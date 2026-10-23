@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // this file contains proxy management restful API handler
@@ -64,6 +65,16 @@ func RegisterMgrRoute(proxy *Proxy) {
 			{management.RouteClearReadTaskQueue, proxy.ClearReadTaskQueueManagement},
 			{management.RouteQueryCoordBalanceStatus, proxy.CheckQueryCoordBalanceStatus},
 			{management.RouteBackupEZ, proxy.BackupEZ},
+		}
+		// Off by default: the report is opt-in, so the route is not even
+		// registered unless the operator turns it on. The handler additionally
+		// verifies root Basic Auth on its own, independent of
+		// common.security.adminAuthEnabled.
+		if paramtable.Get().CommonCfg.FeatureUsageEnabled.GetAsBool() {
+			routes = append(routes, struct {
+				path    string
+				handler http.HandlerFunc
+			}{management.RouteFeatureUsage, proxy.FeatureUsage})
 		}
 		for _, r := range routes {
 			management.Register(&management.Handler{
@@ -701,4 +712,55 @@ func (node *Proxy) BackupEZ(w http.ResponseWriter, req *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, `{"msg": "OK", "ezk": "%s"}`, resp.Ezk)
+}
+
+// FeatureUsage serves GET /management/feature_usage: the merged feature usage
+// report collected by MixCoord. It requires HTTP Basic Auth as the root user
+// even when common.security.adminAuthEnabled is off, verified by CheckRootAuth
+// so it shares the root credential cache of the other management routes.
+func (node *Proxy) FeatureUsage(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		fmt.Fprint(w, `{"msg": "method not allowed"}`)
+		return
+	}
+	// With adminAuthEnabled the route wrapper has already verified root; do
+	// not run a second bcrypt comparison.
+	if _, ok := management.AuthenticatedAdminFromContext(req.Context()); !ok {
+		if err := management.CheckRootAuth(req.Context(), req, management.RouteFeatureUsage); err != nil {
+			status := management.HTTPStatusFromPrivilegeError(err)
+			if status == http.StatusUnauthorized {
+				management.WriteBasicAuthChallenge(w)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			msg, _ := json.Marshal(err.Error())
+			fmt.Fprintf(w, `{"msg": %s}`, msg)
+			return
+		}
+	}
+
+	resp, err := node.mixCoord.GetFeatureUsage(req.Context(), &internalpb.GetFeatureUsageRequest{
+		Base: commonpbutil.NewMsgBase(),
+	})
+	if err == nil {
+		err = merr.Error(resp.GetStatus())
+	}
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, `{"msg": "failed to get feature usage, %s"}`, err.Error())
+		return
+	}
+
+	// skip marshal status to output
+	resp.Status = nil
+	bytes, err := json.Marshal(resp)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, `{"msg": "failed to marshal feature usage, %s"}`, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(bytes)
 }

@@ -180,6 +180,15 @@ func TestQueryTransformBarrierMessagesAdvanceTransformingMVCC(t *testing.T) {
 	assert.Equal(t, QueryVChannelMVCC{GrowingTimetick: 120, TransformingTimetick: 130, Confirmed: true}, mvcc)
 }
 
+func TestCreateSnapshotAdvancesTransformMVCC(t *testing.T) {
+	cm := NewQueryMVCCManager(100)
+	cm.ApplyRecoveryBarrier("vc1", 120)
+	cm.UpdateMVCC(createQueryTestMessage(t, 150, "vc1", message.MessageTypeInsert, false, true))
+	cm.UpdateMVCC(createQueryTestMessage(t, 160, "vc1", message.MessageTypeCreateSnapshot, false, true))
+	cm.UpdateMVCC(createQueryTestMessage(t, 160, "", message.MessageTypeTimeTick, false, true))
+	assert.Equal(t, QueryVChannelMVCC{GrowingTimetick: 150, TransformingTimetick: 160, Confirmed: true}, cm.GetQueryMVCCOfVChannel("vc1"))
+}
+
 func TestQueryCommitImportAdvancesQueryPlanMVCC(t *testing.T) {
 	cm := NewQueryMVCCManager(100)
 	cm.ApplyRecoveryBarrier("vc1", 120)
@@ -214,4 +223,26 @@ func createQueryTestMessage(t *testing.T, tt uint64, vc string, typ message.Mess
 		msg = msg.WithTxnContext(message.TxnContext{})
 	}
 	return msg
+}
+
+func TestQueryMVCCBarrierScopesAndConfirmation(t *testing.T) {
+	for _, persisted := range []bool{false, true} {
+		cm := NewQueryMVCCManager(0)
+		cm.ApplyRecoveryBarrier("v", 10)
+		cm.ApplyRecoveryBarrier("other", 10)
+		cm.UpdateMVCC(createQueryTestMessage(t, 200, "v", message.MessageTypeInsert, false, true))
+		builder := message.NewMVCCBarrierMessageBuilderV2().WithHeader(&message.MVCCBarrierMessageHeader{Vchannels: []string{"v", "v2"}}).WithBody(&message.MVCCBarrierMessageBody{}).WithAllVChannel()
+		if !persisted {
+			builder.WithNotPersisted()
+		}
+		cm.UpdateMVCC(builder.MustBuildMutable().WithTimeTick(150))
+		require.Equal(t, QueryVChannelMVCC{GrowingTimetick: 200, TransformingTimetick: 150, Confirmed: false}, cm.GetQueryMVCCOfVChannel("v"))
+		require.Equal(t, QueryVChannelMVCC{GrowingTimetick: 10, TransformingTimetick: 10, Confirmed: true}, cm.GetQueryMVCCOfVChannel("other"))
+		require.Equal(t, QueryVChannelMVCC{GrowingTimetick: 150, TransformingTimetick: 150, Confirmed: true}, cm.GetQueryMVCCOfVChannel("v2"))
+		// Ordinary volatile TimeTicks must retain their original no-op semantics.
+		cm.UpdateMVCC(createQueryTestMessage(t, 300, "", message.MessageTypeTimeTick, false, false))
+		require.False(t, cm.GetQueryMVCCOfVChannel("v").Confirmed)
+		cm.UpdateMVCC(message.NewMVCCBarrierMessageBuilderV2().WithHeader(&message.MVCCBarrierMessageHeader{Vchannels: []string{"v", "v2"}}).WithBody(&message.MVCCBarrierMessageBody{}).WithAllVChannel().WithNotPersisted().MustBuildMutable().WithTimeTick(200))
+		require.Equal(t, QueryVChannelMVCC{GrowingTimetick: 200, TransformingTimetick: 200, Confirmed: true}, cm.GetQueryMVCCOfVChannel("v"))
+	}
 }

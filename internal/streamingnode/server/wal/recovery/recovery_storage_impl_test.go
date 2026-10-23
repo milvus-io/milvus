@@ -358,6 +358,116 @@ func TestRecoveryStorageRejectsStreamEndingBeforeBarrier(t *testing.T) {
 	require.ErrorContains(t, err, "ended before the startup barrier")
 }
 
+func TestRecoveryStorageSkipsCompletedBroadcasts(t *testing.T) {
+	for _, replicated := range []bool{false, true} {
+		t.Run("replicated="+strconv.FormatBool(replicated), func(t *testing.T) {
+			resource.InitForTest(t)
+			storage := newTestRecoveryStorage(t, &utility.WALCheckpoint{
+				MessageID: walimplstest.NewTestMessageID(1), TimeTick: 10,
+			})
+			defer storage.metrics.Close()
+			defer storage.taskScheduler.Close()
+			defer storage.broadcastAck.Close()
+			// Observe the ACK dispatch boundary synchronously, without contacting
+			// a coordinator. A completed broadcast must never reach this module.
+			var acked []uint64
+			patch := mockey.Mock((*broadcastAckModule).Accept).To(func(_ *broadcastAckModule, owner message.OwnedImmutableMessage) {
+				if owner.Message().BroadcastHeader() != nil {
+					acked = append(acked, owner.Message().TimeTick())
+				}
+				owner.Release()
+			}).Build()
+			defer patch.UnPatch()
+
+			broadcast := func(id int64, tick uint64) message.ImmutableMessage {
+				parts := message.NewCreateCollectionMessageBuilderV1().
+					WithBroadcast([]string{funcutil.GetControlChannel("test")}).
+					WithHeader(&message.CreateCollectionMessageHeader{CollectionId: id}).
+					WithBody(&msgpb.CreateCollectionRequest{}).
+					MustBuildBroadcast().WithBroadcastID(uint64(id)).SplitIntoMutableMessage()
+				require.Len(t, parts, 1)
+				if replicated {
+					parts[0].WithReplicateHeader(&message.ReplicateHeader{
+						ClusterID: "source", TimeTick: 9000 + tick,
+						MessageID: walimplstest.NewTestMessageID(id), LastConfirmedMessageID: walimplstest.NewTestMessageID(1),
+					})
+				}
+				return parts[0].WithTimeTick(tick).WithLastConfirmed(walimplstest.NewTestMessageID(1)).
+					IntoImmutableMessage(walimplstest.NewTestMessageID(id))
+			}
+			barrier := message.NewRecoveryBarrierMessageBuilderV2().WithVChannel("").
+				WithHeader(&message.RecoveryBarrierMessageHeader{}).
+				WithBody(&message.RecoveryBarrierMessageBody{}).MustBuildMutable().
+				WithTimeTick(20).WithLastConfirmed(walimplstest.NewTestMessageID(1)).
+				IntoImmutableMessage(walimplstest.NewTestMessageID(5))
+			stream := &blockingRecoveryStream{ch: make(chan message.ImmutableMessage, 4), closed: make(chan struct{})}
+			// The physical replay starts before all three broadcasts, but the
+			// durable local LSN already covers the first two (including equality).
+			stream.ch <- broadcast(2, 9)
+			stream.ch <- broadcast(3, 10)
+			stream.ch <- broadcast(4, 11)
+			stream.ch <- barrier
+			builder := &recordingRecoveryStreamBuilder{stream: stream}
+			snapshot, err := storage.runBoundedRecovery(t.Context(), builder, barrier)
+			require.NoError(t, err)
+			require.Equal(t, []uint64{11}, acked)
+			require.Equal(t, uint64(20), snapshot.Checkpoint.TimeTick)
+			require.True(t, builder.param.StartCheckpoint.EQ(walimplstest.NewTestMessageID(1)))
+
+			stream.ch <- broadcast(6, 21)
+			close(stream.ch)
+			storage.startLiveScanner()
+			storage.scannerWG.Wait()
+			require.Equal(t, []uint64{11, 21}, acked, "new broadcasts still ACK after startup handoff")
+		})
+	}
+}
+
+func TestRecoveryStoragePreservesTxnAcrossCheckpoint(t *testing.T) {
+	resource.InitForTest(t)
+	storage := newTestRecoveryStorage(t, &utility.WALCheckpoint{
+		MessageID: walimplstest.NewTestMessageID(1), TimeTick: 10,
+	})
+	defer storage.metrics.Close()
+	defer storage.taskScheduler.Close()
+	defer storage.broadcastAck.Close()
+	txnCtx := message.TxnContext{TxnID: 1, Keepalive: time.Minute}
+	begin := message.NewBeginTxnMessageBuilderV2().WithVChannel("v1").
+		WithHeader(&message.BeginTxnMessageHeader{}).WithBody(&message.BeginTxnMessageBody{}).
+		MustBuildMutable().WithTimeTick(8).WithLastConfirmed(walimplstest.NewTestMessageID(1)).
+		WithTxnContext(txnCtx).IntoImmutableMessage(walimplstest.NewTestMessageID(2))
+	body := message.NewInsertMessageBuilderV1().WithVChannel("v1").
+		WithHeader(&message.InsertMessageHeader{}).WithBody(&msgpb.InsertRequest{}).
+		MustBuildMutable().WithTimeTick(9).WithLastConfirmed(walimplstest.NewTestMessageID(1)).
+		WithTxnContext(txnCtx).IntoImmutableMessage(walimplstest.NewTestMessageID(3))
+	commit := message.NewCommitTxnMessageBuilderV2().WithVChannel("v1").
+		WithHeader(&message.CommitTxnMessageHeader{}).WithBody(&message.CommitTxnMessageBody{}).
+		MustBuildMutable().WithTimeTick(11).WithLastConfirmed(walimplstest.NewTestMessageID(1)).
+		WithTxnContext(txnCtx).IntoImmutableMessage(walimplstest.NewTestMessageID(4))
+	// Recovery receives the scanner's assembled transaction. Its older Begin
+	// and Insert are retained; the commit's LSN determines observation.
+	txn, err := message.NewImmutableTxnMessageBuilder(message.MustAsImmutableBeginTxnMessageV2(begin)).
+		Add(body).Build(message.MustAsImmutableCommitTxnMessageV2(commit))
+	require.NoError(t, err)
+	barrier := message.NewRecoveryBarrierMessageBuilderV2().WithVChannel("").
+		WithHeader(&message.RecoveryBarrierMessageHeader{}).WithBody(&message.RecoveryBarrierMessageBody{}).
+		MustBuildMutable().WithTimeTick(20).WithLastConfirmed(walimplstest.NewTestMessageID(1)).
+		IntoImmutableMessage(walimplstest.NewTestMessageID(5))
+	stream := &blockingRecoveryStream{ch: make(chan message.ImmutableMessage, 2), closed: make(chan struct{})}
+	stream.ch <- txn
+	stream.ch <- barrier
+	defer stream.Close()
+	var observed []message.ImmutableMessage
+	patch := mockey.Mock((*recoveryStorageImpl).observeMessage).To(func(_ *recoveryStorageImpl, _ context.Context, msg message.ImmutableMessage) {
+		observed = append(observed, msg)
+	}).Build()
+	defer patch.UnPatch()
+	_, err = storage.runBoundedRecovery(t.Context(), &recordingRecoveryStreamBuilder{stream: stream}, barrier)
+	require.NoError(t, err)
+	require.Equal(t, []message.ImmutableMessage{txn, barrier}, observed)
+	require.Equal(t, 1, txn.Size())
+}
+
 func TestRecoveryStorageCompletesMessageWithoutConsumerRefs(t *testing.T) {
 	checkpoint := &utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(1),
@@ -702,13 +812,13 @@ func TestMigrateLegacyRecoveryInfoUsesSafeCheckpoint(t *testing.T) {
 	require.NotNil(t, persisted)
 	assert.Equal(t, utility.RecoveryMagicRecoveryStorageV2, persisted.Magic)
 	assert.True(t, walimplstest.NewTestMessageID(20).EQ(persisted.MessageID))
-	assert.Equal(t, uint64(20), persisted.TimeTick)
+	assert.Zero(t, persisted.TimeTick)
 	assert.True(t, walimplstest.NewTestMessageID(20).EQ(storage.checkpoint.MessageID))
 	assert.Equal(t, utility.RecoveryMagicRecoveryStorageV2, storage.checkpoint.Magic)
 	assert.True(t, walimplstest.NewTestMessageID(20).EQ(storage.checkpoint.MessageID))
 	completed := storage.ackTracker.CompletedPoint()
 	assert.True(t, walimplstest.NewTestMessageID(20).EQ(completed.MessageID))
-	assert.Equal(t, uint64(20), completed.TimeTick)
+	assert.Zero(t, completed.TimeTick)
 	assert.Equal(t, uint64(100), vchannels["v1"].GetCheckpointTimeTick())
 	assert.Equal(t, streamingpb.PartitionState_PARTITION_STATE_NORMAL, vchannels["v1"].CollectionInfo.Partitions[0].GetState())
 	assert.Equal(t, uint64(0), vchannels["v1"].CollectionInfo.Schemas[0].GetCheckpointTimeTick())
@@ -864,7 +974,7 @@ func TestMigrateLegacyRecoveryInfoCapsGlobalCheckpointAtVChannelCheckpoint(t *te
 	require.NoError(t, err)
 	require.True(t, migrated)
 	assert.True(t, walimplstest.NewTestMessageID(100).EQ(storage.checkpoint.MessageID))
-	assert.Equal(t, uint64(100), storage.checkpoint.TimeTick)
+	assert.Zero(t, storage.checkpoint.TimeTick)
 }
 
 func TestMigrateLegacyRecoveryInfoFailsClosed(t *testing.T) {
@@ -994,7 +1104,7 @@ func TestMigrateLegacyRecoveryInfoWithoutActiveVChannels(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, migrated)
 	assert.True(t, walimplstest.NewTestMessageID(100).EQ(storage.checkpoint.MessageID))
-	assert.Equal(t, uint64(100), storage.checkpoint.TimeTick)
+	assert.Zero(t, storage.checkpoint.TimeTick)
 }
 
 func TestLegacyCheckpointFromPosition(t *testing.T) {

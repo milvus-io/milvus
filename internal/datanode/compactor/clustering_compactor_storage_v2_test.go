@@ -248,10 +248,13 @@ func TestClusteringFlushChunkRetainsNativeWriterBuffers(t *testing.T) {
 		buffer.id = i
 		// Install tracking only while constructing the output builders. They
 		// retain the allocator; input records and other writers are untracked.
-		original := memory.DefaultAllocator
-		memory.DefaultAllocator = alloc
-		buffer.builder = storage.NewRecordBuilder(schema)
-		memory.DefaultAllocator = original
+		// Keep this test sequential, with no concurrent DefaultAllocator users.
+		func() {
+			original := memory.DefaultAllocator
+			defer func() { memory.DefaultAllocator = original }()
+			memory.DefaultAllocator = alloc
+			buffer.builder = storage.NewRecordBuilder(schema)
+		}()
 		task.clusterBuffers = append(task.clusterBuffers, buffer)
 	}
 	for bucket, buffer := range task.clusterBuffers {

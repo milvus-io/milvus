@@ -347,22 +347,25 @@ func (bm *broadcastTaskManager) Ack(ctx context.Context, msg message.ImmutableMe
 }
 
 // DropTombstone drops the tombstone task from the manager.
-func (bm *broadcastTaskManager) DropTombstone(ctx context.Context, broadcastID uint64) error {
+func (bm *broadcastTaskManager) DropTombstone(ctx context.Context, broadcastID uint64, checkpoints map[string]*streamingpb.WALCheckpoint) (bool, error) {
 	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return status.NewOnShutdownError("broadcaster is closing")
+		return false, status.NewOnShutdownError("broadcaster is closing")
 	}
 	defer bm.lifetime.Done()
 
 	t, ok := bm.getBroadcastTaskByID(broadcastID)
 	if !ok {
 		bm.Logger().Debug(ctx, "task is not found, ignored the drop tombstone request", mlog.FieldBroadcastID(broadcastID))
-		return nil
+		return true, nil
+	}
+	if !t.canDropTombstone(checkpoints) {
+		return false, nil
 	}
 	if err := t.DropTombstone(ctx); err != nil {
-		return err
+		return false, err
 	}
 	bm.removeBroadcastTask(broadcastID)
-	return nil
+	return true, nil
 }
 
 // Close cancels in-flight requests before waiting for them to exit. An ACK
@@ -443,7 +446,8 @@ func (bm *broadcastTaskManager) getOrCreateBroadcastTask(msg message.ImmutableMe
 	t, ok := bm.tasks[bh.BroadcastID]
 	if ok {
 		bm.mu.Unlock()
-		return t, t.State() != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE
+		state := t.State()
+		return t, state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE && state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE
 	}
 	if msg.ReplicateHeader() == nil {
 		bm.mu.Unlock()

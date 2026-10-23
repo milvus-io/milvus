@@ -41,9 +41,10 @@ func GetMemoryAllocator() MemoryAllocator {
 
 // MemoryAllocator handles memory allocation and deallocation for import tasks
 type MemoryAllocator interface {
-	// BlockingAllocate blocks until memory is available and then allocates
-	// This method will block until memory becomes available
-	BlockingAllocate(taskID int64, size int64)
+	// BlockingAllocate blocks until memory is available and then allocates.
+	// It returns ctx.Err() when ctx is canceled before the allocation succeeds,
+	// in which case no memory is charged.
+	BlockingAllocate(ctx context.Context, taskID int64, size int64) error
 	// Allocate reserves snapshot row/delete budgets atomically and returns the
 	// admitted row buffer, shrinking it if needed to retain the full delete budget.
 	Allocate(ctx context.Context, taskID, preferredRowBuffer, deleteBudget int64) (int64, error)
@@ -74,32 +75,27 @@ func NewMemoryAllocator(systemTotalMemory int64) MemoryAllocator {
 	return ma
 }
 
-// BlockingAllocate blocks until memory is available and then allocates
-func (ma *memoryAllocator) BlockingAllocate(taskID int64, size int64) {
+// BlockingAllocate blocks until memory is available and then allocates.
+func (ma *memoryAllocator) BlockingAllocate(ctx context.Context, taskID int64, size int64) error {
 	ma.mutex.Lock()
 	defer ma.mutex.Unlock()
 
 	percentage := paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.GetAsFloat()
 	memoryLimit := int64(float64(ma.systemTotalMemory) * percentage / 100.0)
 
-	// Wait until enough memory is available
-	for ma.usedMemory+size > memoryLimit {
-		mlog.Warn(context.TODO(), "task waiting for memory allocation...",
+	if err := ma.waitForMemory(ctx, taskID, size, memoryLimit); err != nil {
+		mlog.Warn(ctx, "task canceled while waiting for memory allocation",
 			mlog.FieldTaskID(taskID),
 			mlog.Int64("requestedSize", size),
-			mlog.Int64("usedMemory", ma.usedMemory),
-			mlog.Int64("availableMemory", memoryLimit-ma.usedMemory))
-
-		ma.cond.Wait()
+			mlog.Err(err))
+		return err
 	}
-
-	// Allocate memory
-	ma.usedMemory += size
-	mlog.Info(context.TODO(), "memory allocated successfully",
+	mlog.Info(ctx, "memory allocated successfully",
 		mlog.FieldTaskID(taskID),
 		mlog.Int64("allocatedSize", size),
 		mlog.Int64("usedMemory", ma.usedMemory),
 		mlog.Int64("availableMemory", memoryLimit-ma.usedMemory))
+	return nil
 }
 
 // Allocate reserves row and delete-map memory atomically for a typed snapshot
@@ -120,7 +116,7 @@ func (ma *memoryAllocator) Allocate(ctx context.Context, taskID, preferredRowBuf
 	// adding also avoids overflow for a very large preferred row buffer.
 	rowBuffer := min(preferredRowBuffer, limit-deleteBudget)
 	size := rowBuffer + deleteBudget
-	if err := ma.waitForMemory(ctx, size, limit); err != nil {
+	if err := ma.waitForMemory(ctx, taskID, size, limit); err != nil {
 		return 0, err
 	}
 	return rowBuffer, nil
@@ -138,7 +134,7 @@ func (ma *memoryAllocator) AllocateSnapshotTask(ctx context.Context, taskID, pre
 	rowBuffer := min(preferredRowBuffer, limit-2*deleteBudget)
 	admitted := min(int64(readers), (limit-deleteBudget)/(rowBuffer+deleteBudget))
 	size := deleteBudget + admitted*(rowBuffer+deleteBudget)
-	if err := ma.waitForMemory(ctx, size, limit); err != nil {
+	if err := ma.waitForMemory(ctx, taskID, size, limit); err != nil {
 		return 0, 0, err
 	}
 	return rowBuffer, int(admitted), nil
@@ -146,7 +142,8 @@ func (ma *memoryAllocator) AllocateSnapshotTask(ctx context.Context, taskID, pre
 
 // Caller holds ma.mutex. Waiting acquires no partial reservation, and releasing
 // any existing reservation or canceling the context wakes the waiter.
-func (ma *memoryAllocator) waitForMemory(ctx context.Context, size, limit int64) error {
+// A request larger than the whole limit runs alone instead of waiting forever.
+func (ma *memoryAllocator) waitForMemory(ctx context.Context, taskID, size, limit int64) error {
 	// Acquiring the same lock in the callback prevents a lost wakeup between
 	// checking ctx.Err and Cond.Wait. Stop need not wait for the callback.
 	stop := context.AfterFunc(ctx, func() {
@@ -159,10 +156,15 @@ func (ma *memoryAllocator) waitForMemory(ctx context.Context, size, limit int64)
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if size <= limit-ma.usedMemory {
+		if ma.usedMemory == 0 || size <= limit-ma.usedMemory {
 			ma.usedMemory += size
 			return nil
 		}
+		mlog.Warn(ctx, "task waiting for memory allocation...",
+			mlog.FieldTaskID(taskID),
+			mlog.Int64("requestedSize", size),
+			mlog.Int64("usedMemory", ma.usedMemory),
+			mlog.Int64("availableMemory", limit-ma.usedMemory))
 		ma.cond.Wait()
 	}
 }

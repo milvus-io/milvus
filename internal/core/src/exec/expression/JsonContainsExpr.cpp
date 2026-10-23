@@ -2448,7 +2448,7 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
     // column via execution, not from the index. TODO: consolidate the projection
     // helpers with UnaryExpr and Expr at plan-selected boundaries.
     auto struct_element_offsets =
-        segment_->GetStructElementOffsets(expr_->column_.field_id_);
+        GetStructElementOffsets(expr_->column_.field_id_);
 
     // ProcessIndexChunksImpl invokes this only on an index-result cache miss,
     // so the term list is converted here rather than on every batch: with

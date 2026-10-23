@@ -17,12 +17,16 @@
 package snapshotio
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/iskorotkov/avro/v2"
+	"github.com/iskorotkov/avro/v2/ocf"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -50,7 +54,7 @@ func TestManifestSchemaByVersion(t *testing.T) {
 	assert.NotContains(t, AvroSchemaV4(), "manifest_has_index")
 	assert.Contains(t, AvroSchemaV5(), "manifest_has_index")
 
-	currentSchema, err := ManifestSchemaByVersion(SnapshotFormatVersion)
+	currentSchema, err := ManifestSchema()
 	require.NoError(t, err)
 	assert.NotNil(t, currentSchema)
 
@@ -60,8 +64,8 @@ func TestManifestSchemaByVersion(t *testing.T) {
 	assert.Contains(t, err.Error(), "unsupported manifest schema version")
 }
 
-func TestParseSnapshotMetadataWithVersionCheck(t *testing.T) {
-	metadata, err := ParseSnapshotMetadataWithVersionCheck([]byte(`{
+func TestParseSnapshotMetadata(t *testing.T) {
+	metadata, err := ParseSnapshotMetadata([]byte(`{
 		"format_version": 3,
 		"snapshot_info": {"id": 10, "name": "snap"},
 		"unknown_field": "ignored"
@@ -70,22 +74,15 @@ func TestParseSnapshotMetadataWithVersionCheck(t *testing.T) {
 	assert.Equal(t, int32(3), metadata.GetFormatVersion())
 	assert.Equal(t, int64(10), metadata.GetSnapshotInfo().GetId())
 
-	metadata, err = ParseSnapshotMetadataWithVersionCheck([]byte(fmt.Sprintf(`{"format_version":%d}`, SnapshotFormatVersion)))
+	metadata, err = ParseSnapshotMetadata([]byte(fmt.Sprintf(`{"format_version":%d}`, SnapshotFormatVersion)))
 	require.NoError(t, err)
 	assert.Equal(t, int32(SnapshotFormatVersion), metadata.GetFormatVersion())
 
 	futureVersion := SnapshotFormatVersion + 1
-	_, err = ParseSnapshotMetadataWithVersionCheck([]byte(fmt.Sprintf(`{"format_version":%d}`, futureVersion)))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), fmt.Sprintf("snapshot format version %d is too new", futureVersion))
-	assert.Contains(t, err.Error(), fmt.Sprintf("current supported version: %d", SnapshotFormatVersion))
-	assert.Contains(t, err.Error(), "please upgrade Milvus")
-	assert.ErrorIs(t, err, merr.ErrOperationNotSupported)
-	assert.Equal(t, int32(3000), merr.Status(err).GetCode())
-	assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
-	assert.False(t, merr.Status(err).GetRetriable())
+	_, err = ParseSnapshotMetadata([]byte(fmt.Sprintf(`{"format_version":%d}`, futureVersion)))
+	require.NoError(t, err)
 
-	_, err = ParseSnapshotMetadataWithVersionCheck([]byte(`{`))
+	_, err = ParseSnapshotMetadata([]byte(`{`))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse metadata JSON")
 	assert.ErrorIs(t, err, merr.ErrDataIntegrity)
@@ -96,7 +93,7 @@ func TestParseSnapshotMetadataWithVersionCheck(t *testing.T) {
 
 	assert.NoError(t, ValidateFormatVersion(0))
 	assert.NoError(t, ValidateFormatVersion(SnapshotFormatVersion))
-	assert.Error(t, ValidateFormatVersion(SnapshotFormatVersion+1))
+	assert.NoError(t, ValidateFormatVersion(SnapshotFormatVersion+1))
 }
 
 func TestSegmentManifestRoundTrip(t *testing.T) {
@@ -196,7 +193,7 @@ func TestSegmentManifestRoundTrip(t *testing.T) {
 	assert.Equal(t, segment.GetJsonKeyIndexFiles()[102].GetJsonKeyStatsDataFormat(), parsed.GetJsonKeyIndexFiles()[102].GetJsonKeyStatsDataFormat())
 
 	_, err = ParseSegmentManifest(data, SnapshotFormatVersion+1)
-	require.Error(t, err)
+	require.NoError(t, err)
 
 	_, err = ParseSegmentManifest([]byte("not-avro"), SnapshotFormatVersion)
 	require.Error(t, err)
@@ -247,11 +244,18 @@ func TestMarshalSegmentManifestErrors(t *testing.T) {
 
 	schema, err := ManifestSchema()
 	require.NoError(t, err)
-	mockMarshal := mockey.Mock(avro.Marshal).Return(nil, errors.New("marshal failed")).Build()
+	marshalErr := errors.New("marshal failed")
+	mockMarshal := mockey.Mock((*ocf.Encoder).Encode).Return(marshalErr).Build()
 	defer mockMarshal.UnPatch()
+	closeErr := errors.New("close failed")
+	mockClose := mockey.Mock((*ocf.Encoder).Close).Return(closeErr).Build()
+	defer mockClose.UnPatch()
 
-	_, err = MarshalSegmentManifest(&datapb.SegmentDescription{SegmentId: 100})
-	require.Error(t, err)
+	data, err := MarshalSegmentManifest(&datapb.SegmentDescription{SegmentId: 100})
+	require.ErrorIs(t, err, marshalErr)
+	assert.NotErrorIs(t, err, closeErr)
+	assert.Nil(t, data)
+	assert.Equal(t, 1, mockClose.Times())
 	assert.Contains(t, err.Error(), "failed to serialize entry to avro")
 	_ = schema
 }
@@ -283,5 +287,283 @@ func fieldBinlog(fieldID int64, logID int64, logPath string) *datapb.FieldBinlog
 				MemorySize:    400,
 			},
 		},
+	}
+}
+
+func TestContainerManifestWriterSchema(t *testing.T) {
+	schemaJSON := strings.Replace(AvroSchemaV4(), `{"name": "segment_id", "type": "long"},`, `{"name": "future_field", "type": "string"}, {"name": "segment_id", "type": "long"},`, 1)
+	schemaJSON = strings.Replace(schemaJSON, `{"name": "field_id", "type": "long"},`, `{"name": "field_id", "type": "long"}, {"name": "future_binlog_hint", "type": "string"},`, 1)
+	schema, err := avro.Parse(schemaJSON)
+	require.NoError(t, err)
+	base, err := ManifestSchemaV4()
+	require.NoError(t, err)
+	segment := &datapb.SegmentDescription{SegmentId: 101, PartitionId: 202, CommitTimestamp: 303, Binlogs: []*datapb.FieldBinlog{fieldBinlog(10, 20, "insert")}}
+	raw, err := avro.Marshal(base, SegmentToManifestEntry(segment))
+	require.NoError(t, err)
+	var record map[string]any
+	require.NoError(t, avro.Unmarshal(base, raw, &record))
+	record["future_field"] = "unknown"
+	record["binlog_files"].([]any)[0].(map[string]any)["future_binlog_hint"] = "unknown nested field"
+	var buf bytes.Buffer
+	encoder, err := ocf.NewEncoderWithSchema(schema, &buf)
+	require.NoError(t, err)
+	require.NoError(t, encoder.Encode(record))
+	require.NoError(t, encoder.Close())
+	// Model a legacy reader that has no fields added after V1.
+	decoder, err := ocf.NewDecoder(bytes.NewReader(buf.Bytes()))
+	require.NoError(t, err)
+	require.True(t, decoder.HasNext())
+	var legacy struct {
+		SegmentID   int64 `avro:"segment_id"`
+		PartitionID int64 `avro:"partition_id"`
+		Binlogs     []struct {
+			FieldID int64        `avro:"field_id"`
+			Binlogs []AvroBinlog `avro:"binlogs"`
+		} `avro:"binlog_files"`
+	}
+	require.NoError(t, decoder.Decode(&legacy))
+	assert.Equal(t, int64(101), legacy.SegmentID)
+	assert.Equal(t, int64(202), legacy.PartitionID)
+	require.Len(t, legacy.Binlogs, 1)
+	assert.Equal(t, "insert", legacy.Binlogs[0].Binlogs[0].LogPath)
+	restored, err := ParseSegmentManifest(buf.Bytes(), 99)
+	require.NoError(t, err)
+	assert.Equal(t, segment.GetSegmentId(), restored.GetSegmentId())
+	assert.Equal(t, segment.GetCommitTimestamp(), restored.GetCommitTimestamp())
+	require.Len(t, restored.GetBinlogs(), 1)
+	assert.Equal(t, "insert", restored.GetBinlogs()[0].GetBinlogs()[0].GetLogPath())
+}
+
+func TestManifestContainerAndLegacy(t *testing.T) {
+	segment := &datapb.SegmentDescription{SegmentId: 101}
+	for _, version := range []int{0, 1, 2, 3, 4, 5} {
+		schema, err := ManifestSchemaByVersion(version)
+		require.NoError(t, err)
+		data, err := avro.Marshal(schema, SegmentToManifestEntry(segment))
+		require.NoError(t, err)
+		restored, err := ParseSegmentManifest(data, version)
+		require.NoError(t, err)
+		assert.Equal(t, int64(101), restored.GetSegmentId())
+	}
+	data, err := MarshalSegmentManifest(segment)
+	require.NoError(t, err)
+	assert.True(t, bytes.HasPrefix(data, []byte{'O', 'b', 'j', 1}))
+	decoder, err := ocf.NewDecoder(bytes.NewReader(data))
+	require.NoError(t, err)
+	assert.Contains(t, decoder.Schema().String(), "commit_timestamp")
+	for _, invalid := range [][]byte{data[:4], data[:len(data)-1]} {
+		_, err := ParseSegmentManifest(invalid, SnapshotFormatVersion)
+		require.Error(t, err)
+	}
+	_, err = ParseSegmentManifest([]byte("raw"), SnapshotFormatVersion)
+	require.Error(t, err)
+}
+
+func TestParseSegmentManifestRejectsOCFForLegacyVersion(t *testing.T) {
+	data, err := MarshalSegmentManifest(&datapb.SegmentDescription{SegmentId: 101})
+	require.NoError(t, err)
+
+	for _, version := range []int{0, 1, 2, 3, 4, 5} {
+		t.Run(fmt.Sprintf("V%d", version), func(t *testing.T) {
+			segment, err := ParseSegmentManifest(data, version)
+			require.ErrorIs(t, err, merr.ErrDataIntegrity)
+			assert.Nil(t, segment)
+			assert.ErrorContains(t, err, fmt.Sprintf("snapshot format %d requires a raw binary manifest", version))
+			assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
+			assert.False(t, merr.Status(err).GetRetriable())
+		})
+	}
+}
+
+func TestParseSegmentManifestRejectsInvalidBlockSizes(t *testing.T) {
+	schema, err := ManifestSchema()
+	require.NoError(t, err)
+	var buf bytes.Buffer
+	encoder, err := ocf.NewEncoderWithSchema(schema, &buf)
+	require.NoError(t, err)
+	require.NoError(t, encoder.Close())
+	header := buf.Bytes()
+	valid, err := MarshalSegmentManifest(&datapb.SegmentDescription{SegmentId: 101})
+	require.NoError(t, err)
+	withBlockHeader := func(prefix []byte, count, size int64) []byte {
+		data := binary.AppendVarint(bytes.Clone(prefix), count)
+		return binary.AppendVarint(data, size)
+	}
+
+	for _, tc := range []struct {
+		name string
+		data []byte
+		want string
+	}{
+		{"oversized block", withBlockHeader(header, 1, 1<<30), "block size"},
+		{"zero-count oversized block", withBlockHeader(header, 0, 1<<30), "block size"},
+		{"oversized trailing block", withBlockHeader(valid, 1, 1<<30), "block size"},
+		{"negative block size", withBlockHeader(header, 1, -1), "block size"},
+		{"truncated header", header[:4], "framing"},
+		{"truncated block count", append(bytes.Clone(header), 0x80), "framing"},
+		{"truncated block size", binary.AppendVarint(bytes.Clone(header), 1), "framing"},
+		{"truncated block data", withBlockHeader(header, 1, 1), "framing"},
+		{"truncated block sync", withBlockHeader(header, 1, 0), "framing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// A missing guard must not allocate the forged 1 GiB block in this test.
+			// Validation must reject the file before creating the OCF decoder.
+			patch := mockey.Mock(ocf.NewDecoder).Return(nil, errors.New("unexpected OCF decoder call")).Build()
+			defer patch.UnPatch()
+			segment, err := ParseSegmentManifest(tc.data, SnapshotFormatVersion)
+			require.ErrorIs(t, err, merr.ErrDataIntegrity)
+			assert.Nil(t, segment)
+			assert.ErrorContains(t, err, tc.want)
+		})
+	}
+}
+
+func TestParseSegmentManifestContainerCodecs(t *testing.T) {
+	schema, err := ManifestSchema()
+	require.NoError(t, err)
+	for _, codec := range []ocf.CodecName{ocf.Null, ocf.Deflate, ocf.Snappy, ocf.ZStandard} {
+		t.Run(string(codec), func(t *testing.T) {
+			var buf bytes.Buffer
+			encoder, err := ocf.NewEncoderWithSchema(schema, &buf, ocf.WithCodec(codec))
+			require.NoError(t, err)
+			require.NoError(t, encoder.Encode(SegmentToManifestEntry(&datapb.SegmentDescription{SegmentId: 101})))
+			require.NoError(t, encoder.Close())
+			segment, err := ParseSegmentManifest(buf.Bytes(), SnapshotFormatVersion)
+			require.NoError(t, err)
+			assert.Equal(t, int64(101), segment.GetSegmentId())
+		})
+	}
+}
+
+func TestManifestContainerFailures(t *testing.T) {
+	schema, err := ManifestSchema()
+	require.NoError(t, err)
+	for _, count := range []int{0, 2} {
+		var buf bytes.Buffer
+		encoder, err := ocf.NewEncoderWithSchema(schema, &buf)
+		require.NoError(t, err)
+		for i := 0; i < count; i++ {
+			require.NoError(t, encoder.Encode(SegmentToManifestEntry(&datapb.SegmentDescription{SegmentId: 1})))
+		}
+		require.NoError(t, encoder.Close())
+		_, err = ParseSegmentManifest(buf.Bytes(), SnapshotFormatVersion)
+		require.Error(t, err)
+	}
+	for _, version := range []int{-1} {
+		require.Error(t, ValidateFormatVersion(version))
+	}
+	t.Run("encoder creation", func(t *testing.T) {
+		patch := mockey.Mock(ocf.NewEncoderWithSchema).Return(nil, errors.New("header failure")).Build()
+		defer patch.UnPatch()
+		_, err := MarshalSegmentManifest(&datapb.SegmentDescription{})
+		require.ErrorContains(t, err, "failed to create avro container")
+	})
+	t.Run("encoder close", func(t *testing.T) {
+		patch := mockey.Mock((*ocf.Encoder).Close).Return(errors.New("flush failure")).Build()
+		defer patch.UnPatch()
+		_, err := MarshalSegmentManifest(&datapb.SegmentDescription{})
+		require.ErrorContains(t, err, "failed to finalize avro container")
+	})
+}
+
+func TestParseManifestFailures(t *testing.T) {
+	t.Run("legacy schema", func(t *testing.T) {
+		patch := mockey.Mock(ManifestSchemaByVersion).Return(nil, errors.New("schema failure")).Build()
+		defer patch.UnPatch()
+		_, err := ParseSegmentManifest([]byte{0}, 1)
+		require.ErrorContains(t, err, "failed to get manifest schema")
+	})
+	t.Run("legacy data", func(t *testing.T) {
+		_, err := ParseSegmentManifest(nil, 1)
+		require.ErrorContains(t, err, "failed to parse avro data")
+	})
+	t.Run("container schema", func(t *testing.T) {
+		data, err := avro.Marshal(ocf.HeaderSchema, ocf.Header{
+			Magic: [4]byte{'O', 'b', 'j', 1},
+			Meta:  map[string][]byte{"avro.schema": []byte("invalid")},
+		})
+		require.NoError(t, err)
+		_, err = ParseSegmentManifest(data, SnapshotFormatVersion)
+		require.ErrorContains(t, err, "failed to read avro container header")
+	})
+	t.Run("container record", func(t *testing.T) {
+		var buf bytes.Buffer
+		encoder, err := ocf.NewEncoder(`"string"`, &buf)
+		require.NoError(t, err)
+		require.NoError(t, encoder.Encode("wrong record type"))
+		require.NoError(t, encoder.Close())
+		_, err = ParseSegmentManifest(buf.Bytes(), SnapshotFormatVersion)
+		require.ErrorContains(t, err, "failed to parse avro data")
+	})
+	t.Run("invalid first block", func(t *testing.T) {
+		var buf bytes.Buffer
+		schema, err := ManifestSchema()
+		require.NoError(t, err)
+		encoder, err := ocf.NewEncoderWithSchema(schema, &buf)
+		require.NoError(t, err)
+		require.NoError(t, encoder.Close())
+		data := append(buf.Bytes(), 2, 0)
+		data = append(data, make([]byte, 16)...)
+		_, err = ParseSegmentManifest(data, SnapshotFormatVersion)
+		require.ErrorContains(t, err, "failed to read avro container")
+	})
+	t.Run("invalid trailing block", func(t *testing.T) {
+		data, err := MarshalSegmentManifest(&datapb.SegmentDescription{SegmentId: 1})
+		require.NoError(t, err)
+		data = append(data, 2, 0)
+		data = append(data, make([]byte, 16)...)
+		_, err = ParseSegmentManifest(data, SnapshotFormatVersion)
+		require.ErrorContains(t, err, "failed to read avro container")
+	})
+}
+
+func TestFutureSnapshotVersion(t *testing.T) {
+	metadata, err := ParseSnapshotMetadata([]byte(`{"format_version":99,"future_optional":"ignored"}`))
+	require.NoError(t, err)
+	assert.Equal(t, int32(99), metadata.GetFormatVersion())
+	data, err := MarshalSegmentManifest(&datapb.SegmentDescription{SegmentId: 123})
+	require.NoError(t, err)
+	segment, err := ParseSegmentManifest(data, 99)
+	require.NoError(t, err)
+	assert.Equal(t, int64(123), segment.GetSegmentId())
+	_, err = ParseSnapshotMetadata([]byte(`{"format_version":-1}`))
+	require.Error(t, err)
+	_, err = ParseSegmentManifest(nil, -1)
+	require.Error(t, err)
+}
+
+func TestLegacyV5MarkerAndFields(t *testing.T) {
+	schema, err := ManifestSchemaV5()
+	require.NoError(t, err)
+	base, err := ManifestSchemaV4()
+	require.NoError(t, err)
+	segment := &datapb.SegmentDescription{SegmentId: 123, CommitTimestamp: 456, Binlogs: []*datapb.FieldBinlog{fieldBinlog(10, 20, "insert")}}
+	raw, err := avro.Marshal(base, SegmentToManifestEntry(segment))
+	require.NoError(t, err)
+	var record map[string]any
+	require.NoError(t, avro.Unmarshal(base, raw, &record))
+	for _, marker := range []bool{false, true} {
+		record["manifest_has_index"] = marker
+		raw, err := avro.Marshal(schema, record)
+		require.NoError(t, err)
+		restored, err := ParseSegmentManifest(raw, 5)
+		require.NoError(t, err)
+		require.NotNil(t, restored.ManifestHasIndex)
+		assert.Equal(t, marker, restored.GetManifestHasIndex())
+		assert.Equal(t, segment.GetSegmentId(), restored.GetSegmentId())
+		assert.Equal(t, segment.GetCommitTimestamp(), restored.GetCommitTimestamp())
+		require.Len(t, restored.GetBinlogs(), 1)
+		assert.Equal(t, "insert", restored.GetBinlogs()[0].GetBinlogs()[0].GetLogPath())
+	}
+}
+
+func TestOCFManifestRetainsUpstreamIndexMarker(t *testing.T) {
+	for _, marker := range []bool{false, true} {
+		data, err := MarshalSegmentManifest(&datapb.SegmentDescription{SegmentId: 123, ManifestHasIndex: proto.Bool(marker)})
+		require.NoError(t, err)
+		segment, err := ParseSegmentManifest(data, SnapshotFormatVersion)
+		require.NoError(t, err)
+		require.NotNil(t, segment.ManifestHasIndex)
+		assert.Equal(t, marker, segment.GetManifestHasIndex())
 	}
 }

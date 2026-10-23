@@ -116,7 +116,7 @@ PhyVectorSearchNode::GetOutput() {
         nullptr;
     if (ph.element_level_) {
         struct_element_offsets =
-            segment_->GetStructElementOffsets(search_info_.field_id_);
+            query_context_->get_struct_element_offsets(search_info_.field_id_);
         AssertInfo(struct_element_offsets != nullptr,
                    "Struct element offsets not available");
         query_context_->set_struct_element_offsets(struct_element_offsets);
@@ -204,6 +204,10 @@ PhyVectorSearchNode::GetOutput() {
                             search_view,
                             op_context,
                             search_result);
+    if (search_result.used_interim_index_) {
+        MarkFeature(query_context_->get_plan_options().feature_recorder.get(),
+                    FeatureBit::InterimIndexSearch);
+    }
 
     search_result.total_data_cnt_ = data_cnt;
     search_result.element_level_ = ph.element_level_;

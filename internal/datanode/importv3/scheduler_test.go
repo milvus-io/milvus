@@ -341,10 +341,7 @@ func TestSchedulerClassifiesWithCheckerDenylist(t *testing.T) {
 		// deterministic; without this case every retry burns a new segment
 		// and log range with no cap.
 		{"ErrParameterInvalid fails", merr.WrapErrParameterInvalidMsg("file exceeds maxImportFileSizeInGB"), datapb.ImportTaskStateV2_Failed, false},
-		// An RLS write-predicate denial is deterministic: the rows violate the
-		// principal's policy, so Import V3 must fail the task like Import V2
-		// rather than retry the same rows until the job times out.
-		{"RLS write-predicate denial fails", merr.WrapErrPrivilegeNotPermitted("import operation denied by RLS check expression at row 3"), datapb.ImportTaskStateV2_Failed, false},
+		{"permission denial fails", merr.WrapErrPrivilegeNotPermitted("import operation denied"), datapb.ImportTaskStateV2_Failed, false},
 		// A canceled run must never record Failed even when its error is
 		// terminal: DataCoord's stale query would fail the whole job for a run
 		// it already superseded or dropped.

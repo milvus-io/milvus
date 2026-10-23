@@ -640,6 +640,9 @@ test_ngram_with_data(const boost::container::vector<std::string>& input,
         case proto::plan::PostfixMatch:
             pattern_op = index::PatternOp::PostfixMatch;
             break;
+        case proto::plan::RegexMatch:
+            pattern_op = index::PatternOp::RegexMatch;
+            break;
         default:
             break;
     }
@@ -739,5 +742,86 @@ TEST(NgramExpressionTest, EmbeddedNulLiteralIsHandledByNgram) {
                              test_case.op_type,
                              test_case.expected,
                              /*forward_to_br=*/false);
+    }
+}
+
+// Differential check of NGRAM regex candidate planning against RE2: AND the
+// literals within a branch, union the OR branches, and scan (CanHandle false)
+// when a branch has no usable literal, the pattern matches empty or the bounded
+// condition overflows. Phase 2 always rechecks with RE2, so results must equal
+// a plain RE2 PartialMatch scan either way.
+TEST(NgramExpressionTest, RegexAlternationMatchesRe2) {
+    std::string long_han;
+    for (int i = 0; i < 30; ++i) {
+        long_han += "\xe4\xb8\xad";  // 中, cut inside a character at 64 bytes
+    }
+    boost::container::vector<std::string> test_data = {
+        "the cat sat",      "hotdog stand",
+        "catalog",          "dog",
+        "a bird",           "ERROR: read timeout",
+        "WARN timeout",     "INFO timeout",
+        "foo|bar",          "foo bar",
+        "foo0123456789bar", "foo01bar",
+        "abcfghi",          "abcdehi",
+        "Cat Dog",          "",
+        "你好世界",         "x" + long_han + "y",
+        "hq--zhw",          "iq ziw",
+        "Zq--zZw",
+    };
+
+    // Distinct leading bytes keep RE2 from factoring the branches, so 60
+    // branches of two literals each exceed the 127-node condition budget.
+    auto branches = [](size_t count) {
+        const std::string heads =
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        std::string pattern;
+        for (size_t i = 0; i < count; ++i) {
+            const auto head = heads.substr(i, 1);
+            pattern += (i == 0 ? "" : "|") + head + "q.*z" + head + "w";
+        }
+        return pattern;
+    };
+
+    struct TestCase {
+        std::string pattern;
+        bool ngram;  // whether NGRAM planning prunes (CanHandle)
+    };
+    const std::vector<TestCase> test_cases = {
+        {"cat|dog", true},
+        {"^(cat|dog)$", true},
+        {"(cat|dog)", true},
+        {"(ERROR|WARN).*timeout", true},
+        {"(?:cat|dog)(?:alog| stand)", true},
+        {"abc(de|fg)hi", true},
+        {"foo\\|bar", true},
+        {"\\Qfoo|bar\\E", true},
+        {"[|]bar|bird", true},
+        {"hello|你好", true},
+        {long_han + "|bird", true},
+        {branches(8), true},
+        // The removed hand-written extractor required the literal "10,20"
+        // here and dropped the first matching row.
+        {"foo.{10,20}bar", true},
+        {"cat|a", false},
+        {"cat|", false},
+        {"(?:cat|dog)?", false},
+        {"(?i)cat|dog", false},
+        {"cat|(?i:dog)", false},
+        {"x(?:abc|d)y", false},
+        {"\\ba[ab]b(\\d)", false},
+        {branches(60), false},
+    };
+    for (const auto& test_case : test_cases) {
+        SCOPED_TRACE(test_case.pattern);
+        PartialRegexMatcher matcher(test_case.pattern);
+        std::vector<bool> expected;
+        for (const auto& row : test_data) {
+            expected.push_back(matcher(row));
+        }
+        test_ngram_with_data(test_data,
+                             test_case.pattern,
+                             proto::plan::OpType::RegexMatch,
+                             expected,
+                             /*forward_to_br=*/!test_case.ngram);
     }
 }

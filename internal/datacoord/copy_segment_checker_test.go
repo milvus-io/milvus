@@ -781,6 +781,8 @@ func (s *CopySegmentCheckerSuite) TestClose() {
 }
 
 func (s *CopySegmentCheckerSuite) TestFinishJob_UpdateSegmentStates() {
+	drainBuildIndexChForTest()
+	defer drainBuildIndexChForTest()
 	drainStatsBuildChForTest()
 	defer drainStatsBuildChForTest()
 
@@ -841,7 +843,9 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_UpdateSegmentStates() {
 	// Target segment should be in Flushed state
 	segment := s.meta.GetSegment(context.TODO(), 101)
 	s.Equal(commonpb.SegmentState_Flushed, segment.GetState())
-	// and sent to stats discovery.
+	// and enqueued for index building and stats discovery.
+	assertBuildIndexEvents(s.T(), 101)
+	assertNoBuildIndexEvent(s.T())
 	s.Equal([]UniqueID{101}, drainStatsBuildChForTest())
 
 	// Job should be completed

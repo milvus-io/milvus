@@ -578,6 +578,25 @@ func (b *broadcastTask) FastAck(ctx context.Context, broadcastResult map[string]
 	return b.ack(ctx, callback, msgs...)
 }
 
+// canDropTombstone requires every local broadcast copy to be strictly behind
+// its PChannel's durable replay checkpoint. ACK/callback completion alone does
+// not establish this boundary, for either primary or replicated tasks.
+func (b *broadcastTask) canDropTombstone(checkpoints map[string]*streamingpb.WALCheckpoint) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for idx, vchannel := range b.header().VChannels {
+		acked := b.task.AckedCheckpoints[idx]
+		if acked.GetTimeTick() == 0 {
+			// Legacy tasks without positions cannot prove they are safe to remove.
+			return false
+		}
+		if checkpoints[funcutil.ToPhysicalChannel(vchannel)].GetTimeTick() <= acked.GetTimeTick() {
+			return false
+		}
+	}
+	return true
+}
+
 // DropTombstone drops the tombstone of the broadcast task.
 // It will remove the tombstone of the broadcast task in recovery storage.
 // After the tombstone is dropped, the idempotency and deduplication can not be guaranteed.

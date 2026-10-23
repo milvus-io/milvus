@@ -23,12 +23,10 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
-	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -167,7 +165,6 @@ func (s *sourceStream) open(file *internalpb.ImportFile) error {
 		s.spec.backup,
 		s.spec.collectionSchema,
 		s.spec.runFunctions,
-		s.spec.rlsPredicate,
 		s.timings,
 	)
 	return nil
@@ -205,8 +202,8 @@ type reshardStageTimings struct {
 
 // reshardPrepareStage is one source's read/normalize/validate/function pipeline.
 // A goroutine replays the reader strictly sequentially -- row counting,
-// normalization (including the sequential preallocated-ID offset), RLS
-// validation and function execution all keep read order without any sharing with
+// normalization (including the sequential preallocated-ID offset) and function
+// execution all keep read order without any sharing with
 // the routing side -- streaming prepared batches into a buffered channel so
 // source-side work overlaps fragment sort/write.
 type reshardPrepareStage struct {
@@ -214,10 +211,6 @@ type reshardPrepareStage struct {
 	backup       bool
 	schema       *schemapb.CollectionSchema
 	runFunctions bool
-	// rlsPredicate is enforced on every prepared batch, exactly where Import V2
-	// checks: after normalization and before functions add their output columns.
-	// Nil when the job skips RLS.
-	rlsPredicate *planpb.Expr
 	// runCtx drives function execution: it is the run ctx, not the source ctx,
 	// exactly as before the stage existed. Only the source-side cancel (flush
 	// failure, source switch) stops the stage.
@@ -245,7 +238,6 @@ func newReshardPrepareStage(
 	backup bool,
 	schema *schemapb.CollectionSchema,
 	runFunctions bool,
-	rlsPredicate *planpb.Expr,
 	timings *reshardStageTimings,
 ) *reshardPrepareStage {
 	s := &reshardPrepareStage{
@@ -253,7 +245,6 @@ func newReshardPrepareStage(
 		backup:       backup,
 		schema:       schema,
 		runFunctions: runFunctions,
-		rlsPredicate: rlsPredicate,
 		runCtx:       runCtx,
 		cancelSource: cancelSource,
 		timings:      timings,
@@ -262,20 +253,12 @@ func newReshardPrepareStage(
 	return s
 }
 
-// prepare runs inside the stage goroutine: count, normalize, validate the RLS
-// write predicate, then execute the schema functions. A zero-row batch returns
-// nil and is never sent.
+// prepare runs inside the stage goroutine: count, normalize, then execute the
+// schema functions. A zero-row batch returns nil and is never sent.
 func (s *reshardPrepareStage) prepare(batch *storage.InsertData) (*storage.InsertData, error) {
 	rowNum, _ := importv2.GetInsertDataRowCount(batch, s.schema)
 	normalizeStart := time.Now()
 	err := normalizeReshardBatch(s.file, s.backup, s.schema, batch, rowNum, &s.idOffset)
-	if err == nil && rowNum > 0 && s.rlsPredicate != nil {
-		// Same RLS write-predicate check Import V2 runs on every batch, at the
-		// same point: the batch is normalized (defaults, dynamic data) and the
-		// functions have not yet added their output columns. A violating row
-		// fails this reshard task, exactly as it fails the V2 import task.
-		err = rlsutil.ValidateInsertDataByPredicate(s.runCtx, batch.Data, rowNum, s.rlsPredicate, "import", "check")
-	}
 	s.timings.normalize.Add(int64(time.Since(normalizeStart)))
 	if err != nil {
 		return nil, err
