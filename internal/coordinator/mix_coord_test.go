@@ -64,6 +64,24 @@ func TestMixCoordCollectionAvailability(t *testing.T) {
 	})
 }
 
+func TestMixCoordGetCollectionProperties(t *testing.T) {
+	mockey.PatchConvey("collection properties use the in-process metadata reader", t, func() {
+		core := &rootcoord.Core{}
+		ctx := context.Background()
+		properties := []*commonpb.KeyValuePair{{Key: "collection.autorelease.ttl.seconds", Value: "20"}}
+		mockey.Mock((*rootcoord.Core).GetCollectionProperties).To(func(receiver *rootcoord.Core, actualCtx context.Context, id int64) ([]*commonpb.KeyValuePair, error) {
+			require.Same(t, core, receiver)
+			require.Equal(t, ctx, actualCtx)
+			require.Equal(t, int64(123), id)
+			return properties, nil
+		}).Build()
+		mix := &mixCoordImpl{rootcoordServer: core}
+		got, err := mix.GetCollectionProperties(ctx, 123)
+		require.NoError(t, err)
+		require.Equal(t, properties, got)
+	})
+}
+
 func TestMixcoord_EnableActiveStandby(t *testing.T) {
 	randVal := rand.Int()
 	paramtable.Init()

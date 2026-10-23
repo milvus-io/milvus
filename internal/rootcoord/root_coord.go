@@ -1194,6 +1194,13 @@ func (c *Core) IsCollectionAvailable(collectionID int64) bool {
 	return ok && checker.IsCollectionAvailable(collectionID)
 }
 
+func (c *Core) GetCollectionProperties(ctx context.Context, collectionID int64) ([]*commonpb.KeyValuePair, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return nil, err
+	}
+	return c.meta.GetCollectionProperties(ctx, collectionID)
+}
+
 // HasCollection check collection existence
 func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {

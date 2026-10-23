@@ -275,11 +275,11 @@ func (m *collectionUsageManager) initializeLastActiveAt(collectionID int64) {
 }
 
 func (m *collectionUsageManager) idleTTL(ctx context.Context, collectionID int64) (time.Duration, error) {
-	collection, err := m.broker.DescribeCollection(ctx, collectionID)
+	properties, err := m.broker.GetCollectionProperties(ctx, collectionID)
 	if err != nil {
 		return 0, err
 	}
-	ttl, err := common.GetCollectionAutoReleaseIdleTTL(collection.GetProperties())
+	ttl, err := common.GetCollectionAutoReleaseIdleTTL(properties)
 	if err != nil {
 		mlog.RatedWarn(ctx, 1.0, "invalid collection auto release TTL, use global default",
 			mlog.FieldCollectionID(collectionID), mlog.Err(err))

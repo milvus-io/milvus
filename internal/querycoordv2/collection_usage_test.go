@@ -27,7 +27,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	metastoremocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -226,13 +225,12 @@ func TestCollectionUsageUsesDifferentCollectionTTLs(t *testing.T) {
 		require.NoError(t, s.qviewsRuntime.loadConfigStore.Put(context.Background(), cfg))
 	}
 	broker := meta.NewMockBroker(t)
-	broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, id int64) (*milvuspb.DescribeCollectionResponse, error) {
+	broker.EXPECT().GetCollectionProperties(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, id int64) ([]*commonpb.KeyValuePair, error) {
 		values := map[int64]string{100: "20", 200: "5", 300: "-1"}
-		response := &milvuspb.DescribeCollectionResponse{}
 		if value, ok := values[id]; ok {
-			response.Properties = []*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseIdleTTLKey, Value: value}}
+			return []*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseIdleTTLKey, Value: value}}, nil
 		}
-		return response, nil
+		return nil, nil
 	})
 	manager.broker = broker
 	manager.scan(context.Background())
@@ -254,8 +252,8 @@ func TestCollectionUsageDynamicCollectionTTL(t *testing.T) {
 	s, manager, _, releaseCount := newUsageTestManager(t)
 	properties := []*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseIdleTTLKey, Value: "20"}}
 	broker := meta.NewMockBroker(t)
-	broker.EXPECT().DescribeCollection(mock.Anything, int64(100)).RunAndReturn(func(context.Context, int64) (*milvuspb.DescribeCollectionResponse, error) {
-		return &milvuspb.DescribeCollectionResponse{Properties: properties}, nil
+	broker.EXPECT().GetCollectionProperties(mock.Anything, int64(100)).RunAndReturn(func(context.Context, int64) ([]*commonpb.KeyValuePair, error) {
+		return properties, nil
 	})
 	manager.broker = broker
 	manager.scan(context.Background())
@@ -295,9 +293,9 @@ func TestCollectionUsageInvalidTTLFallsBackToGlobalTTL(t *testing.T) {
 			_, manager, _, releaseCount := newUsageTestManager(t)
 			manager.scan(context.Background())
 			broker := meta.NewMockBroker(t)
-			broker.EXPECT().DescribeCollection(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-				Properties: []*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseIdleTTLKey, Value: value}},
-			}, nil).Twice()
+			broker.EXPECT().GetCollectionProperties(mock.Anything, int64(100)).Return(
+				[]*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseIdleTTLKey, Value: value}}, nil,
+			).Twice()
 			manager.broker = broker
 
 			setActivityTime(manager, 100, time.Now().Add(-5*time.Second))
@@ -330,7 +328,7 @@ func TestCollectionUsageSkipsUnavailableMetadata(t *testing.T) {
 			initial := time.Now().Add(-11 * time.Second)
 			setActivityTime(manager, 100, initial)
 			broker := meta.NewMockBroker(t)
-			broker.EXPECT().DescribeCollection(mock.Anything, int64(100)).Return(nil, tc.err).Once()
+			broker.EXPECT().GetCollectionProperties(mock.Anything, int64(100)).Return(nil, tc.err).Once()
 			manager.broker = broker
 			manager.scan(context.Background())
 			require.Zero(t, *releaseCount, "a failed lookup must not fall back to the global TTL and release")
@@ -338,6 +336,21 @@ func TestCollectionUsageSkipsUnavailableMetadata(t *testing.T) {
 			require.Equal(t, initial, lastActiveAt)
 		})
 	}
+}
+
+func TestCollectionUsageReadsLoadedPropertiesOnEveryScan(t *testing.T) {
+	enableAutoReleaseForTest(t)
+	_, manager, _, releaseCount := newUsageTestManager(t)
+	// Activity alone must not make an unloaded collection a scan target.
+	setActivityTime(manager, 200, time.Now().Add(-time.Hour))
+	broker := meta.NewMockBroker(t)
+	broker.EXPECT().GetCollectionProperties(mock.Anything, int64(100)).Return(
+		[]*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseIdleTTLKey, Value: "-1"}}, nil,
+	).Twice()
+	manager.broker = broker
+	manager.scan(context.Background())
+	manager.scan(context.Background())
+	require.Zero(t, *releaseCount)
 }
 
 func TestCollectionUsageEnsureRefreshesOnEntryAndReady(t *testing.T) {

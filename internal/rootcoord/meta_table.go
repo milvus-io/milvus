@@ -27,6 +27,7 @@ import (
 	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -96,6 +97,7 @@ type IMetaTable interface {
 	GetCollectionByName(ctx context.Context, dbName string, collectionName string, ts Timestamp, allowUnavailable bool) (*model.Collection, error)
 	GetCollectionByID(ctx context.Context, dbName string, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error)
 	GetCollectionByIDWithMaxTs(ctx context.Context, collectionID UniqueID) (*model.Collection, error)
+	GetCollectionProperties(ctx context.Context, collectionID UniqueID) ([]*commonpb.KeyValuePair, error)
 	ListCollections(ctx context.Context, dbName string, ts Timestamp, onlyAvail bool) ([]*model.Collection, error)
 	ListAllAvailCollections(ctx context.Context) map[int64][]int64
 	// ListAllAvailPartitions returns the partition ids of all available collections.
@@ -1021,6 +1023,19 @@ func (mt *MetaTable) GetCollectionByID(ctx context.Context, dbName string, colle
 // GetCollectionByIDWithMaxTs get collection, dbName can be ignored if ts is max timestamps
 func (mt *MetaTable) GetCollectionByIDWithMaxTs(ctx context.Context, collectionID UniqueID) (*model.Collection, error) {
 	return mt.GetCollectionByID(ctx, "", collectionID, typeutil.MaxTimestamp, false)
+}
+
+func (mt *MetaTable) GetCollectionProperties(ctx context.Context, collectionID UniqueID) ([]*commonpb.KeyValuePair, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+	collection := mt.collID2Meta[collectionID]
+	if collection == nil || !collection.Available() {
+		return nil, merr.WrapErrCollectionNotFound(collectionID)
+	}
+	return collection.Properties, nil
 }
 
 // ListAllAvailCollections returns available collection IDs grouped by database.

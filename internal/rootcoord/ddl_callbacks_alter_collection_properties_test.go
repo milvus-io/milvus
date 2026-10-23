@@ -286,6 +286,9 @@ func TestCollectionAutoReleaseTTLPropertiesDDL(t *testing.T) {
 		})
 		require.NoError(t, merr.CheckRPCCall(response, err))
 		properties := common.CloneKeyValuePairs(response.GetProperties()).ToMap()
+		internalProperties, err := core.GetCollectionProperties(ctx, collection.CollectionID)
+		require.NoError(t, err)
+		require.Equal(t, properties, common.CloneKeyValuePairs(internalProperties).ToMap())
 		if value == "" {
 			require.NotContains(t, properties, common.CollectionAutoReleaseIdleTTLKey)
 		} else {

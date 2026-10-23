@@ -587,6 +587,10 @@ func (s *mixCoordImpl) DescribeCollection(ctx context.Context, req *milvuspb.Des
 	return s.rootcoordServer.DescribeCollection(ctx, req)
 }
 
+func (s *mixCoordImpl) GetCollectionProperties(ctx context.Context, collectionID int64) ([]*commonpb.KeyValuePair, error) {
+	return s.rootcoordServer.GetCollectionProperties(ctx, collectionID)
+}
+
 func (s *mixCoordImpl) ShowCollections(ctx context.Context, req *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	return s.rootcoordServer.ShowCollections(ctx, req)
 }
