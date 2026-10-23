@@ -2611,12 +2611,9 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PerSegmentPublication() {
 				s.EqualValues(100, collection)
 				return nil
 			}).Build().UnPatch()
-			var getIndexes func(*indexMeta, int64, string) []*model.Index
-			var lookups atomic.Int32
-			defer mockey.Mock((*indexMeta).GetIndexesForCollection).To(func(im *indexMeta, id int64, name string) []*model.Index {
-				lookups.Add(1)
-				return getIndexes(im, id, name)
-			}).Origin(&getIndexes).Build().UnPatch()
+			// Count real lookups without Origin's shared per-call argument adapter.
+			lookups := mockey.Mock((*indexMeta).GetIndexesForCollection).Build()
+			defer lookups.UnPatch()
 			var install func(*indexMeta, context.Context, *model.SegmentIndex) error
 			defer mockey.Mock((*indexMeta).AddSegmentIndexFromManifest).To(func(im *indexMeta, ctx context.Context, index *model.SegmentIndex) error {
 				segment := m.GetSegment(ctx, index.SegmentID)
@@ -2642,7 +2639,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PerSegmentPublication() {
 			if tc.version >= storage.StorageV3 {
 				expectedLookups += tc.count
 			}
-			s.EqualValues(expectedLookups, lookups.Load())
+			s.EqualValues(expectedLookups, lookups.Times())
 			s.Equal(tc.count*2, writes)
 			if tc.withoutDataView {
 				s.Zero(notifications)

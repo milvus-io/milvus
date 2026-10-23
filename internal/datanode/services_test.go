@@ -57,7 +57,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
-	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -2216,14 +2215,13 @@ func TestSnapshotExportRangeTask_IndependentConcurrency(t *testing.T) {
 		name  string
 		limit int32
 		want  int
-	}{{"configured", 3, 6}, {"above former node cap", 64, 128}, {"legacy request", 0, 256}} {
+	}{{"configured", 3, 6}, {"high concurrency", 64, 128}, {"legacy request", 0, 256}} {
 		t.Run(tc.name, func(t *testing.T) {
 			req, cm := snapshotExportRangeRequest(t, 256)
 			req.CopyConcurrency = tc.limit
 			if tc.limit > 0 {
 				req.TaskSlot = 16
 			}
-			defer mockey.Mock(hardware.GetCPUNum).Return(4).Build().UnPatch()
 			cfg := &Params.DataNodeCfg
 			Params.Save(cfg.ImportConcurrencyPerCPUCore.Key, "8")
 			defer Params.Reset(cfg.ImportConcurrencyPerCPUCore.Key)
