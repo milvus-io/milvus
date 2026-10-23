@@ -130,6 +130,7 @@ func runManifestIndexMigrationLoop(ctx context.Context, updates <-chan struct{},
 		case <-updates:
 		default:
 		}
+		scanStarted := time.Now()
 		// The first scan is immediate, including after restart. Pending is
 		// derived from recovered records, never from a separate checkpoint.
 		if runOnce(ctx) {
@@ -148,6 +149,15 @@ func runManifestIndexMigrationLoop(ctx context.Context, updates <-chan struct{},
 		case <-ctx.Done():
 			return
 		case <-updates:
+		}
+		// Legacy completions can wake an inspector without adding eligible
+		// work. Coalesce these notifications, including ones received during
+		// an empty scan, without scanning faster than the configured interval.
+		timer.Reset(max(0, interval()-time.Since(scanStarted)))
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
 		}
 	}
 }
@@ -183,7 +193,15 @@ func (i *manifestIndexBackfillInspector) runOnce(ctx context.Context) bool {
 // together. Only the catalog transaction limit can split its publication.
 type segmentManifestIndexBackfill struct {
 	segment *SegmentInfo
-	records []*model.SegmentIndex
+	records []manifestIndexBackfillCandidate
+}
+
+// The scan only needs identities. Artifact metadata is reloaded for the selected
+// transaction batch, so file-key slices are never duplicated for the backlog.
+type manifestIndexBackfillCandidate struct {
+	SegmentID int64
+	IndexID   int64
+	BuildID   int64
 }
 
 // scan counts the full eligible backlog before limiting work. Selection rotates
@@ -217,13 +235,16 @@ func (i *manifestIndexBackfillInspector) scan(ctx context.Context) ([]segmentMan
 		if group == nil {
 			segment := i.meta.GetSegment(ctx, record.SegmentID)
 			if !isSegmentHealthy(segment) || segment.GetStorageVersion() != storage.StorageV3 ||
-				segment.GetLevel() == datapb.SegmentLevel_L0 {
+				segment.GetLevel() == datapb.SegmentLevel_L0 || segment.GetIsImporting() ||
+				segment.GetState() == commonpb.SegmentState_Importing {
 				return true
 			}
 			group = &segmentManifestIndexBackfill{segment: segment}
 			groups[record.SegmentID] = group
 		}
-		group.records = append(group.records, model.CloneSegmentIndex(record))
+		group.records = append(group.records, manifestIndexBackfillCandidate{
+			SegmentID: record.SegmentID, IndexID: record.IndexID, BuildID: record.BuildID,
+		})
 		pending++
 		return true
 	})
@@ -376,7 +397,7 @@ func (i *manifestIndexBackfillInspector) backfillIndexes(ctx context.Context, se
 	})
 }
 
-func (i *manifestIndexBackfillInspector) recordFailure(ctx context.Context, segIdx *model.SegmentIndex, err error) {
+func (i *manifestIndexBackfillInspector) recordFailure(ctx context.Context, segIdx manifestIndexBackfillCandidate, err error) {
 	switch {
 	case errors.Is(err, errSegmentIndexBackfillSkipped), errors.Is(err, merr.ErrSegmentNotFound):
 		metrics.DataCoordManifestIndexBackfillRecords.WithLabelValues(manifestIndexBackfillSkipped).Inc()

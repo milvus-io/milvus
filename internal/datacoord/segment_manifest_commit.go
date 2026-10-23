@@ -263,7 +263,8 @@ func (m *meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentMa
 
 	for i := range commit.CatalogMutation.SegmentIndexes {
 		indexMutation := &commit.CatalogMutation.SegmentIndexes[i]
-		if indexMutation.Type == SegmentIndexBackfill && segment.GetLevel() == datapb.SegmentLevel_L0 {
+		if indexMutation.Type == SegmentIndexBackfill && (segment.GetLevel() == datapb.SegmentLevel_L0 ||
+			segment.GetIsImporting() || segment.GetState() == commonpb.SegmentState_Importing) {
 			return errSegmentIndexBackfillSkipped
 		}
 		staged, err := m.indexMeta.stageSegmentIndexMutation(*indexMutation)

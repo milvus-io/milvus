@@ -61,6 +61,12 @@ func TestManifestIndexBackfillRevalidatesSelectedRecord(t *testing.T) {
 		{"changed artifact version", func(_ context.Context, m *meta) error {
 			return m.indexMeta.UpdateVersion(restartBuildID, 10)
 		}},
+		{"import protection", func(ctx context.Context, m *meta) error {
+			return m.UpdateSegmentsInfo(ctx, UpdateIsImporting(restartSegID, true))
+		}},
+		{"import state", func(ctx context.Context, m *meta) error {
+			return m.UpdateSegmentsInfo(ctx, UpdateStatusOperator(restartSegID, commonpb.SegmentState_Importing))
+		}},
 		{"changed level", func(ctx context.Context, m *meta) error {
 			return m.UpdateSegmentsInfo(ctx, UpdateSegmentLevelOperator(restartSegID, datapb.SegmentLevel_L0))
 		}},
@@ -521,6 +527,8 @@ func TestManifestIndexBackfillDoesNotLoseWakeAtIdleBoundary(t *testing.T) {
 	m := bootMetaForRestart(t, metastorekv.NewCatalog(NewMetaMemoryKV(), "", ""), restartCollID)
 	seedLegacyBackfillRecord(t, m, restartSegID, restartBuildID)
 	withSegmentIndexManifestWrites(t, true)
+	interval := mockey.Mock(manifestIndexBackfillInterval).Return(20 * time.Millisecond).Build()
+	t.Cleanup(func() { interval.UnPatch() })
 	inspector := newManifestIndexBackfillInspector(ctx, m)
 	require.NoError(t, inspector.backfillIndexes(ctx, restartSegID, restartBuildID))
 
@@ -560,7 +568,7 @@ func TestManifestIndexBackfillDoesNotLoseWakeAtIdleBoundary(t *testing.T) {
 	require.Eventually(t, func() bool {
 		current, ok := m.indexMeta.GetIndexJob(record.BuildID)
 		return ok && current.ManifestPublished
-	}, 5*time.Second, time.Millisecond, "late copy installation must wake without waiting for the 60 second interval")
+	}, 5*time.Second, time.Millisecond, "late copy installation must survive the empty-scan cooldown")
 }
 
 func TestManifestIndexBackfillScansRecordsBeforeSegments(t *testing.T) {
@@ -592,4 +600,43 @@ func TestManifestIndexBackfillScansRecordsBeforeSegments(t *testing.T) {
 	require.Len(t, work, 1)
 	require.Equal(t, restartBuildID, work[0].records[0].BuildID)
 	assert.EqualValues(t, 1, segmentLookups.Load())
+}
+
+func TestManifestIndexMigrationLoopPacesEmptyNotifications(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	updates := make(chan struct{}, 1)
+	scans := make(chan time.Time, 4)
+	done := make(chan struct{})
+	const interval = 50 * time.Millisecond
+	go func() {
+		defer close(done)
+		runManifestIndexMigrationLoop(ctx, updates, func() time.Duration { return interval }, func(context.Context) bool {
+			scans <- time.Now()
+			// A finished legacy index can arrive during every empty scan.
+			select {
+			case updates <- struct{}{}:
+			default:
+			}
+			return false
+		})
+	}()
+	var previous time.Time
+	for range 3 {
+		select {
+		case current := <-scans:
+			if !previous.IsZero() {
+				require.GreaterOrEqual(t, current.Sub(previous), interval, "empty notifications must not bypass the scan interval")
+			}
+			previous = current
+		case <-time.After(5 * time.Second):
+			t.Fatal("notification was lost")
+		}
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("cooldown did not stop on cancellation")
+	}
 }

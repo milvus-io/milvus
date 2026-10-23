@@ -105,7 +105,7 @@ it out of the next scan.
 A record is eligible only when all of the following are true when the mutation is
 staged under the publication locks:
 
-- its segment is healthy, exactly StorageV3, and not L0;
+- its segment is healthy, exactly StorageV3, not L0, and no longer importing;
 - its collection, partition, and segment identity matches the segment receiving
   the manifest revision;
 - its parent index definition is live;
@@ -303,8 +303,10 @@ concurrency retains its existing `MaxInt32` configuration cap and is bounded
 by the number of selected segments. Interval, batch size, and concurrency are refreshable. Enabling
 the inspector and choosing manifest publication require a DataCoord restart.
 
-Candidate groups are sorted by SegmentID and each scan starts after the last
-selected SegmentID, wrapping at the end. Records within each group are sorted
+Scans retain only segment/index/build identities, without cloning the backlog's
+artifact file-key slices. Selected records are reloaded and revalidated before
+publication. Candidate groups are sorted by SegmentID and each scan starts after
+the last selected SegmentID, wrapping at the end. Records within each group are sorted
 by BuildID. Thus one deterministic failure cannot occupy the first batch
 forever and starve the rest of a large cluster.
 The loop runs its first scan immediately so the pending gauge does not retain
@@ -316,8 +318,13 @@ segment-completion flag or completed-segment set is maintained. A successful
 catalog write that installs a finished, artifact-bearing record sends that
 notification after publishing the record in memory. This includes late legacy
 copy/restore results and rewrites of previously manifest-resident records.
-Notifications arriving during a scan survive its transition to idle. While
-work remains, retries and later batches follow the configured interval.
+Notifications arriving during a scan survive its transition to idle. Notification
+rescans cannot start sooner than one configured interval after the previous scan
+started, so a stream of ineligible legacy completions cannot drive continuous
+empty scans. An inspector that has been idle longer than the interval wakes
+immediately. While work remains, retries and later batches follow the configured
+interval. Copy finalization sends another notification after clearing import
+protection, so an earlier scan that skipped the importing target cannot lose it.
 
 On restart, the immediate scan derives work from the recovered records and
 `ManifestPublished` provenance. Atomic catalog-row deletion remains the durable
@@ -495,15 +502,21 @@ true after rollback completes; it still accurately describes the remaining
 manifest entries.
 
 Copy tasks retain their dispatch-time placement. The inspector does not depend
-on `CopySegmentMeta` or wait for tasks to complete. If a result has published a
-manifest but installed only some of its index records, rollback migrates only
-those installed records and leaves other entries intact. Each later
-`AddSegmentIndexFromManifest` installation wakes rollback, including after an
-empty scan. New tasks use the effective etcd mode.
+on `CopySegmentMeta` or wait for tasks to complete. Result installation holds the
+segment manifest lock, installs all indexes while the target remains importing,
+and only then publishes its manifest and Flushed/non-importing state. Rollback
+can migrate the finalized target before the enclosing task completes. Legacy
+partially installed results still contribute only their installed records to
+rollback; untracked entries remain untouched. Each later record installation
+wakes rollback, including after an empty scan. New tasks use the effective etcd mode.
 
 Result synchronization checks the current persisted task state under the copy
 result lock. Repeated results for a completed task cannot reinstall a manifest
-pointer that rollback has already advanced. Failed tasks are also rejected in
+pointer that rollback has already advanced. Each target's durable Flushed and
+non-importing state also fences replays while the enclosing task is still
+InProgress, including after a failed completion write or coordinator restart.
+Already finalized targets are skipped before reading the worker's old manifest;
+other targets can still finish. Failed tasks are also rejected in
 rollback mode, including historical tasks without a cleanup plan, so a late
 result cannot republish data belonging to a failed task.
 Rejected results continue to re-arm durable cleanup where the task still exists.

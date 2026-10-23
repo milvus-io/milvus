@@ -2274,20 +2274,24 @@ func (gc *garbageCollector) newIndexFileReclaimChecker(ctx context.Context) func
 			// Keep everything; nil decision fields mean "reclaim nothing".
 			return d
 		}
+		// Read import protection before looking up the build. Finalization
+		// clears it only after installing every record: a missing-record read
+		// before finalization must not be combined with a segment read after it.
+		segment := gc.meta.GetSegment(ctx, segmentID)
+		if segment != nil && (segment.GetState() == commonpb.SegmentState_Importing || segment.GetIsImporting()) {
+			return d
+		}
 		canRecycle, segIdx := gc.meta.indexMeta.CheckCleanSegmentIndex(buildID)
 		if !canRecycle {
 			return d
 		}
 		if segIdx == nil {
-			segment := gc.meta.GetSegment(ctx, segmentID)
 			switch {
 			case segment == nil:
 				d.reclaimAll = true
 			case !isSegmentHealthy(segment):
 				// Dropped-segment GC and rejected-copy cleanup own these files
 				// for as long as the segment row exists.
-			case segment.GetState() == commonpb.SegmentState_Importing || segment.GetIsImporting():
-				// Snapshot restore still copying into this segment.
 			default:
 				d.reclaimAll = true
 			}

@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -593,4 +594,33 @@ func TestBackfillMutationRejectsUnsupportedShapes(t *testing.T) {
 			assert.Equal(t, segment.GetManifestPath(), m.GetSegment(ctx, restartSegID).GetManifestPath())
 		})
 	}
+}
+
+func TestManifestIndexBackfillScanDoesNotDuplicateArtifactMetadata(t *testing.T) {
+	withSegmentIndexManifestWrites(t, false)
+	newFakeManifestStore(t)
+	ctx := context.Background()
+	m := bootMetaForRestart(t, metastorekv.NewCatalog(NewMetaMemoryKV(), "", ""), restartCollID)
+	setRollbackTestParam(t, &Params.DataCoordCfg.ManifestIndexBackfillBatchSize, "1")
+	keys := make([]string, 65536)
+	for idx := range keys {
+		keys[idx] = "index-file"
+	}
+	for offset := range int64(4) {
+		seedLegacyBackfillRecord(t, m, restartSegID+offset, restartBuildID+offset)
+		record, ok := m.indexMeta.GetIndexJob(restartBuildID + offset)
+		require.True(t, ok)
+		record.IndexFileKeys = keys
+		// Install a large immutable file list without serializing a synthetic
+		// large catalog record. Scan still traverses the real build table.
+		m.indexMeta.updateSegmentIndex(record)
+	}
+	inspector := newManifestIndexBackfillInspector(ctx, m)
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	work, pending := inspector.scan(ctx)
+	runtime.ReadMemStats(&after)
+	require.Equal(t, 4, pending)
+	require.Len(t, work, 1)
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20), "batch selection must not copy the backlog's file-key slices")
 }
