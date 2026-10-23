@@ -856,7 +856,13 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 			// Handle indexes before the live-V3 blanket skip. Malformed _index
 			// paths stay protected; they must not fall into generic binlog GC.
 			collectionID, segmentID, buildID, parseErr := parseIndexV2FilePath(rootPath, chunkInfo.FilePath)
-			if parseErr != nil || !canReclaimIndex(chunkInfo.FilePath, collectionID, segmentID, buildID) {
+			if parseErr != nil {
+				logger.RatedWarn(ctx, 1.0, "garbageCollector recycleUnusedBinlogFiles skip unparsable index file",
+					mlog.String("file", chunkInfo.FilePath), mlog.Err(parseErr))
+				valid++
+				return true
+			}
+			if !canReclaimIndex(chunkInfo.FilePath, collectionID, segmentID, buildID) {
 				valid++
 				return true
 			}
