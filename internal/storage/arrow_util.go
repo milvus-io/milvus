@@ -499,9 +499,6 @@ func (b *RecordBuilder) prepareAppendDefaults() error {
 }
 
 func (b *RecordBuilder) Append(rec Record, start, end int) error {
-	if err := b.prepareAppendDefaults(); err != nil {
-		return err
-	}
 	if start >= end {
 		return b.appendColumns(nil, start, end)
 	}

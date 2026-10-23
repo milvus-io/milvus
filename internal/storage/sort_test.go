@@ -20,10 +20,12 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"runtime"
 	"slices"
 	"strconv"
 	"testing"
 	"time"
+	"weak"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -522,6 +524,63 @@ func TestMergeSortClearsOutputColumnsOnReaderError(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMergeSortReleasesExhaustedReaderKeys(t *testing.T) {
+	const intField, stringField = FieldID(100), FieldID(101)
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: intField, Name: "int_key", DataType: schemapb.DataType_Int64},
+		{FieldID: stringField, Name: "string_key", DataType: schemapb.DataType_VarChar},
+	}}
+	makeReader := func(ints []int64, strings []string) (RecordReader, weak.Pointer[int64], weak.Pointer[array.String]) {
+		builder := array.NewRecordBuilder(memory.NewGoAllocator(), arrow.NewSchema([]arrow.Field{
+			{Name: "int_key", Type: arrow.PrimitiveTypes.Int64},
+			{Name: "string_key", Type: arrow.BinaryTypes.String},
+		}, nil))
+		// Keep the tracked buffer out of Go's tiny-allocation batches, whose
+		// unrelated live objects can delay clearing a weak pointer.
+		builder.Field(0).Reserve(128)
+		builder.Field(0).(*array.Int64Builder).AppendValues(ints, nil)
+		builder.Field(1).(*array.StringBuilder).AppendValues(strings, nil)
+		record := builder.NewRecord()
+		builder.Release()
+		intBuffer := weak.Make(&record.Column(0).(*array.Int64).Int64Values()[0])
+		stringColumn := weak.Make(record.Column(1).(*array.String))
+		reader := &IterativeRecordReader{
+			cur: &singleRecordReader{record: NewSimpleArrowRecord(record,
+				map[FieldID]int{intField: 0, stringField: 1})},
+			iterate: func() (RecordReader, error) { return nil, io.EOF },
+		}
+		return reader, intBuffer, stringColumn
+	}
+	first, intBuffer, stringColumn := makeReader([]int64{1}, []string{"first"})
+	defer first.Close()
+	other, _, _ := makeReader([]int64{2, 3}, []string{"second", "third"})
+	defer other.Close()
+
+	var gotInts []int64
+	var gotStrings []string
+	writer := &MockRecordWriter{writefn: func(record Record) error {
+		gotInts = append(gotInts, record.Column(intField).(*array.Int64).Int64Values()...)
+		strings := record.Column(stringField).(*array.String)
+		for i := 0; i < strings.Len(); i++ {
+			gotStrings = append(gotStrings, strings.Value(i))
+		}
+		if len(gotInts) == 2 {
+			// Reader 0 reached EOF and released its record; reader 1 still has
+			// another row. Neither cache may keep reader 0's keys reachable.
+			runtime.GC()
+			assert.Nil(t, intBuffer.Value(), "exhausted reader retains its int64 buffer")
+			assert.Nil(t, stringColumn.Value(), "exhausted reader retains its string column")
+		}
+		return nil
+	}}
+	rows, err := MergeSort(1, schema, []RecordReader{first, other}, writer,
+		func(Record, int, int) bool { return true }, []int64{intField, stringField})
+	require.NoError(t, err)
+	require.Equal(t, 3, rows)
+	require.Equal(t, []int64{1, 2, 3}, gotInts)
+	require.Equal(t, []string{"first", "second", "third"}, gotStrings)
 }
 
 func TestMergeSortCachedColumnsPreserveTextAcrossRecords(t *testing.T) {
