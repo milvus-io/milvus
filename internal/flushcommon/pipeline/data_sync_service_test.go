@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -308,15 +309,14 @@ type DataSyncServiceSuite struct {
 	suite.Suite
 	MockDataSuiteBase
 
-	pipelineParams           *util2.PipelineParams // node param
-	chunkManager             *mocks.ChunkManager
-	broker                   *broker.MockBroker
-	allocator                *allocator.MockAllocator
-	wbManager                *writebuffer.MockBufferManager
-	channelCheckpointUpdater *util2.ChannelCheckpointUpdater
-	factory                  *dependency.MockFactory
-	ms                       *msgstream.MockMsgStream
-	msChan                   chan *msgstream.ConsumeMsgPack
+	pipelineParams *util2.PipelineParams // node param
+	chunkManager   *mocks.ChunkManager
+	broker         *broker.MockBroker
+	allocator      *allocator.MockAllocator
+	wbManager      *writebuffer.MockBufferManager
+	factory        *dependency.MockFactory
+	ms             *msgstream.MockMsgStream
+	msChan         chan *msgstream.ConsumeMsgPack
 }
 
 func (s *DataSyncServiceSuite) SetupSuite() {
@@ -332,11 +332,6 @@ func (s *DataSyncServiceSuite) SetupTest() {
 	s.allocator = allocator.NewMockAllocator(s.T())
 	s.wbManager = writebuffer.NewMockBufferManager(s.T())
 
-	paramtable.Get().Save(paramtable.Get().DataNodeCfg.ChannelCheckpointUpdateTickInSeconds.Key, "0.01")
-	defer paramtable.Get().Save(paramtable.Get().DataNodeCfg.ChannelCheckpointUpdateTickInSeconds.Key, "10")
-	s.channelCheckpointUpdater = util2.NewChannelCheckpointUpdater(s.broker)
-
-	go s.channelCheckpointUpdater.Start()
 	s.msChan = make(chan *msgstream.ConsumeMsgPack, 1)
 
 	s.factory = dependency.NewMockFactory(s.T())
@@ -352,7 +347,6 @@ func (s *DataSyncServiceSuite) SetupTest() {
 		MsgStreamFactory:   s.factory,
 		Broker:             s.broker,
 		ChunkManager:       s.chunkManager,
-		CheckpointUpdater:  s.channelCheckpointUpdater,
 		SyncMgr:            syncmgr.NewMockSyncManager(s.T()),
 		WriteBufferManager: s.wbManager,
 		Allocator:          s.allocator,
@@ -486,18 +480,24 @@ func (s *DataSyncServiceSuite) TestStartStop() {
 	}
 	timeTickMsgPack.Msgs = append(timeTickMsgPack.Msgs, timeTickMsg)
 
-	s.wbManager.EXPECT().BufferData(insertChannelName, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	s.wbManager.EXPECT().GetCheckpoint(insertChannelName).Return(&msgpb.MsgPosition{Timestamp: msgTs, ChannelName: insertChannelName, MsgID: []byte{0}}, true, nil)
-	s.wbManager.EXPECT().NotifyCheckpointUpdated(insertChannelName, msgTs).Return().Maybe()
-
-	ch := make(chan struct{})
-	s.broker.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, _ []*msgpb.MsgPosition) error {
-		close(ch)
+	ch := make(chan struct{}, 1)
+	patch := mockey.Mock((*writebuffer.MockBufferManager).BufferData).To(func(_ *writebuffer.MockBufferManager, channel string, _ []*writebuffer.InsertData, _ []*msgstream.DeleteMsg, _, _ *msgpb.MsgPosition, _ int32) error {
+		if channel == insertChannelName {
+			select {
+			case ch <- struct{}{}:
+			default:
+			}
+		}
 		return nil
-	})
+	}).Build()
+	s.T().Cleanup(func() { patch.UnPatch() })
 	s.msChan <- msgstream.BuildConsumeMsgPack(&msgPack)
 	s.msChan <- msgstream.BuildConsumeMsgPack(&timeTickMsgPack)
-	<-ch
+	select {
+	case <-ch:
+	case <-time.After(10 * time.Second):
+		s.T().Fatal("pipeline did not buffer the insert")
+	}
 }
 
 func TestDataSyncService(t *testing.T) {

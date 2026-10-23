@@ -103,7 +103,7 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 		}).
 		WithBroadcast(coll.VirtualChannelNames).
 		MustBuildBroadcast()
-	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
+	if err := c.broadcastCollectionAlter(ctx, broadcaster, msg); err != nil {
 		return err
 	}
 	return nil

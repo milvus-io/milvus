@@ -399,6 +399,8 @@ func Test_NewClient(t *testing.T) {
 		r42, err := client.ValidateAnalyzer(ctx, nil)
 		retCheck(retNotNil, r42, err)
 
+		resources, err := client.GetStreamingNodeQueryViewResources(ctx, &datapb.GetStreamingNodeQueryViewResourcesRequest{})
+		retCheck(retNotNil, resources, err)
 		fetched, err := client.FetchFileResources(ctx, &rootcoordpb.FetchFileResourcesRequest{})
 		retCheck(retNotNil, fetched, err)
 	}
@@ -421,9 +423,14 @@ func Test_NewClient(t *testing.T) {
 		GetGrpcClientErr: nil,
 	}
 
+	mockDCWithErr := mocks.NewMockDataCoordClient(t)
+	mockDCWithErr.EXPECT().
+		GetStreamingNodeQueryViewResources(mock1.Anything, mock1.Anything).
+		Return(nil, mockErr)
 	newFunc2 := func(cc *grpc.ClientConn) MixCoordClient {
 		return MixCoordClient{
 			RootCoordClient:  &mock.GrpcRootCoordClient{Err: errors.New("dummy")},
+			DataCoordClient:  mockDCWithErr,
 			QueryCoordClient: &mock.GrpcQueryCoordClient{Err: errors.New("dummy")},
 		}
 	}
@@ -436,9 +443,14 @@ func Test_NewClient(t *testing.T) {
 		GetGrpcClientErr: nil,
 	}
 
+	mockDC := mocks.NewMockDataCoordClient(t)
+	mockDC.EXPECT().
+		GetStreamingNodeQueryViewResources(mock1.Anything, mock1.Anything).
+		Return(&datapb.GetStreamingNodeQueryViewResourcesResponse{}, nil)
 	newFunc3 := func(cc *grpc.ClientConn) MixCoordClient {
 		return MixCoordClient{
 			RootCoordClient:  &mock.GrpcRootCoordClient{Err: nil},
+			DataCoordClient:  mockDC,
 			QueryCoordClient: &mock.GrpcQueryCoordClient{Err: nil},
 		}
 	}

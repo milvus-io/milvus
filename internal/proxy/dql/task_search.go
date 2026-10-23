@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
+	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -121,6 +122,8 @@ type SearchTask struct {
 	sched             *scheduler.TaskScheduler
 	lb                shardclient.LBPolicy
 	shardClientMgr    shardclient.ShardClientMgr
+	viewQueryClient   queryclient.Client
+	queryViewPlans    []queryclient.ShardPlan
 	queryChannelsTs   map[string]Timestamp
 	queryChannelsNode *typeutil.ConcurrentMap[string, int64]
 	queryInfos        []*planpb.QueryInfo
@@ -186,6 +189,7 @@ func (t *SearchTask) unitSink() *featureusage.Tally {
 
 func NewSearchTask(ctx context.Context, node taskmodel.TaskNode, sched *scheduler.TaskScheduler, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool, tr *timerecord.TimeRecorder) *SearchTask {
 	return &SearchTask{
+		viewQueryClient: viewQueryClientFromNode(node),
 		baseTask: baseTask{
 			MetaCache: node.GetMetaCache(),
 		},
@@ -323,6 +327,7 @@ func (t *SearchTask) PreExecute(ctx context.Context) (retErr error) {
 		return err2
 	}
 	t.schema = collectionInfo.Schema
+	t.SchemaVersion = t.schema.GetVersion()
 	if err := ValidateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
 		return err
 	}
@@ -455,9 +460,19 @@ func (t *SearchTask) PreExecute(ctx context.Context) (retErr error) {
 	physicalTimeMs, _ := tsoutil.ParseHybridTs(guaranteeTs)
 	t.EntityTtlPhysicalTime = uint64(physicalTimeMs * 1000)
 	t.ConsistencyLevel = consistencyLevel
-	if t.isIterator && t.request.GetGuaranteeTimestamp() > 0 {
-		t.MvccTimestamp = t.request.GetGuaranteeTimestamp()
-		t.GuaranteeTimestamp = t.request.GetGuaranteeTimestamp()
+	if t.isIterator {
+		if t.request.GetGuaranteeTimestamp() > 0 {
+			t.MvccTimestamp = t.request.GetGuaranteeTimestamp()
+		} else if t.viewQueryClient != nil {
+			// Choose one snapshot before any shard executes, including the
+			// first page. Every retry and subsequent page retains this value.
+			t.MvccTimestamp = t.BeginTs()
+		}
+		if t.MvccTimestamp != 0 {
+			t.GuaranteeTimestamp = t.MvccTimestamp
+			physicalTimeMs, _ = tsoutil.ParseHybridTs(t.MvccTimestamp)
+			t.EntityTtlPhysicalTime = uint64(physicalTimeMs * 1000)
+		}
 	}
 	t.IsIterator = t.isIterator
 
@@ -471,11 +486,15 @@ func (t *SearchTask) PreExecute(ctx context.Context) (retErr error) {
 	}
 
 	if collectionInfo.CollectionTTL != 0 {
-		physicalTime := tsoutil.PhysicalTime(t.GetBase().GetTimestamp())
+		ttlTimestamp := t.GetBase().GetTimestamp()
+		if t.isIterator && t.MvccTimestamp != 0 {
+			ttlTimestamp = t.MvccTimestamp
+		}
+		physicalTime := tsoutil.PhysicalTime(ttlTimestamp)
 		expireTime := physicalTime.Add(-time.Duration(collectionInfo.CollectionTTL))
 		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime)
 		// preventing overflow, abort
-		if t.CollectionTtlTimestamps > t.GetBase().GetTimestamp() {
+		if t.CollectionTtlTimestamps > ttlTimestamp {
 			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.CollectionTTL)
 		}
 	}
@@ -1464,6 +1483,16 @@ func (t *SearchTask) Execute(ctx context.Context) error {
 	defer tr.CtxElapse(ctx, "done")
 
 	t.queryChannelsNode = typeutil.NewConcurrentMap[string, int64]()
+	if t.viewQueryClient != nil {
+		if err := t.executeByQueryView(ctx); err != nil {
+			log.Warn(ctx, "search execute by query view failed", mlog.Err(err))
+			return errors.Wrap(err, "failed to search")
+		}
+		log.Debug(ctx, "Search Execute done.",
+			mlog.Int64("collection", t.GetCollectionID()),
+			mlog.Int64s("partitionIDs", t.GetPartitionIDs()))
+		return nil
+	}
 	// Built once, ahead of the namespace fast path below, so that the fast
 	// path derives its single-channel workload from the same value Execute
 	// would fan out -- every collection-level field, the resource-group scope
@@ -1506,6 +1535,29 @@ func (t *SearchTask) Execute(ctx context.Context) error {
 	log.Debug(ctx, "Search Execute done.",
 		mlog.Int64("collection", t.GetCollectionID()),
 		mlog.Int64s("partitionIDs", t.GetPartitionIDs()))
+	return nil
+}
+
+func (t *SearchTask) executeByQueryView(ctx context.Context) error {
+	fields, err := translateToOutputFieldIDs(t.requeryOutputFields(), t.schema.CollectionSchema)
+	if err != nil {
+		return err
+	}
+	result, err := t.viewQueryClient.Legacy().Search(ctx, &queryclient.LegacySearchRequest{
+		Req:              t.SearchRequest,
+		RequiredFieldIDs: fields,
+		BarrierMVCC:      t.MvccTimestamp,
+	})
+	if err != nil {
+		return queryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), err)
+	}
+	if t.resultBuf == nil {
+		t.resultBuf = typeutil.NewConcurrentSet[*internalpb.SearchResults]()
+	}
+	t.queryViewPlans = append([]queryclient.ShardPlan{}, result.Plans...)
+	for _, searchResult := range result.Results {
+		t.resultBuf.Insert(searchResult)
+	}
 	return nil
 }
 
@@ -1696,7 +1748,11 @@ func (t *SearchTask) PostExecute(ctx context.Context) error {
 
 	if t.isIterator && t.request.GetGuaranteeTimestamp() == 0 {
 		// first page for iteration, need to set up sessionTs for iterator
-		t.result.SessionTs = getMaxMvccTsFromChannels(t.queryChannelsTs, t.BeginTs())
+		if t.viewQueryClient != nil {
+			t.result.SessionTs = t.MvccTimestamp
+		} else {
+			t.result.SessionTs = getMaxMvccTsFromChannels(t.queryChannelsTs, t.BeginTs())
+		}
 	}
 
 	metrics.ProxyReduceResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.SearchLabel).Observe(float64(tr.RecordSpan().Microseconds()) / 1000.0)

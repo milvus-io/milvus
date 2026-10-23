@@ -19,7 +19,9 @@ package querycoordv2
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -35,11 +37,17 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/coord/loadstatus"
+	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -82,10 +90,11 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 	}
 
 	isGetAll := false
+	configs := s.qviewsRuntime.loadConfigStore.Snapshot().ConfigsMap()
 	collectionSet := typeutil.NewUniqueSet(req.GetCollectionIDs()...)
 	if len(req.GetCollectionIDs()) == 0 {
-		for _, collection := range s.meta.GetAllCollections(ctx) {
-			collectionSet.Insert(collection.GetCollectionID())
+		for collectionID := range configs {
+			collectionSet.Insert(collectionID)
 		}
 		isGetAll = true
 	}
@@ -98,11 +107,12 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 		QueryServiceAvailable: make([]bool, 0, len(collectionSet)),
 	}
 	for _, collectionID := range collections {
-		collection := s.meta.GetCollection(ctx, collectionID)
-		percentage := s.meta.CalculateLoadPercentage(ctx, collectionID)
-		loadFields := s.meta.GetLoadFields(ctx, collectionID)
-		refreshProgress := int64(0)
-		if percentage < 0 {
+		progress, err := s.qviewsLoadProgress(ctx, collectionID)
+		if err != nil {
+			return &querypb.ShowCollectionsResponse{Status: merr.Status(err)}, nil
+		}
+		cfg := progress.Config
+		if cfg == nil {
 			if isGetAll {
 				// The collection is released during this,
 				// ignore it
@@ -139,38 +149,17 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 			}, nil
 		}
 
-		if collection.IsRefreshed() {
-			refreshProgress = 100
-		}
-
-		// A request that names a resource group asks for the progress of the
-		// replicas living there, not the collection-wide figure; -1 says the
-		// group holds no replica of this collection. Whether the service is
-		// available follows the same scope: the caller asks whether THAT
-		// group can serve, and a group that cannot must not be reported as
-		// serving because some other group can.
-		var queryServiceAvailable bool
-		if rgName := req.GetResourceGroup(); rgName != "" {
-			scoped, err := utils.LoadPercentageByResourceGroup(ctx, s.meta, s.targetMgr, s.dist, collectionID, rgName)
-			if err != nil {
-				mlog.Warn(ctx, "show collection failed on the resource-group scoped progress",
-					mlog.Int64("collectionID", collectionID), mlog.String("resourceGroup", rgName), mlog.Err(err))
-				return &querypb.ShowCollectionsResponse{
-					Status: merr.Status(err),
-				}, nil
-			}
-			percentage = scoped
-			queryServiceAvailable = s.checkAnyReplicaAvailableInResourceGroup(ctx, collectionID, rgName)
-		} else {
-			queryServiceAvailable = s.checkAnyReplicaAvailable(collectionID)
-		}
-
 		resp.CollectionIDs = append(resp.CollectionIDs, collectionID)
-		resp.InMemoryPercentages = append(resp.InMemoryPercentages, int64(percentage))
-		resp.QueryServiceAvailable = append(resp.QueryServiceAvailable, queryServiceAvailable)
+		percentage := progress.Percentage()
+		resp.InMemoryPercentages = append(resp.InMemoryPercentages, percentage)
+		resp.QueryServiceAvailable = append(resp.QueryServiceAvailable, progress.Ready())
+		refreshProgress, err := s.qviewsRefreshProgress(ctx, collectionID, percentage)
+		if err != nil {
+			return &querypb.ShowCollectionsResponse{Status: merr.Status(err)}, nil
+		}
 		resp.RefreshProgress = append(resp.RefreshProgress, refreshProgress)
 		resp.LoadFields = append(resp.LoadFields, &schemapb.LongArray{
-			Data: loadFields,
+			Data: qviewsLoadFieldIDs(cfg),
 		})
 	}
 
@@ -189,19 +178,40 @@ func (s *Server) ShowLoadPartitions(ctx context.Context, req *querypb.ShowPartit
 	}
 	defer meta.GlobalFailedLoadCache.TryExpire()
 
-	partitions := req.GetPartitionIDs()
-	percentages := make([]int64, 0)
-	refreshProgress := int64(0)
-
-	if len(partitions) == 0 {
-		partitions = lo.Map(s.meta.GetPartitionsByCollection(ctx, req.GetCollectionID()), func(partition *meta.Partition, _ int) int64 {
-			return partition.GetPartitionID()
-		})
+	progress, err := s.qviewsLoadProgress(ctx, req.GetCollectionID())
+	if err != nil {
+		return &querypb.ShowPartitionsResponse{Status: merr.Status(err)}, nil
+	}
+	cfg := progress.Config
+	if cfg == nil {
+		err := meta.GlobalFailedLoadCache.Get(req.GetCollectionID())
+		if err != nil {
+			err = merr.WrapErrCollectionNotLoaded(req.GetCollectionID(), err.Error())
+			return &querypb.ShowPartitionsResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
+		err = merr.WrapErrCollectionNotLoaded(req.GetCollectionID())
+		return &querypb.ShowPartitionsResponse{
+			Status: merr.Status(err),
+		}, nil
 	}
 
+	partitions := req.GetPartitionIDs()
+	percentages := make([]int64, 0)
+	refreshProgress, err := s.qviewsRefreshProgress(ctx, req.GetCollectionID(), progress.Percentage())
+	if err != nil {
+		return &querypb.ShowPartitionsResponse{Status: merr.Status(err)}, nil
+	}
+
+	if len(partitions) == 0 {
+		partitions = append([]int64{}, cfg.PartitionIDs...)
+	}
+
+	loadedPartitions := typeutil.NewUniqueSet(cfg.PartitionIDs...)
+	loadPercentage := progress.Percentage()
 	for _, partitionID := range partitions {
-		percentage := s.meta.GetPartitionLoadPercentage(ctx, partitionID)
-		if percentage < 0 {
+		if !loadedPartitions.Contain(partitionID) {
 			err := meta.GlobalFailedLoadCache.Get(req.GetCollectionID())
 			if err != nil {
 				partitionErr := merr.WrapErrPartitionNotLoaded(partitionID, err.Error())
@@ -219,13 +229,9 @@ func (s *Server) ShowLoadPartitions(ctx context.Context, req *querypb.ShowPartit
 			}, nil
 		}
 
-		percentages = append(percentages, int64(percentage))
+		percentages = append(percentages, loadPercentage)
 	}
 
-	collection := s.meta.GetCollection(ctx, req.GetCollectionID())
-	if collection != nil && collection.IsRefreshed() {
-		refreshProgress = 100
-	}
 	refreshProgresses := make([]int64, len(partitions))
 	for i := range partitions {
 		refreshProgresses[i] = refreshProgress
@@ -237,6 +243,38 @@ func (s *Server) ShowLoadPartitions(ctx context.Context, req *querypb.ShowPartit
 		InMemoryPercentages: percentages,
 		RefreshProgress:     refreshProgresses,
 	}, nil
+}
+
+// qviewsLoadProgress is shared by collection and partition status reporting.
+func (s *Server) qviewsLoadProgress(ctx context.Context, collectionID int64) (loadstatus.Progress, error) {
+	store := s.qviewsRuntime.loadConfigStore
+	if !store.Contains(collectionID) {
+		return loadstatus.Progress{}, nil
+	}
+	collection, err := s.broker.DescribeCollection(ctx, collectionID)
+	if err != nil {
+		return loadstatus.Progress{}, err
+	}
+	return loadstatus.Get(store, s.qviewsRuntime.shardViewRegistry, collectionID, collection.GetVirtualChannelNames()), nil
+}
+
+func qviewsLoadFieldIDs(cfg *loadmgr.LoadConfig) []int64 {
+	fields := make([]int64, 0, len(cfg.LoadFields))
+	for _, field := range cfg.LoadFields {
+		fields = append(fields, field.GetFieldId())
+	}
+	return fields
+}
+
+func cloneLoadFields(fields []*messagespb.LoadFieldConfig) []*messagespb.LoadFieldConfig {
+	cloned := make([]*messagespb.LoadFieldConfig, 0, len(fields))
+	for _, field := range fields {
+		cloned = append(cloned, &messagespb.LoadFieldConfig{
+			FieldId: field.GetFieldId(),
+			IndexId: field.GetIndexId(),
+		})
+	}
+	return cloned
 }
 
 func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
@@ -464,6 +502,11 @@ func (s *Server) GetLoadSegmentInfo(ctx context.Context, req *querypb.GetSegment
 		}, nil
 	}
 
+	if s.qviewsRuntime != nil {
+		infos, err := s.queryViewSegmentInfo(ctx, req)
+		return &querypb.GetSegmentInfoResponse{Status: merr.Status(err), Infos: infos}, nil
+	}
+
 	infos := make([]*querypb.SegmentInfo, 0, len(req.GetSegmentIDs()))
 	if len(req.GetSegmentIDs()) == 0 {
 		infos = s.getCollectionSegmentInfo(ctx, req.GetCollectionID())
@@ -491,7 +534,7 @@ func (s *Server) GetLoadSegmentInfo(ctx context.Context, req *querypb.GetSegment
 }
 
 func (s *Server) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncNewCreatedPartitionRequest) (*commonpb.Status, error) {
-	mlog.Info(context.TODO(), "received sync new created partition request")
+	mlog.Info(ctx, "received sync new created partition request")
 
 	failedMsg := "failed to sync new created partition"
 	if err := merr.CheckHealthy(s.State()); err != nil {
@@ -499,136 +542,21 @@ func (s *Server) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncN
 		return merr.Status(err), nil
 	}
 
-	syncJob := job.NewSyncNewCreatedPartitionJob(ctx, req, s.meta, s.broker, s.targetObserver, s.targetMgr)
-	go func() {
-		defer func() {
-			syncJob.PostExecute()
-			syncJob.Done()
-		}()
-
-		err := syncJob.PreExecute()
-		if err != nil {
-			mlog.Warn(ctx, failedMsg, mlog.Err(err))
-			syncJob.SetError(err)
-			return
-		}
-		err = syncJob.Execute()
-		if err != nil {
-			mlog.Warn(ctx, failedMsg, mlog.Err(err))
-			syncJob.SetError(err)
-			return
-		}
-	}()
-	err := syncJob.Wait()
-	if err != nil {
-		mlog.Warn(ctx, failedMsg, mlog.Err(err))
-		return merr.Status(err), nil
-	}
-
-	return merr.Success(), nil
+	return merr.Status(qvresource.Resource().AddPartition(ctx, req.GetCollectionID(), req.GetPartitionID())), nil
 }
 
-// refreshCollection must be called after loading a collection. It looks for new segments that are not loaded yet and
-// tries to load them up. It returns when all segments of the given collection are loaded, or when error happens.
-// Note that a collection's loading progress always stays at 100% after a successful load and will not get updated
-// during refreshCollection.
+// refreshCollection publishes pending SegmentMeta changes and waits for every
+// expected shard's serving QueryView to cover that DataView and current config.
 func (s *Server) refreshCollection(ctx context.Context, collectionID int64) error {
-	collection := s.meta.GetCollection(ctx, collectionID)
-	if collection == nil {
-		return merr.WrapErrCollectionNotLoaded(collectionID)
+	progress, err := s.qviewsLoadProgress(ctx, collectionID)
+	if err != nil {
+		return err
 	}
-
-	// Check that collection is fully loaded.
-	if collection.GetStatus() != querypb.LoadStatus_Loaded {
+	if progress.Config == nil || !progress.Ready() {
 		return merr.WrapErrCollectionNotLoaded(collectionID, "collection not fully loaded")
 	}
-
-	// Set a placeholder notifier BEFORE updating the target to avoid a race condition.
-	// Without this, the segment checker might run between UpdateNextTarget and SetNotifierCollectionOp,
-	// see the new segments in next target, but think IsRefreshed() is true (because the notifier
-	// hasn't been set yet), and incorrectly assign LOW priority to import segments.
-	placeholderCh := make(chan struct{})
-	if err := s.meta.UpdateCollection(ctx, collectionID, meta.SetNotifierCollectionOp(placeholderCh)); err != nil {
-		if errors.Is(err, merr.ErrCollectionNotFound) {
-			return nil
-		}
-		return err
-	}
-
-	// Pull the latest target.
-	readyCh, err := s.targetObserver.UpdateNextTarget(collectionID)
-	if err != nil {
-		// On failure, close the placeholder channel so IsRefreshed() returns true
-		close(placeholderCh)
-		return err
-	}
-
-	// Replace the placeholder with the real readyCh from target observer
-	err = s.meta.UpdateCollection(ctx, collectionID, meta.SetNotifierCollectionOp(readyCh))
-	// Close the placeholder channel (no one is waiting on it, but good practice)
-	close(placeholderCh)
-
-	// if collection already released, treat as success
-	if errors.Is(err, merr.ErrCollectionNotFound) {
-		return nil
-	}
-	return err
+	return qvresource.Resource().Refresh(ctx, collectionID)
 }
-
-// This is totally same to refreshCollection, remove it for now
-// refreshPartitions must be called after loading a collection. It looks for new segments that are not loaded yet and
-// tries to load them up. It returns when all segments of the given collection are loaded, or when error happens.
-// Note that a collection's loading progress always stays at 100% after a successful load and will not get updated
-// during refreshPartitions.
-// func (s *Server) refreshPartitions(ctx context.Context, collID int64, partIDs []int64) (*commonpb.Status, error) {
-// 	ctx, cancel := context.WithTimeout(ctx, Params.QueryCoordCfg.LoadTimeoutSeconds.GetAsDuration(time.Second))
-// 	defer cancel()
-
-// 	log := mlog.With(
-// 		mlog.Int64("collectionID", collID),
-// 		mlog.Int64s("partitionIDs", partIDs),
-// 	)
-// 	if s.status.Load() != commonpb.StateCode_Healthy {
-// 		msg := "failed to refresh partitions"
-// 		mlog.Warn(ctx, msg, mlog.Err(ErrNotHealthy))
-// 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
-// 		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy), nil
-// 	}
-
-// 	// Check that all partitions are fully loaded.
-// 	if s.meta.CollectionManager.GetCurrentLoadPercentage(collID) != 100 {
-// 		errMsg := "partitions must be fully loaded before refreshing"
-// 		mlog.Warn(errMsg)
-// 		return &commonpb.Status{
-// 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-// 			Reason:    errMsg,
-// 		}, nil
-// 	}
-
-// 	// Pull the latest target.
-// 	readyCh, err := s.targetObserver.UpdateNextTarget(collID)
-// 	if err != nil {
-// 		mlog.Warn(context.TODO(), "failed to update next target", mlog.Err(err))
-// 		return &commonpb.Status{
-// 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-// 			Reason:    err.Error(),
-// 		}, nil
-// 	}
-
-// 	select {
-// 	case <-ctx.Done():
-// 		mlog.Warn(context.TODO(), "refresh partitions failed as context canceled")
-// 		return &commonpb.Status{
-// 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-// 			Reason:    "context canceled",
-// 		}, nil
-// 	case <-readyCh:
-// 		mlog.Info(context.TODO(), "refresh partitions succeeded")
-// 		return &commonpb.Status{
-// 			ErrorCode: commonpb.ErrorCode_Success,
-// 		}, nil
-// 	}
-// }
 
 func (s *Server) isStoppingNode(ctx context.Context, nodeID int64) error {
 	isStopping, err := s.nodeMgr.IsStoppingNode(nodeID)
@@ -645,100 +573,16 @@ func (s *Server) isStoppingNode(ctx context.Context, nodeID int64) error {
 }
 
 func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error) {
-	mlog.Info(context.TODO(), "load balance request received",
-		mlog.Int64s("source", req.GetSourceNodeIDs()),
-		mlog.Int64s("dest", req.GetDstNodeIDs()),
-		mlog.Int64s("segments", req.GetSealedSegmentIDs()))
-
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		msg := "failed to load balance"
-		mlog.Warn(ctx, msg, mlog.Err(err))
-		return merr.Status(merr.Wrapf(err, "%s", msg)), nil
+		return merr.Status(err), nil
 	}
-
-	// Verify request
 	if len(req.GetSourceNodeIDs()) != 1 {
-		err := merr.WrapErrParameterInvalid("only 1 source node", fmt.Sprintf("%d source nodes", len(req.GetSourceNodeIDs())))
-		msg := "source nodes can only contain 1 node"
-		mlog.Warn(ctx, msg, mlog.Int("source-nodes-num", len(req.GetSourceNodeIDs())))
-		return merr.Status(err), nil
+		return merr.Status(merr.WrapErrParameterInvalidMsg("only 1 source node is allowed")), nil
 	}
-	if s.meta.CalculateLoadPercentage(ctx, req.GetCollectionID()) < 100 {
-		err := merr.WrapErrCollectionNotFullyLoaded(req.GetCollectionID())
-		msg := "can't balance segments of not fully loaded collection"
-		mlog.Warn(ctx, msg)
-		return merr.Status(err), nil
-	}
-	srcNode := req.GetSourceNodeIDs()[0]
-	replica := s.meta.GetByCollectionAndNode(ctx, req.GetCollectionID(), srcNode)
-	if replica == nil || !replica.ContainRWNode(srcNode) {
-		err := merr.WrapErrNodeNotFound(srcNode, fmt.Sprintf("source node not found in any replica of collection %d", req.GetCollectionID()))
-		msg := "source node not found in any replica"
-		mlog.Warn(ctx, msg)
-		return merr.Status(err), nil
-	}
-	if err := s.isStoppingNode(ctx, srcNode); err != nil {
-		return merr.Status(merr.Wrapf(err, "can't balance, because the source node[%d] is invalid", srcNode)), nil
-	}
-
-	// when no dst node specified, default to use all other nodes in same
-	dstNodeSet := typeutil.NewUniqueSet()
-	if len(req.GetDstNodeIDs()) == 0 {
-		dstNodeSet.Insert(replica.GetRWNodes()...)
-	} else {
-		for _, dstNode := range req.GetDstNodeIDs() {
-			if !replica.Contains(dstNode) {
-				err := merr.WrapErrNodeNotFound(dstNode, "destination node not found in the same replica")
-				mlog.Warn(context.TODO(), "failed to balance to the destination node", mlog.Err(err))
-				return merr.Status(err), nil
-			}
-			dstNodeSet.Insert(dstNode)
-		}
-	}
-
-	// check whether dstNode is healthy
-	for dstNode := range dstNodeSet {
-		if err := s.isStoppingNode(ctx, dstNode); err != nil {
-			return merr.Status(merr.Wrapf(err, "can't balance, because the destination node[%d] is invalid", dstNode)), nil
-		}
-	}
-
-	// check sealed segment list
-	segments := s.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(req.GetCollectionID()), meta.WithNodeID(srcNode))
-	segmentsMap := lo.SliceToMap(segments, func(s *meta.Segment) (int64, *meta.Segment) {
-		return s.GetID(), s
-	})
-
-	toBalance := typeutil.NewSet[*meta.Segment]()
-	if len(req.GetSealedSegmentIDs()) == 0 {
-		toBalance.Insert(segments...)
-	} else {
-		// check whether sealed segment exist
-		for _, segmentID := range req.GetSealedSegmentIDs() {
-			segment, ok := segmentsMap[segmentID]
-			if !ok {
-				err := merr.WrapErrSegmentNotFound(segmentID, "segment not found in source node")
-				return merr.Status(err), nil
-			}
-
-			// Only balance segments in targets
-			existInTarget := s.targetMgr.GetSealedSegment(ctx, segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil
-			if !existInTarget {
-				mlog.Info(context.TODO(), "segment doesn't exist in current target, skip it", mlog.Int64("segmentID", segmentID))
-				continue
-			}
-			toBalance.Insert(segment)
-		}
-	}
-
-	err := s.balanceSegments(ctx, replica.GetCollectionID(), replica, srcNode, dstNodeSet.Collect(), toBalance.Collect(), true, false)
-	if err != nil {
-		msg := "failed to balance segments"
-		mlog.Warn(ctx, msg, mlog.Err(err))
-		return merr.Status(merr.Wrapf(err, "%s", msg)), nil
-	}
-
-	return merr.Success(), nil
+	ctx, cancel := context.WithTimeout(ctx, Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond))
+	defer cancel()
+	err := qvresource.Resource().Balance(ctx, req.GetCollectionID(), req.GetSourceNodeIDs()[0], req.GetDstNodeIDs(), req.GetSealedSegmentIDs())
+	return merr.Status(err), nil
 }
 
 func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
@@ -795,30 +639,34 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 }
 
 func (s *Server) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
-	mlog.Info(context.TODO(), "get replicas request received", mlog.Bool("with-shard-nodes", req.GetWithShardNodes()))
-
 	if err := merr.CheckHealthy(s.State()); err != nil {
-		msg := "failed to get replicas"
-		mlog.Warn(ctx, msg, mlog.Err(err))
-		return &milvuspb.GetReplicasResponse{
-			Status: merr.Status(merr.Wrapf(err, "%s", msg)),
-		}, nil
+		return &milvuspb.GetReplicasResponse{Status: merr.Status(err)}, nil
 	}
-
-	resp := &milvuspb.GetReplicasResponse{
-		Status:   merr.Success(),
-		Replicas: make([]*milvuspb.ReplicaInfo, 0),
+	// QueryViews use the WAL owner for planning, not a QueryNode delegator.
+	assignments, err := s.qviewsRuntime.streamingCoordClient.Assignment().GetLatestAssignments(ctx)
+	if err != nil {
+		return &milvuspb.GetReplicasResponse{Status: merr.Status(err)}, nil
 	}
-
-	replicas := s.meta.GetByCollection(ctx, req.GetCollectionID())
-	if len(replicas) == 0 {
-		return resp, nil
+	replicas, err := qvresource.Resource().Replicas(ctx, req.GetCollectionID(), req.GetWithShardNodes())
+	if err != nil {
+		return &milvuspb.GetReplicasResponse{Status: merr.Status(err)}, nil
 	}
-
 	for _, replica := range replicas {
-		resp.Replicas = append(resp.Replicas, s.fillReplicaInfo(ctx, replica, req.GetWithShardNodes()))
+		for _, shard := range replica.ShardReplicas {
+			for _, assignment := range assignments.Assignments {
+				if _, ok := assignment.Channels[funcutil.ToPhysicalChannel(shard.DmChannelName)]; !ok {
+					continue
+				}
+				shard.LeaderID, shard.LeaderAddr = assignment.NodeInfo.ServerID, assignment.NodeInfo.Address
+				replica.NodeIds = append(replica.NodeIds, shard.LeaderID)
+				shard.NodeIds = append(shard.NodeIds, shard.LeaderID)
+				break
+			}
+		}
+		slices.Sort(replica.NodeIds)
+		replica.NodeIds = slices.Compact(replica.NodeIds)
 	}
-	return resp, nil
+	return &milvuspb.GetReplicasResponse{Status: merr.Success(), Replicas: replicas}, nil
 }
 
 func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
@@ -1246,28 +1094,20 @@ func (s *Server) ComputePhraseMatchSlop(ctx context.Context, req *querypb.Comput
 	return resp, nil
 }
 
-// ManualUpdateCurrentTarget is used to manually update the current target for TruncateCollection
-func (s *Server) ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error {
-	mlog.Info(context.TODO(), "manual update current target request received")
-
-	if err := merr.CheckHealthy(s.State()); err != nil {
-		mlog.Warn(context.TODO(), "failed to manual update current target", mlog.Err(err))
-		return err
+// Without an outstanding refresh fence the normal load progress applies.
+func (s *Server) qviewsRefreshProgress(ctx context.Context, collectionID, loadPercentage int64) (int64, error) {
+	version, ok := s.qviewsRuntime.refreshVersions.Load(collectionID)
+	if !ok {
+		return loadPercentage, nil
 	}
-
-	// Check if collection is loaded
-	percentage := s.meta.CalculateLoadPercentage(ctx, collectionID)
-	if percentage < 0 {
-		mlog.Info(context.TODO(), "collection not loaded, skip ManualUpdateCurrentTarget")
-		return nil
-	}
-
-	err := job.WaitCurrentTargetUpdated(ctx, s.targetObserver, collectionID)
+	collection, err := s.broker.DescribeCollection(ctx, collectionID)
 	if err != nil {
-		mlog.Warn(context.TODO(), "failed to wait current target updated", mlog.Err(err))
-		return err
+		return 0, err
 	}
-
-	mlog.Info(context.TODO(), "manual update current target done")
-	return nil
+	progress := loadstatus.GetAtVersions(s.qviewsRuntime.loadConfigStore, s.qviewsRuntime.shardViewRegistry,
+		collectionID, collection.GetVirtualChannelNames(), collection.GetSchema().GetVersion(), version.(qviews.DataVersion))
+	if current, ok := s.qviewsRuntime.refreshVersions.Load(collectionID); !ok || current != version {
+		return 0, nil
+	}
+	return progress.Percentage(), nil
 }

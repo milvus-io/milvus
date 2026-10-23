@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/url"
 	"path"
 	"sync"
@@ -32,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -125,7 +127,7 @@ type ExternalCollectionRefreshManager interface {
 	// If there's an existing active job for the same collection, it will be canceled
 	// and replaced by the new job (the old job will show "superseded by new job" as fail reason).
 	// This method is called from the WAL callback to ensure distributed consistency.
-	SubmitRefreshJobWithID(ctx context.Context, jobID int64, collectionID int64, collectionName string, externalSource, externalSpec string) (int64, error)
+	SubmitRefreshJobWithID(ctx context.Context, jobID int64, collectionID int64, collectionName string, externalSource, externalSpec string, starts ...map[string]uint64) (int64, error)
 
 	// GetJobProgress returns the job info for the given job_id
 	GetJobProgress(ctx context.Context, jobID int64) (*datapb.ExternalCollectionRefreshJob, error)
@@ -259,6 +261,7 @@ func NewExternalCollectionRefreshManager(
 	// a job, preventing unbounded growth.
 	m.inspector = newRefreshInspector(ctx, refreshMeta, scheduler, closeChan)
 	m.checker = newRefreshChecker(ctx, mt, refreshMeta, closeChan, m.handleJobFinished, m.applyFinishedJobSegments, m.handleJobFailed, m.forgetJob, m.ensureTasksForInitJob)
+	m.checker.publishJobInfo = m.publishRefreshJob
 	m.inspector.wrapTask = m.wrapTask
 
 	return m
@@ -514,15 +517,38 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 	// self-heals them. Segment-level validation still rejects schema-version
 	// rollback, but drop, rename, or type changes need a schema gate or lock
 	// before they are supported.
-	return applyExternalCollectionSegmentUpdateForBaseline(
+	return applyExternalCollectionSegmentUpdateAtFence(
 		ctx,
 		m.mt,
 		job.GetCollectionId(),
 		baselineSegmentIDs,
 		keptSegments,
 		updatedSegments,
+		job.GetTransformStartAfterTimeticks(),
 		mlog.FieldJobID(job.GetJobId()),
 	)
+}
+
+// publishRefreshJob retries independently of segment application. A temporary
+// schema or handoff failure must not make committed data a terminal failed job.
+func (m *externalCollectionRefreshManager) publishRefreshJob(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	m.handleJobFinished(ctx, job)
+	if !m.checker.refreshedSchemaVisible(job) {
+		return merr.WrapErrServiceNotReadyMsg("external refresh schema is not published")
+	}
+	r := resource.Resource()
+	if r == nil {
+		return merr.WrapErrServiceNotReadyMsg("QueryView coordinator is not initialized")
+	}
+	segments := m.mt.SelectSegments(ctx, WithCollection(job.GetCollectionId()))
+	ids := make([]int64, 0, len(segments))
+	for _, segment := range segments {
+		ids = append(ids, segment.GetID())
+	}
+	m.mt.notifyQueryViewSegments(job.GetCollectionId(), ids...)
+	return r.Refresh(ctx, job.GetCollectionId())
 }
 
 // wrapTask builds a scheduler-facing task wrapper around a persisted proto
@@ -714,6 +740,7 @@ func (m *externalCollectionRefreshManager) SubmitRefreshJobWithID(
 	collectionID int64,
 	collectionName string,
 	externalSource, externalSpec string,
+	starts ...map[string]uint64,
 ) (int64, error) {
 	log := mlog.With(
 		mlog.FieldJobID(jobID),
@@ -782,6 +809,9 @@ func (m *externalCollectionRefreshManager) SubmitRefreshJobWithID(
 		TaskIds:        []int64{},
 	}
 
+	if len(starts) != 0 {
+		job.TransformStartAfterTimeticks = maps.Clone(starts[0])
+	}
 	if err := m.refreshMeta.AddJob(job); err != nil {
 		log.Warn(ctx, "failed to add job to meta", mlog.Err(err))
 		return 0, err

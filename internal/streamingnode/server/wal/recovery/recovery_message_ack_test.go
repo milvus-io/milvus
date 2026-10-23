@@ -450,10 +450,11 @@ func TestSummaryCoveragePrecedesVChannelObservation(t *testing.T) {
 		batch, err := storage.summaryManager.ReadTransform(ctx, "v1", 0, retained.Message().TimeTick(), walsummary.ReadLimits{MaxRows: 1})
 		require.NoError(t, err)
 		require.Equal(t, retained.Message().TimeTick(), batch.CoveredThrough, "a VChannel task must already see complete Summary coverage")
+		require.Len(t, batch.Entries, 1)
 		observed = true
 	}).Build()
 	defer patch.UnPatch()
-	storage.observeMessage(context.Background(), newAckTestTimeTickMessage(t, 20, 2))
+	storage.observeMessage(context.Background(), newRecoveryTestDeleteMessage(t, "v1", 20))
 	require.True(t, observed)
 }
 

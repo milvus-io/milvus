@@ -2,12 +2,9 @@
 
 This document defines QueryNode resource ownership, preparation, readiness and
 release. Related contracts are [QueryView lifecycle](../query_view_state_machine.md),
-[handler](../query_view_handler.md), schema handoff (see the source reference below),
+[handler](../query_view_handler.md), [schema handoff](../schema_evolution.md),
 [transform frontiers](../transform_start_after_timetick.md), and
 [TransformLog delivery](../../wal/transform_log.md).
-
-The schema handoff document is outside this extraction. Read it without changing
-branches using `git show 257a76b6e71490e78e0c2730716e9a21fff30e41:docs/design-docs/design_docs/qviews/schema_evolution.md`.
 
 ## 1. Principles
 
@@ -597,7 +594,7 @@ acceptance includes non-TEI AlterCollection L0/L1 Python, REST and Go cases.
 
 Runtime reference protection and closure are part of this design. Durable
 schema/LoadInfo/Manifest/FileResource history GC remains the unified TODO in
-schema handoff (`docs/design-docs/design_docs/qviews/schema_evolution.md` in source snapshot `257a76b6e71490e78e0c2730716e9a21fff30e41`).
+[schema handoff](../schema_evolution.md#82-todo-unified-gc-design-deferred).
 No new persistence or distributed GC protocol is introduced here.
 
 | Package | Responsibility |

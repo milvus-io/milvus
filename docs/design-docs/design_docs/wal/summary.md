@@ -15,7 +15,7 @@ The shared bounded-read contract (§5.4) is used by local SN TransformLog
 bootstrap subscriptions (§5.5). The Summary-based L0 consumer remains unwired,
 including range-statistics admission and Summary-owned materialization-backlog
 requests described in [L0Materializer §5](l0_materializer.md#5-read-and-materialize).
-Remote/QN subscription integration remains planned.
+The qv branch wires remote/QN subscriptions through the same Summary reader.
 
 The protocol added by this feature is still under development. Intermediate
 branch versions are not compatibility targets: removed draft messages and
@@ -602,9 +602,9 @@ VChannels' ordinary messages can extend readable coverage without waking it.
 
 Scoped notifications follow query Transform MVCC semantics, using the shared
 message classification in `messageutil` rather than the presence of a stored
-Delete payload. Delete, CreateCollection, transaction commit (including an
-insert-only assembled transaction), CommitImport, Flush/ManualFlush, relevant
-DDL and schema changes notify their VChannel. Plain Inserts, property-only
+Delete payload. Delete, CreateCollection, commits containing non-Insert bodies,
+CommitImport, Flush/ManualFlush, relevant DDL and schema changes notify their
+VChannel. Plain Inserts, pure Insert and empty transactions, property-only
 AlterCollection and ordinary TimeTick confirmations do not. PChannel-wide
 FlushAll/AlterWAL and RecoveryBarrier notify every active scope. GC wakes scopes
 whose history is retired; a terminal failure wakes every scope. Cluster broadcast
@@ -762,10 +762,10 @@ if the write-side MVCC is ahead of Summary. See
 [SyncUp semantics](transform_log.md#3-entry-and-syncup-semantics) for the full
 contract and [delivery conditions](transform_log.md#4-catch-up-and-live-delivery).
 
-Remote transport, QN continuous subscriptions and their view retention are
-planned consumers. Their protocol must not be treated as enabled merely because
-the local SN adaptor exists. The current WAL L0 materializer remains independent
-of all TransformLog subscriptions. See the [WAL-view handoff](streamingnode_vchannel_wal_view.md)
+The qv branch wires remote transport and QN continuous subscriptions through
+independently owned Summary streams. The advancing view retention frontier
+remains deferred; see [Transform subscriptions](../qviews/pure_transform_subscription.md).
+The current WAL L0 materializer remains independent of all TransformLog subscriptions. See the [WAL-view handoff](streamingnode_vchannel_wal_view.md)
 for local snapshot, live-event and retention ownership.
 
 ## 6. Recovery And Term Takeover

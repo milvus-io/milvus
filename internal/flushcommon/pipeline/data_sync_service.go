@@ -309,7 +309,7 @@ func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,
 	nodeList = append(nodeList, writeNode)
 
 	// 3.ttNode
-	ttNode := newTTNode(config, params.WriteBufferManager, params.CheckpointUpdater)
+	ttNode := newTTNode(config)
 	nodeList = append(nodeList, ttNode)
 
 	if err := fg.AssembleNodes(nodeList...); err != nil {

@@ -4,9 +4,9 @@ import "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 
 // AdvancesQueryTransformMVCC classifies a committed VChannel message for both
 // query planning and TransformLog notifications. The caller excludes uncommitted
-// transaction bodies; an assembled transaction is represented by its Commit.
-// This is distinct from having a Delete payload: insert-only commits and
-// publication/schema barriers also advance the query's transform frontier.
+// transaction bodies and pure Insert transactions before representing a
+// transaction by its Commit. Publication/schema barriers can advance the
+// transform frontier without a Delete payload.
 func AdvancesQueryTransformMVCC(msg message.BasicMessage) bool {
 	switch msg.MessageType() {
 	case message.MessageTypeCreateCollection,

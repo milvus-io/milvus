@@ -205,8 +205,6 @@ func (impl *timeTickSyncOperator) sendTsMsgToWAL(ctx context.Context,
 		}
 		return true
 	})
-	// Ack details has been committed to wal, clear it.
-	impl.ackDetails.Clear()
 	tsMsg := msg.IntoImmutableMessage(msgID)
 	// Add it into write ahead buffer.
 	impl.interceptorBuildParam.WriteAheadBuffer.Append(msgs, tsMsg)

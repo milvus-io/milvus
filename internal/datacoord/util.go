@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -36,10 +35,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -365,26 +362,6 @@ func getTotalBinlogRows(segment *SegmentInfo, fieldID int64) int64 {
 		}
 	}
 	return total
-}
-
-func CheckCheckPointsHealth(meta *meta) error {
-	for channel, cp := range meta.GetChannelCheckpoints() {
-		collectionID := funcutil.GetCollectionIDFromVChannel(channel)
-		if collectionID == -1 {
-			mlog.RatedWarn(context.TODO(), rate.Limit(60), "can't parse collection id from vchannel, skip check cp lag", mlog.FieldVChannel(channel))
-			continue
-		}
-		if meta.GetCollection(collectionID) == nil {
-			mlog.RatedWarn(context.TODO(), rate.Limit(60), "corresponding the collection doesn't exists, skip check cp lag", mlog.FieldVChannel(channel))
-			continue
-		}
-		ts, _ := tsoutil.ParseTS(cp.Timestamp)
-		lag := time.Since(ts)
-		if lag > paramtable.Get().DataCoordCfg.ChannelCheckpointMaxLag.GetAsDuration(time.Second) {
-			return merr.WrapErrChannelCPExceededMaxLag(channel, fmt.Sprintf("checkpoint lag: %f(min)", lag.Minutes()))
-		}
-	}
-	return nil
 }
 
 func createStorageConfig() *indexpb.StorageConfig {

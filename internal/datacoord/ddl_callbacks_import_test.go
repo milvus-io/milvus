@@ -53,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -1247,6 +1248,10 @@ func TestImportFlowIntegration(t *testing.T) {
 }
 
 func newTestImportMeta(t *testing.T) (ImportMeta, *mocks.DataCoordCatalog) {
+	// These tests exercise job transitions; publication itself is covered by
+	// the real DataView manager in import_commit_callback_test.go.
+	publication := mockey.Mock((*Server).RefreshDataView).Return(&viewpb.DataVersion{StreamingVersion: 1}, nil).Build()
+	t.Cleanup(func() { publication.UnPatch() })
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()

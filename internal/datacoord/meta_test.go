@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	prometheustestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/samber/lo"
@@ -5860,90 +5861,37 @@ func Test_meta_GcConfirm(t *testing.T) {
 }
 
 func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
-	ms := metacache.NewMetaStore(nil)
-	t.Run("fail to list database", func(t *testing.T) {
-		m := &meta{
-			metaStore: ms,
-		}
-		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(nil, errors.New("list database failed, mocked"))
-		err := m.reloadCollectionsFromRootcoord(context.TODO(), mockBroker)
-		assert.Error(t, err)
-	})
-
-	t.Run("fail to show collections", func(t *testing.T) {
-		m := &meta{
-			metaStore: ms,
-		}
-		mockBroker := broker.NewMockBroker(t)
-
-		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			DbNames: []string{"db1"},
-		}, nil)
-		mockBroker.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, errors.New("show collections failed, mocked"))
-		err := m.reloadCollectionsFromRootcoord(context.TODO(), mockBroker)
-		assert.Error(t, err)
-	})
-
-	t.Run("fail to describe collection", func(t *testing.T) {
-		m := &meta{
-			metaStore: ms,
-		}
-		mockBroker := broker.NewMockBroker(t)
-
-		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			DbNames: []string{"db1"},
-		}, nil)
-		mockBroker.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
-			CollectionNames: []string{"coll1"},
-			CollectionIds:   []int64{1000},
-		}, nil)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(nil, errors.New("describe collection failed, mocked"))
-		err := m.reloadCollectionsFromRootcoord(context.TODO(), mockBroker)
-		assert.Error(t, err)
-	})
-
-	t.Run("fail to show partitions", func(t *testing.T) {
-		m := &meta{
-			metaStore: ms,
-		}
-		mockBroker := broker.NewMockBroker(t)
-
-		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			DbNames: []string{"db1"},
-		}, nil)
-		mockBroker.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
-			CollectionNames: []string{"coll1"},
-			CollectionIds:   []int64{1000},
-		}, nil)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{}, nil)
-		mockBroker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return(nil, errors.New("show partitions failed, mocked"))
-		err := m.reloadCollectionsFromRootcoord(context.TODO(), mockBroker)
-		assert.Error(t, err)
-	})
-
-	t.Run("success", func(t *testing.T) {
-		m := &meta{
-			metaStore: ms,
-		}
-		mockBroker := broker.NewMockBroker(t)
-
-		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			DbNames: []string{"db1"},
-		}, nil)
-		mockBroker.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
-			CollectionNames: []string{"coll1"},
-			CollectionIds:   []int64{1000},
-		}, nil)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-			CollectionID: 1000,
-		}, nil)
-		mockBroker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return([]int64{2000}, nil)
-		err := m.reloadCollectionsFromRootcoord(context.TODO(), mockBroker)
-		assert.NoError(t, err)
-		c := m.GetCollection(UniqueID(1000))
-		assert.NotNil(t, c)
-	})
+	for _, failure := range []string{"ListDatabases", "ShowCollectionIDs", "DescribeCollectionInternal", "ShowPartitionsInternal", ""} {
+		t.Run("failure_"+failure, func(t *testing.T) {
+			mockey.PatchConvey("recover internal collection metadata, including restoring tables", t, func() {
+				m := &meta{metaStore: metacache.NewMetaStore(nil)}
+				b := broker.NewCoordinatorBroker(nil)
+				list := mockey.Mock(mockey.GetMethod(b, "ListDatabases")).Return(&milvuspb.ListDatabasesResponse{DbNames: []string{"db1"}}, nil).Build()
+				ids := mockey.Mock(mockey.GetMethod(b, "ShowCollectionIDs")).Return(&rootcoordpb.ShowCollectionIDsResponse{
+					DbCollections: []*rootcoordpb.DBCollections{{CollectionIDs: []int64{1000}}},
+				}, nil).Build()
+				describe := mockey.Mock(mockey.GetMethod(b, "DescribeCollectionInternal")).Return(&milvuspb.DescribeCollectionResponse{CollectionID: 1000}, nil).Build()
+				partitions := mockey.Mock(mockey.GetMethod(b, "ShowPartitionsInternal")).Return([]int64{2000}, nil).Build()
+				switch failure {
+				case "ListDatabases":
+					list.Return(nil, merr.ErrServiceUnavailable)
+				case "ShowCollectionIDs":
+					ids.Return(nil, merr.ErrServiceUnavailable)
+				case "DescribeCollectionInternal":
+					describe.Return(nil, merr.ErrServiceUnavailable)
+				case "ShowPartitionsInternal":
+					partitions.Return(nil, merr.ErrServiceUnavailable)
+				}
+				err := m.reloadCollectionsFromRootcoord(t.Context(), b)
+				if failure != "" {
+					require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+					return
+				}
+				require.NoError(t, err)
+				require.NotNil(t, m.GetCollection(1000))
+			})
+		})
+	}
 }
 
 func TestMeta_GetSegmentsJSON(t *testing.T) {

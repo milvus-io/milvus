@@ -44,8 +44,6 @@ type BufferManager interface {
 	BufferData(channel string, insertData []*InsertData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition, schemaVersion int32) error
 	// GetCheckpoint returns checkpoint for provided channel.
 	GetCheckpoint(channel string) (*msgpb.MsgPosition, bool, error)
-	// NotifyCheckpointUpdated notify write buffer checkpoint updated to reset flushTs.
-	NotifyCheckpointUpdated(channel string, ts uint64)
 
 	// AllowGrowingSourceFlush returns true if this channel may try growing-source flush.
 	AllowGrowingSourceFlush(channel string) bool
@@ -296,18 +294,6 @@ func (m *bufferManager) GetCheckpoint(channel string) (*msgpb.MsgPosition, bool,
 	flushTs := buf.GetFlushTimestamp()
 
 	return cp, flushTs != nonFlushTS && cp.GetTimestamp() >= flushTs, nil
-}
-
-func (m *bufferManager) NotifyCheckpointUpdated(channel string, ts uint64) {
-	buf, loaded := m.buffers.Get(channel)
-	if !loaded {
-		return
-	}
-	flushTs := buf.GetFlushTimestamp()
-	if flushTs != nonFlushTS && ts > flushTs {
-		mlog.Info(context.TODO(), "reset channel flushTs", mlog.String("channel", channel))
-		buf.SetFlushTimestamp(nonFlushTS)
-	}
 }
 
 // RemoveChannel remove channel WriteBuffer from manager.

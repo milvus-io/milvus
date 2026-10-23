@@ -2,6 +2,7 @@ package timetick
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -22,7 +23,7 @@ import (
 
 func TestTimeTickCommitAppendSuccessCommits(t *testing.T) {
 	impl := newTestTimeTickAppendInterceptor(t)
-	commit, session := newCommitTxnMessageForExistingSession(t, impl, "v1")
+	commit, session := newCommitTxnMessageForExistingSession(t, impl, "v1", message.MessageTypeInsert)
 	expectedMsgID := walimplstest.NewTestMessageID(2)
 
 	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
@@ -53,9 +54,26 @@ func TestTimeTickBodyCountMismatchNeverAppendsCommit(t *testing.T) {
 	requireCommitAckerError(t, impl, err)
 }
 
+func TestTimeTickRejectsEmptyCommitBeforeWALAppend(t *testing.T) {
+	impl := newTestTimeTickAppendInterceptor(t)
+	manager := impl.operator.MVCCManager()
+	manager.ApplyRecoveryBarrier("v1", 1)
+	commit, session := newCommitTxnMessageForExistingSession(t, impl, "v1")
+	before := manager.GetQueryMVCCOfVChannel("v1")
+	ctx := utility.WithExtraAppendResult(t.Context(), &utility.ExtraAppendResult{})
+	_, err := impl.DoAppend(ctx, commit, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		t.Fatal("empty commit must not reach WAL append")
+		return nil, nil
+	})
+	require.ErrorContains(t, err, "cannot commit an empty transaction")
+	require.Equal(t, message.TxnStateRollbacked, session.State())
+	require.Equal(t, before, manager.GetQueryMVCCOfVChannel("v1"))
+	requireCommitAckerError(t, impl, err)
+}
+
 func TestTimeTickCommitAdmissionRejects(t *testing.T) {
 	impl := newTestTimeTickAppendInterceptor(t)
-	commit, session := newCommitTxnMessageForExistingSession(t, impl, "v1")
+	commit, session := newCommitTxnMessageForExistingSession(t, impl, "v1", message.MessageTypeInsert)
 	expectedErr := errors.New("validation rejected")
 
 	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
@@ -73,7 +91,7 @@ func TestCommitCancellationKeepsReferencesForRecovery(t *testing.T) {
 	for _, replicated := range []bool{false, true} {
 		t.Run(map[bool]string{false: "local", true: "replicated"}[replicated], func(t *testing.T) {
 			impl := newTestTimeTickAppendInterceptor(t)
-			commit, session := newCommitTxnMessageForExistingSession(t, impl, "v1")
+			commit, session := newCommitTxnMessageForExistingSession(t, impl, "v1", message.MessageTypeInsert)
 			if replicated {
 				commit = commit.WithReplicateHeader(&message.ReplicateHeader{ClusterID: "source", MessageID: walimplstest.NewTestMessageID(3), LastConfirmedMessageID: walimplstest.NewTestMessageID(0), TimeTick: 100, VChannel: "v1"})
 			}
@@ -149,6 +167,7 @@ func newCommitTxnMessageForExistingSession(
 	t *testing.T,
 	impl *timeTickAppendInterceptor,
 	vchannel string,
+	bodies ...message.MessageType,
 ) (message.MutableMessage, *txn.TxnSession) {
 	t.Helper()
 
@@ -168,6 +187,13 @@ func newCommitTxnMessageForExistingSession(
 
 	session, err := impl.txnManager.GetSessionOfTxn(txnContext.TxnID)
 	require.NoError(t, err)
+	for _, typ := range bodies {
+		body := message.NewMutableMessageBeforeAppend(nil, map[string]string{"_t": strconv.Itoa(int(typ)), "_vc": vchannel}).WithTxnContext(*txnContext)
+		_, err := impl.DoAppend(ctx, body, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+			return walimplstest.NewTestMessageID(1), nil
+		})
+		require.NoError(t, err)
+	}
 
 	return message.NewCommitTxnMessageBuilderV2().
 		WithVChannel(vchannel).

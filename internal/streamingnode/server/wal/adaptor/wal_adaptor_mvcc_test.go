@@ -37,13 +37,13 @@ func TestRetainedMVCCTargetAndPhysicalMetrics(t *testing.T) {
 			syncs++
 		}).Build()
 		write := message.NewInsertMessageBuilderV1().WithVChannel("v1").WithHeader(&message.InsertMessageHeader{}).WithBody(&message.InsertRequest{}).MustBuildMutable().WithTimeTick(120)
-		cm.UpdateMVCC(write)
+		cm.UpdateMVCC(write, false)
 		ts, err := w.GetLatestMVCCTimestamp(context.Background(), "v1")
 		require.NoError(t, err)
 		require.Equal(t, uint64(120), ts)
 		require.Equal(t, 1, syncs)
 		tick := message.NewTimeTickMessageBuilderV1().WithAllVChannel().WithHeader(&message.TimeTickMessageHeader{}).WithBody(&message.TimeTickMsg{}).MustBuildMutable().WithTimeTick(300)
-		cm.UpdateMVCC(tick)
+		cm.UpdateMVCC(tick, false)
 		for i := 0; i < 1000; i++ {
 			ts, err = w.GetLatestMVCCTimestamp(context.Background(), "v1")
 			require.NoError(t, err)
@@ -51,7 +51,7 @@ func TestRetainedMVCCTargetAndPhysicalMetrics(t *testing.T) {
 		}
 		require.Equal(t, 1, syncs)
 		require.Equal(t, uint64(300), w.Metrics().(types.RWWALMetrics).MVCCTimeTick)
-		cm.UpdateMVCC(tick.WithTimeTick(400))
+		cm.UpdateMVCC(tick.WithTimeTick(400), false)
 		require.Equal(t, uint64(400), w.Metrics().(types.RWWALMetrics).MVCCTimeTick)
 		w.lifetime.SetState(typeutil.LifetimeStateStopped)
 		_, err = w.GetLatestMVCCTimestamp(context.Background(), "v1")

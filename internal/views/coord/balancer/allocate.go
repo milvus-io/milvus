@@ -171,9 +171,10 @@ func shardDataViewToProto(shard *ShardDataView) *viewpb.DataViewOfShard {
 		return nil
 	}
 	protoShard := &viewpb.DataViewOfShard{
-		Vchannel:                    shard.VChannel,
-		TransformStartAfterTimetick: shard.TransformStartAfterTimetick(),
-		Partitions:                  make([]*viewpb.DataViewOfPartition, 0, len(shard.Partitions)),
+		Vchannel:                             shard.VChannel,
+		GrowingTransformStartAfterTimetick:   shard.GrowingTransformStartAfterTimetick,
+		CompactedTransformStartAfterTimetick: shard.CompactedTransformStartAfterTimetick,
+		Partitions:                           make([]*viewpb.DataViewOfPartition, 0, len(shard.Partitions)),
 	}
 	for _, partition := range shard.Partitions {
 		protoPartition := &viewpb.DataViewOfPartition{
@@ -183,6 +184,7 @@ func shardDataViewToProto(shard *ShardDataView) *viewpb.DataViewOfShard {
 		for _, segment := range partition.Segments {
 			protoPartition.SegmentIds = append(protoPartition.SegmentIds, segment.SegmentID)
 			protoPartition.SegmentManifestVersions = append(protoPartition.SegmentManifestVersions, segment.ManifestVersion)
+			protoPartition.SegmentTransformStartAfterTimeticks = append(protoPartition.SegmentTransformStartAfterTimeticks, segment.TransformStartAfterTimetick)
 		}
 		protoShard.Partitions = append(protoShard.Partitions, protoPartition)
 	}

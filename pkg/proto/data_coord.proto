@@ -496,6 +496,8 @@ message SegmentInfo {
   // First growing-to-sealed DataView publication. Written with the flush snapshot
   // and retained across compaction/drop so a retried commit returns the same version.
   view.DataVersion sealed_at_data_version = 41;
+  // Exclusive TransformLog replay start for this exact data/manifest revision.
+  // Persisted with the base; compaction inherits its actual input coverage.
   uint64 transform_start_after_timetick = 42;
 }
 
@@ -583,6 +585,11 @@ message SaveBinlogPathsRequest {
   // from the cumulative arrays. Nil / zero for V2 flushes — V2 stats come
   // from req.Field2StatslogPaths via the iteration helper.
   Statistics stats = 19;
+
+  // WAL-side publication proof for this vchannel, conditional on this final
+  // L1 Flush committing. Other unpublished L1 segments cannot require an
+  // earlier TransformLog start. Zero means no new proof (older writers).
+  uint64 growing_transform_start_after_timetick = 20;
 }
 
 message CheckPoint {
@@ -1484,6 +1491,14 @@ message CopySegmentJob {
   string snapshot_s3_location = 20;
   string external_spec = 21;
   string snapshot_fingerprint = 22;
+  // Per-target-VChannel RestoreSnapshot positions. These belong to the target
+  // WAL, never the source snapshot's time domain.
+  map<string, uint64> transform_start_after_timeticks = 23;
+  // The RestoreSnapshot broadcast also creates this target collection.
+  bool creates_collection = 24;
+  map<string, string> channel_mapping = 25; // Source -> target channels for idempotent segment registration.
+  // Stable plan identities for restore-owned L0 materialization, keyed by channel/partition.
+  map<string, int64> restore_compaction_plans = 26;
 }
 
 message ImportJob {
@@ -1511,6 +1526,9 @@ message ImportJob {
   plan.Expr rls_check_predicate = 22;
   repeated internal.SnapshotImportL0Source snapshot_l0_sources = 23;
   internal.ImportVersion version = 24;
+  // Per-vchannel CommitImport fences registered before SN releases the WAL
+  // message. These constrain unpublished data until Segment coverage is visible.
+  map<string, uint64> transform_commit_timeticks = 25;
 }
 
 enum ImportTaskStateV2 {
@@ -1827,6 +1845,11 @@ message CompactionTask{
   IDRange pre_allocated_segmentIDs = 28;
   repeated schema.FunctionSchema diff_functions = 29;
   uint64 create_ts = 30;
+  // Nonzero only for L0 materialization before a restored collection is published.
+  int64 restore_job_id = 31;
+  repeated int64 restore_target_segments = 32;
+  // Retained through task cleanup so the restore owner can prove completion.
+  bool restore_completed = 33;
 }
 
 message PartitionStatsInfo {
@@ -1920,8 +1943,13 @@ message ExternalCollectionRefreshJob {
   // is the field that resolves the one ambiguity this feature introduces: a
   // FAILED job with a non-zero value did apply its data - the refreshed
   // segments are the collection's contents and are being served, and only the
-  // index wait ran out of budget. A failed job with 0 applied nothing.
+  // index wait ran out of budget. New jobs additionally expose segments_applied.
   int64 index_wait_started_time = 13;
+  // Target-vchannel WAL fences of this refresh. Empty for legacy control-only jobs.
+  map<string, uint64> transform_start_after_timeticks = 14;
+  // Persisted after applying segment results, before schema/DataView publication.
+  // Applying is replay-safe across a crash between the segment and job writes.
+  bool segments_applied = 15;
 }
 
 // ExternalCollectionRefreshTask - Task level abstraction for scheduler and worker execution

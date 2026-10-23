@@ -213,6 +213,10 @@ func (it *UpsertTask) OnEnqueue() error {
 
 func retrieveByPKs(ctx context.Context, t *UpsertTask, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 	log := mlog.With(mlog.String("collectionName", t.req.GetCollectionName()))
+	readSchema, err := t.upsertReadSchema(ctx, outputFields)
+	if err != nil {
+		return nil, segcore.StorageCost{}, err
+	}
 	// Both modes use normal Strong queries; only Partial Upsert needs the
 	// executed channel snapshots for its CAS proof.
 	var channelReadTs *typeutil.ConcurrentMap[string, uint64]
@@ -276,6 +280,7 @@ func retrieveByPKs(ctx context.Context, t *UpsertTask, ids *schemapb.IDs, output
 		MvccTimestamp:    0,
 		QueryLabel:       metrics.UpsertQueryLabel,
 	}, t.GetMetaCache(), false)
+	qt.BindReadSchema(t.collectionID, readSchema)
 	qt.SetActualChannelsMvcc(channelReadTs)
 	// The user issued an upsert, not a query: this retrieval reads the rows
 	// the upsert replaces and must not move the query feature counters.
@@ -1956,7 +1961,7 @@ func (it *UpsertTask) PreExecute(ctx context.Context) error {
 	}
 	it.collectionID = collID
 
-	colInfo, err := it.GetMetaCache().GetCollectionInfo(ctx, it.req.GetDbName(), collectionName, collID)
+	colInfo, err := it.GetMetaCache().GetCollectionWriteInfo(ctx, it.req.GetDbName(), collectionName, collID)
 	if err != nil {
 		log.Warn(ctx, "fail to get collection info", mlog.Err(err))
 		return err

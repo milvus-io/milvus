@@ -21,7 +21,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-func TestFlushJoinsIndependentL1AndL0Completion(t *testing.T) {
+func TestFlushWaitsForL1BeforeL0Completion(t *testing.T) {
 	for _, l0First := range []bool{false, true} {
 		t.Run(map[bool]string{false: "L1 first", true: "L0 first"}[l0First], func(t *testing.T) {
 			scheduler := nodescheduler.New(1)
@@ -30,7 +30,7 @@ func TestFlushJoinsIndependentL1AndL0Completion(t *testing.T) {
 			patch := mockey.Mock(mockey.GetMethod(scheduler, "Submit")).To(func(task nodescheduler.Task) nodescheduler.TaskHandle { tasks = append(tasks, task); return nil }).Build()
 			defer patch.UnPatch()
 			lifecycle := segment.NewSegmentLifecycleWriter(nil, 1)
-			commit := mockey.Mock(mockey.GetMethod(lifecycle, "CommitL1Segment")).Return(&viewpb.DataVersion{StreamingVersion: 1}, nil).Build()
+			commit := mockey.Mock(mockey.GetMethod(lifecycle, "CommitL1SegmentWithTransformStart")).Return(&viewpb.DataVersion{StreamingVersion: 1}, nil).Build()
 			defer commit.UnPatch()
 			meta := newMaterializationBlockerMeta(1, 100, false)
 			meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING
@@ -51,9 +51,16 @@ func TestFlushJoinsIndependentL1AndL0Completion(t *testing.T) {
 			if l0First {
 				first, second = 1, 0
 			}
-			require.NoError(t, tasks[first].Execute(context.Background()))
-			require.Zero(t, tracker.CompletedPoint().TimeTick)
-			require.NoError(t, tasks[second].Execute(context.Background()))
+			if l0First {
+				require.ErrorIs(t, tasks[first].Execute(context.Background()), nodescheduler.ErrDelay)
+				require.Zero(t, tracker.CompletedPoint().TimeTick)
+				require.NoError(t, tasks[second].Execute(context.Background()))
+				require.NoError(t, tasks[first].Execute(context.Background()))
+			} else {
+				require.NoError(t, tasks[first].Execute(context.Background()))
+				require.Zero(t, tracker.CompletedPoint().TimeTick)
+				require.NoError(t, tasks[second].Execute(context.Background()))
+			}
 			require.Equal(t, uint64(200), tracker.CompletedPoint().TimeTick)
 			persistDirtySnapshots(module)
 			require.Equal(t, uint64(200), module.vchannelView.PersistedMaterializedTimeTick())
@@ -61,7 +68,7 @@ func TestFlushJoinsIndependentL1AndL0Completion(t *testing.T) {
 	}
 }
 
-func TestManagerFlushesIdleDeletesWhileL1IsGrowing(t *testing.T) {
+func TestManagerDefersIdleDeletesWhileL1IsGrowing(t *testing.T) {
 	params := paramtable.Get()
 	require.NoError(t, params.Save(params.DataNodeCfg.SyncPeriod.Key, "0"))
 	defer params.Reset(params.DataNodeCfg.SyncPeriod.Key)
@@ -83,17 +90,16 @@ func TestManagerFlushesIdleDeletesWhileL1IsGrowing(t *testing.T) {
 	manager.Start()
 	select {
 	case task := <-tasks:
-		require.NoError(t, task.Execute(context.Background()))
+		require.ErrorIs(t, task.Execute(context.Background()), nodescheduler.ErrDelay)
 	case <-time.After(5 * time.Second):
 		t.Fatal("idle Delete did not materialize")
 	}
 	require.True(t, module.segments[1].IsGrowing())
-	require.Equal(t, uint64(100), module.l0Materializer.MaterializedTimeTick())
-	require.NotEmpty(t, manager.ConsumeDirtySnapshots())
+	require.Zero(t, module.l0Materializer.MaterializedTimeTick())
 	manager.Close()
 }
 
-func TestL0WaitsForGrowingRegistrationOnly(t *testing.T) {
+func TestL0WaitsForFinalPublicationAfterGrowingRegistration(t *testing.T) {
 	scheduler := nodescheduler.New(1)
 	defer scheduler.Close()
 	var tasks []nodescheduler.Task
@@ -118,7 +124,13 @@ func TestL0WaitsForGrowingRegistrationOnly(t *testing.T) {
 	require.ErrorIs(t, tasks[1].Execute(context.Background()), nodescheduler.ErrDelay)
 	require.NoError(t, tasks[0].Execute(context.Background()))
 	require.True(t, module.segments[1].Registered())
-	require.NoError(t, tasks[1].Execute(context.Background()))
+	require.ErrorIs(t, tasks[1].Execute(context.Background()), nodescheduler.ErrDelay)
 	require.True(t, module.segments[1].IsGrowing())
+	require.Zero(t, module.l0Materializer.MaterializedTimeTick())
+	// Recovered final publication is sufficient even before the Segment's
+	// tombstone is removed from the owner map.
+	meta := newMaterializationBlockerMeta(1, 50, true)
+	module.segments[1] = segment.NewSegmentViewFromMetaWithConfig(meta, nil, module.segmentViewConfig())
+	require.NoError(t, tasks[1].Execute(context.Background()))
 	require.Equal(t, uint64(100), module.l0Materializer.MaterializedTimeTick())
 }

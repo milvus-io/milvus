@@ -226,3 +226,23 @@ an unsupported new RPC surfaces as Unimplemented.
 - `internal/util/fileresource/pull.go` — process-wide analyzer resource manager access.
 - `internal/util/fileresource/analyzer_resource_manager.go` — ID-keyed loading, download flights, resource ownership and idle leases.
 - `internal/rootcoord/file_resource_fetch.go` — Fetch and name resolution.
+
+## Lexical highlighting
+
+Proxy's post-search HighlightTask resolves VChannels by the search collection ID
+and invokes this same AnalyzerClient once per field. Each request includes the
+search text, explicit highlight queries and returned corpus texts, retaining
+per-text analyzer names, with token details enabled and hashes disabled. It uses
+current WAL schema, the same contract as RunAnalyzer; there is no historical
+schema request or QueryView/replica discovery in this operation.
+
+`internal/util/function/highlight.BuildFragments` performs token matching,
+overlap merging, UTF-8 byte-to-rune conversion and fragment selection. Both Proxy
+and the legacy delegator endpoint use it, preserving rendering behavior while
+removing Proxy's dependency on QN.GetHighlight. The old internal RPC remains
+available for older callers. Semantic/model-based highlighting is unchanged.
+
+Analyzer business Status propagates without retry or relabeling; streaming
+transport failures follow HandlerClient recovery and surface at the Proxy
+boundary. Malformed token-result cardinality is an internal error and must not
+publish partial highlight results. No new SN RPC or client lifecycle is needed.

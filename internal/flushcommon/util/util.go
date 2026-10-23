@@ -45,7 +45,6 @@ type PipelineParams struct {
 	ChunkManager       storage.ChunkManager
 	Session            *sessionutil.Session
 	WriteBufferManager writebuffer.BufferManager
-	CheckpointUpdater  *ChannelCheckpointUpdater
 	Allocator          allocator.Interface
 	MsgHandler         MsgHandler
 	SchemaManager      metacache.SchemaManager

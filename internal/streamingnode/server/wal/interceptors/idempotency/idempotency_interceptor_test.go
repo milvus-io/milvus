@@ -976,7 +976,7 @@ func TestInterceptorClearsExpiredTxnInsertResults(t *testing.T) {
 	require.NotNil(t, interceptor.txnInsertResultBuffers.Build(body))
 
 	expiredTimeTick := tsoutil.AddPhysicalDurationOnTs(baseTimeTick, keepalive)
-	mvccManager.UpdateMVCC(newIdempotentInsertMessage(t, "v1", "").WithTimeTick(expiredTimeTick))
+	mvccManager.UpdateMVCC(newIdempotentInsertMessage(t, "v1", "").WithTimeTick(expiredTimeTick), false)
 	require.Nil(t, interceptor.txnInsertResultBuffers.Build(body))
 }
 
@@ -1014,7 +1014,7 @@ func TestInterceptorClearsExpiredTxnInsertResultsOnIdleChannel(t *testing.T) {
 	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
 	_, err = interceptor.DoAppend(ctx, body, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
 		require.NoError(t, session.AddNewMessage(ctx, baseTimeTick))
-		session.AddNewMessageDoneAndKeepalive(baseTimeTick)
+		session.AddNewMessageDoneAndKeepalive(baseTimeTick, message.MessageTypeInsert)
 		utility.ReplaceAppendResultTimeTick(ctx, baseTimeTick)
 		return newTestMessageID(10), nil
 	})
@@ -1027,7 +1027,7 @@ func TestInterceptorClearsExpiredTxnInsertResultsOnIdleChannel(t *testing.T) {
 	// The timetick interceptor expires txn sessions independently of retained
 	// MVCC. The next buffer operation reclaims the expired session's results.
 	txnManager.CleanupTxnUntil(expiredTimeTick)
-	mvccManager.UpdateMVCC(message.NewTimeTickMessageBuilderV1().WithAllVChannel().WithHeader(&message.TimeTickMessageHeader{}).WithBody(&message.TimeTickMsg{}).MustBuildMutable().WithTimeTick(expiredTimeTick))
+	mvccManager.UpdateMVCC(message.NewTimeTickMessageBuilderV1().WithAllVChannel().WithHeader(&message.TimeTickMessageHeader{}).WithBody(&message.TimeTickMsg{}).MustBuildMutable().WithTimeTick(expiredTimeTick), false)
 	require.Equal(t, baseTimeTick, mvccManager.GetMVCCOfVChannel("v1").Timetick)
 	require.Equal(t, expiredTimeTick, mvccManager.GetConfirmedTimeTick())
 	_, err = txnManager.GetSessionOfTxn(session.TxnContext().TxnID)

@@ -2,7 +2,7 @@
 
 Status: agreed design TODO for issue #40451, recorded on 2026-09-24.
 **The MVCC-based design and its distributed delivery are outside the current SN
-query extraction PR.** This document does not change the current DDL protocol.
+query extraction PR.** The transitional QueryView fence below is implemented for TruncateCollection.
 
 ## 1. Two Visibility Models
 
@@ -94,12 +94,40 @@ GrowingRuntime does not implement their time-based visibility effects. The
 local Summary-backed adaptor supports SN Delete bootstrap; remote QN delivery
 is still outside this extraction.
 
-The legacy Truncate callback explicitly invokes ManualUpdateCurrentTarget,
-which waits for QueryCoord's current target. DropPartition instead notifies
-DataCoord, changes metadata and expires Proxy caches; that callback alone is
-not evidence that the new QueryView handoff fence already exists. The table
-above records the agreed transitional correctness contract, not a claim that
-this PR has wired or validated the full new Coord/Proxy workflow for both DDLs.
+Truncate's callback calls `resource.Resource().Refresh` directly. The package-level
+accessor in `internal/views/coord/resource` exposes the Coordinator's shared
+QueryView infrastructure without forwarding through QueryCoord RPCs. DataCoord
+synchronously reconciles committed SegmentMeta into a DataView and returns its
+DataVersion; the shared QueryView readiness service waits for every expected VChannel × configured replica
+to report an Up view covering that version and the current LoadInfoVersion.
+Preparing/Ready and an older Up view cannot satisfy this fence. An unloaded
+collection has no serving obligation, and release ends an existing obligation.
+Fresh loads consume the committed DataView. Cancellation and publication errors
+propagate to the DDL callback for retry.
+
+DropPartition still needs a separate audit of its completion fence; this change
+does not claim to implement typed DDL Transform entries or its handoff wait.
+
+### Refresh load and newly created partitions
+
+`LoadCollection(refresh=true)` and `LoadPartitions(refresh=true)` use the same
+synchronous DataView publication and QueryView handoff path. Refresh requires a
+loaded QueryView configuration. QueryCoord records the greatest requested data
+fence in memory and reports refresh progress against that fence and the current
+LoadInfoVersion, separately from ordinary loading progress. Release clears the
+fence. Concurrent refreshes cannot lower it. These are request-local completion
+requirements, not a new durable configuration or DataView field.
+
+CreatePartition first commits partition metadata in its WAL acknowledgement
+callback, then applies the union of the new partition and the existing loaded
+partition set through the same application path as AlterLoadConfig. It preserves
+fields and replica placement, and does not load an unloaded collection. The
+CreatePartition WAL operation supplies serialization and replay: the callback
+must not recursively acquire a collection broadcast lock. Coordinator waits for
+all expected Up views to carry the resulting current LoadInfoVersion, then
+expires caches and completes CreatePartition; Proxy performs no extra wait.
+Duplicate callback delivery must neither duplicate partitions nor skip the
+QueryView readiness check.
 
 Follow-up work must cover typed entries and retained replay, ordered SN/QN
 application, MVCC selection, segment/compaction boundaries, DDL completion,
@@ -110,8 +138,28 @@ must not silently skip them and still claim Transform coverage.
 Validation must include pre/post-DDL queries through old and new views, lagging
 and restarted nodes, later segment loads, duplicate delivery, Truncate followed
 by new writes, partition recreation, compaction across the boundary, and Up
-leases spanning a handoff. No proto, runtime, transport or acknowledgement
-implementation is included in this TODO update.
+leases spanning a handoff. The typed DDL Transform protocol remains deferred; the implementation above
+uses the transitional view-based protocol.
+
+### External collection refresh completion
+
+RefreshExternalCollection broadcasts to the target collection VChannels with
+AckSyncUp, advancing their Transform MVCC. Its callback only persists the job
+and per-channel fences, so it does not recursively broadcast schema changes.
+Background work explores and applies the snapshot, stamps changed Segment bases
+with those fences, and persists `segments_applied` while keeping the job
+InProgress. A crash before that marker may replay the idempotent manifest update.
+After the marker, retries must not reapply Segment results or invalidate indexes.
+
+The worker then publishes the external source/spec through RootCoord, reconciles
+the committed DataView, and uses Coordinator's shared QueryView readiness fence.
+Readiness also checks each Segment's required Manifest version; Reopen must
+load refreshed deltalogs before acknowledging that version.
+Only after current serving views cover that publication (and optional index
+waiting completes) may the job report Finished/100%. Transient publication
+failures remain pending; remote waits happen outside the job lock. An unloaded
+collection has no handoff obligation. Legacy jobs without business-channel
+fences retain their original completion path for recovery compatibility.
 
 ## References
 
@@ -125,4 +173,24 @@ Source checkpoints: pkg/proto/streaming.proto;
 pkg/streaming/util/message/messageutil/transform_log.go;
 internal/streamingnode/server/wal/vchannel/growingruntime/{live,dispatch,segment}.go;
 internal/rootcoord/ddl_callbacks_{truncate_collection,drop_partition}.go;
-internal/querycoordv2/services.go (ManualUpdateCurrentTarget).
+internal/views/coord/resource/resource.go; internal/views/coord/loadstatus/wait.go.
+
+## Import completion and serving readiness
+
+CommitImport completes the storage publication, not the query-node load. Its full
+ACK callback persists Committing, applies each business channel's commit TimeTick
+to the imported segments, synchronously publishes their DataView, then persists
+Completed. The existing collection broadcast resource lock serializes these
+publications. Persistence failures retry in Committing; no QueryView Up wait is
+performed while holding this lock.
+
+A subsequent initial Load starts from the already published DataView. On an
+already loaded collection, clients use refresh-load to wait for serving views
+that cover the committed DataVersion. Import Completed alone is not a statement
+that an existing serving view has already handed off. This matches the existing
+separation between import completion and Load/Refresh readiness.
+
+Pending imports without a CommitImport position freeze their channel's accepted
+W; they do not block publication of another committed import. See
+[Transform start frontier](transform_start_after_timetick.md) for the constraint
+handoff from pending jobs to committed segment bases.

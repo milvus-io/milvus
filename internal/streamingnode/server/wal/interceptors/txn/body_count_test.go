@@ -25,7 +25,7 @@ func TestCommitBodyCount(t *testing.T) {
 		{"complete", 2, 2, true},
 		{"missing", 2, 1, false},
 		{"upper_retry_duplicate", 1, 2, false},
-		{"empty", 0, 0, true},
+		{"empty", 0, 0, false},
 		{"legacy_nonempty", 0, 2, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -35,7 +35,7 @@ func TestCommitBodyCount(t *testing.T) {
 			s.RegisterCleanup(func() { cleaned = true }, 1)
 			for i := 0; i < tc.actual; i++ {
 				require.NoError(t, s.AddNewMessage(context.Background(), 2))
-				s.AddNewMessageDoneAndKeepalive(2)
+				s.AddNewMessageDoneAndKeepalive(2, message.MessageTypeInsert)
 			}
 			// An admitted but failed append is not a logical body.
 			require.NoError(t, s.AddNewMessage(context.Background(), 3))
@@ -46,7 +46,11 @@ func TestCommitBodyCount(t *testing.T) {
 				require.False(t, cleaned)
 				s.CommitDone()
 			} else {
-				require.True(t, status.AsStreamingError(err).IsTxnExpired())
+				if tc.actual == 0 {
+					require.ErrorContains(t, err, "cannot commit an empty transaction")
+				} else {
+					require.True(t, status.AsStreamingError(err).IsTxnExpired())
+				}
 				require.Equal(t, message.TxnStateRollbacked, s.State())
 				require.True(t, s.IsExpiredOrDone(4), "must release LastConfirmedMessageID barrier")
 				require.Error(t, s.AddNewMessage(context.Background(), 5), "late retry cannot revive rejected txn")
@@ -70,7 +74,7 @@ func TestCommitBodyCountWaitsForInflight(t *testing.T) {
 		t.Fatalf("Commit returned before body completion: %v", err)
 	default:
 	}
-	s.AddNewMessageDoneAndKeepalive(2)
+	s.AddNewMessageDoneAndKeepalive(2, message.MessageTypeInsert)
 	require.NoError(t, <-done)
 	s.CommitDone()
 }
@@ -86,7 +90,7 @@ func TestRecoveredSessionBodyCount(t *testing.T) {
 	s, err := m.GetSessionOfTxn(1)
 	require.NoError(t, err)
 	require.NoError(t, s.AddNewMessage(context.Background(), 3))
-	s.AddNewMessageDoneAndKeepalive(3)
+	s.AddNewMessageDoneAndKeepalive(3, message.MessageTypeInsert)
 	require.NoError(t, s.RequestCommitAndWait(context.Background(), 4, 2), "count includes recovered and newly appended bodies")
 	s.CommitDone()
 	m.CleanupTxnUntil(5)

@@ -17,12 +17,17 @@ package rootcoord
 
 import (
 	"context"
+	"net"
+	"net/url"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/server/v3/embed"
+	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -34,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
@@ -219,6 +225,78 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 		Properties:     []*commonpb.KeyValuePair{{Key: common.EnableDynamicSchemaKey, Value: "true"}, {Key: common.CollectionReplicaNumber, Value: "1"}},
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+}
+
+func TestCollectionAutoReleaseTTLPropertiesDDL(t *testing.T) {
+	// Keep the existing DDL fixture entirely on a private embedded etcd.
+	endpoint := func() url.URL {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		address := listener.Addr().String()
+		require.NoError(t, listener.Close())
+		return url.URL{Scheme: "http", Host: address}
+	}
+	cfg := embed.NewConfig()
+	cfg.Dir = t.TempDir()
+	cfg.LogLevel = "error"
+	cfg.ListenClientUrls = []url.URL{endpoint()}
+	cfg.AdvertiseClientUrls = cfg.ListenClientUrls
+	cfg.ListenPeerUrls = []url.URL{endpoint()}
+	cfg.AdvertisePeerUrls = cfg.ListenPeerUrls
+	cfg.InitialCluster = cfg.InitialClusterFromName(cfg.Name)
+	server, err := embed.StartEtcd(cfg)
+	require.NoError(t, err)
+	t.Cleanup(server.Close)
+	select {
+	case <-server.Server.ReadyNotify():
+	case <-time.After(10 * time.Second):
+		t.Fatal("embedded etcd did not become ready")
+	}
+	client := v3client.New(server.Server)
+	t.Cleanup(func() { client.Close() })
+	getEtcd := mockey.Mock(kvfactory.GetEtcdAndPath).Return(client, "isolated-ttl").Build()
+	t.Cleanup(func() { getEtcd.UnPatch() })
+	core := initStreamingSystemAndCore(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	core.scheduler = &mockScheduler{AddTaskFunc: func(task task) error {
+		task.NotifyDone(task.Execute(ctx))
+		return nil
+	}}
+	createCollectionForTest(t, ctx, core, "ttl_db", "ttl_collection", &commonpb.KeyValuePair{
+		Key: common.CollectionAutoReleaseIdleTTLKey, Value: "invalid",
+	})
+	collection, err := core.meta.GetCollectionByName(ctx, "ttl_db", "ttl_collection", typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	// No QueryCoord operation is expected while altering this property.
+	core.mixCoord = imocks.NewMixCoord(t)
+	for i, value := range []string{"invalid", "20", "5", "-1", "0", "invalid", ""} {
+		if i > 0 {
+			request := &milvuspb.AlterCollectionRequest{DbName: "ttl_db", CollectionName: "ttl_collection"}
+			if value == "" {
+				request.DeleteKeys = []string{common.CollectionAutoReleaseIdleTTLKey}
+			} else {
+				request.Properties = []*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseIdleTTLKey, Value: value}}
+			}
+			status, err := core.AlterCollection(ctx, request)
+			require.NoError(t, merr.CheckRPCCall(status, err))
+		}
+		response, err := core.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DescribeCollection}, CollectionID: collection.CollectionID,
+		})
+		require.NoError(t, merr.CheckRPCCall(response, err))
+		properties := common.CloneKeyValuePairs(response.GetProperties()).ToMap()
+		if value == "" {
+			require.NotContains(t, properties, common.CollectionAutoReleaseIdleTTLKey)
+		} else {
+			require.Equal(t, value, properties[common.CollectionAutoReleaseIdleTTLKey])
+		}
+		// Read the persisted record independently of the live metadata map.
+		persisted, err := core.meta.(*MetaTable).catalog.GetCollectionByID(ctx, collection.DBID, typeutil.MaxTimestamp, collection.CollectionID)
+		require.NoError(t, err)
+		require.Equal(t, properties, common.CloneKeyValuePairs(persisted.Properties).ToMap())
+		require.Equal(t, collection.SchemaVersion, persisted.SchemaVersion)
+	}
 }
 
 func TestAlterCollectionRejectsReservedMaxFieldIDProperty(t *testing.T) {
@@ -698,6 +776,7 @@ func TestDDLCallbacksAlterCollectionProperties_TTLFieldShouldBroadcastSchema(t *
 		Fields: []*schemapb.FieldSchema{
 			{Name: "field1", DataType: schemapb.DataType_Int64},
 			{Name: "ttl", DataType: schemapb.DataType_Timestamptz, Nullable: true},
+			{Name: "ttl_next", DataType: schemapb.DataType_Timestamptz, Nullable: true},
 		},
 	}
 	schemaBytes, err := proto.Marshal(testSchema)
@@ -712,14 +791,55 @@ func TestDDLCallbacksAlterCollectionProperties_TTLFieldShouldBroadcastSchema(t *
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
 
-	// Alter properties to set ttl field should succeed and should NOT change schema version in meta.
+	// A changed TTL field must drive the same handoff as other schema updates.
 	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Properties:     []*commonpb.KeyValuePair{{Key: common.CollectionTTLFieldKey, Value: "ttl"}},
 	})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
-	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
+
+	// Repeating the same property is a no-op, including its schema version.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName: dbName, CollectionName: collectionName,
+		Properties: []*commonpb.KeyValuePair{{Key: common.CollectionTTLFieldKey, Value: "ttl"}},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
+
+	// Switching to another field must also replace the runtime schema.
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName: dbName, CollectionName: collectionName,
+		Properties: []*commonpb.KeyValuePair{{Key: common.CollectionTTLFieldKey, Value: "ttl_next"}},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 2)
+
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName: dbName, CollectionName: collectionName,
+		DeleteKeys: []string{common.CollectionTTLFieldKey},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 3)
+
+	for _, tc := range []struct {
+		value   string
+		version int32
+	}{{"60", 4}, {"60", 4}, {"120", 5}} {
+		resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+			DbName: dbName, CollectionName: collectionName,
+			Properties: []*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: tc.value}},
+		})
+		require.NoError(t, merr.CheckRPCCall(resp, err))
+		assertSchemaVersion(t, ctx, core, dbName, collectionName, tc.version)
+	}
+	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+		DbName: dbName, CollectionName: collectionName,
+		DeleteKeys: []string{common.CollectionTTLConfigKey},
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 6)
 }
 
 func TestDDLCallbacksAlterCollectionProperties_TTLFieldPreservesExternalSpec(t *testing.T) {

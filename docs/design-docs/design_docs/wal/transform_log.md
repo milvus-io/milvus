@@ -8,9 +8,10 @@
 **Status:** The local SN bootstrap adaptor is implemented in
 `internal/streamingnode/server/wal/walsummary/stream.go` and wired through
 `vchannel.PChannelRecoveryManager` into GrowingRuntime. It performs bounded Delete replay for
-QueryRuntime preparation. Remote transport is implemented through `SubscribeTransform`; QN buffer and
-segment-application integration remain planned; the general subscription contract below includes
-those future consumers.
+QueryRuntime preparation. Remote transport and QN continuous subscriptions use the same reader through
+`PChannelRecoveryManager.AcquireStream` and `SubscribeTransform`. Each acquired
+stream owns its subscriptions and closes on client cancellation or PChannel
+shutdown.
 
 TransformLog is a read-only subscription adaptor over
 [WALSummary](summary.md#54-transform-read-contract). It owns no record storage,
@@ -26,8 +27,7 @@ WALSummary (one store per PChannel)
   +-- Summary L0 consumer               [retained, not wired]
   +-- TransformLog subscription adaptor
         +-- local SN bounded replay     [implemented]
-        +-- remote subscriptions        [implemented]
-        +-- QN buffer/application       [planned]
+        +-- remote / QN subscriptions   [implemented]
 ```
 
 TransformLog owns stream and subscription lifetimes, delivery cursors,
@@ -41,9 +41,8 @@ VChannel subscriptions reuse the same chunk buffer while resident. Cache evictio
 does not remove index entries or change delivery cursors; live subscriptions may
 read object storage again after eviction. See [chunk cache](summary.md#541-resident-index-and-chunk-cache).
 
-The qv branch's stream protocol and consumers are the reference for external
-behavior. Its independent VChannel storage and retained-message write path are
-not part of this design.
+The qv stream protocol and consumers share this adaptor. The former independent
+VChannel storage and retained-message write path are not used.
 
 ## 2. Subscription Interface
 
@@ -60,7 +59,7 @@ strictly after its start cursor. An unset end means continuous delivery; a set
 end means bounded replay through that position. Stream closure releases all
 subscriptions; closing one subscription does not close a shared stream.
 
-The planned QueryNode integration uses continuous subscriptions to catch loaded
+QueryNode integration uses continuous subscriptions to catch loaded
 sealed Segments up and then apply live Deletes. StreamingNode uses bounded subscriptions when preparing
 growing resources from a captured WAL view; subsequent resource events arrive
 through the VChannel's ordered live event path. Both consumers are specified to use the same Summary-backed read semantics.
@@ -83,8 +82,8 @@ been delivered successfully. It makes no claim about history below Summary's
 lower bound. It has two responsibilities:
 
 1. **Advance through intervals without Deletes.** Relevant DDL/publication
-   events, insert-only transaction commits and WAL recovery barriers can advance
-   query Transform MVCC without producing a Delete Entry. SyncUp supplies the
+   events and WAL recovery barriers can advance query Transform MVCC without
+   producing a Delete Entry. SyncUp supplies the
    complete-prefix evidence needed to advance the consumer through those empty
    intervals. Applicable PChannel-wide barriers align all affected subscriptions;
    unrelated VChannel traffic does not require a broadcast.
@@ -93,7 +92,7 @@ lower bound. It has two responsibilities:
    After applying the preceding entries, a view can use this signal to establish
    that it has caught up, rather than enter service with historical TransformLog
    backlog and make its first queries pay that replay cost. QN readiness wiring
-   remains planned in this extraction.
+   is implemented by the qv segment readiness manager.
 
 Delivery and application are distinct. A successful Handler call may only enqueue
 work. Consumers must apply the complete ordered prefix before advancing their
@@ -160,8 +159,8 @@ unavailable prefix, never the retained interval still required through the end.
 ### Unbounded subscriptions for QueryNode
 
 The local adaptor's unbounded mode uses WALSummary's VChannel-scoped transform
-notifications. The same adaptor serves remote subscribers; QN buffer and
-segment-application integration remain outside this extraction. Bounded SN bootstrap
+notifications. The qv branch exposes this through SubscribeTransform and the QN
+VChannel buffer. Bounded SN bootstrap
 keeps its existing global-coverage notification behavior.
 
 The QN contract is to wait for the VChannel `transforming_timetick` selected by
@@ -173,15 +172,16 @@ applicable global barrier. It reads and delivers the required Delete prefix
 before reporting SyncUp. QN must finish applying that prefix before advancing
 its local visibility; receipt of a notification is not query readiness.
 
-The planned QN view preparation uses this applied catch-up signal, together with
-segment loading and the required MVCC boundary, before reporting Ready. Loading
-the base segments or receiving a SyncUp while its preceding Deletes remain
-queued is insufficient. This consumer-side readiness integration is not yet
-implemented by the local adaptor.
+QN view preparation waits for base segment loading and application through the
+buffer's catch-up frontier before reporting Ready. Loading base segments or
+receiving SyncUp while preceding Deletes remain queued is insufficient. The
+readiness manager and TransformLogBuffer implement this consumer-side gate;
+per-query checks separately wait for the query plan's required MVCC boundary.
 
-Notifications cover payload-free changes too: insert-only transaction commits,
-flush/import publication, relevant DDL and schema changes. Their classification
-is shared with query-plan MVCC advancement. PChannel-wide FlushAll/AlterWAL and
+Notifications cover payload-free changes too: flush/import publication, relevant
+DDL and schema changes. Pure Insert transactions advance only GrowingMVCC and
+do not notify Transform subscribers. Their classification is shared with
+query-plan MVCC advancement. PChannel-wide FlushAll/AlterWAL and
 recovery baselines remain broadcasts. GC truncation wakes readers to advance
 to the retained boundary; terminal failures wake them to fail explicitly rather
 than wait indefinitely.
@@ -199,6 +199,72 @@ Use bounded work and delivery buffers. A slow subscriber must not block WAL
 observation or create an unbounded adaptor backlog. A stream that cannot keep up
 may be closed and resumed from its accepted cursor. Sharing reads for live
 subscriptions to the same VChannel avoids decoding the same records repeatedly.
+
+### VChannel Query Barriers
+
+Primary WAL first checks its confirmed Growing and Transform MVCC. If both
+cover B, query planning bypasses Inspector. Otherwise
+`TimeTickInspector.EnsureBarrier(pchannel, vchannel, B)` queues a scoped request
+and actively triggers Sync. Inspector coalesces pending targets, remembers sent
+frontiers per WAL owner and VChannel, and completes callers once the confirmation
+has been appended and published to WAB. It never waits for RecoveryStorage or
+query consumers. Its existing heartbeat retries transient failures or incomplete
+ACK prefixes; callers introduce no polling. Ownership termination cancels waiters.
+TODO: reclaim sent scopes of dropped VChannels under the unified GC policy;
+currently unregistering the WAL owner releases the complete Inspector state.
+
+Sync drives the allocator past the requested target and obtains an ACK-confirmed
+prefix C. With scoped requests it emits a distinct `MVCCBarrier` confirmation
+whose common `_vc` property remains empty (PChannel-level transport scope).
+Its dedicated Header lists the affected `vchannels`; the message TimeTick is C.
+Every listed VChannel receives the same complete-prefix frontier C; query plans
+keep the requested snapshot B. The Body is empty, and no per-VChannel timestamp
+is encoded. The common `_vc` encoding and single-channel APIs remain unchanged.
+The message is persisted when the ACK batch contains persisted business messages, or a scheduled durable sync is
+due; otherwise it uses the existing NotPersisted transport. Published target scopes
+are carried on subsequent sync confirmations so idle coalescing and durable
+catchup cannot lose a previously established scoped frontier. This state belongs
+to Inspector, not WAB. WAB retains generic ordering and latest-confirmation
+semantics; scanners drain preceding payloads and transactions before delivering
+the new confirmation. Ordinary TimeTick generation, filtering and MVCC behavior
+are unchanged, including filtering redundant non-persisted TimeTicks in a data
+batch. Ordinary volatile TimeTicks do not establish query frontiers.
+
+Keeping `_vc` unchanged preserves the existing scope encoding; it does not add
+new-message support to older binaries. Producers and consumers that encounter
+`MVCCBarrier` must understand this message type. New readers retain support for
+existing TimeTick and RecoveryBarrier records. Mixed-version consumption by
+binaries without MVCCBarrier support is not established by this protocol change.
+
+RecoveryStorage passively observes ordered `MVCCBarrier` messages. It exposes
+scoped Summary coverage and sends `QueryBarrierEvent` through the VChannel's
+ordered resource events. Persisted MVCCBarrier confirmations retain full-prefix
+resource effects. The Header scopes the extra advertised query-plan frontiers
+and targeted query notifications. Ordinary TimeTick messages update PChannel
+AckTracker and Summary coverage, then stop before VChannel dispatch; they do not
+advance query execution frontiers. Pure Insert commits require only GrowingMVCC
+progress and never rely on a later TimeTick to complete a Transform wait.
+Empty transactions cannot be newly committed. Historical empty transactions
+produce no Transform entry or notification and are filtered before VChannel
+dispatch while their PChannel recovery progress is retained.
+Volatile confirmations use only the scoped event path and never dirty checkpoints
+or Summary manifests.
+Neither form adds a payload-free TransformLog record. GrowingRuntime advances
+both applied frontiers after preceding events; runtime rebuild and partition
+refresh preserve the progress through snapshot capture and event replay.
+
+Summary reads combine their normal coverage with the requested VChannel's
+volatile floor. Existing paged delivery drains preceding Deletes before emitting
+SyncUp. Only the target VChannel's continuous subscriptions are notified; bounded
+bootstrap readers may also wake to recheck coverage. The floor remains available
+to late subscriptions and is removed during VChannel cleanup. It is not a durable
+acknowledgement, materializer boundary or permission to trim history.
+
+The Iterator plan keeps Growing=B and Transform=B even when actual consumption
+advances further. SN/QN must finish applying the prefix before executing B.
+After WAL recovery, volatile barriers are re-established from the new owner's
+ordered coverage; a resume cursor alone never proves coverage. This does not
+extend historical data retention or add arbitrary time-travel guarantees.
 
 ## 5. Resume And Failure
 

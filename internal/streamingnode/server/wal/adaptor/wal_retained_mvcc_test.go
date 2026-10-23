@@ -34,7 +34,7 @@ func TestRetainedMVCCAppendAfterConfirmation(t *testing.T) {
 		// Delay the callback after the real Acker.Ack has completed. Always return
 		// false from the condition so every call runs the original UpdateMVCC;
 		// only scheduling is controlled, never the MVCC state or getter result.
-		mockey.Mock((*mvcc.MVCCManager).UpdateMVCC).When(func(_ *mvcc.MVCCManager, msg message.MutableMessage) bool {
+		mockey.Mock((*mvcc.MVCCManager).UpdateMVCC).When(func(_ *mvcc.MVCCManager, msg message.MutableMessage, _ bool) bool {
 			if pauseInsert.Load() && msg.MessageType() == message.MessageTypeInsert {
 				acked <- msg.TimeTick()
 				<-release

@@ -48,6 +48,9 @@ import (
 var errNodeNotEnough = errors.New("nodes not enough")
 
 type ResourceManager struct {
+	qviewListeners    map[uint64]func(string, []int64)
+	nextQViewListener uint64
+
 	incomingNode typeutil.UniqueSet // incomingNode is a temporary set for incoming hangup node,
 	// after node is assigned to resource group, it will be removed from this set.
 	groups    map[string]*ResourceGroup // primary index from resource group name to resource group
@@ -446,6 +449,7 @@ func (rm *ResourceManager) DropResourceGroup(ctx context.Context, rgName string)
 	// After recovering, all node assigned to these rg has been removed.
 	// no secondary index need to be removed.
 	delete(rm.groups, rgName)
+	rm.publishResourceGroupLocked(rgName, nil)
 	metrics.QueryCoordResourceGroupInfo.DeletePartialMatch(prometheus.Labels{
 		metrics.ResourceGroupLabelName: rgName,
 	})
@@ -1211,6 +1215,7 @@ func (rm *ResourceManager) setupInMemResourceGroup(r *ResourceGroup) {
 		rm.nodeIDMap[nodeID] = r.GetName()
 	}
 	rm.groups[r.GetName()] = r
+	rm.publishResourceGroupLocked(r.GetName(), r.GetNodes())
 }
 
 func (rm *ResourceManager) GetResourceGroupsJSON(ctx context.Context) string {
@@ -1260,5 +1265,28 @@ func (rm *ResourceManager) CheckNodesInResourceGroup(ctx context.Context) {
 		if !assignedNodes.Contain(node.ID()) {
 			rm.handleNodeUp(context.Background(), node.ID())
 		}
+	}
+}
+
+// RegisterResourceGroupListener atomically replays membership and subscribes to
+// committed changes. Callbacks must not re-enter the manager or perform I/O.
+func (rm *ResourceManager) RegisterResourceGroupListener(listener func(string, []int64)) func() {
+	rm.rwmutex.Lock()
+	if rm.qviewListeners == nil {
+		rm.qviewListeners = make(map[uint64]func(string, []int64))
+	}
+	rm.nextQViewListener++
+	id := rm.nextQViewListener
+	rm.qviewListeners[id] = listener
+	for name, group := range rm.groups {
+		listener(name, group.GetNodes())
+	}
+	rm.rwmutex.Unlock()
+	return func() { rm.rwmutex.Lock(); delete(rm.qviewListeners, id); rm.rwmutex.Unlock() }
+}
+
+func (rm *ResourceManager) publishResourceGroupLocked(name string, nodes []int64) {
+	for _, listener := range rm.qviewListeners {
+		listener(name, nodes)
 	}
 }

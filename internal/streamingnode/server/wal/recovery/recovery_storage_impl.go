@@ -262,13 +262,6 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 		syncmgr.BrokerMetaWriter(broker.NewCoordBroker(coord, paramtable.GetNodeID()), paramtable.GetNodeID(), retry.Attempts(1)),
 	)
 	// The temporary L0 consumer rebuilds retained Delete handles from WAL replay.
-	// Deprecated: the manager periodically reports the pchannel recovery
-	// checkpoint to DataCoord (DataCoord.UpdateChannelCheckpoint) so that
-	// GetFlushState can observe flush progress. The recovery storage write
-	// path itself never calls UpdateChannelCheckpoint; remove this wiring
-	// together with PChannelCheckpointUpdater once the new
-	// checkpoint-propagation path lands.
-	coordinatorBroker := broker.NewCoordBroker(coord, paramtable.GetNodeID())
 	manager, err := vchannel.NewPChannelRecoveryManager(vchannel.PChannelManagerConfig{
 		QueryRuntimeModuleBuilders: []queryresource.QueryRuntimeModuleBuilder{
 			queryresource.NewGrowingRuntimeModuleBuilder(nil),
@@ -287,12 +280,10 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 			idalloc.NewMAllocator(resource.Resource().IDAllocator()),
 			packed.CreateStorageConfig(),
 		),
-		SummaryManager:        summaryManager,
-		L0Materializer:        l0Writer,
-		L0MaterializeRows:     uint64(paramtable.Get().StreamingCfg.FlushL0MaxRowNum.GetAsInt()),
-		L0MaterializeBytes:    uint64(paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64()),
-		GetRecoveryCheckpoint: func() *utility.WALCheckpoint { return r.GetCheckpoint(context.TODO()) },
-		CoordinatorBroker:     coordinatorBroker,
+		SummaryManager:     summaryManager,
+		L0Materializer:     l0Writer,
+		L0MaterializeRows:  uint64(paramtable.Get().StreamingCfg.FlushL0MaxRowNum.GetAsInt()),
+		L0MaterializeBytes: uint64(paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64()),
 	})
 	if err != nil {
 		return err
@@ -588,6 +579,19 @@ func (r *recoveryStorageImpl) observeModulesMessage(
 	if r.summaryManager != nil {
 		r.summaryManager.ObserveMessage(ctx, retained.Message())
 	}
+	// Ordinary confirmations are PChannel recovery progress, not VChannel
+	// resource events. Keep Tracker/Summary coverage without a shard-wide fanout.
+	msg := retained.Message()
+	if msg.MessageType() == message.MessageTypeTimeTick {
+		return
+	}
+	// Old WALs may contain empty transactions. They have no resource or query
+	// effects, but their Summary/AckTracker progress must still be consumed.
+	if msg.MessageType() == message.MessageTypeTxn && message.AsImmutableTxnMessage(msg).Size() == 0 {
+		return
+	}
+	// RecoveryBarrier and persisted MVCCBarrier still retain their complete-prefix
+	// effects. The extra scoped query-plan progress is dispatched separately.
 	r.vchannelManager.ObserveMessage(ctx, retained)
 }
 

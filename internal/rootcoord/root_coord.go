@@ -226,7 +226,7 @@ func (c *Core) ValidateDataViewCollectionForRecovery(ctx context.Context, collec
 		return false, err
 	}
 	switch collection.State {
-	case pb.CollectionState_CollectionCreated:
+	case pb.CollectionState_CollectionCreated, pb.CollectionState_CollectionRestoring:
 		return true, nil
 	case pb.CollectionState_CollectionCreating,
 		pb.CollectionState_CollectionDropping,

@@ -51,7 +51,7 @@ func TestCollectionBarrierFlushesAllEarlierSegmentsBeforeL0Completion(t *testing
 			scheduler := &recordingVChannelScheduler{}
 			lifecycle := segment.NewSegmentLifecycleWriter(nil, 1)
 			var committed []int64
-			patch := mockey.Mock(mockey.GetMethod(lifecycle, "CommitL1Segment")).To(func(_ context.Context, meta *streamingpb.SegmentAssignmentMeta) (*viewpb.DataVersion, error) {
+			patch := mockey.Mock(mockey.GetMethod(lifecycle, "CommitL1SegmentWithTransformStart")).To(func(_ context.Context, meta *streamingpb.SegmentAssignmentMeta, _ uint64) (*viewpb.DataVersion, error) {
 				committed = append(committed, meta.GetSegmentId())
 				return &viewpb.DataVersion{StreamingVersion: 1}, nil
 			}).Build()

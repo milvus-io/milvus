@@ -55,5 +55,9 @@ func (m *meta) notifyQueryViewSegmentUpdates(ctx context.Context, segments []*Se
 	}
 	for collectionID, segmentIDs := range byCollection {
 		m.notifyQueryViewSegments(collectionID, segmentIDs...)
+		// Manifest publication changes the base required by future QueryViews.
+		// Updating only the metadata stream can strand an external View on an
+		// older exact Manifest while every subscriber already sees its successor.
+		m.recomputeDataView(ctx, collectionID)
 	}
 }

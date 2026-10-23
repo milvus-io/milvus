@@ -281,6 +281,7 @@ message StreamingNodeInfo {
 message StreamingNodeAssignment {
     StreamingNodeInfo node         = 1;
     repeated PChannelInfo channels = 2;
+    repeated PChannelInfo secondary_channels = 3;
 }
 
 // DeliverPolicy is the policy to deliver message.
@@ -860,6 +861,8 @@ message VChannelMeta {
     uint64 transform_materialized_time_tick = 5; // The L0 materialization frontier of the transform consumer. Delete entries through this timetick have been emitted as L0 output.
     // Oldest DataVersion reconstructible after segment recovery metadata cleanup.
     view.DataVersion segment_data_version_summary = 6;
+    // Immutable per-VChannel collection creation TimeTick.
+    uint64 create_collection_time_tick = 7;
 }
 
 // CollectionInfoOfVChannel is the collection info in vchannel.
@@ -1180,3 +1183,5 @@ message StreamingNodeValidateAnalyzerResponse {
     repeated int64 resource_ids = 1;
     common.Status status = 2;
 }
+
+

@@ -82,7 +82,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -735,29 +734,29 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 
 	lct := NewLoadCollectionTask(ctx, node, request)
 
-	mlog.Info(context.TODO(), "LoadCollection received")
+	mlog.Info(ctx, "LoadCollection received")
 
 	if err := node.sched.DdQueue.Enqueue(lct); err != nil {
-		mlog.Warn(context.TODO(), "LoadCollection failed to enqueue",
+		mlog.Warn(ctx, "LoadCollection failed to enqueue",
 			mlog.Err(err))
 
 		return merr.Status(err), nil
 	}
 
-	mlog.Debug(context.TODO(), "LoadCollection enqueued",
+	mlog.Debug(ctx, "LoadCollection enqueued",
 		mlog.Uint64("BeginTS", lct.BeginTs()),
 		mlog.Uint64("EndTS", lct.EndTs()),
 	)
 
 	if err := lct.WaitToFinish(); err != nil {
-		mlog.Warn(context.TODO(), "LoadCollection failed to WaitToFinish",
+		mlog.Warn(ctx, "LoadCollection failed to WaitToFinish",
 			mlog.Err(err),
 			mlog.Uint64("BeginTS", lct.BeginTs()),
 			mlog.Uint64("EndTS", lct.EndTs()))
 		return merr.Status(err), nil
 	}
 
-	mlog.Debug(context.TODO(), "LoadCollection done",
+	mlog.Debug(ctx, "LoadCollection done",
 		mlog.Uint64("BeginTS", lct.BeginTs()),
 		mlog.Uint64("EndTS", lct.EndTs()),
 	)
@@ -2411,6 +2410,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	}
 
 	dr := NewDeleteRunner(node, request, node.GetMetaCache(), node.rowIDAllocator, node.tsoAllocator, node.sched.DmQueue, node.lbPolicy, limiter)
+	dr.SetViewQueryClient(node.viewQueryClient)
 
 	mlog.Debug(context.TODO(), "init delete runner in Proxy")
 	if err := dr.Init(ctx); err != nil {
@@ -2618,7 +2618,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	isTopkReduce := false
 	isRecallEvaluation := false
 	countFeatures := true
-	err2 := retry.Handle(ctx, func() (bool, error) {
+	err2 := node.retryDQL(ctx, request.GetDbName(), request.GetCollectionName(), request.GetSearchParams(), func(ctx context.Context) (bool, error) {
 		rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false, countFeatures)
 		countFeatures = false
 		if merr.Ok(rsp.GetStatus()) && optimizedSearch && resultSizeInsufficient && isTopkReduce && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
@@ -2641,8 +2641,8 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 				).Inc()
 			}
 		}
-		if errors.Is(merr.Error(rsp.GetStatus()), merr.ErrInconsistentRequery) {
-			return true, merr.Error(rsp.GetStatus())
+		if err := merr.CheckRPCCall(rsp, err); err != nil {
+			return errors.Is(err, merr.ErrInconsistentRequery), err
 		}
 		// search for ground truth and compute recall
 		if isRecallEvaluation && merr.Ok(rsp.GetStatus()) {
@@ -2654,23 +2654,15 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 				request.GetDbName(),
 				request.GetCollectionName(),
 			).Inc()
-			if merr.Ok(rspGT.GetStatus()) {
-				return false, computeRecall(rsp.GetResults(), rspGT.GetResults())
+			if err := merr.CheckRPCCall(rspGT, err); err != nil {
+				return errors.Is(err, merr.ErrInconsistentRequery), err
 			}
-			if errors.Is(merr.Error(rspGT.GetStatus()), merr.ErrInconsistentRequery) {
-				return true, merr.Error(rspGT.GetStatus())
-			}
-			return false, merr.Error(rspGT.GetStatus())
+			return false, computeRecall(rsp.GetResults(), rspGT.GetResults())
 		}
 		return false, nil
 	})
 	if err2 != nil {
 		rsp.Status = merr.Status(err2)
-	} else if err != nil {
-		rsp.Status = merr.Status(err)
-	}
-	if err != nil {
-		rsp.Status = merr.Status(err)
 	}
 	projectSearchResultValidDataForLegacy(rsp)
 	return rsp, nil
@@ -2734,7 +2726,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	if err != nil {
 		return &milvuspb.SearchResults{
 			Status: merr.Status(err),
-		}, false, false, false, nil
+		}, false, false, false, err
 	}
 
 	validData, err := node.transformSearchByPK(ctx, request, searchByPK)
@@ -2817,7 +2809,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 
 		return &milvuspb.SearchResults{
 			Status: merr.Status(err),
-		}, false, false, false, nil
+		}, false, false, false, err
 	}
 
 	span := tr.CtxRecord(ctx, "wait search result")
@@ -2904,7 +2896,7 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	resultSizeInsufficient := false
 	isTopkReduce := false
 	countFeatures := true
-	err2 := retry.Handle(ctx, func() (bool, error) {
+	err2 := node.retryDQL(ctx, request.GetDbName(), request.GetCollectionName(), nil, func(ctx context.Context) (bool, error) {
 		rsp, resultSizeInsufficient, isTopkReduce, err = node.hybridSearch(ctx, request, optimizedSearch, countFeatures)
 		countFeatures = false
 		if merr.Ok(rsp.GetStatus()) && optimizedSearch && resultSizeInsufficient && isTopkReduce && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
@@ -2927,16 +2919,14 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 				).Inc()
 			}
 		}
-		if errors.Is(merr.Error(rsp.GetStatus()), merr.ErrInconsistentRequery) {
-			return true, merr.Error(rsp.GetStatus())
-		}
-		return false, nil
+		err = merr.CheckRPCCall(rsp, err)
+		return errors.Is(err, merr.ErrInconsistentRequery), err
 	})
 	if err2 != nil {
 		rsp.Status = merr.Status(err2)
 	}
 	projectSearchResultValidDataForLegacy(rsp)
-	return rsp, err
+	return rsp, nil
 }
 
 type hybridSearchRequestExprLogger struct {
@@ -3039,7 +3029,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 
 		return &milvuspb.SearchResults{
 			Status: merr.Status(waitErr),
-		}, false, false, nil
+		}, false, false, waitErr
 	}
 
 	span := tr.CtxRecord(ctx, "wait hybrid search result")
@@ -3364,6 +3354,7 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 		ConsistencyLevel: request.ConsistencyLevel,
 		QueryLabel:       metrics.QueryLabel,
 	}, node.GetMetaCache(), paramtable.Get().ProxyCfg.MustUsePartitionKey.GetAsBool())
+	qt.BindReadSchema(collectionInfo.CollID, collectionInfo.Schema)
 	// The user issued a search, and the search path already counted it; this
 	// retrieval is how the Proxy serves it.
 	qt.MarkInternal()
@@ -3649,7 +3640,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 
 		return &milvuspb.QueryResults{
 			Status: merr.Status(err),
-		}, segcore.StorageCost{}, nil
+		}, segcore.StorageCost{}, err
 	}
 
 	if !qt.ReQuery() {
@@ -3683,16 +3674,6 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 
 // Query get the records by primary keys.
 func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
-	qt := NewQueryTask(ctx, node, request, nil, &internalpb.RetrieveRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-		),
-		ReqID:            paramtable.GetNodeID(),
-		ConsistencyLevel: request.ConsistencyLevel,
-		QueryLabel:       metrics.QueryLabel,
-	}, node.GetMetaCache(), paramtable.Get().ProxyCfg.MustUsePartitionKey.GetAsBool())
-
 	subLabel := GetCollectionRateSubLabel(request)
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
@@ -3707,6 +3688,29 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	).Add(float64(1))
 
 	rateCol.Add(internalpb.RateType_DQLQuery.String(), 1, subLabel)
+
+	var result *milvuspb.QueryResults
+	err := node.retryDQL(ctx, request.GetDbName(), request.GetCollectionName(), request.GetQueryParams(), func(ctx context.Context) (bool, error) {
+		var err error
+		result, err = node.executeQuery(ctx, request)
+		return false, merr.CheckRPCCall(result, err)
+	})
+	if err != nil {
+		return &milvuspb.QueryResults{Status: merr.Status(err)}, nil
+	}
+	return result, nil
+}
+
+func (node *Proxy) executeQuery(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+	qt := NewQueryTask(ctx, node, request, nil, &internalpb.RetrieveRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		ReqID:            paramtable.GetNodeID(),
+		ConsistencyLevel: request.ConsistencyLevel,
+		QueryLabel:       metrics.QueryLabel,
+	}, node.GetMetaCache(), paramtable.Get().ProxyCfg.MustUsePartitionKey.GetAsBool())
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.QueryResults{
@@ -4696,7 +4700,7 @@ func (node *Proxy) GetCompactionStateWithPlans(ctx context.Context, req *milvusp
 	return resp, err
 }
 
-// GetFlushState gets the flush state of the collection based on the provided flush ts and segment IDs.
+// GetFlushState gets the flush state based on the provided segment IDs.
 func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetFlushState")
 	defer sp.End()

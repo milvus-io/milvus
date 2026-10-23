@@ -16,7 +16,8 @@ func TestQueryViewAtCoordBuilder(t *testing.T) {
 			{PartitionId: 1, SegmentIds: []int64{100, 101, 102}},
 			{PartitionId: 2, SegmentIds: []int64{200, 201}},
 		},
-		TransformStartAfterTimetick: 12345,
+		GrowingTransformStartAfterTimetick:   12345,
+		CompactedTransformStartAfterTimetick: 12345,
 	}
 	dataView := &viewpb.DataViewOfCollection{
 		CollectionId: 10,
@@ -116,9 +117,10 @@ func TestQueryViewBuilderPreservesSegmentTransformStarts(t *testing.T) {
 		CollectionId: 1,
 		DataVersion:  &viewpb.DataVersion{StreamingVersion: 1},
 		Shards: []*viewpb.DataViewOfShard{{
-			Vchannel:                    "v1",
-			TransformStartAfterTimetick: 40,
-			Partitions:                  []*viewpb.DataViewOfPartition{{PartitionId: 1, SegmentIds: []int64{10, 20}, SegmentManifestVersions: []int64{3, 4}}},
+			Vchannel:                             "v1",
+			GrowingTransformStartAfterTimetick:   40,
+			CompactedTransformStartAfterTimetick: 50,
+			Partitions:                           []*viewpb.DataViewOfPartition{{PartitionId: 1, SegmentIds: []int64{10, 20}, SegmentTransformStartAfterTimeticks: []uint64{50, 70}, SegmentManifestVersions: []int64{3, 4}}},
 		}},
 	}
 	result := NewQueryViewAtCoordBuilder(1, view, "v1").SetAssignments(map[int64]map[int64][]int64{100: {1: {20, 10}}}).Build()

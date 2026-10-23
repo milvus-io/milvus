@@ -65,6 +65,7 @@ const (
 	QueryCoord_RunAnalyzer_FullMethodName                   = "/milvus.proto.query.QueryCoord/RunAnalyzer"
 	QueryCoord_ComputePhraseMatchSlop_FullMethodName        = "/milvus.proto.query.QueryCoord/ComputePhraseMatchSlop"
 	QueryCoord_ValidateAnalyzer_FullMethodName              = "/milvus.proto.query.QueryCoord/ValidateAnalyzer"
+	QueryCoord_EnsureCollectionReady_FullMethodName         = "/milvus.proto.query.QueryCoord/EnsureCollectionReady"
 )
 
 // QueryCoordClient is the client API for QueryCoord service.
@@ -118,6 +119,7 @@ type QueryCoordClient interface {
 	RunAnalyzer(ctx context.Context, in *RunAnalyzerRequest, opts ...grpc.CallOption) (*milvuspb.RunAnalyzerResponse, error)
 	ComputePhraseMatchSlop(ctx context.Context, in *ComputePhraseMatchSlopRequest, opts ...grpc.CallOption) (*ComputePhraseMatchSlopResponse, error)
 	ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*ValidateAnalyzerResponse, error)
+	EnsureCollectionReady(ctx context.Context, in *EnsureCollectionReadyRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 }
 
 type queryCoordClient struct {
@@ -538,6 +540,15 @@ func (c *queryCoordClient) ValidateAnalyzer(ctx context.Context, in *ValidateAna
 	return out, nil
 }
 
+func (c *queryCoordClient) EnsureCollectionReady(ctx context.Context, in *EnsureCollectionReadyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, QueryCoord_EnsureCollectionReady_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // QueryCoordServer is the server API for QueryCoord service.
 // All implementations should embed UnimplementedQueryCoordServer
 // for forward compatibility
@@ -589,6 +600,7 @@ type QueryCoordServer interface {
 	RunAnalyzer(context.Context, *RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)
 	ComputePhraseMatchSlop(context.Context, *ComputePhraseMatchSlopRequest) (*ComputePhraseMatchSlopResponse, error)
 	ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*ValidateAnalyzerResponse, error)
+	EnsureCollectionReady(context.Context, *EnsureCollectionReadyRequest) (*commonpb.Status, error)
 }
 
 // UnimplementedQueryCoordServer should be embedded to have forward compatible implementations.
@@ -723,6 +735,9 @@ func (UnimplementedQueryCoordServer) ComputePhraseMatchSlop(context.Context, *Co
 }
 func (UnimplementedQueryCoordServer) ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*ValidateAnalyzerResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ValidateAnalyzer not implemented")
+}
+func (UnimplementedQueryCoordServer) EnsureCollectionReady(context.Context, *EnsureCollectionReadyRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EnsureCollectionReady not implemented")
 }
 
 // UnsafeQueryCoordServer may be embedded to opt out of forward compatibility for this service.
@@ -1518,6 +1533,24 @@ func _QueryCoord_ValidateAnalyzer_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _QueryCoord_EnsureCollectionReady_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EnsureCollectionReadyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryCoordServer).EnsureCollectionReady(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryCoord_EnsureCollectionReady_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryCoordServer).EnsureCollectionReady(ctx, req.(*EnsureCollectionReadyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // QueryCoord_ServiceDesc is the grpc.ServiceDesc for QueryCoord service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1692,6 +1725,10 @@ var QueryCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ValidateAnalyzer",
 			Handler:    _QueryCoord_ValidateAnalyzer_Handler,
+		},
+		{
+			MethodName: "EnsureCollectionReady",
+			Handler:    _QueryCoord_EnsureCollectionReady_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

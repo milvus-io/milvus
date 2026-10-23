@@ -48,8 +48,10 @@ for another Commit attempt on the cancelled writer. See
 The temporary WAL L0 materializer retains Delete/Txn and explicit Flush handles.
 Size, buffer age, explicit Flush and recovery-tail requests trigger output.
 Earlier L1 segments must be registered in DataCoord, but need not be flushed.
-L1/L0 Flush work joins via message handles. The global published checkpoint is
-reported directly by cp_updater. The Summary reader materializer is retained for
+L1/L0 Flush work joins via message handles and consuming-side acknowledgements;
+Flush completion does not wait for global checkpoint publication. The global
+checkpoint is persisted by RecoveryStorage, without periodic reporting to
+DataCoord. The Summary reader materializer is retained for
 future QueryView wiring and is not active simultaneously. Durable materialized
 metadata still governs Summary GC and tombstone retirement.
 
@@ -66,4 +68,10 @@ metadata still governs Summary GC and tombstone retirement.
 
 [TransformLog](../../../design-docs/design_docs/wal/transform_log.md) is a read-only subscription adaptor over Summary. Local SN bounded Delete replay is wired into QueryRuntime preparation via `walsummary.Stream`; subsequent live events arrive through VChannel observation. Remote/QN subscription integration remains planned. The adaptor owns neither WAL observation nor L0 materialization.
 
-The former `flusher/flusherimpl` path has been removed. A compatibility VChannel checkpoint updater still reports flush progress to DataCoord; it is not another recovery or truncation cursor.
+The former `flusher/flusherimpl` path and periodic VChannel checkpoint reporting
+have been removed. Historical DataCoord checkpoints remain readable for legacy
+recovery. Dropped-segment GC reads `WALCheckpoint.time_tick` directly from
+StreamingNode catalog once per PChannel per sweep, reusing the value for all
+its segments. Missing checkpoints and read failures prevent reclamation for
+that PChannel. Native RecoveryStorage checkpoint persistence, replay and
+truncation remain independent.

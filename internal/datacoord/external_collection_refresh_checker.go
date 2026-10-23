@@ -69,7 +69,8 @@ type externalCollectionRefreshChecker struct {
 	// applyJobInfo is invoked exactly before a job is persisted as Finished.
 	// It performs the collection-global segment update from all finished task
 	// results so progress polls cannot observe Finished before segments are visible.
-	applyJobInfo func(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error
+	applyJobInfo   func(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error
+	publishJobInfo func(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error
 	// onJobFailed is the manager-side callback invoked when a job first
 	// transitions into Failed state (via aggregateJobState or tryTimeoutJob).
 	// Used to reclaim per-job resources (e.g. the explore temp directory)
@@ -272,7 +273,7 @@ func (c *externalCollectionRefreshChecker) beginIndexWait(job *datapb.ExternalCo
 	// ungated path never pays, because there the apply and Finished are the
 	// same transition and this clear follows immediately.
 	if err := c.refreshMeta.ClearTaskResultsByJobID(job.GetJobId()); err != nil {
-		// Not fatal: finishAfterIndexWait clears again, and DropJob sweeps the
+		// Not fatal: finishAppliedJob clears again, and DropJob sweeps the
 		// job prefix at GC.
 		mlog.Warn(c.ctx, "failed to clear external collection refresh task results on index wait entry",
 			mlog.FieldJobID(job.GetJobId()),
@@ -410,12 +411,12 @@ func (c *externalCollectionRefreshChecker) refreshedSchemaVisible(job *datapb.Ex
 		collection.Schema.GetExternalSpec() == job.GetExternalSpec()
 }
 
-// finishAfterIndexWait completes a job whose wait is over. No pre-apply: the
+// finishAppliedJob completes a job whose wait is over. No pre-apply: the
 // segments were applied when the wait began.
-func (c *externalCollectionRefreshChecker) finishAfterIndexWait(job *datapb.ExternalCollectionRefreshJob) {
+func (c *externalCollectionRefreshChecker) finishAppliedJob(job *datapb.ExternalCollectionRefreshJob) {
 	applied, err := c.refreshMeta.UpdateJobState(job.GetJobId(), indexpb.JobState_JobStateFinished, "")
 	if err != nil {
-		mlog.Warn(c.ctx, "failed to finish external collection refresh after the index wait",
+		mlog.Warn(c.ctx, "failed to finish applied external collection refresh",
 			mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
 		return
 	}
@@ -427,9 +428,41 @@ func (c *externalCollectionRefreshChecker) finishAfterIndexWait(job *datapb.Exte
 			mlog.FieldJobID(job.GetJobId()),
 			mlog.Err(err))
 	}
-	mlog.Info(c.ctx, "external collection refresh finished, its segments are indexed",
+	mlog.Info(c.ctx, "external collection refresh finished",
 		mlog.FieldJobID(job.GetJobId()),
 		mlog.FieldCollectionID(job.GetCollectionId()))
+}
+
+// finishPublishedJob separates durable segment application from retriable
+// publication. All remote waits occur outside the collection job lock.
+func (c *externalCollectionRefreshChecker) finishPublishedJob(job *datapb.ExternalCollectionRefreshJob) {
+	_, err := c.refreshMeta.BeginPublication(job.GetJobId(), func(current *datapb.ExternalCollectionRefreshJob) error {
+		return c.applyJobInfo(c.ctx, current)
+	})
+	if err != nil {
+		mlog.Warn(c.ctx, "failed to apply external refresh results", mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
+		return
+	}
+	job = c.refreshMeta.GetJob(job.GetJobId())
+	if job == nil || job.GetState() != indexpb.JobState_JobStateInProgress {
+		return
+	}
+	if c.indexWaitEnabled() && job.GetIndexWaitStartedTime() == 0 {
+		if _, err := c.refreshMeta.BeginIndexWait(job.GetJobId(), nil); err != nil {
+			mlog.Warn(c.ctx, "failed to persist external refresh index wait", mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
+			return
+		}
+		job = c.refreshMeta.GetJob(job.GetJobId())
+	}
+	waitingForIndex := c.indexWaitEnabled() && !c.indexWaitDone(job)
+	if err := c.publishJobInfo(c.ctx, job); err != nil {
+		mlog.Info(c.ctx, "external refresh publication pending", mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
+		return
+	}
+	if waitingForIndex {
+		return
+	}
+	c.finishAppliedJob(job)
 }
 
 // aggregateJobState updates job state based on its tasks.
@@ -464,6 +497,11 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 		return
 	}
 
+	if state == indexpb.JobState_JobStateFinished && len(job.GetTransformStartAfterTimeticks()) != 0 {
+		c.finishPublishedJob(job)
+		return
+	}
+
 	// The index wait. Off (the default) neither branch is reached and the
 	// generic transition below is untouched.
 	//
@@ -486,7 +524,7 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 		// Finish WITHOUT a pre-apply: the segments were applied by
 		// BeginIndexWait, and replaying that here would be a second apply of
 		// the same results.
-		c.finishAfterIndexWait(job)
+		c.finishAppliedJob(job)
 		return
 	}
 	if state == indexpb.JobState_JobStateFinished && c.indexWaitEnabled() {
@@ -507,7 +545,7 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 		if entered == nil || !c.indexWaitDone(entered) {
 			return
 		}
-		c.finishAfterIndexWait(entered)
+		c.finishAppliedJob(entered)
 		return
 	}
 
@@ -652,7 +690,7 @@ func (c *externalCollectionRefreshChecker) ensureJobFinishedNotified(job *datapb
 	// budget. That is why the Failed path may not claim the publish dedup key;
 	// see handleJobFailed.
 	if latestJob.GetState() != indexpb.JobState_JobStateFinished &&
-		latestJob.GetIndexWaitStartedTime() == 0 {
+		latestJob.GetIndexWaitStartedTime() == 0 && !latestJob.GetSegmentsApplied() {
 		return
 	}
 	c.onJobFinished(c.ctx, latestJob)
@@ -719,7 +757,7 @@ func timeoutFailReason(job *datapb.ExternalCollectionRefreshJob) string {
 // tryTimeoutJob checks if job has exceeded timeout and marks it as failed.
 func (c *externalCollectionRefreshChecker) tryTimeoutJob(job *datapb.ExternalCollectionRefreshJob) {
 	// Skip if StartTime is not set
-	if job.GetStartTime() == 0 {
+	if job.GetStartTime() == 0 || (job.GetSegmentsApplied() && job.GetIndexWaitStartedTime() == 0) {
 		return
 	}
 
