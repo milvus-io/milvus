@@ -587,6 +587,13 @@ TEST_F(SchemaTest, ExternalColumnResolvesAllLogicalAliases) {
     EXPECT_EQ(schema->ResolveColumnFieldIds("shared"),
               (std::vector<FieldId>{FieldId(101), FieldId(102)}));
     EXPECT_EQ(schema->ResolveColumnFieldId("shared"), FieldId(101));
+    EXPECT_TRUE(schema->ResolveColumnFieldIds("dropped_column").empty());
+    EXPECT_THROW(schema->ResolveColumnFieldId("dropped_column"),
+                 std::exception);
+    // Internal manifests still require numeric field-ID column names.
+    Schema internal_schema;
+    EXPECT_THROW(internal_schema.ResolveColumnFieldIds("dropped_column"),
+                 std::exception);
 }
 
 TEST_F(SchemaTest, ConvertToLoonArrowSchemaNullableDenseVectorUsesBinary) {

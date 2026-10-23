@@ -90,6 +90,7 @@ func NormalizeFileInfos(fileInfos []FileInfo, format string) ([]FileInfo, int) {
 // a row total at this layer. Real row counts are only available after manifest
 // construction where Fragment.RowCount = endRow - startRow.
 type FileInfo struct {
+	Columns         []string
 	FilePath        string
 	NumRows         int64
 	SourceSegmentID int64
@@ -97,10 +98,10 @@ type FileInfo struct {
 	Properties      map[string]string `json:"properties,omitempty"`
 }
 
-// ExploreFiles scans an external directory and returns file information.
-// It internally calls exttable_explore to find files, then reads the manifest
 // GetFileInfo retrieves row count information for a single external file.
 // This is used to determine how to split large files into multiple fragments.
+// Column discovery is handled by fetchRowCountsConcurrently, which also has the
+// per-file snapshot properties from the explore manifest.
 func GetFileInfo(
 	format string,
 	filePath string,
@@ -132,7 +133,6 @@ func GetFileInfo(
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, merr.WrapErrStorage(err, "loon_exttable_get_file_info failed")
 	}
-
 	return &FileInfo{
 		FilePath: filePath,
 		NumRows:  int64(numRows),

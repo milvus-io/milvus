@@ -92,8 +92,7 @@ struct LoadDiff {
     std::unordered_map<FieldId, std::unordered_set<std::string>>
         json_indexes_to_drop;
 
-    // Field data that need to be dropped (field_id set)
-    // Only populated when both current and new use binlog mode
+    // Field data to remove from the next runtime state (either storage mode).
     std::unordered_set<FieldId> field_data_to_drop;
 
     // Fields that need to be filled with default values (schema evolution scenario)
@@ -122,11 +121,6 @@ struct LoadDiff {
     // Text fields that need text indexes created from raw data
     std::unordered_set<FieldId> text_indexes_to_create;
 
-    // External collections with manifest should bypass ComputeDiffColumnGroups
-    // (their column names are parquet field names, not numeric field IDs)
-    // and use LoadColumnGroups(manifest_path) directly in ApplyLoadDiff
-    bool load_external_manifest = false;
-
     // Whether manifest path has changed (only when both use manifest mode)
     bool manifest_updated = false;
 
@@ -146,8 +140,7 @@ struct LoadDiff {
                !fields_to_fill_default.empty() ||
                !text_indexes_to_load.empty() || !json_stats_to_load.empty() ||
                !json_stats_to_replace.empty() || !json_stats_to_drop.empty() ||
-               !text_indexes_to_create.empty() || manifest_updated ||
-               load_external_manifest;
+               !text_indexes_to_create.empty() || manifest_updated;
     }
 
     [[nodiscard]] std::string
@@ -385,11 +378,6 @@ struct LoadDiff {
         oss << "manifest_updated=" << (manifest_updated ? "true" : "false");
         if (manifest_updated) {
             oss << ", new_manifest_path=" << new_manifest_path;
-        }
-
-        // load_external_manifest
-        if (load_external_manifest) {
-            oss << ", load_external_manifest=true";
         }
 
         oss << "}";
@@ -1204,6 +1192,9 @@ class SegmentLoadInfo {
 
     void
     ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info);
+
+    bool
+    ShouldEagerLoadManifestField(FieldId field_id) const;
 
     void
     ComputeDiffColumnGroups(LoadDiff& diff, SegmentLoadInfo& new_info);

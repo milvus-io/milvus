@@ -1445,6 +1445,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_UpsertExistingSegment(t
 		[]int64{segmentID},
 		nil,
 		[]*datapb.SegmentInfo{patched},
+		false,
 	)
 	assert.NoError(t, err)
 
@@ -1480,7 +1481,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayNewSegment(t *tes
 		collectionID,
 		nil,
 		nil,
-		[]*datapb.SegmentInfo{incoming},
+		[]*datapb.SegmentInfo{incoming}, false,
 	)
 	assert.NoError(t, err)
 
@@ -1501,7 +1502,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayNewSegment(t *tes
 		collectionID,
 		nil,
 		nil,
-		[]*datapb.SegmentInfo{incoming},
+		[]*datapb.SegmentInfo{incoming}, false,
 	)
 	assert.NoError(t, err)
 	assert.Nil(t, catalog.alteredSegments)
@@ -1518,7 +1519,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayNewSegment(t *tes
 		collectionID,
 		nil,
 		nil,
-		[]*datapb.SegmentInfo{differentBaseReplay},
+		[]*datapb.SegmentInfo{differentBaseReplay}, false,
 	)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "collides with existing metadata")
@@ -1531,7 +1532,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayNewSegment(t *tes
 		collectionID,
 		nil,
 		nil,
-		[]*datapb.SegmentInfo{newerReplay},
+		[]*datapb.SegmentInfo{newerReplay}, false,
 	)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "collides with existing metadata")
@@ -1564,7 +1565,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayPatchedBaselineSe
 	patch.SchemaVersion = 2
 
 	err := applyExternalCollectionSegmentUpdateForBaseline(
-		ctx, mt, collectionID, []int64{segmentID}, nil, []*datapb.SegmentInfo{patch})
+		ctx, mt, collectionID, []int64{segmentID}, nil, []*datapb.SegmentInfo{patch}, false)
 	assert.NoError(t, err)
 	assert.Equal(t, packed.MarshalManifestPath(base, 2), mt.segments.GetSegment(segmentID).GetManifestPath())
 
@@ -1577,7 +1578,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayPatchedBaselineSe
 	catalog.alteredSegments = nil
 
 	err = applyExternalCollectionSegmentUpdateForBaseline(
-		ctx, mt, collectionID, []int64{segmentID}, nil, []*datapb.SegmentInfo{patch})
+		ctx, mt, collectionID, []int64{segmentID}, nil, []*datapb.SegmentInfo{patch}, false)
 	assert.NoError(t, err)
 	assert.Nil(t, catalog.alteredSegments, "a replayed patch must not write at all")
 	assert.Contains(t, mt.segments.GetSegment(segmentID).GetTextStatsLogs(), int64(1),
@@ -1589,7 +1590,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayPatchedBaselineSe
 	newer := proto.Clone(patch).(*datapb.SegmentInfo)
 	newer.ManifestPath = packed.MarshalManifestPath(base, 3)
 	err = applyExternalCollectionSegmentUpdateForBaseline(
-		ctx, mt, collectionID, []int64{segmentID}, nil, []*datapb.SegmentInfo{newer})
+		ctx, mt, collectionID, []int64{segmentID}, nil, []*datapb.SegmentInfo{newer}, false)
 	assert.NoError(t, err)
 	assert.Equal(t, packed.MarshalManifestPath(base, 3), mt.segments.GetSegment(segmentID).GetManifestPath())
 	assert.Empty(t, mt.segments.GetSegment(segmentID).GetTextStatsLogs(),
@@ -1697,6 +1698,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectPatchRowCountChan
 		[]int64{segmentID},
 		nil,
 		[]*datapb.SegmentInfo{patched},
+		false,
 	)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "row count changed")
@@ -1746,6 +1748,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewSegmentIDColli
 		nil,
 		nil,
 		[]*datapb.SegmentInfo{patched},
+		false,
 	)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "collides with existing metadata")
@@ -1785,6 +1788,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewSegmentCollect
 				}},
 			}},
 		}},
+		false,
 	)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "collection mismatch")
@@ -1810,6 +1814,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewSegmentEmptyMa
 		nil,
 		nil,
 		[]*datapb.SegmentInfo{seg},
+		false,
 	)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "empty manifest path")
@@ -1855,6 +1860,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewSegmentIDColli
 		nil,
 		nil,
 		[]*datapb.SegmentInfo{incoming},
+		false,
 	)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "collides with existing metadata")
@@ -1887,6 +1893,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectKeptSegmentOutsid
 		[]int64{1},
 		[]int64{999},
 		nil,
+		false,
 	)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "kept segment 999 is outside the refresh baseline")
@@ -1916,6 +1923,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectForeignKeptSegmen
 		nil,
 		[]int64{10},
 		nil,
+		false,
 	)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "kept segment 10 is outside the refresh baseline")
@@ -1945,6 +1953,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectDroppedKeptSegmen
 		nil,
 		[]int64{10},
 		nil,
+		false,
 	)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "kept segment 10 is outside the refresh baseline")
@@ -1969,6 +1978,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_NormalizeNewSegmentColl
 		nil,
 		nil,
 		[]*datapb.SegmentInfo{seg},
+		false,
 	)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(0), seg.GetCollectionID())
@@ -2010,6 +2020,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectPatchBinlogRowCou
 		[]int64{segmentID},
 		nil,
 		[]*datapb.SegmentInfo{patched},
+		false,
 	)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "binlog row count mismatch")
@@ -2035,6 +2046,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewBinlogRowCount
 		nil,
 		nil,
 		[]*datapb.SegmentInfo{seg},
+		false,
 	)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "binlog row count mismatch")
@@ -2068,6 +2080,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectPatchEmptyNestedB
 		[]int64{segmentID},
 		nil,
 		[]*datapb.SegmentInfo{patched},
+		false,
 	)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "binlog row count mismatch")
@@ -2093,6 +2106,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectNewEmptyNestedBin
 		nil,
 		nil,
 		[]*datapb.SegmentInfo{seg},
+		false,
 	)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "binlog row count mismatch")
@@ -2305,4 +2319,12 @@ func TestRefreshExternalCollectionTask_DropTaskOnWorker(t *testing.T) {
 		task.DropTaskOnWorker(cluster)
 		// Error is logged but not returned
 	})
+}
+
+func TestApplyExternalCollectionSegmentUpdateRejectsContradictoryEmptyResult(t *testing.T) {
+	mt := &meta{}
+	err := applyExternalCollectionSegmentUpdateForBaseline(context.Background(), mt, 100, []int64{1}, []int64{1}, nil, true)
+	assert.ErrorContains(t, err, "unmapped refresh result must not contain segments")
+	err = applyExternalCollectionSegmentUpdateForBaseline(context.Background(), mt, 100, []int64{1}, nil, []*datapb.SegmentInfo{{ID: 1}}, true)
+	assert.ErrorContains(t, err, "unmapped refresh result must not contain segments")
 }

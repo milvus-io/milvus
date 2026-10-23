@@ -1071,3 +1071,180 @@ teiRefreshDone:
 
 	t.Log("TextEmbedding E2E passed: create, refresh, index, load, search")
 }
+
+// Missing inputs must have the same function result as explicitly stored
+// defaults. Physical NULL/empty strings remain distinct from missing columns.
+func TestExternalFunctionMissingInputs(t *testing.T) {
+	ctx := hp.CreateContext(t, 8*time.Minute)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	cfg := getMinIOConfig()
+	objectStore, err := newMinIOClient(cfg)
+	require.NoError(t, err)
+	const fallback = "alpha beta gamma delta"
+	for _, kind := range []string{"bm25_minhash", "embedding"} {
+		t.Run(kind, func(t *testing.T) {
+			if kind == "embedding" {
+				// Use the shared TEI endpoint reachable by the Milvus server.
+				// Its absence only skips embedding, leaving BM25/MinHash runnable.
+				embeddings, err := hp.CallTEIDirectly(hp.GetTEIEndpoint(), []string{fallback})
+				if err != nil {
+					t.Skipf("Skip TextEmbedding missing-input test: TEI endpoint %s unavailable: %v", hp.GetTEIEndpoint(), err)
+				}
+				require.Len(t, embeddings, 1)
+				require.Len(t, embeddings[0], hp.GetTEIModelDim())
+			}
+			name := common.GenRandomString("ext_function_default", 6)
+			prefix := "external-e2e-test/" + name
+			t.Cleanup(func() { cleanupMinIOPrefix(context.Background(), objectStore, cfg.bucket, prefix+"/") })
+			write := func(file, mode string, start int64) {
+				t.Helper()
+				idName := "id"
+				if mode == "unmapped" {
+					idName = "unrelated"
+				}
+				fields := []arrow.Field{{Name: idName, Type: arrow.PrimitiveTypes.Int64}}
+				if mode != "missing" && mode != "unmapped" {
+					fields = append(fields, arrow.Field{Name: "doc", Type: arrow.BinaryTypes.String, Nullable: true})
+				}
+				as := arrow.NewSchema(fields, nil)
+				builder := array.NewRecordBuilder(memory.NewGoAllocator(), as)
+				defer builder.Release()
+				builder.Field(0).(*array.Int64Builder).AppendValues([]int64{start, start + 1}, nil)
+				if len(fields) == 2 {
+					b := builder.Field(1).(*array.StringBuilder)
+					switch mode {
+					case "null":
+						b.AppendNulls(2)
+					case "empty":
+						b.AppendValues([]string{"", ""}, nil)
+					default:
+						b.AppendValues([]string{fallback, fallback}, nil)
+					}
+				}
+				rec := builder.NewRecord()
+				defer rec.Release()
+				var buf bytes.Buffer
+				writer, err := pqarrow.NewFileWriter(as, &buf, nil, pqarrow.DefaultWriterProps())
+				require.NoError(t, err)
+				require.NoError(t, writer.Write(rec))
+				require.NoError(t, writer.Close())
+				uploadParquetToMinIO(ctx, t, objectStore, cfg.bucket, prefix+"/"+file, buf.Bytes())
+			}
+			write("missing.parquet", "missing", 0)
+			write("explicit.parquet", "explicit", 2)
+			write("unmapped.parquet", "unmapped", 100)
+			text := entity.NewField().WithName("doc").WithDataType(entity.FieldTypeVarChar).WithMaxLength(1024).
+				WithExternalField("doc").WithDefaultValueString(fallback)
+			schema := entity.NewSchema().WithName(name).WithExternalSource(extTestURI(cfg, prefix)).WithExternalSpec(extTestSpec(cfg, "parquet")).
+				WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithExternalField("id")).WithField(text)
+			wantIDs := []int64{0, 1, 2, 3}
+			if kind == "bm25_minhash" {
+				text.WithNullable(true).WithEnableAnalyzer(true).WithAnalyzerParams(map[string]any{"tokenizer": "standard"})
+				schema.WithField(entity.NewField().WithName("sparse").WithDataType(entity.FieldTypeSparseVector)).
+					WithField(entity.NewField().WithName("signature").WithDataType(entity.FieldTypeBinaryVector).WithDim(512)).
+					WithFunction(entity.NewFunction().WithName("bm25").WithInputFields("doc").WithOutputFields("sparse").WithType(entity.FunctionTypeBM25)).
+					WithFunction(entity.NewFunction().WithName("minhash").WithInputFields("doc").WithOutputFields("signature").WithType(schemapb.FunctionType_MinHash).WithParam("num_hashes", "16").WithParam("shingle_size", "3"))
+				write("null.parquet", "null", 4)
+				write("empty.parquet", "empty", 6)
+				wantIDs = append(wantIDs, 4, 5, 6, 7)
+			} else {
+				schema.WithField(entity.NewField().WithName("dense").WithDataType(entity.FieldTypeFloatVector).WithDim(int64(hp.GetTEIModelDim()))).
+					WithFunction(entity.NewFunction().WithName("embedding").WithInputFields("doc").WithOutputFields("dense").WithType(entity.FunctionTypeTextEmbedding).
+						WithParam("provider", "TEI").WithParam("endpoint", hp.GetTEIEndpoint()))
+			}
+			require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(name, schema)))
+			t.Cleanup(func() {
+				require.NoError(t, mc.DropCollection(context.Background(), client.NewDropCollectionOption(name)))
+			})
+			refresh := func(state entity.RefreshExternalCollectionState) *entity.RefreshExternalCollectionJobInfo {
+				t.Helper()
+				job, err := mc.RefreshExternalCollection(ctx, client.NewRefreshExternalCollectionOption(name))
+				require.NoError(t, err)
+				return waitRefreshTerminal(t, ctx, mc, job.JobID, state)
+			}
+			refresh(entity.RefreshStateCompleted)
+			indexes := map[string]index.Index{"dense": index.NewFlatIndex(entity.L2)}
+			if kind == "bm25_minhash" {
+				indexes = map[string]index.Index{"sparse": index.NewSparseInvertedIndex(entity.BM25, 0), "signature": index.NewBinFlatIndex(entity.JACCARD)}
+			}
+			for field, idx := range indexes {
+				task, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(name, field, idx))
+				require.NoError(t, err)
+				require.NoError(t, task.Await(ctx))
+			}
+			load, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(name))
+			require.NoError(t, err)
+			require.NoError(t, load.Await(ctx))
+			verify := func() map[int64][]float32 {
+				t.Helper()
+				out := "dense"
+				if kind == "bm25_minhash" {
+					out = "signature"
+				}
+				result, err := mc.Query(ctx, client.NewQueryOption(name).WithFilter("id >= 0").WithLimit(100).WithOutputFields("id", "doc", out).WithConsistencyLevel(entity.ClStrong))
+				require.NoError(t, err)
+				ids := result.GetColumn("id").(*column.ColumnInt64).Data()
+				// ElementsMatch checks multiplicity as well as membership, so a
+				// duplicate or missing ID fails before any byID lookup.
+				require.ElementsMatch(t, wantIDs, ids)
+				byID := make(map[int64]int)
+				for i, id := range ids {
+					byID[id] = i
+					if id < 4 {
+						text, err := result.GetColumn("doc").GetAsString(i)
+						require.NoError(t, err)
+						require.Equal(t, fallback, text)
+					}
+					if id == 4 || id == 5 {
+						null, err := result.GetColumn("doc").IsNull(i)
+						require.NoError(t, err)
+						require.True(t, null)
+					}
+					if id == 6 || id == 7 {
+						null, err := result.GetColumn("doc").IsNull(i)
+						require.NoError(t, err)
+						require.False(t, null)
+						text, err := result.GetColumn("doc").GetAsString(i)
+						require.NoError(t, err)
+						require.Empty(t, text)
+					}
+				}
+				if kind == "bm25_minhash" {
+					values := result.GetColumn(out).(*column.ColumnBinaryVector).Data()
+					for _, id := range []int64{0, 1, 3} {
+						require.Equal(t, values[byID[2]], values[byID[id]])
+					}
+					require.Equal(t, values[byID[4]], values[byID[6]])
+					require.NotEqual(t, values[byID[0]], values[byID[4]])
+					hits, err := mc.Search(ctx, client.NewSearchOption(name, 10, []entity.Vector{entity.Text("alpha")}).WithANNSField("sparse").WithOutputFields("id"))
+					require.NoError(t, err)
+					require.Len(t, hits, 1)
+					require.ElementsMatch(t, []int64{0, 1, 2, 3}, hits[0].GetColumn("id").(*column.ColumnInt64).Data())
+				} else {
+					values := result.GetColumn(out).(*column.ColumnFloatVector).Data()
+					require.Len(t, values, len(wantIDs))
+					denseByID := make(map[int64][]float32, len(ids))
+					for i, value := range values {
+						require.Len(t, value, hp.GetTEIModelDim())
+						// Compare missing-input defaults with physically stored text;
+						// allow numerical variation across TEI inference batches.
+						require.InDeltaSlice(t, values[byID[2]], value, 1e-4)
+						denseByID[ids[i]] = value
+					}
+					return denseByID
+				}
+				return nil
+			}
+			verify()
+			refresh(entity.RefreshStateCompleted)
+			publishedDense := verify()
+			if kind == "embedding" {
+				// A new segment fails execution; previous query-visible segments survive.
+				write("empty.parquet", "empty", 8)
+				progress := refresh(entity.RefreshStateFailed)
+				require.Contains(t, progress.Reason, "TextEmbedding function does not support empty text")
+				require.Equal(t, publishedDense, verify(), "failed refresh must preserve the published vectors")
+			}
+		})
+	}
+}
