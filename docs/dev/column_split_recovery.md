@@ -126,8 +126,9 @@ insert 布局/统计的空 manifest 仍可首次计算 split。
 ## 失败处理与自查
 
 - 元数据损坏、布局不匹配：ErrDataIntegrity，恢复失败，不重新采样分组。
-- 显式永久的原生读取失败：保留 ErrLoonPermanent，在恢复调用处标记
-  Unrecoverable。
+- master 显式永久的原生读取失败：保留 ErrLoonPermanent，在恢复调用处
+  标记 Unrecoverable。3.0 只有 ErrLoonTransient，沿用该分支现有分类；
+  不引用 master 的 marker，也不声称 3.0 能识别原生永久错误。
 - 原生瞬时读取失败：保留 ErrLoonTransient 及 cause；master scheduler
   和旧 pipeline 的重试可以继续处理。取消在读前、读后检查。
 - packed 层只对没有 wire code 的原生错误 marker 添加 Storage 错误码，
@@ -185,6 +186,7 @@ go test -tags dynamic,test -gcflags="all=-N -l" -count=1 \
 C.LoonFilesystemMetricsList / loon_filesystem_get_metrics /
 loon_filesystem_list_metrics / loon_filesystem_free_metrics_list 未定义
 C.SetArrowIOThreadPoolCapacity 未定义
+create_token_stream 参数及返回值签名不匹配
 ```
 
 现有原生库只有 master 新版 metrics / transaction_open 接口；3.0 要求
@@ -195,3 +197,75 @@ milvus-storage 后重跑原生测试。
 两条分支均通过 gofmt 和 git diff --check。未执行真实集群进程的 Coord /
 StreamingNode 重启，也未执行整仓 make test-go；不能将以上回归表述为
 完整的线上重启或版本升级验证。
+
+
+## 2026-10-23：3 组变 4 组的定向复现
+
+新增 `TestDefaultPoliciesCanDriftAcrossBatches`（纯 Go）与
+`TestV3ColumnSplitDriftAfterRecovery`（真实 native 写入/提交/读回）。
+schema 和配置始终相同：系统列 0、1，主键 100，VarChar 101，Int64 102，
+二维 FloatVector 103；开启 system-column / average-size split，阈值 64。
+首批字符串为 `short`，第二批长度 1024。两个批次的采样平均大小跨过阈值。
+
+| 阶段 | GroupID → fields |
+| --- | --- |
+| 首批，3 组 | 0 → [0,1,100]；1 → [101,102]；103 → [103] |
+| 丢失 split 后重新采样，4 组 | 0 → [0,1,100]；1 → [102]；101 → [101]；103 → [103] |
+| 正确恢复后续写，仍为 3 组 | 0 → [0,1,100]；1 → [101,102]；103 → [103] |
+
+原生回归执行以下流程：
+
+1. 真正的 SyncTask 首次按 DefaultPolicies 写入并提交，不预设分组；捕获
+   SaveBinlogPaths 的实际 Stats / ManifestPath / 行数，省略 Binlogs 后做
+   protobuf 序列化、反序列化，模拟 V3 catalog 重载。
+2. 调用实际 initMetaCache 恢复。负对照主动清空恢复布局，模拟旧恢复结果，
+   再写入长字符串，真实提交返回：
+   `Column group size mismatch: existing has 3 groups, but appended has 4 groups`。
+   拒绝后不发布 SaveBinlogPaths，读回已提交 manifest 仍只有原始首行。
+   这是丢失 split 的对照实验，未启动旧二进制或进行真实进程重启。
+3. 正对照保留恢复布局，写入相同长字符串成功；manifest 从版本 1 变为 2，
+   原 GroupID、字段集合、parquet 格式保留，各组累计 MemorySize 增加。
+   通过 native reader 读回主键 [10,20] 和两批字符串内容，验证实际文件数据。
+4. 测试限制为最多 2 次提交尝试，避免复现时无限重试。3.0 用例断言该错误
+   为 ErrLoonTransient；master 断言 ErrLoonPermanent，分别遵守分支语义。
+
+### 对日志中 retried=392 的源码追踪
+
+3.0 固定的 milvus-storage f38765d 在
+`cpp/src/transaction/transaction.cpp` 的追加分组检查中构造
+`arrow::Status::Invalid`。该错误沿 CommitManifestUpdates →
+HandleLoonFFIResult 进入 Go；3.0 后者把所有失败统一包装为
+ErrLoonTransient，BulkPackWriterV3 的 classifyLoonErr 继续允许重试。
+生产 write_buffer 创建 SyncTask 时设置了 AttemptAlways，因此不能将
+classifyLoonErr 注释中的“bounded retry”当作线上有界重试的证据。
+已生成的 4 组文件不会因重复提交自动变成 3 组。
+
+3.0 全仓实际 SplitColumns 调用也已核对：SyncTask 与 GrowingSourceSyncTask
+共用 resolveColumnGroups；其余 PackedRecordWriter / ManifestRecordWriter /
+TextManifestRecordWriter 仅在传入布局为空时首次计算。修复恢复入口提供原布局，
+并从 manifest 补全 Format，让恢复后的两条 sync 路径不再丢失原分组。
+本次回归没有覆盖 QueryNode growing-source 的真实 RPC，也没有调整 FFI 分类。
+
+### 本次执行结果与边界
+
+- 3.0：完整 `internal/storagecommon` 通过，包含实际 DefaultPolicies 的
+  3→4 条件和恢复匹配用例；移除了此前误引入的 master 专有
+  ErrLoonPermanent，读取错误测试改为遵守 3.0 的 transient 语义。
+- master：storagecommon、packed、metacache、pipeline 的定向恢复回归通过，
+  包含上述 native 错误负对照、正确恢复续写和数据读回。
+- 3.0：同一原生回归已添加，但本机现有 master 原生依赖在 metrics、
+  SetArrowIOThreadPoolCapacity、tokenizer 的 C ABI 上均与 3.0 不匹配，
+  因而仍未运行 3.0 原生集成。没有用 master 的通过替代 3.0 的通过。
+- 需要在匹配 3.0 core 和 f38765d 的环境执行以下命令，才能关闭该验证缺口：
+
+```bash
+go test -tags dynamic,test -gcflags="all=-N -l" -count=1 \
+  ./internal/storagecommon ./internal/storagev2/packed \
+  ./internal/flushcommon/metacache ./internal/flushcommon/pipeline \
+  -run 'TestV3ColumnSplitDriftAfterRecovery|TestDefaultPoliciesCanDriftAcrossBatches|TestRestoreColumn|TestInitMetaCache|TestLogicalSplit|TestSegment'
+```
+
+本修复作用于恢复时重新建立的 cache；已经生成错误 split、陷入重试的现存
+SyncTask 需要用修复版本重新建立恢复流程，不能靠仅更换 Coord 内存来修改
+该 task 持有的列组。历史 Stats 与 manifest 若已经不匹配，修复会拒绝恢复，
+本次没有实现自动重写历史数据。
