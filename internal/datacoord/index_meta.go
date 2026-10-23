@@ -884,18 +884,21 @@ func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, ind
 
 	// Subtract immediately — gauge tracks alive indexes only; deferred GC (RemoveSegmentIndex)
 	// must not re-subtract. fieldIndexLock.Lock serializes with concurrent RLock gauge adders.
-	var totalSize float64
-	m.segmentIndexes.Range(func(_ UniqueID, idxMap *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]) bool {
-		for indexID := range deletedSet {
-			if segIdx, ok := idxMap.Get(indexID); ok && segIdx.CollectionID == collID {
-				totalSize += float64(segIdx.IndexSerializedSize)
+	// The scan only feeds the gauge, so it is skipped while the gauge is suppressed.
+	if !metrics.DataCoordStoredIndexFilesSize.Suppressed() {
+		var totalSize float64
+		m.segmentIndexes.Range(func(_ UniqueID, idxMap *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]) bool {
+			for indexID := range deletedSet {
+				if segIdx, ok := idxMap.Get(indexID); ok && segIdx.CollectionID == collID {
+					totalSize += float64(segIdx.IndexSerializedSize)
+				}
 			}
+			return true
+		})
+		if totalSize > 0 {
+			metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
+				fmt.Sprintf("%d", collID)).Sub(totalSize)
 		}
-		return true
-	})
-	if totalSize > 0 {
-		metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
-			fmt.Sprintf("%d", collID)).Sub(totalSize)
 	}
 
 	mlog.Info(ctx, "IndexCoord metaTable MarkIndexAsDeleted success", mlog.Int64("collectionID", collID), mlog.Int64s("indexIDs", indexIDs))

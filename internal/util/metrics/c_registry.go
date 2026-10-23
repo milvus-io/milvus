@@ -32,6 +32,7 @@ import "C"
 import (
 	"context"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -44,8 +45,11 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
+	pkgmetrics "github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
+
+const cacheShardDiskUsageMetricName = "internal_cache_shard_disk_usage_bytes"
 
 // metricSorter is a sortable slice of *dto.Metric.
 type metricSorter []*dto.Metric
@@ -162,6 +166,7 @@ func (r *CRegistry) Gather() (res []*dto.MetricFamily, err error) {
 		mlog.Error(context.TODO(), "fail to parse storage prometheus metrics", mlog.Err(err))
 		return res, err
 	}
+	applyCollectionLevelMetricsMode(out1)
 
 	maps.Copy(out, out1)
 
@@ -173,6 +178,72 @@ func (r *CRegistry) Gather() (res []*dto.MetricFamily, err error) {
 
 	res = NormalizeMetricFamilies(out)
 	return res, err
+}
+
+func applyCollectionLevelMetricsMode(metricFamilies map[string]*dto.MetricFamily) {
+	if !pkgmetrics.IsCollectionLevelMetricsAggregateMode() {
+		return
+	}
+	// Normalize only the parsed Prometheus projection; the C++ caching layer's
+	// internal per-shard attribution remains unchanged.
+	metricFamily, ok := metricFamilies[cacheShardDiskUsageMetricName]
+	if !ok || metricFamily.GetType() != dto.MetricType_GAUGE {
+		return
+	}
+	aggregateGaugeMetricFamilyLabel(metricFamily, "shard", pkgmetrics.AllLabel)
+}
+
+// aggregateGaugeMetricFamilyLabel collapses labelName to aggregateValue and
+// sums gauges that end up with the same label set. The family is parsed for
+// the current scrape only, so its metrics are relabeled in place and the
+// first metric of each label set accumulates the others.
+func aggregateGaugeMetricFamilyLabel(metricFamily *dto.MetricFamily, labelName, aggregateValue string) {
+	aggregateValuePtr := proto.String(aggregateValue)
+	aggregated := make(map[string]*dto.Metric)
+	kept := metricFamily.Metric[:0]
+	for _, metric := range metricFamily.Metric {
+		label := findMetricLabel(metric, labelName)
+		if metric.GetGauge() == nil || label == nil {
+			kept = append(kept, metric)
+			continue
+		}
+		label.Value = aggregateValuePtr
+		sort.Slice(metric.Label, func(i, j int) bool {
+			return metric.Label[i].GetName() < metric.Label[j].GetName()
+		})
+		key := metricLabelKey(metric.Label)
+		if current, ok := aggregated[key]; ok {
+			current.Gauge.Value = proto.Float64(current.GetGauge().GetValue() + metric.GetGauge().GetValue())
+			continue
+		}
+		aggregated[key] = metric
+		kept = append(kept, metric)
+	}
+	metricFamily.Metric = kept
+}
+
+func findMetricLabel(metric *dto.Metric, labelName string) *dto.LabelPair {
+	for _, label := range metric.Label {
+		if label.GetName() == labelName {
+			return label
+		}
+	}
+	return nil
+}
+
+func metricLabelKey(labels []*dto.LabelPair) string {
+	var builder strings.Builder
+	for _, label := range labels {
+		name := label.GetName()
+		value := label.GetValue()
+		builder.WriteString(strconv.Itoa(len(name)))
+		builder.WriteByte(':')
+		builder.WriteString(name)
+		builder.WriteString(strconv.Itoa(len(value)))
+		builder.WriteByte(':')
+		builder.WriteString(value)
+	}
+	return builder.String()
 }
 
 // gatherJemallocMetrics collects comprehensive jemalloc stats and returns them as metric families.
