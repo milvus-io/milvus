@@ -26,4 +26,4 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 
 - FlushAll, AlterReplicateConfig, AlterWAL act as **global barriers**: no other messages can be in flight on any PChannel.
 - AlterResourceGroup, DropResourceGroup are serialized via ExclusiveCluster but are CChannel-only (no PChannel-level exclusive lock). Resource groups describe the nodes of one cluster, so these messages are issued through `StartUnreplicableBroadcastWithResourceKeys` on any replicate role, written to the local WAL, and never replicated.
-- AddFileResource and RemoveFileResource use the ordinary primary-only broadcast API and are eligible for CDC. ExclusiveCluster orders their metadata callbacks against schema callbacks. It does not guarantee resource download readiness on other PChannels; see [File Resource Metadata in WAL](../../../design-docs/design_docs/20261021-file-resource-wal.md).
+- AddFileResource and RemoveFileResource use the ordinary primary-only broadcast API and are eligible for CDC. ExclusiveCluster orders their metadata callbacks against schema callbacks. It does not guarantee resource download readiness on other PChannels.
