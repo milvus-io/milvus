@@ -32,21 +32,14 @@ namespace {
 
 int64_t
 estimate_timestamp_index_bytes(int64_t num_rows, int64_t num_chunks) {
-    auto num_slices = std::max<int64_t>(1, (num_rows + 4095) / 4096);
+    auto num_slices = std::max<int64_t>(
+        1,
+        (num_rows + (kTimestampIndexSliceRows - 1)) / kTimestampIndexSliceRows);
     return sizeof(TimestampIndex) +
            num_slices *
                static_cast<int64_t>(sizeof(int64_t) * 2 + sizeof(Timestamp)) +
            num_chunks *
                static_cast<int64_t>(sizeof(const Timestamp*) + sizeof(int64_t));
-}
-
-TimestampIndex
-build_timestamp_index(const Timestamp* data, size_t num_rows) {
-    TimestampIndex index;
-    auto meta = GenerateFakeSlices(data, num_rows, 4096);
-    index.set_length_meta(std::move(meta));
-    index.build_with(data, num_rows);
-    return index;
 }
 
 std::unique_ptr<OffsetMap>
@@ -188,7 +181,7 @@ TimestampIndexTranslator::get_cells(
                    "timestamp chunk row count {} != expected {}",
                    span.row_count(),
                    num_rows_);
-        index = build_timestamp_index(ts_ptr, num_rows_);
+        index = BuildTimestampIndex(ts_ptr, num_rows_);
     } else {
         std::vector<Timestamp> temp(num_rows_);
         size_t offset = 0;
@@ -205,7 +198,7 @@ TimestampIndexTranslator::get_cells(
                    "timestamp total row count {} != expected {}",
                    offset,
                    num_rows_);
-        index = build_timestamp_index(temp.data(), num_rows_);
+        index = BuildTimestampIndex(temp.data(), num_rows_);
     }
 
     std::vector<std::pair<milvus::cachinglayer::cid_t,
