@@ -27,6 +27,13 @@ func TestGenericScalarKeyPreservesEquality(t *testing.T) {
 		{Val: &planpb.GenericValue_FloatVal{FloatVal: 1}},
 		{Val: &planpb.GenericValue_FloatVal{FloatVal: math.Inf(1)}},
 		{Val: &planpb.GenericValue_FloatVal{FloatVal: math.NaN()}},
+		{Val: &planpb.GenericValue_FloatVal{FloatVal: math.Float64frombits(0xfff8000000000042)}},
+		{Val: &planpb.GenericValue_FloatVal{FloatVal: math.Float64frombits(0x7ff0000000000001)}},
+		{Val: &planpb.GenericValue_FloatVal{FloatVal: math.Inf(-1)}},
+		// Distinct DOUBLE literals must remain distinct even if FLOAT execution
+		// would narrow both to the same value. That rewrite has a separate guard.
+		{Val: &planpb.GenericValue_FloatVal{FloatVal: 16777216}},
+		{Val: &planpb.GenericValue_FloatVal{FloatVal: 16777217}},
 		{Val: &planpb.GenericValue_StringVal{StringVal: ""}},
 		{Val: &planpb.GenericValue_StringVal{StringVal: "1"}},
 		{Val: &planpb.GenericValue_ArrayVal{ArrayVal: &planpb.Array{}}},

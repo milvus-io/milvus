@@ -34,6 +34,7 @@
 namespace milvus::index {
 
 struct SortedBuildParams {
+    bool nan_total_order{true};
     bool nested{false};
     DataType field_type{DataType::NONE};
     DataType value_type{DataType::NONE};

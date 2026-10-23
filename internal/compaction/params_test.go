@@ -108,19 +108,20 @@ func TestGetJSONParams(t *testing.T) {
 	err = json.Unmarshal([]byte(jsonStr), &result)
 	assert.NoError(t, err)
 	assert.Equal(t, Params{
-		StorageVersion:            storageVersion,
-		StorageFormat:             paramtable.Get().DataNodeCfg.StorageFormat.GetValue(),
-		BinLogMaxSize:             paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
-		UseMergeSort:              paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool(),
-		MaxSegmentMergeSort:       paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),
-		PreferSegmentSizeRatio:    paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat(),
-		BloomFilterApplyBatchSize: paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt(),
-		StorageConfig:             CreateStorageConfig(),
-		UseLoonFFI:                paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool(),
-		LOBHoleRatioThreshold:     GetLOBHoleRatioThreshold(),
-		TextInlineThreshold:       getTextInlineThreshold(),
-		TextMaxLobFileBytes:       getTextMaxLobFileBytes(),
-		TextFlushThresholdBytes:   getTextFlushThresholdBytes(),
+		SupportsPartialPartitionStats: true,
+		StorageVersion:                storageVersion,
+		StorageFormat:                 paramtable.Get().DataNodeCfg.StorageFormat.GetValue(),
+		BinLogMaxSize:                 paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64(),
+		UseMergeSort:                  paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool(),
+		MaxSegmentMergeSort:           paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt(),
+		PreferSegmentSizeRatio:        paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSizeRatio.GetAsFloat(),
+		BloomFilterApplyBatchSize:     paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt(),
+		StorageConfig:                 CreateStorageConfig(),
+		UseLoonFFI:                    paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool(),
+		LOBHoleRatioThreshold:         GetLOBHoleRatioThreshold(),
+		TextInlineThreshold:           getTextInlineThreshold(),
+		TextMaxLobFileBytes:           getTextMaxLobFileBytes(),
+		TextFlushThresholdBytes:       getTextFlushThresholdBytes(),
 	}, result)
 }
 
@@ -189,4 +190,17 @@ func TestGetParamsFromJSON_EmptyJSON(t *testing.T) {
 	emptyJSON := ``
 	_, err := ParseParamsFromJSON(emptyJSON)
 	assert.Error(t, err)
+}
+
+func TestPartialPartitionStatsCapability(t *testing.T) {
+	paramtable.Init()
+	require.False(t, GenParams().SupportsPartialPartitionStats)
+	legacy, err := ParseParamsFromJSON(`{"storage_version":2}`)
+	require.NoError(t, err)
+	require.False(t, legacy.SupportsPartialPartitionStats)
+	encoded, err := GenerateJSONParams(nil)
+	require.NoError(t, err)
+	current, err := ParseParamsFromJSON(encoded)
+	require.NoError(t, err)
+	require.True(t, current.SupportsPartialPartitionStats)
 }

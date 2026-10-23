@@ -44,6 +44,7 @@ ParseBuildParams(const Config& params,
                  DataType default_type,
                  bool array_builder) {
     SortedBuildParams result;
+    result.nan_total_order = SupportsNaNTotalOrder(params);
     result.nested = ParseNested(params);
     result.field_type =
         ReadDataTypeParam(params, "field_type")
@@ -292,7 +293,10 @@ SortedIndexBuilder<T>::Build(const ScalarBuildInput<T>& input) && {
     if (total_num_rows_ == 0) {
         ThrowInfo(DataIsEmpty, "sorted index cannot build empty input");
     }
-    std::sort(data_.begin(), data_.end());
+    std::sort(
+        data_.begin(), data_.end(), [&](const auto& left, const auto& right) {
+            return ScalarIndexLess{params_.nan_total_order}(left.a_, right.a_);
+        });
     auto offsets = MakeNumericOffsets(data_, total_num_rows_);
     auto artifact =
         std::make_unique<SortedIndexArtifact<T>>(std::move(data_),
@@ -320,8 +324,7 @@ SortedStringIndexBuilder::Build(
         validity_.resize(total_num_rows_ + n, true);
         for (size_t i = 0; i < n; ++i) {
             const auto coordinate = total_num_rows_ + i;
-            const bool is_valid =
-                params_.nested || !batch.validity || batch.validity[i];
+            const bool is_valid = !batch.validity || batch.validity[i];
             if (is_valid) {
                 postings_[std::string(batch.values[i])].push_back(
                     static_cast<uint32_t>(coordinate));
@@ -370,16 +373,26 @@ namespace {
 template <typename T>
 class NumericArrayBuilderImpl final : public SortedArrayIndexBuilder::Impl {
  public:
+    explicit NumericArrayBuilderImpl(bool total_order)
+        : total_order_(total_order) {
+    }
     void
     AddRow(const ArrayView& value, int32_t coordinate) override {
         for (int i = 0; i < value.length(); ++i) {
+            if (!value.is_element_valid(i)) {
+                continue;
+            }
             data_.emplace_back(ArrayValue<T>(value, i), coordinate);
         }
     }
 
     storage::ArtifactPtr
     Finish(TargetBitmap validity, size_t count) override {
-        std::sort(data_.begin(), data_.end());
+        std::sort(data_.begin(),
+                  data_.end(),
+                  [&](const auto& left, const auto& right) {
+                      return ScalarIndexLess{total_order_}(left.a_, right.a_);
+                  });
         auto offsets = MakeNumericOffsets(data_, count);
         return std::make_unique<SortedIndexArtifact<T>>(std::move(data_),
                                                         std::move(validity),
@@ -389,6 +402,7 @@ class NumericArrayBuilderImpl final : public SortedArrayIndexBuilder::Impl {
     }
 
  private:
+    bool total_order_;
     std::vector<IndexStructure<T>> data_;
 };
 
@@ -397,6 +411,9 @@ class StringArrayBuilderImpl final : public SortedArrayIndexBuilder::Impl {
     void
     AddRow(const ArrayView& value, int32_t coordinate) override {
         for (int i = 0; i < value.length(); ++i) {
+            if (!value.is_element_valid(i)) {
+                continue;
+            }
             postings_[std::string(ArrayValue<std::string_view>(value, i))]
                 .push_back(static_cast<uint32_t>(coordinate));
         }
@@ -426,23 +443,29 @@ class StringArrayBuilderImpl final : public SortedArrayIndexBuilder::Impl {
 };
 
 std::unique_ptr<SortedArrayIndexBuilder::Impl>
-MakeArrayImpl(DataType element_type) {
+MakeArrayImpl(DataType element_type, bool total_order) {
     switch (element_type) {
         case DataType::BOOL:
-            return std::make_unique<NumericArrayBuilderImpl<bool>>();
+            return std::make_unique<NumericArrayBuilderImpl<bool>>(total_order);
         case DataType::INT8:
-            return std::make_unique<NumericArrayBuilderImpl<int8_t>>();
+            return std::make_unique<NumericArrayBuilderImpl<int8_t>>(
+                total_order);
         case DataType::INT16:
-            return std::make_unique<NumericArrayBuilderImpl<int16_t>>();
+            return std::make_unique<NumericArrayBuilderImpl<int16_t>>(
+                total_order);
         case DataType::INT32:
-            return std::make_unique<NumericArrayBuilderImpl<int32_t>>();
+            return std::make_unique<NumericArrayBuilderImpl<int32_t>>(
+                total_order);
         case DataType::INT64:
         case DataType::TIMESTAMPTZ:
-            return std::make_unique<NumericArrayBuilderImpl<int64_t>>();
+            return std::make_unique<NumericArrayBuilderImpl<int64_t>>(
+                total_order);
         case DataType::FLOAT:
-            return std::make_unique<NumericArrayBuilderImpl<float>>();
+            return std::make_unique<NumericArrayBuilderImpl<float>>(
+                total_order);
         case DataType::DOUBLE:
-            return std::make_unique<NumericArrayBuilderImpl<double>>();
+            return std::make_unique<NumericArrayBuilderImpl<double>>(
+                total_order);
         case DataType::STRING:
         case DataType::VARCHAR:
         case DataType::TEXT:
@@ -475,7 +498,7 @@ SortedArrayIndexBuilder::SortedArrayIndexBuilder(SortedBuildParams params)
                   "sorted ARRAY builder requires a concrete element type");
     }
     params_.field_type = DataType::ARRAY;
-    impl_ = MakeArrayImpl(params_.value_type);
+    impl_ = MakeArrayImpl(params_.value_type, params_.nan_total_order);
 }
 
 SortedArrayIndexBuilder::~SortedArrayIndexBuilder() = default;

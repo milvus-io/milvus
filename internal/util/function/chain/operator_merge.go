@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // =============================================================================
@@ -762,7 +763,7 @@ func (op *MergeOp) collectWeightedScores(inputs []*DataFrame, chunkIdx int, layo
 type scoreMergeFunc func(existing float32, new float32, count int) (float32, int)
 
 func maxMergeFunc(existing, new float32, count int) (float32, int) {
-	if new > existing {
+	if typeutil.Float32ToSortableUint32(new) > typeutil.Float32ToSortableUint32(existing) {
 		return new, count + 1
 	}
 	return existing, count + 1
@@ -1044,16 +1045,16 @@ func sortAndExtractResults(candidateScores map[candidateKey]float32, candidateLo
 	return scores, locs
 }
 
-// lessScoredID is the ordering sortIDs used to express directly, kept as a
-// predicate so the three-way comparator below is equivalent to the previous
-// sort.SliceStable call by construction -- including for scores that compare
-// unequal in both directions, such as NaN.
+// lessScoredID orders scores with scalar semantics because public function
+// chains can derive $score from arbitrary floating scalar fields.
 func lessScoredID(a, b scoredID, descending bool) bool {
-	if a.score != b.score {
+	aKey := typeutil.Float32ToSortableUint32(a.score)
+	bKey := typeutil.Float32ToSortableUint32(b.score)
+	if aKey != bKey {
 		if descending {
-			return a.score > b.score
+			return aKey > bKey
 		}
-		return a.score < b.score
+		return aKey < bKey
 	}
 	return compareCandidateKeys(a.key, b.key) < 0
 }

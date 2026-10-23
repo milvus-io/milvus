@@ -239,7 +239,7 @@ func integerOrFloatElementGetter[T constraints.Integer | constraints.Float](fiel
 			if float64Reader.IsNull(i) {
 				return 0, WrapNullElementErr(field)
 			}
-			return T(float64Reader.Value(i)), nil
+			return convertFloat64Value[T](float64Reader.Value(i), field)
 		}, nil
 	default:
 		return nil, WrapTypeErr(field, valueReader.DataType().Name())

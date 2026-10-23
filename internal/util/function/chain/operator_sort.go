@@ -19,8 +19,8 @@
 package chain
 
 import (
+	"cmp"
 	"fmt"
-	"math"
 	"sort"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func init() {
@@ -116,7 +117,7 @@ func (o *SortOp) Execute(ctx *types.FuncContext, input *DataFrame) (*OperatorRes
 		}
 
 		// Sort indices based on values, with tie-breaking by ID ascending.
-		// Numeric values precede NaNs, which precede nulls in either direction.
+		// NaNs share the maximum floating key; nulls stay last in either direction.
 		less, useTypedLess := makeArrayRowLess(sortChunk, tbChunk, o.desc)
 		if useTypedLess {
 			sort.SliceStable(indices, func(i, j int) bool {
@@ -142,11 +143,6 @@ func (o *SortOp) Execute(ctx *types.FuncContext, input *DataFrame) (*OperatorRes
 				if jNull {
 					return true // non-null always goes before null
 				}
-				iNaN, jNaN := isArrayValueNaN(sortChunk, vi), isArrayValueNaN(sortChunk, vj)
-				if iNaN != jNaN {
-					return !iNaN
-				}
-
 				cmp := compareArrayValues(sortChunk, vi, vj)
 				if cmp != 0 {
 					if o.desc {
@@ -175,13 +171,9 @@ func makeArrayRowLess(sortArr arrow.Array, tieArr arrow.Array, desc bool) (rowLe
 	if scoreArr, ok := sortArr.(*array.Float32); ok && scoreArr.NullN() == 0 {
 		if idArr, ok := tieArr.(*array.Int64); ok && idArr.NullN() == 0 {
 			return func(i, j int) bool {
-				si := scoreArr.Value(i)
-				sj := scoreArr.Value(j)
-				iNaN, jNaN := math.IsNaN(float64(si)), math.IsNaN(float64(sj))
-				if iNaN != jNaN {
-					return !iNaN
-				}
-				if !iNaN && si != sj {
+				si := typeutil.Float32ToSortableUint32(scoreArr.Value(i))
+				sj := typeutil.Float32ToSortableUint32(scoreArr.Value(j))
+				if si != sj {
 					return si > sj
 				}
 				return idArr.Value(i) < idArr.Value(j)
@@ -189,17 +181,6 @@ func makeArrayRowLess(sortArr arrow.Array, tieArr arrow.Array, desc bool) (rowLe
 		}
 	}
 	return nil, false
-}
-
-func isArrayValueNaN(arr arrow.Array, index int) bool {
-	switch a := arr.(type) {
-	case *array.Float32:
-		return math.IsNaN(float64(a.Value(index)))
-	case *array.Float64:
-		return math.IsNaN(a.Value(index))
-	default:
-		return false
-	}
 }
 
 // isComparableType checks if an Arrow data type is comparable for sorting.
@@ -260,9 +241,9 @@ func compareArrayValues(arr arrow.Array, i, j int) int {
 	case *array.Uint64:
 		return compareTyped(a, i, j)
 	case *array.Float32:
-		return compareTyped(a, i, j)
+		return cmp.Compare(typeutil.Float32ToSortableUint32(a.Value(i)), typeutil.Float32ToSortableUint32(a.Value(j)))
 	case *array.Float64:
-		return compareTyped(a, i, j)
+		return cmp.Compare(typeutil.Float64ToSortableUint64(a.Value(i)), typeutil.Float64ToSortableUint64(a.Value(j)))
 	case *array.String:
 		return compareTyped(a, i, j)
 	default:

@@ -19,12 +19,15 @@
 package expr
 
 import (
+	"context"
+	"fmt"
 	"math"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -885,5 +888,84 @@ func (s *NumCombineExprTestSuite) TestNonFiniteWeights() {
 			s.Equal("true", status.ExtraInfo[merr.InputErrorFlagKey])
 			s.Contains(status.Reason, "weight[1] must be finite")
 		})
+	}
+}
+
+func TestNumCombineFloatingTotalOrder(t *testing.T) {
+	nan := math.Float64frombits(0x7ff8000000000001)
+	negativeNaN := math.Float64frombits(0xfff8000000000002)
+	negativeZero := math.Copysign(0, -1)
+	left := []float64{nan, math.Inf(1), nan, math.Inf(-1), negativeZero, 0, nan, nan, 0}
+	right := []float64{math.Inf(1), negativeNaN, 3, nan, 0, negativeZero, negativeNaN, 0, negativeNaN}
+	for _, dataType := range []arrow.DataType{arrow.PrimitiveTypes.Float32, arrow.PrimitiveTypes.Float64} {
+		for _, mode := range []string{ModeMin, ModeMax} {
+			for _, policy := range []NumCombineNullPolicy{NumCombineNullPropagate, NumCombineNullAsZero, NumCombineNullSkip} {
+				t.Run(fmt.Sprintf("%s/%s/nullPolicy=%d", dataType.Name(), mode, policy), func(t *testing.T) {
+					pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
+					defer pool.AssertSize(t, 0)
+					makeColumn := func(values []float64, nullRow int) *arrow.Chunked {
+						valid := make([]bool, len(values))
+						for i := range valid {
+							valid[i] = i != nullRow
+						}
+						var arr arrow.Array
+						if dataType.ID() == arrow.FLOAT32 {
+							b := array.NewFloat32Builder(pool)
+							vals := make([]float32, len(values))
+							for i, value := range values {
+								vals[i] = float32(value)
+							}
+							b.AppendValues(vals, valid)
+							arr = b.NewArray()
+							b.Release()
+						} else {
+							b := array.NewFloat64Builder(pool)
+							b.AppendValues(values, valid)
+							arr = b.NewArray()
+							b.Release()
+						}
+						col := arrow.NewChunked(dataType, []arrow.Array{arr})
+						arr.Release()
+						return col
+					}
+					leftCol, rightCol := makeColumn(left, 8), makeColumn(right, 7)
+					defer leftCol.Release()
+					defer rightCol.Release()
+					expr, err := NewNumCombineExpr(mode, nil, WithNullPolicy(policy))
+					require.NoError(t, err)
+					outputs, err := expr.Execute(types.NewFuncContextFull(context.Background(), pool, types.StageL2Rerank), []*arrow.Chunked{leftCol, rightCol})
+					require.NoError(t, err)
+					require.Len(t, outputs, 1)
+					defer outputs[0].Release()
+					got := outputs[0].Chunk(0).(*array.Float32)
+					want := []float64{math.Inf(1), math.Inf(1), 3, math.Inf(-1), negativeZero, 0, nan, nan, nan}
+					if mode == ModeMax {
+						want = []float64{nan, nan, nan, nan, negativeZero, 0, nan, nan, nan}
+					} else if policy == NumCombineNullAsZero {
+						want[7], want[8] = 0, 0
+					}
+					for row, expected := range want {
+						if row >= 7 && policy == NumCombineNullPropagate {
+							require.True(t, got.IsNull(row), "row %d", row)
+							continue
+						}
+						require.False(t, got.IsNull(row), "row %d", row)
+						if math.IsNaN(expected) {
+							require.True(t, math.IsNaN(float64(got.Value(row))), "row %d", row)
+						} else {
+							require.Equal(t, math.Float32bits(float32(expected)), math.Float32bits(got.Value(row)), "row %d", row)
+						}
+					}
+				})
+			}
+		}
+	}
+	// Numeric combination arithmetic continues to propagate NaN, including
+	// indeterminate sums of infinities, independently of selection ordering.
+	for _, mode := range []string{ModeSum, ModeAvg} {
+		expr, err := NewNumCombineExpr(mode, nil)
+		require.NoError(t, err)
+		require.True(t, math.IsNaN(expr.combine([]float64{nan, 1}, nil)))
+		require.True(t, math.IsNaN(expr.combine([]float64{math.Inf(1), math.Inf(-1)}, nil)))
 	}
 }

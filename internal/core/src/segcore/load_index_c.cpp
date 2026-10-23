@@ -51,6 +51,7 @@
 #include "pb/cgo_msg.pb.h"
 #include "pb/schema.pb.h"
 #include "segcore/Types.h"
+#include "segcore/IndexLoadEligibility.h"
 #include "segcore/Utils.h"
 #include "storage/FileManager.h"
 #include "storage/LocalChunkManager.h"
@@ -208,6 +209,32 @@ EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info,
     // Estimation failure must reach the Go caller as an error: a swallowed
     // exception here would read as a zero-resource estimate and let the
     // segment pass load admission without any memory/disk reservation.
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CStatus
+CanLoadIndexFromSerializedInfo(const uint8_t* serialized_load_index_info,
+                               const uint64_t len,
+                               bool* can_load) {
+    SCOPE_CGO_CALL_METRIC();
+    try {
+        AssertInfo(can_load != nullptr, "index eligibility result is null");
+        auto info_proto = milvus::proto::cgo::LoadIndexInfo();
+        AssertInfo(info_proto.ParseFromArray(serialized_load_index_info, len),
+                   "failed to parse load index info");
+        // No field parsing or resource estimation is needed for this decision.
+        auto info = milvus::segcore::LoadIndexInfo();
+        info.field_type =
+            static_cast<milvus::DataType>(info_proto.field().data_type());
+        info.element_type =
+            static_cast<milvus::DataType>(info_proto.field().element_type());
+        for (const auto& [key, value] : info_proto.index_params()) {
+            info.index_params[key] = value;
+        }
+        *can_load = milvus::segcore::CanLoadIndex(
+            info, info_proto.current_scalar_index_version());
+        return milvus::SuccessCStatus();
+    }
     CGO_CATCH_AND_RETURN_CSTATUS
 }
 

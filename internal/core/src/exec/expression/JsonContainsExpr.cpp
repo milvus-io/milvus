@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "common/ScalarComparison.h"
 #include "JsonContainsExpr.h"
 
 #include <simdjson.h>
@@ -52,7 +53,7 @@ namespace exec {
 template <typename T>
 class ContainsAllMatcher {
  public:
-    explicit ContainsAllMatcher(const std::set<T>& targets) {
+    explicit ContainsAllMatcher(const std::set<T, ScalarLessThan<T>>& targets) {
         target_count_ = targets.size();
         use_small_ = (target_count_ <= 64);
         uint32_t idx = 0;
@@ -116,7 +117,8 @@ class ContainsAllMatcher {
     }
 
  private:
-    ankerl::unordered_dense::map<T, uint32_t> value_to_bit_;
+    ankerl::unordered_dense::map<T, uint32_t, ScalarHash<T>, ScalarEqualTo<T>>
+        value_to_bit_;
     size_t target_count_{0};
     bool use_small_{true};
     uint64_t full_mask_{0};
@@ -356,9 +358,12 @@ PhyJsonContainsFilterExpr::ExecArrayContainsImpl(EvalCtx& context) {
     using TypedSet = std::conditional_t<
         std::is_same_v<ExprValueType, std::string>,
         ankerl::unordered_dense::set<std::string, StringHash, std::equal_to<>>,
-        std::conditional_t<std::is_same_v<ExprValueType, bool>,
-                           std::unordered_set<bool>,
-                           ankerl::unordered_dense::set<ExprValueType>>>;
+        std::conditional_t<
+            std::is_same_v<ExprValueType, bool>,
+            std::unordered_set<bool>,
+            ankerl::unordered_dense::set<ExprValueType,
+                                         ScalarHash<ExprValueType>,
+                                         ScalarEqualTo<ExprValueType>>>>;
 
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
@@ -416,6 +421,16 @@ PhyJsonContainsFilterExpr::ExecArrayContainsImpl(EvalCtx& context) {
             const auto& array = data[i];
             const auto array_size = GetArrayRowSize(array);
             for (size_t j = 0; j < array_size; ++j) {
+                const bool member_valid = [&]() {
+                    if constexpr (std::is_same_v<ArrayType, ArrayValueView>) {
+                        return array.child().isValid(array.begin() + j);
+                    } else {
+                        return array.is_element_valid(j);
+                    }
+                }();
+                if (!member_valid) {
+                    continue;
+                }
                 if (elements.find(array.template get_data_unchecked<GetType>(
                         j)) != elements.end()) {
                     return true;
@@ -1013,7 +1028,8 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
     if (!arg_inited_) {
-        auto elements = std::make_shared<std::set<GetType>>();
+        auto elements =
+            std::make_shared<std::set<GetType, ScalarLessThan<GetType>>>();
         for (auto const& element : expr_->vals_) {
             elements->insert(GetValueWithCastNumber<GetType>(element));
         }
@@ -1022,7 +1038,8 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
     }
 
     auto elements =
-        std::static_pointer_cast<std::set<GetType>>(arg_cached_set_);
+        std::static_pointer_cast<std::set<GetType, ScalarLessThan<GetType>>>(
+            arg_cached_set_);
     int processed_cursor = 0;
     ContainsAllMatcher<GetType> matcher(*elements);
     std::vector<uint64_t> found_large(
@@ -1036,7 +1053,7 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
             const int size,
             TargetBitmapView res,
             TargetBitmapView valid_res,
-            const std::set<GetType>& elements) {
+            const std::set<GetType, ScalarLessThan<GetType>>& elements) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -1051,6 +1068,17 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
             if (matcher.use_small()) {
                 uint64_t found = 0;
                 for (size_t j = 0; j < array_size; ++j) {
+                    const bool member_valid = [&]() {
+                        if constexpr (std::is_same_v<ArrayType,
+                                                     ArrayValueView>) {
+                            return data[i].child().isValid(data[i].begin() + j);
+                        } else {
+                            return data[i].is_element_valid(j);
+                        }
+                    }();
+                    if (!member_valid) {
+                        continue;
+                    }
                     if (matcher.set_if_found(
                             data[i].template get_data_unchecked<GetType>(j),
                             found)) {
@@ -1062,6 +1090,17 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
                 std::fill(found_large.begin(), found_large.end(), 0);
                 size_t remaining = matcher.target_count();
                 for (size_t j = 0; j < array_size; ++j) {
+                    const bool member_valid = [&]() {
+                        if constexpr (std::is_same_v<ArrayType,
+                                                     ArrayValueView>) {
+                            return data[i].child().isValid(data[i].begin() + j);
+                        } else {
+                            return data[i].is_element_valid(j);
+                        }
+                    }();
+                    if (!member_valid) {
+                        continue;
+                    }
                     if (matcher.set_if_found(
                             data[i].template get_data_unchecked<GetType>(j),
                             found_large,
@@ -1160,7 +1199,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     if (!arg_inited_) {
-        auto elements = std::make_shared<std::set<GetType>>();
+        auto elements =
+            std::make_shared<std::set<GetType, ScalarLessThan<GetType>>>();
         for (auto const& element : expr_->vals_) {
             elements->insert(GetValueFromProto<GetType>(element));
         }
@@ -1169,7 +1209,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
     }
 
     auto elements =
-        std::static_pointer_cast<std::set<GetType>>(arg_cached_set_);
+        std::static_pointer_cast<std::set<GetType, ScalarLessThan<GetType>>>(
+            arg_cached_set_);
     int processed_cursor = 0;
     ContainsAllMatcher<GetType> matcher(*elements);
     std::vector<uint64_t> found_large(
@@ -1184,7 +1225,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAll(EvalCtx& context) {
             TargetBitmapView res,
             TargetBitmapView valid_res,
             const std::string& pointer,
-            const std::set<GetType>& elements) {
+            const std::set<GetType, ScalarLessThan<GetType>>& elements) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -1313,7 +1354,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
     }
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     if (!arg_inited_) {
-        auto elements = std::make_shared<std::set<GetType>>();
+        auto elements =
+            std::make_shared<std::set<GetType, ScalarLessThan<GetType>>>();
         for (auto const& element : expr_->vals_) {
             elements->insert(GetValueFromProto<GetType>(element));
         }
@@ -1322,7 +1364,8 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllByStats() {
     }
 
     auto elements =
-        std::static_pointer_cast<std::set<GetType>>(arg_cached_set_);
+        std::static_pointer_cast<std::set<GetType, ScalarLessThan<GetType>>>(
+            arg_cached_set_);
     if (elements->empty()) {
         MoveCursor();
         return std::make_shared<ColumnVector>(
@@ -1544,12 +1587,13 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
                             if (val.error()) {
                                 auto double_val = it.template get<double>();
                                 if (!double_val.error() &&
-                                    double_val.value() == element.int64_val()) {
+                                    ScalarEqual(double_val.value(),
+                                                element.int64_val())) {
                                     tmp_elements_index.erase(i);
                                 }
                                 continue;
                             }
-                            if (val.value() == element.int64_val()) {
+                            if (ScalarEqual(val.value(), element.int64_val())) {
                                 tmp_elements_index.erase(i);
                             }
                             break;
@@ -1559,7 +1603,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsAllWithDiffType(EvalCtx& context) {
                             if (val.error()) {
                                 continue;
                             }
-                            if (val.value() == element.float_val()) {
+                            if (ScalarEqual(val.value(), element.float_val())) {
                                 tmp_elements_index.erase(i);
                             }
                             break;
@@ -2142,12 +2186,13 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
                             if (val.error()) {
                                 auto double_val = it.template get<double>();
                                 if (!double_val.error() &&
-                                    double_val.value() == element.int64_val()) {
+                                    ScalarEqual(double_val.value(),
+                                                element.int64_val())) {
                                     return std::make_pair(true, true);
                                 }
                                 continue;
                             }
-                            if (val.value() == element.int64_val()) {
+                            if (ScalarEqual(val.value(), element.int64_val())) {
                                 return std::make_pair(true, true);
                             }
                             break;
@@ -2157,7 +2202,7 @@ PhyJsonContainsFilterExpr::ExecJsonContainsWithDiffType(EvalCtx& context) {
                             if (val.error()) {
                                 continue;
                             }
-                            if (val.value() == element.float_val()) {
+                            if (ScalarEqual(val.value(), element.float_val())) {
                                 return std::make_pair(true, true);
                             }
                             break;
@@ -2458,7 +2503,8 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
         [this, &struct_element_offsets](
             const index::IScalarPredicateReader<GetType>* index_ptr)
         -> TargetBitmap {
-        std::unordered_set<GetType> elements;
+        std::unordered_set<GetType, ScalarHash<GetType>, ScalarEqualTo<GetType>>
+            elements;
         for (const auto& element : expr_->vals_) {
             elements.insert(GetValueWithCastNumber<GetType>(element));
         }

@@ -18,6 +18,7 @@ package storage
 
 import (
 	"context"
+	"math"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
@@ -31,24 +32,29 @@ import (
 // FieldStats contains statistics data for any column
 // todo: compatible to PrimaryKeyStats
 type FieldStats struct {
-	FieldID   int64                            `json:"fieldID"`
-	Type      schemapb.DataType                `json:"type"`
-	Max       ScalarFieldValue                 `json:"max"`       // for scalar field
-	Min       ScalarFieldValue                 `json:"min"`       // for scalar field
-	BFType    bloomfilter.BFType               `json:"bfType"`    // for scalar field
-	BF        bloomfilter.BloomFilterInterface `json:"bf"`        // for scalar field
-	Centroids []VectorFieldValue               `json:"centroids"` // for vector field
+	// FloatBoundsComplete marks bounds built with NaN-aware comparisons. Legacy
+	// finite bounds can have silently ignored stored NaNs and cannot prune safely.
+	// Old readers ignore this additive field; nonfinite bounds are never persisted.
+	FloatBoundsComplete bool                             `json:"floatBoundsComplete,omitempty"`
+	FieldID             int64                            `json:"fieldID"`
+	Type                schemapb.DataType                `json:"type"`
+	Max                 ScalarFieldValue                 `json:"max"`       // for scalar field
+	Min                 ScalarFieldValue                 `json:"min"`       // for scalar field
+	BFType              bloomfilter.BFType               `json:"bfType"`    // for scalar field
+	BF                  bloomfilter.BloomFilterInterface `json:"bf"`        // for scalar field
+	Centroids           []VectorFieldValue               `json:"centroids"` // for vector field
 }
 
 func (stats *FieldStats) Clone() FieldStats {
 	return FieldStats{
-		FieldID:   stats.FieldID,
-		Type:      stats.Type,
-		Max:       stats.Max,
-		Min:       stats.Min,
-		BFType:    stats.BFType,
-		BF:        stats.BF,
-		Centroids: stats.Centroids,
+		FloatBoundsComplete: stats.FloatBoundsComplete,
+		FieldID:             stats.FieldID,
+		Type:                stats.Type,
+		Max:                 stats.Max,
+		Min:                 stats.Min,
+		BFType:              stats.BFType,
+		BF:                  stats.BF,
+		Centroids:           stats.Centroids,
 	}
 }
 
@@ -69,6 +75,12 @@ func (stats *FieldStats) UnmarshalJSON(data []byte) error {
 		return merr.WrapErrServiceInternalMsg("invalid fieldStats, no fieldID")
 	}
 
+	stats.FloatBoundsComplete = false
+	if value := messageMap["floatBoundsComplete"]; value != nil {
+		if err := json.Unmarshal(*value, &stats.FloatBoundsComplete); err != nil {
+			return err
+		}
+	}
 	stats.Type = schemapb.DataType_Int64
 	value, ok := messageMap["type"]
 	if !ok {
@@ -407,6 +419,35 @@ func (stats *FieldStats) UpdateMinMax(pk ScalarFieldValue) {
 	}
 }
 
+// HasUsableScalarBounds rejects unknown legacy float bounds and absent bounds.
+// Keeping those segments is necessary even for finite predicates: a legacy max
+// may exclude stored NaNs which satisfy greater-than predicates in scalar order.
+func (stats *FieldStats) HasUsableScalarBounds() bool {
+	if stats.Min == nil || stats.Max == nil {
+		return false
+	}
+	return (stats.Type != schemapb.DataType_Float && stats.Type != schemapb.DataType_Double) || stats.FloatBoundsComplete
+}
+
+func (stats *FieldStats) hasJSONSafeBounds() bool {
+	if stats.Type != schemapb.DataType_Float && stats.Type != schemapb.DataType_Double {
+		return true
+	}
+	for _, bound := range []ScalarFieldValue{stats.Min, stats.Max} {
+		var value float64
+		switch v := bound.(type) {
+		case *FloatFieldValue:
+			value = float64(v.Value)
+		case *DoubleFieldValue:
+			value = v.Value
+		}
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return false
+		}
+	}
+	return true
+}
+
 // SetVectorCentroids update centroids value
 func (stats *FieldStats) SetVectorCentroids(centroids ...VectorFieldValue) {
 	stats.Centroids = centroids
@@ -421,9 +462,10 @@ func NewFieldStats(fieldID int64, pkType schemapb.DataType, rowNum int64) (*Fiel
 	}
 	bfType := paramtable.Get().CommonCfg.BloomFilterType.GetValue()
 	return &FieldStats{
-		FieldID: fieldID,
-		Type:    pkType,
-		BFType:  bloomfilter.BFTypeFromString(bfType),
+		FloatBoundsComplete: pkType == schemapb.DataType_Float || pkType == schemapb.DataType_Double,
+		FieldID:             fieldID,
+		Type:                pkType,
+		BFType:              bloomfilter.BFTypeFromString(bfType),
 		BF: bloomfilter.NewBloomFilterWithType(
 			uint(rowNum),
 			paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),

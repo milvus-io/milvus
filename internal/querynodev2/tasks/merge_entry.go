@@ -19,8 +19,12 @@
 package tasks
 
 import (
+	"cmp"
+
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // epsilon matches C++ common/Consts.h: const float EPSILON = 0.0000000119
@@ -68,23 +72,33 @@ func (e *mergeEntry) advance() bool {
 	return e.cursor < e.scoreArr.Len()
 }
 
-// greaterInt64Pk: equal scores (within epsilon) → smaller PK is "greater" so it
-// pops first; otherwise sort by score DESC.
-func (e *mergeEntry) greaterInt64Pk(other *mergeEntry) bool {
-	diff := e.scoreVal() - other.scoreVal()
+// compareMergeScores retains the existing epsilon tie rule and shares the
+// scalar ordering keys. Score validation at stage boundaries is unchanged.
+func compareMergeScores(a, b float32) int {
+	diff := a - b
 	if diff > -epsilon && diff < epsilon {
-		return e.idInt64Val() < other.idInt64Val() // equal score → PK ASC
+		return 0
 	}
-	return diff > 0 // score DESC
+	return cmp.Compare(typeutil.Float32ToSortableUint32(a), typeutil.Float32ToSortableUint32(b))
+}
+
+// greaterInt64Pk: equal scores (within epsilon when finite) use PK ASC;
+// otherwise sort by score DESC.
+func (e *mergeEntry) greaterInt64Pk(other *mergeEntry) bool {
+	order := compareMergeScores(e.scoreVal(), other.scoreVal())
+	if order == 0 {
+		return e.idInt64Val() < other.idInt64Val()
+	}
+	return order > 0
 }
 
 // greaterStringPk is the varchar PK variant of greater.
 func (e *mergeEntry) greaterStringPk(other *mergeEntry) bool {
-	diff := e.scoreVal() - other.scoreVal()
-	if diff > -epsilon && diff < epsilon {
+	order := compareMergeScores(e.scoreVal(), other.scoreVal())
+	if order == 0 {
 		return e.idStringVal() < other.idStringVal()
 	}
-	return diff > 0
+	return order > 0
 }
 
 // mergeHeapInt64Pk is a max-heap of mergeEntry by greaterInt64Pk.

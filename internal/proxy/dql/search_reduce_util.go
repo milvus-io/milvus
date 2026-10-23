@@ -880,35 +880,19 @@ func checkSearchResultData(data *schemapb.SearchResultData, nq int64, topk int64
 }
 
 func selectHighestScoreIndex(ctx context.Context, subSearchResultData []*schemapb.SearchResultData, subSearchNqOffset [][]int64, cursors []int64, qi int64) (int, int64) {
-	var (
-		subSearchIdx        = -1
-		resultDataIdx int64 = -1
-	)
-	maxScore := minFloat32
+	subSearchIdx := -1
+	resultDataIdx := int64(-1)
+	var maxKey uint32
 	for i := range cursors {
 		if cursors[i] >= subSearchResultData[i].Topks[qi] {
 			continue
 		}
 		sIdx := subSearchNqOffset[i][qi] + cursors[i]
-		sScore := subSearchResultData[i].Scores[sIdx]
-
-		// Choose the larger score idx or the smaller pk idx with the same score
-		if subSearchIdx == -1 || sScore > maxScore {
-			subSearchIdx = i
-			resultDataIdx = sIdx
-			maxScore = sScore
-		} else if sScore == maxScore {
-			if subSearchIdx == -1 {
-				// A bad case happens where Knowhere returns distance/score == +/-maxFloat32
-				// by mistake.
-				mlog.Error(ctx, "a bad score is returned, something is wrong here!", mlog.Float32("score", sScore))
-			} else if typeutil.ComparePK(
-				typeutil.GetPK(subSearchResultData[i].GetIds(), sIdx),
-				typeutil.GetPK(subSearchResultData[subSearchIdx].GetIds(), resultDataIdx)) {
-				subSearchIdx = i
-				resultDataIdx = sIdx
-				maxScore = sScore
-			}
+		key := typeutil.Float32ToSortableUint32(subSearchResultData[i].Scores[sIdx])
+		if subSearchIdx == -1 || key > maxKey || (key == maxKey && typeutil.ComparePK(
+			typeutil.GetPK(subSearchResultData[i].GetIds(), sIdx),
+			typeutil.GetPK(subSearchResultData[subSearchIdx].GetIds(), resultDataIdx))) {
+			subSearchIdx, resultDataIdx, maxKey = i, sIdx, key
 		}
 	}
 	return subSearchIdx, resultDataIdx

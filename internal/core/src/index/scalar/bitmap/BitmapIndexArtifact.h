@@ -24,6 +24,7 @@
 #include <roaring/roaring.hh>
 
 #include "common/Types.h"
+#include "index/scalar/ScalarIndexUtils.h"
 #include "storage/artifact/Artifact.h"
 #include "storage/artifact/FileSink.h"
 
@@ -33,7 +34,7 @@
 namespace milvus::index {
 
 template <typename T>
-using BitmapArtifactPostingMap = std::map<T, roaring::Roaring, std::less<>>;
+using BitmapArtifactPostingMap = std::map<T, roaring::Roaring, ScalarIndexLess>;
 
 template <typename T>
 class BitmapIndexArtifact final : public storage::Artifact {

@@ -461,25 +461,25 @@ func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
 		}
 		return num, nil
 	case schemapb.DataType_Float:
-		value, ok := obj.(json.Number)
+		value, ok := common.FloatLiteral(obj)
 		if !ok {
 			return nil, r.wrapTypeError(obj, fieldID)
 		}
-		num, err := strconv.ParseFloat(value.String(), 32)
+		num, err := strconv.ParseFloat(value, 32)
 		if err != nil {
 			return nil, err
 		}
-		return float32(num), typeutil.VerifyFloats32([]float32{float32(num)})
+		return float32(num), nil
 	case schemapb.DataType_Double:
-		value, ok := obj.(json.Number)
+		value, ok := common.FloatLiteral(obj)
 		if !ok {
 			return nil, r.wrapTypeError(obj, fieldID)
 		}
-		num, err := strconv.ParseFloat(value.String(), 64)
+		num, err := strconv.ParseFloat(value, 64)
 		if err != nil {
 			return nil, err
 		}
-		return num, typeutil.VerifyFloats64([]float64{num})
+		return num, nil
 	case schemapb.DataType_BinaryVector:
 		arr, ok := obj.([]interface{})
 		if !ok {
@@ -761,18 +761,15 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 	case schemapb.DataType_Float:
 		values := make([]float32, len(arr))
 		for i, v := range arr {
-			value, ok := v.(json.Number)
+			value, ok := common.FloatLiteral(v)
 			if !ok {
 				return nil, r.wrapArrayValueTypeError(arr, eleType)
 			}
-			num, err := strconv.ParseFloat(value.String(), 32)
+			num, err := strconv.ParseFloat(value, 32)
 			if err != nil {
 				return nil, merr.Wrap(err, "failed to parse float32")
 			}
 			values[i] = float32(num)
-		}
-		if err := typeutil.VerifyFloats32(values); err != nil {
-			return nil, merr.Wrap(err, "float32 verification failed")
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_FloatData{
@@ -784,18 +781,15 @@ func (r *rowParser) arrayToFieldData(arr []interface{}, field *schemapb.FieldSch
 	case schemapb.DataType_Double:
 		values := make([]float64, len(arr))
 		for i, v := range arr {
-			value, ok := v.(json.Number)
+			value, ok := common.FloatLiteral(v)
 			if !ok {
 				return nil, r.wrapArrayValueTypeError(arr, eleType)
 			}
-			num, err := strconv.ParseFloat(value.String(), 64)
+			num, err := strconv.ParseFloat(value, 64)
 			if err != nil {
 				return nil, merr.Wrap(err, "failed to parse float64")
 			}
 			values[i] = num
-		}
-		if err := typeutil.VerifyFloats64(values); err != nil {
-			return nil, merr.Wrap(err, "float64 verification failed")
 		}
 		return &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_DoubleData{

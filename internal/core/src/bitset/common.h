@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "common/ScalarComparison.h"
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -60,17 +61,17 @@ struct CompareOperator {
     static inline bool
     compare(const T& t, const U& u) {
         if constexpr (Op == CompareOpType::EQ) {
-            return (t == u);
+            return ScalarEqual(t, u);
         } else if constexpr (Op == CompareOpType::GE) {
-            return (t >= u);
+            return ScalarGreaterEqual(t, u);
         } else if constexpr (Op == CompareOpType::GT) {
-            return (t > u);
+            return ScalarGreater(t, u);
         } else if constexpr (Op == CompareOpType::LE) {
-            return (t <= u);
+            return ScalarLessEqual(t, u);
         } else if constexpr (Op == CompareOpType::LT) {
-            return (t < u);
+            return ScalarLess(t, u);
         } else if constexpr (Op == CompareOpType::NE) {
-            return (t != u);
+            return !ScalarEqual(t, u);
         } else {
             // unimplemented
             static_assert(always_false_v<T>, "unimplemented");
@@ -96,13 +97,14 @@ struct RangeOperator {
     static inline bool
     within_range(const T& lower, const T& upper, const T& value) {
         if constexpr (Op == RangeType::IncInc) {
-            return (lower <= value && value <= upper);
+            return (ScalarLessEqual(lower, value) &&
+                    ScalarLessEqual(value, upper));
         } else if constexpr (Op == RangeType::ExcInc) {
-            return (lower < value && value <= upper);
+            return (ScalarLess(lower, value) && ScalarLessEqual(value, upper));
         } else if constexpr (Op == RangeType::IncExc) {
-            return (lower <= value && value < upper);
+            return (ScalarLessEqual(lower, value) && ScalarLess(value, upper));
         } else if constexpr (Op == RangeType::ExcExc) {
-            return (lower < value && value < upper);
+            return (ScalarLess(lower, value) && ScalarLess(value, upper));
         } else {
             // unimplemented
             static_assert(always_false_v<T>, "unimplemented");

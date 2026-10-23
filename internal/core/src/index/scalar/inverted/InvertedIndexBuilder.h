@@ -36,6 +36,7 @@ class LocalDirectory;
 namespace milvus::index {
 
 struct InvertedBuildParams {
+    bool nan_total_order{true};
     std::string field_name;
     DataType field_type{DataType::NONE};
     DataType value_type{DataType::NONE};

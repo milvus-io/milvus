@@ -208,6 +208,9 @@ func EstimateSegmentFinalResource(ctx context.Context, schema *schemapb.Collecti
 				loadInfo.GetSegmentID(),
 				fieldIndexInfo.GetBuildID())
 		}
+		if estimate.Skipped {
+			continue
+		}
 		evictable.MemoryBytes += estimate.FinalMemoryBytes
 		evictable.DiskBytes += estimate.FinalDiskBytes
 
@@ -359,7 +362,6 @@ func EstimateSegmentLoadingResource(ctx context.Context, schema *schemapb.Collec
 				mlog.Info(ctx, "skip index for dropped field", mlog.Int64("fieldID", fieldID), mlog.String("name", schema.GetName()))
 				continue
 			}
-			indexedFields[fieldID] = struct{}{}
 
 			isVectorType := typeutil.IsVectorType(fieldSchema.GetDataType())
 
@@ -370,6 +372,11 @@ func EstimateSegmentLoadingResource(ctx context.Context, schema *schemapb.Collec
 					loadInfo.GetSegmentID(),
 					fieldIndexInfo.GetBuildID())
 			}
+
+			if estimateResult.Skipped {
+				continue
+			}
+			indexedFields[fieldID] = struct{}{}
 
 			if !options.TieredEvictionEnabled {
 				indexMemorySize += estimateResult.MaxMemoryBytes

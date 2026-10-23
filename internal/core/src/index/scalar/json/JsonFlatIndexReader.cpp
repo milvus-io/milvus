@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
+#include "common/ScalarComparison.h"
 #include "common/JsonUtils.h"
 #include "common/RegexQuery.h"
 #include "common/Utils.h"
@@ -560,30 +561,31 @@ class NumericRange {
 
     static U64Range
     U64ForValue(double value, CompareOp op) {
-        if (std::isnan(value)) {
-            return std::nullopt;
-        }
         switch (op) {
             case CompareOp::LessThan: {
-                auto upper = LastU64Where(
-                    [value](uint64_t v) { return double(v) < value; });
+                auto upper = LastU64Where([value](uint64_t v) {
+                    return ScalarLess(double(v), value);
+                });
                 return upper ? U64Range{{0, *upper}} : std::nullopt;
             }
             case CompareOp::LessEqual: {
-                auto upper = LastU64Where(
-                    [value](uint64_t v) { return double(v) <= value; });
+                auto upper = LastU64Where([value](uint64_t v) {
+                    return ScalarLessEqual(double(v), value);
+                });
                 return upper ? U64Range{{0, *upper}} : std::nullopt;
             }
             case CompareOp::GreaterThan: {
-                auto lower = FirstU64Where(
-                    [value](uint64_t v) { return double(v) > value; });
+                auto lower = FirstU64Where([value](uint64_t v) {
+                    return ScalarGreater(double(v), value);
+                });
                 return lower ? U64Range{{*lower,
                                          std::numeric_limits<uint64_t>::max()}}
                              : std::nullopt;
             }
             case CompareOp::GreaterEqual: {
-                auto lower = FirstU64Where(
-                    [value](uint64_t v) { return double(v) >= value; });
+                auto lower = FirstU64Where([value](uint64_t v) {
+                    return ScalarGreaterEqual(double(v), value);
+                });
                 return lower ? U64Range{{*lower,
                                          std::numeric_limits<uint64_t>::max()}}
                              : std::nullopt;
@@ -597,16 +599,15 @@ class NumericRange {
 
     static U64Range
     U64ForBounds(double lo, bool lo_inc, double hi, bool hi_inc) {
-        if (std::isnan(lo) || std::isnan(hi)) {
-            return std::nullopt;
-        }
         auto lower = FirstU64Where([lo, lo_inc](uint64_t value) {
             const auto converted = static_cast<double>(value);
-            return lo_inc ? converted >= lo : converted > lo;
+            return lo_inc ? ScalarGreaterEqual(converted, lo)
+                          : ScalarGreater(converted, lo);
         });
         auto upper = LastU64Where([hi, hi_inc](uint64_t value) {
             const auto converted = static_cast<double>(value);
-            return hi_inc ? converted <= hi : converted < hi;
+            return hi_inc ? ScalarLessEqual(converted, hi)
+                          : ScalarLess(converted, hi);
         });
         if (!lower || !upper || *lower > *upper) {
             return std::nullopt;
@@ -616,34 +617,35 @@ class NumericRange {
 
     static I64Range
     I64ForValue(double value, CompareOp op) {
-        if (std::isnan(value)) {
-            return std::nullopt;
-        }
         switch (op) {
             case CompareOp::LessThan: {
-                auto upper = LastI64Where(
-                    [value](int64_t v) { return double(v) < value; });
+                auto upper = LastI64Where([value](int64_t v) {
+                    return ScalarLess(double(v), value);
+                });
                 return upper ? I64Range{{std::numeric_limits<int64_t>::lowest(),
                                          *upper}}
                              : std::nullopt;
             }
             case CompareOp::LessEqual: {
-                auto upper = LastI64Where(
-                    [value](int64_t v) { return double(v) <= value; });
+                auto upper = LastI64Where([value](int64_t v) {
+                    return ScalarLessEqual(double(v), value);
+                });
                 return upper ? I64Range{{std::numeric_limits<int64_t>::lowest(),
                                          *upper}}
                              : std::nullopt;
             }
             case CompareOp::GreaterThan: {
-                auto lower = FirstI64Where(
-                    [value](int64_t v) { return double(v) > value; });
+                auto lower = FirstI64Where([value](int64_t v) {
+                    return ScalarGreater(double(v), value);
+                });
                 return lower ? I64Range{{*lower,
                                          std::numeric_limits<int64_t>::max()}}
                              : std::nullopt;
             }
             case CompareOp::GreaterEqual: {
-                auto lower = FirstI64Where(
-                    [value](int64_t v) { return double(v) >= value; });
+                auto lower = FirstI64Where([value](int64_t v) {
+                    return ScalarGreaterEqual(double(v), value);
+                });
                 return lower ? I64Range{{*lower,
                                          std::numeric_limits<int64_t>::max()}}
                              : std::nullopt;
@@ -657,16 +659,15 @@ class NumericRange {
 
     static I64Range
     I64ForBounds(double lo, bool lo_inc, double hi, bool hi_inc) {
-        if (std::isnan(lo) || std::isnan(hi)) {
-            return std::nullopt;
-        }
         auto lower = FirstI64Where([lo, lo_inc](int64_t value) {
             const auto converted = static_cast<double>(value);
-            return lo_inc ? converted >= lo : converted > lo;
+            return lo_inc ? ScalarGreaterEqual(converted, lo)
+                          : ScalarGreater(converted, lo);
         });
         auto upper = LastI64Where([hi, hi_inc](int64_t value) {
             const auto converted = static_cast<double>(value);
-            return hi_inc ? converted <= hi : converted < hi;
+            return hi_inc ? ScalarLessEqual(converted, hi)
+                          : ScalarLess(converted, hi);
         });
         if (!lower || !upper || *lower > *upper) {
             return std::nullopt;
@@ -900,6 +901,10 @@ class JsonNumericPathReader final : public JsonPathReaderBase,
     TargetBitmap
     RangeNumeric(const T& lo, bool lo_inc, const T& hi, bool hi_inc) const {
         TargetBitmap result(Count());
+        if (ScalarLess(hi, lo) ||
+            (ScalarEqual(lo, hi) && !(lo_inc && hi_inc))) {
+            return result;
+        }
         Engine().json_range_query(
             Path(), lo, hi, false, false, lo_inc, hi_inc, &result);
         if constexpr (std::is_integral_v<T>) {

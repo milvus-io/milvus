@@ -39,6 +39,56 @@ namespace sve {
 
 namespace {
 
+template <CompareOpType Op>
+inline svbool_t
+totalCompare(svbool_t pred, svfloat32_t a, svfloat32_t b) {
+    const auto nan_a = svcmpne_f32(pred, a, a);
+    const auto nan_b = svcmpne_f32(pred, b, b);
+    if constexpr (Op == CompareOpType::EQ) {
+        return svorr_z(
+            pred, svcmpeq_f32(pred, a, b), svand_z(pred, nan_a, nan_b));
+    } else if constexpr (Op == CompareOpType::NE) {
+        return svbic_z(
+            pred, svcmpne_f32(pred, a, b), svand_z(pred, nan_a, nan_b));
+    } else if constexpr (Op == CompareOpType::LT) {
+        return svorr_z(
+            pred, svcmplt_f32(pred, a, b), svbic_z(pred, nan_b, nan_a));
+    } else if constexpr (Op == CompareOpType::LE) {
+        return svorr_z(pred, svcmple_f32(pred, a, b), nan_b);
+    } else if constexpr (Op == CompareOpType::GT) {
+        return svorr_z(
+            pred, svcmpgt_f32(pred, a, b), svbic_z(pred, nan_a, nan_b));
+    } else {
+        static_assert(Op == CompareOpType::GE);
+        return svorr_z(pred, svcmpge_f32(pred, a, b), nan_a);
+    }
+}
+
+template <CompareOpType Op>
+inline svbool_t
+totalCompare(svbool_t pred, svfloat64_t a, svfloat64_t b) {
+    const auto nan_a = svcmpne_f64(pred, a, a);
+    const auto nan_b = svcmpne_f64(pred, b, b);
+    if constexpr (Op == CompareOpType::EQ) {
+        return svorr_z(
+            pred, svcmpeq_f64(pred, a, b), svand_z(pred, nan_a, nan_b));
+    } else if constexpr (Op == CompareOpType::NE) {
+        return svbic_z(
+            pred, svcmpne_f64(pred, a, b), svand_z(pred, nan_a, nan_b));
+    } else if constexpr (Op == CompareOpType::LT) {
+        return svorr_z(
+            pred, svcmplt_f64(pred, a, b), svbic_z(pred, nan_b, nan_a));
+    } else if constexpr (Op == CompareOpType::LE) {
+        return svorr_z(pred, svcmple_f64(pred, a, b), nan_b);
+    } else if constexpr (Op == CompareOpType::GT) {
+        return svorr_z(
+            pred, svcmpgt_f64(pred, a, b), svbic_z(pred, nan_a, nan_b));
+    } else {
+        static_assert(Op == CompareOpType::GE);
+        return svorr_z(pred, svcmpge_f64(pred, a, b), nan_a);
+    }
+}
+
 //
 constexpr size_t MAX_SVE_WIDTH = 2048;
 
@@ -186,12 +236,12 @@ struct CmpHelper<CompareOpType::EQ> {
 
     static inline svbool_t
     compare(const svbool_t pred, const svfloat32_t a, const svfloat32_t b) {
-        return svcmpeq_f32(pred, a, b);
+        return totalCompare<CompareOpType::EQ>(pred, a, b);
     }
 
     static inline svbool_t
     compare(const svbool_t pred, const svfloat64_t a, const svfloat64_t b) {
-        return svcmpeq_f64(pred, a, b);
+        return totalCompare<CompareOpType::EQ>(pred, a, b);
     }
 };
 
@@ -219,12 +269,12 @@ struct CmpHelper<CompareOpType::GE> {
 
     static inline svbool_t
     compare(const svbool_t pred, const svfloat32_t a, const svfloat32_t b) {
-        return svcmpge_f32(pred, a, b);
+        return totalCompare<CompareOpType::GE>(pred, a, b);
     }
 
     static inline svbool_t
     compare(const svbool_t pred, const svfloat64_t a, const svfloat64_t b) {
-        return svcmpge_f64(pred, a, b);
+        return totalCompare<CompareOpType::GE>(pred, a, b);
     }
 };
 
@@ -252,12 +302,12 @@ struct CmpHelper<CompareOpType::GT> {
 
     static inline svbool_t
     compare(const svbool_t pred, const svfloat32_t a, const svfloat32_t b) {
-        return svcmpgt_f32(pred, a, b);
+        return totalCompare<CompareOpType::GT>(pred, a, b);
     }
 
     static inline svbool_t
     compare(const svbool_t pred, const svfloat64_t a, const svfloat64_t b) {
-        return svcmpgt_f64(pred, a, b);
+        return totalCompare<CompareOpType::GT>(pred, a, b);
     }
 };
 
@@ -285,12 +335,12 @@ struct CmpHelper<CompareOpType::LE> {
 
     static inline svbool_t
     compare(const svbool_t pred, const svfloat32_t a, const svfloat32_t b) {
-        return svcmple_f32(pred, a, b);
+        return totalCompare<CompareOpType::LE>(pred, a, b);
     }
 
     static inline svbool_t
     compare(const svbool_t pred, const svfloat64_t a, const svfloat64_t b) {
-        return svcmple_f64(pred, a, b);
+        return totalCompare<CompareOpType::LE>(pred, a, b);
     }
 };
 
@@ -318,12 +368,12 @@ struct CmpHelper<CompareOpType::LT> {
 
     static inline svbool_t
     compare(const svbool_t pred, const svfloat32_t a, const svfloat32_t b) {
-        return svcmplt_f32(pred, a, b);
+        return totalCompare<CompareOpType::LT>(pred, a, b);
     }
 
     static inline svbool_t
     compare(const svbool_t pred, const svfloat64_t a, const svfloat64_t b) {
-        return svcmplt_f64(pred, a, b);
+        return totalCompare<CompareOpType::LT>(pred, a, b);
     }
 };
 
@@ -351,12 +401,12 @@ struct CmpHelper<CompareOpType::NE> {
 
     static inline svbool_t
     compare(const svbool_t pred, const svfloat32_t a, const svfloat32_t b) {
-        return svcmpne_f32(pred, a, b);
+        return totalCompare<CompareOpType::NE>(pred, a, b);
     }
 
     static inline svbool_t
     compare(const svbool_t pred, const svfloat64_t a, const svfloat64_t b) {
-        return svcmpne_f64(pred, a, b);
+        return totalCompare<CompareOpType::NE>(pred, a, b);
     }
 };
 
@@ -1600,7 +1650,7 @@ OpArithCompareImpl<float, AOp, CmpOp>::op_arith_compare(
     } else {
         if constexpr (AOp == ArithOpType::Div) {
             if (std::isfinite(value) && std::isfinite(right_operand) &&
-                right_operand > 0) {
+                std::isfinite(right_operand * value) && right_operand > 0) {
                 // a special case that allows faster processing by using the multiplication
                 //   operation instead of the division one.
 
@@ -1619,14 +1669,9 @@ OpArithCompareImpl<float, AOp, CmpOp>::op_arith_compare(
 
                 return op_mask_helper<T, decltype(handler)>(
                     res_u8, size, handler);
-            } else if (std::isfinite(value) && std::isfinite(right_operand) &&
-                       right_operand < 0) {
-                // flip signs and go for the multiplication case
-                return OpArithCompareImpl<float,
-                                          AOp,
-                                          CompareOpDivFlip<CmpOp>::op>::
-                    op_arith_compare(res_u8, src, -right_operand, -value, size);
             }
+            // A negative divisor must use actual division: negating NaN
+            // preserves its maximal SQL order rather than reversing it.
 
             // go with the default case
         }
@@ -1666,7 +1711,7 @@ OpArithCompareImpl<double, AOp, CmpOp>::op_arith_compare(
     } else {
         if constexpr (AOp == ArithOpType::Div) {
             if (std::isfinite(value) && std::isfinite(right_operand) &&
-                right_operand > 0) {
+                std::isfinite(right_operand * value) && right_operand > 0) {
                 // a special case that allows faster processing by using the multiplication
                 //   operation instead of the division one.
 
@@ -1685,14 +1730,9 @@ OpArithCompareImpl<double, AOp, CmpOp>::op_arith_compare(
 
                 return op_mask_helper<T, decltype(handler)>(
                     res_u8, size, handler);
-            } else if (std::isfinite(value) && std::isfinite(right_operand) &&
-                       right_operand < 0) {
-                // flip signs and go for the multiplication case
-                return OpArithCompareImpl<double,
-                                          AOp,
-                                          CompareOpDivFlip<CmpOp>::op>::
-                    op_arith_compare(res_u8, src, -right_operand, -value, size);
             }
+            // A negative divisor must use actual division: negating NaN
+            // preserves its maximal SQL order rather than reversing it.
 
             // go with the default case
         }

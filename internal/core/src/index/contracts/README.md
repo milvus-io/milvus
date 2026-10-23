@@ -82,6 +82,12 @@ even when they appear in the same template inheritance list.
 
 ## Coordinates, values, and JSON
 
+- Floating scalar comparison uses one total order: all NaNs are equal and greater
+  than positive infinity, while negative and positive zero are equal. Floating
+  grouping hashes follow the same equivalence classes. Scalar engine v6 gates
+  writing the corresponding index ordering/keys; segment load admission falls
+  back to raw data for legacy floating indexes whose keys cannot be trusted.
+
 - For a nested index, `CoordDomain()` is `Element`, and `Count()` counts elements rather than rows.
   The index holds no column offsets and does not fold element hits into rows; the execution layer
   uses the column offsets to perform the projection and preserves the validity of each nullable

@@ -45,6 +45,8 @@ import (
 )
 
 type IndexResourceUsage struct {
+	// Skipped means the loader falls back to raw field data for this index.
+	Skipped          bool
 	MaxMemoryBytes   uint64
 	MaxDiskBytes     uint64
 	FinalMemoryBytes uint64
@@ -79,6 +81,21 @@ func EstimateIndexLoadResourceWithRunner(_ context.Context, field *schemapb.Fiel
 	}
 	if len(marshaled) == 0 {
 		return IndexResourceUsage{}, merr.WrapErrServiceInternalMsg("serialized load index info is empty")
+	}
+
+	// Preflight before the estimation runner: ignored legacy indexes must not
+	// contribute index resources or suppress their raw field-data reservation.
+	var canLoad C.bool
+	eligibilityStatus := C.CanLoadIndexFromSerializedInfo(
+		(*C.uint8_t)(unsafe.Pointer(&marshaled[0])),
+		(C.uint64_t)(len(marshaled)),
+		&canLoad,
+	)
+	if err := consumeCStatus(&eligibilityStatus); err != nil {
+		return IndexResourceUsage{}, merr.Wrap(err, "check index load eligibility")
+	}
+	if !bool(canLoad) {
+		return IndexResourceUsage{Skipped: true}, nil
 	}
 
 	var estimate C.LoadResourceRequest

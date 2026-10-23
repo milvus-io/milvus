@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <cmath>
 #include <memory>
 #include <random>
 #include <unordered_set>
@@ -924,3 +925,255 @@ INSTANTIATE_TEST_SUITE_P(
         }
         return constructor_type_str;
     });
+
+namespace milvus::query {
+
+// Inject deterministic backend results while exercising the real NextBatch,
+// chunk heap, continuation filtering, output sorting and padding paths.
+class CachedSearchIteratorTestAccess {
+    class SequenceIterator final : public knowhere::IndexNode::iterator {
+     public:
+        explicit SequenceIterator(std::vector<std::pair<int64_t, float>> values)
+            : values_(std::move(values)) {
+        }
+
+        knowhere::expected<std::pair<int64_t, float>>
+        Next() override {
+            return values_.at(position_++);
+        }
+
+        knowhere::expected<bool>
+        HasNext() override {
+            return position_ < values_.size();
+        }
+
+     private:
+        std::vector<std::pair<int64_t, float>> values_;
+        size_t position_ = 0;
+    };
+
+ public:
+    static std::unique_ptr<CachedSearchIterator>
+    Create(const SearchInfo& info,
+           const std::vector<std::vector<std::pair<int64_t, float>>>& chunks) {
+        auto iterator =
+            std::unique_ptr<CachedSearchIterator>(new CachedSearchIterator());
+        iterator->nq_ = 1;
+        iterator->num_chunks_ = chunks.size();
+        iterator->Init(info);
+        iterator->chunked_heaps_.emplace_back(
+            CachedSearchIterator::IterIdDisIdPairComparator{iterator->sign_});
+        for (const auto& chunk : chunks) {
+            iterator->iterators_.push_back(
+                std::make_shared<SequenceIterator>(chunk));
+        }
+        return iterator;
+    }
+};
+
+}  // namespace milvus::query
+
+namespace {
+
+SearchInfo
+FloatingIteratorInfo(const MetricType& metric, size_t batch_size) {
+    SearchInfo info;
+    info.metric_type_ = metric;
+    info.round_decimal_ = -1;
+    info.iterator_v2_info_ = SearchIteratorV2Info{};
+    info.iterator_v2_info_->batch_size = batch_size;
+    return info;
+}
+
+struct FloatingIteratorRow {
+    int64_t id;
+    float value;
+    int rank;
+};
+
+std::vector<FloatingIteratorRow>
+FloatingIteratorRows(bool similarity) {
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    std::vector<FloatingIteratorRow> rows = {
+        {1, -std::numeric_limits<float>::infinity(), 0},
+        {2, -1, 1},
+        {4, -0.0f, 2},
+        {5, 0.0f, 2},
+        {6, 1, 3},
+        {8, std::numeric_limits<float>::infinity(), 4},
+        {90, nan, 5},
+        {91, -nan, 5}};
+    // The rank oracle is independent of the production floating comparator.
+    std::sort(
+        rows.begin(), rows.end(), [similarity](const auto& a, const auto& b) {
+            if (a.rank == b.rank) {
+                return a.id < b.id;
+            }
+            return similarity ? a.rank > b.rank : a.rank < b.rank;
+        });
+    return rows;
+}
+
+std::vector<std::vector<std::pair<int64_t, float>>>
+FloatingIteratorChunks(const std::vector<FloatingIteratorRow>& rows,
+                       size_t chunk_count) {
+    std::vector<std::vector<std::pair<int64_t, float>>> chunks(chunk_count);
+    for (size_t i = 0; i < rows.size(); ++i) {
+        // The better member of each cross-chunk tie starts in the last chunk,
+        // preventing insertion order from accidentally satisfying the test.
+        chunks[(i + chunk_count - 1) % chunk_count].emplace_back(rows[i].id,
+                                                                 rows[i].value);
+    }
+    return chunks;
+}
+
+std::vector<int64_t>
+ReadFloatingIterator(CachedSearchIterator& iterator, const SearchInfo& info) {
+    std::vector<int64_t> ids;
+    for (size_t batch = 0; batch < 10; ++batch) {
+        SearchResult result;
+        iterator.NextBatch(info, result);
+        bool exhausted = false;
+        for (auto id : result.seg_offsets_) {
+            if (id == -1) {
+                exhausted = true;
+                continue;
+            }
+            EXPECT_FALSE(exhausted);
+            ids.push_back(id);
+        }
+        if (exhausted) {
+            return ids;
+        }
+    }
+    ADD_FAILURE() << "iterator failed to exhaust";
+    return ids;
+}
+
+}  // namespace
+
+TEST(CachedSearchIteratorFloatingTest, TotalOrderAndPagination) {
+    for (const auto& metric : kMetricTypes) {
+        const auto rows = FloatingIteratorRows(PositivelyRelated(metric));
+        std::vector<int64_t> expected;
+        for (const auto& row : rows) {
+            expected.push_back(row.id);
+        }
+        for (size_t chunks : {size_t(1), size_t(2)}) {
+            for (size_t batch_size : {size_t(1), size_t(3), size_t(8)}) {
+                SCOPED_TRACE(metric + "/chunks=" + std::to_string(chunks) +
+                             "/batch=" + std::to_string(batch_size));
+                const auto info = FloatingIteratorInfo(metric, batch_size);
+                auto iterator = CachedSearchIteratorTestAccess::Create(
+                    info, FloatingIteratorChunks(rows, chunks));
+                EXPECT_EQ(ReadFloatingIterator(*iterator, info), expected);
+            }
+        }
+    }
+}
+
+TEST(CachedSearchIteratorFloatingTest, NonfiniteBounds) {
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    struct Bounds {
+        std::optional<float> last, radius, range;
+        std::optional<int> last_rank, radius_rank, range_rank;
+    };
+    const std::vector<Bounds> bounds = {{nan, {}, {}, 5, {}, {}},
+                                        {inf, {}, {}, 4, {}, {}},
+                                        {{}, nan, {}, {}, 5, {}},
+                                        {{}, 0, {}, {}, 2, {}},
+                                        {{}, nan, 0, {}, 5, 2},
+                                        {{}, 0, nan, {}, 2, 5},
+                                        {{}, nan, nan, {}, 5, 5},
+                                        {nan, 0, nan, 5, 2, 5}};
+    for (const auto& metric : kMetricTypes) {
+        const bool similarity = PositivelyRelated(metric);
+        const auto rows = FloatingIteratorRows(similarity);
+        auto before = [similarity](int a, int b) {
+            return similarity ? a > b : a < b;
+        };
+        for (size_t chunks : {size_t(1), size_t(2)}) {
+            for (size_t bi = 0; bi < bounds.size(); ++bi) {
+                SCOPED_TRACE(metric + "/chunks=" + std::to_string(chunks) +
+                             "/bounds=" + std::to_string(bi));
+                const auto& bound = bounds[bi];
+                auto info = FloatingIteratorInfo(metric, 3);
+                info.iterator_v2_info_->last_bound = bound.last;
+                if (bound.radius) {
+                    info.search_params_[knowhere::meta::RADIUS] = *bound.radius;
+                }
+                if (bound.range) {
+                    info.search_params_[knowhere::meta::RANGE_FILTER] =
+                        *bound.range;
+                }
+                std::vector<int64_t> expected;
+                for (const auto& row : rows) {
+                    if ((!bound.last_rank ||
+                         before(*bound.last_rank, row.rank)) &&
+                        (!bound.radius_rank ||
+                         before(row.rank, *bound.radius_rank)) &&
+                        (!bound.range_rank ||
+                         !before(row.rank, *bound.range_rank))) {
+                        expected.push_back(row.id);
+                    }
+                }
+                auto iterator = CachedSearchIteratorTestAccess::Create(
+                    info, FloatingIteratorChunks(rows, chunks));
+                EXPECT_EQ(ReadFloatingIterator(*iterator, info), expected);
+            }
+        }
+    }
+}
+
+TEST(CachedSearchIteratorFloatingTest, ChangedBoundRefillsDiscardedChunk) {
+    for (const auto& metric : kMetricTypes) {
+        const float sign = PositivelyRelated(metric) ? -1 : 1;
+        auto info = FloatingIteratorInfo(metric, 1);
+        auto iterator = CachedSearchIteratorTestAccess::Create(
+            info,
+            {{{10, 0}, {13, sign * 3}, {15, sign * 5}},
+             {{11, sign * 1}, {16, sign * 6}}});
+        SearchResult result;
+        iterator->NextBatch(info, result);
+        ASSERT_EQ(result.seg_offsets_, std::vector<int64_t>({10}));
+        info.iterator_v2_info_->last_bound = sign * 4;
+        iterator->NextBatch(info, result);
+        // Both cached heads fail the changed bound. Refilling only the chunk
+        // with the first valid head would incorrectly return 16 before 15.
+        EXPECT_EQ(result.seg_offsets_, std::vector<int64_t>({15}));
+        EXPECT_EQ(result.distances_, std::vector<float>({sign * 5}));
+        info.iterator_v2_info_->last_bound = result.distances_[0];
+        iterator->NextBatch(info, result);
+        EXPECT_EQ(result.seg_offsets_, std::vector<int64_t>({16}));
+    }
+}
+
+TEST(CachedSearchIteratorFloatingTest,
+     SimilarityNaNBoundRefillsToFiniteSuffix) {
+    for (const auto& metric :
+         {knowhere::metric::IP, knowhere::metric::COSINE}) {
+        const float nan = std::numeric_limits<float>::quiet_NaN();
+        const float inf = std::numeric_limits<float>::infinity();
+        auto info = FloatingIteratorInfo(metric, 1);
+        auto iterator = CachedSearchIteratorTestAccess::Create(
+            info,
+            {{{9, nan}, {91, -nan}, {8, inf}, {6, 1}}, {{90, nan}, {4, 0}}});
+        SearchResult result;
+        iterator->NextBatch(info, result);
+        ASSERT_EQ(result.seg_offsets_, std::vector<int64_t>({9}));
+        ASSERT_TRUE(std::isnan(result.distances_[0]));
+        info.iterator_v2_info_->last_bound = result.distances_[0];
+        iterator->NextBatch(info, result);
+        EXPECT_EQ(result.seg_offsets_, std::vector<int64_t>({8}));
+        EXPECT_EQ(result.distances_, std::vector<float>({inf}));
+        info.iterator_v2_info_->last_bound = result.distances_[0];
+        iterator->NextBatch(info, result);
+        EXPECT_EQ(result.seg_offsets_, std::vector<int64_t>({6}));
+        info.iterator_v2_info_->last_bound = result.distances_[0];
+        iterator->NextBatch(info, result);
+        EXPECT_EQ(result.seg_offsets_, std::vector<int64_t>({4}));
+        info.iterator_v2_info_->last_bound = result.distances_[0];
+        EXPECT_TRUE(ReadFloatingIterator(*iterator, info).empty());
+    }
+}
