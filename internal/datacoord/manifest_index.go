@@ -20,6 +20,7 @@ import (
 	"context"
 	"path"
 	"sort"
+	"strings"
 
 	"golang.org/x/sync/semaphore"
 
@@ -61,7 +62,7 @@ func buildManifestIndexInfo(m *meta, segment *SegmentInfo, segIdx *model.Segment
 		segIdx.SegmentID,
 		segIdx.BuildID,
 		segIdx.IndexVersion,
-	).BuildPrefix()
+	).WithManifestPath(segment.GetManifestPath()).BuildPrefix()
 	relativePath, err := packed.ManifestIndexRelativePath(basePath, indexPrefix)
 	if err != nil {
 		return packed.ManifestIndexInfo{}, err
@@ -132,7 +133,11 @@ func manifestIndexFilePathInfo(segmentID int64, manifestIndex packed.ManifestInd
 		if fileKey == "" || path.IsAbs(fileKey) || path.Base(fileKey) != fileKey || fileKey == "." || fileKey == ".." {
 			return nil, false
 		}
-		filePaths = append(filePaths, path.Join(manifestIndex.Path, fileKey))
+		if metautil.IsSegmentRooted(manifestIndex.IndexStorePathVersion) {
+			filePaths = append(filePaths, strings.TrimRight(manifestIndex.Path, "/")+"/"+fileKey)
+		} else {
+			filePaths = append(filePaths, path.Join(manifestIndex.Path, fileKey))
+		}
 	}
 
 	return &indexpb.IndexFilePathInfo{
@@ -161,8 +166,12 @@ func manifestIndexFilePathInfoForSegment(rootPath string, segment *datapb.Segmen
 ) (*indexpb.IndexFilePathInfo, bool) {
 	expected := metautil.NewIndexPathBuilder(rootPath, entry.IndexStorePathVersion,
 		segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(),
-		entry.BuildID, entry.IndexVersion).BuildPrefix()
-	if path.Clean(entry.Path) != expected {
+		entry.BuildID, entry.IndexVersion).WithManifestPath(segment.GetManifestPath()).BuildPrefix()
+	if metautil.IsSegmentRooted(entry.IndexStorePathVersion) {
+		if entry.Path != expected {
+			return nil, false
+		}
+	} else if path.Clean(entry.Path) != expected {
 		return nil, false
 	}
 	return manifestIndexFilePathInfo(segment.GetID(), entry)
@@ -392,5 +401,6 @@ func segmentIndexFromManifest(segment *SegmentInfo, manifestIndex packed.Manifes
 		CurrentScalarIndexVersion: manifestIndex.CurrentScalarIndexVersion,
 		IndexType:                 manifestIndex.IndexType,
 		IndexStorePathVersion:     manifestIndex.IndexStorePathVersion,
+		ManifestPublished:         true,
 	}
 }

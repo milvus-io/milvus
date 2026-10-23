@@ -1387,6 +1387,10 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
                                           load_index_info->index_version};
     index_meta.index_store_path_version =
         load_index_info->index_store_path_version;
+    if (!load_index_info->index_files.empty()) {
+        const auto& file = load_index_info->index_files.front();
+        index_meta.index_file_prefix = file.substr(0, file.rfind('/'));
+    }
     config[milvus::index::INDEX_FILES] = load_index_info->index_files;
 
     // Old persisted index_params need not contain a nested flag. The legacy

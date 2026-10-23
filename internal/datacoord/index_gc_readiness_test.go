@@ -163,7 +163,7 @@ func TestIndexGCReadinessMarkerFailurePreventsFiles(t *testing.T) {
 	catalog.alterFailure = 20
 	patchIndexGCReadinessExternalIO(t, s, catalog, false)
 	gc := &garbageCollector{meta: s.meta}
-	gc.recycleDroppedSegment(context.Background(), newGCManifestReadIO(t), 1, s.meta.segments.GetSegment(1))
+	gc.recycleDroppedSegment(context.Background(), newGCManifestReadIO(t), 1)
 	require.Equal(t, []string{"mark:10", "mark:20"}, catalog.events, "every marker must persist before any file deletion")
 	require.True(t, catalog.stored[110].IsDeleted)
 	require.False(t, catalog.stored[120].IsDeleted, "failed persistence must not mutate the live task")
@@ -175,7 +175,7 @@ func TestIndexGCReadinessFileFailureLeavesMarkedRecord(t *testing.T) {
 	s, index, catalog := newIndexGCReadinessServer(t, false)
 	patchIndexGCReadinessExternalIO(t, s, catalog, true)
 	gc := &garbageCollector{meta: s.meta}
-	gc.recycleDroppedSegment(context.Background(), newGCManifestReadIO(t), 1, s.meta.segments.GetSegment(1))
+	gc.recycleDroppedSegment(context.Background(), newGCManifestReadIO(t), 1)
 	require.Equal(t, []string{"mark:10", "files"}, catalog.events)
 	require.True(t, catalog.stored[110].IsDeleted)
 	assertIndexGCReadinessInvalidated(t, s, index)
@@ -186,7 +186,7 @@ func TestIndexGCReadinessMetaFailureSurvivesRestart(t *testing.T) {
 	catalog.dropFailure = true
 	patchIndexGCReadinessExternalIO(t, s, catalog, false)
 	gc := &garbageCollector{meta: s.meta}
-	gc.recycleDroppedSegment(context.Background(), newGCManifestReadIO(t), 1, s.meta.segments.GetSegment(1))
+	gc.recycleDroppedSegment(context.Background(), newGCManifestReadIO(t), 1)
 	require.Equal(t, []string{"mark:10", "files", "drop:110"}, catalog.events)
 	require.True(t, catalog.stored[110].IsDeleted)
 	assertIndexGCReadinessInvalidated(t, s, index)
@@ -197,7 +197,7 @@ func TestIndexGCReadinessMetaFailureSurvivesRestart(t *testing.T) {
 	s.meta.indexMeta, err = newIndexMeta(context.Background(), catalog, []int64{1})
 	require.NoError(t, err)
 	assertIndexGCReadinessInvalidated(t, s, index)
-	gc.recycleDroppedSegment(context.Background(), newGCManifestReadIO(t), 1, s.meta.segments.GetSegment(1))
+	gc.recycleDroppedSegment(context.Background(), newGCManifestReadIO(t), 1)
 	require.Equal(t, []string{"mark:10", "files", "drop:110", "files", "drop:110"}, catalog.events, "retry uses the persisted marker without rewriting it")
 
 	// An independently finished current task still reports Finished.

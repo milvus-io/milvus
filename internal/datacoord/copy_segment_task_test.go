@@ -549,7 +549,38 @@ func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerFailsUnsupportedExternalTas
 
 	updatedTask := copyMeta.GetTask(context.Background(), task.GetTaskId())
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, updatedTask.GetState())
-	s.Contains(updatedTask.GetReason(), "datanode does not support external copy segment tasks")
+	s.Contains(updatedTask.GetReason(), "datanode does not support the requested copy segment task")
+	updatedJob := copyMeta.GetJob(context.Background(), task.GetJobId())
+	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, updatedJob.GetState())
+	s.Equal(updatedTask.GetReason(), updatedJob.GetReason())
+}
+
+func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerFailsUnsupportedSegmentRootedTask() {
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	task.task.Load().State = datapb.CopySegmentTaskState_CopySegmentTaskPending
+	copyMeta, _ := newCopySegmentTaskTestMeta(s.T(), task)
+	task.copyMeta = copyMeta
+
+	job := newTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobExecuting).(*copySegmentJob)
+	task.task.Load().IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED.Enum()
+	task.task.Load().IndexWriteToManifest = proto.Bool(true)
+	s.NoError(copyMeta.AddJob(context.Background(), job))
+
+	req := &datapb.CopySegmentRequest{TaskID: task.GetTaskId()}
+	assembleMock := mockey.Mock(AssembleCopySegmentRequest).Return(req, nil).Build()
+	defer assembleMock.UnPatch()
+
+	cluster := &copySegmentClusterMock{}
+	createMock := mockey.Mock((*copySegmentClusterMock).CreateCopySegment).
+		Return(merr.Wrapf(merr.ErrServiceUnimplemented,
+			"worker does not support segment-rooted index copy destinations")).Build()
+	defer createMock.UnPatch()
+
+	task.CreateTaskOnWorker(10, cluster)
+
+	updatedTask := copyMeta.GetTask(context.Background(), task.GetTaskId())
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, updatedTask.GetState())
+	s.Contains(updatedTask.GetReason(), "datanode does not support the requested copy segment task")
 	updatedJob := copyMeta.GetJob(context.Background(), task.GetJobId())
 	s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, updatedJob.GetState())
 	s.Equal(updatedTask.GetReason(), updatedJob.GetReason())
@@ -1568,7 +1599,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PlacementMismatchFailsBef
 
 	err := SyncCopySegmentTask(task, resp, copyMeta, m)
 	s.Require().Error(err)
-	s.Contains(err.Error(), "enabled at dispatch")
+	s.Contains(err.Error(), "path version")
 	s.Zero(manifestReads, "current worker acknowledgement must be used without read-back")
 
 	segment := m.GetSegment(ctx, result.GetSegmentId())
@@ -1593,16 +1624,20 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_IndexWritePlacementMatrix
 	)
 
 	for _, tc := range []struct {
-		name    string
-		enabled bool
+		name     string
+		enabled  bool
+		rollback bool
 	}{
 		{name: "manifest writes disabled", enabled: false},
 		{name: "manifest writes enabled", enabled: true},
+		{name: "rollback drains manifest copy", enabled: true, rollback: true},
+		{name: "rollback accepts etcd copy", enabled: false, rollback: true},
 	} {
 		s.Run(tc.name, func() {
 			// The runtime switch has flipped by the time the result is handled.
 			// The task's persisted dispatch-time value must still win.
 			withSegmentIndexManifestWrites(s.T(), !tc.enabled)
+			withManifestIndexRollback(s.T(), tc.rollback)
 			store := newFakeManifestStore(s.T())
 			ctx := context.Background()
 			catalog := kvdatacoord.NewCatalog(NewMetaMemoryKV(), "", "")
@@ -1675,6 +1710,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_IndexWritePlacementMatrix
 							BuildId:        buildID,
 							IndexName:      "vec_idx",
 							IndexFilePaths: []string{"index.bin"},
+							IndexSize:      1024,
 						},
 					},
 				}},
@@ -1709,6 +1745,21 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_IndexWritePlacementMatrix
 			s.Require().Len(recovered, 1)
 			s.EqualValues(buildID, recovered[indexID].BuildID)
 			s.Equal(commonpb.IndexState_Finished, recovered[indexID].IndexState)
+			if tc.rollback {
+				inspector := newManifestIndexRollbackInspector(ctx, m)
+				inspector.runOnce(ctx)
+				inspector.runOnce(ctx)
+				s.True(inspector.ready)
+				s.False(m.GetSegment(ctx, segmentID).GetManifestHasIndex())
+				persisted, err = catalog.ListSegmentIndexes(ctx, collectionID)
+				s.Require().NoError(err)
+				s.Require().Len(persisted, 1)
+				s.EqualValues(buildID, persisted[0].BuildID)
+				final := m.GetSegment(ctx, segmentID).GetManifestPath()
+				s.Require().NoError(SyncCopySegmentTask(task, resp, copyMeta, m))
+				s.Equal(final, m.GetSegment(ctx, segmentID).GetManifestPath())
+				s.False(indexManifestPublished(s.T(), m.indexMeta, buildID))
+			}
 		})
 	}
 }
@@ -3106,4 +3157,17 @@ func TestAssembleCopySegmentRequest_ManifestFallbackSingleWorker(t *testing.T) {
 		require.Equal(t, job.snapshotCache.data.Segments[i].GetManifestPath(), source.GetManifestPath())
 		require.Empty(t, source.GetIndexFiles())
 	}
+}
+
+func TestCopyTaskPinsSegmentIndexLayout(t *testing.T) {
+	task := createTestCopyTask(100, 2001).(*copySegmentTask)
+	UpdateCopyTaskIndexWriteToManifest(true)(task)
+	version, known := task.Clone().GetIndexStorePathVersion()
+	require.True(t, known)
+	require.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED, version)
+	// Old durable tasks preserve absence instead of silently changing layouts.
+	old := createTestCopyTask(100, 2001).(*copySegmentTask)
+	old.task.Load().IndexWriteToManifest = proto.Bool(true)
+	_, known = old.GetIndexStorePathVersion()
+	require.False(t, known)
 }
