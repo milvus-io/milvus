@@ -3239,6 +3239,102 @@ TEST_P(TestChunkSegmentStorageV2, TestLazySystemIndexesOnSortedSegment) {
     }
 }
 
+// A delete batch applied to a pk-sorted segment (merge against the sorted
+// primary-key column) must mark exactly the rows the pk-index path marks on
+// the unsorted segment with the same data, for stream deletes and for
+// LoadDeletedRecord. The batch is unordered and contains duplicate pks, keys
+// on both sides of a chunk boundary, the first and last rows, missing pks and
+// deletes at or before the insert timestamp.
+TEST_P(TestChunkSegmentStorageV2, TestSortedSegmentBatchDeleteMatchesPkIndex) {
+    const int64_t rows = chunk_num * test_data_count;
+    // Row r has pk r (or string_data[r]) and insert timestamp r.
+    std::vector<std::pair<int64_t, Timestamp>> batch = {
+        {700, 900},
+        {rows - 1, MAX_TIMESTAMP},
+        {test_data_count, 20000},
+        {3, 2},  // before insert: no effect
+        {test_data_count - 1, 20000},
+        {700, 300},  // before insert: no effect
+        {0, 5},
+        {500, 500},  // same timestamp as insert: no effect
+        {test_data_count - 1, 30000},
+        {-1, 100},  // missing pk
+        {1234, 5000},
+        {rows + 5, 100},  // missing pk
+        {1234, 5000},
+    };
+    auto ids = std::make_unique<IdArray>();
+    std::vector<Timestamp> timestamps;
+    for (auto& [pk, ts] : batch) {
+        if (GetParam()) {
+            ids->mutable_str_id()->mutable_data()->Add(
+                pk >= 0 && pk < rows ? string_data[pk]
+                                     : "missing" + std::to_string(pk));
+        } else {
+            ids->mutable_int_id()->mutable_data()->Add(pk);
+        }
+        timestamps.push_back(ts);
+    }
+
+    auto delete_mask_at = [&](SegmentSealed* segment, Timestamp query_ts) {
+        auto* internal = dynamic_cast<SegmentInternalInterface*>(segment);
+        BitsetType mask(rows);
+        BitsetTypeView view(mask);
+        internal->mask_with_delete(view, rows, query_ts);
+        return mask;
+    };
+    auto expected_at = [&](Timestamp query_ts) {
+        BitsetType mask(rows);
+        for (auto& [pk, ts] : batch) {
+            if (pk >= 0 && pk < rows && static_cast<Timestamp>(pk) < ts &&
+                ts <= query_ts) {
+                mask.set(pk);
+            }
+        }
+        return mask;
+    };
+
+    auto sorted = CreateSegment(true);
+    auto unsorted = CreateSegment(false);
+    auto loaded = CreateSegment(true);
+    ASSERT_TRUE(
+        sorted->Delete(batch.size(), ids.get(), timestamps.data()).ok());
+    ASSERT_TRUE(
+        unsorted->Delete(batch.size(), ids.get(), timestamps.data()).ok());
+    LoadDeletedRecordInfo info{
+        timestamps.data(), ids.get(), static_cast<int64_t>(batch.size())};
+    loaded->LoadDeletedRecord(info);
+
+    // Returns the first row where the masks differ, or -1.
+    auto first_mismatch = [&](const BitsetType& a, const BitsetType& b) {
+        for (int64_t r = 0; r < rows; ++r) {
+            if (a[r] != b[r]) {
+                return r;
+            }
+        }
+        return int64_t(-1);
+    };
+    for (Timestamp query_ts :
+         {Timestamp(800), Timestamp(25000), MAX_TIMESTAMP}) {
+        auto expected = expected_at(query_ts);
+        EXPECT_EQ(
+            first_mismatch(delete_mask_at(sorted.get(), query_ts), expected),
+            -1)
+            << "stream delete, query_ts=" << query_ts;
+        EXPECT_EQ(
+            first_mismatch(delete_mask_at(unsorted.get(), query_ts), expected),
+            -1)
+            << "pk index path, query_ts=" << query_ts;
+        EXPECT_EQ(
+            first_mismatch(delete_mask_at(loaded.get(), query_ts), expected),
+            -1)
+            << "load replay, query_ts=" << query_ts;
+    }
+    auto deleted = expected_at(MAX_TIMESTAMP).count();
+    EXPECT_EQ(sorted->get_real_count(), rows - deleted);
+    EXPECT_EQ(unsorted->get_real_count(), rows - deleted);
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // PR #51441 skip-index regression tests (storage v2). Two dimensions:
 //  1. Correctness: real queries return the exact count -- a mis-aligned cell,
