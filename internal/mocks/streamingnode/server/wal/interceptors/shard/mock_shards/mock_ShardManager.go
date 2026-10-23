@@ -1167,6 +1167,39 @@ func (_c *MockShardManager_Logger_Call) RunAndReturn(run func() *mlog.Logger) *M
 	return _c
 }
 
+// ReleaseSplitFence provides a mock function with given fields: vchannel
+func (_m *MockShardManager) ReleaseSplitFence(vchannel string) {
+	_m.Called(vchannel)
+}
+
+// MockShardManager_ReleaseSplitFence_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReleaseSplitFence'
+type MockShardManager_ReleaseSplitFence_Call struct {
+	*mock.Call
+}
+
+// ReleaseSplitFence is a helper method to define mock.On call
+//   - vchannel string
+func (_e *MockShardManager_Expecter) ReleaseSplitFence(vchannel interface{}) *MockShardManager_ReleaseSplitFence_Call {
+	return &MockShardManager_ReleaseSplitFence_Call{Call: _e.mock.On("ReleaseSplitFence", vchannel)}
+}
+
+func (_c *MockShardManager_ReleaseSplitFence_Call) Run(run func(vchannel string)) *MockShardManager_ReleaseSplitFence_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockShardManager_ReleaseSplitFence_Call) Return() *MockShardManager_ReleaseSplitFence_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockShardManager_ReleaseSplitFence_Call) RunAndReturn(run func(string)) *MockShardManager_ReleaseSplitFence_Call {
+	_c.Run(run)
+	return _c
+}
+
 // SplitShard provides a mock function with given fields: msg
 func (_m *MockShardManager) SplitShard(msg message.MutableSplitShardMessageV2) {
 	_m.Called(msg)
