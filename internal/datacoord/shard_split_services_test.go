@@ -238,6 +238,48 @@ func TestCommitShardSplitLeavesLaterStatesAlone(t *testing.T) {
 	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskAdopting, task.GetState())
 }
 
+func TestCommitShardSplitRollsAnAbortedTaskForward(t *testing.T) {
+	// The planner may abort a task on a broadcast failure it took for definite
+	// although the fence landed; the commit proves the fence, and a fenced task
+	// is forward-only. Left Aborted, its source would stay fenced forever with
+	// nothing moving its data, and CheckShardSplitDrained would still answer
+	// recorded=true for it.
+	svr := newShardSplitTestServer(t)
+	require.NoError(t, svr.shardSplitTasks.upsert(context.Background(), svr.meta.catalog, &datapb.SplitShardTask{
+		TaskId:       200,
+		CollectionId: 100,
+		State:        datapb.SplitShardTaskState_SplitShardTaskAborted,
+		Sources:      []*datapb.SplitShardTaskSource{{Vchannel: splitTestSource}},
+	}))
+
+	status, err := svr.CommitShardSplit(context.Background(), splitTestCommitRequest())
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(status))
+
+	task, _ := svr.shardSplitTasks.get(200)
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, task.GetState())
+	assert.True(t, task.GetFenced())
+	assert.EqualValues(t, 2000, task.GetSources()[0].GetSwitchTimeTick())
+}
+
+func TestCommitShardSplitLeavesADoneTaskDone(t *testing.T) {
+	svr := newShardSplitTestServer(t)
+	require.NoError(t, svr.shardSplitTasks.upsert(context.Background(), svr.meta.catalog, &datapb.SplitShardTask{
+		TaskId:       200,
+		CollectionId: 100,
+		State:        datapb.SplitShardTaskState_SplitShardTaskDone,
+		Fenced:       true,
+		Sources:      []*datapb.SplitShardTaskSource{{Vchannel: splitTestSource, SwitchTimeTick: 2000}},
+	}))
+
+	status, err := svr.CommitShardSplit(context.Background(), splitTestCommitRequest())
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(status))
+
+	task, _ := svr.shardSplitTasks.get(200)
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskDone, task.GetState())
+}
+
 func TestCommitShardSplitSeedsOnlyUnseededTargets(t *testing.T) {
 	// A target that already reported a checkpoint has been consuming for a
 	// while; overwriting it with the genesis position would rewind every child
