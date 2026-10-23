@@ -1,4 +1,5 @@
 import io
+import math
 import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
@@ -2745,8 +2746,19 @@ def create_udf(context):
     @pytest.mark.parametrize("mode", ["text_match", "bm25", "hybrid_rrf", "hybrid_weighted"])
     @pytest.mark.parametrize("nq", [1, 2])
     def test_pyudf_text_and_sparse_queries(self, tmp_path, minio_host, minio_bucket, mode, nq):
-        """target: lexical/dense retrieval plus UDF; method: fixed token and scalar ledger; expected: aligned results."""
-        with self._pyudf_test_environment(tmp_path, minio_host, minio_bucket, None) as (client, control, resource):
+        """target: lexical/dense fusion reaches UDF; method: independent branch oracle; expected: exact scores/IDs."""
+        module = """import pyarrow as pa
+class UDF:
+    def transform_query(self, params, columns):
+        factor = float(params.get("factor", 1.0))
+        score_factor = float(params.get("score_factor", 0.0))
+        values = [float(score.as_py()) * score_factor + float(ts.as_py()) * factor
+                  for score, ts in zip(columns[0], columns[1])]
+        return [pa.array(values, type=pa.float32())]
+def create_udf(context):
+    return UDF()
+"""
+        with self._pyudf_test_environment(tmp_path, minio_host, minio_bucket, module) as (client, control, resource):
             self._assert_pyudf_recovery(client, control, resource)
             with ExitStack() as cleanup:
                 name = cf.gen_unique_str("pyudf_text")
@@ -2780,6 +2792,7 @@ def create_udf(context):
                     {"id": 1, "ts": 10, "vector": [0.0, 0.0], "text": "milvus vector database"},
                     {"id": 2, "ts": 20, "vector": [0.01, 0.0], "text": "milvus search"},
                     {"id": 3, "ts": 30, "vector": [0.02, 0.0], "text": "postgres relational"},
+                    {"id": 4, "ts": 40, "vector": [1.0, 0.0], "text": "milvus relational"},
                 ]
                 self.insert(client, name, rows)
                 self.flush(client, name)
@@ -2788,20 +2801,52 @@ def create_udf(context):
                 texts = ["milvus", "relational"][:nq]
                 chain = self._pyudf_chain(resource)
                 if mode.startswith("hybrid"):
+                    # The far-away row 4 must enter through the sparse branch for every query.
+                    dense_hits = self.search(
+                        client,
+                        name,
+                        data=dense,
+                        anns_field="vector",
+                        search_params={"metric_type": "L2"},
+                        limit=2,
+                    )[0]
+                    sparse_hits = self.search(
+                        client,
+                        name,
+                        data=texts,
+                        anns_field="sparse",
+                        search_params={"metric_type": "BM25"},
+                        limit=3,
+                    )[0]
+                    assert len(dense_hits) == len(sparse_hits) == nq
+                    expected_scores = []
+                    for query, (dense_branch, sparse_branch) in enumerate(zip(dense_hits, sparse_hits)):
+                        assert [hit["id"] for hit in dense_branch] == ([1, 2] if query == 0 else [3, 2])
+                        assert {hit["id"] for hit in sparse_branch} == ({1, 2, 4} if query == 0 else {3, 4})
+                        fused = {}
+                        for branch, weight, is_dense in [(dense_branch, 0.3, True), (sparse_branch, 0.7, False)]:
+                            for rank, hit in enumerate(branch, start=1):
+                                if mode == "hybrid_rrf":
+                                    contribution = 1.0 / (60 + rank)
+                                else:
+                                    normalized = 2 * math.atan(hit["distance"]) / math.pi
+                                    contribution = weight * (1 - normalized if is_dense else normalized)
+                                fused[hit["id"]] = fused.get(hit["id"], 0.0) + contribution
+                        expected_scores.append({pk: 100 * score + pk * 20 for pk, score in fused.items()})
                     reqs = [
-                        AnnSearchRequest(data=dense, anns_field="vector", param={"metric_type": "L2"}, limit=3),
+                        AnnSearchRequest(data=dense, anns_field="vector", param={"metric_type": "L2"}, limit=2),
                         AnnSearchRequest(data=texts, anns_field="sparse", param={"metric_type": "BM25"}, limit=3),
                     ]
                     merged = FunctionChain(FunctionChainStage.L2_RERANK)
-                    merged.merge("weighted", weights=[0.3, 0.7]) if mode == "hybrid_weighted" else merged.merge(
-                        "rrf", k=60
-                    )
+                    merged.merge(
+                        "weighted", weights=[0.3, 0.7], norm_score=True
+                    ) if mode == "hybrid_weighted" else merged.merge("rrf", k=60)
                     merged.map(
                         "$score",
                         FunctionChainExpr(
                             "py_udf",
                             args=(col("$score"), col("ts")),
-                            params={"resource_name": resource, "udf_params": {"factor": 2.0}},
+                            params={"resource_name": resource, "udf_params": {"factor": 2.0, "score_factor": 100.0}},
                         ),
                     )
                     merged.sort(col("$score"), desc=True, tie_break_col=col("$id"))
@@ -2824,11 +2869,16 @@ def create_udf(context):
                     )[0]
                 assert len(result) == nq
                 for index, hits in enumerate(result):
-                    expected = (
-                        [3, 2, 1] if mode.startswith("hybrid") else ([3] if mode == "bm25" and index == 1 else [2, 1])
-                    )
+                    if mode.startswith("hybrid"):
+                        scores = expected_scores[index]
+                        expected = sorted(scores, key=lambda pk: (-scores[pk], pk))
+                    else:
+                        expected = [4, 3] if mode == "bm25" and index == 1 else [4, 2, 1]
+                        scores = {pk: pk * 20 for pk in expected}
                     assert [h["id"] for h in hits] == expected
-                    assert [h["distance"] for h in hits] == pytest.approx([i * 20 for i in expected])
+                    assert [h["distance"] for h in hits] == pytest.approx(
+                        [scores[pk] for pk in expected], rel=1e-5, abs=1e-5
+                    )
                     assert [self._hit_field(h, "ts") for h in hits] == [i * 10 for i in expected]
             self._assert_pyudf_recovery(client, control, resource)
 
