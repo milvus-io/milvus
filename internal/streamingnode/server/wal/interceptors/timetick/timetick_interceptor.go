@@ -48,6 +48,13 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 		// Allocate new timestamp acker for message.
 		var acker *ack.Acker
 		if msg.MessageType().IsFreshTimeTick() {
+			if msg.BarrierTimeTick() != 0 {
+				// A fresh tick is never allocated with a barrier: one path
+				// would silently skip the other's guarantee. No producer sets
+				// both; refuse rather than pick one.
+				return nil, merr.WrapErrServiceInternalMsg("message type %s takes a fresh time tick and cannot carry a barrier time tick %d",
+					msg.MessageType().String(), msg.BarrierTimeTick())
+			}
 			acker, err = ackManager.AllocateFreshForAppend(ctx)
 		} else {
 			acker, err = ackManager.AllocateForAppend(ctx, msg.BarrierTimeTick())
