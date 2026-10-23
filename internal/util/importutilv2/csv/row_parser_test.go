@@ -953,77 +953,6 @@ func TestCsvRowParser(t *testing.T) {
 	suite.Run(t, new(RowParserSuite))
 }
 
-func TestArrayOfVectorToFieldData_NonFloatElementTypes(t *testing.T) {
-	makeField := func(elementType schemapb.DataType, dim string) *schemapb.FieldSchema {
-		return &schemapb.FieldSchema{
-			FieldID:     100,
-			Name:        "test_vec",
-			DataType:    schemapb.DataType_ArrayOfVector,
-			ElementType: elementType,
-			TypeParams: []*commonpb.KeyValuePair{
-				{Key: common.DimKey, Value: dim},
-			},
-		}
-	}
-
-	tests := []struct {
-		name    string
-		field   *schemapb.FieldSchema
-		dim     int
-		vectors []any
-		verify  func(*schemapb.VectorField)
-	}{
-		{
-			name:    "binary",
-			field:   makeField(schemapb.DataType_BinaryVector, "16"),
-			dim:     16,
-			vectors: []any{[]any{json.Number("3"), json.Number("11")}},
-			verify: func(field *schemapb.VectorField) {
-				assert.Equal(t, []byte{3, 11}, field.GetBinaryVector())
-			},
-		},
-		{
-			name:    "float16",
-			field:   makeField(schemapb.DataType_Float16Vector, "2"),
-			dim:     2,
-			vectors: []any{[]any{json.Number("0.25"), json.Number("0.5")}},
-			verify: func(field *schemapb.VectorField) {
-				expected := append(typeutil.Float32ToFloat16Bytes(0.25), typeutil.Float32ToFloat16Bytes(0.5)...)
-				assert.Equal(t, expected, field.GetFloat16Vector())
-			},
-		},
-		{
-			name:    "bfloat16",
-			field:   makeField(schemapb.DataType_BFloat16Vector, "2"),
-			dim:     2,
-			vectors: []any{[]any{json.Number("0.25"), json.Number("0.5")}},
-			verify: func(field *schemapb.VectorField) {
-				expected := append(typeutil.Float32ToBFloat16Bytes(0.25), typeutil.Float32ToBFloat16Bytes(0.5)...)
-				assert.Equal(t, expected, field.GetBfloat16Vector())
-			},
-		},
-		{
-			name:    "int8",
-			field:   makeField(schemapb.DataType_Int8Vector, "2"),
-			dim:     2,
-			vectors: []any{[]any{json.Number("1"), json.Number("-2")}},
-			verify: func(field *schemapb.VectorField) {
-				assert.Equal(t, typeutil.Int8ArrayToBytes([]int8{1, -2}), field.GetInt8Vector())
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			parser := &rowParser{name2Dim: map[string]int{tt.field.GetName(): tt.dim}}
-			result, err := parser.arrayOfVectorToFieldData(tt.vectors, tt.field)
-			assert.NoError(t, err)
-			assert.Equal(t, int64(tt.dim), result.GetDim())
-			tt.verify(result)
-		})
-	}
-}
-
 func TestParseStructArrayArrayOfVector_NonFloatElementTypes(t *testing.T) {
 	makeSchema := func(elementType schemapb.DataType, dim string) *schemapb.CollectionSchema {
 		return &schemapb.CollectionSchema{
@@ -1156,4 +1085,137 @@ func TestParseTextFieldValue(t *testing.T) {
 	val, ok := result[int64(101)]
 	assert.True(t, ok)
 	assert.Equal(t, longText, val)
+}
+
+// elementNullStructSchema has a struct with a legacy Int64, an element-nullable
+// VarChar, a nested Array<Array<Int64>> with nullable inner arrays and leaves,
+// and an element-nullable FloatVector sub-field.
+func elementNullStructSchema() *schemapb.CollectionSchema {
+	leaf := &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64}, Nullable: true}
+	inner := &schemapb.TypeSchema{
+		Kind:       &schemapb.TypeSchema_ArrayElement{ArrayElement: leaf},
+		Nullable:   true,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "4"}},
+	}
+	return &schemapb.CollectionSchema{
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 9999, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 200,
+			Name:    "clips",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID: 201, Name: "clips[id]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "4"}},
+				},
+				{
+					FieldID: 202, Name: "clips[label]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar,
+					ElementNullable: true,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxCapacityKey, Value: "4"},
+						{Key: common.MaxLengthKey, Value: "8"},
+					},
+				},
+				{
+					FieldID: 203, Name: "clips[tags]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array,
+					ElementNullable: true,
+					TypeSchema: &schemapb.TypeSchema{
+						Kind:       &schemapb.TypeSchema_ArrayElement{ArrayElement: inner},
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "4"}},
+					},
+				},
+				{
+					FieldID: 204, Name: "clips[emb]", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector,
+					ElementNullable: true,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "2"},
+						{Key: common.MaxCapacityKey, Value: "4"},
+					},
+				},
+			},
+		}},
+	}
+}
+
+func TestParseStructArrayElementNull(t *testing.T) {
+	parser, err := NewRowParser(elementNullStructSchema(), []string{"pk", "clips"}, "NULL")
+	assert.NoError(t, err)
+
+	// The cell holds the same JSON text as the JSON format. The third element
+	// omits the element-nullable label and tags and carries a key that is not a
+	// sub-field.
+	row, err := parser.Parse([]string{"1", `[` +
+		`{"id": 1, "label": null, "tags": [1, null], "emb": null},` +
+		`{"id": 2, "label": "b", "tags": null, "emb": [0.1, 0.2]},` +
+		`{"id": 3, "emb": null, "dropped": "x"}]`})
+	assert.NoError(t, err)
+
+	id := row[201].(*schemapb.ScalarField)
+	assert.Equal(t, []int64{1, 2, 3}, id.GetLongData().GetData())
+	assert.Nil(t, typeutil.GetArrayElementValidData(id))
+
+	label := row[202].(*schemapb.ScalarField)
+	assert.Equal(t, []string{"", "b", ""}, label.GetStringData().GetData())
+	assert.Equal(t, []bool{false, true, false}, typeutil.GetArrayElementValidData(label))
+
+	tags := row[203].(*schemapb.ScalarField)
+	assert.Equal(t, schemapb.DataType_Int64, tags.GetArrayData().GetElementType())
+	assert.Equal(t, []bool{true, false, false}, typeutil.GetArrayElementValidData(tags))
+	children := tags.GetArrayData().GetData()
+	assert.Len(t, children, 3)
+	assert.Equal(t, []int64{1, 0}, children[0].GetLongData().GetData())
+	assert.Equal(t, []bool{true, false}, typeutil.GetArrayElementValidData(children[0]))
+	for _, child := range children[1:] {
+		// A null inner array is a typed empty leaf without valid_data.
+		assert.NotNil(t, child.GetLongData())
+		assert.Empty(t, child.GetLongData().GetData())
+		assert.Nil(t, typeutil.GetArrayElementValidData(child))
+	}
+
+	emb := row[204].(*schemapb.VectorField)
+	assert.Equal(t, []float32{0.1, 0.2}, emb.GetFloatVector().GetData())
+	assert.Equal(t, []bool{false, true, false}, typeutil.GetVectorArrayElementValidData(emb))
+
+	// Keys inside struct elements never reach the dynamic field.
+	assert.Equal(t, []byte("{}"), row[9999])
+
+	row, err = parser.Parse([]string{"2", "[]"})
+	assert.NoError(t, err)
+	assert.Empty(t, row[201].(*schemapb.ScalarField).GetLongData().GetData())
+	assert.Empty(t, row[203].(*schemapb.ScalarField).GetArrayData().GetData())
+}
+
+func TestParseStructArrayElementNullErrors(t *testing.T) {
+	parser, err := NewRowParser(elementNullStructSchema(), []string{"pk", "clips"}, "NULL")
+	assert.NoError(t, err)
+
+	cases := []struct {
+		name     string
+		cell     string
+		contains string
+	}{
+		{"missing non-element-nullable sub-field", `[{"label": "a"}]`, "sub-field 'id' of struct field 'clips' is missing from element 0"},
+		{"null at a non-element-nullable sub-field", `[{"id": null}]`, "element 0 is null, but the sub-field is not element-nullable"},
+		{"null struct element", `[{"id": 1}, null]`, "a struct element cannot be null"},
+		{"not a list", `{"id": 1}`, "expect array"},
+		{"invalid JSON", `[{"id": 1}`, "failed to parse JSON"},
+		{"int64 not integer", `[{"id": 1.5}]`, "failed to parse '1.5' as Int64"},
+		{"label exceeds max_length", `[{"id": 1, "label": "123456789"}]`, "exceeds max_length(8)"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := parser.Parse([]string{"1", c.cell})
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), c.contains)
+		})
+	}
+
+	// A null row of a non-nullable struct is rejected, as before.
+	_, err = parser.Parse([]string{"1", "NULL"})
+	assert.Error(t, err)
+	_, err = parser.Parse([]string{"1", "null"})
+	assert.Error(t, err)
 }

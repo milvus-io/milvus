@@ -478,3 +478,65 @@ func TestDeserializeNativeArrayRowRejectsOutOfRangeNestedOffsets(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 }
+
+func TestNullElementsArrayRowSerializes(t *testing.T) {
+	single := &schemapb.FieldSchema{
+		FieldID: 202, Name: "s[new]", DataType: schemapb.DataType_Array,
+		ElementType: schemapb.DataType_VarChar, Nullable: true, ElementNullable: true,
+	}
+	nested := testNestedField(schemapb.DataType_Int64, true, true)
+	for _, field := range []*schemapb.FieldSchema{single, nested} {
+		for _, n := range []int{0, 3} {
+			row, err := NullElementsArrayRow(field, n)
+			require.NoError(t, err)
+			require.Equal(t, make([]bool, n), row.ValidData)
+			if field == nested {
+				require.Equal(t, schemapb.DataType_Int64, row.GetArrayData().GetElementType())
+				require.Len(t, row.GetArrayData().GetData(), n)
+			} else {
+				require.Len(t, row.GetStringData().GetData(), n)
+			}
+
+			typ, err := ArrowTypeForField(field)
+			require.NoError(t, err)
+			builder := array.NewBuilder(memory.DefaultAllocator, typ)
+			require.NoError(t, SerializeNativeArrayRow(builder, row, field))
+			result := builder.NewArray().(*array.List)
+			require.True(t, result.IsValid(0))
+			start, end := result.ValueOffsets(0)
+			require.Equal(t, int64(n), end-start)
+			for i := start; i < end; i++ {
+				require.True(t, result.ListValues().IsNull(int(i)))
+			}
+			back, err := DeserializeNativeArrayRow(result, 0, field)
+			require.NoError(t, err)
+			require.True(t, proto.Equal(row, back))
+			result.Release()
+			builder.Release()
+		}
+	}
+
+	_, err := NullElementsArrayRow(&schemapb.FieldSchema{
+		Name: "legacy", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+	}, 1)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
+func TestNullElementsVectorArrayRow(t *testing.T) {
+	field := &schemapb.FieldSchema{
+		FieldID: 203, Name: "s[vec]", DataType: schemapb.DataType_ArrayOfVector,
+		ElementType: schemapb.DataType_FloatVector, ElementNullable: true,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}},
+	}
+	row, err := NullElementsVectorArrayRow(field, 4, 2)
+	require.NoError(t, err)
+	require.Equal(t, int64(4), row.GetDim())
+	require.NotNil(t, row.GetFloatVector())
+	require.Empty(t, row.GetFloatVector().GetData())
+	require.Equal(t, []bool{false, false}, row.ValidData)
+
+	_, err = NullElementsVectorArrayRow(&schemapb.FieldSchema{
+		Name: "legacy", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector,
+	}, 4, 1)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+}

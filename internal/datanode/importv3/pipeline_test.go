@@ -101,6 +101,98 @@ func TestNormalizeReshardBatchKeepsBackupFunctionOutput(t *testing.T) {
 	require.Equal(t, []int64{10, 20}, data.Data[101].(*storage.Int64FieldData).Data)
 }
 
+// TestNormalizeReshardBatchFillsMissingStructSubFields pins that the reshard
+// normalization fills element-nullable struct sub-fields a file does not carry
+// (N null elements per row, N from the present sibling) and that the spill
+// serde writes the filled columns as native lists of null elements.
+func TestNormalizeReshardBatchFillsMissingStructSubFields(t *testing.T) {
+	const structName = "clips"
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 110,
+			Name:    structName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID: 111, Name: typeutil.ConcatStructFieldName(structName, "ids"),
+					DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID: 112, Name: typeutil.ConcatStructFieldName(structName, "text"),
+					DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar, ElementNullable: true,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "64"}},
+				},
+				{
+					FieldID: 113, Name: typeutil.ConcatStructFieldName(structName, "emb"),
+					DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, ElementNullable: true,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+				},
+			},
+		}},
+	}
+	counts := []int{2, 0, 3}
+	ids := &storage.ArrayFieldData{ElementType: schemapb.DataType_Int64}
+	for _, n := range counts {
+		require.NoError(t, ids.AppendRow(&schemapb.ScalarField{
+			Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: make([]int64, n)}},
+		}))
+	}
+	data := &storage.InsertData{Data: map[int64]storage.FieldData{
+		100: &storage.Int64FieldData{Data: []int64{1, 2, 3}},
+		111: ids,
+	}}
+
+	var offset int64
+	source := &internalpb.ImportFile{Id: 1, IdRange: &commonpb.IDRange{Begin: 100, End: 103}}
+	require.NoError(t, normalizeReshardBatch(source, false, schema, data, 3, &offset))
+	require.Equal(t, 3, data.Data[112].RowNum())
+	require.Equal(t, 3, data.Data[113].RowNum())
+	for i, n := range counts {
+		require.Equal(t, make([]bool, n), typeutil.GetArrayElementValidData(data.Data[112].(*storage.ArrayFieldData).Data[i]))
+		require.Equal(t, make([]bool, n), typeutil.GetVectorArrayElementValidData(data.Data[113].(*storage.VectorArrayFieldData).Data[i]))
+	}
+
+	mgr, err := NewSpillManager(t.TempDir(), schema, 1)
+	require.NoError(t, err)
+	defer func() { _ = mgr.Close() }()
+	r, err := mgr.Append(0, []SpillBatch{{Data: data, Bytes: int64(data.GetMemorySize())}})
+	require.NoError(t, err)
+	require.Equal(t, int64(3), r.Rows)
+	reader, err := mgr.RangeReader(r)
+	require.NoError(t, err)
+	defer func() { _ = reader.Close() }()
+	record, err := reader.Next()
+	require.NoError(t, err)
+	for _, fieldID := range []int64{112, 113} {
+		list, ok := record.Column(fieldID).(*array.List)
+		require.True(t, ok, "field %d", fieldID)
+		require.Equal(t, len(counts), list.Len())
+		for i, n := range counts {
+			require.True(t, list.IsValid(i))
+			start, end := list.ValueOffsets(i)
+			require.Equal(t, int64(n), end-start, "field %d row %d", fieldID, i)
+			for j := start; j < end; j++ {
+				require.True(t, list.ListValues().IsNull(int(j)), "field %d row %d element %d", fieldID, i, j)
+			}
+		}
+	}
+
+	// A missing sub-field that is not element-nullable (ids) is rejected.
+	text := data.Data[112].(*storage.ArrayFieldData)
+	data = &storage.InsertData{Data: map[int64]storage.FieldData{
+		100: &storage.Int64FieldData{Data: []int64{1}},
+		112: &storage.ArrayFieldData{
+			ElementType: schemapb.DataType_VarChar, ElementNullable: true,
+			Data: []*schemapb.ScalarField{text.Data[0]},
+		},
+	}}
+	offset = 0
+	err = normalizeReshardBatch(source, false, schema, data, 1, &offset)
+	require.ErrorIs(t, err, merr.ErrImportFailed)
+}
+
 // TestRunReshardFunctionsGeneratesBM25AndMinHash pins the V2-equivalent
 // placement: reshard runs every function over the batch, so missing BM25 and
 // MinHash output columns are generated before hash routing and fragment write.
