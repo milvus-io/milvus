@@ -379,6 +379,72 @@ func emptyNativeScalar(leaf schemapb.DataType) *schemapb.ScalarField {
 	return row
 }
 
+// zeroNativeScalar returns a typed leaf payload of n zero values.
+func zeroNativeScalar(leaf schemapb.DataType, n int) *schemapb.ScalarField {
+	row := emptyNativeScalar(leaf)
+	switch leaf {
+	case schemapb.DataType_Bool:
+		row.GetBoolData().Data = make([]bool, n)
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		row.GetIntData().Data = make([]int32, n)
+	case schemapb.DataType_Int64:
+		row.GetLongData().Data = make([]int64, n)
+	case schemapb.DataType_Float:
+		row.GetFloatData().Data = make([]float32, n)
+	case schemapb.DataType_Double:
+		row.GetDoubleData().Data = make([]float64, n)
+	case schemapb.DataType_VarChar:
+		row.GetStringData().Data = make([]string, n)
+	}
+	return row
+}
+
+// NullElementsArrayRow builds a valid row of n null elements for an
+// element-nullable scalar Array struct sub-field, in the dense layout
+// SerializeNativeArrayRow accepts: a single-level Array gets n zero
+// placeholders, a nested Array gets n typed empty leaf children, and both get
+// an all-false element valid_data of length n. The schema was validated at
+// DDL time, so any other field is a caller bug.
+func NullElementsArrayRow(field *schemapb.FieldSchema, n int) (*schemapb.ScalarField, error) {
+	if field.GetDataType() != schemapb.DataType_Array || !field.GetElementNullable() {
+		return nil, merr.WrapErrServiceInternalMsg("field %s is not an element-nullable Array", field.GetName())
+	}
+	leaf, _, nested, err := nativeArrayLeaf(field)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := nativeArrayLeafArrowType(leaf); err != nil {
+		return nil, err
+	}
+	var row *schemapb.ScalarField
+	if nested {
+		children := make([]*schemapb.ScalarField, n)
+		for i := range children {
+			children[i] = emptyNativeScalar(leaf)
+		}
+		row = &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{ElementType: leaf, Data: children}}}
+	} else {
+		row = zeroNativeScalar(leaf, n)
+	}
+	typeutil.SetArrayElementValidData(row, make([]bool, n))
+	return row, nil
+}
+
+// NullElementsVectorArrayRow builds a valid row of n null vectors for an
+// element-nullable ArrayOfVector struct sub-field: a typed empty payload with
+// an all-false element valid_data of length n.
+func NullElementsVectorArrayRow(field *schemapb.FieldSchema, dim int64, n int) (*schemapb.VectorField, error) {
+	if field.GetDataType() != schemapb.DataType_ArrayOfVector || !field.GetElementNullable() {
+		return nil, merr.WrapErrServiceInternalMsg("field %s is not an element-nullable ArrayOfVector", field.GetName())
+	}
+	row, err := typeutil.NewEmptyArrayOfVectorRow(dim, field.GetElementType())
+	if err != nil {
+		return nil, merr.WrapErrServiceInternalErr(err, "build null ArrayOfVector row of field %s", field.GetName())
+	}
+	typeutil.SetVectorArrayElementValidData(row, make([]bool, n))
+	return row, nil
+}
+
 func readNativeLeaf(values arrow.Array, start, end int64, leaf schemapb.DataType, nullable bool) (*schemapb.ScalarField, error) {
 	leafType, err := nativeArrayLeafArrowType(leaf)
 	if err != nil {

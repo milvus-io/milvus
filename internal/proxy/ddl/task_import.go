@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/numpy"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -129,7 +130,7 @@ func (it *ImportTask) PreExecute(ctx context.Context) error {
 	if schema.CollectionSchema == nil || len(schema.GetFields()) == 0 {
 		return merr.WrapErrImportSysFailed("collection schema has no fields")
 	}
-	if err := importutilv2.ValidateImportSchema(schema.CollectionSchema); err != nil {
+	if err := importutilv2.ValidateImportSchema(schema.CollectionSchema, req.GetOptions()); err != nil {
 		return err
 	}
 	if err := validateTextStorageV3Enabled(schema.CollectionSchema); err != nil {
@@ -255,9 +256,14 @@ func (it *ImportTask) PreExecute(ctx context.Context) error {
 	if !isBackup && !isL0Import {
 		// check file type
 		for _, file := range req.GetFiles() {
-			_, err = importutilv2.GetFileType(file)
+			fileType, err := importutilv2.GetFileType(file)
 			if err != nil {
 				return err
+			}
+			if fileType == importutilv2.FileTypeNumpy {
+				if err := numpy.ValidateSchema(schema.CollectionSchema); err != nil {
+					return err
+				}
 			}
 		}
 	}

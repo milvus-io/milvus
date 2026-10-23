@@ -453,7 +453,7 @@ func normalizeReshardBatch(
 	if err := importv2.CheckRowsEqual(schema, data); err != nil {
 		return err
 	}
-	if err := importv2.CheckStructArrayConsistency(schema, data); err != nil {
+	if err := importv2.NormalizeStructArrayFields(schema, data); err != nil {
 		return err
 	}
 	if err := importv2.AppendNullableDefaultFieldsData(schema, data, rowNum); err != nil {

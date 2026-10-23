@@ -18,7 +18,9 @@ package elementnullable
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"path"
 	"testing"
 	"time"
 
@@ -322,14 +324,94 @@ func (s *ElementNullableSuite) TestInsertValidationAndImport() {
 		})
 	}
 
+	// Binlog (backup) imports cannot fill element-nullable or nested Array
+	// sub-fields, and NumPy files cannot carry a struct field.
 	resp, err := s.Cluster.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
-		CollectionName: name,
-		Files:          []*internalpb.ImportFile{{Paths: []string{"unused.json"}}},
+		CollectionName: name, PartitionName: "_default",
+		Files:   []*internalpb.ImportFile{{Paths: []string{"backup/insert_log/", "backup/delta_log/"}}},
+		Options: []*commonpb.KeyValuePair{kv("backup", "true")},
 	})
 	s.Require().NoError(err)
 	err = merr.Error(resp.GetStatus())
-	s.Require().Error(err)
-	s.Contains(err.Error(), "bulk import of element-nullable or nested Array field items.ints is not supported yet")
+	s.Require().ErrorIs(err, merr.ErrParameterInvalid)
+	s.Contains(err.Error(), "binlog import (backup restore) into a collection with element-nullable or nested Array field items.ints is not supported")
+
+	resp, err = s.Cluster.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
+		CollectionName: name,
+		Files:          []*internalpb.ImportFile{{Paths: []string{"numpy/pk.npy", "numpy/embedding.npy"}}},
+	})
+	s.Require().NoError(err)
+	err = merr.Error(resp.GetStatus())
+	s.Require().ErrorIs(err, merr.ErrImportFailed)
+	s.Contains(err.Error(), "numpy import does not support struct field 'items'")
+
+	// A JSON import of the rows of insertFields reads back like the insert.
+	s.importJSON(ctx, name, importRows())
+	s.indexAndLoad(ctx, name)
+	s.assertRows(ctx, name)
+}
+
+// importRows are the rows of insertFields in the JSON import format: a struct
+// value is a list of element objects, a null element value is null, and a
+// nested Array value is one inner array (null for a null inner array).
+func importRows() []map[string]any {
+	return []map[string]any{
+		{
+			"pk": 1, "score": 10, "legacy": []int64{1}, "embedding": vector(1),
+			structName: []map[string]any{
+				{intsName: 11, nestedName: []any{21, nil, 23}, textName: []string{"alpha"}, nullVec: vector(1), plainVec: vector(2)},
+				{intsName: nil, nestedName: nil, textName: []string{"beta"}, nullVec: nil, plainVec: vector(3)},
+			},
+		},
+		{"pk": 2, "score": 20, "legacy": []int64{}, "embedding": vector(2), structName: []map[string]any{}},
+		{"pk": 3, "score": 30, "legacy": []int64{3}, "embedding": vector(3), structName: nil},
+	}
+}
+
+func (s *ElementNullableSuite) importJSON(ctx context.Context, name string, rows []map[string]any) {
+	data, err := json.Marshal(rows)
+	s.Require().NoError(err)
+	filePath := path.Join(s.Cluster.RootPath(), "json", name+"_"+funcutil.RandomString(8)+".json")
+	s.Require().NoError(s.Cluster.ChunkManager.Write(ctx, filePath, data))
+	resp, err := s.Cluster.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
+		CollectionName: name, Files: []*internalpb.ImportFile{{Paths: []string{filePath}}},
+	})
+	s.Require().NoError(merr.CheckRPCCall(resp.GetStatus(), err))
+	for {
+		progress, err := s.Cluster.ProxyClient.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{JobID: resp.GetJobID()})
+		s.Require().NoError(merr.CheckRPCCall(progress.GetStatus(), err))
+		s.Require().NotEqual(internalpb.ImportJobState_Failed, progress.GetState(), progress.GetReason())
+		if progress.GetState() == internalpb.ImportJobState_Completed {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			s.FailNow("import did not complete before the deadline")
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+// indexAndLoad indexes every vector field, including the element-nullable
+// vector sub-field that must be indexed before load, and loads the collection.
+func (s *ElementNullableSuite) indexAndLoad(ctx context.Context, name string) {
+	plainName := typeutil.ConcatStructFieldName(structName, plainVec)
+	nullName := typeutil.ConcatStructFieldName(structName, nullVec)
+	for _, field := range []string{"embedding", plainName, nullName} {
+		metricType := metric.L2
+		if field == plainName {
+			metricType = metric.MaxSim
+		}
+		status, err := s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+			CollectionName: name, FieldName: field, IndexName: "idx_" + funcutil.RandomString(4),
+			ExtraParams: integration.ConstructIndexParam(dim, integration.IndexHNSW, metricType),
+		})
+		s.Require().NoError(merr.CheckRPCCall(status, err))
+		s.WaitForIndexBuilt(ctx, name, field)
+	}
+	status, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{CollectionName: name})
+	s.Require().NoError(merr.CheckRPCCall(status, err))
+	s.WaitForLoad(ctx, name)
 }
 
 func (s *ElementNullableSuite) queryRow(ctx context.Context, name string, pk int64) map[string]*schemapb.FieldData {

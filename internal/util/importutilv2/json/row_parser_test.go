@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -790,159 +791,6 @@ func (suite *RowParserSuite) TestParseError() {
 	}
 }
 
-func TestReconstructArrayForStructArray_InconsistentFields(t *testing.T) {
-	subFields := []string{"sub_int", "sub_str"}
-
-	// Element missing a field should produce an error
-	raw := []any{
-		map[string]any{"sub_int": 1, "sub_str": "hello"},
-		map[string]any{"sub_int": 2}, // missing "sub_str"
-	}
-	_, err := reconstructArrayForStructArray(raw, subFields)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "inconsistent field count in StructArray")
-
-	// Element with an extra field should produce an error
-	raw = []any{
-		map[string]any{"sub_int": 1, "sub_str": "hello", "sub_extra": true},
-	}
-	_, err = reconstructArrayForStructArray(raw, subFields)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "inconsistent field count in StructArray")
-
-	// Consistent fields should succeed
-	raw = []any{
-		map[string]any{"sub_int": 1, "sub_str": "hello1"},
-		map[string]any{"sub_int": 2, "sub_str": "hello2"},
-	}
-	result, err := reconstructArrayForStructArray(raw, subFields)
-	assert.NoError(t, err)
-	assert.Len(t, result, 2)
-
-	// Empty array should succeed
-	raw = []any{}
-	result, err = reconstructArrayForStructArray(raw, subFields)
-	assert.NoError(t, err)
-	assert.Len(t, result, 0)
-
-	// Single element should succeed
-	raw = []any{
-		map[string]any{"sub_int": 1, "sub_str": "hello"},
-	}
-	result, err = reconstructArrayForStructArray(raw, subFields)
-	assert.NoError(t, err)
-	assert.Len(t, result, 2)
-}
-
-func TestArrayOfVectorToFieldData_DimensionMismatch(t *testing.T) {
-	dim := 3
-	fieldID := int64(100)
-	field := &schemapb.FieldSchema{
-		FieldID:     fieldID,
-		Name:        "test_vec",
-		DataType:    schemapb.DataType_ArrayOfVector,
-		ElementType: schemapb.DataType_FloatVector,
-		TypeParams: []*commonpb.KeyValuePair{
-			{Key: common.DimKey, Value: "3"},
-		},
-	}
-	parser := &rowParser{
-		id2Dim:   map[int64]int{fieldID: dim},
-		id2Field: map[int64]*schemapb.FieldSchema{fieldID: field},
-	}
-
-	// Mismatched dimension: expect 3, got 2
-	vectors := []any{
-		[]any{json.Number("1.0"), json.Number("2.0")}, // dim=2, expected 3
-	}
-	_, err := parser.arrayOfVectorToFieldData(vectors, field)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "dimension")
-
-	// Correct dimension should succeed
-	vectors = []any{
-		[]any{json.Number("1.0"), json.Number("2.0"), json.Number("3.0")},
-	}
-	result, err := parser.arrayOfVectorToFieldData(vectors, field)
-	assert.NoError(t, err)
-	assert.Equal(t, int64(dim), result.Dim)
-}
-
-func TestArrayOfVectorToFieldData_NonFloatElementTypes(t *testing.T) {
-	fieldID := int64(100)
-	makeField := func(elementType schemapb.DataType, dim string) *schemapb.FieldSchema {
-		return &schemapb.FieldSchema{
-			FieldID:     fieldID,
-			Name:        "test_vec",
-			DataType:    schemapb.DataType_ArrayOfVector,
-			ElementType: elementType,
-			TypeParams: []*commonpb.KeyValuePair{
-				{Key: common.DimKey, Value: dim},
-			},
-		}
-	}
-
-	tests := []struct {
-		name    string
-		field   *schemapb.FieldSchema
-		dim     int
-		vectors []any
-		verify  func(*schemapb.VectorField)
-	}{
-		{
-			name:    "binary",
-			field:   makeField(schemapb.DataType_BinaryVector, "16"),
-			dim:     16,
-			vectors: []any{[]any{json.Number("3"), json.Number("11")}},
-			verify: func(field *schemapb.VectorField) {
-				assert.Equal(t, []byte{3, 11}, field.GetBinaryVector())
-			},
-		},
-		{
-			name:    "float16",
-			field:   makeField(schemapb.DataType_Float16Vector, "2"),
-			dim:     2,
-			vectors: []any{[]any{json.Number("0.25"), json.Number("0.5")}},
-			verify: func(field *schemapb.VectorField) {
-				expected := append(typeutil.Float32ToFloat16Bytes(0.25), typeutil.Float32ToFloat16Bytes(0.5)...)
-				assert.Equal(t, expected, field.GetFloat16Vector())
-			},
-		},
-		{
-			name:    "bfloat16",
-			field:   makeField(schemapb.DataType_BFloat16Vector, "2"),
-			dim:     2,
-			vectors: []any{[]any{json.Number("0.25"), json.Number("0.5")}},
-			verify: func(field *schemapb.VectorField) {
-				expected := append(typeutil.Float32ToBFloat16Bytes(0.25), typeutil.Float32ToBFloat16Bytes(0.5)...)
-				assert.Equal(t, expected, field.GetBfloat16Vector())
-			},
-		},
-		{
-			name:    "int8",
-			field:   makeField(schemapb.DataType_Int8Vector, "2"),
-			dim:     2,
-			vectors: []any{[]any{json.Number("1"), json.Number("-2")}},
-			verify: func(field *schemapb.VectorField) {
-				assert.Equal(t, typeutil.Int8ArrayToBytes([]int8{1, -2}), field.GetInt8Vector())
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			parser := &rowParser{
-				id2Dim:   map[int64]int{fieldID: tt.dim},
-				id2Field: map[int64]*schemapb.FieldSchema{fieldID: tt.field},
-			}
-			result, err := parser.arrayOfVectorToFieldData(tt.vectors, tt.field)
-			assert.NoError(t, err)
-			assert.Equal(t, int64(tt.dim), result.GetDim())
-			tt.verify(result)
-		})
-	}
-}
-
 func TestParseStructArrayArrayOfVector_NonFloatElementTypes(t *testing.T) {
 	makeSchema := func(elementType schemapb.DataType, dim string) *schemapb.CollectionSchema {
 		return &schemapb.CollectionSchema{
@@ -1110,4 +958,175 @@ func TestParseTextFieldValue(t *testing.T) {
 	val, ok := result[int64(101)]
 	assert.True(t, ok)
 	assert.Equal(t, longText, val)
+}
+
+// elementNullStructSchema has a struct with a legacy Int64, an element-nullable
+// Double, a nested Array<Array<Int64>> with nullable inner arrays and leaves,
+// and an element-nullable FloatVector sub-field.
+func elementNullStructSchema() *schemapb.CollectionSchema {
+	leaf := &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64}, Nullable: true}
+	inner := &schemapb.TypeSchema{
+		Kind:       &schemapb.TypeSchema_ArrayElement{ArrayElement: leaf},
+		Nullable:   true,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "4"}},
+	}
+	return &schemapb.CollectionSchema{
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 9999, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 200,
+			Name:    "clips",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID: 201, Name: "clips[id]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "4"}},
+				},
+				{
+					FieldID: 202, Name: "clips[score]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Double,
+					ElementNullable: true,
+					TypeParams:      []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "4"}},
+				},
+				{
+					FieldID: 203, Name: "clips[tags]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array,
+					ElementNullable: true,
+					TypeSchema: &schemapb.TypeSchema{
+						Kind:       &schemapb.TypeSchema_ArrayElement{ArrayElement: inner},
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "4"}},
+					},
+				},
+				{
+					FieldID: 204, Name: "clips[emb]", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector,
+					ElementNullable: true,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "2"},
+						{Key: common.MaxCapacityKey, Value: "4"},
+					},
+				},
+			},
+		}},
+	}
+}
+
+func decodeJSONRow(t *testing.T, raw string) any {
+	var row any
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.UseNumber()
+	assert.NoError(t, dec.Decode(&row))
+	return row
+}
+
+func TestParseStructArrayElementNull(t *testing.T) {
+	parser, err := NewRowParser(elementNullStructSchema())
+	assert.NoError(t, err)
+
+	// A nested sub-field holds one inner array per element. The third element
+	// omits the element-nullable score and tags and carries a key that is not a
+	// sub-field.
+	row, err := parser.Parse(decodeJSONRow(t, `{"pk": 1, "clips": [`+
+		`{"id": 1, "score": null, "tags": [1, null], "emb": null},`+
+		`{"id": 2, "score": 0.5, "tags": null, "emb": [0.1, 0.2]},`+
+		`{"id": 3, "emb": null, "dropped": "x"}]}`))
+	assert.NoError(t, err)
+
+	id := row[201].(*schemapb.ScalarField)
+	assert.Equal(t, []int64{1, 2, 3}, id.GetLongData().GetData())
+	assert.Nil(t, typeutil.GetArrayElementValidData(id))
+
+	score := row[202].(*schemapb.ScalarField)
+	assert.Equal(t, []float64{0, 0.5, 0}, score.GetDoubleData().GetData())
+	assert.Equal(t, []bool{false, true, false}, typeutil.GetArrayElementValidData(score))
+
+	tags := row[203].(*schemapb.ScalarField)
+	assert.Equal(t, schemapb.DataType_Int64, tags.GetArrayData().GetElementType())
+	assert.Equal(t, []bool{true, false, false}, typeutil.GetArrayElementValidData(tags))
+	children := tags.GetArrayData().GetData()
+	assert.Len(t, children, 3)
+	assert.Equal(t, []int64{1, 0}, children[0].GetLongData().GetData())
+	assert.Equal(t, []bool{true, false}, typeutil.GetArrayElementValidData(children[0]))
+	for _, child := range children[1:] {
+		// A null inner array is a typed empty leaf without valid_data.
+		assert.NotNil(t, child.GetLongData())
+		assert.Empty(t, child.GetLongData().GetData())
+		assert.Nil(t, typeutil.GetArrayElementValidData(child))
+	}
+
+	emb := row[204].(*schemapb.VectorField)
+	assert.Equal(t, int64(2), emb.GetDim())
+	assert.Equal(t, []float32{0.1, 0.2}, emb.GetFloatVector().GetData())
+	assert.Equal(t, []bool{false, true, false}, typeutil.GetVectorArrayElementValidData(emb))
+
+	// Keys inside struct elements never reach the dynamic field.
+	var dynamic map[string]any
+	assert.NoError(t, json.Unmarshal(row[9999].([]byte), &dynamic))
+	assert.Empty(t, dynamic)
+}
+
+func TestParseStructArrayElementNullErrors(t *testing.T) {
+	parser, err := NewRowParser(elementNullStructSchema())
+	assert.NoError(t, err)
+
+	cases := []struct {
+		name     string
+		raw      string
+		contains string
+	}{
+		{
+			name:     "missing non-element-nullable sub-field",
+			raw:      `{"pk": 1, "clips": [{"score": 1.0}]}`,
+			contains: "sub-field 'id' of struct field 'clips' is missing from element 0",
+		},
+		{
+			name:     "null at a non-element-nullable sub-field",
+			raw:      `{"pk": 1, "clips": [{"id": null}]}`,
+			contains: "element 0 is null, but the sub-field is not element-nullable",
+		},
+		{
+			name:     "null struct element",
+			raw:      `{"pk": 1, "clips": [{"id": 1}, null]}`,
+			contains: "a struct element cannot be null",
+		},
+		{
+			name:     "struct value is not a list",
+			raw:      `{"pk": 1, "clips": {"id": 1}}`,
+			contains: "should be a list of element objects",
+		},
+		{
+			name:     "nested inner array is not a list",
+			raw:      `{"pk": 1, "clips": [{"id": 1, "tags": 3}]}`,
+			contains: "element 0 should be an array",
+		},
+		{
+			name:     "flat sub-field key",
+			raw:      `{"pk": 1, "clips[id]": [1]}`,
+			contains: "flat sub-field 'clips[id]' is not supported",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := parser.Parse(decodeJSONRow(t, c.raw))
+			assert.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrImportFailed)
+			assert.Contains(t, err.Error(), c.contains)
+		})
+	}
+
+	// A missing struct of a non-nullable struct field is still an error.
+	_, err = parser.Parse(decodeJSONRow(t, `{"pk": 1}`))
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "is missed")
+}
+
+func TestParseStructArrayEmptyList(t *testing.T) {
+	parser, err := NewRowParser(elementNullStructSchema())
+	assert.NoError(t, err)
+
+	row, err := parser.Parse(decodeJSONRow(t, `{"pk": 1, "clips": []}`))
+	assert.NoError(t, err)
+	assert.Empty(t, row[201].(*schemapb.ScalarField).GetLongData().GetData())
+	assert.Empty(t, typeutil.GetArrayElementValidData(row[202].(*schemapb.ScalarField)))
+	assert.Empty(t, row[203].(*schemapb.ScalarField).GetArrayData().GetData())
+	assert.Empty(t, typeutil.GetVectorArrayElementValidData(row[204].(*schemapb.VectorField)))
 }

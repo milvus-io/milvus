@@ -18,6 +18,8 @@ package structsubfield
 
 import (
 	"context"
+	"encoding/json"
+	"path"
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -25,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/tests/integration"
@@ -363,17 +366,74 @@ func (s *StructSubFieldSuite) TestLoadFieldsBeforeAndAfterReload() {
 	s.assertDirectChild(ctx, name, 2, "c")
 }
 
-func (s *StructSubFieldSuite) TestBulkImportStillRejected() {
+// TestBulkImportAfterAddingSubField imports a JSON file written for the schema
+// before the add: the added element-nullable sub-field reads back as one null
+// per element, and a null struct row stays null. Binlog (backup) and NumPy
+// imports are still rejected.
+func (s *StructSubFieldSuite) TestBulkImportAfterAddingSubField() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	name := collectionName("import")
 	s.create(ctx, baseSchema(name, true, true, vectorSchema("vec", false), scalarSchema("ints", schemapb.DataType_Int64, false)))
 	s.add(ctx, name, scalarSchema("c", schemapb.DataType_Int64, true))
+
 	resp, err := s.Cluster.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
-		CollectionName: name, Files: []*internalpb.ImportFile{{Paths: []string{"unused.json"}}},
+		CollectionName: name, PartitionName: "_default",
+		Files:   []*internalpb.ImportFile{{Paths: []string{"backup/insert_log/", "backup/delta_log/"}}},
+		Options: []*commonpb.KeyValuePair{param("backup", "true")},
 	})
 	s.Require().NoError(err)
-	s.Require().ErrorContains(merr.Error(resp.GetStatus()), "bulk import of element-nullable or nested Array field S.c is not supported yet")
+	err = merr.Error(resp.GetStatus())
+	s.Require().ErrorIs(err, merr.ErrParameterInvalid)
+	s.Require().ErrorContains(err, "binlog import (backup restore) into a collection with element-nullable or nested Array field S.c is not supported")
+
+	resp, err = s.Cluster.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
+		CollectionName: name, Files: []*internalpb.ImportFile{{Paths: []string{"numpy/pk.npy", "numpy/embedding.npy"}}},
+	})
+	s.Require().NoError(err)
+	err = merr.Error(resp.GetStatus())
+	s.Require().ErrorIs(err, merr.ErrImportFailed)
+	s.Require().ErrorContains(err, "numpy import does not support struct field 'S'")
+
+	s.importJSON(ctx, name, []map[string]any{
+		{"pk": 1, "embedding": values(1), structName: []map[string]any{{"vec": values(1), "ints": 11}, {"vec": values(2), "ints": 12}}},
+		{"pk": 2, "embedding": values(2), structName: nil},
+		{"pk": 3, "embedding": values(3), structName: []map[string]any{}},
+	})
+	s.indexAndLoad(ctx, name)
+	s.assertBackfilled(ctx, name, 1, "c", 2, true)
+	s.assertBackfilled(ctx, name, 2, "c", 0, false)
+	s.assertBackfilled(ctx, name, 3, "c", 0, true)
+	ints := s.child(ctx, name, 1, "ints").GetScalars().GetArrayData().GetData()
+	s.Require().Len(ints, 1)
+	s.Require().Equal([]int64{11, 12}, ints[0].GetLongData().GetData())
+	vec := s.child(ctx, name, 1, "vec").GetVectors().GetVectorArray().GetData()
+	s.Require().Len(vec, 1)
+	s.Require().Equal(append(values(1), values(2)...), vec[0].GetFloatVector().GetData())
+}
+
+func (s *StructSubFieldSuite) importJSON(ctx context.Context, name string, rows []map[string]any) {
+	data, err := json.Marshal(rows)
+	s.Require().NoError(err)
+	filePath := path.Join(s.Cluster.RootPath(), "json", name+"_"+funcutil.RandomString(8)+".json")
+	s.Require().NoError(s.Cluster.ChunkManager.Write(ctx, filePath, data))
+	resp, err := s.Cluster.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
+		CollectionName: name, Files: []*internalpb.ImportFile{{Paths: []string{filePath}}},
+	})
+	s.Require().NoError(merr.CheckRPCCall(resp.GetStatus(), err))
+	for {
+		progress, err := s.Cluster.ProxyClient.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{JobID: resp.GetJobID()})
+		s.Require().NoError(merr.CheckRPCCall(progress.GetStatus(), err))
+		s.Require().NotEqual(internalpb.ImportJobState_Failed, progress.GetState(), progress.GetReason())
+		if progress.GetState() == internalpb.ImportJobState_Completed {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			s.FailNow("import did not complete before the deadline")
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }
 
 // upsertEmbedding is a partial upsert that only sets embedding, so the struct
