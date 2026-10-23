@@ -590,6 +590,12 @@ func ManifestHasColumns(
 // Go-owned descriptors. Unlike Fragment, ColumnGroupEntry preserves all file
 // properties (including file_size and footer_size), so the native manifest can
 // be released here without losing metadata needed by Parquet/Vortex readers.
+// The external Function writer uses an output-only schema and AsNewColumnGroups,
+// keeping outputs separate from source columns. With unchanged Functions, refresh
+// can retain those groups whole. Mixed groups are rejected: changing their column
+// lists would not project the underlying files. Before commit,
+// createMilvusTableManifest rejects duplicate columns across retained groups and
+// overlap with imported source columns.
 func readManifestColumnGroupEntries(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
