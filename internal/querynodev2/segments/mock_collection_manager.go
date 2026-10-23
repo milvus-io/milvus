@@ -308,6 +308,54 @@ func (_c *MockCollectionManager_Unref_Call) RunAndReturn(run func(int64, uint32)
 	return _c
 }
 
+// UpdateIndexMeta provides a mock function with given fields: collectionID, meta, version
+func (_m *MockCollectionManager) UpdateIndexMeta(collectionID int64, meta *segcorepb.CollectionIndexMeta, version int64) error {
+	ret := _m.Called(collectionID, meta, version)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateIndexMeta")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64, *segcorepb.CollectionIndexMeta, int64) error); ok {
+		r0 = rf(collectionID, meta, version)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCollectionManager_UpdateIndexMeta_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateIndexMeta'
+type MockCollectionManager_UpdateIndexMeta_Call struct {
+	*mock.Call
+}
+
+// UpdateIndexMeta is a helper method to define mock.On call
+//   - collectionID int64
+//   - meta *segcorepb.CollectionIndexMeta
+//   - version int64
+func (_e *MockCollectionManager_Expecter) UpdateIndexMeta(collectionID interface{}, meta interface{}, version interface{}) *MockCollectionManager_UpdateIndexMeta_Call {
+	return &MockCollectionManager_UpdateIndexMeta_Call{Call: _e.mock.On("UpdateIndexMeta", collectionID, meta, version)}
+}
+
+func (_c *MockCollectionManager_UpdateIndexMeta_Call) Run(run func(collectionID int64, meta *segcorepb.CollectionIndexMeta, version int64)) *MockCollectionManager_UpdateIndexMeta_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(*segcorepb.CollectionIndexMeta), args[2].(int64))
+	})
+	return _c
+}
+
+func (_c *MockCollectionManager_UpdateIndexMeta_Call) Return(_a0 error) *MockCollectionManager_UpdateIndexMeta_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCollectionManager_UpdateIndexMeta_Call) RunAndReturn(run func(int64, *segcorepb.CollectionIndexMeta, int64) error) *MockCollectionManager_UpdateIndexMeta_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdateSchema provides a mock function with given fields: collectionID, schema, version
 func (_m *MockCollectionManager) UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, version uint64) error {
 	ret := _m.Called(collectionID, schema, version)
