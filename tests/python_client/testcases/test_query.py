@@ -2120,6 +2120,82 @@ class TestQueryTextMatch(TestcaseBase):
                     pytest.assume(len(res) == data_size, f"stem {stem} token {token} not found in {res}")
 
     @pytest.mark.tags(CaseLabel.L0)
+    def test_query_text_match_custom_analyzer_with_czech_stemmer_filter(self):
+        """
+        target: test text match with a custom analyzer using the Czech stemmer
+        method: 1. enable text match with a stemmer filter configured for Czech
+                2. insert documents containing the base form of several Czech words
+                3. query with inflected forms of those words
+        expected: every inflected form is stemmed to the same stem as the indexed
+                  base form, so each query matches all documents
+        """
+        analyzer_params = {
+            "tokenizer": "standard",
+            "filter": [
+                {
+                    "type": "stemmer",  # Specifies the filter type as stemmer
+                    "language": "czech",  # Sets the language for stemming to Czech
+                }
+            ],
+        }
+        # Czech is heavily inflected; each list holds declension forms that the
+        # Snowball Czech stemmer reduces to the same stem as the key.
+        word_pairs = {
+            "město": ["město", "města", "městě", "městu", "městem"],
+            "hrad": ["hrad", "hradu", "hrady", "hradem", "hradech"],
+            "žena": ["žena", "ženy", "ženě", "ženou", "ženám"],
+            "velký": ["velký", "velká", "velké", "velkým", "velkého"],
+            "student": ["student", "studenta", "studenti", "studentem", "studentů"],
+        }
+
+        dim = 128
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(
+                name="sentence",
+                dtype=DataType.VARCHAR,
+                max_length=65535,
+                enable_analyzer=True,
+                enable_match=True,
+                analyzer_params=analyzer_params,
+            ),
+            FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=dim),
+        ]
+        schema = CollectionSchema(fields=fields, description="test collection")
+        data_size = 5000
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+        fake = fake_en
+        data = [
+            {
+                "id": i,
+                "sentence": fake.sentence() + " " + " ".join(word_pairs.keys()),
+                "emb": [random.random() for _ in range(dim)],
+            }
+            for i in range(data_size)
+        ]
+        df = pd.DataFrame(data)
+        log.info(f"dataframe\n{df}")
+        batch_size = 5000
+        for i in range(0, len(df), batch_size):
+            collection_w.insert(data[i : i + batch_size] if i + batch_size < len(df) else data[i : len(df)])
+            collection_w.flush()
+        collection_w.create_index(
+            "emb",
+            {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}},
+        )
+        collection_w.load()
+        # query sentence field with the inflected forms of each indexed word
+        text_fields = ["sentence"]
+        for field in text_fields:
+            for stem in word_pairs.keys():
+                tokens = word_pairs[stem]
+                for token in tokens:
+                    expr = f"text_match({field}, '{token}')"
+                    log.info(f"expr: {expr}")
+                    res, _ = collection_w.query(expr=expr, output_fields=["id", field])
+                    pytest.assume(len(res) == data_size, f"stem {stem} token {token} not found in {res}")
+
+    @pytest.mark.tags(CaseLabel.L0)
     def test_query_text_match_custom_analyzer_with_ascii_folding_filter(self):
         """
         target: test text match with custom analyzer

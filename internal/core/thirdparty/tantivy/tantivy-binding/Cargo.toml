@@ -25,8 +25,9 @@ overflow-checks = false
 [dependencies]
 tantivy = { git = "https://github.com/zilliztech/tantivy.git" }
 tantivy-5 = { package = "tantivy", git = "https://github.com/zilliztech/tantivy", tag = "0.21.1-fix4" }
-# Preserve persisted analyzer output independently of Tantivy upgrades.
-rust-stemmers = { git = "https://github.com/milvus-io/rust-stemmers.git", rev = "3b2545218f76e797baecbf91fa1cbd2c0db60726" }
+# Pinned independently of Tantivy so persisted analyzer output only changes on an explicit bump.
+# 1.3.0 (Snowball 3.1.1) adds Czech; see #54100 for compatibility of existing indexes.
+rust-stemmers = { git = "https://github.com/milvus-io/rust-stemmers.git", rev = "ac4aee910b032a235e93da694edfc15fad155573" }
 lindera = "0.42.4"
 fs2 = "0.4"
 lindera-dictionary = "0.42.4"
