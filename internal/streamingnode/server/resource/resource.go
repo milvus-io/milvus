@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storage"
+	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	tinspector "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/inspector"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchantempstore"
@@ -35,6 +36,13 @@ func OptETCD(etcd *clientv3.Client) optResourceInit {
 func OptChunkManager(chunkManager storage.ChunkManager) optResourceInit {
 	return func(r *resourceImpl) {
 		r.chunkManager = chunkManager
+	}
+}
+
+// OptPKIndexManager provides the primary key index manager to the resource.
+func OptPKIndexManager(m *snpkindex.Manager) optResourceInit {
+	return func(r *resourceImpl) {
+		r.pkindexManager = m
 	}
 }
 
@@ -112,6 +120,7 @@ type resourceImpl struct {
 	segmentStatsManager  *stats.StatsManager
 	timeTickInspector    tinspector.TimeTickSyncInspector
 	vchannelTempStorage  *vchantempstore.VChannelTempStorage
+	pkindexManager       *snpkindex.Manager
 
 	// TODO: Global flusher components, should be removed afteer flushering in wal refactoring.
 	syncMgr syncmgr.SyncManager
@@ -136,6 +145,11 @@ func (r *resourceImpl) ETCD() *clientv3.Client {
 // ChunkManager returns the chunk manager.
 func (r *resourceImpl) ChunkManager() storage.ChunkManager {
 	return r.chunkManager
+}
+
+// PKIndexManager returns the primary key index manager, nil when it is not set.
+func (r *resourceImpl) PKIndexManager() *snpkindex.Manager {
+	return r.pkindexManager
 }
 
 // SyncManager returns the sync manager.
