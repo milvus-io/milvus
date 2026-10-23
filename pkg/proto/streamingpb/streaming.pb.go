@@ -214,7 +214,7 @@ const (
 	StreamingCode_STREAMING_CODE_SCHEMA_VERSION_MISMATCH   StreamingCode = 15  // wrong schema version
 	StreamingCode_STREAMING_CODE_RATE_LIMIT_REJECTED       StreamingCode = 16  // rate limit rejected
 	StreamingCode_STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE  StreamingCode = 17  // Proxy must re-query, merge, and retry.
-	StreamingCode_STREAMING_CODE_SHARD_FENCED              StreamingCode = 18  // vchannel is fenced by shard split; the client is meant to refresh routing and write to the new shards (proxy side not implemented yet)
+	StreamingCode_STREAMING_CODE_SHARD_FENCED              StreamingCode = 18  // vchannel is fenced by shard split; the client is meant to refresh routing and write to the new shards (the proxy reaction lands in a later layer of the shard split)
 	StreamingCode_STREAMING_CODE_UNKNOWN                   StreamingCode = 999 // unknown error
 )
 
