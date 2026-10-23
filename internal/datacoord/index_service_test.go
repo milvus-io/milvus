@@ -3130,7 +3130,7 @@ func Test_checkFMIndexEngineVersion(t *testing.T) {
 
 func TestCheckArraySTLSORTIndex(t *testing.T) {
 	params := []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexSTLSORT}}
-	for _, elem := range []schemapb.DataType{schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64, schemapb.DataType_Float, schemapb.DataType_Double, schemapb.DataType_VarChar} {
+	for _, elem := range []schemapb.DataType{schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64, schemapb.DataType_VarChar} {
 		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 101, DataType: schemapb.DataType_Array, ElementType: elem}}}
 		err := checkArraySTLSORTIndex(schema, 101, params, common.MinScalarIndexVersionForArrayStlSort-1)
 		assert.ErrorIs(t, err, merr.ErrServiceNotReady)
@@ -3139,7 +3139,7 @@ func TestCheckArraySTLSORTIndex(t *testing.T) {
 		assert.NoError(t, checkArraySTLSORTIndex(schema, 101, params, common.MinScalarIndexVersionForArrayStlSort))
 		assert.NoError(t, checkArraySTLSORTIndex(schema, 101, []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexHybrid}}, 0))
 	}
-	for _, elem := range []schemapb.DataType{schemapb.DataType_JSON} {
+	for _, elem := range []schemapb.DataType{schemapb.DataType_JSON, schemapb.DataType_Float, schemapb.DataType_Double} {
 		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 101, DataType: schemapb.DataType_Array, ElementType: elem}}}
 		assert.ErrorIs(t, checkArraySTLSORTIndex(schema, 101, params, common.MinScalarIndexVersionForArrayStlSort), merr.ErrParameterInvalid)
 	}

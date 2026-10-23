@@ -14,7 +14,6 @@
 #include <array>
 #include <filesystem>
 #include <memory>
-#include <limits>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -288,10 +287,7 @@ TEST_F(ScalarBuildSessionTest, OrdinaryArraySortRejectsOldBuildTarget) {
 }
 
 TEST_F(ScalarBuildSessionTest, OrdinaryArraySortFromBinlogKeepsParentRows) {
-    for (const auto element : {DataType::INT64,
-                               DataType::FLOAT,
-                               DataType::DOUBLE,
-                               DataType::VARCHAR}) {
+    for (const auto element : {DataType::INT64, DataType::VARCHAR}) {
         for (const auto* index_type :
              {index::ASCENDING_SORT, index::HYBRID_INDEX_TYPE}) {
             SCOPED_TRACE(::testing::Message()
@@ -313,14 +309,6 @@ TEST_F(ScalarBuildSessionTest, OrdinaryArraySortFromBinlogKeepsParentRows) {
                     auto* strings = scalar.mutable_string_data();
                     for (const auto value : values)
                         strings->add_data(std::to_string(value));
-                } else if (element == DataType::FLOAT) {
-                    scalar.mutable_float_data();
-                    for (const auto value : values)
-                        scalar.mutable_float_data()->add_data(value);
-                } else if (element == DataType::DOUBLE) {
-                    scalar.mutable_double_data();
-                    for (const auto value : values)
-                        scalar.mutable_double_data()->add_data(value);
                 } else {
                     auto* longs = scalar.mutable_long_data();
                     for (const auto value : values) longs->add_data(value);
@@ -352,65 +340,20 @@ TEST_F(ScalarBuildSessionTest, OrdinaryArraySortFromBinlogKeepsParentRows) {
             };
             if (element == DataType::VARCHAR)
                 check(std::string_view("1"));
-            else if (element == DataType::FLOAT)
-                check(float{1});
-            else if (element == DataType::DOUBLE)
-                check(double{1});
             else
                 check(int64_t{1});
         }
     }
 }
 
-TEST_F(ScalarBuildSessionTest, FloatingArraySortRejectsNonFiniteBinlogs) {
+TEST_F(ScalarBuildSessionTest, OrdinaryFloatingArraySortIsDeferred) {
     for (const auto element : {DataType::FLOAT, DataType::DOUBLE}) {
-        for (const auto* index_type :
-             {index::ASCENDING_SORT, index::HYBRID_INDEX_TYPE}) {
-            for (const double value :
-                 {std::numeric_limits<double>::quiet_NaN(),
-                  std::numeric_limits<double>::infinity(),
-                  -std::numeric_limits<double>::infinity()}) {
-                auto info = Info(DataType::ARRAY, index_type);
-                info.set_current_scalar_index_version(kArrayStlSortMinVersion);
-                info.set_num_rows(1);
-                info.mutable_field_schema()->set_element_type(
-                    static_cast<proto::schema::DataType>(element));
-                // Force HYBRID to choose SORT, not its low-cardinality bitmap.
-                if (std::string_view(index_type) == index::HYBRID_INDEX_TYPE) {
-                    for (auto& param : *info.mutable_index_params()) {
-                        if (param.key() ==
-                            index::BITMAP_INDEX_CARDINALITY_LIMIT)
-                            param.set_value("1");
-                    }
-                }
-                auto prepared =
-                    AdaptBuildIndexInfo(info, BuildPurpose::ScalarIndex);
-                proto::schema::ScalarField scalar;
-                if (element == DataType::FLOAT) {
-                    scalar.mutable_float_data()->add_data(1);
-                    scalar.mutable_float_data()->add_data(value);
-                } else {
-                    scalar.mutable_double_data()->add_data(1);
-                    scalar.mutable_double_data()->add_data(value);
-                }
-                Array array(scalar);
-                auto data =
-                    storage::CreateFieldData(DataType::ARRAY, element, false);
-                data->FillFieldData(&array, 1);
-                info.add_insert_files(
-                    WriteBinlog(prepared.file_manager_context, data));
-                prepared = AdaptBuildIndexInfo(info, BuildPurpose::ScalarIndex);
-                BuildSession session(std::move(prepared.request),
-                                     prepared.file_manager_context);
-                try {
-                    session.BuildFromSource();
-                    FAIL() << "non-finite ARRAY must fail before sorting";
-                } catch (const SegcoreError& error) {
-                    EXPECT_EQ(error.get_error_code(), DataFormatBroken);
-                }
-                EXPECT_THROW(session.Publish(), SegcoreError);
-            }
-        }
+        auto info = Info(DataType::ARRAY, index::ASCENDING_SORT);
+        info.set_current_scalar_index_version(kArrayStlSortMinVersion);
+        info.mutable_field_schema()->set_element_type(
+            static_cast<proto::schema::DataType>(element));
+        EXPECT_THROW(AdaptBuildIndexInfo(info, BuildPurpose::ScalarIndex),
+                     SegcoreError);
     }
 }
 

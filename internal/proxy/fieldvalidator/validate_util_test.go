@@ -9641,7 +9641,7 @@ func TestValidateNullableSparseWithoutPayload(t *testing.T) {
 	}
 }
 
-func TestArrayFloatFiniteValidation(t *testing.T) {
+func TestArrayFloatPreservesNonFiniteCompatibility(t *testing.T) {
 	v := NewValidateUtil(WithNANCheck())
 	for _, elem := range []schemapb.DataType{schemapb.DataType_Float, schemapb.DataType_Double} {
 		for _, value := range []float64{0, math.Copysign(0, -1), 1.5, math.NaN(), math.Inf(1), math.Inf(-1)} {
@@ -9660,11 +9660,7 @@ func TestArrayFloatFiniteValidation(t *testing.T) {
 				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{ElementType: elem, Data: []*schemapb.ScalarField{row}}}}},
 			}
 			err = v.Validate([]*schemapb.FieldData{payload}, helper, 1)
-			if math.IsNaN(value) || math.IsInf(value, 0) {
-				assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-			} else {
-				assert.NoError(t, err)
-			}
+			assert.NoError(t, err)
 		}
 	}
 }

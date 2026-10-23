@@ -19,8 +19,7 @@
 #include <array>
 #include <algorithm>
 #include <cstdint>
-#include <limits>
-#include <cmath>
+#include <chrono>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -146,67 +145,63 @@ TEST(SortedIndexReaderTest, ExplicitArraySortPreservesParentRowsAcrossReloads) {
     }
 }
 
-template <typename T>
-void
-CheckFloatingArraySort(DataType type, const char* backend_name) {
-    for (const auto* index_type : {ASCENDING_SORT, HYBRID_INDEX_TYPE}) {
-        auto adapted = AdaptIndexType({.index_type = index_type,
-                                       .field_type = DataType::ARRAY,
-                                       .element_type = type});
-        adapted.params[SCALAR_INDEX_ENGINE_VERSION] = kArrayStlSortMinVersion;
-        adapted.params[BITMAP_INDEX_CARDINALITY_LIMIT] = 1;
-        for (const T value : {T(1.5),
-                              T(0),
-                              -T(0),
-                              std::numeric_limits<T>::quiet_NaN(),
-                              std::numeric_limits<T>::infinity(),
-                              -std::numeric_limits<T>::infinity()}) {
-            const std::vector<T> values{T(2), value, T(2)};
-            ScalarTestData<ArrayView> data(
-                {OwnedArrayValue::FromFixed<T>(type, values)});
-            const ScalarTestInput<ArrayView> input(data);
-            auto builder =
-                BuilderRegistry<ScalarBuildInput<ArrayView>>::Instance().Create(
-                    adapted.family, adapted.params);
-            if (!std::isfinite(value)) {
-                ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
-                    static_cast<void>(std::move(*builder).Build(input.View()));
-                });
-            } else {
-                auto artifact = std::move(*builder).Build(input.View());
-                ASSERT_NE(artifact, nullptr);
-                // Open the concrete SORT payload selected by either entry.
-                const auto& backend =
-                    ScalarReaderBackends().Get<ArrayView>(backend_name);
-                const auto check = [&](const IIndexReaderBase& reader) {
-                    EXPECT_EQ(reader.Count(), 1);
-                    EXPECT_EQ(reader.CoordDomain(), Domain::Row);
-                    const auto* predicate =
-                        dynamic_cast<const IScalarPredicateReader<T>*>(&reader);
-                    ASSERT_NE(predicate, nullptr);
-                    EXPECT_TRUE(predicate->In(1, &value)[0]);
-                    EXPECT_TRUE(predicate->Range(T(0), true, T(3), true)[0]);
-                };
-                auto legacy = OpenV1V2(
-                    backend, SerializeV1V2(*artifact), {.row_count = 1});
-                ASSERT_NE(legacy, nullptr);
-                check(*legacy);
-                for (const bool async : {false, true}) {
-                    auto packed = OpenV3(backend,
-                                         SerializeV3(*artifact),
-                                         {.row_count = 1},
-                                         async);
-                    ASSERT_NE(packed, nullptr);
-                    check(*packed);
-                }
-            }
-        }
+TEST(SortedIndexReaderTest, ExplicitFloatingArraySortRemainsUnsupported) {
+    for (const auto type : {DataType::FLOAT, DataType::DOUBLE}) {
+        ExpectSegcoreError(ErrorCode::Unsupported, [&] {
+            static_cast<void>(AdaptIndexType({.index_type = ASCENDING_SORT,
+                                              .field_type = DataType::ARRAY,
+                                              .element_type = type}));
+        });
     }
 }
 
-TEST(SortedIndexReaderTest, FloatingArraySortRequiresFiniteValues) {
-    CheckFloatingArraySort<float>(DataType::FLOAT, "SortedFloatArray");
-    CheckFloatingArraySort<double>(DataType::DOUBLE, "SortedDoubleArray");
+// Keep the review workload available without a wall-clock assertion: timings
+// depend on the host, while the postings must remain correct at every size.
+TEST(SortedIndexReaderTest, NumericArrayBuildAcrossSegmentSizes) {
+    for (const size_t rows : {40000, 80000, 160000}) {
+        SCOPED_TRACE(rows);
+        std::vector<OwnedArrayValue> values;
+        values.reserve(rows);
+        for (size_t row = 0; row < rows; ++row) {
+            std::array<int64_t, 10> elements;
+            for (size_t i = 0; i < elements.size(); ++i) {
+                elements[i] = static_cast<int64_t>(row * elements.size() + i);
+            }
+            values.push_back(
+                OwnedArrayValue::FromFixed<int64_t>(DataType::INT64, elements));
+        }
+        ScalarTestData<ArrayView> data(std::move(values));
+        const ScalarTestInput<ArrayView> input(data);
+        const auto adapted = AdaptIndexType({.index_type = ASCENDING_SORT,
+                                             .field_type = DataType::ARRAY,
+                                             .element_type = DataType::INT64});
+        auto builder =
+            BuilderRegistry<ScalarBuildInput<ArrayView>>::Instance().Create(
+                adapted.family, adapted.params);
+        const auto start = std::chrono::steady_clock::now();
+        auto artifact = std::move(*builder).Build(input.View());
+        const auto elapsed =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start)
+                .count();
+        RecordProperty("build_ms_" + std::to_string(rows),
+                       std::to_string(elapsed));
+        const auto& backend =
+            ScalarReaderBackends().Get<ArrayView>("SortedInt64Array");
+        auto reader =
+            OpenV1V2(backend, SerializeV1V2(*artifact), {.row_count = rows});
+        ASSERT_NE(reader, nullptr);
+        EXPECT_EQ(reader->Count(), rows);
+        const auto* predicate =
+            dynamic_cast<const IScalarPredicateReader<int64_t>*>(reader.get());
+        ASSERT_NE(predicate, nullptr);
+        for (const size_t row : {size_t{0}, rows / 2, rows - 1}) {
+            const int64_t key = static_cast<int64_t>(row * 10 + 5);
+            const auto hits = predicate->In(1, &key);
+            EXPECT_EQ(hits.count(), 1);
+            EXPECT_TRUE(hits[row]);
+        }
+    }
 }
 
 TEST(SortedIndexReaderTest, ProvidesInt64Queries) {

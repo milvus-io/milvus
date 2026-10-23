@@ -17,7 +17,6 @@
 #include "index/scalar/sort/SortedIndexBuilder.h"
 
 #include <algorithm>
-#include <cmath>
 #include <limits>
 #include <map>
 #include <optional>
@@ -282,15 +281,6 @@ SortedIndexBuilder<T>::Build(const ScalarBuildInput<T>& input) && {
             const bool is_valid =
                 params_.nested || !batch.validity || batch.validity[i];
             if (is_valid) {
-                if constexpr (std::is_floating_point_v<T>) {
-                    if (params_.field_type == DataType::ARRAY &&
-                        !std::isfinite(batch.values[i])) {
-                        ThrowInfo(DataFormatBroken,
-                                  "cannot build nested ARRAY STL_SORT: "
-                                  "non-finite value at element {}",
-                                  coordinate);
-                    }
-                }
                 data_.emplace_back(batch.values[i],
                                    static_cast<int32_t>(coordinate));
             } else {
@@ -382,19 +372,10 @@ class NumericArrayBuilderImpl final : public SortedArrayIndexBuilder::Impl {
  public:
     void
     AddRow(const ArrayView& value, int32_t coordinate) override {
-        data_.reserve(data_.size() + static_cast<size_t>(value.length()));
+        // Let vector grow geometrically; reserving size + row length here
+        // repeatedly copies the accumulated postings for every input row.
         for (int i = 0; i < value.length(); ++i) {
-            const auto element = ArrayValue<T>(value, i);
-            if constexpr (std::is_floating_point_v<T>) {
-                if (!std::isfinite(element)) {
-                    ThrowInfo(DataFormatBroken,
-                              "cannot build ARRAY STL_SORT: non-finite value "
-                              "at row {} element {}",
-                              coordinate,
-                              i);
-                }
-            }
-            data_.emplace_back(element, coordinate);
+            data_.emplace_back(ArrayValue<T>(value, i), coordinate);
         }
     }
 

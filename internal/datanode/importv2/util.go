@@ -822,39 +822,3 @@ func NewMetaCache(req *datapb.ImportRequest) map[string]metacache.MetaCache {
 	}
 	return metaCaches
 }
-
-// CheckArrayFiniteValues validates every reader's ARRAY payload, including
-// binlog imports which do not pass through the JSON/CSV/Parquet parsers.
-func CheckArrayFiniteValues(data *storage.InsertData) error {
-	var checkRow func(*schemapb.ScalarField) error
-	checkRow = func(row *schemapb.ScalarField) error {
-		switch row.GetData().(type) {
-		case *schemapb.ScalarField_FloatData:
-			return typeutil.VerifyFloats32(row.GetFloatData().GetData())
-		case *schemapb.ScalarField_DoubleData:
-			return typeutil.VerifyFloats64(row.GetDoubleData().GetData())
-		case *schemapb.ScalarField_ArrayData:
-			for _, child := range row.GetArrayData().GetData() {
-				if err := checkRow(child); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}
-	for fieldID, field := range data.Data {
-		array, ok := field.(*storage.ArrayFieldData)
-		if !ok {
-			continue
-		}
-		for rowID, row := range array.Data {
-			if len(array.ValidData) == len(array.Data) && !array.ValidData[rowID] {
-				continue
-			}
-			if err := checkRow(row); err != nil {
-				return merr.Wrapf(err, "import ARRAY field %d row %d", fieldID, rowID)
-			}
-		}
-	}
-	return nil
-}

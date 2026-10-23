@@ -557,22 +557,34 @@ TEST(HybridIndexBuilderTest, ArrayRowsSelectSortOnlyFromGateVersion) {
     }
 }
 
-TEST(HybridIndexBuilderTest, FloatingArraySelectsSortAtNewVersion) {
-    const std::vector<double> values{1, 2, 3};
-    ScalarTestData<ArrayView> data(
-        {OwnedArrayValue::FromFixed<double>(DataType::DOUBLE, values)});
-    const auto& backend =
-        ScalarReaderBackends().Get<ArrayView>("HybridDoubleArray");
-    auto params = backend.BuildParams();
-    params[SCALAR_INDEX_ENGINE_VERSION] = kArrayStlSortMinVersion;
-    params[BITMAP_INDEX_CARDINALITY_LIMIT] = 2;
-    auto builder =
-        BuilderRegistry<ScalarBuildInput<ArrayView>>::Instance().Create(
-            families::kHybrid, params);
-    ASSERT_NE(builder, nullptr);
-    const ScalarTestInput<ArrayView> input(data);
-    const auto artifact = std::move(*builder).Build(input.View());
-    EXPECT_EQ(PersistedSelector(*artifact), ScalarIndexType::STLSORT);
+TEST(HybridIndexBuilderTest, FloatingArrayRetainsExistingSelection) {
+    for (const auto type : {DataType::FLOAT, DataType::DOUBLE}) {
+        const std::vector<double> doubles{1, 2, 3};
+        const std::vector<float> floats{1, 2, 3};
+        ScalarTestData<ArrayView> data(
+            {type == DataType::FLOAT
+                 ? OwnedArrayValue::FromFixed<float>(type, floats)
+                 : OwnedArrayValue::FromFixed<double>(type, doubles)});
+        const auto& backend = ScalarReaderBackends().Get<ArrayView>(
+            type == DataType::FLOAT ? "HybridFloatArray" : "HybridDoubleArray");
+        for (const int32_t version :
+             {kArrayStlSortMinVersion - 1, kArrayStlSortMinVersion}) {
+            for (const int limit : {2, 4}) {
+                auto params = backend.BuildParams();
+                params[SCALAR_INDEX_ENGINE_VERSION] = version;
+                params[BITMAP_INDEX_CARDINALITY_LIMIT] = limit;
+                auto builder =
+                    BuilderRegistry<ScalarBuildInput<ArrayView>>::Instance()
+                        .Create(families::kHybrid, params);
+                ASSERT_NE(builder, nullptr);
+                const ScalarTestInput<ArrayView> input(data);
+                const auto artifact = std::move(*builder).Build(input.View());
+                EXPECT_EQ(PersistedSelector(*artifact),
+                          limit == 2 ? ScalarIndexType::INVERTED
+                                     : ScalarIndexType::BITMAP);
+            }
+        }
+    }
 }
 
 TEST(HybridIndexBuilderTest, InvalidPersistedSelectorIsRejected) {

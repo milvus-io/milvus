@@ -494,6 +494,12 @@ func TestCreateSortedScalarIndex(t *testing.T) {
 	idx := index.NewSortedIndex()
 	for _, field := range schema.Fields {
 		if hp.SupportScalarIndexFieldType(field.DataType) {
+			if field.DataType == entity.FieldTypeArray &&
+				(field.ElementType == entity.FieldTypeFloat || field.ElementType == entity.FieldTypeDouble) {
+				_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idx))
+				require.ErrorContains(t, err, "STL_SORT on ordinary ARRAY supports bool, integer and varchar")
+				continue
+			}
 			if field.DataType == entity.FieldTypeBool ||
 				field.DataType == entity.FieldTypeJSON {
 				_, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(schema.CollectionName, field.Name, idx))

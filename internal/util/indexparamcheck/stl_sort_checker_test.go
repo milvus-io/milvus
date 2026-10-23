@@ -27,7 +27,7 @@ func Test_STLSORTIndexChecker(t *testing.T) {
 	assert.Error(t, c.CheckValidDataType(IndexSTLSORT, &schemapb.FieldSchema{Name: "myStruct[flag]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Bool}))
 	assert.Error(t, c.CheckValidDataType(IndexSTLSORT, &schemapb.FieldSchema{Name: "myStruct[meta]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_JSON}))
 
-	// Ordinary ARRAY includes finite floating values.
+	// Ordinary ARRAY supports bool, integer and varchar elements.
 	assert.NoError(t, c.CheckValidDataType(IndexSTLSORT, &schemapb.FieldSchema{Name: "tags", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}))
 
 	// JSON path index: CheckTrain validation
@@ -53,10 +53,10 @@ func Test_STLSORTIndexChecker(t *testing.T) {
 
 func TestSTLSORTOrdinaryArrayElementTypes(t *testing.T) {
 	c := newSTLSORTChecker()
-	for _, elem := range []schemapb.DataType{schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64, schemapb.DataType_Float, schemapb.DataType_Double, schemapb.DataType_VarChar} {
+	for _, elem := range []schemapb.DataType{schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64, schemapb.DataType_VarChar} {
 		assert.NoError(t, c.CheckValidDataType(IndexSTLSORT, &schemapb.FieldSchema{Name: "tags", DataType: schemapb.DataType_Array, ElementType: elem}), elem.String())
 	}
-	for _, elem := range []schemapb.DataType{schemapb.DataType_None, schemapb.DataType_JSON, schemapb.DataType_Array, schemapb.DataType_FloatVector} {
+	for _, elem := range []schemapb.DataType{schemapb.DataType_Float, schemapb.DataType_Double, schemapb.DataType_None, schemapb.DataType_JSON, schemapb.DataType_Array, schemapb.DataType_FloatVector} {
 		assert.Error(t, c.CheckValidDataType(IndexSTLSORT, &schemapb.FieldSchema{Name: "tags", DataType: schemapb.DataType_Array, ElementType: elem}), elem.String())
 	}
 }

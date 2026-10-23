@@ -19,7 +19,6 @@ package importv2
 import (
 	"context"
 	"fmt"
-	"math"
 	"testing"
 	"time"
 
@@ -31,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/importid"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -1412,48 +1410,4 @@ func TestAppendPreallocatedSystemFields(t *testing.T) {
 		err = AppendPreallocatedSystemFields(schema, data, 2, &commonpb.IDRange{Begin: 20, End: 24}, &offset)
 		require.ErrorIs(t, err, merr.ErrDataIntegrity)
 	})
-}
-
-func TestCheckArrayFiniteValues(t *testing.T) {
-	for _, elem := range []schemapb.DataType{schemapb.DataType_Float, schemapb.DataType_Double} {
-		for _, value := range []float64{0, math.Copysign(0, -1), 1.5, math.NaN(), math.Inf(1), math.Inf(-1)} {
-			row := &schemapb.ScalarField{}
-			if elem == schemapb.DataType_Float {
-				row.Data = &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: []float32{float32(value)}}}
-			} else {
-				row.Data = &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: []float64{value}}}
-			}
-			for _, recursive := range []bool{false, true} {
-				payload := row
-				if recursive {
-					payload = &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{Data: []*schemapb.ScalarField{row}}}}
-				}
-				data := &storage.InsertData{Data: map[int64]storage.FieldData{101: &storage.ArrayFieldData{ElementType: elem, Data: []*schemapb.ScalarField{payload}}}}
-				err := CheckArrayFiniteValues(data)
-				if math.IsNaN(value) || math.IsInf(value, 0) {
-					assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-				} else {
-					assert.NoError(t, err)
-				}
-			}
-		}
-	}
-}
-
-func TestImportTaskRejectsNonFiniteArrayBeforeSync(t *testing.T) {
-	paramtable.Init()
-	data := &storage.InsertData{Data: map[int64]storage.FieldData{101: &storage.ArrayFieldData{
-		ElementType: schemapb.DataType_Double,
-		Data:        []*schemapb.ScalarField{{Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: []float64{math.NaN()}}}}},
-	}}}
-	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 101, Name: "values", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Double}}}
-	reader := importutilv2.NewMockReader(t)
-	reader.EXPECT().Read().Return(data, nil).Once()
-	task := newImportTaskForFields(schema, 10)
-	require.ErrorIs(t, task.importFile(reader, nil, nil), merr.ErrParameterInvalid)
-	preReader := importutilv2.NewMockReader(t)
-	preReader.EXPECT().Size().Return(int64(1), nil).Once()
-	preReader.EXPECT().Read().Return(data, nil).Once()
-	preTask := &PreImportTask{schema: schema}
-	require.ErrorIs(t, preTask.readFileStat(preReader, 0), merr.ErrParameterInvalid)
 }

@@ -167,7 +167,7 @@ func checkArraySTLSORTIndex(schema *schemapb.CollectionSchema, fieldID int64, in
 			continue
 		}
 		if !indexparamcheck.IsArraySTLSORTElementType(field.GetElementType()) {
-			return merr.WrapErrParameterInvalidMsg("STL_SORT on ordinary ARRAY supports bool, integer, float, double and varchar elements, got %s", field.GetElementType())
+			return merr.WrapErrParameterInvalidMsg("STL_SORT on ordinary ARRAY supports bool, integer and varchar elements, got %s", field.GetElementType())
 		}
 		if resolvedScalarVersion < common.MinScalarIndexVersionForArrayStlSort {
 			return merr.WrapErrServiceNotReadyMsg(

@@ -17,7 +17,7 @@ The index accelerates element membership without changing array values, order, l
 
 This design excludes the global NaN total order, Tantivy floating-key normalization, non-finite scalar ingestion, REST representations, ORDER BY/aggregation semantics, and legacy floating-index raw fallback changes in PR #53972. It also does not extend schema or ingestion support for JSON cast arrays, multiple Struct nesting levels, or nullable array members.
 
-**Type boundary:** Public support covers ARRAY elements already permitted by the schema: INT8/INT16/INT32/INT64, BOOL, VARCHAR, FLOAT, and DOUBLE. Lower-level representations such as STRING/TEXT/TIMESTAMPTZ do not automatically become new public schema capabilities. FLOAT/DOUBLE follow the finite-value contract in section 7: ingestion rejects NaN/Inf, and SORT builds check stored data again.
+**Type boundary:** Public support covers BOOL, INT8/INT16/INT32/INT64 and VARCHAR ARRAY elements. Ordinary FLOAT/DOUBLE ARRAY SORT is deferred; HYBRID keeps BITMAP/INVERTED for those elements at both v5 and v6. Existing Struct floating sub-field support is unchanged. Lower-level STRING/TEXT/TIMESTAMPTZ representations do not extend public schema capabilities.
 
 ## 2. Baseline implementation and gaps
 
@@ -141,19 +141,11 @@ Artifacts record the actual target version. New builds, background rebuilds, and
 
 Existing negotiation primarily protects QueryNode readers. Validate the upgrade order and scheduling constraints for DataNode/IndexNode builders. If old builders can still receive new tasks, the gate is incomplete: add worker capability constraints or require build workers to upgrade first, and validate a real upgrade. After writing new ARRAY SORT artifacts, downgrade requires rebuilding a compatible index first; direct rollback readability is not guaranteed.
 
-## 7. Floating-point boundary without a NaN total order
+## 7. Floating-point compatibility boundary
 
-Numeric sorting currently uses native `<`; contains-term deduplication also lacks NaN-aware equality/hash. Passing finite-data tests alone does not establish correctness for arbitrary FLOAT/DOUBLE input. Stored NaN can invalidate binary-search assumptions even when the query contains no NaN.
+Ordinary FLOAT/DOUBLE ARRAY SORT is deferred. Native comparison does not provide a suitable order for NaN, and older gRPC writes could already store non-finite floating ARRAY values. Rejecting only new writes cannot make those stored values safe: changing HYBRID selection would make index rebuilds fail, a new reader-based import check would reject binlog restores, and validation after partial-update merging could reject untouched legacy fields.
 
-The subsequently approved scope opens FLOAT/DOUBLE ARRAY using a finite-value contract instead of a NaN total order:
-
-- Proxy Insert/Upsert calls `VerifyFloats32/64` when validating ARRAY elements. Recursive-array leaves reuse the same check.
-- DataNode pre-import and import check ARRAY floating leaves after reading each batch, including binlog data that passes through a Reader. Existing JSON/CSV/Parquet checks remain.
-- The C++ SORT builder used by DataNode checks floating elements in valid rows before sorting. Both explicit SORT and HYBRID selecting SORT use this check. Stored NaN/Inf causes `DataFormatBroken` and fails the entire build. No partial index is produced, and no values are removed or rewritten.
-- Checks apply to new writes, reader-based import batches, and new SORT builds. They do not clean existing data or change loading of old floating indexes. Direct snapshot file copying is not a per-value ingestion check; subsequent SORT builds remain protected.
-- Finite values, including ±0, retain native comparisons. NaN behavior in query parameters, arithmetic results, and old indexes is outside this change. Do not claim system-wide NaN semantic consistency.
-
-This replaces the initial restrictions that deferred floating ARRAY support and prohibited new ingestion checks.
+This feature therefore does not add Proxy ARRAY non-finite checks, centralized DataNode import checks, or SORT finite-value guards. Existing parser checks and Struct floating sub-field behavior remain unchanged. Floating ARRAY HYBRID retains its original BITMAP/INVERTED selection. Inf is ordered by native comparison; future work must distinguish Inf from NaN and define legacy-data, restore and query compatibility. JSON STRING_TO_DOUBLE and the broader #53971 work remain separate.
 
 ## 8. Resources and failure behavior
 
@@ -176,7 +168,7 @@ The following is the required validation matrix, not a statement that every chec
 | Layer | Required coverage |
 | --- | --- |
 | Builder/Reader contracts | Destroy input after registry build, then serialize/load independently; Row domain and Count; metadata/loaded caps agreement; no ARRAY value lookup |
-| Data matrix | BOOL, integer widths/boundaries, VARCHAR empty/Unicode/NUL strings; duplicates, batch boundaries, NULL, empty arrays, all-empty/all-NULL input, validity-word boundaries; finite and rejected non-finite floating values |
+| Data matrix | BOOL, integer widths/boundaries, VARCHAR empty/Unicode/NUL strings; duplicates, batch boundaries, NULL, empty arrays, all-empty/all-NULL input, validity-word boundaries; rejection of ordinary floating SORT and preservation of floating HYBRID routing |
 | Queries | contains/any/all, repeated/empty terms, NOT, NULL three-valued logic; Range with matching and nonmatching elements in one row; raw paths for positional/whole-array operations |
 | Persistence | Current writer format, V3 synchronous/asynchronous, heap/mmap; supported legacy-reader regressions; corrupt metadata, out-of-range postings, missing validity |
 | Production path | Explicit create → build → upload → load → query; verify the actual HYBRID selector and SORT use rather than raw/INVERTED |
@@ -206,7 +198,7 @@ Public API/SDK integration and real version-upgrade tests are also required. Hel
 | A3: HYBRID selection | Ordinary ARRAY version/type gates, cardinality policy, parameter delegation, and configuration notes | Depends on A1 and version support; may follow A2 |
 | A4: Integration and release notes | Complete persistence/upgrade/failure matrices and measurements; document floating boundaries and rollback requirements | Ship corresponding validation with each feature PR rather than treating it as an ungated follow-up |
 
-A1/A2/A3 each include their tests. Keep global NaN, non-finite REST/import support, JSON typed-array routing, and unrelated nested fixes separate. Include the finite-value ingestion/build checks in section 7. Only fixes actually required by this feature become explicit prerequisite PRs; do not cherry-pick entire files.
+A1/A2/A3 each include their tests. Keep global NaN, non-finite REST/import support, JSON typed-array routing, and unrelated nested fixes separate. Preserve the floating compatibility boundary in section 7. Only fixes actually required by this feature become explicit prerequisite PRs; do not cherry-pick entire files.
 
 ## 11. Alternatives
 
@@ -233,7 +225,7 @@ Paths are relative to this design document. Baseline descriptions refer to the s
 
 Date: 2026-10-21. These are historical results from before the floating extension.
 
-Explicit ordinary ARRAY STL_SORT was enabled for BOOL/integer/VARCHAR, with a v6 gate for high-cardinality HYBRID selection. A subsequent scope approval enabled finite FLOAT/DOUBLE ARRAY with DML/import/build checks; see section 14 for additional results. CreateIndex, snapshot restore, and background dispatch share the gate. If negotiation falls below the gate at dispatch time, the task waits rather than sending incompatible work. The C++ boundary independently rejects explicit ARRAY SORT targets below v6.
+Explicit ordinary ARRAY STL_SORT was enabled for BOOL/integer/VARCHAR, with a v6 gate for high-cardinality HYBRID selection. An intermediate floating extension was tested in section 14 and subsequently withdrawn after review; section 16 defines the current scope. CreateIndex, snapshot restore, and background dispatch share the gate. If negotiation falls below the gate at dispatch time, the task waits rather than sending incompatible work. The C++ boundary independently rejects explicit ARRAY SORT targets below v6.
 
 The load audit found and fixed a pre-existing lower-level builder gap: numeric legacy Artifacts omitted validity, turning empty arrays into NULL after reload. Only ordinary ARRAY numeric Artifacts now write this sidecar, and the legacy loader reads and validates it. Both ordinary ARRAY legacy and V3 loaders reject artifacts missing validity. Old scalar legacy Artifacts without the sidecar retain their reconstruction behavior. V3 reuses existing entries without changing storage paths.
 
@@ -254,11 +246,11 @@ The full `all_tests` target did not build: untouched `LoadAdmissionControllerTes
 
 Real mixed-binary upgrade/downgrade, SDK/distributed E2E, storage fault injection, and performance measurements were not run. Those release gates remain outstanding, including the build-workers-first prerequisite. No wire error codes changed. Create/dispatch not-ready errors remain System/retriable, and corrupt artifacts remain `DataFormatBroken`. The existing path carrying build-boundary `Unsupported` through cgo to scheduler failure classification was traced in code.
 
-## 14. Finite floating ARRAY extension validation
+## 14. Superseded finite floating ARRAY extension validation
 
 Date: 2026-10-21.
 
-Following approval of ingestion checks and build protection, explicit ordinary ARRAY SORT accepts FLOAT/DOUBLE, and high-cardinality HYBRID may select SORT from v6.
+Historical validation of an earlier scope, superseded by the review follow-up in section 16. These results do not describe the current floating ARRAY policy.
 
 - The complete Proxy fieldvalidator package passed. New full-`Validate` entry tests reject NaN/±Inf for FLOAT/DOUBLE and accept finite values/±0.
 - Targeted DataNode import tests passed for ordinary and recursive ARRAY floating leaves. Actual `importFile` and pre-import `readFileStat` reject invalid input before syncing imported data.
@@ -297,8 +289,7 @@ Docker etcd. The earlier embedded-etcd setup can serve SDK requests but lacks a
 writable remote configuration source because parameters initialize before the
 embedded server. No production workaround for that environment issue is added.
 
-Both artifact target versions retain the finite-value ingestion contract of the
-new binary. An explicit low-version SORT request still returns the existing
+Both artifact target versions retain the existing floating ARRAY ingestion behavior. An explicit low-version SORT request still returns the existing
 retriable ServiceNotReady error. Distinguishing a fixed administrator override
 from a transient rolling-upgrade condition remains a separate follow-up.
 This target-version matrix does not establish mixed-binary upgrade safety.
@@ -313,3 +304,20 @@ the management API confirms restoration to the original target and force flag.
 Both native selector regressions passed, and all 18 modified Helm values parsed
 with scalar target v6. This is local targeted SDK coverage, not the complete
 CI SDK suite or a real mixed-binary upgrade.
+
+## 16. Review follow-up: compatibility and build complexity
+
+Ordinary ARRAY SORT is limited to BOOL, integer and VARCHAR elements. Explicit floating ARRAY SORT is rejected in Go admission and the native build adapter; high-cardinality floating HYBRID remains INVERTED at v6. The proposed finite-value ingress and builder guards are removed, preserving compatibility with legacy floating payloads and existing Struct behavior. Section 14 records superseded experiments only.
+
+Numeric ARRAY construction no longer reserves `size + row_length` per row. Vector geometric growth avoids repeatedly copying all previously accumulated postings. Reviewer timings are not local validation results.
+
+The existing narrow-integer contains overflow bug is independent of ARRAY SORT and will be handled separately, with raw/index and NULL/NOT conformance coverage.
+
+
+Targeted validation on 2026-10-23:
+
+- SORT/HYBRID native regressions: 20/20 passed, including FLOAT/DOUBLE selection at v5/v6, both cardinality branches, explicit floating ARRAY SORT rejection, and persistence/query checks.
+- Binlog/build boundary regressions: 4/4 passed in a temporary executable linked from the updated ScalarBuildSessionTest object and the index_tests link configuration. This covers parent-row postings, old-target rejection, floating ARRAY admission, and existing Struct routing.
+- The synthetic numeric ARRAY test builds 40,000/80,000/160,000 rows with 10 increasing unique INT64 values per row. Build-only times on this machine were 5/8/11 ms, excluding input preparation, serialization and loading. It also reopens each artifact and verifies selected parent-row postings. This is not a before/after comparison or an end-to-end production benchmark.
+- Proxy fieldvalidator full package, targeted STL_SORT checker/DataCoord gate/Proxy DDL tests, SDK testcase compilation, targeted checker/fieldvalidator lint (0 issues), changed-file formatting and git diff checks passed.
+- The full SDK suite, real partial-update/binlog-restore E2E, distributed testing and mixed-binary upgrades were not rerun for this follow-up.

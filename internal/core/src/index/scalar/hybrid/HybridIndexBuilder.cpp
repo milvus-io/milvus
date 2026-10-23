@@ -443,8 +443,8 @@ ParseHybridBuildParams(const BuildParams& params) {
     if (field_type == DataType::ARRAY) {
         // ARRAY policies ignore scalar family overrides. Nested indexes use
         // element coordinates from v4; ordinary arrays use parent-row postings
-        // from v6 for supported types. SORT validates floating ARRAY values
-        // before sorting and rejects non-finite stored data.
+        // from v6 for BOOL/integer/VARCHAR. Ordinary floating arrays retain
+        // their existing policy until legacy NaN compatibility is resolved.
         result.low_cardinality_family = families::kBitmap;
         result.high_cardinality_family =
             ((nested && version >= kNestedHybridStlSortMinVersion) ||

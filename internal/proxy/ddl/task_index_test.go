@@ -999,7 +999,7 @@ func Test_parseIndexParams(t *testing.T) {
 		assert.Contains(t, cit3.newIndexParams, &commonpb.KeyValuePair{Key: common.IndexTypeKey, Value: "STL_SORT"})
 		for _, element := range []schemapb.DataType{schemapb.DataType_Float, schemapb.DataType_Double} {
 			cit3.fieldSchema.ElementType = element
-			assert.NoError(t, cit3.parseIndexParams(context.TODO()))
+			assert.Error(t, cit3.parseIndexParams(context.TODO()))
 		}
 	})
 

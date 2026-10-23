@@ -27,14 +27,13 @@
 
 namespace milvus::index {
 
-// Floating ARRAY SORT requires finite values; the builder validates stored data
-// as well as ingestion checks, including when HYBRID selects SORT.
+// Ordinary floating ARRAY SORT is deferred until legacy NaN compatibility
+// is resolved. Existing nested scalar support uses a separate policy.
 inline bool
 SupportsArrayStlSort(DataType type) {
     return type == DataType::BOOL || type == DataType::INT8 ||
            type == DataType::INT16 || type == DataType::INT32 ||
-           type == DataType::INT64 || type == DataType::FLOAT ||
-           type == DataType::DOUBLE || type == DataType::VARCHAR;
+           type == DataType::INT64 || type == DataType::VARCHAR;
 }
 
 inline bool
