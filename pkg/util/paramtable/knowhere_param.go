@@ -54,6 +54,20 @@ func (p *knowhereConfig) init(base *BaseTable) {
 				return "Size limit on the PQ code (compared with raw data)"
 			case "AISAQ.build.search_list_size":
 				return "Size of the candidate list during building graph"
+			case "AISAQ.build.disk_pq_code_budget_gb_ratio":
+				return "Controls the size of the PQ codes of the high precision vectors stored in the index (used for re-ranking), compared to the size of the uncompressed data"
+			case "AISAQ.build.inline_pq":
+				return "Enable compressed vectors to be stored in-line within the node, the number of in-line vectors is limited by max degree"
+			case "AISAQ.build.pq_cache_size":
+				return "Compressed vectors cache DRAM size in bytes, default 0"
+			case "AISAQ.build.rearrange":
+				return "Enable compressed vectors reordering search optimization, default false"
+			case "AISAQ.build.num_entry_points":
+				return "Number of entry points valid only with aisaq option"
+			case "AISAQ.build.search_cache_budget_gb_ratio":
+				return "Controls the amount of DRAM to be used for caching frequently accessed index nodes"
+			case "AISAQ.search.pq_read_page_cache_size":
+				return "Enable compressed vectors read-page cache DRAM size per thread, default 0"
 			case "AISAQ.search.beam_width_ratio":
 				return "Ratio between the maximum number of IO requests per search iteration and CPU number"
 			default:
@@ -86,6 +100,20 @@ func (p *knowhereConfig) getIndexParam(indexType string, stage string) map[strin
 	}
 
 	return matchedParam
+}
+
+// GetIndexParamValue returns the value of a single knowhere index parameter for
+// the given index type and stage (e.g. "AISAQ", "build", "max_degree").
+// It returns an empty string when the parameter is not configured.
+func (p *knowhereConfig) GetIndexParamValue(indexType string, stage string, key string) string {
+	return p.getIndexParam(indexType, stage)[key]
+}
+
+// GetIndexParamKey returns the fully-qualified configuration key for a single
+// knowhere index parameter (e.g. "knowhere.AISAQ.build.pq_cache_size"). Use this
+// when you need the config key itself, for example to Save a value via BaseTable.
+func (p *knowhereConfig) GetIndexParamKey(indexType string, stage string, key string) string {
+	return p.IndexParam.KeyPrefix + indexType + "." + stage + "." + key
 }
 
 func GetKeyFromSlice(indexParams []*commonpb.KeyValuePair, key string) string {
