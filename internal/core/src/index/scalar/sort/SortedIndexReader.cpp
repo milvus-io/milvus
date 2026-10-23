@@ -623,7 +623,8 @@ SortedStorageView<T>::Range(size_t count,
                             const T& hi,
                             bool hi_inc) const {
     TargetBitmap result(count, false);
-    if (data_.size == 0 || hi < lo || (lo == hi && !(lo_inc && hi_inc)) ||
+    if (data_.size == 0 || ScalarLess(hi, lo) ||
+        (ScalarEqual(lo, hi) && !(lo_inc && hi_inc)) ||
         ShouldSkip(lo, hi, CompareOp::Equal)) {
         return result;
     }
@@ -697,15 +698,15 @@ SortedStorageView<T>::ShouldSkip(const T& lower,
     const auto& max = data_.data[data_.size - 1].a_;
     switch (op) {
         case CompareOp::LessThan:
-            return upper <= min;
+            return ScalarLessEqual(upper, min);
         case CompareOp::LessEqual:
-            return upper < min;
+            return ScalarLess(upper, min);
         case CompareOp::GreaterThan:
-            return lower >= max;
+            return ScalarGreaterEqual(lower, max);
         case CompareOp::GreaterEqual:
-            return lower > max;
+            return ScalarGreater(lower, max);
         case CompareOp::Equal:
-            return lower > max || upper < min;
+            return ScalarGreater(lower, max) || ScalarLess(upper, min);
         case CompareOp::NotEqual:
             return false;
     }
@@ -1015,7 +1016,7 @@ SortedStorageView<std::string_view>::Range(size_t count,
                                            const std::string_view& hi,
                                            bool hi_inc) const {
     TargetBitmap result(count, false);
-    if (hi < lo || (lo == hi && !(lo_inc && hi_inc))) {
+    if (ScalarLess(hi, lo) || (ScalarEqual(lo, hi) && !(lo_inc && hi_inc))) {
         return result;
     }
     const auto begin =

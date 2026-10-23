@@ -5,6 +5,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type scalarValueKey struct {
@@ -14,7 +15,7 @@ type scalarValueKey struct {
 }
 
 // Concrete keys avoid boxing every IN value. Keep equalsGeneric's literal-kind
-// distinctions, normalize signed zero, and leave NaN unmatchable.
+// distinctions and canonical floating equality, including NaNs and signed zero.
 func genericScalarKey(value *planpb.GenericValue) (scalarValueKey, bool) {
 	if value == nil {
 		return scalarValueKey{}, false
@@ -29,14 +30,7 @@ func genericScalarKey(value *planpb.GenericValue) (scalarValueKey, bool) {
 	case *planpb.GenericValue_Int64Val:
 		return scalarValueKey{kind: 2, bits: uint64(v.Int64Val)}, true
 	case *planpb.GenericValue_FloatVal:
-		if math.IsNaN(v.FloatVal) {
-			return scalarValueKey{}, false
-		}
-		bits := uint64(0)
-		if v.FloatVal != 0 {
-			bits = math.Float64bits(v.FloatVal)
-		}
-		return scalarValueKey{kind: 3, bits: bits}, true
+		return scalarValueKey{kind: 3, bits: typeutil.Float64ToSortableUint64(v.FloatVal)}, true
 	case *planpb.GenericValue_StringVal:
 		return scalarValueKey{kind: 4, text: v.StringVal}, true
 	default:

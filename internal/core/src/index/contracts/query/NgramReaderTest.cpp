@@ -501,7 +501,7 @@ AddCoreCandidateCases(IndexTestCases& cases) {
                                    {
                                        .op = PatternOp::InnerMatch,
                                        .literal = "hello",
-                                       .initial_offsets = {{}},
+                                       .initial_offsets = std::vector<size_t>{},
                                    });
     AddNgramCase<std::string_view>(cases,
                                    "RegexRequiredLiterals",

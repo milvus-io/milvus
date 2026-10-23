@@ -18,7 +18,6 @@ package segments
 
 import (
 	"context"
-	"math"
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
@@ -212,35 +211,20 @@ func ColdReadFeatureBit(scannedRemoteBytes int64) uint64 {
 }
 
 func SelectSearchResultData(dataArray []*schemapb.SearchResultData, resultOffsets [][]int64, offsets []int64, qi int64) int {
-	var (
-		sel                 = -1
-		maxDistance         = -float32(math.MaxFloat32)
-		resultDataIdx int64 = -1
-	)
-	for i, offset := range offsets { // query num, the number of ways to merge
+	sel := -1
+	var maxKey uint32
+	var resultDataIdx int64
+	for i, offset := range offsets {
 		if offset >= dataArray[i].Topks[qi] {
 			continue
 		}
-
 		idx := resultOffsets[i][qi] + offset
-		distance := dataArray[i].Scores[idx]
-
-		if distance > maxDistance {
-			sel = i
-			maxDistance = distance
-			resultDataIdx = idx
-		} else if distance == maxDistance {
-			if sel == -1 {
-				// A bad case happens where knowhere returns distance == +/-maxFloat32
-				// by mistake.
-				mlog.Warn(context.TODO(), "a bad distance is found, something is wrong here!", mlog.Float32("score", distance))
-			} else if typeutil.ComparePK(
-				typeutil.GetPK(dataArray[i].GetIds(), idx),
-				typeutil.GetPK(dataArray[sel].GetIds(), resultDataIdx)) {
-				sel = i
-				maxDistance = distance
-				resultDataIdx = idx
-			}
+		key := typeutil.Float32ToSortableUint32(dataArray[i].Scores[idx])
+		// Topks determines whether a row exists; even -Inf is a valid score.
+		if sel == -1 || key > maxKey || (key == maxKey && typeutil.ComparePK(
+			typeutil.GetPK(dataArray[i].GetIds(), idx),
+			typeutil.GetPK(dataArray[sel].GetIds(), resultDataIdx))) {
+			sel, maxKey, resultDataIdx = i, key, idx
 		}
 	}
 	return sel

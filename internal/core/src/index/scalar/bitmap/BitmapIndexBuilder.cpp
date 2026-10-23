@@ -43,6 +43,7 @@ CompatibleArrayType(DataType actual, DataType expected) {
 BitmapBuildParams
 ParseBuildParams(const Config& params, DataType default_type, bool array) {
     BitmapBuildParams parsed;
+    parsed.nan_total_order = SupportsNaNTotalOrder(params);
     parsed.nested = ReadNestedConfigParam(params, "bitmap").value_or(false);
     parsed.nullable =
         GetValueFromConfigOrFallback<bool>(params, "nullable", false);
@@ -94,7 +95,8 @@ OwnValue(const T& value) {
 
 template <typename T>
 BitmapIndexBuilder<T>::BitmapIndexBuilder(BitmapBuildParams params)
-    : params_(std::move(params)) {
+    : params_(std::move(params)),
+      postings_(ScalarIndexLess{params_.nan_total_order}) {
     if (params_.value_type == DataType::NONE ||
         params_.value_type == DataType::ARRAY) {
         params_.value_type = CppDataType<T>();
@@ -155,9 +157,15 @@ namespace {
 template <typename T>
 class BitmapArrayBuilderImpl final : public BitmapArrayIndexBuilder::Impl {
  public:
+    explicit BitmapArrayBuilderImpl(bool total_order)
+        : postings_(ScalarIndexLess{total_order}) {
+    }
     void
     AddRow(const ArrayView& value, uint32_t coordinate) override {
         for (int i = 0; i < value.length(); ++i) {
+            if (!value.is_element_valid(i)) {
+                continue;
+            }
             postings_[OwnValue(value.get_data_unchecked<T>(i))].add(coordinate);
         }
     }
@@ -179,25 +187,31 @@ class BitmapArrayBuilderImpl final : public BitmapArrayIndexBuilder::Impl {
 };
 
 std::unique_ptr<BitmapArrayIndexBuilder::Impl>
-MakeArrayImpl(DataType element_type) {
+MakeArrayImpl(DataType element_type, bool total_order) {
     switch (element_type) {
         case DataType::BOOL:
-            return std::make_unique<BitmapArrayBuilderImpl<bool>>();
+            return std::make_unique<BitmapArrayBuilderImpl<bool>>(total_order);
         case DataType::INT8:
-            return std::make_unique<BitmapArrayBuilderImpl<int8_t>>();
+            return std::make_unique<BitmapArrayBuilderImpl<int8_t>>(
+                total_order);
         case DataType::INT16:
-            return std::make_unique<BitmapArrayBuilderImpl<int16_t>>();
+            return std::make_unique<BitmapArrayBuilderImpl<int16_t>>(
+                total_order);
         case DataType::INT32:
-            return std::make_unique<BitmapArrayBuilderImpl<int32_t>>();
+            return std::make_unique<BitmapArrayBuilderImpl<int32_t>>(
+                total_order);
         case DataType::INT64:
-            return std::make_unique<BitmapArrayBuilderImpl<int64_t>>();
+            return std::make_unique<BitmapArrayBuilderImpl<int64_t>>(
+                total_order);
         case DataType::FLOAT:
-            return std::make_unique<BitmapArrayBuilderImpl<float>>();
+            return std::make_unique<BitmapArrayBuilderImpl<float>>(total_order);
         case DataType::DOUBLE:
-            return std::make_unique<BitmapArrayBuilderImpl<double>>();
+            return std::make_unique<BitmapArrayBuilderImpl<double>>(
+                total_order);
         case DataType::STRING:
         case DataType::VARCHAR:
-            return std::make_unique<BitmapArrayBuilderImpl<std::string_view>>();
+            return std::make_unique<BitmapArrayBuilderImpl<std::string_view>>(
+                total_order);
         default:
             ThrowInfo(DataTypeInvalid,
                       "unsupported ARRAY element type {} for bitmap index",
@@ -208,7 +222,8 @@ MakeArrayImpl(DataType element_type) {
 }  // namespace
 
 BitmapArrayIndexBuilder::BitmapArrayIndexBuilder(BitmapBuildParams params)
-    : params_(std::move(params)), impl_(MakeArrayImpl(params_.value_type)) {
+    : params_(std::move(params)),
+      impl_(MakeArrayImpl(params_.value_type, params_.nan_total_order)) {
     AssertInfo(!params_.nested,
                "nested ARRAY bitmap input must be flattened into typed "
                "elements");

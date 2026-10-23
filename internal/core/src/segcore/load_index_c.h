@@ -38,6 +38,12 @@ CStatus
 EstimateLoadIndexResource(CLoadIndexInfo c_load_index_info,
                           LoadResourceRequest* request);
 
+// Metadata-only compatibility preflight shared with SegmentLoadInfo.
+CStatus
+CanLoadIndexFromSerializedInfo(const uint8_t* serialized_load_index_info,
+                               const uint64_t len,
+                               bool* can_load);
+
 CStatus
 EstimateLoadIndexResourceFromSerializedInfo(
     const uint8_t* serialized_load_index_info,

@@ -2760,3 +2760,46 @@ func TestMergeRefreshInfoDoesNotDeclareSystemColumns(t *testing.T) {
 	assert.Empty(t, repr.Info.Ops[0].WriteNames)
 	assert.Empty(t, repr.Operators[0].Outputs)
 }
+
+func (s *MergeHelperTestSuite) TestMergeScalarDerivedScoreOrder() {
+	producer, err := ParseFuncChainProto(&schemapb.FunctionChain{
+		Stage: schemapb.FunctionChainStage_FunctionChainStageL1Rerank,
+		Ops: []*schemapb.FunctionChainOp{{Op: types.OpTypeMap, Outputs: []string{types.ScoreFieldName}, Expr: &schemapb.FunctionChainExpr{
+			Name: "num_combine", Args: []*schemapb.FunctionChainExprArg{columnArg("value"), columnArg(types.ScoreFieldName)},
+			Params: map[string]*schemapb.FunctionParamValue{"mode": stringParam("sum")},
+		}}},
+	}, s.pool)
+	s.Require().NoError(err)
+	first := s.createDFWithFloat32Field([]int64{90, 5, 8, 2}, []float32{0, 0, 0, 0}, "value", []float32{1, 0, float32(math.Inf(1)), float32(math.Inf(-1))})
+	second := s.createDFWithFloat32Field([]int64{90, 91, 4, 6}, []float32{0, 0, 0, 0}, "value", []float32{math.Float32frombits(0x7fc00001), math.Float32frombits(0xffc00002), math.Float32frombits(0x80000000), 1})
+	defer first.Release()
+	defer second.Release()
+	a, err := producer.Execute(first)
+	s.Require().NoError(err)
+	defer a.Release()
+	b, err := producer.Execute(second)
+	s.Require().NoError(err)
+	defer b.Release()
+	for _, strategy := range []MergeStrategy{MergeStrategyMax, MergeStrategySum, MergeStrategyAvg, MergeStrategyWeighted} {
+		params := map[string]*schemapb.FunctionParamValue{
+			MergeParamStrategy: stringParam(string(strategy)), MergeParamNormScore: boolParam(false),
+		}
+		if strategy == MergeStrategyWeighted {
+			params[MergeParamWeights] = arrayParam(doubleParam(1), doubleParam(1))
+		}
+		repr, err := ProtoChainToRepr(&schemapb.FunctionChain{
+			Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
+			Ops:   []*schemapb.FunctionChainOp{{Op: types.OpTypeMerge, Params: params}},
+		})
+		s.Require().NoError(err)
+		merger, err := FuncChainFromReprWithContext(repr, s.pool, types.FunctionBuildContext{
+			Search: &types.SearchRuntimeInfo{MetricTypes: []string{"IP", "IP"}},
+		})
+		s.Require().NoError(err)
+		result, err := merger.ExecuteWithContext(context.Background(), a, b)
+		s.Require().NoError(err)
+		s.Equal([]int64{90, 91, 8, 6, 4, 5, 2}, result.Column(types.IDFieldName).Chunk(0).(*array.Int64).Int64Values(), "strategy %s", strategy)
+		s.True(math.IsNaN(float64(result.Column(types.ScoreFieldName).Chunk(0).(*array.Float32).Value(0))))
+		result.Release()
+	}
+}

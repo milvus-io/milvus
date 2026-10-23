@@ -199,7 +199,8 @@ struct OwnedProbeValue<std::string_view> {
 template <typename T>
 class CardinalityProbe {
  public:
-    explicit CardinalityProbe(DataType) {
+    explicit CardinalityProbe(DataType, bool total_order)
+        : values_(ScalarIndexLess{total_order}) {
     }
 
     void
@@ -218,49 +219,53 @@ class CardinalityProbe {
     }
 
  private:
-    std::set<typename OwnedProbeValue<T>::Type> values_;
+    std::set<typename OwnedProbeValue<T>::Type, ScalarIndexLess> values_;
 };
 
 template <>
 class CardinalityProbe<ArrayView> {
  public:
-    using Sets = std::variant<std::set<bool>,
-                              std::set<int8_t>,
-                              std::set<int16_t>,
-                              std::set<int32_t>,
-                              std::set<int64_t>,
-                              std::set<float>,
-                              std::set<double>,
-                              std::set<std::string>>;
+    template <typename T>
+    using Values = std::set<T, ScalarIndexLess>;
 
-    explicit CardinalityProbe(DataType element_type)
+    using Sets = std::variant<Values<bool>,
+                              Values<int8_t>,
+                              Values<int16_t>,
+                              Values<int32_t>,
+                              Values<int64_t>,
+                              Values<float>,
+                              Values<double>,
+                              Values<std::string>>;
+
+    explicit CardinalityProbe(DataType element_type, bool total_order)
         : element_type_(element_type) {
         switch (element_type_) {
             case DataType::BOOL:
-                values_.emplace<std::set<bool>>();
+                values_.emplace<Values<bool>>(ScalarIndexLess{total_order});
                 break;
             case DataType::INT8:
-                values_.emplace<std::set<int8_t>>();
+                values_.emplace<Values<int8_t>>(ScalarIndexLess{total_order});
                 break;
             case DataType::INT16:
-                values_.emplace<std::set<int16_t>>();
+                values_.emplace<Values<int16_t>>(ScalarIndexLess{total_order});
                 break;
             case DataType::INT32:
-                values_.emplace<std::set<int32_t>>();
+                values_.emplace<Values<int32_t>>(ScalarIndexLess{total_order});
                 break;
             case DataType::INT64:
-                values_.emplace<std::set<int64_t>>();
+                values_.emplace<Values<int64_t>>(ScalarIndexLess{total_order});
                 break;
             case DataType::FLOAT:
-                values_.emplace<std::set<float>>();
+                values_.emplace<Values<float>>(ScalarIndexLess{total_order});
                 break;
             case DataType::DOUBLE:
-                values_.emplace<std::set<double>>();
+                values_.emplace<Values<double>>(ScalarIndexLess{total_order});
                 break;
             case DataType::STRING:
             case DataType::VARCHAR:
             case DataType::TEXT:
-                values_.emplace<std::set<std::string>>();
+                values_.emplace<Values<std::string>>(
+                    ScalarIndexLess{total_order});
                 break;
             default:
                 ThrowInfo(DataTypeInvalid,
@@ -290,7 +295,9 @@ class CardinalityProbe<ArrayView> {
                           row);
             }
             for (int i = 0; i < array.length() && Size() < limit; ++i) {
-                Insert(array, i);
+                if (array.is_element_valid(i)) {
+                    Insert(array, i);
+                }
             }
         }
     }
@@ -306,7 +313,7 @@ class CardinalityProbe<ArrayView> {
     Insert(const ArrayView& array, int offset) {
         switch (element_type_) {
             case DataType::BOOL:
-                std::get<std::set<bool>>(values_).insert(
+                std::get<Values<bool>>(values_).insert(
                     array.get_data_unchecked<bool>(offset));
                 return;
             case DataType::INT8: {
@@ -317,7 +324,7 @@ class CardinalityProbe<ArrayView> {
                               "HYBRID ARRAY INT8 value {} is out of range",
                               value);
                 }
-                std::get<std::set<int8_t>>(values_).insert(
+                std::get<Values<int8_t>>(values_).insert(
                     static_cast<int8_t>(value));
                 return;
             }
@@ -329,30 +336,30 @@ class CardinalityProbe<ArrayView> {
                               "HYBRID ARRAY INT16 value {} is out of range",
                               value);
                 }
-                std::get<std::set<int16_t>>(values_).insert(
+                std::get<Values<int16_t>>(values_).insert(
                     static_cast<int16_t>(value));
                 return;
             }
             case DataType::INT32:
-                std::get<std::set<int32_t>>(values_).insert(
+                std::get<Values<int32_t>>(values_).insert(
                     array.get_data_unchecked<int32_t>(offset));
                 return;
             case DataType::INT64:
-                std::get<std::set<int64_t>>(values_).insert(
+                std::get<Values<int64_t>>(values_).insert(
                     array.get_data_unchecked<int64_t>(offset));
                 return;
             case DataType::FLOAT:
-                std::get<std::set<float>>(values_).insert(
+                std::get<Values<float>>(values_).insert(
                     array.get_data_unchecked<float>(offset));
                 return;
             case DataType::DOUBLE:
-                std::get<std::set<double>>(values_).insert(
+                std::get<Values<double>>(values_).insert(
                     array.get_data_unchecked<double>(offset));
                 return;
             case DataType::STRING:
             case DataType::VARCHAR:
             case DataType::TEXT:
-                std::get<std::set<std::string>>(values_).insert(std::string(
+                std::get<Values<std::string>>(values_).insert(std::string(
                     array.get_data_unchecked<std::string_view>(offset)));
                 return;
             default:
@@ -497,7 +504,9 @@ storage::ArtifactPtr
 HybridIndexBuilder<T>::Build(const ScalarBuildInput<T>& input) && {
     std::string family;
     {
-        CardinalityProbe<T> probe(params_.element_type);
+        CardinalityProbe<T> probe(
+            params_.element_type,
+            SupportsNaNTotalOrder(params_.delegate_params));
         const auto limit = static_cast<size_t>(params_.cardinality_limit);
         for (const auto& batch : input.batches) {
             if (probe.Size() >= limit) {

@@ -17,10 +17,13 @@
 package agg
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 func TestNewAggregationFieldMap_GroupByInvalidField(t *testing.T) {
@@ -90,4 +93,25 @@ func TestNewAggregationFieldMap_ValidGlobalAgg(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, aggMap.Count())
 	assert.Equal(t, "count(*)", aggMap.NameAt(0))
+}
+
+func TestFloatingGroupAccessorHashMatchesRowEquality(t *testing.T) {
+	for _, kind := range []schemapb.DataType{schemapb.DataType_Float, schemapb.DataType_Double} {
+		accessor, err := NewFieldAccessor(kind)
+		require.NoError(t, err)
+		field := &schemapb.FieldData{Type: kind}
+		if kind == schemapb.DataType_Float {
+			field.Field = &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: []float32{float32(math.NaN()), math.Float32frombits(0xffc00001), 0, float32(math.Copysign(0, -1)), float32(math.Inf(1))}}}}}
+		} else {
+			field.Field = &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: []float64{math.NaN(), math.Float64frombits(0xfff8000000000001), 0, math.Copysign(0, -1), math.Inf(1)}}}}}
+		}
+		accessor.SetVals(field)
+		row := func(i int) *Row { return &Row{fieldValues: []*FieldValue{NewFieldValue(accessor.ValAt(i))}} }
+		require.Equal(t, accessor.Hash(0), accessor.Hash(1))
+		require.True(t, row(0).Equal(row(1), 1))
+		require.Equal(t, accessor.Hash(2), accessor.Hash(3))
+		require.True(t, row(2).Equal(row(3), 1))
+		require.False(t, row(0).Equal(row(4), 1))
+		require.False(t, row(0).Equal(&Row{fieldValues: []*FieldValue{NewFieldValue(nil)}}, 1))
+	}
 }

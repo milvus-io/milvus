@@ -17,6 +17,9 @@
 package httpserver
 
 import (
+	"math"
+	"strconv"
+
 	"github.com/tidwall/gjson"
 	"google.golang.org/protobuf/proto"
 
@@ -162,6 +165,35 @@ func rejectNullInFieldPayload(dataType schemapb.DataType, fieldName string, raw 
 	return nullErr
 }
 
+// Keep the legacy decoder's direct float32 rounding and null behavior. Only
+// quoted non-finite values need a fallback because JSON has no numeric tokens
+// for them; quoted finite numbers and all other invalid types stay invalid.
+func decodeFloatingScalarData[T float32 | float64](raw []byte, bits int) ([]T, error) {
+	values := []T{}
+	originalErr := json.Unmarshal(raw, &values)
+	if originalErr == nil {
+		return values, nil
+	}
+	var elements []json.RawMessage
+	if err := json.Unmarshal(raw, &elements); err != nil {
+		return nil, originalErr
+	}
+	values = make([]T, len(elements))
+	for i, element := range elements {
+		var text string
+		if err := json.Unmarshal(element, &text); err == nil && len(element) > 0 && element[0] == '"' {
+			value, err := strconv.ParseFloat(text, bits)
+			if err != nil || (!math.IsNaN(value) && !math.IsInf(value, 0)) {
+				return nil, originalErr
+			}
+			values[i] = T(value)
+		} else if err := json.Unmarshal(element, &values[i]); err != nil {
+			return nil, originalErr
+		}
+	}
+	return values, nil
+}
+
 // AsSchemapb converts the FieldData to schemapb.FieldData
 func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 	// is scarlar
@@ -270,8 +302,7 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 			},
 		}
 	case schemapb.DataType_Float:
-		data := []float32{}
-		err := json.Unmarshal(raw, &data)
+		data, err := decodeFloatingScalarData[float32](raw, 32)
 		if err != nil {
 			return nil, newFieldDataError(f.FieldName, err)
 		}
@@ -286,8 +317,7 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 		}
 
 	case schemapb.DataType_Double:
-		data := []float64{}
-		err := json.Unmarshal(raw, &data)
+		data, err := decodeFloatingScalarData[float64](raw, 64)
 		if err != nil {
 			return nil, newFieldDataError(f.FieldName, err)
 		}

@@ -35,6 +35,7 @@ func (p Params) MarshalLogObject(enc mlog.ObjectEncoder) error {
 	enc.AddString("storageFormat", p.StorageFormat)
 	enc.AddUint64("binlogMaxSize", p.BinLogMaxSize)
 	enc.AddBool("useMergeSort", p.UseMergeSort)
+	enc.AddBool("supportsPartialPartitionStats", p.SupportsPartialPartitionStats)
 	enc.AddInt("maxSegmentMergeSort", p.MaxSegmentMergeSort)
 	enc.AddFloat64("preferSegmentSizeRatio", p.PreferSegmentSizeRatio)
 	enc.AddInt("bloomFilterApplyBatchSize", p.BloomFilterApplyBatchSize)
@@ -53,19 +54,22 @@ func (p Params) MarshalLogObject(enc mlog.ObjectEncoder) error {
 }
 
 type Params struct {
-	StorageVersion            int64                  `json:"storage_version,omitempty"`
-	StorageFormat             string                 `json:"storage_format,omitempty"`
-	BinLogMaxSize             uint64                 `json:"binlog_max_size,omitempty"`
-	UseMergeSort              bool                   `json:"use_merge_sort,omitempty"`
-	MaxSegmentMergeSort       int                    `json:"max_segment_merge_sort,omitempty"`
-	PreferSegmentSizeRatio    float64                `json:"prefer_segment_size_ratio,omitempty"`
-	BloomFilterApplyBatchSize int                    `json:"bloom_filter_apply_batch_size,omitempty"`
-	StorageConfig             *indexpb.StorageConfig `json:"storage_config,omitempty"`
-	UseLoonFFI                bool                   `json:"use_loon_ffi,omitempty"`
-	LOBHoleRatioThreshold     float64                `json:"lob_hole_ratio_threshold,omitempty"`
-	TextInlineThreshold       int64                  `json:"text_inline_threshold,omitempty"`
-	TextMaxLobFileBytes       int64                  `json:"text_max_lob_file_bytes,omitempty"`
-	TextFlushThresholdBytes   int64                  `json:"text_flush_threshold_bytes,omitempty"`
+	// SupportsPartialPartitionStats is the requesting coordinator's capability.
+	// It can remap clustering stats while preserving omitted segment entries.
+	SupportsPartialPartitionStats bool                   `json:"supports_partial_partition_stats,omitempty"`
+	StorageVersion                int64                  `json:"storage_version,omitempty"`
+	StorageFormat                 string                 `json:"storage_format,omitempty"`
+	BinLogMaxSize                 uint64                 `json:"binlog_max_size,omitempty"`
+	UseMergeSort                  bool                   `json:"use_merge_sort,omitempty"`
+	MaxSegmentMergeSort           int                    `json:"max_segment_merge_sort,omitempty"`
+	PreferSegmentSizeRatio        float64                `json:"prefer_segment_size_ratio,omitempty"`
+	BloomFilterApplyBatchSize     int                    `json:"bloom_filter_apply_batch_size,omitempty"`
+	StorageConfig                 *indexpb.StorageConfig `json:"storage_config,omitempty"`
+	UseLoonFFI                    bool                   `json:"use_loon_ffi,omitempty"`
+	LOBHoleRatioThreshold         float64                `json:"lob_hole_ratio_threshold,omitempty"`
+	TextInlineThreshold           int64                  `json:"text_inline_threshold,omitempty"`
+	TextMaxLobFileBytes           int64                  `json:"text_max_lob_file_bytes,omitempty"`
+	TextFlushThresholdBytes       int64                  `json:"text_flush_threshold_bytes,omitempty"`
 }
 
 func GenParams() Params {
@@ -99,6 +103,9 @@ func (p Params) GetStorageFormat() string {
 
 func GenerateJSONParams(schema *schemapb.CollectionSchema) (string, error) {
 	compactionParams := GenParams()
+	// Set only on the requesting side. A worker's local defaults must not
+	// advertise a capability absent from an older coordinator's plan.
+	compactionParams.SupportsPartialPartitionStats = true
 	// TEXT fields require at least V3 manifest storage for LOB support.
 	// This is a safety net: even if UseLoonFFI is toggled off, collections
 	// with TEXT fields must stay on V3 to avoid data loss.

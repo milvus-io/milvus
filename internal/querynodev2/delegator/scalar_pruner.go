@@ -112,6 +112,10 @@ func NewBinaryRangeExpr(lower storage.ScalarFieldValue,
 func (bre *BinaryRangeExpr) Eval(evalCtx *EvalCtx) *bitset.BitSet {
 	localBst := bitset.New(evalCtx.size)
 	for i, segStat := range evalCtx.segmentStats {
+		if len(segStat.FieldStats) == 0 || !segStat.FieldStats[0].HasUsableScalarBounds() {
+			localBst.Set(uint(i))
+			continue
+		}
 		fieldStat := &(segStat.FieldStats[0])
 		idx := uint(i)
 		commonMin := storage.MaxScalar(fieldStat.Min, bre.lowerVal)
@@ -138,6 +142,10 @@ func (ure *UnaryRangeExpr) Eval(
 ) *bitset.BitSet {
 	localBst := bitset.New(evalCtx.size)
 	for i, segStat := range evalCtx.segmentStats {
+		if len(segStat.FieldStats) == 0 || !segStat.FieldStats[0].HasUsableScalarBounds() {
+			localBst.Set(uint(i))
+			continue
+		}
 		fieldStat := &(segStat.FieldStats[0])
 		idx := uint(i)
 		val := ure.val
@@ -181,13 +189,12 @@ func NewTermExpr(values []storage.ScalarFieldValue) *TermExpr {
 func (te *TermExpr) Eval(evalCtx *EvalCtx) *bitset.BitSet {
 	localBst := bitset.New(evalCtx.size)
 	for i, segStat := range evalCtx.segmentStats {
+		if len(segStat.FieldStats) == 0 || !segStat.FieldStats[0].HasUsableScalarBounds() {
+			localBst.Set(uint(i))
+			continue
+		}
 		fieldStat := &(segStat.FieldStats[0])
 		for _, val := range te.vals {
-			if val.GT(fieldStat.Max) {
-				// as the vals inside expr has been sorted before executed, if current val has exceeded the max, then
-				// no need to iterate over other values
-				break
-			}
 			if fieldStat.Min.LE(val) && (val).LE(fieldStat.Max) {
 				localBst.Set(uint(i))
 				break

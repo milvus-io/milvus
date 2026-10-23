@@ -44,6 +44,7 @@ class LocalDirectory;
 namespace milvus::index {
 
 struct JsonFlatBuildParams {
+    bool nan_total_order{true};
     // Tantivy field name. Registry construction derives this from FIELD_ID.
     std::string field_name;
     // Empty means "the whole document"; otherwise the JSON-pointer sub-path

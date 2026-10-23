@@ -27,6 +27,7 @@
 
 #include "common/Types.h"
 #include "index/contracts/query/IIndexReaderBase.h"
+#include "index/scalar/ScalarIndexUtils.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/contracts/query/IScalarValueReader.h"
@@ -62,7 +63,7 @@ enum class BitmapLayout {
 };
 
 template <typename T, typename Posting>
-using BitmapPostingMap = std::map<T, Posting, std::less<>>;
+using BitmapPostingMap = std::map<T, Posting, ScalarIndexLess>;
 
 template <typename T>
 using BitmapRoaringPostingMap = BitmapPostingMap<T, roaring::Roaring>;

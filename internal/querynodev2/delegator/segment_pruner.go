@@ -156,7 +156,7 @@ func PruneSegments(ctx context.Context,
 				}
 			}
 			item.Segments = newSegments
-			sealedSegments[idx] = item
+			sealedSegments[idx] = item //nolint:gosec // idx ranges over sealedSegments; its length is unchanged.
 			segmentCount := len(item.Segments)
 			if segmentCount > maxSegmentCount {
 				maxSegmentCount = segmentCount

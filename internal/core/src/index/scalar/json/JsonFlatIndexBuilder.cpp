@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "index/scalar/json/JsonFlatIndexBuilder.h"
+#include "index/scalar/ScalarIndexUtils.h"
 
 #include <algorithm>
 #include <limits>
@@ -124,6 +125,7 @@ ParseBuildParams(const Config& params) {
                   "JSON flat local_dir contains an embedded NUL");
     }
     return JsonFlatBuildParams{
+        .nan_total_order = SupportsNaNTotalOrder(params),
         .field_name = std::to_string(field_id),
         .nested_path = ParseJsonPath(params),
         .tantivy_index_version = ParseTantivyVersion(params),
@@ -222,6 +224,7 @@ JsonFlatIndexBuilder::JsonFlatIndexBuilder(JsonFlatBuildParams params)
           false,
           false)),
       path_tokens_(parse_json_pointer(params_.nested_path)) {
+    engine_->SetSupportsNaNTotalOrder(params_.nan_total_order);
 }
 
 JsonFlatIndexBuilder::~JsonFlatIndexBuilder() = default;

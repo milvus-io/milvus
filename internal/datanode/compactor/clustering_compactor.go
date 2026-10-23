@@ -415,6 +415,25 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 	if err != nil {
 		return err
 	}
+	// Old coordinators turn missing stats entries into empty entries during
+	// remapping, which legacy readers cannot consume. Check the requesting
+	// coordinator's capability before opening writers or publishing output.
+	if !t.compactionParams.SupportsPartialPartitionStats {
+		for _, entry := range analyzeDict {
+			var value float64
+			switch v := entry.value.(type) {
+			case float32:
+				value = float64(v)
+			case float64:
+				value = v
+			default:
+				continue
+			}
+			if math.IsNaN(value) || math.IsInf(value, 0) {
+				return merr.Wrapf(merr.ErrServiceUnimplemented, "clustering nonfinite floating values requires a coordinator supporting partial partition stats")
+			}
+		}
+	}
 	buckets, containsNull := t.splitClusterByScalarValue(analyzeDict)
 	scalarToClusterBufferMap := make(map[interface{}]*ClusterBuffer, 0)
 	for id, bucket := range buckets {
@@ -439,7 +458,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 		buffer := newClusterBuffer(id, writer, fieldStats)
 		t.clusterBuffers = append(t.clusterBuffers, buffer)
 		for _, key := range bucket {
-			scalarToClusterBufferMap[key] = buffer
+			scalarToClusterBufferMap[scalarClusteringMapKey(key)] = buffer
 		}
 	}
 	var nullBuffer *ClusterBuffer
@@ -467,7 +486,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 			return nullBuffer
 		}
 		// todo: if keys are too many, the map will be quite large, we should mark the range of each buffer and select buffer by range
-		return scalarToClusterBufferMap[key]
+		return scalarToClusterBufferMap[scalarClusteringMapKey(key)]
 	}
 	return nil
 }
@@ -978,14 +997,32 @@ func (t *clusteringCompactionTask) cleanUp(ctx context.Context) {
 	}
 }
 
-func (t *clusteringCompactionTask) scalarAnalyze(ctx context.Context) (map[interface{}]int64, error) {
+// scalarAnalyzeEntry retains a representative source value for bounds while the
+// dictionary uses reflexive keys, including for all NaN payloads.
+type scalarAnalyzeEntry struct {
+	value interface{}
+	count int64
+}
+
+func scalarClusteringMapKey(value interface{}) interface{} {
+	switch v := value.(type) {
+	case float32:
+		return typeutil.Float32ToSortableUint32(v)
+	case float64:
+		return typeutil.Float64ToSortableUint64(v)
+	default:
+		return value
+	}
+}
+
+func (t *clusteringCompactionTask) scalarAnalyze(ctx context.Context) (map[interface{}]scalarAnalyzeEntry, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("scalarAnalyze-%d", t.GetPlanID()))
 	defer span.End()
 	inputSegments := t.plan.GetSegmentBinlogs()
 	futures := make([]*conc.Future[any], 0, len(inputSegments))
 	analyzeStart := time.Now()
 	var mutex sync.Mutex
-	analyzeDict := make(map[interface{}]int64, 0)
+	analyzeDict := make(map[interface{}]scalarAnalyzeEntry, 0)
 	for _, segment := range inputSegments {
 		segmentClone := proto.Clone(segment).(*datapb.CompactionSegmentBinlogs)
 		future := t.mappingPool.Submit(func() (any, error) {
@@ -993,11 +1030,12 @@ func (t *clusteringCompactionTask) scalarAnalyze(ctx context.Context) (map[inter
 			mutex.Lock()
 			defer mutex.Unlock()
 			for key, v := range analyzeResult {
-				if _, exist := analyzeDict[key]; exist {
-					analyzeDict[key] = analyzeDict[key] + v
-				} else {
-					analyzeDict[key] = v
+				entry, exists := analyzeDict[key]
+				if !exists {
+					entry.value = v.value
 				}
+				entry.count += v.count
+				analyzeDict[key] = entry
 			}
 			return struct{}{}, err
 		})
@@ -1018,7 +1056,7 @@ func (t *clusteringCompactionTask) scalarAnalyze(ctx context.Context) (map[inter
 func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	ctx context.Context,
 	segment *datapb.CompactionSegmentBinlogs,
-) (map[interface{}]int64, error) {
+) (map[interface{}]scalarAnalyzeEntry, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("scalarAnalyzeSegment-%d-%d", t.GetPlanID(), segment.GetSegmentID()))
 	defer span.End()
 	processStart := time.Now()
@@ -1052,7 +1090,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	)
 	if err != nil {
 		mlog.Warn(context.TODO(), "new binlog record reader wrong", mlog.Err(err))
-		return make(map[interface{}]int64), err
+		return make(map[interface{}]scalarAnalyzeEntry), err
 	}
 
 	pkIter := storage.NewDeserializeReader(rr, func(r storage.Record, v []*storage.Value) error {
@@ -1075,11 +1113,11 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	return analyzeResult, nil
 }
 
-func (t *clusteringCompactionTask) iterAndGetScalarAnalyzeResult(pkIter *storage.DeserializeReaderImpl[*storage.Value], expiredFilter compaction.EntityFilter) (map[interface{}]int64, int64, error) {
+func (t *clusteringCompactionTask) iterAndGetScalarAnalyzeResult(pkIter *storage.DeserializeReaderImpl[*storage.Value], expiredFilter compaction.EntityFilter) (map[interface{}]scalarAnalyzeEntry, int64, error) {
 	// initial timestampFrom, timestampTo = -1, -1 is an illegal value, only to mark initial state
 	var (
 		remained      int64 = 0
-		analyzeResult       = make(map[interface{}]int64, 0)
+		analyzeResult       = make(map[interface{}]scalarAnalyzeEntry, 0)
 	)
 	hasTTLField := t.ttlFieldID >= common.StartOfUserFieldID
 	for {
@@ -1114,49 +1152,51 @@ func (t *clusteringCompactionTask) iterAndGetScalarAnalyzeResult(pkIter *storage
 			continue
 		}
 
-		key := row[t.clusteringKeyField.GetFieldID()]
-		if _, exist := analyzeResult[key]; exist {
-			analyzeResult[key] = analyzeResult[key] + 1
-		} else {
-			analyzeResult[key] = 1
+		value := row[t.clusteringKeyField.GetFieldID()]
+		key := scalarClusteringMapKey(value)
+		entry, exists := analyzeResult[key]
+		if !exists {
+			entry.value = value
 		}
+		entry.count++
+		analyzeResult[key] = entry
 		remained++
 	}
 	return analyzeResult, remained, nil
 }
 
-func (t *clusteringCompactionTask) generatedScalarPlan(maxRows, preferRows int64, keys []interface{}, dict map[interface{}]int64) [][]interface{} {
+func (t *clusteringCompactionTask) generatedScalarPlan(maxRows, preferRows int64, keys []interface{}, dict map[interface{}]scalarAnalyzeEntry) [][]interface{} {
 	buckets := make([][]interface{}, 0)
 	currentBucket := make([]interface{}, 0)
 	var currentBucketSize int64 = 0
 	for _, key := range keys {
-		// todo can optimize
-		if dict[key] > preferRows {
+		count := dict[scalarClusteringMapKey(key)].count
+		if count > preferRows {
 			if len(currentBucket) != 0 {
 				buckets = append(buckets, currentBucket)
 				currentBucket = make([]interface{}, 0)
 				currentBucketSize = 0
 			}
 			buckets = append(buckets, []interface{}{key})
-		} else if currentBucketSize+dict[key] > maxRows {
+		} else if currentBucketSize+count > maxRows {
 			buckets = append(buckets, currentBucket)
 			currentBucket = []interface{}{key}
-			currentBucketSize = dict[key]
-		} else if currentBucketSize+dict[key] > preferRows {
+			currentBucketSize = count
+		} else if currentBucketSize+count > preferRows {
 			currentBucket = append(currentBucket, key)
 			buckets = append(buckets, currentBucket)
 			currentBucket = make([]interface{}, 0)
 			currentBucketSize = 0
 		} else {
 			currentBucket = append(currentBucket, key)
-			currentBucketSize += dict[key]
+			currentBucketSize += count
 		}
 	}
 	buckets = append(buckets, currentBucket)
 	return buckets
 }
 
-func (t *clusteringCompactionTask) switchPolicyForScalarPlan(totalRows int64, keys []interface{}, dict map[interface{}]int64) [][]interface{} {
+func (t *clusteringCompactionTask) switchPolicyForScalarPlan(totalRows int64, keys []interface{}, dict map[interface{}]scalarAnalyzeEntry) [][]interface{} {
 	bufferNumBySegmentMaxRows := totalRows / t.plan.MaxSegmentRows
 	bufferNumByMemory := t.memoryLimit / expectedBinlogSize
 	mlog.Info(context.TODO(), "switchPolicyForScalarPlan", mlog.Int64("totalRows", totalRows),
@@ -1170,18 +1210,18 @@ func (t *clusteringCompactionTask) switchPolicyForScalarPlan(totalRows int64, ke
 	return t.generatedScalarPlan(maxRows, int64(float64(maxRows)*t.compactionParams.PreferSegmentSizeRatio), keys, dict)
 }
 
-func (t *clusteringCompactionTask) splitClusterByScalarValue(dict map[interface{}]int64) ([][]interface{}, bool) {
+func (t *clusteringCompactionTask) splitClusterByScalarValue(dict map[interface{}]scalarAnalyzeEntry) ([][]interface{}, bool) {
 	totalRows := int64(0)
-	keys := lo.MapToSlice(dict, func(k interface{}, v int64) interface{} {
-		totalRows += v
-		return k
+	keys := lo.MapToSlice(dict, func(_ interface{}, v scalarAnalyzeEntry) interface{} {
+		totalRows += v.count
+		return v.value
 	})
 
 	notNullKeys := lo.Filter(keys, func(i interface{}, j int) bool {
 		return i != nil
 	})
 	sort.Slice(notNullKeys, func(i, j int) bool {
-		return storage.NewScalarFieldValue(t.clusteringKeyField.DataType, notNullKeys[i]).LE(storage.NewScalarFieldValue(t.clusteringKeyField.DataType, notNullKeys[j]))
+		return storage.NewScalarFieldValue(t.clusteringKeyField.DataType, notNullKeys[i]).LT(storage.NewScalarFieldValue(t.clusteringKeyField.DataType, notNullKeys[j]))
 	})
 
 	return t.switchPolicyForScalarPlan(totalRows, notNullKeys, dict), len(keys) > len(notNullKeys)
