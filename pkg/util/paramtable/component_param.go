@@ -6659,9 +6659,10 @@ exceeds this threshold, the earliest growing segments will be sealed.`,
 	p.DVForceAllIndexReady = ParamItem{
 		Key:          "dataCoord.dataview.forceAllIndexReady",
 		Version:      "2.6.2",
-		DefaultValue: "false",
-		Doc:          `If set to true, Milvus will wait all indices ready before the segment appears in indexed dataview.`,
-		Export:       false,
+		DefaultValue: "true",
+		Doc: "Deprecated: a compaction output always waits for every index defined on the collection, scalar and vector, " +
+			"before it replaces its parents in the query view. The key is kept so existing configurations stay recognized and is ignored.",
+		Export: false,
 	}
 	p.DVForceAllIndexReady.Init(base.mgr)
 
