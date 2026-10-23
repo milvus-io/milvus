@@ -346,3 +346,17 @@ func TestFenceIsPersistedAcrossAPendingPartitionDrop(t *testing.T) {
 	assert.Equal(t, uint64(20), timeTick)
 	assert.Equal(t, int64(7), taskID)
 }
+
+// TestSplitSwitchTimeTickOfACorruptedExtra: a fence record whose extra append
+// response cannot be decoded still yields a T_switch -- its own tick, the right
+// one for a first fence -- rather than failing the consumer; the decode failure
+// is reported instead of being read as "no extra".
+func TestSplitSwitchTimeTickOfACorruptedExtra(t *testing.T) {
+	record := newSplitShardMessage(splitSourceVChannel, 300, 200)
+	assert.EqualValues(t, 200, splitSwitchTimeTickOf(message.MustAsImmutableSplitShardMessageV2(record)))
+
+	properties := record.Properties().ToRawMap()
+	properties["_ae"] = "not base64 !"
+	corrupted := message.NewImmutableMesasge(record.MessageID(), record.Payload(), properties)
+	assert.EqualValues(t, 300, splitSwitchTimeTickOf(message.MustAsImmutableSplitShardMessageV2(corrupted)))
+}

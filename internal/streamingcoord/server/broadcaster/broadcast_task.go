@@ -542,6 +542,13 @@ func (b *broadcastTask) copyAndSetAckedCheckpoints(msgs ...message.ImmutableMess
 			// TimeTick == 0 is the not-yet-acked sentinel this function relies on throughout.
 			continue
 		}
+		extra, err := message.DecodeAppendExtra(msg)
+		if err != nil {
+			// Persisted without it: an ack callback that requires the extra
+			// then refuses loudly rather than acting on garbage.
+			b.Logger().Warn(context.TODO(), "the acked record carries an extra append response that cannot be decoded",
+				mlog.FieldVChannel(vchannel), mlog.Err(err))
+		}
 		// the ack result is dirty, so we need to set the dirty flag to true.
 		b.dirty = true
 		task.AckedVchannelBitmap[idx] = 1
@@ -552,7 +559,7 @@ func (b *broadcastTask) copyAndSetAckedCheckpoints(msgs ...message.ImmutableMess
 			// Persisted with the checkpoint: the ack callback reads the append
 			// results from here, after a restart as much as before one, and on a
 			// secondary every ack is a consumer-side one.
-			Extra: message.AppendExtraOf(msg),
+			Extra: extra,
 		}
 		// Release the waiters BEFORE the task is persisted, and deliberately so.
 		// A waiter is asking whether this vchannel's replica is durable in the
