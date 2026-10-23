@@ -320,8 +320,8 @@ func TestExploreExternalFilesErrorPropagation(t *testing.T) {
 			if scenario == "success" {
 				require.NoError(t, err)
 				require.Len(t, files, 1)
-				assert.Equal(t, "a.parquet", files[0].GetFilePath())
-				assert.EqualValues(t, 10, files[0].GetNumRows())
+				assert.Equal(t, "a.parquet", files[0].FilePath)
+				assert.EqualValues(t, 10, files[0].NumRows)
 				assert.Equal(t, "manifest.json", manifest)
 				return
 			}
@@ -488,7 +488,7 @@ func TestEnsureTasksForInitJobDeduplicatesExplore(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	var explores atomic.Int32
 	explore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).To(
-		func(_ *externalCollectionRefreshManager, _ context.Context, _ *datapb.ExternalCollectionRefreshJob) ([]*datapb.ExternalFileInfo, string, error) {
+		func(_ *externalCollectionRefreshManager, _ context.Context, _ *datapb.ExternalCollectionRefreshJob) ([]packed.FileInfo, string, error) {
 			explores.Add(1)
 			close(entered)
 			<-release
@@ -515,7 +515,7 @@ func TestCreateTasksForJobPlanningFailures(t *testing.T) {
 	for _, failure := range []string{"empty_source", "plan_tasks", "allocate_id", "publish_tasks"} {
 		t.Run(failure, func(t *testing.T) {
 			refreshMeta := createTestRefreshMeta(t)
-			files := []*datapb.ExternalFileInfo{{FilePath: "a.parquet"}}
+			files := []packed.FileInfo{{FilePath: "a.parquet"}}
 			if failure == "empty_source" {
 				files = nil
 			}
@@ -559,9 +559,9 @@ func TestCreateTasksForJobFileRanges(t *testing.T) {
 			require.NoError(t, paramtable.Get().Save(param.Key, size))
 			job := &datapb.ExternalCollectionRefreshJob{JobId: 1, State: indexpb.JobState_JobStateInit}
 			refreshMeta := createTestRefreshMetaWithJobs(t, []*datapb.ExternalCollectionRefreshJob{job}, nil)
-			files := make([]*datapb.ExternalFileInfo, 5)
+			files := make([]packed.FileInfo, 5)
 			for i := range files {
-				files[i] = &datapb.ExternalFileInfo{FilePath: fmt.Sprintf("file-%d.parquet", i)}
+				files[i] = packed.FileInfo{FilePath: fmt.Sprintf("file-%d.parquet", i)}
 			}
 			explore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).Return(files, "manifest", nil).Build()
 			defer explore.UnPatch()
@@ -615,7 +615,7 @@ func TestSubmitRefreshJobWithIDStoresJobMetadata(t *testing.T) {
 		refreshMeta, nil, testCollectionGetter(mt), nil, nil, nil)
 
 	mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
-		Return([]*datapb.ExternalFileInfo{{FilePath: "s3://bucket/path/a.parquet", NumRows: 10}}, "manifest-path", nil).
+		Return([]packed.FileInfo{{FilePath: "s3://bucket/path/a.parquet", NumRows: 10}}, "manifest-path", nil).
 		Build()
 	defer mockExplore.UnPatch()
 
@@ -674,7 +674,7 @@ func TestCreateTasksForJob_PersistedOwnershipDrivesWorkerRequest(t *testing.T) {
 		refreshMeta, nil, testCollectionGetter(mt), nil, nil, nil).(*externalCollectionRefreshManager)
 
 	mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
-		Return([]*datapb.ExternalFileInfo{
+		Return([]packed.FileInfo{
 			{FilePath: "f0.parquet", NumRows: 10},
 			{FilePath: "f1.parquet", NumRows: 10},
 			{FilePath: "f2.parquet", NumRows: 10},
@@ -723,6 +723,128 @@ func TestCreateTasksForJob_PersistedOwnershipDrivesWorkerRequest(t *testing.T) {
 	assert.Equal(t, int64(4), cluster.refreshReq.GetFileIndexEnd())
 	require.Len(t, cluster.refreshReq.GetCurrentSegments(), 1)
 	assert.Equal(t, int64(10), cluster.refreshReq.GetCurrentSegments()[0].GetID())
+}
+
+func TestCreateTasksForJobPaimonDataSplits(t *testing.T) {
+	ctx := context.Background()
+	param := &paramtable.Get().DataCoordCfg.ExternalCollectionFilesPerTask
+	original := param.GetValue()
+	require.NoError(t, paramtable.Get().Save(param.Key, "1"))
+	defer paramtable.Get().Save(param.Key, original)
+	files := []packed.FileInfo{
+		externalRefreshPlannerDataSplit(1, "split-a"),
+		externalRefreshPlannerDataSplit(1, "split-b"),
+		externalRefreshPlannerDataSplit(1, "split-c"),
+	}
+	dir := t.TempDir()
+	config := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+	fragments := make([]packed.Fragment, len(files))
+	for i, file := range files {
+		fragments[i] = packed.Fragment{FilePath: file.FilePath, EndRow: file.NumRows, RowCount: file.NumRows, Properties: file.Properties}
+	}
+	manifest, err := packed.CreateManifestForSegment(dir, []string{"id"}, "paimon-table", fragments, config)
+	require.NoError(t, err)
+	manifestPath, err := packed.ManifestFilePath(manifest)
+	require.NoError(t, err)
+	exploredFiles, err := packed.ReadFileInfosFromManifestPath(manifestPath, config)
+	require.NoError(t, err)
+	exploredFiles, _ = packed.NormalizeFileInfos(exploredFiles, "paimon-table")
+	require.Equal(t, files, exploredFiles)
+	job := &datapb.ExternalCollectionRefreshJob{
+		JobId: 1001, CollectionId: 100, State: indexpb.JobState_JobStateInit,
+		ExternalSource: "s3://bucket/table",
+		ExternalSpec:   `{"format":"paimon-table","extfs":{"cloud_provider":"aws","endpoint_url":"http://endpoint","region":"us-east-1","anonymous":"true"}}`,
+	}
+	mt := newEmptyTestMeta()
+	schema := testMilvusTableTargetRefreshSchema()
+	schema.ExternalSpec = job.GetExternalSpec()
+	mt.AddCollection(&collectionInfo{ID: 100, Schema: schema})
+	mt.segments.SetSegment(10, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 10, CollectionID: 100, State: commonpb.SegmentState_Flushed, ManifestPath: "old-manifest",
+	}))
+	refreshMeta := createTestRefreshMetaWithJobs(t, []*datapb.ExternalCollectionRefreshJob{job}, nil)
+	manager := NewExternalCollectionRefreshManager(ctx, mt, newStubScheduler(), &stubAllocator{nextID: 2000},
+		refreshMeta, nil, nil, nil, nil).(*externalCollectionRefreshManager)
+	defer manager.Stop()
+	// Mock the Storage boundary, not exploreExternalFiles: its properties must
+	// survive all the way through planning and the persisted task ranges.
+	explore := mockey.Mock(packed.ExploreFilesReturnManifestPath).Return(exploredFiles, manifestPath, nil).Build()
+	defer explore.UnPatch()
+	readFragments := mockey.Mock(packed.ReadFragmentsFromManifest).Return([]packed.Fragment{{
+		FilePath: files[1].FilePath, EndRow: 10, RowCount: 10, Properties: files[1].Properties,
+	}}, nil).Build()
+	defer readFragments.UnPatch()
+	tasks, err := manager.createTasksForJob(ctx, job)
+	require.NoError(t, err)
+	require.Len(t, tasks, 3)
+	for i, id := range refreshMeta.GetJob(job.GetJobId()).GetTaskIds() {
+		task := refreshMeta.GetTask(id)
+		require.EqualValues(t, i, task.GetFileIndexBegin())
+		require.EqualValues(t, i+1, task.GetFileIndexEnd())
+		if i == 1 {
+			require.Equal(t, []int64{10}, task.GetOwnedSegmentIds())
+		} else {
+			require.Empty(t, task.GetOwnedSegmentIds())
+		}
+		fragments, err := packed.FetchFragmentsFromExternalSourceWithRange(
+			ctx, "paimon-table", []string{"id"}, job.GetExternalSource(), config,
+			task.GetFileIndexBegin(), task.GetFileIndexEnd(), task.GetExploreManifestPath(),
+			packed.ExternalFetchOptions{RowLimit: 4},
+		)
+		require.NoError(t, err)
+		require.Len(t, fragments, 1)
+		require.Equal(t, files[i].FilePath, fragments[0].FilePath)
+		require.Equal(t, files[i].Properties, fragments[0].Properties)
+		require.EqualValues(t, 0, fragments[0].StartRow)
+		require.EqualValues(t, 10, fragments[0].EndRow)
+	}
+}
+
+func TestCreateTasksForJobCrossFormatToPaimon(t *testing.T) {
+	ctx := context.Background()
+	param := &paramtable.Get().DataCoordCfg.ExternalCollectionFilesPerTask
+	original := param.GetValue()
+	require.NoError(t, paramtable.Get().Save(param.Key, "1"))
+	defer paramtable.Get().Save(param.Key, original)
+	files := []packed.FileInfo{
+		{
+			FilePath: "s3://endpoint/bucket/table/data.parquet", NumRows: 10,
+			Properties: map[string]string{"metadata": `{"version":1,"read_path":"direct-file","record_count":10}`},
+		},
+		externalRefreshPlannerDataSplit(1, "split-a"),
+	}
+	explore := mockey.Mock(packed.ExploreFilesReturnManifestPath).Return(files, "manifest", nil).Build()
+	defer explore.UnPatch()
+	read := mockey.Mock(packed.ReadFragmentsFromManifest).Return([]packed.Fragment{{
+		FilePath: "s3://endpoint/bucket/old/data.parquet", EndRow: 10, RowCount: 10,
+	}}, nil).Build()
+	defer read.UnPatch()
+	for _, format := range []string{"parquet", "iceberg-table"} {
+		t.Run(format, func(t *testing.T) {
+			job := &datapb.ExternalCollectionRefreshJob{
+				JobId: 1001, CollectionId: 100, State: indexpb.JobState_JobStateInit,
+				ExternalSource: "s3://bucket/table",
+				ExternalSpec:   `{"format":"paimon-table","extfs":{"cloud_provider":"aws","region":"us-east-1","anonymous":"true"}}`,
+			}
+			schema := testMilvusTableTargetRefreshSchema()
+			schema.ExternalSpec = fmt.Sprintf(`{"format":%q}`, format)
+			mt := newEmptyTestMeta()
+			mt.AddCollection(&collectionInfo{ID: 100, Schema: schema})
+			mt.segments.SetSegment(10, NewSegmentInfo(&datapb.SegmentInfo{
+				ID: 10, CollectionID: 100, State: commonpb.SegmentState_Flushed, ManifestPath: "old-manifest",
+			}))
+			refreshMeta := createTestRefreshMetaWithJobs(t, []*datapb.ExternalCollectionRefreshJob{job}, nil)
+			manager := NewExternalCollectionRefreshManager(ctx, mt, newStubScheduler(), &stubAllocator{nextID: 2000},
+				refreshMeta, nil, nil, nil, nil).(*externalCollectionRefreshManager)
+			defer manager.Stop()
+			tasks, err := manager.createTasksForJob(ctx, job)
+			require.NoError(t, err)
+			require.Len(t, tasks, 2)
+			ids := refreshMeta.GetJob(job.GetJobId()).GetTaskIds()
+			require.Equal(t, []int64{10}, refreshMeta.GetTask(ids[0]).GetOwnedSegmentIds())
+			require.Empty(t, refreshMeta.GetTask(ids[1]).GetOwnedSegmentIds())
+		})
+	}
 }
 
 func TestExploreExternalFiles_UsesUniqueAttemptDirectories(t *testing.T) {
@@ -790,7 +912,7 @@ func TestCreateTasksForJob_UnreadableBaselineManifest(t *testing.T) {
 		refreshMeta, nil, testCollectionGetter(mt), nil, nil, nil).(*externalCollectionRefreshManager)
 
 	mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
-		Return([]*datapb.ExternalFileInfo{{FilePath: "s3://bucket/path/a.parquet", NumRows: 10}}, "manifest-path", nil).
+		Return([]packed.FileInfo{{FilePath: "s3://bucket/path/a.parquet", NumRows: 10}}, "manifest-path", nil).
 		Build()
 	defer mockExplore.UnPatch()
 	mockRead := mockey.Mock(packed.ReadFragmentsFromManifest).
@@ -853,7 +975,7 @@ func TestCreateTasksForJob_CompositePersistenceFailureIsUnpublished(t *testing.T
 	).(*externalCollectionRefreshManager)
 
 	mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
-		Return([]*datapb.ExternalFileInfo{
+		Return([]packed.FileInfo{
 			{FilePath: "s3://bucket/path/a.parquet", NumRows: 10},
 			{FilePath: "s3://bucket/path/b.parquet", NumRows: 10},
 		}, "manifest-path", nil).
@@ -913,7 +1035,7 @@ func TestCreateTasksForJob_TerminalJobRejectsLatePlanAndCleansExplore(t *testing
 	).(*externalCollectionRefreshManager)
 
 	mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
-		Return([]*datapb.ExternalFileInfo{{FilePath: "s3://bucket/path/a.parquet", NumRows: 10}}, "manifest-path", nil).
+		Return([]packed.FileInfo{{FilePath: "s3://bucket/path/a.parquet", NumRows: 10}}, "manifest-path", nil).
 		Build()
 	defer mockExplore.UnPatch()
 
@@ -1462,7 +1584,7 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 		// Mock exploreExternalFiles so the test does not need real S3 + parquet.
 		// Returns one file so createTasksForJob produces a single task chunk.
 		mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
-			Return([]*datapb.ExternalFileInfo{{FilePath: "s3://bucket/path/file.parquet", NumRows: 100}}, "s3://bucket/path/manifest", nil).Build()
+			Return([]packed.FileInfo{{FilePath: "s3://bucket/path/file.parquet", NumRows: 100}}, "s3://bucket/path/manifest", nil).Build()
 		defer mockExplore.UnPatch()
 
 		manager := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), nil, nil, nil)
@@ -1573,7 +1695,7 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 		mockIsExternal := mockey.Mock(typeutil.IsExternalCollection).Return(true).Build()
 		defer mockIsExternal.UnPatch()
 		mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
-			Return([]*datapb.ExternalFileInfo{{FilePath: "s3://bucket/path/file.parquet", NumRows: 100}}, "manifest", nil).
+			Return([]packed.FileInfo{{FilePath: "s3://bucket/path/file.parquet", NumRows: 100}}, "manifest", nil).
 			Build()
 		defer mockExplore.UnPatch()
 
@@ -1662,7 +1784,7 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 		mockIsExternal := mockey.Mock(typeutil.IsExternalCollection).Return(true).Build()
 		defer mockIsExternal.UnPatch()
 		mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
-			Return([]*datapb.ExternalFileInfo{}, "__explore_temp__/coord_1/attempt_1001/manifest", nil).
+			Return([]packed.FileInfo{}, "__explore_temp__/coord_1/attempt_1001/manifest", nil).
 			Build()
 		defer mockExplore.UnPatch()
 

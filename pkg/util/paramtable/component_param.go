@@ -8545,7 +8545,8 @@ type dataNodeConfig struct {
 	StandaloneSlotRatio ParamItem `refreshable:"false"`
 
 	// external collection
-	ExternalCollectionTargetRowsPerSegment ParamItem `refreshable:"true"`
+	ExternalCollectionTargetRowsPerSegment          ParamItem `refreshable:"true"`
+	ExternalCollectionPaimonMaxDataSplitsPerSegment ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -9214,6 +9215,15 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 		Export:       false,
 	}
 	p.ExternalCollectionTargetRowsPerSegment.Init(base.mgr)
+
+	p.ExternalCollectionPaimonMaxDataSplitsPerSegment = ParamItem{
+		Key:          "dataNode.externalCollection.paimon.maxDataSplitsPerSegment",
+		Version:      "3.0.0",
+		DefaultValue: "64",
+		Doc:          "Maximum number of Paimon DataSplits packed into one external collection segment",
+		Export:       false,
+	}
+	p.ExternalCollectionPaimonMaxDataSplitsPerSegment.Init(base.mgr)
 }
 
 type queryViewConfig struct {
