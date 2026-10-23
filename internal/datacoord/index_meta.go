@@ -75,6 +75,8 @@ type indexMeta struct {
 
 	// collectionIndexes records which indexes are on the collection
 	// collID -> indexID -> index
+	// fieldIndexLock guards the in-memory definitions only; index DDL never
+	// holds it across catalog I/O.
 	fieldIndexLock sync.RWMutex
 	indexes        map[UniqueID]map[UniqueID]*model.Index
 	taskCounts     indexTaskCounts
@@ -180,8 +182,8 @@ func (m *indexMeta) reloadFromKV(collectionIDs []int64) error {
 
 	// Parallel load and process: ListIndexes and ListSegmentIndexes have no dependency,
 	// and they update completely separate data structures so memory updates can also run in parallel.
-	// collectionSegIdxes is hoisted to function scope so the gauge goroutine
-	// (launched after g.Wait) can access it when both indexes and segment indexes are loaded.
+	// collectionSegIdxes is hoisted to function scope for the metrics goroutine
+	// launched after g.Wait.
 	collectionSegIdxes := make([][]*model.SegmentIndex, len(collectionIDs))
 	g, _ := errgroup.WithContext(m.ctx)
 	g.Go(func() error {
@@ -237,22 +239,15 @@ func (m *indexMeta) reloadFromKV(collectionIDs []int64) error {
 		return err
 	}
 
-	// Update Prometheus metrics asynchronously. Launched after g.Wait() so that
-	// both m.indexes (from goroutine 1) and collectionSegIdxes (from goroutine 2)
-	// are fully populated. Only count active indexes (index definition alive).
+	// Update Prometheus metrics asynchronously, off the startup path, once both
+	// loads are complete. Publishing writes each collection's current stored
+	// size, so it cannot race a live update into a stale value.
 	go func() {
-		storedSizeByCollection := make(map[int64]float64)
+		m.taskCounts.publishStoredSizes()
 		for _, segIdxes := range collectionSegIdxes {
 			for _, segIdx := range segIdxes {
 				metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(segIdx.IndexFileKeys)))
-				if m.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
-					storedSizeByCollection[segIdx.CollectionID] += float64(segIdx.IndexSerializedSize)
-				}
 			}
-		}
-		for collID, size := range storedSizeByCollection {
-			metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
-				fmt.Sprintf("%d", collID)).Add(size)
 		}
 	}()
 
@@ -300,6 +295,7 @@ func (m *indexMeta) alterSegmentIndexes(segIdxes []*model.SegmentIndex) error {
 	for _, segIdx := range segIdxes {
 		m.updateSegmentIndex(segIdx)
 	}
+	m.taskCounts.publishStoredSizes()
 	return nil
 }
 
@@ -314,12 +310,10 @@ func (m *indexMeta) updateSegIndexMeta(segIdx *model.SegmentIndex, updateFunc fu
 // buildFinishedSegmentIndex projects a worker completion result onto a fresh
 // copy of the task's metadata without persisting it or touching the in-memory
 // record. Callers that must compose this update with another metadata write
-// stage the returned value in the same catalog transaction; the second return
-// value is the previously recorded serialized size, needed for the stored-size
-// gauge delta.
+// stage the returned value in the same catalog transaction.
 //
 // Precondition: the caller holds keyLock for taskInfo.BuildID.
-func (m *indexMeta) buildFinishedSegmentIndex(segIdx *model.SegmentIndex, taskInfo *workerpb.IndexTaskInfo) (*model.SegmentIndex, uint64, error) {
+func (m *indexMeta) buildFinishedSegmentIndex(segIdx *model.SegmentIndex, taskInfo *workerpb.IndexTaskInfo) (*model.SegmentIndex, error) {
 	actualPathVersion := taskInfo.GetIndexStorePathVersion()
 	if err := validateIndexStorePathVersionForFinish(taskInfo.GetBuildID(), segIdx.IndexStorePathVersion, actualPathVersion); err != nil {
 		mlog.Warn(m.ctx, "invalid index store path version returned by worker",
@@ -327,7 +321,7 @@ func (m *indexMeta) buildFinishedSegmentIndex(segIdx *model.SegmentIndex, taskIn
 			mlog.String("requested", segIdx.IndexStorePathVersion.String()),
 			mlog.String("actual", actualPathVersion.String()),
 			mlog.Err(err))
-		return nil, 0, err
+		return nil, err
 	}
 	if actualPathVersion < segIdx.IndexStorePathVersion {
 		mlog.Info(m.ctx, "worker downgraded index store path version",
@@ -346,21 +340,16 @@ func (m *indexMeta) buildFinishedSegmentIndex(segIdx *model.SegmentIndex, taskIn
 	updated.FinishedUTCTime = uint64(time.Now().Unix())
 	updated.CurrentScalarIndexVersion = taskInfo.GetCurrentScalarIndexVersion()
 	updated.IndexStorePathVersion = actualPathVersion
-	return updated, segIdx.IndexSerializedSize, nil
+	return updated, nil
 }
 
 // recordFinishedTask updates process-local observability only. The caller must
-// have already persisted updated and installed it in the in-memory metadata.
-func (m *indexMeta) recordFinishedTask(old, updated *model.SegmentIndex, oldSize uint64, taskInfo *workerpb.IndexTaskInfo) {
+// have already persisted the finished task and installed it in the in-memory
+// metadata, which also updated its stored size, and must not hold segMu.
+func (m *indexMeta) recordFinishedTask(taskInfo *workerpb.IndexTaskInfo) {
 	mlog.Info(m.ctx, "finish index task success", mlog.Int64("buildID", taskInfo.GetBuildID()),
 		mlog.String("state", taskInfo.GetState().String()), mlog.String("fail reason", taskInfo.GetFailReason()),
 		mlog.Int32("current_index_version", taskInfo.GetCurrentIndexVersion()))
-
-	// gauge Add must be serialized vs MarkIndexAsDeleted.
-	m.fieldIndexLock.RLock()
-	m.addStoredIndexSizeMetric(old.CollectionID, old.IndexID,
-		float64(updated.IndexSerializedSize)-float64(oldSize))
-	m.fieldIndexLock.RUnlock()
 
 	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(taskInfo.GetIndexFileKeys())))
 }
@@ -561,9 +550,6 @@ func (m *indexMeta) HasSameReq(req *indexpb.CreateIndexRequest) (bool, UniqueID)
 }
 
 func (m *indexMeta) CreateIndex(ctx context.Context, index *model.Index) error {
-	m.fieldIndexLock.Lock()
-	defer m.fieldIndexLock.Unlock()
-
 	mlog.Info(ctx, "meta update: CreateIndex", mlog.Int64("collectionID", index.CollectionID),
 		mlog.Int64("fieldID", index.FieldID), mlog.Int64("indexID", index.IndexID), mlog.String("indexName", index.IndexName))
 
@@ -574,37 +560,28 @@ func (m *indexMeta) CreateIndex(ctx context.Context, index *model.Index) error {
 		return err
 	}
 
+	m.fieldIndexLock.Lock()
 	m.updateCollectionIndex(index)
+	m.fieldIndexLock.Unlock()
+	m.taskCounts.publishStoredSizes()
 	mlog.Info(ctx, "meta update: CreateIndex success", mlog.Int64("collectionID", index.CollectionID),
 		mlog.Int64("fieldID", index.FieldID), mlog.Int64("indexID", index.IndexID), mlog.String("indexName", index.IndexName))
 	return nil
 }
 
 func (m *indexMeta) AlterIndex(ctx context.Context, indexes ...*model.Index) error {
-	m.fieldIndexLock.Lock()
-	defer m.fieldIndexLock.Unlock()
-
 	err := m.catalog.AlterIndexes(ctx, indexes)
 	if err != nil {
 		return err
 	}
 
+	m.fieldIndexLock.Lock()
 	for _, index := range indexes {
 		m.updateCollectionIndex(index)
 	}
-
+	m.fieldIndexLock.Unlock()
+	m.taskCounts.publishStoredSizes()
 	return nil
-}
-
-// Precondition: caller holds fieldIndexLock — serializes the indexes map read with MarkIndexAsDeleted.
-func (m *indexMeta) addStoredIndexSizeMetric(collID, indexID UniqueID, delta float64) {
-	if delta == 0 {
-		return
-	}
-	if idx, ok := m.indexes[collID][indexID]; ok && !idx.IsDeleted {
-		metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
-			fmt.Sprintf("%d", collID)).Add(delta)
-	}
 }
 
 // AddSegmentIndex adds the index meta corresponding the indexBuildID to meta table.
@@ -650,16 +627,8 @@ func (m *indexMeta) addSegmentIndex(ctx context.Context, segIndex *model.Segment
 		}
 	}
 
-	// Insert + gauge Add must be serialized vs MarkIndexAsDeleted.
-	m.fieldIndexLock.RLock()
-	defer m.fieldIndexLock.RUnlock()
-
 	m.updateSegmentIndex(segIndex)
-
-	if segIndex.IndexState == commonpb.IndexState_Finished {
-		m.addStoredIndexSizeMetric(segIndex.CollectionID, segIndex.IndexID,
-			float64(segIndex.IndexSerializedSize))
-	}
+	m.taskCounts.publishStoredSizes()
 
 	mlog.Info(ctx, "meta update: adding segment index success", mlog.Int64("collectionID", segIndex.CollectionID),
 		mlog.Int64("segmentID", segIndex.SegmentID), mlog.Int64("indexID", segIndex.IndexID),
@@ -839,9 +808,11 @@ func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, ind
 	mlog.Info(ctx, "IndexCoord metaTable MarkIndexAsDeleted", mlog.Int64("collectionID", collID),
 		mlog.Int64s("indexIDs", indexIDs))
 
-	m.fieldIndexLock.Lock()
-	defer m.fieldIndexLock.Unlock()
-
+	// Index DDL of one collection is serialized by the broadcast ack callbacks
+	// (exclusive collection-name resource key), and GC's RemoveIndex only
+	// removes definitions that are already deleted, so the definitions read
+	// here cannot change while the catalog is written without the lock.
+	m.fieldIndexLock.RLock()
 	if len(indexIDs) == 0 {
 		// drop all indexes if indexIDs is empty.
 		indexIDs = make([]UniqueID, 0, len(m.indexes[collID]))
@@ -853,10 +824,7 @@ func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, ind
 		}
 	}
 
-	fieldIndexes, ok := m.indexes[collID]
-	if !ok {
-		return nil
-	}
+	fieldIndexes := m.indexes[collID]
 	indexes := make([]*model.Index, 0)
 	for _, indexID := range indexIDs {
 		index, ok := fieldIndexes[indexID]
@@ -867,6 +835,7 @@ func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, ind
 		clonedIndex.IsDeleted = true
 		indexes = append(indexes, clonedIndex)
 	}
+	m.fieldIndexLock.RUnlock()
 	if len(indexes) == 0 {
 		return nil
 	}
@@ -876,27 +845,14 @@ func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, ind
 		return err
 	}
 
-	deletedSet := make(map[UniqueID]struct{}, len(indexes))
+	// Deactivating the indexes in taskCounts drops their stored size from the
+	// gauge at once; GC removing their segment indexes later changes nothing.
+	m.fieldIndexLock.Lock()
 	for _, index := range indexes {
 		m.updateCollectionIndex(index)
-		deletedSet[index.IndexID] = struct{}{}
 	}
-
-	// Subtract immediately — gauge tracks alive indexes only; deferred GC (RemoveSegmentIndex)
-	// must not re-subtract. fieldIndexLock.Lock serializes with concurrent RLock gauge adders.
-	var totalSize float64
-	m.segmentIndexes.Range(func(_ UniqueID, idxMap *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]) bool {
-		for indexID := range deletedSet {
-			if segIdx, ok := idxMap.Get(indexID); ok && segIdx.CollectionID == collID {
-				totalSize += float64(segIdx.IndexSerializedSize)
-			}
-		}
-		return true
-	})
-	if totalSize > 0 {
-		metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "",
-			fmt.Sprintf("%d", collID)).Sub(totalSize)
-	}
+	m.fieldIndexLock.Unlock()
+	m.taskCounts.publishStoredSizes()
 
 	mlog.Info(ctx, "IndexCoord metaTable MarkIndexAsDeleted success", mlog.Int64("collectionID", collID), mlog.Int64s("indexIDs", indexIDs))
 	return nil
@@ -1154,14 +1110,14 @@ func (m *indexMeta) FinishTask(taskInfo *workerpb.IndexTaskInfo) error {
 		return nil
 	}
 
-	updated, oldSize, err := m.buildFinishedSegmentIndex(segIdx, taskInfo)
+	updated, err := m.buildFinishedSegmentIndex(segIdx, taskInfo)
 	if err != nil {
 		return err
 	}
 	if err := m.alterSegmentIndexes([]*model.SegmentIndex{updated}); err != nil {
 		return err
 	}
-	m.recordFinishedTask(segIdx, updated, oldSize, taskInfo)
+	m.recordFinishedTask(taskInfo)
 	return nil
 }
 
@@ -1243,40 +1199,17 @@ func (m *indexMeta) RemoveSegmentIndex(ctx context.Context, buildID UniqueID) er
 		return err
 	}
 
-	m.removeSegmentIndexInMemory(segIdx)
+	m.removeSegmentIndexRecordInMemory(segIdx)
+	m.taskCounts.publishStoredSizes()
 	return nil
 }
 
-// removeSegmentIndexInMemory drops a SegmentIndex from the in-memory indexes
-// and reconciles its metrics, after its catalog record has been removed. The
-// caller must hold keyLock for segIdx.BuildID. RemoveSegmentIndex, which owns
-// the catalog removal itself, uses this combined form; the manifest-commit
-// staging below uses the same two halves but runs the record removal under
-// segMu and defers the gauge until segMu is released, so the two paths cannot
-// drift.
-func (m *indexMeta) removeSegmentIndexInMemory(segIdx *model.SegmentIndex) {
-	m.subtractStoredIndexSizeOnRemoval(segIdx)
-	m.removeSegmentIndexRecordInMemory(segIdx)
-}
-
-// subtractStoredIndexSizeOnRemoval is the fieldIndexLock-guarded metric half of
-// removeSegmentIndexInMemory. It is split out because the manifest-commit
-// install defers it until segMu is released (see stagedSegmentIndexMutation):
-// every index DDL holds fieldIndexLock's write side across an etcd round trip,
-// so blocking on it inside segMu would stall every segment reader behind that
-// round trip.
-func (m *indexMeta) subtractStoredIndexSizeOnRemoval(segIdx *model.SegmentIndex) {
-	// Reclaim size only when the index is still alive (segment-drop case);
-	// MarkIndexAsDeleted already subtracted otherwise.
-	m.fieldIndexLock.RLock()
-	m.addStoredIndexSizeMetric(segIdx.CollectionID, segIdx.IndexID,
-		-float64(segIdx.IndexSerializedSize))
-	m.fieldIndexLock.RUnlock()
-}
-
-// removeSegmentIndexRecordInMemory is the record half: it mutates only the
-// in-memory segment-index maps and the memory-only task counters. It never
-// acquires fieldIndexLock, so it is safe to run inside a segMu critical section.
+// removeSegmentIndexRecordInMemory drops a SegmentIndex from the in-memory
+// indexes after its catalog record has been removed; taskCounts reclaims its
+// stored size. The caller must hold keyLock for segIdx.BuildID. It mutates
+// only the in-memory segment-index maps and the memory-only task counters and
+// never acquires fieldIndexLock, so it is safe to run inside a segMu critical
+// section.
 func (m *indexMeta) removeSegmentIndexRecordInMemory(segIdx *model.SegmentIndex) {
 	segIndexes, ok := m.segmentIndexes.Get(segIdx.SegmentID)
 	if ok {
@@ -1303,20 +1236,14 @@ var errSegmentIndexRecordGone = errors.New("segment index record no longer exist
 // write. action is nil when the mutation resolves to no catalog write at all;
 // record is the locked task projection used to validate manifest contents.
 //
-// install performs in-memory changes only — it never acquires fieldIndexLock, so
-// the manifest commit may run it inside its segMu critical section. It returns
-// the observability update it deferred (never nil): the stored-index-size gauge
-// must serialize against MarkIndexAsDeleted via fieldIndexLock, whose write
-// side every index DDL (CreateIndex, AlterIndex, MarkIndexAsDeleted,
-// RemoveIndex) holds across an etcd round trip. The caller MUST run the
-// returned closure only after releasing segMu — acquiring fieldIndexLock inside
-// segMu would let one slow DDL stall every segment reader — and before
-// releasing keyLock(BuildID), so the install-then-metric sequence stays ordered
-// against the next writer of the same build.
+// install performs in-memory changes only — it never acquires fieldIndexLock or
+// touches a metric, so the manifest commit may run it inside its segMu critical
+// section and records the task and publishes the stored-index-size gauge after
+// segMu is released.
 type stagedSegmentIndexMutation struct {
 	action  *metastore.UpdateAction
 	record  *model.SegmentIndex
-	install func() (deferredMetric func())
+	install func()
 }
 
 // stageSegmentIndexMutation projects mut against the SegmentIndex record
@@ -1330,10 +1257,9 @@ type stagedSegmentIndexMutation struct {
 // intended end state, so the caller's manifest revision still publishes.
 //
 // Precondition: the caller holds keyLock(mut.BuildID) across this projection,
-// the returned install, and the deferred metric closure install returns. It is
-// acquired by the caller rather than here so that it is ordered before segMu,
-// matching every other SegmentIndex writer; see CommitSegmentManifest's
-// lock-order note.
+// the returned install and the observability that follows it. It is acquired
+// by the caller rather than here so that it is ordered before segMu, matching
+// every other SegmentIndex writer; see CommitSegmentManifest's lock-order note.
 func (m *indexMeta) stageSegmentIndexMutation(mut SegmentIndexMutation) (*stagedSegmentIndexMutation, error) {
 	if mut.BuildID == 0 {
 		return nil, merr.WrapErrServiceInternalMsg("segment index mutation requires a build ID")
@@ -1355,7 +1281,7 @@ func (m *indexMeta) stageSegmentIndexMutation(mut SegmentIndexMutation) (*staged
 		return nil, merr.WrapErrServiceInternalMsg("unknown segment index mutation type %d, buildID=%d", mut.Type, mut.BuildID)
 	}
 
-	staged := &stagedSegmentIndexMutation{install: func() func() { return func() {} }}
+	staged := &stagedSegmentIndexMutation{install: func() {}}
 
 	previous, ok := m.segmentBuildInfo.Get(mut.BuildID)
 	if !ok {
@@ -1370,14 +1296,11 @@ func (m *indexMeta) stageSegmentIndexMutation(mut SegmentIndexMutation) (*staged
 		action := metastore.DropSegmentIndex(segIdx)
 		staged.action = &action
 		staged.record = segIdx
-		staged.install = func() func() {
-			m.removeSegmentIndexRecordInMemory(segIdx)
-			return func() { m.subtractStoredIndexSizeOnRemoval(segIdx) }
-		}
+		staged.install = func() { m.removeSegmentIndexRecordInMemory(segIdx) }
 		return staged, nil
 	}
 
-	finished, previousSize, err := m.buildFinishedSegmentIndex(previous, mut.FinishedTask)
+	finished, err := m.buildFinishedSegmentIndex(previous, mut.FinishedTask)
 	if err != nil {
 		return staged, err
 	}
@@ -1387,12 +1310,7 @@ func (m *indexMeta) stageSegmentIndexMutation(mut SegmentIndexMutation) (*staged
 	action := metastore.DropSegmentIndex(finished)
 	staged.action = &action
 	staged.record = finished
-	staged.install = func() func() {
-		m.updateSegmentIndex(finished)
-		// recordFinishedTask is observability only, but its stored-size gauge
-		// takes fieldIndexLock, so the whole step is deferred out of segMu.
-		return func() { m.recordFinishedTask(previous, finished, previousSize, mut.FinishedTask) }
-	}
+	staged.install = func() { m.updateSegmentIndex(finished) }
 	return staged, nil
 }
 
@@ -1412,8 +1330,6 @@ func (m *indexMeta) GetDeletedIndexes() []*model.Index {
 }
 
 func (m *indexMeta) RemoveIndex(ctx context.Context, collID, indexID UniqueID) error {
-	m.fieldIndexLock.Lock()
-	defer m.fieldIndexLock.Unlock()
 	mlog.Info(ctx, "IndexCoord meta table remove index", mlog.Int64("collectionID", collID), mlog.Int64("indexID", indexID))
 	err := m.catalog.DropIndex(ctx, collID, indexID)
 	if err != nil {
@@ -1422,10 +1338,16 @@ func (m *indexMeta) RemoveIndex(ctx context.Context, collID, indexID UniqueID) e
 		return err
 	}
 
+	m.fieldIndexLock.Lock()
 	m.taskCounts.replaceIndex(m.indexes[collID][indexID], nil)
 	delete(m.indexes[collID], indexID)
-	if len(m.indexes[collID]) == 0 {
+	lastIndex := len(m.indexes[collID]) == 0
+	if lastIndex {
 		delete(m.indexes, collID)
+	}
+	m.fieldIndexLock.Unlock()
+	m.taskCounts.publishStoredSizes()
+	if lastIndex {
 		metrics.IndexTaskNum.Delete(prometheus.Labels{"collection_id": strconv.FormatInt(collID, 10), "index_task_status": metrics.UnissuedIndexTaskLabel})
 		metrics.IndexTaskNum.Delete(prometheus.Labels{"collection_id": strconv.FormatInt(collID, 10), "index_task_status": metrics.InProgressIndexTaskLabel})
 		metrics.IndexTaskNum.Delete(prometheus.Labels{"collection_id": strconv.FormatInt(collID, 10), "index_task_status": metrics.FinishedIndexTaskLabel})

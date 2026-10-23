@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -765,6 +766,7 @@ func TestSegmentIndexSurvivesRestartFromManifestOnly(t *testing.T) {
 	require.Empty(t, persisted, "the switch must have kept the record out of etcd")
 
 	// Restart: same catalog, brand new meta, memory rebuilt from scratch.
+	metrics.DataCoordStoredIndexFilesSize.Reset()
 	restarted := bootMetaForRestart(t, catalog, restartCollID)
 
 	recovered := restarted.indexMeta.GetSegmentIndexes(restartCollID, restartSegID)
@@ -777,6 +779,9 @@ func TestSegmentIndexSurvivesRestartFromManifestOnly(t *testing.T) {
 	assert.EqualValues(t, 4096, segIdx.IndexSerializedSize)
 	assert.EqualValues(t, 1000, segIdx.NumRows)
 	assert.Equal(t, "HNSW", segIdx.IndexType)
+	// The recovered record counts toward the stored index size.
+	assertIndexTaskCounts(t, restarted.indexMeta)
+	assert.Equal(t, map[int64]int64{restartCollID: 4096}, storedIndexSizeSeries(t))
 
 	// The consumers that gate load, compaction and rebuild decisions.
 	assert.Equal(t, []int64{restartSegID},
@@ -898,7 +903,7 @@ func TestCommitSegmentManifestTakesKeyLockBeforeSegMu(t *testing.T) {
 
 	segIdx, ok := m.indexMeta.GetIndexJob(restartBuildID)
 	require.True(t, ok)
-	finished, _, err := m.indexMeta.buildFinishedSegmentIndex(segIdx, &workerpb.IndexTaskInfo{
+	finished, err := m.indexMeta.buildFinishedSegmentIndex(segIdx, &workerpb.IndexTaskInfo{
 		BuildID:       restartBuildID,
 		State:         commonpb.IndexState_Finished,
 		IndexFileKeys: []string{"0", "1"},
