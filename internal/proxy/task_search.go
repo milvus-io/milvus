@@ -401,9 +401,18 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	var err error
 	// TODO: Use function score uniformly to implement related logic
 	if t.request.FunctionScore != nil {
+		// Boost scores individual segments; it cannot fuse hybrid search results.
+		for _, function := range t.request.FunctionScore.GetFunctions() {
+			if rerank.GetRerankName(function) == rerank.BoostName {
+				return merr.WrapErrParameterInvalidMsg("hybrid search does not support boost ranker")
+			}
+		}
 		if t.functionScore, err = rerank.NewFunctionScore(t.schema.CollectionSchema, t.request.FunctionScore, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: t.request.GetDbName()}); err != nil {
 			log.Warn("Failed to create function score", zap.Error(err))
 			return err
+		}
+		if t.functionScore == nil {
+			return merr.WrapErrParameterInvalidMsg("hybrid search requires a rerank function")
 		}
 	} else {
 		if t.functionScore, err = rerank.NewFunctionScoreWithlegacy(t.schema.CollectionSchema, t.request.GetSearchParams()); err != nil {
