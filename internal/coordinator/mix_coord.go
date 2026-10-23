@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord"
+	pkindexservice "github.com/milvus-io/milvus/internal/datacoord/pkindex/service"
 	"github.com/milvus-io/milvus/internal/featureusage"
 	internalhttp "github.com/milvus-io/milvus/internal/http"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -40,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -97,6 +99,11 @@ type mixCoordImpl struct {
 	// QueryCoord (read-only) segment/collection metadata.
 	metaStore metacache.MetaStore
 
+	// pkindexService is the primary key index manifest service. It exists
+	// before activation so that the gRPC server can register it, and it gets
+	// its manager when datacoord starts.
+	pkindexService *pkindexservice.Service
+
 	// POSIX directory cleanup task
 	posixCleanupCancel    context.CancelFunc
 	posixCleanupWg        sync.WaitGroup
@@ -123,6 +130,7 @@ func NewMixCoordServer(c context.Context, factory dependency.Factory) (*mixCoord
 		queryCoordServer: queryCoordServer,
 		factory:          factory,
 		recoveryBarrier:  recoveryBarrier,
+		pkindexService:   pkindexservice.New(),
 	}, nil
 }
 
@@ -191,7 +199,8 @@ func (s *mixCoordImpl) initInternal() error {
 	s.metaStore = metacache.NewMetaStore(catalog)
 
 	// Create DC server with MetaStore injected via constructor option.
-	s.datacoordServer = datacoord.CreateServer(s.ctx, s.factory, datacoord.WithMetaStore(s.metaStore), datacoord.WithCatalog(catalog))
+	s.datacoordServer = datacoord.CreateServer(s.ctx, s.factory, datacoord.WithMetaStore(s.metaStore), datacoord.WithCatalog(catalog),
+		datacoord.WithPKIndexService(s.pkindexService))
 	s.datacoordServer.SetDataViewCollectionRecoveryValidator(s.rootcoordServer.ValidateDataViewCollectionForRecovery)
 	s.datacoordServer.SetSession(s.session)
 	s.datacoordServer.SetAddress(s.address)
@@ -1419,9 +1428,11 @@ func (s *mixCoordImpl) RegisterStreamingCoordGRPCService(server *grpc.Server) {
 	s.streamingCoord.RegisterGRPCService(server)
 }
 
-// RegisterPKIndexCoordGRPCService registers the grpc service of the primary key index manifests.
+// RegisterPKIndexCoordGRPCService registers the grpc service of the primary
+// key index manifests. It can be called before activation; the service answers
+// ServiceNotReady until datacoord starts.
 func (s *mixCoordImpl) RegisterPKIndexCoordGRPCService(server *grpc.Server) {
-	s.datacoordServer.RegisterPKIndexCoordGRPCService(server)
+	pkindexpb.RegisterPKIndexCoordServiceServer(server, s.pkindexService)
 }
 
 func (s *mixCoordImpl) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {

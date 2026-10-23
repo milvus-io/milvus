@@ -232,6 +232,15 @@ func WithCatalog(catalog metastore.DataCoordCatalog) Option {
 	}
 }
 
+// WithPKIndexService returns an Option to set the primary key index manifest
+// service that datacoord gives its manager to. The caller registers the
+// service on its gRPC server.
+func WithPKIndexService(svc *pkindexservice.Service) Option {
+	return func(svr *Server) {
+		svr.pkindexService = svc
+	}
+}
+
 // CreateServer creates a `Server` instance
 func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Option) *Server {
 	rand.Seed(time.Now().UnixNano())
