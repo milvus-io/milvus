@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
@@ -18,7 +17,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
-	"github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -68,9 +66,7 @@ func TestQueryPlanRenewsLeaseOnlyOnSuccessfulReturn(t *testing.T) {
 		patch.UnPatch()
 		if valid {
 			require.NoError(t, err)
-			require.NotNil(t, plan.GetMvcc().GetSchemaBinding())
 			require.Empty(t, plan.GetWorkNodes())
-			require.NoError(t, viewquery.ValidateSchemaBinding(plan.GetLegacyRetrieveRequest(), plan.GetMvcc(), nil))
 		} else {
 			require.Error(t, err)
 		}
@@ -126,16 +122,12 @@ func patchQueryReadRuntime(t *testing.T) *mockey.Mocker {
 	t.Cleanup(func() { patch.UnPatch() })
 	optimizer := mockey.Mock((*queryresource.ReadRuntime).GlobalOptimizer).Return(queryresource.NewGlobalOptimizer(nil, "test")).Build()
 	t.Cleanup(func() { optimizer.UnPatch() })
-	schema := mockey.Mock((*queryresource.ReadRuntime).Schema).Return(&schemapb.CollectionSchema{}).Build()
-	t.Cleanup(func() { schema.UnPatch() })
-	validate := mockey.Mock((*walAdaptorImpl).validateQuerySchemaFields).Return(nil).Build()
-	t.Cleanup(func() { validate.UnPatch() })
 	wait := mockey.Mock((*queryresource.QueryRuntime).WaitMVCCVisible).Return(nil).Build()
 	t.Cleanup(func() { wait.UnPatch() })
 	return wait
 }
 
-func TestQueryPlanWaitsForFixedMVCCBeforeSchemaValidation(t *testing.T) {
+func TestQueryPlanWaitsForFixedMVCCBeforePlanning(t *testing.T) {
 	wait := patchQueryReadRuntime(t)
 	wait.UnPatch()
 	calls := 0
@@ -194,4 +186,33 @@ func TestQueryPlanReadProofKeepsDualMVCC(t *testing.T) {
 		_, err = w.resolveQueryPlanMVCC(t.Context(), req, "v")
 		require.Error(t, err)
 	})
+}
+
+func TestQueryPlanRequiresServingViewBeforeResolvingMVCC(t *testing.T) {
+	for _, unavailable := range []error{
+		viewerror.NewViewNotFound("view released"),
+		viewerror.NewViewInvalidated("view is down"),
+	} {
+		mockey.PatchConvey("MVCC cannot grant access without a serving View", t, func() {
+			mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtSchema).Return(nil, unavailable).Build()
+			resolve := mockey.Mock((*walAdaptorImpl).resolveQueryPlanMVCC).Return(&viewpb.QueryPlanMVCC{GrowingTimetick: 120, TransformingTimetick: 120}, nil).Build()
+			w := &walAdaptorImpl{
+				roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()},
+				queryViewHandler: &snview.SNQueryViewHandler{},
+			}
+			req := &viewpb.GetQueryPlanRequest{
+				ShardId: &viewpb.ShardID{Vchannel: "v", ReplicaId: 1},
+				Mvcc:    &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong},
+			}
+			req.Request = &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: &internalpb.SearchRequest{SchemaVersion: 1}}
+			plan, err := w.GetQueryPlan(t.Context(), req)
+			require.ErrorIs(t, err, unavailable)
+			require.Nil(t, plan)
+			req.Request = &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{SchemaVersion: 1}}
+			plan, err = w.GetQueryPlan(t.Context(), req)
+			require.ErrorIs(t, err, unavailable)
+			require.Nil(t, plan)
+			require.Zero(t, resolve.Times())
+		})
+	}
 }

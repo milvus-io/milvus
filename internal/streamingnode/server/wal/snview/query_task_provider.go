@@ -62,14 +62,6 @@ func (h *SNQueryViewHandler) AcquireSearchSegmentTasks(
 		mlog.FieldVChannel(shardID.VChannel),
 		mlog.Int("segmentCount", len(handles)),
 	)
-	if len(handles) > 0 {
-		if err := viewquery.ValidateSchemaBinding(req, mvcc, handles[0].Collection().Schema()); err != nil {
-			for _, handle := range handles {
-				handle.Release()
-			}
-			return nil, err
-		}
-	}
 	tasks := make([]SNSearchSegmentTask, 0, len(handles))
 	for _, handle := range handles {
 		tasks = append(tasks, SNSearchSegmentTask{
@@ -128,14 +120,6 @@ func (h *SNQueryViewHandler) AcquireQuerySegmentTasks(
 		mlog.FieldVChannel(shardID.VChannel),
 		mlog.Int("segmentCount", len(handles)),
 	)
-	if len(handles) > 0 {
-		if err := viewquery.ValidateSchemaBinding(req, mvcc, handles[0].Collection().Schema()); err != nil {
-			for _, handle := range handles {
-				handle.Release()
-			}
-			return nil, err
-		}
-	}
 	tasks := make([]SNQuerySegmentTask, 0, len(handles))
 	for _, handle := range handles {
 		tasks = append(tasks, SNQuerySegmentTask{

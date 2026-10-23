@@ -11,20 +11,14 @@ func validateSearchRequest(req *viewpb.SearchOnViewRequest) error {
 	if req.GetLegacyReq() == nil {
 		return invalidArgument("missing legacy search request")
 	}
-	if err := validateCommonRequestShape(req.GetShardId(), req.GetVersion(), req.GetMvcc()); err != nil {
-		return err
-	}
-	return ValidateSchemaBinding(req.GetLegacyReq(), req.GetMvcc(), nil)
+	return validateCommonRequestShape(req.GetShardId(), req.GetVersion(), req.GetMvcc())
 }
 
 func validateQueryRequest(req *viewpb.QueryOnViewRequest) error {
 	if req.GetLegacyReq() == nil {
 		return invalidArgument("missing legacy query request")
 	}
-	if err := validateCommonRequestShape(req.GetShardId(), req.GetVersion(), req.GetMvcc()); err != nil {
-		return err
-	}
-	return ValidateSchemaBinding(req.GetLegacyReq(), req.GetMvcc(), nil)
+	return validateCommonRequestShape(req.GetShardId(), req.GetVersion(), req.GetMvcc())
 }
 
 func validateCommonRequestShape(shardID *viewpb.ShardID, version *viewpb.QueryViewVersion, mvcc *viewpb.QueryPlanMVCC) error {

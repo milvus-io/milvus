@@ -27,9 +27,7 @@ type LegacyClient interface {
 }
 
 type LegacySearchRequest struct {
-	// RequiredFieldIDs includes fields needed by later stages without fetching them now.
-	RequiredFieldIDs []int64
-	Req              *internalpb.SearchRequest
+	Req *internalpb.SearchRequest
 	// MVCC, when supplied, overrides consistency-level sampling across retries.
 	MVCC *viewpb.QueryPlanMVCC
 	// BarrierMVCC fixes a scalar snapshot and actively establishes WAL coverage.
@@ -115,12 +113,11 @@ func (c *legacyClient) Search(ctx context.Context, req *LegacySearchRequest) (*L
 		i := i
 		g.Go(func() error {
 			plan, err := c.shardClient.Search(gCtx, &ShardSearchRequest{
-				RequiredFieldIDs: req.RequiredFieldIDs,
-				VChannel:         vchannels[i],
-				Req:              req.Req,
-				MVCC:             req.MVCC,
-				BarrierMVCC:      req.BarrierMVCC,
-				Reducer:          collector,
+				VChannel:    vchannels[i],
+				Req:         req.Req,
+				MVCC:        req.MVCC,
+				BarrierMVCC: req.BarrierMVCC,
+				Reducer:     collector,
 			})
 			if err != nil {
 				return err

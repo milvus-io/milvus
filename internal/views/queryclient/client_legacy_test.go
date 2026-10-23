@@ -282,12 +282,15 @@ func TestLegacyRequeryUsesRetainedViewWithoutReplanning(t *testing.T) {
 			require.True(t, proto.Equal(plan.Mvcc, request.GetMvcc()))
 			require.EqualValues(t, 90, request.GetLegacyReq().GetMvccTimestamp())
 			require.EqualValues(t, 1, request.GetLegacyReq().GetSchemaVersion())
+			require.Equal(t, []int64{101, 102}, request.GetLegacyReq().GetOutputFieldsId())
 			if failure != nil {
 				return nil, failure
 			}
 			return &viewpb.QueryOnViewResponse{LegacyResults: &internalpb.RetrieveResults{Status: merr.Success()}}, nil
 		}).Build()
-		request := &LegacyQueryRequest{Req: &internalpb.RetrieveRequest{SchemaVersion: 1}, Plans: []ShardPlan{plan}}
+		// Requery chooses its output fields now; the retained plan carries no
+		// field allowlist and does not require another Phase 1 request.
+		request := &LegacyQueryRequest{Req: &internalpb.RetrieveRequest{SchemaVersion: 1, OutputFieldsId: []int64{101, 102}}, Plans: []ShardPlan{plan}}
 		result, err := client.Query(t.Context(), request)
 		require.NoError(t, err)
 		require.Len(t, result.Plans, 1)
@@ -296,6 +299,10 @@ func TestLegacyRequeryUsesRetainedViewWithoutReplanning(t *testing.T) {
 		_, err = client.Query(t.Context(), request)
 		require.ErrorIs(t, err, failure)
 		require.Equal(t, 2, calls, "do not retry into another snapshot")
+		failure = merr.WrapErrFieldNotFound(102, "not available during requery")
+		_, err = client.Query(t.Context(), request)
+		require.ErrorIs(t, err, failure)
+		require.Equal(t, 3, calls, "field errors abort requery without replanning")
 		require.Zero(t, request.Req.MvccTimestamp, "dispatch must not mutate the shared request")
 	})
 }

@@ -42,12 +42,11 @@ func newShardViewQueryClient(
 
 // ShardSearchRequest contains the parameters for a shard-level search execution.
 type ShardSearchRequest struct {
-	RequiredFieldIDs []int64
-	VChannel         string
-	Req              *internalpb.SearchRequest
-	MVCC             *viewpb.QueryPlanMVCC
-	BarrierMVCC      uint64
-	Reducer          reducer.SearchResultReducer
+	VChannel    string
+	Req         *internalpb.SearchRequest
+	MVCC        *viewpb.QueryPlanMVCC
+	BarrierMVCC uint64
+	Reducer     reducer.SearchResultReducer
 }
 
 // ShardQueryRequest contains the parameters for a shard-level query (retrieve) execution.
@@ -70,10 +69,9 @@ func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchReque
 		barrierMVCC:      req.BarrierMVCC,
 		buildPlanReq: func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest {
 			return &viewpb.GetQueryPlanRequest{
-				CollectionId:     req.Req.CollectionID,
-				ShardId:          targetShardID.IntoProto(),
-				PartitionIds:     req.Req.PartitionIDs,
-				RequiredFieldIds: req.RequiredFieldIDs,
+				CollectionId: req.Req.CollectionID,
+				ShardId:      targetShardID.IntoProto(),
+				PartitionIds: req.Req.PartitionIDs,
 				Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{
 					LegacySearchRequest: req.Req,
 				},

@@ -52,13 +52,14 @@ These are additional callers of existing helpers; the old delegator is unchanged
 A non-nil `LegacyQueryRequest.Plans` (including an empty slice) selects retained
 requery. It does not resolve a new shard, schema, View or MVCC. It sends the new
 PK retrieve expression through `QueryOnView` to the original workers and retains
-the original schema binding. A retained-plan failure aborts the parent operation;
+the original schema identity. A retained-plan failure aborts the parent operation;
 replanning only the refill would mix snapshots with the original reduced search.
 There is no separate requery RPC.
 
-Fields needed by output/render/rerank must be included in `RequiredFieldIDs`
-during the original search plan, even when they are fetched only by requery.
-See [plan and MVCC contracts](query_plan.md) and
+Requery may select additional output/render/rerank fields without declaring them
+in Phase 1 or adding them to the initial search projection. The new request is
+executed against the retained View and MVCC; field errors abort that operation
+without replanning. See [plan and MVCC contracts](query_plan.md) and
 [node-side execution](query_execution.md).
 
 ## Key packages and tests
