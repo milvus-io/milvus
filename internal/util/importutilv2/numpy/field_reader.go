@@ -23,7 +23,6 @@ import (
 	"io"
 	"unicode/utf8"
 
-	"github.com/sbinet/npyio"
 	"github.com/sbinet/npyio/npy"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -51,9 +50,13 @@ type FieldReader struct {
 }
 
 func NewFieldReader(reader io.Reader, field *schemapb.FieldSchema, timezone string) (*FieldReader, error) {
-	r, err := npyio.NewReader(reader)
+	// The header prefix is validated where the source is opened (CreateReaders),
+	// which is the only place that has the object path and random access. Going
+	// through parseHeader keeps the parser's panics on malformed input from
+	// unwinding into the import worker even for a directly constructed reader.
+	r, err := parseHeader(reader)
 	if err != nil {
-		return nil, err
+		return nil, common.WrapDecodeErr(err, fmt.Sprintf("read numpy header of field '%s' failed", field.GetName()))
 	}
 
 	var dim int64 = 1
@@ -240,7 +243,8 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		for _, wktValue := range strs {
 			wkbValue, err := pkgcommon.ConvertWKTToWKB(wktValue)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, merr.WrapErrImportFailedMsg(
+					"failed to parse value '%v' for geometry field '%s', error: %v", wktValue, c.field.GetName(), err)
 			}
 			byteArr = append(byteArr, wkbValue)
 		}
@@ -407,16 +411,22 @@ func (c *FieldReader) ReadString(count int64) ([]string, error) {
 			// for non-ascii characters, the unicode could be 1 ~ 4 bytes, each character occupies 4 bytes, too
 			raw, err := io.ReadAll(io.LimitReader(c.reader, utf8.UTFMax*int64(maxLen)))
 			if err != nil {
-				return nil, merr.WrapErrImportFailedMsg("failed to read utf32 bytes from numpy file, error: %v", err)
+				// A read failure is not a property of the file content: keep a
+				// typed IO fault and let anything else retry instead of turning
+				// a transient object-store error into a terminal import failure.
+				if merr.IsMilvusError(err) {
+					return nil, err
+				}
+				return nil, merr.WrapErrIoFailedMsg("failed to read utf32 bytes from numpy file, error: %v", err)
 			}
-			str, err := decodeUtf32(raw, c.order)
+			str, decodeErr := decodeUtf32(raw, c.order)
+			if decodeErr != nil {
+				return nil, merr.WrapErrImportFailedMsg("failed to decode utf32 bytes, error: %v", decodeErr)
+			}
 			if c.field.DataType == schemapb.DataType_VarChar {
 				if err = common.CheckVarcharLength(str, maxLength, c.field); err != nil {
 					return nil, err
 				}
-			}
-			if err != nil {
-				return nil, merr.WrapErrImportFailedMsg("failed to decode utf32 bytes, error: %v", err)
 			}
 			data = append(data, str)
 		} else {
@@ -424,7 +434,10 @@ func (c *FieldReader) ReadString(count int64) ([]string, error) {
 			// bytes.Index(buf, []byte{0}) tell us which position is the end of the string
 			buf, err := io.ReadAll(io.LimitReader(c.reader, int64(maxLen)))
 			if err != nil {
-				return nil, merr.WrapErrImportFailedMsg("failed to read ascii bytes from numpy file, error: %v", err)
+				if merr.IsMilvusError(err) {
+					return nil, err
+				}
+				return nil, merr.WrapErrIoFailedMsg("failed to read ascii bytes from numpy file, error: %v", err)
 			}
 			n := bytes.Index(buf, []byte{0})
 			if n > 0 {
