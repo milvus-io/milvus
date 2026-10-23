@@ -675,6 +675,29 @@ func TestCheckShardSplitDrainedThreeConjuncts(t *testing.T) {
 		assert.True(t, resp.GetDrained())
 	})
 
+	t.Run("the checkpoint is read before the segments are scanned", func(t *testing.T) {
+		// A segment registered while the checkpoint is being read is one the
+		// checkpoint already covers; the scan that follows must see it. In the
+		// opposite order, the scan would have missed it and the checkpoint
+		// alone would have reported the source drained.
+		svr := drainedTestServer(t)
+		svr.importMeta = idleImportMeta(t)
+		require.NoError(t, svr.meta.UpdateChannelCheckpoints(context.Background(), drainedCheckpoint))
+		var origin func(*meta, string) *msgpb.MsgPosition
+		readCheckpoint := mockey.Mock((*meta).GetChannelCheckpoint).To(func(m *meta, vchannel string) *msgpb.MsgPosition {
+			putSourceSegment(svr, commonpb.SegmentState_Flushed)
+			return origin(m, vchannel)
+		}).Origin(&origin).Build()
+		defer readCheckpoint.UnPatch()
+
+		resp, err := svr.CheckShardSplitDrained(context.Background(), &datapb.CheckShardSplitDrainedRequest{
+			CollectionId: 100, SplitTaskId: 200,
+		})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		assert.False(t, resp.GetDrained())
+	})
+
 	t.Run("an import on an unrelated vchannel does not hold the drain open", func(t *testing.T) {
 		svr := drainedTestServer(t)
 		svr.importMeta = activeImportMeta(t, "some-other-vchannel")
