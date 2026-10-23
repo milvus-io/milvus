@@ -1743,6 +1743,11 @@ func TestCachedParam(t *testing.T) {
 	assert.Equal(t, 1*time.Hour, params.DataCoordCfg.GCInterval.GetAsDuration(time.Second))
 	assert.Equal(t, 1*time.Hour, params.DataCoordCfg.GCInterval.GetAsDuration(time.Second))
 
+	assert.Equal(t, 1*time.Hour, params.DataCoordCfg.PKIndexGCInterval.GetAsDuration(time.Second))
+	assert.Equal(t, 24*time.Hour, params.DataCoordCfg.PKIndexGCGrace.GetAsDuration(time.Second))
+	assert.Equal(t, 8, params.DataCoordCfg.PKIndexManifestRetainVersions.GetAsInt())
+	assert.Equal(t, 1*time.Hour, params.DataCoordCfg.PKIndexManifestRetainDuration.GetAsDuration(time.Second))
+
 	params.Save(params.QuotaConfig.DiskQuota.Key, "192")
 	assert.Equal(t, float64(192*1024*1024), params.QuotaConfig.DiskQuota.GetAsFloat())
 	assert.Equal(t, float64(192*1024*1024), params.QuotaConfig.DiskQuotaPerCollection.GetAsFloat())

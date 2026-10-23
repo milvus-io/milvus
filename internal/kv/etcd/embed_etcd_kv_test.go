@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -906,6 +907,8 @@ func (s *EmbedEtcdKVSuite) TestTxnWithPredicates() {
 		{"predicate_ok", map[string]string{"a": "b"}, []predicates.Predicate{predicates.ValueEqual("lease1", "1")}, true},
 		{"predicate_fail", map[string]string{"a": "b"}, []predicates.Predicate{predicates.ValueEqual("lease1", "2")}, false},
 		{"bad_predicate", map[string]string{"a": "b"}, []predicates.Predicate{badPredicate}, false},
+		{"key_not_exist_ok", map[string]string{"a": "b"}, []predicates.Predicate{predicates.KeyNotExist("lease_absent")}, true},
+		{"key_not_exist_fail", map[string]string{"a": "b"}, []predicates.Predicate{predicates.KeyNotExist("lease1")}, false},
 	}
 
 	for _, test := range multiSaveAndRemovePredTests {
@@ -924,6 +927,58 @@ func (s *EmbedEtcdKVSuite) TestTxnWithPredicates() {
 			}
 		})
 	}
+}
+
+func (s *EmbedEtcdKVSuite) TestTxnWithKeyNotExistPredicate() {
+	etcdKV := s.kv
+	ctx := context.TODO()
+
+	err := etcdKV.Save(ctx, "existing", "1")
+	s.Require().NoError(err)
+	valueEqualErr := etcdKV.MultiSaveAndRemove(ctx, map[string]string{"other": "v"}, nil, predicates.ValueEqual("existing", "2"))
+	s.Require().Error(valueEqualErr)
+
+	for _, tc := range []struct {
+		tag   string
+		write func(saves map[string]string, preds ...predicates.Predicate) error
+	}{
+		{"MultiSaveAndRemove", func(saves map[string]string, preds ...predicates.Predicate) error {
+			return etcdKV.MultiSaveAndRemove(ctx, saves, nil, preds...)
+		}},
+		{"MultiSaveAndRemoveWithPrefix", func(saves map[string]string, preds ...predicates.Predicate) error {
+			return etcdKV.MultiSaveAndRemoveWithPrefix(ctx, saves, nil, preds...)
+		}},
+	} {
+		s.Run(tc.tag, func() {
+			key := "create_once_" + tc.tag
+
+			err := tc.write(map[string]string{key: "first"}, predicates.KeyNotExist(key))
+			s.NoError(err)
+			value, err := etcdKV.Load(ctx, key)
+			s.NoError(err)
+			s.Equal("first", value)
+
+			err = tc.write(map[string]string{key: "second"}, predicates.KeyNotExist(key))
+			s.Error(err)
+			s.ErrorIs(err, merr.ErrIoFailed)
+			s.Equal(merr.Code(valueEqualErr), merr.Code(err))
+			value, err = etcdKV.Load(ctx, key)
+			s.NoError(err)
+			s.Equal("first", value)
+		})
+	}
+
+	s.Run("deleted key does not exist", func() {
+		key := "deleted_key"
+		s.Require().NoError(etcdKV.Save(ctx, key, "old"))
+		s.Require().NoError(etcdKV.Remove(ctx, key))
+
+		err := etcdKV.MultiSaveAndRemove(ctx, map[string]string{key: "new"}, nil, predicates.KeyNotExist(key))
+		s.NoError(err)
+		value, err := etcdKV.Load(ctx, key)
+		s.NoError(err)
+		s.Equal("new", value)
+	})
 }
 
 func TestEmbedEtcdKV(t *testing.T) {
