@@ -484,6 +484,10 @@ class TestMilvusClientV2Base(Base):
 
     @trace()
     def drop_collection(self, client, collection_name, check_task=None, check_items=None, **kwargs):
+        # Drops in test bodies do not use Base's collection-cleanup budget.
+        timeout = kwargs.get("timeout")
+        kwargs["timeout"] = TIMEOUT if timeout is None else timeout
+
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.drop_collection, collection_name], **kwargs)
         check_result = ResponseChecker(
