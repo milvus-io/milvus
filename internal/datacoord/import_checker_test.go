@@ -23,9 +23,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -33,14 +31,16 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
@@ -52,8 +52,8 @@ type ImportCheckerSuite struct {
 	suite.Suite
 
 	jobID      int64
-	importMeta ImportMeta
-	checker    *importChecker
+	importMeta bulkimport.ImportMeta
+	checker    *bulkimport.Checker
 	alloc      *allocator.MockAllocator
 }
 
@@ -69,40 +69,41 @@ func (s *ImportCheckerSuite) SetupTest() {
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil).Maybe()
 
 	s.alloc = allocator.NewMockAllocator(s.T())
 
 	broker := broker2.NewMockBroker(s.T())
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
-	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
+	dm := &index.IndexTestMetas{}
+	mt, err := meta.NewMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker, index.LoadIndexTestMetas(catalog, dm))
 	s.NoError(err)
 
-	importMeta, err := NewImportMeta(context.TODO(), catalog, s.alloc, meta)
+	importMeta, err := bulkimport.NewImportMeta(context.TODO(), catalog, s.alloc, mt)
 	s.NoError(err)
 	s.importMeta = importMeta
 
-	ci := NewMockCompactionInspector(s.T())
+	ci := compaction.NewMockCompactionInspector(s.T())
 
-	handler := NewNMockHandler(s.T())
-	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collID int64) (*collectionInfo, error) {
-		return &collectionInfo{
+	handler := meta.NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collID int64) (*meta.CollectionInfo, error) {
+		return &meta.CollectionInfo{
 			ID: collID,
 		}, nil
 	}).Maybe()
 
-	checker := NewImportChecker(context.TODO(), meta, broker, s.alloc, importMeta, ci, handler, importCheckerHooks{}).(*importChecker)
+	checker := bulkimport.NewImportChecker(context.TODO(), mt, dm.IndexMeta, broker, s.alloc, importMeta, ci, handler, bulkimport.ImportCheckerHooks{}).(*bulkimport.Checker)
 	s.checker = checker
 
-	job := &importJob{
+	job := &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID:        0,
 			CollectionID: 1,
@@ -136,7 +137,7 @@ func (s *ImportCheckerSuite) SetupTest() {
 				},
 			},
 		},
-		tr: timerecord.NewTimeRecorder("import job"),
+		Tr: timerecord.NewTimeRecorder("import job"),
 	}
 
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
@@ -146,7 +147,7 @@ func (s *ImportCheckerSuite) SetupTest() {
 }
 
 func (s *ImportCheckerSuite) TestLogStats() {
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 
@@ -155,10 +156,10 @@ func (s *ImportCheckerSuite) TestLogStats() {
 		TaskID: 1,
 		State:  datapb.ImportTaskStateV2_Failed,
 	}
-	pit1 := &preImportTask{
-		tr: timerecord.NewTimeRecorder("preimport task"),
+	pit1 := &bulkimport.PreImportTask{
+		Tr: timerecord.NewTimeRecorder("preimport task"),
 	}
-	pit1.task.Store(preImportTaskProto)
+	pit1.Task.Store(preImportTaskProto)
 	err := s.importMeta.AddTask(context.TODO(), pit1)
 	s.NoError(err)
 
@@ -168,10 +169,10 @@ func (s *ImportCheckerSuite) TestLogStats() {
 		SegmentIDs: []int64{10, 11, 12},
 		State:      datapb.ImportTaskStateV2_Pending,
 	}
-	it1 := &importTask{
-		tr: timerecord.NewTimeRecorder("import task"),
+	it1 := &bulkimport.Task{
+		Tr: timerecord.NewTimeRecorder("import task"),
 	}
-	it1.task.Store(importTaskProto)
+	it1.Task.Store(importTaskProto)
 	err = s.importMeta.AddTask(context.TODO(), it1)
 	s.NoError(err)
 
@@ -187,15 +188,15 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 		id := rand.Int63()
 		return id, id + n, nil
 	})
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
 
-	s.checker.checkPendingJob(job)
-	preimportTasks := s.importMeta.GetTaskByJob(context.TODO(), job.GetJobID(), WithType(PreImportTaskType))
+	s.checker.CheckPendingJob(job)
+	preimportTasks := s.importMeta.GetTaskByJob(context.TODO(), job.GetJobID(), bulkimport.WithType(bulkimport.PreImportTaskType))
 	s.Equal(2, len(preimportTasks))
 	s.Equal(internalpb.ImportJobState_PreImporting, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
-	s.checker.checkPendingJob(job) // no lack
-	preimportTasks = s.importMeta.GetTaskByJob(context.TODO(), job.GetJobID(), WithType(PreImportTaskType))
+	s.checker.CheckPendingJob(job) // no lack
+	preimportTasks = s.importMeta.GetTaskByJob(context.TODO(), job.GetJobID(), bulkimport.WithType(bulkimport.PreImportTaskType))
 	s.Equal(2, len(preimportTasks))
 	s.Equal(internalpb.ImportJobState_PreImporting, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
@@ -208,27 +209,27 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 	for _, t := range preimportTasks {
 		err := s.importMeta.UpdateTask(context.TODO(), t.GetTaskID(),
-			UpdateState(datapb.ImportTaskStateV2_Completed), UpdateFileStats(fileStats))
+			bulkimport.UpdateState(datapb.ImportTaskStateV2_Completed), bulkimport.UpdateFileStats(fileStats))
 		s.NoError(err)
 	}
 
 	job = s.restampSuiteJobRanges()
-	s.checker.checkPreImportingJob(job)
-	importTasks := s.importMeta.GetTaskByJob(context.TODO(), job.GetJobID(), WithType(ImportTaskType))
+	s.checker.CheckPreImportingJob(job)
+	importTasks := s.importMeta.GetTaskByJob(context.TODO(), job.GetJobID(), bulkimport.WithType(bulkimport.ImportTaskType))
 	s.Equal(1, len(importTasks))
 	s.Equal(internalpb.ImportJobState_Importing, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
-	s.checker.checkPreImportingJob(job) // no lack
-	importTasks = s.importMeta.GetTaskByJob(context.TODO(), job.GetJobID(), WithType(ImportTaskType))
+	s.checker.CheckPreImportingJob(job) // no lack
+	importTasks = s.importMeta.GetTaskByJob(context.TODO(), job.GetJobID(), bulkimport.WithType(bulkimport.ImportTaskType))
 	s.Equal(1, len(importTasks))
 	s.Equal(internalpb.ImportJobState_Importing, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
 	// test checkImportingJob
-	s.checker.checkImportingJob(job)
+	s.checker.CheckImportingJob(job)
 	s.Equal(internalpb.ImportJobState_Importing, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 	for _, t := range importTasks {
 		task := s.importMeta.GetTask(context.TODO(), t.GetTaskID())
-		for _, id := range task.(*importTask).GetSegmentIDs() {
-			segment := s.checker.meta.GetSegment(context.TODO(), id)
+		for _, id := range task.(*bulkimport.Task).GetSegmentIDs() {
+			segment := s.checker.Meta.GetSegment(context.TODO(), id)
 			s.Equal(true, segment.GetIsImporting())
 		}
 	}
@@ -239,7 +240,7 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	targetSegmentIDs := make([]int64, 0)
 	for _, t := range importTasks {
-		segment := &SegmentInfo{
+		segment := &meta.SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:            rand.Int63(),
 				State:         commonpb.SegmentState_Flushed,
@@ -248,29 +249,29 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 				NumOfRows:     1000,
 			},
 		}
-		err := s.checker.meta.AddSegment(context.Background(), segment)
+		err := s.checker.Meta.AddSegment(context.Background(), segment)
 		s.NoError(err)
 		targetSegmentID := rand.Int63()
-		err = s.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed),
-			UpdateSegmentIDs([]int64{segment.GetID()}), UpdateStatsSegmentIDs([]int64{targetSegmentID}))
+		err = s.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), bulkimport.UpdateState(datapb.ImportTaskStateV2_Completed),
+			bulkimport.UpdateSegmentIDs([]int64{segment.GetID()}), bulkimport.UpdateStatsSegmentIDs([]int64{targetSegmentID}))
 		s.NoError(err)
 		targetSegmentIDs = append(targetSegmentIDs, targetSegmentID)
-		err = s.checker.meta.UpdateChannelCheckpoint(context.TODO(), segment.GetInsertChannel(), &msgpb.MsgPosition{MsgID: []byte{0}})
+		err = s.checker.Meta.UpdateChannelCheckpoint(context.TODO(), segment.GetInsertChannel(), &msgpb.MsgPosition{MsgID: []byte{0}})
 		s.NoError(err)
 	}
-	s.checker.checkImportingJob(job)
+	s.checker.CheckImportingJob(job)
 	s.Equal(internalpb.ImportJobState_Sorting, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
 	// test check stats job
 	alloc.EXPECT().AllocID(mock.Anything).Return(rand.Int63(), nil).Maybe()
-	cim := s.checker.ci.(*MockCompactionInspector)
-	cim.EXPECT().enqueueCompaction(mock.Anything).Return(nil)
+	cim := s.checker.Ci.(*compaction.MockCompactionInspector)
+	cim.EXPECT().EnqueueCompaction(mock.Anything).Return(nil)
 
-	s.checker.checkSortingJob(job)
+	s.checker.CheckSortingJob(job)
 	s.Equal(internalpb.ImportJobState_Sorting, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
 	for _, segmentID := range targetSegmentIDs {
-		segment := &SegmentInfo{
+		segment := &meta.SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:            segmentID,
 				State:         commonpb.SegmentState_Flushed,
@@ -279,36 +280,36 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 				IsSorted:      true,
 			},
 		}
-		err := s.checker.meta.AddSegment(context.Background(), segment)
+		err := s.checker.Meta.AddSegment(context.Background(), segment)
 		s.NoError(err)
 	}
 
-	s.checker.checkSortingJob(job)
+	s.checker.CheckSortingJob(job)
 	s.Equal(internalpb.ImportJobState_IndexBuilding, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
 	// test check IndexBuilding job — transitions to Uncommitted, segments keep is_importing=true
 	// until HandleCommitVchannel runs after the WAL commit fence.
-	s.checker.checkIndexBuildingJob(job)
+	s.checker.CheckIndexBuildingJob(job)
 	for _, t := range importTasks {
 		task := s.importMeta.GetTask(context.TODO(), t.GetTaskID())
-		for _, id := range task.(*importTask).GetSegmentIDs() {
-			segment := s.checker.meta.GetSegment(context.TODO(), id)
+		for _, id := range task.(*bulkimport.Task).GetSegmentIDs() {
+			segment := s.checker.Meta.GetSegment(context.TODO(), id)
 			s.Equal(true, segment.GetIsImporting(), "is_importing must stay true until HandleCommitVchannel")
 		}
 	}
 	s.Equal(internalpb.ImportJobState_Uncommitted, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 }
 
-func (s *ImportCheckerSuite) manuallyUpdateJob(jobID int64, actions ...UpdateJobAction) {
-	meta := s.importMeta.(*importMeta)
-	meta.mu.Lock()
-	defer meta.mu.Unlock()
-	current := meta.jobs[jobID].(*importJob)
-	cloned := current.Clone().(*importJob)
+func (s *ImportCheckerSuite) manuallyUpdateJob(jobID int64, actions ...bulkimport.UpdateJobAction) {
+	mt := s.importMeta.(*bulkimport.Meta)
+	mt.Mu.Lock()
+	defer mt.Mu.Unlock()
+	current := mt.Jobs[jobID].(*bulkimport.Job)
+	cloned := current.Clone().(*bulkimport.Job)
 	for _, action := range actions {
 		action(cloned)
 	}
-	meta.jobs[jobID] = cloned
+	mt.Jobs[jobID] = cloned
 }
 
 // restampSuiteJobRanges clones the suite job with a non-nil reserved range on every file
@@ -316,8 +317,8 @@ func (s *ImportCheckerSuite) manuallyUpdateJob(jobID int64, actions ...UpdateJob
 // its tail instead of parking the job in AssigningIDRange. Tests that use it set their
 // preimport fileStats without an ImportFile, so the gate's per-file lookup (by
 // ImportFile.Id) finds no matching job file and skips the count comparison.
-func (s *ImportCheckerSuite) restampSuiteJobRanges() ImportJob {
-	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
+func (s *ImportCheckerSuite) restampSuiteJobRanges() bulkimport.ImportJob {
+	s.manuallyUpdateJob(s.jobID, func(job bulkimport.ImportJob) {
 		for i, f := range job.GetFiles() {
 			f.IdRange = &commonpb.IDRange{Begin: int64(1000 * (i + 1)), End: int64(1000 * (i + 2))}
 		}
@@ -332,18 +333,18 @@ func (s *ImportCheckerSuite) TestCheckJob_Failed() {
 	// test checkPendingJob
 	alloc := s.alloc
 	alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, nil)
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(mockErr)
 
-	s.checker.checkPendingJob(job)
-	preimportTasks := s.importMeta.GetTaskByJob(context.TODO(), job.GetJobID(), WithType(PreImportTaskType))
+	s.checker.CheckPendingJob(job)
+	preimportTasks := s.importMeta.GetTaskByJob(context.TODO(), job.GetJobID(), bulkimport.WithType(bulkimport.PreImportTaskType))
 	s.Equal(0, len(preimportTasks))
 	s.Equal(internalpb.ImportJobState_Pending, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
 	alloc.ExpectedCalls = nil
 	alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, mockErr)
-	s.checker.checkPendingJob(job)
-	preimportTasks = s.importMeta.GetTaskByJob(context.TODO(), job.GetJobID(), WithType(PreImportTaskType))
+	s.checker.CheckPendingJob(job)
+	preimportTasks = s.importMeta.GetTaskByJob(context.TODO(), job.GetJobID(), bulkimport.WithType(bulkimport.PreImportTaskType))
 	s.Equal(0, len(preimportTasks))
 	s.Equal(internalpb.ImportJobState_Pending, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
@@ -352,8 +353,8 @@ func (s *ImportCheckerSuite) TestCheckJob_Failed() {
 	catalog.ExpectedCalls = nil
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
-	s.checker.checkPendingJob(job)
-	preimportTasks = s.importMeta.GetTaskByJob(context.TODO(), job.GetJobID(), WithType(PreImportTaskType))
+	s.checker.CheckPendingJob(job)
+	preimportTasks = s.importMeta.GetTaskByJob(context.TODO(), job.GetJobID(), bulkimport.WithType(bulkimport.PreImportTaskType))
 	s.Equal(2, len(preimportTasks))
 	s.Equal(internalpb.ImportJobState_PreImporting, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
@@ -365,7 +366,7 @@ func (s *ImportCheckerSuite) TestCheckJob_Failed() {
 	}
 	for _, t := range preimportTasks {
 		err := s.importMeta.UpdateTask(context.TODO(), t.GetTaskID(),
-			UpdateState(datapb.ImportTaskStateV2_Completed), UpdateFileStats(fileStats))
+			bulkimport.UpdateState(datapb.ImportTaskStateV2_Completed), bulkimport.UpdateFileStats(fileStats))
 		s.NoError(err)
 	}
 
@@ -373,16 +374,16 @@ func (s *ImportCheckerSuite) TestCheckJob_Failed() {
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(mockErr)
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 	job = s.restampSuiteJobRanges()
-	s.checker.checkPreImportingJob(job)
-	importTasks := s.importMeta.GetTaskByJob(context.TODO(), job.GetJobID(), WithType(ImportTaskType))
+	s.checker.CheckPreImportingJob(job)
+	importTasks := s.importMeta.GetTaskByJob(context.TODO(), job.GetJobID(), bulkimport.WithType(bulkimport.ImportTaskType))
 	s.Equal(0, len(importTasks))
 	s.Equal(internalpb.ImportJobState_Failed, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
 	alloc.ExpectedCalls = nil
 	alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, mockErr)
-	s.manuallyUpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_PreImporting))
-	s.checker.checkPreImportingJob(job)
-	importTasks = s.importMeta.GetTaskByJob(context.TODO(), job.GetJobID(), WithType(ImportTaskType))
+	s.manuallyUpdateJob(job.GetJobID(), bulkimport.UpdateJobState(internalpb.ImportJobState_PreImporting))
+	s.checker.CheckPreImportingJob(job)
+	importTasks = s.importMeta.GetTaskByJob(context.TODO(), job.GetJobID(), bulkimport.WithType(bulkimport.ImportTaskType))
 	s.Equal(0, len(importTasks))
 	s.Equal(internalpb.ImportJobState_PreImporting, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 
@@ -391,27 +392,27 @@ func (s *ImportCheckerSuite) TestCheckJob_Failed() {
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 	alloc.ExpectedCalls = nil
 	alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, nil)
-	s.checker.checkPreImportingJob(job)
-	importTasks = s.importMeta.GetTaskByJob(context.TODO(), job.GetJobID(), WithType(ImportTaskType))
+	s.checker.CheckPreImportingJob(job)
+	importTasks = s.importMeta.GetTaskByJob(context.TODO(), job.GetJobID(), bulkimport.WithType(bulkimport.ImportTaskType))
 	s.Equal(1, len(importTasks))
 	s.Equal(internalpb.ImportJobState_Importing, s.importMeta.GetJob(context.TODO(), job.GetJobID()).GetState())
 }
 
 func (s *ImportCheckerSuite) TestCheckTimeout() {
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
 
 	taskProto := &datapb.PreImportTask{
 		TaskID: 1,
 		State:  datapb.ImportTaskStateV2_InProgress,
 	}
-	task := &preImportTask{
-		tr: timerecord.NewTimeRecorder("preimport task"),
+	task := &bulkimport.PreImportTask{
+		Tr: timerecord.NewTimeRecorder("preimport task"),
 	}
-	task.task.Store(taskProto)
+	task.Task.Store(taskProto)
 	err := s.importMeta.AddTask(context.TODO(), task)
 	s.NoError(err)
-	s.checker.tryTimeoutJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.TryTimeoutJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 
 	job := s.importMeta.GetJob(context.TODO(), s.jobID)
 	s.Equal(internalpb.ImportJobState_Failed, job.GetState())
@@ -422,10 +423,10 @@ func (s *ImportCheckerSuite) TestCheckTimeout() {
 // callbacks may have made segments visible to queries, so a timeout must leave it
 // alone rather than fail it and drop those segments.
 func (s *ImportCheckerSuite) TestCheckTimeoutSkipCommittingJob() {
-	err := s.importMeta.UpdateJob(context.TODO(), s.jobID, UpdateJobState(internalpb.ImportJobState_Committing))
+	err := s.importMeta.UpdateJob(context.TODO(), s.jobID, bulkimport.UpdateJobState(internalpb.ImportJobState_Committing))
 	s.NoError(err)
 
-	s.checker.tryTimeoutJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.TryTimeoutJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 
 	job := s.importMeta.GetJob(context.TODO(), s.jobID)
 	s.Equal(internalpb.ImportJobState_Committing, job.GetState())
@@ -435,14 +436,14 @@ func (s *ImportCheckerSuite) TestCheckTimeoutSkipCommittingJob() {
 // runGCLoop evaluates a snapshot taken at the start of the tick. A job that
 // entered Committing after the snapshot must still not be failed.
 func (s *ImportCheckerSuite) TestCheckTimeoutStaleSnapshotCommittingJob() {
-	err := s.importMeta.UpdateJob(context.TODO(), s.jobID, UpdateJobState(internalpb.ImportJobState_Uncommitted))
+	err := s.importMeta.UpdateJob(context.TODO(), s.jobID, bulkimport.UpdateJobState(internalpb.ImportJobState_Uncommitted))
 	s.NoError(err)
 	staleSnapshot := s.importMeta.GetJob(context.TODO(), s.jobID)
 
-	err = s.importMeta.UpdateJob(context.TODO(), s.jobID, UpdateJobState(internalpb.ImportJobState_Committing))
+	err = s.importMeta.UpdateJob(context.TODO(), s.jobID, bulkimport.UpdateJobState(internalpb.ImportJobState_Committing))
 	s.NoError(err)
 
-	s.checker.tryTimeoutJob(staleSnapshot)
+	s.checker.TryTimeoutJob(staleSnapshot)
 
 	// Only the state is asserted: UpdateJobReason in the same UpdateJob call still
 	// applies, and reason is surfaced to clients only for Failed jobs.
@@ -455,17 +456,17 @@ func (s *ImportCheckerSuite) TestUpdateJobStateRefusesFailingCommittedJob() {
 		internalpb.ImportJobState_Committing,
 		internalpb.ImportJobState_Completed,
 	} {
-		job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, State: state}}
-		UpdateJobState(internalpb.ImportJobState_Failed)(job)
+		job := &bulkimport.Job{ImportJob: &datapb.ImportJob{JobID: 1, State: state}}
+		bulkimport.UpdateJobState(internalpb.ImportJobState_Failed)(job)
 		s.Equal(state, job.GetState())
 	}
-	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, State: internalpb.ImportJobState_Uncommitted}}
-	UpdateJobState(internalpb.ImportJobState_Failed)(job)
+	job := &bulkimport.Job{ImportJob: &datapb.ImportJob{JobID: 1, State: internalpb.ImportJobState_Uncommitted}}
+	bulkimport.UpdateJobState(internalpb.ImportJobState_Failed)(job)
 	s.Equal(internalpb.ImportJobState_Failed, job.GetState())
 }
 
 func (s *ImportCheckerSuite) TestCheckFailure() {
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 
 	taskProto := &datapb.ImportTaskV2{
@@ -475,34 +476,34 @@ func (s *ImportCheckerSuite) TestCheckFailure() {
 		SegmentIDs:       []int64{2},
 		SortedSegmentIDs: []int64{3},
 	}
-	it := &importTask{
-		tr: timerecord.NewTimeRecorder("import task"),
+	it := &bulkimport.Task{
+		Tr: timerecord.NewTimeRecorder("import task"),
 	}
-	it.task.Store(taskProto)
+	it.Task.Store(taskProto)
 	err := s.importMeta.AddTask(context.TODO(), it)
 	s.NoError(err)
 
-	s.checker.checkFailedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
-	tasks := s.importMeta.GetTaskByJob(context.TODO(), s.jobID, WithStates(datapb.ImportTaskStateV2_Failed))
+	s.checker.CheckFailedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	tasks := s.importMeta.GetTaskByJob(context.TODO(), s.jobID, bulkimport.WithStates(datapb.ImportTaskStateV2_Failed))
 	s.Equal(1, len(tasks))
 
 	catalog.ExpectedCalls = nil
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(errors.New("mock error"))
-	s.checker.checkFailedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
-	tasks = s.importMeta.GetTaskByJob(context.TODO(), s.jobID, WithStates(datapb.ImportTaskStateV2_Failed))
+	s.checker.CheckFailedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	tasks = s.importMeta.GetTaskByJob(context.TODO(), s.jobID, bulkimport.WithStates(datapb.ImportTaskStateV2_Failed))
 	s.Equal(1, len(tasks))
 
 	catalog.ExpectedCalls = nil
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
-	s.checker.checkFailedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
-	tasks = s.importMeta.GetTaskByJob(context.TODO(), s.jobID, WithStates(datapb.ImportTaskStateV2_Failed))
+	s.checker.CheckFailedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	tasks = s.importMeta.GetTaskByJob(context.TODO(), s.jobID, bulkimport.WithStates(datapb.ImportTaskStateV2_Failed))
 	s.Equal(1, len(tasks))
 }
 
 func (s *ImportCheckerSuite) TestCheckGC() {
 	mockErr := errors.New("mock err")
 
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 
 	taskProto := &datapb.ImportTaskV2{
@@ -513,55 +514,55 @@ func (s *ImportCheckerSuite) TestCheckGC() {
 		SortedSegmentIDs: []int64{3},
 	}
 
-	task := &importTask{
-		tr: timerecord.NewTimeRecorder("import task"),
+	task := &bulkimport.Task{
+		Tr: timerecord.NewTimeRecorder("import task"),
 	}
-	task.task.Store(taskProto)
+	task.Task.Store(taskProto)
 	err := s.importMeta.AddTask(context.TODO(), task)
 	s.NoError(err)
 
 	// not failed or completed
-	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckGC(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(1, len(s.importMeta.GetTaskByJob(context.TODO(), s.jobID)))
 	s.Equal(1, len(s.importMeta.GetJobBy(context.TODO())))
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
-	err = s.importMeta.UpdateJob(context.TODO(), s.jobID, UpdateJobState(internalpb.ImportJobState_Failed))
+	err = s.importMeta.UpdateJob(context.TODO(), s.jobID, bulkimport.UpdateJobState(internalpb.ImportJobState_Failed))
 	s.NoError(err)
 
 	// not reach cleanup ts
-	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckGC(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(1, len(s.importMeta.GetTaskByJob(context.TODO(), s.jobID)))
 	s.Equal(1, len(s.importMeta.GetJobBy(context.TODO())))
 	GCRetention := Params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second)
 	job := s.importMeta.GetJob(context.TODO(), s.jobID)
-	job.(*importJob).CleanupTs = tsoutil.AddPhysicalDurationOnTs(job.GetCleanupTs(), GCRetention*-2)
+	job.(*bulkimport.Job).CleanupTs = tsoutil.AddPhysicalDurationOnTs(job.GetCleanupTs(), GCRetention*-2)
 	err = s.importMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
 	// origin segment not dropped
-	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckGC(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(1, len(s.importMeta.GetTaskByJob(context.TODO(), s.jobID)))
 	s.Equal(1, len(s.importMeta.GetJobBy(context.TODO())))
-	err = s.importMeta.UpdateTask(context.TODO(), task.GetTaskID(), UpdateSegmentIDs([]int64{}))
+	err = s.importMeta.UpdateTask(context.TODO(), task.GetTaskID(), bulkimport.UpdateSegmentIDs([]int64{}))
 	s.NoError(err)
 
 	// stats segment not dropped
-	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckGC(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(1, len(s.importMeta.GetTaskByJob(context.TODO(), s.jobID)))
 	s.Equal(1, len(s.importMeta.GetJobBy(context.TODO())))
-	err = s.importMeta.UpdateTask(context.TODO(), task.GetTaskID(), UpdateStatsSegmentIDs([]int64{}))
+	err = s.importMeta.UpdateTask(context.TODO(), task.GetTaskID(), bulkimport.UpdateStatsSegmentIDs([]int64{}))
 	s.NoError(err)
 
 	// task is not dropped
-	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckGC(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(1, len(s.importMeta.GetTaskByJob(context.TODO(), s.jobID)))
 	s.Equal(1, len(s.importMeta.GetJobBy(context.TODO())))
-	err = s.importMeta.UpdateTask(context.TODO(), task.GetTaskID(), UpdateNodeID(NullNodeID))
+	err = s.importMeta.UpdateTask(context.TODO(), task.GetTaskID(), bulkimport.UpdateNodeID(meta.NullNodeID))
 	s.NoError(err)
 
 	// remove task failed
 	catalog.EXPECT().DropImportTask(mock.Anything, mock.Anything).Return(mockErr)
-	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckGC(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(1, len(s.importMeta.GetTaskByJob(context.TODO(), s.jobID)))
 	s.Equal(1, len(s.importMeta.GetJobBy(context.TODO())))
 
@@ -569,14 +570,14 @@ func (s *ImportCheckerSuite) TestCheckGC() {
 	catalog.ExpectedCalls = nil
 	catalog.EXPECT().DropImportTask(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().DropImportJob(mock.Anything, mock.Anything).Return(mockErr)
-	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckGC(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(0, len(s.importMeta.GetTaskByJob(context.TODO(), s.jobID)))
 	s.Equal(1, len(s.importMeta.GetJobBy(context.TODO())))
 
 	// normal case
 	catalog.ExpectedCalls = nil
 	catalog.EXPECT().DropImportJob(mock.Anything, mock.Anything).Return(nil)
-	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckGC(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(0, len(s.importMeta.GetTaskByJob(context.TODO(), s.jobID)))
 	s.Equal(0, len(s.importMeta.GetJobBy(context.TODO())))
 }
@@ -585,7 +586,7 @@ func (s *ImportCheckerSuite) TestCheckGC() {
 // a single import task that has no live segments and is unassigned, so checkGC is one
 // step away from removing the job (the only remaining gate is the replicate rollback).
 func (s *ImportCheckerSuite) setupGCReadyFailedJob() {
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 
@@ -593,16 +594,16 @@ func (s *ImportCheckerSuite) setupGCReadyFailedJob() {
 		JobID:  s.jobID,
 		TaskID: 1,
 		State:  datapb.ImportTaskStateV2_Failed,
-		NodeID: NullNodeID,
+		NodeID: meta.NullNodeID,
 	}
-	task := &importTask{tr: timerecord.NewTimeRecorder("import task")}
-	task.task.Store(taskProto)
+	task := &bulkimport.Task{Tr: timerecord.NewTimeRecorder("import task")}
+	task.Task.Store(taskProto)
 	s.NoError(s.importMeta.AddTask(context.TODO(), task))
 
-	s.NoError(s.importMeta.UpdateJob(context.TODO(), s.jobID, UpdateJobState(internalpb.ImportJobState_Failed)))
+	s.NoError(s.importMeta.UpdateJob(context.TODO(), s.jobID, bulkimport.UpdateJobState(internalpb.ImportJobState_Failed)))
 	GCRetention := Params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second)
 	job := s.importMeta.GetJob(context.TODO(), s.jobID)
-	job.(*importJob).CleanupTs = tsoutil.AddPhysicalDurationOnTs(job.GetCleanupTs(), GCRetention*-2)
+	job.(*bulkimport.Job).CleanupTs = tsoutil.AddPhysicalDurationOnTs(job.GetCleanupTs(), GCRetention*-2)
 	s.NoError(s.importMeta.AddJob(context.TODO(), job))
 }
 
@@ -611,28 +612,28 @@ func (s *ImportCheckerSuite) setupGCReadyFailedJob() {
 // job is removed.
 func (s *ImportCheckerSuite) TestCheckGCReplicateSourceBroadcastsRollback() {
 	s.setupGCReadyFailedJob()
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().DropImportTask(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().DropImportJob(mock.Anything, mock.Anything).Return(nil)
 
 	rollbackCalls := 0
 	rollbackErr := errors.New("broadcast failed")
-	s.checker.hooks.rollbackImport = func(ctx context.Context, job ImportJob) error {
+	s.checker.Hooks.RollbackImport = func(ctx context.Context, job bulkimport.ImportJob) error {
 		rollbackCalls++
 		return rollbackErr
 	}
-	s.checker.hooks.getReplicationRole = func(ctx context.Context) (replicateutil.Role, bool, error) {
+	s.checker.Hooks.GetReplicationRole = func(ctx context.Context) (replicateutil.Role, bool, error) {
 		return replicateutil.RolePrimary, true, nil
 	}
 
 	// First tick: broadcast fails → job retained (tasks already removed), rollback attempted.
-	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckGC(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(1, rollbackCalls)
 	s.Equal(1, len(s.importMeta.GetJobBy(context.TODO())))
 
 	// Next tick: broadcast succeeds → job removed.
 	rollbackErr = nil
-	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckGC(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(2, rollbackCalls)
 	s.Equal(0, len(s.importMeta.GetJobBy(context.TODO())))
 }
@@ -641,36 +642,36 @@ func (s *ImportCheckerSuite) TestCheckGCReplicateSourceBroadcastsRollback() {
 // treated as success so its own failed job is still GC'd.
 func (s *ImportCheckerSuite) TestCheckGCReplicateNotPrimaryProceeds() {
 	s.setupGCReadyFailedJob()
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().DropImportTask(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().DropImportJob(mock.Anything, mock.Anything).Return(nil)
 
-	s.checker.hooks.rollbackImport = func(ctx context.Context, job ImportJob) error { return broadcaster.ErrNotPrimary }
-	s.checker.hooks.getReplicationRole = func(ctx context.Context) (replicateutil.Role, bool, error) {
+	s.checker.Hooks.RollbackImport = func(ctx context.Context, job bulkimport.ImportJob) error { return broadcaster.ErrNotPrimary }
+	s.checker.Hooks.GetReplicationRole = func(ctx context.Context) (replicateutil.Role, bool, error) {
 		return replicateutil.RolePrimary, true, nil
 	}
 
-	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckGC(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(0, len(s.importMeta.GetJobBy(context.TODO())))
 }
 
 // A non-replicating cluster must not broadcast any rollback; the failed job is GC'd as before.
 func (s *ImportCheckerSuite) TestCheckGCNonReplicatingSkipsRollback() {
 	s.setupGCReadyFailedJob()
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().DropImportTask(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().DropImportJob(mock.Anything, mock.Anything).Return(nil)
 
 	rollbackCalls := 0
-	s.checker.hooks.rollbackImport = func(ctx context.Context, job ImportJob) error {
+	s.checker.Hooks.RollbackImport = func(ctx context.Context, job bulkimport.ImportJob) error {
 		rollbackCalls++
 		return nil
 	}
-	s.checker.hooks.getReplicationRole = func(ctx context.Context) (replicateutil.Role, bool, error) {
+	s.checker.Hooks.GetReplicationRole = func(ctx context.Context) (replicateutil.Role, bool, error) {
 		return replicateutil.RolePrimary, false, nil
 	}
 
-	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckGC(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(0, rollbackCalls)
 	s.Equal(0, len(s.importMeta.GetJobBy(context.TODO())))
 }
@@ -680,18 +681,18 @@ func (s *ImportCheckerSuite) TestCheckGCNonReplicatingSkipsRollback() {
 // balancer (datacoord ready before streamingcoord) cannot park the whole checker loop.
 func (s *ImportCheckerSuite) TestCheckGCReplicateCheckCtxIsBounded() {
 	s.setupGCReadyFailedJob()
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().DropImportTask(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().DropImportJob(mock.Anything, mock.Anything).Return(nil)
 
-	s.checker.hooks.rollbackImport = func(ctx context.Context, job ImportJob) error { return nil }
+	s.checker.Hooks.RollbackImport = func(ctx context.Context, job bulkimport.ImportJob) error { return nil }
 	hasDeadline := false
-	s.checker.hooks.getReplicationRole = func(ctx context.Context) (replicateutil.Role, bool, error) {
+	s.checker.Hooks.GetReplicationRole = func(ctx context.Context) (replicateutil.Role, bool, error) {
 		_, hasDeadline = ctx.Deadline()
 		return replicateutil.RolePrimary, false, nil
 	}
 
-	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckGC(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.True(hasDeadline)
 }
 
@@ -702,19 +703,19 @@ func (s *ImportCheckerSuite) TestCheckGCReplicateIndeterminateRetainsJob() {
 	s.setupGCReadyFailedJob()
 	// The task-cleanup loop runs before the replication gate, so the task is removed
 	// even though the job itself is retained; DropImportJob must NOT be called.
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().DropImportTask(mock.Anything, mock.Anything).Return(nil)
 
 	rollbackCalls := 0
-	s.checker.hooks.rollbackImport = func(ctx context.Context, job ImportJob) error {
+	s.checker.Hooks.RollbackImport = func(ctx context.Context, job bulkimport.ImportJob) error {
 		rollbackCalls++
 		return nil
 	}
-	s.checker.hooks.getReplicationRole = func(ctx context.Context) (replicateutil.Role, bool, error) {
+	s.checker.Hooks.GetReplicationRole = func(ctx context.Context) (replicateutil.Role, bool, error) {
 		return replicateutil.RolePrimary, false, errors.New("balancer not ready")
 	}
 
-	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckGC(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(0, rollbackCalls)
 	s.Equal(1, len(s.importMeta.GetJobBy(context.TODO())))
 }
@@ -723,20 +724,20 @@ func (s *ImportCheckerSuite) TestCheckGCReplicateIndeterminateRetainsJob() {
 // NOT be retried forever, which would leak the job's metadata. The job is GC'd instead.
 func (s *ImportCheckerSuite) TestCheckGCReplicatePermanentRollbackErrRemovesJob() {
 	s.setupGCReadyFailedJob()
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().DropImportTask(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().DropImportJob(mock.Anything, mock.Anything).Return(nil)
 
 	rollbackCalls := 0
-	s.checker.hooks.rollbackImport = func(ctx context.Context, job ImportJob) error {
+	s.checker.Hooks.RollbackImport = func(ctx context.Context, job bulkimport.ImportJob) error {
 		rollbackCalls++
 		return merr.WrapErrCollectionNotFound(job.GetCollectionID())
 	}
-	s.checker.hooks.getReplicationRole = func(ctx context.Context) (replicateutil.Role, bool, error) {
+	s.checker.Hooks.GetReplicationRole = func(ctx context.Context) (replicateutil.Role, bool, error) {
 		return replicateutil.RolePrimary, true, nil
 	}
 
-	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckGC(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(1, rollbackCalls)
 	s.Equal(0, len(s.importMeta.GetJobBy(context.TODO())))
 }
@@ -746,20 +747,20 @@ func (s *ImportCheckerSuite) TestCheckGCReplicatePermanentRollbackErrRemovesJob(
 // deadline-bounded ctx so a stuck broadcast cannot park the whole checker loop.
 func (s *ImportCheckerSuite) TestCheckGCReplicateRollbackCtxIsBounded() {
 	s.setupGCReadyFailedJob()
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().DropImportTask(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().DropImportJob(mock.Anything, mock.Anything).Return(nil)
 
 	hasDeadline := false
-	s.checker.hooks.rollbackImport = func(ctx context.Context, job ImportJob) error {
+	s.checker.Hooks.RollbackImport = func(ctx context.Context, job bulkimport.ImportJob) error {
 		_, hasDeadline = ctx.Deadline()
 		return nil
 	}
-	s.checker.hooks.getReplicationRole = func(ctx context.Context) (replicateutil.Role, bool, error) {
+	s.checker.Hooks.GetReplicationRole = func(ctx context.Context) (replicateutil.Role, bool, error) {
 		return replicateutil.RolePrimary, true, nil
 	}
 
-	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckGC(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.True(hasDeadline)
 	s.Equal(0, len(s.importMeta.GetJobBy(context.TODO())))
 }
@@ -769,24 +770,24 @@ func (s *ImportCheckerSuite) TestCheckGCReplicateRollbackCtxIsBounded() {
 // generic ImportSysFailed error must stay transient.
 func (s *ImportCheckerSuite) TestCheckGCReplicateNoVchannelsRollbackErrRemovesJob() {
 	server := &Server{}
-	err := server.broadcastRollbackImportMessage(context.TODO(), &importJob{ImportJob: &datapb.ImportJob{JobID: 1}})
+	err := server.broadcastRollbackImportMessage(context.TODO(), &bulkimport.Job{ImportJob: &datapb.ImportJob{JobID: 1}})
 	s.Error(err)
-	s.True(isPermanentRollbackErr(err))
-	s.False(isPermanentRollbackErr(merr.WrapErrImportSysFailedMsg("some transient failure")))
+	s.True(bulkimport.IsPermanentRollbackErr(err))
+	s.False(bulkimport.IsPermanentRollbackErr(merr.WrapErrImportSysFailedMsg("some transient failure")))
 
 	s.setupGCReadyFailedJob()
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().DropImportTask(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().DropImportJob(mock.Anything, mock.Anything).Return(nil)
 
-	s.checker.hooks.rollbackImport = func(ctx context.Context, job ImportJob) error {
-		return server.broadcastRollbackImportMessage(ctx, &importJob{ImportJob: &datapb.ImportJob{JobID: job.GetJobID()}})
+	s.checker.Hooks.RollbackImport = func(ctx context.Context, job bulkimport.ImportJob) error {
+		return server.broadcastRollbackImportMessage(ctx, &bulkimport.Job{ImportJob: &datapb.ImportJob{JobID: job.GetJobID()}})
 	}
-	s.checker.hooks.getReplicationRole = func(ctx context.Context) (replicateutil.Role, bool, error) {
+	s.checker.Hooks.GetReplicationRole = func(ctx context.Context) (replicateutil.Role, bool, error) {
 		return replicateutil.RolePrimary, true, nil
 	}
 
-	s.checker.checkGC(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckGC(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(0, len(s.importMeta.GetJobBy(context.TODO())))
 }
 
@@ -803,16 +804,16 @@ func (s *ImportCheckerSuite) TestStateMachineProgressesWhileGCRollbackParked() {
 	defer params.Reset(params.DataCoordCfg.ImportCheckIntervalLow.Key)
 
 	s.setupGCReadyFailedJob()
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().DropImportTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 	// Teardown releases the parked rollback, letting the in-flight checkGC run to
 	// completion (RemoveJob, then checkCollection) while the loops shut down.
 	catalog.EXPECT().DropImportJob(mock.Anything, mock.Anything).Return(nil).Maybe()
-	s.checker.broker.(*broker2.MockBroker).EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil).Maybe()
+	s.checker.Broker.(*broker2.MockBroker).EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil).Maybe()
 
 	rollbackEntered := make(chan struct{}, 1)
 	rollbackRelease := make(chan struct{})
-	s.checker.hooks.rollbackImport = func(ctx context.Context, job ImportJob) error {
+	s.checker.Hooks.RollbackImport = func(ctx context.Context, job bulkimport.ImportJob) error {
 		select {
 		case rollbackEntered <- struct{}{}:
 		default:
@@ -821,7 +822,7 @@ func (s *ImportCheckerSuite) TestStateMachineProgressesWhileGCRollbackParked() {
 		<-rollbackRelease
 		return nil
 	}
-	s.checker.hooks.getReplicationRole = func(ctx context.Context) (replicateutil.Role, bool, error) {
+	s.checker.Hooks.GetReplicationRole = func(ctx context.Context) (replicateutil.Role, bool, error) {
 		return replicateutil.RolePrimary, true, nil
 	}
 
@@ -838,7 +839,7 @@ func (s *ImportCheckerSuite) TestStateMachineProgressesWhileGCRollbackParked() {
 
 	// Feed the state machine a Failed job with a live task; only the
 	// state-machine loop (checkFailedJob → tryFailingTasks) can fail the task.
-	jobB := &importJob{
+	jobB := &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID:          s.jobID + 100,
 			CollectionID:   1,
@@ -847,17 +848,17 @@ func (s *ImportCheckerSuite) TestStateMachineProgressesWhileGCRollbackParked() {
 			State:          internalpb.ImportJobState_Failed,
 			CleanupTs:      tsoutil.ComposeTSByTime(time.Now().Add(24 * time.Hour)), // never GC-ready
 		},
-		tr: timerecord.NewTimeRecorder("import job"),
+		Tr: timerecord.NewTimeRecorder("import job"),
 	}
 	s.NoError(s.importMeta.AddJob(context.TODO(), jobB))
 	taskProto := &datapb.ImportTaskV2{
 		JobID:  jobB.GetJobID(),
 		TaskID: 999,
 		State:  datapb.ImportTaskStateV2_Pending,
-		NodeID: NullNodeID,
+		NodeID: meta.NullNodeID,
 	}
-	task := &importTask{tr: timerecord.NewTimeRecorder("import task")}
-	task.task.Store(taskProto)
+	task := &bulkimport.Task{Tr: timerecord.NewTimeRecorder("import task")}
+	task.Task.Store(taskProto)
 	s.NoError(s.importMeta.AddTask(context.TODO(), task))
 
 	s.Eventually(func() bool {
@@ -869,7 +870,7 @@ func (s *ImportCheckerSuite) TestStateMachineProgressesWhileGCRollbackParked() {
 func (s *ImportCheckerSuite) TestCheckCollection() {
 	mockErr := errors.New("mock err")
 
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
 
 	taskProto := &datapb.PreImportTask{
@@ -877,55 +878,55 @@ func (s *ImportCheckerSuite) TestCheckCollection() {
 		TaskID: 1,
 		State:  datapb.ImportTaskStateV2_Pending,
 	}
-	task := &preImportTask{
-		tr: timerecord.NewTimeRecorder("preimport task"),
+	task := &bulkimport.PreImportTask{
+		Tr: timerecord.NewTimeRecorder("preimport task"),
 	}
-	task.task.Store(taskProto)
+	task.Task.Store(taskProto)
 	err := s.importMeta.AddTask(context.TODO(), task)
 	s.NoError(err)
 
 	// no jobs
-	s.checker.checkCollection(1, []ImportJob{})
+	s.checker.CheckCollection(1, []bulkimport.ImportJob{})
 	s.Equal(internalpb.ImportJobState_Pending, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 
 	// collection exist
-	broker := s.checker.broker.(*broker2.MockBroker)
+	broker := s.checker.Broker.(*broker2.MockBroker)
 	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil)
-	s.checker.checkCollection(1, []ImportJob{s.importMeta.GetJob(context.TODO(), s.jobID)})
+	s.checker.CheckCollection(1, []bulkimport.ImportJob{s.importMeta.GetJob(context.TODO(), s.jobID)})
 	s.Equal(internalpb.ImportJobState_Pending, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 
 	// HasCollection failed
-	s.checker.broker = broker2.NewMockBroker(s.T())
-	broker = s.checker.broker.(*broker2.MockBroker)
+	s.checker.Broker = broker2.NewMockBroker(s.T())
+	broker = s.checker.Broker.(*broker2.MockBroker)
 	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, mockErr)
-	s.checker.checkCollection(1, []ImportJob{s.importMeta.GetJob(context.TODO(), s.jobID)})
+	s.checker.CheckCollection(1, []bulkimport.ImportJob{s.importMeta.GetJob(context.TODO(), s.jobID)})
 	s.Equal(internalpb.ImportJobState_Pending, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 
 	// SaveImportJob failed
-	s.checker.broker = broker2.NewMockBroker(s.T())
-	broker = s.checker.broker.(*broker2.MockBroker)
+	s.checker.Broker = broker2.NewMockBroker(s.T())
+	broker = s.checker.Broker.(*broker2.MockBroker)
 	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil)
 	catalog.ExpectedCalls = nil
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(mockErr)
-	s.checker.checkCollection(1, []ImportJob{s.importMeta.GetJob(context.TODO(), s.jobID)})
+	s.checker.CheckCollection(1, []bulkimport.ImportJob{s.importMeta.GetJob(context.TODO(), s.jobID)})
 	s.Equal(internalpb.ImportJobState_Pending, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 
 	// collection dropped
-	s.checker.broker = broker2.NewMockBroker(s.T())
-	broker = s.checker.broker.(*broker2.MockBroker)
+	s.checker.Broker = broker2.NewMockBroker(s.T())
+	broker = s.checker.Broker.(*broker2.MockBroker)
 	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil)
 	catalog.ExpectedCalls = nil
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
-	s.checker.checkCollection(1, []ImportJob{s.importMeta.GetJob(context.TODO(), s.jobID)})
+	s.checker.CheckCollection(1, []bulkimport.ImportJob{s.importMeta.GetJob(context.TODO(), s.jobID)})
 	s.Equal(internalpb.ImportJobState_Failed, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 }
 
 func (s *ImportCheckerSuite) TestCheckCollectionDoesNotFailCommittingJob() {
-	s.manuallyUpdateJob(s.jobID, UpdateJobState(internalpb.ImportJobState_Committing))
-	broker := s.checker.broker.(*broker2.MockBroker)
+	s.manuallyUpdateJob(s.jobID, bulkimport.UpdateJobState(internalpb.ImportJobState_Committing))
+	broker := s.checker.Broker.(*broker2.MockBroker)
 	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil)
 
-	s.checker.checkCollection(1, []ImportJob{s.importMeta.GetJob(context.TODO(), s.jobID)})
+	s.checker.CheckCollection(1, []bulkimport.ImportJob{s.importMeta.GetJob(context.TODO(), s.jobID)})
 
 	s.Equal(internalpb.ImportJobState_Committing, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 }
@@ -934,305 +935,40 @@ func TestImportChecker(t *testing.T) {
 	suite.Run(t, new(ImportCheckerSuite))
 }
 
-func TestImportCheckerCompaction(t *testing.T) {
-	paramtable.Init()
-	Params.Save(Params.DataCoordCfg.ImportCheckIntervalHigh.Key, "1")
-	defer Params.Reset(Params.DataCoordCfg.ImportCheckIntervalHigh.Key)
-	Params.Save(Params.DataCoordCfg.ImportCheckIntervalLow.Key, "10000")
-	defer Params.Reset(Params.DataCoordCfg.ImportCheckIntervalLow.Key)
-
-	// prepare objects
-	catalog := mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
-
-	alloc := allocator.NewMockAllocator(t)
-
-	broker := broker2.NewMockBroker(t)
-	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{}, nil)
-
-	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
-	assert.NoError(t, err)
-
-	importMeta, err := NewImportMeta(context.TODO(), catalog, alloc, meta)
-	assert.NoError(t, err)
-
-	cim := NewMockCompactionInspector(t)
-	handler := NewNMockHandler(t)
-
-	checker := NewImportChecker(context.TODO(), meta, broker, alloc, importMeta, cim, handler, importCheckerHooks{
-		getReplicationRole: func(context.Context) (replicateutil.Role, bool, error) {
-			return replicateutil.RolePrimary, false, nil
-		},
-		assignImportIDRange: func(ctx context.Context, job ImportJob, fileRows []int64) error {
-			// Mirror the production wiring: the primary allocates one exact range per file
-			// and applies it to the job, which is what lets the range gate proceed.
-			ranges := make([]*commonpb.IDRange, len(fileRows))
-			begin := int64(100000)
-			for i, rows := range fileRows {
-				ranges[i] = &commonpb.IDRange{Begin: begin, End: begin + rows}
-				begin += rows
-			}
-			return importMeta.UpdateJob(ctx, job.GetJobID(), UpdateJobIDRanges(ranges))
-		},
-	}).(*importChecker)
-
-	job := &importJob{
-		ImportJob: &datapb.ImportJob{
-			JobID:          1001,
-			CollectionID:   1,
-			PartitionIDs:   []int64{2},
-			ReadyVchannels: []string{"ch0"},
-			Vchannels:      []string{"ch0", "ch1"},
-			State:          internalpb.ImportJobState_Pending,
-			TimeoutTs:      tsoutil.ComposeTSByTime(time.Now().Add(time.Hour)),
-			CleanupTs:      tsoutil.ComposeTSByTime(time.Now().Add(time.Hour)),
-			Schema: &schemapb.CollectionSchema{
-				Fields: []*schemapb.FieldSchema{
-					{
-						FieldID:      100,
-						Name:         "pk",
-						DataType:     schemapb.DataType_Int64,
-						IsPrimaryKey: true,
-					},
-				},
-			},
-			Files: []*internalpb.ImportFile{
-				{
-					Id:    1,
-					Paths: []string{"a.json"},
-				},
-				{
-					Id:    2,
-					Paths: []string{"b.json"},
-				},
-				{
-					Id:    3,
-					Paths: []string{"c.json"},
-				},
-			},
-		},
-		tr: timerecord.NewTimeRecorder("import job"),
-	}
-	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
-	err = importMeta.AddJob(context.TODO(), job)
-	assert.NoError(t, err)
-	jobID := job.GetJobID()
-
-	// start check
-	go checker.Start()
-
-	// sleep 1.5s and ready the job, go to pending stats
-	time.Sleep(1500 * time.Millisecond)
-	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
-	job2 := &importJob{
-		ImportJob: &datapb.ImportJob{
-			JobID:          1001,
-			CollectionID:   1,
-			PartitionIDs:   []int64{2},
-			ReadyVchannels: []string{"ch1"},
-			Vchannels:      []string{"ch0", "ch1"},
-			State:          internalpb.ImportJobState_Pending,
-			TimeoutTs:      tsoutil.ComposeTSByTime(time.Now().Add(time.Hour)),
-			CleanupTs:      tsoutil.ComposeTSByTime(time.Now().Add(time.Hour)),
-			Schema: &schemapb.CollectionSchema{
-				Fields: []*schemapb.FieldSchema{
-					{
-						FieldID:      100,
-						Name:         "pk",
-						DataType:     schemapb.DataType_Int64,
-						IsPrimaryKey: true,
-					},
-				},
-			},
-			Files: []*internalpb.ImportFile{
-				{
-					Id:    1,
-					Paths: []string{"a.json"},
-				},
-				{
-					Id:    2,
-					Paths: []string{"b.json"},
-				},
-				{
-					Id:    3,
-					Paths: []string{"c.json"},
-				},
-			},
-		},
-		tr: timerecord.NewTimeRecorder("import job"),
-	}
-	err = importMeta.AddJob(context.TODO(), job2)
-	assert.NoError(t, err)
-	mlog.Info(context.TODO(), "job ready")
-
-	// check pending
-	alloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
-		id := rand.Int63()
-		return id, id + n, nil
-	}).Maybe()
-	alloc.EXPECT().AllocID(mock.Anything).Return(rand.Int63(), nil).Maybe()
-	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil).Twice()
-	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
-	assert.Eventually(t, func() bool {
-		job := importMeta.GetJob(context.TODO(), jobID)
-		preimportTasks := importMeta.GetTaskByJob(context.TODO(), job.GetJobID(), WithType(PreImportTaskType))
-		taskLen := len(preimportTasks)
-		mlog.Info(context.TODO(), "job pre-importing", mlog.Any("taskLen", taskLen), mlog.Any("jobState", job.GetState()))
-		return taskLen == 2 && job.GetState() == internalpb.ImportJobState_PreImporting
-	}, 5*time.Second, 500*time.Millisecond)
-	mlog.Info(context.TODO(), "job pre-importing")
-
-	// check pre-importing
-	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Once()
-	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil).Twice()
-	// The gate writes the job three times here: the AssigningIDRange transition, the ranges
-	// the assign hook applies, and the Importing transition.
-	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Maybe()
-	preimportTasks := importMeta.GetTaskByJob(context.TODO(), job.GetJobID(), WithType(PreImportTaskType))
-	// Complete every preimport task with one exact count per file, carrying the file id like
-	// the datanode report does: the range gate needs a row count per job file.
-	for _, pt := range preimportTasks {
-		stats := make([]*datapb.ImportFileStats, 0, len(pt.GetFileStats()))
-		for _, st := range pt.GetFileStats() {
-			stats = append(stats, &datapb.ImportFileStats{
-				ImportFile: &internalpb.ImportFile{Id: st.GetImportFile().GetId(), Paths: st.GetImportFile().GetPaths()},
-				TotalRows:  100,
-			})
-		}
-		err := importMeta.UpdateTask(context.TODO(), pt.GetTaskID(),
-			UpdateState(datapb.ImportTaskStateV2_Completed), UpdateFileStats(stats))
-		assert.NoError(t, err)
-	}
-	assert.Eventually(t, func() bool {
-		job := importMeta.GetJob(context.TODO(), jobID)
-		importTasks := importMeta.GetTaskByJob(context.TODO(), job.GetJobID(), WithType(ImportTaskType))
-		return len(importTasks) == 1 && job.GetState() == internalpb.ImportJobState_Importing
-	}, 5*time.Second, 100*time.Millisecond)
-	mlog.Info(context.TODO(), "job importing")
-
-	// check importing
-	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-	// AlterSegments was previously driven by unsetSegmentImporting (removed in 2PC);
-	// the remaining segment writes in this flow may or may not hit it.
-	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
-	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
-	// Maybe, not Once: the open-ended SaveImportJob expectation set for the pre-importing
-	// gate window matches every later call first, so a later Once() would never be consumed.
-	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Maybe()
-	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Once()
-	importTasks := importMeta.GetTaskByJob(context.TODO(), job.GetJobID(), WithType(ImportTaskType))
-	targetSegmentIDs := make([]int64, 0)
-	for _, it := range importTasks {
-		segment := &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:            rand.Int63(),
-				State:         commonpb.SegmentState_Flushed,
-				IsImporting:   true,
-				InsertChannel: "ch0",
-			},
-		}
-		err := checker.meta.AddSegment(context.Background(), segment)
-		assert.NoError(t, err)
-		targetSegmentID := rand.Int63()
-		err = importMeta.UpdateTask(context.TODO(), it.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed),
-			UpdateSegmentIDs([]int64{segment.GetID()}), UpdateStatsSegmentIDs([]int64{targetSegmentID}))
-		assert.NoError(t, err)
-		targetSegmentIDs = append(targetSegmentIDs, targetSegmentID)
-		err = checker.meta.UpdateChannelCheckpoint(context.TODO(), segment.GetInsertChannel(), &msgpb.MsgPosition{MsgID: []byte{0}})
-		assert.NoError(t, err)
-	}
-	assert.Eventually(t, func() bool {
-		job := importMeta.GetJob(context.TODO(), jobID)
-		return job.GetState() == internalpb.ImportJobState_Sorting
-	}, 5*time.Second, 100*time.Millisecond)
-	mlog.Info(context.TODO(), "job stats")
-
-	// check stats
-	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Maybe()
-	for _, targetSegmentID := range targetSegmentIDs {
-		segment := &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:            targetSegmentID,
-				State:         commonpb.SegmentState_Flushed,
-				IsImporting:   true,
-				InsertChannel: "ch0",
-				IsSorted:      true,
-			},
-		}
-		err := checker.meta.AddSegment(context.Background(), segment)
-		assert.NoError(t, err)
-	}
-	assert.Eventually(t, func() bool {
-		job := importMeta.GetJob(context.TODO(), jobID)
-		return job.GetState() == internalpb.ImportJobState_IndexBuilding
-	}, 5*time.Second, 100*time.Millisecond)
-	mlog.Info(context.TODO(), "job index building")
-
-	// check index building → Uncommitted (2PC: no longer transitions directly to Completed;
-	// the test does not wire up a CommitImport broadcaster, so the job stops at Uncommitted).
-	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Maybe()
-	assert.Eventually(t, func() bool {
-		job := importMeta.GetJob(context.TODO(), jobID)
-		return job.GetState() == internalpb.ImportJobState_Uncommitted
-	}, 5*time.Second, 100*time.Millisecond)
-	mlog.Info(context.TODO(), "job uncommitted (awaiting CommitImport WAL fence)")
-}
-
-// ---------------------------------------------------------------------------
-// Tests for checkUncommittedJob
-// ---------------------------------------------------------------------------
-
 func (s *ImportCheckerSuite) TestCheckUncommittedJob_AutoCommitTrue() {
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 
 	// Put the job into Uncommitted state with auto_commit=true (default).
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
-	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
-		job.(*importJob).State = internalpb.ImportJobState_Uncommitted
-		job.(*importJob).AutoCommit = true
+	s.manuallyUpdateJob(s.jobID, func(job bulkimport.ImportJob) {
+		job.(*bulkimport.Job).State = internalpb.ImportJobState_Uncommitted
+		job.(*bulkimport.Job).AutoCommit = true
 	})
 
 	commitCalled := false
-	s.checker.hooks.commitImport = func(ctx context.Context, job ImportJob) error {
+	s.checker.Hooks.CommitImport = func(ctx context.Context, job bulkimport.ImportJob) error {
 		commitCalled = true
 		return nil
 	}
 
-	s.checker.checkUncommittedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckUncommittedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.True(commitCalled, "commit hook should be called when auto_commit=true")
 }
 
 func (s *ImportCheckerSuite) TestCheckUncommittedJob_AutoCommitFalse() {
 	// Put the job into Uncommitted state with auto_commit=false.
-	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
-		job.(*importJob).State = internalpb.ImportJobState_Uncommitted
-		job.(*importJob).AutoCommit = false
+	s.manuallyUpdateJob(s.jobID, func(job bulkimport.ImportJob) {
+		job.(*bulkimport.Job).State = internalpb.ImportJobState_Uncommitted
+		job.(*bulkimport.Job).AutoCommit = false
 	})
 
 	commitCalled := false
-	s.checker.hooks.commitImport = func(ctx context.Context, job ImportJob) error {
+	s.checker.Hooks.CommitImport = func(ctx context.Context, job bulkimport.ImportJob) error {
 		commitCalled = true
 		return nil
 	}
 
-	s.checker.checkUncommittedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckUncommittedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.False(commitCalled, "commit hook must NOT be called when auto_commit=false")
 	// Job state must remain Uncommitted.
 	s.Equal(internalpb.ImportJobState_Uncommitted, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
@@ -1241,14 +977,14 @@ func (s *ImportCheckerSuite) TestCheckUncommittedJob_AutoCommitFalse() {
 func (s *ImportCheckerSuite) TestCheckUncommittedJob_NilFn_AutoCommitTrue() {
 	// commit hook=nil with auto_commit=true is a programming error; the checker
 	// must log an error and return without crashing (no panic in the ticker goroutine).
-	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
-		job.(*importJob).State = internalpb.ImportJobState_Uncommitted
-		job.(*importJob).AutoCommit = true
+	s.manuallyUpdateJob(s.jobID, func(job bulkimport.ImportJob) {
+		job.(*bulkimport.Job).State = internalpb.ImportJobState_Uncommitted
+		job.(*bulkimport.Job).AutoCommit = true
 	})
-	s.checker.hooks.commitImport = nil
+	s.checker.Hooks.CommitImport = nil
 
 	s.NotPanics(func() {
-		s.checker.checkUncommittedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+		s.checker.CheckUncommittedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	})
 	s.Equal(internalpb.ImportJobState_Uncommitted, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 }
@@ -1259,62 +995,54 @@ func (s *ImportCheckerSuite) TestCheckUncommittedJob_NilFn_AutoCommitTrue() {
 // duplicate broadcasts is guaranteed by the broadcaster's resource-key lock,
 // the completed callback's idempotency guard.
 func (s *ImportCheckerSuite) TestCheckUncommittedJob_RepeatedTicks_Safe() {
-	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
-		job.(*importJob).State = internalpb.ImportJobState_Uncommitted
-		job.(*importJob).AutoCommit = true
+	s.manuallyUpdateJob(s.jobID, func(job bulkimport.ImportJob) {
+		job.(*bulkimport.Job).State = internalpb.ImportJobState_Uncommitted
+		job.(*bulkimport.Job).AutoCommit = true
 	})
 
 	callCount := 0
-	s.checker.hooks.commitImport = func(ctx context.Context, job ImportJob) error {
+	s.checker.Hooks.CommitImport = func(ctx context.Context, job bulkimport.ImportJob) error {
 		callCount++
 		return nil
 	}
 
 	for i := 0; i < 3; i++ {
-		s.checker.checkUncommittedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+		s.checker.CheckUncommittedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	}
 	s.Equal(3, callCount, "each tick must call the commit hook; broadcaster handles dedup")
 	s.Equal(internalpb.ImportJobState_Uncommitted, s.importMeta.GetJob(context.TODO(), s.jobID).GetState(),
 		"state must remain Uncommitted until the ack callback fires")
 }
 
-// ---------------------------------------------------------------------------
-// Tests for checkCommittingJob
-// ---------------------------------------------------------------------------
-
 func (s *ImportCheckerSuite) TestCheckCommittingJob_AllVchannelsDone() {
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 
 	// All vchannels committed → expect transition to Completed.
-	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
-		job.(*importJob).State = internalpb.ImportJobState_Committing
-		job.(*importJob).Vchannels = []string{"ch0"}
-		job.(*importJob).CommittedVchannels = []string{"ch0"}
+	s.manuallyUpdateJob(s.jobID, func(job bulkimport.ImportJob) {
+		job.(*bulkimport.Job).State = internalpb.ImportJobState_Committing
+		job.(*bulkimport.Job).Vchannels = []string{"ch0"}
+		job.(*bulkimport.Job).CommittedVchannels = []string{"ch0"}
 	})
 
-	s.checker.checkCommittingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckCommittingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(internalpb.ImportJobState_Completed, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 }
 
 func (s *ImportCheckerSuite) TestCheckCommittingJob_Partial() {
 	// Only some vchannels committed → job should stay Committing.
-	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
-		job.(*importJob).State = internalpb.ImportJobState_Committing
-		job.(*importJob).Vchannels = []string{"ch0", "ch1"}
-		job.(*importJob).CommittedVchannels = []string{"ch0"}
+	s.manuallyUpdateJob(s.jobID, func(job bulkimport.ImportJob) {
+		job.(*bulkimport.Job).State = internalpb.ImportJobState_Committing
+		job.(*bulkimport.Job).Vchannels = []string{"ch0", "ch1"}
+		job.(*bulkimport.Job).CommittedVchannels = []string{"ch0"}
 	})
 
-	s.checker.checkCommittingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckCommittingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(internalpb.ImportJobState_Committing, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 }
 
-// ---------------------------------------------------------------------------
-// Tests for checkPreImportingJob — empty-import fast path
-// ---------------------------------------------------------------------------
-
 func (s *ImportCheckerSuite) TestCheckPreImporting_EmptyImport_AutoCommitFalse() {
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 
 	// First, advance job to PreImporting by creating pre-import tasks.
 	alloc := s.alloc
@@ -1323,41 +1051,41 @@ func (s *ImportCheckerSuite) TestCheckPreImporting_EmptyImport_AutoCommitFalse()
 		return id, id + n, nil
 	})
 	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
-	s.checker.checkPendingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckPendingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(internalpb.ImportJobState_PreImporting, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 
 	// Mark all pre-import tasks completed with totalRows == 0 (empty import).
-	preimportTasks := s.importMeta.GetTaskByJob(context.TODO(), s.jobID, WithType(PreImportTaskType))
+	preimportTasks := s.importMeta.GetTaskByJob(context.TODO(), s.jobID, bulkimport.WithType(bulkimport.PreImportTaskType))
 	for _, t := range preimportTasks {
 		err := s.importMeta.UpdateTask(context.TODO(), t.GetTaskID(),
-			UpdateState(datapb.ImportTaskStateV2_Completed),
-			UpdateFileStats([]*datapb.ImportFileStats{{TotalRows: 0}}))
+			bulkimport.UpdateState(datapb.ImportTaskStateV2_Completed),
+			bulkimport.UpdateFileStats([]*datapb.ImportFileStats{{TotalRows: 0}}))
 		s.NoError(err)
 	}
 
 	// Set auto_commit=false on the job.
-	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
-		job.(*importJob).AutoCommit = false
+	s.manuallyUpdateJob(s.jobID, func(job bulkimport.ImportJob) {
+		job.(*bulkimport.Job).AutoCommit = false
 	})
 
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 	// The range gate runs before the zero-rows exit: a locally empty ranged job still
 	// has to match the peer's ranges, so the first tick parks it in AssigningIDRange.
-	s.checker.checkPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(internalpb.ImportJobState_AssigningIDRange, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 
 	// Apply the zero-width ranges the ack callback would deliver, then run the gate tail.
-	s.NoError(s.importMeta.UpdateJob(context.TODO(), s.jobID, UpdateJobIDRanges([]*commonpb.IDRange{
+	s.NoError(s.importMeta.UpdateJob(context.TODO(), s.jobID, bulkimport.UpdateJobIDRanges([]*commonpb.IDRange{
 		{Begin: 0, End: 0}, {Begin: 0, End: 0}, {Begin: 0, End: 0},
 	})))
-	s.checker.checkAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 
 	// With auto_commit=false, empty import should land in Uncommitted, not Completed.
 	s.Equal(internalpb.ImportJobState_Uncommitted, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 }
 
 func (s *ImportCheckerSuite) TestCheckPreImporting_EmptyImport_AutoCommitTrue() {
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 
 	// First, advance job to PreImporting.
 	alloc := s.alloc
@@ -1366,65 +1094,40 @@ func (s *ImportCheckerSuite) TestCheckPreImporting_EmptyImport_AutoCommitTrue() 
 		return id, id + n, nil
 	})
 	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
-	s.checker.checkPendingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckPendingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(internalpb.ImportJobState_PreImporting, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 
 	// Mark all pre-import tasks completed with totalRows == 0 (empty import).
-	preimportTasks := s.importMeta.GetTaskByJob(context.TODO(), s.jobID, WithType(PreImportTaskType))
+	preimportTasks := s.importMeta.GetTaskByJob(context.TODO(), s.jobID, bulkimport.WithType(bulkimport.PreImportTaskType))
 	for _, t := range preimportTasks {
 		err := s.importMeta.UpdateTask(context.TODO(), t.GetTaskID(),
-			UpdateState(datapb.ImportTaskStateV2_Completed),
-			UpdateFileStats([]*datapb.ImportFileStats{{TotalRows: 0}}))
+			bulkimport.UpdateState(datapb.ImportTaskStateV2_Completed),
+			bulkimport.UpdateFileStats([]*datapb.ImportFileStats{{TotalRows: 0}}))
 		s.NoError(err)
 	}
 
 	// auto_commit=true (the default), so job should go directly to Completed.
-	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
-		job.(*importJob).AutoCommit = true
+	s.manuallyUpdateJob(s.jobID, func(job bulkimport.ImportJob) {
+		job.(*bulkimport.Job).AutoCommit = true
 	})
 
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 	// Same gate-before-zero-rows order as the auto_commit=false case.
-	s.checker.checkPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(internalpb.ImportJobState_AssigningIDRange, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 
-	s.NoError(s.importMeta.UpdateJob(context.TODO(), s.jobID, UpdateJobIDRanges([]*commonpb.IDRange{
+	s.NoError(s.importMeta.UpdateJob(context.TODO(), s.jobID, bulkimport.UpdateJobIDRanges([]*commonpb.IDRange{
 		{Begin: 0, End: 0}, {Begin: 0, End: 0}, {Begin: 0, End: 0},
 	})))
-	s.checker.checkAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 
 	s.Equal(internalpb.ImportJobState_Completed, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
-}
-
-// ---------------------------------------------------------------------------
-// Helpers (newCapturingImportMeta is shared with ddl_callbacks_import_test.go)
-// ---------------------------------------------------------------------------
-
-// newCapturingImportMeta builds an importMeta whose catalog records every proto
-// handed to SaveImportJob, so tests can assert what was actually persisted.
-func newCapturingImportMeta(t *testing.T, saved *[]*datapb.ImportJob) ImportMeta {
-	catalog := mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
-	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, job *datapb.ImportJob) error {
-			*saved = append(*saved, job)
-			return nil
-		}).Maybe()
-	alloc := allocator.NewMockAllocator(t)
-	importMeta, err := NewImportMeta(context.Background(), catalog, alloc, nil)
-	require.NoError(t, err)
-	return importMeta
 }
 
 // enableGateMocks sets the recurring catalog/allocator expectations the gate
 // tests need: preimport task saves (pending -> completed) and open-ended AllocN.
 func (s *ImportCheckerSuite) enableGateMocks() {
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
 	s.alloc.EXPECT().AllocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
 		id := rand.Int63()
@@ -1438,10 +1141,10 @@ func (s *ImportCheckerSuite) enableGateMocks() {
 // PreImport tasks completed, TotalRows present in each ImportFileStats.
 func (s *ImportCheckerSuite) driveToPreImportDone(jobID int64, rowsByFile map[int64]int64) {
 	ctx := context.TODO()
-	s.checker.checkPendingJob(s.importMeta.GetJob(ctx, jobID))
+	s.checker.CheckPendingJob(s.importMeta.GetJob(ctx, jobID))
 	s.Equal(internalpb.ImportJobState_PreImporting, s.importMeta.GetJob(ctx, jobID).GetState())
 
-	tasks := s.importMeta.GetTaskByJob(ctx, jobID, WithType(PreImportTaskType))
+	tasks := s.importMeta.GetTaskByJob(ctx, jobID, bulkimport.WithType(bulkimport.PreImportTaskType))
 	s.NotEmpty(tasks)
 	for _, t := range tasks {
 		// Replace the task's fileStats with fresh protos carrying the exact counts,
@@ -1455,7 +1158,7 @@ func (s *ImportCheckerSuite) driveToPreImportDone(jobID int64, rowsByFile map[in
 			})
 		}
 		s.NoError(s.importMeta.UpdateTask(ctx, t.GetTaskID(),
-			UpdateState(datapb.ImportTaskStateV2_Completed), UpdateFileStats(stats)))
+			bulkimport.UpdateState(datapb.ImportTaskStateV2_Completed), bulkimport.UpdateFileStats(stats)))
 	}
 }
 
@@ -1463,8 +1166,8 @@ func (s *ImportCheckerSuite) driveToPreImportDone(jobID int64, rowsByFile map[in
 // "all preimport tasks completed" with the given exact per-file row counts
 // (keyed by the suite job's fileIDs 1, 2, 3).
 func (s *ImportCheckerSuite) setupAutoIDPreImportDone(rowsByFile map[int64]int64) {
-	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
-		job.(*importJob).Schema.Fields[0].AutoID = true
+	s.manuallyUpdateJob(s.jobID, func(job bulkimport.ImportJob) {
+		job.(*bulkimport.Job).Schema.Fields[0].AutoID = true
 	})
 	s.driveToPreImportDone(s.jobID, rowsByFile)
 }
@@ -1483,10 +1186,6 @@ func gateTestSchema(autoID bool) *schemapb.CollectionSchema {
 		},
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Gate: predicate helpers
-// ---------------------------------------------------------------------------
 
 func (s *ImportCheckerSuite) TestNeedsIDRanges() {
 	cases := []struct {
@@ -1527,8 +1226,8 @@ func (s *ImportCheckerSuite) TestNeedsIDRanges() {
 		}}, nil, false},
 	}
 	for _, tc := range cases {
-		job := &importJob{ImportJob: &datapb.ImportJob{Schema: tc.schema, Options: tc.options}}
-		s.Equal(tc.want, needsIDRanges(job), tc.name)
+		job := &bulkimport.Job{ImportJob: &datapb.ImportJob{Schema: tc.schema, Options: tc.options}}
+		s.Equal(tc.want, bulkimport.NeedsIDRanges(job), tc.name)
 	}
 }
 
@@ -1541,24 +1240,24 @@ func (s *ImportCheckerSuite) TestIDRangeGate_ZeroRowsSideFailsOnPeerRanges() {
 	s.enableGateMocks()
 	s.setupAutoIDPreImportDone(map[int64]int64{1: 0, 2: 0, 3: 0})
 
-	s.checker.checkPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(internalpb.ImportJobState_AssigningIDRange, s.importMeta.GetJob(context.TODO(), s.jobID).GetState(),
 		"a zero-row ranged job waits for the ranges like any other")
 
 	// The peer counted 100 rows for file 1 and none for the rest.
-	s.NoError(s.importMeta.UpdateJob(context.TODO(), s.jobID, UpdateJobIDRanges([]*commonpb.IDRange{
+	s.NoError(s.importMeta.UpdateJob(context.TODO(), s.jobID, bulkimport.UpdateJobIDRanges([]*commonpb.IDRange{
 		{Begin: 5000, End: 5100},
 		{Begin: 5100, End: 5100},
 		{Begin: 5100, End: 5100},
 	})))
 
-	s.checker.checkAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 
 	job := s.importMeta.GetJob(context.TODO(), s.jobID)
 	s.Equal(internalpb.ImportJobState_Failed, job.GetState())
 	s.Contains(job.GetReason(), "local row count 0")
 	s.Contains(job.GetReason(), "cross-cluster file divergence")
-	s.Equal(0, len(s.importMeta.GetTaskByJob(context.TODO(), s.jobID, WithType(ImportTaskType))),
+	s.Equal(0, len(s.importMeta.GetTaskByJob(context.TODO(), s.jobID, bulkimport.WithType(bulkimport.ImportTaskType))),
 		"the job must fail before any Import task is created")
 }
 
@@ -1568,37 +1267,23 @@ func (s *ImportCheckerSuite) TestIDRangeGate_ZeroRowsOnBothSidesProceeds() {
 	s.enableGateMocks()
 	s.setupAutoIDPreImportDone(map[int64]int64{1: 0, 2: 0, 3: 0})
 
-	s.checker.checkPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(internalpb.ImportJobState_AssigningIDRange, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 
-	s.NoError(s.importMeta.UpdateJob(context.TODO(), s.jobID, UpdateJobIDRanges([]*commonpb.IDRange{
+	s.NoError(s.importMeta.UpdateJob(context.TODO(), s.jobID, bulkimport.UpdateJobIDRanges([]*commonpb.IDRange{
 		{Begin: 5000, End: 5000},
 		{Begin: 5000, End: 5000},
 		{Begin: 5000, End: 5000},
 	})))
 
-	s.checker.checkAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 
 	job := s.importMeta.GetJob(context.TODO(), s.jobID)
 	s.Equal(internalpb.ImportJobState_Uncommitted, job.GetState(),
 		"zero rows on both sides keep the zero-rows exit, now reached through the gate")
 	s.Empty(job.GetReason())
-	s.Equal(0, len(s.importMeta.GetTaskByJob(context.TODO(), s.jobID, WithType(ImportTaskType))))
+	s.Equal(0, len(s.importMeta.GetTaskByJob(context.TODO(), s.jobID, bulkimport.WithType(bulkimport.ImportTaskType))))
 }
-
-func TestJobIDRangesSet_NilCheckNotEmptyCheck(t *testing.T) {
-	job := &importJob{ImportJob: &datapb.ImportJob{Files: []*internalpb.ImportFile{
-		{Id: 1, IdRange: &commonpb.IDRange{Begin: 5, End: 5}}, // empty range counts as set
-		{Id: 2},
-	}}}
-	assert.False(t, jobIDRangesSet(job))
-	job.GetFiles()[1].IdRange = &commonpb.IDRange{Begin: 5, End: 9}
-	assert.True(t, jobIDRangesSet(job))
-}
-
-// ---------------------------------------------------------------------------
-// Gate: primary path (Test Plan item 1)
-// ---------------------------------------------------------------------------
 
 // Preimport done, no ranges, primary role (or non-replicating, or role hook
 // disabled): the first tick moves the job PreImporting → AssigningIDRange without
@@ -1614,7 +1299,7 @@ func (s *ImportCheckerSuite) TestIDRangeGate_PrimaryAssignsWithAlignedFileRows()
 	var gotJobID int64
 	var gotFileRows []int64
 	var deadlineOK bool
-	s.checker.hooks.assignImportIDRange = func(ctx context.Context, job ImportJob, fileRows []int64) error {
+	s.checker.Hooks.AssignImportIDRange = func(ctx context.Context, job bulkimport.ImportJob, fileRows []int64) error {
 		calls++
 		gotJobID = job.GetJobID()
 		gotFileRows = fileRows
@@ -1624,11 +1309,11 @@ func (s *ImportCheckerSuite) TestIDRangeGate_PrimaryAssignsWithAlignedFileRows()
 	}
 
 	// Tick 1: the transition itself never consults the role nor broadcasts.
-	s.checker.hooks.getReplicationRole = func(context.Context) (replicateutil.Role, bool, error) {
+	s.checker.Hooks.GetReplicationRole = func(context.Context) (replicateutil.Role, bool, error) {
 		s.Fail("PreImporting → AssigningIDRange must not consult the replication role")
 		return replicateutil.RolePrimary, false, nil
 	}
-	s.checker.checkPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(0, calls, "the transition tick must not broadcast")
 	s.Equal(internalpb.ImportJobState_AssigningIDRange, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 	s.Empty(s.importMeta.GetJob(context.TODO(), s.jobID).GetReason())
@@ -1640,21 +1325,21 @@ func (s *ImportCheckerSuite) TestIDRangeGate_PrimaryAssignsWithAlignedFileRows()
 		name string
 		set  func()
 	}{
-		{"nil role hook", func() { s.checker.hooks.getReplicationRole = nil }},
+		{"nil role hook", func() { s.checker.Hooks.GetReplicationRole = nil }},
 		{"not replicating", func() {
-			s.checker.hooks.getReplicationRole = func(context.Context) (replicateutil.Role, bool, error) {
+			s.checker.Hooks.GetReplicationRole = func(context.Context) (replicateutil.Role, bool, error) {
 				return replicateutil.RolePrimary, false, nil
 			}
 		}},
 		{"replicating primary", func() {
-			s.checker.hooks.getReplicationRole = func(context.Context) (replicateutil.Role, bool, error) {
+			s.checker.Hooks.GetReplicationRole = func(context.Context) (replicateutil.Role, bool, error) {
 				return replicateutil.RolePrimary, true, nil
 			}
 		}},
 	}
 	for i, r := range roles {
 		r.set()
-		s.checker.checkAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+		s.checker.CheckAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 		s.Equal(i+1, calls, r.name+": each tick without applied ranges retries the broadcast")
 		s.Equal(s.jobID, gotJobID)
 		// Aligned with job.GetFiles() order (fileIDs 1,2,3), zero-row file included.
@@ -1664,14 +1349,10 @@ func (s *ImportCheckerSuite) TestIDRangeGate_PrimaryAssignsWithAlignedFileRows()
 		job := s.importMeta.GetJob(context.TODO(), s.jobID)
 		s.Equal(internalpb.ImportJobState_AssigningIDRange, job.GetState(), r.name)
 		s.Empty(job.GetReason(), r.name)
-		s.Equal(0, len(s.importMeta.GetTaskByJob(context.TODO(), s.jobID, WithType(ImportTaskType))),
+		s.Equal(0, len(s.importMeta.GetTaskByJob(context.TODO(), s.jobID, bulkimport.WithType(bulkimport.ImportTaskType))),
 			r.name+": no Import task may be created before the ranges are applied")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Gate: secondary path (Test Plan item 2)
-// ---------------------------------------------------------------------------
 
 // A secondary never allocates: it waits for the replicated UpdateImport. Once
 // the ack callback (simulated here via UpdateJobIDRanges) applies the primary's
@@ -1680,37 +1361,37 @@ func (s *ImportCheckerSuite) TestIDRangeGate_PrimaryAssignsWithAlignedFileRows()
 // IdRange).
 func (s *ImportCheckerSuite) TestIDRangeGate_SecondaryWaitsThenProceeds() {
 	s.enableGateMocks()
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 	s.setupAutoIDPreImportDone(map[int64]int64{1: 100, 2: 0, 3: 200})
 
 	roleCalls, assignCalls := 0, 0
-	s.checker.hooks.getReplicationRole = func(context.Context) (replicateutil.Role, bool, error) {
+	s.checker.Hooks.GetReplicationRole = func(context.Context) (replicateutil.Role, bool, error) {
 		roleCalls++
 		return replicateutil.RoleSecondary, true, nil
 	}
-	s.checker.hooks.assignImportIDRange = func(context.Context, ImportJob, []int64) error {
+	s.checker.Hooks.AssignImportIDRange = func(context.Context, bulkimport.ImportJob, []int64) error {
 		assignCalls++
 		return nil
 	}
 
 	// Tick 1: PreImporting → AssigningIDRange, without consulting the role.
-	s.checker.checkPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(0, roleCalls, "the transition tick must not consult the replication role")
 	s.Equal(0, assignCalls)
 	s.Equal(internalpb.ImportJobState_AssigningIDRange, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 
 	// Tick 2: secondary waits -- no allocation, no broadcast, stays AssigningIDRange.
-	s.checker.checkAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(1, roleCalls)
 	s.Equal(0, assignCalls, "a secondary must never allocate")
 	s.Equal(internalpb.ImportJobState_AssigningIDRange, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 
 	// Tick 3: still waiting; nothing changes (each tick only logs at Debug).
-	s.checker.checkAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(0, assignCalls)
 	s.Equal(internalpb.ImportJobState_AssigningIDRange, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
-	s.Equal(0, len(s.importMeta.GetTaskByJob(context.TODO(), s.jobID, WithType(ImportTaskType))))
+	s.Equal(0, len(s.importMeta.GetTaskByJob(context.TODO(), s.jobID, bulkimport.WithType(bulkimport.ImportTaskType))))
 
 	// The replicated UpdateImport ack applies the primary's ranges (what
 	// updateImportAckCallback does via UpdateJobIDRanges). Each range is sized to its
@@ -1720,17 +1401,17 @@ func (s *ImportCheckerSuite) TestIDRangeGate_SecondaryWaitsThenProceeds() {
 		{Begin: 5100, End: 5100}, // file 2: zero-row file, empty range
 		{Begin: 5100, End: 5300}, // file 3: 200 rows
 	}
-	s.NoError(s.importMeta.UpdateJob(context.TODO(), s.jobID, UpdateJobIDRanges(ranges)))
+	s.NoError(s.importMeta.UpdateJob(context.TODO(), s.jobID, bulkimport.UpdateJobIDRanges(ranges)))
 
 	// Tick 3: gate passes -> Import tasks created, ranges stamped onto task fileStats.
-	s.checker.checkAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(0, assignCalls, "ranges arrived via replication; no local allocation ever")
 	s.Equal(2, roleCalls, "gate satisfied -> role is no longer consulted")
 
 	job := s.importMeta.GetJob(context.TODO(), s.jobID)
 	s.Equal(internalpb.ImportJobState_Importing, job.GetState())
 
-	importTasks := s.importMeta.GetTaskByJob(context.TODO(), s.jobID, WithType(ImportTaskType))
+	importTasks := s.importMeta.GetTaskByJob(context.TODO(), s.jobID, bulkimport.WithType(bulkimport.ImportTaskType))
 	s.NotEmpty(importTasks)
 	wantByFileID := map[int64]*commonpb.IDRange{1: ranges[0], 2: ranges[1], 3: ranges[2]}
 	seen := make(map[int64]bool)
@@ -1751,10 +1432,6 @@ func (s *ImportCheckerSuite) TestIDRangeGate_SecondaryWaitsThenProceeds() {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Gate: indeterminate role (Test Plan item 3)
-// ---------------------------------------------------------------------------
-
 // An indeterminate replication role must NOT allocate -- a secondary that
 // allocated would diverge from the primary's authoritative range. No broadcast,
 // job waits in AssigningIDRange (reached from PreImporting without consulting the
@@ -1764,27 +1441,23 @@ func (s *ImportCheckerSuite) TestIDRangeGate_IndeterminateRoleWaits() {
 	s.setupAutoIDPreImportDone(map[int64]int64{1: 100, 2: 0, 3: 200})
 
 	assignCalls := 0
-	s.checker.hooks.getReplicationRole = func(context.Context) (replicateutil.Role, bool, error) {
+	s.checker.Hooks.GetReplicationRole = func(context.Context) (replicateutil.Role, bool, error) {
 		return replicateutil.RolePrimary, false, errors.New("balancer not ready")
 	}
-	s.checker.hooks.assignImportIDRange = func(context.Context, ImportJob, []int64) error {
+	s.checker.Hooks.AssignImportIDRange = func(context.Context, bulkimport.ImportJob, []int64) error {
 		assignCalls++
 		return nil
 	}
 
-	s.checker.checkPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(internalpb.ImportJobState_AssigningIDRange, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 
-	s.checker.checkAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(0, assignCalls, "an indeterminate role must never reach allocation")
 	job := s.importMeta.GetJob(context.TODO(), s.jobID)
 	s.Equal(internalpb.ImportJobState_AssigningIDRange, job.GetState())
 	s.Empty(job.GetReason())
 }
-
-// ---------------------------------------------------------------------------
-// Gate: assign hook errors are transient (Test Plan item 4)
-// ---------------------------------------------------------------------------
 
 // ErrNotPrimary (stale role during switchover) is tolerated as "wait"; any
 // other error is logged and retried next tick. Neither fails the job nor
@@ -1795,13 +1468,13 @@ func (s *ImportCheckerSuite) TestIDRangeGate_AssignErrorsAreTransient() {
 
 	calls := 0
 	hookErr := error(nil)
-	s.checker.hooks.assignImportIDRange = func(context.Context, ImportJob, []int64) error {
+	s.checker.Hooks.AssignImportIDRange = func(context.Context, bulkimport.ImportJob, []int64) error {
 		calls++
 		return hookErr
 	}
 
 	// Reach the waiting state first; the errors below all happen on AssigningIDRange ticks.
-	s.checker.checkPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(internalpb.ImportJobState_AssigningIDRange, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 
 	errCases := []struct {
@@ -1814,11 +1487,11 @@ func (s *ImportCheckerSuite) TestIDRangeGate_AssignErrorsAreTransient() {
 	}
 	for _, tc := range errCases {
 		hookErr = tc.err
-		s.checker.checkAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+		s.checker.CheckAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 		job := s.importMeta.GetJob(context.TODO(), s.jobID)
 		s.Equal(internalpb.ImportJobState_AssigningIDRange, job.GetState(), tc.name)
 		s.Empty(job.GetReason(), tc.name+": a transient broadcast error must not fail the job")
-		s.Equal(0, len(s.importMeta.GetTaskByJob(context.TODO(), s.jobID, WithType(ImportTaskType))), tc.name)
+		s.Equal(0, len(s.importMeta.GetTaskByJob(context.TODO(), s.jobID, bulkimport.WithType(bulkimport.ImportTaskType))), tc.name)
 	}
 	s.Equal(len(errCases), calls, "every tick must retry the broadcast")
 }
@@ -1832,42 +1505,38 @@ func (s *ImportCheckerSuite) TestIDRangeGate_PermanentAssignErrorFailsJob() {
 	s.setupAutoIDPreImportDone(map[int64]int64{1: 100, 2: 0, 3: 200})
 
 	calls := 0
-	s.checker.hooks.assignImportIDRange = func(context.Context, ImportJob, []int64) error {
+	s.checker.Hooks.AssignImportIDRange = func(context.Context, bulkimport.ImportJob, []int64) error {
 		calls++
 		return merr.WrapErrParameterInvalidMsg(
 			"import file 0 holds 5000000000 rows, more than one allocation batch can reserve (max 4294967295); split the file")
 	}
 
-	s.checker.checkPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(internalpb.ImportJobState_AssigningIDRange, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 
-	s.checker.checkAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 
 	job := s.importMeta.GetJob(context.TODO(), s.jobID)
 	s.Equal(internalpb.ImportJobState_Failed, job.GetState())
 	s.Contains(job.GetReason(), "split the file", "the precise reason must survive")
 	s.Equal(1, calls, "a permanent error must not be retried")
-	s.Equal(0, len(s.importMeta.GetTaskByJob(context.TODO(), s.jobID, WithType(ImportTaskType))),
+	s.Equal(0, len(s.importMeta.GetTaskByJob(context.TODO(), s.jobID, bulkimport.WithType(bulkimport.ImportTaskType))),
 		"no Import task may be created for a failed job")
 }
-
-// ---------------------------------------------------------------------------
-// Gate: excluded jobs proceed without the hook (Test Plan item 5)
-// ---------------------------------------------------------------------------
 
 // Backup and L0 jobs do not need per-file ranges: each proceeds straight to
 // Importing without the role or assign hooks ever firing.
 func (s *ImportCheckerSuite) TestIDRangeGate_ExcludedJobsProceedWithoutHook() {
 	s.enableGateMocks()
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 
 	roleCalls, assignCalls := 0, 0
-	s.checker.hooks.getReplicationRole = func(context.Context) (replicateutil.Role, bool, error) {
+	s.checker.Hooks.GetReplicationRole = func(context.Context) (replicateutil.Role, bool, error) {
 		roleCalls++
 		return replicateutil.RolePrimary, false, nil
 	}
-	s.checker.hooks.assignImportIDRange = func(context.Context, ImportJob, []int64) error {
+	s.checker.Hooks.AssignImportIDRange = func(context.Context, bulkimport.ImportJob, []int64) error {
 		assignCalls++
 		return nil
 	}
@@ -1882,7 +1551,7 @@ func (s *ImportCheckerSuite) TestIDRangeGate_ExcludedJobsProceedWithoutHook() {
 	}
 	for i, v := range variants {
 		jobID := int64(900 + i)
-		job := &importJob{
+		job := &bulkimport.Job{
 			ImportJob: &datapb.ImportJob{
 				JobID:        jobID,
 				CollectionID: 1,
@@ -1897,12 +1566,12 @@ func (s *ImportCheckerSuite) TestIDRangeGate_ExcludedJobsProceedWithoutHook() {
 					{Id: 2, Paths: []string{"b.json"}},
 				},
 			},
-			tr: timerecord.NewTimeRecorder("import job"),
+			Tr: timerecord.NewTimeRecorder("import job"),
 		}
 		s.NoError(s.importMeta.AddJob(context.TODO(), job))
 		s.driveToPreImportDone(jobID, map[int64]int64{1: 10, 2: 20})
 
-		s.checker.checkPreImportingJob(s.importMeta.GetJob(context.TODO(), jobID))
+		s.checker.CheckPreImportingJob(s.importMeta.GetJob(context.TODO(), jobID))
 		s.Equal(internalpb.ImportJobState_Importing,
 			s.importMeta.GetJob(context.TODO(), jobID).GetState(), v.name)
 	}
@@ -1922,33 +1591,29 @@ func (s *ImportCheckerSuite) TestIDRangeGate_VersionGateOffUsesLegacyPath() {
 	defer item.SwapTempValue(old)
 
 	s.enableGateMocks()
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 
 	roleCalls, assignCalls := 0, 0
-	s.checker.hooks.getReplicationRole = func(context.Context) (replicateutil.Role, bool, error) {
+	s.checker.Hooks.GetReplicationRole = func(context.Context) (replicateutil.Role, bool, error) {
 		roleCalls++
 		return replicateutil.RolePrimary, false, nil
 	}
-	s.checker.hooks.assignImportIDRange = func(context.Context, ImportJob, []int64) error {
+	s.checker.Hooks.AssignImportIDRange = func(context.Context, bulkimport.ImportJob, []int64) error {
 		assignCalls++
 		return nil
 	}
 
 	s.setupAutoIDPreImportDone(map[int64]int64{1: 10, 2: 20, 3: 30})
-	s.checker.checkPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 
 	job := s.importMeta.GetJob(context.TODO(), s.jobID)
 	s.Equal(internalpb.ImportJobState_Importing, job.GetState(),
 		"gate off must skip AssigningIDRange and go straight to Importing")
-	s.False(jobIDRangesSet(job), "the legacy path must leave every file range nil")
+	s.False(bulkimport.JobIDRangesSet(job), "the legacy path must leave every file range nil")
 	s.Equal(0, assignCalls, "gate off must never allocate/broadcast ranges")
 	s.Equal(0, roleCalls, "gate off must never consult the replication role")
 }
-
-// ---------------------------------------------------------------------------
-// Gate: totalRows == 0 (Test Plan item 6)
-// ---------------------------------------------------------------------------
 
 // A zero-row autoID job takes the existing empty-import branch before the gate:
 // no range is needed and nothing is broadcast, regardless of auto_commit.
@@ -1959,39 +1624,39 @@ func (s *ImportCheckerSuite) TestIDRangeGate_VersionGateOffUsesLegacyPath() {
 func (s *ImportCheckerSuite) TestIDRangeGate_ZeroRowsStillTakesTheRangeGate() {
 	s.enableGateMocks()
 	assignCalls := 0
-	s.checker.hooks.getReplicationRole = func(context.Context) (replicateutil.Role, bool, error) {
+	s.checker.Hooks.GetReplicationRole = func(context.Context) (replicateutil.Role, bool, error) {
 		return replicateutil.RolePrimary, false, nil
 	}
-	s.checker.hooks.assignImportIDRange = func(context.Context, ImportJob, []int64) error {
+	s.checker.Hooks.AssignImportIDRange = func(context.Context, bulkimport.ImportJob, []int64) error {
 		assignCalls++
 		return nil
 	}
 
 	// auto_commit=false -> Uncommitted (2PC surface) once the ranges are in.
-	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
-		job.(*importJob).Schema.Fields[0].AutoID = true
-		job.(*importJob).AutoCommit = false
+	s.manuallyUpdateJob(s.jobID, func(job bulkimport.ImportJob) {
+		job.(*bulkimport.Job).Schema.Fields[0].AutoID = true
+		job.(*bulkimport.Job).AutoCommit = false
 	})
 	s.driveToPreImportDone(s.jobID, map[int64]int64{1: 0, 2: 0, 3: 0})
-	s.checker.checkPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(internalpb.ImportJobState_AssigningIDRange, s.importMeta.GetJob(context.TODO(), s.jobID).GetState(),
 		"an empty ranged job waits for the ranges like any other")
 	// The broadcast is the AssigningIDRange tick, not the transition tick; the job stays
 	// parked until the ranges are applied.
-	s.checker.checkAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(internalpb.ImportJobState_AssigningIDRange, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 	s.Equal(1, assignCalls, "the primary broadcasts even for an empty job")
-	s.NoError(s.importMeta.UpdateJob(context.TODO(), s.jobID, UpdateJobIDRanges([]*commonpb.IDRange{
+	s.NoError(s.importMeta.UpdateJob(context.TODO(), s.jobID, bulkimport.UpdateJobIDRanges([]*commonpb.IDRange{
 		{Begin: 5000, End: 5000},
 		{Begin: 5000, End: 5000},
 		{Begin: 5000, End: 5000},
 	})))
-	s.checker.checkAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(internalpb.ImportJobState_Uncommitted, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 
 	// auto_commit=true -> Completed once the ranges are in.
 	jobID := int64(950)
-	job := &importJob{
+	job := &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID:        jobID,
 			CollectionID: 1,
@@ -2005,22 +1670,18 @@ func (s *ImportCheckerSuite) TestIDRangeGate_ZeroRowsStillTakesTheRangeGate() {
 				{Id: 1, Paths: []string{"a.json"}},
 			},
 		},
-		tr: timerecord.NewTimeRecorder("import job"),
+		Tr: timerecord.NewTimeRecorder("import job"),
 	}
 	s.NoError(s.importMeta.AddJob(context.TODO(), job))
 	s.driveToPreImportDone(jobID, map[int64]int64{1: 0})
-	s.checker.checkPreImportingJob(s.importMeta.GetJob(context.TODO(), jobID))
+	s.checker.CheckPreImportingJob(s.importMeta.GetJob(context.TODO(), jobID))
 	s.Equal(internalpb.ImportJobState_AssigningIDRange, s.importMeta.GetJob(context.TODO(), jobID).GetState())
-	s.checker.checkAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), jobID))
-	s.NoError(s.importMeta.UpdateJob(context.TODO(), jobID, UpdateJobIDRanges([]*commonpb.IDRange{{Begin: 5000, End: 5000}})))
-	s.checker.checkAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), jobID))
+	s.checker.CheckAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), jobID))
+	s.NoError(s.importMeta.UpdateJob(context.TODO(), jobID, bulkimport.UpdateJobIDRanges([]*commonpb.IDRange{{Begin: 5000, End: 5000}})))
+	s.checker.CheckAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), jobID))
 	s.Equal(internalpb.ImportJobState_Completed, s.importMeta.GetJob(context.TODO(), jobID).GetState())
 	s.Equal(2, assignCalls)
 }
-
-// ---------------------------------------------------------------------------
-// Gate: post-gate divergence check (Test Plan item 7)
-// ---------------------------------------------------------------------------
 
 // A ranged job whose local preimport row count differs from the size of the
 // primary's reserved range (cross-cluster file divergence) fails loudly before any
@@ -2030,31 +1691,31 @@ func (s *ImportCheckerSuite) TestIDRangeGate_ZeroRowsStillTakesTheRangeGate() {
 // AssigningIDRange, then fails once the divergent ranges are applied.
 func (s *ImportCheckerSuite) TestIDRangeGate_RowCountDivergenceFailsJob() {
 	s.enableGateMocks()
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 	// The job must fail before any Import task exists, so this must NOT fire.
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 	s.setupAutoIDPreImportDone(map[int64]int64{1: 100, 2: 0, 3: 200})
 
 	// Tick 1: preimport done, ranges unset → wait in AssigningIDRange.
-	s.checker.checkPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(internalpb.ImportJobState_AssigningIDRange, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 
 	// The primary reserved 150 ids for file 3; this cluster's preimport counted 200.
 	// The gate compares the local count against the range size, so this is a divergence.
-	s.NoError(s.importMeta.UpdateJob(context.TODO(), s.jobID, UpdateJobIDRanges([]*commonpb.IDRange{
+	s.NoError(s.importMeta.UpdateJob(context.TODO(), s.jobID, bulkimport.UpdateJobIDRanges([]*commonpb.IDRange{
 		{Begin: 5000, End: 5100}, // file 1: 100 rows
 		{Begin: 5100, End: 5100}, // file 2: zero-row
 		{Begin: 5100, End: 5250}, // file 3: 150 ids reserved, 200 local rows
 	})))
 
 	assignCalls := 0
-	s.checker.hooks.assignImportIDRange = func(context.Context, ImportJob, []int64) error {
+	s.checker.Hooks.AssignImportIDRange = func(context.Context, bulkimport.ImportJob, []int64) error {
 		assignCalls++
 		return nil
 	}
 
 	// Tick 2: the divergence check fires from the AssigningIDRange state.
-	s.checker.checkAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 
 	job := s.importMeta.GetJob(context.TODO(), s.jobID)
 	s.Equal(internalpb.ImportJobState_Failed, job.GetState())
@@ -2062,13 +1723,9 @@ func (s *ImportCheckerSuite) TestIDRangeGate_RowCountDivergenceFailsJob() {
 	s.Contains(job.GetReason(), "local row count 200")
 	s.Contains(job.GetReason(), "reserved ID range size 150")
 	s.Equal(0, assignCalls, "ranges were applied; the divergence is terminal, not a re-broadcast")
-	s.Equal(0, len(s.importMeta.GetTaskByJob(context.TODO(), s.jobID, WithType(ImportTaskType))),
+	s.Equal(0, len(s.importMeta.GetTaskByJob(context.TODO(), s.jobID, bulkimport.WithType(bulkimport.ImportTaskType))),
 		"the job must fail before any Import task is created")
 }
-
-// ---------------------------------------------------------------------------
-// Gate: missing preimport stat (Test Plan item 8)
-// ---------------------------------------------------------------------------
 
 // A job file without a completed preimport stat at ensureIDRanges time is an
 // internal inconsistency: warn and retry next tick -- no panic, no allocation.
@@ -2076,14 +1733,14 @@ func (s *ImportCheckerSuite) TestIDRangeGate_RowCountDivergenceFailsJob() {
 // AssigningIDRange tick that builds the file-row picture.
 func (s *ImportCheckerSuite) TestIDRangeGate_MissingStatWaits() {
 	s.enableGateMocks()
-	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
-		job.(*importJob).Schema.Fields[0].AutoID = true
-		job.(*importJob).State = internalpb.ImportJobState_PreImporting
+	s.manuallyUpdateJob(s.jobID, func(job bulkimport.ImportJob) {
+		job.(*bulkimport.Job).Schema.Fields[0].AutoID = true
+		job.(*bulkimport.Job).State = internalpb.ImportJobState_PreImporting
 	})
 
 	// One completed preimport task covering only files 1 and 2; the job has file 3 too.
-	task := &preImportTask{tr: timerecord.NewTimeRecorder("preimport task")}
-	task.task.Store(&datapb.PreImportTask{
+	task := &bulkimport.PreImportTask{Tr: timerecord.NewTimeRecorder("preimport task")}
+	task.Task.Store(&datapb.PreImportTask{
 		JobID:  s.jobID,
 		TaskID: 555,
 		State:  datapb.ImportTaskStateV2_Completed,
@@ -2095,18 +1752,18 @@ func (s *ImportCheckerSuite) TestIDRangeGate_MissingStatWaits() {
 	s.NoError(s.importMeta.AddTask(context.TODO(), task))
 
 	assignCalls := 0
-	s.checker.hooks.assignImportIDRange = func(context.Context, ImportJob, []int64) error {
+	s.checker.Hooks.AssignImportIDRange = func(context.Context, bulkimport.ImportJob, []int64) error {
 		assignCalls++
 		return nil
 	}
 
 	// The lone task is completed, so the transition fires despite the coverage gap.
-	s.checker.checkPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(internalpb.ImportJobState_AssigningIDRange, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 	s.Equal(0, assignCalls, "the transition tick must not allocate")
 
 	s.NotPanics(func() {
-		s.checker.checkAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+		s.checker.CheckAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	})
 	s.Equal(0, assignCalls, "no allocation with an incomplete file-row picture")
 	job := s.importMeta.GetJob(context.TODO(), s.jobID)
@@ -2114,52 +1771,44 @@ func (s *ImportCheckerSuite) TestIDRangeGate_MissingStatWaits() {
 	s.Empty(job.GetReason())
 }
 
-// ---------------------------------------------------------------------------
-// Gate: full primary transition PreImporting → AssigningIDRange → Importing
-// ---------------------------------------------------------------------------
-
 // End-to-end on the primary side: the transition tick broadcasts nothing, the
 // waiting tick broadcasts once, and once the ack callback's ranges are applied
 // (simulated via UpdateJobIDRanges) the job reaches Importing with stamped tasks.
 func (s *ImportCheckerSuite) TestIDRangeGate_PrimaryFullTransition() {
 	s.enableGateMocks()
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 	s.setupAutoIDPreImportDone(map[int64]int64{1: 100, 2: 0, 3: 200})
 
-	s.checker.hooks.getReplicationRole = func(context.Context) (replicateutil.Role, bool, error) {
+	s.checker.Hooks.GetReplicationRole = func(context.Context) (replicateutil.Role, bool, error) {
 		return replicateutil.RolePrimary, false, nil
 	}
 	assignCalls := 0
-	s.checker.hooks.assignImportIDRange = func(context.Context, ImportJob, []int64) error {
+	s.checker.Hooks.AssignImportIDRange = func(context.Context, bulkimport.ImportJob, []int64) error {
 		assignCalls++
 		return nil
 	}
 
-	s.checker.checkPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(internalpb.ImportJobState_AssigningIDRange, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 	s.Equal(0, assignCalls, "the transition tick must not broadcast")
 
-	s.checker.checkAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(1, assignCalls, "the waiting tick broadcasts")
 	s.Equal(internalpb.ImportJobState_AssigningIDRange, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 
-	s.NoError(s.importMeta.UpdateJob(context.TODO(), s.jobID, UpdateJobIDRanges([]*commonpb.IDRange{
+	s.NoError(s.importMeta.UpdateJob(context.TODO(), s.jobID, bulkimport.UpdateJobIDRanges([]*commonpb.IDRange{
 		{Begin: 5000, End: 5100},
 		{Begin: 5100, End: 5100},
 		{Begin: 5100, End: 5300},
 	})))
-	s.checker.checkAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(1, assignCalls, "ranges applied; no further broadcast")
 
 	job := s.importMeta.GetJob(context.TODO(), s.jobID)
 	s.Equal(internalpb.ImportJobState_Importing, job.GetState())
-	s.NotEmpty(s.importMeta.GetTaskByJob(context.TODO(), s.jobID, WithType(ImportTaskType)))
+	s.NotEmpty(s.importMeta.GetTaskByJob(context.TODO(), s.jobID, bulkimport.WithType(bulkimport.ImportTaskType)))
 }
-
-// ---------------------------------------------------------------------------
-// Gate: restart recovery from the persisted AssigningIDRange state
-// ---------------------------------------------------------------------------
 
 // importMeta reload is state-agnostic, so a job persisted in AssigningIDRange is
 // picked up by the new state-machine case: it proceeds when ranges are set and
@@ -2167,27 +1816,27 @@ func (s *ImportCheckerSuite) TestIDRangeGate_PrimaryFullTransition() {
 // AssigningIDRange reproduces the post-restart snapshot.
 func (s *ImportCheckerSuite) TestIDRangeGate_RestartRecovery() {
 	s.enableGateMocks()
-	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog := s.importMeta.(*bulkimport.Meta).Catalog.(*mocks.DataCoordCatalog)
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	// Recovered with ranges already applied → proceeds to Importing.
 	s.setupAutoIDPreImportDone(map[int64]int64{1: 100, 2: 0, 3: 200})
-	s.NoError(s.importMeta.UpdateJob(context.TODO(), s.jobID, UpdateJobIDRanges([]*commonpb.IDRange{
+	s.NoError(s.importMeta.UpdateJob(context.TODO(), s.jobID, bulkimport.UpdateJobIDRanges([]*commonpb.IDRange{
 		{Begin: 5000, End: 5100},
 		{Begin: 5100, End: 5100},
 		{Begin: 5100, End: 5300},
 	})))
-	s.manuallyUpdateJob(s.jobID, UpdateJobState(internalpb.ImportJobState_AssigningIDRange))
+	s.manuallyUpdateJob(s.jobID, bulkimport.UpdateJobState(internalpb.ImportJobState_AssigningIDRange))
 	s.Equal(internalpb.ImportJobState_AssigningIDRange,
 		s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 
-	s.checker.checkAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(internalpb.ImportJobState_Importing,
 		s.importMeta.GetJob(context.TODO(), s.jobID).GetState(), "a recovered ranged job must proceed")
 
 	// Recovered without ranges (secondary) → keeps waiting, never allocates.
 	jobID := int64(960)
-	job := &importJob{
+	job := &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID:        jobID,
 			CollectionID: 1,
@@ -2201,29 +1850,25 @@ func (s *ImportCheckerSuite) TestIDRangeGate_RestartRecovery() {
 				{Id: 2, Paths: []string{"b.json"}},
 			},
 		},
-		tr: timerecord.NewTimeRecorder("import job"),
+		Tr: timerecord.NewTimeRecorder("import job"),
 	}
 	s.NoError(s.importMeta.AddJob(context.TODO(), job))
 	s.driveToPreImportDone(jobID, map[int64]int64{1: 10, 2: 20})
-	s.manuallyUpdateJob(jobID, UpdateJobState(internalpb.ImportJobState_AssigningIDRange))
+	s.manuallyUpdateJob(jobID, bulkimport.UpdateJobState(internalpb.ImportJobState_AssigningIDRange))
 
 	assignCalls := 0
-	s.checker.hooks.getReplicationRole = func(context.Context) (replicateutil.Role, bool, error) {
+	s.checker.Hooks.GetReplicationRole = func(context.Context) (replicateutil.Role, bool, error) {
 		return replicateutil.RoleSecondary, true, nil
 	}
-	s.checker.hooks.assignImportIDRange = func(context.Context, ImportJob, []int64) error {
+	s.checker.Hooks.AssignImportIDRange = func(context.Context, bulkimport.ImportJob, []int64) error {
 		assignCalls++
 		return nil
 	}
-	s.checker.checkAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), jobID))
+	s.checker.CheckAssigningIDRangeJob(s.importMeta.GetJob(context.TODO(), jobID))
 	s.Equal(0, assignCalls, "a recovered secondary must never allocate")
 	s.Equal(internalpb.ImportJobState_AssigningIDRange,
 		s.importMeta.GetJob(context.TODO(), jobID).GetState())
 }
-
-// ---------------------------------------------------------------------------
-// Gate: progress bucket for AssigningIDRange
-// ---------------------------------------------------------------------------
 
 // AssigningIDRange reports the end-of-preimport bucket (40), coalesced to the
 // Importing display state like PreImporting, so GetImportProgress distinguishes
@@ -2231,53 +1876,11 @@ func (s *ImportCheckerSuite) TestIDRangeGate_RestartRecovery() {
 func (s *ImportCheckerSuite) TestIDRangeGate_AssigningIDRangeProgress() {
 	s.enableGateMocks()
 	s.setupAutoIDPreImportDone(map[int64]int64{1: 100, 2: 0, 3: 200})
-	s.checker.checkPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.CheckPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(internalpb.ImportJobState_AssigningIDRange, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 
-	progress, state, _, _, reason := GetJobProgress(context.TODO(), s.jobID, s.importMeta, s.checker.meta)
+	progress, state, _, _, reason := bulkimport.GetJobProgress(context.TODO(), s.jobID, s.importMeta, s.checker.Meta, s.checker.IndexMeta)
 	s.Equal(int64(40), progress)
 	s.Equal(internalpb.ImportJobState_Importing, state)
 	s.Empty(reason)
-}
-
-// ---------------------------------------------------------------------------
-// UpdateJobIDRanges (Test Plan item 15)
-// ---------------------------------------------------------------------------
-
-func TestUpdateJobIDRanges_SetsRangesAndPersists(t *testing.T) {
-	ctx := context.Background()
-	var saved []*datapb.ImportJob
-	importMeta := newCapturingImportMeta(t, &saved)
-
-	job := &importJob{
-		ImportJob: &datapb.ImportJob{
-			JobID: 1,
-			State: internalpb.ImportJobState_PreImporting,
-			Files: []*internalpb.ImportFile{{Id: 10}, {Id: 11}},
-		},
-		tr: timerecord.NewTimeRecorder("test"),
-	}
-	require.NoError(t, importMeta.AddJob(ctx, job))
-
-	ranges := []*commonpb.IDRange{
-		{Begin: 100, End: 110},
-		{Begin: 110, End: 110}, // zero-row file keeps its empty range
-	}
-	require.NoError(t, importMeta.UpdateJob(ctx, 1, UpdateJobIDRanges(ranges)))
-
-	// Survives re-GetJob: ranges by position.
-	got := importMeta.GetJob(ctx, 1)
-	require.NotNil(t, got)
-	assert.EqualValues(t, 100, got.GetFiles()[0].GetIdRange().GetBegin())
-	assert.EqualValues(t, 110, got.GetFiles()[0].GetIdRange().GetEnd())
-	assert.EqualValues(t, 110, got.GetFiles()[1].GetIdRange().GetBegin())
-	assert.EqualValues(t, 110, got.GetFiles()[1].GetIdRange().GetEnd())
-
-	// Persisted: the proto handed to the catalog carries the ranges.
-	require.NotEmpty(t, saved)
-	last := saved[len(saved)-1]
-	assert.EqualValues(t, 100, last.GetFiles()[0].GetIdRange().GetBegin())
-	assert.EqualValues(t, 110, last.GetFiles()[0].GetIdRange().GetEnd())
-	assert.EqualValues(t, 110, last.GetFiles()[1].GetIdRange().GetBegin())
-	assert.EqualValues(t, 110, last.GetFiles()[1].GetIdRange().GetEnd())
 }

@@ -28,6 +28,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/gc"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metacache"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/types"
@@ -54,23 +56,23 @@ func TestCheckpointAvailabilityFastPath(t *testing.T) {
 	}
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(checkpoints, nil).Times(3)
 	store := metacache.NewMetaStore(catalog)
-	m := &meta{catalog: catalog, metaStore: store, channelSync: newChannelSync()}
+	m := &meta.Meta{Catalog: catalog, MetaStore: store, ChannelSync: meta.NewChannelSync()}
 	store.LoadChannelCheckpoints(checkpoints)
-	gc := newGarbageCollector(m, newMockHandlerWithMeta(m), GcOption{broker: broker.NewCoordinatorBroker(coord)})
-	gc.recycleChannelCPMeta(context.Background(), nil)
+	gcx := gc.NewGarbageCollector(m, meta.NewMockHandlerWithMeta(m), gc.GcOption{Broker: broker.NewCoordinatorBroker(coord)})
+	gcx.RecycleChannelCPMeta(context.Background(), nil)
 	require.Equal(t, 2, coord.checks)
-	require.Len(t, m.metaStore.GetChannelCheckpoints(), 2)
+	require.Len(t, m.MetaStore.GetChannelCheckpoints(), 2)
 	// The embedded nil RPC interface and strict catalog mock reject any
 	// DescribeCollection/GcConfirm/Drop call on a positive cache hit.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	gc.recycleChannelCPMeta(ctx, nil)
+	gcx.RecycleChannelCPMeta(ctx, nil)
 	require.Equal(t, 2, coord.checks, "a canceled sweep must stop before checking live IDs")
-	pauseRecords := NewGCPauseRecords()
+	pauseRecords := gc.NewGCPauseRecords()
 	_, err := pauseRecords.Insert("test", time.Now().Add(time.Minute))
 	require.NoError(t, err)
-	gc.pausedCollection.Insert(123, pauseRecords)
-	gc.recycleChannelCPMeta(context.Background(), nil)
+	gcx.PausedCollection.Insert(123, pauseRecords)
+	gcx.RecycleChannelCPMeta(context.Background(), nil)
 	require.Equal(t, 3, coord.checks, "paused collections must not reach the fast path")
 }
 
@@ -144,16 +146,16 @@ func TestCheckpointAvailabilityFallback(t *testing.T) {
 					catalog.EXPECT().DropChannelCheckpoint(mock.Anything, mock.Anything).Return(nil).Times(3)
 				}
 				store := metacache.NewMetaStore(catalog)
-				m := &meta{catalog: catalog, metaStore: store, channelSync: newChannelSync()}
+				m := &meta.Meta{Catalog: catalog, MetaStore: store, ChannelSync: meta.NewChannelSync()}
 				store.LoadChannelCheckpoints(checkpoints)
-				gc := newGarbageCollector(m, newMockHandlerWithMeta(m), GcOption{broker: wrapped})
-				gc.recycleChannelCPMeta(context.Background(), nil)
+				gcx := gc.NewGarbageCollector(m, meta.NewMockHandlerWithMeta(m), gc.GcOption{Broker: wrapped})
+				gcx.RecycleChannelCPMeta(context.Background(), nil)
 				require.Equal(t, 2, calls, "fallback results must be reused across channels of one collection")
 				require.ErrorIs(t, previousOuter.Err(), context.Canceled)
 				if tc.dropped {
-					require.Empty(t, m.metaStore.GetChannelCheckpoints())
+					require.Empty(t, m.MetaStore.GetChannelCheckpoints())
 				} else {
-					require.Len(t, m.metaStore.GetChannelCheckpoints(), 3)
+					require.Len(t, m.MetaStore.GetChannelCheckpoints(), 3)
 				}
 			})
 		}

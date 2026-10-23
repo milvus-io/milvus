@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -33,14 +34,14 @@ import (
 // (1001) is Flushed, sorted, invisible and has binlogs — ready under the
 // default config (no index on the collection, no text/JSON stats). The member
 // can be mutated via opts to force a specific not-ready condition.
-func seedStagedInspectorMeta(t *testing.T, memberOpts ...func(*SegmentInfo)) (*meta, *model.SegmentChangeGroup) {
+func seedStagedInspectorMeta(t *testing.T, memberOpts ...func(*meta.SegmentInfo)) (*meta.Meta, *model.SegmentChangeGroup) {
 	t.Helper()
-	m, err := newMemoryMeta(t)
+	m, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	ctx := context.Background()
-	m.AddCollection(&collectionInfo{ID: 10, Schema: readinessVectorSchema()})
+	m.AddCollection(&meta.CollectionInfo{ID: 10, Schema: readinessVectorSchema()})
 
-	seg := NewSegmentInfo(&datapb.SegmentInfo{
+	seg := meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID: 1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, IsInvisible: true,
 		NumOfRows: 42, IsSorted: true,
@@ -61,7 +62,7 @@ func seedStagedInspectorMeta(t *testing.T, memberOpts ...func(*SegmentInfo)) (*m
 
 func TestSegmentChangeInspector_StagedToReady(t *testing.T) {
 	m, group := seedStagedInspectorMeta(t)
-	i := newSegmentChangeInspector(context.Background(), m, newMockAllocator(t))
+	i := newSegmentChangeInspector(context.Background(), m, meta.NewMockAllocator(t))
 	i.evaluateStaged(context.Background(), group)
 
 	got := m.GetSegmentChangeGroup(context.Background(), 10, 1)
@@ -71,8 +72,8 @@ func TestSegmentChangeInspector_StagedToReady(t *testing.T) {
 }
 
 func TestSegmentChangeInspector_StagedNotReady(t *testing.T) {
-	m, group := seedStagedInspectorMeta(t, func(seg *SegmentInfo) { seg.IsSorted = false })
-	i := newSegmentChangeInspector(context.Background(), m, newMockAllocator(t))
+	m, group := seedStagedInspectorMeta(t, func(seg *meta.SegmentInfo) { seg.IsSorted = false })
+	i := newSegmentChangeInspector(context.Background(), m, meta.NewMockAllocator(t))
 	i.evaluateStaged(context.Background(), group)
 
 	got := m.GetSegmentChangeGroup(context.Background(), 10, 1)
@@ -83,12 +84,12 @@ func TestSegmentChangeInspector_StagedTimeoutAborts(t *testing.T) {
 	Params.Save(Params.DataCoordCfg.SegmentChangeStagingTimeout.Key, "1")
 	defer Params.Reset(Params.DataCoordCfg.SegmentChangeStagingTimeout.Key)
 
-	m, group := seedStagedInspectorMeta(t, func(seg *SegmentInfo) { seg.IsSorted = false })
+	m, group := seedStagedInspectorMeta(t, func(seg *meta.SegmentInfo) { seg.IsSorted = false })
 	group.CreateTS = time.Now().Unix() - 100
 	// Persist the old CreateTS so the transition merge does not zero it.
 	require.NoError(t, m.UpdateSegmentChangeGroup(context.Background(), group))
 
-	i := newSegmentChangeInspector(context.Background(), m, newMockAllocator(t))
+	i := newSegmentChangeInspector(context.Background(), m, meta.NewMockAllocator(t))
 	i.evaluateStaged(context.Background(), group)
 
 	got := m.GetSegmentChangeGroup(context.Background(), 10, 1)
@@ -98,9 +99,9 @@ func TestSegmentChangeInspector_StagedTimeoutAborts(t *testing.T) {
 
 func TestSegmentChangeInspector_MemberDroppedFails(t *testing.T) {
 	m, group := seedStagedInspectorMeta(t)
-	require.NoError(t, m.UpdateSegmentsInfo(context.Background(), UpdateStatusOperator(1001, commonpb.SegmentState_Dropped)))
+	require.NoError(t, m.UpdateSegmentsInfo(context.Background(), meta.UpdateStatusOperator(1001, commonpb.SegmentState_Dropped)))
 
-	i := newSegmentChangeInspector(context.Background(), m, newMockAllocator(t))
+	i := newSegmentChangeInspector(context.Background(), m, meta.NewMockAllocator(t))
 	i.evaluateStaged(context.Background(), group)
 
 	got := m.GetSegmentChangeGroup(context.Background(), 10, 1)
@@ -111,10 +112,10 @@ func TestSegmentChangeInspector_MemberDroppedFails(t *testing.T) {
 func TestSegmentChangeInspector_SchemaFenceFails(t *testing.T) {
 	// C23: a schema bump while staged is unconvergeable — fail immediately
 	// instead of waiting out the staging timeout.
-	m, group := seedStagedInspectorMeta(t, func(seg *SegmentInfo) { seg.SchemaVersion = 1 })
+	m, group := seedStagedInspectorMeta(t, func(seg *meta.SegmentInfo) { seg.SchemaVersion = 1 })
 	m.GetCollection(10).Schema.Version = 2
 
-	i := newSegmentChangeInspector(context.Background(), m, newMockAllocator(t))
+	i := newSegmentChangeInspector(context.Background(), m, meta.NewMockAllocator(t))
 	i.evaluateStaged(context.Background(), group)
 
 	got := m.GetSegmentChangeGroup(context.Background(), 10, 1)
@@ -123,11 +124,11 @@ func TestSegmentChangeInspector_SchemaFenceFails(t *testing.T) {
 }
 
 func TestSegmentChangeInspector_ReadyPublishes(t *testing.T) {
-	m, err := newMemoryMeta(t)
+	m, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	ready := seedPublishMeta(t, m, model.SegmentChangeSourceMixCompaction)
 
-	i := newSegmentChangeInspector(context.Background(), m, newMockAllocator(t))
+	i := newSegmentChangeInspector(context.Background(), m, meta.NewMockAllocator(t))
 	i.tryPublish(context.Background(), ready)
 
 	require.Equal(t, model.SegmentChangeStateCommitted, m.GetSegmentChangeGroup(context.Background(), 10, 1).State)
@@ -138,12 +139,12 @@ func TestSegmentChangeInspector_ReadyPublishes(t *testing.T) {
 }
 
 func TestSegmentChangeInspector_ReadyMemberDroppedFails(t *testing.T) {
-	m, err := newMemoryMeta(t)
+	m, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	ready := seedPublishMeta(t, m, model.SegmentChangeSourceMixCompaction)
-	require.NoError(t, m.UpdateSegmentsInfo(context.Background(), UpdateStatusOperator(1001, commonpb.SegmentState_Dropped)))
+	require.NoError(t, m.UpdateSegmentsInfo(context.Background(), meta.UpdateStatusOperator(1001, commonpb.SegmentState_Dropped)))
 
-	i := newSegmentChangeInspector(context.Background(), m, newMockAllocator(t))
+	i := newSegmentChangeInspector(context.Background(), m, meta.NewMockAllocator(t))
 	i.tryPublish(context.Background(), ready)
 
 	got := m.GetSegmentChangeGroup(context.Background(), 10, 1)
@@ -152,14 +153,14 @@ func TestSegmentChangeInspector_ReadyMemberDroppedFails(t *testing.T) {
 }
 
 func TestSegmentChangeInspector_CollectionDroppedAborts(t *testing.T) {
-	m, err := newMemoryMeta(t)
+	m, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	ctx := context.Background()
 
-	dataViewCatalog, ok := m.catalog.(dataview.Catalog)
+	dataViewCatalog, ok := m.Catalog.(dataview.Catalog)
 	require.True(t, ok)
 	dv := dataview.NewManager(dataViewCatalog, nil)
-	m.dataViewManager = dv
+	m.DataViewManager = dv
 	_, err = dv.OnCreateCollection(ctx, dataview.CreateCollectionDataViewEvent{CollectionID: 10, VChannels: []string{"ch-1"}})
 	require.NoError(t, err)
 
@@ -167,7 +168,7 @@ func TestSegmentChangeInspector_CollectionDroppedAborts(t *testing.T) {
 	_, err = dv.OnDropCollection(ctx, 10)
 	require.NoError(t, err)
 
-	i := newSegmentChangeInspector(ctx, m, newMockAllocator(t))
+	i := newSegmentChangeInspector(ctx, m, meta.NewMockAllocator(t))
 	i.tryPublish(ctx, ready)
 
 	got := m.GetSegmentChangeGroup(ctx, 10, 1)
@@ -184,7 +185,7 @@ func TestSegmentChangeInspector_NilMetaNoop(t *testing.T) {
 
 func TestSegmentChangeInspector_CheckAllGroups(t *testing.T) {
 	m, group := seedStagedInspectorMeta(t)
-	i := newSegmentChangeInspector(context.Background(), m, newMockAllocator(t))
+	i := newSegmentChangeInspector(context.Background(), m, meta.NewMockAllocator(t))
 	i.checkAllGroups(context.Background())
 	require.Equal(t, model.SegmentChangeStateReady, m.GetSegmentChangeGroup(context.Background(), 10, 1).State)
 	_ = group
@@ -195,19 +196,19 @@ func TestSegmentChangeInspector_FailFastSkipsWaitingMembers(t *testing.T) {
 	// merely converging (unsorted, waits on the sort term) while member 1002 is
 	// schema-behind; the C23 fail-fast must fire THIS round, not after 1001
 	// converges.
-	m, err := newMemoryMeta(t)
+	m, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	ctx := context.Background()
-	m.AddCollection(&collectionInfo{ID: 10, Schema: readinessVectorSchema()})
+	m.AddCollection(&meta.CollectionInfo{ID: 10, Schema: readinessVectorSchema()})
 
-	for _, seg := range []*SegmentInfo{
-		NewSegmentInfo(&datapb.SegmentInfo{
+	for _, seg := range []*meta.SegmentInfo{
+		meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, IsInvisible: true,
 			NumOfRows: 42, IsSorted: false,
 			Binlogs: []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
 		}),
-		NewSegmentInfo(&datapb.SegmentInfo{
+		meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 1002, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, IsInvisible: true,
 			NumOfRows: 42, IsSorted: true,
@@ -224,7 +225,7 @@ func TestSegmentChangeInspector_FailFastSkipsWaitingMembers(t *testing.T) {
 	}
 	require.NoError(t, m.AddSegmentChangeGroup(ctx, group))
 
-	i := newSegmentChangeInspector(ctx, m, newMockAllocator(t))
+	i := newSegmentChangeInspector(ctx, m, meta.NewMockAllocator(t))
 	i.evaluateStaged(ctx, group)
 
 	got := m.GetSegmentChangeGroup(ctx, 10, 1)
@@ -235,7 +236,7 @@ func TestSegmentChangeInspector_FailFastSkipsWaitingMembers(t *testing.T) {
 func TestSegmentChangeInspector_UnconvergeableNoFootprint(t *testing.T) {
 	// F3: a member with no data footprint can never be published — the publish
 	// is rejected in Phase 2, and the group must be FAILED (not retried).
-	m, err := newMemoryMeta(t)
+	m, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	ctx := context.Background()
 	ready := seedPublishMeta(t, m, model.SegmentChangeSourceMixCompaction)
@@ -243,9 +244,9 @@ func TestSegmentChangeInspector_UnconvergeableNoFootprint(t *testing.T) {
 	member := m.GetSegment(ctx, 1001).Clone()
 	member.Binlogs = nil
 	member.ManifestPath = ""
-	m.segments.SetSegment(1001, member)
+	m.Segments.SetSegment(1001, member)
 
-	i := newSegmentChangeInspector(ctx, m, newMockAllocator(t))
+	i := newSegmentChangeInspector(ctx, m, meta.NewMockAllocator(t))
 	i.tryPublish(ctx, ready)
 
 	got := m.GetSegmentChangeGroup(ctx, 10, 1)

@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -77,7 +78,7 @@ func TestIndexServingReadinessSortTransition(t *testing.T) {
 					beforeState = commonpb.IndexState_Finished
 				}
 				assertIndexServingState(t, s, index, beforeState)
-				channel := &channelMeta{Name: "lineage_channel", CollectionID: 1, StartPosition: &msgpb.MsgPosition{Timestamp: 1}}
+				channel := &meta.ChannelMeta{Name: "lineage_channel", CollectionID: 1, StartPosition: &msgpb.MsgPosition{Timestamp: 1}}
 				before := newServerHandler(s).GetQueryVChanPositions(channel)
 				require.Empty(t, before.GetFlushedSegmentIds())
 				require.ElementsMatch(t, []int64{1}, before.GetUnflushedSegmentIds(), "ordinary invisible sort input is recovered as growing")
@@ -85,10 +86,10 @@ func TestIndexServingReadinessSortTransition(t *testing.T) {
 				// Exercise the real metadata producer after a successful worker
 				// sort result. Native sorting/file generation is outside this test.
 				catalog := &indexSortReadinessCatalog{}
-				s.meta.catalog = catalog
-				s.meta.ctx = context.Background()
+				s.meta.Catalog = catalog
+				s.meta.Ctx = context.Background()
 				collection := s.meta.GetCollection(1)
-				segments, err := s.meta.completeSortCompactionMutation(&datapb.CompactionTask{
+				segments, err := s.meta.CompleteSortCompactionMutation(&datapb.CompactionTask{
 					PlanID: 1000, CollectionID: 1, InputSegments: []int64{1}, Schema: collection.Schema,
 				}, &datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{{
 					SegmentID: 2, NumOfRows: 90, IsSorted: true,
@@ -98,11 +99,11 @@ func TestIndexServingReadinessSortTransition(t *testing.T) {
 				require.NoError(t, err)
 				require.Len(t, segments, 1)
 				require.Len(t, catalog.segments, 2, "producer persists the dropped input and sorted output")
-				parent := s.meta.segments.GetSegment(1)
+				parent := s.meta.Segments.GetSegment(1)
 				require.Equal(t, commonpb.SegmentState_Dropped, parent.GetState())
 				require.True(t, parent.GetCompacted())
 				require.True(t, parent.GetIsInvisible())
-				child := s.meta.segments.GetSegment(2)
+				child := s.meta.Segments.GetSegment(2)
 				require.Equal(t, commonpb.SegmentState_Flushed, child.GetState())
 				require.True(t, child.GetIsSorted())
 				require.False(t, child.GetIsInvisible())

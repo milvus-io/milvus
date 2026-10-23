@@ -25,6 +25,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -142,16 +144,16 @@ func TestTalonPrewarmDataCoordStartAfterHealthy(t *testing.T) {
 	// server-info file.
 	patchScheduler := mockey.Mock((*Server).startTaskScheduler).To(func(*Server) {}).Build()
 	defer patchScheduler.UnPatch()
-	patchImportReload := mockey.Mock((*importInspector).Reload).To(func(*importInspector) {}).Build()
+	patchImportReload := mockey.Mock((*bulkimport.Inspector).Reload).To(func(*bulkimport.Inspector) {}).Build()
 	defer patchImportReload.UnPatch()
 	patchLoops := mockey.Mock((*Server).startServerLoop).To(func(*Server) {}).Build()
 	defer patchLoops.UnPatch()
 	patchInfo := mockey.Mock(sessionutil.SaveServerInfo).To(func(string, int64) {}).Build()
 	defer patchInfo.UnPatch()
 
-	s := &Server{ctx: context.Background(), meta: newEmptyTestMeta(), importInspector: &importInspector{}}
+	s := &Server{ctx: context.Background(), meta: meta.NewEmptyTestMeta(), importInspector: &bulkimport.Inspector{}}
 	s.UpdateStateCode(commonpb.StateCode_Initializing)
-	s.meta.segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{
+	s.meta.Segments.SetSegment(1, meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID: 1, CollectionID: 10, State: commonpb.SegmentState_Flushed, ManifestPath: "unloaded/object",
 	}))
 	session := sessionutil.NewMockSession(t)

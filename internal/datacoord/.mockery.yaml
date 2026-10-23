@@ -8,32 +8,49 @@ dir: "{{.InterfaceDir}}"
 packages:
   github.com/milvus-io/milvus/internal/datacoord:
     interfaces:
-      trigger:
-        config:
-          mockname: MockTrigger
-      CompactionInspector:
-        config:
-          mockname: MockCompactionInspector
-      Handler:
-        config:
-          mockname: NMockHandler
       RWChannelStore:
         config:
           filename: mock_channel_store.go
-      IndexEngineVersionManager:
-        config:
-          mockname: MockVersionManager
-      Manager:
-        config:
-          filename: mock_segment_manager.go
-      TriggerManager:
       Cluster:
-      CompactionMeta:
       ChannelManager:
       SubCluster:
       StatsJobManager:
+  github.com/milvus-io/milvus/internal/datacoord/bulkimport:
+    interfaces:
       ImportMeta:
+  github.com/milvus-io/milvus/internal/datacoord/compaction:
+    interfaces:
+      TriggerManager:
+      CompactionInspector:
+        config:
+          mockname: MockCompactionInspector
+      Trigger:
+        config:
+          mockname: MockTrigger
+  github.com/milvus-io/milvus/internal/datacoord/compaction/task:
+    interfaces:
+      CompactionMeta:
+  github.com/milvus-io/milvus/internal/datacoord/compaction/view:
+    interfaces:
       CollectionTopologyQuerier:
+  github.com/milvus-io/milvus/internal/datacoord/index:
+    interfaces:
+      IndexEngineVersionManager:
+        config:
+          mockname: MockVersionManager
+  github.com/milvus-io/milvus/internal/datacoord/partitionstats:
+    interfaces:
+      PartitionStatsCleaner:
+  github.com/milvus-io/milvus/internal/datacoord/segment:
+    interfaces:
+      Manager:
+        config:
+          filename: mock_segment_manager.go
+  github.com/milvus-io/milvus/internal/datacoord/meta:
+    interfaces:
+      Handler:
+        config:
+          mockname: NMockHandler
   github.com/milvus-io/milvus/internal/datacoord/allocator:
     interfaces:
       Allocator:

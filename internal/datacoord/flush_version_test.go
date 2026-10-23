@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/dataview"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -23,19 +24,19 @@ import (
 )
 
 func (s *ServerSuite) setupFlushVersionCatalog() (*datacoordkv.Catalog, dataview.Manager) {
-	catalog := datacoordkv.NewCatalog(NewMetaMemoryKV(), "", "")
+	catalog := datacoordkv.NewCatalog(meta.NewMetaMemoryKV(), "", "")
 	manager := dataview.NewManager(catalog, nil)
 	_, err := manager.OnCreateCollection(context.Background(), dataview.CreateCollectionDataViewEvent{
 		CollectionID: 100, VChannels: []string{"ch1"},
 	})
 	require.NoError(s.T(), err)
-	s.testServer.meta.catalog = catalog
+	s.testServer.meta.Catalog = catalog
 	s.testServer.dataViewManager = manager
 	return catalog, manager
 }
 
 func (s *ServerSuite) addFlushVersionSegment(id, rows int64) *datapb.SaveBinlogPathsRequest {
-	require.NoError(s.T(), s.testServer.meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+	require.NoError(s.T(), s.testServer.meta.AddSegment(context.Background(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID: id, CollectionID: 100, PartitionID: 10, InsertChannel: "ch1",
 		State: commonpb.SegmentState_Growing, Level: datapb.SegmentLevel_L1,
 		NumOfRows: rows, StorageVersion: storage.StorageV2,
@@ -80,11 +81,11 @@ func (s *ServerSuite) TestFlushVersionSurvivesRetryRecoveryAndDataViewGC() {
 	segments, err := catalog.ListSegments(ctx, 100)
 	require.NoError(s.T(), err)
 	// Background compaction still reads segment indexes during this simulated restart.
-	s.testServer.meta.segMu.Lock()
+	s.testServer.meta.SegMu.Lock()
 	for _, segment := range segments {
-		s.testServer.meta.segments.SetSegment(segment.GetID(), NewSegmentInfo(segment))
+		s.testServer.meta.Segments.SetSegment(segment.GetID(), meta.NewSegmentInfo(segment))
 	}
-	s.testServer.meta.segMu.Unlock()
+	s.testServer.meta.SegMu.Unlock()
 	recovered, err := dataview.RecoverManager(ctx, catalog, func(context.Context, int64) (bool, error) {
 		return true, nil
 	}, nil, nil, nil)
@@ -94,7 +95,7 @@ func (s *ServerSuite) TestFlushVersionSurvivesRetryRecoveryAndDataViewGC() {
 
 	// Compaction may retire the source before SN retries. The original version
 	// must survive, and a retry must not put the source back into membership.
-	require.NoError(s.T(), s.testServer.meta.UpdateSegmentsInfo(ctx, UpdateStatusOperator(10, commonpb.SegmentState_Dropped)))
+	require.NoError(s.T(), s.testServer.meta.UpdateSegmentsInfo(ctx, meta.UpdateStatusOperator(10, commonpb.SegmentState_Dropped)))
 	_, err = recovered.RecomputeNow(ctx, 100, func(context.Context, int64) ([]dataview.LoadableSegment, error) {
 		return []dataview.LoadableSegment{{SegmentID: 20, VChannel: "ch1", PartitionID: 10, RowNum: 10}}, nil
 	})
@@ -150,7 +151,7 @@ func (s *ServerSuite) TestFlushVersionEmptyAndDropped() {
 	require.Equal(s.T(), int64(1), ref.Version().GetStreamingVersion())
 
 	req = s.addFlushVersionSegment(20, 10)
-	require.NoError(s.T(), s.testServer.meta.UpdateSegmentsInfo(context.Background(), UpdateStatusOperator(20, commonpb.SegmentState_Dropped)))
+	require.NoError(s.T(), s.testServer.meta.UpdateSegmentsInfo(context.Background(), meta.UpdateStatusOperator(20, commonpb.SegmentState_Dropped)))
 	require.Nil(s.T(), s.flushVersion(req))
 }
 
@@ -181,7 +182,7 @@ func (s *ServerSuite) TestFlushVersionFailedPublicationDoesNotInstallBinding() {
 // Force the catalog's large-binlog fallback and fail its final transaction.
 func TestFlushVersionChunkedCatalogCommit(t *testing.T) {
 	ctx := context.Background()
-	store := NewMetaMemoryKV()
+	store := meta.NewMetaMemoryKV()
 	catalog := datacoordkv.NewCatalog(store, "", "")
 	segment := &datapb.SegmentInfo{ID: 10, CollectionID: 100, PartitionID: 10, NumOfRows: 10, State: commonpb.SegmentState_Growing}
 	require.NoError(t, catalog.AddSegment(ctx, segment))
@@ -241,7 +242,7 @@ func TestFlushVersionChunkedCatalogCommit(t *testing.T) {
 // its many source records must remain eligible for the chunked write phase.
 func TestFlushVersionDoesNotExpandCompactionCommit(t *testing.T) {
 	ctx := context.Background()
-	catalog := datacoordkv.NewCatalog(NewMetaMemoryKV(), "", "")
+	catalog := datacoordkv.NewCatalog(meta.NewMetaMemoryKV(), "", "")
 	limit := mockey.Mock((*memkv.MemoryKV).MaxTxnOps).Return(2).Build()
 	defer limit.UnPatch()
 	var actions []metastore.UpdateAction

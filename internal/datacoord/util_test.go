@@ -27,6 +27,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -73,7 +77,7 @@ func (suite *UtilSuite) TestCompactionMergeInfoEnums() {
 	suite.Len(states, len(datapb.CompactionTaskState_name))
 	for internalType, publicType := range types {
 		for internalState, publicState := range states {
-			info := getCompactionMergeInfo(&datapb.CompactionTask{
+			info := policy.GetCompactionMergeInfo(&datapb.CompactionTask{
 				Type: internalType, State: internalState,
 				InputSegments: []int64{1, 2}, ResultSegments: []int64{3, 4},
 				FailReason: "retained failure reason",
@@ -198,7 +202,7 @@ func (f *fixedTSOAllocator) AllocN(_ context.Context, _ int64) (UniqueID, Unique
 func (suite *UtilSuite) TestGetZeroTime() {
 	n := 10
 	for i := 0; i < n; i++ {
-		timeGot := getZeroTime()
+		timeGot := meta.GetZeroTime()
 		suite.True(timeGot.IsZero())
 	}
 }
@@ -208,7 +212,7 @@ func (suite *UtilSuite) TestGetCollectionAutoCompactionEnabled() {
 		common.CollectionAutoCompactionKey: "true",
 	}
 
-	enabled, err := getCollectionAutoCompactionEnabled(properties)
+	enabled, err := policy.GetCollectionAutoCompactionEnabled(properties)
 	suite.NoError(err)
 	suite.True(enabled)
 
@@ -216,10 +220,10 @@ func (suite *UtilSuite) TestGetCollectionAutoCompactionEnabled() {
 		common.CollectionAutoCompactionKey: "bad_value",
 	}
 
-	_, err = getCollectionAutoCompactionEnabled(properties)
+	_, err = policy.GetCollectionAutoCompactionEnabled(properties)
 	suite.Error(err)
 
-	enabled, err = getCollectionAutoCompactionEnabled(map[string]string{})
+	enabled, err = policy.GetCollectionAutoCompactionEnabled(map[string]string{})
 	suite.NoError(err)
 	suite.Equal(Params.DataCoordCfg.EnableAutoCompaction.GetAsBool(), enabled)
 }
@@ -233,7 +237,7 @@ func (suite *UtilSuite) TestCreateStorageConfig() {
 		defer paramtable.Get().Reset(Params.LocalStorageCfg.Path.Key)
 		defer paramtable.Get().Reset(Params.MinioCfg.MaxConnections.Key)
 
-		config := createStorageConfig()
+		config := meta.CreateStorageConfig()
 		suite.Equal("local", config.StorageType)
 		suite.Equal("/tmp/milvus-local", config.RootPath)
 		// An external collection can still read from s3:// while the primary
@@ -251,7 +255,7 @@ func (suite *UtilSuite) TestCreateStorageConfig() {
 		defer paramtable.Get().Reset(Params.MinioCfg.UseCRC32C.Key)
 		defer paramtable.Get().Reset(Params.MinioCfg.MaxConnections.Key)
 
-		config := createStorageConfig()
+		config := meta.CreateStorageConfig()
 		suite.Equal("minio", config.StorageType)
 		suite.Equal(Params.MinioCfg.Address.GetValue(), config.Address)
 		suite.Equal("1.2", config.SslTlsMinVersion)
@@ -267,7 +271,7 @@ func (suite *UtilSuite) TestCalculateL0SegmentSize() {
 		Binlogs: []*datapb.Binlog{{LogSize: logsize, MemorySize: logsize}},
 	}}
 
-	suite.Equal(calculateL0SegmentSize(fields), float64(logsize))
+	suite.Equal(compaction.CalculateL0SegmentSize(fields), float64(logsize))
 }
 
 func (suite *UtilSuite) TestCalculateIndexTaskSlot() {
@@ -304,15 +308,15 @@ func (suite *UtilSuite) TestCalculateIndexTaskSlot() {
 
 	for _, tc := range testCases {
 		suite.Run(tc.name, func() {
-			suite.Equal(tc.wantFMIndex, calculateIndexTaskSlot(tc.fieldSize, 1, fmIndexParams))
-			suite.Equal(tc.wantInverted, calculateIndexTaskSlot(tc.fieldSize, 1, invertedParams))
+			suite.Equal(tc.wantFMIndex, index.CalculateIndexTaskSlot(tc.fieldSize, 1, fmIndexParams))
+			suite.Equal(tc.wantInverted, index.CalculateIndexTaskSlot(tc.fieldSize, 1, invertedParams))
 		})
 	}
 
 	// Existing vector indexes must keep using the same heavy curve after the
 	// helper started accepting the complete parameter set.
 	hnswParams := []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}}
-	suite.Equal(int64(16), calculateIndexTaskSlot(200*mib, 1, hnswParams))
+	suite.Equal(int64(16), index.CalculateIndexTaskSlot(200*mib, 1, hnswParams))
 }
 
 func (suite *UtilSuite) TestEstimateFMIndexBuildPeakBytes() {
@@ -321,27 +325,27 @@ func (suite *UtilSuite) TestEstimateFMIndexBuildPeakBytes() {
 
 	// For a single long row the compact-SA peak is ~9.66x payload: source data,
 	// int32 text + SA, sampled bitmap/rank directory, and 1/8 sampled SA values.
-	peak := estimateFMIndexBuildPeakBytes(100*mib, 1, defaultParams)
+	peak := index.EstimateFMIndexBuildPeakBytes(100*mib, 1, defaultParams)
 	suite.Greater(peak, int64(float64(100*mib)*9.65))
 	suite.Less(peak, int64(float64(100*mib)*9.68))
 
 	// More rows add separators and the actual std::string/string_view/boundary
 	// allocations even when payload bytes are identical.
-	manyRowsPeak := estimateFMIndexBuildPeakBytes(100*mib, 1_000_000, defaultParams)
+	manyRowsPeak := index.EstimateFMIndexBuildPeakBytes(100*mib, 1_000_000, defaultParams)
 	suite.Greater(manyRowsPeak, peak)
 
 	// The sampled-SA rate is a real build-memory knob and must affect admission.
 	rate4 := append(defaultParams, &commonpb.KeyValuePair{Key: indexparamcheck.FmSaSampleRateKey, Value: "4"})
 	rate64 := append(defaultParams, &commonpb.KeyValuePair{Key: indexparamcheck.FmSaSampleRateKey, Value: "64"})
 	suite.Greater(
-		estimateFMIndexBuildPeakBytes(100*mib, 1, rate4),
-		estimateFMIndexBuildPeakBytes(100*mib, 1, rate64),
+		index.EstimateFMIndexBuildPeakBytes(100*mib, 1, rate4),
+		index.EstimateFMIndexBuildPeakBytes(100*mib, 1, rate64),
 	)
 
 	// Crossing INT32_MAX symbols selects the int64 text + SA path and creates a
 	// visible discontinuity that the estimator must preserve.
-	compactPeak := estimateFMIndexBuildPeakBytes(int64(^uint32(0)>>1)-1, 0, defaultParams)
-	widePeak := estimateFMIndexBuildPeakBytes(int64(^uint32(0)>>1), 0, defaultParams)
+	compactPeak := index.EstimateFMIndexBuildPeakBytes(int64(^uint32(0)>>1)-1, 0, defaultParams)
+	widePeak := index.EstimateFMIndexBuildPeakBytes(int64(^uint32(0)>>1), 0, defaultParams)
 	suite.Greater(widePeak, compactPeak)
 }
 
@@ -364,7 +368,7 @@ func (suite *UtilSuite) TestFMIndexBuildTaskSlotsStandaloneRatio() {
 	params := []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexFMINDEX}}
 	// A ~9.66 GiB peak consumes five standalone slots when the 0.25 factor
 	// exposes four slots per 8 GiB memory unit.
-	suite.Equal(int64(5), fmIndexBuildTaskSlots(1024*1024*1024, 1, params))
+	suite.Equal(int64(5), index.FmIndexBuildTaskSlots(1024*1024*1024, 1, params))
 }
 
 func (suite *UtilSuite) TestFilterDuplicateFieldBinlogs() {
@@ -373,7 +377,7 @@ func (suite *UtilSuite) TestFilterDuplicateFieldBinlogs() {
 			FieldID: 102,
 			Binlogs: []*datapb.Binlog{{LogID: 1}, {LogID: 2}},
 		}}
-		result := filterDuplicateFieldBinlogs(nil, newLogs)
+		result := meta.FilterDuplicateFieldBinlogs(nil, newLogs)
 		suite.Equal(newLogs, result)
 	})
 
@@ -382,7 +386,7 @@ func (suite *UtilSuite) TestFilterDuplicateFieldBinlogs() {
 			FieldID: 102,
 			Binlogs: []*datapb.Binlog{{LogID: 1}},
 		}}
-		result := filterDuplicateFieldBinlogs(existing, nil)
+		result := meta.FilterDuplicateFieldBinlogs(existing, nil)
 		suite.Empty(result)
 	})
 
@@ -397,7 +401,7 @@ func (suite *UtilSuite) TestFilterDuplicateFieldBinlogs() {
 			Format:      "parquet",
 			Binlogs:     []*datapb.Binlog{{LogID: 2}, {LogID: 3}}, // 2 dup, 3 new
 		}}
-		result := filterDuplicateFieldBinlogs(existing, newLogs)
+		result := meta.FilterDuplicateFieldBinlogs(existing, newLogs)
 		suite.Equal(1, len(result))
 		suite.Equal(int64(102), result[0].FieldID)
 		suite.ElementsMatch([]int64{102, 103}, result[0].GetChildFields())
@@ -415,7 +419,7 @@ func (suite *UtilSuite) TestFilterDuplicateFieldBinlogs() {
 			FieldID: 102,
 			Binlogs: []*datapb.Binlog{{LogID: 1}, {LogID: 2}},
 		}}
-		result := filterDuplicateFieldBinlogs(existing, newLogs)
+		result := meta.FilterDuplicateFieldBinlogs(existing, newLogs)
 		suite.Empty(result)
 	})
 
@@ -428,7 +432,7 @@ func (suite *UtilSuite) TestFilterDuplicateFieldBinlogs() {
 			FieldID: 103,
 			Binlogs: []*datapb.Binlog{{LogID: 1}}, // same logID but different field
 		}}
-		result := filterDuplicateFieldBinlogs(existing, newLogs)
+		result := meta.FilterDuplicateFieldBinlogs(existing, newLogs)
 		suite.Equal(1, len(result))
 		suite.Equal(int64(103), result[0].FieldID)
 		suite.Equal(1, len(result[0].Binlogs))
@@ -443,7 +447,7 @@ func (suite *UtilSuite) TestFilterDuplicateFieldBinlogs() {
 			{FieldID: 102, Binlogs: []*datapb.Binlog{{LogID: 1}, {LogID: 2}}}, // 1 dup, 2 new
 			{FieldID: 104, Binlogs: []*datapb.Binlog{{LogID: 10}}},            // completely new field
 		}
-		result := filterDuplicateFieldBinlogs(existing, newLogs)
+		result := meta.FilterDuplicateFieldBinlogs(existing, newLogs)
 		suite.Equal(2, len(result))
 		// find fieldID 102 in result
 		var fb102, fb104 *datapb.FieldBinlog
@@ -475,7 +479,7 @@ func (suite *UtilSuite) TestMergeFieldBinlogsPreservesColumnGroupMetadata() {
 		Binlogs:     []*datapb.Binlog{{LogID: 2}},
 	}}
 
-	result := mergeFieldBinlogs(current, newLogs)
+	result := meta.MergeFieldBinlogs(current, newLogs)
 
 	suite.Len(result, 1)
 	suite.Equal([]int64{102, 103}, result[0].GetChildFields())

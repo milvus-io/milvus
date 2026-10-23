@@ -162,7 +162,7 @@ func (s *Server) GetQueryViewCollectionIndexInfos(collectionID int64) []*indexpb
 }
 
 func (s *Server) queryViewCollectionIndexInfos(collectionID int64) []*indexpb.IndexInfo {
-	indexes := s.meta.indexMeta.GetIndexesForCollection(collectionID, "")
+	indexes := s.indexMeta.GetIndexesForCollection(collectionID, "")
 	return packQueryViewCollectionIndexInfos(indexes)
 }
 

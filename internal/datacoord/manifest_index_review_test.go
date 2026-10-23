@@ -28,6 +28,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -38,73 +40,23 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
-
-func TestManifestIndexPathMatchesSegmentIdentity(t *testing.T) {
-	segment := &datapb.SegmentInfo{CollectionID: 1, PartitionID: 2, ID: 3}
-	for _, layout := range []indexpb.IndexStorePathVersion{0, 1} {
-		entry := packed.ManifestIndexInfo{
-			IndexID: 4, BuildID: 5, IndexVersion: 6, IndexName: "idx", IndexType: "HNSW",
-			IndexStorePathVersion: layout, IndexFileKeys: []string{"data"},
-		}
-		prefix := metautil.NewIndexPathBuilder("root", layout, 1, 2, 3, 5, 6).BuildPrefix()
-		entry.Path = prefix
-		info, ok := manifestIndexFilePathInfoForSegment("root", segment, entry)
-		require.True(t, ok)
-		require.Equal(t, []string{path.Join(prefix, "data")}, info.GetIndexFilePaths())
-		for _, badPath := range []string{
-			"other/root", prefix + "/child", path.Dir(prefix),
-			metautil.NewIndexPathBuilder("root", layout, 1, 2, 99, 5, 6).BuildPrefix(),
-		} {
-			entry.Path = badPath
-			_, ok = manifestIndexFilePathInfoForSegment("root", segment, entry)
-			require.False(t, ok, badPath)
-		}
-		entry.Path = prefix
-		entry.IndexFileKeys = []string{".."}
-		_, ok = manifestIndexFilePathInfoForSegment("root", segment, entry)
-		require.False(t, ok)
-	}
-}
-
-func TestManifestReloadMissingPointerFailsClosed(t *testing.T) {
-	m := setupManifestReloadMeta(t)
-	segment := m.GetSegment(context.Background(), 5001).Clone()
-	segment.ManifestPath = ""
-	m.segments.SetSegment(segment.GetID(), segment)
-	err := m.reloadSegmentIndexesFromManifests(context.Background())
-	require.ErrorIs(t, err, merr.ErrDataIntegrity)
-}
-
-func TestManifestReadConcurrencyUsesStorageBudget(t *testing.T) {
-	params := paramtable.Get()
-	scan := params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue("64")
-	defer params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue(scan)
-	connections := params.MinioCfg.MaxConnections.SwapTempValue("7")
-	defer params.MinioCfg.MaxConnections.SwapTempValue(connections)
-	require.Equal(t, 7, segmentIndexManifestReadConcurrency())
-	params.MinioCfg.MaxConnections.SwapTempValue("100")
-	require.Equal(t, 64, segmentIndexManifestReadConcurrency())
-	params.MinioCfg.MaxConnections.SwapTempValue("0")
-	require.Equal(t, 64, segmentIndexManifestReadConcurrency())
-}
 
 // Exercise the actual initMeta loop: healthy manifests are read once, a
 // transient read retries locally, and later recovery phases never replay newMeta.
 func TestInitMetaDoesNotReplayManifestScan(t *testing.T) {
 	for _, mode := range []string{"transient", "persistent", "invalid", "collection-reload", "dataview-reload", "dataview-failure"} {
 		t.Run(mode, func(t *testing.T) {
-			mockManifestIndexSubmissions(t)
+			meta.MockManifestIndexSubmissions(t)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			kv := NewMetaMemoryKV()
+			kv := meta.NewMetaMemoryKV()
 			catalog := datacoord.NewCatalog(kv, "", "")
-			m := bootMetaForRestart(t, catalog, 100)
+			m, _ := index.BootMetaForRestart(t, catalog, 100)
 			cm := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart"))
 			for _, id := range []int64{5001, 5002} {
-				require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+				require.NoError(t, m.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
 					CollectionID: 100, PartitionID: 10, ID: id, State: commonpb.SegmentState_Flushed,
 					StorageVersion: storage.StorageV3, ManifestHasIndex: true,
 					ManifestPath: packed.MarshalManifestPath(path.Join("/tmp/test-restart", "insert_log", metautil.JoinIDPath(100, 10, id)), 1),
@@ -192,32 +144,4 @@ func TestInitMetaDoesNotReplayManifestScan(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestManifestGCRejectsForeignArtifactDirectory(t *testing.T) {
-	ctx := context.Background()
-	m, err := newMemoryMeta(t)
-	require.NoError(t, err)
-	root := t.TempDir()
-	cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
-	foreign := path.Join(root, "unrelated", "index.bin")
-	require.NoError(t, cm.Write(ctx, foreign, []byte("keep")))
-	segment := NewSegmentInfo(&datapb.SegmentInfo{
-		ID: 3, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Dropped,
-		StorageVersion: storage.StorageV3, ManifestHasIndex: true,
-		ManifestPath: packed.MarshalManifestPath(path.Join(root, "insert_log/1/2/3"), 1),
-	})
-	require.NoError(t, m.AddSegment(ctx, segment))
-	entry := packed.ManifestIndexInfo{
-		IndexID: 4, BuildID: 5, IndexName: "idx", IndexType: "HNSW",
-		Path: path.Dir(foreign), IndexFileKeys: []string{"index.bin"},
-	}
-	reader := mockey.Mock(packed.GetManifestIndexInfosAsync).Return([]packed.ManifestIndexInfo{entry}, nil).Build()
-	defer reader.UnPatch()
-	gc := newGarbageCollector(m, newMockHandler(), GcOption{cli: cm})
-	gc.recycleDroppedSegment(ctx, newGCManifestReadIO(t), segment.GetID(), segment)
-	require.NotNil(t, m.GetSegment(ctx, segment.GetID()))
-	content, err := cm.Read(ctx, foreign)
-	require.NoError(t, err)
-	require.Equal(t, []byte("keep"), content)
 }

@@ -43,6 +43,14 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction/targets"
+	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/datacoord/segment"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metacache"
@@ -100,7 +108,7 @@ func TestGetSegmentStates(t *testing.T) {
 	t.Run("normal cases", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-		segment := &datapb.SegmentInfo{
+		seg := &datapb.SegmentInfo{
 			ID:            1000,
 			CollectionID:  100,
 			PartitionID:   0,
@@ -114,7 +122,7 @@ func TestGetSegmentStates(t *testing.T) {
 				Timestamp:   0,
 			},
 		}
-		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
+		err := svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg))
 		assert.NoError(t, err)
 
 		cases := []struct {
@@ -187,7 +195,7 @@ func TestGetInsertBinlogPaths(t *testing.T) {
 			},
 			State: commonpb.SegmentState_Growing,
 		}
-		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(info))
+		err := svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(info))
 		assert.NoError(t, err)
 		req := &datapb.GetInsertBinlogPathsRequest{
 			SegmentID: 0,
@@ -219,7 +227,7 @@ func TestGetInsertBinlogPaths(t *testing.T) {
 
 			State: commonpb.SegmentState_Growing,
 		}
-		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(info))
+		err := svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(info))
 		assert.NoError(t, err)
 		req := &datapb.GetInsertBinlogPathsRequest{
 			SegmentID: 1,
@@ -280,11 +288,11 @@ func TestGetCollectionStatisticsSchemaVersionConsistency(t *testing.T) {
 	// schema version == 0: no consistency stats emitted
 	t.Run("schema version 0 emits no consistency stats", func(t *testing.T) {
 		collectionID := int64(9001)
-		svr.meta.AddCollection(&collectionInfo{
+		svr.meta.AddCollection(&meta.CollectionInfo{
 			ID:     collectionID,
 			Schema: &schemapb.CollectionSchema{Version: 0},
 		})
-		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 9100, CollectionID: collectionID, State: commonpb.SegmentState_Flushed,
 		})))
 
@@ -298,12 +306,12 @@ func TestGetCollectionStatisticsSchemaVersionConsistency(t *testing.T) {
 	// schema version > 0 but no healthy segments: no consistency stats emitted
 	t.Run("no healthy segments emits no consistency stats", func(t *testing.T) {
 		collectionID := int64(9002)
-		svr.meta.AddCollection(&collectionInfo{
+		svr.meta.AddCollection(&meta.CollectionInfo{
 			ID:     collectionID,
 			Schema: &schemapb.CollectionSchema{Version: 1},
 		})
 		// Dropped segment is not healthy — should be excluded
-		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 9101, CollectionID: collectionID, State: commonpb.SegmentState_Dropped,
 		})))
 
@@ -317,17 +325,17 @@ func TestGetCollectionStatisticsSchemaVersionConsistency(t *testing.T) {
 	// L0 segment must not be counted in the consistency gate
 	t.Run("L0 segment excluded from consistency gate", func(t *testing.T) {
 		collectionID := int64(9003)
-		svr.meta.AddCollection(&collectionInfo{
+		svr.meta.AddCollection(&meta.CollectionInfo{
 			ID:     collectionID,
 			Schema: &schemapb.CollectionSchema{Version: 2},
 		})
 		// L0 segment with outdated schema version — must not contribute to total
-		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 9102, CollectionID: collectionID, State: commonpb.SegmentState_Flushed,
 			Level: datapb.SegmentLevel_L0, SchemaVersion: 1,
 		})))
 		// Normal L1 flushed segment that IS consistent
-		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 9103, CollectionID: collectionID, State: commonpb.SegmentState_Flushed,
 			Level: datapb.SegmentLevel_L1, SchemaVersion: 2,
 		})))
@@ -342,15 +350,15 @@ func TestGetCollectionStatisticsSchemaVersionConsistency(t *testing.T) {
 	// importing segment must not affect the consistency gate
 	t.Run("importing segment excluded from consistency gate", func(t *testing.T) {
 		collectionID := int64(9004)
-		svr.meta.AddCollection(&collectionInfo{
+		svr.meta.AddCollection(&meta.CollectionInfo{
 			ID:     collectionID,
 			Schema: &schemapb.CollectionSchema{Version: 3},
 		})
-		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 9104, CollectionID: collectionID, State: commonpb.SegmentState_Flushed,
 			IsImporting: true, SchemaVersion: 1,
 		})))
-		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 9105, CollectionID: collectionID, State: commonpb.SegmentState_Flushed,
 			SchemaVersion: 3,
 		})))
@@ -365,12 +373,12 @@ func TestGetCollectionStatisticsSchemaVersionConsistency(t *testing.T) {
 	// all segments consistent: consistent == total
 	t.Run("all segments consistent", func(t *testing.T) {
 		collectionID := int64(9005)
-		svr.meta.AddCollection(&collectionInfo{
+		svr.meta.AddCollection(&meta.CollectionInfo{
 			ID:     collectionID,
 			Schema: &schemapb.CollectionSchema{Version: 5},
 		})
 		for _, id := range []int64{9200, 9201, 9202} {
-			assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			assert.NoError(t, svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 				ID: id, CollectionID: collectionID, State: commonpb.SegmentState_Flushed, SchemaVersion: 5,
 			})))
 		}
@@ -385,17 +393,17 @@ func TestGetCollectionStatisticsSchemaVersionConsistency(t *testing.T) {
 	// partial segments consistent: consistent < total
 	t.Run("partial segments consistent", func(t *testing.T) {
 		collectionID := int64(9006)
-		svr.meta.AddCollection(&collectionInfo{
+		svr.meta.AddCollection(&meta.CollectionInfo{
 			ID:     collectionID,
 			Schema: &schemapb.CollectionSchema{Version: 7},
 		})
 		for _, id := range []int64{9300, 9301} {
-			assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+			assert.NoError(t, svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 				ID: id, CollectionID: collectionID, State: commonpb.SegmentState_Flushed, SchemaVersion: 7,
 			})))
 		}
 		// 1 stale segment (not yet backfilled)
-		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 9302, CollectionID: collectionID, State: commonpb.SegmentState_Flushed, SchemaVersion: 6,
 		})))
 
@@ -411,17 +419,17 @@ func TestGetCollectionStatisticsSchemaVersionConsistency(t *testing.T) {
 	// permanently block schema-change DDLs under any write traffic.
 	t.Run("growing segments excluded from consistency gate", func(t *testing.T) {
 		collectionID := int64(9007)
-		svr.meta.AddCollection(&collectionInfo{
+		svr.meta.AddCollection(&meta.CollectionInfo{
 			ID:     collectionID,
 			Schema: &schemapb.CollectionSchema{Version: 9},
 		})
 		// One flushed segment matching the current schema version
-		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 9400, CollectionID: collectionID, State: commonpb.SegmentState_Flushed, SchemaVersion: 9,
 		})))
 		// Growing segment with SchemaVersion=0 (streaming-created post-alter) — must NOT
 		// count toward total; otherwise the gate would report 1/2 and block DDL forever.
-		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 9401, CollectionID: collectionID, State: commonpb.SegmentState_Growing, SchemaVersion: 0,
 		})))
 
@@ -484,7 +492,7 @@ func TestGetSegmentInfo(t *testing.T) {
 				},
 			},
 		}
-		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segInfo))
+		err := svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(segInfo))
 		assert.NoError(t, err)
 
 		req := &datapb.GetSegmentInfoRequest{
@@ -505,7 +513,7 @@ func TestGetSegmentInfo(t *testing.T) {
 			ID:    0,
 			State: commonpb.SegmentState_Flushed,
 		}
-		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segInfo))
+		err := svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(segInfo))
 		assert.NoError(t, err)
 
 		req := &datapb.GetSegmentInfoRequest{
@@ -532,7 +540,7 @@ func TestGetSegmentInfo(t *testing.T) {
 			ID:    0,
 			State: commonpb.SegmentState_Dropped,
 		}
-		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segInfo))
+		err := svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(segInfo))
 		assert.NoError(t, err)
 
 		req := &datapb.GetSegmentInfoRequest{
@@ -569,7 +577,7 @@ func TestGetSegmentInfo(t *testing.T) {
 			ID:    0,
 			State: commonpb.SegmentState_Flushed,
 		}
-		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segInfo))
+		err := svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(segInfo))
 		assert.NoError(t, err)
 
 		req := &datapb.GetSegmentInfoRequest{
@@ -593,7 +601,7 @@ func TestGetSegmentInfo(t *testing.T) {
 		segInfo.InsertChannel = mockVChannel
 		segInfo.ID = 2
 		req.SegmentIDs = []int64{2}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segInfo))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(segInfo))
 		assert.NoError(t, err)
 		resp, err = svr.GetSegmentInfo(svr.ctx, req)
 		assert.NoError(t, err)
@@ -686,7 +694,7 @@ func TestGetFlushedSegments(t *testing.T) {
 					PartitionID:  tc.partID,
 					State:        commonpb.SegmentState_Flushed,
 				}
-				assert.Nil(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segInfo)))
+				assert.Nil(t, svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(segInfo)))
 			}
 			for _, us := range tc.unflushedSegments {
 				segInfo := &datapb.SegmentInfo{
@@ -695,7 +703,7 @@ func TestGetFlushedSegments(t *testing.T) {
 					PartitionID:  tc.partID,
 					State:        commonpb.SegmentState_Growing,
 				}
-				assert.Nil(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segInfo)))
+				assert.Nil(t, svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(segInfo)))
 			}
 
 			resp, err := svr.GetFlushedSegments(context.Background(), &datapb.GetFlushedSegmentsRequest{
@@ -787,7 +795,7 @@ func TestGetSegmentsByStates(t *testing.T) {
 				expected:     []int64{9, 10},
 			},
 		}
-		svr.meta.AddCollection(&collectionInfo{
+		svr.meta.AddCollection(&meta.CollectionInfo{
 			ID:         1,
 			Partitions: []int64{1, 2},
 			Schema:     nil,
@@ -798,7 +806,7 @@ func TestGetSegmentsByStates(t *testing.T) {
 				},
 			},
 		})
-		svr.meta.AddCollection(&collectionInfo{
+		svr.meta.AddCollection(&meta.CollectionInfo{
 			ID:         2,
 			Partitions: []int64{3},
 			Schema:     nil,
@@ -830,7 +838,7 @@ func TestGetSegmentsByStates(t *testing.T) {
 						Timestamp:   2,
 					},
 				}
-				assert.Nil(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segInfo)))
+				assert.Nil(t, svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(segInfo)))
 			}
 			for _, us := range tc.sealedSegments {
 				segInfo := &datapb.SegmentInfo{
@@ -852,7 +860,7 @@ func TestGetSegmentsByStates(t *testing.T) {
 						Timestamp:   2,
 					},
 				}
-				assert.Nil(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segInfo)))
+				assert.Nil(t, svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(segInfo)))
 			}
 			for _, us := range tc.growingSegments {
 				segInfo := &datapb.SegmentInfo{
@@ -874,7 +882,7 @@ func TestGetSegmentsByStates(t *testing.T) {
 						Timestamp:   2,
 					},
 				}
-				assert.Nil(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segInfo)))
+				assert.Nil(t, svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(segInfo)))
 			}
 			for _, ds := range tc.droppedSegments {
 				segInfo := &datapb.SegmentInfo{
@@ -885,7 +893,7 @@ func TestGetSegmentsByStates(t *testing.T) {
 					State:         commonpb.SegmentState_Dropped,
 					NumOfRows:     1024,
 				}
-				assert.Nil(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segInfo)))
+				assert.Nil(t, svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(segInfo)))
 			}
 
 			resp, err := svr.GetSegmentsByStates(context.Background(), &datapb.GetSegmentsByStatesRequest{
@@ -899,7 +907,7 @@ func TestGetSegmentsByStates(t *testing.T) {
 			assert.ElementsMatch(t, tc.expected, resp.GetSegments())
 		}
 
-		assert.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		assert.NoError(t, svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID:                  13,
 			CollectionID:        1,
 			PartitionID:         1,
@@ -1096,13 +1104,13 @@ func TestDropVirtualChannel(t *testing.T) {
 	maxOperationsPerTxn := int64(64)
 
 	t.Run("normal DropVirtualChannel", func(t *testing.T) {
-		segmentManager := NewMockManager(t)
+		segmentManager := segment.NewMockManager(t)
 		svr := newTestServer(t, WithSegmentManager(segmentManager))
 
 		defer closeTestServer(t, svr)
 
 		vecFieldID := int64(201)
-		svr.meta.AddCollection(&collectionInfo{
+		svr.meta.AddCollection(&meta.CollectionInfo{
 			ID: 0,
 			Schema: &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{
@@ -1124,10 +1132,10 @@ func TestDropVirtualChannel(t *testing.T) {
 				collectionID: 0,
 			})
 		}
-		for idx, segment := range segments {
+		for idx, seg := range segments {
 			s := &datapb.SegmentInfo{
-				ID:            segment.id,
-				CollectionID:  segment.collectionID,
+				ID:            seg.id,
+				CollectionID:  seg.collectionID,
 				InsertChannel: "ch1",
 
 				State: commonpb.SegmentState_Growing,
@@ -1140,7 +1148,7 @@ func TestDropVirtualChannel(t *testing.T) {
 					{FieldID: 1},
 				}
 			}
-			err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(s))
+			err := svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(s))
 			assert.NoError(t, err)
 		}
 		// add non matched segments
@@ -1152,7 +1160,7 @@ func TestDropVirtualChannel(t *testing.T) {
 			State: commonpb.SegmentState_Growing,
 		}
 
-		svr.meta.AddSegment(context.TODO(), NewSegmentInfo(os))
+		svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(os))
 
 		ctx := context.Background()
 		chanName := "ch1"
@@ -1164,10 +1172,10 @@ func TestDropVirtualChannel(t *testing.T) {
 			ChannelName: chanName,
 			Segments:    make([]*datapb.DropVirtualChannelSegment, 0, maxOperationsPerTxn),
 		}
-		for _, segment := range segments {
+		for _, seg := range segments {
 			seg2Drop := &datapb.DropVirtualChannelSegment{
-				SegmentID:    segment.id,
-				CollectionID: segment.collectionID,
+				SegmentID:    seg.id,
+				CollectionID: seg.collectionID,
 				Field2BinlogPaths: []*datapb.FieldBinlog{
 					{
 						FieldID: 1,
@@ -1307,9 +1315,9 @@ func TestGetChannelSeekPosition(t *testing.T) {
 		t.Run(test.testName, func(t *testing.T) {
 			svr := newTestServer(t)
 			defer closeTestServer(t, svr)
-			schema := newTestSchema()
+			schema := meta.NewTestSchema()
 			if test.collStartPos != nil {
-				svr.meta.AddCollection(&collectionInfo{
+				svr.meta.AddCollection(&meta.CollectionInfo{
 					ID:             0,
 					Schema:         schema,
 					StartPositions: test.collStartPos,
@@ -1323,7 +1331,7 @@ func TestGetChannelSeekPosition(t *testing.T) {
 					DmlPosition:   segPos,
 					InsertChannel: "ch1",
 				}
-				err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg))
+				err := svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg))
 				assert.NoError(t, err)
 			}
 			if test.channelCP != nil {
@@ -1331,7 +1339,7 @@ func TestGetChannelSeekPosition(t *testing.T) {
 				assert.NoError(t, err)
 			}
 
-			seekPos := svr.handler.(*ServerHandler).GetChannelSeekPosition(&channelMeta{
+			seekPos := svr.handler.(*ServerHandler).GetChannelSeekPosition(&meta.ChannelMeta{
 				Name:         test.channelName,
 				CollectionID: 0,
 			}, allPartitionID)
@@ -1351,9 +1359,9 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
-			return newMockMixCoord(), nil
+			return meta.NewMockMixCoord(), nil
 		}
-		mockHandler := NewNMockHandler(t)
+		mockHandler := meta.NewNMockHandler(t)
 		mockHandler.EXPECT().GetQueryVChanPositions(mock.Anything, mock.Anything).Return(&datapb.VchannelInfo{})
 		svr.handler = mockHandler
 
@@ -1397,10 +1405,10 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
-			return newMockMixCoord(), nil
+			return meta.NewMockMixCoord(), nil
 		}
-		svr.meta.AddCollection(&collectionInfo{
-			Schema: newTestSchema(),
+		svr.meta.AddCollection(&meta.CollectionInfo{
+			Schema: meta.NewTestSchema(),
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1410,7 +1418,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		err = svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
 			IndexID:      rand.Int63n(1000),
@@ -1453,32 +1461,32 @@ func TestGetRecoveryInfo(t *testing.T) {
 				},
 			},
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg1))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg1))
 		assert.NoError(t, err)
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg2))
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+		err = svr.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: seg1.ID,
 			BuildID:   seg1.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+		err = svr.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: seg1.ID,
 			State:   commonpb.IndexState_Finished,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+		err = svr.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: seg2.ID,
 			BuildID:   seg2.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+		err = svr.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: seg2.ID,
 			State:   commonpb.IndexState_Finished,
 		})
 		assert.NoError(t, err)
 
-		mockHandler := NewNMockHandler(t)
+		mockHandler := meta.NewNMockHandler(t)
 		mockHandler.EXPECT().GetQueryVChanPositions(mock.Anything, mock.Anything).Return(&datapb.VchannelInfo{})
 		svr.handler = mockHandler
 
@@ -1502,11 +1510,11 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
-			return newMockMixCoord(), nil
+			return meta.NewMockMixCoord(), nil
 		}
-		svr.meta.AddCollection(&collectionInfo{
+		svr.meta.AddCollection(&meta.CollectionInfo{
 			ID:     0,
-			Schema: newTestSchema(),
+			Schema: meta.NewTestSchema(),
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1552,9 +1560,9 @@ func TestGetRecoveryInfo(t *testing.T) {
 				},
 			},
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg1))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg1))
 		assert.NoError(t, err)
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg2))
 		assert.NoError(t, err)
 		// svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(nil, nil)
 
@@ -1575,10 +1583,10 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
-			return newMockMixCoord(), nil
+			return meta.NewMockMixCoord(), nil
 		}
-		svr.meta.AddCollection(&collectionInfo{
-			Schema: newTestSchema(),
+		svr.meta.AddCollection(&meta.CollectionInfo{
+			Schema: meta.NewTestSchema(),
 		})
 
 		binlogReq := &datapb.SaveBinlogPathsRequest{
@@ -1626,23 +1634,23 @@ func TestGetRecoveryInfo(t *testing.T) {
 			},
 			Flushed: true,
 		}
-		segment := createSegment(binlogReq.SegmentID, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Growing)
-		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
+		seg := createSegment(binlogReq.SegmentID, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Growing)
+		err := svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg))
 		assert.NoError(t, err)
 
-		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		err = svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
 			IndexID:      rand.Int63n(1000),
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
-			SegmentID: segment.ID,
-			BuildID:   segment.ID,
+		err = svr.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+			SegmentID: seg.ID,
+			BuildID:   seg.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
-			BuildID: segment.ID,
+		err = svr.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+			BuildID: seg.ID,
 			State:   commonpb.IndexState_Finished,
 		})
 		assert.NoError(t, err)
@@ -1677,11 +1685,11 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
-			return newMockMixCoord(), nil
+			return meta.NewMockMixCoord(), nil
 		}
-		svr.meta.AddCollection(&collectionInfo{
+		svr.meta.AddCollection(&meta.CollectionInfo{
 			ID:     0,
-			Schema: newTestSchema(),
+			Schema: meta.NewTestSchema(),
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1693,12 +1701,12 @@ func TestGetRecoveryInfo(t *testing.T) {
 
 		seg1 := createSegment(7, 0, 0, 100, 30, "vchan1", commonpb.SegmentState_Growing)
 		seg2 := createSegment(8, 0, 0, 100, 40, "vchan1", commonpb.SegmentState_Dropped)
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg1))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg1))
 		assert.NoError(t, err)
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg2))
 		assert.NoError(t, err)
 
-		mockHandler := NewNMockHandler(t)
+		mockHandler := meta.NewNMockHandler(t)
 		mockHandler.EXPECT().GetQueryVChanPositions(mock.Anything, mock.Anything).Return(&datapb.VchannelInfo{})
 		svr.handler = mockHandler
 
@@ -1721,11 +1729,11 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
-			return newMockMixCoord(), nil
+			return meta.NewMockMixCoord(), nil
 		}
-		svr.meta.AddCollection(&collectionInfo{
+		svr.meta.AddCollection(&meta.CollectionInfo{
 			ID:     0,
-			Schema: newTestSchema(),
+			Schema: meta.NewTestSchema(),
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1738,9 +1746,9 @@ func TestGetRecoveryInfo(t *testing.T) {
 		seg1 := createSegment(7, 0, 0, 100, 30, "vchan1", commonpb.SegmentState_Growing)
 		seg2 := createSegment(8, 0, 0, 100, 40, "vchan1", commonpb.SegmentState_Flushed)
 		seg2.IsFake = true
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg1))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg1))
 		assert.NoError(t, err)
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg2))
 		assert.NoError(t, err)
 
 		req := &datapb.GetRecoveryInfoRequest{
@@ -1760,11 +1768,11 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
-			return newMockMixCoord(), nil
+			return meta.NewMockMixCoord(), nil
 		}
-		svr.meta.AddCollection(&collectionInfo{
+		svr.meta.AddCollection(&meta.CollectionInfo{
 			ID:     0,
-			Schema: newTestSchema(),
+			Schema: meta.NewTestSchema(),
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1781,24 +1789,24 @@ func TestGetRecoveryInfo(t *testing.T) {
 		seg4 := createSegment(12, 0, 0, 2048, 40, "vchan1", commonpb.SegmentState_Dropped)
 		seg5 := createSegment(13, 0, 0, 2048, 40, "vchan1", commonpb.SegmentState_Flushed)
 		seg5.CompactionFrom = []int64{11, 12}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg1))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg1))
 		assert.NoError(t, err)
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg2))
 		assert.NoError(t, err)
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg3))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg3))
 		assert.NoError(t, err)
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg4))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg4))
 		assert.NoError(t, err)
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg5))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg5))
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		err = svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
 			IndexID:      rand.Int63n(1000),
 			IndexName:    "_default_idx_2",
 		})
 		assert.NoError(t, err)
-		svr.meta.indexMeta.updateSegmentIndex(&model.SegmentIndex{
+		svr.indexMeta.UpdateSegmentIndex(&model.SegmentIndex{
 			SegmentID:           seg4.ID,
 			CollectionID:        0,
 			PartitionID:         0,
@@ -1845,9 +1853,9 @@ func TestGetCompactionState(t *testing.T) {
 		svr := &Server{}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 
-		mockHandler := NewMockCompactionInspector(t)
-		mockHandler.EXPECT().getCompactionInfo(mock.Anything, mock.Anything).Return(&compactionInfo{
-			state: commonpb.CompactionState_Completed,
+		mockHandler := compaction.NewMockCompactionInspector(t)
+		mockHandler.EXPECT().GetCompactionInfo(mock.Anything, mock.Anything).Return(&policy.CompactionInfo{
+			State: commonpb.CompactionState_Completed,
 		})
 		svr.compactionInspector = mockHandler
 		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{})
@@ -1858,21 +1866,26 @@ func TestGetCompactionState(t *testing.T) {
 	t.Run("test get compaction state in running", func(t *testing.T) {
 		svr := &Server{}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		mockMeta := NewMockCompactionMeta(t)
-		mockMeta.EXPECT().GetCompactionTasksByTriggerID(mock.Anything, mock.Anything).Return(
-			[]*datapb.CompactionTask{
-				{State: datapb.CompactionTaskState_executing},
-				{State: datapb.CompactionTaskState_executing},
-				{State: datapb.CompactionTaskState_executing},
-				{State: datapb.CompactionTaskState_completed},
-				{State: datapb.CompactionTaskState_completed},
-				{State: datapb.CompactionTaskState_failed, PlanID: 1},
-				{State: datapb.CompactionTaskState_timeout, PlanID: 2},
-				{State: datapb.CompactionTaskState_timeout},
-				{State: datapb.CompactionTaskState_timeout},
-				{State: datapb.CompactionTaskState_timeout},
-			})
-		mockHandler := newCompactionInspector(mockMeta, nil, nil, nil, nil, newMockVersionManager())
+		mockMeta := ctask.NewMockCompactionMeta(t)
+		compactionTaskMeta := ctask.NewCompactionTaskMetaOverCatalog(nil)
+		tasks := []*datapb.CompactionTask{
+			{State: datapb.CompactionTaskState_executing},
+			{State: datapb.CompactionTaskState_executing},
+			{State: datapb.CompactionTaskState_executing},
+			{State: datapb.CompactionTaskState_completed},
+			{State: datapb.CompactionTaskState_completed},
+			{State: datapb.CompactionTaskState_failed, PlanID: 1},
+			{State: datapb.CompactionTaskState_timeout, PlanID: 2},
+			{State: datapb.CompactionTaskState_timeout},
+			{State: datapb.CompactionTaskState_timeout},
+			{State: datapb.CompactionTaskState_timeout},
+		}
+		// Tasks are keyed by slice index: several of them share PlanID 0.
+		compactionTaskMeta.CompactionTasks[1] = make(map[int64]*datapb.CompactionTask)
+		for i, task := range tasks {
+			compactionTaskMeta.CompactionTasks[1][int64(i)] = task
+		}
+		mockHandler := compaction.NewCompactionInspector(mockMeta, compactionTaskMeta, nil, nil, nil, nil, nil, nil, nil, nil, index.NewTestVersionManager())
 		svr.compactionInspector = mockHandler
 		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{CompactionID: 1})
 		assert.NoError(t, err)
@@ -1901,22 +1914,22 @@ func TestManualCompaction(t *testing.T) {
 		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		store := metacache.NewMetaStore(nil)
-		svr.meta = &meta{metaStore: store}
-		svr.meta.AddCollection(&collectionInfo{
+		svr.meta = &meta.Meta{MetaStore: store}
+		svr.meta.AddCollection(&meta.CollectionInfo{
 			ID:     1,
 			Schema: &schemapb.CollectionSchema{},
 		})
-		mockTrigger := NewMockTrigger(t)
+		mockTrigger := compaction.NewMockTrigger(t)
 		svr.compactionTrigger = mockTrigger
-		mockTrigger.EXPECT().TriggerCompaction(mock.Anything, mock.MatchedBy(func(signal *compactionSignal) bool {
-			return signal.collectionID == 1 && signal.isForce
+		mockTrigger.EXPECT().TriggerCompaction(mock.Anything, mock.MatchedBy(func(signal *compaction.CompactionSignal) bool {
+			return signal.CollectionID == 1 && signal.IsForce
 		})).Return(1, nil).Once()
 
-		mockTriggerManager := NewMockTriggerManager(t)
+		mockTriggerManager := compaction.NewMockTriggerManager(t)
 		svr.compactionTriggerManager = mockTriggerManager
 
-		mockHandler := NewMockCompactionInspector(t)
-		mockHandler.EXPECT().getCompactionTasksNumBySignalID(mock.Anything).Return(1)
+		mockHandler := compaction.NewMockCompactionInspector(t)
+		mockHandler.EXPECT().GetCompactionTasksNumBySignalID(mock.Anything).Return(1)
 		svr.compactionInspector = mockHandler
 		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
 			CollectionID: 1,
@@ -1932,19 +1945,19 @@ func TestManualCompaction(t *testing.T) {
 		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		store := metacache.NewMetaStore(nil)
-		svr.meta = &meta{metaStore: store}
-		svr.meta.AddCollection(&collectionInfo{
+		svr.meta = &meta.Meta{MetaStore: store}
+		svr.meta.AddCollection(&meta.CollectionInfo{
 			ID:     1,
 			Schema: &schemapb.CollectionSchema{},
 		})
-		mockTriggerManager := NewMockTriggerManager(t)
+		mockTriggerManager := compaction.NewMockTriggerManager(t)
 		svr.compactionTriggerManager = mockTriggerManager
 		mockTriggerManager.EXPECT().ManualTrigger(mock.Anything, mock.MatchedBy(func(req *milvuspb.ManualCompactionRequest) bool {
 			return req.GetCollectionID() == 1 && req.GetL0Compaction()
 		})).Return(1, nil)
 
-		mockHandler := NewMockCompactionInspector(t)
-		mockHandler.EXPECT().getCompactionTasksNumBySignalID(mock.Anything).Return(1)
+		mockHandler := compaction.NewMockCompactionInspector(t)
+		mockHandler.EXPECT().GetCompactionTasksNumBySignalID(mock.Anything).Return(1)
 		svr.compactionInspector = mockHandler
 		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
 			CollectionID: 1,
@@ -1963,20 +1976,21 @@ func TestManualCompaction(t *testing.T) {
 		alloc.EXPECT().AllocID(mock.Anything).Return(int64(100), nil).Once()
 		alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(200), nil).Once()
 
-		catalog, records, _, _ := newCompactionTargetTestCatalog(t)
-		targetMeta, err := newCompactionTargetMeta(context.Background(), catalog)
+		catalog, records, _, _ := targets.NewCompactionTargetTestCatalog(t)
+		targetMeta, err := targets.NewCompactionTargetMeta(context.Background(), catalog)
 		require.NoError(t, err)
 
-		handler := NewNMockHandler(t)
-		handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(&collectionInfo{}, nil)
-		inspector := NewMockCompactionInspector(t)
-		versionManager := NewMockVersionManager(t)
+		handler := meta.NewNMockHandler(t)
+		handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(&meta.CollectionInfo{}, nil)
+		inspector := compaction.NewMockCompactionInspector(t)
+		versionManager := index.NewMockVersionManager(t)
 		versionManager.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.7.0")).Maybe()
 
 		svr := &Server{allocator: alloc}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.meta = &meta{compactionTargetMeta: targetMeta}
-		svr.compactionTriggerManager = NewCompactionTriggerManager(alloc, handler, inspector, svr.meta, versionManager)
+		svr.meta = &meta.Meta{}
+		svr.compactionTargetMeta = targetMeta
+		svr.compactionTriggerManager = compaction.NewCompactionTriggerManager(alloc, handler, inspector, svr.meta, nil, nil, nil, svr.compactionTargetMeta, versionManager)
 
 		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
 			CollectionID: 1,
@@ -1996,7 +2010,7 @@ func TestManualCompaction(t *testing.T) {
 		require.Equal(t, uint64(200), record.GetActivatedAtTS())
 		require.Equal(t, uint64(200), record.GetExpectedTS())
 		require.Equal(t, int64(1), record.GetCollectionID())
-		segmentIDs, ok := compactionTargetSegmentIDs(record)
+		segmentIDs, ok := targets.CompactionTargetSegmentIDs(record)
 		require.True(t, ok)
 		require.Equal(t, []int64{10, 20}, segmentIDs)
 	})
@@ -2027,20 +2041,21 @@ func TestManualCompaction(t *testing.T) {
 			t.Run(test.name, func(t *testing.T) {
 				alloc := allocator.NewMockAllocator(t)
 
-				catalog, records, _, _ := newCompactionTargetTestCatalog(t)
-				targetMeta, err := newCompactionTargetMeta(context.Background(), catalog)
+				catalog, records, _, _ := targets.NewCompactionTargetTestCatalog(t)
+				targetMeta, err := targets.NewCompactionTargetMeta(context.Background(), catalog)
 				require.NoError(t, err)
 
-				handler := NewNMockHandler(t)
-				handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(&collectionInfo{}, nil)
-				inspector := NewMockCompactionInspector(t)
-				versionManager := NewMockVersionManager(t)
+				handler := meta.NewNMockHandler(t)
+				handler.EXPECT().GetCollection(mock.Anything, int64(1)).Return(&meta.CollectionInfo{}, nil)
+				inspector := compaction.NewMockCompactionInspector(t)
+				versionManager := index.NewMockVersionManager(t)
 				versionManager.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("2.7.0")).Maybe()
 
 				svr := &Server{allocator: alloc}
 				svr.stateCode.Store(commonpb.StateCode_Healthy)
-				svr.meta = &meta{compactionTargetMeta: targetMeta}
-				svr.compactionTriggerManager = NewCompactionTriggerManager(alloc, handler, inspector, svr.meta, versionManager)
+				svr.meta = &meta.Meta{}
+				svr.compactionTargetMeta = targetMeta
+				svr.compactionTriggerManager = compaction.NewCompactionTriggerManager(alloc, handler, inspector, svr.meta, nil, nil, nil, svr.compactionTargetMeta, versionManager)
 
 				resp, err := svr.ManualCompaction(context.Background(), test.request)
 
@@ -2056,12 +2071,12 @@ func TestManualCompaction(t *testing.T) {
 		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		store := metacache.NewMetaStore(nil)
-		svr.meta = &meta{metaStore: store}
-		svr.meta.AddCollection(&collectionInfo{
+		svr.meta = &meta.Meta{MetaStore: store}
+		svr.meta.AddCollection(&meta.CollectionInfo{
 			ID:     1,
 			Schema: &schemapb.CollectionSchema{},
 		})
-		mockTrigger := NewMockTrigger(t)
+		mockTrigger := compaction.NewMockTrigger(t)
 		svr.compactionTrigger = mockTrigger
 		mockTrigger.EXPECT().TriggerCompaction(mock.Anything, mock.Anything).Return(0, errors.New("mock error"))
 
@@ -2076,7 +2091,7 @@ func TestManualCompaction(t *testing.T) {
 	t.Run("test manual compaction with closed server", func(t *testing.T) {
 		svr := &Server{}
 		svr.stateCode.Store(commonpb.StateCode_Abnormal)
-		mockTrigger := NewMockTrigger(t)
+		mockTrigger := compaction.NewMockTrigger(t)
 		svr.compactionTrigger = mockTrigger
 		mockTrigger.EXPECT().TriggerCompaction(mock.Anything, mock.Anything).Return(1, nil).Maybe()
 
@@ -2091,10 +2106,10 @@ func TestManualCompaction(t *testing.T) {
 
 func TestGetCompactionStateWithPlans(t *testing.T) {
 	t.Run("shared trigger retains running tasks and sorts plans", func(t *testing.T) {
-		svr := &Server{meta: &meta{compactionTaskMeta: newTestCompactionTaskMeta(t)}}
+		svr := &Server{meta: &meta.Meta{}, domainMetas: domainMetas{compactionTaskMeta: ctask.NewTestCompactionTaskMeta(t)}}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		for _, id := range []int64{8, 3, 6, 1, 4, 7, 2, 5} {
-			svr.meta.GetCompactionTaskMeta().saveCompactionTaskMemory(&datapb.CompactionTask{
+			svr.compactionTaskMeta.SaveCompactionTaskMemory(&datapb.CompactionTask{
 				PlanID: id, TriggerID: 100, CollectionID: id%2 + 1,
 				Type:  datapb.CompactionType_Level0DeleteCompaction,
 				State: datapb.CompactionTaskState_executing,
@@ -2116,10 +2131,10 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 		svr := &Server{}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 
-		mockHandler := NewMockCompactionInspector(t)
-		mockHandler.EXPECT().getCompactionInfo(mock.Anything, mock.Anything).Return(&compactionInfo{
-			state:        commonpb.CompactionState_Executing,
-			executingCnt: 1,
+		mockHandler := compaction.NewMockCompactionInspector(t)
+		mockHandler.EXPECT().GetCompactionInfo(mock.Anything, mock.Anything).Return(&policy.CompactionInfo{
+			State:        commonpb.CompactionState_Executing,
+			ExecutingCnt: 1,
 		})
 		svr.compactionInspector = mockHandler
 
@@ -2134,8 +2149,8 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 	t.Run("test get all retained tasks by collection", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-		taskMeta := svr.meta.GetCompactionTaskMeta()
-		taskMeta.saveCompactionTaskMemory(&datapb.CompactionTask{
+		taskMeta := svr.compactionTaskMeta
+		taskMeta.SaveCompactionTaskMemory(&datapb.CompactionTask{
 			PlanID:         10,
 			TriggerID:      100,
 			CollectionID:   1,
@@ -2146,7 +2161,7 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 			InputSegments:  []int64{1, 2},
 			ResultSegments: []int64{3, 4},
 		})
-		taskMeta.saveCompactionTaskMemory(&datapb.CompactionTask{
+		taskMeta.SaveCompactionTaskMemory(&datapb.CompactionTask{
 			PlanID:        11,
 			TriggerID:     101,
 			CollectionID:  1,
@@ -2157,7 +2172,7 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 			FailReason:    "mock failure",
 			InputSegments: []int64{5},
 		})
-		taskMeta.saveCompactionTaskMemory(&datapb.CompactionTask{
+		taskMeta.SaveCompactionTaskMemory(&datapb.CompactionTask{
 			PlanID:       12,
 			TriggerID:    102,
 			CollectionID: 2,
@@ -2250,7 +2265,7 @@ func TestHandleSessionEvent(t *testing.T) {
 	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
 	t.Run("handle events", func(t *testing.T) {
-		svr.indexEngineVersionManager = newIndexEngineVersionManager()
+		svr.indexEngineVersionManager = index.NewIndexEngineVersionManager()
 
 		// None event
 		evt := &sessionutil.SessionEvent{
@@ -2340,7 +2355,7 @@ func TestHandleSessionEvent(t *testing.T) {
 }
 
 type rootCoordSegFlushComplete struct {
-	mockMixCoord
+	meta.MockMixCoord
 	flag bool
 }
 
@@ -2366,7 +2381,7 @@ func TestPostFlush(t *testing.T) {
 		defer closeTestServer(t, svr)
 		svr.mixCoord = &rootCoordSegFlushComplete{flag: true}
 
-		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		err := svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID:           1,
 			CollectionID: 1,
 			PartitionID:  1,
@@ -2385,7 +2400,7 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-		segment := &datapb.SegmentInfo{
+		seg := &datapb.SegmentInfo{
 			ID:            1000,
 			CollectionID:  100,
 			PartitionID:   0,
@@ -2399,7 +2414,7 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 				Timestamp:   0,
 			},
 		}
-		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
+		err := svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg))
 		assert.NoError(t, err)
 		// Set segment state.
 		svr.SetSegmentState(context.TODO(), &datapb.SetSegmentStateRequest{
@@ -2423,9 +2438,9 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 	})
 
 	t.Run("dataCoord meta set state not exists", func(t *testing.T) {
-		meta, err := newMemoryMeta(t)
+		mt, dm, err := newMemoryMetaWithDomainMetas(t)
 		assert.NoError(t, err)
-		svr := newTestServer(t, WithMeta(meta))
+		svr := newTestServer(t, WithMeta(mt, dm))
 		defer closeTestServer(t, svr)
 		// Set segment state.
 		svr.SetSegmentState(context.TODO(), &datapb.SetSegmentStateRequest{
@@ -2558,9 +2573,10 @@ func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 
 var globalTestTikv = tikv.SetupLocalTxn()
 
-func WithMeta(meta *meta) Option {
+func WithMeta(mt *meta.Meta, dm *domainMetas) Option {
 	return func(svr *Server) {
-		svr.meta = meta
+		svr.meta = mt
+		svr.domainMetas = *dm
 
 		svr.watchClient = etcdkv.NewEtcdKV(svr.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue(),
 			etcdkv.WithRequestTimeout(paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
@@ -2602,7 +2618,7 @@ func newTestServer(t *testing.T, opts ...Option) *Server {
 		return dm, nil
 	}
 	svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
-		return newMockMixCoord(), nil
+		return meta.NewMockMixCoord(), nil
 	}
 
 	svr.nodeManager = session.NewNodeManager(svr.dataNodeCreator)
@@ -2652,7 +2668,7 @@ func closeTestServer(t *testing.T, svr *Server) {
 
 func TestServer_rewatchQueryNodes(t *testing.T) {
 	server := &Server{
-		indexEngineVersionManager: newIndexEngineVersionManager(),
+		indexEngineVersionManager: index.NewIndexEngineVersionManager(),
 	}
 
 	// Test with empty sessions
@@ -2810,7 +2826,7 @@ func TestServer_initServiceDiscovery_BindIndexNodeDoesNotAffectQueryNodePathVers
 	server := &Server{
 		ctx:                       context.Background(),
 		session:                   mockSession,
-		indexEngineVersionManager: newIndexEngineVersionManager(),
+		indexEngineVersionManager: index.NewIndexEngineVersionManager(),
 	}
 	server.nodeManager = session.NewNodeManager(func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
 		return nil, nil
@@ -2824,7 +2840,7 @@ func TestServer_initServiceDiscovery_BindIndexNodeDoesNotAffectQueryNodePathVers
 func Test_CheckHealth(t *testing.T) {
 	newHealthStore := func() metacache.MetaStore {
 		store := metacache.NewMetaStore(nil)
-		store.PutCollection(&collectionInfo{
+		store.PutCollection(&meta.CollectionInfo{
 			ID:            449684528748778322,
 			VChannelNames: []string{"ch1", "ch2"},
 		})
@@ -2851,7 +2867,7 @@ func Test_CheckHealth(t *testing.T) {
 				MsgID:     []byte{1, 2, 3, 4},
 			},
 		})
-		svr.meta = &meta{metaStore: store}
+		svr.meta = &meta.Meta{MetaStore: store}
 
 		ctx := context.Background()
 		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
@@ -2878,7 +2894,7 @@ func Test_CheckHealth(t *testing.T) {
 				MsgID:     []byte{1, 2, 3, 4},
 			},
 		})
-		svr.meta = &meta{metaStore: store}
+		svr.meta = &meta.Meta{MetaStore: store}
 		ctx := context.Background()
 		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
@@ -2939,7 +2955,7 @@ func TestLoadCollectionFromRootCoord(t *testing.T) {
 	broker := broker.NewMockBroker(t)
 	s := &Server{
 		broker: broker,
-		meta:   newEmptyTestMeta(),
+		meta:   meta.NewEmptyTestMeta(),
 	}
 
 	t.Run("has collection fail with error", func(t *testing.T) {
@@ -3048,7 +3064,7 @@ func TestServer_InitMessageCallback(t *testing.T) {
 
 	mockCatalog := mocks2.NewDataCoordCatalog(t)
 	mockChunkManager := mocks.NewChunkManager(t)
-	mockManager := NewMockManager(t)
+	mockManager := segment.NewMockManager(t)
 
 	mb := mock_balancer.NewMockBalancer(t)
 	mb.EXPECT().GetLatestChannelAssignment().Return(&balancer.WatchChannelAssignmentsCallbackParam{}, nil).Maybe()
@@ -3062,13 +3078,13 @@ func TestServer_InitMessageCallback(t *testing.T) {
 	ms := metacache.NewMetaStore(nil)
 	server := &Server{
 		ctx: ctx,
-		meta: &meta{
-			catalog:      mockCatalog,
-			chunkManager: mockChunkManager,
-			metaStore:    ms,
-			segments:     NewSegmentsInfo(ms),
+		meta: &meta.Meta{
+			Catalog:      mockCatalog,
+			ChunkManager: mockChunkManager,
+			MetaStore:    ms,
+			Segments:     meta.NewSegmentsInfo(ms),
 		},
-		importMeta:     &importMeta{},
+		importMeta:     &bulkimport.Meta{},
 		segmentManager: mockManager,
 	}
 	server.stateCode.Store(commonpb.StateCode_Abnormal)

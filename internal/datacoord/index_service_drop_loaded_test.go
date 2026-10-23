@@ -28,6 +28,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metacache"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -62,29 +64,30 @@ func newLoadedVectorIndexServer(t *testing.T) (*Server, *indexpb.DropIndexReques
 			},
 		},
 	}, nil)
-	s := &Server{
-		meta: &meta{
-			catalog: catalog,
-			indexMeta: &indexMeta{
-				catalog: catalog,
-				indexes: map[UniqueID]map[UniqueID]*model.Index{
-					collID: {
-						indexID: {
-							CollectionID: collID,
-							FieldID:      fieldID,
-							IndexID:      indexID,
-							IndexName:    indexName,
-							TypeParams:   []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}},
-							IndexParams:  []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "IVF_FLAT"}},
-						},
-					},
+	im := &index.IndexMeta{
+		Catalog: catalog,
+		Indexes: map[UniqueID]map[UniqueID]*model.Index{
+			collID: {
+				indexID: {
+					CollectionID: collID,
+					FieldID:      fieldID,
+					IndexID:      indexID,
+					IndexName:    indexName,
+					TypeParams:   []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}},
+					IndexParams:  []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "IVF_FLAT"}},
 				},
-				segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			},
-			segments: NewSegmentsInfo(metacache.NewMetaStore(nil)),
 		},
+		SegmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+	}
+	s := &Server{
+		meta: &meta.Meta{
+			Catalog:  catalog,
+			Segments: meta.NewSegmentsInfo(metacache.NewMetaStore(nil)),
+		},
+		domainMetas:     domainMetas{indexMeta: im},
 		broker:          b,
-		allocator:       newMockAllocator(t),
+		allocator:       meta.NewMockAllocator(t),
 		notifyIndexChan: make(chan UniqueID, 1),
 	}
 	mixCoord := mocks.NewMixCoord(t)
@@ -105,6 +108,6 @@ func TestDropVectorIndexOnLoadedIsRefused(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, merr.Ok(status))
 	assert.Contains(t, status.GetReason(), "vector index cannot be dropped on loaded collection")
-	assert.NotEmpty(t, s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName()),
+	assert.NotEmpty(t, s.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName()),
 		"a refused drop must leave the index in place")
 }

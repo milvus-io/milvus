@@ -24,11 +24,10 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/datacoord/externalrefresh"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
-
-// --- Test refreshExternalCollectionV2AckCallback ---
 
 func TestDDLCallbacks_RefreshExternalCollectionV2AckCallback_Success(t *testing.T) {
 	ctx := context.Background()
@@ -37,8 +36,8 @@ func TestDDLCallbacks_RefreshExternalCollectionV2AckCallback_Success(t *testing.
 	submitCalled := false
 
 	// Mock externalCollectionRefreshManager.SubmitRefreshJobWithID using mockey
-	mockSubmit := mockey.Mock((*externalCollectionRefreshManager).SubmitRefreshJobWithID).To(func(
-		m *externalCollectionRefreshManager,
+	mockSubmit := mockey.Mock((*externalrefresh.Manager).SubmitRefreshJobWithID).To(func(
+		m *externalrefresh.Manager,
 		ctx context.Context,
 		jobID int64,
 		collectionID int64,
@@ -57,9 +56,9 @@ func TestDDLCallbacks_RefreshExternalCollectionV2AckCallback_Success(t *testing.
 
 	// Create DDLCallbacks with mock refresh manager
 	server := &Server{
-		externalCollectionRefreshManager: &externalCollectionRefreshManager{},
+		externalCollectionRefreshManager: &externalrefresh.Manager{},
 	}
-	callbacks := &DDLCallbacks{Server: server}
+	callbacks := newDDLCallbacks(server)
 
 	// Create test broadcast result using message builder
 	broadcastMsg := message.NewRefreshExternalCollectionMessageBuilderV2().
@@ -82,7 +81,7 @@ func TestDDLCallbacks_RefreshExternalCollectionV2AckCallback_Success(t *testing.
 	}
 
 	// Execute
-	err := callbacks.refreshExternalCollectionV2AckCallback(ctx, result)
+	err := callbacks.RefreshExternalCollectionV2AckCallback(ctx, result)
 
 	// Assert
 	assert.NoError(t, err)
@@ -93,8 +92,8 @@ func TestDDLCallbacks_RefreshExternalCollectionV2AckCallback_SubmitFailed(t *tes
 	ctx := context.Background()
 
 	// Mock externalCollectionRefreshManager.SubmitRefreshJobWithID to return error
-	mockSubmit := mockey.Mock((*externalCollectionRefreshManager).SubmitRefreshJobWithID).To(func(
-		m *externalCollectionRefreshManager,
+	mockSubmit := mockey.Mock((*externalrefresh.Manager).SubmitRefreshJobWithID).To(func(
+		m *externalrefresh.Manager,
 		ctx context.Context,
 		jobID int64,
 		collectionID int64,
@@ -107,9 +106,9 @@ func TestDDLCallbacks_RefreshExternalCollectionV2AckCallback_SubmitFailed(t *tes
 
 	// Create DDLCallbacks with mock refresh manager
 	server := &Server{
-		externalCollectionRefreshManager: &externalCollectionRefreshManager{},
+		externalCollectionRefreshManager: &externalrefresh.Manager{},
 	}
-	callbacks := &DDLCallbacks{Server: server}
+	callbacks := newDDLCallbacks(server)
 
 	// Create test broadcast result
 	broadcastMsg := message.NewRefreshExternalCollectionMessageBuilderV2().
@@ -130,7 +129,7 @@ func TestDDLCallbacks_RefreshExternalCollectionV2AckCallback_SubmitFailed(t *tes
 	}
 
 	// Execute
-	err := callbacks.refreshExternalCollectionV2AckCallback(ctx, result)
+	err := callbacks.RefreshExternalCollectionV2AckCallback(ctx, result)
 
 	// Assert
 	assert.Error(t, err)
@@ -144,8 +143,8 @@ func TestDDLCallbacks_RefreshExternalCollectionV2AckCallback_EmptySource(t *test
 	var capturedSource, capturedSpec string
 
 	// Mock externalCollectionRefreshManager.SubmitRefreshJobWithID
-	mockSubmit := mockey.Mock((*externalCollectionRefreshManager).SubmitRefreshJobWithID).To(func(
-		m *externalCollectionRefreshManager,
+	mockSubmit := mockey.Mock((*externalrefresh.Manager).SubmitRefreshJobWithID).To(func(
+		m *externalrefresh.Manager,
 		ctx context.Context,
 		jobID int64,
 		collectionID int64,
@@ -160,9 +159,9 @@ func TestDDLCallbacks_RefreshExternalCollectionV2AckCallback_EmptySource(t *test
 
 	// Create DDLCallbacks
 	server := &Server{
-		externalCollectionRefreshManager: &externalCollectionRefreshManager{},
+		externalCollectionRefreshManager: &externalrefresh.Manager{},
 	}
-	callbacks := &DDLCallbacks{Server: server}
+	callbacks := newDDLCallbacks(server)
 
 	// Create test broadcast result with empty source and spec
 	broadcastMsg := message.NewRefreshExternalCollectionMessageBuilderV2().
@@ -184,7 +183,7 @@ func TestDDLCallbacks_RefreshExternalCollectionV2AckCallback_EmptySource(t *test
 	}
 
 	// Execute
-	err := callbacks.refreshExternalCollectionV2AckCallback(ctx, result)
+	err := callbacks.RefreshExternalCollectionV2AckCallback(ctx, result)
 
 	// Assert
 	assert.NoError(t, err)
@@ -197,8 +196,8 @@ func TestDDLCallbacks_RefreshExternalCollectionV2AckCallback_NonRetriableError(t
 	ctx := context.Background()
 
 	// Mock SubmitRefreshJobWithID to return a non-retriable error
-	mockSubmit := mockey.Mock((*externalCollectionRefreshManager).SubmitRefreshJobWithID).To(func(
-		m *externalCollectionRefreshManager,
+	mockSubmit := mockey.Mock((*externalrefresh.Manager).SubmitRefreshJobWithID).To(func(
+		m *externalrefresh.Manager,
 		ctx context.Context,
 		jobID int64,
 		collectionID int64,
@@ -210,9 +209,9 @@ func TestDDLCallbacks_RefreshExternalCollectionV2AckCallback_NonRetriableError(t
 	defer mockSubmit.UnPatch()
 
 	server := &Server{
-		externalCollectionRefreshManager: &externalCollectionRefreshManager{},
+		externalCollectionRefreshManager: &externalrefresh.Manager{},
 	}
-	callbacks := &DDLCallbacks{Server: server}
+	callbacks := newDDLCallbacks(server)
 
 	broadcastMsg := message.NewRefreshExternalCollectionMessageBuilderV2().
 		WithHeader(&message.RefreshExternalCollectionMessageHeader{
@@ -232,30 +231,6 @@ func TestDDLCallbacks_RefreshExternalCollectionV2AckCallback_NonRetriableError(t
 	}
 
 	// Non-retriable error should return nil (not block WAL)
-	err := callbacks.refreshExternalCollectionV2AckCallback(ctx, result)
+	err := callbacks.RefreshExternalCollectionV2AckCallback(ctx, result)
 	assert.NoError(t, err)
-}
-
-// --- Test isNonRetriableRefreshError ---
-
-func TestIsNonRetriableRefreshError(t *testing.T) {
-	t.Run("collection_not_found", func(t *testing.T) {
-		err := merr.WrapErrCollectionNotFound(100)
-		assert.True(t, isNonRetriableRefreshError(err))
-	})
-
-	t.Run("collection_illegal_schema", func(t *testing.T) {
-		err := merr.WrapErrCollectionIllegalSchema("test", "not external")
-		assert.True(t, isNonRetriableRefreshError(err))
-	})
-
-	t.Run("task_duplicate", func(t *testing.T) {
-		err := merr.WrapErrTaskDuplicate("refresh", "already in progress")
-		assert.True(t, isNonRetriableRefreshError(err))
-	})
-
-	t.Run("generic_error_is_retriable", func(t *testing.T) {
-		err := errors.New("connection timeout")
-		assert.False(t, isNonRetriableRefreshError(err))
-	})
 }

@@ -24,6 +24,9 @@ import (
 	"github.com/blang/semver/v4"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -67,36 +70,36 @@ func BenchmarkCompactionPolicyNoCandidates(b *testing.B) {
 		for _, collectionCount := range []int{1000, 10000} {
 			b.Run(policyName+"/"+strconv.Itoa(collectionCount), func(b *testing.B) {
 				store := metacache.NewMetaStore(nil)
-				m := &meta{
-					ctx:       context.Background(),
-					metaStore: store,
-					segments:  NewSegmentsInfo(store),
+				m := &meta.Meta{
+					Ctx:       context.Background(),
+					MetaStore: store,
+					Segments:  meta.NewSegmentsInfo(store),
 				}
-				schema := newBumpSchemaVersionTestCollection(1, 2).Schema
+				schema := policy.NewBumpSchemaVersionTestCollection(1, 2).Schema
 				for fieldID := int64(102); fieldID < 116; fieldID++ {
 					schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
 						FieldID: fieldID, Name: "field_" + strconv.FormatInt(fieldID, 10), DataType: schemapb.DataType_Int64,
 					})
 				}
 				for id := int64(1); id <= int64(collectionCount); id++ {
-					store.PutCollection(&collectionInfo{ID: id, Schema: schema})
-					m.segments.SetSegment(id, newBumpSchemaVersionTestSegment(id, id, 2, storage.StorageV3, "manifest"))
+					store.PutCollection(&meta.CollectionInfo{ID: id, Schema: schema})
+					m.Segments.SetSegment(id, policy.NewBumpSchemaVersionTestSegment(id, id, 2, storage.StorageV3, "manifest"))
 				}
 				alloc := &compactionCheckBenchmarkAllocator{}
 				handler := &ServerHandler{s: &Server{meta: m}}
-				var policy CompactionPolicy
+				var pol policy.CompactionPolicy
 				if policyName == "schema" {
-					policy = newBumpSchemaVersionPolicy(m, alloc, handler)
+					pol = policy.NewBumpSchemaVersionPolicy(m, alloc, handler)
 				} else {
-					versionManager := NewMockVersionManager(b)
+					versionManager := index.NewMockVersionManager(b)
 					versionManager.EXPECT().GetMinimalSessionVer().Return(semver.MustParse("3.0.0"))
-					policy = newStorageVersionUpgradePolicy(m, alloc, handler, versionManager)
+					pol = policy.NewStorageVersionUpgradePolicy(m, alloc, handler, versionManager)
 				}
 				ctx := context.Background()
 				b.ReportAllocs()
 				b.ResetTimer()
 				for b.Loop() {
-					events, err := policy.Trigger(ctx)
+					events, err := pol.Trigger(ctx)
 					if err != nil {
 						b.Fatal(err)
 					}
