@@ -126,7 +126,8 @@ type Server struct {
 	handler          Handler
 	importMeta       ImportMeta
 	// shardSplitTasks is datacoord's record of the shard splits it has been
-	// told about, recovered from the catalog at start (shard_split_task.go).
+	// told about, recovered from the catalog at start
+	// (shard_split_task_store.go).
 	shardSplitTasks *shardSplitTasks
 	importInspector ImportInspector
 	importChecker   ImportChecker

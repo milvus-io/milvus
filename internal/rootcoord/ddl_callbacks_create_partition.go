@@ -121,13 +121,13 @@ func (c *DDLCallback) createPartitionV1AckCallback(ctx context.Context, result m
 // itself.
 //
 // Not VirtualChannelNames[0:ShardsNum]. That indexing assumes the live shards
-// are the first ShardsNum entries of the list, which a shard split breaks in
-// both directions at once: the list grows with the split's targets while the
-// retired sources stay in it, and ShardsNum counts only the routable shards. A
-// 2-shard collection whose two shards have each been split once has six
-// vchannels and ShardsNum 4, so the slice is the two dead sources plus two of
-// the four live shards -- the other two never learn the partition was created
-// or dropped.
+// are the first ShardsNum entries of the list, which a shard split breaks: the
+// split's targets are appended after the source, and the fenced source stays
+// in the list until adoption delists it, while ShardsNum counts only the
+// routable shards. A 2-shard collection with one shard fenced and its two
+// targets created lists four vchannels and ShardsNum 3, so the slice is the
+// fenced source, the other live shard and one target -- the second target
+// never learns the partition was created or dropped.
 //
 // A fenced source is included deliberately. It stays in the collection's
 // vchannel list until adoption, and the shard interceptor's name gate (design

@@ -372,7 +372,7 @@ enum StreamingCode {
     STREAMING_CODE_SCHEMA_VERSION_MISMATCH = 15; // wrong schema version
     STREAMING_CODE_RATE_LIMIT_REJECTED    = 16; // rate limit rejected
     STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE = 17; // Proxy must re-query, merge, and retry.
-    STREAMING_CODE_SHARD_FENCED           = 18; // vchannel is fenced by shard split; the client is meant to refresh routing and write to the new shards (proxy side not implemented yet)
+    STREAMING_CODE_SHARD_FENCED           = 18; // vchannel is fenced by shard split; the client is meant to refresh routing and write to the new shards (the proxy reaction lands in a later layer of the shard split)
     // 19 was STREAMING_CODE_ROUTING_STALE, which had no producer; reserved so the
     // number is never reused for a different meaning.
     reserved 19;
