@@ -35,23 +35,17 @@ func TestReferencedSchemaFieldsIncludesHiddenDependencies(t *testing.T) {
 	require.Equal(t, []int64{102, 103, 104, 105, 106, 107, 108, 109, 110, 111}, fields)
 }
 
-func TestSchemaBindingRejectsMVCCSchemaAndFieldChanges(t *testing.T) {
+func TestSchemaBindingRejectsMissingBindingAndUnvalidatedFields(t *testing.T) {
 	request := &internalpb.RetrieveRequest{SchemaVersion: 0, OutputFieldsId: []int64{100}}
-	original := &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 99, SchemaBinding: &viewpb.QuerySchemaBinding{SchemaVersion: 0, GrowingTimetick: 100, TransformingTimetick: 99, FieldIds: []int64{100}}}
+	original := &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 99, SchemaBinding: &viewpb.QuerySchemaBinding{FieldIds: []int64{100}}}
 	require.NoError(t, ValidateSchemaBinding(request, original, nil))
-	for _, change := range []string{"missing binding", "schema", "growing mvcc", "transform mvcc", "field"} {
+	for _, change := range []string{"missing binding", "field"} {
 		t.Run(change, func(t *testing.T) {
 			req := proto.Clone(request).(*internalpb.RetrieveRequest)
 			mvcc := proto.Clone(original).(*viewpb.QueryPlanMVCC)
 			switch change {
 			case "missing binding":
 				mvcc.SchemaBinding = nil
-			case "schema":
-				req.SchemaVersion = 1
-			case "growing mvcc":
-				mvcc.GrowingTimetick++
-			case "transform mvcc":
-				mvcc.TransformingTimetick++
 			case "field":
 				req.OutputFieldsId = append(req.OutputFieldsId, 101)
 			}
@@ -71,7 +65,7 @@ func TestRequeryDependenciesAreValidatedWithoutChangingSearchProjection(t *testi
 	require.Equal(t, []int64{101}, search.OutputFieldsId)
 	mvcc := &viewpb.QueryPlanMVCC{
 		GrowingTimetick: 20, TransformingTimetick: 10,
-		SchemaBinding: &viewpb.QuerySchemaBinding{SchemaVersion: 1, GrowingTimetick: 20, TransformingTimetick: 10, FieldIds: fields},
+		SchemaBinding: &viewpb.QuerySchemaBinding{FieldIds: fields},
 	}
 	requery := &internalpb.RetrieveRequest{SchemaVersion: 1, OutputFieldsId: []int64{101, 102}}
 	require.NoError(t, ValidateSchemaBinding(requery, mvcc, schema))

@@ -200,10 +200,7 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 	}
 	// Never mutate a caller-supplied MVCC when attaching a new plan's proof.
 	plan.Mvcc = proto.Clone(mvcc).(*viewpb.QueryPlanMVCC)
-	plan.Mvcc.SchemaBinding = &viewpb.QuerySchemaBinding{
-		SchemaVersion: schemaVersion, GrowingTimetick: mvcc.GetGrowingTimetick(),
-		TransformingTimetick: mvcc.GetTransformingTimetick(), FieldIds: fields,
-	}
+	plan.Mvcc.SchemaBinding = &viewpb.QuerySchemaBinding{FieldIds: fields}
 	mlog.Debug(ctx, "query view plan created",
 		mlog.FieldCollectionID(lease.Meta.GetCollectionId()),
 		mlog.FieldVChannel(shardID.VChannel),

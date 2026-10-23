@@ -15,8 +15,9 @@ invalidated views return the established View error. An accessed Up view renews
 its [serving lease](../query_view_lease.md). Phase 2 borrows metadata without
 copying a topology it does not use.
 
-The handler validates the request's schema binding against the leased View,
-waits for the fixed Growing/Transform frontiers, resolves the View's partition
+The handler validates the request's schema version against the leased View,
+checks referenced fields against the plan's field binding, waits for the fixed
+Growing/Transform frontiers, and resolves the View's partition
 scope through the required runtime interface and acquires growing segment handles.
 Handles expose the selected exact read-schema CCollection, while physical segments retain their own encoding
 schema. A query error releases every acquired handle. Successful tasks own them
