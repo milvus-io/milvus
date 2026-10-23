@@ -17,24 +17,109 @@
 package storagecommon
 
 import (
+	"cmp"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
+
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // RestoreColumnGroupLayout matches manifest field sets to persisted logical
-// IDs, retaining manifest group order, field order and physical format. The
-// returned groups own their Fields slices and need schema column indexes filled
-// by the caller.
+// IDs, coalescing equivalent historical aliases while retaining manifest group
+// order, field order and physical format. The returned groups own their Fields
+// slices and need schema column indexes filled by the caller.
 func RestoreColumnGroupLayout(manifestGroups []ColumnGroup, logicalGroups []*datapb.ColumnGroupStatistics) ([]ColumnGroup, error) {
-	groupIDs := make(map[string]int64, len(logicalGroups))
+	groups, err := indexColumnGroupStatistics(logicalGroups)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []ColumnGroup
+	for _, group := range manifestGroups {
+		fields := slices.Clone(group.Fields)
+		key, err := columnGroupFieldKey(fields)
+		if err != nil {
+			return nil, err
+		}
+		statistics, exists := groups[key]
+		if !exists {
+			return nil, merr.WrapErrDataIntegrityMsg("manifest column group %v has no matching logical group in Statistics", fields)
+		}
+		if strings.TrimSpace(group.Format) == "" {
+			return nil, merr.WrapErrDataIntegrityMsg("manifest column group %v has no physical format", fields)
+		}
+		result = append(result, ColumnGroup{GroupID: statistics.GetGroupId(), Fields: fields, Format: group.Format})
+		delete(groups, key)
+	}
+	if len(groups) != 0 {
+		return nil, merr.WrapErrDataIntegrityMsg("%d persisted column groups are absent from the manifest", len(groups))
+	}
+	return result, nil
+}
+
+// NormalizeColumnGroupStatistics coalesces historical aliases onto the IDs of
+// the layout that will actually be used to write. It owns the returned proto
+// and retains every aggregate outside LoadResource unchanged. An absent load
+// resource is retained for new segments and legacy snapshots.
+func NormalizeColumnGroupStatistics(layout []ColumnGroup, stats *datapb.Statistics) (*datapb.Statistics, error) {
+	if stats == nil {
+		return nil, nil
+	}
+	result := proto.Clone(stats).(*datapb.Statistics)
+	if len(stats.GetLoadResource().GetColumnGroups()) == 0 {
+		return result, nil
+	}
+	groups, err := indexColumnGroupStatistics(stats.GetLoadResource().GetColumnGroups())
+	if err != nil {
+		return nil, err
+	}
+	normalized := make([]*datapb.ColumnGroupStatistics, 0, len(layout))
+	seenIDs := make(map[int64]struct{}, len(layout))
+	for _, group := range layout {
+		if group.GroupID < 0 {
+			return nil, merr.WrapErrDataIntegrityMsg("invalid recovered column-group ID %d", group.GroupID)
+		}
+		if _, exists := seenIDs[group.GroupID]; exists {
+			return nil, merr.WrapErrDataIntegrityMsg("duplicate recovered column-group ID %d", group.GroupID)
+		}
+		seenIDs[group.GroupID] = struct{}{}
+		key, err := columnGroupFieldKey(group.Fields)
+		if err != nil {
+			return nil, err
+		}
+		statistics, exists := groups[key]
+		if !exists {
+			return nil, merr.WrapErrDataIntegrityMsg("recovered column group %v has no matching statistics", group.Fields)
+		}
+		statistics.GroupId = group.GroupID
+		normalized = append(normalized, statistics)
+		delete(groups, key)
+	}
+	if len(groups) != 0 {
+		return nil, merr.WrapErrDataIntegrityMsg("%d persisted column groups are absent from the recovered layout", len(groups))
+	}
+	slices.SortFunc(normalized, func(a, b *datapb.ColumnGroupStatistics) int {
+		return cmp.Compare(a.GetGroupId(), b.GetGroupId())
+	})
+	result.LoadResource.ColumnGroups = normalized
+	return result, nil
+}
+
+// Equal field sets may have acquired different IDs when an older flusher
+// sampled a fresh split after recovery. Those entries describe disjoint sync
+// contributions to the same physical group. Choose the smallest ID independent
+// of input order and sum their sizes. Partial overlap is not such an alias.
+func indexColumnGroupStatistics(logicalGroups []*datapb.ColumnGroupStatistics) (map[string]*datapb.ColumnGroupStatistics, error) {
+	groups := make(map[string]*datapb.ColumnGroupStatistics, len(logicalGroups))
 	seenIDs := make(map[int64]struct{}, len(logicalGroups))
-	seenFields := make(map[int64]struct{})
+	fieldGroups := make(map[int64]string)
 	for _, group := range logicalGroups {
-		if group == nil || group.GetGroupId() < 0 {
+		if group == nil || group.GetGroupId() < 0 || group.GetMemorySize() < 0 {
 			return nil, merr.WrapErrDataIntegrityMsg("invalid persisted column-group statistics")
 		}
 		id := group.GetGroupId()
@@ -47,35 +132,24 @@ func RestoreColumnGroupLayout(manifestGroups []ColumnGroup, logicalGroups []*dat
 			return nil, err
 		}
 		for _, field := range group.GetFieldIds() {
-			if _, exists := seenFields[field]; exists {
-				return nil, merr.WrapErrDataIntegrityMsg("field %d appears in multiple persisted column groups", field)
+			if previous, exists := fieldGroups[field]; exists && previous != key {
+				return nil, merr.WrapErrDataIntegrityMsg("field %d appears in non-equivalent persisted column groups", field)
 			}
-			seenFields[field] = struct{}{}
+			fieldGroups[field] = key
 		}
-		groupIDs[key] = id
+		if merged, exists := groups[key]; exists {
+			if merged.GetMemorySize() > math.MaxInt64-group.GetMemorySize() {
+				return nil, merr.WrapErrDataIntegrityMsg("column-group memory size overflows for fields %v", group.GetFieldIds())
+			}
+			merged.MemorySize += group.GetMemorySize()
+			merged.GroupId = min(merged.GetGroupId(), id)
+		} else {
+			merged := proto.Clone(group).(*datapb.ColumnGroupStatistics)
+			slices.Sort(merged.FieldIds)
+			groups[key] = merged
+		}
 	}
-
-	var result []ColumnGroup
-	for _, group := range manifestGroups {
-		fields := slices.Clone(group.Fields)
-		key, err := columnGroupFieldKey(fields)
-		if err != nil {
-			return nil, err
-		}
-		id, exists := groupIDs[key]
-		if !exists {
-			return nil, merr.WrapErrDataIntegrityMsg("manifest column group %v has no matching logical group in Statistics", fields)
-		}
-		if strings.TrimSpace(group.Format) == "" {
-			return nil, merr.WrapErrDataIntegrityMsg("manifest column group %v has no physical format", fields)
-		}
-		result = append(result, ColumnGroup{GroupID: id, Fields: fields, Format: group.Format})
-		delete(groupIDs, key)
-	}
-	if len(groupIDs) != 0 {
-		return nil, merr.WrapErrDataIntegrityMsg("%d persisted column groups are absent from the manifest", len(groupIDs))
-	}
-	return result, nil
+	return groups, nil
 }
 
 func columnGroupFieldKey(fields []int64) (string, error) {

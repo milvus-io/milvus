@@ -91,13 +91,14 @@ Binlogs 可以为空，但 Stats.LoadResource.ColumnGroups 仍可用。
    时读取 manifest，补齐完整布局；成功等待所有恢复读取后，将布局安装到
    MetaCache.currentSplit。V1/V2 原路径和 L0 删除段不增加 manifest 读取。
 3. 新增 storagecommon.RestoreColumnGroupLayout：按完整字段集合匹配
-   Stats 与 manifest，保留原 GroupID、manifest 的分组顺序、组内顺序和
-   Format。拒绝重复编号、重复字段、缺失/不匹配的分组及缺失格式。
+   Stats 与 manifest，保留唯一有效的原 GroupID、manifest 的分组顺序、
+   组内顺序和 Format。相同字段集合的历史 GroupID 别名按确定规则归并；拒绝重复编号、
+   字段集合部分重叠、缺失/不匹配的分组及缺失格式。
 4. packed.RestoreColumnGroupsFromManifest 负责读取精确 manifest revision
    并解析数值字段名。读取失败直接返回，不降级为重新 split。
 
-恢复阶段不伪造 FieldBinlog 文件列表，不修改持久化 Stats，不需要新 RPC
-字段，也不需要重新把布局写入 etcd。下一次 sync 按其 schema 重建列下标。
+恢复阶段不伪造 FieldBinlog 文件列表，不修改输入 Stats，也不增加新 RPC
+字段。归一化后的统计随下一次普通 sync 发布；列下标仍由该次 schema 重建。
 
 ## master 的不同入口与实现
 
@@ -267,5 +268,33 @@ go test -tags dynamic,test -gcflags="all=-N -l" -count=1 \
 
 本修复作用于恢复时重新建立的 cache；已经生成错误 split、陷入重试的现存
 SyncTask 需要用修复版本重新建立恢复流程，不能靠仅更换 Coord 内存来修改
-该 task 持有的列组。历史 Stats 与 manifest 若已经不匹配，修复会拒绝恢复，
-本次没有实现自动重写历史数据。
+该 task 持有的列组。相同字段集合的历史别名由下述兼容逻辑处理；其他不能
+完整匹配的 Stats、损坏 manifest 仍明确失败，不猜测缺失信息。
+
+
+## 历史 GroupID 别名兼容
+
+旧版本可能为相同物理布局先后生成 G1{101}、G101{101}；原生 append
+接受相同位置的字段集合和格式，累计 Stats 因而同时保留两个逻辑条目。
+这些条目是不同批次的增量贡献，不能因为字段重复就判为物理数据损坏。
+
+恢复按完整字段集合建立索引，只归并集合完全相同的别名，MemorySize
+相加。Stats-only 恢复选择最小候选 ID，正常唯一 ID 不变；已有完整快照
+时以实际选用布局的 ID 为准。manifest 的顺序、字段顺序和 Format 保留。
+部分重叠、重复逻辑编号、负值及合并溢出仍报 DataIntegrity。
+
+NormalizeColumnGroupStatistics 返回独立 proto，保留 LoadResource 以外的
+累计值不变。旧 pipeline 同时安装恢复布局与归一化后的累计 collector；
+master 的完整快照和 Stats-only 路径也在写入前对齐 collector 的编号。
+下一次正常 sync 发布完整 Stats，使别名不再进入后续持久化统计。
+
+新增回归覆盖：输入统计顺序无关、原 proto 不变、字段集合归并、格式与物理
+顺序保留、二次恢复幂等、完整快照编号优先、合并溢出和部分重叠拒绝。
+原生 pipeline 用例还注入一次元数据发布失败，验证重试发布相同累计值，
+失败尝试不推进 cache；成功续写后再恢复，编号和字节计数保持一致。
+
+临时 overlay 以真实 SyncTask 制造 G1→G101 历史别名，再用修复版恢复、
+续写第三批并读回三批内容，最后再次恢复成功。master 的相关恢复测试和
+新增改动的完整 golangci-lint 通过。3.0/hotfix 的 storagecommon 完整包、
+格式和 depguard 通过；匹配 3.0 原生依赖的集成测试仍受 ABI 环境限制。
+这些结果不等同于真实集群版本升级或进程重启验证。

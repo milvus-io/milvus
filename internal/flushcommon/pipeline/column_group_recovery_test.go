@@ -21,6 +21,7 @@ import (
 	"math"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/mock"
@@ -41,11 +42,20 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 func TestInitMetaCacheRestoresV3ColumnGroupsAfterMetadataReload(t *testing.T) {
+	for _, aliases := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unique groups", true: "historical aliases"}[aliases], func(t *testing.T) {
+			testInitMetaCacheRestoresV3ColumnGroups(t, aliases)
+		})
+	}
+}
+
+func testInitMetaCacheRestoresV3ColumnGroups(t *testing.T, aliases bool) {
 	paramtable.Init()
 	root := t.TempDir()
 	initcore.CleanArrowFileSystem()
@@ -85,14 +95,34 @@ func TestInitMetaCacheRestoresV3ColumnGroupsAfterMetadataReload(t *testing.T) {
 	publish := func(cache metacache.MetaCache, timestamp int64) *datapb.SegmentInfo {
 		var saved *datapb.SegmentInfo
 		b := broker.NewMockBroker(t)
+		attempts := 0
+		expectedAttempts := 1
+		if aliases && timestamp == 20 {
+			expectedAttempts = 2
+		}
+		var firstAttemptStats, baselineStats *datapb.Statistics
 		b.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, req *datapb.SaveBinlogPathsRequest) error {
+			attempts++
+			if expectedAttempts == 2 {
+				segment, ok := cache.GetSegmentByID(10)
+				require.True(t, ok)
+				if attempts == 1 {
+					firstAttemptStats = proto.Clone(req.GetStats()).(*datapb.Statistics)
+					baselineStats = segment.Statistics().Publish()
+					require.Len(t, baselineStats.GetLoadResource().GetColumnGroups(), 1)
+					require.EqualValues(t, 7, baselineStats.GetLoadResource().GetColumnGroups()[0].GetGroupId())
+					return merr.WrapErrServiceUnavailableMsg("injected metadata publication failure")
+				}
+				require.True(t, proto.Equal(firstAttemptStats, req.GetStats()), "retry must publish identical cumulative statistics")
+				require.True(t, proto.Equal(baselineStats, segment.Statistics().Publish()), "failed publication must not advance the collector")
+			}
 			saved = &datapb.SegmentInfo{
 				ID: 10, CollectionID: 1, PartitionID: 2, StorageVersion: storage.StorageV3,
 				Level: datapb.SegmentLevel_L1, ManifestPath: req.GetManifestPath(), Stats: proto.Clone(req.GetStats()).(*datapb.Statistics),
 				NumOfRows: req.GetCheckPoints()[0].GetNumOfRows(),
 			}
 			return nil
-		}).Once()
+		}).Times(expectedAttempts)
 		cache.UpdateSegments(metacache.UpdateBufferedRows(1), metacache.WithSegmentIDs(10))
 		cache.UpdateSegments(metacache.StartSyncing(1), metacache.WithSegmentIDs(10))
 		data := &storage.InsertData{Data: map[int64]storage.FieldData{
@@ -105,7 +135,7 @@ func TestInitMetaCacheRestoresV3ColumnGroupsAfterMetadataReload(t *testing.T) {
 			WithTimeRange(uint64(timestamp), uint64(timestamp)).WithCheckpoint(&msgpb.MsgPosition{Timestamp: uint64(timestamp)})
 		task := syncmgr.NewSyncTask().WithSyncPack(pack).WithSchema(schema).WithMetaCache(cache).
 			WithStorageConfig(config).WithChunkManager(cm).WithAllocator(allocator.NewLocalAllocator(timestamp*100, math.MaxInt64)).
-			WithMetaWriter(syncmgr.BrokerMetaWriter(b, 1))
+			WithMetaWriter(syncmgr.BrokerMetaWriter(b, 1, retry.Attempts(2), retry.Sleep(time.Millisecond)))
 		require.NoError(t, task.Run(context.Background()))
 		require.NotNil(t, saved)
 		return saved
@@ -116,6 +146,15 @@ func TestInitMetaCacheRestoresV3ColumnGroupsAfterMetadataReload(t *testing.T) {
 	reloaded := &datapb.SegmentInfo{}
 	require.NoError(t, proto.Unmarshal(encoded, reloaded))
 	require.Empty(t, reloaded.GetBinlogs())
+	if aliases {
+		group := reloaded.Stats.LoadResource.ColumnGroups[0]
+		alias := proto.Clone(group).(*datapb.ColumnGroupStatistics)
+		alias.GroupId = 107
+		alias.MemorySize = group.MemorySize / 2
+		group.MemorySize -= alias.MemorySize
+		reloaded.Stats.LoadResource.ColumnGroups = append([]*datapb.ColumnGroupStatistics{alias}, group)
+	}
+	inputStats := proto.Clone(reloaded.GetStats()).(*datapb.Statistics)
 	require.NoError(t, params.Save(params.DataNodeCfg.StorageFormat.Key, "parquet"))
 	cache, err := initMetaCache(context.Background(), cm, watch, nil, []*datapb.SegmentInfo{reloaded}, nil, nil)
 	require.NoError(t, err)
@@ -123,6 +162,7 @@ func TestInitMetaCacheRestoresV3ColumnGroupsAfterMetadataReload(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, []storagecommon.ColumnGroup{{GroupID: 7, Fields: []int64{0, 1, 100}, Format: "vortex"}}, segment.GetCurrentSplit())
 	require.True(t, proto.Equal(saved.GetStats(), segment.Statistics().Publish()))
+	require.True(t, proto.Equal(inputStats, reloaded.GetStats()), "recovery must not mutate the input statistics")
 	require.Empty(t, segment.Binlogs(), "layout hydration must not invent persisted binlogs")
 	continued := publish(cache, 20)
 	require.EqualValues(t, 2, continued.GetNumOfRows())
@@ -132,6 +172,19 @@ func TestInitMetaCacheRestoresV3ColumnGroupsAfterMetadataReload(t *testing.T) {
 	require.Equal(t, []int64{0, 1, 100}, groups[0].GetFieldIds())
 	require.Equal(t, []string{"vortex"}, continued.GetStats().GetFormats())
 	require.Greater(t, groups[0].GetMemorySize(), saved.GetStats().GetLoadResource().GetColumnGroups()[0].GetMemorySize())
+	require.Equal(t, saved.GetStats().GetInsertBinlogSize()*2, continued.GetStats().GetInsertBinlogSize())
+	require.Equal(t, saved.GetStats().GetLoadResource().GetColumnGroups()[0].GetMemorySize()*2, groups[0].GetMemorySize())
+	recoveredAgain, err := initMetaCache(context.Background(), cm, watch, nil, []*datapb.SegmentInfo{continued}, nil, nil)
+	require.NoError(t, err)
+	again, ok := recoveredAgain.GetSegmentByID(10)
+	require.True(t, ok)
+	require.Len(t, again.GetCurrentSplit(), len(segment.GetCurrentSplit()))
+	for i, group := range segment.GetCurrentSplit() {
+		require.Equal(t, group.GroupID, again.GetCurrentSplit()[i].GroupID)
+		require.Equal(t, group.Fields, again.GetCurrentSplit()[i].Fields)
+		require.Equal(t, group.Format, again.GetCurrentSplit()[i].Format)
+	}
+	require.True(t, proto.Equal(continued.GetStats(), again.Statistics().Publish()))
 }
 
 func TestInitMetaCacheDoesNotIgnoreColumnGroupReadFailure(t *testing.T) {

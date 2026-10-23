@@ -100,6 +100,19 @@ func (w *growingBulkPackWriter) FlushInsertBuffer(ctx context.Context, pack *flu
 		return nil, err
 	}
 	metaCache := newGrowingSegmentMetaCache(pack.Meta, schema)
+	if pack.Meta.GetStorageVersion() == storage.StorageV3 {
+		// The selected layout can come from a complete snapshot or a manifest.
+		// Seed its collector with the same IDs so a historical alias is not
+		// carried into the next publication. Leave the pack's proto untouched.
+		normalized, err := storagecommon.NormalizeColumnGroupStatistics(currentSplit, pack.Meta.GetPersistedStorage().GetStatistics())
+		if err != nil {
+			return nil, retry.Unrecoverable(merr.Wrap(err, "normalize growing segment column-group statistics"))
+		}
+		metaCache.UpdateSegments(metacache.MergeSegmentAction(
+			metacache.UpdateCurrentSplit(currentSplit),
+			metacache.SetStatistics(metacache.NewSegmentStatsFromStats(normalized, int64(pack.Meta.GetStat().GetModifiedRows()))),
+		), metacache.WithSegmentIDs(pack.SegmentID))
+	}
 	syncPack := new(syncmgr.SyncPack).
 		WithCollectionID(pack.CollectionID).
 		WithPartitionID(pack.PartitionID).

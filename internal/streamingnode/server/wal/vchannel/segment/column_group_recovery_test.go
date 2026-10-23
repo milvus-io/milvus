@@ -35,6 +35,22 @@ import (
 )
 
 func TestV3GrowingPackResumesFromStatsAndManifest(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		aliases  bool
+		snapshot bool
+	}{
+		{"unique statistics", false, false},
+		{"historical aliases", true, false},
+		{"snapshot alias", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testV3GrowingPackResumesFromStatsAndManifest(t, tc.aliases, tc.snapshot)
+		})
+	}
+}
+
+func testV3GrowingPackResumesFromStatsAndManifest(t *testing.T, aliases, snapshot bool) {
 	config, cm := setupV3TestEnv(t)
 	params := paramtable.Get()
 	oldFormat := params.DataNodeCfg.StorageFormat.GetValue()
@@ -60,11 +76,30 @@ func TestV3GrowingPackResumesFromStatsAndManifest(t *testing.T) {
 	meta.PersistedStorage = &streamingpb.L1SegmentPersistedStorage{
 		ManifestPath: result.PersistedStorage.GetManifestPath(), Statistics: baseline,
 	}
+	expectedID := int64(0)
+	if aliases {
+		meta.PersistedStorage.Statistics = proto.Clone(baseline).(*datapb.Statistics)
+		group := meta.PersistedStorage.Statistics.LoadResource.ColumnGroups[0]
+		require.EqualValues(t, 0, group.GetGroupId())
+		alias := proto.Clone(group).(*datapb.ColumnGroupStatistics)
+		alias.GroupId = 7
+		alias.MemorySize = group.MemorySize / 2
+		group.MemorySize -= alias.MemorySize
+		meta.PersistedStorage.Statistics.LoadResource.ColumnGroups = append(meta.PersistedStorage.Statistics.LoadResource.ColumnGroups, alias)
+	}
+	if snapshot {
+		meta.PersistedStorage.Binlogs = proto.Clone(result.PersistedStorage).(*streamingpb.L1SegmentPersistedStorage).GetBinlogs()
+		meta.PersistedStorage.Binlogs[0].FieldBinlog[0].FieldID = 7
+		expectedID = 7
+	}
 	encoded, err := proto.Marshal(meta)
 	require.NoError(t, err)
 	recovered := &streamingpb.SegmentAssignmentMeta{}
 	require.NoError(t, proto.Unmarshal(encoded, recovered))
-	require.Empty(t, recovered.GetPersistedStorage().GetBinlogs())
+	if !snapshot {
+		require.Empty(t, recovered.GetPersistedStorage().GetBinlogs())
+	}
+	inputStats := proto.Clone(recovered.GetPersistedStorage().GetStatistics()).(*datapb.Statistics)
 
 	require.NoError(t, params.Save(params.DataNodeCfg.StorageFormat.Key, "parquet"))
 	newSplit := "true"
@@ -83,9 +118,28 @@ func TestV3GrowingPackResumesFromStatsAndManifest(t *testing.T) {
 	newGroups := stats.GetLoadResource().GetColumnGroups()
 	require.Len(t, newGroups, len(oldGroups))
 	for i, group := range oldGroups {
-		require.Equal(t, group.GetGroupId(), newGroups[i].GetGroupId())
+		groupID := group.GetGroupId()
+		if i == 0 {
+			groupID = expectedID
+		}
+		require.Equal(t, groupID, newGroups[i].GetGroupId())
 		require.Equal(t, group.GetFieldIds(), newGroups[i].GetFieldIds())
 		require.Greater(t, newGroups[i].GetMemorySize(), group.GetMemorySize())
+	}
+	require.True(t, proto.Equal(inputStats, recovered.GetPersistedStorage().GetStatistics()), "pack metadata must remain immutable")
+	third := crashTestPack(1, 2, 3, "v1", 30, schema, buildCrashTestInsertMessage(t, "v1", 1, 2, 3, 30, 30))
+	third.Meta.Stat = &streamingpb.SegmentAssignmentStat{ModifiedRows: 2}
+	third.Meta.PersistedStorage = proto.Clone(continued.PersistedStorage).(*streamingpb.L1SegmentPersistedStorage)
+	final, err := writer.FlushInsertBuffer(context.Background(), third)
+	require.NoError(t, err, "normalized statistics and layout must survive another recovery")
+	finalStats := final.PersistedStorage.GetStatistics()
+	require.Equal(t, baseline.GetInsertBinlogCount()*3, finalStats.GetInsertBinlogCount())
+	finalGroups := finalStats.GetLoadResource().GetColumnGroups()
+	require.Len(t, finalGroups, len(newGroups))
+	for i, group := range newGroups {
+		require.Equal(t, group.GetGroupId(), finalGroups[i].GetGroupId())
+		require.Equal(t, group.GetFieldIds(), finalGroups[i].GetFieldIds())
+		require.Greater(t, finalGroups[i].GetMemorySize(), group.GetMemorySize())
 	}
 }
 

@@ -152,7 +152,11 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 	// segmentPks := typeutil.NewConcurrentMap[int64, []*storage.PkStatistics]()
 	segmentPks := typeutil.NewConcurrentMap[int64, pkoracle.PkStat]()
 	segmentBm25 := typeutil.NewConcurrentMap[int64, map[int64]*storage.BM25Stats]()
-	segmentSplits := typeutil.NewConcurrentMap[int64, []storagecommon.ColumnGroup]()
+	type recoveredColumnGroups struct {
+		split      []storagecommon.ColumnGroup
+		statistics *metacache.SegmentStats
+	}
+	segmentGroups := typeutil.NewConcurrentMap[int64, recoveredColumnGroups]()
 
 	loadSegmentStats := func(segType string, segments []*datapb.SegmentInfo) {
 		for _, item := range segments {
@@ -166,6 +170,10 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 			future := io.GetOrCreateStatsPool().Submit(func() (any, error) {
 				if segType == "growing" && segment.GetStorageVersion() == storage.StorageV3 && segment.GetLevel() != datapb.SegmentLevel_L0 && segment.GetNumOfRows() > 0 {
 					split, err := packed.RestoreColumnGroupsFromManifest(initCtx, segment.GetManifestPath(), segment.GetStats(), nil)
+					var normalized *datapb.Statistics
+					if err == nil {
+						normalized, err = storagecommon.NormalizeColumnGroupStatistics(split, segment.GetStats())
+					}
 					if err != nil {
 						err = merr.Wrapf(err, "restore column groups for segment %d", segment.GetID())
 						if errors.Is(err, merr.ErrDataIntegrity) || errors.Is(err, packed.ErrLoonPermanent) {
@@ -176,7 +184,10 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 					if len(split) == 0 {
 						return nil, retry.Unrecoverable(merr.WrapErrDataIntegrityMsg("segment %d has persisted rows but no manifest column groups", segment.GetID()))
 					}
-					segmentSplits.Insert(segment.GetID(), split)
+					segmentGroups.Insert(segment.GetID(), recoveredColumnGroups{
+						split:      split,
+						statistics: metacache.NewSegmentStatsFromStats(normalized, segment.GetNumOfRows()),
+					})
 				}
 				pkField, err := typeutil.GetPrimaryFieldSchema(info.GetSchema())
 				if err != nil {
@@ -247,8 +258,10 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 	}
 	// return channel, nil
 	cache := metacache.NewMetaCache(info, pkStatsFactory, bm25StatsFactor, schemaManager)
-	segmentSplits.Range(func(segmentID int64, split []storagecommon.ColumnGroup) bool {
-		cache.UpdateSegments(metacache.UpdateCurrentSplit(split), metacache.WithSegmentIDs(segmentID))
+	segmentGroups.Range(func(segmentID int64, groups recoveredColumnGroups) bool {
+		cache.UpdateSegments(metacache.MergeSegmentAction(
+			metacache.UpdateCurrentSplit(groups.split), metacache.SetStatistics(groups.statistics),
+		), metacache.WithSegmentIDs(segmentID))
 		return true
 	})
 
