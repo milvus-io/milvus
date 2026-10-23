@@ -1399,7 +1399,7 @@ SegmentGrowingImpl::Delete(int64_t size,
     }
 
     // step 2: fill delete record
-    deleted_record_.StreamPush(sort_pks, sort_timestamps.data());
+    deleted_record_.StreamPush(std::move(sort_pks), sort_timestamps.data());
 
     // step 3: update resource tracking
     UpdateResourceTracking();
@@ -1425,7 +1425,7 @@ SegmentGrowingImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
 
     // step 2: push delete info to delete_record
-    deleted_record_.LoadPush(pks, timestamps);
+    deleted_record_.LoadPush(std::move(pks), timestamps);
 }
 
 cachinglayer::PinWrapper<SpanBase>
@@ -1717,6 +1717,7 @@ SegmentGrowingImpl::GetFieldDataType(milvus::FieldId field_id) const {
     return field_meta.get_data_type();
 }
 
+// Reports a row's matches in input order; DeletedRecord relies on it.
 void
 SegmentGrowingImpl::search_batch_pks(
     const std::vector<PkType>& pks,
