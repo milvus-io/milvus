@@ -597,16 +597,17 @@ func (b *broadcastTask) canDropTombstone(checkpoints map[string]*streamingpb.WAL
 	return true
 }
 
-// DropTombstone drops the tombstone of the broadcast task.
-// It will remove the tombstone of the broadcast task in recovery storage.
-// After the tombstone is dropped, the idempotency and deduplication can not be guaranteed.
-func (b *broadcastTask) DropTombstone(ctx context.Context) error {
+// markTombstoneDropped marks the task DONE before its tombstone is deleted from
+// recovery storage.
+func (b *broadcastTask) markTombstoneDropped() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	if b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
+		return // A retry after a failed deletion.
+	}
 	b.task.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE
-	b.dirty = true
-	return b.saveTaskIfDirty(ctx, b.Logger())
+	b.ObserveStateChanged(b.task.State)
 }
 
 // isAllDone check if all the vchannels are acked.

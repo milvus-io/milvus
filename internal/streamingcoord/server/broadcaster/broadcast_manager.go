@@ -346,26 +346,36 @@ func (bm *broadcastTaskManager) Ack(ctx context.Context, msg message.ImmutableMe
 	return t.Ack(ctx, msg)
 }
 
-// DropTombstone drops the tombstone task from the manager.
-func (bm *broadcastTaskManager) DropTombstone(ctx context.Context, broadcastID uint64, checkpoints map[string]*streamingpb.WALCheckpoint) (bool, error) {
+// DropTombstones drops the tombstones of the broadcast tasks with one catalog
+// call, which splits the keys into bounded transactions, and then removes the
+// tasks from the manager. After the tombstones are dropped, the idempotency and
+// deduplication can not be guaranteed.
+func (bm *broadcastTaskManager) DropTombstones(ctx context.Context, broadcastIDs []uint64) error {
 	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return false, status.NewOnShutdownError("broadcaster is closing")
+		return status.NewOnShutdownError("broadcaster is closing")
 	}
 	defer bm.lifetime.Done()
+	ctx, cancel := contextutil.MergeContext(ctx, bm.ctx)
+	defer cancel()
 
-	t, ok := bm.getBroadcastTaskByID(broadcastID)
-	if !ok {
-		bm.Logger().Debug(ctx, "task is not found, ignored the drop tombstone request", mlog.FieldBroadcastID(broadcastID))
-		return true, nil
+	bm.mu.Lock()
+	tasks := make([]*broadcastTask, 0, len(broadcastIDs))
+	for _, id := range broadcastIDs {
+		if t, ok := bm.tasks[id]; ok {
+			tasks = append(tasks, t)
+		}
 	}
-	if !t.canDropTombstone(checkpoints) {
-		return false, nil
+	bm.mu.Unlock()
+	// Mark DONE before deleting: a save that races the deletion then writes DONE,
+	// which the catalog turns into a removal.
+	for _, t := range tasks {
+		t.markTombstoneDropped()
 	}
-	if err := t.DropTombstone(ctx); err != nil {
-		return false, err
+	if err := resource.Resource().StreamingCatalog().RemoveBroadcastTasks(ctx, broadcastIDs); err != nil {
+		return err
 	}
-	bm.removeBroadcastTask(broadcastID)
-	return true, nil
+	bm.removeBroadcastTask(broadcastIDs...)
+	return nil
 }
 
 // Close cancels in-flight requests before waiting for them to exit. An ACK
@@ -473,15 +483,17 @@ func (bm *broadcastTaskManager) getBroadcastTaskByID(broadcastID uint64) (*broad
 	return t, ok
 }
 
-// removeBroadcastTask removes the broadcast task by the broadcastID.
-func (bm *broadcastTaskManager) removeBroadcastTask(broadcastID uint64) {
+// removeBroadcastTask removes the broadcast tasks by the broadcastIDs.
+func (bm *broadcastTaskManager) removeBroadcastTask(broadcastIDs ...uint64) {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
 
-	if t, ok := bm.tasks[broadcastID]; ok {
-		bm.idempotencyIndex.Remove(t.IdempotencyScope(), broadcastID)
+	for _, broadcastID := range broadcastIDs {
+		if t, ok := bm.tasks[broadcastID]; ok {
+			bm.idempotencyIndex.Remove(t.IdempotencyScope(), broadcastID)
+		}
+		delete(bm.tasks, broadcastID)
 	}
-	delete(bm.tasks, broadcastID)
 }
 
 // getIncompleteBroadcastTasks returns all incomplete broadcast tasks that have pending messages.
