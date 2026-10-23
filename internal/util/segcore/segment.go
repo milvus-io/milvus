@@ -344,59 +344,47 @@ func (s *cSegmentImpl) Load(ctx context.Context) error {
 	return err
 }
 
-func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) error {
+func (s *cSegmentImpl) Reopen(ctx context.Context, req *ReopenRequest) (cgo.Future, error) {
 	if req == nil {
-		return merr.WrapErrParameterInvalidMsg("reopen request is nil")
+		return nil, merr.WrapErrServiceInternalMsg("reopen request is nil")
 	}
 	if req.LoadInfo == nil {
-		return merr.WrapErrParameterInvalidMsg("reopen load info is nil")
+		return nil, merr.WrapErrServiceInternalMsg("reopen load info is nil")
 	}
-	if req.Schema == nil {
-		return merr.WrapErrParameterInvalidMsg("reopen schema is nil")
+	if req.Collection == nil {
+		return nil, merr.WrapErrServiceInternalMsg("reopen collection is nil")
 	}
 
 	traceCtx := ParseCTraceContext(ctx)
 	defer runtime.KeepAlive(traceCtx)
 	defer runtime.KeepAlive(req)
 
-	segLoadInfo, err := ConvertToSegcoreSegmentLoadInfo(req.LoadInfo)
+	loadInfoBlob, err := proto.Marshal(req.LoadInfo)
 	if err != nil {
-		return merr.Wrap(err, "failed to convert reopen load info")
-	}
-	loadInfoBlob, err := proto.Marshal(segLoadInfo)
-	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(loadInfoBlob) == 0 {
-		return merr.WrapErrServiceInternalMsg("reopen load info blob is empty")
+		return nil, merr.WrapErrServiceInternalMsg("reopen load info blob is empty")
 	}
-
-	schemaBlob, err := proto.Marshal(req.Schema)
-	if err != nil {
-		return err
-	}
-	if len(schemaBlob) == 0 {
-		return merr.WrapErrServiceInternalMsg("reopen schema blob is empty")
-	}
-	defer runtime.KeepAlive(schemaBlob)
 
 	future := cgo.Async(ctx,
 		func() cgo.CFuturePtr {
-			return (cgo.CFuturePtr)(C.AsyncReopenSegment(
+			future := C.AsyncReopenSegment(
 				traceCtx.ctx,
 				s.ptr,
+				req.Collection.rawPointer(),
 				(*C.uint8_t)(unsafe.Pointer(&loadInfoBlob[0])),
 				C.int64_t(len(loadInfoBlob)),
-				unsafe.Pointer(&schemaBlob[0]),
-				C.int64_t(len(schemaBlob)),
-				C.uint64_t(req.SchemaVersion),
-			))
+			)
+			// cgo.Future retains this closure until Release, keeping the request
+			// and trace backing arrays alive after this method returns.
+			runtime.KeepAlive(req)
+			runtime.KeepAlive(traceCtx)
+			return (cgo.CFuturePtr)(future)
 		},
 		cgo.WithName("segment-reopen"),
 	)
-	defer future.Release()
-	_, err = future.BlockAndLeakyGet()
-	return err
+	return future, nil
 }
 
 // Release releases the segment.

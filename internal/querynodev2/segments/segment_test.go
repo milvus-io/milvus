@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
+	"unsafe"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -19,11 +22,13 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	storage "github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -43,6 +48,31 @@ type SegmentSuite struct {
 	collection   *Collection
 	sealed       Segment
 	growing      Segment
+}
+
+// Embedding Future preserves its private method set without changing the
+// production interface; these tests only exercise waiting and ownership.
+type testReopenFuture struct {
+	cgo.Future
+	wait    func() (unsafe.Pointer, error)
+	release func()
+}
+
+func (f *testReopenFuture) Context() context.Context { return context.Background() }
+
+func (f *testReopenFuture) BlockUntilReady() {}
+
+func (f *testReopenFuture) BlockAndLeakyGet() (unsafe.Pointer, error) {
+	if f.wait != nil {
+		return f.wait()
+	}
+	return nil, nil
+}
+
+func (f *testReopenFuture) Release() {
+	if f.release != nil {
+		f.release()
+	}
 }
 
 func (suite *SegmentSuite) SetupSuite() {
@@ -858,21 +888,35 @@ func TestLocalSegmentBM25StatsAreCloned(t *testing.T) {
 	assert.NotContains(t, gotAgain, int64(103))
 }
 
-func TestLocalSegmentReopenUsesSegcoreSchemaVersion(t *testing.T) {
+func TestLocalSegmentReopenUsesCollection(t *testing.T) {
 	paramtable.Init()
 
 	schema := mock_segcore.GenTestCollectionSchema("collection_v1", schemapb.DataType_Int64, false)
 	schema.Version = 1
 
-	collection := &Collection{}
+	collection := &Collection{ccollection: &segcore.CCollection{}}
 	collection.setSchema(schema, 1, 100, 101)
 
+	var convertOrigin func(*querypb.SegmentLoadInfo) (*segcorepb.SegmentLoadInfo, error)
+	convertPatch := mockey.Mock(segcore.ConvertToSegcoreSegmentLoadInfo).To(func(info *querypb.SegmentLoadInfo) (*segcorepb.SegmentLoadInfo, error) {
+		// Conversion can fetch V3 manifests and must stay outside the lock that
+		// excludes collection schema/hint writers.
+		if !collection.mu.TryLock() {
+			return nil, merr.WrapErrServiceInternalMsg("load info conversion held the collection lock")
+		}
+		collection.mu.Unlock()
+		return convertOrigin(info)
+	}).Origin(&convertOrigin).Build()
+	defer convertPatch.UnPatch()
+
+	released := false
+	future := &testReopenFuture{release: func() { released = true }}
 	csegment := mock_segcore.NewMockCSegment(t)
 	csegment.EXPECT().
 		Reopen(mock.Anything, mock.MatchedBy(func(request *segcore.ReopenRequest) bool {
-			return request.Schema == schema && request.SchemaVersion == 101
+			return request.Collection == collection.ccollection && request.LoadInfo.GetSegmentID() == 20
 		})).
-		Return(nil)
+		Return(future, nil).Once()
 
 	loadInfo := &querypb.SegmentLoadInfo{
 		CollectionID:  10,
@@ -895,6 +939,7 @@ func TestLocalSegmentReopenUsesSegcoreSchemaVersion(t *testing.T) {
 	}
 
 	assert.NoError(t, segment.Reopen(context.Background(), loadInfo))
+	assert.True(t, released, "the caller must release the completed reopen future")
 }
 
 func TestLocalSegmentReopenErrorDoesNotAdvanceLoadInfo(t *testing.T) {
@@ -903,13 +948,13 @@ func TestLocalSegmentReopenErrorDoesNotAdvanceLoadInfo(t *testing.T) {
 	schema := mock_segcore.GenTestCollectionSchema("collection_v1", schemapb.DataType_Int64, false)
 	schema.Version = 1
 
-	collection := &Collection{}
+	collection := &Collection{ccollection: &segcore.CCollection{}}
 	collection.setSchema(schema, 1, 100, 101)
 
 	csegment := mock_segcore.NewMockCSegment(t)
 	csegment.EXPECT().
 		Reopen(mock.Anything, mock.AnythingOfType("*segcore.ReopenRequest")).
-		Return(merr.WrapErrCollectionSchemaVersionNotReady("collection_v1", 0, 1))
+		Return(nil, merr.WrapErrCollectionSchemaVersionNotReady("collection_v1", 0, 1)).Once()
 
 	oldLoadInfo := &querypb.SegmentLoadInfo{
 		CollectionID:  10,
@@ -942,6 +987,95 @@ func TestLocalSegmentReopenErrorDoesNotAdvanceLoadInfo(t *testing.T) {
 	err := segment.Reopen(context.Background(), newLoadInfo)
 	assert.ErrorIs(t, err, merr.ErrCollectionSchemaVersionNotReady)
 	assert.Equal(t, int32(1), segment.LoadInfo().GetDataVersion())
+
+	released := false
+	future := &testReopenFuture{
+		wait: func() (unsafe.Pointer, error) {
+			return nil, merr.WrapErrCollectionSchemaVersionNotReady("collection_v1", 0, 1)
+		},
+		release: func() { released = true },
+	}
+	csegment.EXPECT().Reopen(mock.Anything, mock.Anything).Return(future, nil).Once()
+	err = segment.Reopen(context.Background(), newLoadInfo)
+	assert.ErrorIs(t, err, merr.ErrCollectionSchemaVersionNotReady)
+	assert.Equal(t, int32(1), segment.LoadInfo().GetDataVersion())
+	assert.True(t, released, "an errored future must still be released")
+}
+
+func TestLocalSegmentReopenReleasesCollectionLockBeforeWaiting(t *testing.T) {
+	paramtable.Init()
+	schema := mock_segcore.GenTestCollectionSchema("reopen_wait", schemapb.DataType_Int64, false)
+	collection := &Collection{ccollection: &segcore.CCollection{}}
+	collection.setSchema(schema, 0, 100, 100)
+
+	waitEntered := make(chan struct{})
+	finishWait := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-finishWait:
+		default:
+			close(finishWait)
+		}
+	})
+	released := false
+	future := &testReopenFuture{
+		wait: func() (unsafe.Pointer, error) {
+			close(waitEntered)
+			<-finishWait
+			return nil, nil
+		},
+		release: func() { released = true },
+	}
+	csegment := mock_segcore.NewMockCSegment(t)
+	csegment.EXPECT().Reopen(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, request *segcore.ReopenRequest) (cgo.Future, error) {
+		if collection.mu.TryLock() {
+			collection.mu.Unlock()
+			return nil, merr.WrapErrServiceInternalMsg("native preflight ran without the collection read lock")
+		}
+		if request.Collection != collection.ccollection {
+			return nil, merr.WrapErrServiceInternalMsg("native preflight used a different collection")
+		}
+		return future, nil
+	}).Once()
+	loadInfo := &querypb.SegmentLoadInfo{CollectionID: 10, SegmentID: 20, PartitionID: 30}
+	segment := &LocalSegment{
+		baseSegment: baseSegment{
+			collection:         collection,
+			loadInfo:           atomic.NewPointer(loadInfo),
+			version:            atomic.NewInt64(0),
+			resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
+			needUpdatedVersion: atomic.NewInt64(0),
+		},
+		ptrLock:        state.NewLoadStateLock(state.LoadStateDataLoaded),
+		csegment:       csegment,
+		fieldIndexes:   typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
+		fieldJSONStats: make(map[int64]*querypb.JsonStatsInfo),
+	}
+	reopenDone := make(chan error, 1)
+	go func() { reopenDone <- segment.Reopen(context.Background(), loadInfo) }()
+	select {
+	case <-waitEntered:
+	case err := <-reopenDone:
+		t.Fatalf("reopen failed before waiting: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("reopen did not start waiting")
+	}
+
+	writerDone := make(chan struct{})
+	go func() {
+		collection.mu.Lock()
+		collection.loadFields = typeutil.NewSet[int64](100)
+		collection.mu.Unlock()
+		close(writerDone)
+	}()
+	select {
+	case <-writerDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("collection writer remained blocked while reopen waited for storage I/O")
+	}
+	close(finishWait)
+	require.NoError(t, <-reopenDone)
+	assert.True(t, released, "the future must be released after its wait completes")
 }
 
 // TestLocalSegmentReopenInjectsDiskIndexLoadParams reproduces issue #51249:
@@ -955,7 +1089,7 @@ func TestLocalSegmentReopenInjectsDiskIndexLoadParams(t *testing.T) {
 	schema := mock_segcore.GenTestCollectionSchema("collection_v1", schemapb.DataType_Int64, false)
 	schema.Version = 1
 
-	collection := &Collection{}
+	collection := &Collection{ccollection: &segcore.CCollection{}}
 	collection.setSchema(schema, 1, 100, 101)
 
 	getParam := func(kvs []*commonpb.KeyValuePair, key string) (string, bool) {
@@ -967,14 +1101,14 @@ func TestLocalSegmentReopenInjectsDiskIndexLoadParams(t *testing.T) {
 		return "", false
 	}
 
-	var captured *querypb.SegmentLoadInfo
+	var captured *segcorepb.SegmentLoadInfo
 	csegment := mock_segcore.NewMockCSegment(t)
 	csegment.EXPECT().
 		Reopen(mock.Anything, mock.MatchedBy(func(request *segcore.ReopenRequest) bool {
 			captured = request.LoadInfo
 			return true
 		})).
-		Return(nil)
+		Return(&testReopenFuture{}, nil)
 
 	// DISKANN index carrying build-time params but NOT the QueryNode-local
 	// num_load_thread (the exact shape QueryCoord sends on a Reopen task).

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
@@ -26,4 +27,19 @@ func TestCollection(t *testing.T) {
 	assert.NotNil(t, ccollection.IndexMeta())
 	assert.Equal(t, int64(1), ccollection.ID())
 	defer ccollection.Release()
+}
+
+func TestCollectionEmptyLoadFields(t *testing.T) {
+	paramtable.Init()
+	schema := mock_segcore.GenTestCollectionSchema("empty_load_fields", schemapb.DataType_Int64, false)
+	collection, err := segcore.CreateCCollection(&segcore.CreateCCollectionRequest{
+		CollectionID:  1,
+		Schema:        schema,
+		LoadFieldList: []int64{},
+	})
+	require.NoError(t, err)
+	defer collection.Release()
+	require.NoError(t, collection.UpdateLoadFields([]int64{schema.GetFields()[0].GetFieldID()}))
+	require.NoError(t, collection.UpdateLoadFields([]int64{}))
+	require.NoError(t, collection.UpdateLoadFields(nil))
 }
