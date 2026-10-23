@@ -90,7 +90,14 @@ func mergeSortMultipleSegments(ctx context.Context,
 			reader.Close()
 			return nil, err
 		}
-		reader = newMaterializedRecordReader(reader, materializer)
+		preparer, err := newFunctionInputPreparer(writerSchema, writerSchema.GetFunctions(), existingFields,
+			s.GetManifest(), compactionParams.StorageConfig)
+		if err != nil {
+			materializer.Close()
+			reader.Close()
+			return nil, err
+		}
+		reader = newMaterializedRecordReader(ctx, reader, materializer, preparer)
 		segmentReaders[i] = wrapReaderWithTimestampOverwrite(reader, s.GetCommitTimestamp())
 		delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField.DataType, s,
 			storage.WithDownloader(binlogIO.Download),

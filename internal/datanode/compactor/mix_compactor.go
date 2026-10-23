@@ -310,6 +310,12 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 		return
 	}
 	defer materializer.Close()
+	preparer, err := newFunctionInputPreparer(writerSchema, writerSchema.GetFunctions(), existingFields,
+		seg.GetManifest(), t.compactionParams.StorageConfig)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer preparer.Close()
 
 	hasTTLField := t.ttlFieldID >= common.StartOfUserFieldID
 	var totalRowsRead int64
@@ -319,6 +325,9 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 		r, err = reader.Next()
 		if err != nil {
 			if err == sio.EOF {
+				if finishErr := preparer.Finish(); finishErr != nil {
+					return 0, 0, finishErr
+				}
 				err = nil
 				break
 			} else {
@@ -328,7 +337,7 @@ func (t *mixCompactionTask) writeSegment(ctx context.Context,
 		}
 
 		baseRecord := r
-		r, err = materializer.Wrap(baseRecord)
+		r, err = materializePreparedRecord(ctx, baseRecord, nil, materializer, preparer)
 		if err != nil {
 			mlog.Warn(ctx, "compact wrong, failed to materialize record", mlog.Err(err))
 			return
