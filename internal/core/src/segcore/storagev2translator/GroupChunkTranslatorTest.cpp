@@ -27,9 +27,11 @@
 #include "milvus-storage/packed/writer.h"
 #include "milvus-storage/format/parquet/file_reader.h"
 #include "test_utils/Constants.h"
+#include "test_utils/CountedFileSystem.h"
 #include "test_utils/DataGen.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "segcore/Utils.h"
+#include "storage/KeyRetriever.h"
 #include "mmap/ChunkedColumnGroup.h"
 
 #include <memory>
@@ -159,6 +161,121 @@ TEST(GroupChunkLoadingUsageTest, EmptyBatchUsesNoResources) {
     EXPECT_EQ(loading, cachinglayer::ResourceUsage{});
 }
 
+TEST_P(GroupChunkTranslatorTest, FooterReuseScopedToLoadOperation) {
+    // The translator must not retain the parsed parquet footer for the column
+    // group lifetime: it takes fs + file paths and re-prepares (and releases)
+    // the shared footer context per get_cells call. Count footer reads to make
+    // the scoping observable: each get_cells call re-opens a referenced file
+    // exactly once (footer parsed once per file, no matter how many batches),
+    // a second call re-reads the footer again, and no handles stay open
+    // afterwards.
+
+    // Write a dedicated file with enough row groups to produce at least three
+    // cells, so non-adjacent cell ids force two batch tasks on the same file.
+    // (The SetUp fixture writes only the {0..15} scalar/array columns, whose
+    // rows are small enough that the whole file stays one row group, so it
+    // could only ever produce one batch and could not distinguish shared vs
+    // per-batch footer opens.)
+    std::string multi_rg_path = path_ + "/footer_reuse_multi_rg.parquet";
+    std::vector<std::string> write_paths{multi_rg_path};
+    // Include the 128-dim vector column (field 16) so each row is large and
+    // the writer splits the file into many row groups.
+    auto column_groups = std::vector<std::vector<int>>{
+        {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}};
+    auto writer_memory = 16 * 1024 * 1024;
+    auto storage_config = milvus_storage::StorageConfig();
+    auto writer_result = milvus_storage::PackedRecordBatchWriter::Make(
+        fs_,
+        write_paths,
+        arrow_schema_,
+        storage_config,
+        column_groups,
+        writer_memory,
+        ::parquet::default_writer_properties());
+    ASSERT_TRUE(writer_result.ok());
+    auto writer = writer_result.ValueOrDie();
+    int64_t total_rows = 0;
+    for (int64_t i = 0; i < 60; ++i) {
+        auto dataset = DataGen(schema_, 1000);
+        auto record_batch =
+            ConvertToArrowRecordBatch(dataset, 128, arrow_schema_);
+        total_rows += record_batch->num_rows();
+        ASSERT_TRUE(writer->Write(record_batch).ok());
+    }
+    ASSERT_TRUE(writer->Close().ok());
+
+    // Verify the file really has enough row groups for at least three cells,
+    // so the non-adjacent-cell scenario below exercises multiple batches.
+    auto rg_result =
+        milvus_storage::FileRowGroupReader::Make(fs_, multi_rg_path);
+    ASSERT_TRUE(rg_result.ok()) << rg_result.status();
+    auto row_group_count = rg_result.ValueOrDie()
+                               ->file_metadata()
+                               ->GetRowGroupMetadataVector()
+                               .size();
+    ASSERT_GE(row_group_count, 3 * kRowGroupsPerCell - (kRowGroupsPerCell - 1));
+    ASSERT_TRUE(rg_result.ValueOrDie()->Close().ok());
+
+    auto counts = std::make_shared<ReadCounts>();
+    auto counted_fs = std::make_shared<CountedFileSystem>(fs_, counts);
+    std::vector<std::string> files{multi_rg_path};
+
+    // Measure how many footer reads a single PreparedParquetFile::Open issues
+    // so the per-call delta can be asserted exactly. The baseline must be taken
+    // before the probe, otherwise the delta is always zero.
+    const int before_probe = counts->footer_reads;
+    auto probe_result = milvus_storage::PreparedParquetFile::Open(
+        counted_fs, multi_rg_path, storage::GetReaderProperties());
+    ASSERT_TRUE(probe_result.ok()) << probe_result.status();
+    const int per_file_open_reads = counts->footer_reads - before_probe;
+    probe_result.ValueOrDie().reset();
+    EXPECT_EQ(counts->handles, 0);
+    ASSERT_GT(per_file_open_reads, 0);
+    const int footer_reads_after_probe = counts->footer_reads;
+
+    auto translator = std::make_unique<GroupChunkTranslator>(
+        segment_id_,
+        GroupChunkType::DEFAULT,
+        schema_->get_fields(),
+        FieldDataInfo(0, total_rows, TestLocalPath),
+        counted_fs,
+        files,
+        GetParam(),
+        true,
+        schema_->get_field_ids().size(),
+        milvus::proto::common::LoadPriority::LOW,
+        "disable");
+    // Construction opens the file once to build row_group_meta_list_.
+    EXPECT_EQ(counts->footer_reads,
+              footer_reads_after_probe + per_file_open_reads);
+    EXPECT_EQ(counts->handles, 0);
+    ASSERT_GE(translator->num_cells(), 3);
+
+    // Non-adjacent cells split into multiple batch tasks on the same file:
+    // cells 0 and 2 are separated by cell 1, so they land in different
+    // batches. A shared footer must still cost exactly one footer read per
+    // file; a per-batch open would cost one per batch.
+    std::vector<cachinglayer::cid_t> cids{0, 2};
+
+    // First call: exactly one footer read for the file, shared across batches.
+    auto cells = translator->get_cells(nullptr, cids);
+    EXPECT_EQ(cells.size(), cids.size());
+    EXPECT_EQ(counts->footer_reads,
+              footer_reads_after_probe + per_file_open_reads * 2);
+    EXPECT_EQ(counts->handles, 0);
+
+    // Second call: footer is re-read (not cached across calls).
+    cells = translator->get_cells(nullptr, cids);
+    EXPECT_EQ(cells.size(), cids.size());
+    EXPECT_EQ(counts->footer_reads,
+              footer_reads_after_probe + per_file_open_reads * 3);
+    EXPECT_EQ(counts->handles, 0);
+
+    if (std::filesystem::exists(multi_rg_path)) {
+        std::filesystem::remove(multi_rg_path);
+    }
+}
+
 TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
     auto temp_dir =
         std::filesystem::path(TestLocalPath) / "gctt_test_with_mmap";
@@ -173,6 +290,7 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
         GroupChunkType::DEFAULT,
         field_metas,
         column_group_info,
+        fs_,
         paths_,
         use_mmap,
         true,
@@ -338,6 +456,7 @@ TEST_P(GroupChunkTranslatorTest, TestMultipleFiles) {
         GroupChunkType::DEFAULT,
         field_metas,
         column_group_info,
+        fs_,
         multi_file_paths,
         use_mmap,
         true,
