@@ -12,8 +12,14 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cmath>
+#include <iomanip>
+#include <limits>
 #include <memory>
 #include <random>
+#include <set>
+#include <sstream>
+#include <string>
 #include <vector>
 
 #include "common/Types.h"
@@ -1150,4 +1156,333 @@ TEST_F(SortBufferTest, NonSortColumnPreserved) {
     EXPECT_EQ(raw[0], "one");
     EXPECT_EQ(raw[1], "two");
     EXPECT_EQ(raw[2], "three");
+}
+
+// =========================================================================
+// TopK (limit > 0): the result must equal the first `limit` rows of a full
+// sort (limit = -1), and every output row must still carry its own columns.
+// =========================================================================
+
+namespace {
+
+struct TopKSpec {
+    DataType key_type = DataType::INT64;
+    bool nullable = false;
+    int64_t key_cardinality = 0;  // 0 = (almost) unique keys
+    bool second_key = false;      // add a VARCHAR second sort key
+    bool varchar_pk = false;
+    int sorted_input = 0;  // +1 / -1: key increases / decreases with arrival
+};
+
+// Columns: [pk, key, (key2 varchar), row_id (int64)]
+struct TopKTable {
+    std::vector<DataType> types;
+    std::vector<std::vector<ColumnVectorPtr>> batches;
+    std::vector<vector_size_t> batch_rows;
+};
+
+void
+SetKey(const ColumnVectorPtr& col, size_t i, DataType type, int64_t v) {
+    switch (type) {
+        case DataType::BOOL:
+            col->SetValueAt<bool>(i, (v & 1) != 0);
+            break;
+        case DataType::INT8:
+            col->SetValueAt<int8_t>(i, static_cast<int8_t>(v));
+            break;
+        case DataType::INT16:
+            col->SetValueAt<int16_t>(i, static_cast<int16_t>(v));
+            break;
+        case DataType::INT32:
+            col->SetValueAt<int32_t>(i, static_cast<int32_t>(v));
+            break;
+        case DataType::INT64:
+        case DataType::TIMESTAMPTZ:
+            col->SetValueAt<int64_t>(i, v);
+            break;
+        case DataType::FLOAT:
+            // every 13th value is NaN, which sorts as the largest value
+            col->SetValueAt<float>(i,
+                                   v % 13 == 0
+                                       ? std::numeric_limits<float>::quiet_NaN()
+                                       : static_cast<float>(v % 100000) / 3);
+            break;
+        case DataType::DOUBLE:
+            col->SetValueAt<double>(
+                i,
+                v % 13 == 0 ? std::numeric_limits<double>::quiet_NaN()
+                            : static_cast<double>(v) / 7);
+            break;
+        default:  // VARCHAR
+            col->SetValueAt<std::string>(i, "k" + std::to_string(v));
+    }
+}
+
+TopKTable
+GenerateTopKTable(const TopKSpec& spec,
+                  int64_t num_rows,
+                  uint64_t seed,
+                  int64_t batch_size = 256) {
+    TopKTable table;
+    table.types = {spec.varchar_pk ? DataType::VARCHAR : DataType::INT64,
+                   spec.key_type};
+    if (spec.second_key) {
+        table.types.push_back(DataType::VARCHAR);
+    }
+    table.types.push_back(DataType::INT64);
+
+    std::mt19937_64 rng(seed);
+    for (int64_t start = 0; start < num_rows; start += batch_size) {
+        auto n = std::min(batch_size, num_rows - start);
+        std::vector<ColumnVectorPtr> cols;
+        for (auto type : table.types) {
+            cols.push_back(std::make_shared<ColumnVector>(type, n));
+        }
+        for (int64_t i = 0; i < n; ++i) {
+            int64_t id = start + i;
+            uint64_t r = rng();
+            if (spec.varchar_pk) {
+                cols[0]->SetValueAt<std::string>(i, "pk-" + std::to_string(id));
+            } else {
+                cols[0]->SetValueAt<int64_t>(i, id);
+            }
+            if (spec.nullable && r % 10 == 0) {
+                cols[1]->nullAt(i);
+            } else {
+                int64_t v =
+                    spec.sorted_input > 0   ? id
+                    : spec.sorted_input < 0 ? num_rows - id
+                    : spec.key_cardinality > 0
+                        ? static_cast<int64_t>((r >> 8) % spec.key_cardinality)
+                        : static_cast<int64_t>(r >> 2);
+                SetKey(cols[1], i, spec.key_type, v);
+            }
+            if (spec.second_key) {
+                if (spec.nullable && r % 7 == 0) {
+                    cols[2]->nullAt(i);
+                } else {
+                    cols[2]->SetValueAt<std::string>(
+                        i, "s" + std::to_string((r >> 40) % 5));
+                }
+            }
+            cols.back()->SetValueAt<int64_t>(i, id);
+        }
+        table.batches.push_back(std::move(cols));
+        table.batch_rows.push_back(static_cast<vector_size_t>(n));
+    }
+    return table;
+}
+
+template <typename T>
+std::string
+RenderFloat(T v) {
+    if (std::isnan(v)) {
+        return "nan";
+    }
+    std::ostringstream os;
+    os << std::setprecision(std::numeric_limits<T>::max_digits10) << v;
+    return os.str();
+}
+
+std::string
+RenderCell(const ColumnVectorPtr& col, size_t i, DataType type) {
+    if (!col->ValidAt(i)) {
+        return "<null>";
+    }
+    switch (type) {
+        case DataType::BOOL:
+            return std::to_string(col->ValueAt<bool>(i));
+        case DataType::INT8:
+            return std::to_string(col->ValueAt<int8_t>(i));
+        case DataType::INT16:
+            return std::to_string(col->ValueAt<int16_t>(i));
+        case DataType::INT32:
+            return std::to_string(col->ValueAt<int32_t>(i));
+        case DataType::INT64:
+        case DataType::TIMESTAMPTZ:
+            return std::to_string(col->ValueAt<int64_t>(i));
+        case DataType::FLOAT:
+            return RenderFloat(col->ValueAt<float>(i));
+        case DataType::DOUBLE:
+            return RenderFloat(col->ValueAt<double>(i));
+        default:  // VARCHAR
+            return reinterpret_cast<std::string*>(col->GetRawData())[i];
+    }
+}
+
+// Each output row rendered as "key1|key2|...#pk#row_id"
+std::vector<std::string>
+RunSortBuffer(const TopKTable& table,
+              const std::vector<SortKeyInfo>& sort_keys,
+              int64_t limit,
+              bool row_by_row = false) {
+    SortBuffer buffer(table.types, sort_keys, limit);
+    for (size_t b = 0; b < table.batches.size(); ++b) {
+        if (row_by_row) {
+            for (vector_size_t i = 0; i < table.batch_rows[b]; ++i) {
+                buffer.AddRow(table.batches[b], i);
+            }
+        } else {
+            buffer.AddRows(table.batches[b], table.batch_rows[b]);
+        }
+    }
+    buffer.NoMoreInput();
+
+    std::vector<std::string> rows;
+    while (buffer.HasOutput()) {
+        auto out = buffer.GetOutput(97);
+        if (out.empty()) {
+            break;
+        }
+        auto col = [&](size_t c) {
+            return std::dynamic_pointer_cast<ColumnVector>(out[c]);
+        };
+        for (size_t i = 0; i < out[0]->size(); ++i) {
+            std::string row;
+            for (const auto& sk : sort_keys) {
+                row +=
+                    RenderCell(
+                        col(sk.column_index), i, table.types[sk.column_index]) +
+                    "|";
+            }
+            row += "#" + RenderCell(col(0), i, table.types[0]) + "#" +
+                   RenderCell(col(out.size() - 1), i, DataType::INT64);
+            rows.push_back(row);
+        }
+    }
+    return rows;
+}
+
+std::string
+KeyPart(const std::string& row) {
+    return row.substr(0, row.find('#'));
+}
+
+// 'got' must have the key sequence of the first 'limit' rows of the full sort
+// 'full' (rows with equal keys may differ, as with any unstable sort), and
+// each of its rows must be a distinct, intact input row.
+void
+ExpectFullSortPrefix(const std::vector<std::string>& got,
+                     const std::vector<std::string>& full,
+                     int64_t limit) {
+    auto expected = std::min<size_t>(limit, full.size());
+    ASSERT_EQ(got.size(), expected);
+    std::set<std::string> input_rows(full.begin(), full.end());
+    std::set<std::string> seen;
+    for (size_t i = 0; i < got.size(); ++i) {
+        ASSERT_EQ(KeyPart(got[i]), KeyPart(full[i])) << "row " << i;
+        ASSERT_TRUE(input_rows.count(got[i])) << got[i];
+        ASSERT_TRUE(seen.insert(got[i]).second) << "duplicate " << got[i];
+    }
+}
+
+}  // namespace
+
+TEST_F(SortBufferTest, TopKMatchesFullSortPrefix) {
+    struct Case {
+        TopKSpec spec;
+        std::vector<SortKeyInfo> keys;
+    };
+    std::vector<Case> cases;
+    for (bool asc : {true, false}) {
+        for (bool nulls_first : {true, false}) {
+            for (auto type : {DataType::BOOL,
+                              DataType::INT8,
+                              DataType::INT16,
+                              DataType::INT32,
+                              DataType::INT64,
+                              DataType::TIMESTAMPTZ,
+                              DataType::FLOAT,
+                              DataType::DOUBLE,
+                              DataType::VARCHAR}) {
+                for (int64_t card : {int64_t{0}, int64_t{17}}) {
+                    TopKSpec s;
+                    s.key_type = type;
+                    s.nullable = true;
+                    s.key_cardinality = card;
+                    s.varchar_pk = type == DataType::VARCHAR;
+                    cases.push_back({s, {SortKeyInfo(1, asc, nulls_first)}});
+                }
+            }
+            TopKSpec m;  // multi-key with ties on the first key
+            m.key_type = DataType::INT32;
+            m.nullable = true;
+            m.key_cardinality = 17;
+            m.second_key = true;
+            cases.push_back({m,
+                             {SortKeyInfo(1, asc, nulls_first),
+                              SortKeyInfo(2, !asc, !nulls_first)}});
+        }
+    }
+
+    const int64_t kRows = 3000;
+    uint64_t seed = 42;
+    for (const auto& c : cases) {
+        auto table = GenerateTopKTable(c.spec, kRows, seed++);
+        auto full = RunSortBuffer(table, c.keys, -1);
+        ASSERT_EQ(full.size(), static_cast<size_t>(kRows));
+        // below, at and above 2 * limit (when the candidates get shrunk)
+        for (int64_t limit : {int64_t{1},
+                              int64_t{7},
+                              int64_t{100},
+                              int64_t{1500},
+                              int64_t{3000},
+                              int64_t{5000}}) {
+            SCOPED_TRACE(
+                "type=" + std::to_string(static_cast<int>(c.spec.key_type)) +
+                " card=" + std::to_string(c.spec.key_cardinality) +
+                " keys=" + std::to_string(c.keys.size()) +
+                " asc=" + std::to_string(c.keys[0].ascending) +
+                " nulls_first=" + std::to_string(c.keys[0].nulls_first) +
+                " limit=" + std::to_string(limit));
+            ExpectFullSortPrefix(
+                RunSortBuffer(table, c.keys, limit), full, limit);
+        }
+        // AddRow() offers rows one by one
+        ExpectFullSortPrefix(
+            RunSortBuffer(table, c.keys, 100, /*row_by_row=*/true), full, 100);
+    }
+}
+
+// Sorted input: either every row beats the threshold (most shrinks) or none.
+TEST_F(SortBufferTest, TopKSortedInput) {
+    for (int sorted_input : {1, -1}) {
+        for (bool asc : {true, false}) {
+            TopKSpec spec;
+            spec.sorted_input = sorted_input;
+            spec.varchar_pk = true;
+            auto table = GenerateTopKTable(spec, 5000, 3);
+            std::vector<SortKeyInfo> keys = {SortKeyInfo(1, asc, false)};
+            auto full = RunSortBuffer(table, keys, -1);
+            for (int64_t limit : {int64_t{1}, int64_t{64}, int64_t{1000}}) {
+                SCOPED_TRACE("sorted_input=" + std::to_string(sorted_input) +
+                             " asc=" + std::to_string(asc) +
+                             " limit=" + std::to_string(limit));
+                ExpectFullSortPrefix(
+                    RunSortBuffer(table, keys, limit), full, limit);
+                ExpectFullSortPrefix(
+                    RunSortBuffer(table, keys, limit, /*row_by_row=*/true),
+                    full,
+                    limit);
+            }
+        }
+    }
+}
+
+// A limit whose 2 * limit candidate capacity would overflow.
+TEST_F(SortBufferTest, TopKHugeLimit) {
+    TopKSpec spec;
+    spec.nullable = true;
+    auto table = GenerateTopKTable(spec, 1000, 9);
+    std::vector<SortKeyInfo> keys = {SortKeyInfo(1)};
+    auto full = RunSortBuffer(table, keys, -1);
+    for (int64_t limit : {std::numeric_limits<int64_t>::max() / 2 + 1,
+                          std::numeric_limits<int64_t>::max()}) {
+        SCOPED_TRACE("limit=" + std::to_string(limit));
+        ExpectFullSortPrefix(RunSortBuffer(table, keys, limit), full, limit);
+        ExpectFullSortPrefix(
+            RunSortBuffer(table, keys, limit, /*row_by_row=*/true),
+            full,
+            limit);
+    }
 }

@@ -52,7 +52,11 @@ struct SortKeyInfo {
  * - Pointer-based sorting: Only sorts pointers (8 bytes each), not row data
  * - Multi-field sorting: Supports compound ORDER BY (field1 ASC, field2 DESC)
  * - NULL handling: Configurable NULLS FIRST/LAST per sort key
- * - TopK optimization: Uses partial_sort when limit is small relative to input
+ * - TopK optimization: With a limit, rows that cannot make the top limit are
+ *   rejected on arrival and never stored; at most 2 * limit candidate rows
+ *   are kept and shrunk back to limit with a selection algorithm
+ *   (std::nth_element) when full. The final sort orders the candidates and
+ *   the result is truncated to limit
  * - Batched output: Returns results in configurable batch sizes
  *
  * Usage pattern:
@@ -63,7 +67,8 @@ struct SortKeyInfo {
  *
  * Memory model:
  *   - Current implementation is memory-only (no disk spilling)
- *   - Memory usage: O(rows * row_size) for data + O(rows * 8) for pointers
+ *   - Memory usage: O(n * row_size) for data + O(n * 8) for pointers, where
+ *     n = rows without a limit, and n <= 2 * limit with a limit
  *
  * @note This class is NOT thread-safe. External synchronization is required
  *       if used from multiple threads.
@@ -241,6 +246,42 @@ class SortBuffer {
     std::vector<VectorPtr>
     ExtractOutput(int64_t num_rows);
 
+    /**
+     * @brief With a limit: add one input row to the candidate rows, unless it
+     *        can no longer make the top limit_
+     */
+    void
+    OfferRow(const std::vector<ColumnVectorPtr>& columns,
+             vector_size_t row_index);
+
+    /**
+     * @brief With a limit: keep the best limit_ candidate rows, release the
+     *        rest for reuse and update the rejection threshold
+     */
+    void
+    ShrinkCandidates();
+
+    /**
+     * @brief Compare a not yet stored input row against a stored row
+     *
+     * Same semantics as Compare(input_row, row); the input row's sort keys
+     * are read directly from the column vectors.
+     */
+    int
+    CompareInput(const std::vector<ColumnVectorPtr>& columns,
+                 vector_size_t row_index,
+                 const char* row) const;
+
+    /**
+     * @brief Shared implementation of Compare() and CompareInput()
+     *
+     * @tparam Lhs Accessor for the left-hand row (a stored row, or an input
+     *             row read from column vectors)
+     */
+    template <typename Lhs>
+    int
+    CompareImpl(const Lhs& lhs, const char* rhs) const;
+
     //=========================================================================
     // Data Members
     //=========================================================================
@@ -254,8 +295,14 @@ class SortBuffer {
     std::unique_ptr<RowContainer> data_;
 
     // Sorted row pointers (8 bytes per row)
-    // After Sort(), these point to rows in data_ in sorted order
+    // After Sort(), these point to rows in data_ in sorted order.
+    // With a limit, during input these are the (unordered) candidate rows.
     std::vector<char*> sorted_rows_;
+
+    // TopK state, only used with a limit
+    int64_t candidate_capacity_ = 0;       // shrink candidates when reached
+    const char* threshold_row_ = nullptr;  // worst row kept by last shrink
+    std::vector<char*> free_rows_;  // released rows, reused before newRow()
 
     // State tracking
     bool sorted_ = false;
