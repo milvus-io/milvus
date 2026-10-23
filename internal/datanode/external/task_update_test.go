@@ -1201,8 +1201,10 @@ func (s *RefreshExternalCollectionTaskSuite) TestSegmentHasFunctionOutputColumns
 	s.NoError(err)
 	s.False(hasColumns)
 
+	manifestReads := 0
 	mock := mockey.Mock(packed.ManifestHasColumns).To(
 		func(manifestPath string, _ *indexpb.StorageConfig, columns []string) (bool, error) {
+			manifestReads++
 			s.Equal("manifest", manifestPath)
 			s.Equal([]string{"101"}, columns)
 			return false, nil
@@ -1214,7 +1216,22 @@ func (s *RefreshExternalCollectionTaskSuite) TestSegmentHasFunctionOutputColumns
 		},
 	}, []string{"101"})
 	s.NoError(err)
-	s.False(hasColumns, "manifest contents must override synthetic ChildFields")
+	s.True(hasColumns)
+	s.Zero(manifestReads, "advertised Function outputs must not require a manifest read")
+	hasColumns, err = task.segmentHasFunctionOutputColumns(&datapb.SegmentInfo{
+		ManifestPath: "manifest",
+	}, []string{"101"})
+	s.NoError(err)
+	s.False(hasColumns)
+	s.Equal(1, manifestReads)
+	mock.UnPatch()
+
+	mock = mockey.Mock(packed.ManifestHasColumns).Return(true, nil).Build()
+	hasColumns, err = task.segmentHasFunctionOutputColumns(&datapb.SegmentInfo{
+		ManifestPath: "manifest",
+	}, []string{"101"})
+	s.NoError(err)
+	s.True(hasColumns)
 	mock.UnPatch()
 
 	mock = mockey.Mock(packed.ManifestHasColumns).Return(false, fmt.Errorf("manifest read failed")).Build()
