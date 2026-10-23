@@ -149,18 +149,27 @@ func (m *messageImpl) setAppendExtra(extra *anypb.Any) {
 }
 
 // AppendExtraOf returns the extra append response recorded on msg by
-// SetAppendExtra, or nil when the message carries none (or carries one that
-// cannot be decoded, which a reader that requires it must treat as missing).
+// SetAppendExtra, or nil when the message carries none or carries one that
+// cannot be decoded. A reader that must tell the two apart uses
+// DecodeAppendExtra.
 func AppendExtraOf(msg BasicMessage) *anypb.Any {
+	extra, _ := DecodeAppendExtra(msg)
+	return extra
+}
+
+// DecodeAppendExtra returns the extra append response recorded on msg by
+// SetAppendExtra: nil and no error when the message carries none, and an error
+// when it carries one that cannot be decoded.
+func DecodeAppendExtra(msg BasicMessage) (*anypb.Any, error) {
 	value, ok := msg.Properties().Get(messageAppendExtra)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	extra := &anypb.Any{}
 	if err := DecodeProto(value, extra); err != nil {
-		return nil
+		return nil, err
 	}
-	return extra
+	return extra, nil
 }
 
 func (m *messageImpl) injectTraceContext(ctx context.Context) {
