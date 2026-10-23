@@ -445,6 +445,7 @@ func (q *QuotaCenter) collectMetrics() error {
 		}
 
 		q.readableCollections = make(map[int64]map[int64][]int64, 0)
+		metrics.CleanupRootCoordLoadedEntityMetrics()
 		var rangeErr error
 		collections.Range(func(collectionID int64) bool {
 			coll, getErr := q.meta.GetCollectionByIDWithMaxTs(context.TODO(), collectionID)
