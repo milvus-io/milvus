@@ -232,7 +232,22 @@ writer and the import code do not change. There is no proto change.
 
 A collection whose estimated row is at least 268 B (`maxSize / maxRows`)
 keeps its current target. That covers every float vector with dim > 61. For
-`int64 + int32` the target is 112 MB, about 4 M rows.
+`int64 + int32` the target is 112 MB.
+
+**`maxRows` is a byte target, not a row count.** The parameter sets the
+target through the estimated row width, and each path then measures bytes in
+its own unit: import and compaction count binlog bytes, the StreamingNode
+seal counts the bytes of the insert messages. For `int64 + int32` a binlog
+row is about 10.6 B and an insert row 12 B, against the 28 B estimate, so a
+112 MB target gives import segments of 11–13 M rows, compaction outputs of
+up to 10 M rows and growing segments that seal at about 1 M rows (measured in
+Appendix B). The rows per segment are therefore
+`maxRows × rowWidth(c) / (bytes per row in that path)`, 2.5–3× `maxRows`
+for this schema. This is accepted: the per-segment costs the target bounds
+were measured at these sizes and are within budget, and the same byte rule
+on both sides is what keeps compaction from oscillating (next paragraph).
+A row count enforced as such would need the planner's fullness test, the
+writer's split and import assignment to count rows as well (Section 7).
 
 **What the target covers.** The estimate rounds variable-length fields up: a
 `varchar` counts as `min(max_length, 256)` (`common.estimate.varCharLengthAvg`),
@@ -311,7 +326,10 @@ old target are merged once, the same as when an operator raises `maxSize`.
 - **Bytes and rows as two fullness dimensions inside the planner.** It
   produces the same plans as the size target in every simulated interval,
   and it touches knapsack, both planners, the writer, import and the proto.
-  It stays as the fallback if a hard row bound is ever needed.
+  It stays as the fallback if a hard row bound is ever needed. It would also
+  be safe against oscillation, since planner and writer would share the row
+  rule; the oscillation (write amplification 70) only appears when the writer
+  splits by rows while the planner still judges fullness by bytes.
 - **No row target, since PR #54543 removes the availability problem.** Index
   build and load replay are still serial per segment, and the target costs
   nothing outside `getExpectedSegmentSize` and the seal limitation. It can be
@@ -381,6 +399,28 @@ and 265–422 B.
 Streaming insert of the narrow schema seals at 4.85–4.9 M rows (137 MB)
 against a 123 MB seal threshold. The wire size per row (26 B) is lower than
 `MemorySize` (29.6 B), the same ratio that applies to `maxSize` today.
+
+**Phase-1 stack, 2026-10-23 (aarch64, same machine).** Branch
+`nonvec-phase1-stack` on master `f0f7677664`: the four phase-1 changes plus
+PR #54543. Collection `int64` pk + `int32`, no vector field, 44 M rows
+imported from one parquet file, auto compaction on, `maxRows` 4 M.
+
+| Step | Result |
+|---|---:|
+| Import (48 s), segments after sort compaction | 5 segments: 12.59 M, 11.82 M, 11.19 M, 4.20 M, 4.20 M rows; binlog 10.6 B per row |
+| `INVERTED` on `int32`, 44 M rows | 10.6 s (28.6 s on one 44 M segment, 8.5 s on eight) |
+| Load with no index | 3.5 s, RSS +3.6 GB (+5.3 GB before) |
+| Delete 1 % by expression, tsafe stall | 0.38 s (3.8 s before) |
+| Delete 10 % by expression, tsafe stall | 1.62 s (28.6 s before) |
+| Delete 10 % by pk list, 44 requests of 100 k, stall | 0.07 s (24 s before) |
+| Delete-ratio compaction after 20 % deleted | ran within 2 min, outputs visible, 8 segments, largest 7.19 M rows |
+| Release and load again, 9.24 M deletes replayed | 4.9 s |
+| Point / filter / count query | 1–4 ms throughout |
+| `search`, `hybrid_search`, add vector field | rejected with the unified error; adding a scalar field succeeds |
+
+Growing segments of the same schema seal at 0.5–1.0 M rows (112 MB × 0.12
+seal proportion, counted in 12 B insert rows); on a 6 M-row insert the
+compaction outputs stayed at or below 2.8 M rows.
 
 ## References
 
