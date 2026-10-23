@@ -1864,7 +1864,7 @@ func TestSplitWindowMarkChangeRefreshesTheCachedShardStates(t *testing.T) {
 	ctx, collectionID := f.ctx, f.collectionID
 	// a long TTL: only an invalidation makes the next read go to the coordinator.
 	splitState := meta.NewShardSplitStateCache(f.observer.broker, time.Hour)
-	f.targetMgr = meta.NewTargetManagerWithSplitState(f.observer.broker, f.meta, splitState)
+	f.targetMgr = meta.NewTargetManagerWithSplitState(f.observer.broker, f.meta, f.store, splitState)
 	f.observer = NewTargetObserverWithSplitState(f.meta, f.targetMgr, f.distMgr, f.observer.broker, f.observer.cluster, f.observer.nodeMgr, splitState)
 
 	f.setShards([]string{"src"}, schemapb.ShardState_ShardNormal)
