@@ -71,7 +71,7 @@ func TestSNHandler_AcquireSearchSegmentTasksWaitsRuntimeAndReleasesViewRef(t *te
 		context.Background(),
 		view.ShardID(),
 		view.QueryViewKey().QueryViewVersion,
-		&viewpb.QueryPlanMVCC{GrowingTimetick: 11, TransformingTimetick: 10, SchemaBinding: &viewpb.QuerySchemaBinding{}},
+		&viewpb.QueryPlanMVCC{GrowingTimetick: 11, TransformingTimetick: 10},
 		&internalpb.SearchRequest{CollectionID: testCollectionID, PartitionIDs: []int64{10}},
 	)
 
@@ -129,7 +129,7 @@ func TestSNHandler_AcquireQuerySegmentTasksWaitsRuntimeAndReleasesViewRef(t *tes
 		context.Background(),
 		view.ShardID(),
 		view.QueryViewKey().QueryViewVersion,
-		&viewpb.QueryPlanMVCC{GrowingTimetick: 11, TransformingTimetick: 10, SchemaBinding: &viewpb.QuerySchemaBinding{}},
+		&viewpb.QueryPlanMVCC{GrowingTimetick: 11, TransformingTimetick: 10},
 		&internalpb.RetrieveRequest{CollectionID: testCollectionID, PartitionIDs: []int64{20}},
 	)
 
@@ -164,7 +164,7 @@ func TestSNHandler_AcquireSearchSegmentTasksReleasesViewRefOnRuntimeError(t *tes
 		context.Background(),
 		view.ShardID(),
 		view.QueryViewKey().QueryViewVersion,
-		&viewpb.QueryPlanMVCC{GrowingTimetick: 11, TransformingTimetick: 10, SchemaBinding: &viewpb.QuerySchemaBinding{}},
+		&viewpb.QueryPlanMVCC{GrowingTimetick: 11, TransformingTimetick: 10},
 		&internalpb.SearchRequest{CollectionID: testCollectionID},
 	)
 	require.ErrorIs(t, err, runtimeErr)
@@ -226,10 +226,10 @@ func TestSNHandlerDownRejectsNewTasksButRetainsAcquiredHandles(t *testing.T) {
 	resource.OnReady()
 	h.ApplyViews([]handler.ApplyView{{View: newSNViewWithState(1, viewpb.QueryViewState_QueryViewStateUp)}})
 	req := &internalpb.RetrieveRequest{CollectionID: testCollectionID}
-	tasks, err := h.AcquireQuerySegmentTasks(context.Background(), view.ShardID(), view.QueryViewKey().QueryViewVersion, &viewpb.QueryPlanMVCC{SchemaBinding: &viewpb.QuerySchemaBinding{}}, req)
+	tasks, err := h.AcquireQuerySegmentTasks(context.Background(), view.ShardID(), view.QueryViewKey().QueryViewVersion, &viewpb.QueryPlanMVCC{}, req)
 	require.NoError(t, err)
 	h.ApplyViews([]handler.ApplyView{{View: newSNViewWithState(1, viewpb.QueryViewState_QueryViewStateDown)}})
-	_, err = h.AcquireQuerySegmentTasks(context.Background(), view.ShardID(), view.QueryViewKey().QueryViewVersion, &viewpb.QueryPlanMVCC{SchemaBinding: &viewpb.QuerySchemaBinding{}}, req)
+	_, err = h.AcquireQuerySegmentTasks(context.Background(), view.ShardID(), view.QueryViewKey().QueryViewVersion, &viewpb.QueryPlanMVCC{}, req)
 	require.Error(t, err)
 	require.Zero(t, held.releaseCount, "Down must not invalidate handles already owned by execution")
 	require.Len(t, tasks.Tasks(), 1)
@@ -286,7 +286,7 @@ func TestSNTasksRequirePartitionResolutionBeforeAcquiringHandles(t *testing.T) {
 					acquired = true
 					return nil, nil
 				}).Build()
-				mvcc := &viewpb.QueryPlanMVCC{GrowingTimetick: 11, TransformingTimetick: 10, SchemaBinding: &viewpb.QuerySchemaBinding{}}
+				mvcc := &viewpb.QueryPlanMVCC{GrowingTimetick: 11, TransformingTimetick: 10}
 				var err error
 				if search {
 					_, err = h.AcquireSearchSegmentTasks(context.Background(), view.ShardID(), view.QueryViewKey().QueryViewVersion, mvcc, &internalpb.SearchRequest{})

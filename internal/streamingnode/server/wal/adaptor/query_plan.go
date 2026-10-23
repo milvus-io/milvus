@@ -11,7 +11,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
-	"github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -114,9 +113,8 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		return nil, viewerror.NewViewNotFound("query view read resources are unavailable")
 	}
 	runtime := readRuntime.QueryRuntime
-	// Fix one MVCC and wait for its WAL prefix before validating schema
-	// removal boundaries. Returning a retry here would repeatedly sample a
-	// newer write frontier and could keep outrunning the recovery observer.
+	// Fix one MVCC and wait for the selected runtime's data visibility.
+	// Query admission and schema identity come from the acquired View.
 	if err := runtime.WaitMVCCVisible(ctx, mvcc.GetGrowingTimetick(), mvcc.GetTransformingTimetick()); err != nil {
 		return nil, err
 	}
@@ -184,23 +182,6 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 	default:
 		return nil, viewerror.NewUnknownError("query plan request misses legacy request")
 	}
-	var plannedRequest proto.Message
-	switch request := plan.GetRequest().(type) {
-	case *viewpb.QueryPlan_LegacySearchRequest:
-		plannedRequest = request.LegacySearchRequest
-	case *viewpb.QueryPlan_LegacyRetrieveRequest:
-		plannedRequest = request.LegacyRetrieveRequest
-	}
-	fields, err := viewquery.ReferencedSchemaFields(plannedRequest, readRuntime.Schema(), req.GetRequiredFieldIds()...)
-	if err != nil {
-		return nil, err
-	}
-	if err := w.validateQuerySchemaFields(lease.Meta, mvcc, fields); err != nil {
-		return nil, err
-	}
-	// Never mutate a caller-supplied MVCC when attaching a new plan's proof.
-	plan.Mvcc = proto.Clone(mvcc).(*viewpb.QueryPlanMVCC)
-	plan.Mvcc.SchemaBinding = &viewpb.QuerySchemaBinding{FieldIds: fields}
 	mlog.Debug(ctx, "query view plan created",
 		mlog.FieldCollectionID(lease.Meta.GetCollectionId()),
 		mlog.FieldVChannel(shardID.VChannel),
@@ -398,12 +379,4 @@ func queryNodeHasSelectedSegments(qn *viewpb.QueryViewOfQueryNode, partitionIDs 
 		}
 	}
 	return false
-}
-
-func (w *walAdaptorImpl) validateQuerySchemaFields(meta *viewpb.QueryViewMeta, mvcc *viewpb.QueryPlanMVCC, fields []int64) error {
-	module := w.viewResourceManager.Module(meta.GetVchannel())
-	if module == nil {
-		return viewerror.NewViewNotFound("query schema history is unavailable")
-	}
-	return module.ValidateSchemaFields(meta.GetCollectionId(), meta.GetSchemaVersion(), mvcc.GetTransformingTimetick(), fields)
 }

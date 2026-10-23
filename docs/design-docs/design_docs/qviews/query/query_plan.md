@@ -9,23 +9,25 @@ locates the local shard by vchannel and returns its real identity in the plan.
 Matching UpRecovering state waits for local recovery; missing or unusable views
 return the existing View errors.
 
-Planning holds a serving lease, fixes one MVCC, and waits for the runtime to
-observe its Growing and Transform frontiers before checking field-removal
-history. It then resolves the View's loaded partitions, optimizes against the
-exact read runtime, and validates all referenced fields, including fields needed
-by later stages. `QuerySchemaBinding` carries only the validated field IDs.
-The selected QueryView supplies the schema, and QueryPlanMVCC supplies the two
-execution frontiers; the binding does not duplicate either. Phase 2 requires
-the field binding, including for empty results, and checks that execution
-references only validated fields.
-The lease is renewed just before a successful plan return.
+Planning first acquires a serving View with the request's exact schema, then
+fixes one MVCC and waits for the runtime's Growing and Transform data visibility.
+It resolves the View's loaded partitions and optimizes against its exact read
+runtime. The lease is renewed just before a successful plan return.
+
+The selected QueryView determines read-schema identity and resource lifetime.
+A later write-schema change does not independently revoke fields in a retained
+serving View. Search, Query and requery share this rule; a missing or unavailable
+View fails through the View lifecycle. MVCC determines data visibility and does
+not grant access to a View. There is no field allowlist in the plan and no
+Phase 1 declaration of future requery fields. Field errors are reported when
+the corresponding request is planned/executed against the selected resources.
 
 ## Three distinct timestamp contracts
 
 | Input | Meaning | Retry behavior |
 | --- | --- | --- |
 | Consistency level | Sample query frontiers from the primary WAL | May sample again when replanning |
-| Explicit `QueryPlanMVCC` | Caller fixes Growing and Transform frontiers | Clone and preserve both frontiers |
+| Explicit `QueryPlanMVCC` | Caller fixes Growing and Transform frontiers | Preserve both frontiers |
 | `BarrierMVCC=B` | Establish WAL coverage for a scalar snapshot B | Re-establish coverage if needed, execute Growing=B and Transform=B |
 
 Explicit MVCC and BarrierMVCC are mutually exclusive. A barrier is useful for
@@ -88,11 +90,11 @@ Hybrid sub-request count/index checks prevent accidental cross-request reuse.
 Restoration occurs before per-node cloning and dispatch.
 
 The added fields are `QueryPlanMVCC.read_proof_timetick`,
-`GetQueryPlanRequest.read_proof_after` and `required_field_ids`,
+`GetQueryPlanRequest.read_proof_after`,
 `QueryPlan.reused_payloads`, and `StreamingFieldAnalyzer.read_schema_version`.
 This master-based extraction also synchronizes the query-facing schema contracts:
 `QueryViewMeta.schema_version`, Search/RetrieveRequest.schema_version,
-QuerySchemaBinding and required_fields /
+required_fields /
 skip_load_dynamic_field in GetQueryViewLoadInfoResponse. It does not add their
 Coordinator or QN/native implementations. The BarrierMVCC input and scoped WAL
 barrier implementation are already provided by master. The unused, unimplemented

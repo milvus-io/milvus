@@ -16,8 +16,7 @@ its [serving lease](../query_view_lease.md). Phase 2 borrows metadata without
 copying a topology it does not use.
 
 The handler validates the request's schema version against the leased View,
-checks referenced fields against the plan's field binding, waits for the fixed
-Growing/Transform frontiers, and resolves the View's partition
+waits for the fixed Growing/Transform frontiers, and resolves the View's partition
 scope through the required runtime interface and acquires growing segment handles.
 Handles expose the selected exact read-schema CCollection, while physical segments retain their own encoding
 schema. A query error releases every acquired handle. Successful tasks own them
@@ -46,7 +45,7 @@ This PR does not copy QN loaders, ReadState management or native implementation.
 ## Required interfaces
 
 - Phase 1: QueryPlanService returns actual shard identity, View version,
-  QueryPlanMVCC, schema binding, optimized request and work nodes.
+  QueryPlanMVCC, optimized request and work nodes.
 - Phase 2: ViewQueryService accepts SearchOnView / QueryOnView with those same
   identities. QN implementation must wait and execute on the bound resources.
 - Fixed-snapshot coverage: TimeTickSyncInspector.EnsureBarrier certifies
@@ -69,8 +68,8 @@ Milvus code/classification. The ViewError detail also retains the cause rendered
 by the current client error formatter. Caller cancellation and deadlines retain
 their existing meaning.
 
-The [plan contract](query_plan.md) describes field dependencies, exact schema
-validation, fixed snapshots, CAS certificates and payload reuse. Component tests
+The [plan contract](query_plan.md) describes View-based schema identity,
+fixed snapshots, CAS certificates and payload reuse. Component tests
 inject query workers and exercise barrier cancellation and fixed-snapshot
 planning. Scoped barrier production and delivery have their own WAL tests; these
 checks do not prove production Proxy/QN integration or cluster-level recovery.
@@ -79,5 +78,4 @@ Key source paths:
 `internal/streamingnode/server/wal/snview/{query_lease,query_task_provider}.go`,
 `internal/streamingnode/server/viewquery/`,
 `internal/streamingnode/server/wal/vchannel/queryresource/read_schema.go`,
-`internal/views/viewquery/schema_fields.go`, and
 `internal/views/viewerror/rpc_error.go`.
