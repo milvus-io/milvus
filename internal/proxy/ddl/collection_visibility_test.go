@@ -47,8 +47,10 @@ func TestDescribeCollectionInternalMetadata(t *testing.T) {
 					require.Equal(t, []string{crypto.Base64Encode("alice:alice")}, md.Get(util.HeaderAuthorize))
 				}
 				require.Equal(t, []string{"original"}, md.Get("request-id"))
-				return &milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "tenant_b", CollectionID: 77,
-					Schema: &schemapb.CollectionSchema{Name: "orders"}}, nil
+				return &milvuspb.DescribeCollectionResponse{
+					Status: merr.Success(), DbName: "tenant_b", CollectionID: 77,
+					Schema: &schemapb.CollectionSchema{Name: "orders"},
+				}, nil
 			}).Once()
 		task := &DescribeCollectionTask{mixCoord: mix, DescribeCollectionRequest: &milvuspb.DescribeCollectionRequest{DbName: "tenant_a", CollectionName: "orders_alias"}}
 		if internal {
@@ -66,8 +68,10 @@ func TestDescribeCollectionInternalMetadata(t *testing.T) {
 func TestDescribeCollectionInternalMetadataMissingDatabase(t *testing.T) {
 	mix := mocks.NewMockMixCoordClient(t)
 	mix.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(
-		&milvuspb.DescribeCollectionResponse{Status: merr.Success(), CollectionID: 77,
-			Schema: &schemapb.CollectionSchema{Name: "orders"}}, nil).Once()
+		&milvuspb.DescribeCollectionResponse{
+			Status: merr.Success(), CollectionID: 77,
+			Schema: &schemapb.CollectionSchema{Name: "orders"},
+		}, nil).Once()
 	task := &DescribeCollectionTask{mixCoord: mix, DescribeCollectionRequest: &milvuspb.DescribeCollectionRequest{DbName: "untrusted_hint", CollectionID: 77}}
 	task.UseInternalMetadata()
 	require.ErrorIs(t, task.Execute(context.Background()), merr.ErrServiceUnavailable)

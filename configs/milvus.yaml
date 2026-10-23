@@ -446,8 +446,6 @@ rootCoord:
 
 # Related configuration of proxy, used to validate client requests and reduce the returned results.
 proxy:
-  # Experimental RBAC visibility projection; keep disabled until snapshot consistency rollout.
-  enableLocalCollectionVisibility: false
   # Whether Proxy keeps the legacy row-based size packing before sending messages to StreamingNode.
   # Keep this enabled until chunk writing is enabled and observed on every StreamingNode that can own a pchannel.
   # For migration, enable streaming.splitChunkSN first, then disable proxy.splitChunk. Both parameters support live refresh.
@@ -486,6 +484,7 @@ proxy:
   # If the number of result entries exceeds this limit, the search will be rejected.
   # Disabled if the value is less or equal to 0.
   maxResultEntries: -1
+  enableLocalCollectionVisibility: false # Use the local RBAC collection visibility projection when supported. Keep disabled until snapshot consistency rollout is complete.
   # maximum number of SearchAggregation result entries, calculated as Nq * DerivedTopK * DerivedGroupSize.
   # DerivedTopK is the product of all aggregation level sizes. DerivedGroupSize is the max top_hits size across all levels, or 1 when top_hits is absent.
   # If the number of derived result entries exceeds this limit, the search aggregation request will be rejected.
