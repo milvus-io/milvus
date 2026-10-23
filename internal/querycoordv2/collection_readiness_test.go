@@ -667,6 +667,52 @@ func TestPrepareAutoLoadRequestFieldsAndIndexErrors(t *testing.T) {
 	}
 }
 
+// A collection without a vector field has no index it must build, so the
+// automatic load proceeds when the collection has no index at all, and keeps
+// rejecting a collection that has a vector field.
+func TestPrepareAutoLoadRequestWithoutVectorField(t *testing.T) {
+	newServer := func(resp *indexpb.DescribeIndexResponse) *Server {
+		mix := mocks.NewMixCoord(t)
+		mix.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(resp, nil).Once()
+		return &Server{mixCoord: mix}
+	}
+	scalar := []*schemapb.FieldSchema{
+		{FieldID: 0, Name: "row_id", DataType: schemapb.DataType_Int64},
+		{FieldID: 1, Name: "timestamp", DataType: schemapb.DataType_Int64},
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "age", DataType: schemapb.DataType_Int32},
+	}
+	notFound := func() *indexpb.DescribeIndexResponse {
+		return &indexpb.DescribeIndexResponse{Status: merr.Status(merr.ErrIndexNotFound)}
+	}
+
+	t.Run("no index", func(t *testing.T) {
+		coll := testDescribeCollection(100, nil)
+		coll.Schema.Fields = scalar
+		req, err := newServer(notFound()).prepareAutoLoadRequest(context.Background(), coll)
+		require.NoError(t, err)
+		require.Equal(t, []int64{100, 101}, req.GetLoadFields())
+		require.Empty(t, req.GetFieldIndexID())
+	})
+
+	t.Run("scalar index", func(t *testing.T) {
+		coll := testDescribeCollection(100, nil)
+		coll.Schema.Fields = scalar
+		resp := &indexpb.DescribeIndexResponse{Status: merr.Success(), IndexInfos: []*indexpb.IndexInfo{{FieldID: 101, IndexID: 1000}}}
+		req, err := newServer(resp).prepareAutoLoadRequest(context.Background(), coll)
+		require.NoError(t, err)
+		require.Equal(t, map[int64]int64{101: 1000}, req.GetFieldIndexID())
+	})
+
+	t.Run("vector field and no index", func(t *testing.T) {
+		coll := testDescribeCollection(100, nil)
+		coll.Schema.Fields = append(append([]*schemapb.FieldSchema{}, scalar...),
+			&schemapb.FieldSchema{FieldID: 102, Name: "vector", DataType: schemapb.DataType_FloatVector})
+		_, err := newServer(notFound()).prepareAutoLoadRequest(context.Background(), coll)
+		require.ErrorIs(t, err, merr.ErrIndexNotFound)
+	})
+}
+
 func TestEnsureCollectionReadyLoadFailureCanBeRetried(t *testing.T) {
 	total := testutil.ToFloat64(metrics.QueryCoordLoadCount.WithLabelValues(metrics.TotalLabel))
 	fail := testutil.ToFloat64(metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel))
@@ -676,6 +722,9 @@ func TestEnsureCollectionReadyLoadFailureCanBeRetried(t *testing.T) {
 	t.Cleanup(s.qviewsRuntime.stop)
 	const channel = "by-dev-rootcoord-dml_100v0"
 	coll := testDescribeCollection(100, []string{channel})
+	// A vector field makes "no index" a load failure; a collection without one
+	// loads with no index (TestPrepareAutoLoadRequestWithoutVectorField).
+	coll.Schema.Fields = append(coll.Schema.Fields, &schemapb.FieldSchema{FieldID: 199, Name: "vector", DataType: schemapb.DataType_FloatVector})
 	broker.EXPECT().DescribeCollection(mock.Anything, int64(100)).Return(coll, nil).Times(3)
 	putTestCollection(s, coll, 10)
 	mix := mocks.NewMixCoord(t)
@@ -685,7 +734,7 @@ func TestEnsureCollectionReadyLoadFailureCanBeRetried(t *testing.T) {
 	mix.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(
 		&indexpb.DescribeIndexResponse{Status: merr.Status(merr.ErrIndexNotFound)}, nil).Once()
 	mix.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(
-		&indexpb.DescribeIndexResponse{Status: merr.Success()}, nil).Once()
+		&indexpb.DescribeIndexResponse{Status: merr.Success(), IndexInfos: []*indexpb.IndexInfo{{FieldID: 199, IndexID: 1999}}}, nil).Once()
 	bapi := mock_broadcaster.NewMockBroadcastAPI(t)
 	bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(nil, merr.ErrServiceUnavailable).Once()
 	bapi.EXPECT().Close().Return().Once()

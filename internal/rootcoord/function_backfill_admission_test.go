@@ -24,6 +24,12 @@ func TestFunctionBackfillAdmissionPrecedesBroadcast(t *testing.T) {
 					FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar,
 					TypeParams: funcutil.Map2KeyValuePair(map[string]string{common.MaxLengthKey: "1024", common.EnableAnalyzerKey: "true"}),
 				},
+				// A collection created without a vector field cannot gain one, so the
+				// fixture carries a vector field for the function output to join.
+				{
+					FieldID: 102, Name: "vec", DataType: schemapb.DataType_FloatVector,
+					TypeParams: funcutil.Map2KeyValuePair(map[string]string{common.DimKey: "8"}),
+				},
 			},
 		}
 	}

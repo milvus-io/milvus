@@ -432,6 +432,7 @@ type commonConfig struct {
 	Stv2SplitAvgSizeThreshold            ParamItem `refreshable:"true"`
 	UseLoonFFI                           ParamItem `refreshable:"true"`
 	EnableGrowingSourceFlush             ParamItem `refreshable:"false"`
+	EnableCollectionWithoutVector        ParamItem `refreshable:"true"`
 
 	CredentialBrokerAllowedEndpoints    ParamItem `refreshable:"false"`
 	credentialBrokerPolicy              *specutil.BrokerPolicy
@@ -1460,6 +1461,20 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Export:       true,
 	}
 	p.EnableGrowingSourceFlush.Init(base.mgr)
+
+	p.EnableCollectionWithoutVector = ParamItem{
+		Key:          "common.enableCollectionWithoutVector",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc: `Whether CreateCollection accepts a schema with no vector field. Such a collection supports
+every operation except search, and a vector field cannot be added to it later.
+Turning it off rejects new requests to create such a collection on this cluster. Collections that already
+exist keep working, and collections received through replication are not affected.
+It may be turned off for the duration of a rolling upgrade: such a collection created while an old role
+is still running cannot be loaded or compacted until every role is upgraded.`,
+		Export: true,
+	}
+	p.EnableCollectionWithoutVector.Init(base.mgr)
 
 	p.Stv2SplitSystemColumn = ParamItem{
 		Key:          "common.storage.stv2.splitSystemColumn.enabled",

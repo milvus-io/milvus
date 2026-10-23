@@ -1646,6 +1646,12 @@ func (m *IndexMeta) AllDenseWithDiskIndex(collectionID int64, schema *schemapb.C
 		return false
 	})
 
+	// A collection without a vector field has no DiskANN index and keeps the
+	// default segment size; without this guard 0 == 0 selected the DiskANN size.
+	// Sparse-only collections keep their pre-existing result.
+	if !typeutil.HasVectorField(schema) {
+		return false
+	}
 	return len(vectorFields) == len(vectorFieldsWithDiskIndex)
 }
 

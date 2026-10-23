@@ -142,7 +142,7 @@ func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
 	dbName := "testDB" + funcutil.RandomString(10)
 	collectionName := "testCollection" + funcutil.RandomString(10)
 
-	createCollectionForTest(t, ctx, core, dbName, collectionName)
+	createCollectionWithVectorForTest(t, ctx, core, dbName, collectionName)
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
 
 	// case 1: action == nil
@@ -799,7 +799,7 @@ func TestDDLCallbacksAlterCollectionSchemaRejectsFunctionOnlyAdd(t *testing.T) {
 	dbName := "testDB" + funcutil.RandomString(10)
 	collectionName := "testCollection" + funcutil.RandomString(10)
 
-	createCollectionForTest(t, ctx, core, dbName, collectionName)
+	createCollectionWithVectorForTest(t, ctx, core, dbName, collectionName)
 
 	inputFieldBytes, err := proto.Marshal(&schemapb.FieldSchema{
 		Name:     "text_input",
@@ -858,7 +858,7 @@ func TestDDLCallbacksAlterCollectionSchemaAddRejectsStructFieldNameConflicts(t *
 	ctx := context.Background()
 	dbName := "testDB" + funcutil.RandomString(10)
 	collectionName := "testCollection" + funcutil.RandomString(10)
-	createCollectionForTest(t, ctx, core, dbName, collectionName)
+	createCollectionWithVectorForTest(t, ctx, core, dbName, collectionName)
 
 	resp, err := core.AddCollectionStructField(ctx, &milvuspb.AddCollectionStructFieldRequest{
 		DbName:                 dbName,
@@ -1028,7 +1028,7 @@ func TestDDLCallbacksAlterCollectionSchemaAddSkipsSchemaDropReady(t *testing.T) 
 	dbName := "testDB" + funcutil.RandomString(10)
 	collectionName := "testCollection" + funcutil.RandomString(10)
 
-	createCollectionForTest(t, ctx, core, dbName, collectionName)
+	createCollectionWithVectorForTest(t, ctx, core, dbName, collectionName)
 	varcharFieldSchema := &schemapb.FieldSchema{
 		Name:     "text_input",
 		DataType: schemapb.DataType_VarChar,
@@ -2160,7 +2160,9 @@ func TestDDLCallbacksAlterCollectionSchemaAddStructSubField(t *testing.T) {
 	ctx := context.Background()
 	dbName := "testDB" + funcutil.RandomString(10)
 	collectionName := "testCollection" + funcutil.RandomString(10)
-	createCollectionForTest(t, ctx, core, dbName, collectionName)
+	// The fixture vector field takes field ID 101, so the struct field and its
+	// sub-fields start at 102.
+	createCollectionWithVectorForTest(t, ctx, core, dbName, collectionName)
 
 	resp, err := core.AddCollectionStructField(ctx, &milvuspb.AddCollectionStructFieldRequest{
 		DbName: dbName, CollectionName: collectionName,
@@ -2208,13 +2210,13 @@ func TestDDLCallbacksAlterCollectionSchemaAddStructSubField(t *testing.T) {
 	require.Len(t, subFields, 5)
 	for i, name := range []string{"profile[new_scalar]", "profile[new_vector]", "profile[new_nested]"} {
 		require.Equal(t, name, subFields[i+2].Name)
-		require.Equal(t, int64(104+i), subFields[i+2].FieldID)
+		require.Equal(t, int64(105+i), subFields[i+2].FieldID)
 		require.True(t, subFields[i+2].Nullable)
 		require.True(t, subFields[i+2].ElementNullable)
 	}
 	require.True(t, subFields[4].TypeSchema.GetNullable())
 	require.True(t, subFields[4].TypeSchema.GetArrayElement().GetNullable())
-	assertMaxFieldIDProperty(t, ctx, core, dbName, collectionName, 106)
+	assertMaxFieldIDProperty(t, ctx, core, dbName, collectionName, 107)
 
 	for _, tc := range []struct {
 		field *schemapb.FieldSchema
@@ -2255,7 +2257,7 @@ func TestDDLCallbacksAlterCollectionSchemaAddStructSubField(t *testing.T) {
 	dropByID := proto.Clone(dropByName).(*milvuspb.AlterCollectionSchemaRequest)
 	dropByID.GetAction().Op = &milvuspb.AlterCollectionSchemaRequest_Action_DropRequest{
 		DropRequest: &milvuspb.AlterCollectionSchemaRequest_DropRequest{
-			Identifier: &milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldId{FieldId: 105},
+			Identifier: &milvuspb.AlterCollectionSchemaRequest_DropRequest_FieldId{FieldId: 106},
 		},
 	}
 	alterResp, err = core.AlterCollectionSchema(ctx, dropByID)
@@ -2264,7 +2266,7 @@ func TestDDLCallbacksAlterCollectionSchemaAddStructSubField(t *testing.T) {
 	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
 	require.Len(t, coll.StructArrayFields[0].Fields, 3)
-	assertMaxFieldIDProperty(t, ctx, core, dbName, collectionName, 106)
+	assertMaxFieldIDProperty(t, ctx, core, dbName, collectionName, 107)
 
 	// A sub-field name equal to a top-level field or to the struct itself
 	// is valid, since the sub-field is stored as profile[x].
