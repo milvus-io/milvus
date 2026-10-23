@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -52,7 +53,7 @@ func (c *Core) broadcastAlterCollectionSchema(ctx context.Context, req *milvuspb
 		return err
 	}
 	if _, ok := action.GetOp().(*milvuspb.AlterCollectionSchemaRequest_Action_DropRequest); ok {
-		if err := waitUntilSchemaDropReady(ctx); err != nil {
+		if err := waitUntilVersionFeatureReady(ctx, balancer.VersionFeatureSchemaDrop); err != nil {
 			return err
 		}
 	}
