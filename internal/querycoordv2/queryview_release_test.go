@@ -87,9 +87,10 @@ func TestQueryViewReleaseRemovalSubscriptionLifecycle(t *testing.T) {
 					require.Equal(t, int64(100), collectionID)
 					stop := register(reg, collectionID, listener)
 					registered++
-					if scenario == "after subscription" {
+					switch scenario {
+					case "after subscription":
 						require.NoError(t, manager.RequestRelease(ctx))
-					} else if scenario == "cancel" {
+					case "cancel":
 						cancel()
 					}
 					return func() {

@@ -246,15 +246,12 @@ func (s *Server) generateAlterLoadConfigMessageForLoadCollection(
 		PartitionIds:             sortedInt64s(expected.PartitionIDs),
 		LoadFields:               generateQViewsLoadFields(expected.LoadFields, expected.FieldIndexID),
 		RequiredFields:           loadmgr.RequiredFieldsForSchema(coll.GetSchema()),
-		LoadAllFields:            expected.LoadAllFields,
-		SkipLoadDynamicField:     expected.SkipLoadDynamicField,
 		Replicas:                 replicas,
 		UserSpecifiedReplicaMode: expected.UserSpecifiedReplicaMode,
 	}
-	if header.LoadAllFields == nil && current != nil {
-		header.LoadAllFields, header.SkipLoadDynamicField = current.LoadAllFields, current.SkipLoadDynamicField
-	}
-	if header.GetLoadAllFields() {
+	// Preserve the empty-hint representation for full loads; Proxy has already
+	// resolved a dynamic-field exclusion into explicit preload fields.
+	if expected.LoadAllFields != nil && *expected.LoadAllFields && !expected.SkipLoadDynamicField {
 		header.LoadFields = nil
 	}
 	if proto.Equal(loadConfigIntoAlterLoadConfigHeader(current), header) {
@@ -334,8 +331,6 @@ func loadConfigIntoAlterLoadConfigHeader(cfg *loadmgr.LoadConfig) *messagespb.Al
 		PartitionIds:             sortedInt64s(cfg.PartitionIDs),
 		LoadFields:               cloneAndSortLoadFields(cfg.LoadFields),
 		RequiredFields:           cloneAndSortLoadFields(cfg.RequiredFields),
-		LoadAllFields:            cfg.LoadAllFields,
-		SkipLoadDynamicField:     cfg.SkipLoadDynamicField,
 		Replicas:                 replicas,
 		UserSpecifiedReplicaMode: cfg.UserSpecifiedReplicaMode,
 	}
@@ -442,7 +437,7 @@ func qviewsCurrentLoadConfig(cfg *loadmgr.LoadConfig) job.CurrentLoadConfig {
 	if cfg == nil {
 		return current
 	}
-	info := &querypb.CollectionLoadInfo{CollectionID: cfg.CollectionID, DbID: cfg.DbID, ReplicaNumber: int32(len(cfg.Replicas)), Status: querypb.LoadStatus_Loaded, UserSpecifiedReplicaMode: cfg.UserSpecifiedReplicaMode, FieldIndexID: make(map[int64]int64), LoadAllFields: cfg.LoadAllFields, SkipLoadDynamicField: cfg.SkipLoadDynamicField}
+	info := &querypb.CollectionLoadInfo{CollectionID: cfg.CollectionID, DbID: cfg.DbID, ReplicaNumber: int32(len(cfg.Replicas)), Status: querypb.LoadStatus_Loaded, UserSpecifiedReplicaMode: cfg.UserSpecifiedReplicaMode, FieldIndexID: make(map[int64]int64)}
 	info.RequiredFields = cloneAndSortLoadFields(cfg.RequiredFields)
 	for _, field := range cfg.LoadFields {
 		info.LoadFields = append(info.LoadFields, field.GetFieldId())

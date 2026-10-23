@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	metastoremocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -182,7 +183,7 @@ func newLoadConfigQViewsServer(t *testing.T) (*Server, *metastoremocks.QueryCoor
 	require.NoError(t, err)
 
 	nodeMgr := session.NewNodeManager()
-	m := meta.NewMeta(func() (int64, error) { return 1000, nil }, catalog, nodeMgr)
+	m := meta.NewMeta(func() (int64, error) { return 1000, nil }, catalog, nodeMgr, metacache.NewMetaStore(nil))
 	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:  1,
 		Address: "localhost",

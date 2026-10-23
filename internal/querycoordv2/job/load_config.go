@@ -169,8 +169,6 @@ func (c *CurrentLoadConfig) IntoLoadConfigMessageHeader() *messagespb.AlterLoadC
 		PartitionIds:             partitionIDs,
 		LoadFields:               loadFields,
 		RequiredFields:           c.Collection.GetRequiredFields(),
-		LoadAllFields:            c.Collection.LoadAllFields,
-		SkipLoadDynamicField:     c.Collection.GetSkipLoadDynamicField(),
 		Replicas:                 replicas,
 		UserSpecifiedReplicaMode: c.GetUserSpecifiedReplicaMode(),
 	}
@@ -197,16 +195,12 @@ func GenerateAlterLoadConfigMessage(ctx context.Context, req *AlterLoadConfigReq
 		PartitionIds:             partitionIDs,
 		LoadFields:               loadFields,
 		RequiredFields:           qviews.ResolveRequiredFields(req.CollectionInfo.GetSchema(), nil),
-		LoadAllFields:            req.Expected.ExpectedLoadAllFields,
-		SkipLoadDynamicField:     req.Expected.ExpectedSkipLoadDynamicField,
 		Replicas:                 loadReplicaConfigs,
 		UserSpecifiedReplicaMode: req.Expected.ExpectedUserSpecifiedReplicaMode,
 	}
-	if header.LoadAllFields == nil && req.Current.Collection != nil {
-		header.LoadAllFields = req.Current.Collection.LoadAllFields
-		header.SkipLoadDynamicField = req.Current.Collection.GetSkipLoadDynamicField()
-	}
-	if header.GetLoadAllFields() {
+	// Empty preload hints follow the bound schema. A dynamic-field exclusion
+	// is already resolved into the explicit field list by Proxy.
+	if req.Expected.ExpectedLoadAllFields != nil && *req.Expected.ExpectedLoadAllFields && !req.Expected.ExpectedSkipLoadDynamicField {
 		header.LoadFields = nil
 	}
 	// check if the load configuration is changed; nothing to broadcast if not.
