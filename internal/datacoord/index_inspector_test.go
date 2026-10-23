@@ -133,12 +133,12 @@ func TestIndexInspector_inspect(t *testing.T) {
 
 func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 	pt := paramtable.Get()
-	heavyKey := pt.DataCoordCfg.IndexTaskSlotUsage.Key
-	scalarKey := pt.DataCoordCfg.ScalarIndexTaskSlotUsage.Key
-	assert.NoError(t, pt.Save(heavyKey, "64"))
-	assert.NoError(t, pt.Save(scalarKey, "16"))
-	defer pt.Reset(heavyKey)
-	defer pt.Reset(scalarKey)
+	workerSlotKey := pt.DataNodeCfg.WorkerSlotUnit.Key
+	buildParallelKey := pt.DataNodeCfg.BuildParallel.Key
+	assert.NoError(t, pt.Save(workerSlotKey, "16"))
+	assert.NoError(t, pt.Save(buildParallelKey, "1"))
+	defer pt.Reset(workerSlotKey)
+	defer pt.Reset(buildParallelKey)
 
 	ctx := context.Background()
 	notifyChan := make(chan int64, 1)
@@ -441,12 +441,12 @@ func TestIndexInspector_ProcessIndexSegmentsCreatesIndex(t *testing.T) {
 
 func TestIndexInspector_CreateIndexForSegment_FMIndexUsesMemoryBasedSlots(t *testing.T) {
 	pt := paramtable.Get()
-	heavyKey := pt.DataCoordCfg.IndexTaskSlotUsage.Key
-	scalarKey := pt.DataCoordCfg.ScalarIndexTaskSlotUsage.Key
-	assert.NoError(t, pt.Save(heavyKey, "64"))
-	assert.NoError(t, pt.Save(scalarKey, "16"))
-	defer pt.Reset(heavyKey)
-	defer pt.Reset(scalarKey)
+	workerSlotKey := pt.DataNodeCfg.WorkerSlotUnit.Key
+	buildParallelKey := pt.DataNodeCfg.BuildParallel.Key
+	assert.NoError(t, pt.Save(workerSlotKey, "16"))
+	assert.NoError(t, pt.Save(buildParallelKey, "1"))
+	defer pt.Reset(workerSlotKey)
+	defer pt.Reset(buildParallelKey)
 
 	ctx := context.Background()
 	scheduler := task.NewMockGlobalScheduler(t)

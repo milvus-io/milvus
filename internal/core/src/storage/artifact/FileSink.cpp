@@ -31,6 +31,7 @@
 #include <utility>
 #include <vector>
 
+#include "arrow/buffer.h"
 #include "common/Common.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
@@ -39,6 +40,7 @@
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/FileManager.h"
 #include "storage/MemFileManagerImpl.h"
+#include "storage/RemoteOutputStream.h"
 
 namespace milvus::storage {
 
@@ -146,7 +148,7 @@ StreamRawFile(DiskFileManagerImpl& manager,
     }
     const auto file_size = static_cast<size_t>(unsigned_size);
 
-    auto output = manager.OpenOutputStream(
+    auto output = manager.CreateOutputStream(
         std::string(name),
         storage_namespace == ArtifactStorageNamespace::Index);
     if (output == nullptr) {
@@ -396,10 +398,17 @@ class V1DiskSink::Impl {
     knowhere::BinarySet memory_entries;
     std::set<std::string> entry_names;
     std::map<std::string, int64_t> raw_remote_files;
+    std::map<std::string, std::shared_ptr<arrow::Buffer>> raw_entries;
     int64_t raw_size{0};
     SinkState state{SinkState::Open};
     bool released{false};
 };
+
+void
+FileSink::WriteRawEntry(std::string_view name,
+                        std::shared_ptr<arrow::Buffer> data) {
+    ThrowInfo(Unsupported, "artifact sink does not support raw buffer entries");
+}
 
 V1DiskSink::V1DiskSink(const FileManagerContext& context,
                        ArtifactStorageNamespace storage_namespace)
@@ -521,10 +530,53 @@ V1DiskSink::WriteRawEntryFromLocalFile(std::string_view name,
     }
 }
 
+void
+V1DiskSink::WriteRawEntry(std::string_view name,
+                          std::shared_ptr<arrow::Buffer> data) {
+    AssertOpen(impl_->state);
+    try {
+        AssertInfo(
+            data != nullptr, "raw artifact entry {} has no buffer", name);
+        const auto entry_name = impl_->ReserveEntryName(name);
+        AssertInfo(
+            !entry_name.empty() && SinkBaseName(entry_name) == entry_name,
+            "raw artifact entry must be a non-empty basename: {}",
+            name);
+        impl_->AssertRemotePathAvailable(
+            impl_->RemotePathFor(name),
+            impl_->disk_manager->GetRemotePathsToFileSize());
+        impl_->raw_entries.emplace(entry_name, std::move(data));
+    } catch (...) {
+        impl_->state = SinkState::Failed;
+        throw;
+    }
+}
+
 ArtifactStats
 V1DiskSink::Finish() {
     AssertOpen(impl_->state);
     try {
+        for (auto& [name, data] : impl_->raw_entries) {
+            const auto size = data->size();
+            AssertInfo(
+                size <= std::numeric_limits<int64_t>::max() - impl_->raw_size,
+                "artifact serialized size overflow");
+            auto output = impl_->disk_manager->CreateOutputStream(
+                name,
+                impl_->storage_namespace == ArtifactStorageNamespace::Index);
+            output->Write(data);
+            output->Close();
+            data.reset();
+            if (impl_->storage_namespace == ArtifactStorageNamespace::Index &&
+                !impl_->disk_manager->AddFileMeta(
+                    FileMeta{name, static_cast<size_t>(size)})) {
+                ThrowInfo(FileWriteFailed,
+                          "failed to register raw artifact entry {}",
+                          name);
+            }
+            impl_->raw_remote_files.emplace(impl_->RemotePathFor(name), size);
+            impl_->raw_size += size;
+        }
         impl_->PrepareMemoryEntries();
         if (!AddMemoryFiles(*impl_->memory_manager,
                             impl_->storage_namespace,

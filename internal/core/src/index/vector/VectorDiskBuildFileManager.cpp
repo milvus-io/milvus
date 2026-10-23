@@ -22,13 +22,17 @@
 #include <cstring>
 #include <filesystem>
 #include <limits>
+#include <set>
 #include <utility>
 
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "arrow/io/memory.h"
+#include "storage/StatusToErrorCode.h"
 #include "storage/artifact/LocalDirectory.h"
 #include "storage/artifact/LocalFileUtils.h"
 
@@ -182,7 +186,10 @@ class LocalInput final : public milvus::InputStream {
     size_t offset_{0};
 };
 
-class LocalOutput final : public milvus::OutputStream {
+}  // namespace
+
+class VectorDiskBuildFileManager::LocalOutput final
+    : public milvus::OutputStream {
  public:
     LocalOutput(std::string filename,
                 std::shared_ptr<VectorDiskBuildFileManager> manager)
@@ -204,6 +211,7 @@ class LocalOutput final : public milvus::OutputStream {
             ::close(fd_);
         }
         if (!closed_) {
+            manager_->AbortOutput(filename_);
             try {
                 ThrowInfo(FileWriteFailed,
                           "local vector output {} was destroyed before Close",
@@ -295,8 +303,8 @@ class LocalOutput final : public milvus::OutputStream {
                           std::strerror(errno));
             }
             fd_ = -1;
-            closed_ = true;
             manager_->CompleteOutput(filename_, offset_);
+            closed_ = true;
         } catch (...) {
             manager_->RecordFailure(std::current_exception());
             throw;
@@ -311,7 +319,129 @@ class LocalOutput final : public milvus::OutputStream {
     bool closed_{false};
 };
 
-}  // namespace
+// Close preserves the size for AddFileMeta. TakeOutput transfers the backing
+// buffer without another copy, after the engine has finished serialization.
+class VectorDiskBuildFileManager::BufferedOutput final
+    : public milvus::OutputStream {
+ public:
+    BufferedOutput(size_t expected_size,
+                   std::weak_ptr<VectorDiskBuildFileManager> manager)
+        : manager_(std::move(manager)) {
+        AssertInfo(expected_size <=
+                       static_cast<size_t>(std::numeric_limits<int64_t>::max()),
+                   "artifact entry size exceeds the storage size limit");
+        auto result = arrow::io::BufferOutputStream::Create(expected_size);
+        if (!result.ok()) {
+            ThrowInfo(storage::ArrowStatusToErrorCode(result.status()),
+                      "failed to allocate artifact entry: {}",
+                      result.status().ToString());
+        }
+        buffer_ = std::move(result).ValueOrDie();
+    }
+
+    size_t
+    Tell() const override {
+        try {
+            if (closed_) {
+                return size_;
+            }
+            auto result = buffer_->Tell();
+            if (!result.ok()) {
+                ThrowInfo(storage::ArrowStatusToErrorCode(result.status()),
+                          "failed to tell artifact entry position: {}",
+                          result.status().ToString());
+            }
+            return result.ValueOrDie();
+        } catch (...) {
+            RecordFailure();
+            throw;
+        }
+    }
+
+    size_t
+    Write(const void* data, size_t size) override {
+        try {
+            auto status = buffer_->Write(data, size);
+            if (!status.ok()) {
+                ThrowInfo(storage::ArrowStatusToErrorCode(status),
+                          "failed to write artifact entry: {}",
+                          status.ToString());
+            }
+            return size;
+        } catch (...) {
+            RecordFailure();
+            throw;
+        }
+    }
+
+    size_t
+    Write(int fd, size_t size) override {
+        try {
+            std::vector<uint8_t> buffer(std::min(
+                size, static_cast<size_t>(DEFAULT_INDEX_FILE_SLICE_SIZE)));
+            size_t copied = 0;
+            while (copied < size) {
+                const auto chunk = std::min(buffer.size(), size - copied);
+                storage::ReadAll(fd,
+                                 buffer.data(),
+                                 chunk,
+                                 std::to_string(fd),
+                                 "artifact entry source fd");
+                Write(buffer.data(), chunk);
+                copied += chunk;
+            }
+            return copied;
+        } catch (...) {
+            RecordFailure();
+            throw;
+        }
+    }
+
+    void
+    Close() override {
+        try {
+            if (!closed_) {
+                const auto size = Tell();
+                auto status = buffer_->Close();
+                if (!status.ok()) {
+                    ThrowInfo(storage::ArrowStatusToErrorCode(status),
+                              "failed to close artifact entry: {}",
+                              status.ToString());
+                }
+                size_ = size;
+                closed_ = true;
+            }
+        } catch (...) {
+            RecordFailure();
+            throw;
+        }
+    }
+
+    std::shared_ptr<arrow::Buffer>
+    Finish() {
+        Close();
+        auto result = buffer_->Finish();
+        if (!result.ok()) {
+            ThrowInfo(storage::ArrowStatusToErrorCode(result.status()),
+                      "failed to finish artifact entry: {}",
+                      result.status().ToString());
+        }
+        return std::move(result).ValueOrDie();
+    }
+
+ private:
+    void
+    RecordFailure() const noexcept {
+        if (auto manager = manager_.lock()) {
+            manager->RecordFailure(std::current_exception());
+        }
+    }
+
+    std::weak_ptr<VectorDiskBuildFileManager> manager_;
+    std::shared_ptr<arrow::io::BufferOutputStream> buffer_;
+    size_t size_{0};
+    bool closed_{false};
+};
 
 VectorDiskBuildFileManager::VectorDiskBuildFileManager(
     std::shared_ptr<storage::LocalDirectory> local_files)
@@ -320,9 +450,20 @@ VectorDiskBuildFileManager::VectorDiskBuildFileManager(
                "vector disk build file owner is missing");
 }
 
+void
+VectorDiskBuildFileManager::SetFileLoader(
+    std::function<void(const std::string&)> loader) {
+    std::lock_guard lock(mutex_);
+    file_loader_ = std::move(loader);
+}
+
 bool
 VectorDiskBuildFileManager::LoadFile(const std::string& filename) {
     try {
+        std::lock_guard lock(mutex_);
+        if (file_loader_) {
+            file_loader_(filename);
+        }
         std::error_code error;
         const bool exists = std::filesystem::is_regular_file(filename, error);
         if (error || !exists) {
@@ -363,6 +504,22 @@ VectorDiskBuildFileManager::AddFileMeta(const milvus::FileMeta& file_meta) {
             ThrowInfo(FileWriteFailed,
                       "refusing to register unowned vector output metadata {}",
                       file_meta.file_path);
+        }
+        std::shared_ptr<BufferedOutput> stream;
+        {
+            std::lock_guard lock(mutex_);
+            const auto entry = output_streams_.find(file_meta.file_path);
+            if (entry != output_streams_.end()) {
+                stream = entry->second;
+            }
+        }
+        if (stream) {
+            AssertInfo(
+                stream->Tell() == file_meta.file_size,
+                "vector output {} size disagrees with registered size {}",
+                file_meta.file_path,
+                file_meta.file_size);
+            return true;
         }
         std::error_code error;
         const auto actual =
@@ -471,29 +628,56 @@ VectorDiskBuildFileManager::OpenInputStream(const std::string& filename) {
 }
 
 std::shared_ptr<milvus::OutputStream>
-VectorDiskBuildFileManager::OpenOutputStream(const std::string& filename) {
+VectorDiskBuildFileManager::OpenOutputStream(
+    const std::string& filename, milvus::OutputStreamOptions options) {
     try {
         if (!local_files_->Owns(filename)) {
             ThrowInfo(FileWriteFailed,
                       "refusing to open unowned vector output {}",
                       filename);
         }
-        std::error_code error;
-        std::filesystem::create_directories(
-            std::filesystem::path(filename).parent_path(), error);
-        if (error) {
-            ThrowInfo(FileCreateFailed,
-                      "failed to create local vector output parent for {}: {}",
-                      filename,
-                      error.message());
+        std::lock_guard lock(mutex_);
+        AssertInfo(!output_streams_.contains(filename) &&
+                       !open_outputs_.contains(filename),
+                   "duplicate vector output {}",
+                   filename);
+        const auto existing = files_.find(filename);
+        AssertInfo(existing == files_.end() ||
+                       existing->second.transport ==
+                           VectorDiskFileTransport::RawUnsliced,
+                   "cannot overwrite registered vector file {}",
+                   filename);
+        if (!options.use_memory) {
+            std::error_code error;
+            std::filesystem::create_directories(
+                std::filesystem::path(filename).parent_path(), error);
+            if (error) {
+                ThrowInfo(
+                    FileCreateFailed,
+                    "failed to create local vector output parent for {}: {}",
+                    filename,
+                    error.message());
+            }
+            // A repeated serialization replaces its completed output. Files
+            // registered through AddFile remain owned by the build.
+            open_outputs_.emplace(filename, 0);
+            try {
+                auto stream =
+                    std::make_shared<LocalOutput>(filename, shared_from_this());
+                files_.erase(filename);
+                return stream;
+            } catch (...) {
+                open_outputs_.erase(filename);
+                throw;
+            }
         }
-        BeginOutput(filename);
-        try {
-            return std::make_shared<LocalOutput>(filename, shared_from_this());
-        } catch (...) {
-            AbortOutput(filename);
-            throw;
-        }
+        AssertInfo(existing == files_.end(),
+                   "cannot buffer an existing local vector output {}",
+                   filename);
+        auto stream = std::make_shared<BufferedOutput>(options.expected_size,
+                                                       weak_from_this());
+        output_streams_.emplace(filename, stream);
+        return stream;
     } catch (...) {
         RecordFailure(std::current_exception());
         throw;
@@ -508,11 +692,6 @@ VectorDiskBuildFileManager::Directory() const {
 std::string
 VectorDiskBuildFileManager::IndexPrefix() const {
     return Directory() + std::filesystem::path::preferred_separator;
-}
-
-void
-VectorDiskBuildFileManager::RegisterOwnedFile(const std::string& filename) {
-    RegisterOwnedFile(filename, VectorDiskFileTransport::LegacySliced);
 }
 
 void
@@ -549,82 +728,11 @@ VectorDiskBuildFileManager::RegisterOwnedFile(
                        filename);
     }
     std::lock_guard lock(mutex_);
-    AssertInfo(open_outputs_.find(filename) == open_outputs_.end() &&
-                   pending_meta_.find(filename) == pending_meta_.end(),
-               "local vector output {} is incomplete",
+    AssertInfo(!open_outputs_.contains(filename) &&
+                   !output_streams_.contains(filename),
+               "cannot register an open vector output {}",
                filename);
-    RegisterCompletedFileLocked(filename, size, transport);
-}
-
-void
-VectorDiskBuildFileManager::BeginOutput(const std::string& filename) {
-    if (!local_files_->Owns(filename)) {
-        ThrowInfo(FileWriteFailed,
-                  "refusing to track unowned vector output {}",
-                  filename);
-    }
-    std::lock_guard lock(mutex_);
-    AssertInfo(files_.find(filename) == files_.end(),
-               "local vector output {} is already complete",
-               filename);
-    const auto [_, inserted] = open_outputs_.emplace(filename, 0);
-    if (!inserted) {
-        ThrowInfo(FileWriteFailed,
-                  "local vector output {} is already open",
-                  filename);
-    }
-}
-
-void
-VectorDiskBuildFileManager::CompleteOutput(const std::string& filename,
-                                           size_t size) {
-    std::lock_guard lock(mutex_);
-    const auto open = open_outputs_.find(filename);
-    if (open == open_outputs_.end()) {
-        ThrowInfo(FileWriteFailed,
-                  "local vector output {} was not registered as open",
-                  filename);
-    }
-    const auto pending = pending_meta_.find(filename);
-    if (pending != pending_meta_.end() && pending->second != size) {
-        ThrowInfo(FileWriteFailed,
-                  "local vector output {} closed at size {}, metadata says {}",
-                  filename,
-                  size,
-                  pending->second);
-    }
-    RegisterCompletedFileLocked(
-        filename, size, VectorDiskFileTransport::RawUnsliced);
-    open_outputs_.erase(open);
-    if (pending != pending_meta_.end()) {
-        pending_meta_.erase(pending);
-    }
-}
-
-std::vector<VectorDiskArtifactFile>
-VectorDiskBuildFileManager::Files() const {
-    std::lock_guard lock(mutex_);
-    if (!open_outputs_.empty() || !pending_meta_.empty()) {
-        ThrowInfo(FileWriteFailed,
-                  "vector disk build has incomplete local output streams");
-    }
-    std::vector<VectorDiskArtifactFile> files;
-    files.reserve(files_.size());
-    for (const auto& entry : files_) {
-        files.push_back(entry.second);
-    }
-    std::sort(files.begin(), files.end(), [](const auto& lhs, const auto& rhs) {
-        return lhs.path < rhs.path;
-    });
-    return files;
-}
-
-void
-VectorDiskBuildFileManager::RegisterCompletedFileLocked(
-    const std::string& filename,
-    size_t size,
-    VectorDiskFileTransport transport) {
-    auto [entry, inserted] = files_.emplace(
+    const auto [entry, inserted] = files_.emplace(
         filename, VectorDiskArtifactFile{filename, size, transport});
     if (!inserted &&
         (entry->second.size != size || entry->second.transport != transport)) {
@@ -632,6 +740,76 @@ VectorDiskBuildFileManager::RegisterCompletedFileLocked(
                   "local vector output {} has conflicting size or transport",
                   filename);
     }
+}
+
+std::vector<VectorDiskArtifactFile>
+VectorDiskBuildFileManager::LocalFiles() const {
+    std::vector<VectorDiskArtifactFile> files;
+    {
+        std::lock_guard lock(mutex_);
+        AssertInfo(open_outputs_.empty() && pending_meta_.empty(),
+                   "vector disk build has incomplete local output streams");
+        files.reserve(files_.size());
+        for (const auto& entry : files_) {
+            files.push_back(entry.second);
+        }
+    }
+    std::sort(files.begin(), files.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.path < rhs.path;
+    });
+
+    // Recheck before publication: files may have changed since registration.
+    std::set<std::string> names;
+    for (const auto& file : files) {
+        AssertInfo(file.transport == VectorDiskFileTransport::LegacySliced ||
+                       file.transport == VectorDiskFileTransport::RawUnsliced,
+                   "vector disk artifact file has an invalid transport");
+        std::error_code error;
+        if (!local_files_->Owns(file.path) ||
+            !std::filesystem::is_regular_file(file.path, error) || error) {
+            ThrowInfo(FileReadFailed,
+                      "vector disk artifact file {} is unavailable{}{}",
+                      file.path,
+                      error ? ": " : "",
+                      error ? error.message() : "");
+        }
+        const auto actual_size = std::filesystem::file_size(file.path, error);
+        if (error || actual_size != file.size) {
+            ThrowInfo(FileReadFailed,
+                      "vector disk artifact file {} size changed from {}{}{}",
+                      file.path,
+                      file.size,
+                      error ? ": " : " to ",
+                      error ? error.message() : std::to_string(actual_size));
+        }
+        const auto name = std::filesystem::path(file.path).filename().string();
+        AssertInfo(!name.empty() && names.insert(name).second,
+                   "vector disk artifact has a duplicate or empty file name "
+                   "{}",
+                   name);
+    }
+    return files;
+}
+
+std::map<std::string, std::shared_ptr<arrow::Buffer>>
+VectorDiskBuildFileManager::TakeOutput() {
+    std::map<std::string, std::shared_ptr<BufferedOutput>> streams;
+    {
+        std::lock_guard lock(mutex_);
+        streams.swap(output_streams_);
+    }
+    std::map<std::string, std::shared_ptr<arrow::Buffer>> output;
+    for (const auto& [path, stream] : streams) {
+        output.emplace(path, stream->Finish());
+    }
+    return output;
+}
+
+void
+VectorDiskBuildFileManager::ResetOutput() {
+    std::lock_guard lock(mutex_);
+    output_streams_.clear();
+    first_failure_ = nullptr;
 }
 
 void
@@ -658,11 +836,30 @@ VectorDiskBuildFileManager::RecordFailure(std::exception_ptr failure) noexcept {
 }
 
 void
+VectorDiskBuildFileManager::CompleteOutput(const std::string& filename,
+                                           size_t size) {
+    std::lock_guard lock(mutex_);
+    AssertInfo(open_outputs_.contains(filename),
+               "local vector output {} was not registered as open",
+               filename);
+    const auto pending = pending_meta_.find(filename);
+    AssertInfo(
+        pending == pending_meta_.end() || pending->second == size,
+        "local vector output {} closed at a different size than its metadata",
+        filename);
+    files_[filename] = {filename, size, VectorDiskFileTransport::RawUnsliced};
+    open_outputs_.erase(filename);
+    pending_meta_.erase(filename);
+}
+
+void
 VectorDiskBuildFileManager::AbortOutput(const std::string& filename) noexcept {
     try {
         std::lock_guard lock(mutex_);
         open_outputs_.erase(filename);
         pending_meta_.erase(filename);
+        std::error_code ignored;
+        std::filesystem::remove(filename, ignored);
     } catch (...) {
     }
 }

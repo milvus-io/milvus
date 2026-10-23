@@ -24,6 +24,10 @@
 
 #include "storage/artifact/ArtifactStats.h"
 
+namespace arrow {
+class Buffer;
+}
+
 // Legacy write side of artifact persistence. Artifacts emit logical named
 // entries; concrete sinks handle transport, remote naming, slicing, encryption,
 // and publication metadata. Upload orchestration belongs to the caller, and
@@ -72,6 +76,11 @@ class FileSink {
     WriteRawEntryFromLocalFile(std::string_view name,
                                const std::string& local_path) = 0;
 
+    // Retain one completed, unsliced object. Finish uploads the entry
+    // and publishes its metadata together with the other entries.
+    virtual void
+    WriteRawEntry(std::string_view name, std::shared_ptr<arrow::Buffer> data);
+
     // Close the artifact and report what was written.
     virtual ArtifactStats
     Finish() = 0;
@@ -100,6 +109,9 @@ class V1DiskSink final : public FileSink {
     void
     WriteRawEntryFromLocalFile(std::string_view name,
                                const std::string& local_path) override;
+    void
+    WriteRawEntry(std::string_view name,
+                  std::shared_ptr<arrow::Buffer> data) override;
     ArtifactStats
     Finish() override;
     void

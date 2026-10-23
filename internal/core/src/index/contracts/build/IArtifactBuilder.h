@@ -31,6 +31,10 @@ struct BuilderInputSpec {
     // Additional fields that must be materialized into the concrete Input before
     // Build. The input type defines their value channel and representation.
     std::vector<FieldId> side_inputs;
+
+    // Disk-vector inputs stream to a raw file unless the builder opts into a
+    // resident dense tensor. Variable-length inputs retain their file layout.
+    bool use_memory = false;
 };
 
 template <typename Input>
@@ -44,6 +48,13 @@ class IArtifactBuilder {
     virtual BuilderInputSpec
     InputSpec() const {
         return {};
+    }
+
+    // A successful reservation is retained by the builder until Build or
+    // destruction. A busy device leaves the prepared input available to retry.
+    virtual bool
+    TryReserveBuild() {
+        return true;
     }
 
     // The builder borrows the complete input and everything referenced by its

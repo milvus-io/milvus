@@ -25,10 +25,12 @@
 #include <utility>
 #include <vector>
 
+#include "arrow/buffer.h"
 #include "common/Common.h"
 #include "common/Slice.h"
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
+#include "storage/RemoteOutputStream.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "storage/artifact/FileSink.h"
@@ -177,6 +179,113 @@ TEST(V1ArtifactIOTest, RoundTripsSlicedEntryThroughProductionTransport) {
     EXPECT_EQ(source.ReadEntry("payload"),
               (std::vector<uint8_t>(payload.begin(), payload.end())));
 
+    sink.ReleaseLocalStaging();
+}
+
+class FailingOutputStream : public arrow::io::OutputStream {
+ public:
+    bool fail_write{true};
+    bool fail_abort{false};
+    int abort_count{0};
+    int close_count{0};
+
+    arrow::Status
+    Close() override {
+        ++close_count;
+        closed_ = true;
+        return arrow::Status::OK();
+    }
+
+    arrow::Status
+    Abort() override {
+        ++abort_count;
+        closed_ = true;
+        return fail_abort ? arrow::Status::IOError("abort failed")
+                          : arrow::Status::OK();
+    }
+
+    bool
+    closed() const override {
+        return closed_;
+    }
+
+    arrow::Result<int64_t>
+    Tell() const override {
+        return 0;
+    }
+
+    arrow::Status
+    Write(const void*, int64_t) override {
+        return fail_write ? arrow::Status::IOError("write failed")
+                          : arrow::Status::OK();
+    }
+
+ private:
+    bool closed_{false};
+};
+TEST(RemoteOutputStreamTest, FailedWriteAbortsWithoutMaskingError) {
+    for (bool fail_abort : {false, true}) {
+        auto underlying = std::make_shared<FailingOutputStream>();
+        underlying->fail_abort = fail_abort;
+        try {
+            RemoteOutputStream output(underlying);
+            output.Write(arrow::Buffer::FromString("payload"));
+            output.Close();
+            FAIL() << "Write must fail";
+        } catch (const SegcoreError& e) {
+            EXPECT_NE(std::string(e.what()).find("write failed"),
+                      std::string::npos);
+        }
+        EXPECT_EQ(underlying->abort_count, 1);
+        EXPECT_EQ(underlying->close_count, 0);
+    }
+}
+
+TEST(RemoteOutputStreamTest, ClosedStreamIsNotAborted) {
+    auto underlying = std::make_shared<FailingOutputStream>();
+    underlying->fail_write = false;
+    {
+        RemoteOutputStream output(underlying);
+        output.Write(arrow::Buffer::FromString("payload"));
+        output.Close();
+    }
+    EXPECT_EQ(underlying->close_count, 1);
+    EXPECT_EQ(underlying->abort_count, 0);
+}
+
+TEST(V1ArtifactIOTest, RetainsRawBufferUntilUpload) {
+    auto remote_root = LocalDirectory::CreateOwned(
+        std::filesystem::temp_directory_path().string(),
+        "milvus-filesink-stream-test-XXXXXX",
+        "V1 artifact stream test");
+    StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = remote_root->Path() + "/";
+    auto chunk_manager = CreateChunkManager(storage_config);
+    auto filesystem = InitArrowFileSystem(storage_config);
+    FieldDataMeta field_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {
+        3, 100, 1000, 1, "artifact_io", "field", DataType::INT64, 1, false};
+    FileManagerContext context(
+        field_meta, index_meta, chunk_manager, filesystem);
+
+    V1DiskSink sink(context);
+    auto buffer = arrow::Buffer::FromString("payload");
+    std::weak_ptr<arrow::Buffer> retained = buffer;
+    sink.WriteRawEntry("payload", std::move(buffer));
+    EXPECT_FALSE(retained.expired());
+    for (const auto& entry :
+         std::filesystem::recursive_directory_iterator(remote_root->Path())) {
+        EXPECT_FALSE(entry.is_regular_file());
+    }
+    const auto stats = sink.Finish();
+    EXPECT_TRUE(retained.expired());
+    ASSERT_EQ(stats.Files().size(), 1);
+    auto input = filesystem->OpenInputFile(stats.Files().front().file_name);
+    ASSERT_TRUE(input.ok()) << input.status();
+    auto bytes = (*input)->ReadAt(0, 7);
+    ASSERT_TRUE(bytes.ok()) << bytes.status();
+    EXPECT_EQ((*bytes)->ToString(), "payload");
     sink.ReleaseLocalStaging();
 }
 

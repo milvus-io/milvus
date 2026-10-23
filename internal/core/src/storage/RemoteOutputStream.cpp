@@ -4,14 +4,17 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <utility>
 #include <vector>
 
+#include "arrow/buffer.h"
 #include "arrow/io/interfaces.h"
 #include "arrow/result.h"
 #include "arrow/status.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "log/Log.h"
 #include "storage/StatusToErrorCode.h"
 
 namespace milvus::storage {
@@ -22,6 +25,21 @@ RemoteOutputStream::RemoteOutputStream(
 }
 
 RemoteOutputStream::~RemoteOutputStream() {
+    // A failed Write skips Close. Discard an unfinished upload rather than
+    // publishing partial data or leaving its multipart upload on the server.
+    try {
+        if (!output_stream_->closed()) {
+            auto status = output_stream_->Abort();
+            if (!status.ok()) {
+                LOG_WARN("Failed to abort remote output stream: {}",
+                         status.ToString());
+            }
+        }
+    } catch (const std::exception& e) {
+        LOG_WARN("Failed to abort remote output stream: {}", e.what());
+    } catch (...) {
+        LOG_WARN("Failed to abort remote output stream: unknown exception");
+    }
 }
 
 size_t
@@ -44,6 +62,17 @@ RemoteOutputStream::Write(const void* data, size_t size) {
                   status.ToString());
     }
     return size;
+}
+
+size_t
+RemoteOutputStream::Write(const std::shared_ptr<arrow::Buffer>& buffer) {
+    auto status = output_stream_->Write(buffer);
+    if (!status.ok()) {
+        ThrowInfo(ArrowStatusToErrorCode(status),
+                  "Failed to write to output stream: {}",
+                  status.ToString());
+    }
+    return buffer->size();
 }
 
 size_t

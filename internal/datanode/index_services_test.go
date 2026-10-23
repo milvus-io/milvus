@@ -79,6 +79,54 @@ func TestIndexTaskWhenStoppingNode(t *testing.T) {
 	}
 }
 
+func TestStopDefersSegcoreCleanupUntilIndexTasksDrain(t *testing.T) {
+	waiting, release, cleaned := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	wait := mockey.Mock((*index.TaskScheduler).Wait).To(func(*index.TaskScheduler) {
+		close(waiting)
+		<-release
+	}).Build()
+	t.Cleanup(func() { wait.UnPatch() })
+	cleanup := mockey.Mock(index.CloseSegcore).To(func() { close(cleaned) }).Build()
+	t.Cleanup(func() { cleanup.UnPatch() })
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+		select {
+		case <-cleaned:
+		case <-time.After(5 * time.Second):
+			t.Error("native cleanup did not complete")
+		}
+	})
+	node := NewDataNode(context.Background())
+	stopped := make(chan error, 1)
+	go func() { stopped <- node.Stop() }()
+	select {
+	case err := <-stopped:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop waited for the running index task")
+	}
+	select {
+	case <-waiting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop did not wait for task cleanup in the background")
+	}
+	select {
+	case <-cleaned:
+		t.Fatal("native resources were cleaned before tasks drained")
+	default:
+	}
+	close(release)
+	select {
+	case <-cleaned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("native cleanup did not follow task cleanup")
+	}
+}
+
 type fakeServiceIndex struct{}
 
 func (fakeServiceIndex) Delete() error { return nil }
@@ -131,7 +179,7 @@ func TestCreateAnalyzeTaskPropagatesPluginContext(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(status))
 
-	task := node.taskScheduler.TaskQueue.PopUnissuedTask()
+	task := node.taskScheduler.TaskQueue.PopUnissuedTask(true)
 	require.NotNil(t, task)
 	require.NoError(t, task.Execute(ctx))
 	require.Equal(t, expected, captured)
@@ -219,7 +267,7 @@ func TestCreateStatsTaskPropagatesPluginContext(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(status))
 
-	task := node.taskScheduler.TaskQueue.PopUnissuedTask()
+	task := node.taskScheduler.TaskQueue.PopUnissuedTask(true)
 	require.NotNil(t, task)
 	require.NoError(t, task.Execute(ctx))
 	require.NotNil(t, captured)

@@ -48,3 +48,14 @@ type Task interface {
 	GetSlot() int64
 	IsVectorIndex() bool
 }
+
+// PreparedTask separates input preparation from execution without exposing
+// pipeline states to the coordinator or to non-index task implementations.
+type PreparedTask interface {
+	Task
+	LoadData(context.Context) error
+	HasResidentInput() bool
+	TryReserveBuild() (bool, error)
+	SpillInput(context.Context) (bool, error)
+	ReleaseInputMemory() error
+}
