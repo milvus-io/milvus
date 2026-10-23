@@ -313,6 +313,14 @@ func (r *rowParser) Parse(raw any) (Row, error) {
 		}
 	}
 
+	// A row that names no field of the collection carries no data: rejecting
+	// it is clearer than producing a row of nulls and defaults, and matches
+	// the other readers, which reject a file that provides no column. A vector
+	// field used to make this impossible. The dynamic field counts as data.
+	if len(row) == 0 && len(dynamicValues) == 0 {
+		return nil, merr.WrapErrImportFailed("the row provides no field of the collection")
+	}
+
 	// if nullable/defaultValue fields have no values, fill with nil or default value
 	for fieldName, fieldID := range r.name2FieldID {
 		if _, ok = row[fieldID]; !ok {
