@@ -1280,6 +1280,9 @@ message CopySegmentTarget {
   // across the snapshot boundary (field ID cannot be used because one JSON field
   // may carry several indexes on different paths).
   repeated CopySegmentTargetIndex target_indexes = 6;
+  // Absent preserves the source layout. Set by DataCoord for new manifest-backed
+  // StorageV3 copies, independently of the source index's path version.
+  optional index.IndexStorePathVersion index_store_path_version = 7;
 }
 
 message CopySegmentRequest {
@@ -1391,6 +1394,9 @@ message CopySegmentTask {
   // The worker completed, but the coordinator rejected its result. Cleanup is
   // retried from durable metadata, including after coordinator/worker restart.
   bool cleanup_required = 14;
+  // Target layout pinned with placement before dispatch. Absent on older
+  // tasks, which continue to preserve each source index's layout on retries.
+  optional index.IndexStorePathVersion index_store_path_version = 15;
 }
 
 // CopySegmentJobState defines the state machine for copy segment jobs
@@ -1753,6 +1759,8 @@ message QuerySlotResponse {
   int64 available_slots = 2;
   string version = 3; // Kept for wire compatibility; new schedulers do not use it
   bool copy_segment_shared_indexes = 4;
+  // Supports v2 index build and copy destinations under a segment's _index.
+  bool segment_rooted_indexes = 5;
 }
 
 enum CompactionTaskState {

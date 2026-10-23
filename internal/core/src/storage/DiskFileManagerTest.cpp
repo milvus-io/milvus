@@ -627,6 +627,40 @@ TEST_F(DiskAnnFileManagerTest, GetRemoteIndexObjectPrefix_V1CollectionRooted) {
                 std::string::npos);
 }
 
+TEST_F(DiskAnnFileManagerTest, SegmentRootedIndexUploadAndRead) {
+    auto conf = milvus_storage::ArrowFileSystemConfig();
+    conf.storage_type = "local";
+    conf.root_path = TestLocalPath + "segment_rooted_index";
+    auto result = milvus_storage::CreateArrowFileSystem(conf);
+    ASSERT_TRUE(result.ok());
+    auto fs = result.ValueOrDie();
+    FieldDataMeta field_meta{100, 20, 30, 5};
+    IndexMeta index_meta{30, 5, 1000, 1};
+    index_meta.index_store_path_version = milvus::proto::index::
+        IndexStorePathVersion::INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED;
+    // An existing legacy local manifest must retain its actual base.
+    index_meta.index_file_prefix =
+        conf.root_path + "/legacy/insert_log/100/20/30/_index/1000/1";
+    auto fm = std::make_shared<DiskFileManagerImpl>(
+        FileManagerContext(field_meta, index_meta, cm_, fs));
+    EXPECT_EQ(fm->GetRemoteIndexObjectPrefix(), index_meta.index_file_prefix);
+    const std::string local_path =
+        fm->GetLocalIndexObjectPrefix() + "index_data";
+    auto output = fm->OpenOutputStream(local_path);
+    const uint64_t expected = 42;
+    output->Write(expected);
+    output->Close();
+    auto input =
+        fm->OpenInputStream(index_meta.index_file_prefix + "/index_data");
+    uint64_t actual = 0;
+    input->Read(actual);
+    EXPECT_EQ(actual, expected);
+    auto info = fs->GetFileInfo(index_meta.index_file_prefix + "/index_data");
+    ASSERT_TRUE(info.ok());
+    EXPECT_EQ(info->type(), arrow::fs::FileType::File);
+    boost::filesystem::remove_all(conf.root_path);
+}
+
 TEST_F(DiskAnnFileManagerTest, V3PackedIndexPathMismatch) {
     FieldDataMeta filed_data_meta = {1, 2, 3, 100};
     IndexMeta index_meta = {3, 100, 1000, 1, "index"};

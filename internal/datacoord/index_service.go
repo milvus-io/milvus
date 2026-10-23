@@ -1364,11 +1364,16 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 			ret.SegmentInfo[segID].EnableIndex = true
 			for _, segIdx := range segIdxes {
 				if segIdx.IndexState == commonpb.IndexState_Finished {
-					builder := metautil.NewIndexPathBuilder(s.meta.chunkManager.RootPath(),
-						segIdx.IndexStorePathVersion, segIdx.CollectionID,
-						segIdx.PartitionID, segIdx.SegmentID,
-						segIdx.BuildID, segIdx.IndexVersion)
-					indexFilePaths := builder.BuildFilePaths(segIdx.IndexFileKeys)
+					var segmentInfo *datapb.SegmentInfo
+					if metautil.IsSegmentRooted(segIdx.IndexStorePathVersion) {
+						if segment := s.meta.GetSegment(ctx, segID); segment != nil {
+							segmentInfo = segment.SegmentInfo
+						}
+					}
+					indexFilePaths, err := segmentIndexFilePaths(s.meta.chunkManager.RootPath(), segIdx, segmentInfo)
+					if err != nil {
+						return &indexpb.GetIndexInfoResponse{Status: merr.Status(err)}, nil
+					}
 					indexParams := s.meta.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
 					indexParams = append(indexParams, s.meta.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
 					// respect segment-based index type

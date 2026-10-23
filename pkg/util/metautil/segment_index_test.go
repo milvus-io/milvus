@@ -65,7 +65,7 @@ func TestIndexPathBuilder_V1_Prefix(t *testing.T) {
 }
 
 func TestIndexPathBuilder_FutureVersion_TreatedAsV1(t *testing.T) {
-	b := NewIndexPathBuilder("files", 2, 100, 200, 300, 1000, 1)
+	b := NewIndexPathBuilder("files", 3, 100, 200, 300, 1000, 1)
 	path := b.BuildFilePath("data")
 	assert.Equal(t, "files/index_v1/100/200/300/1000/1/data", path)
 }
@@ -73,5 +73,15 @@ func TestIndexPathBuilder_FutureVersion_TreatedAsV1(t *testing.T) {
 func TestIsCollectionRooted(t *testing.T) {
 	assert.False(t, IsCollectionRooted(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED))
 	assert.True(t, IsCollectionRooted(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED))
-	assert.True(t, IsCollectionRooted(indexpb.IndexStorePathVersion(2)))
+	assert.False(t, IsCollectionRooted(indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED))
+	assert.False(t, IsCollectionRooted(indexpb.IndexStorePathVersion(3)))
+}
+
+func TestIndexPathBuilder_SegmentRooted(t *testing.T) {
+	b := NewIndexPathBuilder("files", indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED, 100, 200, 300, 1000, 1)
+	assert.Equal(t, "files/insert_log/100/200/300/_index/1000/1/index", b.BuildFilePath("index"))
+	b.WithManifestPath(`{"base_path":"/data/legacy/insert_log/100/200/300","ver":7}`)
+	assert.Equal(t, "/data/legacy/insert_log/100/200/300/_index/1000/1/index", b.BuildFilePath("index"))
+	legacy := NewIndexPathBuilder("files", 0, 100, 200, 300, 1000, 1).WithManifestPath(`{"base_path":"other","ver":7}`)
+	assert.Equal(t, "files/index_files/1000/1/200/300/index", legacy.BuildFilePath("index"))
 }
