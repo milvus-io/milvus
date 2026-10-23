@@ -74,10 +74,13 @@ func GetReadPluginContext(options importutilv2.Options) []*commonpb.KeyValuePair
 	return hookutil.GetReadStoragePluginContext(importEzk)
 }
 
-func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, msg proto.Message) {
-	pluginContext := hookutil.GetStoragePluginContext(properties, collectionID)
+func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, msg proto.Message) error {
+	pluginContext, err := hookutil.GetStoragePluginContext(properties, collectionID)
+	if err != nil {
+		return err
+	}
 	if pluginContext == nil {
-		return
+		return nil
 	}
 
 	switch msg := msg.(type) {
@@ -106,8 +109,9 @@ func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, 
 		job := msg
 		job.PluginContext = append(job.PluginContext, pluginContext...)
 	default:
-		return
+		return nil
 	}
+	return nil
 }
 
 func isNormalManualCompactionCandidate(meta *meta, segment *SegmentInfo) bool {

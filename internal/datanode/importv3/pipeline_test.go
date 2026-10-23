@@ -653,6 +653,8 @@ type reshardCallRecorder struct {
 	logicalBytes  []int64
 	spillRanges   []int
 	paths         []string
+	readContexts  []*indexcgopb.StoragePluginContext
+	writeContexts []*indexcgopb.StoragePluginContext
 	onWrite       func(call int, group fragmentInput) error
 	published     []*importv3pb.ReshardManifest
 	publishCalled atomic.Int64
@@ -670,7 +672,10 @@ func staticReshardReader(reader importutilv2.Reader) reshardReaderBuilder {
 func mockReshardBoundaries(t *testing.T, readers map[int64]reshardReaderBuilder, recorder *reshardCallRecorder) {
 	t.Helper()
 	readerMock := mockey.Mock(newReshardSourceReader).To(
-		func(ctx context.Context, _ storage.ChunkManager, _ *schemapb.CollectionSchema, file *internalpb.ImportFile, _ importutilv2.Options, _ int64, _ *indexpb.StorageConfig, _ *indexcgopb.StoragePluginContext) (importutilv2.Reader, error) {
+		func(ctx context.Context, _ storage.ChunkManager, _ *schemapb.CollectionSchema, file *internalpb.ImportFile, _ importutilv2.Options, _ int64, _ *indexpb.StorageConfig, pluginContext *indexcgopb.StoragePluginContext) (importutilv2.Reader, error) {
+			recorder.mu.Lock()
+			recorder.readContexts = append(recorder.readContexts, pluginContext)
+			recorder.mu.Unlock()
 			build, ok := readers[file.GetId()]
 			require.True(t, ok, "unexpected reshard source %d", file.GetId())
 			return build(ctx), nil
@@ -684,6 +689,7 @@ func mockReshardBoundaries(t *testing.T, readers map[int64]reshardReaderBuilder,
 			recorder.rows = append(recorder.rows, input.rows)
 			recorder.logicalBytes = append(recorder.logicalBytes, input.logicalBytes)
 			recorder.spillRanges = append(recorder.spillRanges, len(input.ranges()))
+			recorder.writeContexts = append(recorder.writeContexts, spec.pluginContext)
 			recorder.mu.Unlock()
 			if recorder.onWrite != nil {
 				if err := recorder.onWrite(call, input); err != nil {

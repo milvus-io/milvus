@@ -307,6 +307,10 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 			return err
 		}
 		rwOptions = append(rwOptions, storage.WithPluginContext(pluginContext))
+	} else {
+		// schema describes the target collection. A plaintext backup must
+		// not inherit its encryption context.
+		rwOptions = append(rwOptions, storage.WithPluginContext(nil))
 	}
 
 	rr, err := storage.NewBinlogRecordReader(r.ctx, binlogs, r.schema, rwOptions...)
