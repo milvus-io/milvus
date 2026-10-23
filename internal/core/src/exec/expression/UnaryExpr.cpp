@@ -735,7 +735,7 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
 
             std::shared_ptr<const IArrayOffsets> array_offsets;
             if (index_ptr->IsNestedIndex()) {
-                array_offsets = segment_->GetArrayOffsets(field_id_);
+                array_offsets = GetArrayOffsets(field_id_);
                 AssertInfo(array_offsets != nullptr,
                            "array offsets are required for nested ARRAY index");
             }

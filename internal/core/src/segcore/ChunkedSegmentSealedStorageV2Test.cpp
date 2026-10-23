@@ -1187,8 +1187,9 @@ TEST_P(TestLazyManifest,
     source.requestCancellation();
     milvus::OpContext cancelled_ctx(source.getToken());
     try {
-        (void)column->DataOfChunk(&cancelled_ctx, 0);
-        FAIL() << "expected cancelled field materialization";
+        (void)manifest_segment->num_chunk_data(fields.at("int64"),
+                                               &cancelled_ctx);
+        FAIL() << "expected cancelled field metadata materialization";
     } catch (const SegcoreError& err) {
         EXPECT_EQ(err.get_error_code(), ErrorCode::FollyCancel);
     }
