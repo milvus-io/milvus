@@ -1796,12 +1796,19 @@ VisitFieldDataFromStorageV2Paged(
 
     for (const auto& column_group_file : remote_chunk_files) {
         // get all row groups for each file
-        auto result = milvus_storage::FileRowGroupReader::Make(
-            fs,
-            column_group_file,
-            milvus_storage::DEFAULT_READ_BUFFER_SIZE,
-            GetReaderProperties(),
-            GetArrowReaderProperties());
+        auto prepared_result = milvus_storage::PreparedParquetFile::Open(
+            fs, column_group_file, GetReaderProperties());
+        if (!prepared_result.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(prepared_result.status()),
+                      "[StorageV2] Failed to prepare file {}: {}",
+                      column_group_file,
+                      prepared_result.status().ToString());
+        }
+        auto prepared = std::move(prepared_result).ValueOrDie();
+        auto result =
+            prepared->MakeReader(nullptr,
+                                 milvus_storage::DEFAULT_READ_BUFFER_SIZE,
+                                 GetArrowReaderProperties());
         if (!result.ok()) {
             ThrowInfo(ArrowStatusToErrorCode(result.status()),
                       "[StorageV2] Failed to create file row group reader: " +
@@ -1878,6 +1885,7 @@ VisitFieldDataFromStorageV2Paged(
             auto load_future = pool.Submit([channel,
                                             column_group_file,
                                             fs,
+                                            prepared,
                                             row_group]() mutable {
                 auto strategy =
                     std::make_unique<segcore::ParallelDegreeSplitStrategy>(1);
@@ -1888,7 +1896,8 @@ VisitFieldDataFromStorageV2Paged(
                                  std::vector<std::vector<int64_t>>{{row_group}},
                                  fs,
                                  nullptr,
-                                 milvus::proto::common::LoadPriority::HIGH);
+                                 milvus::proto::common::LoadPriority::HIGH,
+                                 {prepared});
             });
 
             // LoadWithStrategy has published both the single wrapper and the

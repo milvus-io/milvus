@@ -24,6 +24,7 @@
 #include "cachinglayer/Utils.h"
 #include "common/ChunkTarget.h"
 #include "milvus-storage/common/metadata.h"
+#include "milvus-storage/filesystem/fs.h"
 #include "mmap/Types.h"
 #include "common/Types.h"
 #include "common/GroupChunk.h"
@@ -40,6 +41,7 @@ class GroupChunkTranslator
         GroupChunkType group_chunk_type,
         const std::unordered_map<FieldId, FieldMeta>& field_metas,
         FieldDataInfo column_group_info,
+        milvus_storage::ArrowFileSystemPtr fs,
         std::vector<std::string> insert_files,
         std::vector<milvus_storage::RowGroupMetadataVector>&&
             row_group_meta_list,
@@ -113,6 +115,9 @@ class GroupChunkTranslator
     std::string key_;
     std::unordered_map<FieldId, FieldMeta> field_metas_;
     FieldDataInfo column_group_info_;
+    // Full footers are prepared only for the files requested by get_cells and
+    // released with that operation. Keep only the layout across calls.
+    milvus_storage::ArrowFileSystemPtr fs_;
     std::vector<std::string> insert_files_;
     std::vector<milvus_storage::RowGroupMetadataVector> row_group_meta_list_;
     std::vector<size_t> file_row_group_prefix_sum_;
