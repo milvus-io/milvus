@@ -145,15 +145,6 @@ func TestServerRejectsInvalidRequestShape(t *testing.T) {
 	assert.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
-func TestServerRequeryOnViewIsUnimplemented(t *testing.T) {
-	server := NewServer(&fakeTaskProvider{}, &fakeScheduler{})
-
-	_, err := server.RequeryOnView(context.Background(), &viewpb.RequeryOnViewRequest{})
-
-	require.Error(t, err)
-	assert.Equal(t, codes.Unimplemented, status.Code(err))
-}
-
 func validSearchRequest() *viewpb.SearchOnViewRequest {
 	return &viewpb.SearchOnViewRequest{
 		LegacyReq: &internalpb.SearchRequest{CollectionID: 10},

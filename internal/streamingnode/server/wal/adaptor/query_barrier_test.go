@@ -164,7 +164,7 @@ func TestQueryPlanCancellationDoesNotHoldWALShutdown(t *testing.T) {
 			meta := &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: "v", ReplicaId: 1}
 			released := make(chan struct{})
 			lease := &snview.QueryViewLease{Meta: meta, Release: func() { close(released) }}
-			mockey.Mock((*snview.SNQueryViewHandler).AcquireLatestUpView).Return(lease, nil).Build()
+			mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtSchema).Return(lease, nil).Build()
 			entered := make(chan struct{})
 			mockey.Mock((*roWALAdaptorImpl).Channel).Return(streamingtypes.PChannelInfo{AccessMode: streamingtypes.AccessModeRW}).Build()
 			mockey.Mock(mockey.GetMethod(resource.Resource().TSOAllocator(), "BarrierUntil")).To(func(ctx context.Context, _ uint64) error {

@@ -6,8 +6,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -17,27 +17,47 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func (w *walAdaptorImpl) GetLatestQueryPlanMVCC(ctx context.Context, vchannel string) (*viewpb.QueryPlanMVCC, error) {
+	return w.getQueryPlanMVCC(ctx, vchannel, true, 0)
+}
+
+func (w *walAdaptorImpl) getQueryPlanMVCC(ctx context.Context, vchannel string, strong bool, minimum uint64) (*viewpb.QueryPlanMVCC, error) {
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, viewerror.NewOnShutdownError("wal is on shutdown")
 	}
 	defer w.lifetime.Done()
-	currentMVCC := w.param.MVCCManager.GetQueryMVCCOfVChannel(vchannel)
+	callerCtx := ctx
+	ctx, cancel := contextutil.MergeContext(ctx, w.availableCtx)
+	defer cancel()
+	manager := w.param.MVCCManager.QueryMVCC()
+	minimum = max(minimum, manager.Minimum(vchannel, strong))
+	currentMVCC, ready := manager.Snapshot(vchannel, minimum)
+	if !ready {
+		resource.Resource().TimeTickInspector().TriggerSync(w.Channel(), false)
+		var err error
+		currentMVCC, err = manager.WaitSnapshot(ctx, vchannel, minimum)
+		if err != nil {
+			if errors.Is(err, context.Canceled) && callerCtx.Err() == nil && w.availableCtx.Err() != nil {
+				return nil, viewerror.NewOnShutdownError("query mvcc WAL is unavailable")
+			}
+			if errors.Is(err, merr.ErrChannelNotFound) {
+				return nil, viewerror.NewViewNotFound("query mvcc for vchannel %s is unavailable", vchannel)
+			}
+			return nil, err
+		}
+	}
 	if currentMVCC.GrowingTimetick == 0 && currentMVCC.TransformingTimetick == 0 {
 		return nil, viewerror.NewViewNotFound("query mvcc for vchannel %s is unavailable", vchannel)
-	}
-	if !currentMVCC.Confirmed {
-		// if the mvcc is not confirmed, trigger a sync operation to make it confirmed as soon as possible.
-		resource.Resource().TimeTickInspector().TriggerSync(w.rwWALImpls.Channel(), false)
 	}
 	mlog.Debug(ctx, "query view latest mvcc resolved",
 		mlog.FieldVChannel(vchannel),
 		mlog.Uint64("growingTimeTick", currentMVCC.GrowingTimetick),
 		mlog.Uint64("transformingTimeTick", currentMVCC.TransformingTimetick),
-		mlog.Bool("confirmed", currentMVCC.Confirmed),
+		mlog.Uint64("minimumPrefix", minimum),
 	)
 	return &viewpb.QueryPlanMVCC{
 		GrowingTimetick:      currentMVCC.GrowingTimetick,
@@ -74,11 +94,21 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 	}
 
 	shardID := qviews.FromProtoShardID(req.GetShardId())
-	lease, err := w.queryViewHandler.AcquireLatestUpView(ctx, shardID)
+	var schemaVersion int32
+	switch request := req.GetRequest().(type) {
+	case *viewpb.GetQueryPlanRequest_LegacySearchRequest:
+		schemaVersion = request.LegacySearchRequest.GetSchemaVersion()
+	case *viewpb.GetQueryPlanRequest_LegacyRetrieveRequest:
+		schemaVersion = request.LegacyRetrieveRequest.GetSchemaVersion()
+	}
+	lease, err := w.queryViewHandler.AcquireUpViewAtSchema(ctx, shardID, schemaVersion)
 	if err != nil {
 		return nil, err
 	}
 	defer lease.Release()
+	if schemaVersion != lease.Meta.GetSchemaVersion() {
+		return nil, viewerror.NewViewNotFound("query view schema is not ready")
+	}
 	if req.GetCollectionId() != 0 && lease.Meta.GetCollectionId() != req.GetCollectionId() {
 		return nil, viewerror.NewViewNotFound("query view collection mismatch, expected %d, got %d", req.GetCollectionId(), lease.Meta.GetCollectionId())
 	}
@@ -93,14 +123,23 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		return nil, err
 	}
 
-	var runtime *queryresource.QueryRuntime
+	var readRuntime *queryresource.ReadRuntime
 	if w.viewResourceManager != nil {
-		runtime, _ = w.viewResourceManager.GetQueryRuntime(qviews.QueryViewKey{
+		readRuntime, _ = w.viewResourceManager.GetQueryReadRuntime(qviews.QueryViewKey{
 			ShardID:          viewShardID,
 			QueryViewVersion: lease.Version,
 		})
 	}
-	optimizer := queryresource.NewGlobalOptimizer(runtime, shard.WALFunctionRunnerKey(shardID.VChannel))
+	if readRuntime == nil {
+		return nil, viewerror.NewViewNotFound("query view read resources are unavailable")
+	}
+	runtime := readRuntime.QueryRuntime
+	// Fix one MVCC and wait for the selected runtime's data visibility.
+	// Query admission and schema identity come from the acquired View.
+	if err := runtime.WaitMVCCVisible(ctx, mvcc.GetGrowingTimetick(), mvcc.GetTransformingTimetick()); err != nil {
+		return nil, err
+	}
+	optimizer := readRuntime.GlobalOptimizer()
 	plan = &viewpb.QueryPlan{
 		Version: lease.Version.IntoProto(),
 		ShardId: viewShardID.IntoProto(),
@@ -114,6 +153,22 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		searchReq := proto.Clone(request.LegacySearchRequest).(*internalpb.SearchRequest)
 		if len(searchReq.GetPartitionIDs()) == 0 && len(req.GetPartitionIds()) > 0 {
 			searchReq.PartitionIDs = append([]int64(nil), req.GetPartitionIds()...)
+		}
+		searchReq.PartitionIDs, err = runtime.ResolvePartitions(lease.Meta.GetLoadInfoVersion(), searchReq.GetPartitionIDs())
+		if err != nil {
+			return nil, err
+		}
+		for _, sub := range searchReq.GetSubReqs() {
+			if sub == nil {
+				continue
+			}
+			if len(sub.GetPartitionIDs()) == 0 {
+				sub.PartitionIDs = append([]int64(nil), searchReq.PartitionIDs...)
+			}
+			sub.PartitionIDs, err = runtime.ResolvePartitions(lease.Meta.GetLoadInfoVersion(), sub.GetPartitionIDs())
+			if err != nil {
+				return nil, err
+			}
 		}
 		optimization, err := optimizer.OptimizeSearch(ctx, searchReq)
 		if err != nil {
@@ -130,6 +185,10 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		retrieveReq := proto.Clone(request.LegacyRetrieveRequest).(*internalpb.RetrieveRequest)
 		if len(retrieveReq.GetPartitionIDs()) == 0 && len(req.GetPartitionIds()) > 0 {
 			retrieveReq.PartitionIDs = append([]int64(nil), req.GetPartitionIds()...)
+		}
+		retrieveReq.PartitionIDs, err = runtime.ResolvePartitions(lease.Meta.GetLoadInfoVersion(), retrieveReq.GetPartitionIDs())
+		if err != nil {
+			return nil, err
 		}
 		if err := optimizer.OptimizeRetrieve(ctx, retrieveReq); err != nil {
 			return nil, err
@@ -153,6 +212,7 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		mlog.Int("workNodeCount", len(plan.WorkNodes)),
 	)
 	// Preserve a full inter-phase serving window after planning completes.
+	qviews.OmitUnchangedQueryPayloads(plan, req)
 	lease.Renew()
 	return plan, nil
 }
@@ -180,8 +240,8 @@ func (w *walAdaptorImpl) resolveQueryPlanMVCC(ctx context.Context, req *viewpb.G
 		if mvcc.BarrierMvcc == 0 {
 			return nil, viewerror.NewUnknownError("query barrier timestamp is zero")
 		}
-		current := w.param.MVCCManager.GetQueryMVCCOfVChannel(vchannel)
-		if !current.Confirmed || current.GrowingTimetick < mvcc.BarrierMvcc || current.TransformingTimetick < mvcc.BarrierMvcc {
+		current, ready := w.param.MVCCManager.QueryMVCC().Snapshot(vchannel, 0)
+		if !ready || current.GrowingTimetick < mvcc.BarrierMvcc || current.TransformingTimetick < mvcc.BarrierMvcc {
 			// Wait for the allocator before registering shared sync work. An
 			// unallocated future timestamp must only hold this request, not the
 			// PChannel's ordinary or persisted TimeTick sync. GetQueryPlan merges
@@ -203,7 +263,13 @@ func (w *walAdaptorImpl) resolveQueryPlanMVCC(ctx context.Context, req *viewpb.G
 		if w.Channel().AccessMode != types.AccessModeRW {
 			return nil, viewerror.NewNotPrimaryError("wal %s is not primary", w.Channel().String())
 		}
-		return w.GetLatestQueryPlanMVCC(ctx, vchannel)
+		strong := mvcc.ConsistencyLevel == commonpb.ConsistencyLevel_Strong || mvcc.ConsistencyLevel == commonpb.ConsistencyLevel_Session
+		var minimum uint64
+		if mvcc.ConsistencyLevel == commonpb.ConsistencyLevel_Bounded {
+			// Proxy supplies the bounded-staleness lower bound in the legacy request.
+			minimum = max(req.GetLegacySearchRequest().GetGuaranteeTimestamp(), req.GetLegacyRetrieveRequest().GetGuaranteeTimestamp())
+		}
+		return w.getQueryPlanMVCC(ctx, vchannel, strong, minimum)
 	default:
 		return nil, viewerror.NewUnknownError("query plan request misses mvcc source")
 	}

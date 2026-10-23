@@ -21,7 +21,11 @@ func (r *Runtime) Prepare(ctx context.Context, view walview.VChannelWALView) err
 	if err := validateWALViewSnapshot(view); err != nil {
 		return err
 	}
-	collection, err := newCollection(view)
+	writeView := view
+	if view.WriteSchema != nil {
+		writeView.Schema = view.WriteSchema
+	}
+	collection, err := newCollection(writeView)
 	if err != nil {
 		return err
 	}
@@ -34,6 +38,8 @@ func (r *Runtime) Prepare(ctx context.Context, view walview.VChannelWALView) err
 		return context.Canceled
 	}
 	r.collection = collection
+	// Retain only the recapture hooks, not the snapshot payload and WAL tail.
+	r.view = walview.VChannelWALView{CaptureQueryView: view.CaptureQueryView, RuntimeContext: view.RuntimeContext}
 	if view.PartitionIDs != nil {
 		r.loadedPartitions = make(map[int64]struct{}, len(view.PartitionIDs))
 		for _, id := range view.PartitionIDs {
@@ -48,6 +54,15 @@ func (r *Runtime) Prepare(ctx context.Context, view walview.VChannelWALView) err
 			r.Close()
 		}
 	}()
+	if err := r.prepareSegments(ctx, view); err != nil {
+		return err
+	}
+	prepared = true
+	return nil
+}
+
+func (r *Runtime) prepareSegments(ctx context.Context, view walview.VChannelWALView) error {
+	collection := r.collection
 	for _, visible := range view.SegmentSnapshot.Segments {
 		if !r.partitionLoaded(visible.PartitionID) {
 			continue
@@ -92,7 +107,6 @@ func (r *Runtime) Prepare(ctx context.Context, view walview.VChannelWALView) err
 	}
 	r.markGrowingTimeTick(view.BaseGrowingTimeTick)
 	r.markTransformTimeTick(view.BaseTransformTimeTick)
-	prepared = true
 	return nil
 }
 
@@ -103,7 +117,7 @@ func newCollection(view walview.VChannelWALView) (*segcore.CCollection, error) {
 	req := &segcore.CreateCCollectionRequest{
 		CollectionID:  view.CollectionID,
 		Schema:        view.Schema,
-		LoadFieldList: loadFieldIDs(view.LoadFields),
+		LoadFieldList: loadFieldIDs(view.RequiredFields),
 	}
 	if len(view.IndexInfos) > 0 {
 		indexMeta := segcore.ComposeCollectionIndexMeta(context.TODO(), view.IndexInfos, view.Schema)

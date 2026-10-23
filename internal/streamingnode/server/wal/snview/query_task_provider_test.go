@@ -6,6 +6,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -16,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 var _ viewquery.QuerySegmentTask = (*SNQuerySegmentTask)(nil)
@@ -35,7 +37,7 @@ func (h *mockGrowingSegmentHandle) PartitionID() int64 {
 }
 
 func (h *mockGrowingSegmentHandle) Collection() *segcore.CCollection {
-	return nil
+	return &segcore.CCollection{}
 }
 
 func (h *mockGrowingSegmentHandle) Segment() segcore.CSegment {
@@ -51,6 +53,7 @@ func TestSNHandler_AcquireSearchSegmentTasksWaitsRuntimeAndReleasesViewRef(t *te
 	mgr := newMockResourceManager()
 	handle := &mockGrowingSegmentHandle{id: 1000, partitionID: 10}
 	runtime := &mockQueryRuntime{handles: []GrowingSegmentHandle{handle}}
+	mockResolvePartitions(t)
 	mgr.runtime = runtime
 	optimizer := &fakeSNLocalOptimizer{}
 	h := recoverSNQueryViewHandler(context.Background(), testPChannel, cat, mgr, nil)
@@ -108,6 +111,7 @@ func TestSNHandler_AcquireQuerySegmentTasksWaitsRuntimeAndReleasesViewRef(t *tes
 	mgr := newMockResourceManager()
 	handle := &mockGrowingSegmentHandle{id: 2000, partitionID: 20}
 	runtime := &mockQueryRuntime{handles: []GrowingSegmentHandle{handle}}
+	mockResolvePartitions(t)
 	mgr.runtime = runtime
 	optimizer := &fakeSNLocalOptimizer{}
 	h := recoverSNQueryViewHandler(context.Background(), testPChannel, cat, mgr, nil)
@@ -212,6 +216,7 @@ func TestSNHandlerDownRejectsNewTasksButRetainsAcquiredHandles(t *testing.T) {
 	mgr := newMockResourceManager()
 	held := &mockGrowingSegmentHandle{id: 100, partitionID: 10}
 	mgr.runtime = &mockQueryRuntime{handles: []GrowingSegmentHandle{held}}
+	mockResolvePartitions(t)
 	h := recoverSNQueryViewHandler(context.Background(), testPChannel, newMockCatalog(), mgr, nil)
 	h.leaseDuration = 0 // Exercise admission after immediate Down with timed retention disabled.
 	view := newPreparingSNView(1)
@@ -230,4 +235,72 @@ func TestSNHandlerDownRejectsNewTasksButRetainsAcquiredHandles(t *testing.T) {
 	require.Len(t, tasks.Tasks(), 1)
 	tasks.Release()
 	require.Equal(t, 1, held.releaseCount)
+}
+
+func (*mockQueryRuntime) ResolvePartitions(uint64, []int64) ([]int64, error) {
+	panic("mock with Mockey")
+}
+
+func mockResolvePartitions(t *testing.T) {
+	t.Helper()
+	patch := mockey.Mock((*mockQueryRuntime).ResolvePartitions).To(func(_ *mockQueryRuntime, _ uint64, partitions []int64) ([]int64, error) {
+		return partitions, nil
+	}).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+}
+
+func TestSNTasksRequirePartitionResolutionBeforeAcquiringHandles(t *testing.T) {
+	for _, search := range []bool{true, false} {
+		for _, reject := range []bool{false, true} {
+			mockey.PatchConvey("resolve the leased scope before handle acquisition", t, func() {
+				mgr := newMockResourceManager()
+				runtime := &mockQueryRuntime{}
+				mgr.runtime = runtime
+				h := recoverSNQueryViewHandler(context.Background(), testPChannel, newMockCatalog(), mgr, nil)
+				h.localOptimizer = &fakeSNLocalOptimizer{}
+				meta := buildHandlerTestMeta(1)
+				meta.LoadInfoVersion = 42
+				view := qviews.NewQueryViewAtStreamingNode(meta, &viewpb.QueryViewOfStreamingNode{})
+				h.ApplyViews([]handler.ApplyView{{View: view}})
+				resource, ok := mgr.getAcquired(view.QueryViewKey())
+				require.True(t, ok)
+				resource.OnReady()
+				meta.State = viewpb.QueryViewState_QueryViewStateUp
+				up := qviews.NewQueryViewAtStreamingNode(meta, &viewpb.QueryViewOfStreamingNode{})
+				h.ApplyViews([]handler.ApplyView{{View: up}})
+				resolved, acquired := false, false
+				resolveErr := merr.WrapErrPartitionNotLoaded(int64(20))
+				mockey.Mock((*mockQueryRuntime).ResolvePartitions).To(func(_ *mockQueryRuntime, version uint64, requested []int64) ([]int64, error) {
+					require.Equal(t, up.IntoProto().GetMeta().GetLoadInfoVersion(), version)
+					require.Equal(t, uint64(11), runtime.growingTimetick)
+					require.Empty(t, requested)
+					resolved = true
+					if reject {
+						return nil, resolveErr
+					}
+					return []int64{10}, nil
+				}).Build()
+				mockey.Mock((*mockQueryRuntime).AcquireGrowingSegmentHandles).To(func(_ *mockQueryRuntime, _ context.Context, _ qviews.DataVersion, partitions []int64) ([]GrowingSegmentHandle, error) {
+					require.True(t, resolved)
+					require.Equal(t, []int64{10}, partitions)
+					acquired = true
+					return nil, nil
+				}).Build()
+				mvcc := &viewpb.QueryPlanMVCC{GrowingTimetick: 11, TransformingTimetick: 10}
+				var err error
+				if search {
+					_, err = h.AcquireSearchSegmentTasks(context.Background(), view.ShardID(), view.QueryViewKey().QueryViewVersion, mvcc, &internalpb.SearchRequest{})
+				} else {
+					_, err = h.AcquireQuerySegmentTasks(context.Background(), view.ShardID(), view.QueryViewKey().QueryViewVersion, mvcc, &internalpb.RetrieveRequest{})
+				}
+				require.True(t, resolved)
+				require.Equal(t, !reject, acquired)
+				if reject {
+					require.ErrorIs(t, err, resolveErr)
+				} else {
+					require.NoError(t, err)
+				}
+			})
+		}
+	}
 }

@@ -83,6 +83,7 @@ message QueryViewMeta {
     QueryViewState state = 5;
     uint64 load_info_version = 6;
     uint64 transform_start_after_timetick = 7;
+    int32 schema_version = 8; // Exact logical schema required by this view.
 }
 
 // QueryViewOfStreamingNode is the StreamingNode-local part of a QueryView.
@@ -271,6 +272,10 @@ message QueryPlan {
         internal.SearchRequest legacy_search_request = 5;
         internal.RetrieveRequest legacy_retrieve_request = 6;
     }
+    // Unchanged large payloads are omitted from request and borrowed from the
+    // original Phase 1 request by Proxy. All other optimized parameters remain
+    // explicit, including empty payloads when the optimizer clears a field.
+    QueryPayloadReuse reused_payloads = 7;
 }
 
 //
@@ -285,9 +290,6 @@ service ViewQueryService {
     rpc SearchOnView(SearchOnViewRequest) returns (SearchOnViewResponse) {}
     // QueryOnView executes a query (retrieve by expression) on segments belonging to the given view version.
     rpc QueryOnView(QueryOnViewRequest) returns (QueryOnViewResponse) {}
-    // RequeryOnView fetches output fields for a set of PKs after Proxy-side reduce.
-    // Uses the same view version as the preceding search/query to ensure consistency.
-    rpc RequeryOnView(RequeryOnViewRequest) returns (RequeryOnViewResponse) {}
 }
 
 message SearchOnViewRequest {
@@ -316,15 +318,9 @@ message QueryOnViewResponse {
     internal.RetrieveResults legacy_results = 1;
 }
 
-message RequeryOnViewRequest {
-    // TODO: replace with native view request types once legacy internal protos are removed.
-    internal.RetrieveRequest legacy_req = 1;
-    ShardID shard_id = 2;
-    QueryViewVersion version = 3;
-    QueryPlanMVCC mvcc = 4;
-}
-
-message RequeryOnViewResponse {
-    // TODO: replace with native view result types once legacy internal protos are removed.
-    internal.RetrieveResults legacy_results = 1;
+message QueryPayloadReuse {
+    bool placeholder_group = 1;
+    bool serialized_expr_plan = 2;
+    // Positional, parallel to SearchRequest.sub_reqs.
+    repeated QueryPayloadReuse sub_requests = 3;
 }

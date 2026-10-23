@@ -185,7 +185,7 @@ func TestOracleRefreshOnlyFetchesRequestedView(t *testing.T) {
 
 func TestOracleOnlyLoadsRequestedBM25Fields(t *testing.T) {
 	r, resource := newTestOracle(t)
-	view := walview.VChannelWALView{Schema: proto.Clone(r.schema).(*schemapb.CollectionSchema), LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 102}}}
+	view := walview.VChannelWALView{Schema: proto.Clone(r.schema).(*schemapb.CollectionSchema), LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 103}}, RequiredFields: []*messagespb.LoadFieldConfig{{FieldId: 102}}}
 	view.Schema.Functions = append(view.Schema.Functions, &schemapb.FunctionSchema{Type: schemapb.FunctionType_BM25, OutputFieldIds: []int64{103}})
 	res := resource(20, 2)
 	res.Bm25Binlogs = append(res.Bm25Binlogs, &datapb.FieldBinlog{FieldID: 103, Binlogs: []*datapb.Binlog{{LogPath: "must-not-read"}}})
@@ -202,7 +202,7 @@ func TestRuntimePreparesOneSharedOracle(t *testing.T) {
 	version := qviews.DataVersion{StreamingVersion: 12}
 	resources := []*datapb.StreamingNodeBM25Resource{}
 	mockViewResources(t, r, &version, &resources)
-	module := &Runtime{oracle: r}
+	module := &Runtime{oracle: r, oracles: map[queryresource.ReadSchemaKey]*oracleRuntime{{}: r}}
 	require.NoError(t, module.PrepareDataVersion(context.Background(), qviews.DataVersion{StreamingVersion: 11}))
 	require.NoError(t, module.PrepareDataVersion(context.Background(), version))
 	require.Eventually(t, func() bool {
