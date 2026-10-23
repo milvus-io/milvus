@@ -1401,6 +1401,10 @@ common:
       info: 500 # minimum milliseconds for printing durations in info level
       warn: 1000 # minimum milliseconds for printing durations in warn level
     maxWLockConditionalWaitTime: 600 # seconds before logging a wlock conditional wait that is taking long; the wait itself is not bounded by this value
+  # Whether CreateCollection accepts a schema with no vector field. Such a collection supports
+  # every operation except search, and a vector field cannot be added to it later.
+  # Keep it false during a rolling upgrade until every proxy and coordinator runs a version with this feature.
+  enableCollectionWithoutVector: true
   traceLogMode: 0 # trace request info
   bloomFilterEnabled: true # whether to load and apply bloom filter/pk stats on querynode
   bloomFilterSize: 100000 # bloom filter initial size

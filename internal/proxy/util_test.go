@@ -2199,6 +2199,21 @@ func TestValidateLoadFieldsList(t *testing.T) {
 			},
 			expectErr: true,
 		},
+		{
+			tag: "no_vector_field_schema",
+			schema: &schemapb.CollectionSchema{
+				EnableDynamicField: true,
+				Fields: []*schemapb.FieldSchema{
+					rowIDField,
+					timestampField,
+					pkField,
+					scalarField,
+					partitionKeyField,
+					dynamicField,
+				},
+			},
+			expectErr: false,
+		},
 	}
 
 	for _, tc := range testCases {

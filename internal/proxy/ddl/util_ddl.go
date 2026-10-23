@@ -910,7 +910,7 @@ func validateLoadFieldsList(schema *schemapb.CollectionSchema) error {
 		}
 	}
 
-	if vectorCnt == 0 {
+	if vectorCnt == 0 && typeutil.HasVectorField(schema) {
 		return merr.WrapErrParameterInvalidMsg("cannot config all vector field(s) skip loading")
 	}
 

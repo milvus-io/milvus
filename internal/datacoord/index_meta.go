@@ -1510,7 +1510,10 @@ func (m *indexMeta) AllDenseWithDiskIndex(collectionID int64, schema *schemapb.C
 		return false
 	})
 
-	return len(vectorFields) == len(vectorFieldsWithDiskIndex)
+	// A collection with no dense vector field has no DiskANN index and keeps the
+	// default segment size; without this guard 0 == 0 selected the DiskANN size
+	// for sparse-only and scalar-only collections.
+	return len(vectorFields) > 0 && len(vectorFields) == len(vectorFieldsWithDiskIndex)
 }
 
 func (m *indexMeta) HasIndex(collectionID int64) bool {

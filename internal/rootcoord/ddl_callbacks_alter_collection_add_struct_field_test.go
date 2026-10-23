@@ -57,7 +57,7 @@ func TestDDLCallbacksAlterCollectionAddStructField(t *testing.T) {
 	ctx := context.Background()
 	dbName := "testDB" + funcutil.RandomString(10)
 	collectionName := "testCollection" + funcutil.RandomString(10)
-	createCollectionForTest(t, ctx, core, dbName, collectionName)
+	createCollectionWithVectorForTest(t, ctx, core, dbName, collectionName)
 
 	resp, err := core.AddCollectionStructField(ctx, &milvuspb.AddCollectionStructFieldRequest{
 		DbName:                 dbName,
@@ -75,26 +75,26 @@ func TestDDLCallbacksAlterCollectionAddStructField(t *testing.T) {
 
 	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
-	require.Len(t, getUserFields(coll.Fields), 1)
+	require.Len(t, getUserFields(coll.Fields), 2)
 	require.Len(t, coll.StructArrayFields, 1)
 
 	structField := coll.StructArrayFields[0]
-	require.Equal(t, int64(101), structField.FieldID)
+	require.Equal(t, int64(102), structField.FieldID)
 	require.Equal(t, "profile", structField.Name)
 	require.True(t, structField.Nullable)
 	require.Len(t, structField.Fields, 2)
 
-	require.Equal(t, int64(102), structField.Fields[0].FieldID)
+	require.Equal(t, int64(103), structField.Fields[0].FieldID)
 	require.Equal(t, "profile[ints]", structField.Fields[0].Name)
 	require.Equal(t, schemapb.DataType_Array, structField.Fields[0].DataType)
 	require.True(t, structField.Fields[0].Nullable)
 
-	require.Equal(t, int64(103), structField.Fields[1].FieldID)
+	require.Equal(t, int64(104), structField.Fields[1].FieldID)
 	require.Equal(t, "profile[vectors]", structField.Fields[1].Name)
 	require.Equal(t, schemapb.DataType_ArrayOfVector, structField.Fields[1].DataType)
 	require.True(t, structField.Fields[1].Nullable)
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
-	assertMaxFieldIDProperty(t, ctx, core, dbName, collectionName, 103)
+	assertMaxFieldIDProperty(t, ctx, core, dbName, collectionName, 104)
 
 	resp, err = core.AddCollectionStructField(ctx, &milvuspb.AddCollectionStructFieldRequest{
 		DbName:                 dbName,

@@ -429,6 +429,7 @@ type commonConfig struct {
 	Stv2SplitAvgSizeThreshold            ParamItem `refreshable:"true"`
 	UseLoonFFI                           ParamItem `refreshable:"true"`
 	EnableGrowingSourceFlush             ParamItem `refreshable:"false"`
+	EnableCollectionWithoutVector        ParamItem `refreshable:"true"`
 
 	StoragePathPrefix                   ParamItem `refreshable:"false"`
 	StorageZstdConcurrency              ParamItem `refreshable:"false"`
@@ -1429,6 +1430,17 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Export:       true,
 	}
 	p.EnableGrowingSourceFlush.Init(base.mgr)
+
+	p.EnableCollectionWithoutVector = ParamItem{
+		Key:          "common.enableCollectionWithoutVector",
+		Version:      "3.0.0",
+		DefaultValue: "true",
+		Doc: `Whether CreateCollection accepts a schema with no vector field. Such a collection supports
+every operation except search, and a vector field cannot be added to it later.
+Keep it false during a rolling upgrade until every proxy and coordinator runs a version with this feature.`,
+		Export: true,
+	}
+	p.EnableCollectionWithoutVector.Init(base.mgr)
 
 	p.Stv2SplitSystemColumn = ParamItem{
 		Key:          "common.storage.stv2.splitSystemColumn.enabled",
