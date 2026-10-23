@@ -302,6 +302,32 @@ func Test_createCollectionTask_validate(t *testing.T) {
 }
 
 func Test_createCollectionTask_validateSchema(t *testing.T) {
+	t.Run("no vector field, gate closed", func(t *testing.T) {
+		paramtable.Get().Save(Params.CommonCfg.EnableCollectionWithoutVector.Key, "false")
+		defer paramtable.Get().Reset(Params.CommonCfg.EnableCollectionWithoutVector.Key)
+		collectionName := funcutil.GenRandomStr()
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+		}
+		schema := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "age", DataType: schemapb.DataType_Int32},
+			},
+		}
+		err := task.validateSchema(context.TODO(), schema)
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "schema does not contain vector field")
+
+		paramtable.Get().Save(Params.CommonCfg.EnableCollectionWithoutVector.Key, "true")
+		err = task.validateSchema(context.TODO(), schema)
+		assert.NoError(t, err)
+	})
+
 	t.Run("name mismatch", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		otherName := collectionName + "_other"
