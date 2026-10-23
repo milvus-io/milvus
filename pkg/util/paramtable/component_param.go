@@ -6285,6 +6285,7 @@ type dataCoordConfig struct {
 	// --- SEGMENTS ---
 	SegmentMaxSize                 ParamItem `refreshable:"false"`
 	DiskSegmentMaxSize             ParamItem `refreshable:"true"`
+	SegmentMaxRows                 ParamItem `refreshable:"true"`
 	SegmentSealProportion          ParamItem `refreshable:"false"`
 	SegmentSealProportionJitter    ParamItem `refreshable:"true"`
 	SegAssignmentExpiration        ParamItem `refreshable:"false"`
@@ -6593,6 +6594,21 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.DiskSegmentMaxSize.Init(base.mgr)
+
+	p.SegmentMaxRows = ParamItem{
+		Key:          "dataCoord.segment.maxRows",
+		Version:      "3.0.0",
+		DefaultValue: "4000000",
+		Doc: `Caps the per-collection segment size target at maxRows x estimated row size of the schema:
+the target becomes min(maxSize, maxRows x estimated row size), for sealing, compaction and import alike.
+It is a byte target derived from a row count, not a row limit: each path measures bytes in its own unit
+(binlog bytes for import and compaction, insert message bytes for sealing), so the rows per segment are
+maxRows x estimated row size / bytes per row in that path. It only takes effect for collections whose
+estimated row is narrower than maxSize / maxRows, such as collections without a vector field or with
+low-dimensional vectors. 0 disables it.`,
+		Export: true,
+	}
+	p.SegmentMaxRows.Init(base.mgr)
 
 	p.SegmentSealProportion = ParamItem{
 		Key:          "dataCoord.segment.sealProportion",

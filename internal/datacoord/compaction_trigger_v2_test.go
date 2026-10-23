@@ -208,6 +208,11 @@ type CompactionTriggerManagerSuite struct {
 }
 
 func (s *CompactionTriggerManagerSuite) SetupTest() {
+	// The planner arithmetic in this suite is written against the plain
+	// SegmentMaxSize target; the row cap (dataCoord.segment.maxRows) is covered
+	// by TestGetExpectedSegmentSizeRowCap.
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.SegmentMaxRows.Key, "0")
+	s.T().Cleanup(func() { paramtable.Get().Reset(paramtable.Get().DataCoordCfg.SegmentMaxRows.Key) })
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
 	s.handler = NewNMockHandler(s.T())
 	s.inspector = NewMockCompactionInspector(s.T())

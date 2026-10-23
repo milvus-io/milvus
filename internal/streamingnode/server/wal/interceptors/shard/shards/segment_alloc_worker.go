@@ -33,6 +33,7 @@ func (m *partitionManager) asyncAllocSegment(schemaVersion int32, requiresStorag
 		wal:               m.wal.Get(),
 		schemaVersion:     schemaVersion,
 		requiresStorageV3: requiresStorageV3,
+		rowWidth:          m.collection.RowWidth(),
 	}
 	w.SetLogger(m.Logger())
 	// It should always done asynchronously.
@@ -55,6 +56,7 @@ type segmentAllocWorker struct {
 	limitation        segmentLimitation // segment limitation determined at first attempt
 	schemaVersion     int32
 	requiresStorageV3 bool
+	rowWidth          int64 // estimated bytes per row of the collection, 0 when unknown
 }
 
 // do is the main loop of the segment allocation worker.
@@ -152,6 +154,6 @@ func (w *segmentAllocWorker) initSegmentConfig() error {
 	}
 
 	// Generate growing segment limitation.
-	w.limitation = getSegmentLimitationPolicy().GenerateLimitation(datapb.SegmentLevel_L1)
+	w.limitation = getSegmentLimitationPolicy().GenerateLimitation(datapb.SegmentLevel_L1, w.rowWidth)
 	return nil
 }
