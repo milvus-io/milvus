@@ -67,6 +67,11 @@ type nameGate struct {
 	// exempt, when set and true for the append, skips the gate: the message is
 	// not managed by the shard manager at all.
 	exempt func(ctx context.Context) bool
+	// appendIfDropped, under notHeldRefuseUnknown, appends without effect
+	// instead of refusing a message that it accepts, when this pchannel no
+	// longer registers the collection at all (rather than under another
+	// vchannel).
+	appendIfDropped func(msg message.MutableMessage) bool
 }
 
 // initOpTable initializes the operation table for the segment interceptor.
@@ -122,8 +127,11 @@ func (impl *shardInterceptor) initOpTable() {
 			},
 			withoutEffect: impl.appendManualFlushWithoutEffect,
 			// A vchannel this pchannel never held has always been refused with
-			// CollectionNotFound; only a fenced source becomes a no-op.
-			notHeld: notHeldRefuseUnknown,
+			// CollectionNotFound; only a fenced source becomes a no-op, and so
+			// does a cluster-local flush that a drop overtook (see
+			// handleManualFlushMessage).
+			notHeld:         notHeldRefuseUnknown,
+			appendIfDropped: isLocalManualFlush,
 		},
 		message.MessageTypeSchemaChange: {
 			collectionID: func(msg message.MutableMessage) int64 {
@@ -244,7 +252,7 @@ func (impl *shardInterceptor) passNameGate(ctx context.Context, msg message.Muta
 			mlog.FieldCollectionID(collectionID), mlog.FieldVChannel(msg.VChannel()),
 			mlog.String("messageType", msg.MessageType().String()), mlog.Bool("fenced", fenced), mlog.Err(err))
 		return nil, rejectUnwritableVChannel(msg.VChannel(), collectionID, err)
-	case gate.notHeld == notHeldRefuseUnknown && !fenced:
+	case gate.notHeld == notHeldRefuseUnknown && !fenced && !impl.isDroppedAndAllowed(msg, gate, collectionID):
 		return nil, status.NewUnrecoverableError("vchannel %s of collection %d is not held by this pchannel: %s", msg.VChannel(), collectionID, err.Error())
 	}
 	impl.shardManager.Logger().Info(ctx, "message addressed to a vchannel this pchannel does not hold, appending without effect",
@@ -254,6 +262,25 @@ func (impl *shardInterceptor) passNameGate(ctx context.Context, msg message.Muta
 		return gate.withoutEffect(ctx, msg, appendOp)
 	}
 	return appendOp(ctx, msg)
+}
+
+// isDroppedAndAllowed reports whether the gate appends msg without effect
+// although its vchannel was never held: the gate accepts it for a dropped
+// collection, and this pchannel registers the collection under no vchannel at
+// all. A collection registered under another vchannel (a split target that took
+// the slot) is not dropped, so a message for it is still refused.
+func (impl *shardInterceptor) isDroppedAndAllowed(msg message.MutableMessage, gate nameGate, collectionID int64) bool {
+	if gate.appendIfDropped == nil || !gate.appendIfDropped(msg) {
+		return false
+	}
+	return errors.Is(impl.shardManager.CheckIfCollectionExists(collectionID), shards.ErrCollectionNotFound)
+}
+
+// isLocalManualFlush reports whether msg is a cluster-local ManualFlush, the
+// only kind DataCoord admits before a drop can overtake it; never a replicated
+// or historical one.
+func isLocalManualFlush(msg message.MutableMessage) bool {
+	return msg.IsUnreplicable() && msg.ReplicateHeader() == nil
 }
 
 // rejectUnwritableVChannel is the single mapping from a failed DML admission
@@ -494,7 +521,7 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 			mlog.Bool("schemaVersionProvided", header.SchemaVersion != nil),
 			mlog.Int32("schemaVersion", schemaVersion),
 			mlog.Err(err))
-		return nil, status.NewUnrecoverableError("unexpected error from CheckIfCollectionSchemaVersionMatch: %s", err.Error())
+		return nil, status.NewUnrecoverableError("unexpected error from CheckWritableAndSchemaVersion: %s", err.Error())
 	}
 	schemaVersion = correctSchemaVersion
 	if header.SchemaVersion == nil {
@@ -740,7 +767,7 @@ func (impl *shardInterceptor) handleManualFlushMessage(ctx context.Context, msg 
 	header := manualFlushMsg.Header()
 	segmentIDs, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(header.GetCollectionId(), msg.TimeTick())
 	if err != nil {
-		if !msg.IsUnreplicable() || msg.ReplicateHeader() != nil || !errors.Is(err, shards.ErrCollectionNotFound) {
+		if !isLocalManualFlush(msg) || !errors.Is(err, shards.ErrCollectionNotFound) {
 			return nil, status.NewUnrecoverableError(err.Error())
 		}
 		// DataCoord admits a local flush only for an existing collection, after
