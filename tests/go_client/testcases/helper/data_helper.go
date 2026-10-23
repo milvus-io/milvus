@@ -609,6 +609,13 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 		}
 		return column.NewColumnFloatVector(fieldName, option.dim, vecFloatValues)
 
+	case entity.FieldTypeInt8Vector:
+		vectors := make([][]int8, nb)
+		for i := range nb {
+			vectors[i] = common.GenInt8Vector(dim)
+		}
+		return column.NewColumnInt8Vector(fieldName, dim, vectors)
+
 	case entity.FieldTypeBinaryVector:
 		if validDataLen < nb {
 			log.Warn("GenColumnData", zap.String("Note", "fieldType FloatVector not support valid data"))
