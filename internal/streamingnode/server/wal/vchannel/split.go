@@ -1,6 +1,9 @@
 package vchannel
 
 import (
+	"context"
+
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
@@ -162,12 +165,25 @@ func (info *VChannelView) ObserveRetireVChannel(msg message.ImmutableAlterCollec
 // the source handler stamped on it as SplitShardExtraResponse (the task's FIRST
 // fence, which the shard manager recorded before the append), or the record's
 // own tick for a record that carries none or a zero one.
+//
+// A record whose extra cannot be decoded also falls back to its own tick --
+// the record is already in the WAL and its fence must still be applied -- but
+// that tick is only right for a first fence: on a re-fence it differs from the
+// T_switch DataCoord recorded, so it is reported as an error.
 func splitSwitchTimeTickOf(msg message.ImmutableSplitShardMessageV2) uint64 {
-	if extra := message.AppendExtraOf(msg); extra != nil {
+	extra, err := message.DecodeAppendExtra(msg)
+	if err == nil && extra != nil {
 		resp := &message.SplitShardExtraResponse{}
-		if err := extra.UnmarshalTo(resp); err == nil && resp.GetSplitTimeTick() != 0 {
+		if err = extra.UnmarshalTo(resp); err == nil && resp.GetSplitTimeTick() != 0 {
 			return resp.GetSplitTimeTick()
 		}
+	}
+	if err != nil {
+		mlog.Error(context.TODO(), "the split fence record carries an extra append response that cannot be decoded, taking its own time tick as T_switch",
+			mlog.FieldVChannel(msg.VChannel()),
+			mlog.Int64("splitTaskID", msg.Header().GetSplitTaskId()),
+			mlog.Uint64("timeTick", msg.TimeTick()),
+			mlog.Err(err))
 	}
 	return msg.TimeTick()
 }

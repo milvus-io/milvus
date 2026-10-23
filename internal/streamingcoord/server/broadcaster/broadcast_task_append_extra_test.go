@@ -170,3 +170,23 @@ func TestReplicatedBroadcastTaskPersistsTheAppendExtra(t *testing.T) {
 
 	assertCallbackSeesTheSourceExtra(t, task, 90)
 }
+
+// TestBroadcastTaskAcksARecordWithACorruptedAppendExtra: a record whose extra
+// append response cannot be decoded is still acked -- the replica landed -- and
+// persisted with no extra, so a callback that requires it refuses rather than
+// reading garbage.
+func TestBroadcastTaskAcksARecordWithACorruptedAppendExtra(t *testing.T) {
+	task := newAppendExtraTestTask(t)
+	records := walRecordsOf(appendExtraTestBroadcast(), appendExtraTestSwitchExtra(t, 90))
+	source := records[appendExtraTestSource]
+	properties := source.Properties().ToRawMap()
+	properties["_ae"] = "not base64 !"
+	records[appendExtraTestSource] = message.NewImmutableMesasge(source.MessageID(), source.Payload(), properties)
+
+	for _, vchannel := range []string{appendExtraTestSource, appendExtraTestTarget, appendExtraTestControl} {
+		require.NoError(t, task.Ack(context.Background(), records[vchannel]))
+	}
+	_, results := task.BroadcastResult()
+	require.NotNil(t, results[appendExtraTestSource])
+	assert.Nil(t, results[appendExtraTestSource].Extra)
+}
