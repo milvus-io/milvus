@@ -927,9 +927,8 @@ SegmentLoadInfo::ComputeDiffJsonKeyStats(LoadDiff& diff,
             continue;
         }
         new_fields.insert(fid);
-        auto current_stats = HasFieldInSchema(fid)
-                                 ? GetJsonKeyStatsLog(field_id)
-                                 : nullptr;
+        auto current_stats =
+            HasFieldInSchema(fid) ? GetJsonKeyStatsLog(field_id) : nullptr;
         if (stats.json_key_stats_data_format() != expected_format) {
             LOG_WARN(
                 "skip json key stats diff because data format is invalid, "

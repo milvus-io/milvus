@@ -458,7 +458,7 @@ class Expr : public std::enable_shared_from_this<Expr> {
     // SetSnapshot; the recorder is owned by the plan and outlives the task.
     // Default no-op for expressions that do not choose an execution path.
     virtual void
-    SetFeatureRecorder(FeatureRecorder* recorder) {
+    SetFeatureRecorder(FeatureRecorder* recorder, const Schema& schema) {
     }
 
  protected:
@@ -581,12 +581,12 @@ class SegmentExpr : public Expr {
     // predicate the plan parser merges in (MergeExprWithNamespace) are not
     // user filters, so an expression on either field records nothing.
     void
-    SetFeatureRecorder(FeatureRecorder* recorder) override {
+    SetFeatureRecorder(FeatureRecorder* recorder,
+                       const Schema& schema) override {
         if (recorder == nullptr) {
             feature_recorder_ = nullptr;
             return;
         }
-        const auto& schema = *segment_->get_schema_snapshot();
         auto ttl_field = schema.get_ttl_field_id();
         auto namespace_field = schema.get_namespace_field_id();
         const bool internal =

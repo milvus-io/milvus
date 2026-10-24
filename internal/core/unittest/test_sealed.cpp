@@ -5348,8 +5348,8 @@ TEST(SealedSegmentCowState, ResolvesCompleteVortexGroupsPerSchemaSnapshot) {
 
     // Physical layout keeps alias/format metadata even outside a View scope,
     // and remains valid after its preparing Schema is destroyed.
-    auto layout = std::make_shared<const SealedFieldLayout>(
-        next_schema.get(), LoadScope({101}));
+    auto layout = std::make_shared<const SealedFieldLayout>(next_schema.get(),
+                                                            LoadScope({101}));
     next_schema.reset();
     EXPECT_FALSE(layout->has_field(FieldId(102)));
     EXPECT_EQ(layout->ResolveColumnFieldIds("shared"),

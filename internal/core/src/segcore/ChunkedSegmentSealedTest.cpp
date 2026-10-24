@@ -725,11 +725,11 @@ TEST(test_chunk_segment, OlderPlanChecksOnlyItsOwnFieldRange) {
     auto dataset = segcore::DataGen(new_schema, 5);
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
                   .GetRemoteChunkManager();
-    auto segment =
-        std::make_unique<ReadinessSegment>(new_schema,
-                                           empty_index_meta,
-                                           segcore::SegcoreConfig::default_config(),
-                                           kSegmentID);
+    auto segment = std::make_unique<ReadinessSegment>(
+        new_schema,
+        empty_index_meta,
+        segcore::SegcoreConfig::default_config(),
+        kSegmentID);
     segment->LoadFieldData(PrepareInsertBinlog(
         kCollectionID, kPartitionID, kSegmentID, dataset, cm));
 
@@ -995,13 +995,13 @@ TEST(test_chunk_segment,
     auto publish_replacement = [&] {
         auto runtime = sealed->TestCloneMutableRuntimeResourceState();
         segcore::ChunkedSegmentSealedImpl::StateDelta initial;
-        initial.schema = schema;
+        initial.fields = current->fields;
         initial.load_info = current->load_info;
         initial.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
         initial.commit_ts = current->commit_ts;
         auto staged = sealed->TestBuildNextPublishedState(current, initial);
         segcore::ChunkedSegmentSealedImpl::StateDelta final;
-        final.schema = schema;
+        final.fields = current->fields;
         final.load_info = current->load_info;
         final.commit_ts = current->commit_ts;
         const auto calls_before_publish = probe->calls;
