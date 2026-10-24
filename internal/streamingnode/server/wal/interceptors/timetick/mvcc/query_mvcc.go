@@ -2,6 +2,7 @@ package mvcc
 
 import (
 	"context"
+	"iter"
 	"sync"
 
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -111,14 +112,16 @@ func (cm *QueryMVCCManager) WaitSnapshot(ctx context.Context, channel string, mi
 
 // Publish consumes successful ACK messages in TimeTick order after WAB.Append.
 // The serialized sync operator supplies exactly one newly completed prefix.
-func (cm *QueryMVCCManager) Publish(messages []message.ImmutableMessage, confirmation message.ImmutableMessage) {
+func (cm *QueryMVCCManager) Publish(messages iter.Seq2[message.ImmutableMessage, bool], confirmation message.ImmutableMessage) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
-	for _, msg := range messages {
-		cm.applyLocked(msg)
-		channel := msg.VChannel()
-		if cm.pending[channel] <= confirmation.TimeTick() {
-			delete(cm.pending, channel)
+	if messages != nil {
+		for msg, insertOnly := range messages {
+			cm.applyLocked(msg, insertOnly)
+			channel := msg.VChannel()
+			if cm.pending[channel] <= confirmation.TimeTick() {
+				delete(cm.pending, channel)
+			}
 		}
 	}
 	if confirmation.MessageType() == message.MessageTypeMVCCBarrier {
@@ -138,7 +141,7 @@ func (cm *QueryMVCCManager) Publish(messages []message.ImmutableMessage, confirm
 	cm.changed = make(chan struct{})
 }
 
-func (cm *QueryMVCCManager) applyLocked(msg message.ImmutableMessage) {
+func (cm *QueryMVCCManager) applyLocked(msg message.ImmutableMessage, insertOnly bool) {
 	if !msg.IsPersisted() || (msg.TxnContext() != nil && msg.MessageType() != message.MessageTypeCommitTxn) {
 		return
 	}
@@ -160,11 +163,14 @@ func (cm *QueryMVCCManager) applyLocked(msg message.ImmutableMessage) {
 		return
 	}
 	current, live := cm.frontiers[channel]
-	if !live && kind != message.MessageTypeCreateCollection {
+	if !live && kind != message.MessageTypeCreateCollection && kind != message.MessageTypeRestoreSnapshot {
 		return
 	}
+	if kind == message.MessageTypeCommitTxn && insertOnly {
+		kind = message.MessageTypeInsert
+	}
 	switch kind {
-	case message.MessageTypeCreateCollection:
+	case message.MessageTypeCreateCollection, message.MessageTypeRestoreSnapshot:
 		current.GrowingTimetick = tick
 		current.TransformingTimetick = tick
 	case message.MessageTypeInsert:

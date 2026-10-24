@@ -38,7 +38,7 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 	defer func() {
 		if err == nil {
 			// the cursor manager should beready since the timetick interceptor is ready.
-			cm.UpdateMVCC(msg, msg.MessageType() == message.MessageTypeCommitTxn && txnSession != nil && txnSession.IsInsertOnly())
+			cm.UpdateMVCC(msg)
 		}
 	}()
 

@@ -15,7 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
-func TestTransactionQueryFrontiersAgreeWithReadProof(t *testing.T) {
+func TestTransactionQueryFrontiersPublishTogether(t *testing.T) {
 	resource.InitForTest(t)
 	for _, tc := range []struct {
 		name      string
@@ -43,24 +43,23 @@ func TestTransactionQueryFrontiersAgreeWithReadProof(t *testing.T) {
 				require.NoError(t, session.AddNewMessage(ctx, tick))
 				session.AddNewMessageDoneAndKeepalive(tick, typ)
 				body := createQueryTestMessage(t, tick, "v", typ, true, true)
-				cm.UpdateMVCC(body, false)
-				require.EqualValues(t, 10, cm.GetQueryMVCCOfVChannel("v").GrowingTimetick)
+				cm.UpdateMVCC(body)
+				require.EqualValues(t, 10, queryFrontier(t, cm, "v").GrowingTimetick)
 			}
 			require.NoError(t, session.RequestCommitAndWait(ctx, 40, uint64(len(tc.bodies))))
 			session.CommitDone()
 			commit := createQueryTestMessage(t, 40, "v", message.MessageTypeCommitTxn, true, true)
-			cm.UpdateMVCC(commit, session.IsInsertOnly())
+			cm.UpdateMVCC(commit)
 			confirmation := createQueryTestMessage(t, 50, "", message.MessageTypeTimeTick, false, true)
-			cm.UpdateMVCC(confirmation, false)
-			cm.PublishReadProof(func(yield func(message.ImmutableMessage, bool) bool) {
+			cm.UpdateMVCC(confirmation)
+			cm.QueryMVCC().Publish(func(yield func(message.ImmutableMessage, bool) bool) {
 				yield(commit.IntoImmutableMessage(nil), session.IsInsertOnly())
 			}, confirmation.IntoImmutableMessage(nil))
-			frontier, proof, err := cm.WaitReadProof(ctx, "v", 50)
+			frontier, err := cm.QueryMVCC().WaitSnapshot(ctx, "v", 50)
 			require.NoError(t, err)
-			require.EqualValues(t, 50, proof)
-			require.Equal(t, mvcc.QueryVChannelMVCC{GrowingTimetick: 40, TransformingTimetick: tc.transform, Confirmed: true}, frontier)
-			require.Equal(t, frontier, cm.GetQueryMVCCOfVChannel("v"))
-			require.Equal(t, mvcc.QueryVChannelMVCC{GrowingTimetick: 10, TransformingTimetick: 10, Confirmed: true}, cm.GetQueryMVCCOfVChannel("other"))
+			require.Equal(t, mvcc.QueryVChannelMVCC{GrowingTimetick: 40, TransformingTimetick: tc.transform}, frontier)
+			require.Equal(t, frontier, queryFrontier(t, cm, "v"))
+			require.Equal(t, mvcc.QueryVChannelMVCC{GrowingTimetick: 10, TransformingTimetick: 10}, queryFrontier(t, cm, "other"))
 		})
 	}
 }
@@ -76,4 +75,11 @@ func createQueryTestMessage(t *testing.T, tt uint64, vc string, typ message.Mess
 		msg = msg.WithTxnContext(message.TxnContext{})
 	}
 	return msg
+}
+
+func queryFrontier(t *testing.T, cm *mvcc.MVCCManager, channel string) mvcc.QueryVChannelMVCC {
+	t.Helper()
+	frontier, ready := cm.QueryMVCC().Snapshot(channel, 0)
+	require.True(t, ready)
+	return frontier
 }

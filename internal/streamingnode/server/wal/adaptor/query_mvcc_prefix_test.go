@@ -69,14 +69,14 @@ func TestQueryMVCCWaitsForCompletePrefix(t *testing.T) {
 				manager.UpdateMVCC(deletion)
 				later := msg(250, message.MessageTypeInsert)
 				manager.UpdateMVCC(later)
-				manager.QueryMVCC().Publish([]message.ImmutableMessage{deletion.IntoImmutableMessage(nil), insert.IntoImmutableMessage(nil)}, tick(200))
+				manager.QueryMVCC().Publish(queryMVCCMessages([]message.ImmutableMessage{deletion.IntoImmutableMessage(nil), insert.IntoImmutableMessage(nil)}), tick(200))
 				got := <-done
 				require.NoError(t, got.err)
 				require.EqualValues(t, 200, got.plan.GetGrowingTimetick())
 				require.EqualValues(t, 150, got.plan.GetTransformingTimetick())
 				require.Equal(t, 1, syncMock.Times())
 				// Subsequent Growing-only progress preserves the QueryNode wait target.
-				manager.QueryMVCC().Publish([]message.ImmutableMessage{later.IntoImmutableMessage(nil)}, tick(300))
+				manager.QueryMVCC().Publish(queryMVCCMessages([]message.ImmutableMessage{later.IntoImmutableMessage(nil)}), tick(300))
 				next, err := w.GetLatestQueryPlanMVCC(ctx, "v")
 				require.NoError(t, err)
 				require.EqualValues(t, 250, next.GetGrowingTimetick())
@@ -134,7 +134,7 @@ func TestQueryMVCCConsistencySelectsCompleteSnapshots(t *testing.T) {
 		mockey.Mock((*roWALAdaptorImpl).Channel).Return(types.PChannelInfo{AccessMode: types.AccessModeRW}).Build()
 		syncs := mockey.Mock(mockey.GetMethod(resource.Resource().TimeTickInspector(), "TriggerSync")).To(func(types.PChannelInfo, bool) {
 			tick := message.NewTimeTickMessageBuilderV1().WithHeader(&message.TimeTickMessageHeader{}).WithBody(&message.TimeTickMsg{}).WithAllVChannel().WithNotPersisted().MustBuildMutable().WithTimeTick(200)
-			manager.QueryMVCC().Publish([]message.ImmutableMessage{insert.IntoImmutableMessage(nil)}, tick.IntoImmutableMessage(nil))
+			manager.QueryMVCC().Publish(queryMVCCMessages([]message.ImmutableMessage{insert.IntoImmutableMessage(nil)}), tick.IntoImmutableMessage(nil))
 		}).Build()
 		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: t.Context(), lifetime: typeutil.NewLifetime()}, param: &interceptors.InterceptorBuildParam{MVCCManager: manager}}
 		req := &viewpb.GetQueryPlanRequest{Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Eventually}}
@@ -160,4 +160,14 @@ func TestQueryMVCCConsistencySelectsCompleteSnapshots(t *testing.T) {
 		require.EqualValues(t, 200, got.GrowingTimetick)
 		require.Equal(t, 1, syncs.Times())
 	})
+}
+
+func queryMVCCMessages(messages []message.ImmutableMessage) func(func(message.ImmutableMessage, bool) bool) {
+	return func(yield func(message.ImmutableMessage, bool) bool) {
+		for _, msg := range messages {
+			if !yield(msg, false) {
+				return
+			}
+		}
+	}
 }

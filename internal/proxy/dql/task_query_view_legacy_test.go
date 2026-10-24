@@ -129,11 +129,11 @@ func TestSearchTaskExecuteUsesQueryViewLegacyClient(t *testing.T) {
 }
 
 func TestQueryViewRecordsFinalReadFrontiersIncludingEmptyShards(t *testing.T) {
-	mockey.PatchConvey("final successful plans supply CAS proofs", t, func() {
+	mockey.PatchConvey("final successful plans supply CAS frontiers", t, func() {
 		legacy := &fakeLegacyQueryClient{}
 		mockey.Mock((*fakeLegacyQueryClient).Query).Return(&queryclient.LegacyQueryResult{Plans: []queryclient.ShardPlan{
-			{ShardID: qviews.ShardID{VChannel: "insert"}, Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 200, TransformingTimetick: 100, ReadProofTimetick: 400}},
-			{ShardID: qviews.ShardID{VChannel: "transform"}, Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 300, ReadProofTimetick: 500}},
+			{ShardID: qviews.ShardID{VChannel: "insert"}, Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 200, TransformingTimetick: 100}},
+			{ShardID: qviews.ShardID{VChannel: "transform"}, Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 300}},
 		}}, nil).Build()
 		task := &QueryTask{
 			schema:          &schemaInfo{},
@@ -143,9 +143,9 @@ func TestQueryViewRecordsFinalReadFrontiersIncludingEmptyShards(t *testing.T) {
 		require.NoError(t, task.Execute(t.Context()))
 		ts, ok := task.actualChannelsMvcc.Get("insert")
 		require.True(t, ok)
-		require.Equal(t, uint64(400), ts)
+		require.Equal(t, uint64(200), ts)
 		ts, ok = task.actualChannelsMvcc.Get("transform")
 		require.True(t, ok)
-		require.Equal(t, uint64(500), ts)
+		require.Equal(t, uint64(300), ts)
 	})
 }

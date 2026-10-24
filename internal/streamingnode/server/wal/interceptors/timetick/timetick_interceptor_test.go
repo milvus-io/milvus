@@ -59,7 +59,7 @@ func TestTimeTickRejectsEmptyCommitBeforeWALAppend(t *testing.T) {
 	manager := impl.operator.MVCCManager()
 	manager.ApplyRecoveryBarrier("v1", 1)
 	commit, session := newCommitTxnMessageForExistingSession(t, impl, "v1")
-	before := manager.GetQueryMVCCOfVChannel("v1")
+	before := queryFrontier(t, manager, "v1")
 	ctx := utility.WithExtraAppendResult(t.Context(), &utility.ExtraAppendResult{})
 	_, err := impl.DoAppend(ctx, commit, func(context.Context, message.MutableMessage) (message.MessageID, error) {
 		t.Fatal("empty commit must not reach WAL append")
@@ -67,7 +67,7 @@ func TestTimeTickRejectsEmptyCommitBeforeWALAppend(t *testing.T) {
 	})
 	require.ErrorContains(t, err, "cannot commit an empty transaction")
 	require.Equal(t, message.TxnStateRollbacked, session.State())
-	require.Equal(t, before, manager.GetQueryMVCCOfVChannel("v1"))
+	require.Equal(t, before, queryFrontier(t, manager, "v1"))
 	requireCommitAckerError(t, impl, err)
 }
 

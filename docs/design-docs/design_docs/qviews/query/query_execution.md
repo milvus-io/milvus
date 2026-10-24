@@ -1,6 +1,6 @@
 > Integration scope: this baseline combines the QueryNode extraction, scoped WAL
 > barriers, coordinator components, and StreamingNode query execution/client.
-> Production Proxy switching and Coordinator runtime activation remain separate.
+> Production Proxy routing and Coordinator runtime activation are wired.
 > See the [QueryNode extraction boundary](../querynode_extraction.md) for its source scope.
 
 # Query Execution Node-Side Design
@@ -456,7 +456,7 @@ The first node-side Phase 2 milestone is:
 ## 16. Integrated StreamingNode execution and schema identity
 
 The injectable [query client](query_client.md) plans on the primary SN and fans
-out the sealed portion to QN. Production Proxy routing is not switched here.
+out the sealed portion to QN. Proxy routes production queries through this path.
 
 `SNQueryViewHandler` acquires the exact plan version in Up state. UpRecovering
 waits for local state-change notifications within the caller context. An accessed

@@ -30,7 +30,7 @@ func publishQueryTestPrefix(t *testing.T, cm *QueryMVCCManager, through uint64, 
 	for _, msg := range msgs {
 		immutable = append(immutable, msg.IntoImmutableMessage(nil))
 	}
-	cm.Publish(immutable, createQueryTestMessage(t, through, "", message.MessageTypeTimeTick, false, false).IntoImmutableMessage(nil))
+	cm.Publish(queryMVCCMessages(immutable), createQueryTestMessage(t, through, "", message.MessageTypeTimeTick, false, false).IntoImmutableMessage(nil))
 }
 
 func TestQueryMVCCPublishesOneCompletePrefix(t *testing.T) {
@@ -121,6 +121,24 @@ func TestQueryMVCCCreatePublishedBeforeCallback(t *testing.T) {
 	require.Equal(t, QueryVChannelMVCC{30, 20}, current)
 }
 
+func TestQueryMVCCRestoreCreatesChannelAtPublishedPrefix(t *testing.T) {
+	cm := NewQueryMVCCManager(10)
+	restore := createQueryTestMessage(t, 20, "restored", message.MessageTypeRestoreSnapshot, false, true)
+	cm.ObserveAppend(restore)
+	_, ready := cm.Snapshot("restored", cm.Minimum("restored", false))
+	require.False(t, ready)
+	publishQueryTestPrefix(t, cm, 20, restore)
+	current, err := cm.WaitSnapshot(t.Context(), "restored", 20)
+	require.NoError(t, err)
+	require.Equal(t, QueryVChannelMVCC{20, 20}, current)
+	insert := createQueryTestMessage(t, 30, "restored", message.MessageTypeInsert, false, true)
+	publishQueryTestPrefix(t, cm, 30, insert)
+	cm.ObserveAppend(restore)
+	current, err = cm.WaitSnapshot(t.Context(), "restored", 30)
+	require.NoError(t, err)
+	require.Equal(t, QueryVChannelMVCC{30, 20}, current)
+}
+
 func TestQueryMVCCMessageProjection(t *testing.T) {
 	for _, kind := range []message.MessageType{message.MessageTypeInsert, message.MessageTypeDelete, message.MessageTypeCommitTxn, message.MessageTypeFlush, message.MessageTypeManualFlush, message.MessageTypeCommitImport, message.MessageTypeCreateSnapshot, message.MessageTypeDropPartition, message.MessageTypeRestoreSnapshot} {
 		t.Run(kind.String(), func(t *testing.T) {
@@ -136,7 +154,7 @@ func TestQueryMVCCMessageProjection(t *testing.T) {
 			if kind == message.MessageTypeInsert {
 				expected = QueryVChannelMVCC{150, 100}
 			}
-			if kind == message.MessageTypeDelete || kind == message.MessageTypeCommitTxn {
+			if kind == message.MessageTypeDelete || kind == message.MessageTypeCommitTxn || kind == message.MessageTypeRestoreSnapshot {
 				expected = QueryVChannelMVCC{150, 150}
 			}
 			require.Equal(t, expected, got)
@@ -189,4 +207,14 @@ func TestQueryMVCCWaitAndRecovery(t *testing.T) {
 	require.Equal(t, QueryVChannelMVCC{300, 300}, got)
 	_, err = replacement.WaitSnapshot(t.Context(), "v", 300)
 	require.ErrorIs(t, err, merr.ErrChannelNotFound)
+}
+
+func queryMVCCMessages(messages []message.ImmutableMessage) func(func(message.ImmutableMessage, bool) bool) {
+	return func(yield func(message.ImmutableMessage, bool) bool) {
+		for _, msg := range messages {
+			if !yield(msg, false) {
+				return
+			}
+		}
+	}
 }

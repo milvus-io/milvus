@@ -8,12 +8,9 @@ not depend on the QueryCoord balancer or load manager. `NewLegacyViewQueryClient
 accepts already planned internal requests and returns per-shard reduced results
 and retained `ShardPlan`s. The surrounding Proxy pipeline owns API rendering.
 
-This extraction adds the client and the SN execution support; it does not switch
-Proxy Search, Query, Delete, Upsert or Iterator to QueryView. QN execution and native resource preparation are separate prerequisites and
-are not imported into this master-based extraction. Coordinator runtime
-activation, complete DataView publication and read-schema publication ordering
-remain integration work. The generic `NewViewQueryClient` staged API also exists,
-but its field-name-to-ID wiring still has TODOs; it is not the production entry.
+Proxy Search, Query, Delete, Upsert and Iterator use the legacy QueryView
+client. Coordinator publication and the SN/QN resources are wired in this
+branch. The generic staged client API is not the production entry.
 
 ## Planning, dispatch and retries
 

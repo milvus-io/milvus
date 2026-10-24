@@ -66,8 +66,7 @@ For node-side Phase 1 planning and Phase 2 execution, see
   CSegments through asynchronous scoring, while LocalSegments keep their local
   pin/unpin protocol. Both execute the shared segcore scoring implementation.
 - **Scope:** retained requery uses `QueryOnView` with the original View/MVCC.
-  Production Proxy wiring
-  remains integration work. See [plan/schema/snapshot contracts](query/query_plan.md).
+  Production Proxy routing is wired. See [plan/schema/snapshot contracts](query/query_plan.md).
 
 Key source paths: `internal/streamingnode/server/queryplan/server.go`,
 `internal/streamingnode/server/wal/adaptor/query_plan.go`,

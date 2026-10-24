@@ -60,8 +60,8 @@ contexts, then calls `TimeTickSyncInspector.EnsureBarrier`. An unallocated futur
 timestamp cannot occupy shared TimeTick sync work. The inspector certifies
 publication; planning separately waits for the selected runtime to apply the
 required frontiers before executing.
-This extraction does not enable the Proxy Iterator path or extend historical
-retention.
+Proxy Iterator uses this scalar barrier for snapshot continuation. Historical
+retention is unchanged.
 
 Internal partial-update CAS reads use the ordinary Strong snapshot. Their
 channel ReadTs is max(GrowingMVCC, TransformMVCC): both frontiers come from one

@@ -330,10 +330,3 @@ message QueryOnViewResponse {
     // TODO: replace with native view result types once legacy internal protos are removed.
     internal.RetrieveResults legacy_results = 1;
 }
-
-message QueryPayloadReuse {
-    bool placeholder_group = 1;
-    bool serialized_expr_plan = 2;
-    // Positional, parallel to SearchRequest.sub_reqs.
-    repeated QueryPayloadReuse sub_requests = 3;
-}

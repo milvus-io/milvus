@@ -976,7 +976,7 @@ func TestInterceptorClearsExpiredTxnInsertResults(t *testing.T) {
 	require.NotNil(t, interceptor.txnInsertResultBuffers.Build(body))
 
 	expiredTimeTick := tsoutil.AddPhysicalDurationOnTs(baseTimeTick, keepalive)
-	mvccManager.UpdateMVCC(newIdempotentInsertMessage(t, "v1", "").WithTimeTick(expiredTimeTick), false)
+	mvccManager.UpdateMVCC(newIdempotentInsertMessage(t, "v1", "").WithTimeTick(expiredTimeTick))
 	require.Nil(t, interceptor.txnInsertResultBuffers.Build(body))
 }
 
@@ -1027,7 +1027,7 @@ func TestInterceptorClearsExpiredTxnInsertResultsOnIdleChannel(t *testing.T) {
 	// The timetick interceptor expires txn sessions independently of retained
 	// MVCC. The next buffer operation reclaims the expired session's results.
 	txnManager.CleanupTxnUntil(expiredTimeTick)
-	mvccManager.UpdateMVCC(message.NewTimeTickMessageBuilderV1().WithAllVChannel().WithHeader(&message.TimeTickMessageHeader{}).WithBody(&message.TimeTickMsg{}).MustBuildMutable().WithTimeTick(expiredTimeTick), false)
+	mvccManager.UpdateMVCC(message.NewTimeTickMessageBuilderV1().WithAllVChannel().WithHeader(&message.TimeTickMessageHeader{}).WithBody(&message.TimeTickMsg{}).MustBuildMutable().WithTimeTick(expiredTimeTick))
 	require.Equal(t, baseTimeTick, mvccManager.GetMVCCOfVChannel("v1").Timetick)
 	require.Equal(t, expiredTimeTick, mvccManager.GetConfirmedTimeTick())
 	_, err = txnManager.GetSessionOfTxn(session.TxnContext().TxnID)
