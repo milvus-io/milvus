@@ -543,3 +543,15 @@ conversion and successful responses contain only `row_count`.
 SN normally invokes this operation while selecting the statistics View, so the
 client does not issue a second execution request to SN. See the
 [statistics orchestration contract](query_client.md#runtime-row-statistics).
+
+## Function model resources
+
+Growing function-chain execution on SN resolves named XGBoost model resources
+through the same demand-download manager used by Analyzer. A fresh name lookup
+selects the immutable resource ID, then concurrent requests share its download
+and model load. The file reference covers native model construction; the native
+UBJ loader copies model state into owned memory. Queries retain a model lease
+through prediction. Idle models expire after the configured file-resource cache
+TTL; removal and shutdown cannot destroy an active model. Reusing a resource name
+with a new ID never substitutes the model held by an executing query. QN/Proxy
+without a pull manager retain their existing file-resource synchronization path.
