@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1542,46 +1543,48 @@ func TestRollbackImportCallback_AfterCommit_NoOp(t *testing.T) {
 // `-race` to detect any unsynchronized access.
 func TestImportAckCallbacks_CommitVsAbort_Race(t *testing.T) {
 	for iter := 0; iter < 32; iter++ {
-		ctx := context.Background()
-		importMeta, _ := newTestImportMeta(t)
+		t.Run(fmt.Sprintf("iteration-%d", iter), func(t *testing.T) {
+			ctx := context.Background()
+			importMeta, _ := newTestImportMeta(t)
 
-		const jobID int64 = 5
-		err := importMeta.AddJob(ctx, &importJob{
-			ImportJob: &datapb.ImportJob{
-				JobID:      jobID,
-				State:      internalpb.ImportJobState_Uncommitted,
-				AutoCommit: false,
-			},
-			tr: timerecord.NewTimeRecorder("race"),
+			const jobID int64 = 5
+			err := importMeta.AddJob(ctx, &importJob{
+				ImportJob: &datapb.ImportJob{
+					JobID:      jobID,
+					State:      internalpb.ImportJobState_Uncommitted,
+					AutoCommit: false,
+				},
+				tr: timerecord.NewTimeRecorder("race"),
+			})
+			assert.NoError(t, err)
+
+			callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
+
+			start := make(chan struct{})
+			var commitErr, rollbackErr error
+			var wg sync.WaitGroup
+			wg.Add(2)
+			go func() {
+				defer wg.Done()
+				<-start
+				commitErr = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(jobID))
+			}()
+			go func() {
+				defer wg.Done()
+				<-start
+				rollbackErr = callbacks.rollbackImportV2AckCallback(ctx, buildRollbackImportBroadcastResult(jobID))
+			}()
+			close(start)
+			wg.Wait()
+
+			assert.NoError(t, commitErr)
+			assert.NoError(t, rollbackErr)
+
+			final := importMeta.GetJob(ctx, jobID).GetState()
+			assert.Contains(t,
+				[]internalpb.ImportJobState{internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed},
+				final, "iter %d: terminal state must be Completed or Failed, got %s", iter, final)
 		})
-		assert.NoError(t, err)
-
-		callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
-
-		start := make(chan struct{})
-		var commitErr, rollbackErr error
-		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			<-start
-			commitErr = callbacks.commitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(jobID))
-		}()
-		go func() {
-			defer wg.Done()
-			<-start
-			rollbackErr = callbacks.rollbackImportV2AckCallback(ctx, buildRollbackImportBroadcastResult(jobID))
-		}()
-		close(start)
-		wg.Wait()
-
-		assert.NoError(t, commitErr)
-		assert.NoError(t, rollbackErr)
-
-		final := importMeta.GetJob(ctx, jobID).GetState()
-		assert.Contains(t,
-			[]internalpb.ImportJobState{internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed},
-			final, "iter %d: terminal state must be Completed or Failed, got %s", iter, final)
 	}
 }
 

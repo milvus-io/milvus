@@ -99,6 +99,7 @@ func TestNewQViewsRuntimeRecoversLoadConfigAndQueryViews(t *testing.T) {
 	require.Same(t, data, runtime.balanceCache.GetCollection(100).DataView())
 	require.Equal(t, "rg1", runtime.balanceCache.GetNode(10).Info().ResourceGroup)
 	runtime.stop()
+	runtime.stop()
 	require.Equal(t, 3, detached)
 }
 

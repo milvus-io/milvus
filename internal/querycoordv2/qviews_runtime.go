@@ -51,6 +51,7 @@ type qviewsBalancer interface {
 }
 
 type qviewsRuntime struct {
+	stopOnce          sync.Once
 	loadInfos         *loadmgr.LoadInfoStore
 	resources         *qvresource.Resources
 	loadConfigStore   *loadmgr.LoadConfigStore
@@ -196,29 +197,31 @@ func (r *qviewsRuntime) start(ctx context.Context) {
 }
 
 func (r *qviewsRuntime) stop() {
-	if r.readyChanges != nil {
-		r.readyChanges.Close()
-	}
-	r.balancer.Stop()
-	if r.balanceCache != nil {
-		r.balanceCache.Close()
-	}
-	if r.nodePublisher != nil {
-		r.nodePublisher.Close()
-	}
-	if r.shardViewRegistry != nil {
-		r.shardViewRegistry.Close()
-	}
-	_ = r.syncer.Close()
-	if r.queryNodeManager != nil {
-		r.queryNodeManager.Close()
-	}
-	if r.streamingNodeHandler != nil {
-		r.streamingNodeHandler.Close()
-	}
-	if r.streamingCoordClient != nil {
-		r.streamingCoordClient.Close()
-	}
+	r.stopOnce.Do(func() {
+		if r.readyChanges != nil {
+			r.readyChanges.Close()
+		}
+		r.balancer.Stop()
+		if r.balanceCache != nil {
+			r.balanceCache.Close()
+		}
+		if r.nodePublisher != nil {
+			r.nodePublisher.Close()
+		}
+		if r.shardViewRegistry != nil {
+			r.shardViewRegistry.Close()
+		}
+		_ = r.syncer.Close()
+		if r.queryNodeManager != nil {
+			r.queryNodeManager.Close()
+		}
+		if r.streamingNodeHandler != nil {
+			r.streamingNodeHandler.Close()
+		}
+		if r.streamingCoordClient != nil {
+			r.streamingCoordClient.Close()
+		}
+	})
 }
 
 func newDefaultQViewsRuntimeDependencies(

@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
@@ -86,6 +87,7 @@ func (suite *LoadCollectionJobSuite) TestGenerateAlterLoadConfigMessageUsesContr
 		CollectionInfo: &milvuspb.DescribeCollectionResponse{
 			DbId:         10,
 			CollectionID: 100,
+			Schema:       &schemapb.CollectionSchema{},
 		},
 		Expected: ExpectedLoadConfig{
 			ExpectedPartitionIDs:  []int64{20},

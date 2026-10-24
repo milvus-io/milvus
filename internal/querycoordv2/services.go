@@ -184,6 +184,11 @@ func (s *Server) ShowLoadPartitions(ctx context.Context, req *querypb.ShowPartit
 	}
 	cfg := progress.Config
 	if cfg == nil {
+		// Listing loaded partitions of a released collection is an empty
+		// result; an explicit partition request still reports not loaded.
+		if len(req.GetPartitionIDs()) == 0 {
+			return &querypb.ShowPartitionsResponse{Status: merr.Success()}, nil
+		}
 		err := meta.GlobalFailedLoadCache.Get(req.GetCollectionID())
 		if err != nil {
 			err = merr.WrapErrCollectionNotLoaded(req.GetCollectionID(), err.Error())

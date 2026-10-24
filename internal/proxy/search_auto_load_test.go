@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -627,6 +628,11 @@ func TestDQLAutoLoadRetryThroughTaskAndGRPC(t *testing.T) {
 			t.Cleanup(func() { searchPre.UnPatch() })
 			queryPre := mockey.Mock((*queryTask).PreExecute).To(func(qt *queryTask, _ context.Context) error {
 				queryTasks.Add(1)
+				schema, err := node.metaCache.GetCollectionSchema(node.ctx, "db", "collection")
+				if err != nil {
+					return err
+				}
+				dql.SetQueryReadSchemaForTest(qt, schema)
 				qt.CollectionID = 100
 				return nil
 			}).Build()

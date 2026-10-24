@@ -1157,6 +1157,10 @@ snapshots.
   not count as loaded.
 - **LoadPercentage**: `count(current-config Up expected shards) / count(expected shards) * 100`.
 
+Listing loaded partitions without explicit partition IDs returns an empty list
+when the collection has no load configuration. Requests for explicit unloaded
+partitions still fail; an empty listing does not assert collection readiness.
+
 `loadstatus.Get` is the shared progress/readiness calculation. Collection and
 partition status and AutoLoad readiness use it and its `Ready()` result. It reads LoadConfig and its version atomically,
 reads one scoped Registry snapshot, then rechecks both the config version and
