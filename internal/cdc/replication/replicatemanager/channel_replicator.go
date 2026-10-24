@@ -51,6 +51,8 @@ type Replicator interface {
 
 var _ Replicator = (*channelReplicator)(nil)
 
+var errScannerClosed = errors.New("replication source scanner closed")
+
 // channelReplicator is the implementation of ChannelReplicator.
 type channelReplicator struct {
 	channel       *meta.ReplicateChannel
@@ -92,21 +94,47 @@ func (r *channelReplicator) StartReplication() {
 			}
 			r.asyncNotifier.Finish(struct{}{})
 		}()
-	INIT_LOOP:
 		for {
+			for {
+				select {
+				case <-r.asyncNotifier.Context().Done():
+					return
+				default:
+					err := r.init()
+					if err != nil {
+						logger.Warn(context.TODO(), "initialize replicator failed", mlog.Err(err))
+						continue
+					}
+				}
+				break
+			}
+
+			err := r.startConsumeLoop()
+			if r.asyncNotifier.Context().Err() != nil || errors.Is(err, context.Canceled) {
+				r.closeFinishedScanner()
+				return
+			}
+			if errors.Is(err, replicatestream.ErrReplicationRemoved) {
+				return
+			}
+			if err == nil {
+				return
+			}
+
+			logger.Warn(context.TODO(), "replication source scanner stopped, retrying", mlog.Err(err))
+			// startConsumeLoop waits for the scanner to finish before returning.
+			// Keep the stream client and its pending message queue so confirmed and
+			// unconfirmed target-side state can continue across scanner recovery.
+			r.resetScanner()
+
+			timer := time.NewTimer(100 * time.Millisecond)
 			select {
 			case <-r.asyncNotifier.Context().Done():
+				timer.Stop()
 				return
-			default:
-				err := r.init()
-				if err != nil {
-					logger.Warn(context.TODO(), "initialize replicator failed", mlog.Err(err))
-					continue
-				}
-				break INIT_LOOP
+			case <-timer.C:
 			}
 		}
-		r.startConsumeLoop()
 	}()
 }
 
@@ -170,16 +198,25 @@ func (r *channelReplicator) init() error {
 }
 
 // startConsumeLoop starts the replicate loop.
-func (r *channelReplicator) startConsumeLoop() {
+func (r *channelReplicator) startConsumeLoop() error {
 	logger := mlog.With(mlog.String("key", r.channel.Key), mlog.Int64("modRevision", r.channel.ModRevision))
 	logger.Info(context.TODO(), "start consume loop")
+	var scannerDone <-chan struct{}
+	if r.msgScanner != nil {
+		scannerDone = r.msgScanner.Done()
+	}
 
 	for {
 		select {
 		case <-r.asyncNotifier.Context().Done():
 			logger.Info(context.TODO(), "consume loop stopped")
-			return
-		case msg := <-r.msgChan:
+			return nil
+		case <-scannerDone:
+			return r.scannerStoppedError(true)
+		case msg, ok := <-r.msgChan:
+			if !ok {
+				return r.scannerStoppedError(false)
+			}
 			// A topology change older than this task describes a past state, not an
 			// instruction. Forwarding it would make the secondary act on it — a
 			// configuration that no longer lists the secondary turns it back into a
@@ -207,10 +244,48 @@ func (r *channelReplicator) startConsumeLoop() {
 					// series. Deleting after BlockUntilFinish ensures no
 					// in-flight confirm re-creates the series afterwards.
 					replicatestream.DeleteLastReplicatedTimeTick(r.channel.Value)
-					return
+					return replicatestream.ErrReplicationRemoved
 				}
 			}
 		}
+	}
+}
+
+func (r *channelReplicator) scannerStoppedError(scannerDone bool) error {
+	if r.msgScanner == nil {
+		return errScannerClosed
+	}
+
+	if !scannerDone {
+		select {
+		case <-r.msgScanner.Done():
+		case <-r.asyncNotifier.Context().Done():
+			return r.asyncNotifier.Context().Err()
+		}
+	}
+	if err := r.msgScanner.Error(); err != nil {
+		return errors.Wrap(err, "replication source scanner stopped")
+	}
+	return errScannerClosed
+}
+
+func (r *channelReplicator) resetScanner() {
+	if r.msgScanner != nil {
+		r.msgScanner.Close()
+	}
+	r.msgScanner = nil
+	r.msgChan = nil
+}
+
+func (r *channelReplicator) closeFinishedScanner() {
+	if r.msgScanner == nil {
+		return
+	}
+	select {
+	case <-r.msgScanner.Done():
+		r.msgScanner.Close()
+		r.msgScanner = nil
+	default:
 	}
 }
 
