@@ -14,12 +14,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Tests for the `bloom_match` C++ probe path (plan proto BloomFilterExpr →
-// expr::BloomFilterExpr → PhyBloomFilterExpr), per design doc
+// Tests for the Bloom-kind `membership_match` C++ probe path (plan proto
+// BloomFilterExpr → expr::BloomFilterExpr → PhyBloomFilterExpr), per design doc
 // docs/design-docs/design_docs/20260707-bloom-filter-expression.md.
 //
 // Golden-vector conformance consumes the same
-// client/sbbf/testdata/golden_vectors.json used by the Go builder tests;
+// client/membership/sbbf/testdata/golden_vectors.json used by the Go builder tests;
 // the C++ prober must reproduce every membership answer bit-identically.
 
 #include <gtest/gtest.h>
@@ -49,13 +49,11 @@
 #include "knowhere/comp/index_param.h"
 #include "exec/QueryContext.h"
 #include "exec/Task.h"
-#include "exec/expression/BloomFilterExpr.h"
+#include "exec/expression/MembershipFilterExpr.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
 #include "exec/expression/LogicalUnaryExpr.h"
 #include "expr/ITypeExpr.h"
-#include "index/BitmapIndex.h"
-#include "index/ScalarIndexSort.h"
 #include "pb/plan.pb.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "query/PlanProto.h"
@@ -63,6 +61,8 @@
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/index_test_utils.h"
+#include "test_utils/CountingScalarReader.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -73,14 +73,14 @@ using namespace milvus::segcore;
 
 namespace {
 
-// Locate client/sbbf/testdata/golden_vectors.json relative to this source
+// Locate client/membership/sbbf/testdata/golden_vectors.json relative to this source
 // file (repo root is four levels up from internal/core/unittest/<file>).
 std::filesystem::path
 GoldenVectorsPath() {
     // Co-located with this test (internal/core/unittest/testdata/bloom) so the
     // C++ unittest environment — which does not check out the standalone
     // client/ module — can always find it. The authoritative copy the client
-    // SDK ships is client/sbbf/testdata/golden_vectors.json; both are generated
+    // SDK ships is client/membership/sbbf/testdata/golden_vectors.json; both are generated
     // from the same spec and pinned identical by CppGeneratedFixtureIsReproducible.
     auto path =
         std::filesystem::path(__FILE__).parent_path()  // internal/core/unittest
@@ -177,7 +177,7 @@ SerializeMbf1(std::string bitset,
     return out;
 }
 
-// Minimal SBBF builder mirroring client/sbbf (Go) and Arrow's
+// Minimal SBBF builder mirroring client/membership/sbbf (Go) and Arrow's
 // parquet::BlockSplitBloomFilter. Used only to construct filters for
 // expression-level tests; cross-language bit-compatibility of the layout is
 // pinned separately by the golden vectors.
@@ -616,7 +616,7 @@ TEST(BloomFilterExprTest, ProtoParserDispatchAndTypeCheck) {
             std::dynamic_pointer_cast<const expr::BloomFilterExpr>(parsed);
         ASSERT_NE(bf_expr, nullptr);
         EXPECT_EQ(bf_expr->column_.field_id_, fid);
-        EXPECT_EQ(bf_expr->filter_blob_, blob);
+        EXPECT_EQ(*bf_expr->filter_blob_, blob);
     }
 
     // JSON parses too, and the nested path survives into the logical expr.
@@ -645,15 +645,6 @@ TEST(BloomFilterExprTest, ProtoParserDispatchAndTypeCheck) {
 // Expression-level evaluation over growing and sealed segments.
 // ---------------------------------------------------------------------------
 std::atomic<int64_t> g_bloom_reverse_lookup_calls{0};
-
-class CountingBloomInt64Index : public index::ScalarIndexSort<int64_t> {
- public:
-    std::optional<int64_t>
-    Reverse_Lookup(size_t offset) const override {
-        ++g_bloom_reverse_lookup_calls;
-        return index::ScalarIndexSort<int64_t>::Reverse_Lookup(offset);
-    }
-};
 
 class BloomFilterExprEvalTest : public ::testing::Test {
  protected:
@@ -715,7 +706,7 @@ class BloomFilterExprEvalTest : public ::testing::Test {
                     N,
                     dataset_->row_ids_.data(),
                     dataset_->timestamps_.data(),
-                    dataset_->raw_);
+                    dataset_->SharedRaw());
         return seg;
     }
 
@@ -730,12 +721,15 @@ class BloomFilterExprEvalTest : public ::testing::Test {
             schema_, *dataset_, false, {i64_fid_.get()});
         EXPECT_FALSE(segment->HasFieldData(i64_fid_));
 
-        LoadIndexInfo index_info;
+        LoadIndexInfo index_info{};
         index_info.field_id = i64_fid_.get();
         index_info.field_type = DataType::INT64;
-        auto scalar_index = std::make_unique<CountingBloomInt64Index>();
-        scalar_index->Build(N, i64_col_.data(), i64_valid_.data());
-        index_info.index_params = GenIndexParams(scalar_index.get());
+        auto scalar_index = std::make_unique<CountingScalarReader<int64_t>>(
+            BuildTestScalarIndex<int64_t>(
+                "sort", N, i64_col_.data(), i64_valid_.data()),
+            g_bloom_reverse_lookup_calls);
+        index_info.index_params = GenIndexParams(scalar_index.get(), "sort");
+        SetTestIndexMetadata(index_info, *scalar_index, "sort");
         index_info.cache_index = CreateTestCacheIndex("bloom-counting-index",
                                                       std::move(scalar_index));
         segment->LoadIndex(index_info);
@@ -945,20 +939,21 @@ TEST_F(BloomFilterExprEvalTest, VarcharGrowingAndSealed) {
 namespace {
 
 enum class JsonVariant : int {
-    kIntMember = 0,   // {"uid": 5}          member of the int blob
-    kIntOther,        // {"uid": 7}          valid non-member
-    kDoubleIntegral,  // {"uid": 5.0}        strictly typed: NOT a member
-    kDoubleFraction,  // {"uid": 5.5}        definite non-member, valid
-    kStrAlice,        // {"uid": "alice"}    string probe
-    kStrFive,         // {"uid": "5"}        string, must not alias int64 5
-    kBool,            // {"uid": true}       no probe value
-    kNull,            // {"uid": null}       no probe value
-    kMissing,         // {"other": 1}        no probe value
-    kObject,          // {"uid": {"a": 1}}   no probe value
-    kArray,           // {"uid": [5]}        no probe value
-    kHugeUint,        // {"uid": 2^64-1}     definite non-member, valid
-    kIntMin,          // {"uid": INT64_MIN}  int64 member probe
-    kRowNull,         // whole-row NULL
+    kIntMember = 0,    // {"uid": 5}          member of the int blob
+    kIntOther,         // {"uid": 7}          valid non-member
+    kDoubleIntegral,   // {"uid": 5.0}        strictly typed: NOT a member
+    kDoubleFraction,   // {"uid": 5.5}        definite non-member, valid
+    kStrAlice,         // {"uid": "alice"}    string probe
+    kStrEscapedAlice,  // {"uid": "a\u006cice"} decoded string probe
+    kStrFive,          // {"uid": "5"}        string, must not alias int64 5
+    kBool,             // {"uid": true}       no probe value
+    kNull,             // {"uid": null}       no probe value
+    kMissing,          // {"other": 1}        no probe value
+    kObject,           // {"uid": {"a": 1}}   no probe value
+    kArray,            // {"uid": [5]}        no probe value
+    kHugeUint,         // {"uid": 2^64-1}     definite non-member, valid
+    kIntMin,           // {"uid": INT64_MIN}  int64 member probe
+    kRowNull,          // whole-row NULL
     kVariantCount,
 };
 
@@ -982,6 +977,8 @@ JsonRowFor(JsonVariant v) {
             return R"({"uid": 5.5})";
         case JsonVariant::kStrAlice:
             return R"({"uid": "alice"})";
+        case JsonVariant::kStrEscapedAlice:
+            return R"({"uid": "a\u006cice"})";
         case JsonVariant::kStrFive:
             return R"({"uid": "5"})";
         case JsonVariant::kBool:
@@ -1025,6 +1022,7 @@ JsonReference(const SplitBlockBloomFilterView& view, JsonVariant v) {
         case JsonVariant::kDoubleFraction:
             return {true, false};
         case JsonVariant::kStrAlice:
+        case JsonVariant::kStrEscapedAlice:
             return {true, view.TestBytes("alice", 5)};
         case JsonVariant::kStrFive:
             return {true, view.TestBytes("5", 1)};
@@ -1252,11 +1250,11 @@ TEST_F(BloomFilterExprEvalTest, JsonPathOffsetInput) {
     ASSERT_TRUE(view.TestInt64(5));
 
     // Non-contiguous, out-of-order candidates spanning the whole segment,
-    // covering member/non-member/gap/whole-row-NULL variants (1777 % 14 == 13
-    // is a whole-row NULL; 1999 % 14 == 11 is the huge uint64).
+    // covering member/non-member/gap/whole-row-NULL variants (1784 % 15 == 14
+    // is a whole-row NULL; 1992 % 15 == 12 is the huge uint64).
     milvus::exec::OffsetVector offsets;
     for (auto o : std::vector<int32_t>{
-             1999, 3, 402, 57, 1500, 800, 17, 1234, 999, 6, 1777, 450}) {
+             1992, 3, 402, 57, 1500, 800, 17, 1234, 999, 6, 1784, 450}) {
         offsets.emplace_back(o);
     }
 
@@ -1281,7 +1279,7 @@ TEST_F(BloomFilterExprEvalTest, JsonPathOffsetInput) {
                 << "candidate k=" << k << " row=" << row;
         }
 
-        // Candidate 0 (row 1999, huge uint64 -> false) vs sequential row 0
+        // Candidate 0 (row 1992, huge uint64 -> false) vs sequential row 0
         // (int member 5 -> true): a first-N sequential scan provably differs,
         // so this test depends on the offset-input path.
         const auto [v0, p0] = JsonReference(view, JsonVariantAt(0));
@@ -1463,6 +1461,58 @@ TEST_F(BloomFilterExprEvalTest,
 }
 
 TEST_F(BloomFilterExprEvalTest,
+       UnaryRangeBitmapInputLeavesExcludedNullCandidatesUntouched) {
+    std::vector<size_t> null_rows;
+    std::vector<size_t> valid_rows;
+    for (size_t i = 0; i < N; ++i) {
+        (i64_valid_[i] ? valid_rows : null_rows).push_back(i);
+    }
+    ASSERT_GE(null_rows.size(), 2u);
+    ASSERT_GE(valid_rows.size(), 2u);
+
+    OffsetVector offsets{
+        static_cast<int32_t>(null_rows[0]),
+        static_cast<int32_t>(valid_rows[0]),
+        static_cast<int32_t>(null_rows[1]),
+        static_cast<int32_t>(valid_rows[1]),
+    };
+    TargetBitmap candidate_mask(offsets.size(), false);
+    candidate_mask.set(1);
+    candidate_mask.set(2);
+
+    proto::plan::GenericValue value;
+    value.set_int64_val(i64_col_[valid_rows[0]]);
+    expr::TypedExprPtr logical = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(i64_fid_, DataType::INT64, {}, true),
+        proto::plan::OpType::Equal,
+        value);
+
+    auto growing = BuildGrowing();
+    auto sealed = BuildSealed();
+    for (const SegmentInternalInterface* segment :
+         {static_cast<const SegmentInternalInterface*>(growing.get()),
+          static_cast<const SegmentInternalInterface*>(sealed.get())}) {
+        auto result =
+            EvalPhysical(segment, logical, candidate_mask.clone(), &offsets);
+        ASSERT_NE(result, nullptr);
+        BitsetTypeView bits(result->GetRawData(), result->size());
+        BitsetTypeView valid(result->GetValidRawData(), result->size());
+        ASSERT_EQ(result->size(), offsets.size());
+
+        EXPECT_FALSE(bits[0]);
+        EXPECT_TRUE(valid[0])
+            << "an excluded NULL candidate must remain untouched";
+        EXPECT_TRUE(bits[1]);
+        EXPECT_TRUE(valid[1]);
+        EXPECT_FALSE(bits[2]);
+        EXPECT_FALSE(valid[2]) << "an active NULL candidate is invalid";
+        EXPECT_FALSE(bits[3]);
+        EXPECT_TRUE(valid[3])
+            << "an excluded valid candidate must remain untouched";
+    }
+}
+
+TEST_F(BloomFilterExprEvalTest,
        JsonBitmapInputLeavesExcludedNullCandidatesUntouched) {
     std::vector<std::string> rows(N, R"({"uid": 5})");
     FixedVector<bool> validity(N, true);
@@ -1583,16 +1633,17 @@ TEST_F(BloomFilterExprEvalTest, Int64SealedScalarIndexOnly) {
     // the index, and stays that way after.
     ASSERT_FALSE(sealed->HasFieldData(i64_fid_));
 
-    LoadIndexInfo idx;
+    LoadIndexInfo idx{};
     idx.field_id = i64_fid_.get();
     idx.field_type = DataType::INT64;
     idx.index_params["index_type"] = "STL_SORT";
     // Build the index WITH the field's real nullability, so the index's
     // Reverse_Lookup returns nullopt exactly for the segment's NULL rows.
     // (GenScalarIndexing's raw-pointer Build would mark every row valid.)
-    auto index = index::CreateScalarIndexSort<int64_t>();
-    index->Build(N, i64_col_.data(), i64_valid_.data());
-    idx.index_params = GenIndexParams(index.get());
+    auto index = milvus::BuildTestScalarIndex<int64_t>(
+        "sort", N, i64_col_.data(), i64_valid_.data());
+    idx.index_params = GenIndexParams(index.get(), "sort");
+    SetTestIndexMetadata(idx, *index, "sort");
     idx.cache_index = CreateTestCacheIndex("test", std::move(index));
     sealed->LoadIndex(idx);
     ASSERT_FALSE(sealed->HasFieldData(i64_fid_));
@@ -1691,12 +1742,13 @@ TEST_F(BloomFilterExprEvalTest,
         schema_, *dataset_, false, GetExcludedFieldIds(schema_, load_fields));
     ASSERT_FALSE(sealed->HasFieldData(i64_fid_));
 
-    LoadIndexInfo idx;
+    LoadIndexInfo idx{};
     idx.field_id = i64_fid_.get();
     idx.field_type = DataType::INT64;
-    auto index = index::CreateScalarIndexSort<int64_t>();
-    index->Build(N, i64_col_.data(), i64_valid_.data());
-    idx.index_params = GenIndexParams(index.get());
+    auto index = milvus::BuildTestScalarIndex<int64_t>(
+        "sort", N, i64_col_.data(), i64_valid_.data());
+    idx.index_params = GenIndexParams(index.get(), "sort");
+    SetTestIndexMetadata(idx, *index, "sort");
     idx.cache_index = CreateTestCacheIndex("snapshot-race", std::move(index));
     sealed->LoadIndex(idx);
     ASSERT_FALSE(sealed->HasFieldData(i64_fid_));
@@ -1841,17 +1893,18 @@ TEST_F(BloomFilterExprEvalTest, Int64SealedBitmapIndexOnlyRejected) {
     // the index, and stays that way after.
     ASSERT_FALSE(sealed->HasFieldData(i64_fid_));
 
-    LoadIndexInfo idx;
+    LoadIndexInfo idx{};
     idx.field_id = i64_fid_.get();
     idx.field_type = DataType::INT64;
     // A bare BITMAP index: the default in-memory Build does NOT enable the
     // offset cache (use_offset_cache_ stays false), so its per-row
     // Reverse_Lookup is O(cardinality) and SupportFastReverseLookup() == false.
     idx.index_params["index_type"] = "BITMAP";
-    auto index = std::make_unique<index::BitmapIndex<int64_t>>();
-    index->Build(N, i64_col_.data(), i64_valid_.data());
-    // GenIndexParams reads index->Type(), which BitmapIndex sets to "BITMAP".
-    idx.index_params = GenIndexParams(index.get());
+    auto index = milvus::BuildTestScalarIndex<int64_t>(
+        "bitmap", N, i64_col_.data(), i64_valid_.data());
+    // Retain bitmap family metadata and its disabled offset cache.
+    idx.index_params = GenIndexParams(index.get(), "bitmap");
+    SetTestIndexMetadata(idx, *index, "bitmap");
     idx.cache_index = CreateTestCacheIndex("test", std::move(index));
     sealed->LoadIndex(idx);
     ASSERT_FALSE(sealed->HasFieldData(i64_fid_));

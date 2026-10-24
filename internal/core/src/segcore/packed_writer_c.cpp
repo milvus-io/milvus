@@ -27,6 +27,7 @@
 #include "arrow/result.h"
 #include "arrow/status.h"
 #include "arrow/type.h"
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/common_type_c.h"
 #include "fmt/core.h"
@@ -45,6 +46,7 @@
 #include "storage/PluginLoader.h"
 #include "storage/StorageV2FSCache.h"
 #include "storage/plugin/PluginInterface.h"
+#include "storage/StatusToErrorCode.h"
 
 CStatus
 NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
@@ -87,6 +89,14 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
             c_storage_config.tls_min_version != nullptr
                 ? std::string(c_storage_config.tls_min_version)
                 : "",
+            c_storage_config.use_crc32c_checksum,
+            c_storage_config.talon_mode,
+            c_storage_config.talon_small_read_threshold,
+            c_storage_config.talon_coordinator != nullptr
+                ? c_storage_config.talon_coordinator
+                : "",
+            c_storage_config.talon_block_size,
+            c_storage_config.talon_max_idle_per_addr,
         });
         if (!trueFs) {
             return milvus::FailureCStatus(
@@ -94,7 +104,16 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
                 "[StorageV2] Failed to get filesystem");
         }
 
-        auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
+        auto schema_result = arrow::ImportSchema(schema);
+        if (!schema_result.ok()) {
+            // A malformed C-ABI schema from the Go side; ValueOrDie would
+            // abort the process instead of returning a classified status.
+            ThrowInfo(
+                milvus::storage::ArrowStatusToErrorCode(schema_result.status()),
+                "failed to import arrow schema: {}",
+                schema_result.status().ToString());
+        }
+        auto trueSchema = schema_result.ValueUnsafe();
 
         auto columnGroups =
             *static_cast<std::vector<std::vector<int>>*>(column_splits);
@@ -139,9 +158,8 @@ NewPackedWriterWithStorageConfig(struct ArrowSchema* schema,
             new std::shared_ptr<milvus_storage::PackedRecordBatchWriter>(
                 std::move(writer));
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -168,7 +186,16 @@ NewPackedWriter(struct ArrowSchema* schema,
                 "[StorageV2] Failed to get filesystem");
         }
 
-        auto trueSchema = arrow::ImportSchema(schema).ValueOrDie();
+        auto schema_result = arrow::ImportSchema(schema);
+        if (!schema_result.ok()) {
+            // A malformed C-ABI schema from the Go side; ValueOrDie would
+            // abort the process instead of returning a classified status.
+            ThrowInfo(
+                milvus::storage::ArrowStatusToErrorCode(schema_result.status()),
+                "failed to import arrow schema: {}",
+                schema_result.status().ToString());
+        }
+        auto trueSchema = schema_result.ValueUnsafe();
 
         auto columnGroups =
             *static_cast<std::vector<std::vector<int>>*>(column_splits);
@@ -213,9 +240,8 @@ NewPackedWriter(struct ArrowSchema* schema,
             new std::shared_ptr<milvus_storage::PackedRecordBatchWriter>(
                 std::move(writer));
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -264,9 +290,8 @@ WriteRecordBatch(CPackedWriter c_packed_writer,
             return milvus::FailureCStatus(&error);
         }
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -284,9 +309,8 @@ CloseWriter(CPackedWriter c_packed_writer) {
             return milvus::FailureCStatus(&error);
         }
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -323,5 +347,9 @@ CloseAndTell(CPackedWriter c_packed_writer, int64_t* sizes, size_t num_groups) {
     } catch (std::exception& e) {
         delete packed_writer;
         return milvus::FailureCStatus(&e);
+    } catch (...) {
+        delete packed_writer;
+        return milvus::FailureCStatus(milvus::UnexpectedError,
+                                      "unknown exception");
     }
 }

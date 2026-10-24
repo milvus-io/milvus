@@ -28,7 +28,7 @@
 #include "common/Common.h"
 #include "common/Types.h"
 #include "common/Exception.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/OpContext.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Utils.h"
@@ -286,13 +286,32 @@ class QueryContext : public Context {
     }
 
     void
-    set_array_offsets(std::shared_ptr<const IArrayOffsets> offsets) {
-        array_offsets_ = std::move(offsets);
+    set_struct_element_offsets(
+        std::shared_ptr<const IStructElementOffsets> offsets) {
+        struct_element_offsets_ = std::move(offsets);
     }
 
-    std::shared_ptr<const IArrayOffsets>
-    get_array_offsets() const {
-        return array_offsets_;
+    std::shared_ptr<const IStructElementOffsets>
+    get_struct_element_offsets() const {
+        return struct_element_offsets_;
+    }
+
+    std::shared_ptr<const IStructElementOffsets>
+    get_struct_element_offsets(FieldId field_id) const {
+        return read_snapshot_
+                   ? read_snapshot_->GetStructElementOffsets(field_id)
+                   : segment_->GetStructElementOffsets(field_id);
+    }
+
+    SchemaPtr
+    get_schema_snapshot() const {
+        if (read_snapshot_) {
+            auto schema = read_snapshot_->get_schema_snapshot();
+            AssertInfo(schema != nullptr,
+                       "query read snapshot must provide a non-null schema");
+            return schema;
+        }
+        return segment_->get_schema_snapshot();
     }
 
     void
@@ -348,6 +367,16 @@ class QueryContext : public Context {
         return enable_sub_expr_cache_write_;
     }
 
+    void
+    set_read_snapshot(std::shared_ptr<const segcore::SegmentReadSnapshot> s) {
+        read_snapshot_ = std::move(s);
+    }
+
+    std::shared_ptr<const segcore::SegmentReadSnapshot>
+    get_read_snapshot() const {
+        return read_snapshot_;
+    }
+
  private:
     folly::Executor* executor_;
     //folly::Executor::KeepAlive<> executor_keepalive_;
@@ -379,12 +408,19 @@ class QueryContext : public Context {
     query::PlanOptions plan_options_;
 
     std::string struct_name_;
-    std::shared_ptr<const IArrayOffsets> array_offsets_{nullptr};
+    std::shared_ptr<const IStructElementOffsets> struct_element_offsets_{
+        nullptr};
     int64_t active_element_count_{0};  // Total elements in active documents
     // Whether the current bitset has been converted to element-level.
     // Set by element-level filter/search operators after row-to-element
     // conversion.
     bool bitset_is_element_level_{false};
+
+    // Request-scoped sealed read snapshot, captured exactly once in
+    // ExecPlanNodeVisitor::visit() while the request read lease is held.
+    // Expressions borrow the raw pointer at construction; the shared_ptr here
+    // is the single owner for the whole ExecuteTask.
+    std::shared_ptr<const segcore::SegmentReadSnapshot> read_snapshot_{nullptr};
 
     // MVCC fast path: set true when sealed + no-filter + no-delete + no-TTL
     bool all_rows_visible_{false};

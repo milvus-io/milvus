@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/importid"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -130,23 +131,46 @@ func (t *importTask) GetTaskSlot() int64 {
 	return int64(CalculateTaskSlot(t, t.importMeta))
 }
 
+func (t *importTask) setState(state datapb.ImportTaskStateV2) {
+	t.task.Load().State = state
+}
+
+func (t *importTask) setReason(reason string) {
+	t.task.Load().Reason = reason
+}
+
+func (t *importTask) setCompleteTime(completeTime string) {
+	t.task.Load().CompleteTime = completeTime
+}
+
+func (t *importTask) setNodeID(nodeID int64) {
+	t.task.Load().NodeID = nodeID
+}
+
+func (t *importTask) setSegmentIDs(segmentIDs []UniqueID) {
+	t.task.Load().SegmentIDs = segmentIDs
+}
+
+func (t *importTask) setStatsSegmentIDs(segmentIDs []UniqueID) {
+	t.task.Load().SortedSegmentIDs = segmentIDs
+}
+
 func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	mlog.Info(context.TODO(), "processing pending import task...", WrapTaskLog(t)...)
 	job := t.importMeta.GetJob(context.TODO(), t.GetJobID())
 	req, err := AssembleImportRequest(t, job, t.meta, t.alloc)
 	if err != nil {
 		mlog.Warn(context.TODO(), "assemble import request failed", WrapTaskLog(t, mlog.Err(err))...)
-		if errors.Is(err, ErrPKRangeTooSmall) {
-			// The one assemble failure a retry cannot fix: the reservation was
-			// sized from an upper bound and preimport produced a larger exact
-			// count. Neither number changes by rescheduling, so fail the job now
+		if errors.Is(err, importid.ErrIDRangeTooSmall) || errors.Is(err, errSnapshotTaskSource) {
+			// Immutable source mismatches and insufficient reservations cannot
+			// be repaired by retrying. Neither the source nor the per-file range
+			// and row count changes by rescheduling, so fail the job now
 			// and keep the precise reason -- otherwise the job stays Importing
 			// (checkImportingJob only advances once every task is Completed) until
 			// tryTimeoutJob overwrites the reason with a generic timeout message.
 			//
-			// Only the job is updated, as in the DataNode-reported failure path
-			// below and in preimport: the checker's tryFailingTasks marks this
-			// task Failed on the next tick.
+			// Only the job is updated, as in preimport: the checker's tryFailingTasks
+			// marks this task Failed on the next tick.
 			if updateErr := t.importMeta.UpdateJob(context.TODO(), t.GetJobID(),
 				UpdateJobState(internalpb.ImportJobState_Failed),
 				UpdateJobReason(err.Error())); updateErr != nil {
@@ -172,7 +196,7 @@ func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 		return
 	}
 	pendingDuration := t.GetTR().RecordSpan()
-	metrics.ImportTaskLatency.WithLabelValues(metrics.ImportStagePending).Observe(float64(pendingDuration.Milliseconds()))
+	metrics.ImportTaskLatency.WithLabelValues(metrics.ImportStagePending, t.GetType().String()).Observe(float64(pendingDuration.Milliseconds()))
 	mlog.Info(context.TODO(), "import task start to execute", WrapTaskLog(t, mlog.Int64("scheduledNodeID", nodeID), mlog.Duration("taskTimeCost/pending", pendingDuration))...)
 }
 
@@ -293,14 +317,14 @@ func (t *importTask) QueryTaskOnWorker(cluster session.Cluster) {
 				mlog.Any("segmentInfo", info))...)
 			totalRows += info.GetImportedRows()
 		}
-		completeTime := time.Now().Format("2006-01-02T15:04:05Z07:00")
+		completeTime := time.Now().Format(time.RFC3339)
 		err = t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed), UpdateCompleteTime(completeTime))
 		if err != nil {
 			mlog.Warn(context.TODO(), "update import task failed", WrapTaskLog(t, mlog.Err(err))...)
 			return
 		}
 		importDuration := t.GetTR().RecordSpan()
-		metrics.ImportTaskLatency.WithLabelValues(metrics.ImportStageImport).Observe(float64(importDuration.Milliseconds()))
+		metrics.ImportTaskLatency.WithLabelValues(metrics.ImportStageImport, t.GetType().String()).Observe(float64(importDuration.Milliseconds()))
 		mlog.Info(context.TODO(), "import done", WrapTaskLog(t, mlog.Int64("totalRows", totalRows), mlog.Duration("taskTimeCost/import", importDuration))...)
 	}
 	mlog.Info(context.TODO(), "query import", WrapTaskLog(t, mlog.String("respState", resp.GetState().String()),

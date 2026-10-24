@@ -33,8 +33,12 @@ TEST(CTokenizer, Default) {
     }
 
     std::string text("football, basketball, swimming");
-    auto token_stream =
-        create_token_stream(tokenizer, text.c_str(), text.length());
+    CTokenStream token_stream;
+    {
+        auto status = create_token_stream(
+            tokenizer, text.c_str(), text.length(), &token_stream);
+        ASSERT_EQ(milvus::ErrorCode::Success, status.error_code);
+    }
 
     std::vector<std::string> refs{"football", "basketball", "swimming"};
     std::vector<std::int64_t> offsets{0, 10, 22};
@@ -48,7 +52,11 @@ TEST(CTokenizer, Default) {
 
     free_token_stream(token_stream);
 
-    token_stream = create_token_stream(tokenizer, text.c_str(), text.length());
+    {
+        auto status = create_token_stream(
+            tokenizer, text.c_str(), text.length(), &token_stream);
+        ASSERT_EQ(milvus::ErrorCode::Success, status.error_code);
+    }
 
     for (int i = 0; i < 3; i++) {
         ASSERT_TRUE(token_stream_advance(token_stream));

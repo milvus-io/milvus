@@ -5,6 +5,7 @@ import json
 import os
 import random
 import re
+import tempfile
 import time
 
 import numpy as np
@@ -71,13 +72,26 @@ _PLACEHOLDER_SRC = "s3://localhost:9000/milvus-bucket/placeholder/"
 _PLACEHOLDER_SPEC = build_external_spec()
 _PLACEHOLDER_NEW_SOURCE = "minio://localhost:9000/milvus-bucket/new/"
 _PLACEHOLDER_NEW_SPEC = build_external_spec()
+# Lance and Vortex writers cannot encode Arrow Map; use paired lists there.
+_EXTERNAL_SPARSE_LAYOUTS = [
+    pytest.param("parquet", "map", id="parquet-map"),
+    pytest.param("parquet", "struct", id="parquet-struct"),
+    pytest.param("lance-table", "struct", id="lance-struct"),
+    pytest.param("vortex", "struct", id="vortex-struct"),
+]
+_EXTERNAL_SPARSE_INVALID_LAYOUTS = _EXTERNAL_SPARSE_LAYOUTS + [
+    pytest.param(fmt, "binary", id=f"{fmt}-binary") for fmt in ("parquet", "lance-table", "vortex")
+]
 _EXTERNAL_ADD_FIELD_UNSUPPORTED_PUBLIC_TYPES = {
     DataType.STRING: {"max_length": 64},
-    DataType.SPARSE_FLOAT_VECTOR: {},
     DataType.STRUCT: {},
 }
 _EXTERNAL_ADD_FIELD_PROTO_ONLY_UNSUPPORTED_TYPES = {
     "Mol": 27,
+    "Date": 28,
+    "Time": 29,
+    "Decimal": 30,
+    "UUID": 31,
 }
 _EXTERNAL_ADD_FIELD_INTERNAL_TYPES = {
     DataType.NONE,
@@ -91,6 +105,7 @@ _EXTERNAL_ADD_FIELD_SDK_ONLY_INTERNAL_TYPES = {
 
 def _supported_external_add_field_data_types():
     supported = {dtype for _name, dtype, _arrow, _extra, _value_fn in FULL_MATRIX_SCALAR_FIELDS}
+    supported.add(DataType.SPARSE_FLOAT_VECTOR)
     supported.add(DataType.ARRAY)
     supported.add(DataType.GEOMETRY)
     supported.update(dtype for _name, dtype, _dim, _idx, _metric, _params in FULL_MATRIX_VECTOR_FIELDS)
@@ -102,29 +117,47 @@ def _proto_data_type_values():
 
 
 def _assert_external_add_field_dtype_matrix_current():
-    supported = _supported_external_add_field_data_types()
+    supported_numbers = {int(dtype) for dtype in _supported_external_add_field_data_types()}
+    unsupported_numbers = {int(dtype) for dtype in _EXTERNAL_ADD_FIELD_UNSUPPORTED_PUBLIC_TYPES}
+    internal_numbers = {int(dtype) for dtype in _EXTERNAL_ADD_FIELD_INTERNAL_TYPES}
+    proto_only_numbers = set(_EXTERNAL_ADD_FIELD_PROTO_ONLY_UNSUPPORTED_TYPES.values())
+    sdk_only_numbers = {int(dtype) for dtype in _EXTERNAL_ADD_FIELD_SDK_ONLY_INTERNAL_TYPES}
     proto_values = _proto_data_type_values()
     sdk_numbers = {int(dtype) for dtype in DataType}
-    classified_numbers = (
-        {int(dtype) for dtype in supported}
-        | {int(dtype) for dtype in _EXTERNAL_ADD_FIELD_UNSUPPORTED_PUBLIC_TYPES}
-        | {int(dtype) for dtype in _EXTERNAL_ADD_FIELD_INTERNAL_TYPES}
-        | set(_EXTERNAL_ADD_FIELD_PROTO_ONLY_UNSUPPORTED_TYPES.values())
-    )
-    assert set(proto_values.values()) == classified_numbers, (
-        "external add-field proto DataType matrix is stale; "
-        f"unclassified={set(proto_values.values()) - classified_numbers}, "
-        f"obsolete={classified_numbers - set(proto_values.values())}, proto={proto_values}"
-    )
-    stale_proto_only = {
-        name: number
-        for name, number in _EXTERNAL_ADD_FIELD_PROTO_ONLY_UNSUPPORTED_TYPES.items()
-        if number in sdk_numbers
+
+    categories = {
+        "supported": supported_numbers,
+        "unsupported public": unsupported_numbers,
+        "internal": internal_numbers,
+        "proto only": proto_only_numbers,
+        "SDK only": sdk_only_numbers,
     }
-    assert not stale_proto_only, (
-        "proto-only DataType is now exposed by PyMilvus DataType; "
-        f"move it to supported or unsupported public coverage: {stale_proto_only}"
+    classified = {}
+    for category, numbers in categories.items():
+        for number in numbers:
+            assert number not in classified, (
+                f"DataType {number} is classified as both {classified.get(number)} and {category}"
+            )
+            classified[number] = category
+
+    expected_proto_numbers = supported_numbers | unsupported_numbers | internal_numbers | proto_only_numbers
+    expected_sdk_numbers = supported_numbers | unsupported_numbers | internal_numbers | sdk_only_numbers
+    assert set(proto_values.values()) == expected_proto_numbers, (
+        "external add-field proto DataType matrix is stale; "
+        f"unclassified={set(proto_values.values()) - expected_proto_numbers}, "
+        f"obsolete={expected_proto_numbers - set(proto_values.values())}, proto={proto_values}"
     )
+    assert sdk_numbers == expected_sdk_numbers, (
+        "external add-field SDK DataType matrix is stale; "
+        f"unclassified={sdk_numbers - expected_sdk_numbers}, "
+        f"obsolete={expected_sdk_numbers - sdk_numbers}"
+    )
+    mismatched_proto_only = {
+        name: (number, proto_values.get(name))
+        for name, number in _EXTERNAL_ADD_FIELD_PROTO_ONLY_UNSUPPORTED_TYPES.items()
+        if proto_values.get(name) != number
+    }
+    assert not mismatched_proto_only, f"proto-only DataType names or values changed: {mismatched_proto_only}"
 
 
 def assert_external_spec_persisted(actual_spec, expected_spec, context):
@@ -149,6 +182,43 @@ def _build_basic_schema(self, client, ext_path, dim=ct.default_dim, ext_spec=Non
     self.add_field(schema, "value", DataType.FLOAT, external_field="value")
     self.add_field(schema, "embedding", DataType.FLOAT_VECTOR, dim=dim, external_field="embedding")
     return schema
+
+
+def _write_external_sparse_dataset(fmt, minio_client, cfg, ext_key, table):
+    """Persist the same sparse table in real source files, including file boundaries."""
+    if fmt == "parquet":
+        buf = io.BytesIO()
+        pq.write_table(table, buf, row_group_size=7)
+        upload_parquet(minio_client, cfg["bucket"], f"{ext_key}/data.parquet", buf.getvalue())
+    elif fmt == "lance-table":
+        import lance
+
+        with tempfile.TemporaryDirectory(prefix="ext_sparse_lance_") as tmpdir:
+            local_path = os.path.join(tmpdir, "dataset.lance")
+            for start in range(0, table.num_rows, 7):
+                lance.write_dataset(
+                    table.slice(start, 7),
+                    local_path,
+                    mode="create" if start == 0 else "append",
+                    # Lance 2.0 loses top-level Struct validity on round trip.
+                    data_storage_version="2.1",
+                )
+            assert lance.dataset(local_path).to_table().equals(table), "Lance source round trip changed sparse data"
+            for root, _dirs, files in os.walk(local_path):
+                for name in files:
+                    absolute = os.path.join(root, name)
+                    relative = os.path.relpath(absolute, local_path)
+                    minio_client.fput_object(cfg["bucket"], f"{ext_key}/{relative}", absolute)
+    elif fmt == "vortex":
+        for start in range(0, table.num_rows, 7):
+            write_vortex_table(
+                minio_client,
+                cfg["bucket"],
+                f"{ext_key}/part_{start:03d}.vortex",
+                table.slice(start, 7),
+            )
+    else:
+        raise AssertionError(f"unsupported sparse source format: {fmt}")
 
 
 def _assert_basic_format_rows(self, client, coll, fmt, batches, dim=ct.default_dim):
@@ -660,16 +730,6 @@ class TestMilvusClientExternalTableSchema(ExternalTableTestBase):
                 "create_collection",
             ),
             (
-                "sparse_float_vector",
-                {},
-                [
-                    ("id", DataType.INT64, {"external_field": "id"}),
-                    ("sv", DataType.SPARSE_FLOAT_VECTOR, {"external_field": "sv"}),
-                ],
-                "SparseFloatVector",
-                "create_collection",
-            ),
-            (
                 "duplicate_external_field",
                 {},
                 [
@@ -687,7 +747,6 @@ class TestMilvusClientExternalTableSchema(ExternalTableTestBase):
             "dynamic_field_enabled",
             "partition_key",
             "missing_external_field",
-            "sparse_float_vector",
             "duplicate_external_field",
         ],
     )
@@ -2586,7 +2645,8 @@ class TestMilvusClientExternalTableAddField(ExternalTableTestBase):
         schema = _build_basic_schema(self, client, url_a, ext_spec=ext_spec)
         self.create_collection(client, collection_name=coll, schema=schema)
         self.refresh_and_wait(client, coll)
-        self.index_and_load(client, coll)
+        self.add_vector_index(client, coll, "embedding", "FLAT", "L2")
+        self.load_collection(client, coll)
         assert self.query_count(client, coll) == nb
 
         self.release_collection(client, coll)
@@ -2599,6 +2659,7 @@ class TestMilvusClientExternalTableAddField(ExternalTableTestBase):
             external_field="score",
         )
         self.refresh_and_wait(client, coll, external_source=url_b, external_spec=ext_spec)
+        assert self.wait_for_index_ready(client, coll, "embedding", timeout=120)
         self.load_collection(client, coll)
         assert self.query_count(client, coll) == nb
 
@@ -2631,6 +2692,7 @@ class TestMilvusClientExternalTableAddField(ExternalTableTestBase):
 
         self.release_collection(client, coll)
         self.refresh_and_wait(client, coll)
+        assert self.wait_for_index_ready(client, coll, "embedding", timeout=120)
         self.load_collection(client, coll)
         reused = self.query(client, coll, filter="id >= 5000 && id < 5005", output_fields=["id", "score"], limit=10)[0]
         _assert_score_rows(reused, [5000, 5001, 5002, 5003, 5004])
@@ -2779,13 +2841,21 @@ class TestMilvusClientExternalTableAddField(ExternalTableTestBase):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_external_table_add_field_dtype_matrix_covers_proto_and_sdk(self):
+        """
+        target: keep external add-field DataType coverage current
+        method: classify every proto and SDK enum type without external services
+        expected: each type belongs to exactly one supported, unsupported, or internal category
+        """
+        _assert_external_add_field_dtype_matrix_current()
+
+    @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_external_table_add_all_supported_field_types(self, minio_env, external_prefix):
         """
         target: test external table add all supported field types
-        method: validate the DataType matrix, add every supported parquet-backed type, and reject unsupported public types
+        method: add every supported parquet-backed type and reject unsupported public types
         expected: supported fields can be refreshed/indexed/queried/searched; unsupported public types remain rejected
         """
-        _assert_external_add_field_dtype_matrix_current()
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
@@ -2823,14 +2893,19 @@ class TestMilvusClientExternalTableAddField(ExternalTableTestBase):
         self._assert_unsupported_add_field_types_rejected(client, coll)
 
         info = self.describe_collection(client, coll)[0]
-        added_field_names = {field["name"] for field in info["fields"]}
-        expected_added = {name for name, *_ in FULL_MATRIX_SCALAR_FIELDS}
-        expected_added.add(FULL_MATRIX_ARRAY_FIELD[0])
-        expected_added.add("geo")
-        expected_added.update(name for name, *_ in FULL_MATRIX_VECTOR_FIELDS)
-        assert expected_added.issubset(added_field_names), (
-            f"missing added full-matrix fields: {expected_added - added_field_names}"
+        fields_by_name = {field["name"]: field for field in info["fields"]}
+        expected_added_types = {name: dtype for name, dtype, *_ in FULL_MATRIX_SCALAR_FIELDS}
+        expected_added_types[FULL_MATRIX_ARRAY_FIELD[0]] = DataType.ARRAY
+        expected_added_types["geo"] = DataType.GEOMETRY
+        expected_added_types.update({name: dtype for name, dtype, *_ in FULL_MATRIX_VECTOR_FIELDS})
+        assert expected_added_types.keys() <= fields_by_name.keys(), (
+            f"missing added full-matrix fields: {expected_added_types.keys() - fields_by_name.keys()}"
         )
+        for name, dtype in expected_added_types.items():
+            field = fields_by_name[name]
+            assert field.get("type") == dtype, f"{name} type mismatch: {field}"
+            assert field.get("external_field") == name, f"{name} external_field mismatch: {field}"
+            assert field.get("nullable") is True, f"{name} should be nullable: {field}"
 
         self.refresh_and_wait(client, coll)
         create_full_matrix_indexes(self, client, coll)
@@ -3628,9 +3703,9 @@ class TestMilvusClientExternalTableRefresh(ExternalTableTestBase):
         self, minio_env, external_prefix
     ):
         """
-        target: test MilvusClient external table refresh second concurrent returns existing or rejects (milvus#49231)
-        method: milvus#49231: duplicate refresh must not return a dropped new job_id
-        expected: behavior matches the case assertion.
+        target: verify duplicate external table refresh behavior (milvus#49231)
+        method: submit two back-to-back refreshes and inspect the first job if the second creates a new job
+        expected: reject/reuse while active, or create a new job only after the first job is terminal
         """
         minio_client, cfg = minio_env
         client = self._client()
@@ -3646,14 +3721,30 @@ class TestMilvusClientExternalTableRefresh(ExternalTableTestBase):
         schema = _build_basic_schema(self, client, ext_url)
         self.create_collection(client, collection_name=coll, schema=schema)
         job_first = self.refresh_external_collection(client, collection_name=coll)[0]
-        self.refresh_external_collection(
+        second_result, second_succeeded = self.refresh_external_collection(
             client,
             collection_name=coll,
-            check_task=CheckTasks.err_res,
-            check_items={ct.err_code: 1100, ct.err_msg: "in progress"},
+            check_task=CheckTasks.check_nothing,
         )
+
         first_progress = self.wait_refresh_progress(client, job_first)
         assert first_progress.state == "RefreshCompleted"
+
+        if second_succeeded:
+            if second_result != job_first:
+                second_progress = self.wait_refresh_progress(client, second_result)
+                assert second_progress.state == "RefreshCompleted", (
+                    f"second refresh job {second_result} ended in {second_progress.state}: {second_progress.reason}"
+                )
+                assert first_progress.end_time <= second_progress.start_time, (
+                    "duplicate refresh jobs overlapped: "
+                    f"first={job_first} (end_time={first_progress.end_time}), "
+                    f"second={second_result} (start_time={second_progress.start_time})"
+                )
+        else:
+            assert second_result.code == 703, second_result
+            assert "in progress" in second_result.message, second_result
+            assert str(job_first) in second_result.message, second_result
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_client_external_table_list_refresh_jobs(self, minio_env, external_prefix):
@@ -4035,6 +4126,151 @@ class TestMilvusClientExternalTableRefresh(ExternalTableTestBase):
 
 class TestMilvusClientExternalTableDQL(ExternalTableTestBase):
     """Read-side operations on external collections."""
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("fmt,representation", _EXTERNAL_SPARSE_INVALID_LAYOUTS)
+    def test_milvus_client_external_precomputed_sparse_invalid(self, minio_env, external_prefix, fmt, representation):
+        """A malformed source row must fail refresh with conversion context."""
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        if representation == "map":
+            column = pa.array([{3: -1.0}], type=pa.map_(pa.int32(), pa.float32()))
+        elif representation == "struct":
+            column = pa.array(
+                [{"indices": [3], "values": [-1.0]}],
+                type=pa.struct([("indices", pa.list_(pa.int32())), ("values", pa.list_(pa.float32()))]),
+            )
+        else:
+            column = pa.array([b"\x00"], type=pa.binary())
+        _write_external_sparse_dataset(fmt, minio_client, cfg, external_prefix["key"], pa.table({"sparse": column}))
+        schema = self.create_schema(
+            client, external_source=external_prefix["url"], external_spec=build_external_spec(cfg, fmt=fmt)
+        )[0]
+        self.add_field(schema, "sparse", DataType.SPARSE_FLOAT_VECTOR, external_field="sparse")
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_expect_failed(client, coll, reason_terms=("invalid external sparse vector",))
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("fmt,representation", _EXTERNAL_SPARSE_LAYOUTS)
+    @pytest.mark.parametrize("add_after_create", [False, True], ids=["create", "add-field"])
+    def test_milvus_client_external_precomputed_sparse(
+        self, minio_env, external_prefix, fmt, representation, add_after_create
+    ):
+        """Compare external sparse search, hybrid search and take with inserted data."""
+        minio_client, cfg = minio_env
+        client = self._client()
+        coll = cf.gen_collection_name_by_testcase_name()
+        reference = f"{coll}_reference"
+        count = 32
+        sparse = [None, {}] + [{17: float(i + 1), 3: 0.5} for i in range(2, count)]
+        dense = [[float(i), 1.0, 0.0, 0.0] for i in range(count)]
+        if representation == "map":
+            column = pa.array(sparse, type=pa.map_(pa.int64(), pa.float64()))
+        else:
+            column = pa.array(
+                [None if row is None else {"indices": list(row), "values": list(row.values())} for row in sparse],
+                type=pa.struct([("indices", pa.list_(pa.int64())), ("values", pa.list_(pa.float64()))]),
+            )
+        table = pa.table(
+            {
+                "id": pa.array(range(count), type=pa.int64()),
+                "dense": pa.array(dense, type=pa.list_(pa.float32())),
+                "sparse": column,
+            }
+        )
+        _write_external_sparse_dataset(fmt, minio_client, cfg, external_prefix["key"], table)
+
+        schema = self.create_schema(
+            client, external_source=external_prefix["url"], external_spec=build_external_spec(cfg, fmt=fmt)
+        )[0]
+        self.add_field(schema, "id", DataType.INT64, external_field="id")
+        self.add_field(schema, "dense", DataType.FLOAT_VECTOR, dim=4, external_field="dense")
+        if not add_after_create:
+            self.add_field(schema, "sparse", DataType.SPARSE_FLOAT_VECTOR, external_field="sparse")
+        self.create_collection(client, collection_name=coll, schema=schema)
+        self.refresh_and_wait(client, coll)
+        if add_after_create:
+            initial_index = self.prepare_index_params(client)[0]
+            initial_index.add_index(field_name="dense", index_type="FLAT", metric_type="L2")
+            self.create_index(client, coll, initial_index)
+            self.load_collection(client, coll)
+            assert self.query_count(client, coll) == count
+            self.release_collection(client, coll)
+            self.add_collection_field(
+                client,
+                collection_name=coll,
+                field_name="sparse",
+                data_type=DataType.SPARSE_FLOAT_VECTOR,
+                nullable=True,
+                external_field="sparse",
+            )
+            self.refresh_and_wait(client, coll)
+
+        normal = self.create_schema(client, auto_id=False, enable_dynamic_field=False)[0]
+        self.add_field(normal, "id", DataType.INT64, is_primary=True)
+        self.add_field(normal, "dense", DataType.FLOAT_VECTOR, dim=4)
+        self.add_field(normal, "sparse", DataType.SPARSE_FLOAT_VECTOR, nullable=True)
+        self.create_collection(client, collection_name=reference, schema=normal)
+        self.insert(client, reference, [{"id": i, "dense": dense[i], "sparse": sparse[i]} for i in range(count)])
+        for name in (coll, reference):
+            idx = self.prepare_index_params(client)[0]
+            if name != coll or not add_after_create:
+                idx.add_index(field_name="dense", index_type="FLAT", metric_type="L2")
+            idx.add_index(field_name="sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="IP")
+            self.create_index(client, name, idx)
+            self.load_collection(client, name)
+
+        def search(name):
+            return self.search(
+                client,
+                name,
+                data=[{17: 1.0}],
+                anns_field="sparse",
+                search_params={"metric_type": "IP"},
+                limit=10,
+                output_fields=["id", "sparse"],
+                consistency_level="Strong",
+            )[0][0]
+
+        expected = search(reference)
+        actual = search(coll)
+        assert [hit["entity"]["id"] for hit in actual] == [hit["entity"]["id"] for hit in expected]
+        assert [hit["distance"] for hit in actual] == pytest.approx([hit["distance"] for hit in expected])
+        assert [hit["entity"]["sparse"] for hit in actual] == [hit["entity"]["sparse"] for hit in expected]
+
+        # Exercise nullable and empty rows in raw query output, not just index hits.
+        def query(name):
+            rows = self.query(
+                client,
+                name,
+                filter="id >= 0",
+                output_fields=["id", "sparse"],
+                consistency_level="Strong",
+            )[0]
+            return sorted([{"id": row["id"], "sparse": row["sparse"]} for row in rows], key=lambda row: row["id"])
+
+        assert query(coll) == query(reference)
+        requests = [
+            AnnSearchRequest(data=[[4.1, 1.0, 0.0, 0.0]], anns_field="dense", limit=10, param={"metric_type": "L2"}),
+            AnnSearchRequest(data=[{17: 1.0}], anns_field="sparse", limit=10, param={"metric_type": "IP"}),
+        ]
+        results = []
+        for name in (coll, reference):
+            hits = self.hybrid_search(
+                client,
+                name,
+                reqs=requests,
+                ranker=RRFRanker(),
+                limit=6,
+                output_fields=["id"],
+                consistency_level="Strong",
+            )[0][0]
+            results.append({hit["entity"]["id"]: hit["distance"] for hit in hits})
+        assert results[0] == pytest.approx(results[1])
+        self.release_collection(client, coll)
+        self.load_collection(client, coll)
+        assert query(coll) == query(reference)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(

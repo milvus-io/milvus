@@ -19,6 +19,7 @@
 extern "C" {
 #endif
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "common/common_type_c.h"
@@ -33,6 +34,13 @@ InitLocalChunkManagerSingleton(const char* path);
 CStatus
 InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config);
 
+// Select the remote ChunkManager backend for this process: when enabled,
+// CreateChunkManager routes remote IO through the milvus-storage
+// ArrowFileSystem instead of the legacy AWS-SDK based chunk managers.
+// Must be set before any remote chunk manager is created (component init).
+void
+SetArrowFileSystemChunkManagerEnabled(bool enable);
+
 CStatus
 InitMmapManager(CMmapConfig c_mmap_config);
 
@@ -45,8 +53,25 @@ ResizeTheadPool(int64_t priority, float ratio);
 CStatus
 InitDiskFileWriterConfig(CDiskWriteConfig c_disk_write_config);
 
+// Configure process-wide Arrow CPU/IO pools and the shared storage Tokio
+// runtime. The caller must invoke this once before the first Rust bridge use.
+CStatus
+InitStorageRuntime(int cpu_threads, int io_threads);
+
 CStatus
 InitArrowReaderConfig(CArrowReaderConfig c_arrow_reader_config);
+
+void
+SetExternalVectorPartialNullAsRowNull(bool enabled);
+
+bool
+GetExternalVectorPartialNullAsRowNull();
+
+bool
+SetExternalSparseConversionMemoryLimit(int64_t bytes);
+
+int64_t
+GetExternalSparseConversionMemoryLimit();
 
 CStatus
 InitLoonReaderThreadPool(int32_t num_threads);

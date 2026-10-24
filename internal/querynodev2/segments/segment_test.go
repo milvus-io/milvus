@@ -242,8 +242,16 @@ func TestCompactLoadInfoForRuntimeCachesResourceUsage(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapJSONStats.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapJSONStats.Key)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.Key)
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.Key, "1.0")
 	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.Key)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.JSONKeyStatsExpansionFactor.Key, "3.0")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.JSONKeyStatsExpansionFactor.Key)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TextIndexExpansionFactor.Key, "2.0")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TextIndexExpansionFactor.Key)
 
 	schema := &schemapb.CollectionSchema{
 		Name: "test",
@@ -269,6 +277,12 @@ func TestCompactLoadInfoForRuntimeCachesResourceUsage(t *testing.T) {
 				}},
 			},
 		},
+		JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+			101: {FieldID: 101, MemorySize: 100},
+		},
+		TextStatsLogs: map[int64]*datapb.TextIndexStats{
+			101: {FieldID: 101, MemorySize: 200},
+		},
 	}
 	segment := &baseSegment{
 		collection:         NewTestCollection(loadInfo.GetCollectionID(), querypb.LoadType_LoadCollection, schema),
@@ -283,9 +297,9 @@ func TestCompactLoadInfoForRuntimeCachesResourceUsage(t *testing.T) {
 	assert.Nil(t, segment.LoadInfo().GetStats())
 	cached := segment.resourceUsageCache.Load()
 	if assert.NotNil(t, cached) {
-		assert.EqualValues(t, 4096, cached.MemorySize)
+		assert.EqualValues(t, 4796, cached.MemorySize)
 	}
-	assert.EqualValues(t, 4096, segment.ResourceUsageEstimate().MemorySize)
+	assert.EqualValues(t, 4796, segment.ResourceUsageEstimate().MemorySize)
 }
 
 func (suite *SegmentSuite) TestSyncFieldJSONStatsFromLoadInfo() {
@@ -519,6 +533,36 @@ func (suite *SegmentSuite) TestLoadDeltaData_UnsortedBatchAllApplied() {
 	suite.EqualValues(97, suite.sealed.RowNum()) // 100 - 3 deletes
 	// Watermark advances to batch max, not last.
 	suite.EqualValues(1500, suite.sealed.(*LocalSegment).LastDeltaTimestamp())
+}
+
+// TestLoadDeltaData_OutOfOrderKeepsEarliestDelete guards against losing a
+// row's earliest delete when deletes arrive out of timestamp order, e.g. the
+// segment's own deltalogs are applied before an older delete of the same row
+// is forwarded from a remaining L0 segment (#52784).
+func (suite *SegmentSuite) TestLoadDeltaData_OutOfOrderKeepsEarliestDelete() {
+	ctx := context.Background()
+	sealed := suite.sealed.(*LocalSegment)
+
+	loadDelete := func(pk int64, ts uint64) {
+		pks := storage.NewInt64PrimaryKeys(1)
+		pks.AppendRaw(pk)
+		dd, err := storage.NewDeltaDataWithData(pks, []uint64{ts})
+		suite.Require().NoError(err)
+		suite.Require().NoError(sealed.LoadDeltaData(ctx, dd))
+	}
+	// retrieves pk in {1, 2, 3} at ts 1000
+	retrieve := func() []int64 {
+		plan, err := mock_segcore.GenSimpleRetrievePlan(suite.collection.GetCCollection())
+		suite.Require().NoError(err)
+		res, err := sealed.Retrieve(ctx, plan)
+		suite.Require().NoError(err)
+		return res.GetIds().GetIntId().GetData()
+	}
+
+	loadDelete(2, 2000)
+	suite.ElementsMatch([]int64{1, 2, 3}, retrieve())
+	loadDelete(2, 500)
+	suite.ElementsMatch([]int64{1, 3}, retrieve())
 }
 
 // TestAdvanceLastDeltaTimestamp_NeverRegresses verifies the watermark is

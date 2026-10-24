@@ -14,7 +14,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	clientroaring "github.com/milvus-io/milvus/client/v3/roaringfilter"
+	clientroaring "github.com/milvus-io/milvus/client/v3/membership/roaringfilter"
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -1399,6 +1399,12 @@ func TestExpr_IsNull(t *testing.T) {
 		`VarCharField IS NULL`,
 		`ArrayField is null`,
 		`StringArrayField IS NULL`,
+		`FloatVectorField is null`,
+		`BinaryVectorField is null`,
+		`Float16VectorField is null`,
+		`BFloat16VectorField is null`,
+		`SparseFloatVectorField is null`,
+		`Int8VectorField is null`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -1406,12 +1412,6 @@ func TestExpr_IsNull(t *testing.T) {
 
 	unsupported := []string{
 		`not_exist is null`,
-		`FloatVectorField is null`,
-		`BinaryVectorField is null`,
-		`Float16VectorField is null`,
-		`BFloat16VectorField is null`,
-		`SparseFloatVectorField is null`,
-		`Int8VectorField is null`,
 		// issue #48904: array element access with IS NULL should be
 		// rejected at parse time rather than raising an internal error
 		// at execution time.
@@ -1501,6 +1501,12 @@ func TestExpr_IsNotNull(t *testing.T) {
 		`VarCharField IS NOT NULL`,
 		`ArrayField is not null`,
 		`StringArrayField IS NOT NULL`,
+		`FloatVectorField is not null`,
+		`BinaryVectorField is not null`,
+		`Float16VectorField is not null`,
+		`BFloat16VectorField is not null`,
+		`SparseFloatVectorField is not null`,
+		`Int8VectorField is not null`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
@@ -1508,12 +1514,6 @@ func TestExpr_IsNotNull(t *testing.T) {
 
 	unsupported := []string{
 		`not_exist is not null`,
-		`FloatVectorField is not null`,
-		`BinaryVectorField is not null`,
-		`Float16VectorField is not null`,
-		`BFloat16VectorField is not null`,
-		`SparseFloatVectorField is not null`,
-		`Int8VectorField is not null`,
 		// issue #48904: array element access with IS NOT NULL should be
 		// rejected at parse time rather than raising an internal error
 		// at execution time.
@@ -3197,14 +3197,14 @@ func Test_SegmentScorers(t *testing.T) {
 			kind   string
 		}{
 			{
-				name:   "bloom_match",
-				filter: "bloom_match(Int64Field, {bf})",
+				name:   "bloom",
+				filter: "membership_match(Int64Field, {bf}, type=bloom)",
 				values: map[string]*schemapb.TemplateValue{"bf": bloomTemplate},
 				kind:   "bloom",
 			},
 			{
-				name:   "roaring_match",
-				filter: "roaring_match(Int64Field, {rb})",
+				name:   "roaring",
+				filter: "membership_match(Int64Field, {rb}, type=roaring)",
 				values: map[string]*schemapb.TemplateValue{
 					"rb": {Val: &schemapb.TemplateValue_BytesVal{BytesVal: roaringBlob}},
 				},
@@ -4581,6 +4581,59 @@ func TestExpr_TimestamptzCompareInvalid(t *testing.T) {
 
 	for _, expr := range invalidExprs {
 		assertInvalidExpr(t, schema, expr)
+	}
+}
+
+// Timestamptz values are int64 unix microseconds in the plan. Consumers such as
+// the delegator segment pruner and segcore require GenericValue_Int64Val, so any
+// other literal kind must be rejected at parse time.
+func TestExpr_TimestamptzRejectsNonIntegerLiterals(t *testing.T) {
+	schema := newTestSchemaWithTimestamptz(t)
+
+	invalidExprs := []string{
+		`TimestamptzField in ["a", "b"]`,
+		`TimestamptzField in [1.5]`,
+		`TimestamptzField in [true]`,
+		`"a" < TimestamptzField < "z"`,
+		`1.5 < TimestamptzField < 2.5`,
+	}
+	for _, expr := range invalidExprs {
+		_, err := ParseExpr(schema, expr, nil)
+		assert.ErrorIs(t, err, merr.ErrQueryPlan, expr)
+	}
+
+	invalidTemplates := map[string]*schemapb.TemplateValue{
+		"str":   {Val: &schemapb.TemplateValue_StringVal{StringVal: "2025-01-01T00:00:00Z"}},
+		"float": {Val: &schemapb.TemplateValue_FloatVal{FloatVal: 1.5}},
+		"strs": {Val: &schemapb.TemplateValue_ArrayVal{ArrayVal: &schemapb.TemplateArrayValue{
+			Data: &schemapb.TemplateArrayValue_StringData{StringData: &schemapb.StringArray{Data: []string{"a"}}},
+		}}},
+	}
+	for _, expr := range []string{
+		`TimestamptzField > {str}`,
+		`TimestamptzField > {float}`,
+		`TimestamptzField in {strs}`,
+		`{str} < TimestamptzField < {str}`,
+	} {
+		_, err := ParseExpr(schema, expr, invalidTemplates)
+		assert.ErrorIs(t, err, merr.ErrQueryPlan, expr)
+	}
+
+	// Raw integer literals are read as unix microseconds and keep working.
+	validTemplates := map[string]*schemapb.TemplateValue{
+		"ts": {Val: &schemapb.TemplateValue_Int64Val{Int64Val: 1735689600000000}},
+		"tss": {Val: &schemapb.TemplateValue_ArrayVal{ArrayVal: &schemapb.TemplateArrayValue{
+			Data: &schemapb.TemplateArrayValue_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}},
+		}}},
+	}
+	for _, expr := range []string{
+		`TimestamptzField in [1, 2, 3]`,
+		`1 < TimestamptzField < 100`,
+		`TimestamptzField > {ts}`,
+		`TimestamptzField in {tss}`,
+	} {
+		_, err := ParseExpr(schema, expr, validTemplates)
+		assert.NoError(t, err, expr)
 	}
 }
 

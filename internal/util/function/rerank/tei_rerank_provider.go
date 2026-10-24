@@ -89,13 +89,11 @@ func newTeiProvider(params []*commonpb.KeyValuePair, conf map[string]string, cre
 }
 
 func (provider *teiProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
-	rerankResp, err := provider.client.Rerank(query, docs, provider.params, provider.timeoutMs)
+	rerankResp, err := provider.client.Rerank(ctx, query, docs, provider.params, provider.timeoutMs)
 	if err != nil {
 		return nil, err
 	}
-	scores := make([]float32, len(docs))
-	for i, result := range *rerankResp {
-		scores[i] = result.Score
-	}
-	return scores, nil
+	return rerankScoresByIndex(len(docs), len(*rerankResp), func(i int) (int, float32) {
+		return (*rerankResp)[i].Index, (*rerankResp)[i].Score
+	})
 }

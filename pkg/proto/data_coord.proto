@@ -10,6 +10,9 @@ import "milvus.proto";
 import "schema.proto";
 import "msg.proto";
 import "index_coord.proto";
+import "plan.proto";
+import "view.proto";
+import "import_v3.proto";
 
 // TODO: import google/protobuf/empty.proto
 message Empty {}
@@ -29,6 +32,7 @@ enum SegmentLevel {
 }
 
 service DataCoord {
+  rpc GetStreamingNodeQueryViewResources(GetStreamingNodeQueryViewResourcesRequest) returns (GetStreamingNodeQueryViewResourcesResponse) {}
   rpc Flush(FlushRequest) returns (FlushResponse) {}
   // FlushAll flushes all data in the cluster.
   rpc FlushAll(FlushAllRequest) returns(FlushAllResponse) {}
@@ -390,7 +394,10 @@ message SegmentInfo {
   int64 num_of_rows = 5;
   common.SegmentState state = 6;
   int64 max_row_num = 7 [deprecated = true]; // deprecated, we use the binary size to control the segment size but not a estimate rows.
-  uint64 last_expire_time = 8;
+  // Legacy allocation lease expiry, retained for allocation RPC, recovery,
+  // and empty-segment cleanup compatibility. Do not use for index readiness
+  // or data age; use effective segment data timestamps instead.
+  uint64 last_expire_time = 8 [deprecated = true];
   msg.MsgPosition start_position = 9;
   msg.MsgPosition dml_position = 10;
   // binlogs consist of insert binlogs
@@ -479,6 +486,16 @@ message SegmentInfo {
   // create_ts records the planning/create timestamp for replacement segment metadata.
   // Legacy segments keep the zero value, which means unknown.
   uint64 create_ts = 39;
+
+  // Conservative presence marker for the current manifest's index section.
+  // Additions set it atomically with the pointer; removals clear it only after
+  // verifying the final revision is empty. Recovery normalizes old sticky true
+  // values once. False proves emptiness independently of the write-mode switch.
+  bool manifest_has_index = 40;
+
+  // First growing-to-sealed DataView publication. Written with the flush snapshot
+  // and retained across compaction/drop so a retried commit returns the same version.
+  view.DataVersion sealed_at_data_version = 41;
 }
 
 // Statistics carries aggregate metrics for a segment so DataCoord can make
@@ -842,6 +859,47 @@ message CompactionPlan {
   repeated common.KeyValuePair plugin_context = 29;
   repeated internal.FileResourceInfo file_resources = 30;
   repeated schema.FunctionSchema functions = 31;
+  // The requesting DataCoord can commit schema-bump manifest deltas. Absent
+  // or false preserves the legacy worker-produced complete manifest response.
+  bool enable_manifest_delta = 32;
+}
+
+// ManifestColumnGroupFile is one loon/parquet file belonging to a column
+// group, in the serializable form the datanode ships to DataCoord so DataCoord
+// can re-run the StorageV3 manifest transaction on the current base version.
+// Mirrors LoonColumnGroupFile in milvus-storage's ffi_c.h.
+message ManifestColumnGroupFile {
+  string path = 1;
+  int64 start_index = 2;
+  int64 end_index = 3;
+  map<string, string> properties = 4;
+}
+
+// ManifestColumnGroup is a column group the datanode wrote and wants DataCoord
+// to register into the segment's manifest. Mirrors LoonColumnGroup.
+message ManifestColumnGroup {
+  repeated string columns = 1;
+  string format = 2;
+  repeated ManifestColumnGroupFile files = 3;
+}
+
+// ManifestStatEntry is one manifest stat blob (e.g. BM25) the datanode wrote,
+// carried as serializable input to the DataCoord-side manifest transaction.
+message ManifestStatEntry {
+  string key = 1;
+  repeated string files = 2;
+  map<string, string> metadata = 3;
+}
+
+// SegmentManifestDelta is the serializable input to a StorageV3 manifest
+// transaction. When present on a CompactionSegment, DataCoord (not the
+// datanode) runs the loon transaction: it re-applies these column groups and
+// stats onto the segment's CURRENT manifest version, enabling a true rebase
+// against concurrent commits (e.g. L0 deltalog adds) instead of the datanode
+// pinning a possibly-stale base. See internal/datacoord/segment_manifest_commit.go.
+message SegmentManifestDelta {
+  repeated ManifestColumnGroup column_groups = 1;
+  repeated ManifestStatEntry stats = 2;
 }
 
 message CompactionSegment {
@@ -885,6 +943,12 @@ message CompactionSegment {
   // For V3 outputs whose stats blob lives in the manifest, this is the only
   // authoritative source for stats_binlog_size.
   Statistics stats = 16;
+  // manifest_delta carries the serializable input to the StorageV3 manifest
+  // transaction for an in-place schema-bump materialization. When set,
+  // `manifest` is left empty and DataCoord runs the transaction itself
+  // (ManifestMutationCommitUpdates), rebasing the column-group / stats adds
+  // onto the segment's current manifest instead of a datanode-pinned base.
+  SegmentManifestDelta manifest_delta = 17;
 }
 
 message CompactionPlanResult {
@@ -893,6 +957,10 @@ message CompactionPlanResult {
   repeated CompactionSegment segments = 3;
   string channel = 4;
   CompactionType type = 5;
+  // Typed failure carried back to DataCoord when state == failed: the worker
+  // classifies the original error (merr.Status), so DataCoord can persist the
+  // code/reason and decide retryability instead of seeing a bare `failed`.
+  common.Status fail_status = 6;
 }
 
 message CompactionStateResponse {
@@ -1052,6 +1120,7 @@ message PreImportRequest {
   index.StorageConfig storage_config = 10;
   int64 task_slot = 11;
   repeated common.KeyValuePair plugin_context = 12;
+  internal.SnapshotImportL0Source snapshot_l0_source = 13;
 }
 
 message IDRange {
@@ -1083,6 +1152,8 @@ message ImportRequest {
   int64 storage_version = 15;
   repeated common.KeyValuePair plugin_context = 16;
   bool use_loon_ffi = 17;
+  plan.Expr rls_check_predicate = 18;
+  internal.SnapshotImportL0Source snapshot_l0_source = 19;
 }
 
 message QueryPreImportRequest {
@@ -1188,6 +1259,11 @@ message CopySegmentSource {
   // replacing collection/partition/segment IDs.
   string source_root_path = 14;
 
+  // Source-segment index presence marker. Presence matters: false proves that the
+  // copied manifest has no index entries, while absence means an older
+  // snapshot whose manifest must still be inspected conservatively.
+  optional bool manifest_has_index = 15;
+
   // Snapshot-declared row count, used when StorageV3 omits legacy PB binlogs.
   int64 num_of_rows = 16;
 }
@@ -1198,6 +1274,12 @@ message CopySegmentTarget {
   int64 segment_id = 3;     // target segment ID
   map<int64, int64> new_build_ids = 4;  // srcBuildID -> newBuildID mapping for target segment indexes
   string target_root_path = 5; // target root path for external snapshot restore
+  // Target-collection index identity, keyed by index name. RestoreIndexes()
+  // allocates fresh index IDs for the restored collection, so the worker cannot
+  // derive them from the source snapshot; index name is the only key preserved
+  // across the snapshot boundary (field ID cannot be used because one JSON field
+  // may carry several indexes on different paths).
+  repeated CopySegmentTargetIndex target_indexes = 6;
 }
 
 message CopySegmentRequest {
@@ -1212,6 +1294,8 @@ message CopySegmentRequest {
   index.StorageConfig storage_config = 6;
   int64 task_slot = 7;
   string external_spec = 8;
+  // Shared collection definitions. Older workers receive the legacy per-target field.
+  repeated CopySegmentTargetIndex target_indexes = 9;
 }
 
 message QueryCopySegmentRequest {
@@ -1273,6 +1357,12 @@ message CopySegmentResult {
 
   // Transformed manifest path for target segment
   string manifest_path = 10;
+
+  // Present on workers that rewrote (or proved empty) the copied manifest's
+  // index section. The build IDs are the entries actually published there.
+  // Absence identifies an older worker and requires DataCoord read-back.
+  optional bool manifest_index_rewritten = 11;
+  repeated int64 manifest_index_build_ids = 12;
 }
 
 // CopySegmentTask represents a copy segment task that copies segment data and optionally indexes
@@ -1292,6 +1382,15 @@ message CopySegmentTask {
   repeated CopySegmentIDMapping id_mappings = 9;
   uint64 created_ts = 10;   // Unix timestamp in nanoseconds
   uint64 complete_ts = 11;  // Unix timestamp in nanoseconds
+
+  // Placement selected before dispatch. Presence distinguishes an explicit
+  // false value from an older persisted task that predates this field.
+  optional bool index_write_to_manifest = 12;
+  // Coordinator-derived directories owned by this task, saved before dispatch.
+  repeated string cleanup_prefixes = 13;
+  // The worker completed, but the coordinator rejected its result. Cleanup is
+  // retried from durable metadata, including after coordinator/worker restart.
+  bool cleanup_required = 14;
 }
 
 // CopySegmentJobState defines the state machine for copy segment jobs
@@ -1407,6 +1506,10 @@ message ImportJob {
   uint64 data_ts = 18;
   repeated string committed_vchannels = 19;
   bool            auto_commit         = 20;
+  bool commit_by_coordinator = 21; // Commit protocol selected by the original Import WAL message.
+  plan.Expr rls_check_predicate = 22;
+  repeated internal.SnapshotImportL0Source snapshot_l0_sources = 23;
+  internal.ImportVersion version = 24;
 }
 
 enum ImportTaskStateV2 {
@@ -1435,6 +1538,49 @@ message PreImportTask {
   string complete_time = 12;
 }
 
+// ImportV3FileStats is the Import V3 count-only preimport per-file stat. Unlike
+// ImportFileStats it carries no ImportFile and no hashed bucket stats: V3 only
+// needs the file ID and the exact counts the primary sizes ID ranges from.
+message ImportV3FileStats {
+  int64 file_id = 1;
+  int64 file_size = 2;
+  int64 total_rows = 3;
+  // total_memory_size is a packing hint for the reshard BFD balance, NOT a
+  // memory size: the parquet/numpy metadata path fills an encoded size estimate
+  // (dictionary/RLE under-count), the JSON/CSV scan path a real decoded size.
+  // It must not be used for quota or memory budgets.
+  int64 total_memory_size = 4;
+}
+
+// PreImportTaskV3 is the Import V3 count-only preimport control record. It is
+// a distinct type rather than a copy of PreImportTask, so the fields it
+// actually reads are the only ones it can carry. The records are isolated by
+// their own catalog prefix.
+message PreImportTaskV3 {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 collection_id = 3;
+  int64 node_id = 4;
+  ImportTaskStateV2 state = 5;
+  string reason = 6;
+  repeated ImportV3FileStats file_stats = 7;
+  string created_time = 8;
+  string complete_time = 9;
+}
+
+message QueryPreImportV3Request {
+  string cluster_id = 1;
+  int64 job_id = 2;
+  int64 task_id = 3;
+}
+
+message QueryPreImportV3Response {
+  common.Status status = 1;
+  ImportTaskStateV2 state = 2;
+  string reason = 3;
+  repeated ImportV3FileStats file_stats = 4;
+}
+
 message ImportTaskV2 {
   int64 jobID = 1;
   int64 taskID = 2;
@@ -1448,6 +1594,136 @@ message ImportTaskV2 {
   repeated int64 sorted_segmentIDs = 10;
   string created_time = 11;
   ImportTaskSourceV2 source = 12;
+}
+
+// V3 tasks intentionally keep run_id on the task rather than introducing a
+// separate attempt/run catalog level. State names are deliberately simple so
+// V2 and V3 recovery can share the same scheduler vocabulary.
+message ReshardTask {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 collection_id = 3;
+  ImportTaskStateV2 state = 4;
+  string reason = 5;
+  int64 run_id = 6;
+  int64 node_id = 7;
+  // The ImportFile IDs this task covers. Source ownership is the only
+  // planning fact Pending recovery needs; every other execution input is
+  // re-derived from the ImportJob when the task is dispatched.
+  repeated int64 file_ids = 9;
+  // When the task record was created, formatted like ImportJob and
+  // ImportTaskV2 created_time. Recovery starts the task latency recorder from
+  // it so a restart does not reset the stage latency to zero.
+  string created_time = 10;
+  // When the reshard task reached Completed, formatted like ImportJob and
+  // ImportTaskV2 complete_time. Mirrors V2's per-task complete_time so
+  // GetImportProgress can fill each source file's detail.
+  string complete_time = 11;
+}
+
+// ImportTaskV3 persists only the per-segment ownership that Planning recovery
+// cannot re-derive: the fragment set this task covers plus its bucket. Every
+// other execution input is re-derived from the ImportJob and current config
+// when the task is dispatched, and travels inside ImportTaskV3Request.
+message ImportTaskV3 {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 collection_id = 3;
+  ImportTaskStateV2 state = 4;
+  string reason = 5;
+  int64 run_id = 6;
+  int64 node_id = 7;
+  int64 segment_id = 8;
+  IDRange log_range = 9;
+  int64 rows = 11;
+  repeated importv3.FragmentRef fragments = 12;
+  string vchannel = 13;
+  int64 partition_id = 14;
+  // When the task record was created, formatted like ImportJob and
+  // ImportTaskV2 created_time. Recovery starts the task latency recorder from
+  // it so a restart does not reset the stage latency to zero.
+  string created_time = 15;
+  // Segments this task used to own and no longer references (the superseded
+  // segment of a retried run). The next dispatch drops them and clears the list.
+  repeated int64 old_segment_ids = 16;
+}
+
+message ReshardTaskRequest {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 run_id = 3;
+  int64 slot = 4;
+  index.StorageConfig storage_config = 5;
+  repeated common.KeyValuePair plugin_context = 6;
+  importv3.ReshardTaskPlan plan = 7;
+}
+
+message ImportTaskV3Request {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 run_id = 3;
+  int64 segment_id = 4;
+  IDRange log_range = 5;
+  int64 slot = 6;
+  index.StorageConfig storage_config = 7;
+  repeated common.KeyValuePair plugin_context = 8;
+  importv3.ImportTaskPlan plan = 9;
+}
+
+// ImportTaskV3Result is the result of one ImportTaskV3 run: the single segment
+// it produced and the metas acceptance needs. Named like the rest of the
+// ImportTaskV3 family rather than a generic segment type.
+message ImportTaskV3Result {
+  int64 rows = 1;
+  repeated FieldBinlog insert_logs = 2;
+  FieldBinlog pk_log = 3;
+  repeated FieldBinlog bm25_logs = 4;
+  string manifest_path = 5;
+  Statistics statistics = 6;
+  repeated int64 expiration_quantiles = 7;
+}
+
+message QueryReshardTaskRequest {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 run_id = 3;
+}
+
+message ReshardSourceProgress {
+  int64 file_id = 1;
+  int64 hashed_rows = 2;
+}
+
+message QueryReshardTaskResponse {
+  common.Status status = 1;
+  ImportTaskStateV2 state = 2;
+  string reason = 3;
+  repeated ReshardSourceProgress source_progresses = 4;
+}
+
+message DropReshardTaskRequest {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 run_id = 3;
+}
+
+message QueryImportTaskV3Request {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 run_id = 3;
+}
+
+message QueryImportTaskV3Response {
+  common.Status status = 1;
+  ImportTaskStateV2 state = 2;
+  string reason = 3;
+  repeated ImportTaskV3Result segments = 4;
+}
+
+message DropImportTaskV3Request {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 run_id = 3;
 }
 
 enum GcCommand {
@@ -1476,6 +1752,7 @@ message QuerySlotResponse {
   common.Status status = 1;
   int64 available_slots = 2;
   string version = 3; // Kept for wire compatibility; new schedulers do not use it
+  bool copy_segment_shared_indexes = 4;
 }
 
 enum CompactionTaskState {
@@ -1627,6 +1904,23 @@ message ExternalCollectionRefreshJob {
   int64 end_time = 9;            // Job end timestamp (Unix ms, 0 if not completed)
   int64 progress = 10;           // Aggregated progress percentage (0-100)
   repeated int64 task_ids = 11;  // Task IDs belonging to this job
+  // Timestamp (Unix ms) at which the job entered the index wait, written in the
+  // same transition that applies its segment results - ordered after the
+  // segment write under the job lock, not atomic with it. Only written when
+  // dataCoord.externalCollection.refreshWaitForIndex is on.
+  //
+  // It is both the sub-state marker ("applied, now waiting for indexes") and
+  // the apply-once guard: a job carrying it has already committed its segments
+  // and must not apply again. The converse does not hold - a crash between the
+  // two writes leaves committed segments with no marker, and the apply is
+  // replay-safe for exactly that reason. 0 when unset.
+  //
+  // Callers of DescribeRefresh / ListRefreshJobs can read it directly, and it
+  // is the field that resolves the one ambiguity this feature introduces: a
+  // FAILED job with a non-zero value did apply its data - the refreshed
+  // segments are the collection's contents and are being served, and only the
+  // index wait ran out of budget. A failed job with 0 applied nothing.
+  int64 index_wait_started_time = 13;
 }
 
 // ExternalCollectionRefreshTask - Task level abstraction for scheduler and worker execution
@@ -1749,6 +2043,9 @@ message SegmentDescription {
   // Must be preserved across snapshot/restore so temporal protections
   // (GC, TTL, MVCC) are not lost on the restored segments.
   uint64 commit_timestamp = 18;
+  // Index presence marker copied from SegmentInfo. Presence lets restore skip
+  // manifest index reads when false; old snapshots leave it absent.
+  optional bool manifest_has_index = 19;
 }
 
 message CollectionDescription {
@@ -2036,4 +2333,44 @@ message GetExportSnapshotStateRequest {
 message GetExportSnapshotStateResponse {
   common.Status status = 1;
   ExportSnapshotJobInfo info = 2;
+}
+
+// CopySegmentTargetIndex carries the target-collection metadata a copied index
+// artifact must be recorded under. The worker owns the physical facts (paths,
+// build ID, sizes); DataCoord owns the identity and index definition below.
+// Keep this message at the end so adding it does not renumber descriptors for
+// the many existing messages below CopySegmentTarget.
+message CopySegmentTargetIndex {
+  string index_name = 1;               // stable key across the snapshot boundary
+  int64 index_id = 2;                  // target collection's index ID
+  int64 field_id = 3;                  // target collection's field ID
+  string column_name = 4;              // target collection's schema field name
+  string index_type = 5;
+  map<string, string> properties = 6;  // type params merged with index params
+}
+
+
+message GetStreamingNodeQueryViewResourcesRequest {
+  common.MsgBase base = 1;
+  int64 collection_id = 2;
+  string vchannel = 3;
+  view.DataVersion data_version = 4;
+  uint64 load_info_version = 5;
+  repeated int64 partition_ids = 6;
+}
+
+message GetStreamingNodeQueryViewResourcesResponse {
+  common.Status status = 1;
+  int64 collection_id = 2;
+  string vchannel = 3;
+  view.DataVersion data_version = 4;
+  repeated StreamingNodeBM25Resource bm25_resources = 5;
+}
+
+message StreamingNodeBM25Resource {
+  int64 segment_id = 1;
+  int64 partition_id = 2;
+  repeated FieldBinlog bm25_binlogs = 3;
+  int64 storage_version = 4;
+  string manifest_path = 5;
 }

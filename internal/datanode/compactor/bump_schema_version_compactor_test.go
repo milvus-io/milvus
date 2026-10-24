@@ -65,12 +65,7 @@ func TestBumpSchemaVersionCompactionTaskSuite(t *testing.T) {
 
 type fakeTextIndex struct{}
 
-func (fakeTextIndex) Build(*indexcgowrapper.Dataset) error                        { return nil }
-func (fakeTextIndex) Serialize() ([]*indexcgowrapper.Blob, error)                 { return nil, nil }
-func (fakeTextIndex) GetIndexFileInfo() ([]*indexcgowrapper.IndexFileInfo, error) { return nil, nil }
-func (fakeTextIndex) Load([]*indexcgowrapper.Blob) error                          { return nil }
-func (fakeTextIndex) Delete() error                                               { return nil }
-func (fakeTextIndex) CleanLocalData() error                                       { return nil }
+func (fakeTextIndex) Delete() error { return nil }
 func (fakeTextIndex) UpLoad() (*cgopb.IndexStats, error) {
 	return &cgopb.IndexStats{SerializedIndexInfos: []*cgopb.SerializedIndexFileInfo{{FileName: "text-index", FileSize: 42}}}, nil
 }
@@ -161,7 +156,8 @@ func (s *BumpSchemaVersionCompactionTaskSuite) setupTest() {
 	}
 
 	plan := &datapb.CompactionPlan{
-		PlanID: 999,
+		EnableManifestDelta: true,
+		PlanID:              999,
 		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{
 			CollectionID:        1,
 			PartitionID:         1,
@@ -250,7 +246,8 @@ func (s *BumpSchemaVersionCompactionTaskSuite) setupMinHashTest() {
 	s.Require().NoError(err)
 
 	plan := &datapb.CompactionPlan{
-		PlanID: 999,
+		EnableManifestDelta: true,
+		PlanID:              999,
 		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{
 			CollectionID:   1,
 			PartitionID:    1,
@@ -294,7 +291,11 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionMa
 
 	segment := result.GetSegments()[0]
 	s.EqualValues(3, segment.GetNumOfRows())
-	s.NotEmpty(segment.GetManifest())
+	// In-place materialization ships a manifest delta for DataCoord to commit on
+	// the segment's current manifest; the datanode no longer bakes a path.
+	s.Empty(segment.GetManifest())
+	s.Require().NotNil(segment.GetManifestDelta())
+	s.NotEmpty(segment.GetManifestDelta().GetColumnGroups())
 	s.Empty(segment.GetBm25Logs())
 
 	const minHashOutputFieldID = int64(102)
@@ -510,9 +511,13 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionSu
 	s.NotZero(segment.GetSegmentID())
 	s.EqualValues(3, segment.GetNumOfRows())
 	s.NotEmpty(segment.GetInsertLogs())
-	// BM25 stats are embedded in the V3 manifest atomically with column groups.
+	// BM25 stats ride in the V3 manifest delta atomically with the column groups;
+	// the datanode ships the delta and DataCoord commits it on the current base.
 	s.Empty(segment.GetBm25Logs())
-	s.NotEmpty(segment.GetManifest())
+	s.Empty(segment.GetManifest())
+	s.Require().NotNil(segment.GetManifestDelta())
+	s.NotEmpty(segment.GetManifestDelta().GetColumnGroups())
+	s.NotEmpty(segment.GetManifestDelta().GetStats())
 
 	// The materialized output field (ID=102) must carry a non-zero LogID in its insert binlog.
 	const materializedOutputFieldID = int64(102)
@@ -523,6 +528,26 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionSu
 				"V3 schema bump insert binlog (fieldID=%d) must have non-zero LogID", materializedOutputFieldID)
 		}
 	}
+}
+
+// materializeAdditiveManifest plays DataCoord's half of the split additive
+// commit: it applies the result segment's shipped ManifestDelta onto its
+// BaseManifest via the same loon transaction DataCoord's CommitSegmentManifest
+// runs, and returns the resulting manifest path for data assertions. The
+// additive path itself never commits on the DataNode.
+func (s *BumpSchemaVersionCompactionTaskSuite) materializeAdditiveManifest(segment *datapb.CompactionSegment) string {
+	s.Require().Empty(segment.GetManifest(), "additive result must ship a delta, not a committed manifest")
+	delta := segment.GetManifestDelta()
+	s.Require().NotNil(delta, "additive result must ship a manifest delta")
+	s.Require().NotEmpty(delta.GetColumnGroups())
+	basePath, baseVersion, err := packed.UnmarshalManifestPath(segment.GetBaseManifest())
+	s.Require().NoError(err)
+	manifest, err := packed.CommitManifestUpdates(basePath, baseVersion, s.task.compactionParams.StorageConfig, &packed.ManifestUpdates{
+		ColumnGroups: packed.ColumnGroupEntriesFromProto(delta.GetColumnGroups()),
+		Stats:        packed.StatEntriesFromProto(delta.GetStats()),
+	})
+	s.Require().NoError(err)
+	return manifest
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReconciliationPersistsOrdinaryNullableField() {
@@ -541,13 +566,14 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReconciliationPersist
 	s.Require().NoError(err)
 	segment := result.GetSegments()[0]
 	s.EqualValues(3, segment.GetNumOfRows())
-	s.NotEqual(segment.GetBaseManifest(), segment.GetManifest())
+	manifest := s.materializeAdditiveManifest(segment)
+	s.NotEqual(segment.GetBaseManifest(), manifest)
 	s.Require().Len(segment.GetInsertLogs(), 1)
 	s.EqualValues(ordinaryFieldID, segment.GetInsertLogs()[0].GetFieldID())
 	s.EqualValues(3, segment.GetInsertLogs()[0].GetBinlogs()[0].GetEntriesNum())
 	s.EqualValues(3, segment.GetStats().GetNullCounts()[ordinaryFieldID])
 
-	fields, err := packed.GetManifestFieldIDs(segment.GetManifest(), s.task.compactionParams.StorageConfig)
+	fields, err := packed.GetManifestFieldIDs(manifest, s.task.compactionParams.StorageConfig)
 	s.Require().NoError(err)
 	s.Contains(fields, ordinaryFieldID)
 }
@@ -576,7 +602,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReconciliationPersist
 	// the added column materializes its declared default (42), not NULL.
 	s.EqualValues(0, segment.GetStats().GetNullCounts()[ordinaryFieldID])
 
-	reader, err := storage.NewManifestRecordReader(context.Background(), segment.GetManifest(), &schemapb.CollectionSchema{
+	reader, err := storage.NewManifestRecordReader(context.Background(), s.materializeAdditiveManifest(segment), &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{typeutil.GetField(s.task.plan.GetSchema(), ordinaryFieldID)},
 	}, storage.WithCollectionID(1), storage.WithVersion(storage.StorageV3), storage.WithStorageConfig(s.task.compactionParams.StorageConfig))
 	s.Require().NoError(err)
@@ -620,7 +646,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReconciliationPersist
 	// all rows survive even though that default is already expired.
 	s.EqualValues(0, segment.GetStats().GetNullCounts()[ttlFieldID])
 
-	reader, err := storage.NewManifestRecordReader(context.Background(), segment.GetManifest(), &schemapb.CollectionSchema{
+	reader, err := storage.NewManifestRecordReader(context.Background(), s.materializeAdditiveManifest(segment), &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{typeutil.GetField(s.task.plan.GetSchema(), ttlFieldID)},
 	}, storage.WithCollectionID(1), storage.WithVersion(storage.StorageV3), storage.WithStorageConfig(s.task.compactionParams.StorageConfig))
 	s.Require().NoError(err)
@@ -652,7 +678,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReconciliationPersist
 	s.EqualValues(3, segment.GetNumOfRows(), "an added nullable TTL field must not filter rows during additive reconciliation")
 	s.EqualValues(3, segment.GetStats().GetNullCounts()[ttlFieldID])
 
-	reader, err := storage.NewManifestRecordReader(context.Background(), segment.GetManifest(), &schemapb.CollectionSchema{
+	reader, err := storage.NewManifestRecordReader(context.Background(), s.materializeAdditiveManifest(segment), &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{typeutil.GetField(s.task.plan.GetSchema(), ttlFieldID)},
 	}, storage.WithCollectionID(1), storage.WithVersion(storage.StorageV3), storage.WithStorageConfig(s.task.compactionParams.StorageConfig))
 	s.Require().NoError(err)
@@ -707,7 +733,8 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReconciliationPersist
 		return fb.GetFieldID()
 	}))
 
-	manifestFields, err := packed.GetManifestFieldIDs(segment.GetManifest(), s.task.compactionParams.StorageConfig)
+	manifest := s.materializeAdditiveManifest(segment)
+	manifestFields, err := packed.GetManifestFieldIDs(manifest, s.task.compactionParams.StorageConfig)
 	s.Require().NoError(err)
 	s.NotContains(manifestFields, structFieldID)
 	for _, child := range children {
@@ -716,7 +743,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReconciliationPersist
 	}
 
 	readSchema := &schemapb.CollectionSchema{StructArrayFields: s.task.plan.Schema.GetStructArrayFields()}
-	reader, err := storage.NewManifestRecordReader(context.Background(), segment.GetManifest(), readSchema,
+	reader, err := storage.NewManifestRecordReader(context.Background(), manifest, readSchema,
 		storage.WithCollectionID(1),
 		storage.WithVersion(storage.StorageV3),
 		storage.WithStorageConfig(s.task.compactionParams.StorageConfig),
@@ -834,7 +861,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReconciliationPersist
 	readSchema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		typeutil.GetField(s.task.plan.GetSchema(), textFieldID),
 	}}
-	reader, err := storage.NewManifestRecordReader(context.Background(), segment.GetManifest(), readSchema,
+	reader, err := storage.NewManifestRecordReader(context.Background(), s.materializeAdditiveManifest(segment), readSchema,
 		storage.WithCollectionID(1),
 		storage.WithVersion(storage.StorageV3),
 		storage.WithStorageConfig(s.task.compactionParams.StorageConfig),
@@ -924,6 +951,9 @@ func (s *BumpSchemaVersionCompactionTaskSuite) buildTextLOBTask(withTextField bo
 			OutputFieldNames: []string{"sparse"}, OutputFieldIds: []int64{102},
 		}}
 	}
+	params := compaction.GenParams()
+	manifest := packed.MarshalManifestPath(
+		storage.SegmentManifestBasePath(params.StorageConfig.GetRootPath(), 1, 1, 100), 1)
 	plan := &datapb.CompactionPlan{
 		PlanID:    999,
 		Type:      datapb.CompactionType_BumpSchemaVersionCompaction,
@@ -931,16 +961,32 @@ func (s *BumpSchemaVersionCompactionTaskSuite) buildTextLOBTask(withTextField bo
 		TotalRows: 3,
 		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{
 			CollectionID: 1, PartitionID: 1, SegmentID: 100,
-			StorageVersion: storage.StorageV3, Manifest: "manifest",
+			StorageVersion: storage.StorageV3, Manifest: manifest,
 		}},
 	}
-	params := compaction.GenParams()
 	params.StorageVersion = storage.StorageV3
 	return &bumpSchemaVersionCompactionTask{
 		ctx:              context.Background(),
 		plan:             plan,
 		compactionParams: params,
 	}
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestInitLOBCompactionContextRewritesAcrossPartitionBases() {
+	task := s.buildTextLOBTask(true)
+	task.plan.SegmentBinlogs[0].Manifest = packed.MarshalManifestPath(
+		task.compactionParams.StorageConfig.GetRootPath()+"/files/insert_log/1/1/100", 1)
+	collectPatch := mockey.Mock(compaction.CollectLobFilesFromManifests).Return(
+		map[int64][]packed.LobFileInfo{100: {{FieldID: 101, TotalRows: 3, ValidRows: 3}}}, nil,
+	).Build()
+	defer collectPatch.UnPatch()
+
+	err := task.initLOBCompactionContext(context.Background())
+	s.NoError(err)
+	s.Require().NotNil(task.lobContext)
+	s.False(task.lobContext.HasReuseAllFields())
+	s.True(task.lobContext.ShouldRewriteAnyField())
+	s.Equal(compaction.LOBStrategyRewriteAll, task.lobContext.GetStrategy(101))
 }
 
 // TestInitLOBCompactionContextTextFieldReuseAll: a schema-bump on a segment with a
@@ -1062,6 +1108,41 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteDropsExpirQuantile
 			s.NotZero(binlog.GetLogID())
 		}
 	}
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteRejectsInputRowCountMismatch() {
+	s.prepareBumpSchemaVersionCompactionWithDroppedField()
+	s.task.plan.TotalRows = 4
+
+	result, err := s.task.Compact()
+	s.Nil(result)
+	s.ErrorIs(err, merr.ErrDataIntegrity)
+	s.ErrorContains(err, "read 3 rows, expected 4")
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteRejectsInputRowCountOverrun() {
+	s.prepareBumpSchemaVersionCompactionWithDroppedField()
+	s.task.plan.TotalRows = 2
+
+	result, err := s.task.Compact()
+	s.Nil(result)
+	s.ErrorIs(err, merr.ErrDataIntegrity)
+	s.ErrorContains(err, "read 3 rows, expected 2")
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteRejectsRowConservationMismatch() {
+	s.prepareBumpSchemaVersionCompactionWithDroppedField()
+	s.task.plan.CollectionTtl = 1
+	selectionPatch := mockey.Mock(selectFullRewriteRecord).Return(&recordSelection{
+		ranges: []rowRange{{start: 0, end: 2}},
+		length: 2,
+	}, nil).Build()
+	defer selectionPatch.UnPatch()
+
+	result, err := s.task.Compact()
+	s.Nil(result)
+	s.ErrorIs(err, merr.ErrServiceInternal)
+	s.ErrorContains(err, "row count mismatch: read 3, wrote 2, filtered 0")
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestFullRewriteNormalizesCommitTimestampBeforeWrite() {
@@ -1546,7 +1627,6 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestEmptyAdditiveReconciliationFa
 			}},
 			storageVersion: storage.StorageV3,
 			basePath:       "/data/segments/1",
-			baseVersion:    10,
 		}, nil,
 	).Build()
 	defer writerPatch.UnPatch()
@@ -2017,6 +2097,31 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestSchemaBumpPhysicalDiffRejects
 	s.Require().Error(err)
 	s.ErrorIs(err, merr.ErrDataIntegrity)
 	s.ErrorContains(err, "has no producing function")
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestSchemaBumpRejectsDuplicateFunctionOutputOwnershipBeforeVersionOnly() {
+	s.setupTest()
+	s.task.plan.Schema.Functions = append(s.task.plan.Schema.Functions, &schemapb.FunctionSchema{
+		Name:           "duplicate",
+		Type:           schemapb.FunctionType_BM25,
+		InputFieldIds:  []int64{101},
+		OutputFieldIds: []int64{102},
+	})
+	existingFields := map[int64]struct{}{
+		common.RowIDField:     {},
+		common.TimeStampField: {},
+		100:                   {},
+		101:                   {},
+		102:                   {},
+	}
+	manifestPatch := mockey.Mock(packed.GetManifestFieldIDs).Return(existingFields, nil).Build()
+	defer manifestPatch.UnPatch()
+
+	result, err := s.task.Compact()
+	s.Nil(result)
+	s.Require().Error(err)
+	s.ErrorIs(err, merr.ErrDataIntegrity)
+	s.ErrorContains(err, "field 102 is declared by both function BM25 and function duplicate")
 }
 
 // TestMaterializationStatsDeltaIgnoresPlanArrays is the regression test for

@@ -34,12 +34,22 @@ log:
   level: debug
 extraConfigFiles:
   user.yaml: |+
+    grpc:
+      client:
+        compressionEnabled: true
+        compressionAlgorithm: s2
     common:
+      fileResource:
+        mode:
+          proxy: sync
       storage:
         enablev2: true
         # enable storage v3
         useLoonFFI: true
     dataCoord:
+      targetVecIndexVersion: 11
+      forceRebuildScalarSegmentIndex: true
+      targetScalarIndexVersion: 5
       compaction:
         bumpSchemaVersion:
           enabled: true
@@ -56,6 +66,9 @@ extraConfigFiles:
         scalarField: true
         scalarIndex: true
         growingMmapEnabled: true
+    function:
+      pyUDF:
+        enabled: true
     quotaAndLimits:
       flushRate:
         collection:

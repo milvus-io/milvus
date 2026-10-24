@@ -20,11 +20,11 @@ package chain
 
 import (
 	"fmt"
+	"math"
 	"sort"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
-	"github.com/apache/arrow/go/v17/arrow/memory"
 
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -75,7 +75,7 @@ func (o *SortOp) Name() string { return "Sort" }
 
 // Inputs and Outputs are inherited from BaseOp
 
-func (o *SortOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, error) {
+func (o *SortOp) Execute(ctx *types.FuncContext, input *DataFrame) (*OperatorResult, error) {
 	column := o.Column()
 	sortCol := input.Column(column)
 	if sortCol == nil {
@@ -84,7 +84,7 @@ func (o *SortOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, 
 
 	// Validate sort column type is comparable
 	if !isComparableType(sortCol.DataType()) {
-		return nil, merr.WrapErrServiceInternalMsg("sort_op: column %s has non-comparable type %s", column, sortCol.DataType().Name())
+		return nil, merr.WrapErrParameterInvalidMsg("sort_op: column %s has non-comparable type %s", column, sortCol.DataType().Name())
 	}
 
 	// Resolve optional tie-break column
@@ -96,11 +96,7 @@ func (o *SortOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, 
 		}
 	}
 
-	colNames := input.ColumnNames()
-	collector := NewChunkCollector(colNames, input.NumChunks())
-	defer collector.Release()
-
-	newChunkSizes := make([]int64, input.NumChunks())
+	selection := &RowSelection{Chunks: make([]ChunkSelection, input.NumChunks())}
 
 	// Process each chunk independently
 	for chunkIdx := range input.NumChunks() {
@@ -120,7 +116,7 @@ func (o *SortOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, 
 		}
 
 		// Sort indices based on values, with tie-breaking by ID ascending.
-		// Nulls always sort to the end regardless of sort direction.
+		// Numeric values precede NaNs, which precede nulls in either direction.
 		less, useTypedLess := makeArrayRowLess(sortChunk, tbChunk, o.desc)
 		if useTypedLess {
 			sort.SliceStable(indices, func(i, j int) bool {
@@ -146,6 +142,10 @@ func (o *SortOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, 
 				if jNull {
 					return true // non-null always goes before null
 				}
+				iNaN, jNaN := isArrayValueNaN(sortChunk, vi), isArrayValueNaN(sortChunk, vj)
+				if iNaN != jNaN {
+					return !iNaN
+				}
 
 				cmp := compareArrayValues(sortChunk, vi, vj)
 				if cmp != 0 {
@@ -161,34 +161,9 @@ func (o *SortOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, 
 				return false
 			})
 		}
-		newChunkSizes[chunkIdx] = int64(chunkLen)
-
-		// Reorder each column
-		for _, colName := range colNames {
-			col := input.Column(colName)
-			dataChunk := col.Chunk(chunkIdx)
-			reordered, err := reorderArray(ctx.Pool(), dataChunk, indices)
-			if err != nil {
-				return nil, merr.WrapErrServiceInternalMsg("sort_op: column %s: %v", colName, err)
-			}
-			collector.Set(colName, chunkIdx, reordered)
-		}
+		selection.Chunks[chunkIdx] = RowIndices(indices)
 	}
-
-	// Create new DataFrame with all chunks
-	builder := NewDataFrameBuilder()
-	defer builder.Release()
-
-	builder.SetChunkSizes(newChunkSizes)
-
-	for _, colName := range colNames {
-		if err := builder.AddColumnFromChunks(colName, collector.Consume(colName)); err != nil {
-			return nil, err
-		}
-		builder.CopyFieldMetadata(input, colName)
-	}
-
-	return builder.Build(), nil
+	return &OperatorResult{Selection: selection}, nil
 }
 
 type rowLessFunc func(i, j int) bool
@@ -202,7 +177,11 @@ func makeArrayRowLess(sortArr arrow.Array, tieArr arrow.Array, desc bool) (rowLe
 			return func(i, j int) bool {
 				si := scoreArr.Value(i)
 				sj := scoreArr.Value(j)
-				if si != sj {
+				iNaN, jNaN := math.IsNaN(float64(si)), math.IsNaN(float64(sj))
+				if iNaN != jNaN {
+					return !iNaN
+				}
+				if !iNaN && si != sj {
 					return si > sj
 				}
 				return idArr.Value(i) < idArr.Value(j)
@@ -210,6 +189,17 @@ func makeArrayRowLess(sortArr arrow.Array, tieArr arrow.Array, desc bool) (rowLe
 		}
 	}
 	return nil, false
+}
+
+func isArrayValueNaN(arr arrow.Array, index int) bool {
+	switch a := arr.(type) {
+	case *array.Float32:
+		return math.IsNaN(float64(a.Value(index)))
+	case *array.Float64:
+		return math.IsNaN(a.Value(index))
+	default:
+		return false
+	}
 }
 
 // isComparableType checks if an Arrow data type is comparable for sorting.
@@ -278,11 +268,6 @@ func compareArrayValues(arr arrow.Array, i, j int) int {
 	default:
 		return 0
 	}
-}
-
-// reorderArray reorders an array based on indices.
-func reorderArray(pool memory.Allocator, data arrow.Array, indices []int) (arrow.Array, error) {
-	return dispatchPickByIndices(pool, data, indices)
 }
 
 // NewSortOpFromRepr creates a SortOp from an OperatorRepr.

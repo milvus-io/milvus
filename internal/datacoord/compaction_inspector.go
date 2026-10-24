@@ -54,7 +54,8 @@ type CompactionInspector interface {
 	stop()
 	// enqueueCompaction start to enqueue compaction task and return immediately
 	enqueueCompaction(task *datapb.CompactionTask) error
-	// isFull return true if the task pool is full
+	// isFull returns true if the task queue is full, or pending and running
+	// tasks reach dataCoord.compaction.maxTaskNum
 	isFull() bool
 	// get compaction tasks by signal id
 	getCompactionTasksNumBySignalID(signalID int64) int
@@ -313,8 +314,8 @@ func (c *compactionInspector) start() {
 }
 
 func (c *compactionInspector) loadMeta() {
-	// TODO: make it compatible to all types of compaction with persist meta
 	triggers := c.meta.GetCompactionTasks(context.TODO())
+	var failedTasks []*datapb.CompactionTask
 	for _, tasks := range triggers {
 		for _, task := range tasks {
 			if isCompactionTaskCleaned(task) {
@@ -323,49 +324,89 @@ func (c *compactionInspector) loadMeta() {
 					mlog.String("type", task.GetType().String()),
 					mlog.String("state", task.GetState().String()))
 				continue
-			} else {
-				t, err := c.createCompactTask(task)
-				if err != nil {
-					mlog.Info(context.TODO(), "compactionInspector loadMeta create compactionTask failed, try to clean it",
+			}
+
+			t, err := c.createCompactTask(task)
+			if err != nil {
+				mlog.Info(context.TODO(), "compactionInspector loadMeta create compactionTask failed, defer cleanup",
+					mlog.Int64("planID", task.GetPlanID()),
+					mlog.String("type", task.GetType().String()),
+					mlog.String("state", task.GetState().String()),
+					mlog.Err(err),
+				)
+				failedTasks = append(failedTasks, task)
+				continue
+			}
+			if t.NeedReAssignNodeID() {
+				if err = c.submitTask(t); err != nil {
+					mlog.Info(context.TODO(), "compactionInspector loadMeta submit task failed, defer cleanup",
 						mlog.Int64("planID", task.GetPlanID()),
 						mlog.String("type", task.GetType().String()),
 						mlog.String("state", task.GetState().String()),
 						mlog.Err(err),
 					)
-					// ignore the drop error
-					c.meta.DropCompactionTask(context.TODO(), task)
+					failedTasks = append(failedTasks, task)
 					continue
 				}
-				if t.NeedReAssignNodeID() {
-					if err = c.submitTask(t); err != nil {
-						mlog.Info(context.TODO(), "compactionInspector loadMeta submit task failed, try to clean it",
-							mlog.Int64("planID", task.GetPlanID()),
-							mlog.String("type", task.GetType().String()),
-							mlog.String("state", task.GetState().String()),
-							mlog.Err(err),
-						)
-						// ignore the drop error
-						c.meta.DropCompactionTask(context.Background(), task)
-						continue
-					}
-					mlog.Info(context.TODO(), "compactionInspector loadMeta submitTask",
-						mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
-						mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
-						mlog.FieldCollectionID(t.GetTaskProto().GetCollectionID()),
-						mlog.String("type", task.GetType().String()),
-						mlog.String("state", t.GetTaskProto().GetState().String()))
-				} else {
-					c.restoreTask(t)
-					mlog.Info(context.TODO(), "compactionInspector loadMeta restoreTask",
-						mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
-						mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
-						mlog.FieldCollectionID(t.GetTaskProto().GetCollectionID()),
-						mlog.String("type", task.GetType().String()),
-						mlog.String("state", t.GetTaskProto().GetState().String()))
-				}
+				mlog.Info(context.TODO(), "compactionInspector loadMeta submitTask",
+					mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
+					mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
+					mlog.FieldCollectionID(t.GetTaskProto().GetCollectionID()),
+					mlog.String("type", task.GetType().String()),
+					mlog.String("state", t.GetTaskProto().GetState().String()))
+			} else {
+				c.restoreTask(t)
+				mlog.Info(context.TODO(), "compactionInspector loadMeta restoreTask",
+					mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
+					mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
+					mlog.FieldCollectionID(t.GetTaskProto().GetCollectionID()),
+					mlog.String("type", task.GetType().String()),
+					mlog.String("state", t.GetTaskProto().GetState().String()))
 			}
 		}
 	}
+
+	if len(failedTasks) > 0 {
+		c.stopWg.Add(1)
+		go c.cleanupFailedCompactionTasks(failedTasks)
+	}
+}
+
+func (c *compactionInspector) cleanupFailedCompactionTasks(tasks []*datapb.CompactionTask) {
+	defer c.stopWg.Done()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		select {
+		case <-c.stopCh:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	total := len(tasks)
+	mlog.Info(ctx, "start cleaning up failed compaction tasks", mlog.Int("total", total))
+	cleaned := 0
+	for _, task := range tasks {
+		select {
+		case <-ctx.Done():
+			mlog.Info(ctx, "failed compaction task cleanup aborted",
+				mlog.Int("cleaned", cleaned),
+				mlog.Int("remaining", total-cleaned))
+			return
+		default:
+		}
+		if err := c.meta.DropCompactionTask(ctx, task); err != nil {
+			mlog.Warn(ctx, "drop failed compaction task failed",
+				mlog.Int64("planID", task.GetPlanID()), mlog.Err(err))
+			continue
+		}
+		cleaned++
+	}
+	mlog.Info(ctx, "failed compaction task cleanup finished",
+		mlog.Int("cleaned", cleaned),
+		mlog.Int("total", total))
 }
 
 func (c *compactionInspector) loopSchedule() {
@@ -585,6 +626,9 @@ func (c *compactionInspector) enqueueCompaction(task *datapb.CompactionTask) err
 		c.meta.SetSegmentsCompacting(context.Background(), t.GetTaskProto().GetInputSegments(), false)
 		return err
 	}
+	// After the queue accepted it: a full queue makes the trigger plan the
+	// same compaction again on its next tick.
+	recordCompactionType(task.GetType())
 	log.Info(context.TODO(), "Compaction plan submitted")
 	return nil
 }
@@ -695,9 +739,22 @@ func (c *compactionInspector) cleanFailedTasks() {
 	c.cleaningGuard.Unlock()
 }
 
-// isFull return true if the task pool is full
+// isFull returns true if the queue reaches its capacity, or pending and running
+// tasks reach dataCoord.compaction.maxTaskNum. Automatic compaction checks it
+// before planning and before each submission, so maxTaskNum is a soft cap.
 func (c *compactionInspector) isFull() bool {
-	return c.queueTasks.Len() >= c.queueTasks.capacity
+	pending := c.queueTasks.Len()
+	if pending >= c.queueTasks.capacity {
+		return true
+	}
+	maxTaskNum := Params.DataCoordCfg.CompactionMaxTaskNum.GetAsInt()
+	if maxTaskNum <= 0 {
+		return false
+	}
+	c.executingGuard.RLock()
+	running := len(c.executingTasks)
+	c.executingGuard.RUnlock()
+	return pending+running >= maxTaskNum
 }
 
 func (c *compactionInspector) checkDelay(t CompactionTask) {

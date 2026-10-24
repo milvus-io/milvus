@@ -39,9 +39,12 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/dataview"
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
+	"github.com/milvus-io/milvus/internal/metacache"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
@@ -100,15 +103,19 @@ type Server struct {
 	quitCh           chan struct{}
 	stateCode        atomic.Value
 
-	etcdCli        *clientv3.Client
-	tikvCli        *txnkv.Client
-	address        string
-	watchClient    kv.WatchKV
-	kv             kv.MetaKv
-	metaRootPath   string
-	meta           *meta
-	segmentManager Manager
-	allocator      allocator.Allocator
+	etcdCli                             *clientv3.Client
+	tikvCli                             *txnkv.Client
+	address                             string
+	watchClient                         kv.WatchKV
+	kv                                  kv.MetaKv
+	metaRootPath                        string
+	meta                                *meta
+	dataViewManager                     DataViewManager
+	metaStore                           metacache.MetaStore
+	catalog                             metastore.DataCoordCatalog
+	dataViewCollectionRecoveryValidator dataview.CollectionRecoveryValidator
+	segmentManager                      Manager
+	allocator                           allocator.Allocator
 	// self host id allocator, to avoid get unique id from rootcoord
 	idAllocator      *globalIDAllocator.GlobalIDAllocator
 	nodeManager      session.NodeManager
@@ -120,6 +127,7 @@ type Server struct {
 	importMeta       ImportMeta
 	importInspector  ImportInspector
 	importChecker    ImportChecker
+	importCheckerV3  ImportChecker
 	importJobLock    *lock.KeyLock[int64]
 
 	copySegmentMeta      CopySegmentMeta
@@ -157,6 +165,8 @@ type Server struct {
 	statsInspector                   *statsInspector
 	indexInspector                   *indexInspector
 	analyzeInspector                 *analyzeInspector
+	talonPrewarmInspector            *TalonPrewarmInspector
+	segmentChangeInspector           *segmentChangeInspector
 	externalCollectionRefreshManager ExternalCollectionRefreshManager
 	globalScheduler                  task.GlobalScheduler
 
@@ -171,6 +181,7 @@ type Server struct {
 
 type FileResourceObserver interface {
 	InitDataCoord(manager session.NodeManager)
+	IsEmpty() bool
 	Notify()
 }
 
@@ -199,6 +210,22 @@ func WithDataNodeCreator(creator session.DataNodeCreatorFunc) Option {
 func WithSegmentManager(manager Manager) Option {
 	return func(svr *Server) {
 		svr.segmentManager = manager
+	}
+}
+
+// WithMetaStore returns an Option to set the shared MetaStore for datacoord
+// to use as the primary segment and collection storage.
+func WithMetaStore(store metacache.MetaStore) Option {
+	return func(svr *Server) {
+		svr.metaStore = store
+	}
+}
+
+// WithCatalog returns an Option to set the DataCoordCatalog for sub-meta
+// initialization (indexMeta, analyzeMeta, importMeta, etc.).
+func WithCatalog(catalog metastore.DataCoordCatalog) Option {
+	return func(svr *Server) {
+		svr.catalog = catalog
 	}
 }
 
@@ -268,7 +295,12 @@ func (s *Server) Init() error {
 	return s.initDataCoord()
 }
 
-func (s *Server) initDataCoord() error {
+func (s *Server) initDataCoord() (initErr error) {
+	defer func() {
+		if initErr != nil && s.meta != nil {
+			s.meta.closeManifestCommitExecutor()
+		}
+	}()
 	mlog.Info(s.ctx, "DataCoord try to wait for MixCoord ready")
 	if err := s.initMixCoord(); err != nil {
 		return err
@@ -314,7 +346,7 @@ func (s *Server) initDataCoord() error {
 
 	s.globalScheduler = task.NewGlobalTaskScheduler(s.ctx, s.cluster2)
 
-	s.importMeta, err = NewImportMeta(s.ctx, s.meta.catalog, s.allocator, s.meta)
+	s.importMeta, err = NewImportMeta(s.ctx, s.catalog, s.allocator, s.meta)
 	if err != nil {
 		return err
 	}
@@ -330,6 +362,9 @@ func (s *Server) initDataCoord() error {
 	s.initStatsInspector()
 	mlog.Info(s.ctx, "init statsJobManager done")
 
+	s.initSegmentChangeInspector()
+	mlog.Info(s.ctx, "init segment change inspector done")
+
 	s.initExternalCollectionInspector(storageCli)
 	mlog.Info(s.ctx, "init external collection inspector done")
 
@@ -340,12 +375,17 @@ func (s *Server) initDataCoord() error {
 
 	s.initGarbageCollection(storageCli)
 
-	s.importInspector = NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler)
-
 	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, importCheckerHooks{
-		commitImport:         s.broadcastCommitImportMessage,
-		rollbackImport:       s.broadcastRollbackImportMessage,
-		isReplicatingCluster: s.isReplicatingClusterNow,
+		commitImport:        s.broadcastCommitImportMessage,
+		rollbackImport:      s.broadcastRollbackImportMessage,
+		assignImportIDRange: s.broadcastUpdateImportMessage,
+		getReplicationRole:  s.getReplicationRole,
+	})
+	s.importCheckerV3 = NewImportCheckerV3(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.cluster2, importCheckerHooks{
+		commitImport:        s.broadcastCommitImportMessage,
+		rollbackImport:      s.broadcastRollbackImportMessage,
+		assignImportIDRange: s.broadcastUpdateImportMessage,
+		getReplicationRole:  s.getReplicationRole,
 	})
 
 	// init file resource observer
@@ -358,6 +398,8 @@ func (s *Server) initDataCoord() error {
 	if err != nil {
 		return err
 	}
+
+	s.importInspector = NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler, s.copySegmentMeta)
 	s.copySegmentInspector = NewCopySegmentInspector(
 		s.ctx,
 		s.meta,
@@ -395,8 +437,10 @@ func (s *Server) initDataCoord() error {
 	mlog.Info(s.ctx, "init snapshot manager done")
 
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
+	if err := s.initTalonPrewarm(); err != nil {
+		return err
+	}
 
-	RegisterDDLCallbacks(s)
 	mlog.Info(s.ctx, "init datacoord done", mlog.FieldNodeID(paramtable.GetNodeID()), mlog.String("Address", s.address))
 
 	return nil
@@ -418,9 +462,19 @@ func (s *Server) Start() error {
 
 func (s *Server) startDataCoord() {
 	s.startTaskScheduler()
+	// Reconcile orphan import segments and re-enqueue in-flight import tasks
+	// before the checkers start and before the state turns Healthy: the scan
+	// must not race producers that persist a segment before its owner record
+	// (snapshot restore pre-registration, V2 import segment allocation).
+	s.importInspector.Reload()
 	s.startServerLoop()
 	s.afterStart()
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
+	// The first prewarm round reads the recovered metadata through a healthy
+	// DataCoord; starting it earlier could skip that round as not ready.
+	if s.talonPrewarmInspector != nil {
+		s.talonPrewarmInspector.Start()
+	}
 	sessionutil.SaveServerInfo(typeutil.MixCoordRole, s.session.GetServerID())
 }
 
@@ -460,6 +514,10 @@ func (s *Server) SetMixCoord(mixCoord types.MixCoord) {
 	s.mixCoord = mixCoord
 }
 
+func (s *Server) SetDataViewCollectionRecoveryValidator(validator dataview.CollectionRecoveryValidator) {
+	s.dataViewCollectionRecoveryValidator = validator
+}
+
 func (s *Server) SetDataNodeCreator(f func(context.Context, string, int64) (types.DataNodeClient, error)) {
 	s.dataNodeCreator = f
 }
@@ -492,6 +550,10 @@ func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 		scanInterval:     Params.DataCoordCfg.GCScanIntervalInHour.GetAsDuration(time.Hour),
 		missingTolerance: Params.DataCoordCfg.GCMissingTolerance.GetAsDuration(time.Second),
 		dropTolerance:    Params.DataCoordCfg.GCDropTolerance.GetAsDuration(time.Second),
+		dataViewGC:       s.dataViewManager,
+		importJobAlive: func(ctx context.Context, jobID int64) bool {
+			return s.importMeta.GetJob(ctx, jobID) != nil
+		},
 	})
 }
 
@@ -630,27 +692,71 @@ func (s *Server) initKV() error {
 }
 
 func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
+	// MixCoord injects the shared catalog and MetaStore. A standalone
+	// DataCoord (e.g. in tests) builds its own over the local KV.
+	if s.catalog == nil {
+		s.catalog = datacoord.NewCatalog(s.kv, chunkManager.RootPath(), s.metaRootPath)
+	}
+	if s.metaStore == nil {
+		s.metaStore = metacache.NewMetaStore(s.catalog)
+	}
 	if s.meta != nil {
 		return nil
 	}
+	// DataView persistence lives on the concrete KV catalog, not on the
+	// DataCoordCatalog interface.
+	catalog, ok := s.catalog.(dataview.Catalog)
+	if !ok {
+		return merr.WrapErrServiceInternalMsg("datacoord catalog does not support DataView persistence")
+	}
+	var recoveredMeta *meta
 	reloadEtcdFn := func() error {
 		var err error
-		catalog := datacoord.NewCatalog(s.kv, chunkManager.RootPath(), s.metaRootPath)
-		s.meta, err = newMeta(s.ctx, catalog, chunkManager, s.broker)
-		if err != nil {
-			return err
-		}
-
-		// Load collection information asynchronously
-		// HINT: please make sure this is the last step in the `reloadEtcdFn` function !!!
-		go func() {
-			_ = retry.Do(s.ctx, func() error {
-				return s.meta.reloadCollectionsFromRootcoord(s.ctx, s.broker)
-			}, retry.Sleep(time.Second), retry.Attempts(connMetaMaxRetryTime))
-		}()
-		return nil
+		recoveredMeta, err = newMeta(s.ctx, s.catalog, chunkManager, s.metaStore, s.broker)
+		return err
 	}
-	return retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime))
+	if err := retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime)); err != nil {
+		return err
+	}
+	defer func() {
+		if s.meta != recoveredMeta {
+			recoveredMeta.closeManifestCommitExecutor()
+		}
+	}()
+	// Retry each recovery phase independently: a later metadata error must
+	// not repeat newMeta's successful object-storage manifest scan.
+	if err := retry.Do(s.ctx, func() error {
+		return recoveredMeta.reloadCollectionsFromRootcoord(s.ctx, s.broker)
+	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
+		return err
+	}
+
+	collections := recoveredMeta.GetCollections()
+	collectionIDs := lo.Map(collections, func(c *collectionInfo, _ int) int64 { return c.ID })
+	collectionVChannels := lo.SliceToMap(collections, func(c *collectionInfo) (int64, []string) {
+		return c.ID, c.VChannelNames
+	})
+	var manager dataview.Manager
+	if err := retry.Do(s.ctx, func() error {
+		var err error
+		manager, err = dataview.RecoverManager(
+			s.ctx,
+			catalog,
+			s.dataViewCollectionRecoveryValidator,
+			recoveredMeta.loadableProjection,
+			collectionIDs,
+			collectionVChannels,
+		)
+		return err
+	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
+		return err
+	}
+	// Publish only fully recovered metadata. A failed later phase must not
+	// make a subsequent initMeta call return early with partial state.
+	recoveredMeta.dataViewManager = manager
+	s.meta = recoveredMeta
+	s.dataViewManager = manager
+	return nil
 }
 
 func (s *Server) initAnalyzeInspector() {
@@ -671,11 +777,17 @@ func (s *Server) initStatsInspector() {
 	}
 }
 
+func (s *Server) initSegmentChangeInspector() {
+	if s.segmentChangeInspector == nil {
+		s.segmentChangeInspector = newSegmentChangeInspector(s.ctx, s.meta, s.allocator)
+	}
+}
+
 func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager) {
 	// Initialize Manager (handles job submission, query, and internal inspector/checker)
 	if s.externalCollectionRefreshManager == nil {
 		s.externalCollectionRefreshManager = NewExternalCollectionRefreshManager(
-			s.ctx, s.meta, s.globalScheduler, s.allocator, s.meta.externalCollectionRefreshMeta, s.cluster2, s.handler.GetCollection, s.updateExternalSchemaViaWAL, storageCli)
+			s.ctx, s.meta, s.globalScheduler, s.allocator, s.meta.externalCollectionRefreshMeta, s.cluster2, s.handler.GetCollection, s.updateExternalSchemaViaWAL, storageCli, s.notifyIndexChan)
 	}
 }
 
@@ -726,6 +838,7 @@ func (s *Server) startServerLoop() {
 	s.globalScheduler.Start()
 	go s.importInspector.Start()
 	go s.importChecker.Start()
+	go s.importCheckerV3.Start()
 
 	// Start copy segment inspector and checker
 	go s.copySegmentInspector.Start()
@@ -737,7 +850,12 @@ func (s *Server) startServerLoop() {
 		s.snapshotExportManager.Start()
 	}
 
+	// The DataView recompute worker was already started at RecoverManager
+	// construction (bounded by s.ctx); nothing to do here.
+
 	s.garbageCollector.start()
+
+	s.meta.statsTaskMeta.StartCleanupDeprecatedSortTasks(s.serverLoopCtx, &s.serverLoopWg)
 }
 
 func (s *Server) startCollectMetaMetrics(ctx context.Context) {
@@ -766,6 +884,7 @@ func (s *Server) startTaskScheduler() {
 	s.statsInspector.Start()
 	s.indexInspector.Start()
 	s.analyzeInspector.Start()
+	s.segmentChangeInspector.Start()
 	// Note: externalCollectionInspector.Start() is called in startServerLoop as a goroutine
 	s.startCollectMetaMetrics(s.serverLoopCtx)
 }
@@ -877,7 +996,7 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 			}
 
 			// notify file manager sync file resource to new node
-			if s.fileResourceObserver != nil {
+			if s.fileResourceObserver != nil && !s.fileResourceObserver.IsEmpty() {
 				s.fileResourceObserver.Notify()
 			}
 		case sessionutil.SessionDelEvent:
@@ -964,16 +1083,14 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 		return merr.WrapErrSegmentNotFound(segmentID, "segment not found, might be a faked segment, ignore post flush")
 	}
 
-	if enableSortCompaction() {
+	collection := s.meta.GetCollection(segment.GetCollectionID())
+	if enableSortCompaction() && (collection == nil || !collection.IsExternal()) {
 		select {
 		case getStatsTaskChSingleton() <- segmentID:
 		default:
 		}
 	} else {
-		select {
-		case getBuildIndexChSingleton() <- segmentID:
-		default:
-		}
+		notifySegmentIndexBuild(segmentID)
 	}
 
 	// Insert / delta counts come from Statistics. Stats array is iterated
@@ -1048,6 +1165,11 @@ func (s *Server) initMixCoord() error {
 //
 //	stop message stream client and stop server loops
 func (s *Server) Stop() error {
+	// Init can create the client without reaching Start. Release it even when
+	// the state guard below skips the rest of component shutdown.
+	if s.talonPrewarmInspector != nil {
+		s.talonPrewarmInspector.Stop()
+	}
 	if !s.stateCode.CompareAndSwap(commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal) {
 		return nil
 	}
@@ -1070,6 +1192,7 @@ func (s *Server) Stop() error {
 	s.globalScheduler.Stop()
 	s.importInspector.Close()
 	s.importChecker.Close()
+	s.importCheckerV3.Close()
 
 	// Stop copy segment components
 	s.copySegmentInspector.Close()
@@ -1081,6 +1204,9 @@ func (s *Server) Stop() error {
 
 	s.statsInspector.Stop()
 	mlog.Info(s.ctx, "datacoord stats inspector stopped")
+
+	s.segmentChangeInspector.Stop()
+	mlog.Info(s.ctx, "datacoord segment change inspector stopped")
 
 	s.indexInspector.Stop()
 	mlog.Info(s.ctx, "datacoord index inspector stopped")
@@ -1108,6 +1234,9 @@ func (s *Server) Stop() error {
 
 	s.stopServerLoop()
 	mlog.Info(s.ctx, "datacoord serverloop stopped")
+	if s.meta != nil {
+		s.meta.closeManifestCommitExecutor()
+	}
 	mlog.Warn(s.ctx, "datacoord stop successful")
 	return nil
 }
@@ -1206,7 +1335,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		properties[pair.GetKey()] = pair.GetValue()
 	}
 
-	collInfo := &collectionInfo{
+	s.meta.AddCollection(&collectionInfo{
 		ID:             resp.CollectionID,
 		Schema:         resp.Schema,
 		Partitions:     partitionIDs,
@@ -1216,8 +1345,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		DatabaseName:   resp.GetDbName(),
 		DatabaseID:     resp.GetDbId(),
 		VChannelNames:  resp.GetVirtualChannelNames(),
-	}
-	s.meta.AddCollection(collInfo)
+	})
 	return nil
 }
 

@@ -28,11 +28,13 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
@@ -98,7 +100,11 @@ func newMemoryMeta(t *testing.T) (*meta, error) {
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	return newMeta(context.TODO(), catalog, nil, broker)
+	m, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
+	if m != nil {
+		t.Cleanup(m.closeManifestCommitExecutor)
+	}
+	return m, err
 }
 
 func newMetaWithEtcd(t *testing.T, rootPath string) (*meta, error) {
@@ -107,7 +113,11 @@ func newMetaWithEtcd(t *testing.T, rootPath string) (*meta, error) {
 	catalog := datacoord.NewCatalog(catalogKV, "", rootPath)
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	return newMeta(context.TODO(), catalog, nil, broker)
+	m, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
+	if m != nil {
+		t.Cleanup(m.closeManifestCommitExecutor)
+	}
+	return m, err
 }
 
 func newMockAllocator(t *testing.T) *allocator.MockAllocator {
@@ -160,6 +170,7 @@ func newTestScalarClusteringKeySchema() *schemapb.CollectionSchema {
 }
 
 type mockMixCoord struct {
+	rootcoordpb.UnimplementedRootCoordServer
 	state commonpb.StateCode
 	cnt   atomic.Int64
 }
@@ -183,6 +194,10 @@ func (m *mockMixCoord) DescribeDatabase(ctx context.Context, in *rootcoordpb.Des
 		DbName:           "default",
 		CreatedTimestamp: 1,
 	}, nil
+}
+
+func (m *mockMixCoord) GetRLSMetadata(context.Context, *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
+	return &rootcoordpb.GetRLSMetadataResponse{Status: merr.Success()}, nil
 }
 
 func (m *mockMixCoord) Close() error {
@@ -228,6 +243,10 @@ func (m *mockMixCoord) AddCollectionStructField(ctx context.Context, req *milvus
 }
 
 func (m *mockMixCoord) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
+	panic("implement me")
+}
+
+func (m *mockMixCoord) GetFeatureUsage(ctx context.Context, req *internalpb.GetFeatureUsageRequest) (*internalpb.FeatureUsageReport, error) {
 	panic("implement me")
 }
 
@@ -555,6 +574,10 @@ func (m *mockMixCoord) GetQcMetrics(ctx context.Context, req *milvuspb.GetMetric
 }
 
 func (m *mockMixCoord) GetDataCoordTopology(ctx context.Context, req *milvuspb.GetMetricsRequest) (*metricsinfo.DataCoordTopology, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (m *mockMixCoord) GetConnectedDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) ([]metricsinfo.DataNodeInfos, error) {
 	panic("not implemented") // TODO: Implement
 }
 
@@ -995,7 +1018,7 @@ func (s *mockMixCoord) AllocSegment(ctx context.Context, req *datapb.AllocSegmen
 	panic("implement me")
 }
 
-func (s *mockMixCoord) NotifyDropPartition(ctx context.Context, channel string, partitionIDs []int64) error {
+func (s *mockMixCoord) NotifyDropPartition(ctx context.Context, channel string, collectionID int64, partitionIDs []int64) error {
 	panic("implement me")
 }
 
@@ -1165,7 +1188,7 @@ func (h *mockHandler) ListLoadedSegments(ctx context.Context) ([]int64, error) {
 	return nil, nil
 }
 
-func (h *mockHandler) GenSnapshot(ctx context.Context, collectionID UniqueID) (*snapshotstorage.SnapshotData, error) {
+func (h *mockHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, positions []*msgpb.MsgPosition) (*snapshotstorage.SnapshotData, error) {
 	return &snapshotstorage.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{
 			Name:         "test_snapshot",
@@ -1182,4 +1205,12 @@ func newMockHandlerWithMeta(meta *meta) *mockHandler {
 	return &mockHandler{
 		meta: meta,
 	}
+}
+
+func (*mockMixCoord) GetQueryViewLoadInfo(context.Context, *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
+	return nil, merr.WrapErrServiceInternalMsg("GetQueryViewLoadInfo is not configured by this test")
+}
+
+func (*mockMixCoord) GetStreamingNodeQueryViewResources(context.Context, *datapb.GetStreamingNodeQueryViewResourcesRequest) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
+	return nil, merr.WrapErrServiceInternalMsg("GetStreamingNodeQueryViewResources is not configured by this test")
 }

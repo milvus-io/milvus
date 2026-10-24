@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -1882,6 +1883,80 @@ func TestIndexMeta_GetUnindexedSegments(t *testing.T) {
 	assert.Equal(t, 0, len(unindexed))
 }
 
+func TestIndexMeta_GetUnIndexedSegmentIDsForIndexTask(t *testing.T) {
+	const (
+		segWithNoIndex       = UniqueID(1000)
+		segWithPartialIndex  = UniqueID(1001)
+		segWithCompleteIndex = UniqueID(1002)
+	)
+	m := &indexMeta{
+		segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			collID: {
+				indexID: {
+					CollectionID: collID,
+					FieldID:      fieldID,
+					IndexID:      indexID,
+				},
+				indexID + 1: {
+					CollectionID: collID,
+					FieldID:      fieldID + 1,
+					IndexID:      indexID + 1,
+				},
+			},
+			collID + 1: {
+				indexID + 2: {
+					CollectionID: collID + 1,
+					FieldID:      fieldID + 2,
+					IndexID:      indexID + 2,
+				},
+			},
+			collID + 3: {
+				indexID + 3: {
+					CollectionID: collID + 3,
+					FieldID:      fieldID + 3,
+					IndexID:      indexID + 3,
+					IsDeleted:    true,
+				},
+			},
+		},
+	}
+	partial := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	partial.Insert(indexID, &model.SegmentIndex{
+		CollectionID: collID,
+		SegmentID:    segWithPartialIndex,
+		IndexID:      indexID,
+	})
+	m.segmentIndexes.Insert(segWithPartialIndex, partial)
+	complete := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	complete.Insert(indexID, &model.SegmentIndex{
+		CollectionID: collID,
+		SegmentID:    segWithCompleteIndex,
+		IndexID:      indexID,
+	})
+	complete.Insert(indexID+1, &model.SegmentIndex{
+		CollectionID: collID,
+		SegmentID:    segWithCompleteIndex,
+		IndexID:      indexID + 1,
+	})
+	m.segmentIndexes.Insert(segWithCompleteIndex, complete)
+
+	unindexed := m.GetUnIndexedSegmentIDsForIndexTask(collID, []UniqueID{
+		segWithNoIndex,
+		segWithPartialIndex,
+		segWithCompleteIndex,
+	})
+	assert.True(t, unindexed.Contain(segWithNoIndex))
+	assert.True(t, unindexed.Contain(segWithPartialIndex))
+	assert.False(t, unindexed.Contain(segWithCompleteIndex))
+
+	unindexed = m.GetUnIndexedSegmentIDsForIndexTask(collID+2, []UniqueID{segWithNoIndex})
+	assert.Empty(t, unindexed)
+
+	unindexed = m.GetUnIndexedSegmentIDsForIndexTask(collID+3, []UniqueID{segWithNoIndex})
+	assert.Empty(t, unindexed)
+}
+
 func TestBuildIndexTaskStatsJSON(t *testing.T) {
 	im := &indexMeta{segmentBuildInfo: newSegmentIndexBuildInfo()}
 	si1 := &model.SegmentIndex{
@@ -2657,34 +2732,31 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 	})
 }
 
-func TestIndexMeta_GetDeletedIndexesWithV1Path(t *testing.T) {
-	m := &indexMeta{
-		segmentBuildInfo: newSegmentIndexBuildInfo(),
+// The feature switch controls completed-artifact publication only. Task
+// lifecycle states remain durable in etcd in both modes.
+func TestSegmentIndexTaskStatesAlwaysPersistToEtcd(t *testing.T) {
+	assert.False(t, paramtable.Get().DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
+
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("manifest=%t", enabled), func(t *testing.T) {
+			withSegmentIndexManifestWrites(t, enabled)
+			catalog := catalogmocks.NewDataCoordCatalog(t)
+			catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Once()
+			catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Times(2)
+			m := &indexMeta{
+				ctx:              context.TODO(),
+				catalog:          catalog,
+				indexes:          map[UniqueID]map[UniqueID]*model.Index{},
+				keyLock:          lock.NewKeyLock[UniqueID](),
+				segmentBuildInfo: newSegmentIndexBuildInfo(),
+				segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+			}
+			require.NoError(t, m.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+				CollectionID: 100, PartitionID: 10, SegmentID: 6002,
+				IndexID: 600, BuildID: 6200,
+			}))
+			require.NoError(t, m.BuildIndex(6200))
+			require.NoError(t, m.UpdateIndexState(6200, commonpb.IndexState_Failed, "failed"))
+		})
 	}
-
-	// Add: deleted v0, deleted v1, not-deleted v1.
-	// Only deleted v1 indexes need metadata-driven cleanup under index_v1;
-	// v0 deletion is handled by the buildID-rooted index_files prefix walk.
-	m.segmentBuildInfo.Add(&model.SegmentIndex{
-		BuildID:               1000,
-		CollectionID:          100,
-		IndexStorePathVersion: 0,
-		IsDeleted:             true,
-	})
-	m.segmentBuildInfo.Add(&model.SegmentIndex{
-		BuildID:               2000,
-		CollectionID:          200,
-		IndexStorePathVersion: 1,
-		IsDeleted:             true,
-	})
-	m.segmentBuildInfo.Add(&model.SegmentIndex{
-		BuildID:               3000,
-		CollectionID:          300,
-		IndexStorePathVersion: 1,
-		IsDeleted:             false,
-	})
-
-	result := m.GetDeletedIndexesWithV1Path()
-	assert.Len(t, result, 1)
-	assert.Equal(t, int64(2000), result[0].BuildID)
 }

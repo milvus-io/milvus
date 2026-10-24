@@ -25,12 +25,9 @@ StreamingNode would become a compute-intensive and IO-intensive global bottlenec
 
 ## 3. Two-Phase Query Process
 
-TODO(query/query_client.md): add the detailed query-path flow, service boundary,
-client orchestration, and shard discovery design when the query path is picked.
-TODO(query/query_plan.md): add the node-side Phase 1 planning design when that
-module is picked.
-TODO(query/query_execution.md): add the node-side Phase 2 execution design when
-that module is picked.
+The following end-to-end flow describes the target architecture. The current
+extraction implements the SN server side; it does not wire the new Proxy client,
+complete Coord scheduling, or QN query execution/remote Delete subscriptions.
 
 1. **Phase One**: Proxy generates a Shard-level query plan from StreamingNode using the highest version QueryView:
    - Includes MVCC
@@ -40,6 +37,46 @@ that module is picked.
    - StreamingNode and QueryNode execute query operations using Segments under the corresponding view version
    - Proxy reduces all results and returns them to the user
 3. If a node failure or view invalidation occurs during the process, the query is canceled and retried directly.
+
+### Current SN implementation
+
+- **Phase 1:** `GetQueryPlan` acquires the highest available Up view, resolves
+  query MVCC, performs request/BM25 optimization and selects the plan's workers.
+  `GetMVCCTimestamp` exposes primary-WAL query frontiers. See the
+  [consistency-level discussion](#13-consistency-implementation-consistency-level)
+  for the current routing limits.
+- **Phase 2:** `SearchOnView` and `QueryOnView` acquire the explicit Up version,
+  wait for Growing/Transform MVCC, and pin segments selected by DataVersion and
+  partition scope. The [serving lease](query_view_lease.md) protects the view
+  during acquisition; handles retain resources during execution.
+- **Execution dependency:** the new QueryView scheduler and resource path invoke
+  legacy `querynodev2/tasks.SearchTask` / `QueryTask.ExecuteOnSegments` directly
+  inside SN, with `querypb` request and collection/segment adapters. This reuses
+  task execution and reduction, not the old QueryNode scheduler. TODO(#40451):
+  replace these adapters with shared execution accepting plans and pinned
+  segcore handles directly. With `common.interface.zeroCopy` enabled, both SN
+  adapters and legacy `LocalSegment` objects use Arrow batch field refill.
+  `fetchFieldsAsRecord` pins/unpins LocalSegments locally and borrows SN
+  CSegments protected by the outer query task handles. These handles remain held
+  through execution and Arrow-to-proto conversion; the adapter does not release them.
+  Boost scorers follow the same ownership rule: SN adapters borrow the pinned
+  CSegments through asynchronous scoring, while LocalSegments keep their local
+  pin/unpin protocol. Both execute the shared segcore scoring implementation.
+- **Scope:** `RequeryOnView` returns Unimplemented. The Proxy orchestration and
+  complete SN/QN end-to-end flow above remain integration work.
+
+Key source paths: `internal/streamingnode/server/queryplan/server.go`,
+`internal/streamingnode/server/wal/adaptor/query_plan.go`,
+`internal/streamingnode/server/wal/snview/query_task_provider.go`,
+`internal/streamingnode/server/viewquery/{scheduler,executor,runner}.go`, and
+`internal/views/viewquery/server.go`.
+
+For hybrid search, Phase 1 builds independent mutable sub-requests for the
+optimizer. Once optimization succeeds, it transfers each temporary request's
+placeholder, serialized plan and partition slice back to its sub-request and
+clears those fields in the temporary request. No optimizer retains these slices
+after the transfer. Phase 2 expands independent sub-requests again for concurrent
+execution; the ownership transfer changes no RPC fields or query semantics.
 
 ### Advantages
 
@@ -72,71 +109,106 @@ For a single Shard of a Collection, the complete distributed query view consists
 
 ## 5. Data Side — Storage View (DataView)
 
-TODO(data_view.md): add the detailed DataView contract, event triggers, delayed
-visibility rules, and delete timetick handling when DataView is picked.
+The complete contract, event triggers, delayed-visibility rules, persistence,
+recovery, reference protection, and GC behavior are documented in
+[DataView Design](data_view.md).
 
 ### 5.1 Overview
 
 The storage view contains all complete, non-duplicate loadable Sealed Segment
 data ([B1] and [A1]). A version number DataVersion is introduced:
 
-- **streaming_version**: Incremented when new loadable data joins the view from
-  the write/import/copy-segment-complete side.
-- **compact_version**: Incremented when existing loadable membership is
-  replaced, removed, or trimmed.
+- **streaming_version**: Incremented only by the flush atomic txn
+  (PrepareFlush) for the growing-to-sealed query handoff.
+- **compact_version**: Incremented for every other loadable-membership change,
+  including import, copy completion, compaction, external refresh, L0 Manifest
+  advance, partition drop, and truncate.
 
-Version numbers are ordered lexicographically by `(streaming_version, compact_version)`.
+Version numbers are ordered lexicographically by
+`(streaming_version, compact_version)`.
+
+Completeness and logical non-duplication are projection contracts, not facts
+derived by DataViewManager. The manager validates unique Segment-ID placement,
+but the projection decides when a Segment is loadable and must not report
+overlapping logical data under different Segment IDs.
+
+Each partition also carries a packed Manifest-version array parallel to its
+packed Segment-ID array. Version `0` keeps the Coordinator SegmentMeta watch
+and resolves full SegmentInfo for loading. A positive version denotes a
+canonical StorageV3 Manifest: QueryNode derives its object-storage path from
+Collection/Partition/Segment IDs and the version, loads all data metadata from
+the Manifest, and does not watch Coordinator SegmentMeta for that Segment.
 
 ### 5.2 Data Structures
 
-TODO: `DataViewOfCollection`, `DataViewOfShard`, and `DataViewOfPartition` are
-not part of the state-machine-only proto extraction. Add their definitions when
-the DataView module is picked. `DataVersion` is already defined in
-[view.proto](../../../../pkg/proto/view.proto) because QueryViewVersion depends
-on it.
+`DataViewOfCollection`, `DataViewOfShard`, `DataViewOfPartition`, and
+`DataVersion` are defined in [view.proto](../../../../pkg/proto/view.proto).
 
 ### 5.3 Storage View Version Evolution Example
 
-The following timeline shows the version evolution process of the storage view (DataView), with each Segment labeled as `SegmentID @DataVersion`:
+The following timeline shows the current Collection-level snapshot behavior:
 
 | Step | Event | DataView Version | Segments in the View |
 |---|---|---|---|
-| 1 | Initial state | `1,0` | `Segment 1 @1,0`, `Segment 2 @1,0` |
-| 2 | Flush Segment 3 | `2,0` | `Segment 1 @1,0`, `Segment 2 @1,0`, `Segment 3 @2,0` |
-| 3 | Compact Segment 1 and 2 into Segment 4 and 5 | `2,1` | `Segment 4 @2,1`, `Segment 5 @2,1`, `Segment 3 @2,0` |
-| 4 | Cluster compaction or reshard | `2,2` | `Segment 6 @2,2`, `Segment 7 @2,2`, `Segment 8 @2,2`, `Segment 9 @2,2` |
-| 5 | Import Segment 5 | `3,0` | `Segment 6 @2,2`, `Segment 7 @2,2`, `Segment 8 @2,2`, `Segment 9 @2,2`, `Segment 10 @3,0` |
+| 1 | Create Collection | `(1,0)` | none; declared VChannels only |
+| 2 | Flush Segments 1 and 2 | `(2,0)` | `1, 2` |
+| 3 | Flush Segment 3 | `(3,0)` | `1, 2, 3` |
+| 4 | L0 compact updates Segment 1 Manifest | `(3,1)` | `1, 2, 3` |
+| 5 | Compact Segments 1 and 2 into Segments 4 and 5 | `(3,2)` | `3, 4, 5` |
+| 6 | Cluster compaction or reshard | `(3,3)` | `6, 7, 8, 9` |
+| 7 | Import Segment 10 | `(3,4)` | `6, 7, 8, 9, 10` |
 
-1. **Version 1,0**: Initial state, containing Segment 1 @1,0 and Segment 2 @1,0.
-2. **Version 2,0** (Flush Segment 3): Segment 3 @2,0 is added, streaming_version is incremented. Segments 1 and 2 retain their original version number @1,0.
-3. **Version 2,1** (Compact Segments 1 and 2 into Segments 4 and 5): Segments 1 and 2 are removed from the view, Segments 4 @2,1 and 5 @2,1 are added. compact_version is incremented. Segment 3 @2,0 remains unchanged.
-4. **Version 2,2** (Cluster Compaction or Reshard): All old Segments are replaced by Segments 6–9 @2,2.
-5. **Version 3,0** (Import Segment 5): Segment 10 @3,0 is added, streaming_version is incremented. Segments 6–9 retain @2,2.
+Each row is a complete immutable snapshot. Every Segment entry also has a
+Manifest version; the table omits the value for readability. The Collection
+snapshot is identified and ordered by `DataVersion`.
 
 Key observations:
-- Flush operations cause streaming_version to increment (e.g., 1,0 → 2,0 and 2,2 → 3,0).
-- Compact operations cause compact_version to increment (e.g., 2,0 → 2,1 → 2,2).
-- In this example, `SegmentID @DataVersion` labels the DataVersion when the
-  segment joined the view. DataView itself stores loadable membership and the
-  collection-level DataVersion, not a per-segment view-version field.
-- After Compaction, old Segments are permanently removed from the view.
+- Only the flush atomic txn causes streaming_version to increment (for
+  example, `(1,0) → (2,0) → (3,0)`).
+- All other membership changes cause compact_version to increment (for
+  example, `(3,1) → (3,2) → (3,3) → (3,4)`).
+- L0 compaction changes no membership but advances Segment Manifest versions;
+  this hard-triggers compact_version +1. Repeated L0 updates are collapsed by
+  the recompute queue before the next drain.
+- Compaction replaces its input membership with output membership in one
+  snapshot. Clustering compaction keeps its output Segments invisible until
+  they are published, so a snapshot rebuilt from the loadable projection never
+  exposes them early.
+- A Segment's Manifest version is monotonic across DataViews. Replaying the
+  same version is a no-op, a higher version advances it, and a lower version is
+  rejected (a projection reporting zero preserves the stored version).
+- TODO: A future StreamingNode refactor will add the safe, monotonic shard
+  `transform_start_after_timetick` protocol described in
+  [Transform Start-After TimeTick](transform_start_after_timetick.md). The
+  field is already present on the wire (`DataViewOfShard`, `QueryViewMeta`)
+  for QueryView consumer compatibility, but the current branch does not
+  advance or persist a meaningful frontier.
 
 ### 5.4 Constraints
 
-- Each DataVersion can correspond to one or more segment membership changes.
-- Once a Segment is compacted, it is removed from the storage view and will never return.
-- The view is not affected by offline tasks such as indexing.
+- Membership changes create immutable DataVersions through `Recompute`
+  (rebuilt from the SegmentMeta projection) or the flush atomic txn.
+- DataViewManager does not understand compaction lineage. The projection must
+  not report a superseded input Segment again after compaction removes it.
+- SegmentMeta and Manifest updates do not automatically rewrite DataView: a
+  mutation owner requests an asynchronous recompute after its SegmentMeta
+  commit, and the manager-internal worker rebuilds the snapshot from the
+  injected projection.
 - The storage view version number is at the Collection level (laying the groundwork for future capabilities such as Shard splitting).
-- DataView tracks loadable segment membership only. Segment content changes,
-  manifest updates, segment-level data version changes, and delete frontier
-  refreshes do not advance DataVersion unless membership changes.
+- DataView tracks loadable Segment membership and monotonically increasing
+  Manifest versions.
 
 ## 6. Query Side — Query View (QueryView)
 
 ### 6.1 Version Number
 
-Each query view version number is `(D, Q)`, ordered lexicographically:
-- **D increases**: Data undergoes storage-level changes.
+Each query view version number is `(D, Q)`, where
+`D = (streaming_version, compact_version)`. The full
+ordering is therefore lexicographic by `(streaming_version, compact_version,
+query_version)`:
+
+- **StreamingVersion or CompactVersion increases**: immediately generate a
+  QueryView because the growing/sealed handoff or loaded data changed.
 - **Q increases**: Data undergoes load-level redistribution.
 
 The query view version number is at the **ShardOnReplica level**, and its lifecycle is the same as the Load operation lifecycle of the corresponding replica.
@@ -147,20 +219,14 @@ The following timeline shows the version evolution process of the query view (Qu
 
 | Step | Event | QueryView Version | Segment Placement |
 |---|---|---|---|
-| 1 | Initial placement | `(1,1)` | `Segment 1 @Node1`, `Segment 2 @Node1` |
-| 2 | Balance: move Segment 2 from Node1 to Node2 | `(1,2)` | `Segment 1 @Node1`, `Segment 2 @Node2` |
-| 3 | DataVersion 2 arrives and adds Segment 3 | `(2,1)` | `Segment 1 @Node1`, `Segment 2 @Node2`, `Segment 3 @Node2` |
-| 4 | Recovery balance after Node2 crashes | `(2,2)` | `Segment 1 @Node1`, `Segment 2 @Node1`, `Segment 3 @Node1` |
-| 5 | DataVersion 3 arrives with more QueryNodes | `(3,1)` | `Segment 6 @Node1`, `Segment 7 @Node2`, `Segment 8 @Node3`, `Segment 9 @Node1`, `Segment 10 @Node2` |
-
-1. **Version (1,1)**: Initial state, Segment 1 @Node1, Segment 2 @Node1 (all Segments on Node 1).
-2. **Version (1,2)** (Balance Operation: Move Segment 2 From Node 1 To Node 2): Segment 2 is migrated to Node 2. DataVersion remains unchanged (D=1), QueryVersion is incremented (Q: 1→2).
-3. **Version (2,1)** (Data Version 2 Coming): DataView produces a new version (Flush adds Segment 3), Segment 3 @Node2 joins. DataVersion is incremented (D: 1→2), QueryVersion is reset (Q=1).
-4. **Version (2,2)** (Balance Operation For Recovery, such as Node 2 crashes): Node 2 crashes, all Segments are moved back to Node 1. QueryVersion is incremented (Q: 1→2).
-5. **Version (3,1)** (Data Version 3 Coming And More QueryNode): A new DataVersion arrives with more QueryNodes available, Segments 6–10 are distributed across Node 1, Node 2, and Node 3. DataVersion is incremented (D: 2→3), QueryVersion is reset (Q=1).
+| 1 | Place DataView `(2,0)` | `((2,0),1)` | `Segment 1 @Node1`, `Segment 2 @Node1` |
+| 2 | Balance: move Segment 2 from Node1 to Node2 | `((2,0),2)` | `Segment 1 @Node1`, `Segment 2 @Node2` |
+| 3 | DataView `(3,0)` adds Segment 3 | `((3,0),1)` | `Segment 1 @Node1`, `Segment 2 @Node2`, `Segment 3 @Node2` |
+| 4 | Recovery balance after Node2 crashes | `((3,0),2)` | `Segment 1 @Node1`, `Segment 2 @Node1`, `Segment 3 @Node1` |
+| 5 | DataView advances to `(3,3)` | `((3,3),1)` | `Segment 6 @Node1`, `Segment 7 @Node2`, `Segment 8 @Node3`, `Segment 9 @Node1`, `Segment 10 @Node2` |
 
 Key observations:
-- When D increases, Q is reset to 1 (new data at the storage level needs to be redistributed).
+- When composite D increases, Q is reset to 1 (new data at the storage level needs to be redistributed).
 - An increase in Q represents pure load-level redistribution (Balance, Recovery); the data itself does not change.
 - Node crashes are handled by generating a new QueryView, migrating crashed node's Segments to surviving nodes.
 
@@ -176,7 +242,8 @@ See the definitions of `QueryViewOfShard`, `QueryViewMeta`, `QueryViewVersion`,
 
 ### 6.5 Constraints
 
-- The version number `(D,Q)` of a QueryView in Up state may only increase non-strictly; rollback is not allowed.
+- The version number `((S,C),Q)` of a QueryView in Up state may only increase
+  non-strictly; rollback is not allowed.
 - A Shard maintains a fixed upper limit of query views (typically 2–3, similar to a Double Buffer / Triple Buffer pipeline design).
 
 ## 7. Query View Lifecycle State Machine
@@ -199,25 +266,38 @@ Key constraints:
 - Workflows across multiple view versions are completely independent, but through Coord state machine constraints, each node has at most one view in Preparing state.
 - QueryNode loss is handled only for active QN-targeted syncs: in Preparing it makes the view Unrecoverable, and in Dropping it counts that QN cleanup as complete. StreamingNode unavailability is handled by channel assignment, not by the QueryView per-view state machine.
 
+The SN renewable serving lease delays local Up → Down during active use; see
+[StreamingNode QueryView Serving Lease](query_view_lease.md).
+
 ## 8. Incremental Query Segment Lifecycle
 
-On StreamingNode, incremental Segments generated from WAL have their lifecycle entirely controlled by Coord instructions:
+In the target QueryView integration, incremental Segments generated from WAL on
+StreamingNode follow Coord-driven lifecycle instructions:
 
 ```
-Growing → Sealed [DataVersion D1] → Release
+Growing → Sealed [flush streaming_version S1] → Release
 ```
 
 | State | State Transition Condition | Description | Query Behavior |
 |---|---|---|---|
 | **Growing** | Discovered from WAL | Segment is in Growing state; Coord has not yet managed it | Always queried |
-| **Sealed [D1]** | Consumed Flush event from WAL | Segment becomes Sealed at version D1 (meaning Coord has seen this Segment in views ≥ D1) | View Version < (D1,0): Always queried; View Version ≥ (D1,0): Not queried (data is already on QN) |
-| **Release** | SN required DataVersion watermark ≥ D1 and no retained view needs this Segment | Segment does not participate in any queries | Noop |
+| **Sealed [S1]** | Consumed Flush publication metadata | Segment was added by a DataView whose `streaming_version` is S1 | QueryView DataVersion with `streaming_version < S1`: still query it on SN; `streaming_version >= S1`: the sealed handoff may exclude it from growing-side queries |
+| **Release** | SN required streaming-version watermark ≥ S1 and no retained view needs this Segment | Segment does not participate in any queries | Noop |
 
-The Sealed state is retained on StreamingNode until the local required DataVersion
-watermark reaches D1. This delayed GC is required for crash recovery when
-a persisted Up view is older than the latest local SegmentModule state: the old Up
-view still needs flushed-at-D1 segments as growing-side resources if its DataVersion is
-lower than D1.
+The Sealed state is retained on StreamingNode until the local required
+streaming-version watermark reaches S1. This delayed GC is required for crash
+recovery when a persisted Up view is older than the latest local SegmentModule
+state: the old Up view still needs a flushed-at-S1 Segment as a growing-side
+resource if its DataVersion has `streaming_version < S1`.
+
+The recovery-storage implementation binds the first Flush DataVersion in
+DataCoord SegmentInfo and StreamingNode SegmentAssignmentMeta as
+`sealed_at_data_version`. Retried commits return this immutable version.
+The current SN QueryRuntime integration uses this binding to filter query
+membership, advances reclamation by the minimum retained DataVersion, and pins
+physical resources for active queries. See the
+[SN WAL input view](../wal/streamingnode_vchannel_wal_view.md) for preparation,
+readiness and retention; the binding alone is not sufficient without this wiring.
 
 ## 9. Historical Query Segment Lifecycle
 
@@ -245,7 +325,8 @@ StreamingNode resources are prepared by QueryView state machines. The QueryView'
 When QueryView state enters the local Preparing/UpRecovering path, the state
 machine calls the PChannel-local
 `VChannelRecoveryModule` through `Acquire`; the module builds the query input
-view from its owned DataView, Segment state, and TransformLog, then keeps
+view from its StreamingNode-local WAL recovery data view, Segment state, and
+TransformLog, then keeps
 consuming DML so the recovered DataView only grows while the QueryView is live.
 Long-term resource retention is driven by local QueryView references.
 QueryNode sealed segment resources continue to follow QueryNode's segment/view resource
@@ -254,14 +335,20 @@ lifecycle.
 TODO(qnview/querynode_queryview_resource_preparation.md): add the QueryNode-side
 sealed segment resource preparation design when that resource module is picked.
 
-Example: If view A is unreasonable and causes OOM on a node, it is marked as Unrecoverable, but view A still exists on the node and already-loaded resources are not rolled back. After Coord detects this, the Balancer generates a new view B and pushes both views for atomic modification (A Dropped, B Preparing). Resources in (A diff B) are released, resources in (B diff A) are loaded, and resources in A∩B are retained.
+Target coordination example: if a node cannot satisfy view A's resource
+requirements, it reports A as Unrecoverable. Coord can prepare a replacement B
+and arrange A's cleanup. Successful shared resources may be reused according to
+their ownership rules; this does not require retaining a failed partial SN
+bootstrap. The current SN builder closes failed partial modules and constructs
+a fresh runtime on a locally retryable attempt. A process killed by OOM cannot
+report a view failure; node failure detection must handle that case.
 
-TODO(snview/streamingnode_resource_manager.md): add the StreamingNode query
-runtime manager design when that resource module is picked.
-TODO(snview/growing_segment_runtime.md): add the StreamingNode growing segment
-runtime design when that resource module is picked.
-TODO(snview/idf_oracle_runtime.md): add the StreamingNode IDF oracle runtime
-design when that resource module is picked.
+[SN WAL input view and QueryRuntime preparation](../wal/streamingnode_vchannel_wal_view.md)
+describes the implemented resource manager, GrowingRuntime bootstrap, readiness
+barriers and retention. Later load-info/schema changes and historical load-info
+resolution remain explicitly deferred there.
+[StreamingNode IDF Oracle Runtime](snview/idf_oracle_runtime.md) defines the
+single locally prepared BM25 aggregate shared by all QueryView DataVersions.
 
 ## 11. Coord and Node Interactions
 
@@ -269,6 +356,10 @@ design when that resource module is picked.
 
 - **Coord**: Obtains global information, computes and generates QueryViews, and advances the state machine. No longer manages resource preparation workflows.
 - **Node**: Responsible for preparing resources required by QueryViews and reporting resource preparation status.
+- **Failure ownership**: Worknodes retry locally recoverable failures. Coord
+  handles failures that cannot be resolved by the current node/view, including
+  resource shortages requiring placement or allocation changes. See the
+  [contract and current gaps](../wal/streamingnode_vchannel_wal_view.md#preparation-failure-ownership).
 
 ### 11.2 Component Modules
 
@@ -277,16 +368,16 @@ design when that resource module is picked.
 | Coord | Node Manager | Service discovery, maintaining the global available QueryNode list |
 | Coord | Resource Group Manager | Resource Group partitioning, generating QueryNode-ResourceGroup grouping relationships |
 | Coord | Replica Manager | Replica assignment, generating Replica-to-available-Node relationships |
-| Coord | DataView Manager | Maintaining the storage view list |
+| DataCoord (inside MixCoord) | DataView Manager | Maintaining immutable Collection snapshots and DataViewRefs |
 | Coord | Sealed Segment Balancer | Gathering information from all Managers, generating and distributing QueryViews |
 | Coord | QueryView Manager | View state machine transitions, syncing view information to all Nodes |
 | Streaming Node | PChannel Query Resource Manager | Preparing vchannel resources from versioned load info, latest schema, SegmentModule views, TransformLog, and BM25 resource RPC |
 | Streaming Node | QueryView Manager | Listening for view state machine changes, checking prepared view resources, and publishing the required DataVersion watermark for SN-only eviction |
-| Streaming Node | Pure Delete Stream Manager | Acting as subscription server, publishing Delete data to QueryNodes. TODO(../wal/transform_log_view_module.md): add the TransformLog view module design. |
+| Streaming Node | TransformLog adaptor | Local Summary-backed SN bootstrap is wired; remote QN publication remains planned. See [TransformLog](../wal/transform_log.md). |
 | Streaming Node | Growing Segment Manager | Incremental data management, maintaining Growing Segment lifecycle |
 | Query Node | QueryView Manager | Listening for view state machine changes, applying to Sealed Segments |
 | Query Node | Sealed Segment Manager | Historical data management, maintaining Sealed Segment lifecycle |
-| Query Node | Pure Delete Stream Manager | Acting as subscription client, applying Delete data to each Segment. TODO(../wal/transform_log_view_module.md): add the TransformLog view module design. |
+| Query Node | Pure Delete Stream Manager | Planned remote subscription client applying Delete data to each Segment; not wired by this SN extraction. |
 
 ### 11.3 SyncQueryView RPC
 
@@ -294,7 +385,7 @@ The sole RPC that unifies the synchronization layer behavior of StreamingNode
 and QueryNode. See the definitions of `ViewSyncService`, `SyncRequest`,
 `SyncResponse`, and related messages in
 [view.proto](../../../../pkg/proto/view.proto).
-TODO(syncer.md): add the Coord-side transport design when the syncer is picked.
+See [Syncer](syncer.md) for the Coord-side transport design.
 
 RPC rules:
 - The QueryView list is atomically applied to the local QueryViewManager.
@@ -311,7 +402,11 @@ For detailed per-node state machine analysis (entry conditions, automatic behavi
 
 ## 13. Consistency Implementation (Consistency Level)
 
-### Consistency Levels
+### TODO: Consistency Levels — Pending Discussion
+
+The table below records the proposed target behavior, not a completed capability
+matrix or a finalized replica-routing policy. Replica-SN MVCC selection and the
+mapping of consistency levels to primary/replica routing remain pending discussion.
 
 | Level | MvccTimestamp Generation Logic |
 |---|---|
@@ -320,17 +415,44 @@ For detailed per-node state machine analysis (entry conditions, automatic behavi
 | **Session** | Same as Strong |
 | **Eventual** | Same as Bounded |
 
-Key changes:
+**Current implementation:** `wal/adaptor/query_plan.go` handles every
+`ConsistencyLevel` request through the RW WAL's local query MVCC and rejects
+non-RW WALs with NotPrimary; it does not branch on the level's enum value.
+`GetMVCCTimestamp` also requires RW access. A request carrying an explicit
+`QueryPlanMVCC` follows a separate path and does not demonstrate that replica
+selection or the table's consistency-level routing has been implemented.
+
+The follow-up discussion must settle which node supplies each level's MVCC,
+what freshness/visibility it guarantees, and how the client routes or retries
+when only a non-primary node is available. No routing or MVCC behavior changes
+are part of this documentation update.
+
+Target changes:
 - GuaranteeTS assignment logic is moved down to StreamingNode, obtained from the WAL system.
 - MvccTimestamp and GuaranteeTS are merged and always kept consistent.
 - ts will trend toward LSN rather than system time in the future.
 
 ## 14. Pure Delete Stream
 
-StreamingNode already implements Pub-Sub capability. PureDeleteStreamManager wraps and optimizes on top of it:
+The current [TransformLog adaptor](../wal/transform_log.md) wraps WALSummary
+reads. Local SN bootstrap uses bounded replay; subsequent SN events arrive via
+the VChannel live path. The local unbounded mode has scoped notifications, but
+remote QN subscriptions and their retention integration remain planned.
+
+The following describes future pure-delete consumption options, not enabled
+QN behavior in this extraction:
 
 - During Recovery, pure delete stream subscriptions use batch processing for merging.
 - L0 is used on StreamingNode.
 - Bloom filter filtering + batch merge of delete data at the Node level.
 - Remote Load L0 (conflicts with Bloom filter filtering; choose one of the two).
 - Subscription catch-up merging.
+
+## 15. TODO: DDL Query Visibility
+
+[Truncate and Partition Drop Query Visibility](ddl_visibility.md) records the
+agreed follow-up: typed TransformLog entries delivered to the affected SN/QN
+consumers enable MVCC-based segment exclusion. Until then, DDL query visibility
+uses a QueryView handoff fence (QueryCoord target update in the legacy model).
+The MVCC extension and distributed delivery are outside the current SN query
+extraction PR; a progress barrier alone does not implement DDL visibility.

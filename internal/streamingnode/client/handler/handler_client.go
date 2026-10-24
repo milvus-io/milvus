@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/assignment"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
+	transformlogclient "github.com/milvus-io/milvus/internal/streamingnode/client/handler/transformlog"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
@@ -75,6 +76,15 @@ type ConsumerOptions struct {
 // HandlerClient wraps the PChannel Assignment Service Discovery.
 // Provides the ability to create pchannel-level producer and consumer.
 type HandlerClient interface {
+	// RunAnalyzer executes an analyzer on a streaming node.
+	RunAnalyzer(context.Context, *streamingpb.StreamingNodeRunAnalyzerRequest) (*streamingpb.StreamingNodeRunAnalyzerResponse, error)
+
+	// GetCollectionSchema resolves a schema on the current primary WAL owner.
+	GetCollectionSchema(context.Context, *streamingpb.StreamingNodeGetCollectionSchemaRequest) (*streamingpb.StreamingNodeGetCollectionSchemaResponse, error)
+
+	// ValidateAnalyzer prepares file resources and validates configs without a collection.
+	ValidateAnalyzer(context.Context, *streamingpb.StreamingNodeValidateAnalyzerRequest) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error)
+
 	// GetLatestMVCCTimestampIfLocal gets the latest mvcc timestamp of the vchannel.
 	// If the wal is located at remote, it will return 0, error.
 	GetLatestMVCCTimestampIfLocal(ctx context.Context, vchannel string) (uint64, error)
@@ -106,6 +116,9 @@ type HandlerClient interface {
 	// A consumer will not share stream connection with other consumers.
 	CreateConsumer(ctx context.Context, opts *ConsumerOptions) (Consumer, error)
 
+	// AcquireTransformLogStream creates a PChannel-level transform event stream.
+	AcquireTransformLogStream(ctx context.Context, pchannel string) (wal.TransformLogStream, error)
+
 	// Close closes the handler client.
 	// It will only stop the underlying service discovery, but don't stop the producer and consumer created by it.
 	// So please close Producer and Consumer created by it before close the handler client.
@@ -127,15 +140,17 @@ func NewHandlerClient(w types.AssignmentDiscoverWatcher) HandlerClient {
 		)
 	})
 	watcher := assignment.NewWatcher(rb.Resolver())
-	return &handlerClientImpl{
-		lifetime:         typeutil.NewLifetime(),
-		service:          lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingNodeHandlerServiceClient),
-		rb:               rb,
-		watcher:          watcher,
-		rebalanceTrigger: w,
-		newProducer:      producer.CreateProducer,
-		newConsumer:      consumer.CreateConsumer,
+	hc := &handlerClientImpl{
+		lifetime:                   typeutil.NewLifetime(),
+		service:                    lazygrpc.WithServiceCreator(conn, streamingpb.NewStreamingNodeHandlerServiceClient),
+		rb:                         rb,
+		watcher:                    watcher,
+		rebalanceTrigger:           w,
+		newProducer:                producer.CreateProducer,
+		newConsumer:                consumer.CreateConsumer,
+		newTransformLogEventStream: transformlogclient.CreateEventStream,
 	}
+	return hc
 }
 
 // getDialOptions returns grpc dial options.

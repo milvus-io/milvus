@@ -98,7 +98,7 @@ Disassemble(BinarySet& binarySet) {
         Config last_meta_data = Config::parse(std::string(
             reinterpret_cast<char*>(slice_meta->data.get()), slice_meta->size));
         for (auto& item : last_meta_data[META]) {
-            meta_info[META].emplace_back(item);
+            meta_info[META].emplace_back(std::move(item));
         }
     }
 
@@ -113,7 +113,7 @@ Disassemble(BinarySet& binarySet) {
     for (auto& key : slice_key_list) {
         Config slice_i;
         Slice(key, binarySet.Erase(key), slice_size, binarySet, slice_i);
-        meta_info[META].emplace_back(slice_i);
+        meta_info[META].emplace_back(std::move(slice_i));
     }
     if (!slice_key_list.empty()) {
         AppendSliceMeta(binarySet, meta_info);

@@ -14,6 +14,29 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util"
 )
 
+func TestCompactionPlansDatabaseInterceptor(t *testing.T) {
+	for _, tc := range []struct{ name, header, body, want string }{
+		{"header", "dbA", "", "dbA"},
+		{"explicit_body", "dbA", "dbB", "dbB"},
+		{"default", "", "", "default"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(util.HeaderDBName, tc.header))
+			for _, collection := range []string{"C", ""} {
+				req := &milvuspb.GetCompactionPlansRequest{DbName: tc.body, CollectionName: collection, CompactionID: 123}
+				_, err := DatabaseInterceptor()(ctx, req, &grpc.UnaryServerInfo{}, func(ctx context.Context, request interface{}) (interface{}, error) {
+					got := request.(*milvuspb.GetCompactionPlansRequest)
+					assert.Equal(t, tc.want, got.GetDbName())
+					assert.Equal(t, collection, got.GetCollectionName())
+					assert.Equal(t, int64(123), got.GetCompactionID())
+					return nil, nil
+				})
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestDatabaseInterceptor(t *testing.T) {
 	ctx := context.Background()
 	interceptor := DatabaseInterceptor()
@@ -208,6 +231,7 @@ func TestDatabaseInterceptor(t *testing.T) {
 			&milvuspb.OperatePrivilegeRequest{Entity: &milvuspb.GrantEntity{}},
 			&milvuspb.SelectGrantRequest{Entity: &milvuspb.GrantEntity{}},
 			&milvuspb.ManualCompactionRequest{},
+			&milvuspb.GetCompactionPlansRequest{},
 			&milvuspb.AddCollectionFieldRequest{},
 			&milvuspb.AddCollectionStructFieldRequest{},
 			&milvuspb.AlterCollectionSchemaRequest{},
@@ -239,7 +263,6 @@ func TestDatabaseInterceptor(t *testing.T) {
 			&milvuspb.CalcDistanceRequest{},
 			&milvuspb.FlushAllRequest{},
 			&milvuspb.GetCompactionStateRequest{},
-			&milvuspb.GetCompactionPlansRequest{},
 			&milvuspb.GetFlushAllStateRequest{},
 			&milvuspb.GetImportStateRequest{},
 		}

@@ -45,7 +45,7 @@ impl PinyinFilter {
 
         if let Some(v) = value.get("keep_original") {
             options.keep_original = v.as_bool().ok_or_else(|| {
-                TantivyBindingError::InternalError(
+                TantivyBindingError::InvalidArgument(
                     "keep_original must be a boolean value".to_string(),
                 )
             })?;
@@ -53,7 +53,7 @@ impl PinyinFilter {
 
         if let Some(v) = value.get("keep_full_pinyin") {
             options.keep_full_pinyin = v.as_bool().ok_or_else(|| {
-                TantivyBindingError::InternalError(
+                TantivyBindingError::InvalidArgument(
                     "keep_full_pinyin must be a boolean value".to_string(),
                 )
             })?;
@@ -61,7 +61,7 @@ impl PinyinFilter {
 
         if let Some(v) = value.get("keep_joined_full_pinyin") {
             options.keep_joined_full_pinyin = v.as_bool().ok_or_else(|| {
-                TantivyBindingError::InternalError(
+                TantivyBindingError::InvalidArgument(
                     "keep_joined_full_pinyin must be a boolean value".to_string(),
                 )
             })?;
@@ -69,7 +69,7 @@ impl PinyinFilter {
 
         if let Some(v) = value.get("keep_separate_first_letter") {
             options.keep_separate_first_letter = v.as_bool().ok_or_else(|| {
-                TantivyBindingError::InternalError(
+                TantivyBindingError::InvalidArgument(
                     "keep_separate_first_letter must be a boolean value".to_string(),
                 )
             })?;

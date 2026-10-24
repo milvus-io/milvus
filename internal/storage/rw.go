@@ -65,6 +65,7 @@ type rwOptions struct {
 	version             int64
 	op                  rwOp
 	bufferSize          int64
+	parallelChunkRead   ParallelChunkRead
 	downloader          downloaderFn
 	uploader            uploaderFn
 	multiPartUploadSize int64
@@ -74,11 +75,16 @@ type rwOptions struct {
 	neededFields        typeutil.Set[int64]
 	useLoonFFI          bool
 	pluginContext       *indexcgopb.StoragePluginContext
-	textColumnConfigs   []packed.TextColumnConfig // TEXT column configurations for REWRITE_ALL mode
-	textRefsAsBinary    bool                      // TEXT columns already contain encoded LOB refs and should be copied as-is
-	externalReader      packed.ExternalReaderContext
-	writerFormat        string
-	presentFields       map[FieldID]struct{} // reader: caller-known physically-present field IDs, skips a manifest re-read
+	// pluginContextSet distinguishes an explicit plaintext source from
+	// destination-schema fallback.
+	pluginContextSet  bool
+	textColumnConfigs []packed.TextColumnConfig // TEXT column configurations for REWRITE_ALL mode
+	textRefsAsBinary  bool                      // TEXT columns already contain encoded LOB refs and should be copied as-is
+	resolveTextLob    bool                      // decode manifest TEXT LOB refs into ordinary UTF8 values
+	externalReader    packed.ExternalReaderContext
+	writerFormat      string
+	presentFields     map[FieldID]struct{} // reader: caller-known physically-present field IDs, skips a manifest re-read
+	pkStatsConfig     *PkStatsConfig
 }
 
 func (o *rwOptions) validate() error {
@@ -133,6 +139,38 @@ func WithVersion(version int64) RwOption {
 func WithBufferSize(bufferSize int64) RwOption {
 	return func(options *rwOptions) {
 		options.bufferSize = bufferSize
+	}
+}
+
+// ParallelChunkRead configures WithParallelChunkRead.
+type ParallelChunkRead struct {
+	// Concurrency is how many chunks are read at once. <= 1 keeps the serial
+	// reader, with the buffer size of WithBufferSize, exactly as without this
+	// option.
+	Concurrency int
+	// BufferSize is the size of one read round of a chunk. It applies only to
+	// the parallel reader. <= 0 means packed.DefaultReadBufferSize: the packed
+	// reader treats a non-positive size as unlimited, which would make one
+	// round the whole chunk.
+	BufferSize int64
+}
+
+// WithParallelChunkRead makes a StorageV2/V3 binlog reader read up to
+// Concurrency chunks at once, still delivering records in order.
+//
+// Memory, on top of what the caller keeps:
+//   - Decoded records: the reader does not wait for the caller, so up to the
+//     whole input may be decoded before the first record is consumed. Use this
+//     option only when the caller materializes its input anyway, such as a sort.
+//   - Raw file bytes: each in-flight chunk holds one read round, at most
+//     BufferSize, until the round is replaced or the chunk is closed. The total
+//     is up to Concurrency * BufferSize, and never more than the raw input.
+//
+// Only the binlog reader of NewBinlogRecordReader uses this option. Readers of
+// StorageV1 data and manifest readers ignore it, including its BufferSize.
+func WithParallelChunkRead(p ParallelChunkRead) RwOption {
+	return func(options *rwOptions) {
+		options.parallelChunkRead = p
 	}
 }
 
@@ -202,9 +240,13 @@ func WithUseLoonFFI(useLoonFFI bool) RwOption {
 	}
 }
 
+// WithPluginContext supplies an already-resolved storage encryption context.
+// For manifest readers, calling it with nil explicitly marks a plaintext
+// source and disables fallback to the destination schema's CMEK properties.
 func WithPluginContext(pluginContext *indexcgopb.StoragePluginContext) RwOption {
 	return func(options *rwOptions) {
 		options.pluginContext = pluginContext
+		options.pluginContextSet = true
 	}
 }
 
@@ -226,9 +268,24 @@ func WithTextRefsAsBinary() RwOption {
 	}
 }
 
+// WithResolveTextLob makes a manifest reader resolve internal TEXT LOB
+// references into ordinary UTF8 values. It is opt-in because compaction paths
+// need the physical binary references for reuse and rewrite strategies.
+func WithResolveTextLob() RwOption {
+	return func(options *rwOptions) {
+		options.resolveTextLob = true
+	}
+}
+
 func WithWriterFormat(format string) RwOption {
 	return func(options *rwOptions) {
 		options.writerFormat = format
+	}
+}
+
+func WithPkStatsConfig(config PkStatsConfig) RwOption {
+	return func(options *rwOptions) {
+		options.pkStatsConfig = &config
 	}
 }
 
@@ -313,7 +370,7 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 	}
 
 	binlogReaderOpts := []BinlogReaderOption{}
-	var pluginContext *indexcgopb.StoragePluginContext
+	pluginContext := rwOptions.pluginContext
 	if hookutil.IsClusterEncryptionEnabled() {
 		// Reader pluginContext from import tasks
 		if rwOptions.pluginContext != nil {
@@ -373,10 +430,10 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 			if ferr != nil {
 				return nil, ferr
 			}
-			rr = newIterativePackedRecordReader(paths, readSchema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext, rwOptions.externalReader)
+			rr = newPackedChunksRecordReader(ctx, paths, readSchema, rwOptions, pluginContext)
 			rr = NewAbsentFieldFillRecordReader(rr, schema, present)
 		} else {
-			rr = newIterativePackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext, rwOptions.externalReader)
+			rr = newPackedChunksRecordReader(ctx, paths, schema, rwOptions, pluginContext)
 		}
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)
@@ -395,11 +452,25 @@ func NewManifestRecordReader(ctx context.Context, manifestPath string, neededSch
 	if err := rwOptions.validate(); err != nil {
 		return nil, err
 	}
+	// WithResolveTextLob selects milvus-storage SegmentReader, whose current C
+	// API cannot receive the source backup's key-retriever context. Reject the
+	// explicit source key here even when cluster encryption is disabled; letting
+	// it fall through would silently discard the key before opening the backup.
+	// CMEK sources without TEXT/LOB use PackedReader and remain supported.
+	if rwOptions.resolveTextLob && rwOptions.pluginContext != nil {
+		return nil, merr.WrapErrOperationNotSupportedMsg(
+			"CMEK-protected StorageV3 import does not support TEXT/LOB fields",
+		)
+	}
 
 	var pluginContext *indexcgopb.StoragePluginContext
-	if hookutil.IsClusterEncryptionEnabled() {
-		// Reader pluginContext from import tasks
-		if rwOptions.pluginContext != nil {
+	// In snapshot-source import, neededSchema describes the destination
+	// collection. WithPluginContext marks that the source context has already
+	// been resolved, including an explicit nil for a plaintext source, so target
+	// CMEK properties are never reused to read the source. Destination encryption
+	// is applied independently by the import write path.
+	if hookutil.IsClusterEncryptionEnabled() && !rwOptions.resolveTextLob {
+		if rwOptions.pluginContextSet {
 			pluginContext = rwOptions.pluginContext
 		} else {
 			ez := hookutil.GetEzByCollProperties(neededSchema.GetProperties(), rwOptions.collectionID)
@@ -437,6 +508,48 @@ func NewManifestRecordReader(ctx context.Context, manifestPath string, neededSch
 	}
 	inner, err := NewRecordReaderFromManifest(manifestPath, presentSchema,
 		rwOptions.bufferSize, rwOptions.storageConfig, pluginContext, option...)
+	if err != nil {
+		return nil, err
+	}
+	return NewAbsentFieldFillRecordReader(inner, neededSchema, present), nil
+}
+
+// NewTextDecodedManifestRecordReader resolves persisted TEXT references through
+// source-specific LOB paths and returns logical UTF8 columns. It is intended for
+// compaction that must rewrite LOB payloads into a different partition namespace.
+func NewTextDecodedManifestRecordReader(
+	_ context.Context,
+	manifestPath string,
+	neededSchema *schemapb.CollectionSchema,
+	textColumnConfigs []packed.TextColumnConfig,
+	option ...RwOption,
+) (RecordReader, error) {
+	rwOptions := DefaultReaderOptions()
+	for _, opt := range option {
+		opt(rwOptions)
+	}
+	if err := rwOptions.validate(); err != nil {
+		return nil, err
+	}
+	present := rwOptions.presentFields
+	if present == nil {
+		var err error
+		present, err = packed.GetManifestFieldIDs(manifestPath, rwOptions.storageConfig)
+		if err != nil {
+			return nil, err
+		}
+	}
+	presentSchema, err := filterSchemaToPresentFields(neededSchema, present)
+	if err != nil {
+		return nil, err
+	}
+	inner, err := NewTextDecodedManifestReader(
+		manifestPath,
+		presentSchema,
+		rwOptions.bufferSize,
+		rwOptions.storageConfig,
+		textColumnConfigs,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -530,7 +643,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 	}
 
 	opts := []StreamWriterOption{}
-	var pluginContext *indexcgopb.StoragePluginContext
+	pluginContext := rwOptions.pluginContext
 	if hookutil.IsClusterEncryptionEnabled() {
 		ez := hookutil.GetEzByCollProperties(schema.GetProperties(), collectionID)
 		if ez != nil {
@@ -541,7 +654,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			opts = append(opts, GetEncryptionOptions(ez.EzID, edek, encryptor)...)
 
 			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
-			if len(unsafe) > 0 {
+			if pluginContext == nil && len(unsafe) > 0 {
 				pluginContext = &indexcgopb.StoragePluginContext{
 					EncryptionZoneId: ez.EzID,
 					CollectionId:     ez.CollectionID,
@@ -550,7 +663,6 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			}
 		}
 	}
-
 	switch rwOptions.version {
 	case StorageV1:
 		rootPath := rwOptions.storageConfig.GetRootPath()
@@ -563,6 +675,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			rwOptions.storageConfig,
 			pluginContext,
 			rwOptions.writerFormat,
+			rwOptions.pkStatsConfig,
 		)
 	case StorageV3:
 		// if TEXT column configs are provided, use the text writer with TEXT column support
@@ -572,7 +685,9 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 				rwOptions.bufferSize, rwOptions.multiPartUploadSize, rwOptions.columnGroups,
 				rwOptions.storageConfig,
 				rwOptions.textColumnConfigs,
+				pluginContext,
 				rwOptions.writerFormat,
+				rwOptions.pkStatsConfig,
 			)
 		}
 		return newPackedManifestRecordWriter(collectionID, partitionID, segmentID, schema,
@@ -582,6 +697,7 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 			pluginContext,
 			rwOptions.textRefsAsBinary,
 			rwOptions.writerFormat,
+			rwOptions.pkStatsConfig,
 		)
 	}
 	return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)

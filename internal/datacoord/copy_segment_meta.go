@@ -308,6 +308,10 @@ func NewCopySegmentMeta(ctx context.Context, catalog metastore.DataCoordCatalog,
 			times:        taskcommon.NewTimes(),
 		}
 		t.task.Store(task)
+		// A failed task may have crashed before persisting cleanup admission or
+		// releasing its worker. Poll it again without reviving the durable state.
+		t.cleanupAdmissionPending.Store(task.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskFailed &&
+			len(task.GetCleanupPrefixes()) > 0 && task.GetNodeId() != NullNodeID)
 		tasks.add(t)
 	}
 

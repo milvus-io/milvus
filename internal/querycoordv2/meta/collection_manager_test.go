@@ -23,12 +23,14 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -106,7 +108,7 @@ func (suite *CollectionManagerSuite) SetupTest() {
 	suite.catalog = querycoord.NewCatalog(suite.kv)
 	suite.broker = NewMockBroker(suite.T())
 
-	suite.mgr = NewCollectionManager(suite.catalog)
+	suite.mgr = NewCollectionManager(suite.catalog, metacache.NewMetaStore(nil))
 	suite.loadAll()
 }
 
@@ -683,4 +685,24 @@ func (suite *CollectionManagerSuite) clearMemory() {
 
 func TestCollectionManager(t *testing.T) {
 	suite.Run(t, new(CollectionManagerSuite))
+}
+
+func TestCollectionManager_GetSchemaFromSharedStore(t *testing.T) {
+	store := metacache.NewMetaStore(nil)
+	store.PutCollection(&metacache.CollectionInfo{
+		ID: 100,
+		Schema: &schemapb.CollectionSchema{Name: "shared_coll", Fields: []*schemapb.FieldSchema{
+			{FieldID: 1, Name: "id", DataType: schemapb.DataType_Int64},
+			{FieldID: 2, Name: "vec", DataType: schemapb.DataType_FloatVector},
+		}},
+		Partitions:    []int64{10},
+		VChannelNames: []string{"ch-0"},
+	})
+
+	mgr := NewCollectionManager(nil, store) // nil catalog for unit test
+
+	schema := mgr.GetCollectionSchema(context.Background(), 100)
+	assert.NotNil(t, schema)
+	assert.Equal(t, "shared_coll", schema.GetName())
+	assert.Len(t, schema.GetFields(), 2)
 }

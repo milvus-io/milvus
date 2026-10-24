@@ -25,7 +25,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	prometheustestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/samber/lo"
@@ -41,7 +40,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	dataviewpkg "github.com/milvus-io/milvus/internal/dataview"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	mocks2 "github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -56,6 +57,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -63,7 +65,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // MetaReloadSuite tests meta reload & meta creation related logic
@@ -76,11 +77,17 @@ type MetaReloadSuite struct {
 
 func (suite *MetaReloadSuite) SetupTest() {
 	catalog := mocks2.NewDataCoordCatalog(suite.T())
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	suite.catalog = catalog
 }
 
 func (suite *MetaReloadSuite) resetMock() {
 	suite.catalog.ExpectedCalls = nil
+	// newMeta calls ListSegmentChangeGroups (group recovery) on every
+	// construction; SetupTest runs once per test method, not per subtest, so
+	// resetMock must re-register this default or the subtests that reach
+	// loadSegmentChangeGroups fail on an unexpected call (C12).
+	suite.catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 }
 
 func (suite *MetaReloadSuite) TestReloadFromKV() {
@@ -111,7 +118,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		_, err := newMeta(ctx, suite.catalog, nil, brk)
+		_, err := newMeta(ctx, suite.catalog, nil, metacache.NewMetaStore(suite.catalog), brk)
 		suite.Error(err)
 	})
 
@@ -132,7 +139,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		_, err := newMeta(ctx, suite.catalog, nil, brk)
+		_, err := newMeta(ctx, suite.catalog, nil, metacache.NewMetaStore(suite.catalog), brk)
 		suite.Error(err)
 	})
 
@@ -184,7 +191,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		meta, err := newMeta(ctx, suite.catalog, nil, brk)
+		meta, err := newMeta(ctx, suite.catalog, nil, metacache.NewMetaStore(suite.catalog), brk)
 		suite.NoError(err)
 		suite.NotNil(meta.compactionTargetMeta)
 		suite.Equal(datapb.TargetState_TARGET_STATE_ACTIVE, meta.compactionTargetMeta.GetCompactionTarget(10).GetState())
@@ -208,7 +215,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		_, err := newMeta(ctx, suite.catalog, nil, brk)
+		_, err := newMeta(ctx, suite.catalog, nil, metacache.NewMetaStore(suite.catalog), brk)
 		suite.Error(err)
 	})
 
@@ -228,7 +235,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		_, err := newMeta(ctx, suite.catalog, nil, brk)
+		_, err := newMeta(ctx, suite.catalog, nil, metacache.NewMetaStore(suite.catalog), brk)
 		suite.Error(err)
 	})
 
@@ -248,7 +255,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		_, err := newMeta(ctx, suite.catalog, nil, brk)
+		_, err := newMeta(ctx, suite.catalog, nil, metacache.NewMetaStore(suite.catalog), brk)
 		suite.Error(err)
 	})
 
@@ -268,7 +275,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		_, err := newMeta(ctx, suite.catalog, nil, brk)
+		_, err := newMeta(ctx, suite.catalog, nil, metacache.NewMetaStore(suite.catalog), brk)
 		suite.Error(err)
 	})
 
@@ -288,7 +295,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		_, err := newMeta(ctx, suite.catalog, nil, brk)
+		_, err := newMeta(ctx, suite.catalog, nil, metacache.NewMetaStore(suite.catalog), brk)
 		suite.Error(err)
 	})
 
@@ -308,7 +315,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		_, err := newMeta(ctx, suite.catalog, nil, brk)
+		_, err := newMeta(ctx, suite.catalog, nil, metacache.NewMetaStore(suite.catalog), brk)
 		suite.Error(err)
 	})
 
@@ -352,7 +359,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 				}, nil
 			})
 
-		meta, err := newMeta(ctx, suite.catalog, nil, brk)
+		meta, err := newMeta(ctx, suite.catalog, nil, metacache.NewMetaStore(suite.catalog), brk)
 		suite.NoError(err)
 		for _, collectionID := range []int64{100, 101, 102, 200, 201, 202} {
 			segments := meta.GetSegmentsOfCollection(ctx, collectionID)
@@ -416,8 +423,9 @@ func (suite *MetaBasicSuite) TestCollection() {
 }
 
 func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
+	ms := metacache.NewMetaStore(nil)
 	getLatestSegments := func() *SegmentsInfo {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewSegmentsInfo(ms)
 		for segID, segment := range map[UniqueID]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
 				ID:           1,
@@ -452,6 +460,13 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 
 	mockChMgr := mocks.NewChunkManager(suite.T())
 
+	// numL1Legacy reads DataCoordNumSegments for the fixture segments' labels
+	// (L1, unsorted, storage version 0, legacy format).
+	numL1Legacy := func(state commonpb.SegmentState) float64 {
+		return prometheustestutil.ToFloat64(metrics.DataCoordNumSegments.WithLabelValues(
+			state.String(), datapb.SegmentLevel_L1.String(), "unsorted", "0", "legacy"))
+	}
+
 	suite.Run("test complete with empty result segments", func() {
 		// Test case: when all data is deleted, compaction result should have empty Segments slice
 		// This verifies that completeMixCompactionMutation correctly handles the case
@@ -472,10 +487,11 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			chunkManager: mockChMgr,
 		}
 
-		infos, mutation, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		flushedBefore := numL1Legacy(commonpb.SegmentState_Flushed)
+		droppedBefore := numL1Legacy(commonpb.SegmentState_Dropped)
+		infos, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		suite.NoError(err)
 		suite.Empty(infos) // No output segments when all data deleted
-		suite.NotNil(mutation)
 
 		// check compactFrom segments are marked as Dropped
 		for _, segID := range []int64{1, 2} {
@@ -485,12 +501,9 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			suite.True(seg.GetCompacted())
 		}
 
-		// check mutation metrics - only input segments changed to Dropped
-		suite.EqualValues(-4, mutation.rowCountChange)
-		flushedUnsorted := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Flushed.String()][getSortStatus(false)]["0"][segmentMetricFormatLegacy]
-		suite.EqualValues(-2, flushedUnsorted)
-		droppedUnsorted := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Dropped.String()][getSortStatus(false)]["0"][segmentMetricFormatLegacy]
-		suite.EqualValues(2, droppedUnsorted)
+		// segment metrics - only input segments changed to Dropped
+		suite.EqualValues(-2, numL1Legacy(commonpb.SegmentState_Flushed)-flushedBefore)
+		suite.EqualValues(2, numL1Legacy(commonpb.SegmentState_Dropped)-droppedBefore)
 	})
 
 	suite.Run("test complete with compactTo 0 num of rows", func() {
@@ -516,13 +529,14 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			chunkManager: mockChMgr,
 		}
 
-		infos, mutation, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		flushedBefore := numL1Legacy(commonpb.SegmentState_Flushed)
+		droppedBefore := numL1Legacy(commonpb.SegmentState_Dropped)
+		infos, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		assert.NoError(suite.T(), err)
 		suite.Equal(1, len(infos))
 		info := infos[0]
 		suite.NoError(err)
 		suite.NotNil(info)
-		suite.NotNil(mutation)
 
 		// check compact to segments
 		suite.EqualValues(4, info.GetID())
@@ -539,20 +553,14 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			suite.NotEmpty(seg.GetDroppedAt())
 
 			suite.EqualValues(segID, seg.GetID())
-			suite.ElementsMatch(latestSegments.segments[segID].GetBinlogs(), seg.GetBinlogs())
-			suite.ElementsMatch(latestSegments.segments[segID].GetStatslogs(), seg.GetStatslogs())
-			suite.ElementsMatch(latestSegments.segments[segID].GetDeltalogs(), seg.GetDeltalogs())
+			suite.ElementsMatch(latestSegments.GetSegment(segID).GetBinlogs(), seg.GetBinlogs())
+			suite.ElementsMatch(latestSegments.GetSegment(segID).GetStatslogs(), seg.GetStatslogs())
+			suite.ElementsMatch(latestSegments.GetSegment(segID).GetDeltalogs(), seg.GetDeltalogs())
 		}
 
-		// check mutation metrics
-		suite.EqualValues(2, len(mutation.stateChange[datapb.SegmentLevel_L1.String()]))
-		suite.EqualValues(-4, mutation.rowCountChange)
-		suite.EqualValues(0, mutation.rowCountAccChange)
-		flushedUnsorted := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Flushed.String()][getSortStatus(false)]["0"][segmentMetricFormatLegacy]
-		suite.EqualValues(-2, flushedUnsorted)
-
-		droppedUnsorted := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Dropped.String()][getSortStatus(false)]["0"][segmentMetricFormatLegacy]
-		suite.EqualValues(3, droppedUnsorted)
+		// segment metrics - inputs dropped, empty compactTo segment added as Dropped
+		suite.EqualValues(-2, numL1Legacy(commonpb.SegmentState_Flushed)-flushedBefore)
+		suite.EqualValues(3, numL1Legacy(commonpb.SegmentState_Dropped)-droppedBefore)
 	})
 
 	suite.Run("test complete compaction mutation", func() {
@@ -578,13 +586,14 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			chunkManager: mockChMgr,
 		}
 
-		infos, mutation, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		flushedBefore := numL1Legacy(commonpb.SegmentState_Flushed)
+		droppedBefore := numL1Legacy(commonpb.SegmentState_Dropped)
+		infos, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		assert.NoError(suite.T(), err)
 		suite.Equal(1, len(infos))
 		info := infos[0]
 		suite.NoError(err)
 		suite.NotNil(info)
-		suite.NotNil(mutation)
 
 		// check newSegment
 		suite.EqualValues(3, info.GetID())
@@ -614,26 +623,20 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			suite.NotEmpty(seg.GetDroppedAt())
 
 			suite.EqualValues(segID, seg.GetID())
-			suite.ElementsMatch(latestSegments.segments[segID].GetBinlogs(), seg.GetBinlogs())
-			suite.ElementsMatch(latestSegments.segments[segID].GetStatslogs(), seg.GetStatslogs())
-			suite.ElementsMatch(latestSegments.segments[segID].GetDeltalogs(), seg.GetDeltalogs())
+			suite.ElementsMatch(latestSegments.GetSegment(segID).GetBinlogs(), seg.GetBinlogs())
+			suite.ElementsMatch(latestSegments.GetSegment(segID).GetStatslogs(), seg.GetStatslogs())
+			suite.ElementsMatch(latestSegments.GetSegment(segID).GetDeltalogs(), seg.GetDeltalogs())
 		}
 
-		// check mutation metrics
-		suite.EqualValues(2, len(mutation.stateChange[datapb.SegmentLevel_L1.String()]))
-		suite.EqualValues(-2, mutation.rowCountChange)
-		suite.EqualValues(2, mutation.rowCountAccChange)
-		flushedCount := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Flushed.String()][getSortStatus(false)]["0"][segmentMetricFormatLegacy]
-		suite.EqualValues(-1, flushedCount)
-
-		droppedCount := mutation.stateChange[datapb.SegmentLevel_L1.String()][commonpb.SegmentState_Dropped.String()][getSortStatus(false)]["0"][segmentMetricFormatLegacy]
-		suite.EqualValues(2, droppedCount)
+		// segment metrics - inputs dropped, compactTo segment added as Flushed
+		suite.EqualValues(-1, numL1Legacy(commonpb.SegmentState_Flushed)-flushedBefore)
+		suite.EqualValues(2, numL1Legacy(commonpb.SegmentState_Dropped)-droppedBefore)
 	})
 
 	suite.Run("mixed schema version mix compaction uses task schema version", func() {
 		latestSegments := getLatestSegments()
-		latestSegments.segments[1].SchemaVersion = 2
-		latestSegments.segments[2].SchemaVersion = 3
+		latestSegments.GetSegment(1).SchemaVersion = 2
+		latestSegments.GetSegment(2).SchemaVersion = 3
 		compactToSeg := &datapb.CompactionSegment{
 			SegmentID:           5,
 			InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogIDs(0, 50000)},
@@ -654,14 +657,14 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			chunkManager: mockChMgr,
 		}
 
-		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		infos, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		suite.NoError(err)
 		suite.Require().Len(infos, 1)
 		suite.EqualValues(9, infos[0].GetSchemaVersion())
 	})
 
 	suite.Run("mixed schema version clustering compaction uses task schema version", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewSegmentsInfo(ms)
 		for segID, segment := range map[UniqueID]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
 				ID:            1,
@@ -707,7 +710,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			chunkManager: mockChMgr,
 		}
 
-		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		infos, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		suite.NoError(err)
 		suite.Require().Len(infos, 1)
 		suite.EqualValues(9, infos[0].GetSchemaVersion())
@@ -734,16 +737,15 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			chunkManager: mockChMgr,
 		}
 
-		infos, mutation, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		infos, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		suite.Error(err)
 		suite.True(errors.Is(err, merr.ErrIllegalCompactionPlan))
 		suite.Nil(infos)
-		suite.Nil(mutation)
 	})
 
 	suite.Run("test L2 sort", func() {
 		getLatestSegments := func() *SegmentsInfo {
-			latestSegments := NewSegmentsInfo()
+			latestSegments := NewSegmentsInfo(ms)
 			for segID, segment := range map[UniqueID]*SegmentInfo{
 				1: {SegmentInfo: &datapb.SegmentInfo{
 					ID:           1,
@@ -789,13 +791,12 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			chunkManager: mockChMgr,
 		}
 
-		infos, mutation, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		infos, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		assert.NoError(suite.T(), err)
 		suite.Equal(1, len(infos))
 		info := infos[0]
 		suite.NoError(err)
 		suite.NotNil(info)
-		suite.NotNil(mutation)
 
 		// check newSegment
 		suite.EqualValues(2, info.GetID())
@@ -848,11 +849,10 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			chunkManager: mockChMgr,
 		}
 
-		infos, mutation, err = m.CompleteCompactionMutation(context.TODO(), task, result)
+		infos, err = m.CompleteCompactionMutation(context.TODO(), task, result)
 		suite.Error(err)
 		suite.True(errors.Is(err, merr.ErrIllegalCompactionPlan))
 		suite.Nil(infos)
-		suite.Nil(mutation)
 		suite.Equal(commonpb.SegmentState_Flushed, m.GetSegment(context.TODO(), 1).GetState())
 	})
 
@@ -860,7 +860,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 		// Input: two import segments with different commit_timestamps.
 		// After compaction, row timestamps are already rewritten to commit_ts
 		// by the compactor, so the output segment is normalized (CommitTimestamp = 0).
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewSegmentsInfo(ms)
 		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 1, CollectionID: 100, PartitionID: 10,
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
@@ -885,14 +885,14 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			segments:     latestSegments,
 			chunkManager: mockChMgr,
 		}
-		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		infos, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		suite.NoError(err)
 		suite.Require().Equal(1, len(infos))
 		suite.EqualValues(0, infos[0].GetCommitTimestamp(), "compaction normalizes commit_timestamp: row timestamps already rewritten")
 	})
 
 	suite.Run("sort compaction normalizes commit_timestamp to zero", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewSegmentsInfo(ms)
 		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 1, CollectionID: 100, PartitionID: 10,
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L2,
@@ -912,14 +912,14 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			segments:     latestSegments,
 			chunkManager: mockChMgr,
 		}
-		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		infos, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		suite.NoError(err)
 		suite.Require().Equal(1, len(infos))
 		suite.EqualValues(0, infos[0].GetCommitTimestamp(), "sort compaction normalizes commit_timestamp: row timestamps already rewritten")
 	})
 
 	suite.Run("clustering compaction normalizes commit_timestamp to zero", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewSegmentsInfo(ms)
 		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 1, CollectionID: 100, PartitionID: 10,
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
@@ -943,7 +943,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			segments:     latestSegments,
 			chunkManager: mockChMgr,
 		}
-		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		infos, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		suite.NoError(err)
 		suite.Require().Equal(1, len(infos))
 		suite.EqualValues(0, infos[0].GetCommitTimestamp(), "clustering compaction normalizes commit_timestamp: row timestamps already rewritten")
@@ -952,7 +952,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 	suite.Run("mix compaction with mixed import and normal segments normalizes to zero", func() {
 		// One import segment (commitTs=5000) + one normal segment (commitTs=0).
 		// After compaction, row timestamps are rewritten, so output is normalized.
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewSegmentsInfo(ms)
 		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 1, CollectionID: 100, PartitionID: 10,
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
@@ -977,14 +977,14 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			segments:     latestSegments,
 			chunkManager: mockChMgr,
 		}
-		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		infos, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		suite.NoError(err)
 		suite.Require().Equal(1, len(infos))
 		suite.EqualValues(0, infos[0].GetCommitTimestamp(), "compaction normalizes commit_timestamp: row timestamps already rewritten")
 	})
 
 	suite.Run("mix compaction with no import segments sets commit_timestamp to 0", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewSegmentsInfo(ms)
 		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 1, CollectionID: 100, PartitionID: 10,
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
@@ -1009,14 +1009,14 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			segments:     latestSegments,
 			chunkManager: mockChMgr,
 		}
-		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		infos, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		suite.NoError(err)
 		suite.Require().Equal(1, len(infos))
 		suite.EqualValues(0, infos[0].GetCommitTimestamp(), "normal segment compaction must not set commit_timestamp")
 	})
 
 	suite.Run("sort compaction normalizes stale import fallback start position", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewSegmentsInfo(ms)
 		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 1, CollectionID: 100, PartitionID: 10,
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L2,
@@ -1038,7 +1038,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			segments:     latestSegments,
 			chunkManager: mockChMgr,
 		}
-		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		infos, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		suite.NoError(err)
 		suite.Require().Equal(1, len(infos))
 		suite.EqualValues(5000, infos[0].GetStartPosition().GetTimestamp())
@@ -1046,7 +1046,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 	})
 
 	suite.Run("mix compaction preserves fallback start while normalizing fallback dml", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewSegmentsInfo(ms)
 		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 1, CollectionID: 100, PartitionID: 10,
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
@@ -1076,7 +1076,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 			segments:     latestSegments,
 			chunkManager: mockChMgr,
 		}
-		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		infos, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		suite.NoError(err)
 		suite.Require().Equal(1, len(infos))
 		suite.EqualValues(1000, infos[0].GetStartPosition().GetTimestamp())
@@ -1086,9 +1086,10 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 }
 
 func (suite *MetaBasicSuite) TestCompleteMixCompactionMutation_UsesCompositeUpdate() {
+	ms := metacache.NewMetaStore(nil)
 	mockChMgr := mocks.NewChunkManager(suite.T())
 
-	latestSegments := NewSegmentsInfo()
+	latestSegments := NewSegmentsInfo(ms)
 	latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 		ID:           1,
 		CollectionID: 100,
@@ -1127,6 +1128,7 @@ func (suite *MetaBasicSuite) TestCompleteMixCompactionMutation_UsesCompositeUpda
 	// still called AlterSegments directly (the old two-call path), mockery
 	// would fail the test with an unexpected-call panic.
 	catalog := mocks2.NewDataCoordCatalog(suite.T())
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	var gotActions []metastore.UpdateAction
 	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, actions ...metastore.UpdateAction) error {
@@ -1140,7 +1142,7 @@ func (suite *MetaBasicSuite) TestCompleteMixCompactionMutation_UsesCompositeUpda
 		chunkManager: mockChMgr,
 	}
 
-	_, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+	_, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 	suite.NoError(err)
 
 	// One AddSegment for the compactTo segment, then one UpdateSegment per
@@ -1165,6 +1167,7 @@ func (suite *MetaBasicSuite) TestCompleteMixCompactionMutation_UsesCompositeUpda
 }
 
 func (suite *MetaBasicSuite) TestBatchSaveDropSegments_UsesCompositeUpdate() {
+	ms := metacache.NewMetaStore(nil)
 	modSegments := map[int64]*SegmentInfo{
 		1: {SegmentInfo: &datapb.SegmentInfo{
 			ID:           1,
@@ -1185,6 +1188,7 @@ func (suite *MetaBasicSuite) TestBatchSaveDropSegments_UsesCompositeUpdate() {
 	// old two-call path), mockery would fail the test with an
 	// unexpected-call panic.
 	catalog := mocks2.NewDataCoordCatalog(suite.T())
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	var gotActions []metastore.UpdateAction
 	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, actions ...metastore.UpdateAction) error {
@@ -1194,7 +1198,7 @@ func (suite *MetaBasicSuite) TestBatchSaveDropSegments_UsesCompositeUpdate() {
 
 	m := &meta{
 		catalog:  catalog,
-		segments: NewSegmentsInfo(),
+		segments: NewSegmentsInfo(ms),
 	}
 
 	err := m.batchSaveDropSegments(context.TODO(), "ch-1", modSegments)
@@ -1225,7 +1229,8 @@ func (suite *MetaBasicSuite) TestBatchSaveDropSegments_UsesCompositeUpdate() {
 }
 
 func (suite *MetaBasicSuite) TestValidateSegmentState_BlockedBySnapshot() {
-	latestSegments := NewSegmentsInfo()
+	ms := metacache.NewMetaStore(nil)
+	latestSegments := NewSegmentsInfo(ms)
 	for segID, segment := range map[UniqueID]*SegmentInfo{
 		1: {SegmentInfo: &datapb.SegmentInfo{
 			ID:           1,
@@ -1297,7 +1302,7 @@ func (suite *MetaBasicSuite) TestValidateSegmentState_BlockedBySnapshot() {
 	})
 
 	suite.Run("rejected when only middle segment is protected in multi-segment task", func() {
-		multiSegments := NewSegmentsInfo()
+		multiSegments := NewSegmentsInfo(ms)
 		for segID, segment := range map[UniqueID]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 100, PartitionID: 10, State: commonpb.SegmentState_Flushed}},
 			2: {SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 100, PartitionID: 10, State: commonpb.SegmentState_Flushed}},
@@ -1496,6 +1501,7 @@ func (suite *MetaBasicSuite) TestRecalculateSegmentPosition() {
 }
 
 func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions() {
+	ms := metacache.NewMetaStore(nil)
 	mockChMgr := mocks.NewChunkManager(suite.T())
 
 	// Helper to build FieldBinlog with timestamps
@@ -1509,7 +1515,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 	}
 
 	suite.Run("mix_compaction_recalculates_positions_from_binlogs", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewSegmentsInfo(ms)
 		for segID, segment := range map[UniqueID]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
 				ID:            1,
@@ -1559,7 +1565,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 			chunkManager: mockChMgr,
 		}
 
-		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		infos, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		suite.NoError(err)
 		suite.Require().Equal(1, len(infos))
 
@@ -1570,7 +1576,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 	})
 
 	suite.Run("mix_compaction_uses_output_timestamps_when_normal_segment_precedes_import_commit", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewSegmentsInfo(ms)
 		for segID, segment := range map[UniqueID]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
 				ID:              1,
@@ -1622,7 +1628,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 			chunkManager: mockChMgr,
 		}
 
-		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		infos, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		suite.NoError(err)
 		suite.Require().Equal(1, len(infos))
 
@@ -1632,7 +1638,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 	})
 
 	suite.Run("mix_compaction_fallback_when_no_timestamps", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewSegmentsInfo(ms)
 		for segID, segment := range map[UniqueID]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
 				ID:            1,
@@ -1683,7 +1689,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 			chunkManager: mockChMgr,
 		}
 
-		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		infos, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		suite.NoError(err)
 		suite.Require().Equal(1, len(infos))
 
@@ -1693,7 +1699,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 	})
 
 	suite.Run("cluster_compaction_recalculates_positions", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewSegmentsInfo(ms)
 		for segID, segment := range map[UniqueID]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
 				ID:            1,
@@ -1742,7 +1748,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 			chunkManager: mockChMgr,
 		}
 
-		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		infos, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		suite.NoError(err)
 		suite.Require().Equal(1, len(infos))
 
@@ -1752,7 +1758,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 	})
 
 	suite.Run("cluster_compaction_fallback_when_no_timestamps", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewSegmentsInfo(ms)
 		for segID, segment := range map[UniqueID]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
 				ID:            1,
@@ -1801,7 +1807,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 			chunkManager: mockChMgr,
 		}
 
-		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		infos, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		suite.NoError(err)
 		suite.Require().Equal(1, len(infos))
 
@@ -1810,7 +1816,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 	})
 
 	suite.Run("sort_compaction_recalculates_positions", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewSegmentsInfo(ms)
 		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:             1,
 			CollectionID:   100,
@@ -1846,7 +1852,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 			chunkManager: mockChMgr,
 		}
 
-		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		infos, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		suite.NoError(err)
 		suite.Require().Equal(1, len(infos))
 
@@ -1855,7 +1861,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 	})
 
 	suite.Run("sort_compaction_fallback_when_no_timestamps", func() {
-		latestSegments := NewSegmentsInfo()
+		latestSegments := NewSegmentsInfo(ms)
 		latestSegments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:             1,
 			CollectionID:   100,
@@ -1891,7 +1897,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 			chunkManager: mockChMgr,
 		}
 
-		infos, _, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+		infos, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 		suite.NoError(err)
 		suite.Require().Equal(1, len(infos))
 
@@ -1903,6 +1909,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 func (suite *MetaBasicSuite) TestSetSegment() {
 	meta := suite.meta
 	catalog := mocks2.NewDataCoordCatalog(suite.T())
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	meta.catalog = catalog
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1988,9 +1995,10 @@ func (suite *MetaBasicSuite) TestSetSegment() {
 }
 
 func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
+	ms := metacache.NewMetaStore(nil)
 	// Helper to build a SegmentsInfo containing a single healthy Flushed segment with the given ID.
 	makeSegments := func(segID int64, state commonpb.SegmentState) *SegmentsInfo {
-		segs := NewSegmentsInfo()
+		segs := NewSegmentsInfo(metacache.NewMetaStore(nil))
 		segs.SetSegment(segID, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:            segID,
 			CollectionID:  100,
@@ -2019,10 +2027,9 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				{SegmentID: 1},
 			},
 		}
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.Error(err)
 		suite.Nil(infos)
-		suite.Nil(mutation)
 	})
 
 	suite.Run("too many result segments", func() {
@@ -2040,17 +2047,16 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				{SegmentID: 2}, // two results — should error
 			},
 		}
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.Error(err)
 		suite.Nil(infos)
-		suite.Nil(mutation)
 	})
 
 	suite.Run("segment not found", func() {
 		// Segment 99 is not in meta.
 		m := &meta{
 			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
-			segments: NewSegmentsInfo(),
+			segments: NewSegmentsInfo(ms),
 		}
 		task := &datapb.CompactionTask{
 			InputSegments: []int64{99},
@@ -2061,11 +2067,10 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				{SegmentID: 99},
 			},
 		}
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.Error(err)
 		suite.ErrorIs(err, merr.ErrSegmentNotFound)
 		suite.Nil(infos)
-		suite.Nil(mutation)
 	})
 
 	suite.Run("segment dropped", func() {
@@ -2082,11 +2087,10 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				{SegmentID: 1},
 			},
 		}
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.Error(err)
 		suite.ErrorIs(err, merr.ErrSegmentNotFound)
 		suite.Nil(infos)
-		suite.Nil(mutation)
 	})
 
 	suite.Run("in-place result with matching base manifest is adopted", func() {
@@ -2117,9 +2121,8 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				},
 			},
 		}
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.NoError(err)
-		suite.NotNil(mutation)
 		suite.Require().Len(infos, 1)
 		suite.EqualValues(1, infos[0].GetID())
 		suite.Equal(resultManifest, infos[0].GetManifestPath())
@@ -2165,7 +2168,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				},
 			},
 		}
-		infos, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.NoError(err)
 		suite.Require().Len(infos, 1)
 		suite.Require().NotNil(infos[0].GetStats())
@@ -2218,7 +2221,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				},
 			},
 		}
-		infos, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.NoError(err)
 		suite.Require().Len(infos, 1)
 
@@ -2269,7 +2272,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				},
 			},
 		}
-		infos, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.NoError(err)
 		suite.Require().Len(infos, 1)
 
@@ -2334,7 +2337,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				},
 			},
 		}
-		infos, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.NoError(err)
 		suite.Require().Len(infos, 1)
 		// The pre-existing group survives and both newly appended groups are
@@ -2355,7 +2358,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		// Replay: the segment now sits at resultManifest, so this is the
 		// idempotent-adoption branch. The merge must not duplicate either new
 		// group, and the manifest-gated increment must not be accumulated twice.
-		replayed, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		replayed, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.NoError(err)
 		suite.Require().Len(replayed, 1)
 		suite.Require().Len(replayed[0].GetBinlogs(), 3)
@@ -2403,7 +2406,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				},
 			},
 		}
-		_, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		_, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.NoError(err)
 
 		updated := m.segments.GetSegment(1)
@@ -2463,11 +2466,10 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				},
 			},
 		}
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.Error(err)
 		suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
 		suite.Nil(infos)
-		suite.Nil(mutation)
 	})
 
 	// Defensive: base == current only claims the pointer has not drifted; it does
@@ -2508,11 +2510,10 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 						},
 					},
 				}
-				infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+				infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 				suite.Error(err)
 				suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
 				suite.Nil(infos)
-				suite.Nil(mutation)
 			})
 		}
 	})
@@ -2549,9 +2550,8 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				},
 			},
 		}
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.NoError(err)
-		suite.NotNil(mutation)
 		suite.Require().Len(infos, 1)
 		suite.Equal("base/manifest-12", infos[0].GetManifestPath())
 	})
@@ -2575,10 +2575,9 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				},
 			},
 		}
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.Error(err)
 		suite.Nil(infos)
-		suite.Nil(mutation)
 	})
 
 	suite.Run("replacement result accepts expanded preallocated segment ID range", func() {
@@ -2618,9 +2617,8 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.NoError(err)
-		suite.NotNil(mutation)
 		suite.Require().Len(infos, 1)
 		suite.EqualValues(2, infos[0].GetID())
 		suite.Equal(commonpb.SegmentState_Flushed, infos[0].GetState())
@@ -2667,9 +2665,8 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.NoError(err)
-		suite.NotNil(mutation)
 		suite.Require().Len(infos, 1)
 		suite.EqualValues(2, infos[0].GetID())
 		suite.Equal(commonpb.SegmentState_Dropped, infos[0].GetState())
@@ -2728,9 +2725,8 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 					},
 				}
 
-				infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+				infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 				suite.NoError(err)
-				suite.NotNil(mutation)
 				suite.Require().Len(infos, 1)
 				suite.Equal(tc.inputIsSorted, infos[0].GetIsSorted())
 				suite.Equal(tc.inputIsSortedByNamespace, infos[0].GetIsSortedByNamespace())
@@ -2768,9 +2764,8 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.NoError(err)
-		suite.NotNil(mutation)
 		suite.Require().Len(infos, 1)
 		suite.EqualValues(2, infos[0].GetID())
 		suite.EqualValues(3, infos[0].GetSchemaVersion())
@@ -2802,10 +2797,9 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
 		suite.Nil(infos)
-		suite.Nil(mutation)
 	})
 
 	suite.Run("replacement result rejects invisible input", func() {
@@ -2833,10 +2827,9 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
 		suite.Nil(infos)
-		suite.Nil(mutation)
 	})
 
 	suite.Run("replacement result rejects nil task schema", func() {
@@ -2861,10 +2854,9 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.Error(err)
 		suite.Nil(infos)
-		suite.Nil(mutation)
 	})
 
 	suite.Run("replacement result rejects non-begin preallocated segment ID", func() {
@@ -2890,14 +2882,13 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.Error(err)
 		suite.Nil(infos)
-		suite.Nil(mutation)
 	})
 
 	suite.Run("missing manifest rejected", func() {
-		segs := NewSegmentsInfo()
+		segs := NewSegmentsInfo(ms)
 		segs.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:            1,
 			CollectionID:  100,
@@ -2927,10 +2918,9 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				},
 			},
 		}
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.Error(err)
 		suite.Nil(infos)
-		suite.Nil(mutation)
 	})
 
 	suite.Run("non-v3 result rejected", func() {
@@ -2952,14 +2942,13 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				},
 			},
 		}
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.Error(err)
 		suite.Nil(infos)
-		suite.Nil(mutation)
 	})
 
 	suite.Run("v3 success - forward manifest updated", func() {
-		segs := NewSegmentsInfo()
+		segs := NewSegmentsInfo(ms)
 		currentManifest := packed.MarshalManifestPath("/data/segments/1", 1)
 		resultManifest := packed.MarshalManifestPath("/data/segments/1", 2)
 		segs.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
@@ -2995,9 +2984,8 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 				},
 			},
 		}
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.NoError(err)
-		suite.NotNil(mutation)
 		suite.Require().Len(infos, 1)
 
 		suite.Equal(resultManifest, infos[0].GetManifestPath())
@@ -3043,9 +3031,8 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.NoError(err)
-		suite.NotNil(mutation)
 		suite.Require().Len(infos, 1)
 		suite.Equal(manifestPath, infos[0].GetManifestPath())
 		suite.EqualValues(3, infos[0].GetSchemaVersion())
@@ -3087,9 +3074,8 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.NoError(err)
-		suite.NotNil(mutation)
 		suite.Require().Len(infos, 1)
 		suite.EqualValues(350, infos[0].GetStats().GetInsertBinlogSize())
 		suite.EqualValues(3, infos[0].GetStats().GetInsertBinlogCount())
@@ -3124,9 +3110,8 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.NoError(err)
-		suite.NotNil(mutation)
 		suite.Require().Len(infos, 1)
 		suite.Equal(manifestPath, infos[0].GetManifestPath())
 		suite.EqualValues(3, infos[0].GetSchemaVersion())
@@ -3157,10 +3142,9 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
 		suite.Nil(infos)
-		suite.Nil(mutation)
 		suite.Empty(m.segments.GetSegment(1).GetManifestPath())
 	})
 
@@ -3186,9 +3170,8 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.NoError(err)
-		suite.NotNil(mutation)
 		suite.Require().Len(infos, 1)
 		suite.Equal(commonpb.SegmentState_Dropped, infos[0].GetState())
 		suite.Equal(commonpb.SegmentState_Dropped, m.segments.GetSegment(2).GetState())
@@ -3226,10 +3209,9 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.ErrorIs(err, catalogErr)
 		suite.Nil(infos)
-		suite.Nil(mutation)
 		unchanged := m.segments.GetSegment(1)
 		suite.Equal(currentManifest, unchanged.GetManifestPath())
 		suite.EqualValues(1, unchanged.GetSchemaVersion())
@@ -3263,10 +3245,9 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.ErrorIs(err, catalogErr)
 		suite.Nil(infos)
-		suite.Nil(mutation)
 		suite.Equal(commonpb.SegmentState_Flushed, m.segments.GetSegment(1).GetState())
 		suite.Nil(m.segments.GetSegment(2))
 	})
@@ -3297,10 +3278,9 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
 		suite.Nil(infos)
-		suite.Nil(mutation)
 		suite.Equal(currentManifest, m.segments.GetSegment(1).GetManifestPath())
 	})
 
@@ -3332,10 +3312,9 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
 		suite.Nil(infos)
-		suite.Nil(mutation)
 		suite.Equal(currentManifest, m.segments.GetSegment(1).GetManifestPath())
 	})
 
@@ -3367,10 +3346,9 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
 		suite.Nil(infos)
-		suite.Nil(mutation)
 		suite.Equal(currentManifest, m.segments.GetSegment(1).GetManifestPath())
 	})
 
@@ -3401,10 +3379,9 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
 		suite.Nil(infos)
-		suite.Nil(mutation)
 		suite.Equal(currentManifest, m.segments.GetSegment(1).GetManifestPath())
 	})
 
@@ -3435,10 +3412,9 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 			},
 		}
 
-		infos, mutation, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 		suite.ErrorIs(err, merr.ErrIllegalCompactionPlan)
 		suite.Nil(infos)
-		suite.Nil(mutation)
 		suite.Equal(currentManifest, m.segments.GetSegment(1).GetManifestPath())
 	})
 
@@ -3447,7 +3423,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		// Binlogs/Deltalogs come back empty, and Stats is the only durable
 		// record of the segment's footprint. Two successive materializations
 		// must both land on top of it.
-		segs := NewSegmentsInfo()
+		segs := NewSegmentsInfo(ms)
 		segs.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:             1,
 			CollectionID:   100,
@@ -3496,7 +3472,7 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 					},
 				},
 			}
-			_, _, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+			_, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
 			suite.NoError(err)
 		}
 
@@ -3513,8 +3489,9 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 }
 
 func (suite *MetaBasicSuite) TestCompleteCompactionMutation_DispatchesBumpSchemaVersion() {
+	ms := metacache.NewMetaStore(nil)
 	manifestPath := packed.MarshalManifestPath("/data/segments/1", 10)
-	segs := NewSegmentsInfo()
+	segs := NewSegmentsInfo(ms)
 	segs.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 		ID:             1,
 		CollectionID:   100,
@@ -3548,9 +3525,8 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_DispatchesBumpSchema
 		},
 	}
 
-	infos, mutation, err := m.CompleteCompactionMutation(context.TODO(), task, result)
+	infos, err := m.CompleteCompactionMutation(context.TODO(), task, result)
 	suite.NoError(err)
-	suite.NotNil(mutation)
 	suite.Require().Len(infos, 1)
 	suite.EqualValues(task.GetSchema().GetVersion(), infos[0].GetSchemaVersion())
 }
@@ -3659,7 +3635,7 @@ func TestMeta_Basic(t *testing.T) {
 		catalog := datacoord.NewCatalog(metakv, "", "")
 		broker := broker.NewMockBroker(t)
 		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-		meta, err := newMeta(context.TODO(), catalog, nil, broker)
+		meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 		assert.NoError(t, err)
 
 		err = meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{}))
@@ -3674,7 +3650,7 @@ func TestMeta_Basic(t *testing.T) {
 		metakv2.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, nil).Maybe()
 		metakv2.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("failed"))
 		catalog = datacoord.NewCatalog(metakv2, "", "")
-		meta, err = newMeta(context.TODO(), catalog, nil, broker)
+		meta, err = newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 		assert.NoError(t, err)
 		// nil, since no segment yet
 		err = meta.DropSegment(context.TODO(), 0)
@@ -3687,7 +3663,7 @@ func TestMeta_Basic(t *testing.T) {
 		assert.Error(t, err)
 
 		catalog = datacoord.NewCatalog(metakv, "", "")
-		meta, err = newMeta(context.TODO(), catalog, nil, broker)
+		meta, err = newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 		assert.NoError(t, err)
 		assert.NotNil(t, meta)
 	})
@@ -3737,18 +3713,26 @@ func TestMeta_Basic(t *testing.T) {
 		assert.Equal(t, 0, len(result))
 	})
 
-	t.Run("GetClonedCollectionInfo", func(t *testing.T) {
+	t.Run("GetCollection", func(t *testing.T) {
 		// collection does not exist
-		ret := meta.GetClonedCollectionInfo(-1)
+		ret := meta.GetCollection(-1)
 		assert.Nil(t, ret)
 
+		// AddCollection stores the pointer and GetCollection hands it back, so
+		// comparing the argument against the result would compare an object
+		// with itself and pass whatever the store did. Assert against
+		// independently-built expectations instead.
 		collInfo.Properties = map[string]string{
 			common.CollectionTTLConfigKey: "3600",
 		}
 		meta.AddCollection(collInfo)
-		ret = meta.GetClonedCollectionInfo(collInfo.ID)
-		equalCollectionInfo(t, collInfo, ret)
+		ret = meta.GetCollection(collInfo.ID)
+		require.NotNil(t, ret)
+		assert.Equal(t, collInfo.ID, ret.ID)
+		assert.Equal(t, "3600", ret.Properties[common.CollectionTTLConfigKey])
+		assert.Empty(t, ret.StartPositions)
 
+		// A re-add must replace the entry wholesale, not merge into it.
 		collInfo.StartPositions = []*commonpb.KeyDataPair{
 			{
 				Key:  "k",
@@ -3756,8 +3740,11 @@ func TestMeta_Basic(t *testing.T) {
 			},
 		}
 		meta.AddCollection(collInfo)
-		ret = meta.GetClonedCollectionInfo(collInfo.ID)
-		equalCollectionInfo(t, collInfo, ret)
+		ret = meta.GetCollection(collInfo.ID)
+		require.NotNil(t, ret)
+		require.Len(t, ret.StartPositions, 1)
+		assert.Equal(t, "k", ret.StartPositions[0].GetKey())
+		assert.Equal(t, []byte("v"), ret.StartPositions[0].GetData())
 	})
 
 	t.Run("Test GetCollectionBinlogSize", func(t *testing.T) {
@@ -3784,7 +3771,7 @@ func TestMeta_Basic(t *testing.T) {
 		assert.Equal(t, int64(size0+size1), quotaInfo.CollectionBinlogSize[collID])
 		assert.Equal(t, int64(size0+size1), quotaInfo.TotalBinlogSize)
 
-		meta.collections.Insert(collID, collInfo)
+		meta.AddCollection(collInfo)
 		quotaInfo = meta.GetQuotaInfo()
 		assert.Len(t, quotaInfo.CollectionBinlogSize, 1)
 		assert.Equal(t, int64(size0+size1), quotaInfo.CollectionBinlogSize[collID])
@@ -3947,8 +3934,8 @@ func TestAddL0DeltalogsAndUpdateManifestOperator(t *testing.T) {
 		}},
 	}}
 
-	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
-		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
+	patch := mockL0ManifestSubmissions(
+		func(_ context.Context, _ *packed.ManifestIOContext, manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
 			require.Equal(t, oldManifest, manifestPath)
 			require.NotNil(t, storageConfig)
 			require.Len(t, deltaLogs, 1)
@@ -3956,7 +3943,7 @@ func TestAddL0DeltalogsAndUpdateManifestOperator(t *testing.T) {
 			require.EqualValues(t, 3, deltaLogs[0].NumEntries)
 			return newManifest, nil
 		},
-	).Build()
+	)
 	defer patch.UnPatch()
 
 	cache := make(map[int64]string)
@@ -4019,11 +4006,11 @@ func TestAddL0DeltalogsAccumulatesDeltaStatsAfterRestart(t *testing.T) {
 		}},
 	}}
 
-	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
-		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
+	patch := mockL0ManifestSubmissions(
+		func(_ context.Context, _ *packed.ManifestIOContext, manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
 			return newManifest, nil
 		},
-	).Build()
+	)
 	defer patch.UnPatch()
 
 	cache := make(map[int64]string)
@@ -4080,12 +4067,12 @@ func TestAddL0DeltalogsRetryDoesNotDoubleCountDeltaStats(t *testing.T) {
 	}}
 
 	var commitCalls int
-	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
-		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
+	patch := mockL0ManifestSubmissions(
+		func(_ context.Context, _ *packed.ManifestIOContext, manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
 			commitCalls++
 			return newManifest, nil
 		},
-	).Build()
+	)
 	defer patch.UnPatch()
 
 	// First run: commits manifest, accumulates deltas.
@@ -4131,13 +4118,13 @@ func TestAddL0DeltalogsAndUpdateManifestOperatorCommitsManifestsConcurrently(t *
 		ManifestPath: oldManifest2,
 	})))
 
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.Key, "2")
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.Key)
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ManifestCommitConcurrency.Key, "2")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.ManifestCommitConcurrency.Key)
 
 	entered := make(chan string, 2)
 	release := make(chan struct{})
-	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
-		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
+	patch := mockL0ManifestSubmissions(
+		func(_ context.Context, _ *packed.ManifestIOContext, manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
 			entered <- manifestPath
 			<-release
 			switch manifestPath {
@@ -4150,7 +4137,7 @@ func TestAddL0DeltalogsAndUpdateManifestOperatorCommitsManifestsConcurrently(t *
 				return "", nil
 			}
 		},
-	).Build()
+	)
 	defer patch.UnPatch()
 
 	errCh := make(chan error, 1)
@@ -4201,8 +4188,8 @@ func TestAddL0DeltalogsAndUpdateManifestOperatorSerializesConcurrentUpdates(t *t
 
 	var mu sync.Mutex
 	calls := make([]string, 0, 2)
-	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
-		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
+	patch := mockL0ManifestSubmissions(
+		func(_ context.Context, _ *packed.ManifestIOContext, manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			calls = append(calls, manifestPath)
@@ -4211,7 +4198,7 @@ func TestAddL0DeltalogsAndUpdateManifestOperatorSerializesConcurrentUpdates(t *t
 			}
 			return manifest9, nil
 		},
-	).Build()
+	)
 	defer patch.UnPatch()
 
 	makeDelta := func(logID int64) []*datapb.FieldBinlog {
@@ -4287,12 +4274,12 @@ func TestAddL0DeltalogsAndUpdateManifestOperatorCacheDoesNotRegressManifest(t *t
 	})))
 
 	calls := 0
-	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
-		func(manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
+	patch := mockL0ManifestSubmissions(
+		func(_ context.Context, _ *packed.ManifestIOContext, manifestPath string, storageConfig *indexpb.StorageConfig, deltaLogs []packed.DeltaLogEntry) (string, error) {
 			calls++
 			return "", errors.New("should not be called")
 		},
-	).Build()
+	)
 	defer patch.UnPatch()
 
 	cache := map[int64]string{200: manifest8}
@@ -4693,7 +4680,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		catalog := datacoord.NewCatalog(metakv, "", "")
 		broker := broker.NewMockBroker(t)
 		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-		meta, err := newMeta(context.TODO(), catalog, nil, broker)
+		meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 		assert.NoError(t, err)
 
 		segmentInfo := &SegmentInfo{
@@ -4747,77 +4734,6 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		seg = meta.GetSegment(context.TODO(), 1)
 		assert.Equal(t, uint64(0), seg.GetCommitTimestamp())
 	})
-}
-
-func TestSegmentMetricFormatLabel(t *testing.T) {
-	tests := []struct {
-		name    string
-		segment *SegmentInfo
-		want    string
-	}{
-		{
-			name: "legacy storage without format",
-			segment: NewSegmentInfo(&datapb.SegmentInfo{
-				StorageVersion: storage.StorageV1,
-			}),
-			want: "legacy",
-		},
-		{
-			name: "storage v2 without format",
-			segment: NewSegmentInfo(&datapb.SegmentInfo{
-				StorageVersion: storage.StorageV2,
-			}),
-			want: "unknown",
-		},
-		{
-			name: "storage v3 parquet",
-			segment: NewSegmentInfo(&datapb.SegmentInfo{
-				StorageVersion: storage.StorageV3,
-				Binlogs: []*datapb.FieldBinlog{
-					{Format: "parquet"},
-					{Format: "parquet"},
-				},
-			}),
-			want: "parquet",
-		},
-		{
-			name: "storage v3 external iceberg table",
-			segment: NewSegmentInfo(&datapb.SegmentInfo{
-				StorageVersion: storage.StorageV3,
-				Binlogs: []*datapb.FieldBinlog{
-					{Format: "iceberg-table"},
-				},
-			}),
-			want: "iceberg-table",
-		},
-		{
-			name: "storage v3 external lance table",
-			segment: NewSegmentInfo(&datapb.SegmentInfo{
-				StorageVersion: storage.StorageV3,
-				Binlogs: []*datapb.FieldBinlog{
-					{Format: "lance-table"},
-				},
-			}),
-			want: "lance-table",
-		},
-		{
-			name: "mixed column group formats",
-			segment: NewSegmentInfo(&datapb.SegmentInfo{
-				StorageVersion: storage.StorageV3,
-				Binlogs: []*datapb.FieldBinlog{
-					{Format: "parquet"},
-					{Format: "vortex"},
-				},
-			}),
-			want: "mixed",
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			assert.Equal(t, test.want, segmentMetricFormatLabel(test.segment))
-		})
-	}
 }
 
 func TestUpdateSegmentsInfoUpdatesSegmentFormatMetric(t *testing.T) {
@@ -4874,7 +4790,7 @@ func TestUpdateSegmentsInfoUpdatesSegmentFormatMetricToMixed(t *testing.T) {
 	require.NoError(t, meta.AddSegment(context.TODO(), segment))
 
 	unknownLabels := []string{metrics.FlushedSegmentLabel, datapb.SegmentLevel_L1.String(), "unsorted", fmt.Sprint(storage.StorageV3), "unknown"}
-	mixedLabels := []string{metrics.FlushedSegmentLabel, datapb.SegmentLevel_L1.String(), "unsorted", fmt.Sprint(storage.StorageV3), segmentMetricFormatMixed}
+	mixedLabels := []string{metrics.FlushedSegmentLabel, datapb.SegmentLevel_L1.String(), "unsorted", fmt.Sprint(storage.StorageV3), "mixed"}
 	assert.Equal(t, float64(1), prometheustestutil.ToFloat64(metrics.DataCoordNumSegments.WithLabelValues(unknownLabels...)))
 
 	err = meta.UpdateSegmentsInfo(context.TODO(), AddBinlogsOperator(1,
@@ -4920,8 +4836,8 @@ func TestUpdateSegmentsInfoUpdatesSegmentFormatMetricWithStateChange(t *testing.
 	})
 	require.NoError(t, meta.AddSegment(context.TODO(), segment))
 
-	growingUnknownLabels := []string{commonpb.SegmentState_Growing.String(), datapb.SegmentLevel_L1.String(), "unsorted", fmt.Sprint(storage.StorageV3), segmentMetricFormatUnknown}
-	flushedUnknownLabels := []string{metrics.FlushedSegmentLabel, datapb.SegmentLevel_L1.String(), "unsorted", fmt.Sprint(storage.StorageV3), segmentMetricFormatUnknown}
+	growingUnknownLabels := []string{commonpb.SegmentState_Growing.String(), datapb.SegmentLevel_L1.String(), "unsorted", fmt.Sprint(storage.StorageV3), "unknown"}
+	flushedUnknownLabels := []string{metrics.FlushedSegmentLabel, datapb.SegmentLevel_L1.String(), "unsorted", fmt.Sprint(storage.StorageV3), "unknown"}
 	flushedLanceLabels := []string{metrics.FlushedSegmentLabel, datapb.SegmentLevel_L1.String(), "unsorted", fmt.Sprint(storage.StorageV3), "lance-table"}
 	assert.Equal(t, float64(1), prometheustestutil.ToFloat64(metrics.DataCoordNumSegments.WithLabelValues(growingUnknownLabels...)))
 
@@ -4965,7 +4881,7 @@ func TestUpdateSegmentsInfoUpdatesSegmentFormatMetricWithBinlogsBeforeStateChang
 	})
 	require.NoError(t, meta.AddSegment(context.TODO(), segment))
 
-	importingUnknownLabels := []string{commonpb.SegmentState_Importing.String(), datapb.SegmentLevel_L1.String(), "unsorted", fmt.Sprint(storage.StorageV3), segmentMetricFormatUnknown}
+	importingUnknownLabels := []string{commonpb.SegmentState_Importing.String(), datapb.SegmentLevel_L1.String(), "unsorted", fmt.Sprint(storage.StorageV3), "unknown"}
 	importingParquetLabels := []string{commonpb.SegmentState_Importing.String(), datapb.SegmentLevel_L1.String(), "unsorted", fmt.Sprint(storage.StorageV3), "parquet"}
 	flushedParquetLabels := []string{metrics.FlushedSegmentLabel, datapb.SegmentLevel_L1.String(), "unsorted", fmt.Sprint(storage.StorageV3), "parquet"}
 	assert.Equal(t, float64(1), prometheustestutil.ToFloat64(metrics.DataCoordNumSegments.WithLabelValues(importingUnknownLabels...)))
@@ -5369,6 +5285,7 @@ func TestUpdateSegmentColumnGroupsOperator(t *testing.T) {
 }
 
 func Test_meta_SetSegmentsCompacting(t *testing.T) {
+	ms := metacache.NewMetaStore(nil)
 	type fields struct {
 		client   kv.MetaKv
 		segments *SegmentsInfo
@@ -5387,7 +5304,7 @@ func Test_meta_SetSegmentsCompacting(t *testing.T) {
 			fields{
 				NewMetaMemoryKV(),
 				func() *SegmentsInfo {
-					s := NewSegmentsInfo()
+					s := NewSegmentsInfo(ms)
 					s.SetSegment(1, &SegmentInfo{
 						SegmentInfo: &datapb.SegmentInfo{
 							ID:    1,
@@ -5418,7 +5335,8 @@ func Test_meta_SetSegmentsCompacting(t *testing.T) {
 }
 
 func Test_meta_GetSegmentsOfCollection(t *testing.T) {
-	storedSegments := NewSegmentsInfo()
+	ms := metacache.NewMetaStore(nil)
+	storedSegments := NewSegmentsInfo(ms)
 
 	for segID, segment := range map[int64]*SegmentInfo{
 		1: {
@@ -5463,7 +5381,8 @@ func Test_meta_GetSegmentsOfCollection(t *testing.T) {
 }
 
 func Test_meta_GetSegmentsWithChannel(t *testing.T) {
-	storedSegments := NewSegmentsInfo()
+	ms := metacache.NewMetaStore(nil)
+	storedSegments := NewSegmentsInfo(ms)
 	for segID, segment := range map[int64]*SegmentInfo{
 		1: {
 			SegmentInfo: &datapb.SegmentInfo{
@@ -5517,49 +5436,36 @@ func Test_meta_GetSegmentsWithChannel(t *testing.T) {
 	))
 
 	m.segments.DropSegment(3)
-	_, ok := m.segments.secondaryIndexes.coll2Segments[2]
-	assert.False(t, ok)
-	assert.Equal(t, 1, len(m.segments.secondaryIndexes.coll2Segments))
-	assert.Equal(t, 2, len(m.segments.secondaryIndexes.channel2Segments))
-
-	segments, ok := m.segments.secondaryIndexes.channel2Segments["h1"]
-	assert.True(t, ok)
-	assert.Equal(t, 1, len(segments))
-	assert.Equal(t, int64(1), segments[1].ID)
-	segments, ok = m.segments.secondaryIndexes.channel2Segments["h2"]
-	assert.True(t, ok)
-	assert.Equal(t, 1, len(segments))
-	assert.Equal(t, int64(2), segments[2].ID)
+	// After dropping segment 3 (the only segment of collection 2), the
+	// per-collection and per-channel views are derived from the store.
+	got = m.GetSegmentsByChannel("h1")
+	assert.Equal(t, 1, len(got))
+	assert.Equal(t, int64(1), got[0].ID)
+	got = m.GetSegmentsByChannel("h2")
+	assert.Equal(t, 1, len(got))
+	assert.Equal(t, int64(2), got[0].ID)
+	assert.Equal(t, 2, len(m.GetSegmentsOfCollection(context.TODO(), 1)))
+	assert.Equal(t, 0, len(m.GetSegmentsOfCollection(context.TODO(), 2)))
 
 	m.segments.DropSegment(2)
-	segments, ok = m.segments.secondaryIndexes.coll2Segments[1]
-	assert.True(t, ok)
-	assert.Equal(t, 1, len(segments))
-	assert.Equal(t, int64(1), segments[1].ID)
-	assert.Equal(t, 1, len(m.segments.secondaryIndexes.coll2Segments))
-	assert.Equal(t, 1, len(m.segments.secondaryIndexes.channel2Segments))
-
-	segments, ok = m.segments.secondaryIndexes.channel2Segments["h1"]
-	assert.True(t, ok)
-	assert.Equal(t, 1, len(segments))
-	assert.Equal(t, int64(1), segments[1].ID)
-	_, ok = m.segments.secondaryIndexes.channel2Segments["h2"]
-	assert.False(t, ok)
+	got = m.GetSegmentsByChannel("h1")
+	assert.Equal(t, 1, len(got))
+	assert.Equal(t, int64(1), got[0].ID)
+	got = m.GetSegmentsByChannel("h2")
+	assert.Equal(t, 0, len(got))
+	assert.Equal(t, 1, len(m.GetSegmentsOfCollection(context.TODO(), 1)))
 }
 
 func TestMeta_HasSegments(t *testing.T) {
-	m := &meta{
-		segments: &SegmentsInfo{
-			segments: map[UniqueID]*SegmentInfo{
-				1: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:        1,
-						NumOfRows: 100,
-					},
-				},
-			},
+	ms := metacache.NewMetaStore(nil)
+	segmentsInfo := NewSegmentsInfo(ms)
+	segmentsInfo.SetSegment(1, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:        1,
+			NumOfRows: 100,
 		},
-	}
+	})
+	m := &meta{segments: segmentsInfo}
 
 	has, err := m.HasSegments([]UniqueID{1})
 	assert.Equal(t, true, has)
@@ -5571,24 +5477,21 @@ func TestMeta_HasSegments(t *testing.T) {
 }
 
 func TestMeta_GetAllSegments(t *testing.T) {
-	m := &meta{
-		segments: &SegmentsInfo{
-			segments: map[UniqueID]*SegmentInfo{
-				1: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:    1,
-						State: commonpb.SegmentState_Growing,
-					},
-				},
-				2: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:    2,
-						State: commonpb.SegmentState_Dropped,
-					},
-				},
-			},
+	ms := metacache.NewMetaStore(nil)
+	segmentsInfo := NewSegmentsInfo(ms)
+	segmentsInfo.SetSegment(1, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:    1,
+			State: commonpb.SegmentState_Growing,
 		},
-	}
+	})
+	segmentsInfo.SetSegment(2, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:    2,
+			State: commonpb.SegmentState_Dropped,
+		},
+	})
+	m := &meta{segments: segmentsInfo}
 
 	seg1 := m.GetHealthySegment(context.TODO(), 1)
 	seg1All := m.GetSegment(context.TODO(), 1)
@@ -5621,6 +5524,7 @@ func TestUpdateChannelCheckpoint_DifferentChannelsPersistConcurrently(t *testing
 	)
 
 	catalog := mocks2.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	channel1Entered := make(chan struct{})
 	releaseChannel1 := make(chan struct{})
 	channel2Entered := make(chan struct{})
@@ -5636,12 +5540,13 @@ func TestUpdateChannelCheckpoint_DifferentChannelsPersistConcurrently(t *testing
 			return nil
 		}).Once()
 
+	ms := metacache.NewMetaStore(catalog)
 	meta := &meta{
 		ctx:         context.Background(),
 		catalog:     catalog,
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		segments:    NewSegmentsInfo(),
-		channelCPs:  newChannelCps(),
+		metaStore:   ms,
+		segments:    NewSegmentsInfo(ms),
+		channelSync: newChannelSync(),
 	}
 	channel1Done := make(chan error, 1)
 	go func() {
@@ -5702,6 +5607,7 @@ func TestUpdateChannelCheckpoints_SerializesWithSingleUpdateOnSameChannel(t *tes
 	const channel = "channel-1"
 
 	catalog := mocks2.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	batchEntered := make(chan struct{})
 	releaseBatch := make(chan struct{})
 	singleEntered := make(chan struct{})
@@ -5717,12 +5623,13 @@ func TestUpdateChannelCheckpoints_SerializesWithSingleUpdateOnSameChannel(t *tes
 			return nil
 		}).Once()
 
+	ms := metacache.NewMetaStore(catalog)
 	meta := &meta{
 		ctx:         context.Background(),
 		catalog:     catalog,
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		segments:    NewSegmentsInfo(),
-		channelCPs:  newChannelCps(),
+		metaStore:   ms,
+		segments:    NewSegmentsInfo(ms),
+		channelSync: newChannelSync(),
 	}
 	batchDone := make(chan error, 1)
 	go func() {
@@ -5808,17 +5715,17 @@ func TestChannelCP(t *testing.T) {
 	t.Run("UpdateChannelCheckpoints", func(t *testing.T) {
 		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
-		assert.Equal(t, 0, len(meta.channelCPs.checkpoints))
+		assert.Equal(t, 0, len(meta.metaStore.GetChannelCheckpoints()))
 
 		err = meta.UpdateChannelCheckpoints(context.TODO(), nil)
 		assert.NoError(t, err)
-		assert.Equal(t, 0, len(meta.channelCPs.checkpoints))
+		assert.Equal(t, 0, len(meta.metaStore.GetChannelCheckpoints()))
 
 		err = meta.UpdateChannelCheckpoints(context.TODO(), []*msgpb.MsgPosition{pos, {
 			ChannelName: "",
 		}})
 		assert.NoError(t, err)
-		assert.Equal(t, 1, len(meta.channelCPs.checkpoints))
+		assert.Equal(t, 1, len(meta.metaStore.GetChannelCheckpoints()))
 	})
 
 	t.Run("GetChannelCheckpoint", func(t *testing.T) {
@@ -5846,16 +5753,6 @@ func TestChannelCP(t *testing.T) {
 		err = meta.UpdateChannelCheckpoint(context.TODO(), mockVChannel, pos)
 		assert.NoError(t, err)
 		err = meta.DropChannelCheckpoint(mockVChannel)
-		assert.NoError(t, err)
-	})
-
-	t.Run("WatchChannelCheckpoint", func(t *testing.T) {
-		meta, err := newMemoryMeta(t)
-		assert.NoError(t, err)
-
-		err = meta.UpdateChannelCheckpoint(context.TODO(), mockVChannel, pos)
-		assert.NoError(t, err)
-		err = meta.WatchChannelCheckpoint(context.TODO(), mockVChannel, pos.Timestamp-1)
 		assert.NoError(t, err)
 	})
 
@@ -5949,7 +5846,9 @@ func TestChannelCP(t *testing.T) {
 func Test_meta_GcConfirm(t *testing.T) {
 	m := &meta{}
 	catalog := mocks2.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	m.catalog = catalog
+	m.metaStore = metacache.NewMetaStore(catalog)
 
 	catalog.On("GcConfirm",
 		mock.Anything,
@@ -5961,9 +5860,10 @@ func Test_meta_GcConfirm(t *testing.T) {
 }
 
 func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
+	ms := metacache.NewMetaStore(nil)
 	t.Run("fail to list database", func(t *testing.T) {
 		m := &meta{
-			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+			metaStore: ms,
 		}
 		mockBroker := broker.NewMockBroker(t)
 		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(nil, errors.New("list database failed, mocked"))
@@ -5973,7 +5873,7 @@ func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
 
 	t.Run("fail to show collections", func(t *testing.T) {
 		m := &meta{
-			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+			metaStore: ms,
 		}
 		mockBroker := broker.NewMockBroker(t)
 
@@ -5987,7 +5887,7 @@ func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
 
 	t.Run("fail to describe collection", func(t *testing.T) {
 		m := &meta{
-			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+			metaStore: ms,
 		}
 		mockBroker := broker.NewMockBroker(t)
 
@@ -6005,7 +5905,7 @@ func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
 
 	t.Run("fail to show partitions", func(t *testing.T) {
 		m := &meta{
-			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+			metaStore: ms,
 		}
 		mockBroker := broker.NewMockBroker(t)
 
@@ -6024,7 +5924,7 @@ func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		m := &meta{
-			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+			metaStore: ms,
 		}
 		mockBroker := broker.NewMockBroker(t)
 
@@ -6047,37 +5947,34 @@ func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
 }
 
 func TestMeta_GetSegmentsJSON(t *testing.T) {
+	ms := metacache.NewMetaStore(nil)
 	// Create a mock meta object
-	m := &meta{
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{
-				1: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:            1,
-						CollectionID:  1,
-						PartitionID:   1,
-						InsertChannel: "channel1",
-						NumOfRows:     100,
-						State:         commonpb.SegmentState_Growing,
-						MaxRowNum:     1000,
-						Compacted:     false,
-					},
-				},
-				2: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:            2,
-						CollectionID:  2,
-						PartitionID:   2,
-						InsertChannel: "channel2",
-						NumOfRows:     200,
-						State:         commonpb.SegmentState_Sealed,
-						MaxRowNum:     2000,
-						Compacted:     true,
-					},
-				},
-			},
+	segmentsInfo := NewSegmentsInfo(ms)
+	segmentsInfo.SetSegment(1, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            1,
+			CollectionID:  1,
+			PartitionID:   1,
+			InsertChannel: "channel1",
+			NumOfRows:     100,
+			State:         commonpb.SegmentState_Growing,
+			MaxRowNum:     1000,
+			Compacted:     false,
 		},
-	}
+	})
+	segmentsInfo.SetSegment(2, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            2,
+			CollectionID:  2,
+			PartitionID:   2,
+			InsertChannel: "channel2",
+			NumOfRows:     200,
+			State:         commonpb.SegmentState_Sealed,
+			MaxRowNum:     2000,
+			Compacted:     true,
+		},
+	})
+	m := &meta{segments: segmentsInfo}
 
 	segments := m.getSegmentsMetrics(0)
 
@@ -6177,279 +6074,6 @@ func Test_meta_DropSegmentsOfPartition(t *testing.T) {
 	assert.NotEqual(t, commonpb.SegmentState_Dropped, segment.GetState())
 }
 
-func TestGetMinGrowingSegmentCheckpoint(t *testing.T) {
-	mockVChannel := "fake-by-dev-rootcoord-dml-1-testgrowing-v0"
-
-	t.Run("empty returns nil", func(t *testing.T) {
-		meta, err := newMemoryMeta(t)
-		assert.NoError(t, err)
-
-		pos := meta.GetMinGrowingSegmentCheckpoint(mockVChannel)
-		assert.Nil(t, pos)
-	})
-
-	t.Run("growing L1 segments return min DmlPosition", func(t *testing.T) {
-		meta, err := newMemoryMeta(t)
-		assert.NoError(t, err)
-
-		// Register a TEXT collection so the checkpoint logic applies
-		meta.collections.Insert(1, &collectionInfo{
-			ID: 1,
-			Schema: &schemapb.CollectionSchema{
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
-					{FieldID: 101, Name: "text_field", DataType: schemapb.DataType_Text},
-				},
-			},
-		})
-
-		// Growing L1 segment with T300
-		seg1 := &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:            1,
-				CollectionID:  1,
-				PartitionID:   1,
-				InsertChannel: mockVChannel,
-				State:         commonpb.SegmentState_Growing,
-				Level:         datapb.SegmentLevel_L1,
-				DmlPosition: &msgpb.MsgPosition{
-					ChannelName: mockVChannel,
-					MsgID:       []byte{1},
-					Timestamp:   300,
-				},
-			},
-		}
-		err = meta.AddSegment(context.TODO(), seg1)
-		assert.NoError(t, err)
-
-		// Growing L1 segment with T500
-		seg2 := &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:            2,
-				CollectionID:  1,
-				PartitionID:   1,
-				InsertChannel: mockVChannel,
-				State:         commonpb.SegmentState_Growing,
-				Level:         datapb.SegmentLevel_L1,
-				DmlPosition: &msgpb.MsgPosition{
-					ChannelName: mockVChannel,
-					MsgID:       []byte{2},
-					Timestamp:   500,
-				},
-			},
-		}
-		err = meta.AddSegment(context.TODO(), seg2)
-		assert.NoError(t, err)
-
-		pos := meta.GetMinGrowingSegmentCheckpoint(mockVChannel)
-		assert.NotNil(t, pos)
-		assert.Equal(t, uint64(300), pos.GetTimestamp())
-	})
-
-	t.Run("L0 segments excluded", func(t *testing.T) {
-		meta, err := newMemoryMeta(t)
-		assert.NoError(t, err)
-
-		// Growing L0 segment with T100
-		seg := &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:            1,
-				CollectionID:  1,
-				PartitionID:   1,
-				InsertChannel: mockVChannel,
-				State:         commonpb.SegmentState_Growing,
-				Level:         datapb.SegmentLevel_L0,
-				DmlPosition: &msgpb.MsgPosition{
-					ChannelName: mockVChannel,
-					MsgID:       []byte{1},
-					Timestamp:   100,
-				},
-			},
-		}
-		err = meta.AddSegment(context.TODO(), seg)
-		assert.NoError(t, err)
-
-		pos := meta.GetMinGrowingSegmentCheckpoint(mockVChannel)
-		assert.Nil(t, pos)
-	})
-
-	t.Run("non-Growing segments excluded", func(t *testing.T) {
-		meta, err := newMemoryMeta(t)
-		assert.NoError(t, err)
-
-		// Flushed L1 segment with T100
-		seg := &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:            1,
-				CollectionID:  1,
-				PartitionID:   1,
-				InsertChannel: mockVChannel,
-				State:         commonpb.SegmentState_Flushed,
-				Level:         datapb.SegmentLevel_L1,
-				DmlPosition: &msgpb.MsgPosition{
-					ChannelName: mockVChannel,
-					MsgID:       []byte{1},
-					Timestamp:   100,
-				},
-			},
-		}
-		err = meta.AddSegment(context.TODO(), seg)
-		assert.NoError(t, err)
-
-		pos := meta.GetMinGrowingSegmentCheckpoint(mockVChannel)
-		assert.Nil(t, pos)
-	})
-}
-
-func TestUpdateChannelCheckpoint_ClampedByGrowing(t *testing.T) {
-	mockVChannel := "fake-by-dev-rootcoord-dml-1-testclamp-v0"
-
-	meta, err := newMemoryMeta(t)
-	assert.NoError(t, err)
-
-	// Register a TEXT collection so clamping is enabled
-	meta.collections.Insert(1, &collectionInfo{
-		ID: 1,
-		Schema: &schemapb.CollectionSchema{
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
-				{FieldID: 101, Name: "text_field", DataType: schemapb.DataType_Text},
-			},
-		},
-	})
-
-	// Add a growing L1 segment at T300
-	seg := &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{
-			ID:            1,
-			CollectionID:  1,
-			PartitionID:   1,
-			InsertChannel: mockVChannel,
-			State:         commonpb.SegmentState_Growing,
-			Level:         datapb.SegmentLevel_L1,
-			DmlPosition: &msgpb.MsgPosition{
-				ChannelName: mockVChannel,
-				MsgID:       []byte{1},
-				Timestamp:   300,
-			},
-		},
-	}
-	err = meta.AddSegment(context.TODO(), seg)
-	assert.NoError(t, err)
-
-	// Update checkpoint with T500, should be clamped to T300 (TEXT collection)
-	err = meta.UpdateChannelCheckpoint(context.TODO(), mockVChannel, &msgpb.MsgPosition{
-		ChannelName: mockVChannel,
-		MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
-		Timestamp:   500,
-	})
-	assert.NoError(t, err)
-
-	cp := meta.GetChannelCheckpoint(mockVChannel)
-	assert.NotNil(t, cp)
-	assert.Equal(t, uint64(300), cp.GetTimestamp())
-}
-
-func TestUpdateChannelCheckpoint_NotClampedForNonTextCollection(t *testing.T) {
-	mockVChannel := "fake-by-dev-rootcoord-dml-1-testclamp-notext-v0"
-
-	meta, err := newMemoryMeta(t)
-	assert.NoError(t, err)
-
-	// Register a non-TEXT collection — clamping should NOT apply
-	meta.collections.Insert(2, &collectionInfo{
-		ID: 2,
-		Schema: &schemapb.CollectionSchema{
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
-				{FieldID: 101, Name: "varchar_field", DataType: schemapb.DataType_VarChar},
-			},
-		},
-	})
-
-	// Add a growing L1 segment at T300 for the non-TEXT collection
-	seg := &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{
-			ID:            10,
-			CollectionID:  2,
-			PartitionID:   1,
-			InsertChannel: mockVChannel,
-			State:         commonpb.SegmentState_Growing,
-			Level:         datapb.SegmentLevel_L1,
-			DmlPosition: &msgpb.MsgPosition{
-				ChannelName: mockVChannel,
-				MsgID:       []byte{1},
-				Timestamp:   300,
-			},
-		},
-	}
-	err = meta.AddSegment(context.TODO(), seg)
-	assert.NoError(t, err)
-
-	// Update checkpoint with T500 — should NOT be clamped (non-TEXT collection)
-	err = meta.UpdateChannelCheckpoint(context.TODO(), mockVChannel, &msgpb.MsgPosition{
-		ChannelName: mockVChannel,
-		MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
-		Timestamp:   500,
-	})
-	assert.NoError(t, err)
-
-	cp := meta.GetChannelCheckpoint(mockVChannel)
-	assert.NotNil(t, cp)
-	assert.Equal(t, uint64(500), cp.GetTimestamp()) // NOT clamped
-}
-
-func TestUpdateChannelCheckpoints_ClampedByGrowing(t *testing.T) {
-	mockVChannel := "fake-by-dev-rootcoord-dml-1-testclampbatch-v0"
-
-	meta, err := newMemoryMeta(t)
-	assert.NoError(t, err)
-
-	// Register a TEXT collection so clamping is enabled
-	meta.collections.Insert(1, &collectionInfo{
-		ID: 1,
-		Schema: &schemapb.CollectionSchema{
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
-				{FieldID: 101, Name: "text_field", DataType: schemapb.DataType_Text},
-			},
-		},
-	})
-
-	// Add a growing L1 segment at T300
-	seg := &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{
-			ID:            1,
-			CollectionID:  1,
-			PartitionID:   1,
-			InsertChannel: mockVChannel,
-			State:         commonpb.SegmentState_Growing,
-			Level:         datapb.SegmentLevel_L1,
-			DmlPosition: &msgpb.MsgPosition{
-				ChannelName: mockVChannel,
-				MsgID:       []byte{1},
-				Timestamp:   300,
-			},
-		},
-	}
-	err = meta.AddSegment(context.TODO(), seg)
-	assert.NoError(t, err)
-
-	// Batch update checkpoint with T500, should be clamped to T300 (TEXT collection)
-	err = meta.UpdateChannelCheckpoints(context.TODO(), []*msgpb.MsgPosition{
-		{
-			ChannelName: mockVChannel,
-			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
-			Timestamp:   500,
-		},
-	})
-	assert.NoError(t, err)
-
-	cp := meta.GetChannelCheckpoint(mockVChannel)
-	assert.NotNil(t, cp)
-	assert.Equal(t, uint64(300), cp.GetTimestamp())
-}
-
 func TestCompactionCompletionRecordsSegmentCreateTsFromTaskCreateTs(t *testing.T) {
 	ctx := context.Background()
 	startTime := time.Date(2026, time.May, 20, 12, 0, 0, 0, time.UTC).Unix()
@@ -6477,7 +6101,7 @@ func TestCompactionCompletionRecordsSegmentCreateTsFromTaskCreateTs(t *testing.T
 			}},
 		}
 
-		infos, _, err := meta.CompleteCompactionMutation(ctx, task, result)
+		infos, err := meta.CompleteCompactionMutation(ctx, task, result)
 		require.NoError(t, err)
 		require.Len(t, infos, 1)
 		require.Equal(t, expectedCreateTS, infos[0].GetCreateTs())
@@ -6503,7 +6127,7 @@ func TestCompactionCompletionRecordsSegmentCreateTsFromTaskCreateTs(t *testing.T
 			}},
 		}
 
-		infos, _, err := meta.CompleteCompactionMutation(ctx, task, result)
+		infos, err := meta.CompleteCompactionMutation(ctx, task, result)
 		require.NoError(t, err)
 		require.Len(t, infos, 1)
 		require.Equal(t, expectedCreateTS, infos[0].GetCreateTs())
@@ -6532,7 +6156,7 @@ func TestCompactionCompletionRecordsSegmentCreateTsFromTaskCreateTs(t *testing.T
 			}},
 		}
 
-		infos, _, err := meta.CompleteCompactionMutation(ctx, task, result)
+		infos, err := meta.CompleteCompactionMutation(ctx, task, result)
 		require.NoError(t, err)
 		require.Len(t, infos, 1)
 		require.Equal(t, expectedCreateTS, infos[0].GetCreateTs())
@@ -6561,7 +6185,7 @@ func TestCompactionCompletionRecordsSegmentCreateTsFromTaskCreateTs(t *testing.T
 			}},
 		}
 
-		infos, _, err := meta.CompleteCompactionMutation(ctx, task, result)
+		infos, err := meta.CompleteCompactionMutation(ctx, task, result)
 		require.NoError(t, err)
 		require.Len(t, infos, 1)
 		require.Equal(t, expectedCreateTS, infos[0].GetCreateTs())
@@ -6592,7 +6216,7 @@ func TestCompactionCompletionRecordsSegmentCreateTsFromTaskCreateTs(t *testing.T
 			}},
 		}
 
-		infos, _, err := meta.CompleteCompactionMutation(ctx, task, result)
+		infos, err := meta.CompleteCompactionMutation(ctx, task, result)
 		require.NoError(t, err)
 		require.Len(t, infos, 1)
 		require.Equal(t, uint64(777), infos[0].GetCreateTs())
@@ -6600,8 +6224,252 @@ func TestCompactionCompletionRecordsSegmentCreateTsFromTaskCreateTs(t *testing.T
 	})
 }
 
+func TestCompleteCompactionMutationPublishesOnlyFinalDataViewSegments(t *testing.T) {
+	ctx := context.Background()
+	newMetaWithDataView := func(t *testing.T) (*meta, dataviewpkg.Manager) {
+		catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+		segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
+		for _, segmentID := range []int64{1, 2} {
+			segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
+				ID:            segmentID,
+				CollectionID:  100,
+				PartitionID:   10,
+				InsertChannel: "ch-1",
+				State:         commonpb.SegmentState_Flushed,
+				Level:         datapb.SegmentLevel_L1,
+				NumOfRows:     100,
+				Binlogs: []*datapb.FieldBinlog{{
+					FieldID: 100,
+					Binlogs: []*datapb.Binlog{{LogID: segmentID}},
+				}},
+			}))
+		}
+		manager := dataviewpkg.NewManager(catalog, nil)
+		_, err := manager.OnCreateCollection(ctx, dataviewpkg.CreateCollectionDataViewEvent{
+			CollectionID: 100,
+			VChannels:    []string{"ch-1"},
+		})
+		require.NoError(t, err)
+		_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64) ([]dataviewpkg.LoadableSegment, error) {
+			return []dataviewpkg.LoadableSegment{
+				{SegmentID: 1, VChannel: "ch-1", PartitionID: 10},
+				{SegmentID: 2, VChannel: "ch-1", PartitionID: 10},
+			}, nil
+		})
+		require.NoError(t, err)
+		return &meta{ctx: ctx, catalog: catalog, segments: segments, dataViewManager: manager}, manager
+	}
+	dataViewSegmentIDs := func(t *testing.T, manager dataviewpkg.Manager) []int64 {
+		ref, err := manager.Latest(ctx, 100)
+		require.NoError(t, err)
+		require.NotNil(t, ref)
+		defer ref.Deref()
+		return lo.FlatMap(ref.DataView().GetShards(), func(shard *viewpb.DataViewOfShard, _ int) []int64 {
+			return lo.FlatMap(shard.GetPartitions(), func(partition *viewpb.DataViewOfPartition, _ int) []int64 {
+				return partition.GetSegmentIds()
+			})
+		})
+	}
+	// reconcile drives the same loadable projection the async recompute queue
+	// worker would run after the SegmentMeta mutation commits.
+	reconcile := func(t *testing.T, meta *meta, manager dataviewpkg.Manager) {
+		segments, err := meta.loadableProjection(ctx, 100)
+		require.NoError(t, err)
+		_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64) ([]dataviewpkg.LoadableSegment, error) {
+			return segments, nil
+		})
+		require.NoError(t, err)
+	}
+	result := &datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{{
+		SegmentID: 3,
+		NumOfRows: 100,
+		InsertLogs: []*datapb.FieldBinlog{{
+			FieldID: 100,
+			Binlogs: []*datapb.Binlog{{LogID: 3}},
+		}},
+	}}}
+
+	t.Run("mix publishes final output", func(t *testing.T) {
+		meta, manager := newMetaWithDataView(t)
+		task := &datapb.CompactionTask{
+			CollectionID:  100,
+			PartitionID:   10,
+			InputSegments: []int64{1, 2},
+			Type:          datapb.CompactionType_MixCompaction,
+			Channel:       "ch-1",
+			Schema:        &schemapb.CollectionSchema{Version: 1},
+		}
+		_, err := meta.CompleteCompactionMutation(ctx, task, proto.Clone(result).(*datapb.CompactionPlanResult))
+		require.NoError(t, err)
+		// The mutation commits SegmentMeta first; the DataView converges via
+		// the async recompute over the final SegmentMeta.
+		reconcile(t, meta, manager)
+		require.Equal(t, []int64{3}, dataViewSegmentIDs(t, manager))
+	})
+
+	t.Run("mix converges on retry", func(t *testing.T) {
+		meta, manager := newMetaWithDataView(t)
+		task := &datapb.CompactionTask{
+			CollectionID:  100,
+			PartitionID:   10,
+			InputSegments: []int64{1, 2},
+			Type:          datapb.CompactionType_MixCompaction,
+			Channel:       "ch-1",
+			Schema:        &schemapb.CollectionSchema{Version: 1},
+		}
+		compactionResult := proto.Clone(result).(*datapb.CompactionPlanResult)
+
+		segments, err := meta.CompleteCompactionMutation(ctx, task, compactionResult)
+		require.NoError(t, err)
+		require.Len(t, segments, 1)
+		require.Equal(t, commonpb.SegmentState_Dropped, meta.segments.GetSegment(1).GetState())
+		require.Equal(t, commonpb.SegmentState_Dropped, meta.segments.GetSegment(2).GetState())
+		require.NotNil(t, meta.segments.GetSegment(3))
+
+		// Replaying the same mutation (e.g. a worker retry after the original
+		// response was lost) is idempotent, and the recompute still converges.
+		require.NoError(t, meta.ValidateSegmentStateBeforeCompleteCompactionMutation(task))
+		segments, err = meta.CompleteCompactionMutation(ctx, task, compactionResult)
+		require.NoError(t, err)
+		require.Len(t, segments, 1)
+		reconcile(t, meta, manager)
+		require.Equal(t, []int64{3}, dataViewSegmentIDs(t, manager))
+	})
+
+	t.Run("clustering does not publish temporary output", func(t *testing.T) {
+		meta, manager := newMetaWithDataView(t)
+		task := &datapb.CompactionTask{
+			CollectionID:  100,
+			PartitionID:   10,
+			InputSegments: []int64{1, 2},
+			Type:          datapb.CompactionType_ClusteringCompaction,
+			Channel:       "ch-1",
+			Schema:        &schemapb.CollectionSchema{Version: 1},
+		}
+		_, err := meta.CompleteCompactionMutation(ctx, task, proto.Clone(result).(*datapb.CompactionPlanResult))
+		require.NoError(t, err)
+		// The DataView is only published by the clustering completeTask after
+		// the whole job finishes; the single-mutation view is untouched until
+		// the async recompute runs against the final SegmentMeta.
+		require.ElementsMatch(t, []int64{1, 2}, dataViewSegmentIDs(t, manager))
+		reconcile(t, meta, manager)
+		// The clustering output stays invisible (visible after stats and index)
+		// until the completeTask marks it loadable; a standalone mutation does
+		// not surface it.
+		require.ElementsMatch(t, []int64{1, 2}, dataViewSegmentIDs(t, manager))
+	})
+
+	t.Run("sort converges after SegmentMeta commit", func(t *testing.T) {
+		meta, manager := newMetaWithDataView(t)
+		// Simulate a Segment flushed by an older coordinator that still used the
+		// delayed-visibility SortCompaction protocol.
+		meta.segments.GetSegment(1).IsInvisible = true
+		task := &datapb.CompactionTask{
+			CollectionID:  100,
+			PartitionID:   10,
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_SortCompaction,
+			Channel:       "ch-1",
+			Schema:        &schemapb.CollectionSchema{Version: 1},
+		}
+		result := &datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{{
+			SegmentID: 3,
+			NumOfRows: 100,
+			IsSorted:  true,
+			InsertLogs: []*datapb.FieldBinlog{{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{{LogID: 3}},
+			}},
+		}}}
+
+		segments, err := meta.CompleteCompactionMutation(ctx, task, result)
+		require.NoError(t, err)
+		require.Len(t, segments, 1)
+		require.Equal(t, commonpb.SegmentState_Dropped, meta.segments.GetSegment(1).GetState())
+		require.NotNil(t, meta.segments.GetSegment(3))
+
+		require.NoError(t, meta.ValidateSegmentStateBeforeCompleteCompactionMutation(task))
+		segments, err = meta.CompleteCompactionMutation(ctx, task, result)
+		require.NoError(t, err)
+		require.Len(t, segments, 1)
+		reconcile(t, meta, manager)
+		require.ElementsMatch(t, []int64{2, 3}, dataViewSegmentIDs(t, manager))
+
+		ref, err := manager.Latest(ctx, 100)
+		require.NoError(t, err)
+		require.NotNil(t, ref)
+		defer ref.Deref()
+		require.Equal(t, int64(2), ref.Version().GetCompactVersion())
+	})
+}
+
+func TestCompleteCompactionMutationKeepsDataViewOrder(t *testing.T) {
+	ctx := context.Background()
+	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+	segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
+	segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{
+		ID:            1,
+		CollectionID:  100,
+		PartitionID:   10,
+		InsertChannel: "ch-1",
+		State:         commonpb.SegmentState_Flushed,
+		Level:         datapb.SegmentLevel_L1,
+		NumOfRows:     100,
+		Binlogs: []*datapb.FieldBinlog{{
+			FieldID: 100,
+			Binlogs: []*datapb.Binlog{{LogID: 1}},
+		}},
+	}))
+	manager := dataviewpkg.NewManager(catalog, nil)
+	_, err := manager.OnCreateCollection(ctx, dataviewpkg.CreateCollectionDataViewEvent{CollectionID: 100, VChannels: []string{"ch-1"}})
+	require.NoError(t, err)
+	_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64) ([]dataviewpkg.LoadableSegment, error) {
+		return []dataviewpkg.LoadableSegment{{SegmentID: 1, VChannel: "ch-1", PartitionID: 10}}, nil
+	})
+	require.NoError(t, err)
+	meta := &meta{ctx: ctx, catalog: catalog, segments: segments, dataViewManager: manager}
+	compact := func(from, to int64) error {
+		_, err := meta.CompleteCompactionMutation(ctx, &datapb.CompactionTask{
+			CollectionID:  100,
+			PartitionID:   10,
+			InputSegments: []int64{from},
+			Type:          datapb.CompactionType_MixCompaction,
+			Channel:       "ch-1",
+			Schema:        &schemapb.CollectionSchema{Version: 1},
+		}, &datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{{
+			SegmentID: to,
+			NumOfRows: 100,
+			InsertLogs: []*datapb.FieldBinlog{{
+				FieldID: 100,
+				Binlogs: []*datapb.Binlog{{LogID: to}},
+			}},
+		}}})
+		return err
+	}
+
+	// Two compactions in sequence; the DataView recompute (queue worker)
+	// later reads the final SegmentMeta and converges to the last output
+	// exactly once, in a single snapshot write.
+	require.NoError(t, compact(1, 2))
+	require.NoError(t, compact(2, 3))
+
+	segmentsProjection, err := meta.loadableProjection(ctx, 100)
+	require.NoError(t, err)
+	_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64) ([]dataviewpkg.LoadableSegment, error) {
+		return segmentsProjection, nil
+	})
+	require.NoError(t, err)
+
+	ref, err := manager.Latest(ctx, 100)
+	require.NoError(t, err)
+	require.NotNil(t, ref)
+	defer ref.Deref()
+	require.Equal(t, []int64{3}, ref.DataView().GetShards()[0].GetPartitions()[0].GetSegmentIds())
+}
+
 func newCompactionCreateTsTestMeta(segments ...*SegmentInfo) *meta {
-	segmentStore := NewSegmentsInfo()
+	ms := metacache.NewMetaStore(nil)
+	segmentStore := NewSegmentsInfo(ms)
 	for _, segment := range segments {
 		segmentStore.SetSegment(segment.GetID(), segment)
 	}
@@ -6947,6 +6815,7 @@ func TestMeta_CleanPartitionStatsInfo(t *testing.T) {
 
 	t.Run("no rollback needed", func(t *testing.T) {
 		catalog := mocks2.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 		var gotActions []metastore.UpdateAction
 		catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).
 			RunAndReturn(func(_ context.Context, actions ...metastore.UpdateAction) error {
@@ -6996,6 +6865,7 @@ func TestMeta_CleanPartitionStatsInfo(t *testing.T) {
 
 	t.Run("rolls back current version", func(t *testing.T) {
 		catalog := mocks2.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 		var gotActions []metastore.UpdateAction
 		catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			RunAndReturn(func(_ context.Context, actions ...metastore.UpdateAction) error {
@@ -7059,6 +6929,7 @@ func TestMeta_CleanPartitionStatsInfo(t *testing.T) {
 		// both meta locks are held while catalog.Update runs: TryLock returns
 		// false only when the lock is already held.
 		catalog := mocks2.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 
 		var am *analyzeMeta
 		var psm *partitionStatsMeta
@@ -7114,6 +6985,7 @@ func TestMeta_CleanPartitionStatsInfo(t *testing.T) {
 
 	t.Run("catalog update failure leaves memory untouched", func(t *testing.T) {
 		catalog := mocks2.NewDataCoordCatalog(t)
+		catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 		catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("update failed")).Once()
 
 		am := &analyzeMeta{ctx: ctx, catalog: catalog, tasks: map[int64]*indexpb.AnalyzeTask{

@@ -18,6 +18,7 @@ package paramtable
 
 import (
 	"strings"
+	"time"
 )
 
 type functionConfig struct {
@@ -30,6 +31,40 @@ type functionConfig struct {
 	ZillizProviders               ParamGroup `refreshable:"true"`
 	AnalyzerConcurrencyPerCPUCore ParamItem  `refreshable:"true"`
 	AnalyzerRunnerConcurrency     ParamItem  `refreshable:"true"`
+	// EnableWriteBeforeMaterialization gates the write-before function
+	// materialization (streamingnode materializes BM25/embedding function
+	// output fields before WAL append). Default "auto": it is switched on
+	// automatically once the whole cluster has confirmed version >= 2.6.23
+	// (plus the SwitchDelay stability window); before that the write path keeps
+	// the legacy format. Explicit "false" keeps legacy format forever (escape
+	// hatch); explicit "true" force-enables and bypasses the version gate (use
+	// with caution).
+	//
+	// Notes on the auto-switch behavior:
+	//   - The flip is a one-shot decision taken by the MixCoord confirmator:
+	//     once it flips the value to "true" it writes the config-center (etcd)
+	//     key, which then outranks file/env sources per the usual config
+	//     priority. After the flip, the only working override is the etcd
+	//     config-center key itself (`<etcd.rootPath>/config/<key>`); a "false"
+	//     set in milvus.yaml or env afterwards is silently ignored. Explicit
+	//     "false"/"true" set before the flip (in any source) is honored and
+	//     skips the etcd write.
+	//   - Setting "false" at startup makes the gate resolve immediately and the
+	//     confirmator exits; reverting "false" back to "auto" at runtime does
+	//     not re-arm the gate (the confirmator is one-shot), so the flip only
+	//     takes effect after a MixCoord restart. Operators can still intervene
+	//     at any time by setting "true" or "false" explicitly.
+	EnableWriteBeforeMaterialization ParamItem `refreshable:"true"`
+
+	PyUDFEnabled            ParamItem `refreshable:"false"`
+	PyUDFAddress            ParamItem `refreshable:"false"`
+	PyUDFRPCTimeout         ParamItem `refreshable:"false"`
+	PyUDFConnectionPoolSize ParamItem `refreshable:"false"`
+	PyUDFMaxMessageBytes    ParamItem `refreshable:"false"`
+	PyUDFWorkerCount        ParamItem `refreshable:"false"`
+	PyUDFGRPCConcurrency    ParamItem `refreshable:"false"`
+	PyUDFMaxConcurrentRPCs  ParamItem `refreshable:"false"`
+	PyUDFShutdownTimeout    ParamItem `refreshable:"false"`
 }
 
 func (p *functionConfig) init(base *BaseTable) {
@@ -53,6 +88,12 @@ func (p *functionConfig) init(base *BaseTable) {
 		KeyPrefix: "function.textEmbedding.providers.",
 		Version:   "2.6.0",
 		Export:    true,
+		// Provider entries are open-ended, so the group defaults to sensitive.
+		// Keep only the enable switch readable. URLs and resource names are
+		// infrastructure topology and, more importantly, changing one can redirect
+		// a request that carries the separately configured provider credential.
+		Sensitive:            true,
+		NonSensitiveSuffixes: []string{"enable"},
 		DocFunc: func(key string) string {
 			switch key {
 			case "tei.enable":
@@ -133,9 +174,11 @@ func (p *functionConfig) init(base *BaseTable) {
 	p.TextEmbeddingProviders.Init(base.mgr)
 
 	p.RerankModelProviders = ParamGroup{
-		KeyPrefix: "function.rerank.model.providers.",
-		Version:   "2.6.0",
-		Export:    true,
+		KeyPrefix:            "function.rerank.model.providers.",
+		Version:              "2.6.0",
+		Export:               true,
+		Sensitive:            true,
+		NonSensitiveSuffixes: []string{"enable"},
 		DocFunc: func(key string) string {
 			switch key {
 			case "tei.credential":
@@ -188,12 +231,17 @@ func (p *functionConfig) init(base *BaseTable) {
 	p.LinderaDownloadUrls = ParamGroup{
 		KeyPrefix: "function.analyzer.lindera.download_urls.",
 		Version:   "2.5.16",
+		Sensitive: true,
 	}
 	p.LinderaDownloadUrls.Init(base.mgr)
 
 	p.ZillizProviders = ParamGroup{
 		KeyPrefix: "function.models.zilliz.",
 		Version:   "2.6.5",
+		Sensitive: true,
+		// Every member controls the remote connection or its trust policy, so
+		// projections and logs redact the whole group. Sensitivity does not
+		// restrict configuration writes.
 	}
 	p.ZillizProviders.Init(base.mgr)
 
@@ -214,6 +262,104 @@ func (p *functionConfig) init(base *BaseTable) {
 		DefaultValue: "8",
 	}
 	p.AnalyzerRunnerConcurrency.Init(base.mgr)
+
+	p.EnableWriteBeforeMaterialization = ParamItem{
+		Key:          "function.enableWriteBeforeMaterialization",
+		Version:      "2.6.23",
+		Export:       false,
+		Doc:          "Whether to materialize function output fields (e.g. BM25 sparse vectors) before WAL append. auto: switch on automatically once the whole cluster reaches 2.6.23 and the stability window elapses; false: always keep the legacy format (escape hatch); true: force enable and bypass the version gate (use with caution).",
+		DefaultValue: "auto",
+		VersionGateSwitcher: &VersionGateSwitcher{
+			EnableAutoSwitchValue: "auto",
+			PreSwitchValue:        "false", // before the gate is activated the write path keeps the legacy format
+			GateVersion:           "2.6.23",
+			TargetValue:           "true",
+			SwitchDelay:           1 * time.Minute,
+		},
+	}
+	p.EnableWriteBeforeMaterialization.Init(base.mgr)
+
+	p.PyUDFEnabled = ParamItem{
+		Key:          "function.pyUDF.enabled",
+		Version:      "3.0.3",
+		DefaultValue: "false",
+		Export:       true,
+		Doc:          "Whether to enable PyUDF in processes that use it. Enabling it on Proxy also requires common.fileResource.mode.proxy: sync. Restart is required after changing this value.",
+	}
+	p.PyUDFEnabled.Init(base.mgr)
+
+	p.PyUDFAddress = ParamItem{
+		Key:          "function.pyUDF.address",
+		Sensitivity:  Sensitive,
+		Version:      "3.0.3",
+		DefaultValue: "127.0.0.1:19090",
+		Export:       true,
+		Doc:          "Shared local IPv4 address and port of the PyUDF workers. Keep on loopback or a trusted, access-controlled network; the worker endpoint has no TLS or authentication. Restart is required after changing this value.",
+	}
+	p.PyUDFAddress.Init(base.mgr)
+
+	p.PyUDFRPCTimeout = ParamItem{
+		Key:          "function.pyUDF.rpcTimeout",
+		Version:      "3.0.3",
+		DefaultValue: "30s",
+		Export:       true,
+		Doc:          "Deadline for one PyUDF Execute call, including serialization. Range: 5s to 300s, in whole milliseconds; invalid values log an error and use 30s. Restart is required after changing this value.",
+	}
+	p.PyUDFRPCTimeout.Init(base.mgr)
+
+	p.PyUDFConnectionPoolSize = ParamItem{
+		Key:          "function.pyUDF.connectionPoolSize",
+		Version:      "3.0.3",
+		DefaultValue: "10",
+		Export:       true,
+		Doc:          "Number of reused client connections; this does not limit concurrent RPCs. Restart is required after changing this value.",
+	}
+	p.PyUDFConnectionPoolSize.Init(base.mgr)
+
+	p.PyUDFMaxMessageBytes = ParamItem{
+		Key:          "function.pyUDF.maxMessageBytes",
+		Version:      "3.0.3",
+		DefaultValue: "67108864",
+		Export:       true,
+		Doc:          "Maximum serialized size of one PyUDF gRPC message in bytes. Restart is required after changing this value.",
+	}
+	p.PyUDFMaxMessageBytes.Init(base.mgr)
+
+	p.PyUDFWorkerCount = ParamItem{
+		Key:          "function.pyUDF.server.workerCount",
+		Version:      "3.0.3",
+		DefaultValue: "1",
+		Export:       true,
+		Doc:          "Number of Python worker processes sharing the configured address. Restart is required after changing this value.",
+	}
+	p.PyUDFWorkerCount.Init(base.mgr)
+
+	p.PyUDFGRPCConcurrency = ParamItem{
+		Key:          "function.pyUDF.server.grpcConcurrency",
+		Version:      "3.0.3",
+		DefaultValue: "10",
+		Export:       true,
+		Doc:          "Per-worker gRPC executor threads. Restart is required after changing this value.",
+	}
+	p.PyUDFGRPCConcurrency.Init(base.mgr)
+
+	p.PyUDFMaxConcurrentRPCs = ParamItem{
+		Key:          "function.pyUDF.server.maxConcurrentRPCs",
+		Version:      "3.0.3",
+		DefaultValue: "100",
+		Export:       true,
+		Doc:          "Maximum in-flight RPCs per Python worker, including requests waiting in the gRPC executor. Restart is required after changing this value.",
+	}
+	p.PyUDFMaxConcurrentRPCs.Init(base.mgr)
+
+	p.PyUDFShutdownTimeout = ParamItem{
+		Key:          "function.pyUDF.server.shutdownTimeout",
+		Version:      "3.0.3",
+		DefaultValue: "30s",
+		Export:       true,
+		Doc:          "Python worker termination escalation deadline. Range: 5s to 60s, in whole milliseconds; invalid values log an error and use 30s. Restart is required after changing this value.",
+	}
+	p.PyUDFShutdownTimeout.Init(base.mgr)
 }
 
 func (p *functionConfig) GetTextEmbeddingProviderConfig(providerName string) map[string]string {

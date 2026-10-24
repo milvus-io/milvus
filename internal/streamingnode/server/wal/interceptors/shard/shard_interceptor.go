@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 const interceptorName = "shard"
@@ -40,6 +41,7 @@ func (impl *shardInterceptor) initOpTable() {
 		message.MessageTypeInsert:             impl.handleInsertMessage,
 		message.MessageTypeDelete:             impl.handleDeleteMessage,
 		message.MessageTypeManualFlush:        impl.handleManualFlushMessage,
+		message.MessageTypeCreateSnapshot:     impl.handleCreateSnapshotMessage,
 		message.MessageTypeSchemaChange:       impl.handleSchemaChange,
 		message.MessageTypeAlterCollection:    impl.handleAlterCollection,
 		message.MessageTypeCreateSegment:      impl.handleCreateSegment,
@@ -109,7 +111,7 @@ func (impl *shardInterceptor) handleDropCollection(ctx context.Context, msg mess
 		return msgID, err
 	}
 	impl.shardManager.DropCollection(message.MustAsImmutableDropCollectionMessageV1(msg.IntoImmutableMessage(msgID)))
-	function.GetManager().Release(dropCollectionMessage.Header().GetCollectionId(), walFunctionRunnerKey(dropCollectionMessage.VChannel()))
+	function.GetManager().Release(dropCollectionMessage.Header().GetCollectionId(), WALFunctionRunnerKey(dropCollectionMessage.VChannel()))
 	return msgID, nil
 }
 
@@ -187,17 +189,34 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 	if header.SchemaVersion == nil {
 		schemaVersion = function.LatestFunctionRunnerVersion
 	}
-	if err := impl.materializeFunctionFields(ctx, insertMsg, header.GetCollectionId(), schemaVersion); err != nil {
-		impl.shardManager.Logger().Warn(ctx, "failed to materialize function fields before WAL append",
-			mlog.Int64("collectionID", header.GetCollectionId()),
-			mlog.Int32("schemaVersion", schemaVersion),
-			mlog.Err(err))
-		return nil, status.NewUnrecoverableError("failed to materialize function fields before WAL append: %s", err.Error())
+	// Write-before function materialization is version-gated: it only runs once
+	// the whole cluster has confirmed version >= GateVersion (config default
+	// "auto"); before that the write path keeps the legacy format. The gate is
+	// applied at the config-item read layer, so GetAsBool already returns the
+	// effective value.
+	if paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization.GetAsBool() {
+		if err := impl.materializeFunctionFields(ctx, insertMsg, header.GetCollectionId(), schemaVersion); err != nil {
+			var preparation *function.PreparationRequiredError
+			if errors.As(err, &preparation) {
+				// Unwind to redo before waiting for initialization. No
+				// fields or segment assignments have changed on this path.
+				return nil, err
+			}
+			impl.shardManager.Logger().Warn(ctx, "failed to materialize function fields before WAL append",
+				mlog.Int64("collectionID", header.GetCollectionId()),
+				mlog.Int32("schemaVersion", schemaVersion),
+				mlog.Err(err))
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return nil, status.NewUnrecoverableError("failed to materialize function fields before WAL append: %s", err.Error())
+		}
 	}
 	for _, partition := range header.GetPartitions() {
 		if partition.BinarySize == 0 {
-			// Proxy does not estimate binary size today. Use payload size after
-			// write-before materialization when the estimate is absent.
+			// Proxy does not estimate binary size today. Use the payload size;
+			// note this excludes materialized function output fields while the
+			// version gate is off (matching pre-feature behavior).
 			partition.BinarySize = uint64(msg.EstimateSize())
 		}
 		req := &shards.AssignSegmentRequest{
@@ -222,8 +241,8 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 			// we just redo it to refresh a new latest timetick.
 			return nil, redo.ErrRedo
 		}
-		if errors.IsAny(err, shards.ErrTooLargeInsert, shards.ErrPartitionNotFound, shards.ErrCollectionNotFound) {
-			// Message is too large, so retry operation is unrecoverable, can't be retry at client side.
+		if errors.IsAny(err, shards.ErrPartitionNotFound, shards.ErrCollectionNotFound) {
+			// The target metadata no longer exists, so retrying cannot recover the operation.
 			impl.shardManager.Logger().Warn(ctx, "unrecoverable insert operation", mlog.Object("message", msg), mlog.Err(err))
 			return nil, status.NewUnrecoverableError("fail to assign segment, %s", err.Error())
 		}
@@ -260,11 +279,21 @@ func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg messa
 
 // handleManualFlushMessage handles the manual flush message.
 func (impl *shardInterceptor) handleManualFlushMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
-	maunalFlushMsg := message.MustAsMutableManualFlushMessageV2(msg)
-	header := maunalFlushMsg.Header()
+	manualFlushMsg := message.MustAsMutableManualFlushMessageV2(msg)
+	header := manualFlushMsg.Header()
 	segmentIDs, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(header.GetCollectionId(), msg.TimeTick())
 	if err != nil {
-		return nil, status.NewUnrecoverableError(err.Error())
+		if !msg.IsUnreplicable() || msg.ReplicateHeader() != nil || !errors.Is(err, shards.ErrCollectionNotFound) {
+			return nil, status.NewUnrecoverableError(err.Error())
+		}
+		// DataCoord admits a local flush only for an existing collection, after
+		// CreateCollection's business-channel ACKs. Its ID is never reused, so a
+		// missing shard here means Drop overtook the flush (including on retry
+		// after WAL recovery). Append an empty best-effort flush for the dropped
+		// collection. It follows normal consuming ACK/resource-key ordering without
+		// an additional dependency on Drop completion. Never synthesize an ACK or
+		// apply this exception to historical/replicated flushes or other errors.
+		segmentIDs = nil
 	}
 
 	// Modify the extra response for manual flush message.
@@ -272,8 +301,18 @@ func (impl *shardInterceptor) handleManualFlushMessage(ctx context.Context, msg 
 		return &messagespb.ManualFlushExtraResponse{SegmentIds: segmentIDs}
 	})
 	header.SegmentIds = segmentIDs
-	maunalFlushMsg.OverwriteHeader(header)
+	manualFlushMsg.OverwriteHeader(header)
 
+	return appendOp(ctx, msg)
+}
+
+// handleCreateSnapshotMessage seals the old segments so later inserts cannot
+// change the snapshot's L1 data. The consuming-side Ack waits for their output.
+func (impl *shardInterceptor) handleCreateSnapshotMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	header := message.MustAsMutableCreateSnapshotMessageV2(msg).Header()
+	if _, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(header.GetCollectionId(), msg.TimeTick()); err != nil {
+		return nil, status.NewUnrecoverableError(err.Error())
+	}
 	return appendOp(ctx, msg)
 }
 
@@ -389,7 +428,7 @@ func (impl *shardInterceptor) handleTruncateCollectionMessage(ctx context.Contex
 func (impl *shardInterceptor) Close() {
 	if schemaProvider, ok := impl.shardManager.(collectionSchemaProvider); ok {
 		for collectionID, schemaInfo := range schemaProvider.GetAllCollectionSchemaInfos() {
-			function.GetManager().Release(collectionID, walFunctionRunnerKey(schemaInfo.VChannel))
+			function.GetManager().Release(collectionID, WALFunctionRunnerKey(schemaInfo.VChannel))
 		}
 	}
 }

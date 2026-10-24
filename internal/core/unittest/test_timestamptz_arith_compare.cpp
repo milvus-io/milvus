@@ -24,12 +24,12 @@
 #include "common/Types.h"
 #include "exec/expression/ExprBatchTestUtils.h"
 #include "expr/ITypeExpr.h"
-#include "index/ScalarIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "query/ExecPlanNodeVisitor.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegcoreConfig.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/index_test_utils.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -80,6 +80,26 @@ MakeTstzPlusOneMonthCompare(FieldId tstz_fid,
 constexpr int64_t kFarFutureUs = 4102444800LL * 1000000;  // 2100-01-01
 constexpr int64_t kFarPastUs = -2208988800LL * 1000000;   // 1900-01-01
 
+void
+SetTimestamptzValues(GeneratedData& dataset,
+                     FieldId field_id,
+                     const std::vector<int64_t>& values) {
+    ASSERT_EQ(dataset.raw_->num_rows(), values.size());
+    for (int i = 0; i < dataset.raw_->fields_data_size(); ++i) {
+        auto* field_data = dataset.raw_->mutable_fields_data(i);
+        if (field_data->field_id() != field_id.get()) {
+            continue;
+        }
+        auto* data = field_data->mutable_scalars()
+                         ->mutable_timestamptz_data()
+                         ->mutable_data();
+        data->Clear();
+        data->Add(values.data(), values.data() + values.size());
+        return;
+    }
+    FAIL() << "timestamptz field " << field_id.get() << " not found";
+}
+
 }  // namespace
 
 class TimestamptzArithCompareCorrectnessTest : public ::testing::Test {
@@ -104,7 +124,7 @@ class TimestamptzArithCompareCorrectnessTest : public ::testing::Test {
                          N,
                          dataset_->row_ids_.data(),
                          dataset_->timestamps_.data(),
-                         dataset_->raw_);
+                         dataset_->SharedRaw());
         sealed_ = CreateSealedWithFieldDataLoaded(schema_, *dataset_);
     }
 
@@ -179,15 +199,28 @@ class TimestamptzArithCompareCorrectnessTest : public ::testing::Test {
         }
     }
 
+    // A production sealed load registers the type AdaptIndexType assigns, the
+    // INT64 storage type; the default keeps the logical timestamp type.
     void
-    LoadTimestamptzIndex(const int64_t* values, bool drop_field_data) {
-        auto scalar_index = milvus::index::CreateScalarIndexSort<int64_t>();
-        scalar_index->Build(N, values, tstz_valid_.data());
+    LoadTimestamptzIndex(const int64_t* values,
+                         bool drop_field_data,
+                         DataType value_type = DataType::TIMESTAMPTZ) {
+        auto scalar_index = milvus::BuildTestScalarIndex<int64_t>(
+            "sort",
+            N,
+            values,
+            tstz_valid_.data(),
+            {{"field_type", DataType::TIMESTAMPTZ},
+             {"value_type", value_type}});
+        ASSERT_EQ(scalar_index->ValueType(), value_type);
+        ASSERT_TRUE(scalar_index->Caps().value_lookup);
 
-        LoadIndexInfo load_index_info;
+        LoadIndexInfo load_index_info{};
         load_index_info.field_id = tstz_fid_.get();
         load_index_info.field_type = DataType::TIMESTAMPTZ;
-        load_index_info.index_params = GenIndexParams(scalar_index.get());
+        load_index_info.index_params =
+            GenIndexParams(scalar_index.get(), "sort");
+        SetTestIndexMetadata(load_index_info, *scalar_index, "sort");
         load_index_info.cache_index = milvus::CreateTestCacheIndex(
             "timestamptz", std::move(scalar_index));
         sealed_->LoadIndex(load_index_info);
@@ -301,6 +334,102 @@ TEST_F(TimestamptzArithCompareCorrectnessTest,
     }
 }
 
+TEST_F(TimestamptzArithCompareCorrectnessTest,
+       SealedIndexOnlyWithStorageTypedIndex) {
+    std::vector<int64_t> values(N);
+    std::iota(values.begin(), values.end(), int64_t{0});
+    LoadTimestamptzIndex(values.data(), true, DataType::INT64);
+
+    proto::plan::Interval ignored_interval;
+    ignored_interval.set_months(1);
+    auto arith = MakeTstzCompare(tstz_fid_,
+                                 proto::plan::ArithOpType::Unknown,
+                                 ignored_interval,
+                                 proto::plan::OpType::GreaterEqual,
+                                 16);
+    auto arith_result =
+        query::ExecuteQueryExpr(milvus::test::CreateRetrievePlanByExpr(arith),
+                                sealed_.get(),
+                                N,
+                                MAX_TIMESTAMP);
+    ASSERT_EQ(arith_result.size(), N);
+    for (size_t i = 0; i < N; ++i) {
+        EXPECT_EQ(arith_result[i], tstz_valid_[i] && i >= 16) << "row " << i;
+    }
+
+    proto::plan::GenericValue bound;
+    bound.set_int64_val(9);
+    auto range = std::make_shared<milvus::expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(tstz_fid_, DataType::TIMESTAMPTZ),
+        proto::plan::OpType::LessThan,
+        bound);
+    auto range_result =
+        query::ExecuteQueryExpr(milvus::test::CreateRetrievePlanByExpr(range),
+                                sealed_.get(),
+                                N,
+                                MAX_TIMESTAMP);
+    ASSERT_EQ(range_result.size(), N);
+    for (size_t i = 0; i < N; ++i) {
+        EXPECT_EQ(range_result[i], tstz_valid_[i] && i < 9) << "row " << i;
+    }
+}
+
 TEST_F(TimestamptzArithCompareCorrectnessTest, SealedOffsetInputNullSemantics) {
     AssertOffsetInputNullSemantics(sealed_.get());
+}
+
+TEST(TimestamptzArithCompareOffsetScanTest,
+     DenseSortedAndDuplicateOffsetsGatherSourceRows) {
+    constexpr int64_t kRowCount = 32;
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    auto timestamp_fid =
+        schema->AddDebugField("ts", DataType::TIMESTAMPTZ, false);
+    schema->set_primary_field_id(pk_fid);
+
+    auto dataset = DataGen(schema, kRowCount, 84);
+    std::vector<int64_t> timestamps(kRowCount);
+    for (int64_t i = 0; i < kRowCount; ++i) {
+        timestamps[i] = i * 1000000;
+    }
+    SetTimestamptzValues(dataset, timestamp_fid, timestamps);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+
+    proto::plan::Interval interval;
+    proto::plan::GenericValue compare_value;
+    compare_value.set_int64_val(11500000);
+    auto typed_expr =
+        std::make_shared<milvus::expr::TimestamptzArithCompareExpr>(
+            expr::ColumnInfo(timestamp_fid, DataType::TIMESTAMPTZ),
+            proto::plan::ArithOpType::Add,
+            interval,
+            proto::plan::OpType::LessThan,
+            compare_value);
+    auto filter_node = std::make_shared<milvus::plan::FilterBitsNode>(
+        DEFAULT_PLANNODE_ID, typed_expr);
+
+    OffsetVector offsets{10, 12, 12};
+    auto col_vec = milvus::test::gen_filter_res(
+        filter_node.get(), segment.get(), kRowCount, MAX_TIMESTAMP, &offsets);
+    {
+        BitsetTypeView res(col_vec->GetRawData(), col_vec->size());
+        ASSERT_EQ(res.size(), offsets.size());
+        EXPECT_TRUE(res[0]);
+        EXPECT_FALSE(res[1]);
+        EXPECT_FALSE(res[2]);
+    }
+
+    OffsetVector duplicate_offsets{10, 10, 10};
+    col_vec = milvus::test::gen_filter_res(filter_node.get(),
+                                           segment.get(),
+                                           kRowCount,
+                                           MAX_TIMESTAMP,
+                                           &duplicate_offsets);
+    BitsetTypeView duplicate_res(col_vec->GetRawData(), col_vec->size());
+    ASSERT_EQ(duplicate_res.size(), duplicate_offsets.size());
+    EXPECT_TRUE(duplicate_res[0]);
+    EXPECT_TRUE(duplicate_res[1]);
+    EXPECT_TRUE(duplicate_res[2]);
 }

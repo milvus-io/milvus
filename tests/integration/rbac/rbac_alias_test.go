@@ -106,7 +106,7 @@ func (s *RBACBasicTestSuite) TestAliasRBAC() {
 			Privilege: &milvuspb.PrivilegeEntity{Name: "GetStatistics"},
 		},
 		Type:           milvuspb.OperatePrivilegeType_Grant,
-		DbName:         util.AnyWord,
+		DbName:         util.DefaultDBName,
 		CollectionName: realColName,
 	})
 	s.NoError(err)

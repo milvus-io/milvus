@@ -15,9 +15,13 @@
 // limitations under the License.
 
 #include "exec/expression/function/init_c.h"
+#include "common/CGoCatch.h"
 #include "exec/expression/function/FunctionFactory.h"
 
 void
 InitExecExpressionFunctionFactory() {
-    milvus::exec::expression::FunctionFactory::Instance().Initialize();
+    try {
+        milvus::exec::expression::FunctionFactory::Instance().Initialize();
+    }
+    CGO_CATCH_AND_LOG("InitExecExpressionFunctionFactory")
 }

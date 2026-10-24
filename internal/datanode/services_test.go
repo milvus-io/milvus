@@ -238,7 +238,6 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 			PlanID: 1,
 			State:  datapb.CompactionTaskState_completed,
 		}, nil)
-		mockC.EXPECT().GetStorageConfig().Return(s.storageConfig)
 		s.node.compactionExecutor.Enqueue(mockC)
 
 		mockC2 := compactor.NewMockCompactor(s.T())
@@ -252,7 +251,6 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 			PlanID: 2,
 			State:  datapb.CompactionTaskState_failed,
 		}, nil)
-		mockC2.EXPECT().GetStorageConfig().Return(s.storageConfig)
 		s.node.compactionExecutor.Enqueue(mockC2)
 
 		s.Eventually(func() bool {
@@ -528,6 +526,7 @@ func (s *DataNodeServicesSuite) TestQuerySlot() {
 		resp, err := s.node.QuerySlot(ctx, nil)
 		s.NoError(err)
 		s.True(merr.Ok(resp.GetStatus()))
+		s.True(resp.GetCopySegmentSharedIndexes())
 		s.NoError(merr.Error(resp.GetStatus()))
 	})
 }

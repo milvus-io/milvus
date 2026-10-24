@@ -1496,6 +1496,91 @@ func TestGetCommandsForClientWithConfigHashChange(t *testing.T) {
 	assert.Empty(t, commands2)
 }
 
+func TestEmptyConfigSentinelConvergesAfterLastConfigDeleted(t *testing.T) {
+	mgr := NewTelemetryManager(nil)
+	mockStore := newMockCommandStore()
+	mgr.SetCommandStore(mockStore)
+	ctx := context.Background()
+	clientID := "empty-config-client"
+
+	configID, err := mockStore.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
+		CommandType: "push_config",
+		Payload:     []byte(`{"sampling_rate":0.5}`),
+		Persistent:  true,
+	})
+	require.NoError(t, err)
+
+	initial := mgr.getCommandsForClientWithID(clientID, &milvuspb.ClientHeartbeatRequest{
+		ClientInfo: &commonpb.ClientInfo{Reserved: map[string]string{"client_id": clientID}},
+	})
+	require.Len(t, initial, 1)
+	oldHash := computeClientConfigHash([]*ClientConfig{{
+		ConfigId:   initial[0].CommandId,
+		ConfigType: initial[0].CommandType,
+		Payload:    initial[0].Payload,
+	}})
+	require.NotEmpty(t, oldHash)
+
+	require.NoError(t, mockStore.DeleteCommand(ctx, configID))
+	transition := mgr.getCommandsForClientWithID(clientID, &milvuspb.ClientHeartbeatRequest{
+		ClientInfo: &commonpb.ClientInfo{Reserved: map[string]string{"client_id": clientID}},
+		ConfigHash: oldHash,
+	})
+	require.Len(t, transition, 1)
+	sentinel := transition[0]
+	assert.Equal(t, emptyConfigSentinelCommandID, sentinel.CommandId)
+	assert.Equal(t, "push_config", sentinel.CommandType)
+	assert.Equal(t, []byte("{}"), sentinel.Payload)
+	assert.Zero(t, sentinel.CreateTime)
+	assert.True(t, sentinel.Persistent)
+	assert.Equal(t, emptyConfigSentinelHash, computeClientConfigHash([]*ClientConfig{{
+		ConfigId:   sentinel.CommandId,
+		ConfigType: sentinel.CommandType,
+		Payload:    sentinel.Payload,
+	}}))
+
+	for name, hash := range map[string]string{
+		"fresh empty hash":    "",
+		"sentinel empty hash": emptyConfigSentinelHash,
+	} {
+		t.Run(name, func(t *testing.T) {
+			commands := mgr.getCommandsForClientWithID(clientID, &milvuspb.ClientHeartbeatRequest{
+				ClientInfo: &commonpb.ClientInfo{Reserved: map[string]string{"client_id": clientID}},
+				ConfigHash: hash,
+			})
+			assert.Empty(t, commands)
+		})
+	}
+
+	_, err = mockStore.PushCommand(ctx, &milvuspb.PushClientCommandRequest{
+		CommandType: "push_config",
+		Payload:     []byte(`{"enabled":false}`),
+		Persistent:  true,
+	})
+	require.NoError(t, err)
+	replacement := mgr.getCommandsForClientWithID(clientID, &milvuspb.ClientHeartbeatRequest{
+		ClientInfo: &commonpb.ClientInfo{Reserved: map[string]string{"client_id": clientID}},
+		ConfigHash: emptyConfigSentinelHash,
+	})
+	require.Len(t, replacement, 1)
+	assert.NotEqual(t, emptyConfigSentinelCommandID, replacement[0].CommandId)
+}
+
+func TestEmptyConfigSentinelReplyIsNotStored(t *testing.T) {
+	mgr := NewTelemetryManager(nil)
+	mgr.SetCommandStore(newMockCommandStore())
+	cache := &ClientMetricsCache{ClientID: "empty-config-client"}
+
+	repliedIDs := mgr.processCommandReplies(cache, []*commonpb.CommandReply{{
+		CommandId: emptyConfigSentinelCommandID,
+		Success:   true,
+		Payload:   []byte(`{"applied":[]}`),
+	}})
+
+	assert.Empty(t, repliedIDs)
+	assert.Empty(t, cache.replies())
+}
+
 func TestGetCommandsForClientWithOneTimeCommand(t *testing.T) {
 	mgr := NewTelemetryManager(nil)
 	mockStore := newMockCommandStore()

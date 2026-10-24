@@ -88,7 +88,7 @@ func (w *segmentFlushWorker) do() {
 		case <-w.ctx.Done():
 			w.Logger().Info(w.ctx, "flush segment canceled", mlog.Err(w.ctx.Err()))
 			return
-		case <-w.wal.Available():
+		case <-w.wal.Unavailable():
 			// wal is unavailable, stop the worker.
 			w.Logger().Warn(w.ctx, "wal is unavailable, stop flush segment")
 			return
@@ -106,7 +106,7 @@ func (w *segmentFlushWorker) waitForTxnManagerRecoverDone() error {
 	case <-w.ctx.Done():
 		w.Logger().Info(w.ctx, "flush segment canceled", mlog.Err(w.ctx.Err()))
 		return w.ctx.Err()
-	case <-w.wal.Available():
+	case <-w.wal.Unavailable():
 		return status.NewOnShutdownError("wal is unavailable")
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
@@ -31,6 +33,18 @@ func TestFieldDataValidData(t *testing.T) {
 		}
 		assert.Equal(t, vectorValid, GetFieldDataValidData(field))
 		assert.True(t, ValidateAndNormalizeFieldDataValidData(field))
+	})
+
+	t.Run("nested scalar field", func(t *testing.T) {
+		field := &schemapb.ScalarField{ValidData: scalarValid}
+		assert.Equal(t, scalarValid, GetArrayElementValidData(field))
+		assert.Nil(t, GetArrayElementValidData((*schemapb.ScalarField)(nil)))
+	})
+
+	t.Run("nested vector field", func(t *testing.T) {
+		field := &schemapb.VectorField{ValidData: vectorValid}
+		assert.Equal(t, vectorValid, GetVectorArrayElementValidData(field))
+		assert.Nil(t, GetVectorArrayElementValidData((*schemapb.VectorField)(nil)))
 	})
 
 	t.Run("legacy fallback", func(t *testing.T) {
@@ -398,4 +412,40 @@ func TestFieldDataBuilder_Build(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Older SDKs omit the sparse payload entirely when every row is null.
+func TestNormalizeAllNullSparseFieldData(t *testing.T) {
+	field := &schemapb.FieldData{
+		Type:      schemapb.DataType_SparseFloatVector,
+		FieldName: "sparse", FieldId: 102,
+		ValidData: []bool{false, false},
+	}
+	// Match the input boundary, including protobuf's absent-oneof semantics.
+	wire, err := proto.Marshal(field)
+	require.NoError(t, err)
+	field = &schemapb.FieldData{}
+	require.NoError(t, proto.Unmarshal(wire, field))
+	require.Nil(t, field.Field)
+	for range 2 {
+		require.True(t, ValidateAndNormalizeFieldDataValidData(field))
+		require.Equal(t, []bool{false, false}, GetFieldDataValidData(field))
+		require.Empty(t, field.GetValidData())
+		require.NotNil(t, field.GetVectors().GetSparseFloatVector())
+		require.Empty(t, field.GetVectors().GetSparseFloatVector().GetContents())
+	}
+	// Repacking must retain null rows without adding empty non-null vectors.
+	dst := make([]*schemapb.FieldData, 1)
+	for row := range 2 {
+		AppendFieldData(dst, []*schemapb.FieldData{field}, int64(row), -1)
+	}
+	require.Equal(t, []bool{false, false}, GetFieldDataValidData(dst[0]))
+	require.Empty(t, dst[0].GetVectors().GetSparseFloatVector().GetContents())
+	wire, err = proto.Marshal(dst[0])
+	require.NoError(t, err)
+	decoded := &schemapb.FieldData{}
+	require.NoError(t, proto.Unmarshal(wire, decoded))
+	require.Equal(t, []bool{false, false}, GetFieldDataValidData(decoded))
+	ProjectFieldDataValidDataForLegacy(decoded)
+	require.Equal(t, []bool{false, false}, decoded.GetValidData())
 }

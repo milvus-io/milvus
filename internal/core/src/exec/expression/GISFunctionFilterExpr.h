@@ -37,6 +37,37 @@
 namespace milvus {
 namespace exec {
 
+namespace gis_detail {
+
+inline index::SpatialOp
+ToSpatialOp(proto::plan::GISFunctionFilterExpr_GISOp op) {
+    using PlanOp = proto::plan::GISFunctionFilterExpr_GISOp;
+    switch (op) {
+        case PlanOp::GISFunctionFilterExpr_GISOp_Equals:
+            return index::SpatialOp::Equals;
+        case PlanOp::GISFunctionFilterExpr_GISOp_Touches:
+            return index::SpatialOp::Touches;
+        case PlanOp::GISFunctionFilterExpr_GISOp_Overlaps:
+            return index::SpatialOp::Overlaps;
+        case PlanOp::GISFunctionFilterExpr_GISOp_Crosses:
+            return index::SpatialOp::Crosses;
+        case PlanOp::GISFunctionFilterExpr_GISOp_Contains:
+            return index::SpatialOp::Contains;
+        case PlanOp::GISFunctionFilterExpr_GISOp_Intersects:
+            return index::SpatialOp::Intersects;
+        case PlanOp::GISFunctionFilterExpr_GISOp_Within:
+            return index::SpatialOp::Within;
+        case PlanOp::GISFunctionFilterExpr_GISOp_DWithin:
+            return index::SpatialOp::DWithin;
+        default:
+            ThrowInfo(UnexpectedError,
+                      "unsupported spatial operator {}",
+                      static_cast<int>(op));
+    }
+}
+
+}  // namespace gis_detail
+
 // Evaluate a single GIS predicate using a prepared query geometry against an
 // already-constructed `left` row geometry. This centralizes the prepared
 // predicate semantics — notably the contains/within swap
@@ -109,9 +140,9 @@ EvaluateGISPreparedOp(proto::plan::GISFunctionFilterExpr_GISOp op,
 //
 // Returns true when `coarse` was short and has been promoted; false when it
 // already spanned (at least) `active_count` rows and was left untouched.
-// Validity is deliberately NOT handled here: the per-predicate path needs
-// IsNotNull(active_count) (absolute null offsets survive independently of the
-// short entry count) while the fusion path derives nullness in Refine.
+// Validity is deliberately NOT handled here: the per-predicate path reads
+// exact field validity from raw data while the fusion path derives nullness in
+// Refine.
 inline bool
 PromoteShortGISCoarseBitmap(TargetBitmap& coarse, int64_t active_count) {
     if (static_cast<int64_t>(coarse.size()) >= active_count) {
@@ -124,7 +155,7 @@ PromoteShortGISCoarseBitmap(TargetBitmap& coarse, int64_t active_count) {
 class PhyGISFunctionFilterExpr : public SegmentExpr {
  public:
     PhyGISFunctionFilterExpr(
-        const std::vector<std::shared_ptr<Expr>>& input,
+        std::vector<std::shared_ptr<Expr>> input,
         const std::shared_ptr<const milvus::expr::GISFunctionFilterExpr>& expr,
         const std::string& name,
         milvus::OpContext* op_ctx,
@@ -151,6 +182,14 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
 
     void
     DetermineExecPath() override;
+
+    // ST_IsValid has no index form: DetermineExecPath sends it to raw data
+    // whatever index the field has, which is the designed path, not a
+    // declined index.
+    bool
+    ReportsIndexDecline() const override {
+        return expr_->op_ != proto::plan::GISFunctionFilterExpr_GISOp_STIsValid;
+    }
 
     std::optional<milvus::expr::ColumnInfo>
     GetColumnInfo() const override {
@@ -182,22 +221,16 @@ class PhyGISFunctionFilterExpr : public SegmentExpr {
     // still advance this expression's cursors, otherwise it desynchronizes
     // from its sibling expressions and later batches evaluate the wrong rows.
     // The base MoveCursor() covers every case except the growing interim-index
-    // path: MoveCursorForIndex() asserts sealed-only, while
-    // EvalForIndexSegment() on a growing segment advances the global index
-    // position together with the data cursor -- mirror that here.
-    // Unlike the base implementation, MoveCursorForData() is called without a
-    // HasFieldData() guard: this exec path already walks data chunks
-    // unconditionally (EvalForIndexSegment), and with no field data
-    // num_data_chunk_ is 0, making the call a no-op -- the omission is
-    // intentional, not an oversight.
+    // path. EvalForIndexSegment() advances both the global index position and
+    // the legacy data chunk cursor, so a skipped batch must mirror both
+    // updates here.
     void
     MoveCursor() override {
         if (has_offset_input_ || execute_all_at_once_) {
             return;
         }
         if (UseIndexCursor() && segment_->type() != SegmentType::Sealed) {
-            current_index_chunk_pos_ +=
-                std::min(active_count_ - current_index_chunk_pos_, batch_size_);
+            MoveCursorForIndex();
             MoveCursorForData();
             return;
         }

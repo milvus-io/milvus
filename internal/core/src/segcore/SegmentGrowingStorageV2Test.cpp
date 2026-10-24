@@ -42,6 +42,7 @@
 #include "common/Schema.h"
 #include "common/TracerBase.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
@@ -55,6 +56,7 @@
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/TextLobSpillover.h"
 #include "segcore/memory_planner.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
@@ -200,6 +202,109 @@ TEST_F(TestGrowingStorageV2, LoadFieldData) {
     segment->LoadFieldData(load_info);
 }
 
+// Regression for add-field + legacy StorageV2 data: a growing segment written
+// by StorageV2 can have a TEXT field added to its schema afterwards (AddField)
+// while its binlogs carry no TEXT column and it has no StorageV3 manifest. The
+// V2 column-group load must NOT be rejected on the schema alone; the missing
+// TEXT column is backfilled with empty values by FillAbsentFields.
+TEST_F(TestGrowingStorageV2, LoadFieldDataWithAddedTextFieldBackfillsEmpty) {
+    int batch_size = 1000;
+
+    auto paths = std::vector<std::string>{path_ + "/10002.parquet",
+                                          path_ + "/10003.parquet"};
+    auto column_groups = std::vector<std::vector<int>>{{2}, {0, 1}};
+    auto writer_memory = 16 * 1024 * 1024;
+    auto storage_config = milvus_storage::StorageConfig();
+    auto result = milvus_storage::PackedRecordBatchWriter::Make(
+        fs_,
+        paths,
+        schema_,
+        storage_config,
+        column_groups,
+        writer_memory,
+        ::parquet::default_writer_properties());
+    EXPECT_TRUE(result.ok());
+    auto writer = result.ValueOrDie();
+    for (int i = 0; i < batch_size; ++i) {
+        EXPECT_TRUE(writer->Write(record_batch_).ok());
+    }
+    EXPECT_TRUE(writer->Close().ok());
+
+    // Binlog fields match the parquet (ts/pk/str -> field ids 100/101/102);
+    // the TEXT field (103) was added after the binlogs were written. Added
+    // fields must be nullable (proxy/task.go enforces this) so old rows read
+    // back as null.
+    auto schema = std::make_shared<milvus::Schema>();
+    schema->AddDebugField("ts", milvus::DataType::INT64, true);
+    auto pk_fid = schema->AddDebugField("pk", milvus::DataType::INT64, false);
+    schema->AddDebugField("str", milvus::DataType::VARCHAR, true);
+    auto text_fid = schema->AddDebugField("text", milvus::DataType::TEXT, true);
+    schema->set_primary_field_id(pk_fid);
+
+    auto segment =
+        milvus::segcore::CreateGrowingSegment(schema, milvus::empty_index_meta);
+    auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(segment_impl, nullptr);
+
+    LoadFieldDataInfo load_info;
+    load_info.field_infos = {
+        {0,
+         FieldBinlogInfo{0,
+                         3000,
+                         std::vector<int64_t>{3000},
+                         std::vector<int64_t>{3000},
+                         false,
+                         "",
+                         std::vector<std::string>{paths[0]}}},
+        {1,
+         FieldBinlogInfo{1,
+                         3000,
+                         std::vector<int64_t>{3000},
+                         std::vector<int64_t>{3000},
+                         false,
+                         "",
+                         std::vector<std::string>{paths[1]}}},
+    };
+    load_info.storage_version = 2;
+
+    // Before the fix this asserted: the schema has a TEXT field so the V2
+    // column-group load was rejected even though the binlogs carry no TEXT
+    // column and the field is empty by construction.
+    segment->LoadFieldData(load_info);
+    ASSERT_EQ(segment->get_row_count(), 3000);
+
+    segment_impl->FillAbsentFields();
+
+    // The added TEXT column must be backfilled rather than left uninitialized:
+    // every old row reads back as null (validity false). The raw column holds
+    // spillover references whose decoded values are empty.
+    auto* text_column = dynamic_cast<const ConcurrentVector<std::string>*>(
+        segment_impl->get_insert_record().get_data_base(text_fid));
+    ASSERT_NE(text_column, nullptr);
+    auto valid_data =
+        segment_impl->get_insert_record().get_valid_data(text_fid);
+    ASSERT_NE(valid_data, nullptr);
+    for (int64_t i = 0; i < 3000; ++i) {
+        EXPECT_FALSE(valid_data->is_valid(i)) << "row " << i << " not null";
+        EXPECT_EQ(TextLobRef::Decode(text_column->view_element(i)).size, 0)
+            << "row " << i << " TEXT payload is not empty";
+    }
+
+    // Exercise the query read path: backfilled rows must retrieve as null with
+    // an empty value after decoding the local spillover reference.
+    std::vector<int64_t> offsets(3000);
+    std::iota(offsets.begin(), offsets.end(), 0);
+    auto out = segment->bulk_subscript(nullptr, text_fid, offsets.data(), 3000);
+    ASSERT_NE(out, nullptr);
+    const auto& valid = GetFieldDataRowValidData(*out);
+    ASSERT_EQ(valid.size(), 3000);
+    for (int64_t i = 0; i < 3000; ++i) {
+        EXPECT_FALSE(valid[i]) << "row " << i << " not null via bulk_subscript";
+        EXPECT_TRUE(out->scalars().string_data().data(i).empty())
+            << "row " << i << " TEXT value is not empty via bulk_subscript";
+    }
+}
+
 TEST_F(TestGrowingStorageV2, LoadWithStrategy) {
     int batch_size = 1000;
 
@@ -342,11 +447,21 @@ TEST_F(TestGrowingStorageV2, TestAllDataTypes) {
     // Write data to storage v2
     auto paths = std::vector<std::string>{path_ + "/19530.parquet",
                                           path_ + "/19531.parquet"};
-    auto column_groups = std::vector<std::vector<int>>{
-        {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}, {15}};
     auto writer_memory = 16 * 1024 * 1024;
     auto storage_config = milvus_storage::StorageConfig();
     auto arrow_schema = schema->ConvertToArrowSchema();
+    // Keep the vector in its own group while including every scalar column,
+    // even when the shared all-types schema gains another type.
+    std::vector<std::vector<int>> column_groups(2);
+    for (int i = 0; i < arrow_schema->num_fields(); ++i) {
+        const auto field_id =
+            std::stoll(arrow_schema->field(i)
+                           ->metadata()
+                           ->Get(milvus_storage::ARROW_FIELD_ID_KEY)
+                           .ValueOrDie());
+        column_groups[field_id == vec.get() ? 1 : 0].push_back(i);
+    }
+    ASSERT_EQ(column_groups[1].size(), 1);
     auto result = milvus_storage::PackedRecordBatchWriter::Make(
         fs_,
         paths,
@@ -358,8 +473,12 @@ TEST_F(TestGrowingStorageV2, TestAllDataTypes) {
     EXPECT_TRUE(result.ok());
     auto writer = result.ValueOrDie();
     int64_t total_rows = 0;
+    std::vector<float> expected_vectors;
     for (int64_t i = 0; i < n_batch; i++) {
         auto dataset = DataGen(schema, per_batch);
+        const auto vectors = dataset.get_col<float>(vec);
+        expected_vectors.insert(
+            expected_vectors.end(), vectors.begin(), vectors.end());
         auto record_batch =
             ConvertToArrowRecordBatch(dataset, dim, arrow_schema);
         total_rows += record_batch->num_rows();
@@ -390,4 +509,16 @@ TEST_F(TestGrowingStorageV2, TestAllDataTypes) {
     };
     load_info.storage_version = 2;
     segment->LoadFieldData(load_info);
+    ASSERT_EQ(segment->get_row_count(), total_rows);
+    for (const auto& [field_id, field_meta] : schema->get_fields()) {
+        EXPECT_TRUE(segment->HasFieldData(field_id)) << field_id.get();
+    }
+    std::vector<int64_t> offsets(total_rows);
+    std::iota(offsets.begin(), offsets.end(), 0);
+    auto vectors =
+        segment->bulk_subscript(nullptr, vec, offsets.data(), total_rows);
+    const auto& values = vectors->vectors().float_vector().data();
+    EXPECT_EQ(vectors->vectors().dim(), dim);
+    EXPECT_EQ(std::vector<float>(values.begin(), values.end()),
+              expected_vectors);
 }

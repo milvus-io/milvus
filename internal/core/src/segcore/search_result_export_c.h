@@ -31,16 +31,20 @@ struct ArrowArray;
 // them through the Arrow C Data Interface when imported/consumed.
 // cancellation_source may be null; otherwise it must point to a
 // folly::CancellationSource created by NewLoadCancellationSource().
+// input_plan_blob contains a serialized milvus.proto.cgo.FunctionChainInputPlan.
+// A zero input_plan_size exports only system columns; input_plan_blob may be null.
+// Input bytes are only borrowed for the duration of the call.
 CStatus
-ExportSearchResultAsArrowRecordBatch(CSearchResult c_search_result,
-                                     CSearchPlan c_plan,
-                                     const int64_t* extra_field_ids,
-                                     int64_t num_extra_fields,
-                                     struct ArrowSchema* out_schema,
-                                     struct ArrowArray* out_array,
-                                     int64_t** out_chunk_sizes,
-                                     int64_t* out_num_chunks,
-                                     void* cancellation_source);
+ExportSearchResultAsArrowRecordBatchWithInputPlan(
+    CSearchResult c_search_result,
+    CSearchPlan c_plan,
+    const void* input_plan_blob,
+    int64_t input_plan_size,
+    struct ArrowSchema* out_schema,
+    struct ArrowArray* out_array,
+    int64_t** out_chunk_sizes,
+    int64_t* out_num_chunks,
+    void* cancellation_source);
 
 // Fill output fields for multiple segments in a single call, producing
 // results in the specified output order.
@@ -65,28 +69,29 @@ FillOutputFieldsOrdered(CSearchResult* search_results,
                         CProto* out_result,
                         void* cancellation_source);
 
-// Read explicit schema fields from multiple segments and export one Arrow
-// RecordBatch in the caller-provided row order. The caller owns
+// Materialize logical scalar/JSON-path inputs from multiple segments as one
+// Arrow RecordBatch in the caller-provided row order. The caller owns
 // out_schema/out_array and must release them through the Arrow C Data Interface
-// when imported/consumed.
+// when imported/consumed. Input plan bytes are only borrowed during the call.
 CStatus
-FillFieldsOrderedAsArrowRecordBatch(CSearchResult* search_results,
-                                    int64_t num_search_results,
-                                    CSearchPlan c_plan,
-                                    const int64_t* field_ids,
-                                    int64_t num_fields,
-                                    const int32_t* result_seg_indices,
-                                    const int64_t* result_seg_offsets,
-                                    int64_t total_rows,
-                                    struct ArrowSchema* out_schema,
-                                    struct ArrowArray* out_array,
-                                    void* cancellation_source);
+FillFieldsOrderedAsArrowRecordBatchWithInputPlan(
+    CSearchResult* search_results,
+    int64_t num_search_results,
+    CSearchPlan c_plan,
+    const void* input_plan_blob,
+    int64_t input_plan_size,
+    const int32_t* result_seg_indices,
+    const int64_t* result_seg_offsets,
+    int64_t total_rows,
+    struct ArrowSchema* out_schema,
+    struct ArrowArray* out_array,
+    void* cancellation_source);
 
 // Run the pre-export phase of reduce across all per-segment SearchResults:
 // filter invalid rows, optionally apply Global Refine (truncate + refine),
 // and fill primary keys. Mutates the passed SearchResults in place; the
 // Go-side pipeline then exports the prepared results via
-// ExportSearchResultAsArrowRecordBatch.
+// ExportSearchResultAsArrowRecordBatchWithInputPlan.
 //
 // Internally constructs a ReduceHelper and calls helper.PreReduce(). When
 // global refine is enabled (plan's search_info has non-zero ratios) and at
@@ -113,8 +118,8 @@ PrepareSearchResultsForExport(CTraceContext c_trace,
 //     seg_offsets_/distances_
 //   - group_size: the configured per-group cap (0 when group-by is disabled)
 //   - scanned_remote_bytes / scanned_total_bytes: storage cost accumulated by
-//     the segment search itself, by ExportSearchResultAsArrowRecordBatch when
-//     reading extra fields, and by FillOutputFieldsOrdered during late
+//     the segment search itself, by ExportSearchResultAsArrowRecordBatchWithInputPlan
+//     when reading extra fields, and by FillOutputFieldsOrdered during late
 //     materialization. Caller should invoke this after all those phases.
 void
 GetSearchResultMetadata(CSearchResult c_search_result,

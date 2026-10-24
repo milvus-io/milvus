@@ -36,7 +36,9 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/ce"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -408,6 +410,7 @@ func TestDDLCallbacksAlterCollectionV2AckCallback_StopRetryOnResourceGroupNotFou
 		withMeta(meta),
 		withMixCoord(mixc),
 		withValidProxyManager(),
+		withTsoAllocator(newMockTsoAllocator()),
 		withBroker(&mockBroker{
 			BroadcastAlteredCollectionFunc: func(ctx context.Context, collectionID int64) error {
 				return nil
@@ -415,13 +418,26 @@ func TestDDLCallbacksAlterCollectionV2AckCallback_StopRetryOnResourceGroupNotFou
 		}),
 	)
 	cb := &DDLCallback{Core: c}
+	notifyErr := merr.WrapErrServiceUnavailableMsg("proxy temporarily unavailable")
+	var notifications []*proxypb.InvalidateCollMetaCacheRequest
+	proxy := newMockProxy()
+	proxy.InvalidateCollectionMetaCacheFunc = func(_ context.Context, req *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+		notifications = append(notifications, req)
+		return merr.Status(notifyErr), nil
+	}
+	c.proxyClientManager.GetProxyClients().Insert(TestProxyID, proxy)
 
 	raw := message.NewAlterCollectionMessageBuilderV2().
 		WithHeader(&messagespb.AlterCollectionMessageHeader{
 			CollectionId: 1,
+			CacheExpirations: ce.NewBuilder().WithLegacyProxyCollectionMetaCache(
+				ce.OptLPCMDBName("db"), ce.OptLPCMCollectionName("coll"),
+				ce.OptLPCMCollectionID(1), ce.OptLPCMMsgType(commonpb.MsgType_AlterCollection),
+			).Build(),
 		}).
 		WithBody(&messagespb.AlterCollectionMessageBody{
 			Updates: &messagespb.AlterCollectionMessageUpdates{
+				Properties: []*commonpb.KeyValuePair{{Key: common.CollectionReplicaNumber, Value: "1"}},
 				AlterLoadConfig: &messagespb.AlterLoadConfigOfAlterCollection{
 					ReplicaNumber:  1,
 					ResourceGroups: []string{"rg_not_exist"},
@@ -436,7 +452,18 @@ func TestDDLCallbacksAlterCollectionV2AckCallback_StopRetryOnResourceGroupNotFou
 		Message: msg,
 		Results: map[string]*message.AppendResult{},
 	})
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.Len(t, notifications, 1)
+	require.Equal(t, int64(1), notifications[0].GetCollectionID())
+	require.Equal(t, commonpb.MsgType_AlterCollection, notifications[0].GetBase().GetMsgType())
+
+	notifyErr = nil
+	err = cb.alterCollectionV2AckCallback(ctx, message.BroadcastResultAlterCollectionMessageV2{
+		Message: msg,
+		Results: map[string]*message.AppendResult{},
+	})
 	require.NoError(t, err)
+	require.Len(t, notifications, 2)
 }
 
 func TestCore_getAlterLoadConfigOfAlterCollection(t *testing.T) {
@@ -907,7 +934,7 @@ func TestDDLCallbacksAlterCollectionProperties_MixedExternalAndRegular(t *testin
 	assertReplicaNumber(t, ctx, core, dbName, collectionName, 2)
 }
 
-func createCollectionForTest(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string) {
+func createCollectionForTest(t *testing.T, ctx context.Context, core *Core, dbName string, collectionName string, properties ...*commonpb.KeyValuePair) {
 	resp, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{
 		DbName: dbName,
 	})
@@ -926,9 +953,11 @@ func createCollectionForTest(t *testing.T, ctx context.Context, core *Core, dbNa
 	schemaBytes, err := proto.Marshal(testSchema)
 	require.NoError(t, err)
 	resp, err = core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
-		DbName:           dbName,
-		CollectionName:   collectionName,
-		Properties:       []*commonpb.KeyValuePair{{Key: common.CollectionReplicaNumber, Value: "1"}},
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Properties: append([]*commonpb.KeyValuePair{
+			{Key: common.CollectionReplicaNumber, Value: "1"},
+		}, properties...),
 		Schema:           schemaBytes,
 		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
 	})

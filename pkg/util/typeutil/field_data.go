@@ -27,6 +27,26 @@ func GetFieldDataValidData(fieldData *schemapb.FieldData) []bool {
 	return getFieldSpecificValidData(fieldData)
 }
 
+// GetArrayElementValidData returns element validity carried by one scalar
+// Array row. Unlike GetFieldDataValidData, this bitmap is element-level.
+func GetArrayElementValidData(row *schemapb.ScalarField) []bool {
+	return row.GetValidData()
+}
+
+// GetVectorArrayElementValidData returns element validity carried by one
+// ArrayOfVector row. Unlike GetFieldDataValidData, this bitmap is element-level.
+func GetVectorArrayElementValidData(row *schemapb.VectorField) []bool {
+	return row.GetValidData()
+}
+
+// SetVectorArrayElementValidData writes element validity carried by one
+// ArrayOfVector row.
+func SetVectorArrayElementValidData(row *schemapb.VectorField, validData []bool) {
+	if row != nil {
+		row.ValidData = validData
+	}
+}
+
 // SetFieldDataValidData writes validity to the current field-specific location
 // and clears the legacy FieldData.valid_data source.
 func SetFieldDataValidData(fieldData *schemapb.FieldData, validData []bool) {
@@ -79,6 +99,21 @@ func fieldDataValidDataConsistent(fieldData *schemapb.FieldData) bool {
 func normalizeFieldDataValidData(fieldData *schemapb.FieldData) {
 	if fieldData == nil {
 		return
+	}
+
+	// Older SDKs omit the sparse payload for an all-null batch. Materialize
+	// its empty container before moving legacy validity into VectorField,
+	// otherwise the default branch below discards the only null information.
+	// Keep the bitmap unchanged: row alignment still rejects missing vectors
+	// when any bit is true.
+	if fieldData.Field == nil && fieldData.GetType() == schemapb.DataType_SparseFloatVector && len(fieldData.GetValidData()) > 0 {
+		fieldData.Field = &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Data: &schemapb.VectorField_SparseFloatVector{
+					SparseFloatVector: &schemapb.SparseFloatArray{},
+				},
+			},
+		}
 	}
 
 	switch fieldData.Field.(type) {
@@ -270,4 +305,50 @@ func (b *FieldDataBuilder) Build() *schemapb.FieldData {
 		SetFieldDataValidData(field, b.valid)
 	}
 	return field
+}
+
+// CopyFieldDataMetadata copies field wrappers for consumer-local normalization.
+// Column values and validity bitmap backing arrays remain borrowed read-only.
+// Preserve both validity locations so conflicting input is still rejected by
+// ValidateAndNormalizeFieldDataValidData instead of being silently repaired.
+func CopyFieldDataMetadata(fields []*schemapb.FieldData) []*schemapb.FieldData {
+	if fields == nil {
+		return nil
+	}
+	result := make([]*schemapb.FieldData, len(fields))
+	for i, src := range fields {
+		if src == nil {
+			continue
+		}
+		dst := &schemapb.FieldData{
+			Type: src.Type, FieldName: src.FieldName, FieldId: src.FieldId,
+			IsDynamic: src.IsDynamic, ValidData: src.ValidData,
+		}
+		switch field := src.Field.(type) {
+		case *schemapb.FieldData_Scalars:
+			var scalar *schemapb.ScalarField
+			if field.Scalars != nil {
+				scalar = &schemapb.ScalarField{Data: field.Scalars.Data, ValidData: field.Scalars.ValidData}
+				scalar.ProtoReflect().SetUnknown(slices.Clone(field.Scalars.ProtoReflect().GetUnknown()))
+			}
+			dst.Field = &schemapb.FieldData_Scalars{Scalars: scalar}
+		case *schemapb.FieldData_Vectors:
+			var vector *schemapb.VectorField
+			if field.Vectors != nil {
+				vector = &schemapb.VectorField{Dim: field.Vectors.Dim, Data: field.Vectors.Data, ValidData: field.Vectors.ValidData}
+				vector.ProtoReflect().SetUnknown(slices.Clone(field.Vectors.ProtoReflect().GetUnknown()))
+			}
+			dst.Field = &schemapb.FieldData_Vectors{Vectors: vector}
+		case *schemapb.FieldData_StructArrays:
+			var array *schemapb.StructArrayField
+			if field.StructArrays != nil {
+				array = &schemapb.StructArrayField{Fields: CopyFieldDataMetadata(field.StructArrays.Fields)}
+				array.ProtoReflect().SetUnknown(slices.Clone(field.StructArrays.ProtoReflect().GetUnknown()))
+			}
+			dst.Field = &schemapb.FieldData_StructArrays{StructArrays: array}
+		}
+		dst.ProtoReflect().SetUnknown(slices.Clone(src.ProtoReflect().GetUnknown()))
+		result[i] = dst
+	}
+	return result
 }

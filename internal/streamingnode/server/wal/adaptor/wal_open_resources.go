@@ -3,18 +3,16 @@ package adaptor
 import (
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher/flusherimpl"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 )
 
 type walOpenResources struct {
-	once            sync.Once
-	released        bool // Release and Close are called by the same openRWWAL goroutine.
-	roWAL           *roWALAdaptorImpl
-	param           *interceptors.InterceptorBuildParam
-	recoveryStorage recovery.RecoveryStorage
-	flusher         *flusherimpl.WALFlusherImpl
+	once             sync.Once
+	released         bool // Release and Close are called by the same openRWWAL goroutine.
+	roWAL            *roWALAdaptorImpl
+	param            *interceptors.InterceptorBuildParam
+	queryViewHandler *snview.SNQueryViewHandler
 }
 
 func (r *walOpenResources) Close() {
@@ -22,11 +20,9 @@ func (r *walOpenResources) Close() {
 		return
 	}
 	r.once.Do(func() {
-		// WALFlusherImpl owns and closes recoveryStorage when it is present.
-		if r.flusher != nil {
-			r.flusher.Close()
-		} else if r.recoveryStorage != nil {
-			r.recoveryStorage.Close()
+		// Release callbacks require the recovery scheduler to remain running.
+		if r.queryViewHandler != nil {
+			r.queryViewHandler.CloseForHandoff()
 		}
 		if r.param != nil {
 			r.param.Clear()

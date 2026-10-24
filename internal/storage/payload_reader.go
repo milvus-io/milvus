@@ -626,7 +626,7 @@ func readVectorArrayFromListArray(r *PayloadReader) ([]*schemapb.VectorField, er
 		}
 
 		for i := 0; i < listArray.Len(); i++ {
-			value, err := deserializeArrayOfVector(listArray, i, elementType, dim, true)
+			value, err := deserializeArrayOfVector(listArray, i, elementType, dim, true, false)
 			if err != nil {
 				return nil, merr.Wrapf(err, "failed to deserialize VectorArray at row %d", len(result))
 			}

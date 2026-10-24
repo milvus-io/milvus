@@ -1460,7 +1460,9 @@ func TestCatalog_CreateCollection(t *testing.T) {
 
 func TestCatalog_DropCollection(t *testing.T) {
 	t.Run("failed to remove", func(t *testing.T) {
-		mockSnapshot := newMockSnapshot(t, withMockMultiSaveAndRemove(errors.New("error mock MultiSaveAndRemove")))
+		mockSnapshot := newMockSnapshot(t,
+			withMockMultiSaveAndRemove(errors.New("error mock MultiSaveAndRemove")),
+		)
 		kc := NewCatalog(mockSnapshot)
 		ctx := context.Background()
 		coll := &model.Collection{
@@ -1473,9 +1475,7 @@ func TestCatalog_DropCollection(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("removes children and collection key in one atomic txn", func(t *testing.T) {
-		// DropCollection now delegates to Update: children + collection key
-		// are removed together in a single atomic MultiSaveAndRemove.
+	t.Run("removes children and collection key", func(t *testing.T) {
 		mockSnapshot := newMockSnapshot(t)
 		var gotSaves map[string]string
 		var gotRemovals []string

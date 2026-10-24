@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
@@ -101,9 +102,9 @@ func (suite *OpsServiceSuite) SetupTest() {
 	suite.store = querycoord.NewCatalog(suite.kv)
 	suite.dist = meta.NewDistributionManager(suite.nodeMgr)
 	suite.nodeMgr = session.NewNodeManager()
-	suite.meta = meta.NewMeta(params.RandomIncrementIDAllocator(), suite.store, suite.nodeMgr)
+	suite.meta = meta.NewMeta(params.RandomIncrementIDAllocator(), suite.store, suite.nodeMgr, metacache.NewMetaStore(nil))
 	suite.broker = meta.NewMockBroker(suite.T())
-	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
+	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta, metacache.NewMetaStore(nil))
 	suite.targetObserver = observers.NewTargetObserver(
 		suite.meta,
 		suite.targetMgr,

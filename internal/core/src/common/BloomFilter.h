@@ -22,6 +22,7 @@
 #include <stdexcept>
 #include "log/Log.h"
 #include "xxhash.h"  // from xxhash/xxhash
+#include "common/EasyAssert.h"
 
 namespace milvus {
 
@@ -112,8 +113,10 @@ class BlockedBloomFilter : public BloomFilter {
     explicit BlockedBloomFilter(const nlohmann::json& data) {
         if (!data.contains("bits") || !data.contains("num_bits") ||
             !data.contains("k")) {
-            throw std::runtime_error(
-                "Invalid JSON for BlockedBloomFilter: missing required fields");
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "{}",
+                      std::string("Invalid JSON for BlockedBloomFilter: "
+                                  "missing required fields"));
         }
 
         bits_ = data["bits"].get<std::vector<uint64_t>>();
@@ -280,8 +283,10 @@ NewBloomFilterWithType(uint64_t capacity,
 inline BloomFilterPtr
 BloomFilterFromJson(const nlohmann::json& data) {
     if (!data.contains("type")) {
-        throw std::runtime_error(
-            "JSON data for bloom filter missing 'type' field");
+        ThrowInfo(
+            ErrorCode::DataFormatBroken,
+            "{}",
+            std::string("JSON data for bloom filter missing 'type' field"));
     }
 
     std::string type_str = data["type"].get<std::string>();
@@ -293,8 +298,10 @@ BloomFilterFromJson(const nlohmann::json& data) {
         case BFType::AlwaysTrue:
             return g_always_true_bf;
         default:
-            throw std::runtime_error("Unsupported bloom filter type: " +
-                                     type_str);
+            ThrowInfo(
+                ErrorCode::Unsupported,
+                "{}",
+                std::string("Unsupported bloom filter type: " + type_str));
     }
 }
 

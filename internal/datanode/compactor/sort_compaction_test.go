@@ -36,8 +36,10 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -50,9 +52,14 @@ func TestSortCompactionTaskSuite(t *testing.T) {
 func TestSortInitLOBCompactionContextKeepsReuseAllDecisionWithoutLobFiles(t *testing.T) {
 	paramtable.Get().Init(paramtable.NewBaseTable())
 	textFieldIDs := []int64{101, 102}
+	params := compaction.GenParams()
+	collectionID, partitionID := int64(10), int64(20)
 	task := &sortCompactionTask{
-		segmentID: 100,
-		manifest:  "manifest-100",
+		collectionID: collectionID,
+		partitionID:  partitionID,
+		segmentID:    100,
+		manifest: packed.MarshalManifestPath(
+			storage.SegmentManifestBasePath(params.StorageConfig.GetRootPath(), collectionID, partitionID, 100), 1),
 		plan: &datapb.CompactionPlan{
 			Type: datapb.CompactionType_SortCompaction,
 			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
@@ -60,7 +67,7 @@ func TestSortInitLOBCompactionContextKeepsReuseAllDecisionWithoutLobFiles(t *tes
 				{FieldID: textFieldIDs[1], Name: "text_2", DataType: schemapb.DataType_Text},
 			}},
 		},
-		compactionParams: compaction.GenParams(),
+		compactionParams: params,
 	}
 	collectPatch := mockey.Mock(compaction.CollectLobFilesFromManifests).Return(map[int64][]packed.LobFileInfo{
 		100: {},
@@ -76,6 +83,37 @@ func TestSortInitLOBCompactionContextKeepsReuseAllDecisionWithoutLobFiles(t *tes
 		for _, fieldID := range textFieldIDs {
 			assert.Equal(t, compaction.LOBStrategyReuseAll, task.lobContext.Decisions[fieldID].Strategy)
 		}
+	}
+}
+
+func TestSortInitLOBCompactionContextRewritesAcrossPartitionBases(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable())
+	params := compaction.GenParams()
+	task := &sortCompactionTask{
+		collectionID: 10,
+		partitionID:  20,
+		segmentID:    100,
+		manifest: packed.MarshalManifestPath(
+			params.StorageConfig.GetRootPath()+"/files/insert_log/10/20/100", 1),
+		plan: &datapb.CompactionPlan{
+			Type: datapb.CompactionType_SortCompaction,
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_Text},
+			}},
+		},
+		compactionParams: params,
+	}
+	collectPatch := mockey.Mock(compaction.CollectLobFilesFromManifests).Return(
+		map[int64][]packed.LobFileInfo{100: {{FieldID: 101, TotalRows: 1, ValidRows: 1}}}, nil,
+	).Build()
+	defer collectPatch.UnPatch()
+
+	err := task.initLOBCompactionContext(context.Background())
+	assert.NoError(t, err)
+	if assert.NotNil(t, task.lobContext) {
+		assert.False(t, task.lobContext.HasReuseAllFields())
+		assert.True(t, task.lobContext.ShouldRewriteAnyField())
+		assert.Equal(t, compaction.LOBStrategyRewriteAll, task.lobContext.GetStrategy(101))
 	}
 }
 
@@ -225,6 +263,54 @@ func (s *SortCompactionTaskSuite) prepareSortCompactionTask() {
 			},
 		},
 	}
+}
+
+// parallelChunkReadSeen runs one sort compaction and returns every value the
+// sort handed to storage.WithParallelChunkRead.
+func (s *SortCompactionTaskSuite) parallelChunkReadSeen() []storage.ParallelChunkRead {
+	var seen []storage.ParallelChunkRead
+	var origin func(storage.ParallelChunkRead) storage.RwOption
+	mock := mockey.Mock(storage.WithParallelChunkRead).To(func(p storage.ParallelChunkRead) storage.RwOption {
+		seen = append(seen, p)
+		return origin(p)
+	}).Origin(&origin).Build()
+	defer mock.UnPatch()
+
+	s.prepareSortCompactionTask()
+	result, err := s.task.Compact()
+	s.NoError(err)
+	s.Equal(datapb.CompactionTaskState_completed, result.GetState())
+	return seen
+}
+
+func (s *SortCompactionTaskSuite) TestSortCompactionReadOptionsDefault() {
+	s.Equal([]storage.ParallelChunkRead{{
+		Concurrency: min(hardware.GetCPUNum(), 8),
+		BufferSize:  512 * 1024 * 1024,
+	}}, s.parallelChunkReadSeen(), "the input reader must be opened once, with the default read options")
+}
+
+func (s *SortCompactionTaskSuite) TestSortCompactionReadOptionsFollowConfig() {
+	cfg := &paramtable.Get().DataNodeCfg
+	paramtable.Get().Save(cfg.SortReadConcurrency.Key, "3")
+	defer paramtable.Get().Reset(cfg.SortReadConcurrency.Key)
+	paramtable.Get().Save(cfg.SortReadBufferSize.Key, "16m")
+	defer paramtable.Get().Reset(cfg.SortReadBufferSize.Key)
+
+	s.Equal([]storage.ParallelChunkRead{{
+		Concurrency: 3,
+		BufferSize:  16 * 1024 * 1024,
+	}}, s.parallelChunkReadSeen(), "both settings must reach the reader")
+}
+
+func (s *SortCompactionTaskSuite) TestSortCompactionReadOptionsSerialWhenSwitchedOff() {
+	cfg := &paramtable.Get().DataNodeCfg
+	paramtable.Get().Save(cfg.SortReadConcurrency.Key, "1")
+	defer paramtable.Get().Reset(cfg.SortReadConcurrency.Key)
+
+	seen := s.parallelChunkReadSeen()
+	s.Len(seen, 1)
+	s.Equal(1, seen[0].Concurrency, "1 is the way to get the serial reader back")
 }
 
 func (s *SortCompactionTaskSuite) TestSortCompactionBasic() {
@@ -503,4 +589,47 @@ func TestSortCompactionTaskBasic(t *testing.T) {
 	assert.NotNil(t, task)
 	assert.Equal(t, int64(123), task.GetPlanID())
 	assert.Equal(t, datapb.CompactionType_SortCompaction, task.GetCompactionType())
+}
+
+func TestLogIfParallelReadIgnored(t *testing.T) {
+	ctx := context.Background()
+	const message = "sort read in parallel is ignored"
+
+	t.Run("manifest with configured parallel read warns", func(t *testing.T) {
+		sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
+		logIfParallelReadIgnored(ctx, mlog.With(), 100, storage.StorageV3, "base_path/_metadata/manifest-1", 8, true)
+		assert.Contains(t, sink.String(), message)
+		assert.Contains(t, sink.String(), "manifest", "the reason must name the manifest route")
+		assert.Contains(t, sink.String(), "100", "the segment ID must be in the log")
+		assert.Contains(t, sink.String(), "[WARN]", "an operator's own setting being ignored is a warning")
+	})
+
+	t.Run("StorageV1 segment with configured parallel read warns", func(t *testing.T) {
+		sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
+		logIfParallelReadIgnored(ctx, mlog.With(), 100, storage.StorageV1, "", 8, true)
+		assert.Contains(t, sink.String(), message)
+		assert.Contains(t, sink.String(), "StorageV1", "the reason must name the V1 route")
+	})
+
+	// Every unconfigured multi-core DataNode resolves the default to >= 2, so
+	// warning here would fire on clusters that never asked for parallel reads.
+	t.Run("derived concurrency reports at info", func(t *testing.T) {
+		sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
+		logIfParallelReadIgnored(ctx, mlog.With(), 100, storage.StorageV3, "base_path/_metadata/manifest-1", 8, false)
+		assert.Contains(t, sink.String(), message, "the no-op is still reported")
+		assert.Contains(t, sink.String(), "[INFO]")
+		assert.NotContains(t, sink.String(), "[WARN]", "a default nobody chose is not a misconfiguration")
+	})
+
+	t.Run("binlog V2 path stays quiet", func(t *testing.T) {
+		sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
+		logIfParallelReadIgnored(ctx, mlog.With(), 100, storage.StorageV2, "", 8, true)
+		assert.NotContains(t, sink.String(), message)
+	})
+
+	t.Run("concurrency 1 stays quiet", func(t *testing.T) {
+		sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
+		logIfParallelReadIgnored(ctx, mlog.With(), 100, storage.StorageV3, "base_path/_metadata/manifest-1", 1, true)
+		assert.NotContains(t, sink.String(), message)
+	})
 }

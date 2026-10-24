@@ -15,9 +15,13 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <map>
+#include <limits>
 #include <memory>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -34,9 +38,13 @@
 #include "common/protobuf_utils.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
-#include "index/IndexInfo.h"
-#include "index/VectorMemIndex.h"
+#include "index/contracts/growing/IGrowingIndex.h"
+#include "index/contracts/query/IVectorReader.h"
+#include "index/growing/KnowhereGrowingVectorIndex.h"
+#include "index/vector/KnowhereEngine.h"
+#include "index/vector/VectorIndexReader.h"
 #include "knowhere/comp/index_param.h"
+#include "knowhere/comp/knowhere_config.h"
 #include "knowhere/dataset.h"
 #include "knowhere/expected.h"
 #include "knowhere/object.h"
@@ -48,18 +56,58 @@
 #include "pb/schema.pb.h"
 #include "query/Plan.h"
 #include "segcore/ConcurrentVector.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/IndexConfigGenerator.h"
 #include "segcore/InsertRecord.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/indexing/GrowingIndexSet.h"
+#include "segcore/segcore_init_c.h"
 #include "storage/FileManager.h"
+#include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/SegcoreConfigUtils.h"
 #include "test_utils/indexbuilder_test_utils.h"
+#include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
+
+namespace {
+
+class FloatVectorBuildSource final : public index::GrowingVectorSource<float> {
+ public:
+    FloatVectorBuildSource(std::vector<float> values, int64_t dim)
+        : values_(std::move(values)), dim_(dim) {
+    }
+
+    std::span<const float>
+    ContiguousRows(int64_t physical_begin, int64_t row_count) const override {
+        return {values_.data() + physical_begin * dim_,
+                static_cast<size_t>(row_count * dim_)};
+    }
+
+    void
+    CopyRows(int64_t physical_begin,
+             int64_t row_count,
+             float* output) const override {
+        const auto values = ContiguousRows(physical_begin, row_count);
+        std::copy(values.begin(), values.end(), output);
+    }
+
+    const float*
+    Row(int64_t physical_offset) const override {
+        return values_.data() + physical_offset * dim_;
+    }
+
+ private:
+    std::vector<float> values_;
+    int64_t dim_;
+};
+
+}  // namespace
 
 using Param = std::tuple<DataType,
                          /*index type*/ std::string,
@@ -190,6 +238,253 @@ INSTANTIATE_TEST_SUITE_P(
                         knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR,
                         "FLOAT16")));
 
+TEST(SparseInterimIndexConfigTest, OverridesAreMetricSpecificAndOptional) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore restore(config);
+    config.set_interim_index_target_version(10);
+    for (const auto& metric : {knowhere::metric::IP, knowhere::metric::BM25}) {
+        for (const auto& origin :
+             {knowhere::IndexEnum::INDEX_SPARSE_WAND,
+              knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX}) {
+            FieldIndexMeta meta(FieldId(101),
+                                {{"index_type", origin},
+                                 {"metric_type", metric},
+                                 {"inverted_index_algo", "TAAT_NAIVE"},
+                                 {"inverted_index_codec", "block_maskedvbyte"},
+                                 {"drop_ratio_build", "0.2"},
+                                 {"bm25_k1", "1.2"},
+                                 {"bm25_b", "0.75"},
+                                 {"bm25_avgdl", "100"}},
+                                {});
+            for (auto type : {SegmentType::Growing, SegmentType::Sealed}) {
+                config.set_sparse_interim_index_algos("", "");
+                VecIndexConfig inherited(100, meta, config, type, true);
+                auto params = inherited.GetBuildBaseParams(
+                    DataType::VECTOR_SPARSE_U32_F32);
+                EXPECT_EQ(params["inverted_index_algo"], "TAAT_NAIVE");
+                EXPECT_FALSE(params.contains("drop_ratio_build"));
+                EXPECT_FALSE(params.contains("inverted_index_codec"));
+                for (const auto* key : {"bm25_k1", "bm25_b", "bm25_avgdl"}) {
+                    if (metric == knowhere::metric::BM25) {
+                        EXPECT_EQ(params[key], meta.GetIndexParams().at(key));
+                    } else {
+                        EXPECT_FALSE(params.contains(key));
+                    }
+                }
+                EXPECT_EQ(
+                    inherited.GetIndexType(),
+                    origin == knowhere::IndexEnum::INDEX_SPARSE_WAND
+                        ? knowhere::IndexEnum::INDEX_SPARSE_WAND_CC
+                        : knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX_CC);
+
+                config.set_sparse_interim_index_algos("SINDI", "DAAT_WAND");
+                VecIndexConfig overridden(100, meta, config, type, true);
+                params = overridden.GetBuildBaseParams(
+                    DataType::VECTOR_SPARSE_U32_F32);
+                EXPECT_EQ(
+                    params["inverted_index_algo"],
+                    metric == knowhere::metric::IP ? "SINDI" : "DAAT_WAND");
+                EXPECT_EQ(overridden.GetIndexType(), inherited.GetIndexType());
+                EXPECT_FALSE(params.contains("drop_ratio_build"));
+                EXPECT_FALSE(params.contains("inverted_index_codec"));
+                for (const auto* key : {"bm25_k1", "bm25_b", "bm25_avgdl"}) {
+                    if (metric == knowhere::metric::BM25) {
+                        EXPECT_EQ(params[key], meta.GetIndexParams().at(key));
+                    } else {
+                        EXPECT_FALSE(params.contains(key));
+                    }
+                }
+                EXPECT_EQ(meta.GetIndexParams().at("inverted_index_algo"),
+                          "TAAT_NAIVE");
+            }
+        }
+    }
+}
+
+TEST(SparseInterimIndexConfigTest, UnsetAlgorithmAndDenseDefaultsArePreserved) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore restore(config);
+    config.set_interim_index_target_version(10);
+    config.set_sparse_interim_index_algos("", "");
+    FieldIndexMeta sparse_meta(
+        FieldId(101),
+        {{"index_type", knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX},
+         {"metric_type", knowhere::metric::IP}},
+        {});
+    VecIndexConfig sparse(100, sparse_meta, config, SegmentType::Growing, true);
+    EXPECT_FALSE(sparse.GetBuildBaseParams(DataType::VECTOR_SPARSE_U32_F32)
+                     .contains("inverted_index_algo"));
+
+    config.set_sparse_interim_index_algos("SINDI", "DAAT_WAND");
+    FieldIndexMeta dense_meta(FieldId(102),
+                              {{"index_type", knowhere::IndexEnum::INDEX_HNSW},
+                               {"metric_type", knowhere::metric::IP}},
+                              {});
+    VecIndexConfig dense(100, dense_meta, config, SegmentType::Growing, false);
+    EXPECT_EQ(dense.GetIndexType(),
+              config.get_dense_vector_intermin_index_type());
+    EXPECT_FALSE(dense.GetBuildBaseParams(DataType::VECTOR_FLOAT)
+                     .contains("inverted_index_algo"));
+}
+
+TEST(SparseInterimIndexConfigTest, InvalidOverridesPreservePreviousSettings) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore restore(config);
+    config.set_interim_index_target_version(10);
+    config.set_sparse_interim_index_algos("DAAT_MAXSCORE", "DAAT_WAND");
+    for (const auto& algos :
+         {std::pair{"INVALID", "SINDI"}, std::pair{"SINDI", "INVALID"}}) {
+        auto status =
+            SegcoreSetSparseInterimIndexAlgorithms(algos.first, algos.second);
+        ASSERT_EQ(status.error_code, ConfigInvalid);
+        free(const_cast<char*>(status.error_msg));
+        EXPECT_EQ(config.get_sparse_ip_interim_index_algo(), "DAAT_MAXSCORE");
+        EXPECT_EQ(config.get_sparse_bm25_interim_index_algo(), "DAAT_WAND");
+    }
+    config.set_interim_index_target_version(9);
+    for (const auto& algos : {std::pair{"SINDI", ""}, std::pair{"", "SINDI"}}) {
+        auto status =
+            SegcoreSetSparseInterimIndexAlgorithms(algos.first, algos.second);
+        ASSERT_EQ(status.error_code, ConfigInvalid);
+        free(const_cast<char*>(status.error_msg));
+        EXPECT_EQ(config.get_sparse_ip_interim_index_algo(), "DAAT_MAXSCORE");
+        EXPECT_EQ(config.get_sparse_bm25_interim_index_algo(), "DAAT_WAND");
+    }
+}
+
+class SparseInterimIndexAlgorithmTest
+    : public ::testing::TestWithParam<std::tuple<std::string, std::string>> {};
+
+TEST_P(SparseInterimIndexAlgorithmTest, GrowingAppendAndSealedSearch) {
+    const auto& [metric, algo] = GetParam();
+    // Keep build and query statistics aligned: this test covers algorithm
+    // overrides, not pruning behavior when corpus statistics change.
+    constexpr float avgdl = 100.0F;
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore restore(config);
+    InterimIndexConfigForTest options;
+    options.target_index_version = 10;
+    options.nlist = 1;
+    options.chunk_rows = 16;
+    ApplyInterimIndexConfigForTest(options, config);
+    config.set_sparse_interim_index_algos(
+        metric == knowhere::metric::IP ? algo : "TAAT_NAIVE",
+        metric == knowhere::metric::BM25 ? algo : "TAAT_NAIVE");
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto vec = schema->AddDebugField(
+        "vec", DataType::VECTOR_SPARSE_U32_F32, 2, metric);
+    schema->set_primary_field_id(pk);
+    FieldIndexMeta field_meta(
+        vec,
+        {{"index_type", knowhere::IndexEnum::INDEX_SPARSE_WAND},
+         {"metric_type", metric},
+         {"inverted_index_algo", "DAAT_MAXSCORE"},
+         {"drop_ratio_build", "0.5"},
+         {"bm25_k1", "1.2"},
+         {"bm25_b", "0.75"},
+         {"bm25_avgdl", std::to_string(avgdl)}},
+        {});
+    auto index_meta = std::make_shared<CollectionIndexMeta>(
+        100, std::map<FieldId, FieldIndexMeta>{{vec, field_meta}});
+    auto make_data = [&](int64_t begin, int64_t count) {
+        auto data = DataGen(schema, count);
+        for (auto& field : *data.raw_->mutable_fields_data()) {
+            if (field.field_id() != vec.get()) {
+                continue;
+            }
+            auto* sparse =
+                field.mutable_vectors()->mutable_sparse_float_vector();
+            sparse->clear_contents();
+            sparse->set_dim(2);
+            for (int64_t i = 0; i < count; ++i) {
+                knowhere::sparse::SparseRow<float> row(2);
+                row.set_at(0, 0, static_cast<float>(begin + i + 1));
+                row.set_at(1, 1, 1.0F);
+                sparse->add_contents(row.data(), row.data_byte_size());
+            }
+        }
+        return data;
+    };
+
+    milvus::proto::plan::PlanNode node;
+    auto* anns = node.mutable_vector_anns();
+    anns->set_vector_type(milvus::proto::plan::VectorType::SparseFloatVector);
+    anns->set_placeholder_tag("$0");
+    anns->set_field_id(vec.get());
+    auto* info = anns->mutable_query_info();
+    info->set_topk(5);
+    info->set_metric_type(metric);
+    // QueryInfo defaults to 0 decimal places; compare unrounded BM25 scores.
+    info->set_round_decimal(-1);
+    info->set_search_params(R"({"drop_ratio_search":0})");
+    info->set_bm25_avgdl(avgdl);
+    auto placeholders = CreateSparseFloatPlaceholderGroup(1);
+    knowhere::sparse::SparseRow<float> query_row(1);
+    query_row.set_at(0, 0, 1.0F);
+    placeholders.mutable_placeholders(0)->set_values(
+        0, query_row.data(), query_row.data_byte_size());
+    auto check = [&](SegmentInternalInterface& segment, int64_t count) {
+        auto serialized = node.SerializeAsString();
+        auto plan = query::CreateSearchPlanByExpr(
+            schema, serialized.data(), serialized.size());
+        ASSERT_EQ(plan->plan_node_->search_info_.round_decimal_, -1);
+        auto parsed =
+            ParsePlaceholderGroup(plan.get(), placeholders.SerializeAsString());
+        auto result = segment.Search(plan.get(), parsed.get(), MAX_TIMESTAMP);
+        ASSERT_EQ(result->seg_offsets_.size(), 5);
+        for (int64_t i = 0; i < 5; ++i) {
+            EXPECT_EQ(result->seg_offsets_[i], count - 1 - i);
+            const float tf = count - i;
+            const float expected =
+                metric == knowhere::metric::IP
+                    ? tf
+                    : tf * 2.2F /
+                          (tf + 1.2F * (0.25F + 0.75F * (tf + 1) / avgdl));
+            EXPECT_NEAR(result->distances_[i], expected, 1e-4);
+        }
+    };
+
+    auto growing = CreateGrowingSegment(schema, index_meta, 1, config);
+    for (const auto& [begin, count] : {std::pair{0, 60}, std::pair{60, 40}}) {
+        auto data = make_data(begin, count);
+        auto offset = growing->PreInsert(count);
+        growing->Insert(offset,
+                        count,
+                        data.row_ids_.data(),
+                        data.timestamps_.data(),
+                        data.SharedRaw());
+        auto pin = growing->PinGrowingIndex(vec);
+        ASSERT_TRUE(pin)
+            << "algorithm must build an index instead of falling back";
+        EXPECT_EQ(pin.CoveredRowEnd(), begin + count);
+        check(*growing, begin + count);
+    }
+
+    auto sealed = CreateSealedSegment(schema, index_meta);
+    auto data = make_data(0, 100);
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info =
+        PrepareInsertBinlog(kCollectionID, kPartitionID, kSegmentID, data, cm);
+    sealed->LoadFieldData(load_info);
+    ASSERT_TRUE(sealed->HasIndex(vec));
+    check(*sealed, 100);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    MetricsAndAlgorithms,
+    SparseInterimIndexAlgorithmTest,
+    ::testing::Combine(::testing::Values(knowhere::metric::IP,
+                                         knowhere::metric::BM25),
+                       ::testing::Values("TAAT_NAIVE",
+                                         "DAAT_WAND",
+                                         "DAAT_MAXSCORE",
+                                         "BLOCK_MAX_WAND",
+                                         "BLOCK_MAX_MAXSCORE",
+                                         "SINDI")));
+
 TEST(GrowingIndexVersionTest, SupportsSindiWithConfiguredMaximumVersion) {
     constexpr int64_t dim = kTestSparseDim;
     constexpr int64_t row_count = 100;
@@ -232,9 +527,12 @@ TEST(GrowingIndexVersionTest, SupportsSindiWithConfiguredMaximumVersion) {
                     row_count,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
 
-    ASSERT_TRUE(segment_impl->get_indexing_record().SyncDataWithIndex(vec));
+    const auto index_pin = segment_impl->PinGrowingIndex(vec);
+    ASSERT_TRUE(index_pin);
+    EXPECT_EQ(index_pin.CoveredRowEnd(), row_count);
+    EXPECT_EQ(index_pin.Reader().Count(), row_count);
 
     milvus::proto::plan::PlanNode plan_node;
     auto* vector_anns = plan_node.mutable_vector_anns();
@@ -366,7 +664,7 @@ TEST_P(GrowingIndexTest, Correctness) {
                         per_batch,
                         dataset.row_ids_.data(),
                         dataset.timestamps_.data(),
-                        dataset.raw_);
+                        std::make_shared<InsertRecordProto>(*dataset.raw_));
         const VectorBase* field_data = nullptr;
         if (is_sparse) {
             field_data = segmentImplPtr->get_insert_record()
@@ -490,27 +788,8 @@ class GrowingIndexRawOwnershipTest : public ::testing::Test {
                         row_count,
                         dataset.row_ids_.data(),
                         dataset.timestamps_.data(),
-                        dataset.raw_);
+                        std::make_shared<InsertRecordProto>(*dataset.raw_));
         return dataset;
-    }
-
-    FieldDataPtr
-    CreateNullableFloatFieldData(const DataArray& data) const {
-        std::vector<uint8_t> valid_bitmap((row_count + 7) / 8, 0);
-        const auto& valid_data = GetFieldDataRowValidData(data);
-        for (int64_t i = 0; i < row_count; ++i) {
-            if (valid_data[i]) {
-                valid_bitmap[i / 8] |= uint8_t{1} << (i % 8);
-            }
-        }
-
-        auto field_data = storage::CreateFieldData(
-            DataType::VECTOR_FLOAT, DataType::NONE, true, dim, row_count);
-        field_data->FillFieldData(data.vectors().float_vector().data().data(),
-                                  valid_bitmap.data(),
-                                  row_count,
-                                  0);
-        return field_data;
     }
 
     void
@@ -563,6 +842,7 @@ TEST_F(GrowingIndexRawOwnershipTest,
     EXPECT_EQ(raw_vector->num_chunk(), 0);
     EXPECT_EQ(raw_vector->get_offset_mapping().GetTotalCount(),
               raw_logical_count);
+    EXPECT_TRUE(segment->HasFieldData(vec_));
 
     std::vector<int64_t> offsets(row_count);
     for (int64_t i = 0; i < row_count; ++i) {
@@ -580,7 +860,7 @@ TEST_F(GrowingIndexRawOwnershipTest,
     auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(segment_impl, nullptr);
 
-    InsertBatch(segment.get(), 42);
+    auto first_batch = InsertBatch(segment.get(), 42);
     auto* raw_vector = segment_impl->get_insert_record().get_data_base(vec_);
     ASSERT_EQ(raw_vector->num_chunk(), 0);
     ASSERT_TRUE(segment_impl->CanReadRawVectorFromIndex(vec_));
@@ -588,16 +868,51 @@ TEST_F(GrowingIndexRawOwnershipTest,
         raw_vector->get_offset_mapping().GetTotalCount();
     ASSERT_EQ(raw_logical_count, row_count);
 
-    auto second_batch = DataGen(schema_, row_count, 44);
+    auto second_batch = DataGen(schema_, row_count, 44, row_count);
     auto expected = second_batch.get_col(vec_);
-    auto field_data = CreateNullableFloatFieldData(*expected);
-    auto offset = segment->PreInsert(row_count);
-    segment_impl->load_field_data_common(
-        vec_, offset, {field_data}, pk_, row_count);
+    const auto& expected_valid_data = GetFieldDataRowValidData(*expected);
+    ASSERT_EQ(expected_valid_data.size(), row_count);
+    ASSERT_EQ(std::count(
+                  expected_valid_data.begin(), expected_valid_data.end(), true),
+              row_count / 2);
+    ASSERT_EQ(expected->vectors().float_vector().data_size(),
+              row_count / 2 * dim);
 
+    // The generic binlog helper treats vectors as non-nullable. Preserve the
+    // compact values and logical-row validity when serializing this column.
+    std::vector<uint8_t> valid_bitmap((row_count + 7) / 8, 0);
+    for (int64_t i = 0; i < row_count; ++i) {
+        if (expected_valid_data[i]) {
+            valid_bitmap[i / 8] |= uint8_t{1} << (i % 8);
+        }
+    }
+    auto field_data = storage::CreateFieldData(
+        DataType::VECTOR_FLOAT, DataType::NONE, true, dim, row_count);
+    field_data->FillFieldData(expected->vectors().float_vector().data().data(),
+                              valid_bitmap.data(),
+                              row_count,
+                              0);
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareInsertBinlog(kCollectionID,
+                                         kPartitionID,
+                                         kSegmentID,
+                                         second_batch,
+                                         cm,
+                                         "",
+                                         {vec_.get()});
+    auto vector_load_info = PrepareSingleFieldInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, vec_.get(), {field_data}, cm);
+    load_info.field_infos.merge(vector_load_info.field_infos);
+    // Loading publishes the complete row range after staging all columns.
+    // The column writer alone does not advance the frozen index reader.
+    segment_impl->LoadFieldData(load_info);
+
+    EXPECT_EQ(segment->get_row_count(), 2 * row_count);
     EXPECT_EQ(raw_vector->num_chunk(), 0);
     EXPECT_EQ(raw_vector->get_offset_mapping().GetTotalCount(),
               raw_logical_count);
+    EXPECT_TRUE(segment->HasFieldData(vec_));
 
     std::vector<int64_t> offsets(row_count);
     for (int64_t i = 0; i < row_count; ++i) {
@@ -606,6 +921,14 @@ TEST_F(GrowingIndexRawOwnershipTest,
     auto actual =
         segment_impl->bulk_subscript(nullptr, vec_, offsets.data(), row_count);
     AssertNullableFloatDataEqual(*actual, *expected);
+
+    for (int64_t i = 0; i < row_count; ++i) {
+        offsets[i] = i;
+    }
+    auto first_actual =
+        segment_impl->bulk_subscript(nullptr, vec_, offsets.data(), row_count);
+    auto first_expected = first_batch.get_col(vec_);
+    AssertNullableFloatDataEqual(*first_actual, *first_expected);
 }
 
 TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
@@ -613,165 +936,298 @@ TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
     constexpr int dim = 4;
     constexpr int add_cont = 5;
 
-    milvus::index::CreateIndexInfo create_index_info;
-    create_index_info.field_type = data_type;
-    create_index_info.metric_type = metric_type;
-    create_index_info.index_type = index_type;
-    create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionNumber();
-
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     schema->AddDebugField("random", DataType::DOUBLE);
     auto vec = schema->AddDebugField("embeddings", data_type, dim, metric_type);
     schema->set_primary_field_id(pk);
-
     auto dataset = DataGen(schema, N);
-
     auto build_config = generate_build_conf(index_type, metric_type);
+    build_config[knowhere::meta::DIM] = std::to_string(dim);
+
+    auto build_and_add = [&](const knowhere::DataSetPtr& values,
+                             const std::string& engine_type) {
+        // The growing publisher currently always uses the build pool. Exercise
+        // the current engine's explicit no-pool Build/Add boundary directly.
+        index::KnowhereEngine engine(
+            data_type,
+            DataType::NONE,
+            engine_type,
+            metric_type,
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            false);
+        ASSERT_FALSE(engine.UseBuildPool());
+        ASSERT_EQ(engine.native_index.Build(
+                      values, build_config, engine.UseBuildPool()),
+                  knowhere::Status::success);
+        for (int i = 0; i < add_cont; ++i) {
+            ASSERT_EQ(engine.native_index.Add(
+                          values, build_config, engine.UseBuildPool()),
+                      knowhere::Status::success);
+        }
+        engine.SetDim(engine.native_index.Dim());
+        index::VectorIndexReader reader(std::move(engine));
+        EXPECT_EQ(reader.Count(), (add_cont + 1) * N);
+    };
 
     if (data_type == DataType::VECTOR_FLOAT) {
-        auto index = std::make_unique<milvus::index::VectorMemIndex<float>>(
-            DataType::NONE,
-            index_type,
-            metric_type,
-            knowhere::Version::GetCurrentVersion().VersionNumber(),
-            false,
-            milvus::storage::FileManagerContext());
-        auto float_data = dataset.get_col<float>(vec);
-        index->BuildWithDataset(knowhere::GenDataSet(N, dim, float_data.data()),
-                                build_config);
-        for (int i = 0; i < add_cont; i++) {
-            index->AddWithDataset(
-                knowhere::GenDataSet(N, dim, float_data.data()), build_config);
-        }
-        EXPECT_EQ(index->Count(), (add_cont + 1) * N);
+        auto values = dataset.get_col<float>(vec);
+        build_and_add(knowhere::GenDataSet(N, dim, values.data()), index_type);
     } else if (data_type == DataType::VECTOR_FLOAT16) {
-        auto index = std::make_unique<milvus::index::VectorMemIndex<float16>>(
-            DataType::NONE,
-            index_type,
-            metric_type,
-            knowhere::Version::GetCurrentVersion().VersionNumber(),
-            false,
-            milvus::storage::FileManagerContext());
-        auto float16_data = dataset.get_col<float16>(vec);
-        index->BuildWithDataset(
-            knowhere::GenDataSet(N, dim, float16_data.data()), build_config);
-        for (int i = 0; i < add_cont; i++) {
-            index->AddWithDataset(
-                knowhere::GenDataSet(N, dim, float16_data.data()),
-                build_config);
-        }
-        EXPECT_EQ(index->Count(), (add_cont + 1) * N);
+        auto values = dataset.get_col<float16>(vec);
+        build_and_add(knowhere::GenDataSet(N, dim, values.data()), index_type);
     } else if (data_type == DataType::VECTOR_BFLOAT16) {
-        auto index = std::make_unique<milvus::index::VectorMemIndex<bfloat16>>(
-            DataType::NONE,
-            index_type,
-            metric_type,
-            knowhere::Version::GetCurrentVersion().VersionNumber(),
-            false,
-            milvus::storage::FileManagerContext());
-        auto bfloat16_data = dataset.get_col<bfloat16>(vec);
-        index->BuildWithDataset(
-            knowhere::GenDataSet(N, dim, bfloat16_data.data()), build_config);
-        for (int i = 0; i < add_cont; i++) {
-            index->AddWithDataset(
-                knowhere::GenDataSet(N, dim, bfloat16_data.data()),
-                build_config);
-        }
-        EXPECT_EQ(index->Count(), (add_cont + 1) * N);
+        auto values = dataset.get_col<bfloat16>(vec);
+        build_and_add(knowhere::GenDataSet(N, dim, values.data()), index_type);
     } else if (is_sparse) {
-        // Use the CC (concurrent) variant of sparse index types, since
-        // non-CC sparse indices do not support incremental Add() after
-        // the initial Build().
-        auto cc_index_type =
-            (index_type == knowhere::IndexEnum::INDEX_SPARSE_WAND)
+        // Sparse incremental Add still requires its concurrent backend.
+        const auto cc_index_type =
+            index_type == knowhere::IndexEnum::INDEX_SPARSE_WAND
                 ? knowhere::IndexEnum::INDEX_SPARSE_WAND_CC
                 : knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX_CC;
-        auto index =
-            std::make_unique<milvus::index::VectorMemIndex<sparse_u32_f32>>(
-                DataType::NONE,
-                cc_index_type,
-                metric_type,
-                knowhere::Version::GetCurrentVersion().VersionNumber(),
-                false,
-                milvus::storage::FileManagerContext());
-        auto sparse_data =
+        auto values =
             dataset
                 .get_col<knowhere::sparse::SparseRow<milvus::SparseValueType>>(
                     vec);
-        index->BuildWithDataset(
-            knowhere::GenDataSet(N, dim, sparse_data.data()), build_config);
-        for (int i = 0; i < add_cont; i++) {
-            index->AddWithDataset(
-                knowhere::GenDataSet(N, dim, sparse_data.data()), build_config);
-        }
-        EXPECT_EQ(index->Count(), (add_cont + 1) * N);
+        auto input = knowhere::GenDataSet(N, dim, values.data());
+        input->SetIsSparse(true);
+        build_and_add(input, cc_index_type);
     } else {
         throw std::invalid_argument("Unsupported data type");
     }
 }
 
+TEST(GrowingIndexBuildThreadRateTest, ResolvedAgainstBuildThreadPoolSize) {
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+
+    const auto pool_size = static_cast<int64_t>(
+        knowhere::KnowhereConfig::GetBuildThreadPoolSize());
+    ASSERT_GT(pool_size, 0);
+
+    auto build_thread_num = [&]() {
+        return ResolveGrowingBuildThreadNum(config);
+    };
+
+    // 0 is the default and keeps every growing index build single threaded.
+    config.set_growing_index_build_thread_rate(0.0F);
+    EXPECT_EQ(build_thread_num(), 1);
+
+    // The rate is a fraction of the build thread pool size, not of cpu num.
+    config.set_growing_index_build_thread_rate(1.0F);
+    EXPECT_EQ(build_thread_num(), pool_size);
+
+    // A rate too small to reach a whole thread still resolves to one thread.
+    config.set_growing_index_build_thread_rate(
+        1.0F / static_cast<float>(pool_size * 8));
+    EXPECT_EQ(build_thread_num(), 1);
+
+    // knowhere declares num_build_thread without a range and passes it straight
+    // to omp_set_num_threads, and this config is refreshable, so an out of range
+    // rate must be clamped to the pool size rather than reach that call.
+    config.set_growing_index_build_thread_rate(8.0F);
+    EXPECT_EQ(build_thread_num(), pool_size);
+
+    // Non-finite values must not reach llround or knowhere either.
+    config.set_growing_index_build_thread_rate(
+        std::numeric_limits<float>::infinity());
+    EXPECT_EQ(build_thread_num(), 1);
+    config.set_growing_index_build_thread_rate(
+        std::numeric_limits<float>::quiet_NaN());
+    EXPECT_EQ(build_thread_num(), 1);
+    config.set_growing_index_build_thread_rate(-1.0F);
+    EXPECT_EQ(build_thread_num(), 1);
+}
+
+TEST(GrowingIndexBuildThreadRateTest, MultiThreadedBuildKeepsSearchCorrect) {
+    constexpr int64_t dim = 16;
+    constexpr int64_t per_batch = 10000;
+    constexpr int64_t n_batch = 3;
+    constexpr int64_t top_k = 5;
+    constexpr int64_t num_queries = 5;
+
+    auto build_and_search = [&](float build_thread_rate) {
+        auto schema = std::make_shared<Schema>();
+        auto pk = schema->AddDebugField("pk", DataType::INT64);
+        auto vec = schema->AddDebugField(
+            "embeddings", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+        schema->set_primary_field_id(pk);
+
+        std::map<std::string, std::string> index_params = {
+            {"index_type", knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
+            {"metric_type", knowhere::metric::L2},
+            {"nlist", "128"}};
+        std::map<std::string, std::string> type_params = {
+            {"dim", std::to_string(dim)}};
+        FieldIndexMeta field_index_meta(
+            vec, std::move(index_params), std::move(type_params));
+        std::map<FieldId, FieldIndexMeta> field_map = {{vec, field_index_meta}};
+        IndexMetaPtr meta_ptr =
+            std::make_shared<CollectionIndexMeta>(226985, std::move(field_map));
+
+        auto& config = SegcoreConfig::default_config();
+        ScopedSegcoreConfigRestore config_restore(config);
+        InterimIndexConfigForTest interim_config;
+        interim_config.chunk_rows = 1024;
+        // Scan every inverted list so that the compared distances are exact and
+        // independent of how the coarse quantizer happens to be trained.
+        interim_config.nprobe = interim_config.nlist;
+        interim_config.growing_index_build_thread_rate = build_thread_rate;
+        ApplyInterimIndexConfigForTest(interim_config, config);
+
+        auto segment = CreateGrowingSegment(schema, meta_ptr);
+
+        milvus::proto::plan::PlanNode plan_node;
+        auto* vector_anns = plan_node.mutable_vector_anns();
+        vector_anns->set_vector_type(
+            milvus::proto::plan::VectorType::FloatVector);
+        vector_anns->set_placeholder_tag("$0");
+        vector_anns->set_field_id(vec.get());
+        auto* query_info = vector_anns->mutable_query_info();
+        query_info->set_topk(top_k);
+        query_info->set_round_decimal(3);
+        query_info->set_metric_type(knowhere::metric::L2);
+        query_info->set_search_params(R"({})");
+        auto plan_str = plan_node.SerializeAsString();
+
+        for (int64_t i = 0; i < n_batch; i++) {
+            auto dataset = DataGen(schema, per_batch, 42 + i);
+            auto offset = segment->PreInsert(per_batch);
+            segment->Insert(offset,
+                            per_batch,
+                            dataset.row_ids_.data(),
+                            dataset.timestamps_.data(),
+                            std::make_shared<InsertRecordProto>(*dataset.raw_));
+        }
+
+        // Guard against a vacuous comparison: if the interim index were never
+        // built, both runs would fall back to brute force and match trivially.
+        auto* growing_segment =
+            dynamic_cast<SegmentGrowingImpl*>(segment.get());
+        EXPECT_NE(growing_segment, nullptr);
+        EXPECT_TRUE(growing_segment != nullptr &&
+                    static_cast<bool>(growing_segment->PinGrowingIndex(vec)));
+        if (growing_segment != nullptr) {
+            const auto pin = growing_segment->PinGrowingIndex(vec);
+            EXPECT_EQ(pin.CoveredRowEnd(), per_batch * n_batch);
+            if (pin) {
+                EXPECT_EQ(pin.Reader().Count(), per_batch * n_batch);
+            }
+        }
+
+        auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, 1024);
+        auto plan = milvus::query::CreateSearchPlanByExpr(
+            schema, plan_str.data(), plan_str.size());
+        auto ph_group =
+            ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+        auto sr = segment->Search(plan.get(), ph_group.get(), 1000000);
+        EXPECT_EQ(sr->total_nq_, num_queries);
+        EXPECT_EQ(sr->unity_topK_, top_k);
+        EXPECT_EQ(sr->distances_.size(), num_queries * top_k);
+        return sr->distances_;
+    };
+
+    // A growing index built with the whole build thread pool must return the
+    // same results as the single threaded build: IVF_FLAT_CC partitions the
+    // inverted lists across the OMP threads, so parallelism must not drop or
+    // duplicate any row.
+    auto single_threaded = build_and_search(0.0F);
+    auto multi_threaded = build_and_search(1.0F);
+    ASSERT_EQ(single_threaded.size(), multi_threaded.size());
+    for (size_t i = 0; i < single_threaded.size(); i++) {
+        EXPECT_FLOAT_EQ(single_threaded[i], multi_threaded[i]);
+    }
+}
+
 TEST(GrowingIndexNullableVectorTest, AddAllNullTailAdvancesIdMapLogicalCount) {
     constexpr int64_t dim = 2;
-
-    auto build_config =
+    const auto build_config =
         knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                        {knowhere::meta::DIM, std::to_string(dim)},
                        {knowhere::indexparam::NLIST, "1"}};
-
-    milvus::index::VectorMemIndex<float> index(
-        DataType::NONE,
+    auto source = std::make_shared<FloatVectorBuildSource>(
+        std::vector<float>{0.0F, 0.0F, 2.0F, 0.0F}, dim);
+    index::KnowhereGrowingVectorIndex<float> owner(
+        DataType::VECTOR_FLOAT,
         knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC,
         knowhere::metric::L2,
         knowhere::Version::GetCurrentVersion().VersionNumber(),
-        false,
-        milvus::storage::FileManagerContext());
-    index.SetIdMapType(knowhere::IdMap::Type::GROWING);
+        dim,
+        2,
+        build_config,
+        {{knowhere::indexparam::NPROBE, "1"}},
+        source,
+        false);
 
-    std::array<float, 4> initial_data = {0.0F, 0.0F, 2.0F, 0.0F};
-    std::array<bool, 3> initial_valid = {true, false, true};
-    auto initial_dataset = knowhere::GenDataSet(2, dim, initial_data.data());
-    initial_dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
-        initial_valid.data(), initial_valid.size()));
-    index.BuildWithDataset(initial_dataset, build_config);
+    const std::array<float, 4> initial_data = {0.0F, 0.0F, 2.0F, 0.0F};
+    const std::array<bool, 3> initial_valid = {true, false, true};
+    owner.Append(0,
+                 index::VectorBatch<float>{initial_valid.size(),
+                                           initial_data.data(),
+                                           dim,
+                                           initial_valid.data()});
+    auto initial = owner.PinSnapshot();
+    ASSERT_TRUE(static_cast<bool>(initial));
+    EXPECT_EQ(initial.CoveredRowEnd(), 3);
+    EXPECT_EQ(initial.Reader().Count(), 2);
+    const auto* initial_reader =
+        dynamic_cast<const index::IVectorReader*>(&initial.Reader());
+    ASSERT_NE(initial_reader, nullptr);
+    EXPECT_EQ(initial_reader->ValidCount(), 2);
+    EXPECT_TRUE(initial_reader->IsRowValid(0));
+    EXPECT_FALSE(initial_reader->IsRowValid(1));
+    EXPECT_TRUE(initial_reader->IsRowValid(2));
 
-    const auto* id_map = &index.GetIdMap();
-    ASSERT_EQ(id_map->OutCount(), 3);
-    ASSERT_EQ(id_map->InToOutIds().size(), 2);
-    EXPECT_EQ(id_map->MapInToOut(0), 0);
-    EXPECT_EQ(id_map->MapInToOut(1), 2);
+    const std::array<bool, 2> all_null_tail = {false, false};
+    owner.Append(3,
+                 index::VectorBatch<float>{
+                     all_null_tail.size(), nullptr, dim, all_null_tail.data()});
+    auto null_tail = owner.PinSnapshot();
+    ASSERT_TRUE(static_cast<bool>(null_tail));
+    EXPECT_EQ(null_tail.CoveredRowEnd(), 5);
+    EXPECT_EQ(null_tail.Reader().Count(), 2);
+    const auto* null_tail_reader =
+        dynamic_cast<const index::IVectorReader*>(&null_tail.Reader());
+    ASSERT_NE(null_tail_reader, nullptr);
+    EXPECT_FALSE(null_tail_reader->IsRowValid(3));
+    EXPECT_FALSE(null_tail_reader->IsRowValid(4));
 
-    std::array<bool, 2> all_null_tail = {false, false};
-    auto all_null_dataset = knowhere::GenDataSet(0, dim, nullptr);
-    all_null_dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
-        all_null_tail.data(), all_null_tail.size()));
-    index.AddWithDataset(all_null_dataset, build_config);
+    const std::array<float, 4> appended_data = {5.0F, 0.0F, 7.0F, 0.0F};
+    const std::array<bool, 3> appended_valid = {true, false, true};
+    owner.Append(5,
+                 index::VectorBatch<float>{appended_valid.size(),
+                                           appended_data.data(),
+                                           dim,
+                                           appended_valid.data()});
+    owner.Flush();
+    auto latest = owner.PinSnapshot();
+    ASSERT_TRUE(static_cast<bool>(latest));
+    EXPECT_EQ(latest.CoveredRowEnd(), 8);
+    EXPECT_EQ(latest.Reader().Count(), 4);
+    const auto* reader =
+        dynamic_cast<const index::IVectorReader*>(&latest.Reader());
+    ASSERT_NE(reader, nullptr);
+    EXPECT_EQ(reader->ValidCount(), 4);
+    EXPECT_TRUE(reader->IsRowValid(5));
+    EXPECT_FALSE(reader->IsRowValid(6));
+    EXPECT_TRUE(reader->IsRowValid(7));
 
-    id_map = &index.GetIdMap();
-    ASSERT_EQ(id_map->OutCount(), 5);
-    ASSERT_EQ(id_map->InToOutIds().size(), 2);
-    EXPECT_FALSE(index.IsRowValid(3));
-    EXPECT_FALSE(index.IsRowValid(4));
-
-    std::array<float, 4> appended_data = {5.0F, 0.0F, 7.0F, 0.0F};
-    std::array<bool, 3> appended_valid = {true, false, true};
-    auto appended_dataset = knowhere::GenDataSet(2, dim, appended_data.data());
-    appended_dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
-        appended_valid.data(), appended_valid.size()));
-    index.AddWithDataset(appended_dataset, build_config);
-
-    id_map = &index.GetIdMap();
-    ASSERT_EQ(id_map->OutCount(), 8);
-    ASSERT_EQ(id_map->InToOutIds().size(), 4);
-    EXPECT_EQ(id_map->MapInToOut(0), 0);
-    EXPECT_EQ(id_map->MapInToOut(1), 2);
-    EXPECT_EQ(id_map->MapInToOut(2), 5);
-    EXPECT_EQ(id_map->MapInToOut(3), 7);
-    EXPECT_TRUE(index.IsRowValid(5));
-    EXPECT_FALSE(index.IsRowValid(6));
-    EXPECT_TRUE(index.IsRowValid(7));
-    EXPECT_EQ(index.Count(), 4);
+    // Logical id-addressed retrieval proves the same physical-to-logical
+    // mapping without exposing the engine's internal mutable IdMap.
+    const std::array<int64_t, 4> ids = {0, 2, 5, 7};
+    auto raw = reader->GetVector(GenIdsDataset(ids.size(), ids.data()));
+    ASSERT_EQ(raw.size(), 8 * sizeof(float));
+    std::array<float, 8> decoded{};
+    std::memcpy(decoded.data(), raw.data(), raw.size());
+    EXPECT_EQ(
+        decoded,
+        (std::array<float, 8>{0.0F, 0.0F, 2.0F, 0.0F, 5.0F, 0.0F, 7.0F, 0.0F}));
+    EXPECT_EQ(initial.CoveredRowEnd(), 3);
+    EXPECT_EQ(initial.Reader().Count(), 2);
+    EXPECT_EQ(null_tail.CoveredRowEnd(), 5);
+    EXPECT_EQ(null_tail.Reader().Count(), 2);
+    EXPECT_FALSE(initial_reader->IsRowValid(5));
+    EXPECT_FALSE(null_tail_reader->IsRowValid(5));
 }
 
 TEST(GrowingIndexNullableVectorTest,
@@ -837,7 +1293,7 @@ TEST(GrowingIndexNullableVectorTest,
     compact_vectors[dim + 2] = 0.0f;
     compact_vectors[dim + 3] = 0.0f;
 
-    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto insert_data = std::make_shared<InsertRecordProto>();
     auto pk_array =
         CreateDataArrayFrom(pks.data(), nullptr, row_count, (*schema)[pk]);
     auto vec_array = CreateVectorDataArrayFrom(compact_vectors.data(),
@@ -854,7 +1310,7 @@ TEST(GrowingIndexNullableVectorTest,
                             row_count,
                             row_ids.data(),
                             timestamps.data(),
-                            insert_data.get());
+                            insert_data);
 
     milvus::segcore::ScopedSchemaHandle schema_handle(*schema);
     auto plan_str = schema_handle.ParseSearch(
@@ -940,7 +1396,7 @@ TEST_P(GrowingIndexTest, GetVector) {
                             per_batch,
                             dataset.row_ids_.data(),
                             dataset.timestamps_.data(),
-                            dataset.raw_);
+                            std::make_shared<InsertRecordProto>(*dataset.raw_));
             auto num_inserted = (i + 1) * per_batch;
             auto ids_ds = GenRandomIds(num_inserted);
             auto result = segment->bulk_subscript(
@@ -967,7 +1423,7 @@ TEST_P(GrowingIndexTest, GetVector) {
                             per_batch,
                             dataset.row_ids_.data(),
                             dataset.timestamps_.data(),
-                            dataset.raw_);
+                            std::make_shared<InsertRecordProto>(*dataset.raw_));
             auto num_inserted = (i + 1) * per_batch;
             auto ids_ds = GenRandomIds(num_inserted);
             auto result = segment->bulk_subscript(
@@ -993,7 +1449,7 @@ TEST_P(GrowingIndexTest, GetVector) {
                             per_batch,
                             dataset.row_ids_.data(),
                             dataset.timestamps_.data(),
-                            dataset.raw_);
+                            std::make_shared<InsertRecordProto>(*dataset.raw_));
             auto num_inserted = (i + 1) * per_batch;
             auto ids_ds = GenRandomIds(num_inserted);
             auto result = segment->bulk_subscript(
@@ -1021,7 +1477,7 @@ TEST_P(GrowingIndexTest, GetVector) {
                             per_batch,
                             dataset.row_ids_.data(),
                             dataset.timestamps_.data(),
-                            dataset.raw_);
+                            std::make_shared<InsertRecordProto>(*dataset.raw_));
             auto num_inserted = (i + 1) * per_batch;
             auto ids_ds = GenRandomIds(num_inserted);
             auto result = segment->bulk_subscript(

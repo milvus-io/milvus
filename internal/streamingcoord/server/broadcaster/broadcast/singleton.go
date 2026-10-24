@@ -43,6 +43,23 @@ func StartBroadcastWithResourceKeys(ctx context.Context, resourceKeys ...message
 	return broadcaster.WithResourceKeys(ctx, resourceKeys...)
 }
 
+// StartUnreplicableBroadcastWithResourceKeys starts a broadcast that stays in this cluster.
+// It is accepted on any replicate role. The message passed to Broadcast must be unreplicable.
+func StartUnreplicableBroadcastWithResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+	broadcaster, err := singleton.GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	b, err := balance.GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := b.WaitUntilWALbasedDDLReady(ctx); err != nil {
+		return nil, merr.Wrap(err, "failed to wait until WAL based DDL ready")
+	}
+	return broadcaster.WithUnreplicableResourceKeys(ctx, resourceKeys...)
+}
+
 // StartBroadcastWithSecondaryClusterResourceKey starts a broadcast with exclusive cluster resource key
 // and verifies the cluster is secondary. Returns error if the cluster is primary.
 // This is used for force promote operations that should only be executed on secondary clusters.
@@ -68,6 +85,15 @@ func GetPendingSchemaFileResources() map[int64][]int64 {
 		return nil
 	}
 	return singleton.Get().GetPendingSchemaFileResources()
+}
+
+// GetPendingSchemaTarget reads the earliest unfinished durable schema ALTER.
+// Recovery must complete first; WAL append and ACK completion are not required.
+func GetPendingSchemaTarget(collectionID int64) (*broadcaster.SchemaTarget, error) {
+	if !singleton.Ready() {
+		return nil, merr.WrapErrServiceNotReadyMsg("schema target recovery is not ready")
+	}
+	return singleton.Get().GetPendingSchemaTarget(collectionID)
 }
 
 // Release releases the broadcaster.

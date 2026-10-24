@@ -164,15 +164,10 @@ PhyTimestamptzArithCompareExpr::DetermineExecPath() {
         return;
     }
 
-    // An index-only sealed segment can still evaluate the expression if its
-    // scalar index retains the original values for Reverse_Lookup().
-    SegmentExpr::DetermineExecPath();
-    if (exec_path_ == ExprExecPath::ScalarIndex && num_index_chunk_ == 1) {
-        using Index = index::ScalarIndex<int64_t>;
-        auto index_ptr = dynamic_cast<const Index*>(pinned_index_[0].get());
-        if (index_ptr != nullptr && index_ptr->HasRawData()) {
-            return;
-        }
+    auto req = MakeIndexRequirement(RequiredReader::ValueLookup);
+    req.value_type = DataType::TIMESTAMPTZ;
+    if (SelectAndPinIndex(req)) {
+        return;
     }
 
     ThrowInfo(UnexpectedError,
@@ -202,7 +197,6 @@ template <typename T>
 VectorPtr
 PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForIndex(
     OffsetVector* input) {
-    using Index = index::ScalarIndex<T>;
     if (!arg_inited_) {
         interval_ = expr_->interval_;
         compare_value_.SetValue<T>(expr_->compare_value_);
@@ -218,13 +212,10 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForIndex(
     if (real_batch_size == 0) {
         return nullptr;
     }
-    const int64_t eval_size =
-        input != nullptr ? real_batch_size : active_count_;
-
     auto exec_index =
         [ arith_op,
           compare_op ]<FilterType filter_type = FilterType::sequential>(
-            Index * index_ptr,
+            const index::IScalarValueReader<T>* index_ptr,
             int64_t size,
             T compare_value,
             const proto::plan::Interval& interval,
@@ -235,7 +226,7 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForIndex(
             if constexpr (filter_type == FilterType::random) {
                 offset = offsets == nullptr ? i : offsets[i];
             }
-            auto raw = index_ptr->Reverse_Lookup(offset);
+            auto raw = index_ptr->Lookup(offset);
             if (raw.has_value()) {
                 result[i] = EvaluateTimestamp(
                     raw.value(), arith_op, interval, compare_op, compare_value);
@@ -246,11 +237,10 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForIndex(
 
     VectorPtr result;
     if (input != nullptr) {
-        result = ProcessIndexChunksByOffsets<T>(
-            exec_index, input, eval_size, compare_value, interval);
+        result = ProcessValueIndexByOffsets<T>(
+            exec_index, input, compare_value, interval);
     } else {
-        result = ProcessIndexChunks<T>(
-            exec_index, eval_size, compare_value, interval);
+        result = ProcessValueIndex<T>(exec_index, compare_value, interval);
     }
     AssertInfo(result != nullptr && result->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -303,14 +293,18 @@ PhyTimestamptzArithCompareExpr::ExecCompareVisitorImplForAll(
         }
         const int64_t compare_us = compare_value;
         for (int i = 0; i < size; ++i) {
-            if (valid_data && !valid_data[i]) {
+            int32_t offset = i;
+            if constexpr (filter_type == FilterType::random) {
+                offset = offsets == nullptr ? i : offsets[i];
+            }
+            if (valid_data && !valid_data[offset]) {
                 // NULL never matches, under either polarity (three-valued
                 // logic); do not evaluate the storage placeholder value.
                 res[i] = valid_res[i] = false;
                 continue;
             }
             res[i] = EvaluateTimestamp(
-                data[i], arith_op, interval, compare_op, compare_us);
+                data[offset], arith_op, interval, compare_op, compare_us);
         }
     };
     int64_t processed_size;

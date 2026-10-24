@@ -38,10 +38,19 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-const dim = 128
+const (
+	dim = 128
+
+	// commitTsOffset is how far into the future setCommitTimestamp stamps a
+	// segment when a test needs reads and DML to land before the commit
+	// timestamp. It has to cover bringing the coordinator back up, building
+	// the index and loading the collection.
+	commitTsOffset = 30 * time.Second
+)
 
 func TestCommitTimestampSuite(t *testing.T) {
 	suite.Run(t, new(CommitTimestampSuite))
@@ -53,36 +62,81 @@ type CommitTimestampSuite struct {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
-// setCommitTimestamp reads a segment's metadata from etcd, sets its
-// CommitTimestamp to commitTs, then writes it back. This simulates an
-// import segment without going through the actual import pipeline.
-func (s *CommitTimestampSuite) setCommitTimestamp(
-	collectionID int64,
-	commitTs uint64,
-) []int64 {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
+// listDataSegments returns the persisted SegmentInfo of every flushed segment
+// of the collection that holds rows, keyed by its etcd key.
+//
+// The record carries no binlog arrays -- datacoord strips them before
+// serialization and stores them under the separate datacoord-meta/binlog
+// prefix (V2), or resolves them from the LOON manifest (V3) -- so NumOfRows,
+// which is on the record for both, is what says a segment holds data.
+func (s *CommitTimestampSuite) listDataSegments(ctx context.Context, collectionID int64) map[string]*datapb.SegmentInfo {
 	prefix := path.Join(s.Cluster.RootPath(), "meta/datacoord-meta/s",
 		fmt.Sprintf("%d", collectionID)) + "/"
 
 	resp, err := s.Cluster.EtcdCli.Get(ctx, prefix, clientv3.WithPrefix())
 	s.Require().NoError(err, "failed to list segments from etcd")
-	s.Require().NotEmpty(resp.Kvs, "no segments found in etcd")
 
-	var segmentIDs []int64
+	segments := make(map[string]*datapb.SegmentInfo)
 	for _, kv := range resp.Kvs {
-		var seg datapb.SegmentInfo
-		err := proto.Unmarshal(kv.Value, &seg)
-		if err != nil {
+		seg := &datapb.SegmentInfo{}
+		if err := proto.Unmarshal(kv.Value, seg); err != nil {
 			continue
 		}
 		if seg.GetState() != commonpb.SegmentState_Flushed && seg.GetState() != commonpb.SegmentState_Flushing {
 			continue
 		}
-		if len(seg.GetBinlogs()) == 0 {
+		if seg.GetNumOfRows() == 0 {
 			continue
 		}
+		segments[string(kv.Key)] = seg
+	}
+	return segments
+}
+
+// setCommitTimestamp stamps every flushed segment of the collection with a
+// commit timestamp `offset` in the future and returns it along with the
+// segments it modified. This simulates an import segment without going through
+// the actual import pipeline.
+//
+// DataCoord serves segment meta from its in-memory SegmentsInfo, which is
+// loaded from etcd at startup, so a write straight into etcd is invisible to a
+// running coordinator: compaction plans, MVCC filtering and GC all read the
+// in-memory copy. The write is therefore made while the coordinator is down.
+// The commit timestamp is composed after the shutdown so that its offset only
+// has to cover what the caller does next, not the shutdown itself.
+func (s *CommitTimestampSuite) setCommitTimestamp(
+	collectionID int64,
+	offset time.Duration,
+) (uint64, []int64) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	// Sort compaction runs asynchronously after flush and replaces the segment
+	// it sorts with a copy whose CommitTimestamp is 0, so a stamp written
+	// while it is in flight is silently dropped. Wait for it to land. It also
+	// makes the segments selectable for mix compaction
+	// (isMixCompactionSelectable), which TestCompaction_NormalizesCommitTs
+	// depends on.
+	s.Require().Eventually(func() bool {
+		segments := s.listDataSegments(ctx, collectionID)
+		if len(segments) == 0 {
+			return false
+		}
+		for _, seg := range segments {
+			if !seg.GetIsSorted() {
+				return false
+			}
+		}
+		return true
+	}, time.Minute, time.Second, "flushed segments were never sorted")
+
+	s.Cluster.DefaultMixCoord().Stop()
+	commitTs := tsoutil.ComposeTSByTime(time.Now().Add(offset))
+
+	var segmentIDs []int64
+	for key, seg := range s.listDataSegments(ctx, collectionID) {
+		s.Require().True(seg.GetIsSorted(),
+			"segment %d became unsorted again after the wait", seg.GetID())
 
 		mlog.Info(context.TODO(), "setCommitTimestamp: modifying segment",
 			mlog.FieldSegmentID(seg.GetID()),
@@ -90,14 +144,17 @@ func (s *CommitTimestampSuite) setCommitTimestamp(
 
 		seg.CommitTimestamp = commitTs
 
-		data, err := proto.Marshal(&seg)
+		data, err := proto.Marshal(seg)
 		s.Require().NoError(err)
-		_, err = s.Cluster.EtcdCli.Put(ctx, string(kv.Key), string(data))
+		_, err = s.Cluster.EtcdCli.Put(ctx, key, string(data))
 		s.Require().NoError(err)
 		segmentIDs = append(segmentIDs, seg.GetID())
 	}
 	s.Require().NotEmpty(segmentIDs, "no flushed segments were modified")
-	return segmentIDs
+
+	s.Cluster.AddMixCoord()
+
+	return commitTs, segmentIDs
 }
 
 // createCollectionAndInsert creates a collection, inserts rows, and flushes.
@@ -181,6 +238,11 @@ func (s *CommitTimestampSuite) queryCountWithTs(ctx context.Context, collName st
 		},
 	}
 	if guaranteeTs > 0 {
+		// Customized, not the proto default Strong: the delegator replaces a
+		// Strong read's guarantee timestamp with the WAL's current MVCC
+		// timestamp (speedupGuranteeTS), which drops a timestamp that lies in
+		// the future and serves the read at "now" instead of waiting for it.
+		req.ConsistencyLevel = commonpb.ConsistencyLevel_Customized
 		req.GuaranteeTimestamp = guaranteeTs
 	} else {
 		req.ConsistencyLevel = commonpb.ConsistencyLevel_Strong
@@ -217,9 +279,10 @@ func (s *CommitTimestampSuite) deleteByPKs(ctx context.Context, collName string,
 // searchWithTs performs a search with explicit guarantee timestamp. Returns result count.
 func (s *CommitTimestampSuite) searchWithTs(ctx context.Context, collName string, guaranteeTs uint64, topk int) int {
 	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, metric.L2)
-	searchReq := integration.ConstructSearchRequest("", collName, "",
+	searchReq := integration.ConstructSearchRequestWithConsistencyLevel("", collName, "",
 		integration.FloatVecField, schemapb.DataType_FloatVector, nil,
-		metric.L2, params, 1, dim, topk, -1)
+		metric.L2, params, 1, dim, topk, -1,
+		false, commonpb.ConsistencyLevel_Customized)
 	searchReq.GuaranteeTimestamp = guaranteeTs
 
 	searchResult, err := s.Cluster.MilvusClient.Search(ctx, searchReq)
@@ -242,9 +305,8 @@ func (s *CommitTimestampSuite) TestMVCC_Visibility() {
 	tBefore := tsoutil.ComposeTSByTime(time.Now())
 
 	// Set commit_ts to a future time to test MVCC
-	tCommit := tsoutil.ComposeTSByTime(time.Now().Add(10 * time.Second))
-	tAfterCommit := tsoutil.ComposeTSByTime(time.Now().Add(20 * time.Second))
-	s.setCommitTimestamp(collectionID, tCommit)
+	tCommit, _ := s.setCommitTimestamp(collectionID, commitTsOffset)
+	tAfterCommit := tsoutil.AddPhysicalDurationOnTs(tCommit, 2*time.Second)
 
 	s.buildIndexAndLoad(ctx, collName)
 
@@ -278,8 +340,7 @@ func (s *CommitTimestampSuite) TestMVCC_StrongConsistency_CommitTsInPast() {
 	collName, collectionID := s.createCollectionAndInsert(ctx, rowNum)
 
 	// Set commit_ts to now (in the past by the time query runs)
-	commitTs := tsoutil.ComposeTSByTime(time.Now())
-	s.setCommitTimestamp(collectionID, commitTs)
+	s.setCommitTimestamp(collectionID, 0)
 
 	s.buildIndexAndLoad(ctx, collName)
 
@@ -300,8 +361,7 @@ func (s *CommitTimestampSuite) TestSearch_WithGuaranteeTs() {
 	collName, collectionID := s.createCollectionAndInsert(ctx, rowNum)
 
 	tBefore := tsoutil.ComposeTSByTime(time.Now())
-	tCommit := tsoutil.ComposeTSByTime(time.Now().Add(10 * time.Second))
-	s.setCommitTimestamp(collectionID, tCommit)
+	tCommit, _ := s.setCommitTimestamp(collectionID, commitTsOffset)
 
 	s.buildIndexAndLoad(ctx, collName)
 
@@ -328,8 +388,7 @@ func (s *CommitTimestampSuite) TestDelete_AfterCommitTs() {
 	collName, collectionID := s.createCollectionAndInsert(ctx, rowNum)
 
 	// commit_ts in the past so delete_ts > commit_ts
-	commitTs := tsoutil.ComposeTSByTime(time.Now())
-	s.setCommitTimestamp(collectionID, commitTs)
+	s.setCommitTimestamp(collectionID, 0)
 
 	s.buildIndexAndLoad(ctx, collName)
 
@@ -356,8 +415,7 @@ func (s *CommitTimestampSuite) TestDelete_BeforeCommitTs() {
 	collName, collectionID := s.createCollectionAndInsert(ctx, rowNum)
 
 	// commit_ts in the future so delete_ts < commit_ts
-	commitTs := tsoutil.ComposeTSByTime(time.Now().Add(10 * time.Second))
-	s.setCommitTimestamp(collectionID, commitTs)
+	commitTs, _ := s.setCommitTimestamp(collectionID, commitTsOffset)
 
 	s.buildIndexAndLoad(ctx, collName)
 
@@ -382,8 +440,7 @@ func (s *CommitTimestampSuite) TestUpsert_AfterCommitTs() {
 	collName, collectionID := s.createCollectionAndInsert(ctx, rowNum)
 
 	// commit_ts in the past so upsert_ts > commit_ts
-	commitTs := tsoutil.ComposeTSByTime(time.Now())
-	s.setCommitTimestamp(collectionID, commitTs)
+	s.setCommitTimestamp(collectionID, 0)
 
 	s.buildIndexAndLoad(ctx, collName)
 
@@ -428,8 +485,7 @@ func (s *CommitTimestampSuite) TestUpsert_BeforeCommitTs() {
 	collName, collectionID := s.createCollectionAndInsert(ctx, rowNum)
 
 	// commit_ts in the future so upsert_ts < commit_ts
-	commitTs := tsoutil.ComposeTSByTime(time.Now().Add(10 * time.Second))
-	s.setCommitTimestamp(collectionID, commitTs)
+	commitTs, _ := s.setCommitTimestamp(collectionID, commitTsOffset)
 
 	s.buildIndexAndLoad(ctx, collName)
 
@@ -504,8 +560,7 @@ func (s *CommitTimestampSuite) TestCompaction_NormalizesCommitTs() {
 	s.Require().NoError(err)
 	collectionID := showResp.GetCollectionIds()[0]
 
-	commitTs := tsoutil.ComposeTSByTime(time.Now())
-	modifiedSegIDs := s.setCommitTimestamp(collectionID, commitTs)
+	commitTs, modifiedSegIDs := s.setCommitTimestamp(collectionID, 0)
 	s.Require().GreaterOrEqual(len(modifiedSegIDs), 2,
 		"should have at least 2 segments to compact")
 
@@ -516,24 +571,31 @@ func (s *CommitTimestampSuite) TestCompaction_NormalizesCommitTs() {
 	s.Require().NoError(err)
 	s.Require().True(merr.Ok(compactResp.GetStatus()))
 
-	compactionID := compactResp.GetCompactionID()
-
-	compactionCompleted := false
-	for i := 0; i < 60; i++ {
-		time.Sleep(2 * time.Second)
-		stateResp, err := s.Cluster.MilvusClient.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{
-			CompactionID: compactionID,
-		})
+	// Wait for the mix compaction to replace the stamped segments, and take that
+	// turnover as the proof it ran. Neither the returned compaction ID nor the
+	// reported state can play that role: a trigger that selects no candidate
+	// still allocates an ID, and GetCompactionState reports Completed with zero
+	// plans both when no plan was ever generated and when a finished task has
+	// been cleaned from the inspector, which happens within a second.
+	stamped := typeutil.NewSet(modifiedSegIDs...)
+	s.Require().Eventually(func() bool {
+		segments, err := s.Cluster.ShowSegments(collName)
 		if err != nil {
-			continue
+			return false
 		}
-		if stateResp.GetState() == commonpb.CompactionState_Completed {
-			mlog.Info(context.TODO(), "compaction completed", mlog.Int64("compactionID", compactionID))
-			compactionCompleted = true
-			break
+		flushed := 0
+		for _, seg := range segments {
+			if seg.GetState() != commonpb.SegmentState_Flushed {
+				continue
+			}
+			if stamped.Contain(seg.GetID()) {
+				return false
+			}
+			flushed++
 		}
-	}
-	s.Require().True(compactionCompleted, "compaction did not complete within timeout")
+		return flushed > 0
+	}, 2*time.Minute, time.Second,
+		"mix compaction never replaced the segments carrying a commit timestamp")
 
 	// Verify output segments: CommitTimestamp = 0, binlog timestamps updated
 	segments, err := s.Cluster.ShowSegments(collName)
@@ -581,8 +643,7 @@ func (s *CommitTimestampSuite) TestGC_ImportSegmentNotPrematurelyDropped() {
 	collName, collectionID := s.createCollectionAndInsert(ctx, rowNum)
 
 	// Set commit_ts to now
-	commitTs := tsoutil.ComposeTSByTime(time.Now())
-	s.setCommitTimestamp(collectionID, commitTs)
+	s.setCommitTimestamp(collectionID, 0)
 
 	s.buildIndexAndLoad(ctx, collName)
 

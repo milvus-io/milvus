@@ -765,8 +765,8 @@ def gen_data_by_data_field(
                         dtype=np.dtype("str"),
                     )
             else:
-                data = pd.Series([json.dumps({gen_unique_str(): None}) for _ in range(start, rows + start)])
-                data = [json.dumps({gen_unique_str(): None}) for _ in range(start, rows + start)]
+                # A null JSON field is distinct from a non-null object containing a null value.
+                data = [None for _ in range(rows)]
         elif data_field == DataField.array_bool_field:
             if not nullable:
                 data = pd.Series(
@@ -1011,7 +1011,7 @@ def gen_dict_data_by_data_field(
                         "number": r + start,
                     }
                 else:
-                    d[data_field] = {str(r + start): None}
+                    d[data_field] = None
             elif data_field == DataField.array_bool_field:
                 array_length = random.randint(0, 10) if array_length is None else array_length
                 if not nullable:

@@ -38,6 +38,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -46,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/pipeline"
@@ -67,6 +69,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
@@ -276,7 +279,6 @@ func (node *QueryNode) RegisterSegcoreConfigWatcher() {
 		config.NewHandler("common.diskWriteRateLimiter.middlePriorityRatio", node.ReconfigDiskFileWriterParams))
 	pt.Watch(pt.CommonCfg.DiskWriteRateLimiterLowPriorityRatio.Key,
 		config.NewHandler("common.diskWriteRateLimiter.lowPriorityRatio", node.ReconfigDiskFileWriterParams))
-	initcore.RegisterArrowIOThreadPoolWatchers(pt, "querynode")
 	pt.Watch(pt.QueryNodeCfg.StorageV2CellTargetSizeBytes.Key,
 		config.NewHandler("queryNode.segcore.storageV2.cellTargetSizeBytes", func(evt *config.Event) {
 			if !evt.HasUpdated {
@@ -329,6 +331,7 @@ func (node *QueryNode) registerMetricsRequest() {
 func (node *QueryNode) Init() error {
 	var initError error
 	node.initOnce.Do(func() {
+		captureStartConfig()
 		node.registerMetricsRequest()
 		// ctx := context.Background()
 		mlog.Info(node.ctx, "QueryNode session info", mlog.String("metaPath", paramtable.Get().EtcdCfg.MetaRootPath.GetValue()))
@@ -341,8 +344,12 @@ func (node *QueryNode) Init() error {
 
 		err = node.initHook()
 		if err != nil {
-			// auto index cannot work if hook init failed
-			if paramtable.Get().AutoIndexConfig.Enable.GetAsBool() {
+			// A hook configured both ways is a contradiction in the
+			// deployment, not an optional plug-in that is absent: refuse to
+			// start whatever autoIndex.enable says. Any other failure keeps
+			// the old rule - auto index cannot work without a hook, so it is
+			// fatal only when auto index is on.
+			if hookInitIsFatal(err) {
 				mlog.Error(node.ctx, "QueryNode init hook failed", mlog.Err(err))
 				initError = err
 				return
@@ -439,6 +446,9 @@ func (node *QueryNode) Start() error {
 
 		paramtable.SetCreateTime(time.Now())
 		paramtable.SetUpdateTime(time.Now())
+
+		// execution-path feature counters (see internal/featureusage)
+		featureusage.SetEnabled(paramtable.Get().CommonCfg.FeatureUsageCountersEnabled.GetAsBool())
 		mmapEnabled := paramtable.Get().QueryNodeCfg.MmapEnabled.GetAsBool()
 		growingmmapEnable := paramtable.Get().QueryNodeCfg.GrowingMmapEnabled.GetAsBool()
 		mmapVectorIndex := paramtable.Get().QueryNodeCfg.MmapVectorIndex.GetAsBool()
@@ -634,9 +644,43 @@ func (node *QueryNode) SetAddress(address string) {
 	node.address = address
 }
 
-// initHook initializes parameter tuning hook.
+// errQueryHookConflict is returned when a compiled-in query hook and
+// queryNode.soPath are both configured. A hook that fails to load is an
+// optional plug-in that may be absent, but this is a contradiction in the
+// deployment, so Init refuses to start on it whatever autoIndex.enable says.
+var errQueryHookConflict = errors.New("queryNode.soPath and a compiled-in query hook are both configured")
+
+// hookInitIsFatal reports whether an initHook error must stop the QueryNode.
+// A queryNode.soPath configured beside a compiled-in hook is a contradiction
+// and is always fatal; any other failure - no path at all, a plug-in that
+// does not load - is fatal only when auto index is on, because that is the
+// only feature that needs a hook.
+func hookInitIsFatal(err error) bool {
+	return errors.Is(err, errQueryHookConflict) || paramtable.Get().AutoIndexConfig.Enable.GetAsBool()
+}
+
+// initHook installs the parameter tuning hook: the one compiled into this
+// binary if a distribution installed one, otherwise the plug-in at
+// queryNode.soPath.
+//
+// A compiled-in hook is used in preference to the plug-in, and a deployment
+// that configures both is refused (errQueryHookConflict): both would tune
+// every search, and picking silently would make which one wins depend on
+// start-up order rather than on the deployment. It is otherwise treated
+// exactly as the plug-in is: the same two Init calls with the autoIndex
+// configuration, the same watchers.
 func (node *QueryNode) initHook() error {
 	path := paramtable.Get().QueryNodeCfg.SoPath.GetValue()
+
+	if compiled := extension.InstalledQueryHook(); compiled != nil {
+		if path != "" {
+			return merr.Wrapf(errQueryHookConflict,
+				"queryNode.soPath is set to %q and a query hook is also compiled in; "+
+					"both tune every search, and only one can", path)
+		}
+		return node.useQueryHook(compiled)
+	}
+
 	if path == "" {
 		return merr.WrapErrServiceInternalMsg("fail to set the plugin path")
 	}
@@ -645,17 +689,23 @@ func (node *QueryNode) initHook() error {
 	if err != nil {
 		return err
 	}
+	return node.useQueryHook(hoo)
+}
 
-	if err = hoo.Init(paramtable.Get().AutoIndexConfig.AutoIndexSearchConfig.GetValue()); err != nil {
+// useQueryHook initializes a query hook with the autoIndex configuration,
+// installs it and watches that configuration on its behalf. It is the same
+// for a plug-in and a compiled-in hook, which is the point: a hook a
+// distribution compiled in must not be a second-class one.
+func (node *QueryNode) useQueryHook(hoo optimizers.QueryHook) error {
+	if err := hoo.Init(paramtable.Get().AutoIndexConfig.AutoIndexSearchConfig.GetValue()); err != nil {
 		return merr.Wrap(err, "fail to init configs for the hook")
 	}
-	if err = hoo.InitTuningConfig(paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.GetValue()); err != nil {
+	if err := hoo.InitTuningConfig(paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.GetValue()); err != nil {
 		return merr.Wrap(err, "fail to init tuning configs for the hook")
 	}
 
 	node.queryHook = hoo
 	node.handleQueryHookEvent()
-
 	return nil
 }
 

@@ -51,28 +51,40 @@ func CreateStorageConfig() *indexpb.StorageConfig {
 			StorageType: paramtable.Get().CommonCfg.StorageType.GetValue(),
 			// External collections may reference an s3:// source even when the
 			// primary storage is local, so the connection cap still applies.
-			MaxConnections: uint32(paramtable.Get().MinioCfg.MaxConnections.GetAsInt()),
+			MaxConnections:              uint32(paramtable.Get().MinioCfg.MaxConnections.GetAsInt()),
+			TalonMode:                   paramtable.Get().CommonCfg.StorageTalonMode.GetAsUint32(),
+			TalonSmallReadThreshold:     paramtable.Get().CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32(),
+			TalonCoordinator:            paramtable.Get().CommonCfg.StorageTalonCoordinator.GetValue(),
+			TalonBlockSize:              paramtable.Get().CommonCfg.StorageTalonBlockSize.GetAsUint32(),
+			TalonMaxIdlePerAddr:         paramtable.Get().CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32(),
+			TalonEnableForExternalTable: paramtable.Get().CommonCfg.StorageTalonEnableForExternalTable.GetAsBool(),
 		}
 	} else {
 		storageConfig = &indexpb.StorageConfig{
-			Address:           paramtable.Get().MinioCfg.Address.GetValue(),
-			AccessKeyID:       paramtable.Get().MinioCfg.AccessKeyID.GetValue(),
-			SecretAccessKey:   paramtable.Get().MinioCfg.SecretAccessKey.GetValue(),
-			UseSSL:            paramtable.Get().MinioCfg.UseSSL.GetAsBool(),
-			SslCACert:         paramtable.Get().MinioCfg.SslCACert.GetValue(),
-			BucketName:        paramtable.Get().MinioCfg.BucketName.GetValue(),
-			RootPath:          paramtable.Get().MinioCfg.RootPath.GetValue(),
-			UseIAM:            paramtable.Get().MinioCfg.UseIAM.GetAsBool(),
-			IAMEndpoint:       paramtable.Get().MinioCfg.IAMEndpoint.GetValue(),
-			StorageType:       paramtable.Get().CommonCfg.StorageType.GetValue(),
-			Region:            paramtable.Get().MinioCfg.Region.GetValue(),
-			UseVirtualHost:    paramtable.Get().MinioCfg.UseVirtualHost.GetAsBool(),
-			CloudProvider:     paramtable.Get().MinioCfg.CloudProvider.GetValue(),
-			RequestTimeoutMs:  paramtable.Get().MinioCfg.RequestTimeoutMs.GetAsInt64(),
-			MaxConnections:    uint32(paramtable.Get().MinioCfg.MaxConnections.GetAsInt()),
-			GcpCredentialJSON: paramtable.Get().MinioCfg.GcpCredentialJSON.GetValue(),
-			SslTlsMinVersion:  paramtable.Get().MinioCfg.SslTLSMinVersion.GetValue(),
-			UseCrc32CChecksum: paramtable.Get().MinioCfg.UseCRC32C.GetAsBool(),
+			Address:                     paramtable.Get().MinioCfg.Address.GetValue(),
+			AccessKeyID:                 paramtable.Get().MinioCfg.AccessKeyID.GetValue(),
+			SecretAccessKey:             paramtable.Get().MinioCfg.SecretAccessKey.GetValue(),
+			UseSSL:                      paramtable.Get().MinioCfg.UseSSL.GetAsBool(),
+			SslCACert:                   paramtable.Get().MinioCfg.SslCACert.GetValue(),
+			BucketName:                  paramtable.Get().MinioCfg.BucketName.GetValue(),
+			RootPath:                    paramtable.Get().MinioCfg.RootPath.GetValue(),
+			UseIAM:                      paramtable.Get().MinioCfg.UseIAM.GetAsBool(),
+			IAMEndpoint:                 paramtable.Get().MinioCfg.IAMEndpoint.GetValue(),
+			StorageType:                 paramtable.Get().CommonCfg.StorageType.GetValue(),
+			Region:                      paramtable.Get().MinioCfg.Region.GetValue(),
+			UseVirtualHost:              paramtable.Get().MinioCfg.UseVirtualHost.GetAsBool(),
+			CloudProvider:               paramtable.Get().MinioCfg.CloudProvider.GetValue(),
+			RequestTimeoutMs:            paramtable.Get().MinioCfg.RequestTimeoutMs.GetAsInt64(),
+			MaxConnections:              uint32(paramtable.Get().MinioCfg.MaxConnections.GetAsInt()),
+			GcpCredentialJSON:           paramtable.Get().MinioCfg.GcpCredentialJSON.GetValue(),
+			SslTlsMinVersion:            paramtable.Get().MinioCfg.SslTLSMinVersion.GetValue(),
+			UseCrc32CChecksum:           paramtable.Get().MinioCfg.UseCRC32C.GetAsBool(),
+			TalonMode:                   paramtable.Get().CommonCfg.StorageTalonMode.GetAsUint32(),
+			TalonSmallReadThreshold:     paramtable.Get().CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32(),
+			TalonCoordinator:            paramtable.Get().CommonCfg.StorageTalonCoordinator.GetValue(),
+			TalonBlockSize:              paramtable.Get().CommonCfg.StorageTalonBlockSize.GetAsUint32(),
+			TalonMaxIdlePerAddr:         paramtable.Get().CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32(),
+			TalonEnableForExternalTable: paramtable.Get().CommonCfg.StorageTalonEnableForExternalTable.GetAsBool(),
 		}
 	}
 
@@ -112,33 +124,12 @@ func NewFFIPackedWriter(basePath string, schema *arrow.Schema, columnGroups []st
 		}
 	}
 
-	// Configure CMEK encryption if plugin context is provided
-	if storagePluginContext != nil {
-		var cKey *C.char
-		var cMeta *C.char
-
-		encKey := C.CString(storagePluginContext.EncryptionKey)
-		defer C.free(unsafe.Pointer(encKey))
-
-		// Prepare plugin context for FFI call to retrieve encryption parameters
-		var pluginContext C.CPluginContext
-		pluginContext.ez_id = C.int64_t(storagePluginContext.EncryptionZoneId)
-		pluginContext.collection_id = C.int64_t(storagePluginContext.CollectionId)
-		pluginContext.key = encKey
-
-		// Get encryption key and metadata from cipher plugin via FFI
-		status := C.GetEncParams(&pluginContext, &cKey, &cMeta)
-		if err := ConsumeCStatusIntoError(&status); err != nil {
-			return nil, err
-		}
-
-		// Set encryption properties for the writer
-		extra[PropertyWriterEncEnable] = "true"
-		extra[PropertyWriterEncKey] = C.GoString(cKey)
-		C.free(unsafe.Pointer(cKey))
-		extra[PropertyWriterEncMeta] = C.GoString(cMeta)
-		C.free(unsafe.Pointer(cMeta))
-		extra[PropertyWriterEncAlgo] = "AES_GCM_V1"
+	encryptionProperties, err := writerEncryptionProperties(storagePluginContext)
+	if err != nil {
+		return nil, err
+	}
+	for key, value := range encryptionProperties {
+		extra[key] = value
 	}
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, extra)
@@ -264,6 +255,29 @@ func (f *ColumnGroups) applyTo(handle C.LoonTransactionHandle) error {
 		return merr.Wrap(err, "commit manifest append_files")
 	}
 	return nil
+}
+
+func (f *ColumnGroups) invalidatedIndexColumns() []string {
+	if f == nil || f.addNewColumnGroups {
+		return nil
+	}
+	return appendedIndexColumns(f.cColumnGroups)
+}
+
+func appendedIndexColumns(groups *C.LoonColumnGroups) []string {
+	if groups == nil {
+		return nil
+	}
+	var columns []string
+	for _, group := range unsafe.Slice(groups.column_group_array, int(groups.num_of_column_groups)) {
+		if group.num_of_files == 0 {
+			continue
+		}
+		for _, column := range unsafe.Slice(group.columns, int(group.num_of_columns)) {
+			columns = append(columns, C.GoString(column))
+		}
+	}
+	return columns
 }
 
 // Close closes the underlying loon writer and returns the column-groups

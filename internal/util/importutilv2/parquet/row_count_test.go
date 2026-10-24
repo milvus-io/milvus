@@ -1,6 +1,23 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package parquet
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"io"
@@ -10,6 +27,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
+	arrowparquet "github.com/apache/arrow/go/v17/parquet"
+	"github.com/apache/arrow/go/v17/parquet/compress"
+	parquetfile "github.com/apache/arrow/go/v17/parquet/file"
+	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -177,4 +201,87 @@ func Test_validateFooter_capIsConfigurable(t *testing.T) {
 
 	paramtable.Get().Save(key, "0")
 	assert.NoError(t, probe(), "a nonsensical value falls back to the default rather than refusing everything")
+}
+
+// Test_NumRowsAndBytesReportsDecodedLogicalSize pins the success-path byte math
+// that feeds the reshard BFD: logicalBytes is the sum of every column chunk's
+// uncompressed (decoded) size, never the smaller on-disk compressed size, and
+// the physical size is the object size the sizing reader observed. The fixture
+// compresses so the two metrics are provably distinct.
+func Test_NumRowsAndBytesReportsDecodedLogicalSize(t *testing.T) {
+	const rows = 512
+	const path = "data.parquet"
+	data := writePlainParquetInt64(t, rows)
+	cm := cmServingBytes(t, path, data)
+
+	gotRows, logical, fileSize, err := NumRowsAndBytes(context.Background(), cm, path)
+	require.NoError(t, err)
+	require.Equal(t, int64(rows), gotRows)
+	require.Equal(t, int64(len(data)), fileSize)
+
+	uncompressed, compressed := parquetFooterSizes(t, data)
+	require.Equal(t, uncompressed, logical)
+	require.NotEqual(t, compressed, uncompressed,
+		"the fixture must report distinct compressed and uncompressed sizes so a regression to the compressed metric fails")
+}
+
+// writePlainParquetInt64 writes a single-row-group Int64 parquet file of
+// all-zero values, which compresses far below its decoded size.
+func writePlainParquetInt64(t *testing.T, rows int) []byte {
+	t.Helper()
+	buf := new(bytes.Buffer)
+	schema := arrow.NewSchema([]arrow.Field{{Name: "v", Type: arrow.PrimitiveTypes.Int64}}, nil)
+	fw, err := pqarrow.NewFileWriter(schema, buf,
+		arrowparquet.NewWriterProperties(arrowparquet.WithMaxRowGroupLength(int64(rows)), arrowparquet.WithCompression(compress.Codecs.Snappy)),
+		pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+
+	builder := array.NewInt64Builder(memory.DefaultAllocator)
+	builder.AppendValues(make([]int64, rows), nil)
+	column := builder.NewArray()
+	builder.Release()
+	record := array.NewRecord(schema, []arrow.Array{column}, int64(rows))
+	column.Release()
+	require.NoError(t, fw.Write(record))
+	record.Release()
+	require.NoError(t, fw.Close())
+	return append([]byte(nil), buf.Bytes()...)
+}
+
+// parquetFooterSizes re-reads a parquet footer and sums the columns'
+// uncompressed and compressed sizes independently of NumRowsAndBytes.
+func parquetFooterSizes(t *testing.T, data []byte) (uncompressed, compressed int64) {
+	t.Helper()
+	pr, err := parquetfile.NewParquetReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer pr.Close()
+	for _, rg := range pr.MetaData().GetRowGroups() {
+		for _, cc := range rg.GetColumns() {
+			if md := cc.GetMetaData(); md != nil {
+				uncompressed += md.GetTotalUncompressedSize()
+				compressed += md.GetTotalCompressedSize()
+			}
+		}
+	}
+	return uncompressed, compressed
+}
+
+// cmServingBytes serves an in-memory object through the same Size/ReadAt pair
+// the sizing reader uses.
+func cmServingBytes(t *testing.T, path string, data []byte) *mocks.ChunkManager {
+	t.Helper()
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().Size(mock.Anything, path).Return(int64(len(data)), nil).Maybe()
+	cm.EXPECT().ReadAt(mock.Anything, path, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ string, off int64, length int64) ([]byte, error) {
+			if off >= int64(len(data)) {
+				return nil, io.EOF
+			}
+			end := off + length
+			if end > int64(len(data)) {
+				end = int64(len(data))
+			}
+			return data[off:end], nil
+		}).Maybe()
+	return cm
 }

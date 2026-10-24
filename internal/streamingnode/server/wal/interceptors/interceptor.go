@@ -20,8 +20,19 @@ type (
 	Append = func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error)
 )
 
+// MessageRowLock coordinates writes before their visibility timestamp is
+// allocated. The lock interceptor calls it under the shard lifecycle lock for
+// every non-replicated message. The returned context may retain decoded write
+// metadata for later interceptors. The release function runs after the
+// downstream append returns: after transaction, acknowledgement and MVCC
+// publication.
+type MessageRowLock interface {
+	Acquire(ctx context.Context, msg message.MutableMessage) (context.Context, func(), error)
+}
+
 // InterceptorBuildParam is the parameter to build a interceptor.
 type InterceptorBuildParam struct {
+	Context                context.Context // WAL-open context for bounded startup recovery; optional in tests.
 	ChannelInfo            types.PChannelInfo
 	WAL                    *syncutil.Future[wal.WAL]    // The wal final object, can be used after interceptor is ready.
 	LastTimeTickMessage    message.ImmutableMessage     // The last time tick message in wal.
@@ -29,9 +40,11 @@ type InterceptorBuildParam struct {
 	WriteAheadBuffer       *wab.WriteAheadBuffer        // The write ahead buffer for the wal, used to erase the subscription of underlying wal.
 	MVCCManager            *mvcc.MVCCManager            // The MVCC manager for the wal, can be used to get the latest mvcc timetick.
 	InitialRecoverSnapshot *recovery.RecoverySnapshot   // The initial recover snapshot for the wal, used to recover the wal state.
+	RecoveryStorage        recovery.RecoveryStorage     // The recovery storage owned by the wal lifecycle.
 	TxnManager             *txn.TxnManager              // The transaction manager for the wal, used to manage the transactions.
 	ShardManager           shards.ShardManager          // The shard manager for the wal, used to manage the shards, segment assignment, partition.
 	ReplicateManager       replicates.ReplicatesManager // The replicates manager for the wal, used to manage the replicates.
+	RowLock                MessageRowLock               // Optional per-write row lock, taken by the lock interceptor.
 }
 
 // Clear release the resources in the interceptor build param.
@@ -41,6 +54,9 @@ func (p *InterceptorBuildParam) Clear() {
 	}
 	if p.ShardManager != nil {
 		p.ShardManager.Close()
+	}
+	if p.RecoveryStorage != nil {
+		p.RecoveryStorage.Close()
 	}
 }
 

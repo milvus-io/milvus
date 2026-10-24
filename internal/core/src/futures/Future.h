@@ -15,6 +15,7 @@
 #include <common/EasyAssert.h>
 #include <folly/CancellationToken.h>
 #include <folly/futures/Future.h>
+#include <folly/executors/InlineExecutor.h>
 #include <folly/futures/SharedPromise.h>
 #include "future_c_types.h"
 #include "LeakyResult.h"
@@ -246,10 +247,10 @@ class Future : public IFuture {
         auto future = std::make_unique<Future<R>>(pool_type);
         // setup the interrupt handler for the promise.
         future->setInterruptHandler();
+        // Attach completion before the producer can finish.
+        future->registerConsumeCallback();
         // start async function.
         future->asyncProduce(executor, priority, std::forward<Fn>(fn));
-        // register consume callback function.
-        future->registerConsumeCallback(executor, priority);
         return future;
     }
 
@@ -342,9 +343,9 @@ class Future : public IFuture {
 
             try {
                 return fn(cancellation_token);
-            } catch (const folly::FutureCancellation& e) {
+            } catch (const folly::FutureCancellation&) {
                 metrics_.withDuringCancel();
-                throw e;
+                throw;
             } catch (const milvus::SegcoreError& e) {
                 // A cancellation raised inside execution does not always reach
                 // here as a raw folly::FutureCancellation: the exec driver's
@@ -371,11 +372,10 @@ class Future : public IFuture {
 
     /// @brief async consume the result of the future.
     void
-    registerConsumeCallback(folly::Executor::KeepAlive<> executor,
-                            int priority) noexcept {
+    registerConsumeCallback() noexcept {
         // set up the result consume arm and exception consume arm.
         promise_->getSemiFuture()
-            .via(executor, priority)
+            .via(&folly::InlineExecutor::instance())
             .thenValue(
                 [ready = ready_](R* r) { ready->setValue(LeakyResult<R>(r)); })
             .thenError(folly::tag_t<folly::FutureCancellation>{},
@@ -393,6 +393,16 @@ class Future : public IFuture {
                            ready->setValue(LeakyResult<R>(
                                static_cast<int>(e.get_error_code()), e.what()));
                        })
+            // An async producer's OOM must reach Go as the same retriable
+            // MemAllocateFailed the synchronous CGo boundary reports
+            // (CGoCatch.h); the generic std::exception arm below would flatten
+            // it to a permanent UnexpectedError and skip retry/reroute.
+            .thenError(
+                folly::tag_t<std::bad_alloc>{},
+                [ready = ready_](const std::bad_alloc& e) {
+                    ready->setValue(LeakyResult<R>(
+                        static_cast<int>(milvus::MemAllocateFailed), e.what()));
+                })
             .thenError(
                 folly::tag_t<std::exception>{},
                 [ready = ready_](const std::exception& e) {

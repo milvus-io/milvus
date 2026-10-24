@@ -114,21 +114,34 @@ func validateFooter(ra io.ReaderAt, size int64, path string) error {
 	return nil
 }
 
-// NumRows reads only the parquet footer to get the exact row count via a
-// common.SizingReaderAt, which retries the ranged reads the footer relies on. Any error
-// from NewParquetReader is therefore a genuine file-format problem, not a transient
-// fault, and is returned as a non-retryable import error.
+// NumRows reads only the parquet footer to get the exact row count.
+func NumRows(ctx context.Context, cm storage.ChunkManager, path string) (int64, error) {
+	rows, _, _, err := NumRowsAndBytes(ctx, cm, path)
+	return rows, err
+}
+
+// NumRowsAndBytes reads only the parquet footer to get the exact row count, the
+// total uncompressed (decoded) column size, and the physical object size. The
+// decoded size is a cheap logical size used by the Import V3 reshard BFD, which
+// packs tasks by decoded bytes rather than by the compressed object size; the
+// physical size comes for free from the SizingReaderAt so callers need not size
+// the object again.
+//
+// It uses a common.SizingReaderAt, which retries the ranged reads the footer
+// relies on. Any error from NewParquetReader is therefore a genuine file-format
+// problem, not a transient fault, and is returned as a non-retryable import error.
 //
 // The concurrency gate below is deliberately attached here rather than to NewReader:
-// only the pre-broadcast sizing pass parses footers on the coordinator, and putting
-// the gate on the DataNode read path would serialize ordinary imports at its width.
-func NumRows(ctx context.Context, cm storage.ChunkManager, path string) (int64, error) {
+// only the sizing pass parses footers, and putting the gate on the DataNode read
+// path would serialize ordinary imports at its width.
+func NumRowsAndBytes(ctx context.Context, cm storage.ChunkManager, path string) (int64, int64, int64, error) {
 	ra, err := common.NewSizingReaderAt(ctx, cm, path)
 	if err != nil {
-		return 0, err
+		return 0, 0, 0, err
 	}
-	if err := validateFooter(ra, ra.FileSize(), path); err != nil {
-		return 0, err
+	fileSize := ra.FileSize()
+	if err := validateFooter(ra, fileSize, path); err != nil {
+		return 0, 0, 0, err
 	}
 
 	// Hold the gate across the decode only. The reads above are ordinary object
@@ -137,14 +150,14 @@ func NumRows(ctx context.Context, cm storage.ChunkManager, path string) (int64, 
 	// one slow request stall every other import's sizing pass.
 	//
 	// The gate is process-wide and narrow, so concurrent submissions of
-	// footer-heavy files queue behind each other and lengthen the broadcast RPC.
+	// footer-heavy files queue behind each other and lengthen the sizing pass.
 	// That is the intended trade against unbounded decode allocation, but it is
 	// invisible from the outside, so a wait worth noticing is logged.
 	gateStart := time.Now()
 	select {
 	case footerParseSem <- struct{}{}:
 	case <-ctx.Done():
-		return 0, ctx.Err()
+		return 0, 0, 0, ctx.Err()
 	}
 	if waited := time.Since(gateStart); waited > footerGateSlowWait {
 		mlog.Warn(ctx, "waited for the parquet footer decode gate",
@@ -156,8 +169,21 @@ func NumRows(ctx context.Context, cm storage.ChunkManager, path string) (int64, 
 
 	pr, err := file.NewParquetReader(ra)
 	if err != nil {
-		return 0, common.WrapDecodeErr(err, fmt.Sprintf("read parquet footer failed, path=%s", path))
+		return 0, 0, 0, common.WrapDecodeErr(err, fmt.Sprintf("read parquet footer failed, path=%s", path))
 	}
 	defer pr.Close()
-	return pr.NumRows(), nil
+
+	// Sum the uncompressed column-chunk sizes from the footer. They are the
+	// data's decoded size, which is what the reshard task actually materializes.
+	var logicalBytes int64
+	if md := pr.MetaData(); md != nil {
+		for _, rg := range md.RowGroups {
+			for _, cc := range rg.GetColumns() {
+				if cc.GetMetaData() != nil {
+					logicalBytes += cc.GetMetaData().GetTotalUncompressedSize()
+				}
+			}
+		}
+	}
+	return pr.NumRows(), logicalBytes, fileSize, nil
 }

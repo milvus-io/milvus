@@ -85,6 +85,42 @@ TEST(JsonNumericTest, AtNumericDoubleDetection) {
     EXPECT_DOUBLE_EQ(n.get_double(), 3.14);
 }
 
+TEST(JsonNumericTest, AtStringOrInt64DispatchesRuntimeTypes) {
+    auto j = makeJson(
+        R"({"str":"alice","escaped":"a\u006cice","int":-7,"uint":18446744073709551615,"double":5.0,"bool":true})");
+
+    const auto str = j.at_string_or_int64("/str");
+    EXPECT_EQ(str.kind, JsonStringOrInt64::Kind::String);
+    EXPECT_EQ(str.string_value, "alice");
+
+    const auto escaped = j.at_string_or_int64("/escaped");
+    EXPECT_EQ(escaped.kind, JsonStringOrInt64::Kind::String);
+    EXPECT_EQ(escaped.string_value, "alice");
+
+    const auto integer = j.at_string_or_int64("/int");
+    EXPECT_EQ(integer.kind, JsonStringOrInt64::Kind::Int64);
+    EXPECT_EQ(integer.int64_value, -7);
+
+    const auto uint = j.at_string_or_int64("/uint");
+    EXPECT_EQ(uint.kind, JsonStringOrInt64::Kind::OtherNumber);
+
+    const auto floating = j.at_string_or_int64("/double");
+    EXPECT_EQ(floating.kind, JsonStringOrInt64::Kind::OtherNumber);
+
+    const auto other = j.at_string_or_int64("/bool");
+    EXPECT_EQ(other.kind, JsonStringOrInt64::Kind::NoProbeValue);
+
+    const auto missing = j.at_string_or_int64("/missing");
+    EXPECT_EQ(missing.kind, JsonStringOrInt64::Kind::NoProbeValue);
+}
+
+TEST(JsonNumericTest, AtStringOrInt64SupportsRootPointer) {
+    auto j = makeJson(R"(-9223372036854775808)");
+    const auto root = j.at_string_or_int64("");
+    EXPECT_EQ(root.kind, JsonStringOrInt64::Kind::Int64);
+    EXPECT_EQ(root.int64_value, std::numeric_limits<int64_t>::min());
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Document why static_cast<int64_t> is wrong (the bug we're fixing)
 // ═══════════════════════════════════════════════════════════════════════════════

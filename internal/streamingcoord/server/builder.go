@@ -4,6 +4,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
+	"github.com/milvus-io/milvus/internal/metastore/kv/streamingnode"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/service"
 	"github.com/milvus-io/milvus/internal/types"
@@ -48,6 +49,7 @@ func (s *ServerBuilder) Build() *Server {
 	resource.Init(
 		resource.OptETCD(s.etcdClient),
 		resource.OptStreamingCatalog(streamingcoord.NewCataLog(s.metaKV)),
+		resource.OptStreamingNodeCatalog(streamingnode.NewCataLog(s.metaKV)),
 		resource.OptMixCoordClient(s.mixCoordClient),
 		resource.OptSession(s.session),
 	)

@@ -152,6 +152,44 @@ func (t *sortCompactionTask) preCompact() error {
 	return nil
 }
 
+// logIfParallelReadIgnored reports that the parallel chunk read option cannot
+// take effect for this sort input. Only sort compaction sets the option, and a
+// segment read through a manifest or through the StorageV1 reader ignores it:
+// the input is read serially and nothing else surfaces the no-op at runtime.
+//
+// The level depends on where the concurrency came from. Asked for by an
+// operator and then dropped on the floor is worth a warning. Derived from the
+// CPU count -- what every unconfigured DataNode gets, since the default
+// resolves to at least 2 on any multi-core machine -- is not: a cluster that
+// never opted into parallel reads would otherwise log a warning per sorted
+// manifest or StorageV1 segment, implying a misconfiguration that does not
+// exist.
+func logIfParallelReadIgnored(ctx context.Context, log *mlog.Logger, segmentID int64, storageVersion int64, manifest string, concurrency int, configured bool) {
+	if concurrency <= 1 {
+		return
+	}
+	var reason string
+	switch {
+	case manifest != "":
+		reason = "the segment is read through a manifest"
+	case storageVersion == storage.StorageV1:
+		reason = "the segment uses StorageV1 binlogs"
+	default:
+		return
+	}
+	const msg = "sort read in parallel is ignored: input is read serially"
+	fields := []mlog.Field{
+		mlog.Int64("segmentID", segmentID),
+		mlog.String("reason", reason),
+		mlog.Int("concurrency", concurrency),
+	}
+	if !configured {
+		log.Info(ctx, msg, fields...)
+		return
+	}
+	log.Warn(ctx, msg, fields...)
+}
+
 func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.CompactionPlanResult, error) {
 	log := mlog.With(
 		mlog.Int64("planID", t.plan.GetPlanID()),
@@ -181,6 +219,19 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 		storage.WithUseLoonFFI(t.useLoonFFI),
 		storage.WithWriterFormat(t.compactionParams.GetStorageFormat()),
+	}
+	if t.lobContext != nil && t.lobContext.ShouldRewriteAnyField() {
+		lobBasePath := storage.SegmentPartitionBasePath(
+			t.compactionParams.StorageConfig.GetRootPath(), t.collectionID, t.partitionID)
+		textColumnConfigs := t.lobContext.GetTextColumnConfigs(
+			lobBasePath,
+			t.compactionParams.TextInlineThreshold,
+			t.compactionParams.TextMaxLobFileBytes,
+			t.compactionParams.TextFlushThresholdBytes,
+		)
+		if len(textColumnConfigs) > 0 {
+			writerOpts = append(writerOpts, storage.WithTextColumnConfigs(textColumnConfigs))
+		}
 	}
 	if t.lobContext != nil && t.lobContext.HasReuseAllFields() {
 		writerOpts = append(writerOpts, storage.WithTextRefsAsBinary())
@@ -249,11 +300,30 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	}
 
 	phaseStart = time.Now()
-	rr, existingFields, err := newCompactionSegmentRecordReader(ctx, t.plan.GetSegmentBinlogs()[0], t.plan.Schema, t.compactionParams.StorageConfig,
+	textDecodeConfigs, err := t.lobContext.GetSourceTextColumnConfigs(t.manifest)
+	if err != nil {
+		srw.Close()
+		return nil, err
+	}
+	sortReadConcurrency := paramtable.Get().DataNodeCfg.SortReadConcurrency.GetAsInt()
+	parallelRead := storage.ParallelChunkRead{
+		Concurrency: sortReadConcurrency,
+		BufferSize:  paramtable.Get().DataNodeCfg.SortReadBufferSize.GetAsSize(),
+	}
+	logIfParallelReadIgnored(ctx, log, t.segmentID, t.segmentStorageVersion, t.manifest, sortReadConcurrency,
+		paramtable.Get().DataNodeCfg.SortReadConcurrency.IsSetByUser())
+	rr, existingFields, err := newTextDecodedCompactionSegmentRecordReader(ctx, t.plan.GetSegmentBinlogs()[0], t.plan.Schema, t.compactionParams.StorageConfig, textDecodeConfigs,
 		storage.WithVersion(t.segmentStorageVersion),
 		storage.WithDownloader(t.binlogIO.Download),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 		storage.WithCollectionID(t.collectionID),
+		// The sort below keeps every decoded input record until it has written
+		// its output, so decoding chunks ahead of it adds nothing to the peak;
+		// readers that stream their input must not do this. What reading ahead
+		// does add is the raw bytes of the rounds in flight: one round per
+		// chunk being read, each never larger than its chunk, so at most
+		// sortReadConcurrency * sortReadBufferSize.
+		storage.WithParallelChunkRead(parallelRead),
 	)
 	if err != nil {
 		log.Warn(ctx, "error creating insert binlog reader", mlog.Err(err))
@@ -353,6 +423,8 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		mlog.Duration("initReaderCost", initReaderCost),
 		mlog.Int("sortBatches", sortTimings.NumBatches),
 		mlog.Duration("sortReadCost", sortTimings.ReadCost),
+		mlog.Duration("sortFetchCost", sortTimings.FetchCost),
+		mlog.Duration("sortFilterCost", sortTimings.ReadCost-sortTimings.FetchCost),
 		mlog.Duration("sortSortCost", sortTimings.SortCost),
 		mlog.Duration("sortWriteCost", sortTimings.WriteCost),
 		mlog.Duration("flushCost", flushCost),
@@ -563,9 +635,9 @@ func (t *sortCompactionTask) createTextIndex(ctx context.Context,
 }
 
 // initLOBCompactionContext initializes the LOB compaction context for TEXT columns.
-// For sort compaction, data is reordered but not redistributed, so TEXT columns
-// use REUSE_ALL strategy (LOB references remain valid after reordering).
-// The LOB file references need to be copied to the output segment's manifest.
+// Sort compaction normally reuses TEXT references because data is reordered but
+// not redistributed. If the output uses a different partition base, references
+// must instead be rewritten because they do not encode their source namespace.
 func (t *sortCompactionTask) initLOBCompactionContext(ctx context.Context) error {
 	// check if there are TEXT fields in schema
 	textFieldIDs := compaction.GetTEXTFieldIDsFromSchema(t.plan.GetSchema())
@@ -616,12 +688,28 @@ func (t *sortCompactionTask) initLOBCompactionContext(ctx context.Context) error
 
 	// compute strategies (will use forced REUSE_ALL for all TEXT fields)
 	t.lobContext.ComputeStrategies(textFieldIDs, t.compactionParams.LOBHoleRatioThreshold)
+	outputPartitionBase := storage.SegmentPartitionBasePath(
+		t.compactionParams.StorageConfig.GetRootPath(), t.collectionID, t.partitionID)
+	partitionBaseMismatch, err := compaction.LOBSourcePartitionBaseMismatch(sourceManifests, outputPartitionBase)
+	if err != nil {
+		return err
+	}
+	if partitionBaseMismatch {
+		t.lobContext.ForceRewriteAllAcrossPartitionBases(textFieldIDs)
+		log.Info(ctx, "forcing TEXT LOB rewrite across partition namespaces",
+			mlog.String("outputPartitionBase", outputPartitionBase))
+	}
 
 	// log strategy decisions
 	for fieldID, decision := range t.lobContext.Decisions {
 		log.Info(ctx, "LOB compaction strategy decided",
 			mlog.FieldFieldID(fieldID),
-			mlog.String("strategy", "REUSE_ALL"),
+			mlog.String("strategy", func() string {
+				if decision.Strategy == compaction.LOBStrategyRewriteAll {
+					return "REWRITE_ALL"
+				}
+				return "REUSE_ALL"
+			}()),
 			mlog.Bool("isForced", t.lobContext.IsForced),
 			mlog.Float64("holeRatio", decision.OverallHoleRatio),
 		)

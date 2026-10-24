@@ -27,3 +27,11 @@ func IsSchemaChange(header *message.AlterCollectionMessageHeader) bool {
 	}
 	return false
 }
+
+// IsTimeTickConfirmBarrier checks whether a message type confirms all messages
+// whose timetick is not greater than the barrier timetick.
+func IsTimeTickConfirmBarrier(messageType message.MessageType) bool {
+	return messageType == message.MessageTypeTimeTick ||
+		messageType == message.MessageTypeMVCCBarrier ||
+		messageType == message.MessageTypeRecoveryBarrier
+}

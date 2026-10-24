@@ -196,8 +196,22 @@ type FieldData interface {
 	GetValidData() []bool
 }
 
+// NewFieldData creates an empty FieldData whose cap is expressed in rows;
+// vector columns scale it by their per-row element count, except nullable
+// columns, which reserve only cap: a nullable column missing from the source
+// only appends ValidData (see AppendNullableDefaultFieldsData), so a
+// dim-scaled Data reservation would stay invisible to GetMemorySize and never
+// trigger spill.
 func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema, cap int) (FieldData, error) {
 	typeParams := fieldSchema.GetTypeParams()
+	// nullableDataCap keeps the master row-count reservation for nullable
+	// vector columns; non-nullable columns keep the dim-scaled reservation.
+	nullableDataCap := func(scaled int) int {
+		if fieldSchema.GetNullable() {
+			return cap
+		}
+		return scaled
+	}
 	switch dataType {
 	case schemapb.DataType_Float16Vector:
 		dim, err := GetDimFromParams(typeParams)
@@ -205,7 +219,7 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 			return nil, err
 		}
 		data := &Float16VectorFieldData{
-			Data:     make([]byte, 0, cap),
+			Data:     make([]byte, 0, nullableDataCap(cap*dim*2)),
 			Dim:      dim,
 			Nullable: fieldSchema.GetNullable(),
 		}
@@ -219,7 +233,7 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 			return nil, err
 		}
 		data := &BFloat16VectorFieldData{
-			Data:     make([]byte, 0, cap),
+			Data:     make([]byte, 0, nullableDataCap(cap*dim*2)),
 			Dim:      dim,
 			Nullable: fieldSchema.GetNullable(),
 		}
@@ -233,7 +247,7 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 			return nil, err
 		}
 		data := &FloatVectorFieldData{
-			Data:     make([]float32, 0, cap),
+			Data:     make([]float32, 0, nullableDataCap(cap*dim)),
 			Dim:      dim,
 			Nullable: fieldSchema.GetNullable(),
 		}
@@ -247,7 +261,7 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 			return nil, err
 		}
 		data := &BinaryVectorFieldData{
-			Data:     make([]byte, 0, cap),
+			Data:     make([]byte, 0, nullableDataCap(cap*dim/8)),
 			Dim:      dim,
 			Nullable: fieldSchema.GetNullable(),
 		}
@@ -269,7 +283,7 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 			return nil, err
 		}
 		data := &Int8VectorFieldData{
-			Data:     make([]int8, 0, cap),
+			Data:     make([]int8, 0, nullableDataCap(cap*dim)),
 			Dim:      dim,
 			Nullable: fieldSchema.GetNullable(),
 		}
@@ -375,9 +389,10 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 		return data, nil
 	case schemapb.DataType_Array:
 		data := &ArrayFieldData{
-			Data:        make([]*schemapb.ScalarField, 0, cap),
-			ElementType: fieldSchema.GetElementType(),
-			Nullable:    fieldSchema.GetNullable(),
+			Data:            make([]*schemapb.ScalarField, 0, cap),
+			ElementType:     fieldSchema.GetElementType(),
+			Nullable:        fieldSchema.GetNullable(),
+			ElementNullable: fieldSchema.GetElementNullable(),
 		}
 		if fieldSchema.GetNullable() {
 			data.ValidData = make([]bool, 0, cap)
@@ -399,10 +414,11 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 			return nil, err
 		}
 		data := &VectorArrayFieldData{
-			Dim:         int64(dim),
-			Data:        make([]*schemapb.VectorField, 0, cap),
-			ElementType: fieldSchema.GetElementType(),
-			Nullable:    fieldSchema.GetNullable(),
+			Dim:             int64(dim),
+			Data:            make([]*schemapb.VectorField, 0, cap),
+			ElementType:     fieldSchema.GetElementType(),
+			Nullable:        fieldSchema.GetNullable(),
+			ElementNullable: fieldSchema.GetElementNullable(),
 		}
 		if fieldSchema.GetNullable() {
 			data.ValidData = make([]bool, 0, cap)
@@ -455,10 +471,11 @@ type StringFieldData struct {
 	Nullable  bool
 }
 type ArrayFieldData struct {
-	ElementType schemapb.DataType
-	Data        []*schemapb.ScalarField
-	ValidData   []bool
-	Nullable    bool
+	ElementType     schemapb.DataType
+	Data            []*schemapb.ScalarField
+	ValidData       []bool
+	Nullable        bool
+	ElementNullable bool
 }
 type JSONFieldData struct {
 	Data      [][]byte
@@ -582,11 +599,12 @@ type Int8VectorFieldData struct {
 }
 
 type VectorArrayFieldData struct {
-	Dim         int64
-	ElementType schemapb.DataType
-	Data        []*schemapb.VectorField
-	ValidData   []bool
-	Nullable    bool
+	Dim             int64
+	ElementType     schemapb.DataType
+	Data            []*schemapb.VectorField
+	ValidData       []bool
+	Nullable        bool
+	ElementNullable bool
 }
 
 func emptyPerRowVectorField(dim int64, elementType schemapb.DataType) *schemapb.VectorField {
@@ -676,9 +694,7 @@ func (data *Int8VectorFieldData) RowNum() int {
 	return len(data.Data) / data.Dim
 }
 
-func (data *VectorArrayFieldData) RowNum() int {
-	return len(data.Data)
-}
+func (data *VectorArrayFieldData) RowNum() int { return len(data.Data) }
 
 // GetRow implements FieldData.GetRow
 func (data *BoolFieldData) GetRow(i int) any {
@@ -1014,18 +1030,20 @@ func (data *StringFieldData) AppendRow(row interface{}) error {
 
 func (data *ArrayFieldData) AppendRow(row interface{}) error {
 	if data.GetNullable() && row == nil {
-		data.Data = append(data.Data, make([]*schemapb.ScalarField, 1)...)
+		data.Data = append(data.Data, nil)
 		data.ValidData = append(data.ValidData, false)
 		return nil
 	}
+
 	v, ok := row.(*schemapb.ScalarField)
 	if !ok {
 		return merr.WrapErrParameterInvalid("*schemapb.ScalarField", row, "Wrong row type")
 	}
+	data.Data = append(data.Data, v)
+
 	if data.GetNullable() {
 		data.ValidData = append(data.ValidData, true)
 	}
-	data.Data = append(data.Data, v)
 	return nil
 }
 
@@ -1187,11 +1205,13 @@ func (data *VectorArrayFieldData) AppendRow(row interface{}) error {
 		data.ValidData = append(data.ValidData, false)
 		return nil
 	}
+
 	v, ok := row.(*schemapb.VectorField)
 	if !ok {
 		return merr.WrapErrParameterInvalid("*schemapb.VectorField", row, "Wrong row type")
 	}
 	data.Data = append(data.Data, v)
+
 	if data.GetNullable() {
 		data.ValidData = append(data.ValidData, true)
 	}
@@ -1942,6 +1962,9 @@ func (data *Int8VectorFieldData) GetMemorySize() int {
 }
 
 func GetVectorSize(vector *schemapb.VectorField, vectorType schemapb.DataType) int {
+	if vector == nil {
+		return 0
+	}
 	size := 0
 	switch vectorType {
 	case schemapb.DataType_BinaryVector:
@@ -1966,8 +1989,10 @@ func (data *VectorArrayFieldData) GetMemorySize() int {
 	var size int
 	for _, val := range data.Data {
 		size += GetVectorSize(val, data.ElementType)
+		size += binary.Size(typeutil.GetVectorArrayElementValidData(val))
 	}
-	size += binary.Size(data.ValidData) + 1
+	size += binary.Size(data.ValidData) + binary.Size(data.Nullable)
+	size += binary.Size(data.ElementNullable)
 	return size
 }
 
@@ -1984,7 +2009,10 @@ func (data *TimestamptzFieldData) GetDataType() schemapb.DataType {
 }
 func (data *StringFieldData) GetDataType() schemapb.DataType { return data.DataType }
 func (data *ArrayFieldData) GetDataType() schemapb.DataType  { return schemapb.DataType_Array }
-func (data *JSONFieldData) GetDataType() schemapb.DataType   { return schemapb.DataType_JSON }
+func (data *ArrayFieldData) GetElementType() schemapb.DataType {
+	return data.ElementType
+}
+func (data *JSONFieldData) GetDataType() schemapb.DataType { return schemapb.DataType_JSON }
 func (data *GeometryFieldData) GetDataType() schemapb.DataType {
 	return schemapb.DataType_Geometry
 }
@@ -2070,8 +2098,11 @@ func (data *ArrayFieldData) GetMemorySize() int {
 	var size int
 	for _, val := range data.Data {
 		size += getArrayScalarFieldMemorySize(val, data.ElementType)
+		size += binary.Size(typeutil.GetArrayElementValidData(val))
 	}
-	return size + binary.Size(data.ValidData) + binary.Size(data.Nullable)
+	size += binary.Size(data.ValidData) + binary.Size(data.Nullable)
+	size += binary.Size(data.ElementNullable)
+	return size
 }
 
 func (data *JSONFieldData) GetMemorySize() int {
@@ -2216,12 +2247,20 @@ func (data *ArrayFieldData) GetNullable() bool {
 	return data.Nullable
 }
 
+func (data *ArrayFieldData) GetElementNullable() bool {
+	return data.ElementNullable
+}
+
 func (data *JSONFieldData) GetNullable() bool {
 	return data.Nullable
 }
 
 func (data *VectorArrayFieldData) GetNullable() bool {
 	return data.Nullable
+}
+
+func (data *VectorArrayFieldData) GetElementNullable() bool {
+	return data.ElementNullable
 }
 
 func (data *GeometryFieldData) GetNullable() bool {

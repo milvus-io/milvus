@@ -41,17 +41,20 @@ func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 }
 
 // RateLimitInterceptorWithMetaCache returns a new unary server interceptor that performs
-// request rate limiting. getMetaCache is resolved per request so the interceptor observes
+// request rate limiting. GetMetaCache is resolved per request so the interceptor observes
 // the meta cache initialized by the proxy after startup instead of a construction-time snapshot.
-func RateLimitInterceptorWithMetaCache(getMetaCache func() Cache, limiter types.Limiter) grpc.UnaryServerInterceptor {
+func RateLimitInterceptorWithMetaCache(GetMetaCache func() Cache, limiter types.Limiter) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		request, ok := req.(proto.Message)
 		if !ok {
 			return nil, merr.WrapErrParameterInvalidMsg("wrong req format when check limiter")
 		}
-		dbID, collectionIDToPartIDs, rt, n, err := GetRequestInfo(ctx, getMetaCache(), request)
+		dbID, collectionIDToPartIDs, rt, n, err := GetRequestInfo(ctx, GetMetaCache(), request)
 		if err != nil {
 			mlog.Warn(context.TODO(), "failed to get request info", mlog.Err(err))
+			return handler(ctx, req)
+		}
+		if n == 0 {
 			return handler(ctx, req)
 		}
 		if rt == internalpb.RateType_DMLBulkLoad {
@@ -201,14 +204,6 @@ func getCollectionID(metaCache Cache, r reqCollName) (int64, map[int64][]int64) 
 	}
 	collectionID, _ := metaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
 	return db.DBID, map[int64][]int64{collectionID: {}}
-}
-
-func getDatabaseID(metaCache Cache, dbName string) int64 {
-	db, _ := metaCache.GetDatabaseInfo(context.TODO(), dbName)
-	if db == nil {
-		return util.InvalidDBID
-	}
-	return db.DBID
 }
 
 // failedMutationResult returns failed mutation result.

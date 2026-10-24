@@ -36,8 +36,8 @@
 #include "glog/logging.h"
 #include "index/SkipIndex.h"
 #include "monitor/Monitor.h"
-#include "index/json_stats/JsonKeyStats.h"
-#include "index/json_stats/utils.h"
+#include "segcore/json_stats/JsonKeyStats.h"
+#include "segcore/json_stats/utils.h"
 #include "log/Log.h"
 #include "opentelemetry/trace/span.h"
 #include "query/Utils.h"
@@ -55,8 +55,7 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     WaitPrefetch();
     tracer::AutoSpan span(
         "PhyBinaryRangeFilterExpr::Eval", tracer::GetRootSpan(), true);
-    span.GetSpan()->SetAttribute("data_type",
-                                 static_cast<int>(expr_->column_.data_type_));
+    span.SetAttribute("data_type", static_cast<int>(expr_->column_.data_type_));
 
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
@@ -106,8 +105,7 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::JSON: {
-            span.GetSpan()->SetAttribute("json_filter_expr_type",
-                                         "binary_range");
+            span.SetAttribute("json_filter_expr_type", "binary_range");
             auto lower_type = expr_->lower_val_.val_case();
             auto upper_type = expr_->upper_val_.val_case();
             // For numeric types, if either bound is float, use double for both.
@@ -407,7 +405,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex(OffsetVector* input) {
     typedef std::
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
-    using Index = index::ScalarIndex<IndexInnerType>;
+    using ReaderType = index_value_t<T>;
     typedef std::conditional_t<std::is_integral_v<IndexInnerType> &&
                                    !std::is_same_v<bool, T>,
                                int64_t,
@@ -437,27 +435,26 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex(OffsetVector* input) {
         return res;
     }
 
-    auto execute_sub_batch = [lower_inclusive, upper_inclusive](
-                                 Index* index_ptr,
-                                 HighPrecisionType val1,
-                                 HighPrecisionType val2) {
-        BinaryRangeIndexFunc<T> func;
-        return func(index_ptr, val1, val2, lower_inclusive, upper_inclusive);
-    };
+    auto execute_sub_batch =
+        [lower_inclusive, upper_inclusive](
+            const index::IScalarPredicateReader<ReaderType>* reader,
+            HighPrecisionType val1,
+            HighPrecisionType val2) {
+            BinaryRangeIndexFunc<T> func;
+            return func(reader, val1, val2, lower_inclusive, upper_inclusive);
+        };
     if (input != nullptr) {
         if (PinnedJsonIndexIsFlat()) {
             return ProcessIndexChunksAndGatherByOffsets<T>(
                 execute_sub_batch, *input, val1, val2);
         }
         if (cached_result_ == nullptr) {
-            auto scalar_index =
-                dynamic_cast<const Index*>(pinned_index_[0].get());
-            AssertInfo(scalar_index != nullptr, "invalid scalar index type");
-            auto* index_ptr = const_cast<Index*>(scalar_index);
+            const auto* reader = PredicateReader<ReaderType>();
+            AssertInfo(reader != nullptr, "invalid scalar predicate type");
             cached_result_ = std::make_shared<TargetBitmap>(
-                execute_sub_batch(index_ptr, val1, val2));
+                execute_sub_batch(reader, val1, val2));
             cached_valid_result_ = std::make_shared<TargetBitmap>(
-                GetCachedIndexValidBitmap(index_ptr).clone());
+                GetCachedIndexValidBitmap().clone());
             AssertInfo(
                 cached_result_->size() == static_cast<size_t>(active_count_),
                 "index range result size {} does not match row count {}",
@@ -595,23 +592,15 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData(EvalCtx& context) {
         processed_cursor += size;
     };
 
-    auto skip_index_func =
-        [op_ctx = op_ctx_, val1, val2, lower_inclusive, upper_inclusive](
-            const SkipIndex& skip_index, FieldId field_id, int64_t chunk_id) {
-            if (lower_inclusive && upper_inclusive) {
-                return skip_index.CanSkipBinaryRange<T>(
-                    op_ctx, field_id, chunk_id, val1, val2, true, true);
-            } else if (lower_inclusive && !upper_inclusive) {
-                return skip_index.CanSkipBinaryRange<T>(
-                    op_ctx, field_id, chunk_id, val1, val2, true, false);
-            } else if (!lower_inclusive && upper_inclusive) {
-                return skip_index.CanSkipBinaryRange<T>(
-                    op_ctx, field_id, chunk_id, val1, val2, false, true);
-            } else {
-                return skip_index.CanSkipBinaryRange<T>(
-                    op_ctx, field_id, chunk_id, val1, val2, false, false);
-            }
+    SkipChunkFn skip_index_func;
+    if (CanUseSkipFilter(is_nullable_, null_rejecting_)) {
+        skip_index_func = [val1, val2, lower_inclusive, upper_inclusive](
+                              const FieldSkipMetricsView& view,
+                              int64_t chunk_id) {
+            return view.CanSkipBinaryRange<T>(
+                chunk_id, val1, val2, lower_inclusive, upper_inclusive);
         };
+    }
     int64_t processed_size;
     if (has_offset_input_) {
         if (expr_->column_.element_level_) {
@@ -686,8 +675,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(EvalCtx& context) {
         upper_arg_.SetValue<ValueType>(expr_->upper_val_);
         arg_inited_ = true;
     }
-    ValueType val1 = lower_arg_.GetValue<ValueType>();
-    ValueType val2 = upper_arg_.GetValue<ValueType>();
+    const ValueType& val1 = lower_arg_.GetValue<ValueType>();
+    const ValueType& val2 = upper_arg_.GetValue<ValueType>();
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
     size_t processed_cursor = 0;
@@ -705,8 +694,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson(EvalCtx& context) {
             const int size,
             TargetBitmapView res,
             TargetBitmapView valid_res,
-            ValueType val1,
-            ValueType val2) {
+            const ValueType& val1,
+            const ValueType& val2) {
         // If data is nullptr, this chunk was skipped by SkipIndex.
         // We only need to update processed_cursor for bitmap_input indexing.
         if (data == nullptr) {
@@ -1038,8 +1027,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray(EvalCtx& context) {
         upper_arg_.SetValue<ValueType>(expr_->upper_val_);
         arg_inited_ = true;
     }
-    ValueType val1 = lower_arg_.GetValue<ValueType>();
-    ValueType val2 = upper_arg_.GetValue<ValueType>();
+    const ValueType& val1 = lower_arg_.GetValue<ValueType>();
+    const ValueType& val2 = upper_arg_.GetValue<ValueType>();
 
     int index = -1;
     if (expr_->column_.nested_path_.size() > 0) {
@@ -1056,8 +1045,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray(EvalCtx& context) {
             const int size,
             TargetBitmapView res,
             TargetBitmapView valid_res,
-            ValueType val1,
-            ValueType val2,
+            const ValueType& val1,
+            const ValueType& val2,
             int index) {
         AssertInfo(index >= 0,
                    "array element range predicate requires nested path");
@@ -1240,43 +1229,11 @@ PhyBinaryRangeFilterExpr::DetermineExecPath() {
         return;
     }
 
-    SegmentExpr::DetermineExecPath();
+    auto req = MakeIndexRequirement(RequiredReader::Predicate);
+    req.value_type = field_type_ == DataType::JSON ? value_type_ : data_type;
+    SelectAndPinIndex(req);
     if (exec_path_ != ExprExecPath::ScalarIndex) {
         return;
-    }
-
-    if (data_type == DataType::JSON &&
-        expr_->lower_val_.val_case() ==
-            proto::plan::GenericValue::ValCase::kStringVal) {
-        auto* index_ptr = dynamic_cast<const index::ScalarIndex<std::string>*>(
-            pinned_index_[0].get());
-        const auto supports_range =
-            index_ptr != nullptr &&
-            index_ptr->GetIndexType() != index::ScalarIndexType::NGRAM &&
-            SegmentExpr::CanUseIndexForOp<std::string>(
-                proto::plan::OpType::GreaterEqual) &&
-            SegmentExpr::CanUseIndexForOp<std::string>(
-                proto::plan::OpType::LessEqual);
-        if (!supports_range) {
-            exec_path_ = ExprExecPath::RawData;
-        }
-    }
-
-    // A binary range needs both one-sided range operations. String indexes can
-    // decline individual operations through ShouldUseOp; FMINDEX declines all
-    // lexicographic ranges and must fall back before its Range() overload is
-    // reached.
-    if (data_type == DataType::VARCHAR) {
-        const auto lower_op = expr_->lower_inclusive_
-                                  ? proto::plan::OpType::GreaterEqual
-                                  : proto::plan::OpType::GreaterThan;
-        const auto upper_op = expr_->upper_inclusive_
-                                  ? proto::plan::OpType::LessEqual
-                                  : proto::plan::OpType::LessThan;
-        if (!SegmentExpr::CanUseIndexForOp<std::string>(lower_op) ||
-            !SegmentExpr::CanUseIndexForOp<std::string>(upper_op)) {
-            exec_path_ = ExprExecPath::RawData;
-        }
     }
 }
 
@@ -1331,30 +1288,72 @@ PhyBinaryRangeFilterExpr::PrefetchRawData() {
 template <typename T>
 void
 PhyBinaryRangeFilterExpr::PrefetchRawData() {
+    if (!CanUseSkipFilter(is_nullable_, null_rejecting_)) {
+        SegmentExpr::PrefetchRawData(field_id_);
+        return;
+    }
     using U =
         std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T>;
     using H =
         std::conditional_t<std::is_integral_v<U> && !std::is_same_v<bool, T>,
                            int64_t,
                            U>;
-    H lower_val = GetValueWithCastNumber<H>(expr_->lower_val_);
-    H upper_val = GetValueWithCastNumber<H>(expr_->upper_val_);
-    auto skip_index = segment_->GetSkipIndex();
 
-    std::vector<int64_t> chunks_may_hit;
-    for (size_t i = RawDataPrefetchStartChunk(); i < num_data_chunk_; ++i) {
-        auto skip = skip_index->CanSkipBinaryRange(field_id_,
-                                                   i,
-                                                   lower_val,
-                                                   upper_val,
-                                                   expr_->lower_inclusive_,
-                                                   expr_->upper_inclusive_);
-        if (!skip) {
+    auto prefetch = [&](const auto& lower_val,
+                        const auto& upper_val,
+                        bool lower_inclusive,
+                        bool upper_inclusive) {
+        using ValueType = std::decay_t<decltype(lower_val)>;
+        std::vector<int64_t> chunks_may_hit;
+        for (size_t i = RawDataPrefetchStartChunk(); i < num_data_chunk_; ++i) {
+            auto skip = skip_view_.CanSkipBinaryRange<ValueType>(
+                i, lower_val, upper_val, lower_inclusive, upper_inclusive);
+            if (skip) {
+                continue;
+            }
             chunks_may_hit.push_back(i);
         }
-    }
+        segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);
+    };
 
-    segment_->prefetch_chunks(op_ctx_, field_id_, chunks_may_hit);
+    H lower_val = GetValueWithCastNumber<H>(expr_->lower_val_);
+    H upper_val = GetValueWithCastNumber<H>(expr_->upper_val_);
+    bool lower_inclusive = expr_->lower_inclusive_;
+    bool upper_inclusive = expr_->upper_inclusive_;
+    if constexpr (std::is_integral_v<U> && !std::is_same_v<bool, T>) {
+        // Skip metrics carry the field's physical type, so the literals must be
+        // narrowed before a bound can be matched against them. Resolve an
+        // out-of-range literal the way PreCheckOverflow<T> does instead of
+        // abandoning the pruning: a bound past the far end of T makes the range
+        // provably empty, and a bound past the near end constrains nothing on
+        // that side. The scan settles both cases and keeps pruning with the
+        // clamped bounds, so a prefetch that gave up here would fetch cells the
+        // scan has already proven it will never read.
+        if (query::gt_ub<T>(lower_val) || query::lt_lb<T>(upper_val)) {
+            // Provably empty: PreCheckOverflow answers the batch outright and
+            // reaches the column only to materialize validity, which
+            // ApplyFieldValidData skips for a non-nullable field and the
+            // element-level branch fills in without any read.
+            if (is_nullable_ && !expr_->column_.element_level_) {
+                SegmentExpr::PrefetchRawData(field_id_);
+            }
+            return;
+        }
+        if (query::lt_lb<T>(lower_val)) {
+            lower_val = std::numeric_limits<T>::min();
+            lower_inclusive = true;
+        }
+        if (query::gt_ub<T>(upper_val)) {
+            upper_val = std::numeric_limits<T>::max();
+            upper_inclusive = true;
+        }
+        prefetch(static_cast<T>(lower_val),
+                 static_cast<T>(upper_val),
+                 lower_inclusive,
+                 upper_inclusive);
+    } else {
+        prefetch(lower_val, upper_val, lower_inclusive, upper_inclusive);
+    }
 }
 }  // namespace exec
 }  // namespace milvus

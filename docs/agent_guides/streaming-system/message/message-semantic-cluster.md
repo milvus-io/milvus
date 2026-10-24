@@ -6,13 +6,13 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 
 | Message | Dispatch | ExclusiveRequired | ResourceKey |
 |---------|----------|-------------------|-------------|
-| FlushAll | Broadcast: all PChannels | Yes (all PChannels) | ExclusiveCluster |
+| FlushAll | Broadcast: all PChannels, Unreplicable (`_ur`) | Yes (all PChannels) | ExclusiveCluster |
 | AlterReplicateConfig | Broadcast: all PChannels | Yes (all PChannels) | ExclusiveCluster |
 | AlterWAL | Broadcast: all PChannels | Yes (all PChannels) | ExclusiveCluster |
-| AlterResourceGroup | Broadcast: CChannel | No | ExclusiveCluster |
-| DropResourceGroup | Broadcast: CChannel | No | ExclusiveCluster |
+| AlterResourceGroup | Broadcast: CChannel, Unreplicable (`_ur`) | No | ExclusiveCluster |
+| DropResourceGroup | Broadcast: CChannel, Unreplicable (`_ur`) | No | ExclusiveCluster |
 
-- **FlushAll**: Flushes ALL growing segments across ALL collections on ALL PChannels.
+- **FlushAll**: Issued through the unreplicable broadcast entrance on either replication role, affecting only the receiving cluster. Waits at each PChannel for its current replicated transaction and precedes subsequent transactions (see [Local Flush Control](../wal/local-flush.md)). Flushes ALL growing segments and required L0 Delete output across ALL collections on ALL PChannels. Uses AckSyncUp; the RPC waits for consuming-side completion on every PChannel. Follow-up GetFlushAllState returns true without polling channel checkpoints.
 - **AlterReplicateConfig**: Changes replication topology — enabling, disabling, or switching PRIMARY/SECONDARY roles.
 - **AlterWAL**: Switches WAL backend implementation across the entire cluster.
 - **AlterResourceGroup**: Creates, updates, or transfers nodes between query resource groups.
@@ -21,4 +21,4 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 ## Key Invariants
 
 - FlushAll, AlterReplicateConfig, AlterWAL act as **global barriers**: no other messages can be in flight on any PChannel.
-- AlterResourceGroup, DropResourceGroup are serialized via ExclusiveCluster but are CChannel-only (no PChannel-level exclusive lock).
+- AlterResourceGroup, DropResourceGroup are serialized via ExclusiveCluster but are CChannel-only (no PChannel-level exclusive lock). Resource groups describe the nodes of one cluster, so these messages are issued through `StartUnreplicableBroadcastWithResourceKeys` on any replicate role, written to the local WAL, and never replicated.

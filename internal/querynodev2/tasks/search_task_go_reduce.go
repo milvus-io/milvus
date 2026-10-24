@@ -33,8 +33,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/resource"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
@@ -134,17 +134,17 @@ func (t *SearchTask) buildReduceLayout(groupByOpts *groupByOptions, hasL1 bool) 
 }
 
 // exportSearchResultsAsArrow exports per-segment SearchResults as Arrow DataFrames
-// via the Arrow C Stream Interface (one RecordBatch per NQ).
+// via the Arrow C Data Interface (one RecordBatch per segment).
 // Each DataFrame contains $id, $score, $seg_offset columns, optional $group_by
 // and $element_indices columns, plus any extra fields, with one chunk per NQ
 // query. Arrow field metadata is preserved so group-by and extra fields keep
 // their Milvus field id, logical type, and nullability.
-// extraFieldIDs specifies additional fields to export (e.g., fields needed by L0 rerank).
+// inputPlan specifies logical scalar/JSON-path inputs needed by L0 rerank.
 // The caller is responsible for releasing the returned DataFrames.
 func (t *SearchTask) exportSearchResultsAsArrow(
 	results []*segments.SearchResult,
 	plan *segcore.SearchPlan,
-	extraFieldIDs []int64,
+	inputPlan *chain.DataFrameInputPlan,
 ) (segDFs []*chain.DataFrame, retErr error) {
 	segDFs = make([]*chain.DataFrame, len(results))
 	defer func() {
@@ -157,8 +157,13 @@ func (t *SearchTask) exportSearchResultsAsArrow(
 		}
 	}()
 
+	inputPlanBlob, err := segcore.MarshalFunctionChainInputPlan(inputPlan)
+	if err != nil {
+		return nil, err
+	}
+
 	exportOne := func(ctx context.Context, idx int, result *segments.SearchResult) error {
-		record, chunkSizes, err := segcore.ExportSearchResultAsArrowRecordBatch(ctx, result, plan, extraFieldIDs)
+		record, chunkSizes, err := segcore.ExportSearchResultAsArrowRecordBatchWithInputPlan(ctx, result, plan, inputPlanBlob)
 		if err != nil {
 			mlog.Warn(ctx, "failed to export search result as Arrow", mlog.Err(err))
 			return err
@@ -177,21 +182,47 @@ func (t *SearchTask) exportSearchResultsAsArrow(
 		if err := exportOne(t.ctx, 0, results[0]); err != nil {
 			return nil, err
 		}
-		return segDFs, nil
+	} else {
+		errGroup, groupCtx := errgroup.WithContext(t.ctx)
+		for i, res := range results {
+			idx := i
+			result := res
+			errGroup.Go(func() error {
+				return exportOne(groupCtx, idx, result)
+			})
+		}
+		if err := errGroup.Wait(); err != nil {
+			return segDFs, err
+		}
 	}
-
-	errGroup, groupCtx := errgroup.WithContext(t.ctx)
-	for i, res := range results {
-		idx := i
-		result := res
-		errGroup.Go(func() error {
-			return exportOne(groupCtx, idx, result)
-		})
-	}
-	if err := errGroup.Wait(); err != nil {
+	if err := validateL0InputDataFrames(segDFs, inputPlan); err != nil {
 		return segDFs, err
 	}
 	return segDFs, nil
+}
+
+func validateL0InputDataFrames(segDFs []*chain.DataFrame, inputPlan *chain.DataFrameInputPlan) error {
+	if inputPlan == nil || len(inputPlan.Inputs) == 0 {
+		return nil
+	}
+	var expectedSchema *arrow.Schema
+	for segmentIndex, df := range segDFs {
+		if df == nil {
+			return merr.WrapErrServiceInternalMsg("l0_rerank: segment dataframe %d is nil", segmentIndex)
+		}
+		if expectedSchema == nil {
+			expectedSchema = df.Schema()
+		} else if !expectedSchema.Equal(df.Schema()) {
+			return merr.WrapErrServiceInternalMsg("l0_rerank: segment dataframe %d has inconsistent Arrow schema", segmentIndex)
+		}
+
+		for _, input := range inputPlan.Inputs {
+			if err := chain.ValidateMaterializedInput(df, input); err != nil {
+				return merr.Wrapf(err, "l0_rerank: segment dataframe %d", segmentIndex)
+			}
+		}
+	}
+	return nil
 }
 
 func resolveGroupByOptions(segDFs []*chain.DataFrame, results []*segments.SearchResult) *groupByOptions {
@@ -306,7 +337,12 @@ func resolveGroupSizeFromMetadata(metadata []segcore.SearchResultMetadata) int64
 // proportionally to NQ. Must run AFTER every slice's Late Mat finishes —
 // FillOutputFieldsOrdered accumulates bytes on the C++ SearchResult, so
 // GetMetadata().StorageCost is only final after late mat completes.
-func (t *SearchTask) attributeStorageCost(results []*segments.SearchResult) {
+//
+// Every sub-task also gets the execution feature bits of the shared plan,
+// whole rather than split: a feature one merged request used is reported to
+// each. A cold read is added from the total before the split, since the
+// split rounds a small byte count down to zero.
+func (t *SearchTask) attributeStorageCost(results []*segments.SearchResult, featureBits uint64) {
 	var totalNq int64
 	for _, n := range t.originNqs {
 		totalNq += n
@@ -320,11 +356,13 @@ func (t *SearchTask) attributeStorageCost(results []*segments.SearchResult) {
 		totalCost.ScannedRemoteBytes += c.ScannedRemoteBytes
 		totalCost.ScannedTotalBytes += c.ScannedTotalBytes
 	}
+	featureBits |= segments.ColdReadFeatureBit(totalCost.ScannedRemoteBytes)
 	for i, sliceNq := range t.originNqs {
 		task := t.subTaskAt(i)
 		ratio := float64(sliceNq) / float64(totalNq)
 		task.result.ScannedRemoteBytes = int64(float64(totalCost.ScannedRemoteBytes) * ratio)
 		task.result.ScannedTotalBytes = int64(float64(totalCost.ScannedTotalBytes) * ratio)
+		task.result.FeatureBits = featureBits
 	}
 }
 
@@ -442,9 +480,8 @@ func lateMaterializeOutputFields(
 	}
 
 	var fieldResult schemapb.SearchResultData
-	// fastpb: wire-equivalent fast decoder for the late-materialize output-fields
-	// hot path (~2x varchar / ~6x vector vs proto.Unmarshal).
-	if err := fastpb.UnmarshalSearchResultData(protoBytes, &fieldResult); err != nil {
+	// Decode with the configured fast or standard protobuf decoder.
+	if err := resource.UnmarshalSearchResultData(protoBytes, &fieldResult); err != nil {
 		return err
 	}
 	searchResultData.FieldsData = fieldResult.FieldsData

@@ -20,6 +20,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
@@ -40,6 +42,45 @@ func floatVec(fieldID int64, name string, dim int64, data []float32) *schemapb.F
 			Dim:  dim,
 			Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: data}},
 		}},
+	}
+}
+
+func TestAppendFieldDataAfterLegacyAllNullVector(t *testing.T) {
+	for _, tc := range []struct {
+		dataType schemapb.DataType
+		vector   *schemapb.VectorField
+	}{
+		{schemapb.DataType_FloatVector, &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{7, 8}}}}},
+		{schemapb.DataType_BinaryVector, &schemapb.VectorField{Dim: 16, Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{7, 8}}}},
+		{schemapb.DataType_Float16Vector, &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{0, 7, 0, 8}}}},
+		{schemapb.DataType_BFloat16Vector, &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{7, 0, 8, 0}}}},
+		{schemapb.DataType_Int8Vector, &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{7, 8}}}},
+	} {
+		t.Run(tc.dataType.String(), func(t *testing.T) {
+			null := []*schemapb.FieldData{{
+				FieldId: 100, Type: tc.dataType,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{ValidData: []bool{false}}},
+			}}
+			src := []*schemapb.FieldData{{
+				FieldId: 100, Type: tc.dataType,
+				Field: &schemapb.FieldData_Vectors{Vectors: tc.vector},
+			}}
+			SetFieldDataValidData(src[0], []bool{true})
+			for _, dst := range [][]*schemapb.FieldData{PrepareResultFieldData(null, 3), make([]*schemapb.FieldData, 1)} {
+				AppendFieldData(dst, null, 0, -1)
+				AppendFieldData(dst, src, 0, 0)
+				AppendFieldData(dst, null, 0, -1)
+				require.Equal(t, tc.vector.GetDim(), dst[0].GetVectors().GetDim())
+				require.Equal(t, []bool{false, true, false}, GetFieldDataValidData(dst[0]))
+
+				// A second row copy, as in hybrid assembly, must retain the
+				// payload as well as the validity of the selected vector.
+				assembled := make([]*schemapb.FieldData, 1)
+				idxs := NewFieldDataIdxComputer(dst).Compute(1)
+				AppendFieldData(assembled, dst, 1, idxs...)
+				require.True(t, proto.Equal(src[0], assembled[0]), "expected %v, got %v", src[0], assembled[0])
+			}
+		})
 	}
 }
 

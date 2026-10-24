@@ -35,6 +35,9 @@ void
 SetLoadTransientBudgetBytes(int64_t bytes);
 
 void
+SetLoadAdmissionSlots(int64_t slots);
+
+void
 SetHighPriorityThreadCoreCoefficient(const float);
 
 void
@@ -94,26 +97,15 @@ SetExprResCacheEnable(bool val);
 void
 SetExprResCacheConfig(const char* mode,            // "memory" or "disk"
                       const char* disk_base_path,  // disk mode: file path
+                      int64_t materialization_max_bytes,
                       int64_t mem_max_bytes,
                       bool compression_enabled,
+                      bool mem_enable_growing,
                       int32_t admission_threshold,
                       int64_t mem_min_eval_duration_us,
                       int64_t disk_max_bytes,
                       int64_t disk_max_file_size,
                       int64_t disk_min_eval_duration_us);
-
-// Set the capacity of arrow's internal IO thread pool. This pool runs
-// async range reads (ReadRangeCache) that issue actual S3 GetObject
-// requests, so it's the true ceiling on parallel object-storage reads —
-// independent of the segcore HIGH/MIDDLE pools and aws-sdk-cpp's
-// ClientConfiguration::maxConnections. Arrow's built-in default is a
-// fixed constant (kDefaultNumIoThreads = 8 in arrow 17), which is almost
-// always the hidden bottleneck for retrieve/load workloads. The Go side
-// resolves common.arrow.ioThreadPoolCoefficient (× CPU cores, clamped by
-// common.arrow.ioThreadPoolMaxCapacity) into a final thread count and
-// passes it here. Values <= 0 are ignored (keep the current capacity).
-void
-SetArrowIOThreadPoolCapacity(int threads);
 
 void
 UpdateArrowIOThreadPoolMetrics();
@@ -122,6 +114,30 @@ UpdateArrowIOThreadPoolMetrics();
 // packed into cells so that rgs_per_cell * avg_row_group_size ≈ this value.
 void
 SetStorageV2CellTargetSizeBytes(int64_t bytes);
+
+// Updates the rollout default used by newly constructed manifest translators.
+CStatus
+SetStorageV2AsyncLoadEnabled(bool enabled);
+
+// Sets a positive async executor worker limit without creating an unused pool.
+// Resizes an existing pool in place; reports invalid values or resize failures.
+CStatus
+SetStorageV2AsyncLoadThreadPoolSize(int threads);
+
+// Returns the effective worker limit, including before first executor use.
+int
+GetStorageV2AsyncLoadThreadPoolSize();
+
+// Target estimated-byte threshold for one Storage V3 async read window.
+// The value must be positive; non-positive values restore the process default.
+// A window always contains at least one cell, so an oversized cell may exceed
+// the configured threshold.
+void
+SetStorageV2AsyncLoadReadWindowSizeBytes(int64_t bytes);
+
+// Returns the effective Storage V3 async read-window threshold in bytes.
+int64_t
+GetStorageV2AsyncLoadReadWindowSizeBytes();
 
 #ifdef __cplusplus
 };

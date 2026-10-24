@@ -23,6 +23,7 @@ import (
 	"slices"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -412,8 +413,10 @@ func TestMergeSort(t *testing.T) {
 }
 
 func TestMergeSortReturnsRecordBuilderAppendError(t *testing.T) {
-	textBuilder := array.NewStringBuilder(memory.DefaultAllocator)
-	textBuilder.Append("not-a-lob-ref")
+	// UTF8 is valid decoded TEXT. An integer column violates both supported
+	// TEXT representations and must still propagate the Append error.
+	textBuilder := array.NewInt64Builder(memory.DefaultAllocator)
+	textBuilder.Append(42)
 	textColumn := textBuilder.NewArray()
 	defer textColumn.Release()
 	textBuilder.Release()
@@ -427,7 +430,7 @@ func TestMergeSortReturnsRecordBuilderAppendError(t *testing.T) {
 	rec := NewSimpleArrowRecord(array.NewRecord(
 		arrow.NewSchema([]arrow.Field{
 			{Name: "pk", Type: arrow.PrimitiveTypes.Int64},
-			{Name: "text", Type: arrow.BinaryTypes.String},
+			{Name: "text", Type: arrow.PrimitiveTypes.Int64},
 		}, nil),
 		[]arrow.Array{pkColumn, textColumn},
 		1,
@@ -839,4 +842,46 @@ func TestMergeSortUnsortedInputReportsOffendingReader(t *testing.T) {
 	assert.ErrorContains(t, err, "not sorted by the merge key")
 	assert.ErrorIs(t, err, merr.ErrDataIntegrity)
 	assert.ErrorContains(t, err, "reader 1 record 1 row 1 out of order")
+}
+
+// slowRecordReader delays every Next(), standing in for a reader waiting on
+// object storage.
+type slowRecordReader struct {
+	inner RecordReader
+	delay time.Duration
+}
+
+func (r *slowRecordReader) Next() (Record, error) {
+	time.Sleep(r.delay)
+	return r.inner.Next()
+}
+
+func (r *slowRecordReader) Close() error { return r.inner.Close() }
+
+// TestSortTimingsSplitsFetchFromFilter pins that the read phase reports how
+// much of itself was spent waiting for input. A read that is slow because of
+// object storage and one that is slow because of the per-row predicate look
+// identical in ReadCost alone, and only the first is worth more read
+// concurrency.
+func TestSortTimingsSplitsFetchFromFilter(t *testing.T) {
+	const delay = 20 * time.Millisecond
+	blobs, err := generateTestDataWithSeed(10, 3)
+	assert.NoError(t, err)
+	inner := newIterativeCompositeBinlogRecordReader(generateTestSchema(), nil, MakeBlobsReader(blobs))
+	rw := &MockRecordWriter{
+		writefn: func(r Record) error { return nil },
+		closefn: func() error { return nil },
+	}
+
+	_, timings, err := Sort(64*1024*1024, generateTestSchema(),
+		[]RecordReader{&slowRecordReader{inner: inner, delay: delay}}, rw,
+		func(r Record, ri, i int) bool { return true }, []int64{common.RowIDField})
+	assert.NoError(t, err)
+	assert.NotNil(t, timings)
+
+	// Each record costs one delayed Next(), plus one more to report EOF.
+	assert.GreaterOrEqual(t, timings.FetchCost, time.Duration(timings.NumBatches+1)*delay,
+		"time spent inside Next() must be reported as fetch cost")
+	assert.LessOrEqual(t, timings.FetchCost, timings.ReadCost,
+		"fetch cost is part of read cost, never more")
 }

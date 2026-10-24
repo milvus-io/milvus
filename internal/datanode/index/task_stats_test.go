@@ -35,9 +35,11 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/cgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -376,6 +378,195 @@ func (s *TaskStatsSuite) TestJSONKeyStatsPropagatesPluginContext() {
 	s.Require().NoError(err)
 	s.Require().NotNil(captured)
 	s.Equal(pluginContext, captured.GetStoragePluginContext())
+}
+
+type manifestStatsTextIndex struct{ statsFakeTextIndex }
+
+func (manifestStatsTextIndex) UpLoad() (*cgopb.IndexStats, error) {
+	return &cgopb.IndexStats{SerializedIndexInfos: []*cgopb.SerializedIndexFileInfo{
+		{FileName: "milvus_packed_inverted_index.v3", FileSize: 10},
+	}}, nil
+}
+
+// TestStandaloneJSONKeyJobNegotiatesManifestCommit verifies the worker side of the
+// request capability: only an opted-in JsonKeyIndexJob ships raw stats and
+// leaves the manifest pointer at its base (DataCoord runs the manifest
+// transaction), while the Sort sub-job still bakes stats into the target-segment
+// manifest inline.
+func TestStandaloneJSONKeyJobNegotiatesManifestCommit(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	const (
+		clusterID = "c1"
+		taskID    = int64(1)
+		fieldID   = int64(500)
+	)
+	run := func(sub indexpb.StatsSubJob, enableDelta, failCommit bool) {
+		cfg := &indexpb.StorageConfig{RootPath: t.TempDir(), StorageType: "local"}
+		basePath := cfg.RootPath + "/insert_log/1/2/103"
+		baseManifest, err := packed.CreateManifestForSegment(basePath, []string{"100"}, "parquet",
+			[]packed.Fragment{{FilePath: basePath + "/source.parquet", EndRow: 10, RowCount: 10}}, cfg)
+		require.NoError(t, err)
+		mgr := NewTaskManager(ctx)
+		mgr.LoadOrStoreStatsTask(clusterID, taskID, &StatsTaskInfo{})
+		req := &workerpb.CreateStatsRequest{
+			EnableManifestDelta:    enableDelta,
+			ClusterID:              clusterID,
+			TaskID:                 taskID,
+			CollectionID:           1,
+			PartitionID:            2,
+			SegmentID:              103,
+			TargetSegmentID:        103,
+			TaskVersion:            1,
+			NumRows:                10,
+			StorageVersion:         storage.StorageV3,
+			SubJobType:             sub,
+			ManifestPath:           baseManifest,
+			EnableJsonKeyStats:     true,
+			JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion,
+			StorageConfig:          cfg,
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: fieldID, Name: "json", DataType: schemapb.DataType_JSON},
+			}},
+			InsertLogs: []*datapb.FieldBinlog{{FieldID: fieldID}},
+		}
+		st := NewStatsTask(ctx, nil, req, mgr, nil, nil)
+		// Execute() seeds manifestPath from the request; call the sub-job directly here.
+		st.manifestPath = baseManifest
+
+		buildMock := mockey.Mock(indexcgowrapper.CreateJSONKeyStats).To(
+			func(_ context.Context, _ *indexcgopb.BuildIndexInfo) (*indexcgowrapper.JSONKeyStatsResult, error) {
+				return &indexcgowrapper.JSONKeyStatsResult{MemSize: 10, Files: map[string]int64{"json-stats": 10}}, nil
+			}).Build()
+		defer buildMock.UnPatch()
+		commitErr := errors.New("injected manifest commit failure")
+		if failCommit {
+			patch := mockey.Mock(packed.AddStatsToManifest).Return("", commitErr).Build()
+			defer patch.UnPatch()
+		}
+
+		err = st.createJSONKeyStats(ctx, st.req.GetStorageConfig(), 1, 2, 103, 1, taskID,
+			common.JSONStatsDataFormatVersion, st.req.GetInsertLogs(), 256, 0.3, 81920)
+		if failCommit {
+			require.ErrorIs(t, err, commitErr)
+			require.Equal(t, baseManifest, st.manifestPath)
+			require.Empty(t, mgr.GetStatsTaskInfo(clusterID, taskID).Manifest,
+				"failed manifest commits must not publish a successful worker result")
+			return
+		}
+		require.NoError(t, err)
+		info := mgr.GetStatsTaskInfo(clusterID, taskID)
+		require.Equal(t, baseManifest, info.BaseManifest)
+		require.NotEmpty(t, info.JSONKeyStatsLogs[fieldID].GetFiles())
+		_, stats, err := packed.NewStatsResolver(info.Manifest, cfg).WithJSONKeyStats(info.JSONKeyStatsLogs).TextAndJSONIndexStats()
+		require.NoError(t, err)
+		if !enableDelta || sub == indexpb.StatsSubJob_Sort {
+			require.NotEqual(t, baseManifest, info.Manifest)
+			require.NotNil(t, stats[fieldID], "worker must commit stats for legacy requests and Sort")
+			require.Equal(t, taskID, stats[fieldID].GetBuildID())
+			require.Equal(t, info.JSONKeyStatsLogs[fieldID].GetFiles(), stats[fieldID].GetFiles())
+		} else {
+			require.Equal(t, baseManifest, info.Manifest)
+			require.Empty(t, stats, "opted-in standalone jobs leave the manifest commit to DataCoord")
+		}
+	}
+
+	for _, enableDelta := range []bool{false, true} {
+		run(indexpb.StatsSubJob_JsonKeyIndexJob, enableDelta, false)
+		run(indexpb.StatsSubJob_Sort, enableDelta, false)
+	}
+	run(indexpb.StatsSubJob_JsonKeyIndexJob, false, true)
+}
+
+// TestStandaloneTextIndexJobNegotiatesManifestCommit is the text-index analog of
+// TestStandaloneJSONKeyJobNegotiatesManifestCommit: a standalone TextIndexJob ships raw
+// stats without baking only when opted in; legacy requests and Sort bake inline.
+func TestStandaloneTextIndexJobNegotiatesManifestCommit(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	const (
+		clusterID = "c1"
+		taskID    = int64(1)
+		fieldID   = int64(101)
+	)
+	run := func(sub indexpb.StatsSubJob, enableDelta, failCommit bool) {
+		cfg := &indexpb.StorageConfig{RootPath: t.TempDir(), StorageType: "local"}
+		basePath := cfg.RootPath + "/insert_log/1/2/103"
+		baseManifest, err := packed.CreateManifestForSegment(basePath, []string{"100"}, "parquet",
+			[]packed.Fragment{{FilePath: basePath + "/source.parquet", EndRow: 10, RowCount: 10}}, cfg)
+		require.NoError(t, err)
+		mgr := NewTaskManager(ctx)
+		mgr.LoadOrStoreStatsTask(clusterID, taskID, &StatsTaskInfo{})
+		req := &workerpb.CreateStatsRequest{
+			EnableManifestDelta: enableDelta,
+			ClusterID:           clusterID,
+			TaskID:              taskID,
+			CollectionID:        1,
+			PartitionID:         2,
+			SegmentID:           103,
+			TargetSegmentID:     103,
+			TaskVersion:         1,
+			NumRows:             10,
+			StorageVersion:      storage.StorageV3,
+			SubJobType:          sub,
+			ManifestPath:        baseManifest,
+			StorageConfig:       cfg,
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:    fieldID,
+					Name:       "text",
+					DataType:   schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{{Key: "enable_match", Value: "true"}},
+				},
+			}},
+			InsertLogs: []*datapb.FieldBinlog{{FieldID: fieldID}},
+		}
+		st := NewStatsTask(ctx, nil, req, mgr, nil, nil)
+		st.manifestPath = baseManifest
+
+		buildMock := mockey.Mock(indexcgowrapper.CreateIndex).To(
+			func(_ context.Context, _ *indexcgopb.BuildIndexInfo) (indexcgowrapper.CodecIndex, error) {
+				return manifestStatsTextIndex{}, nil
+			}).Build()
+		defer buildMock.UnPatch()
+		commitErr := errors.New("injected manifest commit failure")
+		if failCommit {
+			patch := mockey.Mock(packed.AddStatsToManifest).Return("", commitErr).Build()
+			defer patch.UnPatch()
+		}
+
+		err = st.createTextIndex(ctx, st.req.GetStorageConfig(), 1, 2, 103, 1, taskID, st.req.GetInsertLogs())
+		if failCommit {
+			require.ErrorIs(t, err, commitErr)
+			require.Equal(t, baseManifest, st.manifestPath)
+			require.Empty(t, mgr.GetStatsTaskInfo(clusterID, taskID).Manifest,
+				"failed manifest commits must not publish a successful worker result")
+			return
+		}
+		require.NoError(t, err)
+		info := mgr.GetStatsTaskInfo(clusterID, taskID)
+		require.Equal(t, baseManifest, info.BaseManifest)
+		require.NotEmpty(t, info.TextStatsLogs[fieldID].GetFiles())
+		stats, _, err := packed.NewStatsResolver(info.Manifest, cfg).WithJSONKeyStats(info.JSONKeyStatsLogs).TextAndJSONIndexStats()
+		require.NoError(t, err)
+		if !enableDelta || sub == indexpb.StatsSubJob_Sort {
+			require.NotEqual(t, baseManifest, info.Manifest)
+			require.NotNil(t, stats[fieldID], "worker must commit stats for legacy requests and Sort")
+			require.Equal(t, taskID, stats[fieldID].GetBuildID())
+			require.NotEmpty(t, stats[fieldID].GetFiles())
+		} else {
+			require.Equal(t, baseManifest, info.Manifest)
+			require.Empty(t, stats, "opted-in standalone jobs leave the manifest commit to DataCoord")
+		}
+	}
+
+	for _, enableDelta := range []bool{false, true} {
+		run(indexpb.StatsSubJob_TextIndexJob, enableDelta, false)
+		run(indexpb.StatsSubJob_Sort, enableDelta, false)
+	}
+	run(indexpb.StatsSubJob_TextIndexJob, false, true)
 }
 
 func genCollectionSchemaWithBM25() *schemapb.CollectionSchema {

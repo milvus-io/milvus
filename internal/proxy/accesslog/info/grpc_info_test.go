@@ -80,6 +80,12 @@ func (s *GrpcAccessInfoSuite) SetupTest() {
 	}
 }
 
+func (s *GrpcAccessInfoSuite) TestMethodName() {
+	s.info.grpcInfo.FullMethod = "/milvus.proto.milvus.MilvusService/Search"
+	s.Equal("Search", s.info.MethodName())
+	s.Equal("Search", s.info.MethodNameForFormatter())
+}
+
 func (s *GrpcAccessInfoSuite) TestErrorCode() {
 	s.info.resp = &milvuspb.QueryResults{
 		Status: merr.Status(nil),

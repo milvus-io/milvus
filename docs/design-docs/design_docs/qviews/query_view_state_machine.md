@@ -15,10 +15,33 @@ Coord is the leader of the global state machine. It generates QueryViews, drives
 
 Persisted states: **Preparing**, **Up**, **Down**, **Unrecoverable** (write-ahead), **Dropped** (deletion).
 
+The Coord state machine exposes pending persistence and node-sync effects as one
+atomic `ConsumeFlush` result. Persist and sync values are independently
+latest-wins until consumed, so the manager cannot drain only one half of a
+transition and leave an inconsistent externalization boundary.
+
+Each state-machine instance is derived from one Collection-scoped DataVersion.
+The QueryView manager must own the corresponding `DataViewRef` from Preparing
+through Ready, Up, Down, Unrecoverable, and Dropping, and release it only after
+Dropped destroys the instance. On recovery, persisted QueryViews must reacquire
+their DataVersions before DataView snapshot GC is enabled.
+
+L0 compaction advances DataView compact_version (a Manifest-version change
+with no dedicated counter). It invalidates the current
+QueryView: the state machine generates a new QueryView at the latest
+DataVersion so the old Manifest revision can be released. The TransformLog
+start frontier remains a TODO pending the StreamingNode shard barrier
+described in
+[Transform Start-After TimeTick](transform_start_after_timetick.md). The
+scheduling policy is not implemented by the current DataView-only PR.
+
 ### 1.1 Preparing
 
 **Entry Conditions:**
-- Balancer generates a new view (triggers: DataView version change, balance request, QN online/offline, previous view becomes Unrecoverable, load config change such as LoadPartition/ReleasePartition).
+- Balancer generates a new view (hard triggers: StreamingVersion or
+  CompactVersion change - including L0 Manifest advances - balance request,
+  QN online/offline, previous view becomes Unrecoverable, or load config
+  changes such as LoadPartition/ReleasePartition).
 - Recovery: loaded from ETCD in Preparing state.
 
 **Automatic Behavior:**
@@ -109,11 +132,10 @@ Persisted states: **Preparing**, **Up**, **Down**, **Unrecoverable** (write-ahea
 1. Persist Down to ETCD (if transitioning from Up).
 2. Push Down to SN.
 
-> Query lease ownership: Coord does not wait for a lease period before entering
-> Down and always keeps at most one Up view. After receiving Down, StreamingNode
-> stops generating new query plans from the old view, but query leases/query
-> references keep its resources alive for already-generated queries. Resource
-> release completes only after those references are released.
+> Query lease ownership: Coord can enter Down immediately, but SN defers its
+> local Up → Down transition while its renewable serving lease or active query
+> references remain. QNs stay Ready until SN confirms Down and Coord advances
+> to Dropping. See [Serving Lease](query_view_lease.md).
 
 **Transitions:**
 
@@ -129,6 +151,10 @@ Persisted states: **Preparing**, **Up**, **Down**, **Unrecoverable** (write-ahea
   - Dropped → Coord transitions to Dropping. This fast-forwards recovery when
     Coord regresses from the unpersisted Dropping state to persisted Down while
     SN has already completed Dropped.
+  - If a recovered Down view is no longer present on SN, SN reports Dropped
+    immediately. Coord then follows the same fast-forward path and pushes
+    Dropped to all nodes, allowing QueryNode resources and the persisted Coord
+    record to be cleaned up.
   - Unrecoverable → Coord transitions to Unrecoverable.
 - **QN**: Ready / Unrecoverable
   - Ready → Coord does nothing.
@@ -196,7 +222,7 @@ Persisted states: **Preparing**, **Up**, **Down**, **Unrecoverable** (write-ahea
 
 **Automatic Behavior:**
 1. Delete the view from ETCD.
-2. Destroy the state machine instance.
+2. After the ETCD deletion succeeds, destroy the state machine instance.
 
 **Transitions:** None (terminal state).
 
@@ -206,22 +232,18 @@ Persisted states: **Preparing**, **Up**, **Down**, **Unrecoverable** (write-ahea
 
 ## 2. StreamingNode State Machine
 
-StreamingNode manages growing data and generates query plans. It persists Up
-recovery records for crash recovery. Each persisted recovery record is the
+StreamingNode persists Up recovery records for crash recovery. Each record is the
 complete `QueryViewOfShard` received from Coord, including both
-`QueryViewOfStreamingNode` and `QueryViewOfQueryNode`; the latter is required to
-rebuild Phase 1 query plans after StreamingNode restart.
+`QueryViewOfStreamingNode` and `QueryViewOfQueryNode`, so recovery retains the
+complete shard topology without depending on a separate metadata source.
 
 Persisted states: **Up** recovery info only. Every version that has reached Up
 is persisted independently until that view receives Down or Dropped, so
 multiple Up recovery records may coexist.
 
-> **TODO:** Wire StreamingNode resource-preparation and WAL-recovery failures
-> to `snQueryViewStateMachine.OnUnrecoverable`. The current production resource
-> manager reports successful readiness but does not provide an unrecoverable
-> failure callback. Until that callback is introduced, the StreamingNode
-> transitions to Unrecoverable described below are design intent rather than a
-> production-reachable chain.
+StreamingNode resource acquisition exposes both successful and unrecoverable
+callbacks. The handler wires them to `OnReady` and `OnUnrecoverable`, including
+the crash-recovery path.
 
 ### 2.1 Preparing
 
@@ -231,14 +253,37 @@ multiple Up recovery records may coexist.
 **Automatic Behavior:**
 1. Check replica information.
 2. Transition growing segments to queryable state.
-3. Check whether the local Flusher's data_version > the view's data_version.
+3. Check whether retained growing data can satisfy the QueryView's composite
+   DataVersion, using the per-Segment Flush `streaming_version` handoff metadata.
+4. Before reporting Ready, require no pending segment final commits and wait
+   until the query runtime has applied the completed sealed notifications. This
+   check also applies when reusing a runtime. Then prepare the shared BM25
+   aggregate for this view's DataVersion before reporting Ready. An already
+   materialized Oracle must complete this preparation; an unmaterialized lazy
+   Oracle only advances its target until the first BM25 query. See
+   [WAL input view readiness](../wal/streamingnode_vchannel_wal_view.md#9-queryview-readiness-and-version-ordering)
+   and [IDF refresh](snview/idf_oracle_runtime.md#refresh-and-handoff).
+
+Locally recoverable preparation failures should remain Preparing and retry on
+the Worknode. Failures requiring a different view or node/resource assignment
+belong to Coord and make the current view Unrecoverable. This includes resource
+requirements the node cannot satisfy, not every temporary admission delay.
+The [failure ownership contract](../wal/streamingnode_vchannel_wal_view.md#preparation-failure-ownership)
+records the current classifier gaps; the intended policy is not fully realized
+by today's error allowlist.
+
+New acquisitions must not regress below the shared VChannel resource manager's
+highest accepted DataVersion, including across replicas. Such acquisitions report
+Unrecoverable so Coord can replace them with a newer DataView. Equal DataVersions
+and already retained older views are allowed; this policy does not invalidate
+their existing Up leases.
 
 **Transitions:**
 
 | Target State | Trigger | Transition Behavior |
 |---|---|---|
 | Ready | Resource preparation succeeded | Report Ready to Coord |
-| Unrecoverable | **TODO:** data_version expired (growing segments already flushed and released) | Report Unrecoverable to Coord after the failure callback is wired |
+| Unrecoverable | Preparation classified as unrecoverable; see the failure-ownership policy and classifier gaps above | Report Unrecoverable to Coord |
 | Dropped | Received Dropped push from Coord (Coord aborted this view) | Release any prepared resources |
 
 **Possible Coord States (and this node's reaction):**
@@ -280,11 +325,11 @@ multiple Up recovery records may coexist.
 
 | Target State | Trigger | Transition Behavior |
 |---|---|---|
-| Down | Received Down push from Coord | Delete persisted recovery info; stop generating query plans from this view (but can still serve query execution requests) |
+| Down | Received Down push and serving lease expired with no active query references | Delete persisted recovery info; stop accepting new query plans or execution tasks; tasks that already acquired segment handles may finish |
 
 **Possible Coord States (and this node's reaction):**
 - Coord in Up / Down → SN does nothing; normal.
-- Coord pushes Down → SN transitions to Down.
+- Coord pushes Down → SN records the intent and waits for the serving lease and active query references before transitioning to Down.
 - Other signals → SN ignores.
 
 ### 2.4 UpRecovering (StreamingNode-Only Proto State)
@@ -303,6 +348,8 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 2. Do NOT serve queries (data is incomplete).
 3. Multiple UpRecovering versions may coexist. After recovery, query planning
    selects the highest available Up version.
+4. Resource preparation uses the same final-commit and applied-sealed-event
+   readiness check before completing UpRecovering.
 
 **Transitions:**
 
@@ -310,7 +357,7 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 |---|---|---|
 | Up | WAL consumption catches up to current position | Begin serving queries |
 | Down | Received Down push from Coord | Delete recovery info; abandon WAL catch-up |
-| Unrecoverable | **TODO:** local resource failure during WAL recovery (e.g., OOM) | Mark the view locally unavailable without reporting to Coord after the failure callback is wired; retain persisted Up recovery info, and let the query path trigger replacement |
+| Unrecoverable | local resource failure during WAL recovery (e.g., OOM) | Mark the view locally unavailable without reporting to Coord; retain persisted Up recovery info, and let the query path trigger replacement |
 
 **Possible Coord States (and this node's reaction):**
 - Coord considers this view to be in Up state (Coord is unaware of UpRecovering).
@@ -323,11 +370,11 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 ### 2.5 Down
 
 **Entry Conditions:**
-- Received Down push from Coord.
+- Received Down push from Coord; the serving lease has expired and active query references are zero.
 
 **Automatic Behavior:**
 1. Delete persisted recovery info.
-2. Stop generating query plans from this view (but can still serve query execution requests under plans already generated).
+2. Stop accepting new query plans or execution tasks. A Phase 2 request arriving after the actual Down transition must replan; tasks that already hold handles may finish. Before that transition, pending Down views remain Up and successful access renews the lease.
 3. Report Down to Coord.
 
 **Transitions:**
@@ -340,12 +387,12 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 - Coord in Down / Dropping → SN does nothing; normal.
 - Coord pushes Dropped → SN transitions to Dropped.
 
-### 2.6 Unrecoverable (TODO: Production Failure Wiring)
+### 2.6 Unrecoverable
 
 **Entry Conditions:**
-- **TODO:** data_version check failed during Preparing (growing segments already
+- data_version check failed during Preparing (growing segments already
   flushed to sealed and released).
-- **TODO:** local resource failure during UpRecovering (e.g., OOM while
+- local resource failure during UpRecovering (e.g., OOM while
   replaying WAL to recover growing segments).
 
 **Automatic Behavior:**
@@ -382,7 +429,15 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 
 ## 3. QueryNode State Machine
 
+The resource preparation steps below describe the target QN integration. Remote
+TransformLog consumption and its catch-up readiness wiring are not implemented
+by the current SN extraction.
+
 QueryNode is fully stateless with no persistence and no recovery process. It does NOT observe Up, Down, or Dropping states — it can serve queries as soon as it reaches Ready.
+
+QN stores the complete pending report proto at the moment a state/progress
+event occurs. `ConsumeReport` returns that immutable snapshot and clears it;
+later local progress does not retroactively mutate an already-pending report.
 
 ### 3.1 Preparing
 
@@ -390,16 +445,33 @@ QueryNode is fully stateless with no persistence and no recovery process. It doe
 - Received Preparing sync signal from Coord via SyncQueryView.
 
 **Automatic Behavior:**
-1. Asynchronously load segments from object storage.
-2. Subscribe to the pure delete stream from SN.
-3. Mark each segment as ready progressively; report the latest accumulated
+1. Resolve each Segment's loading metadata from the DataView Manifest version:
+   - Version `0`: Coord keeps watching Coordinator SegmentMeta, resolves the
+     complete current SegmentInfo, and freezes it into this QueryView/load
+     operation before dispatch.
+   - Positive version: QueryNode constructs the canonical StorageV3 Manifest
+     object path from Collection/Partition/Segment IDs plus the version and
+     derives all loading metadata directly from that Manifest; no Coordinator
+     SegmentMeta watch is required for this Segment.
+2. Asynchronously load segments from object storage.
+3. Subscribe to the pure delete stream from SN, apply its ordered Entries and
+   establish catch-up using SyncUp and the required Transform MVCC boundary.
+   SyncUp also advances intervals without Deletes. Receipt while preceding
+   Deletes remain queued does not establish readiness; see
+   [SyncUp semantics](../wal/transform_log.md#3-entry-and-syncup-semantics).
+4. Mark segments ready only after base loading and the required Transform
+   catch-up/application are complete; report the latest accumulated
    ready subset to Coord via `ready_segment_ids` in responses.
+
+This catch-up gate prevents a newly serving view from exposing its historical
+replay backlog to queries. It is a point-in-time condition, not a guarantee of
+zero query waiting after later writes; per-query MVCC checks remain required.
 
 **Transitions:**
 
 | Target State | Trigger | Transition Behavior |
 |---|---|---|
-| Ready | All segments loaded successfully | Report Ready to Coord |
+| Ready | All segments loaded and required Transform catch-up applied | Report Ready to Coord |
 | Unrecoverable | Resource preparation failed (OOM, disk full, etc.) | Report Unrecoverable to Coord |
 | Dropped | Received Dropped push from Coord (Coord aborted this view) | Release loaded resources; disconnect delete stream |
 

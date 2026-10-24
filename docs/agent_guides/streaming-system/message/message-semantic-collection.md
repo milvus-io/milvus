@@ -15,16 +15,18 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | CreateIndex | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | AlterIndex | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | DropIndex | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
-| CreateSnapshot | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
+| CreateSnapshot | Broadcast: All Collection VChannels + CChannel (AckSyncUp) | Yes | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
 | DropSnapshot | Broadcast: CChannel | No | ExclusiveSnapshotName |
 | RestoreSnapshot | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
 | DropSnapshotsByCollection | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
-| Import | Broadcast: VChannels (no CChannel) | No | — |
+| Import | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
+| UpdateImport | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
+| CommitImport / RollbackImport | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
 | Insert | Single VChannel | No | — |
 | Delete | Single VChannel | No | — |
 | CreateSegment *(SelfControlled)* | Single VChannel | No | — |
 | Flush *(SelfControlled)* | Single VChannel | No | — |
-| ManualFlush | Single VChannel | Yes (VChannel) | — |
+| ManualFlush | Broadcast: collection VChannels + CChannel, AckSyncUp, Unreplicable (`_ur`) | Yes (data VChannels) | SharedDBName + ExclusiveCollectionName |
 | AlterLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | DropLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName (or ExclusiveCluster) |
 | BatchUpdateManifest | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
@@ -36,21 +38,28 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **DropCollection**: Drops a collection and all its data, indexes, and load config. Implicitly flushes all growing segments.
 - **AlterCollection**: Alters collection properties, description, consistency level, or schema. Schema changes implicitly flush growing segments. When used for **RenameCollection**, the ResourceKey changes to `ExclusiveDBName(srcDB) + ExclusiveDBName(dstDB)` (deduplicated if same DB), blocking all collection DDL in both databases.
 - **TruncateCollection**: Logically truncates by sealing and dropping all segments before the truncation timestamp. Implicitly flushes all growing segments. Uses AckSyncUp.
-- **CreatePartition** / **DropPartition**: Creates or drops a partition. DropPartition implicitly flushes the partition's growing segments.
+- **CreatePartition** / **DropPartition**: Creates or drops a partition. DropPartition seals and flushes all earlier growing segments of the collection on each VChannel, but logically drops only the requested partition.
 - **CreateIndex** / **AlterIndex** / **DropIndex**: Manages indexes on a collection's field. CChannel-only.
-- **CreateSnapshot** / **DropSnapshot** / **RestoreSnapshot** / **DropSnapshotsByCollection**: Manages collection snapshots. CChannel-only.
-- **Import**: Initiates a bulk import job for a collection.
+- **CreateSnapshot**: Broadcasts to all collection VChannels plus CChannel with AckSyncUp. Flushes earlier L1/L0 data and uses each business channel's message position as the snapshot cut.
+- **DropSnapshot** / **RestoreSnapshot** / **DropSnapshotsByCollection**: Manages collection snapshots. CChannel-only.
+- **Import**: Initiates a bulk import job for a collection through its broadcast callback; CChannel is excluded from the job's data-channel list.
+- **CommitImport**: The DataCoord callback persists Committing, publishes imported segment visibility at each business VChannel's own append TimeTick, then persists Completed. The broadcast task retries failures. New jobs carry `commit_by_coordinator=true` and do not require a StreamingNode Flush or per-channel commit RPC. Legacy messages keep the per-channel RPC before BroadcastAckModule Ack and the counter-based checker completion.
+- **RollbackImport**: The DataCoord callback marks an uncommitted job Failed; committed jobs are unchanged.
+- **UpdateImport**: Assigns the per-file ID ranges to an in-progress import job once preimport reports exact row counts; replicated so both clusters derive identical PK/RowID. DataCoord ack callback only (no local recovery data work).
 - **Insert** / **Delete**: DML on a single VChannel. CipherEnabled.
 - **CreateSegment** / **Flush**: WAL-generated (SelfControlled). Allocates or seals a growing segment.
-- **ManualFlush**: Seals all growing segments for a collection on a VChannel.
+- **ManualFlush**: Flushes the collection on the receiving cluster, on either replication role. Broadcasts to all collection VChannels plus CChannel and waits for local L1/L0 completion with AckSyncUp. See [Local Flush Control](../wal/local-flush.md) for ordering between replicated transactions.
 - **AlterLoadConfig**: Modifies load configuration — partition set, replica count, load fields, etc. CChannel-only, consumed by QueryCoord.
 - **DropLoadConfig**: Removes load configuration, unloading/releasing from query nodes. Uses ExclusiveCluster when part of DropCollection flow.
 - **BatchUpdateManifest**: Updates segment manifest versions in batch. Used after compaction or index building. CChannel-only.
 - **RefreshExternalCollection**: Submits an external collection refresh job using a pre-allocated job ID from the WAL message. CChannel-only.
 
+The retired `AlterRLSMetadata` and `DropRLSMetadata` wire types remain decodable,
+but have no ACK callbacks and do not maintain metadata during replay.
+
 ## Replication Compatibility
 
-Current producers explicitly mark these collection-scoped broadcast messages with `Unreplicable` (`_ur`): CreateSnapshot, DropSnapshot, RestoreSnapshot, BatchUpdateManifest, and RefreshExternalCollection. Replication skips the concrete marked messages instead of classifying the whole message type as permanently unsupported, so newly generated messages can become replicable later by no longer setting `_ur`.
+Current producers explicitly mark these collection-scoped broadcast messages with `Unreplicable` (`_ur`): CreateSnapshot, DropSnapshot, RestoreSnapshot, BatchUpdateManifest, RefreshExternalCollection, and ManualFlush. Replication skips the concrete marked messages instead of classifying the whole message type as permanently unsupported, so newly generated messages can become replicable later by no longer setting `_ur`.
 
 ## Data Lifecycle Ordering Invariants
 
@@ -78,11 +87,19 @@ CreateSegment → Insert* → (Flush | ManualFlush | DropPartition | DropCollect
 - **CreateSegment** must precede any Insert referencing that segment.
 - Any message with flush semantics (Flush, ManualFlush, DropPartition, DropCollection, TruncateCollection, FlushAll) seals the segment. No Insert may reference it afterward.
 
+### Import Lifecycle
+
+```
+Import → UpdateImport → (CommitImport | RollbackImport)
+```
+
+- For the same job, **Import** must precede **UpdateImport**, which must precede **CommitImport** or **RollbackImport**. All are broadcast to the job's data VChannels plus the CChannel, so per-PChannel WAL order enforces the sequence and the CChannel copy gives their ack callbacks a single cluster-wide order.
+
 ### Exclusive Lock Rule
 
 DDL messages (CreateCollection, DropCollection, CreatePartition, DropPartition, TruncateCollection, ManualFlush, FlushAll) acquire exclusive locks. While held:
 - No DML (Insert/Delete) can append to locked VChannels.
-- In-flight transactions on locked VChannels are failed.
+- Locally originated in-flight transactions on locked VChannels are failed. Local flushes drain the current replicated transaction before taking the exclusive lock and hold subsequent replication until their append completes.
 
 DML (Insert/Delete) acquires **shared** locks — concurrent with each other, blocked by any exclusive lock.
 
@@ -98,7 +115,7 @@ CreateCollection(p0)@tt=1                    (creates collection with default pa
   → CreatePartition(p1)@tt=10                (add new partition)
     → CreateSegment(seg=101)@tt=11           (WAL-generated)
       → Insert(p1, seg=101)@tt=13
-  → DropPartition(p1)@tt=15                  (exclusive, flushes p1 segments, no more p1 DML)
+  → DropPartition(p1)@tt=15                  (exclusive, seals all earlier segments, no more p1 DML)
   → ManualFlush@tt=18                        (exclusive, seals remaining segments)
 → DropCollection@tt=20                       (exclusive, flushes all segments, collection terminated)
 ```

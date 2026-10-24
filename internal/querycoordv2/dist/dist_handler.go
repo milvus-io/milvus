@@ -199,6 +199,34 @@ func (dh *distHandler) SetNotifyFunc(notifyFunc NotifyDelegatorChanges) {
 	dh.notifyFunc = notifyFunc
 }
 
+// projectForDistribution copies the fields the segment distribution needs out
+// of a target segment resolved from the shared metacache store.
+//
+// The store hands back its live proto, binlog/statslog arrays included, and
+// replaces that proto wholesale on every mutation. Keeping the pointer in the
+// distribution would pin whole generations of segment metadata per node: an
+// entry is only refreshed when the node reports a new LastModifyTs, and delta
+// updates touch only the reported segments. The field set here matches what
+// GetRecoveryInfoV2 used to return, which is what the distribution retained
+// before the shared store existed.
+func projectForDistribution(info *datapb.SegmentInfo) *datapb.SegmentInfo {
+	if info == nil {
+		return nil
+	}
+	return &datapb.SegmentInfo{
+		ID:                  info.GetID(),
+		CollectionID:        info.GetCollectionID(),
+		PartitionID:         info.GetPartitionID(),
+		InsertChannel:       info.GetInsertChannel(),
+		NumOfRows:           info.GetNumOfRows(),
+		Level:               info.GetLevel(),
+		IsSorted:            info.GetIsSorted(),
+		IsSortedByNamespace: info.GetIsSortedByNamespace(),
+		ManifestPath:        info.GetManifestPath(),
+		DataVersion:         info.GetDataVersion(),
+	}
+}
+
 func (dh *distHandler) updateSegmentsDistribution(ctx context.Context, resp *querypb.GetDataDistributionResponse) {
 	updates := make([]*meta.Segment, 0, len(resp.GetSegments()))
 	for _, s := range resp.GetSegments() {
@@ -207,7 +235,7 @@ func (dh *distHandler) updateSegmentsDistribution(ctx context.Context, resp *que
 		if s.GetLevel() == datapb.SegmentLevel_L0 {
 			continue
 		}
-		segmentInfo := dh.target.GetSealedSegment(ctx, s.GetCollection(), s.GetID(), meta.CurrentTargetFirst)
+		segmentInfo := projectForDistribution(dh.target.GetSealedSegment(ctx, s.GetCollection(), s.GetID(), meta.CurrentTargetFirst))
 		if segmentInfo == nil {
 			segmentInfo = &datapb.SegmentInfo{
 				ID:            s.GetID(),
@@ -310,7 +338,17 @@ func (dh *distHandler) updateChannelsDistribution(ctx context.Context, resp *que
 	}
 
 	var newLeaderOnNode []*meta.DmChannel
+	var removedLeaderChannels []*meta.DmChannel
 	if resp.GetIsDelta() {
+		removedByName := make(map[string]struct{}, len(resp.GetRemovedChannelNames()))
+		for _, channelName := range resp.GetRemovedChannelNames() {
+			removedByName[channelName] = struct{}{}
+		}
+		for _, ch := range dh.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(resp.GetNodeID())) {
+			if _, ok := removedByName[ch.GetChannelName()]; ok {
+				removedLeaderChannels = append(removedLeaderChannels, ch)
+			}
+		}
 		newLeaderOnNode = dh.dist.ChannelDistManager.Patch(resp.GetNodeID(), updates, resp.GetRemovedChannelNames())
 	} else {
 		newLeaderOnNode = dh.dist.ChannelDistManager.Update(resp.GetNodeID(), updates...)
@@ -318,6 +356,9 @@ func (dh *distHandler) updateChannelsDistribution(ctx context.Context, resp *que
 	if dh.notifyFunc != nil {
 		collectionIDs := typeutil.NewUniqueSet()
 		for _, ch := range newLeaderOnNode {
+			collectionIDs.Insert(ch.CollectionID)
+		}
+		for _, ch := range removedLeaderChannels {
 			collectionIDs.Insert(ch.CollectionID)
 		}
 		dh.notifyFunc(collectionIDs.Collect()...)

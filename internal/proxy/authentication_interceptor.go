@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -85,7 +86,7 @@ func GrpcAuthInterceptor(authFunc grpc_auth.AuthFunc) grpc.UnaryServerIntercepto
 // as a readiness gate: until the proxy has published its meta cache (in
 // Proxy.Init), all requests are rejected with ServiceUnavailable, mirroring the
 // previous globalMetaCache == nil check that this PR's per-proxy cache removed.
-func AuthenticationInterceptorWithMetaCache(getMetaCache func() Cache) grpc_auth.AuthFunc {
+func AuthenticationInterceptorWithMetaCache(GetMetaCache func() Cache) grpc_auth.AuthFunc {
 	return func(ctx context.Context) (context.Context, error) {
 		// The keys within metadata.MD are normalized to lowercase.
 		// See: https://godoc.org/google.golang.org/grpc/metadata#New
@@ -93,7 +94,7 @@ func AuthenticationInterceptorWithMetaCache(getMetaCache func() Cache) grpc_auth
 		if !ok {
 			return nil, merr.WrapErrIoKeyNotFound("metadata", "auth check failure, due to occurs inner error: missing metadata")
 		}
-		if getMetaCache() == nil {
+		if GetMetaCache() == nil {
 			return nil, merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")
 		}
 		// check rpc call from sdk
@@ -121,6 +122,7 @@ func AuthenticationInterceptorWithMetaCache(getMetaCache func() Cache) grpc_auth
 					return nil, status.Error(codes.Unauthenticated, "auth check failure, please check api key is correct")
 				}
 				metrics.UserRPCCounter.WithLabelValues(user).Inc()
+				featureusage.Hit(featureusage.FeatureAuthAPIKey)
 				userToken := fmt.Sprintf("%s%s%s", user, util.CredentialSeparator, util.PasswordHolder)
 				md[strings.ToLower(util.HeaderAuthorize)] = []string{crypto.Base64Encode(userToken)}
 				md[util.HeaderToken] = []string{rawToken}
@@ -134,6 +136,7 @@ func AuthenticationInterceptorWithMetaCache(getMetaCache func() Cache) grpc_auth
 					return nil, status.Error(codes.Unauthenticated, "auth check failure, please check username and password are correct")
 				}
 				metrics.UserRPCCounter.WithLabelValues(username).Inc()
+				featureusage.Hit(featureusage.FeatureAuthPassword)
 			}
 		}
 		return ctx, nil

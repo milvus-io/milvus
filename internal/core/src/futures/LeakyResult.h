@@ -17,8 +17,29 @@
 #include <memory>
 #include <functional>
 #include <common/type_c.h>
+#include "common/EasyAssert.h"
 
 namespace milvus::futures {
+
+/// @brief destroy a result that was produced but never handed to the caller.
+///
+/// This runs when the async function completed successfully but ~LeakyResult
+/// fires before leakyGet() -- the cancellation race, where Go abandons the
+/// future after the C++ side already built the result.
+///
+/// The default `delete` is correct for a self-contained C++ object. A C result
+/// struct that owns heap buffers through raw pointers frees nothing that way,
+/// so it must specialise this with its own C free function. The specialisation
+/// has to be visible in the translation unit that instantiates Future<R>.
+///
+/// NOTE: CProto (and therefore CRetrieveResult) does NOT specialise this, so
+/// this path still leaks its proto_blob. That is pre-existing and left alone
+/// here; see DeleteRetrieveResult for the shape a specialisation would take.
+template <class R>
+inline void
+DestroyLeakyResult(R* r) {
+    delete r;
+}
 
 /// @brief LeakyResult is a class that holds the result that can be leaked.
 /// @tparam R is a type to real result that can be leak after get operation.
@@ -92,12 +113,14 @@ class LeakyResult {
             return std::make_pair<void*, CStatus>(
                 nullptr, CStatus{status.error_code, status.error_msg});
         }
-        throw std::logic_error("get on a not ready LeakyResult");
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "{}",
+                  std::string("get on a not ready LeakyResult"));
     }
 
     ~LeakyResult() {
         if (result_.has_value()) {
-            delete result_.value();
+            DestroyLeakyResult(result_.value());
         }
         if (status_.has_value()) {
             free((char*)(status_.value().error_msg));

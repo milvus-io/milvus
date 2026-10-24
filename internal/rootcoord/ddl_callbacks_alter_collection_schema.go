@@ -25,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
@@ -160,9 +159,6 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 		return err
 	}
 
-	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
-	channels = append(channels, streaming.WAL().ControlChannel())
-	channels = append(channels, coll.VirtualChannelNames...)
 	msg := message.NewAlterCollectionMessageBuilderV2().
 		WithHeader(&messagespb.AlterCollectionMessageHeader{
 			DbId:         coll.DBID,
@@ -179,7 +175,7 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 				BoundFieldIndexes: boundFieldIndexes,
 			},
 		}).
-		WithBroadcast(channels).
+		WithBroadcast(coll.VirtualChannelNames).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		rollbackAlterCollectionAnalyzerFileResourceReservation(ctx, c.meta, coll.CollectionID, addedFileResourceIds, err)
@@ -428,9 +424,6 @@ func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcast
 		return err
 	}
 
-	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
-	channels = append(channels, streaming.WAL().ControlChannel())
-	channels = append(channels, coll.VirtualChannelNames...)
 	msg := message.NewAlterCollectionMessageBuilderV2().
 		WithHeader(&messagespb.AlterCollectionMessageHeader{
 			DbId:         coll.DBID,
@@ -447,7 +440,7 @@ func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcast
 				Properties: properties,
 			},
 		}).
-		WithBroadcast(channels).
+		WithBroadcast(coll.VirtualChannelNames).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		rollbackAlterCollectionAnalyzerFileResourceReservation(ctx, c.meta, coll.CollectionID, addedFileResourceIds, err)

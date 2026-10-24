@@ -23,7 +23,14 @@ log:
   level: debug
 extraConfigFiles:
   user.yaml: |+
+    grpc:
+      client:
+        compressionEnabled: true
+        compressionAlgorithm: s2
     common:
+      fileResource:
+        mode:
+          proxy: sync
       storage:
         # enable storage v3
         useLoonFFI: true
@@ -31,6 +38,9 @@ extraConfigFiles:
       storage:
         format: vortex
     dataCoord:
+      targetVecIndexVersion: 11
+      forceRebuildScalarSegmentIndex: true
+      targetScalarIndexVersion: 5
       compaction:
         bumpSchemaVersion:
           enabled: true
@@ -41,6 +51,9 @@ extraConfigFiles:
     queryNode:
       segcore:
         exprEvalBatchSize: 512
+    function:
+      pyUDF:
+        enabled: true
 metrics:
   serviceMonitor:
     enabled: true

@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/zilliztech/woodpecker/common/config"
 	wpMetrics "github.com/zilliztech/woodpecker/common/metrics"
@@ -13,6 +16,7 @@ import (
 	"github.com/zilliztech/woodpecker/woodpecker"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -39,7 +43,11 @@ func (b *builderImpl) Name() message.WALName {
 }
 
 // Build build a wal instance.
+//
+// The registry caches the opener per walName, so this runs at most once per process and
+// the storage mode picked here is never revisited.
 func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
+	mlog.Info(context.TODO(), "start building wp opener")
 	cfg, err := b.getWpConfig()
 	if err != nil {
 		return nil, err
@@ -59,6 +67,8 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 	}
 	mlog.Info(context.TODO(), "create etcd client finish while building wp opener")
 	var wpClient woodpecker.Client
+	mlog.Info(context.TODO(), "create woodpecker client",
+		mlog.String("storageType", cfg.Woodpecker.Storage.Type))
 	if cfg.Woodpecker.Storage.IsStorageService() {
 		wpClient, err = woodpecker.NewClient(context.Background(), cfg, etcdCli, true)
 	} else {
@@ -75,6 +85,24 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 }
 
 func (b *builderImpl) getWpConfig() (*config.Configuration, error) {
+	// The etcd config source is only refreshed by a periodic poll, while a WAL switch
+	// reaches this node through the WAL broadcast within milliseconds. Read etcd
+	// linearizably first so a woodpecker configuration written just before the switch is
+	// already visible here; the opener is built once, so a stale read would be permanent.
+	if bt := paramtable.GetBaseTable(); bt != nil {
+		start := time.Now()
+		refreshed, err := bt.RefreshRemoteConfigsLinearizable()
+		if err != nil {
+			// Fail closed: the last polled snapshot may be exactly the stale one this refresh
+			// is meant to replace. The opener is only cached on success, so the WAL open is
+			// retried instead of settling on the wrong mode for the life of the process.
+			return nil, merr.Wrap(err, "failed to refresh remote configs before building wp opener")
+		}
+		if refreshed {
+			mlog.Info(context.TODO(), "refreshed remote configs linearizably before building wp opener",
+				mlog.Duration("cost", time.Since(start)))
+		}
+	}
 	wpConfig, err := config.NewConfiguration()
 	if err != nil {
 		return nil, err
@@ -92,6 +120,25 @@ func setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.Woodpecke
 	wpConfig.Etcd.RootPath = paramtable.Get().EtcdCfg.RootPath.GetValue()
 	// logClient
 	wpConfig.Woodpecker.Client.Auditor.MaxInterval = config.NewDurationSecondsFromInt(int(cfg.AuditorMaxInterval.GetAsDurationByParse().Seconds()))
+	// Both are rejected below 1s by Woodpecker's Validate(), which runs before these overrides
+	// land. For a deadline, being dropped is the dangerous direction rather than the safe one:
+	// at <= 0 the auditor skips context.WithTimeout entirely, and its own context carries no
+	// deadline, so SegmentCompact runs against an unresponsive node with no bound at all. The
+	// pass budget does not rescue it either -- that is checked between segments and lets an
+	// in-flight one run to completion, so a hung attempt blocks the whole walk for that log,
+	// stalling truncation, snapshot publication and the orphan sweep with it.
+	if v := int(cfg.AuditorCompactionAttemptTimeout.GetAsDurationByParse().Seconds()); v > 0 {
+		wpConfig.Woodpecker.Client.Auditor.CompactionAttemptTimeout = config.NewDurationSecondsFromInt(v)
+	} else {
+		mlog.Warn(context.TODO(), "invalid woodpecker auditor compactionAttemptTimeout, keeping woodpecker built-in default",
+			mlog.String("value", cfg.AuditorCompactionAttemptTimeout.GetValue()))
+	}
+	if v := int(cfg.AuditorCompactionPassBudget.GetAsDurationByParse().Seconds()); v > 0 {
+		wpConfig.Woodpecker.Client.Auditor.CompactionPassBudget = config.NewDurationSecondsFromInt(v)
+	} else {
+		mlog.Warn(context.TODO(), "invalid woodpecker auditor compactionPassBudget, keeping woodpecker built-in default",
+			mlog.String("value", cfg.AuditorCompactionPassBudget.GetValue()))
+	}
 	wpConfig.Woodpecker.Client.SegmentAppend.MaxRetries = cfg.AppendMaxRetries.GetAsInt()
 	wpConfig.Woodpecker.Client.SegmentAppend.QueueSize = cfg.AppendQueueSize.GetAsInt()
 	// GetAsInt/GetAsSize return 0 on a parse failure (e.g. a typo like "1,000"),
@@ -137,6 +184,9 @@ func setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.Woodpecke
 			mlog.String("value", cfg.DirectReadMaxFetchThreads.GetValue()))
 	}
 
+	// client operational bounds
+	setClientOperationalConfig(wpConfig, cfg)
+
 	// quorum configuration
 	setQuorumConfig(wpConfig, cfg)
 
@@ -162,6 +212,33 @@ func setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.Woodpecke
 	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxBytes = config.NewByteSize(cfg.CompactionSize.GetAsSize())
 	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxParallelUploads = cfg.CompactionMaxParallelUploads.GetAsInt()
 	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxParallelReads = cfg.CompactionMaxParallelReads.GetAsInt()
+	// Woodpecker's Validate() rejects a non-positive timeout, a non-positive inflight
+	// ceiling and a watermark outside (0, 1], but it runs inside NewConfiguration above,
+	// before these overrides land, so nothing re-checks them here. Each bad value fails
+	// silently rather than loudly: a sub-second timeout truncates to 0 and makes every
+	// compaction expire immediately, and either memory value out of range switches off
+	// the bound it configures. Keep the already-validated Woodpecker value and warn.
+	if v := int(cfg.CompactionTimeout.GetAsDurationByParse().Seconds()); v > 0 {
+		wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.Timeout = config.NewDurationSecondsFromInt(v)
+	} else {
+		mlog.Warn(context.TODO(), "invalid woodpecker segmentCompactionPolicy timeout, keeping woodpecker built-in default",
+			mlog.String("value", cfg.CompactionTimeout.GetValue()))
+	}
+	if v := cfg.CompactionMaxInflightMemory.GetAsSize(); v > 0 {
+		wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxInflightMemory = config.NewByteSize(v)
+	} else {
+		mlog.Warn(context.TODO(), "invalid woodpecker segmentCompactionPolicy maxInflightMemory, keeping woodpecker built-in default",
+			mlog.String("value", cfg.CompactionMaxInflightMemory.GetValue()))
+	}
+	if v := cfg.CompactionMemoryHighWatermark.GetAsFloat(); v > 0 && v <= 1 {
+		wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MemoryHighWatermark = v
+	} else {
+		mlog.Warn(context.TODO(), "invalid woodpecker segmentCompactionPolicy memoryHighWatermark, keeping woodpecker built-in default",
+			mlog.String("value", cfg.CompactionMemoryHighWatermark.GetValue()))
+	}
+	// maxWorkers is the one value in this range that is safe unguarded: NewSyncScheduler
+	// falls back to its own default when handed a non-positive count.
+	wpConfig.Woodpecker.Logstore.SyncScheduler.MaxWorkers = cfg.SyncSchedulerMaxWorkers.GetAsInt()
 	wpConfig.Woodpecker.Logstore.SegmentReadPolicy.MaxBatchSize = config.NewByteSize(cfg.ReaderMaxBatchSize.GetAsSize())
 	wpConfig.Woodpecker.Logstore.SegmentReadPolicy.MaxFetchThreads = cfg.ReaderMaxFetchThreads.GetAsInt()
 	wpConfig.Woodpecker.Logstore.RetentionPolicy.TTL = int(cfg.RetentionTTL.GetAsDurationByParse().Milliseconds() / 1000) // convert to seconds
@@ -173,7 +250,7 @@ func setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.Woodpecke
 	// Set RootPath based on configuration
 	if cfg.RootPath.GetValue() == "default" {
 		// Use LocalStorage.Path as prefix with "wp" subdirectory for default
-		wpConfig.Woodpecker.Storage.RootPath = fmt.Sprintf("%s/wp", paramtable.Get().LocalStorageCfg.Path.GetValue())
+		wpConfig.Woodpecker.Storage.RootPath = fmt.Sprintf("%s/%s", paramtable.Get().LocalStorageCfg.Path.GetValue(), common.WoodpeckerRootPath)
 	} else {
 		// Use custom directory as-is
 		wpConfig.Woodpecker.Storage.RootPath = cfg.RootPath.GetValue()
@@ -181,7 +258,7 @@ func setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.Woodpecke
 
 	// set bucketName
 	wpConfig.Minio.BucketName = paramtable.Get().MinioCfg.BucketName.GetValue()
-	wpConfig.Minio.RootPath = fmt.Sprintf("%s/wp", paramtable.Get().MinioCfg.RootPath.GetValue())
+	wpConfig.Minio.RootPath = fmt.Sprintf("%s/%s", paramtable.Get().MinioCfg.RootPath.GetValue(), common.WoodpeckerRootPath)
 	wpConfig.Minio.UseSSL = paramtable.Get().MinioCfg.UseSSL.GetAsBool()
 	wpConfig.Minio.UseIAM = paramtable.Get().MinioCfg.UseIAM.GetAsBool()
 	addr := paramtable.Get().MinioCfg.Address.GetValue()
@@ -307,10 +384,10 @@ func validateQuorumJSON(label, raw string, parse func([]byte) error) {
 		return
 	}
 	if err := parse([]byte(raw)); err != nil {
+		// Quorum JSON can contain private seed addresses; parser errors may
+		// also include input fragments. Keep only the declared configuration label.
 		mlog.Warn(context.TODO(), "invalid quorum JSON config at startup, will fall back to static default",
-			mlog.String("config", label),
-			mlog.String("json", raw),
-			mlog.Err(err))
+			mlog.String("config", label))
 	}
 }
 
@@ -329,10 +406,46 @@ func getEtcdClient(ctx context.Context) (*clientv3.Client, error) {
 		etcdConfig.EtcdTLSKey.GetValue(),
 		etcdConfig.EtcdTLSCACert.GetValue(),
 		etcdConfig.EtcdTLSMinVersion.GetValue(),
-		etcdConfig.ClientOptions()...)
+		etcdConfig.ClientOptions()...,
+	)
 	if err != nil {
 		mlog.Warn(ctx, "Woodpecker create connection to etcd failed", mlog.Err(err))
 		return nil, err
 	}
 	return etcdCli, nil
+}
+
+// setClientOperationalConfig preserves the validated library defaults when overrides
+// cannot represent a positive bound. Read bounds and backoff are coupled settings.
+func setClientOperationalConfig(wpConfig *config.Configuration, cfg *paramtable.WoodpeckerConfig) {
+	c := &wpConfig.Woodpecker.Client
+	setMilliseconds := func(dst *config.DurationMilliseconds, item *paramtable.ParamItem) {
+		if v := item.GetAsDurationByParse().Milliseconds(); v > 0 {
+			*dst = config.NewDurationMillisecondsFromInt(int(v))
+		}
+	}
+	setMilliseconds(&c.SegmentAppend.SendTimeout, &cfg.AppendSendTimeout)
+	setMilliseconds(&c.Quorum.SelectNodesTimeout, &cfg.QuorumSelectNodesTimeout)
+	setMilliseconds(&c.GRPC.DialTimeout, &cfg.ClientGRPCDialTimeout)
+	active := cfg.ClientReadActiveTimeout.GetAsDurationByParse().Milliseconds()
+	settled := cfg.ClientReadSettledTimeout.GetAsDurationByParse().Milliseconds()
+	if active > 0 && settled >= active {
+		c.SegmentRead.ActiveTimeout = config.NewDurationMillisecondsFromInt(int(active))
+		c.SegmentRead.SettledTimeout = config.NewDurationMillisecondsFromInt(int(settled))
+	}
+	base := cfg.ClientGRPCBackoffBaseDelay.GetAsDurationByParse().Milliseconds()
+	max := cfg.ClientGRPCBackoffMaxDelay.GetAsDurationByParse().Milliseconds()
+	multiplier := cfg.ClientGRPCBackoffMultiplier.GetAsFloat()
+	// Parse explicitly: GetAsFloat maps malformed input to zero, which is legal jitter.
+	parsedJitter, jitterErr := strconv.ParseFloat(cfg.ClientGRPCBackoffJitter.GetValue(), 64)
+	if base > 0 && max >= base && multiplier >= 1 && !math.IsInf(multiplier, 0) && jitterErr == nil && parsedJitter >= 0 && parsedJitter <= 1 {
+		c.GRPC.ConnectBackoff = config.GRPCBackoffConfig{
+			BaseDelay:  config.NewDurationMillisecondsFromInt(int(base)),
+			MaxDelay:   config.NewDurationMillisecondsFromInt(int(max)),
+			Multiplier: multiplier, Jitter: parsedJitter,
+		}
+	}
+	if v := cfg.SkipRangeRefreshInterval.GetAsDurationByParse().Seconds(); v >= 1 {
+		c.SkipRangeRefreshInterval = config.NewDurationSecondsFromInt(int(v))
+	}
 }

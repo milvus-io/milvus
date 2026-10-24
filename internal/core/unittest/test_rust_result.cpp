@@ -12,9 +12,14 @@
 #include <stddef.h>
 #include <cstdint>
 #include <memory>
+#include <type_traits>
+#include <utility>
 
 #include "gtest/gtest.h"
 #include "tantivy-binding.h"
+#include "rust-array.h"
+#include "tantivy-error.h"
+#include "tantivy/tokenizer.h"
 
 TEST(RustResultTest, TestResult) {
     auto arr = test_enum_with_array();
@@ -28,4 +33,79 @@ TEST(RustResultTest, TestResult) {
     EXPECT_EQ(1, *static_cast<uint32_t*>(ptr.value.ptr._0));
     free_rust_result(ptr);
     free_test_ptr(ptr.value.ptr._0);
+}
+
+using milvus::tantivy::RustArrayWrapper;
+using milvus::tantivy::RustResultWrapper;
+
+TEST(RustResultTest, AnalyzerMissingPathClassificationIsValidationOnly) {
+    // An empty local path cannot be opened; no shared filesystem fixture needed.
+    const char* params =
+        R"({"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"local","path":""}}]})";
+    RustResultWrapper validation(tantivy_validate_analyzer(params, ""));
+    ASSERT_FALSE(validation.result_->success);
+    EXPECT_EQ(validation.result_->error_code,
+              TantivyBindingErrorCode::IoNotFound);
+    EXPECT_EQ(milvus::tantivy::TantivyErrorToErrorCode(
+                  validation.result_->error_code),
+              milvus::ErrorCode::FileReadFailed);
+
+    // Only the C++ validation boundary makes missing paths terminal.
+    try {
+        milvus::tantivy::validate_analyzer(std::string(params), "");
+        FAIL() << "Validation should fail for a missing path";
+    } catch (const milvus::SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), milvus::ErrorCode::PathNotExist);
+    }
+
+    // Runtime construction must retain the retriable I/O classification.
+    RustResultWrapper creation(tantivy_create_analyzer(params, ""));
+    ASSERT_FALSE(creation.result_->success);
+    EXPECT_EQ(creation.result_->error_code,
+              TantivyBindingErrorCode::IoNotFound);
+    EXPECT_EQ(
+        milvus::tantivy::TantivyErrorToErrorCode(creation.result_->error_code),
+        milvus::ErrorCode::FileReadFailed);
+}
+
+static_assert(std::is_nothrow_constructible_v<RustResultWrapper, RustResult>);
+static_assert(std::is_nothrow_move_constructible_v<RustResultWrapper>);
+static_assert(std::is_nothrow_move_assignable_v<RustResultWrapper>);
+
+TEST(RustResultTest, WrapperMovesTransferOwnership) {
+    RustResultWrapper source(test_enum_with_array());
+    auto* original_array = source.result_->value.rust_array._0.array;
+
+    RustResultWrapper moved(std::move(source));
+    EXPECT_FALSE(source.result_);
+    ASSERT_TRUE(moved.result_);
+    EXPECT_EQ(moved.result_->value.rust_array._0.array, original_array);
+
+    // Replacing an existing result must release it before adopting the source.
+    RustResultWrapper destination(test_enum_with_array());
+    destination = std::move(moved);
+    EXPECT_FALSE(moved.result_);
+    ASSERT_TRUE(destination.result_);
+    EXPECT_EQ(destination.result_->value.rust_array._0.array, original_array);
+    EXPECT_EQ(destination.result_->value.rust_array._0.len, 3);
+    EXPECT_EQ(destination.result_->value.rust_array._0.array[2], 3);
+
+    RustResultWrapper empty;
+    destination = std::move(empty);
+    EXPECT_FALSE(destination.result_);
+    EXPECT_FALSE(empty.result_);
+}
+
+TEST(RustResultTest, WrapperCanTransferArrayOwnership) {
+    RustResultWrapper result(test_enum_with_array());
+    auto* original_array = result.result_->value.rust_array._0.array;
+    RustArrayWrapper array(std::move(result.result_->value.rust_array._0));
+    EXPECT_EQ(result.result_->value.rust_array._0.array, nullptr);
+    EXPECT_EQ(array.array_.array, original_array);
+
+    // Releasing the moved-from result must leave the transferred array valid.
+    result = RustResultWrapper();
+    EXPECT_EQ(array.array_.len, 3);
+    EXPECT_EQ(array.array_.array[0], 1);
+    EXPECT_EQ(array.array_.array[2], 3);
 }

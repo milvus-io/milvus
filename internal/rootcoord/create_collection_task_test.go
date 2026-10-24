@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/internal/snapshotio"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -1590,10 +1591,10 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 
 	t.Run("normal with analyzer", func(t *testing.T) {
 		mixcoord := mocks.NewMixCoord(t)
-		mixcoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.Anything).Return(&querypb.ValidateAnalyzerResponse{
-			Status:      merr.Status(nil),
-			ResourceIds: []int64{1, 2, 3},
-		}, nil)
+		setValidateAnalyzer := mockAnalyzerValidation(t)
+		setValidateAnalyzer(func(_ context.Context, infos []*querypb.AnalyzerInfo) ([]int64, error) {
+			return []int64{1, 2, 3}, nil
+		})
 
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().IncFileResourceRefCnt(mock.Anything).Return(nil)
@@ -1646,10 +1647,10 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 
 	t.Run("normal with file resource observer", func(t *testing.T) {
 		mixcoord := mocks.NewMixCoord(t)
-		mixcoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.Anything).Return(&querypb.ValidateAnalyzerResponse{
-			Status:      merr.Status(nil),
-			ResourceIds: []int64{1, 2, 3},
-		}, nil)
+		setValidateAnalyzer := mockAnalyzerValidation(t)
+		setValidateAnalyzer(func(_ context.Context, infos []*querypb.AnalyzerInfo) ([]int64, error) {
+			return []int64{1, 2, 3}, nil
+		})
 
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().IncFileResourceRefCnt(mock.Anything).Return(nil)
@@ -1698,7 +1699,6 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 
 		// with file resource observer
 		fileResourceObserver := NewMockFileResourceObserver(t)
-		fileResourceObserver.EXPECT().CheckAllQnReady().Return(nil)
 
 		task.fileResourceObserver = fileResourceObserver
 		err = task.prepareSchema(context.TODO())
@@ -2111,6 +2111,30 @@ func TestPrepareMilvusTableSnapshotSchemaErrors(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "read milvus-table snapshot metadata")
 	})
+
+	for _, tc := range []struct {
+		name    string
+		data    string
+		readErr error
+		wantErr error
+	}{
+		{"corrupt metadata", `{`, nil, merr.ErrDataIntegrity},
+		{"metadata read timeout", "", context.DeadlineExceeded, context.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, parseErr := snapshotio.ParseSnapshotMetadata([]byte(tc.data))
+			if tc.readErr != nil {
+				parseErr = tc.readErr
+			}
+			read := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).Return(nil, parseErr).Build()
+			defer read.UnPatch()
+
+			err := baseTask(baseSchema()).prepareMilvusTableSnapshotSchema(context.Background())
+			require.ErrorIs(t, err, tc.wantErr)
+			assert.Equal(t, merr.Code(tc.wantErr), merr.Status(err).GetCode())
+			assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
+		})
+	}
 
 	t.Run("missing source schema", func(t *testing.T) {
 		mockReadMetadata := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).

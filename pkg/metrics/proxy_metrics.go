@@ -68,6 +68,23 @@ var (
 			Help:      "counter of vectors successfully deleted",
 		}, []string{nodeIDLabelName, databaseLabelName, collectionName})
 
+	ProxyPathReplaceParentOperations = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "path_replace_parent_operations_total",
+			Help:      "number of successfully resolved positional partial-update parent operations by category",
+		}, []string{nodeIDLabelName, databaseLabelName, collectionName, "parent_type"})
+
+	ProxyPathReplaceMergeLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "path_replace_merge_latency",
+			Help:      "latency of materializing positional partial updates",
+			Buckets:   buckets, // unit: ms
+		}, []string{nodeIDLabelName, databaseLabelName, collectionName})
+
 	// ProxySQLatency record the latency of search successfully.
 	ProxySQLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -77,6 +94,24 @@ var (
 			Help:      "latency of search or query successfully",
 			Buckets:   buckets,
 		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
+
+	// ProxyResourceGroupSQLatency records the latency of a search or query
+	// attributed to the resource group that served it.
+	//
+	// It is a family of its own rather than an rg label on ProxySQLatency
+	// because only a deployment form that scopes its queries to a resource group
+	// can attribute anything: adding the label to the existing family would give
+	// every stock milvus an extra, permanently empty dimension on a metric its
+	// dashboards and recording rules already read. Nothing scopes a query in a
+	// binary with no provider installed, so it exposes no series here at all.
+	ProxyResourceGroupSQLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "resource_group_sq_latency",
+			Help:      "latency of search or query successfully, per resource group",
+			Buckets:   buckets,
+		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName, ResourceGroupLabelName})
 
 	// ProxyCollectionSQLatency record the latency of search successfully, per collection
 	// Deprecated, ProxySQLatency instead of it
@@ -491,8 +526,11 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyInsertVectors)
 	registry.MustRegister(ProxyUpsertVectors)
 	registry.MustRegister(ProxyDeleteVectors)
+	registry.MustRegister(ProxyPathReplaceParentOperations)
+	registry.MustRegister(ProxyPathReplaceMergeLatency)
 
 	registry.MustRegister(ProxySQLatency)
+	registry.MustRegister(ProxyResourceGroupSQLatency)
 	registry.MustRegister(ProxyCollectionSQLatency)
 	registry.MustRegister(ProxyMutationLatency)
 	registry.MustRegister(ProxyCollectionMutationLatency)
@@ -579,6 +617,8 @@ func proxyCollectionScopedMetrics() []partialMatchDeleter {
 		ProxyInsertVectors,
 		ProxyUpsertVectors,
 		ProxyDeleteVectors,
+		ProxyPathReplaceParentOperations,
+		ProxyPathReplaceMergeLatency,
 		ProxySQLatency,
 		ProxyCollectionSQLatency,
 		ProxyMutationLatency,
@@ -593,6 +633,7 @@ func proxyCollectionScopedMetrics() []partialMatchDeleter {
 		ProxySearchSparseNumNonZeros,
 		ProxyScannedRemoteMB,
 		ProxyScannedTotalMB,
+		ProxyResourceGroupSQLatency,
 	}
 }
 

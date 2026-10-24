@@ -28,8 +28,8 @@ class GroupChunk {
  public:
     GroupChunk() = default;
     explicit GroupChunk(
-        const std::unordered_map<FieldId, std::shared_ptr<Chunk>>& chunks)
-        : chunks_(chunks) {
+        std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks)
+        : chunks_(std::move(chunks)) {
     }
 
     virtual ~GroupChunk() = default;

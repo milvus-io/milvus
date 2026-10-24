@@ -22,6 +22,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
 	"github.com/stretchr/testify/assert"
@@ -458,4 +459,33 @@ func TestRetryableReader_ContextDeadlineExceeded(t *testing.T) {
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Equal(t, 0, n)
 	assert.Equal(t, 1, mockReader.callCount, "context.DeadlineExceeded should not be retried")
+}
+
+func TestRetryableReaderCloseAfterFailedReopen(t *testing.T) {
+	underlying := &customMockReader{}
+	closed := 0
+	patch := mockey.Mock((*customMockReader).Close).To(func(*customMockReader) error {
+		closed++
+		return nil
+	}).Build()
+	defer patch.UnPatch()
+	reader := &retryableReader{
+		FileReader: underlying,
+		ctx:        context.Background(),
+		path:       "missing",
+		reopen: func(context.Context, string, int64) (storage.FileReader, error) {
+			return nil, io.ErrClosedPipe
+		},
+	}
+	assert.Error(t, reader.reopenAtOffset())
+	assert.Nil(t, reader.FileReader)
+	assert.NoError(t, reader.Close())
+	assert.Equal(t, 1, closed, "cleanup must not close the discarded reader again")
+}
+
+func TestRetryableReaderCloseForwardsError(t *testing.T) {
+	patch := mockey.Mock((*customMockReader).Close).Return(io.ErrClosedPipe).Build()
+	defer patch.UnPatch()
+	reader := &retryableReader{FileReader: &customMockReader{}}
+	assert.ErrorIs(t, reader.Close(), io.ErrClosedPipe)
 }

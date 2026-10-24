@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"regexp"
 	"strconv"
 	"testing"
 	"time"
@@ -248,6 +249,59 @@ func TestGetCollectionIDFromVChannel(t *testing.T) {
 	invaildVChannel = "06b84fe16780ed1-rootcoord-dm_3_-1v0"
 	collectionID = GetCollectionIDFromVChannel(invaildVChannel)
 	assert.Equal(t, int64(-1), collectionID)
+}
+
+func BenchmarkGetCollectionIDFromVChannel(b *testing.B) {
+	const channel = "cluster-rootcoord-dm_3_449684528748778322v0"
+	b.Run("compile-per-call", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			matches := regexp.MustCompile(`.*_(\d+)v\d+`).FindStringSubmatch(channel)
+			id, err := strconv.ParseInt(matches[1], 0, 64)
+			if err != nil || id != 449684528748778322 {
+				b.Fatal("unexpected collection ID")
+			}
+		}
+	})
+	b.Run("shared-regexp", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			if GetCollectionIDFromVChannel(channel) != 449684528748778322 {
+				b.Fatal("unexpected collection ID")
+			}
+		}
+	})
+}
+
+func TestParseVChannel(t *testing.T) {
+	pchannel, collectionID, index, err := ParseVChannel("by-dev-rootcoord-dml_0_12345v2")
+	require.NoError(t, err)
+	assert.Equal(t, "by-dev-rootcoord-dml_0", pchannel)
+	assert.Equal(t, int64(12345), collectionID)
+	assert.Equal(t, 2, index)
+
+	for _, vchannel := range []string{
+		"",
+		"_12345v2",
+		"by-dev-rootcoord-dml_0",
+		"by-dev-rootcoord-dml_0_v2",
+		"by-dev-rootcoord-dml_0_12345",
+		"by-dev-rootcoord-dml_0_12345v",
+		"by-dev-rootcoord-dml_0_-1v2",
+		"by-dev-rootcoord-dml_0_12345v-1",
+		"by-dev-rootcoord-dml_0_+12345v2",
+		"by-dev-rootcoord-dml_0_12345v+2",
+		"by-dev-rootcoord-dml_0_012345v2",
+		"by-dev-rootcoord-dml_0_12345v02",
+		"by-dev-rootcoord-dml_0_12345v2x",
+		"by-dev-rootcoord-dml_0_9223372036854775808v2",
+		"by-dev-rootcoord-dml_0_12345v9223372036854775808",
+	} {
+		t.Run(vchannel, func(t *testing.T) {
+			_, _, _, err := ParseVChannel(vchannel)
+			require.Error(t, err)
+		})
+	}
 }
 
 func TestCheckCtxValid(t *testing.T) {

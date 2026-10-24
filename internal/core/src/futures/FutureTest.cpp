@@ -15,7 +15,10 @@
 #include <gtest/gtest.h>
 #include <stdlib.h>
 #include <chrono>
+#include <condition_variable>
+#include <atomic>
 #include <exception>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -27,13 +30,64 @@
 
 #include "common/EasyAssert.h"
 #include "common/common_type_c.h"
+#include "futures/Executor.h"
 #include "futures/Future.h"
 #include "futures/LeakyResult.h"
 #include "futures/Ready.h"
+#include "futures/future_c.h"
 #include "futures/future_c_types.h"
 #include "gtest/gtest.h"
+#include "segcore/json_stats/JsonStatsBuildMemoryBudget.h"
 
 using namespace milvus::futures;
+
+TEST(Futures, JsonStatsBuildExecutor) {
+    auto* executor = getJsonStatsBuildExecutor();
+
+    ASSERT_NE(executor, nullptr);
+    EXPECT_NE(executor, getSearchCPUExecutor());
+    EXPECT_NE(executor, getLoadCPUExecutor());
+    EXPECT_EQ(executor->getNumPriorities(), 1);
+    EXPECT_GE(executor->numThreads(), 1);
+
+    std::promise<std::thread::id> promise;
+    auto future = promise.get_future();
+    executor->add(
+        [&promise]() { promise.set_value(std::this_thread::get_id()); });
+
+    EXPECT_NE(future.get(), std::this_thread::get_id());
+}
+
+TEST(Futures, ResizeJsonStatsBuildExecutor) {
+    auto* executor = getJsonStatsBuildExecutor();
+    auto original_thread_num = executor->numThreads();
+
+    auto status = executor_set_json_stats_build_thread_num(3);
+    ASSERT_EQ(status.error_code, milvus::Success);
+    EXPECT_EQ(executor->numThreads(), 3);
+
+    status = executor_set_json_stats_build_thread_num(0);
+    ASSERT_EQ(status.error_code, milvus::Success);
+    EXPECT_EQ(executor->numThreads(), 1);
+
+    status = executor_set_json_stats_build_thread_num(
+        static_cast<int>(original_thread_num));
+    ASSERT_EQ(status.error_code, milvus::Success);
+}
+
+TEST(Futures, SetJsonStatsBuildMemoryBudget) {
+    auto& budget = milvus::index::JsonStatsBuildMemoryBudget::GetInstance();
+    auto original_capacity = budget.CapacityBytes();
+
+    auto status = executor_set_json_stats_build_max_inflight_bytes(1234);
+    EXPECT_EQ(status.error_code, milvus::Success);
+    EXPECT_EQ(budget.CapacityBytes(), 1234);
+
+    status = executor_set_json_stats_build_max_inflight_bytes(
+        static_cast<int64_t>(original_capacity));
+    EXPECT_EQ(status.error_code, milvus::Success);
+    EXPECT_EQ(budget.CapacityBytes(), original_capacity);
+}
 
 TEST(Futures, LeakyResult) {
     {
@@ -225,4 +279,106 @@ TEST(Futures, Future) {
         ASSERT_EQ(s.error_code, milvus::FollyCancel);
         free((char*)(s.error_msg));
     }
+}
+
+namespace {
+class FutureTestEvent {
+ public:
+    void
+    signal() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        signaled_ = true;
+        cv_.notify_all();
+    }
+
+    bool
+    wait() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        return cv_.wait_for(
+            lock, std::chrono::seconds(5), [this] { return signaled_; });
+    }
+
+ private:
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    bool signaled_{false};
+};
+
+}  // namespace
+
+TEST(Futures, ReadyBeforeQueuedProducer) {
+    folly::CPUThreadPoolExecutor executor(1);
+    FutureTestEvent started, produce, release_next;
+    struct CallbackState {
+        FutureTestEvent notified;
+        std::atomic<int> first{0};
+        std::thread::id producer_thread;
+    } state;
+    auto future =
+        Future<int>::async(&executor, 0, [&](folly::CancellationToken) {
+            state.producer_thread = std::this_thread::get_id();
+            started.signal();
+            EXPECT_TRUE(produce.wait());
+            return new int(1);
+        });
+    EXPECT_TRUE(started.wait());
+    future->registerReadyCallback(
+        [](CLockedGoMutex* opaque) {
+            auto& state = *reinterpret_cast<CallbackState*>(opaque);
+            EXPECT_EQ(std::this_thread::get_id(), state.producer_thread);
+            int expected = 0;
+            state.first.compare_exchange_strong(expected, 1);
+            state.notified.signal();
+        },
+        reinterpret_cast<CLockedGoMutex*>(&state));
+    executor.add([&] {
+        int expected = 0;
+        state.first.compare_exchange_strong(expected, 2);
+        EXPECT_TRUE(release_next.wait());
+    });
+    produce.signal();
+    const bool notified = state.notified.wait();
+    // Always release the next task, including when testing the old behavior.
+    release_next.signal();
+    EXPECT_TRUE(notified);
+    EXPECT_EQ(state.first.load(), 1);
+    executor.join();
+    auto [result, status] = future->leakyGet();
+    EXPECT_EQ(status.error_code, milvus::Success);
+    delete static_cast<int*>(result);
+}
+
+TEST(Futures, ConsumeAndDestroyDuringNotification) {
+    folly::CPUThreadPoolExecutor executor(1);
+    FutureTestEvent started, produce;
+    struct CallbackState {
+        IFuture* future;
+        FutureTestEvent consumed;
+        FutureTestEvent finish;
+    } state;
+    auto future =
+        Future<int>::async(&executor, 0, [&](folly::CancellationToken) {
+            started.signal();
+            EXPECT_TRUE(produce.wait());
+            return new int(42);
+        });
+    EXPECT_TRUE(started.wait());
+    state.future = future.get();
+    future->registerReadyCallback(
+        [](CLockedGoMutex* opaque) {
+            auto& state = *reinterpret_cast<CallbackState*>(opaque);
+            EXPECT_TRUE(state.future->isReady());
+            auto [result, status] = state.future->leakyGet();
+            EXPECT_EQ(status.error_code, milvus::Success);
+            EXPECT_EQ(*static_cast<int*>(result), 42);
+            delete static_cast<int*>(result);
+            state.consumed.signal();
+            EXPECT_TRUE(state.finish.wait());
+        },
+        reinterpret_cast<CLockedGoMutex*>(&state));
+    produce.signal();
+    EXPECT_TRUE(state.consumed.wait());
+    future.reset();
+    state.finish.signal();
+    executor.join();
 }

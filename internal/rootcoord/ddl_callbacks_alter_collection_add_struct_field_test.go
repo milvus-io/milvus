@@ -18,6 +18,7 @@ package rootcoord
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -31,6 +32,24 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestValidateAddedStructFieldNameErrorClassification(t *testing.T) {
+	for _, name := range []string{"", strings.Repeat("a", Params.ProxyCfg.MaxNameLength.GetAsInt()+1), "1field", "bad name", "AND"} {
+		t.Run(name, func(t *testing.T) {
+			err := validateAddedStructFieldName(name)
+			require.ErrorIs(t, err, merr.ErrFieldInvalidName)
+			require.Equal(t, merr.InputError, merr.GetErrorType(err))
+			status := merr.Status(err)
+			require.Equal(t, int32(1701), status.GetCode())
+			require.Equal(t, err.Error(), status.GetReason())
+			require.Equal(t, "true", status.GetExtraInfo()[merr.InputErrorFlagKey])
+			require.False(t, status.GetRetriable())
+			roundTrip := merr.Error(status)
+			require.ErrorIs(t, roundTrip, merr.ErrFieldInvalidName)
+			require.Equal(t, merr.InputError, merr.GetErrorType(roundTrip))
+		})
+	}
+}
 
 func TestDDLCallbacksAlterCollectionAddStructField(t *testing.T) {
 	core := initStreamingSystemAndCore(t)

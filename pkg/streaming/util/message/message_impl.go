@@ -7,7 +7,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type messageImpl struct {
@@ -51,21 +50,6 @@ func (m *messageImpl) Payload() []byte {
 	return payload
 }
 
-// DecodePayload returns the message payload without converting decryption
-// failures into a process-wide panic. It is intended for append-path callers
-// that must reject one message when its encrypted body cannot be read.
-func DecodePayload(ctx context.Context, msg BasicMessage) ([]byte, error) {
-	if msg == nil {
-		return nil, merr.WrapErrServiceInternalMsg("message is nil")
-	}
-	if decoder, ok := msg.(interface {
-		decodePayload(context.Context) ([]byte, error)
-	}); ok {
-		return decoder.decodePayload(ctx)
-	}
-	return msg.Payload(), nil
-}
-
 func (m *messageImpl) decodePayload(ctx context.Context) ([]byte, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -78,18 +62,7 @@ func (m *messageImpl) decodePayload(ctx context.Context) ([]byte, error) {
 		return nil, err
 	}
 	if ch != nil {
-		decryptor, err := getDecryptorWithRetryContext(ctx, ch.EzId, ch.CollectionId, ch.SafeKey)
-		if err != nil {
-			return nil, err
-		}
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		payload, err := decryptor.Decrypt(m.payload)
-		if err != nil {
-			return nil, err
-		}
-		return payload, nil
+		return decryptPayloadWithRetry(ctx, ch.EzId, ch.CollectionId, ch.SafeKey, m.payload)
 	}
 	return m.payload, nil
 }
@@ -287,7 +260,8 @@ func (m *messageImpl) IntoImmutableMessage(id MessageID) ImmutableMessage {
 	// payload and id is always immutable, so we only clone the prop here is ok.
 	prop := m.properties.Clone()
 	return &immutableMessageImpl{
-		id: id,
+		id:        id,
+		bodyCache: newBodyCacheSlot(),
 		messageImpl: messageImpl{
 			payload:    m.payload,
 			properties: prop,
@@ -470,7 +444,8 @@ func CloneMutableMessage(msg MutableMessage) MutableMessage {
 
 type immutableMessageImpl struct {
 	messageImpl
-	id MessageID
+	id        MessageID
+	bodyCache *bodyCacheSlot
 }
 
 // WALName returns the name of message related wal.
@@ -514,7 +489,8 @@ func (m *immutableMessageImpl) cloneForTxnBody(timetick uint64, LastConfirmedMes
 func (m *immutableMessageImpl) clone() *immutableMessageImpl {
 	// payload and message id is always immutable, so we only clone the prop here is ok.
 	return &immutableMessageImpl{
-		id: m.id,
+		id:        m.id,
+		bodyCache: m.bodyCache,
 		messageImpl: messageImpl{
 			payload:    m.payload,
 			properties: m.properties.Clone(),

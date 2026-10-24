@@ -29,14 +29,13 @@ struct ArrowSchema;
 struct ArrowArray;
 
 typedef void* CPackedReader;
-typedef void* CArrowArray;
-typedef void* CArrowSchema;
 
 CStatus
 NewPackedReaderWithStorageConfig(char** paths,
                                  int64_t num_paths,
                                  struct ArrowSchema* schema,
                                  const int64_t buffer_size,
+                                 const bool eager_prebuffer,
                                  CStorageConfig c_storage_config,
                                  CPackedReader* c_packed_reader,
                                  CPluginContext* c_plugin_context);
@@ -46,6 +45,7 @@ NewPackedReaderWithProperties(char** paths,
                               int64_t num_paths,
                               struct ArrowSchema* schema,
                               const int64_t buffer_size,
+                              const bool eager_prebuffer,
                               const LoonProperties* c_properties,
                               const char* filesystem_path,
                               CPackedReader* c_packed_reader,
@@ -57,6 +57,11 @@ NewPackedReaderWithProperties(char** paths,
  * @param path The root path of the packed files to read.
  * @param schema The original schema of data.
  * @param buffer_size The max buffer size of the packed reader.
+ * @param eager_prebuffer When true, all byte ranges of a read are fetched
+ *        concurrently instead of one at a time. How far adjacent ranges are
+ *        coalesced is left as configured, so the requests are the ones every
+ *        other reader issues, only together. False keeps the configured lazy
+ *        reads. Same meaning for every NewPackedReader* constructor.
  * @param c_packed_reader The output pointer of the packed reader.
  */
 CStatus
@@ -64,6 +69,7 @@ NewPackedReader(char** paths,
                 int64_t num_paths,
                 struct ArrowSchema* schema,
                 const int64_t buffer_size,
+                const bool eager_prebuffer,
                 CPackedReader* c_packed_reader,
                 CPluginContext* c_plugin_context);
 
@@ -72,13 +78,15 @@ NewPackedReader(char** paths,
  *        By default, the maximum return batch is 1024 rows.
  *
  * @param c_packed_reader The packed reader to read.
- * @param out_array The output pointer of the arrow array.
- * @param out_schema The output pointer of the arrow schema.
+ * @param out_array Caller-owned array, with release == nullptr on entry.
+ *                  A null release callback on success indicates end of stream.
+ * @param out_schema Caller-owned schema, with release == nullptr on entry.
+ *                   The caller releases both outputs, including on failure.
  */
 CStatus
 ReadNext(CPackedReader c_packed_reader,
-         CArrowArray* out_array,
-         CArrowSchema* out_schema);
+         struct ArrowArray* out_array,
+         struct ArrowSchema* out_schema);
 
 /**
  * @brief Close the packed reader and release the resources.

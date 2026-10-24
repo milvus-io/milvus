@@ -23,14 +23,14 @@
 
 namespace milvus::segcore {
 
-using namespace milvus_storage::lob_column;
-
 namespace {
 
-arrow::Result<std::unique_ptr<LobColumnReader>>
-DefaultTextLobReaderFactory(std::shared_ptr<arrow::fs::FileSystem> fs,
-                            const LobColumnConfig& config) {
-    return CreateLobColumnReader(std::move(fs), config);
+arrow::Result<std::unique_ptr<milvus_storage::lob_column::LobColumnReader>>
+DefaultTextLobReaderFactory(
+    std::shared_ptr<arrow::fs::FileSystem> fs,
+    const milvus_storage::lob_column::LobColumnConfig& config) {
+    return milvus_storage::lob_column::CreateLobColumnReader(std::move(fs),
+                                                             config);
 }
 
 }  // namespace
@@ -66,7 +66,7 @@ TextColumnCache::GetOrCreateReader(
 
     file_cache_misses_.fetch_add(1, std::memory_order_relaxed);
 
-    LobColumnConfig config;
+    milvus_storage::lob_column::LobColumnConfig config;
     config.lob_base_path = lob_base_path;
     config.properties = properties;
 
@@ -79,7 +79,7 @@ TextColumnCache::GetOrCreateReader(
                   error.what());
     }
 
-    auto reader = std::shared_ptr<LobColumnReader>(
+    auto reader = std::shared_ptr<milvus_storage::lob_column::LobColumnReader>(
         std::move(reader_result).ValueOrDie().release());
     auto cached_reader =
         std::make_shared<CachedTextLobReader>(std::move(reader));
@@ -97,10 +97,11 @@ TextColumnCache::GetOrCreateReader(
 }
 
 std::vector<std::string>
-TextColumnCache::ReadBatch(const std::string& lob_base_path,
-                           std::shared_ptr<arrow::fs::FileSystem> fs,
-                           const milvus_storage::api::Properties& properties,
-                           const std::vector<EncodedRef>& encoded_refs) {
+TextColumnCache::ReadBatch(
+    const std::string& lob_base_path,
+    std::shared_ptr<arrow::fs::FileSystem> fs,
+    const milvus_storage::api::Properties& properties,
+    const std::vector<milvus_storage::lob_column::EncodedRef>& encoded_refs) {
     if (encoded_refs.empty()) {
         return {};
     }
@@ -108,7 +109,7 @@ TextColumnCache::ReadBatch(const std::string& lob_base_path,
     std::vector<std::string> results(encoded_refs.size());
     std::vector<size_t>
         pending_indices;  // Indices that need to be read from file
-    std::vector<EncodedRef> pending_refs;
+    std::vector<milvus_storage::lob_column::EncodedRef> pending_refs;
 
     for (size_t i = 0; i < encoded_refs.size(); i++) {
         const auto& ref = encoded_refs[i];
@@ -118,8 +119,9 @@ TextColumnCache::ReadBatch(const std::string& lob_base_path,
             continue;
         }
 
-        if (IsInlineData(ref.data)) {
-            results[i] = DecodeInlineText(ref.data, ref.size);
+        if (milvus_storage::lob_column::IsInlineData(ref.data)) {
+            results[i] = milvus_storage::lob_column::DecodeInlineText(ref.data,
+                                                                      ref.size);
             continue;
         }
 
@@ -160,14 +162,14 @@ TextColumnCache::ReadBatchInto(
     const std::string& lob_base_path,
     std::shared_ptr<arrow::fs::FileSystem> fs,
     const milvus_storage::api::Properties& properties,
-    const std::vector<EncodedRef>& encoded_refs,
+    const std::vector<milvus_storage::lob_column::EncodedRef>& encoded_refs,
     google::protobuf::RepeatedPtrField<std::string>* dst) {
     if (encoded_refs.empty()) {
         return;
     }
 
     std::vector<size_t> pending_indices;
-    std::vector<EncodedRef> pending_refs;
+    std::vector<milvus_storage::lob_column::EncodedRef> pending_refs;
 
     for (size_t i = 0; i < encoded_refs.size(); i++) {
         const auto& ref = encoded_refs[i];
@@ -177,8 +179,9 @@ TextColumnCache::ReadBatchInto(
             continue;
         }
 
-        if (IsInlineData(ref.data)) {
-            *dst->Mutable(i) = DecodeInlineText(ref.data, ref.size);
+        if (milvus_storage::lob_column::IsInlineData(ref.data)) {
+            *dst->Mutable(i) = milvus_storage::lob_column::DecodeInlineText(
+                ref.data, ref.size);
             continue;
         }
 
