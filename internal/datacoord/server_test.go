@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
@@ -601,6 +602,228 @@ func TestGetSegmentInfo(t *testing.T) {
 		assert.Equal(t, 1, len(resp.GetChannelCheckpoint()))
 		assert.Equal(t, mockPChannel, resp.ChannelCheckpoint[mockVChannel].ChannelName)
 		assert.Equal(t, Timestamp(1000), resp.ChannelCheckpoint[mockVChannel].Timestamp)
+	})
+}
+
+func TestGetQueryViewSegmentLoadInfos(t *testing.T) {
+	t.Run("packs complete segment load info and collection indexes", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+
+		collectionID := int64(100)
+		partitionID := int64(10)
+		segmentID := int64(1000)
+		indexID := int64(200)
+		buildID := int64(300)
+		fieldID := int64(101)
+		startPos := &msgpb.MsgPosition{ChannelName: "vchan", Timestamp: 11}
+		dmlPos := &msgpb.MsgPosition{ChannelName: "vchan", Timestamp: 22}
+		segment := &datapb.SegmentInfo{
+			ID:                          segmentID,
+			CollectionID:                collectionID,
+			PartitionID:                 partitionID,
+			InsertChannel:               "vchan",
+			State:                       commonpb.SegmentState_Flushed,
+			NumOfRows:                   100,
+			Binlogs:                     []*datapb.FieldBinlog{{FieldID: fieldID, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
+			Statslogs:                   []*datapb.FieldBinlog{{FieldID: fieldID, Binlogs: []*datapb.Binlog{{LogID: 2}}}},
+			Deltalogs:                   []*datapb.FieldBinlog{{FieldID: fieldID, Binlogs: []*datapb.Binlog{{LogID: 3}}}},
+			Bm25Statslogs:               []*datapb.FieldBinlog{{FieldID: fieldID, Binlogs: []*datapb.Binlog{{LogID: 4}}}},
+			StartPosition:               startPos,
+			DmlPosition:                 dmlPos,
+			Level:                       datapb.SegmentLevel_L1,
+			StorageVersion:              2,
+			IsSorted:                    true,
+			DataVersion:                 7,
+			CommitTimestamp:             99,
+			TransformStartAfterTimetick: 17,
+		}
+		require.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment)))
+		require.NoError(t, svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+			CollectionID: collectionID,
+			FieldID:      fieldID,
+			IndexID:      indexID,
+			IndexName:    "vec_idx",
+			IndexParams:  []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "IVF_FLAT"}},
+			UserIndexParams: []*commonpb.KeyValuePair{
+				{Key: common.MmapEnabledKey, Value: "true"},
+			},
+		}))
+		require.NoError(t, svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+			SegmentID:             segmentID,
+			CollectionID:          collectionID,
+			PartitionID:           partitionID,
+			IndexID:               indexID,
+			BuildID:               buildID,
+			IndexVersion:          4,
+			IndexState:            commonpb.IndexState_Finished,
+			IndexFileKeys:         []string{"idx/1"},
+			IndexSerializedSize:   123,
+			IndexMemSize:          456,
+			NumRows:               100,
+			CurrentIndexVersion:   5,
+			IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		}))
+
+		infos, indexInfos, err := svr.GetQueryViewSegmentLoadInfos(context.Background(), collectionID, []int64{segmentID})
+
+		require.NoError(t, err)
+		require.Len(t, infos, 1)
+		require.Len(t, indexInfos, 1)
+		info := infos[0]
+		assert.Equal(t, segmentID, info.GetSegmentID())
+		assert.Equal(t, partitionID, info.GetPartitionID())
+		assert.Equal(t, collectionID, info.GetCollectionID())
+		assert.Equal(t, "vchan", info.GetInsertChannel())
+		assert.Equal(t, startPos, info.GetStartPosition())
+		assert.Equal(t, dmlPos, info.GetDeltaPosition())
+		assert.Equal(t, datapb.SegmentLevel_L1, info.GetLevel())
+		assert.Equal(t, int64(2), info.GetStorageVersion())
+		assert.True(t, info.GetIsSorted())
+		assert.Equal(t, int32(7), info.GetDataVersion())
+		assert.Equal(t, uint64(99), info.GetCommitTimestamp())
+		assert.Equal(t, uint64(17), info.GetTransformStartAfterTimetick(), "replay starts at the segment cursor, not its DML position")
+		assert.Equal(t, commonpb.LoadPriority_HIGH, info.GetPriority())
+		assert.Contains(t, info.GetBinlogPaths()[0].GetBinlogs()[0].GetLogPath(), "/insert_log/100/10/1000/101/1")
+		assert.Contains(t, info.GetStatslogs()[0].GetBinlogs()[0].GetLogPath(), "/stats_log/100/10/1000/101/2")
+		assert.Contains(t, info.GetDeltalogs()[0].GetBinlogs()[0].GetLogPath(), "/delta_log/100/10/1000/3")
+		assert.Contains(t, info.GetBm25Logs()[0].GetBinlogs()[0].GetLogPath(), "/bm25_stats/100/10/1000/101/4")
+		stored := svr.meta.GetSegment(context.Background(), segmentID)
+		for _, logs := range [][]*datapb.FieldBinlog{stored.GetBinlogs(), stored.GetStatslogs(), stored.GetDeltalogs(), stored.GetBm25Statslogs()} {
+			assert.Empty(t, logs[0].GetBinlogs()[0].GetLogPath(), "packing a load snapshot must not mutate cached metadata")
+		}
+		require.Len(t, info.GetIndexInfos(), 1)
+		indexInfo := info.GetIndexInfos()[0]
+		assert.Equal(t, fieldID, indexInfo.GetFieldID())
+		assert.Equal(t, "vec_idx", indexInfo.GetIndexName())
+		assert.Equal(t, indexID, indexInfo.GetIndexID())
+		assert.Equal(t, buildID, indexInfo.GetBuildID())
+		assert.Contains(t, indexInfo.GetIndexParams(), &commonpb.KeyValuePair{Key: common.LoadPriorityKey, Value: commonpb.LoadPriority_HIGH.String()})
+		assert.Contains(t, indexInfo.GetIndexParams(), &commonpb.KeyValuePair{Key: common.MmapEnabledKey, Value: "true"})
+	})
+
+	t.Run("uses one consistent index metadata snapshot", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+
+		const (
+			collectionID = int64(100)
+			partitionID  = int64(10)
+			segmentID    = int64(1000)
+			indexID      = int64(200)
+			buildID      = int64(300)
+			oldFieldID   = int64(101)
+			newFieldID   = int64(102)
+		)
+		require.NoError(t, svr.meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID:                          segmentID,
+			CollectionID:                collectionID,
+			PartitionID:                 partitionID,
+			InsertChannel:               "vchan",
+			State:                       commonpb.SegmentState_Flushed,
+			TransformStartAfterTimetick: 17,
+		})))
+		require.NoError(t, svr.meta.indexMeta.CreateIndex(context.Background(), &model.Index{
+			CollectionID: collectionID,
+			FieldID:      oldFieldID,
+			IndexID:      indexID,
+			IndexName:    "old-index",
+			IndexParams: []*commonpb.KeyValuePair{{
+				Key: common.IndexTypeKey, Value: "IVF_FLAT",
+			}},
+		}))
+		require.NoError(t, svr.meta.indexMeta.AddSegmentIndex(context.Background(), &model.SegmentIndex{
+			SegmentID:    segmentID,
+			CollectionID: collectionID,
+			PartitionID:  partitionID,
+			IndexID:      indexID,
+			BuildID:      buildID,
+			IndexState:   commonpb.IndexState_Finished,
+		}))
+
+		getSegmentIndexesMock := mockey.Mock((*indexMeta).GetSegmentsIndexes).To(
+			func(meta *indexMeta, collectionID UniqueID, segmentIDs []UniqueID) map[int64]map[UniqueID]*model.SegmentIndex {
+				meta.fieldIndexLock.RLock()
+				indexes := make(map[int64]map[UniqueID]*model.SegmentIndex, len(segmentIDs))
+				for _, segmentID := range segmentIDs {
+					indexes[segmentID] = meta.getSegmentIndexes(collectionID, segmentID)
+				}
+				meta.fieldIndexLock.RUnlock()
+
+				meta.fieldIndexLock.Lock()
+				meta.indexes[collectionID][indexID] = &model.Index{
+					CollectionID: collectionID,
+					FieldID:      newFieldID,
+					IndexID:      indexID,
+					IndexName:    "new-index",
+					IndexParams: []*commonpb.KeyValuePair{{
+						Key: common.IndexTypeKey, Value: "HNSW",
+					}},
+				}
+				meta.fieldIndexLock.Unlock()
+				return indexes
+			},
+		).Build()
+		defer getSegmentIndexesMock.UnPatch()
+
+		infos, indexInfos, err := svr.GetQueryViewSegmentLoadInfos(context.Background(), collectionID, []int64{segmentID})
+
+		require.NoError(t, err)
+		require.Len(t, infos, 1)
+		require.Len(t, indexInfos, 1)
+		require.Len(t, infos[0].GetIndexInfos(), 1)
+		segmentIndex := infos[0].GetIndexInfos()[0]
+		assert.Equal(t, indexInfos[0].GetFieldID(), segmentIndex.GetFieldID())
+		assert.Equal(t, indexInfos[0].GetIndexName(), segmentIndex.GetIndexName())
+		assert.Contains(t, segmentIndex.GetIndexParams(), &commonpb.KeyValuePair{
+			Key: common.IndexTypeKey, Value: "IVF_FLAT",
+		})
+	})
+
+	t.Run("returns segment not found on missing segment", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+
+		_, _, err := svr.GetQueryViewSegmentLoadInfos(context.Background(), 100, []int64{404})
+
+		assert.ErrorIs(t, err, merr.ErrSegmentNotFound)
+	})
+
+	t.Run("preserves manifest json placeholders", func(t *testing.T) {
+		svr := newTestServer(t)
+		defer closeTestServer(t, svr)
+
+		const (
+			collectionID = int64(100)
+			partitionID  = int64(10)
+			segmentID    = int64(1000)
+			fieldID      = int64(101)
+		)
+		parentManifest := packed.MarshalManifestPath("files/insert_log/100/10/1000", 1)
+		jsonPlaceholder := &datapb.JsonKeyStats{
+			FieldID:                fieldID,
+			BuildID:                200,
+			JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion,
+		}
+		require.NoError(t, svr.meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+			ID:                          segmentID,
+			CollectionID:                collectionID,
+			PartitionID:                 partitionID,
+			State:                       commonpb.SegmentState_Dropped,
+			ManifestPath:                parentManifest,
+			TransformStartAfterTimetick: 123,
+			Deltalogs:                   []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogID: 3}}}},
+			JsonKeyStats:                map[int64]*datapb.JsonKeyStats{fieldID: jsonPlaceholder},
+			InsertChannel:               "vchan",
+		})))
+		infos, _, err := svr.GetQueryViewSegmentLoadInfos(context.Background(), collectionID, []int64{segmentID})
+
+		require.NoError(t, err)
+		require.Len(t, infos, 1)
+		assert.Equal(t, parentManifest, infos[0].GetManifestPath())
+		assert.Equal(t, uint64(123), infos[0].GetTransformStartAfterTimetick())
+		assert.Equal(t, jsonPlaceholder, infos[0].GetJsonKeyStatsLogs()[fieldID])
+		assert.Empty(t, infos[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath(), "manifest delta summaries are not legacy files")
 	})
 }
 
@@ -1578,7 +1801,8 @@ func TestGetRecoveryInfo(t *testing.T) {
 			return newMockMixCoord(), nil
 		}
 		svr.meta.AddCollection(&collectionInfo{
-			Schema: newTestSchema(),
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		binlogReq := &datapb.SaveBinlogPathsRequest{
@@ -1627,6 +1851,11 @@ func TestGetRecoveryInfo(t *testing.T) {
 			Flushed: true,
 		}
 		segment := createSegment(binlogReq.SegmentID, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Growing)
+		// Native Flush carries the WAL-proven frontier; checkpoints cannot
+		// establish a DataView publication boundary.
+		segment.TransformStartAfterTimetick = 10
+		binlogReq.GrowingTransformStartAfterTimetick = 10
+
 		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
 		assert.NoError(t, err)
 
@@ -2480,7 +2709,7 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 	t.Run("dataCoord meta set state not exists", func(t *testing.T) {
 		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)
-		svr := newTestServer(t, WithMeta(meta))
+		svr := newTestServer(t, WithMeta(t, meta))
 		defer closeTestServer(t, svr)
 		// Set segment state.
 		svr.SetSegmentState(context.TODO(), &datapb.SetSegmentStateRequest{
@@ -2613,9 +2842,15 @@ func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 
 var globalTestTikv = tikv.SetupLocalTxn()
 
-func WithMeta(meta *meta) Option {
+func WithMeta(t *testing.T, meta *meta) Option {
+	t.Helper()
 	return func(svr *Server) {
 		svr.meta = meta
+		// Production recovers imports with SegmentMeta before exposing DataViews.
+		// Inject the same complete metadata set when bypassing initMeta here.
+		var err error
+		svr.importMeta, err = NewImportMeta(svr.ctx, meta.catalog, svr.allocator, meta)
+		require.NoError(t, err)
 
 		svr.watchClient = etcdkv.NewEtcdKV(svr.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue(),
 			etcdkv.WithRequestTimeout(paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
@@ -2667,6 +2902,10 @@ func newTestServer(t *testing.T, opts ...Option) *Server {
 
 	err = svr.Init()
 	assert.NoError(t, err)
+	// This fixture runs DataCoord without a Broadcaster lifecycle. Its jobs
+	// use the collection snapshots installed by each test; schema-target tests
+	// explicitly install their preparation source on meta.
+	svr.meta.preparationSchema = nil
 
 	signal := make(chan struct{})
 	if Params.DataCoordCfg.EnableActiveStandby.GetAsBool() {
@@ -2896,7 +3135,7 @@ func Test_CheckHealth(t *testing.T) {
 		assert.NotEmpty(t, resp.Reasons)
 	})
 
-	t.Run("check checkpoint fail", func(t *testing.T) {
+	t.Run("historical checkpoint does not affect health", func(t *testing.T) {
 		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		store := newHealthStore()
@@ -2911,8 +3150,8 @@ func Test_CheckHealth(t *testing.T) {
 		ctx := context.Background()
 		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, false, resp.IsHealthy)
-		assert.NotEmpty(t, resp.Reasons)
+		assert.True(t, resp.IsHealthy)
+		assert.Empty(t, resp.Reasons)
 	})
 
 	t.Run("ok", func(t *testing.T) {
@@ -2991,54 +3230,42 @@ func Test_initGarbageCollection(t *testing.T) {
 }
 
 func TestLoadCollectionFromRootCoord(t *testing.T) {
-	broker := broker.NewMockBroker(t)
-	s := &Server{
-		broker: broker,
-		meta:   newEmptyTestMeta(),
+	for _, tc := range []struct {
+		name          string
+		describeErr   error
+		partitionsErr error
+	}{
+		{name: "missing", describeErr: merr.ErrCollectionNotFound},
+		{name: "describe unavailable", describeErr: merr.ErrServiceUnavailable},
+		{name: "partition metadata unavailable", partitionsErr: merr.ErrServiceUnavailable},
+		{name: "restoring collection is internally loadable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mockey.PatchConvey(tc.name, t, func() {
+				b := &broker.MockBroker{}
+				public := mockey.Mock((*broker.MockBroker).HasCollection).Return(false, nil).Build()
+				mockey.Mock((*broker.MockBroker).DescribeCollectionInternal).Return(&milvuspb.DescribeCollectionResponse{
+					CollectionID: 1, VirtualChannelNames: []string{"target"},
+				}, tc.describeErr).Build()
+				mockey.Mock((*broker.MockBroker).ShowPartitionsInternal).Return([]int64{2000}, tc.partitionsErr).Build()
+				s := &Server{broker: b, meta: newEmptyTestMeta()}
+				err := s.loadCollectionFromRootCoord(t.Context(), 1)
+				switch {
+				case tc.describeErr != nil:
+					assert.ErrorIs(t, err, tc.describeErr)
+				case tc.partitionsErr != nil:
+					assert.ErrorIs(t, err, tc.partitionsErr)
+				default:
+					assert.NoError(t, err)
+					coll := s.meta.GetCollection(1)
+					require.NotNil(t, coll)
+					assert.Equal(t, []int64{2000}, coll.Partitions)
+					assert.Equal(t, []string{"target"}, coll.VChannelNames)
+				}
+				assert.Zero(t, public.Times(), "public visibility must not gate internal metadata loading")
+			})
+		})
 	}
-
-	t.Run("has collection fail with error", func(t *testing.T) {
-		broker.EXPECT().HasCollection(mock.Anything, mock.Anything).
-			Return(false, errors.New("has collection error")).Once()
-		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
-		assert.Error(t, err, "has collection error")
-	})
-
-	t.Run("has collection with not found", func(t *testing.T) {
-		broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil).Once()
-		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
-		assert.Error(t, err)
-		assert.True(t, errors.Is(err, merr.ErrCollectionNotFound))
-	})
-
-	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil)
-
-	t.Run("describeCollectionInternal fail", func(t *testing.T) {
-		broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(nil, errors.New("describeCollectionInternal error")).Once()
-		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
-		assert.Error(t, err, "describeCollectionInternal error")
-	})
-
-	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		CollectionID: 1,
-	}, nil).Twice()
-
-	t.Run("ShowPartitionsInternal fail", func(t *testing.T) {
-		broker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).
-			Return(nil, errors.New("ShowPartitionsInternal error")).Once()
-		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
-		assert.Error(t, err, "ShowPartitionsInternal error")
-	})
-
-	broker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return([]int64{2000}, nil).Once()
-	t.Run("ok", func(t *testing.T) {
-		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
-		assert.NoError(t, err)
-		assert.Equal(t, 1, len(s.meta.ListCollections()))
-		coll := s.meta.GetCollection(1)
-		assert.NotNil(t, coll)
-	})
 }
 
 func TestUpdateAutoBalanceConfigLoop(t *testing.T) {

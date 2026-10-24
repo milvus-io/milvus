@@ -34,6 +34,7 @@ func (impl *timeTickAppendInterceptor) Name() string {
 // Do implements AppendInterceptor.
 func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (msgID message.MessageID, err error) {
 	cm := impl.operator.MVCCManager()
+	var txnSession *txn.TxnSession
 	defer func() {
 		if err == nil {
 			// the cursor manager should beready since the timetick interceptor is ready.
@@ -42,7 +43,6 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 	}()
 
 	ackManager := impl.operator.AckManager()
-	var txnSession *txn.TxnSession
 	var immutableMsg message.ImmutableMessage
 	if msg.MessageType() != message.MessageTypeTimeTick && msg.MessageType() != message.MessageTypeMVCCBarrier {
 		// Allocate new timestamp acker for message.
@@ -107,7 +107,7 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 					return
 				}
 				// perform keepalive for the transaction session if append success.
-				txnSession.AddNewMessageDoneAndKeepalive(msg.TimeTick())
+				txnSession.AddNewMessageDoneAndKeepalive(msg.TimeTick(), msg.MessageType())
 			}()
 		}
 	}

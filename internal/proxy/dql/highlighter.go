@@ -13,8 +13,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
-	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/util/function/highlight"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -320,7 +320,7 @@ func NewLexicalHighlighter(highlighter *commonpb.Highlighter) (*LexicalHighlight
 type lexicalHighlightOperator struct {
 	tasks     []*highlightTask
 	schema    *schemaInfo
-	lbPolicy  shardclient.LBPolicy
+	metaCache metacache.Cache
 	scheduler *scheduler.TaskScheduler
 
 	collectionName string
@@ -331,7 +331,7 @@ type lexicalHighlightOperator struct {
 func newLexicalHighlightOperator(t *SearchTask, tasks []*highlightTask) (operator, error) {
 	return &lexicalHighlightOperator{
 		tasks:          tasks,
-		lbPolicy:       t.lb,
+		metaCache:      t.GetMetaCache(),
 		scheduler:      t.sched,
 		schema:         t.schema,
 		collectionName: t.request.CollectionName,
@@ -458,9 +458,11 @@ func (op *lexicalHighlightOperator) run(ctx context.Context, span trace.Span, in
 		}
 	}
 
+	readSchemaVersion := op.schema.GetVersion()
 	task := &HighlightTask{
+		readSchemaVersion:   &readSchemaVersion,
 		ctx:                 ctx,
-		lb:                  op.lbPolicy,
+		baseTask:            baseTask{MetaCache: op.metaCache},
 		Condition:           NewTaskCondition(ctx),
 		GetHighlightRequest: req,
 		collectionName:      op.collectionName,

@@ -356,3 +356,46 @@ func TestGlobalOptimizerIDFResourceErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestGlobalOptimizerMinHash(t *testing.T) {
+	const collectionID = int64(99001)
+	const key = "minhash-search-test"
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+		{FieldID: 102, Name: "hash", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+	}, Functions: []*schemapb.FunctionSchema{{
+		Name: "minhash", Type: schemapb.FunctionType_MinHash,
+		InputFieldIds: []int64{101}, OutputFieldIds: []int64{102}, InputFieldNames: []string{"text"}, OutputFieldNames: []string{"hash"},
+		Params: []*commonpb.KeyValuePair{{Key: function.NumHashesKey, Value: "4"}, {Key: function.ShingleSizeKey, Value: "1"}},
+	}}}
+	require.NoError(t, function.GetManager().Alloc(collectionID, key, schema))
+	defer function.GetManager().Release(collectionID, key)
+	optimizer := NewGlobalOptimizer(NewQueryRuntime(), key)
+	for _, advanced := range []bool{false, true} {
+		req := testBM25SearchRequest(t, collectionID, 101, 102)
+		req.MetricType = metric.MHJACCARD
+		if advanced {
+			req = &internalpb.SearchRequest{CollectionID: collectionID, IsAdvanced: true, SubReqs: []*internalpb.SubSearchRequest{{
+				FieldId: 102, MetricType: req.MetricType, PlaceholderGroup: req.PlaceholderGroup, SerializedExprPlan: req.SerializedExprPlan,
+			}}}
+		}
+		_, err := optimizer.OptimizeSearch(t.Context(), req)
+		require.NoError(t, err)
+		data := req.PlaceholderGroup
+		if advanced {
+			data = req.SubReqs[0].PlaceholderGroup
+		}
+		holder := &commonpb.PlaceholderGroup{}
+		require.NoError(t, proto.Unmarshal(data, holder))
+		require.Equal(t, commonpb.PlaceholderType_BinaryVector, holder.Placeholders[0].Type)
+		require.Len(t, holder.Placeholders[0].Values[0], 16)
+	}
+	req := testBM25SearchRequest(t, collectionID, 101, 102)
+	req.MetricType = metric.L2
+	_, err := optimizer.OptimizeSearch(t.Context(), req)
+	require.Error(t, err)
+	req.MetricType = metric.MHJACCARD
+	req.PlaceholderGroup = []byte{255}
+	_, err = optimizer.OptimizeSearch(t.Context(), req)
+	require.Error(t, err)
+}

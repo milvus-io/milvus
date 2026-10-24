@@ -473,6 +473,7 @@ proxy:
   roleNameValidation:
     allowedChars: $ # Additional characters allowed in role names beyond underscores, letters and numbers. Add '-' to allow hyphens in role names.
   maxTaskNum: 1024 # The maximum number of tasks in the task queue of the proxy.
+  enableAutoLoad: false # whether to automatically load an unloaded collection before DQL requests
   ddlConcurrency: 16 # The concurrent execution number of DDL at proxy.
   dclConcurrency: 16 # The concurrent execution number of DCL at proxy.
   mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
@@ -620,6 +621,11 @@ queryCoord:
   dispatchInterval: 500
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
   loadTimeoutSeconds: 600
+  autoRelease:
+    enabled: false # whether QueryCoord releases collections after an idle TTL; effective only when proxy.enableAutoLoad is true
+    idleTTLSeconds: 600
+    checkIntervalSeconds: 30
+    releaseConcurrency: 16 # maximum concurrent automatic collection releases in one scan; changes apply to the next release batch
   distRequestTimeout: 5000 # the request timeout for querycoord fetching data distribution from querynodes, in milliseconds
   heatbeatWarningLag: 5000 # the lag value for querycoord report warning when last heatbeat is too old, in milliseconds
   enableDataDistributionDelta: true # whether querycoord requests delta data distribution reports from querynodes
@@ -650,6 +656,9 @@ queryCoord:
     enabled: false # Whether QueryCoord load resource precheck can use autoscale upper bounds to admit a load request when current QueryNode capacity is insufficient. This is effective only when precheckEnabled is true and tiered eviction is disabled.
     maxMemoryLimit: 0 # Maximum global QueryNode memory capacity after autoscale, unit: GiB (1 GiB = 1024^3 bytes). 0 means autoscale cannot add memory capacity.
     maxDiskLimit: 0 # Maximum sum of Worker QueryNode LOCAL_STORAGE_SIZE after autoscale, unit: GiB (1 GiB = 1024^3 bytes). 0 means autoscale cannot add disk capacity.
+  queryView:
+    fullReconsileInterval: 10 # Interval in seconds for periodic QueryView full reconciliation.
+    targetRowsPerShardNode: 100000 # Target number of sealed rows per QueryNode used to derive the free fanout budget for each QueryView shard. Must be positive. Changes take effect on the next reconciliation.
   cleanExcludeSegmentInterval: 60 # the time duration of clean pipeline exclude segment which used for filter invalid data, in seconds
   ip:  # TCP/IP address of queryCoord. If not specified, use the first unicastable address
   port: 19531 # TCP port of queryCoord
@@ -826,6 +835,9 @@ queryNode:
     preload: true # Whether to parse and merge BM25 stats into current during load before first target. When false, stats are only written to disk and loaded on first SyncDistribution.
     readBufferSize: 4194304 # Read buffer size in bytes for streaming BM25 stats from remote storage. Reduces per-read overhead through the storage SDK.
     bm25StatsBytesPerEntry: 20 # Estimated memory cost (bytes) per entry in BM25 stats rowsWithToken map for memory accounting. Empirical measurement: 12-19.5 bytes/entry depending on map fill ratio. Increase if cache eviction is too lax; decrease to load more segments concurrently.
+  queryView:
+    segmentCatchupConcurrency: 4 # Maximum number of concurrent QueryView sealed segment TransformLog catch-up tasks on each QueryNode.
+    transformLogDrainConcurrency: 4 # Maximum number of concurrent QueryView TransformLog backlog drain tasks on each QueryNode.
   ip:  # TCP/IP address of queryNode. If not specified, use the first unicastable address
   port: 21123 # TCP port of queryNode
   grpc:
@@ -1100,13 +1112,6 @@ dataNode:
     # if this parameter <= 0, will set it as the maximum number of CPUs that can be executing
     # suggest to set it bigger on large collection numbers to avoid blocking
     workPoolSize: -1
-    # specify the size of global work pool for channel checkpoint updating
-    # if this parameter <= 0, will set it as 10
-    updateChannelCheckpointMaxParallel: 10
-    updateChannelCheckpointInterval: 60 # the interval duration(in seconds) for datanode to update channel checkpoint of each channel
-    updateChannelCheckpointRPCTimeout: 20 # timeout in seconds for UpdateChannelCheckpoint RPC call
-    maxChannelCheckpointsPerPRC: 128 # The maximum number of channel checkpoints per UpdateChannelCheckpoint RPC.
-    channelCheckpointUpdateTickInSeconds: 10 # The frequency, in seconds, at which the channel checkpoint updater executes updates.
   import:
     concurrencyPerCPUCore: 4 # The execution concurrency unit for import/pre-import tasks per CPU core.
     maxImportFileSizeInGB: 16 # The maximum file size (in GB) for an import file, where an import file refers to either a Row-Based file or a set of Column-Based files.
@@ -1699,7 +1704,33 @@ queryView:
   idfOracle:
     lazyLoadSealedStats: false # Whether QueryView IDF runtimes defer sealed BM25 resource discovery and stats materialization until the first BM25 search.
     sealedStatsLoadConcurrencyRatio: 4 # Maximum process-wide concurrency for loading sealed BM25 stats, expressed as a ratio of CPU cores.
-  leaseDuration: 60s # Renewable SN Up-view retention after query access. Delays normal Down; non-positive durations disable timed retention. Not refreshable.
+  leaseDuration: 5s # Renewable SN Up-view retention after query access. Delays normal Down; non-positive durations disable timed retention. Not refreshable.
+  logicalSize:
+    source: rowCount # LogicalSize source: rowCount uses physical rows; insertBytes uses ceil(segment insert_binlog_size / bytesPerUnit). Unsupported values use rowCount. Missing size falls back to rows, then segmentBaseCost is added. Sampled once when the DataView manager is initialized; requires coordinator restart.
+    bytesPerUnit: 64KB # Bytes per logical unit for the insertBytes source, parsed as a size (for example 64KB or 1MB). Non-positive or invalid values use 64KB. Sampled once when the DataView manager is initialized; requires coordinator restart. Missing segment size estimates one unit per physical row.
+    segmentBaseCost: 16 # Non-negative fixed cost in logical units added to physical rows or normalized segment bytes when building each new DataView LogicalSize. Changes apply on the next DataView update, never to existing snapshots. Invalid values retain the last valid sampled cost; zero disables the fixed cost.
+  balancer:
+    reconcileInterval: 1m # Positive duration with a unit between periodic reconciles. Decrease for faster convergence and more coordinator work; increase to reduce scan frequency. Events reconcile independently.
+    optimization:
+      enabled: true # Enables optional placement optimization. Disable to stop optional movement; mandatory recovery, version updates and releases continue independently of queryCoord.autoBalance.
+      minScoreGain: 1 # Positive minimum net weighted score gain after movement and loading costs for optional optimization. Increase to reject marginal moves; decrease to accept smaller improvements.
+      maxCandidateEvaluationsPerShard: 100000 # Positive maximum optional candidate evaluations per shard pass. Increase to search more candidates at higher CPU cost; decrease to yield earlier and continue on a later reconcile. Mandatory placement is not capped.
+    scoring:
+      targetLogicalSizePerNode: 100000 # Positive concentration scale in logical size units for preferred shard fanout and the collection concentration floor. Increase to favor fewer participants; decrease to favor spreading. Not a capacity limit.
+      resourceGroup:
+        weight: 1 # Weight of RG load-band improvement. Increase to favor reducing aggregate logical-size skew over local concentration and loading cost.
+        relativeTolerance: 0.1 # Fractional RG load tolerance, in [0,1). Increase to accept more relative skew and reduce movement; decrease to pursue closer logical-size balance.
+        absoluteTolerance: 100000 # Positive minimum RG tolerance in logical size units. Increase to keep tiny shards concentrated at low total volume; decrease to rebalance smaller absolute load differences.
+      concentration:
+        shardWeight: 1 # Weight of excess shard logical size units on one node. Increase to spread large shards more strongly; small shards within their preferred footprint receive no spreading reward.
+        collectionWeight: 1 # Weight of excess collection-replica logical size units on one node. Increase to distribute large collections made of many small shards more evenly.
+        relativeTolerance: 0.1 # Fractional allowance above shard and collection concentration targets. Increase to retain more concentrated layouts; decrease to spread large data more strongly.
+      fanout:
+        weight: 1 # Weight of net excess shard fanout. Increase to favor consolidation and fewer query participants; decrease to permit wider spreading.
+        hysteresis: 0.1 # Fractional growth/shrink margin for preferred fanout, in [0,1). Increase to reduce fanout changes near size boundaries; decrease to react sooner to data growth and shrinkage.
+      movement:
+        moveCostPerUnit: 0.02 # Cost multiplier on published LogicalSize whose node changes. Increase to reduce movement; decrease to accept smaller placement improvements, even when destination resources already exist.
+        loadCostPerUnit: 0.08 # Additional cost multiplier on logical size units needing a compatible destination load. Increase to favor protected ready-resource reuse; decrease to favor balance despite additional loading.
 
 # Any configuration related to the streaming service.
 streaming:
@@ -1810,6 +1841,10 @@ streaming:
       lowWatermark: 4g # RecoveryStorage releases WAL append pressure after the unpublished WAL tail falls to this logical size.
       softWatermark: 8g # RecoveryStorage requests VChannel persistence and slows WAL append after the unpublished WAL tail reaches this logical size.
       highWatermark: 16g # RecoveryStorage rejects new DML append after the unpublished WAL tail reaches this logical size.
+  transformLog:
+    catchupConcurrencyPerStream: 4 # Maximum number of TransformLog subscriptions catching up concurrently on each stream.
+  queryView:
+    liveEventDispatchConcurrencyPerPChannel: 4 # Maximum number of QueryRuntimes dispatching live events concurrently on each PChannel.
   replication:
     pendingMessagesQueueLength: 128 # The capacity of pending message queue for each replication stream client.
     pendingMessagesQueueMaxSize: 134217728 # The maximum size (in bytes) of pending message queue for each replication stream client. Default is 128MB.

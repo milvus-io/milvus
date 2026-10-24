@@ -20,14 +20,16 @@ are split by responsibility:
 - [VChannel Recovery Module](vchannel_view_module.md)
 - [Segment View Component](segment_view_module.md)
 - [L0 Materializer](l0_materializer.md)
-- [TransformLog Subscription Adaptor](transform_log.md) (future integration)
+- [TransformLog Subscription Adaptor](transform_log.md)
 - [WALSummary](summary.md)
 - [Broadcast Ack Module](broadcast_ack_module.md)
 - [StreamingNode VChannel WAL Input View](streamingnode_vchannel_wal_view.md)
 
 **Current runtime:** [WAL L0 Materializer](l0_materializer.md) retains Delete
 handles for legacy query recovery. The [Summary consumer](summary_l0_materializer.md)
-is retained for future QueryView wiring; the two implementations are not run together.
+is retained as an unwired alternative; QueryView resource preparation and
+execution already use the summary-backed subscription adaptor independently of
+L0 materialization. The two L0 implementations are not run together.
 
 ## 1. Goals
 
@@ -99,9 +101,9 @@ The checkpoint is the only:
 
 There is no Meta checkpoint, Data checkpoint, DataBarrier, or recovery mode.
 `Metrics().RecoveryTimeTick` currently reports Tracker completion, which can be
-ahead of Summary confirmation and published progress. The compatibility
-DataCoord VChannel checkpoint updater reports flush progress, not a second WAL
-recovery cursor.
+ahead of Summary confirmation and published progress. There is no periodic
+DataCoord VChannel checkpoint reporter. Streaming Flush completes through
+consuming-side acknowledgements, independently of global checkpoint publication.
 
 ## 4. Component Snapshot Checkpoints
 
@@ -195,7 +197,7 @@ raw WAL message M
        -> PChannel/VChannel metadata
        -> affected SegmentViews and L1 materialization bound
        -> WALMaterializer.ObserveMessage retains Delete/explicit Flush handles
-       -> QueryRuntime plain immutable event (future integration)
+       -> QueryRuntime ordered immutable live event
   -> D.Release()
   -> BroadcastAck.Accept(O)
   -> all retained work and Coordinator Ack succeed without poison
@@ -262,4 +264,4 @@ feature branch receives a reader, writer, migration path, or fallback.
 12. Summary installs readable records before VChannel observation; this does not
     require Summary persistence.
 13. The current L0 consumer rebuilds unfinished Delete handles from WAL replay.
-    Only the future Summary consumer needs a barrier to expose pre-checkpoint Deletes.
+    The alternative Summary L0 consumer needs a barrier to expose pre-checkpoint Deletes.

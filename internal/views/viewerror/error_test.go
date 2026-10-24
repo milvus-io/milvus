@@ -59,3 +59,23 @@ func TestViewErrorPreservesTransportCancellation(t *testing.T) {
 	require.False(t, AsViewError(client).IsRetryable())
 	require.Equal(t, plain.Error(), AsViewError(plain).Cause)
 }
+
+func TestBusinessErrorSurvivesQueryViewRPCHops(t *testing.T) {
+	for _, cause := range []error{
+		merr.WrapErrParameterInvalidMsg("function chain output must be numeric"),
+		merr.WrapErrServiceUnavailable("resource preparation is not ready"),
+	} {
+		original := merr.Status(cause)
+		decoded := cause
+		for range 2 { // Worker -> SN -> Proxy must preserve the same cause.
+			wire := NewGRPCStatusFromError(decoded).Err()
+			decoded = ConvertViewError("SearchOnView", wire)
+			actual := merr.Status(decoded)
+			require.Equal(t, original.GetCode(), actual.GetCode())
+			require.Equal(t, original.GetErrorCode(), actual.GetErrorCode())
+			require.Equal(t, original.GetExtraInfo(), actual.GetExtraInfo())
+			require.Contains(t, actual.GetReason(), cause.Error())
+			require.False(t, AsViewError(decoded).IsRetryable())
+		}
+	}
+}

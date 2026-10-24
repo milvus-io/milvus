@@ -1014,7 +1014,7 @@ func TestInterceptorClearsExpiredTxnInsertResultsOnIdleChannel(t *testing.T) {
 	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
 	_, err = interceptor.DoAppend(ctx, body, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
 		require.NoError(t, session.AddNewMessage(ctx, baseTimeTick))
-		session.AddNewMessageDoneAndKeepalive(baseTimeTick)
+		session.AddNewMessageDoneAndKeepalive(baseTimeTick, message.MessageTypeInsert)
 		utility.ReplaceAppendResultTimeTick(ctx, baseTimeTick)
 		return newTestMessageID(10), nil
 	})

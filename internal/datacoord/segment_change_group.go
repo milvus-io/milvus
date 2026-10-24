@@ -265,6 +265,7 @@ func loadableSegmentOf(seg *SegmentInfo) (dataview.LoadableSegment, error) {
 		PartitionID:     seg.GetPartitionID(),
 		ManifestVersion: manifestVersion,
 		RowNum:          seg.GetNumOfRows(),
+		Size:            seg.GetStats().GetInsertBinlogSize(),
 	}, nil
 }
 

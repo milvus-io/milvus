@@ -51,8 +51,9 @@ func (v *VersionedStreamingNodeAssignments) PChannelOfCChannel() string {
 
 // StreamingNodeAssignment is the relation between server and channels.
 type StreamingNodeAssignment struct {
-	NodeInfo StreamingNodeInfo
-	Channels map[string]PChannelInfo
+	NodeInfo          StreamingNodeInfo
+	Channels          map[string]PChannelInfo
+	SecondaryChannels map[string]PChannelInfo
 }
 
 // NewStreamingNodeInfoFromProto creates a StreamingNodeInfo from proto.

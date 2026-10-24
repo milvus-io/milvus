@@ -458,7 +458,7 @@ class Expr : public std::enable_shared_from_this<Expr> {
     // SetSnapshot; the recorder is owned by the plan and outlives the task.
     // Default no-op for expressions that do not choose an execution path.
     virtual void
-    SetFeatureRecorder(FeatureRecorder* recorder) {
+    SetFeatureRecorder(FeatureRecorder* recorder, const Schema& schema) {
     }
 
  protected:
@@ -515,13 +515,11 @@ class SegmentExpr : public Expr {
 
     void
     InitSegmentExpr() {
-        auto schema = segment_->get_schema_snapshot();
-        auto& field_meta = (*schema)[field_id_];
+        auto field_meta = segment_->get_field_meta(field_id_);
         field_type_ = field_meta.get_data_type();
         is_nullable_ = field_meta.is_nullable();
 
-        if (schema->get_primary_field_id().has_value() &&
-            schema->get_primary_field_id().value() == field_id_ &&
+        if (segment_->is_primary_field(field_id_) &&
             IsPrimaryKeyDataType(field_meta.get_data_type())) {
             is_pk_field_ = true;
             pk_type_ = field_meta.get_data_type();
@@ -583,12 +581,12 @@ class SegmentExpr : public Expr {
     // predicate the plan parser merges in (MergeExprWithNamespace) are not
     // user filters, so an expression on either field records nothing.
     void
-    SetFeatureRecorder(FeatureRecorder* recorder) override {
+    SetFeatureRecorder(FeatureRecorder* recorder,
+                       const Schema& schema) override {
         if (recorder == nullptr) {
             feature_recorder_ = nullptr;
             return;
         }
-        const auto& schema = *segment_->get_schema_snapshot();
         auto ttl_field = schema.get_ttl_field_id();
         auto namespace_field = schema.get_namespace_field_id();
         const bool internal =
@@ -3192,8 +3190,8 @@ class SegmentExpr : public Expr {
                 // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
                 // NOT ScalarIndex<ArrayView>
                 if constexpr (std::is_same_v<T, ArrayView>) {
-                    auto schema = segment_->get_schema_snapshot();
-                    auto element_type = (*schema)[field_id_].get_element_type();
+                    auto element_type =
+                        segment_->get_field_meta(field_id_).get_element_type();
                     switch (element_type) {
                         case DataType::BOOL: {
                             return ProcessIndexChunksForValid<bool>();
@@ -3260,8 +3258,8 @@ class SegmentExpr : public Expr {
                 // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
                 // NOT ScalarIndex<ArrayView>
                 if constexpr (std::is_same_v<T, ArrayView>) {
-                    auto schema = segment_->get_schema_snapshot();
-                    auto element_type = (*schema)[field_id_].get_element_type();
+                    auto element_type =
+                        segment_->get_field_meta(field_id_).get_element_type();
                     switch (element_type) {
                         case DataType::BOOL: {
                             return ProcessChunksForValidByOffsets<bool>(
@@ -3653,6 +3651,16 @@ class SegmentExpr : public Expr {
             if (req.reader != RequiredReader::JsonPath && req.is_json_field) {
                 const auto cast = JsonCastForRequirement(req);
                 if (!cast.has_value()) {
+                    ClearSelectedIndex();
+                    exec_path_ = ExprExecPath::RawData;
+                    return false;
+                }
+                // JsonFlat postings flatten array elements into the same path
+                // as scalar values. They cannot answer scalar predicates exactly
+                // (including NULL/type validity and negation). Use raw JSON until
+                // the reader can distinguish the path's actual value shape.
+                if (entry->value_type == DataType::JSON &&
+                    !req.json_array_cast) {
                     ClearSelectedIndex();
                     exec_path_ = ExprExecPath::RawData;
                     return false;

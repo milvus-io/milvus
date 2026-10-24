@@ -15,6 +15,11 @@ import (
 
 // VChannelWALView is the vchannel-owned WAL input view for one query view.
 type VChannelWALView struct {
+	// CaptureQueryView captures a fresh snapshot and registers its consumer under
+	// the VChannel owner lock. The callback must not perform I/O.
+	CaptureQueryView func(*viewpb.QueryViewMeta, func(VChannelWALView)) bool
+	RuntimeContext   context.Context
+
 	// WithResourceEventLock orders a barrier after all already observed WAL events.
 	WithResourceEventLock func(func())
 	ResourceEventBarrier  func(context.Context) error
@@ -32,10 +37,14 @@ type VChannelWALView struct {
 	LoadInfoVersion uint64
 	// PartitionIDs is nil for an unrestricted legacy snapshot. A non-nil empty
 	// list means load metadata was resolved and no partitions are loaded.
-	PartitionIDs []int64
-	LoadFields   []*messagespb.LoadFieldConfig
-	IndexInfos   []*indexpb.IndexInfo
-	Schema       *schemapb.CollectionSchema
+	PartitionIDs         []int64
+	LoadFields           []*messagespb.LoadFieldConfig
+	RequiredFields       []*messagespb.LoadFieldConfig
+	SkipLoadDynamicField bool
+	IndexInfos           []*indexpb.IndexInfo
+	Schema               *schemapb.CollectionSchema
+	// WriteSchema is the allocation/encoding frontier, independent of the read view.
+	WriteSchema *schemapb.CollectionSchema
 
 	SegmentSnapshot                VisibleSegmentSnapshot
 	TransformLogStream             wal.TransformLogStream

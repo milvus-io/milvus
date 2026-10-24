@@ -176,7 +176,7 @@ func TestPartialUpdateVersionlessInsertWithoutSchemaFailsClosed(t *testing.T) {
 				require.False(t, appended)
 				// The rejected body never reached the WAL and left no write set.
 				_, err = env.append(newCommitTxnMessage("v1", result.TxnCtx.TxnID, 0), nil)
-				require.NoError(t, err)
+				require.ErrorContains(t, err, "cannot commit an empty transaction")
 			case "recovered_transaction":
 				// The durable body's PK descriptor cannot be resolved, so the
 				// transaction is incomplete and its commit is rejected before

@@ -45,7 +45,7 @@
 namespace milvus::query {
 
 void
-SearchOnSealedIndex(const Schema& schema,
+SearchOnSealedIndex(const FieldMeta& field,
                     const index::IVectorReader& reader,
                     const SearchInfo& search_info,
                     const void* query_data,
@@ -54,7 +54,6 @@ SearchOnSealedIndex(const Schema& schema,
                     const BitsetView& bitset,
                     milvus::OpContext* op_context,
                     SearchResult& search_result) {
-    const auto* schema_ptr = &schema;
     // The reader stays pinned for the lifetime of the SearchResult that owns
     // the recreator.
     const auto* reader_ptr = &reader;
@@ -66,7 +65,7 @@ SearchOnSealedIndex(const Schema& schema,
         }
         search_result.SetVectorSearchProvider(
             bitset,
-            [schema_ptr,
+            [field,
              reader_ptr,
              phase1_search_info = search_info,
              query_data,
@@ -76,7 +75,7 @@ SearchOnSealedIndex(const Schema& schema,
                          int64_t remaining_topk,
                          SearchResult& filtered_result) {
                 SearchOnSealedIndex(
-                    *schema_ptr,
+                    field,
                     *reader_ptr,
                     StrictGroupSearchInfo(phase1_search_info, remaining_topk),
                     query_data,
@@ -91,7 +90,6 @@ SearchOnSealedIndex(const Schema& schema,
     auto topK = search_info.topk_;
 
     auto field_id = search_info.field_id_;
-    auto& field = schema[field_id];
     if (field.get_data_type() == DataType::VECTOR_ARRAY &&
         field.is_element_nullable()) {
         ThrowInfo(NotImplemented,
@@ -165,7 +163,7 @@ SearchOnSealedIndex(const Schema& schema,
 }
 
 void
-SearchOnSealedColumn(const Schema& schema,
+SearchOnSealedColumn(const FieldMeta& field,
                      ChunkedColumnInterface* column,
                      const SearchInfo& search_info,
                      const std::map<std::string, std::string>& index_info,
@@ -176,7 +174,6 @@ SearchOnSealedColumn(const Schema& schema,
                      const BitsetView& bitview,
                      milvus::OpContext* op_context,
                      SearchResult& result) {
-    const auto* schema_ptr = &schema;
     auto register_vector_search_provider = [&] {
         if (!result.allow_filtered_vector_search_ ||
             !CanUseStrictGroupSearch(search_info, num_queries) ||
@@ -185,7 +182,7 @@ SearchOnSealedColumn(const Schema& schema,
         }
         result.SetVectorSearchProvider(
             bitview,
-            [schema_ptr,
+            [field,
              column,
              phase1_search_info = search_info,
              phase1_index_info = index_info,
@@ -197,7 +194,7 @@ SearchOnSealedColumn(const Schema& schema,
                          int64_t remaining_topk,
                          SearchResult& filtered_result) {
                 SearchOnSealedColumn(
-                    *schema_ptr,
+                    field,
                     column,
                     StrictGroupSearchInfo(phase1_search_info, remaining_topk),
                     phase1_index_info,
@@ -212,7 +209,6 @@ SearchOnSealedColumn(const Schema& schema,
     };
 
     auto field_id = search_info.field_id_;
-    auto& field = schema[field_id];
     if (field.get_data_type() == DataType::VECTOR_ARRAY &&
         field.is_element_nullable()) {
         ThrowInfo(NotImplemented,

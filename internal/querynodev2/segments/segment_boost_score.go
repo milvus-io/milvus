@@ -71,6 +71,10 @@ func computeScorerScoresOnChunkedOffsets(
 		}
 		defer segment.ptrLock.Unpin()
 		csegment = segment.csegment
+	case *sealedReadState:
+		// The query operation owns this exact read state and its schema until
+		// scoring (including native asynchronous cleanup) has completed.
+		csegment = segment.native
 	case *viewQueryGrowingSegment:
 		// SearchOnView retains the owning handles until scoring completes.
 		csegment = segment.csegment

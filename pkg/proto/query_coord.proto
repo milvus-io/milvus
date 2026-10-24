@@ -14,6 +14,7 @@ import "msg.proto";
 import "data_coord.proto";
 import "index_coord.proto";
 
+
 service QueryCoord {
     rpc GetQueryViewLoadInfo(GetQueryViewLoadInfoRequest) returns (GetQueryViewLoadInfoResponse) {}
     rpc ShowLoadCollections(ShowCollectionsRequest)
@@ -38,6 +39,10 @@ service QueryCoord {
         returns (GetPartitionStatesResponse) {
     }
     rpc GetLoadSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {
+    }
+
+    rpc WatchQueryViewSegmentLoadInfo(stream WatchQueryViewSegmentLoadInfoRequest)
+        returns (stream WatchQueryViewSegmentLoadInfoResponse) {
     }
     rpc LoadBalance(LoadBalanceRequest) returns (common.Status) {
     }
@@ -106,6 +111,7 @@ service QueryCoord {
   rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
   rpc ComputePhraseMatchSlop(ComputePhraseMatchSlopRequest) returns(ComputePhraseMatchSlopResponse){}
   rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(ValidateAnalyzerResponse){}
+  rpc EnsureCollectionReady(EnsureCollectionReadyRequest) returns (common.Status) {}
 }
 
 service QueryNode {
@@ -260,6 +266,8 @@ message LoadCollectionRequest {
     repeated string resource_groups = 8;
     repeated int64 load_fields = 9;
     common.LoadPriority priority = 10;
+    optional bool load_all_fields = 11;
+    bool skip_load_dynamic_field = 12;
 }
 
 message ReleaseCollectionRequest {
@@ -292,6 +300,8 @@ message LoadPartitionsRequest {
     repeated index.IndexInfo index_info_list = 10;
     repeated int64 load_fields = 11;
     common.LoadPriority priority = 12;
+    optional bool load_all_fields = 13;
+    bool skip_load_dynamic_field = 14;
 }
 
 message ReleasePartitionsRequest {
@@ -323,6 +333,64 @@ message GetSegmentInfoRequest {
 message GetSegmentInfoResponse {
     common.Status status = 1;
     repeated SegmentInfo infos = 2;
+}
+
+message GetQueryViewLoadInfoRequest {
+    common.MsgBase base = 1;
+    int64 collectionID = 2;
+    uint64 version = 3;
+}
+
+message GetQueryViewLoadInfoResponse {
+    common.Status status = 1;
+    int64 collectionID = 2;
+    uint64 version = 3;
+    repeated int64 partitionIDs = 4;
+    repeated messages.LoadFieldConfig load_fields = 5;
+    repeated index.IndexInfo index_info_list = 6;
+    repeated messages.LoadFieldConfig required_fields = 7; // Internal explicit query field scope, independent of load_fields hints.
+    bool skip_load_dynamic_field = 8; // Preload hint only.
+}
+
+message QueryViewSegmentLoadInfoRevision {
+    uint64 load_info_revision = 1;
+}
+
+message WatchQueryViewSegmentLoadInfoSubscription {
+    int64 collectionID = 1;
+    int64 segmentID = 2;
+    QueryViewSegmentLoadInfoRevision revision = 3;
+}
+
+message WatchQueryViewSegmentLoadInfoUnsubscription {
+    int64 collectionID = 1;
+    int64 segmentID = 2;
+}
+
+message WatchQueryViewSegmentLoadInfoRequest {
+    common.MsgBase base = 1;
+    repeated WatchQueryViewSegmentLoadInfoSubscription subscribe = 2;
+    repeated WatchQueryViewSegmentLoadInfoUnsubscription unsubscribe = 3;
+}
+
+message QueryViewSegmentLoadInfoSnapshot {
+    int64 collectionID = 1;
+    int64 segmentID = 2;
+    QueryViewSegmentLoadInfoRevision revision = 3;
+    SegmentLoadInfo load_info = 4;
+}
+
+// Shared once per collection within each response; snapshots in that response
+// resolve their collection's current index definitions from this table.
+message QueryViewCollectionIndexes {
+    int64 collectionID = 1;
+    repeated index.IndexInfo index_info_list = 2;
+}
+
+message WatchQueryViewSegmentLoadInfoResponse {
+    common.Status status = 1;
+    repeated QueryViewSegmentLoadInfoSnapshot snapshots = 2;
+    repeated QueryViewCollectionIndexes collection_indexes = 3;
 }
 
 message GetShardLeadersRequest {
@@ -463,6 +531,9 @@ message SegmentLoadInfo {
     repeated string child_manifest_paths = 29;
     // stats carries the durable segment aggregates used for resource estimation.
     data.Statistics stats = 30;
+    // Replay cursor of this exact physical base, fetched atomically with its
+    // manifest/binlogs. QueryView carries only the shard buffer retention floor.
+    uint64 transform_start_after_timetick = 31;
 }
 
 message FieldIndexInfo {
@@ -797,6 +868,7 @@ message CollectionLoadInfo {
     repeated int64 load_fields = 8;
     int64 dbID= 9;
     bool user_specified_replica_mode = 10;
+    repeated messages.LoadFieldConfig required_fields = 11; // Materialized internal scope; empty only in legacy persisted records.
 }
 
 message PartitionLoadInfo {
@@ -1204,18 +1276,8 @@ message ListLoadedSegmentsResponse {
     repeated int64 segmentIDs = 2;
 }
 
-
-message GetQueryViewLoadInfoRequest {
+message EnsureCollectionReadyRequest {
     common.MsgBase base = 1;
     int64 collectionID = 2;
-    uint64 version = 3;
-}
-
-message GetQueryViewLoadInfoResponse {
-    common.Status status = 1;
-    int64 collectionID = 2;
-    uint64 version = 3;
-    repeated int64 partitionIDs = 4;
-    repeated messages.LoadFieldConfig load_fields = 5;
-    repeated index.IndexInfo index_info_list = 6;
+    repeated string expected_vchannels = 3;
 }

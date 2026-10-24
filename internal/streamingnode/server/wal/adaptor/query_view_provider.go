@@ -22,6 +22,14 @@ func (w *walAdaptorImpl) QueryViewHandler() worknodehandler.QueryViewHandler {
 	return w.queryViewHandler
 }
 
+func (w *walAdaptorImpl) Statistics(ctx context.Context, req *viewpb.StatisticsOnViewRequest) (int64, error) {
+	h, err := w.queryViewTaskHandler(qviews.FromProtoShardID(req.GetShardId()))
+	if err != nil {
+		return 0, err
+	}
+	return h.Statistics(ctx, req)
+}
+
 func (w *walAdaptorImpl) AcquireSearchSegmentTasks(
 	ctx context.Context,
 	shardID qviews.ShardID,

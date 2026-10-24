@@ -512,11 +512,16 @@ func (kc *Catalog) SaveDataView(ctx context.Context, dataView *viewpb.DataViewOf
 		dataView.GetDataVersion().GetStreamingVersion(),
 		dataView.GetDataVersion().GetCompactVersion(),
 	)
-	value, err := proto.Marshal(dataView)
+	value, err := marshalDataView(dataView)
 	if err != nil {
 		return err
 	}
 	return kc.MetaKv.Save(ctx, key, string(value))
+}
+
+// marshalDataView persists membership, Segment revisions, and version-bound W/A.
+func marshalDataView(dataView *viewpb.DataViewOfCollection) ([]byte, error) {
+	return proto.Marshal(dataView)
 }
 
 func (kc *Catalog) ListDataViews(ctx context.Context, collectionID int64) ([]*viewpb.DataViewOfCollection, error) {

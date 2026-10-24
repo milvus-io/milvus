@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
@@ -2784,9 +2785,10 @@ func (s *CompactionTriggerSuite) TestHandleSignalStopsWhenInspectorFull() {
 			s.T().Cleanup(func() { pt.Reset(key) })
 		}
 		for _, segment := range s.meta.segments.GetSegments() {
-			cloned := segment.Clone()
-			cloned.Binlogs[0].Binlogs[0].MemorySize = 250 * mb
-			s.meta.segments.SetSegment(cloned.GetID(), cloned)
+			updated := segment.Clone()
+			updated.Binlogs[0].Binlogs[0].MemorySize = 250 * mb
+			updated.Stats = storage.BuildStatsFromFieldBinlogs(updated.GetBinlogs(), updated.GetStatslogs(), updated.GetBm25Statslogs(), updated.GetDeltalogs())
+			s.meta.segments.SetSegment(updated.GetID(), updated)
 		}
 		// Every subtest plans a single group.
 		s.handler.EXPECT().GetCollection(mock.Anything, s.collectionID).Return(&collectionInfo{

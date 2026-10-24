@@ -89,7 +89,10 @@ PhyElementFilterBitsNode::GetOutput() {
         std::chrono::high_resolution_clock::now();
 
     // Step 1: Get struct element offsets
-    auto schema = query_context_->get_schema_snapshot();
+    auto segment = query_context_->get_segment();
+    auto schema = segment->type() == SegmentType::Growing
+                      ? segment->get_schema_snapshot()
+                      : query_context_->get_read_schema();
     auto& field_meta = schema->GetFirstArrayFieldInStruct(struct_name_);
     auto field_id = field_meta.get_id();
     auto struct_element_offsets =

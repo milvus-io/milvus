@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 // QueryRuntimeModule is a concrete vchannel resource module managed by
@@ -21,9 +22,21 @@ type QueryRuntimeModule interface {
 }
 
 // QueryRuntimePrepareModule prepares shared resources before a QueryView is ready.
-// It does not retain a separate aggregate per version.
+// Preparation selects the exact schema and load scope from the view metadata.
+// It does not retain a separate aggregate per DataVersion.
 type QueryRuntimePrepareModule interface {
-	PrepareDataVersion(context.Context, qviews.DataVersion) error
+	PrepareSchemaDataVersion(context.Context, *viewpb.QueryViewMeta) error
+}
+
+// QueryRuntimeWriteSchemaModule reports progress on the ordered WAL write path.
+// Read resources instead prepare each view's exact schema and load identity.
+type QueryRuntimeWriteSchemaModule interface {
+	WriteSchemaVersion() int32
+}
+
+// QueryRuntimeIndexModule refreshes collection search metadata for a reused runtime.
+type QueryRuntimeIndexModule interface {
+	UpdateIndexMeta(context.Context, []*indexpb.IndexInfo) error
 }
 
 // QueryRuntimeModuleBuilder creates an unprepared module owned by QueryRuntime.
@@ -36,12 +49,20 @@ type LoadInfoProvider interface {
 }
 
 type QueryViewLoadInfo struct {
-	PartitionIDs []int64
-	LoadFields   []*messagespb.LoadFieldConfig
-	IndexInfos   []*indexpb.IndexInfo
+	PartitionIDs         []int64
+	LoadFields           []*messagespb.LoadFieldConfig
+	RequiredFields       []*messagespb.LoadFieldConfig
+	SkipLoadDynamicField bool
+	IndexInfos           []*indexpb.IndexInfo
 }
 
 // QueryRuntimeReleaseModule completes resource transitions before a DataView may Drop.
 type QueryRuntimeReleaseModule interface {
 	BeforeRelease(context.Context, qviews.DataVersion) error
+}
+
+// QueryRuntimeSchemaModule rebuilds schema-dependent resources before readiness.
+// Live event application remains independent of its resource I/O.
+type QueryRuntimeSchemaModule interface {
+	PrepareSchema(context.Context, *viewpb.QueryViewMeta, LoadInfoProvider) error
 }

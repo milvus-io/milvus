@@ -791,7 +791,7 @@ func (h *ServerHandler) HasCollection(ctx context.Context, collectionID UniqueID
 func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error) {
 	coll := h.s.meta.GetCollection(collectionID)
 	if coll != nil {
-		return coll, nil
+		return h.s.meta.collectionForPreparation(ctx, coll)
 	}
 	ctx2, cancel := context.WithTimeout(ctx, time.Second*10)
 	defer cancel()
@@ -808,7 +808,7 @@ func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID
 			mlog.Err(err))
 		return nil, err
 	}
-	return h.s.meta.GetCollection(collectionID), nil
+	return h.s.meta.collectionForPreparation(ctx, h.s.meta.GetCollection(collectionID))
 }
 
 // CheckShouldDropChannel returns whether specified channel is marked to be removed
@@ -1040,6 +1040,7 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 			NumOfRows:         segInfo.GetNumOfRows(),
 			StartPosition:     segInfo.GetStartPosition(),
 			DmlPosition:       segInfo.GetDmlPosition(),
+			CommitTimestamp:   segInfo.GetCommitTimestamp(),
 			StorageVersion:    segInfo.GetStorageVersion(),
 			IsSorted:          segInfo.GetIsSorted(),
 			Binlogs:           segInfo.GetBinlogs(),
@@ -1051,7 +1052,6 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 			TextIndexFiles:    segInfo.GetTextStatsLogs(),
 			ManifestPath:      segInfo.GetManifestPath(),
 			ManifestHasIndex:  proto.Bool(segInfo.GetManifestHasIndex()),
-			CommitTimestamp:   segInfo.GetCommitTimestamp(),
 		}
 	})
 

@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -24,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/ce"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
@@ -153,12 +155,15 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionProperties)
 	}
 
-	// If TTL field is changed through properties, also broadcast an updated schema snapshot and mark it as schema change,
-	// so QueryNode can refresh runtime schema properties without requiring release/load.
+	// Both TTL selectors and duration affect read visibility. Bind their changes
+	// to a new schema so SN and QN activate the same semantics through handoff.
 	ttlOld, okOld := oldProperties[common.CollectionTTLFieldKey]
 	ttlNew, okNew := newProperties[common.CollectionTTLFieldKey]
 	needTTLFieldSchemaRefresh := (okOld != okNew) || (okOld && okNew && ttlOld != ttlNew)
-	if needTTLFieldSchemaRefresh {
+	ttlDurationOld, durationOldExists := oldProperties[common.CollectionTTLConfigKey]
+	ttlDurationNew, durationNewExists := newProperties[common.CollectionTTLConfigKey]
+	needTTLDurationSchemaRefresh := durationOldExists != durationNewExists || ttlDurationOld != ttlDurationNew
+	if needTTLFieldSchemaRefresh || needTTLDurationSchemaRefresh {
 		// validate ttl field name exists in schema fields when setting it
 		if okNew {
 			found := false
@@ -178,8 +183,10 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 			header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionSchema)
 		}
 
-		// Build schema snapshot with updated properties (schema version should NOT be changed for properties-only alter).
+		// TTL changes query runtime semantics. Version the updated snapshot so
+		// both SN and QN must prepare it before the schema handoff completes.
 		schema := coll.ToCollectionSchemaPB()
+		schema.Version = coll.SchemaVersion + 1
 		schema.Properties = newPropsKeyValuePairs
 		// Preserve ExternalSource/ExternalSpec from current collection state
 		// unless this alter is itself updating them (refresh-completion sync).
@@ -207,7 +214,7 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		}).
 		WithBroadcast(coll.VirtualChannelNames).
 		MustBuildBroadcast()
-	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
+	if err := c.broadcastCollectionAlter(ctx, broadcaster, msg); err != nil {
 		return err
 	}
 	return nil
@@ -332,7 +339,7 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 		}).
 		WithBroadcast(coll.VirtualChannelNames).
 		MustBuildBroadcast()
-	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
+	if err := c.broadcastCollectionAlter(ctx, broadcaster, msg); err != nil {
 		return err
 	}
 	return nil
@@ -391,7 +398,7 @@ func (c *Core) broadcastDisableDynamicField(ctx context.Context, req *milvuspb.A
 		}).
 		WithBroadcast(coll.VirtualChannelNames).
 		MustBuildBroadcast()
-	if _, err := bc.Broadcast(ctx, msg); err != nil {
+	if err := c.broadcastCollectionAlter(ctx, bc, msg); err != nil {
 		return err
 	}
 	return nil
@@ -447,24 +454,24 @@ func (c *Core) getAlterLoadConfigOfAlterCollection(oldProps []*commonpb.KeyValue
 func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
 	header := result.Message.Header()
 	body := result.Message.MustBody()
-	if err := c.meta.AlterCollection(ctx, result); err != nil {
+	if messageutil.IsSchemaChange(header) {
+		if err := c.prepareAndPublishCollectionSchema(ctx, result); err != nil {
+			if errors.Is(err, errAlterCollectionNotFound) {
+				return nil
+			}
+			return err
+		}
+	} else if err := c.meta.AlterCollection(ctx, result); err != nil {
 		if errors.Is(err, errAlterCollectionNotFound) {
 			mlog.Warn(ctx, "alter a non-existent collection, ignore it", mlog.FieldMessage(result.Message))
 			return nil
 		}
 		return merr.Wrap(err, "failed to alter collection")
 	}
-	// Refresh datacoord's cached collection schema BEFORE the bound index meta
-	// becomes visible: creating the index signals the index inspector, whose
-	// function-output-field guard reads that cached schema — on a stale view it
-	// would schedule doomed builds on segments that have no binlog for the new
-	// field yet. The schema push depends only on rootcoord meta (updated above),
-	// never on index meta, so this order is always safe.
+	// DataCoord prepares against Broadcaster's acknowledged schema. Refresh its
+	// public metadata cache only after the serving schema has been published.
 	if err := c.broker.BroadcastAlteredCollection(ctx, header.CollectionId); err != nil {
 		return merr.Wrap(err, "failed to broadcast altered collection")
-	}
-	if err := c.applyBoundFieldIndexesInline(ctx, result); err != nil {
-		return err
 	}
 	if body.Updates.AlterLoadConfig != nil {
 		resp, err := c.mixCoord.UpdateLoadConfig(ctx, &querypb.UpdateLoadConfigRequest{
@@ -502,6 +509,43 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 	}
 
 	return c.ExpireCaches(ctx, header)
+}
+
+// prepareAndPublishCollectionSchema runs in the original ALTER callback. Its
+// durable WAL task is the preparation source; no nested broadcast is needed.
+func (c *DDLCallback) prepareAndPublishCollectionSchema(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
+	id := result.Message.Header().CollectionId
+	published, err := c.meta.GetCollectionByIDWithMaxTs(ctx, id)
+	if err != nil {
+		if errors.Is(err, merr.ErrCollectionNotFound) {
+			return errAlterCollectionNotFound
+		}
+		return err
+	}
+	resources := qvresource.Resource()
+	// Publication may have succeeded before a cache invalidation failed. Replaying
+	// that callback must not wait for a retired schema or overwrite newer metadata.
+	if published.UpdateTimestamp >= result.GetMaxTimeTick() {
+		resources.ShardViews.PublishCollectionSchema(id, published.SchemaVersion)
+		return nil
+	}
+	if err := c.applyBoundFieldIndexesInline(ctx, result); err != nil {
+		return err
+	}
+	updates := result.Message.MustBody().GetUpdates()
+	fields := make([]*messagespb.LoadFieldConfig, 0, len(updates.GetBoundFieldIndexes()))
+	for _, field := range updates.GetBoundFieldIndexes() {
+		index := field.GetIndexInfo()
+		fields = append(fields, &messagespb.LoadFieldConfig{FieldId: index.GetFieldID(), IndexId: index.GetIndexID()})
+	}
+	if err := resources.PrepareSchema(ctx, id, published.ToCollectionSchemaPB(), updates.GetSchema(), fields); err != nil {
+		return merr.Wrap(err, "prepare collection schema QueryViews")
+	}
+	if err := c.meta.AlterCollection(ctx, result); err != nil {
+		return merr.Wrap(err, "publish collection schema")
+	}
+	resources.ShardViews.PublishCollectionSchema(id, updates.GetSchema().GetVersion())
+	return nil
 }
 
 // applyBoundFieldIndexesInline creates the index meta bound to a newly added

@@ -2777,6 +2777,7 @@ type proxyConfig struct {
 	NameValidationAllowedChars        ParamItem `refreshable:"true"`
 	RoleNameValidationAllowedChars    ParamItem `refreshable:"true"`
 	MaxTaskNum                        ParamItem `refreshable:"false"`
+	EnableAutoLoad                    ParamItem `refreshable:"true"`
 	DDLConcurrency                    ParamItem `refreshable:"true"`
 	DCLConcurrency                    ParamItem `refreshable:"true"`
 	ShardLeaderCacheInterval          ParamItem `refreshable:"false"`
@@ -3041,6 +3042,15 @@ For migration, enable streaming.splitChunkSN first, then disable proxy.splitChun
 		Export:       true,
 	}
 	p.MaxTaskNum.Init(base.mgr)
+
+	p.EnableAutoLoad = ParamItem{
+		Key:          "proxy.enableAutoLoad",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "whether to automatically load an unloaded collection before DQL requests",
+		Export:       true,
+	}
+	p.EnableAutoLoad.Init(base.mgr)
 
 	p.DDLConcurrency = ParamItem{
 		Key:          "proxy.ddlConcurrency",
@@ -3541,6 +3551,10 @@ type queryCoordConfig struct {
 	DispatchInterval           ParamItem `refreshable:"false"`
 	HeartbeatAvailableInterval ParamItem `refreshable:"true"`
 	LoadTimeoutSeconds         ParamItem `refreshable:"true"`
+	AutoReleaseEnabled         ParamItem `refreshable:"true"`
+	AutoReleaseIdleTTLSeconds  ParamItem `refreshable:"true"`
+	AutoReleaseCheckInterval   ParamItem `refreshable:"true"`
+	AutoReleaseConcurrency     ParamItem `refreshable:"true"`
 
 	DistributionRequestTimeout  ParamItem `refreshable:"true"`
 	HeartBeatWarningLag         ParamItem `refreshable:"true"`
@@ -3603,6 +3617,8 @@ type queryCoordConfig struct {
 	UpdateTargetNeedSegmentDataReady ParamItem `refreshable:"true"`
 
 	AutoWarmupForNonPKIsolationCollection ParamItem `refreshable:"false"`
+	QueryViewFullReconsileInterval        ParamItem `refreshable:"true"`
+	QueryViewTargetRowsPerShardNode       ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -3940,6 +3956,69 @@ If this parameter is set false, Milvus simply searches the growing segments with
 		Export:       true,
 	}
 	p.LoadTimeoutSeconds.Init(base.mgr)
+
+	p.AutoReleaseEnabled = ParamItem{
+		Key:          "queryCoord.autoRelease.enabled",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc:          "whether QueryCoord releases collections after an idle TTL; effective only when proxy.enableAutoLoad is true",
+		Export:       true,
+	}
+	p.AutoReleaseEnabled.Init(base.mgr)
+
+	p.AutoReleaseIdleTTLSeconds = ParamItem{
+		Key:          "queryCoord.autoRelease.idleTTLSeconds",
+		Version:      "3.0.0",
+		DefaultValue: "600",
+		PanicIfEmpty: true,
+		Export:       true,
+		Formatter: func(v string) string {
+			seconds, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || seconds <= 0 || seconds > math.MaxInt64/int64(time.Second) {
+				mlog.Warn(context.TODO(), "queryCoord.autoRelease.idleTTLSeconds must be positive and fit time.Duration, using default",
+					mlog.String("configured", v))
+				return "600"
+			}
+			return v
+		},
+	}
+	p.AutoReleaseIdleTTLSeconds.Init(base.mgr)
+
+	p.AutoReleaseCheckInterval = ParamItem{
+		Key:          "queryCoord.autoRelease.checkIntervalSeconds",
+		Version:      "3.0.0",
+		DefaultValue: "30",
+		PanicIfEmpty: true,
+		Export:       true,
+		Formatter: func(v string) string {
+			seconds, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || seconds <= 0 || seconds > math.MaxInt64/int64(time.Second) {
+				mlog.Warn(context.TODO(), "queryCoord.autoRelease.checkIntervalSeconds must be positive and fit time.Duration, using default",
+					mlog.String("configured", v))
+				return "30"
+			}
+			return v
+		},
+	}
+	p.AutoReleaseCheckInterval.Init(base.mgr)
+
+	p.AutoReleaseConcurrency = ParamItem{
+		Key:          "queryCoord.autoRelease.releaseConcurrency",
+		Version:      "3.0.0",
+		DefaultValue: "16",
+		PanicIfEmpty: true,
+		Doc:          "maximum concurrent automatic collection releases in one scan; changes apply to the next release batch",
+		Export:       true,
+		Formatter: func(v string) string {
+			if getAsInt(v) <= 0 {
+				mlog.Warn(context.TODO(), "queryCoord.autoRelease.releaseConcurrency must be positive, using default",
+					mlog.String("configured", v))
+				return "16"
+			}
+			return v
+		},
+	}
+	p.AutoReleaseConcurrency.Init(base.mgr)
 
 	p.HeartbeatAvailableInterval = ParamItem{
 		Key:          "queryCoord.heartbeatAvailableInterval",
@@ -4363,6 +4442,38 @@ Set to 0 to disable the penalty period.`,
 		Export:       false,
 	}
 	p.AutoWarmupForNonPKIsolationCollection.Init(base.mgr)
+
+	p.QueryViewFullReconsileInterval = ParamItem{
+		Key:          "queryCoord.queryView.fullReconsileInterval",
+		Version:      "3.0.0",
+		DefaultValue: "10",
+		Doc:          "Interval in seconds for periodic QueryView full reconciliation.",
+		Export:       true,
+		Formatter: func(v string) string {
+			if getAsInt(v) < 1 {
+				return "1"
+			}
+			return v
+		},
+	}
+	p.QueryViewFullReconsileInterval.Init(base.mgr)
+
+	p.QueryViewTargetRowsPerShardNode = ParamItem{
+		Key:          "queryCoord.queryView.targetRowsPerShardNode",
+		Version:      "3.0.0",
+		DefaultValue: "100000",
+		Doc:          "Target number of sealed rows per QueryNode used to derive the free fanout budget for each QueryView shard. Must be positive. Changes take effect on the next reconciliation.",
+		Export:       true,
+		Formatter: func(v string) string {
+			if getAsInt64(v) <= 0 {
+				mlog.Warn(context.TODO(), "queryCoord.queryView.targetRowsPerShardNode must be positive, using default 100000",
+					mlog.String("configured", v))
+				return "100000"
+			}
+			return v
+		},
+	}
+	p.QueryViewTargetRowsPerShardNode.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -4590,6 +4701,10 @@ type queryNodeConfig struct {
 	ExternalCollectionSamplePerSegment ParamItem `refreshable:"true"`
 	ExternalCollectionSampleRows       ParamItem `refreshable:"true"`
 	ExternalCollectionRawDataFactor    ParamItem `refreshable:"true"`
+
+	// query view recovery
+	QueryViewSegmentCatchupConcurrency    ParamItem `refreshable:"false"`
+	QueryViewTransformLogDrainConcurrency ParamItem `refreshable:"false"`
 }
 
 func formatDurationWithMillisecondFallback(v string) string {
@@ -6239,6 +6354,36 @@ user-task-polling:
 		Export:       false,
 	}
 	p.ExternalCollectionRawDataFactor.Init(base.mgr)
+
+	p.QueryViewSegmentCatchupConcurrency = ParamItem{
+		Key:          "queryNode.queryView.segmentCatchupConcurrency",
+		Version:      "3.0.0",
+		DefaultValue: "4",
+		Doc:          "Maximum number of concurrent QueryView sealed segment TransformLog catch-up tasks on each QueryNode.",
+		Export:       true,
+		Formatter: func(v string) string {
+			if getAsInt(v) < 1 {
+				return "1"
+			}
+			return v
+		},
+	}
+	p.QueryViewSegmentCatchupConcurrency.Init(base.mgr)
+
+	p.QueryViewTransformLogDrainConcurrency = ParamItem{
+		Key:          "queryNode.queryView.transformLogDrainConcurrency",
+		Version:      "3.0.0",
+		DefaultValue: "4",
+		Doc:          "Maximum number of concurrent QueryView TransformLog backlog drain tasks on each QueryNode.",
+		Export:       true,
+		Formatter: func(v string) string {
+			if getAsInt(v) < 1 {
+				return "1"
+			}
+			return v
+		},
+	}
+	p.QueryViewTransformLogDrainConcurrency.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -6327,9 +6472,7 @@ type dataCoordConfig struct {
 
 	MaxFragmentsPerGroup ParamItem `refreshable:"true"`
 	TwoTierCompaction    ParamItem `refreshable:"true"`
-
-	ChannelCheckpointMaxLag ParamItem `refreshable:"true"`
-	SyncSegmentsInterval    ParamItem `refreshable:"false"`
+	SyncSegmentsInterval ParamItem `refreshable:"false"`
 
 	// Index related configuration
 	IndexMemSizeEstimateMultiplier      ParamItem `refreshable:"true"`
@@ -7083,14 +7226,6 @@ segments while automatic compaction is disabled. 0 or a negative value means unl
 		Export:       true,
 	}
 	p.L0CompactionTriggerInterval.Init(base.mgr)
-
-	p.ChannelCheckpointMaxLag = ParamItem{
-		Key:          "dataCoord.compaction.channelMaxCPLag",
-		Version:      "2.4.0",
-		Doc:          "max tolerable channel checkpoint lag(in seconds) to execute compaction",
-		DefaultValue: "900", // 15 * 60 seconds
-	}
-	p.ChannelCheckpointMaxLag.Init(base.mgr)
 
 	p.SyncSegmentsInterval = ParamItem{
 		Key:          "dataCoord.syncSegmentsInterval",
@@ -8488,12 +8623,6 @@ type dataNodeConfig struct {
 	// channel
 	ChannelWorkPoolSize ParamItem `refreshable:"true"`
 
-	UpdateChannelCheckpointMaxParallel   ParamItem `refreshable:"true"`
-	UpdateChannelCheckpointInterval      ParamItem `refreshable:"true"`
-	UpdateChannelCheckpointRPCTimeout    ParamItem `refreshable:"true"`
-	MaxChannelCheckpointsPerRPC          ParamItem `refreshable:"true"`
-	ChannelCheckpointUpdateTickInSeconds ParamItem `refreshable:"true"`
-
 	// import
 	ImportConcurrencyPerCPUCore     ParamItem `refreshable:"true"`
 	MaxImportFileSizeInGB           ParamItem `refreshable:"true"`
@@ -8760,53 +8889,6 @@ suggest to set it bigger on large collection numbers to avoid blocking`,
 		Export: true,
 	}
 	p.ChannelWorkPoolSize.Init(base.mgr)
-
-	p.UpdateChannelCheckpointMaxParallel = ParamItem{
-		Key:          "dataNode.channel.updateChannelCheckpointMaxParallel",
-		Version:      "2.3.4",
-		PanicIfEmpty: false,
-		DefaultValue: "10",
-		Doc: `specify the size of global work pool for channel checkpoint updating
-if this parameter <= 0, will set it as 10`,
-		Export: true,
-	}
-	p.UpdateChannelCheckpointMaxParallel.Init(base.mgr)
-
-	p.UpdateChannelCheckpointInterval = ParamItem{
-		Key:          "dataNode.channel.updateChannelCheckpointInterval",
-		Version:      "2.4.0",
-		Doc:          "the interval duration(in seconds) for datanode to update channel checkpoint of each channel",
-		DefaultValue: "60",
-		Export:       true,
-	}
-	p.UpdateChannelCheckpointInterval.Init(base.mgr)
-
-	p.UpdateChannelCheckpointRPCTimeout = ParamItem{
-		Key:          "dataNode.channel.updateChannelCheckpointRPCTimeout",
-		Version:      "2.4.0",
-		Doc:          "timeout in seconds for UpdateChannelCheckpoint RPC call",
-		DefaultValue: "20",
-		Export:       true,
-	}
-	p.UpdateChannelCheckpointRPCTimeout.Init(base.mgr)
-
-	p.MaxChannelCheckpointsPerRPC = ParamItem{
-		Key:          "dataNode.channel.maxChannelCheckpointsPerPRC",
-		Version:      "2.4.0",
-		Doc:          "The maximum number of channel checkpoints per UpdateChannelCheckpoint RPC.",
-		DefaultValue: "128",
-		Export:       true,
-	}
-	p.MaxChannelCheckpointsPerRPC.Init(base.mgr)
-
-	p.ChannelCheckpointUpdateTickInSeconds = ParamItem{
-		Key:          "dataNode.channel.channelCheckpointUpdateTickInSeconds",
-		Version:      "2.4.0",
-		Doc:          "The frequency, in seconds, at which the channel checkpoint updater executes updates.",
-		DefaultValue: "10",
-		Export:       true,
-	}
-	p.ChannelCheckpointUpdateTickInSeconds.Init(base.mgr)
 
 	p.ImportConcurrencyPerCPUCore = ParamItem{
 		Key:          "dataNode.import.concurrencyPerCPUCore",
@@ -9216,47 +9298,6 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 	p.ExternalCollectionTargetRowsPerSegment.Init(base.mgr)
 }
 
-type queryViewConfig struct {
-	IDFLazyLoadSealedStats             ParamItem `refreshable:"true"`
-	IDFSealedStatsLoadConcurrencyRatio ParamItem `refreshable:"true"`
-	LeaseDuration                      ParamItem `refreshable:"false"`
-}
-
-func (p *queryViewConfig) init(base *BaseTable) {
-	p.IDFLazyLoadSealedStats = ParamItem{
-		Key:          "queryView.idfOracle.lazyLoadSealedStats",
-		Version:      "3.1.0",
-		Export:       true,
-		DefaultValue: "false",
-		Doc:          "Whether QueryView IDF runtimes defer sealed BM25 resource discovery and stats materialization until the first BM25 search.",
-	}
-	p.IDFLazyLoadSealedStats.Init(base.mgr)
-
-	p.IDFSealedStatsLoadConcurrencyRatio = ParamItem{
-		Key:          "queryView.idfOracle.sealedStatsLoadConcurrencyRatio",
-		Version:      "3.1.0",
-		Export:       true,
-		DefaultValue: "4",
-		Doc:          "Maximum process-wide concurrency for loading sealed BM25 stats, expressed as a ratio of CPU cores.",
-		Formatter: func(v string) string {
-			if getAsFloat(v) <= 0 {
-				return "1"
-			}
-			return v
-		},
-	}
-	p.IDFSealedStatsLoadConcurrencyRatio.Init(base.mgr)
-
-	p.LeaseDuration = ParamItem{
-		Key:          "queryView.leaseDuration",
-		Version:      "3.1.0",
-		DefaultValue: "60s",
-		Doc:          "Renewable SN Up-view retention after query access. Delays normal Down; non-positive durations disable timed retention. Not refreshable.",
-		Export:       true,
-	}
-	p.LeaseDuration.Init(base.mgr)
-}
-
 type streamingConfig struct {
 	// WAL payload chunking rollout switch.
 	SplitChunkSN ParamItem `refreshable:"true"`
@@ -9341,9 +9382,11 @@ type streamingConfig struct {
 	WALRecoveryTailHighWatermark         ParamItem `refreshable:"true"`
 
 	// idempotent write configuration.
-	IdempotencyMaxBytesPerWindow  ParamItem `refreshable:"false"`
-	IdempotencyChunkMaxBytes      ParamItem `refreshable:"false"`
-	IdempotencyMaxStagingInterval ParamItem `refreshable:"false"`
+	IdempotencyMaxBytesPerWindow                     ParamItem `refreshable:"false"`
+	IdempotencyChunkMaxBytes                         ParamItem `refreshable:"false"`
+	IdempotencyMaxStagingInterval                    ParamItem `refreshable:"false"`
+	TransformLogCatchupConcurrencyPerStream          ParamItem `refreshable:"false"`
+	QueryViewLiveEventDispatchConcurrencyPerPChannel ParamItem `refreshable:"false"`
 
 	// wal rate limit
 	WALRateLimitDefaultBurst                     ParamItem `refreshable:"true"`
@@ -9892,6 +9935,36 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 		Export:       false,
 	}
 	p.IdempotencyMaxBytesPerWindow.Init(base.mgr)
+
+	p.QueryViewLiveEventDispatchConcurrencyPerPChannel = ParamItem{
+		Key:          "streaming.queryView.liveEventDispatchConcurrencyPerPChannel",
+		Version:      "3.0.0",
+		DefaultValue: "4",
+		Doc:          "Maximum number of QueryRuntimes dispatching live events concurrently on each PChannel.",
+		Export:       true,
+		Formatter: func(v string) string {
+			if getAsInt(v) < 1 {
+				return "1"
+			}
+			return v
+		},
+	}
+	p.QueryViewLiveEventDispatchConcurrencyPerPChannel.Init(base.mgr)
+
+	p.TransformLogCatchupConcurrencyPerStream = ParamItem{
+		Key:          "streaming.transformLog.catchupConcurrencyPerStream",
+		Version:      "3.0.0",
+		DefaultValue: "4",
+		Doc:          "Maximum number of TransformLog subscriptions catching up concurrently on each stream.",
+		Export:       true,
+		Formatter: func(v string) string {
+			if getAsInt(v) < 1 {
+				return "1"
+			}
+			return v
+		},
+	}
+	p.TransformLogCatchupConcurrencyPerStream.Init(base.mgr)
 
 	p.OldVersionLastConfirmedWindowSize = ParamItem{
 		Key:     "streaming.walScanner.oldVersionLastConfirmedWindowSize",

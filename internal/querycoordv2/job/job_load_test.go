@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
@@ -79,6 +80,25 @@ func (suite *LoadCollectionJobSuite) buildBroadcastResult(collectionID int64, pa
 			controlChannel: {},
 		},
 	}
+}
+
+func (suite *LoadCollectionJobSuite) TestGenerateAlterLoadConfigMessageUsesControlChannelWithoutAckSyncUp() {
+	msg, err := GenerateAlterLoadConfigMessage(context.Background(), &AlterLoadConfigRequest{
+		CollectionInfo: &milvuspb.DescribeCollectionResponse{
+			DbId:         10,
+			CollectionID: 100,
+			Schema:       &schemapb.CollectionSchema{},
+		},
+		Expected: ExpectedLoadConfig{
+			ExpectedPartitionIDs:  []int64{20},
+			ExpectedReplicaNumber: map[string]int{},
+		},
+	})
+
+	suite.NoError(err)
+	suite.NotNil(msg)
+	suite.Empty(msg.BroadcastHeader().VChannels)
+	suite.False(msg.BroadcastHeader().AckSyncUp)
 }
 
 // TestDescribeCollectionNotFound tests that Execute returns nil when the collection is not found.

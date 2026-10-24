@@ -290,6 +290,7 @@ type MixCoordClient interface {
 //
 //go:generate mockery --name=MixCoord  --output=../mocks --filename=mock_mixcoord.go --with-expecter
 type MixCoord interface {
+	GetQueryViewSegmentLoadInfos(ctx context.Context, collectionID int64, segmentIDs []int64) ([]*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, error)
 	Component
 	rootcoordpb.RootCoordServer
 	querypb.QueryCoordServer
@@ -312,8 +313,6 @@ type MixCoord interface {
 	NotifyDropPartition(ctx context.Context, channel string, collectionID int64, partitionIDs []int64) error
 
 	DropSegmentsByTime(ctx context.Context, collectionID int64, flushTsList map[string]uint64) error
-
-	ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error
 
 	// GetFileResources resolves RootCoord-owned file resources inside MixCoord.
 	GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error)

@@ -4,6 +4,12 @@ Executes cross-PChannel atomic broadcast for DDL/DCL messages with resource lock
 
 ## Broadcast API
 
+The agreed [schema-handoff refactor](../../../design-docs/design_docs/qviews/schema_evolution.md)
+uses the durable ALTER message and ordered ACK callback as the target-schema
+source for DataCoord and QueryView planning. Its in-process target projection
+is new work, not an existing historical-schema API. Completed task cleanup is
+not a permanent schema store; all new GC coordination is deferred in that design.
+
 Callers use `broadcast.StartBroadcastWithResourceKeys(ctx, resourceKeys...)` to obtain a `BroadcastAPI`, which acquires resource key locks and returns after WAL-based DDL is ready. The caller then constructs a `BroadcastMutableMessage` with its data VChannels (`WithBroadcast`), or with none (`WithControlChannelBroadcast`) for a CChannel-only broadcast, and calls `Broadcast()`. The broadcaster adds the CChannel to the header of every broadcast, so callers never pass it. `Close()` releases locks if no broadcast was issued.
 
 The ordinary broadcast entrance rejects non-primary clusters with `ErrNotPrimary`. For local operations, `broadcast.StartUnreplicableBroadcastWithResourceKeys`: it is accepted on any replicate role, and its message must carry the `Unreplicable` (`_ur`) property, so it is written to the local WAL and never replicated (used for resource group DDL and local Flush/FlushAll). ForcePromote has a separate secondary-only entrance. See [Local Flush Control](../wal/local-flush.md) for abort-and-replay semantics.
@@ -179,7 +185,9 @@ Import, CommitImport, and RollbackImport include CChannel alongside the business
 VChannels so replicated callbacks share an ordered copy. CommitImport uses
 FastAck and completes in the DataCoord callback: persist Committing to protect
 against timeout, update segment visibility with each business VChannel's own
-commit TimeTick, then persist Completed. Failures keep the broadcast task
+commit TimeTick, synchronously publish the resulting DataView, then persist
+Completed. QueryView readiness is waited by Load/Refresh, not this callback.
+Failures keep the broadcast task
 retryable. New Import jobs persist `commit_by_coordinator=true`; no StreamingNode
 per-channel RPC or L0 materialization is required for these jobs. Absent/false
 flags retain legacy completion: BroadcastAckModule calls HandleCommitVchannel

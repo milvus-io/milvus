@@ -320,6 +320,7 @@ type Collection struct {
 	mu                 sync.RWMutex // protects colllectionPtr
 	schemaTransitionMu sync.RWMutex // serializes schema transitions with insert payload conversion and growing writes
 	ccollection        *segcore.CCollection
+	schemaOwner        *Collection // non-nil only for borrowed immutable load scopes
 	id                 int64
 	partitions         *typeutil.ConcurrentSet[int64]
 	loadType           querypb.LoadType
@@ -334,6 +335,7 @@ type Collection struct {
 	schema     atomic.Pointer[collectionSchemaSnapshot]
 	isGpuIndex bool
 	loadFields typeutil.Set[int64]
+	fieldHints []int64
 
 	refCount *atomic.Uint32
 }
@@ -413,6 +415,9 @@ func (c *Collection) CreateCSegment(req *segcore.CreateCSegmentRequest) (segcore
 		return nil, merr.WrapErrServiceInternal("create segment on released collection")
 	}
 	req.Collection = c.ccollection
+	req.LoadFields = c.loadFields.Collect()
+	req.FieldHints = c.fieldHints
+	req.ExplicitLoadScope = c.schemaOwner != nil
 	return segcore.CreateCSegment(req)
 }
 
@@ -431,6 +436,65 @@ func (c *Collection) updateIndexMeta(meta *segcorepb.CollectionIndexMeta) error 
 		return nil
 	}
 	return c.ccollection.UpdateIndexMeta(meta)
+}
+
+// UpdateIndexMeta updates the native collection index metadata while keeping
+// it in the same transition epoch as schema changes.
+func (c *Collection) UpdateIndexMeta(meta *segcorepb.CollectionIndexMeta) error {
+	if c.schemaOwner != nil {
+		return c.schemaOwner.updateScopedIndexMeta(meta, c.loadFields)
+	}
+	if meta == nil {
+		return nil
+	}
+
+	c.mu.RLock()
+	if c.ccollection == nil {
+		c.mu.RUnlock()
+		return merr.WrapErrServiceInternal("update index meta on released collection")
+	}
+	unchanged := proto.Equal(c.ccollection.IndexMeta(), meta)
+	c.mu.RUnlock()
+	if unchanged {
+		return nil
+	}
+
+	c.lockSchemaTransitionForUpdate()
+	defer c.unlockSchemaTransitionForUpdate()
+
+	return c.updateIndexMeta(meta)
+}
+
+// A scoped metadata response says nothing about fields outside that scope.
+// Serialize the merge on the schema owner, shared by all borrowed wrappers.
+func (c *Collection) updateScopedIndexMeta(meta *segcorepb.CollectionIndexMeta, fields typeutil.Set[int64]) error {
+	if meta == nil {
+		return nil
+	}
+	c.schemaTransitionMu.Lock()
+	defer c.schemaTransitionMu.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	merged := proto.Clone(meta).(*segcorepb.CollectionIndexMeta)
+	selected := merged.IndexMetas[:0]
+	for _, index := range merged.IndexMetas {
+		if fields.Contain(index.GetFieldID()) {
+			selected = append(selected, index)
+		}
+	}
+	clear(merged.IndexMetas[len(selected):])
+	merged.IndexMetas = selected
+	current := c.ccollection.IndexMeta()
+	for _, index := range current.GetIndexMetas() {
+		if !fields.Contain(index.GetFieldID()) {
+			merged.IndexMetas = append(merged.IndexMetas, index)
+		}
+	}
+	merged.MaxIndexRowCount = max(merged.GetMaxIndexRowCount(), current.GetMaxIndexRowCount())
+	if proto.Equal(current, merged) {
+		return nil
+	}
+	return c.ccollection.UpdateIndexMeta(merged)
 }
 
 func (c *Collection) updateSchema(schema *schemapb.CollectionSchema, version uint64) error {
@@ -653,6 +717,34 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	coll.setSchema(schema, logicalSchemaVersion, schemaBarrierTs, initialSegcoreSchemaVersion(logicalSchemaVersion, schemaBarrierTs))
 
 	return coll, nil
+}
+
+// WithLoadScope returns borrowed Go metadata for one QueryView. The caller must
+// retain the owning collection for this wrapper's entire lifetime. It owns no
+// native resource and must not be passed to DeleteCollection or a manager.
+// Schema and index metadata stay shared; field and partition scope do not.
+func (c *Collection) WithLoadScope(partitions, fields []int64, hints ...[]int64) *Collection {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	loadFields := typeutil.NewSet(fields...)
+	view := &Collection{
+		ccollection:   c.ccollection,
+		schemaOwner:   c,
+		id:            c.id,
+		partitions:    typeutil.NewConcurrentSet[int64](),
+		loadType:      c.loadType,
+		dbName:        c.dbName,
+		dbProperties:  c.dbProperties,
+		resourceGroup: c.resourceGroup,
+		isGpuIndex:    c.isGpuIndex,
+		loadFields:    loadFields,
+	}
+	if len(hints) > 0 {
+		view.fieldHints = append([]int64(nil), hints[0]...)
+	}
+	view.schema.Store(c.schema.Load())
+	view.AddPartition(partitions...)
+	return view
 }
 
 // Only for test

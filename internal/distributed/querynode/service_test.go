@@ -24,16 +24,23 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 type MockRootCoord struct {
@@ -75,7 +82,8 @@ func (m *MockRootCoord) GetComponentStates(ctx context.Context, req *milvuspb.Ge
 
 func TestMain(m *testing.M) {
 	paramtable.Init()
-	os.Exit(m.Run())
+	code := m.Run()
+	os.Exit(code)
 }
 
 func Test_NewServer(t *testing.T) {
@@ -312,6 +320,109 @@ func Test_NewServer(t *testing.T) {
 
 	err = server.Stop()
 	assert.NoError(t, err)
+}
+
+type fakeQueryViewMetadataMixCoordClient struct {
+	types.MixCoordClient
+
+	describeReqs  []*milvuspb.DescribeCollectionRequest
+	describeResps []*milvuspb.DescribeCollectionResponse
+	describeErrs  []error
+
+	getQVCollectionLoadInfoReqs  []*querypb.GetQueryViewLoadInfoRequest
+	getQVCollectionLoadInfoResps []*querypb.GetQueryViewLoadInfoResponse
+	getQVCollectionLoadInfoErrs  []error
+}
+
+func (c *fakeQueryViewMetadataMixCoordClient) DescribeCollection(_ context.Context, req *milvuspb.DescribeCollectionRequest, _ ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+	c.describeReqs = append(c.describeReqs, req)
+	idx := len(c.describeReqs) - 1
+	if idx < len(c.describeErrs) && c.describeErrs[idx] != nil {
+		return nil, c.describeErrs[idx]
+	}
+	if idx < len(c.describeResps) {
+		return c.describeResps[idx], nil
+	}
+	return c.describeResps[len(c.describeResps)-1], nil
+}
+
+func (c *fakeQueryViewMetadataMixCoordClient) GetQueryViewLoadInfo(_ context.Context, req *querypb.GetQueryViewLoadInfoRequest, _ ...grpc.CallOption) (*querypb.GetQueryViewLoadInfoResponse, error) {
+	c.getQVCollectionLoadInfoReqs = append(c.getQVCollectionLoadInfoReqs, req)
+	idx := len(c.getQVCollectionLoadInfoReqs) - 1
+	if idx < len(c.getQVCollectionLoadInfoErrs) && c.getQVCollectionLoadInfoErrs[idx] != nil {
+		return nil, c.getQVCollectionLoadInfoErrs[idx]
+	}
+	if idx < len(c.getQVCollectionLoadInfoResps) {
+		return c.getQVCollectionLoadInfoResps[idx], nil
+	}
+	return c.getQVCollectionLoadInfoResps[len(c.getQVCollectionLoadInfoResps)-1], nil
+}
+
+func newTestQueryViewLoadMetadataProvider(client types.MixCoordClient) *lazyQueryViewLoadMetadataProvider {
+	future := syncutil.NewFuture[types.MixCoordClient]()
+	future.Set(client)
+	return &lazyQueryViewLoadMetadataProvider{mixCoord: future}
+}
+
+func TestLazyQueryViewLoadMetadataProvider_GetQueryViewLoadInfo(t *testing.T) {
+	indexes := []*indexpb.IndexInfo{{CollectionID: 100, FieldID: 101, IndexName: "vec_idx"}}
+	client := &fakeQueryViewMetadataMixCoordClient{
+		getQVCollectionLoadInfoResps: []*querypb.GetQueryViewLoadInfoResponse{{
+			Status:        &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			CollectionID:  100,
+			Version:       7,
+			PartitionIDs:  []int64{10, 20},
+			LoadFields:    []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101, IndexId: 1001}},
+			IndexInfoList: indexes,
+		}},
+	}
+	provider := newTestQueryViewLoadMetadataProvider(client)
+
+	info, err := provider.GetQueryViewLoadInfo(context.Background(), 100, qnview.QueryViewLoadInfoVersion(7))
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(100), info.CollectionID)
+	assert.Equal(t, qnview.QueryViewLoadInfoVersion(7), info.Version)
+	assert.Equal(t, []int64{10, 20}, info.PartitionIDs)
+	assert.Equal(t, []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101, IndexId: 1001}}, info.LoadFields)
+	assert.Equal(t, indexes, info.IndexInfos)
+	require.Len(t, client.getQVCollectionLoadInfoReqs, 1)
+	assert.Equal(t, int64(100), client.getQVCollectionLoadInfoReqs[0].GetCollectionID())
+	assert.Equal(t, uint64(7), client.getQVCollectionLoadInfoReqs[0].GetVersion())
+}
+
+func TestLazyQueryViewLoadMetadataProvider_DescribeCollectionAttemptsRecoverableErrorOnce(t *testing.T) {
+	client := &fakeQueryViewMetadataMixCoordClient{
+		describeErrs: []error{merr.WrapErrNodeNotMatch(1, 2)},
+		describeResps: []*milvuspb.DescribeCollectionResponse{{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Schema: &schemapb.CollectionSchema{
+				Name: "qv",
+			},
+		}},
+	}
+	provider := newTestQueryViewLoadMetadataProvider(client)
+
+	resp, err := provider.DescribeCollection(context.Background(), 100)
+
+	require.ErrorIs(t, err, merr.ErrNodeNotMatch)
+	assert.Nil(t, resp)
+	require.Len(t, client.describeReqs, 1)
+	assert.Equal(t, int64(100), client.describeReqs[0].GetCollectionID())
+}
+
+func TestLazyQueryViewLoadMetadataProvider_DescribeCollectionDoesNotRetryPermanentError(t *testing.T) {
+	client := &fakeQueryViewMetadataMixCoordClient{
+		describeErrs: []error{merr.WrapErrCollectionNotFound(100)},
+	}
+	provider := newTestQueryViewLoadMetadataProvider(client)
+
+	_, err := provider.DescribeCollection(context.Background(), 100)
+
+	require.ErrorIs(t, err, merr.ErrCollectionNotFound)
+	assert.NotContains(t, err.Error(), "unrecoverable error")
+	require.Len(t, client.describeReqs, 1)
+	assert.Equal(t, int64(100), client.describeReqs[0].GetCollectionID())
 }
 
 func Test_Run(t *testing.T) {

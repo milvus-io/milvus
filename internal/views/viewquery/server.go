@@ -4,8 +4,6 @@ import (
 	"context"
 
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -25,6 +23,17 @@ func NewServer(provider TaskProvider, scheduler Scheduler) *Server {
 		provider:  provider,
 		scheduler: scheduler,
 	}
+}
+
+func (s *Server) StatisticsOnView(ctx context.Context, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error) {
+	if err := validateCommonRequestShape(req.GetShardId(), req.GetVersion(), req.GetMvcc()); err != nil {
+		return nil, err
+	}
+	rows, err := s.provider.Statistics(ctx, req)
+	if err != nil {
+		return nil, toRPCError(err)
+	}
+	return &viewpb.StatisticsOnViewResponse{RowCount: rows}, nil
 }
 
 func (s *Server) SearchOnView(ctx context.Context, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
@@ -128,8 +137,4 @@ func (s *Server) QueryOnView(ctx context.Context, req *viewpb.QueryOnViewRequest
 		return nil, toRPCError(err)
 	}
 	return &viewpb.QueryOnViewResponse{LegacyResults: result}, nil
-}
-
-func (s *Server) RequeryOnView(context.Context, *viewpb.RequeryOnViewRequest) (*viewpb.RequeryOnViewResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "RequeryOnView is not implemented")
 }

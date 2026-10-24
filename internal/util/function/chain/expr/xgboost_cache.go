@@ -23,12 +23,14 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type (
@@ -59,17 +61,19 @@ type (
 		resourcePath string
 		model        *modelHandle
 
-		refs    atomic.Int64
-		closing atomic.Bool
-		closed  atomic.Bool
-		closeMu sync.Mutex
+		refs       atomic.Int64
+		closing    atomic.Bool
+		closed     atomic.Bool
+		expiration *time.Timer // guarded by the owning cache mutex
+		closeMu    sync.Mutex
 
 		closer xgboostModelCloser
 	}
 
 	xgboostModelLease struct {
-		cached   *cachedXGBoostModel
-		released atomic.Bool
+		cached       *cachedXGBoostModel
+		released     atomic.Bool
+		afterRelease func()
 	}
 )
 
@@ -251,6 +255,9 @@ func (l *xgboostModelLease) Release() {
 		return
 	}
 	l.cached.release()
+	if l.afterRelease != nil {
+		l.afterRelease()
+	}
 }
 
 func (m *cachedXGBoostModel) release() {
@@ -291,6 +298,9 @@ func (c *xgboostModelCache) evictStaleModels(activeKeys map[string]struct{}) {
 			continue
 		}
 		delete(c.models, key)
+		if cached.expiration != nil {
+			cached.expiration.Stop()
+		}
 		evicted = append(evicted, cached)
 	}
 	c.mu.Unlock()
@@ -304,3 +314,57 @@ func (c *xgboostModelCache) len() int {
 	defer c.mu.RUnlock()
 	return len(c.models)
 }
+
+// acquire resolves demand resources on SN; legacy nodes retain their synced table.
+func (c *xgboostModelCache) acquire(ctx context.Context, name string) (*xgboostModelLease, error) {
+	if !fileresource.IsPullEnabled() {
+		return c.acquireByResourceName(name)
+	}
+	files, err := fileresource.AcquireNamed(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	defer files.Close()
+	resource := files.Resolved()[0]
+	if !isXGBoostUBJResource(resource) {
+		return nil, merr.WrapErrParameterInvalidMsg("xgboost: model resource %q must be a UBJ file", name)
+	}
+	for attempt := 0; attempt < maxXGBoostAcquireAttempts; attempt++ {
+		lease, retry, err := c.acquireOrLoad(resource)
+		if err != nil {
+			return nil, err
+		}
+		if retry {
+			continue
+		}
+		lease.afterRelease = func() { c.retainIdle(lease.cached) }
+		return lease, nil
+	}
+	return nil, merr.WrapErrServiceUnavailableMsg("xgboost model was evicted during acquisition")
+}
+
+func (c *xgboostModelCache) retainIdle(model *cachedXGBoostModel) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.models[model.key] != model || model.refs.Load() != 0 {
+		return
+	}
+	if model.expiration != nil {
+		model.expiration.Stop()
+	}
+	var timer *time.Timer
+	timer = time.AfterFunc(paramtable.Get().CommonCfg.FileResourceCacheTTL.GetAsDurationByParse(), func() {
+		c.mu.Lock()
+		if c.models[model.key] != model || model.expiration != timer || model.refs.Load() != 0 {
+			c.mu.Unlock()
+			return
+		}
+		delete(c.models, model.key)
+		c.mu.Unlock()
+		model.markClosing()
+	})
+	model.expiration = timer
+}
+
+// CloseXGBoostModels releases idle models; active query leases delay destruction.
+func CloseXGBoostModels() { globalXGBoostModelCache.evictStaleModels(nil) }
