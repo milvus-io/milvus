@@ -28,6 +28,42 @@ func TestQueryMVCCShutdownPreservesViewError(t *testing.T) {
 	require.True(t, viewerror.AsViewError(viewerror.ConvertViewError("GetMVCCTimestamp", wire)).IsRetryable())
 }
 
+func TestStatisticsPlanCountsSNAndReturnsOnlySelectedQNs(t *testing.T) {
+	patchQueryReadRuntime(t)
+	mockey.PatchConvey("statistics samples the latest View without a logical schema request", t, func() {
+		view := &viewpb.QueryViewOfShard{
+			Meta:          &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: "p_1v0", ReplicaId: 3, SchemaVersion: 7, LoadInfoVersion: 2, Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 8}, QueryVersion: 9}},
+			StreamingNode: &viewpb.QueryViewOfStreamingNode{},
+			QueryNode: []*viewpb.QueryViewOfQueryNode{
+				{NodeId: 11, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{100}}}},
+				{NodeId: 12, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 20, SegmentIds: []int64{200}}}},
+			},
+		}
+		counted, released := false, false
+		lease := &snview.QueryViewLease{Meta: view.Meta, View: view, Version: qviews.FromProtoQueryViewVersion(view.Meta.Version), Renew: func() { require.True(t, counted); require.False(t, released) }, Release: func() { released = true }}
+		mockey.Mock((*snview.SNQueryViewHandler).AcquireLatestUpView).Return(lease, nil).Build()
+		mockey.Mock((*queryresource.QueryRuntime).ResolvePartitions).Return([]int64{10}, nil).Build()
+		mockey.Mock((*snview.SNQueryViewHandler).Statistics).To(func(_ *snview.SNQueryViewHandler, _ context.Context, req *viewpb.StatisticsOnViewRequest) (int64, error) {
+			require.Equal(t, lease.Version.IntoProto(), req.GetVersion())
+			require.EqualValues(t, 3, req.GetShardId().GetReplicaId())
+			require.Equal(t, []int64{10}, req.GetPartitionIds())
+			counted = true
+			return 23, nil
+		}).Build()
+		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}, viewResourceManager: &vchannel.PChannelRecoveryManager{}}
+		plan, err := w.GetQueryPlan(t.Context(), &viewpb.GetQueryPlanRequest{
+			CollectionId: 1, ShardId: &viewpb.ShardID{Vchannel: "p_1v0"},
+			Mvcc:    &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 99}},
+			Request: &viewpb.GetQueryPlanRequest_StatisticsRequest{StatisticsRequest: &viewpb.StatisticsRequest{PartitionIds: []int64{10}}},
+		})
+		require.NoError(t, err)
+		require.True(t, released)
+		require.EqualValues(t, 23, plan.GetGrowingRowCount())
+		require.Len(t, plan.GetWorkNodes(), 1)
+		require.EqualValues(t, 11, plan.GetWorkNodes()[0].GetQueryNode().GetNodeId())
+	})
+}
+
 func TestQueryPlanPrunesSNUsingSelectedViewDataVersion(t *testing.T) {
 	sealedAt := qviews.DataVersion{StreamingVersion: 10, CompactVersion: 2}
 	patch := mockey.Mock((*queryresource.QueryRuntime).MayHaveVisibleGrowingSegments).To(func(_ *queryresource.QueryRuntime, version qviews.DataVersion, growing uint64, transform uint64, partitions []int64) bool {

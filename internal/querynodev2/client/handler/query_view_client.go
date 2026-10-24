@@ -12,6 +12,8 @@ import (
 
 // QueryViewClient is the QueryView domain client under the QueryNode handler client.
 type QueryViewClient interface {
+	StatisticsOnView(ctx context.Context, nodeID int64, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error)
+
 	SearchOnView(ctx context.Context, nodeID int64, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error)
 	QueryOnView(ctx context.Context, nodeID int64, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error)
 }
@@ -64,4 +66,10 @@ func executeViewQueryRPC[T any](
 
 func (qvc *queryViewClient) close() {
 	qvc.service.Close()
+}
+
+func (qvc *queryViewClient) StatisticsOnView(ctx context.Context, nodeID int64, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error) {
+	return executeViewQueryRPC(ctx, qvc, nodeID, "ViewQueryService.StatisticsOnView", func(ctx context.Context, client viewpb.ViewQueryServiceClient) (*viewpb.StatisticsOnViewResponse, error) {
+		return client.StatisticsOnView(ctx, req)
+	})
 }

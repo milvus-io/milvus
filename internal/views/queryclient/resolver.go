@@ -23,6 +23,8 @@ type QueryPlanClient interface {
 // Implementation handles work node resolution and gRPC connection management internally.
 // WorkNode is used as the routing key to locate the target node.
 type ViewQueryServiceClient interface {
+	StatisticsOnView(ctx context.Context, node qviews.WorkNode, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error)
+
 	// SearchOnView executes a vector search on the given work node.
 	SearchOnView(ctx context.Context, node qviews.WorkNode, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error)
 

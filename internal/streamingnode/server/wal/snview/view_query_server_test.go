@@ -113,6 +113,7 @@ func (m *fakeViewQueryWALManager) GetAvailableWAL(channel types.PChannelInfo) (w
 }
 
 type fakeViewQueryWAL struct {
+	viewquery.TaskProvider
 	wal.WAL
 	searchTasks   *fakeViewQuerySearchTasks
 	searchShardID qviews.ShardID

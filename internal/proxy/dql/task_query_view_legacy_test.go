@@ -42,6 +42,7 @@ func (c *fakeLegacyViewQueryClient) Legacy() queryclient.LegacyClient {
 }
 
 type fakeLegacyQueryClient struct {
+	queryclient.LegacyClient
 	searchCalled int
 	queryCalled  int
 	searchResult *queryclient.LegacySearchResult

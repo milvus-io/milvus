@@ -963,6 +963,10 @@ func TestProxy(t *testing.T) {
 
 	mlog.Info(context.TODO(), "Initialize parameter table of Proxy")
 
+	// Background quota RPCs may arrive as soon as a worker registers.
+	// Install its WAL accessor before starting any server.
+	streaming.Init()
+
 	mix := runMixCoord(ctx, localMsg)
 	mlog.Info(context.TODO(), "running MixCoord ...")
 
@@ -976,8 +980,6 @@ func TestProxy(t *testing.T) {
 	mlog.Info(context.TODO(), "running QueryNode ...")
 
 	time.Sleep(10 * time.Millisecond)
-
-	streaming.Init()
 
 	proxy, err := NewProxy(ctx, factory)
 	assert.NoError(t, err)

@@ -42,6 +42,7 @@ func (f *fakeStreamingNodeViewQueryServiceClient) QueryOnView(context.Context, t
 }
 
 type fakeQueryNodeViewQueryServiceClient struct {
+	QueryNodeViewQueryServiceClient
 	nodeID    int64
 	queryResp *viewpb.QueryOnViewResponse
 }

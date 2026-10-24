@@ -175,6 +175,7 @@ func testVersion() qviews.QueryViewVersion {
 }
 
 type fakeTaskProvider struct {
+	TaskProvider
 	searchTasks   *fakeSearchSegmentTasks
 	searchErr     error
 	searchShardID qviews.ShardID

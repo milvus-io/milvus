@@ -210,6 +210,7 @@ func (c *legacyPlanClient) GetMVCCTimestamp(context.Context, qviews.ShardID, *vi
 }
 
 type legacyServiceClient struct {
+	ViewQueryServiceClient
 	searchResults  map[string]*internalpb.SearchResults
 	queryResults   map[string]*internalpb.RetrieveResults
 	queryCallCount int
