@@ -61,13 +61,13 @@ func TestDefaultPoliciesCanDriftAcrossBatches(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
 	for _, setting := range []struct {
-		item  paramtable.ParamItem
+		item  *paramtable.ParamItem
 		value string
 	}{
-		{params.CommonCfg.Stv2SplitSystemColumn, "true"},
-		{params.CommonCfg.Stv2SystemColumnIncludePK, "true"},
-		{params.CommonCfg.Stv2SplitByAvgSize, "true"},
-		{params.CommonCfg.Stv2SplitAvgSizeThreshold, "64"},
+		{&params.CommonCfg.Stv2SplitSystemColumn, "true"},
+		{&params.CommonCfg.Stv2SystemColumnIncludePK, "true"},
+		{&params.CommonCfg.Stv2SplitByAvgSize, "true"},
+		{&params.CommonCfg.Stv2SplitAvgSizeThreshold, "64"},
 	} {
 		key, previous := setting.item.Key, setting.item.GetValue()
 		require.NoError(t, params.Save(key, setting.value))
