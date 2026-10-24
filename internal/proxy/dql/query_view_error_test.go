@@ -29,7 +29,7 @@ func TestQueryViewLoadError(t *testing.T) {
 				mockey.Mock((*namespaceRequeryMockNode).MixCoord).Return(&mocks.MockMixCoordClient{}).Build()
 				mockey.Mock((*mocks.MockMixCoordClient).GetQueryViewLoadInfo).Return(tc.response, nil).Build()
 				original := viewerror.NewViewNotFound("released or recovering")
-				err := queryViewLoadError(t.Context(), &namespaceRequeryMockNode{}, 1, []int64{20}, original)
+				err := QueryViewLoadError(t.Context(), &namespaceRequeryMockNode{}, 1, []int64{20}, original)
 				if tc.want != nil {
 					require.ErrorIs(t, err, tc.want)
 				} else {
@@ -39,6 +39,6 @@ func TestQueryViewLoadError(t *testing.T) {
 		})
 	}
 	for _, err := range []error{context.Canceled, context.DeadlineExceeded, merr.WrapErrServiceInternalMsg("unrelated")} {
-		require.Equal(t, err, queryViewLoadError(t.Context(), nil, 1, nil, err))
+		require.Equal(t, err, QueryViewLoadError(t.Context(), nil, 1, nil, err))
 	}
 }

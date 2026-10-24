@@ -107,7 +107,7 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 		QueryServiceAvailable: make([]bool, 0, len(collectionSet)),
 	}
 	for _, collectionID := range collections {
-		progress, err := s.qviewsLoadProgress(ctx, collectionID)
+		progress, err := s.qviewsLoadProgressInResourceGroup(ctx, collectionID, req.GetResourceGroup())
 		if err != nil {
 			return &querypb.ShowCollectionsResponse{Status: merr.Status(err)}, nil
 		}
@@ -153,7 +153,7 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 		percentage := progress.Percentage()
 		resp.InMemoryPercentages = append(resp.InMemoryPercentages, percentage)
 		resp.QueryServiceAvailable = append(resp.QueryServiceAvailable, progress.Ready())
-		refreshProgress, err := s.qviewsRefreshProgress(ctx, collectionID, percentage)
+		refreshProgress, err := s.qviewsRefreshProgressInResourceGroup(ctx, collectionID, percentage, req.GetResourceGroup())
 		if err != nil {
 			return &querypb.ShowCollectionsResponse{Status: merr.Status(err)}, nil
 		}
@@ -252,6 +252,10 @@ func (s *Server) ShowLoadPartitions(ctx context.Context, req *querypb.ShowPartit
 
 // qviewsLoadProgress is shared by collection and partition status reporting.
 func (s *Server) qviewsLoadProgress(ctx context.Context, collectionID int64) (loadstatus.Progress, error) {
+	return s.qviewsLoadProgressInResourceGroup(ctx, collectionID, "")
+}
+
+func (s *Server) qviewsLoadProgressInResourceGroup(ctx context.Context, collectionID int64, rg string) (loadstatus.Progress, error) {
 	store := s.qviewsRuntime.loadConfigStore
 	if !store.Contains(collectionID) {
 		return loadstatus.Progress{}, nil
@@ -260,7 +264,7 @@ func (s *Server) qviewsLoadProgress(ctx context.Context, collectionID int64) (lo
 	if err != nil {
 		return loadstatus.Progress{}, err
 	}
-	return loadstatus.Get(store, s.qviewsRuntime.shardViewRegistry, collectionID, collection.GetVirtualChannelNames()), nil
+	return loadstatus.GetInResourceGroup(store, s.qviewsRuntime.shardViewRegistry, collectionID, collection.GetVirtualChannelNames(), rg), nil
 }
 
 func qviewsLoadFieldIDs(cfg *loadmgr.LoadConfig) []int64 {
@@ -1101,6 +1105,10 @@ func (s *Server) ComputePhraseMatchSlop(ctx context.Context, req *querypb.Comput
 
 // Without an outstanding refresh fence the normal load progress applies.
 func (s *Server) qviewsRefreshProgress(ctx context.Context, collectionID, loadPercentage int64) (int64, error) {
+	return s.qviewsRefreshProgressInResourceGroup(ctx, collectionID, loadPercentage, "")
+}
+
+func (s *Server) qviewsRefreshProgressInResourceGroup(ctx context.Context, collectionID, loadPercentage int64, resourceGroup string) (int64, error) {
 	version, ok := s.qviewsRuntime.refreshVersions.Load(collectionID)
 	if !ok {
 		return loadPercentage, nil
@@ -1109,8 +1117,8 @@ func (s *Server) qviewsRefreshProgress(ctx context.Context, collectionID, loadPe
 	if err != nil {
 		return 0, err
 	}
-	progress := loadstatus.GetAtVersions(s.qviewsRuntime.loadConfigStore, s.qviewsRuntime.shardViewRegistry,
-		collectionID, collection.GetVirtualChannelNames(), collection.GetSchema().GetVersion(), version.(qviews.DataVersion))
+	progress := loadstatus.GetAtVersionsInResourceGroup(s.qviewsRuntime.loadConfigStore, s.qviewsRuntime.shardViewRegistry,
+		collectionID, collection.GetVirtualChannelNames(), collection.GetSchema().GetVersion(), version.(qviews.DataVersion), resourceGroup)
 	if current, ok := s.qviewsRuntime.refreshVersions.Load(collectionID); !ok || current != version {
 		return 0, nil
 	}

@@ -59,6 +59,7 @@ func TestManualBalance(t *testing.T) {
 		{"all missing segments", 1, []int64{2}, []int64{998, 999}, merr.ErrSegmentNotFound},
 		{"unloaded partition", 1, []int64{2}, []int64{201}, merr.ErrSegmentNotFound},
 		{"source only", 1, []int64{1}, []int64{101}, merr.ErrParameterInvalid},
+		{"missing segment before source-only destination", 1, []int64{1}, []int64{999}, merr.ErrSegmentNotFound},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := b.MoveSegments(t.Context(), cfg, tc.source, tc.destinations, tc.segments)

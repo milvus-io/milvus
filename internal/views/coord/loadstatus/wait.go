@@ -44,7 +44,7 @@ func wait(ctx context.Context, store *loadmgr.LoadConfigStore, registry *coordvi
 		// The same configuration-version-checked result drives public loading
 		// progress and AutoLoad readiness. Observe release again after the read
 		// so a coalesced release/reload cannot satisfy an older subscriber.
-		progress := getAtVersions(store, registry, collectionID, vchannels, schemaVersion, dataVersion)
+		progress := getAtVersions(store, registry, collectionID, vchannels, schemaVersion, dataVersion, "")
 		if progress.Config == nil {
 			return merr.WrapErrCollectionNotLoaded(collectionID)
 		}

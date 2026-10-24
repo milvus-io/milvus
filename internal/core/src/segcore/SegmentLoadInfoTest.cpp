@@ -1445,7 +1445,7 @@ TEST_F(SegmentLoadInfoTest, MovePreservesRawDataIndexFieldsForDefaultDiff) {
     index_param->set_key("index_type");
     index_param->set_value(knowhere::IndexEnum::INDEX_FAISS_IDMAP);
 
-    auto assert_field_101_has_data = [](SegmentLoadInfo& info) {
+    auto assert_field_101_has_data = [this](SegmentLoadInfo& info) {
         auto diff = info.GetLoadDiff(LoadFieldsFor(schema_));
         EXPECT_TRUE(diff.indexes_to_load.count(FieldId(101)) > 0);
         for (const auto& field_id : diff.fields_to_fill_default) {

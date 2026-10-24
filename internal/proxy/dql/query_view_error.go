@@ -12,10 +12,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+// QueryViewLoadError preserves the public load-state errors for all query consumers.
 // A missing view can mean release or temporary handoff/recovery. Consult the
 // current configuration only on failure; never turn a loaded collection's
 // transient view error into a terminal not-loaded error.
-func queryViewLoadError(ctx context.Context, node taskmodel.TaskNode, collectionID int64, partitions []int64, queryErr error) error {
+func QueryViewLoadError(ctx context.Context, node taskmodel.TaskNode, collectionID int64, partitions []int64, queryErr error) error {
 	var viewErr *viewerror.ViewError
 	var clientStatus *viewerror.ViewClientStatus
 	if errors.IsAny(queryErr, context.Canceled, context.DeadlineExceeded) ||

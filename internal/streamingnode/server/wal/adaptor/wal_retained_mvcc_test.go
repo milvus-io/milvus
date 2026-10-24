@@ -34,7 +34,7 @@ func TestRetainedMVCCAppendAfterConfirmation(t *testing.T) {
 		// Delay the callback after the real Acker.Ack has completed. Always return
 		// false from the condition so every call runs the original UpdateMVCC;
 		// only scheduling is controlled, never the MVCC state or getter result.
-		mockey.Mock((*mvcc.MVCCManager).UpdateMVCC).When(func(_ *mvcc.MVCCManager, msg message.MutableMessage, _ bool) bool {
+		mockey.Mock((*mvcc.MVCCManager).UpdateMVCC).When(func(_ *mvcc.MVCCManager, msg message.MutableMessage) bool {
 			if pauseInsert.Load() && msg.MessageType() == message.MessageTypeInsert {
 				acked <- msg.TimeTick()
 				<-release
@@ -66,8 +66,7 @@ func TestRetainedMVCCAppendAfterConfirmation(t *testing.T) {
 		defer w.Close()
 		require.Equal(t, message.WALNameTest, w.WALName())
 		(&testOneWALFramework{t: t}).testSendCreateCollection(ctx, w)
-		// Initialize segment assignment before injecting the race: CreateSegment
-		// also legitimately advances this VChannel's retained target.
+		// Initialize segment assignment before injecting the insert callback race.
 		_, err = w.Append(ctx, message.CreateTestEmptyInsertMesage(0, nil))
 		require.NoError(t, err)
 		inspector := resource.Resource().TimeTickInspector()

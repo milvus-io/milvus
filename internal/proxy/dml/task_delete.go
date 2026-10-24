@@ -776,7 +776,7 @@ func (dr *DeleteRunner) complexDeleteByQueryView(ctx context.Context, serialized
 		},
 	})
 	if err != nil {
-		return err
+		return dql.QueryViewLoadError(ctx, dr.node, dr.collectionID, dr.partitionIDs, err)
 	}
 
 	primaryKeys := &schemapb.IDs{}

@@ -1137,7 +1137,7 @@ func (t *QueryTask) executeByQueryView(ctx context.Context) error {
 
 	result, err := t.viewQueryClient.Legacy().Query(ctx, request)
 	if err != nil {
-		return queryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), err)
+		return QueryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), err)
 	}
 	for _, retrieveResult := range result.Results {
 		t.resultBuf.Insert(retrieveResult)

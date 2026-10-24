@@ -67,7 +67,8 @@ func TestManifestPublicationNotifiesQueryViews(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := metacache.NewMetaStore(nil)
-			m := &meta{metaStore: store, ctx: context.Background(), catalog: catalogkv.NewCatalog(NewMetaMemoryKV(), "", ""), segments: NewSegmentsInfo(store)}
+			m := &meta{metaStore: store, ctx: context.Background(), catalog: catalogkv.NewCatalog(NewMetaMemoryKV(), "", ""), segments: NewSegmentsInfo(store), manifestCommitExecutor: newManifestCommitExecutor(1)}
+			t.Cleanup(m.manifestCommitExecutor.close)
 			segment := NewSegmentInfo(&datapb.SegmentInfo{
 				ID: 10, CollectionID: 1, PartitionID: 2, State: commonpb.SegmentState_Flushed,
 				Level: datapb.SegmentLevel_L1, StorageVersion: storage.StorageV3, ManifestPath: oldManifest,
@@ -126,7 +127,8 @@ func TestManifestPublicationNotifiesQueryViews(t *testing.T) {
 
 func TestManifestPublicationGroupsNotifications(t *testing.T) {
 	store := metacache.NewMetaStore(nil)
-	m := &meta{metaStore: store, ctx: context.Background(), catalog: catalogkv.NewCatalog(NewMetaMemoryKV(), "", ""), segments: NewSegmentsInfo(store)}
+	m := &meta{metaStore: store, ctx: context.Background(), catalog: catalogkv.NewCatalog(NewMetaMemoryKV(), "", ""), segments: NewSegmentsInfo(store), manifestCommitExecutor: newManifestCommitExecutor(1)}
+	t.Cleanup(m.manifestCommitExecutor.close)
 	for _, id := range []int64{10, 11, 20} {
 		m.segments.SetSegment(id, NewSegmentInfo(&datapb.SegmentInfo{
 			ID: id, CollectionID: id / 10, State: commonpb.SegmentState_Flushed,

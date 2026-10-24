@@ -9,12 +9,16 @@ import (
 // Progress describes loading against one collection's current desired state.
 // Config is immutable. A zero total never means that loading is complete.
 type Progress struct {
-	Config *loadmgr.LoadConfig
-	Total  int64
-	Loaded int64
+	Config           *loadmgr.LoadConfig
+	Total            int64
+	Loaded           int64
+	NoReplicaInScope bool
 }
 
 func (p Progress) Percentage() int64 {
+	if p.NoReplicaInScope {
+		return -1
+	}
 	if p.Total == 0 {
 		return 0
 	}
@@ -29,34 +33,37 @@ func (p Progress) Ready() bool {
 // Get counts the full vchannel-by-replica product, including shards not yet in
 // the registry. vchannels must come from collection metadata, not resident views.
 func Get(store *loadmgr.LoadConfigStore, registry *coordview.ShardViewRegistry, collectionID int64, vchannels []string) Progress {
-	return getAtVersions(store, registry, collectionID, vchannels, nil, qviews.DataVersion{})
+	return getAtVersions(store, registry, collectionID, vchannels, nil, qviews.DataVersion{}, "")
 }
 
 // GetAtSchemaVersion additionally fences completion on the Up views' schema.
 // A different schema is never substituted for the requested generation.
 func GetAtSchemaVersion(store *loadmgr.LoadConfigStore, registry *coordview.ShardViewRegistry, collectionID int64, vchannels []string, schemaVersion int32) Progress {
-	return getAtVersions(store, registry, collectionID, vchannels, &schemaVersion, qviews.DataVersion{})
+	return getAtVersions(store, registry, collectionID, vchannels, &schemaVersion, qviews.DataVersion{}, "")
 }
 
 // GetAtVersions also requires each serving Up view to cover the published data.
 // A newer DataVersion satisfies a fence captured before subsequent mutations.
 func GetAtVersions(store *loadmgr.LoadConfigStore, registry *coordview.ShardViewRegistry, collectionID int64, vchannels []string, schemaVersion int32, dataVersion qviews.DataVersion) Progress {
-	return getAtVersions(store, registry, collectionID, vchannels, &schemaVersion, dataVersion)
+	return getAtVersions(store, registry, collectionID, vchannels, &schemaVersion, dataVersion, "")
 }
 
-func getAtVersions(store *loadmgr.LoadConfigStore, registry *coordview.ShardViewRegistry, collectionID int64, vchannels []string, schemaVersion *int32, dataVersion qviews.DataVersion) Progress {
+func getAtVersions(store *loadmgr.LoadConfigStore, registry *coordview.ShardViewRegistry, collectionID int64, vchannels []string, schemaVersion *int32, dataVersion qviews.DataVersion, resourceGroup string) Progress {
 	cfg, version := store.GetConfigWithVersion(collectionID)
 	if cfg == nil {
 		return Progress{}
 	}
 	shards := make([]qviews.ShardID, 0, len(vchannels)*len(cfg.Replicas))
 	for _, replica := range cfg.Replicas {
+		if resourceGroup != "" && replica.ResourceGroup != resourceGroup {
+			continue
+		}
 		for _, channel := range vchannels {
 			shards = append(shards, qviews.ShardID{ReplicaID: replica.ReplicaID, VChannel: channel})
 		}
 	}
 	stats := registry.SnapshotForShards(shards).StatsMap()
-	progress := Progress{Config: cfg, Total: int64(len(shards))}
+	progress := Progress{Config: cfg, Total: int64(len(shards)), NoReplicaInScope: resourceGroup != "" && len(shards) == 0 && len(vchannels) > 0}
 	for _, shard := range shards {
 		if stat := stats[shard]; stat != nil && stat.UpVersion != nil && stat.UpLoadInfoVersion == version && (schemaVersion == nil || stat.UpSchemaVersion == *schemaVersion) && stat.UpVersion.DataVersion.GTE(dataVersion) {
 			progress.Loaded++
@@ -76,4 +83,16 @@ func getAtVersions(store *loadmgr.LoadConfigStore, registry *coordview.ShardView
 		return Progress{Config: current}
 	}
 	return progress
+}
+
+// GetInResourceGroup uses the same version fence and expected shard set as Get,
+// restricted to the configured replicas in the requested group.
+func GetInResourceGroup(store *loadmgr.LoadConfigStore, registry *coordview.ShardViewRegistry, collectionID int64, vchannels []string, resourceGroup string) Progress {
+	return getAtVersions(store, registry, collectionID, vchannels, nil, qviews.DataVersion{}, resourceGroup)
+}
+
+// GetAtVersionsInResourceGroup scopes refresh completion to the same replicas
+// as the resource-group loading progress.
+func GetAtVersionsInResourceGroup(store *loadmgr.LoadConfigStore, registry *coordview.ShardViewRegistry, collectionID int64, vchannels []string, schemaVersion int32, dataVersion qviews.DataVersion, resourceGroup string) Progress {
+	return getAtVersions(store, registry, collectionID, vchannels, &schemaVersion, dataVersion, resourceGroup)
 }

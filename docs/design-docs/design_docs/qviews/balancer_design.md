@@ -1157,6 +1157,14 @@ snapshots.
   not count as loaded.
 - **LoadPercentage**: `count(current-config Up expected shards) / count(expected shards) * 100`.
 
+Resource-group-scoped status uses the same calculation, restricted to replicas
+assigned to that group in the captured LoadConfig. Unknown groups are rejected;
+a known group with no configured replica returns -1 and unavailable, while a
+configured replica with missing/not-current Up shards returns 0 or partial
+progress. An empty scope retains the collection-wide calculation. Refresh
+progress applies its schema/data fences to the same replica scope. Legacy
+Target/Distribution progress is not used by these public status surfaces.
+
 Listing loaded partitions without explicit partition IDs returns an empty list
 when the collection has no load configuration. Requests for explicit unloaded
 partitions still fail; an empty listing does not assert collection readiness.

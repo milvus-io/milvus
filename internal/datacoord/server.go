@@ -1198,6 +1198,12 @@ func (s *Server) Stop() error {
 		s.talonPrewarmInspector.Stop()
 	}
 	if !s.stateCode.CompareAndSwap(commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal) {
+		if s.garbageCollector != nil {
+			s.garbageCollector.close()
+		}
+		if s.snapshotExportManager != nil {
+			s.snapshotExportManager.Close()
+		}
 		return nil
 	}
 	mlog.Info(s.ctx, "datacoord server shutdown")

@@ -1544,7 +1544,7 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 		BarrierMVCC: t.MvccTimestamp,
 	})
 	if err != nil {
-		return queryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), err)
+		return QueryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), err)
 	}
 	if t.resultBuf == nil {
 		t.resultBuf = typeutil.NewConcurrentSet[*internalpb.SearchResults]()

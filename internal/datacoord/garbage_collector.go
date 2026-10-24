@@ -266,7 +266,7 @@ func newGarbageCollector(meta *meta, handler Handler, opt GcOption) *garbageColl
 		mlog.Duration("missingTolerance", opt.missingTolerance),
 		mlog.Duration("dropTolerance", opt.dropTolerance))
 	opt.removeObjectPool = conc.NewPool[struct{}](Params.DataCoordCfg.GCRemoveConcurrent.GetAsInt(), conc.WithExpiryDuration(time.Minute))
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118: ownership transfers to the returned manager; Close cancels it.
 	metaSignal := make(chan gcCmd)
 	orphanSignal := make(chan gcCmd)
 	lobSignal := make(chan gcCmd)

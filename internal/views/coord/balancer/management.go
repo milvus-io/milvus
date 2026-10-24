@@ -121,9 +121,6 @@ func (b *DefaultBalancer) MoveSegments(ctx context.Context, cfg *loadmgr.LoadCon
 	}
 	slices.Sort(eligible)
 	eligible = slices.Compact(eligible)
-	if len(eligible) == 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("no destination query node other than source")
-	}
 	data := b.cache.GetCollection(cfg.CollectionID).DataView()
 	if data == nil {
 		return nil, merr.WrapErrServiceUnavailableMsg("DataView is not ready for manual balance")
@@ -158,6 +155,9 @@ func (b *DefaultBalancer) MoveSegments(ctx context.Context, cfg *loadmgr.LoadCon
 		if _, ok := sources[segment]; !ok {
 			return nil, merr.WrapErrSegmentNotFound(segment, "segment not found in source node")
 		}
+	}
+	if len(eligible) == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("no destination query node other than source")
 	}
 	rows := make(map[int64]int64, len(eligible))
 	for _, node := range eligible {

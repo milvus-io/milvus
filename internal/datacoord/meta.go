@@ -1820,7 +1820,12 @@ func clearEmptyManifestIndexMarker(segmentID int64, expectedManifest string) Upd
 
 func UpdateManifestVersion(segmentID int64, manifestVersion int64) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
-		segment := modPack.Get(segmentID)
+		// Inspect the pending value without registering a write for a stale/no-op
+		// manifest. Other operators in this batch may already have changed it.
+		segment := modPack.segments[segmentID]
+		if segment == nil {
+			segment = modPack.meta.segments.GetSegment(segmentID)
+		}
 		if segment == nil {
 			mlog.Warn(modPack.meta.ctx, "meta update: update manifest version failed - segment not found",
 				mlog.Int64("segmentID", segmentID))
@@ -1851,7 +1856,7 @@ func UpdateManifestVersion(segmentID int64, manifestVersion int64) UpdateOperato
 			}
 			return false
 		}
-		segment.ManifestPath = packed.MarshalManifestPath(basePath, manifestVersion)
+		modPack.Get(segmentID).ManifestPath = packed.MarshalManifestPath(basePath, manifestVersion)
 		return true
 	}
 }
