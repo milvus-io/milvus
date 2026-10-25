@@ -79,3 +79,15 @@ Key source paths:
 `internal/streamingnode/server/viewquery/`,
 `internal/streamingnode/server/wal/vchannel/queryresource/read_schema.go`,
 `internal/views/viewerror/rpc_error.go`.
+
+## Function model resources
+
+Growing function-chain execution on SN resolves named XGBoost model resources
+through the same demand-download manager used by Analyzer. A fresh name lookup
+selects the immutable resource ID, then concurrent requests share its download
+and model load. The file reference covers native model construction; the native
+UBJ loader copies model state into owned memory. Queries retain a model lease
+through prediction. Idle models expire after the configured file-resource cache
+TTL; removal and shutdown cannot destroy an active model. Reusing a resource name
+with a new ID never substitutes the model held by an executing query. QN/Proxy
+without a pull manager retain their existing file-resource synchronization path.
