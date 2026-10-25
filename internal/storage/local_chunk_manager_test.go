@@ -21,13 +21,39 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"syscall"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/localstorage"
 )
+
+func TestLocalChunkManagerDurableCopyAndSyncErrors(t *testing.T) {
+	root := t.TempDir()
+	cm := NewLocalChunkManager(objectstorage.RootPath(root))
+	ctx := t.Context()
+	source := filepath.Join(root, "source")
+	destination := filepath.Join(root, "new", "parents", "copy")
+	require.NoError(t, cm.Write(ctx, source, []byte("complete")))
+	require.NoError(t, cm.Copy(ctx, source, destination))
+	require.NoError(t, cm.Copy(ctx, source, source))
+	data, err := cm.Read(ctx, source)
+	require.NoError(t, err)
+	require.Equal(t, "complete", string(data))
+	data, err = cm.Read(ctx, destination)
+	require.NoError(t, err)
+	require.Equal(t, "complete", string(data))
+
+	patch := mockey.Mock(localstorage.SyncDirectories).Return(syscall.EIO).Build()
+	defer patch.UnPatch()
+	require.Error(t, cm.Write(ctx, source, []byte("new")))
+	require.Error(t, cm.Copy(ctx, source, destination))
+	require.Error(t, cm.MultiWrite(ctx, map[string][]byte{source: []byte("batch")}))
+}
 
 var localPath string
 

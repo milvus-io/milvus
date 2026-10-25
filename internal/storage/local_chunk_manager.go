@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/localstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -98,30 +99,18 @@ func (lcm *LocalChunkManager) ReaderAtOffset(ctx context.Context, filePath strin
 
 // Write writes the data to local storage.
 func (lcm *LocalChunkManager) Write(ctx context.Context, filePath string, content []byte) error {
-	dir := path.Dir(filePath)
-	exist, err := lcm.Exist(ctx, dir)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return err
-	}
-	if !exist {
-		err := os.MkdirAll(dir, os.ModePerm)
-		if err != nil {
-			return merr.WrapErrIoFailed(filePath, err)
-		}
 	}
 	return WriteFile(filePath, content, os.ModePerm)
 }
 
 // MultiWrite writes the data to local storage.
 func (lcm *LocalChunkManager) MultiWrite(ctx context.Context, contents map[string][]byte) error {
-	var el error
-	for filePath, content := range contents {
-		err := lcm.Write(ctx, filePath, content)
-		if err != nil {
-			el = merr.Combine(el, merr.Wrapf(err, "write %s failed", filePath))
-		}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	return el
+	return merr.WrapErrIoFailed("local batch", localstorage.WriteFiles(contents, os.ModePerm))
 }
 
 // Exist checks whether chunk is saved to local storage.
@@ -315,33 +304,14 @@ func (lcm *LocalChunkManager) Copy(ctx context.Context, srcFilePath string, dstF
 	}
 	defer srcFile.Close()
 
-	// Create destination directory if not exists
-	dstDir := path.Dir(dstFilePath)
-	exist, err := lcm.Exist(ctx, dstDir)
-	if err != nil {
-		return err
-	}
-	if !exist {
-		err := os.MkdirAll(dstDir, os.ModePerm)
-		if err != nil {
-			return merr.WrapErrIoFailed(dstFilePath, err)
+	err = localstorage.Write(dstFilePath, 0o666, func(dst io.Writer) error {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-	}
-
-	// Create destination file
-	dstFile, err := os.Create(dstFilePath)
-	if err != nil {
-		return merr.WrapErrIoFailed(dstFilePath, err)
-	}
-	defer dstFile.Close()
-
-	// Copy content
-	_, err = io.Copy(dstFile, srcFile)
-	if err != nil {
-		return merr.WrapErrIoFailed(dstFilePath, err)
-	}
-
-	return nil
+		_, err := io.Copy(dst, srcFile)
+		return err
+	})
+	return merr.WrapErrIoFailed(dstFilePath, err)
 }
 
 type LocalReader struct {

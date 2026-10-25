@@ -23,6 +23,11 @@
 #include <boost/system/error_code.hpp>
 #include <fstream>
 #include <sstream>
+#include <cerrno>
+#include <cstring>
+#include <fcntl.h>
+#include <unistd.h>
+#include <milvus-storage/filesystem/local_durability.h>
 
 #include "common/EasyAssert.h"
 #include "common/Exception.h"
@@ -303,6 +308,85 @@ LocalChunkManager::GetSizeOfDir(const std::string& dir) {
     }
 
     return total_file_size;
+}
+
+void
+DurableLocalChunkManager::Write(const std::string& filename,
+                                void* data,
+                                uint64_t size) {
+    boost::filesystem::path path(filename);
+    boost::filesystem::create_directories(path.parent_path());
+    auto opened = milvus_storage::OpenDurableLocalOutput(filename);
+    if (!opened.ok()) {
+        ThrowInfo(FileWriteFailed, opened.status().ToString());
+    }
+    auto output = std::move(opened).ValueOrDie();
+    auto status = output->Write(data, size);
+    if (status.ok()) {
+        status = output->Close();
+    } else {
+        (void)output->Abort();
+    }
+    if (!status.ok()) {
+        ThrowInfo(FileWriteFailed, status.ToString());
+    }
+}
+
+void
+DurableLocalChunkManager::Write(const std::string& filename,
+                                uint64_t offset,
+                                void* data,
+                                uint64_t size) {
+    int fd = ::open(filename.c_str(), O_WRONLY | O_CLOEXEC);
+    if (fd < 0) {
+        ThrowInfo(
+            FileOpenFailed, "open {}: {}", filename, std::strerror(errno));
+    }
+    try {
+        uint64_t written = 0;
+        while (written < size) {
+            auto n = ::pwrite(fd,
+                              static_cast<const char*>(data) + written,
+                              size - written,
+                              offset + written);
+            if (n < 0 && errno == EINTR)
+                continue;
+            if (n <= 0) {
+                ThrowInfo(FileWriteFailed,
+                          "write {}: {}",
+                          filename,
+                          n == 0 ? "short write" : std::strerror(errno));
+            }
+            written += n;
+        }
+        int result;
+        do {
+            result = ::fsync(fd);
+        } while (result < 0 && errno == EINTR);
+        if (result != 0) {
+            ThrowInfo(FileWriteFailed,
+                      "fsync {}: {}",
+                      filename,
+                      std::strerror(errno));
+        }
+        auto close_result = ::close(fd);
+        fd = -1;
+        if (close_result != 0) {
+            ThrowInfo(FileWriteFailed,
+                      "close {}: {}",
+                      filename,
+                      std::strerror(errno));
+        }
+        auto status = milvus_storage::SyncLocalDirectoryTree(
+            boost::filesystem::path(filename).parent_path().string());
+        if (!status.ok()) {
+            ThrowInfo(FileWriteFailed, status.ToString());
+        }
+    } catch (...) {
+        if (fd >= 0)
+            (void)::close(fd);
+        throw;
+    }
 }
 
 }  // namespace milvus::storage
