@@ -141,6 +141,8 @@ type shardExecParams struct {
 	barrierMVCC      uint64
 	// buildPlanReq creates the GetQueryPlanRequest for a target shard.
 	buildPlanReq func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest
+	// consumePlan accepts results already computed on SN, before QN dispatch.
+	consumePlan func(*viewpb.QueryPlan) error
 	// dispatchNode executes a Phase 2 RPC on a single work node.
 	// Called concurrently for each work node in the plan, with per-node retry
 	// for non-ViewError transient failures.
@@ -184,6 +186,11 @@ func (s *shardViewQueryClient) executeShard(
 
 		if err := qviews.RestoreQueryPlanPayloads(plan, planReq); err != nil {
 			return nil, err
+		}
+		if params.consumePlan != nil {
+			if err := params.consumePlan(plan); err != nil {
+				return nil, err
+			}
 		}
 		shardID := qviews.FromProtoShardID(plan.ShardId)
 		workNodes := workNodesFromPlan(plan)

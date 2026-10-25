@@ -20,6 +20,8 @@ type StreamingNodeViewQueryServiceClient interface {
 }
 
 type QueryNodeViewQueryServiceClient interface {
+	StatisticsOnView(ctx context.Context, nodeID int64, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error)
+
 	SearchOnView(ctx context.Context, nodeID int64, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error)
 	QueryOnView(ctx context.Context, nodeID int64, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error)
 }
@@ -58,4 +60,12 @@ func invalidWorkNodeError(node qviews.WorkNode) error {
 		return viewerror.NewUnknownError("nil query view work node")
 	}
 	return viewerror.NewUnknownError("unknown query view work node %s", node.String())
+}
+
+func (c *compositeViewQueryServiceClient) StatisticsOnView(ctx context.Context, node qviews.WorkNode, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error) {
+	qn, ok := node.(qviews.QueryNode)
+	if !ok {
+		return nil, invalidWorkNodeError(node)
+	}
+	return c.queryNode.StatisticsOnView(ctx, qn.ID, req)
 }

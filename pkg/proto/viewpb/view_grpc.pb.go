@@ -272,8 +272,9 @@ var QueryPlanService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	ViewQueryService_SearchOnView_FullMethodName = "/milvus.proto.view.ViewQueryService/SearchOnView"
-	ViewQueryService_QueryOnView_FullMethodName  = "/milvus.proto.view.ViewQueryService/QueryOnView"
+	ViewQueryService_SearchOnView_FullMethodName     = "/milvus.proto.view.ViewQueryService/SearchOnView"
+	ViewQueryService_QueryOnView_FullMethodName      = "/milvus.proto.view.ViewQueryService/QueryOnView"
+	ViewQueryService_StatisticsOnView_FullMethodName = "/milvus.proto.view.ViewQueryService/StatisticsOnView"
 )
 
 // ViewQueryServiceClient is the client API for ViewQueryService service.
@@ -284,6 +285,7 @@ type ViewQueryServiceClient interface {
 	SearchOnView(ctx context.Context, in *SearchOnViewRequest, opts ...grpc.CallOption) (*SearchOnViewResponse, error)
 	// QueryOnView executes a query (retrieve by expression) on segments belonging to the given view version.
 	QueryOnView(ctx context.Context, in *QueryOnViewRequest, opts ...grpc.CallOption) (*QueryOnViewResponse, error)
+	StatisticsOnView(ctx context.Context, in *StatisticsOnViewRequest, opts ...grpc.CallOption) (*StatisticsOnViewResponse, error)
 }
 
 type viewQueryServiceClient struct {
@@ -312,6 +314,15 @@ func (c *viewQueryServiceClient) QueryOnView(ctx context.Context, in *QueryOnVie
 	return out, nil
 }
 
+func (c *viewQueryServiceClient) StatisticsOnView(ctx context.Context, in *StatisticsOnViewRequest, opts ...grpc.CallOption) (*StatisticsOnViewResponse, error) {
+	out := new(StatisticsOnViewResponse)
+	err := c.cc.Invoke(ctx, ViewQueryService_StatisticsOnView_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ViewQueryServiceServer is the server API for ViewQueryService service.
 // All implementations should embed UnimplementedViewQueryServiceServer
 // for forward compatibility
@@ -320,6 +331,7 @@ type ViewQueryServiceServer interface {
 	SearchOnView(context.Context, *SearchOnViewRequest) (*SearchOnViewResponse, error)
 	// QueryOnView executes a query (retrieve by expression) on segments belonging to the given view version.
 	QueryOnView(context.Context, *QueryOnViewRequest) (*QueryOnViewResponse, error)
+	StatisticsOnView(context.Context, *StatisticsOnViewRequest) (*StatisticsOnViewResponse, error)
 }
 
 // UnimplementedViewQueryServiceServer should be embedded to have forward compatible implementations.
@@ -331,6 +343,9 @@ func (UnimplementedViewQueryServiceServer) SearchOnView(context.Context, *Search
 }
 func (UnimplementedViewQueryServiceServer) QueryOnView(context.Context, *QueryOnViewRequest) (*QueryOnViewResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method QueryOnView not implemented")
+}
+func (UnimplementedViewQueryServiceServer) StatisticsOnView(context.Context, *StatisticsOnViewRequest) (*StatisticsOnViewResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method StatisticsOnView not implemented")
 }
 
 // UnsafeViewQueryServiceServer may be embedded to opt out of forward compatibility for this service.
@@ -380,6 +395,24 @@ func _ViewQueryService_QueryOnView_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ViewQueryService_StatisticsOnView_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StatisticsOnViewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ViewQueryServiceServer).StatisticsOnView(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ViewQueryService_StatisticsOnView_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ViewQueryServiceServer).StatisticsOnView(ctx, req.(*StatisticsOnViewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ViewQueryService_ServiceDesc is the grpc.ServiceDesc for ViewQueryService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -394,6 +427,10 @@ var ViewQueryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "QueryOnView",
 			Handler:    _ViewQueryService_QueryOnView_Handler,
+		},
+		{
+			MethodName: "StatisticsOnView",
+			Handler:    _ViewQueryService_StatisticsOnView_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

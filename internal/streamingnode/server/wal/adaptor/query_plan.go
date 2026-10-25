@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -101,12 +102,17 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 	case *viewpb.GetQueryPlanRequest_LegacyRetrieveRequest:
 		schemaVersion = request.LegacyRetrieveRequest.GetSchemaVersion()
 	}
-	lease, err := w.queryViewHandler.AcquireUpViewAtSchema(ctx, shardID, schemaVersion)
+	var lease *snview.QueryViewLease
+	if req.GetStatisticsRequest() != nil {
+		lease, err = w.queryViewHandler.AcquireLatestUpView(ctx, shardID)
+	} else {
+		lease, err = w.queryViewHandler.AcquireUpViewAtSchema(ctx, shardID, schemaVersion)
+	}
 	if err != nil {
 		return nil, err
 	}
 	defer lease.Release()
-	if schemaVersion != lease.Meta.GetSchemaVersion() {
+	if req.GetStatisticsRequest() == nil && schemaVersion != lease.Meta.GetSchemaVersion() {
 		return nil, viewerror.NewViewNotFound("query view schema is not ready")
 	}
 	if req.GetCollectionId() != 0 && lease.Meta.GetCollectionId() != req.GetCollectionId() {
@@ -139,13 +145,33 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 	if err := runtime.WaitMVCCVisible(ctx, mvcc.GetGrowingTimetick(), mvcc.GetTransformingTimetick()); err != nil {
 		return nil, err
 	}
-	optimizer := readRuntime.GlobalOptimizer()
 	plan = &viewpb.QueryPlan{
 		Version: lease.Version.IntoProto(),
 		ShardId: viewShardID.IntoProto(),
 		Mvcc:    mvcc,
 	}
 	switch request := req.GetRequest().(type) {
+	case *viewpb.GetQueryPlanRequest_StatisticsRequest:
+		statistics := proto.Clone(request.StatisticsRequest).(*viewpb.StatisticsRequest)
+		statistics.PartitionIds, err = runtime.ResolvePartitions(lease.Meta.GetLoadInfoVersion(), statistics.GetPartitionIds())
+		if err != nil {
+			return nil, err
+		}
+		// Count growing data while the chosen View is still leased. The returned
+		// routing contains QNs only, so no second SN request is necessary.
+		rows, countErr := w.queryViewHandler.Statistics(ctx, &viewpb.StatisticsOnViewRequest{
+			ShardId: viewShardID.IntoProto(), Version: lease.Version.IntoProto(),
+			Mvcc: mvcc, PartitionIds: statistics.PartitionIds,
+		})
+		if countErr != nil {
+			return nil, countErr
+		}
+		plan.GrowingRowCount = &rows
+		plan.Request = &viewpb.QueryPlan_StatisticsRequest{StatisticsRequest: statistics}
+		plan.WorkNodes = buildQueryPlanWorkNodes(lease.View, queryPlanWorkNodeOptions{
+			ignoreGrowing: true, partitionIDs: statistics.PartitionIds,
+		})
+
 	case *viewpb.GetQueryPlanRequest_LegacySearchRequest:
 		if request.LegacySearchRequest == nil {
 			return nil, viewerror.NewUnknownError("query plan request misses legacy search request")
@@ -170,6 +196,7 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 				return nil, err
 			}
 		}
+		optimizer := readRuntime.GlobalOptimizer()
 		optimization, err := optimizer.OptimizeSearch(ctx, searchReq)
 		if err != nil {
 			return nil, err
@@ -190,6 +217,7 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		if err != nil {
 			return nil, err
 		}
+		optimizer := readRuntime.GlobalOptimizer()
 		if err := optimizer.OptimizeRetrieve(ctx, retrieveReq); err != nil {
 			return nil, err
 		}
@@ -267,7 +295,7 @@ func (w *walAdaptorImpl) resolveQueryPlanMVCC(ctx context.Context, req *viewpb.G
 		var minimum uint64
 		if mvcc.ConsistencyLevel == commonpb.ConsistencyLevel_Bounded {
 			// Proxy supplies the bounded-staleness lower bound in the legacy request.
-			minimum = max(req.GetLegacySearchRequest().GetGuaranteeTimestamp(), req.GetLegacyRetrieveRequest().GetGuaranteeTimestamp())
+			minimum = max(req.GetLegacySearchRequest().GetGuaranteeTimestamp(), req.GetLegacyRetrieveRequest().GetGuaranteeTimestamp(), req.GetStatisticsRequest().GetGuaranteeTimestamp())
 		}
 		return w.getQueryPlanMVCC(ctx, vchannel, strong, minimum)
 	default:

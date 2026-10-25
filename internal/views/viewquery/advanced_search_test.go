@@ -276,6 +276,7 @@ func (t *advancedSearchTasks) Release() {
 }
 
 type advancedTaskProvider struct {
+	TaskProvider
 	mu            sync.Mutex
 	emptyFields   map[int64]struct{}
 	acquired      []int64

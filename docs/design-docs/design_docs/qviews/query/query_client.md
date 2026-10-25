@@ -72,3 +72,36 @@ without replanning. See [plan and MVCC contracts](query_plan.md) and
   cleanup and empty-shard proof retention.
 - `client_legacy_test.go`: retained requery without replanning.
 - Handler `query_view_ready_test.go`: migration, readiness and cancellation.
+
+## Runtime row statistics
+
+The extracted `Legacy().Statistics` component is available to future Proxy
+callers. Production Proxy routing and the QN provider implementation remain
+separate integration work; this PR adds the SN provider and shared contracts.
+
+For each shard the client sends a `statistics_request` through `GetQueryPlan`.
+SN selects the latest serving Up View (physical statistics do not select a
+logical read schema), waits for the requested consumption lower bound, resolves
+the View's partition scope, and counts its retained growing resources in the
+same call. The response contains `growing_row_count`, the selected View/version,
+MVCC frontiers, resolved partitions and QN workers only. There is no follow-up
+SN execution RPC and no expression/index optimizer work for statistics.
+
+The client then calls `StatisticsOnView` on those QNs and sums their row counts
+with the SN result. The QN provider contract requires waiting for Transform
+application on the exact acquired physical registrations and counting the
+View's pinned ReadStates. SN uses the same DataVersion-based growing exclusion
+as queries; QN uses the selected View's sealed membership. One replica per shard contributes, including during handoff.
+
+These are runtime `RowNum` statistics with applied deletes, not a historical
+MVCC snapshot, a TTL-filtered `count(*)`, or a globally atomic row count. The
+request guarantee is a freshness lower bound; later applied writes/deletes can
+be reflected. No new periodic row-count reporting or Coordinator aggregation
+is introduced. Growing reuses its existing native `GetRealCount`; sealed reads
+use the existing physical deletion-cardinality counter.
+
+A retryable QN View failure cancels and joins that shard's workers, discards
+both the SN sample and all partial QN counts, and restarts at SN. Other shards
+retain successful results. Empty and growing-only shards still retain the SN
+result even when there are no QN workers. Errors use existing View RPC status
+handling; the new response carries only a successful row count.

@@ -25,6 +25,17 @@ func NewServer(provider TaskProvider, scheduler Scheduler) *Server {
 	}
 }
 
+func (s *Server) StatisticsOnView(ctx context.Context, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error) {
+	if err := validateCommonRequestShape(req.GetShardId(), req.GetVersion(), req.GetMvcc()); err != nil {
+		return nil, err
+	}
+	rows, err := s.provider.Statistics(ctx, req)
+	if err != nil {
+		return nil, toRPCError(err)
+	}
+	return &viewpb.StatisticsOnViewResponse{RowCount: rows}, nil
+}
+
 func (s *Server) SearchOnView(ctx context.Context, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
 	if err := validateSearchRequest(req); err != nil {
 		return nil, err

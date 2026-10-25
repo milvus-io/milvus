@@ -80,6 +80,21 @@ Key source paths:
 `internal/streamingnode/server/wal/vchannel/queryresource/read_schema.go`,
 `internal/views/viewerror/rpc_error.go`.
 
+## Physical row statistics
+
+`TaskProvider.Statistics` is a lightweight resource operation. It acquires the
+requested View and partition scope, waits for visibility, retains the concrete
+segment handles, samples their existing `RowNum`, and releases every handle on
+success, cancellation or error. It needs no query scheduler or expression plan.
+The separately integrated QN provider must read `ReadableSealedSegment.QuerySegment()` so it uses the
+same pinned ReadState as queries, never a new SegmentID lookup or a base's latest
+state. It must wait for Transform on the exact registrations behind those handles. The RPC adapter is `StatisticsOnView`; errors use the existing status
+conversion and successful responses contain only `row_count`.
+
+SN normally invokes this operation while selecting the statistics View, so the
+client does not issue a second execution request to SN. See the
+[statistics orchestration contract](query_client.md#runtime-row-statistics).
+
 ## Function model resources
 
 Growing function-chain execution on SN resolves named XGBoost model resources

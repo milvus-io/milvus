@@ -243,6 +243,8 @@ message GetQueryPlanRequest {
     oneof request {
         internal.SearchRequest legacy_search_request = 5;
         internal.RetrieveRequest legacy_retrieve_request = 6;
+        // SN counts growing data during this call; the returned plan targets QNs only.
+        StatisticsRequest statistics_request = 9;
     }
 }
 
@@ -274,11 +276,13 @@ message QueryPlan {
     oneof request {
         internal.SearchRequest legacy_search_request = 5;
         internal.RetrieveRequest legacy_retrieve_request = 6;
+        StatisticsRequest statistics_request = 8;
     }
     // Unchanged large payloads are omitted from request and borrowed from the
     // original Phase 1 request by Proxy. All other optimized parameters remain
     // explicit, including empty payloads when the optimizer clears a field.
     QueryPayloadReuse reused_payloads = 7;
+    optional int64 growing_row_count = 9;
 }
 
 //
@@ -293,6 +297,25 @@ service ViewQueryService {
     rpc SearchOnView(SearchOnViewRequest) returns (SearchOnViewResponse) {}
     // QueryOnView executes a query (retrieve by expression) on segments belonging to the given view version.
     rpc QueryOnView(QueryOnViewRequest) returns (QueryOnViewResponse) {}
+    rpc StatisticsOnView(StatisticsOnViewRequest) returns (StatisticsOnViewResponse) {}
+}
+
+// Runtime physical row statistics: no expression, TTL or historical snapshot.
+// The guarantee timestamp is a consumption lower bound, not a read timestamp.
+message StatisticsRequest {
+    repeated int64 partition_ids = 1;
+    uint64 guarantee_timestamp = 2;
+}
+
+message StatisticsOnViewRequest {
+    ShardID shard_id = 1;
+    QueryViewVersion version = 2;
+    QueryPlanMVCC mvcc = 3;
+    repeated int64 partition_ids = 4;
+}
+
+message StatisticsOnViewResponse {
+    int64 row_count = 1;
 }
 
 message SearchOnViewRequest {

@@ -148,6 +148,7 @@ func (f *fakeQueryPlanClient) GetMVCCTimestamp(_ context.Context, shardID qviews
 }
 
 type fakeViewQueryServiceClient struct {
+	ViewQueryServiceClient
 	searchReq *viewpb.SearchOnViewRequest
 }
 
