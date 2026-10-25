@@ -129,3 +129,18 @@ activation and mixed-version acceptance require integration validation.
 - `internal/streamingnode/server/wal/vchannel/{schema,query_resource_module}.go`
 - `internal/streamingnode/server/wal/interceptors/timetick/mvcc/query_mvcc.go`
 - `internal/streamingnode/server/wal/interceptors/timetick/timetick_sync_operator.go`
+
+## Transaction and restore publication
+
+Successful transaction bodies record whether Transform consumption is required
+before releasing their in-flight slots. Recovery reconstructs the same
+classification. At a complete ACK prefix, an insert-only commit advances only
+GrowingMVCC; a commit containing Delete advances both frontiers. ACK details
+remain available until WAB.Append and QueryMVCC publication finish. Empty
+transactions retain their existing acceptance behavior and conservative dual
+frontier projection.
+
+A published RestoreSnapshot, like CreateCollection, initializes both frontiers
+for its channel. Observing its append alone cannot register a query snapshot;
+late append callbacks cannot overwrite newer published progress. The full
+RestoreSnapshot creation workflow remains separate production integration.

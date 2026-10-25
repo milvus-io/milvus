@@ -35,7 +35,7 @@ func TestQueryMVCCACKPublicationPrecedesAppendCallback(t *testing.T) {
 			require.NotEmpty(t, published)
 			require.GreaterOrEqual(t, through, msg.TimeTick())
 			confirmation := NewTimeTickMsg(through, walimplstest.NewTestMessageID(0), 0, false).IntoImmutableMessage(nil)
-			cm.QueryMVCC().Publish(published, confirmation)
+			cm.QueryMVCC().Publish(queryMVCCMessages(published), confirmation)
 			before, ready := cm.QueryMVCC().Snapshot("v", through)
 			require.True(t, ready)
 			original(cm, msg)
@@ -57,4 +57,14 @@ func TestQueryMVCCACKPublicationPrecedesAppendCallback(t *testing.T) {
 		got, _ := manager.QueryMVCC().Snapshot("v", 0)
 		require.Zero(t, got)
 	})
+}
+
+func queryMVCCMessages(messages []message.ImmutableMessage) func(func(message.ImmutableMessage, bool) bool) {
+	return func(yield func(message.ImmutableMessage, bool) bool) {
+		for _, msg := range messages {
+			if !yield(msg, false) {
+				return
+			}
+		}
+	}
 }
