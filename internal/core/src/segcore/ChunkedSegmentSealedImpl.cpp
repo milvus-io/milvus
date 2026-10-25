@@ -3434,6 +3434,12 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                                 std::move(timestamp_index);
                             runtime.timestamp_index_slot.reset();
                             stats_.mem_size += sizeof(Timestamp) * num_rows;
+                            LOG_INFO(
+                                "Adding timestamps raw with size {} for "
+                                "segment {} , mem_size= {}",
+                                num_rows * sizeof(Timestamp),
+                                id_,
+                                stats_.mem_size.load());
                         });
                 } else {
                     std::unique_ptr<cachinglayer::Translator<
@@ -3473,6 +3479,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
 
         if (column_group_id.get() == DEFAULT_SHORT_COLUMN_GROUP_ID) {
             stats_.mem_size += chunked_column_group->memory_size();
+            LOG_INFO("chunked_column_group->memory_size(): {}",
+                     chunked_column_group->memory_size());
         }
     }
 }
@@ -3568,6 +3576,12 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                     std::unique_lock lck(mutex_);
                     update_row_count(runtime, num_rows);
                     stats_.mem_size += sizeof(Timestamp) * num_rows;
+                    LOG_INFO(
+                        "Adding timestamps raw with size {} for segment {} , "
+                        "mem_size= {}",
+                        num_rows * sizeof(Timestamp),
+                        id_,
+                        stats_.mem_size.load());
                 });
             } else {
                 AssertInfo(system_field_type == SystemFieldType::RowId,
@@ -9667,6 +9681,12 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
                     runtime.timestamp_index = std::move(timestamp_index);
                     runtime.timestamp_index_slot.reset();
                     stats_.mem_size += sizeof(Timestamp) * num_rows;
+                    LOG_INFO(
+                        "Adding timestamps raw with size {} for segment {} , "
+                        "mem_size= {}",
+                        num_rows * sizeof(Timestamp),
+                        id_,
+                        stats_.mem_size.load());
                 });
             } else {
                 std::unique_ptr<cachinglayer::Translator<
