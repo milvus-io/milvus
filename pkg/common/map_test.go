@@ -18,6 +18,9 @@ func TestMapEqual(t *testing.T) {
 		m4 := map[int64]int64{1: 11, 2: 22}
 		assert.False(t, MapEqual(m1, m4))
 
+		m5 := map[int64]int64{1: 11, 2: 22, 4: 33}
+		assert.False(t, MapEqual(m1, m5))
+
 		assert.False(t, MapEqual(m1, nil))
 		assert.True(t, MapEqual(map[int64]int64(nil), map[int64]int64(nil)))
 	})
