@@ -630,6 +630,17 @@ GetFieldIDList(FieldId column_group_id,
                const std::shared_ptr<arrow::Schema>& arrow_schema,
                milvus_storage::ArrowFileSystemPtr fs);
 
+// Field id list of a whole column group. A multi-field column group without
+// ChildFields in its binlog meta (legacy StorageV2) is described only by the
+// footers of its files, so every file's footer is read and all of them must
+// list the same fields; otherwise DataFormatBroken names the first file that
+// differs from files[0].
+milvus_storage::FieldIDList
+GetColumnGroupFieldIDList(FieldId column_group_id,
+                          const std::vector<std::string>& files,
+                          const std::shared_ptr<arrow::Schema>& arrow_schema,
+                          milvus_storage::ArrowFileSystemPtr fs);
+
 // Convert a single row of an Arrow ListArray to a protobuf ScalarField.
 // The element type is inferred from the ListArray's value type.
 // Supported value types: BOOL, INT8, INT16, INT32, INT64, FLOAT, DOUBLE, STRING.

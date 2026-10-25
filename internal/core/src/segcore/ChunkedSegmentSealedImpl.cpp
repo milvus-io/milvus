@@ -3300,8 +3300,8 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
 
         milvus_storage::FieldIDList field_id_list;
         if (info.child_field_ids.size() == 0) {
-            field_id_list = storage::GetFieldIDList(
-                column_group_id, insert_files[0], arrow_schema, fs);
+            field_id_list = storage::GetColumnGroupFieldIDList(
+                column_group_id, insert_files, arrow_schema, fs);
         } else {
             field_id_list = milvus_storage::FieldIDList(info.child_field_ids);
         }

@@ -1735,8 +1735,9 @@ VisitFieldDataFromStorageV2Paged(
             if (group_id >= START_USER_FIELDID) {
                 continue;
             }
-            milvus_storage::FieldIDList field_id_list = storage::GetFieldIDList(
-                FieldId(group_id), files[0], nullptr, fs);
+            milvus_storage::FieldIDList field_id_list =
+                storage::GetColumnGroupFieldIDList(
+                    FieldId(group_id), files, nullptr, fs);
             for (size_t i = 0; i < field_id_list.size(); ++i) {
                 if (field_id_list.Get(i) == field_id) {
                     remote_chunk_files = files;
@@ -1768,8 +1769,9 @@ VisitFieldDataFromStorageV2Paged(
 
     // find column offset
     if (col_offset == -1) {
-        milvus_storage::FieldIDList field_id_list = storage::GetFieldIDList(
-            FieldId(column_group_id), remote_chunk_files[0], nullptr, fs);
+        milvus_storage::FieldIDList field_id_list =
+            storage::GetColumnGroupFieldIDList(
+                FieldId(column_group_id), remote_chunk_files, nullptr, fs);
 
         for (size_t i = 0; i < field_id_list.size(); ++i) {
             if (field_id_list.Get(i) == field_id) {
@@ -2896,6 +2898,39 @@ GetFieldIDList(FieldId column_group_id,
                   "{}",
                   filepath,
                   status.ToString());
+    }
+    return field_id_list;
+}
+
+milvus_storage::FieldIDList
+GetColumnGroupFieldIDList(FieldId column_group_id,
+                          const std::vector<std::string>& files,
+                          const std::shared_ptr<arrow::Schema>& arrow_schema,
+                          milvus_storage::ArrowFileSystemPtr fs) {
+    if (files.empty()) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "[StorageV2] column group {} has no files",
+                  column_group_id.get());
+    }
+    auto field_id_list =
+        GetFieldIDList(column_group_id, files[0], arrow_schema, fs);
+    if (column_group_id >= FieldId(START_USER_FIELDID)) {
+        return field_id_list;
+    }
+    // Only the footer is read; data pages are untouched.
+    for (size_t i = 1; i < files.size(); ++i) {
+        auto file_field_id_list =
+            GetFieldIDList(column_group_id, files[i], arrow_schema, fs);
+        if (!(file_field_id_list == field_id_list)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "[StorageV2] column group {} stores different fields "
+                      "across its files: {} has [{}] but {} has [{}]",
+                      column_group_id.get(),
+                      files[0],
+                      field_id_list.ToString(),
+                      files[i],
+                      file_field_id_list.ToString());
+        }
     }
     return field_id_list;
 }
