@@ -1,0 +1,100 @@
+{
+ "name": "prod_2_68c6200f",
+ "category": "2_frequent_scale",
+ "customer": null,
+ "source": "in01-68c6200f gcp; node scale 1.000, segment scale 1.000, row_scale=0.1117; autoscaling 4<->8 QN several times a day (19 event groups); compare moves per scale event and settling time.",
+ "streaming": true,
+ "qns": 4,
+ "sns": 1,
+ "qn_cores": 6,
+ "qn_memory_gb": 32,
+ "load": {
+  "concurrency": 30,
+  "bandwidth_mb": 270,
+  "single_bandwidth_mb": 400,
+  "base_ms": 300,
+  "jitter_sigma": 0.45
+ },
+ "search": {
+  "BaseMs": 20.8,
+  "MsPerMillionRows": 0,
+  "LoadInterference": 0.0
+ },
+ "collections": [
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 22,
+   "rows_median": 2006,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 385.5,
+   "compact_every_seconds": 379.5,
+   "flush_rows": 2006
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 14,
+   "rows_median": 895417,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 605.8,
+   "compact_every_seconds": 596.3,
+   "flush_rows": 895417
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 13,
+   "rows_median": 964280,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 652.4,
+   "compact_every_seconds": 642.1,
+   "flush_rows": 964280
+  }
+ ],
+ "ingest": {
+  "rows_per_sec_per_channel": 8,
+  "flush_every_seconds": 519.2,
+  "compact_every_seconds": 511.1
+ },
+ "events": [
+  {
+   "at": 5.0,
+   "op": "add_qn",
+   "count": 2
+  },
+  {
+   "at": 245.0,
+   "op": "stop_qn",
+   "node": 6
+  },
+  {
+   "at": 245.0,
+   "op": "stop_qn",
+   "node": 5
+  }
+ ],
+ "duration_seconds": 360.0,
+ "prod": {
+  "qn": 4,
+  "sn": 1,
+  "segments": 37.0,
+  "collections": 3,
+  "steady_seg_move_per_hour": 12.63,
+  "seg_move_per_hour": 34.92,
+  "seg_move_per_segment_per_hour": 0.9437837837837838,
+  "seg_moves_per_seg_grow": 16.78846153846154,
+  "load_p50_s": 0.8608,
+  "load_p99_s": 86.57039999999999,
+  "load_mean_s": 8.153827829377365,
+  "segment_grow_mean_s": 17.6316,
+  "segment_move_mean_s": 8.1861,
+  "task_num_max": 14.0,
+  "search_p99_idle_ms": 20.8,
+  "search_p99_busy_ms": 7.911,
+  "window_events_real_hour": 2
+ }
+}

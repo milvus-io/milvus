@@ -1,0 +1,49 @@
+{
+ "name": "prod_6_modash_68ca962d_coldload_p18c64",
+ "category": "6_cold_load",
+ "customer": "modash",
+ "source": "in01-68ca962ddb239d1 aws-eu, 2026-10-22 19:39-20:22 UTC, 2.6->3.0 upgrade. The new 3.0.3 QueryCoord saw the two collections (~304 segments of ~300 MiB, ~90 GiB) as lacking on its six new 8c/32GB nodes and dispatched all of them at once (~50 per node); QueryNode logs: 302 loads started 19:47, each wave ~80% cut at the 300 s task timeout (load durations p50 301 s), ~60 segments finished per 5-minute wave; old nodes kept serving until the platform stopped them at 20:15 with the new copy 40-60% complete; search down 20:17-20:22. Modeled as a cold load of 2 tables onto 6 empty nodes. Load model: fitted 45 MiB/s/core with concurrency penalty 1.8 and a QueryNode pool of 64 so that ~50 loads run at once as in the incident (per-load rate ~0.6 MiB/s, so a 300 MiB load does not fit in the 300 s timeout).",
+ "streaming": false,
+ "qns": 6,
+ "sns": 0,
+ "qn_cores": 8,
+ "qn_memory_gb": 32,
+ "load": {
+  "concurrency": 64,
+  "bandwidth_mb": 360,
+  "single_bandwidth_mb": 400,
+  "base_ms": 300,
+  "jitter_sigma": 0.45,
+  "concurrency_penalty": 1.8
+ },
+ "search": {
+  "BaseMs": 50,
+  "MsPerMillionRows": 0,
+  "LoadInterference": 0.43
+ },
+ "collections": [],
+ "ingest": {
+  "rows_per_sec_per_channel": 0,
+  "flush_every_seconds": 600,
+  "compact_every_seconds": 3600
+ },
+ "events": [
+  {
+   "at": 5,
+   "op": "load_tables",
+   "tables": {
+    "count": 2,
+    "replicas": 1,
+    "channels": 8,
+    "segments_per_channel": 19,
+    "rows_median": 614400,
+    "rows_sigma": 0.3,
+    "flush_every_seconds": 3600,
+    "compact_every_seconds": 36000,
+    "flush_rows": 614400
+   }
+  }
+ ],
+ "duration_seconds": 2400,
+ "time_scale": 1
+}

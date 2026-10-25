@@ -195,8 +195,76 @@ var (
 		}, []string{nodeIDLabelName})
 )
 
-// Load pacing.
+// Two-level balancer, placement and load pacing. Reasons and causes are
+// the planner's own words (level, table_move, table_exchange, ...;
+// table_stuck, level_hurt_table, node_term, ...), so a dashboard reads
+// like the log.
 var (
+	QueryCoordBalancePlanTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "balance_plan_total",
+			Help:      "segment moves the balancer planned, by reason",
+		}, []string{"reason"})
+
+	QueryCoordBalanceSkipTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "balance_skip_total",
+			Help:      "actions the balancer considered and did not take, by cause",
+		}, []string{"cause"})
+
+	QueryCoordBalancePlanLatency = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "balance_plan_latency",
+			Help:      "time one balance planning round took (ms)",
+			Buckets:   buckets,
+		})
+
+	QueryCoordBalanceNodeDeviation = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "balance_node_deviation",
+			Help:      "a node's final memory fill minus its resource group's mean, in bands (|x| > 0.5 is outside the band)",
+		}, []string{nodeIDLabelName})
+
+	QueryCoordBalanceNodeSegments = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "balance_node_segments",
+			Help:      "sealed segment copies a node holds or is receiving, as the balancer sees it",
+		}, []string{nodeIDLabelName})
+
+	QueryCoordBalanceNodeInflightLoads = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "balance_node_inflight_loads",
+			Help:      "segment loads in flight to a node, from any source",
+		}, []string{nodeIDLabelName})
+
+	QueryCoordBalanceTablesOffShare = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "balance_tables_off_share",
+			Help:      "tables (per replica) the last round found outside their share, in segments or bytes",
+		})
+
+	QueryCoordPlacementTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "placement_total",
+			Help:      "segments placed by the two-level policy: pass=slot went to a node with a free load slot, pass=queued to the shortest queue",
+		}, []string{"pass"})
+
 	QueryCoordLoadPacerBandwidth = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -260,6 +328,14 @@ func RegisterQueryCoord(registry *prometheus.Registry) {
 	registry.MustRegister(QueryCoordResourceGroupReplicaTotal)
 	registry.MustRegister(QueryCoordReplicaRONodeTotal)
 	registry.MustRegister(QueryCoordLastHeartbeatTimeStamp)
+	registry.MustRegister(QueryCoordBalancePlanTotal)
+	registry.MustRegister(QueryCoordBalanceSkipTotal)
+	registry.MustRegister(QueryCoordBalancePlanLatency)
+	registry.MustRegister(QueryCoordBalanceNodeDeviation)
+	registry.MustRegister(QueryCoordBalanceNodeSegments)
+	registry.MustRegister(QueryCoordBalanceNodeInflightLoads)
+	registry.MustRegister(QueryCoordBalanceTablesOffShare)
+	registry.MustRegister(QueryCoordPlacementTotal)
 	registry.MustRegister(QueryCoordLoadPacerBandwidth)
 	registry.MustRegister(QueryCoordLoadPacerInflightBytes)
 	registry.MustRegister(QueryCoordLoadPacerWaitTotal)
@@ -269,6 +345,9 @@ func RegisterQueryCoord(registry *prometheus.Registry) {
 
 // CleanQueryCoordMetricsWithNodeID drops a gone node's per-node gauges.
 func CleanQueryCoordMetricsWithNodeID(nodeID int64) {
+	for _, g := range []*prometheus.GaugeVec{QueryCoordBalanceNodeDeviation, QueryCoordBalanceNodeSegments, QueryCoordBalanceNodeInflightLoads} {
+		g.DeleteLabelValues(fmt.Sprint(nodeID))
+	}
 	QueryCoordLoadPacerBandwidth.DeleteLabelValues(fmt.Sprint(nodeID))
 	QueryCoordLoadPacerInflightBytes.DeleteLabelValues(fmt.Sprint(nodeID))
 }

@@ -3604,6 +3604,21 @@ type queryCoordConfig struct {
 	ChannelTaskRetryTimeout  ParamItem `refreshable:"true"`
 	ForceLoadAfterRejections ParamItem `refreshable:"true"`
 
+	// two-level balancer (queryCoord.balancer = TwoLevelBalancer)
+	TwoLevelNodeTolerance              ParamItem `refreshable:"true"`
+	TwoLevelHighWater                  ParamItem `refreshable:"true"`
+	TwoLevelHighWaterTolerance         ParamItem `refreshable:"true"`
+	TwoLevelTableSegmentCountTolerance ParamItem `refreshable:"true"`
+	TwoLevelTableByteTolerance         ParamItem `refreshable:"true"`
+	TwoLevelSmallTableSegmentsPerNode  ParamItem `refreshable:"true"`
+	TwoLevelLevelCandidates            ParamItem `refreshable:"true"`
+	TwoLevelCeilingRatio               ParamItem `refreshable:"true"`
+	TwoLevelCooldownSeconds            ParamItem `refreshable:"true"`
+	TwoLevelSwapCandidates             ParamItem `refreshable:"true"`
+	TwoLevelTablesPerRound             ParamItem `refreshable:"true"`
+	TwoLevelLedgerTTLSeconds           ParamItem `refreshable:"true"`
+	TwoLevelViewTTLMillis              ParamItem `refreshable:"true"`
+
 	AutoscalePrecheckEnabled ParamItem `refreshable:"true"`
 	AutoscaleEnabled         ParamItem `refreshable:"true"`
 	AutoscaleMaxMemoryLimit  ParamItem `refreshable:"true"`
@@ -4392,6 +4407,132 @@ Set to 0 to disable.`,
 		Export: true,
 	}
 	p.ForceLoadAfterRejections.Init(base.mgr)
+
+	p.TwoLevelNodeTolerance = ParamItem{
+		Key:          "queryCoord.twoLevel.nodeTolerance",
+		Version:      "3.1.0",
+		DefaultValue: "0.1",
+		Doc: `Two-level balancer: the fullest and emptiest QueryNode of a resource group may differ in memory fill
+by this fraction of the group's mean fill (the band); above twoLevel.highWater the band is
+twoLevel.highWaterTolerance instead. A node outside the band is leveled before any table is balanced.`,
+		Export: true,
+	}
+	p.TwoLevelNodeTolerance.Init(base.mgr)
+
+	p.TwoLevelHighWater = ParamItem{
+		Key:          "queryCoord.twoLevel.highWater",
+		Version:      "3.1.0",
+		DefaultValue: "0.8",
+		Doc:          `Two-level balancer: mean fill above which the tighter highWaterTolerance band applies.`,
+		Export:       true,
+	}
+	p.TwoLevelHighWater.Init(base.mgr)
+
+	p.TwoLevelHighWaterTolerance = ParamItem{
+		Key:          "queryCoord.twoLevel.highWaterTolerance",
+		Version:      "3.1.0",
+		DefaultValue: "0.05",
+		Doc:          `Two-level balancer: the band above highWater, as a fraction of the mean fill.`,
+		Export:       true,
+	}
+	p.TwoLevelHighWaterTolerance.Init(base.mgr)
+
+	p.TwoLevelTableSegmentCountTolerance = ParamItem{
+		Key:          "queryCoord.twoLevel.tableSegmentCountTolerance",
+		Version:      "3.1.0",
+		DefaultValue: "0.15",
+		Doc: `Two-level balancer: a table may hold on one node this fraction more or fewer segments than its fair
+share over the replica's nodes, and at least one.`,
+		Export: true,
+	}
+	p.TwoLevelTableSegmentCountTolerance.Init(base.mgr)
+
+	p.TwoLevelTableByteTolerance = ParamItem{
+		Key:          "queryCoord.twoLevel.tableByteTolerance",
+		Version:      "3.1.0",
+		DefaultValue: "0.15",
+		Doc: `Two-level balancer: a table may hold on one node this fraction more or fewer bytes than its fair
+share, and at least its largest segment.`,
+		Export: true,
+	}
+	p.TwoLevelTableByteTolerance.Init(base.mgr)
+
+	p.TwoLevelSmallTableSegmentsPerNode = ParamItem{
+		Key:          "queryCoord.twoLevel.smallTableSegmentsPerNode",
+		Version:      "3.1.0",
+		DefaultValue: "2",
+		Doc: `Two-level balancer: a table with fewer segments per replica node than this on average is small:
+placement still spreads it, balance leaves it alone and moving its segments never counts as hurting
+it. 0 balances every table.`,
+		Export: true,
+	}
+	p.TwoLevelSmallTableSegmentsPerNode.Init(base.mgr)
+
+	p.TwoLevelLevelCandidates = ParamItem{
+		Key:          "queryCoord.twoLevel.levelCandidates",
+		Version:      "3.1.0",
+		DefaultValue: "1000",
+		Doc: `Two-level balancer: the largest segments of an over-full node that leveling considers moving.
+0 considers all of them.`,
+		Export: true,
+	}
+	p.TwoLevelLevelCandidates.Init(base.mgr)
+
+	p.TwoLevelCeilingRatio = ParamItem{
+		Key:          "queryCoord.twoLevel.ceilingRatio",
+		Version:      "3.1.0",
+		DefaultValue: "0.5",
+		Doc: `Two-level balancer: table balance and placement add nothing to a node whose fill is above
+mean x (1 + nodeTolerance x ceilingRatio).`,
+		Export: true,
+	}
+	p.TwoLevelCeilingRatio.Init(base.mgr)
+
+	p.TwoLevelCooldownSeconds = ParamItem{
+		Key:          "queryCoord.twoLevel.cooldownSeconds",
+		Version:      "3.1.0",
+		DefaultValue: "600",
+		Doc:          `Two-level balancer: a segment balance moved is not moved again within this many seconds.`,
+		Export:       true,
+	}
+	p.TwoLevelCooldownSeconds.Init(base.mgr)
+
+	p.TwoLevelSwapCandidates = ParamItem{
+		Key:          "queryCoord.twoLevel.swapCandidates",
+		Version:      "3.1.0",
+		DefaultValue: "32",
+		Doc:          `Two-level balancer: segments per side tried when pairing a swap.`,
+		Export:       true,
+	}
+	p.TwoLevelSwapCandidates.Init(base.mgr)
+
+	p.TwoLevelTablesPerRound = ParamItem{
+		Key:          "queryCoord.twoLevel.tablesPerRound",
+		Version:      "3.1.0",
+		DefaultValue: "20000",
+		Doc:          `Two-level balancer: tables examined per planning round, round robin.`,
+		Export:       true,
+	}
+	p.TwoLevelTablesPerRound.Init(base.mgr)
+
+	p.TwoLevelLedgerTTLSeconds = ParamItem{
+		Key:          "queryCoord.twoLevel.ledgerTTLSeconds",
+		Version:      "3.1.0",
+		DefaultValue: "600",
+		Doc: `Two-level balancer: how long a planned placement or move stays in the planner's ledger after the
+distribution should have shown it.`,
+		Export: true,
+	}
+	p.TwoLevelLedgerTTLSeconds.Init(base.mgr)
+
+	p.TwoLevelViewTTLMillis = ParamItem{
+		Key:          "queryCoord.twoLevel.viewTTLMillis",
+		Version:      "3.1.0",
+		DefaultValue: "500",
+		Doc:          `Two-level balancer: how long placement reuses the last cluster view before rebuilding it.`,
+		Export:       true,
+	}
+	p.TwoLevelViewTTLMillis.Init(base.mgr)
 
 	p.ResourceExhaustionCleanupInterval = ParamItem{
 		Key:          "queryCoord.resourceExhaustionCleanupInterval",

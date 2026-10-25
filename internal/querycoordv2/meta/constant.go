@@ -22,4 +22,7 @@ const (
 	ScoreBasedBalancerName        = "ScoreBasedBalancer"
 	MultiTargetBalancerName       = "MultipleTargetBalancer"
 	ChannelLevelScoreBalancerName = "ChannelLevelScoreBalancer"
+	// TwoLevelBalancerName selects the two-level balancer; segment placement
+	// for recovery and stopping balance follows it (assign.PlacementPolicyType).
+	TwoLevelBalancerName = "TwoLevelBalancer"
 )

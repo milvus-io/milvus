@@ -380,7 +380,11 @@ func (b *BalanceChecker) generateBalanceTasksFromReplicas(ctx context.Context, b
 		tasks := balance.CreateSegmentTasksFromPlans(ctx, b.ID(), config.segmentTaskTimeout, segmentPlans)
 		if len(tasks) > 0 {
 			task.SetPriority(task.TaskPriorityLow, tasks...)
-			task.SetReason("segment unbalanced", tasks...)
+			reason := "segment unbalanced"
+			if isStoppingBalance {
+				reason = "drain"
+			}
+			task.SetReasonIfEmpty(reason, tasks...)
 			segmentTasks = append(segmentTasks, tasks...)
 		}
 	}
@@ -557,8 +561,24 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 			return nil
 		}
 
+		balancer := balance.GetGlobalBalancerFactory().GetBalancer()
+		// A global balancer plans segment moves for the whole
+		// cluster once per round; the per-collection queue below then only
+		// produces channel plans.
+		if gb, ok := balancer.(balance.GlobalBalancer); ok {
+			if plans := gb.BalanceGlobal(ctx, b.meta); len(plans) > 0 {
+				for i := range plans {
+					plans[i].LoadPriority = commonpb.LoadPriority_LOW
+				}
+				tasks := balance.CreateSegmentTasksFromPlans(ctx, b.ID(), config.segmentTaskTimeout, plans)
+				task.SetPriority(task.TaskPriorityLow, tasks...)
+				task.SetReasonIfEmpty("segment unbalanced", tasks...)
+				b.submitTasks(tasks, nil)
+			}
+		}
+
 		generatedSegmentTaskNum, generatedChannelTaskNum := b.processBalanceQueue(ctx,
-			balance.GetGlobalBalancerFactory().GetBalancer(),
+			balancer,
 			b.getReplicaForNormalBalance,
 			b.constructNormalBalanceQueue,
 			func() *assign.PriorityQueue { return b.normalBalanceQueue },

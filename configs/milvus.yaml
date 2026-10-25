@@ -681,6 +681,36 @@ queryCoord:
   # sit just under the threshold could otherwise never load a large segment although it has room overall.
   # Set to 0 to disable.
   forceLoadAfterRejections: 3
+  twoLevel:
+    # Two-level balancer: the fullest and emptiest QueryNode of a resource group may differ in memory fill
+    # by this fraction of the group's mean fill (the band); above twoLevel.highWater the band is
+    # twoLevel.highWaterTolerance instead. A node outside the band is leveled before any table is balanced.
+    nodeTolerance: 0.1
+    highWater: 0.8 # Two-level balancer: mean fill above which the tighter highWaterTolerance band applies.
+    highWaterTolerance: 0.05 # Two-level balancer: the band above highWater, as a fraction of the mean fill.
+    # Two-level balancer: a table may hold on one node this fraction more or fewer segments than its fair
+    # share over the replica's nodes, and at least one.
+    tableSegmentCountTolerance: 0.15
+    # Two-level balancer: a table may hold on one node this fraction more or fewer bytes than its fair
+    # share, and at least its largest segment.
+    tableByteTolerance: 0.15
+    # Two-level balancer: a table with fewer segments per replica node than this on average is small:
+    # placement still spreads it, balance leaves it alone and moving its segments never counts as hurting
+    # it. 0 balances every table.
+    smallTableSegmentsPerNode: 2
+    # Two-level balancer: the largest segments of an over-full node that leveling considers moving.
+    # 0 considers all of them.
+    levelCandidates: 1000
+    # Two-level balancer: table balance and placement add nothing to a node whose fill is above
+    # mean x (1 + nodeTolerance x ceilingRatio).
+    ceilingRatio: 0.5
+    cooldownSeconds: 600 # Two-level balancer: a segment balance moved is not moved again within this many seconds.
+    swapCandidates: 32 # Two-level balancer: segments per side tried when pairing a swap.
+    tablesPerRound: 20000 # Two-level balancer: tables examined per planning round, round robin.
+    # Two-level balancer: how long a planned placement or move stays in the planner's ledger after the
+    # distribution should have shown it.
+    ledgerTTLSeconds: 600
+    viewTTLMillis: 500 # Two-level balancer: how long placement reuses the last cluster view before rebuilding it.
   autoscale:
     precheckEnabled: false # Whether QueryCoord performs load resource precheck before committing load configuration changes and publishes demand counters after successful broadcasts. With tiered eviction enabled, only demand estimation is performed; capacity checks are skipped.
     enabled: false # Whether QueryCoord load resource precheck can use autoscale upper bounds to admit a load request when current QueryNode capacity is insufficient. This is effective only when precheckEnabled is true and tiered eviction is disabled.

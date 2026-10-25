@@ -554,6 +554,9 @@ type Scheduler interface {
 	// collectionID == -1 means the collection-scoped snapshot covers all collections.
 	GetSegmentTaskDeltaSnapshot(nodeIDs []int64, collectionID int64) *SegmentTaskDeltaSnapshot
 	GetChannelTaskDelta(nodeID int64, collectionID int64) int
+	// LoadBudget is what the load pacer lets node have in flight: bytes and
+	// loads; 0, 0 for a node without an executor.
+	LoadBudget(nodeID int64) (bytes float64, loads int)
 }
 
 type taskScheduler struct {
@@ -925,6 +928,13 @@ func (scheduler *taskScheduler) Dispatch(node int64) {
 
 func (scheduler *taskScheduler) GetSegmentTaskDeltaSnapshot(nodeIDs []int64, collectionID int64) *SegmentTaskDeltaSnapshot {
 	return scheduler.segmentTaskDelta.GetSegmentSnapshot(nodeIDs, collectionID, scheduler.distMgr)
+}
+
+func (scheduler *taskScheduler) LoadBudget(nodeID int64) (bytes float64, loads int) {
+	if ex, ok := scheduler.executors.Get(nodeID); ok {
+		return ex.LoadBudget()
+	}
+	return 0, 0
 }
 
 func (scheduler *taskScheduler) GetChannelTaskDelta(nodeID, collectionID int64) int {

@@ -1,0 +1,113 @@
+{
+ "name": "prod_2_046a62fd",
+ "category": "2_frequent_scale",
+ "customer": null,
+ "source": "in01-046a62fd gcp; node scale 1.000, segment scale 1.000, row_scale=0.1844; scheduled scale 4->7/12 QN at 12:35 and back at ~23:35 with no ingestion; pure topology-driven moves (100% near topology change); compare moves per scale step.",
+ "streaming": true,
+ "qns": 4,
+ "sns": 1,
+ "qn_cores": 8,
+ "qn_memory_gb": 32,
+ "load": {
+  "concurrency": 40,
+  "bandwidth_mb": 360,
+  "single_bandwidth_mb": 400,
+  "base_ms": 300,
+  "jitter_sigma": 0.45
+ },
+ "search": {
+  "BaseMs": 20,
+  "MsPerMillionRows": 0,
+  "LoadInterference": 0.0
+ },
+ "collections": [
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 23,
+   "rows_median": 542440,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 439.0,
+   "compact_every_seconds": 0,
+   "flush_rows": 542440
+  }
+ ],
+ "ingest": {
+  "rows_per_sec_per_channel": 0,
+  "flush_every_seconds": 439.0,
+  "compact_every_seconds": 0
+ },
+ "events": [
+  {
+   "at": 1,
+   "op": "add_qn",
+   "count": 1
+  },
+  {
+   "at": 1,
+   "op": "add_qn",
+   "count": 1
+  },
+  {
+   "at": 1,
+   "op": "add_qn",
+   "count": 1
+  },
+  {
+   "at": 1,
+   "op": "add_qn",
+   "count": 1
+  },
+  {
+   "at": 5.0,
+   "op": "stop_qn",
+   "node": 8
+  },
+  {
+   "at": 5.0,
+   "op": "stop_qn",
+   "node": 7
+  },
+  {
+   "at": 5.0,
+   "op": "stop_qn",
+   "node": 6
+  },
+  {
+   "at": 5.0,
+   "op": "stop_qn",
+   "node": 5
+  },
+  {
+   "at": 155.0,
+   "op": "add_qn",
+   "count": 8
+  },
+  {
+   "at": 215.0,
+   "op": "add_sn",
+   "count": 1
+  }
+ ],
+ "duration_seconds": 360.0,
+ "prod": {
+  "qn": 4,
+  "sn": 1,
+  "segments": 23.0,
+  "collections": 1,
+  "steady_seg_move_per_hour": 0.0,
+  "seg_move_per_hour": 4.64,
+  "seg_move_per_segment_per_hour": 0.2017391304347826,
+  "seg_moves_per_seg_grow": 5.658536585365853,
+  "load_p50_s": 17.4468,
+  "load_p99_s": 140.875,
+  "load_mean_s": 20.273158357771262,
+  "segment_grow_mean_s": 25.2352,
+  "segment_move_mean_s": 17.7383,
+  "task_num_max": 6.0,
+  "search_p99_idle_ms": 20,
+  "search_p99_busy_ms": 20,
+  "window_events_real_hour": 4
+ }
+}

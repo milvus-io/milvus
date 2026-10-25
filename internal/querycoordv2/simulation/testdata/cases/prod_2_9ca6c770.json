@@ -1,0 +1,94 @@
+{
+ "name": "prod_2_9ca6c770",
+ "category": "2_frequent_scale",
+ "customer": null,
+ "source": "in01-9ca6c770 aws-us/az; node scale 1.000, segment scale 1.000, row_scale=0.0258; 2<->9 QN with SN 2<->5, 88 event groups; compare loads per event and seg_grow latency.",
+ "streaming": true,
+ "qns": 4,
+ "sns": 4,
+ "qn_cores": 16,
+ "qn_memory_gb": 64,
+ "load": {
+  "concurrency": 80,
+  "bandwidth_mb": 720,
+  "single_bandwidth_mb": 400,
+  "base_ms": 300,
+  "jitter_sigma": 0.45
+ },
+ "search": {
+  "BaseMs": 31.1,
+  "MsPerMillionRows": 0,
+  "LoadInterference": 0.03
+ },
+ "collections": [
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 12,
+   "rows_median": 3868500,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 9.0,
+   "compact_every_seconds": 19.9,
+   "flush_rows": 3868500
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 2,
+   "rows_median": 2487474,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 54.3,
+   "compact_every_seconds": 119.3,
+   "flush_rows": 2487474
+  }
+ ],
+ "ingest": {
+  "rows_per_sec_per_channel": 3141,
+  "flush_every_seconds": 15.5,
+  "compact_every_seconds": 34.1
+ },
+ "events": [
+  {
+   "at": 5.0,
+   "op": "add_qn",
+   "count": 5
+  },
+  {
+   "at": 5.0,
+   "op": "kill_sn",
+   "node": 1003
+  },
+  {
+   "at": 35.0,
+   "op": "stop_qn",
+   "node": 9
+  },
+  {
+   "at": 35.0,
+   "op": "kill_sn",
+   "node": 1002
+  }
+ ],
+ "duration_seconds": 360.0,
+ "prod": {
+  "qn": 4,
+  "sn": 4,
+  "segments": 28.0,
+  "collections": 2,
+  "steady_seg_move_per_hour": 29.1,
+  "seg_move_per_hour": 24.77,
+  "seg_move_per_segment_per_hour": 0.8846428571428572,
+  "seg_moves_per_seg_grow": 0.5333763996554695,
+  "load_p50_s": 3.786,
+  "load_p99_s": 46.5226,
+  "load_mean_s": 6.0675412482066,
+  "segment_grow_mean_s": 7.527699999999999,
+  "segment_move_mean_s": 5.8376,
+  "task_num_max": 26.0,
+  "search_p99_idle_ms": 31.06,
+  "search_p99_busy_ms": 31.267,
+  "window_events_real_hour": 4
+ }
+}

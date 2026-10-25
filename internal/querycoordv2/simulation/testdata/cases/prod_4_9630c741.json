@@ -1,0 +1,84 @@
+{
+ "name": "prod_4_9630c741",
+ "category": "4_load_hurts_query",
+ "customer": null,
+ "source": "in01-9630c741 aws-ap; node scale 1.000, segment scale 1.000, row_scale=0.3739; aws-ap, 816 avg QPS bursts with frequent scale (13 groups) - p99 median 31 ms idle vs 388 ms busy but only 61 usable windows; low confidence.",
+ "streaming": true,
+ "qns": 6,
+ "sns": 2,
+ "qn_cores": 16,
+ "qn_memory_gb": 64,
+ "load": {
+  "concurrency": 80,
+  "bandwidth_mb": 720,
+  "single_bandwidth_mb": 400,
+  "base_ms": 300,
+  "jitter_sigma": 0.45
+ },
+ "search": {
+  "BaseMs": 31.4,
+  "MsPerMillionRows": 0,
+  "LoadInterference": 8.0
+ },
+ "collections": [
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 147,
+   "rows_median": 267419,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 7.8,
+   "compact_every_seconds": 13.0,
+   "flush_rows": 267419
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 39,
+   "rows_median": 31611,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 29.3,
+   "compact_every_seconds": 48.8,
+   "flush_rows": 31611
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 32,
+   "rows_median": 21608,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 35.8,
+   "compact_every_seconds": 59.5,
+   "flush_rows": 21608
+  }
+ ],
+ "ingest": {
+  "rows_per_sec_per_channel": 9995,
+  "flush_every_seconds": 15.8,
+  "compact_every_seconds": 26.2
+ },
+ "events": [],
+ "duration_seconds": 300,
+ "prod": {
+  "qn": 6,
+  "sn": 2,
+  "segments": 223.0,
+  "collections": 3,
+  "steady_seg_move_per_hour": 402.92,
+  "seg_move_per_hour": 49.0,
+  "seg_move_per_segment_per_hour": 0.21973094170403587,
+  "seg_moves_per_seg_grow": 0.7145982207962667,
+  "load_p50_s": 2.9065,
+  "load_p99_s": 85.5132,
+  "load_mean_s": 7.285397181763337,
+  "segment_grow_mean_s": 7.9043,
+  "segment_move_mean_s": 9.4655,
+  "task_num_max": 97.0,
+  "search_p99_idle_ms": 31.41,
+  "search_p99_busy_ms": 387.97,
+  "window_events_real_hour": 8
+ }
+}

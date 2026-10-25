@@ -1,0 +1,117 @@
+{
+ "name": "prod_1_6de12834",
+ "category": "1_frequent_balance",
+ "customer": null,
+ "source": "in01-6de12834 aws-us/az; node scale 0.960, segment scale 0.289, row_scale=1.0000; steady-state balancer churn with ~680 small collections: 6.5k segment moves/h at constant 25 QN, uncorrelated with ingestion (rho -0.18); compare simulated moves/h at fixed topology (should be ~0).",
+ "streaming": true,
+ "qns": 24,
+ "sns": 4,
+ "qn_cores": 12,
+ "qn_memory_gb": 64,
+ "load": {
+  "concurrency": 60,
+  "bandwidth_mb": 540,
+  "single_bandwidth_mb": 400,
+  "base_ms": 300,
+  "jitter_sigma": 0.45
+ },
+ "search": {
+  "BaseMs": 9.7,
+  "MsPerMillionRows": 0,
+  "LoadInterference": 0.0
+ },
+ "collections": [
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 69,
+   "rows_median": 966720,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 8.3,
+   "compact_every_seconds": 6.0,
+   "flush_rows": 966720
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 46,
+   "rows_median": 622428,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 12.5,
+   "compact_every_seconds": 9.0,
+   "flush_rows": 622428
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 43,
+   "rows_median": 827763,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 13.4,
+   "compact_every_seconds": 9.6,
+   "flush_rows": 827763
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 20,
+   "rows_median": 911293,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 29.2,
+   "compact_every_seconds": 20.9,
+   "flush_rows": 911293
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 14,
+   "rows_median": 1054617,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 40.6,
+   "compact_every_seconds": 29.1,
+   "flush_rows": 1054617
+  },
+  {
+   "count": 145,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 19,
+   "rows_median": 15303,
+   "rows_sigma": 2.0,
+   "flush_every_seconds": 138.5,
+   "compact_every_seconds": 99.3,
+   "flush_rows": 15303
+  }
+ ],
+ "ingest": {
+  "rows_per_sec_per_channel": 0,
+  "flush_every_seconds": 130.6,
+  "compact_every_seconds": 93.6
+ },
+ "events": [],
+ "duration_seconds": 300,
+ "prod": {
+  "qn": 25,
+  "sn": 4,
+  "segments": 10392.0,
+  "collections": 679,
+  "steady_seg_move_per_hour": 6480.53,
+  "seg_move_per_hour": 6477.05,
+  "seg_move_per_segment_per_hour": 0.6232727097767513,
+  "seg_moves_per_seg_grow": 3.4604986883651847,
+  "load_p50_s": 1.8774000000000002,
+  "load_p99_s": 14.9932,
+  "load_mean_s": 2.375976414838575,
+  "segment_grow_mean_s": 3.2618,
+  "segment_move_mean_s": 3.8341999999999996,
+  "task_num_max": 89.0,
+  "search_p99_idle_ms": 9.7,
+  "search_p99_busy_ms": 9.7,
+  "window_events_real_hour": 3
+ }
+}

@@ -1,0 +1,43 @@
+{
+ "name": "day_19_cold_start_small_segments",
+ "category": "many_small",
+ "source": "synthetic (gen by hand): a cold start of 6,000 30MB segments on 8 idle 16-core nodes, QueryNode load concurrency 32 (cpu x middlePriority coefficient), production dispatch tick 500ms. Measures initial_load_seconds: the pacer must not throttle a burst of small loads below what the nodes can take (tick-bound dispatch did: 26s against 3s without the pacer, before loads were dispatched on slot release and the cap grew by slow start).",
+ "streaming": false,
+ "qns": 8,
+ "sns": 0,
+ "qn_cores": 16,
+ "qn_memory_gb": 64,
+ "load": {
+  "concurrency": 80,
+  "bandwidth_mb": 720,
+  "single_bandwidth_mb": 400,
+  "base_ms": 300,
+  "jitter_sigma": 0.45
+ },
+ "search": {
+  "BaseMs": 0,
+  "MsPerMillionRows": 0,
+  "LoadInterference": 0
+ },
+ "time_scale": 6,
+ "collections": [
+  {
+   "count": 50,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 120,
+   "rows_median": 61440,
+   "rows_sigma": 0
+  }
+ ],
+ "ingest": {
+  "rows_per_sec_per_channel": 0,
+  "flush_every_seconds": 0,
+  "compact_every_seconds": 0
+ },
+ "events": [],
+ "duration_seconds": 600,
+ "params": {
+  "queryCoord.dispatchInterval": "500"
+ }
+}

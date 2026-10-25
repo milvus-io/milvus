@@ -85,6 +85,16 @@ func SetReason(reason string, tasks ...Task) {
 	}
 }
 
+// SetReasonIfEmpty gives tasks a reason unless the planner already set one
+// (a balancer's plans say why each move was planned).
+func SetReasonIfEmpty(reason string, tasks ...Task) {
+	for i := range tasks {
+		if tasks[i].GetReason() == "" {
+			tasks[i].SetReason(reason)
+		}
+	}
+}
+
 // GetTaskType returns the task's type,
 // for now, only 3 types;
 // - only 1 grow action -> Grow

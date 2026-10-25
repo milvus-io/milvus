@@ -1,0 +1,109 @@
+{
+ "name": "prod_3_0b87681b",
+ "category": "3_slow_load",
+ "customer": null,
+ "source": "in01-0b87681b gcp; node scale 1.000, segment scale 1.000, row_scale=0.2160; gcp, load mean 42 s p99 244 s, segment_grow 73 s, task_num peak 105 during a 4->8->4 scale; compare backlog peak.",
+ "streaming": true,
+ "qns": 4,
+ "sns": 1,
+ "qn_cores": 6,
+ "qn_memory_gb": 32,
+ "load": {
+  "concurrency": 30,
+  "bandwidth_mb": 270,
+  "single_bandwidth_mb": 400,
+  "base_ms": 300,
+  "jitter_sigma": 0.45
+ },
+ "search": {
+  "BaseMs": 20,
+  "MsPerMillionRows": 0,
+  "LoadInterference": 0.0
+ },
+ "collections": [
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 96,
+   "rows_median": 462934,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 292.3,
+   "compact_every_seconds": 347.8,
+   "flush_rows": 462934
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 10,
+   "rows_median": 340730,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 2805.9,
+   "compact_every_seconds": 3339.0,
+   "flush_rows": 340730
+  }
+ ],
+ "ingest": {
+  "rows_per_sec_per_channel": 1,
+  "flush_every_seconds": 529.4,
+  "compact_every_seconds": 630.0
+ },
+ "events": [
+  {
+   "at": 5.0,
+   "op": "add_qn",
+   "count": 4
+  },
+  {
+   "at": 5.0,
+   "op": "add_sn",
+   "count": 1
+  },
+  {
+   "at": 95.0,
+   "op": "stop_qn",
+   "node": 8
+  },
+  {
+   "at": 95.0,
+   "op": "stop_qn",
+   "node": 7
+  },
+  {
+   "at": 95.0,
+   "op": "stop_qn",
+   "node": 6
+  },
+  {
+   "at": 95.0,
+   "op": "stop_qn",
+   "node": 5
+  },
+  {
+   "at": 95.0,
+   "op": "kill_sn",
+   "node": 1001
+  }
+ ],
+ "duration_seconds": 360.0,
+ "prod": {
+  "qn": 4,
+  "sn": 1,
+  "segments": 106.0,
+  "collections": 2,
+  "steady_seg_move_per_hour": 1.01,
+  "seg_move_per_hour": 1.22,
+  "seg_move_per_segment_per_hour": 0.011509433962264152,
+  "seg_moves_per_seg_grow": 0.8970588235294117,
+  "load_p50_s": 7.6293,
+  "load_p99_s": 243.7233,
+  "load_mean_s": 42.42311600928074,
+  "segment_grow_mean_s": 72.6316,
+  "segment_move_mean_s": 9.9506,
+  "task_num_max": 105.0,
+  "search_p99_idle_ms": 20,
+  "search_p99_busy_ms": 20,
+  "window_events_real_hour": 4
+ }
+}
