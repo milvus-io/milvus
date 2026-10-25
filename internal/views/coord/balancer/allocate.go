@@ -119,10 +119,11 @@ func allocate(p *planningContext, shardID qviews.ShardID, baseRows map[int64]int
 		assignments[node][segment.PartitionID] = append(assignments[node][segment.PartitionID], segment.SegmentID)
 	}
 	dataVersion, _ := p.DataVersionForCollection(desired.CollectionID)
-	builder := qviews.NewQueryViewAtCoordBuilder(shardID.ReplicaID, syntheticDataView(desired, dataVersion, shard), shardID.VChannel)
+	dataView := syntheticDataView(desired, dataVersion, shard)
+	dataView.SchemaVersion = p.SchemaVersion(desired.CollectionID)
+	builder := qviews.NewQueryViewAtCoordBuilder(shardID.ReplicaID, dataView, shardID.VChannel)
 	builder.SetAssignments(assignments)
 	builder.SetLoadInfoVersion(p.ConfigVersion(desired.CollectionID))
-	builder.SetSchemaVersion(p.SchemaVersion(desired.CollectionID))
 	return &allocationResult{builder: builder, assignments: ctx.assignments, rowsByNode: ctx.rows, more: more}
 }
 

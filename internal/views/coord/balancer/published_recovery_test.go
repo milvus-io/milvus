@@ -48,6 +48,21 @@ func TestBalancerRepairsPublishedSchemaWhileTargetRemainsPending(t *testing.T) {
 	old := *manager.Stats().UpVersion
 	manager.PublishSchema(0)
 	latest.Store(1)
+	// The target is known, but DataView still certifies schema 0. Losing its
+	// QN must recover the published base despite target admission being gated.
+	cache.PublishNode(1, nil)
+	cache.PublishNode(2, &NodeInfo{NodeID: 2, Alive: true, ResourceGroup: "rg1"})
+	controller.Trigger()
+	require.NoError(t, controller.Reconcile(t.Context()))
+	require.Eventually(t, func() bool {
+		up, ok := manager.Stats().UpBySchema[0]
+		return ok && up.Version.GT(old)
+	}, 5*time.Second, time.Millisecond)
+	require.Equal(t, old.DataVersion, manager.Stats().UpBySchema[0].Version.DataVersion)
+	require.EqualValues(t, 0, manager.Stats().PreparingSchemaVersion)
+	old = manager.Stats().UpBySchema[0].Version
+	data = cacheData(1, id.VChannel, 100)
+	data.SchemaVersion = 1
 	data.DataVersion.CompactVersion = 1
 	cache.PublishDataView(1, data)
 	controller.Trigger()
@@ -62,8 +77,8 @@ func TestBalancerRepairsPublishedSchemaWhileTargetRemainsPending(t *testing.T) {
 	drain.UnPatch()
 	require.NotNil(t, manager.PublishedRecovery(1))
 	require.Contains(t, manager.Stats().UpBySchema, int32(0))
-	cache.PublishNode(1, nil)
-	cache.PublishNode(2, &NodeInfo{NodeID: 2, Alive: true, ResourceGroup: "rg1"})
+	cache.PublishNode(2, nil)
+	cache.PublishNode(3, &NodeInfo{NodeID: 3, Alive: true, ResourceGroup: "rg1"})
 	controller.Trigger()
 	require.NoError(t, controller.Reconcile(t.Context()))
 	require.Eventually(t, func() bool {
@@ -72,7 +87,7 @@ func TestBalancerRepairsPublishedSchemaWhileTargetRemainsPending(t *testing.T) {
 	}, 5*time.Second, time.Millisecond)
 	recovered := manager.Stats().UpBySchema[0].Version
 	require.Equal(t, old.DataVersion, recovered.DataVersion, "repair must retain the published data base")
-	require.Equal(t, []int64{2}, manager.Stats().UpNodes)
+	require.Equal(t, []int64{3}, manager.Stats().UpNodes)
 	for range 3 {
 		controller.Trigger()
 		require.NoError(t, controller.Reconcile(t.Context()))

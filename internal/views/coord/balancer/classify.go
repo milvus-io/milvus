@@ -85,19 +85,11 @@ func classifyShard(snap balanceInput, shardID qviews.ShardID) actionKind {
 		}
 		return actionNone
 	}
-	// Supersede an in-flight view whose schema can no longer be fetched. This
+	// Supersede an in-flight view after DataView certifies a newer schema. This
 	// check must precede the normal "wait for Preparing" rule.
 	latestSchema := snap.SchemaVersion(desired.CollectionID)
 	if hasPreparing && stats.PreparingSchemaVersion < latestSchema {
 		return actionMust
-	}
-	if hasPreparing && stats.PreparingSchemaVersion > stats.UpSchemaVersion {
-		// Schema preparation can require columns produced by schema-bump
-		// compaction. Its new Manifest/DataView is the input that makes the
-		// pending view loadable; waiting for the old base to become Up deadlocks.
-		if latest, ok := snap.DataVersionForCollection(desired.CollectionID); ok && latest.GT(stats.PreparingVersion.DataVersion) {
-			return actionMust
-		}
 	}
 	if !hasPreparing && hasUpView && stats.UpSchemaVersion < latestSchema {
 		return actionMust

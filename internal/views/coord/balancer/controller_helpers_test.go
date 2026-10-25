@@ -29,6 +29,8 @@ func emptyRegistry(t *testing.T, syncCallbacks ...func(context.Context, syncer.S
 	patch := mockey.Mock((*datacatalog.Catalog).ListAllDataViews).Return([]*viewpb.DataViewOfCollection{
 		{CollectionId: 1, DataVersion: &viewpb.DataVersion{StreamingVersion: 1}},
 		{CollectionId: 1, DataVersion: &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 1}},
+		{CollectionId: 1, DataVersion: &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 2}},
+		{CollectionId: 1, DataVersion: &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 3}},
 	}, nil).Build()
 	refs, err := dataview.RecoverManager(t.Context(), datacatalog.NewCatalog(nil, "", ""),
 		func(context.Context, int64) (bool, error) { return true, nil }, nil, nil, nil)

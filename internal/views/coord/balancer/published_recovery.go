@@ -79,7 +79,7 @@ func (b *DefaultBalancer) recoverPublishedSchemas(ctx context.Context, p *planni
 		if manager == nil {
 			continue
 		}
-		recovery := manager.PublishedRecovery(p.SchemaVersion(cfg.CollectionID))
+		recovery := manager.PublishedRecovery(p.targetSchemaVersion(cfg.CollectionID))
 		if recovery == nil {
 			continue
 		}

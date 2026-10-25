@@ -41,6 +41,7 @@ func NewQueryViewAtCoordBuilder(replicaID int64, dataView *viewpb.DataViewOfColl
 	}
 	return &QueryViewAtCoordBuilder{
 		collectionID:                dataView.CollectionId,
+		schemaVersion:               dataView.GetSchemaVersion(),
 		replicaID:                   replicaID,
 		vchannel:                    vchannel,
 		dataVersion:                 FromProtoDataVersion(dataView.DataVersion),

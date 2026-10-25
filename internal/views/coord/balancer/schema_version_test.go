@@ -15,7 +15,7 @@ import (
 
 func testLatestSchema(context.Context, int64) (int32, error) { panic("mock with mockey") }
 
-func TestReconcileUsesLatestSchemaAndPreemptsObsoletePreparing(t *testing.T) {
+func TestReconcileUsesDataViewSchemaAndPreemptsObsoletePreparing(t *testing.T) {
 	latest, reads := int32(1), 0
 	var readErr error
 	patch := mockey.Mock(testLatestSchema).To(func(_ context.Context, id int64) (int32, error) {
@@ -28,7 +28,9 @@ func TestReconcileUsesLatestSchemaAndPreemptsObsoletePreparing(t *testing.T) {
 	cfg := cfgFor(1, 10, []int64{1}, nil)
 	c := newTestCache(cfg)
 	id := cacheShard(1, 10)
-	c.PublishDataView(1, cacheData(1, id.VChannel, 100))
+	data := cacheData(1, id.VChannel, 100)
+	data.SchemaVersion = 1
+	c.PublishDataView(1, data)
 	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	t.Cleanup(reg.RegisterPublicationListener(c.PublishShard))
 	c.MarkReady()
@@ -41,14 +43,21 @@ func TestReconcileUsesLatestSchemaAndPreemptsObsoletePreparing(t *testing.T) {
 	require.Equal(t, 1, reads)
 
 	// A publication/DDL notification arriving while the old view is preparing
-	// must supersede it, even though no load or data configuration changed.
+	// cannot supersede it until the matching DataView schema is published.
 	latest = 2
+	b.Trigger()
+	require.NoError(t, b.Reconcile(t.Context()))
+	require.EqualValues(t, 1, reg.Get(id).Stats().PreparingSchemaVersion, "pending DDL cannot reinterpret an old DataView")
+	next := cacheData(1, id.VChannel, 100)
+	next.SchemaVersion = 2
+	next.DataVersion.CompactVersion = 1
+	c.PublishDataView(1, next)
 	b.Trigger(TriggerScope{DirtyCollections: []int64{1}})
 	require.NoError(t, b.Reconcile(t.Context()))
 	second := reg.Get(id).Stats()
 	require.Equal(t, latest, second.PreparingSchemaVersion)
 	require.True(t, second.PreparingVersion.GT(*first.PreparingVersion))
-	require.Equal(t, first.PreparingVersion.DataVersion, second.PreparingVersion.DataVersion)
+	require.True(t, second.PreparingVersion.DataVersion.GT(first.PreparingVersion.DataVersion))
 	require.Equal(t, originalLoadVersion, c.GetCollection(1).ConfigVersion())
 
 	// A duplicate notification cannot stack another Preparing view.
@@ -62,6 +71,10 @@ func TestReconcileUsesLatestSchemaAndPreemptsObsoletePreparing(t *testing.T) {
 	require.ErrorIs(t, b.Reconcile(t.Context()), merr.ErrServiceUnavailable)
 	require.Equal(t, second.PreparingVersion, reg.Get(id).Stats().PreparingVersion)
 	readErr, latest = nil, 3
+	next = cacheData(1, id.VChannel, 100)
+	next.SchemaVersion = 3
+	next.DataVersion.CompactVersion = 2
+	c.PublishDataView(1, next)
 	b.queue.mu.Lock()
 	b.queue.retryAt = time.Time{}
 	b.queue.mu.Unlock()
@@ -71,6 +84,10 @@ func TestReconcileUsesLatestSchemaAndPreemptsObsoletePreparing(t *testing.T) {
 	// A new controller reconstructs the target from current metadata, with no
 	// persistent load-config schema or remembered DDL notification.
 	latest = 4
+	next = cacheData(1, id.VChannel, 100)
+	next.SchemaVersion = 4
+	next.DataVersion.CompactVersion = 3
+	c.PublishDataView(1, next)
 	recovered := NewDefaultBalancer(c, reg, nil, testLatestSchema)
 	recovered.Trigger()
 	require.NoError(t, recovered.Reconcile(t.Context()))
@@ -82,7 +99,9 @@ func TestSchemaChangeRebuildsUpWithoutChangingLoadIdentity(t *testing.T) {
 	cfg := cfgFor(1, 10, []int64{1}, nil)
 	c := newTestCache(cfg)
 	id := cacheShard(1, 10)
-	c.PublishDataView(1, cacheData(1, id.VChannel, 100))
+	data := cacheData(1, id.VChannel, 100)
+	data.SchemaVersion = 2
+	c.PublishDataView(1, data)
 	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	version := c.GetCollection(1).ConfigVersion()
 	stats := testShardStats(ver(1, 0, 1), version, placement(1000, 1, 1, coordview.SegmentStateUp))
@@ -143,12 +162,13 @@ func TestSchemaPreparationFollowsMaterializedDataView(t *testing.T) {
 	id := cacheShard(1, 10)
 	data := cacheData(1, id.VChannel, 100)
 	data.DataVersion.CompactVersion = 1
+	data.SchemaVersion = 1
 	c.PublishDataView(1, data)
 	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	version := c.GetCollection(1).ConfigVersion()
 	stats := testShardStats(ver(1, 0, 1), version, placement(1000, 1, 1, coordview.SegmentStateUp))
 	stats.PreparingVersion = ver(1, 0, 2)
-	stats.PreparingSchemaVersion = 1
+	stats.PreparingSchemaVersion = 0
 	c.PublishShard(id, stats)
 	reader := newPlanningContext(c)
 	reader.schemaVersions = map[int64]int32{1: 1}
@@ -159,6 +179,7 @@ func TestSchemaPreparationFollowsMaterializedDataView(t *testing.T) {
 	require.EqualValues(t, 1, plan.Prepares[id].Build().Meta.SchemaVersion)
 
 	stats.PreparingVersion = ver(1, 1, 1)
+	stats.PreparingSchemaVersion = 1
 	c.PublishShard(id, stats)
 	require.Equal(t, actionNone, classifyShard(newPlanningContext(c), id), "do not repeatedly supersede the same physical base")
 }

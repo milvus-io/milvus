@@ -9,6 +9,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/coord/loadstatus"
@@ -18,6 +19,10 @@ import (
 )
 
 type refreshSource struct{}
+
+func (*refreshSource) PrepareDataViewSchema(context.Context, int64, *schemapb.CollectionSchema, *schemapb.CollectionSchema) error {
+	panic("mock with mockey")
+}
 
 func (*refreshSource) RefreshDataView(context.Context, int64) (*viewpb.DataVersion, error) {
 	panic("mock with mockey")

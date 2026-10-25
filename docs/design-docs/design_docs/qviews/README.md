@@ -115,6 +115,10 @@ recovery, reference protection, and GC behavior are documented in
 
 ### 5.1 Overview
 
+The extracted [DataView schema certification](data_view_schema.md) contract
+binds new QueryViews to the supported read schema of their selected DataView.
+Pending DDL schema targets gate preparation rather than overriding that identity.
+
 The storage view contains all complete, non-duplicate loadable Sealed Segment
 data ([B1] and [A1]). A version number DataVersion is introduced:
 

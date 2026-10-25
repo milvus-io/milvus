@@ -251,10 +251,22 @@ func (p *planningContext) acceptRows(id qviews.ShardID, rows map[int64]int64) {
 	}
 }
 
-// SchemaVersion is sampled from current collection metadata for this planning pass.
+// SchemaVersion belongs to the exact immutable DataView selected in this pass.
 func (p *planningContext) SchemaVersion(id int64) int32 {
 	if p.recovery != nil && p.recovery.collectionID == id {
 		return p.recovery.schemaVersion
 	}
-	return p.schemaVersions[id]
+	if collection := p.GetCollection(id); collection != nil && collection.DataView() != nil {
+		return collection.DataView().SchemaVersion
+	}
+	return 0
+}
+
+// targetSchemaVersion only preserves the old public schema's recovery obligation.
+// It is never used to bind a normal QueryView to a physical DataView.
+func (p *planningContext) targetSchemaVersion(id int64) int32 {
+	if version, ok := p.schemaVersions[id]; ok {
+		return version
+	}
+	return p.SchemaVersion(id)
 }

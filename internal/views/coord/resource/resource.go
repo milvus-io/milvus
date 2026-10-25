@@ -9,6 +9,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
@@ -26,6 +27,7 @@ var current atomic.Pointer[Resources]
 // Wiring supplies DataCoord directly, without routing through a Coord RPC.
 type DataViewReconciler interface {
 	RefreshDataView(context.Context, int64) (*viewpb.DataVersion, error)
+	PrepareDataViewSchema(context.Context, int64, *schemapb.CollectionSchema, *schemapb.CollectionSchema) error
 }
 
 // Resources borrows the recovered managers owned by Coordinator. Dependencies

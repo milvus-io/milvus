@@ -45,8 +45,8 @@ type DefaultBalancer struct {
 	wg     sync.WaitGroup
 }
 
-// SchemaVersionProvider reads the authorized preparation schema identity.
-// Schema identity is independent of the desired load configuration.
+// SchemaVersionProvider reads the authorized DDL target for admission and
+// published-view recovery. New QueryViews bind the selected DataView schema.
 type SchemaVersionProvider func(context.Context, int64) (int32, error)
 
 // NewDefaultBalancer constructs the standard Balancer controller.
@@ -215,7 +215,7 @@ func (b *DefaultBalancer) Reconcile(ctx context.Context) error {
 		// explicit release/removal still tears down its complete obligation.
 		plan.Releases = slices.DeleteFunc(plan.Releases, func(id qviews.ShardID) bool {
 			cfg, manager := reader.ConfigForShard(id), b.viewRegistry.Get(id)
-			return cfg != nil && manager != nil && manager.PublishedRecovery(reader.SchemaVersion(cfg.CollectionID)) != nil
+			return cfg != nil && manager != nil && manager.PublishedRecovery(reader.targetSchemaVersion(cfg.CollectionID)) != nil
 		})
 	}
 	applyErr := b.apply(ctx, plan)

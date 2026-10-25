@@ -63,6 +63,9 @@ func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.
 				plan.Retries = append(plan.Retries, shardID)
 				continue
 			}
+			if snap.schemaVersions[cfg.CollectionID] != snap.SchemaVersion(cfg.CollectionID) {
+				continue // DataView publication will wake planning when materialization is complete.
+			}
 		}
 		action := classifyShard(snap, shardID)
 		switch action {

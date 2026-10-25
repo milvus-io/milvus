@@ -28,6 +28,8 @@ message DataViewOfCollection {
     int64 collection_id = 1;
     repeated DataViewOfShard shards = 2;
     DataVersion data_version = 3;
+    // Read schema supported by this exact snapshot; advanced only by schema DDL.
+    int32 schema_version = 4;
 }
 
 // DataViewOfShard groups loadable segments by partition for one vchannel.

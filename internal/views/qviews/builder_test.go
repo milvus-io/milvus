@@ -19,9 +19,10 @@ func TestQueryViewAtCoordBuilder(t *testing.T) {
 		TransformStartAfterTimetick: 12345,
 	}
 	dataView := &viewpb.DataViewOfCollection{
-		CollectionId: 10,
-		DataVersion:  &viewpb.DataVersion{StreamingVersion: 2, CompactVersion: 1},
-		Shards:       []*viewpb.DataViewOfShard{shardView},
+		CollectionId:  10,
+		SchemaVersion: 7,
+		DataVersion:   &viewpb.DataVersion{StreamingVersion: 2, CompactVersion: 1},
+		Shards:        []*viewpb.DataViewOfShard{shardView},
 	}
 
 	loadInfoVersion := uint64(7)
@@ -49,6 +50,7 @@ func TestQueryViewAtCoordBuilder(t *testing.T) {
 	assert.Equal(t, int64(1), result.Meta.Version.DataVersion.CompactVersion)
 	assert.Equal(t, int64(3), result.Meta.Version.QueryVersion)
 	assert.Equal(t, loadInfoVersion, result.Meta.LoadInfoVersion)
+	assert.EqualValues(t, 7, result.Meta.SchemaVersion)
 	assert.Equal(t, uint64(12345), result.Meta.TransformStartAfterTimetick)
 
 	// Verify query nodes are sorted by node ID.

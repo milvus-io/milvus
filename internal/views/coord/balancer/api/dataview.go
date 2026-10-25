@@ -4,13 +4,14 @@ import "github.com/milvus-io/milvus/internal/views/qviews"
 
 // CollectionDataView is the native (non-proto) DataView of one collection.
 type CollectionDataView struct {
-	CollectionID int64
-	TotalRows    int64
-	LogicalSize  int64
-	DataVersion  qviews.DataVersion
-	Shards       []*ShardDataView
-	shardIndex   map[string]*ShardDataView
-	segments     map[int64]*SegmentDataView
+	SchemaVersion int32
+	CollectionID  int64
+	TotalRows     int64
+	LogicalSize   int64
+	DataVersion   qviews.DataVersion
+	Shards        []*ShardDataView
+	shardIndex    map[string]*ShardDataView
+	segments      map[int64]*SegmentDataView
 }
 
 // ShardDataView is one vchannel's DataView within a collection.

@@ -11,6 +11,11 @@ physical Segment GC are deliberately outside this component.
 
 ## Model
 
+Every snapshot also carries its supported read `SchemaVersion`. The explicit
+schema publication API, materialization wait and QueryView binding are described
+in [DataView schema certification](data_view_schema.md). Ordinary membership
+updates preserve that identity; only schema publication advances it.
+
 `DataViewOfCollection` is an immutable collection snapshot once handed to a
 consumer through `DataViewRef`:
 
