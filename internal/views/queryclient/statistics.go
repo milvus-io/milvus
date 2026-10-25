@@ -6,7 +6,6 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -14,7 +13,8 @@ import (
 
 // Statistics makes one SN call per attempt, followed only by the selected QNs.
 // Counts are current physical statistics, not MVCC/TTL-filtered query results.
-func (c *legacyClient) Statistics(ctx context.Context, collectionID int64, req *viewpb.StatisticsRequest) (int64, error) {
+// barrierMVCC reuses Phase 1 barrier coverage; zero uses ordinary Strong sampling.
+func (c *legacyClient) Statistics(ctx context.Context, collectionID int64, req *viewpb.StatisticsRequest, barrierMVCC uint64) (int64, error) {
 	vchannels, err := c.shardResolver.ResolveVChannels(ctx, collectionID)
 	if err != nil {
 		return 0, err
@@ -23,7 +23,7 @@ func (c *legacyClient) Statistics(ctx context.Context, collectionID int64, req *
 	group, groupCtx := errgroup.WithContext(ctx)
 	for i, channel := range vchannels {
 		group.Go(func() error {
-			rows, err := c.shardClient.statistics(groupCtx, channel, collectionID, req)
+			rows, err := c.shardClient.statistics(groupCtx, channel, collectionID, req, barrierMVCC)
 			counts[i] = rows
 			return err
 		})
@@ -38,28 +38,28 @@ func (c *legacyClient) Statistics(ctx context.Context, collectionID int64, req *
 	return rows, nil
 }
 
-func (s *shardViewQueryClient) statistics(ctx context.Context, channel string, collectionID int64, req *viewpb.StatisticsRequest) (int64, error) {
+func (s *shardViewQueryClient) statistics(ctx context.Context, channel string, collectionID int64, req *viewpb.StatisticsRequest, barrierMVCC uint64) (int64, error) {
 	var rows atomic.Int64
 	_, err := s.executeShard(ctx, channel, &shardExecParams{
-		// The legacy statistics guarantee is a freshness lower bound. Do not
-		// turn it into a fixed BarrierMVCC or wait for unrelated future writes.
-		consistencyLevel: commonpb.ConsistencyLevel_Bounded,
+		barrierMVCC: barrierMVCC,
 		buildPlanReq: func(shard qviews.ShardID) *viewpb.GetQueryPlanRequest {
 			return &viewpb.GetQueryPlanRequest{
 				CollectionId: collectionID, ShardId: shard.IntoProto(),
 				Request: &viewpb.GetQueryPlanRequest_StatisticsRequest{StatisticsRequest: req},
 			}
 		},
-		consumePlan: func(plan *viewpb.QueryPlan) error {
-			if plan.GrowingRowCount == nil || plan.GetStatisticsRequest() == nil {
-				return merr.WrapErrServiceInternalMsg("statistics plan misses growing result or partition scope")
+		consumeResponse: func(response *viewpb.GetQueryPlanResponse) error {
+			plan := response.GetPlan()
+			statistics := response.GetGrowingInlineResponse().GetStatisticsResponse()
+			if statistics == nil || plan.GetStatisticsRequest() == nil {
+				return merr.WrapErrServiceInternalMsg("statistics response misses growing result or partition scope")
 			}
 			for _, node := range plan.GetWorkNodes() {
 				if node.GetQueryNode() == nil {
 					return merr.WrapErrServiceInternalMsg("statistics plan contains a non-QueryNode worker")
 				}
 			}
-			rows.Store(plan.GetGrowingRowCount())
+			rows.Store(statistics.GetRowCount())
 			return nil
 		},
 		dispatchNode: func(ctx context.Context, node qviews.WorkNode, plan *viewpb.QueryPlan, shard qviews.ShardID) error {

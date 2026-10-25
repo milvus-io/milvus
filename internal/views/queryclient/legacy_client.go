@@ -22,7 +22,8 @@ type Client interface {
 
 // LegacyClient executes proxy-generated legacy internal requests and returns raw results.
 type LegacyClient interface {
-	Statistics(ctx context.Context, collectionID int64, req *viewpb.StatisticsRequest) (int64, error)
+	// Statistics uses the outer BarrierMVCC; zero selects ordinary Strong sampling.
+	Statistics(ctx context.Context, collectionID int64, req *viewpb.StatisticsRequest, barrierMVCC uint64) (int64, error)
 
 	Search(ctx context.Context, req *LegacySearchRequest) (*LegacySearchResult, error)
 	Query(ctx context.Context, req *LegacyQueryRequest) (*LegacyQueryResult, error)

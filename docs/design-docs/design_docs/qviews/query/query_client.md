@@ -80,12 +80,19 @@ callers. Production Proxy routing and the QN provider implementation remain
 separate integration work; this PR adds the SN provider and shared contracts.
 
 For each shard the client sends a `statistics_request` through `GetQueryPlan`.
+The caller supplies its normalized timestamp as the separate `barrierMVCC`
+argument to `Legacy().Statistics`; the client reuses the outer `barrier_mvcc`
+field and preserves it across retries. A zero argument uses the shared ordinary
+Strong sampling path. `StatisticsRequest` contains only the partition scope.
 SN selects the latest serving Up View (physical statistics do not select a
 logical read schema), waits for the requested consumption lower bound, resolves
 the View's partition scope, and counts its retained growing resources in the
-same call. The response contains `growing_row_count`, the selected View/version,
-MVCC frontiers, resolved partitions and QN workers only. There is no follow-up
-SN execution RPC and no expression/index optimizer work for statistics.
+same call. `GetQueryPlanResponse.growing_inline_response.statistics_response`
+contains the growing row count, including an explicit response for zero rows.
+The separate `plan` contains the selected View/version, MVCC frontiers, resolved
+partitions and QN workers only. There is no follow-up SN execution RPC and no
+expression/index optimizer work for statistics. The inline-response oneof can
+later carry other SN result types without adding result fields to QueryPlan.
 
 The client then calls `StatisticsOnView` on those QNs and sums their row counts
 with the SN result. The QN provider contract requires waiting for Transform
@@ -95,8 +102,9 @@ as queries; QN uses the selected View's sealed membership. One replica per shard
 
 These are runtime `RowNum` statistics with applied deletes, not a historical
 MVCC snapshot, a TTL-filtered `count(*)`, or a globally atomic row count. The
-request guarantee is a freshness lower bound; later applied writes/deletes can
-be reflected. No new periodic row-count reporting or Coordinator aggregation
+barrier fixes both execution wait targets to B; later applied writes/deletes
+can still be reflected by RowNum. This reuses the existing scoped barrier path,
+including Transform advancement, without a statistics-specific freshness policy. No new periodic row-count reporting or Coordinator aggregation
 is introduced. Growing reuses its existing native `GetRealCount`; sealed reads
 use the existing physical deletion-cardinality counter.
 

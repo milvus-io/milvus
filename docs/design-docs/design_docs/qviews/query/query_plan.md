@@ -133,12 +133,13 @@ activation and mixed-version acceptance require integration validation.
 ## Physical statistics selection
 
 A `statistics_request` selects the latest Up View independently of a logical
-SchemaVersion. It uses the same serving lease and WAL freshness machinery, but
-counts growing resources before renewing the lease and returning. Its plan
-contains only QN workers and a present `growing_row_count` (including zero).
+SchemaVersion. It reuses the outer `barrier_mvcc` and serving lease, counts
+growing resources before renewing the lease, and returns QN workers in the plan.
+The growing count is returned separately in
+`GetQueryPlanResponse.growing_inline_response.statistics_response`, including
+an explicit response for zero rows. QueryPlan itself contains no inline result.
 Resolved partition scope is echoed in `statistics_request`. This operation does
-not run query optimizers or reinterpret its freshness frontiers as a historical
-count boundary. See [runtime statistics](query_client.md#runtime-row-statistics).
+not run query optimizers or use the barrier timestamp to filter historical rows. See [runtime statistics](query_client.md#runtime-row-statistics).
 
 ## Transaction and restore publication
 

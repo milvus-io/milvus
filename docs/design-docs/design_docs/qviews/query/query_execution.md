@@ -91,8 +91,11 @@ same pinned ReadState as queries, never a new SegmentID lookup or a base's lates
 state. It must wait for Transform on the exact registrations behind those handles. The RPC adapter is `StatisticsOnView`; errors use the existing status
 conversion and successful responses contain only `row_count`.
 
-SN normally invokes this operation while selecting the statistics View, so the
-client does not issue a second execution request to SN. See the
+SN invokes this operation while selecting the statistics View and returns the
+result in `GetQueryPlanResponse.growing_inline_response.statistics_response`.
+The client consumes that response before QN dispatch and discards it together
+with partial QN results on a shard retry. QueryPlan stays reusable without
+embedding execution results; no second execution request is sent to SN. See the
 [statistics orchestration contract](query_client.md#runtime-row-statistics).
 
 ## Function model resources

@@ -66,7 +66,7 @@ func (w *walAdaptorImpl) getQueryPlanMVCC(ctx context.Context, vchannel string, 
 	}, nil
 }
 
-func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryPlanRequest) (plan *viewpb.QueryPlan, err error) {
+func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryPlanRequest) (response *viewpb.GetQueryPlanResponse, err error) {
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, viewerror.NewOnShutdownError("wal is on shutdown")
 	}
@@ -82,7 +82,7 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		// Preserve caller cancellation; otherwise let the client replan on
 		// the replacement owner through the existing shutdown retry path.
 		if errors.Is(err, context.Canceled) && callerCtx.Err() == nil && w.availableCtx.Err() != nil {
-			plan = nil
+			response = nil
 			err = viewerror.NewOnShutdownError("query plan WAL is unavailable")
 		}
 	}()
@@ -145,11 +145,12 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 	if err := runtime.WaitMVCCVisible(ctx, mvcc.GetGrowingTimetick(), mvcc.GetTransformingTimetick()); err != nil {
 		return nil, err
 	}
-	plan = &viewpb.QueryPlan{
+	plan := &viewpb.QueryPlan{
 		Version: lease.Version.IntoProto(),
 		ShardId: viewShardID.IntoProto(),
 		Mvcc:    mvcc,
 	}
+	response = &viewpb.GetQueryPlanResponse{Plan: plan}
 	switch request := req.GetRequest().(type) {
 	case *viewpb.GetQueryPlanRequest_StatisticsRequest:
 		statistics := proto.Clone(request.StatisticsRequest).(*viewpb.StatisticsRequest)
@@ -166,7 +167,11 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		if countErr != nil {
 			return nil, countErr
 		}
-		plan.GrowingRowCount = &rows
+		response.GrowingInlineResponse = &viewpb.GrowingInlineResponse{
+			Response: &viewpb.GrowingInlineResponse_StatisticsResponse{
+				StatisticsResponse: &viewpb.StatisticsOnViewResponse{RowCount: rows},
+			},
+		}
 		plan.Request = &viewpb.QueryPlan_StatisticsRequest{StatisticsRequest: statistics}
 		plan.WorkNodes = buildQueryPlanWorkNodes(lease.View, queryPlanWorkNodeOptions{
 			ignoreGrowing: true, partitionIDs: statistics.PartitionIds,
@@ -242,7 +247,7 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 	// Preserve a full inter-phase serving window after planning completes.
 	qviews.OmitUnchangedQueryPayloads(plan, req)
 	lease.Renew()
-	return plan, nil
+	return response, nil
 }
 
 func (w *walAdaptorImpl) GetMVCCTimestamp(ctx context.Context, req *viewpb.GetMVCCTimestampRequest) (*viewpb.GetMVCCTimestampResponse, error) {
@@ -295,7 +300,7 @@ func (w *walAdaptorImpl) resolveQueryPlanMVCC(ctx context.Context, req *viewpb.G
 		var minimum uint64
 		if mvcc.ConsistencyLevel == commonpb.ConsistencyLevel_Bounded {
 			// Proxy supplies the bounded-staleness lower bound in the legacy request.
-			minimum = max(req.GetLegacySearchRequest().GetGuaranteeTimestamp(), req.GetLegacyRetrieveRequest().GetGuaranteeTimestamp(), req.GetStatisticsRequest().GetGuaranteeTimestamp())
+			minimum = max(req.GetLegacySearchRequest().GetGuaranteeTimestamp(), req.GetLegacyRetrieveRequest().GetGuaranteeTimestamp())
 		}
 		return w.getQueryPlanMVCC(ctx, vchannel, strong, minimum)
 	default:

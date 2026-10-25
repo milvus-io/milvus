@@ -258,6 +258,15 @@ message GetMVCCTimestampResponse {
 
 message GetQueryPlanResponse {
     QueryPlan plan = 1;
+    GrowingInlineResponse growing_inline_response = 2;
+}
+
+// Growing results computed during Phase 1, separate from the reusable query plan.
+// Additional result types can extend this oneof when SN inlines other queries.
+message GrowingInlineResponse {
+    oneof response {
+        StatisticsOnViewResponse statistics_response = 1;
+    }
 }
 
 // QueryPlan contains everything needed to dispatch Phase 2 requests.
@@ -282,7 +291,6 @@ message QueryPlan {
     // original Phase 1 request by Proxy. All other optimized parameters remain
     // explicit, including empty payloads when the optimizer clears a field.
     QueryPayloadReuse reused_payloads = 7;
-    optional int64 growing_row_count = 9;
 }
 
 //
@@ -301,10 +309,9 @@ service ViewQueryService {
 }
 
 // Runtime physical row statistics: no expression, TTL or historical snapshot.
-// The guarantee timestamp is a consumption lower bound, not a read timestamp.
+// Consumption progress is supplied by the outer GetQueryPlanRequest MVCC.
 message StatisticsRequest {
     repeated int64 partition_ids = 1;
-    uint64 guarantee_timestamp = 2;
 }
 
 message StatisticsOnViewRequest {

@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
@@ -15,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -47,20 +50,25 @@ func TestStatisticsPlanCountsSNAndReturnsOnlySelectedQNs(t *testing.T) {
 			require.Equal(t, lease.Version.IntoProto(), req.GetVersion())
 			require.EqualValues(t, 3, req.GetShardId().GetReplicaId())
 			require.Equal(t, []int64{10}, req.GetPartitionIds())
+			require.EqualValues(t, 99, req.GetMvcc().GetGrowingTimetick())
+			require.EqualValues(t, 99, req.GetMvcc().GetTransformingTimetick())
 			counted = true
 			return 23, nil
 		}).Build()
-		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}, viewResourceManager: &vchannel.PChannelRecoveryManager{}}
+		manager := mvcc.NewMVCCManager(100)
+		manager.ApplyRecoveryBarrier("p_1v0", 100)
+		mockey.Mock((*roWALAdaptorImpl).Channel).Return(types.PChannelInfo{AccessMode: types.AccessModeRW}).Build()
+		w := &walAdaptorImpl{param: &interceptors.InterceptorBuildParam{MVCCManager: manager}, roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}, viewResourceManager: &vchannel.PChannelRecoveryManager{}}
 		plan, err := w.GetQueryPlan(t.Context(), &viewpb.GetQueryPlanRequest{
 			CollectionId: 1, ShardId: &viewpb.ShardID{Vchannel: "p_1v0"},
-			Mvcc:    &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 99}},
+			Mvcc:    &viewpb.GetQueryPlanRequest_BarrierMvcc{BarrierMvcc: 99},
 			Request: &viewpb.GetQueryPlanRequest_StatisticsRequest{StatisticsRequest: &viewpb.StatisticsRequest{PartitionIds: []int64{10}}},
 		})
 		require.NoError(t, err)
 		require.True(t, released)
-		require.EqualValues(t, 23, plan.GetGrowingRowCount())
-		require.Len(t, plan.GetWorkNodes(), 1)
-		require.EqualValues(t, 11, plan.GetWorkNodes()[0].GetQueryNode().GetNodeId())
+		require.EqualValues(t, 23, plan.GetGrowingInlineResponse().GetStatisticsResponse().GetRowCount())
+		require.Len(t, plan.GetPlan().GetWorkNodes(), 1)
+		require.EqualValues(t, 11, plan.GetPlan().GetWorkNodes()[0].GetQueryNode().GetNodeId())
 	})
 }
 
@@ -96,7 +104,7 @@ func TestQueryPlanRenewsLeaseOnlyOnSuccessfulReturn(t *testing.T) {
 		patch.UnPatch()
 		if valid {
 			require.NoError(t, err)
-			require.Empty(t, plan.GetWorkNodes())
+			require.Empty(t, plan.GetPlan().GetWorkNodes())
 		} else {
 			require.Error(t, err)
 		}

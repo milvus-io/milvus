@@ -128,16 +128,17 @@ func TestStrongSearchAlwaysTargetsPrimary(t *testing.T) {
 }
 
 type fakeQueryPlanClient struct {
-	plan         *viewpb.QueryPlan
-	planReq      *viewpb.GetQueryPlanRequest
-	mvccReq      *viewpb.GetMVCCTimestampRequest
-	mvccShardID  qviews.ShardID
-	mvccReqCount int
+	growingInlineResponse *viewpb.GrowingInlineResponse
+	plan                  *viewpb.QueryPlan
+	planReq               *viewpb.GetQueryPlanRequest
+	mvccReq               *viewpb.GetMVCCTimestampRequest
+	mvccShardID           qviews.ShardID
+	mvccReqCount          int
 }
 
 func (f *fakeQueryPlanClient) GetQueryPlan(_ context.Context, _ qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
 	f.planReq = proto.Clone(req).(*viewpb.GetQueryPlanRequest)
-	return &viewpb.GetQueryPlanResponse{Plan: f.plan}, nil
+	return &viewpb.GetQueryPlanResponse{Plan: f.plan, GrowingInlineResponse: f.growingInlineResponse}, nil
 }
 
 func (f *fakeQueryPlanClient) GetMVCCTimestamp(_ context.Context, shardID qviews.ShardID, req *viewpb.GetMVCCTimestampRequest) (*viewpb.GetMVCCTimestampResponse, error) {

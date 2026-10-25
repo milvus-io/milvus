@@ -141,8 +141,8 @@ type shardExecParams struct {
 	barrierMVCC      uint64
 	// buildPlanReq creates the GetQueryPlanRequest for a target shard.
 	buildPlanReq func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest
-	// consumePlan accepts results already computed on SN, before QN dispatch.
-	consumePlan func(*viewpb.QueryPlan) error
+	// consumeResponse accepts inline SN results before worker dispatch.
+	consumeResponse func(*viewpb.GetQueryPlanResponse) error
 	// dispatchNode executes a Phase 2 RPC on a single work node.
 	// Called concurrently for each work node in the plan, with per-node retry
 	// for non-ViewError transient failures.
@@ -175,7 +175,7 @@ func (s *shardViewQueryClient) executeShard(
 
 		// Phase 1: GetQueryPlan with consistency routing.
 		planReq := params.buildPlanReq(targetShardID)
-		plan, err := s.executeGetQueryPlan(ctx, targetShardID, planReq, params)
+		response, err := s.executeGetQueryPlan(ctx, targetShardID, planReq, params)
 		if err != nil {
 			if ve := viewerror.AsViewError(err); ve != nil && ve.IsRetryable() {
 				lastErr = err
@@ -184,11 +184,12 @@ func (s *shardViewQueryClient) executeShard(
 			return nil, err
 		}
 
+		plan := response.GetPlan()
 		if err := qviews.RestoreQueryPlanPayloads(plan, planReq); err != nil {
 			return nil, err
 		}
-		if params.consumePlan != nil {
-			if err := params.consumePlan(plan); err != nil {
+		if params.consumeResponse != nil {
+			if err := params.consumeResponse(response); err != nil {
 				return nil, err
 			}
 		}
@@ -227,7 +228,7 @@ func (s *shardViewQueryClient) executeGetQueryPlan(
 	targetShardID qviews.ShardID,
 	planReq *viewpb.GetQueryPlanRequest,
 	params *shardExecParams,
-) (*viewpb.QueryPlan, error) {
+) (*viewpb.GetQueryPlanResponse, error) {
 	if params.mvcc != nil && params.barrierMVCC != 0 {
 		return nil, merr.WrapErrServiceInternalMsg("query specifies both executor MVCC and BarrierMVCC")
 	}
@@ -247,11 +248,7 @@ func (s *shardViewQueryClient) executeGetQueryPlan(
 			}
 		}
 	}
-	resp, err := s.queryPlanClient.GetQueryPlan(ctx, targetShardID, planReq)
-	if err != nil {
-		return nil, err
-	}
-	return resp.Plan, nil
+	return s.queryPlanClient.GetQueryPlan(ctx, targetShardID, planReq)
 }
 
 // fanOutToWorkNodes dispatches Phase 2 to all work nodes concurrently.
