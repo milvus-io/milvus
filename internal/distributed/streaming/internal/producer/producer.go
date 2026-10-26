@@ -131,11 +131,8 @@ func (p *ResumableProducer) produceInternal(ctx context.Context, msg message.Mut
 	}
 	defer p.lifetime.Done()
 
-	// A failed transport attempt may have committed. Result tombstones normally
-	// reconcile the retry, but their absence after eviction/handoff is not proof
-	// that it is safe to replay the whole transaction under a new TxnID.
-	uncertainCommit := false
-	nativeCommit := msg.MessageType() == message.MessageTypeCommitTxn && msg.ReplicateHeader() == nil
+	// Transport failures retry this same message. Only the server's business
+	// error decides whether the caller may replay a transaction with a new ID.
 	for {
 		// get producer.
 		producerHandler, err := p.producer.GetProducerAfterAvailable(ctx)
@@ -159,12 +156,6 @@ func (p *ResumableProducer) produceInternal(ctx context.Context, msg message.Mut
 			return nil, errors.Mark(err, errs.ErrCanceledOrDeadlineExceed)
 		}
 		if sErr := status.AsStreamingError(err); sErr != nil {
-			if uncertainCommit && sErr.IsTxnUnavilable() {
-				p.Logger().Warn(ctx, "cannot reconcile a previously attempted transaction commit",
-					mlog.FieldVChannel(msg.VChannel()), mlog.Int64("txnID", int64(msg.TxnContext().TxnID)), mlog.Err(err))
-				return nil, errors.Mark(status.NewUnrecoverableError(
-					"transaction %d commit outcome unknown; its previous attempt may have succeeded", msg.TxnContext().TxnID), errs.ErrUnrecoverable)
-			}
 			if sErr.IsPartialUpdateRetryableCAS() {
 				// Proxy must re-query and rebuild the row instead of retrying the
 				// transaction with stale merged fields.
@@ -187,7 +178,6 @@ func (p *ResumableProducer) produceInternal(ctx context.Context, msg message.Mut
 				continue // Admission rejection did not reach WAL.
 			}
 		}
-		uncertainCommit = nativeCommit
 	}
 }
 

@@ -114,7 +114,7 @@ See [Transaction Messages](../message/message-semantic-txn.md) for message types
 2. **Append**: Each message in the transaction increments the in-flight counter and refreshes the session TTL.
 3. **Commit**: Close body admission and wait for in-flight appends. Check a nonzero Commit `body_cnt` against successful appends; zero skips validation for legacy transactions. A mismatch rolls back the session and releases references, causing a whole-transaction retry. After successful Commit append, mark the transaction as committed. The transaction's messages become visible to consumers as a single atomic group at the assigned TimeTick.
 4. **Rollback**: Mark the transaction as rolled back. All messages in the transaction are discarded.
-5. **Expire**: Expiration TimeTick = `lastTimetick + keepalive`. Each successful body append refreshes `lastTimetick` (lease renewal). Once current TimeTick ≥ expiration, the transaction is unrecoverably failed (`STREAMING_CODE_TRANSACTION_EXPIRED`).
+5. **Expire**: Expiration TimeTick = `lastTimetick + keepalive`. Each successful body append refreshes `lastTimetick` (lease renewal). An InFlight transaction whose current TimeTick ≥ expiration rejects further appends with `STREAMING_CODE_TRANSACTION_EXPIRED`. An admitted or committed transaction does not become a retryable expiration when its lease elapses.
 6. **Force-fail**: The [Lock](lock.md) interceptor aborts all active transactions in the affected scope after an exclusive operation is successfully appended. Failed, deduplicated and explicitly ignored operations do not abort.
 
 A Commit of either origin interrupted by WAL cancellation/fencing stays unresolved until
@@ -175,10 +175,17 @@ transactions in its replay range, preserving their original age. Records before
 the checkpoint are not restored: this is best-effort retention, not a durable
 exactly-once window. CDC keeps its source-checkpoint deduplication.
 
-After an ambiguous native Commit attempt, a producer retry that encounters an
-unavailable transaction reports an unrecoverable unknown outcome. Missing history
-does not authorize replay with a new TxnID. A first, definite expiration or body-count
-rejection retains the existing retry behavior, including CAS retry restrictions.
+Transport failures only retry the same message; the producer never infers a
+transaction outcome from a connection error. The server returns TransactionExpired
+only for a definite pre-commit expiration or rejection, allowing the existing
+whole-transaction retry, including CAS retry restrictions. A missing session
+returns TransactionNotFound using the existing UNRECOVERABLE wire code, so old
+producers also stop rather than replay. This applies to missing body/rollback
+sessions as well; Begin admission is unchanged. An admitted or committed session
+returns InvalidTransactionState even after its lease elapses. Missing history does
+not authorize replay with a new TxnID. Upgrade StreamingNodes before producers:
+old servers still conflate missing sessions with expiration, and the corrected
+server semantics are required for the guarantee during rolling upgrades.
 
 ## LastConfirmedMessageID
 
