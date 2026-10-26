@@ -1689,32 +1689,52 @@ func (t *SearchTask) supportsStreamingReduce() bool {
 			}
 		}
 		for _, sub := range req.GetSubReqs() {
-			if sub == nil || sub.GetGroupByFieldId() > 0 ||
-				(sub.GetSearchType() != internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER &&
-					sub.GetSearchType() != internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER) {
+			if sub == nil || sub.GetGroupByFieldId() > 0 {
 				return false
 			}
 		}
-		return true
-	}
-	if len(req.GetSubReqs()) > 0 {
-		return false
-	}
-	if t.aggCtx != nil {
-		return len(req.GetGroupByFieldIds()) > 0 && !req.GetIsIterator()
-	}
-	if req.GetGroupByFieldId() > 0 || len(req.GetGroupByFieldIds()) > 0 {
-		return !req.GetIsIterator()
+	} else {
+		if len(req.GetSubReqs()) > 0 {
+			return false
+		}
+		if t.aggCtx != nil {
+			return len(req.GetGroupByFieldIds()) > 0 && !req.GetIsIterator()
+		}
+		if req.GetGroupByFieldId() > 0 || len(req.GetGroupByFieldIds()) > 0 {
+			return !req.GetIsIterator()
+		}
+
+		// Iterator Search is classified as SearchType_DEFAULT. After rejecting
+		// unsupported request shapes above, IsIterator identifies the supported path.
+		if req.GetIsIterator() {
+			return true
+		}
 	}
 
-	// Iterator Search is classified as SearchType_DEFAULT. After rejecting
-	// unsupported request shapes above, IsIterator identifies the supported path.
-	if req.GetIsIterator() {
-		return true
+	for index := 0; index < max(1, len(req.GetSubReqs())); index++ {
+		searchType := req.GetSearchType()
+		if req.GetIsAdvanced() {
+			searchType = req.GetSubReqs()[index].GetSearchType()
+		}
+		if searchType == internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER ||
+			searchType == internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER {
+			continue
+		}
+		if searchType != internalpb.SearchType_DEFAULT || index >= len(t.queryInfos) || hasFunctionRerank(t.request) {
+			return false
+		}
+		if req.GetIsAdvanced() && index < len(t.request.GetSubReqs()) &&
+			len(t.request.GetSubReqs()[index].GetFunctionChains()) > 0 {
+			return false
+		}
+		info := t.queryInfos[index]
+		if !gjson.Get(info.GetSearchParams(), radiusKey).Exists() &&
+			info.GetHints() != iterativeFilterKey &&
+			gjson.Get(info.GetSearchParams(), common.HintsKey).String() != iterativeFilterKey {
+			return false
+		}
 	}
-
-	return req.GetSearchType() == internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER ||
-		req.GetSearchType() == internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER
+	return true
 }
 
 // find the last bound based on reduced results and metric type
