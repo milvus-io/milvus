@@ -484,13 +484,15 @@ func (lst *ListSnapshotsTask) Execute(ctx context.Context) error {
 	summaries := make([]*milvuspb.SnapshotSummary, 0, len(result.GetSnapshotSummaries()))
 	for _, info := range result.GetSnapshotSummaries() {
 		summaries = append(summaries, &milvuspb.SnapshotSummary{
-			Name: info.GetName(), CreateTs: info.GetCreateTs(), Description: info.GetDescription(),
+			Name:        info.GetName(),
+			CreateTs:    info.GetCreateTs(),
+			Description: info.GetDescription(),
 		})
 	}
 	lst.result = &milvuspb.ListSnapshotsResponse{
-		SnapshotSummaries: summaries,
 		Status:            result.GetStatus(),
 		Snapshots:         result.GetSnapshots(),
+		SnapshotSummaries: summaries,
 	}
 
 	return nil

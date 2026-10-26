@@ -572,11 +572,11 @@ func (sm *snapshotManager) DescribeSnapshot(ctx context.Context, collectionID in
 // to live here was unreachable via any public API and has been removed.
 // getDBCollectionIDs is still used by ListRestoreJobs for db-level job filtering.
 func (sm *snapshotManager) ListSnapshots(ctx context.Context, collectionID, partitionID, dbID int64) ([]*datapb.SnapshotSummary, error) {
-	mlog.Info(context.TODO(), "list snapshots request received")
+	mlog.Info(ctx, "list snapshots request received")
 
 	snapshots, err := sm.snapshotMeta.ListSnapshots(ctx, collectionID, partitionID)
 	if err != nil {
-		mlog.Error(context.TODO(), "failed to list snapshots", mlog.Err(err))
+		mlog.Error(ctx, "failed to list snapshots", mlog.Err(err))
 		return nil, err
 	}
 
