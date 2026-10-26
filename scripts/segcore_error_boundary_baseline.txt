@@ -15,7 +15,6 @@ knowhere	internal/core/src/common/Types.h
 knowhere	internal/core/src/common/TypeTraits.h
 knowhere	internal/core/src/common/Utils.h
 knowhere	internal/core/src/config/ConfigKnowhere.cpp
-knowhere	internal/core/src/exec/expression/ExprTestBase.h
 knowhere	internal/core/src/exec/operator/IterativeElementFilterNode.cpp
 knowhere	internal/core/src/exec/operator/IterativeFilterNode.cpp
 knowhere	internal/core/src/exec/operator/RescoresNode.cpp
@@ -97,12 +96,6 @@ arrow	internal/core/src/common/Schema.cpp
 arrow	internal/core/src/common/Schema.h
 arrow	internal/core/src/common/Types.h
 arrow	internal/core/src/indexbuilder/BuildSession.cpp
-arrow	internal/core/src/segcore/json_stats/JsonKeyStats.cpp
-arrow	internal/core/src/segcore/json_stats/JsonKeyStats.h
-arrow	internal/core/src/segcore/json_stats/parquet_writer.cpp
-arrow	internal/core/src/segcore/json_stats/parquet_writer.h
-arrow	internal/core/src/segcore/json_stats/utils.cpp
-arrow	internal/core/src/segcore/json_stats/utils.h
 arrow	internal/core/src/index/skipindex_stats/SkipIndexStats.cpp
 arrow	internal/core/src/index/skipindex_stats/SkipIndexStats.h
 arrow	internal/core/src/mmap/SparseVortexFileSystem.cpp
@@ -118,6 +111,7 @@ arrow	internal/core/src/segcore/ChunkedSegmentSealedImpl.cpp
 arrow	internal/core/src/segcore/ChunkedSegmentSealedImpl.h
 arrow	internal/core/src/segcore/external_utils_c.cpp
 arrow	internal/core/src/segcore/json_stats/JsonKeyStats.cpp
+arrow	internal/core/src/segcore/json_stats/JsonKeyStats.h
 arrow	internal/core/src/segcore/json_stats/parquet_writer.cpp
 arrow	internal/core/src/segcore/json_stats/parquet_writer.h
 arrow	internal/core/src/segcore/json_stats/utils.cpp
@@ -142,6 +136,8 @@ arrow	internal/core/src/segcore/TextColumnCache.cpp
 arrow	internal/core/src/segcore/TextColumnCache.h
 arrow	internal/core/src/storage/ArrowFileSystemChunkManager.cpp
 arrow	internal/core/src/storage/loon_ffi/ffi_reader_c.cpp
+arrow	internal/core/src/storage/loon_ffi/ffi_reader_status.h
+arrow	internal/core/src/storage/loon_ffi/ffi_reader_stream.h
 arrow	internal/core/src/storage/loon_ffi/util.cpp
 arrow	internal/core/src/storage/PayloadReader.cpp
 arrow	internal/core/src/storage/PayloadReader.h
@@ -203,6 +199,8 @@ milvus_storage	internal/core/src/storage/IndexEntryEncryptedLocalWriter.h
 milvus_storage	internal/core/src/storage/LegacyIndexFileIO.cpp
 milvus_storage	internal/core/src/storage/LegacyIndexFileIO.h
 milvus_storage	internal/core/src/storage/loon_ffi/ffi_reader_c.cpp
+milvus_storage	internal/core/src/storage/loon_ffi/ffi_reader_status.h
+milvus_storage	internal/core/src/storage/loon_ffi/ffi_reader_stream.h
 milvus_storage	internal/core/src/storage/loon_ffi/loon_error_code.h
 milvus_storage	internal/core/src/storage/loon_ffi/milvus_table_c.cpp
 milvus_storage	internal/core/src/storage/loon_ffi/property_singleton.h
