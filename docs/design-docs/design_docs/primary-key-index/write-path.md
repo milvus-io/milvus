@@ -115,7 +115,12 @@ in `docs/agent_guides/streaming-system/wal/timetick_and_txn.md`.
 ```
 internal/streamingnode/server/wal/interceptors/pkindex   the interceptor (a thin shell)
         │ translates WAL messages into DecideRequests, appends what the Decider asks for
-        │ creates the engine of each vchannel (in-memory in this step)
+        ▼
+internal/streamingnode/server/pkindex                    the index of the streaming node
+        │ PChannelIndexManager: the vchannels of one pchannel, Decider(vchannel)
+        ▼
+internal/streamingnode/server/pkindex/index              the index of one vchannel
+        │ Index: it owns the engine and the Decider on it
         ▼
 internal/pkindex/dedup                                   the write path decision
         │ Decider: in-flight set (also the key lock), probe, pending writes of transactions
@@ -125,10 +130,13 @@ internal/pkindex/engine                                  the storage behind it
                                                          (engine.RW: MultiGet, Write)
 ```
 
-The package `internal/pkindex/dedup` holds the index logic and does not depend
-on the WAL. The interceptor is the only place that knows both sides. The
-Decider only reads the engine of its vchannel. It does not own the engine: the
-caller creates it, and closes it after the Decider.
+The packages `internal/streamingnode/server/pkindex`, its `index` and
+`internal/pkindex/dedup` hold the index logic and do not depend on the WAL.
+The interceptor is the only place that knows both sides. The Decider only
+reads the engine of its vchannel. It does not own the engine: the Index
+creates it, and closes it after the Decider. The structure above the Decider,
+the handover of the index and its readiness are described in the
+[handover design](snapshot.md).
 
 The primary key payload of a message is read by `wal/utility/primarykey`. It
 checks the payload the way the write path needs it: a bad message gets an
@@ -201,7 +209,7 @@ not in it. A key that the index does not know may still exist in the data.
 
 So the index only ever adds deletes. A delete of a client reaches the WAL
 unchanged. An autocommit delete needs no decision: the interceptor does not
-call the decider for it, does not register its keys in the in-flight set, and
+call the Decider for it, does not register its keys in the in-flight set, and
 does not probe the engine. A delete in a transaction is recorded as a pending
 write of the transaction, so that its keys enter the in-flight set at commit.
 It does not remove a key from the companion delete decision, because it can
@@ -498,7 +506,7 @@ append.
 
 ## Test plan
 
-- Unit tests of the helper, the Decider and the interceptor,
+- Unit tests of the helper, the Decider, the index and the interceptor,
   with a fake append operation.
 - Tests on the real interceptor chain (`wal/adaptor`): the consumer sees one
   transaction with the insert and the companion delete at the TimeTick of the
