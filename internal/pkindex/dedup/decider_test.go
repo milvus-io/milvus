@@ -256,7 +256,7 @@ func TestTxnRollbackAndDrop(t *testing.T) {
 			require.NoError(t, err)
 			rollback.Committed(ctx, 20)
 		},
-		func(txnID int64) { d.DropTxn(txnID) },
+		func(txnID int64) { d.DropEndedTxns(func(id int64) bool { return id == txnID }) },
 	} {
 		const txnID = 21
 		body, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(5), TxnID: txnID})
@@ -292,20 +292,20 @@ func TestTxnCommitDiscardKeepsPending(t *testing.T) {
 	require.Equal(t, 1, InflightLenForTest(d))
 }
 
-func TestPendingTxnIDs(t *testing.T) {
+func TestDropEndedTxns(t *testing.T) {
 	ctx := context.Background()
 	d, _ := newTestDecider(t)
-	require.Empty(t, d.PendingTxnIDs())
+	require.Empty(t, PendingTxnIDsForTest(d))
 
 	for _, txnID := range []int64{41, 42} {
 		body, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(txnID), TxnID: txnID})
 		require.NoError(t, err)
 		body.Committed(ctx, 11)
 	}
-	require.ElementsMatch(t, []int64{41, 42}, d.PendingTxnIDs())
+	require.ElementsMatch(t, []int64{41, 42}, PendingTxnIDsForTest(d))
 
-	d.DropTxn(41)
-	require.Equal(t, []int64{42}, d.PendingTxnIDs())
+	d.DropEndedTxns(func(txnID int64) bool { return txnID == 41 })
+	require.Equal(t, []int64{42}, PendingTxnIDsForTest(d))
 }
 
 func TestIntentResolvedOnce(t *testing.T) {

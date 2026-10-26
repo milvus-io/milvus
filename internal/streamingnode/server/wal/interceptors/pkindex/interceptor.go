@@ -361,11 +361,10 @@ func (i *appendInterceptor) dropPendingOfEndedTxns() {
 		return
 	}
 	i.registry.forEach(func(t *target) {
-		for _, txnID := range t.decider.PendingTxnIDs() {
-			if _, err := i.sessions.GetSessionOfTxn(message.TxnID(txnID)); err != nil {
-				t.decider.DropTxn(txnID)
-			}
-		}
+		t.decider.DropEndedTxns(func(txnID int64) bool {
+			_, err := i.sessions.GetSessionOfTxn(message.TxnID(txnID))
+			return err != nil
+		})
 	})
 }
 

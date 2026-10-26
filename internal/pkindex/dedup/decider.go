@@ -269,17 +269,19 @@ func (d *decider) probe(ctx context.Context, pks []PK) ([]PK, error) {
 	return present, nil
 }
 
-func (d *decider) PendingTxnIDs() []int64 {
+func (d *decider) DropEndedTxns(ended func(txnID int64) bool) {
 	d.pendingMu.Lock()
 	defer d.pendingMu.Unlock()
-	ids := make([]int64, 0, len(d.pending))
 	for id := range d.pending {
-		ids = append(ids, id)
+		if ended(id) {
+			delete(d.pending, id)
+		}
 	}
-	return ids
 }
 
-func (d *decider) DropTxn(txnID int64) {
+// dropTxn forgets the pending writes of a transaction that its CommitTxn or
+// RollbackTxn ended.
+func (d *decider) dropTxn(txnID int64) {
 	d.pendingMu.Lock()
 	defer d.pendingMu.Unlock()
 	delete(d.pending, txnID)
