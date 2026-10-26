@@ -573,14 +573,17 @@ TEST_F(GeometryValueSemanticsTest, DWithinSearchEnvelopeEdgeCases) {
     }
 
     // A query exactly on the antimeridian: +180 and -180 are the same
-    // meridian, so both edges are covered even at distance 0.
+    // meridian, so both edges are covered even at a near-zero distance.
+    // Not exactly 0: haversine puts the two meridians ~1.6e-9 m apart,
+    // since sin(pi) is not 0 in floating point.
+    constexpr double kNearZeroMeters = 1e-6;
     Geometry on_edge(ctx_, "POINT (180 0)");
     ASSERT_TRUE(Geometry::DWithinSearchEnvelope(
-        ctx_, on_edge.GetGeometry(), 0, region));
+        ctx_, on_edge.GetGeometry(), kNearZeroMeters, region));
     ASSERT_EQ(region.count, 2u);
     {
         Geometry same(ctx_, "POINT (-180 0)");
-        ASSERT_TRUE(same.dwithin(on_edge, 0, ctx_));
+        ASSERT_TRUE(same.dwithin(on_edge, kNearZeroMeters, ctx_));
         LonLatBox box{};
         ASSERT_TRUE(EnvelopeOf(ctx_, same, box));
         EXPECT_TRUE(Intersects(region, box));
