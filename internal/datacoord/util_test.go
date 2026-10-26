@@ -272,15 +272,12 @@ func (suite *UtilSuite) TestCalculateL0SegmentSize() {
 
 func (suite *UtilSuite) TestCalculateIndexTaskSlot() {
 	pt := paramtable.Get()
-	heavyKey := pt.DataCoordCfg.IndexTaskSlotUsage.Key
 	scalarKey := pt.DataCoordCfg.ScalarIndexTaskSlotUsage.Key
 	workerSlotKey := pt.DataNodeCfg.WorkerSlotUnit.Key
 	buildParallelKey := pt.DataNodeCfg.BuildParallel.Key
-	suite.NoError(pt.Save(heavyKey, "64"))
 	suite.NoError(pt.Save(scalarKey, "16"))
 	suite.NoError(pt.Save(workerSlotKey, "16"))
 	suite.NoError(pt.Save(buildParallelKey, "1"))
-	defer pt.Reset(heavyKey)
 	defer pt.Reset(scalarKey)
 	defer pt.Reset(workerSlotKey)
 	defer pt.Reset(buildParallelKey)
@@ -308,11 +305,48 @@ func (suite *UtilSuite) TestCalculateIndexTaskSlot() {
 			suite.Equal(tc.wantInverted, calculateIndexTaskSlot(tc.fieldSize, 1, invertedParams))
 		})
 	}
+}
 
-	// Existing vector indexes must keep using the same heavy curve after the
-	// helper started accepting the complete parameter set.
-	hnswParams := []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}}
-	suite.Equal(int64(16), calculateIndexTaskSlot(200*mib, 1, hnswParams))
+func (suite *UtilSuite) TestCalculateVectorIndexTaskSlot() {
+	pt := paramtable.Get()
+	workerSlotKey := pt.DataNodeCfg.WorkerSlotUnit.Key
+	buildParallelKey := pt.DataNodeCfg.BuildParallel.Key
+	suite.NoError(pt.Save(workerSlotKey, "16"))
+	suite.NoError(pt.Save(buildParallelKey, "1"))
+	defer pt.Reset(workerSlotKey)
+	defer pt.Reset(buildParallelKey)
+
+	const mib = int64(1 << 20)
+	for _, gpuBuild := range []string{"", "false", "true", "invalid"} {
+		params := []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: "HNSW"},
+			{Key: "gpu_build", Value: gpuBuild},
+		}
+		for _, tc := range []struct {
+			bytes int64
+			slots int64
+		}{
+			{0, 1},
+			{10 * mib, 1},
+			{128 * mib, 1},
+			{128*mib + 1, 2},
+			{200 * mib, 2},
+			{256 * mib, 2},
+			{512 * mib, 4},
+			{512*mib + 1, 5},
+			{1024 * mib, 8},
+			{6 * 1024 * mib, 48},
+		} {
+			suite.Equal(tc.slots, calculateIndexTaskSlot(tc.bytes, 1, params))
+		}
+	}
+
+	params := []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}}
+	suite.NoError(pt.Save(workerSlotKey, "32"))
+	suite.Equal(int64(16), calculateIndexTaskSlot(1024*mib, 1, params))
+	suite.NoError(pt.Save(workerSlotKey, "16"))
+	suite.NoError(pt.Save(buildParallelKey, "2"))
+	suite.Equal(int64(16), calculateIndexTaskSlot(1024*mib, 1, params))
 }
 
 func (suite *UtilSuite) TestEstimateFMIndexBuildPeakBytes() {

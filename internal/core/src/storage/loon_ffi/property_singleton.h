@@ -59,6 +59,11 @@ class LoonFFIPropertiesSingleton {
         std::unique_lock lck(mutex_);
 
         if (properties_ == nullptr) {
+            if (c_storage_config.throughput_target_gbps > 0) {
+                std::unique_lock cfg_lck(config_mutex_);
+                s3_throughput_target_gbps_ =
+                    c_storage_config.throughput_target_gbps;
+            }
             properties_ =
                 MakeInternalPropertiesFromStorageConfig(c_storage_config);
             ApplyArrowReaderConfig(*properties_);
@@ -92,6 +97,13 @@ class LoonFFIPropertiesSingleton {
     GetProperties() const {
         std::shared_lock lck(mutex_);
         return properties_;
+    }
+
+    // Job messages do not carry node-local CRT resource tuning.
+    double
+    GetS3ThroughputTargetGbps() const {
+        std::shared_lock cfg_lck(config_mutex_);
+        return s3_throughput_target_gbps_;
     }
 
     void
@@ -174,6 +186,7 @@ class LoonFFIPropertiesSingleton {
     // while mutex_ is held; see ApplyArrowReaderConfig.
     mutable std::shared_mutex config_mutex_;
     ArrowReaderLimits arrow_reader_limits_{};
+    double s3_throughput_target_gbps_ = 50.0;
     ExternalIopsConfig external_iops_config_{};
     std::atomic<int64_t> index_build_read_window_bytes_{0};
 };

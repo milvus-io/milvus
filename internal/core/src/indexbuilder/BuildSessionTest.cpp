@@ -32,6 +32,7 @@
 #include "index/contracts/query/ITextMatchReader.h"
 #include "indexbuilder/BuildSession.h"
 #include "indexbuilder/IndexBuildCapiAdapter.h"
+#include "knowhere/version.h"
 #include "storage/InsertData.h"
 #include "storage/PayloadReader.h"
 #include "storage/Util.h"
@@ -181,6 +182,67 @@ TEST_F(BuildSessionTest, ScalarAndTextManifestInputsKeepTalonConfiguration) {
             ASSERT_TRUE(external.ok());
             EXPECT_EQ(*external, external_enabled ? "2" : "0");
         }
+    }
+}
+
+TEST_F(BuildSessionTest, ResidentVectorsBuildAfterSpillAndRelease) {
+    constexpr int64_t rows = 8;
+    constexpr int64_t dim = 4;
+    auto info = BuildInfo(schemapb::DataType::FloatVector,
+                          knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+                          rows,
+                          3);
+    info.set_dim(dim);
+    info.set_current_index_version(
+        knowhere::Version::GetCurrentVersion().VersionNumber());
+    auto* metric = info.add_index_params();
+    metric->set_key(index::METRIC_TYPE);
+    metric->set_value("L2");
+    info.add_insert_files(InsertPath());
+    auto prepared = AdaptBuildIndexInfo(info, BuildPurpose::VectorIndex);
+    prepared.request.staging_parent = remote_->Path();
+    auto data = storage::CreateFieldData(
+        DataType::VECTOR_FLOAT, DataType::NONE, false, dim);
+    std::vector<float> values(rows * dim, 1.0F);
+    data->FillFieldData(values.data(), rows);
+    WriteInsert(prepared.file_manager_context, data);
+    BuildSession session(prepared.request, prepared.file_manager_context);
+    session.LoadData();
+    ASSERT_TRUE(session.HasResidentInput());
+    ASSERT_TRUE(session.SpillInput());
+    EXPECT_TRUE(session.HasResidentInput());
+    session.ReleaseInputMemory();
+    EXPECT_FALSE(session.HasResidentInput());
+    ASSERT_NO_THROW(session.Build());
+    EXPECT_FALSE(session.Publish().Files().empty());
+}
+
+TEST_F(BuildSessionTest, AllNullVectorsReleasePreparedAllocation) {
+    constexpr int64_t rows = 8;
+    constexpr int64_t dim = 4;
+    for (const auto* type : {knowhere::IndexEnum::INDEX_HNSW,
+                             knowhere::IndexEnum::INDEX_DISKANN}) {
+        auto info = BuildInfo(schemapb::DataType::FloatVector, type, rows, 3);
+        info.set_dim(dim);
+        info.set_current_index_version(
+            knowhere::Version::GetCurrentVersion().VersionNumber());
+        info.mutable_field_schema()->set_nullable(true);
+        auto* metric = info.add_index_params();
+        metric->set_key(index::METRIC_TYPE);
+        metric->set_value("L2");
+        info.add_insert_files(InsertPath());
+        auto prepared = AdaptBuildIndexInfo(info, BuildPurpose::VectorIndex);
+        prepared.request.staging_parent = remote_->Path();
+        auto data = storage::CreateFieldData(
+            DataType::VECTOR_FLOAT, DataType::NONE, true, dim);
+        std::vector<float> values(rows * dim);
+        const std::vector<uint8_t> validity((rows + 7) / 8, 0);
+        data->FillFieldData(values.data(), validity.data(), rows, 0);
+        WriteInsert(prepared.file_manager_context, data);
+        BuildSession session(prepared.request, prepared.file_manager_context);
+        session.LoadData();
+        EXPECT_FALSE(session.HasResidentInput());
+        ASSERT_NO_THROW(session.Build());
     }
 }
 

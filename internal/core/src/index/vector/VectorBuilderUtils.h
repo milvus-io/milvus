@@ -24,7 +24,9 @@
 
 #include "common/EasyAssert.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "index/Meta.h"
+#include "index/IndexTypeAdapter.h"
 #include "index/Utils.h"
 #include "index/contracts/build/IArtifactBuilder.h"
 #include "knowhere/index/index.h"
@@ -42,10 +44,31 @@ CheckedSize(int64_t value, std::string_view label) {
     return static_cast<size_t>(value);
 }
 
+inline bool
+TryReserveBuild(knowhere::Index<knowhere::IndexNode>& native_index,
+                const Config& build_params,
+                int64_t dim) {
+    auto config = build_params;
+    EraseNormalizedBuildContract(config);
+    auto dataset = knowhere::GenDataSet(
+        GetValueFromConfig<int64_t>(build_params, INDEX_NUM_ROWS_KEY)
+            .value_or(0),
+        dim,
+        nullptr);
+    auto result = native_index.TryReserveBuild(dataset, config);
+    if (!result.has_value()) {
+        ThrowInfo(KnowhereBuildStatusToErrorCode(result.error()),
+                  "failed to reserve vector build: {}",
+                  result.what());
+    }
+    return result.value();
+}
+
 inline BuilderInputSpec
 DeriveInputSpec(const Config& build_params,
                 const knowhere::Index<knowhere::IndexNode>& native_index) {
     BuilderInputSpec spec;
+    spec.use_memory = native_index.GetBuildInputOptions().use_memory;
     const auto opt_fields =
         GetValueFromConfig<OptFieldT>(build_params, VEC_OPT_FIELDS);
     const auto partition_isolation =

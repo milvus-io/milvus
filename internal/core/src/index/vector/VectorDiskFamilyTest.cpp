@@ -30,6 +30,7 @@
 #include <utility>
 #include <vector>
 
+#include "arrow/buffer.h"
 #include "common/Utils.h"
 #include "index/IndexTypeAdapter.h"
 #include "index/Meta.h"
@@ -39,6 +40,7 @@
 #include "index/vector/KnowhereEngine.h"
 #include "index/vector/VectorDiskBuildFileManager.h"
 #include "index/vector/VectorDiskArtifact.h"
+#include "indexbuilder/VectorDiskBuildMaterializer.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/version.h"
 #include "storage/FileManager.h"
@@ -120,7 +122,8 @@ BuildDisk(const std::string& raw_path,
           int64_t dim = kDim,
           int64_t logical_rows = kRows,
           const std::string& offsets_path = {},
-          bool mmap = false) {
+          bool mmap = false,
+          const T* tensor = nullptr) {
     auto adapted = AdaptIndexType({
         .index_type = knowhere::IndexEnum::INDEX_DISKANN,
         .field_type =
@@ -142,7 +145,9 @@ BuildDisk(const std::string& raw_path,
         BuilderRegistry<PreparedVectorBuildFiles<T>>::Instance().Create(
             adapted.family, adapted.params);
     ASSERT_NE(builder, nullptr);
-    PreparedVectorBuildFiles<T> input{.raw_path = raw_path};
+    PreparedVectorBuildFiles<T> input{.raw_path = raw_path,
+                                      .tensor = tensor,
+                                      .raw_file_complete = tensor == nullptr};
     if (!offsets_path.empty()) {
         input.embedding_offsets_path = offsets_path;
     }
@@ -199,14 +204,22 @@ BuildDisk(const std::string& raw_path,
 
 template <typename T>
 void
-RunOrdinaryDiskSearch(bool mmap) {
+RunOrdinaryDiskSearch(bool mmap, bool resident = false) {
     auto files = storage::LocalDirectory::CreateOwned(
         "/tmp", "vector_disk_family_XXXXXX", "vector disk family test");
     const auto raw_path = files->Path() + "/raw";
     auto values = MakeRows<T>();
-    WriteRaw(raw_path, values, kRows, kDim);
+    WriteRaw(raw_path, resident ? std::vector<T>{} : values, kRows, kDim);
     OpenedDiskIndex<T> opened;
-    BuildDisk(raw_path, files->Path(), opened, "L2", kDim, kRows, {}, mmap);
+    BuildDisk(raw_path,
+              files->Path(),
+              opened,
+              "L2",
+              kDim,
+              kRows,
+              {},
+              mmap,
+              resident ? values.data() : nullptr);
     ASSERT_NE(opened.base, nullptr);
     const auto* reader = dynamic_cast<const IVectorReader*>(opened.base.get());
     ASSERT_NE(reader, nullptr);
@@ -272,7 +285,7 @@ TEST(VectorDiskFileManagerTest, PreparedInputsAreBorrowedReadOnly) {
     std::array<float, 2> values;
     EXPECT_EQ(stream->Read(values.data(), sizeof(values)), sizeof(values));
     EXPECT_EQ(values, (std::array<float, 2>{1.0f, 2.0f}));
-    EXPECT_TRUE(manager->Files().empty());
+    EXPECT_TRUE(manager->LocalFiles().empty());
     EXPECT_THROW(manager->OpenOutputStream(raw), SegcoreError);
     EXPECT_FALSE(manager->AddFile(raw));
     EXPECT_FALSE(manager->RemoveFile(raw));
@@ -333,13 +346,13 @@ TEST(VectorDiskFileManagerTest, MetadataBeforeOrAfterClosePublishesRawBytes) {
         const milvus::FileMeta meta{path, bytes.size()};
         if (before_close) {
             ASSERT_TRUE(manager->AddFileMeta(meta));
-            EXPECT_THROW(manager->Files(), SegcoreError);
+            EXPECT_THROW(manager->LocalFiles(), SegcoreError);
         }
         output->Close();
         ASSERT_TRUE(manager->AddFileMeta(meta));
         EXPECT_TRUE(manager->AddFileMeta(meta));
         EXPECT_NO_THROW(manager->RethrowFirstFailure());
-        auto files = manager->Files();
+        auto files = manager->LocalFiles();
         ASSERT_EQ(files.size(), 1);
         EXPECT_EQ(files[0].transport, VectorDiskFileTransport::RawUnsliced);
         EXPECT_EQ(files[0].size, bytes.size());
@@ -379,7 +392,7 @@ TEST(VectorDiskFileManagerTest, MetadataConflictKeepsOutputFailed) {
             ASSERT_TRUE(manager->AddFileMeta({path, 1}));
             output->Write(&byte, 1);
             EXPECT_THROW(output->Close(), SegcoreError);
-            EXPECT_THROW(manager->Files(), SegcoreError);
+            EXPECT_THROW(manager->LocalFiles(), SegcoreError);
         } else {
             output->Close();
             EXPECT_FALSE(manager->AddFileMeta({path, 2}));
@@ -403,12 +416,70 @@ TEST(VectorDiskFileManagerTest, MetadataCannotConvertLegacyFilesToRaw) {
     ASSERT_TRUE(manager->AddFile(path));
     EXPECT_FALSE(
         manager->AddFileMeta({path, std::filesystem::file_size(path)}));
-    EXPECT_EQ(manager->Files().front().transport,
+    EXPECT_EQ(manager->LocalFiles().front().transport,
               VectorDiskFileTransport::LegacySliced);
 }
 
 TEST(VectorDiskFamilyTest, FloatBuildLoadSearchAndRawCapability) {
     RunOrdinaryDiskSearch<float>(false);
+}
+
+TEST(VectorDiskFamilyTest, ResidentInputBuildLoadSearch) {
+    RunOrdinaryDiskSearch<float>(false, true);
+}
+
+TEST(VectorDiskFamilyTest, PreparedInputFollowsBuilderOptions) {
+    auto files = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_disk_input_XXXXXX", "vector disk input test");
+    auto adapted = AdaptIndexType({
+        .index_type = knowhere::IndexEnum::INDEX_DISKANN,
+        .field_type = DataType::VECTOR_FLOAT,
+        .element_type = DataType::NONE,
+        .index_engine_version =
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+        .params = {{METRIC_TYPE, "L2"},
+                   {DIM_KEY, kDim},
+                   {DISK_ANN_MAX_DEGREE, "24"},
+                   {DISK_ANN_SEARCH_LIST_SIZE, "56"},
+                   {DISK_ANN_PQ_CODE_BUDGET, "0.001"},
+                   {DISK_ANN_BUILD_DRAM_BUDGET, "2"},
+                   {DISK_ANN_BUILD_THREAD_NUM, "2"}},
+    });
+    adapted.params["local_dir"] = files->Path();
+    for (bool direct : {false, true}) {
+        indexbuilder::VectorDiskBuildMaterializer materializer(
+            files->Path(),
+            DataType::VECTOR_FLOAT,
+            DataType::VECTOR_FLOAT,
+            kDim,
+            false,
+            kRows,
+            adapted.family,
+            adapted.params);
+        const auto values = MakeRows<float>();
+        const bool use_memory = materializer.InputSpec().use_memory;
+        if (direct && use_memory) {
+            std::memcpy(materializer.AllocateInput(),
+                        values.data(),
+                        values.size() * sizeof(float));
+            materializer.FinishInput(kRows);
+        } else {
+            auto batch = storage::CreateFieldData(
+                DataType::VECTOR_FLOAT, DataType::NONE, false, kDim);
+            batch->FillFieldData(values.data(), kRows);
+            materializer.Add(batch);
+        }
+        materializer.FinishPrimary();
+        EXPECT_EQ(materializer.HasResidentInput(), use_memory);
+        EXPECT_EQ(materializer.SpillInput(), use_memory);
+        EXPECT_EQ(materializer.HasResidentInput(), use_memory);
+        if (use_memory) {
+            materializer.ReleaseInputMemory();
+        }
+        EXPECT_FALSE(materializer.HasResidentInput());
+        auto artifact = std::move(materializer).Build();
+        ASSERT_NE(artifact, nullptr);
+    }
 }
 
 TEST(VectorDiskFamilyTest, Float16BuildLoadSearch) {

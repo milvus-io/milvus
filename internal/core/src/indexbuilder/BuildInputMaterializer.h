@@ -16,10 +16,12 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 
 #include "common/FieldData.h"
 #include "index/contracts/Registry.h"
 #include "index/contracts/build/IArtifactBuilder.h"
+#include "knowhere/build_scheduler.h"
 #include "storage/artifact/Artifact.h"
 
 namespace milvus::indexbuilder {
@@ -36,8 +38,45 @@ class BuildInputMaterializer {
     virtual void
     Add(const FieldDataPtr& batch) = 0;
 
+    // False leaves the input intact and allows a later retry. A successful
+    // default reservation is held until BuildSession destroys the materializer.
+    virtual bool
+    TryReserveBuild() {
+        if (!build_reservation_) {
+            build_reservation_ =
+                knowhere::BuildScheduler::Instance().TryReserve();
+        }
+        return build_reservation_.has_value();
+    }
+
+    // After loading, input remains resident through spill until explicitly released.
+    virtual bool
+    HasResidentInput() const {
+        return true;
+    }
+
+    // True means a complete file is available; memory is still retained.
+    // False means spilling is unsupported or was canceled before completion.
+    virtual bool
+    SpillInput() {
+        return false;
+    }
+
+    // May run concurrently with SpillInput. Requests cancellation, not a join.
+    virtual void
+    StopSpill() {
+    }
+
+    // Only after SpillInput returned true and the caller joined its writer.
+    virtual void
+    ReleaseInputMemory() {
+    }
+
     virtual storage::ArtifactPtr
     Build() && = 0;
+
+ private:
+    std::optional<knowhere::BuildScheduler::Reservation> build_reservation_;
 };
 
 using BuildInputMaterializerPtr = std::unique_ptr<BuildInputMaterializer>;

@@ -4,15 +4,20 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
+#include <limits>
 #include <utility>
 #include <vector>
 
+#include "arrow/buffer.h"
 #include "arrow/io/interfaces.h"
 #include "arrow/result.h"
 #include "arrow/status.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "log/Log.h"
 #include "storage/StatusToErrorCode.h"
+#include "milvus-storage/filesystem/async_output_stream.h"
 
 namespace milvus::storage {
 
@@ -22,6 +27,21 @@ RemoteOutputStream::RemoteOutputStream(
 }
 
 RemoteOutputStream::~RemoteOutputStream() {
+    // A failed Write skips Close. Discard an unfinished upload rather than
+    // publishing partial data or leaving its multipart upload on the server.
+    try {
+        if (!output_stream_->closed()) {
+            auto status = output_stream_->Abort();
+            if (!status.ok()) {
+                LOG_WARN("Failed to abort remote output stream: {}",
+                         status.ToString());
+            }
+        }
+    } catch (const std::exception& e) {
+        LOG_WARN("Failed to abort remote output stream: {}", e.what());
+    } catch (...) {
+        LOG_WARN("Failed to abort remote output stream: unknown exception");
+    }
 }
 
 size_t
@@ -35,6 +55,28 @@ RemoteOutputStream::Tell() const {
     return status.ValueOrDie();
 }
 
+bool
+RemoteOutputStream::Prepare(size_t expected_size) {
+    auto* output =
+        dynamic_cast<milvus_storage::AsyncOutputStream*>(output_stream_.get());
+    if (!output) {
+        return false;
+    }
+    AssertInfo(expected_size <=
+                   static_cast<size_t>(std::numeric_limits<int64_t>::max()),
+               "upload size hint exceeds the storage size limit");
+    const auto status = output->Prepare(static_cast<int64_t>(expected_size));
+    if (status.IsNotImplemented()) {
+        return false;
+    }
+    if (!status.ok()) {
+        ThrowInfo(ArrowStatusToErrorCode(status),
+                  "Failed to prepare output stream: {}",
+                  status.ToString());
+    }
+    return true;
+}
+
 size_t
 RemoteOutputStream::Write(const void* data, size_t size) {
     auto status = output_stream_->Write(data, size);
@@ -44,6 +86,17 @@ RemoteOutputStream::Write(const void* data, size_t size) {
                   status.ToString());
     }
     return size;
+}
+
+size_t
+RemoteOutputStream::Write(const std::shared_ptr<arrow::Buffer>& buffer) {
+    auto status = output_stream_->Write(buffer);
+    if (!status.ok()) {
+        ThrowInfo(ArrowStatusToErrorCode(status),
+                  "Failed to write to output stream: {}",
+                  status.ToString());
+    }
+    return buffer->size();
 }
 
 size_t

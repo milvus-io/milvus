@@ -150,6 +150,12 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
             std::to_string(c_storage_config.max_connections).c_str());
     }
 
+    (*properties_map)[PROPERTY_FS_S3_THROUGHPUT_TARGET_GBPS] =
+        c_storage_config.throughput_target_gbps > 0
+            ? c_storage_config.throughput_target_gbps
+            : milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                  .GetS3ThroughputTargetGbps();
+
     if (c_storage_config.tls_min_version != nullptr) {
         std::string tls_ver(c_storage_config.tls_min_version);
         if (!tls_ver.empty() && tls_ver != "default") {
@@ -286,6 +292,7 @@ ExternalFsPropertyKey(const std::string& extfs_prefix,
 // milvus.yaml, not from a user-supplied external_spec.
 static const std::vector<const char*> kExtfsInheritedFsFields = {
     PROPERTY_FS_MAX_CONNECTIONS,
+    PROPERTY_FS_S3_THROUGHPUT_TARGET_GBPS,
 };
 
 // PropertyValueAsString renders a PropertyVariant back to the string form
@@ -307,7 +314,7 @@ PropertyValueAsString(const milvus_storage::api::Properties& properties,
                 return v.empty() ? std::nullopt : std::optional<std::string>(v);
             } else if constexpr (std::is_same_v<T, bool>) {
                 return std::optional<std::string>(v ? "true" : "false");
-            } else if constexpr (std::is_integral_v<T>) {
+            } else if constexpr (std::is_arithmetic_v<T>) {
                 return std::optional<std::string>(std::to_string(v));
             } else {
                 // vector<string> / nullptr_t: no scalar rendering, and no

@@ -2018,26 +2018,27 @@ Set an easy-to-identify root key prefix for Milvus if etcd service already exist
 // /////////////////////////////////////////////////////////////////////////////
 // --- minio ---
 type MinioConfig struct {
-	Address            ParamItem `refreshable:"false"`
-	Port               ParamItem `refreshable:"false"`
-	AccessKeyID        ParamItem `refreshable:"false"`
-	SecretAccessKey    ParamItem `refreshable:"false"`
-	UseSSL             ParamItem `refreshable:"false"`
-	SslCACert          ParamItem `refreshable:"false"`
-	SslTLSMinVersion   ParamItem `refreshable:"false"`
-	BucketName         ParamItem `refreshable:"false"`
-	RootPath           ParamItem `refreshable:"false"`
-	UseIAM             ParamItem `refreshable:"false"`
-	CloudProvider      ParamItem `refreshable:"false"`
-	GcpCredentialJSON  ParamItem `refreshable:"false"`
-	IAMEndpoint        ParamItem `refreshable:"false"`
-	LogLevel           ParamItem `refreshable:"false"`
-	Region             ParamItem `refreshable:"false"`
-	UseVirtualHost     ParamItem `refreshable:"false"`
-	RequestTimeoutMs   ParamItem `refreshable:"false"`
-	MaxConnections     ParamItem `refreshable:"false"`
-	ListObjectsMaxKeys ParamItem `refreshable:"true"`
-	UseCRC32C          ParamItem `refreshable:"false"`
+	Address              ParamItem `refreshable:"false"`
+	Port                 ParamItem `refreshable:"false"`
+	AccessKeyID          ParamItem `refreshable:"false"`
+	SecretAccessKey      ParamItem `refreshable:"false"`
+	UseSSL               ParamItem `refreshable:"false"`
+	SslCACert            ParamItem `refreshable:"false"`
+	SslTLSMinVersion     ParamItem `refreshable:"false"`
+	BucketName           ParamItem `refreshable:"false"`
+	RootPath             ParamItem `refreshable:"false"`
+	UseIAM               ParamItem `refreshable:"false"`
+	CloudProvider        ParamItem `refreshable:"false"`
+	GcpCredentialJSON    ParamItem `refreshable:"false"`
+	IAMEndpoint          ParamItem `refreshable:"false"`
+	LogLevel             ParamItem `refreshable:"false"`
+	Region               ParamItem `refreshable:"false"`
+	UseVirtualHost       ParamItem `refreshable:"false"`
+	RequestTimeoutMs     ParamItem `refreshable:"false"`
+	MaxConnections       ParamItem `refreshable:"false"`
+	ThroughputTargetGbps ParamItem `refreshable:"false"`
+	ListObjectsMaxKeys   ParamItem `refreshable:"true"`
+	UseCRC32C            ParamItem `refreshable:"false"`
 
 	MultipartCopyThreshold    ParamItem `refreshable:"true"`
 	DisableAWSChunkedEncoding ParamItem `refreshable:"false"`
@@ -2289,6 +2290,15 @@ Leave it empty if you want to use AWS default endpoint`,
 		Doc:          "Maximum concurrent HTTP connections to object storage",
 	}
 	p.MaxConnections.Init(base.mgr)
+
+	p.ThroughputTargetGbps = ParamItem{
+		Key:          "minio.throughputTargetGbps",
+		Version:      "3.0.0",
+		DefaultValue: "50",
+		Doc:          "Target throughput in Gbps used by the S3 CRT client to size transfer resources. Not a bandwidth limit. Requires restart.",
+		Export:       true,
+	}
+	p.ThroughputTargetGbps.Init(base.mgr)
 
 	p.ListObjectsMaxKeys = ParamItem{
 		Key:          "minio.listObjectsMaxKeys",

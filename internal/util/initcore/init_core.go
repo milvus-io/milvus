@@ -182,6 +182,7 @@ func initLocalArrowFileSystem(path string, params *paramtable.ComponentParam) er
 		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
 		talon_max_idle_per_addr:         C.uint32_t(params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32()),
 		talon_enable_for_external_table: C.bool(params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool()),
+		throughput_target_gbps:          C.double(params.MinioCfg.ThroughputTargetGbps.GetAsFloat()),
 	}
 	status := C.InitArrowFileSystem(storageConfig)
 	return HandleCStatus(&status, "InitArrowFileSystem failed")
@@ -243,6 +244,7 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
 		talon_max_idle_per_addr:         C.uint32_t(params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32()),
 		talon_enable_for_external_table: C.bool(params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool()),
+		throughput_target_gbps:          C.double(params.MinioCfg.ThroughputTargetGbps.GetAsFloat()),
 	}
 
 	status := C.InitArrowFileSystem(storageConfig)
@@ -317,6 +319,7 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
 		talon_max_idle_per_addr:         C.uint32_t(params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32()),
 		talon_enable_for_external_table: C.bool(params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool()),
+		throughput_target_gbps:          C.double(params.MinioCfg.ThroughputTargetGbps.GetAsFloat()),
 	}
 
 	status := C.InitRemoteChunkManagerSingleton(storageConfig)

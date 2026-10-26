@@ -23,6 +23,7 @@
 #include <type_traits>
 
 #include "common/Types.h"
+#include "common/OpContext.h"
 #include "common/ValidityView.h"
 #include "knowhere/sparse_utils.h"
 
@@ -78,10 +79,12 @@ struct VectorBuildInput {
     ValidityView parent_validity;
     std::optional<std::span<const size_t>> embedding_offsets;
     std::span<const VectorScalarFieldGroups> scalar_fields;
+    milvus::OpContext* op_context{nullptr};
 };
 
-// Complete local-file input for a disk vector builder. T tags the physical
-// vector type for registry dispatch; payload bytes remain in the prepared files.
+// Input for a disk vector builder. T tags the physical vector type. The raw
+// file contains its header and, when raw_file_complete is true, its payload.
+// Otherwise tensor supplies the payload; file-only engines materialize it on demand.
 // The caller keeps the local generation alive and does not modify it throughout
 // Build.
 // Neither the builder nor its returned Artifact may retain these input paths or
@@ -97,6 +100,11 @@ struct PreparedVectorBuildFiles {
     std::optional<std::string> validity_path;
     std::optional<std::string> embedding_offsets_path;
     std::optional<std::string> scalar_info_path;
+    milvus::OpContext* op_context{nullptr};
+    // A resident tensor replaces only the raw-file payload. Sidecar files and
+    // the raw header keep the same row, dimension and optional-field contract.
+    const void* tensor{nullptr};
+    bool raw_file_complete{true};
 };
 
 }  // namespace milvus::index
