@@ -2232,7 +2232,7 @@ func TestUnwrapPartialUpdateAppendErrorRejectsMixedOutcome(t *testing.T) {
 			{Error: casErr},
 			{Error: unknownErr},
 		},
-	})
+	}, newStreamingErrorTestMessages("v1", "v2"))
 	require.ErrorIs(t, err, unknownErr)
 
 	err = unwrapStreamingMutationError(streaming.AppendResponses{
@@ -2240,7 +2240,7 @@ func TestUnwrapPartialUpdateAppendErrorRejectsMixedOutcome(t *testing.T) {
 			{Error: casErr},
 			{AppendResult: &streamingtypes.AppendResult{TimeTick: 100}},
 		},
-	})
+	}, newStreamingErrorTestMessages("v1", "v2"))
 	require.ErrorIs(t, err, casErr)
 }
 
@@ -8146,7 +8146,7 @@ func TestPartialUpsertPublicErrorsDoNotRecoverCASRetry(t *testing.T) {
 	require.False(t, isPartialUpdateCASRetry(nil))
 	for _, projected := range []error{merr.WrapErrCollectionPartialUpdateConflictErr(cas, "relative conflict"), conditionalExecutionError(cas)} {
 		require.False(t, isPartialUpdateCASRetry(projected))
-		require.Equal(t, projected, unwrapStreamingMutationError(streaming.AppendResponses{Responses: []streaming.AppendResponse{{Error: projected}}}))
+		require.Equal(t, projected, unwrapStreamingMutationError(streaming.AppendResponses{Responses: []streaming.AppendResponse{{Error: projected}}}, nil))
 	}
 }
 
