@@ -2075,6 +2075,17 @@ func (c *Client) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMe
 	})
 }
 
+func (c *Client) GetFeatureUsage(ctx context.Context, req *internalpb.GetFeatureUsageRequest, opts ...grpc.CallOption) (*internalpb.FeatureUsageReport, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*internalpb.FeatureUsageReport, error) {
+		return client.GetFeatureUsage(ctx, req)
+	})
+}
+
 func (c *Client) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest, opts ...grpc.CallOption) (*querypb.ListLoadedSegmentsResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
@@ -2363,5 +2374,27 @@ func (c *Client) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteCl
 func (c *Client) ListClientCommands(ctx context.Context, req *rootcoordpb.ListClientCommandsRequest, opts ...grpc.CallOption) (*rootcoordpb.ListClientCommandsResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*rootcoordpb.ListClientCommandsResponse, error) {
 		return client.ListClientCommands(ctx, req, opts...)
+	})
+}
+
+func (c *Client) GetQueryViewLoadInfo(ctx context.Context, req *querypb.GetQueryViewLoadInfoRequest, opts ...grpc.CallOption) (*querypb.GetQueryViewLoadInfoResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*querypb.GetQueryViewLoadInfoResponse, error) {
+		return client.GetQueryViewLoadInfo(ctx, req)
+	})
+}
+
+func (c *Client) GetStreamingNodeQueryViewResources(ctx context.Context, req *datapb.GetStreamingNodeQueryViewResourcesRequest, opts ...grpc.CallOption) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.sess.ServerID)),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
+		return client.GetStreamingNodeQueryViewResources(ctx, req)
 	})
 }

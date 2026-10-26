@@ -1032,45 +1032,72 @@ func (ifv *FloatVectorFieldValue) Size() int64 {
 	return int64(len(ifv.Value) * 8)
 }
 
+// genericValueMismatch reports a plan literal whose kind does not match the
+// field type. The parser guarantees the shape, so reaching this is a Milvus bug.
+func genericValueMismatch(dtype schemapb.DataType, gVal *planpb.GenericValue) error {
+	return merr.WrapErrServiceInternalMsg("plan literal %T does not match field type %s", gVal.GetVal(), dtype.String())
+}
+
 func NewScalarFieldValueFromGenericValue(dtype schemapb.DataType, gVal *planpb.GenericValue) (ScalarFieldValue, error) {
 	switch dtype {
 	case schemapb.DataType_Int8:
-		i64Val := gVal.Val.(*planpb.GenericValue_Int64Val)
+		i64Val, ok := gVal.GetVal().(*planpb.GenericValue_Int64Val)
+		if !ok {
+			return nil, genericValueMismatch(dtype, gVal)
+		}
 		if i64Val.Int64Val > math.MaxInt8 || i64Val.Int64Val < math.MinInt8 {
 			return nil, merr.WrapErrParameterInvalidRange(math.MinInt8, math.MaxInt8, i64Val.Int64Val, "expr value out of bound")
 		}
 		return NewInt8FieldValue(int8(i64Val.Int64Val)), nil
 
 	case schemapb.DataType_Int16:
-		i64Val := gVal.Val.(*planpb.GenericValue_Int64Val)
+		i64Val, ok := gVal.GetVal().(*planpb.GenericValue_Int64Val)
+		if !ok {
+			return nil, genericValueMismatch(dtype, gVal)
+		}
 		if i64Val.Int64Val > math.MaxInt16 || i64Val.Int64Val < math.MinInt16 {
 			return nil, merr.WrapErrParameterInvalidRange(math.MinInt16, math.MaxInt16, i64Val.Int64Val, "expr value out of bound")
 		}
 		return NewInt16FieldValue(int16(i64Val.Int64Val)), nil
 
 	case schemapb.DataType_Int32:
-		i64Val := gVal.Val.(*planpb.GenericValue_Int64Val)
+		i64Val, ok := gVal.GetVal().(*planpb.GenericValue_Int64Val)
+		if !ok {
+			return nil, genericValueMismatch(dtype, gVal)
+		}
 		if i64Val.Int64Val > math.MaxInt32 || i64Val.Int64Val < math.MinInt32 {
 			return nil, merr.WrapErrParameterInvalidRange(math.MinInt32, math.MaxInt32, i64Val.Int64Val, "expr value out of bound")
 		}
 		return NewInt32FieldValue(int32(i64Val.Int64Val)), nil
-	case schemapb.DataType_Int64:
-		i64Val := gVal.Val.(*planpb.GenericValue_Int64Val)
+	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
+		i64Val, ok := gVal.GetVal().(*planpb.GenericValue_Int64Val)
+		if !ok {
+			return nil, genericValueMismatch(dtype, gVal)
+		}
 		return NewInt64FieldValue(i64Val.Int64Val), nil
 	case schemapb.DataType_Float:
-		floatVal := gVal.Val.(*planpb.GenericValue_FloatVal)
+		floatVal, ok := gVal.GetVal().(*planpb.GenericValue_FloatVal)
+		if !ok {
+			return nil, genericValueMismatch(dtype, gVal)
+		}
 		return NewFloatFieldValue(float32(floatVal.FloatVal)), nil
 	case schemapb.DataType_Double:
-		floatVal := gVal.Val.(*planpb.GenericValue_FloatVal)
+		floatVal, ok := gVal.GetVal().(*planpb.GenericValue_FloatVal)
+		if !ok {
+			return nil, genericValueMismatch(dtype, gVal)
+		}
 		return NewDoubleFieldValue(floatVal.FloatVal), nil
-	case schemapb.DataType_Timestamptz:
-		i64VAl := gVal.Val.(*planpb.GenericValue_Int64Val)
-		return NewInt64FieldValue(i64VAl.Int64Val), nil
 	case schemapb.DataType_String:
-		strVal := gVal.Val.(*planpb.GenericValue_StringVal)
+		strVal, ok := gVal.GetVal().(*planpb.GenericValue_StringVal)
+		if !ok {
+			return nil, genericValueMismatch(dtype, gVal)
+		}
 		return NewStringFieldValue(strVal.StringVal), nil
 	case schemapb.DataType_VarChar:
-		strVal := gVal.Val.(*planpb.GenericValue_StringVal)
+		strVal, ok := gVal.GetVal().(*planpb.GenericValue_StringVal)
+		if !ok {
+			return nil, genericValueMismatch(dtype, gVal)
+		}
 		return NewVarCharFieldValue(strVal.StringVal), nil
 	default:
 		// should not be reach

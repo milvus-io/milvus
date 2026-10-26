@@ -33,6 +33,10 @@ namespace milvus::index {
 DataType
 JsonProjectedValueTypeForCast(JsonCastType cast_type);
 
+// Explicit JSON SORT supports numeric/string casts and BOOL array casts.
+bool
+IsJsonSortCast(JsonCastType cast_type);
+
 // Immutable routing metadata for one typed JSON-path index. ARRAY casts are
 // row-domain indexes whose erased ValueType is the element type. Because that
 // provenance cannot be recovered from IIndexReaderBase, callers constructing an

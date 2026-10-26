@@ -85,21 +85,14 @@ func (op *SliceOperator) applySlice(result *internalpb.RetrieveResults) (*intern
 		return result, nil
 	}
 
-	start := int(op.offset)
-	if start >= size {
+	window := op.selectDocWindow(size)
+	if window.start == window.end {
 		return &internalpb.RetrieveResults{}, nil
 	}
-
-	end := size
-	if op.limit > 0 && start+int(op.limit) < end {
-		end = start + int(op.limit)
-	}
-
-	if start == 0 && end == size {
+	if window.start == 0 && window.end == size {
 		return result, nil
 	}
-
-	return rangeSliceRetrieveResults(result, start, end)
+	return rangeSliceRetrieveResults(result, window.start, window.end)
 }
 
 // applyElementLevelSlice applies element-level offset and limit.
@@ -112,92 +105,105 @@ func (op *SliceOperator) applyElementLevelSlice(result *internalpb.RetrieveResul
 		return result, nil
 	}
 
-	// Phase 1: Apply offset by skipping elements
-	startDoc := 0
-	var startTrimCount int // number of elements to trim from the start of startDoc (0 = no trim)
-	if op.offset > 0 {
-		var skipped int64
-		for startDoc < docCount && skipped < op.offset {
-			if startDoc >= len(elemIndices) {
-				break
-			}
-			docElemCount := int64(len(elemIndices[startDoc].GetIndices()))
-			if skipped+docElemCount > op.offset {
-				// Offset lands mid-document: record how many elements to trim
-				startTrimCount = int(op.offset - skipped)
-				break
-			}
-			skipped += docElemCount
-			startDoc++
+	window := op.selectElementWindow(docCount, func(row int) (*internalpb.ElementIndices, bool) {
+		if row >= len(elemIndices) {
+			return nil, false
 		}
-		if startDoc >= docCount {
-			return &internalpb.RetrieveResults{ElementLevel: true}, nil
-		}
-	}
-
-	// Phase 2: Apply limit by counting elements
-	endDoc := docCount   // default: take all remaining
-	var endTrimCount int // number of elements to keep in endDoc-1 (0 = no trim, keep all)
-	if op.limit > 0 {
-		var collected int64
-		for i := startDoc; i < docCount; i++ {
-			if i >= len(elemIndices) {
-				endDoc = i
-				break
-			}
-			docElemCount := int64(len(elemIndices[i].GetIndices()))
-			if i == startDoc && startTrimCount > 0 {
-				docElemCount -= int64(startTrimCount)
-			}
-			if collected+docElemCount >= op.limit {
-				// Limit reached at or within this document
-				remaining := op.limit - collected
-				fullCount := int64(len(elemIndices[i].GetIndices()))
-				if i == startDoc && startTrimCount > 0 {
-					// Both trim from start and end of same doc
-					endTrimCount = startTrimCount + int(remaining)
-				} else if remaining < fullCount {
-					endTrimCount = int(remaining)
-				}
-				endDoc = i + 1
-				break
-			}
-			collected += docElemCount
-		}
-	}
-
-	if startDoc >= endDoc {
+		return elemIndices[row], true
+	})
+	if window.start >= window.end {
 		return &internalpb.RetrieveResults{ElementLevel: true}, nil
 	}
-
-	// Phase 3: Slice field data at document granularity [startDoc, endDoc)
-	sliced, err := rangeSliceRetrieveResults(result, startDoc, endDoc)
+	sliced, err := rangeSliceRetrieveResults(result, window.start, window.end)
 	if err != nil {
 		return nil, err
 	}
+	window.trimElements(sliced)
+	return sliced, nil
+}
 
-	// Phase 4: Apply element-level trims to ElementIndices
-	if startTrimCount > 0 && endTrimCount > 0 && startDoc+1 == endDoc {
-		// Both trims apply to the same (single) document
-		original := sliced.GetElementIndices()[0].GetIndices()
-		sliced.ElementIndices[0] = &internalpb.ElementIndices{
-			Indices: original[startTrimCount:endTrimCount],
-		}
-	} else {
-		if startTrimCount > 0 && len(sliced.GetElementIndices()) > 0 {
-			original := sliced.GetElementIndices()[0].GetIndices()
-			sliced.ElementIndices[0] = &internalpb.ElementIndices{
-				Indices: original[startTrimCount:],
+// rowWindow describes a page before its field data is built. Element-level
+// pages retain complete documents and trim only their ElementIndices.
+type rowWindow struct {
+	start, end           int
+	firstTrim, lastCount int
+}
+
+func (op *SliceOperator) selectDocWindow(count int) rowWindow {
+	if op.offset >= int64(count) {
+		return rowWindow{start: count, end: count}
+	}
+	window := rowWindow{start: int(op.offset), end: count}
+	if op.limit > 0 && op.limit < int64(count-window.start) {
+		window.end = window.start + int(op.limit)
+	}
+	return window
+}
+
+// selectElementWindow is shared by payload slicing and refs-only pagination.
+// indicesAt reports false for absent metadata so existing single-source Slice
+// semantics are preserved; multi-source callers validate shape separately.
+func (op *SliceOperator) selectElementWindow(docCount int, indicesAt func(int) (*internalpb.ElementIndices, bool)) rowWindow {
+	window := rowWindow{end: docCount}
+	if op.offset > 0 {
+		var skipped int64
+		for window.start < docCount && skipped < op.offset {
+			indices, ok := indicesAt(window.start)
+			if !ok {
+				break
 			}
-		}
-		if endTrimCount > 0 && len(sliced.GetElementIndices()) > 0 {
-			lastIdx := len(sliced.GetElementIndices()) - 1
-			original := sliced.GetElementIndices()[lastIdx].GetIndices()
-			sliced.ElementIndices[lastIdx] = &internalpb.ElementIndices{
-				Indices: original[:endTrimCount],
+			n := int64(len(indices.GetIndices()))
+			if skipped+n > op.offset {
+				window.firstTrim = int(op.offset - skipped)
+				break
 			}
+			skipped += n
+			window.start++
+		}
+		if window.start == docCount {
+			return window
 		}
 	}
+	if op.limit > 0 {
+		var collected int64
+		for row := window.start; row < docCount; row++ {
+			indices, ok := indicesAt(row)
+			if !ok {
+				window.end = row
+				break
+			}
+			fullCount := len(indices.GetIndices())
+			n := int64(fullCount)
+			if row == window.start {
+				n -= int64(window.firstTrim)
+			}
+			if collected+n >= op.limit {
+				remaining := int(op.limit - collected)
+				if row == window.start && window.firstTrim > 0 {
+					window.lastCount = window.firstTrim + remaining
+				} else if remaining < fullCount {
+					window.lastCount = remaining
+				}
+				window.end = row + 1
+				break
+			}
+			collected += n
+		}
+	}
+	return window
+}
 
-	return sliced, nil
+func (window rowWindow) trimElements(result *internalpb.RetrieveResults) {
+	indices := result.GetElementIndices()
+	if window.firstTrim > 0 && window.lastCount > 0 && len(indices) == 1 {
+		indices[0] = &internalpb.ElementIndices{Indices: indices[0].GetIndices()[window.firstTrim:window.lastCount]}
+		return
+	}
+	if window.firstTrim > 0 && len(indices) > 0 {
+		indices[0] = &internalpb.ElementIndices{Indices: indices[0].GetIndices()[window.firstTrim:]}
+	}
+	if window.lastCount > 0 && len(indices) > 0 {
+		last := len(indices) - 1
+		indices[last] = &internalpb.ElementIndices{Indices: indices[last].GetIndices()[:window.lastCount]}
+	}
 }

@@ -130,22 +130,6 @@ func TestCatalog_listPartitionsAfter210_SkipsTombstone(t *testing.T) {
 	assert.Equal(t, int64(1), got[0].PartitionID)
 }
 
-func TestCatalog_batchListPartitionsAfter210_SkipsTombstone(t *testing.T) {
-	ctx := context.Background()
-	part := &pb.PartitionInfo{PartitionID: 1, CollectionId: 5}
-	b, err := proto.Marshal(part)
-	require.NoError(t, err)
-
-	kv := mocks.NewTxnKV(t)
-	kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).
-		Return([]string{"k-tomb", "k-ok"}, []string{tombstone(), string(b)}, nil)
-
-	kc := NewCatalog(kv).(*Catalog)
-	got, err := kc.batchListPartitionsAfter210(ctx, 0)
-	assert.NoError(t, err)
-	require.Len(t, got[5], 1)
-}
-
 func TestCatalog_listFieldsAfter210_SkipsTombstone(t *testing.T) {
 	ctx := context.Background()
 	field := &schemapb.FieldSchema{FieldID: 100, Name: "f"}
@@ -161,27 +145,6 @@ func TestCatalog_listFieldsAfter210_SkipsTombstone(t *testing.T) {
 	assert.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, int64(100), got[0].FieldID)
-}
-
-func TestCatalog_batchListFieldsAfter210_SkipsTombstone(t *testing.T) {
-	ctx := context.Background()
-	field := &schemapb.FieldSchema{FieldID: 100, Name: "f"}
-	b, err := proto.Marshal(field)
-	require.NoError(t, err)
-
-	kv := mocks.NewTxnKV(t)
-	kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).
-		Return(
-			[]string{"root-coord/fields/7/0", "root-coord/fields/7/100"},
-			[]string{tombstone(), string(b)},
-			nil,
-		)
-
-	kc := NewCatalog(kv).(*Catalog)
-	got, err := kc.batchListFieldsAfter210(ctx, 0)
-	assert.NoError(t, err)
-	require.Len(t, got[7], 1)
-	assert.Equal(t, int64(100), got[7][0].FieldID)
 }
 
 func TestCatalog_listStructArrayFieldsAfter210_SkipsTombstone(t *testing.T) {
@@ -216,25 +179,4 @@ func TestCatalog_listFunctions_SkipsTombstone(t *testing.T) {
 	assert.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, int64(300), got[0].ID)
-}
-
-func TestCatalog_batchListFunctions_SkipsTombstone(t *testing.T) {
-	ctx := context.Background()
-	fn := &schemapb.FunctionSchema{Id: 300, Name: "fn"}
-	b, err := proto.Marshal(fn)
-	require.NoError(t, err)
-
-	kv := mocks.NewTxnKV(t)
-	kv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).
-		Return(
-			[]string{"root-coord/functions/9/0", "root-coord/functions/9/300"},
-			[]string{tombstone(), string(b)},
-			nil,
-		)
-
-	kc := NewCatalog(kv).(*Catalog)
-	got, err := kc.batchListFunctions(ctx, 0)
-	assert.NoError(t, err)
-	require.Len(t, got[9], 1)
-	assert.Equal(t, int64(300), got[9][0].ID)
 }

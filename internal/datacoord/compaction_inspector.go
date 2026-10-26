@@ -54,7 +54,8 @@ type CompactionInspector interface {
 	stop()
 	// enqueueCompaction start to enqueue compaction task and return immediately
 	enqueueCompaction(task *datapb.CompactionTask) error
-	// isFull return true if the task pool is full
+	// isFull returns true if the task queue is full, or pending and running
+	// tasks reach dataCoord.compaction.maxTaskNum
 	isFull() bool
 	// get compaction tasks by signal id
 	getCompactionTasksNumBySignalID(signalID int64) int
@@ -625,6 +626,9 @@ func (c *compactionInspector) enqueueCompaction(task *datapb.CompactionTask) err
 		c.meta.SetSegmentsCompacting(context.Background(), t.GetTaskProto().GetInputSegments(), false)
 		return err
 	}
+	// After the queue accepted it: a full queue makes the trigger plan the
+	// same compaction again on its next tick.
+	recordCompactionType(task.GetType())
 	log.Info(context.TODO(), "Compaction plan submitted")
 	return nil
 }
@@ -735,9 +739,22 @@ func (c *compactionInspector) cleanFailedTasks() {
 	c.cleaningGuard.Unlock()
 }
 
-// isFull return true if the task pool is full
+// isFull returns true if the queue reaches its capacity, or pending and running
+// tasks reach dataCoord.compaction.maxTaskNum. Automatic compaction checks it
+// before planning and before each submission, so maxTaskNum is a soft cap.
 func (c *compactionInspector) isFull() bool {
-	return c.queueTasks.Len() >= c.queueTasks.capacity
+	pending := c.queueTasks.Len()
+	if pending >= c.queueTasks.capacity {
+		return true
+	}
+	maxTaskNum := Params.DataCoordCfg.CompactionMaxTaskNum.GetAsInt()
+	if maxTaskNum <= 0 {
+		return false
+	}
+	c.executingGuard.RLock()
+	running := len(c.executingTasks)
+	c.executingGuard.RUnlock()
+	return pending+running >= maxTaskNum
 }
 
 func (c *compactionInspector) checkDelay(t CompactionTask) {

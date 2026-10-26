@@ -19,6 +19,7 @@ func newReplicateTxnHelper() *replicateTxnHelper {
 type replicateTxnHelper struct {
 	currentTxn *message.TxnContext
 	messageIDs typeutil.Set[string]
+	vchannel   string
 }
 
 // CurrentTxn returns the current txn context.
@@ -26,7 +27,7 @@ func (s *replicateTxnHelper) CurrentTxn() *message.TxnContext {
 	return s.currentTxn
 }
 
-func (s *replicateTxnHelper) StartBegin(txn *message.TxnContext, replicateHeader *message.ReplicateHeader) error {
+func (s *replicateTxnHelper) StartBegin(txn *message.TxnContext) error {
 	if s.currentTxn != nil {
 		if s.currentTxn.TxnID == txn.TxnID {
 			return status.NewIgnoreOperation("txn message is already in progress, txnID: %d", s.currentTxn.TxnID)
@@ -36,14 +37,15 @@ func (s *replicateTxnHelper) StartBegin(txn *message.TxnContext, replicateHeader
 	return nil
 }
 
-func (s *replicateTxnHelper) BeginDone(txn *message.TxnContext) {
+func (s *replicateTxnHelper) BeginDone(txn *message.TxnContext, vchannel string) {
 	s.currentTxn = txn
 	s.messageIDs = typeutil.NewSet[string]()
+	s.vchannel = vchannel
 }
 
 func (s *replicateTxnHelper) AddNewMessage(txn *message.TxnContext, replicateHeader *message.ReplicateHeader) error {
 	if s.currentTxn == nil {
-		return status.NewIgnoreOperation("add new txn message without txn, maybe already committed, incoming: %d", txn.TxnID)
+		return status.NewTransactionExpired("replicated txn %d has no active begin; replay the transaction", txn.TxnID)
 	}
 	if s.currentTxn.TxnID != txn.TxnID {
 		return status.NewReplicateViolation("add new txn message with different txn, current: %d, incoming: %d", s.currentTxn.TxnID, txn.TxnID)
@@ -58,19 +60,27 @@ func (s *replicateTxnHelper) AddNewMessageDone(replicateHeader *message.Replicat
 	s.messageIDs.Insert(replicateHeader.MessageID.Marshal())
 }
 
-func (s *replicateTxnHelper) StartCommit(txn *message.TxnContext) error {
+func (s *replicateTxnHelper) StartCommit(txn *message.TxnContext, bodyCnt uint64) error {
 	if s.currentTxn == nil {
-		return status.NewIgnoreOperation("commit txn without txn, maybe already committed, txnID: %d", txn.TxnID)
+		return status.NewTransactionExpired("replicated txn %d has no active begin; replay the transaction", txn.TxnID)
 	}
 	if s.currentTxn.TxnID != txn.TxnID {
 		return status.NewReplicateViolation("commit txn with different txn, current: %d, incoming: %d", s.currentTxn.TxnID, txn.TxnID)
 	}
-	s.currentTxn = nil
-	s.messageIDs = nil
+	// Duplicate source IDs never reach the WAL or increase this count. Check
+	// before preparing Commit so an incomplete replay can continue receiving.
+	if bodyCnt != 0 && bodyCnt != uint64(len(s.messageIDs)) {
+		return status.NewTransactionExpired("replicated txn %d body count mismatch: expected %d, received %d; replay the transaction", txn.TxnID, bodyCnt, len(s.messageIDs))
+	}
 	return nil
 }
 
-func (s *replicateTxnHelper) CommitDone(txn *message.TxnContext) {
+func (s *replicateTxnHelper) CommitDone() {
+	s.clear()
+}
+
+func (s *replicateTxnHelper) clear() {
 	s.currentTxn = nil
 	s.messageIDs = nil
+	s.vchannel = ""
 }

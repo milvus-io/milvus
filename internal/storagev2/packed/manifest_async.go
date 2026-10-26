@@ -22,7 +22,7 @@ package packed
 #include "milvus-storage/ffi_c.h"
 extern int32_t milvusManifestSubmit(void*, LoonAsyncTask, void*);
 extern void milvusManifestOpenDone(uintptr_t, LoonFFIResult, LoonTransactionHandle);
-extern void milvusManifestCommitDone(uintptr_t, LoonFFIResult, int32_t, int64_t);
+extern void milvusManifestCommitDone(uintptr_t, LoonFFIResult, int32_t, int64_t, int64_t);
 static inline void milvusRunManifestTask(LoonAsyncTask task, void* data) { task(data); }
 */
 import "C"
@@ -229,7 +229,7 @@ type manifestCommitResult struct {
 }
 
 //export milvusManifestCommitDone
-func milvusManifestCommitDone(token C.uintptr_t, result C.LoonFFIResult, outcome C.int32_t, version C.int64_t) {
+func milvusManifestCommitDone(token C.uintptr_t, result C.LoonFFIResult, outcome C.int32_t, version C.int64_t, _ C.int64_t) {
 	h := cgo.Handle(token)
 	complete := h.Value().(func(manifestCommitResult))
 	value := manifestCommitResult{ManifestCommitOutcome(outcome), int64(version), handleManifestAsyncResult(result)}
@@ -290,7 +290,7 @@ func (io *ManifestIOContext) submitOpen(ctx context.Context, base string, versio
 		complete(result)
 	})
 	mu.Lock()
-	res := C.loon_transaction_open_async(io.native, cBase, properties, C.int64_t(version), resolver,
+	res := C.loon_transaction_open_async(io.native, cBase, properties, C.int64_t(version), C.int64_t(-1), resolver,
 		getRetryLimit(), (C.LoonTransactionOpenCallback)(C.milvusManifestOpenDone), C.uintptr_t(token), &operation)
 	if err := handleManifestAsyncResult(res); err != nil {
 		mu.Unlock()

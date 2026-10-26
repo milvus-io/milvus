@@ -214,7 +214,7 @@ func (g *ProduceGuard) produceWithTxnOnce(ctx context.Context, msgs ...message.M
 	if err := g.appendTxnBody(ctx, txn, msgs...); err != nil {
 		return nil, err
 	}
-	return g.commitTxn(ctx, msgs[0].VChannel(), txn, partialUpdateCAS)
+	return g.commitTxn(ctx, msgs[0].VChannel(), txn, partialUpdateCAS, uint64(len(msgs)))
 }
 
 // beginTxn begins a new transaction.
@@ -272,10 +272,11 @@ func (g *ProduceGuard) commitTxn(
 	vchannel string,
 	txn *message.TxnContext,
 	partialUpdateCAS bool,
+	bodyCnt uint64,
 ) (*types.AppendResult, error) {
 	commitTxn := message.NewCommitTxnMessageBuilderV2().
 		WithVChannel(vchannel).
-		WithHeader(&message.CommitTxnMessageHeader{}).
+		WithHeader(&message.CommitTxnMessageHeader{BodyCnt: bodyCnt}).
 		WithBody(&message.CommitTxnMessageBody{}).
 		WithIdempotencyKey(message.IdempotencyKey(idempotencyKeyFromProduceOptions(g.opts...))).
 		MustBuildMutable()

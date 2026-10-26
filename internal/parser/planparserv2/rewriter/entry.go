@@ -11,21 +11,6 @@ func RewriteExpr(e *planpb.Expr) *planpb.Expr {
 	return RewriteExprWithConfig(e, optimizeEnabled)
 }
 
-// MergeNormalizedAnd combines two expressions that have already passed
-// RewriteExpr. It preserves cross-branch AND optimizations without walking or
-// mutating either input tree again.
-func MergeNormalizedAnd(left, right *planpb.Expr) *planpb.Expr {
-	v := &visitor{optimizeEnabled: paramtable.Get().CommonCfg.EnabledOptimizeExpr.GetAsBool()}
-	if !v.optimizeEnabled {
-		return &planpb.Expr{Expr: &planpb.Expr_BinaryExpr{BinaryExpr: &planpb.BinaryExpr{
-			Left: left, Right: right, Op: planpb.BinaryExpr_LogicalAnd,
-		}}}
-	}
-	return v.mergeAndParts(flattenLogicalExpr(&planpb.BinaryExpr{
-		Left: left, Right: right, Op: planpb.BinaryExpr_LogicalAnd,
-	}))
-}
-
 func RewriteExprWithConfig(e *planpb.Expr, optimizeEnabled bool) *planpb.Expr {
 	if e == nil {
 		return nil
@@ -126,8 +111,7 @@ func (v *visitor) visitBinaryExpr(expr *planpb.BinaryExpr) interface{} {
 	}
 }
 
-// mergeAndParts applies the same AND rules to visited operands and to the
-// already-normalized operands supplied by RLS, without visiting them again.
+// mergeAndParts applies AND rules to operands that have already been visited.
 func (v *visitor) mergeAndParts(parts []*planpb.Expr) *planpb.Expr {
 	parts = combineArrayContains(parts, planpb.JSONContainsExpr_ContainsAll)
 	parts = v.combineAndRangePredicates(parts)

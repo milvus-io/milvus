@@ -136,6 +136,10 @@ func (qn *qnServerWrapper) GetMetrics(ctx context.Context, in *milvuspb.GetMetri
 	return qn.QueryNode.GetMetrics(ctx, in)
 }
 
+func (qn *qnServerWrapper) GetFeatureUsage(ctx context.Context, in *internalpb.GetFeatureUsageRequest, opts ...grpc.CallOption) (*internalpb.GetFeatureUsageResponse, error) {
+	return qn.QueryNode.GetFeatureUsage(ctx, in)
+}
+
 func (qn *qnServerWrapper) GetDataDistribution(ctx context.Context, in *querypb.GetDataDistributionRequest, opts ...grpc.CallOption) (*querypb.GetDataDistributionResponse, error) {
 	return qn.QueryNode.GetDataDistribution(ctx, in)
 }

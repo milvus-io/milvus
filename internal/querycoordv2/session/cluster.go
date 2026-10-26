@@ -43,6 +43,7 @@ type Cluster interface {
 	ReleasePartitions(ctx context.Context, nodeID int64, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error)
 	GetDataDistribution(ctx context.Context, nodeID int64, req *querypb.GetDataDistributionRequest) (*querypb.GetDataDistributionResponse, error)
 	GetMetrics(ctx context.Context, nodeID int64, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+	GetFeatureUsage(ctx context.Context, nodeID int64, req *internalpb.GetFeatureUsageRequest) (*internalpb.GetFeatureUsageResponse, error)
 	SyncDistribution(ctx context.Context, nodeID int64, req *querypb.SyncDistributionRequest) (*commonpb.Status, error)
 	GetComponentStates(ctx context.Context, nodeID int64) (*milvuspb.ComponentStates, error)
 	RunAnalyzer(ctx context.Context, nodeID int64, req *querypb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)
@@ -215,6 +216,20 @@ func (c *QueryCluster) GetDataDistribution(ctx context.Context, nodeID int64, re
 			TargetID: nodeID,
 		}
 		resp, err = cli.GetDataDistribution(ctx, req)
+	})
+	if err1 != nil {
+		return nil, err1
+	}
+	return resp, err
+}
+
+func (c *QueryCluster) GetFeatureUsage(ctx context.Context, nodeID int64, req *internalpb.GetFeatureUsageRequest) (*internalpb.GetFeatureUsageResponse, error) {
+	var (
+		resp *internalpb.GetFeatureUsageResponse
+		err  error
+	)
+	err1 := c.send(ctx, nodeID, func(cli types.QueryNodeClient) {
+		resp, err = cli.GetFeatureUsage(ctx, req)
 	})
 	if err1 != nil {
 		return nil, err1

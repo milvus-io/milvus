@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -236,6 +237,79 @@ TEST(SearchResultExport, SortEqualScoresByPks_MixedScores) {
     // Distances unchanged (all equal within groups)
     EXPECT_FLOAT_EQ(sr.distances_[0], 5.0f);
     EXPECT_FLOAT_EQ(sr.distances_[3], 3.0f);
+}
+
+TEST(SearchResultExport, SortEqualScoresByPks_CloseScoresKeepRowAssociation) {
+    const float low = 0.042794593f;
+    const float high =
+        std::nextafter(low, std::numeric_limits<float>::infinity());
+    ASSERT_GT(high, low);
+
+    for (bool string_pk : {false, true}) {
+        SCOPED_TRACE(string_pk);
+        SearchResult sr;
+        sr.total_nq_ = 1;
+        sr.unity_topK_ = 4;
+        sr.distances_ = {high, high, low, low};
+        sr.seg_offsets_ = {40, 30, 20, 10};
+        sr.element_level_ = true;
+        sr.element_indices_ = {4, 3, 2, 1};
+        sr.topk_per_nq_prefix_sum_ = {0, 4};
+        auto make_pk = [string_pk](int64_t id) -> PkType {
+            if (string_pk) {
+                return std::to_string(id);
+            }
+            return id;
+        };
+        sr.primary_keys_ = {
+            make_pk(7176), make_pk(7175), make_pk(5990), make_pk(5989)};
+        sr.composite_group_by_values_.emplace();
+        for (int64_t value : {4, 3, 2, 1}) {
+            milvus::CompositeGroupKey key;
+            key.Add(GroupByValueType(value));
+            sr.composite_group_by_values_->push_back(std::move(key));
+        }
+
+        SortEqualScoresByPks(&sr);
+
+        // Exact ties still use PK ASC, but distinct adjacent float32 scores
+        // must keep their original PK/offset/element/group-by association.
+        const std::vector<PkType> expected_pks = {
+            make_pk(7175), make_pk(7176), make_pk(5989), make_pk(5990)};
+        EXPECT_EQ(sr.primary_keys_, expected_pks);
+        EXPECT_EQ(sr.seg_offsets_, std::vector<int64_t>({30, 40, 10, 20}));
+        EXPECT_EQ(sr.element_indices_, std::vector<int32_t>({3, 4, 1, 2}));
+        const std::vector<float> expected_scores = {high, high, low, low};
+        const std::vector<int64_t> expected_groups = {3, 4, 1, 2};
+        for (size_t i = 0; i < expected_scores.size(); ++i) {
+            // EXPECT_FLOAT_EQ tolerates several ULPs and would miss this bug.
+            EXPECT_EQ(sr.distances_[i], expected_scores[i]);
+            EXPECT_EQ(std::get<int64_t>(
+                          sr.composite_group_by_values_->at(i)[0].value()),
+                      expected_groups[i]);
+        }
+    }
+}
+
+TEST(SearchResultExport, SortEqualScoresByPks_EqualInfiniteScores) {
+    SearchResult sr;
+    sr.total_nq_ = 2;
+    sr.unity_topK_ = 2;
+    const float inf = std::numeric_limits<float>::infinity();
+    sr.distances_ = {inf, inf, -inf, -inf};
+    sr.seg_offsets_ = {20, 10, 40, 30};
+    sr.primary_keys_ = {PkType(int64_t(2)),
+                        PkType(int64_t(1)),
+                        PkType(int64_t(4)),
+                        PkType(int64_t(3))};
+    sr.topk_per_nq_prefix_sum_ = {0, 2, 4};
+
+    SortEqualScoresByPks(&sr);
+
+    EXPECT_EQ(
+        sr.primary_keys_,
+        std::vector<PkType>({int64_t(1), int64_t(2), int64_t(3), int64_t(4)}));
+    EXPECT_EQ(sr.seg_offsets_, std::vector<int64_t>({10, 20, 30, 40}));
 }
 
 TEST(SearchResultExport, SortEqualScoresByPks_WithElementIndices) {
@@ -3369,6 +3443,50 @@ TEST(SearchResultExport, GlobalRefineTruncate_MergesBeforeSegmentPruning) {
     ASSERT_TRUE(seg1.distances_.empty());
     ASSERT_TRUE(seg1.seg_offsets_.empty());
     EXPECT_EQ(seg1.topk_per_nq_prefix_sum_, std::vector<size_t>({0, 0}));
+}
+
+TEST(SearchResultExport, GlobalRefineTruncate_PrefersHigherCloseScore) {
+    const float low = 0.042794593f;
+    const float high =
+        std::nextafter(low, std::numeric_limits<float>::infinity());
+    for (bool reverse_inputs : {false, true}) {
+        SCOPED_TRACE(reverse_inputs);
+        auto schema = std::make_shared<Schema>();
+        Plan plan(schema);
+        plan.plan_node_ = std::make_unique<VectorPlanNode>();
+        plan.plan_node_->search_info_.refine_topk_ratio_ = 1.0;
+
+        SearchResult lower;
+        lower.total_nq_ = 1;
+        lower.unity_topK_ = 1;
+        lower.distances_ = {low};
+        lower.seg_offsets_ = {100};
+        lower.topk_per_nq_prefix_sum_ = {0, 1};
+
+        SearchResult higher;
+        higher.total_nq_ = 1;
+        higher.unity_topK_ = 1;
+        higher.distances_ = {high};
+        higher.seg_offsets_ = {200};
+        higher.topk_per_nq_prefix_sum_ = {0, 1};
+
+        std::vector<SearchResult*> search_results{&lower, &higher};
+        if (reverse_inputs) {
+            std::reverse(search_results.begin(), search_results.end());
+        }
+        int64_t slice_nqs[] = {1};
+        int64_t slice_topks[] = {1};
+        TestReduceHelper helper(
+            search_results, &plan, nullptr, slice_nqs, slice_topks, 1, nullptr);
+
+        helper.TruncateForTest();
+
+        EXPECT_TRUE(lower.distances_.empty());
+        EXPECT_TRUE(lower.seg_offsets_.empty());
+        ASSERT_EQ(higher.distances_.size(), 1u);
+        EXPECT_EQ(higher.distances_[0], high);
+        EXPECT_EQ(higher.seg_offsets_, std::vector<int64_t>({200}));
+    }
 }
 
 // TruncateToRefineTopk with mixed per-segment result sizes and ef=3:

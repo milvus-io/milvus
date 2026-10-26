@@ -2,10 +2,12 @@ package delegator
 
 import (
 	"github.com/bits-and-blooms/bitset"
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type EvalCtx struct {
@@ -276,9 +278,16 @@ func ParseTermExpr(exprPb *planpb.TermExpr, parseCtx *ParseContext) (Expr, error
 	scalarVals := make([]storage.ScalarFieldValue, 0)
 	for _, val := range exprPb.GetValues() {
 		innerVal, err := storage.NewScalarFieldValueFromGenericValue(parseCtx.dataType, val)
-		if err == nil {
-			scalarVals = append(scalarVals, innerVal)
+		if err != nil {
+			// An out-of-range value cannot equal any row, so it is safe to skip.
+			// Any other error must not drop the value, or segments holding it
+			// would be pruned.
+			if errors.Is(err, merr.ErrParameterInvalid) {
+				continue
+			}
+			return nil, err
 		}
+		scalarVals = append(scalarVals, innerVal)
 	}
 	return NewTermExpr(scalarVals), nil
 }

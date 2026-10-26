@@ -233,7 +233,14 @@ func (m *specializedImmutableMessageImpl[H, B]) Header() H {
 
 // Body returns the message body.
 func (m *specializedImmutableMessageImpl[H, B]) Body(ctx context.Context) (B, error) {
-	return decodeProtoB[B](ctx, m)
+	body, err := globalBodyCache().get(ctx, m.bodyCache, func() (proto.Message, int, error) {
+		return decodeProtoBWithSize[B](ctx, m)
+	})
+	if err != nil {
+		var empty B
+		return empty, err
+	}
+	return body.(B), nil
 }
 
 // Must Body returns the message body.
@@ -255,17 +262,26 @@ func decodeProtoB[B proto.Message](ctx context.Context, msg interface {
 	decodePayload(ctx context.Context) ([]byte, error)
 },
 ) (B, error) {
+	body, _, err := decodeProtoBWithSize[B](ctx, msg)
+	return body, err
+}
+
+// decodeProtoBWithSize reports the plaintext length without retaining its buffer.
+func decodeProtoBWithSize[B proto.Message](ctx context.Context, msg interface {
+	decodePayload(context.Context) ([]byte, error)
+},
+) (B, int, error) {
 	payload, err := msg.decodePayload(ctx)
 	if err != nil {
 		var nilBody B
-		return nilBody, err
+		return nilBody, 0, err
 	}
 	body, err := unmarshalProtoB[B](payload)
 	if err != nil {
 		// Wrap instead of Mark, so that both the standard and the cockroachdb errors.Is find the sentinel.
-		return body, errors.Wrap(ErrMalformedBody, err.Error())
+		return body, 0, errors.Wrap(ErrMalformedBody, err.Error())
 	}
-	return body, nil
+	return body, len(payload), nil
 }
 
 func unmarshalProtoB[B proto.Message](data []byte) (B, error) {

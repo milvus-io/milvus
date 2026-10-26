@@ -20,13 +20,35 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
+
+func TestComputeScorerScoresUnpinsLocalSegmentAfterFailure(t *testing.T) {
+	for _, async := range []bool{false, true} {
+		segment := &LocalSegment{
+			ptrLock:  state.NewLoadStateLock(state.LoadStateOnlyMeta),
+			csegment: &mock_segcore.MockCSegment{},
+		}
+		var scorer any = segcore.ComputeScorerScoresOnChunkedOffsets
+		if async {
+			scorer = segcore.AsyncComputeScorerScoresOnChunkedOffsets
+		}
+		patch := mockey.Mock(scorer).Return(nil, context.Canceled).Build()
+		_, err := computeScorerScoresOnChunkedOffsets(context.Background(), segment, nil, nil, nil, async)
+		patch.UnPatch()
+		require.ErrorIs(t, err, context.Canceled)
+		guard := segment.ptrLock.StartReleaseAll()
+		require.NotNil(t, guard, "failed scoring must release its local segment pin")
+		guard.Done(nil)
+	}
+}
 
 func TestComputeScorerScoresOnChunkedOffsetsNilSegment(t *testing.T) {
 	scores, err := ComputeScorerScoresOnChunkedOffsets(context.Background(), nil, nil, nil, nil)

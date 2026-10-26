@@ -113,7 +113,9 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
                 TargetBitmap res = json_reader_->Exists(pointer);
                 TargetBitmap valid(res.size(), true);
                 return {std::move(res), std::move(valid)};
-            });
+            },
+            /*enable_cache_write=*/true,
+            feature_recorder_);
         cached_index_chunk_res_ = cached.result;
     }
     auto res = MoveOrSliceBitmap(
@@ -265,7 +267,9 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
 
                 TargetBitmap valid(active_count_, true);
                 return {std::move(res), std::move(valid)};
-            });
+            },
+            /*enable_cache_write=*/true,
+            feature_recorder_);
         cached_index_chunk_res_ = cached.result;
     }
 

@@ -474,13 +474,6 @@ func (n *mockAliasNode) LBPolicy() shardclient.LBPolicy       { return nil }
 func (n *mockAliasNode) ShardMgr() shardclient.ShardClientMgr { return nil }
 func (n *mockAliasNode) ChMgr() channelmgr.ChannelsMgr        { return nil }
 func (n *mockAliasNode) TsoAllocator() taskmodel.TsoAllocator { return nil }
-func (n *mockAliasNode) ResolveRLSEnforcement(_ context.Context, _ metacache.Cache, rlsEnabled, _, _ bool, _, _, _ string) (bool, error) {
-	return rlsEnabled, nil
-}
-
-func (n *mockAliasNode) CheckManageRLSPrivilege(_ context.Context, _ metacache.Cache, _ *milvuspb.AlterCollectionRequest, _, _ string) error {
-	return nil
-}
 
 func (n *mockAliasNode) CheckClusterPrivilege(_ context.Context, _ interface{}, _, _ string) error {
 	return nil
