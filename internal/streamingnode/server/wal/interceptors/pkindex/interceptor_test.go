@@ -778,6 +778,48 @@ func TestInsertFailsWhenTheIndexIsUnavailable(t *testing.T) {
 	require.Empty(t, f.types, "nothing may be appended when the index lookup failed")
 }
 
+// A decider whose writes wait for observe makes DoAppend return
+// WaitRequiredError and append nothing. Its Wait fails when the decider closes,
+// and returns once observe reaches the time tick, and the append then succeeds.
+func TestWriteThatWaitsReturnsWaitRequired(t *testing.T) {
+	i, _ := newTestInterceptor(t, nil)
+	decider := i.registry.get(testVChannel).decider
+	dedup.WaitUntilForTest(decider, 50)
+	f := newFakeAppender()
+
+	for _, msg := range []message.MutableMessage{newInsert(testVChannel, 1), newDelete(testVChannel, 1)} {
+		_, err := i.DoAppend(newTestAppendContext(), msg, f.append)
+		var wait *interceptors.WaitRequiredError
+		require.ErrorAs(t, err, &wait)
+		require.Empty(t, f.types, "nothing may be appended while the write waits")
+		require.Equal(t, 0, inflightLen(i))
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		require.ErrorIs(t, wait.Wait(ctx), context.Canceled)
+	}
+
+	_, err := i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
+	var wait *interceptors.WaitRequiredError
+	require.ErrorAs(t, err, &wait)
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- wait.Wait(context.Background()) }()
+	decider.Close()
+	requireInner(t, <-waitDone)
+
+	i, _ = newTestInterceptor(t, nil)
+	decider = i.registry.get(testVChannel).decider
+	dedup.WaitUntilForTest(decider, 50)
+	f = newFakeAppender()
+	_, err = i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
+	require.ErrorAs(t, err, &wait)
+	dedup.ObserveTimeTickForTest(decider, 50)
+	require.NoError(t, wait.Wait(context.Background()))
+	_, err = i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
+	require.NoError(t, err)
+	require.Equal(t, []message.MessageType{message.MessageTypeInsert}, f.types)
+}
+
 // ===== autocommit delete =====
 
 func TestDeleteOfPresentKeys(t *testing.T) {

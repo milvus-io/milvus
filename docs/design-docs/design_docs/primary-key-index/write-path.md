@@ -343,15 +343,37 @@ also does more work per key than the row lock. So large writes reach about half
 of the row lock throughput. A vchannel-wide lock for writes above some number of
 keys (lock escalation) is an open item.
 
-### Degraded mode
+### Writes that wait outside the WAL lock
 
-`DegradeUntil(T)` makes every key present until observe reaches TimeTick `T`.
-An insert then gets a companion delete for each of its keys. That is always
-correct and only costs extra deletes. It never blocks a write. It covers events
-whose earlier writes did not pass through the in-flight set: the index is
-enabled for an existing collection, a secondary is promoted to primary, or the
-engine recovers from a failure. This step adds the mechanism only. Nothing
-calls it yet.
+`WaitUntil(T)` makes the writes of a vchannel wait until observe reaches
+TimeTick `T`. It covers events whose earlier writes did not pass through the
+in-flight set: the index is enabled for an existing collection, a secondary is
+promoted to primary, or the engine recovers from a failure. After the wait, the
+decision is exact, so an insert gets a companion delete only for the keys that
+exist. This step adds the mechanism only. Nothing calls it yet. A not-ready
+index (`Config.Degraded`) is a different case: it decides degraded, every key
+is present, and it never waits.
+
+The wait can not block inside the pkindex interceptor. That interceptor runs
+under `glock.RLock` of the lock interceptor. An exclusive message waits for
+`glock.Lock`. A TimeTick append also needs `glock.RLock`, and it queues behind
+the exclusive message. So observe never reaches `T`, and the waiting write,
+the exclusive message and the TimeTick block each other forever.
+
+So the wait is in the redo interceptor, which is above the lock interceptor and
+holds no lock:
+
+1. `Decide` returns a `*dedup.WaitError` for an autocommit insert or delete,
+   and for a CommitTxn with pending writes, while observe is below `T`. It
+   registers nothing and probes nothing. A transaction body and a rollback do
+   not wait.
+2. The pkindex interceptor returns `interceptors.WaitRequiredError` with the
+   `Wait` of that error. Nothing of the message is appended.
+3. The lock interceptor releases `glock` when the inner chain returns.
+4. The redo interceptor calls `Wait` without a lock. `Wait` returns when
+   observe reaches `T`, when the context ends, or when the decider closes. The
+   redo interceptor then runs the whole chain again, and `Decide` makes the
+   decision anew.
 
 ### Contract of the interceptor
 

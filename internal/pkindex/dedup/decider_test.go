@@ -445,23 +445,113 @@ func TestBodyAppliedAfterCommitDecisionPanics(t *testing.T) {
 		func() { commit.Committed(ctx, 13) })
 }
 
-// While observe has not reached the degraded time tick, every key is present
-// and the engine is not probed. Nothing blocks.
-func TestDegradeUntil(t *testing.T) {
-	ctx := context.Background()
-	d, _ := newTestDecider(t)
-	ObserveTimeTickForTest(d, 5)
-	d.DegradeUntil(10)
-	d.DegradeUntil(8) // never lowers
+// requireWaitError asserts that err is a *WaitError for tt and returns it.
+func requireWaitError(t *testing.T, err error, tt uint64) *WaitError {
+	t.Helper()
+	var wait *WaitError
+	require.ErrorAs(t, err, &wait)
+	require.Equal(t, tt, wait.TimeTick)
+	return wait
+}
 
-	intent, companion := decideInsert(t, d, 1, 2)
-	require.Equal(t, int64PKs(1, 2), companion)
-	intent.Committed(ctx, 9)
+// While observe has not reached the time tick of WaitUntil, every write that
+// registers keys gets a WaitError and registers nothing. A transaction body and
+// a rollback do not wait. Once observe reaches the time tick, the decision is
+// exact.
+func TestWaitUntil(t *testing.T) {
+	ctx := context.Background()
+	d, eng := newTestDecider(t)
+	seed(t, eng, 100, 1)
+	ObserveTimeTickForTest(d, 5)
+	d.WaitUntil(10)
+	d.WaitUntil(8) // never lowers
+
+	_, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1, 2)})
+	requireWaitError(t, err, 10)
+	_, err = d.Decide(ctx, DecideRequest{Kind: KindDelete, VChannel: "v1", PKs: int64PKs(1)})
+	requireWaitError(t, err, 10)
+	require.Equal(t, 0, InflightLenForTest(d), "a write that waits registers nothing")
+
+	const txnID = 7
+	body, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1), TxnID: txnID})
+	require.NoError(t, err, "a transaction body does not wait")
+	body.Committed(ctx, 6)
+	_, err = d.Decide(ctx, DecideRequest{Kind: KindCommitTxn, VChannel: "v1", TxnID: txnID})
+	requireWaitError(t, err, 10)
+	require.Equal(t, 0, InflightLenForTest(d))
+	rollback, err := d.Decide(ctx, DecideRequest{Kind: KindRollbackTxn, VChannel: "v1", TxnID: 8})
+	require.NoError(t, err, "a rollback does not wait")
+	rollback.Committed(ctx, 6)
+	commit, err := d.Decide(ctx, DecideRequest{Kind: KindCommitTxn, VChannel: "v1", TxnID: 9})
+	require.NoError(t, err, "a commit without pending writes does not wait")
+	commit.Committed(ctx, 6)
+
+	ObserveTimeTickForTest(d, 9)
+	_, err = d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1, 2)})
+	requireWaitError(t, err, 10)
 
 	ObserveTimeTickForTest(d, 10)
-	require.NoError(t, ObserveForTest(ctx, d, 9, 500, int64PKs(1, 2), int64PKs(1, 2)))
-	_, companion = decideInsert(t, d, 2, 3)
-	require.Equal(t, int64PKs(2), companion, "not degraded once observe reached the time tick")
+	insert, companion := decideInsert(t, d, 1, 2)
+	require.Equal(t, int64PKs(1), companion, "exact once observe reached the time tick")
+	insert.Committed(ctx, 11)
+	commit, err = d.Decide(ctx, DecideRequest{Kind: KindCommitTxn, VChannel: "v1", TxnID: txnID})
+	require.NoError(t, err)
+	require.Equal(t, int64PKs(1), commit.Decision().CompanionDeletePKs)
+}
+
+// Wait returns once observe reaches the time tick, with ctx.Err() when ctx ends
+// first, and with the closed error when the decider is closed first.
+func TestWaitErrorWait(t *testing.T) {
+	ctx := context.Background()
+	d, _ := newTestDecider(t)
+	d.WaitUntil(10)
+	_, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
+	wait := requireWaitError(t, err, 10)
+
+	done := make(chan error, 1)
+	go func() { done <- wait.Wait(ctx) }()
+	ObserveTimeTickForTest(d, 9)
+	select {
+	case err := <-done:
+		t.Fatalf("Wait returned before observe reached the time tick: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	ObserveTimeTickForTest(d, 10)
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Wait did not return after observe reached the time tick")
+	}
+	require.NoError(t, wait.Wait(ctx), "returns at once when observe already reached the time tick")
+
+	d.WaitUntil(20)
+	_, err = d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
+	wait = requireWaitError(t, err, 20)
+	cctx, cancel := context.WithCancel(ctx)
+	cancel()
+	require.ErrorIs(t, wait.Wait(cctx), context.Canceled)
+
+	go func() { done <- wait.Wait(ctx) }()
+	d.Close()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, engine.ErrClosed)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Wait did not return after Close")
+	}
+}
+
+// A not-ready index decides degraded and never waits, even below the time
+// tick of WaitUntil.
+func TestNotReadyDoesNotWait(t *testing.T) {
+	ctx := context.Background()
+	d := New(NewMemoryEngine(), Config{Degraded: func() bool { return true }}).(*decider)
+	defer d.Close()
+	d.WaitUntil(10)
+	intent, companion := decideInsert(t, d, 1, 2)
+	require.Equal(t, int64PKs(1, 2), companion)
+	intent.Committed(ctx, 5)
 }
 
 // The decision order of one key must equal the order in which writers pass the

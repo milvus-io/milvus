@@ -23,6 +23,7 @@ package dedup
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -39,6 +40,10 @@ type Decider interface {
 	//
 	// Decide never waits for the index to be ready: a not-ready index decides
 	// degraded. It fails with an error that wraps engine.ErrClosed after Close.
+	// While the writes of the vchannel must wait for observe (WaitUntil), it
+	// returns a *WaitError for an autocommit write and for a CommitTxn with
+	// pending writes, before it registers or probes anything. It never blocks
+	// on that wait itself: the caller may hold a lock that observe needs.
 	Decide(ctx context.Context, req DecideRequest) (*WriteIntent, error)
 
 	// PendingTxnIDs returns the transactions that have pending writes.
@@ -64,6 +69,28 @@ type Config struct {
 	// brings back later does not come back to life. Nil means never degraded.
 	// It never blocks a decision: a not-ready index is degraded, not closed.
 	Degraded func() bool
+}
+
+// WaitError is returned by Decide when the write must wait until observe
+// reaches TimeTick before it can be decided. Nothing is registered for the
+// write. The caller releases the locks that the observe may need, calls Wait,
+// and then calls Decide again.
+type WaitError struct {
+	TimeTick uint64
+
+	d        *decider
+	vchannel string
+}
+
+func (e *WaitError) Error() string {
+	return fmt.Sprintf("primary key index of vchannel %s waits for observe to reach time tick %d", e.vchannel, e.TimeTick)
+}
+
+// Wait blocks until observe reaches TimeTick. It returns ctx.Err() when ctx
+// ends first, and an error that wraps engine.ErrClosed when the decider is
+// closed first.
+func (e *WaitError) Wait(ctx context.Context) error {
+	return e.d.inflight.waitObserved(ctx, e.TimeTick, e.d.stop, e.vchannel)
 }
 
 // WriteKind is the kind of write the caller is about to append.
