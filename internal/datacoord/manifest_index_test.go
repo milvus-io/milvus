@@ -129,9 +129,7 @@ func TestBuildManifestIndexInfoFromDataCoordMetadata(t *testing.T) {
 	require.EqualValues(t, 5, info.CurrentIndexVersion)
 	require.EqualValues(t, 6, info.CurrentScalarIndexVersion)
 	require.Equal(t, []string{"0", "1"}, info.IndexFileKeys)
-	require.Equal(t, "16", info.Properties["M"])
-	require.Equal(t, "8", info.Properties[common.DimKey])
-	require.Equal(t, "HNSW", info.Properties[common.IndexTypeKey])
+	require.Empty(t, info.Properties, "collection parameters are not segment build metadata")
 
 	// The stored path is relative to <basePath>/_index and resolves back to the
 	// segment index prefix, which is what milvus-storage reproduces on read.
@@ -174,7 +172,7 @@ func TestBuildManifestIndexInfoRespectsSegmentIndexTypeOverride(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, "FLAT", info.IndexType)
-	require.Equal(t, "FLAT", info.Properties[common.IndexTypeKey])
+	require.Empty(t, info.Properties)
 	// A field the schema does not describe leaves ColumnName empty rather than
 	// inventing one; field_id stays the authoritative identity.
 	require.Empty(t, info.ColumnName)
@@ -189,6 +187,18 @@ func TestManifestIndexFileKeysRejectPathTraversal(t *testing.T) {
 		IndexFileKeys:         []string{"../other-build/file"},
 	})
 	require.False(t, ok)
+}
+
+func TestManifestIndexFilePathInfoIgnoresLegacyProperties(t *testing.T) {
+	info, ok := manifestIndexFilePathInfo(3, packed.ManifestIndexInfo{
+		IndexName: "index", IndexType: "FLAT",
+		Path:                  "files/insert_log/1/2/3/_index/102/4",
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+		IndexFileKeys:         []string{"index.bin"},
+		Properties:            map[string]string{common.IndexTypeKey: "HNSW", "M": "16", common.DimKey: "8"},
+	})
+	require.True(t, ok)
+	require.Equal(t, []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FLAT"}}, info.IndexParams)
 }
 
 // GetIndexInfos serves the load path from in-memory SegmentIndex metadata and
@@ -253,6 +263,8 @@ func TestServerGetIndexInfosReadsNoManifest(t *testing.T) {
 						FieldID:      fieldID,
 						IndexID:      indexID,
 						IndexName:    "vector_hnsw",
+						IndexParams:  []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}, {Key: "metric_type", Value: "L2"}},
+						TypeParams:   []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}},
 					},
 					indexID2: {
 						CollectionID: collectionID,
@@ -359,6 +371,7 @@ func TestServerGetIndexInfosReadsNoManifest(t *testing.T) {
 			if info.GetBuildID() == buildID {
 				require.Equal(t, []string{"segments/1/2/3/_index/102/4/index.bin"}, info.GetIndexFilePaths())
 				require.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED, info.GetIndexStorePathVersion())
+				require.Equal(t, map[string]string{common.IndexTypeKey: "HNSW", "metric_type": "L2", common.DimKey: "8"}, common.KeyValuePairs(info.GetIndexParams()).ToMap())
 			}
 		}
 	})
@@ -778,6 +791,7 @@ func TestSegmentIndexSurvivesRestartFromManifestOnly(t *testing.T) {
 	manifestEntries := store.revisions[m.GetSegment(ctx, restartSegID).GetManifestPath()]
 	require.Len(t, manifestEntries, 1, "the index task must publish its artifact into the manifest")
 	assert.EqualValues(t, restartBuildID, manifestEntries[0].BuildID)
+	assert.Empty(t, manifestEntries[0].Properties)
 
 	// Nothing about this index reached etcd.
 	persisted, err := catalog.ListSegmentIndexes(ctx, restartCollID)

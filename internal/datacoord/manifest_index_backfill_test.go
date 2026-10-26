@@ -227,6 +227,7 @@ func TestManifestIndexBackfillMovesCatalogRowAtomically(t *testing.T) {
 	assert.EqualValues(t, restartIndexID, entries[0].IndexID)
 	assert.EqualValues(t, restartBuildID, entries[0].BuildID)
 	assert.Equal(t, []string{"0", "1"}, entries[0].IndexFileKeys)
+	assert.Empty(t, entries[0].Properties)
 	assert.True(t, m.GetSegment(ctx, restartSegID).GetManifestHasIndex())
 
 	persisted, err = catalog.ListSegmentIndexes(ctx, restartCollID)

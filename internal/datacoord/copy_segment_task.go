@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"maps"
 	"net/url"
 	"path"
 	"slices"
@@ -1449,13 +1448,9 @@ func verifyCopiedManifestIndexOwnership(result *datapb.CopySegmentResult, task C
 				"copied manifest of segment %d carries index %d foreign to the current target definition; retry the restore",
 				result.GetSegmentId(), entry.IndexID)
 		}
-		expectedParams := common.KeyValuePairs(definition.TypeParams).ToMap()
-		for key, value := range common.KeyValuePairs(definition.IndexParams).ToMap() {
-			expectedParams[key] = value
-		}
-		if entry.IndexType != GetIndexType(definition.IndexParams) || !maps.Equal(entry.Properties, expectedParams) {
+		if entry.IndexType != GetIndexType(definition.IndexParams) {
 			return nil, merr.WrapErrServiceInternalMsg(
-				"copied manifest index %d has changed target parameters; retry the restore", entry.IndexID)
+				"copied manifest index %d has changed target index type; retry the restore", entry.IndexID)
 		}
 		if _, ok := manifestIndexFilePathInfoForSegment(rootPath, segment.SegmentInfo, entry); !ok {
 			return nil, merr.Wrapf(merr.ErrDataIntegrity,
@@ -1573,17 +1568,14 @@ func buildCopySegmentTargetIndexes(m *meta, collectionID int64, writeToManifest 
 			continue
 		}
 		indexParams := m.indexMeta.GetIndexParams(collectionID, index.IndexID)
-		properties := common.KeyValuePairs(m.indexMeta.GetTypeParams(collectionID, index.IndexID)).ToMap()
-		for key, value := range common.KeyValuePairs(indexParams).ToMap() {
-			properties[key] = value
-		}
+		// Keep the legacy Properties wire field unset. Collection parameters
+		// must not become a copied artifact's manifest properties.
 		targetIndexes = append(targetIndexes, &datapb.CopySegmentTargetIndex{
 			IndexName:  index.IndexName,
 			IndexId:    index.IndexID,
 			FieldId:    index.FieldID,
 			ColumnName: collectionFieldName(m, collectionID, index.FieldID),
 			IndexType:  GetIndexType(indexParams),
-			Properties: properties,
 		})
 	}
 	return targetIndexes
