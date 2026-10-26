@@ -157,6 +157,15 @@ JsonProjectedValueTypeForCast(JsonCastType cast_type) {
     }
 }
 
+bool
+IsJsonSortCast(JsonCastType cast_type) {
+    const auto element = cast_type.element_type();
+    return element == JsonCastType::DataType::DOUBLE ||
+           element == JsonCastType::DataType::VARCHAR ||
+           (cast_type.data_type() == JsonCastType::DataType::ARRAY &&
+            element == JsonCastType::DataType::BOOL);
+}
+
 JsonProjectedIndexSpec::JsonProjectedIndexSpec(std::string json_path,
                                                JsonCastType cast_type,
                                                int64_t row_count)

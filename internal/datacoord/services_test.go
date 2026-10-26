@@ -1365,6 +1365,31 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		assert.NotNil(t, coll.Properties)
 	})
 
+	t.Run("published external source notifies index build", func(t *testing.T) {
+		spec := `{"format":"parquet"}`
+		ms := metacache.NewMetaStore(nil)
+		ms.PutCollection(&collectionInfo{ID: 100, Schema: externalRefreshIndexSchema("s3://bucket/a", spec)})
+		notifyIndexChan := make(chan UniqueID, 1)
+		s := &Server{meta: &meta{metaStore: ms}, notifyIndexChan: notifyIndexChan}
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+		ctx := context.Background()
+
+		resp, err := s.BroadcastAlteredCollection(ctx, &datapb.AlterCollectionRequest{
+			CollectionID: 100,
+			Schema:       externalRefreshIndexSchema("s3://bucket/a", spec),
+		})
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+		assert.Empty(t, notifyIndexChan)
+
+		resp, err = s.BroadcastAlteredCollection(ctx, &datapb.AlterCollectionRequest{
+			CollectionID: 100,
+			Schema:       externalRefreshIndexSchema("s3://bucket/b", spec),
+		})
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+		require.Len(t, notifyIndexChan, 1)
+		assert.Equal(t, UniqueID(100), <-notifyIndexChan)
+	})
+
 	// RootCoord rebuilds this request from its authoritative meta on every
 	// alter, so an update must adopt the request's view wholesale. The previous
 	// code kept Partitions/StartPositions/DatabaseName/DatabaseID from the
@@ -2562,6 +2587,7 @@ func TestServer_FlushAll(t *testing.T) {
 		// Mock broadcaster
 		bapi := mock_broadcaster.NewMockBroadcastAPI(t)
 		bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, msg message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
+			require.True(t, msg.IsUnreplicable())
 			require.True(t, msg.BroadcastHeader().AckSyncUp, "FlushAll must wait for consuming-side completion")
 			results := make(map[string]*message.AppendResult)
 			for _, vchannel := range msg.BroadcastHeader().VChannels {
@@ -2591,12 +2617,12 @@ func TestServer_FlushAll(t *testing.T) {
 
 		// Register mock broadcaster
 		mb := mock_broadcaster.NewMockBroadcaster(t)
-		mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything).Return(bapi, nil)
+		mb.EXPECT().WithUnreplicableResourceKeys(mock.Anything, mock.Anything).Return(bapi, nil)
 		mb.EXPECT().Close().Return().Maybe()
 		broadcast.ResetBroadcaster()
 		broadcast.Register(mb)
 
-		// Register mock balancer for balance.GetWithContext in StartBroadcastWithResourceKeys
+		// Register mock balancer for balance.GetWithContext in StartUnreplicableBroadcastWithResourceKeys
 		b := mock_balancer.NewMockBalancer(t)
 		b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil)
 		b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, callback balancer.WatchChannelAssignmentsCallback) error {
@@ -5461,6 +5487,8 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 		ctx := context.Background()
 
 		registry.ResetRegistration()
+		drainBuildIndexChForTest()
+		defer drainBuildIndexChForTest()
 
 		mockUpdateSegmentsInfo := mockey.Mock((*meta).UpdateSegmentsInfo).To(
 			func(m *meta, ctx context.Context, operators ...UpdateOperator) error {
@@ -5499,6 +5527,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 			},
 		})
 		assert.NoError(t, err)
+		assertBuildIndexEvents(t, 1, 2)
 
 		recomputeManager.mu.Lock()
 		defer recomputeManager.mu.Unlock()
@@ -5539,6 +5568,8 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 		ctx := context.Background()
 
 		registry.ResetRegistration()
+		drainBuildIndexChForTest()
+		defer drainBuildIndexChForTest()
 
 		mockUpdateSegmentsInfo := mockey.Mock((*meta).UpdateSegmentsInfo).To(
 			func(m *meta, ctx context.Context, operators ...UpdateOperator) error {
@@ -5573,6 +5604,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 			},
 		})
 		assert.Error(t, err)
+		assertNoBuildIndexEvent(t)
 	})
 
 	t.Run("v2_column_groups_dispatches_operator", func(t *testing.T) {
@@ -6595,6 +6627,35 @@ func TestHandleCommitVchannelRPCIsNoOpForCoordinatorOwnedJob(t *testing.T) {
 	server.stateCode.Store(commonpb.StateCode_Abnormal)
 	resp, err := server.HandleCommitVchannel(context.Background(), &datapb.HandleCommitVchannelRequest{})
 	require.Error(t, merr.CheckRPCCall(resp, err))
+}
+
+func TestHandleCommitVchannelRPC_MissingJob_PrimaryIsNoOp(t *testing.T) {
+	importMeta, _ := newTestImportMeta(t)
+	mockReplicateConfiguration(t, nil)
+	server := &Server{importMeta: importMeta}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	// A StreamingNode replaying an old CommitImport after checkGC removed the
+	// job must get success, or it retries forever and blocks the pchannel.
+	resp, err := server.HandleCommitVchannel(context.Background(), &datapb.HandleCommitVchannelRequest{
+		JobId: 13, Vchannel: "vchan-0", CommitTimestamp: 300,
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	require.Nil(t, importMeta.GetJob(context.Background(), 13))
+}
+
+func TestHandleCommitVchannelRPC_MissingJob_SecondaryRetries(t *testing.T) {
+	importMeta, _ := newTestImportMeta(t)
+	mockReplicateConfiguration(t, secondaryReplicateConfiguration())
+	server := &Server{importMeta: importMeta}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	resp, err := server.HandleCommitVchannel(context.Background(), &datapb.HandleCommitVchannelRequest{
+		JobId: 13, Vchannel: "vchan-0", CommitTimestamp: 300,
+	})
+	err = merr.CheckRPCCall(resp, err)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, merr.ErrImportSysFailed))
 }
 
 func TestLoadableProjectionUsesFinalSegments(t *testing.T) {

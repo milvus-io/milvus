@@ -306,6 +306,17 @@ func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	})
 }
 
+// GetFeatureUsage returns the node's feature usage view.
+func (c *Client) GetFeatureUsage(ctx context.Context, req *internalpb.GetFeatureUsageRequest, _ ...grpc.CallOption) (*internalpb.GetFeatureUsageResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(c.nodeID))
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*internalpb.GetFeatureUsageResponse, error) {
+		return client.GetFeatureUsage(ctx, req)
+	})
+}
+
 func (c *Client) GetStatistics(ctx context.Context, request *querypb.GetStatisticsRequest, _ ...grpc.CallOption) (*internalpb.GetStatisticsResponse, error) {
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*internalpb.GetStatisticsResponse, error) {
 		return client.GetStatistics(ctx, request)

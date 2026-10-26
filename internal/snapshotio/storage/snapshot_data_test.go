@@ -255,7 +255,7 @@ func readSnapshotMetadataForTest(t *testing.T, cm storage.ChunkManager, metadata
 	t.Helper()
 	data, err := cm.Read(context.Background(), snapshotstorage.NormalizeSnapshotObjectPath(metadataPath))
 	require.NoError(t, err)
-	metadata, err := snapshotio.ParseSnapshotMetadataWithVersionCheck(data)
+	metadata, err := snapshotio.ParseSnapshotMetadata(data)
 	require.NoError(t, err)
 	return metadata
 }
@@ -366,6 +366,14 @@ func TestSnapshotWriter_Save_RealAvro(t *testing.T) {
 		writeCallCount++
 		// Verify that written content is not empty mock data
 		assert.NotEmpty(t, content)
+		if path.Ext(filePath) == ".json" {
+			metadata, err := snapshotio.ParseSnapshotMetadata(content)
+			require.NoError(t, err)
+			assert.Equal(t, int32(6), metadata.GetFormatVersion())
+		} else {
+			_, err := snapshotio.ParseSegmentManifest(content, 6)
+			require.NoError(t, err)
+		}
 		return nil
 	}).Build()
 	defer mockWrite.UnPatch()
@@ -685,7 +693,7 @@ func TestSnapshotReader_ReadSnapshot_Success(t *testing.T) {
 	}
 
 	// Pre-generate valid Avro data for manifest using the real schema (single record)
-	manifestSchema, _ := snapshotio.ManifestSchema()
+	manifestSchema, _ := snapshotio.ManifestSchemaByVersion(0)
 	validManifestData, _ := avro.Marshal(manifestSchema, manifestEntry)
 
 	metadataFilePath := "snapshots/100/metadata/00001-uuid.json"
@@ -2718,10 +2726,7 @@ func TestSnapshotReader_ReadSnapshot_RebasesRelocatedSelfContainedBundleBeforeMa
 		StorageVersion:    2,
 		CommitTimestamp:   10,
 	}
-	manifestEntry := snapshotio.SegmentToManifestEntry(segment)
-	manifestSchema, err := snapshotio.ManifestSchemaByVersion(snapshotio.SnapshotFormatVersion)
-	require.NoError(t, err)
-	manifestBytes, err := avro.Marshal(manifestSchema, manifestEntry)
+	manifestBytes, err := snapshotio.MarshalSegmentManifest(segment)
 	require.NoError(t, err)
 
 	readPaths := make([]string, 0, 2)
@@ -2885,10 +2890,6 @@ func TestSnapshotReader_ReadSnapshot_ClassifiesPermanentMetadataErrorsAsDataInte
 		{
 			name: "invalid json",
 			data: []byte("{"),
-		},
-		{
-			name: "unsupported format version",
-			data: []byte(`{"format_version":999}`),
 		},
 	}
 
@@ -3331,10 +3332,7 @@ func TestSnapshotReader_ReadSnapshot_RebasesStorageV2ManifestListBeforeFillingSe
 		StorageVersion:    2,
 		CommitTimestamp:   10,
 	}
-	manifestEntry := snapshotio.SegmentToManifestEntry(segment)
-	manifestSchema, err := snapshotio.ManifestSchemaByVersion(snapshotio.SnapshotFormatVersion)
-	require.NoError(t, err)
-	manifestBytes, err := avro.Marshal(manifestSchema, manifestEntry)
+	manifestBytes, err := snapshotio.MarshalSegmentManifest(segment)
 	require.NoError(t, err)
 
 	mockRead := mockey.Mock((*storage.LocalChunkManager).Read).To(func(ctx context.Context, filePath string) ([]byte, error) {
@@ -3424,10 +3422,9 @@ func TestValidateFormatVersion(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:        "version_100_future",
-			version:     100,
-			wantErr:     true,
-			errContains: "too new",
+			name:    "version_100_future",
+			version: 100,
+			wantErr: false,
 		},
 	}
 
@@ -3573,7 +3570,7 @@ func TestSnapshotReader_ReadSnapshot_LegacyVersion(t *testing.T) {
 }
 
 func TestSnapshotReader_ReadSnapshot_FutureVersion(t *testing.T) {
-	// Test that reading a snapshot with future version fails
+	// A future writer version alone does not prevent metadata reading.
 	tempDir := t.TempDir()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
 	reader := snapshotstorage.NewSnapshotReader(cm)
@@ -3601,7 +3598,32 @@ func TestSnapshotReader_ReadSnapshot_FutureVersion(t *testing.T) {
 	}).Build()
 	defer mockRead.UnPatch()
 
-	_, err := reader.ReadSnapshot(context.Background(), metadataFilePath, false)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "too new")
+	snapshot, err := reader.ReadSnapshot(context.Background(), metadataFilePath, false)
+	require.NoError(t, err)
+	assert.Equal(t, "future_snapshot", snapshot.SnapshotInfo.GetName())
+}
+
+func TestSnapshotReader_FutureManifest(t *testing.T) {
+	root := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	ctx := context.Background()
+	metadataPath := path.Join(root, "metadata.json")
+	manifestPath := path.Join(root, "segment.avro")
+	metadata := &datapb.SnapshotMetadata{
+		FormatVersion: 7,
+		SnapshotInfo:  &datapb.SnapshotInfo{Id: 1, CollectionId: 10, Name: "future", S3Location: metadataPath},
+		Collection:    &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{Name: "source"}},
+		ManifestList:  []string{manifestPath},
+		SegmentIds:    []int64{123},
+	}
+	data, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(metadata)
+	require.NoError(t, err)
+	require.NoError(t, cm.Write(ctx, metadataPath, data))
+	data, err = snapshotio.MarshalSegmentManifest(&datapb.SegmentDescription{SegmentId: 123})
+	require.NoError(t, err)
+	require.NoError(t, cm.Write(ctx, manifestPath, data))
+	snapshot, err := snapshotstorage.NewSnapshotReader(cm).ReadSnapshot(ctx, metadataPath, true)
+	require.NoError(t, err)
+	require.Len(t, snapshot.Segments, 1)
+	assert.Equal(t, int64(123), snapshot.Segments[0].GetSegmentId())
 }

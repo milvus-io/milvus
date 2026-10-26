@@ -55,7 +55,7 @@ func getMultiAnalyzerParams(field *schemapb.FieldSchema) (string, bool) {
 	return "", false
 }
 
-func NewMultiAnalyzerBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema, inputField, outputField *schemapb.FieldSchema, params string) (*MultiAnalyzerBM25FunctionRunner, error) {
+func NewMultiAnalyzerBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema, inputField, outputField *schemapb.FieldSchema, params string, extraInfo ...string) (*MultiAnalyzerBM25FunctionRunner, error) {
 	runner := &MultiAnalyzerBM25FunctionRunner{
 		schema:      schema,
 		inputFields: []*schemapb.FieldSchema{inputField},
@@ -112,7 +112,7 @@ func NewMultiAnalyzerBM25FunctionRunner(coll *schemapb.CollectionSchema, schema 
 	}
 
 	for name, param := range analyzersParam {
-		analyzer, err := analyzer.NewAnalyzer(string(param), "")
+		analyzer, err := analyzer.NewAnalyzer(string(param), analyzerExtraInfo(extraInfo))
 		if err != nil {
 			return nil, merr.Wrapf(err, "bm25 function create analyzer %s failed", name)
 		}

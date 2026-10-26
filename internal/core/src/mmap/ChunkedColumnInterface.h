@@ -67,6 +67,12 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
 
     ~ChunkedColumnInterface() override = default;
 
+    // Materialize a lazy column's chunk directory with the caller's context
+    // before using context-free layout accessors. This does not pin raw data.
+    virtual void
+    Prepare(milvus::OpContext* op_ctx) const {
+    }
+
     // Optional per-cell skip metrics owned by this column's generation.
     // Storage V2 proxy columns override both accessors; an ordinary V1 column
     // has no metrics and must fail open (never skip).

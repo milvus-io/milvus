@@ -3,8 +3,6 @@ package rootcoord
 import (
 	"context"
 	"fmt"
-	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -19,13 +17,11 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
@@ -47,12 +43,6 @@ type Catalog struct {
 
 	pool *conc.Pool[any]
 }
-
-type prefixWalker interface {
-	WalkWithPrefix(context.Context, string, int, func([]byte, []byte) error) error
-}
-
-const rlsPrincipalScanBatchSize = 128
 
 func NewCatalog(metaKV kv.TxnKV) metastore.RootCoordCatalog {
 	ioPool := conc.NewPool[any](paramtable.Get().MetaStoreCfg.ReadConcurrency.GetAsInt())
@@ -397,184 +387,118 @@ func (kc *Catalog) AlterCredential(ctx context.Context, credential *model.Creden
 	return nil
 }
 
-func (kc *Catalog) listPartitionsAfter210(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.Partition, error) {
-	prefix := BuildPartitionPrefix(collectionID)
-	_, values, err := kc.Txn.LoadWithPrefix(ctx, prefix)
-	if err != nil {
-		return nil, err
-	}
-	partitions := make([]*model.Partition, 0, len(values))
-	for _, v := range values {
-		if IsTombstone(v) {
-			continue
-		}
-		partitionMeta := &pb.PartitionInfo{}
-		err := proto.Unmarshal([]byte(v), partitionMeta)
-		if err != nil {
-			return nil, err
-		}
-		partitions = append(partitions, model.UnmarshalPartitionModel(partitionMeta))
-	}
-	return partitions, nil
-}
-
-func (kc *Catalog) batchListPartitionsAfter210(ctx context.Context, ts typeutil.Timestamp) (map[int64][]*model.Partition, error) {
-	_, values, err := kc.Txn.LoadWithPrefix(ctx, PartitionMetaPrefix+"/")
-	if err != nil {
-		return nil, err
-	}
-
-	ret := make(map[int64][]*model.Partition)
-	for i := 0; i < len(values); i++ {
-		if IsTombstone(values[i]) {
-			continue
-		}
-		partitionMeta := &pb.PartitionInfo{}
-		err := proto.Unmarshal([]byte(values[i]), partitionMeta)
-		if err != nil {
-			return nil, err
-		}
-		collectionID := partitionMeta.GetCollectionId()
-		if ret[collectionID] == nil {
-			ret[collectionID] = make([]*model.Partition, 0)
-		}
-		ret[collectionID] = append(ret[collectionID], model.UnmarshalPartitionModel(partitionMeta))
-	}
-	return ret, nil
+// childMetadataStoredSeparately reports whether the partitions and fields of a
+// collection are stored under the child prefixes instead of in its value,
+// which is the layout since 2.1.0.
+func childMetadataStoredSeparately(collMeta *pb.CollectionInfo) bool {
+	return partitionVersionAfter210(collMeta) || fieldVersionAfter210(collMeta)
 }
 
 func fieldVersionAfter210(collMeta *pb.CollectionInfo) bool {
 	return len(collMeta.GetSchema().GetFields()) <= 0 && len(collMeta.GetSchema().GetStructArrayFields()) <= 0
 }
 
-func (kc *Catalog) listFieldsAfter210(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.Field, error) {
-	prefix := BuildFieldPrefix(collectionID)
-	_, values, err := kc.Txn.LoadWithPrefix(ctx, prefix)
-	if err != nil {
-		return nil, err
+// The unmarshal helpers decode stored child metadata for both the per
+// collection reads and the recovery scans. A value that does not decode is
+// corrupt persisted metadata.
+
+func unmarshalPartition(value []byte) (*model.Partition, error) {
+	info := &pb.PartitionInfo{}
+	if err := proto.Unmarshal(value, info); err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "unmarshal partition metadata")
 	}
-	fields := make([]*model.Field, 0, len(values))
-	for _, v := range values {
-		if IsTombstone(v) {
-			continue
-		}
-		partitionMeta := &schemapb.FieldSchema{}
-		err := proto.Unmarshal([]byte(v), partitionMeta)
-		if err != nil {
-			return nil, err
-		}
-		fields = append(fields, model.UnmarshalFieldModel(partitionMeta))
-	}
-	return fields, nil
+	return model.UnmarshalPartitionModel(info), nil
 }
 
-func (kc *Catalog) batchListFieldsAfter210(ctx context.Context, ts typeutil.Timestamp) (map[int64][]*model.Field, error) {
-	keys, values, err := kc.Txn.LoadWithPrefix(ctx, FieldMetaPrefix+"/")
+func unmarshalField(value []byte) (*model.Field, error) {
+	info := &schemapb.FieldSchema{}
+	if err := proto.Unmarshal(value, info); err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "unmarshal field metadata")
+	}
+	return model.UnmarshalFieldModel(info), nil
+}
+
+func unmarshalStructArrayField(value []byte) (*model.StructArrayField, error) {
+	info := &schemapb.StructArrayFieldSchema{}
+	if err := proto.Unmarshal(value, info); err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "unmarshal struct array field metadata")
+	}
+	return model.UnmarshalStructArrayFieldModel(info), nil
+}
+
+func unmarshalFunction(value []byte) (*model.Function, error) {
+	info := &schemapb.FunctionSchema{}
+	if err := proto.Unmarshal(value, info); err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "unmarshal function metadata")
+	}
+	return model.UnmarshalFunctionModel(info), nil
+}
+
+// listChildMetadata reads the entries under prefix and decodes the ones that
+// are not legacy tombstones.
+func listChildMetadata[T any](ctx context.Context, txn kv.TxnKV, prefix string, decode func([]byte) (T, error)) ([]T, error) {
+	_, values, err := txn.LoadWithPrefix(ctx, prefix)
 	if err != nil {
 		return nil, err
 	}
-
-	ret := make(map[int64][]*model.Field)
-	for i := 0; i < len(values); i++ {
-		if IsTombstone(values[i]) {
+	children := make([]T, 0, len(values))
+	for _, value := range values {
+		if IsTombstone(value) {
 			continue
 		}
-		fieldMeta := &schemapb.FieldSchema{}
-		err := proto.Unmarshal([]byte(values[i]), fieldMeta)
+		child, err := decode([]byte(value))
 		if err != nil {
 			return nil, err
 		}
-
-		collectionID, err := strconv.ParseInt(strings.Split(keys[i], "/")[2], 10, 64)
-		if err != nil {
-			return nil, err
-		}
-		if ret[collectionID] == nil {
-			ret[collectionID] = make([]*model.Field, 0)
-		}
-		ret[collectionID] = append(ret[collectionID], model.UnmarshalFieldModel(fieldMeta))
+		children = append(children, child)
 	}
-	return ret, nil
+	return children, nil
+}
+
+func (kc *Catalog) listPartitionsAfter210(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.Partition, error) {
+	return listChildMetadata(ctx, kc.Txn, BuildPartitionPrefix(collectionID), unmarshalPartition)
+}
+
+func (kc *Catalog) listFieldsAfter210(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.Field, error) {
+	return listChildMetadata(ctx, kc.Txn, BuildFieldPrefix(collectionID), unmarshalField)
 }
 
 func (kc *Catalog) listStructArrayFieldsAfter210(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.StructArrayField, error) {
-	prefix := BuildStructArrayFieldPrefix(collectionID)
-	_, values, err := kc.Txn.LoadWithPrefix(ctx, prefix)
-	if err != nil {
-		return nil, err
-	}
-	structFields := make([]*model.StructArrayField, 0, len(values))
-	for _, v := range values {
-		if IsTombstone(v) {
-			continue
-		}
-		partitionMeta := &schemapb.StructArrayFieldSchema{}
-		err := proto.Unmarshal([]byte(v), partitionMeta)
-		if err != nil {
-			return nil, err
-		}
-		structFields = append(structFields, model.UnmarshalStructArrayFieldModel(partitionMeta))
-	}
-	return structFields, nil
+	return listChildMetadata(ctx, kc.Txn, BuildStructArrayFieldPrefix(collectionID), unmarshalStructArrayField)
 }
 
 func (kc *Catalog) listFunctions(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.Function, error) {
-	prefix := BuildFunctionPrefix(collectionID)
-	_, values, err := kc.Txn.LoadWithPrefix(ctx, prefix)
-	if err != nil {
-		return nil, err
-	}
-	functions := make([]*model.Function, 0, len(values))
-	for _, v := range values {
-		if IsTombstone(v) {
-			continue
-		}
-		functionSchema := &schemapb.FunctionSchema{}
-		err := proto.Unmarshal([]byte(v), functionSchema)
-		if err != nil {
-			return nil, err
-		}
-		functions = append(functions, model.UnmarshalFunctionModel(functionSchema))
-	}
-	return functions, nil
+	return listChildMetadata(ctx, kc.Txn, BuildFunctionPrefix(collectionID), unmarshalFunction)
 }
 
-func (kc *Catalog) batchListFunctions(ctx context.Context, ts typeutil.Timestamp) (map[int64][]*model.Function, error) {
-	keys, values, err := kc.Txn.LoadWithPrefix(ctx, FunctionMetaPrefix+"/")
-	if err != nil {
-		return nil, err
+// decodeCollection decodes a stored collection, moves a collection still
+// marked with util.NonDBID to the default database, and reports whether its
+// partitions and fields are stored under the child prefixes.
+func (kc *Catalog) decodeCollection(ctx context.Context, value []byte, ts typeutil.Timestamp) (*model.Collection, bool, error) {
+	collMeta := &pb.CollectionInfo{}
+	if err := proto.Unmarshal(value, collMeta); err != nil {
+		return nil, false, merr.WrapErrDataIntegrity(err, "unmarshal collection metadata")
 	}
-	ret := make(map[int64][]*model.Function)
-	for i := 0; i < len(values); i++ {
-		if IsTombstone(values[i]) {
-			continue
-		}
-		functionSchema := &schemapb.FunctionSchema{}
-		err := proto.Unmarshal([]byte(values[i]), functionSchema)
-		if err != nil {
-			return nil, err
-		}
-		collectionID, err := strconv.ParseInt(strings.Split(keys[i], "/")[2], 10, 64)
-		if err != nil {
-			return nil, err
-		}
-		if ret[collectionID] == nil {
-			ret[collectionID] = make([]*model.Function, 0)
-		}
-		ret[collectionID] = append(ret[collectionID], model.UnmarshalFunctionModel(functionSchema))
-	}
-	return ret, nil
+	kc.fixDefaultDBIDConsistency(ctx, collMeta, ts)
+	return model.UnmarshalCollectionModel(collMeta), childMetadataStoredSeparately(collMeta), nil
 }
 
 func (kc *Catalog) appendPartitionAndFieldsInfo(ctx context.Context, collMeta *pb.CollectionInfo,
 	ts typeutil.Timestamp,
 ) (*model.Collection, error) {
 	collection := model.UnmarshalCollectionModel(collMeta)
-
-	if !partitionVersionAfter210(collMeta) && !fieldVersionAfter210(collMeta) {
+	if !childMetadataStoredSeparately(collMeta) {
 		return collection, nil
 	}
+	if err := kc.loadChildMetadata(ctx, collection, ts); err != nil {
+		return nil, err
+	}
+	return collection, nil
+}
 
+// loadChildMetadata replaces the partitions, fields, struct array fields and
+// functions of collection with the ones stored under its child prefixes.
+func (kc *Catalog) loadChildMetadata(ctx context.Context, collection *model.Collection, ts typeutil.Timestamp) error {
 	var (
 		partitions        []*model.Partition
 		fields            []*model.Field
@@ -610,58 +534,14 @@ func (kc *Catalog) appendPartitionAndFieldsInfo(ctx context.Context, collMeta *p
 	})
 
 	if err := g.Wait(); err != nil {
-		return nil, err
+		return err
 	}
 
 	collection.Partitions = partitions
 	collection.Fields = fields
 	collection.StructArrayFields = structArrayFields
 	collection.Functions = functions
-	return collection, nil
-}
-
-func (kc *Catalog) batchAppendPartitionAndFieldsInfo(ctx context.Context, collMeta []*pb.CollectionInfo,
-	ts typeutil.Timestamp,
-) ([]*model.Collection, error) {
-	var partitionMetaMap map[int64][]*model.Partition
-	var fieldMetaMap map[int64][]*model.Field
-	var functionMetaMap map[int64][]*model.Function
-	ret := make([]*model.Collection, 0)
-	for _, coll := range collMeta {
-		collection := model.UnmarshalCollectionModel(coll)
-		if partitionVersionAfter210(coll) || fieldVersionAfter210(coll) {
-			if len(partitionMetaMap) == 0 {
-				var err error
-				partitionMetaMap, err = kc.batchListPartitionsAfter210(ctx, ts)
-				if err != nil {
-					return nil, err
-				}
-
-				fieldMetaMap, err = kc.batchListFieldsAfter210(ctx, ts)
-				if err != nil {
-					return nil, err
-				}
-
-				functionMetaMap, err = kc.batchListFunctions(ctx, ts)
-				if err != nil {
-					return nil, err
-				}
-			}
-
-			if partitionMetaMap[collection.CollectionID] != nil {
-				collection.Partitions = partitionMetaMap[collection.CollectionID]
-			}
-			if fieldMetaMap[collection.CollectionID] != nil {
-				collection.Fields = fieldMetaMap[collection.CollectionID]
-			}
-			if functionMetaMap[collection.CollectionID] != nil {
-				collection.Functions = functionMetaMap[collection.CollectionID]
-			}
-		}
-		ret = append(ret, collection)
-	}
-
-	return ret, nil
+	return nil
 }
 
 func (kc *Catalog) GetCollectionByID(ctx context.Context, dbID int64, ts typeutil.Timestamp, collectionID typeutil.UniqueID) (*model.Collection, error) {
@@ -714,7 +594,7 @@ func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Col
 
 // buildDropCollectionKeys computes the collection key and the child
 // metadata keys (aliases, partitions, fields, struct array fields,
-// functions and RLS policies) removed when dropping a collection. Factored out so both
+// functions) removed when dropping a collection. Factored out so both
 // Catalog.DropCollection (which now delegates to the composite Update) and
 // Catalog.Update's CollectionEntry/ActionDelete type-switch case
 // (accumulated into a single txn.Builder) apply the exact same key set.
@@ -743,12 +623,6 @@ func buildDropCollectionKeys(collectionInfo *model.Collection) (string, []string
 	}
 	for _, function := range collectionInfo.Functions {
 		delMetakeysSnap = append(delMetakeysSnap, BuildFunctionKey(collectionInfo.CollectionID, function.ID))
-	}
-	for _, policy := range collectionInfo.RLSPolicies {
-		if policy == nil {
-			continue
-		}
-		delMetakeysSnap = append(delMetakeysSnap, BuildRLSPolicyKey(collectionInfo.CollectionID, policy.PolicyID))
 	}
 	// delMetakeysSnap = append(delMetakeysSnap, buildPartitionPrefix(collectionInfo.CollectionID))
 	// delMetakeysSnap = append(delMetakeysSnap, buildFieldPrefix(collectionInfo.CollectionID))
@@ -1044,16 +918,15 @@ func (kc *Catalog) ListCollections(ctx context.Context, dbID int64, ts typeutil.
 		i := i
 		val := val
 		futures = append(futures, kc.pool.Submit(func() (any, error) {
-			collMeta := &pb.CollectionInfo{}
-			err := proto.Unmarshal([]byte(val), collMeta)
+			collection, childMetaStoredSeparately, err := kc.decodeCollection(ctx, []byte(val), ts)
 			if err != nil {
 				mlog.Warn(ctx, "unmarshal collection info failed", mlog.Err(err))
 				return nil, err
 			}
-			kc.fixDefaultDBIDConsistency(ctx, collMeta, ts)
-			collection, err := kc.appendPartitionAndFieldsInfo(ctx, collMeta, ts)
-			if err != nil {
-				return nil, err
+			if childMetaStoredSeparately {
+				if err := kc.loadChildMetadata(ctx, collection, ts); err != nil {
+					return nil, err
+				}
 			}
 			colls[i] = collection
 			return nil, nil
@@ -2352,131 +2225,6 @@ func (kc *Catalog) ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.Privile
 		privGroups = append(privGroups, privGroupInfo)
 	}
 	return privGroups, nil
-}
-
-func (kc *Catalog) SaveRLSPolicy(ctx context.Context, policy *model.RLSPolicy) error {
-	if policy == nil {
-		return merr.WrapErrServiceInternalMsg("RLS policy is nil")
-	}
-	if policy.PolicyID == 0 {
-		return merr.WrapErrServiceInternalMsg("RLS policy ID is empty")
-	}
-	key := BuildRLSPolicyKey(policy.CollectionID, policy.PolicyID)
-	value, err := proto.Marshal(model.MarshalRLSPolicyModel(policy))
-	if err != nil {
-		return merr.WrapErrSerializationFailed(err, "marshal RLS policy info")
-	}
-	return kc.Txn.Save(ctx, key, string(value))
-}
-
-func (kc *Catalog) DropRLSPolicy(ctx context.Context, collectionID int64, policyID int64) error {
-	return kc.Txn.Remove(ctx, BuildRLSPolicyKey(collectionID, policyID))
-}
-
-func (kc *Catalog) ListRLSPolicies(ctx context.Context, collectionID int64) ([]*model.RLSPolicy, error) {
-	_, values, err := kc.Txn.LoadWithPrefix(ctx, BuildRLSPolicyPrefix(collectionID))
-	if err != nil {
-		return nil, err
-	}
-	policies := make([]*model.RLSPolicy, 0, len(values))
-	for _, value := range values {
-		info := &rootcoordpb.RLSPolicyInfo{}
-		if err := proto.Unmarshal([]byte(value), info); err != nil {
-			return nil, merr.WrapErrDataIntegrity(err, "unmarshal RLS policy info")
-		}
-		policies = append(policies, model.UnmarshalRLSPolicyModel(info))
-	}
-	sort.Slice(policies, func(i, j int) bool {
-		if policies[i].PolicyName == policies[j].PolicyName {
-			return policies[i].PolicyID < policies[j].PolicyID
-		}
-		return policies[i].PolicyName < policies[j].PolicyName
-	})
-	return policies, nil
-}
-
-func buildRLSPrincipalKey(collectionID int64, principalName string) string {
-	return BuildRLSPrincipalPrefix(collectionID) + url.PathEscape(principalName)
-}
-
-func (kc *Catalog) SaveRLSPrincipal(ctx context.Context, principal *model.RLSPrincipal) error {
-	if principal == nil {
-		return merr.WrapErrServiceInternalMsg("RLS principal is nil")
-	}
-	key := buildRLSPrincipalKey(principal.CollectionID, principal.PrincipalName)
-	info, err := model.MarshalRLSPrincipalModel(principal)
-	if err != nil {
-		return err
-	}
-	value, err := proto.Marshal(info)
-	if err != nil {
-		return merr.WrapErrSerializationFailed(err, "marshal RLS principal info")
-	}
-	return kc.Txn.Save(ctx, key, string(value))
-}
-
-func (kc *Catalog) GetRLSPrincipal(ctx context.Context, collectionID int64, principalName string) (*model.RLSPrincipal, error) {
-	key := buildRLSPrincipalKey(collectionID, principalName)
-	value, err := kc.Txn.Load(ctx, key)
-	if err != nil {
-		return nil, err
-	}
-	info := &rootcoordpb.RLSPrincipalInfo{}
-	if err := proto.Unmarshal([]byte(value), info); err != nil {
-		return nil, merr.WrapErrDataIntegrity(err, "unmarshal RLS principal info")
-	}
-	principal, err := model.UnmarshalRLSPrincipalModel(info)
-	if err != nil {
-		return nil, merr.WrapErrDataIntegrity(err, "decode RLS principal tags")
-	}
-	return principal, nil
-}
-
-func (kc *Catalog) DropRLSPrincipal(ctx context.Context, collectionID int64, principalName string) error {
-	return kc.Txn.Remove(ctx, buildRLSPrincipalKey(collectionID, principalName))
-}
-
-func (kc *Catalog) ListRLSPrincipals(ctx context.Context, collectionID int64) ([]*model.RLSPrincipal, error) {
-	walker, ok := kc.Txn.(prefixWalker)
-	if !ok {
-		return nil, merr.Wrapf(merr.ErrServiceUnimplemented, "metadata store does not support bounded RLS principal scans")
-	}
-	maxEntries := paramtable.Get().ProxyCfg.RLSMaxPrincipalCacheEntries.GetAsInt()
-	maxBytes := paramtable.Get().ProxyCfg.RLSMaxPrincipalCacheBytes.GetAsInt64()
-	principals := make([]*model.RLSPrincipal, 0, min(maxEntries, rlsPrincipalScanBatchSize))
-	var totalBytes int64
-	// TODO: Add cursor pagination so callers can enumerate collections that
-	// exceed the non-paginated list limits.
-	err := walker.WalkWithPrefix(ctx, BuildRLSPrincipalPrefix(collectionID), rlsPrincipalScanBatchSize, func(_, value []byte) error {
-		if len(principals) >= maxEntries {
-			return merr.WrapErrServiceQuotaExceededMsg("RLS principal list exceeds the %d-entry limit", maxEntries)
-		}
-		info := &rootcoordpb.RLSPrincipalInfo{}
-		if err := proto.Unmarshal(value, info); err != nil {
-			return merr.WrapErrDataIntegrity(err, "unmarshal RLS principal info")
-		}
-		principal, err := model.UnmarshalRLSPrincipalModel(info)
-		if err != nil {
-			return merr.WrapErrDataIntegrity(err, "decode RLS principal tags")
-		}
-		entryBytes, err := rlsutil.PrincipalTagsSize(principal.PrincipalName, principal.Tags)
-		if err != nil {
-			return err
-		}
-		if entryBytes > maxBytes-totalBytes {
-			return merr.WrapErrServiceQuotaExceededMsg("RLS principal list exceeds the %d-byte limit", maxBytes)
-		}
-		totalBytes += entryBytes
-		principals = append(principals, principal)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	sort.Slice(principals, func(i, j int) bool {
-		return principals[i].PrincipalName < principals[j].PrincipalName
-	})
-	return principals, nil
 }
 
 func (kc *Catalog) SaveFileResource(ctx context.Context, resource *internalpb.FileResourceInfo, version uint64) error {

@@ -163,6 +163,9 @@ service QueryNode {
     rpc GetMetrics(milvus.GetMetricsRequest)
         returns (milvus.GetMetricsResponse) {
     }
+    rpc GetFeatureUsage(internal.GetFeatureUsageRequest)
+        returns (internal.GetFeatureUsageResponse) {
+    }
 
     rpc GetDataDistribution(GetDataDistributionRequest)
         returns (GetDataDistributionResponse) {
@@ -375,6 +378,10 @@ message SyncNewCreatedPartitionRequest {
     common.MsgBase base = 1;
     int64 collectionID = 2;
     int64 partitionID = 3;
+    // When true, the request returns after the partition joins the load meta
+    // and its target update is triggered, without waiting until the partition
+    // is queryable.
+    bool skip_wait_ready = 4;
 }
 
 // -----------------query node grpc request and response proto----------------

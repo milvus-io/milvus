@@ -54,6 +54,7 @@
 #include "segcore/test_utils/ConsumerIndexTestUtils.h"
 #include "index/contracts/query/IVectorReader.h"
 #include "index/contracts/query/INullReader.h"
+#include "index/contracts/query/IScalarValueReader.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/version.h"
 #include "pb/plan.pb.h"
@@ -440,6 +441,7 @@ class ArrayEqualityCountingSegment : public ChunkedSegmentSealedImpl {
 class ArrayEqualityCountingIndex final
     : public index::IIndexReaderBase,
       public index::IScalarPredicateReader<int64_t>,
+      public index::IScalarValueReader<int64_t>,
       public index::INullReader {
  public:
     explicit ArrayEqualityCountingIndex(index::IIndexReaderBasePtr reader)
@@ -447,9 +449,13 @@ class ArrayEqualityCountingIndex final
           predicates_(
               dynamic_cast<const index::IScalarPredicateReader<int64_t>*>(
                   reader_.get())),
-          nulls_(dynamic_cast<const index::INullReader*>(reader_.get())) {
+          nulls_(dynamic_cast<const index::INullReader*>(reader_.get())),
+          values_(dynamic_cast<const index::IScalarValueReader<int64_t>*>(
+              reader_.get())) {
         AssertInfo(predicates_ != nullptr && nulls_ != nullptr,
                    "ARRAY equality fixture needs predicate and null readers");
+        AssertInfo(!reader_->Caps().value_lookup || values_ != nullptr,
+                   "ARRAY equality fixture needs the advertised value reader");
     }
 
     mutable size_t callback_calls = 0;
@@ -513,10 +519,26 @@ class ArrayEqualityCountingIndex final
         return nulls_->IsNotNull();
     }
 
+    std::optional<int64_t>
+    Lookup(int64_t offset) const override {
+        AssertInfo(values_ != nullptr, "value reader is unavailable");
+        return values_->Lookup(offset);
+    }
+
+    void
+    Gather(const int64_t* offsets,
+           int64_t count,
+           const std::function<void(int64_t, const int64_t*, bool)>& out)
+        const override {
+        AssertInfo(values_ != nullptr, "value reader is unavailable");
+        values_->Gather(offsets, count, out);
+    }
+
  private:
     index::IIndexReaderBasePtr reader_;
     const index::IScalarPredicateReader<int64_t>* predicates_;
     const index::INullReader* nulls_;
+    const index::IScalarValueReader<int64_t>* values_;
 };
 
 }  // namespace
@@ -1141,7 +1163,9 @@ TEST(Expr, TestArrayEqual) {
     }
 }
 
-TEST(Expr, TestArrayIndexEqualityReadsOnlyCandidates) {
+static void
+CheckArrayIndexEqualityReadsOnlyCandidates(const std::string& index_type,
+                                           Config params = Config::object()) {
     constexpr int64_t N = 1536;
     for (bool nested : {false, true}) {
         for (bool mmap : {false, true}) {
@@ -1221,14 +1245,18 @@ TEST(Expr, TestArrayIndexEqualityReadsOnlyCandidates) {
                 if (nested) {
                     ASSERT_NE(segment.GetStructElementOffsets(field), nullptr);
                 }
-                auto opened =
-                    test::expr_index::BuildIndex(field,
-                                                 DataType::ARRAY,
-                                                 index::INVERTED_INDEX_TYPE,
-                                                 {field_data},
-                                                 Config::object(),
-                                                 DataType::INT64,
-                                                 nested);
+                auto opened = test::expr_index::BuildIndex(field,
+                                                           DataType::ARRAY,
+                                                           index_type,
+                                                           {field_data},
+                                                           params,
+                                                           DataType::INT64,
+                                                           nested);
+                if (index_type == index::HYBRID_INDEX_TYPE ||
+                    index_type == index::ASCENDING_SORT) {
+                    ASSERT_EQ(opened.family, index::families::kSort);
+                    ASSERT_EQ(opened.caps.value_lookup, nested);
+                }
                 auto counting = std::make_unique<ArrayEqualityCountingIndex>(
                     std::move(opened.reader));
                 auto* index_ptr = counting.get();
@@ -1319,6 +1347,24 @@ TEST(Expr, TestArrayIndexEqualityReadsOnlyCandidates) {
             }
         }
     }
+}
+
+TEST(Expr, TestArrayIndexEqualityReadsOnlyCandidates) {
+    CheckArrayIndexEqualityReadsOnlyCandidates(index::INVERTED_INDEX_TYPE);
+}
+
+TEST(Expr, TestArraySortedIndexEqualityReadsOnlyCandidates) {
+    CheckArrayIndexEqualityReadsOnlyCandidates(
+        index::HYBRID_INDEX_TYPE,
+        {{index::SCALAR_INDEX_ENGINE_VERSION, kArrayHybridStlSortMinVersion},
+         {index::ENABLE_ARRAY_SORT_INDEX, true},
+         {index::BITMAP_INDEX_CARDINALITY_LIMIT, 1}});
+}
+
+TEST(Expr, TestArrayExplicitSortedIndexEqualityReadsOnlyCandidates) {
+    CheckArrayIndexEqualityReadsOnlyCandidates(
+        index::ASCENDING_SORT,
+        {{index::SCALAR_INDEX_ENGINE_VERSION, kArrayHybridStlSortMinVersion}});
 }
 
 TEST(Expr, TestArrayNullExpr) {
@@ -4275,7 +4321,9 @@ TEST(Expr, TestArrayContainsForStruct) {
 // cached. Evaluating a sealed segment larger than one batch, without the
 // single-pass optimization, checks that every later batch sees the same,
 // deduplicated terms as the first one.
-TEST(Expr, TestArrayContainsIndexPathAcrossBatches) {
+static void
+CheckArrayContainsIndexPathAcrossBatches(const std::string& index_type,
+                                         Config params = Config::object()) {
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
@@ -4300,19 +4348,23 @@ TEST(Expr, TestArrayContainsIndexPathAcrossBatches) {
     field_data->FillFieldData(arrays.data(), N);
 
     // Build, serialize and reload through the production reader contracts.
-    auto bitmap_index = test::expr_index::BuildIndex(str_array_fid,
+    auto opened_index = test::expr_index::BuildIndex(str_array_fid,
                                                      DataType::ARRAY,
-                                                     index::BITMAP_INDEX_TYPE,
+                                                     index_type,
                                                      {field_data},
-                                                     Config::object(),
+                                                     params,
                                                      DataType::VARCHAR);
-    ASSERT_EQ(bitmap_index.reader->CoordDomain(), index::Domain::Row);
-    ASSERT_FALSE(bitmap_index.caps.nested);
-    ASSERT_EQ(bitmap_index.reader->Count(), N);
+    if (index_type == index::HYBRID_INDEX_TYPE ||
+        index_type == index::ASCENDING_SORT) {
+        ASSERT_EQ(opened_index.family, index::families::kSort);
+    }
+    ASSERT_EQ(opened_index.reader->CoordDomain(), index::Domain::Row);
+    ASSERT_FALSE(opened_index.caps.nested);
+    ASSERT_EQ(opened_index.reader->Count(), N);
     test::expr_index::InstallIndex(*segment,
                                    str_array_fid,
                                    DataType::ARRAY,
-                                   std::move(bitmap_index),
+                                   std::move(opened_index),
                                    DataType::VARCHAR);
 
     auto row_values = [&](int i) {
@@ -4392,6 +4444,24 @@ TEST(Expr, TestArrayContainsIndexPathAcrossBatches) {
             return contains(values, all_terms[0]) &&
                    contains(values, all_terms[1]);
         });
+}
+
+TEST(Expr, TestArrayContainsIndexPathAcrossBatches) {
+    CheckArrayContainsIndexPathAcrossBatches(index::BITMAP_INDEX_TYPE);
+}
+
+TEST(Expr, TestArraySortedContainsIndexPathAcrossBatches) {
+    CheckArrayContainsIndexPathAcrossBatches(
+        index::HYBRID_INDEX_TYPE,
+        {{index::SCALAR_INDEX_ENGINE_VERSION, kArrayHybridStlSortMinVersion},
+         {index::ENABLE_ARRAY_SORT_INDEX, true},
+         {index::BITMAP_INDEX_CARDINALITY_LIMIT, 1}});
+}
+
+TEST(Expr, TestArrayExplicitSortedContainsIndexPathAcrossBatches) {
+    CheckArrayContainsIndexPathAcrossBatches(
+        index::ASCENDING_SORT,
+        {{index::SCALAR_INDEX_ENGINE_VERSION, kArrayHybridStlSortMinVersion}});
 }
 
 // A sealed segment with two chunks: the chunk-length path must resolve rows

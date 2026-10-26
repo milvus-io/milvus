@@ -423,6 +423,10 @@ message ScoreOption{
 
 message PlanOption {
    bool expr_use_json_stats = 1;
+   // Record which execution features (filter paths, scalar index types,
+   // interim index, ...) the request used, for the feature usage report.
+   // Set by the Proxy only on requests it counts.
+   bool collect_feature_bits = 2;
 };
 
 message PlanNode {

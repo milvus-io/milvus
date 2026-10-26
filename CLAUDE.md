@@ -34,6 +34,13 @@ NEVER answer based on documentation alone or code alone. NEVER skip Step 2 — t
 
 - [**Observability**](docs/agent_guides/observability/README.md): Logging, metrics, tracing, and observability debug workflows.
 - [**Streaming System**](docs/agent_guides/streaming-system/streaming-system.md): Write path, WAL, DDL/DCL execution, replication && CDC.
+  - Also read [replicate.md](docs/agent_guides/streaming-system/replication/replicate.md) when you add a feature, or add a side effect to an existing feature. This applies when the feature creates, changes or deletes something that a user expects to still exist after a switchover to another cluster. Examples: rows from any write path, a collection property, a new partition that joins a loaded collection, a granted privilege, a row-level policy, an analyzer that refers to an uploaded dictionary file. Background jobs and internal triggers count too, not only client requests. Decide how the feature works on a CDC deployment. There are three choices:
+    - Replicate it. CDC replicates a state change only through its WAL messages. A secondary applies a message with the same consumer or ack callback as the primary. It derives its physical state (segments, index files, replica placement) by itself.
+    - Keep it local to each cluster, when the state describes that cluster's own deployment: resource group configuration, the message queue in use. Mark its messages unreplicable (`_ur`).
+    - Reject it on a cluster with a replicate topology, until replication is supported. Return an error that says the operation is not supported on a replicating cluster.
+  - Two patterns break replication:
+    - The code applies a state change outside the message path. For example, a coordinator writes its meta directly, or the proxy sends a second RPC after `Broadcast` returns.
+    - A state change depends on a value that is local to one cluster. For example: a segment ID, a node ID, an ID from the local TSO, or a local file path. Allocate such a value on the primary before the broadcast and carry it in the message. Otherwise, do not use it in the state change.
 - [**Storage Paths**](docs/agent_guides/storage/path_contract.md): Read before changing storage paths, manifests, local migration, or GC.
 
 ## Testing

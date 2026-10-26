@@ -1261,6 +1261,9 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			if meta.dataViewManager != nil {
 				meta.recomputeDataView(context.TODO(), task.GetCollectionId())
 			}
+			// The segment is Flushed and carries every index the snapshot had.
+			// Enqueue it so the index inspector builds any index it still lacks.
+			notifySegmentIndexBuild(result.GetSegmentId())
 
 			mlog.Info(context.TODO(), "update copy segment info done",
 				WrapCopySegmentTaskLog(task, mlog.Int64("segmentID", result.GetSegmentId()),

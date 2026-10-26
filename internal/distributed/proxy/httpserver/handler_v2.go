@@ -294,14 +294,14 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(DataBaseCategory+AlterAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.alterDatabase))))
 	router.POST(DataBaseCategory+AlterPropertiesAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.alterDatabase))))
 	// Query
-	router.POST(EntityCategory+QueryAction, h.dqlAdmission(restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
+	router.POST(EntityCategory+QueryAction, h.dqlAdmission(restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
 		return &QueryReqV2{
 			Limit:        100,
 			OutputFields: []string{DefaultOutputFields},
 		}
 	}, wrapperTraceLog(h.query))), true)))
 	// Get
-	router.POST(EntityCategory+GetAction, h.dqlAdmission(restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
+	router.POST(EntityCategory+GetAction, h.dqlAdmission(restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
 		return &CollectionIDReq{
 			OutputFields: []string{DefaultOutputFields},
 		}
@@ -319,19 +319,19 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 		return &CollectionDataReq{}
 	}, wrapperTraceLog(h.upsert))), false))
 	// Search
-	router.POST(EntityCategory+SearchAction, h.dqlAdmission(restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
+	router.POST(EntityCategory+SearchAction, h.dqlAdmission(restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
 		return &SearchReqV2{
 			Limit: 100,
 		}
 	}, wrapperTraceLog(h.search))), true)))
 	// advanced_search, backward compatible uri
-	router.POST(EntityCategory+AdvancedSearchAction, h.dqlAdmission(restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
+	router.POST(EntityCategory+AdvancedSearchAction, h.dqlAdmission(restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
 		return &HybridSearchReq{
 			Limit: 100,
 		}
 	}, wrapperTraceLog(h.advancedSearch))), true)))
 	// HybridSearch
-	router.POST(EntityCategory+HybridSearchAction, h.dqlAdmission(restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
+	router.POST(EntityCategory+HybridSearchAction, h.dqlAdmission(restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
 		return &HybridSearchReq{
 			Limit: 100,
 		}
@@ -1595,8 +1595,6 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 	req := &milvuspb.QueryRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
-		RlsPrincipal:   httpReq.RlsPrincipal,
-		SkipRls:        httpReq.SkipRls,
 		Expr:           httpReq.Filter,
 		OutputFields:   httpReq.OutputFields,
 		PartitionNames: httpReq.PartitionNames,
@@ -1697,8 +1695,6 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 	req := &milvuspb.QueryRequest{
 		DbName:             dbName,
 		CollectionName:     httpReq.CollectionName,
-		RlsPrincipal:       httpReq.RlsPrincipal,
-		SkipRls:            httpReq.SkipRls,
 		OutputFields:       httpReq.OutputFields,
 		PartitionNames:     httpReq.PartitionNames,
 		Expr:               filter,
@@ -1759,8 +1755,6 @@ func (h *HandlersV2) delete(ctx context.Context, c *gin.Context, anyReq any, dbN
 	req := &milvuspb.DeleteRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
-		RlsPrincipal:   httpReq.RlsPrincipal,
-		SkipRls:        httpReq.SkipRls,
 		PartitionName:  httpReq.PartitionName,
 		Expr:           httpReq.Filter,
 	}
@@ -1806,8 +1800,6 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	req := &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
-		RlsPrincipal:   httpReq.RlsPrincipal,
-		SkipRls:        httpReq.SkipRls,
 		PartitionName:  httpReq.PartitionName,
 		// PartitionName:  "_default",
 	}
@@ -1882,8 +1874,6 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	req := &milvuspb.UpsertRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
-		RlsPrincipal:   httpReq.RlsPrincipal,
-		SkipRls:        httpReq.SkipRls,
 		PartitionName:  httpReq.PartitionName,
 		PartialUpdate:  httpReq.PartialUpdate,
 		// PartitionName:  "_default",
@@ -2126,8 +2116,6 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	req := &milvuspb.SearchRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
-		RlsPrincipal:   httpReq.RlsPrincipal,
-		SkipRls:        httpReq.SkipRls,
 		Dsl:            httpReq.Filter,
 		DslType:        commonpb.DslType_BoolExprV1,
 		OutputFields:   httpReq.OutputFields,
@@ -2459,8 +2447,6 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 	req := &milvuspb.HybridSearchRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
-		RlsPrincipal:   httpReq.RlsPrincipal,
-		SkipRls:        httpReq.SkipRls,
 		PartitionNames: httpReq.PartitionNames,
 		Requests:       []*milvuspb.SearchRequest{},
 		OutputFields:   httpReq.OutputFields,

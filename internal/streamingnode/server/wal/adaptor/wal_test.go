@@ -60,6 +60,11 @@ func TestFencedError(t *testing.T) {
 func TestWAL(t *testing.T) {
 	walimplstest.Reset()
 	initResourceForTest(t)
+	// Exercise eviction with the existing 10 KiB cache without turning this
+	// append/scan test into a producer-admission test: keep slowdown at 64 MiB.
+	pressureKey := paramtable.Get().StreamingCfg.WALRateLimitWABSlowdownRatio.Key
+	require.NoError(t, paramtable.Get().Save(pressureKey, "6553.6")) // 64 MiB / 10 KiB
+	t.Cleanup(func() { _ = paramtable.Get().Reset(pressureKey) })
 	b := registry.MustGetBuilder(message.WALNameTest,
 		redo.NewInterceptorBuilder(),
 		lock.NewInterceptorBuilder(),

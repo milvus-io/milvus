@@ -1580,6 +1580,65 @@ func TestGetCurrentSegmentsView(t *testing.T) {
 	assert.ElementsMatch(t, []int64{9}, view.ImportingSegmentIDs)
 }
 
+func TestGetCurrentSegmentsViewExternalCollection(t *testing.T) {
+	svr := newTestServer(t)
+	defer closeTestServer(t, svr)
+	schema := newTestSchema()
+	svr.meta.AddCollection(&collectionInfo{
+		ID:         0,
+		Partitions: []int64{0},
+		Schema:     schema,
+	})
+
+	// External collection segments are produced by refresh, not the WAL, so they
+	// carry neither start nor dml position. A committed manifest or fake binlogs
+	// must still admit them, otherwise GetPersistentSegmentInfo returns nothing
+	// for external collections while GetQuerySegmentInfo does report them.
+	manifestSeg := &datapb.SegmentInfo{
+		ID:             100,
+		CollectionID:   0,
+		PartitionID:    0,
+		InsertChannel:  "ch1",
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath("/data/segments/100", 1),
+		NumOfRows:      100,
+	}
+	err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(manifestSeg))
+	assert.NoError(t, err)
+
+	// Fake binlogs are stripped on persistence, but before a restart they are the
+	// only marker a freshly refreshed external segment carries.
+	binlogSeg := &datapb.SegmentInfo{
+		ID:            101,
+		CollectionID:  0,
+		PartitionID:   0,
+		InsertChannel: "ch1",
+		State:         commonpb.SegmentState_Flushed,
+		Binlogs: []*datapb.FieldBinlog{
+			{FieldID: 1, Binlogs: []*datapb.Binlog{{LogID: 1, EntriesNum: 100}}},
+		},
+		NumOfRows: 100,
+	}
+	err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(binlogSeg))
+	assert.NoError(t, err)
+
+	// A segment with no position, no manifest and no binlogs is still dropped.
+	emptySeg := &datapb.SegmentInfo{
+		ID:            102,
+		CollectionID:  0,
+		PartitionID:   0,
+		InsertChannel: "ch1",
+		State:         commonpb.SegmentState_Flushed,
+		NumOfRows:     100,
+	}
+	err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(emptySeg))
+	assert.NoError(t, err)
+
+	view := svr.handler.GetCurrentSegmentsView(context.Background(), &channelMeta{Name: "ch1", CollectionID: 0})
+	assert.ElementsMatch(t, []int64{100, 101}, view.FlushedSegmentIDs)
+}
+
 func TestShouldDropChannel(t *testing.T) {
 	type myRootCoord struct {
 		mocks2.MockRootCoordClient

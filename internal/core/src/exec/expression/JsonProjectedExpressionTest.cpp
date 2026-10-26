@@ -13,9 +13,12 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 #include <tuple>
+#include <utility>
 #include <vector>
 
+#include "common/Consts.h"
 #include "common/Schema.h"
 #include "exec/expression/ExprBatchTestUtils.h"
 #include "exec/expression/ExprIndexIntegrationTestUtils.h"
@@ -25,7 +28,9 @@
 
 using namespace milvus;
 
-TEST(JsonProjectedExpressionTest, ContainsUsesIndexAndExactRawFallback) {
+static void
+CheckContainsUsesIndexAndExactRawFallback(const std::string& index_type,
+                                          Config params = Config::object()) {
     milvus::test::ExprBatchSizeGuard batch_size_guard(8);
     std::vector<std::string> json_raw_data = {
         R"(1)",
@@ -67,12 +72,13 @@ TEST(JsonProjectedExpressionTest, ContainsUsesIndexAndExactRawFallback) {
     auto segment = segcore::CreateSealedSegment(schema);
     auto raw_info = raw_files.Prepare(json_fid, {json_field});
     segment->LoadFieldData(raw_info);
+    params[JSON_PATH] = json_path;
+    params[JSON_CAST_TYPE] = "ARRAY_DOUBLE";
     auto opened = test::expr_index::BuildIndex(
-        json_fid,
-        DataType::JSON,
-        index::INVERTED_INDEX_TYPE,
-        {json_field},
-        {{JSON_PATH, json_path}, {JSON_CAST_TYPE, "ARRAY_DOUBLE"}});
+        json_fid, DataType::JSON, index_type, {json_field}, params);
+    if (index_type == index::HYBRID_INDEX_TYPE) {
+        ASSERT_EQ(opened.family, index::families::kSort);
+    }
     test::expr_index::InstallIndex(
         *segment, json_fid, DataType::JSON, std::move(opened));
 
@@ -150,6 +156,200 @@ TEST(JsonProjectedExpressionTest, ContainsUsesIndexAndExactRawFallback) {
         large_int_plan, segment.get(), json_raw_data.size(), MAX_TIMESTAMP);
     EXPECT_EQ(large_int_result.count(), 1);
     EXPECT_TRUE(large_int_result[26]);
+}
+
+TEST(JsonProjectedExpressionTest, ContainsUsesIndexAndExactRawFallback) {
+    CheckContainsUsesIndexAndExactRawFallback(index::INVERTED_INDEX_TYPE);
+}
+
+TEST(JsonProjectedExpressionTest, HybridArrayContainsPreservesExactFallback) {
+    CheckContainsUsesIndexAndExactRawFallback(
+        index::HYBRID_INDEX_TYPE,
+        {{index::SCALAR_INDEX_ENGINE_VERSION, kArrayHybridStlSortMinVersion},
+         {index::ENABLE_ARRAY_SORT_INDEX, true},
+         {index::BITMAP_INDEX_CARDINALITY_LIMIT, 1}});
+}
+
+TEST(JsonProjectedExpressionTest, TypedArraysMatchRawContainsAnyAndAll) {
+    milvus::test::ExprBatchSizeGuard batch_size_guard(2);
+    for (const auto& cast : {std::string("ARRAY_BOOL"),
+                             std::string("ARRAY_DOUBLE"),
+                             std::string("ARRAY_VARCHAR")}) {
+        proto::plan::GenericValue first;
+        proto::plan::GenericValue second;
+        std::vector<std::string> rows;
+        if (cast == "ARRAY_BOOL") {
+            first.set_bool_val(false);
+            second.set_bool_val(true);
+            rows = {R"({"a":[false,true,true]})",
+                    R"({"a":[true]})",
+                    R"({"a":[]})",
+                    R"({})",
+                    R"({"a":null})",
+                    R"({"a":3})",
+                    R"({"a":[false,3,"ignored",null,{}]})",
+                    R"({"a":[false]})",
+                    R"({"a":[false,true]})"};
+        } else if (cast == "ARRAY_DOUBLE") {
+            first.set_float_val(1.0);
+            second.set_float_val(100.0);
+            rows = {R"({"a":[1,100,100]})",
+                    R"({"a":[100.0]})",
+                    R"({"a":[]})",
+                    R"({})",
+                    R"({"a":null})",
+                    R"({"a":true})",
+                    R"({"a":[1.0,false,"ignored",null,{}]})",
+                    R"({"a":[1]})",
+                    R"({"a":[1,100]})"};
+        } else {
+            first.set_string_val("a");
+            second.set_string_val("z");
+            rows = {R"({"a":["a","z","z"]})",
+                    R"({"a":["z"]})",
+                    R"({"a":[]})",
+                    R"({})",
+                    R"({"a":null})",
+                    R"({"a":true})",
+                    R"({"a":["a",false,3,null,{}]})",
+                    R"({"a":["a"]})",
+                    R"({"a":["a","z"]})"};
+        }
+        auto schema = std::make_shared<Schema>();
+        const auto field = schema->AddDebugField("json", DataType::JSON, true);
+        rows.push_back(R"({"a":[null,{},[]]})");
+        const std::vector<uint8_t> validity{0x7f, 0x03};
+        auto data = test::expr_index::JsonField(rows, true, validity.data());
+        test::expr_index::RawFieldFiles raw_files;
+        auto raw = segcore::CreateSealedSegment(schema);
+        raw->LoadFieldData(raw_files.Prepare(field, {data}));
+        for (const auto& [index_type, threshold] :
+             {std::pair{index::HYBRID_INDEX_TYPE, 1},
+              std::pair{index::HYBRID_INDEX_TYPE, 16},
+              std::pair{index::ASCENDING_SORT, 1}}) {
+            const bool hybrid =
+                std::string_view(index_type) == index::HYBRID_INDEX_TYPE;
+            for (const int engine_version :
+                 hybrid ? std::vector<int>{3, 4, 5} : std::vector<int>{5}) {
+                for (const bool mmap : {false, true}) {
+                    SCOPED_TRACE(cast + "/index=" + index_type +
+                                 "/version=" + std::to_string(engine_version) +
+                                 "/threshold=" + std::to_string(threshold) +
+                                 "/mmap=" + std::to_string(mmap));
+                    auto indexed = segcore::CreateSealedSegment(schema);
+                    indexed->LoadFieldData(raw_files.Prepare(field, {data}));
+                    Config index_params{
+                        {JSON_PATH, "/a"},
+                        {JSON_CAST_TYPE, cast},
+                        {index::SCALAR_INDEX_ENGINE_VERSION, engine_version},
+                        {index::ENABLE_ARRAY_SORT_INDEX, true}};
+                    if (std::string_view(index_type) ==
+                        index::HYBRID_INDEX_TYPE) {
+                        index_params[index::BITMAP_INDEX_CARDINALITY_LIMIT] =
+                            threshold;
+                    }
+                    auto opened = test::expr_index::BuildIndex(field,
+                                                               DataType::JSON,
+                                                               index_type,
+                                                               {data},
+                                                               index_params,
+                                                               DataType::NONE,
+                                                               false,
+                                                               mmap);
+                    ASSERT_EQ(opened.family,
+                              threshold != 1
+                                  ? index::families::kBitmap
+                                  : (hybrid && engine_version <
+                                                   kArrayHybridStlSortMinVersion
+                                         ? index::families::kInverted
+                                         : index::families::kSort));
+                    test::expr_index::InstallIndex(
+                        *indexed, field, DataType::JSON, std::move(opened));
+                    const auto expect_equal = [&](const auto& expected,
+                                                  const auto& actual,
+                                                  const auto&
+                                                      expected_validity) {
+                        const BitsetTypeView expected_bits(
+                            expected.result->GetRawData(), rows.size());
+                        const BitsetTypeView actual_bits(
+                            actual.result->GetRawData(), rows.size());
+                        const BitsetTypeView expected_valid(
+                            expected_validity.result->GetValidRawData(),
+                            rows.size());
+                        const BitsetTypeView actual_valid(
+                            actual.result->GetValidRawData(), rows.size());
+                        for (size_t row = 0; row < rows.size(); ++row) {
+                            EXPECT_EQ(actual_bits[row], expected_bits[row])
+                                << row;
+                            EXPECT_EQ(actual_valid[row], expected_valid[row])
+                                << row;
+                        }
+                    };
+                    for (const auto op :
+                         {proto::plan::JSONContainsExpr_JSONOp_ContainsAny,
+                          proto::plan::JSONContainsExpr_JSONOp_ContainsAll}) {
+                        for (const auto& terms : std::vector<
+                                 std::vector<proto::plan::GenericValue>>{
+                                 {first, second, first}, {}}) {
+                            SCOPED_TRACE("query terms=" +
+                                         std::to_string(terms.size()));
+                            const auto expression =
+                                std::make_shared<expr::JsonContainsExpr>(
+                                    expr::ColumnInfo(
+                                        field, DataType::JSON, {"a"}, true),
+                                    op,
+                                    true,
+                                    terms);
+                            if (!terms.empty()) {
+                                EXPECT_TRUE(test::CanExprExecuteAllAtOnce(
+                                    expression, indexed.get(), rows.size()));
+                            }
+                            const auto reference = test::EvalExprInBatches(
+                                expression, raw.get(), rows.size());
+                            const auto actual = test::EvalExprInBatches(
+                                expression, indexed.get(), rows.size());
+                            expect_equal(reference, actual, reference);
+                            const BitsetTypeView actual_bits(
+                                actual.result->GetRawData(), rows.size());
+                            const BitsetTypeView actual_valid(
+                                actual.result->GetValidRawData(), rows.size());
+                            // Empty query lists use the shared expression short-circuit;
+                            // compare its existing result and validity without changing
+                            // the JSON NULL semantics in this index-selection patch.
+                            if (!terms.empty()) {
+                                const auto negated = std::make_shared<
+                                    expr::LogicalUnaryExpr>(
+                                    expr::LogicalUnaryExpr::OpType::LogicalNot,
+                                    expression);
+                                const auto raw_not = test::EvalExprInBatches(
+                                    negated, raw.get(), rows.size());
+                                const auto indexed_not =
+                                    test::EvalExprInBatches(
+                                        negated, indexed.get(), rows.size());
+                                // NOT preserves the original expression validity.
+                                expect_equal(raw_not, indexed_not, reference);
+                                const BitsetTypeView indexed_not_bits(
+                                    indexed_not.result->GetRawData(),
+                                    rows.size());
+                                EXPECT_TRUE(actual_valid[2]);
+                                EXPECT_TRUE(actual_valid[9]);
+                                EXPECT_TRUE(indexed_not_bits[2]);
+                                EXPECT_TRUE(indexed_not_bits[9]);
+                                EXPECT_FALSE(actual_valid[7]);
+                                EXPECT_TRUE(actual_bits[0]);
+                                EXPECT_TRUE(actual_bits[8]);
+                                EXPECT_EQ(
+                                    actual_bits[6],
+                                    op ==
+                                        proto::plan::
+                                            JSONContainsExpr_JSONOp_ContainsAny);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 TEST(JsonProjectedExpressionTest, StringToDoubleCastReachesExpression) {

@@ -66,6 +66,7 @@
 #include "indexbuilder/BuildSession.h"
 #include "indexbuilder/VectorDiskBuildMaterializer.h"
 #include "knowhere/binaryset.h"
+#include "knowhere/index/index_factory.h"
 #include "knowhere/operands.h"
 #include "knowhere/sparse_utils.h"
 #include "knowhere/version.h"
@@ -298,12 +299,12 @@ GeneratedIndexIdentifierPrefixForTest(const IndexMeta& index_meta) {
 }
 
 std::vector<std::string>
-CollectIdMapMmapFiles(const std::string& root_path,
-                      const IndexMeta& index_meta) {
-    std::vector<std::string> files;
+CollectIdMapMmapDirectories(const std::string& root_path,
+                            const IndexMeta& index_meta) {
+    std::vector<std::string> directories;
     boost::filesystem::path root(root_path);
     if (!boost::filesystem::exists(root)) {
-        return files;
+        return directories;
     }
 
     const auto index_identifier =
@@ -312,41 +313,18 @@ CollectIdMapMmapFiles(const std::string& root_path,
          it != end;
          ++it) {
         const auto& path = it->path();
-        if (!boost::filesystem::is_regular_file(path)) {
+        if (!boost::filesystem::is_directory(path)) {
             continue;
         }
         if (path.string().find(index_identifier) == std::string::npos) {
             continue;
         }
-        if (path.parent_path().filename().string() ==
-            milvus::index::ID_MAP_MMAP_DIR) {
-            files.emplace_back(path.string());
+        if (path.filename().string() == milvus::index::ID_MAP_MMAP_DIR) {
+            directories.emplace_back(path.string());
         }
     }
-    std::sort(files.begin(), files.end());
-    return files;
-}
-
-bool
-HasIdMapMmapFilePrefix(const std::vector<std::string>& files,
-                       const std::string& prefix) {
-    const auto prefix_with_generation = prefix + ".";
-    return std::any_of(files.begin(), files.end(), [&](const auto& file) {
-        return boost::filesystem::path(file).filename().string().rfind(
-                   prefix_with_generation, 0) == 0;
-    });
-}
-
-std::vector<std::string>
-NewFilesAfter(const std::vector<std::string>& before,
-              const std::vector<std::string>& after) {
-    std::vector<std::string> files;
-    for (const auto& file : after) {
-        if (!std::binary_search(before.begin(), before.end(), file)) {
-            files.emplace_back(file);
-        }
-    }
-    return files;
+    std::sort(directories.begin(), directories.end());
+    return directories;
 }
 
 }  // namespace
@@ -1150,18 +1128,21 @@ TEST_F(DiskAnnFileManagerTest, LoadStreamIndexCachesOnlyValidDataSidecar) {
     std::memcpy(&cached_wire_count, cached_valid_data.data(), sizeof(uint64_t));
     ASSERT_EQ(milvus::index::FromValidDataCount(cached_wire_count),
               total_count);
-    knowhere::IdMap loaded_id_map;
-    const auto restored = index::RestoreIdMapFromValidData(
-        loaded_id_map,
+    auto created = knowhere::IndexFactory::Instance().Create<float>(
+        knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+        knowhere::Version::GetCurrentVersion().VersionNumber());
+    ASSERT_TRUE(created.has_value());
+    auto loaded = std::move(created.value());
+    const auto input = index::MakeNullableLoadInput(
         index::ValidDataView{true,
                              static_cast<size_t>(total_count),
                              cached_valid_data.data() + sizeof(uint64_t)});
-    loaded_id_map.FinalizeVectorIds();
-
-    ASSERT_TRUE(restored.has_valid_data);
-    EXPECT_FALSE(loaded_id_map.ValidBitmap().empty());
-    EXPECT_EQ(loaded_id_map.OutCount(), total_count);
-    EXPECT_EQ(loaded_id_map.InCount(), valid_count);
+    ASSERT_TRUE(input.validity.has_value());
+    ASSERT_EQ(loaded.ImportValidity(*input.validity),
+              knowhere::Status::success);
+    EXPECT_TRUE(loaded.HasValidity().value());
+    EXPECT_EQ(loaded.LogicalCount().value(), total_count);
+    EXPECT_EQ(loaded.ValidCount().value(), valid_count);
     EXPECT_EQ(file_manager_context.indexMeta.dim, 128);
 
     local_chunk_manager->Remove(valid_data_path);
@@ -1927,8 +1908,7 @@ TEST_F(DiskAnnFileManagerTest, BuildAllNullNullableDiskVectorIndexFromDataset) {
     }
 }
 
-TEST_F(DiskAnnFileManagerTest,
-       BuildNullableDiskVectorIndexCreatesIdMapMmapFilesInCompatibleDir) {
+TEST_F(DiskAnnFileManagerTest, NullableDiskVectorLoadsIsolateMmapDirectories) {
     const int64_t collection_id = 1;
     const int64_t partition_id = 2;
     const int64_t segment_id = 3003;
@@ -1981,15 +1961,16 @@ TEST_F(DiskAnnFileManagerTest,
 
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    const auto mmap_files_before_build =
-        CollectIdMapMmapFiles(local_chunk_manager->GetRootPath(), index_meta)
+    const auto mmap_directory_count_before_build =
+        CollectIdMapMmapDirectories(local_chunk_manager->GetRootPath(),
+                                    index_meta)
             .size();
 
     auto published = PublishDiskResident(file_manager_context, data, config);
     EXPECT_EQ(PersistedVectorRowCount(published, file_manager_context),
               num_rows);
-    // Artifacts contain persisted files. The first consumer open owns the
-    // derived id-map mmap files, as does each subsequent independent load.
+    // Each consumer owns an independent staging directory. Backends may
+    // consume and release temporary mapping arrays during load.
     auto reader = published.Open(file_manager_context);
     const auto& vector = dynamic_cast<const index::IVectorReader&>(*reader);
     ASSERT_TRUE(vector.HasValidData());
@@ -1999,13 +1980,10 @@ TEST_F(DiskAnnFileManagerTest,
         EXPECT_EQ(vector.IsRowValid(row), valid_data[row]);
     }
 
-    const auto mmap_files_after_build =
-        CollectIdMapMmapFiles(local_chunk_manager->GetRootPath(), index_meta);
-    EXPECT_GT(mmap_files_after_build.size(), mmap_files_before_build);
-    EXPECT_TRUE(
-        HasIdMapMmapFilePrefix(mmap_files_after_build, "in_to_out_ids"));
-    EXPECT_TRUE(
-        HasIdMapMmapFilePrefix(mmap_files_after_build, "out_to_in_ids"));
+    const auto mmap_directories_after_build = CollectIdMapMmapDirectories(
+        local_chunk_manager->GetRootPath(), index_meta);
+    EXPECT_EQ(mmap_directories_after_build.size(),
+              mmap_directory_count_before_build + 1);
 
     auto files = published.Files();
     ASSERT_GT(files.size(), 1);
@@ -2017,8 +1995,8 @@ TEST_F(DiskAnnFileManagerTest,
     load_config[milvus::index::ENABLE_MMAP_I2O_MAP] = true;
     load_config[milvus::index::ENABLE_MMAP_O2I_MAP] = true;
 
-    const auto mmap_files_before_load =
-        CollectIdMapMmapFiles(local_chunk_manager->GetRootPath(), index_meta);
+    const auto mmap_directories_before_load = CollectIdMapMmapDirectories(
+        local_chunk_manager->GetRootPath(), index_meta);
 
     auto loaded_reader = published.Open(file_manager_context, load_config);
     const auto& loaded_vector =
@@ -2030,12 +2008,24 @@ TEST_F(DiskAnnFileManagerTest,
         EXPECT_EQ(loaded_vector.IsRowValid(row), valid_data[row]);
     }
 
-    const auto mmap_files_after_load =
-        CollectIdMapMmapFiles(local_chunk_manager->GetRootPath(), index_meta);
-    const auto loaded_mmap_files =
-        NewFilesAfter(mmap_files_before_load, mmap_files_after_load);
-    EXPECT_TRUE(HasIdMapMmapFilePrefix(loaded_mmap_files, "in_to_out_ids"));
-    EXPECT_TRUE(HasIdMapMmapFilePrefix(loaded_mmap_files, "out_to_in_ids"));
+    const auto mmap_directories_after_load = CollectIdMapMmapDirectories(
+        local_chunk_manager->GetRootPath(), index_meta);
+    EXPECT_EQ(mmap_directories_after_load.size(),
+              mmap_directories_before_load.size() + 1);
+    EXPECT_TRUE(std::includes(mmap_directories_after_load.begin(),
+                              mmap_directories_after_load.end(),
+                              mmap_directories_before_load.begin(),
+                              mmap_directories_before_load.end()));
+    reader.reset();
+    EXPECT_EQ(CollectIdMapMmapDirectories(local_chunk_manager->GetRootPath(),
+                                          index_meta)
+                  .size(),
+              mmap_directory_count_before_build + 1);
+    loaded_reader.reset();
+    EXPECT_EQ(CollectIdMapMmapDirectories(local_chunk_manager->GetRootPath(),
+                                          index_meta)
+                  .size(),
+              mmap_directory_count_before_build);
 
     for (const auto& file : files) {
         cm_->Remove(file);
@@ -2090,8 +2080,9 @@ TEST_F(DiskAnnFileManagerTest, LoadAllNullNullableDiskVectorIndexFromDataset) {
 
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    const auto mmap_file_count_before_load =
-        CollectIdMapMmapFiles(local_chunk_manager->GetRootPath(), index_meta)
+    const auto mmap_directory_count_before_load =
+        CollectIdMapMmapDirectories(local_chunk_manager->GetRootPath(),
+                                    index_meta)
             .size();
 
     {
@@ -2111,10 +2102,10 @@ TEST_F(DiskAnnFileManagerTest, LoadAllNullNullableDiskVectorIndexFromDataset) {
         }
     }
 
-    EXPECT_EQ(
-        CollectIdMapMmapFiles(local_chunk_manager->GetRootPath(), index_meta)
-            .size(),
-        mmap_file_count_before_load);
+    EXPECT_EQ(CollectIdMapMmapDirectories(local_chunk_manager->GetRootPath(),
+                                          index_meta)
+                  .size(),
+              mmap_directory_count_before_load);
 
     auto id_map_mmap_load_config = load_config;
     id_map_mmap_load_config[milvus::index::ENABLE_MMAP_I2O_MAP] = true;
@@ -2131,10 +2122,10 @@ TEST_F(DiskAnnFileManagerTest, LoadAllNullNullableDiskVectorIndexFromDataset) {
     for (int64_t row = 0; row < num_rows; ++row) {
         EXPECT_FALSE(vector.IsRowValid(row));
     }
-    EXPECT_EQ(
-        CollectIdMapMmapFiles(local_chunk_manager->GetRootPath(), index_meta)
-            .size(),
-        mmap_file_count_before_load);
+    EXPECT_EQ(CollectIdMapMmapDirectories(local_chunk_manager->GetRootPath(),
+                                          index_meta)
+                  .size(),
+              mmap_directory_count_before_load);
 
     for (const auto& file : files) {
         cm_->Remove(file);

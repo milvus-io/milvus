@@ -16,13 +16,14 @@
 
 package datacoord
 
-// importCheckerV3 is only the orchestrator: it owns the two checker loops and
-// the per-tick dispatch. Everything a tick does to one job lives elsewhere:
-// the state machine in import_v3_handler.go and the import_v3_handler_<state>.go
-// files (with the generic helpers in import_v3_job_context.go), the preimport
-// stage in import_v3_preimport.go, the reshard and planning stages in
-// import_v3_reshard.go and import_v3_planning.go, the terminal-job GC in
-// import_v3_gc.go, and the job-to-plan derivation in import_v3_plan.go.
+// importCheckerV3 is only the orchestrator: it owns the two checker loops (the
+// high-frequency state machine and the low-frequency pass) and their dispatch.
+// The terminal-job reclamation itself lives in import_v3_gc.go; everything else
+// a tick does to one job lives in import_v3_handler.go and the
+// import_v3_handler_<state>.go files (with the generic helpers in
+// import_v3_job_context.go), the preimport stage in import_v3_preimport.go, the
+// reshard and planning stages in import_v3_reshard.go and
+// import_v3_planning.go, and the job-to-plan derivation in import_v3_plan.go.
 
 import (
 	"context"
@@ -30,7 +31,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
@@ -41,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
@@ -142,26 +141,18 @@ func (c *importCheckerV3) checkJob(job ImportJob) {
 	jc := newImportV3JobContext(c, job)
 	if err := handler.Handle(jc); err != nil {
 		jc.log.Warn(jc.ctx, "import v3 job state handle failed", mlog.String("state", job.GetState().String()), mlog.Err(err))
-		if isTerminalImportV3JobErr(err) {
+		if importcommon.IsTerminalImportV3Err(err) {
 			jc.failJob(err.Error())
 		}
 	}
 }
 
-// isTerminalImportV3JobErr decides whether a state-handler error fails the job
-// immediately instead of retrying on the next tick. It is the shared denylist
-// plus disk-quota exhaustion, matching the V2 checker (import_checker.go): the
-// quota verdict is not input the user can fix by resubmitting the same
-// request, and a silent retry loop would re-read every reshard manifest on
-// each 2s tick while the job reports a fixed 40% with an empty reason. The
-// Planning state is the only quota consumer, so folding it into the shared
-// policy keeps every state's rule identical.
-func isTerminalImportV3JobErr(err error) bool {
-	return importcommon.IsTerminalImportV3Err(err) || errors.Is(err, merr.ErrServiceQuotaExceeded)
-}
-
+// runGCLoop is the checker's low-frequency pass. It runs the terminal-state
+// policies and then reclaims each terminal job's resources; the collection
+// check stays on this clock because it is a broker RPC, not a cheap timestamp
+// comparison like the job timeout.
 func (c *importCheckerV3) runGCLoop() {
-	ticker := time.NewTicker(Params.DataCoordCfg.ImportCheckIntervalLow.GetAsDuration(time.Second)) // 2min
+	ticker := time.NewTicker(Params.DataCoordCfg.ImportCheckIntervalLow.GetAsDuration(time.Second))
 	defer ticker.Stop()
 	for {
 		select {
@@ -240,6 +231,10 @@ func (c *importCheckerV3) LogTaskStats() {
 	logFunc(tasks, ImportTaskV3Type)
 }
 
+// Terminal-state policies. Neither is an execution error: the job cannot make
+// progress any more, so the pass moves it to Failed and the GC pipeline
+// (import_v3_gc.go) reclaims it on the same or the next pass.
+//
 // tryTimeoutJob fails a job that outlived its timeout. Committing is exempt:
 // the commit ack callback, not the checker, owns that transition.
 func (c *importCheckerV3) tryTimeoutJob(job ImportJob) {
