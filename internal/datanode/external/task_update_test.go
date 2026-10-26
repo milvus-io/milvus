@@ -1201,14 +1201,9 @@ func (s *RefreshExternalCollectionTaskSuite) TestSegmentHasFunctionOutputColumns
 	s.NoError(err)
 	s.False(hasColumns)
 
-	manifestReads := 0
-	mock := mockey.Mock(packed.ManifestHasColumns).To(
-		func(manifestPath string, _ *indexpb.StorageConfig, columns []string) (bool, error) {
-			manifestReads++
-			s.Equal("manifest", manifestPath)
-			s.Equal([]string{"101"}, columns)
-			return false, nil
-		}).Build()
+	// Verify routing through call counts without inspecting slice arguments in
+	// a reflection-based mock callback, which crashed under CI's race checks.
+	mock := mockey.Mock(packed.ManifestHasColumns).Return(false, nil).Build()
 	hasColumns, err = task.segmentHasFunctionOutputColumns(&datapb.SegmentInfo{
 		ManifestPath: "manifest",
 		Binlogs: []*datapb.FieldBinlog{
@@ -1217,13 +1212,13 @@ func (s *RefreshExternalCollectionTaskSuite) TestSegmentHasFunctionOutputColumns
 	}, []string{"101"})
 	s.NoError(err)
 	s.True(hasColumns)
-	s.Zero(manifestReads, "advertised Function outputs must not require a manifest read")
+	s.Zero(mock.Times(), "advertised Function outputs must not require a manifest read")
 	hasColumns, err = task.segmentHasFunctionOutputColumns(&datapb.SegmentInfo{
 		ManifestPath: "manifest",
 	}, []string{"101"})
 	s.NoError(err)
 	s.False(hasColumns)
-	s.Equal(1, manifestReads)
+	s.Equal(1, mock.Times())
 	mock.UnPatch()
 
 	mock = mockey.Mock(packed.ManifestHasColumns).Return(true, nil).Build()
