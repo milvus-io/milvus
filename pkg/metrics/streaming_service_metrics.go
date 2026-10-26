@@ -242,6 +242,15 @@ var (
 		Help: "Primary key index handovers that failed and will be retried",
 	})
 
+	// StreamingNodePKIndexFatalTotal counts the failures of the primary key
+	// index that make a WAL unavailable, by the class of the error: io,
+	// corrupted, unavailable or other. The log line of the failure names the
+	// pchannel and the vchannel.
+	StreamingNodePKIndexFatalTotal = newStreamingNodeCounterVec(prometheus.CounterOpts{
+		Name: "pkindex_fatal_total",
+		Help: "Primary key index failures that made the WAL unavailable, by error class",
+	}, "class")
+
 	// WAL WAL metrics
 	WALInfo = newWALGaugeVec(prometheus.GaugeOpts{
 		Name: "info",
@@ -727,6 +736,7 @@ func RegisterStreamingNode(registry *prometheus.Registry) {
 	registry.MustRegister(StreamingNodePKIndexLockWaitDurationSeconds)
 	registry.MustRegister(StreamingNodePKIndexHandoverTotal)
 	registry.MustRegister(StreamingNodePKIndexHandoverFailuresTotal)
+	registry.MustRegister(StreamingNodePKIndexFatalTotal)
 
 	registerWAL(registry)
 	RegisterLoggingMetrics(registry)
