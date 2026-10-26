@@ -2,6 +2,8 @@ package producer_test
 
 import (
 	"context"
+	"io"
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -108,7 +110,8 @@ func TestLostCommitResponseDoesNotReplayTransaction(t *testing.T) {
 				responses := producer.BatchCommitProduce(ctx, guard)
 				result, err := responses.Responses[0].AppendResult, responses.Responses[0].Error
 				if mode == "result evicted" {
-					require.ErrorContains(t, err, "commit outcome unknown")
+					require.ErrorContains(t, err, "not found")
+					require.True(t, status.AsStreamingError(err).IsUnrecoverable())
 					require.False(t, status.AsStreamingError(err).IsTxnExpired())
 					require.False(t, status.AsStreamingError(err).IsPartialUpdateRetryableCAS())
 				} else {
@@ -123,6 +126,122 @@ func TestLostCommitResponseDoesNotReplayTransaction(t *testing.T) {
 }
 
 type partialUpdateCASRejectProducer struct{ handlerproducer.Producer }
+
+// Business decisions must be identical with and without a preceding transport
+// failure. The real server distinguishes a live, expired session from no record.
+func TestCommitRetryUsesServerOutcome(t *testing.T) {
+	for _, outcome := range []string{"expired", "not found"} {
+		for _, disconnect := range []bool{false, true} {
+			for _, cas := range []bool{false, true} {
+				name := outcome
+				if disconnect {
+					name += "/disconnected"
+				}
+				if cas {
+					name += "/CAS"
+				}
+				t.Run(name, func(t *testing.T) {
+					resource.InitForTest(t)
+					manager := txn.NewTxnManager(types.PChannelInfo{Name: t.Name()}, nil)
+					defer manager.FailTxnAtVChannel("")
+					floor := walimplstest.NewTestMessageID(0)
+					barrier := timetick.NewTimeTickMsg(1, floor, 0, true).IntoImmutableMessage(floor)
+					server := timetick.NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
+						ChannelInfo: types.PChannelInfo{Name: t.Name()}, LastTimeTickMessage: barrier, LastConfirmedMessageID: floor,
+						TxnManager: manager, MVCCManager: mvcc.NewMVCCManager(1),
+					})
+					defer server.Close()
+					var mu sync.Mutex
+					var firstTxn message.TxnID
+					var attempts []message.TxnID
+					var sequence int64
+					begins, commits := 0, 0
+					var serverErr error
+					transport := &partialUpdateCASRejectProducer{}
+					patch := mockey.Mock((*partialUpdateCASRejectProducer).Append).To(func(_ *partialUpdateCASRejectProducer, ctx context.Context, msg message.MutableMessage) (*types.AppendResult, error) {
+						if msg.MessageType() == message.MessageTypeCommitTxn {
+							id := msg.TxnContext().TxnID
+							attempts = append(attempts, id)
+							if firstTxn == 0 {
+								firstTxn = id
+							}
+							if disconnect && len(attempts) == 1 {
+								return nil, io.ErrUnexpectedEOF
+							}
+							if id == firstTxn {
+								if outcome == "expired" {
+									session, err := manager.GetSessionOfTxn(id)
+									require.NoError(t, err)
+									require.True(t, status.AsStreamingError(session.AddNewMessage(ctx, math.MaxUint64)).IsTxnExpired())
+								} else {
+									manager.FailTxnAtVChannel(msg.VChannel())
+								}
+							}
+						}
+						extra := &utility.ExtraAppendResult{}
+						id, err := server.DoAppend(utility.WithExtraAppendResult(ctx, extra), msg, func(_ context.Context, m message.MutableMessage) (message.MessageID, error) {
+							mu.Lock()
+							defer mu.Unlock()
+							sequence++
+							if m.MessageType() == message.MessageTypeBeginTxn {
+								begins++
+							}
+							if m.MessageType() == message.MessageTypeCommitTxn {
+								commits++
+							}
+							return walimplstest.NewTestMessageID(sequence), nil
+						})
+						if err != nil {
+							serverErr = err
+							return nil, err
+						}
+						return &types.AppendResult{MessageID: id, TimeTick: extra.TimeTick, LastConfirmedMessageID: extra.LastConfirmedMessageID, TxnCtx: extra.TxnCtx}, nil
+					}).Build()
+					defer patch.UnPatch()
+					available := mockey.Mock((*partialUpdateCASRejectProducer).IsAvailable).Return(true).Build()
+					defer available.UnPatch()
+					wait := mockey.Mock((*partialUpdateCASRejectProducer).Available).Return(make(chan struct{})).Build()
+					defer wait.UnPatch()
+					closePatch := mockey.Mock((*partialUpdateCASRejectProducer).Close).Return().Build()
+					defer closePatch.UnPatch()
+					p := producer.NewResumableProducer(func(context.Context, *handler.ProducerOptions) (handlerproducer.Producer, error) {
+						return transport, nil
+					}, &producer.ProducerOptions{PChannel: t.Name()})
+					defer p.Close()
+					msgs := []message.MutableMessage{createRealInsertMessage(t, "test-v"), createRealInsertMessage(t, "test-v")}
+					if cas {
+						msgs = []message.MutableMessage{createRealPartialUpdateInsertMessage(t, "test-v")}
+					}
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					guard, err := p.BeginProduce(ctx, msgs...)
+					require.NoError(t, err)
+					response := producer.BatchCommitProduce(ctx, guard).Responses[0]
+					if outcome == "not found" {
+						require.ErrorContains(t, response.Error, "not found")
+						require.ErrorIs(t, response.Error, serverErr)
+						require.False(t, status.AsStreamingError(response.Error).IsTxnExpired())
+						require.True(t, status.AsStreamingError(response.Error).IsUnrecoverable())
+						require.Equal(t, 1, begins)
+						require.Zero(t, commits)
+					} else if cas {
+						require.True(t, status.AsStreamingError(response.Error).IsPartialUpdateRetryableCAS(), "%v", response.Error)
+						require.Equal(t, 1, begins)
+						require.Zero(t, commits)
+					} else {
+						require.NoError(t, response.Error)
+						require.Equal(t, 2, begins)
+						require.Equal(t, 1, commits)
+					}
+					if disconnect {
+						require.GreaterOrEqual(t, len(attempts), 2)
+						require.Equal(t, attempts[0], attempts[1], "transport retry must resend the same Commit")
+					}
+				})
+			}
+		}
+	}
+}
 
 func createRealInsertMessage(t *testing.T, vchannel string) message.MutableMessage {
 	t.Helper()

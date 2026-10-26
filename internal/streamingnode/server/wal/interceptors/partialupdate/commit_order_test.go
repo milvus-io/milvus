@@ -43,7 +43,8 @@ func TestPartialUpdateChainBodyBeforeBeginIsRejected(t *testing.T) {
 			appended = true
 			return env.nextMessageID(), nil
 		})
-		requireOrderTestCode(t, err, streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED, name+" before BeginTxn")
+		requireOrderTestCode(t, err, streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE, name+" before BeginTxn")
+		require.ErrorContains(t, err, "not found")
 		require.False(t, appended, "%s before BeginTxn reached the WAL", name)
 		require.Nil(t, env.partial.state.getTxn(txnContext.TxnID), "%s before BeginTxn created a record", name)
 	}
