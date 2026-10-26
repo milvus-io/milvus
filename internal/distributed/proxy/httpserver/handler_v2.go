@@ -2135,13 +2135,11 @@ func appendGroupParams(params []*commonpb.KeyValuePair, groupByField string, gro
 	return params, nil
 }
 
-func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
-	vectorEncoding, err := parseFloatVectorEncoding(c.Request.Header)
-	if err != nil {
-		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-		return nil, err
-	}
-	httpReq := anyReq.(*SearchReqV2)
+// buildSearchRequest turns the RESTful search body into the proxy's
+// SearchRequest and fetches the collection schema it needs on the way. Every
+// error path has already written the HTTP response, so callers return the
+// error as is.
+func (h *HandlersV2) buildSearchRequest(ctx context.Context, c *gin.Context, httpReq *SearchReqV2, dbName string) (*milvuspb.SearchRequest, *schemapb.CollectionSchema, error) {
 	req := &milvuspb.SearchRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
@@ -2150,6 +2148,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		OutputFields:   httpReq.OutputFields,
 		PartitionNames: httpReq.PartitionNames,
 	}
+	var err error
 	req.ConsistencyLevel, req.UseDefaultConsistency, err = convertConsistencyLevel(httpReq.ConsistencyLevel)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, search with consistency_level invalid", mlog.Err(err))
@@ -2157,14 +2156,14 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: "consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded, err:" + err.Error(),
 		})
-		return nil, err
+		return nil, nil, err
 	}
 	c.Set(ContextRequest, req)
 
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
 		// has already throw http in GetCollectionSchema if fails to get schema
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Check if search by primary keys or by vectors
@@ -2177,7 +2176,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
 			HTTPReturnMessage: "primary keys (ids) and query vectors (data) are mutually exclusive. Please provide either 'ids' or 'data', not both",
 		})
-		return nil, merr.ErrParameterInvalid
+		return nil, nil, merr.ErrParameterInvalid
 	}
 
 	// At least one of ids or data must be provided
@@ -2186,29 +2185,29 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			HTTPReturnCode:    merr.Code(merr.ErrMissingRequiredParameters),
 			HTTPReturnMessage: "either 'ids' (for primary key search) or 'data' (for vector search) must be provided",
 		})
-		return nil, merr.ErrMissingRequiredParameters
+		return nil, nil, merr.ErrMissingRequiredParameters
 	}
 
 	if httpReq.SearchAggregation != nil {
 		if hasIDs {
 			err := merr.WrapErrParameterInvalidMsg("ids and searchAggregation cannot be used simultaneously")
 			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-			return nil, err
+			return nil, nil, err
 		}
 		if httpReq.Offset != 0 {
 			err := merr.WrapErrParameterInvalidMsg("offset is not supported with searchAggregation")
 			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-			return nil, err
+			return nil, nil, err
 		}
 		if searchParamsContainAny(httpReq.SearchParams, proxy.OffsetKey) {
 			err := merr.WrapErrParameterInvalidMsg("searchParams.offset is not supported with searchAggregation")
 			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-			return nil, err
+			return nil, nil, err
 		}
 		if httpReq.GroupByField != "" || httpReq.GroupSize != nil || httpReq.StrictGroupSize != nil {
 			err := merr.WrapErrParameterInvalidMsg("groupingField/groupSize/strictGroupSize and searchAggregation cannot be used simultaneously")
 			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-			return nil, err
+			return nil, nil, err
 		}
 		if searchParamsContainAny(httpReq.SearchParams,
 			proxy.GroupByFieldKey, proxy.GroupByFieldsKey, proxy.GroupSizeKey, proxy.StrictGroupSize) {
@@ -2216,18 +2215,18 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			// clients and the REST e2e suite already pin on
 			err := merr.WrapErrParameterInvalidMsg("searchParams.group_by_field(s) and searchAggregation cannot be used simultaneously, and neither can group_size/strict_group_size")
 			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-			return nil, err
+			return nil, nil, err
 		}
 		if len(httpReq.OrderByFields) > 0 {
 			err := merr.WrapErrParameterInvalidMsg("orderByFields and searchAggregation cannot be used simultaneously")
 			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-			return nil, err
+			return nil, nil, err
 		}
 		req.SearchAggregation, err = convertSearchAggregationReq(httpReq.SearchAggregation)
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, convert SearchAggregation failed", mlog.Err(err))
 			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
@@ -2236,7 +2235,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	if len(httpReq.OrderByFields) > 0 && searchParamsContainAny(httpReq.SearchParams, proxy.OrderByFieldsKey) {
 		err := merr.WrapErrParameterInvalidMsg("ambiguous order by: use either orderByFields or searchParams.order_by_fields, not both")
 		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-		return nil, err
+		return nil, nil, err
 	}
 
 	// The group knobs have the same two spellings, and the searchParams one is
@@ -2250,7 +2249,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		err := merr.WrapErrParameterInvalidMsg(
 			"ambiguous grouping: use either the top-level groupingField/groupSize/strictGroupSize or the searchParams group keys, not both")
 		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-		return nil, err
+		return nil, nil, err
 	}
 
 	// The rule that a size knob needs a grouping field holds for the legacy
@@ -2265,7 +2264,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		err := merr.WrapErrParameterInvalidMsg(
 			"searchParams group_size/strict_group_size require a group field")
 		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Group keys nested under searchParams.params never act -- the proxy reads
@@ -2281,7 +2280,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 					err := merr.WrapErrParameterInvalidMsg(
 						"searchParams.params cannot carry %s; use the top-level grouping fields or searchParams.%s", key, key)
 					HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-					return nil, err
+					return nil, nil, err
 				}
 			}
 		}
@@ -2294,14 +2293,14 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: err.Error(),
 		})
-		return nil, err
+		return nil, nil, err
 	}
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: common.TopKKey, Value: strconv.FormatInt(int64(httpReq.Limit), 10)})
 	searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.OffsetKey, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
 	searchParams, err = appendGroupParams(searchParams, httpReq.GroupByField, httpReq.GroupSize, httpReq.StrictGroupSize)
 	if err != nil {
 		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
-		return nil, err
+		return nil, nil, err
 	}
 	if len(httpReq.OrderByFields) > 0 {
 		searchParams = append(searchParams, &commonpb.KeyValuePair{Key: proxy.OrderByFieldsKey, Value: strings.Join(httpReq.OrderByFields, ",")})
@@ -2309,13 +2308,13 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	if len(httpReq.FunctionScore.Functions) != 0 {
 		if req.FunctionScore, err = genFunctionScore(ctx, &httpReq.FunctionScore); err != nil {
 			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(merr.ErrParameterInvalid), HTTPReturnMessage: err.Error()})
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	if len(httpReq.FunctionChains) != 0 {
 		if req.FunctionChains, err = genFunctionChains(httpReq.FunctionChains); err != nil {
 			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(merr.ErrParameterInvalid), HTTPReturnMessage: err.Error()})
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
@@ -2327,7 +2326,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 				HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
 				HTTPReturnMessage: "collection has no primary key field",
 			})
-			return nil, merr.ErrParameterInvalid
+			return nil, nil, merr.ErrParameterInvalid
 		}
 
 		// Convert ids to schemapb.IDs
@@ -2338,7 +2337,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 				HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
 				HTTPReturnMessage: merr.ErrParameterInvalid.Error() + ", error: " + err.Error(),
 			})
-			return nil, err
+			return nil, nil, err
 		}
 
 		// Set Ids field using the oneof SearchInput field
@@ -2360,7 +2359,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 				HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
 				HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
 			})
-			return nil, err
+			return nil, nil, err
 		}
 		req.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{
 			PlaceholderGroup: placeholderGroup,
@@ -2375,9 +2374,23 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: err.Error(),
 		})
-		return nil, err
+		return nil, nil, err
 	}
 	req.ExprTemplateValues = templateValues
+	return req, collSchema, nil
+}
+
+func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	vectorEncoding, err := parseFloatVectorEncoding(c.Request.Header)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
+	httpReq := anyReq.(*SearchReqV2)
+	req, collSchema, err := h.buildSearchRequest(ctx, c, httpReq, dbName)
+	if err != nil {
+		return nil, err
+	}
 	resp, err := h.wrapperProxyWithLimit(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/Search", true, h.proxy, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Search(reqCtx, req.(*milvuspb.SearchRequest))
 	})
