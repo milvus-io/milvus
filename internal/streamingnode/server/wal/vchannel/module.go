@@ -751,7 +751,8 @@ func (m *VChannelRecoveryModule) ConsumeCleanupSnapshots(cleanup moduleapi.Clean
 		if len(cleanupPartitions) > 0 {
 			vchannelChanged = m.vchannelView.ApplyPartitionCleanup(cleanupPartitions) || vchannelChanged
 		} else if dropSnapshot != nil && len(m.segments) == 0 && !queryReferenced &&
-			cleanup.SummaryRetired != nil && cleanup.SummaryRetired(m.vchannel, dropSnapshot.GetCheckpointTimeTick()) {
+			cleanup.SummaryRetired != nil && cleanup.SummaryRetired(m.vchannel, dropSnapshot.GetCheckpointTimeTick()) &&
+			m.finalCheckpointReported(cleanup, dropSnapshot) {
 			checkpointTimeTick := dropSnapshot.GetCheckpointTimeTick()
 			snapshots = append(snapshots,
 				newDirtySnapshot(
@@ -793,6 +794,27 @@ func (m *VChannelRecoveryModule) ConsumeCleanupSnapshots(cleanup moduleapi.Clean
 		m.runtime.Notifier.NotifyModuleUpdated(moduleapi.ModuleNameVChannel)
 	}
 	return snapshots
+}
+
+// finalCheckpointReported reports whether a tombstoned VChannel's checkpoint
+// no longer needs reporting, so its module may be removed.
+//
+// Only a retired shard split source waits. DataCoord decides that the source
+// is drained by its stored channel checkpoint reaching T_switch, and a
+// secondary cluster asks that question after it has appended the retiring
+// commit -- so the source can be tombstoned before its last checkpoint
+// reached DataCoord. The checkpoint updater reports only the modules still
+// present, so removing this one first would leave that checkpoint below
+// T_switch for good, and the routing commit's callback would wait on it
+// forever. The drop tick bounds T_switch from above (the retire follows the
+// fence), so a report through it is enough on either cluster.
+//
+// An ordinary drop has no reader of its final checkpoint and takes no wait.
+func (m *VChannelRecoveryModule) finalCheckpointReported(cleanup moduleapi.CleanupContext, dropSnapshot *streamingpb.VChannelMeta) bool {
+	if dropSnapshot.GetSplitFenceTimeTick() == 0 || cleanup.CheckpointReported == nil {
+		return true
+	}
+	return cleanup.CheckpointReported(m.vchannel, dropSnapshot.GetCheckpointTimeTick())
 }
 
 func (m *VChannelRecoveryModule) completeVChannelCleanup(checkpointTimeTick uint64) {
