@@ -162,21 +162,14 @@ func (s *RefreshExternalCollectionTaskSuite) TestRefreshMilvusTableSegmentManife
 	task := NewRefreshExternalCollectionTask(ctx, req)
 	task.parsedSpec = &externalspec.ExternalSpec{Format: externalspec.FormatMilvusTable}
 
+	// Exercise result propagation without inspecting stack-backed slices in a
+	// reflection-based mock callback; the native artifact test below covers carry.
 	mockRefresh := mockey.Mock(packed.RefreshMilvusTableManifest).
-		To(func(_ context.Context, oldPath string, columns []string, fragments []packed.Fragment, cfg *indexpb.StorageConfig,
-			extfs packed.ExternalSpecContext, outputColumns []string, deltas []packed.DeltaLogEntry,
-		) (packed.MilvusTableRefreshResult, error) {
-			s.Equal(oldManifest, oldPath)
-			s.Same(req.GetStorageConfig(), cfg)
-			s.Equal([]string{"101"}, outputColumns)
-			s.Len(fragments, 1)
-			s.Empty(deltas)
-			return packed.MilvusTableRefreshResult{
-				ManifestPath:  finalManifest,
-				TextStatsLogs: map[int64]*datapb.TextIndexStats{100: {FieldID: 100, Version: 2, BuildID: 20}},
-				JSONKeyStats:  map[int64]*datapb.JsonKeyStats{102: {FieldID: 102, Version: 2, BuildID: 21, JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion}},
-			}, nil
-		}).Build()
+		Return(packed.MilvusTableRefreshResult{
+			ManifestPath:  finalManifest,
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{100: {FieldID: 100, Version: 2, BuildID: 20}},
+			JSONKeyStats:  map[int64]*datapb.JsonKeyStats{102: {FieldID: 102, Version: 2, BuildID: 21, JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion}},
+		}, nil).Build()
 	defer mockRefresh.UnPatch()
 
 	seg := &datapb.SegmentInfo{
@@ -199,6 +192,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestRefreshMilvusTableSegmentManife
 		RowCount: 1000,
 	}}, []string{"101"})
 	s.NoError(err)
+	s.Equal(1, mockRefresh.Times())
 	s.Equal(seg.GetID(), updated.GetID())
 	s.Equal(finalManifest, updated.GetManifestPath())
 	s.Equal(storage.StorageV3, updated.GetStorageVersion())
