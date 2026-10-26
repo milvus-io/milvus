@@ -1709,3 +1709,8 @@ func WrapErrOperationNotSupported(err error, format string, args ...any) error {
 	}
 	return wrapInner(ErrOperationNotSupported, formatMsg(format, args...), err)
 }
+
+// WrapErrCollectionConditionalUpsertExecutionErr projects a possibly committed attempt.
+func WrapErrCollectionConditionalUpsertExecutionErr(err error, msg string) error {
+	return wrapInner(ErrCollectionConditionalUpsertExecution, msg, err)
+}

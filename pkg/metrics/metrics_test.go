@@ -281,3 +281,35 @@ func TestDeletePartialMatch(t *testing.T) {
 	}
 	assert.Equal(t, 0, getMetricsCount())
 }
+
+func TestConditionalUpsertMetricsCleanup(t *testing.T) {
+	for _, scope := range []string{"collection", "database"} {
+		t.Run(scope, func(t *testing.T) {
+			registry := prometheus.NewRegistry()
+			registry.MustRegister(ProxyUpsertWriteConditionRows)
+			const database = "conditional_upsert_cleanup"
+			for _, node := range []string{"1", "2"} {
+				for _, collection := range []string{"drop", "keep"} {
+					for _, outcome := range []string{"written", "condition_not_met", "missing_skipped"} {
+						ProxyUpsertWriteConditionRows.WithLabelValues(node, database, collection, outcome).Inc()
+					}
+				}
+			}
+			t.Cleanup(func() {
+				CleanupProxyDBMetrics(1, database)
+				CleanupProxyDBMetrics(2, database)
+			})
+			expected := 9
+			if scope == "database" {
+				CleanupProxyDBMetrics(1, database)
+				expected = 6
+			} else {
+				CleanupProxyCollectionMetrics(1, database, "drop")
+			}
+			families, err := registry.Gather()
+			require.NoError(t, err)
+			require.Len(t, families, 1)
+			require.Len(t, families[0].GetMetric(), expected)
+		})
+	}
+}

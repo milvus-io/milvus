@@ -387,8 +387,16 @@ result. Linux build and incremental Go tests are being run separately.
 Multi-channel runtime fault injection, mixed-version rollout and p99
 measurements remain pending.
 
-Both Go modules pin the published proto version
-`v3.0.0-20261026105746-2239d2a723c1`; no local proto replacements remain.
-PyMilvus pins the same proto commit, `2239d2a723c1`, and regenerates its bindings
-with the repository's standard code-generation toolchain. No Milvus or PyMilvus
-release floor is asserted until those implementations are released.
+The 3.0 integration uses the public fork revision from the 3.0 proto PR
+through a versioned Go module replacement, with no local filesystem paths.
+After that PR merges, pin its upstream revision and remove the fork replacement
+before merging the Milvus backport. PyMilvus's master bindings retain compatible
+conditional field/enum numbers. No 3.0 release floor is asserted before release.
+
+### 3.0 backport
+
+The backport retains the existing 3.0 nullable-field validity representation and
+metric cleanup helpers. Conditional outcome metrics are registered and cleaned
+on collection/database deletion. The master feature-usage subsystem is absent
+from 3.0, so its conditional-upsert usage keys are not backported. The public
+protocol and row-selection/retry/error contracts are otherwise unchanged.

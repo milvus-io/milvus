@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
@@ -104,4 +105,26 @@ func TestHasNonReplaceFieldPartialUpdateOp(t *testing.T) {
 	assert.False(t, hasNonReplaceFieldPartialUpdateOp(nil))
 	assert.False(t, hasNonReplaceFieldPartialUpdateOp([]*schemapb.FieldPartialUpdateOp{{Op: schemapb.FieldPartialUpdateOp_REPLACE}}))
 	assert.True(t, hasNonReplaceFieldPartialUpdateOp([]*schemapb.FieldPartialUpdateOp{{Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE}}))
+}
+
+func TestConditionalUpsertRESTCondition(t *testing.T) {
+	for _, op := range []string{"gt", "GTE"} {
+		for _, policy := range []struct {
+			name  string
+			value int32
+		}{{"", 0}, {"insert", 0}, {"INSERT", 0}, {"sKiP", 1}, {"error", 2}, {"ERROR", 2}} {
+			condition, err := (&WriteConditionReq{Field: "version", Op: op, OnMissing: policy.name}).toProto()
+			require.NoError(t, err)
+			require.Equal(t, "version", condition.GetField())
+			require.EqualValues(t, policy.value, condition.GetOnMissing())
+		}
+	}
+	for _, condition := range []*WriteConditionReq{{Op: ""}, {Op: "eq"}, {Op: "gt", OnMissing: "other"}, {Op: "gt", OnMissing: "ERROR_IF_MISSING"}} {
+		_, err := condition.toProto()
+		require.Error(t, err)
+	}
+	var absent *WriteConditionReq
+	condition, err := absent.toProto()
+	require.NoError(t, err)
+	require.Nil(t, condition)
 }
