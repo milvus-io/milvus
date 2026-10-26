@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -42,11 +43,11 @@ func (s *directoryServer) WatchVChannelReplicas(stream viewpb.ViewQueryService_W
 	return nil
 }
 
-func newDirectoryTransport(t *testing.T) (*directoryServer, viewpb.ViewQueryServiceClient) {
+func newDirectoryTransport(t *testing.T, options ...grpc.ServerOption) (*directoryServer, viewpb.ViewQueryServiceClient) {
 	t.Helper()
 	endpoint := &directoryServer{directory: NewDirectory()}
 	listener := bufconn.Listen(1024 * 1024)
-	server := grpc.NewServer()
+	server := grpc.NewServer(options...)
 	viewpb.RegisterViewQueryServiceServer(server, endpoint)
 	go func() { _ = server.Serve(listener) }()
 	conn, err := grpc.DialContext(t.Context(), "passthrough:///replicas", grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }), grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -250,29 +251,52 @@ func TestReplicaWatchInvalidatesSnapshotDuringReconnect(t *testing.T) {
 	waitReplicaSnapshot(t, sub, []int64{8})
 }
 
+// snapshotBlockedStream lets Mockey inject flow control while retaining the real
+// gRPC context, which is canceled only after the RPC handler returns.
+type snapshotBlockedStream struct {
+	grpc.ServerStream
+}
+
+func (s *snapshotBlockedStream) SendMsg(message any) error {
+	return s.ServerStream.SendMsg(message)
+}
+
 func TestReplicaWatchSlowReaderDoesNotBlockOwnerShutdown(t *testing.T) {
-	endpoint, client := newDirectoryTransport(t)
-	for id := int64(1); id <= 100000; id++ {
-		endpoint.directory.Set("p_1v0", id, &qviews.QueryViewVersion{})
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	entered := make(chan struct{})
+	exited := make(chan struct{})
+	patch := mockey.Mock((*snapshotBlockedStream).SendMsg).To(func(s *snapshotBlockedStream, message any) error {
+		if response, ok := message.(*viewpb.WatchVChannelReplicasResponse); ok && response.GetSnapshot() != nil {
+			close(entered)
+			<-s.Context().Done()
+			defer close(exited)
+			return s.Context().Err()
+		}
+		return s.ServerStream.SendMsg(message)
+	}).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+	endpoint, client := newDirectoryTransport(t, grpc.StreamInterceptor(func(srv any, stream grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		return handler(srv, &snapshotBlockedStream{ServerStream: stream})
+	}))
+	endpoint.directory.Set("p_1v0", 1, &qviews.QueryViewVersion{})
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	stream, err := client.WatchVChannelReplicas(ctx)
 	require.NoError(t, err)
 	_, err = stream.Recv()
 	require.NoError(t, err)
 	require.NoError(t, stream.Send(&viewpb.WatchVChannelReplicasRequest{Vchannel: "p_1v0"}))
-	require.Eventually(t, func() bool {
-		endpoint.directory.mu.Lock()
-		defer endpoint.directory.mu.Unlock()
-		for watch := range endpoint.directory.listeners["p_1v0"] {
-			if len(watch.pending) == 0 {
-				return true
-			}
-		}
-		return false
-	}, time.Second, time.Millisecond)
-	// Do not receive the large snapshot: force stream-level flow control.
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("snapshot send did not start")
+	}
+	// The snapshot sender cannot progress until gRPC cancels its context.
+	// Closing the directory must return the handler without joining that sender.
 	endpoint.directory.Close()
 	require.Eventually(t, func() bool { return endpoint.active.Load() == 0 }, time.Second, time.Millisecond)
+	select {
+	case <-exited:
+	case <-time.After(time.Second):
+		t.Fatal("handler return did not release the blocked sender")
+	}
 }
