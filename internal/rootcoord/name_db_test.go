@@ -35,3 +35,15 @@ func TestNameDbRemoveIfMatched(t *testing.T) {
 	assert.Equal(t, map[string]UniqueID{"reused": 200}, names.listCollections("db"))
 	assert.Equal(t, map[string]UniqueID{"old": 300}, names.listCollections("other-db"))
 }
+
+func TestNameDbReserveKeepsEntries(t *testing.T) {
+	names := newNameDb()
+	names.insert("db", "kept", 100)
+	names.reserve("db", 1000)
+	names.reserve("missing-db", 1000)
+	names.reserve("db", 0)
+	assert.Equal(t, map[string]UniqueID{"kept": 100}, names.listCollections("db"))
+	assert.False(t, names.exist("missing-db"), "reserve never creates a database")
+	names.insert("db", "added", 200)
+	assert.Equal(t, map[string]UniqueID{"kept": 100, "added": 200}, names.listCollections("db"))
+}

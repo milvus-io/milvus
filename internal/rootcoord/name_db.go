@@ -46,6 +46,18 @@ func (n *nameDb) createDbIfNotExist(dbName string) {
 	}
 }
 
+// reserve sizes an existing database's name map for count more collections, so
+// a bulk insert during reload does not grow it incrementally.
+func (n *nameDb) reserve(dbName string, count int) {
+	current, ok := n.db2Name2ID[dbName]
+	if !ok || count <= 0 {
+		return
+	}
+	resized := make(map[string]UniqueID, len(current)+count)
+	maps.Copy(resized, current)
+	n.db2Name2ID[dbName] = resized
+}
+
 func (n *nameDb) dropDb(dbName string) {
 	delete(n.db2Name2ID, dbName)
 }
