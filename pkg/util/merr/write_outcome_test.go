@@ -15,8 +15,8 @@ func TestWriteOutcomeUnknownWireContract(t *testing.T) {
 	require.Equal(t, commonpb.ErrorCode_UnexpectedError, st.GetErrorCode())
 	require.False(t, st.GetRetriable())
 	require.Equal(t, SystemError, GetErrorType(ErrServiceWriteOutcomeUnknown))
-	require.Contains(t, st.GetReason(), "write may have completed")
-	require.Contains(t, st.GetReason(), "avoid duplicate writes")
+	require.Contains(t, st.GetReason(), "write may have succeeded")
+	require.Contains(t, st.GetReason(), "retrying may result in duplicate data")
 	wire, err := proto.Marshal(st)
 	require.NoError(t, err)
 	var decoded commonpb.Status
