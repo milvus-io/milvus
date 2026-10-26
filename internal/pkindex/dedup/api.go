@@ -15,9 +15,10 @@
 // limitations under the License.
 
 // Package dedup is the write path decision of the primary key index of one
-// vchannel: the index of the vchannel (Store) and the decisions made with it
-// (Decider): which keys of an insert need a companion delete, which keys of a
+// vchannel: which keys of an insert need a companion delete, which keys of a
 // delete exist, and how the writes of a transaction take effect at its commit.
+// It reads the engine of the vchannel and never writes it: the observe of the
+// WAL recovery writes it.
 package dedup
 
 import (
@@ -35,6 +36,9 @@ type Decider interface {
 	// Committed, Aborted and InDoubt, exactly once, after the downstream
 	// append. A panic between Decide and that call ends the process, like
 	// every panic on the append path.
+	//
+	// Decide never waits for the index to be ready: a not-ready index decides
+	// degraded. It fails with an error that wraps engine.ErrClosed after Close.
 	Decide(ctx context.Context, req DecideRequest) (*WriteIntent, error)
 
 	// PendingTxnIDs returns the transactions that have pending writes.
@@ -43,8 +47,23 @@ type Decider interface {
 	// DropTxn forgets the pending writes of a transaction that expired or was failed.
 	DropTxn(txnID int64)
 
-	// Close closes the underlying Store.
-	Close() error
+	// Close stops the decider: a later Decide fails. It does not wait for the
+	// open intents, they end on their own, and it does not close the engine:
+	// the caller does, and a probe on a closed engine fails with
+	// engine.ErrClosed.
+	Close()
+}
+
+// Config configures a Decider.
+type Config struct {
+	// Degraded reports whether the engine may miss records: the committed
+	// table set of the vchannel is not installed yet. While it returns true,
+	// a decision does not probe the engine and treats every key as present.
+	// An insert then gets a companion delete for every key, and a delete
+	// writes a tombstone for every key, so that a record that the install
+	// brings back later does not come back to life. Nil means never degraded.
+	// It never blocks a decision: a not-ready index is degraded, not closed.
+	Degraded func() bool
 }
 
 // WriteKind is the kind of write the caller is about to append.

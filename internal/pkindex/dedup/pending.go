@@ -43,7 +43,7 @@ func (p *pendingTxn) recordDelete(pks []PK) {
 	}
 }
 
-// snapshot returns a copy, so that it can be used outside the decider mutex.
+// snapshot returns a copy, so that it can be used outside pendingMu.
 func (p *pendingTxn) snapshot() *pendingTxn {
 	s := newPendingTxn()
 	for k, v := range p.puts {

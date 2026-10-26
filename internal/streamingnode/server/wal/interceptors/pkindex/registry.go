@@ -32,6 +32,7 @@ import (
 // target is what the interceptor needs to handle the writes of one vchannel.
 type target struct {
 	decider      dedup.Decider
+	engine       Engine
 	collectionID int64
 	pkFieldID    int64
 	pkDataType   schemapb.DataType
@@ -94,7 +95,7 @@ func (r *registry) add(ctx context.Context, vchannel string, collectionID int64,
 	if _, ok := r.targets[vchannel]; ok {
 		return false, nil
 	}
-	a, err := dedup.NewStore(vchannel)
+	eng, err := newEngine(vchannel)
 	if err != nil {
 		return false, err
 	}
@@ -102,7 +103,8 @@ func (r *registry) add(ctx context.Context, vchannel string, collectionID int64,
 	// because a schema change can neither drop the primary key field nor alter
 	// its id or its data type.
 	r.targets[vchannel] = &target{
-		decider:      dedup.New(a),
+		decider:      dedup.New(eng, dedup.Config{}),
+		engine:       eng,
 		collectionID: collectionID,
 		pkFieldID:    pkField.GetFieldID(),
 		pkDataType:   pkField.GetDataType(),
@@ -134,7 +136,8 @@ func (r *registry) close(ctx context.Context) {
 }
 
 func closeTarget(ctx context.Context, vchannel string, t *target) {
-	if err := t.decider.Close(); err != nil {
+	t.decider.Close()
+	if err := t.engine.Close(); err != nil {
 		mlog.Warn(ctx, "failed to close the primary key index of a vchannel",
 			mlog.FieldVChannel(vchannel), mlog.Err(err))
 	}

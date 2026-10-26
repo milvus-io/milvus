@@ -185,9 +185,10 @@ func (s *inflightSet) markUncertain(w *inflightWrite, tt uint64) {
 	close(w.done)
 }
 
-// observe is called after the writes of pks with time tick tt were applied to
-// the engine (rule A). It raises the observed time tick, then removes the
-// filled-in writes of those keys up to tt.
+// observe is called after every write up to tt was applied to the engine
+// (rule A). pks are the keys of the write at tt, none for a time tick that
+// writes no key. It raises the observed time tick, removes the writes with an
+// unknown outcome up to it, then removes the filled-in writes of pks up to tt.
 //
 // TODO: rule A needs an engine write to be visible to reads as soon as it
 // returns. A Pebble batch commit should give that; confirm it with a test when
@@ -212,16 +213,6 @@ func (s *inflightSet) observe(tt uint64, pks []PK) {
 		clear(queue[len(kept):])
 		s.setQueue(key, kept)
 	}
-}
-
-// observeTimeTick is observe of a time tick that writes no key: it raises the
-// observed time tick to tt and removes the writes with an unknown outcome up to
-// it. Observe calls it after it applied every write up to tt to the engine.
-func (s *inflightSet) observeTimeTick(tt uint64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.raiseObservedLocked(tt)
-	s.removeUncertainLocked()
 }
 
 // raiseObservedLocked stores tt as the observed time tick unless it is lower.

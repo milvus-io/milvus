@@ -25,15 +25,19 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/internal/pkindex/engine"
 )
 
-func newTestDecider(t *testing.T) (*decider, Store) {
+func newTestDecider(t *testing.T) (*decider, *MemoryEngine) {
 	t.Helper()
-	a, err := NewStore("v1")
-	require.NoError(t, err)
-	d := New(a).(*decider)
-	t.Cleanup(func() { _ = d.Close() })
-	return d, a
+	eng := NewMemoryEngine()
+	d := New(eng, Config{}).(*decider)
+	t.Cleanup(func() {
+		d.Close()
+		_ = eng.Close()
+	})
+	return d, eng
 }
 
 func int64PKs(values ...int64) []PK {
@@ -44,19 +48,14 @@ func int64PKs(values ...int64) []PK {
 	return pks
 }
 
-func seed(t *testing.T, a Store, segmentID int64, values ...int64) {
+func seed(t *testing.T, eng engine.RW, segmentID int64, values ...int64) {
 	t.Helper()
-	b := a.NewBatch()
-	for _, pk := range int64PKs(values...) {
-		b.Put(pk, Entry{SegmentID: segmentID})
-	}
-	require.NoError(t, a.Write(context.Background(), b))
+	require.NoError(t, writeRecords(context.Background(), eng, segmentID, int64PKs(values...), nil))
 }
 
-func requireSegment(t *testing.T, a Store, pk int64, segmentID int64) {
+func requireSegment(t *testing.T, eng engine.RW, pk int64, segmentID int64) {
 	t.Helper()
-	entry, err := a.Get(context.Background(), Int64PK(pk))
-	require.NoError(t, err)
+	entry := lookupOne(t, eng, Int64PK(pk))
 	if segmentID == 0 {
 		require.Nil(t, entry)
 		return
@@ -319,22 +318,52 @@ func TestIntentResolvedOnce(t *testing.T) {
 	require.Panics(t, func() { intent.InDoubt(ctx, nil, 1) })
 }
 
-func TestDecideHonorsContextWhileWaitingForReady(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	d := New(&notReadyStore{ready: make(chan struct{})})
-	_, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
-	require.ErrorIs(t, err, context.Canceled)
+// A not-ready index is degraded, not blocked: Decide returns at once and
+// treats every key as present, so an insert gets a companion delete for
+// every key and a delete writes a tombstone for every key.
+func TestNotReadyDecidesDegraded(t *testing.T) {
+	ctx := context.Background()
+	eng := NewMemoryEngine()
+	ready := false
+	d := New(eng, Config{Degraded: func() bool { return !ready }})
+	defer d.Close()
+
+	intent, companion := decideInsert(t, d, 1, 2)
+	require.Equal(t, int64PKs(1, 2), companion, "absent keys count as present")
+	intent.Committed(ctx, 5)
+	require.NoError(t, ObserveForTest(ctx, d, 5, 10, int64PKs(1, 2), int64PKs(1, 2)))
+
+	del, err := d.Decide(ctx, DecideRequest{Kind: KindDelete, VChannel: "v1", PKs: int64PKs(2, 3)})
+	require.NoError(t, err)
+	require.Equal(t, int64PKs(2, 3), del.Decision().PresentPKs, "a tombstone for every key")
+	del.Committed(ctx, 6)
+	require.NoError(t, ObserveForTest(ctx, d, 6, 0, nil, int64PKs(2, 3)))
+
+	ready = true
+	_, companion = decideInsert(t, d, 1, 3)
+	require.Equal(t, int64PKs(1), companion, "ready: only the present key")
+}
+
+// A Decide after Close fails with the closed error. An open intent still
+// ends on its own.
+func TestDecideAfterClose(t *testing.T) {
+	ctx := context.Background()
+	d := New(NewMemoryEngine(), Config{})
+	intent, _ := decideInsert(t, d, 1)
+	d.Close()
+	_, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(2)})
+	require.ErrorIs(t, err, engine.ErrClosed)
+	intent.Committed(ctx, 1)
+	require.Equal(t, 1, InflightLenForTest(d))
 }
 
 func TestDecideReturnsProbeError(t *testing.T) {
 	ctx := context.Background()
-	a, err := NewStore("v1")
-	require.NoError(t, err)
-	d := New(a)
-	require.NoError(t, a.Close()) // the memory engine fails every call after Close
+	eng := NewMemoryEngine()
+	d := New(eng, Config{})
+	require.NoError(t, eng.Close()) // the memory engine fails every call after Close
 
-	_, err = d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
+	_, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
 	require.Error(t, err)
 	// nothing was appended, so the registration is gone and does not block.
 	require.Equal(t, 0, InflightLenForTest(d))
@@ -390,7 +419,7 @@ func TestApplyOnACanceledContext(t *testing.T) {
 	require.Equal(t, int64PKs(1), companion, "the write applied after the cancel must be visible")
 }
 
-// A body applied between the commit snapshot and the commit Committed breaks the
+// A body applied between the commit snapshot and Committed of the commit breaks the
 // WAL contract that a producer waits for every body before it commits. The
 // companion deletes were decided without it, so Committed ends the process.
 func TestBodyAppliedAfterCommitDecisionPanics(t *testing.T) {
@@ -535,11 +564,3 @@ func TestTxnAndAutocommitOnSameKeyConcurrently(t *testing.T) {
 
 	require.Equal(t, int64(1), misses.Load())
 }
-
-type notReadyStore struct {
-	Store
-	ready chan struct{}
-}
-
-func (a *notReadyStore) Ready() <-chan struct{} { return a.ready }
-func (a *notReadyStore) Close() error           { return nil }

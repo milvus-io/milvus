@@ -14,35 +14,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package dedup
+package pkindex
 
 import (
-	"context"
 	"sync"
+
+	"github.com/cockroachdb/errors"
+
+	"github.com/milvus-io/milvus/internal/pkindex/engine"
 )
 
-// Mutation is one change to the engine.
-type Mutation struct {
-	Key    []byte
-	Value  []byte
-	Delete bool // when true, Value is ignored and Key becomes absent
-}
+// errNoEngineFactory is returned when no engine factory is registered.
+// It is a plain identity sentinel, not a merr error, so that errors.Is matches
+// only this error and not every merr service-internal error.
+var errNoEngineFactory = errors.New("no primary key index engine factory is registered")
 
-// Engine is the byte-level key-value store behind one vchannel's Store.
-// It is defined here, by its consumer. Storage implementations adapt to it.
+// Engine is the engine of one vchannel. The interceptor creates it with the
+// target of the vchannel, the Decider reads it, and the interceptor closes it
+// after the Decider.
 //
 // TODO: replace the test-only memory engine with the persistent engine.
 type Engine interface {
-	// MultiGet returns the values aligned with keys. A nil value means the key is absent.
-	// The caller must not modify the returned values.
-	MultiGet(ctx context.Context, keys [][]byte) ([][]byte, error)
-	// Write applies all mutations atomically. A concurrent MultiGet sees either none or all of them.
-	// Mutations are applied in slice order. A later mutation of the same key wins.
-	// Write is a memory operation: it must not wait for disk or network, and it
-	// fails only on a bug or a closed engine. Persistence happens outside of it.
-	// The caller ends the process on an error, because the WAL already accepted
-	// the write that the mutations describe.
-	Write(ctx context.Context, muts []Mutation) error
+	engine.RW
 	Close() error
 }
 
@@ -68,8 +61,17 @@ func HasEngineFactory() bool {
 	return engineFactory != nil
 }
 
-func getEngineFactory() EngineFactory {
+// newEngine creates the engine of a vchannel with the registered engine factory.
+func newEngine(vchannel string) (Engine, error) {
 	engineFactoryMu.RLock()
-	defer engineFactoryMu.RUnlock()
-	return engineFactory
+	factory := engineFactory
+	engineFactoryMu.RUnlock()
+	if factory == nil {
+		return nil, errNoEngineFactory
+	}
+	eng, err := factory(vchannel)
+	if err != nil {
+		return nil, errors.Wrapf(err, "create primary key index engine of vchannel %s", vchannel)
+	}
+	return eng, nil
 }

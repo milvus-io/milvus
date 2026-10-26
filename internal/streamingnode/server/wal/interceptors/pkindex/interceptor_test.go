@@ -18,7 +18,6 @@ package pkindex
 
 import (
 	"context"
-	"encoding/binary"
 	"sync"
 	"testing"
 	"time"
@@ -29,7 +28,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
+	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
@@ -63,7 +64,7 @@ func TestMain(m *testing.M) {
 
 // testEngine is a memory engine that a test can read back and that counts probes.
 type testEngine struct {
-	dedup.Engine
+	Engine
 	mu       sync.Mutex
 	multiGet int
 }
@@ -89,9 +90,8 @@ func (e *testEngine) put(t *testing.T, pk int64, segmentID int64) {
 
 func (e *testEngine) putPK(t *testing.T, pk dedup.PK, segmentID int64) {
 	t.Helper()
-	value := make([]byte, 8)
-	binary.BigEndian.PutUint64(value, uint64(segmentID))
-	require.NoError(t, e.Write(context.Background(), []dedup.Mutation{
+	value := codec.EncodePKEntry(codec.PKEntry{SegmentID: segmentID})
+	require.NoError(t, e.Write(context.Background(), []engine.Mutation{
 		{Key: pk.Encode(), Value: value},
 	}))
 }
@@ -109,8 +109,9 @@ func (e *testEngine) segmentOfPK(t *testing.T, pk dedup.PK) (int64, bool) {
 	if values[0] == nil {
 		return 0, false
 	}
-	require.Len(t, values[0], 8)
-	return int64(binary.BigEndian.Uint64(values[0])), true
+	entry, err := codec.DecodePKEntry(values[0])
+	require.NoError(t, err)
+	return entry.SegmentID, true
 }
 
 // testEngines registers itself as the engine factory and keeps every engine it made.
@@ -121,13 +122,13 @@ type testEngines struct {
 
 func newTestEngines(t *testing.T) *testEngines {
 	e := &testEngines{engines: make(map[string]*testEngine)}
-	dedup.RegisterEngineFactory(e.create)
-	t.Cleanup(func() { dedup.RegisterEngineFactory(dedup.NewMemoryEngine) })
+	RegisterEngineFactory(e.create)
+	t.Cleanup(func() { RegisterEngineFactory(NewMemoryEngine) })
 	return e
 }
 
-func (e *testEngines) create(vchannel string) (dedup.Engine, error) {
-	inner, err := dedup.NewMemoryEngine(vchannel)
+func (e *testEngines) create(vchannel string) (Engine, error) {
+	inner, err := NewMemoryEngine(vchannel)
 	if err != nil {
 		return nil, err
 	}
@@ -463,8 +464,8 @@ func TestNewBuilderPanicsWhenEnabledWithoutEngineFactory(t *testing.T) {
 	params := paramtable.Get()
 	params.Save(params.StreamingCfg.PKIndexEnabled.Key, "true")
 	defer params.Reset(params.StreamingCfg.PKIndexEnabled.Key)
-	dedup.RegisterEngineFactory(nil)
-	defer dedup.RegisterEngineFactory(dedup.NewMemoryEngine)
+	RegisterEngineFactory(nil)
+	defer RegisterEngineFactory(NewMemoryEngine)
 
 	require.PanicsWithValue(t, params.StreamingCfg.PKIndexEnabled.Key+" is true but this binary has no primary key index engine", func() {
 		NewInterceptorBuilder()
@@ -472,8 +473,8 @@ func TestNewBuilderPanicsWhenEnabledWithoutEngineFactory(t *testing.T) {
 }
 
 func TestNewBuilderWithoutEngineFactoryWhenDisabled(t *testing.T) {
-	dedup.RegisterEngineFactory(nil)
-	defer dedup.RegisterEngineFactory(dedup.NewMemoryEngine)
+	RegisterEngineFactory(nil)
+	defer RegisterEngineFactory(NewMemoryEngine)
 
 	require.NotPanics(t, func() {
 		i := NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
@@ -517,10 +518,10 @@ func TestBuildPanicsWhenTheIndexOfAnExistingCollectionCanNotBeCreated(t *testing
 	params := paramtable.Get()
 	params.Save(params.StreamingCfg.PKIndexEnabled.Key, "true")
 	defer params.Reset(params.StreamingCfg.PKIndexEnabled.Key)
-	dedup.RegisterEngineFactory(func(string) (dedup.Engine, error) {
+	RegisterEngineFactory(func(string) (Engine, error) {
 		return nil, errors.New("disk is full")
 	})
-	t.Cleanup(func() { dedup.RegisterEngineFactory(dedup.NewMemoryEngine) })
+	t.Cleanup(func() { RegisterEngineFactory(NewMemoryEngine) })
 
 	defer func() {
 		value := recover()
@@ -1211,10 +1212,10 @@ func TestCreateCollectionOfAutoIDHasNoTarget(t *testing.T) {
 }
 
 func TestCreateCollectionRejectedWhenTheIndexCanNotBeCreated(t *testing.T) {
-	dedup.RegisterEngineFactory(func(string) (dedup.Engine, error) {
+	RegisterEngineFactory(func(string) (Engine, error) {
 		return nil, errors.New("disk is full")
 	})
-	t.Cleanup(func() { dedup.RegisterEngineFactory(dedup.NewMemoryEngine) })
+	t.Cleanup(func() { RegisterEngineFactory(NewMemoryEngine) })
 	i := &appendInterceptor{registry: newRegistry(), sessions: nil, metrics: newMetrics()}
 	defer i.Close()
 	f := newFakeAppender()
