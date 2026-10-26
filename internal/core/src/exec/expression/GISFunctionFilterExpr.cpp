@@ -19,6 +19,7 @@
 #include <cstdlib>
 #include <iosfwd>
 #include <string_view>
+#include <utility>
 
 #include "bitset/bitset.h"
 #include "bitset/detail/element_vectorized.h"
@@ -29,6 +30,7 @@
 #include "common/PreparedGeometry.h"
 #include "common/Types.h"
 #include "common/Utils.h"
+#include "index/contracts/query/ISpatialReader.h"
 #include "geos_c.h"
 #include "log/Log.h"
 #include "pb/plan.pb.h"
@@ -418,6 +420,36 @@ create_bounding_box_for_dwithin(GEOSContextHandle_t ctx,
     return Geometry(ctx, bboxWKT.c_str());
 }
 
+// R-Tree candidates for the union of a DWITHIN search region. The reader
+// answers one box per lookup, so a region that wraps the antimeridian costs
+// one lookup per box and the bitmaps are ORed. Each answer is Count()-sized;
+// should two answers differ in length, the union keeps the shorter one so a
+// short index is still detected (and fully refined) downstream rather than
+// padded with false negatives.
+static TargetBitmap
+DWithinCandidates(const index::ISpatialReader& reader,
+                  index::SpatialOp op,
+                  GEOSContextHandle_t ctx,
+                  const Geometry::DWithinSearchBoxes& boxes) {
+    AssertInfo(boxes.count > 0, "DWITHIN search region has no box");
+    TargetBitmap candidates;
+    bool first = true;
+    for (const auto& env : boxes) {
+        auto more =
+            reader.Candidates(op, create_bounding_box_for_dwithin(ctx, env));
+        if (first) {
+            candidates = std::move(more);
+            first = false;
+            continue;
+        }
+        if (more.size() < candidates.size()) {
+            candidates.resize(more.size());
+        }
+        candidates.inplace_or(more, candidates.size());
+    }
+    return candidates;
+}
+
 VectorPtr
 PhyGISFunctionFilterExpr::EvalForIndexSegment() {
     AssertInfo(num_index_chunk_ == 1, "num_index_chunk_ should be 1");
@@ -472,12 +504,16 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
 
         // For range_within operations, use bounding box for coarse filtering
         if (expr_->op_ == proto::plan::GISFunctionFilterExpr_GISOp_DWithin) {
-            Geometry::Envelope env{};
-            if (Geometry::DWithinSearchEnvelope(
-                    ctx, query_geometry.GetGeometry(), expr_->distance_, env)) {
-                coarse_global_ = spatial_reader_->Candidates(
-                    gis_detail::ToSpatialOp(expr_->op_),
-                    create_bounding_box_for_dwithin(ctx, env));
+            Geometry::DWithinSearchBoxes boxes;
+            if (Geometry::DWithinSearchEnvelope(ctx,
+                                                query_geometry.GetGeometry(),
+                                                expr_->distance_,
+                                                boxes)) {
+                coarse_global_ =
+                    DWithinCandidates(*spatial_reader_,
+                                      gis_detail::ToSpatialOp(expr_->op_),
+                                      ctx,
+                                      boxes);
             } else {
                 // An empty query point is within no distance of any row
                 // (Geometry::dwithin rejects empty operands), so there is

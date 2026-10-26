@@ -48,16 +48,21 @@ CreateWkbFromWkt(const std::string& wkt) {
     return Geometry(GetThreadLocalGEOSContext(), wkt.c_str()).to_wkb_string();
 }
 
-// Fault injection at the expression boundary retains the real loaded R-Tree
-// and its NULL state. Current loaders reject incomplete archives; a malformed
-// short candidate bitmap is injected here to keep the consumer's defensive
-// full-refinement branch covered without resurrecting the removed Index API.
-class ShortSpatialCandidates final : public index::IIndexReaderBase,
-                                     public index::ISpatialReader,
-                                     public index::INullReader {
+// Interception at the expression boundary retains the real loaded R-Tree and
+// its NULL state while letting a test observe or rewrite each candidate
+// bitmap the consumer receives. Current loaders reject incomplete archives;
+// a malformed short candidate bitmap is injected through this hook to keep
+// the consumer's defensive full-refinement branch covered without
+// resurrecting the removed Index API, and the same hook counts candidates
+// to check coarse-pass selectivity.
+class InterceptedSpatialCandidates final : public index::IIndexReaderBase,
+                                           public index::ISpatialReader,
+                                           public index::INullReader {
  public:
-    explicit ShortSpatialCandidates(index::IIndexReaderBasePtr reader)
-        : reader_(std::move(reader)) {
+    using Hook = std::function<void(TargetBitmap&)>;
+
+    InterceptedSpatialCandidates(index::IIndexReaderBasePtr reader, Hook hook)
+        : reader_(std::move(reader)), hook_(std::move(hook)) {
     }
 
     index::ReaderCaps
@@ -89,10 +94,7 @@ class ShortSpatialCandidates final : public index::IIndexReaderBase,
         auto candidates =
             dynamic_cast<const index::ISpatialReader&>(*reader_).Candidates(
                 op, query);
-        AssertInfo(candidates.size() > 2,
-                   "short-candidate fixture needs three rows");
-        candidates.reset(1);
-        candidates.resize(candidates.size() - 1);
+        hook_(candidates);
         return candidates;
     }
     TargetBitmap
@@ -106,7 +108,18 @@ class ShortSpatialCandidates final : public index::IIndexReaderBase,
 
  private:
     index::IIndexReaderBasePtr reader_;
+    Hook hook_;
 };
+
+// Drops interior row 1 and the last row from every candidate bitmap: an
+// index that under-reports the segment row space.
+void
+MakeCandidatesShort(TargetBitmap& candidates) {
+    AssertInfo(candidates.size() > 2,
+               "short-candidate fixture needs three rows");
+    candidates.reset(1);
+    candidates.resize(candidates.size() - 1);
+}
 
 // RAII toggle for the static geometry-cache switch: restores the previous
 // value even when a gtest ASSERT returns out of the test body early, so a
@@ -186,7 +199,7 @@ class GISIndexRefinementTest : public ::testing::Test {
     InstallGeometryIndex(GeometrySegment& segment,
                          const std::vector<std::string>& wkbs,
                          const std::vector<uint8_t>& validity = {},
-                         bool short_candidates = false) {
+                         InterceptedSpatialCandidates::Hook hook = nullptr) {
         auto data = storage::CreateFieldData(
             DataType::GEOMETRY, DataType::NONE, !validity.empty());
         if (validity.empty()) {
@@ -198,9 +211,9 @@ class GISIndexRefinementTest : public ::testing::Test {
                                                    DataType::GEOMETRY,
                                                    index::RTREE_INDEX_TYPE,
                                                    {data});
-        if (short_candidates) {
-            opened.reader = std::make_unique<ShortSpatialCandidates>(
-                std::move(opened.reader));
+        if (hook) {
+            opened.reader = std::make_unique<InterceptedSpatialCandidates>(
+                std::move(opened.reader), std::move(hook));
         }
         test::expr_index::InstallIndex(*segment.sealed,
                                        segment.geo_id,
@@ -217,7 +230,7 @@ class GISIndexRefinementTest : public ::testing::Test {
             validity[row / 8] |= static_cast<uint8_t>(1u << (row % 8));
         }
         auto segment = MakeGeometrySegment(wkbs, validity);
-        InstallGeometryIndex(segment, wkbs, validity, true);
+        InstallGeometryIndex(segment, wkbs, validity, MakeCandidatesShort);
         return segment;
     }
 
@@ -891,6 +904,115 @@ TEST_F(GISIndexRefinementTest, DWithinIndexPathMatchesRawPath) {
         BitsetType idx_bits = run(indexed, "POINT (0 -29)", pole_distance);
         ASSERT_TRUE(raw_bits[kPoleRow]) << "pole row is not on the boundary";
         EXPECT_TRUE(idx_bits[kPoleRow]) << "pole row pruned by the envelope";
+    }
+}
+
+// ST_DWITHIN around a point next to the antimeridian (review of #54294). The
+// haversine cap wraps across +-180, so rows on both sides must survive the
+// coarse pass; but only the cap's overflow may wrap, not every longitude:
+// many far rows at the same latitude must stay out of the candidate set
+// (each candidate costs an exact distance and, without the geometry cache, a
+// WKB read and parse).
+TEST_F(GISIndexRefinementTest, DWithinAntimeridianStaysSelective) {
+    // Rows near the antimeridian at latitude 0. Distances are to
+    // POINT (179.999 0); 0.001 deg of longitude is ~111 m there.
+    const std::vector<std::string> near_wkts = {
+        "POINT (179.9995 0)",     // east of the query, ~56 m
+        "POINT (180 0)",          // on the antimeridian, ~111 m
+        "POINT (-180 0)",         // the same meridian, other sign, ~111 m
+        "POINT (-179.996 0)",     // across +-180, ~556 m
+        "POINT (179.995 0.002)",  // west, ~497 m
+        // A non-point row near the query (planar metric, no wrap).
+        "LINESTRING (179.9985 -0.0005, 179.9985 0.0005)",
+    };
+    // Just across the antimeridian but outside 1 km: in the coarse sliver's
+    // neighborhood, rejected by refinement on both paths.
+    const std::vector<std::string> edge_wkts = {
+        "POINT (-179.985 0)",  // ~1.7 km
+        "POINT (179.98 0)",    // ~2.1 km
+    };
+    constexpr int kFarRows = 300;  // same latitude, spread over the globe
+
+    std::vector<std::string> wkts = near_wkts;
+    wkts.insert(wkts.end(), edge_wkts.begin(), edge_wkts.end());
+    for (int i = 0; i < kFarRows; ++i) {
+        // Longitudes -170 .. ~170 in ~1.13 deg steps, latitude in [0, 0.004].
+        const double lon = -170.0 + i * (340.0 / kFarRows);
+        const double lat = (i % 5) * 0.001;
+        wkts.push_back("POINT (" + std::to_string(lon) + " " +
+                       std::to_string(lat) + ")");
+    }
+    const int N = static_cast<int>(wkts.size());
+    std::vector<std::string> wkbs;
+    wkbs.reserve(N);
+    for (const auto& wkt : wkts) {
+        wkbs.emplace_back(CreateWkbFromWkt(wkt));
+        ASSERT_FALSE(wkbs.back().empty()) << wkt;
+    }
+
+    struct CandidateStats {
+        int lookups = 0;
+        size_t candidates = 0;
+    };
+    auto stats = std::make_shared<CandidateStats>();
+    auto raw = MakeGeometrySegment(wkbs);
+    auto indexed = MakeGeometrySegment(wkbs);
+    InstallGeometryIndex(indexed, wkbs, {}, [stats](TargetBitmap& bits) {
+        ++stats->lookups;
+        stats->candidates += bits.count();
+    });
+    ASSERT_TRUE(indexed.sealed->HasIndex(indexed.geo_id));
+
+    auto run = [&](const GeometrySegment& seg,
+                   const std::string& wkt,
+                   double distance) {
+        auto gis_expr = std::make_shared<milvus::expr::GISFunctionFilterExpr>(
+            milvus::expr::ColumnInfo(seg.geo_id, DataType::GEOMETRY),
+            proto::plan::GISFunctionFilterExpr_GISOp_DWithin,
+            wkt,
+            distance);
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           gis_expr);
+        return ExecuteQueryExpr(plan, seg.sealed.get(), N, MAX_TIMESTAMP);
+    };
+
+    const int near_count = static_cast<int>(near_wkts.size());
+    const int local_count = near_count + static_cast<int>(edge_wkts.size());
+    // The west-side mirror query (222 m from the east one) reaches the same
+    // point rows through the other edge; the line row is planar-far from it.
+    for (const char* query : {"POINT (179.999 0)", "POINT (-179.999 0)"}) {
+        SCOPED_TRACE(query);
+        *stats = CandidateStats{};
+        BitsetType raw_bits = run(raw, query, 1000);
+        BitsetType idx_bits = run(indexed, query, 1000);
+        ASSERT_EQ(raw_bits.size(), static_cast<size_t>(N));
+        ASSERT_EQ(idx_bits.size(), static_cast<size_t>(N));
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(bool(raw_bits[i]), bool(idx_bits[i]))
+                << "row " << i << " (" << wkts[i]
+                << ") raw=" << bool(raw_bits[i])
+                << " indexed=" << bool(idx_bits[i]);
+        }
+        // One lookup per side of the antimeridian.
+        EXPECT_EQ(stats->lookups, 2);
+        // Only rows near the antimeridian can be candidates; with a full
+        // longitude band every far row at latitude 0..0.004 would be one.
+        EXPECT_LE(stats->candidates, static_cast<size_t>(local_count));
+        for (int i = local_count; i < N; ++i) {
+            EXPECT_FALSE(idx_bits[i]) << "far row " << wkts[i];
+        }
+    }
+
+    // Specifically the east query accepts every near row on both sides of
+    // +-180 and rejects the two just past 1 km.
+    {
+        BitsetType idx_bits = run(indexed, "POINT (179.999 0)", 1000);
+        for (int i = 0; i < near_count; ++i) {
+            EXPECT_TRUE(idx_bits[i]) << "near row " << wkts[i];
+        }
+        for (int i = near_count; i < local_count; ++i) {
+            EXPECT_FALSE(idx_bits[i]) << "edge row " << wkts[i];
+        }
     }
 }
 
