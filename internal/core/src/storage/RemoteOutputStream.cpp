@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -16,6 +17,7 @@
 #include "common/EasyAssert.h"
 #include "log/Log.h"
 #include "storage/StatusToErrorCode.h"
+#include "milvus-storage/filesystem/async_output_stream.h"
 
 namespace milvus::storage {
 
@@ -51,6 +53,28 @@ RemoteOutputStream::Tell() const {
                   status.status().ToString());
     }
     return status.ValueOrDie();
+}
+
+bool
+RemoteOutputStream::Prepare(size_t expected_size) {
+    auto* output =
+        dynamic_cast<milvus_storage::AsyncOutputStream*>(output_stream_.get());
+    if (!output) {
+        return false;
+    }
+    AssertInfo(expected_size <=
+                   static_cast<size_t>(std::numeric_limits<int64_t>::max()),
+               "upload size hint exceeds the storage size limit");
+    const auto status = output->Prepare(static_cast<int64_t>(expected_size));
+    if (status.IsNotImplemented()) {
+        return false;
+    }
+    if (!status.ok()) {
+        ThrowInfo(ArrowStatusToErrorCode(status),
+                  "Failed to prepare output stream: {}",
+                  status.ToString());
+    }
+    return true;
 }
 
 size_t

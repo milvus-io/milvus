@@ -457,6 +457,13 @@ VectorDiskBuildFileManager::SetFileLoader(
     file_loader_ = std::move(loader);
 }
 
+void
+VectorDiskBuildFileManager::SetOutputPreparer(
+    std::function<void(const std::string&, size_t)> prepare) {
+    std::lock_guard lock(mutex_);
+    output_preparer_ = std::move(prepare);
+}
+
 bool
 VectorDiskBuildFileManager::LoadFile(const std::string& filename) {
     try {
@@ -636,7 +643,7 @@ VectorDiskBuildFileManager::OpenOutputStream(
                       "refusing to open unowned vector output {}",
                       filename);
         }
-        std::lock_guard lock(mutex_);
+        std::unique_lock lock(mutex_);
         AssertInfo(!output_streams_.contains(filename) &&
                        !open_outputs_.contains(filename),
                    "duplicate vector output {}",
@@ -677,6 +684,11 @@ VectorDiskBuildFileManager::OpenOutputStream(
         auto stream = std::make_shared<BufferedOutput>(options.expected_size,
                                                        weak_from_this());
         output_streams_.emplace(filename, stream);
+        auto prepare = output_preparer_;
+        lock.unlock();
+        if (prepare) {
+            prepare(filename, options.expected_size);
+        }
         return stream;
     } catch (...) {
         RecordFailure(std::current_exception());

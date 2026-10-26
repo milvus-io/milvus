@@ -76,6 +76,11 @@ class FileSink {
     WriteRawEntryFromLocalFile(std::string_view name,
                                const std::string& local_path) = 0;
 
+    // Optionally initialize transport while the producer fills its own buffer.
+    // This neither writes payload bytes nor publishes an entry.
+    virtual void
+    PrepareRawEntry(std::string_view name, size_t expected_size);
+
     // Retain one completed, unsliced object. Finish uploads the entry
     // and publishes its metadata together with the other entries.
     virtual void
@@ -109,6 +114,8 @@ class V1DiskSink final : public FileSink {
     void
     WriteRawEntryFromLocalFile(std::string_view name,
                                const std::string& local_path) override;
+    void
+    PrepareRawEntry(std::string_view name, size_t expected_size) override;
     void
     WriteRawEntry(std::string_view name,
                   std::shared_ptr<arrow::Buffer> data) override;

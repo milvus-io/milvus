@@ -100,6 +100,7 @@ typedef struct CStorageConfig {
     uint32_t talon_block_size;
     uint32_t talon_max_idle_per_addr;
     bool talon_enable_for_external_table;
+    double throughput_target_gbps;
 } CStorageConfig;
 
 typedef struct CDiskWriteRateLimiterConfig {

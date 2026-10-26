@@ -29,6 +29,10 @@ class RemoteOutputStream : public milvus::OutputStream {
     size_t
     Tell() const override;
 
+    // Returns false when this stream has no asynchronous preparation capability.
+    bool
+    Prepare(size_t expected_size);
+
     size_t
     Write(const void* data, size_t size) override;
 

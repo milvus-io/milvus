@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 #include "arrow/buffer.h"
@@ -127,6 +128,40 @@ TEST(VectorDiskBuildFileManagerTest,
     EXPECT_TRUE(manager->TakeOutput().empty());
     manager->ResetOutput();
     EXPECT_EQ(output.at(path)->ToString(), "payload");
+}
+
+TEST(VectorDiskBuildFileManagerTest,
+     PreparesBufferedOutputBeforeProducerWritesAndRetainsFailures) {
+    auto files = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_prepare_output_XXXXXX", "prepare output test");
+    auto manager = std::make_shared<VectorDiskBuildFileManager>(files);
+    const auto path = files->Path() + "/index";
+    size_t preparations = 0;
+    manager->SetOutputPreparer([&](const std::string& name, size_t size) {
+        EXPECT_EQ(name, path);
+        EXPECT_EQ(size, 7);
+        // Called outside the manager lock, before returning to the producer.
+        EXPECT_TRUE(manager->LocalFiles().empty());
+        ++preparations;
+    });
+    auto stream = manager->OpenOutputStream(
+        path, {.expected_size = 7, .use_memory = true});
+    EXPECT_EQ(preparations, 1);
+    EXPECT_EQ(stream->Tell(), 0);
+    stream->Write("payload", 7);
+    stream->Close();
+    manager->ResetOutput();
+
+    manager->SetOutputPreparer([](const std::string&, size_t) {
+        throw std::runtime_error("preparation failed");
+    });
+    EXPECT_ANY_THROW(manager->OpenOutputStream(
+        path, {.expected_size = 7, .use_memory = true}));
+    EXPECT_THROW(manager->RethrowFirstFailure(), std::runtime_error);
+    manager->SetOutputPreparer({});
+    manager->ResetOutput();
+    EXPECT_NO_THROW(manager->OpenOutputStream(
+        path, {.expected_size = 7, .use_memory = true}));
 }
 
 TEST(VectorDiskBuildFileManagerTest, FailedOutputCanBeDiscardedBeforeRetry) {

@@ -52,6 +52,10 @@ class VectorDiskBuildFileManager final
     void
     SetFileLoader(std::function<void(const std::string&)> loader);
 
+    // Installed only during serialization; the sink owns upload initialization.
+    void
+    SetOutputPreparer(std::function<void(const std::string&, size_t)> prepare);
+
     bool
     LoadFile(const std::string& filename) override;
     bool
@@ -114,6 +118,7 @@ class VectorDiskBuildFileManager final
     std::unordered_map<std::string, size_t> pending_meta_;
     std::exception_ptr first_failure_;
     std::function<void(const std::string&)> file_loader_;
+    std::function<void(const std::string&, size_t)> output_preparer_;
     std::map<std::string, std::shared_ptr<BufferedOutput>> output_streams_;
 };
 

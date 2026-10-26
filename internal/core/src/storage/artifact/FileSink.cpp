@@ -268,6 +268,13 @@ class V1DiskSink::Impl {
         : disk_manager(std::make_shared<DiskFileManagerImpl>(context)),
           memory_manager(std::make_shared<MemFileManagerImpl>(context)),
           storage_namespace(storage_namespace) {
+        auto fs = context.fs;
+        if (auto subtree =
+                std::dynamic_pointer_cast<arrow::fs::SubTreeFileSystem>(fs)) {
+            fs = subtree->base_fs();
+        }
+        prepare_uploads =
+            fs && fs->type_name() == milvus_storage::kCloudProviderAWS;
     }
 
     std::string
@@ -399,10 +406,16 @@ class V1DiskSink::Impl {
     std::set<std::string> entry_names;
     std::map<std::string, int64_t> raw_remote_files;
     std::map<std::string, std::shared_ptr<arrow::Buffer>> raw_entries;
+    std::map<std::string, std::shared_ptr<RemoteOutputStream>> prepared_entries;
+    bool prepare_uploads{false};
     int64_t raw_size{0};
     SinkState state{SinkState::Open};
     bool released{false};
 };
+
+void
+FileSink::PrepareRawEntry(std::string_view name, size_t expected_size) {
+}
 
 void
 FileSink::WriteRawEntry(std::string_view name,
@@ -531,6 +544,37 @@ V1DiskSink::WriteRawEntryFromLocalFile(std::string_view name,
 }
 
 void
+V1DiskSink::PrepareRawEntry(std::string_view name, size_t expected_size) {
+    AssertOpen(impl_->state);
+    if (!impl_->prepare_uploads) {
+        return;
+    }
+    try {
+        const auto entry_name = std::string(name);
+        AssertInfo(
+            !entry_name.empty() && SinkBaseName(entry_name) == entry_name,
+            "raw artifact entry must be a non-empty basename: {}",
+            name);
+        impl_->AssertRemotePathAvailable(
+            impl_->RemotePathFor(name),
+            impl_->disk_manager->GetRemotePathsToFileSize());
+        AssertInfo(!impl_->entry_names.contains(entry_name) &&
+                       !impl_->prepared_entries.contains(entry_name),
+                   "duplicate artifact entry: {}",
+                   name);
+        auto output = impl_->disk_manager->CreateOutputStream(
+            entry_name,
+            impl_->storage_namespace == ArtifactStorageNamespace::Index);
+        if (output->Prepare(expected_size)) {
+            impl_->prepared_entries.emplace(entry_name, std::move(output));
+        }
+    } catch (...) {
+        impl_->state = SinkState::Failed;
+        throw;
+    }
+}
+
+void
 V1DiskSink::WriteRawEntry(std::string_view name,
                           std::shared_ptr<arrow::Buffer> data) {
     AssertOpen(impl_->state);
@@ -561,9 +605,13 @@ V1DiskSink::Finish() {
             AssertInfo(
                 size <= std::numeric_limits<int64_t>::max() - impl_->raw_size,
                 "artifact serialized size overflow");
-            auto output = impl_->disk_manager->CreateOutputStream(
-                name,
-                impl_->storage_namespace == ArtifactStorageNamespace::Index);
+            auto prepared = impl_->prepared_entries.find(name);
+            auto output = prepared != impl_->prepared_entries.end()
+                              ? std::move(prepared->second)
+                              : impl_->disk_manager->CreateOutputStream(
+                                    name,
+                                    impl_->storage_namespace ==
+                                        ArtifactStorageNamespace::Index);
             output->Write(data);
             output->Close();
             data.reset();
@@ -577,6 +625,7 @@ V1DiskSink::Finish() {
             impl_->raw_remote_files.emplace(impl_->RemotePathFor(name), size);
             impl_->raw_size += size;
         }
+        impl_->prepared_entries.clear();
         impl_->PrepareMemoryEntries();
         if (!AddMemoryFiles(*impl_->memory_manager,
                             impl_->storage_namespace,

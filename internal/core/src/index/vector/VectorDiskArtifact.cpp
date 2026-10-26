@@ -47,8 +47,15 @@ VectorDiskArtifact::Serialize(storage::FileSink& sink) const {
 
     if (engine_) {
         file_manager_->ResetOutput();
-        auto output_guard =
-            folly::makeGuard([this] { file_manager_->ResetOutput(); });
+        auto output_guard = folly::makeGuard([this] {
+            file_manager_->SetOutputPreparer({});
+            file_manager_->ResetOutput();
+        });
+        file_manager_->SetOutputPreparer(
+            [&sink](const std::string& path, size_t size) {
+                sink.PrepareRawEntry(
+                    std::filesystem::path(path).filename().string(), size);
+            });
         knowhere::BinarySet entries;
         const auto status = engine_->native_index.Serialize(entries);
         file_manager_->RethrowFirstFailure();
