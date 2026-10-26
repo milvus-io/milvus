@@ -119,6 +119,8 @@ func (f *BalancerFactory) GetBalancer() Balance {
 		balancer = NewMultiTargetBalancer(f.scheduler, f.nodeManager, f.dist, f.targetMgr)
 	case meta.ChannelLevelScoreBalancerName:
 		balancer = NewChannelLevelScoreBalancer(f.scheduler, f.nodeManager, f.dist, f.targetMgr)
+	case meta.TwoLevelBalancerName:
+		balancer = NewTwoLevelBalancer(f.scheduler, f.nodeManager, f.dist, f.targetMgr)
 	default:
 		mlog.Info(context.TODO(), "Unknown balancer type, using default",
 			mlog.String("requested", balanceKey),
@@ -133,7 +135,9 @@ func (f *BalancerFactory) GetBalancer() Balance {
 // GetStoppingBalancer returns a stopping balancer instance based on the current configuration.
 // It caches balancer instances by policy type and reuses them when the configuration hasn't changed.
 func (f *BalancerFactory) GetStoppingBalancer() *StoppingBalancer {
-	policyType := paramtable.Get().QueryCoordCfg.StoppingBalanceAssignPolicy.GetValue()
+	// Placement follows the balancer: with TwoLevelBalancer the drain puts
+	// segments where balance keeps them, whatever the stopping policy says.
+	policyType := assign.PlacementPolicyType(paramtable.Get().QueryCoordCfg.StoppingBalanceAssignPolicy.GetValue())
 
 	f.stoppingBalancerLock.Lock()
 	defer f.stoppingBalancerLock.Unlock()

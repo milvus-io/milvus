@@ -3595,6 +3595,30 @@ type queryCoordConfig struct {
 	ResourceExhaustionPenaltyDuration ParamItem `refreshable:"true"`
 	ResourceExhaustionCleanupInterval ParamItem `refreshable:"true"`
 
+	// load pacing and adaptive task timeouts
+	LoadPacingEnabled        ParamItem `refreshable:"true"`
+	LoadBandwidthPerCoreMBps ParamItem `refreshable:"true"`
+	LoadPacingSlowFraction   ParamItem `refreshable:"true"`
+	LoadPacingWaitForTick    ParamItem `refreshable:"true"`
+	SegmentTaskRetryTimeout  ParamItem `refreshable:"true"`
+	ChannelTaskRetryTimeout  ParamItem `refreshable:"true"`
+	ForceLoadAfterRejections ParamItem `refreshable:"true"`
+
+	// two-level balancer (queryCoord.balancer = TwoLevelBalancer)
+	TwoLevelNodeTolerance              ParamItem `refreshable:"true"`
+	TwoLevelHighWater                  ParamItem `refreshable:"true"`
+	TwoLevelHighWaterTolerance         ParamItem `refreshable:"true"`
+	TwoLevelTableSegmentCountTolerance ParamItem `refreshable:"true"`
+	TwoLevelTableByteTolerance         ParamItem `refreshable:"true"`
+	TwoLevelSmallTableSegmentsPerNode  ParamItem `refreshable:"true"`
+	TwoLevelLevelCandidates            ParamItem `refreshable:"true"`
+	TwoLevelCeilingRatio               ParamItem `refreshable:"true"`
+	TwoLevelCooldownSeconds            ParamItem `refreshable:"true"`
+	TwoLevelSwapCandidates             ParamItem `refreshable:"true"`
+	TwoLevelTablesPerRound             ParamItem `refreshable:"true"`
+	TwoLevelLedgerTTLSeconds           ParamItem `refreshable:"true"`
+	TwoLevelViewTTLMillis              ParamItem `refreshable:"true"`
+
 	AutoscalePrecheckEnabled ParamItem `refreshable:"true"`
 	AutoscaleEnabled         ParamItem `refreshable:"true"`
 	AutoscaleMaxMemoryLimit  ParamItem `refreshable:"true"`
@@ -3897,22 +3921,48 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	p.ChannelTaskTimeout = ParamItem{
 		Key:          "queryCoord.channelTaskTimeout",
 		Version:      "2.0.0",
-		DefaultValue: "120000",
+		DefaultValue: "60000",
 		PanicIfEmpty: true,
-		Doc:          "2 minutes",
-		Export:       true,
+		Doc: `Timeout of a channel task's first attempt, in milliseconds (1 minute). A watch that does not finish
+within it is canceled and retried with channelTaskRetryTimeout.`,
+		Export: true,
 	}
 	p.ChannelTaskTimeout.Init(base.mgr)
+
+	p.ChannelTaskRetryTimeout = ParamItem{
+		Key:          "queryCoord.channelTaskRetryTimeout",
+		Version:      "3.1.0",
+		DefaultValue: "300000",
+		Doc: `Timeout, in milliseconds, of a channel watch retried on the same node after its previous attempt ended
+on the deadline (5 minutes), so a delegator that needs longer to catch up converges instead of being
+killed and retried forever. A successful watch resets it. 0 keeps channelTaskTimeout for every attempt.`,
+		Export: true,
+	}
+	p.ChannelTaskRetryTimeout.Init(base.mgr)
 
 	p.SegmentTaskTimeout = ParamItem{
 		Key:          "queryCoord.segmentTaskTimeout",
 		Version:      "2.0.0",
-		DefaultValue: "300000",
+		DefaultValue: "60000",
 		PanicIfEmpty: true,
-		Doc:          "5 minutes",
-		Export:       true,
+		Doc: `Timeout of a segment task's first attempt, in milliseconds (1 minute). The load pacer keeps a
+node from queueing loads, so a load that does not finish within it is unusually slow; it is then
+canceled and retried with segmentTaskRetryTimeout. With loadPacingEnabled=false loads queue on the
+node again and every attempt uses segmentTaskRetryTimeout.`,
+		Export: true,
 	}
 	p.SegmentTaskTimeout.Init(base.mgr)
+
+	p.SegmentTaskRetryTimeout = ParamItem{
+		Key:          "queryCoord.segmentTaskRetryTimeout",
+		Version:      "3.1.0",
+		DefaultValue: "300000",
+		Doc: `Timeout, in milliseconds, of a segment load retried after its previous attempt ended on the deadline
+(5 minutes), so an oversized segment is not canceled and retried forever. A successful load resets the
+segment to segmentTaskTimeout. 0 keeps segmentTaskTimeout for every attempt.`,
+		Export: true,
+	}
+	p.SegmentTaskRetryTimeout.Init(base.mgr)
 
 	p.DistPullInterval = ParamItem{
 		Key:          "queryCoord.distPullInterval",
@@ -4300,6 +4350,190 @@ Set to 0 to disable the penalty period.`,
 	}
 	p.ResourceExhaustionPenaltyDuration.Init(base.mgr)
 
+	p.LoadPacingEnabled = ParamItem{
+		Key:          "queryCoord.loadPacingEnabled",
+		Version:      "3.1.0",
+		DefaultValue: "true",
+		Doc: `Pace segment loads per QueryNode by the bytes in flight: the node is sent what it drains within a
+quarter of the task timeout at its believed bandwidth (loadBandwidthPerCoreMBps per core to start, adapted
+to how long loads take), and at most one load per core. The executor otherwise admits far more loads
+than a node's bandwidth serves at once, the rest wait inside the node against the task timeout, and a
+burst of loads times out and is redone. Loads over the budget wait in QueryCoord, where no deadline runs.`,
+		Export: true,
+	}
+	p.LoadPacingEnabled.Init(base.mgr)
+
+	p.LoadBandwidthPerCoreMBps = ParamItem{
+		Key:          "queryCoord.loadBandwidthPerCoreMBps",
+		Version:      "3.1.0",
+		DefaultValue: "32",
+		Doc: `Segment load bandwidth a QueryNode is assumed to have per CPU core, in MiB/s, when the pacer first
+sends it loads (a 16-core node: 512 MiB/s, so up to 7.5 GiB in flight under a 60 s task timeout). The
+pacer then adapts it between an eighth and eight times this: halved after a window of loads that
+took more than loadPacingSlowFraction of their timeout on a saturated node, raised by one core's worth
+per window of fast ones. Measured nodes with local NVMe load at 30-50 MiB/s per core.`,
+		Export: true,
+	}
+	p.LoadBandwidthPerCoreMBps.Init(base.mgr)
+
+	p.LoadPacingSlowFraction = ParamItem{
+		Key:          "queryCoord.loadPacingSlowFraction",
+		Version:      "3.1.0",
+		DefaultValue: "0.5",
+		Doc: `A load that takes more than this fraction of its task timeout on a saturated node counts as slow;
+a window of slow loads halves the node's believed bandwidth, a window of fast ones raises it by one
+core's worth.`,
+		Export: true,
+	}
+	p.LoadPacingSlowFraction.Init(base.mgr)
+
+	p.LoadPacingWaitForTick = ParamItem{
+		Key:          "queryCoord.loadPacingWaitForTick",
+		Version:      "3.1.0",
+		DefaultValue: "false",
+		Doc:          "Test knob: a load the pacer held back waits for the next dispatch tick instead of being dispatched as soon as a slot frees.",
+	}
+	p.LoadPacingWaitForTick.Init(base.mgr)
+
+	p.ForceLoadAfterRejections = ParamItem{
+		Key:          "queryCoord.forceLoadAfterRejections",
+		Version:      "3.1.0",
+		DefaultValue: "3",
+		Doc: `After a segment's load was refused for memory this many times in a row, the next load is sent
+with force_load: the QueryNode admits it up to queryNode.forceLoadMemoryThresholdPercentage instead of
+the overloaded threshold, and balance moves memory off the node afterwards. A cluster whose nodes all
+sit just under the threshold could otherwise never load a large segment although it has room overall.
+Set to 0 to disable.`,
+		Export: true,
+	}
+	p.ForceLoadAfterRejections.Init(base.mgr)
+
+	p.TwoLevelNodeTolerance = ParamItem{
+		Key:          "queryCoord.twoLevel.nodeTolerance",
+		Version:      "3.1.0",
+		DefaultValue: "0.1",
+		Doc: `Two-level balancer: the fullest and emptiest QueryNode of a resource group may differ in memory fill
+by this fraction of the group's mean fill (the band); above twoLevel.highWater the band is
+twoLevel.highWaterTolerance instead. A node outside the band is leveled before any table is balanced.`,
+		Export: true,
+	}
+	p.TwoLevelNodeTolerance.Init(base.mgr)
+
+	p.TwoLevelHighWater = ParamItem{
+		Key:          "queryCoord.twoLevel.highWater",
+		Version:      "3.1.0",
+		DefaultValue: "0.8",
+		Doc:          `Two-level balancer: mean fill above which the tighter highWaterTolerance band applies.`,
+		Export:       true,
+	}
+	p.TwoLevelHighWater.Init(base.mgr)
+
+	p.TwoLevelHighWaterTolerance = ParamItem{
+		Key:          "queryCoord.twoLevel.highWaterTolerance",
+		Version:      "3.1.0",
+		DefaultValue: "0.05",
+		Doc:          `Two-level balancer: the band above highWater, as a fraction of the mean fill.`,
+		Export:       true,
+	}
+	p.TwoLevelHighWaterTolerance.Init(base.mgr)
+
+	p.TwoLevelTableSegmentCountTolerance = ParamItem{
+		Key:          "queryCoord.twoLevel.tableSegmentCountTolerance",
+		Version:      "3.1.0",
+		DefaultValue: "0.15",
+		Doc: `Two-level balancer: a table may hold on one node this fraction more or fewer segments than its fair
+share over the replica's nodes, and at least one.`,
+		Export: true,
+	}
+	p.TwoLevelTableSegmentCountTolerance.Init(base.mgr)
+
+	p.TwoLevelTableByteTolerance = ParamItem{
+		Key:          "queryCoord.twoLevel.tableByteTolerance",
+		Version:      "3.1.0",
+		DefaultValue: "0.15",
+		Doc: `Two-level balancer: a table may hold on one node this fraction more or fewer bytes than its fair
+share, and at least its largest segment.`,
+		Export: true,
+	}
+	p.TwoLevelTableByteTolerance.Init(base.mgr)
+
+	p.TwoLevelSmallTableSegmentsPerNode = ParamItem{
+		Key:          "queryCoord.twoLevel.smallTableSegmentsPerNode",
+		Version:      "3.1.0",
+		DefaultValue: "2",
+		Doc: `Two-level balancer: a table with fewer segments per replica node than this on average is small:
+placement still spreads it, balance leaves it alone and moving its segments never counts as hurting
+it. 0 balances every table.`,
+		Export: true,
+	}
+	p.TwoLevelSmallTableSegmentsPerNode.Init(base.mgr)
+
+	p.TwoLevelLevelCandidates = ParamItem{
+		Key:          "queryCoord.twoLevel.levelCandidates",
+		Version:      "3.1.0",
+		DefaultValue: "1000",
+		Doc: `Two-level balancer: the largest segments of an over-full node that leveling considers moving.
+0 considers all of them.`,
+		Export: true,
+	}
+	p.TwoLevelLevelCandidates.Init(base.mgr)
+
+	p.TwoLevelCeilingRatio = ParamItem{
+		Key:          "queryCoord.twoLevel.ceilingRatio",
+		Version:      "3.1.0",
+		DefaultValue: "0.5",
+		Doc: `Two-level balancer: table balance and placement add nothing to a node whose fill is above
+mean x (1 + nodeTolerance x ceilingRatio).`,
+		Export: true,
+	}
+	p.TwoLevelCeilingRatio.Init(base.mgr)
+
+	p.TwoLevelCooldownSeconds = ParamItem{
+		Key:          "queryCoord.twoLevel.cooldownSeconds",
+		Version:      "3.1.0",
+		DefaultValue: "600",
+		Doc:          `Two-level balancer: a segment balance moved is not moved again within this many seconds.`,
+		Export:       true,
+	}
+	p.TwoLevelCooldownSeconds.Init(base.mgr)
+
+	p.TwoLevelSwapCandidates = ParamItem{
+		Key:          "queryCoord.twoLevel.swapCandidates",
+		Version:      "3.1.0",
+		DefaultValue: "32",
+		Doc:          `Two-level balancer: segments per side tried when pairing a swap.`,
+		Export:       true,
+	}
+	p.TwoLevelSwapCandidates.Init(base.mgr)
+
+	p.TwoLevelTablesPerRound = ParamItem{
+		Key:          "queryCoord.twoLevel.tablesPerRound",
+		Version:      "3.1.0",
+		DefaultValue: "20000",
+		Doc:          `Two-level balancer: tables examined per planning round, round robin.`,
+		Export:       true,
+	}
+	p.TwoLevelTablesPerRound.Init(base.mgr)
+
+	p.TwoLevelLedgerTTLSeconds = ParamItem{
+		Key:          "queryCoord.twoLevel.ledgerTTLSeconds",
+		Version:      "3.1.0",
+		DefaultValue: "600",
+		Doc: `Two-level balancer: how long a planned placement or move stays in the planner's ledger after the
+distribution should have shown it.`,
+		Export: true,
+	}
+	p.TwoLevelLedgerTTLSeconds.Init(base.mgr)
+
+	p.TwoLevelViewTTLMillis = ParamItem{
+		Key:          "queryCoord.twoLevel.viewTTLMillis",
+		Version:      "3.1.0",
+		DefaultValue: "500",
+		Doc:          `Two-level balancer: how long placement reuses the last cluster view before rebuilding it.`,
+		Export:       true,
+	}
+	p.TwoLevelViewTTLMillis.Init(base.mgr)
+
 	p.ResourceExhaustionCleanupInterval = ParamItem{
 		Key:          "queryCoord.resourceExhaustionCleanupInterval",
 		Version:      "2.6.7",
@@ -4435,6 +4669,8 @@ type queryNodeConfig struct {
 	DiskCapacityLimit      ParamItem `refreshable:"true"`
 	MaxDiskUsagePercentage ParamItem `refreshable:"true"`
 	DiskCacheCapacityLimit ParamItem `refreshable:"true"`
+
+	ForceLoadMemoryThresholdPercentage ParamItem `refreshable:"true"`
 
 	// cache limit
 	// Deprecated: Never used
@@ -5632,6 +5868,20 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export: true,
 	}
 	p.MaxDiskUsagePercentage.Init(base.mgr)
+
+	p.ForceLoadMemoryThresholdPercentage = ParamItem{
+		Key:          "queryNode.forceLoadMemoryThresholdPercentage",
+		Version:      "3.1.0",
+		DefaultValue: "95",
+		PanicIfEmpty: true,
+		Formatter: func(v string) string {
+			return fmt.Sprintf("%f", getAsFloat(v)/100)
+		},
+		Doc: `Memory threshold (percentage) for a load request marked force_load by QueryCoord (see
+queryCoord.forceLoadAfterRejections); other loads use overloadedMemoryThresholdPercentage.`,
+		Export: true,
+	}
+	p.ForceLoadMemoryThresholdPercentage.Init(base.mgr)
 
 	p.DiskCacheCapacityLimit = ParamItem{
 		Key:     "queryNode.diskCacheCapacityLimit",

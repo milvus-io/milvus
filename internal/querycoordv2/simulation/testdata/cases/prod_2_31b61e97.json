@@ -1,0 +1,204 @@
+{
+ "name": "prod_2_31b61e97",
+ "category": "2_frequent_scale,3_slow_load",
+ "customer": "exa",
+ "source": "in01-31b61e97 aws-us/az; node scale 0.750, segment scale 1.000, row_scale=0.0817; exa: autoscale storm 12-96 QN with SN 3-16, 541 topology event groups, 22 QN OOM restarts; 96% of moves near topology changes; compare segment_grow backlog (task_num peak 4077) and per-segment load mean 203 s.",
+ "streaming": true,
+ "qns": 24,
+ "sns": 4,
+ "qn_cores": 24,
+ "qn_memory_gb": 128,
+ "load": {
+  "concurrency": 120,
+  "bandwidth_mb": 1080,
+  "single_bandwidth_mb": 400,
+  "base_ms": 300,
+  "jitter_sigma": 0.45
+ },
+ "search": {
+  "BaseMs": 228.6,
+  "MsPerMillionRows": 0,
+  "LoadInterference": 0.43
+ },
+ "collections": [
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 1959,
+   "rows_median": 1223359,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 0.5,
+   "compact_every_seconds": 82.8,
+   "flush_rows": 1223359
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 91,
+   "rows_median": 2187898,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 11.0,
+   "compact_every_seconds": 1783.3,
+   "flush_rows": 2187898
+  }
+ ],
+ "ingest": {
+  "rows_per_sec_per_channel": 21,
+  "flush_every_seconds": 1.0,
+  "compact_every_seconds": 158.3
+ },
+ "events": [
+  {
+   "at": 1,
+   "op": "add_qn",
+   "count": 1
+  },
+  {
+   "at": 1,
+   "op": "add_qn",
+   "count": 1
+  },
+  {
+   "at": 5.0,
+   "op": "add_qn",
+   "count": 19
+  },
+  {
+   "at": 125.0,
+   "op": "stop_qn",
+   "node": 45
+  },
+  {
+   "at": 125.0,
+   "op": "stop_qn",
+   "node": 44
+  },
+  {
+   "at": 125.0,
+   "op": "stop_qn",
+   "node": 43
+  },
+  {
+   "at": 125.0,
+   "op": "stop_qn",
+   "node": 42
+  },
+  {
+   "at": 125.0,
+   "op": "stop_qn",
+   "node": 41
+  },
+  {
+   "at": 125.0,
+   "op": "stop_qn",
+   "node": 40
+  },
+  {
+   "at": 125.0,
+   "op": "stop_qn",
+   "node": 39
+  },
+  {
+   "at": 155.0,
+   "op": "stop_qn",
+   "node": 38
+  },
+  {
+   "at": 155.0,
+   "op": "stop_qn",
+   "node": 37
+  },
+  {
+   "at": 155.0,
+   "op": "stop_qn",
+   "node": 36
+  },
+  {
+   "at": 155.0,
+   "op": "stop_qn",
+   "node": 35
+  },
+  {
+   "at": 245.0,
+   "op": "stop_qn",
+   "node": 34
+  },
+  {
+   "at": 245.0,
+   "op": "stop_qn",
+   "node": 33
+  },
+  {
+   "at": 245.0,
+   "op": "stop_qn",
+   "node": 32
+  },
+  {
+   "at": 245.0,
+   "op": "stop_qn",
+   "node": 31
+  },
+  {
+   "at": 245.0,
+   "op": "stop_qn",
+   "node": 30
+  },
+  {
+   "at": 245.0,
+   "op": "stop_qn",
+   "node": 29
+  },
+  {
+   "at": 245.0,
+   "op": "stop_qn",
+   "node": 28
+  },
+  {
+   "at": 245.0,
+   "op": "stop_qn",
+   "node": 27
+  },
+  {
+   "at": 305.0,
+   "op": "stop_qn",
+   "node": 26
+  },
+  {
+   "at": 305.0,
+   "op": "stop_qn",
+   "node": 25
+  },
+  {
+   "at": 305.0,
+   "op": "stop_qn",
+   "node": 24
+  },
+  {
+   "at": 305.0,
+   "op": "stop_qn",
+   "node": 23
+  }
+ ],
+ "duration_seconds": 360.0,
+ "prod": {
+  "qn": 32,
+  "sn": 6,
+  "segments": 2265.0,
+  "collections": 2,
+  "steady_seg_move_per_hour": 7.35,
+  "seg_move_per_hour": 40.02,
+  "seg_move_per_segment_per_hour": 0.01766887417218543,
+  "seg_moves_per_seg_grow": 0.05410520907972475,
+  "load_p50_s": 179.1049,
+  "load_p99_s": 923.243,
+  "load_mean_s": 203.03282231001626,
+  "segment_grow_mean_s": 469.8467,
+  "segment_move_mean_s": 88.751,
+  "task_num_max": 4077.0,
+  "search_p99_idle_ms": 228.567,
+  "search_p99_busy_ms": 245.025,
+  "window_events_real_hour": 10
+ }
+}

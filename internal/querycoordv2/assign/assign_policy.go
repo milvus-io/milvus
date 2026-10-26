@@ -34,6 +34,7 @@ type SegmentAssignPlan struct {
 	ToScore      int64
 	SegmentScore int64
 	LoadPriority commonpb.LoadPriority
+	Reason       string // why the balancer planned it, for logs
 }
 
 func (segPlan *SegmentAssignPlan) String() string {

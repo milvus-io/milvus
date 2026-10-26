@@ -1,0 +1,117 @@
+{
+ "name": "prod_1_a6ee8e27",
+ "category": "1_frequent_balance",
+ "customer": null,
+ "source": "in01-a6ee8e27 aws-us/az; node scale 1.000, segment scale 0.425, row_scale=1.0000; same pattern as 6de12834 (497 collections, 20 QN): 6.3k moves/h, zero topology events; compare moves/h and loads/h.",
+ "streaming": true,
+ "qns": 20,
+ "sns": 3,
+ "qn_cores": 12,
+ "qn_memory_gb": 64,
+ "load": {
+  "concurrency": 60,
+  "bandwidth_mb": 540,
+  "single_bandwidth_mb": 400,
+  "base_ms": 300,
+  "jitter_sigma": 0.45
+ },
+ "search": {
+  "BaseMs": 11.7,
+  "MsPerMillionRows": 0,
+  "LoadInterference": 0.0
+ },
+ "collections": [
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 42,
+   "rows_median": 722178,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 17.1,
+   "compact_every_seconds": 12.1,
+   "flush_rows": 722178
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 31,
+   "rows_median": 848880,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 22.6,
+   "compact_every_seconds": 16.0,
+   "flush_rows": 848880
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 29,
+   "rows_median": 884265,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 25.0,
+   "compact_every_seconds": 17.7,
+   "flush_rows": 884265
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 28,
+   "rows_median": 897451,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 25.7,
+   "compact_every_seconds": 18.2,
+   "flush_rows": 897451
+  },
+  {
+   "count": 1,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 22,
+   "rows_median": 877099,
+   "rows_sigma": 0.3,
+   "flush_every_seconds": 32.8,
+   "compact_every_seconds": 23.2,
+   "flush_rows": 877099
+  },
+  {
+   "count": 145,
+   "replicas": 1,
+   "channels": 1,
+   "segments_per_channel": 20,
+   "rows_median": 22476,
+   "rows_sigma": 2.0,
+   "flush_every_seconds": 123.3,
+   "compact_every_seconds": 87.3,
+   "flush_rows": 22476
+  }
+ ],
+ "ingest": {
+  "rows_per_sec_per_channel": 0,
+  "flush_every_seconds": 118.3,
+  "compact_every_seconds": 83.7
+ },
+ "events": [],
+ "duration_seconds": 300,
+ "prod": {
+  "qn": 20,
+  "sn": 3,
+  "segments": 7052.0,
+  "collections": 497,
+  "steady_seg_move_per_hour": 6325.67,
+  "seg_move_per_hour": 6328.81,
+  "seg_move_per_segment_per_hour": 0.8974489506522972,
+  "seg_moves_per_seg_grow": 4.184364855304828,
+  "load_p50_s": 1.7167000000000001,
+  "load_p99_s": 16.685200000000002,
+  "load_mean_s": 2.4442653744807843,
+  "segment_grow_mean_s": 3.6552,
+  "segment_move_mean_s": 3.8236,
+  "task_num_max": 56.0,
+  "search_p99_idle_ms": 11.7,
+  "search_p99_busy_ms": 11.7,
+  "window_events_real_hour": 0
+ }
+}

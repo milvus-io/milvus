@@ -554,6 +554,9 @@ type Scheduler interface {
 	// collectionID == -1 means the collection-scoped snapshot covers all collections.
 	GetSegmentTaskDeltaSnapshot(nodeIDs []int64, collectionID int64) *SegmentTaskDeltaSnapshot
 	GetChannelTaskDelta(nodeID int64, collectionID int64) int
+	// LoadBudget is what the load pacer lets node have in flight: bytes and
+	// loads; 0, 0 for a node without an executor.
+	LoadBudget(nodeID int64) (bytes float64, loads int)
 }
 
 type taskScheduler struct {
@@ -648,6 +651,7 @@ func (scheduler *taskScheduler) AddExecutor(nodeID int64) {
 	if _, exist := scheduler.executors.GetOrInsert(nodeID, executor); exist {
 		return
 	}
+	executor.dispatch = func() { scheduler.Dispatch(nodeID) }
 	executor.Start(scheduler.ctx)
 	mlog.Info(scheduler.ctx, "add executor for new QueryNode", mlog.Int64("nodeID", nodeID))
 }
@@ -924,6 +928,13 @@ func (scheduler *taskScheduler) Dispatch(node int64) {
 
 func (scheduler *taskScheduler) GetSegmentTaskDeltaSnapshot(nodeIDs []int64, collectionID int64) *SegmentTaskDeltaSnapshot {
 	return scheduler.segmentTaskDelta.GetSegmentSnapshot(nodeIDs, collectionID, scheduler.distMgr)
+}
+
+func (scheduler *taskScheduler) LoadBudget(nodeID int64) (bytes float64, loads int) {
+	if ex, ok := scheduler.executors.Get(nodeID); ok {
+		return ex.LoadBudget()
+	}
+	return 0, 0
 }
 
 func (scheduler *taskScheduler) GetChannelTaskDelta(nodeID, collectionID int64) int {
@@ -1306,6 +1317,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 		index := NewReplicaSegmentIndex(task)
 		scheduler.segmentTasks.Remove(index)
 		log = mlog.With(mlog.Int64("segmentID", task.SegmentID()))
+		noteSegmentTaskDone(task)
 		if task.Status() == TaskStatusFailed &&
 			task.Err() != nil &&
 			!errors.IsAny(task.Err(), merr.ErrChannelNotFound, merr.ErrServiceTooManyRequests) {
@@ -1316,6 +1328,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}
 		scheduler.channelTasks.Remove(index)
 		log = mlog.With(mlog.String("channel", task.Channel()))
+		noteChannelTaskDone(task)
 
 	case *LeaderTask:
 		index := NewReplicaLeaderIndex(task)

@@ -53,7 +53,7 @@ func CreateSegmentTasksFromPlans(ctx context.Context, source task.Source, timeou
 		}
 		t, err := task.NewSegmentTask(
 			ctx,
-			timeout,
+			segmentTaskTimeout(p.Segment, timeout),
 			source,
 			p.Segment.GetCollectionID(),
 			p.Replica,
@@ -82,6 +82,9 @@ func CreateSegmentTasksFromPlans(ctx context.Context, source task.Source, timeou
 			mlog.Int32("loadPriority", int32(p.LoadPriority)),
 			mlog.Int64("from", p.From),
 			mlog.Int64("to", p.To))
+		if p.Reason != "" {
+			t.SetReason(p.Reason)
+		}
 		if task.GetTaskType(t) == task.TaskTypeMove {
 			// from balance checker
 			t.SetPriority(task.TaskPriorityLow)
@@ -109,7 +112,11 @@ func CreateChannelTasksFromPlans(ctx context.Context, source task.Source, timeou
 			action := task.NewChannelAction(p.From, task.ActionTypeReduce, p.Channel.GetChannelName())
 			actions = append(actions, action)
 		}
-		t, err := task.NewChannelTask(ctx, timeout, source, p.Channel.GetCollectionID(), p.Replica, actions...)
+		chTimeout := timeout
+		if p.To != -1 {
+			chTimeout = channelTaskTimeout(p.Channel.GetChannelName(), p.To, timeout)
+		}
+		t, err := task.NewChannelTask(ctx, chTimeout, source, p.Channel.GetCollectionID(), p.Replica, actions...)
 		if err != nil {
 			mlog.Warn(ctx, "create channel task failed",
 				mlog.Int64("collection", p.Channel.GetCollectionID()),
@@ -240,4 +247,22 @@ func sortIfChannelAtWALLocated(channels []*meta.DmChannel) []*meta.DmChannel {
 		return weighter(channels[i]) < weighter(channels[j])
 	})
 	return channels
+}
+
+// segmentTaskTimeout is the timeout for a load of s: the configured one for
+// a first attempt, queryCoord.segmentTaskRetryTimeout after a load that ended
+// on its deadline, so an oversized segment is not canceled and retried
+// forever (see task.SegmentTaskTimeout).
+func segmentTaskTimeout(s *meta.Segment, timeout time.Duration) time.Duration {
+	if s == nil {
+		return timeout
+	}
+	return task.SegmentTaskTimeout(s.GetID(), timeout)
+}
+
+// channelTaskTimeout is the timeout for a watch of channel on node: the
+// configured one for a first attempt, queryCoord.channelTaskRetryTimeout after
+// a watch that ended on its deadline (see task.ChannelTaskTimeout).
+func channelTaskTimeout(channel string, node int64, timeout time.Duration) time.Duration {
+	return task.ChannelTaskTimeout(channel, node, timeout)
 }
