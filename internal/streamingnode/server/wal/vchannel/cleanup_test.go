@@ -257,3 +257,78 @@ func TestQueryResourceRejectsDroppedVChannel(t *testing.T) {
 		scheduler.Close()
 	}
 }
+
+func fenceCleanupTestVChannel(t *testing.T, manager *PChannelRecoveryManager) {
+	t.Helper()
+	module := manager.Module("v1")
+	require.NotNil(t, module)
+	module.vchannelView.mu.Lock()
+	module.vchannelView.meta.SplitFenceTimeTick = 5
+	module.vchannelView.meta.SplitFenceTaskId = 7
+	module.vchannelView.mu.Unlock()
+}
+
+// TestRetiredSplitSourceWaitsForItsFinalCheckpointReport: a retired split
+// source is not removed -- and so stays in the checkpoint updater's report set
+// -- until DataCoord has accepted a checkpoint through its drop tick, which a
+// secondary's drain predicate reads after the source is already retired.
+func TestRetiredSplitSourceWaitsForItsFinalCheckpointReport(t *testing.T) {
+	manager := newCleanupTestManager(t, streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED, nil)
+	fenceCleanupTestVChannel(t, manager)
+	reported := false
+	cleanup := moduleapi.CleanupContext{
+		PhysicalTimeTick: 11,
+		SummaryRetired:   func(string, uint64) bool { return true },
+		CheckpointReported: func(vc string, through uint64) bool {
+			require.Equal(t, "v1", vc)
+			require.Equal(t, uint64(10), through, "the drop tick bounds T_switch from above")
+			return reported
+		},
+	}
+	require.Empty(t, manager.ConsumeCleanupSnapshots(cleanup))
+	require.Empty(t, manager.ConsumeCleanupSnapshots(cleanup), "still a cleanup candidate, still waiting")
+	require.NotNil(t, manager.Module("v1"))
+	assert.Contains(t, manager.activeVChannels(), "v1", "its checkpoint is still reported")
+
+	reported = true
+	snapshots := manager.ConsumeCleanupSnapshots(cleanup)
+	require.Len(t, snapshots, 1)
+	require.Equal(t, moduleapi.SnapshotOpDelete, snapshots[0].Op())
+	snapshots[0].MarkPersisted()
+	require.Nil(t, manager.Module("v1"))
+}
+
+// TestOrdinaryDropDoesNotWaitForCheckpointReport: a drop that was never a
+// split source has no reader of its final checkpoint.
+func TestOrdinaryDropDoesNotWaitForCheckpointReport(t *testing.T) {
+	manager := newCleanupTestManager(t, streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED, nil)
+	snapshots := manager.ConsumeCleanupSnapshots(moduleapi.CleanupContext{
+		PhysicalTimeTick:   11,
+		SummaryRetired:     func(string, uint64) bool { return true },
+		CheckpointReported: func(string, uint64) bool { return false },
+	})
+	require.Len(t, snapshots, 1)
+	require.Equal(t, moduleapi.SnapshotOpDelete, snapshots[0].Op())
+}
+
+// TestManagerGatesRetiredSplitSourceOnItsCheckpointUpdater: the manager wires
+// its own updater into the cleanup context, and forgets the vchannel once the
+// module is removed.
+func TestManagerGatesRetiredSplitSourceOnItsCheckpointUpdater(t *testing.T) {
+	manager := newCleanupTestManager(t, streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED, nil)
+	fenceCleanupTestVChannel(t, manager)
+	updater := newPChannelCheckpointUpdater("p1", manager.activeVChannels,
+		func() *utility.WALCheckpoint { return nil }, nil)
+	manager.checkpointUpdater = updater
+	cleanup := moduleapi.CleanupContext{PhysicalTimeTick: 11, SummaryRetired: func(string, uint64) bool { return true }}
+
+	updater.markReported([]string{"v1"}, 9)
+	require.Empty(t, manager.ConsumeCleanupSnapshots(cleanup), "a report below the drop tick is not enough")
+
+	updater.markReported([]string{"v1"}, 10)
+	snapshots := manager.ConsumeCleanupSnapshots(cleanup)
+	require.Len(t, snapshots, 1)
+	snapshots[0].MarkPersisted()
+	require.Nil(t, manager.Module("v1"))
+	assert.False(t, updater.Reported("v1", 10), "a removed vchannel is forgotten")
+}

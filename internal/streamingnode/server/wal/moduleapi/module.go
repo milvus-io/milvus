@@ -13,6 +13,12 @@ type CleanupContext struct {
 	// SummaryRetired proves the persisted manifest no longer needs this
 	// VChannel tombstone to recover its transform GC frontier.
 	SummaryRetired func(vchannel string, through uint64) bool
+	// CheckpointReported proves DataCoord has stored a channel checkpoint of
+	// this VChannel at or past through. A retired shard split source waits on
+	// it: DataCoord's drain predicate reads that checkpoint, and nothing reports
+	// it once the VChannel is cleaned up. Nil means there is no reporter, and
+	// nothing waits on it.
+	CheckpointReported func(vchannel string, through uint64) bool
 }
 
 type ModuleName string

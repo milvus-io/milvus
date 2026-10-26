@@ -176,3 +176,34 @@ func TestCheckpointUpdaterRetryUsesCurrentPublishedPair(t *testing.T) {
 		require.Equal(t, adaptor.MustGetMQWrapperIDFromMessage(cp.MessageID).Serialize(), position.GetMsgID())
 	}
 }
+
+// TestCheckpointUpdaterRecordsWhatDataCoordAccepted: only a report DataCoord
+// accepted counts, it never moves backward, and Forget drops it.
+func TestCheckpointUpdaterRecordsWhatDataCoordAccepted(t *testing.T) {
+	reporter := &stubCheckpointReporter{}
+	timeTick := uint64(100)
+	updater := newTestCheckpointUpdater(reporter, func() *utility.WALCheckpoint {
+		return &utility.WALCheckpoint{MessageID: rmq.NewRmqID(1), TimeTick: timeTick, Magic: 1}
+	})
+	assert.False(t, updater.Reported("v1", 1), "nothing reported yet")
+
+	updater.execute()
+	assert.True(t, updater.Reported("v1", 100))
+	assert.True(t, updater.Reported("v2", 99))
+	assert.False(t, updater.Reported("v1", 101))
+
+	reporter.mu.Lock()
+	reporter.err = errors.New("coordinator down")
+	reporter.mu.Unlock()
+	timeTick = 200
+	updater.execute()
+	assert.False(t, updater.Reported("v1", 200), "a failed report is not delivered")
+	assert.True(t, updater.Reported("v1", 100))
+
+	updater.markReported([]string{"v1"}, 50)
+	assert.True(t, updater.Reported("v1", 100), "an older report does not move it back")
+
+	updater.Forget("v1")
+	assert.False(t, updater.Reported("v1", 100))
+	assert.True(t, updater.Reported("v2", 100))
+}

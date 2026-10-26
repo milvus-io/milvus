@@ -55,6 +55,11 @@ type PChannelCheckpointUpdater struct {
 
 	tickInterval time.Duration
 
+	// reportedMu guards reported: the time tick of the last checkpoint
+	// DataCoord accepted, per vchannel.
+	reportedMu sync.Mutex
+	reported   map[string]uint64
+
 	closeCh   chan struct{}
 	closeOnce sync.Once
 }
@@ -77,6 +82,7 @@ func newPChannelCheckpointUpdater(
 		// Same cadence as the removed flusher's ChannelCheckpointUpdater
 		// (dataNode.channel.channelCheckpointUpdateTickInSeconds).
 		tickInterval: paramtable.Get().DataNodeCfg.ChannelCheckpointUpdateTickInSeconds.GetAsDuration(time.Second),
+		reported:     make(map[string]uint64),
 		closeCh:      make(chan struct{}),
 	}
 }
@@ -139,10 +145,37 @@ func (u *PChannelCheckpointUpdater) execute() {
 			mlog.Err(err))
 		return
 	}
+	u.markReported(vchannels, checkpoint.TimeTick)
 	mlog.Info(ctx, "update channel checkpoint done",
 		mlog.String("pchannel", u.pchannel),
 		mlog.Uint64("checkpointTimeTick", checkpoint.TimeTick),
 		mlog.Int("vchannels", len(vchannels)))
+}
+
+func (u *PChannelCheckpointUpdater) markReported(vchannels []string, timeTick uint64) {
+	u.reportedMu.Lock()
+	defer u.reportedMu.Unlock()
+	for _, vchannel := range vchannels {
+		if u.reported[vchannel] < timeTick {
+			u.reported[vchannel] = timeTick
+		}
+	}
+}
+
+// Reported reports whether DataCoord accepted a checkpoint of vchannel at or
+// past through since this updater started. It is memory only: after a restart
+// the vchannel is still present, so it is reported again before it can pass.
+func (u *PChannelCheckpointUpdater) Reported(vchannel string, through uint64) bool {
+	u.reportedMu.Lock()
+	defer u.reportedMu.Unlock()
+	return u.reported[vchannel] >= through
+}
+
+// Forget drops what was recorded for a vchannel that is no longer reported.
+func (u *PChannelCheckpointUpdater) Forget(vchannel string) {
+	u.reportedMu.Lock()
+	defer u.reportedMu.Unlock()
+	delete(u.reported, vchannel)
 }
 
 // Close stops the report loop. It is idempotent.
