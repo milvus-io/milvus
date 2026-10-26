@@ -1060,6 +1060,22 @@ func (m *indexMeta) getSegmentIndexes(collectionID UniqueID, segID UniqueID) map
 	return ret
 }
 
+// rangeSegmentIndexesBySegment visits, without cloning, the SegmentIndex record
+// of each index of each segment: the records getSegmentIndexes filters. Writers
+// replace a resident record instead of mutating it, so fn may read it but must
+// neither mutate nor keep it; fn returns false to stop. Like any sync.Map
+// traversal, it may miss concurrent updates.
+func (m *indexMeta) rangeSegmentIndexesBySegment(fn func(segIdx *model.SegmentIndex) bool) {
+	m.segmentIndexes.Range(func(_ UniqueID, segIndexes *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]) bool {
+		next := true
+		segIndexes.Range(func(_ UniqueID, segIdx *model.SegmentIndex) bool {
+			next = fn(segIdx)
+			return next
+		})
+		return next
+	})
+}
+
 func (m *indexMeta) GetFieldIDByIndexID(collID, indexID UniqueID) UniqueID {
 	m.fieldIndexLock.RLock()
 	defer m.fieldIndexLock.RUnlock()
