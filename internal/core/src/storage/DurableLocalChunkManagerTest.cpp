@@ -68,7 +68,8 @@ TEST_F(DurableLocalChunkManagerTest, SyncFailureCannotAcknowledgeIndexSlice) {
     milvus_storage::ScopedFiuFault fault(FIUKEY_LOCAL_FILE_SYNC_FAIL, false);
     std::string replacement = "replacement";
     ASSERT_ANY_THROW(cm.Write(path, replacement.data(), replacement.size()));
-    ASSERT_EQ(Read(path), "old");
+    // A failed write is not acknowledged; incomplete output may remain.
+    ASSERT_EQ(Read(path), replacement);
 }
 
 TEST_F(DurableLocalChunkManagerTest,

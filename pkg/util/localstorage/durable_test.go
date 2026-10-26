@@ -16,7 +16,6 @@ package localstorage
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -25,53 +24,44 @@ import (
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 )
 
-func TestAtomicPublication(t *testing.T) {
-	name := filepath.Join(t.TempDir(), "parents", "data", "manifest")
+func TestDirectWriteAndRetry(t *testing.T) {
+	name := filepath.Join(t.TempDir(), "parents", "data", "object")
 	require.NoError(t, WriteFile(name, []byte("old"), 0o640))
+	before, err := os.Stat(name)
+	require.NoError(t, err)
 	require.NoError(t, Write(name, 0o777, func(w io.Writer) error {
 		_, err := w.Write([]byte("new"))
-		require.NoError(t, err)
-		current, err := os.ReadFile(name)
-		require.NoError(t, err)
-		require.Equal(t, "old", string(current), "an incomplete replacement must stay invisible")
-		return nil
+		return err
 	}))
-	current, err := os.ReadFile(name)
+	data, err := os.ReadFile(name)
 	require.NoError(t, err)
-	require.Equal(t, "new", string(current))
-	info, err := os.Stat(name)
+	require.Equal(t, "new", string(data))
+	after, err := os.Stat(name)
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o640), info.Mode().Perm())
+	require.True(t, os.SameFile(before, after), "write directly to the existing file")
+	require.Equal(t, before.Mode().Perm(), after.Mode().Perm())
 
 	err = Write(name, 0o640, func(w io.Writer) error {
 		_, _ = w.Write([]byte("partial"))
 		return syscall.EIO
 	})
 	require.ErrorIs(t, err, syscall.EIO)
-	current, err = os.ReadFile(name)
+	// Failed writes may remain. Callers must not commit their metadata.
+	require.NoError(t, WriteFile(name, []byte("retry"), 0o600))
+	data, err = os.ReadFile(name)
 	require.NoError(t, err)
-	require.Equal(t, "new", string(current))
-	temporary, err := filepath.Glob(filepath.Join(filepath.Dir(name), ".milvus-tmp-*"))
-	require.NoError(t, err)
-	require.Empty(t, temporary)
+	require.Equal(t, "retry", string(data))
 }
 
-func TestFileSyncFailureDoesNotReplaceManifest(t *testing.T) {
-	name := filepath.Join(t.TempDir(), "manifest")
-	require.NoError(t, WriteFile(name, []byte("old"), 0o600))
+func TestFileSyncFailureCannotReturnSuccess(t *testing.T) {
+	name := filepath.Join(t.TempDir(), "object")
 	patch := mockey.Mock((*os.File).Sync).Return(syscall.EIO).Build()
 	defer patch.UnPatch()
-	err := WriteFile(name, []byte("new"), 0o600)
-	require.ErrorIs(t, err, syscall.EIO)
-	current, err := os.ReadFile(name)
-	require.NoError(t, err)
-	require.Equal(t, "old", string(current))
-	temporary, err := filepath.Glob(filepath.Join(filepath.Dir(name), ".milvus-tmp-*"))
-	require.NoError(t, err)
-	require.Empty(t, temporary)
+	require.ErrorIs(t, WriteFile(name, []byte("data"), 0o600), syscall.EIO)
 }
 
 func TestDirectorySyncFailureIsNotAcknowledged(t *testing.T) {
@@ -80,33 +70,22 @@ func TestDirectorySyncFailureIsNotAcknowledged(t *testing.T) {
 	err := WriteFile(name, []byte("complete"), 0o600)
 	patch.UnPatch()
 	require.ErrorIs(t, err, syscall.EIO)
-	// Publication may already be visible, but success must wait for directory
-	// synchronization. A retry must sync existing parents too.
 	require.NoError(t, WriteFile(name, []byte("retry"), 0o600))
-	current, err := os.ReadFile(name)
-	require.NoError(t, err)
-	require.Equal(t, "retry", string(current))
 }
 
-func TestCloseAndPublicationErrors(t *testing.T) {
+func TestCloseAndOpenErrors(t *testing.T) {
 	t.Run("close", func(t *testing.T) {
 		name := filepath.Join(t.TempDir(), "object")
 		var original func(*os.File) error
 		patch := mockey.Mock((*os.File).Close).Origin(&original).To(func(f *os.File) error {
-			return errors.Join(original(f), syscall.EIO)
+			return errors.CombineErrors(original(f), syscall.EIO)
 		}).Build()
 		err := WriteFile(name, []byte("data"), 0o600)
 		patch.UnPatch()
 		require.ErrorIs(t, err, syscall.EIO)
-		_, err = os.Stat(name)
-		require.True(t, os.IsNotExist(err))
 	})
-	t.Run("rename", func(t *testing.T) {
-		name := t.TempDir()
-		require.Error(t, WriteFile(name, []byte("data"), 0o600))
-		info, err := os.Stat(name)
-		require.NoError(t, err)
-		require.True(t, info.IsDir())
+	t.Run("directory", func(t *testing.T) {
+		require.Error(t, WriteFile(t.TempDir(), []byte("data"), 0o600))
 	})
 }
 

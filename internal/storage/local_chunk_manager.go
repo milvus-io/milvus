@@ -297,12 +297,29 @@ func (lcm *LocalChunkManager) RemoveWithPrefix(ctx context.Context, prefix strin
 }
 
 func (lcm *LocalChunkManager) Copy(ctx context.Context, srcFilePath string, dstFilePath string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// Read source file
 	srcFile, err := Open(srcFilePath)
 	if err != nil {
 		return merr.WrapErrIoFailed(srcFilePath, err)
 	}
 	defer srcFile.Close()
+
+	// A direct-write copy must not truncate its own source, including aliases.
+	if dstInfo, statErr := os.Stat(dstFilePath); statErr == nil {
+		srcInfo, err := srcFile.Stat()
+		if err != nil {
+			return merr.WrapErrIoFailed(srcFilePath, err)
+		}
+		if os.SameFile(srcInfo, dstInfo) {
+			if err := srcFile.Sync(); err != nil {
+				return merr.WrapErrIoFailed(dstFilePath, err)
+			}
+			return merr.WrapErrIoFailed(dstFilePath, localstorage.SyncDirectories(filepath.Dir(dstFilePath)))
+		}
+	}
 
 	err = localstorage.Write(dstFilePath, 0o666, func(dst io.Writer) error {
 		if err := ctx.Err(); err != nil {

@@ -14,24 +14,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package localstorage implements durable publication of complete local objects.
+// Package localstorage synchronizes completed local file writes.
 package localstorage
 
 import (
-	"crypto/rand"
-	"encoding/hex"
-	"errors"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/cockroachdb/errors"
 )
 
-// WriteFile publishes a complete object atomically and persists both its bytes
-// and directory entries before returning. Readers keep seeing the old object
-// until the replacement is complete, including for repeatedly updated manifests.
+// WriteFile writes directly to the target path, syncing the file and its
+// directory entries before returning success.
 func WriteFile(name string, data []byte, perm fs.FileMode) error {
 	return Write(name, perm, func(w io.Writer) error {
 		_, err := w.Write(data)
@@ -39,84 +37,47 @@ func WriteFile(name string, data []byte, perm fs.FileMode) error {
 	})
 }
 
-// Write buffers a complete object in a sibling temporary file. The callback can
-// issue arbitrarily many small writes; synchronization happens only at completion.
+// Write syncs once after all callback writes. An error can leave an incomplete
+// file; callers must not commit metadata referencing a failed write.
 func Write(name string, perm fs.FileMode, write func(io.Writer) error) error {
-	if err := writeAtomic(name, perm, write); err != nil {
+	if err := writeFile(name, perm, write); err != nil {
 		return err
 	}
 	return SyncDirectories(filepath.Dir(name))
 }
 
 // WriteFiles coalesces directory synchronization across a batch of complete
-// objects. Every file is synced before publication; common directory ancestors
+// objects. Every completed file is synced; common directory ancestors
 // are synced once before the batch is acknowledged.
 func WriteFiles(files map[string][]byte, perm fs.FileMode) error {
-	var errs []error
+	var errs error
 	dirs := make([]string, 0, len(files))
 	for name, data := range files {
-		if err := writeAtomic(name, perm, func(w io.Writer) error {
+		if err := writeFile(name, perm, func(w io.Writer) error {
 			_, err := w.Write(data)
 			return err
 		}); err != nil {
-			errs = append(errs, err)
+			errs = errors.CombineErrors(errs, err)
 		} else {
 			dirs = append(dirs, filepath.Dir(name))
 		}
 	}
-	errs = append(errs, SyncDirectories(dirs...))
-	return errors.Join(errs...)
+	return errors.CombineErrors(errs, SyncDirectories(dirs...))
 }
 
-func writeAtomic(name string, perm fs.FileMode, write func(io.Writer) error) (err error) {
-	dir := filepath.Dir(name)
-	if err := os.MkdirAll(dir, 0o777); err != nil {
+func writeFile(name string, perm fs.FileMode, write func(io.Writer) error) (err error) {
+	if err := os.MkdirAll(filepath.Dir(name), 0o777); err != nil {
 		return err
 	}
-	// Match os.WriteFile's permission behavior for an existing regular file.
-	preserveMode := false
-	if info, statErr := os.Stat(name); statErr == nil && info.Mode().IsRegular() {
-		perm = info.Mode().Perm()
-		preserveMode = true
-	}
-	var random [16]byte
-	if _, err := rand.Read(random[:]); err != nil {
-		return err
-	}
-	temporary := filepath.Join(dir, ".milvus-tmp-"+hex.EncodeToString(random[:]))
-	f, err := os.OpenFile(temporary, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
+	f, err := os.OpenFile(name, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, perm)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if f != nil {
-			err = errors.Join(err, f.Close())
-		}
-		if temporary != "" {
-			_ = os.Remove(temporary)
-		}
-	}()
-	if preserveMode {
-		if err := f.Chmod(perm); err != nil {
-			return err
-		}
-	}
+	defer func() { err = errors.CombineErrors(err, f.Close()) }()
 	if err := write(f); err != nil {
 		return err
 	}
-	if err := f.Sync(); err != nil {
-		return err
-	}
-	closeErr := f.Close()
-	f = nil
-	if closeErr != nil {
-		return closeErr
-	}
-	if err := os.Rename(temporary, name); err != nil {
-		return err
-	}
-	temporary = ""
-	return nil
+	return f.Sync()
 }
 
 // SyncDirectories persists each directory and its ancestors. Existing parents
@@ -160,5 +121,5 @@ func syncDirectory(name string) error {
 		return err
 	}
 	err = f.Sync()
-	return errors.Join(err, f.Close())
+	return errors.CombineErrors(err, f.Close())
 }
