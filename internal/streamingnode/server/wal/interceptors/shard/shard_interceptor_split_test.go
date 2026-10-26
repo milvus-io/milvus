@@ -349,6 +349,24 @@ func TestSplitShardOnTargetConflictIsRefused(t *testing.T) {
 	assert.True(t, status.AsStreamingError(err).IsUnrecoverable())
 }
 
+// A late retry of a target's genesis that lands after a later split fenced the
+// target as its source is refused, and unrecoverable so the producer stops.
+func TestSplitShardOnTargetFencedIsRefused(t *testing.T) {
+	i, shardManager := newTestShardInterceptor(t)
+	shardManager.EXPECT().CheckIfVChannelCanBeCreated(int64(7), "v1").
+		Return(errors.Wrap(shards.ErrVChannelFenced, "fenced by split 200")).Once()
+
+	msgID, err := i.DoAppend(context.Background(),
+		newTestSplitShardMutableMessage("v1", newTestSplitShardHeader(7, 100, "v0", "v1"),
+			&schemapb.CollectionSchema{Name: "test"}),
+		func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			assert.Fail(t, "the genesis of a fenced vchannel must not be appended")
+			return nil, nil
+		})
+	assert.Nil(t, msgID)
+	assert.True(t, status.AsStreamingError(err).IsUnrecoverable())
+}
+
 func TestSplitShardOnTargetExistingIsIdempotent(t *testing.T) {
 	i, shardManager := newTestShardInterceptor(t)
 	// the collection already exists on this pchannel: the genesis is still
