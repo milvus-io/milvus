@@ -26,11 +26,11 @@ import (
 
 func TestClassifyLoonErr(t *testing.T) {
 	t.Run("nil", func(t *testing.T) {
-		assert.NoError(t, classifyLoonErr(nil))
+		assert.NoError(t, packed.ClassifyLoonErr(nil))
 	})
 	t.Run("transient stays retryable", func(t *testing.T) {
 		wrapped := fmt.Errorf("loon failed: %w", packed.ErrLoonTransient)
-		out := classifyLoonErr(wrapped)
+		out := packed.ClassifyLoonErr(wrapped)
 		require.Error(t, out)
 		assert.True(t, errors.Is(out, packed.ErrLoonTransient),
 			"transient error must remain retryable")
@@ -38,7 +38,7 @@ func TestClassifyLoonErr(t *testing.T) {
 			"transient error must remain recoverable so retry.Do retries")
 	})
 	t.Run("non-transient becomes unrecoverable", func(t *testing.T) {
-		out := classifyLoonErr(errors.New("permanent disk fault"))
+		out := packed.ClassifyLoonErr(errors.New("permanent disk fault"))
 		require.Error(t, out)
 		assert.False(t, retry.IsRecoverable(out),
 			"non-transient error must be wrapped Unrecoverable so retry stops")
