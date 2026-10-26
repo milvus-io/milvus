@@ -80,12 +80,12 @@ func TestLastAckedIgnoresIdleVChannels(t *testing.T) {
 
 	a := env.add(ch, "va")
 	b := env.add(ch, "vb")
-	ch.ObserveTimeTick(5)
+	ch.ObserveTimeTick(5, WALTailSnapshot{})
 	assert.EqualValues(t, 5, ch.LastAcked(), "no Index is dirty")
 
 	insert(t, ch, a, 1, 1)
 	insert(t, ch, b, 1, 1)
-	ch.ObserveTimeTick(10)
+	ch.ObserveTimeTick(10, WALTailSnapshot{})
 	assert.EqualValues(t, 5, ch.LastAcked(), "a and b hold it at their commit")
 	handover(t, a)
 	handover(t, b)
@@ -93,10 +93,10 @@ func TestLastAckedIgnoresIdleVChannels(t *testing.T) {
 
 	// b stays idle and does not hold back the writes of a
 	insert(t, ch, a, 2, 2)
-	ch.ObserveTimeTick(20)
+	ch.ObserveTimeTick(20, WALTailSnapshot{})
 	assert.EqualValues(t, 10, ch.LastAcked())
 	handover(t, a)
-	ch.ObserveTimeTick(30)
+	ch.ObserveTimeTick(30, WALTailSnapshot{})
 	assert.EqualValues(t, 30, ch.LastAcked())
 
 	// b becomes dirty again with an old commit, the value does not go down
@@ -144,7 +144,7 @@ func TestLastAckedHeapMatchesBruteForce(t *testing.T) {
 			insert(t, ch, idx, pk, pk)
 		case op < 18:
 			tt++
-			ch.ObserveTimeTick(tt)
+			ch.ObserveTimeTick(tt, WALTailSnapshot{})
 		default:
 			if idx.Dirty() {
 				handover(t, idx)

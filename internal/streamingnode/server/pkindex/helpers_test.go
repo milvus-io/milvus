@@ -18,6 +18,7 @@ package pkindex
 
 import (
 	"context"
+	"math"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -41,6 +42,9 @@ const (
 	testTerm         = int64(3)
 	waitTimeout      = 10 * time.Second
 )
+
+// farFuture is a step time at which every backoff is ready.
+var farFuture = time.Now().Add(24 * time.Hour)
 
 // testStorageRoot is the object storage root path of the tests.
 const testStorageRoot = "root"
@@ -270,6 +274,18 @@ func (syncScheduler) Submit(t nodescheduler.Task) nodescheduler.TaskHandle {
 	return chanHandle{done: done}
 }
 
+// asyncScheduler runs every task in its own goroutine.
+type asyncScheduler struct{}
+
+func (asyncScheduler) Submit(t nodescheduler.Task) nodescheduler.TaskHandle {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = t.Execute(context.Background())
+	}()
+	return chanHandle{done: done}
+}
+
 // droppingScheduler finishes every task without running it, like a closed scheduler.
 type droppingScheduler struct{}
 
@@ -311,7 +327,14 @@ type testEnv struct {
 }
 
 func defaultTestParams() Params {
-	return Params{Params: index.Params{ReuploadAfter: time.Hour}}
+	return Params{
+		Params:        index.Params{ReuploadAfter: time.Hour},
+		ActiveBytes:   1,
+		TailBytes:     math.MaxUint64,
+		SoftWatermark: math.MaxUint64,
+		BackoffBase:   time.Millisecond,
+		MaxBackoff:    10 * time.Millisecond,
+	}
 }
 
 func newTestEnv(t *testing.T, sched nodescheduler.Scheduler) *testEnv {
@@ -347,11 +370,12 @@ func (env *testEnv) setParams(f func(p *Params)) {
 	env.params.Store(&p)
 }
 
-// channel opens a started PChannelIndexManager. Every Index that a test adds
-// to it is the Index of a new collection, ready at once.
+// channel opens a started PChannelIndexManager without the driver goroutine.
+// Every Index that a test adds to it is the Index of a new collection, ready
+// at once.
 func (env *testEnv) channel(seed uint64) *PChannelIndexManager {
 	ch := env.openChannel(seed)
-	ch.Start()
+	ch.start(false)
 	return ch
 }
 
@@ -470,4 +494,15 @@ func int64PKs(values ...int64) []dedup.PK {
 		pks = append(pks, dedup.Int64PK(v))
 	}
 	return pks
+}
+
+// picks returns the indexes that the driver would hand over at now.
+func picks(ch *PChannelIndexManager, now time.Time) []*index.Index {
+	out, _, _ := ch.pickHandovers(now)
+	return out
+}
+
+// scheduleOf returns the driver bookkeeping of idx.
+func scheduleOf(ch *PChannelIndexManager, idx *index.Index) *handoverSchedule {
+	return ch.scheduleOf(idx)
 }
