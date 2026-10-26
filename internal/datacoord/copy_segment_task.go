@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -162,6 +163,9 @@ func UpdateCopyTaskCompleteTs(completeTs uint64) UpdateCopySegmentTaskAction {
 func UpdateCopyTaskIndexWriteToManifest(enabled bool) UpdateCopySegmentTaskAction {
 	return func(t CopySegmentTask) {
 		t.(*copySegmentTask).task.Load().IndexWriteToManifest = proto.Bool(enabled)
+		if enabled {
+			t.(*copySegmentTask).task.Load().IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED.Enum()
+		}
 	}
 }
 
@@ -181,6 +185,7 @@ type CopySegmentTask interface {
 	GetState() datapb.CopySegmentTaskState
 	GetReason() string
 	GetIndexWriteToManifest() (bool, bool)
+	GetIndexStorePathVersion() (indexpb.IndexStorePathVersion, bool)
 	GetCleanupPrefixes() []string
 	GetCleanupRequired() bool
 	GetIdMappings() []*datapb.CopySegmentIDMapping // Lightweight ID mappings
@@ -279,6 +284,11 @@ func (t *copySegmentTask) GetReason() string {
 func (t *copySegmentTask) GetIndexWriteToManifest() (bool, bool) {
 	task := t.task.Load()
 	return task.GetIndexWriteToManifest(), task.IndexWriteToManifest != nil
+}
+
+func (t *copySegmentTask) GetIndexStorePathVersion() (indexpb.IndexStorePathVersion, bool) {
+	task := t.task.Load()
+	return task.GetIndexStorePathVersion(), task.IndexStorePathVersion != nil
 }
 
 // GetIdMappings returns the source-to-target segment ID mappings.
@@ -422,9 +432,10 @@ func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	if err != nil {
 		mlog.Warn(ctx, "failed to create copy segment task on datanode",
 			WrapCopySegmentTaskLog(t, mlog.FieldNodeID(nodeID), mlog.Err(err))...)
-		if job.GetExternal() && errors.Is(err, merr.ErrServiceUnimplemented) {
+		version, _ := t.GetIndexStorePathVersion()
+		if (job.GetExternal() || metautil.IsSegmentRooted(version)) && errors.Is(err, merr.ErrServiceUnimplemented) {
 			t.markTaskAndJobFailed(merr.Wrap(err,
-				"datanode does not support external copy segment tasks").Error())
+				"datanode does not support the requested copy segment task").Error())
 		}
 		return
 	}
@@ -692,7 +703,11 @@ func (t *copySegmentTask) prepareCopyCleanup(ctx context.Context, req *datapb.Co
 			if buildID <= 0 {
 				return merr.WrapErrServiceInternalMsg("missing allocated copy build ID for %d", info.GetBuildID())
 			}
-			builder := metautil.NewIndexPathBuilder(root, info.GetIndexStorePathVersion(), target.GetCollectionId(), target.GetPartitionId(), target.GetSegmentId(), buildID, info.GetIndexVersion())
+			pathVersion := info.GetIndexStorePathVersion()
+			if target.IndexStorePathVersion != nil {
+				pathVersion = target.GetIndexStorePathVersion()
+			}
+			builder := metautil.NewIndexPathBuilder(root, pathVersion, target.GetCollectionId(), target.GetPartitionId(), target.GetSegmentId(), buildID, info.GetIndexVersion())
 			prefixes = append(prefixes, builder.BuildPrefix()+"/")
 		}
 	}
@@ -995,6 +1010,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 				}
 				info, ok := manifestIndexFilePathInfoForSegment(storageConfig.GetRootPath(), &datapb.SegmentInfo{
 					ID: source.GetSegmentId(), CollectionID: source.GetCollectionId(), PartitionID: source.GetPartitionId(),
+					ManifestPath: source.GetManifestPath(),
 				}, manifestIndex)
 				if !ok {
 					return nil, merr.WrapErrServiceInternalMsg("invalid source index metadata in manifest for segment %d", source.GetSegmentId())
@@ -1044,6 +1060,9 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 			SegmentId:      targetSegID,
 			NewBuildIds:    newBuildIDs,
 			TargetRootPath: storageConfig.GetRootPath(),
+		}
+		if version, known := task.GetIndexStorePathVersion(); known && source.GetStorageVersion() == storage.StorageV3 {
+			target.IndexStorePathVersion = version.Enum()
 		}
 		mlog.Info(ctx, "prepare copy segment source and target",
 			WrapCopySegmentTaskLog(task,
@@ -1242,6 +1261,9 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			if meta.dataViewManager != nil {
 				meta.recomputeDataView(context.TODO(), task.GetCollectionId())
 			}
+			// The segment is Flushed and carries every index the snapshot had.
+			// Enqueue it so the index inspector builds any index it still lacks.
+			notifySegmentIndexBuild(result.GetSegmentId())
 
 			mlog.Info(context.TODO(), "update copy segment info done",
 				WrapCopySegmentTaskLog(task, mlog.Int64("segmentID", result.GetSegmentId()),
@@ -1441,6 +1463,10 @@ func validateCopiedManifestIndexPlacement(result *datapb.CopySegmentResult,
 		}
 		if _, exists := targetIndexNames[indexInfo.GetIndexName()]; !exists {
 			continue
+		}
+		if expected, known := task.GetIndexStorePathVersion(); known && indexInfo.GetIndexStorePathVersion() != expected {
+			return merr.WrapErrServiceInternalMsg("copied index build %d returned path version %s instead of %s; upgrade the DataNode and retry the restore",
+				indexInfo.GetBuildId(), indexInfo.GetIndexStorePathVersion(), expected)
 		}
 		if _, published := publishedBuilds[indexInfo.GetBuildId()]; !published {
 			return merr.WrapErrServiceInternalMsg(

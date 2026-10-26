@@ -22,9 +22,11 @@ import (
 
 	"github.com/samber/lo"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // externalCollectionRefreshChecker drives the external collection job state machine.
@@ -343,9 +345,10 @@ func (c *externalCollectionRefreshChecker) indexWaitDone(job *datapb.ExternalCol
 	return false
 }
 
-// nudgeIndexBuilds pushes unindexed segments into the build-acceleration
-// channel, exactly as importChecker.checkIndexBuildingJob does - but only once
-// DataCoord's collection meta already carries THIS refresh's source/spec.
+// nudgeIndexBuilds pushes the unindexed segments that have no index task yet
+// into the build-acceleration channel through notifySegmentIndexBuild - but
+// only once DataCoord's collection meta already carries THIS refresh's
+// source/spec.
 //
 // An index build resolves the external source/spec at DISPATCH time, not at
 // enqueue time: prepareJobRequest calls handler.GetCollection and copies
@@ -366,11 +369,11 @@ func (c *externalCollectionRefreshChecker) indexWaitDone(job *datapb.ExternalCol
 // it from RootCoord and be safe, but skipping one nudge only costs latency and
 // the periodic index inspector still creates the tasks either way.
 //
-// This narrows the window; it does not close it. The inspector's own 60s tick
-// scans every flushed segment and needs no notification, so a build can still
-// be created inside the window without this nudge. That hazard predates this
-// feature and is out of scope here - what this guarantees is that the wait does
-// not actively dispatch into it.
+// This narrows the window; it does not close it. The inspector's periodic
+// reconcile scan covers every flushed segment and needs no notification, so a
+// build can still be created inside the window without this nudge. That hazard
+// predates this feature and is out of scope here - what this guarantees is that
+// the wait does not actively dispatch into it.
 func (c *externalCollectionRefreshChecker) nudgeIndexBuilds(job *datapb.ExternalCollectionRefreshJob, unindexed []int64) {
 	if !c.refreshedSchemaVisible(job) {
 		mlog.Debug(c.ctx, "refreshed external schema not visible yet, holding the index build nudge",
@@ -378,12 +381,18 @@ func (c *externalCollectionRefreshChecker) nudgeIndexBuilds(job *datapb.External
 			mlog.FieldCollectionID(job.GetCollectionId()))
 		return
 	}
-	for _, segmentID := range unindexed {
-		select {
-		case getBuildIndexChSingleton() <- segmentID: // accelerate index building
-		default:
-		}
+	// Segments that already have index tasks only need time to finish.
+	notifySegmentIndexBuild(c.mt.indexMeta.GetUnIndexedSegmentIDsForIndexTask(job.GetCollectionId(), unindexed).Collect()...)
+}
+
+// externalSourceChanged reports whether a schema update makes a new external
+// source/spec visible for an external collection.
+func externalSourceChanged(oldSchema, newSchema *schemapb.CollectionSchema) bool {
+	if !typeutil.IsExternalCollection(newSchema) {
+		return false
 	}
+	return oldSchema.GetExternalSource() != newSchema.GetExternalSource() ||
+		oldSchema.GetExternalSpec() != newSchema.GetExternalSpec()
 }
 
 // refreshedSchemaVisible reports whether DataCoord's collection meta already

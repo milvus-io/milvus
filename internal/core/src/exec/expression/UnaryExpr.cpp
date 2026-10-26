@@ -722,8 +722,7 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
             // and the plan-selected projection constrained by index/contracts/README.md.
             std::shared_ptr<const IStructElementOffsets> struct_element_offsets;
             if (selected_element_level_result_) {
-                struct_element_offsets =
-                    segment_->GetStructElementOffsets(field_id_);
+                struct_element_offsets = GetStructElementOffsets(field_id_);
                 AssertInfo(struct_element_offsets != nullptr,
                            "array offsets are required for nested ARRAY index");
             }

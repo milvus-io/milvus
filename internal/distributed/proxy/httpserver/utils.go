@@ -77,7 +77,7 @@ func HTTPReturn(c *gin.Context, code int, result gin.H) {
 }
 
 // HTTPReturnStream uses custom jsonRender that encodes JSON data directly into the response writer.
-// Timeout-wrapped REST routes still buffer encoded bytes before committing them to the client.
+// Buffered routes retain encoded bytes until completion; V2 DQL routes can encode rows in reusable batches.
 func HTTPReturnStream(c *gin.Context, code int, result gin.H) {
 	c.Set(HTTPReturnCode, result[HTTPReturnCode])
 	if errorMsg, ok := result[HTTPReturnMessage]; ok {
@@ -4167,6 +4167,8 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 			case *schemapb.IDs_StrId:
 				stringPks := ids.GetStrId().GetData()
 				rowsNum = int64(len(stringPks))
+			case nil:
+				// An empty search result can carry IDs with no IdField set.
 			default:
 				return nil, asSafeMessage(merr.WrapErrParameterInvalidMsg("the type of primary key(id) is not supported, use other sdk please"))
 			}

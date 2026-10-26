@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -248,6 +249,36 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 
 		it.CreateTaskOnWorker(1, cluster)
 		s.Equal(indexpb.JobState_JobStateInProgress, indexpb.JobState(it.IndexState))
+	})
+
+	s.Run("unsupported v2 worker fails durably", func() {
+		job, ok := s.mt.indexMeta.GetIndexJob(s.taskID)
+		s.Require().True(ok)
+		original := model.CloneSegmentIndex(job)
+		defer s.mt.indexMeta.segmentBuildInfo.Add(original)
+		originalSegment := s.mt.segments.GetSegment(s.segID)
+		defer s.mt.segments.SetSegment(s.segID, originalSegment)
+		segment := originalSegment.Clone()
+		segment.ManifestPath = packed.MarshalManifestPath("root/insert_log/1/2/1179", 1)
+		segment.StorageVersion = storage.StorageV3
+		s.mt.segments.SetSegment(s.segID, segment)
+		job.IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
+		s.mt.indexMeta.segmentBuildInfo.Add(job)
+		it.IndexStorePathVersion = job.IndexStorePathVersion
+		it.SetState(indexpb.JobState_JobStateInit, "")
+		catalogMock := catalogmocks.NewDataCoordCatalog(s.T())
+		catalogMock.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
+		s.mt.indexMeta.catalog = catalogMock
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(
+			merr.Wrapf(merr.ErrServiceUnimplemented, "worker does not support segment-rooted indexes"))
+		cluster.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(nil)
+		it.CreateTaskOnWorker(1, cluster)
+		s.Equal(commonpb.IndexState_Failed, it.IndexState)
+		stored, ok := s.mt.indexMeta.GetIndexJob(s.taskID)
+		s.Require().True(ok)
+		s.Equal(commonpb.IndexState_Failed, stored.IndexState)
+		s.Contains(stored.FailReason, "does not support segment-rooted indexes")
 	})
 }
 
@@ -658,6 +689,8 @@ func (s *indexTaskSuite) TestPrepareJobRequestUsesNullableStructArrayParentForSu
 	}
 	segIndex, ok := mt.indexMeta.segmentBuildInfo.Get(s.taskID)
 	s.True(ok)
+	segIndex.IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
+	base := fmt.Sprintf("/local/legacy/insert_log/%d/%d/%d", s.collID, s.partID, s.segID)
 
 	childField := &schemapb.FieldSchema{
 		Name:        "events[embedding]",
@@ -692,10 +725,12 @@ func (s *indexTaskSuite) TestPrepareJobRequestUsesNullableStructArrayParentForSu
 	req, err := it.prepareJobRequest(
 		context.Background(),
 		&SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-			ID:           s.segID,
-			CollectionID: s.collID,
-			PartitionID:  s.partID,
-			NumOfRows:    4,
+			ID:             s.segID,
+			CollectionID:   s.collID,
+			PartitionID:    s.partID,
+			NumOfRows:      4,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath(base, 7),
 		}},
 		segIndex,
 		[]*commonpb.KeyValuePair{
@@ -705,7 +740,9 @@ func (s *indexTaskSuite) TestPrepareJobRequestUsesNullableStructArrayParentForSu
 		"HNSW",
 	)
 
-	s.NoError(err)
+	s.Require().NoError(err)
+	s.Equal(fmt.Sprintf("%s/_index/%d/%d", base, s.taskID, segIndex.IndexVersion+1), req.GetIndexFilePrefix())
+	s.Equal(segIndex.IndexStorePathVersion, req.GetIndexStorePathVersion())
 	s.True(req.GetField().GetNullable())
 	s.False(childField.GetNullable())
 	s.NotSame(childField, req.GetField())
@@ -1116,4 +1153,89 @@ func (s *indexTaskSuite) TestSetJobInfo() {
 		s.NoError(err)
 		s.Equal(indexpb.JobState_JobStateFinished, indexpb.JobState(it.IndexState))
 	})
+}
+
+func (s *indexTaskSuite) TestPrepareJobRequestArraySortSoftwareGate() {
+	resetJSONVersionTargets(s.T())
+	gate := &Params.DataCoordCfg.EnableArraySortIndex
+	previousGate := gate.GetValue()
+	s.T().Cleanup(func() { s.NoError(Params.Save(gate.Key, previousGate)) })
+
+	for _, dataType := range []schemapb.DataType{schemapb.DataType_Array, schemapb.DataType_JSON, schemapb.DataType_FloatVector} {
+		for _, savedGate := range []string{"", "true", "false"} {
+			s.Run(dataType.String()+"/saved="+savedGate, func() {
+				catalog := catalogmocks.NewDataCoordCatalog(s.T())
+				mt := &meta{
+					indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
+				}
+				segIndex, ok := mt.indexMeta.segmentBuildInfo.Get(s.taskID)
+				s.Require().True(ok)
+				indexType := "HYBRID"
+				if dataType == schemapb.DataType_FloatVector {
+					indexType = "FLAT"
+				}
+				definition := mt.indexMeta.indexes[s.collID][s.indexID]
+				definition.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexType}}
+				definition.TypeParams = []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}
+				if savedGate != "" && dataType != schemapb.DataType_FloatVector {
+					// A saved or user-supplied value in either bag must not bypass
+					// the current coordinator gate. C++ merges type params last.
+					definition.IndexParams = append(definition.IndexParams, &commonpb.KeyValuePair{Key: enableArraySortIndexKey, Value: savedGate})
+					definition.TypeParams = append(definition.TypeParams, &commonpb.KeyValuePair{Key: enableArraySortIndexKey, Value: savedGate})
+				}
+				field := &schemapb.FieldSchema{
+					Name: "values", FieldID: s.fieldID, DataType: dataType,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}},
+				}
+				if dataType == schemapb.DataType_Array {
+					field.ElementType = schemapb.DataType_Int64
+				}
+				handler := NewNMockHandler(s.T())
+				handler.EXPECT().GetCollection(mock.Anything, s.collID).Return(&collectionInfo{
+					ID: s.collID, Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}},
+				}, nil)
+				cm := mocks.NewChunkManager(s.T())
+				cm.EXPECT().RootPath().Return("root")
+				versions := jsonArrayVersionManager(s.T(), common.CurrentScalarIndexEngineVersion)
+				it := newIndexBuildTask(segIndex, 1, mt, handler, cm, versions)
+				segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+					ID: s.segID, CollectionID: s.collID, PartitionID: s.partID, NumOfRows: 4,
+				}}
+				// Reuse the same existing index definition across an upgrade and
+				// an explicit disable. Each new segment/retry resolves the gate anew.
+				for _, currentGate := range []string{"false", "true", "false"} {
+					s.Require().NoError(Params.Save(gate.Key, currentGate))
+					req, err := it.prepareJobRequest(context.Background(), segment, segIndex,
+						mt.indexMeta.GetIndexParams(s.collID, s.indexID), indexType)
+					s.Require().NoError(err)
+					value, err := getIndexParam(req.GetIndexParams(), enableArraySortIndexKey)
+					if dataType == schemapb.DataType_FloatVector {
+						s.Error(err, "do not send an unknown scalar option to Knowhere")
+					} else {
+						s.NoError(err)
+						s.Equal(currentGate, value)
+						count := 0
+						for _, param := range req.GetIndexParams() {
+							if param.GetKey() == enableArraySortIndexKey {
+								count++
+							}
+						}
+						s.Equal(1, count)
+					}
+					_, err = getIndexParam(req.GetTypeParams(), enableArraySortIndexKey)
+					s.Error(err, "schema params must not override the coordinator gate")
+					s.Equal(common.CurrentScalarIndexEngineVersion, req.GetCurrentScalarIndexVersion())
+					for _, params := range [][]*commonpb.KeyValuePair{definition.IndexParams, definition.TypeParams} {
+						value, err := getIndexParam(params, enableArraySortIndexKey)
+						if savedGate == "" || dataType == schemapb.DataType_FloatVector {
+							s.Error(err)
+						} else {
+							s.NoError(err)
+							s.Equal(savedGate, value, "build-time override must not mutate saved metadata")
+						}
+					}
+				}
+			})
+		}
+	}
 }

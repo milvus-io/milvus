@@ -154,6 +154,8 @@ func TestValidateResourceGroupName(t *testing.T) {
 	assert.Nil(t, ValidateResourceGroupName("abc"))
 	assert.Nil(t, ValidateResourceGroupName("_123abc"))
 	assert.Nil(t, ValidateResourceGroupName("abc123_"))
+	assert.Nil(t, ValidateResourceGroupName("rg-01"))
+	assert.Nil(t, ValidateResourceGroupName("a-b_c-"))
 
 	longName := make([]byte, 256)
 	for i := 0; i < len(longName); i++ {
@@ -168,6 +170,9 @@ func TestValidateResourceGroupName(t *testing.T) {
 		"",
 		string(longName),
 		"中文",
+		"-rg",
+		"-",
+		"a b-c",
 	}
 
 	for _, name := range invalidNames {

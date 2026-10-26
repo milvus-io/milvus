@@ -896,6 +896,7 @@ dataCoord:
   # if param forceRebuildScalarSegmentIndex is not enabled, the newly created scalar index will be aligned with the newer one of scalar index engine's version and targetScalarIndexVersion.
   # if param targetScalarIndexVersion is not set, the default value is -1, which means no target scalar index version, then the scalar index will be aligned with scalar index engine's version
   targetScalarIndexVersion: -1
+  enableArraySortIndex: auto # Whether ordinary ARRAY HYBRID may select STL_SORT, ordinary ARRAY may use explicit STL_SORT, and typed JSON ARRAY paths may use HYBRID or STL_SORT. auto: enable once all registered online components reach 3.1.0 and the stability window elapses; false: keep ordinary ARRAY HYBRID high cardinality on INVERTED, downgrade affected AUTOINDEX requests to INVERTED, and reject explicit ARRAY STL_SORT or JSON ARRAY HYBRID/STL_SORT; true: force enable and bypass the software-version gate.
   segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flushing operation on same segment
   manifestCommitConcurrency: 16 # Maximum concurrent DataCoord manifest commits across L0 compaction, index and stats publication, schema materialization, and GC. Values are clamped to [1, 256]. Workers start on demand. Read once during metadata initialization; changes require restart.
   # Switch value to control if to enable segment compaction.
@@ -915,6 +916,11 @@ dataCoord:
     # mix is prioritized by level: mix compactions first, then L0 compactions, then clustering compactions.
     taskPrioritizer: level
     taskQueueCapacity: 100000 # compaction task queue size
+    # Soft cap on pending and running compaction tasks: once reached, automatic compaction, including sort compaction and
+    # target-based compaction, stops planning and submitting tasks, so concurrent submissions can briefly exceed it.
+    # Manual compaction, import and the sort of clustering compaction outputs are not capped, nor is the sort of flushed
+    # segments while automatic compaction is disabled. 0 or a negative value means unlimited.
+    maxTaskNum: 0
     rpcTimeout: 10
     maxParallelTaskNum: -1 # Deprecated, see datanode.slot.slotCap
     dropTolerance: 3600 # Compaction task will be cleaned after finish longer than this time(in seconds)
@@ -966,7 +972,8 @@ dataCoord:
     # Layout 1 is additionally gated on no QueryNode still reporting an older release line, so setting this to 1 during a 2.6 -> 3.0 upgrade still builds layout 0 until every QueryNode is upgraded. That check reads the version each QueryNode publishes in its session, which is a per-release-line constant, so it separates 2.6.x from 3.0.x but does not differentiate binaries within the same release line.
     storePathVersion: 0
     # Whether completed StorageV3 index artifacts are published in segment manifests. Off (the default) keeps the legacy path: every SegmentIndex task record stays in etcd and no manifest index entry is produced. On still persists Unissued, InProgress, Failed, fake-finished, and other task states in etcd; only a successful build with artifact files is published to the manifest, and that commit atomically deletes the corresponding Finished etcd row. StorageV1/V2 always use etcd.
-    # The setting may be switched in either direction. Turning it off changes where new completions are written; records already published to manifests remain recoverable through the segment's sticky manifest_has_index marker.
+    # New StorageV3 builds also write artifacts under the segment manifest base/_index/<build>/<version> (path version 2). Upgrade all workers and QueryNodes before enabling. Old-layout tasks keep their original etcd publication mode; external index paths are never added.
+    # The setting applies when a build task is created. Existing builds keep their persisted mode across switches and restarts: path version 2 publishes to manifests, while versions 0/1 finish in etcd. Published records remain recoverable through the segment's manifest_has_index marker.
     # The value must be exactly true or false. A value that does not parse as a boolean, such as yes, is silently read as false, i.e. the legacy etcd behavior.
     writeSegmentIndexToManifest: false
     # Concurrency of StorageV3 manifest index reads during startup and snapshot restore. Reads await asynchronous transaction callbacks in Go. Values are clamped to [1, 256], and the coordinator read limit is also capped by positive minio.maxConnections values. Restore assembly and verification share the same budget.
@@ -1274,7 +1281,7 @@ common:
   indexSliceSize: 16 # Index slice size in MB
   threadCoreCoefficient:
     highPriority: 10 # This parameter specify how many times the number of threads is the number of cores in high priority pool
-    middlePriority: 5 # This parameter specify how many times the number of threads is the number of cores in middle priority pool
+    middlePriority: 5 # Thread-to-core ratio for each of the independent middle priority and search fanout pools; both follow maxThreadsSize.
     lowPriority: 1 # This parameter specify how many times the number of threads is the number of cores in low priority pool
     maxThreadsSize: 16 # The maximum number of threads in the thread pool, only effective when greater than 0
   buildIndexThreadPoolRatio: 0.75

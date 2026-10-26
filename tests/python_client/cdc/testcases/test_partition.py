@@ -6,6 +6,7 @@ import time
 
 import pytest
 from common.common_type import CaseLabel
+from pymilvus import DataType
 
 from .base import TestCDCSyncBase
 
@@ -339,6 +340,89 @@ class TestCDCSyncPartition(TestCDCSyncBase):
                 return False
 
         assert self.wait_for_sync(check_data, sync_timeout, f"insert data to partition {partition_name}")
+
+    @pytest.mark.parametrize("flush_after_insert", [False, True], ids=["without_flush", "with_flush"])
+    def test_create_partition_after_collection_load(
+        self, upstream_client, downstream_client, sync_timeout, flush_after_insert
+    ):
+        """Verify partitions created after collection load become queryable through CDC (#54467)."""
+        self._upstream_client = upstream_client
+        collection_name = self.gen_unique_name("test_col_part_after_load")
+        self.resources_to_cleanup.append(("collection", collection_name))
+        self.cleanup_collection(upstream_client, collection_name)
+
+        schema = self.create_default_schema(upstream_client)
+        schema.add_field("value", DataType.INT64)
+        upstream_client.create_collection(collection_name=collection_name, schema=schema, consistency_level="Strong")
+        control_partition = self.gen_unique_name("part_before_load")
+        upstream_client.create_partition(collection_name, control_partition)
+        index_params = upstream_client.prepare_index_params()
+        index_params.add_index(field_name="vector", index_type="FLAT", metric_type="L2")
+        upstream_client.create_index(collection_name, index_params)
+
+        def query_rows(client, partition_name=None):
+            rows = client.query(
+                collection_name=collection_name,
+                filter="id >= 0",
+                output_fields=["id", "value", "vector"],
+                partition_names=[partition_name] if partition_name else None,
+                consistency_level="Strong",
+                limit=100,
+                timeout=10,
+            )
+            return sorted(rows, key=lambda row: row["id"])
+
+        def check_partition(partition_name, expected_rows):
+            assert partition_name in downstream_client.list_partitions(collection_name)
+            state = downstream_client.get_load_state(collection_name, partition_name=partition_name)
+            assert str(state["state"]) == "Loaded", f"Partition {partition_name}: {state}"
+            actual_rows = query_rows(downstream_client, partition_name)
+            assert actual_rows == expected_rows, f"Partition {partition_name}: {actual_rows} != {expected_rows}"
+            return True
+
+        # Establish a working pre-load control before creating any post-load partitions.
+        control_data = [{"id": 0, "value": 0, "vector": [0.125] * 128}]
+        upstream_client.insert(collection_name, control_data, partition_name=control_partition)
+        upstream_client.load_collection(collection_name)
+        assert str(upstream_client.get_load_state(collection_name)["state"]) == "Loaded"
+        assert query_rows(upstream_client, control_partition) == control_data
+
+        def check_initial_load():
+            assert str(downstream_client.get_load_state(collection_name)["state"]) == "Loaded"
+            return check_partition(control_partition, control_data)
+
+        assert self.wait_for_sync(check_initial_load, sync_timeout, f"initial collection load {collection_name}")
+
+        expected_collection_rows = list(control_data)
+        for i in range(1, 4):
+            partition_name = self.gen_unique_name(f"part_after_load_{i}")
+            upstream_client.create_partition(collection_name, partition_name)
+            data = [{"id": i, "value": i * 10, "vector": [i / 8.0] * 128}]
+            upstream_client.insert(collection_name, data, partition_name=partition_name)
+            if flush_after_insert:
+                upstream_client.flush(collection_name)
+
+            # No additional load/release calls: the new partition must load automatically.
+            state = upstream_client.get_load_state(collection_name, partition_name=partition_name)
+            assert str(state["state"]) == "Loaded", f"Upstream partition {partition_name}: {state}"
+            assert query_rows(upstream_client, partition_name) == data
+            assert self.wait_for_sync(
+                lambda: check_partition(partition_name, data),
+                sync_timeout,
+                f"automatically load and replicate partition {partition_name}",
+            )
+
+            expected_collection_rows.extend(data)
+            assert query_rows(upstream_client) == expected_collection_rows
+
+            def check_collection_data():
+                actual_rows = query_rows(downstream_client)
+                assert actual_rows == expected_collection_rows, f"Collection rows: {actual_rows}"
+                return True
+
+            assert self.wait_for_sync(
+                check_collection_data, sync_timeout, f"collection query includes partition {partition_name}"
+            )
 
     def test_partition_delete(self, upstream_client, downstream_client, sync_timeout):
         """Test DELETE operation from partition sync."""

@@ -2833,8 +2833,30 @@ func TestResultErrMessageFromRealProducers(t *testing.T) {
 		assert.Contains(t, resultErrMessage(err), "use other sdk please")
 	})
 
-	t.Run("unsupported primary key type is echoed", func(t *testing.T) {
-		_, err := buildQueryResp(0, nil, nil, &schemapb.IDs{}, nil, true, nil)
+	t.Run("ids without an id field are zero rows", func(t *testing.T) {
+		rows, err := buildQueryResp(0, nil, nil, &schemapb.IDs{}, []float32{}, true, nil)
+		require.NoError(t, err)
+		assert.Empty(t, rows)
+	})
+
+	t.Run("ids without an id field are rejected when rows are present", func(t *testing.T) {
+		_, err := buildQueryResp(0, []string{"ids"}, []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Int64,
+				FieldName: "ids",
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{7}}},
+					},
+				},
+			},
+		}, &schemapb.IDs{}, nil, true, nil)
+		require.Error(t, err)
+		assert.Contains(t, resultErrMessage(err), "use other sdk please")
+	})
+
+	t.Run("ids without an id field are rejected for a caller-supplied row count", func(t *testing.T) {
+		_, err := buildQueryResp(1, nil, nil, &schemapb.IDs{}, nil, true, nil)
 		require.Error(t, err)
 		assert.Contains(t, resultErrMessage(err), "use other sdk please")
 	})

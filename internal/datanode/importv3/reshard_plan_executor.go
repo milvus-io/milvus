@@ -357,7 +357,13 @@ func publishReshardManifest(ctx context.Context, cm storage.ChunkManager, req *d
 	}
 	resultPath := path.Join(cm.RootPath(), metautil.BuildImportReshardResultPath(req.GetJobId(), req.GetTaskId(), req.GetRunId()))
 	if err := cm.Write(ctx, resultPath, payload); err != nil {
-		return merr.Wrap(err, "write ReshardManifest")
+		if merr.IsMilvusError(err) {
+			return merr.Wrap(err, "write ReshardManifest")
+		}
+		// Write leaves object-store errors unmapped; classify them here so a
+		// permanent access/bucket failure fails the task instead of rerunning
+		// the whole reshard forever. Unmapped faults become typed IO errors.
+		return storage.ToMilvusIoError(resultPath, err)
 	}
 	return nil
 }

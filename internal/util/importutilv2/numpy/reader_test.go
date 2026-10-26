@@ -516,8 +516,13 @@ func (suite *ReaderSuite) TestReadRecoversFromPrematureEOF() {
 
 func TestNumpyCreateReaders(t *testing.T) {
 	ctx := context.Background()
+	// CreateReaders now validates the header of every source it opens, so the
+	// mock must serve a well-formed .npy prefix; the fields differ but the
+	// prefix check is schema-independent.
+	buf := new(bytes.Buffer)
+	assert.NoError(t, npyio.Write(buf, []int64{1}))
 	cm := mocks.NewChunkManager(t)
-	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(nil, nil)
+	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(importcommon.NewMockReader(buf.String()), nil)
 
 	// normal case
 	schema := &schemapb.CollectionSchema{

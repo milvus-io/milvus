@@ -2153,13 +2153,9 @@ VisitFieldDataFromManifestPaged(
     //
     // The decode tasks go to the LOW pool, not MIDDLE. Every production
     // caller of this function is an index build (DiskFileManagerImpl /
-    // MemFileManagerImpl), i.e. background batch work, while MIDDLE is where
-    // ReduceHelper submits search reduce tasks and then blocks on
-    // future.get(). In standalone both share one ThreadPools singleton, so
-    // submitting a whole decode window to MIDDLE would queue CPU-bound
-    // tasks ahead of reduce and hold search latency up for the entire
-    // download phase. LOW carries only background segment loads and, being
-    // CPU_NUM-sized, still saturates the cores for this CPU-bound decode.
+    // MemFileManagerImpl), i.e. background batch work. Keep decode off the
+    // MIDDLE pool used by batch field and index loading. LOW's default
+    // CPU_NUM-sized capacity is sufficient for this CPU-bound decode.
     // Invariant this relies on: the calling thread blocks on decode futures,
     // so this function must not be called from a LOW-pool thread. Index
     // build tasks enter segcore from Go, so no caller does today.

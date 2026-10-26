@@ -50,7 +50,7 @@ using PackedFinishFn = std::variant<PackedSyncFinishFn, PackedAsyncFinishFn>;
  * @brief Plan, read, initialize and commit one packed reader generation.
  * @param source Opened packed source; legacy sources cannot enter this
  * operation.
- * @param options Fixed family configuration, copied with context for this call.
+ * @param options Fixed family configuration, owned by the task before it starts.
  * @param plan Family target allocation; does not read payloads.
  * @param finish Family reader initialization after all target writes finish.
  * @param context Borrowed through task completion; may be null.
@@ -62,7 +62,7 @@ using PackedFinishFn = std::variant<PackedSyncFinishFn, PackedAsyncFinishFn>;
  */
 folly::coro::Task<IIndexReaderBasePtr>
 RunPackedIndexLoad(PackedIndexSource& source,
-                   const storage::LoadOptions& options,
+                   storage::LoadOptions options,
                    PackedPlanFn plan,
                    PackedFinishFn finish,
                    milvus::OpContext* context);

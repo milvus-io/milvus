@@ -28,6 +28,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -47,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
@@ -54,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -2679,9 +2682,8 @@ func TestServer_GetIndexInfos(t *testing.T) {
 		}
 	)
 
-	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(Params)
-	cli, err := chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
-	assert.NoError(t, err)
+	// This RPC only constructs paths; it must not depend on a running object store.
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 
 	mock0Allocator := newMockAllocator(t)
 
@@ -2763,6 +2765,50 @@ func TestServer_GetIndexInfos(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, 1, len(resp.GetSegmentInfo()))
 	})
+
+	for _, tc := range []struct {
+		name       string
+		version    indexpb.IndexStorePathVersion
+		segment    *datapb.SegmentInfo
+		wantSuffix string
+		wantErr    error
+	}{
+		{name: "v0 without segment", version: 0, wantSuffix: "/index_files/10000/1/2/1000/index.bin"},
+		{name: "v1 without segment", version: 1, wantSuffix: "/index_v1/1/2/1000/10000/1/index.bin"},
+		{name: "v2 missing segment", version: 2, wantErr: merr.ErrSegmentNotFound},
+		{name: "v2 missing manifest", version: 2, segment: &datapb.SegmentInfo{}, wantErr: merr.ErrDataIntegrity},
+		{name: "v2 malformed manifest", version: 2, segment: &datapb.SegmentInfo{ManifestPath: "bad-json"}, wantErr: merr.ErrDataIntegrity},
+		{name: "v2 empty base", version: 2, segment: &datapb.SegmentInfo{ManifestPath: packed.MarshalManifestPath("", 1)}, wantErr: merr.ErrDataIntegrity},
+		{name: "v2 legacy base", version: 2, segment: &datapb.SegmentInfo{ManifestPath: packed.MarshalManifestPath("/data/legacy/insert_log/1/2/1000", 1)}, wantSuffix: "/data/legacy/insert_log/1/2/1000/_index/10000/1/index.bin"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			segIdx := s.meta.indexMeta.GetSegmentIndexes(collID, segID)[indexID]
+			segIdx.IndexStorePathVersion = tc.version
+			segIdx.IndexFileKeys = []string{"index.bin"}
+			segIdx1.Insert(indexID, segIdx)
+			s.meta.segments.DropSegment(segID)
+			if tc.segment != nil {
+				tc.segment.ID, tc.segment.CollectionID, tc.segment.PartitionID = segID, collID, partID
+				tc.segment.State = commonpb.SegmentState_Flushed
+				s.meta.segments.SetSegment(segID, NewSegmentInfo(tc.segment))
+			}
+			resp, err := s.GetIndexInfos(ctx, req)
+			require.NoError(t, err)
+			if tc.wantErr != nil {
+				require.ErrorIs(t, merr.Error(resp.GetStatus()), tc.wantErr)
+				assert.Empty(t, resp.GetSegmentInfo(), "do not return guessed or partially resolved paths")
+				return
+			}
+			require.NoError(t, merr.Error(resp.GetStatus()))
+			infos := resp.GetSegmentInfo()[segID].GetIndexInfos()
+			require.Len(t, infos, 1)
+			expected := tc.wantSuffix
+			if tc.version != 2 {
+				expected = cli.RootPath() + tc.wantSuffix
+			}
+			assert.Equal(t, []string{expected}, infos[0].GetIndexFilePaths())
+		})
+	}
 }
 
 func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
@@ -2783,6 +2829,7 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 				InsertChannel: "",
 				NumOfRows:     1025,
 				State:         commonpb.SegmentState_Flushed,
+				IsSorted:      true,
 			},
 		},
 		segID + 1: {
@@ -2851,9 +2898,8 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 	}
 
 	t.Run("normal", func(t *testing.T) {
-		segments := indexInspector.getUnIndexTaskSegments(context.TODO())
-		assert.Equal(t, 1, len(segments))
-		assert.Equal(t, segID, segments[0].ID)
+		segIDs := indexInspector.getUnIndexTaskSegments(context.TODO())
+		assert.Equal(t, []UniqueID{segID}, segIDs)
 
 		m.indexMeta.segmentIndexes.Insert(segID, typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]())
 		m.indexMeta.updateSegmentIndex(&model.SegmentIndex{
@@ -2862,8 +2908,8 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 			IndexID:      indexID + 2,
 			IndexState:   commonpb.IndexState_Finished,
 		})
-		assert.Equal(t, 1, len(segments))
-		assert.Equal(t, segID, segments[0].ID)
+		segIDs = indexInspector.getUnIndexTaskSegments(context.TODO())
+		assert.Equal(t, []UniqueID{segID}, segIDs)
 	})
 
 	t.Run("segment partial field with index", func(t *testing.T) {
@@ -2874,9 +2920,8 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 			IndexState:   commonpb.IndexState_Finished,
 		})
 
-		segments := indexInspector.getUnIndexTaskSegments(context.TODO())
-		assert.Equal(t, 1, len(segments))
-		assert.Equal(t, segID, segments[0].ID)
+		segIDs := indexInspector.getUnIndexTaskSegments(context.TODO())
+		assert.Equal(t, []UniqueID{segID}, segIDs)
 	})
 
 	t.Run("segment all vector field with index", func(t *testing.T) {
@@ -2887,8 +2932,8 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 			IndexState:   commonpb.IndexState_Finished,
 		})
 
-		segments := indexInspector.getUnIndexTaskSegments(context.TODO())
-		assert.Equal(t, 0, len(segments))
+		segIDs := indexInspector.getUnIndexTaskSegments(context.TODO())
+		assert.Empty(t, segIDs)
 	})
 }
 

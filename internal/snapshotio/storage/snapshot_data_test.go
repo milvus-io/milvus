@@ -1585,6 +1585,14 @@ func TestListSnapshotDataFiles_StorageV3IncludesManifestRootObjectsAndLobs(t *te
 	require.NoError(t, cm.Write(ctx, pathlessDeltaPath, []byte("pathless delta")))
 	siblingPath := basePath + "0/manifest"
 	require.NoError(t, cm.Write(ctx, siblingPath, []byte("sibling")))
+	indexPath := path.Join(basePath, "_index/7001/2/index")
+	obsoleteAttemptPath := path.Join(basePath, "_index/7001/1/index")
+	unpinnedIndexPath := path.Join(basePath, "_index/7004/1/index")
+	legacyIndexPath := path.Join(tempDir, "files/index_files/7005/1/20/1001/index")
+	similarPrefixPath := path.Join(basePath, "_index_extra/data")
+	for _, file := range []string{indexPath, obsoleteAttemptPath, unpinnedIndexPath, legacyIndexPath, similarPrefixPath} {
+		require.NoError(t, cm.Write(ctx, file, []byte("index")))
+	}
 
 	snapshot := createTestSnapshotData()
 	segment := snapshot.Segments[0]
@@ -1620,7 +1628,10 @@ func TestListSnapshotDataFiles_StorageV3IncludesManifestRootObjectsAndLobs(t *te
 		},
 	}}
 	segment.Bm25Statslogs = nil
-	segment.IndexFiles = nil
+	segment.IndexFiles = []*indexpb.IndexFilePathInfo{
+		{BuildID: 7001, IndexFilePaths: []string{indexPath}},
+		{BuildID: 7005, IndexFilePaths: []string{legacyIndexPath}},
+	}
 
 	foreignStorageConfig := &indexpb.StorageConfig{
 		BucketName: "foreign-bucket",
@@ -1661,7 +1672,18 @@ func TestListSnapshotDataFiles_StorageV3IncludesManifestRootObjectsAndLobs(t *te
 	assert.NotContains(t, byPath, siblingPath)
 	assert.Contains(t, byPath, deltaPath)
 	assert.Contains(t, byPath, pathlessDeltaPath)
-	assert.Len(t, byPath, 6)
+	assert.Equal(t, snapshotstorage.SnapshotFileTypeIndexFile, byPath[indexPath].Type)
+	assert.Equal(t, snapshotstorage.SnapshotFileTypeIndexFile, byPath[legacyIndexPath].Type)
+	assert.NotContains(t, byPath, obsoleteAttemptPath)
+	assert.NotContains(t, byPath, unpinnedIndexPath)
+	assert.Contains(t, byPath, similarPrefixPath)
+	assert.Len(t, byPath, 9)
+
+	// GC of an unreferenced build must not change the export input on recovery.
+	require.NoError(t, cm.Remove(ctx, unpinnedIndexPath))
+	refsAfterGC, err := snapshotstorage.ListSnapshotDataFiles(ctx, cm, snapshot, foreignStorageConfig)
+	require.NoError(t, err)
+	assert.Equal(t, refs, refsAfterGC)
 
 	// Rewriting keeps the pathless summary pathless instead of failing on a
 	// missing mapping for "".
@@ -1678,6 +1700,8 @@ func TestListSnapshotDataFiles_StorageV3IncludesManifestRootObjectsAndLobs(t *te
 		"s3://bucket/bundle/snapshots/100/metadata/1.json",
 	)
 	require.NoError(t, err)
+	assert.Equal(t, mappings[indexPath], rewritten.Segments[0].GetIndexFiles()[0].GetIndexFilePaths()[0])
+	assert.Equal(t, mappings[legacyIndexPath], rewritten.Segments[0].GetIndexFiles()[1].GetIndexFilePaths()[0])
 	assert.Equal(t, mappings[deltaPath], rewritten.Segments[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
 	assert.Empty(t, rewritten.Segments[0].GetDeltalogs()[0].GetBinlogs()[1].GetLogPath())
 	assert.Equal(t, int64(8), rewritten.Segments[0].GetDeltalogs()[0].GetBinlogs()[1].GetLogID())

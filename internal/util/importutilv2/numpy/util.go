@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -79,7 +80,7 @@ func SourcePaths(schema *schemapb.CollectionSchema, paths []string) []string {
 	return lo.Values(sourced)
 }
 
-func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, paths []string) (map[int64]storage.FileReader, error) {
+func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, paths []string) (result map[int64]storage.FileReader, err error) {
 	// Paths naming no field are redundant and ignored; only the special "$meta"
 	// field carries dynamic data, and it is a schema field like any other.
 	sourcedPaths, nameToPath := resolveFieldPaths(schema, paths)
@@ -90,6 +91,13 @@ func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemap
 	// this loop is for "how many fields are provided?"
 	readFields := make(map[string]int64)
 	readers := make(map[int64]storage.FileReader)
+	defer func() {
+		if err != nil {
+			for _, r := range readers {
+				_ = r.Close()
+			}
+		}
+	}()
 	for name, path := range sourcedPaths {
 		field := nameToField[name]
 
@@ -118,10 +126,33 @@ func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemap
 
 		reader, err := cm.Reader(ctx, path)
 		if err != nil {
-			return nil, merr.WrapErrImportFailed(
-				fmt.Sprintf("failed to read the file '%s', error: %s", path, err.Error()))
+			// Opening is storage traffic, not file decoding: map it to the same
+			// typed IO error the other readers expose, so a transient outage
+			// stays retriable instead of failing the job as bad input.
+			if merr.IsMilvusError(err) {
+				return nil, err
+			}
+			return nil, storage.ToMilvusIoError(path, err)
 		}
 		retryableReader := common.NewRetryableReaderWithReopen(ctx, path, reader, common.NewChunkManagerReopenReaderFunc(cm), cm.Size)
+		// A .npy source is only readable if its header is well formed; screen the
+		// parser's unchecked assumptions here, where the object path and random
+		// access are already available, so the failure is a normal input error.
+		if _, err := parseHeaderPrefix(retryableReader, path); err != nil {
+			_ = retryableReader.Close()
+			return nil, err
+		}
+		// minio's Object.ReadAt moves the object's own offset and leaves the
+		// ranged body consumed. Rewind so npyio's sequential parse starts at
+		// byte 0; without this every well-formed file pays a failed read, a
+		// reopen and a retry backoff on S3/MinIO.
+		if _, err := retryableReader.Seek(0, io.SeekStart); err != nil {
+			_ = retryableReader.Close()
+			if merr.IsMilvusError(err) {
+				return nil, err
+			}
+			return nil, storage.ToMilvusIoError(path, err)
+		}
 		readers[field.GetFieldID()] = retryableReader
 		readFields[field.GetName()] = field.GetFieldID()
 	}

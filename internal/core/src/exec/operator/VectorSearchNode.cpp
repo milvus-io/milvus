@@ -116,7 +116,7 @@ PhyVectorSearchNode::GetOutput() {
         nullptr;
     if (ph.element_level_) {
         struct_element_offsets =
-            segment_->GetStructElementOffsets(search_info_.field_id_);
+            query_context_->get_struct_element_offsets(search_info_.field_id_);
         AssertInfo(struct_element_offsets != nullptr,
                    "Struct element offsets not available");
         query_context_->set_struct_element_offsets(struct_element_offsets);
