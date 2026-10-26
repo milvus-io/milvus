@@ -6408,8 +6408,10 @@ func TestRestoreExternalSnapshot_PreparationFailuresReleaseLocks(t *testing.T) {
 func TestSnapshotManager_ListSnapshots_SummaryOrder(t *testing.T) {
 	meta := createTestSnapshotMetaLoaded(t)
 	for i, info := range []*datapb.SnapshotInfo{
-		{Name: "old", CreateTs: 0}, {Name: "b", CreateTs: 200},
-		{Name: "a", CreateTs: 200}, {Name: "middle", CreateTs: 100},
+		{Name: "old", CreateTs: 0},
+		{Name: "b", CreateTs: 200},
+		{Name: "a", CreateTs: 200},
+		{Name: "middle", CreateTs: 100},
 	} {
 		info.Id = int64(i + 1)
 		info.CollectionId = 100
