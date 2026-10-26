@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
@@ -26,6 +27,7 @@ import (
 )
 
 type PChannelManagerConfig struct {
+	QueryStatsChunkManager     storage.ChunkManager
 	QueryRuntimeModuleBuilders []queryresource.QueryRuntimeModuleBuilder
 	QueryViewLoadInfoProvider  queryresource.LoadInfoProvider
 
@@ -354,6 +356,7 @@ func (m *PChannelRecoveryManager) newModule(vchannel string) (*VChannelRecoveryM
 	module, err := newModuleFromOwnedRecoveryState(ModuleConfig{
 		QueryRuntimeModuleBuilders: m.config.QueryRuntimeModuleBuilders,
 		QueryViewLoadInfoProvider:  m.config.QueryViewLoadInfoProvider,
+		QueryStatsChunkManager:     m.config.QueryStatsChunkManager,
 		QueryDispatcher:            m.queryDispatcher,
 		TransformLogStream:         m.queryTransformLogStream,
 		SummaryManager:             m.config.SummaryManager,

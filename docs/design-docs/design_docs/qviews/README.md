@@ -23,6 +23,10 @@ StreamingNode would become a compute-intensive and IO-intensive global bottlenec
 3. **StreamingNode is no longer responsible for Search/Query logic forwarding**: Proxy uses a two-phase query approach — it generates a query plan on StreamingNode, then sends the query plan to designated QueryNodes to complete the query, and performs all distributed Reduce operations itself.
 4. **StreamingNode no longer actively applies incremental delete data**: After LoadSegment, QueryNode proactively subscribes to the corresponding Delete data from StreamingNode and applies Delete data on its own.
 
+The query execution components include [versioned partition statistics and
+segment pruning](query/segment_pruning.md), including conservative fallback,
+per-worker/subquery selection, and empty-shard MVCC/result normalization.
+
 ## 3. Two-Phase Query Process
 
 The following end-to-end flow describes the target architecture. The current

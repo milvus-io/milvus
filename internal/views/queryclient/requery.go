@@ -11,10 +11,12 @@ import (
 // ShardPlan holds the Phase 1 result for a shard, retained for use
 // in Requery stages that dispatch QueryOnView using the same view version and MVCC.
 type ShardPlan struct {
-	ShardID   qviews.ShardID
-	Version   *viewpb.QueryViewVersion
-	Mvcc      *viewpb.QueryPlanMVCC
-	WorkNodes []qviews.WorkNode
+	Selections       []*viewpb.QueryPlanWorkNode
+	ExecutionSummary *viewpb.ExecutionSummary
+	ShardID          qviews.ShardID
+	Version          *viewpb.QueryViewVersion
+	Mvcc             *viewpb.QueryPlanMVCC
+	WorkNodes        []qviews.WorkNode
 }
 
 // RequeryRunner handles the Requery stage of the query pipeline.

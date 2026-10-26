@@ -151,6 +151,7 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		Mvcc:    mvcc,
 	}
 	response = &viewpb.GetQueryPlanResponse{Plan: plan}
+	var partitionFiltered bool
 	switch request := req.GetRequest().(type) {
 	case *viewpb.GetQueryPlanRequest_StatisticsRequest:
 		statistics := proto.Clone(request.StatisticsRequest).(*viewpb.StatisticsRequest)
@@ -173,7 +174,7 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 			},
 		}
 		plan.Request = &viewpb.QueryPlan_StatisticsRequest{StatisticsRequest: statistics}
-		plan.WorkNodes = buildQueryPlanWorkNodes(lease.View, queryPlanWorkNodeOptions{
+		plan.WorkNodes, _ = buildQueryPlanWorkNodes(lease.View, queryPlanWorkNodeOptions{
 			ignoreGrowing: true, partitionIDs: statistics.PartitionIds,
 		})
 
@@ -208,7 +209,7 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		}
 		plan.Request = &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: searchReq}
 		if !optimization.Skip {
-			plan.WorkNodes = buildQueryPlanWorkNodes(lease.View, searchQueryPlanWorkNodeOptions(searchReq, runtime, mvcc))
+			plan.WorkNodes, partitionFiltered = buildQueryPlanWorkNodes(lease.View, searchQueryPlanWorkNodeOptions(searchReq, runtime, mvcc))
 		}
 	case *viewpb.GetQueryPlanRequest_LegacyRetrieveRequest:
 		if request.LegacyRetrieveRequest == nil {
@@ -227,7 +228,7 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 			return nil, err
 		}
 		plan.Request = &viewpb.QueryPlan_LegacyRetrieveRequest{LegacyRetrieveRequest: retrieveReq}
-		plan.WorkNodes = buildQueryPlanWorkNodes(lease.View, queryPlanWorkNodeOptions{
+		plan.WorkNodes, partitionFiltered = buildQueryPlanWorkNodes(lease.View, queryPlanWorkNodeOptions{
 			ignoreGrowing: retrieveReq.GetIgnoreGrowing(),
 			partitionIDs:  retrieveReq.GetPartitionIDs(),
 			runtime:       runtime,
@@ -235,6 +236,21 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		})
 	default:
 		return nil, viewerror.NewUnknownError("query plan request misses legacy request")
+	}
+	if req.GetStatisticsRequest() == nil {
+		summary, err := readRuntime.GlobalOptimizer().OptimizePlan(ctx, plan, lease.View)
+		if err != nil {
+			return nil, err
+		}
+		if partitionFiltered {
+			if summary == nil {
+				summary = &viewpb.GlobalOptimizerExecutionSummary{}
+			}
+			summary.Flags |= 1 << viewpb.GlobalOptimizerExecutionSummary_PrunedByPartitionFiltering
+		}
+		if summary != nil {
+			response.ExecutionSummary = &viewpb.ExecutionSummary{GlobalOptimizer: summary}
+		}
 	}
 	mlog.Debug(ctx, "query view plan created",
 		mlog.FieldCollectionID(lease.Meta.GetCollectionId()),
@@ -332,8 +348,12 @@ type queryPlanGrowingRuntime interface {
 type queryPlanWorkNodeOptions struct {
 	ignoreGrowing bool
 	partitionIDs  []int64
-	runtime       queryPlanGrowingRuntime
-	mvcc          *viewpb.QueryPlanMVCC
+	// Hybrid dispatch uses the union above; commonPartitions is the intersection
+	// of non-skipped scopes. Nil means every subquery accepts all partitions.
+	advanced         bool
+	commonPartitions map[int64]struct{}
+	runtime          queryPlanGrowingRuntime
+	mvcc             *viewpb.QueryPlanMVCC
 }
 
 func searchQueryPlanWorkNodeOptions(req *internalpb.SearchRequest, runtime queryPlanGrowingRuntime, mvcc *viewpb.QueryPlanMVCC) queryPlanWorkNodeOptions {
@@ -349,6 +369,7 @@ func searchQueryPlanWorkNodeOptions(req *internalpb.SearchRequest, runtime query
 	ignoreGrowing := true
 	allPartitions := false
 	partitionSet := make(map[int64]struct{})
+	var commonPartitions map[int64]struct{}
 	for _, subReq := range req.GetSubReqs() {
 		if subReq.GetSkip() {
 			continue
@@ -360,8 +381,19 @@ func searchQueryPlanWorkNodeOptions(req *internalpb.SearchRequest, runtime query
 			allPartitions = true
 			continue
 		}
+		subPartitions := make(map[int64]struct{}, len(subReq.GetPartitionIDs()))
 		for _, partitionID := range subReq.GetPartitionIDs() {
 			partitionSet[partitionID] = struct{}{}
+			subPartitions[partitionID] = struct{}{}
+		}
+		if commonPartitions == nil {
+			commonPartitions = subPartitions
+		} else {
+			for partitionID := range commonPartitions {
+				if _, ok := subPartitions[partitionID]; !ok {
+					delete(commonPartitions, partitionID)
+				}
+			}
 		}
 	}
 
@@ -373,14 +405,16 @@ func searchQueryPlanWorkNodeOptions(req *internalpb.SearchRequest, runtime query
 		}
 	}
 	return queryPlanWorkNodeOptions{
-		ignoreGrowing: ignoreGrowing,
-		partitionIDs:  partitionIDs,
-		runtime:       runtime,
-		mvcc:          mvcc,
+		ignoreGrowing:    ignoreGrowing,
+		partitionIDs:     partitionIDs,
+		advanced:         true,
+		commonPartitions: commonPartitions,
+		runtime:          runtime,
+		mvcc:             mvcc,
 	}
 }
 
-func buildQueryPlanWorkNodes(view *viewpb.QueryViewOfShard, options queryPlanWorkNodeOptions) []*viewpb.QueryPlanWorkNode {
+func buildQueryPlanWorkNodes(view *viewpb.QueryViewOfShard, options queryPlanWorkNodeOptions) ([]*viewpb.QueryPlanWorkNode, bool) {
 	nodes := make([]*viewpb.QueryPlanWorkNode, 0, 1+len(view.GetQueryNode()))
 	if queryPlanIncludesStreamingNode(view, options) {
 		nodes = append(nodes, &viewpb.QueryPlanWorkNode{
@@ -391,8 +425,37 @@ func buildQueryPlanWorkNodes(view *viewpb.QueryViewOfShard, options queryPlanWor
 			},
 		})
 	}
+	// Build request membership once, shared by all QNs. Collect summary facts in
+	// the same partition pass used to select workers, without visiting segment IDs.
+	var selectedPartitions map[int64]struct{}
+	if len(options.partitionIDs) > 0 {
+		selectedPartitions = make(map[int64]struct{}, len(options.partitionIDs))
+		for _, id := range options.partitionIDs {
+			selectedPartitions[id] = struct{}{}
+		}
+	}
+	commonPartitions := selectedPartitions
+	if options.advanced {
+		commonPartitions = options.commonPartitions
+	}
+	filtered := false
 	for _, qn := range view.GetQueryNode() {
-		if !queryNodeHasSelectedSegments(qn, options.partitionIDs) {
+		selected := false
+		for _, partition := range qn.GetPartitions() {
+			if len(partition.GetSegmentIds()) == 0 {
+				continue
+			}
+			_, included := selectedPartitions[partition.GetPartitionId()]
+			selected = selected || selectedPartitions == nil || included
+			if !filtered && commonPartitions != nil {
+				_, common := commonPartitions[partition.GetPartitionId()]
+				filtered = !common
+			}
+			if selected && (filtered || commonPartitions == nil) {
+				break
+			}
+		}
+		if !selected {
 			continue
 		}
 		nodes = append(nodes, &viewpb.QueryPlanWorkNode{
@@ -401,7 +464,7 @@ func buildQueryPlanWorkNodes(view *viewpb.QueryViewOfShard, options queryPlanWor
 			},
 		})
 	}
-	return nodes
+	return nodes, filtered
 }
 
 func queryPlanIncludesStreamingNode(view *viewpb.QueryViewOfShard, options queryPlanWorkNodeOptions) bool {
@@ -417,25 +480,4 @@ func queryPlanIncludesStreamingNode(view *viewpb.QueryViewOfShard, options query
 		options.mvcc.GetTransformingTimetick(),
 		options.partitionIDs,
 	)
-}
-
-func queryNodeHasSelectedSegments(qn *viewpb.QueryViewOfQueryNode, partitionIDs []int64) bool {
-	if len(partitionIDs) == 0 {
-		for _, partition := range qn.GetPartitions() {
-			if len(partition.GetSegmentIds()) > 0 {
-				return true
-			}
-		}
-		return false
-	}
-	selectedPartitions := make(map[int64]struct{}, len(partitionIDs))
-	for _, partitionID := range partitionIDs {
-		selectedPartitions[partitionID] = struct{}{}
-	}
-	for _, partition := range qn.GetPartitions() {
-		if _, ok := selectedPartitions[partition.GetPartitionId()]; ok && len(partition.GetSegmentIds()) > 0 {
-			return true
-		}
-	}
-	return false
 }

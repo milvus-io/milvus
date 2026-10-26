@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -21,6 +22,7 @@ import (
 type ViewBuilder func(meta *viewpb.QueryViewMeta) (walview.VChannelWALView, bool)
 
 type Config struct {
+	ChunkManager     storage.ChunkManager
 	Builders         []QueryRuntimeModuleBuilder
 	Scheduler        nodescheduler.Scheduler
 	Dispatcher       *Dispatcher
@@ -28,7 +30,9 @@ type Config struct {
 }
 
 type Manager struct {
-	mu sync.Mutex
+	chunkManager   storage.ChunkManager
+	partitionStats map[partitionStatsKey]*partitionStatsResource
+	mu             sync.Mutex
 	// Detached builds must stop before their resources can be closed.
 	releasing sync.WaitGroup
 
@@ -47,6 +51,9 @@ type Manager struct {
 }
 
 type queryViewRef struct {
+	statsResources []*partitionStatsResource
+	// Published once after successful preparation; borrowed read-only by queries.
+	statsSnapshots  map[int64]*storage.PartitionStatsSnapshot
 	meta            *viewpb.QueryViewMeta
 	onReady         func()
 	onUnrecoverable func()
@@ -54,6 +61,7 @@ type queryViewRef struct {
 
 func NewManager(config Config) *Manager {
 	return &Manager{
+		chunkManager:     config.ChunkManager,
 		builders:         defaultQueryRuntimeModuleBuilders(config.Builders),
 		scheduler:        config.Scheduler,
 		dispatcher:       config.Dispatcher,
@@ -88,6 +96,7 @@ func (m *Manager) AcquireLocked(req snview.AcquireResource, build ViewBuilder) {
 			m.refs = make(map[qviews.QueryViewKey]queryViewRef)
 		}
 		m.refs[req.Key] = queryViewRef{
+			statsResources:  m.acquirePartitionStatsLocked(snviewAcquireStats{req.Meta.GetCollectionId(), req.Meta.GetVchannel(), req.PartitionStats}),
 			meta:            proto.Clone(req.Meta).(*viewpb.QueryViewMeta),
 			onReady:         req.OnReady,
 			onUnrecoverable: req.OnUnrecoverable,
@@ -140,7 +149,8 @@ func (m *Manager) Release(req snview.ReleaseResource) {
 	var hasAdvance bool
 
 	m.mu.Lock()
-	if _, ok := m.refs[req.Key]; ok {
+	if ref, ok := m.refs[req.Key]; ok {
+		m.releasePartitionStatsLocked(ref.statsResources)
 		delete(m.refs, req.Key)
 		advance, hasAdvance = minQueryViewDataVersion(m.refs)
 		advanceRuntime = m.runtime
@@ -219,7 +229,15 @@ func (m *Manager) ReadRuntime(key qviews.QueryViewKey) (*ReadRuntime, bool) {
 	if !ok || m.task != nil || m.runtime == nil || m.err != nil {
 		return nil, false
 	}
-	return m.runtime.ReadRuntime(ref.meta)
+	if len(ref.statsResources) > 0 && ref.statsSnapshots == nil {
+		return nil, false
+	}
+	runtime, ok := m.runtime.ReadRuntime(ref.meta)
+	if !ok {
+		return nil, false
+	}
+	runtime.partitionStats = ref.statsSnapshots
+	return runtime, true
 }
 
 func (m *Manager) OldestDataVersion() (qviews.DataVersion, bool) {
@@ -238,6 +256,9 @@ func (m *Manager) Close() {
 	m.mu.Lock()
 	m.closed = true
 	runtime, task := m.takeRuntimeLocked()
+	for _, ref := range m.refs {
+		m.releasePartitionStatsLocked(ref.statsResources)
+	}
 	m.refs = nil
 	m.mu.Unlock()
 
@@ -462,6 +483,11 @@ func (m *Manager) prepareReady(ctx context.Context, key qviews.QueryViewKey, onR
 	// checking the target revision and refreshing shared search index metadata.
 	// Modules prepare changed load scopes before this view can become Ready.
 	err := func() error {
+		for _, resource := range ref.statsResources {
+			if err := resource.prepare(ctx, m.chunkManager); err != nil {
+				return err
+			}
+		}
 		var schemaErr error
 		runtime.RangeModules(func(module QueryRuntimeModule) bool {
 			if resource, ok := module.(QueryRuntimeSchemaModule); ok {
@@ -486,8 +512,8 @@ func (m *Manager) prepareReady(ctx context.Context, key qviews.QueryViewKey, onR
 		}
 		if !retryablePreparationError(err) {
 			m.mu.Lock()
-			ref, ok := m.refs[key]
-			current := ok && m.runtime == runtime && m.task == nil && m.err == nil
+			currentRef, ok := m.refs[key]
+			current := ok && currentRef.meta == ref.meta && m.runtime == runtime && m.task == nil && m.err == nil
 			m.mu.Unlock()
 			if current && ref.onUnrecoverable != nil {
 				ref.onUnrecoverable()
@@ -497,8 +523,14 @@ func (m *Manager) prepareReady(ctx context.Context, key qviews.QueryViewKey, onR
 		return errors.Mark(err, nodescheduler.ErrDelay)
 	}
 	m.mu.Lock()
-	_, ok = m.refs[key]
-	ready = ok && m.runtime == runtime && m.task == nil && m.err == nil
+	currentRef, ok := m.refs[key]
+	// Meta is cloned on registration, so its identity distinguishes a released
+	// acquisition from a later registration even if the QueryViewKey is reused.
+	ready = ok && currentRef.meta == ref.meta && m.runtime == runtime && m.task == nil && m.err == nil
+	if ready && currentRef.statsSnapshots == nil && len(currentRef.statsResources) > 0 {
+		currentRef.statsSnapshots = collectPartitionStatsSnapshots(currentRef.statsResources)
+		m.refs[key] = currentRef
+	}
 	m.mu.Unlock()
 	if !ready {
 		return nil

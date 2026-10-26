@@ -19,6 +19,7 @@ type TaskProvider interface {
 		version qviews.QueryViewVersion,
 		mvcc *viewpb.QueryPlanMVCC,
 		req *internalpb.SearchRequest,
+		selection *viewpb.SegmentSelection,
 	) (SearchSegmentTasks, error)
 
 	AcquireQuerySegmentTasks(
@@ -27,5 +28,6 @@ type TaskProvider interface {
 		version qviews.QueryViewVersion,
 		mvcc *viewpb.QueryPlanMVCC,
 		req *internalpb.RetrieveRequest,
+		selection *viewpb.SegmentSelection,
 	) (QuerySegmentTasks, error)
 }

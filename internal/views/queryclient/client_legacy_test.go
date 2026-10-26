@@ -95,7 +95,7 @@ func TestLegacyClientQueryReturnsRawResults(t *testing.T) {
 	require.Len(t, result.Plans, 1)
 }
 
-func TestLegacyClientQuerySkipsEmptyDownstreamResults(t *testing.T) {
+func TestLegacyClientQueryPreservesEmptyDownstreamSnapshot(t *testing.T) {
 	collectionID := int64(100)
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	queryNode := qviews.NewQueryNode(11)
@@ -123,7 +123,10 @@ func TestLegacyClientQuerySkipsEmptyDownstreamResults(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	require.Empty(t, result.Results)
+	require.Len(t, result.Results, 1)
+	require.Empty(t, result.Results[0].GetIds())
+	require.EqualValues(t, 100, result.Results[0].GetMvccTimestamp())
+	require.Zero(t, result.Results[0].GetFeatureBits())
 	require.Len(t, result.Plans, 1)
 }
 
@@ -155,7 +158,10 @@ func TestLegacyClientQueryDoesNotDispatchWhenPlanHasNoWorkNodes(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	require.Empty(t, result.Results)
+	require.Len(t, result.Results, 1)
+	require.Empty(t, result.Results[0].GetIds())
+	require.EqualValues(t, 100, result.Results[0].GetMvccTimestamp())
+	require.Zero(t, result.Results[0].GetFeatureBits())
 	require.Len(t, result.Plans, 1)
 	require.Zero(t, service.queryCallCount)
 }
@@ -272,6 +278,8 @@ func TestLegacyRequeryUsesRetainedViewWithoutReplanning(t *testing.T) {
 	mockey.PatchConvey("requery preserves the exact parent plan, including failures", t, func() {
 		node := qviews.NewQueryNode(9)
 		plan := ShardPlan{ShardID: qviews.ShardID{VChannel: "p_1v0", ReplicaID: 2}, Version: &viewpb.QueryViewVersion{QueryVersion: 5}, Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 90}, WorkNodes: []qviews.WorkNode{node}}
+		selection := &viewpb.SegmentSelection{SegmentIds: []int64{777}}
+		plan.Selections = []*viewpb.QueryPlanWorkNode{{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: 9}}, SegmentSelection: selection}}
 		service := &fakeViewQueryServiceClient{}
 		client := &legacyClient{shardClient: &shardViewQueryClient{queryServiceClient: service}}
 		var failure error
@@ -279,6 +287,7 @@ func TestLegacyRequeryUsesRetainedViewWithoutReplanning(t *testing.T) {
 		mockey.Mock((*fakeViewQueryServiceClient).QueryOnView).To(func(_ *fakeViewQueryServiceClient, _ context.Context, selected qviews.WorkNode, request *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
 			calls++
 			require.Equal(t, node, selected)
+			require.True(t, proto.Equal(selection, request.GetSegmentSelection()))
 			require.True(t, proto.Equal(plan.Version, request.GetVersion()))
 			require.True(t, proto.Equal(plan.Mvcc, request.GetMvcc()))
 			require.EqualValues(t, 90, request.GetLegacyReq().GetMvccTimestamp())

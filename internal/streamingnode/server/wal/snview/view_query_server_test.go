@@ -127,6 +127,7 @@ func (w *fakeViewQueryWAL) AcquireSearchSegmentTasks(
 	_ qviews.QueryViewVersion,
 	_ *viewpb.QueryPlanMVCC,
 	_ *internalpb.SearchRequest,
+	_ *viewpb.SegmentSelection,
 ) (viewquery.SearchSegmentTasks, error) {
 	w.searchShardID = shardID
 	return w.searchTasks, nil
@@ -138,6 +139,7 @@ func (w *fakeViewQueryWAL) AcquireQuerySegmentTasks(
 	_ qviews.QueryViewVersion,
 	_ *viewpb.QueryPlanMVCC,
 	_ *internalpb.RetrieveRequest,
+	_ *viewpb.SegmentSelection,
 ) (viewquery.QuerySegmentTasks, error) {
 	w.queryShardID = shardID
 	return w.queryTasks, nil

@@ -275,6 +275,7 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 			queryresource.NewReadSchemaModuleBuilder(),
 			idf.NewFutureProvider(resource.Resource().MixCoordClient(), idf.WithChunkManager(resource.Resource().ChunkManager())),
 		},
+		QueryStatsChunkManager:    resource.Resource().ChunkManager(),
 		QueryViewLoadInfoProvider: queryresource.NewFutureLoadInfoProvider(resource.Resource().MixCoordClient()),
 		PChannel:                  r.channel.Name,
 		VChannelMetas:             vchannels,

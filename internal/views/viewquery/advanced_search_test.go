@@ -300,6 +300,7 @@ func (p *advancedTaskProvider) AcquireSearchSegmentTasks(
 	_ qviews.QueryViewVersion,
 	_ *viewpb.QueryPlanMVCC,
 	req *internalpb.SearchRequest,
+	_ *viewpb.SegmentSelection,
 ) (SearchSegmentTasks, error) {
 	fieldID := req.GetFieldId()
 	p.mu.Lock()
@@ -323,6 +324,7 @@ func (*advancedTaskProvider) AcquireQuerySegmentTasks(
 	qviews.QueryViewVersion,
 	*viewpb.QueryPlanMVCC,
 	*internalpb.RetrieveRequest,
+	*viewpb.SegmentSelection,
 ) (QuerySegmentTasks, error) {
 	return nil, viewerror.NewUnknownError("unexpected query")
 }

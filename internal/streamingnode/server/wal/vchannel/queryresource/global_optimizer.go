@@ -9,6 +9,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/views/optimizer"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
@@ -25,6 +26,8 @@ type idfOracle interface {
 }
 
 type globalOptimizer struct {
+	schema            *schemapb.CollectionSchema
+	partitionStats    map[int64]*storage.PartitionStatsSnapshot
 	idf               idfOracle
 	functionRunnerKey string
 }

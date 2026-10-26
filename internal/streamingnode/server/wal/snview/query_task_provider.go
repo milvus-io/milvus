@@ -19,6 +19,7 @@ func (h *SNQueryViewHandler) AcquireSearchSegmentTasks(
 	version qviews.QueryViewVersion,
 	mvcc *viewpb.QueryPlanMVCC,
 	req *internalpb.SearchRequest,
+	selection *viewpb.SegmentSelection,
 ) (viewquery.SearchSegmentTasks, error) {
 	if req.GetIgnoreGrowing() {
 		return NewSNSearchSegmentTasks(nil), nil
@@ -80,6 +81,7 @@ func (h *SNQueryViewHandler) AcquireQuerySegmentTasks(
 	version qviews.QueryViewVersion,
 	mvcc *viewpb.QueryPlanMVCC,
 	req *internalpb.RetrieveRequest,
+	selection *viewpb.SegmentSelection,
 ) (viewquery.QuerySegmentTasks, error) {
 	lease, err := h.acquireUpView(ctx, shardID, version, false)
 	if err != nil {

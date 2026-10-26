@@ -73,6 +73,7 @@ func TestSNHandler_AcquireSearchSegmentTasksWaitsRuntimeAndReleasesViewRef(t *te
 		view.QueryViewKey().QueryViewVersion,
 		&viewpb.QueryPlanMVCC{GrowingTimetick: 11, TransformingTimetick: 10},
 		&internalpb.SearchRequest{CollectionID: testCollectionID, PartitionIDs: []int64{10}},
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -99,6 +100,7 @@ func TestSNHandler_AcquireSearchSegmentTasksSkipsIgnoreGrowingSubSearch(t *testi
 		qviews.QueryViewVersion{},
 		&viewpb.QueryPlanMVCC{},
 		&internalpb.SearchRequest{IgnoreGrowing: true},
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -131,6 +133,7 @@ func TestSNHandler_AcquireQuerySegmentTasksWaitsRuntimeAndReleasesViewRef(t *tes
 		view.QueryViewKey().QueryViewVersion,
 		&viewpb.QueryPlanMVCC{GrowingTimetick: 11, TransformingTimetick: 10},
 		&internalpb.RetrieveRequest{CollectionID: testCollectionID, PartitionIDs: []int64{20}},
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -166,6 +169,7 @@ func TestSNHandler_AcquireSearchSegmentTasksReleasesViewRefOnRuntimeError(t *tes
 		view.QueryViewKey().QueryViewVersion,
 		&viewpb.QueryPlanMVCC{GrowingTimetick: 11, TransformingTimetick: 10},
 		&internalpb.SearchRequest{CollectionID: testCollectionID},
+		nil,
 	)
 	require.ErrorIs(t, err, runtimeErr)
 
@@ -226,10 +230,10 @@ func TestSNHandlerDownRejectsNewTasksButRetainsAcquiredHandles(t *testing.T) {
 	resource.OnReady()
 	h.ApplyViews([]handler.ApplyView{{View: newSNViewWithState(1, viewpb.QueryViewState_QueryViewStateUp)}})
 	req := &internalpb.RetrieveRequest{CollectionID: testCollectionID}
-	tasks, err := h.AcquireQuerySegmentTasks(context.Background(), view.ShardID(), view.QueryViewKey().QueryViewVersion, &viewpb.QueryPlanMVCC{}, req)
+	tasks, err := h.AcquireQuerySegmentTasks(context.Background(), view.ShardID(), view.QueryViewKey().QueryViewVersion, &viewpb.QueryPlanMVCC{}, req, nil)
 	require.NoError(t, err)
 	h.ApplyViews([]handler.ApplyView{{View: newSNViewWithState(1, viewpb.QueryViewState_QueryViewStateDown)}})
-	_, err = h.AcquireQuerySegmentTasks(context.Background(), view.ShardID(), view.QueryViewKey().QueryViewVersion, &viewpb.QueryPlanMVCC{}, req)
+	_, err = h.AcquireQuerySegmentTasks(context.Background(), view.ShardID(), view.QueryViewKey().QueryViewVersion, &viewpb.QueryPlanMVCC{}, req, nil)
 	require.Error(t, err)
 	require.Zero(t, held.releaseCount, "Down must not invalidate handles already owned by execution")
 	require.Len(t, tasks.Tasks(), 1)
@@ -289,9 +293,9 @@ func TestSNTasksRequirePartitionResolutionBeforeAcquiringHandles(t *testing.T) {
 				mvcc := &viewpb.QueryPlanMVCC{GrowingTimetick: 11, TransformingTimetick: 10}
 				var err error
 				if search {
-					_, err = h.AcquireSearchSegmentTasks(context.Background(), view.ShardID(), view.QueryViewKey().QueryViewVersion, mvcc, &internalpb.SearchRequest{})
+					_, err = h.AcquireSearchSegmentTasks(context.Background(), view.ShardID(), view.QueryViewKey().QueryViewVersion, mvcc, &internalpb.SearchRequest{}, nil)
 				} else {
-					_, err = h.AcquireQuerySegmentTasks(context.Background(), view.ShardID(), view.QueryViewKey().QueryViewVersion, mvcc, &internalpb.RetrieveRequest{})
+					_, err = h.AcquireQuerySegmentTasks(context.Background(), view.ShardID(), view.QueryViewKey().QueryViewVersion, mvcc, &internalpb.RetrieveRequest{}, nil)
 				}
 				require.True(t, resolved)
 				require.Equal(t, !reject, acquired)

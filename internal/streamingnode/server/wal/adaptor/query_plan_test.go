@@ -2,6 +2,7 @@ package adaptor
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -219,6 +220,104 @@ func TestQueryPlanRequiresServingViewBeforeResolvingMVCC(t *testing.T) {
 			require.ErrorIs(t, err, unavailable)
 			require.Nil(t, plan)
 			require.Zero(t, resolve.Times())
+		})
+	}
+}
+
+func TestQueryPlanReturnsOptimizerSummarySeparately(t *testing.T) {
+	patchQueryReadRuntime(t)
+	view := &viewpb.QueryViewOfShard{
+		Meta: &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: "p_1v0", ReplicaId: 1, Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 1}, QueryVersion: 1}},
+		QueryNode: []*viewpb.QueryViewOfQueryNode{
+			{NodeId: 11, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{100}}}},
+			{NodeId: 12, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 20, SegmentIds: []int64{200}}}},
+		},
+	}
+	lease := &snview.QueryViewLease{Meta: view.Meta, View: view, Version: qviews.FromProtoQueryViewVersion(view.Meta.Version), Renew: func() {}, Release: func() {}}
+	patch := mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtSchema).Return(lease, nil).Build()
+	defer patch.UnPatch()
+	partitions := mockey.Mock((*queryresource.QueryRuntime).ResolvePartitions).To(func(_ *queryresource.QueryRuntime, _ uint64, ids []int64) ([]int64, error) {
+		return ids, nil
+	}).Build()
+	defer partitions.UnPatch()
+	w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}, viewResourceManager: &vchannel.PChannelRecoveryManager{}}
+	for _, ids := range [][]int64{{10}, {10, 20}} {
+		response, err := w.GetQueryPlan(t.Context(), &viewpb.GetQueryPlanRequest{
+			ShardId: qviews.NewShardIDFromQVMeta(view.Meta).IntoProto(),
+			Mvcc:    &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 1}},
+			Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{CollectionID: 1, PartitionIDs: ids}},
+		})
+		require.NoError(t, err)
+		require.Len(t, response.GetPlan().GetWorkNodes(), len(ids))
+		if len(ids) == 1 {
+			require.Equal(t, uint32(1<<viewpb.GlobalOptimizerExecutionSummary_PrunedByPartitionFiltering), response.GetExecutionSummary().GetGlobalOptimizer().GetFlags())
+		} else {
+			require.Nil(t, response.GetExecutionSummary())
+		}
+	}
+}
+
+func TestQueryPlanPartitionSelectionAndSummary(t *testing.T) {
+	view := &viewpb.QueryViewOfShard{QueryNode: []*viewpb.QueryViewOfQueryNode{
+		{NodeId: 1, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 1, SegmentIds: []int64{11}}, {PartitionId: 2, SegmentIds: []int64{12}}}},
+		{NodeId: 2, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 2, SegmentIds: []int64{22}}}},
+		{NodeId: 3, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 3, SegmentIds: []int64{33}}}},
+		{NodeId: 4, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 99}}},
+	}}
+	for _, tc := range []struct {
+		name     string
+		req      *internalpb.SearchRequest
+		nodes    []int64
+		filtered bool
+	}{
+		{"unrestricted", &internalpb.SearchRequest{}, []int64{1, 2, 3}, false},
+		{"all_selected", &internalpb.SearchRequest{PartitionIDs: []int64{1, 2, 3}}, []int64{1, 2, 3}, false},
+		{"partial_worker", &internalpb.SearchRequest{PartitionIDs: []int64{1}}, []int64{1}, true},
+		{"shared_partition", &internalpb.SearchRequest{PartitionIDs: []int64{2}}, []int64{1, 2}, true},
+		{"all_excluded", &internalpb.SearchRequest{PartitionIDs: []int64{99}}, nil, true},
+		{"hybrid_union_all", &internalpb.SearchRequest{IsAdvanced: true, SubReqs: []*internalpb.SubSearchRequest{{PartitionIDs: []int64{1, 2}}, {PartitionIDs: []int64{2, 3}}}}, []int64{1, 2, 3}, true},
+		{"hybrid_identical_all", &internalpb.SearchRequest{IsAdvanced: true, SubReqs: []*internalpb.SubSearchRequest{{PartitionIDs: []int64{1, 2, 3}}, {PartitionIDs: []int64{1, 2, 3}}}}, []int64{1, 2, 3}, false},
+		{"hybrid_unrestricted_and_bounded", &internalpb.SearchRequest{IsAdvanced: true, SubReqs: []*internalpb.SubSearchRequest{{}, {PartitionIDs: []int64{2}}}}, []int64{1, 2, 3}, true},
+		{"hybrid_skipped_and_unrestricted", &internalpb.SearchRequest{IsAdvanced: true, SubReqs: []*internalpb.SubSearchRequest{{PartitionIDs: []int64{2}, Skip: true}, {}}}, []int64{1, 2, 3}, false},
+		{"hybrid_disjoint", &internalpb.SearchRequest{IsAdvanced: true, SubReqs: []*internalpb.SubSearchRequest{{PartitionIDs: []int64{1}}, {PartitionIDs: []int64{3}}}}, []int64{1, 3}, true},
+		{"hybrid_duplicate_ids", &internalpb.SearchRequest{IsAdvanced: true, SubReqs: []*internalpb.SubSearchRequest{{PartitionIDs: []int64{2, 2}}, {PartitionIDs: []int64{2}}}}, []int64{1, 2}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			options := searchQueryPlanWorkNodeOptions(tc.req, nil, nil)
+			workers, filtered := buildQueryPlanWorkNodes(view, options)
+			var ids []int64
+			for _, worker := range workers {
+				ids = append(ids, worker.GetQueryNode().GetNodeId())
+			}
+			require.Equal(t, tc.nodes, ids)
+			require.Equal(t, tc.filtered, filtered)
+			// Empty partitions/views are not proof of any candidate exclusion.
+			workers, filtered = buildQueryPlanWorkNodes(&viewpb.QueryViewOfShard{QueryNode: view.QueryNode[3:]}, options)
+			require.Empty(t, workers)
+			require.False(t, filtered)
+		})
+	}
+}
+
+func BenchmarkQueryPlanPartitionSelection(b *testing.B) {
+	for _, count := range []int{32, 1024, 8192} {
+		b.Run(strconv.Itoa(count), func(b *testing.B) {
+			ids := make([]int64, count)
+			partitions := make([]*viewpb.QueryViewOfPartition, count)
+			for i := range ids {
+				ids[i] = int64(i)
+				partitions[i] = &viewpb.QueryViewOfPartition{PartitionId: ids[i], SegmentIds: []int64{ids[i]}}
+			}
+			view := &viewpb.QueryViewOfShard{QueryNode: []*viewpb.QueryViewOfQueryNode{{NodeId: 1, Partitions: partitions}}}
+			options := queryPlanWorkNodeOptions{partitionIDs: ids}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				workers, filtered := buildQueryPlanWorkNodes(view, options)
+				if len(workers) != 1 || filtered {
+					b.Fatal("all partitions must remain selected")
+				}
+			}
 		})
 	}
 }

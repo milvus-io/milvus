@@ -54,7 +54,11 @@ func TestLegacyShardQueryReduction(t *testing.T) {
 	collector.ResetShard(id)
 	results, err = collector.Reduce(t.Context(), req, []ShardPlan{plan})
 	require.NoError(t, err)
-	require.Empty(t, results)
+	require.Len(t, results, 1)
+	require.Empty(t, results[0].GetIds())
+	require.Empty(t, results[0].GetFieldsData())
+	require.Zero(t, results[0].GetAllRetrieveCount())
+	require.EqualValues(t, 100, results[0].GetMvccTimestamp())
 }
 
 func TestLegacyShardSearchReduction(t *testing.T) {
@@ -231,7 +235,10 @@ func TestLegacyRetryDiscardsLateResultsAndRetainsEmptyShardSnapshot(t *testing.T
 		})
 		require.NoError(t, err)
 		require.EqualValues(t, 2, attempts.Load())
-		require.Empty(t, result.Results, "the failed attempt's late result must be discarded")
+		require.Len(t, result.Results, 1)
+		require.Empty(t, result.Results[0].GetIds(), "the failed attempt's late result must be discarded")
+		require.Zero(t, result.Results[0].GetAllRetrieveCount())
+		require.EqualValues(t, 300, result.Results[0].GetMvccTimestamp())
 		require.Len(t, result.Plans, 1, "empty results still carry the successful shard snapshot")
 		require.EqualValues(t, 300, result.Plans[0].Mvcc.GetGrowingTimetick())
 		require.EqualValues(t, 90, result.Plans[0].Mvcc.GetTransformingTimetick())

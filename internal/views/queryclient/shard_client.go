@@ -78,10 +78,12 @@ func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchReque
 		},
 		dispatchNode: func(ctx context.Context, node qviews.WorkNode, plan *viewpb.QueryPlan, shardID qviews.ShardID) error {
 			resp, err := s.queryServiceClient.SearchOnView(ctx, node, &viewpb.SearchOnViewRequest{
-				LegacyReq: legacySearchRequestForNode(plan, node),
-				ShardId:   shardID.IntoProto(),
-				Version:   plan.Version,
-				Mvcc:      plan.GetMvcc(),
+				LegacyReq:        legacySearchRequestForNode(plan, node),
+				SegmentSelection: qviews.WorkNodeSelection(plan, node).GetSegmentSelection(),
+				SubSelections:    qviews.WorkNodeSelection(plan, node).GetSubSelections(),
+				ShardId:          shardID.IntoProto(),
+				Version:          plan.Version,
+				Mvcc:             plan.GetMvcc(),
 			})
 			if err != nil {
 				return err
@@ -112,10 +114,11 @@ func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest
 		},
 		dispatchNode: func(ctx context.Context, node qviews.WorkNode, plan *viewpb.QueryPlan, shardID qviews.ShardID) error {
 			resp, err := s.queryServiceClient.QueryOnView(ctx, node, &viewpb.QueryOnViewRequest{
-				LegacyReq: legacyRetrieveRequestForNode(plan, node),
-				ShardId:   shardID.IntoProto(),
-				Version:   plan.Version,
-				Mvcc:      plan.GetMvcc(),
+				LegacyReq:        legacyRetrieveRequestForNode(plan, node),
+				SegmentSelection: qviews.WorkNodeSelection(plan, node).GetSegmentSelection(),
+				ShardId:          shardID.IntoProto(),
+				Version:          plan.Version,
+				Mvcc:             plan.GetMvcc(),
 			})
 			if err != nil {
 				return err
@@ -208,10 +211,12 @@ func (s *shardViewQueryClient) executeShard(
 		}
 
 		return &ShardPlan{
-			ShardID:   shardID,
-			Version:   plan.Version,
-			Mvcc:      plan.GetMvcc(),
-			WorkNodes: workNodes,
+			ShardID:          shardID,
+			Version:          plan.Version,
+			Mvcc:             plan.GetMvcc(),
+			WorkNodes:        workNodes,
+			Selections:       plan.GetWorkNodes(),
+			ExecutionSummary: response.GetExecutionSummary(),
 		}, nil
 	}
 	return nil, lastErr

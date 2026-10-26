@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/util/function"
@@ -214,6 +215,7 @@ func (r *QueryRuntime) ReadRuntime(meta *viewpb.QueryViewMeta) (*ReadRuntime, bo
 // ReadRuntime binds query planning and handles to one immutable read schema.
 // A QueryView lease owns the enclosing runtime; each handle also pins its schema.
 type ReadRuntime struct {
+	partitionStats map[int64]*storage.PartitionStatsSnapshot
 	*QueryRuntime
 	schema *readSchema
 	key    ReadSchemaKey
@@ -248,7 +250,7 @@ func (h *readSchemaHandle) Release() {
 }
 
 func (r *ReadRuntime) GlobalOptimizer() optimizer.GlobalOptimizer {
-	return globalOptimizer{idf: schemaIDFOracle{runtime: r.QueryRuntime, key: r.key}, functionRunnerKey: r.schema.functionKey}
+	return globalOptimizer{schema: r.Schema(), partitionStats: r.partitionStats, idf: schemaIDFOracle{runtime: r.QueryRuntime, key: r.key}, functionRunnerKey: r.schema.functionKey}
 }
 
 type schemaIDFOracle struct {

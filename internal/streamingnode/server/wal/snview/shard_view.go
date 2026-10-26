@@ -99,8 +99,9 @@ func (s *snShardView) startRecoveryVersions(versions []qviews.QueryViewVersion) 
 		entry := s.views[version]
 		v := version // capture loop variable
 		s.resMgr.Acquire(AcquireResource{
-			Key:  key,
-			Meta: entry.sm.Meta(),
+			Key:            key,
+			Meta:           entry.sm.Meta(),
+			PartitionStats: entry.sm.SNView().GetPartitionStats(),
 			OnReady: func() {
 				s.notifyRecoveringDone(v)
 			},
@@ -178,8 +179,9 @@ func (s *snShardView) applyOneLocked(av *handler.ApplyView) {
 			// Tell ResourceManager to prepare resources. Callbacks will drive SM progress.
 			version := key.QueryViewVersion
 			s.resMgr.Acquire(AcquireResource{
-				Key:  key,
-				Meta: sm.Meta(),
+				Key:            key,
+				Meta:           sm.Meta(),
+				PartitionStats: sm.SNView().GetPartitionStats(),
 				OnReady: func() {
 					s.notifyReady(version)
 				},

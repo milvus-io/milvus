@@ -5,21 +5,44 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/agg"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // Reduce runs after all shard attempts finish. A retry has already discarded
 // that shard's partial results, so each bucket represents one successful plan.
+// A successful plan without collected results still contributes an empty result
+// and its snapshot, independently of which optimizations were applied.
 func (c *legacyQueryCollector) Reduce(ctx context.Context, req *LegacyQueryRequest, plans []ShardPlan) ([]*internalpb.RetrieveResults, error) {
 	results := make([]*internalpb.RetrieveResults, 0, len(plans))
 	for _, plan := range plans {
 		inputs := c.results[plan.ShardID.String()]
 		if len(inputs) == 0 {
-			continue
+			inputs = []*internalpb.RetrieveResults{{Status: merr.Success()}}
+		}
+		// A worker with no selected segments returns a fieldless empty result.
+		// Aggregation still needs its typed identity (count=0, empty groups, ...)
+		// before either this shard reducer or Proxy can merge it.
+		if len(req.Req.GetGroupByFieldIds()) > 0 || len(req.Req.GetAggregates()) > 0 {
+			for i, input := range inputs {
+				if len(input.GetFieldsData()) != 0 {
+					continue
+				}
+				empty, err := agg.NewGroupAggReducer(req.Req.GetGroupByFieldIds(), req.Req.GetAggregates(), -1, req.Schema).EmptyAggResult()
+				if err != nil {
+					return nil, err
+				}
+				normalized := proto.Clone(input).(*internalpb.RetrieveResults)
+				normalized.FieldsData = empty.GetFieldDatas()
+				inputs[i] = normalized
+			}
 		}
 		var result *internalpb.RetrieveResults
 		if len(inputs) == 1 {
@@ -36,6 +59,7 @@ func (c *legacyQueryCollector) Reduce(ctx context.Context, req *LegacyQueryReque
 			}
 			result.CostAggregation = mergeLegacyCosts(costs)
 		}
+		result.FeatureBits |= executionSummaryFeatureBits(plan.ExecutionSummary)
 		result.MvccTimestamp = max(plan.Mvcc.GetGrowingTimetick(), plan.Mvcc.GetTransformingTimetick())
 		results = append(results, result)
 	}
@@ -47,12 +71,17 @@ func (c *legacySearchCollector) Reduce(ctx context.Context, req *internalpb.Sear
 	for _, plan := range plans {
 		inputs := c.results[plan.ShardID.String()]
 		if len(inputs) == 0 {
-			continue
+			empty, err := viewquery.EmptySearchResults(req)
+			if err != nil {
+				return nil, err
+			}
+			inputs = []*internalpb.SearchResults{empty}
 		}
 		result, err := reduceLegacyShardSearch(ctx, req, inputs)
 		if err != nil {
 			return nil, err
 		}
+		result.FeatureBits |= executionSummaryFeatureBits(plan.ExecutionSummary)
 		result.ChannelsMvcc = map[string]uint64{plan.ShardID.VChannel: max(plan.Mvcc.GetGrowingTimetick(), plan.Mvcc.GetTransformingTimetick())}
 		results = append(results, result)
 	}
@@ -126,4 +155,15 @@ func mergeLegacyCosts(costs []*internalpb.CostAggregation) *internalpb.CostAggre
 	}
 	result.TotalRelatedDataSize = related
 	return result
+}
+
+// Metrics own their bit allocation. Only known statistics-pruning facts map to
+// SegmentPrune usage; partition filtering and unknown summary bits do not.
+func executionSummaryFeatureBits(summary *viewpb.ExecutionSummary) uint64 {
+	const pruningMask uint32 = 1<<viewpb.GlobalOptimizerExecutionSummary_PrunedByScalarFiltering | 1<<viewpb.GlobalOptimizerExecutionSummary_PrunedByVectorFiltering
+	if summary.GetGlobalOptimizer().GetFlags()&pruningMask != 0 {
+		bit, _ := featureusage.ExecBit(featureusage.FeatureSegmentPrune)
+		return bit
+	}
+	return 0
 }

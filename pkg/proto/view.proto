@@ -91,6 +91,12 @@ message QueryViewMeta {
 // QueryViewOfStreamingNode is the StreamingNode-local part of a QueryView.
 // The node is identified implicitly by the shard's vchannel binding.
 message QueryViewOfStreamingNode {
+    repeated ClusteredPartitionStats partition_stats = 1;
+}
+
+message ClusteredPartitionStats {
+    int64 partition_id = 1;
+    int64 version = 2;
 }
 
 // QueryViewOfQueryNode contains the segment assignments for one QueryNode.
@@ -111,6 +117,8 @@ message QueryViewOfPartition {
     int64 partition_id = 1;
     repeated int64 segment_ids = 2;
     repeated int64 ready_segment_ids = 3;
+    // Minimum physical base version required before this view reports Ready.
+    // Parallel to segment_ids; zero preserves legacy metadata resolution.
     repeated int64 segment_manifest_versions = 4 [packed = true];
 }
 
@@ -191,6 +199,16 @@ message QueryPlanWorkNode {
         QueryWorkNode query_node = 1;
         StreamingWorkNode streaming_node = 2;
     }
+    SegmentSelection segment_selection = 3;
+    // Positional, parallel to hybrid subrequests. Each entry is explicit.
+    repeated SegmentSelection sub_selections = 4;
+}
+
+// Absent means all View members in scope. Present inclusion with no IDs means
+// none; exclusion with no IDs means all. Use the smaller side on the wire.
+message SegmentSelection {
+    repeated int64 segment_ids = 1 [packed = true];
+    bool exclude = 2;
 }
 
 //
@@ -259,6 +277,25 @@ message GetMVCCTimestampResponse {
 message GetQueryPlanResponse {
     QueryPlan plan = 1;
     GrowingInlineResponse growing_inline_response = 2;
+    ExecutionSummary execution_summary = 3;
+}
+
+message ExecutionSummary {
+    GlobalOptimizerExecutionSummary global_optimizer = 1;
+}
+
+message GlobalOptimizerExecutionSummary {
+    // Offsets in flags, NOT masks: test/set a bit with uint32(1) << offset.
+    // Zero denotes a real bit offset, not an unspecified optimization.
+    enum BitOffset {
+        PrunedByPartitionFiltering = 0;
+        PrunedByScalarFiltering = 1;
+        PrunedByVectorFiltering = 2;
+    }
+    // Records actual candidate exclusions, not enabled optimizer settings.
+    // Extend beyond 32 bits by adding another uint32 field and its own offsets;
+    // do not renumber existing offsets or allocate unused words in advance.
+    uint32 flags = 1;
 }
 
 // Growing results computed during Phase 1, separate from the reusable query plan.
@@ -331,6 +368,8 @@ message SearchOnViewRequest {
     ShardID shard_id = 2;
     QueryViewVersion version = 3;
     QueryPlanMVCC mvcc = 4;
+    SegmentSelection segment_selection = 5;
+    repeated SegmentSelection sub_selections = 6;
 }
 
 message SearchOnViewResponse {
@@ -344,6 +383,7 @@ message QueryOnViewRequest {
     ShardID shard_id = 2;
     QueryViewVersion version = 3;
     QueryPlanMVCC mvcc = 4;
+    SegmentSelection segment_selection = 5;
 }
 
 message QueryOnViewResponse {

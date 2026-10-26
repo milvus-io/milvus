@@ -265,7 +265,8 @@ func (c *legacyClient) queryRetainedPlans(ctx context.Context, req *LegacyQueryR
 				request := proto.Clone(req.Req).(*internalpb.RetrieveRequest)
 				request.MvccTimestamp = legacyMVCCForNode(plan.Mvcc, node)
 				response, err := c.shardClient.queryServiceClient.QueryOnView(groupCtx, node, &viewpb.QueryOnViewRequest{
-					LegacyReq: request, ShardId: plan.ShardID.IntoProto(), Version: plan.Version, Mvcc: plan.Mvcc,
+					SegmentSelection: qviews.WorkNodeSelection(&viewpb.QueryPlan{WorkNodes: plan.Selections}, node).GetSegmentSelection(),
+					LegacyReq:        request, ShardId: plan.ShardID.IntoProto(), Version: plan.Version, Mvcc: plan.Mvcc,
 				})
 				if err != nil {
 					return err

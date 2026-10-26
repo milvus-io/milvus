@@ -40,6 +40,11 @@ func TestShardSearchReturnsQueryPlanMVCCForRequery(t *testing.T) {
 			},
 		},
 	}
+	selection := &viewpb.SegmentSelection{SegmentIds: []int64{100}, Exclude: true}
+	subSelections := []*viewpb.SegmentSelection{{SegmentIds: []int64{101}}, {Exclude: true}}
+	planClient.executionSummary = &viewpb.ExecutionSummary{GlobalOptimizer: &viewpb.GlobalOptimizerExecutionSummary{Flags: 1 << viewpb.GlobalOptimizerExecutionSummary_PrunedByScalarFiltering}}
+	planClient.plan.WorkNodes[0].SegmentSelection = selection
+	planClient.plan.WorkNodes[0].SubSelections = subSelections
 	queryService := &fakeViewQueryServiceClient{}
 	client := newShardViewQueryClient(
 		1,
@@ -57,6 +62,10 @@ func TestShardSearchReturnsQueryPlanMVCCForRequery(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	require.True(t, proto.Equal(selection, queryService.searchReq.GetSegmentSelection()))
+	require.Equal(t, subSelections, queryService.searchReq.GetSubSelections())
+	require.Equal(t, planClient.plan.WorkNodes, shardPlan.Selections)
+	require.True(t, proto.Equal(planClient.executionSummary, shardPlan.ExecutionSummary))
 	require.True(t, proto.Equal(mvcc, shardPlan.Mvcc))
 	require.True(t, proto.Equal(mvcc, queryService.searchReq.GetMvcc()))
 	require.Equal(t, mvcc.GetTransformingTimetick(), queryService.searchReq.GetLegacyReq().GetMvccTimestamp())
@@ -128,6 +137,7 @@ func TestStrongSearchAlwaysTargetsPrimary(t *testing.T) {
 }
 
 type fakeQueryPlanClient struct {
+	executionSummary      *viewpb.ExecutionSummary
 	growingInlineResponse *viewpb.GrowingInlineResponse
 	plan                  *viewpb.QueryPlan
 	planReq               *viewpb.GetQueryPlanRequest
@@ -138,7 +148,7 @@ type fakeQueryPlanClient struct {
 
 func (f *fakeQueryPlanClient) GetQueryPlan(_ context.Context, _ qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
 	f.planReq = proto.Clone(req).(*viewpb.GetQueryPlanRequest)
-	return &viewpb.GetQueryPlanResponse{Plan: f.plan, GrowingInlineResponse: f.growingInlineResponse}, nil
+	return &viewpb.GetQueryPlanResponse{Plan: f.plan, GrowingInlineResponse: f.growingInlineResponse, ExecutionSummary: f.executionSummary}, nil
 }
 
 func (f *fakeQueryPlanClient) GetMVCCTimestamp(_ context.Context, shardID qviews.ShardID, req *viewpb.GetMVCCTimestampRequest) (*viewpb.GetMVCCTimestampResponse, error) {

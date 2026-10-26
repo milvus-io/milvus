@@ -14,7 +14,8 @@ type AcquireResource struct {
 	Key qviews.QueryViewKey
 
 	// Meta carries the complete view metadata required by resource preparation.
-	Meta *viewpb.QueryViewMeta
+	Meta           *viewpb.QueryViewMeta
+	PartitionStats []*viewpb.ClusteredPartitionStats
 
 	// OnReady is called when resource preparation completes successfully.
 	// Must NOT be called synchronously during Acquire.
@@ -34,8 +35,8 @@ type ReleaseResource struct {
 	Key qviews.QueryViewKey
 
 	// OnDropped is called when the view-level release operation completes.
-	// Physical SN resources are reclaimed by DataVersion watermark updates,
-	// not by per-view reference counting.
+	// Growing-segment reclamation follows DataVersion watermarks; immutable
+	// partition-statistics resources use per-View reference counts.
 	// Must NOT be called synchronously during Release.
 	OnDropped func()
 }

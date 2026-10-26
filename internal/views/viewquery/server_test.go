@@ -197,6 +197,7 @@ func (p *fakeTaskProvider) AcquireSearchSegmentTasks(
 	version qviews.QueryViewVersion,
 	mvcc *viewpb.QueryPlanMVCC,
 	req *internalpb.SearchRequest,
+	_ *viewpb.SegmentSelection,
 ) (SearchSegmentTasks, error) {
 	p.searchShardID = shardID
 	p.searchVersion = version
@@ -214,6 +215,7 @@ func (p *fakeTaskProvider) AcquireQuerySegmentTasks(
 	version qviews.QueryViewVersion,
 	mvcc *viewpb.QueryPlanMVCC,
 	req *internalpb.RetrieveRequest,
+	_ *viewpb.SegmentSelection,
 ) (QuerySegmentTasks, error) {
 	p.queryShardID = shardID
 	p.queryVersion = version
