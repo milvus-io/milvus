@@ -16,15 +16,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/dql"
-	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
-	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -278,8 +277,10 @@ type DeleteRunner struct {
 	initRequestOnce sync.Once
 	req             *milvuspb.DeleteRequest
 	result          *milvuspb.MutationResult
-	node            taskmodel.TaskNode
-	metaCache       Cache
+	// userPlanIsSimple: the user's filter names primary keys only (delete by ids).
+	userPlanIsSimple bool
+	node             taskmodel.TaskNode
+	metaCache        Cache
 
 	// channel
 	vChannels []vChan
@@ -382,22 +383,6 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 	if err != nil {
 		return ErrWithLog(log, "Failed to get collection info", err)
 	}
-	canonicalDBName := colInfo.DBName
-	if canonicalDBName == "" {
-		canonicalDBName = dr.req.GetDbName()
-	}
-	rlsEnabled := colInfo.RlsEnabled
-	if rlsEnabled && dr.req.GetSkipRls() {
-		rlsEnabled, err = dr.node.ResolveRLSEnforcement(ctx, dr.GetMetaCache(), rlsEnabled, colInfo.RlsForce, true,
-			canonicalDBName, colInfo.Schema.GetName(), "delete")
-		if err != nil {
-			return err
-		}
-	}
-	principalName, enforceRLS, err := rlsutil.ResolveRuntimePrincipal(rlsEnabled, dr.req.GetRlsPrincipal(), "delete")
-	if err != nil {
-		return err
-	}
 
 	dr.schema = colInfo.Schema
 	if err := dql.ValidateTextStorageV3Enabled(dr.schema.CollectionSchema); err != nil {
@@ -412,7 +397,9 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 	}
 
 	colTimezone := dql.GetColTimezone(colInfo)
-	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: colTimezone}
+	// Count the user's filter before the rewriter changes it.
+	var exprFeatures featureusage.FeatureSet
+	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: colTimezone, OnParsedExpr: dql.ExprFeatureObserver(&exprFeatures)}
 
 	parseDeletePlan := func(expr string) (*planpb.PlanNode, error) {
 		start := time.Now()
@@ -429,19 +416,13 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	dql.RecordExprTemplateFeatures(&exprFeatures, dr.req.GetExprTemplateValues())
 	if planparserv2.IsAlwaysTruePlan(userPlan) {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr()))
 	}
 	dr.plan = userPlan
-
-	if enforceRLS {
-		predicate, err := rls.ResolveUsingPredicate(ctx, dr.collectionID, principalName, rlsutil.PolicyActionDelete, dr.schema.SchemaHelper)
-		if err != nil {
-			return err
-		}
-		if err := rls.MergeNormalizedPredicateToPlan(dr.plan, predicate); err != nil {
-			return err
-		}
+	if featureusage.Enabled() {
+		dr.userPlanIsSimple = isSimpleDeletePlan(userPlan)
 	}
 
 	// Approximate membership_match filters carrying an MBF1 blob must not drive
@@ -514,6 +495,7 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 
 func (dr *DeleteRunner) Run(ctx context.Context) error {
 	isSimple, pk, numRow := getPrimaryKeysFromPlan(dr.schema.CollectionSchema, dr.plan)
+	recordDeleteMode(dr.userPlanIsSimple)
 	if isSimple {
 		// if could get delete.primaryKeys from delete expr
 		err := dr.simpleDelete(ctx, pk, numRow)
@@ -775,6 +757,24 @@ func (dr *DeleteRunner) simpleDelete(ctx context.Context, pk *schemapb.IDs, numR
 		dr.result.Timestamp = task.sessionTS
 	}
 	return err
+}
+
+// isSimpleDeletePlan reports whether getPrimaryKeysFromPlan would take the
+// simple-delete path for plan, from the plan shape alone, without copying
+// the primary keys out.
+func isSimpleDeletePlan(plan *planpb.PlanNode) bool {
+	isPKType := func(t schemapb.DataType) bool {
+		return t == schemapb.DataType_Int64 || t == schemapb.DataType_VarChar
+	}
+	switch expr := plan.GetQuery().GetPredicates().GetExpr().(type) {
+	case *planpb.Expr_TermExpr:
+		info := expr.TermExpr.GetColumnInfo()
+		return info.GetIsPrimaryKey() && isPKType(info.GetDataType())
+	case *planpb.Expr_UnaryRangeExpr:
+		info := expr.UnaryRangeExpr.GetColumnInfo()
+		return expr.UnaryRangeExpr.GetOp() == planpb.OpType_Equal && info.GetIsPrimaryKey() && isPKType(info.GetDataType())
+	}
+	return false
 }
 
 func getPrimaryKeysFromPlan(schema *schemapb.CollectionSchema, plan *planpb.PlanNode) (isSimpleDelete bool, pks *schemapb.IDs, pkCount int64) {

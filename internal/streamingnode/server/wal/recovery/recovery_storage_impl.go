@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -104,6 +105,11 @@ func WithNodeScheduler(scheduler nodescheduler.Scheduler) RecoveryStorageOption 
 	}
 }
 
+// WithConsumedThrough releases WAB messages after complete ordered observation.
+func WithConsumedThrough(release func(uint64)) RecoveryStorageOption {
+	return func(r *recoveryStorageImpl) { r.consumedThrough = release }
+}
+
 func WithRecoveryTailRateLimiter(rateLimiter RecoveryTailRateLimiter) RecoveryStorageOption {
 	return func(r *recoveryStorageImpl) {
 		r.recoveryTailRateLimiter = rateLimiter
@@ -165,6 +171,7 @@ func newRecoveryStorage(channel types.PChannelInfo, cp *utility.WALCheckpoint, o
 // recoveryStorageImpl is a component that manages the recovery info for the streaming service.
 // It will consume the message from the wal, consume the message in wal, and update the checkpoint for it.
 type recoveryStorageImpl struct {
+	consumedThrough func(uint64)
 	mlog.Binder
 	backgroundTaskNotifier  *syncutil.AsyncTaskNotifier[struct{}]
 	cfg                     *config
@@ -530,17 +537,19 @@ func shouldAdvanceConsumePoint(current, next utility.WALCheckpoint) bool {
 
 // observeMessage observes a message and update the recovery storage.
 func (r *recoveryStorageImpl) observeMessage(ctx context.Context, msg message.ImmutableMessage) {
-	// Non-persisted time tick heartbeats carry no data and are not written to
-	// the WAL; consuming them would advance the tracker (and thus persist a
-	// recovery snapshot) on every heartbeat even while the pchannel is fully
-	// idle. Skip them entirely: the time tick sync inspector appends a
-	// persisted time tick every forcePersistedInterval, which keeps the
-	// checkpoint fresh on a bounded cadence instead.
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// Scoped query progress follows the ordered prefix. Only persisted
+	// confirmations enter the recovery tracker and dirty a snapshot.
+	defer func() {
+		r.observeQueryBarriers(ctx, msg)
+		if r.consumedThrough != nil && messageutil.IsTimeTickConfirmBarrier(msg.MessageType()) {
+			r.consumedThrough(msg.TimeTick())
+		}
+	}()
 	if !msg.IsPersisted() {
 		return
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	owner := r.ackTracker.Track(msg)
 	r.refreshRecoveryTail()
 	r.metrics.ObserveObservedTimeTick(msg.TimeTick())

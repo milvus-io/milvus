@@ -167,6 +167,8 @@ type Server struct {
 	manifestIndexBackfillInspector   *manifestIndexBackfillInspector
 	manifestIndexRollbackInspector   *manifestIndexRollbackInspector
 	analyzeInspector                 *analyzeInspector
+	talonPrewarmInspector            *TalonPrewarmInspector
+	segmentChangeInspector           *segmentChangeInspector
 	externalCollectionRefreshManager ExternalCollectionRefreshManager
 	globalScheduler                  task.GlobalScheduler
 
@@ -366,6 +368,9 @@ func (s *Server) initDataCoord() (initErr error) {
 	s.initStatsInspector()
 	mlog.Info(s.ctx, "init statsJobManager done")
 
+	s.initSegmentChangeInspector()
+	mlog.Info(s.ctx, "init segment change inspector done")
+
 	s.initExternalCollectionInspector(storageCli)
 	mlog.Info(s.ctx, "init external collection inspector done")
 
@@ -438,6 +443,9 @@ func (s *Server) initDataCoord() (initErr error) {
 	mlog.Info(s.ctx, "init snapshot manager done")
 
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
+	if err := s.initTalonPrewarm(); err != nil {
+		return err
+	}
 
 	mlog.Info(s.ctx, "init datacoord done", mlog.FieldNodeID(paramtable.GetNodeID()), mlog.String("Address", s.address))
 
@@ -468,6 +476,11 @@ func (s *Server) startDataCoord() {
 	s.startServerLoop()
 	s.afterStart()
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
+	// The first prewarm round reads the recovered metadata through a healthy
+	// DataCoord; starting it earlier could skip that round as not ready.
+	if s.talonPrewarmInspector != nil {
+		s.talonPrewarmInspector.Start()
+	}
 	sessionutil.SaveServerInfo(typeutil.MixCoordRole, s.session.GetServerID())
 }
 
@@ -776,11 +789,17 @@ func (s *Server) initStatsInspector() {
 	}
 }
 
+func (s *Server) initSegmentChangeInspector() {
+	if s.segmentChangeInspector == nil {
+		s.segmentChangeInspector = newSegmentChangeInspector(s.ctx, s.meta, s.allocator)
+	}
+}
+
 func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager) {
 	// Initialize Manager (handles job submission, query, and internal inspector/checker)
 	if s.externalCollectionRefreshManager == nil {
 		s.externalCollectionRefreshManager = NewExternalCollectionRefreshManager(
-			s.ctx, s.meta, s.globalScheduler, s.allocator, s.meta.externalCollectionRefreshMeta, s.cluster2, s.handler.GetCollection, s.updateExternalSchemaViaWAL, storageCli)
+			s.ctx, s.meta, s.globalScheduler, s.allocator, s.meta.externalCollectionRefreshMeta, s.cluster2, s.handler.GetCollection, s.updateExternalSchemaViaWAL, storageCli, s.notifyIndexChan)
 	}
 }
 
@@ -883,6 +902,7 @@ func (s *Server) startTaskScheduler() {
 		s.manifestIndexRollbackInspector.Start()
 	}
 	s.analyzeInspector.Start()
+	s.segmentChangeInspector.Start()
 	// Note: externalCollectionInspector.Start() is called in startServerLoop as a goroutine
 	s.startCollectMetaMetrics(s.serverLoopCtx)
 }
@@ -1081,16 +1101,14 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 		return merr.WrapErrSegmentNotFound(segmentID, "segment not found, might be a faked segment, ignore post flush")
 	}
 
-	if enableSortCompaction() {
+	collection := s.meta.GetCollection(segment.GetCollectionID())
+	if enableSortCompaction() && (collection == nil || !collection.IsExternal()) {
 		select {
 		case getStatsTaskChSingleton() <- segmentID:
 		default:
 		}
 	} else {
-		select {
-		case getBuildIndexChSingleton() <- segmentID:
-		default:
-		}
+		notifySegmentIndexBuild(segmentID)
 	}
 
 	// Insert / delta counts come from Statistics. Stats array is iterated
@@ -1165,6 +1183,11 @@ func (s *Server) initMixCoord() error {
 //
 //	stop message stream client and stop server loops
 func (s *Server) Stop() error {
+	// Init can create the client without reaching Start. Release it even when
+	// the state guard below skips the rest of component shutdown.
+	if s.talonPrewarmInspector != nil {
+		s.talonPrewarmInspector.Stop()
+	}
 	if !s.stateCode.CompareAndSwap(commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal) {
 		return nil
 	}
@@ -1199,6 +1222,9 @@ func (s *Server) Stop() error {
 
 	s.statsInspector.Stop()
 	mlog.Info(s.ctx, "datacoord stats inspector stopped")
+
+	s.segmentChangeInspector.Stop()
+	mlog.Info(s.ctx, "datacoord segment change inspector stopped")
 
 	s.indexInspector.Stop()
 	mlog.Info(s.ctx, "datacoord index inspector stopped")

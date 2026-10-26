@@ -164,11 +164,20 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	// cannot use GetSegmentsByChannel since dropped segments are needed here
 	segments := h.s.meta.GetRealSegmentsForChannel(channel.GetName())
 
+	// R10: staged (invisible) members of ALIVE groups are excluded from the
+	// query view by construction. They must not fall into growingIDs — a staged
+	// import/copy segment has CreatedByCompaction=false, so the
+	// `IsInvisible && CreatedByCompaction` skip below would miss it.
+	aliveStaged := h.s.meta.aliveStagedMembers(h.s.ctx, channel.GetCollectionID())
+
 	validSegmentInfos := make(map[int64]*SegmentInfo)
 	indexedSegments := FilterInIndexedSegments(context.Background(), h, h.s.meta, false, segments...)
 	indexed := typeutil.NewUniqueSet(lo.Map(indexedSegments, func(segment *SegmentInfo, _ int) int64 { return segment.GetID() })...)
 	for _, s := range segments {
 		if filterWithPartition && !validPartitionsMap[s.GetPartitionID()] {
+			continue
+		}
+		if aliveStaged.Contain(s.GetID()) {
 			continue
 		}
 		recoverable, err := isQueryRecoverableSegment(s)
@@ -532,12 +541,20 @@ func (h *ServerHandler) GetCurrentSegmentsView(ctx context.Context, channel RWCh
 	// cannot use GetSegmentsByChannel since dropped segments are needed here
 	segments := h.s.meta.GetRealSegmentsForChannel(channel.GetName())
 
+	// R10: staged (invisible) members of ALIVE groups are excluded from the
+	// segments view — they are unpublished by construction and must not leak
+	// into growingIDs.
+	aliveStaged := h.s.meta.aliveStagedMembers(ctx, channel.GetCollectionID())
+
 	validSegmentInfos := make(map[int64]*SegmentInfo)
 	for _, s := range segments {
 		if filterWithPartition && !validPartitionsMap[s.GetPartitionID()] {
 			continue
 		}
 		if s.GetStartPosition() == nil && s.GetDmlPosition() == nil {
+			continue
+		}
+		if aliveStaged.Contain(s.GetID()) {
 			continue
 		}
 
@@ -578,6 +595,18 @@ func (h *ServerHandler) GetCurrentSegmentsView(ctx context.Context, channel RWCh
 	}
 }
 
+// firstCollectionIDOfSegments returns the first non-zero CollectionID among the
+// segments, or 0 when there are none. A channel is single-collection by
+// construction, so this scopes staged-member lookups correctly.
+func firstCollectionIDOfSegments(segments []*SegmentInfo) int64 {
+	for _, s := range segments {
+		if s != nil && s.GetCollectionID() > 0 {
+			return s.GetCollectionID()
+		}
+	}
+	return 0
+}
+
 // getEarliestSegmentDMLPos returns the earliest dml position of segments,
 // this is mainly for COMPATIBILITY with old version <=2.1.x
 func (h *ServerHandler) getEarliestSegmentDMLPos(channel string, partitionIDs ...UniqueID) *msgpb.MsgPosition {
@@ -585,6 +614,13 @@ func (h *ServerHandler) getEarliestSegmentDMLPos(channel string, partitionIDs ..
 	var minPosSegID int64
 	var minPosTs uint64
 	segments := h.s.meta.SelectSegments(context.TODO(), WithChannel(channel))
+
+	// R10: a staged (invisible) segment's DML position must not pollute the
+	// channel-seek fallback — the seek would otherwise start before data the
+	// queries never see. Filter members of ALIVE groups, not all IsInvisible
+	// segments: sort-enabled flush segments use IsInvisible=true as the
+	// awaiting-sort marker and legitimately contribute their DML position.
+	aliveStaged := h.s.meta.aliveStagedMembers(context.TODO(), firstCollectionIDOfSegments(segments))
 
 	validPartitions := lo.Filter(partitionIDs, func(partitionID int64, _ int) bool { return partitionID > allPartitionID })
 	partitionSet := typeutil.NewUniqueSet(validPartitions...)
@@ -595,6 +631,9 @@ func (h *ServerHandler) getEarliestSegmentDMLPos(channel string, partitionIDs ..
 		}
 		if s.GetIsImporting() {
 			// Skip bulk insert segments.
+			continue
+		}
+		if aliveStaged.Contain(s.GetID()) {
 			continue
 		}
 		if s.GetState() == commonpb.SegmentState_Dropped {

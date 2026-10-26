@@ -1352,6 +1352,10 @@ func installCopySegmentResult(ctx context.Context, result *datapb.CopySegmentRes
 		meta.recomputeDataView(ctx, task.GetCollectionId())
 	}
 
+	// The segment is Flushed and carries every index the snapshot had.
+	// Enqueue it so the index inspector builds any index it still lacks.
+	notifySegmentIndexBuild(result.GetSegmentId())
+
 	mlog.Info(ctx, "update copy segment info done",
 		WrapCopySegmentTaskLog(task, mlog.FieldSegmentID(result.GetSegmentId()),
 			mlog.Int64("importedRows", result.GetImportedRows()),

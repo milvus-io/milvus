@@ -123,13 +123,12 @@ ParseProjectionParams(DataType value_type,
     const bool scalar = cast_type.data_type() != JsonCastType::DataType::ARRAY;
     bool family_supported = false;
     if (family == index::families::kHybrid) {
-        family_supported = index_type == index::HYBRID_INDEX_TYPE && scalar;
+        family_supported = index_type == index::HYBRID_INDEX_TYPE;
     } else if (family == index::families::kInverted) {
         family_supported = index_type == index::INVERTED_INDEX_TYPE;
     } else if (family == index::families::kSort) {
-        family_supported =
-            index_type == index::ASCENDING_SORT && scalar &&
-            (value_type == DataType::DOUBLE || value_type == DataType::VARCHAR);
+        family_supported = index_type == index::ASCENDING_SORT &&
+                           index::IsJsonSortCast(cast_type);
     } else if (family == index::families::kBitmap) {
         family_supported =
             index_type == index::BITMAP_INDEX_TYPE && scalar &&
@@ -143,8 +142,7 @@ ParseProjectionParams(DataType value_type,
     // when it was created (the NGRAM checker had no cast check before
     // #44157). Unsupported fails the build task once instead of re-dispatching
     // it.
-    if (!family_supported ||
-        (!scalar && family != index::families::kInverted)) {
+    if (!family_supported) {
         ThrowInfo(Unsupported,
                   "typed JSON cast {} is not supported by family {}",
                   cast_type,
@@ -187,14 +185,14 @@ MakeInnerParams(const index::IndexFamily& family,
                 DataType value_type,
                 const index::BuildParams& outer) {
     auto inner = outer;
-    if (family == index::families::kHybrid) {
-        inner["field_type"] = static_cast<int32_t>(value_type);
-        inner["element_type"] = static_cast<int32_t>(DataType::NONE);
-        inner["array_element_type"] = static_cast<int32_t>(DataType::NONE);
-    } else if (cast_type.data_type() == JsonCastType::DataType::ARRAY) {
+    if (cast_type.data_type() == JsonCastType::DataType::ARRAY) {
         inner["field_type"] = static_cast<int32_t>(DataType::ARRAY);
         inner["element_type"] = static_cast<int32_t>(value_type);
         inner["array_element_type"] = static_cast<int32_t>(value_type);
+    } else if (family == index::families::kHybrid) {
+        inner["field_type"] = static_cast<int32_t>(value_type);
+        inner["element_type"] = static_cast<int32_t>(DataType::NONE);
+        inner["array_element_type"] = static_cast<int32_t>(DataType::NONE);
     }
     return inner;
 }
@@ -237,19 +235,28 @@ class JsonBatch {
 };
 
 RowPresence
-Locate(const JsonBatch& batch, size_t row, const ProjectionParams& params) {
+Locate(const JsonBatch& batch,
+       size_t row,
+       const ProjectionParams& params,
+       simdjson::dom::element& root) {
     if (!batch.IsValid(row))
         return RowPresence::FieldNull;
     const auto& document = batch.Document(row);
     AssertInfo(!document.data().empty(),
                "valid JSON row {} has an empty document",
                row);
-    auto root = document.dom_doc();
-    if (!path_exists(root.value(), params.path_tokens) ||
+    root = document.dom_doc().value();
+    if (!path_exists(root, params.path_tokens) ||
         !document.exist(params.json_path)) {
         return RowPresence::NoValue;
     }
     return RowPresence::Present;
+}
+
+RowPresence
+Locate(const JsonBatch& batch, size_t row, const ProjectionParams& params) {
+    simdjson::dom::element root;
+    return Locate(batch, row, params, root);
 }
 
 template <typename T>
@@ -601,9 +608,11 @@ class ArrayProjectedMaterializer final : public ProjectedBase<ArrayView> {
                                    index::ScalarBuildInput<ArrayView>>> builder,
                                ProjectionParams params,
                                int64_t expected_rows,
-                               DataType element_type)
+                               DataType element_type,
+                               bool require_array)
         : ProjectedBase(std::move(builder), std::move(params), expected_rows),
-          element_type_(element_type) {
+          element_type_(element_type),
+          require_array_(require_array) {
     }
 
     void
@@ -619,12 +628,19 @@ class ArrayProjectedMaterializer final : public ProjectedBase<ArrayView> {
             std::vector<size_t> non_exist;
             for (size_t i = 0; i < count; ++i) {
                 const auto row = begin + i;
-                const auto presence = Locate(source, row, Params());
+                simdjson::dom::element root;
+                const auto presence = Locate(source, row, Params(), root);
                 batch->validity[i] = presence != RowPresence::FieldNull;
                 if (presence != RowPresence::Present)
                     non_exist.push_back(i);
-                if (presence == RowPresence::Present) {
-                    ExtractArray(source.Document(row), batch->rows[i]);
+                if (presence == RowPresence::Present ||
+                    (require_array_ && presence != RowPresence::FieldNull)) {
+                    const bool is_array = ExtractArray(root, batch->rows[i]);
+                    if (require_array_) {
+                        // CONTAINS is unknown for missing, null and non-array
+                        // paths, but valid for empty/all-uncastable arrays.
+                        batch->validity[i] = is_array;
+                    }
                 }
             }
             for (auto& row : batch->rows) batch->views.push_back(MakeView(row));
@@ -647,12 +663,11 @@ class ArrayProjectedMaterializer final : public ProjectedBase<ArrayView> {
     }
 
  private:
-    void
-    ExtractArray(const Json& document, Row& row) const {
-        auto root = document.dom_doc();
-        auto array = root.value().at_pointer(Params().json_path).get_array();
+    bool
+    ExtractArray(const simdjson::dom::element& root, Row& row) const {
+        auto array = root.at_pointer(Params().json_path).get_array();
         if (array.error() != simdjson::SUCCESS)
-            return;
+            return false;
         for (const auto element : array.value()) {
             if (element_type_ == DataType::BOOL) {
                 auto value = element.get<bool>();
@@ -677,6 +692,7 @@ class ArrayProjectedMaterializer final : public ProjectedBase<ArrayView> {
                 row.string_bytes.append(value.value());
             }
         }
+        return true;
     }
 
     ArrayView
@@ -721,6 +737,7 @@ class ArrayProjectedMaterializer final : public ProjectedBase<ArrayView> {
     }
 
     DataType element_type_{DataType::NONE};
+    bool require_array_;
     std::vector<std::unique_ptr<Batch>> batches_;
 };
 
@@ -754,7 +771,9 @@ MakeJsonBuildMaterializer(DataType value_type,
             CreateBuilder<ArrayView>(family, inner_params, value_type),
             std::move(projection),
             expected_rows,
-            value_type);
+            value_type,
+            family == index::families::kHybrid ||
+                family == index::families::kSort);
     }
     if (family == index::families::kNgram) {
         return std::make_unique<NgramProjectedMaterializer>(

@@ -5,138 +5,82 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/pkg/v3/mocks/streaming/util/mock_message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 func TestPendingQueue(t *testing.T) {
-	pq := newPendingQueue(100, 5*time.Second, newImmutableTimeTickMessage(t, 99))
-	snapshot, err := pq.CreateSnapshotFromOffset(0)
-	assert.NoError(t, err)
-	assert.Len(t, snapshot, 1)
+	q := newPendingQueue(1, time.Hour, createTimeTickMessage(99, true))
+	messages := []message.ImmutableMessage{createInsertMessage(100), createInsertMessage(101), createTimeTickMessage(110, true), createInsertMessage(120), createTimeTickMessage(130, true)}
+	q.Push(messages)
+	require.Equal(t, 5, q.CurrentOffset())
+	snapshot, err := q.CreateSnapshotFromOffset(1)
+	require.NoError(t, err)
+	require.Len(t, snapshot, 5)
+	for _, tick := range []uint64{100, 105, 110} {
+		got, err := q.CreateSnapshotFromExclusiveTimeTick(tick)
+		require.NoError(t, err)
+		require.Greater(t, got[0].Message.TimeTick(), tick)
+	}
+	_, err = q.CreateSnapshotFromExclusiveTimeTick(98)
+	require.ErrorIs(t, err, ErrEvicted)
+	_, err = q.CreateSnapshotFromExclusiveTimeTick(130)
+	require.ErrorIs(t, err, io.EOF)
+	_, err = q.CreateSnapshotFromOffset(6)
+	require.ErrorIs(t, err, io.EOF)
+	require.Panics(t, func() { _, _ = q.CreateSnapshotFromOffset(7) })
 
-	snapshot, err = pq.CreateSnapshotFromExclusiveTimeTick(100)
-	assert.ErrorIs(t, err, io.EOF)
-	assert.Nil(t, snapshot)
-
-	pq.Push([]message.ImmutableMessage{
-		newImmutableMessage(t, 100, 10),
-		newImmutableMessage(t, 101, 20),
-		newImmutableMessage(t, 103, 30),
-		newImmutableMessage(t, 104, 40),
-	})
-	pq.Evict()
-	assert.Equal(t, pq.CurrentOffset(), 4)
-	assert.Len(t, pq.buf, 5)
-
-	snapshot, err = pq.CreateSnapshotFromExclusiveTimeTick(100)
-	assert.NoError(t, err)
-	assert.Len(t, snapshot, 3)
-	assert.Equal(t, snapshot[0].Message.TimeTick(), uint64(101))
-	assert.Equal(t, snapshot[2].Message.TimeTick(), uint64(104))
-
-	snapshot, err = pq.CreateSnapshotFromExclusiveTimeTick(98)
-	assert.ErrorIs(t, err, ErrEvicted)
-	assert.Nil(t, snapshot)
-
-	snapshot, err = pq.CreateSnapshotFromExclusiveTimeTick(102)
-	assert.NoError(t, err)
-	assert.Len(t, snapshot, 2)
-	assert.Equal(t, snapshot[0].Message.TimeTick(), uint64(103))
-	assert.Equal(t, snapshot[1].Message.TimeTick(), uint64(104))
-
-	snapshot, err = pq.CreateSnapshotFromExclusiveTimeTick(104)
-	assert.ErrorIs(t, err, io.EOF)
-	assert.Nil(t, snapshot)
-
-	snapshot, err = pq.CreateSnapshotFromExclusiveTimeTick(105)
-	assert.ErrorIs(t, err, io.EOF)
-	assert.Nil(t, snapshot)
-
-	snapshot, err = pq.CreateSnapshotFromOffset(1)
-	assert.NoError(t, err)
-	assert.Len(t, snapshot, 4)
-	assert.Equal(t, snapshot[0].Message.TimeTick(), uint64(100))
-	assert.Equal(t, snapshot[3].Message.TimeTick(), uint64(104))
-
-	snapshot, err = pq.CreateSnapshotFromOffset(3)
-	assert.NoError(t, err)
-	assert.Len(t, snapshot, 2)
-	assert.Equal(t, snapshot[0].Message.TimeTick(), uint64(103))
-	assert.Equal(t, snapshot[1].Message.TimeTick(), uint64(104))
-
-	snapshot, err = pq.CreateSnapshotFromOffset(4)
-	assert.NoError(t, err)
-	assert.Len(t, snapshot, 1)
-	assert.Equal(t, snapshot[0].Message.TimeTick(), uint64(104))
-
-	snapshot, err = pq.CreateSnapshotFromOffset(5)
-	assert.ErrorIs(t, err, io.EOF)
-	assert.Nil(t, snapshot)
-
-	// push a new item will trigger eviction
-	snapshot, err = pq.CreateSnapshotFromOffset(1)
-	assert.NoError(t, err, io.EOF)
-	assert.Len(t, snapshot, 4)
-	pq.Push([]message.ImmutableMessage{
-		newImmutableMessage(t, 105, 60),
-	})
-	pq.Evict()
-	assert.Equal(t, pq.CurrentOffset(), 5)
-	assert.Len(t, pq.buf, 2)
-
-	// Previous snapshot should be available.
-	assert.Equal(t, snapshot[0].Message.TimeTick(), uint64(100))
-	assert.Equal(t, snapshot[1].Message.TimeTick(), uint64(101))
-	assert.Equal(t, snapshot[2].Message.TimeTick(), uint64(103))
-	assert.Equal(t, snapshot[3].Message.TimeTick(), uint64(104))
-
-	// offset 2 should be evcited
-	snapshot, err = pq.CreateSnapshotFromOffset(3)
-	assert.ErrorIs(t, err, ErrEvicted)
-	assert.Nil(t, snapshot)
-
-	// offset 3 should be ok.
-	snapshot, err = pq.CreateSnapshotFromOffset(4)
-	assert.NoError(t, err)
-	assert.Len(t, snapshot, 2)
-	assert.Equal(t, snapshot[0].Message.TimeTick(), uint64(104))
-	assert.Equal(t, snapshot[1].Message.TimeTick(), uint64(105))
-
-	// Test time based eviction
-	pq = newPendingQueue(100, 10*time.Millisecond, newImmutableTimeTickMessage(t, 99))
-	pq.Push([]message.ImmutableMessage{
-		newImmutableMessage(t, 100, 10),
-	})
-	pq.Evict()
-	assert.Equal(t, pq.CurrentOffset(), 1)
-	assert.Len(t, pq.buf, 2)
-	time.Sleep(20 * time.Millisecond)
-	pq.Evict()
-	// the last message should never be evicted.
-	assert.Len(t, pq.buf, 1)
-
-	assert.Panics(t, func() {
-		pq.Push([]message.ImmutableMessage{newImmutableMessage(t, 99, 10)})
-	})
+	// Over capacity alone cannot evict the unconsumed prefix.
+	q.Evict()
+	require.Len(t, q.buf, 5) // Only the consumed seed may go.
+	q.ReleaseThrough(110)
+	require.Len(t, q.buf, 2)
+	require.EqualValues(t, 110, q.readableAfter)
+	_, err = q.CreateSnapshotFromOffset(3)
+	require.ErrorIs(t, err, ErrEvicted)
+	got, err := q.CreateSnapshotFromOffset(4)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	got, err = q.CreateSnapshotFromExclusiveTimeTick(110)
+	require.NoError(t, err)
+	require.EqualValues(t, 120, got[0].Message.TimeTick())
+	// Existing reader snapshots still own the evicted messages.
+	require.Equal(t, messages[0], snapshot[0].Message)
+	require.Equal(t, messages[2], snapshot[2].Message)
+	q.ReleaseThrough(100)
+	require.EqualValues(t, 110, q.consumedThrough)
+	q.ReleaseThrough(150)
+	require.Empty(t, q.buf)
+	_, err = q.CreateSnapshotFromExclusiveTimeTick(130)
+	require.ErrorIs(t, err, io.EOF)
+	require.Panics(t, func() { q.Push([]message.ImmutableMessage{createInsertMessage(129)}) })
+	require.Panics(t, func() { q.Push([]message.ImmutableMessage{createMVCCBarrier(129, "a")}) })
 }
 
-func newImmutableMessage(t *testing.T, timetick uint64, estimateSize int) message.ImmutableMessage {
-	msg := mock_message.NewMockImmutableMessage(t)
-	msg.EXPECT().TimeTick().Return(timetick).Maybe()
-	msg.EXPECT().EstimateSize().Return(estimateSize).Maybe()
-	msg.EXPECT().Version().Return(message.VersionV1).Maybe()
-	msg.EXPECT().MessageType().Return(message.MessageTypeInsert).Maybe()
-	return msg
-}
+func TestCacheEvictionRequiresPolicyAndConsumption(t *testing.T) {
+	for _, policy := range []string{"capacity", "ttl"} {
+		t.Run(policy, func(t *testing.T) {
+			q := newPendingQueue(1<<20, time.Hour, createTimeTickMessage(1, true))
+			q.Push([]message.ImmutableMessage{createInsertMessage(10), createTimeTickMessage(20, true)})
+			q.ReleaseThrough(20)
+			require.Len(t, q.buf, 3, "consumption alone must not discard cache")
+			if policy == "capacity" {
+				q.capacity = 1
+				q.Evict()
+			} else {
+				q.evict(time.Now().Add(2 * time.Hour))
+			}
+			require.Empty(t, q.buf, "the durable anchor is retained outside the cache")
 
-func newImmutableTimeTickMessage(t *testing.T, timetick uint64) message.ImmutableMessage {
-	msg := mock_message.NewMockImmutableMessage(t)
-	msg.EXPECT().TimeTick().Return(timetick).Maybe()
-	msg.EXPECT().EstimateSize().Return(0).Maybe()
-	msg.EXPECT().MessageType().Return(message.MessageTypeTimeTick).Maybe()
-	msg.EXPECT().Version().Return(message.VersionV1).Maybe()
-	return msg
+			q.Push([]message.ImmutableMessage{createInsertMessage(30), createTimeTickMessage(40, true)})
+			q.evict(time.Now().Add(2 * time.Hour))
+			require.Len(t, q.buf, 2, "capacity/TTL cannot evict the unconsumed data")
+			q.ReleaseThrough(40)
+			if policy == "ttl" {
+				q.evict(time.Now().Add(2 * time.Hour))
+			}
+			require.Empty(t, q.buf)
+		})
+	}
 }

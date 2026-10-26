@@ -175,7 +175,7 @@ func mockRefreshSnapshotReads(t *testing.T, read func() ([]byte, error)) {
 		if err != nil {
 			return nil, err
 		}
-		return snapshotio.ParseSnapshotMetadataWithVersionCheck(data)
+		return snapshotio.ParseSnapshotMetadata(data)
 	}
 	metadata := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).To(func(string, string, *indexpb.StorageConfig, packed.ExternalSpecContext) (*datapb.SnapshotMetadata, error) {
 		return parse()
@@ -198,7 +198,6 @@ func TestRefreshMilvusTableInvalidMetadataFailsJob(t *testing.T) {
 	}{
 		{"truncated_json", `{"corrupt manifest`, false, false, "failed to parse metadata JSON"},
 		{"empty_metadata", "", false, false, "failed to parse metadata JSON"},
-		{"unsupported_version", `{"format_version":99999}`, false, false, "snapshot format version 99999 is too new"},
 		{"corrupted_between_validation_and_explore", `{"corrupt manifest`, true, false, "failed to parse metadata JSON"},
 		{"failed_state_persistence_retried", `{"corrupt manifest`, false, true, "failed to parse metadata JSON"},
 	} {
@@ -241,7 +240,7 @@ func TestRefreshMilvusTableInvalidMetadataFailsJob(t *testing.T) {
 				refreshMeta, nil, testCollectionGetter(mt), func(context.Context, int64, string, string) error {
 					schemaUpdates.Add(1)
 					return nil
-				}, nil).(*externalCollectionRefreshManager)
+				}, nil, nil).(*externalCollectionRefreshManager)
 			defer manager.Stop()
 
 			jobID, err := manager.SubmitRefreshJobWithID(ctx, 1, 100, schema.GetName(),
@@ -353,7 +352,6 @@ func TestCreateTasksForJobSnapshotErrorCodes(t *testing.T) {
 		wantErr error
 	}{
 		{"corrupt_metadata", `{`, merr.ErrDataIntegrity},
-		{"unsupported_version", `{"format_version":99999}`, merr.ErrOperationNotSupported},
 	} {
 		for _, failDuringExplore := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/explore=%t", tc.name, failDuringExplore), func(t *testing.T) {
@@ -410,7 +408,7 @@ func TestRefreshMilvusTableMetadataReadTimeoutRetries(t *testing.T) {
 		return []byte(`{"corrupt manifest`), nil
 	})
 	manager := NewExternalCollectionRefreshManager(ctx, mt, newStubScheduler(), &stubAllocator{nextID: 1000},
-		refreshMeta, nil, testCollectionGetter(mt), nil, nil).(*externalCollectionRefreshManager)
+		refreshMeta, nil, testCollectionGetter(mt), nil, nil, nil).(*externalCollectionRefreshManager)
 	defer manager.Stop()
 	_, err := manager.SubmitRefreshJobWithID(ctx, 1, 100, schema.GetName(), "", "")
 	require.NoError(t, err)
@@ -426,7 +424,7 @@ func TestRefreshMilvusTableMetadataReadTimeoutRetries(t *testing.T) {
 }
 
 func TestCreateTasksForJobInvalidMetadataRedactsSource(t *testing.T) {
-	_, metadataErr := snapshotio.ParseSnapshotMetadataWithVersionCheck([]byte(`{"corrupt manifest`))
+	_, metadataErr := snapshotio.ParseSnapshotMetadata([]byte(`{"corrupt manifest`))
 	require.ErrorIs(t, metadataErr, merr.ErrDataIntegrity)
 	// Source validation rejects userinfo before reading. Inject only the
 	// dependency's real parse error here to test diagnostic redaction in isolation.
@@ -472,7 +470,7 @@ func TestEnsureTasksForInitJobRechecksState(t *testing.T) {
 			defer getJob.UnPatch()
 			scheduler := newStubScheduler()
 			manager := NewExternalCollectionRefreshManager(context.Background(), nil, scheduler, nil,
-				createTestRefreshMeta(t), nil, nil, nil, nil).(*externalCollectionRefreshManager)
+				createTestRefreshMeta(t), nil, nil, nil, nil, nil).(*externalCollectionRefreshManager)
 			defer manager.Stop()
 			manager.ensureTasksForInitJob(1)
 			manager.wg.Wait()
@@ -498,7 +496,7 @@ func TestEnsureTasksForInitJobDeduplicatesExplore(t *testing.T) {
 		}).Build()
 	defer explore.UnPatch()
 	manager := NewExternalCollectionRefreshManager(context.Background(), nil, newStubScheduler(), nil,
-		refreshMeta, nil, nil, nil, nil).(*externalCollectionRefreshManager)
+		refreshMeta, nil, nil, nil, nil, nil).(*externalCollectionRefreshManager)
 	defer func() {
 		close(release)
 		manager.Stop()
@@ -568,7 +566,7 @@ func TestCreateTasksForJobFileRanges(t *testing.T) {
 			explore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).Return(files, "manifest", nil).Build()
 			defer explore.UnPatch()
 			manager := NewExternalCollectionRefreshManager(context.Background(), newEmptyTestMeta(), newStubScheduler(), &stubAllocator{},
-				refreshMeta, nil, nil, nil, nil).(*externalCollectionRefreshManager)
+				refreshMeta, nil, nil, nil, nil, nil).(*externalCollectionRefreshManager)
 			defer manager.Stop()
 			tasks, err := manager.createTasksForJob(context.Background(), job)
 			require.NoError(t, err)
@@ -614,7 +612,7 @@ func TestSubmitRefreshJobWithIDStoresJobMetadata(t *testing.T) {
 	refreshMeta := createTestRefreshMetaWithJobs(t, nil, nil)
 	mgr := NewExternalCollectionRefreshManager(
 		ctx, mt, newStubScheduler(), &stubAllocator{nextID: 2000},
-		refreshMeta, nil, testCollectionGetter(mt), nil, nil)
+		refreshMeta, nil, testCollectionGetter(mt), nil, nil, nil)
 
 	mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
 		Return([]*datapb.ExternalFileInfo{{FilePath: "s3://bucket/path/a.parquet", NumRows: 10}}, "manifest-path", nil).
@@ -673,7 +671,7 @@ func TestCreateTasksForJob_PersistedOwnershipDrivesWorkerRequest(t *testing.T) {
 	refreshMeta := createTestRefreshMetaWithJobs(t, nil, nil)
 	mgr := NewExternalCollectionRefreshManager(
 		ctx, mt, newStubScheduler(), &stubAllocator{nextID: 2000},
-		refreshMeta, nil, testCollectionGetter(mt), nil, nil).(*externalCollectionRefreshManager)
+		refreshMeta, nil, testCollectionGetter(mt), nil, nil, nil).(*externalCollectionRefreshManager)
 
 	mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
 		Return([]*datapb.ExternalFileInfo{
@@ -789,7 +787,7 @@ func TestCreateTasksForJob_UnreadableBaselineManifest(t *testing.T) {
 	alloc := &stubAllocator{nextID: 2000}
 	mgr := NewExternalCollectionRefreshManager(
 		ctx, mt, newStubScheduler(), alloc,
-		refreshMeta, nil, testCollectionGetter(mt), nil, nil).(*externalCollectionRefreshManager)
+		refreshMeta, nil, testCollectionGetter(mt), nil, nil, nil).(*externalCollectionRefreshManager)
 
 	mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
 		Return([]*datapb.ExternalFileInfo{{FilePath: "s3://bucket/path/a.parquet", NumRows: 10}}, "manifest-path", nil).
@@ -851,6 +849,7 @@ func TestCreateTasksForJob_CompositePersistenceFailureIsUnpublished(t *testing.T
 		testCollectionGetter(mt),
 		nil,
 		cm,
+		nil,
 	).(*externalCollectionRefreshManager)
 
 	mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
@@ -910,6 +909,7 @@ func TestCreateTasksForJob_TerminalJobRejectsLatePlanAndCleansExplore(t *testing
 		testCollectionGetter(mt),
 		nil,
 		cm,
+		nil,
 	).(*externalCollectionRefreshManager)
 
 	mockExplore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
@@ -1097,6 +1097,56 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsWithoutBaselin
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.SegmentState_Flushed, mt.segments.GetSegment(10).GetState())
+}
+
+// Applying a refresh must not enqueue index builds by itself: a refresh that
+// rebinds the collection publishes its new source/spec only afterwards, and a
+// build dispatched before that reads the previous source and fails terminally.
+func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsDoesNotNotifyIndexBuild(t *testing.T) {
+	drainBuildIndexChForTest()
+	defer drainBuildIndexChForTest()
+
+	ctx := context.Background()
+	catalog := &stubCatalog{}
+	refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	assert.NoError(t, err)
+
+	addManagerOwnershipTask(t, refreshMeta, &datapb.ExternalCollectionRefreshTask{
+		TaskId:          1001,
+		JobId:           1,
+		CollectionId:    100,
+		State:           indexpb.JobState_JobStateFinished,
+		ResultReady:     true,
+		KeptSegments:    []int64{1},
+		UpdatedSegments: []*datapb.SegmentInfo{newTestExternalRefreshSegment(10, 100, 7)},
+	}, 1)
+	publishManagerTestTasks(t, refreshMeta, 1, 100, 1001)
+
+	ms := newTestCollections(100)
+	segments := NewSegmentsInfo(ms)
+	segments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:           1,
+		CollectionID: 100,
+		State:        commonpb.SegmentState_Flushed,
+		NumOfRows:    5,
+	}})
+	mt := &meta{
+		catalog:   catalog,
+		segments:  segments,
+		metaStore: ms,
+	}
+	mgr := &externalCollectionRefreshManager{
+		mt:          mt,
+		refreshMeta: refreshMeta,
+	}
+
+	err = mgr.applyFinishedJobSegments(ctx, &datapb.ExternalCollectionRefreshJob{
+		JobId:        1,
+		CollectionId: 100,
+	})
+	assert.NoError(t, err)
+
+	assertNoBuildIndexEvent(t)
 }
 
 func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsNonFinishedTask(t *testing.T) {
@@ -1352,7 +1402,7 @@ func TestExternalCollectionRefreshManager_NewManager(t *testing.T) {
 	alloc := &stubAllocator{}
 	scheduler := newStubScheduler()
 
-	manager := NewExternalCollectionRefreshManager(ctx, nil, scheduler, alloc, refreshMeta, nil, nil, nil, nil)
+	manager := NewExternalCollectionRefreshManager(ctx, nil, scheduler, alloc, refreshMeta, nil, nil, nil, nil, nil)
 	assert.NotNil(t, manager)
 }
 
@@ -1363,7 +1413,7 @@ func TestExternalCollectionRefreshManager_StartStop(t *testing.T) {
 	alloc := &stubAllocator{}
 	scheduler := newStubScheduler()
 
-	manager := NewExternalCollectionRefreshManager(ctx, nil, scheduler, alloc, refreshMeta, nil, nil, nil, nil)
+	manager := NewExternalCollectionRefreshManager(ctx, nil, scheduler, alloc, refreshMeta, nil, nil, nil, nil, nil)
 
 	// Mock inspector and checker run methods to avoid actual execution
 	mockInspectorRun := mockey.Mock((*externalCollectionRefreshInspector).run).Return().Build()
@@ -1415,7 +1465,7 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 			Return([]*datapb.ExternalFileInfo{{FilePath: "s3://bucket/path/file.parquet", NumRows: 100}}, "s3://bucket/path/manifest", nil).Build()
 		defer mockExplore.UnPatch()
 
-		manager := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), nil, nil)
+		manager := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), nil, nil, nil)
 
 		jobID, err := manager.SubmitRefreshJobWithID(ctx, 1, 100, "test_collection", "", "")
 		assert.NoError(t, err)
@@ -1442,7 +1492,7 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 		alloc := &stubAllocator{}
 		scheduler := newStubScheduler()
 
-		manager := NewExternalCollectionRefreshManager(ctx, nil, scheduler, alloc, refreshMeta, nil, nil, nil, nil)
+		manager := NewExternalCollectionRefreshManager(ctx, nil, scheduler, alloc, refreshMeta, nil, nil, nil, nil, nil)
 
 		// Should return without error if job already exists
 		jobID, err := manager.SubmitRefreshJobWithID(ctx, 1, 100, "test_collection", "", "")
@@ -1459,7 +1509,7 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 		ms := metacache.NewMetaStore(nil)
 		mt := &meta{metaStore: ms}
 
-		manager := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), nil, nil)
+		manager := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), nil, nil, nil)
 
 		_, err := manager.SubmitRefreshJobWithID(ctx, 1, 999, "test_collection", "", "")
 		assert.Error(t, err)
@@ -1486,7 +1536,7 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 		mockIsExternal := mockey.Mock(typeutil.IsExternalCollection).Return(false).Build()
 		defer mockIsExternal.UnPatch()
 
-		manager := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), nil, nil)
+		manager := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), nil, nil, nil)
 
 		_, err := manager.SubmitRefreshJobWithID(ctx, 1, 100, "test_collection", "", "")
 		assert.Error(t, err)
@@ -1527,7 +1577,7 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 			Build()
 		defer mockExplore.UnPatch()
 
-		manager := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), nil, nil)
+		manager := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), nil, nil, nil)
 
 		// Phase A persists the Init job and returns success. Phase B runs
 		// in the background; its failure (AllocID error here) is logged
@@ -1576,7 +1626,7 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 			Return(nil, "", ffiErr).Build()
 		defer mockExplore.UnPatch()
 
-		manager := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), nil, nil)
+		manager := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), nil, nil, nil)
 
 		_, err := manager.SubmitRefreshJobWithID(ctx, 1, 100, "test_collection", "", "")
 		assert.NoError(t, err)
@@ -1626,6 +1676,7 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 			testCollectionGetter(mt),
 			nil,
 			chunkManager,
+			nil,
 		)
 
 		_, err := manager.SubmitRefreshJobWithID(ctx, 1, 100, "test_collection", "", "")
@@ -1665,7 +1716,7 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 			Return(nil, "", inputErr).Build()
 		defer mockExplore.UnPatch()
 
-		manager := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), nil, nil)
+		manager := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), nil, nil, nil)
 
 		_, err := manager.SubmitRefreshJobWithID(ctx, 1, 100, "test_collection", "", "")
 		assert.NoError(t, err)
@@ -1697,7 +1748,7 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 			}, nil).Build()
 		defer mockRead.UnPatch()
 
-		manager := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), nil, nil)
+		manager := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), nil, nil, nil)
 
 		_, err := manager.SubmitRefreshJobWithID(ctx, 1, 100, "test_collection", "", "")
 		assert.NoError(t, err)
@@ -1741,7 +1792,7 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 		mockIsExternal := mockey.Mock(typeutil.IsExternalCollection).Return(true).Build()
 		defer mockIsExternal.UnPatch()
 
-		manager := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), nil, nil)
+		manager := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), nil, nil, nil)
 
 		// Submit a new job with different ID should fail
 		_, err := manager.SubmitRefreshJobWithID(ctx, 2, 100, "test_collection", "", "")
@@ -1777,7 +1828,7 @@ func TestExternalCollectionRefreshManager_GetJobProgress(t *testing.T) {
 		alloc := &stubAllocator{}
 		scheduler := newStubScheduler()
 
-		manager := NewExternalCollectionRefreshManager(ctx, nil, scheduler, alloc, refreshMeta, nil, nil, nil, nil)
+		manager := NewExternalCollectionRefreshManager(ctx, nil, scheduler, alloc, refreshMeta, nil, nil, nil, nil, nil)
 
 		job, err := manager.GetJobProgress(ctx, 1)
 		assert.NoError(t, err)
@@ -1802,7 +1853,7 @@ func TestExternalCollectionRefreshManager_GetJobProgress(t *testing.T) {
 		alloc := &stubAllocator{}
 		scheduler := newStubScheduler()
 
-		manager := NewExternalCollectionRefreshManager(ctx, nil, scheduler, alloc, refreshMeta, nil, nil, nil, nil)
+		manager := NewExternalCollectionRefreshManager(ctx, nil, scheduler, alloc, refreshMeta, nil, nil, nil, nil, nil)
 
 		job, err := manager.GetJobProgress(ctx, 1)
 		assert.NoError(t, err)
@@ -1827,7 +1878,7 @@ func TestExternalCollectionRefreshManager_GetJobProgress(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100},
 		}
 		refreshMeta := createTestRefreshMetaWithJobs(t, []*datapb.ExternalCollectionRefreshJob{existingJob}, tasks)
-		manager := NewExternalCollectionRefreshManager(ctx, nil, newStubScheduler(), &stubAllocator{}, refreshMeta, nil, nil, nil, nil)
+		manager := NewExternalCollectionRefreshManager(ctx, nil, newStubScheduler(), &stubAllocator{}, refreshMeta, nil, nil, nil, nil, nil)
 
 		job, err := manager.GetJobProgress(ctx, 1)
 		assert.NoError(t, err)
@@ -1847,7 +1898,7 @@ func TestExternalCollectionRefreshManager_GetJobProgress(t *testing.T) {
 			{TaskId: 1001, JobId: 1, State: indexpb.JobState_JobStateFinished, Progress: 100},
 		}
 		refreshMeta := createTestRefreshMetaWithJobs(t, []*datapb.ExternalCollectionRefreshJob{existingJob}, tasks)
-		manager := NewExternalCollectionRefreshManager(ctx, nil, newStubScheduler(), &stubAllocator{}, refreshMeta, nil, nil, nil, nil)
+		manager := NewExternalCollectionRefreshManager(ctx, nil, newStubScheduler(), &stubAllocator{}, refreshMeta, nil, nil, nil, nil, nil)
 
 		job, err := manager.GetJobProgress(ctx, 1)
 		assert.NoError(t, err)
@@ -1867,7 +1918,7 @@ func TestExternalCollectionRefreshManager_GetJobProgress(t *testing.T) {
 		}
 		refreshMeta := createTestRefreshMetaWithJobs(t, []*datapb.ExternalCollectionRefreshJob{existingJob}, tasks)
 
-		manager := NewExternalCollectionRefreshManager(ctx, nil, newStubScheduler(), &stubAllocator{}, refreshMeta, nil, nil, nil, nil)
+		manager := NewExternalCollectionRefreshManager(ctx, nil, newStubScheduler(), &stubAllocator{}, refreshMeta, nil, nil, nil, nil, nil)
 
 		job, err := manager.GetJobProgress(ctx, 1)
 		assert.NoError(t, err)
@@ -1889,7 +1940,7 @@ func TestExternalCollectionRefreshManager_GetJobProgress(t *testing.T) {
 		}
 		refreshMeta := createTestRefreshMetaWithJobs(t, []*datapb.ExternalCollectionRefreshJob{existingJob}, tasks)
 
-		manager := NewExternalCollectionRefreshManager(ctx, nil, newStubScheduler(), &stubAllocator{}, refreshMeta, nil, nil, nil, nil)
+		manager := NewExternalCollectionRefreshManager(ctx, nil, newStubScheduler(), &stubAllocator{}, refreshMeta, nil, nil, nil, nil, nil)
 
 		job, err := manager.GetJobProgress(ctx, 1)
 		assert.NoError(t, err)
@@ -1922,6 +1973,7 @@ func TestExternalCollectionRefreshManager_GetJobProgress(t *testing.T) {
 			nil,
 			nil,
 			nil,
+			nil,
 		)
 
 		job, err := manager.GetJobProgress(ctx, 1)
@@ -1935,7 +1987,7 @@ func TestExternalCollectionRefreshManager_GetJobProgress(t *testing.T) {
 		alloc := &stubAllocator{}
 		scheduler := newStubScheduler()
 
-		manager := NewExternalCollectionRefreshManager(ctx, nil, scheduler, alloc, refreshMeta, nil, nil, nil, nil)
+		manager := NewExternalCollectionRefreshManager(ctx, nil, scheduler, alloc, refreshMeta, nil, nil, nil, nil, nil)
 
 		_, err := manager.GetJobProgress(ctx, 999)
 		assert.Error(t, err)
@@ -1963,7 +2015,7 @@ func TestExternalCollectionRefreshManager_ListJobs(t *testing.T) {
 		alloc := &stubAllocator{}
 		scheduler := newStubScheduler()
 
-		manager := NewExternalCollectionRefreshManager(ctx, nil, scheduler, alloc, refreshMeta, nil, nil, nil, nil)
+		manager := NewExternalCollectionRefreshManager(ctx, nil, scheduler, alloc, refreshMeta, nil, nil, nil, nil, nil)
 
 		result, err := manager.ListJobs(ctx, 100)
 		assert.NoError(t, err)
@@ -1985,7 +2037,7 @@ func TestExternalCollectionRefreshManager_ListJobs(t *testing.T) {
 		alloc := &stubAllocator{}
 		scheduler := newStubScheduler()
 
-		manager := NewExternalCollectionRefreshManager(ctx, nil, scheduler, alloc, refreshMeta, nil, nil, nil, nil)
+		manager := NewExternalCollectionRefreshManager(ctx, nil, scheduler, alloc, refreshMeta, nil, nil, nil, nil, nil)
 
 		result, err := manager.ListJobs(ctx, 100)
 		assert.NoError(t, err)
@@ -2005,7 +2057,7 @@ func TestExternalCollectionRefreshManager_ListJobs(t *testing.T) {
 		}
 		refreshMeta := createTestRefreshMetaWithJobs(t, jobs, tasks)
 
-		manager := NewExternalCollectionRefreshManager(ctx, nil, newStubScheduler(), &stubAllocator{}, refreshMeta, nil, nil, nil, nil)
+		manager := NewExternalCollectionRefreshManager(ctx, nil, newStubScheduler(), &stubAllocator{}, refreshMeta, nil, nil, nil, nil, nil)
 
 		result, err := manager.ListJobs(ctx, 100)
 		assert.NoError(t, err)
@@ -2052,6 +2104,7 @@ func TestExternalCollectionRefreshManager_ListJobs(t *testing.T) {
 			nil,
 			nil,
 			nil,
+			nil,
 		)
 
 		result, err := manager.ListJobs(ctx, 100)
@@ -2065,7 +2118,7 @@ func TestExternalCollectionRefreshManager_ListJobs(t *testing.T) {
 		alloc := &stubAllocator{}
 		scheduler := newStubScheduler()
 
-		manager := NewExternalCollectionRefreshManager(ctx, nil, scheduler, alloc, refreshMeta, nil, nil, nil, nil)
+		manager := NewExternalCollectionRefreshManager(ctx, nil, scheduler, alloc, refreshMeta, nil, nil, nil, nil, nil)
 
 		result, err := manager.ListJobs(ctx, 100)
 		assert.NoError(t, err)
@@ -2104,7 +2157,8 @@ func TestHandleJobFinished_SchemaChanged(t *testing.T) {
 		return nil
 	}
 
-	mgr := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), schemaUpdater, nil)
+	notifyIndexChan := make(chan UniqueID, 1)
+	mgr := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), schemaUpdater, nil, notifyIndexChan)
 	concreteManager := mgr.(*externalCollectionRefreshManager)
 
 	job := &datapb.ExternalCollectionRefreshJob{
@@ -2146,7 +2200,8 @@ func TestHandleJobFinished_SchemaUnchanged(t *testing.T) {
 		return nil
 	}
 
-	mgr := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), schemaUpdater, nil)
+	notifyIndexChan := make(chan UniqueID, 1)
+	mgr := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), schemaUpdater, nil, notifyIndexChan)
 	concreteManager := mgr.(*externalCollectionRefreshManager)
 
 	job := &datapb.ExternalCollectionRefreshJob{
@@ -2160,6 +2215,31 @@ func TestHandleJobFinished_SchemaUnchanged(t *testing.T) {
 	assert.False(t, updaterCalled, "schemaUpdater should NOT be called when source/spec unchanged")
 }
 
+func externalRefreshIndexSchema(source, spec string) *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Name:           "external_collection",
+		ExternalSource: source,
+		ExternalSpec:   spec,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "pk"},
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, ExternalField: "vec"},
+		},
+	}
+}
+
+func TestExternalSourceChanged(t *testing.T) {
+	spec := `{"format":"parquet"}`
+	external := externalRefreshIndexSchema("s3://bucket/a", spec)
+
+	assert.False(t, externalSourceChanged(nil, nil))
+	assert.False(t, externalSourceChanged(nil, &schemapb.CollectionSchema{ExternalSource: "s3://bucket/a"}),
+		"a collection without external fields is not external")
+	assert.True(t, externalSourceChanged(nil, external))
+	assert.False(t, externalSourceChanged(externalRefreshIndexSchema("s3://bucket/a", spec), external))
+	assert.True(t, externalSourceChanged(externalRefreshIndexSchema("s3://bucket/b", spec), external))
+	assert.True(t, externalSourceChanged(externalRefreshIndexSchema("s3://bucket/a", `{"format":"orc"}`), external))
+}
+
 func TestHandleJobFinished_NilSchemaUpdater(t *testing.T) {
 	ctx := context.Background()
 
@@ -2168,7 +2248,7 @@ func TestHandleJobFinished_NilSchemaUpdater(t *testing.T) {
 	scheduler := newStubScheduler()
 
 	// Create manager with nil schemaUpdater
-	mgr := NewExternalCollectionRefreshManager(ctx, nil, scheduler, alloc, refreshMeta, nil, nil, nil, nil)
+	mgr := NewExternalCollectionRefreshManager(ctx, nil, scheduler, alloc, refreshMeta, nil, nil, nil, nil, nil)
 	concreteManager := mgr.(*externalCollectionRefreshManager)
 
 	job := &datapb.ExternalCollectionRefreshJob{
@@ -2201,7 +2281,7 @@ func TestHandleJobFinished_CollectionNotFound(t *testing.T) {
 		return nil
 	}
 
-	mgr := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), schemaUpdater, nil)
+	mgr := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), schemaUpdater, nil, nil)
 	concreteManager := mgr.(*externalCollectionRefreshManager)
 
 	job := &datapb.ExternalCollectionRefreshJob{
@@ -2240,7 +2320,7 @@ func TestHandleJobFinished_SchemaUpdaterError(t *testing.T) {
 		return errors.New("WAL broadcast failed")
 	}
 
-	mgr := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), schemaUpdater, nil)
+	mgr := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), schemaUpdater, nil, nil)
 	concreteManager := mgr.(*externalCollectionRefreshManager)
 
 	job := &datapb.ExternalCollectionRefreshJob{
@@ -2280,7 +2360,7 @@ func TestHandleJobFinished_SourceChangedOnly(t *testing.T) {
 		return nil
 	}
 
-	mgr := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), schemaUpdater, nil)
+	mgr := NewExternalCollectionRefreshManager(ctx, mt, scheduler, alloc, refreshMeta, nil, testCollectionGetter(mt), schemaUpdater, nil, nil)
 	concreteManager := mgr.(*externalCollectionRefreshManager)
 
 	// Only source changed, spec unchanged
@@ -2368,7 +2448,7 @@ func newManagerWithChunkManager(t *testing.T, cm storage.ChunkManager) *external
 	refreshMeta := createTestRefreshMeta(t)
 	alloc := &stubAllocator{}
 	scheduler := newStubScheduler()
-	mgr := NewExternalCollectionRefreshManager(ctx, nil, scheduler, alloc, refreshMeta, nil, nil, nil, cm)
+	mgr := NewExternalCollectionRefreshManager(ctx, nil, scheduler, alloc, refreshMeta, nil, nil, nil, cm, nil)
 	return mgr.(*externalCollectionRefreshManager)
 }
 
@@ -2474,7 +2554,7 @@ func TestCleanupExploreTempForJob_RespectsManagerCtxCancel(t *testing.T) {
 	refreshMeta := createTestRefreshMeta(t)
 	alloc := &stubAllocator{}
 	scheduler := newStubScheduler()
-	mgr := NewExternalCollectionRefreshManager(ctx, nil, scheduler, alloc, refreshMeta, nil, nil, nil, cm).(*externalCollectionRefreshManager)
+	mgr := NewExternalCollectionRefreshManager(ctx, nil, scheduler, alloc, refreshMeta, nil, nil, nil, cm, nil).(*externalCollectionRefreshManager)
 
 	done := make(chan struct{})
 	go func() {
@@ -2520,6 +2600,7 @@ func TestHandleJobFinished_TriggersExploreTempCleanup(t *testing.T) {
 	mgr := NewExternalCollectionRefreshManager(
 		ctx, mt, scheduler, alloc, refreshMeta, nil,
 		testCollectionGetter(mt), schemaUpdater, cm,
+		nil,
 	).(*externalCollectionRefreshManager)
 
 	job := &datapb.ExternalCollectionRefreshJob{
@@ -2562,6 +2643,7 @@ func newManagerForPublish(t *testing.T, source string, updater func(context.Cont
 	return NewExternalCollectionRefreshManager(
 		ctx, mt, newStubScheduler(), &stubAllocator{}, createTestRefreshMeta(t), nil,
 		testCollectionGetter(mt), updater, &recordingChunkManager{},
+		nil,
 	).(*externalCollectionRefreshManager)
 }
 

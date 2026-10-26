@@ -121,6 +121,43 @@ func setIndexParam(indexParams []*commonpb.KeyValuePair, key, value string) {
 	}
 }
 
+func isTypedJSONArrayIndex(indexType, castType string) bool {
+	if indexType != indexparamcheck.IndexHybrid && indexType != indexparamcheck.IndexSTLSORT {
+		return false
+	}
+	return indexparamcheck.IsJSONArrayCastType(castType)
+}
+
+func checkJSONArrayIndexEnabled(indexType, castType string) error {
+	if isTypedJSONArrayIndex(indexType, castType) &&
+		!Params.DataCoordCfg.EnableArraySortIndex.GetAsBool() {
+		return merr.WrapErrServiceNotReadyMsg("JSON ARRAY HYBRID and STL_SORT are disabled by the cluster software upgrade gate")
+	}
+	return nil
+}
+
+// Explicit SORT on ordinary ARRAY is a new logical index type for old readers.
+// Nested ARRAY SORT retains its existing admission rules.
+func checkOrdinaryArraySortIndex(field *schemapb.FieldSchema, indexType string, versions IndexEngineVersionManager) error {
+	if indexType != indexparamcheck.IndexSTLSORT || field.GetDataType() != schemapb.DataType_Array || typeutil.IsStructSubField(field.GetName()) {
+		return nil
+	}
+	if !Params.DataCoordCfg.EnableArraySortIndex.GetAsBool() {
+		return merr.WrapErrServiceNotReadyMsg("ARRAY STL_SORT is disabled by the cluster software upgrade gate")
+	}
+	if versions.ResolveScalarIndexVersion() < 3 {
+		return merr.WrapErrParameterInvalidMsg("ARRAY STL_SORT requires the existing packed scalar index format (version >= 3)")
+	}
+	return nil
+}
+
+func requiredJSONPathIndexVersion(indexType, castType string) int32 {
+	if isTypedJSONArrayIndex(indexType, castType) {
+		return 3 // Existing packed scalar index format; no new engine version.
+	}
+	return common.MinScalarIndexVersionForJsonPathMultiType
+}
+
 // checkFMIndexEngineVersion rejects FMINDEX creation when the cluster's resolved
 // scalar index engine version is below MinScalarIndexVersionForFMINDEX. FMINDEX
 // (scalar engine v5) is a new capability older nodes cannot handle:
@@ -183,6 +220,16 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		return merr.Status(merr.WrapErrFieldNotFound(req.GetFieldID())), nil
 	}
 
+	if err := checkOrdinaryArraySortIndex(typeutil.GetField(schema, req.GetFieldID()), common.GetIndexType(req.GetIndexParams()), s.indexEngineVersionManager); err != nil {
+		if !req.GetIsAutoIndex() {
+			return merr.Status(err), nil
+		}
+		mlog.Info(ctx, "downgrading ARRAY AutoIndex to INVERTED",
+			mlog.FieldCollectionID(req.GetCollectionID()), mlog.FieldFieldID(req.GetFieldID()),
+			mlog.String("requestedType", common.GetIndexType(req.GetIndexParams())), mlog.Err(err))
+		setIndexParam(req.GetIndexParams(), common.IndexTypeKey, indexparamcheck.IndexINVERTED)
+	}
+
 	isJSON := isJSONField(schema, req.GetFieldID())
 	if isJSON {
 		// check json_path and json_cast_type exist
@@ -191,7 +238,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 			mlog.Warn(ctx, "get json path failed", mlog.Err(err))
 			return merr.Status(err), nil
 		}
-		_, err = getIndexParam(req.GetIndexParams(), common.JSONCastTypeKey)
+		castType, err := getIndexParam(req.GetIndexParams(), common.JSONCastTypeKey)
 		if err != nil {
 			mlog.Warn(ctx, "get json cast type failed", mlog.Err(err))
 			return merr.Status(err), nil
@@ -206,29 +253,40 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		setIndexParam(req.GetIndexParams(), common.JSONPathKey, nestedPath)
 
 		// JSON path index on STL_SORT, BITMAP, HYBRID requires scalar index
-		// engine version >= MinScalarIndexVersionForJsonPathMultiType.
+		// engine version >= the existing scalar/packed-array format threshold.
 		//
 		// For AutoIndex requests, transparently downgrade the requested type
 		// to INVERTED if the cluster version is too low — this keeps AutoIndex
 		// creating *some* usable index during rolling upgrade instead of
 		// failing outright. For explicit user requests, return an error.
 		indexType := common.GetIndexType(req.GetIndexParams())
+		if err := checkJSONArrayIndexEnabled(indexType, castType); err != nil {
+			if !req.GetIsAutoIndex() {
+				return merr.Status(err), nil
+			}
+			mlog.Info(ctx, "downgrading JSON ARRAY AutoIndex to INVERTED because the software upgrade gate is closed",
+				mlog.FieldCollectionID(req.GetCollectionID()), mlog.FieldFieldID(req.GetFieldID()),
+				mlog.String("requestedType", indexType), mlog.Err(err))
+			indexType = indexparamcheck.IndexINVERTED
+			setIndexParam(req.GetIndexParams(), common.IndexTypeKey, indexType)
+		}
 		if indexType == indexparamcheck.IndexSTLSORT ||
 			indexType == indexparamcheck.IndexBitmap ||
 			indexType == indexparamcheck.IndexHybrid {
 			resolved := s.indexEngineVersionManager.ResolveScalarIndexVersion()
-			if resolved < common.MinScalarIndexVersionForJsonPathMultiType {
+			required := requiredJSONPathIndexVersion(indexType, castType)
+			if resolved < required {
 				if req.GetIsAutoIndex() {
 					mlog.Info(ctx, "downgrading JSON AutoIndex to INVERTED because cluster scalar index version is too low",
 						mlog.String("requestedType", indexType),
 						mlog.Int32("resolvedVersion", resolved),
-						mlog.Int32("requiredVersion", common.MinScalarIndexVersionForJsonPathMultiType))
+						mlog.Int32("requiredVersion", required))
 					setIndexParam(req.GetIndexParams(), common.IndexTypeKey,
 						indexparamcheck.IndexINVERTED)
 				} else {
 					err := merr.WrapErrParameterInvalidMsg(
 						"JSON path index with %s requires scalar index engine version >= %d, current resolved version: %d",
-						indexType, common.MinScalarIndexVersionForJsonPathMultiType, resolved)
+						indexType, required, resolved)
 					mlog.Warn(ctx, "scalar index engine version too low for JSON path index", mlog.Err(err))
 					return merr.Status(err), nil
 				}
@@ -617,6 +675,14 @@ func (s *Server) selectSegmentIndexesStats(ctx context.Context, filters ...Segme
 	}
 	hasCompactionLineage := false
 	segmentsIndexes := s.meta.indexMeta.getSegmentsIndexStates(segments[0].CollectionID, segmentIDs)
+	if s.droppedSinceSnapshot(ctx, segments, segmentsIndexes) {
+		// The index states carry a task aborted because its segment was
+		// dropped after the snapshot. The abort is persisted only once the
+		// drop is in meta, so a snapshot taken now sees the drop, along with
+		// any compaction output committed with it, which has no index state
+		// read yet and therefore counts as unissued.
+		segments = s.meta.SelectSegments(ctx, filters...)
+	}
 	for _, info := range segments {
 		hasCompactionLineage = hasCompactionLineage || len(info.GetCompactionFrom()) > 0
 		is := &indexStats{
@@ -743,6 +809,29 @@ func newQueryLineageCycleChecker(validSegmentInfos map[int64]*SegmentInfo) func(
 		return false
 	}
 	return check
+}
+
+// droppedSinceSnapshot reports whether a segment that the snapshot sees as
+// flushed has a failed index state and is no longer flushed in meta.
+func (s *Server) droppedSinceSnapshot(ctx context.Context, segments []*SegmentInfo, segmentsIndexes map[int64]map[int64]*indexpb.SegmentIndexState) bool {
+	for _, info := range segments {
+		if !isFlushState(info.GetState()) || !hasFailedSegmentIndex(segmentsIndexes[info.GetID()]) {
+			continue
+		}
+		if current := s.meta.GetSegment(ctx, info.GetID()); current == nil || !isFlushState(current.GetState()) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasFailedSegmentIndex(states map[int64]*indexpb.SegmentIndexState) bool {
+	for _, state := range states {
+		if state.GetState() == commonpb.IndexState_Failed {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) countIndexedRows(indexInfo *indexpb.IndexInfo, segments map[int64]*indexStats) int64 {

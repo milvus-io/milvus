@@ -243,12 +243,7 @@ func (t *mixCompactionTask) saveSegmentMeta(result *datapb.CompactionPlanResult)
 		return err
 	}
 	newSegmentIDs := lo.Map(newSegments, func(s *SegmentInfo, _ int) UniqueID { return s.GetID() })
-	for _, newSegID := range newSegmentIDs {
-		select {
-		case getBuildIndexChSingleton() <- newSegID:
-		default:
-		}
-	}
+	notifySegmentIndexBuild(newSegmentIDs...)
 
 	// The SegmentMeta mutation is committed (inputs dropped, outputs visible,
 	// manifest versions advanced); schedule an asynchronous DataView snapshot

@@ -107,6 +107,11 @@ class NgramIndexReader final : public IIndexReaderBase,
     bool
     ShouldUseBatchStrategy(double pre_filter_hit_rate) const;
 
+    // AND-merges every literal's candidates using the cost policy above.
+    void
+    ApplyLiterals(const std::vector<std::string>& literals,
+                  TargetBitmap& candidates) const;
+
     void
     ApplyIterativeNgramFilter(const std::vector<std::string>& sorted_terms,
                               size_t total_count,

@@ -321,12 +321,11 @@ func TestImportTaskV3CreateTaskOnWorkerUsesPlanStorageVersion(t *testing.T) {
 // every accepted segment waiting for the next TaskCheckInterval (60s) scan,
 // which makes index building effectively start only after the whole merge
 // stage (V2 parity: postFlush and mixCompaction push each finished segment).
-// A zero-row placeholder is dropped at acceptance and must NOT be pushed:
-// the buildIndexCh consumer does not re-check the segment state.
+// A zero-row placeholder is dropped at acceptance and must NOT be pushed.
 func TestImportTaskV3AcceptanceNotifiesIndexBuild(t *testing.T) {
 	ctx := context.Background()
-	drainBuildIndexCh()
-	defer drainBuildIndexCh()
+	drainBuildIndexChForTest()
+	defer drainBuildIndexChForTest()
 
 	meta, err := newMemoryMeta(t)
 	require.NoError(t, err)
@@ -362,7 +361,7 @@ func TestImportTaskV3AcceptanceNotifiesIndexBuild(t *testing.T) {
 	seg := meta.GetSegment(ctx, 100)
 	require.Equal(t, commonpb.SegmentState_Flushed, seg.GetState())
 	require.True(t, seg.GetIsSorted())
-	require.Equal(t, []int64{100}, drainBuildIndexCh())
+	require.Equal(t, []int64{100}, drainBuildIndexChForTest())
 
 	// Zero-row result: placeholder dropped at acceptance, nothing pushed.
 	_, err = addImportSegment(ctx, meta, 101, 1, 11, 2, 3, "v0", datapb.SegmentLevel_L1, storage.StorageV2, 0)
@@ -381,7 +380,7 @@ func TestImportTaskV3AcceptanceNotifiesIndexBuild(t *testing.T) {
 	task2.QueryTaskOnWorker(cluster)
 
 	require.Equal(t, commonpb.SegmentState_Dropped, meta.GetSegment(ctx, 101).GetState())
-	require.Empty(t, drainBuildIndexCh())
+	require.Empty(t, drainBuildIndexChForTest())
 }
 
 func TestReconcileOrphanImportSegments(t *testing.T) {

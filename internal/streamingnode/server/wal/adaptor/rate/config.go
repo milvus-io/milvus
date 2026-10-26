@@ -155,8 +155,6 @@ func newAdaptiveRateLimitControllerConfigFetcher(channel types.PChannelInfo, sou
 	switch sourceName {
 	case SourceNodeMemory:
 		config = &paramtable.Get().StreamingCfg.WALRateLimitNodeMemoryAdaptiveRateLimit
-	case SourceFlusherRecovering:
-		config = &paramtable.Get().StreamingCfg.WALRateLimitFlusherAdaptiveRateLimit
 	case SourceRecoveryStorage:
 		config = &paramtable.Get().StreamingCfg.WALRateLimitRecoveryStorageAdaptiveRateLimit
 	case SourceAppendRate:

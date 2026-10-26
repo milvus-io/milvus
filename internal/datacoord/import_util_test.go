@@ -49,7 +49,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -316,14 +315,12 @@ func TestImportUtil_NewImportTasksWithDataTt(t *testing.T) {
 }
 
 func TestImportUtil_AssembleRequest(t *testing.T) {
-	rlsPredicate := &planpb.Expr{Expr: &planpb.Expr_AlwaysTrueExpr{AlwaysTrueExpr: &planpb.AlwaysTrueExpr{}}}
 	var job ImportJob = &importJob{
 		ImportJob: &datapb.ImportJob{
-			JobID:             0,
-			CollectionID:      1,
-			PartitionIDs:      []int64{2},
-			Vchannels:         []string{"v0"},
-			RlsCheckPredicate: rlsPredicate,
+			JobID:        0,
+			CollectionID: 1,
+			PartitionIDs: []int64{2},
+			Vchannels:    []string{"v0"},
 		},
 	}
 	importMeta := NewMockImportMeta(t)
@@ -403,7 +400,6 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 	assert.Equal(t, task.GetCollectionID(), importReq.GetCollectionID())
 	assert.Equal(t, job.GetPartitionIDs(), importReq.GetPartitionIDs())
 	assert.Equal(t, job.GetVchannels(), importReq.GetVchannels())
-	assert.Equal(t, rlsPredicate, importReq.GetRlsCheckPredicate())
 }
 
 func TestImportUtil_AssembleRequestWithDataTt(t *testing.T) {

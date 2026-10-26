@@ -551,6 +551,7 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 	var total int64
 	storedBinlogSize := make(map[string]map[string]int64) // map[collectionID]map[segment_state]size
 	binlogFileCount := make(map[string]int64)             // map[collectionID]count
+	deltalogAggregates := make(map[string]*deltalogAggregate)
 	coll2DbName := make(map[string]string)
 
 	for _, segment := range segments {
@@ -576,6 +577,13 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 
 				storedBinlogSize[collIDStr][segment.GetState().String()] += segmentSize
 				binlogFileCount[collIDStr] += int64(getBinlogFileCount(segment.SegmentInfo))
+
+				agg, ok := deltalogAggregates[collIDStr]
+				if !ok {
+					agg = &deltalogAggregate{dbName: coll.DatabaseName}
+					deltalogAggregates[collIDStr] = agg
+				}
+				agg.observe(segment)
 			}
 
 			if _, ok := collectionRowsNum[segment.GetCollectionID()]; !ok {
@@ -619,6 +627,8 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 			metrics.DataCoordL0DeleteEntriesNum.WithLabelValues(coll.DatabaseName, strconv.FormatInt(collectionID, 10)).Set(float64(entriesNum))
 		}
 	}
+
+	reportDeltalogMetrics(deltalogAggregates)
 
 	info.TotalBinlogSize = total
 	info.CollectionBinlogSize = collectionBinlogSize
@@ -3094,61 +3104,6 @@ func (m *meta) GetCompactionTo(segmentID int64) ([]*SegmentInfo, bool) {
 	return m.segments.GetCompactionTo(segmentID)
 }
 
-// GetMinGrowingSegmentCheckpoint returns the minimum DmlPosition of all growing
-// segments on the given channel that belong to TEXT collections.
-// This is used to prevent the channel checkpoint from advancing beyond unflushed
-// growing segment data (critical for TEXT collections where QueryNode manages
-// insert flush independently).
-//
-// Only TEXT collections need clamping because their growing segment data is
-// flushed by QueryNode (not StreamNode/DataNode). For normal collections,
-// StreamNode owns both the data flush and checkpoint, so clamping would
-// incorrectly slow down checkpoint advancement.
-//
-// Returns nil if no TEXT collection growing segments exist on the channel.
-func (m *meta) GetMinGrowingSegmentCheckpoint(channel string) *msgpb.MsgPosition {
-	segments := m.SelectSegments(context.TODO(), WithChannel(channel))
-
-	// Cache collection TEXT field check results to avoid repeated schema scans
-	// within the same call (many segments may belong to the same collection).
-	textCollectionCache := make(map[int64]bool)
-
-	var minPos *msgpb.MsgPosition
-	for _, s := range segments {
-		// Only consider growing (unflushed) segments at L1 level
-		if s.GetState() != commonpb.SegmentState_Growing {
-			continue
-		}
-		if s.GetLevel() == datapb.SegmentLevel_L0 {
-			continue
-		}
-
-		// Only clamp for TEXT collections — normal collections don't need it.
-		collID := s.GetCollectionID()
-		isText, cached := textCollectionCache[collID]
-		if !cached {
-			isText = m.collectionHasTextFields(collID)
-			textCollectionCache[collID] = isText
-		}
-		if !isText {
-			continue
-		}
-
-		pos := s.GetDmlPosition()
-		if pos == nil {
-			pos = s.GetStartPosition()
-		}
-		if pos == nil {
-			continue
-		}
-
-		if minPos == nil || pos.GetTimestamp() < minPos.GetTimestamp() {
-			minPos = pos
-		}
-	}
-	return minPos
-}
-
 // collectionTextFieldIDs returns the field IDs of all TEXT type fields in the collection schema.
 func (m *meta) collectionTextFieldIDs(collectionID int64) []int64 {
 	coll := m.GetCollection(collectionID)
@@ -3164,29 +3119,16 @@ func (m *meta) collectionTextFieldIDs(collectionID int64) []int64 {
 	return ids
 }
 
-// collectionHasTextFields returns true if the collection has any TEXT type fields.
-func (m *meta) collectionHasTextFields(collectionID int64) bool {
-	return len(m.collectionTextFieldIDs(collectionID)) > 0
-}
-
 // UpdateChannelCheckpoint updates and saves channel checkpoint.
 func (m *meta) UpdateChannelCheckpoint(ctx context.Context, vChannel string, pos *msgpb.MsgPosition) error {
 	if pos == nil || pos.GetMsgID() == nil {
 		return merr.WrapErrServiceInternalMsg("channelCP is nil, vChannel=%s", vChannel)
 	}
 
-	// Clamp checkpoint to not advance beyond min growing segment checkpoint.
-	// This prevents TEXT collection data loss where StreamNode (L0 delete) checkpoint
-	// may advance beyond QueryNode's (L1 insert) unflushed data.
-	minGrowingCP := m.GetMinGrowingSegmentCheckpoint(vChannel)
-	if minGrowingCP != nil && pos.GetTimestamp() > minGrowingCP.GetTimestamp() {
-		mlog.Info(ctx, "clamping channel checkpoint to min growing segment checkpoint",
-			mlog.String("vChannel", vChannel),
-			mlog.Uint64("requestedTs", pos.GetTimestamp()),
-			mlog.Uint64("clampedTs", minGrowingCP.GetTimestamp()))
-		pos = minGrowingCP
-	}
-
+	// The writer reports a safe channel position after accounting for buffered
+	// data, in-flight syncs and metadata publication. A Growing segment's last
+	// DmlPosition is a data-flush position, not a limit on later idle progress.
+	// Clamping to it would pin TEXT channels indefinitely after a data sync.
 	m.channelSync.channelLocks.Lock(vChannel)
 	defer m.channelSync.channelLocks.Unlock(vChannel)
 
@@ -3204,21 +3146,6 @@ func (m *meta) MarkChannelCheckpointDropped(ctx context.Context, channel string)
 
 // UpdateChannelCheckpoints updates and saves channel checkpoints.
 func (m *meta) UpdateChannelCheckpoints(ctx context.Context, positions []*msgpb.MsgPosition) error {
-	// Clamp each position to not advance beyond min growing segment checkpoint.
-	for i, pos := range positions {
-		if pos == nil || pos.GetChannelName() == "" {
-			continue
-		}
-		minGrowingCP := m.GetMinGrowingSegmentCheckpoint(pos.GetChannelName())
-		if minGrowingCP != nil && pos.GetTimestamp() > minGrowingCP.GetTimestamp() {
-			mlog.Info(ctx, "clamping channel checkpoint to min growing segment checkpoint",
-				mlog.String("vChannel", pos.GetChannelName()),
-				mlog.Uint64("requestedTs", pos.GetTimestamp()),
-				mlog.Uint64("clampedTs", minGrowingCP.GetTimestamp()))
-			positions[i] = minGrowingCP
-		}
-	}
-
 	// Serialize with single-channel updates on the same channels. Locks are
 	// taken in sorted order so overlapping batches cannot deadlock.
 	channelSet := make(map[string]struct{}, len(positions))

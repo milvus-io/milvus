@@ -190,12 +190,8 @@ func (h indexBuildingHandler) Handle(jc *importV3JobContext) error {
 	healthySegments := jc.meta.GetSegments(segmentIDs, isSegmentHealthy)
 	unindexed := jc.meta.indexMeta.GetUnindexedSegments(jc.job.GetCollectionID(), healthySegments)
 	if Params.DataCoordCfg.WaitForIndex.GetAsBool() && len(unindexed) > 0 {
-		for _, segmentID := range unindexed {
-			select {
-			case getBuildIndexChSingleton() <- segmentID:
-			default:
-			}
-		}
+		// Segments that already have index tasks only need time to finish.
+		notifySegmentIndexBuild(jc.meta.indexMeta.GetUnIndexedSegmentIDsForIndexTask(jc.job.GetCollectionID(), unindexed).Collect()...)
 		return nil
 	}
 	if err := jc.transitionTo(internalpb.ImportJobState_Uncommitted); err != nil {

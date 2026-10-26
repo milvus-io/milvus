@@ -1819,6 +1819,10 @@ func (coord *MixCoordMock) GetQuotaMetrics(ctx context.Context, in *internalpb.G
 	return &internalpb.GetQuotaMetricsResponse{}, nil
 }
 
+func (coord *MixCoordMock) GetFeatureUsage(ctx context.Context, in *internalpb.GetFeatureUsageRequest, opts ...grpc.CallOption) (*internalpb.FeatureUsageReport, error) {
+	return &internalpb.FeatureUsageReport{Status: merr.Success()}, nil
+}
+
 func (coord *MixCoordMock) ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
 	return &internalpb.ClearReadTaskQueueResponse{Status: merr.Success()}, nil
 }
@@ -1946,3 +1950,7 @@ type ImportFunc func(ctx context.Context, req *milvuspb.ImportRequest, opts ...g
 type DropCollectionFunc func(ctx context.Context, request *milvuspb.DropCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 
 type GetGetCredentialFunc func(ctx context.Context, req *rootcoordpb.GetCredentialRequest, opts ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error)
+
+func (*MixCoordMock) FetchFileResources(context.Context, *rootcoordpb.FetchFileResourcesRequest, ...grpc.CallOption) (*rootcoordpb.FetchFileResourcesResponse, error) {
+	panic("mock FetchFileResources with mockey")
+}

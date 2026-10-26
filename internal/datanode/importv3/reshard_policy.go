@@ -23,7 +23,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/importv3pb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -65,7 +64,7 @@ type writeSpec struct {
 
 // sourceSpec is the immutable configuration one source read and its prepare
 // stage need: the chunk manager and per-file reader inputs, the normalize and
-// function contract, and the RLS predicate.
+// function contract.
 type sourceSpec struct {
 	cm               storage.ChunkManager
 	collectionSchema *schemapb.CollectionSchema
@@ -78,7 +77,6 @@ type sourceSpec struct {
 	// way.
 	backup       bool
 	runFunctions bool
-	rlsPredicate *planpb.Expr
 }
 
 // reshardPolicy bundles the immutable per-run configuration derived once from
@@ -168,7 +166,6 @@ func getReshardPolicy(req *datapb.ReshardTaskRequest, plan *importv3pb.ReshardTa
 			bufferSize:       bufferSize,
 			backup:           backup,
 			runFunctions:     !backup,
-			rlsPredicate:     plan.GetRlsCheckPredicate(),
 		},
 		write: writeSpec{
 			req:            req,

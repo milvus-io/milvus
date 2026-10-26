@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
@@ -35,6 +36,23 @@ func TestTimeTickCommitAppendSuccessCommits(t *testing.T) {
 	requireCommitAckerSuccess(t, impl, session)
 }
 
+func TestTimeTickBodyCountMismatchNeverAppendsCommit(t *testing.T) {
+	impl := newTestTimeTickAppendInterceptor(t)
+	commit, session := newCommitTxnMessageForExistingSession(t, impl, "v1")
+	message.MustAsMutableCommitTxnMessageV2(commit).OverwriteHeader(&message.CommitTxnMessageHeader{BodyCnt: 1})
+	cleaned := false
+	session.RegisterCleanup(func() { cleaned = true }, 0)
+	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	_, err := impl.DoAppend(ctx, commit, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		t.Fatal("count mismatch must reject before WAL append")
+		return nil, nil
+	})
+	require.True(t, status.AsStreamingError(err).IsTxnExpired())
+	require.Equal(t, message.TxnStateRollbacked, session.State())
+	require.True(t, cleaned)
+	requireCommitAckerError(t, impl, err)
+}
+
 func TestTimeTickCommitAdmissionRejects(t *testing.T) {
 	impl := newTestTimeTickAppendInterceptor(t)
 	commit, session := newCommitTxnMessageForExistingSession(t, impl, "v1")
@@ -51,20 +69,31 @@ func TestTimeTickCommitAdmissionRejects(t *testing.T) {
 	requireCommitAckerError(t, impl, expectedErr)
 }
 
-func TestTimeTickCommitInnerErrorPreservesExistingStateTransition(t *testing.T) {
-	impl := newTestTimeTickAppendInterceptor(t)
-	commit, session := newCommitTxnMessageForExistingSession(t, impl, "v1")
-	expectedErr := errors.New("wal append failed")
-
-	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
-	_, err := impl.DoAppend(ctx, commit, func(context.Context, message.MutableMessage) (message.MessageID, error) {
-		return nil, expectedErr
-	})
-
-	require.ErrorIs(t, err, expectedErr)
-	require.False(t, txn.IsCommitAdmissionRejected(err))
-	require.Equal(t, message.TxnStateCommitted, session.State())
-	requireCommitAckerError(t, impl, expectedErr)
+func TestCommitCancellationKeepsReferencesForRecovery(t *testing.T) {
+	for _, replicated := range []bool{false, true} {
+		t.Run(map[bool]string{false: "local", true: "replicated"}[replicated], func(t *testing.T) {
+			impl := newTestTimeTickAppendInterceptor(t)
+			commit, session := newCommitTxnMessageForExistingSession(t, impl, "v1")
+			if replicated {
+				commit = commit.WithReplicateHeader(&message.ReplicateHeader{ClusterID: "source", MessageID: walimplstest.NewTestMessageID(3), LastConfirmedMessageID: walimplstest.NewTestMessageID(0), TimeTick: 100, VChannel: "v1"})
+			}
+			cleaned := false
+			session.RegisterCleanup(func() { cleaned = true }, 0)
+			walCtx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			ctx := utility.WithExtraAppendResult(walCtx, &utility.ExtraAppendResult{})
+			_, err := impl.DoAppend(ctx, commit, func(ctx context.Context, _ message.MutableMessage) (message.MessageID, error) {
+				cancel() // The WAL lifecycle ends; this session is not reused for retry.
+				return nil, ctx.Err()
+			})
+			require.ErrorIs(t, err, context.Canceled)
+			require.Equal(t, message.TxnStateOnCommit, session.State())
+			require.False(t, cleaned)
+			requireCommitAckerError(t, impl, err)
+			impl.txnManager.FailTxnAtVChannel("")
+			require.True(t, cleaned)
+		})
+	}
 }
 
 func requireCommitAckerSuccess(t *testing.T, impl *timeTickAppendInterceptor, session *txn.TxnSession) {

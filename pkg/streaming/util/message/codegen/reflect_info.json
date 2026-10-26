@@ -548,6 +548,16 @@
         },
         {
             "MessageSpecializedType": {
+                "HeaderType": "messagespb.MVCCBarrierMessageHeader",
+                "BodyType": "messagespb.MVCCBarrierMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeMVCCBarrier",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
                 "HeaderType": "messagespb.BatchUpdateManifestMessageHeader",
                 "BodyType": "messagespb.BatchUpdateManifestMessageBody"
             },

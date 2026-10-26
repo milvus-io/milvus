@@ -189,3 +189,20 @@ func (m *VChannelRecoveryModule) publishSegmentSealedLocked(id int64) {
 	m.querySealed[id] = true
 	m.observeQueryResourceEvent(context.TODO(), walview.VChannelResourceEvent{SegmentSealed: &walview.SegmentSealedEvent{SegmentID: id, VChannel: m.vchannel, SealedAtDataVersion: qviews.FromProtoDataVersion(meta.GetSealedAtDataVersion())}})
 }
+
+// ObserveQueryBarrier publishes scoped progress behind the ordered WAL prefix.
+// The caller serializes this with RecoveryStorage's message dispatch.
+func (m *VChannelRecoveryModule) ObserveQueryBarrier(ctx context.Context, timetick uint64) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.removed || m.vchannelView == nil || !m.vchannelView.IsActive() {
+		return false
+	}
+	if timetick > m.queryBarrierTimeTick {
+		m.queryBarrierTimeTick = timetick
+		m.queryObservedTimeTick = max(m.queryObservedTimeTick, timetick)
+		m.observeQueryResourceEvent(ctx, walview.VChannelResourceEvent{QueryBarrier: &walview.QueryBarrierEvent{TimeTick: timetick}})
+		m.queryResources.TryBuildLocked(m.queryWALViewLocked)
+	}
+	return true
+}

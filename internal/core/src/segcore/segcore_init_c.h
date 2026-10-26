@@ -60,6 +60,10 @@ SegcoreSetNprobe(const int64_t);
 CStatus
 SegcoreSetDenseVectorInterminIndexType(const char*);
 
+CStatus
+SegcoreSetSparseInterimIndexAlgorithms(const char* ip_algo,
+                                       const char* bm25_algo);
+
 void
 SegcoreSetSubDim(const int64_t);
 

@@ -17,7 +17,7 @@ import (
 )
 
 func TestQueryMVCCShutdownPreservesViewError(t *testing.T) {
-	w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{lifetime: typeutil.NewLifetime()}}
+	w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}}
 	w.lifetime.SetState(typeutil.LifetimeStateStopped)
 	_, err := w.GetLatestQueryPlanMVCC(context.Background(), "p_1v0")
 	require.True(t, viewerror.AsViewError(err).IsOnShutdown())
@@ -47,7 +47,7 @@ func TestQueryPlanRenewsLeaseOnlyOnSuccessfulReturn(t *testing.T) {
 		renewed, released := false, false
 		lease := &snview.QueryViewLease{Meta: view.Meta, View: view, Version: qviews.FromProtoQueryViewVersion(view.Meta.Version), Renew: func() { require.False(t, released); renewed = true }, Release: func() { released = true }}
 		patch := mockey.Mock((*snview.SNQueryViewHandler).AcquireLatestUpView).Return(lease, nil).Build()
-		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}}
+		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}}
 		req := &viewpb.GetQueryPlanRequest{ShardId: qviews.NewShardIDFromQVMeta(view.Meta).IntoProto(), Mvcc: &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 1}}}
 		if valid {
 			req.Request = &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{CollectionID: 1}}

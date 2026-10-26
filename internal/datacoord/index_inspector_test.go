@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -203,6 +204,240 @@ func TestIndexInspector_ReloadFromMeta(t *testing.T) {
 		assert.Equal(t, int64(4), scheduled.GetTaskSlot())
 	}).Return()
 	inspector.reloadFromMeta()
+}
+
+// A notification round takes only the notified segments, deduplicated; the
+// ticker also takes the pending ones, and a notification supersedes a pending
+// retry.
+func TestIndexInspector_PopIndexSegments(t *testing.T) {
+	inspector := newIndexInspector(context.Background(), nil, nil, nil, nil, nil, nil, nil)
+	inspector.requeuePendingIndexSegments(1, 2)
+	inspector.notifyIndexSegments(2, 3, 2)
+
+	assert.ElementsMatch(t, []UniqueID{2, 3}, inspector.popIndexSegments(false))
+	assert.ElementsMatch(t, []UniqueID{1}, inspector.popIndexSegments(true))
+	assert.Empty(t, inspector.popIndexSegments(true))
+}
+
+// Senders must not depend on the create-index loop: with only the forwarder
+// running, more segments than the channel holds still go through.
+func TestIndexInspector_ForwardBuildIndexChWithoutCreateIndexLoop(t *testing.T) {
+	drainBuildIndexChForTest()
+	defer drainBuildIndexChForTest()
+
+	// The deadline bounds the senders' wait if forwarding regresses.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	inspector := newIndexInspector(ctx, nil, nil, nil, nil, nil, nil, nil)
+	defer inspector.Stop()
+	setBuildIndexConsumerForTest(t, ctx.Done())
+	inspector.wg.Add(1)
+	go inspector.forwardBuildIndexCh(inspector.ctx)
+
+	total := 2 * cap(getBuildIndexChSingleton())
+	notifySegmentIndexBuild(lo.RangeFrom(UniqueID(0), total)...)
+
+	got := typeutil.NewUniqueSet()
+	assert.Eventually(t, func() bool {
+		got.Insert(inspector.popIndexSegments(false)...)
+		return got.Len() == total
+	}, 5*time.Second, 10*time.Millisecond)
+	assert.Len(t, inspector.notifiedIndexSegsCh, 1, "forwarding must wake the create-index loop")
+}
+
+// A segment that appears after Start is indexed through its notification alone,
+// while the segment the startup scan left pending waits for the ticker: the
+// tick/reconcile intervals are far beyond the wait below, and the mocks allow a
+// single index task.
+func TestIndexInspector_StartIndexesNotifiedSegment(t *testing.T) {
+	drainBuildIndexChForTest()
+	defer drainBuildIndexChForTest()
+	interval := &Params.DataCoordCfg.TaskCheckInterval
+	defer interval.SwapTempValue(interval.SwapTempValue("60"))
+
+	ctx := context.Background()
+	const (
+		collID       = UniqueID(12)
+		segID        = UniqueID(32)
+		pendingSegID = UniqueID(33)
+		fieldID      = UniqueID(101)
+		indexID      = UniqueID(42)
+	)
+	newFlushedSegment := func(id UniqueID) *SegmentInfo {
+		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID:           id,
+			CollectionID: collID,
+			NumOfRows:    1024,
+			State:        commonpb.SegmentState_Flushed,
+			IsSorted:     true,
+			Binlogs:      []*datapb.FieldBinlog{{FieldID: fieldID}},
+		}}
+	}
+	scheduler := task.NewMockGlobalScheduler(t)
+	alloc := allocator.NewMockAllocator(t)
+	handler := NewNMockHandler(t)
+	catalog := mocks2.NewDataCoordCatalog(t)
+	ms := metacache.NewMetaStore(nil)
+	m := &meta{
+		segments:  NewSegmentsInfo(ms),
+		metaStore: ms,
+		indexMeta: createTestIndexMeta(t, collID, map[int64]*model.Index{
+			indexID: {CollectionID: collID, FieldID: fieldID, IndexID: indexID, IndexName: "default_idx"},
+		}, catalog),
+	}
+	m.segments.SetSegment(pendingSegID, newFlushedSegment(pendingSegID))
+	handler.EXPECT().GetCollection(mock.Anything, collID).Return(&collectionInfo{
+		ID:     collID,
+		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: fieldID, Name: "f101"}}},
+	}, nil).Once()
+	alloc.EXPECT().AllocID(mock.Anything).Return(1, nil).Once()
+	catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Once()
+	scheduler.EXPECT().Enqueue(mock.Anything).Return().Once()
+
+	inspector := newIndexInspector(ctx, make(chan int64, 1), m, scheduler, alloc, handler, mocks.NewChunkManager(t), newIndexEngineVersionManager())
+	inspector.Start()
+	defer inspector.Stop()
+
+	m.segments.SetSegment(segID, newFlushedSegment(segID))
+	notifySegmentIndexBuild(segID)
+
+	assert.Eventually(t, func() bool {
+		return !m.indexMeta.IsUnIndexedSegment(collID, segID)
+	}, 5*time.Second, 10*time.Millisecond)
+	assert.True(t, m.indexMeta.IsUnIndexedSegment(collID, pendingSegID))
+	assert.ElementsMatch(t, []UniqueID{pendingSegID}, inspector.popIndexSegments(true))
+}
+
+func TestIndexInspector_ProcessIndexSegmentsRequeuesStillUnindexedSegment(t *testing.T) {
+	ctx := context.Background()
+	const (
+		collID  = UniqueID(10)
+		partID  = UniqueID(20)
+		segID   = UniqueID(30)
+		indexID = UniqueID(40)
+	)
+
+	ms := metacache.NewMetaStore(nil)
+	m := &meta{
+		segments:  NewSegmentsInfo(ms),
+		metaStore: ms,
+		indexMeta: &indexMeta{
+			segmentBuildInfo: newSegmentIndexBuildInfo(),
+			indexes: map[UniqueID]map[UniqueID]*model.Index{
+				collID: {
+					indexID: {
+						CollectionID: collID,
+						FieldID:      102,
+						IndexID:      indexID,
+						IndexName:    "bm25_idx",
+					},
+				},
+			},
+			segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		},
+	}
+	ms.PutCollection(&collectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+				{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
+				{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector},
+			},
+			Functions: []*schemapb.FunctionSchema{
+				{Name: "bm25_fn", OutputFieldIds: []int64{102}},
+			},
+		},
+	})
+	m.segments.SetSegment(segID, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:           segID,
+		CollectionID: collID,
+		PartitionID:  partID,
+		State:        commonpb.SegmentState_Flushed,
+		IsSorted:     true,
+		Binlogs: []*datapb.FieldBinlog{
+			{FieldID: 0, ChildFields: []int64{100, 101}},
+		},
+	}})
+
+	handler := NewNMockHandler(t)
+	handler.EXPECT().GetCollection(mock.Anything, collID).
+		Return(nil, errors.New("mock rootcoord unreachable")).Once()
+	inspector := newIndexInspector(ctx, nil, m, nil, nil, handler, nil, nil)
+	inspector.notifyIndexSegments(segID)
+
+	inspector.processIndexSegments(ctx, false)
+
+	assert.Empty(t, inspector.popIndexSegments(false), "a deferred segment must not ride on notifications")
+	assert.ElementsMatch(t, []UniqueID{segID}, inspector.popIndexSegments(true))
+}
+
+func TestIndexInspector_ProcessIndexSegmentsCreatesIndex(t *testing.T) {
+	ctx := context.Background()
+	const (
+		collID  = UniqueID(11)
+		partID  = UniqueID(21)
+		segID   = UniqueID(31)
+		fieldID = UniqueID(101)
+		indexID = UniqueID(41)
+		buildID = UniqueID(51)
+	)
+
+	scheduler := task.NewMockGlobalScheduler(t)
+	alloc := allocator.NewMockAllocator(t)
+	handler := NewNMockHandler(t)
+	storageCli := mocks.NewChunkManager(t)
+	versionManager := newIndexEngineVersionManager()
+	catalog := mocks2.NewDataCoordCatalog(t)
+	ms := metacache.NewMetaStore(nil)
+	m := &meta{
+		segments:  NewSegmentsInfo(ms),
+		metaStore: ms,
+		indexMeta: &indexMeta{
+			keyLock:          lock.NewKeyLock[UniqueID](),
+			catalog:          catalog,
+			segmentBuildInfo: newSegmentIndexBuildInfo(),
+			indexes: map[UniqueID]map[UniqueID]*model.Index{
+				collID: {
+					indexID: {
+						CollectionID: collID,
+						FieldID:      fieldID,
+						IndexID:      indexID,
+						IndexName:    "default_idx",
+					},
+				},
+			},
+			segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		},
+	}
+	m.segments.SetSegment(segID, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:           segID,
+		CollectionID: collID,
+		PartitionID:  partID,
+		NumOfRows:    1024,
+		State:        commonpb.SegmentState_Flushed,
+		IsSorted:     true,
+		Binlogs: []*datapb.FieldBinlog{
+			{FieldID: fieldID},
+		},
+	}})
+
+	inspector := newIndexInspector(ctx, make(chan int64, 1), m, scheduler, alloc, handler, storageCli, versionManager)
+	inspector.notifyIndexSegments(segID)
+	handler.EXPECT().GetCollection(mock.Anything, collID).Return(&collectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: fieldID, Name: "f101"},
+		}},
+	}, nil).Once()
+	alloc.EXPECT().AllocID(mock.Anything).Return(buildID, nil).Once()
+	catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil).Once()
+	scheduler.EXPECT().Enqueue(mock.Anything).Return().Once()
+
+	inspector.processIndexSegments(ctx, false)
+
+	assert.Empty(t, inspector.popIndexSegments(true))
+	assert.Contains(t, m.indexMeta.GetSegmentIndexes(collID, segID), indexID)
 }
 
 func TestIndexInspector_CreateIndexForSegment_FMIndexUsesMemoryBasedSlots(t *testing.T) {

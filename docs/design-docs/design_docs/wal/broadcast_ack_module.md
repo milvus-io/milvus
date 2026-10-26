@@ -55,7 +55,11 @@ AND no earlier unfinished task conflicts
 ```
 
 Conflicting tasks preserve WAL observation order. Independent tasks may Ack
-concurrently.
+concurrently. A local ManualFlush overtaken by DropCollection is an empty
+best-effort operation and uses the same ResourceKey ordering. It adds no VChannel
+dependency on Drop completion when a replicated rename makes their name keys
+differ. An unfinished Drop still blocks the global recovery checkpoint through
+its own retained handle.
 
 ## 4. Ack And Retry
 
@@ -198,6 +202,18 @@ legacy checker completes the job after all channels have committed. This also
 works when the original broadcast task is already TOMBSTONE. No WAL scan or
 rebroadcast by the checker is needed. RPC calls may repeat after a failure or
 restart; their effects are idempotent, not exactly-once calls.
+
+A replay can arrive after importChecker.checkGC removed the job. A job exists
+before any CommitImport for it is written, so on a cluster that is not a CDC
+secondary a missing job at commit time is a terminal job that GC removed: both
+HandleCommitVchannel and the CommitImport callback return success and leave
+metadata unchanged. On a CDC secondary the replicated CommitImport can precede
+the local Import ack callback, so a missing job there still returns a retriable
+error. When the replication role cannot be read yet, the error is retriable too.
+A secondary cannot tell a job that is not created yet from a job that its own
+checkGC removed, so a replay of a garbage-collected CommitImport on a secondary
+retries without end. A durable tombstone at GC time (see #54425) would close
+that case. It is follow-up work.
 
 This branch uses the existing segment-metadata serving path: MVCC already
 tracks CommitImport's WAL position, and QueryNode uses CommitTimestamp for
