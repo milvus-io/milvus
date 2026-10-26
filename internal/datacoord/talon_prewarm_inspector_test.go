@@ -18,6 +18,8 @@ package datacoord
 
 import (
 	"context"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -31,6 +33,7 @@ type recordingTalonPrewarm struct {
 	batches      [][]TalonPrewarmRequest
 	statFailure  string
 	batchFailure bool
+	beforeStat   func()
 	pending      chan struct{}
 	closeStarted chan struct{}
 	closeRelease chan struct{}
@@ -39,6 +42,9 @@ type recordingTalonPrewarm struct {
 }
 
 func (c *recordingTalonPrewarm) Stat(ctx context.Context, uri string) (uint64, string, error) {
+	if c.beforeStat != nil {
+		c.beforeStat()
+	}
 	c.stats[uri]++
 	if uri == c.statFailure {
 		return 0, "", errors.New("stat unavailable")
@@ -77,7 +83,7 @@ func TestTalonPrewarmInspectorRounds(t *testing.T) {
 	var supplierErr error
 	c := &recordingTalonPrewarm{stats: map[string]int{}, statFailure: "s3://bad", batchFailure: true}
 	inspector := NewTalonPrewarmInspector(ctx, func(context.Context) ([]string, error) { return descriptors, supplierErr }, c,
-		func(s string) (string, error) { return "s3://" + s, nil }, time.Hour, 2)
+		func(s string) (string, uint64, error) { return "s3://" + s, 0, nil }, time.Hour, 2)
 	inspector.inspect(ctx)
 	require.Len(t, c.batches, 2) // Batch failure must not suppress the second batch.
 	require.Len(t, c.batches[0], 2)
@@ -115,9 +121,33 @@ func TestTalonPrewarmInspectorRounds(t *testing.T) {
 	require.Empty(t, inspector.metadata)
 }
 
+// Readers open a manifest whose descriptor records its size with that size and
+// the unchecked version, so the load uses the same identity without a stat.
+// Such manifests all load before the first stat.
+func TestTalonPrewarmInspectorRecordedSize(t *testing.T) {
+	c := &recordingTalonPrewarm{stats: map[string]int{}}
+	c.beforeStat = func() { require.Len(t, c.batches, 2) }
+	inspector := NewTalonPrewarmInspector(context.Background(), func(context.Context) ([]string, error) {
+		return []string{"sized1", "unsized1", "sized2", "unsized2", "sized3"}, nil
+	}, c, func(s string) (string, uint64, error) {
+		if strings.HasPrefix(s, "sized") {
+			return s, 4096, nil
+		}
+		return s, 0, nil
+	}, time.Hour, 2)
+	inspector.inspect(context.Background())
+	unsized1 := TalonPrewarmRequest{URI: "unsized1", Size: 8, Version: "etag:unsized1"}
+	unsized2 := TalonPrewarmRequest{URI: "unsized2", Size: 8, Version: "etag:unsized2"}
+	require.Equal(t, map[string]int{"unsized1": 1, "unsized2": 1}, c.stats)
+	require.Len(t, c.batches, 3)
+	require.ElementsMatch(t, []TalonPrewarmRequest{{URI: "sized1", Size: 4096}, {URI: "sized2", Size: 4096}, {URI: "sized3", Size: 4096}}, slices.Concat(c.batches[:2]...))
+	require.ElementsMatch(t, []TalonPrewarmRequest{unsized1, unsized2}, c.batches[2])
+	require.Equal(t, map[string]TalonPrewarmRequest{"unsized1": unsized1, "unsized2": unsized2}, inspector.metadata)
+}
+
 func TestTalonPrewarmInspectorStopPending(t *testing.T) {
 	c := &recordingTalonPrewarm{stats: map[string]int{}, pending: make(chan struct{}), closeStarted: make(chan struct{}), closeRelease: make(chan struct{})}
-	inspector := NewTalonPrewarmInspector(context.Background(), func(context.Context) ([]string, error) { return []string{"one", "two"}, nil }, c, func(s string) (string, error) { return s, nil }, time.Hour, 1)
+	inspector := NewTalonPrewarmInspector(context.Background(), func(context.Context) ([]string, error) { return []string{"one", "two"}, nil }, c, func(s string) (string, uint64, error) { return s, 0, nil }, time.Hour, 1)
 	inspector.Start()
 	<-c.pending
 	stopped := make(chan struct{})
@@ -150,11 +180,11 @@ func TestTalonPrewarmInspectorStopBeforeStart(t *testing.T) {
 
 func TestTalonPrewarmInspectorResolutionFailure(t *testing.T) {
 	c := &recordingTalonPrewarm{stats: map[string]int{}}
-	inspector := NewTalonPrewarmInspector(context.Background(), func(context.Context) ([]string, error) { return []string{"invalid", "valid", "valid"}, nil }, c, func(s string) (string, error) {
+	inspector := NewTalonPrewarmInspector(context.Background(), func(context.Context) ([]string, error) { return []string{"invalid", "valid", "valid"}, nil }, c, func(s string) (string, uint64, error) {
 		if s == "invalid" {
-			return "", errors.New("malformed metadata")
+			return "", 0, errors.New("malformed metadata")
 		}
-		return s, nil
+		return s, 0, nil
 	}, time.Hour, 2)
 	inspector.inspect(context.Background())
 	require.Len(t, c.batches, 1)
@@ -171,7 +201,7 @@ func TestTalonPrewarmInspectorStopBlockedSupplier(t *testing.T) {
 		// Model the uncancellable segMu.RLock wait behind a catalog writer.
 		<-releaseSupplier
 		return []string{"one", "two"}, nil
-	}, c, func(s string) (string, error) { return s, nil }, time.Hour, 1)
+	}, c, func(s string) (string, uint64, error) { return s, 0, nil }, time.Hour, 1)
 	stopped := make(chan struct{})
 	t.Cleanup(func() {
 		releaseOnce.Do(func() { close(releaseSupplier) })

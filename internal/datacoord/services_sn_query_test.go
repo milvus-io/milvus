@@ -24,7 +24,7 @@ func TestStreamingNodeResourcesRespectDataViewManifest(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	version := &viewpb.DataVersion{StreamingVersion: 1}
-	view := &viewpb.DataViewOfCollection{CollectionId: 1, DataVersion: version, Shards: []*viewpb.DataViewOfShard{{Vchannel: "v1", Partitions: []*viewpb.DataViewOfPartition{{PartitionId: 2, SegmentIds: []int64{3, 4}, SegmentManifestVersions: []int64{7, 0}}}}}}
+	view := &viewpb.DataViewOfCollection{CollectionId: 1, DataVersion: version, Shards: []*viewpb.DataViewOfShard{{Vchannel: "v1", Partitions: []*viewpb.DataViewOfPartition{{PartitionId: 2, SegmentIds: []int64{3, 4, 5}, SegmentManifestVersions: []int64{7, 0, 9}}}}}}
 	patch := mockey.Mock((*catalogkv.Catalog).ListAllDataViews).Return([]*viewpb.DataViewOfCollection{view}, nil).Build()
 	defer patch.UnPatch()
 	manager, err := dataview.RecoverManager(ctx, &catalogkv.Catalog{}, func(context.Context, int64) (bool, error) { return true, nil }, nil, nil, nil)
@@ -32,16 +32,18 @@ func TestStreamingNodeResourcesRespectDataViewManifest(t *testing.T) {
 	store := metacache.NewMetaStore(nil)
 	s := &Server{dataViewManager: manager, meta: &meta{segments: NewSegmentsInfo(store), metaStore: store}}
 	s.stateCode.Store(commonpb.StateCode_Healthy)
-	for _, id := range []int64{3, 4} {
-		s.meta.segments.SetSegment(id, NewSegmentInfo(&datapb.SegmentInfo{ID: id, CollectionID: 1, PartitionID: 2, InsertChannel: "v1", ManifestPath: packed.MarshalManifestPath("segments", 9)}))
+	current := packed.CommittedManifestPath("segments", 9, 4096, "remote")
+	for _, id := range []int64{3, 4, 5} {
+		s.meta.segments.SetSegment(id, NewSegmentInfo(&datapb.SegmentInfo{ID: id, CollectionID: 1, PartitionID: 2, InsertChannel: "v1", ManifestPath: current}))
 	}
 	resp, err := s.GetStreamingNodeQueryViewResources(ctx, &datapb.GetStreamingNodeQueryViewResourcesRequest{CollectionId: 1, Vchannel: "v1", DataVersion: version})
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(resp.GetStatus()))
-	require.Len(t, resp.GetBm25Resources(), 2)
+	require.Len(t, resp.GetBm25Resources(), 3)
 	require.Equal(t, packed.MarshalManifestPath("segments", 7), resp.Bm25Resources[0].GetManifestPath(), "historical view must not read latest manifest")
-	require.Equal(t, packed.MarshalManifestPath("segments", 9), resp.Bm25Resources[1].GetManifestPath(), "version zero resolves current metadata")
-	require.Equal(t, packed.MarshalManifestPath("segments", 9), s.meta.GetSegment(ctx, 3).GetManifestPath(), "shared metadata stays immutable")
+	require.Equal(t, current, resp.Bm25Resources[1].GetManifestPath(), "version zero resolves current metadata")
+	require.Equal(t, current, resp.Bm25Resources[2].GetManifestPath(), "pinning the current revision keeps its recorded size")
+	require.Equal(t, current, s.meta.GetSegment(ctx, 3).GetManifestPath(), "shared metadata stays immutable")
 	resp, err = s.GetStreamingNodeQueryViewResources(ctx, &datapb.GetStreamingNodeQueryViewResourcesRequest{CollectionId: 1, Vchannel: "v1", DataVersion: &viewpb.DataVersion{StreamingVersion: 100}})
 	require.NoError(t, err)
 	require.Error(t, merr.Error(resp.GetStatus()))
