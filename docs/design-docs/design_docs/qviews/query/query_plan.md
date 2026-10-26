@@ -51,6 +51,13 @@ Only ordered publication changes channel membership, so delayed Create/Drop
 callbacks cannot register or revive channels. Recovery initializes live channels
 at its complete opening fence before append admission opens.
 
+Customized reads preserve the request's GuaranteeTimestamp as a lower bound
+for both execution frontiers. If either frontier is behind, planning establishes
+a barrier at the maximum of that guarantee and the currently visible frontiers.
+This preserves newer visible writes instead of interpreting the guarantee as an
+exact historical snapshot. Already-covered requests require no barrier; future
+guarantees use the same allocator admission and cancellation as explicit barriers.
+
 Explicit MVCC and BarrierMVCC are mutually exclusive. A barrier is useful for
 Iterator snapshot continuation; an ACK published later than B does not change
 the query's snapshot. Master supplies scoped barrier production and its ordered

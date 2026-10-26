@@ -19,7 +19,7 @@ but its field-name-to-ID wiring still has TODOs; it is not the production entry.
 
 For each resolved vchannel, Phase 1 targets the primary StreamingNode using
 `UnknownReplicaID`. The returned plan supplies the actual shard/replica identity.
-Strong and Session are sent as Strong; Bounded and Eventually retain their enum
+Strong and Session are sent as Strong; Bounded, Eventually and Customized retain their enum
 values. Strong/Session waits for completed writes; Eventually reuses the current complete
 snapshot, and Bounded also enforces the request guarantee timestamp. All use primary-WAL planning. The presence of
 `GetMVCCTimestamp` does not implement secondary replica selection.
