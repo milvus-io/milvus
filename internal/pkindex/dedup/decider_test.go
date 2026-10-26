@@ -768,3 +768,19 @@ func TestTxnAndAutocommitOnSameKeyConcurrently(t *testing.T) {
 
 	require.Equal(t, int64(1), misses.Load())
 }
+
+func TestRestorePendingFeedsTheCommitDecision(t *testing.T) {
+	ctx := context.Background()
+	d, eng := newTestDecider(t)
+	seed(t, eng, 6, 1)
+	d.RestorePending(42, KindInsert, int64PKs(1, 2))
+	d.RestorePending(42, KindDelete, int64PKs(2))
+	require.Equal(t, 0, InflightLenForTest(d), "a restored body gets no in-flight entry")
+
+	g, err := d.Decide(ctx, DecideRequest{Kind: KindCommitTxn, TxnID: 42})
+	require.NoError(t, err)
+	require.Equal(t, int64PKs(1), g.CompanionDeletePKs(), "pk 1 is in the engine, pk 2 is deleted by the transaction itself")
+	g.Appended(20)
+	require.Equal(t, 2, InflightLenForTest(d), "the commit registers both keys")
+	require.Empty(t, PendingTxnIDsForTest(d))
+}

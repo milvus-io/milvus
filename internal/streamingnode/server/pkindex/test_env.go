@@ -39,8 +39,9 @@ const fakeStorageRoot = "root"
 
 // FakeCommitter applies lookups and flushes the way the manifest service
 // does, with the SST base path of a new manifest under fakeStorageRoot. The
-// fields are set by the tests of this package through set. A flush is
-// fenced or rejected until assign gives the pchannel meta the term of the
+// tests of this package set its fields through set, the tests of other
+// packages through SetManifest, SetLookupFailures and SetLookupErr. A flush
+// is fenced or rejected until assign gives the pchannel meta the term of the
 // flush.
 type FakeCommitter struct {
 	mu sync.Mutex
@@ -52,6 +53,8 @@ type FakeCommitter struct {
 	// history keeps every manifest version, by vchannel.
 	history map[string][]*index.FakeManifest
 
+	// lookupErr fails every lookup, if it is not nil.
+	lookupErr   error
 	lookupErrs  []error
 	lookupBlock chan struct{}
 	// itemErrs are the per-item errors of the lookups, by vchannel.
@@ -92,6 +95,37 @@ func (c *FakeCommitter) assign(term int64) {
 	c.assignedTerm = term
 }
 
+// SetManifest gives a vchannel a manifest, nil removes it.
+func (c *FakeCommitter) SetManifest(vchannel string, m *index.FakeManifest) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if m == nil {
+		delete(c.manifests, vchannel)
+		return
+	}
+	c.store(vchannel, m, true)
+}
+
+// errFakeTransient is the transient failure that SetLookupFailures injects.
+var errFakeTransient = errors.New("injected transient failure")
+
+// SetLookupFailures makes the next n manifest lookups fail with a transient error.
+func (c *FakeCommitter) SetLookupFailures(n int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lookupErrs = nil
+	for i := 0; i < n; i++ {
+		c.lookupErrs = append(c.lookupErrs, errors.Wrap(errFakeTransient, "look up the manifests"))
+	}
+}
+
+// SetLookupErr makes every later manifest lookup fail with err.
+func (c *FakeCommitter) SetLookupErr(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lookupErr = err
+}
+
 // GetRecoveryManifests implements Committer.
 func (c *FakeCommitter) GetRecoveryManifests(ctx context.Context, refs []VChannelRef) ([]RecoveryManifest, error) {
 	c.mu.Lock()
@@ -107,6 +141,9 @@ func (c *FakeCommitter) GetRecoveryManifests(ctx context.Context, refs []VChanne
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.lookupErr != nil {
+		return nil, c.lookupErr
+	}
 	if len(c.lookupErrs) > 0 {
 		err := c.lookupErrs[0]
 		c.lookupErrs = c.lookupErrs[1:]
@@ -119,9 +156,21 @@ func (c *FakeCommitter) GetRecoveryManifests(ctx context.Context, refs []VChanne
 			out = append(out, RecoveryManifest{Err: errs[0]})
 			continue
 		}
-		out = append(out, FakeRecoveryManifest(c.manifests[ref.VChannel]))
+		out = append(out, FakeRecoveryManifest(ref.VChannel, c.manifests[ref.VChannel]))
 	}
 	return out, nil
+}
+
+// ReadManifest implements Committer. The body key names the vchannel and the version.
+func (c *FakeCommitter) ReadManifest(ctx context.Context, bodyKey string) (index.ManifestView, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for vchannel, m := range c.manifests {
+		if FakeRecoveryManifest(vchannel, m).BodyKey == bodyKey {
+			return m.View, nil
+		}
+	}
+	return index.ManifestView{}, errors.Wrapf(pkroot.ErrCorrupted, "manifest body %s does not exist", bodyKey)
 }
 
 // lookupList returns the refs of each GetRecoveryManifests call.
@@ -293,3 +342,27 @@ func (c *PChannelIndexManager) IndexForTest(vchannel string) *index.Index {
 func (c *PChannelIndexManager) RemoveForTest(ctx context.Context, vchannel string) {
 	c.remove(ctx, vchannel)
 }
+
+// GetForTest returns the open PChannelIndexManager of a pchannel, nil when
+// none is open. Production code gets it from the recovery snapshot.
+func (m *Manager) GetForTest(pchannel string) *PChannelIndexManager {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.channels[pchannel]
+}
+
+// StoreForTest returns the table store of the Manager.
+func (m *Manager) StoreForTest() TableStore { return m.cfg.Store }
+
+// FlushTTForTest returns the time tick of the last flush that the observe
+// saw on a vchannel, 0 when it saw none or the vchannel has no Index.
+func (c *PChannelIndexManager) FlushTTForTest(vchannel string) uint64 {
+	idx := c.get(vchannel)
+	if idx == nil {
+		return 0
+	}
+	return c.scheduleOf(idx).flushTT.Load()
+}
+
+// SetCommitterForTest replaces the Committer of the Manager.
+func (m *Manager) SetCommitterForTest(c Committer) { m.cfg.Committer = c }

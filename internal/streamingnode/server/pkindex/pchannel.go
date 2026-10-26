@@ -286,6 +286,13 @@ func (c *PChannelIndexManager) get(vchannel string) *index.Index {
 // LastObserved returns lastObserved, see the field.
 func (c *PChannelIndexManager) LastObserved() uint64 { return c.lastObserved.Load() }
 
+// Closed reports whether Close ran, also for a PChannelIndexManager that
+// Manager.New returned closed because the Manager had stopped.
+func (c *PChannelIndexManager) Closed() bool { return c.ctx.Err() != nil }
+
+// Info returns the pchannel of the PChannelIndexManager.
+func (c *PChannelIndexManager) Info() types.PChannelInfo { return c.info }
+
 // Apply writes w, the change of one WAL message, into the Index of vchannel
 // and adds the Index to the LastAcked heap when the write made it dirty.
 // The observe of the WAL recovery is the only caller: it calls Apply in
