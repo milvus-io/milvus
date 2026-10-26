@@ -66,13 +66,11 @@ func (s *TxnSession) AddNewMessage(ctx context.Context, timetick uint64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// if the txn is expired, return error.
-	if err := s.checkIfExpired(timetick); err != nil {
-		return err
-	}
-
 	if s.state != message.TxnStateInFlight {
 		return status.NewInvalidTransactionState("AddNewMessage", message.TxnStateInFlight, s.state)
+	}
+	if err := s.checkIfExpired(timetick); err != nil {
+		return err
 	}
 	s.inFlightCount++
 	return nil
@@ -265,12 +263,13 @@ func (s *TxnSession) getDoneChan(timetick uint64, state message.TxnState) (<-cha
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if err := s.checkIfExpired(timetick); err != nil {
-		return nil, err
-	}
-
+	// An admitted/committed transaction must never become a retryable expiry
+	// merely because its lease elapsed. Resolve its state before checking TTL.
 	if s.state != message.TxnStateInFlight {
 		return nil, status.NewInvalidTransactionState("GetWaitChan", message.TxnStateInFlight, s.state)
+	}
+	if err := s.checkIfExpired(timetick); err != nil {
+		return nil, err
 	}
 	s.state = state
 
