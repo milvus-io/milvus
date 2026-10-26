@@ -20,6 +20,7 @@ import (
 	"context"
 	"net"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -327,20 +328,31 @@ func TestPublicRunningRequestHandlersDelegateToCoordinator(t *testing.T) {
 	// the answer is the cluster's, not this proxy's registry
 	assert.Equal(t, int64(999), listResp.GetRequests()[0].GetProxyId())
 
+	// the cluster's answer: 5 stopped by this call, 8 was already Canceling
+	// from an earlier call and is only echoed back
+	logs := captureProxyLogs(t)
 	mixc.EXPECT().CancelRequests(mock.Anything, mock.MatchedBy(func(req *milvuspb.CancelRequestsRequest) bool {
 		return req.GetBase().GetMsgType() == commonpb.MsgType_CancelRequests
 	})).Return(&milvuspb.CancelRequestsResponse{
-		Status:       merr.Success(),
-		Canceled:     []*milvuspb.RunningRequestInfo{{RequestId: 5, ProxyId: 999, ElapsedMs: 42}},
+		Status: merr.Success(),
+		Canceled: []*milvuspb.RunningRequestInfo{
+			{RequestId: 5, ProxyId: 999, ElapsedMs: 42, State: reqregistry.StateRunning},
+			{RequestId: 8, ProxyId: 999, State: reqregistry.StateCanceling},
+		},
 		NotFound:     []int64{6},
 		Undetermined: []int64{7},
 	}, nil)
-	cancelResp, err := node.CancelRequests(context.Background(), &milvuspb.CancelRequestsRequest{RequestIds: []int64{5, 6}, Reason: "r"})
+	cancelResp, err := node.CancelRequests(context.Background(), &milvuspb.CancelRequestsRequest{RequestIds: []int64{5, 6, 8}, Reason: "r"})
 	require.NoError(t, err)
-	require.Len(t, cancelResp.GetCanceled(), 1)
+	require.Len(t, cancelResp.GetCanceled(), 2)
 	assert.Equal(t, int64(42), cancelResp.GetCanceled()[0].GetElapsedMs())
 	assert.Equal(t, []int64{6}, cancelResp.GetNotFound())
 	assert.Equal(t, []int64{7}, cancelResp.GetUndetermined())
+	// the audit trail names this operator for 5 only; the repeated cancel of
+	// 8 is answered but not attributed to them
+	assert.Equal(t, 1, strings.Count(logs.String(), "request canceled by operator"))
+	assert.Contains(t, logs.String(), "requestID=5")
+	assert.NotContains(t, logs.String(), "requestID=8")
 }
 
 func TestCancelRequestsRejectsEmptyIDs(t *testing.T) {

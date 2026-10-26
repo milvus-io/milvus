@@ -22,10 +22,13 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -159,6 +162,40 @@ func TestExprPrefixIsBounded(t *testing.T) {
 	_, e := r.Register(context.Background(), Info{RequestID: 1, Expr: long})
 	defer r.Unregister(e)
 	assert.Len(t, e.Snapshot(time.Now()).Expr, ExprPrefixLimit)
+}
+
+func TestExprPrefixNeverSplitsACharacter(t *testing.T) {
+	// A three-byte character starting at byte 255 straddles the limit; a
+	// four-byte one starting at byte 253 too. The cut must back up to the
+	// character boundary so that the prefix stays valid UTF-8 and the proto3
+	// string field it is copied into still marshals.
+	for _, tc := range []struct {
+		name string
+		expr string
+		want int
+	}{
+		{"cjk straddles the limit", strings.Repeat("x", ExprPrefixLimit-1) + strings.Repeat("中", 100), ExprPrefixLimit - 1},
+		{"emoji straddles the limit", strings.Repeat("x", ExprPrefixLimit-3) + strings.Repeat("\U0001F600", 100), ExprPrefixLimit - 3},
+		{"character ends exactly at the limit", strings.Repeat("x", ExprPrefixLimit-3) + strings.Repeat("中", 100), ExprPrefixLimit},
+		{"all multi-byte", strings.Repeat("中", 200), ExprPrefixLimit - ExprPrefixLimit%3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := New()
+			_, e := r.Register(context.Background(), Info{RequestID: 1, Expr: tc.expr})
+			defer r.Unregister(e)
+			got := e.Snapshot(time.Now()).Expr
+			assert.Len(t, got, tc.want)
+			assert.True(t, utf8.ValidString(got))
+			assert.True(t, strings.HasPrefix(tc.expr, got))
+			_, err := proto.Marshal(&milvuspb.RunningRequestInfo{Expr: got})
+			assert.NoError(t, err)
+		})
+	}
+	// and the unfixed cut really would have been rejected by the marshaller
+	bad := (strings.Repeat("x", ExprPrefixLimit-1) + "中")[:ExprPrefixLimit]
+	require.False(t, utf8.ValidString(bad))
+	_, err := proto.Marshal(&milvuspb.RunningRequestInfo{Expr: bad})
+	require.Error(t, err)
 }
 
 func TestSnapshotIsolatesTaskIDs(t *testing.T) {

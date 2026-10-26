@@ -306,7 +306,10 @@ func (node *Proxy) CancelRequests(ctx context.Context, request *milvuspb.CancelR
 	// The operator is known here, where the caller authenticated, and nowhere
 	// downstream: the internal calls are new connections that carry no user.
 	// So the audit trail is written here, once, over the whole cluster's
-	// answer.
+	// answer. The answer also carries requests that were already on their way
+	// out (state Canceling, canceled by an earlier call): those are not this
+	// operator's doing and get no audit line, so the log keeps naming the
+	// operator who actually stopped each request.
 	operator := GetCurUserFromContextOrDefault(ctx)
 	request.Base = commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_CancelRequests))
 	resp, err := node.mixCoord.CancelRequests(ctx, request)
@@ -314,6 +317,9 @@ func (node *Proxy) CancelRequests(ctx context.Context, request *milvuspb.CancelR
 		return &milvuspb.CancelRequestsResponse{Status: merr.Status(err)}, nil
 	}
 	for _, info := range resp.GetCanceled() {
+		if info.GetState() == reqregistry.StateCanceling {
+			continue
+		}
 		mlog.Info(ctx, "request canceled by operator",
 			mlog.String("operator", operator),
 			mlog.String("reason", request.GetReason()),
