@@ -1947,7 +1947,7 @@ func TestSnapshotDescriptionLengthConfig(t *testing.T) {
 	assert.Equal(t, 2048, limit.GetAsInt())
 	require.NoError(t, params.Reset(limit.Key))
 	assert.Equal(t, 1024, limit.GetAsInt())
-	field, ok := reflect.TypeOf(params.ProxyCfg).FieldByName("MaxSnapshotDescriptionLength")
+	field, ok := reflect.TypeOf(&params.ProxyCfg).Elem().FieldByName("MaxSnapshotDescriptionLength")
 	require.True(t, ok)
 	assert.Equal(t, "true", field.Tag.Get("refreshable"))
 }
