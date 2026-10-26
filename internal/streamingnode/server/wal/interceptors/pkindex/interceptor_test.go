@@ -18,6 +18,8 @@ package pkindex
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -28,9 +30,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
+	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
@@ -53,6 +58,7 @@ const (
 	testCollectionID = int64(1)
 	testPKFieldID    = int64(100)
 	testPartitionID  = int64(2)
+	testPChannel     = "by-dev-rootcoord-dml_0"
 )
 
 func TestMain(m *testing.M) {
@@ -63,23 +69,52 @@ func TestMain(m *testing.M) {
 // ===== test doubles =====
 
 // testEngine is a memory engine that a test can read back and that counts probes.
+type testIndexEnv struct {
+	mgr       *snpkindex.Manager
+	committer *snpkindex.FakeCommitter
+	root      string
+
+	mu     sync.Mutex
+	fatals []error
+}
+
+func newTestIndexEnv(t *testing.T) *testIndexEnv {
+	return newTestIndexEnvAt(t, t.TempDir())
+}
+
+// newTestIndexEnvAt creates the env with root as the local root directory.
+func newTestIndexEnvAt(t *testing.T, root string) *testIndexEnv {
+	env := snpkindex.NewFakeEnv(t, root)
+	return &testIndexEnv{mgr: env.Manager, committer: env.Committer, root: root}
+}
+
+// openChannel opens the index Channel of the test pchannel.
+func (env *testIndexEnv) openChannel(seed uint64) *snpkindex.PChannelIndexManager {
+	ch := env.mgr.New(snpkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: testPChannel, Term: 1}, Seed: seed, OnFatal: env.onFatal})
+	ch.Start()
+	return ch
+}
+
+func (env *testIndexEnv) onFatal(err error) {
+	env.mu.Lock()
+	defer env.mu.Unlock()
+	env.fatals = append(env.fatals, err)
+}
+
+func (env *testIndexEnv) fatalList() []error {
+	env.mu.Lock()
+	defer env.mu.Unlock()
+	return append([]error(nil), env.fatals...)
+}
+
+// useResource makes the env the index Manager of the streaming node resource.
+func (env *testIndexEnv) useResource(t *testing.T) {
+	resource.InitForTest(t, resource.OptPKIndexManager(env.mgr))
+}
+
+// testEngine reads and seeds the engine of the Index of one vchannel.
 type testEngine struct {
-	Engine
-	mu       sync.Mutex
-	multiGet int
-}
-
-func (e *testEngine) MultiGet(ctx context.Context, keys [][]byte) ([][]byte, error) {
-	e.mu.Lock()
-	e.multiGet++
-	e.mu.Unlock()
-	return e.Engine.MultiGet(ctx, keys)
-}
-
-func (e *testEngine) probes() int {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.multiGet
+	idx *index.Index
 }
 
 // put seeds the index of one primary key, as an earlier insert would have done.
@@ -91,7 +126,7 @@ func (e *testEngine) put(t *testing.T, pk int64, segmentID int64) {
 func (e *testEngine) putPK(t *testing.T, pk dedup.PK, segmentID int64) {
 	t.Helper()
 	value := codec.EncodePKEntry(codec.PKEntry{SegmentID: segmentID})
-	require.NoError(t, e.Write(context.Background(), []engine.Mutation{
+	require.NoError(t, e.idx.EngineForTest().Write(context.Background(), []engine.Mutation{
 		{Key: pk.Encode(), Value: value},
 	}))
 }
@@ -104,7 +139,7 @@ func (e *testEngine) segmentOf(t *testing.T, pk int64) (int64, bool) {
 
 func (e *testEngine) segmentOfPK(t *testing.T, pk dedup.PK) (int64, bool) {
 	t.Helper()
-	values, err := e.Engine.MultiGet(context.Background(), [][]byte{pk.Encode()})
+	values, err := e.idx.EngineForTest().MultiGet(context.Background(), [][]byte{pk.Encode()})
 	require.NoError(t, err)
 	if values[0] == nil {
 		return 0, false
@@ -114,38 +149,16 @@ func (e *testEngine) segmentOfPK(t *testing.T, pk dedup.PK) (int64, bool) {
 	return entry.SegmentID, true
 }
 
-// testEngines registers itself as the engine factory and keeps every engine it made.
+// testEngines finds the Index of a vchannel in the Channel of an interceptor.
 type testEngines struct {
-	mu      sync.Mutex
-	engines map[string]*testEngine
-}
-
-func newTestEngines(t *testing.T) *testEngines {
-	e := &testEngines{engines: make(map[string]*testEngine)}
-	RegisterEngineFactory(e.create)
-	t.Cleanup(func() { RegisterEngineFactory(NewMemoryEngine) })
-	return e
-}
-
-func (e *testEngines) create(vchannel string) (Engine, error) {
-	inner, err := NewMemoryEngine(vchannel)
-	if err != nil {
-		return nil, err
-	}
-	engine := &testEngine{Engine: inner}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.engines[vchannel] = engine
-	return engine, nil
+	ch *snpkindex.PChannelIndexManager
 }
 
 func (e *testEngines) of(t *testing.T, vchannel string) *testEngine {
 	t.Helper()
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	engine, ok := e.engines[vchannel]
-	require.True(t, ok, "no index engine was created for %s", vchannel)
-	return engine
+	idx := e.ch.IndexForTest(vchannel)
+	require.NotNil(t, idx, "no index was created for %s", vchannel)
+	return &testEngine{idx: idx}
 }
 
 // fakeAppender imitates the chain below the interceptor: it assigns a time tick,
@@ -391,23 +404,32 @@ func newDropCollection(vchannel string) message.MutableMessage {
 // ===== harness =====
 
 // newTestInterceptor builds the interceptor directly, with a target registered
-// for testVChannel. The real decider and a memory engine are used.
+// for testVChannel. A real index over a real engine is used.
 func newTestInterceptor(t *testing.T, sessions txnSessions) (*appendInterceptor, *testEngines) {
 	return newTestInterceptorOfSchema(t, sessions, testSchema(false))
 }
 
 func newTestInterceptorOfSchema(t *testing.T, sessions txnSessions, schema *schemapb.CollectionSchema) (*appendInterceptor, *testEngines) {
-	engines := newTestEngines(t)
+	i, engines := newEmptyTestInterceptor(t, newTestIndexEnv(t), sessions)
+	created, err := i.registry.add(context.Background(), testVChannel, testCollectionID, schema)
+	require.NoError(t, err)
+	require.True(t, created)
+	require.NotNil(t, i.registry.get(testVChannel))
+	return i, engines
+}
+
+// newEmptyTestInterceptor builds the interceptor directly, with no target.
+func newEmptyTestInterceptor(t *testing.T, env *testIndexEnv, sessions txnSessions) (*appendInterceptor, *testEngines) {
+	ch := env.openChannel(0)
 	i := &appendInterceptor{
-		registry: newRegistry(),
+		ch:       ch,
+		registry: newRegistry(ch),
 		sessions: sessions,
 		metrics:  newMetrics(),
+		onFatal:  env.onFatal,
 	}
-	_, err := i.registry.add(context.Background(), testVChannel, testCollectionID, schema)
-	require.NoError(t, err)
-	require.NotNil(t, i.registry.get(testVChannel))
 	t.Cleanup(i.Close)
-	return i, engines
+	return i, &testEngines{ch: ch}
 }
 
 // requireDoAppendReturns fails when DoAppend does not return within five
@@ -441,26 +463,38 @@ func requireInner(t *testing.T, err error) {
 	require.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_INNER, status.AsStreamingError(err).Code)
 }
 
+func requireOnShutdown(t *testing.T, err error) {
+	t.Helper()
+	require.Error(t, err)
+	require.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN, status.AsStreamingError(err).Code)
+}
+
 // presentOf reports whether a key exists for the write path of testVChannel:
 // in the in-flight set or in the engine.
 func presentOf(t *testing.T, i *appendInterceptor, pk dedup.PK) bool {
 	t.Helper()
-	present, err := dedup.PresentForTest(context.Background(), i.registry.get(testVChannel).decider, pk)
+	present, err := dedup.PresentForTest(context.Background(), i.ch.Decider(testVChannel), pk)
 	require.NoError(t, err)
 	return present
 }
 
 func inflightLen(i *appendInterceptor) int {
-	return dedup.InflightLenForTest(i.registry.get(testVChannel).decider)
+	return dedup.InflightLenForTest(i.ch.Decider(testVChannel))
 }
 
 // ===== the switch =====
 
-func TestBuildIsPassthroughWhenDisabled(t *testing.T) {
-	i := NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
-		ChannelInfo: types.PChannelInfo{Name: "by-dev-rootcoord-dml_0"},
+func TestBuildWithoutIndexManagerIsPassthrough(t *testing.T) {
+	resource.InitForTest(t)
+
+	var i interceptors.Interceptor
+	require.NotPanics(t, func() {
+		i = NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
+			ChannelInfo: types.PChannelInfo{Name: testPChannel},
+		})
 	})
 	defer i.Close()
+	require.IsType(t, passthroughInterceptor{}, i)
 
 	f := newFakeAppender()
 	_, err := i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
@@ -468,28 +502,29 @@ func TestBuildIsPassthroughWhenDisabled(t *testing.T) {
 	require.Equal(t, []message.MessageType{message.MessageTypeInsert}, f.types)
 }
 
-func TestNewBuilderPanicsWhenEnabledWithoutEngineFactory(t *testing.T) {
-	params := paramtable.Get()
-	params.Save(params.StreamingCfg.PKIndexEnabled.Key, "true")
-	defer params.Reset(params.StreamingCfg.PKIndexEnabled.Key)
-	RegisterEngineFactory(nil)
-	defer RegisterEngineFactory(NewMemoryEngine)
+// TestBuildWithoutAnOpenPChannelIsPassthrough checks that the interceptor
+// passes the messages through when the manager has no index for the pchannel:
+// the WAL recovery did not build one.
+func TestBuildWithoutAnOpenPChannelIsPassthrough(t *testing.T) {
+	newTestIndexEnv(t).useResource(t)
 
-	require.PanicsWithValue(t, params.StreamingCfg.PKIndexEnabled.Key+" is true but this binary has no primary key index engine", func() {
-		NewInterceptorBuilder()
+	i := NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
+		ChannelInfo: types.PChannelInfo{Name: testPChannel},
 	})
+	defer i.Close()
+	require.IsType(t, passthroughInterceptor{}, i)
 }
 
-func TestNewBuilderWithoutEngineFactoryWhenDisabled(t *testing.T) {
-	RegisterEngineFactory(nil)
-	defer RegisterEngineFactory(NewMemoryEngine)
+func TestBuildWithIndexManagerUsesTheIndex(t *testing.T) {
+	env := newTestIndexEnv(t)
+	env.useResource(t)
+	env.openChannel(0)
 
-	require.NotPanics(t, func() {
-		i := NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
-			ChannelInfo: types.PChannelInfo{Name: "by-dev-rootcoord-dml_0"},
-		})
-		i.Close()
+	i := NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
+		ChannelInfo: types.PChannelInfo{Name: testPChannel},
 	})
+	defer i.Close()
+	require.IsType(t, &appendInterceptor{}, i)
 }
 
 // fakeSchemaLister is the part of the shard manager Build reads at WAL open.
@@ -503,13 +538,12 @@ func (l fakeSchemaLister) GetAllCollectionSchemaInfos() map[int64]shards.Collect
 }
 
 func TestBuildCreatesTheIndexOfExistingCollections(t *testing.T) {
-	params := paramtable.Get()
-	params.Save(params.StreamingCfg.PKIndexEnabled.Key, "true")
-	defer params.Reset(params.StreamingCfg.PKIndexEnabled.Key)
-	engines := newTestEngines(t)
+	env := newTestIndexEnv(t)
+	env.useResource(t)
+	env.openChannel(0)
 
 	i := NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
-		ChannelInfo: types.PChannelInfo{Name: "by-dev-rootcoord-dml_0"},
+		ChannelInfo: types.PChannelInfo{Name: testPChannel},
 		ShardManager: fakeSchemaLister{infos: map[int64]shards.CollectionSchemaInfo{
 			testCollectionID:     {VChannel: testVChannel, Schema: testSchema(false)},
 			testCollectionID + 1: {VChannel: testVChannel + "_autoid", Schema: testSchema(true)},
@@ -517,35 +551,99 @@ func TestBuildCreatesTheIndexOfExistingCollections(t *testing.T) {
 	})
 	defer i.Close()
 
-	require.NotNil(t, i.(*appendInterceptor).registry.get(testVChannel))
-	require.Nil(t, i.(*appendInterceptor).registry.get(testVChannel+"_autoid"))
-	require.Len(t, engines.engines, 1)
+	ai := i.(*appendInterceptor)
+	require.NotNil(t, ai.registry.get(testVChannel))
+	require.Same(t, ai.ch.IndexForTest(testVChannel).Decider(), ai.ch.Decider(testVChannel))
+	require.Nil(t, ai.registry.get(testVChannel+"_autoid"))
+	require.Nil(t, ai.ch.IndexForTest(testVChannel+"_autoid"), "an autoID collection gets no index")
 }
 
-func TestBuildPanicsWhenTheIndexOfAnExistingCollectionCanNotBeCreated(t *testing.T) {
-	params := paramtable.Get()
-	params.Save(params.StreamingCfg.PKIndexEnabled.Key, "true")
-	defer params.Reset(params.StreamingCfg.PKIndexEnabled.Key)
-	RegisterEngineFactory(func(string) (Engine, error) {
-		return nil, errors.New("disk is full")
+// newBrokenRoot returns a local root directory under which no engine can be
+// opened: the root is a regular file.
+func newBrokenRoot(t *testing.T) string {
+	root := filepath.Join(t.TempDir(), "root")
+	require.NoError(t, os.WriteFile(root, nil, 0o600))
+	return root
+}
+
+// TestBuildMarksTheWALUnavailableWhenTheIndexCanNotBeOpened checks that a
+// local disk error at WAL open goes to param.OnFatal and does not panic.
+func TestBuildMarksTheWALUnavailableWhenTheIndexCanNotBeOpened(t *testing.T) {
+	env := newTestIndexEnvAt(t, newBrokenRoot(t))
+	env.useResource(t)
+	env.openChannel(0)
+
+	var fatals []error
+	var i interceptors.Interceptor
+	require.NotPanics(t, func() {
+		i = NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
+			ChannelInfo: types.PChannelInfo{Name: testPChannel},
+			OnFatal:     func(err error) { fatals = append(fatals, err) },
+			ShardManager: fakeSchemaLister{infos: map[int64]shards.CollectionSchemaInfo{
+				testCollectionID: {VChannel: testVChannel, Schema: testSchema(false)},
+			}},
+		})
 	})
-	t.Cleanup(func() { RegisterEngineFactory(NewMemoryEngine) })
+	defer i.Close()
+
+	require.Len(t, fatals, 1)
+	require.True(t, errors.Is(fatals[0], errOpenIndex), "the error is marked as an index open error")
+	require.ErrorContains(t, fatals[0], "not a directory")
+	require.Nil(t, i.(*appendInterceptor).registry.get(testVChannel))
+}
+
+func TestBuildPanicsWhenAnExistingCollectionHasAnUnsupportedPrimaryKey(t *testing.T) {
+	env := newTestIndexEnv(t)
+	env.useResource(t)
+	env.openChannel(0)
+	schema := testSchema(false)
+	schema.Fields[0].DataType = schemapb.DataType_Float
 
 	defer func() {
 		value := recover()
 		require.NotNil(t, value, "Build must panic")
 		require.Contains(t, value.(string), "at wal open")
-		require.Contains(t, value.(string), "disk is full")
+		require.Contains(t, value.(string), "unsupported data type")
 	}()
 	NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
-		ChannelInfo: types.PChannelInfo{Name: "by-dev-rootcoord-dml_0"},
+		ChannelInfo: types.PChannelInfo{Name: testPChannel},
+		OnFatal:     func(err error) { t.Errorf("OnFatal must not be called: %v", err) },
 		ShardManager: fakeSchemaLister{infos: map[int64]shards.CollectionSchemaInfo{
-			testCollectionID: {VChannel: testVChannel, Schema: testSchema(false)},
+			testCollectionID: {VChannel: testVChannel, Schema: schema},
 		}},
 	})
 }
 
 // ===== autocommit insert =====
+
+// corruptedEngine stands for an engine that finds a damaged table file: every
+// read fails with an error marked ErrCorrupted.
+type corruptedEngine struct {
+	engine.RW
+}
+
+func (corruptedEngine) MultiGet(context.Context, [][]byte) ([][]byte, error) {
+	return nil, errors.Mark(errors.New("damaged table file"), pkroot.ErrCorrupted)
+}
+
+func TestInsertOnCorruptedIndexMarksTheWALUnavailable(t *testing.T) {
+	env := newTestIndexEnv(t)
+	i, engines := newEmptyTestInterceptor(t, env, nil)
+	created, err := i.registry.add(context.Background(), testVChannel, testCollectionID, testSchema(false))
+	require.NoError(t, err)
+	require.True(t, created)
+	e := engines.of(t, testVChannel)
+	e.idx.SetDeciderEngineForTest(corruptedEngine{RW: e.idx.EngineForTest()})
+	f := newFakeAppender()
+
+	_, err = i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
+	require.Error(t, err)
+	require.Empty(t, f.types, "nothing is appended after a failed decision")
+	fatals := env.fatalList()
+	require.Len(t, fatals, 1)
+	// errors.Mark of cockroachdb is not visible to the errors.Is of the standard library
+	require.True(t, errors.Is(fatals[0], pkroot.ErrCorrupted), "%v", fatals[0])
+}
 
 func TestInsertMiss(t *testing.T) {
 	i, engines := newTestInterceptor(t, nil)
@@ -676,11 +774,11 @@ func TestFailedInsertWithAnUnknownOutcomeKeepsItsKey(t *testing.T) {
 
 	// the failed insert got time tick 101 and was not in the WAL: observe passes
 	// 101 without meeting it, and only the second insert stays.
-	decider := i.registry.get(testVChannel).decider
+	auth := i.ch.Decider(testVChannel)
 	require.Equal(t, 2, inflightLen(i))
-	dedup.ObserveTimeTickForTest(decider, 100)
+	dedup.ObserveTimeTickForTest(auth, 100)
 	require.Equal(t, 2, inflightLen(i))
-	dedup.ObserveTimeTickForTest(decider, 101)
+	dedup.ObserveTimeTickForTest(auth, 101)
 	require.Equal(t, 1, inflightLen(i))
 }
 
@@ -776,14 +874,36 @@ func TestFailedCommitOfAnInsertHitWithAnUnknownOutcomeKeepsItsKeys(t *testing.T)
 	require.True(t, presentOf(t, i, dedup.Int64PK(2)))
 }
 
+// TestInsertFailsWhenTheIndexIsUnavailable covers a write that finds the engine
+// of its index closed: the index closes only with the WAL, so the client sees
+// the on-shutdown error and retries on the next owner of the channel.
 func TestInsertFailsWhenTheIndexIsUnavailable(t *testing.T) {
 	i, engines := newTestInterceptor(t, nil)
-	require.NoError(t, engines.of(t, testVChannel).Close())
+	require.NoError(t, engines.of(t, testVChannel).idx.EngineForTest().Close())
 	f := newFakeAppender()
 
 	_, err := i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
-	requireInner(t, err)
+	requireOnShutdown(t, err)
 	require.Empty(t, f.types, "nothing may be appended when the index lookup failed")
+}
+
+// TestInsertFailsWhenTheIndexIsRemoved covers a write that still finds the
+// target of an index that the Channel already closed.
+func TestInsertFailsWhenTheIndexIsRemoved(t *testing.T) {
+	i, _ := newTestInterceptor(t, nil)
+	i.ch.RemoveForTest(context.Background(), testVChannel)
+	f := newFakeAppender()
+
+	_, err := i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
+	requireOnShutdown(t, err)
+	require.Empty(t, f.types, "nothing may be appended when the index lookup failed")
+}
+
+func TestDecideErrorClassification(t *testing.T) {
+	require.ErrorIs(t, decideError(context.Canceled), context.Canceled)
+	require.ErrorIs(t, decideError(errors.Wrap(context.DeadlineExceeded, "lookup")), context.DeadlineExceeded)
+	requireOnShutdown(t, decideError(errors.Wrap(engine.ErrClosed, "lookup")))
+	requireInner(t, decideError(errors.New("disk read failed")))
 }
 
 // A decider whose writes wait for observe makes DoAppend return
@@ -792,7 +912,7 @@ func TestInsertFailsWhenTheIndexIsUnavailable(t *testing.T) {
 // An autocommit delete needs no decision, so it does not wait.
 func TestWriteThatWaitsReturnsWaitRequired(t *testing.T) {
 	i, _ := newTestInterceptor(t, nil)
-	decider := i.registry.get(testVChannel).decider
+	decider := i.ch.Decider(testVChannel)
 	dedup.WaitUntilForTest(decider, 50)
 	f := newFakeAppender()
 
@@ -815,10 +935,10 @@ func TestWriteThatWaitsReturnsWaitRequired(t *testing.T) {
 	waitDone := make(chan error, 1)
 	go func() { waitDone <- wait.Wait(context.Background()) }()
 	decider.Close()
-	requireInner(t, <-waitDone)
+	requireOnShutdown(t, <-waitDone)
 
 	i, _ = newTestInterceptor(t, nil)
-	decider = i.registry.get(testVChannel).decider
+	decider = i.ch.Decider(testVChannel)
 	dedup.WaitUntilForTest(decider, 50)
 	f = newFakeAppender()
 	_, err = i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
@@ -1124,11 +1244,26 @@ func TestCommitFailsWhenTheIndexIsUnavailable(t *testing.T) {
 	f := newFakeAppender()
 	_, err := i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 11).WithTxnContext(txnCtx), f.append)
 	require.NoError(t, err)
-	require.NoError(t, engine.Close())
+	require.NoError(t, engine.idx.EngineForTest().Close())
 
 	f2 := newFakeAppender()
 	_, err = i.DoAppend(newTestAppendContext(), newCommit(testVChannel, txnCtx), f2.append)
-	requireInner(t, err)
+	requireOnShutdown(t, err)
+	require.Empty(t, f2.types, "nothing may be appended when the index lookup failed")
+}
+
+func TestCommitFailsWhenTheChannelIsClosed(t *testing.T) {
+	i, _ := newTestInterceptor(t, nil)
+	txnCtx := message.TxnContext{TxnID: 47, Keepalive: time.Hour}
+
+	f := newFakeAppender()
+	_, err := i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 11).WithTxnContext(txnCtx), f.append)
+	require.NoError(t, err)
+	i.ch.Close()
+
+	f2 := newFakeAppender()
+	_, err = i.DoAppend(newTestAppendContext(), newCommit(testVChannel, txnCtx), f2.append)
+	requireOnShutdown(t, err)
 	require.Empty(t, f2.types, "nothing may be appended when the index lookup failed")
 }
 
@@ -1136,7 +1271,7 @@ func TestCommitFailsWhenTheIndexIsUnavailable(t *testing.T) {
 func newTestTxnSession(t *testing.T) (*txn.TxnManager, *txn.TxnSession) {
 	t.Helper()
 	resource.InitForTest(t)
-	manager := txn.NewTxnManager(types.PChannelInfo{Name: "by-dev-rootcoord-dml_0"}, nil)
+	manager := txn.NewTxnManager(types.PChannelInfo{Name: testPChannel}, nil)
 	<-manager.RecoverDone()
 	begin := message.NewBeginTxnMessageBuilderV2().
 		WithVChannel(testVChannel).
@@ -1171,20 +1306,20 @@ func TestTimeTickDropsThePendingWritesOfEndedTxns(t *testing.T) {
 	txnID := int64(txnCtx.TxnID)
 
 	i, _ := newTestInterceptor(t, manager)
-	target := i.registry.get(testVChannel)
+	target := i.ch.Decider(testVChannel)
 
 	for _, pk := range []int64{7, 8} {
 		_, err := i.DoAppend(newTestAppendContext(), newInsert(testVChannel, pk).WithTxnContext(txnCtx), newFakeAppender().append)
 		require.NoError(t, err)
 	}
-	require.Equal(t, []int64{txnID}, dedup.PendingTxnIDsForTest(target.decider))
+	require.Equal(t, []int64{txnID}, dedup.PendingTxnIDsForTest(target))
 
 	// the session is alive, so a TimeTick keeps the pending writes.
 	f := newFakeAppender()
 	_, err := i.DoAppend(newTestAppendContext(), newTimeTick(20), f.append)
 	require.NoError(t, err)
 	require.Equal(t, []message.MessageType{message.MessageTypeTimeTick}, f.types, "the TimeTick passes through")
-	require.Equal(t, []int64{txnID}, dedup.PendingTxnIDsForTest(target.decider))
+	require.Equal(t, []int64{txnID}, dedup.PendingTxnIDsForTest(target))
 
 	// an exclusive DDL fails the transaction. The manager forgets the session.
 	manager.FailTxnAtVChannel(testVChannel)
@@ -1193,7 +1328,7 @@ func TestTimeTickDropsThePendingWritesOfEndedTxns(t *testing.T) {
 
 	_, err = i.DoAppend(newTestAppendContext(), newTimeTick(21), newFakeAppender().append)
 	require.NoError(t, err)
-	require.Empty(t, dedup.PendingTxnIDsForTest(target.decider), "the pending writes of an ended transaction must be dropped")
+	require.Empty(t, dedup.PendingTxnIDsForTest(target), "the pending writes of an ended transaction must be dropped")
 
 	// a commit that still arrives has nothing to apply.
 	f2 := newFakeAppender()
@@ -1246,9 +1381,7 @@ func TestVChannelWithoutTargetPassesThrough(t *testing.T) {
 // ===== collection lifecycle =====
 
 func TestCreateAndDropCollectionMaintainTheRegistry(t *testing.T) {
-	newTestEngines(t)
-	i := &appendInterceptor{registry: newRegistry(), sessions: nil, metrics: newMetrics()}
-	defer i.Close()
+	i, _ := newEmptyTestInterceptor(t, newTestIndexEnv(t), nil)
 	f := newFakeAppender()
 
 	_, err := i.DoAppend(newTestAppendContext(), newCreateCollection(testVChannel, testSchema(false)), f.append)
@@ -1262,6 +1395,7 @@ func TestCreateAndDropCollectionMaintainTheRegistry(t *testing.T) {
 	_, err = i.DoAppend(newTestAppendContext(), newDropCollection(testVChannel), f.append)
 	require.NoError(t, err)
 	require.Nil(t, i.registry.get(testVChannel))
+	require.Nil(t, i.ch.IndexForTest(testVChannel), "a dropped collection closes its index")
 
 	before := len(f.types)
 	_, err = i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 2), f.append)
@@ -1270,9 +1404,7 @@ func TestCreateAndDropCollectionMaintainTheRegistry(t *testing.T) {
 }
 
 func TestCreateCollectionAfterDropBuildsAFreshIndex(t *testing.T) {
-	newTestEngines(t)
-	i := &appendInterceptor{registry: newRegistry(), sessions: nil, metrics: newMetrics()}
-	defer i.Close()
+	i, _ := newEmptyTestInterceptor(t, newTestIndexEnv(t), nil)
 	f := newFakeAppender()
 
 	_, err := i.DoAppend(newTestAppendContext(), newCreateCollection(testVChannel, testSchema(false)), f.append)
@@ -1295,9 +1427,7 @@ func TestCreateCollectionAfterDropBuildsAFreshIndex(t *testing.T) {
 }
 
 func TestCreateCollectionOfAutoIDHasNoTarget(t *testing.T) {
-	newTestEngines(t)
-	i := &appendInterceptor{registry: newRegistry(), sessions: nil, metrics: newMetrics()}
-	defer i.Close()
+	i, _ := newEmptyTestInterceptor(t, newTestIndexEnv(t), nil)
 	f := newFakeAppender()
 
 	_, err := i.DoAppend(newTestAppendContext(), newCreateCollection(testVChannel, testSchema(true)), f.append)
@@ -1306,38 +1436,35 @@ func TestCreateCollectionOfAutoIDHasNoTarget(t *testing.T) {
 }
 
 func TestCreateCollectionRejectedWhenTheIndexCanNotBeCreated(t *testing.T) {
-	RegisterEngineFactory(func(string) (Engine, error) {
-		return nil, errors.New("disk is full")
-	})
-	t.Cleanup(func() { RegisterEngineFactory(NewMemoryEngine) })
-	i := &appendInterceptor{registry: newRegistry(), sessions: nil, metrics: newMetrics()}
-	defer i.Close()
+	i, _ := newEmptyTestInterceptor(t, newTestIndexEnvAt(t, newBrokenRoot(t)), nil)
 	f := newFakeAppender()
 
 	_, err := i.DoAppend(newTestAppendContext(), newCreateCollection(testVChannel, testSchema(false)), f.append)
 	require.Error(t, err)
 	require.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE, status.AsStreamingError(err).Code)
-	require.ErrorContains(t, err, "disk is full")
+	require.ErrorContains(t, err, "not a directory")
 	require.Empty(t, f.types, "the create collection message must not reach the WAL")
 	require.Nil(t, i.registry.get(testVChannel))
 }
 
 func TestCreateCollectionAppendFailureRemovesTheTarget(t *testing.T) {
-	newTestEngines(t)
-	i := &appendInterceptor{registry: newRegistry(), sessions: nil, metrics: newMetrics()}
-	defer i.Close()
+	env := newTestIndexEnv(t)
+	i, _ := newEmptyTestInterceptor(t, env, nil)
 
 	appendErr := errors.New("wal is closed")
 	_, err := i.DoAppend(newTestAppendContext(), newCreateCollection(testVChannel, testSchema(false)),
 		func(context.Context, message.MutableMessage) (message.MessageID, error) { return nil, appendErr })
 	require.ErrorIs(t, err, appendErr)
 	require.Nil(t, i.registry.get(testVChannel))
+	require.Nil(t, i.ch.IndexForTest(testVChannel), "the index of a collection that was not created is closed")
+	require.NoDirExists(t, filepath.Join(env.root, testVChannel), "a retry of the create opens an index with no leftover")
 }
 
 func TestDuplicateCreateCollectionAppendFailureKeepsTheTarget(t *testing.T) {
 	i, engines := newTestInterceptor(t, nil)
 	engines.of(t, testVChannel).put(t, 1, 100)
 	existing := i.registry.get(testVChannel)
+	existingIdx := i.ch.IndexForTest(testVChannel)
 
 	// The shard interceptor lets a duplicate CreateCollection pass, so it reaches
 	// this interceptor while the target of the collection is in use.
@@ -1346,7 +1473,10 @@ func TestDuplicateCreateCollectionAppendFailureKeepsTheTarget(t *testing.T) {
 		func(context.Context, message.MutableMessage) (message.MessageID, error) { return nil, appendErr })
 	require.ErrorIs(t, err, appendErr)
 	require.Same(t, existing, i.registry.get(testVChannel))
-	require.Len(t, engines.engines, 1)
+	require.Same(t, existingIdx, i.ch.IndexForTest(testVChannel), "the index in use stays open")
+	seg, ok := engines.of(t, testVChannel).segmentOf(t, 1)
+	require.True(t, ok, "the index keeps its data")
+	require.EqualValues(t, 100, seg)
 
 	f := newFakeAppender()
 	_, err = i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
@@ -1361,9 +1491,8 @@ func TestDuplicateCreateCollectionAppendFailureKeepsTheTarget(t *testing.T) {
 }
 
 func TestRegistryAddRejectsAnUnusableSchema(t *testing.T) {
-	newTestEngines(t)
-	r := newRegistry()
-	defer r.close(context.Background())
+	r := newRegistry(newTestIndexEnv(t).openChannel(0))
+	defer r.close()
 
 	noPK := testSchema(false)
 	noPK.Fields[0].IsPrimaryKey = false
@@ -1375,31 +1504,30 @@ func TestRegistryAddRejectsAnUnusableSchema(t *testing.T) {
 	_, err = r.add(context.Background(), testVChannel, testCollectionID, floatPK)
 	require.Error(t, err)
 	require.Nil(t, r.get(testVChannel))
+	require.Nil(t, r.ch.IndexForTest(testVChannel), "a rejected schema opens no index")
 }
 
 func TestRegistryAddIsIdempotent(t *testing.T) {
-	engines := newTestEngines(t)
-	r := newRegistry()
-	defer r.close(context.Background())
+	r := newRegistry(newTestIndexEnv(t).openChannel(0))
+	defer r.close()
 
 	created, err := r.add(context.Background(), testVChannel, testCollectionID, testSchema(false))
 	require.NoError(t, err)
 	require.True(t, created)
 	first := r.get(testVChannel)
+	firstIdx := r.ch.IndexForTest(testVChannel)
 	created, err = r.add(context.Background(), testVChannel, testCollectionID, testSchema(false))
 	require.NoError(t, err)
 	require.False(t, created)
 	require.Same(t, first, r.get(testVChannel))
-	require.Len(t, engines.engines, 1)
+	require.Same(t, firstIdx, r.ch.IndexForTest(testVChannel), "a second add opens no second index")
 }
 
 func TestCreateCollectionOnControlChannelHasNoTarget(t *testing.T) {
-	newTestEngines(t)
-	i := &appendInterceptor{registry: newRegistry(), sessions: nil, metrics: newMetrics()}
-	defer i.Close()
+	i, _ := newEmptyTestInterceptor(t, newTestIndexEnv(t), nil)
 	f := newFakeAppender()
 
-	controlChannel := funcutil.GetControlChannel("by-dev-rootcoord-dml_0")
+	controlChannel := funcutil.GetControlChannel(testPChannel)
 	require.True(t, funcutil.IsControlChannel(controlChannel))
 	_, err := i.DoAppend(newTestAppendContext(), newCreateCollection(controlChannel, testSchema(false)), f.append)
 	require.NoError(t, err)
