@@ -229,6 +229,9 @@ func (m *PChannelRecoveryManager) ConsumeCleanupSnapshots(cleanup moduleapi.Clea
 	candidates := m.cleanupModules
 	m.cleanupModules = nil
 	m.dirtyMu.Unlock()
+	if cleanup.CheckpointReported == nil && m.checkpointUpdater != nil {
+		cleanup.CheckpointReported = m.checkpointUpdater.Reported
+	}
 	var snapshots []moduleapi.DirtySnapshot
 	for _, module := range candidates {
 		snapshots = append(snapshots, module.ConsumeCleanupSnapshots(cleanup)...)
@@ -421,6 +424,9 @@ func (m *PChannelRecoveryManager) removeModule(module *VChannelRecoveryModule) {
 		delete(m.cleanupModules, module.vchannel)
 	}
 	m.dirtyMu.Unlock()
+	if m.checkpointUpdater != nil {
+		m.checkpointUpdater.Forget(module.vchannel)
+	}
 	// Report the GC boundary to the summary: the dropped vchannel's cleanup
 	// snapshot is durable, so its records — staged or already chunked — may
 	// be released by retention GC.
