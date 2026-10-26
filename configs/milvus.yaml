@@ -916,6 +916,11 @@ dataCoord:
     # mix is prioritized by level: mix compactions first, then L0 compactions, then clustering compactions.
     taskPrioritizer: level
     taskQueueCapacity: 100000 # compaction task queue size
+    # Soft cap on pending and running compaction tasks: once reached, automatic compaction, including sort compaction and
+    # target-based compaction, stops planning and submitting tasks, so concurrent submissions can briefly exceed it.
+    # Manual compaction, import and the sort of clustering compaction outputs are not capped, nor is the sort of flushed
+    # segments while automatic compaction is disabled. 0 or a negative value means unlimited.
+    maxTaskNum: 0
     rpcTimeout: 10
     maxParallelTaskNum: -1 # Deprecated, see datanode.slot.slotCap
     dropTolerance: 3600 # Compaction task will be cleaned after finish longer than this time(in seconds)

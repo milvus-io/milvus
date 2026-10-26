@@ -799,9 +799,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         const std::string& warmup_policy,
         RuntimeResourceState* runtime);
 
-    static TimestampIndex
-    build_timestamp_index(const Timestamp* data, size_t num_rows);
-
     template <typename PK>
     void
     search_sorted_pk_range_impl(

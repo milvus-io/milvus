@@ -42,7 +42,7 @@ func TestCurrentSplitForGrowingPackFillsNewSplitFormats(t *testing.T) {
 	}}
 	meta := &streamingpb.SegmentAssignmentMeta{StorageVersion: storage.StorageV3}
 
-	columnGroups, err := currentSplitForGrowingPack(schema, nil, meta)
+	columnGroups, err := currentSplitForGrowingPack(context.Background(), schema, nil, meta, nil)
 	require.NoError(t, err)
 
 	require.NotEmpty(t, columnGroups)
@@ -174,7 +174,7 @@ func TestCurrentSplitForNewGrowingPackFillsFormats(t *testing.T) {
 		StorageVersion: storage.StorageV3,
 	}
 
-	currentSplit, err := currentSplitForGrowingPack(testGrowingPackSchema(), nil, meta)
+	currentSplit, err := currentSplitForGrowingPack(context.Background(), testGrowingPackSchema(), nil, meta, nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, currentSplit)
 	wantFormat := paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
@@ -202,7 +202,7 @@ func TestCurrentSplitForGrowingPackPreservesPersistedManifestFormat(t *testing.T
 		},
 	}
 
-	currentSplit, err := currentSplitForGrowingPack(testGrowingPackSchema(), nil, meta)
+	currentSplit, err := currentSplitForGrowingPack(context.Background(), testGrowingPackSchema(), nil, meta, nil)
 	require.NoError(t, err)
 	require.Len(t, currentSplit, 2)
 	require.Equal(t, "vortex", currentSplit[0].Format)
@@ -224,7 +224,7 @@ func TestCurrentSplitForGrowingPackDoesNotGuessPersistedV3Format(t *testing.T) {
 		},
 	}
 
-	currentSplit, err := currentSplitForGrowingPack(testGrowingPackSchema(), nil, meta)
+	currentSplit, err := currentSplitForGrowingPack(context.Background(), testGrowingPackSchema(), nil, meta, nil)
 	require.NoError(t, err)
 	require.Len(t, currentSplit, 2)
 	require.Empty(t, currentSplit[0].Format)
@@ -302,7 +302,7 @@ func TestCurrentSplitForGrowingPackHandlesLegacyFieldBinlogs(t *testing.T) {
 				}}},
 			},
 		}
-		groups, err := currentSplitForGrowingPack(testGrowingPackSchema(), nil, meta)
+		groups, err := currentSplitForGrowingPack(context.Background(), testGrowingPackSchema(), nil, meta, nil)
 		require.NoError(t, err)
 		if version == storage.StorageV1 {
 			require.Empty(t, groups, "StorageV1 writes per-field binlogs without column groups")

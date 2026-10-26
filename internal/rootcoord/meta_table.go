@@ -248,9 +248,20 @@ func (mt *MetaTable) reload() error {
 		mt.aliases.createDbIfNotExist(util.DefaultDBName)
 	}
 
+	// Collections stored without a database are listed under util.NonDBID.
+	dbIDs := make([]int64, 0, len(mt.dbName2Meta)+1)
+	dbIDs = append(dbIDs, util.NonDBID)
+	for _, db := range mt.dbName2Meta {
+		dbIDs = append(dbIDs, db.ID)
+	}
+	collectionsByDB, err := mt.catalog.ListCollectionsForRecovery(mt.ctx, dbIDs, typeutil.MaxTimestamp)
+	if err != nil {
+		return err
+	}
+
 	// in order to support backward compatibility with meta of the old version, it also
 	// needs to reload collections that have no database
-	if err := mt.reloadWithNonDatabase(); err != nil {
+	if err := mt.reloadWithNonDatabase(collectionsByDB[util.NonDBID]); err != nil {
 		return err
 	}
 
@@ -262,11 +273,7 @@ func (mt *MetaTable) reload() error {
 		mt.names.createDbIfNotExist(dbName)
 
 		start := time.Now()
-		// TODO: async list collections to accelerate cases with multiple databases.
-		collections, err := mt.catalog.ListCollections(mt.ctx, db.ID, typeutil.MaxTimestamp)
-		if err != nil {
-			return err
-		}
+		collections := collectionsByDB[db.ID]
 		for _, collection := range collections {
 			if collection.DBName != "" && collection.DBName != dbName {
 				mlog.Warn(mt.ctx,
@@ -349,14 +356,9 @@ func (mt *MetaTable) reload() error {
 }
 
 // insert into default database if the collections doesn't inside some database
-func (mt *MetaTable) reloadWithNonDatabase() error {
+func (mt *MetaTable) reloadWithNonDatabase(oldCollections []*model.Collection) error {
 	collectionNum := int64(0)
 	partitionNum := int64(0)
-	oldCollections, err := mt.catalog.ListCollections(mt.ctx, util.NonDBID, typeutil.MaxTimestamp)
-	if err != nil {
-		return err
-	}
-
 	for _, collection := range oldCollections {
 		ensureCollectionMaxFieldIDProperty(collection)
 		mt.collID2Meta[collection.CollectionID] = collection
