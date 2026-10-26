@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -74,6 +75,18 @@ type HandlersV2 struct {
 // The probe NewHandlersV2 asserts for must stay on the concrete proxy: a
 // rename must fail the build rather than silently disable admission.
 var _ interface{ IsDQLQueueFull() bool } = (*proxy.Proxy)(nil)
+
+// searchExplainer is the Go-only method behind the explain route. It is not
+// part of types.ProxyComponent because there is no such RPC; the REST server
+// runs in the proxy process and reaches the concrete type directly, asserting
+// for it on h.proxy per request.
+type searchExplainer interface {
+	ExplainSearch(ctx context.Context, request *milvuspb.SearchRequest) (*planparserv2.PlanExplanation, error)
+}
+
+// Same reason as the admission probe: a rename must fail the build, not turn
+// every explain request into "service unimplemented".
+var _ searchExplainer = (*proxy.Proxy)(nil)
 
 func NewHandlersV2(proxyClient types.ProxyComponent) *HandlersV2 {
 	h := &HandlersV2{
@@ -167,6 +180,7 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 	"/v2/vectordb/entities/insert":          "Insert",
 	"/v2/vectordb/entities/upsert":          "Upsert",
 	"/v2/vectordb/entities/search":          "Search",
+	"/v2/vectordb/entities/explain":         "ExplainSearch",
 	"/v2/vectordb/entities/advanced_search": "HybridSearch",
 	"/v2/vectordb/entities/hybrid_search":   "HybridSearch",
 
@@ -324,7 +338,7 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	// Search
 	router.POST(EntityCategory+SearchAction, h.dqlAdmission(restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
 		return &SearchReqV2{
-			Limit: 100,
+			Limit: defaultSearchLimit,
 		}
 	}, wrapperTraceLog(h.search))), true)))
 	// advanced_search, backward compatible uri
@@ -339,6 +353,15 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 			Limit: 100,
 		}
 	}, wrapperTraceLog(h.advancedSearch))), true)))
+	// Not behind the DQL middlewares: no search task is enqueued
+	// (dqlAdmission), the answer is one explanation, not a result set
+	// (dqlTimeoutMiddleware), and the byte metrics are labeled inside
+	// Proxy.Search, which explain never calls (restfulSizeMiddleware).
+	router.POST(EntityCategory+ExplainAction, timeoutMiddleware(wrapperPost(func() any {
+		return &ExplainReqV2{
+			SearchReqV2: SearchReqV2{Limit: defaultSearchLimit},
+		}
+	}, wrapperTraceLog(h.explain))))
 
 	router.POST(PartitionCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.listPartitions))))
 	router.POST(PartitionCategory+HasAction, timeoutMiddleware(wrapperPost(func() any { return &PartitionReq{} }, wrapperTraceLog(h.hasPartitions))))
@@ -697,6 +720,13 @@ func getTraceLogRequestFieldWithoutSensitiveInfo(req any) mlog.Field {
 		redactedReq := *request
 		redactedReq.ExprParams = redactExprParams(request.ExprParams)
 		return mlog.Any("request", &redactedReq)
+	case *ExplainReqV2:
+		if request == nil {
+			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
+		}
+		// logged as the search body it embeds, which the *SearchReqV2 arm
+		// redacts; format is not sensitive and the route is in the base info
+		return getTraceLogRequestFieldWithoutSensitiveInfo(&request.SearchReqV2)
 	case *HybridSearchReq:
 		if request == nil || !hasExprParams(request.Search) {
 			return proxy.GetRequestFieldWithoutSensitiveInfo(req)
@@ -2484,6 +2514,69 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		}
 	}
 	return resp, err
+}
+
+// explain returns the plan the search body would send to the query nodes,
+// without running it. The body becomes a SearchRequest and is authorized
+// exactly as a search is; the proxy then stops after PreExecute instead of
+// enqueuing the task.
+func (h *HandlersV2) explain(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*ExplainReqV2)
+	format := httpReq.Format
+	if format == "" {
+		format = ExplainFormatJSON
+	}
+	if format != ExplainFormatJSON && format != ExplainFormatText {
+		err := merr.WrapErrParameterInvalidMsg("format must be %q or %q, got %q", ExplainFormatJSON, ExplainFormatText, format)
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
+	req, _, err := h.buildSearchRequest(ctx, c, &httpReq.SearchReqV2, dbName)
+	if err != nil {
+		return nil, err
+	}
+	// There is no ExplainSearch RPC. Hooks see this name, and its last
+	// segment is the route's routeToMethod tag. The forward interceptor
+	// matches the DML/DQL RPC names exactly; with the Search name it would
+	// run a real search on a legacy proxy in standalone mode.
+	resp, err := h.wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/ExplainSearch", func(reqCtx context.Context, req any) (interface{}, error) {
+		explainer, ok := h.proxy.(searchExplainer)
+		if !ok {
+			return nil, merr.Wrap(merr.ErrServiceUnimplemented, "explain is only served by the proxy that hosts this REST server")
+		}
+		explanation, err := explainer.ExplainSearch(reqCtx, req.(*milvuspb.SearchRequest))
+		if err != nil {
+			// A status, as Proxy.Search reports a failed task: the request was
+			// processed, so the metric counts a failure, not a rejection.
+			return merr.Status(err), nil
+		}
+		return explanation, nil
+	})
+	if err != nil {
+		return resp, err
+	}
+	// A hook that mocks search requests by type answers with search results,
+	// since the request type is the one search uses.
+	explanation, ok := resp.(*planparserv2.PlanExplanation)
+	if !ok {
+		err := merr.WrapErrServiceInternalMsg("explain got a %T instead of a plan explanation", resp)
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return merr.Status(err), err
+	}
+	if format == ExplainFormatText {
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: explanation.Text()})
+		return resp, nil
+	}
+	// data is the document PlanExplanation.JSON() defines, embedded as is,
+	// rather than the struct re-encoded by the response writer.
+	doc, err := explanation.JSON()
+	if err != nil {
+		err = merr.WrapErrServiceInternalErr(err, "encode the explanation")
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return merr.Status(err), err
+	}
+	HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: json.RawMessage(doc)})
+	return resp, nil
 }
 
 func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {

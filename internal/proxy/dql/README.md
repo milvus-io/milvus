@@ -20,6 +20,8 @@ via the exported constructors, enqueue it on the scheduler's `DqQueue`/`DdQueue`
 and wait for the result. Execution flows through the search/query pipelines
 (`PreExecute -> Execute -> PostExecute`), which fan out to query nodes via the
 shard client, reduce per-shard results, and reconstruct the final response.
+`ExplainSearch` is the one path that bypasses the scheduler: it builds a
+`SearchTask`, runs only `PreExecute`, and explains the plan it serialized.
 
 ### Tasks
 
@@ -93,6 +95,9 @@ func NewQueryTask(node taskmodel.TaskNode, ctx context.Context,
 
 func NewGetStatisticsTask(node taskmodel.TaskNode, ctx context.Context,
     request *milvuspb.GetStatisticsRequest, tr *timerecord.TimeRecorder) *GetStatisticsTask
+
+func ExplainSearch(ctx context.Context, node taskmodel.TaskNode,
+    request *milvuspb.SearchRequest) (*planparserv2.PlanExplanation, error)
 
 func ConvertHybridSearchToSearch(req *milvuspb.HybridSearchRequest) *milvuspb.SearchRequest
 func PickFieldData(ids *schemapb.IDs, pkOffset map[any]int,

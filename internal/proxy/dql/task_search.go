@@ -109,6 +109,11 @@ type SearchTask struct {
 	resultSizeInsufficient bool
 	isTopkReduce           bool
 	isRecallEvaluation     bool
+	// planOnly marks a task that runs PreExecute only, never Execute.
+	// PreExecute then skips embedding the query text through the
+	// collection's model provider; a new PreExecute step that calls a query
+	// node or a model provider must check it too.
+	planOnly bool
 
 	translatedOutputFields []string
 	userOutputFields       []string
@@ -900,7 +905,7 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		}
 	}
 
-	if embedding.HasNonBM25AndMinHashFunctions(t.schema.Functions, queryFieldIDs) {
+	if !t.planOnly && embedding.HasNonBM25AndMinHashFunctions(t.schema.Functions, queryFieldIDs) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AdvancedSearch-call-function-udf")
 		defer sp.End()
 		exec, err := embedding.NewFunctionExecutor(t.schema.CollectionSchema, nil, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: t.request.GetDbName()})
@@ -1309,7 +1314,7 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 	t.GroupByFieldId = queryInfo.GroupByFieldId
 	t.GroupByFieldIds = queryInfo.GroupByFieldIds
 	t.GroupSize = queryInfo.GroupSize
-	if embedding.HasNonBM25AndMinHashFunctions(t.schema.Functions, []int64{queryInfo.GetQueryFieldId()}) {
+	if !t.planOnly && embedding.HasNonBM25AndMinHashFunctions(t.schema.Functions, []int64{queryInfo.GetQueryFieldId()}) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-call-function-udf")
 		defer sp.End()
 		exec, err := embedding.NewFunctionExecutor(t.schema.CollectionSchema, nil, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: t.request.GetDbName()})

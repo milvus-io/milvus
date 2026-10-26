@@ -67,6 +67,7 @@ const (
 	AdvancedSearchAction = "advanced_search"
 	CancelAction         = "cancel"
 	HybridSearchAction   = "hybrid_search"
+	ExplainAction        = "explain"
 
 	UpdatePasswordAction            = "update_password"
 	GrantRoleAction                 = "grant_role"
@@ -143,6 +144,8 @@ const (
 	HTTPAliasName           = "aliasName"
 	HTTPRequestData         = "data"
 	HTTPRequestDefaultValue = "defaultValue"
+	ExplainFormatJSON       = "json"
+	ExplainFormatText       = "text"
 	DefaultDbName           = "default"
 	DefaultIndexName        = "vector_idx"
 	DefaultAliasName        = "the_alias"
@@ -229,6 +232,10 @@ const (
 
 	Dim = "dim"
 )
+
+// defaultSearchLimit is the limit a search body omits. Explain hands the proxy
+// the request search would, so both routes set it from here.
+const defaultSearchLimit = 100
 
 const (
 	Params               = proxy.ParamsKey

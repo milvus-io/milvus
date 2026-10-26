@@ -54,6 +54,8 @@ func RunMilvus(args []string) {
 		c = &dryRun{}
 	case MckCmd:
 		c = &mck{}
+	case ExplainCmd:
+		c = &explain{}
 	default:
 		c = &defaultCommand{}
 	}
