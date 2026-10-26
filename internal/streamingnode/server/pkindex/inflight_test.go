@@ -100,40 +100,43 @@ func TestFillInRacesWithObserve(t *testing.T) {
 	require.Equal(t, int64PKs(1), companion)
 }
 
-// Observe and the fill-in each store a time tick and then read the other's.
-// When one side runs exactly between the store and the read of the other, the
-// write must still leave the set. Each case fails if its side reads first and
-// stores after.
+// Observe and the fill-in can run in either order. The write must leave the set
+// in both orders, and so must a write with an unknown outcome.
 func TestFillInAndObserveOrder(t *testing.T) {
 	pks := int64PKs(1, 2)
-	t.Run("fill-in between the observed store and the removal", func(t *testing.T) {
+	t.Run("fill-in after observe passed its time tick", func(t *testing.T) {
 		var s inflightSet
 		w, _ := s.register(pks)
-		s.afterObservedStore = func() {
-			s.afterObservedStore = nil
-			s.fill(w, 10)
-		}
 		s.observe(10, pks)
-		require.Equal(t, 0, s.len())
-	})
-	t.Run("observe between the fill-in and the observed read", func(t *testing.T) {
-		var s inflightSet
-		w, _ := s.register(pks)
-		s.afterFill = func() {
-			s.afterFill = nil
-			s.observe(10, pks)
-		}
+		require.Equal(t, 2, s.len(), "observe skips a write that is not filled in")
 		s.fill(w, 10)
 		require.Equal(t, 0, s.len())
+		require.Nil(t, s.keys)
 	})
-	t.Run("observe between the uncertain mark and the observed read", func(t *testing.T) {
+	t.Run("observe after the fill-in", func(t *testing.T) {
 		var s inflightSet
 		w, _ := s.register(pks)
-		s.afterFill = func() {
-			s.afterFill = nil
-			s.observeTimeTick(10)
-		}
+		s.fill(w, 10)
+		require.Equal(t, 2, s.len())
+		s.observe(10, pks)
+		require.Equal(t, 0, s.len())
+		require.Nil(t, s.keys)
+	})
+	t.Run("uncertain mark after observe passed its time tick", func(t *testing.T) {
+		var s inflightSet
+		w, _ := s.register(pks)
+		s.observeTimeTick(10)
 		s.markUncertain(w, 10)
+		require.Equal(t, 0, s.len())
+		require.Empty(t, s.uncertain)
+	})
+	t.Run("observe after the uncertain mark", func(t *testing.T) {
+		var s inflightSet
+		w, _ := s.register(pks)
+		s.markUncertain(w, 10)
+		require.Equal(t, 2, s.len())
+		require.Len(t, s.uncertain, 1)
+		s.observeTimeTick(10)
 		require.Equal(t, 0, s.len())
 		require.Empty(t, s.uncertain)
 	})
@@ -151,19 +154,15 @@ func TestRegisterDeduplicatesKeys(t *testing.T) {
 	for i := range values {
 		values[i] = int64(r.Intn(300))
 	}
-	keys, shards := groupByShard(int64PKs(values...))
+	keys := lockKeys(int64PKs(values...))
 	distinct := make(map[int64]struct{})
 	for _, v := range values {
 		distinct[v] = struct{}{}
 	}
 	require.Len(t, keys, len(distinct))
-	require.True(t, slices.IsSorted(shards))
-	seen := make(map[uint64]struct{}, len(keys))
-	for i, key := range keys {
-		require.Equal(t, shardOf(key), shards[i])
-		_, dup := seen[key]
-		require.False(t, dup)
-		seen[key] = struct{}{}
+	require.True(t, slices.IsSorted(keys))
+	for i := 1; i < len(keys); i++ {
+		require.NotEqual(t, keys[i-1], keys[i])
 	}
 }
 
@@ -291,9 +290,7 @@ func TestInflightStressWithObserve(t *testing.T) {
 	}
 	require.Equal(t, int64(len(distinct)), misses.Load(), "every key misses exactly once")
 	require.Equal(t, 0, d.InflightLenForTest(), "no entry outlives observe")
-	for i := range d.inflight.shards {
-		require.Nil(t, d.inflight.shards[i].keys, "an empty shard map is dropped")
-	}
+	require.Nil(t, d.inflight.keys, "an empty map is dropped")
 }
 
 // The second writer of a key waits until the first one filled in its time tick,
