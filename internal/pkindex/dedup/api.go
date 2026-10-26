@@ -46,11 +46,10 @@ type Decider interface {
 	// on that wait itself: the caller may hold a lock that observe needs.
 	Decide(ctx context.Context, req DecideRequest) (*WriteIntent, error)
 
-	// PendingTxnIDs returns the transactions that have pending writes.
-	PendingTxnIDs() []int64
-
-	// DropTxn forgets the pending writes of a transaction that expired or was failed.
-	DropTxn(txnID int64)
+	// DropEndedTxns forgets the pending writes of every transaction for which
+	// ended returns true: one that expired or was failed, so that no CommitTxn
+	// or RollbackTxn will end it. ended runs under a lock of the decider.
+	DropEndedTxns(ended func(txnID int64) bool)
 
 	// Close stops the decider: a later Decide fails. It does not wait for the
 	// open intents, they end on their own, and it does not close the engine:

@@ -35,7 +35,7 @@ func (i *WriteIntent) Committed(_ context.Context, tt uint64) {
 
 	switch {
 	case i.req.Kind == KindRollbackTxn:
-		i.d.DropTxn(i.req.TxnID)
+		i.d.dropTxn(i.req.TxnID)
 	case i.req.Kind == KindCommitTxn:
 		if i.txn == nil {
 			return
@@ -54,7 +54,7 @@ func (i *WriteIntent) Committed(_ context.Context, tt uint64) {
 				"a producer must wait for the result of every body before it appends the CommitTxn",
 				i.req.TxnID, i.req.VChannel))
 		}
-		i.d.DropTxn(i.req.TxnID)
+		i.d.dropTxn(i.req.TxnID)
 	case i.req.TxnID != 0:
 		i.d.pendingMu.Lock()
 		txn, ok := i.d.pending[i.req.TxnID]

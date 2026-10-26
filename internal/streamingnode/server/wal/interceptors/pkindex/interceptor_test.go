@@ -1125,14 +1125,14 @@ func TestTimeTickDropsThePendingWritesOfEndedTxns(t *testing.T) {
 		_, err := i.DoAppend(newTestAppendContext(), newInsert(testVChannel, pk).WithTxnContext(txnCtx), newFakeAppender().append)
 		require.NoError(t, err)
 	}
-	require.Equal(t, []int64{txnID}, target.decider.PendingTxnIDs())
+	require.Equal(t, []int64{txnID}, dedup.PendingTxnIDsForTest(target.decider))
 
 	// the session is alive, so a TimeTick keeps the pending writes.
 	f := newFakeAppender()
 	_, err := i.DoAppend(newTestAppendContext(), newTimeTick(20), f.append)
 	require.NoError(t, err)
 	require.Equal(t, []message.MessageType{message.MessageTypeTimeTick}, f.types, "the TimeTick passes through")
-	require.Equal(t, []int64{txnID}, target.decider.PendingTxnIDs())
+	require.Equal(t, []int64{txnID}, dedup.PendingTxnIDsForTest(target.decider))
 
 	// an exclusive DDL fails the transaction. The manager forgets the session.
 	manager.FailTxnAtVChannel(testVChannel)
@@ -1141,7 +1141,7 @@ func TestTimeTickDropsThePendingWritesOfEndedTxns(t *testing.T) {
 
 	_, err = i.DoAppend(newTestAppendContext(), newTimeTick(21), newFakeAppender().append)
 	require.NoError(t, err)
-	require.Empty(t, target.decider.PendingTxnIDs(), "the pending writes of an ended transaction must be dropped")
+	require.Empty(t, dedup.PendingTxnIDsForTest(target.decider), "the pending writes of an ended transaction must be dropped")
 
 	// a commit that still arrives has nothing to apply.
 	f2 := newFakeAppender()

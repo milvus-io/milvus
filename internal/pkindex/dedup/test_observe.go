@@ -51,6 +51,18 @@ func ObserveForTest(ctx context.Context, d Decider, tt uint64, segmentID int64, 
 	return nil
 }
 
+// PendingTxnIDsForTest returns the transactions that have pending writes.
+func PendingTxnIDsForTest(d Decider) []int64 {
+	a := d.(*decider)
+	a.pendingMu.Lock()
+	defer a.pendingMu.Unlock()
+	ids := make([]int64, 0, len(a.pending))
+	for id := range a.pending {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 // ObserveTimeTickForTest is Observe of a TimeTick, for the tests of other
 // packages.
 func ObserveTimeTickForTest(d Decider, tt uint64) {
