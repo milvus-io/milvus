@@ -50,10 +50,10 @@ type inflightSet struct {
 	// raised is closed and replaced by nil when observed rises, which wakes the
 	// waits of waitObserved. It is nil while nobody waits.
 	raised chan struct{}
-	// uncertain holds the writes whose append failed with an unknown outcome.
+	// inDoubt holds the writes whose append failed with an unknown outcome.
 	// Observe removes them by time tick, because such a write may never reach
 	// the WAL and then observe never meets its keys.
-	uncertain []*inflightWrite
+	inDoubt []*inflightWrite
 }
 
 // inflightWrite is one write of one or more keys. All keys of the write share it.
@@ -69,10 +69,10 @@ type inflightWrite struct {
 	done chan struct{}
 }
 
-// register adds one write of pks to the set in one step and returns it with the
-// pending writes it must wait for. The registration is atomic under the mutex,
-// so registrations of overlapping writes are totally ordered and a write waits
-// only for writes registered before it: the waits form no cycle. Per key it is
+// enqueue adds one write of pks to the end of the queue of each key in one step
+// and returns it with the pending writes ahead of it. The step is atomic under
+// the mutex, so the enqueues of overlapping writes are totally ordered and a write waits
+// only for writes enqueued before it: the waits form no cycle. Per key it is
 // enough to wait for the last pending write, because that write waits itself for
 // the ones before it.
 //
@@ -80,14 +80,14 @@ type inflightWrite struct {
 // of keys, is open, and so is the threshold (write-path.md, open items).
 // TODO: the total budget of the set and what to do above it (back pressure or a
 // degraded write) are open.
-func (s *inflightSet) register(pks []PK) (*inflightWrite, []*inflightWrite) {
+func (s *inflightSet) enqueue(pks []PK) (*inflightWrite, []*inflightWrite) {
 	w := &inflightWrite{keys: lockKeys(pks), done: make(chan struct{})}
 
 	// A key without other writes, the common case, gets a queue of one slot of
 	// this array, so a write allocates once and not once per key. Each slot has
 	// capacity 1, so an append to a queue never writes into its neighbor.
 	slots := make([]*inflightWrite, len(w.keys))
-	var earlier []*inflightWrite
+	var ahead []*inflightWrite
 	s.mu.Lock()
 	for i, key := range w.keys {
 		queue := s.keys[key]
@@ -96,8 +96,8 @@ func (s *inflightSet) register(pks []PK) (*inflightWrite, []*inflightWrite) {
 		}
 		for j := len(queue) - 1; j >= 0; j-- {
 			if queue[j].tt == 0 {
-				if !slices.Contains(earlier, queue[j]) {
-					earlier = append(earlier, queue[j])
+				if !slices.Contains(ahead, queue[j]) {
+					ahead = append(ahead, queue[j])
 				}
 				break
 			}
@@ -108,23 +108,23 @@ func (s *inflightSet) register(pks []PK) (*inflightWrite, []*inflightWrite) {
 		s.keys[key] = append(queue, w)
 	}
 	s.mu.Unlock()
-	return w, earlier
+	return w, ahead
 }
 
-// wait blocks until every write in earlier is filled in or removed. When ctx
+// waitAhead blocks until every write in ahead is committed, aborted or in doubt. When ctx
 // ends first, w keeps its place in line until those writes are done and is
 // removed after them: a later write that found w waits only for w, not for the
 // writes w was waiting for.
-func (s *inflightSet) wait(ctx context.Context, w *inflightWrite, earlier []*inflightWrite) error {
-	for _, e := range earlier {
+func (s *inflightSet) waitAhead(ctx context.Context, w *inflightWrite, ahead []*inflightWrite) error {
+	for _, e := range ahead {
 		select {
 		case <-e.done:
 		case <-ctx.Done():
 			go func() {
-				for _, e := range earlier {
+				for _, e := range ahead {
 					<-e.done
 				}
-				s.remove(w)
+				s.abort(w)
 			}()
 			return ctx.Err()
 		}
@@ -132,12 +132,12 @@ func (s *inflightSet) wait(ctx context.Context, w *inflightWrite, earlier []*inf
 	return nil
 }
 
-// presentBefore returns the lock keys of w that have a write registered before
-// w, nil when none has. Such a write is ahead of w in the queue of the key, and
-// w is still in each of its queues. After wait no such write is pending, so each
-// one is filled in or has an unknown outcome: both count as present. Writes
-// registered after w are ignored, they wait for w and take a larger time tick.
-func (s *inflightSet) presentBefore(w *inflightWrite) map[uint64]struct{} {
+// keysAhead returns the lock keys of w that have a write enqueued before w,
+// nil when none has. Such a write is ahead of w in the queue of the key, and
+// w is still in each of its queues. After waitAhead no such write is pending, so each
+// one is committed or in doubt: both count as present. Writes
+// enqueued after w are ignored, they wait for w and take a larger time tick.
+func (s *inflightSet) keysAhead(w *inflightWrite) map[uint64]struct{} {
 	var present map[uint64]struct{}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -152,10 +152,10 @@ func (s *inflightSet) presentBefore(w *inflightWrite) map[uint64]struct{} {
 	return present
 }
 
-// fill records the time tick of w after its append returned and wakes the
+// commit records the time tick of w after its append returned and wakes the
 // writes that wait for it. When observe already passed tt, observe may have
 // skipped w, so w removes itself.
-func (s *inflightSet) fill(w *inflightWrite, tt uint64) {
+func (s *inflightSet) commit(w *inflightWrite, tt uint64) {
 	s.mu.Lock()
 	w.tt = tt
 	if tt <= s.observed {
@@ -165,24 +165,24 @@ func (s *inflightSet) fill(w *inflightWrite, tt uint64) {
 	close(w.done)
 }
 
-// remove drops a pending write that is known not to be in the WAL.
-func (s *inflightSet) remove(w *inflightWrite) {
+// abort drops a pending write that is known not to be in the WAL.
+func (s *inflightSet) abort(w *inflightWrite) {
 	s.mu.Lock()
 	s.removeLocked(w)
 	s.mu.Unlock()
 	close(w.done)
 }
 
-// markUncertain keeps a pending write whose append failed but may be in the WAL
+// markInDoubt keeps a pending write whose append failed but may be in the WAL
 // at a time tick up to tt. Its keys count as present until observe passes tt,
 // and it no longer blocks other writes.
-func (s *inflightSet) markUncertain(w *inflightWrite, tt uint64) {
+func (s *inflightSet) markInDoubt(w *inflightWrite, tt uint64) {
 	s.mu.Lock()
 	w.tt = tt
 	if tt <= s.observed {
 		s.removeLocked(w)
 	} else {
-		s.uncertain = append(s.uncertain, w)
+		s.inDoubt = append(s.inDoubt, w)
 	}
 	s.mu.Unlock()
 	close(w.done)
@@ -190,8 +190,8 @@ func (s *inflightSet) markUncertain(w *inflightWrite, tt uint64) {
 
 // observe is called after every write up to tt was applied to the engine
 // (rule A). pks are the keys of the write at tt, none for a time tick that
-// writes no key. It raises the observed time tick, removes the writes with an
-// unknown outcome up to it, then removes the filled-in writes of pks up to tt.
+// writes no key. It raises the observed time tick, removes the in-doubt writes
+// up to it, then removes the committed writes of pks up to tt.
 //
 // TODO: rule A needs an engine write to be visible to reads as soon as it
 // returns. A Pebble batch commit should give that; confirm it with a test when
@@ -201,7 +201,7 @@ func (s *inflightSet) observe(tt uint64, pks []PK) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.raiseObservedLocked(tt)
-	s.removeUncertainLocked()
+	s.removeInDoubtLocked()
 	for _, key := range keys {
 		queue, ok := s.keys[key]
 		if !ok {
@@ -254,19 +254,19 @@ func (s *inflightSet) waitObserved(ctx context.Context, tt uint64, stop <-chan s
 	}
 }
 
-// removeUncertainLocked removes the writes with an unknown outcome whose time
-// tick observe passed.
-func (s *inflightSet) removeUncertainLocked() {
-	kept := s.uncertain[:0]
-	for _, w := range s.uncertain {
+// removeInDoubtLocked removes the in-doubt writes whose time tick observe
+// passed.
+func (s *inflightSet) removeInDoubtLocked() {
+	kept := s.inDoubt[:0]
+	for _, w := range s.inDoubt {
 		if w.tt <= s.observed {
 			s.removeLocked(w)
 		} else {
 			kept = append(kept, w)
 		}
 	}
-	clear(s.uncertain[len(kept):])
-	s.uncertain = kept
+	clear(s.inDoubt[len(kept):])
+	s.inDoubt = kept
 }
 
 // lockKeys returns the distinct lock keys of pks, ascending.

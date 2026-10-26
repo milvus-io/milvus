@@ -126,9 +126,9 @@ func (d *decider) waitError(vchannel string) error {
 
 // Observe tells the decider that the observe of the WAL recovery applied
 // every write up to tt to the engine. pks are the keys of the write at tt, none
-// for a TimeTick. It removes the filled-in entries of pks from the in-flight
+// for a TimeTick. It removes the committed entries of pks from the in-flight
 // set (rule A: the engine first, then the set), raises the observed time tick
-// and removes the entries with an unknown outcome that it passed. The pchannel
+// and removes the in-doubt entries that it passed. The pchannel
 // calls it for every index when its driver wakes, so an idle vchannel sheds
 // them too.
 func (d *decider) Observe(tt uint64, pks []PK) {
@@ -172,12 +172,12 @@ func (d *decider) decide(ctx context.Context, intent *WriteIntent) (*WriteIntent
 		}
 		// pendingMu must be released before the wait: a body of another
 		// transaction takes pendingMu in Committed.
-		if err := intent.register(ctx, intent.txn.allPKs()); err != nil {
+		if err := intent.acquire(ctx, intent.txn.allPKs()); err != nil {
 			return nil, err
 		}
-		hits, err := d.present(ctx, intent.write, intent.txn.companionCandidates())
+		hits, err := d.existing(ctx, intent.write, intent.txn.companionCandidates())
 		if err != nil {
-			intent.withdraw()
+			intent.abort()
 			return nil, err
 		}
 		intent.decision.CompanionDeletePKs = hits
@@ -190,12 +190,12 @@ func (d *decider) decide(ctx context.Context, intent *WriteIntent) (*WriteIntent
 	if err := d.waitError(req.VChannel); err != nil {
 		return nil, err
 	}
-	if err := intent.register(ctx, req.PKs); err != nil {
+	if err := intent.acquire(ctx, req.PKs); err != nil {
 		return nil, err
 	}
-	present, err := d.present(ctx, intent.write, req.PKs)
+	present, err := d.existing(ctx, intent.write, req.PKs)
 	if err != nil {
-		intent.withdraw()
+		intent.abort()
 		return nil, err
 	}
 	switch req.Kind {
@@ -207,20 +207,21 @@ func (d *decider) decide(ctx context.Context, intent *WriteIntent) (*WriteIntent
 	return intent, nil
 }
 
-// present returns the keys of pks that exist, in the order of pks. w is the
-// caller's own registration, which has already waited for the earlier writes.
+// existing returns the keys of pks that exist, in the order of pks. w is the
+// caller's own write in the in-flight set, which has already waited for the
+// writes ahead of it.
 //
 // Rule B: the in-flight set is read before the engine. Observe writes the engine
 // before it removes an entry (rule A), so a key that left the set between the two
 // reads is found in the engine.
-func (d *decider) present(ctx context.Context, w *inflightWrite, pks []PK) ([]PK, error) {
+func (d *decider) existing(ctx context.Context, w *inflightWrite, pks []PK) ([]PK, error) {
 	if len(pks) == 0 {
 		return nil, nil
 	}
 	if d.isDegraded() {
 		return slices.Clone(pks), nil
 	}
-	inSet := d.inflight.presentBefore(w)
+	inSet := d.inflight.keysAhead(w)
 	var probe []PK
 	for _, pk := range pks {
 		if _, ok := inSet[pk.lockKey()]; !ok {
@@ -289,15 +290,15 @@ func (d *decider) Close() {
 	d.stopOnce.Do(func() { close(d.stop) })
 }
 
-// register adds the keys of this write to the in-flight set and waits for the
-// earlier writes of the same keys. It must run before the downstream append:
+// acquire enqueues the keys of this write in the in-flight set and waits for the
+// writes ahead of it, which makes it the lock of those keys. It must run before the downstream append:
 // observe may apply a write as soon as its append is acknowledged, which can be
-// before the append returns, so a registration made after the append could be
+// before the append returns, so an entry enqueued after the append could be
 // left in the set forever.
-func (i *WriteIntent) register(ctx context.Context, pks []PK) error {
+func (i *WriteIntent) acquire(ctx context.Context, pks []PK) error {
 	start := time.Now()
-	w, earlier := i.d.inflight.register(pks)
-	if err := i.d.inflight.wait(ctx, w, earlier); err != nil {
+	w, ahead := i.d.inflight.enqueue(pks)
+	if err := i.d.inflight.waitAhead(ctx, w, ahead); err != nil {
 		return err
 	}
 	i.write = w
@@ -305,9 +306,9 @@ func (i *WriteIntent) register(ctx context.Context, pks []PK) error {
 	return nil
 }
 
-// withdraw removes the registration of a decision that failed before anything
+// abort removes the in-flight entry of a decision that failed before anything
 // was appended.
-func (i *WriteIntent) withdraw() {
-	i.d.inflight.remove(i.write)
+func (i *WriteIntent) abort() {
+	i.d.inflight.abort(i.write)
 	i.write = nil
 }

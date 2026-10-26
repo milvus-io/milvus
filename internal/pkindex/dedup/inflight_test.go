@@ -46,11 +46,11 @@ func (a *hookEngine) MultiGet(ctx context.Context, keys [][]byte) ([][]byte, err
 	return a.RW.MultiGet(ctx, keys)
 }
 
-// Registration races with observe. A write of p was appended (filled in, tt 10)
-// and a later write of p registers. Observe of tt 10 can run before the later
+// Enqueue races with observe. A write of p was appended (committed, tt 10)
+// and a later write of p enqueues. Observe of tt 10 can run before the later
 // write reads the set, or between its set read and its engine read. Rule B (set
 // first) and rule A (engine first) keep p present in both cases.
-func TestRegistrationRacesWithObserve(t *testing.T) {
+func TestEnqueueRacesWithObserve(t *testing.T) {
 	ctx := context.Background()
 	for _, c := range []struct {
 		name          string
@@ -80,72 +80,72 @@ func TestRegistrationRacesWithObserve(t *testing.T) {
 	}
 }
 
-// The time tick fill-in races with observe. Observe may apply a message before
+// The commit of the time tick races with observe. Observe may apply a message before
 // its append returns to the writer, because the append is acknowledged first.
-// Observe then skips the entry (not filled in yet), and the fill-in removes it.
-func TestFillInRacesWithObserve(t *testing.T) {
+// Observe then skips the entry (not committed yet), and the commit removes it.
+func TestCommitRacesWithObserve(t *testing.T) {
 	ctx := context.Background()
 	d, a := newTestDecider(t)
 
 	intent, _ := decideInsert(t, d, 1)
 	// the append was acknowledged with tt 10 and observe applied it.
 	require.NoError(t, ObserveForTest(ctx, d, 10, 500, int64PKs(1), nil))
-	require.Equal(t, 1, InflightLenForTest(d), "observe skips a write that is not filled in")
+	require.Equal(t, 1, InflightLenForTest(d), "observe skips a write that is not committed")
 
 	intent.Committed(ctx, 10)
-	require.Equal(t, 0, InflightLenForTest(d), "the fill-in removes a write that observe passed")
+	require.Equal(t, 0, InflightLenForTest(d), "the commit removes a write that observe passed")
 	requireSegment(t, a, 1, 500)
 
 	_, companion := decideInsert(t, d, 1)
 	require.Equal(t, int64PKs(1), companion)
 }
 
-// Observe and the fill-in can run in either order. The write must leave the set
+// Observe and the commit can run in either order. The write must leave the set
 // in both orders, and so must a write with an unknown outcome.
-func TestFillInAndObserveOrder(t *testing.T) {
+func TestCommitAndObserveOrder(t *testing.T) {
 	pks := int64PKs(1, 2)
-	t.Run("fill-in after observe passed its time tick", func(t *testing.T) {
+	t.Run("commit after observe passed its time tick", func(t *testing.T) {
 		var s inflightSet
-		w, _ := s.register(pks)
+		w, _ := s.enqueue(pks)
 		s.observe(10, pks)
-		require.Equal(t, 2, s.len(), "observe skips a write that is not filled in")
-		s.fill(w, 10)
+		require.Equal(t, 2, s.len(), "observe skips a write that is not committed")
+		s.commit(w, 10)
 		require.Equal(t, 0, s.len())
 		require.Nil(t, s.keys)
 	})
-	t.Run("observe after the fill-in", func(t *testing.T) {
+	t.Run("observe after the commit", func(t *testing.T) {
 		var s inflightSet
-		w, _ := s.register(pks)
-		s.fill(w, 10)
+		w, _ := s.enqueue(pks)
+		s.commit(w, 10)
 		require.Equal(t, 2, s.len())
 		s.observe(10, pks)
 		require.Equal(t, 0, s.len())
 		require.Nil(t, s.keys)
 	})
-	t.Run("uncertain mark after observe passed its time tick", func(t *testing.T) {
+	t.Run("in-doubt mark after observe passed its time tick", func(t *testing.T) {
 		var s inflightSet
-		w, _ := s.register(pks)
+		w, _ := s.enqueue(pks)
 		s.observe(10, nil)
-		s.markUncertain(w, 10)
+		s.markInDoubt(w, 10)
 		require.Equal(t, 0, s.len())
-		require.Empty(t, s.uncertain)
+		require.Empty(t, s.inDoubt)
 	})
-	t.Run("observe after the uncertain mark", func(t *testing.T) {
+	t.Run("observe after the in-doubt mark", func(t *testing.T) {
 		var s inflightSet
-		w, _ := s.register(pks)
-		s.markUncertain(w, 10)
+		w, _ := s.enqueue(pks)
+		s.markInDoubt(w, 10)
 		require.Equal(t, 2, s.len())
-		require.Len(t, s.uncertain, 1)
+		require.Len(t, s.inDoubt, 1)
 		s.observe(10, nil)
 		require.Equal(t, 0, s.len())
-		require.Empty(t, s.uncertain)
+		require.Empty(t, s.inDoubt)
 	})
 }
 
 // The keys of one write are deduplicated after they are mapped to lock keys.
-func TestRegisterDeduplicatesKeys(t *testing.T) {
+func TestEnqueueDeduplicatesKeys(t *testing.T) {
 	var s inflightSet
-	w, _ := s.register(int64PKs(3, 1, 3, 2, 1))
+	w, _ := s.enqueue(int64PKs(3, 1, 3, 2, 1))
 	require.Len(t, w.keys, 3)
 	require.Equal(t, 3, s.len())
 
@@ -271,7 +271,7 @@ func TestInflightStressWithObserve(t *testing.T) {
 				misses.Add(int64(len(values) - len(intent.Decision().CompanionDeletePKs)))
 				tt := appendToLog(int64PKs(values...))
 				if r.Intn(4) == 0 {
-					time.Sleep(time.Microsecond) // let observe overtake the fill-in
+					time.Sleep(time.Microsecond) // let observe overtake the commit
 				}
 				intent.Committed(ctx, tt)
 			}
@@ -293,7 +293,7 @@ func TestInflightStressWithObserve(t *testing.T) {
 	require.Nil(t, d.inflight.keys, "an empty map is dropped")
 }
 
-// The second writer of a key waits until the first one filled in its time tick,
+// The second writer of a key waits until the first one committed its time tick,
 // and then sees the key.
 func TestTwoWritersOnTheSamePK(t *testing.T) {
 	ctx := context.Background()
@@ -512,8 +512,8 @@ func BenchmarkInflightLock(b *testing.B) {
 	}
 }
 
-// BenchmarkInflightLockOnly measures only the lock part of the set: register,
-// wait, a simulated 2 ms append, fill-in and the removal by observe. It matches
+// BenchmarkInflightLockOnly measures only the lock part of the set: enqueue,
+// waitAhead, a simulated 2 ms append, commit and the removal by observe. It matches
 // the stripe lock and RowLock comparison of the design, which measured the locks
 // alone; BenchmarkInflightLock adds the decision and the engine.
 func BenchmarkInflightLockOnly(b *testing.B) {
@@ -541,11 +541,11 @@ func BenchmarkInflightLockOnly(b *testing.B) {
 					}
 					for i := 0; next.Add(1) <= uint64(b.N); i++ {
 						pks := batches[i%len(batches)]
-						w, earlier := s.register(pks)
-						_ = s.wait(context.Background(), w, earlier)
+						w, ahead := s.enqueue(pks)
+						_ = s.waitAhead(context.Background(), w, ahead)
 						time.Sleep(appendRTT)
 						t := tt.Add(1)
-						s.fill(w, t)
+						s.commit(w, t)
 						s.observe(t, pks)
 					}
 				}(int64(w))
@@ -557,7 +557,7 @@ func BenchmarkInflightLockOnly(b *testing.B) {
 }
 
 // BenchmarkWritePathOf1000Keys splits the work of one write of 1000 new keys
-// without contention: the lock alone (register, wait, fill-in and the removal by
+// without contention: the lock alone (enqueue, waitAhead, commit and the removal by
 // observe), the engine probe alone, and the whole decision (lock, set check and
 // probe). The engine is the in-memory test engine, so the probe here is a lower
 // bound of a persistent engine probe.
@@ -577,10 +577,10 @@ func BenchmarkWritePathOf1000Keys(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			pks := batches[i%len(batches)]
-			w, earlier := s.register(pks)
-			_ = s.wait(context.Background(), w, earlier)
+			w, ahead := s.enqueue(pks)
+			_ = s.waitAhead(context.Background(), w, ahead)
 			tt := uint64(i + 1)
-			s.fill(w, tt)
+			s.commit(w, tt)
 			s.observe(tt, pks)
 		}
 	})
