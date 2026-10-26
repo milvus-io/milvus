@@ -15,6 +15,7 @@ import (
 	"github.com/apache/arrow/go/v17/parquet"
 	"github.com/apache/arrow/go/v17/parquet/file"
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -1593,4 +1595,22 @@ func TestBuildVectorArrayFieldRejectsInvalidFloat(t *testing.T) {
 		_, err := buildVectorArrayFieldFromFixedSizeBinary(field, 4, vectors, 0, 1)
 		assert.Error(t, err)
 	})
+}
+
+// TestWrapParquetErr pins the column-level classification: a decode failure on
+// an immutable source is an input error, while a typed IO fault from the
+// retryable reader keeps its own code.
+func TestWrapParquetErr(t *testing.T) {
+	require.NoError(t, wrapParquetErr(nil))
+
+	decodeErr := wrapParquetErr(errors.New("parquet: invalid page header"))
+	require.True(t, errors.Is(decodeErr, merr.ErrImportFailed),
+		"a corrupt page must be an input error: %v", decodeErr)
+
+	ioErr := wrapParquetErr(merr.WrapErrIoFailed("a.parquet", errors.New("connection reset")))
+	require.Equal(t, merr.Code(merr.ErrIoFailed), merr.Code(ioErr),
+		"a typed object-store fault keeps its code: %v", ioErr)
+
+	alreadyInput := merr.WrapErrImportFailedMsg("bad value")
+	require.Same(t, alreadyInput, wrapParquetErr(alreadyInput), "an existing classification is not rewritten")
 }

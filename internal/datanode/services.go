@@ -450,7 +450,7 @@ func (node *DataNode) PreImportV3(ctx context.Context, req *datapb.PreImportRequ
 		mlog.Error(ctx, "create chunk manager failed", mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
 			mlog.Err(err),
 		)
-		return merr.Status(err), nil
+		return merr.Status(storage.ToMilvusIoError(req.GetStorageConfig().GetBucketName(), err)), nil
 	}
 
 	return node.submitImportV3WorkerTask(ctx, importv3.NewPreImportTask(req, cm))
@@ -824,6 +824,12 @@ func (node *DataNode) DropCompactionPlan(ctx context.Context, req *datapb.DropCo
 }
 
 // CreateTask creates different types of tasks based on task type
+// invalidTaskPayload reports a CreateTask payload that does not decode: the
+// request itself is malformed, so retrying the same plan cannot help.
+func invalidTaskPayload(kind string, err error) *commonpb.Status {
+	return merr.Status(merr.WrapErrParameterInvalidMsg("invalid %s task payload: %v", kind, err))
+}
+
 func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTaskRequest) (*commonpb.Status, error) {
 	mlog.Info(ctx, "CreateTask received", mlog.Any("properties", request.GetProperties()))
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
@@ -832,13 +838,16 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 	properties := taskcommon.NewProperties(request.GetProperties())
 	taskType, err := properties.GetTaskType()
 	if err != nil {
-		return merr.Status(err), nil
+		// Preserve the coordinator's classification: an unknown type is a
+		// worker capability/version mismatch (ServiceUnimplemented), not user
+		// input.
+		return merr.Status(merr.Wrap(err, "invalid task type")), nil
 	}
 	switch taskType {
 	case taskcommon.PreImport:
 		req := &datapb.PreImportRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
-			return merr.Status(err), nil
+			return invalidTaskPayload("PreImport", err), nil
 		}
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
@@ -847,7 +856,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 	case taskcommon.PreImportV3:
 		req := &datapb.PreImportRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
-			return merr.Status(err), nil
+			return invalidTaskPayload("PreImportV3", err), nil
 		}
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
@@ -856,7 +865,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 	case taskcommon.Import:
 		req := &datapb.ImportRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
-			return merr.Status(err), nil
+			return invalidTaskPayload("Import", err), nil
 		}
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
@@ -865,7 +874,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 	case taskcommon.Reshard:
 		req := &datapb.ReshardTaskRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
-			return merr.Status(err), nil
+			return invalidTaskPayload("Reshard", err), nil
 		}
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
@@ -874,7 +883,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 	case taskcommon.ImportV3:
 		req := &datapb.ImportTaskV3Request{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
-			return merr.Status(err), nil
+			return invalidTaskPayload("ImportV3", err), nil
 		}
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
@@ -883,7 +892,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 	case taskcommon.Compaction:
 		req := &datapb.CompactionPlan{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
-			return merr.Status(err), nil
+			return invalidTaskPayload("Compaction", err), nil
 		}
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
@@ -892,7 +901,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 	case taskcommon.Index:
 		req := &workerpb.CreateJobRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
-			return merr.Status(err), nil
+			return invalidTaskPayload("Index", err), nil
 		}
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
@@ -901,7 +910,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 	case taskcommon.Stats:
 		req := &workerpb.CreateStatsRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
-			return merr.Status(err), nil
+			return invalidTaskPayload("Stats", err), nil
 		}
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
@@ -910,7 +919,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 	case taskcommon.Analyze:
 		req := &workerpb.AnalyzeRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
-			return merr.Status(err), nil
+			return invalidTaskPayload("Analyze", err), nil
 		}
 		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
 			return merr.Status(err), nil
@@ -919,12 +928,14 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 	case taskcommon.RefreshExternalCollection:
 		req := &datapb.RefreshExternalCollectionTaskRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
-			return merr.Status(err), nil
+			return invalidTaskPayload("RefreshExternalCollection", err), nil
 		}
 		if req.GetClusterID() == "" {
 			clusterID, err := properties.GetClusterID()
 			if err != nil {
-				return merr.Status(err), nil
+				// Preserve WrapErrTaskPropertyLack's ServiceInternal code: the
+				// property is populated by the coordinator, not the user.
+				return merr.Status(merr.Wrap(err, "invalid cluster id")), nil
 			}
 			req.ClusterID = clusterID
 		}
@@ -932,7 +943,7 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 	case taskcommon.CopySegment, taskcommon.ExternalCopySegment:
 		req := &datapb.CopySegmentRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
-			return merr.Status(err), nil
+			return invalidTaskPayload("copy segment", err), nil
 		}
 		// ExternalCopySegment is authoritative for new coordinators. The payload
 		// fallback preserves old DataCoord -> new DataNode rolling upgrades, where
@@ -1146,7 +1157,10 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 	properties := taskcommon.NewProperties(request.GetProperties())
 	taskType, err := properties.GetTaskType()
 	if err != nil {
-		return merr.Status(err), nil
+		// Preserve the coordinator's classification: an unknown type is a
+		// worker capability/version mismatch (ServiceUnimplemented), not user
+		// input.
+		return merr.Status(merr.Wrap(err, "invalid task type")), nil
 	}
 	taskID, err := properties.GetTaskID()
 	if err != nil {
