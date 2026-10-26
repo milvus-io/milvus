@@ -55,6 +55,9 @@ func TestIntegerDefaultsCreateAndAddField(t *testing.T) {
 			{"1.9", 0, true},
 			{"9223372036854775808", 0, true},
 			{"-9223372036854775809", 0, true},
+			{"1e9999999999999999999999999", 0, true},
+			{"1e-9999999999999999999999999", 0, true},
+			{"0e9999999999999999999999999", 0, false},
 		} {
 			t.Run(route+"/"+test.literal, func(t *testing.T) {
 				mp := mocks.NewMockProxy(t)

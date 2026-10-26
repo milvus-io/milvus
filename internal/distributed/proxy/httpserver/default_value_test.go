@@ -78,6 +78,7 @@ func TestFieldSchemaIntegerDefaults(t *testing.T) {
 			for _, unmarshal := range []func([]byte, interface{}) error{gojson.Unmarshal, json.Unmarshal} {
 				var field FieldSchema
 				require.NoError(t, unmarshal(body, &field))
+				require.Equal(t, json.Number(test.literal), field.DefaultValue)
 				value, err := convertDefaultValue(field.DefaultValue, test.dataType)
 				if test.invalid {
 					require.Error(t, err)

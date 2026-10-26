@@ -18,6 +18,7 @@ package httpserver
 
 import (
 	"context"
+	gojson "encoding/json"
 	"strconv"
 	"strings"
 
@@ -888,9 +889,10 @@ func (field *FieldSchema) UnmarshalJSON(data []byte) error {
 	type plainFieldSchema FieldSchema
 	decoded := struct {
 		*plainFieldSchema
-		DefaultValue json.RawMessage `json:"defaultValue"`
+		DefaultValue gojson.RawMessage `json:"defaultValue"`
 	}{plainFieldSchema: (*plainFieldSchema)(field)}
-	if err := json.Unmarshal(data, &decoded); err != nil {
+	// Capture the raw default before Sonic can reject an overflowing exponent.
+	if err := gojson.Unmarshal(data, &decoded); err != nil {
 		return merr.WrapErrParameterInvalidErr(err, "invalid field schema JSON")
 	}
 	field.DefaultValue = nil
