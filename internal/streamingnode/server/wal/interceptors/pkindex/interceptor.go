@@ -78,7 +78,11 @@ func (i *appendInterceptor) DoAppend(ctx context.Context, msg message.MutableMes
 		return appendOp(ctx, msg)
 	}
 
-	// TODO: replicated messages bypass the index entirely, so a secondary cluster has an empty index after promotion.
+	// A replicated message carries the decision of the source cluster, so it
+	// skips the decision here. The observe applies it to the engine.
+	// TODO: at promotion, call WaitUntil with the time tick of the role
+	// switch. Replicated writes that the observe has not applied yet are not
+	// in the in-flight set.
 	if msg.ReplicateHeader() != nil {
 		return appendOp(ctx, msg)
 	}
