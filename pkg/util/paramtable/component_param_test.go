@@ -1942,6 +1942,8 @@ func TestSnapshotDescriptionLengthConfig(t *testing.T) {
 	params.Init(NewBaseTable(SkipRemote(true)))
 	limit := &params.ProxyCfg.MaxSnapshotDescriptionLength
 	assert.Equal(t, "proxy.maxSnapshotDescriptionLength", limit.Key)
+	assert.Equal(t, "3.0.5", limit.Version)
+	assert.False(t, limit.Export)
 	assert.Equal(t, 1024, limit.GetAsInt())
 	require.NoError(t, params.Save(limit.Key, "2048"))
 	assert.Equal(t, 2048, limit.GetAsInt())

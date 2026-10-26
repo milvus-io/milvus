@@ -2512,12 +2512,6 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 		return merr.Status(err), nil
 	}
 
-	// Enforce the request limit before any metadata lookup or snapshot publication.
-	maxDescriptionLength := paramtable.Get().ProxyCfg.MaxSnapshotDescriptionLength.GetAsInt()
-	if len(req.GetDescription()) > maxDescriptionLength {
-		return merr.Status(merr.WrapErrParameterInvalidMsg("the length of a snapshot description must not exceed %d bytes", maxDescriptionLength)), nil
-	}
-
 	mlog.Info(context.TODO(), "receive CreateSnapshot request", mlog.String("name", req.GetName()),
 		mlog.String("description", req.GetDescription()),
 		mlog.Int64("compactionProtectionSeconds", req.GetCompactionProtectionSeconds()))

@@ -570,7 +570,7 @@ func TestSnapshot(t *testing.T) {
 }
 
 func TestListSnapshotSummaries(t *testing.T) {
-	for _, scenario := range []string{"metadata", "reverse", "legacy", "empty", "rpc error", "status error"} {
+	for _, scenario := range []string{"server order", "ordered", "legacy", "empty", "rpc error", "status error"} {
 		t.Run(scenario, func(t *testing.T) {
 			service := &snapshotServiceClientStub{}
 			client := &Client{service: service}
@@ -591,10 +591,10 @@ func TestListSnapshotSummaries(t *testing.T) {
 				if scenario != "empty" {
 					resp.Snapshots = []string{"old", "b", "a"}
 				}
-				if scenario == "metadata" {
+				if scenario == "server order" {
 					resp.SnapshotSummaries = []*milvuspb.SnapshotSummary{{Name: "old"}, {Name: "b", CreateTs: 9007199254740993, Description: "daily"}, {Name: "a", CreateTs: 9007199254740993}}
 				}
-				if scenario == "reverse" {
+				if scenario == "ordered" {
 					resp.SnapshotSummaries = []*milvuspb.SnapshotSummary{{Name: "a", CreateTs: 9007199254740993}, {Name: "b", CreateTs: 9007199254740993, Description: "daily"}, {Name: "old"}}
 				}
 				return resp, nil
@@ -626,10 +626,14 @@ func TestListSnapshotSummaries(t *testing.T) {
 			default:
 				require.NoError(t, err)
 				require.Len(t, infos, 3)
-				require.Equal(t, "a", infos[0].GetName())
-				require.Equal(t, "b", infos[1].GetName())
-				require.Equal(t, "old", infos[2].GetName())
-				require.Equal(t, int64(9007199254740993), infos[0].GetCreateTs())
+				expectedNames := []string{"old", "b", "a"}
+				if scenario == "ordered" {
+					expectedNames = []string{"a", "b", "old"}
+				}
+				for i, name := range expectedNames {
+					require.Equal(t, name, infos[i].GetName())
+				}
+				require.Equal(t, int64(9007199254740993), infos[1].GetCreateTs())
 				require.Equal(t, "daily", infos[1].GetDescription())
 			}
 		})

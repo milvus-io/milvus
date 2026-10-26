@@ -18,8 +18,6 @@ package milvusclient
 
 import (
 	"context"
-	"slices"
-	"strings"
 
 	"google.golang.org/grpc"
 
@@ -74,8 +72,8 @@ func (c *Client) ListSnapshots(ctx context.Context, opt ListSnapshotsOption, cal
 	return snapshots, err
 }
 
-// ListSnapshotSummaries returns lightweight metadata ordered by create_ts descending,
-// then name ascending. Servers returning only names are rejected as unsupported.
+// ListSnapshotSummaries returns lightweight metadata in the server-provided order.
+// Servers returning only names are rejected as unsupported.
 func (c *Client) ListSnapshotSummaries(ctx context.Context, opt ListSnapshotsOption, callOptions ...grpc.CallOption) ([]*milvuspb.SnapshotSummary, error) {
 	if opt == nil {
 		return nil, merr.WrapErrParameterInvalid("ListSnapshotsOption", "nil", "option cannot be nil")
@@ -96,15 +94,6 @@ func (c *Client) ListSnapshotSummaries(ctx context.Context, opt ListSnapshotsOpt
 	if err != nil {
 		return nil, err
 	}
-	slices.SortFunc(summaries, func(a, b *milvuspb.SnapshotSummary) int {
-		if a.GetCreateTs() > b.GetCreateTs() {
-			return -1
-		}
-		if a.GetCreateTs() < b.GetCreateTs() {
-			return 1
-		}
-		return strings.Compare(a.GetName(), b.GetName())
-	})
 	return summaries, nil
 }
 

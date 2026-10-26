@@ -862,8 +862,9 @@ message DropSnapshotResponse {
 
 Snapshot descriptions supplied to CreateSnapshot are limited by
 `proxy.maxSnapshotDescriptionLength` (default 1024 UTF-8 bytes), checked by
-both Proxy and DataCoord. Existing descriptions remain unchanged; this limit
-bounds newly created descriptions, not the total size of a list response.
+Proxy before forwarding the request to DataCoord. Existing descriptions remain
+unchanged; this limit bounds newly created descriptions, not the total size of a
+list response.
 
 ### ListSnapshots
 
@@ -908,10 +909,11 @@ name-list methods. On an older server that returns names without summaries,
 the new methods report that snapshot summaries are unsupported and never call
 DescribeSnapshot. Callers can upgrade the server or explicitly use the existing
 name-list methods. Go returns a service-unimplemented error; PyMilvus raises
-ServerVersionIncompatibleException. Both methods use only ListSnapshots and sort
-the returned summaries. If both response lists are empty, they return an empty
-list: protobuf repeated fields have no presence bit, so that response cannot
-distinguish an empty collection on an older server from one on a newer server.
+ServerVersionIncompatibleException. Both methods use only ListSnapshots and
+preserve the server-provided order without sorting locally. If both response lists
+are empty, they return an empty list. Protobuf repeated fields have no presence
+bit, so that response cannot distinguish an empty collection on an older server
+from one on a newer server.
 
 ### DescribeSnapshot
 

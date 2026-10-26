@@ -8149,50 +8149,6 @@ func TestGetImportSegmentIDsByVchannel_V3OnlyAcceptedCompletedOutputs(t *testing
 	assert.Equal(t, []int64{101}, segIDs)
 }
 
-func TestServer_CreateSnapshot_DescriptionLength(t *testing.T) {
-	paramtable.Init()
-	limit := &paramtable.Get().ProxyCfg.MaxSnapshotDescriptionLength
-	for _, tc := range []struct {
-		name        string
-		limit       string
-		description string
-		rejected    bool
-	}{
-		{"empty", "1024", "", false},
-		{"default_boundary", "1024", strings.Repeat("a", 1024), false},
-		{"default_overflow", "1024", strings.Repeat("a", 1025), true},
-		{"configured_boundary", "6", "abcdef", false},
-		{"configured_overflow", "6", "abcdefg", true},
-		{"unicode_boundary", "6", "快照", false},
-		{"unicode_overflow", "6", "快照名", true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			previous := limit.SwapTempValue(tc.limit)
-			defer limit.SwapTempValue(previous)
-			called := false
-			// Stop accepted requests at the first dependency, before any external I/O.
-			patch := mockey.Mock((*snapshotManager).GetSnapshot).To(func(_ *snapshotManager, _ context.Context, _ int64, _ string) (*datapb.SnapshotInfo, error) {
-				called = true
-				return nil, merr.ErrServiceNotReady
-			}).Build()
-			defer patch.UnPatch()
-			server := &Server{snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil)}
-			server.stateCode.Store(commonpb.StateCode_Healthy)
-			status, err := server.CreateSnapshot(context.Background(), &datapb.CreateSnapshotRequest{Name: "backup", CollectionId: 100, Description: tc.description})
-			require.NoError(t, err)
-			if tc.rejected {
-				require.ErrorIs(t, merr.Error(status), merr.ErrParameterInvalid)
-				assert.Contains(t, status.GetReason(), "bytes")
-				assert.Equal(t, "true", status.GetExtraInfo()["is_input_error"])
-				assert.False(t, called, "reject direct RPC before metadata lookup or publication")
-			} else {
-				require.ErrorIs(t, merr.Error(status), merr.ErrServiceNotReady)
-				assert.True(t, called)
-			}
-		})
-	}
-}
-
 func TestServer_CreateSnapshot_PreparationFailures(t *testing.T) {
 	for _, scenario := range []string{"collection_error", "collection_missing", "lock_error", "duplicate_after_lock", "broadcast_error"} {
 		t.Run(scenario, func(t *testing.T) {
