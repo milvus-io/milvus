@@ -179,13 +179,21 @@ Transport failures only retry the same message; the producer never infers a
 transaction outcome from a connection error. The server returns TransactionExpired
 only for a definite pre-commit expiration or rejection, allowing the existing
 whole-transaction retry, including CAS retry restrictions. A missing session
-returns TransactionNotFound using the existing UNRECOVERABLE wire code, so old
-producers also stop rather than replay. This applies to missing body/rollback
+returns the independent TRANSACTION_NOT_FOUND code, distinct from expiration and
+generic UNRECOVERABLE errors. The producer classifies it as terminal. Proxy maps
+this explicit server classification to the non-retriable
+system error `ErrServiceWriteOutcomeUnknown` (public code 13), telling the caller
+that the write may have completed and to verify its result before retrying.
+An unknown outcome takes precedence over another shard's rejection, including a
+CAS conflict; it cannot authorize whole-request replay. Plain UNRECOVERABLE,
+transport errors and explicit expiration are not reclassified based on text or
+connection history. This applies to missing body/rollback
 sessions as well; Begin admission is unchanged. An admitted or committed session
 returns InvalidTransactionState even after its lease elapses. Missing history does
-not authorize replay with a new TxnID. Upgrade StreamingNodes before producers:
-old servers still conflate missing sessions with expiration, and the corrected
-server semantics are required for the guarantee during rolling upgrades.
+not authorize replay with a new TxnID. Older producers do not recognize the new
+code and can retry the same Commit until cancellation or timeout; this code does
+not trigger a new TxnID. Older servers still conflate missing sessions with
+expiration. Both sides need the corrected semantics for the new behavior.
 
 ## LastConfirmedMessageID
 

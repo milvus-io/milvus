@@ -80,7 +80,7 @@ func (dt *DeleteTask) Execute(ctx context.Context) (err error) {
 		mlog.Duration("prepare duration", dt.tr.RecordSpan()))
 
 	resp := streaming.WAL().AppendMessages(ctx, msgs...)
-	if err := resp.UnwrapFirstError(); err != nil {
+	if err := unwrapStreamingMutationError(resp); err != nil {
 		mlog.Warn(ctx, "append messages to wal failed", mlog.Err(err))
 		return err
 	}

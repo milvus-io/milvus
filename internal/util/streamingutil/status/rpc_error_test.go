@@ -83,15 +83,16 @@ func TestPartialUpdateCASErrorsGRPCMapping(t *testing.T) {
 	}
 }
 
-func TestTransactionNotFoundPreservesNonRetryableWireCode(t *testing.T) {
+func TestTransactionNotFoundPreservesDedicatedWireCode(t *testing.T) {
 	err := NewTransactionNotFound(42)
 	st := NewGRPCStatusFromStreamingError(err)
-	require.Equal(t, codes.FailedPrecondition, st.Code())
+	require.Equal(t, codes.NotFound, st.Code())
 	roundTrip := AsStreamingError(ConvertStreamingError("Append", st.Err()))
-	require.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE, roundTrip.Code)
+	require.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_NOT_FOUND, roundTrip.Code)
 	require.Equal(t, err.Cause, roundTrip.Cause)
 	require.Contains(t, roundTrip.Cause, "transaction 42 not found")
 	require.True(t, roundTrip.IsUnrecoverable())
+	require.True(t, roundTrip.IsTxnNotFound())
 	require.False(t, roundTrip.IsTxnExpired())
 	require.False(t, roundTrip.IsPartialUpdateRetryableCAS())
 }
