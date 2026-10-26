@@ -449,6 +449,16 @@ VectorDiskBuilder<T>::Build(const PreparedVectorBuildFiles<T>& input) && {
             }
             NormalizeDiskAnnBuildThreads(config, engine_->KnowhereIndexType());
 
+            std::vector<std::string> input_paths;
+            input_paths.reserve(3);
+            input_paths.push_back(input.raw_path);
+            if (embedding_list) {
+                input_paths.push_back(*input.embedding_offsets_path);
+            }
+            if (input.scalar_info_path && !input.scalar_info_path->empty()) {
+                input_paths.push_back(*input.scalar_info_path);
+            }
+            file_manager_->SetInputFiles(std::move(input_paths));
             const auto status = engine_->native_index.Build({}, config);
             file_manager_->RethrowFirstFailure();
             if (status != knowhere::Status::success) {

@@ -508,6 +508,11 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         return group_->num_chunks();
     }
 
+    void
+    Prepare(milvus::OpContext* op_ctx) const override {
+        group_->Prepare(op_ctx);
+    }
+
     size_t
     DataByteSize() const override {
         const auto fields = group_->NumFieldsInGroup();

@@ -19,6 +19,8 @@ package initcore
 import (
 	"os"
 	"os/exec"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -33,6 +35,44 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestInitSparseInterimIndexAlgorithms(t *testing.T) {
+	params := &paramtable.ComponentParam{}
+	params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+	cfg := &params.QueryNodeCfg
+	t.Cleanup(func() {
+		params.Reset(cfg.InterimIndexSparseIPAlgo.Key)
+		params.Reset(cfg.InterimIndexSparseBM25Algo.Key)
+		params.Reset(cfg.InterimIndexTargetIndexVersion.Key)
+		require.NoError(t, InitInterminIndexConfig(params))
+	})
+	for _, tc := range []struct {
+		name, ip, bm25, version string
+		wantErr                 bool
+	}{
+		{name: "inherit", version: "8"},
+		{name: "independent", ip: "sindi", bm25: "daat_wand", version: "10"},
+		{name: "bm25_sindi", ip: "TAAT_NAIVE", bm25: "SINDI", version: "10"},
+		{name: "invalid_ip", ip: "INVALID", version: "10", wantErr: true},
+		{name: "invalid_bm25", bm25: "INVALID", version: "10", wantErr: true},
+		{name: "ip_old_version", ip: "SINDI", version: "9", wantErr: true},
+		{name: "bm25_old_version", bm25: "SINDI", version: "9", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NoError(t, params.Save(cfg.InterimIndexSparseIPAlgo.Key, tc.ip))
+			require.NoError(t, params.Save(cfg.InterimIndexSparseBM25Algo.Key, tc.bm25))
+			require.NoError(t, params.Save(cfg.InterimIndexTargetIndexVersion.Key, tc.version))
+			err := InitInterminIndexConfig(params)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Equal(t, int32(merr.CodeConfigInvalid), merr.Code(err))
+				assert.False(t, merr.IsRetryableErr(err))
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
 
 func TestResolveArrowIOThreadPoolCapacity(t *testing.T) {
 	paramtable.Init()
@@ -419,6 +459,30 @@ func TestInitExternalVectorNullPolicy(t *testing.T) {
 	err := InitExternalVectorNullPolicy(pt)
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+}
+
+func TestInitExternalSparseConversionConfig(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	key := pt.CommonCfg.ExternalSparseConversionMemoryLimit.Key
+	original := pt.CommonCfg.ExternalSparseConversionMemoryLimit.GetValue()
+	t.Cleanup(func() {
+		assert.NoError(t, pt.Save(key, original))
+		assert.NoError(t, InitExternalSparseConversionConfig(pt))
+	})
+	for _, value := range []string{"1", " 268435456 ", "9223372036854775807"} {
+		assert.NoError(t, pt.Save(key, value))
+		assert.NoError(t, InitExternalSparseConversionConfig(pt))
+		expected, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		assert.NoError(t, err)
+		assert.Equal(t, expected, externalSparseConversionMemoryLimit())
+	}
+	previous := externalSparseConversionMemoryLimit()
+	for _, value := range []string{"0", "-1", "", "invalid", "9223372036854775808"} {
+		assert.NoError(t, pt.Save(key, value))
+		assert.ErrorIs(t, InitExternalSparseConversionConfig(pt), merr.ErrParameterInvalid)
+		assert.Equal(t, previous, externalSparseConversionMemoryLimit())
+	}
 }
 
 func TestInitLoonReaderConfig(t *testing.T) {

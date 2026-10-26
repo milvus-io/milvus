@@ -111,7 +111,7 @@ func buildMilvusTableFileInfosFromSnapshotMetadata(
 	getSegmentDescription func(string, int32) (*datapb.SegmentDescription, error),
 	resolveManifestPath func(string) (string, error),
 ) ([]FileInfo, error) {
-	metadata, err := snapshotio.ParseSnapshotMetadataWithVersionCheck(metadataBytes)
+	metadata, err := snapshotio.ParseSnapshotMetadata(metadataBytes)
 	if err != nil {
 		return nil, merr.Wrap(err, "parse milvus snapshot metadata")
 	}
@@ -248,7 +248,7 @@ func ReadMilvusTableSnapshotMetadata(
 	if err != nil {
 		return nil, merr.Wrap(err, "read milvus snapshot metadata")
 	}
-	metadata, err := snapshotio.ParseSnapshotMetadataWithVersionCheck(metadataBytes)
+	metadata, err := snapshotio.ParseSnapshotMetadata(metadataBytes)
 	if err != nil {
 		return nil, merr.Wrap(err, "parse milvus snapshot metadata")
 	}

@@ -21,6 +21,9 @@
 #include <filesystem>
 #include <string>
 #include <utility>
+#include "folly/ScopeGuard.h"
+#include "folly/coro/BlockingWait.h"
+#include "storage/AsyncLoadExecutor.h"
 
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
@@ -52,18 +55,6 @@ IsPackedV3(const std::vector<std::string>& paths) {
                                     .ends_with(".v3");
 }
 
-std::unique_ptr<storage::FileSource>
-MakeTextSource(const storage::FileManagerContext& context,
-               const std::vector<std::string>& paths,
-               const storage::LoadOptions& options) {
-    return std::make_unique<storage::V1RemoteSource>(
-        context,
-        paths,
-        options,
-        storage::ArtifactStorageNamespace::TextLog,
-        storage::V1SourceLayout::DiskFiles);
-}
-
 }  // namespace
 
 namespace {
@@ -83,7 +74,8 @@ EstimateValidityBitmapBytes(int64_t num_rows) {
 TextMatchIndexTranslator::TextMatchIndexTranslator(
     TextMatchIndexLoadInfo load_info,
     milvus::storage::FileManagerContext file_manager_context,
-    milvus::Config config)
+    milvus::Config config,
+    milvus::OpContext* op_ctx)
     : load_info_(std::move(load_info)),
       file_manager_context_(std::move(file_manager_context)),
       config_(std::move(config)),
@@ -121,10 +113,13 @@ TextMatchIndexTranslator::TextMatchIndexTranslator(
         std::move(family), value_type, loader_entry.derive_caps(config_));
     const auto files = index::GetValueFromConfig<std::vector<std::string>>(
         config_, index::INDEX_FILES);
+    file_manager_context_.use_async_load =
+        file_manager_context_.use_async_load.value_or(
+            storagev2translator::StorageV2AsyncLoadEnabled());
+    IndexLoadContext metadata_ctx(
+        op_ctx,
+        index::GetValueFromConfig<int32_t>(config_, LOAD_PRIORITY).value_or(0));
     if (files && files->size() == 1 && files->front().ends_with(".v3")) {
-        file_manager_context_.use_async_load =
-            file_manager_context_.use_async_load.value_or(
-                storagev2translator::StorageV2AsyncLoadEnabled());
         auto resources = index::ScalarIndexFileLoadResource(
             DataType::VARCHAR,
             load_info_.index_size,
@@ -134,9 +129,47 @@ TextMatchIndexTranslator::TextMatchIndexTranslator(
             load_info_.num_rows,
             *files,
             file_manager_context_,
-            storage::ArtifactStorageNamespace::TextLog);
-        packed_load_resource_request_ = resources.request;
+            storage::ArtifactStorageNamespace::TextLog,
+            &metadata_ctx.ctx);
+        file_load_resource_request_ = resources.request;
         meta_.loading_overhead_config = std::move(resources.overhead);
+    } else if (files && !files->empty() &&
+               *file_manager_context_.use_async_load) {
+        storage::LoadOptions options;
+        options.op_ctx = &metadata_ctx.ctx;
+        const std::map<std::string, std::string> params{
+            {index::INDEX_TYPE, index::INVERTED_INDEX_TYPE}};
+        auto inspect = [&]() -> folly::coro::Task<LoadResourceRequest> {
+            prepared_source_ = co_await storage::V1RemoteSource::OpenAsync(
+                file_manager_context_,
+                *files,
+                options,
+                storage::ArtifactStorageNamespace::TextLog,
+                storage::V1SourceLayout::DiskFiles);
+            auto detach = folly::makeGuard([&] {
+                prepared_source_->SetLoadContext(
+                    proto::common::LoadPriority::HIGH, {});
+            });
+            co_return co_await index::LegacyScalarIndexLoadResourceAsync(
+                DataType::VARCHAR,
+                load_info_.index_size,
+                params,
+                load_info_.enable_mmap,
+                load_info_.num_rows,
+                *prepared_source_);
+        };
+        file_load_resource_request_ =
+            folly::coro::blockingWait(folly::coro::co_withExecutor(
+                storage::ResolveAsyncLoadExecutor(
+                    {},
+                    metadata_ctx.ctx.runtime_load_priority.value_or(0) != 0
+                        ? proto::common::LoadPriority::LOW
+                        : proto::common::LoadPriority::HIGH),
+                inspect()));
+        if (meta_.cache_warmup_policy ==
+            CacheWarmupPolicy::CacheWarmupPolicy_Disable) {
+            prepared_source_.reset();
+        }
     }
 }
 
@@ -154,26 +187,24 @@ std::pair<milvus::cachinglayer::ResourceUsage,
           milvus::cachinglayer::ResourceUsage>
 TextMatchIndexTranslator::estimated_byte_size_of_cell(
     milvus::cachinglayer::cid_t) const {
-    if (packed_load_resource_request_) {
-        const auto& request = *packed_load_resource_request_;
+    if (file_load_resource_request_) {
+        const auto& request = *file_load_resource_request_;
         return {{request.final_memory_cost, request.final_disk_cost},
                 {request.max_memory_cost - request.final_memory_cost,
                  request.max_disk_cost - request.final_disk_cost}};
     }
     // ignore the cid checking, because there is only one cell
-    // V1/V2 text loads are synchronous: each sliced file is first cached under
-    // localStorage, then copied into the staging directory, and the cache is
-    // removed when the load finishes. Peak disk is twice the index size.
+    // Sync legacy files are decoded directly into one staging directory.
     auto bitmap_bytes = EstimateValidityBitmapBytes(load_info_.num_rows);
     auto resident_bytes =
         bitmap_bytes +
         static_cast<int64_t>(index::kScalarIndexFixedResidentBytes);
     if (load_info_.enable_mmap) {
         return {{resident_bytes, load_info_.index_size},
-                {load_info_.index_size, load_info_.index_size}};
+                {load_info_.index_size, 0}};
     } else {
         return {{load_info_.index_size + resident_bytes, 0},
-                {0, 2 * load_info_.index_size}};
+                {0, load_info_.index_size}};
     }
 }
 
@@ -195,6 +226,8 @@ std::vector<std::pair<milvus::cachinglayer::cid_t,
 TextMatchIndexTranslator::get_cells(
     milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
+    // Preparation belongs only to the first attempt, including cancellation.
+    auto prepared_source = std::move(prepared_source_);
     // Check for cancellation before loading text match index
     CheckCancellation(
         ctx, load_info_.segment_id, "TextMatchIndexTranslator::get_cells()");
@@ -243,13 +276,19 @@ TextMatchIndexTranslator::get_cells(
                      index::PackedIndexStorageConfig{
                          storage::ArtifactStorageNamespace::TextLog}},
                  options});
-        } else {
-            auto source =
-                MakeTextSource(file_manager_context_, *files, options);
+        } else if (prepared_source) {
             reader = loader_entry.Load(
                 {index::OpenedIndexSource{index::LegacyIndexSource{
-                     std::shared_ptr<storage::FileSource>(std::move(source)),
-                     false}},
+                     std::move(prepared_source), true}},
+                 options});
+        } else {
+            reader = loader_entry.Load(
+                {index::IndexFiles{
+                     file_manager_context_,
+                     *files,
+                     index::LegacyIndexStorageConfig{
+                         storage::V1SourceLayout::DiskFiles,
+                         storage::ArtifactStorageNamespace::TextLog}},
                  options});
         }
     }

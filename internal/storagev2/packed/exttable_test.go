@@ -831,6 +831,7 @@ func TestManifestPathKey(t *testing.T) {
 	assert.Equal(t, canonical, ManifestPathKey(canonical))
 	assert.Equal(t, canonical, ManifestPathKey(reordered))
 	assert.Equal(t, canonical, ManifestPathKey(extended))
+	assert.Equal(t, canonical, ManifestPathKey(" \n\t"+reordered))
 	assert.True(t, SameManifestPath(reordered, extended))
 
 	assert.False(t, SameManifestPath(canonical, MarshalManifestPath("files/insert_log/1/2/3", 8)))
@@ -2141,7 +2142,6 @@ func TestMilvusTableSnapshotMetadataInvalid(t *testing.T) {
 		{"truncated_json", `{"corrupt manifest`, merr.ErrDataIntegrity},
 		{"empty_object", "", merr.ErrDataIntegrity},
 		{"invalid_field_type", `{"format_version":"invalid"}`, merr.ErrDataIntegrity},
-		{"unsupported_version", `{"format_version":99999}`, merr.ErrOperationNotSupported},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// Exercise both consumers with real parsing. Only object I/O is patched.
@@ -2178,12 +2178,17 @@ func TestReadMilvusTableSnapshotMetadata_ReadFailureIsNotInvalidMetadata(t *test
 }
 
 func TestReadMilvusTableSnapshotMetadata_ValidMetadata(t *testing.T) {
-	read := mockey.Mock(readExternalSourceFile).Return([]byte(`{"format_version":2}`), nil).Build()
-	defer read.UnPatch()
-	metadata, err := ReadMilvusTableSnapshotMetadata("s3://bucket/metadata.json",
-		`{"format":"milvus-table"}`, nil, ExternalSpecContext{})
-	require.NoError(t, err)
-	assert.Equal(t, int32(2), metadata.GetFormatVersion())
+	for _, version := range []int32{2, 99999} {
+		t.Run(fmt.Sprintf("version_%d", version), func(t *testing.T) {
+			data := []byte(fmt.Sprintf(`{"format_version":%d}`, version))
+			read := mockey.Mock(readExternalSourceFile).Return(data, nil).Build()
+			defer read.UnPatch()
+			metadata, err := ReadMilvusTableSnapshotMetadata("s3://bucket/metadata.json",
+				`{"format":"milvus-table"}`, nil, ExternalSpecContext{})
+			require.NoError(t, err)
+			assert.Equal(t, version, metadata.GetFormatVersion())
+		})
+	}
 }
 
 func TestReadMilvusTableSnapshotMetadata_InvalidSource(t *testing.T) {

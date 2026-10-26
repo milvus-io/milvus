@@ -652,6 +652,24 @@ func InitExternalVectorNullPolicy(params *paramtable.ComponentParam) error {
 	return nil
 }
 
+// InitExternalSparseConversionConfig applies the startup-only budget shared by
+// external load, take, index build and field-size sampling.
+func InitExternalSparseConversionConfig(params *paramtable.ComponentParam) error {
+	item := &params.CommonCfg.ExternalSparseConversionMemoryLimit
+	limit, err := strconv.ParseInt(strings.TrimSpace(item.GetValue()), 10, 64)
+	if err != nil || limit <= 0 {
+		return merr.WrapErrParameterInvalidMsg("%s must be a positive byte count, got %q", item.Key, item.GetValue())
+	}
+	if !bool(C.SetExternalSparseConversionMemoryLimit(C.int64_t(limit))) {
+		return merr.WrapErrParameterInvalidMsg("%s must be positive, got %d", item.Key, limit)
+	}
+	return nil
+}
+
+func externalSparseConversionMemoryLimit() int64 {
+	return int64(C.GetExternalSparseConversionMemoryLimit())
+}
+
 func externalVectorPartialNullAsRowNullEnabled() bool {
 	return bool(C.GetExternalVectorPartialNullAsRowNull())
 }
@@ -877,6 +895,15 @@ func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
 	targetVersion := C.int64_t(params.QueryNodeCfg.InterimIndexTargetIndexVersion.GetAsInt64())
 	status := C.SegcoreSetInterimIndexTargetVersion(targetVersion)
 	if err := HandleCStatus(&status, "SegcoreSetInterimIndexTargetVersion failed"); err != nil {
+		return err
+	}
+
+	sparseIPAlgo := C.CString(params.QueryNodeCfg.InterimIndexSparseIPAlgo.GetValue())
+	defer C.free(unsafe.Pointer(sparseIPAlgo))
+	sparseBM25Algo := C.CString(params.QueryNodeCfg.InterimIndexSparseBM25Algo.GetValue())
+	defer C.free(unsafe.Pointer(sparseBM25Algo))
+	status = C.SegcoreSetSparseInterimIndexAlgorithms(sparseIPAlgo, sparseBM25Algo)
+	if err := HandleCStatus(&status, "SegcoreSetSparseInterimIndexAlgorithms failed"); err != nil {
 		return err
 	}
 

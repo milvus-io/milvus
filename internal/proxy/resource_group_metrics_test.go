@@ -106,7 +106,7 @@ func TestSearchRunsScopedToTheResourceGroupTheHookNamed(t *testing.T) {
 
 	var scope string
 	seen := false
-	defer mockey.Mock((*scheduler.BaseTaskQueue).Enqueue).To(func(_ *scheduler.BaseTaskQueue, t taskmodel.Task) error {
+	defer mockey.Mock((*scheduler.DqTaskQueue).Enqueue).To(func(_ *scheduler.DqTaskQueue, t taskmodel.Task) error {
 		scope = extension.QueryResourceGroupFromContext(t.TraceCtx())
 		seen = true
 		return nil
@@ -132,7 +132,7 @@ func TestSearchTaskCarriesNoScopeWithTheDefaultHook(t *testing.T) {
 	hookutil.SetTestHook(hookutil.DefaultHook{})
 
 	scope := "unset"
-	defer mockey.Mock((*scheduler.BaseTaskQueue).Enqueue).To(func(_ *scheduler.BaseTaskQueue, t taskmodel.Task) error {
+	defer mockey.Mock((*scheduler.DqTaskQueue).Enqueue).To(func(_ *scheduler.DqTaskQueue, t taskmodel.Task) error {
 		scope = extension.QueryResourceGroupFromContext(t.TraceCtx())
 		return nil
 	}).Build().UnPatch()

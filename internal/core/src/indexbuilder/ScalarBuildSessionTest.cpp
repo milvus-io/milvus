@@ -114,17 +114,15 @@ class ScalarBuildSessionTest : public ::testing::Test {
         auto source = index::InspectPackedIndexFile(
             {stats.Files()[0].file_name}, context);
         const auto resolved_family =
-            index::ResolvePackedLoadFamily(family, source->IndexMeta(), params);
+            index::ResolvePackedLoadFamily(family, source.Metadata(), params);
         // Cold-load planning annotates typed JSON completeness, as the sealed
         // index translator does before opening the reader.
         storage::LoadOptions options;
         options.params = index::AnnotateJsonProjectionCompleteness(
-            params, source->Directory(), source->IndexMeta());
+            params, source.Directory(), source.Metadata());
         return index::LoaderRegistry::Instance()
             .Lookup(resolved_family)
-            .Load({index::OpenedIndexSource{index::PackedIndexSource{
-                       std::shared_ptr<storage::AsyncIndexEntryReader>(
-                           std::move(source))}},
+            .Load({index::OpenedIndexSource{std::move(source)},
                    std::move(options)});
     }
 

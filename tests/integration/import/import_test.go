@@ -40,7 +40,7 @@ import (
 )
 
 type importTestBase struct {
-	importSuite
+	integration.MiniClusterSuite
 
 	failed       bool
 	failedReason string
@@ -65,12 +65,12 @@ type MultiFileTypeImportSuite struct {
 
 func (s *importTestBase) SetupSuite() {
 	s.WithMilvusConfig(paramtable.Get().RootCoordCfg.DmlChannelNum.Key, "4")
-	s.importSuite.SetupSuite()
+	s.MiniClusterSuite.SetupSuite()
 }
 
 func (s *importTestBase) SetupTest() {
 	s.failed = false
-	s.fileType = importutilv2.Parquet
+	s.fileType = importutilv2.FileTypeParquet
 	s.pkType = schemapb.DataType_Int64
 
 	s.vecType = schemapb.DataType_FloatVector
@@ -129,11 +129,11 @@ func (s *importTestBase) run() {
 	options := []*commonpb.KeyValuePair{}
 
 	switch s.fileType {
-	case importutilv2.Numpy:
+	case importutilv2.FileTypeNumpy:
 		importFile, err := GenerateNumpyFiles(c, schema, rowCount)
 		s.NoError(err)
 		files = []*internalpb.ImportFile{importFile}
-	case importutilv2.JSON:
+	case importutilv2.FileTypeJSON:
 		rowBasedFile := GenerateJSONFile(s.T(), c, schema, rowCount)
 		files = []*internalpb.ImportFile{
 			{
@@ -142,7 +142,7 @@ func (s *importTestBase) run() {
 				},
 			},
 		}
-	case importutilv2.Parquet:
+	case importutilv2.FileTypeParquet:
 		filePath, err := GenerateParquetFile(s.Cluster, schema, rowCount)
 		s.NoError(err)
 		files = []*internalpb.ImportFile{
@@ -152,7 +152,7 @@ func (s *importTestBase) run() {
 				},
 			},
 		}
-	case importutilv2.CSV:
+	case importutilv2.FileTypeCsv:
 		filePath, sep := GenerateCSVFile(s.T(), s.Cluster, schema, rowCount)
 		options = []*commonpb.KeyValuePair{{Key: "sep", Value: string(sep)}}
 		s.NoError(err)
@@ -188,11 +188,19 @@ func (s *importTestBase) run() {
 	s.NoError(err)
 	s.NotEmpty(segments)
 	for _, segment := range segments {
-		s.True(len(segment.GetBinlogs()) > 0)
-		s.NoError(CheckLogID(segment.GetBinlogs()))
+		// Storage V2 segments reference insert/stats binlogs; Storage V3 (LOON)
+		// segments, as written by Import V3 with common.storage.useLoonFFI, keep
+		// their data in the manifest instead. Either way a segment must carry
+		// its data and no delete logs.
+		if segment.GetManifestPath() == "" {
+			s.True(len(segment.GetBinlogs()) > 0)
+			s.NoError(CheckLogID(segment.GetBinlogs()))
+			s.True(len(segment.GetStatslogs()) > 0)
+			s.NoError(CheckLogID(segment.GetStatslogs()))
+		} else {
+			s.NotEmpty(segment.GetManifestPath())
+		}
 		s.True(len(segment.GetDeltalogs()) == 0)
-		s.True(len(segment.GetStatslogs()) > 0)
-		s.NoError(CheckLogID(segment.GetStatslogs()))
 	}
 
 	// create index
@@ -238,6 +246,38 @@ func (s *BulkInsertSuite) TestGeometryTypes() {
 	s.run()
 }
 
+func (s *MultiFileTypeImportSuite) TestMultiFileTypes() {
+	fileTypeArr := []importutilv2.FileType{importutilv2.FileTypeJSON, importutilv2.FileTypeNumpy, importutilv2.FileTypeParquet, importutilv2.FileTypeCsv}
+	vectorTypes := []struct {
+		vecType    schemapb.DataType
+		indexType  indexparamcheck.IndexType
+		metricType metric.MetricType
+	}{
+		{schemapb.DataType_BinaryVector, "BIN_IVF_FLAT", metric.HAMMING},
+		{schemapb.DataType_FloatVector, "HNSW", metric.L2},
+		{schemapb.DataType_Float16Vector, "HNSW", metric.L2},
+		{schemapb.DataType_BFloat16Vector, "HNSW", metric.L2},
+		{schemapb.DataType_Int8Vector, "HNSW", metric.L2},
+		{schemapb.DataType_SparseFloatVector, "SPARSE_WAND", metric.IP},
+	}
+
+	for _, fileType := range fileTypeArr {
+		for _, vectorType := range vectorTypes {
+			// Numpy does not support sparse vectors.
+			if fileType == importutilv2.FileTypeNumpy && vectorType.vecType == schemapb.DataType_SparseFloatVector {
+				continue
+			}
+			s.Run(fmt.Sprintf("%s/%s", fileType, vectorType.vecType), func() {
+				s.fileType = fileType
+				s.vecType = vectorType.vecType
+				s.indexType = vectorType.indexType
+				s.metricType = vectorType.metricType
+				s.run()
+			})
+		}
+	}
+}
+
 func (s *BulkInsertSuite) TestPK() {
 	s.pkType = schemapb.DataType_Int64
 	s.run()
@@ -247,6 +287,13 @@ func (s *BulkInsertSuite) TestPK() {
 }
 
 func (s *BulkInsertSuite) TestZeroRowCount() {
+	s.runZeroRowCountTest(true)
+}
+
+// runZeroRowCountTest is shared by the V2 and V3 suites. A zero-row ordinary job
+// short-circuits to Completed under auto_commit, or parks in Uncommitted without
+// it, and produces no segments either way.
+func (s *importTestBase) runZeroRowCountTest(autoCommit bool) {
 	const (
 		rowCount = 0
 	)
@@ -287,17 +334,30 @@ func (s *BulkInsertSuite) TestZeroRowCount() {
 	importResp, err := c.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
 		CollectionName: collectionName,
 		Files:          files,
+		Options:        zeroRowOptions(autoCommit),
 	})
 	s.NoError(err)
 	mlog.Info(context.TODO(), "Import result", mlog.Any("importResp", importResp))
 
 	jobID := importResp.GetJobID()
-	err = WaitForImportDone(ctx, c, jobID)
-	s.NoError(err)
+	if autoCommit {
+		s.NoError(WaitForImportDone(ctx, c, jobID))
+	} else {
+		s.NoError(WaitForImportState(ctx, c, jobID, internalpb.ImportJobState_Uncommitted))
+	}
 
 	segments, err := c.ShowSegments(collectionName)
 	s.NoError(err)
 	s.Empty(segments)
+}
+
+// zeroRowOptions keeps the auto_commit default (true) when requested; an explicit
+// auto_commit=false parks the job in Uncommitted.
+func zeroRowOptions(autoCommit bool) []*commonpb.KeyValuePair {
+	if autoCommit {
+		return nil
+	}
+	return []*commonpb.KeyValuePair{{Key: "auto_commit", Value: "false"}}
 }
 
 func (s *BulkInsertSuite) TestImportFixedSizeListParquet() {

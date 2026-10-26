@@ -165,11 +165,19 @@ TEST_F(ScalarIndexTranslatorTest,
             context_.use_async_load = async;
             Config config(info.index_params);
             config["nested"] = true;
-            SealedIndexTranslator translator(
-                &info, tracer::TraceContext{}, context_, config);
-            EXPECT_EQ(translator.Family(), index::families::kSort);
-            EXPECT_EQ(translator.ValueType(), DataType::VARCHAR);
-            auto cells = translator.get_cells(nullptr, {0});
+            std::unique_ptr<SealedIndexTranslator> translator;
+            {
+                folly::CancellationSource cancel;
+                OpContext creation(cancel.getToken());
+                creation.runtime_load_priority = 1;
+                translator = std::make_unique<SealedIndexTranslator>(
+                    &info, tracer::TraceContext{}, context_, config, &creation);
+                cancel.requestCancellation();
+            }
+            EXPECT_EQ(translator->Family(), index::families::kSort);
+            EXPECT_EQ(translator->ValueType(), DataType::VARCHAR);
+            OpContext load;
+            auto cells = translator->get_cells(&load, {0});
             ASSERT_EQ(cells.size(), 1);
             const auto* reader = cells.front().second.get();
             ASSERT_NE(reader, nullptr);

@@ -7,8 +7,10 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 )
 
 var (
@@ -24,7 +26,6 @@ type redoAppendInterceptor struct {
 	gracefulStop chan struct{}
 }
 
-// TODO: should be removed after lock-based before timetick is applied.
 func (r *redoAppendInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (msgID message.MessageID, err error) {
 	for {
 		if ctx.Err() != nil {
@@ -39,8 +40,44 @@ func (r *redoAppendInterceptor) DoAppend(ctx context.Context, msg message.Mutabl
 		if errors.Is(err, ErrRedo) {
 			continue
 		}
+		var preparation *function.PreparationRequiredError
+		if errors.As(err, &preparation) {
+			// The inner chain has released its locks, TimeTick acker and
+			// transaction admission before joining preparation.
+			if err := prepareRunner(ctx, preparation); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		return msgID, err
 	}
+}
+
+type callerContextKey struct{}
+
+// WithCallerContext preserves the caller's cancellation before the WAL detaches
+// it for mutation safety. Only preparation uses it; accepted writes still use
+// the WAL-owned context.
+func WithCallerContext(ctx context.Context) context.Context {
+	return context.WithValue(ctx, callerContextKey{}, ctx)
+}
+
+func prepareRunner(ctx context.Context, preparation *function.PreparationRequiredError) error {
+	if caller, ok := ctx.Value(callerContextKey{}).(context.Context); ok {
+		var cancel context.CancelFunc
+		ctx, cancel = contextutil.MergeContext(caller, ctx)
+		defer cancel()
+	}
+	err := preparation.Prepare(ctx)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if err != nil {
+		// Transient resource failures retry inside Prepare. Preserve the
+		// existing terminal append policy for permanent/native failures.
+		return status.NewUnrecoverableError("failed to prepare function fields before WAL append: %s", err.Error())
+	}
+	return nil
 }
 
 // waitUntilGrowingSegmentReady waits until the growing segment is ready if msg is insert.

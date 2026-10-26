@@ -280,7 +280,9 @@ func castValue(dataType schemapb.DataType, value *planpb.GenericValue) (*planpb.
 	if typeutil.IsStringType(dataType) && IsString(value) {
 		return value, nil
 	}
-	if typeutil.IsTimestamptzType(dataType) {
+	// Timestamptz is int64 unix microseconds in the plan; ISO literals are
+	// converted by the dedicated grammar path and never reach castValue.
+	if typeutil.IsTimestamptzType(dataType) && IsInteger(value) {
 		return value, nil
 	}
 
@@ -779,7 +781,8 @@ func castRangeValue(dataType schemapb.DataType, value *planpb.GenericValue) (*pl
 		}
 	case schemapb.DataType_Bool:
 		return nil, merr.WrapErrQueryPlanMsg("invalid range operations on boolean expr")
-	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64:
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64,
+		schemapb.DataType_Timestamptz:
 		if !IsInteger(value) {
 			return nil, merr.WrapErrQueryPlanMsg("invalid range operations")
 		}

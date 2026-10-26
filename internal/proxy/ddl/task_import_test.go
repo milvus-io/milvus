@@ -18,9 +18,9 @@ package ddl
 
 import (
 	"context"
-	"strconv"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
@@ -41,7 +42,138 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// Note: mockey is not used in this file since we use testify/mock for generated mocks
+func TestImportTaskPreExecuteTargetPartitions(t *testing.T) {
+	paramtable.Init()
+	for _, tc := range []struct {
+		name         string
+		snapshot     bool
+		backup       bool
+		partitionKey bool
+		partition    string
+		mapping      string
+		wantName     string
+		wantIDs      []int64
+		wantErr      string
+		l0           bool
+		loaded       bool
+		failAt       string
+		fileCount    int
+	}{
+		{name: "snapshot_default", snapshot: true, backup: true, wantName: "_default", wantIDs: []int64{10}},
+		{name: "snapshot_mapping", snapshot: true, backup: true, mapping: `{"A":"custom","B":"_default"}`, wantIDs: []int64{10, 20}},
+		{name: "snapshot_mapping_merge", snapshot: true, backup: true, mapping: `{"A":"custom","B":"custom"}`, wantIDs: []int64{20}},
+		{name: "snapshot_mapping_named", snapshot: true, backup: true, mapping: `{"A":"custom"}`, partition: "custom", wantErr: "cannot be combined"},
+		{name: "snapshot_mapping_partition_key", snapshot: true, backup: true, mapping: `{"A":"custom"}`, partitionKey: true, wantErr: "cannot be combined"},
+		{name: "snapshot_mapping_missing_target", snapshot: true, backup: true, mapping: `{"A":"missing"}`, wantErr: "partition not found"},
+		{name: "ordinary_mapping", mapping: `{"A":"custom"}`, wantErr: "requires source_type=snapshot"},
+		{name: "snapshot_named", snapshot: true, backup: true, partition: "custom", wantName: "custom", wantIDs: []int64{20}},
+		{name: "snapshot_missing_partition", snapshot: true, backup: true, partition: "missing", wantErr: "partition not found"},
+		{name: "snapshot_partition_key", snapshot: true, backup: true, partitionKey: true, wantIDs: []int64{20, 10}},
+		{name: "snapshot_partition_key_explicit", snapshot: true, backup: true, partitionKey: true, partition: "_default_0", wantErr: "not allow to set partition name"},
+		{name: "legacy_backup_requires_partition", backup: true, wantErr: "partition not specified"},
+		{name: "legacy_backup_named", backup: true, partition: "custom", wantName: "custom", wantIDs: []int64{20}},
+		{name: "ordinary_default", wantName: "_default", wantIDs: []int64{10}},
+		{name: "ordinary_partition_key", partitionKey: true, wantIDs: []int64{20, 10}},
+		{name: "legacy_backup_missing_partition", backup: true, partition: "missing", wantErr: "partition not found"},
+		{name: "l0_all_partitions", l0: true, wantIDs: []int64{-1}},
+		{name: "l0_named_partition", l0: true, partition: "custom", wantName: "custom", wantIDs: []int64{20}},
+		{name: "l0_missing_partition", l0: true, partition: "missing", wantErr: "partition not found"},
+		{name: "l0_load_state_error", l0: true, failAt: "load", wantErr: "dependency failed"},
+		{name: "l0_already_loaded", l0: true, loaded: true, wantErr: "collection cannot be loaded"},
+		{name: "partition_metadata_error", snapshot: true, backup: true, partitionKey: true, failAt: "partitions", wantErr: "dependency failed"},
+		{name: "text_storage_disabled", failAt: "text", wantErr: "dependency failed"},
+		{name: "partition_mapping_read_error", failAt: "mapping", wantErr: "dependency failed"},
+		{name: "multiple_snapshot_sources", snapshot: true, backup: true, fileCount: 2, wantErr: "exactly one snapshot metadata path"},
+		{name: "too_many_files", fileCount: 2, wantErr: "max number of import files"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			errFor := func(stage string) error {
+				if tc.failAt == stage {
+					return errors.New("dependency failed")
+				}
+				return nil
+			}
+			textValidation := mockey.Mock(validateTextStorageV3Enabled).Return(errFor("text")).Build()
+			defer textValidation.UnPatch()
+			loaded := mockey.Mock(isCollectionLoaded).Return(tc.loaded, errFor("load")).Build()
+			defer loaded.UnPatch()
+			if tc.failAt == "mapping" {
+				// Exercise propagation at the routing boundary independently of
+				// the earlier public-option validator, which has its own tests.
+				validation := mockey.Mock(importutilv2.ValidateSnapshotSourceRequest).Return(nil).Build()
+				defer validation.UnPatch()
+				mapping := mockey.Mock(importutilv2.GetPartitionMapping).Return(nil, errFor("mapping")).Build()
+				defer mapping.UnPatch()
+			}
+			schema := &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{Name: "target", Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "part", DataType: schemapb.DataType_Int64, IsPartitionKey: tc.partitionKey},
+			}}}
+			cache := &MetaCache{}
+			idPatch := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(100), nil).Build()
+			defer idPatch.UnPatch()
+			schemaPatch := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
+				CollID: 100, DBName: "default", Schema: schema,
+			}, nil).Build()
+			defer schemaPatch.UnPatch()
+			partitionPatch := mockey.Mock((*MetaCache).GetPartitionID).To(
+				func(_ *MetaCache, _ context.Context, _, _, name string) (int64, error) {
+					switch name {
+					case "_default":
+						return 10, nil
+					case "custom":
+						return 20, nil
+					default:
+						return 0, errors.New("partition not found")
+					}
+				}).Build()
+			defer partitionPatch.UnPatch()
+			// IDs deliberately differ from name order: both import phases must
+			// receive the stable partition-key index order, not map or ID order.
+			partitionsPatch := mockey.Mock((*MetaCache).GetPartitions).Return(map[string]int64{
+				"_default_1": 10, "_default_0": 20,
+			}, errFor("partitions")).Build()
+			defer partitionsPatch.UnPatch()
+			type testChannels struct{ channelmgr.ChannelsMgr }
+			channels := &testChannels{}
+			channelPatch := mockey.Mock((*testChannels).GetVChannels).Return([]string{"v1"}, nil).Build()
+			defer channelPatch.UnPatch()
+			req := &internalpb.ImportRequest{
+				DbName: "default", CollectionName: "target", PartitionName: tc.partition,
+				Files: []*internalpb.ImportFile{{Paths: []string{"data.json"}}},
+			}
+			if tc.backup {
+				req.Options = append(req.Options, &commonpb.KeyValuePair{Key: "backup", Value: "true"})
+			}
+			if tc.l0 {
+				req.Options = append(req.Options, &commonpb.KeyValuePair{Key: "l0_import", Value: "true"})
+			}
+			if tc.mapping != "" {
+				req.Options = append(req.Options, &commonpb.KeyValuePair{Key: "partition_mapping", Value: tc.mapping})
+			}
+			if tc.snapshot {
+				req.Options = append(req.Options, &commonpb.KeyValuePair{Key: "source_type", Value: "snapshot"})
+				req.Files[0].Paths = []string{"s3://source/root/snapshots/1/metadata/2.json"}
+			}
+			if tc.fileCount > 1 {
+				req.Files = append(req.Files, &internalpb.ImportFile{Paths: []string{"second.json"}})
+				limit := &paramtable.Get().DataCoordCfg.MaxFilesPerImportReq
+				old := limit.SwapTempValue("1")
+				defer limit.SwapTempValue(old)
+			}
+			task := &ImportTask{req: req, node: &mockTaskNode{metaCache: cache, chMgr: channels}}
+			task.MetaCache = cache
+			err := task.PreExecute(context.Background())
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.wantName, req.PartitionName)
+			require.Equal(t, tc.wantIDs, task.partitionIDs)
+		})
+	}
+}
 
 // ================================
 // ImportTask Test Suite
@@ -243,8 +375,6 @@ func (s *ImportTaskSuite) TestExecute_PassesCorrectRequestParameters() {
 		collectionID: 100,
 		partitionIDs: []int64{1, 2},
 		vchannels:    []string{"v1", "v2"},
-		rlsPrincipal: "alice",
-		skipRLS:      true,
 		schema: &schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{
 				Name: "test_collection",
@@ -265,8 +395,6 @@ func (s *ImportTaskSuite) TestExecute_PassesCorrectRequestParameters() {
 	s.Equal([]string{"v1", "v2"}, capturedReq.ChannelNames)
 	s.Equal(uint64(0), capturedReq.DataTimestamp) // Must be 0 for proxy call
 	s.Equal(int64(0), capturedReq.JobID)          // Let DataCoord allocate
-	s.Equal("alice", capturedReq.GetRlsPrincipal())
-	s.True(capturedReq.GetSkipRls())
 }
 
 // --------------------------------
@@ -512,105 +640,6 @@ func newImportTaskForPreExecute(t *testing.T, options []*commonpb.KeyValuePair) 
 		},
 		resp: &internalpb.ImportResponse{},
 	}
-}
-
-func TestImportTask_PreExecutePinsIdentityAndRLSContext(t *testing.T) {
-	paramtable.Init()
-	gate := &paramtable.Get().ProxyCfg.RLSImportEnforcementEnabled
-	oldGate := gate.SwapTempValue("true")
-	t.Cleanup(func() { gate.SwapTempValue(oldGate) })
-	require.NoError(t, paramtable.Get().Save(paramtable.Get().CommonCfg.AuthorizationEnabled.Key, "false"))
-	t.Cleanup(func() {
-		require.NoError(t, paramtable.Get().Reset(paramtable.Get().CommonCfg.AuthorizationEnabled.Key))
-	})
-
-	for _, test := range []struct {
-		name              string
-		rlsEnabled        bool
-		skipRLS           bool
-		expectedPrincipal string
-		expectedSkipRLS   bool
-	}{
-		{name: "principal is retained for enforcement", rlsEnabled: true, expectedPrincipal: "alice"},
-		{name: "authorized bypass is retained", rlsEnabled: true, skipRLS: true, expectedSkipRLS: true},
-		{name: "unchecked bypass on disabled collection is discarded", skipRLS: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			const collectionID = int64(100)
-			cache := NewMockCache(t)
-			cache.EXPECT().GetCollectionID(mock.Anything, "request_db", "alias").Return(collectionID, nil)
-			cache.EXPECT().GetCollectionInfo(mock.Anything, "request_db", "alias", collectionID).Return(&collectionInfo{
-				CollID:     collectionID,
-				DBName:     "canonical_db",
-				RlsEnabled: test.rlsEnabled,
-				Schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
-					Name: "canonical_collection",
-					Fields: []*schemapb.FieldSchema{
-						{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-					},
-				}},
-			}, nil)
-			cache.EXPECT().GetPartitionID(mock.Anything, "canonical_db", "canonical_collection", mock.Anything).
-				Return(int64(200), nil)
-
-			channels := channelmgr.NewMockChannelsMgr(t)
-			channels.EXPECT().GetVChannels(collectionID).Return([]string{"v1"}, nil)
-			task := &ImportTask{
-				baseTask: baseTask{MetaCache: cache},
-				ctx:      context.Background(),
-				node:     &mockTaskNode{metaCache: cache, chMgr: channels},
-				req: &internalpb.ImportRequest{
-					DbName:         "request_db",
-					CollectionName: "alias",
-					Files:          []*internalpb.ImportFile{{Paths: []string{"staging/file.json"}}},
-					Options: []*commonpb.KeyValuePair{
-						{Key: "rls_principal", Value: "alice"},
-						{Key: "skip_rls", Value: strconv.FormatBool(test.skipRLS)},
-					},
-				},
-				resp: &internalpb.ImportResponse{},
-			}
-
-			require.NoError(t, task.PreExecute(context.Background()))
-			assert.Equal(t, "canonical_db", task.req.GetDbName())
-			assert.Equal(t, "canonical_collection", task.req.GetCollectionName())
-			assert.Equal(t, test.expectedPrincipal, task.rlsPrincipal)
-			assert.Equal(t, test.expectedSkipRLS, task.skipRLS)
-		})
-	}
-}
-
-func TestImportTask_PreExecuteRejectsRLSBeforeClusterUpgrade(t *testing.T) {
-	paramtable.Init()
-	gate := &paramtable.Get().ProxyCfg.RLSImportEnforcementEnabled
-	oldGate := gate.SwapTempValue("false")
-	t.Cleanup(func() { gate.SwapTempValue(oldGate) })
-
-	cache := NewMockCache(t)
-	cache.EXPECT().GetCollectionID(mock.Anything, "test_db", "test_collection").Return(int64(100), nil)
-	cache.EXPECT().GetCollectionInfo(mock.Anything, "test_db", "test_collection", int64(100)).Return(&collectionInfo{
-		CollID:     100,
-		RlsEnabled: true,
-		Schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
-			Name:   "test_collection",
-			Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
-		}},
-	}, nil)
-	task := &ImportTask{
-		baseTask: baseTask{MetaCache: cache},
-		ctx:      context.Background(),
-		req: &internalpb.ImportRequest{
-			DbName:         "test_db",
-			CollectionName: "test_collection",
-			Options: []*commonpb.KeyValuePair{
-				{Key: "rls_principal", Value: "alice"},
-				{Key: "skip_rls", Value: "true"},
-			},
-		},
-	}
-
-	err := task.PreExecute(context.Background())
-	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 }
 
 // TestImportTask_PreExecuteRequiresImportBinlogPrivilege drives the gate through

@@ -43,6 +43,13 @@ func OptStreamingCatalog(catalog metastore.StreamingCoordCataLog) optResourceIni
 	}
 }
 
+// OptStreamingNodeCatalog provides read access to the durable WAL recovery checkpoints.
+func OptStreamingNodeCatalog(catalog metastore.StreamingNodeCataLog) optResourceInit {
+	return func(r *resourceImpl) {
+		r.streamingNodeCatalog = catalog
+	}
+}
+
 // OptSession provides the session to the resource.
 func OptSession(session sessionutil.SessionInterface) optResourceInit {
 	return func(r *resourceImpl) {
@@ -63,6 +70,7 @@ func Init(opts ...optResourceInit) {
 	assertNotNil(newR.MixCoordClient())
 	assertNotNil(newR.ETCD())
 	assertNotNil(newR.StreamingCatalog())
+	assertNotNil(newR.StreamingNodeCatalog())
 	newR.streamingNodeManagerClient = manager.NewManagerClient(newR.etcdClient)
 	assertNotNil(newR.StreamingNodeManagerClient())
 	r.Store(newR)
@@ -88,6 +96,7 @@ type resourceImpl struct {
 	session                    sessionutil.SessionInterface
 	etcdClient                 *clientv3.Client
 	streamingCatalog           metastore.StreamingCoordCataLog
+	streamingNodeCatalog       metastore.StreamingNodeCataLog
 	streamingNodeManagerClient manager.ManagerClient
 	logger                     *mlog.Logger
 }
@@ -105,6 +114,11 @@ func (r *resourceImpl) IDAllocator() idalloc.Allocator {
 // StreamingCatalog returns the StreamingCatalog client.
 func (r *resourceImpl) StreamingCatalog() metastore.StreamingCoordCataLog {
 	return r.streamingCatalog
+}
+
+// StreamingNodeCatalog reads the same durable recovery metadata as WAL startup.
+func (r *resourceImpl) StreamingNodeCatalog() metastore.StreamingNodeCataLog {
+	return r.streamingNodeCatalog
 }
 
 // ETCD returns the etcd client.

@@ -192,7 +192,7 @@ func newCollectionInfosFromWritePathRecovery(
 			PartitionIDs: partitionIDs,
 		}
 		if state.Schema != nil {
-			collectionInfo.setSchema(&streamingpb.CollectionSchemaOfVChannel{Schema: state.Schema})
+			collectionInfo.setSchema(&streamingpb.CollectionSchemaOfVChannel{Schema: state.Schema, CheckpointTimeTick: state.SchemaTimeTick})
 		}
 		collectionInfoMap[state.CollectionID] = collectionInfo
 	}

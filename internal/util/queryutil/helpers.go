@@ -69,6 +69,13 @@ func comparePK(a, b any) int {
 // the merge logic. Pass nil to fall back to template-based inference
 // (backward compatible for tests and callers without schema).
 func buildMergedRetrieveResults(results []*internalpb.RetrieveResults, selectedRows []rowRef, schema *schemapb.CollectionSchema) (*internalpb.RetrieveResults, error) {
+	return buildMergedRetrieveResultsRange(results, selectedRows, 0, len(selectedRows), schema)
+}
+
+// buildMergedRetrieveResultsRange validates the complete selection, but only
+// materializes selectedRows[start:end]. In particular, discarded vector rows
+// still participate in type inference, nullable checks, and bounds validation.
+func buildMergedRetrieveResultsRange(results []*internalpb.RetrieveResults, selectedRows []rowRef, start, end int, schema *schemapb.CollectionSchema) (*internalpb.RetrieveResults, error) {
 	if len(selectedRows) == 0 || len(results) == 0 {
 		return &internalpb.RetrieveResults{}, nil
 	}
@@ -139,8 +146,10 @@ func buildMergedRetrieveResults(results []*internalpb.RetrieveResults, selectedR
 		FieldsData: make([]*schemapb.FieldData, numFields),
 	}
 
-	// Build merged IDs
-	merged.Ids = buildMergedIDs(results, selectedRows)
+	pageRows := selectedRows[start:end]
+
+	// Build merged IDs only for the output page.
+	merged.Ids = buildMergedIDs(results, pageRows)
 
 	// Build merged field data
 	for fieldIdx := 0; fieldIdx < numFields; fieldIdx++ {
@@ -149,7 +158,7 @@ func buildMergedRetrieveResults(results []*internalpb.RetrieveResults, selectedR
 		if fieldSchemaMap != nil {
 			fs = fieldSchemaMap[fieldID] // nil for system fields (RowID=0, Timestamp=1)
 		}
-		fd, err := buildMergedFieldData(results, selectedRows, fieldIdx, fs)
+		fd, err := buildMergedFieldDataRange(results, selectedRows, start, end, fieldIdx, fs)
 		if err != nil {
 			return nil, err
 		}
@@ -159,7 +168,7 @@ func buildMergedRetrieveResults(results []*internalpb.RetrieveResults, selectedR
 	// Propagate element-level metadata
 	merged.ElementLevel = template.GetElementLevel()
 	if merged.ElementLevel {
-		merged.ElementIndices = buildMergedElementIndices(results, selectedRows)
+		merged.ElementIndices = buildMergedElementIndices(results, pageRows)
 	}
 
 	return merged, nil
@@ -235,11 +244,11 @@ func buildMergedIDs(results []*internalpb.RetrieveResults, selectedRows []rowRef
 	return nil
 }
 
-// buildMergedFieldData builds merged field data from selected rows.
+// buildMergedFieldDataRange builds merged field data for the selected page.
 // fieldSchema provides DataType, dim, and nullable from the collection schema.
 // It may be nil for system fields (RowID, Timestamp) or in tests; in that case
 // the function falls back to template-based inference for backward compatibility.
-func buildMergedFieldData(results []*internalpb.RetrieveResults, selectedRows []rowRef, fieldIdx int, fieldSchema *schemapb.FieldSchema) (*schemapb.FieldData, error) {
+func buildMergedFieldDataRange(results []*internalpb.RetrieveResults, selectedRows []rowRef, start, end, fieldIdx int, fieldSchema *schemapb.FieldSchema) (*schemapb.FieldData, error) {
 	template := results[selectedRows[0].resultIdx].GetFieldsData()[fieldIdx]
 	isNullable := fieldSchema != nil && fieldSchema.GetNullable()
 
@@ -259,7 +268,7 @@ func buildMergedFieldData(results []*internalpb.RetrieveResults, selectedRows []
 	}
 
 	if isVector {
-		vecField, err := buildMergedVectorField(results, selectedRows, fieldIdx, fieldSchema)
+		vecField, err := buildMergedVectorFieldRange(results, selectedRows, start, end, fieldIdx, fieldSchema)
 		if err != nil {
 			return nil, err
 		}
@@ -268,14 +277,14 @@ func buildMergedFieldData(results []*internalpb.RetrieveResults, selectedRows []
 		}
 	} else {
 		newFd.Field = &schemapb.FieldData_Scalars{
-			Scalars: buildMergedScalarField(results, selectedRows, fieldIdx),
+			Scalars: buildMergedScalarFieldFromTemplate(results, selectedRows[start:end], fieldIdx, template.GetScalars()),
 		}
 	}
 
-	// Preserve ValidData (nullable bitmap) for nullable fields.
+	// Preserve ValidData (nullable bitmap) for the output page.
 	if isNullable {
-		validData := make([]bool, len(selectedRows))
-		for i, ref := range selectedRows {
+		validData := make([]bool, end-start)
+		for i, ref := range selectedRows[start:end] {
 			vd := typeutil.GetFieldDataValidData(results[ref.resultIdx].GetFieldsData()[fieldIdx])
 			if len(vd) > 0 && int(ref.rowIdx) < len(vd) {
 				validData[i] = vd[ref.rowIdx]
@@ -288,12 +297,12 @@ func buildMergedFieldData(results []*internalpb.RetrieveResults, selectedRows []
 	return newFd, nil
 }
 
-// buildMergedScalarField builds merged scalar field from selected rows.
+// buildMergedScalarFieldFromTemplate builds scalar fields for the selected page,
+// preserving the template chosen before pagination.
 // Bounds-checks each row access: nullable fields with all-null results may have an empty
 // Data array (segcore omits the storage); out-of-bounds rows keep the Go zero value.
 // The corresponding ValidData entry will be false, so users never see zero-filled nulls.
-func buildMergedScalarField(results []*internalpb.RetrieveResults, selectedRows []rowRef, fieldIdx int) *schemapb.ScalarField {
-	template := results[selectedRows[0].resultIdx].GetFieldsData()[fieldIdx].GetScalars()
+func buildMergedScalarFieldFromTemplate(results []*internalpb.RetrieveResults, selectedRows []rowRef, fieldIdx int, template *schemapb.ScalarField) *schemapb.ScalarField {
 	newSf := &schemapb.ScalarField{}
 
 	switch template.GetData().(type) {
@@ -538,7 +547,8 @@ func getVecDataIdx(compactIndices [][]int, ref rowRef) int {
 	return ci[ref.rowIdx]
 }
 
-// buildMergedVectorField builds merged vector field from selected rows.
+// buildMergedVectorFieldRange validates all selected vector rows and builds
+// payloads only for the page range.
 // For nullable primitive vector fields, segcore uses compact mode: the data
 // array only contains entries for valid (non-null) rows, and ValidData bitmap
 // marks which logical rows are null. Null rows don't occupy space in the data
@@ -559,7 +569,7 @@ func getVecDataIdx(compactIndices [][]int, ref rowRef) int {
 //
 // fieldSchema may be nil for system fields or tests; in that case we fall back
 // to scanning results for the first non-nil Data to infer the type.
-func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows []rowRef, fieldIdx int, fieldSchema *schemapb.FieldSchema) (*schemapb.VectorField, error) {
+func buildMergedVectorFieldRange(results []*internalpb.RetrieveResults, selectedRows []rowRef, startRow, endRow, fieldIdx int, fieldSchema *schemapb.FieldSchema) (*schemapb.VectorField, error) {
 	isNullable := fieldSchema != nil && fieldSchema.GetNullable()
 
 	// Determine DataType and dim from schema (preferred) or from result data (fallback).
@@ -626,8 +636,8 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 
 	switch dataType {
 	case schemapb.DataType_FloatVector:
-		data := make([]float32, 0, len(selectedRows)*int(dim))
-		for _, ref := range selectedRows {
+		data := make([]float32, 0, (endRow-startRow)*int(dim))
+		for row, ref := range selectedRows {
 			di := getVecDataIdx(compactIdx, ref)
 			if di < 0 {
 				continue
@@ -637,14 +647,16 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 			if start+int(dim) > len(vec) {
 				return nil, vecDataOOB(ref, di, len(vec))
 			}
-			data = append(data, vec[start:start+int(dim)]...)
+			if row >= startRow && row < endRow {
+				data = append(data, vec[start:start+int(dim)]...)
+			}
 		}
 		newVf.Data = &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: data}}
 
 	case schemapb.DataType_BinaryVector:
 		bytesPerRow := int(dim) / 8
-		data := make([]byte, 0, len(selectedRows)*bytesPerRow)
-		for _, ref := range selectedRows {
+		data := make([]byte, 0, (endRow-startRow)*bytesPerRow)
+		for row, ref := range selectedRows {
 			di := getVecDataIdx(compactIdx, ref)
 			if di < 0 {
 				continue
@@ -654,14 +666,16 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 			if start+bytesPerRow > len(vec) {
 				return nil, vecDataOOB(ref, di, len(vec))
 			}
-			data = append(data, vec[start:start+bytesPerRow]...)
+			if row >= startRow && row < endRow {
+				data = append(data, vec[start:start+bytesPerRow]...)
+			}
 		}
 		newVf.Data = &schemapb.VectorField_BinaryVector{BinaryVector: data}
 
 	case schemapb.DataType_Float16Vector:
 		bytesPerRow := int(dim) * 2
-		data := make([]byte, 0, len(selectedRows)*bytesPerRow)
-		for _, ref := range selectedRows {
+		data := make([]byte, 0, (endRow-startRow)*bytesPerRow)
+		for row, ref := range selectedRows {
 			di := getVecDataIdx(compactIdx, ref)
 			if di < 0 {
 				continue
@@ -671,14 +685,16 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 			if start+bytesPerRow > len(vec) {
 				return nil, vecDataOOB(ref, di, len(vec))
 			}
-			data = append(data, vec[start:start+bytesPerRow]...)
+			if row >= startRow && row < endRow {
+				data = append(data, vec[start:start+bytesPerRow]...)
+			}
 		}
 		newVf.Data = &schemapb.VectorField_Float16Vector{Float16Vector: data}
 
 	case schemapb.DataType_BFloat16Vector:
 		bytesPerRow := int(dim) * 2
-		data := make([]byte, 0, len(selectedRows)*bytesPerRow)
-		for _, ref := range selectedRows {
+		data := make([]byte, 0, (endRow-startRow)*bytesPerRow)
+		for row, ref := range selectedRows {
 			di := getVecDataIdx(compactIdx, ref)
 			if di < 0 {
 				continue
@@ -688,14 +704,16 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 			if start+bytesPerRow > len(vec) {
 				return nil, vecDataOOB(ref, di, len(vec))
 			}
-			data = append(data, vec[start:start+bytesPerRow]...)
+			if row >= startRow && row < endRow {
+				data = append(data, vec[start:start+bytesPerRow]...)
+			}
 		}
 		newVf.Data = &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: data}
 
 	case schemapb.DataType_Int8Vector:
 		bytesPerRow := int(dim)
-		data := make([]byte, 0, len(selectedRows)*bytesPerRow)
-		for _, ref := range selectedRows {
+		data := make([]byte, 0, (endRow-startRow)*bytesPerRow)
+		for row, ref := range selectedRows {
 			di := getVecDataIdx(compactIdx, ref)
 			if di < 0 {
 				continue
@@ -705,14 +723,16 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 			if start+bytesPerRow > len(vec) {
 				return nil, vecDataOOB(ref, di, len(vec))
 			}
-			data = append(data, vec[start:start+bytesPerRow]...)
+			if row >= startRow && row < endRow {
+				data = append(data, vec[start:start+bytesPerRow]...)
+			}
 		}
 		newVf.Data = &schemapb.VectorField_Int8Vector{Int8Vector: data}
 
 	case schemapb.DataType_SparseFloatVector:
-		contents := make([][]byte, 0, len(selectedRows))
+		contents := make([][]byte, 0, endRow-startRow)
 		var maxDim int64
-		for _, ref := range selectedRows {
+		for row, ref := range selectedRows {
 			di := getVecDataIdx(compactIdx, ref)
 			if di < 0 {
 				continue
@@ -726,7 +746,9 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 					fd.GetFieldId(), fd.GetFieldName(), ref.resultIdx,
 					di, len(sparse.GetContents()), typeutil.GetSizeOfIDs(results[ref.resultIdx].GetIds()))
 			}
-			contents = append(contents, sparse.GetContents()[di])
+			if row >= startRow && row < endRow {
+				contents = append(contents, sparse.GetContents()[di])
+			}
 			if sparse.GetDim() > maxDim {
 				maxDim = sparse.GetDim()
 			}
@@ -761,8 +783,9 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 		// ArrayOfVector must stay row-dense even for nullable all-null output.
 		// Do not use len(Data)==0 as an all-null signal: ValidData carries nullness,
 		// while Data keeps one placeholder per logical row.
-		data := make([]*schemapb.VectorField, 0, len(selectedRows))
-		for _, ref := range selectedRows {
+		data := make([]*schemapb.VectorField, 0, endRow-startRow)
+		var emptyRowTemplate *schemapb.VectorField
+		for row, ref := range selectedRows {
 			fd := results[ref.resultIdx].GetFieldsData()[fieldIdx]
 			numRows := typeutil.GetSizeOfIDs(results[ref.resultIdx].GetIds())
 			rowValid, err := arrayOfVectorRowValid(fd, ref.rowIdx, isNullable, numRows, ref.resultIdx)
@@ -772,11 +795,21 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 
 			di := getVecDataIdx(compactIdx, ref)
 			if di < 0 || !rowValid {
-				emptyRow, err := typeutil.NewEmptyArrayOfVectorRow(dim, elementType)
-				if err != nil {
-					return nil, err
+				// Validate the placeholder type even for rows outside the page.
+				if emptyRowTemplate == nil {
+					var err error
+					emptyRowTemplate, err = typeutil.NewEmptyArrayOfVectorRow(dim, elementType)
+					if err != nil {
+						return nil, err
+					}
 				}
-				data = append(data, emptyRow)
+				if row >= startRow && row < endRow {
+					emptyRow, err := typeutil.NewEmptyArrayOfVectorRow(dim, elementType)
+					if err != nil {
+						return nil, err
+					}
+					data = append(data, emptyRow)
+				}
 				continue
 			}
 			va := fd.GetVectors().GetVectorArray()
@@ -794,7 +827,9 @@ func buildMergedVectorField(results []*internalpb.RetrieveResults, selectedRows 
 					fd.GetFieldId(), fd.GetFieldName(), ref.resultIdx,
 					di, len(va.GetData()), typeutil.GetSizeOfIDs(results[ref.resultIdx].GetIds()))
 			}
-			data = append(data, va.GetData()[di])
+			if row >= startRow && row < endRow {
+				data = append(data, va.GetData()[di])
+			}
 		}
 		newVf.Data = &schemapb.VectorField_VectorArray{
 			VectorArray: &schemapb.VectorArray{
@@ -1720,6 +1755,13 @@ func getFieldValue(fd *schemapb.FieldData, rowIdx int) (any, bool) {
 		}
 		return data[rowIdx], false
 
+	case *schemapb.ScalarField_TimestamptzData:
+		data := scalars.GetTimestamptzData().GetData()
+		if rowIdx >= len(data) {
+			return nil, true
+		}
+		return data[rowIdx], false
+
 	case *schemapb.ScalarField_FloatData:
 		data := scalars.GetFloatData().GetData()
 		if rowIdx >= len(data) {
@@ -1846,7 +1888,7 @@ func compareValues(a, b any, dataType schemapb.DataType) int {
 		}
 		return 0
 
-	case schemapb.DataType_Int64:
+	case schemapb.DataType_Int64, schemapb.DataType_Timestamptz:
 		va := a.(int64)
 		vb := b.(int64)
 		if va < vb {

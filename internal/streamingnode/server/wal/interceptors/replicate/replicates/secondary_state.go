@@ -33,10 +33,10 @@ func recoverSecondaryState(param *ReplicateManagerRecoverParam) (*secondaryState
 			continue
 		}
 		// there will be only one uncommitted txn builder.
-		if err := txnHelper.StartBegin(begin.TxnContext(), begin.ReplicateHeader()); err != nil {
+		if err := txnHelper.StartBegin(begin.TxnContext()); err != nil {
 			return nil, err
 		}
-		txnHelper.BeginDone(begin.TxnContext())
+		txnHelper.BeginDone(begin.TxnContext(), begin.VChannel())
 		for _, msg := range body {
 			if err := txnHelper.AddNewMessage(msg.TxnContext(), msg.ReplicateHeader()); err != nil {
 				return nil, err

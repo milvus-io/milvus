@@ -4,6 +4,7 @@ package packed
 #cgo pkg-config: milvus_core milvus-storage
 #include <stdlib.h>
 #include "milvus-storage/ffi_c.h"
+#include "storage/loon_ffi/ffi_writer_c.h"
 #include "storage/loon_ffi/external_spec_c.h"
 #include "arrow/c/abi.h"
 #include "arrow/c/helpers.h"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storagev2"
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -78,6 +80,36 @@ var (
 	PropertyWriterEncMeta   = C.GoString(C.loon_properties_writer_enc_meta)      // Encoded metadata containing zone ID, collection ID, and key version
 	PropertyWriterEncAlgo   = C.GoString(C.loon_properties_writer_enc_algorithm) // Encryption algorithm (e.g., "AES_GCM_V1")
 )
+
+func writerEncryptionProperties(storagePluginContext *indexcgopb.StoragePluginContext) (map[string]string, error) {
+	if storagePluginContext == nil {
+		return nil, nil
+	}
+
+	var cKey *C.char
+	var cMeta *C.char
+	encKey := C.CString(storagePluginContext.EncryptionKey)
+	defer C.free(unsafe.Pointer(encKey))
+
+	pluginContext := C.CPluginContext{
+		ez_id:         C.int64_t(storagePluginContext.EncryptionZoneId),
+		collection_id: C.int64_t(storagePluginContext.CollectionId),
+		key:           encKey,
+	}
+	status := C.GetEncParams(&pluginContext, &cKey, &cMeta)
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return nil, err
+	}
+	defer C.free(unsafe.Pointer(cKey))
+	defer C.free(unsafe.Pointer(cMeta))
+
+	return map[string]string{
+		PropertyWriterEncEnable: "true",
+		PropertyWriterEncKey:    C.GoString(cKey),
+		PropertyWriterEncMeta:   C.GoString(cMeta),
+		PropertyWriterEncAlgo:   "AES_GCM_V1",
+	}, nil
+}
 
 // ExtfsPrefixForCollection returns the per-collection extfs property prefix.
 func ExtfsPrefixForCollection(collectionID int64) string {
@@ -512,7 +544,8 @@ func CompareManifestPath(a, b string) (int, error) {
 // by their text. A value that is not a manifest path, such as an external
 // table file path, is returned unchanged.
 func ManifestPathKey(path string) string {
-	if !strings.HasPrefix(path, "{") {
+	// UnmarshalManifestPath accepts leading whitespace too.
+	if !strings.HasPrefix(strings.TrimSpace(path), "{") {
 		return path
 	}
 	basePath, version, err := UnmarshalManifestPath(path)

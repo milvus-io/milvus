@@ -32,6 +32,7 @@
 
 #include <folly/executors/CPUThreadPoolExecutor.h>
 
+#include "common/FeatureBits.h"
 #include "exec/QueryContext.h"
 #include "exec/expression/BinaryArithOpEvalRangeExpr.h"
 #include "exec/expression/ExistsExpr.h"
@@ -493,12 +494,18 @@ TEST_P(RawExprCacheExtendedTest, MissHitAndOffsetsPreserveRawResults) {
                   nullptr);
         auto miss_calls = std::make_shared<RawCalls>();
         auto input = MakeInput(c.logical, miss_calls);
+        FeatureRecorder miss_recorder;
+        input->SetFeatureRecorder(&miss_recorder);
         auto miss = std::make_shared<RawExprCacheAdapter>(input, nullptr, true);
         miss->PrefetchAsync(pool_);
         EvalCtx context(exec_.get());
         Check(ReadAll(miss, context), c);
         EXPECT_EQ(miss_calls->eval, 3);
         EXPECT_EQ(miss_calls->prefetch.load(), 1);
+        EXPECT_EQ(miss_recorder.Bits() & (uint64_t{1} << static_cast<uint32_t>(
+                                              FeatureBit::ExprCacheHit)),
+                  0u)
+            << "a miss that filled the cache is not a hit";
         ASSERT_EQ(manager.GetEntryCount(), 1u);
         ExprResCacheManager::Value stored;
         stored.active_count = kRows;
@@ -508,8 +515,14 @@ TEST_P(RawExprCacheExtendedTest, MissHitAndOffsetsPreserveRawResults) {
         Check({stored.result->clone(), stored.valid_result->clone()}, c);
 
         auto hit_calls = std::make_shared<RawCalls>();
-        auto hit = std::make_shared<RawExprCacheAdapter>(
-            MakeInput(c.logical, hit_calls), nullptr, false);
+        auto hit_input = MakeInput(c.logical, hit_calls);
+        // A served hit bypasses the wrapped expression, whose own cache-hit
+        // hook therefore never runs; the adapter records through the
+        // expression's recorder instead.
+        FeatureRecorder hit_recorder;
+        hit_input->SetFeatureRecorder(&hit_recorder);
+        auto hit =
+            std::make_shared<RawExprCacheAdapter>(hit_input, nullptr, false);
         hit->PrefetchAsync(pool_);
         Check(ReadAll(hit, context), c);
         VectorPtr eof;
@@ -517,6 +530,10 @@ TEST_P(RawExprCacheExtendedTest, MissHitAndOffsetsPreserveRawResults) {
         EXPECT_EQ(eof, nullptr);
         EXPECT_EQ(hit_calls->eval, 0);
         EXPECT_EQ(hit_calls->prefetch.load(), 0);
+        const uint64_t cache_hit_bit =
+            uint64_t{1} << static_cast<uint32_t>(FeatureBit::ExprCacheHit);
+        EXPECT_NE(hit_recorder.Bits() & cache_hit_bit, 0u)
+            << "a served cache hit is an expr_cache_hit";
 
         auto gathered = std::make_shared<RawExprCacheAdapter>(
             MakeInput(c.logical, hit_calls), nullptr, true);
