@@ -25,6 +25,11 @@ import (
 )
 
 var (
+	ProxyUpsertWriteConditionRows = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: milvusNamespace, Subsystem: typeutil.ProxyRole, Name: "upsert_write_condition_rows_total",
+		Help: "Confirmed row-level outcomes of conditional upserts, including failed RPCs; unknown outcomes are excluded.",
+	}, []string{nodeIDLabelName, databaseLabelName, collectionName, outcomeLabelName})
+
 	ProxyReceivedNQ = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -558,6 +563,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxySearchVectors)
 	registry.MustRegister(ProxyInsertVectors)
 	registry.MustRegister(ProxyUpsertVectors)
+	registry.MustRegister(ProxyUpsertWriteConditionRows)
 	registry.MustRegister(ProxyDeleteVectors)
 	registry.MustRegister(ProxyPathReplaceParentOperations)
 	registry.MustRegister(ProxyPathReplaceMergeLatency)
@@ -652,6 +658,7 @@ func proxyCollectionScopedMetrics() []partialMatchDeleter {
 		ProxySearchVectors,
 		ProxyInsertVectors,
 		ProxyUpsertVectors,
+		ProxyUpsertWriteConditionRows,
 		ProxyDeleteVectors,
 		ProxyPathReplaceParentOperations,
 		ProxyPathReplaceMergeLatency,
