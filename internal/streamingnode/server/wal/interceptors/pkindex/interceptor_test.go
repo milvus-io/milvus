@@ -17,6 +17,7 @@
 package pkindex
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -28,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
@@ -41,10 +43,13 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -63,7 +68,35 @@ const (
 
 func TestMain(m *testing.M) {
 	paramtable.Init()
+	// The cipher is registered once per process. No other test of the package
+	// builds an encrypted message.
+	message.RegisterCipher(testCipher{})
 	m.Run()
+}
+
+// testCipher marks a payload as encrypted with a prefix.
+type testCipher struct{}
+
+const testCipherPrefix = "enc:"
+
+func (testCipher) Init(map[string]string) error { return nil }
+
+func (testCipher) GetEncryptor(int64, int64) (hook.Encryptor, []byte, error) {
+	return testCipher{}, []byte("key"), nil
+}
+
+func (testCipher) GetDecryptor(int64, int64, []byte) (hook.Decryptor, error) {
+	return testCipher{}, nil
+}
+
+func (testCipher) GetUnsafeKey(int64, int64) []byte { return nil }
+
+func (testCipher) Encrypt(plain []byte) ([]byte, error) {
+	return append([]byte(testCipherPrefix), plain...), nil
+}
+
+func (testCipher) Decrypt(cipherText []byte) ([]byte, error) {
+	return bytes.TrimPrefix(cipherText, []byte(testCipherPrefix)), nil
 }
 
 // ===== test doubles =====
@@ -105,11 +138,6 @@ func (env *testIndexEnv) fatalList() []error {
 	env.mu.Lock()
 	defer env.mu.Unlock()
 	return append([]error(nil), env.fatals...)
-}
-
-// useResource makes the env the index Manager of the streaming node resource.
-func (env *testIndexEnv) useResource(t *testing.T) {
-	resource.InitForTest(t, resource.OptPKIndexManager(env.mgr))
 }
 
 // testEngine reads and seeds the engine of the Index of one vchannel.
@@ -243,6 +271,16 @@ func newInsert(vchannel string, pks ...int64) message.MutableMessage {
 }
 
 func newInsertInPartition(vchannel string, partitionID int64, pks ...int64) message.MutableMessage {
+	return newEncryptedInsertInPartition(vchannel, partitionID, nil, pks...)
+}
+
+func newEncryptedInsert(vchannel string, cipher *message.CipherConfig, pks ...int64) message.MutableMessage {
+	return newEncryptedInsertInPartition(vchannel, testPartitionID, cipher, pks...)
+}
+
+// newEncryptedInsertInPartition returns an insert into partitionID encrypted
+// with cipher, plain when cipher is nil.
+func newEncryptedInsertInPartition(vchannel string, partitionID int64, cipher *message.CipherConfig, pks ...int64) message.MutableMessage {
 	return message.NewInsertMessageBuilderV1().
 		WithVChannel(vchannel).
 		WithHeader(&message.InsertMessageHeader{
@@ -266,6 +304,7 @@ func newInsertInPartition(vchannel string, partitionID int64, pks ...int64) mess
 				},
 			},
 		}).
+		WithCipher(cipher).
 		MustBuildMutable()
 }
 
@@ -484,9 +523,7 @@ func inflightLen(i *appendInterceptor) int {
 
 // ===== the switch =====
 
-func TestBuildWithoutIndexManagerIsPassthrough(t *testing.T) {
-	resource.InitForTest(t)
-
+func TestBuildWithoutASnapshotIsPassthrough(t *testing.T) {
 	var i interceptors.Interceptor
 	require.NotPanics(t, func() {
 		i = NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
@@ -502,29 +539,89 @@ func TestBuildWithoutIndexManagerIsPassthrough(t *testing.T) {
 	require.Equal(t, []message.MessageType{message.MessageTypeInsert}, f.types)
 }
 
-// TestBuildWithoutAnOpenPChannelIsPassthrough checks that the interceptor
-// passes the messages through when the manager has no index for the pchannel:
-// the WAL recovery did not build one.
-func TestBuildWithoutAnOpenPChannelIsPassthrough(t *testing.T) {
-	newTestIndexEnv(t).useResource(t)
-
+// TestBuildWithoutAnIndexInTheSnapshotIsPassthrough checks that the
+// interceptor passes the messages through when the recovery snapshot has no
+// index: the index is off, or the WAL recovery did not build one.
+func TestBuildWithoutAnIndexInTheSnapshotIsPassthrough(t *testing.T) {
 	i := NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
-		ChannelInfo: types.PChannelInfo{Name: testPChannel},
+		ChannelInfo:            types.PChannelInfo{Name: testPChannel},
+		InitialRecoverSnapshot: &recovery.RecoverySnapshot{},
 	})
 	defer i.Close()
 	require.IsType(t, passthroughInterceptor{}, i)
 }
 
-func TestBuildWithIndexManagerUsesTheIndex(t *testing.T) {
+func TestBuildUsesTheIndexOfTheSnapshot(t *testing.T) {
 	env := newTestIndexEnv(t)
-	env.useResource(t)
-	env.openChannel(0)
+	ch := env.openChannel(0)
 
 	i := NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
-		ChannelInfo: types.PChannelInfo{Name: testPChannel},
+		ChannelInfo:            types.PChannelInfo{Name: testPChannel},
+		InitialRecoverSnapshot: &recovery.RecoverySnapshot{PKIndex: ch},
 	})
 	defer i.Close()
 	require.IsType(t, &appendInterceptor{}, i)
+	require.Same(t, ch, i.(*appendInterceptor).ch)
+}
+
+// TestBuildRestoresThePendingWritesOfOpenTransactions checks that the bodies
+// of a transaction that was open at the recovery barrier reach the pending
+// set of the index, so that its commit is decided over them.
+func TestBuildRestoresThePendingWritesOfOpenTransactions(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		cipher *message.CipherConfig
+	}{
+		{name: "plain"},
+		{name: "encrypted", cipher: &message.CipherConfig{EzID: 1, CollectionID: testCollectionID}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newTestIndexEnv(t)
+			ch := env.openChannel(0)
+			txnCtx := message.TxnContext{TxnID: 48, Keepalive: time.Hour}
+			beginID := walimplstest.NewTestMessageID(3)
+			begin := message.NewBeginTxnMessageBuilderV2().
+				WithVChannel(testVChannel).
+				WithHeader(&message.BeginTxnMessageHeader{KeepaliveMilliseconds: time.Hour.Milliseconds()}).
+				WithBody(&message.BeginTxnMessageBody{}).
+				MustBuildMutable().
+				WithTxnContext(txnCtx).
+				WithTimeTick(3).
+				WithLastConfirmed(beginID).
+				IntoImmutableMessage(beginID)
+			body := newEncryptedInsert(testVChannel, tc.cipher, 1).
+				WithTxnContext(txnCtx).
+				WithTimeTick(4).
+				WithLastConfirmed(beginID).
+				IntoImmutableMessage(walimplstest.NewTestMessageID(4))
+			buf := utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
+			buf.HandleImmutableMessages([]message.ImmutableMessage{begin, body}, 4)
+			require.Len(t, buf.GetUncommittedMessageBuilder(), 1)
+
+			i := NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
+				ChannelInfo:            types.PChannelInfo{Name: testPChannel},
+				InitialRecoverSnapshot: &recovery.RecoverySnapshot{PKIndex: ch, TxnBuffer: buf},
+				OnFatal:                func(err error) { t.Errorf("OnFatal must not be called: %v", err) },
+				ShardManager: fakeSchemaLister{infos: map[int64]shards.CollectionSchemaInfo{
+					testCollectionID: {VChannel: testVChannel, Schema: testSchema(false)},
+				}},
+			})
+			defer i.Close()
+			ai := i.(*appendInterceptor)
+			require.Equal(t, []int64{48}, dedup.PendingTxnIDsForTest(ai.ch.Decider(testVChannel)))
+
+			// pk 1 reached the index before the restart, so the commit of the
+			// open transaction gets a companion delete for it. The commit is the
+			// first message of the vchannel in this WAL lifetime, so the cipher
+			// config of the delete comes from the restored body.
+			(&testEngine{idx: ai.ch.IndexForTest(testVChannel)}).put(t, 1, 100)
+			f := newFakeAppender()
+			_, err := ai.DoAppend(newTestAppendContext(), newCommit(testVChannel, txnCtx), f.append)
+			require.NoError(t, err)
+			require.Equal(t, []message.MessageType{message.MessageTypeDelete, message.MessageTypeCommitTxn}, f.types)
+			require.Equal(t, tc.cipher, message.CipherConfigOf(f.appended[0]))
+		})
+	}
 }
 
 // fakeSchemaLister is the part of the shard manager Build reads at WAL open.
@@ -539,11 +636,11 @@ func (l fakeSchemaLister) GetAllCollectionSchemaInfos() map[int64]shards.Collect
 
 func TestBuildCreatesTheIndexOfExistingCollections(t *testing.T) {
 	env := newTestIndexEnv(t)
-	env.useResource(t)
-	env.openChannel(0)
+	ch := env.openChannel(0)
 
 	i := NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
-		ChannelInfo: types.PChannelInfo{Name: testPChannel},
+		ChannelInfo:            types.PChannelInfo{Name: testPChannel},
+		InitialRecoverSnapshot: &recovery.RecoverySnapshot{PKIndex: ch},
 		ShardManager: fakeSchemaLister{infos: map[int64]shards.CollectionSchemaInfo{
 			testCollectionID:     {VChannel: testVChannel, Schema: testSchema(false)},
 			testCollectionID + 1: {VChannel: testVChannel + "_autoid", Schema: testSchema(true)},
@@ -570,15 +667,15 @@ func newBrokenRoot(t *testing.T) string {
 // local disk error at WAL open goes to param.OnFatal and does not panic.
 func TestBuildMarksTheWALUnavailableWhenTheIndexCanNotBeOpened(t *testing.T) {
 	env := newTestIndexEnvAt(t, newBrokenRoot(t))
-	env.useResource(t)
-	env.openChannel(0)
+	ch := env.openChannel(0)
 
 	var fatals []error
 	var i interceptors.Interceptor
 	require.NotPanics(t, func() {
 		i = NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
-			ChannelInfo: types.PChannelInfo{Name: testPChannel},
-			OnFatal:     func(err error) { fatals = append(fatals, err) },
+			ChannelInfo:            types.PChannelInfo{Name: testPChannel},
+			InitialRecoverSnapshot: &recovery.RecoverySnapshot{PKIndex: ch},
+			OnFatal:                func(err error) { fatals = append(fatals, err) },
 			ShardManager: fakeSchemaLister{infos: map[int64]shards.CollectionSchemaInfo{
 				testCollectionID: {VChannel: testVChannel, Schema: testSchema(false)},
 			}},
@@ -594,8 +691,7 @@ func TestBuildMarksTheWALUnavailableWhenTheIndexCanNotBeOpened(t *testing.T) {
 
 func TestBuildPanicsWhenAnExistingCollectionHasAnUnsupportedPrimaryKey(t *testing.T) {
 	env := newTestIndexEnv(t)
-	env.useResource(t)
-	env.openChannel(0)
+	ch := env.openChannel(0)
 	schema := testSchema(false)
 	schema.Fields[0].DataType = schemapb.DataType_Float
 
@@ -606,8 +702,9 @@ func TestBuildPanicsWhenAnExistingCollectionHasAnUnsupportedPrimaryKey(t *testin
 		require.Contains(t, value.(string), "unsupported data type")
 	}()
 	NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{
-		ChannelInfo: types.PChannelInfo{Name: testPChannel},
-		OnFatal:     func(err error) { t.Errorf("OnFatal must not be called: %v", err) },
+		ChannelInfo:            types.PChannelInfo{Name: testPChannel},
+		InitialRecoverSnapshot: &recovery.RecoverySnapshot{PKIndex: ch},
+		OnFatal:                func(err error) { t.Errorf("OnFatal must not be called: %v", err) },
 		ShardManager: fakeSchemaLister{infos: map[int64]shards.CollectionSchemaInfo{
 			testCollectionID: {VChannel: testVChannel, Schema: schema},
 		}},
@@ -1395,7 +1492,10 @@ func TestCreateAndDropCollectionMaintainTheRegistry(t *testing.T) {
 	_, err = i.DoAppend(newTestAppendContext(), newDropCollection(testVChannel), f.append)
 	require.NoError(t, err)
 	require.Nil(t, i.registry.get(testVChannel))
-	require.Nil(t, i.ch.IndexForTest(testVChannel), "a dropped collection closes its index")
+	idx := i.ch.IndexForTest(testVChannel)
+	require.NotNil(t, idx, "the observe of the WAL recovery closes the index, not the append of the drop")
+	// the observe reaches the insert before the drop and still finds the engine open
+	require.NoError(t, i.ch.Apply(context.Background(), testVChannel, index.Write{Puts: []index.Put{{PK: dedup.Int64PK(3), SegmentID: 9}}, TimeTick: 50}))
 
 	before := len(f.types)
 	_, err = i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 2), f.append)
@@ -1414,6 +1514,8 @@ func TestCreateCollectionAfterDropBuildsAFreshIndex(t *testing.T) {
 	_, err = i.DoAppend(newTestAppendContext(), newDropCollection(testVChannel), f.append)
 	require.NoError(t, err)
 	require.Nil(t, i.registry.get(testVChannel))
+	// the observe of the WAL recovery closes the index of the dropped collection
+	require.NoError(t, i.ch.DropCollection(context.Background(), testVChannel))
 
 	_, err = i.DoAppend(newTestAppendContext(), newCreateCollection(testVChannel, testSchema(false)), f.append)
 	require.NoError(t, err)
@@ -1578,7 +1680,7 @@ func BenchmarkDecodeKeysOf1000Rows(b *testing.B) {
 				if err != nil {
 					b.Fatal(err)
 				}
-				if len(toPKs(keys)) != len(pks) {
+				if len(snpkindex.PKsOf(keys)) != len(pks) {
 					b.Fatal("wrong key count")
 				}
 			}

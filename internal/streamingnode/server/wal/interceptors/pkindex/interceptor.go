@@ -120,7 +120,14 @@ func (i *appendInterceptor) appendCreateCollection(ctx context.Context, msg mess
 	schema := messageutil.MustGetSchemaFromCreateCollectionMessageBody(create.MustBody())
 	// The index is created before the append, so a collection whose index can not
 	// be created is not created either. CreateCollection holds the exclusive lock
-	// of the vchannel, no write of it is in flight.
+	// of the vchannel, no write of it is in flight. The observe of the WAL
+	// recovery finds the index when it reaches the message: the open is
+	// get-or-create on both sides.
+	// TODO: the enabling message of the index is a CreateIndex of type
+	// PRIMARY_KEY, opened after a successful append, with a retriable error
+	// for the writes of the vchannel while the result of the append is
+	// unknown. The CreateIndex message carries no index type yet and goes to
+	// the control channel only, so the index is opened here until then.
 	created, err := i.registry.add(ctx, msg.VChannel(), create.Header().GetCollectionId(), schema)
 	if err != nil {
 		return nil, status.NewUnrecoverableError("create the primary key index of the collection: %v", err)
@@ -148,7 +155,9 @@ func (i *appendInterceptor) appendDropCollection(ctx context.Context, msg messag
 	if funcutil.IsControlChannel(msg.VChannel()) {
 		return id, nil
 	}
-	i.registry.drop(ctx, msg.VChannel())
+	// The index stays open: the observe of the WAL recovery closes it when
+	// it reaches the drop, see registry.forget.
+	i.registry.forget(msg.VChannel())
 	return id, nil
 }
 
@@ -162,11 +171,11 @@ func (i *appendInterceptor) appendInsert(ctx context.Context, t *target, msg mes
 	if err != nil {
 		return nil, err
 	}
-	i.rememberCipher(t, msg)
+	t.rememberCipher(msg)
 
 	intent, err := i.decide(ctx, t, msg.VChannel(), dedup.DecideRequest{
 		Kind:  dedup.KindInsert,
-		PKs:   toPKs(keys),
+		PKs:   snpkindex.PKsOf(keys),
 		TxnID: txnIDOf(msg),
 	})
 	if err != nil {
@@ -215,7 +224,7 @@ func (i *appendInterceptor) appendDelete(ctx context.Context, t *target, msg mes
 	if len(body.GetSerializedExprPlan()) > 0 {
 		panic("a delete by expression reached the primary key index, the index does not support it")
 	}
-	i.rememberCipher(t, msg)
+	t.rememberCipher(msg)
 
 	// The delete reaches the WAL unchanged. The index only ever adds deletes, it never
 	// removes one: it is a subset of the data, because rows written by bulk import or
@@ -236,7 +245,7 @@ func (i *appendInterceptor) appendDelete(ctx context.Context, t *target, msg mes
 	}
 	intent, err := i.decide(ctx, t, msg.VChannel(), dedup.DecideRequest{
 		Kind:  dedup.KindDelete,
-		PKs:   toPKs(keys),
+		PKs:   snpkindex.PKsOf(keys),
 		TxnID: txnID,
 	})
 	if err != nil {
@@ -266,8 +275,10 @@ func (i *appendInterceptor) appendCommit(ctx context.Context, t *target, msg mes
 	// remembered for this vchannel, and this handler never remembers one itself.
 	// It does not need to: a pending set exists only if a body of the same
 	// transaction passed through appendInsert or appendDelete in this wal
-	// lifetime, and that call remembered the config. The config is remembered
-	// once per wal lifetime, the first body of the vchannel that carries one wins.
+	// lifetime, or was restored from the transaction buffer when the wal
+	// opened (restorePending), and both remember the config. The config is
+	// remembered once per wal lifetime, the first body of the vchannel that
+	// carries one wins.
 	var extras []message.MutableMessage
 	if len(companionPKs) > 0 {
 		companion, err := newCompanionDelete(msg.VChannel(), t, companionPKs)
@@ -403,7 +414,9 @@ func (i *appendInterceptor) dropPendingOfEndedTxns() {
 	})
 }
 
-func (i *appendInterceptor) rememberCipher(t *target, msg message.MutableMessage) {
+// rememberCipher keeps the cipher config of msg for the companion deletes of
+// the vchannel. The first message of the vchannel that carries one wins.
+func (t *target) rememberCipher(msg message.BasicMessage) {
 	if t.cipher.Load() != nil {
 		return
 	}

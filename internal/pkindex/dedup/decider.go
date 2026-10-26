@@ -279,11 +279,6 @@ func (d *decider) probe(ctx context.Context, pks []PK) ([]PK, error) {
 	return present, nil
 }
 
-// RestorePending records a body of a transaction that the WAL accepted
-// before this WAL open, from the transaction buffer of the recovery
-// snapshot, so that the CommitTxn of the transaction is decided over all of
-// its bodies. The body is in the WAL already and the observe of the
-// recovery applies it with the commit, so it gets no in-flight entry.
 func (d *decider) RestorePending(txnID int64, kind WriteKind, pks []PK) {
 	d.pendingMu.Lock()
 	defer d.pendingMu.Unlock()

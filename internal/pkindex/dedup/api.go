@@ -64,6 +64,13 @@ type Decider interface {
 	// the in-doubt entries that it passed.
 	Observe(tt uint64, pks []PK)
 
+	// RestorePending records a body of a transaction that the WAL accepted
+	// before this WAL open, from the transaction buffer of the recovery
+	// snapshot, so that the CommitTxn of the transaction is decided over all of
+	// its bodies. The body is in the WAL already and the observe of the
+	// recovery applies it with the commit, so it gets no in-flight entry.
+	RestorePending(txnID int64, kind WriteKind, pks []PK)
+
 	// Close stops the decider: a later Decide fails. It does not wait for the
 	// open intents, they end on their own, and it does not close the engine:
 	// the caller does, and a probe on a closed engine fails with
