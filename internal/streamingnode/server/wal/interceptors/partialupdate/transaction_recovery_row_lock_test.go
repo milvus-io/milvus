@@ -77,7 +77,8 @@ func TestPartialUpdateRecoveryRegistersLeaseCleanup(t *testing.T) {
 	env.txnManager.CleanupTxnUntil(math.MaxUint64)
 	require.Nil(t, env.partial.state.getTxn(1))
 	_, err := env.txnManager.GetSessionOfTxn(1)
-	require.True(t, status.AsStreamingError(err).IsTxnExpired())
+	require.ErrorContains(t, err, "not found")
+	require.False(t, status.AsStreamingError(err).IsTxnExpired())
 	requireTestRowLocksAvailable(t, env.partial.state.rowLocks, "v1", 10)
 }
 
