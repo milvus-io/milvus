@@ -570,13 +570,14 @@ func TestSnapshot(t *testing.T) {
 }
 
 func TestListSnapshotSummaries(t *testing.T) {
-	for _, scenario := range []string{"metadata", "reverse", "legacy", "empty", "rpc error", "status error", "describe error", "describe status error"} {
+	for _, scenario := range []string{"metadata", "reverse", "legacy", "empty", "rpc error", "status error"} {
 		t.Run(scenario, func(t *testing.T) {
 			service := &snapshotServiceClientStub{}
 			client := &Client{service: service}
-			calls := 0
+			listCalls, describeCalls := 0, 0
 			opt := NewListSnapshotsOption("books").WithDbName("archive")
 			list := mockey.Mock((*snapshotServiceClientStub).ListSnapshots).To(func(_ *snapshotServiceClientStub, _ context.Context, req *milvuspb.ListSnapshotsRequest, options ...grpc.CallOption) (*milvuspb.ListSnapshotsResponse, error) {
+				listCalls++
 				require.Equal(t, "books", req.GetCollectionName())
 				require.Equal(t, "archive", req.GetDbName())
 				require.Len(t, options, 1)
@@ -590,7 +591,7 @@ func TestListSnapshotSummaries(t *testing.T) {
 				if scenario != "empty" {
 					resp.Snapshots = []string{"old", "b", "a"}
 				}
-				if scenario == "metadata" || scenario == "reverse" {
+				if scenario == "metadata" {
 					resp.SnapshotSummaries = []*milvuspb.SnapshotSummary{{Name: "old"}, {Name: "b", CreateTs: 9007199254740993, Description: "daily"}, {Name: "a", CreateTs: 9007199254740993}}
 				}
 				if scenario == "reverse" {
@@ -599,33 +600,29 @@ func TestListSnapshotSummaries(t *testing.T) {
 				return resp, nil
 			}).Build()
 			defer list.UnPatch()
-			describe := mockey.Mock((*snapshotServiceClientStub).DescribeSnapshot).To(func(_ *snapshotServiceClientStub, _ context.Context, req *milvuspb.DescribeSnapshotRequest, options ...grpc.CallOption) (*milvuspb.DescribeSnapshotResponse, error) {
-				calls++
-				require.Equal(t, "books", req.GetCollectionName())
-				require.Equal(t, "archive", req.GetDbName())
-				require.Len(t, options, 1)
-				if scenario == "describe error" {
-					return nil, errors.New("snapshot deleted")
-				}
-				if scenario == "describe status error" {
-					return &milvuspb.DescribeSnapshotResponse{Status: merr.Status(merr.ErrParameterInvalid)}, nil
-				}
-				ts := int64(9007199254740993)
-				if req.GetName() == "old" {
-					ts = 0
-				}
-				return &milvuspb.DescribeSnapshotResponse{Status: merr.Success(), Name: req.GetName(), CreateTs: ts, Description: "daily"}, nil
+			describe := mockey.Mock((*snapshotServiceClientStub).DescribeSnapshot).To(func(_ *snapshotServiceClientStub, _ context.Context, _ *milvuspb.DescribeSnapshotRequest, _ ...grpc.CallOption) (*milvuspb.DescribeSnapshotResponse, error) {
+				describeCalls++
+				return nil, errors.New("unexpected DescribeSnapshot call")
 			}).Build()
 			defer describe.UnPatch()
 			infos, err := client.ListSnapshotSummaries(context.Background(), opt, grpc.WaitForReady(true))
+			require.Equal(t, 1, listCalls)
+			require.Zero(t, describeCalls)
 			switch scenario {
-			case "rpc error", "status error", "describe error", "describe status error":
+			case "legacy":
+				require.ErrorIs(t, err, merr.ErrServiceUnimplemented)
+				require.Contains(t, err.Error(), "server does not support snapshot summaries")
+				require.Nil(t, infos)
+				names, err := client.ListSnapshots(context.Background(), opt, grpc.WaitForReady(true))
+				require.NoError(t, err)
+				require.Equal(t, []string{"old", "b", "a"}, names)
+				require.Zero(t, describeCalls)
+			case "rpc error", "status error":
 				require.Error(t, err)
 				require.Nil(t, infos)
 			case "empty":
 				require.NoError(t, err)
 				require.Empty(t, infos)
-				require.Zero(t, calls)
 			default:
 				require.NoError(t, err)
 				require.Len(t, infos, 3)
@@ -634,11 +631,6 @@ func TestListSnapshotSummaries(t *testing.T) {
 				require.Equal(t, "old", infos[2].GetName())
 				require.Equal(t, int64(9007199254740993), infos[0].GetCreateTs())
 				require.Equal(t, "daily", infos[1].GetDescription())
-				if scenario == "metadata" || scenario == "reverse" {
-					require.Zero(t, calls)
-				} else {
-					require.Equal(t, 3, calls)
-				}
 			}
 		})
 	}

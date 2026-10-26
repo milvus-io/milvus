@@ -75,7 +75,7 @@ func (c *Client) ListSnapshots(ctx context.Context, opt ListSnapshotsOption, cal
 }
 
 // ListSnapshotSummaries returns lightweight metadata ordered by create_ts descending,
-// then name ascending. Older servers fall back to DescribeSnapshot per name.
+// then name ascending. Servers returning only names are rejected as unsupported.
 func (c *Client) ListSnapshotSummaries(ctx context.Context, opt ListSnapshotsOption, callOptions ...grpc.CallOption) ([]*milvuspb.SnapshotSummary, error) {
 	if opt == nil {
 		return nil, merr.WrapErrParameterInvalid("ListSnapshotsOption", "nil", "option cannot be nil")
@@ -89,18 +89,7 @@ func (c *Client) ListSnapshotSummaries(ctx context.Context, opt ListSnapshotsOpt
 		}
 		summaries = resp.GetSnapshotSummaries()
 		if len(summaries) == 0 && len(resp.GetSnapshots()) > 0 {
-			summaries = make([]*milvuspb.SnapshotSummary, 0, len(resp.GetSnapshots()))
-			for _, name := range resp.GetSnapshots() {
-				info, err := service.DescribeSnapshot(ctx, &milvuspb.DescribeSnapshotRequest{
-					DbName: req.GetDbName(), CollectionName: req.GetCollectionName(), Name: name,
-				}, callOptions...)
-				if err = merr.CheckRPCCall(info, err); err != nil {
-					return err
-				}
-				summaries = append(summaries, &milvuspb.SnapshotSummary{
-					Name: name, CreateTs: info.GetCreateTs(), Description: info.GetDescription(),
-				})
-			}
+			return merr.WrapErrServiceUnimplemented("server does not support snapshot summaries; upgrade the server or use ListSnapshots")
 		}
 		return nil
 	})
