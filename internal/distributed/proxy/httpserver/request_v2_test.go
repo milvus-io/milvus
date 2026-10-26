@@ -341,3 +341,25 @@ func TestDescribeStructSubFieldRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, proto.Equal(created.GetFields()[1].GetTypeSchema(), recreated.GetFields()[0].GetTypeSchema()))
 }
+
+func TestConditionalUpsertRESTCondition(t *testing.T) {
+	for _, op := range []string{"gt", "GTE"} {
+		for _, policy := range []struct {
+			name  string
+			value int32
+		}{{"", 0}, {"insert", 0}, {"INSERT", 0}, {"sKiP", 1}, {"error", 2}, {"ERROR", 2}} {
+			condition, err := (&WriteConditionReq{Field: "version", Op: op, OnMissing: policy.name}).toProto()
+			require.NoError(t, err)
+			require.Equal(t, "version", condition.GetField())
+			require.EqualValues(t, policy.value, condition.GetOnMissing())
+		}
+	}
+	for _, condition := range []*WriteConditionReq{{Op: ""}, {Op: "eq"}, {Op: "gt", OnMissing: "other"}, {Op: "gt", OnMissing: "ERROR_IF_MISSING"}} {
+		_, err := condition.toProto()
+		require.Error(t, err)
+	}
+	var absent *WriteConditionReq
+	condition, err := absent.toProto()
+	require.NoError(t, err)
+	require.Nil(t, condition)
+}
