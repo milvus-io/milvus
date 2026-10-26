@@ -20,6 +20,7 @@ package pkindex
 
 import (
 	"context"
+	"math"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -75,15 +76,22 @@ type FakeEnv struct {
 }
 
 // NewFakeEnv creates an index Manager over a real engine with root as the local
-// root directory. The test cleanup closes the Manager and releases the
-// engine caches.
+// root directory. No size or tail ever starts a handover. The test cleanup
+// closes the Manager and releases the engine caches.
 func NewFakeEnv(t *testing.T, root string) *FakeEnv {
 	env := &FakeEnv{Committer: NewFakeCommitter()}
 	shared := engine.NewSharedResources(engine.SharedConfig{CacheBytes: 8 << 20})
 	t.Cleanup(shared.Release)
 	var nextID atomic.Int64
 	nextID.Store(1000)
-	params := Params{Params: index.Params{ReuploadAfter: time.Hour}}
+	params := Params{
+		Params:        index.Params{ReuploadAfter: time.Hour},
+		ActiveBytes:   math.MaxUint64,
+		TailBytes:     math.MaxUint64,
+		SoftWatermark: math.MaxUint64,
+		BackoffBase:   time.Millisecond,
+		MaxBackoff:    10 * time.Millisecond,
+	}
 	env.Manager = NewManager(ManagerConfig{
 		Root:            root,
 		Shared:          shared,
