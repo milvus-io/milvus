@@ -35,6 +35,7 @@ import (
 	"context"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/cockroachdb/errors"
 
@@ -250,12 +251,24 @@ func (r *Registry) Register(ctx context.Context, info Info) (context.Context, *E
 	info.StartTime = time.Now()
 	info.State = StateQueued
 	info.Cancellable = true
-	if len(info.Expr) > ExprPrefixLimit {
-		info.Expr = info.Expr[:ExprPrefixLimit]
-	}
+	info.Expr = exprPrefix(info.Expr)
 	e := &Entry{info: info, cancel: cancel}
 	r.entries.Insert(info.RequestID, e)
 	return context.WithValue(ctx, ctxKey{}, e), e
+}
+
+// exprPrefix bounds the expression text to ExprPrefixLimit bytes without
+// cutting through a multi-byte character: the prefix is copied into a proto3
+// string field, which must stay valid UTF-8 or the response fails to marshal.
+func exprPrefix(expr string) string {
+	if len(expr) <= ExprPrefixLimit {
+		return expr
+	}
+	n := ExprPrefixLimit
+	for n > 0 && !utf8.RuneStart(expr[n]) {
+		n--
+	}
+	return expr[:n]
 }
 
 // Unregister removes the entry and releases its context. Safe to call with a
