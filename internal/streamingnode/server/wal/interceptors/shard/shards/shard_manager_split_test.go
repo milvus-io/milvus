@@ -386,3 +386,19 @@ func TestShardManagerRecoverTwoLiveVChannelsOfOneCollection(t *testing.T) {
 		assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(1, "v1"), ErrCollectionNotFound)
 	}
 }
+
+// TestShardManagerGenesisOfAFencedVChannelDoesNotRegisterIt: target T of
+// split#1 is registered, split#2 fences T as its source, and a delayed retry
+// of split#1's genesis for T arrives. T must stay fenced.
+func TestShardManagerGenesisOfAFencedVChannelDoesNotRegisterIt(t *testing.T) {
+	m := newTestShardManagerWithSplitFence(t, 0)
+	m.CreateVChannel(newTestSplitShardGenesisImmutableMessage("t1", 7, []int64{8}, 2000))
+	require.NoError(t, m.CheckIfVChannelCanBeWritten(7, "t1"))
+
+	m.SplitShard(newTestSplitShardImmutableMessageOfTask("t1", 7, 200, 3000))
+	require.ErrorIs(t, m.CheckIfVChannelCanBeWritten(7, "t1"), ErrVChannelFenced)
+
+	assert.ErrorIs(t, m.CheckIfVChannelCanBeCreated(7, "t1"), ErrVChannelFenced)
+	m.CreateVChannel(newTestSplitShardGenesisImmutableMessage("t1", 7, []int64{8}, 4000))
+	assert.ErrorIs(t, m.CheckIfVChannelCanBeWritten(7, "t1"), ErrVChannelFenced, "the late genesis must not undo the fence")
+}

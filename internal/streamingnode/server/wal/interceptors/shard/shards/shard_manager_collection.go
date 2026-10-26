@@ -110,6 +110,16 @@ func (m *shardManagerImpl) CheckIfVChannelCanBeCreated(collectionID int64, vchan
 }
 
 func (m *shardManagerImpl) checkIfVChannelCanBeCreated(collectionID int64, vchannel string) error {
+	// A fenced vchannel was registered before it was fenced -- only a
+	// registered vchannel can be fenced -- so a genesis for it now is a late
+	// retry of its own creation, landing after a later split fenced it as a
+	// source. The fence removed the registration, so the lookup below would
+	// call the slot free and register the shard again: writable, after
+	// T_switch, outside the split's drain and adoption.
+	if _, fenced := m.fencedVChannels[vchannel]; fenced {
+		return errors.Wrapf(ErrVChannelFenced,
+			"vchannel %s of collection %d is fenced by a shard split, cannot register it again", vchannel, collectionID)
+	}
 	collectionInfo, ok := m.collections[collectionID]
 	if !ok {
 		return nil
@@ -297,6 +307,12 @@ func (m *shardManagerImpl) CreateVChannel(msg message.ImmutableSplitShardMessage
 			// the newcomer is left without a registration and the shard is
 			// unwritable until the WAL is next recovered.
 			logger.Error(m.ctx, "cannot register vchannel, another vchannel of the collection holds this pchannel", mlog.Err(err))
+			return
+		}
+		if errors.Is(err, ErrVChannelFenced) {
+			// The append path refuses this too; the apply must not undo a fence
+			// either way.
+			logger.Warn(m.ctx, "skip the genesis of a vchannel fenced by a shard split", mlog.Err(err))
 			return
 		}
 		// ErrCollectionExists: the same vchannel is already registered, an
