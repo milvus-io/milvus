@@ -3607,7 +3607,8 @@ class SegmentExpr : public Expr {
 
     bool
     SelectAndPinIndex(const ExprIndexRequirement& req) {
-        auto capabilities = segment_->IndexCapability(field_id_);
+        auto capabilities =
+            segment_->ResolveIndexCapability(op_ctx_, field_id_);
         auto decision = exec::DetermineExecPath(req, capabilities);
         exec_path_ = decision.path;
         if (!decision.key.has_value()) {
@@ -3985,34 +3986,29 @@ class SegmentExpr : public Expr {
         }
     }
 
-    // Whether a scalar index exists that this expression could have used,
-    // for the index-declined feature, from the segment's index metadata.
-    // Only an entry that serves filters counts (a predicate, pattern, NGRAM,
-    // spatial or JSON-path reader): a text-match index serves text_match()
-    // alone and is no index a LIKE or a comparison could have used. A JSON
-    // field's indexes are per path: one on another path is no index for
-    // this expression, so only an entry covering the path counts (a flat
-    // index routing the path, or a cast index on exactly this path).
+    // Checks scalar/NGRAM registrations for index-declined reporting without
+    // resolving lazy metadata. JSON indexes must cover this expression's path.
     bool
     HasIndexForThisPath() const {
-        const auto capabilities = segment_->IndexCapability(field_id_);
+        const auto registrations = segment_->IndexRegistrations(field_id_);
         const auto path = field_type_ == DataType::JSON
                               ? milvus::Json::pointer(nested_path_)
                               : std::string{};
-        for (const auto& entry : capabilities.entries()) {
-            const auto& caps = entry.caps;
-            if (!(caps.predicate || caps.pattern_match ||
-                  caps.ngram_candidates || caps.spatial || caps.json_paths)) {
+        for (const auto& registration : registrations) {
+            if (registration.kind != segcore::IndexKind::Scalar &&
+                registration.kind != segcore::IndexKind::Ngram) {
                 continue;
             }
             if (field_type_ != DataType::JSON) {
                 return true;
             }
-            if (caps.json_paths &&
-                index_path_detail::IsPathPrefix(entry.json_path, path)) {
+            if (registration.json_cast_type.data_type() ==
+                    JsonCastType::DataType::JSON &&
+                index_path_detail::IsPathPrefix(registration.json_path, path)) {
                 return true;
             }
-            if (!entry.json_path.empty() && entry.json_path == path) {
+            if (!registration.json_path.empty() &&
+                registration.json_path == path) {
                 return true;
             }
         }

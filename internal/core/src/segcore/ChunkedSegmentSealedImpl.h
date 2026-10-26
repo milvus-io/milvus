@@ -143,7 +143,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     HasColumnInLoadedManifest(const std::string& column_name) const override;
 
     FieldIndexCapability
-    IndexCapability(FieldId field_id) const override;
+    ResolveIndexCapability(milvus::OpContext* op_ctx,
+                           FieldId field_id) const override;
+
+    std::vector<IndexRegistration>
+    IndexRegistrations(FieldId field_id) const override;
 
     IndexPin
     PinIndex(milvus::OpContext* op_ctx, const IndexKey& key) const override;
@@ -1618,8 +1622,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         }
 
         void
-        StageVectorIndexMutationLocked(IndexInventory::Entry entry,
-                                       bool drop_existing);
+        StageVectorIndexMutationLocked(
+            std::shared_ptr<IndexInventory::Entry> entry, bool drop_existing);
 
         void
         StageVectorIndexDropLocked(FieldId field_id) {
@@ -1629,9 +1633,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
         void
         StageInterimVectorIndexMutationLocked(
-            IndexInventory::Entry entry,
+            std::shared_ptr<IndexInventory::Entry> entry,
             std::unique_ptr<VecIndexConfig> binlog_config) {
-            auto field_id = entry.meta.key.field_id;
+            auto field_id = entry->registration().key.field_id;
             RetireVectorIndexingLocked(field_id);
             RetireCacheIndexingLocked(
                 runtime_->indexes.Register(std::move(entry)));
@@ -1684,10 +1688,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
      private:
         void
         RetireVectorIndexingLocked(FieldId field_id) {
-            auto capability = runtime_->indexes.Capability(field_id);
-            for (const auto& entry : capability.entries()) {
-                if (entry.family == index::families::kVectorMem ||
-                    entry.family == index::families::kVectorDisk) {
+            for (const auto& entry : runtime_->indexes.Entries(field_id)) {
+                if (entry.kind == IndexKind::Vector) {
                     RetireCacheIndexingLocked(
                         runtime_->indexes.Drop(entry.key));
                 }
@@ -2125,7 +2127,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool committed_{false};
     };
 
-    IndexInventory::Entry
+    std::shared_ptr<IndexInventory::Entry>
     BuildTextIndexFromFiles(
         milvus::OpContext* op_ctx,
         const std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>& info_proto,
@@ -2298,6 +2300,55 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
 #ifdef MILVUS_UNIT_TEST
  public:
+    void
+    TestLoadBatchIndexes(
+        std::unordered_map<FieldId, std::vector<LoadIndexInfo>>& indexes,
+        milvus::OpContext* op_ctx = nullptr,
+        bool is_replace = false) {
+        std::lock_guard<std::mutex> guard(reopen_mutex_);
+        auto current = CapturePublishedState();
+        auto runtime = CloneRuntimeResourceState(current->runtime);
+        auto staged = ClonePublishedState(current);
+        staged->runtime = runtime;
+        StagedStateCommitter committer(*this, runtime.get(), staged.get());
+        milvus::tracer::TraceContext trace_ctx{};
+        LoadBatchIndexes(
+            trace_ctx, indexes, current->schema, op_ctx, is_replace, committer);
+        auto delta = MakeStateDelta(current->schema,
+                                    current->load_info,
+                                    ToConstRuntimeState(std::move(runtime)),
+                                    current->commit_ts);
+        delta.published_index_ready_bitset =
+            staged->published_index_ready_bitset.clone();
+        delta.published_binlog_index_ready_bitset =
+            staged->published_binlog_index_ready_bitset.clone();
+        delta.published_index_has_raw_data =
+            staged->published_index_has_raw_data;
+        committer.Publish(current, delta);
+    }
+
+    void
+    TestLoadTextIndexFromFiles(
+        const std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>& info,
+        milvus::OpContext* op_ctx = nullptr) {
+        std::lock_guard<std::mutex> guard(reopen_mutex_);
+        auto current = CapturePublishedState();
+        auto runtime = CloneRuntimeResourceState(current->runtime);
+        auto staged = ClonePublishedState(current);
+        staged->runtime = runtime;
+        StagedStateCommitter committer(*this, runtime.get(), staged.get());
+        std::unordered_map<FieldId,
+                           std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>>
+            indexes{{FieldId(info->fieldid()), info}};
+        LoadBatchTextIndexes(
+            op_ctx, indexes, current->schema, *current->load_info, committer);
+        auto delta = MakeStateDelta(current->schema,
+                                    current->load_info,
+                                    ToConstRuntimeState(std::move(runtime)),
+                                    current->commit_ts);
+        committer.Publish(current, delta);
+    }
+
     // Test-only: inject a mock Reader for unit testing take() paths.
     void
     SetReaderForTesting(std::unique_ptr<milvus_storage::api::Reader> r) {

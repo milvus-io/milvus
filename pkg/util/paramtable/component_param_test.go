@@ -453,6 +453,21 @@ func TestComponentParam_LazyColumnGroupEnabled(t *testing.T) {
 	assert.False(t, item.GetAsBool())
 }
 
+func TestTieredLazyIndexSlotConfig(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil)))
+	item := &params.QueryNodeCfg.TieredLazyIndexSlotEnabled
+
+	assert.Equal(t, "queryNode.segcore.tieredStorage.lazyIndexSlotEnabled", item.Key)
+	assert.Equal(t, "false", item.DefaultValue)
+	assert.True(t, item.Export)
+	assert.False(t, item.GetAsBool())
+	require.NoError(t, params.Save(item.Key, "true"))
+	assert.True(t, item.GetAsBool())
+	require.NoError(t, params.Save(item.Key, "false"))
+	assert.False(t, item.GetAsBool())
+}
+
 func TestComponentParam_IDFLazyLoadSealedStats(t *testing.T) {
 	Init()
 	params := Get()
