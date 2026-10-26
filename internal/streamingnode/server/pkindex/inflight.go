@@ -20,18 +20,14 @@ import (
 	"context"
 	"slices"
 	"sync"
-	"sync/atomic"
 )
-
-// inflightShardCount is the number of shards of an in-flight set. A shard is a
-// mutex and a map. It is held only while a map is read or changed, never across
-// an append, so the count only spreads mutex contention and has no effect on
-// correctness.
-const inflightShardCount = 64
 
 // inflightSet holds the writes of one vchannel that were decided but are not
 // yet applied to the engine by observe. It answers one question, whether a key
 // exists, and doubles as the exact primary key lock of the write path.
+//
+// One mutex guards the whole set. It is held only while a map or a time tick is
+// read or changed, never across an append or a wait.
 //
 // Two ordering rules make the set and the engine together complete: every
 // appended write is in the set, in the engine, or in both.
@@ -42,109 +38,73 @@ const inflightShardCount = 64
 // the removal, so the engine probe that follows finds the key.
 //
 // A write leaves the set when observe has passed its time tick. Observe raises
-// the observed time tick before it removes entries, and a writer sets its time
-// tick before it reads the observed time tick. Both use sequentially consistent
-// atomics, so at least one side sees the other and removes the write.
+// the observed time tick and removes entries under the mutex, and a writer sets
+// its time tick and reads the observed time tick under the mutex, so the side
+// that comes second removes the write.
 type inflightSet struct {
-	shards [inflightShardCount]inflightShard
-	// observed is the highest time tick that observe has applied to the engine.
-	observed atomic.Uint64
-	// seq orders registrations. It is taken under the shard mutexes of the write,
-	// so two writes of one key always see their seq in registration order.
-	seq atomic.Uint64
-
-	// uncertainMu guards uncertain: the writes whose append failed with an
-	// unknown outcome. Observe removes them by time tick, because such a write
-	// may never reach the WAL and then observe never meets its keys.
-	uncertainMu sync.Mutex
-	uncertain   []*inflightWrite
-
-	// Test hooks: afterObservedStore runs in observe between the store of the
-	// observed time tick and the removal, afterFill runs between the store of a
-	// write's time tick, by a fill-in or an uncertain mark, and the read of the
-	// observed time tick.
-	afterObservedStore func()
-	afterFill          func()
-}
-
-type inflightShard struct {
 	mu sync.Mutex
 	// keys is nil when empty, because a Go map never shrinks after deletes.
 	keys map[uint64][]*inflightWrite // lock key -> writes in registration order
+	// observed is the highest time tick that observe has applied to the engine.
+	observed uint64
+	// uncertain holds the writes whose append failed with an unknown outcome.
+	// Observe removes them by time tick, because such a write may never reach
+	// the WAL and then observe never meets its keys.
+	uncertain []*inflightWrite
 }
 
 // inflightWrite is one write of one or more keys. All keys of the write share it.
 type inflightWrite struct {
-	seq       uint64
-	keys      []uint64 // distinct lock keys, sorted by shard
-	keyShards []int    // the shard of each key
-	shards    []int    // the distinct shards of keys, ascending
+	keys []uint64 // distinct lock keys, ascending
 	// tt is 0 while the append has not returned: the write then is the lock of
 	// its keys, and a later write of the same key waits for it. Otherwise it is
 	// the time tick of the write, or for a write with an unknown outcome the
-	// largest time tick at which it may be in the WAL.
-	tt atomic.Uint64
+	// largest time tick at which it may be in the WAL. It is guarded by
+	// inflightSet.mu.
+	tt uint64
 	// done is closed when tt is set or the write is removed.
 	done chan struct{}
 }
 
-// shardOf maps a lock key to a shard. An int64 key is its own lock key, so the
-// splitmix64 finalizer mixes the high bits into the low bits first: keys that
-// are multiples of the shard count would all land on one shard otherwise.
-func shardOf(key uint64) int {
-	z := key + 0x9E3779B97F4A7C15
-	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9
-	z = (z ^ (z >> 27)) * 0x94D049BB133111EB
-	return int((z ^ (z >> 31)) % inflightShardCount)
-}
-
 // register adds one write of pks to the set in one step and returns it with the
-// pending writes it must wait for. All involved shard mutexes are taken together
-// in ascending order, so registrations of overlapping writes are totally ordered
-// and a write waits only for writes registered before it: the waits form no
-// cycle. Per key it is enough to wait for the last pending write, because that
-// write waits itself for the ones before it.
+// pending writes it must wait for. The registration is atomic under the mutex,
+// so registrations of overlapping writes are totally ordered and a write waits
+// only for writes registered before it: the waits form no cycle. Per key it is
+// enough to wait for the last pending write, because that write waits itself for
+// the ones before it.
 //
 // TODO: lock escalation, a vchannel-wide exclusion for a write above some number
 // of keys, is open, and so is the threshold (write-path.md, open items).
 // TODO: the total budget of the set and what to do above it (back pressure or a
 // degraded write) are open.
 func (s *inflightSet) register(pks []PK) (*inflightWrite, []*inflightWrite) {
-	w := &inflightWrite{done: make(chan struct{})}
-	w.keys, w.keyShards = groupByShard(pks)
-	for _, shard := range w.keyShards {
-		if n := len(w.shards); n == 0 || w.shards[n-1] != shard {
-			w.shards = append(w.shards, shard)
-		}
-	}
+	w := &inflightWrite{keys: lockKeys(pks), done: make(chan struct{})}
 
 	// A key without other writes, the common case, gets a queue of one slot of
 	// this array, so a write allocates once and not once per key. Each slot has
 	// capacity 1, so an append to a queue never writes into its neighbor.
 	slots := make([]*inflightWrite, len(w.keys))
 	var earlier []*inflightWrite
-	s.lock(w)
-	w.seq = s.seq.Add(1)
+	s.mu.Lock()
 	for i, key := range w.keys {
-		shard := &s.shards[w.keyShards[i]]
-		queue := shard.keys[key]
+		queue := s.keys[key]
 		if len(queue) == 0 {
 			queue = slots[i : i : i+1]
 		}
 		for j := len(queue) - 1; j >= 0; j-- {
-			if queue[j].tt.Load() == 0 {
+			if queue[j].tt == 0 {
 				if !slices.Contains(earlier, queue[j]) {
 					earlier = append(earlier, queue[j])
 				}
 				break
 			}
 		}
-		if shard.keys == nil {
-			shard.keys = make(map[uint64][]*inflightWrite)
+		if s.keys == nil {
+			s.keys = make(map[uint64][]*inflightWrite)
 		}
-		shard.keys[key] = append(queue, w)
+		s.keys[key] = append(queue, w)
 	}
-	s.unlock(w)
+	s.mu.Unlock()
 	return w, earlier
 }
 
@@ -170,49 +130,43 @@ func (s *inflightSet) wait(ctx context.Context, w *inflightWrite, earlier []*inf
 }
 
 // presentBefore returns the lock keys of w that have a write registered before
-// w, nil when none has. After wait no such write is pending, so each one is
-// filled in or has an unknown outcome: both count as present. Writes registered
-// after w are ignored, they wait for w and take a larger time tick.
+// w, nil when none has. Such a write is ahead of w in the queue of the key, and
+// w is still in each of its queues. After wait no such write is pending, so each
+// one is filled in or has an unknown outcome: both count as present. Writes
+// registered after w are ignored, they wait for w and take a larger time tick.
 func (s *inflightSet) presentBefore(w *inflightWrite) map[uint64]struct{} {
 	var present map[uint64]struct{}
-	for start := 0; start < len(w.keys); {
-		end := start
-		for end < len(w.keys) && w.keyShards[end] == w.keyShards[start] {
-			end++
-		}
-		shard := &s.shards[w.keyShards[start]]
-		shard.mu.Lock()
-		for _, key := range w.keys[start:end] {
-			for _, other := range shard.keys[key] {
-				if other.seq < w.seq {
-					if present == nil {
-						present = make(map[uint64]struct{})
-					}
-					present[key] = struct{}{}
-					break
-				}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, key := range w.keys {
+		if slices.Index(s.keys[key], w) > 0 {
+			if present == nil {
+				present = make(map[uint64]struct{})
 			}
+			present[key] = struct{}{}
 		}
-		shard.mu.Unlock()
-		start = end
 	}
 	return present
 }
 
 // fill records the time tick of w after its append returned and wakes the
-// writes that wait for it. It takes no shard mutex, except when observe already
-// passed tt: observe may have skipped w, so w removes itself.
+// writes that wait for it. When observe already passed tt, observe may have
+// skipped w, so w removes itself.
 func (s *inflightSet) fill(w *inflightWrite, tt uint64) {
-	w.tt.Store(tt)
+	s.mu.Lock()
+	w.tt = tt
+	if tt <= s.observed {
+		s.removeLocked(w)
+	}
+	s.mu.Unlock()
 	close(w.done)
-	s.removeIfObserved(w, tt)
 }
 
 // remove drops a pending write that is known not to be in the WAL.
 func (s *inflightSet) remove(w *inflightWrite) {
-	s.lock(w)
+	s.mu.Lock()
 	s.removeLocked(w)
-	s.unlock(w)
+	s.mu.Unlock()
 	close(w.done)
 }
 
@@ -220,26 +174,15 @@ func (s *inflightSet) remove(w *inflightWrite) {
 // at a time tick up to tt. Its keys count as present until observe passes tt,
 // and it no longer blocks other writes.
 func (s *inflightSet) markUncertain(w *inflightWrite, tt uint64) {
-	w.tt.Store(tt)
-	s.uncertainMu.Lock()
-	s.uncertain = append(s.uncertain, w)
-	s.uncertainMu.Unlock()
+	s.mu.Lock()
+	w.tt = tt
+	if tt <= s.observed {
+		s.removeLocked(w)
+	} else {
+		s.uncertain = append(s.uncertain, w)
+	}
+	s.mu.Unlock()
 	close(w.done)
-	s.removeIfObserved(w, tt)
-}
-
-// removeIfObserved removes w when observe already passed tt, the time tick that
-// the caller stored in w.
-func (s *inflightSet) removeIfObserved(w *inflightWrite, tt uint64) {
-	if s.afterFill != nil {
-		s.afterFill()
-	}
-	if tt > s.observed.Load() {
-		return
-	}
-	s.lock(w)
-	s.removeLocked(w)
-	s.unlock(w)
 }
 
 // observe is called after the writes of pks with time tick tt were applied to
@@ -250,40 +193,24 @@ func (s *inflightSet) removeIfObserved(w *inflightWrite, tt uint64) {
 // returns. A Pebble batch commit should give that; confirm it with a test when
 // observe writes the Pebble engine.
 func (s *inflightSet) observe(tt uint64, pks []PK) {
-	s.raiseObserved(tt)
-	if s.afterObservedStore != nil {
-		s.afterObservedStore()
-	}
-	s.removeUncertain()
-	s.removeFilled(tt, pks)
-}
-
-// removeFilled removes the filled-in writes of pks up to tt.
-func (s *inflightSet) removeFilled(tt uint64, pks []PK) {
-	keys, keyShards := groupByShard(pks)
-	for start := 0; start < len(keys); {
-		end := start
-		for end < len(keys) && keyShards[end] == keyShards[start] {
-			end++
+	keys := lockKeys(pks)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.raiseObservedLocked(tt)
+	s.removeUncertainLocked()
+	for _, key := range keys {
+		queue, ok := s.keys[key]
+		if !ok {
+			continue
 		}
-		shard := &s.shards[keyShards[start]]
-		shard.mu.Lock()
-		for _, key := range keys[start:end] {
-			queue, ok := shard.keys[key]
-			if !ok {
-				continue
+		kept := queue[:0]
+		for _, w := range queue {
+			if w.tt == 0 || w.tt > tt {
+				kept = append(kept, w)
 			}
-			kept := queue[:0]
-			for _, w := range queue {
-				if wtt := w.tt.Load(); wtt == 0 || wtt > tt {
-					kept = append(kept, w)
-				}
-			}
-			clear(queue[len(kept):])
-			shard.setQueue(key, kept)
 		}
-		shard.mu.Unlock()
-		start = end
+		clear(queue[len(kept):])
+		s.setQueue(key, kept)
 	}
 }
 
@@ -291,137 +218,78 @@ func (s *inflightSet) removeFilled(tt uint64, pks []PK) {
 // observed time tick to tt and removes the writes with an unknown outcome up to
 // it. Observe calls it after it applied every write up to tt to the engine.
 func (s *inflightSet) observeTimeTick(tt uint64) {
-	s.raiseObserved(tt)
-	if s.afterObservedStore != nil {
-		s.afterObservedStore()
-	}
-	s.removeUncertain()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.raiseObservedLocked(tt)
+	s.removeUncertainLocked()
 }
 
-// raiseObserved stores tt as the observed time tick unless it is lower. Observe
-// must call it before it removes any write of tt, see inflightSet.
-func (s *inflightSet) raiseObserved(tt uint64) {
-	for {
-		cur := s.observed.Load()
-		if tt <= cur || s.observed.CompareAndSwap(cur, tt) {
-			return
-		}
+// raiseObservedLocked stores tt as the observed time tick unless it is lower.
+func (s *inflightSet) raiseObservedLocked(tt uint64) {
+	if tt > s.observed {
+		s.observed = tt
 	}
 }
 
-// removeUncertain removes the writes with an unknown outcome whose time tick
-// observe passed.
-func (s *inflightSet) removeUncertain() {
-	observed := s.observed.Load()
-	var expired []*inflightWrite
-	s.uncertainMu.Lock()
+// removeUncertainLocked removes the writes with an unknown outcome whose time
+// tick observe passed.
+func (s *inflightSet) removeUncertainLocked() {
 	kept := s.uncertain[:0]
 	for _, w := range s.uncertain {
-		if w.tt.Load() <= observed {
-			expired = append(expired, w)
+		if w.tt <= s.observed {
+			s.removeLocked(w)
 		} else {
 			kept = append(kept, w)
 		}
 	}
 	clear(s.uncertain[len(kept):])
 	s.uncertain = kept
-	s.uncertainMu.Unlock()
-	for _, w := range expired {
-		s.lock(w)
-		s.removeLocked(w)
-		s.unlock(w)
-	}
 }
 
-// groupByShard returns the distinct lock keys of pks ordered by shard, and the
-// shard of each, with a counting sort over the shards.
-func groupByShard(pks []PK) ([]uint64, []int) {
-	var counts [inflightShardCount + 1]int
+// lockKeys returns the distinct lock keys of pks, ascending.
+func lockKeys(pks []PK) []uint64 {
 	keys := make([]uint64, len(pks))
-	shards := make([]int, len(pks))
 	for i, pk := range pks {
 		keys[i] = pk.lockKey()
-		shards[i] = shardOf(keys[i])
-		counts[shards[i]+1]++
 	}
-	for i := 1; i <= inflightShardCount; i++ {
-		counts[i] += counts[i-1]
-	}
-	sorted := make([]uint64, len(pks))
-	next := counts
-	for i, key := range keys {
-		sorted[next[shards[i]]] = key
-		next[shards[i]]++
-	}
-	// Remove the duplicates of each shard. The keys of one shard are few, so a
-	// sort per shard is cheap.
-	out := sorted[:0]
-	keyShards := shards[:0]
-	for shard := 0; shard < inflightShardCount; shard++ {
-		bucket := sorted[counts[shard]:counts[shard+1]]
-		if len(bucket) == 0 {
-			continue
-		}
-		slices.Sort(bucket)
-		for j, key := range bucket {
-			if j > 0 && key == bucket[j-1] {
-				continue
-			}
-			out = append(out, key)
-			keyShards = append(keyShards, shard)
-		}
-	}
-	return out, keyShards
+	slices.Sort(keys)
+	return slices.Compact(keys)
 }
 
 func (s *inflightSet) observedTimeTick() uint64 {
-	return s.observed.Load()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.observed
 }
 
 // len returns the number of key entries in the set.
 func (s *inflightSet) len() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	n := 0
-	for i := range s.shards {
-		shard := &s.shards[i]
-		shard.mu.Lock()
-		for _, queue := range shard.keys {
-			n += len(queue)
-		}
-		shard.mu.Unlock()
+	for _, queue := range s.keys {
+		n += len(queue)
 	}
 	return n
 }
 
-func (s *inflightSet) lock(w *inflightWrite) {
-	for _, shard := range w.shards {
-		s.shards[shard].mu.Lock()
-	}
-}
-
-func (s *inflightSet) unlock(w *inflightWrite) {
-	for i := len(w.shards) - 1; i >= 0; i-- {
-		s.shards[w.shards[i]].mu.Unlock()
-	}
-}
-
 // removeLocked drops w from the queue of each of its keys that still holds it.
 func (s *inflightSet) removeLocked(w *inflightWrite) {
-	for i, key := range w.keys {
-		shard := &s.shards[w.keyShards[i]]
-		queue := shard.keys[key]
+	for _, key := range w.keys {
+		queue := s.keys[key]
 		if i := slices.Index(queue, w); i >= 0 {
-			shard.setQueue(key, slices.Delete(queue, i, i+1))
+			s.setQueue(key, slices.Delete(queue, i, i+1))
 		}
 	}
 }
 
-func (sh *inflightShard) setQueue(key uint64, queue []*inflightWrite) {
+func (s *inflightSet) setQueue(key uint64, queue []*inflightWrite) {
 	if len(queue) > 0 {
-		sh.keys[key] = queue
+		s.keys[key] = queue
 		return
 	}
-	delete(sh.keys, key)
-	if len(sh.keys) == 0 {
-		sh.keys = nil
+	delete(s.keys, key)
+	if len(s.keys) == 0 {
+		s.keys = nil
 	}
 }
