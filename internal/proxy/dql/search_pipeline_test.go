@@ -390,6 +390,7 @@ func (s *SearchPipelineSuite) TestRerankOpValidatesAllEmptyResults() {
 			s.Require().NoError(err)
 			s.Require().Len(outputs, 1)
 			result := outputs[0].(*milvuspb.SearchResults).GetResults()
+			s.Equal(int64(0), result.GetTopK())
 			s.Equal([]int64{0}, result.GetTopks())
 			s.Empty(result.GetScores())
 		})
