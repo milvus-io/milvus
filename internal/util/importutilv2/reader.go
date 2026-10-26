@@ -250,6 +250,12 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 			return nil, err
 		}
 		return csv.NewReader(ctx, cm, schema, importFile.GetPaths()[0], bufferSize, sep, nullkey)
+	case FileTypeLance:
+		ver, err := GetLanceVersion(options)
+		if err != nil {
+			return nil, err
+		}
+		return lance.NewReader(ctx, cm, schema, importFile.GetPaths()[0], bufferSize, ver)
 	}
 	return nil, merr.WrapErrImportFailed("unexpected import file")
 }

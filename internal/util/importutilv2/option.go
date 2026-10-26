@@ -47,6 +47,9 @@ const (
 
 	// CSVNullKey specifies the null key used when importing CSV files.
 	CSVNullKey = "nullkey"
+
+	//LanceVersion specifies the version used for importing lance files0
+	LanceVersion = "ver"
 )
 
 // AutoCommitKey is the option key for enabling/disabling auto-commit of import jobs.
@@ -449,6 +452,18 @@ func GetCSVSep(options Options) (rune, error) {
 		return 0, merr.WrapErrImportFailedMsg("unsupported csv separator: %s", sep)
 	}
 	return []rune(sep)[0], nil
+}
+
+func GetLanceVersion(options Options) (uint64, error) {
+	v, err := funcutil.GetAttrByKeyFromRepeatedKV(LanceVersion, options)
+	if err != nil || len(v) == 0 {
+		return 0, merr.WrapErrImportFailedMsg("lance import requires an explicit dataset version")
+	}
+	ver, err := strconv.ParseUint(v, 10, 64)
+	if err != nil {
+		return 0, merr.WrapErrImportFailedMsg("invalid lance version: %s", v)
+	}
+	return ver, nil
 }
 
 func GetCSVNullKey(options Options) (string, error) {
