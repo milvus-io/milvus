@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -238,7 +239,10 @@ func testStreamingReplay(t *testing.T) {
 		before := decryptCalls[2]
 		pack := consumeReplayMessage(t, restore(dropped, 32))
 		packs, err := d.groupAndParseMsgs(pack, adaptor.UnmashalerDispatcher)
-		require.ErrorIs(t, err, message.ErrKmsKeyInvalid)
+		// CockroachDB error marks are recognized by its errors.Is, which the
+		// cipher classifier also uses, rather than the standard errors.Is.
+		require.True(t, errors.Is(err, message.ErrKmsKeyInvalid))
+		require.True(t, message.IsRetryableCipherError(err))
 		require.Empty(t, packs)
 		require.Equal(t, before+1, decryptCalls[2])
 	})
