@@ -722,10 +722,14 @@ func (r *legacyResolver) ResolveVChannels(context.Context, int64) ([]string, err
 
 type legacyPlanClient struct {
 	QueryPlanClient
-	plans map[string]*viewpb.QueryPlan
+	plans        map[string]*viewpb.QueryPlan
+	getQueryPlan func(context.Context, qviews.ShardID, *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error)
 }
 
-func (c *legacyPlanClient) GetQueryPlan(_ context.Context, shardID qviews.ShardID, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+func (c *legacyPlanClient) GetQueryPlan(ctx context.Context, shardID qviews.ShardID, request *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+	if c.getQueryPlan != nil {
+		return c.getQueryPlan(ctx, shardID, request)
+	}
 	return &viewpb.GetQueryPlanResponse{Plan: c.plans[shardID.VChannel]}, nil
 }
 
@@ -736,14 +740,19 @@ func (c *legacyPlanClient) GetMVCCTimestamp(context.Context, qviews.ShardID, *vi
 type legacyServiceClient struct {
 	ViewQueryServiceClient
 	searchResults      map[string]*internalpb.SearchResults
+	searchOnView       func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error)
 	searchOnViewStream func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error)
 	queryResults       map[string]*internalpb.RetrieveResults
+	queryOnView        func(context.Context, qviews.WorkNode, *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error)
 	queryOnViewStream  func(context.Context, qviews.WorkNode, *viewpb.QueryOnViewRequest) (queryutil.ReduceStream, error)
 	queryMu            sync.Mutex
 	queryCallCount     int
 }
 
-func (c *legacyServiceClient) SearchOnView(_ context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+func (c *legacyServiceClient) SearchOnView(ctx context.Context, node qviews.WorkNode, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+	if c.searchOnView != nil {
+		return c.searchOnView(ctx, node, req)
+	}
 	return &viewpb.SearchOnViewResponse{
 		LegacyResults: c.searchResults[req.GetShardId().GetVchannel()],
 	}, nil
@@ -759,10 +768,13 @@ func (c *legacyServiceClient) SearchOnViewStream(ctx context.Context, node qview
 	}, nil
 }
 
-func (c *legacyServiceClient) QueryOnView(_ context.Context, _ qviews.WorkNode, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
+func (c *legacyServiceClient) QueryOnView(ctx context.Context, node qviews.WorkNode, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
 	c.queryMu.Lock()
 	c.queryCallCount++
 	c.queryMu.Unlock()
+	if c.queryOnView != nil {
+		return c.queryOnView(ctx, node, req)
+	}
 	return &viewpb.QueryOnViewResponse{
 		LegacyResults: c.queryResults[req.GetShardId().GetVchannel()],
 	}, nil

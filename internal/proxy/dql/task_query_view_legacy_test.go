@@ -57,22 +57,26 @@ type fakeLegacyQueryClient struct {
 	maxRetries          int
 	reduceStreamEnabled bool
 	searchResult        *queryclient.LegacySearchResult
+	lastSearchRequest   *queryclient.LegacySearchRequest
 	queryResult         *queryclient.LegacyQueryResult
+	lastQueryRequest    *queryclient.LegacyQueryRequest
 	err                 error
 	search              func(int) (*queryclient.LegacySearchResult, error)
 	query               func(int) (*queryclient.LegacyQueryResult, error)
 }
 
-func (c *fakeLegacyQueryClient) Search(context.Context, *queryclient.LegacySearchRequest) (*queryclient.LegacySearchResult, error) {
+func (c *fakeLegacyQueryClient) Search(_ context.Context, request *queryclient.LegacySearchRequest) (*queryclient.LegacySearchResult, error) {
 	c.searchCalled++
+	c.lastSearchRequest = request
 	if c.search != nil {
 		return c.search(c.searchCalled)
 	}
 	return c.searchResult, c.err
 }
 
-func (c *fakeLegacyQueryClient) Query(context.Context, *queryclient.LegacyQueryRequest) (*queryclient.LegacyQueryResult, error) {
+func (c *fakeLegacyQueryClient) Query(_ context.Context, request *queryclient.LegacyQueryRequest) (*queryclient.LegacyQueryResult, error) {
 	c.queryCalled++
+	c.lastQueryRequest = request
 	if c.query != nil {
 		return c.query(c.queryCalled)
 	}

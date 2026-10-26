@@ -1172,7 +1172,28 @@ func (t *QueryTask) executeByQueryView(ctx context.Context) error {
 		BarrierMVCC: t.MvccTimestamp, AllowStreaming: allowStreaming,
 	}
 
-	retryStreaming := len(t.queryViewPlans) == 0 && allowStreaming && legacy.ReduceStreamEnabled()
+	enableReduceStream := legacy.ReduceStreamEnabled()
+	// Benchmark-only Query parameters; retained-plan requery stays on Batch.
+	if request.Plans == nil {
+		if value, err := funcutil.GetAttrByKeyFromRepeatedKV("enableReduceStream", t.request.GetQueryParams()); err == nil {
+			enabled, err := strconv.ParseBool(value)
+			if err != nil {
+				return merr.WrapErrParameterInvalidMsg("enableReduceStream must be a boolean, got %q", value)
+			}
+			if enabled && !allowStreaming {
+				return merr.WrapErrParameterInvalidMsg("enableReduceStream=true is not supported for this Query request")
+			}
+			enableReduceStream, request.EnableReduceStream = enabled, &enabled
+		}
+		if value, err := funcutil.GetAttrByKeyFromRepeatedKV("reduceStreamChunkBytes", t.request.GetQueryParams()); err == nil {
+			chunkBytes, err := strconv.Atoi(value)
+			if err != nil || chunkBytes <= 0 {
+				return merr.WrapErrParameterInvalidMsg("reduceStreamChunkBytes must be a positive integer, got %q", value)
+			}
+			request.ReduceStreamChunkBytes = chunkBytes
+		}
+	}
+	retryStreaming := request.Plans == nil && allowStreaming && enableReduceStream
 	maxAttempts := 1
 	if retryStreaming {
 		maxAttempts = max(1, legacy.MaxRetries())
