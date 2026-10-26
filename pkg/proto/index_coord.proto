@@ -37,12 +37,15 @@ service IndexCoord {
 
 // Path format version for index files on object storage.
 // Enum values are wire-compatible with the previous int32 encoding:
-// 0 remains BUILD_ROOTED (legacy), 1 remains COLLECTION_ROOTED (new).
+// 0 remains BUILD_ROOTED (legacy), 1 remains COLLECTION_ROOTED.
 enum IndexStorePathVersion {
     // legacy: index_files/{buildID}/{indexVersion}/{partID}/{segID}/{fileKey}
     INDEX_STORE_PATH_VERSION_BUILD_ROOTED = 0;
-    // new: index_files/{collID}/{partID}/{segID}/{buildID}/{indexVersion}/{fileKey}
+    // index_v1/{collID}/{partID}/{segID}/{buildID}/{indexVersion}/{fileKey}
     INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED = 1;
+    // insert_log/{collID}/{partID}/{segID}/_index/{buildID}/{indexVersion}/{fileKey}
+    // Selected for new StorageV3 builds when manifest index publication is enabled.
+    INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED = 2;
 }
 
 message IndexInfo {
@@ -97,7 +100,8 @@ message SegmentIndex {
     string index_type = 21;
     // Path format version for index files on object storage.
     // BUILD_ROOTED (0): index_files/{buildID}/{indexVersion}/{partID}/{segID}/{fileKey}
-    // COLLECTION_ROOTED (1): index_files/{collID}/{partID}/{segID}/{buildID}/{indexVersion}/{fileKey}
+    // COLLECTION_ROOTED (1): index_v1/{collID}/{partID}/{segID}/{buildID}/{indexVersion}/{fileKey}
+    // SEGMENT_ROOTED (2): <manifest base>/_index/{buildID}/{indexVersion}/{fileKey}
     IndexStorePathVersion index_store_path_version = 22;
 }
 

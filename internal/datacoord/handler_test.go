@@ -2533,7 +2533,7 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 
 func TestGenSnapshotDependencyErrors(t *testing.T) {
 	type snapshotBroker struct{ broker.Broker }
-	for _, stage := range []string{"describe", "partitions", "empty_positions", "empty_channel", "decompress", "compact_delta", "success"} {
+	for _, stage := range []string{"describe", "partitions", "empty_positions", "empty_channel", "decompress", "compact_delta", "index_files", "success"} {
 		t.Run(stage, func(t *testing.T) {
 			wantErr := merr.ErrServiceNotReady
 			errFor := func(name string) error {
@@ -2572,7 +2572,7 @@ func TestGenSnapshotDependencyErrors(t *testing.T) {
 			defer decompress.UnPatch()
 			deltas := mockey.Mock((*ServerHandler).GetDeltaLogFromCompactTo).Return([]*datapb.FieldBinlog(nil), errFor("compact_delta")).Build()
 			defer deltas.UnPatch()
-			indexFiles := mockey.Mock(uncompressIndexFiles).Return([]*indexpb.IndexFilePathInfo(nil)).Build()
+			indexFiles := mockey.Mock(uncompressIndexFiles).Return([]*indexpb.IndexFilePathInfo(nil), errFor("index_files")).Build()
 			defer indexFiles.UnPatch()
 
 			snapshot, err := handler.GenSnapshot(context.Background(), 2, positions)
@@ -2680,6 +2680,7 @@ func TestGenSnapshot_RejectsSegmentWithoutChannelSeekPosition(t *testing.T) {
 }
 
 func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
+	version := indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED
 	handler := &ServerHandler{
 		s: &Server{
 			meta: &meta{
@@ -2700,7 +2701,7 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 				IndexVersion:          40,
 				IndexState:            commonpb.IndexState_Finished,
 				IndexFileKeys:         []string{"index_data"},
-				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+				IndexStorePathVersion: version,
 			},
 		}
 	}).Build()
@@ -2718,11 +2719,32 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 	mockTypeParams := mockey.Mock((*indexMeta).GetTypeParams).Return(nil).Build()
 	defer mockTypeParams.UnPatch()
 
-	indexFiles := uncompressIndexFiles(handler, 1, 2)
+	indexFiles, err := uncompressIndexFiles(handler, &datapb.SegmentInfo{CollectionID: 1, ID: 2})
+	require.NoError(t, err)
 
 	require.Len(t, indexFiles, 1)
+	assert.Equal(t, int64(2), indexFiles[0].GetSegmentID())
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, indexFiles[0].GetIndexStorePathVersion())
 	assert.Equal(t, []string{"files/index_v1/1/20/2/30/40/index_data"}, indexFiles[0].GetIndexFilePaths())
+
+	// There is no segment store in this handler. The selected snapshot segment
+	// must be sufficient, including when its base differs from the current root.
+	version = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
+	segment := &datapb.SegmentInfo{
+		CollectionID: 1, ID: 2,
+		ManifestPath: packed.MarshalManifestPath("/data/legacy/insert_log/1/20/2", 1),
+	}
+	indexFiles, err = uncompressIndexFiles(handler, segment)
+	require.NoError(t, err)
+	require.Len(t, indexFiles, 1)
+	assert.Equal(t, segment.GetID(), indexFiles[0].GetSegmentID())
+	assert.Equal(t, version, indexFiles[0].GetIndexStorePathVersion())
+	assert.Equal(t, []string{"/data/legacy/insert_log/1/20/2/_index/30/40/index_data"}, indexFiles[0].GetIndexFilePaths())
+
+	segment.ManifestPath = ""
+	indexFiles, err = uncompressIndexFiles(handler, segment)
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	assert.Empty(t, indexFiles)
 }
 
 func TestUncompressJsonStatsForSnapshotPaths(t *testing.T) {

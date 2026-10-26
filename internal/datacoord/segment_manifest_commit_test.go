@@ -686,7 +686,7 @@ func TestCommitSegmentManifestPublishesIndexTaskAtomically(t *testing.T) {
 		BuildID:               buildID,
 		IndexVersion:          4,
 		IndexState:            commonpb.IndexState_InProgress,
-		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
 	}))
 
 	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
@@ -708,7 +708,7 @@ func TestCommitSegmentManifestPublishesIndexTaskAtomically(t *testing.T) {
 		IndexFileKeys:         []string{"0", "1"},
 		SerializedSize:        2000,
 		MemSize:               3000,
-		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
 	}
 	entry := manifestIndexEntryForCommitTest(t, meta, segmentID, buildID, taskInfo)
 	require.NoError(t, meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
@@ -773,7 +773,7 @@ func TestCommitSegmentManifestRejectsStaleIndexTaskProjection(t *testing.T) {
 		BuildID:               buildID,
 		IndexVersion:          4,
 		IndexState:            commonpb.IndexState_InProgress,
-		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
 	}))
 
 	taskInfo := &workerpb.IndexTaskInfo{
@@ -781,7 +781,7 @@ func TestCommitSegmentManifestRejectsStaleIndexTaskProjection(t *testing.T) {
 		State:                 commonpb.IndexState_Finished,
 		IndexFileKeys:         []string{"0"},
 		SerializedSize:        100,
-		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
 	}
 	entry := manifestIndexEntryForCommitTest(t, meta, segmentID, buildID, taskInfo)
 
@@ -1166,13 +1166,14 @@ func TestCommitSegmentManifestRetiresIndexEtcdRowWhenGated(t *testing.T) {
 		ManifestPath:   packed.MarshalManifestPath(basePath, 3),
 	})))
 	require.NoError(t, meta.indexMeta.AddSegmentIndex(context.Background(), &model.SegmentIndex{
-		CollectionID: collectionID,
-		PartitionID:  partitionID,
-		SegmentID:    segmentID,
-		IndexID:      indexID,
-		BuildID:      buildID,
-		IndexVersion: 1,
-		IndexState:   commonpb.IndexState_InProgress,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+		CollectionID:          collectionID,
+		PartitionID:           partitionID,
+		SegmentID:             segmentID,
+		IndexID:               indexID,
+		BuildID:               buildID,
+		IndexVersion:          1,
+		IndexState:            commonpb.IndexState_InProgress,
 	}))
 
 	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).Return(mockManifestUpdateResult(newManifest, nil), nil).Build()
@@ -1202,10 +1203,11 @@ func TestCommitSegmentManifestRetiresIndexEtcdRowWhenGated(t *testing.T) {
 	defer update.UnPatch()
 
 	taskInfo := &workerpb.IndexTaskInfo{
-		BuildID:        buildID,
-		State:          commonpb.IndexState_Finished,
-		IndexFileKeys:  []string{"0"},
-		SerializedSize: 100,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+		BuildID:               buildID,
+		State:                 commonpb.IndexState_Finished,
+		IndexFileKeys:         []string{"0"},
+		SerializedSize:        100,
 	}
 	entry := manifestIndexEntryForCommitTest(t, meta, segmentID, buildID, taskInfo)
 	require.NoError(t, meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
@@ -1262,9 +1264,10 @@ func TestCommitSegmentManifestDefersFieldIndexLockOutsideSegMu(t *testing.T) {
 	segIdx, ok := m.indexMeta.GetIndexJob(restartBuildID)
 	require.True(t, ok)
 	finished, _, err := m.indexMeta.buildFinishedSegmentIndex(segIdx, &workerpb.IndexTaskInfo{
-		BuildID:       restartBuildID,
-		State:         commonpb.IndexState_Finished,
-		IndexFileKeys: []string{"0", "1"},
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+		BuildID:               restartBuildID,
+		State:                 commonpb.IndexState_Finished,
+		IndexFileKeys:         []string{"0", "1"},
 	})
 	require.NoError(t, err)
 	entry, err := buildManifestIndexInfo(m, m.GetSegment(ctx, restartSegID), finished)
@@ -1290,9 +1293,10 @@ func TestCommitSegmentManifestDefersFieldIndexLockOutsideSegMu(t *testing.T) {
 					Type:    SegmentIndexUpsert,
 					BuildID: restartBuildID,
 					FinishedTask: &workerpb.IndexTaskInfo{
-						BuildID:       restartBuildID,
-						State:         commonpb.IndexState_Finished,
-						IndexFileKeys: []string{"0", "1"},
+						IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+						BuildID:               restartBuildID,
+						State:                 commonpb.IndexState_Finished,
+						IndexFileKeys:         []string{"0", "1"},
 					},
 				}},
 			},
