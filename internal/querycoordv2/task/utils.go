@@ -223,7 +223,7 @@ func packSubChannelRequest(
 		Schema:        finalSchema, // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
 		LoadMeta:      loadMeta,    // assign it for compatibility of rolling upgrade from 2.2.x to 2.3
 		ReplicaID:     task.ReplicaID(),
-		Version:       time.Now().UnixNano(),
+		Version:       task.WatchVersion(),
 		IndexInfoList: indexInfo,
 		TargetVersion: targetVersion,
 	}
