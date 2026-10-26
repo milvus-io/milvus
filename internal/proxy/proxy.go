@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/featureusage"
 	internalhttp "github.com/milvus-io/milvus/internal/http"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/proxy/reqregistry"
@@ -243,6 +244,16 @@ func (node *Proxy) CheckClusterPrivilege(ctx context.Context, req interface{}, f
 // GetMetaCache) to reject search/query before paying for body decoding.
 func (node *Proxy) IsDQLQueueFull() bool {
 	return node.sched != nil && node.sched.DqQueue.IsFull()
+}
+
+// ExplainSearch describes the plan a search request would send to the query
+// nodes, without executing it. Go-only, like IsDQLQueueFull: there is no
+// such RPC, the REST layer reaches it through an interface assertion.
+func (node *Proxy) ExplainSearch(ctx context.Context, request *milvuspb.SearchRequest) (*planparserv2.PlanExplanation, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return nil, err
+	}
+	return ExplainSearch(ctx, node, request)
 }
 
 // Register registers proxy at etcd

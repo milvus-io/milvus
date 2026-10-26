@@ -5081,6 +5081,13 @@ func TestProxy_IsDQLQueueFull(t *testing.T) {
 	assert.True(t, node.IsDQLQueueFull())
 }
 
+func TestProxy_ExplainSearch_NotHealthy(t *testing.T) {
+	node := &Proxy{}
+	node.UpdateStateCode(commonpb.StateCode_Abnormal)
+	_, err := node.ExplainSearch(context.Background(), &milvuspb.SearchRequest{CollectionName: "c"})
+	assert.ErrorIs(t, err, merr.ErrServiceNotReady)
+}
+
 func getMixCoordClient() *mocks.MockMixCoordClient {
 	mixc := &mocks.MockMixCoordClient{}
 	mixc.EXPECT().Close().Return(nil)
