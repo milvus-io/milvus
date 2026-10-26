@@ -201,6 +201,161 @@ func (s *RefreshExternalCollectionTaskSuite) TestRefreshMilvusTableSegmentManife
 	s.Equal(oldManifest, seg.GetManifestPath(), "source SegmentInfo must remain immutable")
 }
 
+func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableChecksOutputsBeforeDeleteRefresh() {
+	paramtable.Init()
+	readErr := merr.WrapErrServiceUnavailableMsg("manifest read unavailable")
+	corruptErr := merr.WrapErrDataIntegrityMsg("malformed manifest")
+	buildErr := merr.WrapErrFunctionFailedMsg("replacement output failed")
+	for _, tc := range []struct {
+		name       string
+		changed    bool
+		hasOutputs bool
+		sourceErr  error
+		readErr    error
+		refreshErr error
+		patchErr   error
+		buildErr   error
+	}{
+		{name: "complete outputs are retained", changed: true, hasOutputs: true},
+		{name: "missing outputs rebuild only their segment", changed: true},
+		{name: "unchanged deletes use ChildFields only"},
+		{name: "read failure does not rebuild", changed: true, readErr: readErr},
+		{name: "corruption does not rebuild", changed: true, readErr: corruptErr},
+		{name: "cancellation does not rebuild", changed: true, readErr: context.Canceled},
+		{name: "replacement failure publishes no result", changed: true, buildErr: buildErr},
+		{name: "delete discovery failure does not rebuild", changed: true, sourceErr: readErr},
+		{name: "refresh failure does not rebuild", changed: true, hasOutputs: true, refreshErr: corruptErr},
+		{name: "column append failure does not rebuild", changed: true, hasOutputs: true, patchErr: readErr},
+	} {
+		s.Run(tc.name, func() {
+			ctx := context.Background()
+			oldManifest := packed.MarshalManifestPath("files/insert_log/1000/2000/1", 1)
+			patchedManifest := packed.MarshalManifestPath("files/insert_log/1000/2000/1", 2)
+			rebuiltManifest := packed.MarshalManifestPath("files/insert_log/1000/2000/100", 1)
+			seg := &datapb.SegmentInfo{
+				ID: 1, CollectionID: s.collectionID, PartitionID: 2000, NumOfRows: 10,
+				ManifestPath: oldManifest, StorageVersion: storage.StorageV3,
+				Binlogs: []*datapb.FieldBinlog{{ChildFields: []int64{100, 101, 102}}},
+			}
+			healthy := &datapb.SegmentInfo{
+				ID: 2, CollectionID: s.collectionID, PartitionID: 2000, NumOfRows: 10,
+				ManifestPath: packed.MarshalManifestPath("files/insert_log/1000/2000/2", 1),
+				Binlogs:      []*datapb.FieldBinlog{{ChildFields: []int64{100, 101, 102}}},
+			}
+			req := &datapb.RefreshExternalCollectionTaskRequest{
+				CollectionID: s.collectionID, PartitionID: 2000,
+				ExternalSpec:  `{"format":"milvus-table"}`,
+				StorageConfig: &indexpb.StorageConfig{RootPath: "files", StorageType: "local"},
+				Schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "pk"},
+						{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, ExternalField: "text"},
+						{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+					},
+					Functions: []*schemapb.FunctionSchema{{
+						Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{101}, OutputFieldIds: []int64{102},
+					}},
+				},
+				CurrentSegments:        []*datapb.SegmentInfo{seg, healthy},
+				PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
+			}
+			if tc.patchErr != nil {
+				req.Schema.Fields = append(req.Schema.Fields, &schemapb.FieldSchema{
+					FieldID: 103, Name: "price", DataType: schemapb.DataType_Int64, ExternalField: "price",
+				})
+			}
+			task := NewRefreshExternalCollectionTask(ctx, req)
+			task.parsedSpec = &externalspec.ExternalSpec{Format: externalspec.FormatMilvusTable}
+			task.nextAllocID = 100
+			task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
+			first := packed.Fragment{FilePath: "source-1", StartRow: 0, EndRow: 10, RowCount: 10}
+			second := packed.Fragment{FilePath: "source-2", StartRow: 0, EndRow: 10, RowCount: 10}
+			current := packed.SegmentFragments{1: {first}, 2: {second}}
+			latest := first
+			if tc.changed {
+				latest.Deltalogs = []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{
+					LogID: 88, LogPath: "s3://source-bucket/files/insert_log/1/_delta/88", EntriesNum: 1,
+				}}}}
+			}
+			sourcePatch := mockey.Mock(packed.GetDeltaLogsFromManifestWithExtfs).Return(nil, tc.sourceErr).Build()
+			defer sourcePatch.UnPatch()
+			// Fixed returns avoid inspecting stack-backed slices inside Mockey.
+			checkPatch := mockey.Mock(packed.ManifestHasColumns).Return(tc.hasOutputs, tc.readErr).Build()
+			defer checkPatch.UnPatch()
+			preparePatch := mockey.Mock((*RefreshExternalCollectionTask).prepareMilvusTableL0Deltalogs).Return(nil, nil).Build()
+			defer preparePatch.UnPatch()
+			refreshPatch := mockey.Mock(packed.RefreshMilvusTableManifest).
+				Return(packed.MilvusTableRefreshResult{ManifestPath: patchedManifest}, tc.refreshErr).Build()
+			defer refreshPatch.UnPatch()
+			appendPatch := mockey.Mock((*RefreshExternalCollectionTask).patchSegmentForMissingColumns).Return(nil, tc.patchErr).Build()
+			defer appendPatch.UnPatch()
+			var rebuiltFragments []packed.Fragment
+			// These fragments come from the real balancing path's heap-owned work
+			// bundle. Copy them for assertions after the worker pool has joined.
+			buildPatch := mockey.Mock((*RefreshExternalCollectionTask).createManifestWithFunctions).
+				To(func(_ *RefreshExternalCollectionTask, _ context.Context, _ int64, fragments []packed.Fragment) (string, error) {
+					rebuiltFragments = append([]packed.Fragment(nil), fragments...)
+					return rebuiltManifest, tc.buildErr
+				}).Build()
+			defer buildPatch.UnPatch()
+			samplePatch := mockey.Mock(packed.SampleExternalFieldSizes).Return(map[string]int64{"pk": 8, "text": 32}, nil).Build()
+			defer samplePatch.UnPatch()
+
+			result, err := task.organizeSegments(ctx, current, []packed.Fragment{latest, second})
+			s.Equal(oldManifest, seg.GetManifestPath(), "never mutate the published input segment")
+			checks, refreshes, rebuilds := 0, 0, 0
+			if tc.changed && tc.sourceErr == nil {
+				checks = 1
+				if tc.readErr == nil {
+					if tc.hasOutputs {
+						refreshes = 1
+					} else {
+						rebuilds = 1
+					}
+				}
+			}
+			s.Equal(checks, checkPatch.Times())
+			s.Equal(refreshes, preparePatch.Times(), "check outputs before preparing target deletes")
+			s.Equal(refreshes, refreshPatch.Times())
+			s.Equal(rebuilds, buildPatch.Times())
+			var expected error
+			for _, failure := range []error{tc.sourceErr, tc.readErr, tc.refreshErr, tc.patchErr, tc.buildErr} {
+				if failure != nil {
+					expected = failure
+					break
+				}
+			}
+			if expected != nil {
+				s.ErrorIs(err, expected)
+				s.Empty(result)
+				s.Empty(task.GetUpdatedSegments())
+				s.Empty(task.GetKeptSegmentIDs())
+				return
+			}
+			s.Require().NoError(err)
+			s.Require().Len(result, 2)
+			if !tc.changed {
+				s.Equal([]int64{1, 2}, task.GetKeptSegmentIDs())
+				s.Empty(task.GetUpdatedSegments())
+				return
+			}
+			s.Equal([]int64{2}, task.GetKeptSegmentIDs(), "unaffected segment remains usable")
+			updated := task.GetUpdatedSegments()
+			s.Require().Len(updated, 1)
+			if tc.hasOutputs {
+				s.Equal(int64(1), updated[0].GetID())
+				s.Equal(patchedManifest, updated[0].GetManifestPath())
+				return
+			}
+			s.Equal([]packed.Fragment{latest}, rebuiltFragments, "rebuild exactly once from the latest source deletes")
+			s.Equal(int64(100), updated[0].GetID())
+			s.Equal(int64(102), task.nextAllocID, "allocate one segment ID and one fake binlog ID")
+			s.Equal(rebuiltManifest, updated[0].GetManifestPath())
+			s.ElementsMatch([]int64{100, 101, 102}, updated[0].GetBinlogs()[0].GetChildFields())
+		})
+	}
+}
+
 func (s *RefreshExternalCollectionTaskSuite) TestRefreshMilvusTableManifestReusesFilesInOneCommit() {
 	paramtable.Init()
 	storageConfig := &indexpb.StorageConfig{StorageType: "local", RootPath: s.T().TempDir()}
