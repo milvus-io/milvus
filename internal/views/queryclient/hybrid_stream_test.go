@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/util/searchutil"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -97,6 +98,35 @@ func TestHybridStreamSetupFailureClosesEarlierSubSearches(t *testing.T) {
 	require.ErrorIs(t, err, failure)
 	require.Nil(t, streams)
 	require.Equal(t, 1, child.closeCount())
+}
+
+func TestHybridStreamsPreserveElementAndEmbeddingListRequests(t *testing.T) {
+	request := hybridStreamRequest()
+	for index, kind := range []commonpb.PlaceholderType{commonpb.PlaceholderType_FloatVector, commonpb.PlaceholderType_EmbListFloatVector} {
+		var err error
+		request.SubReqs[index].PlaceholderGroup, err = proto.Marshal(&commonpb.PlaceholderGroup{
+			Placeholders: []*commonpb.PlaceholderValue{{Tag: "$0", Type: kind, Values: [][]byte{{1, 2, 3, 4}}}},
+		})
+		require.NoError(t, err)
+		request.SubReqs[index].SerializedExprPlan = []byte{byte(index + 1)}
+	}
+	shard := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+	plan := legacySearchPlan(shard, qviews.NewQueryNode(11))
+	plan.Request = &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: proto.Clone(request).(*internalpb.SearchRequest)}
+	var opened int
+	service := &fakeViewQueryServiceClient{searchOnViewStream: func(_ context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+		index := int(req.GetLegacyReq().GetFieldId() - 101)
+		require.Equal(t, request.SubReqs[index].GetPlaceholderGroup(), req.GetLegacyReq().GetPlaceholderGroup())
+		require.Equal(t, request.SubReqs[index].GetSerializedExprPlan(), req.GetLegacyReq().GetSerializedExprPlan())
+		opened++
+		return &fakeSearchStream{}, nil
+	}}
+	streams, _, err := newShardViewQueryClient(1, &fakeQueryPlanClient{plan: plan}, service).SearchStreams(context.Background(), &ShardSearchRequest{Req: request, VChannel: shard.VChannel}, 20)
+	require.NoError(t, err)
+	require.Equal(t, 2, opened)
+	for _, stream := range streams {
+		require.NoError(t, stream.Close())
+	}
 }
 
 func TestSearchStreamsPreserveRangeAndIterativeFilterPlans(t *testing.T) {
