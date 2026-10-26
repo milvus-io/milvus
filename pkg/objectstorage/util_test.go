@@ -590,3 +590,47 @@ func TestNewAzureClientSPNCredentialPath(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "https://testaccount.blob.core.windows.net/", client.URL())
 }
+
+func TestNewAzureClientSPNMissingVarsReturnsError(t *testing.T) {
+	// AZURE_CLIENT_SECRET set but AZURE_CLIENT_ID and AZURE_TENANT_ID missing —
+	// the SPN branch must return a hard error rather than silently falling through.
+	t.Setenv("AZURE_CLIENT_SECRET", "fake-secret")
+	t.Setenv("AZURE_CLIENT_ID", "")
+	t.Setenv("AZURE_TENANT_ID", "")
+	t.Setenv("AZURE_FEDERATED_TOKEN_FILE", "")
+
+	cfg := &Config{
+		Address:         "core.windows.net",
+		BucketName:      "container",
+		AccessKeyID:     "testaccount",
+		UseIAM:          true,
+		SkipBucketCheck: true,
+	}
+
+	_, err := NewAzureObjectStorageClient(context.Background(), cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "SPN authentication requires")
+}
+
+func TestNewAzureClientWITakesPriorityOverSPN(t *testing.T) {
+	// Both WI and SPN vars set — WI must be selected first (WI → SPN → MI order).
+	// NewWorkloadIdentityCredential fails because the token file does not exist,
+	// but that error is distinct from the SPN missing-vars error, proving WI was chosen.
+	t.Setenv("AZURE_FEDERATED_TOKEN_FILE", "/nonexistent/token/file")
+	t.Setenv("AZURE_CLIENT_SECRET", "fake-secret")
+	t.Setenv("AZURE_CLIENT_ID", "00000000-0000-0000-0000-000000000001")
+	t.Setenv("AZURE_TENANT_ID", "00000000-0000-0000-0000-000000000002")
+
+	cfg := &Config{
+		Address:         "core.windows.net",
+		BucketName:      "container",
+		AccessKeyID:     "testaccount",
+		UseIAM:          true,
+		SkipBucketCheck: true,
+	}
+
+	_, err := NewAzureObjectStorageClient(context.Background(), cfg)
+	// WI path taken: error comes from WorkloadIdentityCredential, not SPN validation.
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "SPN authentication requires")
+}

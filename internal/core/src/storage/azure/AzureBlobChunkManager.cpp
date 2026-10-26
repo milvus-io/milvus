@@ -15,7 +15,6 @@
 // limitations under the License.
 
 #include <azure/identity/client_secret_credential.hpp>
-#include <azure/identity/default_azure_credential.hpp>
 #include <azure/identity/managed_identity_credential.hpp>
 #include <azure/identity/workload_identity_credential.hpp>
 #include <algorithm>
@@ -117,11 +116,14 @@ AzureBlobChunkManager::AzureBlobChunkManager(
         } else if (has_client_secret) {
             const char* spn_client_id = std::getenv("AZURE_CLIENT_ID");
             const char* spn_tenant_id = std::getenv("AZURE_TENANT_ID");
+            if (spn_client_id == nullptr || std::strlen(spn_client_id) == 0 ||
+                spn_tenant_id == nullptr || std::strlen(spn_tenant_id) == 0) {
+                throw std::invalid_argument(
+                    "AZURE_CLIENT_ID and AZURE_TENANT_ID must be set when AZURE_CLIENT_SECRET is set");
+            }
             auto credential =
                 std::make_shared<Azure::Identity::ClientSecretCredential>(
-                    spn_tenant_id == nullptr ? "" : spn_tenant_id,
-                    spn_client_id == nullptr ? "" : spn_client_id,
-                    client_secret_env);
+                    spn_tenant_id, spn_client_id, client_secret_env);
             client_ =
                 std::make_shared<Azure::Storage::Blobs::BlobServiceClient>(
                     "https://" + access_key_id + ".blob." + address + "/",

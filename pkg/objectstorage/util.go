@@ -204,7 +204,7 @@ func NewAzureObjectStorageClient(ctx context.Context, c *Config) (*service.Clien
 			tenantID := os.Getenv("AZURE_TENANT_ID")
 			clientID := os.Getenv("AZURE_CLIENT_ID")
 			if tenantID == "" || clientID == "" {
-				return nil, fmt.Errorf("SPN authentication requires AZURE_TENANT_ID, AZURE_CLIENT_ID and AZURE_CLIENT_SECRET")
+				return nil, merr.WrapErrParameterMissingMsg("SPN authentication requires AZURE_TENANT_ID, AZURE_CLIENT_ID and AZURE_CLIENT_SECRET")
 			}
 			cred, credErr = azidentity.NewClientSecretCredential(tenantID, clientID, secret, nil)
 		} else {
