@@ -125,6 +125,7 @@ func (m *lazyDMLMessage) SetTraceCtx(ctx context.Context) { m.traceCtx = ctx }
 // The application message ID and replication metadata are stored in the body.
 // Dispatcher routing only uses the header-backed getters above.
 func (m *lazyDMLMessage) GetID() int64 { return m.mustUnmarshal().ID() }
+
 func (m *lazyDMLMessage) GetReplicateID() string {
 	return m.mustUnmarshal().(interface{ GetBase() *commonpb.MsgBase }).GetBase().GetReplicateInfo().GetReplicateID()
 }
