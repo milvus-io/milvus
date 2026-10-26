@@ -50,6 +50,15 @@ func (impl *shardInterceptor) handleSplitShardOnTarget(ctx context.Context, msg 
 				mlog.FieldCollectionID(header.GetCollectionId()), mlog.Err(err))
 			return nil, status.NewUnrecoverableError("%s", err.Error())
 		}
+		if errors.Is(err, shards.ErrVChannelFenced) {
+			// A late retry of this target's genesis, landing after a later split
+			// fenced it as a source. Appending it would put a genesis after the
+			// fence in the WAL. Unrecoverable, so the producer stops retrying it:
+			// the vchannel's first genesis is the one that landed.
+			impl.shardManager.Logger().Warn(ctx, "refuse the genesis of a vchannel fenced by a shard split",
+				mlog.FieldCollectionID(header.GetCollectionId()), mlog.Err(err))
+			return nil, status.NewUnrecoverableError("%s", err.Error())
+		}
 		// ErrCollectionExists: the same vchannel is already registered. The
 		// genesis is still appended and applied; every consumer is idempotent.
 		impl.shardManager.Logger().Warn(ctx, "vchannel already exists when creating vchannel",
