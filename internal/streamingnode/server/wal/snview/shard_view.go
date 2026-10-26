@@ -7,6 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/replicadiscovery"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -21,6 +22,8 @@ import (
 // contracts require that all callbacks are asynchronous, so this does not
 // cause deadlocks.
 type snShardView struct {
+	replicas        *replicadiscovery.Directory
+	maxUpVersion    *qviews.QueryViewVersion
 	mu              sync.Mutex
 	recoveryChanged chan struct{}
 	closed          bool
@@ -39,6 +42,7 @@ type snShardView struct {
 
 // snViewEntry pairs an ApplyView (carrying the OnReport callback) with its state machine.
 type snViewEntry struct {
+	advertisedUp bool
 	handler.ApplyView
 	sm             *snQueryViewStateMachine
 	queryRefs      int
@@ -139,6 +143,10 @@ func (s *snShardView) ApplyViews(views []handler.ApplyView) bool {
 func (s *snShardView) CloseForHandoff() {
 	s.mu.Lock()
 	s.closed = true
+	if s.replicas != nil {
+		s.replicas.Set(s.shardID.VChannel, s.shardID.ReplicaID, nil)
+	}
+	s.maxUpVersion = nil
 	s.notifyRecoveryChangedLocked()
 	s.detached = true
 	releases := make([]<-chan struct{}, 0, len(s.views))
@@ -314,6 +322,7 @@ func (s *snShardView) consumeReportPersistAndCleanup(version qviews.QueryViewVer
 	if !s.consumeAndPersist(entry) {
 		return
 	}
+	s.publishReplicaLocked(entry)
 	s.consumeReport(entry)
 	s.consumeAndRelease(version, entry)
 	s.cleanupIfDropped(version, entry)
@@ -474,5 +483,38 @@ func (s *snShardView) releaseQueryViewLease(version qviews.QueryViewVersion) {
 	if entry.queryRefs == 0 && entry.releasePending {
 		entry.releasePending = false
 		s.startReleaseLocked(version, entry)
+	}
+}
+
+// publishReplicaLocked follows successful persistence and precedes entry cleanup.
+// Recovery, lease timers and Coord pushes all use the same transition drain.
+func (s *snShardView) publishReplicaLocked(entry *snViewEntry) {
+	up := entry.sm.State() == qviews.QueryViewStateUp
+	if entry.advertisedUp == up {
+		return
+	}
+	entry.advertisedUp = up
+	version := entry.View.QueryViewKey().QueryViewVersion
+	if up {
+		if s.maxUpVersion != nil && !version.GT(*s.maxUpVersion) {
+			return
+		}
+		s.maxUpVersion = &version
+	} else {
+		if s.maxUpVersion == nil || !version.EQ(*s.maxUpVersion) {
+			return
+		}
+		s.maxUpVersion = nil
+		// Only retirement of the advertised maximum scans the retained versions.
+		// advertisedUp records successfully persisted transitions, unlike SM state.
+		for candidate, other := range s.views {
+			if other.advertisedUp && (s.maxUpVersion == nil || candidate.GT(*s.maxUpVersion)) {
+				v := candidate
+				s.maxUpVersion = &v
+			}
+		}
+	}
+	if s.replicas != nil {
+		s.replicas.Set(s.shardID.VChannel, s.shardID.ReplicaID, s.maxUpVersion)
 	}
 }

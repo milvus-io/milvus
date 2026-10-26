@@ -17,6 +17,7 @@ import (
 
 // Client exposes QueryView query client domains.
 type Client interface {
+	Close()
 	Legacy() LegacyClient
 }
 
@@ -63,8 +64,10 @@ type LegacyQueryResult struct {
 }
 
 type legacyOnlyClient struct {
-	legacy LegacyClient
+	legacy *legacyClient
 }
+
+func (c *legacyOnlyClient) Close() { c.legacy.shardClient.replicas.Close() }
 
 func (c *legacyOnlyClient) Legacy() LegacyClient {
 	return c.legacy

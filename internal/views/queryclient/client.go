@@ -20,6 +20,7 @@ import (
 // It applies to both single search (e.g., decay, model-based rerank) and HybridSearch
 // (e.g., RRF/weighted across multiple sub-searches).
 type ViewQueryClient interface {
+	Close()
 	// Legacy returns the raw legacy execution domain used by Proxy's existing pipelines.
 	Legacy() LegacyClient
 

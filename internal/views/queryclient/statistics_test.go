@@ -29,12 +29,13 @@ func statisticsResponse(version int64, rows int64, nodes ...int64) *viewpb.GetQu
 }
 
 func TestStatisticsRetriesEntireShardAndJoinsLateResults(t *testing.T) {
+	setupTestReplicaRouting(t)
 	mockey.PatchConvey("a retired View cannot contribute to its successor's count", t, func() {
 		plans := 0
 		lateFinished := false
 		started := make(chan struct{})
 		mockey.Mock((*fakeQueryPlanClient).GetQueryPlan).To(func(_ *fakeQueryPlanClient, _ context.Context, shard qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
-			require.Equal(t, qviews.UnknownReplicaID, shard.ReplicaID)
+			require.EqualValues(t, 1, shard.ReplicaID)
 			require.IsType(t, &viewpb.GetQueryPlanRequest_BarrierMvcc{}, req.GetMvcc())
 			require.EqualValues(t, 99, req.GetBarrierMvcc())
 			plans++
@@ -70,6 +71,7 @@ func TestStatisticsRetriesEntireShardAndJoinsLateResults(t *testing.T) {
 }
 
 func TestStatisticsEmptyAndGrowingOnlyShards(t *testing.T) {
+	setupTestReplicaRouting(t)
 	for _, count := range []int64{0, 42} {
 		response := statisticsResponse(1, count)
 		// Even zero rows must remain distinguishable from an omitted inline result.
@@ -85,6 +87,7 @@ func TestStatisticsEmptyAndGrowingOnlyShards(t *testing.T) {
 }
 
 func TestStatisticsRejectsMissingSNResult(t *testing.T) {
+	setupTestReplicaRouting(t)
 	response := statisticsResponse(1, 0)
 	response.GrowingInlineResponse = nil
 	client := newShardViewQueryClient(1, &fakeQueryPlanClient{plan: response.Plan, growingInlineResponse: response.GrowingInlineResponse}, nil)
@@ -93,6 +96,7 @@ func TestStatisticsRejectsMissingSNResult(t *testing.T) {
 }
 
 func TestStatisticsCollectionAggregatesAndPropagatesFailure(t *testing.T) {
+	setupTestReplicaRouting(t)
 	mockey.PatchConvey("collection statistics combine one result per shard and return no partial count", t, func() {
 		var shardErr error
 		mockey.Mock((*shardViewQueryClient).statistics).To(func(_ *shardViewQueryClient, _ context.Context, channel string, collectionID int64, req *viewpb.StatisticsRequest, barrierMVCC uint64) (int64, error) {

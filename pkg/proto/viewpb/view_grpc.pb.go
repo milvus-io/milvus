@@ -272,15 +272,18 @@ var QueryPlanService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	ViewQueryService_SearchOnView_FullMethodName     = "/milvus.proto.view.ViewQueryService/SearchOnView"
-	ViewQueryService_QueryOnView_FullMethodName      = "/milvus.proto.view.ViewQueryService/QueryOnView"
-	ViewQueryService_StatisticsOnView_FullMethodName = "/milvus.proto.view.ViewQueryService/StatisticsOnView"
+	ViewQueryService_WatchVChannelReplicas_FullMethodName = "/milvus.proto.view.ViewQueryService/WatchVChannelReplicas"
+	ViewQueryService_SearchOnView_FullMethodName          = "/milvus.proto.view.ViewQueryService/SearchOnView"
+	ViewQueryService_QueryOnView_FullMethodName           = "/milvus.proto.view.ViewQueryService/QueryOnView"
+	ViewQueryService_StatisticsOnView_FullMethodName      = "/milvus.proto.view.ViewQueryService/StatisticsOnView"
 )
 
 // ViewQueryServiceClient is the client API for ViewQueryService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ViewQueryServiceClient interface {
+	// StreamingNode only: latest locally Up replicas for subscribed VChannels.
+	WatchVChannelReplicas(ctx context.Context, opts ...grpc.CallOption) (ViewQueryService_WatchVChannelReplicasClient, error)
 	// SearchOnView executes a vector search on segments belonging to the given view version.
 	SearchOnView(ctx context.Context, in *SearchOnViewRequest, opts ...grpc.CallOption) (*SearchOnViewResponse, error)
 	// QueryOnView executes a query (retrieve by expression) on segments belonging to the given view version.
@@ -294,6 +297,37 @@ type viewQueryServiceClient struct {
 
 func NewViewQueryServiceClient(cc grpc.ClientConnInterface) ViewQueryServiceClient {
 	return &viewQueryServiceClient{cc}
+}
+
+func (c *viewQueryServiceClient) WatchVChannelReplicas(ctx context.Context, opts ...grpc.CallOption) (ViewQueryService_WatchVChannelReplicasClient, error) {
+	stream, err := c.cc.NewStream(ctx, &ViewQueryService_ServiceDesc.Streams[0], ViewQueryService_WatchVChannelReplicas_FullMethodName, opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &viewQueryServiceWatchVChannelReplicasClient{stream}
+	return x, nil
+}
+
+type ViewQueryService_WatchVChannelReplicasClient interface {
+	Send(*WatchVChannelReplicasRequest) error
+	Recv() (*WatchVChannelReplicasResponse, error)
+	grpc.ClientStream
+}
+
+type viewQueryServiceWatchVChannelReplicasClient struct {
+	grpc.ClientStream
+}
+
+func (x *viewQueryServiceWatchVChannelReplicasClient) Send(m *WatchVChannelReplicasRequest) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *viewQueryServiceWatchVChannelReplicasClient) Recv() (*WatchVChannelReplicasResponse, error) {
+	m := new(WatchVChannelReplicasResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 func (c *viewQueryServiceClient) SearchOnView(ctx context.Context, in *SearchOnViewRequest, opts ...grpc.CallOption) (*SearchOnViewResponse, error) {
@@ -327,6 +361,8 @@ func (c *viewQueryServiceClient) StatisticsOnView(ctx context.Context, in *Stati
 // All implementations should embed UnimplementedViewQueryServiceServer
 // for forward compatibility
 type ViewQueryServiceServer interface {
+	// StreamingNode only: latest locally Up replicas for subscribed VChannels.
+	WatchVChannelReplicas(ViewQueryService_WatchVChannelReplicasServer) error
 	// SearchOnView executes a vector search on segments belonging to the given view version.
 	SearchOnView(context.Context, *SearchOnViewRequest) (*SearchOnViewResponse, error)
 	// QueryOnView executes a query (retrieve by expression) on segments belonging to the given view version.
@@ -338,6 +374,9 @@ type ViewQueryServiceServer interface {
 type UnimplementedViewQueryServiceServer struct {
 }
 
+func (UnimplementedViewQueryServiceServer) WatchVChannelReplicas(ViewQueryService_WatchVChannelReplicasServer) error {
+	return status.Errorf(codes.Unimplemented, "method WatchVChannelReplicas not implemented")
+}
 func (UnimplementedViewQueryServiceServer) SearchOnView(context.Context, *SearchOnViewRequest) (*SearchOnViewResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SearchOnView not implemented")
 }
@@ -357,6 +396,32 @@ type UnsafeViewQueryServiceServer interface {
 
 func RegisterViewQueryServiceServer(s grpc.ServiceRegistrar, srv ViewQueryServiceServer) {
 	s.RegisterService(&ViewQueryService_ServiceDesc, srv)
+}
+
+func _ViewQueryService_WatchVChannelReplicas_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(ViewQueryServiceServer).WatchVChannelReplicas(&viewQueryServiceWatchVChannelReplicasServer{stream})
+}
+
+type ViewQueryService_WatchVChannelReplicasServer interface {
+	Send(*WatchVChannelReplicasResponse) error
+	Recv() (*WatchVChannelReplicasRequest, error)
+	grpc.ServerStream
+}
+
+type viewQueryServiceWatchVChannelReplicasServer struct {
+	grpc.ServerStream
+}
+
+func (x *viewQueryServiceWatchVChannelReplicasServer) Send(m *WatchVChannelReplicasResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *viewQueryServiceWatchVChannelReplicasServer) Recv() (*WatchVChannelReplicasRequest, error) {
+	m := new(WatchVChannelReplicasRequest)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 func _ViewQueryService_SearchOnView_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -433,6 +498,13 @@ var ViewQueryService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ViewQueryService_StatisticsOnView_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "WatchVChannelReplicas",
+			Handler:       _ViewQueryService_WatchVChannelReplicas_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+	},
 	Metadata: "view.proto",
 }

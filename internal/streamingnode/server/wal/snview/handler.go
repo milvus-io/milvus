@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/views/optimizer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/replicadiscovery"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -66,6 +67,7 @@ var _ handler.QueryViewHandler = (*SNQueryViewHandler)(nil)
 //     Repeated Down pushes update the callback without renewing the lease.
 //   - Other states: SM handles coord push and responds accordingly.
 type SNQueryViewHandler struct {
+	replicas       *replicadiscovery.Directory
 	mu             sync.Mutex
 	closed         bool
 	ctx            context.Context
@@ -87,6 +89,7 @@ func recoverSNQueryViewHandler(
 	views []*viewpb.QueryViewOfShard,
 ) *SNQueryViewHandler {
 	h := &SNQueryViewHandler{
+		replicas:       replicadiscovery.NewDirectory(),
 		ctx:            ctx,
 		pchannel:       pchannel,
 		shards:         make(map[qviews.ShardID]*snShardView),
@@ -114,6 +117,7 @@ func recoverSNQueryViewHandler(
 
 	for shardID, shardViews := range grouped {
 		shard := recoverSnShardView(ctx, pchannel, shardID, shardViews, catalog, resMgr)
+		shard.replicas = h.replicas
 		shard.leaseDuration = h.leaseDuration
 		shard.onEmpty = h.makeOnEmpty(shardID)
 		h.shards[shardID] = shard
@@ -189,6 +193,9 @@ func (h *SNQueryViewHandler) ApplyViews(views []handler.ApplyView) {
 }
 
 func (h *SNQueryViewHandler) CloseForHandoff() {
+	if h.replicas != nil {
+		h.replicas.Close()
+	}
 	h.mu.Lock()
 	h.closed = true
 	shards := make([]*snShardView, 0, len(h.shards))
@@ -212,6 +219,7 @@ func (h *SNQueryViewHandler) getOrCreateShard(shardID qviews.ShardID) *snShardVi
 	shard, ok := h.shards[shardID]
 	if !ok {
 		shard = &snShardView{
+			replicas:      h.replicas,
 			ctx:           h.ctx,
 			pchannel:      h.pchannel,
 			shardID:       shardID,
@@ -294,4 +302,9 @@ func (h *SNQueryViewHandler) acquireUpViewForSchema(ctx context.Context, shardID
 			return nil, ctx.Err()
 		}
 	}
+}
+
+// WatchReplicas observes local eligibility without acquiring any View lease.
+func (h *SNQueryViewHandler) WatchReplicas() *replicadiscovery.Watch {
+	return h.replicas.Watch()
 }

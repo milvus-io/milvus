@@ -15,14 +15,33 @@ activation, complete DataView publication and read-schema publication ordering
 remain integration work. The generic `NewViewQueryClient` staged API also exists,
 but its field-name-to-ID wiring still has TODOs; it is not the production entry.
 
+The injected QN transport must opt into `contextutil.WithFailFastPick`, disable
+hidden same-node gRPC retries, and wrap a missing session with
+`viewerror.NodeSessionUnavailable`. Capture its `Changed` channel before dispatch
+so a racing resolver update cannot be lost. The QN session observer/transport
+implementation and Proxy ownership wiring remain in the parent integration;
+this branch supplies their contracts and verifies retry behavior through injection.
+The owner must call `Client.Close` before closing its handler clients.
+
 ## Planning, dispatch and retries
 
-For each resolved vchannel, Phase 1 targets the primary StreamingNode using
-`UnknownReplicaID`. The returned plan supplies the actual shard/replica identity.
+For each resolved VChannel, the client retains one replica subscription from the
+primary StreamingNode. Its callback updates a local route snapshot and wakes
+queries without per-VChannel workers. The client round-robins explicit ReplicaIDs;
+there is no UnknownReplicaID fallback. Invalid/uninitialized and authoritative
+empty directories wait for discovery under the request context. `Client.Close`
+unsubscribes and wakes waiters before the underlying handler clients shut down.
+TODO: reclaim idle route subscriptions together with Proxy metadata GC.
+
+Phase 1 still targets the primary WAL owner. The advertised maximum Up version
+is only a routing-change hint; SN selects the highest Up View matching the request
+schema within the requested replica. The returned plan supplies the exact version.
 Strong and Session are sent as Strong; Bounded, Eventually and Customized retain their enum
 values. Strong/Session waits for completed writes; Eventually reuses the current complete
-snapshot, and Bounded also enforces the request guarantee timestamp. All use primary-WAL planning. The presence of
-`GetMVCCTimestamp` does not implement secondary replica selection.
+snapshot, and Bounded also enforces the request guarantee timestamp. Customized
+preserves its guarantee as a lower bound for both frontiers, using a scoped
+barrier when necessary. All use primary-WAL planning. The presence of
+`GetMVCCTimestamp` does not implement WAL-secondary routing.
 
 Phase 2 sends `SearchOnView` or `QueryOnView` concurrently to every worker in the
 plan. Requests retain the plan's View version and `QueryPlanMVCC`. The legacy
@@ -35,13 +54,46 @@ A retryable View error restarts the shard from Phase 1. The client first cancels
 and joins all workers in that attempt, then clears the shard's partial results.
 A response completing after cancellation therefore cannot leak into the next
 attempt. Other shards retain their results. The caller context bounds all
-attempts; errors outside the View retry policy are returned to the caller.
+attempts; non-retryable errors are returned to the caller.
 
 `handler.QueryViewClient` owns SN assignment lookup and RPC readiness handling.
 WAL shutdown/NotPrimary errors wait for routing or readiness; View errors return
-to query orchestration. gRPC WaitForReady applies to the query services.
+to query orchestration. SN services retain WAL readiness handling. The injected QN transport is required to use
+an explicit fail-fast picker mode and disable hidden same-node gRPC retries;
+ordinary WAL RPCs keep their existing picker behavior.
 `UpRecovering` waits inside the SN handler for local state notifications, under
 the same caller deadline, rather than repeatedly generating plans.
+
+QN transport Unavailable and retryable View errors trigger shard replanning.
+Every current candidate is tried before repeating a temporarily failed one.
+The existing attempt budget defaults to three, extended to cover all untried
+current candidates; exhausting it returns the original failure to Proxy's outer
+recovery (including AutoLoad). Waiting for an empty/uninitialized directory does
+not consume attempts. After all temporary candidates fail, wait 100 ms or a
+route change before retrying. Request cancellation bounds all waits.
+
+A QN missing from the session resolver is not retried on that timer. Record the
+node and the attempted replica/advertised version; try other replicas, or wait
+for a new maximum Up version or QN session-directory revision. A newly planned
+View still containing a known missing QN is rejected before accepting inline SN
+results or dispatching workers. The parent QN client uses a single shared session observer to broadcast
+resolver revisions without copying topology or creating per-query watches.
+Capture its change channel before RPC dispatch; resolver changes racing with
+failure cannot be lost. On a revision, clear request-local exclusions and
+reconsider candidates: apparent absence may have been discovery lag, rather
+than permanent removal. Missing/temporarily disconnected nodes always fail
+promptly at the QN picker; no dead RPC is kept waiting for readiness.
+
+Retries clear partial results only after canceled workers have joined. Statistics
+also clears its inline SN count. Explicit paired MVCC and BarrierMVCC remain
+unchanged across replicas; ordinary consistency may resample on the same primary
+WAL. Other successful shards are retained.
+
+For [segment pruning](segment_pruning.md), each worker receives its own selection
+and hybrid subqueries retain separate selections. Requery uses the original
+selection union. Successful empty shards still contribute an empty result and
+MVCC; fieldless aggregation results use the schema-aware identity (for example,
+count=0). Only the successful attempt's ExecutionSummary contributes feature usage.
 
 ## Reduction and retained requery
 
@@ -113,3 +165,12 @@ both the SN sample and all partial QN counts, and restarts at SN. Other shards
 retain successful results. Empty and growing-only shards still retain the SN
 result even when there are no QN workers. Errors use existing View RPC status
 handling; the new response carries only a successful row count.
+
+## StreamingNode replica discovery
+
+[Replica Discovery](replica_discovery.md) defines the resumable, PChannel-multiplexed
+VChannel Watch exposed by ViewQueryService. It supplies each candidate ReplicaID
+and its maximum locally Up QueryViewVersion, including updates when only the
+version changes. These versions are routing hints, not pinned query versions;
+QueryViewClient uses this directory for explicit selection and failover as
+described above. Discovery itself does not choose or pin a query View.

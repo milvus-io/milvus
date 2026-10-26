@@ -338,6 +338,8 @@ message QueryPlan {
 // Implemented by both StreamingNode and QueryNode.
 // Each node determines which segments to query based on the view version.
 service ViewQueryService {
+    // StreamingNode only: latest locally Up replicas for subscribed VChannels.
+    rpc WatchVChannelReplicas(stream WatchVChannelReplicasRequest) returns (stream WatchVChannelReplicasResponse) {}
     // SearchOnView executes a vector search on segments belonging to the given view version.
     rpc SearchOnView(SearchOnViewRequest) returns (SearchOnViewResponse) {}
     // QueryOnView executes a query (retrieve by expression) on segments belonging to the given view version.
@@ -396,4 +398,32 @@ message QueryPayloadReuse {
     bool serialized_expr_plan = 2;
     // Positional, parallel to SearchRequest.sub_reqs.
     repeated QueryPayloadReuse sub_requests = 3;
+}
+
+
+message WatchVChannelReplicasRequest {
+    string vchannel = 1;
+    bool unsubscribe = 2;
+}
+
+message VChannelReplicas {
+    string vchannel = 1;
+    // Complete replacement, including an empty set. Does not certify QN health
+    // or the availability of a particular schema version.
+    repeated Replica replicas = 2;
+
+    // VChannel plus replica_id identifies the shard. No full View is replicated.
+    message Replica {
+        int64 replica_id = 1;
+        QueryViewVersion max_up_view_version = 2;
+    }
+}
+
+message WatchVChannelReplicasResponse {
+    oneof response {
+        // First response, after validating the PChannel owner/term.
+        bool ready = 1;
+        VChannelReplicas snapshot = 2;
+        string unsubscribed_vchannel = 3;
+    }
 }

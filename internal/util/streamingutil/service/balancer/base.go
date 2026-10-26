@@ -27,6 +27,8 @@ import (
 )
 
 type PickerBuildInfo struct {
+	// Err preserves aggregate connection failures for ordinary callers.
+	Err error
 	// ReadySCs is a map from all ready SubConns to the Addresses can be used.
 	ReadySCs map[balancer.SubConn]base.SubConnInfo
 

@@ -422,13 +422,16 @@ For detailed per-node state machine analysis (entry conditions, automatic behavi
 
 ### Current primary routing
 
-The query client always targets the primary SN by vchannel. Strong and Session
+The query client discovers eligible replicas through the primary SN's
+[replica directory](query/replica_discovery.md), selects an explicit ReplicaID,
+and still plans through that primary WAL owner. Strong and Session
 are sent as Strong; Bounded and Eventually preserve the requested enum.
 `wal/adaptor/query_plan.go` reads paired frontiers from one complete RW WAL
 prefix and rejects non-RW WALs with NotPrimary. Strong/Session covers completed
 writes, Eventually can reuse the current complete snapshot, and Bounded also
 requires coverage of its guarantee timestamp. `GetMVCCTimestamp`
-also requires RW access. Secondary replica selection remains future work.
+also requires RW access. WAL-secondary routing remains future work; QueryView replicas on the current
+owner are selected explicitly and support shard-level failover.
 
 Explicit executor MVCC and scalar BarrierMVCC have distinct contracts; see
 [Query plan](query/query_plan.md). CAS uses the ordinary Strong snapshot with

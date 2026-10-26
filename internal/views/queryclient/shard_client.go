@@ -3,12 +3,17 @@ package queryclient
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	"github.com/milvus-io/milvus/internal/views/queryclient/reducer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/replicadiscovery"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -24,6 +29,7 @@ import (
 // in what request goes into the GetQueryPlanRequest and which Phase 2 RPC is called.
 type shardViewQueryClient struct {
 	maxRetries         int
+	replicas           *replicaRouter
 	queryPlanClient    QueryPlanClient
 	queryServiceClient ViewQueryServiceClient
 }
@@ -35,6 +41,7 @@ func newShardViewQueryClient(
 ) *shardViewQueryClient {
 	return &shardViewQueryClient{
 		maxRetries:         maxRetries,
+		replicas:           newReplicaRouter(queryPlanClient),
 		queryPlanClient:    queryPlanClient,
 		queryServiceClient: queryServiceClient,
 	}
@@ -147,40 +154,58 @@ type shardExecParams struct {
 	// consumeResponse accepts inline SN results before worker dispatch.
 	consumeResponse func(*viewpb.GetQueryPlanResponse) error
 	// dispatchNode executes a Phase 2 RPC on a single work node.
-	// Called concurrently for each work node in the plan, with per-node retry
-	// for non-ViewError transient failures.
+	// Called concurrently for each work node in the plan.
 	dispatchNode func(ctx context.Context, node qviews.WorkNode, plan *viewpb.QueryPlan, shardID qviews.ShardID) error
 	// resetShard resets the reducer state for the given shard on retry.
 	resetShard func(shardID qviews.ShardID)
 }
 
 // executeShard runs Phase 1 + Phase 2 for a single shard with retry.
-// The client always targets the primary replica; the real replica ID is
-// learned from the Phase 1 plan and used for Phase 2.
+// Candidates come from the WAL owner directory. GetQueryPlan selects the
+// exact-schema View within the explicitly selected replica.
 //
 // Shard-level retry handles ViewErrors (view invalidated, not found, etc.).
-// Per-node retry within fanOutToWorkNodes handles transient non-view errors.
+// Transport unavailability also restarts the shard on another candidate.
 func (s *shardViewQueryClient) executeShard(
 	ctx context.Context,
 	vchannel string,
 	params *shardExecParams,
 ) (*ShardPlan, error) {
 	var lastErr error
-
-	for attempt := 0; attempt < s.maxRetries; attempt++ {
+	route, err := s.replicas.route(vchannel)
+	if err != nil {
+		return nil, err
+	}
+	tried := make(map[replicadiscovery.Replica]bool)
+	deadNodes := make(map[int64]struct{})
+	var sessionChanged <-chan struct{}
+	for attempt := 0; ; attempt++ {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
+		if s.maxRetries > 0 && attempt >= s.maxRetries && !route.hasUntried(tried) {
+			return nil, lastErr
+		}
 
-		// Before Phase 1 the client only knows the vchannel; the replica ID is
-		// unknown and is echoed back by the plan for Phase 2.
-		targetShardID := qviews.ShardID{ReplicaID: qviews.UnknownReplicaID, VChannel: vchannel}
+		candidate, sessionsUpdated, err := route.nextReplica(ctx, tried, sessionChanged)
+		if sessionsUpdated {
+			clear(deadNodes)
+			clear(tried)
+			sessionChanged = nil
+			attempt--
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		tried[candidate] = false
+		targetShardID := qviews.ShardID{ReplicaID: candidate.ReplicaID, VChannel: vchannel}
 
 		// Phase 1: GetQueryPlan with consistency routing.
 		planReq := params.buildPlanReq(targetShardID)
 		response, err := s.executeGetQueryPlan(ctx, targetShardID, planReq, params)
 		if err != nil {
-			if ve := viewerror.AsViewError(err); ve != nil && ve.IsRetryable() {
+			if retryableQueryError(err) {
 				lastErr = err
 				continue
 			}
@@ -190,6 +215,21 @@ func (s *shardViewQueryClient) executeShard(
 		plan := response.GetPlan()
 		if err := qviews.RestoreQueryPlanPayloads(plan, planReq); err != nil {
 			return nil, err
+		}
+		// A newer advertised version does not certify removal of a dead QN.
+		// Recheck the actual exact-schema plan before accepting inline results.
+		blocked := false
+		for _, worker := range plan.GetWorkNodes() {
+			if qn := worker.GetQueryNode(); qn != nil {
+				if _, dead := deadNodes[qn.GetNodeId()]; dead {
+					blocked = true
+					break
+				}
+			}
+		}
+		if blocked {
+			tried[candidate] = true
+			continue
 		}
 		if params.consumeResponse != nil {
 			if err := params.consumeResponse(response); err != nil {
@@ -202,8 +242,20 @@ func (s *shardViewQueryClient) executeShard(
 		// Phase 2: Fan out to all work nodes concurrently.
 		err = s.fanOutToWorkNodes(ctx, workNodes, plan, shardID, params.dispatchNode)
 		if err != nil {
-			if ve := viewerror.AsViewError(err); ve != nil && ve.IsRetryable() {
+			if retryableQueryError(err) {
 				lastErr = err
+				var failed *workNodeFailure
+				var sessionError *viewerror.NodeSessionUnavailable
+				missingSession := errors.As(err, &sessionError)
+				if errors.As(err, &failed) && (missingSession || picker.IsErrSubConnNoExist(failed.err)) {
+					if node, ok := failed.node.(qviews.QueryNode); ok {
+						deadNodes[node.ID] = struct{}{}
+						if missingSession && sessionChanged == nil {
+							sessionChanged = sessionError.Changed
+						}
+						tried[candidate] = true
+					}
+				}
 				params.resetShard(shardID)
 				continue
 			}
@@ -219,13 +271,12 @@ func (s *shardViewQueryClient) executeShard(
 			ExecutionSummary: response.GetExecutionSummary(),
 		}, nil
 	}
-	return nil, lastErr
 }
 
 // executeGetQueryPlan handles consistency-level routing and dispatches Phase 1.
 //
-// The client always targets the primary replica, so strong consistency is
-// satisfied directly by the primary's WAL:
+// All replicas are planned on the primary WAL owner, so strong consistency
+// is satisfied directly by that WAL:
 //   - Strong/Session: GetQueryPlan(consistency_level=Strong)
 //   - Bounded/Eventually: GetQueryPlan(consistency_level=...) — SN generates MVCC from WAL
 func (s *shardViewQueryClient) executeGetQueryPlan(
@@ -261,8 +312,8 @@ func (s *shardViewQueryClient) executeGetQueryPlan(
 // and in-flight RPCs on other nodes are aborted. The caller (executeShard) then
 // retries the entire shard.
 //
-// Per-node transient retry (network timeout, etc.) is handled by the
-// ViewQueryServiceClient implementation, not here.
+// QN connection failures return promptly for replica reselection. SN assignment
+// readiness remains owned by its WAL handler.
 func (s *shardViewQueryClient) fanOutToWorkNodes(
 	ctx context.Context,
 	workNodes []qviews.WorkNode,
@@ -274,7 +325,10 @@ func (s *shardViewQueryClient) fanOutToWorkNodes(
 	for _, node := range workNodes {
 		node := node
 		g.Go(func() error {
-			return dispatchNode(gCtx, node, plan, shardID)
+			if err := dispatchNode(gCtx, node, plan, shardID); err != nil {
+				return &workNodeFailure{node: node, err: err}
+			}
+			return nil
 		})
 	}
 	return g.Wait()
@@ -324,4 +378,19 @@ func workNodesFromPlan(plan *viewpb.QueryPlan) []qviews.WorkNode {
 		}
 	}
 	return nodes
+}
+
+// workNodeFailure retains the worker identity without masking its error code.
+type workNodeFailure struct {
+	node qviews.WorkNode
+	err  error
+}
+
+func (e *workNodeFailure) Error() string { return e.err.Error() }
+func (e *workNodeFailure) Unwrap() error { return e.err }
+func retryableQueryError(err error) bool {
+	if ve := viewerror.AsViewError(err); ve != nil && ve.IsRetryable() {
+		return true
+	}
+	return status.Code(err) == codes.Unavailable
 }

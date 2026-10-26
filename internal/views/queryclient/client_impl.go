@@ -17,7 +17,7 @@ const defaultMaxRetries = 3
 
 // ViewQueryClientConfig holds configuration for the ViewQueryClient.
 type ViewQueryClientConfig struct {
-	MaxRetries int // Maximum per-shard retries on retryable errors. 0 uses default (3).
+	MaxRetries int // Maximum per-shard attempts; zero defaults to 3. At least one full candidate pass is allowed.
 }
 
 // viewQueryClientImpl implements ViewQueryClient.
@@ -30,7 +30,7 @@ type ViewQueryClientConfig struct {
 // Execution stages for Query:  Plan → Search → [Requery] → Render
 type viewQueryClientImpl struct {
 	shardClient            *shardViewQueryClient
-	legacyClient           LegacyClient
+	legacyClient           *legacyClient
 	shardResolver          resolver.ShardResolver
 	fieldFetchPlanner      FieldFetchPlanner
 	rerankerBuilder        reranker.Builder
@@ -301,4 +301,9 @@ func (c *viewQueryClientImpl) queryAllShards(
 		return nil, err
 	}
 	return shardPlans, nil
+}
+
+func (c *viewQueryClientImpl) Close() {
+	c.shardClient.replicas.Close()
+	c.legacyClient.shardClient.replicas.Close()
 }

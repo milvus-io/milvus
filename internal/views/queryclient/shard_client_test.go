@@ -14,6 +14,7 @@ import (
 )
 
 func TestShardSearchReturnsQueryPlanMVCCForRequery(t *testing.T) {
+	setupTestReplicaRouting(t)
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	mvcc := &viewpb.QueryPlanMVCC{
 		GrowingTimetick:      100,
@@ -72,6 +73,7 @@ func TestShardSearchReturnsQueryPlanMVCCForRequery(t *testing.T) {
 }
 
 func TestSessionSearchOnPrimaryLetsSNGenerateQueryPlanMVCC(t *testing.T) {
+	setupTestReplicaRouting(t)
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	planClient := &fakeQueryPlanClient{
 		plan: newTestSearchQueryPlan(shardID, &viewpb.QueryPlanMVCC{
@@ -103,8 +105,9 @@ func TestSessionSearchOnPrimaryLetsSNGenerateQueryPlanMVCC(t *testing.T) {
 }
 
 func TestStrongSearchAlwaysTargetsPrimary(t *testing.T) {
+	setupTestReplicaRouting(t)
 	vchannel := "by-dev-rootcoord-dml_0_100v0"
-	primaryShardID := qviews.ShardID{ReplicaID: qviews.UnknownReplicaID, VChannel: vchannel}
+	primaryShardID := qviews.ShardID{ReplicaID: 1, VChannel: vchannel}
 	planClient := &fakeQueryPlanClient{plan: newTestSearchQueryPlan(primaryShardID, &viewpb.QueryPlanMVCC{
 		GrowingTimetick:      100,
 		TransformingTimetick: 90,
@@ -137,6 +140,7 @@ func TestStrongSearchAlwaysTargetsPrimary(t *testing.T) {
 }
 
 type fakeQueryPlanClient struct {
+	QueryPlanClient
 	executionSummary      *viewpb.ExecutionSummary
 	growingInlineResponse *viewpb.GrowingInlineResponse
 	plan                  *viewpb.QueryPlan

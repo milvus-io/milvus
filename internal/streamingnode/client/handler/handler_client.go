@@ -126,7 +126,8 @@ type HandlerClient interface {
 
 	// Close closes the handler client.
 	// It will only stop the underlying service discovery, but don't stop the producer and consumer created by it.
-	// So please close Producer and Consumer created by it before close the handler client.
+	// Close producers and consumers before closing the handler client. Replica discovery
+	// and its shared callback dispatchers are closed automatically.
 	Close()
 }
 
