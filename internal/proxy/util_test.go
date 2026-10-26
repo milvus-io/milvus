@@ -2552,6 +2552,50 @@ func Test_validateMaxCapacityPerRow(t *testing.T) {
 	})
 }
 
+func Test_validateMaxLengthPerRow(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("normal case", func(t *testing.T) {
+		err := validateMaxLengthPerRow("collection", &schemapb.FieldSchema{
+			Name:     "field",
+			DataType: schemapb.DataType_VarChar,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MaxLengthKey,
+					Value: "100",
+				},
+			},
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("max length not int", func(t *testing.T) {
+		err := validateMaxLengthPerRow("collection", &schemapb.FieldSchema{
+			Name:     "arr",
+			DataType: schemapb.DataType_VarChar,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.MaxLengthKey,
+					Value: "()",
+				},
+			},
+		})
+		// A malformed max_length must surface as an invalid-parameter error (1100)
+		// that names the field and the parameter, not a raw strconv error (65535).
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "max_length")
+		assert.Contains(t, err.Error(), "arr")
+	})
+
+	t.Run("no max length", func(t *testing.T) {
+		err := validateMaxLengthPerRow("collection", &schemapb.FieldSchema{
+			Name:     "field",
+			DataType: schemapb.DataType_VarChar,
+		})
+		assert.Error(t, err)
+	})
+}
+
 func TestAppendUserInfoForRPC(t *testing.T) {
 	ctx := GetContext(context.Background(), "root:123456")
 	ctx = AppendUserInfoForRPC(ctx)
