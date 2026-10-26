@@ -17,13 +17,15 @@
 //go:build test
 // +build test
 
-package dedup
+package pkindex
 
 import (
 	"context"
 	"sync"
 
 	"github.com/cockroachdb/errors"
+
+	"github.com/milvus-io/milvus/internal/pkindex/engine"
 )
 
 // This file is compiled only with the "test" build tag. It provides an in-memory
@@ -67,7 +69,7 @@ func (e *memoryEngine) MultiGet(_ context.Context, keys [][]byte) ([][]byte, err
 	return values, nil
 }
 
-func (e *memoryEngine) Write(_ context.Context, muts []Mutation) error {
+func (e *memoryEngine) Write(_ context.Context, muts []engine.Mutation) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed {

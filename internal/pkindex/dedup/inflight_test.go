@@ -28,20 +28,22 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/internal/pkindex/engine"
 )
 
-// hookStore runs beforeMultiGet before each engine probe, to place observe
+// hookEngine runs beforeMultiGet before each engine probe, to place observe
 // between the in-flight set read and the engine read of a decision.
-type hookStore struct {
-	Store
+type hookEngine struct {
+	engine.RW
 	beforeMultiGet func()
 }
 
-func (a *hookStore) MultiGet(ctx context.Context, pks []PK) ([]*Entry, error) {
+func (a *hookEngine) MultiGet(ctx context.Context, keys [][]byte) ([][]byte, error) {
 	if a.beforeMultiGet != nil {
 		a.beforeMultiGet()
 	}
-	return a.Store.MultiGet(ctx, pks)
+	return a.RW.MultiGet(ctx, keys)
 }
 
 // Registration races with observe. A write of p was appended (filled in, tt 10)
@@ -58,10 +60,8 @@ func TestRegistrationRacesWithObserve(t *testing.T) {
 		{"observe between the set read and the engine read", false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			a, err := NewStore("v1")
-			require.NoError(t, err)
-			hook := &hookStore{Store: a}
-			d := New(hook)
+			hook := &hookEngine{RW: NewMemoryEngine()}
+			d := New(hook, Config{})
 			defer d.Close()
 
 			first, _ := decideInsert(t, d, 1)
@@ -125,7 +125,7 @@ func TestFillInAndObserveOrder(t *testing.T) {
 	t.Run("uncertain mark after observe passed its time tick", func(t *testing.T) {
 		var s inflightSet
 		w, _ := s.register(pks)
-		s.observeTimeTick(10)
+		s.observe(10, nil)
 		s.markUncertain(w, 10)
 		require.Equal(t, 0, s.len())
 		require.Empty(t, s.uncertain)
@@ -136,7 +136,7 @@ func TestFillInAndObserveOrder(t *testing.T) {
 		s.markUncertain(w, 10)
 		require.Equal(t, 2, s.len())
 		require.Len(t, s.uncertain, 1)
-		s.observeTimeTick(10)
+		s.observe(10, nil)
 		require.Equal(t, 0, s.len())
 		require.Empty(t, s.uncertain)
 	})
@@ -472,9 +472,7 @@ func BenchmarkInflightLock(b *testing.B) {
 	} {
 		b.Run(c.name, func(b *testing.B) {
 			ctx := context.Background()
-			a, err := NewStore("v1")
-			require.NoError(b, err)
-			d := New(a)
+			d := New(NewMemoryEngine(), Config{})
 			defer d.Close()
 
 			var next, tt atomic.Uint64
@@ -587,20 +585,17 @@ func BenchmarkWritePathOf1000Keys(b *testing.B) {
 		}
 	})
 	b.Run("probe", func(b *testing.B) {
-		a, err := NewStore("v1")
-		require.NoError(b, err)
-		defer a.Close()
+		eng := NewMemoryEngine()
+		defer eng.Close()
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			if _, err := a.MultiGet(context.Background(), batches[i%len(batches)]); err != nil {
+			if _, err := lookup(context.Background(), eng, batches[i%len(batches)]); err != nil {
 				b.Fatal(err)
 			}
 		}
 	})
 	b.Run("decision", func(b *testing.B) {
-		a, err := NewStore("v1")
-		require.NoError(b, err)
-		d := New(a).(*decider)
+		d := New(NewMemoryEngine(), Config{}).(*decider)
 		defer d.Close()
 		ctx := context.Background()
 		b.ReportAllocs()

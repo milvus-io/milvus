@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/milvus-io/milvus/internal/pkindex/dedup"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -37,7 +36,7 @@ var _ interceptors.InterceptorBuilder = (*interceptorBuilder)(nil)
 // misconfigured streaming node fails at start instead of writing without the index.
 func NewInterceptorBuilder() interceptors.InterceptorBuilder {
 	enabled := &paramtable.Get().StreamingCfg.PKIndexEnabled
-	if enabled.GetAsBool() && !dedup.HasEngineFactory() {
+	if enabled.GetAsBool() && !HasEngineFactory() {
 		panic(enabled.Key + " is true but this binary has no primary key index engine")
 	}
 	return &interceptorBuilder{}

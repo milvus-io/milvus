@@ -112,20 +112,20 @@ in `docs/agent_guides/streaming-system/wal/timetick_and_txn.md`.
 ```
 internal/streamingnode/server/wal/interceptors/pkindex   the interceptor (a thin shell)
         │ translates WAL messages into DecideRequests, appends what the Decider asks for
+        │ creates the engine of each vchannel (in-memory in this step)
         ▼
 internal/pkindex/dedup                                   the write path decision
         │ Decider: in-flight set (also the key lock), probe, pending writes of transactions
         │ WriteIntent: the decision until Committed, Aborted or InDoubt
-        │ Store: the index of one vchannel, key-value semantics
-        │        (Get, MultiGet, NewBatch, Write)
         ▼
-Engine                                                   the storage behind it
-                                                         (in-memory in this step)
+internal/pkindex/engine                                  the storage behind it
+                                                         (engine.RW: MultiGet, Write)
 ```
 
 The package `internal/pkindex/dedup` holds the index logic and does not depend
-on the WAL. The interceptor is the only place that knows both
-sides.
+on the WAL. The interceptor is the only place that knows both sides. The
+Decider only reads the engine of its vchannel. It does not own the engine: the
+caller creates it, and closes it after the Decider.
 
 The primary key payload of a message is read by `wal/utility/primarykey`. It
 checks the payload the way the write path needs it: a bad message gets an
@@ -436,7 +436,7 @@ insert, so WAL record and byte counts under-report such an append.
 
 ## Test plan
 
-- Unit tests of the helper, the Store, the Decider and the interceptor,
+- Unit tests of the helper, the Decider and the interceptor,
   with a fake append operation.
 - Tests on the real interceptor chain (`wal/adaptor`): the consumer sees one
   transaction with the insert and the companion delete at the TimeTick of the

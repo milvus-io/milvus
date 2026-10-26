@@ -22,20 +22,30 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/cockroachdb/errors"
+
+	pkroot "github.com/milvus-io/milvus/internal/pkindex"
+	"github.com/milvus-io/milvus/internal/pkindex/engine"
 )
 
-// decider makes the write path decisions of one vchannel on top of its Store.
+// decider makes the write path decisions of one vchannel on top of its
+// engine.
 //
-// The decider never writes the engine. A decided write is kept in an in-flight
-// set from before its append until observe applied it to the engine. Observe is
-// the single writer of the engine, for the replay at WAL open and for the live
+// The decider never writes the engine. A decided write is kept in an
+// in-flight set from before its append until the observe of the WAL recovery
+// applied it to the engine and reported that with Observe. The observe is the
+// single writer of the engine, for the replay at WAL open and for the live
 // messages alike.
 //
 // TODO: duplicate primary keys inside one insert are not detected.
-// TODO: observe does not apply the WAL to the engine yet, so a decided write stays
-// in the in-flight set for the life of the index. The recovery step adds observe.
+// TODO: the observe does not apply the WAL to the engine yet, so a decided
+// write stays in the in-flight set for the life of the index. The recovery
+// change adds the observe.
 type decider struct {
-	store    Store
+	eng      engine.RW
+	degraded func() bool
+	closed   atomic.Bool
 	inflight inflightSet
 	// degradedUntil is the time tick before which this vchannel is degraded: while
 	// observe has not reached it, every key counts as present and the engine is
@@ -48,11 +58,13 @@ type decider struct {
 	pending   map[int64]*pendingTxn
 }
 
-// New creates the Decider of a vchannel. It takes ownership of a.
-func New(a Store) Decider {
+// New creates the Decider of a vchannel over its engine. It does not own
+// the engine: the caller closes it, after Close.
+func New(eng engine.RW, cfg Config) Decider {
 	return &decider{
-		store:   a,
-		pending: make(map[int64]*pendingTxn),
+		eng:      eng,
+		degraded: cfg.Degraded,
+		pending:  make(map[int64]*pendingTxn),
 	}
 }
 
@@ -78,18 +90,41 @@ func (d *decider) DegradeUntil(tt uint64) {
 	}
 }
 
-func (d *decider) degraded() bool {
+// isDegraded reports whether a decision treats every key as present: the
+// committed table set is not installed (Config.Degraded), or the observe has
+// not reached the time tick of DegradeUntil.
+func (d *decider) isDegraded() bool {
+	if d.degraded != nil && d.degraded() {
+		return true
+	}
 	return d.inflight.observedTimeTick() < d.degradedUntil.Load()
 }
 
-func (d *decider) Decide(ctx context.Context, req DecideRequest) (*WriteIntent, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-d.store.Ready():
-	}
+// Observe tells the decider that the observe of the WAL recovery applied
+// every write up to tt to the engine. pks are the keys of the write at tt, none
+// for a TimeTick. It removes the filled-in entries of pks from the in-flight
+// set (rule A: the engine first, then the set), raises the observed time tick
+// and removes the entries with an unknown outcome that it passed. The pchannel
+// calls it for every index when its driver wakes, so an idle vchannel sheds
+// them too.
+func (d *decider) Observe(tt uint64, pks []PK) {
+	d.inflight.observe(tt, pks)
+}
 
-	intent := &WriteIntent{d: d, req: req}
+func (d *decider) Decide(ctx context.Context, req DecideRequest) (*WriteIntent, error) {
+	if d.closed.Load() {
+		return nil, errClosed(req.VChannel)
+	}
+	return d.decide(ctx, &WriteIntent{d: d, req: req})
+}
+
+// errClosed reports a Decide after Close.
+func errClosed(vchannel string) error {
+	return errors.Mark(errors.Wrapf(engine.ErrClosed, "primary key index of vchannel %s is closed", vchannel), pkroot.ErrUnavailable)
+}
+
+func (d *decider) decide(ctx context.Context, intent *WriteIntent) (*WriteIntent, error) {
+	req := intent.req
 	switch {
 	case req.Kind == KindRollbackTxn:
 		return intent, nil
@@ -152,7 +187,7 @@ func (d *decider) present(ctx context.Context, w *inflightWrite, pks []PK) ([]PK
 	if len(pks) == 0 {
 		return nil, nil
 	}
-	if d.degraded() {
+	if d.isDegraded() {
 		return slices.Clone(pks), nil
 	}
 	inSet := d.inflight.presentBefore(w)
@@ -190,7 +225,7 @@ func (d *decider) probe(ctx context.Context, pks []PK) ([]PK, error) {
 	if len(pks) == 0 {
 		return nil, nil
 	}
-	entries, err := d.store.MultiGet(ctx, pks)
+	entries, err := lookup(ctx, d.eng, pks)
 	if err != nil {
 		return nil, err
 	}
@@ -219,8 +254,8 @@ func (d *decider) DropTxn(txnID int64) {
 	delete(d.pending, txnID)
 }
 
-func (d *decider) Close() error {
-	return d.store.Close()
+func (d *decider) Close() {
+	d.closed.Store(true)
 }
 
 // register adds the keys of this write to the in-flight set and waits for the
