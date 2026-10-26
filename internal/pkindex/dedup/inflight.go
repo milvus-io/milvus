@@ -47,6 +47,9 @@ type inflightSet struct {
 	keys map[uint64][]*inflightWrite // lock key -> writes in registration order
 	// observed is the highest time tick that observe has applied to the engine.
 	observed uint64
+	// raised is closed and replaced by nil when observed rises, which wakes the
+	// waits of waitObserved. It is nil while nobody waits.
+	raised chan struct{}
 	// uncertain holds the writes whose append failed with an unknown outcome.
 	// Observe removes them by time tick, because such a write may never reach
 	// the WAL and then observe never meets its keys.
@@ -215,10 +218,39 @@ func (s *inflightSet) observe(tt uint64, pks []PK) {
 	}
 }
 
-// raiseObservedLocked stores tt as the observed time tick unless it is lower.
+// raiseObservedLocked stores tt as the observed time tick unless it is lower,
+// and wakes the waits of waitObserved.
 func (s *inflightSet) raiseObservedLocked(tt uint64) {
 	if tt > s.observed {
 		s.observed = tt
+		if s.raised != nil {
+			close(s.raised)
+			s.raised = nil
+		}
+	}
+}
+
+// waitObserved blocks until the observed time tick is at least tt, ctx ends or
+// stop is closed.
+func (s *inflightSet) waitObserved(ctx context.Context, tt uint64, stop <-chan struct{}, vchannel string) error {
+	for {
+		s.mu.Lock()
+		if s.observed >= tt {
+			s.mu.Unlock()
+			return nil
+		}
+		if s.raised == nil {
+			s.raised = make(chan struct{})
+		}
+		raised := s.raised
+		s.mu.Unlock()
+		select {
+		case <-raised:
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-stop:
+			return errClosed(vchannel)
+		}
 	}
 }
 

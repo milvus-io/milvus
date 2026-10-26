@@ -57,6 +57,11 @@ func ObserveTimeTickForTest(d Decider, tt uint64) {
 	d.(*decider).Observe(tt, nil)
 }
 
+// WaitUntilForTest is WaitUntil, for the tests of other packages.
+func WaitUntilForTest(d Decider, tt uint64) {
+	d.(*decider).WaitUntil(tt)
+}
+
 // InflightLenForTest returns the number of entries of the in-flight set.
 func InflightLenForTest(d Decider) int {
 	return d.(*decider).inflight.len()

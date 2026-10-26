@@ -312,6 +312,20 @@ func (i *appendInterceptor) decide(ctx context.Context, t *target, req dedup.Dec
 	start := time.Now()
 	intent, err := t.decider.Decide(ctx, req)
 	if err != nil {
+		// The wait needs observe to advance, which needs the WAL lock that this
+		// interceptor runs under, so the redo interceptor waits outside the lock.
+		var wait *dedup.WaitError
+		if errors.As(err, &wait) {
+			return nil, &interceptors.WaitRequiredError{Wait: func(ctx context.Context) error {
+				if err := wait.Wait(ctx); err != nil {
+					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+						return err
+					}
+					return status.NewInner("primary key index wait failed: %v", err)
+				}
+				return nil
+			}}
+		}
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, err
 		}

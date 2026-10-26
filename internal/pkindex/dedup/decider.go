@@ -47,10 +47,12 @@ type decider struct {
 	degraded func() bool
 	closed   atomic.Bool
 	inflight inflightSet
-	// degradedUntil is the time tick before which this vchannel is degraded: while
-	// observe has not reached it, every key counts as present and the engine is
-	// not probed. See DegradeUntil.
-	degradedUntil atomic.Uint64
+	// waitUntil is the time tick before which the writes of this vchannel wait:
+	// while observe has not reached it, Decide returns a *WaitError. See WaitUntil.
+	waitUntil atomic.Uint64
+	// stop is closed by Close. It ends the waits of WaitError.Wait.
+	stop     chan struct{}
+	stopOnce sync.Once
 
 	// pendingMu guards pending and every pendingTxn in it. No code waits for an
 	// in-flight write while it holds pendingMu.
@@ -64,40 +66,62 @@ func New(eng engine.RW, cfg Config) Decider {
 	return &decider{
 		eng:      eng,
 		degraded: cfg.Degraded,
+		stop:     make(chan struct{}),
 		pending:  make(map[int64]*pendingTxn),
 	}
 }
 
-// DegradeUntil makes the vchannel degraded until observe reaches tt. A degraded
-// decision treats every key as present: an insert gets a companion delete for
-// each of its keys. That is always correct and costs only extra deletes. It
-// never blocks a write.
+// WaitUntil makes the writes of the vchannel wait until observe reaches tt.
+// While observe has not reached it, Decide returns a *WaitError for every write
+// that registers keys, before it registers or probes anything. The caller waits
+// for it outside the WAL lock and decides again. A write that waits gets an
+// exact decision afterwards, not a companion delete for every key.
 //
 // It covers the events that the in-flight set can not cover, because writes that
-// took effect before them did not pass through this decider.
+// took effect before them did not pass through this decider. A not-ready index
+// (Config.Degraded) never waits: it decides degraded.
+//
+// tt must be the time tick of a persisted WAL message, or not above the observed
+// time tick. Only persisted messages move the observed time tick: the applied
+// writes and the persisted TimeTicks. The TimeTick after a persisted message is
+// always persisted, but on an idle vchannel the TimeTicks are not, so a tt of no
+// persisted message makes the writes wait until the next persisted message.
 //
 // TODO: call it when the index of a vchannel is enabled by CreateIndex, with the
 // time tick of that message.
 // TODO: call it when the WAL is promoted from a secondary to a primary, with the
 // time tick of the role switch.
 // TODO: call it when the engine recovers from a failure.
-func (d *decider) DegradeUntil(tt uint64) {
+func (d *decider) WaitUntil(tt uint64) {
 	for {
-		cur := d.degradedUntil.Load()
-		if tt <= cur || d.degradedUntil.CompareAndSwap(cur, tt) {
+		cur := d.waitUntil.Load()
+		if tt <= cur || d.waitUntil.CompareAndSwap(cur, tt) {
 			return
 		}
 	}
 }
 
 // isDegraded reports whether a decision treats every key as present: the
-// committed table set is not installed (Config.Degraded), or the observe has
-// not reached the time tick of DegradeUntil.
+// committed table set is not installed (Config.Degraded), or a WaitUntil raced
+// with this decision after it passed the wait check.
 func (d *decider) isDegraded() bool {
 	if d.degraded != nil && d.degraded() {
 		return true
 	}
-	return d.inflight.observedTimeTick() < d.degradedUntil.Load()
+	return d.inflight.observedTimeTick() < d.waitUntil.Load()
+}
+
+// waitError returns a *WaitError when a write that registers keys must wait for
+// observe, nil otherwise. A not-ready index decides degraded and never waits.
+func (d *decider) waitError(vchannel string) error {
+	if d.degraded != nil && d.degraded() {
+		return nil
+	}
+	target := d.waitUntil.Load()
+	if d.inflight.observedTimeTick() >= target {
+		return nil
+	}
+	return &WaitError{TimeTick: target, d: d, vchannel: vchannel}
 }
 
 // Observe tells the decider that the observe of the WAL recovery applied
@@ -143,6 +167,9 @@ func (d *decider) decide(ctx context.Context, intent *WriteIntent) (*WriteIntent
 		if intent.txn == nil {
 			return intent, nil
 		}
+		if err := d.waitError(req.VChannel); err != nil {
+			return nil, err
+		}
 		// pendingMu must be released before the wait: a body of another
 		// transaction takes pendingMu in Committed.
 		if err := intent.register(ctx, intent.txn.allPKs()); err != nil {
@@ -160,6 +187,9 @@ func (d *decider) decide(ctx context.Context, intent *WriteIntent) (*WriteIntent
 		return intent, nil
 	}
 
+	if err := d.waitError(req.VChannel); err != nil {
+		return nil, err
+	}
 	if err := intent.register(ctx, req.PKs); err != nil {
 		return nil, err
 	}
@@ -256,6 +286,7 @@ func (d *decider) DropTxn(txnID int64) {
 
 func (d *decider) Close() {
 	d.closed.Store(true)
+	d.stopOnce.Do(func() { close(d.stop) })
 }
 
 // register adds the keys of this write to the in-flight set and waits for the
