@@ -314,18 +314,23 @@ func TestImportTaskV3CreateTaskOnWorkerUsesPlanStorageVersion(t *testing.T) {
 	require.Equal(t, storage.StorageV3, meta.GetSegment(ctx, 100).GetStorageVersion())
 }
 
-// TestImportTaskV3AcceptanceNotifiesIndexBuild pins the per-segment index
-// wakeup: accepting a Completed worker result persists the segment as
-// Flushed+IsSorted and must push it to the indexInspector's build channel in
-// the same tick. Without the push, a burst of finishing import tasks leaves
-// every accepted segment waiting for the next TaskCheckInterval (60s) scan,
-// which makes index building effectively start only after the whole merge
-// stage (V2 parity: postFlush and mixCompaction push each finished segment).
+// TestImportTaskV3AcceptanceNotifiesIndexAndStatsBuild pins the per-segment
+// index and stats wakeups: accepting a Completed worker result persists the
+// segment as Flushed+IsSorted and must push it to both the indexInspector's and
+// the statsInspector's build channels in the same tick. Without the index push,
+// a burst of finishing import tasks leaves every accepted segment waiting for
+// the next TaskCheckInterval (60s) scan, which makes index building effectively
+// start only after the whole merge stage (V2 parity: postFlush and
+// mixCompaction push each finished segment). The segment is already sorted, so
+// no sort compaction pushes it to stats discovery; without the stats push its
+// text and JSON key stats wait for the reconcile scan.
 // A zero-row placeholder is dropped at acceptance and must NOT be pushed.
-func TestImportTaskV3AcceptanceNotifiesIndexBuild(t *testing.T) {
+func TestImportTaskV3AcceptanceNotifiesIndexAndStatsBuild(t *testing.T) {
 	ctx := context.Background()
 	drainBuildIndexChForTest()
 	defer drainBuildIndexChForTest()
+	drainStatsBuildChForTest()
+	defer drainStatsBuildChForTest()
 
 	meta, err := newMemoryMeta(t)
 	require.NoError(t, err)
@@ -362,6 +367,7 @@ func TestImportTaskV3AcceptanceNotifiesIndexBuild(t *testing.T) {
 	require.Equal(t, commonpb.SegmentState_Flushed, seg.GetState())
 	require.True(t, seg.GetIsSorted())
 	require.Equal(t, []int64{100}, drainBuildIndexChForTest())
+	require.Equal(t, []int64{100}, drainStatsBuildChForTest())
 
 	// Zero-row result: placeholder dropped at acceptance, nothing pushed.
 	_, err = addImportSegment(ctx, meta, 101, 1, 11, 2, 3, "v0", datapb.SegmentLevel_L1, storage.StorageV2, 0)
@@ -381,6 +387,7 @@ func TestImportTaskV3AcceptanceNotifiesIndexBuild(t *testing.T) {
 
 	require.Equal(t, commonpb.SegmentState_Dropped, meta.GetSegment(ctx, 101).GetState())
 	require.Empty(t, drainBuildIndexChForTest())
+	require.Empty(t, drainStatsBuildChForTest())
 }
 
 func TestReconcileOrphanImportSegments(t *testing.T) {
