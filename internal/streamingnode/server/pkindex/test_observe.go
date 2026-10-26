@@ -57,10 +57,9 @@ func (d *Decider) InflightLenForTest() int {
 // in the in-flight set, or the engine holds it.
 func (d *Decider) PresentForTest(ctx context.Context, pk PK) (bool, error) {
 	key := pk.lockKey()
-	shard := &d.inflight.shards[shardOf(key)]
-	shard.mu.Lock()
-	inSet := len(shard.keys[key]) > 0
-	shard.mu.Unlock()
+	d.inflight.mu.Lock()
+	inSet := len(d.inflight.keys[key]) > 0
+	d.inflight.mu.Unlock()
 	if inSet {
 		return true, nil
 	}

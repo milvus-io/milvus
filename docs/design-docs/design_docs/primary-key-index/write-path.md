@@ -270,13 +270,11 @@ The registration happens before the append because observe can apply a message
 before its append returns to the writer. A registration made after the append
 could stay in the set for ever.
 
-Steps 2 and 3 race. Observe raises the observed TimeTick and then removes the
-entries of that TimeTick. A writer stores its TimeTick in the entry and then
-reads the observed TimeTick. Both use sequentially consistent atomics. So at
-least one side sees the store of the other, and the entry is always removed.
-If either side does the read before the store, an entry can stay for ever.
-A test puts a hook between the store and the read on each side and fails when
-either order is reversed.
+Steps 2 and 3 race. Observe raises the observed TimeTick and removes the
+entries of that TimeTick under the mutex of the set. A writer stores its
+TimeTick in the entry and reads the observed TimeTick under the same mutex. So
+the side that comes second sees the other, and the entry is always removed.
+A test runs both orders and checks that the entry leaves the set.
 
 ### Presence
 
@@ -291,22 +289,21 @@ An entry without a TimeTick is the lock of its keys. The design follows the
 partial update row lock (`wal/interceptors/partialupdate/row_lock.go`) and the
 latch manager of CockroachDB (`spanlatch`):
 
-- A write registers all its keys in one step. It takes the mutexes of all
-  involved shards in ascending shard order. So the registrations of two
-  overlapping writes are totally ordered.
+- A write registers all its keys in one step under the one mutex of the set.
+  So the registrations of two overlapping writes are totally ordered.
 - A write waits only for the last entry without a TimeTick of each key. That
   entry waited for the entries before it. The waits form no cycle, so writes of
   many keys can not deadlock.
 - A write whose context ends while it waits keeps its place in line. It leaves
   after the writes it waited for, so a later write still waits for them.
-- The fill-in stores the TimeTick with one atomic store and closes a channel.
-  It takes no shard mutex. Only a writer that finds that observe passed its
-  TimeTick takes the mutexes, to remove its own entry.
-- The shard mutexes are held only while the maps change, never across an
-  append.
+- The fill-in stores the TimeTick under the mutex and closes a channel after
+  it releases the mutex. A writer that finds that observe passed its TimeTick
+  also removes its own entry under the mutex.
+- The mutex is held only while the map changes, never across an append.
 
-The set has 64 shards. A key of the set is a 64-bit number: the value of an
-int64 primary key, or the 64-bit FNV-1a hash of a VarChar primary key. Two
+The set has one mutex and one map. A key of the set is a 64-bit number: the
+value of an int64 primary key, or the 64-bit FNV-1a hash of a VarChar primary
+key. Two
 VarChar keys with the same hash share one entry. That only adds a wait and a
 companion delete of a key that may not exist. Both are safe. The keys of one
 write are deduplicated after the hash.
@@ -322,25 +319,25 @@ One insert of 1000 new int64 keys, one writer, no contention, Intel i7-8700:
 |---|---|
 | Decode the body and the primary keys (key column only) | 15 µs |
 | Decode the body and the primary keys (with a 128-dim float vector column) | 250 µs |
-| Lock: register, wait, fill in, removal by observe | 193 µs |
-| Decision with the in-memory test engine (lock, set read, probe) | 259 µs |
+| Lock: register, wait, fill in, removal by observe | 173 µs |
+| Decision with the in-memory test engine (lock, set read, probe) | 250 µs |
 | Probe of 1000 keys on the Pebble engine (all miss, 1M keys in the memtable) | 1330 µs |
 
-With the Pebble probe, the lock is about 12% of decode, decision and lock
-(193 of about 1570 µs). With the in-memory test engine it is about 70%.
+With the Pebble probe, the lock is about 11% of decode, decision and lock
+(173 of about 1520 µs). With the in-memory test engine it is about 70%.
 
 Under contention, 32 writers each hold the lock for a simulated 2 ms append.
 The table gives messages per second at `GOMAXPROCS=2`:
 
 | Keys per message | Row lock, exclusive mode | In-flight set |
 |---|---|---|
-| 1 | 14794 | 14516 |
-| 16 | 14341 | 13725 |
-| 100 | 13142 | 11398 |
-| 1000 | 7700 | 4150 |
+| 1 | 14794 | 13692 |
+| 16 | 14341 | 12804 |
+| 100 | 13142 | 11742 |
+| 1000 | 7700 | 4799 |
 
-A write of 1000 keys touches almost all 64 shards. Its registration takes almost
-every shard mutex at the same time, which is the same as a table lock. The set
+The registration of a write of 1000 keys holds the one mutex of the set for
+all 1000 keys, which is the same as a table lock. The set
 also does more work per key than the row lock. So large writes reach about half
 of the row lock throughput. A vchannel-wide lock for writes above some number of
 keys (lock escalation) is an open item.
@@ -412,9 +409,9 @@ insert, so WAL record and byte counts under-report such an append.
 - The total size of the in-flight set has no limit yet. What to do above a
   limit (back pressure or degraded mode) is open.
 - Lock escalation for writes of many keys, and its threshold, are open.
-- An empty shard map is set to nil so that it does not keep its peak memory.
+- An empty map is set to nil so that it does not keep its peak memory.
   Keeping the maps would make the lock of a 1000-key write about 30% faster
-  (140 µs instead of 193 µs).
+  (140 µs instead of 193 µs, measured with the earlier 64-shard set).
 - Rule A needs an engine write to be visible to reads as soon as it returns.
   A test must check this for the Pebble engine when observe writes it.
 - Pending writes of a transaction are not rebuilt at WAL open.

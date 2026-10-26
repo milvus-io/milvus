@@ -61,21 +61,6 @@ func TestPKAccessors(t *testing.T) {
 	require.NotEqual(t, VarCharPK("a").lockKey(), VarCharPK("b").lockKey())
 }
 
-// An int64 key is its own lock key, so keys that are all multiples of the shard
-// count would land on one shard without the mixing of shardOf. Each key pattern
-// must spread over all shards.
-func TestInt64KeysSpreadOverShards(t *testing.T) {
-	for _, multiplier := range []int64{1, 2, 10, 64, 100, 1024} {
-		t.Run("", func(t *testing.T) {
-			shards := make(map[int]struct{}, inflightShardCount)
-			for i := int64(0); i < 100000; i++ {
-				shards[shardOf(Int64PK(multiplier*i).lockKey())] = struct{}{}
-			}
-			require.Len(t, shards, inflightShardCount)
-		})
-	}
-}
-
 // The varchar lock key is FNV-1a 64, written out to avoid a []byte copy.
 func TestVarCharLockKeyIsFNV1a(t *testing.T) {
 	for _, s := range []string{"", "a", "primary key 42"} {
