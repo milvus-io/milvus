@@ -47,31 +47,54 @@ func TestReopenedIndexStartsEmpty(t *testing.T) {
 	idx.reopen(t)
 	require.Empty(t, idx.committer.manifest().Tables)
 
-	assert.Empty(t, idx.eng.FrozenGenerations())
-	assert.NoDirExists(t, idx.committedDir)
+	assert.Empty(t, idx.eng.FrozenGenerations(), "the engine directory is wiped at the open")
 	assert.Zero(t, idx.segmentOf(t, 1), "the old key is gone")
 
 	idx.insert(t, 20, 3)
 	assert.EqualValues(t, 20, idx.segmentOf(t, 3))
 }
 
-// TestLeftoverInCommittedOnlyIsRemovedAtOpen checks that a file left in the
-// committed directory alone, such as a download that did not finish, is
-// removed at open, and the Index starts empty.
-func TestLeftoverInCommittedOnlyIsRemovedAtOpen(t *testing.T) {
+// TestLeftoverInCommittedOnlyIsKeptAtOpen checks that a file left in the
+// committed directory alone survives the open: the install checks the
+// committed directory against the manifest and removes what it does not
+// list, so a restart keeps the tables it already has.
+func TestLeftoverInCommittedOnlyIsKeptAtOpen(t *testing.T) {
+	ctx := context.Background()
 	idx := openTestIndex(t)
-	idx.Close(context.Background())
+	idx.Close(ctx)
 	require.NoError(t, os.RemoveAll(Dir(idx.root, testVChannel)))
 	committed := filepath.Join(Dir(idx.root, testVChannel), "committed")
 	require.NoError(t, os.MkdirAll(committed, 0o755))
-	// a download that did not finish, and no engine directory
 	leftover := filepath.Join(committed, "1001.sst.download-123")
 	require.NoError(t, os.WriteFile(leftover, []byte("partial"), 0o600))
 
 	idx.open(t)
-	assert.NoDirExists(t, committed)
+	assert.FileExists(t, leftover, "the open keeps the committed directory")
 	assert.Empty(t, idx.eng.FrozenGenerations())
 	assert.Zero(t, idx.segmentOf(t, 1))
+	idx.SetCommitted(ManifestView{Version: 1})
+	require.NoError(t, idx.Install(ctx))
+	assert.NoFileExists(t, leftover, "the install removes what the manifest does not list")
+}
+
+func TestOpenKeepsCommittedDirAndWipesEngineDir(t *testing.T) {
+	ctx := context.Background()
+	idx := newTestIndex(t)
+	require.NoError(t, os.MkdirAll(idx.committedDir, 0o755))
+	kept := filepath.Join(idx.committedDir, "7.sst")
+	require.NoError(t, os.WriteFile(kept, []byte("table"), 0o600))
+	idx.insert(t, 1, 5)
+	engineDir := filepath.Join(Dir(idx.root, testVChannel), "engine")
+	idx.Close(ctx) // keeps the files, like a restart
+	require.DirExists(t, engineDir)
+
+	idx.open(t)
+	assert.FileExists(t, kept)
+	idx.MarkReady(ctx)
+	g, err := idx.Decider().Decide(ctx, insertRequest(5))
+	require.NoError(t, err)
+	assert.Empty(t, g.CompanionDeletePKs(), "the engine dir was wiped")
+	g.NotAppended()
 }
 
 // corruptedEngine stands for an engine that finds a damaged table file: every
@@ -184,4 +207,43 @@ func TestInstallIfNewerIgnoresAnOlderVersion(t *testing.T) {
 	assert.Equal(t, paths, idx.installedPaths)
 	assert.Equal(t, tables, idx.eng.Stats().CommittedTables)
 	assert.EqualValues(t, 20, idx.segmentOf(t, 2))
+}
+
+func TestResolveLocalRedownloadsATableWithTheWrongSize(t *testing.T) {
+	ctx := context.Background()
+	idx := newTestIndex(t)
+	// a real table in the store, built by one handover
+	idx.insert(t, 1, 1, 2, 3)
+	idx.observed.Store(12)
+	p, err := idx.prepare(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, p)
+	ref := p.request.AddTables[0]
+	require.NoError(t, idx.store.UploadFile(ctx, pkroot.SSTKey(idx.sstBasePath, int64(ref.ID)), p.local[ref.ID]))
+	// corrupt the local copy: wrong size
+	local := committedPath(idx.committedDir, ref.ID)
+	require.NoError(t, os.WriteFile(local, []byte("short"), 0o600))
+
+	view := ManifestView{Version: 1, SSTBasePath: idx.sstBasePath, CheckpointTimeTick: 11, Tables: []TableRef{ref}}
+	require.NoError(t, idx.installIfNewer(ctx, view, nil))
+	fi, err := os.Stat(local)
+	require.NoError(t, err)
+	assert.Equal(t, ref.Size, fi.Size())
+}
+
+func TestResolveLocalReusesATableWithTheRightSize(t *testing.T) {
+	ctx := context.Background()
+	idx := newTestIndex(t)
+	idx.insert(t, 1, 1, 2, 3)
+	idx.observed.Store(12)
+	p, err := idx.prepare(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, p)
+	ref := p.request.AddTables[0]
+	require.NoError(t, idx.store.UploadFile(ctx, pkroot.SSTKey(idx.sstBasePath, int64(ref.ID)), p.local[ref.ID]))
+	// a download would fail, so the install must use the local file
+	idx.store.FailDownloads(1)
+
+	view := ManifestView{Version: 1, SSTBasePath: idx.sstBasePath, CheckpointTimeTick: 11, Tables: []TableRef{ref}}
+	require.NoError(t, idx.installIfNewer(ctx, view, nil))
 }
