@@ -69,6 +69,9 @@ var (
 	ErrServiceUnimplemented        = newMilvusError("service unimplemented", 10, false)
 	ErrServiceTimeTickLongDelay    = newMilvusError("time tick long delay", 11, false)
 	ErrServiceResourceInsufficient = newMilvusError("service resource insufficient", 12, true)
+	// Missing transaction history cannot establish whether a write committed.
+	// Keep this a non-retriable system error: replay can duplicate the write.
+	ErrServiceWriteOutcomeUnknown = newMilvusError("write outcome is unknown: the write may have completed; verify the result before retrying to avoid duplicate writes", 13, false)
 
 	// Collection related
 	ErrCollectionNotFound                      = newMilvusError("collection not found", 100, false) // SystemError by default: internal retry.Do paths (datacoord handler/recovery) must keep retrying through a transient not-found; the proxy boundary stamps it InputError for users via WrapErrAsInputErrorWhen.
