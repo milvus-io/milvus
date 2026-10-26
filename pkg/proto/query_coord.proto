@@ -1220,5 +1220,4 @@ message GetQueryViewLoadInfoResponse {
     repeated messages.LoadFieldConfig load_fields = 5;
     repeated index.IndexInfo index_info_list = 6;
     repeated messages.LoadFieldConfig required_fields = 7;
-    bool skip_load_dynamic_field = 8;
 }

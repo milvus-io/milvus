@@ -52,9 +52,13 @@ This PR does not copy QN loaders, ReadState management or native implementation.
   publication of an ordered complete WAL prefix after request-scoped TSO
   admission. The query runtime must then apply the fixed Growing/Transform
   frontiers. WAL-owner cancellation allows replanning on the replacement owner.
-- Load scope: GetQueryViewLoadInfoResponse carries required_fields and
-  skip_load_dynamic_field alongside the existing scope and indexes. Producers
-  are supplied by the separate control-plane implementation.
+- Load scope: GetQueryViewLoadInfoResponse carries required_fields alongside
+  load_fields, partition scope and indexes. Required fields define the logical
+  query scope; load_fields supplies physical loading hints. The control-plane
+  producer normalizes the user-facing skip-dynamic-field option into those
+  hints, so the response needs no separate boolean. Skipping dynamic-field
+  preloading does not remove that field from the logical query scope.
+  Producers are supplied by the separate control-plane implementation.
 
 Retained requery uses QueryOnView with the original plan, workers, Schema and
 MVCC. It does not select new resources through Phase 1 or use a separate requery

@@ -119,8 +119,9 @@ The added fields are `QueryPlan.reused_payloads` and
 `StreamingFieldAnalyzer.read_schema_version`.
 This master-based extraction also synchronizes the query-facing schema contracts:
 `QueryViewMeta.schema_version`, Search/RetrieveRequest.schema_version,
-required_fields /
-skip_load_dynamic_field in GetQueryViewLoadInfoResponse. It does not add their
+required_fields in GetQueryViewLoadInfoResponse. Dynamic-field preloading hints
+are already expressed by load_fields, without a separate skip boolean in this
+response. It does not add their
 Coordinator or QN/native implementations. The BarrierMVCC input and scoped WAL
 barrier implementation are already provided by master. The unused, unimplemented
 RequeryOnView RPC and its messages are removed; retained requery uses QueryOnView.
