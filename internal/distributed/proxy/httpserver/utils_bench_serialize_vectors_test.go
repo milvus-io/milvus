@@ -177,7 +177,7 @@ func BenchmarkSerialize_FloatOrByteVectors_Fp32(b *testing.B) {
 	vectorsJSON := generateVectorsJSON()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := serializeFloatOrByteVectors(vectorsJSON, schemapb.DataType_Float16Vector, 128, typeutil.Float32ArrayToFloat16Bytes)
+		_, err := serializeFloatOrByteVectors(vectorsJSON, schemapb.DataType_Float16Vector, 128, 256, typeutil.Float32ArrayToFloat16Bytes)
 		assert.Nil(b, err)
 	}
 }
@@ -186,7 +186,7 @@ func BenchmarkSerialize_FloatOrByteVectors_Byte(b *testing.B) {
 	vectorsJSON := generateByteVectorsJSON()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := serializeFloatOrByteVectors(vectorsJSON, schemapb.DataType_Float16Vector, 256, typeutil.Float32ArrayToFloat16Bytes)
+		_, err := serializeFloatOrByteVectors(vectorsJSON, schemapb.DataType_Float16Vector, 256, 512, typeutil.Float32ArrayToFloat16Bytes)
 		assert.Nil(b, err)
 	}
 }
