@@ -150,7 +150,7 @@ wal.Append(Insert pk=1,2)
        │    ├ Insert (copy) → timetick → shard → …                       tt=101
        │    ├ Delete(1)     → timetick → shard → …                       tt=102
        │    └ CommitTxn     → timetick → …                               tt=103
-       └ Committed: fill in tt=103 in the entry. Later writes of 1 and 2 stop waiting.
+       └ Committed: set tt=103 in the entry. Later writes of 1 and 2 stop waiting.
 client ◀ MessageID and TimeTick of the CommitTxn (tt=103)
 consumer: one Txn message at tt=103 with Insert and Delete. The row of key 1 is masked.
 observe: writes 1 and 2 into the engine at tt=103, then removes the entry.
@@ -260,15 +260,15 @@ key.
 
 ### Entry life cycle
 
-1. **Register** before the append. The entry has no TimeTick yet.
-2. **Fill in** the TimeTick after the append returns. If observe already passed
+1. **Enqueue** before the append. The entry has no TimeTick yet.
+2. **Commit**: set the TimeTick after the append returns. If observe already passed
    that TimeTick, the writer removes the entry itself.
 3. **Remove** in one of three ways: observe applies the write, the writer finds
    that observe passed its TimeTick, or the append failed and the message was
    not written.
 
-The registration happens before the append because observe can apply a message
-before its append returns to the writer. A registration made after the append
+The entry is enqueued before the append because observe can apply a message
+before its append returns to the writer. An entry enqueued after the append
 could stay in the set for ever.
 
 Steps 2 and 3 race. Observe raises the observed TimeTick and removes the
@@ -280,7 +280,7 @@ A test runs both orders and checks that the entry leaves the set.
 ### Presence
 
 A key is present for a write when the set holds an entry of the key that was
-registered before the write, or when the engine holds the key. The write's own
+enqueued before the write, or when the engine holds the key. The write's own
 entry, and the entries of later writes, do not count. A later write waits for
 this one and gets a larger TimeTick.
 
@@ -290,14 +290,14 @@ An entry without a TimeTick is the lock of its keys. The design follows the
 partial update row lock (`wal/interceptors/partialupdate/row_lock.go`) and the
 latch manager of CockroachDB (`spanlatch`):
 
-- A write registers all its keys in one step under the one mutex of the set.
-  So the registrations of two overlapping writes are totally ordered.
+- A write enqueues all its keys in one step under the one mutex of the set.
+  So the enqueues of two overlapping writes are totally ordered.
 - A write waits only for the last entry without a TimeTick of each key. That
   entry waited for the entries before it. The waits form no cycle, so writes of
   many keys can not deadlock.
 - A write whose context ends while it waits keeps its place in line. It leaves
   after the writes it waited for, so a later write still waits for them.
-- The fill-in stores the TimeTick under the mutex and closes a channel after
+- The commit stores the TimeTick under the mutex and closes a channel after
   it releases the mutex. A writer that finds that observe passed its TimeTick
   also removes its own entry under the mutex.
 - The mutex is held only while the map changes, never across an append.
@@ -320,7 +320,7 @@ One insert of 1000 new int64 keys, one writer, no contention, Intel i7-8700:
 |---|---|
 | Decode the body and the primary keys (key column only) | 15 µs |
 | Decode the body and the primary keys (with a 128-dim float vector column) | 250 µs |
-| Lock: register, wait, fill in, removal by observe | 173 µs |
+| Lock: enqueue, wait, commit, removal by observe | 173 µs |
 | Decision with the in-memory test engine (lock, set read, probe) | 250 µs |
 | Probe of 1000 keys on the Pebble engine (all miss, 1M keys in the memtable) | 1330 µs |
 
@@ -466,14 +466,14 @@ insert, so WAL record and byte counts under-report such an append.
   companion delete at commit, a delete reaches the WAL unchanged, and 320
   concurrent inserts of one key produce exactly one insert without a companion
   delete.
-- Tests of the in-flight set: registration races with observe, the fill-in
+- Tests of the in-flight set: enqueue races with observe, the commit
   races with observe (a hook on each side), an append with an unknown outcome,
   two writers of one key, a canceled waiter, writes of many overlapping keys
   with no deadlock, a lock key collision, and a stress run against a simulated
   WAL with an observer.
 - Mutation checks: each test fails when its rule is broken. That is: no removal
-  at fill-in, the set is not read, no wait, a canceled waiter leaves at once,
-  either order of the observe and fill-in race is reversed. Without the
+  at commit, the set is not read, no wait, a canceled waiter leaves at once,
+  either order of the observe and commit race is reversed. Without the
   rollback, the redo test fails.
 - Benchmarks: the lock under contention (hot key, batches of 1 to 1000 keys,
   mixed batches), and the cost of each step of one 1000-key write.

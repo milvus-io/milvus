@@ -40,7 +40,7 @@ func (i *WriteIntent) Committed(_ context.Context, tt uint64) {
 		if i.txn == nil {
 			return
 		}
-		i.d.inflight.fill(i.write, tt)
+		i.d.inflight.commit(i.write, tt)
 
 		i.d.pendingMu.Lock()
 		live, ok := i.d.pending[i.req.TxnID]
@@ -69,24 +69,24 @@ func (i *WriteIntent) Committed(_ context.Context, tt uint64) {
 		}
 		i.d.pendingMu.Unlock()
 	default:
-		i.d.inflight.fill(i.write, tt)
+		i.d.inflight.commit(i.write, tt)
 	}
 }
 
 func (i *WriteIntent) Aborted(_ context.Context, _ error) {
 	i.resolve()
 	if i.write != nil {
-		i.d.inflight.remove(i.write)
+		i.d.inflight.abort(i.write)
 	}
 }
 
 func (i *WriteIntent) InDoubt(_ context.Context, _ error, tt uint64) {
 	i.resolve()
 	if tt == 0 {
-		panic("primary key index intent discarded as uncertain without a time tick")
+		panic("primary key index intent marked in doubt without a time tick")
 	}
 	if i.write != nil {
-		i.d.inflight.markUncertain(i.write, tt)
+		i.d.inflight.markInDoubt(i.write, tt)
 	}
 }
 

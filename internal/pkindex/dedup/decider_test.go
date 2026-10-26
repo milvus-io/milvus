@@ -128,7 +128,7 @@ func TestAutocommitInsertInDoubt(t *testing.T) {
 	require.Equal(t, int64PKs(1), companion)
 	again.Committed(ctx, 20)
 
-	// Below 15 the uncertain write may still be applied later, so it stays.
+	// Below 15 the in-doubt write may still be applied later, so it stays.
 	ObserveTimeTickForTest(d, 14)
 	require.Equal(t, 2, InflightLenForTest(d))
 	// The write was not in the WAL: observe reaches 15 without meeting it.
@@ -138,7 +138,7 @@ func TestAutocommitInsertInDoubt(t *testing.T) {
 	require.Equal(t, 0, InflightLenForTest(d))
 }
 
-// An uncertain write whose time tick observe already passed is removed at once.
+// An in-doubt write whose time tick observe already passed is removed at once.
 func TestInDoubtBelowObserved(t *testing.T) {
 	ctx := context.Background()
 	d, _ := newTestDecider(t)
@@ -371,7 +371,7 @@ func TestDecideReturnsProbeError(t *testing.T) {
 }
 
 // A CommitTxn decision probes the index through the same present() path as an
-// autocommit decision, so it can fail the same way and must withdraw the same way.
+// autocommit decision, so it can fail the same way and must abort the same way.
 func TestDecideCommitReturnsProbeError(t *testing.T) {
 	ctx := context.Background()
 	d, a := newTestDecider(t)
