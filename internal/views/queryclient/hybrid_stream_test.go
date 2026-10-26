@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/searchutil"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
@@ -96,6 +97,48 @@ func TestHybridStreamSetupFailureClosesEarlierSubSearches(t *testing.T) {
 	require.ErrorIs(t, err, failure)
 	require.Nil(t, streams)
 	require.Equal(t, 1, child.closeCount())
+}
+
+func TestSearchStreamsPreserveRangeAndIterativeFilterPlans(t *testing.T) {
+	for _, hybrid := range []bool{false, true} {
+		t.Run(map[bool]string{false: "ordinary", true: "hybrid"}[hybrid], func(t *testing.T) {
+			request := hybridStreamRequest()
+			infos := []*planpb.QueryInfo{
+				{SearchParams: `{"radius":10,"range_filter":1}`},
+				{SearchParams: `{"ef":128}`, Hints: "iterative_filter"},
+			}
+			for i, sub := range request.SubReqs {
+				plan := &planpb.PlanNode{Node: &planpb.PlanNode_VectorAnns{VectorAnns: &planpb.VectorANNS{QueryInfo: infos[i]}}}
+				var err error
+				sub.SerializedExprPlan, err = proto.Marshal(plan)
+				require.NoError(t, err)
+				sub.SearchType = internalpb.SearchType_DEFAULT
+			}
+			if !hybrid {
+				request.IsAdvanced = false
+				request.SerializedExprPlan = request.SubReqs[0].SerializedExprPlan
+				request.SubReqs = nil
+			}
+			shard := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+			plan := legacySearchPlan(shard, qviews.NewQueryNode(11))
+			plan.Request = &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: request}
+			calls := 0
+			service := &fakeViewQueryServiceClient{searchOnViewStream: func(_ context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+				actual := &planpb.PlanNode{}
+				require.NoError(t, proto.Unmarshal(req.GetLegacyReq().GetSerializedExprPlan(), actual))
+				require.True(t, proto.Equal(infos[calls], actual.GetVectorAnns().GetQueryInfo()))
+				require.Equal(t, internalpb.SearchType_DEFAULT, req.GetLegacyReq().GetSearchType())
+				calls++
+				return &fakeSearchStream{}, nil
+			}}
+			streams, _, err := newShardViewQueryClient(1, &fakeQueryPlanClient{plan: plan}, service).SearchStreams(context.Background(), &ShardSearchRequest{Req: request, VChannel: shard.VChannel}, 20)
+			require.NoError(t, err)
+			require.Equal(t, map[bool]int{false: 1, true: 2}[hybrid], calls)
+			for _, stream := range streams {
+				require.NoError(t, stream.Close())
+			}
+		})
+	}
 }
 
 func TestLegacyHybridStreamsReduceEachSubSearchAcrossVChannels(t *testing.T) {
