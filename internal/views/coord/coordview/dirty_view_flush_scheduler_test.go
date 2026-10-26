@@ -399,7 +399,7 @@ func TestDirtyViewFlushSchedulerRunsAfterPersistCallbacksAfterCatalogSave(t *tes
 
 func TestShardViewManagerSubmitsOneShardScopedDirtyEvent(t *testing.T) {
 	submitter := &capturedDirtyViewEventSubmitter{}
-	manager := newShardViewManager(context.Background(), testShardID, submitter, nil)
+	manager := newShardViewManager(context.Background(), testShardID, submitter, nil, stubDataViewRefProvider{})
 
 	require.NoError(t, manager.AddPreparing(context.Background(), testBuilder(1, 1, 1)))
 	events := submitter.snapshot()
@@ -411,7 +411,7 @@ func TestShardViewManagerSubmitsOneShardScopedDirtyEvent(t *testing.T) {
 
 func TestShardViewManagerSubmitsDirtyEventWhileHoldingManagerLock(t *testing.T) {
 	submitter := &lockCheckingDirtyViewEventSubmitter{}
-	manager := newShardViewManager(context.Background(), testShardID, submitter, nil)
+	manager := newShardViewManager(context.Background(), testShardID, submitter, nil, stubDataViewRefProvider{})
 	submitter.manager = manager
 
 	require.NoError(t, manager.AddPreparing(context.Background(), testBuilder(1, 1, 1)))
@@ -424,7 +424,7 @@ func TestShardViewManagerPreservesTransitionOrderWhenSubmitOverlaps(t *testing.T
 		releaseFirst: make(chan struct{}),
 		submitted:    make(chan struct{}, 2),
 	}
-	manager := newShardViewManager(context.Background(), testShardID, submitter, nil)
+	manager := newShardViewManager(context.Background(), testShardID, submitter, nil, stubDataViewRefProvider{})
 
 	addDone := make(chan error, 1)
 	go func() {
@@ -460,7 +460,7 @@ func TestShardViewManagerDoesNotReuseQueryVersionBeforeDroppedPersist(t *testing
 	catalog := &blockNextFlushCatalog{mockCatalog: newMockCatalog()}
 	s := newMockSyncer()
 	scheduler := newTestDirtyViewFlushScheduler(t, catalog, s, 128)
-	manager := newShardViewManager(context.Background(), testShardID, scheduler, nil)
+	manager := newShardViewManager(context.Background(), testShardID, scheduler, nil, stubDataViewRefProvider{})
 	flush := func() { require.NoError(t, scheduler.Flush(context.Background())) }
 	version1 := testVersion(1, 1, 1)
 

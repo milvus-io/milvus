@@ -115,6 +115,10 @@ recovery, reference protection, and GC behavior are documented in
 
 ### 5.1 Overview
 
+The extracted [DataView schema certification](data_view_schema.md) contract
+binds new QueryViews to the supported read schema of their selected DataView.
+Pending DDL schema targets gate preparation rather than overriding that identity.
+
 The storage view contains all complete, non-duplicate loadable Sealed Segment
 data ([B1] and [A1]). A version number DataVersion is introduced:
 
@@ -378,6 +382,11 @@ single locally prepared BM25 aggregate shared by all QueryView DataVersions.
 | Query Node | QueryView Manager | Listening for view state machine changes, applying to Sealed Segments |
 | Query Node | Sealed Segment Manager | Historical data management, maintaining Sealed Segment lifecycle |
 | Query Node | Pure Delete Stream Manager | Planned remote subscription client applying Delete data to each Segment; not wired by this SN extraction. |
+
+The extracted coordinator's background scheduling uses
+[Collection-batched Balancer Reconciliation](balancer_scanning.md): cache-owned
+scanners retain a directory slice across batches, and local work can run between
+collection checkpoints. Production activation remains separate integration work.
 
 ### 11.3 SyncQueryView RPC
 
