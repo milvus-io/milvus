@@ -26,12 +26,14 @@ import (
 	"os/exec"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
+	promtest "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -61,6 +63,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -1035,6 +1038,7 @@ func partialUpdateCASTestTask(
 	}
 	setPartialUpdateCASTestChannels(task, partialUpdateCASTestVChannels)
 	insertMsgs, deleteMsgs := buildPartialUpdateCASTestMessages(t, task.collectionID, partialUpdateCASTestVChannels, finalInsertPKs, deletePKs, nil)
+	initPreparedPartialTestState(task)
 	return task, insertMsgs, deleteMsgs
 }
 
@@ -1113,6 +1117,7 @@ func partialUpdateCASRealPackTestTask(
 			},
 		},
 	}
+	initPreparedPartialTestState(task)
 	return task
 }
 
@@ -1963,6 +1968,7 @@ func partialUpdateCASStringTestTask(
 	}
 	setPartialUpdateCASTestChannels(task, partialUpdateCASTestVChannels)
 	insertMsgs, deleteMsgs := buildPartialUpdateCASStringTestMessages(t, task.collectionID, partialUpdateCASTestVChannels, finalInsertPKs, deletePKs, nil)
+	initPreparedPartialTestState(task)
 	return task, insertMsgs, deleteMsgs
 }
 
@@ -2100,6 +2106,7 @@ func TestPartialUpdateRetriesAfterCASConflict(t *testing.T) {
 	requeryCalls := 0
 	m = mockey.Mock((*UpsertTask).queryPreExecute).To(func(task *UpsertTask, ctx context.Context) ([]int, error) {
 		requeryCalls++
+		task.partialState.writeRows = []int{1, 0, 2}
 		require.Equal(t, initialTs, task.BeginTs())
 		require.Equal(t, initialID, task.ID())
 		for _, meta := range task.partialUpdateCASGroups {
@@ -2129,6 +2136,8 @@ func TestPartialUpdateRetriesAfterCASConflict(t *testing.T) {
 	require.Equal(t, initialTs, task.BeginTs())
 	require.Equal(t, initialID, task.ID())
 	require.Equal(t, uint64(200), task.result.GetTimestamp())
+	require.NoError(t, task.PostExecute(context.Background()))
+	require.Equal(t, uint64(2000), task.result.GetTimestamp())
 }
 
 func TestPartialUpdateCASConflictProjection(t *testing.T) {
@@ -4333,6 +4342,11 @@ func TestPartialUpdateAutoIDMixedCommitRetry(t *testing.T) {
 	defer read.UnPatch()
 	fakeWAL.appendHook = func(ctx context.Context, msgs ...streamingmessage.MutableMessage) streaming.AppendResponses {
 		responses := streamingtypes.NewAppendResponseN(len(msgs))
+		if fakeWAL.appendCalls > 1 {
+			for _, msg := range msgs {
+				require.NotEqual(t, newChannel, msg.VChannel(), "successful channel must never be replayed")
+			}
+		}
 		for index, msg := range msgs {
 			if fakeWAL.appendCalls == 1 && msg.VChannel() != newChannel {
 				responses.FillResponseAtIdx(streaming.AppendResponse{Error: streamingstatus.NewPartialUpdateRetryable("conflict on existing row")}, index)
@@ -4367,9 +4381,8 @@ func TestPartialUpdateAutoIDMixedCommitRetry(t *testing.T) {
 	require.Equal(t, 2, reads)
 	require.Equal(t, 5, allocations) // one PK range, two RowID ranges, two Delete message ID ranges
 	require.Equal(t, map[int64]int32{1: 200, newID: 100}, stored)
-	// The successful first-channel insert becomes a delete+insert at the same
-	// PK on retry, so it cannot accumulate a second undeleted physical row.
-	require.ElementsMatch(t, []int64{1, newID}, task.deletePKs.GetIntId().GetData())
+	// Only the rejected channel is rebuilt; the successful insert is frozen.
+	require.Equal(t, []int64{1}, task.deletePKs.GetIntId().GetData())
 	require.NoError(t, task.PostExecute(context.Background()))
 	require.Equal(t, []int64{newID, 1}, task.result.IDs.GetIntId().GetData())
 }
@@ -4620,6 +4633,8 @@ func TestPartialUpdateAutoIDReadPreparation(t *testing.T) {
 				require.EqualValues(t, 1000, nextID)
 				require.Empty(t, task.partialUpdateAllocatedIDs)
 				task.result.IDs = partialUpdateCASIDs([]int64{1, 2})
+				task.partialState.written[0] = int64(1)
+				task.partialState.written[1] = int64(2)
 				require.NoError(t, task.PostExecute(context.Background()))
 				require.Equal(t, []int64{1, 2}, task.result.IDs.GetIntId().GetData())
 			case "all_missing", "term_lookup_unavailable_after_read":
@@ -7699,6 +7714,7 @@ func TestPartialUpdateRetryPreparationErrorsDoNotAppend(t *testing.T) {
 			gen := mockey.Mock(genFunctionFields).Return(failure("functions")).Build()
 			defer gen.UnPatch()
 			query := mockey.Mock((*UpsertTask).queryPreExecute).To(func(task *UpsertTask, ctx context.Context) ([]int, error) {
+				task.partialState.writeRows = []int{0}
 				if err := failure("query"); err != nil {
 					return nil, err
 				}
@@ -7765,6 +7781,7 @@ func TestUpdateTaskPreExecuteStopsRejectedRequestsBeforeWriting(t *testing.T) {
 			queryCalls := 0
 			query := mockey.Mock((*UpsertTask).queryPreExecute).To(func(task *UpsertTask, _ context.Context) ([]int, error) {
 				queryCalls++
+				task.partialState.writeRows = append([]int(nil), task.partialState.rows...)
 				task.insertFieldData = task.req.FieldsData
 				return nil, nil
 			}).Build()
@@ -7785,6 +7802,1126 @@ func TestUpdateTaskPreExecuteStopsRejectedRequestsBeforeWriting(t *testing.T) {
 				require.Zero(t, queryCalls)
 			}
 			require.Zero(t, fakeWAL.appendCalls)
+		})
+	}
+}
+
+func TestConditionalUpsertSelectAndReturnOriginalIndexes(t *testing.T) {
+	for _, op := range []milvuspb.WriteCondition_Op{milvuspb.WriteCondition_GT, milvuspb.WriteCondition_GTE} {
+		t.Run(op.String(), func(t *testing.T) {
+			task := createTestUpdateTask()
+			task.result = &milvuspb.MutationResult{}
+			task.schema, _ = newSchemaInfo(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}, {FieldID: 101, Name: "version", DataType: schemapb.DataType_Int64}}})
+			version := func(values []int64) *schemapb.FieldData {
+				return &schemapb.FieldData{FieldId: 101, FieldName: "version", Type: schemapb.DataType_Int64, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: values}}}}}
+			}
+			task.req = &milvuspb.UpsertRequest{NumRows: 3, WriteCondition: &milvuspb.WriteCondition{Field: "version", Op: op}}
+			task.initPartialState()
+			task.upsertMsg = &msgstream.UpsertMsg{InsertMsg: &msgstream.InsertMsg{InsertRequest: &msgpb.InsertRequest{FieldsData: []*schemapb.FieldData{version([]int64{12, 20, 1})}}}}
+			updates, inserts, err := task.selectConditionalRows(partialUpdateCASIDs([]int64{42, 43, 44}), partialUpdateCASIDs([]int64{43, 42}), []*schemapb.FieldData{version([]int64{25, 11})}, []int{0, 1}, []int{2})
+			require.NoError(t, err)
+			require.Equal(t, []int{0}, updates)
+			require.Equal(t, []int{2}, inserts)
+			require.Equal(t, []int{0, 2}, task.partialState.writeRows)
+			require.Equal(t, []int64{42}, task.deletePKs.GetIntId().Data)
+			task.partialState.written = map[int]any{2: int64(44), 0: int64(42)}
+			task.partialState.insertCount = 2
+			task.partialState.deleteCount = 1
+			task.partialState.timestamp = 500
+			task.publishPartialResult()
+			require.Equal(t, []uint32{0, 2}, task.result.SuccIndex)
+			require.Equal(t, []int64{42, 44}, task.result.IDs.GetIntId().Data)
+			require.EqualValues(t, 2, task.result.UpsertCnt)
+			require.EqualValues(t, 500, task.result.Timestamp)
+		})
+	}
+}
+
+func TestConditionalUpsertIntegerNullableAndCompact(t *testing.T) {
+	field := &schemapb.FieldData{Type: schemapb.DataType_Int64, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{-9223372036854775808, 9223372036854775807}}}}}}
+	typeutil.SetFieldDataValidData(field, []bool{true, false, true})
+	value, valid, err := conditionInt(field, 0)
+	require.NoError(t, err)
+	require.True(t, valid)
+	require.EqualValues(t, -9223372036854775808, value)
+	_, valid, err = conditionInt(field, 1)
+	require.NoError(t, err)
+	require.False(t, valid)
+	value, valid, err = conditionInt(field, 2)
+	require.NoError(t, err)
+	require.True(t, valid)
+	require.EqualValues(t, 9223372036854775807, value)
+	_, _, err = conditionInt(nil, 0)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
+func TestConditionalUpsertMissingPolicy(t *testing.T) {
+	for _, policy := range []milvuspb.WriteCondition_MissingRowPolicy{milvuspb.WriteCondition_SKIP_IF_MISSING, milvuspb.WriteCondition_ERROR_IF_MISSING} {
+		task := createTestUpdateTask()
+		task.req = &milvuspb.UpsertRequest{NumRows: 1, WriteCondition: &milvuspb.WriteCondition{Field: "version", Op: milvuspb.WriteCondition_GT, OnMissing: policy}}
+		task.initPartialState()
+		version := &schemapb.FieldData{FieldName: "version", Type: schemapb.DataType_Int64, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1}}}}}}
+		task.upsertMsg = &msgstream.UpsertMsg{InsertMsg: &msgstream.InsertMsg{InsertRequest: &msgpb.InsertRequest{FieldsData: []*schemapb.FieldData{version}}}}
+		_, inserts, err := task.selectConditionalRows(partialUpdateCASIDs([]int64{42}), partialUpdateCASIDs(nil), nil, nil, []int{0})
+		if policy == milvuspb.WriteCondition_ERROR_IF_MISSING {
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.Contains(t, err.Error(), "42")
+		} else {
+			require.NoError(t, err)
+			require.Empty(t, inserts)
+			require.Empty(t, task.partialState.writeRows)
+		}
+	}
+}
+
+func initPreparedPartialTestState(task *UpsertTask) {
+	if !task.req.GetPartialUpdate() {
+		return
+	}
+	task.initPartialState()
+	pk, _ := typeutil.GetPrimaryFieldSchema(task.schema.CollectionSchema)
+	field, _ := typeutil.GetPrimaryFieldData(task.req.FieldsData, pk)
+	originals, _ := parsePrimaryFieldData2IDs(field)
+	for offset := 0; offset < typeutil.GetSizeOfIDs(task.result.IDs); offset++ {
+		destination := typeutil.GetPK(task.result.IDs, int64(offset))
+		sourceRow := offset
+		for row := 0; row < typeutil.GetSizeOfIDs(originals); row++ {
+			if typeutil.GetPK(originals, int64(row)) == destination {
+				sourceRow = row
+				break
+			}
+		}
+		task.partialState.writeRows = append(task.partialState.writeRows, sourceRow)
+		task.partialState.resultOrder = append(task.partialState.resultOrder, sourceRow)
+	}
+	task.partialState.retryRows = append([]int(nil), task.partialState.rows...)
+}
+
+func TestConditionalUpsertValidationDoesNotOverrideCASDisable(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	casKey := params.StreamingCfg.PartialUpdateEnableCAS.Key
+	casOld := params.StreamingCfg.PartialUpdateEnableCAS.GetValue()
+	require.NoError(t, params.Save(casKey, "false"))
+	defer params.Save(casKey, casOld)
+	task := createTestUpdateTask()
+	task.schema, _ = newSchemaInfo(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}, {FieldID: 101, Name: "version", DataType: schemapb.DataType_Int64}}})
+	task.req = &milvuspb.UpsertRequest{FieldsData: []*schemapb.FieldData{{FieldName: "version"}}, WriteCondition: &milvuspb.WriteCondition{Field: "version", Op: milvuspb.WriteCondition_GT}}
+	require.NoError(t, task.validateWriteCondition())
+	require.True(t, task.req.PartialUpdate)
+	task.req.WriteCondition.Op = milvuspb.WriteCondition_OP_UNSPECIFIED
+	require.ErrorIs(t, task.validateWriteCondition(), merr.ErrParameterInvalid)
+	task.req.WriteCondition.Op = milvuspb.WriteCondition_GTE
+	task.req.FieldOps = []*schemapb.FieldPartialUpdateOp{{FieldName: "tags", Op: schemapb.FieldPartialUpdateOp_ARRAY_APPEND}}
+	require.ErrorIs(t, task.validateWriteCondition(), merr.ErrParameterInvalid)
+}
+
+func TestPartialUpsertFreezesSuccessfulChannels(t *testing.T) {
+	var pks []int64
+	var successful uint32
+	for pk := int64(1); len(pks) < 2; pk++ {
+		channels, err := typeutil.HashPK2Channels(partialUpdateCASIDs([]int64{pk}), partialUpdateCASTestVChannels)
+		require.NoError(t, err)
+		if len(pks) == 0 {
+			pks = append(pks, pk)
+			successful = channels[0]
+		} else if channels[0] != successful {
+			pks = append(pks, pk)
+		}
+	}
+	task, _, _ := partialUpdateCASTestTask(t, true, pks, pks, pks)
+	firstChannel := partialUpdateCASTestVChannels[successful]
+	var secondChannel string
+	channels, err := typeutil.HashPK2Channels(partialUpdateCASIDs(pks), partialUpdateCASTestVChannels)
+	require.NoError(t, err)
+	secondChannel = partialUpdateCASTestVChannels[channels[1]]
+	var messages []streamingmessage.MutableMessage
+	for _, channel := range []string{firstChannel, secondChannel} {
+		msg, err := streamingmessage.NewInsertMessageBuilderV1().WithVChannel(channel).WithHeader(&messagespb.InsertMessageHeader{}).WithBody(&msgpb.InsertRequest{}).BuildMutable()
+		require.NoError(t, err)
+		messages = append(messages, msg)
+	}
+	resp := streaming.AppendResponses{Responses: []streaming.AppendResponse{{AppendResult: &streamingtypes.AppendResult{TimeTick: 100}}, {Error: streamingstatus.NewPartialUpdateRetryable("conflict")}}}
+	require.NoError(t, task.recordPartialAppend(messages, resp))
+	require.Equal(t, map[int]any{0: pks[0]}, task.partialState.written)
+	require.Equal(t, []int{1}, task.partialState.retryRows)
+	require.EqualValues(t, 1, task.partialState.insertCount)
+	task.partialState.rows = []int{1}
+	task.partialState.writeRows = []int{0}
+	task.result.IDs = partialUpdateCASIDs(pks[1:])
+	require.NoError(t, task.recordPartialAppend(messages[1:], streaming.AppendResponses{Responses: []streaming.AppendResponse{{AppendResult: &streamingtypes.AppendResult{TimeTick: 200}}}}))
+	task.publishPartialResult()
+	require.Equal(t, pks, task.result.IDs.GetIntId().Data)
+	require.EqualValues(t, 2, task.result.UpsertCnt)
+	require.EqualValues(t, 200, task.result.Timestamp)
+}
+
+func TestConditionalUpsertAllMissingWithoutQueryColumns(t *testing.T) {
+	task := partialUpdateAutoIDInsertTestTask(t, false)
+	task.schema.Fields[0].AutoID = false
+	task.req.WriteCondition = &milvuspb.WriteCondition{Field: task.schema.Fields[1].GetName(), Op: milvuspb.WriteCondition_GT}
+	for _, field := range task.req.FieldsData {
+		field.FieldId = 0
+	}
+	task.partialUpdateOriginalFields = cloneFieldDataList(task.req.FieldsData)
+	wal := newPartialUpdateCASTestWAL(t, 9)
+	old := streaming.WAL()
+	streaming.SetWALForTest(wal)
+	defer streaming.SetWALForTest(old)
+	read := mockey.Mock(retrieveByPKs).To(func(_ context.Context, task *UpsertTask, _ *schemapb.IDs, _ []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+		for _, proof := range task.partialUpdateCASGroups {
+			proof.ReadTs = 1000
+		}
+		return &milvuspb.QueryResults{Status: merr.Success()}, segcore.StorageCost{}, nil
+	}).Build()
+	defer read.UnPatch()
+	require.NoError(t, task.prepareUpsert(context.Background()))
+	require.Len(t, task.insertFieldData, 2)
+	for index, field := range task.insertFieldData {
+		require.Equal(t, task.schema.Fields[index].GetFieldID(), field.GetFieldId())
+	}
+	require.EqualValues(t, 2, task.upsertMsg.InsertMsg.NumRows)
+	require.Empty(t, task.deletePKs.GetIntId().GetData())
+}
+
+func TestPartialUpsertPublicErrorsDoNotRecoverCASRetry(t *testing.T) {
+	cas := streamingstatus.NewPartialUpdateRetryable("conflict")
+	require.True(t, isPartialUpdateCASRetry(cas))
+	require.False(t, isPartialUpdateCASRetry(nil))
+	for _, projected := range []error{merr.WrapErrCollectionPartialUpdateConflictErr(cas, "relative conflict"), conditionalExecutionError(cas)} {
+		require.False(t, isPartialUpdateCASRetry(projected))
+		require.Equal(t, projected, unwrapPartialUpdateAppendError(streaming.AppendResponses{Responses: []streaming.AppendResponse{{Error: projected}}}))
+	}
+}
+
+func TestConditionalUpsertComparisonSnapshotCases(t *testing.T) {
+	for _, tc := range []struct {
+		name                               string
+		op                                 milvuspb.WriteCondition_Op
+		old, new                           int64
+		oldNull, newNull, written, invalid bool
+	}{
+		{name: "strict equal skip", op: milvuspb.WriteCondition_GT, old: 12, new: 12},
+		{name: "inclusive equal write", op: milvuspb.WriteCondition_GTE, old: 12, new: 12, written: true},
+		{name: "older skip", op: milvuspb.WriteCondition_GT, old: 12, new: 11},
+		{name: "newer write", op: milvuspb.WriteCondition_GT, old: 12, new: 13, written: true},
+		{name: "old null accepts negative", op: milvuspb.WriteCondition_GT, new: -1, oldNull: true, written: true},
+		{name: "new null rejected even if stale", op: milvuspb.WriteCondition_GT, old: 12, newNull: true, invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := createTestUpdateTask()
+			task.req = &milvuspb.UpsertRequest{NumRows: 1, WriteCondition: &milvuspb.WriteCondition{Field: "version", Op: tc.op}}
+			task.initPartialState()
+			makeVersion := func(value int64, valid bool) *schemapb.FieldData {
+				field := &schemapb.FieldData{FieldName: "version", Type: schemapb.DataType_Int64, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{value}}}}}}
+				typeutil.SetFieldDataValidData(field, []bool{valid})
+				return field
+			}
+			task.upsertMsg = &msgstream.UpsertMsg{InsertMsg: &msgstream.InsertMsg{InsertRequest: &msgpb.InsertRequest{FieldsData: []*schemapb.FieldData{makeVersion(tc.new, !tc.newNull)}}}}
+			task.partialUpdateCASGroups = map[string]*messagespb.PartialUpdateCAS{"a": {ReadTs: 500}, "b": {ReadTs: 600}}
+			updates, _, err := task.selectConditionalRows(partialUpdateCASIDs([]int64{42}), partialUpdateCASIDs([]int64{42}), []*schemapb.FieldData{makeVersion(tc.old, !tc.oldNull)}, []int{0}, nil)
+			if tc.invalid {
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.written, len(updates) == 1)
+			require.EqualValues(t, 600, task.partialState.timestamp)
+		})
+	}
+}
+
+func TestPartialUpsertGatherPreservesNullableRepresentations(t *testing.T) {
+	schema, err := newSchemaInfo(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "version", DataType: schemapb.DataType_Int64, Nullable: true},
+		{FieldID: 102, Name: "vector", DataType: schemapb.DataType_FloatVector, Nullable: true},
+	}})
+	require.NoError(t, err)
+	scalar := &schemapb.FieldData{FieldId: 101, FieldName: "version", Type: schemapb.DataType_Int64, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{5, 9}}}}}}
+	vector := &schemapb.FieldData{FieldId: 102, FieldName: "vector", Type: schemapb.DataType_FloatVector, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}}}}}
+	typeutil.SetFieldDataValidData(scalar, []bool{true, false, true})
+	typeutil.SetFieldDataValidData(vector, []bool{true, false, true})
+	fields := selectPartialFields([]*schemapb.FieldData{scalar, vector}, []int{1, 2})
+	require.Equal(t, []int64{9}, fields[0].GetScalars().GetLongData().GetData())
+	require.Equal(t, []bool{false, true}, typeutil.GetFieldDataValidData(fields[0]))
+	require.Equal(t, []float32{3, 4}, fields[1].GetVectors().GetFloatVector().GetData())
+	require.Equal(t, []bool{false, true}, typeutil.GetFieldDataValidData(fields[1]))
+	require.NoError(t, fieldvalidator.FillWithNullValue(fields[0], schema.Fields[1], 2))
+	require.Equal(t, []int64{0, 9}, fields[0].GetScalars().GetLongData().GetData())
+	require.Equal(t, []int64{5, 9}, scalar.GetScalars().GetLongData().GetData(), "gather must not expand its source")
+}
+
+func TestConditionalUpsertValidationOptions(t *testing.T) {
+	paramtable.Init()
+	for _, tc := range []struct {
+		name         string
+		field        *schemapb.FieldSchema
+		condition    *milvuspb.WriteCondition
+		requestField string
+		ops          []*schemapb.FieldPartialUpdateOp
+		valid        bool
+	}{
+		{name: "absent condition", valid: true},
+		{name: "unknown field", condition: &milvuspb.WriteCondition{Field: "unknown", Op: milvuspb.WriteCondition_GT}},
+		{name: "missing input column", condition: &milvuspb.WriteCondition{Field: "version", Op: milvuspb.WriteCondition_GT}, requestField: "other"},
+		{name: "unknown missing policy", condition: &milvuspb.WriteCondition{Field: "version", Op: milvuspb.WriteCondition_GT, OnMissing: 99}},
+		{name: "float version", field: &schemapb.FieldSchema{FieldID: 101, Name: "version", DataType: schemapb.DataType_Float}, condition: &milvuspb.WriteCondition{Field: "version", Op: milvuspb.WriteCondition_GT}},
+		{name: "primary key version", condition: &milvuspb.WriteCondition{Field: "id", Op: milvuspb.WriteCondition_GT}, requestField: "id"},
+		{name: "partition version", field: &schemapb.FieldSchema{FieldID: 101, Name: "version", DataType: schemapb.DataType_Int64, IsPartitionKey: true}, condition: &milvuspb.WriteCondition{Field: "version", Op: milvuspb.WriteCondition_GT}},
+		{name: "cluster version", field: &schemapb.FieldSchema{FieldID: 101, Name: "version", DataType: schemapb.DataType_Int64, IsClusteringKey: true}, condition: &milvuspb.WriteCondition{Field: "version", Op: milvuspb.WriteCondition_GT}},
+		{name: "replace allowed", condition: &milvuspb.WriteCondition{Field: "version", Op: milvuspb.WriteCondition_GT}, ops: []*schemapb.FieldPartialUpdateOp{{FieldName: "version", Op: schemapb.FieldPartialUpdateOp_REPLACE}}, valid: true},
+		{name: "version cannot be relative", condition: &milvuspb.WriteCondition{Field: "version", Op: milvuspb.WriteCondition_GT}, ops: []*schemapb.FieldPartialUpdateOp{{FieldName: "version", Op: schemapb.FieldPartialUpdateOp_ARRAY_APPEND}}},
+		{name: "gt permits other relative field", condition: &milvuspb.WriteCondition{Field: "version", Op: milvuspb.WriteCondition_GT}, ops: []*schemapb.FieldPartialUpdateOp{{FieldName: "tags", Op: schemapb.FieldPartialUpdateOp_ARRAY_APPEND}}, valid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			field := tc.field
+			if field == nil {
+				field = &schemapb.FieldSchema{FieldID: 101, Name: "version", DataType: schemapb.DataType_Int64}
+			}
+			task := createTestUpdateTask()
+			task.schema, _ = newSchemaInfo(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}, field}})
+			requestField := tc.requestField
+			if requestField == "" {
+				requestField = "version"
+			}
+			task.req = &milvuspb.UpsertRequest{WriteCondition: tc.condition, FieldOps: tc.ops, FieldsData: []*schemapb.FieldData{{FieldName: requestField}}}
+			err := task.validateWriteCondition()
+			if tc.valid {
+				require.NoError(t, err)
+				require.Equal(t, tc.condition != nil, task.req.GetPartialUpdate())
+			} else {
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			}
+		})
+	}
+}
+
+func TestPartialUpsertWALErrorProjection(t *testing.T) {
+	for _, conditional := range []bool{false, true} {
+		for _, tc := range []struct {
+			name      string
+			cause     error
+			code      int32
+			retriable bool
+		}{
+			{"schema", streamingstatus.NewSchemaVersionMismatch("schema changed"), 109, false},
+			{"timeout", context.DeadlineExceeded, merr.TimeoutCode, false},
+			{"rate", merr.ErrServiceRateLimit, 8, true},
+			{"unavailable", merr.ErrServiceUnavailable, 2, true},
+		} {
+			t.Run(fmt.Sprintf("conditional=%t/%s", conditional, tc.name), func(t *testing.T) {
+				task, _, _ := partialUpdateCASTestTask(t, true, []int64{10}, []int64{10}, nil)
+				task.req.FieldOps = nil
+				if conditional {
+					task.req.WriteCondition = &milvuspb.WriteCondition{Field: "version", Op: milvuspb.WriteCondition_GT}
+				}
+				wal := newPartialUpdateCASTestWAL(t, 9)
+				old := streaming.WAL()
+				streaming.SetWALForTest(wal)
+				defer streaming.SetWALForTest(old)
+				preparePartialUpdateCASTestGroups(t, task)
+				inserts, _ := buildPartialUpdateCASTestMessages(t, task.collectionID, partialUpdateCASTestVChannels, []int64{10}, nil, task.partialUpdateCASGroups)
+				pack := mockey.Mock((*UpsertTask).packInsertMessage).Return(inserts, nil).Build()
+				defer pack.UnPatch()
+				deletePack := mockey.Mock((*UpsertTask).packDeleteMessage).Return(nil, nil).Build()
+				defer deletePack.UnPatch()
+				wal.appendHook = func(_ context.Context, messages ...streamingmessage.MutableMessage) streaming.AppendResponses {
+					require.True(t, task.partialState.appendAttempted, "mark the WAL attempt before calling AppendMessages")
+					responses := streamingtypes.NewAppendResponseN(len(messages))
+					responses.FillAllError(tc.cause)
+					return responses
+				}
+				err := task.Execute(context.Background())
+				require.Error(t, err)
+				result := merr.Status(err)
+				if conditional {
+					require.ErrorIs(t, err, merr.ErrCollectionConditionalUpsertExecution)
+					require.EqualValues(t, 112, result.GetCode())
+					require.False(t, result.GetRetriable())
+					require.Equal(t, commonpb.ErrorCode_UnexpectedError, result.GetErrorCode())
+					require.Equal(t, merr.SystemError, merr.GetErrorType(err))
+					require.NotEqual(t, "true", result.GetExtraInfo()[merr.InputErrorFlagKey])
+				} else {
+					require.Equal(t, tc.code, result.GetCode())
+					require.Equal(t, tc.retriable, result.GetRetriable())
+					if tc.name == "schema" {
+						require.Equal(t, commonpb.ErrorCode_SchemaMismatch, result.GetErrorCode())
+					}
+					if tc.name == "rate" {
+						require.Equal(t, commonpb.ErrorCode_RateLimit, result.GetErrorCode())
+					}
+				}
+				require.False(t, isPartialUpdateCASRetry(err))
+				require.Equal(t, 1, wal.appendCalls)
+				require.Empty(t, task.partialState.written)
+			})
+		}
+	}
+}
+
+func TestConditionalUpsertMalformedVersionSnapshots(t *testing.T) {
+	version := func(kind schemapb.DataType, values []int32, valid []bool) *schemapb.FieldData {
+		f := &schemapb.FieldData{FieldName: "version", Type: kind, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: values}}}}}
+		typeutil.SetFieldDataValidData(f, valid)
+		return f
+	}
+	for _, tc := range []struct {
+		f   *schemapb.FieldData
+		row int
+	}{
+		{version(schemapb.DataType_Int32, []int32{1}, []bool{true}), 1},
+		{version(schemapb.DataType_Int64, nil, nil), 0},
+		{version(schemapb.DataType_Int32, nil, nil), 0},
+	} {
+		_, _, err := conditionInt(tc.f, tc.row)
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+	}
+	f := version(schemapb.DataType_Int32, []int32{-7, 9}, []bool{true, false, true})
+	v, valid, err := conditionInt(f, 2)
+	require.NoError(t, err)
+	require.True(t, valid)
+	require.EqualValues(t, 9, v)
+	for _, scenario := range []string{"incoming_missing", "duplicate_snapshot", "stored_missing"} {
+		t.Run(scenario, func(t *testing.T) {
+			task := createTestUpdateTask()
+			task.req = &milvuspb.UpsertRequest{NumRows: 1, WriteCondition: &milvuspb.WriteCondition{Field: "version", Op: milvuspb.WriteCondition_GT}}
+			task.initPartialState()
+			fields := []*schemapb.FieldData{version(schemapb.DataType_Int32, []int32{2}, nil)}
+			if scenario == "incoming_missing" {
+				fields = nil
+			}
+			task.upsertMsg = &msgstream.UpsertMsg{InsertMsg: &msgstream.InsertMsg{InsertRequest: &msgpb.InsertRequest{FieldsData: fields}}}
+			oldIDs := partialUpdateCASIDs([]int64{1})
+			stored := []*schemapb.FieldData{version(schemapb.DataType_Int32, []int32{1}, nil)}
+			if scenario == "duplicate_snapshot" {
+				oldIDs = partialUpdateCASIDs([]int64{1, 1})
+			}
+			if scenario == "stored_missing" {
+				stored = nil
+			}
+			_, _, err := task.selectConditionalRows(partialUpdateCASIDs([]int64{1}), oldIDs, stored, []int{0}, nil)
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
+		})
+	}
+	err = conditionalExecutionError(merr.ErrServiceUnavailable)
+	require.Equal(t, err, conditionalExecutionError(err))
+	task := createTestUpdateTask()
+	task.partialUpdateAllocatedIDs = map[int]int64{2: 100}
+	require.Equal(t, task.partialUpdateAllocatedIDs, task.attemptAllocatedIDs())
+}
+
+func TestPartialUpsertAppendRejectsIncompleteEvidence(t *testing.T) {
+	for _, scenario := range []string{"count", "commit_result", "ids", "channels", "routing", "missing_channel"} {
+		t.Run(scenario, func(t *testing.T) {
+			task, _, _ := partialUpdateCASTestTask(t, true, []int64{1}, []int64{1}, []int64{1})
+			msg, err := streamingmessage.NewInsertMessageBuilderV1().WithVChannel("unrelated").WithHeader(&messagespb.InsertMessageHeader{}).WithBody(&msgpb.InsertRequest{}).BuildMutable()
+			require.NoError(t, err)
+			responses := streaming.AppendResponses{Responses: []streaming.AppendResponse{{AppendResult: &streamingtypes.AppendResult{TimeTick: 100}}}}
+			switch scenario {
+			case "count":
+				responses.Responses = nil
+			case "commit_result":
+				responses.Responses[0].AppendResult = nil
+			case "ids":
+				task.result.IDs = &schemapb.IDs{}
+			case "channels":
+				m := mockey.Mock(mockey.GetMethod(task.chMgr, "GetVChannels")).Return([]string(nil), merr.ErrServiceUnavailable).Build()
+				defer m.UnPatch()
+			case "routing":
+				m := mockey.Mock((*UpsertTask).partialUpdateCASChannelIndexes).Return([]uint32(nil), merr.ErrServiceUnavailable).Build()
+				defer m.UnPatch()
+			}
+			err = task.recordPartialAppend([]streamingmessage.MutableMessage{msg}, responses)
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
+			status := merr.Status(err)
+			require.EqualValues(t, 5, status.GetCode())
+			require.False(t, status.GetRetriable())
+			require.Equal(t, commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+			require.Equal(t, merr.SystemError, merr.GetErrorType(err))
+			require.False(t, task.partialState.appendAttempted, "accounting must not own the submission phase")
+			require.Empty(t, task.partialState.written)
+		})
+	}
+}
+
+func TestPartialUpsertPublishStringIDs(t *testing.T) {
+	task := createTestUpdateTask()
+	task.result = &milvuspb.MutationResult{}
+	task.schema, _ = newSchemaInfo(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_VarChar, IsPrimaryKey: true}}})
+	task.req = &milvuspb.UpsertRequest{NumRows: 2, WriteCondition: &milvuspb.WriteCondition{Op: milvuspb.WriteCondition_GT}}
+	task.initPartialState()
+	task.partialState.written[1] = "accepted"
+	task.publishPartialResult()
+	require.Equal(t, []string{"accepted"}, task.result.IDs.GetStrId().GetData())
+	require.Equal(t, []uint32{1}, task.result.SuccIndex)
+}
+
+func TestPartialUpsertGatherStructRetryRows(t *testing.T) {
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
+		Fields:            []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{FieldID: 200, Name: "profile", Nullable: true, Fields: []*schemapb.FieldSchema{{FieldID: 201, Name: "profile[age]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32, Nullable: true}}}},
+	})
+	makeField := func(name string) *schemapb.FieldData {
+		sub := &schemapb.FieldData{FieldId: 201, FieldName: name, Type: schemapb.DataType_Array, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{ElementType: schemapb.DataType_Int32, Data: []*schemapb.ScalarField{{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{42}}}}}}}}}}
+		typeutil.SetFieldDataValidData(sub, []bool{true, false})
+		f := &schemapb.FieldData{FieldId: 200, FieldName: "profile", Type: schemapb.DataType_ArrayOfStruct, Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{sub}}}}
+		typeutil.SetFieldDataValidData(f, []bool{true, false})
+		return f
+	}
+	fields := selectPartialFields([]*schemapb.FieldData{makeField("age")}, []int{1, 0})
+	require.Empty(t, typeutil.GetFieldDataValidData(fields[0]))
+	require.Equal(t, []bool{false, true}, typeutil.GetFieldDataValidData(fields[0].GetStructArrays().Fields[0]))
+	require.Len(t, fields[0].GetStructArrays().Fields[0].GetScalars().GetArrayData().Data, 1)
+	require.NoError(t, validateWholeStructFieldDataForPartialUpdate(schema.SchemaHelper, schema.StructArrayFields[0], fields[0], 2))
+}
+
+// Exercise real rebuild, merge, validation and packing after one channel commits.
+func TestPartialUpsertSubsetRetryPreservesNullablePayloads(t *testing.T) {
+	for _, conditional := range []bool{false, true} {
+		for _, kind := range []string{"nullable", "nullable_default", "default", "struct_scalar", "struct_vector"} {
+			for _, allNull := range []bool{false, true} {
+				t.Run(fmt.Sprintf("conditional=%t/%s/all_null=%t", conditional, kind, allNull), func(t *testing.T) {
+					ctx := context.Background()
+					task := partialUpdateAutoIDInsertTestTask(t, false)
+					schema := proto.Clone(task.schema.CollectionSchema).(*schemapb.CollectionSchema)
+					schema.AutoID, schema.Fields[0].AutoID = false, false
+					extra := &schemapb.FieldSchema{FieldID: 102, Name: "extra", DataType: schemapb.DataType_Int32, Nullable: kind != "default"}
+					if kind == "default" || kind == "nullable_default" {
+						extra.DefaultValue = &schemapb.ValueField{Data: &schemapb.ValueField_IntData{IntData: 42}}
+					}
+					if kind == "struct_vector" || kind == "struct_scalar" {
+						child := &schemapb.FieldSchema{FieldID: 201, Name: "profile[items]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32, Nullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}}}
+						if kind == "struct_vector" {
+							child.DataType, child.ElementType = schemapb.DataType_ArrayOfVector, schemapb.DataType_FloatVector
+							child.TypeParams = append(child.TypeParams, &commonpb.KeyValuePair{Key: "dim", Value: "2"})
+						}
+						schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{{FieldID: 200, Name: "profile", Nullable: true, Fields: []*schemapb.FieldSchema{child}}}
+					} else {
+						schema.Fields = append(schema.Fields, extra)
+					}
+					task.schema = mustNewSchemaInfo(schema)
+					makeExtra := func(valid []bool, values []int32) *schemapb.FieldData {
+						field := &schemapb.FieldData{FieldId: 102, FieldName: "extra", Type: schemapb.DataType_Int32,
+							Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: values}}}}}
+						if kind == "struct_scalar" {
+							arrays := make([]*schemapb.ScalarField, len(values))
+							for i, value := range values {
+								arrays[i] = &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{value}}}}
+							}
+							field.Type = schemapb.DataType_Array
+							field.Field = &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{ElementType: schemapb.DataType_Int32, Data: arrays}}}}
+						} else if kind == "struct_vector" {
+							arrays := make([]*schemapb.VectorField, len(values))
+							for i, value := range values {
+								arrays[i] = &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{float32(value), float32(value + 1)}}}}
+							}
+							field.Type = schemapb.DataType_ArrayOfVector
+							field.Field = &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{Dim: 2, ElementType: schemapb.DataType_FloatVector, Data: arrays}}}}
+						}
+						typeutil.SetFieldDataValidData(field, valid)
+						if kind == "struct_vector" || kind == "struct_scalar" {
+							field.FieldId, field.FieldName = 201, "items"
+							return &schemapb.FieldData{FieldId: 200, FieldName: "profile", Type: schemapb.DataType_ArrayOfStruct, Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{field}}}}
+						}
+						return field
+					}
+					// Row zero commits; rows one and two share the other channel.
+					pks := []int64{1}
+					channelFor := func(pk int64) string {
+						indexes, err := typeutil.HashPK2Channels(partialUpdateCASIDs([]int64{pk}), partialUpdateCASTestVChannels)
+						require.NoError(t, err)
+						return partialUpdateCASTestVChannels[indexes[0]]
+					}
+					committedChannel := channelFor(pks[0])
+					for pk := int64(2); len(pks) < 3; pk++ {
+						if channelFor(pk) != committedChannel {
+							pks = append(pks, pk)
+						}
+					}
+					valid, values := []bool{true, false, true}, []int32{7, 9}
+					if allNull {
+						valid, values = []bool{true, false, false}, []int32{7}
+					}
+					task.req.NumRows, task.upsertMsg.InsertMsg.NumRows = 3, 3
+					task.req.FieldsData = []*schemapb.FieldData{partialUpdateCASPKFieldData(pks), proto.Clone(task.req.FieldsData[1]).(*schemapb.FieldData), makeExtra(valid, values)}
+					task.req.FieldsData[1].GetScalars().GetIntData().Data = []int32{100, 200, 300}
+					if conditional {
+						task.req.WriteCondition = &milvuspb.WriteCondition{Field: "value", Op: milvuspb.WriteCondition_GT}
+					}
+					task.upsertMsg.InsertMsg.FieldsData = task.req.FieldsData
+					task.partialUpdateOriginalFields = cloneFieldDataList(task.req.FieldsData)
+					original := cloneFieldDataList(task.partialUpdateOriginalFields)
+					partition := mockey.Mock((*metacache.MetaCache).GetPartitionID).Return(UniqueID(100), nil).Build()
+					defer partition.UnPatch()
+					collection := mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(task.collectionID, nil).Build()
+					defer collection.UnPatch()
+					nextID := int64(1000)
+					alloc := mockey.Mock((*allocator.IDAllocator).Alloc).To(func(_ *allocator.IDAllocator, count uint32) (int64, int64, error) {
+						begin := nextID
+						nextID += int64(count)
+						return begin, nextID, nil
+					}).Build()
+					defer alloc.UnPatch()
+					wal := newPartialUpdateCASTestWAL(t, 9)
+					oldWAL := streaming.WAL()
+					streaming.SetWALForTest(wal)
+					defer streaming.SetWALForTest(oldWAL)
+					reads := 0
+					read := mockey.Mock(retrieveByPKs).To(func(_ context.Context, task *UpsertTask, ids *schemapb.IDs, _ []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+						reads++
+						if reads > 1 {
+							require.Equal(t, pks[1:], ids.GetIntId().GetData(), "committed rows must not be reread")
+						}
+						n := typeutil.GetSizeOfIDs(ids)
+						version := proto.Clone(task.req.FieldsData[1]).(*schemapb.FieldData)
+						version.GetScalars().GetIntData().Data = make([]int32, n)
+						present := make([]bool, n)
+						for i := range present {
+							present[i] = true
+						}
+						for _, proof := range task.partialUpdateCASGroups {
+							proof.ReadTs = uint64(1000 + reads)
+						}
+						return &milvuspb.QueryResults{Status: merr.Success(), FieldsData: []*schemapb.FieldData{partialUpdateCASPKFieldData(ids.GetIntId().GetData()), version, makeExtra(present, make([]int32, n))}}, segcore.StorageCost{}, nil
+					}).Build()
+					defer read.UnPatch()
+					insertAttempts, deleteAttempts, commits := map[int64]int{}, map[int64]int{}, map[int64]int{}
+					wal.appendHook = func(_ context.Context, msgs ...streamingmessage.MutableMessage) streaming.AppendResponses {
+						responses := streamingtypes.NewAppendResponseN(len(msgs))
+						for i, msg := range msgs {
+							if wal.appendCalls > 1 {
+								require.NotEqual(t, committedChannel, msg.VChannel(), "successful channel must never be replayed")
+							}
+							rejected := wal.appendCalls == 1 && msg.VChannel() != committedChannel
+							if msg.MessageType() == streamingmessage.MessageTypeInsert {
+								body := streamingmessage.MustAsMutableInsertMessageV1(msg).MustBody()
+								var ids, extraField *schemapb.FieldData
+								for _, f := range body.FieldsData {
+									if f.FieldId == 100 {
+										ids = f
+									}
+									if f.FieldId == 102 || f.FieldId == 201 {
+										extraField = f
+									}
+								}
+								require.NotNil(t, ids)
+								require.NotNil(t, extraField)
+								bitmap := typeutil.GetFieldDataValidData(extraField)
+								physical := 0
+								for row, pk := range ids.GetScalars().GetLongData().GetData() {
+									insertAttempts[pk]++
+									if !rejected {
+										commits[pk]++
+									}
+									originalRow := 0
+									for pks[originalRow] != pk {
+										originalRow++
+									}
+									present := valid[originalRow] || extra.GetDefaultValue() != nil
+									if len(bitmap) > 0 {
+										require.Equal(t, present, bitmap[row])
+									} else {
+										require.True(t, present)
+									}
+									if !present {
+										continue
+									}
+									value := int32(9)
+									if originalRow == 0 {
+										value = 7
+									} else if !valid[originalRow] {
+										value = 42
+									}
+									payloadRow := physical
+									payloadRows := len(extraField.GetScalars().GetIntData().GetData())
+									if kind == "struct_vector" {
+										payloadRows = len(extraField.GetVectors().GetVectorArray().GetData())
+									}
+									if kind == "struct_scalar" {
+										payloadRows = len(extraField.GetScalars().GetArrayData().GetData())
+									}
+									if payloadRows == len(bitmap) {
+										payloadRow = row
+									}
+									switch kind {
+									case "struct_vector":
+										require.Equal(t, []float32{float32(value), float32(value + 1)}, extraField.GetVectors().GetVectorArray().Data[payloadRow].GetFloatVector().GetData())
+									case "struct_scalar":
+										require.Equal(t, []int32{value}, extraField.GetScalars().GetArrayData().Data[payloadRow].GetIntData().GetData())
+									default:
+										require.Equal(t, value, extraField.GetScalars().GetIntData().Data[payloadRow])
+									}
+									physical++
+								}
+							} else if msg.MessageType() == streamingmessage.MessageTypeDelete {
+								body := streamingmessage.MustAsMutableDeleteMessageV1(msg).MustBody()
+								for _, pk := range body.GetPrimaryKeys().GetIntId().GetData() {
+									deleteAttempts[pk]++
+								}
+							}
+							if rejected {
+								responses.FillResponseAtIdx(streaming.AppendResponse{Error: streamingstatus.NewPartialUpdateRetryable("injected CAS conflict")}, i)
+							} else {
+								responses.FillResponseAtIdx(streaming.AppendResponse{AppendResult: &streamingtypes.AppendResult{TimeTick: uint64(2000 + wal.appendCalls)}}, i)
+							}
+						}
+						return responses
+					}
+					require.NoError(t, task.prepareUpsert(ctx))
+					require.NoError(t, task.insertPreExecute(ctx))
+					require.NoError(t, task.deletePreExecute(ctx))
+					require.NoError(t, task.Execute(ctx))
+					require.NoError(t, task.PostExecute(ctx))
+					require.Equal(t, 2, wal.appendCalls)
+					require.Equal(t, 2, reads)
+					require.Equal(t, map[int64]int{pks[0]: 1, pks[1]: 2, pks[2]: 2}, insertAttempts)
+					require.Equal(t, insertAttempts, deleteAttempts)
+					require.Equal(t, map[int64]int{pks[0]: 1, pks[1]: 1, pks[2]: 1}, commits)
+					require.Equal(t, pks, task.result.IDs.GetIntId().GetData())
+					require.Equal(t, []uint32{0, 1, 2}, task.result.SuccIndex)
+					require.EqualValues(t, 3, task.result.UpsertCnt)
+					for i := range original {
+						require.True(t, proto.Equal(original[i], task.partialUpdateOriginalFields[i]), "original payload must stay immutable")
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestPartialUpsertAccountingFailureCannotAuthorizeReplay(t *testing.T) {
+	for _, conditional := range []bool{false, true} {
+		for _, tc := range []struct {
+			name  string
+			cause error
+		}{
+			{"unavailable", merr.ErrServiceUnavailable},
+			{"schema", merr.ErrCollectionSchemaMismatch},
+			{"rate", merr.ErrServiceRateLimit},
+			{"cas", streamingstatus.NewPartialUpdateRetryable("CAS diagnostic cause")},
+			{"redirect", merr.Wrap(merr.ErrServiceUnavailable, "STREAMING_CODE_REPLICATE_VIOLATION")},
+		} {
+			t.Run(fmt.Sprintf("conditional=%t/%s", conditional, tc.name), func(t *testing.T) {
+				task, _, _ := partialUpdateCASTestTask(t, true, []int64{10}, []int64{10}, nil)
+				task.req.FieldOps = nil
+				if conditional {
+					task.req.WriteCondition = &milvuspb.WriteCondition{Field: "version", Op: milvuspb.WriteCondition_GT}
+				}
+				wal := newPartialUpdateCASTestWAL(t, 9)
+				old := streaming.WAL()
+				streaming.SetWALForTest(wal)
+				defer streaming.SetWALForTest(old)
+				preparePartialUpdateCASTestGroups(t, task)
+				inserts, _ := buildPartialUpdateCASTestMessages(t, task.collectionID, partialUpdateCASTestVChannels, []int64{10}, nil, task.partialUpdateCASGroups)
+				pack := mockey.Mock((*UpsertTask).packInsertMessage).Return(inserts, nil).Build()
+				defer pack.UnPatch()
+				deletePack := mockey.Mock((*UpsertTask).packDeleteMessage).Return(nil, nil).Build()
+				defer deletePack.UnPatch()
+				original := task.chMgr
+				task.chMgr = channelmgr.NewChannelsMgr(func(collectionID typeutil.UniqueID) (channelmgr.ChannelInfo, error) {
+					if wal.appendCalls > 0 {
+						return channelmgr.ChannelInfo{}, tc.cause
+					}
+					vchans, err := original.GetVChannels(collectionID)
+					if err != nil {
+						return channelmgr.ChannelInfo{}, err
+					}
+					pchans, err := original.GetChannels(collectionID)
+					return channelmgr.ChannelInfo{VChans: vchans, PChans: pchans}, err
+				})
+				wal.appendHook = func(_ context.Context, msgs ...streamingmessage.MutableMessage) streaming.AppendResponses {
+					require.True(t, task.partialState.appendAttempted)
+					responses := make([]streaming.AppendResponse, len(msgs))
+					for i := range responses {
+						responses[i].AppendResult = &streamingtypes.AppendResult{TimeTick: 2000}
+					}
+					return streaming.AppendResponses{Responses: responses}
+				}
+				err := task.Execute(context.Background())
+				require.ErrorIs(t, err, tc.cause, "retain the diagnostic cause")
+				status := merr.Status(err)
+				if conditional {
+					require.EqualValues(t, 112, status.GetCode())
+				} else {
+					require.EqualValues(t, 5, status.GetCode())
+				}
+				require.False(t, status.GetRetriable())
+				require.Equal(t, commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+				require.Equal(t, merr.SystemError, merr.GetErrorType(err))
+				require.NotEqual(t, "true", status.GetExtraInfo()[merr.InputErrorFlagKey])
+				require.False(t, isPartialUpdateCASRetry(err))
+				require.Equal(t, 1, wal.appendCalls, "result-accounting failure must never enter another append attempt")
+				require.Empty(t, task.partialState.written)
+			})
+		}
+	}
+}
+
+func TestPartialUpsertExecutionErrorUsesAppendBoundary(t *testing.T) {
+	for _, conditional := range []bool{false, true} {
+		for _, afterAppend := range []bool{false, true} {
+			for _, cause := range []error{merr.ErrCollectionSchemaMismatch, merr.ErrServiceRateLimit} {
+				t.Run(fmt.Sprintf("conditional=%t/after_append=%t/cause=%d", conditional, afterAppend, merr.Code(cause)), func(t *testing.T) {
+					task, _, _ := partialUpdateCASTestTask(t, true, []int64{10}, []int64{10}, nil)
+					task.req.FieldOps = nil
+					if conditional {
+						task.req.WriteCondition = &milvuspb.WriteCondition{Field: "version", Op: milvuspb.WriteCondition_GT}
+					}
+					wal := newPartialUpdateCASTestWAL(t, 9)
+					old := streaming.WAL()
+					streaming.SetWALForTest(wal)
+					defer streaming.SetWALForTest(old)
+					preparePartialUpdateCASTestGroups(t, task)
+					inserts, _ := buildPartialUpdateCASTestMessages(t, task.collectionID, partialUpdateCASTestVChannels, []int64{10}, nil, task.partialUpdateCASGroups)
+					var packErr error
+					if !afterAppend {
+						packErr = cause
+					}
+					pack := mockey.Mock((*UpsertTask).packInsertMessage).Return(inserts, packErr).Build()
+					defer pack.UnPatch()
+					deletePack := mockey.Mock((*UpsertTask).packDeleteMessage).Return(nil, nil).Build()
+					defer deletePack.UnPatch()
+					read := mockey.Mock(retrieveByPKs).Return((*milvuspb.QueryResults)(nil), segcore.StorageCost{}, cause).Build()
+					defer read.UnPatch()
+					wal.appendHook = func(_ context.Context, msgs ...streamingmessage.MutableMessage) streaming.AppendResponses {
+						responses := streamingtypes.NewAppendResponseN(len(msgs))
+						responses.FillAllError(streamingstatus.NewPartialUpdateRetryable("injected rejection"))
+						return responses
+					}
+					err := task.Execute(context.Background())
+					require.ErrorIs(t, err, cause)
+					expectedCode := merr.Code(cause)
+					if conditional && afterAppend {
+						expectedCode = 112
+					}
+					require.Equal(t, expectedCode, merr.Code(err))
+					require.Equal(t, afterAppend, task.partialState.appendAttempted)
+					if afterAppend {
+						require.Equal(t, 1, wal.appendCalls)
+					} else {
+						require.Zero(t, wal.appendCalls)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestPartialUpsertCASRetryWaitInterrupted(t *testing.T) {
+	for _, conditional := range []bool{false, true} {
+		for _, timeout := range []bool{false, true} {
+			t.Run(fmt.Sprintf("conditional=%t/timeout=%t", conditional, timeout), func(t *testing.T) {
+				pks := []int64{1, 2}
+				channelsFor := func() []uint32 {
+					channels, err := typeutil.HashPK2Channels(partialUpdateCASIDs(pks), partialUpdateCASTestVChannels)
+					require.NoError(t, err)
+					return channels
+				}
+				for channelsFor()[0] == channelsFor()[1] {
+					pks[1]++
+				}
+				committedChannel := partialUpdateCASTestVChannels[channelsFor()[0]]
+				task, _, _ := partialUpdateCASTestTask(t, true, pks, pks, nil)
+				task.req.FieldOps = nil
+				if conditional {
+					task.req.WriteCondition = &milvuspb.WriteCondition{Field: "version", Op: milvuspb.WriteCondition_GT}
+				}
+				wal := newPartialUpdateCASTestWAL(t, 9)
+				old := streaming.WAL()
+				streaming.SetWALForTest(wal)
+				defer streaming.SetWALForTest(old)
+				preparePartialUpdateCASTestGroups(t, task)
+				inserts, _ := buildPartialUpdateCASTestMessages(t, task.collectionID, partialUpdateCASTestVChannels, pks, nil, task.partialUpdateCASGroups)
+				pack := mockey.Mock((*UpsertTask).packInsertMessage).Return(inserts, nil).Build()
+				defer pack.UnPatch()
+				deletePack := mockey.Mock((*UpsertTask).packDeleteMessage).Return(nil, nil).Build()
+				defer deletePack.UnPatch()
+				read := mockey.Mock(retrieveByPKs).Return((*milvuspb.QueryResults)(nil), segcore.StorageCost{}, merr.ErrServiceUnavailable).Build()
+				defer read.UnPatch()
+				wal.appendHook = func(_ context.Context, msgs ...streamingmessage.MutableMessage) streaming.AppendResponses {
+					responses := streamingtypes.NewAppendResponseN(len(msgs))
+					for i, msg := range msgs {
+						if msg.VChannel() == committedChannel {
+							responses.Responses[i].AppendResult = &streamingtypes.AppendResult{TimeTick: 2000}
+						} else {
+							responses.Responses[i].Error = streamingstatus.NewPartialUpdateRetryable("injected conflict")
+						}
+					}
+					return responses
+				}
+
+				// Keep the backoff timer pending so cancellation is the only ready
+				// branch, even when the test process is descheduled for a while.
+				timer := time.NewTimer(time.Hour)
+				defer timer.Stop()
+				waiting := make(chan struct{})
+				backoff := mockey.Mock(time.NewTimer).To(func(delay time.Duration) *time.Timer {
+					require.Equal(t, partialUpdateCASRetryBackoff, delay)
+					close(waiting)
+					return timer
+				}).Build()
+				defer backoff.UnPatch()
+				ctx, cancel := context.WithCancel(context.Background())
+				cause := context.Canceled
+				if timeout {
+					cancel()
+					ctx, cancel = context.WithTimeout(context.Background(), time.Second)
+					cause = context.DeadlineExceeded
+				} else {
+					go func() {
+						select {
+						case <-waiting:
+							cancel()
+						case <-ctx.Done():
+						}
+					}()
+				}
+				defer cancel()
+				err := task.Execute(ctx)
+				require.ErrorIs(t, err, cause)
+				require.Contains(t, err.Error(), "while waiting to retry CAS conflict")
+				expectedCode := merr.Code(cause)
+				if conditional {
+					expectedCode = 112
+				}
+				status := merr.Status(err)
+				require.Equal(t, expectedCode, status.GetCode())
+				expectedStatus := merr.Status(cause)
+				if conditional {
+					expectedStatus = merr.Status(merr.ErrCollectionConditionalUpsertExecution)
+				}
+				require.Equal(t, expectedStatus.GetErrorCode(), status.GetErrorCode())
+				require.False(t, status.GetRetriable())
+				require.False(t, isPartialUpdateCASRetry(err))
+				require.Equal(t, 1, backoff.Times())
+				require.Equal(t, 1, wal.appendCalls)
+				require.Equal(t, 1, pack.Times())
+				require.Equal(t, 1, deletePack.Times())
+				require.Zero(t, read.Times(), "cancellation must stop request rebuilding")
+				require.Equal(t, map[int]any{0: pks[0]}, task.partialState.written)
+				require.Equal(t, []int{1}, task.partialState.retryRows)
+				require.EqualValues(t, len(pks), task.req.GetNumRows())
+			})
+		}
+	}
+}
+
+// Read counts in condition_not_met, missing_skipped, written order. Each test
+// owns distinct collection labels so failures and retries cannot pollute peers.
+func conditionalUpsertMetricReader(t *testing.T, task *UpsertTask) func() [3]float64 {
+	t.Helper()
+	task.req.CollectionName = strings.ReplaceAll(t.Name(), "/", "_")
+	labels := []string{paramtable.GetStringNodeID(), task.req.GetDbName(), task.req.GetCollectionName()}
+	outcomes := []string{"condition_not_met", "missing_skipped", "written"}
+	t.Cleanup(func() {
+		for _, outcome := range outcomes {
+			metrics.ProxyUpsertWriteConditionRows.DeleteLabelValues(labels[0], labels[1], labels[2], outcome)
+		}
+	})
+	return func() [3]float64 {
+		var counts [3]float64
+		for i, outcome := range outcomes {
+			counts[i] = promtest.ToFloat64(metrics.ProxyUpsertWriteConditionRows.WithLabelValues(labels[0], labels[1], labels[2], outcome))
+		}
+		return counts
+	}
+}
+
+func TestConditionalUpsertMetricsSelectionErrorIsAtomic(t *testing.T) {
+	task := partialUpdateAutoIDInsertTestTask(t, false)
+	task.req.WriteCondition = &milvuspb.WriteCondition{Field: "value", Op: milvuspb.WriteCondition_GT}
+	task.initPartialState()
+	counts := conditionalUpsertMetricReader(t, task)
+	task.upsertMsg.InsertMsg.FieldsData[1].GetScalars().GetIntData().Data = []int32{1, 2}
+	// The first row would skip, but the second row's stored version is absent.
+	stored := proto.Clone(task.req.FieldsData[1]).(*schemapb.FieldData)
+	stored.GetScalars().GetIntData().Data = []int32{10}
+	_, _, err := task.selectConditionalRows(partialUpdateCASIDs([]int64{1, 2}), partialUpdateCASIDs([]int64{1, 2}), []*schemapb.FieldData{stored}, []int{0, 1}, nil)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.Equal(t, [3]float64{}, counts(), "an incomplete selection must not publish provisional skips")
+}
+
+func TestConditionalUpsertMetricsAllSkippedAndSeparateRPCs(t *testing.T) {
+	wal := newPartialUpdateCASTestWAL(t, 9)
+	old := streaming.WAL()
+	streaming.SetWALForTest(wal)
+	defer streaming.SetWALForTest(old)
+	for rpc := 1; rpc <= 2; rpc++ {
+		task := partialUpdateAutoIDInsertTestTask(t, false)
+		task.req.NumRows, task.upsertMsg.InsertMsg.NumRows = 4, 4
+		task.req.WriteCondition = &milvuspb.WriteCondition{Field: "value", Op: milvuspb.WriteCondition_GT, OnMissing: milvuspb.WriteCondition_SKIP_IF_MISSING}
+		task.req.FieldsData[0] = partialUpdateCASPKFieldData([]int64{1, 2, 3, 4})
+		task.req.FieldsData[1].GetScalars().GetIntData().Data = []int32{1, 1, 1, 1}
+		task.upsertMsg.InsertMsg.FieldsData = task.req.FieldsData
+		task.partialUpdateOriginalFields = cloneFieldDataList(task.req.FieldsData)
+		task.initPartialState()
+		counts := conditionalUpsertMetricReader(t, task)
+		stored := proto.Clone(task.req.FieldsData[1]).(*schemapb.FieldData)
+		stored.GetScalars().GetIntData().Data = []int32{10, 10}
+		updates, inserts, err := task.selectConditionalRows(partialUpdateCASIDs([]int64{1, 2, 3, 4}), partialUpdateCASIDs([]int64{1, 2}), []*schemapb.FieldData{stored}, []int{0, 1}, []int{2, 3})
+		require.NoError(t, err)
+		require.Empty(t, updates)
+		require.Empty(t, inserts)
+		require.Equal(t, [3]float64{float64(2 * rpc), float64(2 * rpc), 0}, counts(), "separate RPCs count their own decisions")
+		require.NoError(t, task.Execute(context.Background()))
+		require.NoError(t, task.PostExecute(context.Background()))
+		require.Zero(t, task.result.UpsertCnt)
+		require.False(t, task.partialState.appendAttempted)
+		require.Zero(t, wal.appendCalls)
+	}
+}
+
+func TestConditionalUpsertMetricsSurviveLaterPreparationFailure(t *testing.T) {
+	task := partialUpdateAutoIDInsertTestTask(t, false)
+	schema := proto.Clone(task.schema.CollectionSchema).(*schemapb.CollectionSchema)
+	schema.AutoID, schema.Fields[0].AutoID = false, false
+	task.schema = mustNewSchemaInfo(schema)
+	task.req.NumRows, task.upsertMsg.InsertMsg.NumRows = 3, 3
+	task.req.WriteCondition = &milvuspb.WriteCondition{Field: "value", Op: milvuspb.WriteCondition_GT, OnMissing: milvuspb.WriteCondition_SKIP_IF_MISSING}
+	task.req.FieldsData[0] = partialUpdateCASPKFieldData([]int64{1, 2, 3})
+	task.req.FieldsData[1].GetScalars().GetIntData().Data = []int32{100, 200, 300}
+	task.upsertMsg.InsertMsg.FieldsData = task.req.FieldsData
+	task.partialUpdateOriginalFields = cloneFieldDataList(task.req.FieldsData)
+	counts := conditionalUpsertMetricReader(t, task)
+	wal := newPartialUpdateCASTestWAL(t, 9)
+	old := streaming.WAL()
+	streaming.SetWALForTest(wal)
+	defer streaming.SetWALForTest(old)
+	read := mockey.Mock(retrieveByPKs).To(func(_ context.Context, task *UpsertTask, _ *schemapb.IDs, _ []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+		for _, proof := range task.partialUpdateCASGroups {
+			proof.ReadTs = 1000
+		}
+		stored := proto.Clone(task.req.FieldsData[1]).(*schemapb.FieldData)
+		stored.GetScalars().GetIntData().Data = []int32{1000, 0}
+		return &milvuspb.QueryResults{Status: merr.Success(), FieldsData: []*schemapb.FieldData{partialUpdateCASPKFieldData([]int64{1, 2}), stored}}, segcore.StorageCost{}, nil
+	}).Build()
+	defer read.UnPatch()
+	alloc := mockey.Mock((*allocator.IDAllocator).Alloc).Return(int64(0), int64(0), merr.ErrServiceUnavailable).Build()
+	defer alloc.UnPatch()
+	require.NoError(t, task.prepareUpsert(context.Background()))
+	require.Equal(t, [3]float64{1, 1, 0}, counts())
+	require.ErrorIs(t, task.insertPreExecute(context.Background()), merr.ErrServiceUnavailable)
+	require.Equal(t, [3]float64{1, 1, 0}, counts(), "later preparation failure does not revoke completed row decisions")
+	require.Zero(t, wal.appendCalls)
+	require.False(t, task.partialState.appendAttempted)
+}
+
+func TestConditionalUpsertMetricsMixedCommitAndRetry(t *testing.T) {
+	for _, scenario := range []string{"cas_then_skip", "unknown_commit"} {
+		t.Run(scenario, func(t *testing.T) {
+			task := partialUpdateAutoIDInsertTestTask(t, false)
+			schema := proto.Clone(task.schema.CollectionSchema).(*schemapb.CollectionSchema)
+			schema.AutoID, schema.Fields[0].AutoID = false, false
+			task.schema = mustNewSchemaInfo(schema)
+			channelFor := func(pk int64) string {
+				indexes, err := typeutil.HashPK2Channels(partialUpdateCASIDs([]int64{pk}), partialUpdateCASTestVChannels)
+				require.NoError(t, err)
+				return partialUpdateCASTestVChannels[indexes[0]]
+			}
+			committedPK, retryPK := int64(1), int64(2)
+			for channelFor(retryPK) == channelFor(committedPK) {
+				retryPK++
+			}
+			skippedPK := retryPK + 1
+			pks := []int64{skippedPK, committedPK, retryPK}
+			committedChannel := channelFor(committedPK)
+			task.req.NumRows, task.upsertMsg.InsertMsg.NumRows = 3, 3
+			task.req.WriteCondition = &milvuspb.WriteCondition{Field: "value", Op: milvuspb.WriteCondition_GT}
+			task.req.FieldsData[0] = partialUpdateCASPKFieldData(pks)
+			task.req.FieldsData[1].GetScalars().GetIntData().Data = []int32{100, 200, 300}
+			task.upsertMsg.InsertMsg.FieldsData = task.req.FieldsData
+			task.partialUpdateOriginalFields = cloneFieldDataList(task.req.FieldsData)
+			counts := conditionalUpsertMetricReader(t, task)
+			partition := mockey.Mock((*metacache.MetaCache).GetPartitionID).Return(UniqueID(100), nil).Build()
+			defer partition.UnPatch()
+			collection := mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(task.collectionID, nil).Build()
+			defer collection.UnPatch()
+			nextID := int64(1000)
+			alloc := mockey.Mock((*allocator.IDAllocator).Alloc).To(func(_ *allocator.IDAllocator, count uint32) (int64, int64, error) {
+				begin := nextID
+				nextID += int64(count)
+				return begin, nextID, nil
+			}).Build()
+			defer alloc.UnPatch()
+			wal := newPartialUpdateCASTestWAL(t, 9)
+			old := streaming.WAL()
+			streaming.SetWALForTest(wal)
+			defer streaming.SetWALForTest(old)
+			reads := 0
+			read := mockey.Mock(retrieveByPKs).To(func(_ context.Context, task *UpsertTask, ids *schemapb.IDs, _ []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+				reads++
+				if reads > 1 {
+					require.Equal(t, []int64{retryPK}, ids.GetIntId().GetData(), "terminal rows must not be reread")
+				}
+				values := make([]int32, typeutil.GetSizeOfIDs(ids))
+				for row, pk := range ids.GetIntId().GetData() {
+					if pk == skippedPK || reads == 3 {
+						values[row] = 1000
+					}
+				}
+				stored := proto.Clone(task.req.FieldsData[1]).(*schemapb.FieldData)
+				stored.GetScalars().GetIntData().Data = values
+				for _, proof := range task.partialUpdateCASGroups {
+					proof.ReadTs = uint64(1000 + reads)
+				}
+				return &milvuspb.QueryResults{Status: merr.Success(), FieldsData: []*schemapb.FieldData{partialUpdateCASPKFieldData(ids.GetIntId().GetData()), stored}}, segcore.StorageCost{}, nil
+			}).Build()
+			defer read.UnPatch()
+			attempts := map[int64]int{}
+			wal.appendHook = func(_ context.Context, msgs ...streamingmessage.MutableMessage) streaming.AppendResponses {
+				expectedWritten := float64(0)
+				if wal.appendCalls > 1 {
+					expectedWritten = 1
+				}
+				require.Equal(t, [3]float64{1, 0, expectedWritten}, counts(), "pending CAS attempts are not confirmed writes")
+				responses := make([]streaming.AppendResponse, len(msgs))
+				for i, msg := range msgs {
+					if wal.appendCalls > 1 {
+						require.NotEqual(t, committedChannel, msg.VChannel(), "successful channel must not be replayed")
+					}
+					if msg.MessageType() == streamingmessage.MessageTypeInsert {
+						for _, field := range streamingmessage.MustAsMutableInsertMessageV1(msg).MustBody().FieldsData {
+							if field.FieldId == 100 {
+								for _, pk := range field.GetScalars().GetLongData().GetData() {
+									require.NotEqual(t, skippedPK, pk)
+									attempts[pk]++
+								}
+							}
+						}
+					}
+					if msg.VChannel() == committedChannel {
+						responses[i].AppendResult = &streamingtypes.AppendResult{TimeTick: 2000}
+					} else if scenario == "cas_then_skip" {
+						responses[i].Error = streamingstatus.NewPartialUpdateRetryable("injected conflict")
+					} else {
+						responses[i].Error = context.DeadlineExceeded
+					}
+				}
+				return streaming.AppendResponses{Responses: responses}
+			}
+			require.NoError(t, task.prepareUpsert(context.Background()))
+			require.NoError(t, task.insertPreExecute(context.Background()))
+			require.NoError(t, task.deletePreExecute(context.Background()))
+			err := task.Execute(context.Background())
+			if scenario == "cas_then_skip" {
+				require.NoError(t, err)
+				require.NoError(t, task.PostExecute(context.Background()))
+				require.Equal(t, [3]float64{2, 0, 1}, counts())
+				require.Equal(t, 3, reads)
+				require.Equal(t, 2, wal.appendCalls)
+				require.Equal(t, map[int64]int{committedPK: 1, retryPK: 2}, attempts)
+				require.Equal(t, []uint32{1}, task.result.SuccIndex)
+				require.Equal(t, []int64{committedPK}, task.result.IDs.GetIntId().GetData())
+			} else {
+				require.ErrorIs(t, err, merr.ErrCollectionConditionalUpsertExecution)
+				// Scheduler never calls PostExecute on an Execute error. Already
+				// confirmed commits must remain visible in the metric regardless.
+				require.Equal(t, [3]float64{1, 0, 1}, counts())
+				require.Equal(t, 1, reads)
+				require.Equal(t, 1, wal.appendCalls)
+				require.Equal(t, map[int64]int{committedPK: 1, retryPK: 1}, attempts)
+			}
 		})
 	}
 }

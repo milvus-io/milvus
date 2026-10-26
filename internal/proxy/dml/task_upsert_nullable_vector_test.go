@@ -172,6 +172,19 @@ func TestUpsertPreExecuteNullableVectorValidity(t *testing.T) {
 						}).Build()
 						t.Cleanup(func() { allocation.UnPatch() })
 						patch(retrieveByPKs, queryResult, segcore.StorageCost{}, nil)
+						bind := mockey.Mock((*UpsertTask).preparePartialUpdateCASGroups).To(func(task *UpsertTask, ctx context.Context) error {
+							groups, err := task.buildPartialUpdateCASGroups()
+							if err != nil {
+								return err
+							}
+							for _, proof := range groups {
+								proof.ReadTs = 1000
+								proof.ObservedPchannelTerm = 9
+							}
+							task.partialUpdateCASGroups = groups
+							return nil
+						}).Build()
+						t.Cleanup(func() { bind.UnPatch() })
 
 						// Exercise the input boundary, partial merge, and final insert validation.
 						err := task.PreExecute(context.Background())

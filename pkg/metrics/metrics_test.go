@@ -332,6 +332,7 @@ func observeProxyCollection(nodeID, db, collection string) {
 	ProxySearchVectors.WithLabelValues(nodeID, db, collection).Add(1)
 	ProxyInsertVectors.WithLabelValues(nodeID, db, collection).Add(1)
 	ProxyUpsertVectors.WithLabelValues(nodeID, db, collection).Add(1)
+	ProxyUpsertWriteConditionRows.WithLabelValues(nodeID, db, collection, "written").Add(1)
 	ProxyDeleteVectors.WithLabelValues(nodeID, db, collection).Add(1)
 	for _, parentType := range []string{"array", "struct_array"} {
 		ProxyPathReplaceParentOperations.WithLabelValues(nodeID, db, collection, parentType).Add(1)
