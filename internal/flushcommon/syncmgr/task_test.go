@@ -534,6 +534,70 @@ func (s *SyncTaskSuite) TestSyncTask_MarshalJSON() {
 	s.JSONEq(expectedJSON, string(data))
 }
 
+// TestSyncTask_MarshalJSONConcurrentWithRun serializes the task stats while
+// Run writes flushedSize/execTime and releases the pack's delta data, the
+// overlap a DataNode SyncTaskKey metrics request can hit. The race detector
+// reports any unsynchronized access between the two.
+func (s *SyncTaskSuite) TestSyncTask_MarshalJSONConcurrentWithRun() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil)
+
+	bfs := pkoracle.NewBloomFilterSet()
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{Level: datapb.SegmentLevel_L0}, bfs, nil, metacache.NewEmptySegmentStats())
+	s.metacache.EXPECT().GetSegmentByID(s.segmentID).Return(seg, true)
+	s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
+	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
+	deleteData := s.getDeleteBuffer()
+	task := s.getSuiteSyncTask(new(SyncPack).
+		WithDeleteData(deleteData).
+		WithFlush().
+		WithCheckpoint(&msgpb.MsgPosition{
+			ChannelName: s.channelName,
+			MsgID:       []byte{1, 2, 3, 4},
+			Timestamp:   100,
+		}))
+	task.WithMetaWriter(BrokerMetaWriter(s.broker, 1)).WithSchema(s.schema)
+
+	before := &metricsinfo.SyncTask{}
+	data, err := task.MarshalJSON()
+	s.Require().NoError(err)
+	s.Require().NoError(json.Unmarshal(data, before))
+	s.Equal(deleteData.RowCount, before.DeltaRowCount)
+
+	done := make(chan struct{})
+	readerDone := make(chan struct{})
+	stopReader := func() {
+		close(done)
+		<-readerDone
+	}
+	go func() {
+		defer close(readerDone)
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			_, err := task.MarshalJSON()
+			s.NoError(err)
+		}
+	}()
+
+	func() {
+		defer stopReader()
+		err = task.Run(ctx)
+	}()
+	s.NoError(err)
+
+	after := &metricsinfo.SyncTask{}
+	data, err = task.MarshalJSON()
+	s.Require().NoError(err)
+	s.Require().NoError(json.Unmarshal(data, after))
+	s.Zero(after.DeltaRowCount)
+	s.Positive(after.FlushSize)
+}
+
 func TestSyncTask(t *testing.T) {
 	suite.Run(t, new(SyncTaskSuite))
 }

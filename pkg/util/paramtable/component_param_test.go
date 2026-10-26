@@ -45,6 +45,27 @@ func TestDataNodeConcurrencyAndImportMemoryFallbacks(t *testing.T) {
 	}
 }
 
+func TestQueryNodeSparseInterimIndexAlgorithms(t *testing.T) {
+	params := &ComponentParam{}
+	base := NewBaseTable(SkipRemote(true))
+	t.Cleanup(base.mgr.Close)
+	params.Init(base)
+	cfg := &params.QueryNodeCfg
+	assert.Equal(t, "2.6.26", cfg.InterimIndexSparseIPAlgo.Version)
+	assert.Equal(t, "2.6.26", cfg.InterimIndexSparseBM25Algo.Version)
+	assert.False(t, cfg.InterimIndexSparseIPAlgo.Export)
+	assert.False(t, cfg.InterimIndexSparseBM25Algo.Export)
+	assert.Empty(t, cfg.InterimIndexSparseIPAlgo.GetValue())
+	assert.Empty(t, cfg.InterimIndexSparseBM25Algo.GetValue())
+	require.NoError(t, params.Save(cfg.InterimIndexSparseIPAlgo.Key, " sindi "))
+	require.NoError(t, params.Save(cfg.InterimIndexSparseBM25Algo.Key, "daat_maxscore"))
+	assert.Equal(t, "SINDI", cfg.InterimIndexSparseIPAlgo.GetValue())
+	assert.Equal(t, "DAAT_MAXSCORE", cfg.InterimIndexSparseBM25Algo.GetValue())
+	require.NoError(t, params.Reset(cfg.InterimIndexSparseIPAlgo.Key))
+	assert.Empty(t, cfg.InterimIndexSparseIPAlgo.GetValue())
+	assert.Equal(t, "DAAT_MAXSCORE", cfg.InterimIndexSparseBM25Algo.GetValue())
+}
+
 func TestQueryNodeStrictGroupSettings(t *testing.T) {
 	params := &ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true)))
@@ -1222,6 +1243,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.EnableActiveStandby.GetAsBool(), false)
 		t.Logf("dataCoord EnableActiveStandby = %t", Params.EnableActiveStandby.GetAsBool())
 		assert.Equal(t, int64(4096), Params.GrowingSegmentsMemSizeInMB.GetAsInt64())
+		assert.Equal(t, 0, Params.CompactionMaxTaskNum.GetAsInt())
 
 		assert.Equal(t, true, Params.AutoBalance.GetAsBool())
 		assert.Equal(t, 10, Params.CheckAutoBalanceConfigInterval.GetAsInt())
@@ -1531,6 +1553,11 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(256*1024), params.StreamingCfg.WALRateLimitNodeMemoryAdaptiveRateLimit.RecoveryIncremental.GetAsSize())
 		assert.Equal(t, 1*time.Second, params.StreamingCfg.WALRateLimitNodeMemoryAdaptiveRateLimit.RecoveryIncreaseInterval.GetAsDurationByParse())
 
+		// WAB pressure is independent of legacy cache capacity and recovery-tail timing.
+		assert.Equal(t, 1.5, params.StreamingCfg.WALRateLimitWABSlowdownRatio.GetAsFloat())
+		assert.Equal(t, int64(32*1024*1024), params.StreamingCfg.WALRateLimitWABSlowdownRate.GetAsSize())
+		assert.Equal(t, float64(2), params.StreamingCfg.WALRateLimitWABRejectRatio.GetAsFloat())
+
 		// recovery storage adaptive rate limit
 		assert.Equal(t, 30*time.Second, params.StreamingCfg.WALRateLimitRecoveryStorageAdaptiveRateLimit.SlowdownStartupDelayInterval.GetAsDurationByParse())
 		assert.Equal(t, int64(32*1024*1024), params.StreamingCfg.WALRateLimitRecoveryStorageAdaptiveRateLimit.SlowdownHWM.GetAsSize())
@@ -1543,19 +1570,6 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 30*time.Second, params.StreamingCfg.WALRateLimitRecoveryStorageAdaptiveRateLimit.RecoveryNormalDelayInterval.GetAsDurationByParse())
 		assert.Equal(t, int64(1*1024*1024), params.StreamingCfg.WALRateLimitRecoveryStorageAdaptiveRateLimit.RecoveryIncremental.GetAsSize())
 		assert.Equal(t, 1*time.Second, params.StreamingCfg.WALRateLimitRecoveryStorageAdaptiveRateLimit.RecoveryIncreaseInterval.GetAsDurationByParse())
-
-		// flusher adaptive rate limit
-		assert.Equal(t, 10*time.Second, params.StreamingCfg.WALRateLimitFlusherAdaptiveRateLimit.SlowdownStartupDelayInterval.GetAsDurationByParse())
-		assert.Equal(t, int64(16*1024*1024), params.StreamingCfg.WALRateLimitFlusherAdaptiveRateLimit.SlowdownHWM.GetAsSize())
-		assert.Equal(t, int64(2*1024*1024), params.StreamingCfg.WALRateLimitFlusherAdaptiveRateLimit.SlowdownLWM.GetAsSize())
-		assert.Equal(t, 30*time.Second, params.StreamingCfg.WALRateLimitFlusherAdaptiveRateLimit.SlowdownDecreaseInterval.GetAsDurationByParse())
-		assert.Equal(t, 0.8, params.StreamingCfg.WALRateLimitFlusherAdaptiveRateLimit.SlowdownDecreaseRatio.GetAsFloat())
-		assert.Equal(t, 2*time.Minute, params.StreamingCfg.WALRateLimitFlusherAdaptiveRateLimit.SlowdownRejectDelayInterval.GetAsDurationByParse())
-		assert.Equal(t, int64(64*1024*1024), params.StreamingCfg.WALRateLimitFlusherAdaptiveRateLimit.RecoveryHWM.GetAsSize())
-		assert.Equal(t, int64(16*1024*1024), params.StreamingCfg.WALRateLimitFlusherAdaptiveRateLimit.RecoveryLWM.GetAsSize())
-		assert.Equal(t, 5*time.Second, params.StreamingCfg.WALRateLimitFlusherAdaptiveRateLimit.RecoveryNormalDelayInterval.GetAsDurationByParse())
-		assert.Equal(t, int64(5*1024*1024), params.StreamingCfg.WALRateLimitFlusherAdaptiveRateLimit.RecoveryIncremental.GetAsSize())
-		assert.Equal(t, 1*time.Second, params.StreamingCfg.WALRateLimitFlusherAdaptiveRateLimit.RecoveryIncreaseInterval.GetAsDurationByParse())
 
 		params.Save(params.StreamingCfg.WALBalancerTriggerInterval.Key, "50s")
 		params.Save(params.StreamingCfg.WALBalancerBackoffInitialInterval.Key, "50s")

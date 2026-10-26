@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,6 +46,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+const enableArraySortIndexKey = "enable_array_sort_index"
 
 type indexBuildTask struct {
 	*model.SegmentIndex
@@ -625,6 +628,17 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		return nil, merr.WrapErrFieldNotFound(fieldID)
 	}
 	buildField := fieldSchemaForIndexBuild(schema, field)
+
+	if typeutil.IsArrayType(field.GetDataType()) || typeutil.IsJSONType(field.GetDataType()) {
+		// Resolve the software gate for every build, including new segments of an
+		// existing HYBRID index. Neither saved index nor schema params may override it.
+		params = DeleteParams(params, []string{enableArraySortIndexKey})
+		typeParams = DeleteParams(typeParams, []string{enableArraySortIndexKey})
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   enableArraySortIndexKey,
+			Value: strconv.FormatBool(Params.DataCoordCfg.EnableArraySortIndex.GetAsBool()),
+		})
+	}
 
 	// Extract dim only for vector types to avoid unnecessary warnings
 	dim := -1

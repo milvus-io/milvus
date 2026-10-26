@@ -284,13 +284,6 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 	return r, nil
 }
 
-// Read overrides the roWALAdaptorImpl.Read to automatically add the append rate counter.
-func (w *walAdaptorImpl) Read(ctx context.Context, opts wal.ReadOption) (wal.Scanner, error) {
-	// Automatically add the append rate counter to the read options.
-	opts.AppendRateCounter = w.appendRateCounter
-	return w.roWALAdaptorImpl.Read(ctx, opts)
-}
-
 // appendWithOptionalChunking appends a logical message, splitting it into WAL
 // records only when streaming.splitChunkSN is enabled. During a rolling
 // upgrade, proxy.splitChunk stays enabled until every StreamingNode has been
@@ -538,4 +531,8 @@ func buildInterceptorsAndReleaseInitialSnapshot(
 	result := buildInterceptor(builders, param)
 	param.InitialRecoverSnapshot = nil
 	return result
+}
+
+func (w *walAdaptorImpl) TransformLog() wal.TransformLogAccesser {
+	return w.viewResourceManager
 }

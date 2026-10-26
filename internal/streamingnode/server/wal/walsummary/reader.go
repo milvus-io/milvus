@@ -85,7 +85,7 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 	if m.readableChanged == nil {
 		m.readableChanged = make(chan struct{})
 	}
-	batch := TransformBatch{CoveredThrough: after, ReadableThrough: m.readableThrough, Changed: m.readableChanged}
+	batch := TransformBatch{CoveredThrough: after, ReadableThrough: max(m.readableThrough, m.queryBarriers[vchannel]), Changed: m.readableChanged}
 	if notifier := m.transformNotifiers[vchannel]; notifier != nil {
 		if notifier.changed == nil {
 			notifier.changed = make(chan struct{})

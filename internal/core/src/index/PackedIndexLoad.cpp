@@ -118,11 +118,10 @@ InspectPackedIndexFile(const std::vector<std::string>& files,
 
 folly::coro::Task<IIndexReaderBasePtr>
 RunPackedIndexLoad(PackedIndexSource& source,
-                   const storage::LoadOptions& fixed_options,
+                   storage::LoadOptions options,
                    PackedPlanFn make_plan,
                    PackedFinishFn finish,
                    milvus::OpContext* context) {
-    auto options = fixed_options;
     options.op_ctx = context;
     const auto priority =
         context && context->runtime_load_priority.value_or(0) != 0

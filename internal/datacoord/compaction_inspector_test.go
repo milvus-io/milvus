@@ -572,6 +572,33 @@ func (s *CompactionPlanHandlerSuite) TestCompactionQueueFull() {
 	s.Error(s.handler.submitTask(t2))
 }
 
+func (s *CompactionPlanHandlerSuite) TestIsFullAtMaxTaskNum() {
+	for _, tc := range []struct {
+		name             string
+		maxTaskNum       string
+		pending, running int
+		full             bool
+	}{
+		{"0 is unlimited", "0", 2, 2, false},
+		{"-1 is unlimited", "-1", 2, 2, false},
+		{"below the limit", "5", 2, 2, false},
+		{"pending and running tasks reach the limit", "4", 2, 2, true},
+	} {
+		s.Run(tc.name, func() {
+			paramtable.Get().Save(Params.DataCoordCfg.CompactionMaxTaskNum.Key, tc.maxTaskNum)
+			defer paramtable.Get().Reset(Params.DataCoordCfg.CompactionMaxTaskNum.Key)
+			inspector := newCompactionInspector(s.mockMeta, nil, nil, nil, nil, newMockVersionManager())
+			for i := 0; i < tc.pending; i++ {
+				s.Require().NoError(inspector.submitTask(newMixCompactionTask(&datapb.CompactionTask{PlanID: int64(1 + i)}, nil, s.mockMeta, newMockVersionManager())))
+			}
+			for i := 0; i < tc.running; i++ {
+				inspector.executingTasks[int64(100+i)] = newMixCompactionTask(&datapb.CompactionTask{PlanID: int64(100 + i)}, nil, s.mockMeta, newMockVersionManager())
+			}
+			s.Equal(tc.full, inspector.isFull())
+		})
+	}
+}
+
 func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
 	s.SetupTest()
 	s.mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything, mock.Anything).Return(true, true).Maybe()

@@ -217,6 +217,7 @@ func (p *ComponentParam) versionGateItems() []*ParamItem {
 	return []*ParamItem{
 		&p.FunctionCfg.EnableWriteBeforeMaterialization,
 		&p.DataCoordCfg.ImportEnableIDRangeMsg,
+		&p.DataCoordCfg.EnableArraySortIndex,
 	}
 }
 
@@ -899,8 +900,8 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Key:          "common.threadCoreCoefficient.middlePriority",
 		Version:      "2.0.0",
 		DefaultValue: strconv.Itoa(DefaultMiddlePriorityThreadCoreCoefficient),
-		Doc: "This parameter specify how many times the number of threads " +
-			"is the number of cores in middle priority pool",
+		Doc: "Thread-to-core ratio for each of the independent middle priority " +
+			"and search fanout pools; both follow maxThreadsSize.",
 		Export: true,
 	}
 	p.MiddlePriorityThreadCoreCoefficient.Init(base.mgr)
@@ -1053,7 +1054,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 			`Only affects index build; query-node loads keep the default window. ` +
 			`Batch decode for these reads runs on the segcore LOW-priority pool ` +
 			`(common.threadCoreCoefficient.lowPriority), deliberately not the ` +
-			`MIDDLE pool that serves search reduce.`,
+			`MIDDLE pool used by batch field and index loading.`,
 		Export: false,
 	}
 	p.IndexBuildReadWindowBytes.Init(base.mgr)
@@ -4390,6 +4391,8 @@ type queryNodeConfig struct {
 	InterimIndexRefineQuantType        ParamItem `refreshable:"false"`
 	InterimIndexRefineWithQuant        ParamItem `refreshable:"false"`
 	DenseVectorInterminIndexType       ParamItem `refreshable:"false"`
+	InterimIndexSparseIPAlgo           ParamItem `refreshable:"false"`
+	InterimIndexSparseBM25Algo         ParamItem `refreshable:"false"`
 	InterimIndexMemExpandRate          ParamItem `refreshable:"false"`
 	InterimIndexBuildParallelRate      ParamItem `refreshable:"false"`
 	InterimIndexGrowingBuildThreadRate ParamItem `refreshable:"true"`
@@ -5100,6 +5103,26 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Export:       true,
 	}
 	p.DenseVectorInterminIndexType.Init(base.mgr)
+
+	p.InterimIndexSparseIPAlgo = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.sparseIPIndexAlgo",
+		Version:      "2.6.26",
+		DefaultValue: "",
+		Formatter:    func(v string) string { return strings.ToUpper(strings.TrimSpace(v)) },
+		Doc:          "Sparse IP interim index algorithm for growing and unindexed sealed segments. Empty inherits the collection index parameters. Options: TAAT_NAIVE, DAAT_WAND, DAAT_MAXSCORE, BLOCK_MAX_WAND, BLOCK_MAX_MAXSCORE, SINDI. SINDI requires interimIndex.targetIndexVersion >= 10. Takes effect after restart.",
+		Export:       false,
+	}
+	p.InterimIndexSparseIPAlgo.Init(base.mgr)
+
+	p.InterimIndexSparseBM25Algo = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.sparseBM25IndexAlgo",
+		Version:      "2.6.26",
+		DefaultValue: "",
+		Formatter:    func(v string) string { return strings.ToUpper(strings.TrimSpace(v)) },
+		Doc:          "Sparse BM25 interim index algorithm for growing and unindexed sealed segments. Empty inherits the collection index parameters. Options: TAAT_NAIVE, DAAT_WAND, DAAT_MAXSCORE, BLOCK_MAX_WAND, BLOCK_MAX_MAXSCORE, SINDI. SINDI requires interimIndex.targetIndexVersion >= 10. Takes effect after restart.",
+		Export:       false,
+	}
+	p.InterimIndexSparseBM25Algo.Init(base.mgr)
 
 	p.InterimIndexRefineQuantType = ParamItem{
 		Key:          "queryNode.segcore.interimIndex.refineQuantType",
@@ -6250,6 +6273,7 @@ type dataCoordConfig struct {
 	TargetVecIndexVersion          ParamItem `refreshable:"true"`
 	ForceRebuildScalarSegmentIndex ParamItem `refreshable:"true"`
 	TargetScalarIndexVersion       ParamItem `refreshable:"true"`
+	EnableArraySortIndex           ParamItem `refreshable:"true"`
 	SegmentFlushInterval           ParamItem `refreshable:"true"`
 	BlockingL0EntryNum             ParamItem `refreshable:"true"`
 	BlockingL0SizeInMB             ParamItem `refreshable:"true"`
@@ -6265,6 +6289,7 @@ type dataCoordConfig struct {
 	IndexBasedCompaction                   ParamItem `refreshable:"true"`
 	CompactionTaskPrioritizer              ParamItem `refreshable:"true"`
 	CompactionTaskQueueCapacity            ParamItem `refreshable:"false"`
+	CompactionMaxTaskNum                   ParamItem `refreshable:"true"`
 	CompactionPreAllocateIDExpansionFactor ParamItem `refreshable:"false"`
 
 	CompactionRPCTimeout                       ParamItem `refreshable:"true"`
@@ -6374,6 +6399,10 @@ type dataCoordConfig struct {
 
 	MinSegmentNumRowsToEnableIndex ParamItem `refreshable:"true"`
 	BrokerTimeout                  ParamItem `refreshable:"false"`
+
+	// segment change staging
+	SegmentChangeStagingTimeout  ParamItem `refreshable:"true"`
+	SegmentChangeGroupMaxMembers ParamItem `refreshable:"true"`
 
 	// auto balance channel on datanode
 	AutoBalance                    ParamItem `refreshable:"true"`
@@ -6728,6 +6757,18 @@ mix is prioritized by level: mix compactions first, then L0 compactions, then cl
 		Export:       true,
 	}
 	p.CompactionTaskQueueCapacity.Init(base.mgr)
+
+	p.CompactionMaxTaskNum = ParamItem{
+		Key:          "dataCoord.compaction.maxTaskNum",
+		Version:      "3.0.1",
+		DefaultValue: "0",
+		Doc: `Soft cap on pending and running compaction tasks: once reached, automatic compaction, including sort compaction and
+target-based compaction, stops planning and submitting tasks, so concurrent submissions can briefly exceed it.
+Manual compaction, import and the sort of clustering compaction outputs are not capped, nor is the sort of flushed
+segments while automatic compaction is disabled. 0 or a negative value means unlimited.`,
+		Export: true,
+	}
+	p.CompactionMaxTaskNum.Init(base.mgr)
 
 	p.CompactionPreAllocateIDExpansionFactor = ParamItem{
 		Key:          "dataCoord.compaction.preAllocateIDExpansionFactor",
@@ -7162,7 +7203,7 @@ Startup continuously schedules bounded concurrent reads and retries failed reads
 		Key:          "dataCoord.index.hybridIndex.highCardinalityIndexType",
 		Version:      "2.6.10",
 		DefaultValue: "STL_SORT",
-		Doc:          "Index type for high cardinality fields in hybrid index. Does not apply to Array types (always INVERTED).",
+		Doc:          "Index type for high cardinality fields in hybrid index. Array types use a separate version-dependent SORT/INVERTED selection policy.",
 		Export:       false,
 	}
 	p.HybridIndexHighCardinalityIndexType.Init(base.mgr)
@@ -7553,6 +7594,24 @@ Startup continuously schedules bounded concurrent reads and retries failed reads
 	}
 	p.MinSegmentNumRowsToEnableIndex.Init(base.mgr)
 
+	p.SegmentChangeStagingTimeout = ParamItem{
+		Key:          "dataCoord.segmentChange.stagingTimeout",
+		Version:      "3.0.4",
+		DefaultValue: "3600",
+		Doc:          "The maximum duration in seconds a segment change group may stay staged before the batch is aborted (STAGED -> ABORTED), bounding unconvergeable or externally-dropped batches.",
+		Export:       true,
+	}
+	p.SegmentChangeStagingTimeout.Init(base.mgr)
+
+	p.SegmentChangeGroupMaxMembers = ParamItem{
+		Key:          "dataCoord.segmentChange.maxMembersPerGroup",
+		Version:      "3.0.4",
+		DefaultValue: "512",
+		Doc:          "The maximum number of output segments one segment change group may carry before oversized task outputs are split into sequentially published subgroups.",
+		Export:       true,
+	}
+	p.SegmentChangeGroupMaxMembers.Init(base.mgr)
+
 	p.BindIndexNodeMode = ParamItem{
 		Key:          "indexCoord.bindIndexNodeMode.enable",
 		Version:      "2.0.0",
@@ -7702,6 +7761,22 @@ if param targetScalarIndexVersion is not set, the default value is -1, which mea
 		Export: true,
 	}
 	p.TargetScalarIndexVersion.Init(base.mgr)
+
+	p.EnableArraySortIndex = ParamItem{
+		Key:          "dataCoord.enableArraySortIndex",
+		Version:      "3.1.0",
+		DefaultValue: "auto",
+		Export:       true,
+		Doc:          "Whether ordinary ARRAY HYBRID may select STL_SORT, ordinary ARRAY may use explicit STL_SORT, and typed JSON ARRAY paths may use HYBRID or STL_SORT. auto: enable once all registered online components reach 3.1.0 and the stability window elapses; false: keep ordinary ARRAY HYBRID high cardinality on INVERTED, downgrade affected AUTOINDEX requests to INVERTED, and reject explicit ARRAY STL_SORT or JSON ARRAY HYBRID/STL_SORT; true: force enable and bypass the software-version gate.",
+		VersionGateSwitcher: &VersionGateSwitcher{
+			EnableAutoSwitchValue: "auto",
+			PreSwitchValue:        "false",
+			GateVersion:           "3.1.0",
+			TargetValue:           "true",
+			SwitchDelay:           time.Minute,
+		},
+	}
+	p.EnableArraySortIndex.Init(base.mgr)
 
 	p.SegmentFlushInterval = ParamItem{
 		Key:          "dataCoord.segmentFlushInterval",
@@ -9276,8 +9351,10 @@ type streamingConfig struct {
 	WALRateLimitNodeMemoryRejectThreshold        ParamItem `refreshable:"true"`
 	WALRateLimitNodeMemoryRecoverThreshold       ParamItem `refreshable:"true"`
 	WALRateLimitNodeMemoryAdaptiveRateLimit      AdaptiveRateLimitConfig
-	WALRateLimitFlusherAdaptiveRateLimit         AdaptiveRateLimitConfig
 	WALRateLimitRecoveryStorageAdaptiveRateLimit AdaptiveRateLimitConfig
+	WALRateLimitWABSlowdownRatio                 ParamItem `refreshable:"true"`
+	WALRateLimitWABSlowdownRate                  ParamItem `refreshable:"true"`
+	WALRateLimitWABRejectRatio                   ParamItem `refreshable:"true"`
 	WALRateLimitAppendRateEnabled                ParamItem `refreshable:"true"`
 	WALRateLimitAppendRateSlowdownThreshold      ParamItem `refreshable:"true"`
 	WALRateLimitAppendRateRecoverThreshold       ParamItem `refreshable:"true"`
@@ -9591,7 +9668,7 @@ limits; requests that carry no key are accepted at any value.`,
 	p.WALWriteAheadBufferCapacity = ParamItem{
 		Key:          "streaming.walWriteAheadBuffer.capacity",
 		Version:      "2.6.0",
-		Doc:          "The capacity of write ahead buffer of each wal, 64M by default",
+		Doc:          "WAB cache capacity. Capacity/keepalive eviction only removes records consumed by RecoveryStorage and preserves the durable catchup anchor. Also scales walRateLimit.writeAheadBuffer.slowdownRatio.",
 		DefaultValue: "64m",
 		Export:       true,
 	}
@@ -9599,7 +9676,7 @@ limits; requests that carry no key are accepted at any value.`,
 	p.WALWriteAheadBufferKeepalive = ParamItem{
 		Key:          "streaming.walWriteAheadBuffer.keepalive",
 		Version:      "2.6.0",
-		Doc:          "The keepalive duration for entries in write ahead buffer of each wal, 30s by default",
+		Doc:          "WAB cache TTL. Expired records are evictable only after RecoveryStorage consumes them; the durable catchup anchor is retained.",
 		DefaultValue: "30s",
 		Export:       true,
 	}
@@ -9954,20 +10031,38 @@ so we set 1 second here as a threshold.`,
 		Export:                       false,
 	})
 
-	p.WALRateLimitFlusherAdaptiveRateLimit.init(base, "streaming.walRateLimit.flusher.adaptiveRateLimit", AdaptiveRateLimitConfigDefaultValue{
-		SlowdownStartupDelayInterval: "10s",
-		SlowdownHWM:                  "16mb",
-		SlowdownLWM:                  "2mb",
-		SlowdownDecreaseInterval:     "30s",
-		SlowdownDecreaseRatio:        "0.8",
-		SlowdownRejectDelayInterval:  "2m",
-		RecoveryHWM:                  "64mb",
-		RecoveryLWM:                  "16mb",
-		RecoveryNormalDelayInterval:  "5s",
-		RecoveryIncremental:          "5mb",
-		RecoveryIncreaseInterval:     "1s",
-		Export:                       false,
-	})
+	p.WALRateLimitWABSlowdownRatio = ParamItem{
+		Key:     "streaming.walRateLimit.writeAheadBuffer.slowdownRatio",
+		Version: "3.1.0", DefaultValue: "1.5", Export: false,
+		Doc: "Start proportional slowdown above this multiple of the WAB instance's cache capacity. Takes effect immediately; values below 1 are clamped to 1, invalid/non-finite values use 1.",
+		Formatter: func(v string) string {
+			ratio, err := strconv.ParseFloat(v, 64)
+			if err != nil || ratio < 1 || math.IsNaN(ratio) || math.IsInf(ratio, 0) {
+				return "1"
+			}
+			return v
+		},
+	}
+	p.WALRateLimitWABSlowdownRatio.Init(base.mgr)
+	p.WALRateLimitWABSlowdownRate = ParamItem{
+		Key:     "streaming.walRateLimit.writeAheadBuffer.slowdownRate",
+		Version: "3.1.0", DefaultValue: "32m", Export: false,
+		Doc: "Producer byte rate per second at the WAB slowdown threshold. Takes effect immediately; invalid/nonpositive values use the default.",
+	}
+	p.WALRateLimitWABSlowdownRate.Init(base.mgr)
+	p.WALRateLimitWABRejectRatio = ParamItem{
+		Key:     "streaming.walRateLimit.writeAheadBuffer.rejectRatio",
+		Version: "3.1.0", DefaultValue: "2", Export: false,
+		Doc: "Reject new DML when WAB bytes reach this multiple of the slowdown threshold (capacity * slowdownRatio). Takes effect immediately. Must be finite and greater than 1; invalid values use 2.",
+		Formatter: func(v string) string {
+			ratio, err := strconv.ParseFloat(v, 64)
+			if err != nil || ratio <= 1 || math.IsNaN(ratio) || math.IsInf(ratio, 0) {
+				return "2"
+			}
+			return v
+		},
+	}
+	p.WALRateLimitWABRejectRatio.Init(base.mgr)
 
 	p.WALRateLimitAppendRateEnabled = ParamItem{
 		Key:          "streaming.walRateLimit.appendRate.enabled",
