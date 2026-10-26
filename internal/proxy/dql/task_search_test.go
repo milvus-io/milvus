@@ -154,7 +154,7 @@ func TestConsumeResultStreamPreservesOrderByCandidateWindow(t *testing.T) {
 		},
 	}}
 
-	result, metricType, err := task.consumeResultStream(stream, metric.L2, func(*internalpb.SearchResults) {})
+	result, metricType, err := task.consumeResultStream(stream, task.SearchRequest, metric.L2, func(*internalpb.SearchResults) {})
 	require.NoError(t, err)
 	require.Equal(t, metric.L2, metricType)
 	require.Equal(t, []int64{10, 11, 12}, result.GetResults().GetIds().GetIntId().GetData())

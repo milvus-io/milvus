@@ -443,6 +443,7 @@ func (s *OrderedReduceStream) acceptMetadata(chunk *internalpb.RetrieveResults) 
 	s.metadata.HasMoreResult = s.metadata.GetHasMoreResult() || chunk.GetHasMoreResult()
 	s.metadata.ScannedRemoteBytes += chunk.GetScannedRemoteBytes()
 	s.metadata.ScannedTotalBytes += chunk.GetScannedTotalBytes()
+	s.metadata.FeatureBits |= chunk.GetFeatureBits()
 	s.metadata.MvccTimestamp = max(s.metadata.GetMvccTimestamp(), chunk.GetMvccTimestamp())
 	s.metadata.CostAggregation = mergeQueryCost(s.metadata.GetCostAggregation(), chunk.GetCostAggregation())
 }
@@ -463,6 +464,7 @@ func (s *OrderedReduceStream) attachMetadata(chunk *internalpb.RetrieveResults) 
 	chunk.HasMoreResult = metadata.GetHasMoreResult()
 	chunk.ScannedRemoteBytes = metadata.GetScannedRemoteBytes()
 	chunk.ScannedTotalBytes = metadata.GetScannedTotalBytes()
+	chunk.FeatureBits = metadata.GetFeatureBits()
 	chunk.MvccTimestamp = metadata.GetMvccTimestamp()
 	s.metadataEmitted = true
 	s.metadata = nil
@@ -626,6 +628,7 @@ func (s *UnOrderedReduceStream) acceptMetadata(chunk *internalpb.RetrieveResults
 	s.metadata.HasMoreResult = s.metadata.GetHasMoreResult() || chunk.GetHasMoreResult()
 	s.metadata.ScannedRemoteBytes += chunk.GetScannedRemoteBytes()
 	s.metadata.ScannedTotalBytes += chunk.GetScannedTotalBytes()
+	s.metadata.FeatureBits |= chunk.GetFeatureBits()
 	s.metadata.MvccTimestamp = max(s.metadata.GetMvccTimestamp(), chunk.GetMvccTimestamp())
 	s.metadata.CostAggregation = mergeQueryCost(s.metadata.GetCostAggregation(), chunk.GetCostAggregation())
 }
@@ -645,6 +648,7 @@ func (s *UnOrderedReduceStream) attachMetadata(chunk *internalpb.RetrieveResults
 	chunk.HasMoreResult = metadata.GetHasMoreResult()
 	chunk.ScannedRemoteBytes = metadata.GetScannedRemoteBytes()
 	chunk.ScannedTotalBytes = metadata.GetScannedTotalBytes()
+	chunk.FeatureBits = metadata.GetFeatureBits()
 	chunk.MvccTimestamp = metadata.GetMvccTimestamp()
 	s.metadata = nil
 }
@@ -748,6 +752,7 @@ func SplitRetrieveResult(result *internalpb.RetrieveResults, chunkBytes int) ([]
 	first.HasMoreResult = result.GetHasMoreResult()
 	first.ScannedRemoteBytes = result.GetScannedRemoteBytes()
 	first.ScannedTotalBytes = result.GetScannedTotalBytes()
+	first.FeatureBits = result.GetFeatureBits()
 	first.MvccTimestamp = result.GetMvccTimestamp()
 	return chunks, nil
 }

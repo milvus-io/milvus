@@ -124,7 +124,7 @@ func (s *SearchPipelineSuite) TestRunFromReducedSkipsReduceNode() {
 	}
 
 	storageCost := segcore.StorageCost{ScannedRemoteBytes: 10, ScannedTotalBytes: 20}
-	result, actualStorageCost, err := pipeline.RunFromReduced(context.Background(), s.span, reduced, "L2", storageCost)
+	result, actualStorageCost, err := pipeline.RunFromReduced(context.Background(), s.span, []*milvuspb.SearchResults{reduced}, []string{"L2"}, storageCost)
 	s.Require().NoError(err)
 	s.False(reduceCalled)
 	s.Same(reduced, result)

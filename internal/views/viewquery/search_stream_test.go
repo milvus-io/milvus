@@ -521,6 +521,7 @@ func streamTestResult() *internalpb.SearchResults {
 }
 
 type streamTestProvider struct {
+	TaskProvider
 	searchTasks  SearchSegmentTasks
 	searchErr    error
 	request      *internalpb.SearchRequest
