@@ -308,6 +308,39 @@ Intersects(const Geometry::Envelope& a, const LonLatBox& b) {
            b.min_y <= a.max_y;
 }
 
+// The R-Tree coarse pass keeps a row when its MBR meets ANY box of the region.
+bool
+Intersects(const Geometry::DWithinSearchBoxes& region, const LonLatBox& b) {
+    for (const auto& env : region) {
+        if (Intersects(env, b)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Total longitude width of the region, in degrees.
+double
+LongitudeWidth(const Geometry::DWithinSearchBoxes& region) {
+    double width = 0;
+    for (const auto& env : region) {
+        width += env.max_x - env.min_x;
+    }
+    return width;
+}
+
+// Wrap a longitude into [-180, 180], where valid rows are stored.
+double
+NormalizeLon(double lon) {
+    while (lon > 180.0) {
+        lon -= 360.0;
+    }
+    while (lon < -180.0) {
+        lon += 360.0;
+    }
+    return lon;
+}
+
 // Great-circle destination point (sphere), used to place rows exactly on the
 // haversine boundary at an arbitrary bearing.
 std::pair<double, double>
@@ -332,9 +365,12 @@ Destination(double lat_deg, double lon_deg, double bearing_deg, double meters) {
 TEST_F(GeometryValueSemanticsTest, DWithinSearchEnvelopeCoversIssueRows) {
     const Geometry query(ctx_, "POINT (115 35)");
     const double d = 500000.0;
-    Geometry::Envelope env{};
+    Geometry::DWithinSearchBoxes region;
     ASSERT_TRUE(
-        Geometry::DWithinSearchEnvelope(ctx_, query.GetGeometry(), d, env));
+        Geometry::DWithinSearchEnvelope(ctx_, query.GetGeometry(), d, region));
+    // Far from the antimeridian and the poles: a single box.
+    ASSERT_EQ(region.count, 1u);
+    const auto& env = region.boxes[0];
 
     // Must strictly contain the old box (no regression in what was found).
     EXPECT_LT(env.min_x, 109.516823);
@@ -382,6 +418,12 @@ TEST_F(GeometryValueSemanticsTest,
         {10, 60, 2000000},
         {-120, -75, 300000},
         {179.5, 10, 200000},
+        // The cap crosses the antimeridian: the rows past +-180 are only
+        // covered by the wrapped box (review of #54294).
+        {179.999, 0, 1000},
+        {-179.95, 40, 50000},
+        {180, -20, 100000},
+        {-180, 60, 300000},
         {5, 85, 800000},
         {30, 45, 0.5},
         {-45, 20, 50},
@@ -406,7 +448,7 @@ TEST_F(GeometryValueSemanticsTest,
         const std::string qwkt = "POINT (" + std::to_string(c.lon) + " " +
                                  std::to_string(c.lat) + ")";
         const Geometry query(ctx_, qwkt.c_str());
-        Geometry::Envelope env{};
+        Geometry::DWithinSearchBoxes env;
         ASSERT_TRUE(Geometry::DWithinSearchEnvelope(
             ctx_, query.GetGeometry(), c.meters, env))
             << qwkt;
@@ -417,7 +459,10 @@ TEST_F(GeometryValueSemanticsTest,
                 // Point rows: exactly on / around the haversine circle.
                 auto [plon, plat] =
                     Destination(c.lat, c.lon, b, c.meters * scale);
-                std::string pwkt = "POINT (" + std::to_string(plon) + " " +
+                // Valid point rows are stored in [-180, 180]: a destination
+                // past the antimeridian is stored on the other side.
+                std::string pwkt = "POINT (" +
+                                   std::to_string(NormalizeLon(plon)) + " " +
                                    std::to_string(plat) + ")";
                 Geometry point(ctx_, pwkt.c_str());
                 ASSERT_TRUE(point.IsValid()) << pwkt;
@@ -469,24 +514,86 @@ TEST_F(GeometryValueSemanticsTest,
 TEST_F(GeometryValueSemanticsTest, DWithinSearchEnvelopeEdgeCases) {
     // Empty query point: no envelope (caller yields zero candidates).
     Geometry empty(ctx_, "POINT EMPTY");
-    Geometry::Envelope env{};
+    Geometry::DWithinSearchBoxes region;
     EXPECT_FALSE(
-        Geometry::DWithinSearchEnvelope(ctx_, empty.GetGeometry(), 10, env));
+        Geometry::DWithinSearchEnvelope(ctx_, empty.GetGeometry(), 10, region));
 
-    // A cap containing a pole must span every longitude.
+    // A cap containing a pole must span every longitude, in one box.
     Geometry polar(ctx_, "POINT (5 85)");
     ASSERT_TRUE(Geometry::DWithinSearchEnvelope(
-        ctx_, polar.GetGeometry(), 800000, env));
+        ctx_, polar.GetGeometry(), 800000, region));
+    ASSERT_EQ(region.count, 1u);
+    const auto& env = region.boxes[0];
     EXPECT_LE(env.min_x, -180.0);
     EXPECT_GE(env.max_x, 180.0);
     EXPECT_GE(env.max_y, 90.0);
 
-    // Crossing the antimeridian widens to the full longitude range.
+    // Crossing the antimeridian adds a wrapped box at the opposite edge
+    // instead of widening to every longitude.
     Geometry edge(ctx_, "POINT (179.5 10)");
-    ASSERT_TRUE(
-        Geometry::DWithinSearchEnvelope(ctx_, edge.GetGeometry(), 200000, env));
-    EXPECT_LE(env.min_x, -180.0);
-    EXPECT_GE(env.max_x, 180.0);
+    ASSERT_TRUE(Geometry::DWithinSearchEnvelope(
+        ctx_, edge.GetGeometry(), 200000, region));
+    ASSERT_EQ(region.count, 2u);
+    EXPECT_GT(region.boxes[0].min_x, 177.0);
+    EXPECT_GT(region.boxes[0].max_x, 180.0);  // unclamped primary box
+    EXPECT_EQ(region.boxes[1].min_x, -180.0);
+    EXPECT_GT(region.boxes[1].max_x, -180.0);
+    EXPECT_LT(region.boxes[1].max_x, -178.0);
+
+    // The reviewer's example: 1 km around a point 111 m from the
+    // antimeridian is two slivers, not a 360 deg latitude band. Mirror it on
+    // the west side, and check that the far side of the antimeridian is
+    // reachable while an antipodal row is not.
+    struct WrapCase {
+        const char* query_wkt;
+        const char* across_wkt;  // just across +-180, within 1 km
+        double wrapped_min_x, wrapped_max_x;
+    };
+    for (const WrapCase& wc :
+         {WrapCase{"POINT (179.999 0)", "POINT (-179.996 0)", -180.0, -179.9},
+          WrapCase{"POINT (-179.999 0)", "POINT (179.996 0)", 179.9, 180.0}}) {
+        SCOPED_TRACE(wc.query_wkt);
+        Geometry q(ctx_, wc.query_wkt);
+        ASSERT_TRUE(Geometry::DWithinSearchEnvelope(
+            ctx_, q.GetGeometry(), 1000, region));
+        ASSERT_EQ(region.count, 2u);
+        EXPECT_LT(LongitudeWidth(region), 0.03);  // vs 360 before
+        EXPECT_GE(region.boxes[1].min_x, wc.wrapped_min_x);
+        EXPECT_LE(region.boxes[1].max_x, wc.wrapped_max_x);
+
+        Geometry across(ctx_, wc.across_wkt);
+        ASSERT_TRUE(across.dwithin(q, 1000, ctx_));
+        LonLatBox box{};
+        ASSERT_TRUE(EnvelopeOf(ctx_, across, box));
+        EXPECT_TRUE(Intersects(region, box));
+
+        Geometry antipodal(ctx_, "POINT (0 0)");
+        ASSERT_TRUE(EnvelopeOf(ctx_, antipodal, box));
+        EXPECT_FALSE(Intersects(region, box));
+    }
+
+    // A query exactly on the antimeridian: +180 and -180 are the same
+    // meridian, so both edges are covered even at distance 0.
+    Geometry on_edge(ctx_, "POINT (180 0)");
+    ASSERT_TRUE(Geometry::DWithinSearchEnvelope(
+        ctx_, on_edge.GetGeometry(), 0, region));
+    ASSERT_EQ(region.count, 2u);
+    {
+        Geometry same(ctx_, "POINT (-180 0)");
+        ASSERT_TRUE(same.dwithin(on_edge, 0, ctx_));
+        LonLatBox box{};
+        ASSERT_TRUE(EnvelopeOf(ctx_, same, box));
+        EXPECT_TRUE(Intersects(region, box));
+    }
+
+    // A query longitude outside [-180, 180] keeps the full-range fallback:
+    // haversine still wraps it, so the box cannot be placed by offset alone.
+    Geometry outside(ctx_, "POINT (190 0)");
+    ASSERT_TRUE(Geometry::DWithinSearchEnvelope(
+        ctx_, outside.GetGeometry(), 1000, region));
+    ASSERT_EQ(region.count, 1u);
+    EXPECT_LE(region.boxes[0].min_x, -180.0);
+    EXPECT_GE(region.boxes[0].max_x, 180.0);
 
     // A cap that touches a pole to within rounding: d is the pole distance
     // to the ulp, so cap_lat_deg and the sin/cos ratio in the envelope both
@@ -511,7 +618,8 @@ TEST_F(GeometryValueSemanticsTest, DWithinSearchEnvelopeEdgeCases) {
             pc.row_lat, pc.row_lon, pc.query_lat, pc.query_lon);
         ASSERT_TRUE(pole_row.dwithin(pole_query, pole_distance, ctx_));
         ASSERT_TRUE(Geometry::DWithinSearchEnvelope(
-            ctx_, pole_query.GetGeometry(), pole_distance, env));
+            ctx_, pole_query.GetGeometry(), pole_distance, region));
+        ASSERT_EQ(region.count, 1u);
         EXPECT_LE(env.min_x, -180.0);
         EXPECT_GE(env.max_x, 180.0);
         if (pc.row_lat < 0) {
@@ -524,7 +632,8 @@ TEST_F(GeometryValueSemanticsTest, DWithinSearchEnvelopeEdgeCases) {
     // Negative distance is treated as zero: a degenerate box at the point.
     Geometry q(ctx_, "POINT (10 20)");
     ASSERT_TRUE(
-        Geometry::DWithinSearchEnvelope(ctx_, q.GetGeometry(), -5, env));
+        Geometry::DWithinSearchEnvelope(ctx_, q.GetGeometry(), -5, region));
+    ASSERT_EQ(region.count, 1u);
     EXPECT_NEAR(env.min_x, 10.0, 1e-6);
     EXPECT_NEAR(env.max_x, 10.0, 1e-6);
     EXPECT_NEAR(env.min_y, 20.0, 1e-6);
