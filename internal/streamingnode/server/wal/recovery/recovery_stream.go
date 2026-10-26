@@ -68,6 +68,14 @@ L:
 			}
 		}
 	}
+	if r.pkindex != nil {
+		// After the barrier every replayed write is in the index, and no live
+		// writer runs before this function returns. The install tasks that
+		// Run submits run in the background.
+		if err := r.pkindex.Run(ctx); err != nil {
+			return nil, merr.Wrap(err, "finish the primary key index recovery")
+		}
+	}
 	snapshot = r.buildInitialRecoverySnapshot()
 	snapshot.TxnBuffer = rs.TxnBuffer()
 	snapshot.SummarySnapshots, err = r.buildIdempotencySnapshots(ctx)
@@ -103,6 +111,9 @@ func (r *recoveryStorageImpl) buildInitialRecoverySnapshot() *RecoverySnapshot {
 	}
 	if r.vchannelManager != nil {
 		snapshot.WritePathRecovery = r.vchannelManager.RecoverySnapshot()
+	}
+	if r.pkindex != nil {
+		snapshot.PKIndex = r.pkindex.Manager()
 	}
 	return snapshot
 }

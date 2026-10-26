@@ -45,6 +45,7 @@ const (
 	StatusLabelName                       = statusLabelName
 	StreamingNodeLabelName                = "streaming_node"
 	NodeIDLabelName                       = nodeIDLabelName
+	pkIndexProbeResultLabelName           = "result"
 )
 
 var (
@@ -208,6 +209,47 @@ var (
 		Name: "partial_update_version_index_missed_writes_total",
 		Help: "Committed writes with primary keys omitted because the partial update version index budget was exhausted",
 	})
+
+	StreamingNodePKIndexProbedKeysTotal = newStreamingNodeCounterVec(prometheus.CounterOpts{
+		Name: "pkindex_probed_keys_total",
+		Help: "Primary keys probed in the primary key index on the write path, by result",
+	}, pkIndexProbeResultLabelName)
+
+	StreamingNodePKIndexCompanionDeleteKeysTotal = newStreamingNodeCounterVec(prometheus.CounterOpts{
+		Name: "pkindex_companion_delete_keys_total",
+		Help: "Primary keys deleted by companion deletes that the primary key index derived from inserts",
+	})
+
+	StreamingNodePKIndexDecideDurationSeconds = newStreamingNodeHistogramVec(prometheus.HistogramOpts{
+		Name:    "pkindex_decide_duration_seconds",
+		Help:    "Duration of one primary key index write path decision, lock wait included",
+		Buckets: secondsBuckets,
+	})
+
+	StreamingNodePKIndexLockWaitDurationSeconds = newStreamingNodeHistogramVec(prometheus.HistogramOpts{
+		Name:    "pkindex_lock_wait_duration_seconds",
+		Help:    "Time one primary key index decision waited for its lock stripes",
+		Buckets: secondsBuckets,
+	})
+
+	StreamingNodePKIndexHandoverTotal = newStreamingNodeCounterVec(prometheus.CounterOpts{
+		Name: "pkindex_handover_total",
+		Help: "Primary key index handovers that finished, including handovers with nothing to publish",
+	})
+
+	StreamingNodePKIndexHandoverFailuresTotal = newStreamingNodeCounterVec(prometheus.CounterOpts{
+		Name: "pkindex_handover_failures_total",
+		Help: "Primary key index handovers that failed and will be retried",
+	})
+
+	// StreamingNodePKIndexFatalTotal counts the failures of the primary key
+	// index that make a WAL unavailable, by the class of the error: io,
+	// corrupted, unavailable or other. The log line of the failure names the
+	// pchannel and the vchannel.
+	StreamingNodePKIndexFatalTotal = newStreamingNodeCounterVec(prometheus.CounterOpts{
+		Name: "pkindex_fatal_total",
+		Help: "Primary key index failures that made the WAL unavailable, by error class",
+	}, "class")
 
 	// WAL WAL metrics
 	WALInfo = newWALGaugeVec(prometheus.GaugeOpts{
@@ -688,6 +730,13 @@ func RegisterStreamingNode(registry *prometheus.Registry) {
 	registry.MustRegister(StreamingNodePartialUpdateVersionIndexBytes)
 	registry.MustRegister(StreamingNodePartialUpdateVersionIndexMaxBytes)
 	registry.MustRegister(StreamingNodePartialUpdateVersionIndexMissedWrites)
+	registry.MustRegister(StreamingNodePKIndexProbedKeysTotal)
+	registry.MustRegister(StreamingNodePKIndexCompanionDeleteKeysTotal)
+	registry.MustRegister(StreamingNodePKIndexDecideDurationSeconds)
+	registry.MustRegister(StreamingNodePKIndexLockWaitDurationSeconds)
+	registry.MustRegister(StreamingNodePKIndexHandoverTotal)
+	registry.MustRegister(StreamingNodePKIndexHandoverFailuresTotal)
+	registry.MustRegister(StreamingNodePKIndexFatalTotal)
 
 	registerWAL(registry)
 	RegisterLoggingMetrics(registry)
