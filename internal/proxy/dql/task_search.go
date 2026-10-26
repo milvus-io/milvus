@@ -1678,15 +1678,10 @@ func (t *SearchTask) supportsStreamingReduce() bool {
 	}
 	if req.GetIsAdvanced() {
 		if _, legacyFusion := t.rerankMeta.(*legacyRerankMeta); !legacyFusion ||
-			req.GetIsIterator() || t.aggCtx != nil || t.hybridElementLevel ||
+			req.GetIsIterator() || t.aggCtx != nil ||
 			req.GetGroupByFieldId() > 0 || len(req.GetGroupByFieldIds()) > 0 ||
 			len(t.orderByFields) > 0 || len(req.GetSubReqs()) == 0 {
 			return false
-		}
-		for _, info := range t.hybridSubSearchInfos {
-			if info.Kind != hybridSubSearchNormal {
-				return false
-			}
 		}
 		for _, sub := range req.GetSubReqs() {
 			if sub == nil || sub.GetGroupByFieldId() > 0 {
