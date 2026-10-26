@@ -18,6 +18,7 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -102,7 +103,8 @@ func TestCompositeBinlogRecordReaderFieldAlignment(t *testing.T) {
 		{name: "wrapped EOF before read error", steps: []step{{rows: -1, err: fmt.Errorf("field exhausted: %w", io.EOF)}, {rows: -1, err: io.ErrUnexpectedEOF}}, wantErr: io.ErrUnexpectedEOF},
 		{name: "records before read error", steps: []step{{rows: 2}, {rows: -1, err: io.ErrUnexpectedEOF}}, wantErr: io.ErrUnexpectedEOF},
 		{name: "EOF mismatch before read error", steps: []step{{rows: -1}, {rows: 2}, {rows: -1, err: io.ErrUnexpectedEOF}}, wantErr: io.ErrUnexpectedEOF},
-		{name: "different batch row counts", steps: []step{{rows: 2}, {rows: 1}}, wantErr: merr.ErrServiceInternal},
+		{name: "different batch row counts", steps: []step{{rows: 2}, {rows: 1}}, wantErr: merr.ErrDataIntegrity},
+		{name: "empty and nonempty batches", steps: []step{{rows: 0}, {rows: 2}}, wantErr: merr.ErrDataIntegrity},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			allocator := memory.NewCheckedAllocator(memory.DefaultAllocator)
@@ -168,6 +170,20 @@ func TestCompositeBinlogRecordReaderFieldAlignment(t *testing.T) {
 				require.Equal(t, tc.wantRows, record.Column(200).NullN())
 			}
 		})
+	}
+}
+
+func TestCompositeBinlogRecordReaderPreservesTypedFailures(t *testing.T) {
+	for _, source := range []error{merr.WrapErrDataIntegrityMsg("bad vector"), merr.WrapErrServiceUnavailableMsg("retry later"), context.Canceled} {
+		reader := &CompositeBinlogRecordReader{
+			fields: map[FieldID]*schemapb.FieldSchema{100: {FieldID: 100, DataType: schemapb.DataType_Int64}},
+			index:  map[FieldID]int16{100: 0}, rrs: []array.RecordReader{&erroringRecordReader{err: source}},
+		}
+		_, err := reader.Next()
+		require.ErrorIs(t, err, source)
+		require.Equal(t, merr.Status(source).GetCode(), merr.Status(err).GetCode())
+		require.Equal(t, merr.Status(source).GetRetriable(), merr.Status(err).GetRetriable())
+		require.NoError(t, reader.Close())
 	}
 }
 

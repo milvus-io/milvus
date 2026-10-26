@@ -313,7 +313,7 @@ via `WrapErrAsInputError(When)` at the proxy chokepoint only.
 | bad search/query expression or plan | `ErrQueryPlan` 2201 (Input) | `ErrParameterInvalid` | dedicated code, SDKs branch on it |
 | object-storage op failed (already typed by `mapObjectStorageError`) | `merr.Wrap(err, …)` | `WrapErrIoFailedErr` | Pattern 3: don't flatten Io taxonomy |
 | C++ status crossing cgo | `merr.SegcoreError(code, msg)` | hand-picked 20xx sentinel | Pattern 7: the table owns projection/retriability |
-| persisted meta / binlog is corrupt | `ErrDataIntegrity` 1009 | `ErrParameterInvalid` | stored state, not the current request |
+| persisted data or a storage record violates its schema/layout | `ErrDataIntegrity` 1009 | `ErrParameterInvalid` / writer-side `ErrServiceInternal` | non-retriable SystemError; detection stage does not establish provenance |
 | function/embedding pipeline contract broke | `WrapErrFunctionFailedMsg` 2400 | `ErrServiceInternal` | that subsystem's promised code |
 | in-process control-flow signal (idempotent no-op, queue empty) | package-level `errors.New` sentinel, caught + translated | any merr | Pattern 6; see convention doc |
 

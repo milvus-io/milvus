@@ -1100,10 +1100,11 @@ func WrapErrSerializationFailed(err error, format string, args ...any) error {
 }
 
 // WrapErrDataIntegrityMsg creates a new ErrDataIntegrity (code 1009) with a
-// detail message. Use when on-disk bytes don't conform to the expected schema
-// (binlog type mismatch, valuesRead vs rows mismatch, malformed event header,
-// unparseable stats buffer) — i.e. the stored data itself is corrupt, not the
-// (de)serialization step.
+// detail message. Use when persisted data or a storage record violates its
+// schema/layout (including missing/short columns and illegal nulls). This is
+// non-retriable SystemError, independent of the detection stage; the code alone
+// does not attribute the defect to disk, a reader, or a writer. Add that context
+// only when known. Preserve existing typed errors with merr.Wrap instead.
 func WrapErrDataIntegrityMsg(format string, args ...any) error {
 	return wrapMsg(ErrDataIntegrity, format, args...)
 }

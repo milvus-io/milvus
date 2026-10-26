@@ -1238,6 +1238,9 @@ func (t *bumpSchemaVersionCompactionTask) runAdditivePhysicalReconciliation(ctx 
 		return nil, err
 	}
 	defer materializer.Close()
+	// This path reads only the anchor, function inputs and appended ordinary
+	// fields. Unchanged collection fields are deliberately not in each record.
+	materializer.inputSchema = inputSchema
 
 	var totalRows int64
 	for {

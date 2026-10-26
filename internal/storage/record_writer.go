@@ -47,49 +47,56 @@ import (
 // such an over-wide record straight to the FFI writer misaligns column count
 // against the writer's manifest and crashes loon_writer_write.
 func toWriterRecord(r Record, schema *schemapb.CollectionSchema, arrowSchema *arrow.Schema) (arrow.Record, func(), error) {
-	if sar, ok := r.(*simpleArrowRecord); ok && sar.r.Schema().Equal(arrowSchema) {
-		return sar.r, func() {}, nil
+	var validator *RecordValidator
+	return prepareWriterRecord(r, schema, arrowSchema, &validator)
+}
+
+func (v *RecordValidator) toWriterRecord(r Record) (arrow.Record, func(), error) {
+	if err := v.Validate(r); err != nil {
+		return nil, nil, merr.Wrap(err, "writer record validation")
 	}
-	allFields := typeutil.GetAllFieldSchemas(schema)
-	arrays := make([]arrow.Array, len(allFields))
+	if sar, ok := r.(*simpleArrowRecord); ok && sar.r.Schema().Equal(v.physical) {
+		exact := true
+		for i, field := range v.fields {
+			idx, found := sar.field2Col[field.field.GetFieldID()]
+			if !found || idx != i || sar.r.Column(i).Len() != r.Len() {
+				exact = false
+				break
+			}
+		}
+		if exact {
+			return sar.r, func() {}, nil
+		}
+	}
+	arrays := make([]arrow.Array, len(v.fields))
 	var normalized []arrow.Array
 	defer func() {
 		for _, column := range normalized {
 			column.Release()
 		}
 	}()
-	for i, field := range allFields {
-		column := r.Column(field.GetFieldID())
-		expected := arrowSchema.Field(i).Type
-		if column == nil || column.Len() < r.Len() {
-			return nil, nil, merr.WrapErrServiceInternalMsg("missing or short writer column for field %s", field.GetName())
+	for i, contract := range v.fields {
+		column, _ := TryRecordColumn(r, contract.field.GetFieldID())
+		expected := contract.expected
+		if column.Len() > r.Len() {
+			column = array.NewSlice(column, 0, int64(r.Len()))
+			normalized = append(normalized, column)
 		}
 		if !arrow.TypeEqual(column.DataType(), expected) {
-			// Absent TEXT fields may use a different null representation than
-			// the writer expects. Nulls have no LOB/string payload to convert;
-			// normalize them to the writer's fixed schema on every batch.
-			// Non-null TEXT must already use the representation agreed by the
-			// task's reader/writer schemas; this is not a LOB decoding boundary.
-			sourceType, targetType := column.DataType().ID(), expected.ID()
-			if field.GetDataType() == schemapb.DataType_Text && column.NullN() == column.Len() &&
-				(sourceType == arrow.STRING || sourceType == arrow.BINARY) &&
-				(targetType == arrow.STRING || targetType == arrow.BINARY) {
-				column = array.MakeArrayOfNull(memory.DefaultAllocator, expected, r.Len())
-				normalized = append(normalized, column)
-			} else {
-				return nil, nil, merr.WrapErrServiceInternalMsg("writer column type mismatch for field %s: got %s, expected %s",
-					field.GetName(), column.DataType(), expected)
-			}
+			// Validation allows only the all-null TEXT normalization here.
+			column = array.MakeArrayOfNull(memory.DefaultAllocator, expected, r.Len())
+			normalized = append(normalized, column)
 		}
 		arrays[i] = column
 	}
-	rec := array.NewRecord(arrowSchema, arrays, int64(r.Len()))
+	rec := array.NewRecord(v.physical, arrays, int64(r.Len()))
 	return rec, rec.Release, nil
 }
 
 var _ RecordWriter = (*packedRecordWriter)(nil)
 
 type packedRecordWriter struct {
+	validator               *RecordValidator
 	writer                  *packed.PackedWriter
 	bufferSize              int64
 	columnGroups            []storagecommon.ColumnGroup
@@ -106,7 +113,7 @@ type packedRecordWriter struct {
 }
 
 func (pw *packedRecordWriter) Write(r Record) error {
-	rec, release, err := toWriterRecord(r, pw.schema, pw.arrowSchema)
+	rec, release, err := prepareWriterRecord(r, pw.schema, pw.arrowSchema, &pw.validator)
 	if err != nil {
 		return err
 	}
@@ -254,6 +261,7 @@ func newPackedRecordWriter(
 }
 
 type packedRecordBatchWriter struct {
+	validator               *RecordValidator
 	writer                  *packed.FFIPackedWriter
 	bufferSize              int64
 	columnGroups            []storagecommon.ColumnGroup
@@ -269,7 +277,7 @@ type packedRecordBatchWriter struct {
 }
 
 func (pw *packedRecordBatchWriter) Write(r Record) error {
-	rec, release, err := toWriterRecord(r, pw.schema, pw.arrowSchema)
+	rec, release, err := prepareWriterRecord(r, pw.schema, pw.arrowSchema, &pw.validator)
 	if err != nil {
 		return err
 	}
@@ -505,6 +513,7 @@ func NewPackedSerializeWriter(bucketName string, paths []string, schema *schemap
 // packedTextBatchWriter wraps FFISegmentWriter for TEXT column support during compaction.
 // it handles TEXT column rewriting with LOB file management in REWRITE_ALL mode.
 type packedTextBatchWriter struct {
+	validator               *RecordValidator
 	writer                  *packed.FFISegmentWriter
 	bufferSize              int64
 	columnGroups            []storagecommon.ColumnGroup
@@ -520,7 +529,7 @@ type packedTextBatchWriter struct {
 }
 
 func (pw *packedTextBatchWriter) Write(r Record) error {
-	rec, release, err := toWriterRecord(r, pw.schema, pw.arrowSchema)
+	rec, release, err := prepareWriterRecord(r, pw.schema, pw.arrowSchema, &pw.validator)
 	if err != nil {
 		return err
 	}
@@ -589,6 +598,13 @@ func (pw *packedTextBatchWriter) Close() (packed.WriterOutput, error) {
 		pw.columnGroupCompressed[id] = uint64(0)
 	}
 	return out, nil
+}
+
+func (pw *packedTextBatchWriter) Abort() {
+	if pw.writer != nil {
+		pw.writer.Destroy()
+		pw.writer = nil
+	}
 }
 
 // NewPackedTextBatchWriter creates a new writer that uses FFISegmentWriter with TEXT column support.

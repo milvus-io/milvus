@@ -86,6 +86,8 @@ func SegmentPartitionBasePath(rootPath string, collectionID, partitionID UniqueI
 }
 
 type packedBinlogRecordWriterBase struct {
+	validator *RecordValidator
+	aborted   bool
 	// attributes
 	collectionID         UniqueID
 	partitionID          UniqueID
@@ -125,6 +127,41 @@ type packedBinlogRecordWriterBase struct {
 
 	// Track null counts per field for nullable fields
 	nullCounts map[FieldID]int64
+}
+
+// prepareRecord runs before column grouping, statistics or native writes. The
+// returned record uses exact logical lengths, so collectors cannot count tail
+// values that the record does not expose. Lower packed writers reuse this
+// validation within this synchronous Write call.
+func (pw *packedBinlogRecordWriterBase) prepareRecord(r Record) (Record, func(), error) {
+	if pw.aborted {
+		return nil, nil, merr.WrapErrServiceInternalMsg("binlog writer is aborted")
+	}
+	if pw.validator == nil {
+		var err error
+		pw.validator, err = NewRecordValidator(pw.schema, pw.arrowSchema)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	rec, release, err := prepareWriterRecord(r, pw.schema, pw.arrowSchema, &pw.validator)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &validatedWriterRecord{
+		simpleArrowRecord: &simpleArrowRecord{r: rec, field2Col: pw.validator.field2Col},
+		schema:            pw.schema,
+	}, release, nil
+}
+
+// AbortBinlogRecordWriter releases a failed task's output without publishing a
+// V3 manifest. It does not delete files already flushed to object storage.
+// Legacy V1 writers have no manifest commit and are closed to release buffers.
+func AbortBinlogRecordWriter(writer BinlogRecordWriter) error {
+	if aborter, ok := writer.(interface{ Abort() error }); ok {
+		return aborter.Abort()
+	}
+	return writer.Close()
 }
 
 func (pw *packedBinlogRecordWriterBase) getColumnStatsFromRecord(r Record, allFields []*schemapb.FieldSchema) map[int64]storagecommon.ColumnStats {
@@ -290,7 +327,20 @@ type PackedBinlogRecordWriter struct {
 	writer *packedRecordWriter
 }
 
-func (pw *PackedBinlogRecordWriter) Write(r Record) error {
+func (pw *PackedBinlogRecordWriter) Write(r Record) (err error) {
+	defer func() {
+		if err != nil {
+			_ = pw.Abort()
+		}
+	}()
+	r, release, err := pw.prepareRecord(r)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if r.Len() == 0 {
+		return nil
+	}
 	if err := pw.initWriters(r); err != nil {
 		return err
 	}
@@ -322,9 +372,9 @@ func (pw *PackedBinlogRecordWriter) Write(r Record) error {
 
 	pw.collectNullCounts(r)
 
-	err := pw.writer.Write(r)
+	err = pw.writer.Write(r)
 	if err != nil {
-		return merr.WrapErrStorage(err, "write record batch error")
+		return merr.Wrap(err, "write record batch error")
 	}
 	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
 	return nil
@@ -384,6 +434,9 @@ func (pw *PackedBinlogRecordWriter) finalizeBinlogs() {
 }
 
 func (pw *PackedBinlogRecordWriter) Close() error {
+	if pw.aborted {
+		return nil
+	}
 	if pw.writer != nil {
 		if err := pw.writer.Close(); err != nil {
 			return err
@@ -396,6 +449,18 @@ func (pw *PackedBinlogRecordWriter) Close() error {
 	return nil
 }
 
+func (pw *PackedBinlogRecordWriter) Abort() error {
+	pw.aborted = true
+	if pw.writer == nil {
+		return nil
+	}
+	// V2 has no discard API. Only previously validated batches reach it;
+	// close releases native resources without publishing binlogs or stats.
+	err := pw.writer.Close()
+	pw.writer = nil
+	return err
+}
+
 func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, schema *schemapb.CollectionSchema,
 	blobsWriter ChunkedBlobsWriter, allocator allocator.Interface, maxRowNum int64, bufferSize, multiPartUploadSize int64, columnGroups []storagecommon.ColumnGroup,
 	storageConfig *indexpb.StorageConfig,
@@ -403,7 +468,7 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 	writerFormat string,
 	pkStatsConfig *PkStatsConfig,
 ) (*PackedBinlogRecordWriter, error) {
-	arrowSchema, err := ConvertToArrowSchema(schema, true)
+	arrowSchema, err := ConvertToArrowSchema(schema, false)
 	if err != nil {
 		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
 	}
@@ -456,7 +521,20 @@ type PackedManifestRecordWriter struct {
 	textRefsAsBinary bool
 }
 
-func (pw *PackedManifestRecordWriter) Write(r Record) error {
+func (pw *PackedManifestRecordWriter) Write(r Record) (err error) {
+	defer func() {
+		if err != nil {
+			_ = pw.Abort()
+		}
+	}()
+	r, release, err := pw.prepareRecord(r)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if r.Len() == 0 {
+		return nil
+	}
 	if err := pw.initWriters(r); err != nil {
 		return err
 	}
@@ -488,9 +566,9 @@ func (pw *PackedManifestRecordWriter) Write(r Record) error {
 
 	pw.collectNullCounts(r)
 
-	err := pw.writer.Write(r)
+	err = pw.writer.Write(r)
 	if err != nil {
-		return merr.WrapErrStorage(err, "write record batch error")
+		return merr.Wrap(err, "write record batch error")
 	}
 	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
 	return nil
@@ -548,6 +626,9 @@ func (pw *PackedManifestRecordWriter) finalizeBinlogs() {
 // those blobs to storage, then performs a single packed.CommitManifestUpdates
 // that registers inserts + all stats atomically.
 func (pw *PackedManifestRecordWriter) Close() error {
+	if pw.aborted {
+		return nil
+	}
 	if pw.writer == nil {
 		return nil
 	}
@@ -572,6 +653,15 @@ func (pw *PackedManifestRecordWriter) Close() error {
 		return merr.Wrap(err, "PackedManifestRecordWriter.Close commit")
 	}
 	pw.manifest = newManifest
+	return nil
+}
+
+func (pw *PackedManifestRecordWriter) Abort() error {
+	pw.aborted = true
+	if pw.writer != nil {
+		pw.writer.Abort()
+		pw.writer = nil
+	}
 	return nil
 }
 
@@ -639,6 +729,9 @@ func newPackedManifestRecordWriter(collectionID, partitionID, segmentID UniqueID
 	if err != nil {
 		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
 	}
+	if textRefsAsBinary {
+		arrowSchema = overrideTextFieldsToBinary(schema, arrowSchema)
+	}
 
 	writer := &PackedManifestRecordWriter{
 		packedBinlogRecordWriterBase: packedBinlogRecordWriterBase{
@@ -690,7 +783,20 @@ type PackedTextManifestRecordWriter struct {
 	textColumnConfigs []packed.TextColumnConfig
 }
 
-func (pw *PackedTextManifestRecordWriter) Write(r Record) error {
+func (pw *PackedTextManifestRecordWriter) Write(r Record) (err error) {
+	defer func() {
+		if err != nil {
+			_ = pw.Abort()
+		}
+	}()
+	r, release, err := pw.prepareRecord(r)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if r.Len() == 0 {
+		return nil
+	}
 	if err := pw.initWriters(r); err != nil {
 		return err
 	}
@@ -722,9 +828,9 @@ func (pw *PackedTextManifestRecordWriter) Write(r Record) error {
 
 	pw.collectNullCounts(r)
 
-	err := pw.writer.Write(r)
+	err = pw.writer.Write(r)
 	if err != nil {
-		return merr.WrapErrStorage(err, "write record batch error")
+		return merr.Wrap(err, "write record batch error")
 	}
 	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
 	return nil
@@ -783,6 +889,9 @@ func (pw *PackedTextManifestRecordWriter) finalizeBinlogs() {
 // Close finalizes the text-column segment using the same do-then-commit
 // pattern as PackedManifestRecordWriter.Close.
 func (pw *PackedTextManifestRecordWriter) Close() error {
+	if pw.aborted {
+		return nil
+	}
 	if pw.writer == nil {
 		return nil
 	}
@@ -811,6 +920,15 @@ func (pw *PackedTextManifestRecordWriter) Close() error {
 	return nil
 }
 
+func (pw *PackedTextManifestRecordWriter) Abort() error {
+	pw.aborted = true
+	if pw.writer != nil {
+		pw.writer.Abort()
+		pw.writer = nil
+	}
+	return nil
+}
+
 // NewPackedTextManifestRecordWriter creates a new BinlogRecordWriter for TEXT column compaction.
 // textColumnConfigs: TEXT column configurations for REWRITE_ALL fields
 func NewPackedTextManifestRecordWriter(
@@ -830,6 +948,12 @@ func NewPackedTextManifestRecordWriter(
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
 		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
+	}
+	for _, tc := range textColumnConfigs {
+		if tc.RewriteMode {
+			arrowSchema = overrideTextFieldsToBinary(schema, arrowSchema)
+			break
+		}
 	}
 
 	writer := &PackedTextManifestRecordWriter{

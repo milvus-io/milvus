@@ -246,16 +246,7 @@ func (w *FFISegmentWriter) Close() (WriterOutput, error) {
 		return nil, merr.WrapErrServiceInternal("FFISegmentWriter already closed")
 	}
 	w.closed = true
-	defer func() {
-		if w.handle != 0 {
-			C.loon_segment_writer_destroy(w.handle)
-			w.handle = 0
-		}
-		if w.cProperties != nil {
-			C.loon_properties_free(w.cProperties)
-			w.cProperties = nil
-		}
-	}()
+	defer w.Destroy()
 	var cOutput C.LoonSegmentWriteOutput
 	result := C.loon_segment_writer_close(w.handle, &cOutput)
 	if err := HandleLoonFFIResult(result); err != nil {
@@ -265,6 +256,23 @@ func (w *FFISegmentWriter) Close() (WriterOutput, error) {
 		cOutput:     cOutput,
 		rowsWritten: int64(cOutput.rows_written),
 	}, nil
+}
+
+// Destroy releases native resources without finalizing/publishing output.
+// Already flushed files are not deleted. Safe after Close or repeated calls.
+func (w *FFISegmentWriter) Destroy() {
+	if w == nil {
+		return
+	}
+	w.closed = true
+	if w.handle != 0 {
+		C.loon_segment_writer_destroy(w.handle)
+		w.handle = 0
+	}
+	if w.cProperties != nil {
+		C.loon_properties_free(w.cProperties)
+		w.cProperties = nil
+	}
 }
 
 // buildCSegmentWriterConfig converts Go config to C config.

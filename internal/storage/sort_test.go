@@ -412,9 +412,9 @@ func TestMergeSort(t *testing.T) {
 	})
 }
 
-func TestMergeSortReturnsRecordBuilderAppendError(t *testing.T) {
+func TestMergeSortRejectsInvalidTextBeforeAppend(t *testing.T) {
 	// UTF8 is valid decoded TEXT. An integer column violates both supported
-	// TEXT representations and must still propagate the Append error.
+	// TEXT representations and must fail before projection or native writing.
 	textBuilder := array.NewInt64Builder(memory.DefaultAllocator)
 	textBuilder.Append(42)
 	textColumn := textBuilder.NewArray()
@@ -454,7 +454,7 @@ func TestMergeSortReturnsRecordBuilderAppendError(t *testing.T) {
 	_, err := MergeSort(1024, schema, []RecordReader{reader}, writer, func(r Record, ri, i int) bool {
 		return true
 	}, []int64{100})
-	assert.ErrorContains(t, err, "failed to append value")
+	assert.ErrorIs(t, err, merr.ErrDataIntegrity)
 }
 
 // Benchmark sort

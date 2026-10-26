@@ -53,8 +53,12 @@ func (s *recordSelection) Len() int {
 }
 
 type RecordMaterializer struct {
-	materializers []FunctionMaterializer
-	schema        *schemapb.CollectionSchema
+	inputValidator *storage.RecordValidator
+	materializers  []FunctionMaterializer
+	schema         *schemapb.CollectionSchema
+	// inputSchema is the explicit read projection for additive reconciliation.
+	// Other callers read all schema fields except pending function outputs.
+	inputSchema *schemapb.CollectionSchema
 	// pendingOutputs are the function-output fields this materializer computes:
 	// the only schema fields absent from the records it wraps. Absent ordinary
 	// fields are already reader-filled (default/null) per the reader contract.
@@ -127,6 +131,33 @@ func (m *RecordMaterializer) Wrap(rec storage.Record) (storage.Record, error) {
 // that keep the returned record across a reader advance must Retain/Release
 // it explicitly (see storage.Sort).
 func (m *RecordMaterializer) WrapWithSelection(rec storage.Record, selection *recordSelection) (storage.Record, error) {
+	if selection != nil || m.hasMaterialization() {
+		if m.schema == nil {
+			return nil, merr.WrapErrServiceInternalMsg("record materializer requires a schema")
+		}
+		if m.inputValidator == nil {
+			// Ordinary absent fields have already been filled by the reader.
+			// Pending function outputs are the only legitimate missing fields
+			// at this stage; validating them here would reject schema evolution.
+			inputSchema := m.inputSchema
+			if inputSchema == nil {
+				inputSchema = &schemapb.CollectionSchema{}
+				for _, field := range typeutil.GetAllFieldSchemas(m.schema) {
+					if _, pending := m.pendingOutputs[field.GetFieldID()]; !pending {
+						inputSchema.Fields = append(inputSchema.Fields, field)
+					}
+				}
+			}
+			var err error
+			m.inputValidator, err = storage.NewRecordValidator(inputSchema, nil)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if err := m.inputValidator.Validate(rec); err != nil {
+			return nil, merr.Wrap(err, "function materializer input validation")
+		}
+	}
 	base := rec
 	if selection != nil {
 		selected, err := newSelectedRecord(rec, m.schema, m.pendingOutputs, selection)

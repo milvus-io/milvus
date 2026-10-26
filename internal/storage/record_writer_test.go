@@ -259,7 +259,7 @@ func TestToWriterRecordRejectsNonNullTextTypeMismatch(t *testing.T) {
 	writerSchema := arrow.NewSchema([]arrow.Field{{Name: field.Name, Type: arrow.BinaryTypes.String, Nullable: true}}, nil)
 	require.NotPanics(t, func() {
 		converted, release, err := toWriterRecord(record, schema, writerSchema)
-		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		require.ErrorIs(t, err, merr.ErrDataIntegrity)
 		require.Nil(t, converted)
 		require.Nil(t, release)
 	})

@@ -131,7 +131,12 @@ Quick rules for the cases that get misclassified in practice:
   system errors, even though the checks look like validation.
 - **Data produced by segcore or another internal component** is not user
   input. A violated data-shape contract (ValidData length, truncated vectors)
-  is a Milvus bug → `WrapErrServiceInternalMsg`.
+  is a system failure. Storage record/schema integrity violations use
+  `WrapErrDataIntegrityMsg` (1009, non-retriable), whether detected on read,
+  during transformation, or before writing. This describes the data, not its
+  provenance; do not infer disk corruption or relabel it to ServiceInternal
+  merely because the check is writer-side. Other internal execution/protocol
+  contracts use `WrapErrServiceInternalMsg` (or the subsystem's promised code).
 - A **TOCTOU race** (state was valid at check time, changed by execution time)
   is not user input → keep it a system error.
 

@@ -308,7 +308,12 @@ func (failingFunctionMaterializer) Close() {}
 // [U6][S1] materializedRecordReader propagates Wrap failures, cleans the
 // previous record, and leaves the base record reader-owned.
 func TestRMMaterializedReaderWrapFailure(t *testing.T) {
-	materializer := &RecordMaterializer{materializers: []FunctionMaterializer{failingFunctionMaterializer{}}}
+	materializer := &RecordMaterializer{
+		schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64},
+		}},
+		materializers: []FunctionMaterializer{failingFunctionMaterializer{}},
+	}
 
 	ints := newInt64Array(t, []int64{1, 2})
 	defer ints.Release()
@@ -317,6 +322,7 @@ func TestRMMaterializedReaderWrapFailure(t *testing.T) {
 
 	_, err := reader.Next()
 	require.Error(t, err)
+	require.ErrorContains(t, err, "injected materialize failure")
 	require.Zero(t, base.releaseCount, "base record stays owned by its reader")
 	require.NoError(t, reader.Close())
 }
