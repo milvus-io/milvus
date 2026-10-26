@@ -209,19 +209,22 @@ the primary key index:
   creates the index of every existing collection with `CreateCollection`,
   recovers them (manifest lookups, install, replay), calls `Start`, and
   closes it with the WAL (see [Readiness](#readiness)).
-- The interceptor only borrows the index: `Build` takes it from
-  `Manager.Get(pchannel)`, and passes the messages through when there is none.
+- The interceptor only uses the index: `Build` reads it from the recovery
+  snapshot (`RecoverySnapshot.PKIndex`), and passes the messages through when
+  there is none.
   It registers the translation of every existing collection and calls
   `CreateCollection` for it, which finds the index that the recovery opened.
   An open that fails on the local disk goes to `OnFatal`: the WAL rejects all
   appends, and its next open tries again. A schema that the index rejects is
   a broken invariant for an existing collection, and it panics. `Close` of the
   interceptor does not close the index.
-- DropCollection and the rollback of a failed CreateCollection call
+- The rollback of a failed CreateCollection calls
   `PChannelIndexManager.DropCollection`. It closes the index and removes `<root>/<vchannel>/`. A
   vchannel name embeds the collection ID, so no later open of the vchannel
-  would remove the files. A failed removal is only logged, because the
-  append is done.
+  would remove the files. At a DropCollection the interceptor only forgets
+  the vchannel; the observe of the WAL recovery closes the index when it
+  reaches the drop, after the writes before it (see
+  [recovery](recovery.md#observe)). A failed removal is only logged.
 
 ### Wiring into the streaming node
 
