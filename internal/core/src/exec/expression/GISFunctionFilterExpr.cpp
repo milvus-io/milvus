@@ -18,6 +18,7 @@
 #include "log/Log.h"
 #include "pb/plan.pb.h"
 #include <cmath>
+#include <vector>
 #include <fmt/core.h>
 namespace milvus {
 namespace exec {
@@ -357,17 +358,7 @@ PhyGISFunctionFilterExpr::EvalForDataSegment() {
 // a fixed decimal count, so the WKT round trip cannot shrink the box.
 static Geometry
 create_bounding_box_for_dwithin(GEOSContextHandle_t ctx,
-                                const Geometry& query_point,
-                                double distance_meters) {
-    Geometry::Envelope env{};
-    if (!Geometry::DWithinSearchEnvelope(
-            ctx, query_point.GetGeometry(), distance_meters, env)) {
-        // An empty query point is within no distance of anything (dwithin
-        // returns false for every row), so hand the index an empty geometry:
-        // it has no envelope and yields zero candidates.
-        return Geometry(ctx, "POLYGON EMPTY");
-    }
-
+                                const Geometry::Envelope& env) {
     std::string bboxWKT =
         fmt::format("POLYGON(({} {}, {} {}, {} {}, {} {}, {} {}))",
                     env.min_x,
@@ -383,6 +374,31 @@ create_bounding_box_for_dwithin(GEOSContextHandle_t ctx,
         );
 
     return Geometry(ctx, bboxWKT.c_str());
+}
+
+// One coarse query geometry per box of the DWITHIN search region: a single
+// box, or two when the spherical cap wraps around the antimeridian. The index
+// takes one geometry per lookup, so the caller looks up each and ORs the
+// candidate bitmaps.
+static std::vector<Geometry>
+create_bounding_boxes_for_dwithin(GEOSContextHandle_t ctx,
+                                  const Geometry& query_point,
+                                  double distance_meters) {
+    std::vector<Geometry> boxes;
+    Geometry::DWithinSearchBoxes region;
+    if (!Geometry::DWithinSearchEnvelope(
+            ctx, query_point.GetGeometry(), distance_meters, region)) {
+        // An empty query point is within no distance of anything (dwithin
+        // returns false for every row), so hand the index an empty geometry:
+        // it has no envelope and yields zero candidates.
+        boxes.emplace_back(ctx, "POLYGON EMPTY");
+        return boxes;
+    }
+    boxes.reserve(region.count);
+    for (const auto& env : region) {
+        boxes.push_back(create_bounding_box_for_dwithin(ctx, env));
+    }
+    return boxes;
 }
 
 VectorPtr
@@ -436,31 +452,43 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
     if (!coarse_cached_) {
         using Index = index::ScalarIndex<std::string>;
 
-        // Prepare shared dataset for index query (coarse candidate set by R-Tree)
-        auto ds = std::make_shared<milvus::Dataset>();
-        ds->Set(milvus::index::OPERATOR_TYPE, expr_->op_);
-
-        // For range_within operations, use bounding box for coarse filtering
-        if (expr_->op_ == proto::plan::GISFunctionFilterExpr_GISOp_DWithin) {
-            // Create bounding box geometry for index coarse filtering
-            Geometry bbox_geometry = create_bounding_box_for_dwithin(
-                ctx, query_geometry, expr_->distance_);
-
-            ds->Set(milvus::index::MATCH_VALUE, bbox_geometry);
-
-            // Note: Distance is not used for bounding box intersection query
-        } else {
-            // For other operations, use original geometry
-            ds->Set(milvus::index::MATCH_VALUE, query_geometry);
-        }
-
         // Query segment-level R-Tree index **once** since each chunk shares the same index
         auto scalar_index = dynamic_cast<const Index*>(pinned_index_[0].get());
         auto* idx_ptr = const_cast<Index*>(scalar_index);
 
-        {
-            auto tmp = idx_ptr->Query(ds);
-            coarse_global_ = std::move(tmp);
+        // Coarse candidate set by R-Tree for one query geometry.
+        auto query_index = [&](const Geometry& match_value) {
+            auto ds = std::make_shared<milvus::Dataset>();
+            ds->Set(milvus::index::OPERATOR_TYPE, expr_->op_);
+            ds->Set(milvus::index::MATCH_VALUE, match_value);
+            return idx_ptr->Query(ds);
+        };
+
+        // For range_within operations, use bounding box for coarse filtering
+        if (expr_->op_ == proto::plan::GISFunctionFilterExpr_GISOp_DWithin) {
+            // One lookup per box of the search region (two when it wraps the
+            // antimeridian); distance is not used by the box intersection.
+            // Each answer is Count()-sized; should two differ in length, the
+            // union keeps the shorter one so a short index is still detected
+            // (and fully refined) below rather than padded with false
+            // negatives.
+            bool first = true;
+            for (const auto& bbox : create_bounding_boxes_for_dwithin(
+                     ctx, query_geometry, expr_->distance_)) {
+                TargetBitmap more = query_index(bbox);
+                if (first) {
+                    coarse_global_ = std::move(more);
+                    first = false;
+                    continue;
+                }
+                if (more.size() < coarse_global_.size()) {
+                    coarse_global_.resize(more.size());
+                }
+                coarse_global_.inplace_or(more, coarse_global_.size());
+            }
+        } else {
+            // For other operations, use original geometry
+            coarse_global_ = query_index(query_geometry);
         }
         // Self-heal an index that reports fewer rows than the segment holds.
         //

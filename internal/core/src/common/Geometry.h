@@ -12,6 +12,7 @@
 
 #include <geos_c.h>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <memory>
@@ -622,6 +623,25 @@ class Geometry {
         double max_y;
     };
 
+    // The coarse search region of one ST_DWITHIN query: the union of `count`
+    // boxes (one, or two when the spherical cap wraps around the
+    // antimeridian). The R-Tree reader takes one box per lookup, so the
+    // caller looks up each box and ORs the candidate bitmaps.
+    struct DWithinSearchBoxes {
+        static constexpr size_t kMaxBoxes = 2;
+        std::array<Envelope, kMaxBoxes> boxes{};
+        size_t count = 0;
+
+        const Envelope*
+        begin() const {
+            return boxes.data();
+        }
+        const Envelope*
+        end() const {
+            return boxes.data() + count;
+        }
+    };
+
     /**
      * The lon/lat envelope that contains EVERY geometry dwithin() can accept
      * for `query_point` and `distance_meters` -- the coarse pre-filter the
@@ -645,11 +665,20 @@ class Geometry {
      *    lon/lat space. Any geometry within that planar distance has a vertex
      *    inside the +-r box, so its envelope intersects the box.
      *
-     * The result is the union of the two boxes plus a tiny margin that
-     * absorbs rounding on the boundary. A cap that crosses the antimeridian
-     * is widened to the full [-180, 180] longitude range; coordinates stored
-     * outside the valid lon/lat range are not covered (haversine wraps them,
-     * an axis-aligned box cannot).
+     * The primary box is the union of the two extents plus a tiny margin
+     * that absorbs rounding on the boundary. Its longitude range is not
+     * clamped to [-180, 180], so it stays a superset of the planar disc.
+     *
+     * Antimeridian: haversine measures longitude modulo 360, so a spherical
+     * cap that crosses +-180 continues on the other side, while the planar
+     * GEOS metric does not wrap. Only the cap's overflow is mapped back, as a
+     * second box at the opposite edge -- e.g. POINT (179.999 0) with 1000 m
+     * yields a sliver on each side of the antimeridian instead of every
+     * longitude in the latitude band. A cap that contains a pole is widened
+     * to the full [-180, 180] range in one box, as is a query whose own
+     * longitude lies outside [-180, 180]. Row coordinates stored outside the
+     * valid lon/lat range are not covered (haversine wraps them, an
+     * axis-aligned box cannot).
      *
      * Returns false only when the query point has no coordinates (empty
      * geometry); dwithin() then accepts nothing, so the caller should treat
@@ -659,7 +688,7 @@ class Geometry {
     DWithinSearchEnvelope(GEOSContextHandle_t ctx,
                           const GEOSGeometry* query_point,
                           double distance_meters,
-                          Envelope& out) {
+                          DWithinSearchBoxes& out) {
         AssertInfo(query_point != nullptr, "query point is null");
         double query_lon = 0, query_lat = 0;
         if (GEOSGeomGetX_r(ctx, query_point, &query_lon) != 1 ||
@@ -711,23 +740,50 @@ class Geometry {
             degrees_to_meters_at_location(1.0, query_lat);
         const double planar_deg = d / meters_per_degree;
 
-        double lat_half = std::max(cap_lat_deg, planar_deg);
-        double lon_half = std::max(cap_lon_deg, planar_deg);
-        lat_half = lat_half * (1.0 + kRelativeMargin) + kAbsoluteMarginDeg;
-        lon_half = lon_half * (1.0 + kRelativeMargin) + kAbsoluteMarginDeg;
+        auto pad = [](double half_deg) {
+            return half_deg * (1.0 + kRelativeMargin) + kAbsoluteMarginDeg;
+        };
+        const double lat_half = pad(std::max(cap_lat_deg, planar_deg));
+        const double lon_half = pad(std::max(cap_lon_deg, planar_deg));
 
-        out.min_y = query_lat - lat_half;
-        out.max_y = query_lat + lat_half;
-        out.min_x = query_lon - lon_half;
-        out.max_x = query_lon + lon_half;
-        if (full_longitude || out.min_x < -180.0 || out.max_x > 180.0) {
-            // The cap wraps around the antimeridian (or contains a pole):
-            // every longitude in the valid range may hold a matching point.
-            // Keep the overflow rather than clamping so the box stays a
-            // superset of the planar disc as well.
-            out.min_x = std::min(out.min_x, -180.0);
-            out.max_x = std::max(out.max_x, 180.0);
+        out = DWithinSearchBoxes{};
+        Envelope& primary = out.boxes[out.count++];
+        primary.min_y = query_lat - lat_half;
+        primary.max_y = query_lat + lat_half;
+        primary.min_x = query_lon - lon_half;
+        primary.max_x = query_lon + lon_half;
+        if (full_longitude || query_lon < -180.0 || query_lon > 180.0) {
+            // The cap contains a pole, or the query longitude itself is out
+            // of range (haversine still wraps it): every longitude may hold
+            // a matching point. Keep any overflow rather than clamping so the
+            // box stays a superset of the planar disc as well.
+            primary.min_x = std::min(primary.min_x, -180.0);
+            primary.max_x = std::max(primary.max_x, 180.0);
+            return true;
         }
+
+        // The spherical cap's longitude span [query_lon -+ cap_lon_half] is
+        // below 180 deg wide here (asin < 90 deg) and query_lon is in range,
+        // so it overflows at most one edge; map that overflow to the other
+        // edge. Only point rows are measured by haversine, so the wrapped box
+        // takes the cap's own latitude extent, not the planar one.
+        const double cap_lon_half = pad(cap_lon_deg);
+        const double cap_lat_half = pad(cap_lat_deg);
+        double wrapped_min_x = 0, wrapped_max_x = 0;
+        if (query_lon + cap_lon_half > 180.0) {
+            wrapped_min_x = -180.0;
+            wrapped_max_x = query_lon + cap_lon_half - 360.0;
+        } else if (query_lon - cap_lon_half < -180.0) {
+            wrapped_min_x = query_lon - cap_lon_half + 360.0;
+            wrapped_max_x = 180.0;
+        } else {
+            return true;
+        }
+        Envelope& wrapped = out.boxes[out.count++];
+        wrapped.min_x = wrapped_min_x;
+        wrapped.max_x = wrapped_max_x;
+        wrapped.min_y = query_lat - cap_lat_half;
+        wrapped.max_y = query_lat + cap_lat_half;
         return true;
     }
 

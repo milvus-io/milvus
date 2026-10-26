@@ -2248,8 +2248,21 @@ TEST_F(RTreeIndexTest, GIS_DWithin_IndexPathMatchesRawPath) {
         // the cap touches the pole only to within rounding, so the envelope
         // must still span every longitude (review of #54294).
         {90, "POINT (180 -90)"},
+        // Around POINT (179.999 0) with 1000 m (review of #54294): the
+        // haversine cap wraps across +-180, so rows on both sides must
+        // survive the coarse pass, which maps only the cap's overflow to the
+        // other edge instead of every longitude.
+        {92, "POINT (179.9995 0)"},  // ~56 m
+        {93, "POINT (180 0)"},       // ~111 m
+        {94, "POINT (-180 0)"},      // same meridian, ~111 m
+        {95, "POINT (-179.996 0)"},  // across +-180, ~556 m
+        {96, "LINESTRING (179.9985 -0.0005, 179.9985 0.0005)"},  // planar
+        {97, "POINT (-179.985 0)"},  // across +-180, ~1.7 km: rejected
+        {98, "POINT (0 0)"},         // antipodal, same latitude: rejected
     };
     constexpr int kPoleRow = 90;
+    const std::set<int> antimeridian_near = {92, 93, 94, 95, 96};
+    const std::set<int> antimeridian_far = {97, 98};
     // Same argument order as Geometry::dwithin (row first, then query).
     const double pole_distance =
         Geometry::haversine_distance_meters(-90.0, 180.0, -29.0, 0.0);
@@ -2370,6 +2383,8 @@ TEST_F(RTreeIndexTest, GIS_DWithin_IndexPathMatchesRawPath) {
         {"POINT (-60 -40)", 1, true},
         {"POINT EMPTY", 1e12, true},
         {"POINT (0 -29)", pole_distance, false},
+        {"POINT (179.999 0)", 1000, true},
+        {"POINT (-179.999 0)", 1000, true},
     };
     for (const auto& q : queries) {
         SCOPED_TRACE("ST_DWITHIN(geo, '" + q.wkt + "', " +
@@ -2423,6 +2438,19 @@ TEST_F(RTreeIndexTest, GIS_DWithin_IndexPathMatchesRawPath) {
             run(indexed.get(), "POINT (0 -29)", pole_distance);
         ASSERT_TRUE(raw_bits[kPoleRow]) << "pole row is not on the boundary";
         EXPECT_TRUE(idx_bits[kPoleRow]) << "pole row pruned by the envelope";
+    }
+    // Next to the antimeridian, the indexed path keeps the rows on both
+    // sides of +-180 and rejects the ones past 1 km, including the antipodal
+    // row at the same latitude that a full-longitude box would make a
+    // candidate. (The line row is planar-near only to the east query.)
+    {
+        BitsetType idx_bits = run(indexed.get(), "POINT (179.999 0)", 1000);
+        for (int i : antimeridian_near) {
+            EXPECT_TRUE(idx_bits[i]) << "antimeridian row " << i;
+        }
+        for (int i : antimeridian_far) {
+            EXPECT_FALSE(idx_bits[i]) << "antimeridian row " << i;
+        }
     }
 
     indexed.reset();
