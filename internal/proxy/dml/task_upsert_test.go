@@ -2212,7 +2212,7 @@ func TestUnwrapPartialUpdateAppendErrorRejectsMixedOutcome(t *testing.T) {
 			{Error: casErr},
 			{Error: unknownErr},
 		},
-	})
+	}, newStreamingErrorTestMessages("v1", "v2"))
 	require.ErrorIs(t, err, unknownErr)
 
 	err = unwrapStreamingMutationError(streaming.AppendResponses{
@@ -2220,7 +2220,7 @@ func TestUnwrapPartialUpdateAppendErrorRejectsMixedOutcome(t *testing.T) {
 			{Error: casErr},
 			{AppendResult: &streamingtypes.AppendResult{TimeTick: 100}},
 		},
-	})
+	}, newStreamingErrorTestMessages("v1", "v2"))
 	require.ErrorIs(t, err, casErr)
 }
 

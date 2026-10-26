@@ -183,7 +183,9 @@ returns the independent TRANSACTION_NOT_FOUND code, distinct from expiration and
 generic UNRECOVERABLE errors. The producer classifies it as terminal. Proxy maps
 this explicit server classification to the non-retriable
 system error `ErrServiceWriteOutcomeUnknown` (public code 13), telling the caller
-that the write may have completed and to verify its result before retrying.
+that the write result is unknown, the write may have succeeded, and retrying may
+result in duplicate data. The error includes the VChannel of the corresponding
+failed append response, using the original message order preserved by AppendMessages.
 An unknown outcome takes precedence over another shard's rejection, including a
 CAS conflict; it cannot authorize whole-request replay. Plain UNRECOVERABLE,
 transport errors and explicit expiration are not reclassified based on text or

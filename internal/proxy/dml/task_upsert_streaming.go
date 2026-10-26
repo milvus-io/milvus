@@ -139,7 +139,7 @@ func (ut *UpsertTask) appendUpsertAttempt(ctx context.Context, ez *message.Ciphe
 		}
 	}
 	resp := streaming.WAL().AppendMessages(ctx, messages...)
-	appendErr := unwrapStreamingMutationError(resp)
+	appendErr := unwrapStreamingMutationError(resp, messages)
 	if appendErr != nil {
 		logger.Warn(ctx, "append messages to wal failed", mlog.Err(appendErr))
 		if status.AsStreamingError(appendErr).IsSchemaVersionMismatch() {
