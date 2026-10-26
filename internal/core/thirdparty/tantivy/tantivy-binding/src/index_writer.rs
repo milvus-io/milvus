@@ -12,6 +12,13 @@ use crate::{index_writer_v5, index_writer_v7, TantivyIndexVersion};
 
 pub trait TantivyValue<D> {
     fn add_to_document(&self, field: u32, document: &mut D);
+
+    fn canonicalize(self, _enabled: bool) -> Self
+    where
+        Self: Sized,
+    {
+        self
+    }
 }
 
 pub enum IndexWriterWrapper {
@@ -20,6 +27,13 @@ pub enum IndexWriterWrapper {
 }
 
 impl IndexWriterWrapper {
+    pub fn set_nan_total_order(&mut self, enabled: bool) {
+        match self {
+            Self::V5(writer) => writer.supports_nan_total_order = enabled,
+            Self::V7(writer) => writer.supports_nan_total_order = enabled,
+        }
+    }
+
     // create a IndexWriterWrapper according to `tanviy_index_version`.
     // version 7 is the latest version and is what we should use in most cases.
     // We may also build with version 5 for compatibility for reader nodes with older versions.

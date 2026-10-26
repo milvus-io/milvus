@@ -25,6 +25,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func (s *GroupByOpTestSuite) nanGroupByFrame(ids []int64, scores []float32, categories []string) *DataFrame {
@@ -53,7 +54,7 @@ func (s *GroupByOpTestSuite) TestGroupByOp_NaNTopK() {
 	nan := float32(math.NaN())
 	for _, scorer := range []GroupScorer{GroupScorerMax, GroupScorerSum, GroupScorerAvg} {
 		for _, desc := range []bool{true, false} {
-			direction, expected := "descending", []int64{4, 1}
+			direction, expected := "descending", []int64{3, 4}
 			if !desc {
 				direction, expected = "ascending", []int64{2, 1}
 			}
@@ -67,8 +68,8 @@ func (s *GroupByOpTestSuite) TestGroupByOp_NaNTopK() {
 					groupSize, limit = 2, 1
 				}
 				s.Run(string(scorer)+"/"+direction+"/"+scope, func() {
-					// NaN must not prevent the last, highest-scoring row/group
-					// from moving ahead of earlier candidates before truncation.
+					// Intermediate scores use the scalar total order, so NaN
+					// precedes every numeric score in descending top-k.
 					df := s.nanGroupByFrame([]int64{1, 2, 3, 4}, []float32{5, 3, nan, 9}, categories)
 					defer df.Release()
 					op := NewGroupByOpWithScorer("category", groupSize, limit, 0, scorer).SetSortDescending(desc)
@@ -76,7 +77,13 @@ func (s *GroupByOpTestSuite) TestGroupByOp_NaNTopK() {
 					s.Require().NoError(err)
 					defer result.Release()
 					s.Equal(expected, s.getChunkInt64Values(result.Column(types.IDFieldName), 0))
-					s.NoError(ValidateScoreChunk(result.Column(types.ScoreFieldName).Chunk(0), 0))
+					scoreErr := ValidateScoreChunk(result.Column(types.ScoreFieldName).Chunk(0), 0)
+					if desc {
+						s.Require().ErrorIs(scoreErr, merr.ErrFunctionFailed)
+						s.Contains(scoreErr.Error(), "$score contains non-finite value NaN")
+					} else {
+						s.NoError(scoreErr)
+					}
 				})
 			}
 		}
@@ -108,7 +115,7 @@ func (s *GroupByOpTestSuite) TestGroupByOp_NaNTiesAndInfinities() {
 			s.Run(direction+"/"+test.name, func() {
 				expected := test.expected
 				if expected == nil {
-					expected = []int64{1, 4, 3, 2}
+					expected = []int64{2, 1, 4, 3}
 					if !desc {
 						expected = []int64{3, 4, 1, 2}
 					}
@@ -120,6 +127,7 @@ func (s *GroupByOpTestSuite) TestGroupByOp_NaNTiesAndInfinities() {
 				s.Require().NoError(err)
 				defer result.Release()
 				s.Equal(expected, s.getChunkInt64Values(result.Column(types.IDFieldName), 0))
+				s.ErrorIs(ValidateScoreChunk(result.Column(types.ScoreFieldName).Chunk(0), 0), merr.ErrFunctionFailed)
 			})
 		}
 	}
@@ -129,7 +137,7 @@ func (s *GroupByOpTestSuite) TestGroupByOp_AggregationNaN() {
 	// Even without NaN input, +Inf + -Inf produces NaN for sum/avg.
 	for _, scorer := range []GroupScorer{GroupScorerSum, GroupScorerAvg} {
 		for _, desc := range []bool{true, false} {
-			direction, expected := "descending", []int64{4, 1}
+			direction, expected := "descending", []int64{2, 3, 4}
 			if !desc {
 				direction, expected = "ascending", []int64{1, 4}
 			}
@@ -141,7 +149,15 @@ func (s *GroupByOpTestSuite) TestGroupByOp_AggregationNaN() {
 				s.Require().NoError(err)
 				defer result.Release()
 				s.Equal(expected, s.getChunkInt64Values(result.Column(types.IDFieldName), 0))
-				s.NoError(ValidateScoreChunk(result.Column(types.ScoreFieldName).Chunk(0), 0))
+				scoreErr := ValidateScoreChunk(result.Column(types.ScoreFieldName).Chunk(0), 0)
+				if desc {
+					// The NaN aggregate ranks first, preserving its source rows.
+					// Their infinities remain invalid at the final score boundary.
+					s.Require().ErrorIs(scoreErr, merr.ErrFunctionFailed)
+					s.Contains(scoreErr.Error(), "$score contains non-finite value")
+				} else {
+					s.NoError(scoreErr)
+				}
 			})
 		}
 	}

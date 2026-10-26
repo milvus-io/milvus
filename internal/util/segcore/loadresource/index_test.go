@@ -267,3 +267,56 @@ func TestEstimateIndexLoadResourceReturnsErrorWithoutIndexType(t *testing.T) {
 	require.Error(t, err)
 	require.Zero(t, usage)
 }
+
+func TestEstimateIndexEligibilityVersionAndTypeMatrix(t *testing.T) {
+	paramtable.Init()
+	cases := []struct {
+		name        string
+		dataType    schemapb.DataType
+		elementType schemapb.DataType
+		castType    string
+		affected    bool
+	}{
+		{"float", schemapb.DataType_Float, schemapb.DataType_None, "", true},
+		{"double", schemapb.DataType_Double, schemapb.DataType_None, "", true},
+		{"int64", schemapb.DataType_Int64, schemapb.DataType_None, "", false},
+		{"float_array", schemapb.DataType_Array, schemapb.DataType_Float, "", true},
+		{"double_array", schemapb.DataType_Array, schemapb.DataType_Double, "", true},
+		{"int_array", schemapb.DataType_Array, schemapb.DataType_Int64, "", false},
+		{"json_double", schemapb.DataType_JSON, schemapb.DataType_None, "DOUBLE", true},
+		{"json_array_double", schemapb.DataType_JSON, schemapb.DataType_None, "ARRAY_DOUBLE", true},
+		{"json_flat", schemapb.DataType_JSON, schemapb.DataType_None, "JSON", true},
+		{"json_varchar", schemapb.DataType_JSON, schemapb.DataType_None, "VARCHAR", false},
+		{"json_bool", schemapb.DataType_JSON, schemapb.DataType_None, "BOOL", false},
+		{"json_array_varchar", schemapb.DataType_JSON, schemapb.DataType_None, "ARRAY_VARCHAR", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			field := &schemapb.FieldSchema{FieldID: 100, Name: "value", DataType: tc.dataType, ElementType: tc.elementType}
+			segment := &querypb.SegmentLoadInfo{SegmentID: 3, NumOfRows: 100}
+			index := &querypb.FieldIndexInfo{
+				FieldID: 100, IndexSize: 1024, NumRows: 100,
+				IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "INVERTED"}},
+			}
+			if tc.castType != "" {
+				index.IndexParams = append(index.IndexParams, &commonpb.KeyValuePair{Key: "json_cast_type", Value: tc.castType})
+			}
+			for _, version := range []int32{0, 5, 6} {
+				index.CurrentScalarIndexVersion = version
+				calls := 0
+				runner := func(fn func() error) error { calls++; return fn() }
+				usage, err := EstimateIndexLoadResourceWithRunner(context.Background(), field, segment, index, runner)
+				require.NoError(t, err)
+				skipped := tc.affected && version < 6
+				require.Equal(t, skipped, usage.Skipped)
+				if skipped {
+					require.Equal(t, IndexResourceUsage{Skipped: true}, usage)
+					require.Zero(t, calls)
+				} else {
+					require.Equal(t, 1, calls)
+					require.NotZero(t, usage.MaxMemoryBytes+usage.MaxDiskBytes)
+				}
+			}
+		})
+	}
+}

@@ -23,6 +23,7 @@
 #include <utility>
 
 #include "common/EasyAssert.h"
+#include "common/ScalarComparison.h"
 #include "common/RegexQuery.h"
 #include "common/Utils.h"
 #include "storage/artifact/LocalDirectory.h"
@@ -296,6 +297,9 @@ InvertedIndexReader<T>::Range(const T& lo,
                               const T& hi,
                               bool hi_inc) const {
     TargetBitmap result(count_);
+    if (ScalarLess(hi, lo) || (ScalarEqual(lo, hi) && !(lo_inc && hi_inc))) {
+        return result;
+    }
     if constexpr (std::is_same_v<T, std::string_view>) {
         const auto owned_lo = OwnString(lo);
         const auto owned_hi = OwnString(hi);

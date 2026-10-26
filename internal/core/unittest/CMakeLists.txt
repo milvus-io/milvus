@@ -107,6 +107,7 @@ set(INDEX_TEST_FILES
         ${CMAKE_HOME_DIRECTORY}/src/index/contracts/query/SpatialReaderTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/contracts/query/TextMatchReaderTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/contracts/query/VectorReaderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/NaNIndexTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/bitmap/BitmapIndexArtifactTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/bitmap/BitmapIndexReaderTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/scalar/fmindex/FmIndexArtifactTest.cpp

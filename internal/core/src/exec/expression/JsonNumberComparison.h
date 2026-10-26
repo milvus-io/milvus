@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "common/ScalarComparison.h"
 #include <cmath>
 #include <cstdint>
 #include <optional>
@@ -30,6 +31,9 @@ namespace milvus::exec {
 
 inline int
 CompareInt64ToDouble(int64_t lhs, double rhs) {
+    if (ScalarIsNaN(rhs)) {
+        return -1;
+    }
     constexpr double kInt64Lower = -0x1p63;
     constexpr double kInt64Upper = 0x1p63;
     if (rhs < kInt64Lower) {
@@ -59,6 +63,9 @@ CompareInt64ToDouble(int64_t lhs, double rhs) {
 
 inline int
 CompareUint64ToDouble(uint64_t lhs, double rhs) {
+    if (ScalarIsNaN(rhs)) {
+        return -1;
+    }
     constexpr double kUint64Upper = 0x1p64;
     if (rhs < 0) {
         return 1;
@@ -164,9 +171,7 @@ CompareJsonNumberToBound(int64_t number,
     }
     if (bound.has_float_val()) {
         const auto rhs = bound.float_val();
-        return std::isnan(rhs)
-                   ? std::nullopt
-                   : std::optional<int>(CompareInt64ToDouble(number, rhs));
+        return CompareInt64ToDouble(number, rhs);
     }
     return std::nullopt;
 }
@@ -174,18 +179,12 @@ CompareJsonNumberToBound(int64_t number,
 inline std::optional<int>
 CompareJsonNumberToBound(double number,
                          const proto::plan::GenericValue& bound) {
-    if (std::isnan(number)) {
-        return std::nullopt;
-    }
     if (bound.has_int64_val()) {
         return -CompareInt64ToDouble(bound.int64_val(), number);
     }
     if (bound.has_float_val()) {
         const auto rhs = bound.float_val();
-        if (std::isnan(rhs)) {
-            return std::nullopt;
-        }
-        return number < rhs ? -1 : number > rhs ? 1 : 0;
+        return ScalarLess(number, rhs) ? -1 : ScalarEqual(number, rhs) ? 0 : 1;
     }
     return std::nullopt;
 }
@@ -260,9 +259,6 @@ CompareJsonNumberToBound(const simdjson::ondemand::number& number,
         }
         if (bound.has_float_val()) {
             const auto rhs = bound.float_val();
-            if (std::isnan(rhs)) {
-                return std::nullopt;
-            }
             return CompareUint64ToDouble(number.get_uint64(), rhs);
         }
         return std::nullopt;

@@ -522,7 +522,7 @@ func collapseElementLevelResultWithMetricDirection(result *milvuspb.SearchResult
 			hits = append(hits, hit)
 		}
 		sort.SliceStable(hits, func(i, j int) bool {
-			if hits[i].aggregate != hits[j].aggregate {
+			if typeutil.Float32ToSortableUint32(hits[i].aggregate) != typeutil.Float32ToSortableUint32(hits[j].aggregate) {
 				return isBetterElementScore(hits[i].aggregate, hits[j].aggregate, largerScoreIsBetter)
 			}
 			return hits[i].order < hits[j].order
@@ -570,7 +570,7 @@ func aggregateElementHits(hits []bestElementHit, config elementCollapseConfig, l
 
 	bestHits := append([]bestElementHit(nil), hits...)
 	sort.SliceStable(bestHits, func(i, j int) bool {
-		if bestHits[i].score != bestHits[j].score {
+		if typeutil.Float32ToSortableUint32(bestHits[i].score) != typeutil.Float32ToSortableUint32(bestHits[j].score) {
 			return isBetterElementScore(bestHits[i].score, bestHits[j].score, largerScoreIsBetter)
 		}
 		return bestHits[i].order < bestHits[j].order
@@ -648,10 +648,12 @@ func normalizeElementLevelHybridResult(result *milvuspb.SearchResults) (*milvusp
 }
 
 func isBetterElementScore(candidate, current float32, largerScoreIsBetter bool) bool {
+	candidateKey := typeutil.Float32ToSortableUint32(candidate)
+	currentKey := typeutil.Float32ToSortableUint32(current)
 	if largerScoreIsBetter {
-		return candidate > current
+		return candidateKey > currentKey
 	}
-	return candidate < current
+	return candidateKey < currentKey
 }
 
 func copySearchResultsWithData(src *milvuspb.SearchResults, data *schemapb.SearchResultData) *milvuspb.SearchResults {
@@ -2389,10 +2391,8 @@ func isSameGroupByValue(field *schemapb.FieldData, i, j int) bool {
 // Returns -1 if value[i] < value[j], 0 if equal, 1 if value[i] > value[j].
 // Returns an error if indices are out of bounds (indicates a bug in the pipeline).
 //
-// Note on Float/Double NaN handling: This function does not explicitly handle NaN values
-// because Milvus rejects NaN and Infinity at insert time via proxy validation
-// (see internal/proxy/fieldvalidator WithNANCheck -> Validate -> typeutil.VerifyFloat).
-// Therefore, NaN values cannot exist in stored data and will never reach this comparison.
+// Floating-point values use the scalar SQL order: all NaNs compare equal
+// above +Inf, and both signed zeros compare equal. NULL placement is separate.
 func compareFieldDataAt(field *schemapb.FieldData, i, j int, nullsFirst bool) (int, error) {
 	if cmp, handled := compareNulls(typeutil.GetFieldDataValidData(field), i, j, nullsFirst); handled {
 		return cmp, nil
@@ -2426,9 +2426,10 @@ func compareFieldDataAt(field *schemapb.FieldData, i, j int, nullsFirst bool) (i
 		if i >= len(data) || j >= len(data) {
 			return 0, merr.WrapErrServiceInternalMsg("compareFieldDataAt: index out of bounds for Float field %s (i=%d, j=%d, len=%d)", field.GetFieldName(), i, j, len(data))
 		}
-		if data[i] < data[j] {
+		left, right := typeutil.Float32ToSortableUint32(data[i]), typeutil.Float32ToSortableUint32(data[j])
+		if left < right {
 			return -1, nil
-		} else if data[i] > data[j] {
+		} else if left > right {
 			return 1, nil
 		}
 		return 0, nil
@@ -2437,9 +2438,10 @@ func compareFieldDataAt(field *schemapb.FieldData, i, j int, nullsFirst bool) (i
 		if i >= len(data) || j >= len(data) {
 			return 0, merr.WrapErrServiceInternalMsg("compareFieldDataAt: index out of bounds for Double field %s (i=%d, j=%d, len=%d)", field.GetFieldName(), i, j, len(data))
 		}
-		if data[i] < data[j] {
+		left, right := typeutil.Float64ToSortableUint64(data[i]), typeutil.Float64ToSortableUint64(data[j])
+		if left < right {
 			return -1, nil
-		} else if data[i] > data[j] {
+		} else if left > right {
 			return 1, nil
 		}
 		return 0, nil

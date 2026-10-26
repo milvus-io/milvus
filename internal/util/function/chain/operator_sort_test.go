@@ -27,6 +27,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -94,13 +95,16 @@ func (s *SortOpTestSuite) TestSpecialFloatOrdering() {
 						s.Require().NoError(err)
 						defer result.Release()
 						want := []int64{6, 4, 3, 5}
-						if desc {
-							want = []int64{5, 3, 4, 6}
-						}
+						nanIDs := []int64{9, 1}
 						if tieBreak != "" {
-							want = append(want, 1, 9)
+							nanIDs = []int64{1, 9}
+						}
+						finiteOffset := int64(1)
+						if desc {
+							want = append(nanIDs, 5, 3, 4, 6)
+							finiteOffset = 3
 						} else {
-							want = append(want, 9, 1)
+							want = append(want, nanIDs...)
 						}
 						if withNull {
 							if tieBreak != "" {
@@ -111,13 +115,13 @@ func (s *SortOpTestSuite) TestSpecialFloatOrdering() {
 						}
 						s.Equal(want, result.Column(types.IDFieldName).Chunk(0).(*array.Int64).Int64Values())
 						if dataType.ID() == arrow.FLOAT32 {
-							// Remove the leading infinity and retain only finite rows.
-							limited, err := ExecuteOperator(ctx, result, NewLimitOp(2, 1))
+							// Export only finite candidates; nonfinite final scores stay invalid.
+							limited, err := ExecuteOperator(ctx, result, NewLimitOp(2, finiteOffset))
 							s.Require().NoError(err)
 							defer limited.Release()
 							exported, err := ToSearchResultData(limited)
 							s.Require().NoError(err)
-							s.Equal(want[1:3], exported.Ids.GetIntId().Data)
+							s.Equal(want[finiteOffset:finiteOffset+2], exported.Ids.GetIntId().Data)
 						}
 					})
 				}
@@ -564,4 +568,100 @@ func (s *SortOpTestSuite) TestSortIgnoresNonComparableTieBreakAndStringHelpers()
 	s.Require().ErrorIs(err, merr.ErrParameterInvalid)
 	s.Equal(merr.InputError, merr.GetErrorType(merr.Error(merr.Status(err))))
 	s.False(merr.Status(err).GetRetriable())
+}
+
+func TestSortOpScalarFloatingTotalOrder(t *testing.T) {
+	ids := []int64{91, 8, 5, 3, 90, 4, 6, 2, 10, 9}
+	floatValues := []float32{math.Float32frombits(0x7fc00001), float32(math.Inf(1)), 0, float32(math.Inf(-1)), math.Float32frombits(0xffc00002), math.Float32frombits(0x80000000), 1, -1, 0, 0}
+	doubleValues := []float64{math.Float64frombits(0x7ff8000000000001), math.Inf(1), 0, math.Inf(-1), math.Float64frombits(0xfff8000000000002), math.Copysign(0, -1), 1, -1, 0, 0}
+	// Equal ranks encode the expected equality classes without depending on
+	// either comparator implementation: all NaNs tie, as do signed zeros.
+	ranks := []int{5, 4, 2, 0, 5, 2, 3, 1}
+	for _, dataType := range []schemapb.DataType{schemapb.DataType_Float, schemapb.DataType_Double} {
+		for _, desc := range []bool{false, true} {
+			for _, nullable := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/desc=%t/nullable=%t", dataType, desc, nullable), func(t *testing.T) {
+					pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
+					defer pool.AssertSize(t, 0)
+					n := 8
+					var valid []bool
+					if nullable {
+						n = 10
+						valid = []bool{true, true, true, true, true, true, true, true, false, false}
+					}
+					var values arrow.Array
+					if dataType == schemapb.DataType_Float {
+						b := array.NewFloat32Builder(pool)
+						b.AppendValues(floatValues[:n], valid)
+						values = b.NewArray()
+						b.Release()
+					} else {
+						b := array.NewFloat64Builder(pool)
+						b.AppendValues(doubleValues[:n], valid)
+						values = b.NewArray()
+						b.Release()
+					}
+					idBuilder := array.NewInt64Builder(pool)
+					idBuilder.AppendValues(ids[:n], nil)
+					idArray := idBuilder.NewArray()
+					idBuilder.Release()
+					builder := NewDataFrameBuilder()
+					defer builder.Release()
+					builder.SetChunkSizes([]int64{int64(n)})
+					require.NoError(t, builder.AddColumnFromChunks(types.IDFieldName, []arrow.Array{idArray}))
+					require.NoError(t, builder.AddColumnFromChunks("scalar_field", []arrow.Array{values}))
+					builder.SetFieldType("scalar_field", dataType)
+					df := builder.Build()
+					defer df.Release()
+
+					less, fast := makeArrayRowLess(values, idArray, desc)
+					require.Equal(t, dataType == schemapb.DataType_Float && desc && !nullable, fast)
+					for i, rankI := range ranks {
+						for j, rankJ := range ranks {
+							want := 0
+							if rankI < rankJ {
+								want = -1
+							} else if rankI > rankJ {
+								want = 1
+							}
+							require.Equal(t, want, compareArrayValues(values, i, j), "rows %d/%d", i, j)
+							if fast {
+								require.Equal(t, want > 0 || (want == 0 && ids[i] < ids[j]), less(i, j), "fast rows %d/%d", i, j)
+							}
+						}
+					}
+
+					op := newSortOp("scalar_field", desc, types.IDFieldName)
+					result, err := ExecuteOperator(types.NewFuncContextFull(context.Background(), pool, "rerank"), df, op)
+					require.NoError(t, err)
+					defer result.Release()
+					want := []int64{3, 2, 4, 5, 6, 8, 90, 91}
+					if desc {
+						want = []int64{90, 91, 8, 6, 4, 5, 2, 3}
+					}
+					if nullable {
+						want = append(want, 9, 10)
+					}
+					require.Equal(t, want, result.Column(types.IDFieldName).Chunk(0).(*array.Int64).Int64Values())
+					got := result.Column("scalar_field").Chunk(0)
+					for row, id := range want {
+						for original, originalID := range ids[:n] {
+							if id != originalID {
+								continue
+							}
+							require.Equal(t, original >= 8, got.IsNull(row))
+							if got.IsNull(row) {
+								continue
+							}
+							if dataType == schemapb.DataType_Float {
+								require.Equal(t, math.Float32bits(floatValues[original]), math.Float32bits(got.(*array.Float32).Value(row)))
+							} else {
+								require.Equal(t, math.Float64bits(doubleValues[original]), math.Float64bits(got.(*array.Float64).Value(row)))
+							}
+						}
+					}
+				})
+			}
+		}
+	}
 }

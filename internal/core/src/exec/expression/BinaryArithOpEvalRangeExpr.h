@@ -128,11 +128,7 @@ template <typename T,
           proto::plan::ArithOpType arith_op,
           FilterType filter_type = FilterType::sequential>
 struct ArithOpElementFunc {
-    typedef std::conditional_t<std::is_integral_v<T> &&
-                                   !std::is_same_v<bool, T>,
-                               int64_t,
-                               T>
-        HighPrecisonType;
+    using HighPrecisonType = milvus::bitset::ArithHighPrecisionType<T>;
     void
     operator()(const T* src,
                size_t size,
@@ -150,259 +146,20 @@ struct ArithOpElementFunc {
             }
         }
 
-        // This is the original code, kept here for the documentation purposes
-        // and also this code will be used for iterative filter since iterative filter does not execute as a batch manner
+        // Iterative filtering evaluates only the requested offsets.
         if constexpr (filter_type == FilterType::random) {
             for (int i = 0; i < size; ++i) {
                 auto offset = (offsets) ? offsets[i] : i;
-                if constexpr (cmp_op == proto::plan::OpType::Equal) {
-                    if constexpr (arith_op == proto::plan::ArithOpType::Add) {
-                        res[i] = (src[offset] + right_operand) == val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Sub) {
-                        res[i] = (src[offset] - right_operand) == val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Mul) {
-                        res[i] = (src[offset] * right_operand) == val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Div) {
-                        res[i] = (src[offset] / right_operand) == val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Mod) {
-                        res[i] =
-                            (long(src[offset]) % long(right_operand)) == val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::BitAnd) {
-                        res[i] =
-                            (long(src[offset]) & long(right_operand)) == val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::BitOr) {
-                        res[i] =
-                            (long(src[offset]) | long(right_operand)) == val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::BitXor) {
-                        res[i] =
-                            (long(src[offset]) ^ long(right_operand)) == val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Shl) {
-                        res[i] =
-                            (long(src[offset]) << long(right_operand)) == val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Shr) {
-                        res[i] =
-                            (long(src[offset]) >> long(right_operand)) == val;
-                    } else {
-                        ThrowInfo(UnexpectedError,
-                                  fmt::format("unsupported arith type:{} for "
-                                              "ArithOpElementFunc",
-                                              arith_op));
-                    }
-                } else if constexpr (cmp_op == proto::plan::OpType::NotEqual) {
-                    if constexpr (arith_op == proto::plan::ArithOpType::Add) {
-                        res[i] = (src[offset] + right_operand) != val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Sub) {
-                        res[i] = (src[offset] - right_operand) != val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Mul) {
-                        res[i] = (src[offset] * right_operand) != val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Div) {
-                        res[i] = (src[offset] / right_operand) != val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Mod) {
-                        res[i] =
-                            (long(src[offset]) % long(right_operand)) != val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::BitAnd) {
-                        res[i] =
-                            (long(src[offset]) & long(right_operand)) != val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::BitOr) {
-                        res[i] =
-                            (long(src[offset]) | long(right_operand)) != val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::BitXor) {
-                        res[i] =
-                            (long(src[offset]) ^ long(right_operand)) != val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Shl) {
-                        res[i] =
-                            (long(src[offset]) << long(right_operand)) != val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Shr) {
-                        res[i] =
-                            (long(src[offset]) >> long(right_operand)) != val;
-                    } else {
-                        ThrowInfo(UnexpectedError,
-                                  fmt::format("unsupported arith type:{} for "
-                                              "ArithOpElementFunc",
-                                              arith_op));
-                    }
-                } else if constexpr (cmp_op ==
-                                     proto::plan::OpType::GreaterThan) {
-                    if constexpr (arith_op == proto::plan::ArithOpType::Add) {
-                        res[i] = (src[offset] + right_operand) > val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Sub) {
-                        res[i] = (src[offset] - right_operand) > val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Mul) {
-                        res[i] = (src[offset] * right_operand) > val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Div) {
-                        res[i] = (src[offset] / right_operand) > val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Mod) {
-                        res[i] =
-                            (long(src[offset]) % long(right_operand)) > val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::BitAnd) {
-                        res[i] =
-                            (long(src[offset]) & long(right_operand)) > val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::BitOr) {
-                        res[i] =
-                            (long(src[offset]) | long(right_operand)) > val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::BitXor) {
-                        res[i] =
-                            (long(src[offset]) ^ long(right_operand)) > val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Shl) {
-                        res[i] =
-                            (long(src[offset]) << long(right_operand)) > val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Shr) {
-                        res[i] =
-                            (long(src[offset]) >> long(right_operand)) > val;
-                    } else {
-                        ThrowInfo(UnexpectedError,
-                                  fmt::format("unsupported arith type:{} for "
-                                              "ArithOpElementFunc",
-                                              arith_op));
-                    }
-                } else if constexpr (cmp_op ==
-                                     proto::plan::OpType::GreaterEqual) {
-                    if constexpr (arith_op == proto::plan::ArithOpType::Add) {
-                        res[i] = (src[offset] + right_operand) >= val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Sub) {
-                        res[i] = (src[offset] - right_operand) >= val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Mul) {
-                        res[i] = (src[offset] * right_operand) >= val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Div) {
-                        res[i] = (src[offset] / right_operand) >= val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Mod) {
-                        res[i] =
-                            (long(src[offset]) % long(right_operand)) >= val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::BitAnd) {
-                        res[i] =
-                            (long(src[offset]) & long(right_operand)) >= val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::BitOr) {
-                        res[i] =
-                            (long(src[offset]) | long(right_operand)) >= val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::BitXor) {
-                        res[i] =
-                            (long(src[offset]) ^ long(right_operand)) >= val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Shl) {
-                        res[i] =
-                            (long(src[offset]) << long(right_operand)) >= val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Shr) {
-                        res[i] =
-                            (long(src[offset]) >> long(right_operand)) >= val;
-                    } else {
-                        ThrowInfo(UnexpectedError,
-                                  fmt::format("unsupported arith type:{} for "
-                                              "ArithOpElementFunc",
-                                              arith_op));
-                    }
-                } else if constexpr (cmp_op == proto::plan::OpType::LessThan) {
-                    if constexpr (arith_op == proto::plan::ArithOpType::Add) {
-                        res[i] = (src[offset] + right_operand) < val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Sub) {
-                        res[i] = (src[offset] - right_operand) < val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Mul) {
-                        res[i] = (src[offset] * right_operand) < val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Div) {
-                        res[i] = (src[offset] / right_operand) < val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Mod) {
-                        res[i] =
-                            (long(src[offset]) % long(right_operand)) < val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::BitAnd) {
-                        res[i] =
-                            (long(src[offset]) & long(right_operand)) < val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::BitOr) {
-                        res[i] =
-                            (long(src[offset]) | long(right_operand)) < val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::BitXor) {
-                        res[i] =
-                            (long(src[offset]) ^ long(right_operand)) < val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Shl) {
-                        res[i] =
-                            (long(src[offset]) << long(right_operand)) < val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Shr) {
-                        res[i] =
-                            (long(src[offset]) >> long(right_operand)) < val;
-                    } else {
-                        ThrowInfo(UnexpectedError,
-                                  fmt::format("unsupported arith type:{} for "
-                                              "ArithOpElementFunc",
-                                              arith_op));
-                    }
-                } else if constexpr (cmp_op == proto::plan::OpType::LessEqual) {
-                    if constexpr (arith_op == proto::plan::ArithOpType::Add) {
-                        res[i] = (src[offset] + right_operand) <= val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Sub) {
-                        res[i] = (src[offset] - right_operand) <= val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Mul) {
-                        res[i] = (src[offset] * right_operand) <= val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Div) {
-                        res[i] = (src[offset] / right_operand) <= val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Mod) {
-                        res[i] =
-                            (long(src[offset]) % long(right_operand)) <= val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::BitAnd) {
-                        res[i] =
-                            (long(src[offset]) & long(right_operand)) <= val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::BitOr) {
-                        res[i] =
-                            (long(src[offset]) | long(right_operand)) <= val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::BitXor) {
-                        res[i] =
-                            (long(src[offset]) ^ long(right_operand)) <= val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Shl) {
-                        res[i] =
-                            (long(src[offset]) << long(right_operand)) <= val;
-                    } else if constexpr (arith_op ==
-                                         proto::plan::ArithOpType::Shr) {
-                        res[i] =
-                            (long(src[offset]) >> long(right_operand)) <= val;
+                if constexpr (!std::is_same_v<decltype(CmpOpHelper<cmp_op>::op),
+                                              void>) {
+                    if constexpr (!std::is_same_v<
+                                      decltype(ArithOpHelper<arith_op>::op),
+                                      void>) {
+                        res[i] = milvus::bitset::ArithCompareOperator<
+                            ArithOpHelper<arith_op>::op,
+                            CmpOpHelper<cmp_op>::op>::compare(src[offset],
+                                                              right_operand,
+                                                              val);
                     } else {
                         ThrowInfo(UnexpectedError,
                                   fmt::format("unsupported arith type:{} for "
@@ -445,11 +202,7 @@ template <typename T,
           proto::plan::ArithOpType arith_op,
           FilterType filter_type>
 struct ArithOpIndexFunc {
-    typedef std::conditional_t<std::is_integral_v<T> &&
-                                   !std::is_same_v<bool, T>,
-                               int64_t,
-                               T>
-        HighPrecisonType;
+    using HighPrecisonType = milvus::bitset::ArithHighPrecisionType<T>;
     TargetBitmap
     operator()(const index::IScalarValueReader<T>* index,
                size_t size,
@@ -477,227 +230,21 @@ struct ArithOpIndexFunc {
                 res[i] = false;
                 continue;
             }
-            if constexpr (cmp_op == proto::plan::OpType::Equal) {
-                if constexpr (arith_op == proto::plan::ArithOpType::Add) {
-                    res[i] = (raw.value() + right_operand) == val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Sub) {
-                    res[i] = (raw.value() - right_operand) == val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Mul) {
-                    res[i] = (raw.value() * right_operand) == val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Div) {
-                    res[i] = (raw.value() / right_operand) == val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Mod) {
-                    res[i] = (long(raw.value()) % long(right_operand)) == val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::BitAnd) {
-                    res[i] = (long(raw.value()) & long(right_operand)) == val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::BitOr) {
-                    res[i] = (long(raw.value()) | long(right_operand)) == val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::BitXor) {
-                    res[i] = (long(raw.value()) ^ long(right_operand)) == val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Shl) {
-                    res[i] = (long(raw.value()) << long(right_operand)) == val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Shr) {
-                    res[i] = (long(raw.value()) >> long(right_operand)) == val;
+            if constexpr (!std::is_same_v<decltype(CmpOpHelper<cmp_op>::op),
+                                          void>) {
+                if constexpr (!std::is_same_v<
+                                  decltype(ArithOpHelper<arith_op>::op),
+                                  void>) {
+                    res[i] = milvus::bitset::ArithCompareOperator<
+                        ArithOpHelper<arith_op>::op,
+                        CmpOpHelper<cmp_op>::op>::compare(raw.value(),
+                                                          right_operand,
+                                                          val);
                 } else {
-                    ThrowInfo(
-                        UnexpectedError,
-                        fmt::format(
-                            "unsupported arith type:{} for ArithOpElementFunc",
-                            arith_op));
-                }
-            } else if constexpr (cmp_op == proto::plan::OpType::NotEqual) {
-                if constexpr (arith_op == proto::plan::ArithOpType::Add) {
-                    res[i] = (raw.value() + right_operand) != val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Sub) {
-                    res[i] = (raw.value() - right_operand) != val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Mul) {
-                    res[i] = (raw.value() * right_operand) != val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Div) {
-                    res[i] = (raw.value() / right_operand) != val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Mod) {
-                    res[i] = (long(raw.value()) % long(right_operand)) != val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::BitAnd) {
-                    res[i] = (long(raw.value()) & long(right_operand)) != val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::BitOr) {
-                    res[i] = (long(raw.value()) | long(right_operand)) != val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::BitXor) {
-                    res[i] = (long(raw.value()) ^ long(right_operand)) != val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Shl) {
-                    res[i] = (long(raw.value()) << long(right_operand)) != val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Shr) {
-                    res[i] = (long(raw.value()) >> long(right_operand)) != val;
-                } else {
-                    ThrowInfo(
-                        UnexpectedError,
-                        fmt::format(
-                            "unsupported arith type:{} for ArithOpElementFunc",
-                            arith_op));
-                }
-            } else if constexpr (cmp_op == proto::plan::OpType::GreaterThan) {
-                if constexpr (arith_op == proto::plan::ArithOpType::Add) {
-                    res[i] = (raw.value() + right_operand) > val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Sub) {
-                    res[i] = (raw.value() - right_operand) > val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Mul) {
-                    res[i] = (raw.value() * right_operand) > val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Div) {
-                    res[i] = (raw.value() / right_operand) > val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Mod) {
-                    res[i] = (long(raw.value()) % long(right_operand)) > val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::BitAnd) {
-                    res[i] = (long(raw.value()) & long(right_operand)) > val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::BitOr) {
-                    res[i] = (long(raw.value()) | long(right_operand)) > val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::BitXor) {
-                    res[i] = (long(raw.value()) ^ long(right_operand)) > val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Shl) {
-                    res[i] = (long(raw.value()) << long(right_operand)) > val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Shr) {
-                    res[i] = (long(raw.value()) >> long(right_operand)) > val;
-                } else {
-                    ThrowInfo(
-                        UnexpectedError,
-                        fmt::format(
-                            "unsupported arith type:{} for ArithOpElementFunc",
-                            arith_op));
-                }
-            } else if constexpr (cmp_op == proto::plan::OpType::GreaterEqual) {
-                if constexpr (arith_op == proto::plan::ArithOpType::Add) {
-                    res[i] = (raw.value() + right_operand) >= val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Sub) {
-                    res[i] = (raw.value() - right_operand) >= val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Mul) {
-                    res[i] = (raw.value() * right_operand) >= val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Div) {
-                    res[i] = (raw.value() / right_operand) >= val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Mod) {
-                    res[i] = (long(raw.value()) % long(right_operand)) >= val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::BitAnd) {
-                    res[i] = (long(raw.value()) & long(right_operand)) >= val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::BitOr) {
-                    res[i] = (long(raw.value()) | long(right_operand)) >= val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::BitXor) {
-                    res[i] = (long(raw.value()) ^ long(right_operand)) >= val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Shl) {
-                    res[i] = (long(raw.value()) << long(right_operand)) >= val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Shr) {
-                    res[i] = (long(raw.value()) >> long(right_operand)) >= val;
-                } else {
-                    ThrowInfo(
-                        UnexpectedError,
-                        fmt::format(
-                            "unsupported arith type:{} for ArithOpElementFunc",
-                            arith_op));
-                }
-            } else if constexpr (cmp_op == proto::plan::OpType::LessThan) {
-                if constexpr (arith_op == proto::plan::ArithOpType::Add) {
-                    res[i] = (raw.value() + right_operand) < val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Sub) {
-                    res[i] = (raw.value() - right_operand) < val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Mul) {
-                    res[i] = (raw.value() * right_operand) < val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Div) {
-                    res[i] = (raw.value() / right_operand) < val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Mod) {
-                    res[i] = (long(raw.value()) % long(right_operand)) < val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::BitAnd) {
-                    res[i] = (long(raw.value()) & long(right_operand)) < val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::BitOr) {
-                    res[i] = (long(raw.value()) | long(right_operand)) < val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::BitXor) {
-                    res[i] = (long(raw.value()) ^ long(right_operand)) < val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Shl) {
-                    res[i] = (long(raw.value()) << long(right_operand)) < val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Shr) {
-                    res[i] = (long(raw.value()) >> long(right_operand)) < val;
-                } else {
-                    ThrowInfo(
-                        UnexpectedError,
-                        fmt::format(
-                            "unsupported arith type:{} for ArithOpElementFunc",
-                            arith_op));
-                }
-            } else if constexpr (cmp_op == proto::plan::OpType::LessEqual) {
-                if constexpr (arith_op == proto::plan::ArithOpType::Add) {
-                    res[i] = (raw.value() + right_operand) <= val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Sub) {
-                    res[i] = (raw.value() - right_operand) <= val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Mul) {
-                    res[i] = (raw.value() * right_operand) <= val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Div) {
-                    res[i] = (raw.value() / right_operand) <= val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Mod) {
-                    res[i] = (long(raw.value()) % long(right_operand)) <= val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::BitAnd) {
-                    res[i] = (long(raw.value()) & long(right_operand)) <= val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::BitOr) {
-                    res[i] = (long(raw.value()) | long(right_operand)) <= val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::BitXor) {
-                    res[i] = (long(raw.value()) ^ long(right_operand)) <= val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Shl) {
-                    res[i] = (long(raw.value()) << long(right_operand)) <= val;
-                } else if constexpr (arith_op ==
-                                     proto::plan::ArithOpType::Shr) {
-                    res[i] = (long(raw.value()) >> long(right_operand)) <= val;
-                } else {
-                    ThrowInfo(
-                        UnexpectedError,
-                        fmt::format(
-                            "unsupported arith type:{} for ArithOpElementFunc",
-                            arith_op));
+                    ThrowInfo(UnexpectedError,
+                              fmt::format("unsupported arith type:{} for "
+                                          "ArithOpElementFunc",
+                                          arith_op));
                 }
             }
         }

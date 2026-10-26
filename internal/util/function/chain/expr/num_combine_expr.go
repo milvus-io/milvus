@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // =============================================================================
@@ -364,14 +365,18 @@ func (s *NumCombineExpr) combine(values []float64, weights []float64) float64 {
 	case ModeMax:
 		result := values[0]
 		for _, v := range values[1:] {
-			result = math.Max(result, v)
+			if typeutil.Float64ToSortableUint64(v) > typeutil.Float64ToSortableUint64(result) {
+				result = v
+			}
 		}
 		return result
 
 	case ModeMin:
 		result := values[0]
 		for _, v := range values[1:] {
-			result = math.Min(result, v)
+			if typeutil.Float64ToSortableUint64(v) < typeutil.Float64ToSortableUint64(result) {
+				result = v
+			}
 		}
 		return result
 

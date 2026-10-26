@@ -2,7 +2,6 @@ package rewriter
 
 import (
 	"fmt"
-	"math"
 	"sort"
 	"strings"
 
@@ -123,17 +122,11 @@ func sortGenericValues(values []*planpb.GenericValue) []*planpb.GenericValue {
 		values = lo.UniqBy(values, func(v *planpb.GenericValue) int64 { return v.GetInt64Val() })
 	case "float":
 		sort.Slice(values, func(i, j int) bool {
-			a, b := values[i].GetFloatVal(), values[j].GetFloatVal()
-			// NaN sorts last to maintain strict weak ordering required by sort.Slice
-			if math.IsNaN(a) {
-				return false
-			}
-			if math.IsNaN(b) {
-				return true
-			}
-			return a < b
+			return typeutil.Float64ToSortableUint64(values[i].GetFloatVal()) < typeutil.Float64ToSortableUint64(values[j].GetFloatVal())
 		})
-		values = lo.UniqBy(values, func(v *planpb.GenericValue) float64 { return v.GetFloatVal() })
+		values = lo.UniqBy(values, func(v *planpb.GenericValue) uint64 {
+			return typeutil.Float64ToSortableUint64(v.GetFloatVal())
+		})
 	case "string":
 		sort.Slice(values, func(i, j int) bool {
 			return values[i].GetStringVal() < values[j].GetStringVal()
@@ -298,7 +291,7 @@ func equalsGeneric(a, b *planpb.GenericValue) bool {
 		}
 	case *planpb.GenericValue_FloatVal:
 		if _, ok := b.GetVal().(*planpb.GenericValue_FloatVal); ok {
-			return a.GetFloatVal() == b.GetFloatVal()
+			return typeutil.Float64ToSortableUint64(a.GetFloatVal()) == typeutil.Float64ToSortableUint64(b.GetFloatVal())
 		}
 	case *planpb.GenericValue_StringVal:
 		if _, ok := b.GetVal().(*planpb.GenericValue_StringVal); ok {

@@ -90,9 +90,14 @@ only checking that a call returned.
 | `IArtifactBuilder<Input>::InputSpec`, `Build` | Stable side input declaration; borrowed values survive multiple/empty batches and input destruction; all-null, explicit all-valid, omitted-validity, scalar/array/vector shapes; invalid non-nullable input and invalid prepared-file path rejection |
 | `IReaderConvertible::FromArtifact`, `IntoReader` | Null artifact, absent capability, successful ownership transfer, conversion throw/null result, non-convertible real artifact, direct RAM conversion, persistence before consumption |
 
-Invalid scalar lookup offsets, empty scalar builder input, and NaN order have no
-uniform expectation in the interfaces or across the registered reader profiles.
-The tests do not assign invented behavior to those inputs.
+Invalid scalar lookup offsets and empty scalar builder input have no uniform
+expectation in the interfaces or across the registered reader profiles. The tests
+do not assign invented behavior to those inputs. `NaNIndexTest` builds scalar,
+nested and ordinary ARRAY floating indexes through the registry, persists and
+loads them through heap/mmap and synchronous/asynchronous paths. With scalar
+engine v6, all NaNs compare equal above positive infinity and signed zeros compare
+equal; independent query oracles cover point, complement and interval predicates.
+Legacy floating index admission is tested separately in `SegmentLoadInfoTest`.
 The R-Tree builder rejects an empty geometry dataset, so an empty spatial
 reader cannot be opened through the public build and load path.
 

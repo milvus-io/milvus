@@ -102,3 +102,28 @@ func Test_ConvertFloat32ToFP16BF16BytesAllowsTinyValues(t *testing.T) {
 		})
 	}
 }
+
+func TestScalarFloatSortableKeys(t *testing.T) {
+	values := []float64{
+		math.Inf(-1), -3, -math.SmallestNonzeroFloat64,
+		math.Copysign(0, -1), 0, math.SmallestNonzeroFloat64, 3, math.Inf(1), math.NaN(),
+	}
+	var previous uint64
+	for i, value := range values {
+		key := Float64ToSortableUint64(value)
+		if i > 0 {
+			assert.LessOrEqual(t, previous, key)
+		}
+		previous = key
+	}
+	assert.Equal(t, Float64ToSortableUint64(math.Copysign(0, -1)), Float64ToSortableUint64(0))
+	assert.Equal(t, Float32ToSortableUint32(float32(math.Copysign(0, -1))), Float32ToSortableUint32(0))
+	for _, bits := range []uint64{0x7ff8000000000000, 0xfff8000000000001, 0x7ff0000000000001, 0x7fffffffffffffff} {
+		assert.Equal(t, uint64(math.MaxUint64), Float64ToSortableUint64(math.Float64frombits(bits)))
+	}
+	for _, bits := range []uint32{0x7fc00000, 0xffc00001, 0x7f800001, 0x7fffffff} {
+		assert.Equal(t, uint32(math.MaxUint32), Float32ToSortableUint32(math.Float32frombits(bits)))
+	}
+	assert.Less(t, Float64ToSortableUint64(math.Inf(1)), Float64ToSortableUint64(math.NaN()))
+	assert.Less(t, Float32ToSortableUint32(float32(math.Inf(1))), Float32ToSortableUint32(float32(math.NaN())))
+}

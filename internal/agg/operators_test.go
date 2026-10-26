@@ -113,7 +113,7 @@ func TestMaxAggregateUpdateOrderedTypes(t *testing.T) {
 	}
 }
 
-func TestMinMaxAggregateUpdateDoesNotReplaceWhenComparisonHasNaN(t *testing.T) {
+func TestMinMaxAggregateUpdateUsesNaNTotalOrder(t *testing.T) {
 	tests := []struct {
 		name        string
 		aggregate   AggregateBase
@@ -123,8 +123,8 @@ func TestMinMaxAggregateUpdateDoesNotReplaceWhenComparisonHasNaN(t *testing.T) {
 		expectedNaN bool
 	}{
 		{name: "min new NaN", aggregate: &MinAggregate{}, target: 1, newValue: math.NaN(), expected: 1},
-		{name: "min target NaN", aggregate: &MinAggregate{}, target: math.NaN(), newValue: 1, expectedNaN: true},
-		{name: "max new NaN", aggregate: &MaxAggregate{}, target: 1, newValue: math.NaN(), expected: 1},
+		{name: "min target NaN", aggregate: &MinAggregate{}, target: math.NaN(), newValue: 1, expected: 1},
+		{name: "max new NaN", aggregate: &MaxAggregate{}, target: 1, newValue: math.NaN(), expectedNaN: true},
 		{name: "max target NaN", aggregate: &MaxAggregate{}, target: math.NaN(), newValue: 1, expectedNaN: true},
 	}
 
@@ -347,4 +347,29 @@ func TestAvgTerminateRejectsNonNumericState(t *testing.T) {
 	_, err := avg.Terminate([]*FieldValue{NewFieldValue("bad"), NewFieldValue(int64(1))})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "avg expects numeric accumulator")
+}
+
+func TestFloat32MinMaxNaNOrderIndependentOfInputOrder(t *testing.T) {
+	values := []float32{math.Float32frombits(0xffc00001), float32(math.Inf(-1)), 0, float32(math.Inf(1)), float32(math.NaN())}
+	for _, reverse := range []bool{false, true} {
+		for _, aggregate := range []AggregateBase{&MinAggregate{}, &MaxAggregate{}} {
+			state := aggregate.NewState()
+			for i := range values {
+				idx := i
+				if reverse {
+					idx = len(values) - 1 - i
+				}
+				require.NoError(t, aggregate.UpdateState(state, NewFieldValue(values[idx])))
+			}
+			result, err := aggregate.Terminate(state)
+			require.NoError(t, err)
+			value, ok := result.(float32)
+			require.True(t, ok, "FLOAT accumulator retains its width")
+			if aggregate.Name() == kMin {
+				require.True(t, math.IsInf(float64(value), -1))
+			} else {
+				require.True(t, math.IsNaN(float64(value)))
+			}
+		}
+	}
 }

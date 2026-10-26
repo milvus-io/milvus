@@ -225,7 +225,8 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
     TargetBitmap
     Range(const T& lo, bool lo_inc, const T& hi, bool hi_inc) const override {
         TargetBitmap result(options_.total_num_rows, false);
-        if (hi < lo || (lo == hi && !(lo_inc && hi_inc))) {
+        if (ScalarLess(hi, lo) ||
+            (ScalarEqual(lo, hi) && !(lo_inc && hi_inc))) {
             return result;
         }
         const auto begin = lo_inc ? storage_->postings.lower_bound(lo)

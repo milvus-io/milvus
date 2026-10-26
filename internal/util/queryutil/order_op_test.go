@@ -18,6 +18,8 @@ package queryutil
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -791,4 +793,76 @@ func TestOrderByLimitOperator_TimestamptzGroupTieBreaker(t *testing.T) {
 	require.NoError(t, err)
 	sorted := outputs[0].(*internalpb.RetrieveResults)
 	assert.Equal(t, []int64{100}, sorted.GetFieldsData()[1].GetScalars().GetTimestamptzData().GetData())
+}
+
+// Exercise both full sorting and heap-based LIMIT selection on actual scalar
+// results. NaN payloads and signed zeros tie by PK; NULL placement is independent
+// of the floating order and sort direction.
+func TestOrderByLimitOperator_FloatingTotalOrder(t *testing.T) {
+	ids := []int64{91, 8, 5, 3, 90, 4, 6, 2, 10, 9}
+	valid := []bool{true, true, true, true, true, true, true, true, false, false}
+	floatValues := []float32{math.Float32frombits(0x7fc00001), float32(math.Inf(1)), 0, float32(math.Inf(-1)), math.Float32frombits(0xffc00002), math.Float32frombits(0x80000000), 1, -1, 0, 0}
+	doubleValues := []float64{math.Float64frombits(0x7ff8000000000001), math.Inf(1), 0, math.Inf(-1), math.Float64frombits(0xfff8000000000002), math.Copysign(0, -1), 1, -1, 0, 0}
+	for _, dataType := range []schemapb.DataType{schemapb.DataType_Float, schemapb.DataType_Double} {
+		for _, ascending := range []bool{true, false} {
+			for _, nullsFirst := range []bool{true, false} {
+				for _, limit := range []int64{0, 1, 4, 9} {
+					for _, explicitPositions := range []bool{false, true} {
+						t.Run(fmt.Sprintf("%s/asc=%t/nullsFirst=%t/limit=%d/positions=%t", dataType, ascending, nullsFirst, limit, explicitPositions), func(t *testing.T) {
+							scalar := &schemapb.ScalarField{ValidData: valid}
+							if dataType == schemapb.DataType_Float {
+								scalar.Data = &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: floatValues}}
+							} else {
+								scalar.Data = &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: doubleValues}}
+							}
+							result := &internalpb.RetrieveResults{
+								Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids}}},
+								FieldsData: []*schemapb.FieldData{makePKField(ids), {
+									Type: dataType, FieldId: 2, FieldName: "value",
+									Field: &schemapb.FieldData_Scalars{Scalars: scalar},
+								}},
+							}
+							order := []*orderby.OrderByField{{FieldID: 2, FieldName: "value", DataType: dataType, Ascending: ascending, NullsFirst: nullsFirst}}
+							op := NewOrderByLimitOperator(order, limit)
+							if explicitPositions {
+								op = NewOrderByLimitOperatorWithPositions(order, []int{1}, limit)
+							}
+							outputs, err := op.Run(context.Background(), nil, result)
+							require.NoError(t, err)
+							want := []int64{3, 2, 4, 5, 6, 8, 90, 91}
+							if !ascending {
+								want = []int64{90, 91, 8, 6, 4, 5, 2, 3}
+							}
+							if nullsFirst {
+								want = append([]int64{9, 10}, want...)
+							} else {
+								want = append(want, 9, 10)
+							}
+							if limit > 0 {
+								want = want[:limit]
+							}
+							sorted := outputs[0].(*internalpb.RetrieveResults)
+							require.Equal(t, want, sorted.GetIds().GetIntId().GetData())
+							// Sorting must preserve the original payload, including NaN bits
+							// and the sign of zero, and keep validity aligned with rows.
+							for row, id := range want {
+								for original, originalID := range ids {
+									if id != originalID {
+										continue
+									}
+									got, null := getFieldValue(sorted.FieldsData[1], row)
+									require.Equal(t, !valid[original], null)
+									if !null && dataType == schemapb.DataType_Float {
+										assert.Equal(t, math.Float32bits(floatValues[original]), math.Float32bits(got.(float32)))
+									} else if !null {
+										assert.Equal(t, math.Float64bits(doubleValues[original]), math.Float64bits(got.(float64)))
+									}
+								}
+							}
+						})
+					}
+				}
+			}
+		}
+	}
 }

@@ -545,7 +545,12 @@ func (t *clusteringCompactionTask) regeneratePartitionStats(tmpToResultSegments 
 	}
 
 	for from, to := range tmpToResultSegments {
-		stats := partitionStats.SegmentStats[from]
+		stats, exists := partitionStats.SegmentStats[from]
+		if !exists {
+			// Nonfinite scalar bounds have no legacy JSON representation.
+			// Absence means unknown: keep the output segments unpruned too.
+			continue
+		}
 		// stats task only one to
 		for _, toID := range to {
 			partitionStats.SegmentStats[toID] = stats

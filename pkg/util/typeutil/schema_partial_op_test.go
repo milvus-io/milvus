@@ -353,24 +353,15 @@ func TestApplyArrayRowOp_RemoveDuplicatesInUpdate(t *testing.T) {
 }
 
 func TestApplyArrayRowOp_RemoveFloatNaN(t *testing.T) {
-	nan32 := float32(math.NaN())
-	got, err := ApplyArrayRowOp(floatRow(1.0, nan32, 2.0), floatRow(nan32), schemapb.FieldPartialUpdateOp_ARRAY_REMOVE, schemapb.DataType_Float, -1)
+	got, err := ApplyArrayRowOp(floatRow(1, float32(math.NaN()), 2), floatRow(float32(math.NaN())), schemapb.FieldPartialUpdateOp_ARRAY_REMOVE, schemapb.DataType_Float, -1)
 	require.NoError(t, err)
-	// NaN != NaN → base NaN retained
-	out := got.GetFloatData().GetData()
-	require.Len(t, out, 3)
-	assert.Equal(t, float32(1.0), out[0])
-	assert.True(t, math.IsNaN(float64(out[1])))
-	assert.Equal(t, float32(2.0), out[2])
+	assert.Equal(t, []float32{1, 2}, got.GetFloatData().GetData())
 }
 
 func TestApplyArrayRowOp_RemoveDoubleNaN(t *testing.T) {
-	got, err := ApplyArrayRowOp(doubleRow(math.NaN(), 1.0), doubleRow(math.NaN()), schemapb.FieldPartialUpdateOp_ARRAY_REMOVE, schemapb.DataType_Double, -1)
+	got, err := ApplyArrayRowOp(doubleRow(math.NaN(), 1), doubleRow(math.Float64frombits(0xfff8000000000001)), schemapb.FieldPartialUpdateOp_ARRAY_REMOVE, schemapb.DataType_Double, -1)
 	require.NoError(t, err)
-	out := got.GetDoubleData().GetData()
-	require.Len(t, out, 2)
-	assert.True(t, math.IsNaN(out[0]))
-	assert.Equal(t, 1.0, out[1])
+	assert.Equal(t, []float64{1}, got.GetDoubleData().GetData())
 }
 
 func TestApplyArrayRowOp_RemoveUnsupportedElementType(t *testing.T) {
@@ -384,14 +375,14 @@ func TestContainsFloat32(t *testing.T) {
 	assert.False(t, containsFloat32(nil, 1))
 	// NaN behavior
 	nan := float32(math.NaN())
-	assert.False(t, containsFloat32([]float32{nan}, nan))
+	assert.True(t, containsFloat32([]float32{nan}, nan))
 }
 
 func TestContainsFloat64(t *testing.T) {
 	assert.True(t, containsFloat64([]float64{1, 2, 3}, 2))
 	assert.False(t, containsFloat64([]float64{1, 2, 3}, 9))
 	assert.False(t, containsFloat64(nil, 1))
-	assert.False(t, containsFloat64([]float64{math.NaN()}, math.NaN()))
+	assert.True(t, containsFloat64([]float64{math.NaN()}, math.NaN()))
 }
 
 func arrayField(rows []*schemapb.ScalarField, et schemapb.DataType) *schemapb.FieldData {

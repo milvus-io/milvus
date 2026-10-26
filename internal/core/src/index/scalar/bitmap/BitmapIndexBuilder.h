@@ -37,6 +37,7 @@
 namespace milvus::index {
 
 struct BitmapBuildParams {
+    bool nan_total_order{true};
     // Build over ARRAY elements rather than rows. Persisted.
     bool nested{false};
     bool nullable{false};

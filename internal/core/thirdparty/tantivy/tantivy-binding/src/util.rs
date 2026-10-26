@@ -8,6 +8,63 @@ use std::ffi::{c_char, c_void};
 use std::ops::Bound;
 use tantivy::{directory::MmapDirectory, Index};
 
+/// All NaNs use the greatest sortable Tantivy key (u64::MAX); zeros share +0.
+/// Keep the same representation at document and query construction boundaries.
+#[inline]
+pub fn canonical_f64(value: f64) -> f64 {
+    if value.is_nan() {
+        f64::from_bits(0x7fff_ffff_ffff_ffff)
+    } else if value == 0.0 {
+        0.0
+    } else {
+        value
+    }
+}
+
+// Strict JSON numbers are finite. Normalize floating zero without converting
+// integer values through f64, which would lose precision above 2^53.
+pub fn canonicalize_json_zeros(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Number(number) if number.is_f64() && number.as_f64() == Some(0.0) => {
+            *number = serde_json::Number::from_f64(0.0).unwrap();
+        }
+        serde_json::Value::Array(values) => {
+            values.iter_mut().for_each(canonicalize_json_zeros);
+        }
+        serde_json::Value::Object(values) => {
+            values.values_mut().for_each(canonicalize_json_zeros);
+        }
+        _ => {}
+    }
+}
+
+pub trait CanonicalNumericValue: Sized {
+    fn canonical_numeric(self) -> Self;
+
+    fn is_nan_value(&self) -> bool {
+        false
+    }
+}
+
+impl CanonicalNumericValue for f64 {
+    fn canonical_numeric(self) -> Self {
+        canonical_f64(self)
+    }
+
+    fn is_nan_value(&self) -> bool {
+        self.is_nan()
+    }
+}
+
+macro_rules! identity_numeric_value {
+    ($($value_type:ty),+) => {$(
+        impl CanonicalNumericValue for $value_type {
+            fn canonical_numeric(self) -> Self { self }
+        }
+    )+};
+}
+identity_numeric_value!(i64, u64, bool);
+
 #[inline]
 pub fn c_ptr_to_str(ptr: *const c_char) -> Result<&'static str> {
     Ok(unsafe { CStr::from_ptr(ptr) }.to_str()?)
