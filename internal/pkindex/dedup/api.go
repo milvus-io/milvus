@@ -62,9 +62,6 @@ type Decider interface {
 	// removes the committed entries of pks from the in-flight set (rule A: the
 	// engine first, then the set), raises the observed time tick and removes
 	// the in-doubt entries that it passed.
-	//
-	// TODO: the observe of the WAL recovery calls it for every applied write
-	// and for every TimeTick. Nothing calls it yet.
 	Observe(tt uint64, pks []PK)
 
 	// Close stops the decider: a later Decide fails. It does not wait for the
