@@ -232,6 +232,16 @@ var (
 		Buckets: secondsBuckets,
 	})
 
+	StreamingNodePKIndexHandoverTotal = newStreamingNodeCounterVec(prometheus.CounterOpts{
+		Name: "pkindex_handover_total",
+		Help: "Primary key index handovers that finished, including handovers with nothing to publish",
+	})
+
+	StreamingNodePKIndexHandoverFailuresTotal = newStreamingNodeCounterVec(prometheus.CounterOpts{
+		Name: "pkindex_handover_failures_total",
+		Help: "Primary key index handovers that failed and will be retried",
+	})
+
 	// WAL WAL metrics
 	WALInfo = newWALGaugeVec(prometheus.GaugeOpts{
 		Name: "info",
@@ -715,6 +725,8 @@ func RegisterStreamingNode(registry *prometheus.Registry) {
 	registry.MustRegister(StreamingNodePKIndexCompanionDeleteKeysTotal)
 	registry.MustRegister(StreamingNodePKIndexDecideDurationSeconds)
 	registry.MustRegister(StreamingNodePKIndexLockWaitDurationSeconds)
+	registry.MustRegister(StreamingNodePKIndexHandoverTotal)
+	registry.MustRegister(StreamingNodePKIndexHandoverFailuresTotal)
 
 	registerWAL(registry)
 	RegisterLoggingMetrics(registry)
