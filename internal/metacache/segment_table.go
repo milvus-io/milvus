@@ -68,10 +68,13 @@ func (t *segmentTable) get(segmentID int64) (*datapb.SegmentInfo, bool) {
 // lockShard locks the live shard of collectionID for writing, creating it.
 func (t *segmentTable) lockShard(collectionID int64) *segmentShard {
 	for {
-		shard, _ := t.shards.GetOrInsert(collectionID, &segmentShard{
-			ids:       make(map[int64]struct{}),
-			byChannel: make(map[string]map[int64]struct{}),
-		})
+		shard, ok := t.shards.Get(collectionID)
+		if !ok {
+			shard, _ = t.shards.GetOrInsert(collectionID, &segmentShard{
+				ids:       make(map[int64]struct{}),
+				byChannel: make(map[string]map[int64]struct{}),
+			})
+		}
 		shard.mu.Lock()
 		if !shard.retired {
 			return shard
@@ -135,38 +138,29 @@ func (t *segmentTable) apply(puts []*datapb.SegmentInfo, removes []int64, hook f
 }
 
 // lockWritten locks, in collection order, the shards of the collections the
-// segments of a write belong to now and will belong to after it.
+// segments of a write belong to now and will belong to after it. Writes of a
+// segment do not run concurrently, so these collections cannot change while
+// the shards are being locked.
 func (t *segmentTable) lockWritten(puts []*datapb.SegmentInfo, removes []int64) map[int64]*segmentShard {
-	collectionsOf := func() []int64 {
-		collections := make([]int64, 0, 1)
-		for _, segment := range puts {
-			collections = append(collections, segment.GetCollectionID())
-			if old, ok := t.segments.Get(segment.GetID()); ok {
-				collections = append(collections, old.GetCollectionID())
-			}
-		}
-		for _, segmentID := range removes {
-			if old, ok := t.segments.Get(segmentID); ok {
-				collections = append(collections, old.GetCollectionID())
-			}
-		}
-		slices.Sort(collections)
-		return slices.Compact(collections)
-	}
-	for {
-		collections := collectionsOf()
-		shards := make(map[int64]*segmentShard, len(collections))
-		for _, collectionID := range collections {
-			shards[collectionID] = t.lockShard(collectionID)
-		}
-		// A segment can only change collection under the locks of both.
-		if slices.Equal(collections, collectionsOf()) {
-			return shards
-		}
-		for _, shard := range shards {
-			shard.mu.Unlock()
+	collections := make([]int64, 0, 1)
+	for _, segment := range puts {
+		collections = append(collections, segment.GetCollectionID())
+		if old, ok := t.segments.Get(segment.GetID()); ok {
+			collections = append(collections, old.GetCollectionID())
 		}
 	}
+	for _, segmentID := range removes {
+		if old, ok := t.segments.Get(segmentID); ok {
+			collections = append(collections, old.GetCollectionID())
+		}
+	}
+	slices.Sort(collections)
+	collections = slices.Compact(collections)
+	shards := make(map[int64]*segmentShard, len(collections))
+	for _, collectionID := range collections {
+		shards[collectionID] = t.lockShard(collectionID)
+	}
+	return shards
 }
 
 func (t *segmentTable) put(shards map[int64]*segmentShard, segment *datapb.SegmentInfo, withMetrics bool) {

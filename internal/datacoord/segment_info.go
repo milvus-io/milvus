@@ -164,10 +164,14 @@ func NewSegmentsInfo(store metacache.MetaStore) *SegmentsInfo {
 // the compaction relations and the per-segment transient state would stay
 // empty until each segment happens to be written again.
 func (s *SegmentsInfo) RebuildFromStore() {
+	var compacted []*datapb.SegmentInfo
 	for id, segProto := range s.store.GetAllSegments() {
-		s.addCompactTo(&SegmentInfo{SegmentInfo: segProto})
+		if len(segProto.GetCompactionFrom()) > 0 {
+			compacted = append(compacted, segProto)
+		}
 		s.dcState.Insert(id, newDCSegmentState(segProto))
 	}
+	s.updateCompactionTo(nil, compacted)
 }
 
 // newDCSegmentState seeds the transient state of a segment read back from the
@@ -388,12 +392,7 @@ func (s *SegmentsInfo) PublishSegments(segments []*SegmentInfo) {
 		olds[i], _ = s.store.GetSegment(segment.GetID())
 	}
 	s.store.ApplySegments(protos, nil, func() {
-		for i, segment := range segments {
-			if olds[i] != nil {
-				s.deleteCompactFrom(olds[i].GetCompactionFrom())
-			}
-			s.addCompactTo(segment)
-		}
+		s.updateCompactionTo(olds, protos)
 	})
 	for _, segment := range segments {
 		s.dcState.Insert(segment.GetID(), &dcSegmentState{
@@ -517,10 +516,36 @@ func (s *SegmentInfo) ShadowClone(opts ...SegmentInfoOption) *SegmentInfo {
 	return cloned
 }
 
-func (s *SegmentsInfo) addCompactTo(segment *SegmentInfo) {
-	for _, from := range segment.GetCompactionFrom() {
-		compactTos, _ := s.compactionTo.Get(from)
-		s.compactionTo.Insert(from, append(slices.Clip(compactTos), segment.GetID()))
+// updateCompactionTo applies the compaction relation changes of segments in
+// order: for each segments[i], every list named by olds[i].CompactionFrom (olds
+// may be shorter or hold nil) is dropped whole, then segments[i] joins the list
+// of each segment it was compacted from. Each changed list is copied and stored
+// once, so a list that many of the segments share (a clustering compaction's
+// inputs) is not copied once per segment. A stored list is never appended to in
+// place.
+func (s *SegmentsInfo) updateCompactionTo(olds, segments []*datapb.SegmentInfo) {
+	lists := make(map[UniqueID][]UniqueID)
+	for i, segment := range segments {
+		if i < len(olds) {
+			for _, from := range olds[i].GetCompactionFrom() {
+				lists[from] = nil
+			}
+		}
+		for _, from := range segment.GetCompactionFrom() {
+			list, ok := lists[from]
+			if !ok {
+				stored, _ := s.compactionTo.Get(from)
+				list = slices.Clip(stored)
+			}
+			lists[from] = append(list, segment.GetID())
+		}
+	}
+	for from, list := range lists {
+		if len(list) == 0 {
+			s.compactionTo.Remove(from)
+		} else {
+			s.compactionTo.Insert(from, list)
+		}
 	}
 }
 
