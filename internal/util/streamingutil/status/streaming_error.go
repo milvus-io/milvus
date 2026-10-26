@@ -58,6 +58,7 @@ func (e *StreamingError) IsUnrecoverable() bool {
 	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE ||
 		e.IsInvalidArgument() ||
 		e.IsReplicateViolation() ||
+		e.IsTxnNotFound() ||
 		e.IsTxnUnavilable() || e.IsSchemaVersionMismatch()
 }
 
@@ -80,6 +81,11 @@ func (e *StreamingError) IsTxnUnavilable() bool {
 // IsTxnExpired returns true if the transaction is expired.
 func (e *StreamingError) IsTxnExpired() bool {
 	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_EXPIRED
+}
+
+// IsTxnNotFound reports missing history, not a definite expiration.
+func (e *StreamingError) IsTxnNotFound() bool {
+	return e.Code == streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_NOT_FOUND
 }
 
 // IsResourceAcquired returns true if the resource is acquired.
@@ -169,10 +175,9 @@ func NewTransactionExpired(format string, args ...interface{}) *StreamingError {
 }
 
 // NewTransactionNotFound reports missing transaction state, which does not prove
-// expiration or authorize replay. Use the existing unrecoverable wire code so
-// older producers also stop rather than retry an unrecognized error forever.
+// expiration or authorize replay.
 func NewTransactionNotFound(id message.TxnID) *StreamingError {
-	return NewUnrecoverableError("transaction %d not found; its outcome is unavailable", id)
+	return New(streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_NOT_FOUND, "transaction %d not found; its outcome is unavailable", id)
 }
 
 // NewInvalidTransactionState creates a new StreamingError with code STREAMING_CODE_INVALID_TRANSACTION_STATE.

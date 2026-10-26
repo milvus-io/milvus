@@ -2227,7 +2227,7 @@ func TestUnwrapPartialUpdateAppendErrorRejectsMixedOutcome(t *testing.T) {
 	casErr := streamingstatus.NewPartialUpdateRetryable("conflict")
 	unknownErr := context.DeadlineExceeded
 
-	err := unwrapPartialUpdateAppendError(streaming.AppendResponses{
+	err := unwrapStreamingMutationError(streaming.AppendResponses{
 		Responses: []streaming.AppendResponse{
 			{Error: casErr},
 			{Error: unknownErr},
@@ -2235,7 +2235,7 @@ func TestUnwrapPartialUpdateAppendErrorRejectsMixedOutcome(t *testing.T) {
 	})
 	require.ErrorIs(t, err, unknownErr)
 
-	err = unwrapPartialUpdateAppendError(streaming.AppendResponses{
+	err = unwrapStreamingMutationError(streaming.AppendResponses{
 		Responses: []streaming.AppendResponse{
 			{Error: casErr},
 			{AppendResult: &streamingtypes.AppendResult{TimeTick: 100}},
@@ -8146,7 +8146,7 @@ func TestPartialUpsertPublicErrorsDoNotRecoverCASRetry(t *testing.T) {
 	require.False(t, isPartialUpdateCASRetry(nil))
 	for _, projected := range []error{merr.WrapErrCollectionPartialUpdateConflictErr(cas, "relative conflict"), conditionalExecutionError(cas)} {
 		require.False(t, isPartialUpdateCASRetry(projected))
-		require.Equal(t, projected, unwrapPartialUpdateAppendError(streaming.AppendResponses{Responses: []streaming.AppendResponse{{Error: projected}}}))
+		require.Equal(t, projected, unwrapStreamingMutationError(streaming.AppendResponses{Responses: []streaming.AppendResponse{{Error: projected}}}))
 	}
 }
 

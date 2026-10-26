@@ -80,7 +80,7 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 		IdempotencyKey: it.idempotencyKey,
 	})
 	invalidateMismatchedWriteSchema(ctx, it.GetMetaCache(), collID, resp)
-	if err := resp.UnwrapFirstError(); err != nil {
+	if err := unwrapStreamingMutationError(resp); err != nil {
 		mlog.Warn(ctx, "append messages to wal failed", mlog.Err(err))
 		if status.AsStreamingError(err).IsSchemaVersionMismatch() {
 			it.result.Status = merr.Status(merr.ErrCollectionSchemaMismatch)

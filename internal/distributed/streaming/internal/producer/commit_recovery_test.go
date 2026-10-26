@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
@@ -32,7 +33,7 @@ import (
 // Inject response loss ABOVE successful server Commit handling. Exercise the
 // real producer retry loop and TimeTick interceptor, not backend Append retries.
 func TestLostCommitResponseDoesNotReplayTransaction(t *testing.T) {
-	for _, mode := range []string{"before cleanup", "after cleanup", "result evicted"} {
+	for _, mode := range []string{"before cleanup", "after cleanup", "result evicted", "result evicted with legacy producer"} {
 		for _, cas := range []bool{false, true} {
 			name := mode
 			if cas {
@@ -40,8 +41,20 @@ func TestLostCommitResponseDoesNotReplayTransaction(t *testing.T) {
 			}
 			t.Run(name, func(t *testing.T) {
 				resource.InitForTest(t)
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				legacy := mode == "result evicted with legacy producer"
+				if legacy {
+					// Reproduce the old classification while exercising the same real
+					// retry loop: an unrecognized code is not terminal for that client.
+					classification := mockey.Mock((*status.StreamingError).IsUnrecoverable).To(func(e *status.StreamingError) bool {
+						return e.Code == streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE ||
+							e.IsInvalidArgument() || e.IsReplicateViolation() || e.IsTxnUnavilable() || e.IsSchemaVersionMismatch()
+					}).Build()
+					defer classification.UnPatch()
+				}
 				params := paramtable.Get()
-				if mode == "result evicted" {
+				if mode == "result evicted" || legacy {
 					require.NoError(t, params.Save(params.StreamingCfg.TxnTombstoneMaxCount.Key, "0"))
 					defer params.Reset(params.StreamingCfg.TxnTombstoneMaxCount.Key)
 				}
@@ -56,6 +69,7 @@ func TestLostCommitResponseDoesNotReplayTransaction(t *testing.T) {
 				var mu sync.Mutex
 				var sequence int64
 				begins, commits, attempts := 0, 0, 0
+				missingAttempts := 0
 				var original *types.AppendResult
 				transport := &partialUpdateCASRejectProducer{}
 				patch := mockey.Mock((*partialUpdateCASRejectProducer).Append).To(func(_ *partialUpdateCASRejectProducer, ctx context.Context, msg message.MutableMessage) (*types.AppendResult, error) {
@@ -73,6 +87,13 @@ func TestLostCommitResponseDoesNotReplayTransaction(t *testing.T) {
 						return walimplstest.NewTestMessageID(sequence), nil
 					})
 					if err != nil {
+						if status.AsStreamingError(err).IsTxnNotFound() {
+							missingAttempts++
+							if legacy && missingAttempts == 3 {
+								cancel()
+								return nil, ctx.Err()
+							}
+						}
 						return nil, err
 					}
 					result := &types.AppendResult{MessageID: id, TimeTick: extra.TimeTick, LastConfirmedMessageID: extra.LastConfirmedMessageID, TxnCtx: extra.TxnCtx}
@@ -105,12 +126,15 @@ func TestLostCommitResponseDoesNotReplayTransaction(t *testing.T) {
 				}
 				guard, err := rp.BeginProduce(context.Background(), msgs...)
 				require.NoError(t, err)
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
 				responses := producer.BatchCommitProduce(ctx, guard)
 				result, err := responses.Responses[0].AppendResult, responses.Responses[0].Error
-				if mode == "result evicted" {
+				if legacy {
+					require.ErrorIs(t, err, context.Canceled)
+					require.Equal(t, 3, missingAttempts, "legacy producer keeps retrying the same missing Commit")
+				} else if mode == "result evicted" {
+					require.Equal(t, 1, missingAttempts, "new producer stops on the explicit error")
 					require.ErrorContains(t, err, "not found")
+					require.True(t, status.AsStreamingError(err).IsTxnNotFound())
 					require.True(t, status.AsStreamingError(err).IsUnrecoverable())
 					require.False(t, status.AsStreamingError(err).IsTxnExpired())
 					require.False(t, status.AsStreamingError(err).IsPartialUpdateRetryableCAS())
@@ -219,6 +243,7 @@ func TestCommitRetryUsesServerOutcome(t *testing.T) {
 					response := producer.BatchCommitProduce(ctx, guard).Responses[0]
 					if outcome == "not found" {
 						require.ErrorContains(t, response.Error, "not found")
+						require.True(t, status.AsStreamingError(response.Error).IsTxnNotFound())
 						require.ErrorIs(t, response.Error, serverErr)
 						require.False(t, status.AsStreamingError(response.Error).IsTxnExpired())
 						require.True(t, status.AsStreamingError(response.Error).IsUnrecoverable())
