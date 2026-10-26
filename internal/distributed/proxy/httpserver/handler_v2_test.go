@@ -248,7 +248,7 @@ func TestRESTV2PathReplaceScalarArrayRequest(t *testing.T) {
 	assert.Equal(t, []int64{100}, array.GetData()[0].GetLongData().GetData())
 }
 
-func sendReqAndVerify(t *testing.T, testEngine *gin.Engine, testName, method string, testcase requestBodyTestCase) {
+func sendReqAndVerify(t *testing.T, testEngine http.Handler, testName, method string, testcase requestBodyTestCase) {
 	t.Run(testName, func(t *testing.T) {
 		req := httptest.NewRequest(method, testcase.path, bytes.NewReader(testcase.requestBody))
 		w := httptest.NewRecorder()
@@ -1423,12 +1423,26 @@ func TestTextFieldDMLV2(t *testing.T) {
 	}
 }
 
+type dqlWriteRecorder struct {
+	*httptest.ResponseRecorder
+	writes int
+}
+
+func (w *dqlWriteRecorder) Write(data []byte) (int, error) {
+	w.writes++
+	return w.ResponseRecorder.Write(data)
+}
+
 func TestTextFieldQueryV2(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
 
 	collSchema := generateTextCollectionSchema(false)
+	texts := make([]string, dqlJSONBatchRows+1)
+	for i := range texts {
+		texts[i] = "rest query text"
+	}
 	mp := mocks.NewMockProxy(t)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
@@ -1446,7 +1460,7 @@ func TestTextFieldQueryV2(t *testing.T) {
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_StringData{
-							StringData: &schemapb.StringArray{Data: []string{"rest query text"}},
+							StringData: &schemapb.StringArray{Data: texts},
 						},
 					},
 				},
@@ -1459,18 +1473,104 @@ func TestTextFieldQueryV2(t *testing.T) {
 		"collectionName": "book",
 		"filter": "book_id > 0",
 		"outputFields": ["text_field"],
-		"limit": 10
+		"limit": 1000
 	}`)))
-	w := httptest.NewRecorder()
+	w := &dqlWriteRecorder{ResponseRecorder: httptest.NewRecorder()}
 	testEngine.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
+	require.Greater(t, w.writes, 1, "the real Query handler must use batched writes, not the buffered fallback")
 
 	resp := map[string]interface{}{}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	assert.Equal(t, float64(0), resp[HTTPReturnCode])
 	data := resp[HTTPReturnData].([]interface{})
-	require.Len(t, data, 1)
-	assert.Equal(t, "rest query text", data[0].(map[string]interface{})[FieldText])
+	require.Len(t, data, len(texts))
+	for _, row := range data {
+		assert.Equal(t, "rest query text", row.(map[string]interface{})[FieldText])
+	}
+}
+
+func TestDQLRoutesBatchResponse(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key) })
+	paramtable.Get().Save(proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.Key, "true")
+	t.Cleanup(func() { paramtable.Get().Reset(proxy.Params.QueryNodeCfg.StorageUsageTrackingEnabled.Key) })
+
+	ids := make([]int64, 257)
+	scores := make([]float32, len(ids))
+	for i := range ids {
+		ids[i], scores[i] = int64(i), 0.5
+	}
+	fields := []*schemapb.FieldData{{
+		Type: schemapb.DataType_Int64, FieldName: FieldBookID,
+		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: ids}},
+		}},
+	}}
+	status := &commonpb.Status{ExtraInfo: map[string]string{
+		"scanned_remote_bytes": "11", "scanned_total_bytes": "22", "cache_hit_ratio": "0.5", "report_value": "7",
+	}}
+	for _, action := range []string{GetAction, SearchAction, AdvancedSearchAction, HybridSearchAction} {
+		t.Run(action, func(t *testing.T) {
+			mp := mocks.NewMockProxy(t)
+			mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+				Status: commonSuccessStatus, Schema: generateCollectionSchema(schemapb.DataType_Int64, false, true),
+			}, nil).Once()
+			body := gin.H{"collectionName": "book", "outputFields": []string{FieldBookID}, "limit": 129}
+			if action == GetAction {
+				body["id"] = ids
+				mp.EXPECT().Query(mock.Anything, mock.Anything).Return(&milvuspb.QueryResults{
+					Status: status, OutputFields: []string{FieldBookID}, FieldsData: fields,
+				}, nil).Once()
+			} else {
+				result := &milvuspb.SearchResults{Status: status, Results: &schemapb.SearchResultData{
+					NumQueries: 2, TopK: 129, Topks: []int64{128, 129},
+					OutputFields: []string{FieldBookID}, FieldsData: fields, Scores: scores,
+					Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids}}},
+				}}
+				vectors := [][]float32{{0.1, 0.2}, {0.3, 0.4}}
+				if action == SearchAction {
+					body["data"] = vectors
+					result.Results.Recalls = []float32{0.5, 0.75}
+					mp.EXPECT().Search(mock.Anything, mock.Anything).Return(result, nil).Once()
+				} else {
+					body["search"] = []gin.H{{"data": vectors, "annsField": FieldBookIntro, "limit": 129}}
+					body["rerank"] = gin.H{"strategy": "rrf", "params": gin.H{"k": 60}}
+					mp.EXPECT().HybridSearch(mock.Anything, mock.Anything).Return(result, nil).Once()
+				}
+			}
+			encoded, err := json.Marshal(body)
+			require.NoError(t, err)
+			req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, action), bytes.NewReader(encoded))
+			req.Header.Set(HTTPHeaderAllowInt64, "true")
+			w := &dqlWriteRecorder{ResponseRecorder: httptest.NewRecorder()}
+			initHTTPServerV2(mp, false).ServeHTTP(w, req)
+			require.Equal(t, http.StatusOK, w.Code)
+			var result map[string]interface{}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
+			require.Equal(t, float64(0), result[HTTPReturnCode], w.Body.String())
+			rows := result[HTTPReturnData].([]interface{})
+			require.Len(t, rows, 257)
+			for i, row := range rows {
+				assert.Equal(t, float64(i), row.(map[string]interface{})[FieldBookID])
+				if action != GetAction {
+					assert.Equal(t, 0.5, row.(map[string]interface{})[HTTPReturnDistance])
+				}
+			}
+			assert.Equal(t, float64(11), result[HTTPReturnScannedRemoteBytes])
+			assert.Equal(t, float64(7), result[HTTPReturnCost])
+			assert.Equal(t, float64(22), result[HTTPReturnScannedTotalBytes])
+			assert.Equal(t, 0.5, result[HTTPReturnCacheHitRatio])
+			if action != GetAction {
+				assert.Equal(t, []interface{}{float64(128), float64(129)}, result[HTTPReturnTopks])
+			}
+			if action == SearchAction {
+				assert.Equal(t, []interface{}{0.5, 0.75}, result[HTTPReturnRecalls])
+			}
+			require.Greater(t, w.writes, 1, "DQL rows must use batched writes rather than the whole-response recorder")
+		})
+	}
 }
 
 func TestDocInDocOutInsertInvalid(t *testing.T) {
@@ -3120,7 +3220,7 @@ func versionalV2(category string, action string) string {
 	return "/v2/vectordb" + category + action
 }
 
-func initHTTPServerV2(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
+func initHTTPServerV2(proxy types.ProxyComponent, needAuth bool) http.Handler {
 	h := NewHandlersV2(proxy)
 	ginHandler := gin.Default()
 	// Mirror the middleware the real server installs, so tests exercise the same
@@ -3129,7 +3229,7 @@ func initHTTPServerV2(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
 	appV2 := ginHandler.Group("/v2/vectordb", genAuthMiddleWare(needAuth))
 	h.RegisterRoutesToV2(appV2)
 
-	return ginHandler
+	return DQLStreamingHTTPHandler(ginHandler)
 }
 
 type externalCollectionRESTProxy struct {
@@ -4761,7 +4861,7 @@ func TestCreateImportJobPreservesRBACRoleContext(t *testing.T) {
 // newRESTV2ServerForRBACTest builds a v2 REST server whose auth middleware sets
 // the parsed username directly, without re-initializing the proxy privilege
 // cache (genAuthMiddleWare resets it, which would wipe test grants).
-func newRESTV2ServerForRBACTest(t *testing.T, pxy types.ProxyComponent) *gin.Engine {
+func newRESTV2ServerForRBACTest(t *testing.T, pxy types.ProxyComponent) http.Handler {
 	t.Helper()
 	h := NewHandlersV2(pxy)
 	ginHandler := gin.Default()
@@ -4774,7 +4874,7 @@ func newRESTV2ServerForRBACTest(t *testing.T, pxy types.ProxyComponent) *gin.Eng
 		c.Set(ContextUsername, username)
 	})
 	h.RegisterRoutesToV2(appV2)
-	return ginHandler
+	return DQLStreamingHTTPHandler(ginHandler)
 }
 
 // TestRESTV2AliasRBAC guards the alias-resolution wiring of the REST v2
@@ -4890,7 +4990,7 @@ func TestRESTV2AliasRBAC_GrantOnAliasStringDenied(t *testing.T) {
 	mp.AssertNotCalled(t, "LoadCollection", mock.Anything, mock.Anything)
 }
 
-func validateTestCases(t *testing.T, testEngine *gin.Engine, queryTestCases []requestBodyTestCase, allowInt64 bool) {
+func validateTestCases(t *testing.T, testEngine http.Handler, queryTestCases []requestBodyTestCase, allowInt64 bool) {
 	for i, testcase := range queryTestCases {
 		t.Run(testcase.path, func(t *testing.T) {
 			bodyReader := bytes.NewReader(testcase.requestBody)
@@ -5936,9 +6036,10 @@ func TestSearchAggregationV2(t *testing.T) {
 		}
 	}`)))
 	req.Header.Set(HTTPHeaderAllowInt64, "true")
-	w := httptest.NewRecorder()
+	w := &dqlWriteRecorder{ResponseRecorder: httptest.NewRecorder()}
 	testEngine.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, 1, w.writes, "nested aggregation results must retain whole-response rendering")
 
 	resp := map[string]interface{}{}
 	err := json.Unmarshal(w.Body.Bytes(), &resp)
@@ -6023,7 +6124,7 @@ func TestSearchAggregationV2UnsupportedCombinations(t *testing.T) {
 
 type AddCollectionFieldSuite struct {
 	suite.Suite
-	testEngine *gin.Engine
+	testEngine http.Handler
 	mp         *mocks.MockProxy
 }
 
@@ -6383,7 +6484,7 @@ func TestCollectionFunctionSuite(t *testing.T) {
 
 type CollectionFunctionSuite struct {
 	suite.Suite
-	testEngine *gin.Engine
+	testEngine http.Handler
 	mp         *mocks.MockProxy
 }
 

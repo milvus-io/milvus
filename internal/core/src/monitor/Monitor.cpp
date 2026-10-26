@@ -33,7 +33,7 @@ std::map<std::string, std::string> getMap = {
 std::map<std::string, std::string> getSucMap = {
     {"persistent_data_op_type", "get"}, {"status", "success"}};
 std::map<std::string, std::string> getFailMap = {
-    {"persistent_data_op_type", "get"}};
+    {"persistent_data_op_type", "get"}, {"status", "fail"}};
 std::map<std::string, std::string> putMap = {
     {"persistent_data_op_type", "put"}};
 std::map<std::string, std::string> putSucMap = {
