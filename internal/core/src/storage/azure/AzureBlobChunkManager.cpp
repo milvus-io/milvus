@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <azure/identity/client_secret_credential.hpp>
 #include <azure/identity/default_azure_credential.hpp>
 #include <azure/identity/managed_identity_credential.hpp>
 #include <azure/identity/workload_identity_credential.hpp>
@@ -86,21 +87,17 @@ AzureBlobChunkManager::AzureBlobChunkManager(
     bool useIAM) {
     requestTimeoutMs_ = requestTimeoutMs;
     if (useIAM) {
-        const char* client_secret_env = std::getenv("AZURE_CLIENT_SECRET");
-        const bool has_client_secret = client_secret_env != nullptr &&
-                                       std::strlen(client_secret_env) > 0;
-        if (has_client_secret) {
-            auto credential =
-                std::make_shared<Azure::Identity::DefaultAzureCredential>();
-            client_ =
-                std::make_shared<Azure::Storage::Blobs::BlobServiceClient>(
-                    "https://" + access_key_id + ".blob." + address + "/",
-                    credential);
-        } else {
+        // Credential priority: WI → SPN → MI.
+        // WI is checked first so that pods with valid Workload Identity config are
+        // not silently switched to a different identity when AZURE_CLIENT_SECRET
+        // is also present in the environment.
         const char* federated_token_file =
             std::getenv("AZURE_FEDERATED_TOKEN_FILE");
         const bool has_federated_token = federated_token_file != nullptr &&
                                          std::strlen(federated_token_file) > 0;
+        const char* client_secret_env = std::getenv("AZURE_CLIENT_SECRET");
+        const bool has_client_secret = client_secret_env != nullptr &&
+                                       std::strlen(client_secret_env) > 0;
         if (has_federated_token) {
             Azure::Identity::WorkloadIdentityCredentialOptions options;
             const char* workload_client_id = std::getenv("AZURE_CLIENT_ID");
@@ -117,6 +114,18 @@ AzureBlobChunkManager::AzureBlobChunkManager(
                 std::make_shared<Azure::Storage::Blobs::BlobServiceClient>(
                     "https://" + access_key_id + ".blob." + address + "/",
                     workloadIdentityCredential);
+        } else if (has_client_secret) {
+            const char* spn_client_id = std::getenv("AZURE_CLIENT_ID");
+            const char* spn_tenant_id = std::getenv("AZURE_TENANT_ID");
+            auto credential =
+                std::make_shared<Azure::Identity::ClientSecretCredential>(
+                    spn_tenant_id == nullptr ? "" : spn_tenant_id,
+                    spn_client_id == nullptr ? "" : spn_client_id,
+                    client_secret_env);
+            client_ =
+                std::make_shared<Azure::Storage::Blobs::BlobServiceClient>(
+                    "https://" + access_key_id + ".blob." + address + "/",
+                    credential);
         } else {
             const char* client_id_env = std::getenv("AZURE_CLIENT_ID");
             std::string client_id =
@@ -136,7 +145,6 @@ AzureBlobChunkManager::AzureBlobChunkManager(
                     "https://" + access_key_id + ".blob." + address + "/",
                     credential);
         }
-        } // end else (no client secret)
     } else {
         client_ = std::make_shared<Azure::Storage::Blobs::BlobServiceClient>(
             Azure::Storage::Blobs::BlobServiceClient::
