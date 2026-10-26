@@ -36,7 +36,7 @@ import (
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-func (s *BulkInsertSuite) runTestAutoID() {
+func (s *importTestBase) runTestAutoID() {
 	const (
 		rowCount = 10
 		fileNum  = 10

@@ -52,6 +52,8 @@ TantivyErrorToErrorCode(TantivyBindingErrorCode code) {
         case TantivyBindingErrorCode::InvalidArgument:
             return ErrorCode::InvalidParameter;
         case TantivyBindingErrorCode::Io:
+        case TantivyBindingErrorCode::IoNotFound:
+            // Preserve runtime I/O retry behavior, including missing paths.
             return ErrorCode::FileReadFailed;
         case TantivyBindingErrorCode::DataCorruption:
             return ErrorCode::DataFormatBroken;

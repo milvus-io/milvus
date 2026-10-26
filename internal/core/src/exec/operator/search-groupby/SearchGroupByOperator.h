@@ -359,6 +359,7 @@ class SealedDataGetter : public DataGetter<OutputType> {
             }
         }
         if (from_data_) {
+            column_->Prepare(op_ctx_);
             auto id_offset_pair = column_->GetChunkIDByOffset(idx);
             auto chunk_id = id_offset_pair.first;
             auto inner_offset = id_offset_pair.second;

@@ -214,8 +214,13 @@ func (m *shardManagerImpl) checkIfCollectionSchemaVersionMatch(header *message.I
 	}
 	// Missing schemaVersion means the proxy did not set it (old proxy or old SDK).
 	// Skip the schema presence and version checks for backward compatibility during
-	// rolling upgrades, where a legacy collection may still have Schema == nil when
-	// an old proxy writes.
+	// rolling upgrades. A collection without a schema is unreachable on supported
+	// paths: CreateCollection carries the schema and vchannel recovery meta
+	// persists it. With partial-update CAS enabled, partialupdate rejects such an
+	// insert before the WAL append: the row-lock hook does so before this check for
+	// a non-transactional insert, and the partialupdate interceptor after it for a
+	// transaction body or a replicated insert (see the 20260601 partial-update
+	// optimistic lock design doc).
 	if header.SchemaVersion == nil {
 		return collectionInfo.SchemaVersion(), nil
 	}
@@ -253,6 +258,21 @@ func (m *shardManagerImpl) GetCollectionSchema(collectionID int64, schemaVersion
 	}
 
 	return proto.Clone(collectionInfo.Schema.GetSchema()).(*schemapb.CollectionSchema), nil
+}
+
+// GetWriteSchema captures the same schema used by insert admission. Recovery's
+// observer may still be behind this write-path state after an ALTER append.
+func (m *shardManagerImpl) GetWriteSchema(collectionID int64, vchannel string) (*streamingpb.CollectionSchemaOfVChannel, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	collection, ok := m.collections[collectionID]
+	if !ok || collection.VChannel != vchannel {
+		return nil, status.NewUnrecoverableError("collection %d is not present on vchannel %s", collectionID, vchannel)
+	}
+	if collection.Schema.GetSchema() == nil {
+		return nil, status.NewInner("write schema for collection %d is not ready", collectionID)
+	}
+	return proto.Clone(collection.Schema).(*streamingpb.CollectionSchemaOfVChannel), nil
 }
 
 // GetPrimaryKeyDescriptor returns immutable PK schema data without cloning the

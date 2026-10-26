@@ -101,11 +101,11 @@ PhyIterativeElementFilterNode::GetOutput() {
                   "search result");
     }
 
-    auto segment = query_context_->get_segment();
-    auto schema = segment->get_schema_snapshot();
+    auto schema = query_context_->get_schema_snapshot();
     auto& field_meta = schema->GetFirstArrayFieldInStruct(struct_name_);
     auto field_id = field_meta.get_id();
-    auto struct_element_offsets = segment->GetStructElementOffsets(field_id);
+    auto struct_element_offsets =
+        query_context_->get_struct_element_offsets(field_id);
     if (struct_element_offsets == nullptr) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "IStructElementOffsets not found for field {}",

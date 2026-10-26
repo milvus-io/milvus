@@ -83,65 +83,6 @@ func (_c *MixCoord_AbortImport_Call) Run(run func(_a0 context.Context, _a1 *data
 	return _c
 }
 
-// GetRLSMetadata provides a mock function with given fields: _a0, _a1
-func (_m *MixCoord) GetRLSMetadata(_a0 context.Context, _a1 *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
-	ret := _m.Called(_a0, _a1)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetRLSMetadata")
-	}
-
-	var r0 *rootcoordpb.GetRLSMetadataResponse
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error)); ok {
-		return rf(_a0, _a1)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetRLSMetadataRequest) *rootcoordpb.GetRLSMetadataResponse); ok {
-		r0 = rf(_a0, _a1)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*rootcoordpb.GetRLSMetadataResponse)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.GetRLSMetadataRequest) error); ok {
-		r1 = rf(_a0, _a1)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MixCoord_GetRLSMetadata_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRLSMetadata'
-type MixCoord_GetRLSMetadata_Call struct {
-	*mock.Call
-}
-
-// GetRLSMetadata is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *rootcoordpb.GetRLSMetadataRequest
-func (_e *MixCoord_Expecter) GetRLSMetadata(_a0 interface{}, _a1 interface{}) *MixCoord_GetRLSMetadata_Call {
-	return &MixCoord_GetRLSMetadata_Call{Call: _e.mock.On("GetRLSMetadata", _a0, _a1)}
-}
-
-func (_c *MixCoord_GetRLSMetadata_Call) Run(run func(_a0 context.Context, _a1 *rootcoordpb.GetRLSMetadataRequest)) *MixCoord_GetRLSMetadata_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*rootcoordpb.GetRLSMetadataRequest))
-	})
-	return _c
-}
-
-func (_c *MixCoord_GetRLSMetadata_Call) Return(_a0 *rootcoordpb.GetRLSMetadataResponse, _a1 error) *MixCoord_GetRLSMetadata_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MixCoord_GetRLSMetadata_Call) RunAndReturn(run func(context.Context, *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error)) *MixCoord_GetRLSMetadata_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 func (_c *MixCoord_AbortImport_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_AbortImport_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
@@ -4920,6 +4861,65 @@ func (_c *MixCoord_GetExportSnapshotState_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
+// GetFeatureUsage provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) GetFeatureUsage(_a0 context.Context, _a1 *internalpb.GetFeatureUsageRequest) (*internalpb.FeatureUsageReport, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetFeatureUsage")
+	}
+
+	var r0 *internalpb.FeatureUsageReport
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetFeatureUsageRequest) (*internalpb.FeatureUsageReport, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetFeatureUsageRequest) *internalpb.FeatureUsageReport); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.FeatureUsageReport)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.GetFeatureUsageRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_GetFeatureUsage_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetFeatureUsage'
+type MixCoord_GetFeatureUsage_Call struct {
+	*mock.Call
+}
+
+// GetFeatureUsage is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *internalpb.GetFeatureUsageRequest
+func (_e *MixCoord_Expecter) GetFeatureUsage(_a0 interface{}, _a1 interface{}) *MixCoord_GetFeatureUsage_Call {
+	return &MixCoord_GetFeatureUsage_Call{Call: _e.mock.On("GetFeatureUsage", _a0, _a1)}
+}
+
+func (_c *MixCoord_GetFeatureUsage_Call) Run(run func(_a0 context.Context, _a1 *internalpb.GetFeatureUsageRequest)) *MixCoord_GetFeatureUsage_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*internalpb.GetFeatureUsageRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_GetFeatureUsage_Call) Return(_a0 *internalpb.FeatureUsageReport, _a1 error) *MixCoord_GetFeatureUsage_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_GetFeatureUsage_Call) RunAndReturn(run func(context.Context, *internalpb.GetFeatureUsageRequest) (*internalpb.FeatureUsageReport, error)) *MixCoord_GetFeatureUsage_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetFileResources provides a mock function with given fields: ctx, resourceIDs
 func (_m *MixCoord) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error) {
 	_va := make([]interface{}, len(resourceIDs))
@@ -5996,6 +5996,65 @@ func (_c *MixCoord_GetQueryNodeDistribution_Call) RunAndReturn(run func(context.
 	return _c
 }
 
+// GetQueryViewLoadInfo provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) GetQueryViewLoadInfo(_a0 context.Context, _a1 *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetQueryViewLoadInfo")
+	}
+
+	var r0 *querypb.GetQueryViewLoadInfoResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.GetQueryViewLoadInfoRequest) *querypb.GetQueryViewLoadInfoResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.GetQueryViewLoadInfoResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.GetQueryViewLoadInfoRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_GetQueryViewLoadInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetQueryViewLoadInfo'
+type MixCoord_GetQueryViewLoadInfo_Call struct {
+	*mock.Call
+}
+
+// GetQueryViewLoadInfo is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.GetQueryViewLoadInfoRequest
+func (_e *MixCoord_Expecter) GetQueryViewLoadInfo(_a0 interface{}, _a1 interface{}) *MixCoord_GetQueryViewLoadInfo_Call {
+	return &MixCoord_GetQueryViewLoadInfo_Call{Call: _e.mock.On("GetQueryViewLoadInfo", _a0, _a1)}
+}
+
+func (_c *MixCoord_GetQueryViewLoadInfo_Call) Run(run func(_a0 context.Context, _a1 *querypb.GetQueryViewLoadInfoRequest)) *MixCoord_GetQueryViewLoadInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.GetQueryViewLoadInfoRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_GetQueryViewLoadInfo_Call) Return(_a0 *querypb.GetQueryViewLoadInfoResponse, _a1 error) *MixCoord_GetQueryViewLoadInfo_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_GetQueryViewLoadInfo_Call) RunAndReturn(run func(context.Context, *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error)) *MixCoord_GetQueryViewLoadInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetQuotaMetrics provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) GetQuotaMetrics(_a0 context.Context, _a1 *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -6051,6 +6110,65 @@ func (_c *MixCoord_GetQuotaMetrics_Call) Return(_a0 *internalpb.GetQuotaMetricsR
 }
 
 func (_c *MixCoord_GetQuotaMetrics_Call) RunAndReturn(run func(context.Context, *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error)) *MixCoord_GetQuotaMetrics_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetRLSMetadata provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) GetRLSMetadata(_a0 context.Context, _a1 *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRLSMetadata")
+	}
+
+	var r0 *rootcoordpb.GetRLSMetadataResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetRLSMetadataRequest) *rootcoordpb.GetRLSMetadataResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*rootcoordpb.GetRLSMetadataResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.GetRLSMetadataRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_GetRLSMetadata_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRLSMetadata'
+type MixCoord_GetRLSMetadata_Call struct {
+	*mock.Call
+}
+
+// GetRLSMetadata is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *rootcoordpb.GetRLSMetadataRequest
+func (_e *MixCoord_Expecter) GetRLSMetadata(_a0 interface{}, _a1 interface{}) *MixCoord_GetRLSMetadata_Call {
+	return &MixCoord_GetRLSMetadata_Call{Call: _e.mock.On("GetRLSMetadata", _a0, _a1)}
+}
+
+func (_c *MixCoord_GetRLSMetadata_Call) Run(run func(_a0 context.Context, _a1 *rootcoordpb.GetRLSMetadataRequest)) *MixCoord_GetRLSMetadata_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*rootcoordpb.GetRLSMetadataRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_GetRLSMetadata_Call) Return(_a0 *rootcoordpb.GetRLSMetadataResponse, _a1 error) *MixCoord_GetRLSMetadata_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_GetRLSMetadata_Call) RunAndReturn(run func(context.Context, *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error)) *MixCoord_GetRLSMetadata_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -6822,6 +6940,65 @@ func (_c *MixCoord_GetStatisticsChannel_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
+// GetStreamingNodeQueryViewResources provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) GetStreamingNodeQueryViewResources(_a0 context.Context, _a1 *datapb.GetStreamingNodeQueryViewResourcesRequest) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetStreamingNodeQueryViewResources")
+	}
+
+	var r0 *datapb.GetStreamingNodeQueryViewResourcesResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetStreamingNodeQueryViewResourcesRequest) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetStreamingNodeQueryViewResourcesRequest) *datapb.GetStreamingNodeQueryViewResourcesResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.GetStreamingNodeQueryViewResourcesResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.GetStreamingNodeQueryViewResourcesRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_GetStreamingNodeQueryViewResources_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetStreamingNodeQueryViewResources'
+type MixCoord_GetStreamingNodeQueryViewResources_Call struct {
+	*mock.Call
+}
+
+// GetStreamingNodeQueryViewResources is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *datapb.GetStreamingNodeQueryViewResourcesRequest
+func (_e *MixCoord_Expecter) GetStreamingNodeQueryViewResources(_a0 interface{}, _a1 interface{}) *MixCoord_GetStreamingNodeQueryViewResources_Call {
+	return &MixCoord_GetStreamingNodeQueryViewResources_Call{Call: _e.mock.On("GetStreamingNodeQueryViewResources", _a0, _a1)}
+}
+
+func (_c *MixCoord_GetStreamingNodeQueryViewResources_Call) Run(run func(_a0 context.Context, _a1 *datapb.GetStreamingNodeQueryViewResourcesRequest)) *MixCoord_GetStreamingNodeQueryViewResources_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.GetStreamingNodeQueryViewResourcesRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_GetStreamingNodeQueryViewResources_Call) Return(_a0 *datapb.GetStreamingNodeQueryViewResourcesResponse, _a1 error) *MixCoord_GetStreamingNodeQueryViewResources_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_GetStreamingNodeQueryViewResources_Call) RunAndReturn(run func(context.Context, *datapb.GetStreamingNodeQueryViewResourcesRequest) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error)) *MixCoord_GetStreamingNodeQueryViewResources_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetTimeTickChannel provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) GetTimeTickChannel(_a0 context.Context, _a1 *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -7544,6 +7721,65 @@ func (_c *MixCoord_ListDatabases_Call) Return(_a0 *milvuspb.ListDatabasesRespons
 }
 
 func (_c *MixCoord_ListDatabases_Call) RunAndReturn(run func(context.Context, *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error)) *MixCoord_ListDatabases_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// FetchFileResources provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) FetchFileResources(_a0 context.Context, _a1 *rootcoordpb.FetchFileResourcesRequest) (*rootcoordpb.FetchFileResourcesResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FetchFileResources")
+	}
+
+	var r0 *rootcoordpb.FetchFileResourcesResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.FetchFileResourcesRequest) (*rootcoordpb.FetchFileResourcesResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.FetchFileResourcesRequest) *rootcoordpb.FetchFileResourcesResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*rootcoordpb.FetchFileResourcesResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.FetchFileResourcesRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_FetchFileResources_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FetchFileResources'
+type MixCoord_FetchFileResources_Call struct {
+	*mock.Call
+}
+
+// FetchFileResources is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *rootcoordpb.FetchFileResourcesRequest
+func (_e *MixCoord_Expecter) FetchFileResources(_a0 interface{}, _a1 interface{}) *MixCoord_FetchFileResources_Call {
+	return &MixCoord_FetchFileResources_Call{Call: _e.mock.On("FetchFileResources", _a0, _a1)}
+}
+
+func (_c *MixCoord_FetchFileResources_Call) Run(run func(_a0 context.Context, _a1 *rootcoordpb.FetchFileResourcesRequest)) *MixCoord_FetchFileResources_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*rootcoordpb.FetchFileResourcesRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_FetchFileResources_Call) Return(_a0 *rootcoordpb.FetchFileResourcesResponse, _a1 error) *MixCoord_FetchFileResources_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_FetchFileResources_Call) RunAndReturn(run func(context.Context, *rootcoordpb.FetchFileResourcesRequest) (*rootcoordpb.FetchFileResourcesResponse, error)) *MixCoord_FetchFileResources_Call {
 	_c.Call.Return(run)
 	return _c
 }

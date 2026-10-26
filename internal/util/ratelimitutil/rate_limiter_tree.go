@@ -19,6 +19,7 @@ package ratelimitutil
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -36,8 +37,11 @@ type QuotaStateInfo struct {
 }
 
 type RateLimiterNode struct {
-	limiters    *typeutil.ConcurrentMap[internalpb.RateType, *ratelimitutil.Limiter]
-	quotaStates *typeutil.ConcurrentMap[milvuspb.QuotaState, *QuotaStateInfo]
+	limiters *typeutil.ConcurrentMap[internalpb.RateType, *ratelimitutil.Limiter]
+	// quotaStates atomically publishes the current ConcurrentMap. ConcurrentMap
+	// protects operations within one map, while atomic.Pointer protects replacing
+	// the map itself.
+	quotaStates atomic.Pointer[typeutil.ConcurrentMap[milvuspb.QuotaState, *QuotaStateInfo]]
 	level       internalpb.RateScope
 
 	// db id, collection id or partition id, cluster id is 0 for the cluster level
@@ -51,11 +55,11 @@ type RateLimiterNode struct {
 
 func NewRateLimiterNode(level internalpb.RateScope) *RateLimiterNode {
 	rln := &RateLimiterNode{
-		limiters:    typeutil.NewConcurrentMap[internalpb.RateType, *ratelimitutil.Limiter](),
-		quotaStates: typeutil.NewConcurrentMap[milvuspb.QuotaState, *QuotaStateInfo](),
-		children:    typeutil.NewConcurrentMap[int64, *RateLimiterNode](),
-		level:       level,
+		limiters: typeutil.NewConcurrentMap[internalpb.RateType, *ratelimitutil.Limiter](),
+		children: typeutil.NewConcurrentMap[int64, *RateLimiterNode](),
+		level:    level,
 	}
+	rln.SetQuotaStates(typeutil.NewConcurrentMap[milvuspb.QuotaState, *QuotaStateInfo]())
 	return rln
 }
 
@@ -93,18 +97,19 @@ func (rln *RateLimiterNode) Check(rt internalpb.RateType, n int) error {
 }
 
 func (rln *RateLimiterNode) GetQuotaExceededError(rt internalpb.RateType) error {
+	quotaStates := rln.GetQuotaStates()
 	switch rt {
 	case internalpb.RateType_DMLInsert, internalpb.RateType_DMLDelete, internalpb.RateType_DMLBulkLoad:
-		if stateInfo, ok := rln.quotaStates.Get(milvuspb.QuotaState_DenyToWrite); ok {
+		if stateInfo, ok := quotaStates.Get(milvuspb.QuotaState_DenyToWrite); ok {
 			return merr.WrapErrServiceQuotaExceeded(ratelimitutil.GetQuotaErrorStringWithReason(stateInfo.ErrorCode, stateInfo.Reason))
 		}
 	case internalpb.RateType_DQLSearch, internalpb.RateType_DQLQuery:
-		if stateInfo, ok := rln.quotaStates.Get(milvuspb.QuotaState_DenyToRead); ok {
+		if stateInfo, ok := quotaStates.Get(milvuspb.QuotaState_DenyToRead); ok {
 			return merr.WrapErrServiceQuotaExceeded(ratelimitutil.GetQuotaErrorStringWithReason(stateInfo.ErrorCode, stateInfo.Reason))
 		}
 	case internalpb.RateType_DDLCollection, internalpb.RateType_DDLPartition,
 		internalpb.RateType_DDLIndex, internalpb.RateType_DDLCompaction, internalpb.RateType_DDLFlush:
-		if stateInfo, ok := rln.quotaStates.Get(milvuspb.QuotaState_DenyToDDL); ok {
+		if stateInfo, ok := quotaStates.Get(milvuspb.QuotaState_DenyToDDL); ok {
 			return merr.WrapErrServiceQuotaExceeded(ratelimitutil.GetQuotaErrorStringWithReason(stateInfo.ErrorCode, stateInfo.Reason))
 		}
 	}
@@ -123,7 +128,7 @@ func TraverseRateLimiterTree(root *RateLimiterNode, fn1 func(internalpb.RateType
 	}
 
 	if fn2 != nil {
-		root.quotaStates.Range(func(state milvuspb.QuotaState, stateInfo *QuotaStateInfo) bool {
+		root.GetQuotaStates().Range(func(state milvuspb.QuotaState, stateInfo *QuotaStateInfo) bool {
 			return fn2(root, state, stateInfo.ErrorCode, stateInfo.Reason)
 		})
 	}
@@ -155,11 +160,11 @@ func (rln *RateLimiterNode) SetLimiters(new *typeutil.ConcurrentMap[internalpb.R
 }
 
 func (rln *RateLimiterNode) GetQuotaStates() *typeutil.ConcurrentMap[milvuspb.QuotaState, *QuotaStateInfo] {
-	return rln.quotaStates
+	return rln.quotaStates.Load()
 }
 
 func (rln *RateLimiterNode) SetQuotaStates(new *typeutil.ConcurrentMap[milvuspb.QuotaState, *QuotaStateInfo]) {
-	rln.quotaStates = new
+	rln.quotaStates.Store(new)
 }
 
 func (rln *RateLimiterNode) GetID() int64 {

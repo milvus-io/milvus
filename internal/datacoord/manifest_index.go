@@ -20,6 +20,7 @@ import (
 	"context"
 	"path"
 	"sort"
+	"strings"
 
 	"golang.org/x/sync/semaphore"
 
@@ -61,7 +62,7 @@ func buildManifestIndexInfo(m *meta, segment *SegmentInfo, segIdx *model.Segment
 		segIdx.SegmentID,
 		segIdx.BuildID,
 		segIdx.IndexVersion,
-	).BuildPrefix()
+	).WithManifestPath(segment.GetManifestPath()).BuildPrefix()
 	relativePath, err := packed.ManifestIndexRelativePath(basePath, indexPrefix)
 	if err != nil {
 		return packed.ManifestIndexInfo{}, err
@@ -114,6 +115,28 @@ func collectionFieldName(m *meta, collectionID, fieldID int64) string {
 	return ""
 }
 
+// segmentIndexFilePaths resolves stored index file keys for load and snapshot
+// consumers. A v2 build needs its owning segment's actual manifest base: a
+// missing row or invalid pointer must not silently select a different namespace.
+func segmentIndexFilePaths(rootPath string, segIdx *model.SegmentIndex, segment *datapb.SegmentInfo) ([]string, error) {
+	builder := metautil.NewIndexPathBuilder(rootPath, segIdx.IndexStorePathVersion,
+		segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.BuildID, segIdx.IndexVersion)
+	if metautil.IsSegmentRooted(segIdx.IndexStorePathVersion) && len(segIdx.IndexFileKeys) > 0 {
+		if segment == nil {
+			return nil, merr.WrapErrSegmentNotFound(segIdx.SegmentID, "cannot resolve segment-rooted index files")
+		}
+		base, _, err := packed.UnmarshalManifestPath(segment.GetManifestPath())
+		if err != nil {
+			return nil, merr.WrapErrDataIntegrity(err, "invalid manifest path for segment %d index files", segIdx.SegmentID)
+		}
+		if base == "" {
+			return nil, merr.WrapErrDataIntegrityMsg("empty manifest base for segment %d index files", segIdx.SegmentID)
+		}
+		builder.WithManifestPath(segment.GetManifestPath())
+	}
+	return builder.BuildFilePaths(segIdx.IndexFileKeys), nil
+}
+
 // manifestIndexFilePathInfo projects one manifest index entry into the load
 // metadata QueryNode consumes. It returns false for an entry that cannot
 // produce a safe file list, which the caller treats as "no manifest artifact".
@@ -132,7 +155,11 @@ func manifestIndexFilePathInfo(segmentID int64, manifestIndex packed.ManifestInd
 		if fileKey == "" || path.IsAbs(fileKey) || path.Base(fileKey) != fileKey || fileKey == "." || fileKey == ".." {
 			return nil, false
 		}
-		filePaths = append(filePaths, path.Join(manifestIndex.Path, fileKey))
+		if metautil.IsSegmentRooted(manifestIndex.IndexStorePathVersion) {
+			filePaths = append(filePaths, strings.TrimRight(manifestIndex.Path, "/")+"/"+fileKey)
+		} else {
+			filePaths = append(filePaths, path.Join(manifestIndex.Path, fileKey))
+		}
 	}
 
 	return &indexpb.IndexFilePathInfo{
@@ -161,8 +188,12 @@ func manifestIndexFilePathInfoForSegment(rootPath string, segment *datapb.Segmen
 ) (*indexpb.IndexFilePathInfo, bool) {
 	expected := metautil.NewIndexPathBuilder(rootPath, entry.IndexStorePathVersion,
 		segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(),
-		entry.BuildID, entry.IndexVersion).BuildPrefix()
-	if path.Clean(entry.Path) != expected {
+		entry.BuildID, entry.IndexVersion).WithManifestPath(segment.GetManifestPath()).BuildPrefix()
+	if metautil.IsSegmentRooted(entry.IndexStorePathVersion) {
+		if entry.Path != expected {
+			return nil, false
+		}
+	} else if path.Clean(entry.Path) != expected {
 		return nil, false
 	}
 	return manifestIndexFilePathInfo(segment.GetID(), entry)

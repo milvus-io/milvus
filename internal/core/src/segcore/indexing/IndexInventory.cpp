@@ -65,7 +65,6 @@ IndexInventory::Capability(FieldId field_id) const {
 void
 IndexInventory::RefreshCapability(FieldId field_id) {
     std::vector<IndexCapabilityEntry> matches;
-    matches.reserve(entries_.size());
     for (const auto& [key, entry] : entries_) {
         if (key.field_id == field_id) {
             matches.push_back(entry.meta);

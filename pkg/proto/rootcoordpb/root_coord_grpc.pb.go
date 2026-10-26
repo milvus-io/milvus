@@ -98,6 +98,7 @@ const (
 	RootCoord_DescribeDatabase_FullMethodName              = "/milvus.proto.rootcoord.RootCoord/DescribeDatabase"
 	RootCoord_AlterDatabase_FullMethodName                 = "/milvus.proto.rootcoord.RootCoord/AlterDatabase"
 	RootCoord_GetQuotaMetrics_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/GetQuotaMetrics"
+	RootCoord_GetFeatureUsage_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/GetFeatureUsage"
 	RootCoord_ClearReadTaskQueue_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/ClearReadTaskQueue"
 	RootCoord_BackupEzk_FullMethodName                     = "/milvus.proto.rootcoord.RootCoord/BackupEzk"
 	RootCoord_AddFileResource_FullMethodName               = "/milvus.proto.rootcoord.RootCoord/AddFileResource"
@@ -108,6 +109,7 @@ const (
 	RootCoord_PushClientCommand_FullMethodName             = "/milvus.proto.rootcoord.RootCoord/PushClientCommand"
 	RootCoord_DeleteClientCommand_FullMethodName           = "/milvus.proto.rootcoord.RootCoord/DeleteClientCommand"
 	RootCoord_ListClientCommands_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/ListClientCommands"
+	RootCoord_FetchFileResources_FullMethodName            = "/milvus.proto.rootcoord.RootCoord/FetchFileResources"
 )
 
 // RootCoordClient is the client API for RootCoord service.
@@ -265,6 +267,7 @@ type RootCoordClient interface {
 	DescribeDatabase(ctx context.Context, in *DescribeDatabaseRequest, opts ...grpc.CallOption) (*DescribeDatabaseResponse, error)
 	AlterDatabase(ctx context.Context, in *AlterDatabaseRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	GetQuotaMetrics(ctx context.Context, in *internalpb.GetQuotaMetricsRequest, opts ...grpc.CallOption) (*internalpb.GetQuotaMetricsResponse, error)
+	GetFeatureUsage(ctx context.Context, in *internalpb.GetFeatureUsageRequest, opts ...grpc.CallOption) (*internalpb.FeatureUsageReport, error)
 	ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error)
 	BackupEzk(ctx context.Context, in *internalpb.BackupEzkRequest, opts ...grpc.CallOption) (*internalpb.BackupEzkResponse, error)
 	// File Resource Management
@@ -277,6 +280,7 @@ type RootCoordClient interface {
 	PushClientCommand(ctx context.Context, in *milvuspb.PushClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.PushClientCommandResponse, error)
 	DeleteClientCommand(ctx context.Context, in *milvuspb.DeleteClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.DeleteClientCommandResponse, error)
 	ListClientCommands(ctx context.Context, in *ListClientCommandsRequest, opts ...grpc.CallOption) (*ListClientCommandsResponse, error)
+	FetchFileResources(ctx context.Context, in *FetchFileResourcesRequest, opts ...grpc.CallOption) (*FetchFileResourcesResponse, error)
 }
 
 type rootCoordClient struct {
@@ -962,6 +966,15 @@ func (c *rootCoordClient) GetQuotaMetrics(ctx context.Context, in *internalpb.Ge
 	return out, nil
 }
 
+func (c *rootCoordClient) GetFeatureUsage(ctx context.Context, in *internalpb.GetFeatureUsageRequest, opts ...grpc.CallOption) (*internalpb.FeatureUsageReport, error) {
+	out := new(internalpb.FeatureUsageReport)
+	err := c.cc.Invoke(ctx, RootCoord_GetFeatureUsage_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *rootCoordClient) ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
 	out := new(internalpb.ClearReadTaskQueueResponse)
 	err := c.cc.Invoke(ctx, RootCoord_ClearReadTaskQueue_FullMethodName, in, out, opts...)
@@ -1046,6 +1059,15 @@ func (c *rootCoordClient) DeleteClientCommand(ctx context.Context, in *milvuspb.
 func (c *rootCoordClient) ListClientCommands(ctx context.Context, in *ListClientCommandsRequest, opts ...grpc.CallOption) (*ListClientCommandsResponse, error) {
 	out := new(ListClientCommandsResponse)
 	err := c.cc.Invoke(ctx, RootCoord_ListClientCommands_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rootCoordClient) FetchFileResources(ctx context.Context, in *FetchFileResourcesRequest, opts ...grpc.CallOption) (*FetchFileResourcesResponse, error) {
+	out := new(FetchFileResourcesResponse)
+	err := c.cc.Invoke(ctx, RootCoord_FetchFileResources_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1207,6 +1229,7 @@ type RootCoordServer interface {
 	DescribeDatabase(context.Context, *DescribeDatabaseRequest) (*DescribeDatabaseResponse, error)
 	AlterDatabase(context.Context, *AlterDatabaseRequest) (*commonpb.Status, error)
 	GetQuotaMetrics(context.Context, *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error)
+	GetFeatureUsage(context.Context, *internalpb.GetFeatureUsageRequest) (*internalpb.FeatureUsageReport, error)
 	ClearReadTaskQueue(context.Context, *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error)
 	BackupEzk(context.Context, *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error)
 	// File Resource Management
@@ -1219,6 +1242,7 @@ type RootCoordServer interface {
 	PushClientCommand(context.Context, *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error)
 	DeleteClientCommand(context.Context, *milvuspb.DeleteClientCommandRequest) (*milvuspb.DeleteClientCommandResponse, error)
 	ListClientCommands(context.Context, *ListClientCommandsRequest) (*ListClientCommandsResponse, error)
+	FetchFileResources(context.Context, *FetchFileResourcesRequest) (*FetchFileResourcesResponse, error)
 }
 
 // UnimplementedRootCoordServer should be embedded to have forward compatible implementations.
@@ -1450,6 +1474,9 @@ func (UnimplementedRootCoordServer) AlterDatabase(context.Context, *AlterDatabas
 func (UnimplementedRootCoordServer) GetQuotaMetrics(context.Context, *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetQuotaMetrics not implemented")
 }
+func (UnimplementedRootCoordServer) GetFeatureUsage(context.Context, *internalpb.GetFeatureUsageRequest) (*internalpb.FeatureUsageReport, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetFeatureUsage not implemented")
+}
 func (UnimplementedRootCoordServer) ClearReadTaskQueue(context.Context, *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ClearReadTaskQueue not implemented")
 }
@@ -1479,6 +1506,9 @@ func (UnimplementedRootCoordServer) DeleteClientCommand(context.Context, *milvus
 }
 func (UnimplementedRootCoordServer) ListClientCommands(context.Context, *ListClientCommandsRequest) (*ListClientCommandsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListClientCommands not implemented")
+}
+func (UnimplementedRootCoordServer) FetchFileResources(context.Context, *FetchFileResourcesRequest) (*FetchFileResourcesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method FetchFileResources not implemented")
 }
 
 // UnsafeRootCoordServer may be embedded to opt out of forward compatibility for this service.
@@ -2842,6 +2872,24 @@ func _RootCoord_GetQuotaMetrics_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RootCoord_GetFeatureUsage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(internalpb.GetFeatureUsageRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).GetFeatureUsage(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_GetFeatureUsage_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).GetFeatureUsage(ctx, req.(*internalpb.GetFeatureUsageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _RootCoord_ClearReadTaskQueue_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(internalpb.ClearReadTaskQueueRequest)
 	if err := dec(in); err != nil {
@@ -3018,6 +3066,24 @@ func _RootCoord_ListClientCommands_Handler(srv interface{}, ctx context.Context,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(RootCoordServer).ListClientCommands(ctx, req.(*ListClientCommandsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RootCoord_FetchFileResources_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FetchFileResourcesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RootCoordServer).FetchFileResources(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RootCoord_FetchFileResources_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RootCoordServer).FetchFileResources(ctx, req.(*FetchFileResourcesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3330,6 +3396,10 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _RootCoord_GetQuotaMetrics_Handler,
 		},
 		{
+			MethodName: "GetFeatureUsage",
+			Handler:    _RootCoord_GetFeatureUsage_Handler,
+		},
+		{
 			MethodName: "ClearReadTaskQueue",
 			Handler:    _RootCoord_ClearReadTaskQueue_Handler,
 		},
@@ -3368,6 +3438,10 @@ var RootCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListClientCommands",
 			Handler:    _RootCoord_ListClientCommands_Handler,
+		},
+		{
+			MethodName: "FetchFileResources",
+			Handler:    _RootCoord_FetchFileResources_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

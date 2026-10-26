@@ -255,6 +255,16 @@ GetExternalVectorPartialNullAsRowNull() {
     return milvus::storage::GetExternalVectorPartialNullAsRowNull();
 }
 
+bool
+SetExternalSparseConversionMemoryLimit(int64_t bytes) {
+    return milvus::storage::SetExternalSparseConversionMemoryLimit(bytes);
+}
+
+int64_t
+GetExternalSparseConversionMemoryLimit() {
+    return milvus::storage::GetExternalSparseConversionMemoryLimit();
+}
+
 CStatus
 InitLoonReaderThreadPool(int32_t num_threads) {
     try {

@@ -71,6 +71,14 @@ SetExternalVectorPartialNullAsRowNull(bool enabled);
 bool
 GetExternalVectorPartialNullAsRowNull();
 
+// Startup-only budget for the buffers owned by one sparse normalization call.
+// Returns false for a non-positive limit and leaves the existing value intact.
+bool
+SetExternalSparseConversionMemoryLimit(int64_t bytes);
+
+int64_t
+GetExternalSparseConversionMemoryLimit();
+
 void
 ReadMediumType(BinlogReaderPtr reader);
 

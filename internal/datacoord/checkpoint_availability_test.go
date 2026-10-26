@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/metacache"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -52,12 +53,13 @@ func TestCheckpointAvailabilityFastPath(t *testing.T) {
 		"cluster-rootcoord-dm_0_124v0": nil,
 	}
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(checkpoints, nil).Times(3)
-	m := &meta{catalog: catalog, channelCPs: newChannelCps()}
-	m.channelCPs.checkpoints = checkpoints
+	store := metacache.NewMetaStore(catalog)
+	m := &meta{catalog: catalog, metaStore: store, channelSync: newChannelSync()}
+	store.LoadChannelCheckpoints(checkpoints)
 	gc := newGarbageCollector(m, newMockHandlerWithMeta(m), GcOption{broker: broker.NewCoordinatorBroker(coord)})
 	gc.recycleChannelCPMeta(context.Background(), nil)
 	require.Equal(t, 2, coord.checks)
-	require.Len(t, m.channelCPs.checkpoints, 2)
+	require.Len(t, m.metaStore.GetChannelCheckpoints(), 2)
 	// The embedded nil RPC interface and strict catalog mock reject any
 	// DescribeCollection/GcConfirm/Drop call on a positive cache hit.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -141,16 +143,17 @@ func TestCheckpointAvailabilityFallback(t *testing.T) {
 				if tc.dropped {
 					catalog.EXPECT().DropChannelCheckpoint(mock.Anything, mock.Anything).Return(nil).Times(3)
 				}
-				m := &meta{catalog: catalog, channelCPs: newChannelCps()}
-				m.channelCPs.checkpoints = checkpoints
+				store := metacache.NewMetaStore(catalog)
+				m := &meta{catalog: catalog, metaStore: store, channelSync: newChannelSync()}
+				store.LoadChannelCheckpoints(checkpoints)
 				gc := newGarbageCollector(m, newMockHandlerWithMeta(m), GcOption{broker: wrapped})
 				gc.recycleChannelCPMeta(context.Background(), nil)
 				require.Equal(t, 2, calls, "fallback results must be reused across channels of one collection")
 				require.ErrorIs(t, previousOuter.Err(), context.Canceled)
 				if tc.dropped {
-					require.Empty(t, m.channelCPs.checkpoints)
+					require.Empty(t, m.metaStore.GetChannelCheckpoints())
 				} else {
-					require.Len(t, m.channelCPs.checkpoints, 3)
+					require.Len(t, m.metaStore.GetChannelCheckpoints(), 3)
 				}
 			})
 		}

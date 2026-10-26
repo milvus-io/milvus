@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	mocks2 "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -1840,6 +1841,36 @@ func TestGetRecoveryInfo(t *testing.T) {
 func TestGetCompactionState(t *testing.T) {
 	paramtable.Get().Save(Params.DataCoordCfg.EnableCompaction.Key, "true")
 	defer paramtable.Get().Reset(Params.DataCoordCfg.EnableCompaction.Key)
+	t.Run("unknown compaction id", func(t *testing.T) {
+		svr := &Server{}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		mockMeta := NewMockCompactionMeta(t)
+		mockMeta.EXPECT().GetCompactionTasksByTriggerID(mock.Anything, int64(999999)).Return(nil)
+		svr.compactionInspector = newCompactionInspector(mockMeta, nil, nil, nil, nil, newMockVersionManager())
+
+		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{CompactionID: 999999})
+
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.CompactionState_UndefiedState, resp.GetState())
+		assert.Zero(t, resp.GetExecutingPlanNo())
+		assert.Zero(t, resp.GetCompletedPlanNo())
+	})
+	t.Run("explicit no-op compaction id", func(t *testing.T) {
+		svr := &Server{}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		mockMeta := NewMockCompactionMeta(t)
+		mockMeta.EXPECT().GetCompactionTasksByTriggerID(mock.Anything, int64(-1)).Return(nil)
+		svr.compactionInspector = newCompactionInspector(mockMeta, nil, nil, nil, nil, newMockVersionManager())
+
+		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{CompactionID: -1})
+
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.CompactionState_Completed, resp.GetState())
+		assert.Zero(t, resp.GetExecutingPlanNo())
+		assert.Zero(t, resp.GetCompletedPlanNo())
+	})
 	t.Run("test get compaction state with new compaction Handler", func(t *testing.T) {
 		svr := &Server{}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
@@ -1899,8 +1930,9 @@ func TestManualCompaction(t *testing.T) {
 	t.Run("target size zero routes to ordinary manual compaction", func(t *testing.T) {
 		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.meta = &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
-		svr.meta.collections.Insert(1, &collectionInfo{
+		store := metacache.NewMetaStore(nil)
+		svr.meta = &meta{metaStore: store}
+		svr.meta.AddCollection(&collectionInfo{
 			ID:     1,
 			Schema: &schemapb.CollectionSchema{},
 		})
@@ -1929,8 +1961,9 @@ func TestManualCompaction(t *testing.T) {
 	t.Run("test manual l0 compaction successfully", func(t *testing.T) {
 		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.meta = &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
-		svr.meta.collections.Insert(1, &collectionInfo{
+		store := metacache.NewMetaStore(nil)
+		svr.meta = &meta{metaStore: store}
+		svr.meta.AddCollection(&collectionInfo{
 			ID:     1,
 			Schema: &schemapb.CollectionSchema{},
 		})
@@ -2052,8 +2085,9 @@ func TestManualCompaction(t *testing.T) {
 	t.Run("test manual compaction failure", func(t *testing.T) {
 		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.meta = &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
-		svr.meta.collections.Insert(1, &collectionInfo{
+		store := metacache.NewMetaStore(nil)
+		svr.meta = &meta{metaStore: store}
+		svr.meta.AddCollection(&collectionInfo{
 			ID:     1,
 			Schema: &schemapb.CollectionSchema{},
 		})
@@ -2335,45 +2369,100 @@ func TestHandleSessionEvent(t *testing.T) {
 	})
 }
 
-type rootCoordSegFlushComplete struct {
-	mockMixCoord
-	flag bool
-}
-
-// SegmentFlushCompleted, override default behavior
-func (rc *rootCoordSegFlushComplete) SegmentFlushCompleted(ctx context.Context, req *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
-	if rc.flag {
-		return merr.Success(), nil
+func newPostFlushTestServer(collection *collectionInfo, segments ...*datapb.SegmentInfo) *Server {
+	mt := newEmptyTestMeta()
+	if collection != nil {
+		mt.AddCollection(collection)
 	}
-	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil
+	for _, segment := range segments {
+		mt.segments.SetSegment(segment.GetID(), NewSegmentInfo(segment))
+	}
+	return &Server{meta: mt}
 }
 
 func TestPostFlush(t *testing.T) {
 	t.Run("segment not found", func(t *testing.T) {
-		svr := newTestServer(t)
-		defer closeTestServer(t, svr)
+		svr := newPostFlushTestServer(nil)
 
 		err := svr.postFlush(context.Background(), 1)
 		assert.ErrorIs(t, err, merr.ErrSegmentNotFound)
 	})
 
 	t.Run("success post flush", func(t *testing.T) {
-		svr := newTestServer(t)
-		defer closeTestServer(t, svr)
-		svr.mixCoord = &rootCoordSegFlushComplete{flag: true}
-
-		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
+		svr := newPostFlushTestServer(nil, &datapb.SegmentInfo{
 			ID:           1,
 			CollectionID: 1,
 			PartitionID:  1,
 			State:        commonpb.SegmentState_Flushing,
 			IsSorted:     true,
-		}))
+		})
+		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
+		drainBuildIndexChForTest()
+		defer drainBuildIndexChForTest()
+		drainStatsTaskChForTest()
+		defer drainStatsTaskChForTest()
 
+		err := svr.postFlush(context.Background(), 1)
 		assert.NoError(t, err)
+		assertBuildIndexEvents(t, 1)
+	})
 
-		err = svr.postFlush(context.Background(), 1)
+	t.Run("sort compaction post flush only triggers stats task", func(t *testing.T) {
+		svr := newPostFlushTestServer(nil, &datapb.SegmentInfo{
+			ID:           1,
+			CollectionID: 1,
+			PartitionID:  1,
+			State:        commonpb.SegmentState_Flushing,
+		})
+		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "true")
+		paramtable.Get().Save(Params.DataCoordCfg.EnableCompaction.Key, "true")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableCompaction.Key)
+		drainBuildIndexChForTest()
+		defer drainBuildIndexChForTest()
+		drainStatsTaskChForTest()
+		defer drainStatsTaskChForTest()
+
+		err := svr.postFlush(context.Background(), 1)
 		assert.NoError(t, err)
+		assertNoBuildIndexEvent(t)
+		select {
+		case segID := <-getStatsTaskChSingleton():
+			assert.Equal(t, UniqueID(1), segID)
+		case <-time.After(100 * time.Millisecond):
+			require.Fail(t, "missing stats task event")
+		}
+	})
+
+	t.Run("external collection post flush triggers build index directly", func(t *testing.T) {
+		svr := newPostFlushTestServer(&collectionInfo{
+			ID: 1,
+			Schema: &schemapb.CollectionSchema{
+				ExternalSource: "s3://external",
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, ExternalField: "pk_col"},
+				},
+			},
+		}, &datapb.SegmentInfo{
+			ID:           1,
+			CollectionID: 1,
+			PartitionID:  1,
+			State:        commonpb.SegmentState_Flushing,
+		})
+		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "true")
+		paramtable.Get().Save(Params.DataCoordCfg.EnableCompaction.Key, "true")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableCompaction.Key)
+		drainBuildIndexChForTest()
+		defer drainBuildIndexChForTest()
+		drainStatsTaskChForTest()
+		defer drainStatsTaskChForTest()
+
+		err := svr.postFlush(context.Background(), 1)
+		assert.NoError(t, err)
+		assertBuildIndexEvents(t, 1)
+		assertNoStatsTaskEvent(t)
 	})
 }
 
@@ -2818,12 +2907,14 @@ func TestServer_initServiceDiscovery_BindIndexNodeDoesNotAffectQueryNodePathVers
 }
 
 func Test_CheckHealth(t *testing.T) {
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(449684528748778322, &collectionInfo{
-		ID:            449684528748778322,
-		VChannelNames: []string{"ch1", "ch2"},
-	})
-	collections.Insert(2, nil)
+	newHealthStore := func() metacache.MetaStore {
+		store := metacache.NewMetaStore(nil)
+		store.PutCollection(&collectionInfo{
+			ID:            449684528748778322,
+			VChannelNames: []string{"ch1", "ch2"},
+		})
+		return store
+	}
 
 	t.Run("not healthy", func(t *testing.T) {
 		ctx := context.Background()
@@ -2838,17 +2929,14 @@ func Test_CheckHealth(t *testing.T) {
 	t.Run("check checkpoint fail", func(t *testing.T) {
 		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.meta = &meta{
-			collections: collections,
-			channelCPs: &channelCPs{
-				checkpoints: map[string]*msgpb.MsgPosition{
-					"cluster-id-rootcoord-dm_3_449684528748778322v0": {
-						Timestamp: tsoutil.ComposeTSByTime(time.Now().Add(-1000 * time.Hour)),
-						MsgID:     []byte{1, 2, 3, 4},
-					},
-				},
+		store := newHealthStore()
+		store.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
+			"cluster-id-rootcoord-dm_3_449684528748778322v0": {
+				Timestamp: tsoutil.ComposeTSByTime(time.Now().Add(-1000 * time.Hour)),
+				MsgID:     []byte{1, 2, 3, 4},
 			},
-		}
+		})
+		svr.meta = &meta{metaStore: store}
 
 		ctx := context.Background()
 		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
@@ -2860,25 +2948,22 @@ func Test_CheckHealth(t *testing.T) {
 	t.Run("ok", func(t *testing.T) {
 		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.meta = &meta{
-			collections: collections,
-			channelCPs: &channelCPs{
-				checkpoints: map[string]*msgpb.MsgPosition{
-					"cluster-id-rootcoord-dm_3_449684528748778322v0": {
-						Timestamp: tsoutil.ComposeTSByTime(time.Now()),
-						MsgID:     []byte{1, 2, 3, 4},
-					},
-					"cluster-id-rootcoord-dm_3_449684528748778323v0": {
-						Timestamp: tsoutil.ComposeTSByTime(time.Now()),
-						MsgID:     []byte{1, 2, 3, 4},
-					},
-					"invalid-vchannel-name": {
-						Timestamp: tsoutil.ComposeTSByTime(time.Now()),
-						MsgID:     []byte{1, 2, 3, 4},
-					},
-				},
+		store := newHealthStore()
+		store.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
+			"cluster-id-rootcoord-dm_3_449684528748778322v0": {
+				Timestamp: tsoutil.ComposeTSByTime(time.Now()),
+				MsgID:     []byte{1, 2, 3, 4},
 			},
-		}
+			"cluster-id-rootcoord-dm_3_449684528748778323v0": {
+				Timestamp: tsoutil.ComposeTSByTime(time.Now()),
+				MsgID:     []byte{1, 2, 3, 4},
+			},
+			"invalid-vchannel-name": {
+				Timestamp: tsoutil.ComposeTSByTime(time.Now()),
+				MsgID:     []byte{1, 2, 3, 4},
+			},
+		})
+		svr.meta = &meta{metaStore: store}
 		ctx := context.Background()
 		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
@@ -2939,7 +3024,7 @@ func TestLoadCollectionFromRootCoord(t *testing.T) {
 	broker := broker.NewMockBroker(t)
 	s := &Server{
 		broker: broker,
-		meta:   &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()},
+		meta:   newEmptyTestMeta(),
 	}
 
 	t.Run("has collection fail with error", func(t *testing.T) {
@@ -2980,9 +3065,9 @@ func TestLoadCollectionFromRootCoord(t *testing.T) {
 	t.Run("ok", func(t *testing.T) {
 		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
 		assert.NoError(t, err)
-		assert.Equal(t, 1, s.meta.collections.Len())
-		_, ok := s.meta.collections.Get(1)
-		assert.True(t, ok)
+		assert.Equal(t, 1, len(s.meta.ListCollections()))
+		coll := s.meta.GetCollection(1)
+		assert.NotNil(t, coll)
 	})
 }
 
@@ -3059,12 +3144,14 @@ func TestServer_InitMessageCallback(t *testing.T) {
 	snmanager.ResetStreamingNodeManager()
 	balance.Register(mb)
 
+	ms := metacache.NewMetaStore(nil)
 	server := &Server{
 		ctx: ctx,
 		meta: &meta{
 			catalog:      mockCatalog,
 			chunkManager: mockChunkManager,
-			segments:     NewSegmentsInfo(),
+			metaStore:    ms,
+			segments:     NewSegmentsInfo(ms),
 		},
 		importMeta:     &importMeta{},
 		segmentManager: mockManager,

@@ -259,19 +259,31 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 				m.handleTicker(ctx, TargetTicker)
 			}
 		case segID := <-getStatsTaskChSingleton():
-			log.Info(ctx, "receive new segment to trigger sort compaction", mlog.Int64("segmentID", segID))
-			view := m.singlePolicy.triggerSegmentSortCompaction(ctx, segID)
-			if view == nil {
-				log.Warn(ctx, "segment no need to do sort compaction", mlog.Int64("segmentID", segID))
-				continue
-			}
-			if m.meta.GetSegment(ctx, segID) == nil {
-				log.Warn(ctx, "segment not found", mlog.Int64("segmentID", segID))
-				continue
-			}
-			m.notify(ctx, TriggerTypeSort, []CompactionView{view})
+			m.handleSortSignal(ctx, segID)
 		}
 	}
+}
+
+// handleSortSignal submits the sort compaction of a segment sent to the stats
+// task channel after its flush, or by the clustering compaction that wrote it.
+func (m *CompactionTriggerManager) handleSortSignal(ctx context.Context, segID int64) {
+	mlog.Info(ctx, "receive new segment to trigger sort compaction", mlog.Int64("segmentID", segID))
+	view := m.singlePolicy.triggerSegmentSortCompaction(ctx, segID)
+	if view == nil {
+		mlog.Warn(ctx, "segment no need to do sort compaction", mlog.Int64("segmentID", segID))
+		return
+	}
+	segment := m.meta.GetSegment(ctx, segID)
+	if segment == nil {
+		mlog.Warn(ctx, "segment not found", mlog.Int64("segmentID", segID))
+		return
+	}
+	// A clustering compaction writes its outputs invisible and holds its task
+	// until they are sorted, so capping their sorts could deadlock it. A capped
+	// sort of a flushed segment is left to the sort sweep, so it is capped only
+	// while the sweep runs.
+	clusteringOutput := segment.GetIsInvisible() && segment.GetCreatedByCompaction()
+	m.notify(ctx, TriggerTypeSort, []CompactionView{view}, !clusteringOutput && m.singlePolicy.Enable())
 }
 
 func (m *CompactionTriggerManager) handleTicker(ctx context.Context, tickerType TickerType) {
@@ -296,11 +308,13 @@ func (m *CompactionTriggerManager) handleTicker(ctx context.Context, tickerType 
 		mlog.Warn(ctx, "Fail to trigger policy", mlog.String("policy", policy.Name()), mlog.Err(err))
 		return
 	}
+	// Submit sorts first: mix compaction and index builds only take sorted segments.
+	m.notify(ctx, TriggerTypeSort, events[TriggerTypeSort], true)
 	for triggerType, views := range events {
-		if len(views) == 0 {
+		if triggerType == TriggerTypeSort || len(views) == 0 {
 			continue
 		}
-		m.notify(ctx, triggerType, views)
+		m.notify(ctx, triggerType, views, true)
 	}
 }
 
@@ -349,7 +363,7 @@ func (m *CompactionTriggerManager) ManualTrigger(ctx context.Context, req *milvu
 	}
 	if len(events) > 0 {
 		for triggerType, views := range events {
-			m.notify(ctx, triggerType, views)
+			m.notify(ctx, triggerType, views, false)
 		}
 	}
 	return triggerID, nil
@@ -411,13 +425,20 @@ func (m *CompactionTriggerManager) triggerViewForCompaction(ctx context.Context,
 	}
 }
 
-func (m *CompactionTriggerManager) notify(ctx context.Context, eventType CompactionTriggerType, views []CompactionView) {
+// notify submits the views of one trigger type. When capped, it stops once the
+// inspector is full and leaves the rest to later runs.
+func (m *CompactionTriggerManager) notify(ctx context.Context, eventType CompactionTriggerType, views []CompactionView, capped bool) {
 	log := mlog.With()
 	log.Debug(ctx, "Start to trigger compactions", mlog.String("eventType", eventType.String()))
 	for _, view := range views {
 		outViews, reason := m.triggerViewForCompaction(ctx, eventType, view)
 		for _, outView := range outViews {
 			if outView != nil {
+				if capped && m.inspector.isFull() {
+					log.RatedInfo(ctx, rate.Limit(1), "Stop submitting compactions since inspector is full",
+						mlog.String("eventType", eventType.String()))
+					return
+				}
 				log.Info(ctx, "Success to trigger a compaction, try to submit",
 					mlog.String("eventType", eventType.String()),
 					mlog.String("reason", reason),

@@ -20,10 +20,11 @@ set -e
 
 mkdir -p "$GOPATH/bin" && cp -f "$PWD/bin/milvus" "$GOPATH/bin/milvus"
 mkdir -p "$LIBRARY_PATH"
-cp $PWD"/internal/core/output/lib/"*.dylib* "$LIBRARY_PATH" 2>/dev/null || true
-cp $PWD"/internal/core/output/lib/"*.so* "$LIBRARY_PATH" || true
-cp $PWD"/internal/core/output/lib64/"*.so* "$LIBRARY_PATH" 2>/dev/null || true
-cp -r $PWD"/internal/core/output/lib/ossl-modules" "$LIBRARY_PATH" 2>/dev/null || true
+# Preserve linker and SONAME aliases instead of duplicating their library payloads.
+cp -a "$PWD"/internal/core/output/lib/*.dylib* "$LIBRARY_PATH" 2>/dev/null || true
+cp -a "$PWD"/internal/core/output/lib/*.so* "$LIBRARY_PATH" || true
+cp -a "$PWD"/internal/core/output/lib64/*.so* "$LIBRARY_PATH" 2>/dev/null || true
+cp -r "$PWD/internal/core/output/lib/ossl-modules" "$LIBRARY_PATH" 2>/dev/null || true
 
 PYUDF_WHEEL_DIR="$PWD/cmake_build/runtime/pyudf/wheels"
 PYUDF_RUNTIME_DIR="$LIBRARY_PATH/pyudf"

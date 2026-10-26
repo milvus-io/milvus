@@ -1663,6 +1663,30 @@ func TestMeta_FinishTaskIndexStorePathVersion(t *testing.T) {
 		return m
 	}
 
+	t.Run("failed result without worker payload preserves dispatched layout", func(t *testing.T) {
+		m := setup(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED, nil)
+		err := m.FinishTask(&workerpb.IndexTaskInfo{BuildID: buildID, State: commonpb.IndexState_Failed, FailReason: "worker lost"})
+		assert.NoError(t, err)
+		stored, ok := m.segmentBuildInfo.Get(buildID)
+		assert.True(t, ok)
+		assert.Equal(t, commonpb.IndexState_Failed, stored.IndexState)
+		assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED, stored.IndexStorePathVersion)
+	})
+
+	t.Run("segment rooted result cannot fall back to older layouts", func(t *testing.T) {
+		for _, actual := range []indexpb.IndexStorePathVersion{0, 1} {
+			m := setup(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED, nil)
+			err := m.FinishTask(&workerpb.IndexTaskInfo{
+				BuildID: buildID, State: commonpb.IndexState_Finished,
+				IndexFileKeys: []string{"index.bin"}, IndexStorePathVersion: actual,
+			})
+			assert.Error(t, err)
+			stored, ok := m.segmentBuildInfo.Get(buildID)
+			assert.True(t, ok)
+			assert.Equal(t, commonpb.IndexState_InProgress, stored.IndexState)
+		}
+	})
+
 	t.Run("actual lower than requested persists actual version", func(t *testing.T) {
 		m := setup(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, []string{"old-file"})
 
@@ -1928,6 +1952,80 @@ func TestIndexMeta_GetUnindexedSegments(t *testing.T) {
 	// no index
 	unindexed = m.indexMeta.GetUnindexedSegments(collID+1, segmentIDs)
 	assert.Equal(t, 0, len(unindexed))
+}
+
+func TestIndexMeta_GetUnIndexedSegmentIDsForIndexTask(t *testing.T) {
+	const (
+		segWithNoIndex       = UniqueID(1000)
+		segWithPartialIndex  = UniqueID(1001)
+		segWithCompleteIndex = UniqueID(1002)
+	)
+	m := &indexMeta{
+		segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			collID: {
+				indexID: {
+					CollectionID: collID,
+					FieldID:      fieldID,
+					IndexID:      indexID,
+				},
+				indexID + 1: {
+					CollectionID: collID,
+					FieldID:      fieldID + 1,
+					IndexID:      indexID + 1,
+				},
+			},
+			collID + 1: {
+				indexID + 2: {
+					CollectionID: collID + 1,
+					FieldID:      fieldID + 2,
+					IndexID:      indexID + 2,
+				},
+			},
+			collID + 3: {
+				indexID + 3: {
+					CollectionID: collID + 3,
+					FieldID:      fieldID + 3,
+					IndexID:      indexID + 3,
+					IsDeleted:    true,
+				},
+			},
+		},
+	}
+	partial := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	partial.Insert(indexID, &model.SegmentIndex{
+		CollectionID: collID,
+		SegmentID:    segWithPartialIndex,
+		IndexID:      indexID,
+	})
+	m.segmentIndexes.Insert(segWithPartialIndex, partial)
+	complete := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	complete.Insert(indexID, &model.SegmentIndex{
+		CollectionID: collID,
+		SegmentID:    segWithCompleteIndex,
+		IndexID:      indexID,
+	})
+	complete.Insert(indexID+1, &model.SegmentIndex{
+		CollectionID: collID,
+		SegmentID:    segWithCompleteIndex,
+		IndexID:      indexID + 1,
+	})
+	m.segmentIndexes.Insert(segWithCompleteIndex, complete)
+
+	unindexed := m.GetUnIndexedSegmentIDsForIndexTask(collID, []UniqueID{
+		segWithNoIndex,
+		segWithPartialIndex,
+		segWithCompleteIndex,
+	})
+	assert.True(t, unindexed.Contain(segWithNoIndex))
+	assert.True(t, unindexed.Contain(segWithPartialIndex))
+	assert.False(t, unindexed.Contain(segWithCompleteIndex))
+
+	unindexed = m.GetUnIndexedSegmentIDsForIndexTask(collID+2, []UniqueID{segWithNoIndex})
+	assert.Empty(t, unindexed)
+
+	unindexed = m.GetUnIndexedSegmentIDsForIndexTask(collID+3, []UniqueID{segWithNoIndex})
+	assert.Empty(t, unindexed)
 }
 
 func TestBuildIndexTaskStatsJSON(t *testing.T) {

@@ -101,6 +101,21 @@ func normalizeFieldDataValidData(fieldData *schemapb.FieldData) {
 		return
 	}
 
+	// Older SDKs omit the sparse payload for an all-null batch. Materialize
+	// its empty container before moving legacy validity into VectorField,
+	// otherwise the default branch below discards the only null information.
+	// Keep the bitmap unchanged: row alignment still rejects missing vectors
+	// when any bit is true.
+	if fieldData.Field == nil && fieldData.GetType() == schemapb.DataType_SparseFloatVector && len(fieldData.GetValidData()) > 0 {
+		fieldData.Field = &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Data: &schemapb.VectorField_SparseFloatVector{
+					SparseFloatVector: &schemapb.SparseFloatArray{},
+				},
+			},
+		}
+	}
+
 	switch fieldData.Field.(type) {
 	case *schemapb.FieldData_Scalars, *schemapb.FieldData_Vectors:
 		if validData := GetFieldDataValidData(fieldData); len(validData) > 0 {
@@ -290,4 +305,50 @@ func (b *FieldDataBuilder) Build() *schemapb.FieldData {
 		SetFieldDataValidData(field, b.valid)
 	}
 	return field
+}
+
+// CopyFieldDataMetadata copies field wrappers for consumer-local normalization.
+// Column values and validity bitmap backing arrays remain borrowed read-only.
+// Preserve both validity locations so conflicting input is still rejected by
+// ValidateAndNormalizeFieldDataValidData instead of being silently repaired.
+func CopyFieldDataMetadata(fields []*schemapb.FieldData) []*schemapb.FieldData {
+	if fields == nil {
+		return nil
+	}
+	result := make([]*schemapb.FieldData, len(fields))
+	for i, src := range fields {
+		if src == nil {
+			continue
+		}
+		dst := &schemapb.FieldData{
+			Type: src.Type, FieldName: src.FieldName, FieldId: src.FieldId,
+			IsDynamic: src.IsDynamic, ValidData: src.ValidData,
+		}
+		switch field := src.Field.(type) {
+		case *schemapb.FieldData_Scalars:
+			var scalar *schemapb.ScalarField
+			if field.Scalars != nil {
+				scalar = &schemapb.ScalarField{Data: field.Scalars.Data, ValidData: field.Scalars.ValidData}
+				scalar.ProtoReflect().SetUnknown(slices.Clone(field.Scalars.ProtoReflect().GetUnknown()))
+			}
+			dst.Field = &schemapb.FieldData_Scalars{Scalars: scalar}
+		case *schemapb.FieldData_Vectors:
+			var vector *schemapb.VectorField
+			if field.Vectors != nil {
+				vector = &schemapb.VectorField{Dim: field.Vectors.Dim, Data: field.Vectors.Data, ValidData: field.Vectors.ValidData}
+				vector.ProtoReflect().SetUnknown(slices.Clone(field.Vectors.ProtoReflect().GetUnknown()))
+			}
+			dst.Field = &schemapb.FieldData_Vectors{Vectors: vector}
+		case *schemapb.FieldData_StructArrays:
+			var array *schemapb.StructArrayField
+			if field.StructArrays != nil {
+				array = &schemapb.StructArrayField{Fields: CopyFieldDataMetadata(field.StructArrays.Fields)}
+				array.ProtoReflect().SetUnknown(slices.Clone(field.StructArrays.ProtoReflect().GetUnknown()))
+			}
+			dst.Field = &schemapb.FieldData_StructArrays{StructArrays: array}
+		}
+		dst.ProtoReflect().SetUnknown(slices.Clone(src.ProtoReflect().GetUnknown()))
+		result[i] = dst
+	}
+	return result
 }
