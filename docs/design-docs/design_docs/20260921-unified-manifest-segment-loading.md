@@ -444,6 +444,13 @@ reserved for existing helpers reconstructing already-known column groups;
 production generic exploration always resolves it before creating segments.
 `milvus-table` keeps its existing source-manifest inventory and numeric mapping.
 
+Creation of ordinary external collections rejects `external_field` mappings
+consisting entirely of ASCII digits. Such source names could otherwise be
+mistaken for internal field IDs after a mapping is dropped while an older
+manifest is still loaded. This creation-time restriction exempts `milvus-table`
+and does not apply to internally generated function output columns. It does not
+retroactively validate existing collections or change schema-alter validation.
+
 User-visible costs and boundaries:
 
 - Refresh needs extra file-schema metadata reads, including files with known row
