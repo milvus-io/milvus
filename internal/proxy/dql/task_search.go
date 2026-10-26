@@ -7,12 +7,14 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"go.opentelemetry.io/otel"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -38,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
+	"github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -121,6 +124,9 @@ type SearchTask struct {
 	resultBuf              *typeutil.ConcurrentSet[*internalpb.SearchResults]
 	reducedResult          *milvuspb.SearchResults
 	reducedMetricType      string
+	reducedSubResults      []*milvuspb.SearchResults
+	reducedSubMetrics      []string
+	reducedFeatureBits     uint64
 
 	partitionIDsSet *typeutil.ConcurrentSet[UniqueID]
 
@@ -1556,10 +1562,6 @@ func (t *SearchTask) Execute(ctx context.Context) error {
 }
 
 func (t *SearchTask) executeByQueryView(ctx context.Context) error {
-	fields, err := translateToOutputFieldIDs(t.requeryOutputFields(), t.schema.CollectionSchema)
-	if err != nil {
-		return err
-	}
 	if t.resultBuf == nil {
 		t.resultBuf = typeutil.NewConcurrentSet[*internalpb.SearchResults]()
 	}
@@ -1581,10 +1583,9 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		result, err := legacy.Search(ctx, &queryclient.LegacySearchRequest{
-			Req:              searchRequest,
-			RequiredFieldIDs: fields,
-			BarrierMVCC:      t.MvccTimestamp,
-			AllowStreaming:   allowStreaming,
+			Req:            searchRequest,
+			BarrierMVCC:    t.MvccTimestamp,
+			AllowStreaming: allowStreaming,
 		})
 		if err != nil {
 			if ctx.Err() != nil {
@@ -1594,12 +1595,12 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 				lastErr = err
 				continue
 			}
-			return queryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), err)
+			return QueryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), err)
 		}
 		if result == nil {
 			return merr.WrapErrServiceInternalMsg("QueryView Search returned a nil result")
 		}
-		if result.Stream == nil {
+		if result.Stream == nil && result.SubStreams == nil {
 			for _, searchResult := range result.Results {
 				t.resultBuf.Insert(searchResult)
 			}
@@ -1609,10 +1610,12 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 
 		queryChannelsTs := make(map[string]uint64)
 		var relatedDataSize int64
+		var featureBits uint64
 		var isTopkReduce, isRecallEvaluation bool
 		storageCost := segcore.StorageCost{}
 		metricType := t.GetMetricType()
 		collectMetadata := func(r *internalpb.SearchResults) {
+			featureBits |= r.GetFeatureBits()
 			isTopkReduce = isTopkReduce || r.GetIsTopkReduce()
 			isRecallEvaluation = isRecallEvaluation || r.GetIsRecallEvaluation()
 			relatedDataSize += r.GetCostAggregation().GetTotalRelatedDataSize()
@@ -1623,9 +1626,21 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 			storageCost.ScannedTotalBytes += r.GetScannedTotalBytes()
 		}
 
-		reducedResult, reducedMetricType, recvErr := t.consumeResultStream(result.Stream, metricType, collectMetadata)
+		for _, plan := range result.Plans {
+			queryChannelsTs[plan.ShardID.VChannel] = max(plan.Mvcc.GetGrowingTimetick(), plan.Mvcc.GetTransformingTimetick())
+		}
+		var reducedResult *milvuspb.SearchResults
+		var reducedMetricType string
+		var reducedSubResults []*milvuspb.SearchResults
+		var reducedSubMetrics []string
+		var recvErr, closeErr error
+		if result.SubStreams != nil {
+			reducedSubResults, reducedSubMetrics, recvErr = t.consumeHybridResultStreams(result.SubStreams, collectMetadata)
+		} else {
+			reducedResult, reducedMetricType, recvErr = t.consumeResultStream(result.Stream, searchRequest, metricType, collectMetadata)
+			closeErr = result.Stream.Close()
+		}
 		retryable := recvErr != nil && viewerror.AsViewError(recvErr).IsRetryable()
-		closeErr := result.Stream.Close()
 		if recvErr != nil {
 			attemptErr := merr.Combine(recvErr, closeErr)
 			if ctx.Err() != nil {
@@ -1635,7 +1650,7 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 				lastErr = attemptErr
 				continue
 			}
-			return queryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), attemptErr)
+			return QueryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), attemptErr)
 		}
 		if closeErr != nil {
 			return closeErr
@@ -1643,6 +1658,8 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 
 		t.reducedResult = reducedResult
 		t.reducedMetricType = reducedMetricType
+		t.reducedSubResults, t.reducedSubMetrics = reducedSubResults, reducedSubMetrics
+		t.reducedFeatureBits = featureBits
 		t.queryChannelsTs = queryChannelsTs
 		t.relatedDataSize = relatedDataSize
 		t.isTopkReduce = isTopkReduce
@@ -1651,14 +1668,36 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 		t.queryViewPlans = append([]queryclient.ShardPlan{}, result.Plans...)
 		return nil
 	}
-	return queryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), lastErr)
+	return QueryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), lastErr)
 }
 
 func (t *SearchTask) supportsStreamingReduce() bool {
 	req := t.SearchRequest
-	if req == nil ||
-		req.GetIsAdvanced() ||
-		len(req.GetSubReqs()) > 0 {
+	if req == nil {
+		return false
+	}
+	if req.GetIsAdvanced() {
+		if _, legacyFusion := t.rerankMeta.(*legacyRerankMeta); !legacyFusion ||
+			req.GetIsIterator() || t.aggCtx != nil || t.hybridElementLevel ||
+			req.GetGroupByFieldId() > 0 || len(req.GetGroupByFieldIds()) > 0 ||
+			len(t.orderByFields) > 0 || len(req.GetSubReqs()) == 0 {
+			return false
+		}
+		for _, info := range t.hybridSubSearchInfos {
+			if info.Kind != hybridSubSearchNormal {
+				return false
+			}
+		}
+		for _, sub := range req.GetSubReqs() {
+			if sub == nil || sub.GetGroupByFieldId() > 0 ||
+				(sub.GetSearchType() != internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER &&
+					sub.GetSearchType() != internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER) {
+				return false
+			}
+		}
+		return true
+	}
+	if len(req.GetSubReqs()) > 0 {
 		return false
 	}
 	if t.aggCtx != nil {
@@ -1828,37 +1867,38 @@ func appendFinalSearchChunk(
 
 func (t *SearchTask) consumeResultStream(
 	stream searchutil.ReduceStream,
+	request *internalpb.SearchRequest,
 	metricType string,
 	collectMetadata func(*internalpb.SearchResults),
 ) (*milvuspb.SearchResults, string, error) {
-	offset := t.GetOffset()
-	limit := t.GetTopk() - offset
-	groupByFieldIDs := t.GetGroupByFieldIds()
-	if len(groupByFieldIDs) == 0 && t.GetGroupByFieldId() > 0 {
-		groupByFieldIDs = []int64{t.GetGroupByFieldId()}
+	offset := request.GetOffset()
+	limit := request.GetTopk() - offset
+	groupByFieldIDs := request.GetGroupByFieldIds()
+	if len(groupByFieldIDs) == 0 && request.GetGroupByFieldId() > 0 {
+		groupByFieldIDs = []int64{request.GetGroupByFieldId()}
 	}
 	if len(groupByFieldIDs) > 0 {
 		offset = 0 // The final ReduceStream applies group offset before emitting hits.
 		if len(t.orderByFields) > 0 {
-			limit = t.GetTopk()
+			limit = request.GetTopk()
 		}
-		limit *= max(1, t.GetGroupSize())
+		limit *= max(1, request.GetGroupSize())
 	} else if len(t.orderByFields) > 0 {
 		offset = 0
-		limit = t.GetTopk()
+		limit = request.GetTopk()
 	}
 	if limit <= 0 {
 		return nil, metricType, merr.WrapErrServiceInternalMsg("invalid final Search limit %d", limit)
 	}
 
 	data := &schemapb.SearchResultData{
-		NumQueries: t.GetNq(),
+		NumQueries: request.GetNq(),
 		TopK:       limit,
 		Ids:        &schemapb.IDs{},
-		Scores:     make([]float32, 0, t.GetNq()*limit),
-		Topks:      make([]int64, t.GetNq()),
+		Scores:     make([]float32, 0, request.GetNq()*limit),
+		Topks:      make([]int64, request.GetNq()),
 	}
-	seenPerQuery := make([]int64, t.GetNq())
+	seenPerQuery := make([]int64, request.GetNq())
 	var resultSize int64
 	for {
 		chunk, recvErr := stream.Recv()
@@ -1919,6 +1959,64 @@ func (t *SearchTask) consumeResultStream(
 		Status:  merr.Success(),
 		Results: data,
 	}, metricType, nil
+}
+
+func (t *SearchTask) consumeHybridResultStreams(
+	streams []searchutil.ReduceStream,
+	collectMetadata func(*internalpb.SearchResults),
+) (results []*milvuspb.SearchResults, metrics []string, err error) {
+	var closeOnce, failOnce sync.Once
+	var closeErr, receiveErr error
+	closeStreams := func() {
+		closeOnce.Do(func() {
+			for _, stream := range streams {
+				if stream != nil {
+					closeErr = merr.Combine(closeErr, stream.Close())
+				}
+			}
+		})
+	}
+	defer func() {
+		closeStreams()
+		err = merr.Combine(err, closeErr)
+	}()
+	requests, err := viewquery.BuildSubSearchRequests(t.SearchRequest)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(streams) != len(requests) {
+		return nil, nil, merr.WrapErrServiceInternalMsg("Hybrid result stream count does not match sub-search count")
+	}
+	for _, stream := range streams {
+		if stream == nil {
+			return nil, nil, merr.WrapErrServiceInternalMsg("Hybrid result contains a nil sub-search stream")
+		}
+	}
+	results = make([]*milvuspb.SearchResults, len(streams))
+	metrics = make([]string, len(streams))
+	var metadataMu sync.Mutex
+	var group errgroup.Group
+	for index, stream := range streams {
+		group.Go(func() error {
+			var recvErr error
+			results[index], metrics[index], recvErr = t.consumeResultStream(stream, requests[index], requests[index].GetMetricType(), func(chunk *internalpb.SearchResults) {
+				metadataMu.Lock()
+				defer metadataMu.Unlock()
+				collectMetadata(chunk)
+			})
+			if recvErr != nil {
+				failOnce.Do(func() {
+					receiveErr = recvErr
+					closeStreams()
+				})
+			}
+			return recvErr
+		})
+	}
+	if group.Wait() != nil {
+		return nil, nil, receiveErr
+	}
+	return results, metrics, nil
 }
 
 // regroupFinalSearchResult arranges already-selected hits by group without ranking them again.
@@ -2032,7 +2130,7 @@ func (t *SearchTask) PostExecute(ctx context.Context) error {
 	}()
 	log := mlog.With(mlog.Int64("nq", t.GetNq()))
 
-	var execBits uint64
+	execBits := t.reducedFeatureBits
 	isTopkReduce := t.isTopkReduce
 	isRecallEvaluation := t.isRecallEvaluation
 	storageCost := t.storageCost
@@ -2057,12 +2155,14 @@ func (t *SearchTask) PostExecute(ctx context.Context) error {
 	}
 
 	var (
-		toReduceResults []*internalpb.SearchResults
-		reducedResult   = t.reducedResult
-		err             error
+		toReduceResults   []*internalpb.SearchResults
+		reducedResult     = t.reducedResult
+		reducedSubResults = t.reducedSubResults
+		err               error
 	)
 	t.reducedResult = nil
-	if reducedResult == nil {
+	t.reducedSubResults = nil
+	if reducedResult == nil && reducedSubResults == nil {
 		t.queryChannelsTs = make(map[string]uint64)
 		t.relatedDataSize = 0
 		isTopkReduce = false
@@ -2104,7 +2204,12 @@ func (t *SearchTask) PostExecute(ctx context.Context) error {
 	}
 	if reducedResult != nil {
 		fillFieldNames(t.schema.CollectionSchema, reducedResult.GetResults())
-		t.result, t.storageCost, err = pipeline.RunFromReduced(ctx, sp, reducedResult, metricType, storageCost)
+		t.result, t.storageCost, err = pipeline.RunFromReduced(ctx, sp, []*milvuspb.SearchResults{reducedResult}, []string{metricType}, storageCost)
+	} else if reducedSubResults != nil {
+		for _, result := range reducedSubResults {
+			fillFieldNames(t.schema.CollectionSchema, result.GetResults())
+		}
+		t.result, t.storageCost, err = pipeline.RunFromReduced(ctx, sp, reducedSubResults, t.reducedSubMetrics, storageCost)
 	} else {
 		t.result, t.storageCost, err = pipeline.Run(ctx, sp, toReduceResults, storageCost)
 	}

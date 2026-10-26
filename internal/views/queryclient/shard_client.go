@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/queryclient/reducer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
+	"github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -29,8 +30,8 @@ import (
 // It owns replica resolution, consistency routing, Phase 1 (GetQueryPlan),
 // Phase 2 (SearchOnView/QueryOnView) dispatch, and shard-level retry.
 //
-// Search and Query use the existing batch executeShard path. SearchStream opens
-// the request-scoped per-vchannel ReduceStream used by iterator Search.
+// Search and Query use the existing batch executeShard path. SearchStreams
+// opens one request-scoped per-vchannel ReduceStream per Search sub-request.
 type shardViewQueryClient struct {
 	queryHook          optimizers.QueryHook
 	maxRetries         int
@@ -66,12 +67,12 @@ type ShardSearchRequest struct {
 
 // ShardQueryRequest contains the parameters for a shard-level query (retrieve) execution.
 type ShardQueryRequest struct {
-	VChannel       string
-	Req            *internalpb.RetrieveRequest
-	Schema         *schemapb.CollectionSchema
-	MVCC           *viewpb.QueryPlanMVCC
-	BarrierMVCC    uint64
-	Reducer        reducer.RetrieveResultReducer
+	VChannel    string
+	Req         *internalpb.RetrieveRequest
+	Schema      *schemapb.CollectionSchema
+	MVCC        *viewpb.QueryPlanMVCC
+	BarrierMVCC uint64
+	Reducer     reducer.RetrieveResultReducer
 }
 
 // Search executes Phase 1 + Phase 2 for a single shard's search.
@@ -118,15 +119,15 @@ func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchReque
 	})
 }
 
-// SearchStream opens the SN/QN child streams for one vchannel and returns the
-// request-scoped ReduceStream without consuming its output.
-func (s *shardViewQueryClient) SearchStream(
+// SearchStreams returns one per-vchannel ReduceStream per sub-search, or one
+// stream for ordinary Search. All streams share the same optimized QueryPlan.
+func (s *shardViewQueryClient) SearchStreams(
 	ctx context.Context,
 	req *ShardSearchRequest,
 	chunkBytes int,
-) (searchutil.ReduceStream, *ShardPlan, error) {
+) ([]searchutil.ReduceStream, *ShardPlan, error) {
 	if req == nil || req.Req == nil {
-		return nil, nil, merr.WrapErrServiceInternalMsg("SearchStream requires a Search request")
+		return nil, nil, merr.WrapErrServiceInternalMsg("SearchStreams requires a Search request")
 	}
 	if ctx.Err() != nil {
 		return nil, nil, ctx.Err()
@@ -134,10 +135,9 @@ func (s *shardViewQueryClient) SearchStream(
 
 	targetShardID := qviews.ShardID{ReplicaID: qviews.UnknownReplicaID, VChannel: req.VChannel}
 	planReq := &viewpb.GetQueryPlanRequest{
-		CollectionId:     req.Req.GetCollectionID(),
-		ShardId:          targetShardID.IntoProto(),
-		PartitionIds:     req.Req.GetPartitionIDs(),
-		RequiredFieldIds: req.RequiredFieldIDs,
+		CollectionId: req.Req.GetCollectionID(),
+		ShardId:      targetShardID.IntoProto(),
+		PartitionIds: req.Req.GetPartitionIDs(),
 		Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{
 			LegacySearchRequest: req.Req,
 		},
@@ -153,44 +153,65 @@ func (s *shardViewQueryClient) SearchStream(
 	if err := qviews.RestoreQueryPlanPayloads(plan, planReq); err != nil {
 		return nil, nil, err
 	}
+	requests := []*internalpb.SearchRequest{req.Req}
+	plannedRequests := []*internalpb.SearchRequest{plan.GetLegacySearchRequest()}
+	if req.Req.GetIsAdvanced() {
+		requests, err = viewquery.BuildSubSearchRequests(req.Req)
+		if err != nil {
+			return nil, nil, err
+		}
+		plannedRequests, err = viewquery.BuildSubSearchRequests(plan.GetLegacySearchRequest())
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(requests) != len(plannedRequests) {
+			return nil, nil, merr.WrapErrServiceInternalMsg("Hybrid QueryPlan changed the sub-search count")
+		}
+	}
 
 	shardID := qviews.FromProtoShardID(plan.ShardId)
 	workNodes := workNodesFromPlan(plan)
-	childStreams := make([]searchutil.ReduceStream, 0, len(workNodes))
-	for _, node := range workNodes {
-		childStream, openErr := s.queryServiceClient.SearchOnViewStream(ctx, node, &viewpb.SearchOnViewRequest{
-			LegacyReq:        legacySearchRequestForNode(plan, node),
-			ShardId:          shardID.IntoProto(),
-			Version:          plan.Version,
-			Mvcc:             plan.GetMvcc(),
-			StreamChunkBytes: int64(chunkBytes),
-		})
-		if openErr != nil {
-			err = openErr
-			break
+	streams := make([]searchutil.ReduceStream, 0, len(requests))
+	for index, request := range requests {
+		childStreams := make([]searchutil.ReduceStream, 0, len(workNodes))
+		skipped := req.Req.GetIsAdvanced() && plan.GetLegacySearchRequest().GetSubReqs()[index].GetSkip()
+		for _, node := range workNodes {
+			if skipped {
+				break
+			}
+			workerRequest := proto.Clone(plannedRequests[index]).(*internalpb.SearchRequest)
+			workerRequest.MvccTimestamp = legacyMVCCForNode(plan.GetMvcc(), node)
+			childStream, openErr := s.queryServiceClient.SearchOnViewStream(ctx, node, &viewpb.SearchOnViewRequest{
+				LegacyReq: workerRequest, ShardId: shardID.IntoProto(),
+				Version: plan.Version, Mvcc: plan.GetMvcc(), StreamChunkBytes: int64(chunkBytes),
+			})
+			if openErr != nil {
+				err = openErr
+				break
+			}
+			if childStream == nil {
+				err = merr.WrapErrServiceInternalMsg("SearchOnViewStream returned a nil stream for work node %s", node.String())
+				break
+			}
+			childStreams = append(childStreams, childStream)
 		}
-		if childStream == nil {
-			err = merr.WrapErrServiceInternalMsg("SearchOnViewStream returned a nil stream for work node %s", node.String())
-			break
+		var reducedStream searchutil.ReduceStream
+		if err == nil {
+			reducedStream, err = searchutil.NewShardReduceStream(request, childStreams, chunkBytes)
 		}
-		childStreams = append(childStreams, childStream)
-	}
-	if err != nil {
-		for _, childStream := range childStreams {
-			err = errors.Join(err, childStream.Close())
+		if err != nil {
+			for _, childStream := range childStreams {
+				err = errors.Join(err, childStream.Close())
+			}
+			for _, stream := range streams {
+				err = errors.Join(err, stream.Close())
+			}
+			return nil, nil, err
 		}
-		return nil, nil, err
+		streams = append(streams, reducedStream)
 	}
 
-	reducedStream, err := searchutil.NewShardReduceStream(req.Req, childStreams, chunkBytes)
-	if err != nil {
-		for _, childStream := range childStreams {
-			err = errors.Join(err, childStream.Close())
-		}
-		return nil, nil, err
-	}
-
-	return reducedStream, &ShardPlan{
+	return streams, &ShardPlan{
 		ShardID:   shardID,
 		Version:   plan.Version,
 		Mvcc:      plan.GetMvcc(),
@@ -253,10 +274,9 @@ func (s *shardViewQueryClient) QueryStream(
 	}
 	targetShardID := qviews.ShardID{ReplicaID: qviews.UnknownReplicaID, VChannel: req.VChannel}
 	planReq := &viewpb.GetQueryPlanRequest{
-		CollectionId:   req.Req.GetCollectionID(),
-		ShardId:        targetShardID.IntoProto(),
-		PartitionIds:   req.Req.GetPartitionIDs(),
-		ReadProofAfter: req.ReadProofAfter,
+		CollectionId: req.Req.GetCollectionID(),
+		ShardId:      targetShardID.IntoProto(),
+		PartitionIds: req.Req.GetPartitionIDs(),
 		Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{
 			LegacyRetrieveRequest: req.Req,
 		},

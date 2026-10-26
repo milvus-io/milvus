@@ -26,6 +26,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/reduce"
@@ -194,7 +195,7 @@ func TestSearchAggregationStreamingMatchesBatch(t *testing.T) {
 					require.NoError(t, err)
 					expected, _, err := pipeline.Run(ctx, span, batchShards, segcore.StorageCost{})
 					require.NoError(t, err)
-					actual, _, err := pipeline.RunFromReduced(ctx, span, task.reducedResult, metric, segcore.StorageCost{})
+					actual, _, err := pipeline.RunFromReduced(ctx, span, []*milvuspb.SearchResults{task.reducedResult}, []string{metric}, segcore.StorageCost{})
 					require.NoError(t, err)
 					require.True(t, proto.Equal(expected, actual), "Batch=%s\nStreaming=%s", expected, actual)
 					require.NoError(t, task.PostExecute(ctx))

@@ -113,7 +113,7 @@ func runGroupedSearchComparison(t *testing.T, request *internalpb.SearchRequest,
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, stream.Close()) })
 	task := &SearchTask{SearchRequest: request}
-	streamed, _, err := task.consumeResultStream(stream, request.GetMetricType(), func(*internalpb.SearchResults) {})
+	streamed, _, err := task.consumeResultStream(stream, request, request.GetMetricType(), func(*internalpb.SearchResults) {})
 	require.NoError(t, err)
 	require.True(t, proto.Equal(batch.GetResults(), streamed.GetResults()), "batch=%s\nstream=%s", batch.GetResults(), streamed.GetResults())
 	return streamed.GetResults()
