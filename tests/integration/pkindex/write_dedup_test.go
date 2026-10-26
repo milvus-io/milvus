@@ -38,13 +38,10 @@ import (
 
 // The suite writes the same primary keys twice and checks what a reader sees.
 // It turns on streaming.pkindex.enabled, so the streaming node deduplicates
-// them once the WAL recovery opens the index of a pchannel. Nothing opens it
-// yet, so the interceptor passes every write through and the suite would
-// fail. The suite is skipped until the recovery change, which removes the
-// skip.
+// them: the WAL recovery opens the index of the pchannel at the WAL open.
 //
-// TODO: the change that connects the index to the manifest service sets a
-// small handover size here and checks that a handover runs.
+// TODO: the change that connects the index to the manifest service removes
+// the skip, sets a small handover size here and checks that a handover runs.
 const (
 	dedupDim      = 8
 	dedupTagField = "tag"
@@ -61,7 +58,7 @@ func (s *WriteDedupSuite) SetupSuite() {
 }
 
 func TestWriteDedup(t *testing.T) {
-	t.Skip("the WAL recovery does not open the primary key index of a pchannel yet, so nothing deduplicates")
+	t.Skip("a streaming node with the primary key index on panics until the Committer is injected")
 	suite.Run(t, new(WriteDedupSuite))
 }
 
