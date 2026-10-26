@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math"
 	"path"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
@@ -98,11 +99,17 @@ type meta struct {
 	// channel checkpoints, file resources, and catalog persistence.
 	metaStore metacache.MetaStore
 
-	segMu    lock.RWMutex
 	segments *SegmentsInfo // segment id to segment info
+	// segmentLocks are the segment writer locks (see segment_locks.go). The
+	// Onces initialize them and segmentManifestLocks for a meta built without
+	// newMeta.
+	segmentLocks             *lock.KeyLock[int64]
+	segmentLocksOnce         sync.Once
+	segmentManifestLocksOnce sync.Once
 	// segmentManifestLocks serializes the full StorageV3 manifest commit for a
-	// segment. It must be acquired before segMu. Manifest I/O runs outside
-	// segMu; final full-record catalog and memory publication runs under segMu.
+	// segment. It must be acquired before the segment writer locks. Manifest
+	// I/O runs outside them; the final full-record catalog write and memory
+	// publication run under them.
 	segmentManifestLocks   *lock.KeyLock[int64]
 	copyResultLocksOnce    sync.Once
 	copyResultLocks        *lock.KeyLock[int64]
@@ -125,9 +132,12 @@ type meta struct {
 	// Snapshot Meta
 	snapshotMeta *snapshotMeta
 
+	// groupMu guards segmentChangeGroups and its reverse indexes. A write that
+	// also writes segments takes it after their writer locks.
+	groupMu sync.RWMutex
 	// segmentChangeGroups is the in-memory table of SegmentChangeGroup, keyed by
-	// groupID and guarded by segMu (the group record composes into the same
-	// catalog txn as segment writes, so it shares the segment lock). The reverse
+	// groupID and guarded by groupMu (the group record composes into the same
+	// catalog txn as segment writes). The reverse
 	// indexes map an ALIVE (STAGED/READY) group's referenced segments to their
 	// owning group for cheap "is this segment claimed" lookups and to enforce
 	// the anti-duplication invariant (an L1/L2 segment may be referenced — as a
@@ -241,6 +251,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		catalog:                  catalog,
 		metaStore:                metaStore,
 		segments:                 NewSegmentsInfo(metaStore),
+		segmentLocks:             lock.NewKeyLock[int64](),
 		segmentManifestLocks:     lock.NewKeyLock[int64](),
 		channelSync:              newChannelSync(),
 		chunkManager:             chunkManager,
@@ -536,8 +547,6 @@ func getBinlogFileCount(s *datapb.SegmentInfo) int {
 
 func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 	info := &metricsinfo.DataCoordQuotaMetrics{}
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
 	collectionBinlogSize := make(map[UniqueID]int64)
 	partitionBinlogSize := make(map[UniqueID]map[UniqueID]int64)
 	collectionRowsNum := make(map[UniqueID]map[commonpb.SegmentState]int64)
@@ -636,8 +645,6 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 }
 
 func (m *meta) GetAllCollectionNumRows() map[int64]int64 {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
 	ret := make(map[int64]int64)
 	segments := m.segments.GetSegments()
 	for _, segment := range segments {
@@ -651,8 +658,7 @@ func (m *meta) GetAllCollectionNumRows() map[int64]int64 {
 // AddSegment records segment info, persisting info into kv store
 func (m *meta) AddSegment(ctx context.Context, segment *SegmentInfo) error {
 	mlog.Info(ctx, "meta update: adding segment - Start", mlog.Int64("segmentID", segment.GetID()))
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
+	defer m.lockSegments(segment.GetID())()
 	if info := m.segments.GetSegment(segment.GetID()); info != nil {
 		mlog.Info(ctx, "segment is already exists, ignore the operation", mlog.Int64("segmentID", segment.ID))
 		return nil
@@ -671,8 +677,7 @@ func (m *meta) AddSegment(ctx context.Context, segment *SegmentInfo) error {
 // DropSegment remove segment with provided id, etcd persistence also removed
 func (m *meta) DropSegment(ctx context.Context, segmentID UniqueID) error {
 	mlog.Debug(ctx, "meta update: dropping segment", mlog.Int64("segmentID", segmentID))
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
+	defer m.lockSegments(segmentID)()
 	segment := m.segments.GetSegment(segmentID)
 	if segment == nil {
 		mlog.Warn(ctx, "meta update: dropping segment failed - segment not found",
@@ -694,8 +699,6 @@ func (m *meta) DropSegment(ctx context.Context, segmentID UniqueID) error {
 // GetHealthySegment returns segment info with provided id
 // if not segment is found, nil will be returned
 func (m *meta) GetHealthySegment(ctx context.Context, segID UniqueID) *SegmentInfo {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
 	segment := m.segments.GetSegment(segID)
 	if segment != nil && isSegmentHealthy(segment) {
 		return segment
@@ -705,11 +708,10 @@ func (m *meta) GetHealthySegment(ctx context.Context, segID UniqueID) *SegmentIn
 
 // Get segments By filter function
 func (m *meta) GetSegments(segIDs []UniqueID, filterFunc SegmentInfoSelector) []UniqueID {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
+	segments := m.segments.GetSegmentsByIDs(segIDs)
 	var result []UniqueID
 	for _, id := range segIDs {
-		segment := m.segments.GetSegment(id)
+		segment := segments[id]
 		if segment != nil && filterFunc(segment) {
 			result = append(result, id)
 		}
@@ -718,11 +720,10 @@ func (m *meta) GetSegments(segIDs []UniqueID, filterFunc SegmentInfoSelector) []
 }
 
 func (m *meta) GetSegmentInfos(segIDs []UniqueID) []*SegmentInfo {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
+	segments := m.segments.GetSegmentsByIDs(segIDs)
 	var result []*SegmentInfo
 	for _, id := range segIDs {
-		segment := m.segments.GetSegment(id)
+		segment := segments[id]
 		if segment != nil {
 			result = append(result, segment)
 		}
@@ -734,24 +735,19 @@ func (m *meta) GetSegmentInfos(segIDs []UniqueID) []*SegmentInfo {
 // include the unhealthy segment
 // if not segment is found, nil will be returned
 func (m *meta) GetSegment(ctx context.Context, segID UniqueID) *SegmentInfo {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
 	return m.segments.GetSegment(segID)
 }
 
 // GetAllSegmentsUnsafe returns all segments
 func (m *meta) GetAllSegmentsUnsafe() []*SegmentInfo {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
 	return m.segments.GetSegments()
 }
 
 func (m *meta) GetSegmentsTotalNumRows(segmentIDs []UniqueID) int64 {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
+	segments := m.segments.GetSegmentsByIDs(segmentIDs)
 	var sum int64 = 0
 	for _, segmentID := range segmentIDs {
-		segment := m.segments.GetSegment(segmentID)
+		segment := segments[segmentID]
 		if segment == nil {
 			mlog.Warn(m.ctx, "cannot find segment", mlog.Int64("segmentID", segmentID))
 			continue
@@ -762,11 +758,10 @@ func (m *meta) GetSegmentsTotalNumRows(segmentIDs []UniqueID) int64 {
 }
 
 func (m *meta) GetSegmentsChannels(segmentIDs []UniqueID) (map[int64]string, error) {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
+	segments := m.segments.GetSegmentsByIDs(segmentIDs)
 	segChannels := make(map[int64]string)
 	for _, segmentID := range segmentIDs {
-		segment := m.segments.GetSegment(segmentID)
+		segment := segments[segmentID]
 		if segment == nil {
 			return nil, merr.WrapErrServiceInternalMsg("cannot find segment %d", segmentID)
 		}
@@ -780,8 +775,7 @@ func (m *meta) SetState(ctx context.Context, segmentID UniqueID, targetState com
 	mlog.Debug(ctx, "meta update: setting segment state",
 		mlog.Int64("segmentID", segmentID),
 		mlog.Any("target state", targetState))
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
+	defer m.lockSegments(segmentID)()
 	curSegInfo := m.segments.GetSegment(segmentID)
 	if curSegInfo == nil {
 		mlog.Warn(ctx, "meta update: setting segment state - segment not found",
@@ -814,8 +808,7 @@ func (m *meta) SetState(ctx context.Context, segmentID UniqueID, targetState com
 }
 
 func (m *meta) UpdateSegment(segmentID int64, operators ...SegmentOperator) error {
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
+	defer m.lockSegments(segmentID)()
 	info := m.segments.GetSegment(segmentID)
 	if info == nil {
 		mlog.Warn(m.ctx, "meta update: UpdateSegment - segment not found",
@@ -855,7 +848,9 @@ func (m *meta) UpdateSegment(segmentID int64, operators ...SegmentOperator) erro
 }
 
 type updateSegmentPack struct {
-	meta     *meta
+	meta *meta
+	// locks, if not nil, takes the writer lock of each segment the pack reads.
+	locks    *segmentLockSet
 	segments map[int64]*SegmentInfo
 	// for update etcd binlog paths
 	increments                  map[int64]metastore.BinlogsIncrement
@@ -903,6 +898,7 @@ func (p *updateSegmentPack) Get(segmentID int64) *SegmentInfo {
 		return segment
 	}
 
+	p.lock(segmentID)
 	segment := p.meta.segments.GetSegment(segmentID)
 	if segment == nil {
 		mlog.Warn(p.meta.ctx, "meta update: get segment failed - segment not found",
@@ -916,11 +912,24 @@ func (p *updateSegmentPack) Get(segmentID int64) *SegmentInfo {
 	return p.segments[segmentID]
 }
 
+// Peek returns the current value of a segment, without a copy to modify, for
+// an operator that decides on it. It must not be modified.
+func (p *updateSegmentPack) Peek(segmentID int64) *SegmentInfo {
+	p.lock(segmentID)
+	return p.meta.segments.GetSegment(segmentID)
+}
+
+func (p *updateSegmentPack) lock(segmentID int64) {
+	if p.locks != nil {
+		p.locks.lock(segmentID)
+	}
+}
+
 type UpdateOperator func(*updateSegmentPack) bool
 
 func CreateL0Operator(collectionID, partitionID, segmentID int64, channel string) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
-		segment := modPack.meta.segments.GetSegment(segmentID)
+		segment := modPack.Peek(segmentID)
 		if segment == nil {
 			mlog.Info(modPack.meta.ctx, "meta update: add new l0 segment",
 				mlog.Int64("collectionID", collectionID),
@@ -2006,7 +2015,7 @@ func UpdateImportSegmentPosition(segmentID int64, minTs, maxTs uint64) UpdateOpe
 // SegmentMeta and DataView. The caller holds the DataView collection lock.
 func setSealedAtDataVersion(segmentID int64, version *viewpb.DataVersion) UpdateOperator {
 	return func(pack *updateSegmentPack) bool {
-		current := pack.meta.segments.GetSegment(segmentID)
+		current := pack.Peek(segmentID)
 		if current == nil || current.GetState() == commonpb.SegmentState_Dropped {
 			return pack.fail(merr.WrapErrSegmentNotFound(segmentID))
 		}
@@ -2046,10 +2055,8 @@ func UpdateAsDroppedIfEmptyWhenFlushing(segmentID int64) UpdateOperator {
 // updateSegmentsInfo update segment infos
 // will exec all operators, and update all changed segments
 func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperator) error {
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
-
-	updatePack, err := m.buildUpdateSegmentPack(ctx, operators)
+	locks, updatePack, err := m.buildUpdateSegmentPack(ctx, operators)
+	defer locks.release()
 	if err != nil {
 		return err
 	}
@@ -2066,9 +2073,7 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 		return err
 	}
 	// update memory status
-	for id, s := range updatePack.segments {
-		m.segments.SetSegment(id, s)
-	}
+	m.segments.PublishSegments(lo.Values(updatePack.segments))
 	mlog.Info(ctx, "meta update: update flush segments info - update flush segments info successfully")
 	return nil
 }
@@ -2080,10 +2085,8 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 // even without SegmentMeta mutations; (false, nil) means both are absent.
 // Catalog retries overwrite the same actions until success or cancellation.
 func (m *meta) UpdateSegmentsInfoAndDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection, operators ...UpdateOperator) (bool, error) {
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
-
-	updatePack, err := m.buildUpdateSegmentPack(ctx, operators)
+	locks, updatePack, err := m.buildUpdateSegmentPack(ctx, operators)
+	defer locks.release()
 	if err != nil {
 		return false, err
 	}
@@ -2129,30 +2132,62 @@ func (m *meta) UpdateSegmentsInfoAndDataView(ctx context.Context, dataView *view
 	}
 	if updatePack != nil {
 		// update memory status
-		for id, s := range updatePack.segments {
-			m.segments.SetSegment(id, s)
-		}
+		m.segments.PublishSegments(lo.Values(updatePack.segments))
 	}
 	mlog.Info(ctx, "meta update: update flush segments info and DataView successfully")
 	return true, nil
 }
 
 // buildUpdateSegmentPack applies operators to a fresh updateSegmentPack and
-// validates it. It returns (nil, nil) when the update touches no segment or is
-// a benign stale no-op, and (pack, nil) otherwise. Caller must hold segMu.
-func (m *meta) buildUpdateSegmentPack(ctx context.Context, operators []UpdateOperator) (*updateSegmentPack, error) {
-	updatePack := &updateSegmentPack{
-		meta:       m,
-		segments:   make(map[int64]*SegmentInfo),
-		increments: make(map[int64]metastore.BinlogsIncrement),
+// validates it, holding the writer locks of the segments they read and of
+// those the pack writes. It returns them, for the caller to release after it
+// stored and published the pack. It returns (nil, nil) when the update touches
+// no segment or is a benign stale no-op, and (pack, nil) otherwise.
+func (m *meta) buildUpdateSegmentPack(ctx context.Context, operators []UpdateOperator) (*segmentLockSet, *updateSegmentPack, error) {
+	locks, updatePack, err := m.runOperators(operators)
+	if err != nil {
+		return locks, nil, err
 	}
+	updatePack, err = m.finishUpdateSegmentPack(ctx, updatePack)
+	return locks, updatePack, err
+}
 
-	for _, operator := range operators {
-		operator(updatePack)
-		if updatePack.err != nil {
-			return nil, updatePack.err
+// runOperators applies operators to a fresh update pack, holding the writer
+// locks of the segments they read and of those the pack writes. A run that
+// could not take a lock is discarded and runs again with the locks it reached
+// (see segment_locks.go); operators change only the pack, never their inputs,
+// so a discarded run has no effect. The caller releases the locks.
+func (m *meta) runOperators(operators []UpdateOperator) (*segmentLockSet, *updateSegmentPack, error) {
+	locks := newSegmentLockSet(m.getSegmentLocks())
+	for {
+		updatePack := &updateSegmentPack{
+			meta:       m,
+			locks:      locks,
+			segments:   make(map[int64]*SegmentInfo),
+			increments: make(map[int64]metastore.BinlogsIncrement),
 		}
+		for _, operator := range operators {
+			operator(updatePack)
+			if updatePack.err != nil {
+				break
+			}
+		}
+		// Operators may add a segment to the pack without reading it.
+		written := lo.Keys(updatePack.segments)
+		slices.Sort(written)
+		for _, segmentID := range written {
+			locks.lock(segmentID)
+		}
+		if locks.complete() {
+			return locks, updatePack, updatePack.err
+		}
+		locks.relock()
 	}
+}
+
+// finishUpdateSegmentPack commits the L0 manifest updates of a pack whose
+// operators ran and validates it.
+func (m *meta) finishUpdateSegmentPack(ctx context.Context, updatePack *updateSegmentPack) (*updateSegmentPack, error) {
 	if err := commitL0ManifestUpdates(ctx, m.manifestCommitExecutor, updatePack.l0ManifestUpdates); err != nil {
 		return nil, err
 	}
@@ -2187,8 +2222,15 @@ func (m *meta) buildUpdateSegmentPack(ctx context.Context, operators []UpdateOpe
 func (m *meta) UpdateDropChannelSegmentInfo(ctx context.Context, channel string, segments []*SegmentInfo) error {
 	mlog.Debug(ctx, "meta update: update drop channel segment info",
 		mlog.String("channel", channel))
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
+	locks := newSegmentLockSet(m.getSegmentLocks())
+	defer locks.release()
+	selected := lockSelection(locks, func() []int64 {
+		ids := lo.Map(segments, func(segment *SegmentInfo, _ int) int64 { return segment.GetID() })
+		for _, seg := range m.segments.GetSegmentsBySelector(WithChannel(channel)) {
+			ids = append(ids, seg.GetID())
+		}
+		return ids
+	})
 
 	modSegments := make(map[UniqueID]*SegmentInfo)
 	// save new segments flushed from buffer data
@@ -2199,8 +2241,9 @@ func (m *meta) UpdateDropChannelSegmentInfo(ctx context.Context, channel string,
 		}
 	}
 	// set existed segments of channel to Dropped
-	for _, seg := range m.segments.GetSegments() {
-		if seg.InsertChannel != channel {
+	for _, id := range selected {
+		seg := m.segments.GetSegment(id)
+		if seg == nil || seg.InsertChannel != channel {
 			continue
 		}
 		_, ok := modSegments[seg.ID]
@@ -2311,9 +2354,7 @@ func (m *meta) batchSaveDropSegments(ctx context.Context, channel string, modSeg
 	}
 
 	// update memory info
-	for id, segment := range modSegments {
-		m.segments.SetSegment(id, segment)
-	}
+	m.segments.PublishSegments(lo.Values(modSegments))
 
 	return nil
 }
@@ -2403,14 +2444,10 @@ func (m *meta) GetFlushingSegments() []*SegmentInfo {
 
 // SelectSegments select segments with selector
 func (m *meta) SelectSegments(ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
 	return m.segments.GetSegmentsBySelector(filters...)
 }
 
 func (m *meta) GetRealSegmentsForChannel(channel string) []*SegmentInfo {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
 	return m.segments.GetRealSegmentsForChannel(channel)
 }
 
@@ -2419,8 +2456,7 @@ func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
 	mlog.Debug(m.ctx, "meta update: add allocation",
 		mlog.Int64("segmentID", segmentID),
 		mlog.Any("allocation", allocation))
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
+	defer m.lockSegments(segmentID)()
 	curSegInfo := m.segments.GetSegment(segmentID)
 	if curSegInfo == nil {
 		// TODO: Error handling.
@@ -2437,16 +2473,14 @@ func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
 // SetAllocations set Segment allocations, will overwrite ALL original allocations
 // Note that allocations is not persisted in KV store
 func (m *meta) SetAllocations(segmentID UniqueID, allocations []*Allocation) {
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
+	defer m.lockSegments(segmentID)()
 	m.segments.SetAllocations(segmentID, allocations)
 }
 
 // SetLastExpire set lastExpire time for segment
 // Note that last is not necessary to store in KV meta
 func (m *meta) SetLastExpire(segmentID UniqueID, lastExpire uint64) {
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
+	defer m.lockSegments(segmentID)()
 	clonedSegment := m.segments.GetSegment(segmentID).Clone()
 	clonedSegment.LastExpireTime = lastExpire
 	m.segments.SetSegment(segmentID, clonedSegment)
@@ -2455,31 +2489,26 @@ func (m *meta) SetLastExpire(segmentID UniqueID, lastExpire uint64) {
 // SetLastFlushTime set LastFlushTime for segment with provided `segmentID`
 // Note that lastFlushTime is not persisted in KV store
 func (m *meta) SetLastFlushTime(segmentID UniqueID, t time.Time) {
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
+	defer m.lockSegments(segmentID)()
 	m.segments.SetFlushTime(segmentID, t)
 }
 
 // SetLastWrittenTime set LastWrittenTime for segment with provided `segmentID`
 // Note that lastWrittenTime is not persisted in KV store
 func (m *meta) SetLastWrittenTime(segmentID UniqueID) {
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
+	defer m.lockSegments(segmentID)()
 	m.segments.SetLastWrittenTime(segmentID)
 }
 
 // SetSegmentCompacting sets compaction state for segment
 func (m *meta) SetSegmentCompacting(segmentID UniqueID, compacting bool) {
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
+	defer m.lockSegments(segmentID)()
 
 	m.segments.SetIsCompacting(segmentID, compacting)
 }
 
 // IsSegmentCompacting check if segment is compacting
 func (m *meta) IsSegmentCompacting(segmentID UniqueID) bool {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
 	seg := m.segments.GetSegment(segmentID)
 	if seg == nil {
 		return false
@@ -2491,8 +2520,7 @@ func (m *meta) IsSegmentCompacting(segmentID UniqueID) bool {
 // if true, set them compacting and return true
 // if false, skip setting and
 func (m *meta) CheckAndSetSegmentsCompacting(ctx context.Context, segmentIDs []UniqueID) (exist, canDo bool) {
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
+	defer m.lockSegments(segmentIDs...)()
 	var hasCompacting bool
 	exist = true
 	for _, segmentID := range segmentIDs {
@@ -2516,8 +2544,7 @@ func (m *meta) CheckAndSetSegmentsCompacting(ctx context.Context, segmentIDs []U
 }
 
 func (m *meta) SetSegmentsCompacting(ctx context.Context, segmentIDs []UniqueID, compacting bool) {
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
+	defer m.lockSegments(segmentIDs...)()
 	for _, segmentID := range segmentIDs {
 		m.segments.SetIsCompacting(segmentID, compacting)
 	}
@@ -2706,9 +2733,7 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 		mlog.Warn(m.ctx, "fail to alter compactTo segments", mlog.Err(err))
 		return nil, err
 	}
-	lo.ForEach(compactToSegInfos, func(info *SegmentInfo, _ int) {
-		m.segments.SetSegment(info.GetID(), info)
-	})
+	m.segments.PublishSegments(compactToSegInfos)
 	mlog.Info(m.ctx, "meta update: alter in memory meta after compaction - complete")
 	return compactToSegInfos, nil
 }
@@ -2842,21 +2867,13 @@ func (m *meta) completeMixCompactionMutation(
 		mlog.Warn(m.ctx, "fail to update compaction segments", mlog.Err(err))
 		return nil, err
 	}
-	lo.ForEach(compactFromSegInfos, func(info *SegmentInfo, _ int) {
-		m.segments.SetSegment(info.GetID(), info)
-	})
-	lo.ForEach(compactToSegments, func(info *SegmentInfo, _ int) {
-		m.segments.SetSegment(info.GetID(), info)
-	})
+	m.segments.PublishSegments(append(append([]*SegmentInfo{}, compactFromSegInfos...), compactToSegments...))
 
 	mlog.Info(m.ctx, "meta update: alter in memory meta after compaction - complete")
 	return compactToSegments, nil
 }
 
 func (m *meta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.CompactionTask) error {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
-
 	// Snapshot compaction protection exists to keep the sealed-segment list stable during
 	// backfill — if an L1/L2 segment gets merged away mid-backfill, the backfill breaks.
 	// L0 segments are transient delete-log carriers, not part of that stable list, and
@@ -2974,9 +2991,17 @@ func (m *meta) appliedCompactionResultLocked(
 	return compactTo, true, nil
 }
 
+// compactionSegmentIDs returns the inputs and the outputs of a compaction.
+func compactionSegmentIDs(t *datapb.CompactionTask, result *datapb.CompactionPlanResult) []int64 {
+	ids := slices.Clone(t.GetInputSegments())
+	for _, segment := range result.GetSegments() {
+		ids = append(ids, segment.GetSegmentID())
+	}
+	return ids
+}
+
 func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) (newSegments []*SegmentInfo, retErr error) {
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
+	defer m.lockSegments(compactionSegmentIDs(t, result)...)()
 	if appliedSegments, applied, appliedErr := m.appliedCompactionResultLocked(t, result); applied {
 		newSegments = appliedSegments
 		retErr = appliedErr
@@ -3008,10 +3033,10 @@ func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.Compact
 // Dropped/NotExist), not invisible, not importing, and not an L0 delta
 // segment, and has a data footprint (a non-empty binlog set or a StorageV3
 // manifest path). The Manifest version is parsed from the segment's manifest
-// path (0 when absent). The SegmentMeta snapshot is taken under segMu.RLock;
-// manifest path parsing runs outside the lock (pure string ops on the
-// snapshot). Callers must hold the DataView Collection lock (lock order:
-// DataView -> segMu).
+// path (0 when absent). The SegmentMeta snapshot of the collection is read
+// at one point in time; manifest path parsing is pure string ops on the
+// snapshot. Callers must hold the DataView Collection lock (lock order:
+// DataView -> segment writer locks).
 func (m *meta) loadableProjection(ctx context.Context, collectionID int64) ([]dataview.LoadableSegment, error) {
 	segments := m.SelectSegments(ctx, WithCollection(collectionID))
 	loadable := make([]dataview.LoadableSegment, 0, len(segments))
@@ -3082,11 +3107,9 @@ func isSegmentHealthy(segment *SegmentInfo) bool {
 }
 
 func (m *meta) HasSegments(segIDs []UniqueID) (bool, error) {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
-
+	segments := m.segments.GetSegmentsByIDs(segIDs)
 	for _, segID := range segIDs {
-		if seg := m.segments.GetSegment(segID); seg == nil {
+		if seg := segments[segID]; seg == nil {
 			return false, merr.WrapErrServiceInternalMsg("segment is not exist with ID = %d", segID)
 		}
 	}
@@ -3095,9 +3118,6 @@ func (m *meta) HasSegments(segIDs []UniqueID) (bool, error) {
 
 // GetCompactionTo returns the segment info of the segment to be compacted to.
 func (m *meta) GetCompactionTo(segmentID int64) ([]*SegmentInfo, bool) {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
-
 	return m.segments.GetCompactionTo(segmentID)
 }
 
@@ -3474,8 +3494,7 @@ func (m *meta) completeSortCompactionMutation(
 		return nil, err
 	}
 
-	m.segments.SetSegment(oldSegment.GetID(), cloned)
-	m.segments.SetSegment(segment.GetID(), segment)
+	m.segments.PublishSegments([]*SegmentInfo{cloned, segment})
 	mlog.Info(m.ctx, "meta update: alter in memory meta after compaction - complete")
 	return []*SegmentInfo{segment}, nil
 }
@@ -3720,16 +3739,12 @@ func (m *meta) completeBumpSchemaVersionReplacementMutation(
 		return nil, err
 	}
 
-	m.segments.SetSegment(dropped.GetID(), dropped)
-	m.segments.SetSegment(newSegment.GetID(), newSegment)
+	m.segments.PublishSegments([]*SegmentInfo{dropped, newSegment})
 	mlog.Info(m.ctx, "meta update: alter in memory meta after schema bump full rewrite replacement - complete")
 	return []*SegmentInfo{newSegment}, nil
 }
 
 func (m *meta) getSegmentsMetrics(collectionID int64) []*metricsinfo.Segment {
-	m.segMu.RLock()
-	defer m.segMu.RUnlock()
-
 	allSegs := m.segments.GetSegments()
 	segments := make([]*metricsinfo.Segment, 0, len(allSegs))
 	for _, s := range allSegs {
@@ -3755,13 +3770,22 @@ func (m *meta) getSegmentsMetrics(collectionID int64) []*metricsinfo.Segment {
 }
 
 func (m *meta) DropSegmentsOfPartition(ctx context.Context, partitionIDs []int64) error {
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
+	locks := newSegmentLockSet(m.getSegmentLocks())
+	defer locks.release()
+	selected := lockSelection(locks, func() []int64 {
+		var ids []int64
+		for _, seg := range m.segments.GetSegments() {
+			if contains(partitionIDs, seg.PartitionID) {
+				ids = append(ids, seg.GetID())
+			}
+		}
+		return ids
+	})
 
 	modSegments := make([]*SegmentInfo, 0)
 	segments := make([]*datapb.SegmentInfo, 0)
-	for _, seg := range m.segments.GetSegments() {
-		if contains(partitionIDs, seg.PartitionID) {
+	for _, id := range selected {
+		if seg := m.segments.GetSegment(id); seg != nil {
 			clonedSeg := seg.Clone()
 			updateSegState(clonedSeg, commonpb.SegmentState_Dropped)
 			modSegments = append(modSegments, clonedSeg)
@@ -3773,9 +3797,7 @@ func (m *meta) DropSegmentsOfPartition(ctx context.Context, partitionIDs []int64
 	if err != nil {
 		return err
 	}
-	for _, segment := range modSegments {
-		m.segments.SetSegment(segment.GetID(), segment)
-	}
+	m.segments.PublishSegments(modSegments)
 	return nil
 }
 
@@ -3797,14 +3819,21 @@ func (m *meta) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*i
 
 // TruncateChannelByTime drops segments of a channel that were updated before the flush timestamp
 func (m *meta) TruncateChannelByTime(ctx context.Context, vChannel string, flushTs uint64) error {
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
-
-	segments := m.segments.GetSegmentsBySelector(SegmentFilterFunc(isSegmentHealthy), WithChannel(vChannel))
+	locks := newSegmentLockSet(m.getSegmentLocks())
+	defer locks.release()
+	selected := lockSelection(locks, func() []int64 {
+		var ids []int64
+		for _, segment := range m.segments.GetSegmentsBySelector(SegmentFilterFunc(isSegmentHealthy), WithChannel(vChannel)) {
+			if segmentEffectiveDmlTs(segment.SegmentInfo) <= flushTs && segment.GetState() != commonpb.SegmentState_Dropped {
+				ids = append(ids, segment.GetID())
+			}
+		}
+		return ids
+	})
 	segmentsToDrop := make([]*SegmentInfo, 0)
 
-	for _, segment := range segments {
-		if segmentEffectiveDmlTs(segment.SegmentInfo) <= flushTs && segment.GetState() != commonpb.SegmentState_Dropped {
+	for _, id := range selected {
+		if segment := m.segments.GetSegment(id); segment != nil {
 			cloned := segment.Clone()
 			updateSegState(cloned, commonpb.SegmentState_Dropped)
 			segmentsToDrop = append(segmentsToDrop, cloned)
@@ -3823,9 +3852,7 @@ func (m *meta) TruncateChannelByTime(ctx context.Context, vChannel string, flush
 		return err
 	}
 
-	for _, seg := range segmentsToDrop {
-		m.segments.SetSegment(seg.GetID(), seg)
-	}
+	m.segments.PublishSegments(segmentsToDrop)
 
 	return nil
 }

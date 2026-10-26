@@ -53,7 +53,7 @@ func (c *DDLCallbacks) batchUpdateManifestV2AckCallback(ctx context.Context, res
 			// commits in a single atomic UpdateSegmentsInfo (one AlterSegments).
 			//
 			// Routing each item through meta.CommitSegmentManifest instead would take
-			// the per-segment manifest lock plus segMu twice per item and issue one
+			// the per-segment manifest lock plus the writer lock per item and issue one
 			// catalog.Update per item, and a mid-loop failure would return before the
 			// accumulated V2 operators are applied — i.e. the batch would no longer be
 			// applied as a unit. The tension is that CommitSegmentManifest's per-segment

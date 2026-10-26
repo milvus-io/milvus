@@ -50,9 +50,9 @@ func TestPublishedManifestSnapshot(t *testing.T) {
 	require.ElementsMatch(t, []string{"collection10/v1", "collection20/v1", "collection20/v2", packed.MarshalManifestPath("files/insert_log/30/1/10", 0)}, got)
 	// Returned strings are detached from later metadata publication; no clones of
 	// schemas/binlogs/index metadata are necessary.
-	s.meta.segMu.Lock()
+	unlock := s.meta.lockSegments(fixtures[0].ID)
 	fixtures[0].ManifestPath = "collection10/v2"
-	s.meta.segMu.Unlock()
+	unlock()
 	require.Contains(t, got, "collection10/v1")
 	// A caller can take the write lock after enumeration; no lock spans Talon I/O.
 	ctx, cancel := context.WithCancel(context.Background())
