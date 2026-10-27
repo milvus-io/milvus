@@ -90,7 +90,7 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 			rec, err := r.Next()
 			fetchCost += time.Since(fetchStart)
 			if err == nil {
-				if err := validator.Validate(rec); err != nil {
+				if err := validator.ValidateForRead(rec); err != nil {
 					return 0, nil, merr.Wrap(err, "sort input validation")
 				}
 				rec.Retain()
@@ -422,7 +422,7 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 			return err
 		}
 		pos[ri] = 0
-		if err := validator.Validate(rec); err != nil {
+		if err := validator.ValidateForRead(rec); err != nil {
 			return merr.Wrap(err, "merge-sort input validation")
 		}
 		recNo[ri]++

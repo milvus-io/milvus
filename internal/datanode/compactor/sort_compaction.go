@@ -253,12 +253,6 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		return nil, err
 	}
 	initWriterCost := time.Since(phaseStart)
-	writerClosed := false
-	defer func() {
-		if !writerClosed {
-			_ = storage.AbortBinlogRecordWriter(srw)
-		}
-	}()
 
 	phaseStart = time.Now()
 	deletePKs, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField.DataType, t.plan.SegmentBinlogs[0],
@@ -266,6 +260,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		storage.WithStorageConfig(t.compactionParams.StorageConfig))
 	if err != nil {
 		log.Warn(ctx, "load deletePKs failed", mlog.Err(err))
+		srw.Close()
 		return nil, err
 	}
 	loadDeltaCost := time.Since(phaseStart)
@@ -307,6 +302,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	phaseStart = time.Now()
 	textDecodeConfigs, err := t.lobContext.GetSourceTextColumnConfigs(t.manifest)
 	if err != nil {
+		srw.Close()
 		return nil, err
 	}
 	sortReadConcurrency := paramtable.Get().DataNodeCfg.SortReadConcurrency.GetAsInt()
@@ -331,12 +327,14 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	)
 	if err != nil {
 		log.Warn(ctx, "error creating insert binlog reader", mlog.Err(err))
+		srw.Close()
 		return nil, err
 	}
 	materializer, err := NewRecordMaterializer(writerSchema, writerSchema.GetFunctions(), existingFields)
 	if err != nil {
 		log.Warn(ctx, "error creating record materializer", mlog.Err(err))
 		rr.Close()
+		srw.Close()
 		return nil, err
 	}
 	rr = newMaterializedRecordReader(rr, materializer)
@@ -348,6 +346,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	numValidRows, sortTimings, err := storage.Sort(t.compactionParams.BinLogMaxSize, writerSchema, rrs, srw, predicate, t.sortByFieldIDs)
 	if err != nil {
 		log.Warn(ctx, "sort failed", mlog.Err(err))
+		srw.Close()
 		return nil, err
 	}
 	if sortTimings == nil {
@@ -362,7 +361,6 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 	if err := srw.Close(); err != nil {
 		return nil, err
 	}
-	writerClosed = true
 	flushCost := time.Since(phaseStart)
 
 	phaseStart = time.Now()

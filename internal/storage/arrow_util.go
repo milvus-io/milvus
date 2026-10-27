@@ -273,6 +273,9 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, field *schemap
 		}
 
 		start, end := la.ValueOffsets(idx)
+		if err := validateElementRange(start, end, la.ListValues().Len()); err != nil {
+			return 0, err
+		}
 		b.Append(true)
 
 		valuesArray := la.ListValues()
@@ -497,13 +500,32 @@ func (b *RecordBuilder) prepareAppendDefaults() error {
 }
 
 func (b *RecordBuilder) Append(rec Record, start, end int) error {
+	rows, err := recordRows(rec)
+	if err != nil {
+		return err
+	}
+	if start < 0 || end < start || end > rows {
+		return merr.WrapErrDataIntegrityMsg("invalid record range [%d,%d), record rows=%d", start, end, rows)
+	}
 	if err := b.prepareAppendDefaults(); err != nil {
 		return err
 	}
 	for offset := start; offset < end; offset++ {
 		for i, builder := range b.builders {
 			f := b.fields[i]
-			col := rec.Column(f.FieldID)
+			// Check only the values being copied, inside the existing traversal.
+			// Do not rescan the record or nested payload for each Append call.
+			col, ok := TryRecordColumn(rec, f.GetFieldID())
+			if !ok || col == nil || col.Len() < rows {
+				return merr.WrapErrDataIntegrityMsg("field %s (ID=%d): missing or short column, record rows=%d", f.GetName(), f.GetFieldID(), rows)
+			}
+			contract := recordFieldContract{field: f, expected: b.arrowFields[i].Type}
+			if err := validateColumnType(contract, col, true); err != nil {
+				return merr.Wrapf(err, "field %s (ID=%d)", f.GetName(), f.GetFieldID())
+			}
+			if !f.GetNullable() && col.IsNull(offset) {
+				return merr.WrapErrDataIntegrityMsg("field %s (ID=%d): non-nullable row %d is null", f.GetName(), f.GetFieldID(), offset)
+			}
 			// TEXT may be decoded UTF8 or a binary LOB reference. Preserve the
 			// reader's representation instead of treating decoded text as a ref.
 			// Reader/writer schemas must agree on one non-null representation

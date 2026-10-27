@@ -718,23 +718,20 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 		if crr.rrs[idx] != nil {
 			if ok := crr.rrs[idx].Next(); !ok {
 				if err := crr.rrs[idx].Err(); err != nil && !errors.Is(err, io.EOF) {
-					if merr.IsMilvusError(err) || merr.IsCanceledOrTimeout(err) {
-						return nil, merr.Wrapf(err, "read V1 insert binlog field %d", f.FieldID)
-					}
 					return nil, merr.WrapErrDataIntegrity(err, "read V1 insert binlog field %d", f.FieldID)
 				}
 				sawEOF = true
 				continue
 			}
+			sawRecord = true
 			r := crr.rrs[idx].Record()
 			recs[idx] = r.Column(0)
 			recs[idx].Retain()
-			if !sawRecord {
+			if nRows == 0 {
 				nRows = int(r.NumRows())
 			}
-			sawRecord = true
 			if nRows != int(r.NumRows()) {
-				return nil, merr.WrapErrDataIntegrityMsg("number of rows mismatch for field %d: got %d, expected %d", f.FieldID, r.NumRows(), nRows)
+				return nil, merr.WrapErrServiceInternalMsg("number of rows mismatch for field %d", f.FieldID)
 			}
 		} else {
 			nonExistingFields = append(nonExistingFields, f)

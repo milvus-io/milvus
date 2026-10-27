@@ -90,22 +90,41 @@ func NewRecordValidator(schema *schemapb.CollectionSchema, physical *arrow.Schem
 // before FFI. Scalar Array payloads are protobuf Binary, not Arrow List: their
 // semantic decoding remains the responsibility of the deserializer.
 func (v *RecordValidator) Validate(rec Record) error {
+	return v.validate(rec, true)
+}
+
+// ValidateForRead protects column access before predicates and sorting. Value
+// checks belong to the existing row-copy loop or the final writer boundary,
+// not a separate scan of nested payloads that filtering may discard.
+func (v *RecordValidator) ValidateForRead(rec Record) error {
+	return v.validate(rec, false)
+}
+
+func recordRows(rec Record) (int, error) {
 	if rec == nil {
-		return merr.WrapErrDataIntegrityMsg("nil record")
+		return 0, merr.WrapErrDataIntegrityMsg("nil record")
 	}
 	switch rec := rec.(type) {
 	case *simpleArrowRecord:
 		if rec == nil || rec.r == nil {
-			return merr.WrapErrDataIntegrityMsg("nil Arrow record")
+			return 0, merr.WrapErrDataIntegrityMsg("nil Arrow record")
 		}
 	case *compositeRecord:
 		if rec == nil || len(rec.recs) == 0 || rec.recs[0] == nil {
-			return merr.WrapErrDataIntegrityMsg("missing composite record row anchor")
+			return 0, merr.WrapErrDataIntegrityMsg("missing composite record row anchor")
 		}
 	}
 	rows := rec.Len()
 	if rows < 0 {
-		return merr.WrapErrDataIntegrityMsg("negative record rows: %d", rows)
+		return 0, merr.WrapErrDataIntegrityMsg("negative record rows: %d", rows)
+	}
+	return rows, nil
+}
+
+func (v *RecordValidator) validate(rec Record, full bool) error {
+	rows, err := recordRows(rec)
+	if err != nil {
+		return err
 	}
 	for _, contract := range v.fields {
 		col, ok := TryRecordColumn(rec, contract.field.GetFieldID())
@@ -113,7 +132,7 @@ func (v *RecordValidator) Validate(rec Record) error {
 			return merr.WrapErrDataIntegrityMsg("field %s (ID=%d): missing column, record rows=%d",
 				contract.field.GetName(), contract.field.GetFieldID(), rows)
 		}
-		if err := v.validateColumn(contract, col, rows); err != nil {
+		if err := v.validateColumn(contract, col, rows, full); err != nil {
 			return merr.Wrapf(err, "field %s (ID=%d), record rows=%d, expected type=%s",
 				contract.field.GetName(), contract.field.GetFieldID(), rows, contract.expected)
 		}
@@ -121,7 +140,7 @@ func (v *RecordValidator) Validate(rec Record) error {
 	return nil
 }
 
-func (v *RecordValidator) validateColumn(c recordFieldContract, col arrow.Array, rows int) error {
+func (v *RecordValidator) validateColumn(c recordFieldContract, col arrow.Array, rows int, full bool) error {
 	if col.Len() < rows {
 		return merr.WrapErrDataIntegrityMsg("short column: length=%d", col.Len())
 	}
@@ -129,22 +148,20 @@ func (v *RecordValidator) validateColumn(c recordFieldContract, col arrow.Array,
 		col = array.NewSlice(col, 0, int64(rows))
 		defer col.Release()
 	}
-	if !arrow.TypeEqual(col.DataType(), c.expected) {
-		// All-null TEXT has no payload to decode. The writer can normalize it
-		// between String and Binary without interpreting a LOB reference.
-		textCompatible := c.field.GetDataType() == schemapb.DataType_Text &&
-			isTextArrowType(col.DataType()) && isTextArrowType(c.expected) &&
-			(v.reader || col.NullN() == rows)
-		if !textCompatible {
-			return merr.WrapErrDataIntegrityMsg("column type mismatch: got %s", col.DataType())
-		}
+	if err := validateColumnType(c, col, v.reader); err != nil {
+		return err
 	}
 	if !c.field.GetNullable() && col.NullN() != 0 {
 		return merr.WrapErrDataIntegrityMsg("non-nullable column contains %d nulls", col.NullN())
 	}
+	if !full {
+		return nil
+	}
 	if c.field.GetDataType() == schemapb.DataType_ArrayOfVector {
 		list := col.(*array.List) // physical type was checked above
 		values := list.ListValues()
+		_, fixedWidth := values.(*array.FixedSizeBinary)
+		skipChildren := fixedWidth && values.NullN() == 0
 		for row := 0; row < rows; row++ {
 			// A null parent masks its children. List slices can retain children
 			// outside their visible range; neither is a data-integrity failure.
@@ -152,8 +169,11 @@ func (v *RecordValidator) validateColumn(c recordFieldContract, col arrow.Array,
 				continue
 			}
 			start, end := list.ValueOffsets(row)
-			if start < 0 || end < start || end > int64(values.Len()) {
-				return merr.WrapErrDataIntegrityMsg("row %d: invalid element range [%d,%d), child length=%d", row, start, end, values.Len())
+			if err := validateElementRange(start, end, values.Len()); err != nil {
+				return merr.Wrapf(err, "row %d", row)
+			}
+			if skipChildren {
+				continue
 			}
 			for i := int(start); i < int(end); i++ {
 				if values.IsNull(i) {
@@ -175,6 +195,27 @@ func (v *RecordValidator) validateColumn(c recordFieldContract, col arrow.Array,
 				return merr.WrapErrDataIntegrityMsg("row %d: vector width=%d, expected=%d", row, binary.ValueLen(row), c.vectorWidth)
 			}
 		}
+	}
+	return nil
+}
+
+func validateColumnType(c recordFieldContract, col arrow.Array, reader bool) error {
+	if arrow.TypeEqual(col.DataType(), c.expected) {
+		return nil
+	}
+	// Readers preserve either TEXT representation. Writers may normalize an
+	// all-null column, which has no payload or LOB reference to interpret.
+	if c.field.GetDataType() == schemapb.DataType_Text &&
+		isTextArrowType(col.DataType()) && isTextArrowType(c.expected) &&
+		(reader || col.NullN() == col.Len()) {
+		return nil
+	}
+	return merr.WrapErrDataIntegrityMsg("column type mismatch: got %s, expected %s", col.DataType(), c.expected)
+}
+
+func validateElementRange(start, end int64, length int) error {
+	if start < 0 || end < start || end > int64(length) {
+		return merr.WrapErrDataIntegrityMsg("invalid element range [%d,%d), child length=%d", start, end, length)
 	}
 	return nil
 }

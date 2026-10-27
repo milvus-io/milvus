@@ -87,7 +87,6 @@ func SegmentPartitionBasePath(rootPath string, collectionID, partitionID UniqueI
 
 type packedBinlogRecordWriterBase struct {
 	validator *RecordValidator
-	aborted   bool
 	// attributes
 	collectionID         UniqueID
 	partitionID          UniqueID
@@ -134,9 +133,6 @@ type packedBinlogRecordWriterBase struct {
 // values that the record does not expose. Lower packed writers reuse this
 // validation within this synchronous Write call.
 func (pw *packedBinlogRecordWriterBase) prepareRecord(r Record) (Record, func(), error) {
-	if pw.aborted {
-		return nil, nil, merr.WrapErrServiceInternalMsg("binlog writer is aborted")
-	}
 	if pw.validator == nil {
 		var err error
 		pw.validator, err = NewRecordValidator(pw.schema, pw.arrowSchema)
@@ -154,14 +150,13 @@ func (pw *packedBinlogRecordWriterBase) prepareRecord(r Record) (Record, func(),
 	}, release, nil
 }
 
-// AbortBinlogRecordWriter releases a failed task's output without publishing a
-// V3 manifest. It does not delete files already flushed to object storage.
-// Legacy V1 writers have no manifest commit and are closed to release buffers.
-func AbortBinlogRecordWriter(writer BinlogRecordWriter) error {
-	if aborter, ok := writer.(interface{ Abort() error }); ok {
-		return aborter.Abort()
+// wrapPackedRecordWriteError translates untyped native failures into the
+// existing storage fallback without masking validation or other merr codes.
+func wrapPackedRecordWriteError(err error) error {
+	if merr.IsMilvusError(err) {
+		return merr.Wrap(err, "write record batch error")
 	}
-	return writer.Close()
+	return merr.WrapErrStorage(err, "write record batch error")
 }
 
 func (pw *packedBinlogRecordWriterBase) getColumnStatsFromRecord(r Record, allFields []*schemapb.FieldSchema) map[int64]storagecommon.ColumnStats {
@@ -327,12 +322,7 @@ type PackedBinlogRecordWriter struct {
 	writer *packedRecordWriter
 }
 
-func (pw *PackedBinlogRecordWriter) Write(r Record) (err error) {
-	defer func() {
-		if err != nil {
-			_ = pw.Abort()
-		}
-	}()
+func (pw *PackedBinlogRecordWriter) Write(r Record) error {
 	r, release, err := pw.prepareRecord(r)
 	if err != nil {
 		return err
@@ -374,7 +364,7 @@ func (pw *PackedBinlogRecordWriter) Write(r Record) (err error) {
 
 	err = pw.writer.Write(r)
 	if err != nil {
-		return merr.Wrap(err, "write record batch error")
+		return wrapPackedRecordWriteError(err)
 	}
 	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
 	return nil
@@ -434,9 +424,6 @@ func (pw *PackedBinlogRecordWriter) finalizeBinlogs() {
 }
 
 func (pw *PackedBinlogRecordWriter) Close() error {
-	if pw.aborted {
-		return nil
-	}
 	if pw.writer != nil {
 		if err := pw.writer.Close(); err != nil {
 			return err
@@ -447,18 +434,6 @@ func (pw *PackedBinlogRecordWriter) Close() error {
 		return err
 	}
 	return nil
-}
-
-func (pw *PackedBinlogRecordWriter) Abort() error {
-	pw.aborted = true
-	if pw.writer == nil {
-		return nil
-	}
-	// V2 has no discard API. Only previously validated batches reach it;
-	// close releases native resources without publishing binlogs or stats.
-	err := pw.writer.Close()
-	pw.writer = nil
-	return err
 }
 
 func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, schema *schemapb.CollectionSchema,
@@ -521,12 +496,7 @@ type PackedManifestRecordWriter struct {
 	textRefsAsBinary bool
 }
 
-func (pw *PackedManifestRecordWriter) Write(r Record) (err error) {
-	defer func() {
-		if err != nil {
-			_ = pw.Abort()
-		}
-	}()
+func (pw *PackedManifestRecordWriter) Write(r Record) error {
 	r, release, err := pw.prepareRecord(r)
 	if err != nil {
 		return err
@@ -568,7 +538,7 @@ func (pw *PackedManifestRecordWriter) Write(r Record) (err error) {
 
 	err = pw.writer.Write(r)
 	if err != nil {
-		return merr.Wrap(err, "write record batch error")
+		return wrapPackedRecordWriteError(err)
 	}
 	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
 	return nil
@@ -626,9 +596,6 @@ func (pw *PackedManifestRecordWriter) finalizeBinlogs() {
 // those blobs to storage, then performs a single packed.CommitManifestUpdates
 // that registers inserts + all stats atomically.
 func (pw *PackedManifestRecordWriter) Close() error {
-	if pw.aborted {
-		return nil
-	}
 	if pw.writer == nil {
 		return nil
 	}
@@ -653,15 +620,6 @@ func (pw *PackedManifestRecordWriter) Close() error {
 		return merr.Wrap(err, "PackedManifestRecordWriter.Close commit")
 	}
 	pw.manifest = newManifest
-	return nil
-}
-
-func (pw *PackedManifestRecordWriter) Abort() error {
-	pw.aborted = true
-	if pw.writer != nil {
-		pw.writer.Abort()
-		pw.writer = nil
-	}
 	return nil
 }
 
@@ -783,12 +741,7 @@ type PackedTextManifestRecordWriter struct {
 	textColumnConfigs []packed.TextColumnConfig
 }
 
-func (pw *PackedTextManifestRecordWriter) Write(r Record) (err error) {
-	defer func() {
-		if err != nil {
-			_ = pw.Abort()
-		}
-	}()
+func (pw *PackedTextManifestRecordWriter) Write(r Record) error {
 	r, release, err := pw.prepareRecord(r)
 	if err != nil {
 		return err
@@ -830,7 +783,7 @@ func (pw *PackedTextManifestRecordWriter) Write(r Record) (err error) {
 
 	err = pw.writer.Write(r)
 	if err != nil {
-		return merr.Wrap(err, "write record batch error")
+		return wrapPackedRecordWriteError(err)
 	}
 	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
 	return nil
@@ -889,9 +842,6 @@ func (pw *PackedTextManifestRecordWriter) finalizeBinlogs() {
 // Close finalizes the text-column segment using the same do-then-commit
 // pattern as PackedManifestRecordWriter.Close.
 func (pw *PackedTextManifestRecordWriter) Close() error {
-	if pw.aborted {
-		return nil
-	}
 	if pw.writer == nil {
 		return nil
 	}
@@ -917,15 +867,6 @@ func (pw *PackedTextManifestRecordWriter) Close() error {
 		return merr.Wrap(err, "PackedTextManifestRecordWriter.Close commit")
 	}
 	pw.manifest = newManifest
-	return nil
-}
-
-func (pw *PackedTextManifestRecordWriter) Abort() error {
-	pw.aborted = true
-	if pw.writer != nil {
-		pw.writer.Abort()
-		pw.writer = nil
-	}
 	return nil
 }
 

@@ -600,13 +600,6 @@ func (pw *packedTextBatchWriter) Close() (packed.WriterOutput, error) {
 	return out, nil
 }
 
-func (pw *packedTextBatchWriter) Abort() {
-	if pw.writer != nil {
-		pw.writer.Destroy()
-		pw.writer = nil
-	}
-}
-
 // NewPackedTextBatchWriter creates a new writer that uses FFISegmentWriter with TEXT column support.
 // this writer is used during compaction when TEXT columns need REWRITE_ALL strategy.
 // textColumnConfigs: TEXT column configurations for REWRITE_ALL fields (nil if no TEXT fields need rewriting)

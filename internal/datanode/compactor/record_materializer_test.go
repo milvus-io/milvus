@@ -231,65 +231,6 @@ func TestRecordMaterializerWrapWithSelectionReturnsColumnBuildError(t *testing.T
 	require.Equal(t, 0, record.releaseCount)
 }
 
-func TestRecordMaterializerRejectsMalformedInputBeforeFunction(t *testing.T) {
-	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-		{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar},
-		{FieldID: 101, Name: "output", DataType: schemapb.DataType_Int64},
-	}}
-	for _, scenario := range []string{"missing", "short", "wrong type", "null"} {
-		t.Run(scenario, func(t *testing.T) {
-			runner := &inputViewMaterializer{inputFieldID: 100}
-			m := &RecordMaterializer{schema: schema, materializers: []FunctionMaterializer{runner}, pendingOutputs: map[int64]struct{}{101: {}}}
-			r := &materializerTestRecord{len: 2, columns: make(map[storage.FieldID]arrow.Array)}
-			switch scenario {
-			case "short":
-				r.columns[100] = newStringArray(t, []string{"one"})
-			case "wrong type":
-				r.columns[100] = newInt64Array(t, []int64{1, 2})
-			case "null":
-				r.columns[100] = newNullableStringArray(t, []string{"one", ""}, []bool{true, false})
-			}
-			defer releaseArrowArrays(r.columns)
-			require.NotPanics(t, func() {
-				out, err := m.Wrap(r)
-				require.Nil(t, out)
-				require.ErrorIs(t, err, merr.ErrDataIntegrity)
-				require.EqualValues(t, 1009, merr.Status(err).GetCode())
-				require.False(t, merr.Status(err).GetRetriable())
-			})
-			require.Nil(t, runner.view, "invalid input must not reach the function runner")
-			require.Zero(t, r.releaseCount, "input remains reader-owned")
-		})
-	}
-}
-
-func TestRecordMaterializerAcceptsProjectedReadSchema(t *testing.T) {
-	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-		{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar},
-		{FieldID: 101, Name: "unchanged", DataType: schemapb.DataType_Int64},
-		{FieldID: 102, Name: "output", DataType: schemapb.DataType_Int64},
-	}}
-	runner := &inputViewMaterializer{inputFieldID: 100}
-	m := &RecordMaterializer{
-		schema: schema, inputSchema: &schemapb.CollectionSchema{Fields: schema.Fields[:1]},
-		materializers: []FunctionMaterializer{runner}, pendingOutputs: map[int64]struct{}{102: {}},
-	}
-	column := newStringArray(t, []string{"one"})
-	defer column.Release()
-	r := &materializerTestRecord{len: 1, columns: map[storage.FieldID]arrow.Array{100: column}}
-	out, err := m.Wrap(r)
-	require.NoError(t, err)
-	require.Same(t, r, out)
-	require.Same(t, column, runner.input)
-
-	// A projected field is still required; the projection is not inferred by
-	// probing which columns happened to be present in the malformed record.
-	runner.view = nil
-	_, err = m.Wrap(&materializerTestRecord{len: 1})
-	require.ErrorIs(t, err, merr.ErrDataIntegrity)
-	require.Nil(t, runner.view)
-}
-
 func TestRecordMaterializerSelectionColumnsFixedBeforeTimestampOverwrite(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar},
@@ -455,7 +396,6 @@ func TestRecordMaterializerFunctionsShareOrdinaryInputView(t *testing.T) {
 		hiddenFieldID: first.outputFieldID,
 	}
 	materializer := &RecordMaterializer{
-		schema:        &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{ordinaryField}},
 		materializers: []FunctionMaterializer{first, second},
 	}
 
@@ -503,7 +443,6 @@ func TestRecordMaterializerFunctionOutputLifecycleExact(t *testing.T) {
 			output:        output,
 		}
 		materializer := &RecordMaterializer{
-			schema:        &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{ordinaryField}},
 			materializers: []FunctionMaterializer{functionMaterializer},
 		}
 		// Reader-null-filled ordinary input lives on the base record.
@@ -584,6 +523,27 @@ func TestStringInputsFromRecordRejectsBinaryTextWithoutLOBDecoding(t *testing.T)
 	_, err := stringInputsFromRecord(
 		&materializerTestRecord{len: 1, columns: map[storage.FieldID]arrow.Array{100: input}}, 100)
 	require.ErrorContains(t, err, "cannot materialize bm25 from text binary values without lob decoding")
+}
+
+func TestStringInputsFromRecordRejectsMalformedColumns(t *testing.T) {
+	for _, scenario := range []string{"missing", "short", "wrong type"} {
+		t.Run(scenario, func(t *testing.T) {
+			r := &materializerTestRecord{len: 2, columns: make(map[storage.FieldID]arrow.Array)}
+			switch scenario {
+			case "short":
+				r.columns[100] = newStringArray(t, []string{"one"})
+			case "wrong type":
+				r.columns[100] = newInt64Array(t, []int64{1, 2})
+			}
+			defer releaseArrowArrays(r.columns)
+			require.NotPanics(t, func() {
+				inputs, err := stringInputsFromRecord(r, 100)
+				require.Nil(t, inputs)
+				require.ErrorIs(t, err, merr.ErrDataIntegrity)
+				require.EqualValues(t, 1009, merr.Status(err).GetCode())
+			})
+		})
+	}
 }
 
 func TestBM25FunctionMaterializerMaterializesNullableInputAsNonNullableOutput(t *testing.T) {
@@ -794,7 +754,6 @@ func TestMaterializedRecordReaderRetainedRecordSurvivesAdvance(t *testing.T) {
 	// reader advancing (its base ref is kept until the retained record is
 	// released).
 	materializer := &RecordMaterializer{
-		schema:        &schemapb.CollectionSchema{},
 		materializers: []FunctionMaterializer{freshOutputMaterializer{t: t, outputFieldID: 101}},
 	}
 
@@ -1006,9 +965,8 @@ func TestRecordMaterializerMaterializesBM25AndMinHashOutputs(t *testing.T) {
 	minHashMaterializer, err := newFunctionMaterializer(bm25Schema, minHashRunner, []int{0}, false)
 	require.NoError(t, err)
 	materializer := &RecordMaterializer{
-		schema:         bm25Schema,
-		materializers:  []FunctionMaterializer{bm25Materializer, minHashMaterializer},
-		pendingOutputs: map[int64]struct{}{bm25Output.GetFieldID(): {}, minHashOutput.GetFieldID(): {}},
+		schema:        bm25Schema,
+		materializers: []FunctionMaterializer{bm25Materializer, minHashMaterializer},
 	}
 	defer materializer.Close()
 
