@@ -304,9 +304,6 @@ func (w *walAdaptorImpl) resolveQueryPlanMVCC(ctx context.Context, req *viewpb.G
 				return nil, err
 			}
 			minimum = max(req.GetLegacySearchRequest().GetGuaranteeTimestamp(), req.GetLegacyRetrieveRequest().GetGuaranteeTimestamp())
-			if current.GrowingTimetick >= minimum && current.TransformingTimetick >= minimum {
-				return current, nil
-			}
 			return w.resolveBarrierMVCC(ctx, vchannel, max(minimum, current.GrowingTimetick, current.TransformingTimetick))
 		}
 		return w.getQueryPlanMVCC(ctx, vchannel, strong, minimum)
@@ -322,21 +319,28 @@ func (w *walAdaptorImpl) resolveBarrierMVCC(ctx context.Context, vchannel string
 	if barrier == 0 {
 		return nil, viewerror.NewUnknownError("query barrier timestamp is zero")
 	}
-	current, ready := w.param.MVCCManager.QueryMVCC().Snapshot(vchannel, 0)
-	if !ready || current.GrowingTimetick < barrier || current.TransformingTimetick < barrier {
-		// Wait for the allocator before registering shared sync work. An
-		// unallocated future timestamp must only hold this request, not the
-		// PChannel's ordinary or persisted TimeTick sync. GetQueryPlan merges
-		// caller and WAL-owner cancellation into ctx; keep the requested B intact.
-		if err := resource.Resource().TSOAllocator().BarrierUntil(ctx, barrier); err != nil {
-			return nil, err
+	current, ready := w.param.MVCCManager.QueryMVCC().SnapshotAt(vchannel, barrier)
+	if ready {
+		if current.GrowingTimetick == 0 && current.TransformingTimetick == 0 {
+			return nil, viewerror.NewViewNotFound("query mvcc for vchannel %s is unavailable", vchannel)
 		}
-		if err := resource.Resource().TimeTickInspector().EnsureBarrier(ctx, w.Channel(), vchannel, barrier); err != nil {
-			if se := status.AsStreamingError(err); se.IsOnShutdown() || se.IsFenced() {
-				return nil, viewerror.NewOnShutdownError("query barrier WAL is unavailable")
-			}
-			return nil, err
+		return &viewpb.QueryPlanMVCC{
+			GrowingTimetick:      current.GrowingTimetick,
+			TransformingTimetick: current.TransformingTimetick,
+		}, nil
+	}
+	// Wait for the allocator before registering shared sync work. An
+	// unallocated future timestamp must only hold this request, not the
+	// PChannel's ordinary or persisted TimeTick sync. GetQueryPlan merges
+	// caller and WAL-owner cancellation into ctx; keep the requested B intact.
+	if err := resource.Resource().TSOAllocator().BarrierUntil(ctx, barrier); err != nil {
+		return nil, err
+	}
+	if err := resource.Resource().TimeTickInspector().EnsureBarrier(ctx, w.Channel(), vchannel, barrier); err != nil {
+		if se := status.AsStreamingError(err); se.IsOnShutdown() || se.IsFenced() {
+			return nil, viewerror.NewOnShutdownError("query barrier WAL is unavailable")
 		}
+		return nil, err
 	}
 	return &viewpb.QueryPlanMVCC{GrowingTimetick: barrier, TransformingTimetick: barrier}, nil
 }

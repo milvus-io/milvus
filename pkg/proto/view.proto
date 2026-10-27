@@ -251,7 +251,8 @@ message GetQueryPlanRequest {
     oneof mvcc {
         common.ConsistencyLevel consistency_level = 3;
         QueryPlanMVCC query_plan_mvcc = 7;
-        // Establish scoped WAL coverage, then read both frontiers at this timestamp.
+        // Establish WAL coverage for this fixed logical snapshot. Execution frontiers
+        // may be lower when the complete prefix proves equivalent visibility.
         uint64 barrier_mvcc = 8;
     }
     repeated int64 partition_ids = 4;

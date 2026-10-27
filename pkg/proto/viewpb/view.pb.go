@@ -1846,7 +1846,8 @@ type GetQueryPlanRequest_QueryPlanMvcc struct {
 }
 
 type GetQueryPlanRequest_BarrierMvcc struct {
-	// Establish scoped WAL coverage, then read both frontiers at this timestamp.
+	// Establish WAL coverage for this fixed logical snapshot. Execution frontiers
+	// may be lower when the complete prefix proves equivalent visibility.
 	BarrierMvcc uint64 `protobuf:"varint,8,opt,name=barrier_mvcc,json=barrierMvcc,proto3,oneof"`
 }
 

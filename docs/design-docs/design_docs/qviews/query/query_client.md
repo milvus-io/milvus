@@ -39,8 +39,9 @@ schema within the requested replica. The returned plan supplies the exact versio
 Strong and Session are sent as Strong; Bounded, Eventually and Customized retain their enum
 values. Strong/Session waits for completed writes; Eventually reuses the current complete
 snapshot, and Bounded also enforces the request guarantee timestamp. Customized
-preserves its guarantee as a lower bound for both frontiers, using a scoped
-barrier when necessary. All use primary-WAL planning. The presence of
+preserves its guarantee as a logical snapshot lower bound, reusing the same
+complete-prefix optimization as BarrierMVCC and establishing a scoped barrier
+only when coverage is insufficient. All use primary-WAL planning. The presence of
 `GetMVCCTimestamp` does not implement WAL-secondary routing.
 
 Phase 2 sends `SearchOnView` or `QueryOnView` concurrently to every worker in the
@@ -154,8 +155,9 @@ as queries; QN uses the selected View's sealed membership. One replica per shard
 
 These are runtime `RowNum` statistics with applied deletes, not a historical
 MVCC snapshot, a TTL-filtered `count(*)`, or a globally atomic row count. The
-barrier fixes both execution wait targets to B; later applied writes/deletes
-can still be reflected by RowNum. This reuses the existing scoped barrier path,
+barrier ensures that changes through B are applied; its execution wait targets
+may be lower where the complete prefix proves no intervening changes. Later
+applied writes/deletes can still be reflected by RowNum. This reuses the existing scoped barrier path,
 including Transform advancement, without a statistics-specific freshness policy. No new periodic row-count reporting or Coordinator aggregation
 is introduced. Growing reuses its existing native `GetRealCount`; sealed reads
 use the existing physical deletion-cardinality counter.

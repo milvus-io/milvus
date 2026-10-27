@@ -30,7 +30,9 @@ type QueryMVCCManager struct {
 	pending    map[string]uint64
 	pendingAll uint64
 	through    uint64
-	changed    chan struct{}
+	// A confirmation may reach WAL consumers before its frontiers are published.
+	publishingThrough uint64
+	changed           chan struct{}
 }
 
 // ApplyRecoveryBarrier runs for live channels before append admission opens.
@@ -87,6 +89,35 @@ func (cm *QueryMVCCManager) Snapshot(channel string, minimum uint64) (QueryVChan
 	return cm.frontiers[channel], cm.through >= minimum
 }
 
+// BeginPublication fences fixed-snapshot optimization before a confirmation is
+// exposed through the WAL or WAB. A consumer can publish a new View while the
+// corresponding frontier update is still pending. Do not lower that View's
+// execution timestamps using the previous prefix. Failed appends leave the
+// fence in place until a successful publication covers their possible effects.
+func (cm *QueryMVCCManager) BeginPublication(through uint64) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	cm.publishingThrough = max(cm.publishingThrough, through)
+}
+
+// SnapshotAt returns execution frontiers equivalent to the fixed timestamp,
+// only after the complete published prefix covers it and any confirmation
+// already exposed to consumers. The caller acquires its View before sampling.
+// If a frontier is below timestamp, the covered interval contains no relevant
+// events for that frontier. Otherwise timestamp excludes all later events.
+// A ready zero pair still denotes an absent channel, as with Snapshot.
+func (cm *QueryMVCCManager) SnapshotAt(channel string, timestamp uint64) (QueryVChannelMVCC, bool) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	if cm.through < max(timestamp, cm.publishingThrough) {
+		return QueryVChannelMVCC{}, false
+	}
+	snapshot := cm.frontiers[channel]
+	snapshot.GrowingTimetick = min(snapshot.GrowingTimetick, timestamp)
+	snapshot.TransformingTimetick = min(snapshot.TransformingTimetick, timestamp)
+	return snapshot, true
+}
+
 func (cm *QueryMVCCManager) WaitSnapshot(ctx context.Context, channel string, minimum uint64) (QueryVChannelMVCC, error) {
 	for {
 		cm.mu.Lock()
@@ -134,6 +165,9 @@ func (cm *QueryMVCCManager) Publish(messages iter.Seq2[message.ImmutableMessage,
 		}
 	}
 	cm.through = confirmation.TimeTick()
+	if cm.publishingThrough <= cm.through {
+		cm.publishingThrough = 0
+	}
 	if cm.pendingAll <= cm.through {
 		cm.pendingAll = 0
 	}

@@ -218,3 +218,117 @@ func queryMVCCMessages(messages []message.ImmutableMessage) func(func(message.Im
 		}
 	}
 }
+
+func TestQueryMVCCSnapshotAtRequiresCompletePrefix(t *testing.T) {
+	cm := NewQueryMVCCManager(100)
+	cm.ApplyRecoveryBarrier("v", 100)
+	deletion := createQueryTestMessage(t, 150, "v", message.MessageTypeDelete, false, true)
+	insert := createQueryTestMessage(t, 200, "v", message.MessageTypeInsert, false, true)
+	cm.ObserveAppend(insert) // An earlier Delete still prevents prefix publication.
+	_, ready := cm.SnapshotAt("v", 175)
+	require.False(t, ready, "append completion cannot certify a historical cutoff")
+	publishQueryTestPrefix(t, cm, 250, deletion, insert)
+	got, ready := cm.SnapshotAt("v", 175)
+	require.True(t, ready)
+	require.Equal(t, QueryVChannelMVCC{175, 150}, got)
+	original, _ := cm.Snapshot("v", 250)
+	require.Equal(t, QueryVChannelMVCC{200, 150}, original, "clipping must not mutate published frontiers")
+	_, ready = cm.SnapshotAt("v", 251)
+	require.False(t, ready)
+	got, ready = cm.SnapshotAt("absent", 175)
+	require.True(t, ready)
+	require.Equal(t, QueryVChannelMVCC{}, got)
+}
+
+// Compare the real frontier projection against scalar-B row visibility, rather
+// than duplicating the min formula as the expected result. Flush moves existing
+// rows to the sealed executor; Import publishes sealed rows directly. Every
+// later prefix rechecks earlier B values, modeling iterator retries after new
+// inserts, deletes, commits and growing-to-sealed handoffs.
+func TestQueryMVCCSnapshotAtMatchesScalarVisibility(t *testing.T) {
+	type row struct {
+		inserted, deleted uint64
+		sealed            bool
+	}
+	kinds := []message.MessageType{
+		message.MessageTypeInsert, message.MessageTypeDelete, message.MessageTypeFlush,
+		message.MessageTypeCommitImport, message.MessageTypeCommitTxn, message.MessageTypeCommitTxn,
+	}
+	const insertOnlyTxn = 4
+	const mixedTxn = 5
+	const historyCount = 6 * 6 * 6
+	for history := range historyCount {
+		cm := NewQueryMVCCManager(1)
+		cm.ApplyRecoveryBarrier("v", 1)
+		var rows []row
+		remaining := history
+		for step := range 3 {
+			op := remaining % len(kinds)
+			remaining /= len(kinds)
+			ts := uint64((step + 1) * 10)
+			msg := createQueryTestMessage(t, ts, "v", kinds[op], op >= insertOnlyTxn, true).IntoImmutableMessage(nil)
+			cm.Publish(func(yield func(message.ImmutableMessage, bool) bool) {
+				yield(msg, op == insertOnlyTxn)
+			}, createQueryTestMessage(t, ts+2, "", message.MessageTypeTimeTick, false, false).IntoImmutableMessage(nil))
+			switch op {
+			case 1, mixedTxn: // Delete all previously inserted live rows.
+				for i := range rows {
+					if rows[i].deleted == 0 {
+						rows[i].deleted = ts
+					}
+				}
+			case 2: // A new View serves flushed rows on the sealed executor.
+				for i := range rows {
+					rows[i].sealed = true
+				}
+			}
+			if op == 0 || op == 3 || op == insertOnlyTxn || op == mixedTxn {
+				rows = append(rows, row{inserted: ts, sealed: op == 3})
+			}
+			for barrier := uint64(1); barrier <= ts+2; barrier++ {
+				snapshot, ready := cm.SnapshotAt("v", barrier)
+				require.True(t, ready)
+				for id, row := range rows {
+					want := row.inserted <= barrier && (row.deleted == 0 || row.deleted > barrier)
+					executeAt := snapshot.GrowingTimetick
+					if row.sealed {
+						executeAt = snapshot.TransformingTimetick
+					}
+					got := row.inserted <= executeAt && (row.deleted == 0 || row.deleted > executeAt)
+					require.Equal(t, want, got, "history=%d prefix=%d B=%d row=%d snapshot=%+v", history, ts+2, barrier, id, snapshot)
+				}
+			}
+		}
+	}
+}
+
+func TestQueryMVCCSnapshotAtFencesViewPublication(t *testing.T) {
+	cm := NewQueryMVCCManager(100)
+	cm.ApplyRecoveryBarrier("v", 100)
+	insert := createQueryTestMessage(t, 120, "v", message.MessageTypeInsert, false, true)
+	publishQueryTestPrefix(t, cm, 150, insert)
+	before, ready := cm.SnapshotAt("v", 130)
+	require.True(t, ready)
+	require.Equal(t, QueryVChannelMVCC{120, 100}, before)
+	cm.BeginPublication(250)
+	// Flush@240 can already be consumed and publish a View serving Insert@120
+	// as sealed. T=100 from the old prefix would omit that row in this new View.
+	_, ready = cm.SnapshotAt("v", 130)
+	require.False(t, ready)
+	flush := createQueryTestMessage(t, 240, "v", message.MessageTypeFlush, false, true)
+	publishQueryTestPrefix(t, cm, 250, flush)
+	after, ready := cm.SnapshotAt("v", 130)
+	require.True(t, ready)
+	require.Equal(t, QueryVChannelMVCC{120, 130}, after)
+	cm.BeginPublication(350)
+	// An append failure is ambiguous. Neither an old publication nor a
+	// smaller retry may prematurely remove its fence.
+	cm.BeginPublication(300)
+	publishQueryTestPrefix(t, cm, 300)
+	_, ready = cm.SnapshotAt("v", 130)
+	require.False(t, ready)
+	publishQueryTestPrefix(t, cm, 400)
+	after, ready = cm.SnapshotAt("v", 130)
+	require.True(t, ready)
+	require.Equal(t, QueryVChannelMVCC{120, 130}, after)
+}

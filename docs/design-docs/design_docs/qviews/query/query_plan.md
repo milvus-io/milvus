@@ -28,7 +28,7 @@ the corresponding request is planned/executed against the selected resources.
 | --- | --- | --- |
 | Consistency level | Obtain paired frontiers from a complete published primary-WAL prefix | May select a new prefix when replanning |
 | Explicit `QueryPlanMVCC` | Caller fixes Growing and Transform frontiers | Preserve both frontiers |
-| `BarrierMVCC=B` | Establish WAL coverage for a scalar snapshot B | Re-establish coverage if needed, execute Growing=B and Transform=B |
+| `BarrierMVCC=B` | Establish WAL coverage for a scalar snapshot B | Preserve logical B; execution frontiers may be smaller where the covered prefix proves no intervening events |
 
 `QueryMVCCManager` owns one executable frontier map, the complete published
 prefix position, and pending freshness bounds. Successful append callbacks only
@@ -52,21 +52,53 @@ callbacks cannot register or revive channels. Recovery initializes live channels
 at its complete opening fence before append admission opens.
 
 Customized reads preserve the request's GuaranteeTimestamp as a lower bound
-for both execution frontiers. If either frontier is behind, planning establishes
-a barrier at the maximum of that guarantee and the currently visible frontiers.
-This preserves newer visible writes instead of interpreting the guarantee as an
-exact historical snapshot. Already-covered requests require no barrier; future
-guarantees use the same allocator admission and cancellation as explicit barriers.
+on the logical snapshot. Planning chooses B as the maximum of that guarantee and
+the currently visible frontiers, then uses the same barrier resolution as an
+explicit BarrierMVCC. This preserves already observed writes without requiring
+both execution frontiers to reach the guarantee.
+
+The manager logically owns (G,T,P): per-channel Growing/Transform frontiers and
+the shared PChannel complete-prefix boundary P (`through`). All three are read
+atomically; P is not a per-View version or a new wire field. `SnapshotAt(B)`
+requires P >= B and returns (min(G,B), min(T,B)). A zero pair denotes a missing
+channel and is rejected by planning. This reads at logical B without creating
+Transform progress solely because Growing writes or idle confirmations advanced.
+
+The sync operator calls `BeginPublication` before appending a confirmation, so
+both durable WAL readers and WAB readers are fenced before they can publish a
+new View ahead of its frontier update. `SnapshotAt` disables clipping while
+`publishingThrough > P`; planning uses the existing scalar barrier path instead.
+A failed append retains this conservative fence until a successful publication
+covers it. The fence lives in QueryMVCCManager, performs no network I/O under its
+lock, and does not change ordinary Strong/weak snapshot selection. The selected
+View is acquired before sampling; later publications cannot replace that View
+inside the attempt.
+
+For either frontier X, if X < B <= P, the complete prefix contains no relevant
+event in (X,B], so reading at X is equivalent to reading at B. If X >= B, the
+executor reads at B and filters out later row mutations. Delete advances both
+frontiers; insert-only transactions advance Growing at Commit, while mixed
+transactions advance both at Commit. Flush/import publication advances Transform,
+so sealed membership cannot be used to treat newly published rows as unrelated
+to that frontier. This argument assumes the acquired View's existing resource
+and history guarantees; it does not introduce historical DDL or extend retention.
+
+A clipped pair is an execution bound, not necessarily the exact maxima of
+historical events at B. Subsequent prefixes or a recovered owner may produce a
+different pair for the same B; both must remain logically equivalent to B.
+Iterator continuation retains the original scalar B, never max of the optimized
+pair. Explicit QueryPlanMVCC and retained requery still preserve their exact pair.
 
 Explicit MVCC and BarrierMVCC are mutually exclusive. A barrier is useful for
 Iterator snapshot continuation; an ACK published later than B does not change
 the query's snapshot. Master supplies scoped barrier production and its ordered
-TransformLog/query-resource delivery. If existing frontiers do not cover B,
+TransformLog/query-resource delivery. If the complete prefix does not cover B,
 planning first waits for `TSOAllocator.BarrierUntil` under the caller and WAL-owner
 contexts, then calls `TimeTickSyncInspector.EnsureBarrier`. An unallocated future
 timestamp cannot occupy shared TimeTick sync work. The inspector certifies
 publication; planning separately waits for the selected runtime to apply the
-required frontiers before executing.
+required frontiers before executing. This slow path retains the conservative
+(B,B) execution pair after establishing coverage.
 This extraction does not enable the Proxy Iterator path or extend historical
 retention.
 

@@ -172,7 +172,7 @@ func queryMVCCMessages(messages []message.ImmutableMessage) func(func(message.Im
 	}
 }
 
-func TestCustomizedGuaranteeAdvancesBothFrontiers(t *testing.T) {
+func TestCustomizedGuaranteeReusesCompletePrefix(t *testing.T) {
 	resource.InitForTest(t)
 	mockey.PatchConvey("customized reads preserve the caller lower bound and newer writes", t, func() {
 		manager := mvcc.NewMVCCManager(100)
@@ -190,7 +190,7 @@ func TestCustomizedGuaranteeAdvancesBothFrontiers(t *testing.T) {
 		}).Build()
 		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: t.Context(), lifetime: typeutil.NewLifetime()}, param: &interceptors.InterceptorBuildParam{MVCCManager: manager}}
 		for _, search := range []bool{false, true} {
-			for _, guarantee := range []uint64{90, 150, 300} {
+			for _, guarantee := range []uint64{90, 150, 225, 250, 300} {
 				req := &viewpb.GetQueryPlanRequest{Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Customized}}
 				if search {
 					req.Request = &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: &internalpb.SearchRequest{GuaranteeTimestamp: guarantee}}
@@ -200,7 +200,7 @@ func TestCustomizedGuaranteeAdvancesBothFrontiers(t *testing.T) {
 				before := ensured.Times()
 				got, err := w.resolveQueryPlanMVCC(t.Context(), req, "v")
 				require.NoError(t, err)
-				if guarantee == 90 {
+				if guarantee <= 250 {
 					require.EqualValues(t, 200, got.GrowingTimetick)
 					require.EqualValues(t, 100, got.TransformingTimetick)
 					require.Equal(t, before, ensured.Times())

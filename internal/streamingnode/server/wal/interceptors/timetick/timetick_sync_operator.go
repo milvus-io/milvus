@@ -185,6 +185,9 @@ func (impl *timeTickSyncOperator) sendTsMsgToWAL(ctx context.Context,
 		})
 	}
 
+	// Fence before either durable WAL readers or WAB readers can observe the
+	// confirmation and publish a View ahead of its query-frontier update.
+	impl.MVCCManager().QueryMVCC().BeginPublication(ts)
 	// Append it to wal.
 	msgID, err := appender(ctx, msg)
 	if err != nil {
