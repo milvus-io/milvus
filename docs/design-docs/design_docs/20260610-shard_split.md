@@ -2967,6 +2967,16 @@ Other follow-ups:
   path to reach unlisted targets, from a record of the task the callback would
   have to write for a dropping collection too (the same record the item above
   needs).
+- **A callback refused after its DataCoord commit leaves the targets marked
+  "added".** The SplitShard callback commits at DataCoord first (the task, the
+  targets' `MarkChannelAdded`, their checkpoint seeds) and applies the routing
+  after. When the collection goes `Dropping` between the two,
+  `ApplyShardSplitRouting` refuses it and the callback ends, so the targets keep
+  their channel marks and checkpoint rows; the drop removes only the vchannels
+  the collection lists, which never included them. Harmless in the same way as
+  the retired source's mark below: the marks keep the GC guard on for channels
+  that get no segments, and the keys are never deleted. Same family as the item
+  above; the drop path reaching unlisted targets would clean these up too.
 - **A retired source's channel mark stays "added".** `CommitShardSplit` marks
   the targets added, and nothing ever marks a retired source removed, because
   retirement never calls `DropVirtualChannel` (§6.5). Harmless: the mark only
