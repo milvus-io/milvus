@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	importv3pb "github.com/milvus-io/milvus/pkg/v3/proto/importv3pb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -314,19 +315,24 @@ func TestImportTaskV3CreateTaskOnWorkerUsesPlanStorageVersion(t *testing.T) {
 	require.Equal(t, storage.StorageV3, meta.GetSegment(ctx, 100).GetStorageVersion())
 }
 
-// TestImportTaskV3AcceptanceNotifiesIndexBuild pins the per-segment index
-// wakeup: accepting a Completed worker result persists the segment as
-// Flushed+IsSorted and must push it to the indexInspector's build channel in
-// the same tick. Without the push, a burst of finishing import tasks leaves
-// every accepted segment waiting for the next TaskCheckInterval (60s) scan,
-// which makes index building effectively start only after the whole merge
-// stage (V2 parity: postFlush and mixCompaction push each finished segment).
+// TestImportTaskV3AcceptanceNotifiesIndexAndStatsBuild pins the per-segment
+// index and stats wakeups: accepting a Completed worker result persists the
+// segment as Flushed+IsSorted and must push it to both the indexInspector's and
+// the statsInspector's build channels in the same tick. Without the index push,
+// a burst of finishing import tasks leaves every accepted segment waiting for
+// the next TaskCheckInterval (60s) scan, which makes index building effectively
+// start only after the whole merge stage (V2 parity: postFlush and
+// mixCompaction push each finished segment). The segment is already sorted, so
+// no sort compaction pushes it to stats discovery; without the stats push its
+// text and JSON key stats wait for the reconcile scan.
 // A zero-row placeholder is dropped at acceptance and must NOT be pushed:
 // the buildIndexCh consumer does not re-check the segment state.
-func TestImportTaskV3AcceptanceNotifiesIndexBuild(t *testing.T) {
+func TestImportTaskV3AcceptanceNotifiesIndexAndStatsBuild(t *testing.T) {
 	ctx := context.Background()
-	drainBuildIndexCh()
-	defer drainBuildIndexCh()
+	drainBuildIndexChForTest()
+	defer drainBuildIndexChForTest()
+	drainStatsBuildChForTest()
+	defer drainStatsBuildChForTest()
 
 	meta, err := newMemoryMeta(t)
 	require.NoError(t, err)
@@ -362,7 +368,8 @@ func TestImportTaskV3AcceptanceNotifiesIndexBuild(t *testing.T) {
 	seg := meta.GetSegment(ctx, 100)
 	require.Equal(t, commonpb.SegmentState_Flushed, seg.GetState())
 	require.True(t, seg.GetIsSorted())
-	require.Equal(t, []int64{100}, drainBuildIndexCh())
+	require.Equal(t, []int64{100}, drainBuildIndexChForTest())
+	require.Equal(t, []int64{100}, drainStatsBuildChForTest())
 
 	// Zero-row result: placeholder dropped at acceptance, nothing pushed.
 	_, err = addImportSegment(ctx, meta, 101, 1, 11, 2, 3, "v0", datapb.SegmentLevel_L1, storage.StorageV2, 0)
@@ -381,7 +388,8 @@ func TestImportTaskV3AcceptanceNotifiesIndexBuild(t *testing.T) {
 	task2.QueryTaskOnWorker(cluster)
 
 	require.Equal(t, commonpb.SegmentState_Dropped, meta.GetSegment(ctx, 101).GetState())
-	require.Empty(t, drainBuildIndexCh())
+	require.Empty(t, drainBuildIndexChForTest())
+	require.Empty(t, drainStatsBuildChForTest())
 }
 
 func TestReconcileOrphanImportSegments(t *testing.T) {
@@ -516,65 +524,52 @@ func TestImportTaskV3QueryFailedMarksTaskFailed(t *testing.T) {
 // transient (non-terminal) error goes back through prepareRetry, while a terminal
 // error fails the task outright.
 func TestImportTaskV3QueryRPCErrorClassification(t *testing.T) {
-	newTask := func(t *testing.T, importMeta ImportMeta, meta *meta, alloc allocator.Allocator) *importTaskV3 {
-		return newImportTaskV3(&datapb.ImportTaskV3{
-			JobId: 1, TaskId: 10, CollectionId: 2, State: datapb.ImportTaskStateV2_InProgress,
-			RunId: 1, NodeId: 5, SegmentId: 100, LogRange: &datapb.IDRange{Begin: 1000, End: 2000},
-		}, importMeta, meta, alloc)
-	}
+	// Whatever the Query RPC failure is -- transport, node
+	// loss or a typed status -- the outcome is unknown, so DataCoord allocates
+	// a fresh run. The worker's Failed/Retry verdict arrives with err == nil
+	// and is handled from the response state instead.
+	for _, c := range []struct {
+		name string
+		err  error
+	}{
+		{"transient error retries", context.DeadlineExceeded},
+		{"terminal status also retries", merr.WrapErrDataIntegrityMsg("bad result manifest")},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			meta, err := newMemoryMeta(t)
+			require.NoError(t, err)
+			importMeta := NewMockImportMeta(t)
+			cluster := session.NewMockCluster(t)
+			alloc := allocator.NewMockAllocator(t)
+			job := &importJob{ImportJob: &datapb.ImportJob{
+				JobID: 1, CollectionID: 2, State: internalpb.ImportJobState_Importing, DataTs: 1, Schema: retryTestSchema,
+			}}
+			task := newImportTaskV3(&datapb.ImportTaskV3{
+				JobId: 1, TaskId: 10, CollectionId: 2, State: datapb.ImportTaskStateV2_InProgress,
+				RunId: 1, NodeId: 5, SegmentId: 100, LogRange: &datapb.IDRange{Begin: 1000, End: 2000},
+			}, importMeta, meta, alloc)
 
-	t.Run("transient error retries", func(t *testing.T) {
-		meta, err := newMemoryMeta(t)
-		require.NoError(t, err)
-		importMeta := NewMockImportMeta(t)
-		cluster := session.NewMockCluster(t)
-		alloc := allocator.NewMockAllocator(t)
-		job := &importJob{ImportJob: &datapb.ImportJob{
-			JobID: 1, CollectionID: 2, State: internalpb.ImportJobState_Importing, DataTs: 1, Schema: retryTestSchema,
-		}}
-		task := newTask(t, importMeta, meta, alloc)
-
-		cluster.EXPECT().QueryImportV3(int64(5), mock.Anything).Return(nil, context.DeadlineExceeded).Once()
-		importMeta.EXPECT().GetJob(mock.Anything, int64(1)).Return(job).Once()
-		cluster.EXPECT().DropImportV3(int64(5), mock.Anything).Return(nil).Once()
-		alloc.EXPECT().AllocID(mock.Anything).Return(int64(200), nil).Once()
-		alloc.EXPECT().AllocN(mock.Anything).Return(int64(5000), int64(6000), nil).Once()
-		importMeta.EXPECT().UpdateTask(mock.Anything, int64(10),
-			mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
-		).RunAndReturn(func(_ context.Context, _ int64, actions ...UpdateAction) error {
-			clone := task.Clone()
-			for _, action := range actions {
-				action(clone)
-			}
-			task.task.Store(clone.(*importTaskV3).task.Load())
-			return nil
-		}).Once()
-
-		task.QueryTaskOnWorker(cluster)
-		require.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
-		require.Equal(t, int64(2), task.task.Load().GetRunId())
-	})
-
-	t.Run("terminal error fails", func(t *testing.T) {
-		meta, err := newMemoryMeta(t)
-		require.NoError(t, err)
-		importMeta := NewMockImportMeta(t)
-		cluster := session.NewMockCluster(t)
-		task := newTask(t, importMeta, meta, nil)
-
-		cluster.EXPECT().QueryImportV3(int64(5), mock.Anything).
-			Return(nil, merr.WrapErrDataIntegrityMsg("bad result manifest")).Once()
-		importMeta.EXPECT().UpdateTask(mock.Anything, int64(10), mock.Anything, mock.Anything).
-			Run(func(_ context.Context, _ int64, actions ...UpdateAction) {
+			cluster.EXPECT().QueryImportV3(int64(5), mock.Anything).Return(nil, c.err).Once()
+			importMeta.EXPECT().GetJob(mock.Anything, int64(1)).Return(job).Once()
+			cluster.EXPECT().DropImportV3(int64(5), mock.Anything).Return(nil).Once()
+			alloc.EXPECT().AllocID(mock.Anything).Return(int64(200), nil).Once()
+			alloc.EXPECT().AllocN(mock.Anything).Return(int64(5000), int64(6000), nil).Once()
+			importMeta.EXPECT().UpdateTask(mock.Anything, int64(10),
+				mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+			).Run(func(_ context.Context, _ int64, actions ...UpdateAction) {
 				clone := task.Clone().(*importTaskV3)
 				for _, action := range actions {
 					action(clone)
 				}
-				require.Equal(t, datapb.ImportTaskStateV2_Failed, clone.task.Load().GetState())
+				require.Equal(t, datapb.ImportTaskStateV2_Pending, clone.GetState())
+				require.Equal(t, int64(2), clone.task.Load().GetRunId())
 			}).Return(nil).Once()
 
-		task.QueryTaskOnWorker(cluster)
-	})
+			// The UpdateTask mock applies the actions to a clone, so the
+			// Pending/run-id assertions live in its Run callback above.
+			task.QueryTaskOnWorker(cluster)
+		})
+	}
 }
 
 // TestImportTaskV3QueryCompletedAfterJobLeftImportingIsNoOp pins the Completed
@@ -681,4 +676,72 @@ func TestImportTaskV3CreateTaskKeepsOldSegmentsOnDropFailure(t *testing.T) {
 	require.Equal(t, []int64{101}, task.task.Load().GetOldSegmentIds(),
 		"old_segment_ids must survive for the retry on the next tick")
 	require.Nil(t, m.GetSegment(ctx, 100), "no segment may be created when the dispatch aborted early")
+}
+
+// TestImportTaskV3RPCErrorVerdict is the import-task half of the RPC verdict:
+// transient/node-not-found failures allocate a fresh run; permanent input
+// errors fail the task.
+func TestImportTaskV3CreateRPCErrorVerdict(t *testing.T) {
+	cases := []struct {
+		name  string
+		err   error
+		retry bool
+	}{
+		{"transport error retries", errors.New("connection reset"), true},
+		{"node not found retries", merr.ErrNodeNotFound, true},
+		{"typed io failure fails", merr.WrapErrIoFailed("manifest", errors.New("connection reset")), false},
+		{"service unavailable retries", merr.ErrServiceUnavailable, true},
+		{"parameter invalid fails", merr.WrapErrParameterInvalidMsg("bad request"), false},
+		{"import sys failed fails", merr.WrapErrImportSysFailedMsg("invalid request"), false},
+		{"permanent io fails", merr.WrapErrIoKeyNotFound("manifest", "not found"), false},
+		{"service internal fails", merr.WrapErrServiceInternalMsg("internal"), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			meta, err := newMemoryMeta(t)
+			require.NoError(t, err)
+			importMeta := NewMockImportMeta(t)
+			cluster := session.NewMockCluster(t)
+			alloc := allocator.NewMockAllocator(t)
+			task := newImportTaskV3(&datapb.ImportTaskV3{
+				JobId: 1, TaskId: 10, CollectionId: 2, State: datapb.ImportTaskStateV2_InProgress,
+				RunId: 1, NodeId: 5, SegmentId: 100, LogRange: &datapb.IDRange{Begin: 1000, End: 2000},
+			}, importMeta, meta, alloc)
+
+			if c.retry {
+				job := &importJob{ImportJob: &datapb.ImportJob{
+					JobID: 1, CollectionID: 2, State: internalpb.ImportJobState_Importing, DataTs: 1, Schema: retryTestSchema,
+				}}
+				importMeta.EXPECT().GetJob(mock.Anything, int64(1)).Return(job).Once()
+				cluster.EXPECT().DropImportV3(int64(5), mock.Anything).Return(nil).Once()
+				alloc.EXPECT().AllocID(mock.Anything).Return(int64(200), nil).Once()
+				alloc.EXPECT().AllocN(mock.Anything).Return(int64(5000), int64(6000), nil).Once()
+				importMeta.EXPECT().UpdateTask(mock.Anything, int64(10),
+					mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+				).Run(func(_ context.Context, _ int64, actions ...UpdateAction) {
+					clone := task.Clone().(*importTaskV3)
+					for _, action := range actions {
+						action(clone)
+					}
+					require.Equal(t, datapb.ImportTaskStateV2_Pending, clone.GetState())
+					require.Equal(t, int64(2), clone.task.Load().GetRunId())
+				}).Return(nil).Once()
+			} else {
+				importMeta.EXPECT().UpdateTask(mock.Anything, int64(10), mock.Anything, mock.Anything).
+					Run(func(_ context.Context, _ int64, actions ...UpdateAction) {
+						clone := task.Clone().(*importTaskV3)
+						for _, action := range actions {
+							action(clone)
+						}
+						require.Equal(t, datapb.ImportTaskStateV2_Failed, clone.GetState())
+					}).Return(nil).Once()
+			}
+
+			if importcommon.IsTerminalImportV3Err(c.err) {
+				task.fail(c.err.Error())
+			} else {
+				task.prepareRetry(cluster)
+			}
+		})
+	}
 }

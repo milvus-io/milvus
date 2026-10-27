@@ -52,6 +52,7 @@ type VChannelRecoveryModule struct {
 	queryResources          *queryresource.Manager
 	queryTransformLogStream wal.TransformLogStream
 	queryObservedTimeTick   uint64
+	queryBarrierTimeTick    uint64
 	querySealed             map[int64]bool
 	summaryManager          *walsummary.Manager
 

@@ -108,7 +108,9 @@ ParseRuntimeParams(const Config& params) {
     result.nullable =
         GetValueFromConfigOrFallback<bool>(params, "nullable", false);
     result.nested = ReadRequiredNestedParam(params, "bitmap loader");
-    result.value_lookup = result.field_type != DataType::ARRAY || result.nested;
+    result.value_lookup = (result.field_type != DataType::ARRAY &&
+                           !IsJsonArrayProjection(params)) ||
+                          result.nested;
     result.offset_cache =
         GetValueFromConfigOrFallback<bool>(params, ENABLE_OFFSET_CACHE, false);
     return result;
@@ -1151,6 +1153,7 @@ BitmapIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
         state->meta.count,
         !has_validity && (state->meta.nested || !state->params.nullable));
     IndexLoadPlan plan;
+    plan.worker_writes = false;
     plan.load_context = state;
     plan.entries.reserve(3);
     state->projection = PreparePackedJsonProjectedOpen(

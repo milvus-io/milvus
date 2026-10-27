@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -38,7 +39,15 @@ type indexInspector struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	notifyIndexChan chan int64
+	notifyIndexChan     chan int64
+	notifiedIndexSegsCh chan struct{}
+	pendingIndexMu      sync.Mutex
+	// notifiedIndexSegs holds the segments notified since the last round; a
+	// notification round processes exactly these.
+	notifiedIndexSegs typeutil.UniqueSet
+	// pendingIndexSegs holds the segments to retry (startup scan, failed or
+	// deferred attempts); only the ticker processes them.
+	pendingIndexSegs typeutil.UniqueSet
 
 	meta                      *meta
 	scheduler                 task.GlobalScheduler
@@ -64,6 +73,9 @@ func newIndexInspector(
 		cancel:                    cancel,
 		meta:                      meta,
 		notifyIndexChan:           notifyIndexChan,
+		notifiedIndexSegsCh:       make(chan struct{}, 1),
+		notifiedIndexSegs:         typeutil.NewUniqueSet(),
+		pendingIndexSegs:          typeutil.NewUniqueSet(),
 		scheduler:                 scheduler,
 		allocator:                 allocator,
 		handler:                   handler,
@@ -72,8 +84,55 @@ func newIndexInspector(
 	}
 }
 
+// notifyIndexSegments queues segments for the next notification round.
+func (i *indexInspector) notifyIndexSegments(segIDs ...UniqueID) {
+	if len(segIDs) == 0 {
+		return
+	}
+
+	i.pendingIndexMu.Lock()
+	defer i.pendingIndexMu.Unlock()
+	i.notifiedIndexSegs.Insert(segIDs...)
+	select {
+	case i.notifiedIndexSegsCh <- struct{}{}:
+	default:
+	}
+}
+
+// requeuePendingIndexSegments keeps segments for the ticker to retry.
+func (i *indexInspector) requeuePendingIndexSegments(segIDs ...UniqueID) {
+	i.pendingIndexMu.Lock()
+	defer i.pendingIndexMu.Unlock()
+	i.pendingIndexSegs.Insert(segIDs...)
+}
+
+// popIndexSegments takes the notified segments, plus the pending ones when
+// withPending is set. A notified segment supersedes its pending retry.
+func (i *indexInspector) popIndexSegments(withPending bool) []UniqueID {
+	i.pendingIndexMu.Lock()
+	segIDs := i.notifiedIndexSegs.Collect()
+	i.notifiedIndexSegs = typeutil.NewUniqueSet()
+	if !withPending {
+		i.pendingIndexSegs.Remove(segIDs...)
+		i.pendingIndexMu.Unlock()
+		return segIDs
+	}
+	pending := i.pendingIndexSegs
+	i.pendingIndexSegs = typeutil.NewUniqueSet()
+	i.pendingIndexMu.Unlock()
+
+	// The swapped-out backlog is owned here, so merge it outside the lock.
+	pending.Insert(segIDs...)
+	return pending.Collect()
+}
+
 func (i *indexInspector) Start() {
+	// Become the buildIndexCh consumer before any producer starts.
+	setBuildIndexConsumer(i.ctx.Done())
+	i.wg.Add(1)
+	go i.forwardBuildIndexCh(i.ctx)
 	i.reloadFromMeta()
+	i.requeuePendingIndexSegments(i.getUnIndexTaskSegments(i.ctx)...)
 	i.wg.Add(1)
 	go i.createIndexForSegmentLoop(i.ctx)
 }
@@ -90,56 +149,160 @@ func (i *indexInspector) createIndexForSegmentLoop(ctx context.Context) {
 
 	ticker := time.NewTicker(Params.DataCoordCfg.TaskCheckInterval.GetAsDuration(time.Second))
 	defer ticker.Stop()
+	reconcileTicker := time.NewTicker(getIndexReconcileInterval())
+	defer reconcileTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			mlog.Warn(ctx, "DataCoord context done, exit...")
 			return
 		case <-ticker.C:
-			segments := i.getUnIndexTaskSegments(ctx)
-			for _, segment := range segments {
-				if err := i.createIndexesForSegment(ctx, segment); err != nil {
-					mlog.Warn(ctx, "create index for segment fail, wait for retry", mlog.FieldSegmentID(segment.ID))
-					continue
-				}
-			}
+			i.processIndexSegments(ctx, true)
+		case <-i.notifiedIndexSegsCh:
+			i.processIndexSegments(ctx, false)
+		case <-reconcileTicker.C:
+			i.notifyIndexSegments(i.getUnIndexTaskSegments(ctx)...)
 		case collectionID := <-i.notifyIndexChan:
 			mlog.Info(ctx, "receive create index notify", mlog.FieldCollectionID(collectionID))
-			isExternal := i.isExternalCollection(collectionID)
-			segments := i.meta.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
-				return isFlush(info) && (!enableSortCompaction() || info.GetIsSorted() || info.GetIsSortedByNamespace() || isExternal)
-			}))
-			for _, segment := range segments {
-				if err := i.createIndexesForSegment(ctx, segment); err != nil {
-					mlog.Warn(ctx, "create index for segment fail, wait for retry", mlog.FieldSegmentID(segment.ID))
-					continue
-				}
-			}
-		case segID := <-getBuildIndexChSingleton():
-			mlog.Info(ctx, "receive new flushed segment", mlog.FieldSegmentID(segID))
-			segment := i.meta.GetSegment(ctx, segID)
-			if segment == nil {
-				mlog.Warn(ctx, "segment is not exist, no need to build index", mlog.FieldSegmentID(segID))
-				continue
-			}
-			if err := i.createIndexesForSegment(ctx, segment); err != nil {
-				mlog.Warn(ctx, "create index for segment fail, wait for retry", mlog.FieldSegmentID(segment.ID))
-				continue
-			}
+			i.notifyIndexSegments(i.getUnIndexTaskSegments(ctx, WithCollection(collectionID))...)
 		}
 	}
 }
 
-func (i *indexInspector) getUnIndexTaskSegments(ctx context.Context) []*SegmentInfo {
-	flushedSegments := i.meta.SelectSegments(ctx, SegmentFilterFunc(isFlush))
-
-	unindexedSegments := make([]*SegmentInfo, 0)
-	for _, segment := range flushedSegments {
-		if i.meta.indexMeta.IsUnIndexedSegment(segment.CollectionID, segment.GetID()) {
-			unindexedSegments = append(unindexedSegments, segment)
+// forwardBuildIndexCh moves segments from buildIndexCh into the notified set.
+// It runs apart from createIndexForSegmentLoop so that a sender waiting on a
+// full channel never waits for a create-index round to finish.
+func (i *indexInspector) forwardBuildIndexCh(ctx context.Context) {
+	defer i.wg.Done()
+	ch := getBuildIndexChSingleton()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case segID := <-ch:
+			// Take what is already buffered too, so a burst costs one log line
+			// and one wake-up of the create-index loop.
+			segIDs := []UniqueID{segID}
+		drain:
+			for len(segIDs) < cap(ch) {
+				select {
+				case segID = <-ch:
+					segIDs = append(segIDs, segID)
+				default:
+					break drain
+				}
+			}
+			mlog.Info(ctx, "receive segments to build index", mlog.Int64s("segmentIDs", segIDs))
+			i.notifyIndexSegments(segIDs...)
 		}
 	}
-	return unindexedSegments
+}
+
+func getIndexReconcileInterval() time.Duration {
+	checkInterval := Params.DataCoordCfg.TaskCheckInterval.GetAsDuration(time.Second)
+	return checkInterval * 10
+}
+
+// getUnIndexTaskSegments returns the IDs of the segments that can build index
+// now but still miss an index task.
+func (i *indexInspector) getUnIndexTaskSegments(ctx context.Context, filters ...SegmentFilter) []UniqueID {
+	sortCompactionEnabled := enableSortCompaction()
+	externalCollections := make(map[UniqueID]bool)
+	segmentFilters := append([]SegmentFilter{}, filters...)
+	segmentFilters = append(segmentFilters, SegmentFilterFunc(func(segment *SegmentInfo) bool {
+		if !isFlush(segment) {
+			return false
+		}
+		if segment.GetLevel() == datapb.SegmentLevel_L0 {
+			return false
+		}
+		if sortCompactionEnabled && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() {
+			isExternal, ok := externalCollections[segment.CollectionID]
+			if !ok {
+				isExternal = i.isExternalCollection(segment.CollectionID)
+				externalCollections[segment.CollectionID] = isExternal
+			}
+			return isExternal
+		}
+		return true
+	}))
+	segmentIDsByCollection := make(map[UniqueID][]UniqueID)
+	for _, segment := range i.meta.SelectSegments(ctx, segmentFilters...) {
+		segmentIDsByCollection[segment.CollectionID] = append(segmentIDsByCollection[segment.CollectionID], segment.GetID())
+	}
+
+	var unindexedIDs []UniqueID
+	for collectionID, segIDs := range segmentIDsByCollection {
+		unindexedIDs = append(unindexedIDs, i.meta.indexMeta.GetUnIndexedSegmentIDsForIndexTask(collectionID, segIDs).Collect()...)
+	}
+	return unindexedIDs
+}
+
+func (i *indexInspector) processIndexSegments(ctx context.Context, withPending bool) {
+	segIDs := i.popIndexSegments(withPending)
+	if len(segIDs) == 0 {
+		return
+	}
+
+	segmentsByCollection := make(map[UniqueID][]*SegmentInfo)
+	for _, segID := range segIDs {
+		segment := i.meta.GetSegment(ctx, segID)
+		if segment == nil {
+			mlog.Warn(ctx, "segment is not exist, no need to build index", mlog.FieldSegmentID(segID))
+			continue
+		}
+		if !i.canCreateIndexForSegmentNow(segment) {
+			continue
+		}
+		segmentsByCollection[segment.CollectionID] = append(segmentsByCollection[segment.CollectionID], segment)
+	}
+
+	for collectionID, segments := range segmentsByCollection {
+		i.processIndexSegmentsForCollection(ctx, collectionID, segments)
+	}
+}
+
+func (i *indexInspector) processIndexSegmentsForCollection(ctx context.Context, collectionID UniqueID, segments []*SegmentInfo) {
+	segIDs := make([]UniqueID, 0, len(segments))
+	for _, segment := range segments {
+		segIDs = append(segIDs, segment.GetID())
+	}
+	unindexedIDs := i.meta.indexMeta.GetUnIndexedSegmentIDsForIndexTask(collectionID, segIDs)
+	if unindexedIDs.Len() == 0 {
+		return
+	}
+
+	processedIDs := make([]UniqueID, 0, unindexedIDs.Len())
+	for _, segment := range segments {
+		segID := segment.GetID()
+		if !unindexedIDs.Contain(segID) {
+			continue
+		}
+		if err := i.createIndexesForSegment(ctx, segment); err != nil {
+			mlog.Warn(ctx, "create index for segment fail, wait for retry",
+				mlog.FieldSegmentID(segID),
+				mlog.Err(err))
+			i.requeuePendingIndexSegments(segID)
+			continue
+		}
+		processedIDs = append(processedIDs, segID)
+	}
+
+	stillUnindexedIDs := i.meta.indexMeta.GetUnIndexedSegmentIDsForIndexTask(collectionID, processedIDs)
+	i.requeuePendingIndexSegments(stillUnindexedIDs.Collect()...)
+}
+
+func (i *indexInspector) canCreateIndexForSegmentNow(segment *SegmentInfo) bool {
+	if !isFlush(segment) {
+		return false
+	}
+	if segment.GetLevel() == datapb.SegmentLevel_L0 {
+		return false
+	}
+	if enableSortCompaction() && !segment.GetIsSorted() && !segment.GetIsSortedByNamespace() && !i.isExternalCollection(segment.CollectionID) {
+		return false
+	}
+	return true
 }
 
 func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *SegmentInfo) error {
@@ -228,6 +391,13 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 		indexType = newIndexType
 	}
 
+	// Persist the layout and publication mode before dispatch. Retries and
+	// recovery must not redirect this build when the switch changes.
+	pathVersion := i.indexEngineVersionManager.GetClusterMinIndexStorePathVersion()
+	if segment.GetStorageVersion() == storage.StorageV3 && writeSegmentIndexToManifest() {
+		pathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
+	}
+
 	segIndex := &model.SegmentIndex{
 		SegmentID:             segment.ID,
 		CollectionID:          segment.CollectionID,
@@ -238,7 +408,7 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 		CreatedUTCTime:        uint64(time.Now().Unix()),
 		WriteHandoff:          false,
 		IndexType:             indexType,
-		IndexStorePathVersion: i.indexEngineVersionManager.GetClusterMinIndexStorePathVersion(),
+		IndexStorePathVersion: pathVersion,
 	}
 	if err = i.meta.indexMeta.AddSegmentIndex(ctx, segIndex); err != nil {
 		return err

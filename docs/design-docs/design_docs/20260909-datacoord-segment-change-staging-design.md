@@ -416,8 +416,9 @@ Recovery order (`reloadFromMeta`):
 | 3 | STAGED→READY | `groupInspector`: all members satisfy §5.3 | group `state=READY, ready_ts` (independent catalog txn) | half write (etcd txn atomic, impossible) | recovery: READY → publish replay |
 | 4 | STAGED/READY→FAILED | `groupInspector`: any member terminally failed / schema fence unconvergeable | group `state=FAILED, fail_reason` | crash | recovery: FAILED → member reclamation (§8) |
 | 5 | STAGED→ABORTED | timeout (`SegmentChangeStagingTimeout`) / superseded externally dropped / member zero-row dropped / collection drop | group `state=ABORTED` | crash | recovery: ABORTED → member reclamation |
-| 6 | READY→COMMITTED | `publishGroup` (§5.4) | **same txn**: group COMMITTED + member flips + superseded Dropped + DataView snapshot | §5.4 failure matrix | recovery: COMMITTED → keep |
-| 7 | COMMITTED→(deleted) | `groupCleaner`: superseded all Dropped and no longer referenced by any snapshot | delete group key | crash | recovery: leftover COMMITTED kept then rescanned |
+| 6 | READY→STAGED | R5 readiness regression: publish Phase-2 re-check rejects a member whose index regressed / schema went behind after READY | group `state=STAGED, ready_ts=0` (independent catalog txn) | half write (etcd txn atomic, impossible) | recovery: STAGED → re-evaluate (§7) |
+| 7 | READY→COMMITTED | `publishGroup` (§5.4) | **same txn**: group COMMITTED + member flips + superseded Dropped + DataView snapshot | §5.4 failure matrix | recovery: COMMITTED → keep |
+| 8 | COMMITTED→(deleted) | `groupCleaner`: superseded all Dropped and no longer referenced by any snapshot | delete group key | crash | recovery: leftover COMMITTED kept then rescanned |
 
 **Key invariant**: `READY → COMMITTED` persistence is atomic (group state +
 SegmentMeta + DataView snapshot in one txn). There is therefore **no
@@ -660,7 +661,7 @@ compensating write** is introduced.
 | R7 superseded dropped externally (partition/truncate/collection) ∥ publish | DDL vs publish | publish treats superseded idempotently (already Dropped → skip); non-idempotent for `new_segment` → FAILED | §5.4.3 |
 | R8 member re-selected for a second compaction ∥ publish | planner vs publish | **C29/C33 caveat**: the `IsInvisible` exclusion (`compaction_util.go:126`) applies only to the manual/force-merge selector; `canTriggerSortCompaction` deliberately SELECTS invisible segments (they are the awaiting-sort marker, §6.1) and the storage-version policy does not exclude them. A staged member is therefore re-selectable by sort — the guard must exclude ALIVE-GROUP members (staged-membership index), not all invisible segments, and must be scheduled in §11 before the "no defensive gap" invariant (§1.1) is relied upon | invariant + §11 |
 | R9 two alive groups referencing the same L1/L2 segment (new or superseded) | registration vs registration | **rejected at `AddSegmentChangeGroup`** via the `stagedSegmentToGroup`/`supersededSegmentToGroup` reverse indexes (anti-duplication invariant §1.1); a registration race is serialized by segMu | invariant + §1.1 |
-| R10 seek-position read ∥ staged | `getEarliestSegmentDMLPos` (`handler.go:551`) | **existing bug**: filters `IsImporting` but not `IsInvisible`; a staged segment's DML position can pollute the channel-seek fallback | must also filter `IsInvisible` (§10) |
+| R10 seek-position read ∥ staged | `getEarliestSegmentDMLPos` (`handler.go:583`) | **existing bug**: filters `IsImporting` but not staged members; a staged segment's DML position can pollute the channel-seek fallback. **Scope note**: this fix targets the LEGACY (non-dataview) view only — the dataview path (`loadableProjection`) already excludes staged members natively. Filter by **ALIVE-group membership** (`stagedSegmentToGroup` reverse index, exposed as `aliveStagedMembers`), NOT by blanket `IsInvisible`: sort-enabled flush's awaiting-sort segments (§6.1) are `IsInvisible=true` but not group members and must keep their growing/DML contribution — a blanket filter would regress the sort-enabled collection's seek. Applies to `getEarliestSegmentDMLPos`, `GetQueryVChanPositions`, `GetCurrentSegmentsView`. This is a deliberate deviation from the earlier "filter `IsInvisible`" wording, gated on O1 (§6.1): if O1 later makes awaiting-sort segments fully invisible, the filter widens to `IsInvisible` | ALIVE-group filter (§10) |
 | R11 metrics/partition stats ∥ staged | none | clustering's `UpdateSegmentPartitionStatsVersionOperator` runs only at publish | publish txn |
 
 ### View Reading (delete the fallback)
@@ -964,9 +965,17 @@ Replay safety:
    hit by truncate is skipped idempotently at publish. A truncate should trigger
    one group scan to converge quickly.
 4. **channel seek / checkpoint**: `GetChannelSeekPosition` prefers the channel
-   checkpoint; its fallback `getEarliestSegmentDMLPos` **must** filter
-   `IsInvisible` (§5.5 R10), otherwise a staged segment's DML position misleads
-   the seek.
+   checkpoint; its fallback `getEarliestSegmentDMLPos` **must** exclude staged
+   members, otherwise a staged segment's DML position misleads the seek. The
+   exclusion is by **ALIVE-group membership** (`aliveStagedMembers`, the
+   `stagedSegmentToGroup` reverse index), the same filter applied to
+   `GetQueryVChanPositions` / `GetCurrentSegmentsView` (§5.5 R10). This is a
+   legacy (non-dataview) view fix — the dataview path (`loadableProjection`)
+   already excludes staged members natively. A blanket `IsInvisible` filter
+   would also drop sort-enabled flush's awaiting-sort segments (§6.1), which
+   are `IsInvisible=true` but not group members and legitimately contribute
+   their growing/DML position; if O1 (§6.1) later makes awaiting-sort segments
+   fully invisible, the filter can be widened to `IsInvisible`.
 
 ## Implementation Notes
 
@@ -1036,7 +1045,7 @@ subgroups to bound single-txn size and the "entire batch invisible" wait.
 | `internal/dataview/manager.go` | add `PublishChange` (§5.4); reuse `lockStateForMutation` |
 | `internal/datacoord/meta.go` | `UpdateSegmentsInfoAndDataView` supports `SaveSegmentChangeGroup` action; `loadableProjection` unchanged |
 | `internal/datacoord/segment_change_*.go` | new files (§Implementation Notes) |
-| `internal/datacoord/handler.go` | `getEarliestSegmentDMLPos` filters `IsInvisible`; view read path deletes `retrieveSegment` (Phase 2) |
+| `internal/datacoord/handler.go` | `getEarliestSegmentDMLPos` / `GetQueryVChanPositions` / `GetCurrentSegmentsView` exclude ALIVE-group members via `aliveStagedMembers` (R10; NOT blanket `IsInvisible` — see §6.1 awaiting-sort, gated on O1); view read path deletes `retrieveSegment` (Phase 2) |
 | `internal/datacoord/compaction_task_mix.go` / `sort` / `clustering` / `bump_schema_version` | outputs enter groups, retirement deferred to publish, `recomputeDataView` replaced by publish trigger |
 | `internal/datacoord/services.go` | `SaveBinlogPaths` sort-enabled branch: "awaiting sort, not published" (§6.1, subject to O1); `HandleCommitVchannel` triggers publish |
 | `internal/datacoord/copy_segment_task.go` | completion enters a group |

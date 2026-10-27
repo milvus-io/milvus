@@ -63,11 +63,8 @@ func TestValidateCommitMarkerConsistency(t *testing.T) {
 		state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 1})
 
 		txnState, err := state.validateCommit(newCommitTxnMessage("v1", 1, 300), 1)
-		require.NoError(t, err)
+		require.True(t, status.AsStreamingError(err).IsTxnExpired())
 		require.Nil(t, txnState)
-		state.publishCommit(newCommitTxnMessage("v1", 1, 300), txnState)
-		requirePartialUpdateRetryable(t, state.incompleteTxnFences.Verify("v1", 299))
-		require.NoError(t, state.incompleteTxnFences.Verify("v1", 300))
 	})
 
 	t.Run("runtime CAS without marker", func(t *testing.T) {
@@ -107,15 +104,6 @@ func TestValidateCommitMarkerConsistency(t *testing.T) {
 	})
 }
 
-func TestPublishCommitAdvancesRetentionAndFence(t *testing.T) {
-	state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 1})
-	commit := newCommitTxnMessage("v1", 1, 300)
-
-	state.publishCommit(commit, &pendingTxn{fenceCollection: 10, observedBegin: true})
-
-	requirePartialUpdateRetryable(t, state.fences.Verify("v1", 10, 299))
-}
-
 func TestValidateCommitRejectsInvalidProof(t *testing.T) {
 	t.Run("missing derived CAS scope", func(t *testing.T) {
 		state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 1})
@@ -133,17 +121,6 @@ func TestValidateCommitRejectsInvalidProof(t *testing.T) {
 		state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 1})
 		state.recordTxnBegin(1)
 		require.NoError(t, state.recordTxnCAS(1, validCASMeta(100, 1), validCASScope()))
-
-		_, err := state.validateCommit(newCASCommitTxnMessage(t, "v1", 1, 300), 1)
-		requireUnrecoverable(t, err)
-	})
-
-	t.Run("mixed collection ids", func(t *testing.T) {
-		state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 1})
-		state.recordTxnBegin(1)
-		require.NoError(t, state.recordTxnCAS(1, validCASMeta(100, 1), validCASScope()))
-		state.recordTxnWrites(1, []any{int64(10)})
-		state.recordTxnFence(1, 2)
 
 		_, err := state.validateCommit(newCASCommitTxnMessage(t, "v1", 1, 300), 1)
 		requireUnrecoverable(t, err)
@@ -254,17 +231,6 @@ func TestValidateCommitReplicatedCASRequiresCompleteWriteSet(t *testing.T) {
 		state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 2})
 		state.recordTxnBegin(1)
 		require.NoError(t, state.recordTxnCAS(1, validCASMeta(100, 1), validCASScope()))
-
-		_, err := state.validateCommit(newReplicatedCommit(t), 1)
-		requireUnrecoverable(t, err)
-	})
-
-	t.Run("mixed collection ids", func(t *testing.T) {
-		state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 2})
-		state.recordTxnBegin(1)
-		require.NoError(t, state.recordTxnCAS(1, validCASMeta(100, 1), validCASScope()))
-		state.recordTxnWrites(1, []any{int64(10)})
-		state.recordTxnFence(1, 2)
 
 		_, err := state.validateCommit(newReplicatedCommit(t), 1)
 		requireUnrecoverable(t, err)

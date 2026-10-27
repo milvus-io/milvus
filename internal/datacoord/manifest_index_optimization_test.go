@@ -124,12 +124,12 @@ func TestManifestLastIndexDropClearsMarkerAtomically(t *testing.T) {
 	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: root}
 	base := path.Join(root, "insert_log/300/30/8001")
 	entry := func(id int64) packed.ManifestIndexInfo {
-		prefix := metautil.NewIndexPathBuilder(root, 0, 300, 30, 8001, id, 1).BuildPrefix()
+		prefix := metautil.NewIndexPathBuilder(root, 2, 300, 30, 8001, id, 1).BuildPrefix()
 		relative, err := packed.ManifestIndexRelativePath(base, prefix)
 		require.NoError(t, err)
-		return packed.ManifestIndexInfo{ColumnName: "vector", IndexName: "idx", IndexType: "HNSW", Path: relative, FieldID: 101, IndexID: id, BuildID: id, IndexVersion: 1, NumRows: 100, IndexFileKeys: []string{"index.bin"}}
+		return packed.ManifestIndexInfo{ColumnName: "vector", IndexName: "idx", IndexType: "HNSW", Path: relative, IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED, FieldID: 101, IndexID: id, BuildID: id, IndexVersion: 1, NumRows: 100, IndexFileKeys: []string{"index.bin"}}
 	}
-	manifest, err := packed.CommitManifestUpdates(base, 0, cfg, &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{entry(1), entry(2)}})
+	manifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(base, 0), cfg, &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{entry(1), entry(2)}})
 	require.NoError(t, err)
 	require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{ID: 8001, CollectionID: 300, PartitionID: 30, State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3, ManifestPath: manifest, ManifestHasIndex: true})))
 	drop := func(id int64) error {
@@ -259,7 +259,7 @@ func TestManifestRecoverySingleExecutor(t *testing.T) {
 	defer config.UnPatch()
 	for i := int64(1); i <= 5; i++ {
 		base := path.Join(root, "insert_log", metautil.JoinIDPath(300, 30, i))
-		manifest, err := packed.CommitManifestUpdates(base, 0, cfg, &packed.ManifestUpdates{
+		manifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(base, 0), cfg, &packed.ManifestUpdates{
 			DeltaLogs: []packed.DeltaLogEntry{{Path: "delta", NumEntries: 1}},
 		})
 		require.NoError(t, err)

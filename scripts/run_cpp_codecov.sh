@@ -51,6 +51,14 @@ FILE_INFO_OUTPUT="${ROOT_DIR}/lcov_output.info"
 DIR_LCOV_OUTPUT="${ROOT_DIR}/cpp_coverage"
 DIR_GCNO="${ROOT_DIR}/cmake_build/"
 
+if [[ "$(uname -s)" == "Linux" ]]; then
+    echo "Running AWS runtime link checker self-test"
+    (
+        cd "${MILVUS_CMAKE_BUILD_DIR:-${ROOT_DIR}/cmake_build}/unittest" &&
+        ctest -R '^aws_runtime_link_check$' --output-on-failure --no-tests=error
+    ) || exit 1
+fi
+
 # delete old code coverage info files
 rm -f ${FILE_INFO_BASE}
 rm -f ${FILE_INFO_UT}

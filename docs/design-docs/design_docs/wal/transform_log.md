@@ -8,8 +8,8 @@
 **Status:** The local SN bootstrap adaptor is implemented in
 `internal/streamingnode/server/wal/walsummary/stream.go` and wired through
 `vchannel.PChannelRecoveryManager` into GrowingRuntime. It performs bounded Delete replay for
-QueryRuntime preparation. Remote transport and QN continuous-subscription
-integration remain planned; the general subscription contract below includes
+QueryRuntime preparation. Remote transport is implemented through `SubscribeTransform`; QN buffer and
+segment-application integration remain planned; the general subscription contract below includes
 those future consumers.
 
 TransformLog is a read-only subscription adaptor over
@@ -26,7 +26,8 @@ WALSummary (one store per PChannel)
   +-- Summary L0 consumer               [retained, not wired]
   +-- TransformLog subscription adaptor
         +-- local SN bounded replay     [implemented]
-        +-- remote / QN subscriptions   [planned]
+        +-- remote subscriptions        [implemented]
+        +-- QN buffer/application       [planned]
 ```
 
 TransformLog owns stream and subscription lifetimes, delivery cursors,
@@ -159,8 +160,8 @@ unavailable prefix, never the retained interval still required through the end.
 ### Unbounded subscriptions for QueryNode
 
 The local adaptor's unbounded mode uses WALSummary's VChannel-scoped transform
-notifications. This prepares the server-side behavior for QueryNode; remote
-transport and QN integration remain outside this extraction. Bounded SN bootstrap
+notifications. The same adaptor serves remote subscribers; QN buffer and
+segment-application integration remain outside this extraction. Bounded SN bootstrap
 keeps its existing global-coverage notification behavior.
 
 The QN contract is to wait for the VChannel `transforming_timetick` selected by
@@ -203,8 +204,8 @@ subscriptions to the same VChannel avoids decoding the same records repeatedly.
 
 Local and remote transports expose the same contract. After transport failure,
 the client reacquires the PChannel stream and resubscribes exclusively after the
-last position its handler successfully accepted. Entry and SyncUp advance that
-cursor; failed handler calls do not. The server applies its lower-bound policy
+last position delivered to its handler. Entry and SyncUp advance that
+cursor after Handle returns; Handle has no error return. The server applies its lower-bound policy
 again on reconnect.
 
 No durable consumer ACK or cross-process exactly-once guarantee is introduced.
@@ -223,38 +224,47 @@ depends on the reliable-retention TODO, not on accepting an older cursor.
 
 ### Local read recovery
 
-The SN adaptor retries temporary and unclassified `ReadTransform` failures in
-the same subscription, including ordinary `ErrIoFailed` and operation-local
-timeouts. It uses exponential backoff with a 100 ms initial interval, a 10 s
-maximum base interval and jitter, without a retry-count or elapsed-time limit.
-A successful read resets backoff; successful reads allocate no retry timer.
-Retries emit rate-limited warnings with the unchanged read cursor.
+Temporary chunk reads retry inside WALSummary's shared load, so SN bootstrap,
+remote subscriptions and idempotency readers waiting for the same chunk share
+one retry sequence. The adaptor does not start a separate retry loop for each
+subscription. Backoff uses a 100 ms initial interval, a 10 s maximum base interval
+and jitter, without a retry-count or elapsed-time limit. Successful loads
+allocate no retry timer. Generic I/O, unclassified failures and operation-local
+timeouts remain retryable while the shared load is active.
 
-Each failed read returns no deliverable batch. The adaptor keeps its previous
-cursor, delivers no partial entries and sends no SyncUp for that attempt. It
-retries only the read, not handler delivery or Segment application. After success,
-it delivers complete entries before advancing coverage, following the same
-bounded/unbounded rules as a read that never failed.
+A waiting read delivers no partial batch or SyncUp. Successful earlier chunks
+in that batch do not have to be downloaded and decoded again when a later chunk
+retries. After success, the adaptor delivers complete entries before advancing
+coverage, following the same bounded/unbounded rules as a read that never failed.
+Handler delivery and Segment application are never retried by this mechanism.
 
-The retry loop sits outside `ReadTransform`, releasing its snapshot lock and
-local GC pin before waiting. Chunk-cache and Store reads retain their single
-attempt semantics. Subscription cancellation and stream closure cancel both
-backoff and context-aware storage reads. Only the subscription context ending
-means cancellation; a timeout or cancellation of a lower-level attempt while
-that context is active remains retryable.
+Each caller owns only its wait, not the shared load context. Subscription
+cancellation or stream closure releases that subscriber without interrupting
+other callers or resetting backoff. Once the final waiter leaves, the shared
+context cancels both backoff and context-aware storage I/O. The last waiter joins
+the task before releasing its local GC snapshot pin. Unlike the previous
+subscription-level retries, the snapshot stays pinned during shared backoff;
+sustained failures can defer this Manager's physical garbage collection until
+reads recover or all waiters cancel. Download slots are released during backoff.
 
-Known store corruption (`ErrStoreCorrupted`), data-integrity failures and a
-missing object still referenced by the retained index terminate the read
-explicitly. Summary's terminal state also returns `ErrStoreCorrupted`; it must
-not enter an indefinite retry loop. These errors and consumer-handler failures
-keep the existing terminal notification path. Unknown read failures are not
-classified as permanent merely because the generic error lacks a retryable flag.
+Known corruption (`ErrStoreCorrupted`), data-integrity failures, raw
+`io.ErrUnexpectedEOF`, and permanent storage errors such as missing objects or
+permission failures terminate the shared load and fail every remaining waiter.
+Summary terminal-state errors and decoding failures also end the underlying
+stream and publish its Done/Error; they are not handler events. Remote storage maps an interrupted
+object download to retryable `merr.ErrIoUnexpectEOF`; that transient transfer
+failure remains retryable. Bytes returned successfully still undergo framing,
+checksum and index validation, so a damaged object is a permanent failure.
+No error becomes an empty history or a successful SyncUp.
 
-Remote Provider integration must preserve this distinction: owner shutdown,
-migration and PChannel unavailability end the physical stream for PChannel-level
-reconnection; only explicit logical terminal failures become SubscriptionError.
-That transport wiring remains outside the local SN implementation. Segment
-application failure handling is unchanged by read recovery.
+The resumable layer treats every underlying read, subscription or transport
+failure as the end of one physical attempt and recreates all subscriptions from
+their individual delivered cursors. It does not classify runtime failures or
+pass them to business handlers. A persistent corruption therefore remains
+observable in retry logs and blocks progress until repaired or the owner closes
+the logical stream; it never produces fabricated data or coverage. Local callers
+that use a Summary stream directly observe its Done/Error without resuming.
+Segment application failure handling is outside this transport contract.
 
 This retry policy does not alter the lower-bound compatibility rule above or
 implement reliable retention. It preserves delivery across transient failures
@@ -353,3 +363,141 @@ that segcore must retain. No new disk cache or per-version resources are planned
 Validation should cover multi-page replay, midstream failures, cancellation with
 a full queue and peak extra replay memory. The current implementation remains
 unchanged by this TODO.
+
+## 10. Remote Transport And Ordered MVCCBarriers
+
+`WALAccesser.TransformLogStreamManager` opens a logical PChannel stream.
+`HandlerClient.AcquireTransformLogStream` resolves its current assignment and
+selects a local WAL accessor or a bidirectional `SubscribeTransform` RPC.
+Creation metadata carries the PChannel name and term. After validating that
+owner and acquiring its Summary stream, the server sends a stream-level
+`CreateTransformStreamResponse` without waiting for a VChannel request. The
+remote factory waits for this confirmation before returning success, like the
+WAL consumer factory. A rejected owner/term therefore returns through the shared
+HandlerClient assignment-error reporting and assignment-watch/backoff path.
+Failure to send the confirmation closes the acquired Summary stream.
+
+Subscription Create acknowledgements still precede all subscription events.
+Multiple VChannels share one physical stream; each retains its own exclusive
+cursor and optional end timestamp. Owner loss after creation is handled by the
+existing resumable layer; its next factory call validates the owner again.
+The handshake does not change logical subscription lifetime or accepted cursors.
+
+The logical subscription filters events before Handle: entries at or below its
+exclusive cursor and SyncUp below that cursor are discarded. SyncUp at an already
+delivered SyncUp watermark is also discarded across physical attempts. Entry(T)
+does not suppress the first SyncUp(T), including bounded completion; the first
+SyncUp at the initial cursor (including zero) is still delivered. Each logical
+subscription owns its own filtering state.
+The resumable layer checkpoints Entries/SyncUp after Handle returns. On any
+underlying failure it closes that attempt and resubscribes from those cursors,
+aligning with WAL Consumer. Explicit Close ends the logical lifetime; canceling
+one Subscribe call only removes that subscription. Factory cancellation or a
+closed HandlerClient also ends resuming. Other factory errors, including
+Unimplemented, use retry backoff. A Send EOF yields to Recv's final gRPC status
+for diagnostics. Invalid local Subscribe options are rejected synchronously.
+
+All client sends and CloseSend are serialized. Explicit stream close sends a
+CloseStream request and waits for acknowledgement, bounded by five seconds.
+Receive completion cancels only the physical RPC, without waiting for its send
+lock. For an explicit subscription close the server disables event delivery
+before canceling/joining its Summary worker, then acknowledges closure; this
+internal cancellation must not escape as a SubscriptionError. Failed create
+acknowledgements also release the event gate before joining the worker.
+
+`GetQueryPlanRequest.barrier_mvcc` requests a fixed read timestamp on the primary
+RW WAL. The TimeTick inspector coalesces per-VChannel requests and publishes an
+MVCCBarrier after the acknowledged prefix reaches the requested timestamp.
+The barrier carries target VChannels and traverses the same ordered WAB/scanner
+path as confirmations. Durable barriers confirm the full WAL prefix; volatile
+barriers advance only scoped query visibility and Summary read coverage.
+WAB queues each scoped barrier, including volatile barriers, as an ordinary
+ordered pending record; later TimeTicks cannot replace it. RecoveryStorage
+observes preceding records before publishing barrier progress.
+It does not use volatile barriers to advance durable checkpoints, seal chunks,
+acknowledge handles or authorize GC. Scoped Summary notifications wake readers,
+which deliver retained Entries before SyncUp. GrowingRuntime consumes the same
+ordered query barrier to advance its observed query frontier.
+
+After a confirmation has been observed by Summary and dispatched to the ordered
+VChannel resource path, RecoveryStorage reports its consumed-through TimeTick
+to WAB. That prefix becomes eligible for eviction; consumption alone does not
+release cached records. Capacity overflow or keepalive expiry must also apply.
+WAB retains the latest persisted confirmation separately for ordinary WAL
+catchup handoff. Its suffix is not pinned: consumed volatile barriers follow the
+cache policy, while all unconsumed records remain protected regardless of capacity/TTL. The
+inspector therefore only needs pending scoped requests, not continuous replay
+of all previously published scopes. Multi-scope barriers use their existing
+batched header; no additional per-VChannel retention map is maintained in WAB.
+
+WAB pressure is configured under `streaming.walRateLimit.writeAheadBuffer`:
+`slowdownRatio` S (default 1.5, minimum 1) gives threshold C = instance capacity * S,
+`slowdownRate` R (32MB/s), and `rejectRatio` Q (2). For queued bytes B, admission
+is normal through C; rate is `max(1, floor(R*(Q-B/C)/(Q-1)))` between C and Q*C;
+new DML is rejected at Q*C. B includes all retained cache bytes.
+Append, consumption and live config updates all
+re-evaluate the same curve immediately, even if the queue has no traffic.
+There is no time-based ramp or additional control goroutine. The existing
+multi-source WAL limiter combines WAB pressure with independent persistence-tail
+pressure. Capacity never blocks WAB publication or evicts unconsumed barriers.
+
+This guarantee is local to the WAL owner. A volatile barrier is not persisted;
+owner recovery reconstructs progress through RecoveryBarrier. The consumed
+boundary is neither an AckTracker completion point nor a durable checkpoint.
+Startup retains the live suffix while recovery reads the durable prefix, then
+the same scanner tails WAB. Other readers that lag behind a released prefix
+can still use durable catchup, then join WAB at its retained durable confirmation
+and receive retained messages and latest volatile progress without waiting for a
+new WAL write. Readers already at or beyond the latest durable confirmation can
+also rejoin after their offset expires, skipping only consumed volatile
+confirmations. This does not replay every expired scoped barrier to ordinary
+readers; the delivery guarantee is to RecoveryStorage and its ordered observers.
+
+A query waits for the requested timestamp, not a later publication timestamp.
+Before registering a scoped sync, planning waits for the TSO allocator to reach
+the requested timestamp under the caller and WAL-owner contexts. An unallocated
+future timestamp therefore cannot occupy the PChannel's shared sync operation
+or prevent ordinary and durable confirmations. The request keeps its exact
+timestamp; cancellation during this allocator wait does not enqueue the target.
+Owner shutdown cancels pending planning and permits replanning on the new owner;
+caller cancellation remains caller cancellation. Barrier state belongs to one
+WAL registration and is rebuilt after owner replacement.
+
+This transport does not implement QN TransformLogBuffer, DataView/QueryView
+replay-frontier or retention wiring, read-proof/CAS, or a query-path switch.
+Existing Delete/L0 behavior and the retained-history lower-bound contract stay
+in force. Remote subscription progress alone is not a retention guarantee.
+
+A closing physical stream reports a typed shutdown so new subscriptions can
+reacquire an owner. SubscriptionError responses end the physical attempt, just
+like an RPC failure; errors are never delivered through Handle. The resume loop
+closes failed attempts outside receive callbacks. Reconnect backoff resets only
+after an attempt remains available for at least ten seconds after its initial
+subscriptions are created. Delivery by a healthy sibling, including repeated
+SyncUp, does not reset the backoff of a repeatedly failing shared stream. New
+subscriptions wait for an ongoing failure backoff; explicit Close cancels it.
+The client acquires or resumes a physical stream only while logical subscriptions
+exist. Closing the last subscription keeps an established stream available for
+reuse for one minute; the background resume loop then retires it and sleeps
+until a new subscription arrives. Local and remote streams use this same policy.
+An acquisition still waiting for an owner or creation ACK is canceled as soon as
+its final subscriber leaves. A subscription waiting for data is active and is
+never retired just because no events arrive. Explicit stream Close ends the
+logical lifetime and releases the current attempt immediately.
+The server's execution loop owns sends and handles their failures. Summary
+workers deliver data through a cancellable channel, and read failures wake the
+execution loop through the Summary stream's Done/Error, even with no incoming
+client requests. Explicit subscription Close releases delivery before joining
+the worker and does not fail sibling subscriptions.
+Subscription creation has a separate result from normal stream shutdown. Closing
+before creation completes returns a shutdown error to Subscribe, while Close
+itself can succeed. A successfully created subscription may subsequently close
+without retroactively changing its creation result.
+
+Handlers must independently abort blocked delivery before their caller waits
+for subscription/stream Close; Close on a handler only signals completion.
+A blocked remote handler delays all subscriptions sharing that receive loop.
+Never synchronously close a subscription from its own Handle callback.
+EndTimeTick SyncUp signals bounded completion, but the caller must still Close
+the subscription. Only physical stream Close has the five-second timeout;
+per-subscription Close joins delivery without a peer timeout.

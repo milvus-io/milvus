@@ -106,3 +106,19 @@ func cacheShardMetricFamily(samples ...cacheShardSample) *dto.MetricFamily {
 		Metric: metrics,
 	}
 }
+
+func TestParseTextMetrics(t *testing.T) {
+	const metricsText = `# HELP milvus_c_registry_test_total Test metric.
+# TYPE milvus_c_registry_test_total counter
+milvus_c_registry_test_total{source="core"} 1
+`
+
+	metricFamilies, err := parseTextMetrics(metricsText)
+	require.NoError(t, err)
+	require.Contains(t, metricFamilies, "milvus_c_registry_test_total")
+}
+
+func TestParseTextMetricsUsesLegacyValidation(t *testing.T) {
+	_, err := parseTextMetrics(`{"metric.name",source="core"} 1`)
+	require.Error(t, err)
+}

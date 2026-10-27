@@ -25,6 +25,65 @@ func (_m *MockHandlerClient) EXPECT() *MockHandlerClient_Expecter {
 	return &MockHandlerClient_Expecter{mock: &_m.Mock}
 }
 
+// AcquireTransformLogStream provides a mock function with given fields: ctx, pchannel
+func (_m *MockHandlerClient) AcquireTransformLogStream(ctx context.Context, pchannel string) (wal.TransformLogStream, error) {
+	ret := _m.Called(ctx, pchannel)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AcquireTransformLogStream")
+	}
+
+	var r0 wal.TransformLogStream
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (wal.TransformLogStream, error)); ok {
+		return rf(ctx, pchannel)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) wal.TransformLogStream); ok {
+		r0 = rf(ctx, pchannel)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(wal.TransformLogStream)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, pchannel)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockHandlerClient_AcquireTransformLogStream_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AcquireTransformLogStream'
+type MockHandlerClient_AcquireTransformLogStream_Call struct {
+	*mock.Call
+}
+
+// AcquireTransformLogStream is a helper method to define mock.On call
+//   - ctx context.Context
+//   - pchannel string
+func (_e *MockHandlerClient_Expecter) AcquireTransformLogStream(ctx interface{}, pchannel interface{}) *MockHandlerClient_AcquireTransformLogStream_Call {
+	return &MockHandlerClient_AcquireTransformLogStream_Call{Call: _e.mock.On("AcquireTransformLogStream", ctx, pchannel)}
+}
+
+func (_c *MockHandlerClient_AcquireTransformLogStream_Call) Run(run func(ctx context.Context, pchannel string)) *MockHandlerClient_AcquireTransformLogStream_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockHandlerClient_AcquireTransformLogStream_Call) Return(_a0 wal.TransformLogStream, _a1 error) *MockHandlerClient_AcquireTransformLogStream_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockHandlerClient_AcquireTransformLogStream_Call) RunAndReturn(run func(context.Context, string) (wal.TransformLogStream, error)) *MockHandlerClient_AcquireTransformLogStream_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Close provides a mock function with no fields
 func (_m *MockHandlerClient) Close() {
 	_m.Called()
@@ -581,6 +640,65 @@ func (_c *MockHandlerClient_RunAnalyzer_Call) Return(_a0 *streamingpb.StreamingN
 }
 
 func (_c *MockHandlerClient_RunAnalyzer_Call) RunAndReturn(run func(context.Context, *streamingpb.StreamingNodeRunAnalyzerRequest) (*streamingpb.StreamingNodeRunAnalyzerResponse, error)) *MockHandlerClient_RunAnalyzer_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ValidateAnalyzer provides a mock function with given fields: _a0, _a1
+func (_m *MockHandlerClient) ValidateAnalyzer(_a0 context.Context, _a1 *streamingpb.StreamingNodeValidateAnalyzerRequest) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ValidateAnalyzer")
+	}
+
+	var r0 *streamingpb.StreamingNodeValidateAnalyzerResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.StreamingNodeValidateAnalyzerRequest) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *streamingpb.StreamingNodeValidateAnalyzerRequest) *streamingpb.StreamingNodeValidateAnalyzerResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*streamingpb.StreamingNodeValidateAnalyzerResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *streamingpb.StreamingNodeValidateAnalyzerRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockHandlerClient_ValidateAnalyzer_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ValidateAnalyzer'
+type MockHandlerClient_ValidateAnalyzer_Call struct {
+	*mock.Call
+}
+
+// ValidateAnalyzer is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *streamingpb.StreamingNodeValidateAnalyzerRequest
+func (_e *MockHandlerClient_Expecter) ValidateAnalyzer(_a0 interface{}, _a1 interface{}) *MockHandlerClient_ValidateAnalyzer_Call {
+	return &MockHandlerClient_ValidateAnalyzer_Call{Call: _e.mock.On("ValidateAnalyzer", _a0, _a1)}
+}
+
+func (_c *MockHandlerClient_ValidateAnalyzer_Call) Run(run func(_a0 context.Context, _a1 *streamingpb.StreamingNodeValidateAnalyzerRequest)) *MockHandlerClient_ValidateAnalyzer_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*streamingpb.StreamingNodeValidateAnalyzerRequest))
+	})
+	return _c
+}
+
+func (_c *MockHandlerClient_ValidateAnalyzer_Call) Return(_a0 *streamingpb.StreamingNodeValidateAnalyzerResponse, _a1 error) *MockHandlerClient_ValidateAnalyzer_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockHandlerClient_ValidateAnalyzer_Call) RunAndReturn(run func(context.Context, *streamingpb.StreamingNodeValidateAnalyzerRequest) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error)) *MockHandlerClient_ValidateAnalyzer_Call {
 	_c.Call.Return(run)
 	return _c
 }

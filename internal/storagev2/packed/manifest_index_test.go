@@ -12,7 +12,6 @@ package packed
 
 import (
 	"path"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -21,11 +20,10 @@ import (
 )
 
 // indexEntry builds a manifest index entry whose Path is expressed the way
-// DataCoord expresses it: relative to <basePath>/_index, walking back out to
-// the legacy index layout that lives outside the segment directory.
+// DataCoord expresses it: strictly relative to <basePath>/_index.
 func indexEntry(t *testing.T, basePath, indexPrefix string, indexID, buildID int64) ManifestIndexInfo {
 	t.Helper()
-	relativePath, err := filepath.Rel(path.Join(basePath, "_index"), indexPrefix)
+	relativePath, err := ManifestIndexRelativePath(basePath, indexPrefix)
 	require.NoError(t, err)
 	return ManifestIndexInfo{
 		ColumnName:                "vec",
@@ -41,7 +39,7 @@ func indexEntry(t *testing.T, basePath, indexPrefix string, indexID, buildID int
 		MemSize:                   4096,
 		CurrentIndexVersion:       5,
 		CurrentScalarIndexVersion: 6,
-		IndexStorePathVersion:     indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		IndexStorePathVersion:     indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
 		IndexFileKeys:             []string{"0", "1"},
 		Properties:                map[string]string{"index_type": "HNSW", "metric_type": "L2"},
 	}
@@ -49,13 +47,13 @@ func indexEntry(t *testing.T, basePath, indexPrefix string, indexID, buildID int
 
 // TestCommitManifestUpdates_IndexRoundTrip exercises the real FFI: an index
 // entry written with a manifest-relative path must read back resolved to its
-// absolute legacy prefix, with every scalar field intact.
+// complete segment index prefix, with every scalar field intact.
 func TestCommitManifestUpdates_IndexRoundTrip(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
 	basePath := path.Join(cfg.GetRootPath(), "commit_index_roundtrip/seg1")
-	indexPrefix := path.Join(cfg.GetRootPath(), "index_v1/1/2/3/500/1")
+	indexPrefix := path.Join(basePath, "_index/500/1")
 
-	committed, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
+	committed, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{
 		Indexes: []ManifestIndexInfo{indexEntry(t, basePath, indexPrefix, 10, 500)},
 	})
 	require.NoError(t, err)
@@ -65,7 +63,7 @@ func TestCommitManifestUpdates_IndexRoundTrip(t *testing.T) {
 	require.Len(t, indexes, 1)
 	got := indexes[0]
 
-	// The `..` walk is resolved on read, so callers can join file keys onto
+	// The segment-relative prefix is resolved on read, so callers can join file keys onto
 	// Path directly and reach the artifact bytes.
 	require.Equal(t, indexPrefix, got.Path)
 	require.Equal(t, "vec", got.ColumnName)
@@ -80,7 +78,7 @@ func TestCommitManifestUpdates_IndexRoundTrip(t *testing.T) {
 	require.EqualValues(t, 4096, got.MemSize)
 	require.EqualValues(t, 5, got.CurrentIndexVersion)
 	require.EqualValues(t, 6, got.CurrentScalarIndexVersion)
-	require.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, got.IndexStorePathVersion)
+	require.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED, got.IndexStorePathVersion)
 	require.Equal(t, []string{"0", "1"}, got.IndexFileKeys)
 	require.Equal(t, map[string]string{"index_type": "HNSW", "metric_type": "L2"}, got.Properties)
 }
@@ -91,17 +89,15 @@ func TestCommitManifestUpdates_IndexRoundTrip(t *testing.T) {
 func TestCommitManifestUpdates_IndexRepublishReplaces(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
 	basePath := path.Join(cfg.GetRootPath(), "commit_index_republish/seg1")
-	firstPrefix := path.Join(cfg.GetRootPath(), "index_v1/1/2/3/500/1")
-	secondPrefix := path.Join(cfg.GetRootPath(), "index_v1/1/2/3/501/2")
+	firstPrefix := path.Join(basePath, "_index/500/1")
+	secondPrefix := path.Join(basePath, "_index/501/1")
 
-	first, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
+	first, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{
 		Indexes: []ManifestIndexInfo{indexEntry(t, basePath, firstPrefix, 10, 500)},
 	})
 	require.NoError(t, err)
-	_, version, err := UnmarshalManifestPath(first)
-	require.NoError(t, err)
 
-	second, err := CommitManifestUpdates(basePath, version, cfg, &ManifestUpdates{
+	second, err := CommitManifestUpdates(first, cfg, &ManifestUpdates{
 		Indexes: []ManifestIndexInfo{indexEntry(t, basePath, secondPrefix, 10, 501)},
 	})
 	require.NoError(t, err)
@@ -117,20 +113,18 @@ func TestCommitManifestUpdates_DropIndex(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
 	basePath := path.Join(cfg.GetRootPath(), "commit_index_drop/seg1")
 
-	published, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
+	published, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{
 		Indexes: []ManifestIndexInfo{
-			indexEntry(t, basePath, path.Join(cfg.GetRootPath(), "index_v1/1/2/3/500/1"), 10, 500),
-			indexEntry(t, basePath, path.Join(cfg.GetRootPath(), "index_v1/1/2/3/600/1"), 11, 600),
+			indexEntry(t, basePath, path.Join(basePath, "_index/500/1"), 10, 500),
+			indexEntry(t, basePath, path.Join(basePath, "_index/600/1"), 11, 600),
 		},
 	})
-	require.NoError(t, err)
-	_, version, err := UnmarshalManifestPath(published)
 	require.NoError(t, err)
 
 	t.Run("rejects a build the manifest no longer holds", func(t *testing.T) {
 		// GC collected build 499's metadata; a rebuild already published 500
 		// under the same index. Dropping by index_id would delete the live one.
-		_, err := CommitManifestUpdates(basePath, version, cfg, &ManifestUpdates{
+		_, err := CommitManifestUpdates(published, cfg, &ManifestUpdates{
 			DropIndexes: []DropIndexEntry{{IndexID: 10, ExpectedBuildID: 499}},
 		})
 		require.Error(t, err)
@@ -138,16 +132,17 @@ func TestCommitManifestUpdates_DropIndex(t *testing.T) {
 
 	t.Run("absent index is a no-op, not an empty commit", func(t *testing.T) {
 		// loon refuses a transaction with zero staged ops, so a retry of an
-		// already-completed drop must not open one.
-		got, err := CommitManifestUpdates(basePath, version, cfg, &ManifestUpdates{
+		// already-completed drop must not open one, and the unchanged pointer
+		// comes back verbatim.
+		got, err := CommitManifestUpdates(published, cfg, &ManifestUpdates{
 			DropIndexes: []DropIndexEntry{{IndexID: 99, ExpectedBuildID: 999}},
 		})
 		require.NoError(t, err)
-		require.Equal(t, MarshalManifestPath(basePath, version), got)
+		require.Equal(t, published, got)
 	})
 
 	t.Run("drops only the matching index", func(t *testing.T) {
-		got, err := CommitManifestUpdates(basePath, version, cfg, &ManifestUpdates{
+		got, err := CommitManifestUpdates(published, cfg, &ManifestUpdates{
 			DropIndexes: []DropIndexEntry{{IndexID: 10, ExpectedBuildID: 500}},
 		})
 		require.NoError(t, err)

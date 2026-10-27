@@ -29,12 +29,12 @@ impl RegexFilter {
 
     pub fn from_json(params: &json::Map<String, json::Value>) -> Result<RegexFilter> {
         params.get("expr").map_or(
-            Err(TantivyBindingError::InternalError(format!(
+            Err(TantivyBindingError::InvalidArgument(format!(
                 "must set expr for regex filter"
             ))),
             |value| {
                 value.as_str().map_or(
-                    Err(TantivyBindingError::InternalError(format!(
+                    Err(TantivyBindingError::InvalidArgument(format!(
                         "expr must be string"
                     ))),
                     |expr| RegexFilter::new(expr),

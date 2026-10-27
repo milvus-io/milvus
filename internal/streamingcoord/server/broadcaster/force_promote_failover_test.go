@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -202,9 +203,22 @@ func initForcePromoteTestGlobals(t *testing.T) {
 	registry.ResetRegistration()
 	paramtable.Init()
 	balance.ResetBalancer()
-	paramtable.Get().StreamingCfg.WALBroadcasterTombstoneCheckInternal.SwapTempValue("10ms")
-	paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxCount.SwapTempValue("2")
-	paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxLifetime.SwapTempValue("20ms")
+	// These scheduling tests have no persisted WAL checkpoints. GC must retain
+	// their tasks; dedicated tombstone tests exercise checkpoint publication.
+	checkpointPatch := mockey.Mock((*mock_metastore.MockStreamingCoordCataLog).ListPChannel).Return(nil, nil).Build()
+	t.Cleanup(func() { checkpointPatch.UnPatch() })
+	oldWALBroadcasterTombstoneCheckInternal := paramtable.Get().StreamingCfg.WALBroadcasterTombstoneCheckInternal.SwapTempValue("10ms")
+	t.Cleanup(func() {
+		paramtable.Get().StreamingCfg.WALBroadcasterTombstoneCheckInternal.SwapTempValue(oldWALBroadcasterTombstoneCheckInternal)
+	})
+	oldWALBroadcasterTombstoneMaxCount := paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxCount.SwapTempValue("2")
+	t.Cleanup(func() {
+		paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxCount.SwapTempValue(oldWALBroadcasterTombstoneMaxCount)
+	})
+	oldWALBroadcasterTombstoneMaxLifetime := paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxLifetime.SwapTempValue("20ms")
+	t.Cleanup(func() {
+		paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxLifetime.SwapTempValue(oldWALBroadcasterTombstoneMaxLifetime)
+	})
 
 	// Register dummy ack callbacks for all message types used in tests
 	registry.RegisterDropCollectionV1AckCallback(func(ctx context.Context, msg message.BroadcastResultDropCollectionMessageV1) error {

@@ -722,8 +722,7 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
             // and the plan-selected projection constrained by index/contracts/README.md.
             std::shared_ptr<const IStructElementOffsets> struct_element_offsets;
             if (selected_element_level_result_) {
-                struct_element_offsets =
-                    segment_->GetStructElementOffsets(field_id_);
+                struct_element_offsets = GetStructElementOffsets(field_id_);
                 AssertInfo(struct_element_offsets != nullptr,
                            "array offsets are required for nested ARRAY index");
             }
@@ -2370,7 +2369,8 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
                 }
                 return {std::move(res), std::move(valid_res)};
             },
-            enable_sub_expr_cache_write_);
+            enable_sub_expr_cache_write_,
+            feature_recorder_);
         cached_match_res_ = cached.result;
         cached_index_chunk_valid_res_ = cached.valid;
     }
@@ -2417,6 +2417,13 @@ PhyUnaryRangeFilterExpr::ExecuteNgramPhase1(TargetBitmap& candidates) {
                field_id_.get());
     ngram_reader_->Candidates(
         literal, ToIndexPatternOp(expr_->op_type_), candidates);
+    RecordNgramUse();
+}
+
+void
+PhyUnaryRangeFilterExpr::RecordNgramUse() {
+    MarkFeature(feature_recorder_, FeatureBit::FilterPathNgramIndex);
+    MarkFeature(feature_recorder_, FeatureBit::ScalarIndexNgram);
 }
 
 void
@@ -2718,6 +2725,7 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch(EvalCtx& context) {
         TargetBitmap candidates(total_count, true);
         ngram_reader_->Candidates(
             literal, ToIndexPatternOp(expr_->op_type_), candidates);
+        RecordNgramUse();
         cached_phase1_res_ =
             std::make_shared<TargetBitmap>(std::move(candidates));
         cached_index_chunk_valid_res_ =

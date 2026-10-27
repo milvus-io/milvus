@@ -118,7 +118,7 @@ VectorMemArtifact::Serialize(storage::FileSink& sink) const {
     knowhere::BinarySet entries;
     if (!engine_.EmptyEmbListOffsets().empty()) {
         AppendEmptyEmbListOffsets(engine_, entries);
-    } else if (!IsAllNullNullable(engine_.native_index.GetIdMap())) {
+    } else if (!IsAllNullNullable(engine_.native_index)) {
         const auto status = engine_.native_index.Serialize(entries);
         if (status != knowhere::Status::success) {
             ThrowInfo(KnowhereStatusToErrorCode(status),
@@ -127,7 +127,7 @@ VectorMemArtifact::Serialize(storage::FileSink& sink) const {
                       knowhere::Status2String(status));
         }
     }
-    AppendValidDataToBinarySet(engine_.native_index.GetIdMap(), entries);
+    AppendValidDataToBinarySet(engine_.native_index, entries);
     ValidateEntries(entries);
 
     // FileSink owns physical slicing and publication. All entries are prepared

@@ -36,7 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -213,13 +213,12 @@ func (t *reshardTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) 
 	err = cluster.CreateReshard(nodeID, req, t.GetCollectionID())
 	if err != nil {
 		mlog.Warn(context.TODO(), "create reshard task failed", WrapTaskLog(t, mlog.Err(err))...)
-		if errors.Is(err, merr.ErrNodeNotFound) || !common.IsTerminalImportV3Err(err) {
-			// The first node may have accepted the request, or the node vanished
-			// between selection and dispatch. Never re-dispatch the same run;
-			// allocate a new run before retrying.
-			t.prepareRetry(cluster)
-		} else {
+		// Raw transport errors are not terminal and retry; a deterministic
+		// rejection fails the task.
+		if importcommon.IsTerminalImportV3Err(err) {
 			t.fail(err.Error())
+		} else {
+			t.prepareRetry(cluster)
 		}
 		return
 	}
@@ -234,11 +233,8 @@ func (t *reshardTask) QueryTaskOnWorker(cluster session.Cluster) {
 	p := t.task.Load()
 	resp, err := cluster.QueryReshard(t.GetNodeID(), &datapb.QueryReshardTaskRequest{JobId: p.GetJobId(), TaskId: p.GetTaskId(), RunId: p.GetRunId()})
 	if err != nil {
-		if errors.Is(err, merr.ErrNodeNotFound) || !common.IsTerminalImportV3Err(err) {
-			t.prepareRetry(cluster)
-		} else {
-			t.fail(err.Error())
-		}
+		// The dispatch/query outcome is unknown, so never reuse this run.
+		t.prepareRetry(cluster)
 		return
 	}
 	t.setSourceProgress(resp.GetSourceProgresses())
@@ -261,7 +257,7 @@ func (t *reshardTask) QueryTaskOnWorker(cluster session.Cluster) {
 			return
 		}
 		if err := t.acceptResult(); err != nil {
-			if common.IsTerminalImportV3Err(err) {
+			if importcommon.IsTerminalImportV3Err(err) {
 				t.fail(err.Error())
 				return
 			}

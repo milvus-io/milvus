@@ -1,12 +1,12 @@
 module github.com/milvus-io/milvus/tests/go_client
 
-go 1.26.9
+go 1.26.10
 
 require (
 	github.com/apache/arrow/go/v17 v17.0.0
-	github.com/cockroachdb/errors v1.9.1
+	github.com/cockroachdb/errors v1.11.3
 	github.com/milvus-io/milvus v0.0.0
-	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260914122923-ae7fea6ab2f4
+	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261014040338-d453f0648677
 	github.com/milvus-io/milvus/client/v3 v3.0.0
 	github.com/milvus-io/milvus/pkg/v3 v3.0.0-beta
 	github.com/minio/minio-go/v7 v7.0.73
@@ -35,11 +35,11 @@ require (
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/cockroachdb/logtags v0.0.0-20211118104740-dabe8e521a4f // indirect
-	github.com/cockroachdb/redact v1.1.3 // indirect
+	github.com/cockroachdb/logtags v0.0.0-20230118201751-21c54148d20b // indirect
+	github.com/cockroachdb/redact v1.1.5 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/getsentry/sentry-go v0.12.0 // indirect
+	github.com/getsentry/sentry-go v0.27.0 // indirect
 	github.com/go-ini/ini v1.67.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/goccy/go-json v0.10.3 // indirect

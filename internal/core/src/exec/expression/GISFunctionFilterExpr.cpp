@@ -19,6 +19,7 @@
 #include <cstdlib>
 #include <iosfwd>
 #include <string_view>
+#include <utility>
 
 #include "bitset/bitset.h"
 #include "bitset/detail/element_vectorized.h"
@@ -29,6 +30,7 @@
 #include "common/PreparedGeometry.h"
 #include "common/Types.h"
 #include "common/Utils.h"
+#include "index/contracts/query/ISpatialReader.h"
 #include "geos_c.h"
 #include "log/Log.h"
 #include "pb/plan.pb.h"
@@ -388,52 +390,64 @@ PhyGISFunctionFilterExpr::EvalForDataSegment() {
     return res_vec;
 }
 
-// Helper function to calculate bounding box for range_within query optimization
-// Creates a rectangular bounding box around a query point with given distance in meters
+// Coarse pre-filter geometry for ST_DWithin on the indexed path: the R-Tree
+// returns every row whose stored MBR intersects this polygon's envelope, and
+// exact refinement (Geometry::dwithin) decides from there. The envelope itself
+// is derived by Geometry::DWithinSearchEnvelope from the same metrics the
+// exact predicate uses, so that every row dwithin() can accept is a candidate
+// -- the previous fixed 111320 m/deg box was not a superset of either metric
+// and silently dropped boundary rows (issue #54138).
+//
+// Coordinates are printed with fmt's shortest round-trip representation, not
+// a fixed decimal count, so the WKT round trip cannot shrink the box.
 static Geometry
 create_bounding_box_for_dwithin(GEOSContextHandle_t ctx,
-                                const Geometry& query_point,
-                                double distance_meters) {
-    double query_lon, query_lat;
-
-    AssertInfo(GEOSGeomGetX_r(ctx, query_point.GetGeometry(), &query_lon) == 1,
-               "Failed to get X coordinate from query point");
-    AssertInfo(GEOSGeomGetY_r(ctx, query_point.GetGeometry(), &query_lat) == 1,
-               "Failed to get Y coordinate from query point");
-
-    const double metersPerDegreeLat = 111320.0;
-
-    // Calculate latitude offset (relatively constant)
-    double latOffset = distance_meters / metersPerDegreeLat;
-
-    // Calculate longitude offset (varies with latitude)
-    double latRad = query_lat * M_PI / 180.0;
-    double lonOffset =
-        distance_meters / (metersPerDegreeLat * std::cos(latRad));
-
-    // Calculate bounding box coordinates
-    double minLon = query_lon - lonOffset;
-    double maxLon = query_lon + lonOffset;
-    double minLat = query_lat - latOffset;
-    double maxLat = query_lat + latOffset;
-
-    // Create WKT POLYGON for bounding box
-    std::string bboxWKT = fmt::format(
-        "POLYGON(({:.6f} {:.6f}, {:.6f} {:.6f}, {:.6f} {:.6f}, {:.6f} {:.6f}, "
-        "{:.6f} {:.6f}))",
-        minLon,
-        minLat,  // Bottom-left
-        maxLon,
-        minLat,  // Bottom-right
-        maxLon,
-        maxLat,  // Top-right
-        minLon,
-        maxLat,  // Top-left
-        minLon,
-        minLat  // Close the ring
-    );
+                                const Geometry::Envelope& env) {
+    std::string bboxWKT =
+        fmt::format("POLYGON(({} {}, {} {}, {} {}, {} {}, {} {}))",
+                    env.min_x,
+                    env.min_y,  // Bottom-left
+                    env.max_x,
+                    env.min_y,  // Bottom-right
+                    env.max_x,
+                    env.max_y,  // Top-right
+                    env.min_x,
+                    env.max_y,  // Top-left
+                    env.min_x,
+                    env.min_y  // Close the ring
+        );
 
     return Geometry(ctx, bboxWKT.c_str());
+}
+
+// R-Tree candidates for the union of a DWITHIN search region. The reader
+// answers one box per lookup, so a region that wraps the antimeridian costs
+// one lookup per box and the bitmaps are ORed. Each answer is Count()-sized;
+// should two answers differ in length, the union keeps the shorter one so a
+// short index is still detected (and fully refined) downstream rather than
+// padded with false negatives.
+static TargetBitmap
+DWithinCandidates(const index::ISpatialReader& reader,
+                  index::SpatialOp op,
+                  GEOSContextHandle_t ctx,
+                  const Geometry::DWithinSearchBoxes& boxes) {
+    AssertInfo(boxes.count > 0, "DWITHIN search region has no box");
+    TargetBitmap candidates;
+    bool first = true;
+    for (const auto& env : boxes) {
+        auto more =
+            reader.Candidates(op, create_bounding_box_for_dwithin(ctx, env));
+        if (first) {
+            candidates = std::move(more);
+            first = false;
+            continue;
+        }
+        if (more.size() < candidates.size()) {
+            candidates.resize(more.size());
+        }
+        candidates.inplace_or(more, candidates.size());
+    }
+    return candidates;
 }
 
 VectorPtr
@@ -490,10 +504,25 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
 
         // For range_within operations, use bounding box for coarse filtering
         if (expr_->op_ == proto::plan::GISFunctionFilterExpr_GISOp_DWithin) {
-            auto candidate_geometry = create_bounding_box_for_dwithin(
-                ctx, query_geometry, expr_->distance_);
-            coarse_global_ = spatial_reader_->Candidates(
-                gis_detail::ToSpatialOp(expr_->op_), candidate_geometry);
+            Geometry::DWithinSearchBoxes boxes;
+            if (Geometry::DWithinSearchEnvelope(ctx,
+                                                query_geometry.GetGeometry(),
+                                                expr_->distance_,
+                                                boxes)) {
+                coarse_global_ =
+                    DWithinCandidates(*spatial_reader_,
+                                      gis_detail::ToSpatialOp(expr_->op_),
+                                      ctx,
+                                      boxes);
+            } else {
+                // An empty query point is within no distance of any row
+                // (Geometry::dwithin rejects empty operands), so there is
+                // nothing to refine. Do not hand the reader a geometry without
+                // an envelope instead: it answers that with every non-null
+                // row, i.e. a full refinement scan for an empty result.
+                coarse_global_ = TargetBitmap(
+                    static_cast<size_t>(selected_covered_row_end_), false);
+            }
         } else {
             coarse_global_ = spatial_reader_->Candidates(
                 gis_detail::ToSpatialOp(expr_->op_), query_geometry);
