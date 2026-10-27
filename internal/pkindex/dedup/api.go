@@ -85,15 +85,14 @@ type WaitError struct {
 	// write waits only for the index to be ready.
 	TimeTick uint64
 
-	d        *decider
-	vchannel string
+	d *decider
 }
 
 func (e *WaitError) Error() string {
 	if e.TimeTick == 0 {
-		return fmt.Sprintf("primary key index of vchannel %s waits for its committed tables to be installed", e.vchannel)
+		return fmt.Sprintf("primary key index of vchannel %s waits for its committed tables to be installed", e.d.vchannel)
 	}
-	return fmt.Sprintf("primary key index of vchannel %s waits for observe to reach time tick %d", e.vchannel, e.TimeTick)
+	return fmt.Sprintf("primary key index of vchannel %s waits for observe to reach time tick %d", e.d.vchannel, e.TimeTick)
 }
 
 // Wait blocks until the index is ready and observe reaches TimeTick. It
@@ -106,10 +105,10 @@ func (e *WaitError) Wait(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-e.d.stop:
-			return errClosed(e.vchannel)
+			return errClosed(e.d.vchannel)
 		}
 	}
-	return e.d.inflight.waitObserved(ctx, e.TimeTick, e.d.stop, e.vchannel)
+	return e.d.inflight.waitObserved(ctx, e.TimeTick, e.d.stop, e.d.vchannel)
 }
 
 // WriteKind is the kind of write the caller is about to append.
@@ -124,10 +123,9 @@ const (
 
 // DecideRequest describes one write in primary key index terms.
 type DecideRequest struct {
-	Kind     WriteKind
-	VChannel string
-	PKs      []PK  // The keys of an insert or delete. Empty for commit and rollback.
-	TxnID    int64 // 0 for an autocommit write
+	Kind  WriteKind
+	PKs   []PK  // The keys of an insert or delete. Empty for commit and rollback.
+	TxnID int64 // 0 for an autocommit write
 }
 
 // Decision tells the caller what to append.

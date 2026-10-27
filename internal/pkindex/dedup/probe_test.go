@@ -28,7 +28,7 @@ import (
 
 func TestProbeKeepsTheOrderOfTheKeys(t *testing.T) {
 	ctx := context.Background()
-	d := New(NewMemoryEngine(), Config{}).(*decider)
+	d := New("v1", NewMemoryEngine(), Config{}).(*decider)
 	defer d.Close()
 
 	present, err := d.probe(ctx, []PK{Int64PK(1)})
@@ -54,7 +54,7 @@ func TestProbeKeepsTheOrderOfTheKeys(t *testing.T) {
 
 func TestProbeDoesNotDecodeTheValue(t *testing.T) {
 	ctx := context.Background()
-	d := New(NewMemoryEngine(), Config{}).(*decider)
+	d := New("v1", NewMemoryEngine(), Config{}).(*decider)
 	defer d.Close()
 	require.NoError(t, d.eng.Write(ctx, []engine.Mutation{{Key: Int64PK(1).Encode(), Value: []byte{1, 2, 3}}}))
 
@@ -65,7 +65,7 @@ func TestProbeDoesNotDecodeTheValue(t *testing.T) {
 
 func TestProbeAfterEngineClose(t *testing.T) {
 	eng := NewMemoryEngine()
-	d := New(eng, Config{}).(*decider)
+	d := New("v1", eng, Config{}).(*decider)
 	defer d.Close()
 	require.NoError(t, eng.Close())
 	_, err := d.probe(context.Background(), []PK{Int64PK(1)})
@@ -93,7 +93,7 @@ func TestProbeRejectsAWrongLength(t *testing.T) {
 		{"too many values", 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			d := New(&fakeLengthEngine{returnLen: tc.returnLen}, Config{}).(*decider)
+			d := New("v1", &fakeLengthEngine{returnLen: tc.returnLen}, Config{}).(*decider)
 			defer d.Close()
 			_, err := d.probe(ctx, []PK{Int64PK(1), Int64PK(2)})
 			require.Error(t, err)

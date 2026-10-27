@@ -42,7 +42,8 @@ import (
 // write stays in the in-flight set for the life of the index. The recovery
 // change adds the observe.
 type decider struct {
-	eng engine.RW
+	vchannel string
+	eng      engine.RW
 	// ready is Config.Ready: closed when the committed table set is installed.
 	ready    <-chan struct{}
 	closed   atomic.Bool
@@ -62,12 +63,13 @@ type decider struct {
 
 // New creates the Decider of a vchannel over its engine. It does not own
 // the engine: the caller closes it, after Close.
-func New(eng engine.RW, cfg Config) Decider {
+func New(vchannel string, eng engine.RW, cfg Config) Decider {
 	return &decider{
-		eng:     eng,
-		ready:   cfg.Ready,
-		stop:    make(chan struct{}),
-		pending: make(map[int64]*pendingTxn),
+		vchannel: vchannel,
+		eng:      eng,
+		ready:    cfg.Ready,
+		stop:     make(chan struct{}),
+		pending:  make(map[int64]*pendingTxn),
 	}
 }
 
@@ -115,7 +117,7 @@ func (d *decider) isReady() bool {
 
 // waitError returns a *WaitError when a write that registers keys must wait for
 // the index to be ready or for observe, nil otherwise.
-func (d *decider) waitError(vchannel string) error {
+func (d *decider) waitError() error {
 	ready := d.isReady()
 	target := d.waitUntil.Load()
 	if d.inflight.observedTimeTick() >= target {
@@ -124,7 +126,7 @@ func (d *decider) waitError(vchannel string) error {
 		}
 		target = 0
 	}
-	return &WaitError{TimeTick: target, d: d, vchannel: vchannel}
+	return &WaitError{TimeTick: target, d: d}
 }
 
 func (d *decider) Observe(tt uint64, pks []PK) {
@@ -133,7 +135,7 @@ func (d *decider) Observe(tt uint64, pks []PK) {
 
 func (d *decider) Decide(ctx context.Context, req DecideRequest) (*WriteIntent, error) {
 	if d.closed.Load() {
-		return nil, errClosed(req.VChannel)
+		return nil, errClosed(d.vchannel)
 	}
 	return d.decide(ctx, &WriteIntent{d: d, req: req})
 }
@@ -163,7 +165,7 @@ func (d *decider) decide(ctx context.Context, intent *WriteIntent) (*WriteIntent
 		if intent.txn == nil {
 			return intent, nil
 		}
-		if err := d.waitError(req.VChannel); err != nil {
+		if err := d.waitError(); err != nil {
 			return nil, err
 		}
 		// pendingMu must be released before the wait: a body of another
@@ -171,7 +173,7 @@ func (d *decider) decide(ctx context.Context, intent *WriteIntent) (*WriteIntent
 		if err := intent.acquire(ctx, intent.txn.allPKs()); err != nil {
 			return nil, err
 		}
-		hits, err := d.existing(ctx, req.VChannel, intent.write, intent.txn.companionCandidates())
+		hits, err := d.existing(ctx, intent.write, intent.txn.companionCandidates())
 		if err != nil {
 			intent.abort()
 			return nil, err
@@ -183,13 +185,13 @@ func (d *decider) decide(ctx context.Context, intent *WriteIntent) (*WriteIntent
 		return intent, nil
 	}
 
-	if err := d.waitError(req.VChannel); err != nil {
+	if err := d.waitError(); err != nil {
 		return nil, err
 	}
 	if err := intent.acquire(ctx, req.PKs); err != nil {
 		return nil, err
 	}
-	present, err := d.existing(ctx, req.VChannel, intent.write, req.PKs)
+	present, err := d.existing(ctx, intent.write, req.PKs)
 	if err != nil {
 		intent.abort()
 		return nil, err
@@ -210,14 +212,14 @@ func (d *decider) decide(ctx context.Context, intent *WriteIntent) (*WriteIntent
 // Rule B: the in-flight set is read before the engine. Observe writes the engine
 // before it removes an entry (rule A), so a key that left the set between the two
 // reads is found in the engine.
-func (d *decider) existing(ctx context.Context, vchannel string, w *inflightWrite, pks []PK) ([]PK, error) {
+func (d *decider) existing(ctx context.Context, w *inflightWrite, pks []PK) ([]PK, error) {
 	if len(pks) == 0 {
 		return nil, nil
 	}
 	// A WaitUntil after the check before the registration raises the time
 	// tick that the writes wait for. The engine may then miss keys, so this
 	// write waits too: the caller removes its registration.
-	if err := d.waitError(vchannel); err != nil {
+	if err := d.waitError(); err != nil {
 		return nil, err
 	}
 	inSet := d.inflight.keysAhead(w)
