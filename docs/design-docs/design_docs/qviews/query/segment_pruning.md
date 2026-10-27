@@ -80,7 +80,11 @@ The ownership and publication invariants are:
    last release cancels I/O and removes the resource from the manager's cache.
    A detached loader can only retain its old resource; it cannot insert it back
    into the cache. Preparation completion checks both runtime and registration
-   identity under Manager.mu before publishing any View map.
+   identity under Manager.mu before publishing any View map. A canceled load from
+   a released/replaced registration completes its readiness task normally when
+   the task context is still live; cancellation of a current registration or of
+   the task itself remains an error. This avoids scheduler failure logs for
+   ordinary resource retirement without hiding unexpected cancellation.
 6. Cached maps and snapshots are Go-owned. After handoff/Close or final Release,
    readers already holding them retain their memory until those readers finish.
    This protects memory, while normal WAL/View errors govern whether an interrupted

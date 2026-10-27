@@ -93,8 +93,7 @@ func TestQueryViewBarrierStopsOnCloseOrCancellation(t *testing.T) {
 		patch := mockey.Mock((*QueryRuntime).submitDrain).Return().Build()
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan error, 1)
-		meta, _ := testManagerQueryViewMetaAndKey(1)
-		go func() { done <- runtime.PrepareQueryView(ctx, meta) }()
+		go func() { done <- runtime.PrepareQueryView(ctx) }()
 		require.Eventually(t, func() bool {
 			runtime.mu.Lock()
 			defer runtime.mu.Unlock()
@@ -272,8 +271,8 @@ func TestPrepareQueryViewPreservesExactReadIdentity(t *testing.T) {
 	first.SchemaVersion, first.LoadInfoVersion = 0, 20
 	second := proto.Clone(first).(*viewpb.QueryViewMeta)
 	second.SchemaVersion, second.LoadInfoVersion = 2, 10
-	require.NoError(t, runtime.PrepareQueryView(context.Background(), first))
-	require.ErrorIs(t, runtime.PrepareQueryView(context.Background(), second), prepareErr)
+	require.NoError(t, runtime.bindView(first).prepare(context.Background(), nil))
+	require.ErrorIs(t, runtime.bindView(second).prepare(context.Background(), nil), prepareErr)
 	require.Len(t, prepared, 2)
 	require.True(t, proto.Equal(first, prepared[0]))
 	require.True(t, proto.Equal(second, prepared[1]))

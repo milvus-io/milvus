@@ -2,17 +2,19 @@ package idf
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/types"
@@ -22,83 +24,133 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
-func TestSchemaRefreshInitializesDisabledIDFWithoutSnapshotOverlap(t *testing.T) {
-	paramtable.Init()
-	ctx := t.Context()
-	schema := &schemapb.CollectionSchema{Version: 2, Fields: []*schemapb.FieldSchema{
-		{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar},
-		{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector},
-	}, Functions: []*schemapb.FunctionSchema{{Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{101}, OutputFieldIds: []int64{102}}}}
-	version := qviews.DataVersion{StreamingVersion: 10}
-	view := walview.VChannelWALView{
-		CollectionID: 1, VChannel: "v1", Schema: schema, BaseGrowingTimeTick: 10,
-		SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: version, Segments: []walview.VisibleSegment{{
-			SegmentID: 20, PartitionID: 10, Data: walview.SegmentSnapshotData{InsertMessages: []message.ImmutableMessage{bm25Insert(t, 20, 4)}},
-		}}},
+func fieldTestSchema(version int32, ids ...int64) *schemapb.CollectionSchema {
+	schema := &schemapb.CollectionSchema{Version: version}
+	for _, id := range ids {
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{FieldID: id - 1, Name: fmt.Sprintf("text_%d", id), DataType: schemapb.DataType_VarChar}, &schemapb.FieldSchema{FieldID: id, Name: fmt.Sprintf("sparse_%d", id), DataType: schemapb.DataType_SparseFloatVector})
+		schema.Functions = append(schema.Functions, &schemapb.FunctionSchema{Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{id - 1}, OutputFieldIds: []int64{id}})
 	}
-	cm := storage.NewLocalChunkManager()
-	stats := storage.NewBM25Stats()
-	stats.Append(map[uint32]float32{7: 2})
-	data, err := stats.Serialize()
-	require.NoError(t, err)
-	path := t.TempDir() + "/sealed"
-	require.NoError(t, cm.Write(ctx, path, data))
-	provider := NewProvider(&mocks.MockMixCoordClient{}, WithChunkManager(cm))
-	runtime := &Runtime{provider: provider}
-	defer runtime.Close()
-	base := walview.VChannelWALView{Schema: &schemapb.CollectionSchema{Version: 1}, CaptureQueryView: func(_ *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
-		capture(view)
-		return true
-	}}
-	require.NoError(t, runtime.Prepare(ctx, base))
-	require.True(t, runtime.disabled)
-	fail := true
-	patch := mockey.Mock((*Provider).getSealedBM25Resources).To(func(*Provider, context.Context, int64, string, qviews.DataVersion, []int64, uint64) ([]*datapb.StreamingNodeBM25Resource, error) {
-		// The pre-snapshot insert can still be queued in QueryRuntime. Only the
-		// post-snapshot insert belongs in the replacement's live tail.
-		runtime.ApplyLiveEvent(ctx, walview.VChannelResourceEvent{Message: bm25Insert(t, 20, 4)})
-		runtime.ApplyLiveEvent(ctx, walview.VChannelResourceEvent{Message: bm25Insert(t, 20, 6, 11)})
-		if fail {
-			return nil, merr.WrapErrServiceNotReadyMsg("retry storage")
-		}
-		return []*datapb.StreamingNodeBM25Resource{{
-			SegmentId: 30, PartitionId: 10, StorageVersion: storage.StorageV2,
-			Bm25Binlogs: []*datapb.FieldBinlog{{FieldID: 102, Binlogs: []*datapb.Binlog{{LogPath: path}}}},
-		}}, nil
-	}).Build()
-	defer patch.UnPatch()
-	meta := &viewpb.QueryViewMeta{SchemaVersion: 2, Version: &viewpb.QueryViewVersion{DataVersion: version.IntoProto()}}
-	require.ErrorIs(t, runtime.PrepareSchema(ctx, meta, nil), merr.ErrServiceNotReady)
-	require.EqualValues(t, 1, runtime.SchemaVersion())
-	require.Nil(t, runtime.currentOracle())
-	fail = false
-	require.NoError(t, runtime.PrepareSchema(ctx, meta, nil))
-	require.EqualValues(t, 2, runtime.SchemaVersion())
-	require.False(t, runtime.disabled)
-	require.EqualValues(t, 3, runtime.oracle.currentStats[102].NumRow())
-	require.Equal(t, float64(4), runtime.oracle.currentStats[102].GetAvgdl())
-	require.NoError(t, runtime.PrepareSchema(ctx, meta, nil))
-	require.EqualValues(t, 3, runtime.oracle.currentStats[102].NumRow())
+	return schema
 }
 
-func TestSchemaRefreshCancellationUnblocksFullEventQueue(t *testing.T) {
-	paramtable.Init()
-	lifetime, stop := context.WithCancel(t.Context())
-	defer stop()
+func prepareTestView(t *testing.T, r *Runtime, view walview.VChannelWALView) (*viewBinding, error) {
+	t.Helper()
+	if view.CaptureQueryView == nil {
+		view.CaptureQueryView = func(_ *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool { capture(view); return true }
+	}
+	if err := r.Prepare(t.Context(), view); err != nil {
+		return nil, err
+	}
+	b := r.BindView(&viewpb.QueryViewMeta{CollectionId: view.CollectionID, SchemaVersion: view.Schema.GetVersion(), LoadInfoVersion: view.LoadInfoVersion, Version: &viewpb.QueryViewVersion{DataVersion: view.SegmentSnapshot.DataVersion.IntoProto()}}).(*viewBinding)
+	return b, b.Prepare(t.Context(), nil)
+}
+
+func TestAddFieldSharesExistingStatisticsAndReclaimsLastOwner(t *testing.T) {
+	r := &Runtime{provider: NewProvider(&mocks.MockMixCoordClient{})}
+	defer r.Close()
 	version := qviews.DataVersion{StreamingVersion: 10}
-	runtime := &Runtime{provider: NewProvider(&mocks.MockMixCoordClient{})}
-	defer runtime.Close()
-	view := walview.VChannelWALView{Schema: &schemapb.CollectionSchema{Version: 2, Functions: []*schemapb.FunctionSchema{{Type: schemapb.FunctionType_BM25, OutputFieldIds: []int64{102}}}}, SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: version}}
-	require.NoError(t, runtime.Prepare(t.Context(), walview.VChannelWALView{
-		Schema: &schemapb.CollectionSchema{Version: 1}, RuntimeContext: lifetime,
-		CaptureQueryView: func(_ *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool { capture(view); return true },
-	}))
+	current := walview.VChannelWALView{CollectionID: 1, VChannel: "v1", Schema: fieldTestSchema(1, 102), PartitionIDs: []int64{10}, BaseGrowingTimeTick: 10, SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: version}}
+	current.CaptureQueryView = func(meta *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
+		next := current
+		next.Schema = proto.Clone(current.Schema).(*schemapb.CollectionSchema)
+		next.Schema.Version = meta.GetSchemaVersion()
+		capture(next)
+		return true
+	}
+	reads := map[int64]int{}
+	mockey.PatchConvey("reuse actual loaded statistics and single event application", t, func() {
+		mockey.Mock((*Provider).getSealedBM25Resources).Return([]*datapb.StreamingNodeBM25Resource{{SegmentId: 30, PartitionId: 10}}, nil).Build()
+		mockey.Mock((*Provider).loadSealedContributions).To(func(_ *Provider, _ context.Context, _ map[int64]*datapb.StreamingNodeBM25Resource, fields bm25Stats) (bm25Stats, error) {
+			result := make(bm25Stats)
+			for field := range fields {
+				reads[field]++
+				stats := storage.NewBM25Stats()
+				stats.Append(map[uint32]float32{7: 2})
+				result[field] = stats
+			}
+			return result, nil
+		}).Build()
+		first, err := prepareTestView(t, r, current)
+		require.NoError(t, err)
+		old := first.fields[0]
+		bind := func(schema *schemapb.CollectionSchema, load uint64) *viewBinding {
+			current.Schema = schema
+			b := r.BindView(&viewpb.QueryViewMeta{SchemaVersion: schema.Version, LoadInfoVersion: load, Version: &viewpb.QueryViewVersion{DataVersion: version.IntoProto()}}).(*viewBinding)
+			require.NoError(t, b.Prepare(t.Context(), nil))
+			return b
+		}
+		ordinary := fieldTestSchema(2, 102)
+		ordinary.Fields = append(ordinary.Fields, &schemapb.FieldSchema{FieldID: 200, DataType: schemapb.DataType_Int64})
+		second := bind(ordinary, 20)
+		require.Same(t, old, second.fields[0])
+		require.Equal(t, 1, reads[int64(102)])
+		r.ApplyLiveEvent(t.Context(), walview.VChannelResourceEvent{Message: bm25Insert(t, 20, 4, 11)})
+		require.EqualValues(t, 2, old.oracle.currentStats[102].NumRow(), "multiple View owners must not duplicate a WAL insert")
+		third := bind(fieldTestSchema(3, 102, 104), 30)
+		require.Same(t, old, third.fields[0])
+		require.Equal(t, 1, reads[int64(102)])
+		require.Equal(t, 1, reads[int64(104)])
+		first.Release()
+		second.Release()
+		require.False(t, old.oracle.closed)
+		require.Len(t, r.fields, 2)
+		third.Release()
+		require.True(t, old.oracle.closed)
+		require.Empty(t, r.fields)
+		recreated := bind(fieldTestSchema(3, 102), 30)
+		require.NotSame(t, old, recreated.fields[0])
+		require.Equal(t, 2, reads[int64(102)])
+		recreated.Release()
+		require.Empty(t, r.fields)
+	})
+}
+
+func TestFieldSharingRequiresSamePartitionScopeAndSemantics(t *testing.T) {
+	r := &Runtime{provider: NewProvider(&mocks.MockMixCoordClient{})}
+	defer r.Close()
+	current := walview.VChannelWALView{Schema: fieldTestSchema(1, 102), PartitionIDs: []int64{2, 1}, SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: qviews.DataVersion{StreamingVersion: 10}}}
+	current.CaptureQueryView = func(_ *viewpb.QueryViewMeta, fn func(walview.VChannelWALView)) bool { fn(current); return true }
+	patch := mockey.Mock((*Provider).getSealedBM25Resources).Return(nil, nil).Build()
+	defer patch.UnPatch()
+	a, err := prepareTestView(t, r, current)
+	require.NoError(t, err)
+	bind := func() *viewBinding {
+		b := r.BindView(&viewpb.QueryViewMeta{SchemaVersion: current.Schema.Version, Version: &viewpb.QueryViewVersion{DataVersion: current.SegmentSnapshot.DataVersion.IntoProto()}}).(*viewBinding)
+		require.NoError(t, b.Prepare(t.Context(), nil))
+		return b
+	}
+	current.PartitionIDs = []int64{1, 2}
+	b := bind()
+	require.Same(t, a.fields[0], b.fields[0])
+	current.PartitionIDs = []int64{1}
+	c := bind()
+	require.NotSame(t, a.fields[0], c.fields[0])
+	current.Schema = fieldTestSchema(2, 102)
+	current.Schema.Functions[0].Name = "different-semantics"
+	d := bind()
+	require.NotSame(t, c.fields[0], d.fields[0])
+	a.Release()
+	b.Release()
+	c.Release()
+	d.Release()
+	require.Empty(t, r.fields)
+}
+
+func TestFieldPreparationCancellationUnblocksFullEventQueue(t *testing.T) {
+	r := &Runtime{provider: NewProvider(&mocks.MockMixCoordClient{})}
+	defer r.Close()
+	version := qviews.DataVersion{StreamingVersion: 10}
+	view := walview.VChannelWALView{Schema: fieldTestSchema(1, 102), SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: version}}
+	view.CaptureQueryView = func(_ *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool { capture(view); return true }
+	require.NoError(t, r.Prepare(t.Context(), view))
+	binding := r.BindView(&viewpb.QueryViewMeta{SchemaVersion: 1, Version: &viewpb.QueryViewVersion{DataVersion: version.IntoProto()}}).(*viewBinding)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
 	reading := make(chan struct{})
 	patch := mockey.Mock((*Provider).getSealedBM25Resources).To(func(_ *Provider, ctx context.Context, _ int64, _ string, _ qviews.DataVersion, _ []int64, _ uint64) ([]*datapb.StreamingNodeBM25Resource, error) {
 		close(reading)
@@ -107,141 +159,145 @@ func TestSchemaRefreshCancellationUnblocksFullEventQueue(t *testing.T) {
 	}).Build()
 	defer patch.UnPatch()
 	done := make(chan error, 1)
-	go func() {
-		done <- runtime.PrepareSchema(t.Context(), &viewpb.QueryViewMeta{SchemaVersion: 2, Version: &viewpb.QueryViewVersion{DataVersion: version.IntoProto()}}, nil)
-	}()
+	go func() { done <- binding.Prepare(ctx, nil) }()
 	<-reading
 	event := walview.VChannelResourceEvent{SegmentSealed: &walview.SegmentSealedEvent{SegmentID: 20, SealedAtDataVersion: qviews.DataVersion{StreamingVersion: 11}}}
 	for i := 0; i < 1024; i++ {
-		runtime.ApplyLiveEvent(t.Context(), event)
+		r.ApplyLiveEvent(t.Context(), event)
 	}
 	observed := make(chan struct{})
-	go func() { runtime.ApplyLiveEvent(t.Context(), event); close(observed) }()
-	stop()
+	go func() { r.ApplyLiveEvent(t.Context(), event); close(observed) }()
+	cancel()
 	select {
 	case <-observed:
 	case <-time.After(time.Second):
-		t.Fatal("canceled schema build blocked WAL event application")
+		t.Fatal("canceled preparation blocked WAL")
 	}
 	require.ErrorIs(t, <-done, context.Canceled)
-	require.EqualValues(t, 1, runtime.SchemaVersion())
-	require.Nil(t, runtime.currentOracle())
+	binding.Release()
+	require.Empty(t, r.fields)
 }
 
-func TestSchemaRefreshReconcilesLaterLoadFieldsAndPreservesCurrentOracle(t *testing.T) {
-	paramtable.Init()
+func TestFieldPreparationUsesSnapshotTailWithoutDuplication(t *testing.T) {
+	r := &Runtime{provider: NewProvider(&mocks.MockMixCoordClient{})}
+	defer r.Close()
+	view := walview.VChannelWALView{CollectionID: 1, Schema: fieldTestSchema(1, 102), BaseGrowingTimeTick: 10, SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: qviews.DataVersion{StreamingVersion: 10}, Segments: []walview.VisibleSegment{{SegmentID: 20, PartitionID: 10, Data: walview.SegmentSnapshotData{InsertMessages: []message.ImmutableMessage{bm25Insert(t, 20, 4)}}}}}}
+	patch := mockey.Mock((*Provider).getSealedBM25Resources).To(func(*Provider, context.Context, int64, string, qviews.DataVersion, []int64, uint64) ([]*datapb.StreamingNodeBM25Resource, error) {
+		r.ApplyLiveEvent(t.Context(), walview.VChannelResourceEvent{Message: bm25Insert(t, 20, 4)})
+		r.ApplyLiveEvent(t.Context(), walview.VChannelResourceEvent{Message: bm25Insert(t, 20, 6, 11)})
+		return nil, nil
+	}).Build()
+	defer patch.UnPatch()
+	binding, err := prepareTestView(t, r, view)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, binding.fields[0].oracle.currentStats[102].NumRow())
+	// The dispatcher can also deliver snapshot-covered events after publication.
+	r.ApplyLiveEvent(t.Context(), walview.VChannelResourceEvent{Message: bm25Insert(t, 20, 4)})
+	require.EqualValues(t, 2, binding.fields[0].oracle.currentStats[102].NumRow())
+	binding.Release()
+}
+
+// Ensure field scope comes from required fields, not preload hints.
+var _ queryresource.QueryViewResource = (*viewBinding)(nil)
+
+func TestNewFieldWaitsForSharedFieldSnapshotPrefix(t *testing.T) {
+	r := &Runtime{provider: NewProvider(&mocks.MockMixCoordClient{})}
+	defer r.Close()
+	current := walview.VChannelWALView{CollectionID: 1, Schema: fieldTestSchema(1, 102), BaseGrowingTimeTick: 10, SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: qviews.DataVersion{StreamingVersion: 10}}}
+	current.CaptureQueryView = func(_ *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
+		capture(current)
+		return true
+	}
+	patch := mockey.Mock((*Provider).getSealedBM25Resources).Return(nil, nil).Build()
+	defer patch.UnPatch()
+	first, err := prepareTestView(t, r, current)
+	require.NoError(t, err)
+	defer first.Release()
+	original := message.MustAsImmutableInsertMessageV1(bm25Insert(t, 20, 4, 11))
+	body := proto.Clone(original.MustBody()).(*msgpb.InsertRequest)
+	extra := proto.Clone(body.FieldsData[1]).(*schemapb.FieldData)
+	extra.FieldId = 104
+	body.FieldsData = append(body.FieldsData, extra)
+	event := message.NewInsertMessageBuilderV1().WithVChannel("v1").WithHeader(original.Header()).WithBody(body).MustBuildMutable().WithTimeTick(11).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(11))
+	current.Schema = fieldTestSchema(2, 102, 104)
+	current.BaseGrowingTimeTick = 11
+	current.SegmentSnapshot.Segments = []walview.VisibleSegment{{SegmentID: 20, PartitionID: 10, Schema: current.Schema, Data: walview.SegmentSnapshotData{InsertMessages: []message.ImmutableMessage{event}}}}
+	binding := r.BindView(&viewpb.QueryViewMeta{SchemaVersion: 2, Version: &viewpb.QueryViewVersion{DataVersion: current.SegmentSnapshot.DataVersion.IntoProto()}}).(*viewBinding)
+	defer binding.Release()
+	barriers := 0
+	r.view.ResourceEventBarrier = func(context.Context) error {
+		barriers++
+		require.False(t, binding.resolved)
+		require.Zero(t, first.fields[0].oracle.currentStats[102].NumRow())
+		require.EqualValues(t, 1, binding.fields[1].oracle.currentStats[104].NumRow())
+		// Deliver the delayed event to the old field. The new field already covered it.
+		r.ApplyLiveEvent(t.Context(), walview.VChannelResourceEvent{Message: event})
+		return nil
+	}
+	require.NoError(t, binding.Prepare(t.Context(), nil))
+	require.Equal(t, 1, barriers)
+	require.Same(t, first.fields[0], binding.fields[0])
+	require.EqualValues(t, 1, binding.fields[0].oracle.currentStats[102].NumRow())
+	require.EqualValues(t, 1, binding.fields[1].oracle.currentStats[104].NumRow())
+	_, err = binding.BuildIDFBatch(t.Context(), []queryresource.IDFRequest{{FieldID: 102}, {FieldID: 104}})
+	require.NoError(t, err)
+}
+
+func TestViewBindingUsesRequiredFieldAndPartitionScope(t *testing.T) {
 	client := &mocks.MockMixCoordClient{}
 	future := syncutil.NewFuture[types.MixCoordClient]()
 	future.Set(client)
 	loadInfo := queryresource.NewFutureLoadInfoProvider(future)
-	version := qviews.DataVersion{StreamingVersion: 10}
-	schema := &schemapb.CollectionSchema{Version: 2, Functions: []*schemapb.FunctionSchema{{Type: schemapb.FunctionType_BM25, OutputFieldIds: []int64{102}}}}
-	view := walview.VChannelWALView{CollectionID: 1, VChannel: "v1", Schema: schema, LoadInfoVersion: 2, SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: version}}
-	runtime := &Runtime{provider: NewProvider(client)}
-	defer runtime.Close()
-	base := view
-	base.LoadInfoVersion = 1
-	base.RequiredFields = []*messagespb.LoadFieldConfig{{FieldId: 101}}
-	base.CaptureQueryView = func(meta *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
-		view.LoadInfoVersion = meta.GetLoadInfoVersion()
-		view.SegmentSnapshot.DataVersion = qviews.FromProtoDataVersion(meta.GetVersion().GetDataVersion())
-		capture(view)
-		return true
-	}
-	require.NoError(t, runtime.Prepare(t.Context(), base))
-	require.True(t, runtime.disabled)
-	var fetchErr error
-	loadPatch := mockey.Mock((*mocks.MockMixCoordClient).GetQueryViewLoadInfo).To(func(_ *mocks.MockMixCoordClient, _ context.Context, req *querypb.GetQueryViewLoadInfoRequest, _ ...grpc.CallOption) (*querypb.GetQueryViewLoadInfoResponse, error) {
-		return &querypb.GetQueryViewLoadInfoResponse{Status: merr.Success(), CollectionID: 1, Version: req.GetVersion(), RequiredFields: []*messagespb.LoadFieldConfig{{FieldId: 102}}}, fetchErr
+	r := &Runtime{provider: NewProvider(client)}
+	defer r.Close()
+	view := walview.VChannelWALView{CollectionID: 1, Schema: fieldTestSchema(1, 102, 104), SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: qviews.DataVersion{StreamingVersion: 10}}}
+	view.CaptureQueryView = func(_ *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool { capture(view); return true }
+	require.NoError(t, r.Prepare(t.Context(), view))
+	binding := r.BindView(&viewpb.QueryViewMeta{SchemaVersion: 1, LoadInfoVersion: 42, Version: &viewpb.QueryViewVersion{DataVersion: view.SegmentSnapshot.DataVersion.IntoProto()}}).(*viewBinding)
+	defer binding.Release()
+	fail := true
+	rpc := mockey.Mock((*mocks.MockMixCoordClient).GetQueryViewLoadInfo).To(func(_ *mocks.MockMixCoordClient, _ context.Context, req *querypb.GetQueryViewLoadInfoRequest, _ ...grpc.CallOption) (*querypb.GetQueryViewLoadInfoResponse, error) {
+		require.EqualValues(t, 42, req.GetVersion())
+		if fail {
+			return nil, merr.WrapErrServiceNotReadyMsg("load info pending")
+		}
+		return &querypb.GetQueryViewLoadInfoResponse{Status: merr.Success(), CollectionID: 1, PartitionIDs: []int64{10}, RequiredFields: []*messagespb.LoadFieldConfig{{FieldId: 102}}, LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 104}}}, nil
 	}).Build()
-	defer loadPatch.UnPatch()
-	statsPatch := mockey.Mock((*Provider).getSealedBM25Resources).Return(nil, nil).Build()
-	defer statsPatch.UnPatch()
-	meta := &viewpb.QueryViewMeta{CollectionId: 1, SchemaVersion: 2, LoadInfoVersion: 2, Version: &viewpb.QueryViewVersion{DataVersion: version.IntoProto()}}
-	fetchErr = merr.WrapErrServiceNotReadyMsg("load config unavailable")
-	require.ErrorIs(t, runtime.PrepareSchema(t.Context(), meta, loadInfo), merr.ErrServiceNotReady)
-	require.True(t, runtime.disabled)
-	fetchErr = nil
-	require.NoError(t, runtime.PrepareSchema(t.Context(), meta, loadInfo))
-	require.False(t, runtime.disabled)
-	old := runtime.currentOracle()
-	require.Contains(t, old.currentStats, int64(102))
-	// Failed refresh preserves an already usable oracle. An older requested
-	// DataVersion must not regress the single shared aggregate on retry.
-	meta.SchemaVersion = 3
-	meta.Version.DataVersion.StreamingVersion = 9
-	view.Schema = &schemapb.CollectionSchema{Version: 3, Functions: schema.Functions}
-	fetchErr = merr.WrapErrServiceNotReadyMsg("retry")
-	require.Error(t, runtime.PrepareSchema(t.Context(), meta, loadInfo))
-	require.Same(t, old, runtime.currentOracle())
-	require.EqualValues(t, 2, runtime.SchemaVersion())
-	fetchErr = nil
-	require.NoError(t, runtime.PrepareSchema(t.Context(), meta, loadInfo))
-	require.Equal(t, version, runtime.oracle.currentVersion)
-	require.EqualValues(t, 3, runtime.SchemaVersion())
-	require.False(t, old.closed, "old read schema must retain its IDF aggregate")
-	retained := runtime.oracles[queryresource.ReadSchemaKey{SchemaVersion: 2, LoadInfoVersion: 2}]
-	require.Same(t, old, retained)
-	require.NoError(t, runtime.PrepareSchema(t.Context(), &viewpb.QueryViewMeta{SchemaVersion: 2, LoadInfoVersion: 2}, loadInfo))
-	require.Same(t, old, runtime.oracles[queryresource.ReadSchemaKey{SchemaVersion: 2, LoadInfoVersion: 2}])
-	runtime.Close()
-	require.True(t, old.closed)
-	require.ErrorIs(t, runtime.PrepareSchema(t.Context(), meta, loadInfo), context.Canceled)
+	defer rpc.UnPatch()
+	resources := mockey.Mock((*Provider).getSealedBM25Resources).To(func(_ *Provider, _ context.Context, _ int64, _ string, _ qviews.DataVersion, partitions []int64, _ uint64) ([]*datapb.StreamingNodeBM25Resource, error) {
+		require.Equal(t, []int64{10}, partitions)
+		return nil, nil
+	}).Build()
+	defer resources.UnPatch()
+	require.ErrorIs(t, binding.Prepare(t.Context(), loadInfo), merr.ErrServiceNotReady)
+	require.Empty(t, r.fields)
+	fail = false
+	require.NoError(t, binding.Prepare(t.Context(), loadInfo))
+	require.Len(t, binding.fields, 1)
+	require.EqualValues(t, 102, binding.fields[0].key.fieldID)
+	require.Equal(t, "[10]", binding.fields[0].key.scope)
+	_, err := binding.BuildIDFBatch(t.Context(), []queryresource.IDFRequest{{FieldID: 104}})
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
 }
 
-func TestQueryViewReadyWaitsForNewBM25Oracle(t *testing.T) {
-	paramtable.Init()
-	scheduler := nodescheduler.New(1)
-	defer scheduler.Close()
-	dispatcher := queryresource.NewDispatcher(1)
-	defer dispatcher.Close()
-	provider := NewProvider(&mocks.MockMixCoordClient{})
-	manager := queryresource.NewManager(queryresource.Config{
-		Scheduler: scheduler, Dispatcher: dispatcher,
-		Builders: []queryresource.QueryRuntimeModuleBuilder{provider},
-	})
-	defer manager.Close()
-	version := qviews.DataVersion{StreamingVersion: 10}
-	view := walview.VChannelWALView{CollectionID: 1, VChannel: "v1", Schema: &schemapb.CollectionSchema{Version: 1}, SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: version}}
-	view.CaptureQueryView = func(_ *viewpb.QueryViewMeta, capture func(walview.VChannelWALView)) bool {
-		next := view
-		next.Schema = &schemapb.CollectionSchema{Version: 2, Functions: []*schemapb.FunctionSchema{{Type: schemapb.FunctionType_BM25, OutputFieldIds: []int64{102}}}}
-		capture(next)
-		return true
-	}
-	build := func(*viewpb.QueryViewMeta) (walview.VChannelWALView, bool) { return view, true }
-	key := qviews.QueryViewKey{ShardID: qviews.ShardID{ReplicaID: 1, VChannel: "v1"}, QueryViewVersion: qviews.QueryViewVersion{DataVersion: version, QueryVersion: 1}}
-	ready := make(chan struct{})
-	manager.AcquireLocked(snview.AcquireResource{Key: key, Meta: &viewpb.QueryViewMeta{SchemaVersion: 1, Version: key.QueryViewVersion.IntoProto()}, OnReady: func() { close(ready) }}, build)
-	select {
-	case <-ready:
-	case <-time.After(time.Second):
-		t.Fatal("initial view not ready")
-	}
-	reading, finishRead := make(chan struct{}), make(chan struct{})
-	patch := mockey.Mock((*Provider).getSealedBM25Resources).To(func(_ *Provider, ctx context.Context, _ int64, _ string, _ qviews.DataVersion, _ []int64, _ uint64) ([]*datapb.StreamingNodeBM25Resource, error) {
-		close(reading)
-		select {
-		case <-finishRead:
-			return nil, nil
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-	}).Build()
+func TestHybridBatchAlignsSharedFieldVersions(t *testing.T) {
+	r := &Runtime{provider: NewProvider(&mocks.MockMixCoordClient{})}
+	defer r.Close()
+	patch := mockey.Mock((*Provider).getSealedBM25Resources).Return(nil, nil).Build()
 	defer patch.UnPatch()
-	key.QueryViewVersion.QueryVersion++
-	nextReady := make(chan struct{})
-	manager.AcquireLocked(snview.AcquireResource{Key: key, Meta: &viewpb.QueryViewMeta{SchemaVersion: 2, Version: key.QueryViewVersion.IntoProto()}, OnReady: func() { close(nextReady) }}, build)
-	<-reading
-	select {
-	case <-nextReady:
-		t.Fatal("view reported Ready before IDF initialization")
-	default:
-	}
-	close(finishRead)
-	select {
-	case <-nextReady:
-	case <-time.After(time.Second):
-		t.Fatal("new view not ready after IDF initialization")
-	}
+	binding, err := prepareTestView(t, r, walview.VChannelWALView{Schema: fieldTestSchema(1, 102, 104), SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: qviews.DataVersion{StreamingVersion: 10}}})
+	require.NoError(t, err)
+	defer binding.Release()
+	target := qviews.DataVersion{StreamingVersion: 11}
+	require.NoError(t, binding.fields[0].oracle.PrepareDataVersion(t.Context(), target))
+	// A different View may have advanced one shared field. Never return a hybrid
+	// result while its companion is still on the old DataView.
+	binding.fields[1].oracle.advanceMu.Lock()
+	_, err = binding.BuildIDFBatch(t.Context(), []queryresource.IDFRequest{{FieldID: 102}, {FieldID: 104}})
+	binding.fields[1].oracle.advanceMu.Unlock()
+	require.ErrorIs(t, err, merr.ErrServiceNotReady)
+	results, err := binding.BuildIDFBatch(t.Context(), []queryresource.IDFRequest{{FieldID: 102}, {FieldID: 104}})
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	require.Equal(t, target, binding.fields[1].oracle.currentVersion)
 }

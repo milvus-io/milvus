@@ -14,10 +14,12 @@ const defaultLiveEventBufferSize = 1024
 
 // QueryRuntime is the vchannel singleton owned by VChannelRecoveryModule.
 type QueryRuntime struct {
-	mu      sync.Mutex
-	cond    *sync.Cond
-	state   queryRuntimeState
-	modules []QueryRuntimeModule
+	views     map[*viewResources]struct{}
+	closeOnce sync.Once
+	mu        sync.Mutex
+	cond      *sync.Cond
+	state     queryRuntimeState
+	modules   []QueryRuntimeModule
 
 	pending      []walview.VChannelResourceEvent
 	pendingLimit int
@@ -184,8 +186,8 @@ func (r *QueryRuntime) Advance(oldestDataVersion qviews.DataVersion) {
 	}
 }
 
-// PrepareQueryView fences sealed handoffs and prepares the shared BM25 aggregate before readiness.
-func (r *QueryRuntime) PrepareQueryView(ctx context.Context, meta *viewpb.QueryViewMeta) error {
+// PrepareQueryView fences sealed handoffs before View resources are prepared.
+func (r *QueryRuntime) PrepareQueryView(ctx context.Context) error {
 	if r == nil {
 		return nil
 	}
@@ -194,22 +196,9 @@ func (r *QueryRuntime) PrepareQueryView(ctx context.Context, meta *viewpb.QueryV
 		r.mu.Unlock()
 		return context.Canceled
 	}
-	modules := append([]QueryRuntimeModule(nil), r.modules...)
 	prepare := r.prepareView
 	r.mu.Unlock()
-	if err := prepare(ctx); err != nil {
-		return err
-	}
-	for _, module := range modules {
-		versioned, ok := module.(QueryRuntimePrepareModule)
-		if !ok {
-			continue
-		}
-		if err := versioned.PrepareSchemaDataVersion(ctx, meta); err != nil {
-			return err
-		}
-	}
-	return nil
+	return prepare(ctx)
 }
 
 // PrepareIndexMeta refreshes a reused runtime before the new view can serve.
@@ -273,6 +262,17 @@ func (r *QueryRuntime) PrepareIndexMeta(ctx context.Context, meta *viewpb.QueryV
 }
 
 func (r *QueryRuntime) BeforeRelease(ctx context.Context, version qviews.DataVersion) error {
+	r.mu.Lock()
+	closed := r.state == queryRuntimeClosed
+	r.mu.Unlock()
+	if closed {
+		return r.tryClose()
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stop := context.AfterFunc(r.ctx, cancel)
+	defer stop()
+
 	var result error
 	r.RangeModules(func(module QueryRuntimeModule) bool {
 		if module, ok := module.(QueryRuntimeReleaseModule); ok {
@@ -326,30 +326,57 @@ func (r *QueryRuntime) advanceModules(oldestDataVersion qviews.DataVersion) {
 	}
 }
 
+// stop wakes producers and cancels operations without waiting under owner locks.
+func (r *QueryRuntime) stop() []*viewResources {
+	r.mu.Lock()
+	if r.state != queryRuntimeClosed {
+		r.state = queryRuntimeClosed
+		close(r.closed)
+		r.cancel()
+		r.pending = nil
+		r.drainScheduled = false
+		r.cond.Broadcast()
+	}
+	views := make([]*viewResources, 0, len(r.views))
+	for v := range r.views {
+		views = append(views, v)
+	}
+	r.mu.Unlock()
+	for _, v := range views {
+		v.retire()
+	}
+	return views
+}
+
+func (r *QueryRuntime) tryClose() error {
+	for _, v := range r.stop() {
+		if err := v.release(); err != nil {
+			return err
+		}
+	}
+	r.Close()
+	return nil
+}
+
 func (r *QueryRuntime) Close() {
 	if r == nil {
 		return
 	}
-	r.mu.Lock()
-	if r.state == queryRuntimeClosed {
-		r.mu.Unlock()
-		return
-	}
-	r.state = queryRuntimeClosed
-	close(r.closed)
-	r.cancel()
-	r.pending = nil
-	r.drainScheduled = false
-	r.cond.Broadcast()
-	modules := append([]QueryRuntimeModule(nil), r.modules...)
-	r.mu.Unlock()
-	r.applyMu.Lock()
-	defer r.applyMu.Unlock()
-	for i := len(modules) - 1; i >= 0; i-- {
-		if modules[i] != nil {
-			modules[i].Close()
+	views := r.stop()
+	r.closeOnce.Do(func() {
+		for _, v := range views {
+			<-v.drained
+			_ = v.release()
+			<-v.closed
 		}
-	}
+		r.applyMu.Lock()
+		defer r.applyMu.Unlock()
+		for i := len(r.modules) - 1; i >= 0; i-- {
+			if r.modules[i] != nil {
+				r.modules[i].Close()
+			}
+		}
+	})
 }
 
 func (r *QueryRuntime) takeInitialBatch() []walview.VChannelResourceEvent {

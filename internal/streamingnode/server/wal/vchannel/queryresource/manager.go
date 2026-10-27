@@ -51,6 +51,8 @@ type Manager struct {
 }
 
 type queryViewRef struct {
+	resources      *viewResources
+	prepared       bool
 	statsResources []*partitionStatsResource
 	// Published once after successful preparation; borrowed read-only by queries.
 	statsSnapshots  map[int64]*storage.PartitionStatsSnapshot
@@ -76,7 +78,6 @@ func (m *Manager) AcquireLocked(req snview.AcquireResource, build ViewBuilder) {
 	if req.Meta == nil || req.Meta.GetVersion() == nil || req.Meta.GetVersion().GetDataVersion() == nil {
 		panic("query view meta version is nil")
 	}
-	var notifyReady bool
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
@@ -104,13 +105,13 @@ func (m *Manager) AcquireLocked(req snview.AcquireResource, build ViewBuilder) {
 		if m.runtime == nil && m.task == nil {
 			m.startBuildLocked(m.oldestQueryViewMetaLocked(), build)
 		} else if m.runtime != nil && m.task == nil && m.err == nil {
-			notifyReady = true
+			ref := m.refs[req.Key]
+			ref.resources = m.runtime.bindView(ref.meta)
+			m.refs[req.Key] = ref
+			m.submitReadyLocked(req.Key, ref)
 		}
 	}
 	m.mu.Unlock()
-	if notifyReady {
-		m.submitReady(req.Key, req.OnReady)
-	}
 }
 
 // A published-schema placement repair may arrive after a newer schema. Its
@@ -147,9 +148,14 @@ func (m *Manager) Release(req snview.ReleaseResource) {
 	var advanceRuntime *QueryRuntime
 	var advance qviews.DataVersion
 	var hasAdvance bool
+	var resources *viewResources
 
 	m.mu.Lock()
 	if ref, ok := m.refs[req.Key]; ok {
+		resources = ref.resources
+		if resources != nil {
+			resources.retire()
+		}
 		m.releasePartitionStatsLocked(ref.statsResources)
 		delete(m.refs, req.Key)
 		advance, hasAdvance = minQueryViewDataVersion(m.refs)
@@ -171,7 +177,7 @@ func (m *Manager) Release(req snview.ReleaseResource) {
 		}
 		m.runtime.mu.Unlock()
 	}
-	if task != nil {
+	if runtime != nil || task != nil {
 		m.releasing.Add(1)
 	}
 	// Keep reference removal and watermark delivery ordered across replicas.
@@ -192,9 +198,16 @@ func (m *Manager) Release(req snview.ReleaseResource) {
 		}()
 		return
 	}
-	runtime.Close()
-	if hasAdvance && advanceRuntime != nil {
-		m.scheduler.Submit(resourceReleaseTask{runtime: advanceRuntime, version: advance, onDropped: req.OnDropped})
+	if runtime != nil {
+		runtime.stop()
+		m.scheduler.Submit(resourceReleaseTask{runtime: runtime, resources: resources, closeRuntime: true, onDropped: func() {
+			defer m.releasing.Done()
+			if req.OnDropped != nil {
+				req.OnDropped()
+			}
+		}})
+	} else if hasAdvance && advanceRuntime != nil {
+		m.scheduler.Submit(resourceReleaseTask{runtime: advanceRuntime, resources: resources, version: advance, onDropped: req.OnDropped})
 	} else {
 		m.submitCallback(req.OnDropped)
 	}
@@ -226,13 +239,13 @@ func (m *Manager) ReadRuntime(key qviews.QueryViewKey) (*ReadRuntime, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	ref, ok := m.refs[key]
-	if !ok || m.task != nil || m.runtime == nil || m.err != nil {
+	if !ok || !ref.prepared || m.task != nil || m.runtime == nil || m.err != nil {
 		return nil, false
 	}
 	if len(ref.statsResources) > 0 && ref.statsSnapshots == nil {
 		return nil, false
 	}
-	runtime, ok := m.runtime.ReadRuntime(ref.meta)
+	runtime, ok := ref.resources.readRuntime()
 	if !ok {
 		return nil, false
 	}
@@ -410,7 +423,6 @@ func (m *Manager) newModules() []QueryRuntimeModule {
 
 func (m *Manager) finishBuild(task *scheduledBuild) {
 	runtime, err := task.task.Result()
-	ready := make(map[qviews.QueryViewKey]func())
 	var unrecoverable []func()
 	var failedRuntime *QueryRuntime
 	m.mu.Lock()
@@ -432,7 +444,9 @@ func (m *Manager) finishBuild(task *scheduledBuild) {
 		m.runtime = runtime
 		m.err = nil
 		for key, ref := range m.refs {
-			ready[key] = ref.onReady
+			ref.resources = runtime.bindView(ref.meta)
+			m.refs[key] = ref
+			m.submitReadyLocked(key, ref)
 		}
 	}
 	if len(m.refs) == 0 {
@@ -448,66 +462,71 @@ func (m *Manager) finishBuild(task *scheduledBuild) {
 	for _, callback := range unrecoverable {
 		m.submitCallback(callback)
 	}
-	for key, onReady := range ready {
-		m.submitReady(key, onReady)
-	}
 }
 
-func (m *Manager) submitReady(key qviews.QueryViewKey, onReady func()) {
-	if onReady == nil {
+// Capture the registration while holding Manager.mu. A delayed task must never
+// borrow a new same-key registration while retaining the old callback.
+func (m *Manager) submitReadyLocked(key qviews.QueryViewKey, ref queryViewRef) {
+	if ref.onReady == nil {
 		return
 	}
-	m.mu.Lock()
-	if m.scheduler == nil {
-		m.scheduler = nodescheduler.Get()
-	}
-	scheduler := m.scheduler
-	m.mu.Unlock()
-	scheduler.Submit(resourceReadyTask{
+	m.scheduler.Submit(resourceReadyTask{
+		ref: ref, runtime: m.runtime,
 		manager: m,
 		key:     key,
-		onReady: onReady,
+		onReady: ref.onReady,
 	})
 }
 
-func (m *Manager) prepareReady(ctx context.Context, key qviews.QueryViewKey, onReady func()) error {
+func (m *Manager) prepareViewRef(ctx context.Context, key qviews.QueryViewKey, ref queryViewRef, runtime *QueryRuntime, onReady func()) error {
 	m.mu.Lock()
-	ref, ok := m.refs[key]
-	runtime := m.runtime
-	ready := ok && runtime != nil && m.task == nil && m.err == nil
+	current, ok := m.refs[key]
+	ready := ok && current.meta == ref.meta && runtime != nil && m.runtime == runtime && m.task == nil && m.err == nil
 	m.mu.Unlock()
 	if !ready {
 		return nil
 	}
+
 	// Schema transitions are applied on the WAL path; fence that path before
 	// checking the target revision and refreshing shared search index metadata.
 	// Modules prepare changed load scopes before this view can become Ready.
 	err := func() error {
+		ctx, end, err := ref.resources.begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer end()
 		for _, resource := range ref.statsResources {
 			if err := resource.prepare(ctx, m.chunkManager); err != nil {
 				return err
 			}
 		}
-		var schemaErr error
-		runtime.RangeModules(func(module QueryRuntimeModule) bool {
-			if resource, ok := module.(QueryRuntimeSchemaModule); ok {
-				schemaErr = resource.PrepareSchema(ctx, ref.meta, m.loadInfoProvider)
-			}
-			return schemaErr == nil
-		})
-		if schemaErr != nil {
-			return schemaErr
-		}
-		if err := runtime.PrepareQueryView(ctx, ref.meta); err != nil {
+		if err := runtime.PrepareQueryView(ctx); err != nil {
 			return err
 		}
+		if err := ref.resources.prepare(ctx, m.loadInfoProvider); err != nil {
+			return err
+		}
+
 		if err := runtime.CheckWriteSchemaVersion(ref.meta.GetSchemaVersion()); err != nil {
 			return err
 		}
 		return runtime.PrepareIndexMeta(ctx, ref.meta, m.loadInfoProvider)
 	}()
 	if err != nil {
-		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+		if ctx.Err() != nil {
+			return err
+		}
+		if errors.Is(err, context.Canceled) {
+			m.mu.Lock()
+			currentRef, ok := m.refs[key]
+			obsolete := !ok || currentRef.meta != ref.meta || m.runtime != runtime
+			m.mu.Unlock()
+			// Last release cancels resource loading independently of this task.
+			// Only an obsolete registration can treat that cancellation as completion.
+			if obsolete {
+				return nil
+			}
 			return err
 		}
 		if !retryablePreparationError(err) {
@@ -527,6 +546,10 @@ func (m *Manager) prepareReady(ctx context.Context, key qviews.QueryViewKey, onR
 	// Meta is cloned on registration, so its identity distinguishes a released
 	// acquisition from a later registration even if the QueryViewKey is reused.
 	ready = ok && currentRef.meta == ref.meta && m.runtime == runtime && m.task == nil && m.err == nil
+	if ready {
+		currentRef.prepared = true
+		m.refs[key] = currentRef
+	}
 	if ready && currentRef.statsSnapshots == nil && len(currentRef.statsResources) > 0 {
 		currentRef.statsSnapshots = collectPartitionStatsSnapshots(currentRef.statsResources)
 		m.refs[key] = currentRef

@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
+	"github.com/milvus-io/milvus/internal/views/optimizer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -159,7 +160,7 @@ func patchQueryReadRuntime(t *testing.T) *mockey.Mocker {
 	runtime := &queryresource.ReadRuntime{QueryRuntime: queryresource.NewQueryRuntime()}
 	patch := mockey.Mock((*vchannel.PChannelRecoveryManager).GetQueryReadRuntime).Return(runtime, true).Build()
 	t.Cleanup(func() { patch.UnPatch() })
-	optimizer := mockey.Mock((*queryresource.ReadRuntime).GlobalOptimizer).Return(queryresource.NewGlobalOptimizer(nil, "test")).Build()
+	optimizer := mockey.Mock((*queryresource.ReadRuntime).GlobalOptimizer).Return(optimizer.NewNoopGlobalOptimizer()).Build()
 	t.Cleanup(func() { optimizer.UnPatch() })
 	wait := mockey.Mock((*queryresource.QueryRuntime).WaitMVCCVisible).Return(nil).Build()
 	t.Cleanup(func() { wait.UnPatch() })

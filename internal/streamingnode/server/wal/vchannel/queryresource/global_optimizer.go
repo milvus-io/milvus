@@ -26,35 +26,22 @@ type idfOracle interface {
 }
 
 type globalOptimizer struct {
+	resources         *viewResources
 	schema            *schemapb.CollectionSchema
 	partitionStats    map[int64]*storage.PartitionStatsSnapshot
 	idf               idfOracle
 	functionRunnerKey string
 }
 
-func NewGlobalOptimizer(runtime *QueryRuntime, functionRunnerKey string) optimizer.GlobalOptimizer {
-	return globalOptimizer{
-		idf:               findIDFOracle(runtime),
-		functionRunnerKey: functionRunnerKey,
-	}
-}
-
-func findIDFOracle(runtime *QueryRuntime) idfOracle {
-	if runtime == nil {
-		return nil
-	}
-	var oracle idfOracle
-	runtime.RangeModules(func(module QueryRuntimeModule) bool {
-		if idf, ok := module.(idfOracle); ok {
-			oracle = idf
-			return false
-		}
-		return true
-	})
-	return oracle
-}
-
 func (o globalOptimizer) OptimizeSearch(ctx context.Context, req *internalpb.SearchRequest) (optimizer.SearchOptimization, error) {
+	if o.resources != nil {
+		workCtx, end, err := o.resources.begin(ctx)
+		if err != nil {
+			return optimizer.SearchOptimization{}, err
+		}
+		defer end()
+		ctx = workCtx
+	}
 	if req == nil {
 		return optimizer.SearchOptimization{}, merr.WrapErrParameterInvalid("search request", "nil")
 	}

@@ -202,16 +202,18 @@ func TestRuntimePreparesOneSharedOracle(t *testing.T) {
 	version := qviews.DataVersion{StreamingVersion: 12}
 	resources := []*datapb.StreamingNodeBM25Resource{}
 	mockViewResources(t, r, &version, &resources)
-	module := &Runtime{oracle: r, oracles: map[queryresource.ReadSchemaKey]*oracleRuntime{{}: r}}
-	require.NoError(t, module.PrepareDataVersion(context.Background(), qviews.DataVersion{StreamingVersion: 11}))
-	require.NoError(t, module.PrepareDataVersion(context.Background(), version))
+	field := &fieldResource{key: fieldKey{fieldID: 102}, oracle: r, refs: 1}
+	module := &Runtime{fields: map[fieldKey]*fieldResource{field.key: field}}
+	binding := &viewBinding{runtime: module, fields: []*fieldResource{field}, resolved: true}
+	require.NoError(t, binding.advance(context.Background(), qviews.DataVersion{StreamingVersion: 11}))
+	require.NoError(t, binding.advance(context.Background(), version))
 	require.Eventually(t, func() bool {
 		r.mu.RLock()
 		defer r.mu.RUnlock()
 		return r.currentVersion.EQ(version)
 	}, time.Second, time.Millisecond)
 	require.NoError(t, module.BeforeRelease(context.Background(), version))
-	results, err := module.BuildIDFBatch(context.Background(), []queryresource.IDFRequest{{FieldID: 102}, {FieldID: 102}})
+	results, err := binding.BuildIDFBatch(context.Background(), []queryresource.IDFRequest{{FieldID: 102}, {FieldID: 102}})
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 	module.Advance(version)
@@ -219,7 +221,7 @@ func TestRuntimePreparesOneSharedOracle(t *testing.T) {
 	require.Error(t, r.PrepareDataVersion(context.Background(), version))
 	_, err = r.BuildIDFBatch(context.Background(), nil)
 	require.Error(t, err)
-	_, err = module.BuildIDFBatch(context.Background(), nil)
+	_, err = binding.BuildIDFBatch(context.Background(), nil)
 	require.Error(t, err)
 	require.NoError(t, module.BeforeRelease(context.Background(), version))
 	module.Advance(version)

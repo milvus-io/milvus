@@ -119,19 +119,22 @@ lifetime management.
 
 ## Exact read resources and shared physical resources
 
-`queryresource.ReadRuntime` binds resources by
-`ReadSchemaKey{SchemaVersion, LoadInfoVersion}`. LoadInfoVersion is an identity,
-not an ordered revision. The read-schema module owns the immutable CCollection
-and function scope. A serving lease protects the enclosing QueryRuntime; growing
+`queryresource.ReadRuntime` borrows the resources owned by its QueryView. Read-only
+CCollections share `(CollectionID, SchemaVersion)` identity; the View retains its
+load scope independently. LoadInfoVersion is an identity, not an ordered revision.
+Existing View Acquire/Release controls schema, function and field-IDF guards.
+Withdrawal cancels work and waits for in-flight preparation/planning before releasing
+the guards. A serving lease protects the enclosing QueryRuntime; growing
 handles also retain their selected schema through execution and result conversion.
 The physical growing runtime and ordered WAL subscription remain shared.
 
 The no-gap WAL snapshot exposes both `Schema` (the requested read version) and
 `WriteSchema` (the WAL's write version). New physical growing segments capture
 their encoding schema; subsequent schema changes must not reinterpret buffered
-inserts under the current write schema. Per-schema BM25 aggregates are described
-in [IDF runtime](../snview/idf_oracle_runtime.md). Read-schema resources currently
-remain until runtime close; early schema-history reclamation is deferred.
+inserts under the current write schema. Shared per-field BM25 aggregates are described
+in [IDF runtime](../snview/idf_oracle_runtime.md). Resources with no remaining View
+owner are reclaimed even while other Views keep the QueryRuntime alive; native
+handles independently retain their selected schema until execution finishes.
 
 A field analyzer request may carry optional `read_schema_version`. Presence,
 including zero, selects the exact schema and a call-owned function scope, released

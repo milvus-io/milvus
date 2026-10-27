@@ -635,6 +635,20 @@ func (*versionedQueryRuntimeModule) ApplyLiveEvent(context.Context, walview.VCha
 
 func (*versionedQueryRuntimeModule) Advance(qviews.DataVersion) {}
 
+func (m *versionedQueryRuntimeModule) BindView(meta *viewpb.QueryViewMeta) QueryViewResource {
+	return &versionedQueryViewResource{module: m, meta: meta}
+}
+
+type versionedQueryViewResource struct {
+	module *versionedQueryRuntimeModule
+	meta   *viewpb.QueryViewMeta
+}
+
+func (v *versionedQueryViewResource) Prepare(ctx context.Context, _ LoadInfoProvider) error {
+	return v.module.PrepareSchemaDataVersion(ctx, v.meta)
+}
+func (*versionedQueryViewResource) Release() {}
+
 func (m *versionedQueryRuntimeModule) PrepareSchemaDataVersion(ctx context.Context, meta *viewpb.QueryViewMeta) error {
 	return m.prepare(ctx, qviews.FromProtoDataVersion(meta.GetVersion().GetDataVersion()))
 }
@@ -826,4 +840,17 @@ func TestManagerReleaseCancelsQueuedBuild(t *testing.T) {
 	require.Equal(t, int32(1), closes.Load(), "old cleanup must not close the new runtime")
 	manager.Close()
 	require.Equal(t, int32(2), closes.Load())
+}
+
+// Component fixtures register references directly; production binds them during
+// AcquireLocked or successful runtime initialization.
+func (m *Manager) prepareReady(ctx context.Context, key qviews.QueryViewKey, onReady func()) error {
+	m.mu.Lock()
+	ref, runtime := m.refs[key], m.runtime
+	if runtime != nil && ref.resources == nil {
+		ref.resources = runtime.bindView(ref.meta)
+		m.refs[key] = ref
+	}
+	m.mu.Unlock()
+	return m.prepareViewRef(ctx, key, ref, runtime, onReady)
 }

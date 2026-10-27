@@ -16,7 +16,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -107,76 +106,33 @@ func (p *Provider) NewRuntime() (queryresource.QueryRuntimeModule, error) {
 }
 
 type Runtime struct {
-	mu              sync.RWMutex
-	provider        *Provider
-	future          *FutureProvider
-	oracle          *oracleRuntime
-	oracles         map[queryresource.ReadSchemaKey]*oracleRuntime
-	prepareMu       sync.Mutex
-	cond            *sync.Cond
-	refresh         *schemaRefresh
-	schemaVersion   int32
-	loadInfoVersion uint64
-	// New read identities must not capture a DataView below this retention floor.
-	// prepareMu serializes schema preparation and DataView release transitions.
+	mu             sync.RWMutex
+	provider       *Provider
+	future         *FutureProvider
+	prepareMu      sync.Mutex
+	cond           *sync.Cond
+	refresh        *schemaRefresh
+	fields         map[fieldKey]*fieldResource
 	minDataVersion qviews.DataVersion
 	view           walview.VChannelWALView
-	disabled       bool
 	closed         bool
 }
 
-func (r *Runtime) Prepare(ctx context.Context, walView walview.VChannelWALView) error {
-	r.mu.Lock()
-	if r.closed {
-		r.mu.Unlock()
-		return context.Canceled
-	}
-	if r.oracle != nil {
-		r.mu.Unlock()
-		return nil
-	}
-	r.cond = sync.NewCond(&r.mu)
-	r.view = walview.VChannelWALView{CaptureQueryView: walView.CaptureQueryView, RuntimeContext: walView.RuntimeContext, ResourceEventBarrier: walView.ResourceEventBarrier}
-	r.schemaVersion = walView.Schema.GetVersion()
-	r.loadInfoVersion = walView.LoadInfoVersion
-	r.minDataVersion = walView.SegmentSnapshot.DataVersion
-	r.oracles = make(map[queryresource.ReadSchemaKey]*oracleRuntime)
-	r.mu.Unlock()
-
-	if !hasLoadedBM25Function(walView.Schema, loadFieldIDs(walView.RequiredFields)) {
-		r.mu.Lock()
-		closed := r.closed
-		if !closed {
-			r.disabled = true
-			r.oracles[queryresource.ReadSchemaKey{SchemaVersion: r.schemaVersion, LoadInfoVersion: r.loadInfoVersion}] = nil
-		}
-		r.mu.Unlock()
-		if closed {
-			return context.Canceled
-		}
-		return nil
-	}
-	provider, err := r.resolveProvider(ctx)
-	if err != nil {
+// Bootstrap only installs the WAL capture/ordering context. All schema-dependent
+// statistics belong to explicit View bindings, including the initial View.
+func (r *Runtime) Prepare(ctx context.Context, view walview.VChannelWALView) error {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	lazyLoadSealedStats := paramtable.Get().QueryViewCfg.IDFLazyLoadSealedStats.GetAsBool()
-	oracle, err := provider.buildOracle(ctx, walView, lazyLoadSealedStats)
-	if err != nil {
-		return err
-	}
-
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
-		if oracle != nil {
-			oracle.Close()
-		}
 		return context.Canceled
 	}
-	r.oracle = oracle
-	r.oracles[queryresource.ReadSchemaKey{SchemaVersion: r.schemaVersion, LoadInfoVersion: r.loadInfoVersion}] = oracle
-	r.disabled = false
+	r.cond = sync.NewCond(&r.mu)
+	r.view = walview.VChannelWALView{CaptureQueryView: view.CaptureQueryView, RuntimeContext: view.RuntimeContext, ResourceEventBarrier: view.ResourceEventBarrier}
+	r.minDataVersion = view.SegmentSnapshot.DataVersion
+	r.fields = make(map[fieldKey]*fieldResource)
 	return nil
 }
 
@@ -228,35 +184,11 @@ func loadFieldIDs(fields []*messagespb.LoadFieldConfig) []int64 {
 	return ids
 }
 
-func (r *Runtime) BuildIDF(ctx context.Context, dataVersion qviews.DataVersion, fieldID int64, tfs *schemapb.SparseFloatArray) ([][]byte, float64, error) {
-	oracle := r.currentOracle()
-	if oracle == nil {
-		return nil, 0, merr.WrapErrServiceNotReadyMsg("BM25 IDF oracle is not initialized")
-	}
-	return oracle.BuildIDF(ctx, dataVersion, fieldID, tfs)
-}
-
-func (r *Runtime) PrepareDataVersion(ctx context.Context, dataVersion qviews.DataVersion) error {
-	if !r.prepareMu.TryLock() {
-		return merr.WrapErrServiceNotReadyMsg("BM25 schema preparation is in progress")
-	}
-	defer r.prepareMu.Unlock()
-	r.mu.RLock()
-	disabled := r.disabled
-	r.mu.RUnlock()
-	if disabled {
-		return nil
-	}
-	oracle := r.currentOracle()
-	if oracle == nil {
-		return merr.WrapErrServiceNotReadyMsg("BM25 IDF oracle is not initialized")
-	}
-	return oracle.PrepareDataVersion(ctx, dataVersion)
-}
-
+// BeforeRelease advances every still-owned field before old DataView files can
+// be collected. Unowned fields have already canceled/drained in binding.Release.
 func (r *Runtime) BeforeRelease(ctx context.Context, target qviews.DataVersion) error {
 	if !r.prepareMu.TryLock() {
-		return merr.WrapErrServiceNotReadyMsg("BM25 schema preparation is in progress")
+		return merr.WrapErrServiceNotReadyMsg("BM25 field preparation is in progress")
 	}
 	defer r.prepareMu.Unlock()
 	r.mu.Lock()
@@ -268,60 +200,31 @@ func (r *Runtime) BeforeRelease(ctx context.Context, target qviews.DataVersion) 
 		r.minDataVersion = target
 	}
 	target = r.minDataVersion
-	oracles := make([]*oracleRuntime, 0, len(r.oracles))
-	for _, oracle := range r.oracles {
-		if oracle != nil {
-			oracles = append(oracles, oracle)
-		}
+	fields := make([]*fieldResource, 0, len(r.fields))
+	for _, field := range r.fields {
+		fields = append(fields, field)
 	}
 	r.mu.Unlock()
-	// Every retained read identity can still subtract stats from the old files.
-	// The caller may report Dropped only once all of them have advanced. Holding
-	// prepareMu also prevents a new oracle from capturing below the floor while
-	// this release is in flight, including retries after a partial advance.
-	for _, oracle := range oracles {
-		if err := oracle.PrepareDataVersion(ctx, target); err != nil {
-			return err
+	for _, field := range fields {
+		if field.oracle != nil {
+			if err := field.oracle.PrepareDataVersion(ctx, target); err != nil {
+				return err
+			}
+			// Advancing a lazy target cancels its old materialization, but the
+			// reader can still be unwinding. Its files remain pinned until it exits.
+			field.oracle.mu.RLock()
+			call := field.oracle.materialization
+			field.oracle.mu.RUnlock()
+			if call != nil && target.GT(call.target) {
+				select {
+				case <-call.done:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
 		}
 	}
 	return nil
-}
-
-func (r *Runtime) BuildIDFBatch(ctx context.Context, requests []queryresource.IDFRequest) ([]queryresource.IDFResult, error) {
-	oracle := r.currentOracle()
-	if oracle == nil {
-		return nil, merr.WrapErrServiceNotReadyMsg("BM25 IDF oracle is not initialized")
-	}
-	return oracle.BuildIDFBatch(ctx, requests)
-}
-
-// BuildIDFBatchForSchema keeps a plan on one compatible aggregate even while
-// another schema is being prepared. Statistics are current, not MVCC snapshots.
-func (r *Runtime) BuildIDFBatchForSchema(ctx context.Context, key queryresource.ReadSchemaKey, requests []queryresource.IDFRequest) ([]queryresource.IDFResult, error) {
-	r.mu.RLock()
-	oracle := r.oracles[key]
-	r.mu.RUnlock()
-	if oracle == nil {
-		return nil, merr.WrapErrServiceNotReadyMsg("BM25 oracle for read schema %d load %d is not initialized", key.SchemaVersion, key.LoadInfoVersion)
-	}
-	return oracle.BuildIDFBatch(ctx, requests)
-}
-
-func (r *Runtime) PrepareSchemaDataVersion(ctx context.Context, meta *viewpb.QueryViewMeta) error {
-	if !r.prepareMu.TryLock() {
-		return merr.WrapErrServiceNotReadyMsg("BM25 schema preparation is in progress")
-	}
-	defer r.prepareMu.Unlock()
-	r.mu.RLock()
-	oracle, prepared := r.oracles[queryresource.ReadSchemaKey{SchemaVersion: meta.GetSchemaVersion(), LoadInfoVersion: meta.GetLoadInfoVersion()}]
-	r.mu.RUnlock()
-	if !prepared {
-		return merr.WrapErrServiceNotReadyMsg("BM25 read schema is not prepared")
-	}
-	if oracle == nil {
-		return nil
-	}
-	return oracle.PrepareDataVersion(ctx, qviews.FromProtoDataVersion(meta.GetVersion().GetDataVersion()))
 }
 
 func (r *Runtime) ApplyLiveEvent(ctx context.Context, event walview.VChannelResourceEvent) {
@@ -333,19 +236,16 @@ func (r *Runtime) ApplyLiveEvent(ctx context.Context, event walview.VChannelReso
 	if r.closed {
 		return
 	}
-	if next := r.refresh; next != nil && next.err == nil && next.includes(event) {
-		next.pending = append(next.pending, event)
+	if stage := r.refresh; stage != nil && stage.err == nil && stage.includes(event) {
+		stage.pending = append(stage.pending, event)
 	}
-	for _, oracle := range r.oracles {
-		if oracle != nil {
-			oracle.ApplyLiveEvent(ctx, event)
+	for _, field := range r.fields {
+		if field.oracle != nil && field.coverage.includes(event) {
+			field.oracle.ApplyLiveEvent(ctx, event)
 		}
 	}
 }
-
-// BM25 stats advance during PrepareDataVersion, before QueryView readiness.
 func (*Runtime) Advance(qviews.DataVersion) {}
-
 func (r *Runtime) Close() {
 	r.mu.Lock()
 	if r.closed {
@@ -356,25 +256,14 @@ func (r *Runtime) Close() {
 	if r.cond != nil {
 		r.cond.Broadcast()
 	}
-	oracles := r.oracles
-	r.oracles = nil
-	oracle := r.oracle
-	r.oracle = nil
+	fields := r.fields
+	r.fields = nil
 	r.mu.Unlock()
-	for _, retained := range oracles {
-		if retained != nil {
-			retained.Close()
+	for _, field := range fields {
+		if field.oracle != nil {
+			field.oracle.Close()
 		}
 	}
-	if oracle != nil {
-		oracle.Close()
-	}
-}
-
-func (r *Runtime) currentOracle() *oracleRuntime {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.oracle
 }
 
 func collectGrowingInsertStats(stats bm25Stats, schema *schemapb.CollectionSchema, insert walview.SegmentInsertMessage) error {

@@ -154,8 +154,8 @@ func TestPartitionStatsViewCacheSharedAndVersioned(t *testing.T) {
 			reads++
 			return []byte(`{"segmentStats":{}}`), nil
 		}).Build()
-		mockey.Mock((*QueryRuntime).ReadRuntime).To(func(r *QueryRuntime, _ *viewpb.QueryViewMeta) (*ReadRuntime, bool) {
-			return &ReadRuntime{QueryRuntime: r}, true
+		mockey.Mock((*viewResources).readRuntime).To(func(r *viewResources) (*ReadRuntime, bool) {
+			return &ReadRuntime{QueryRuntime: r.runtime}, true
 		}).Build()
 		meta1, key1 := testManagerQueryViewMetaAndKey(1)
 		meta2, key2 := testManagerQueryViewMetaAndKey(2)
@@ -265,4 +265,117 @@ func TestPartitionStatsEmptyScopeAllocatesNoSnapshotMap(t *testing.T) {
 	require.NoError(t, manager.prepareReady(t.Context(), key, func() {}))
 	require.Nil(t, manager.refs[key].statsSnapshots)
 	require.Empty(t, manager.partitionStats)
+}
+
+func TestPartitionStatsReleaseCancellationDoesNotFailReadyTask(t *testing.T) {
+	for _, scenario := range []struct {
+		name       string
+		replace    bool
+		cancelTask bool
+	}{
+		{name: "released"},
+		{name: "same-key-replaced", replace: true},
+		{name: "task-canceled", replace: true, cancelTask: true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			mockey.PatchConvey("a canceled obsolete load is not a scheduler failure", t, func() {
+				manager := newPartitionStatsTestManager(t)
+				meta, key := testManagerQueryViewMetaAndKey(1)
+				var unrecoverable atomic.Bool
+				req := snview.AcquireResource{
+					Key: key, Meta: meta,
+					PartitionStats:  []*viewpb.ClusteredPartitionStats{{PartitionId: 2, Version: 7}},
+					OnUnrecoverable: func() { unrecoverable.Store(true) },
+				}
+				manager.AcquireLocked(req, nil)
+				// Keep the runtime and DataVersion alive, isolating registration identity
+				// from runtime replacement during a same-key reacquisition.
+				anchorMeta := proto.Clone(meta).(*viewpb.QueryViewMeta)
+				anchorKey := key
+				anchorKey.ShardID.ReplicaID++
+				anchorMeta.ReplicaId = anchorKey.ShardID.ReplicaID
+				manager.AcquireLocked(snview.AcquireResource{Key: anchorKey, Meta: anchorMeta}, nil)
+				old := manager.refs[key]
+				entered, canceled, resume := make(chan struct{}), make(chan struct{}), make(chan struct{})
+				unblock := sync.OnceFunc(func() { close(resume) })
+				defer unblock()
+				var reads atomic.Int32
+				mockey.Mock((*storage.LocalChunkManager).Read).To(func(_ *storage.LocalChunkManager, ctx context.Context, _ string) ([]byte, error) {
+					if reads.Add(1) == 1 {
+						close(entered)
+						<-ctx.Done()
+						close(canceled)
+						<-resume
+						return nil, ctx.Err()
+					}
+					return []byte(`{"segmentStats":{}}`), nil
+				}).Build()
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				var oldReady atomic.Bool
+				done := make(chan error, 1)
+				go func() { done <- manager.prepareReady(ctx, key, func() { oldReady.Store(true) }) }()
+				select {
+				case <-entered:
+				case <-time.After(time.Second):
+					t.Fatal("statistics load did not start")
+				}
+				manager.Release(snview.ReleaseResource{Key: key})
+				select {
+				case <-canceled:
+				case <-time.After(time.Second):
+					t.Fatal("last release did not cancel loading")
+				}
+				if scenario.replace {
+					manager.AcquireLocked(req, nil)
+					require.NotSame(t, old.meta, manager.refs[key].meta)
+					require.NotSame(t, old.statsResources[0], manager.refs[key].statsResources[0])
+				}
+				if scenario.cancelTask {
+					cancel()
+				}
+				unblock()
+				select {
+				case err := <-done:
+					if scenario.cancelTask {
+						require.ErrorIs(t, err, context.Canceled)
+					} else {
+						require.NoError(t, err)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("canceled readiness task did not finish")
+				}
+				require.False(t, oldReady.Load())
+				require.False(t, unrecoverable.Load())
+				require.Nil(t, old.statsResources[0].snapshot)
+				if scenario.replace {
+					require.Nil(t, manager.refs[key].statsSnapshots, "old load must not publish into replacement")
+					ready := false
+					require.NoError(t, manager.prepareReady(t.Context(), key, func() { ready = true }))
+					require.True(t, ready)
+					require.Len(t, manager.partitionStats, 1)
+					require.Equal(t, 1, manager.refs[key].statsResources[0].refs)
+					require.NotNil(t, manager.refs[key].statsSnapshots[2])
+				} else {
+					require.NotContains(t, manager.refs, key)
+					require.Empty(t, manager.partitionStats)
+				}
+			})
+		})
+	}
+}
+
+func TestPartitionStatsCurrentRegistrationCancellationRemainsVisible(t *testing.T) {
+	mockey.PatchConvey("internal cancellation of a live registration is not swallowed", t, func() {
+		manager := newPartitionStatsTestManager(t)
+		meta, key := testManagerQueryViewMetaAndKey(1)
+		manager.AcquireLocked(snview.AcquireResource{Key: key, Meta: meta, PartitionStats: []*viewpb.ClusteredPartitionStats{{PartitionId: 2, Version: 7}}}, nil)
+		mockey.Mock((*storage.LocalChunkManager).Read).Return(nil, context.Canceled).Build()
+		ready := false
+		err := manager.prepareReady(t.Context(), key, func() { ready = true })
+		require.ErrorIs(t, err, context.Canceled)
+		require.False(t, ready)
+		require.NoError(t, manager.refs[key].statsResources[0].ctx.Err())
+		require.Nil(t, manager.refs[key].statsSnapshots)
+	})
 }

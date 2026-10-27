@@ -27,8 +27,8 @@ CCollection serializes schema updates and publishes its Go schema cache only
 after a successful native update. The native ordering token is a WAL timestamp,
 separate from the logical SchemaVersion. The growing runtime reports the logical
 schema version applied on the ordered write path through `WriteSchemaVersion`;
-exact read resources are prepared by
-`ReadSchemaKey` and do not impose a global read-schema watermark. Preparing an
+exact read resources are owned by each QueryView, sharing collection/schema and
+field-semantic resources without imposing a global read-schema watermark. Preparing an
 older read schema cannot invalidate a newer View's readiness.
 
 The ALTER component test exercises the native update, preservation of existing

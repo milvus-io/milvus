@@ -8,6 +8,7 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -54,7 +55,7 @@ func TestQueryViewReadyAfterOlderSchemaPreparation(t *testing.T) {
 				next.LoadInfoVersion = meta.GetLoadInfoVersion()
 				next.Schema = &schemapb.CollectionSchema{Version: meta.GetSchemaVersion()}
 				if meta.GetSchemaVersion() == 3 || oldHasBM25 {
-					next.Schema.Functions = []*schemapb.FunctionSchema{{Type: schemapb.FunctionType_BM25, OutputFieldIds: []int64{102}}}
+					next.Schema = fieldTestSchema(meta.GetSchemaVersion(), 102)
 				}
 				capture(next)
 				return true
@@ -62,7 +63,10 @@ func TestQueryViewReadyAfterOlderSchemaPreparation(t *testing.T) {
 			build := func(*viewpb.QueryViewMeta) (walview.VChannelWALView, bool) { return view, true }
 			// S3 is rechecked after S2 completes, including a disabled S2 oracle.
 			// Load identities are hashes: a numerically lower identity is valid.
-			keys := []queryresource.ReadSchemaKey{
+			keys := []struct {
+				SchemaVersion   int32
+				LoadInfoVersion uint64
+			}{
 				{SchemaVersion: 1},
 				{SchemaVersion: 3, LoadInfoVersion: 90},
 				{SchemaVersion: 2, LoadInfoVersion: 80},
@@ -97,14 +101,9 @@ func TestReleaseAdvancesAllReadSchemasBeforeOldFilesCanDrop(t *testing.T) {
 	mockViewResources(t, first, &version, &resources)
 	require.NoError(t, first.PrepareDataVersion(t.Context(), version))
 	require.NoError(t, second.PrepareDataVersion(t.Context(), version))
-	module := &Runtime{
-		// The last prepared identity has no BM25. It must not bypass release
-		// preparation for the two retained BM25 readers.
-		disabled: true, minDataVersion: version,
-		oracles: map[queryresource.ReadSchemaKey]*oracleRuntime{
-			{SchemaVersion: 3}: first, {SchemaVersion: 2}: second, {SchemaVersion: 1}: nil,
-		},
-	}
+	module := &Runtime{minDataVersion: version, fields: map[fieldKey]*fieldResource{
+		{scope: "a", fieldID: 102}: {oracle: first}, {scope: "b", fieldID: 102}: {oracle: second},
+	}}
 	defer module.Close()
 	path := descriptor.GetBm25Binlogs()[0].GetBinlogs()[0].GetLogPath()
 	data, err := first.provider.chunkManager.Read(t.Context(), path)
@@ -152,7 +151,9 @@ func TestSchemaPreparationAndReleaseShareDataViewFloor(t *testing.T) {
 	}))
 	meta := &viewpb.QueryViewMeta{SchemaVersion: 3, Version: &viewpb.QueryViewVersion{DataVersion: (&qviews.DataVersion{StreamingVersion: 10}).IntoProto()}}
 	prepared := make(chan error, 1)
-	go func() { prepared <- module.PrepareSchema(t.Context(), meta, nil) }()
+	go func() {
+		prepared <- module.BindView(proto.Clone(meta).(*viewpb.QueryViewMeta)).Prepare(t.Context(), nil)
+	}()
 	select {
 	case <-captured:
 	case <-time.After(5 * time.Second):
@@ -164,13 +165,13 @@ func TestSchemaPreparationAndReleaseShareDataViewFloor(t *testing.T) {
 	require.NoError(t, <-prepared)
 	require.NoError(t, module.BeforeRelease(t.Context(), floor))
 	meta.SchemaVersion = 2
-	require.NoError(t, module.PrepareSchema(t.Context(), meta, nil))
+	require.NoError(t, module.BindView(proto.Clone(meta).(*viewpb.QueryViewMeta)).Prepare(t.Context(), nil))
 	require.EqualValues(t, 10, (<-captureVersions).StreamingVersion)
 	require.Equal(t, floor, <-captureVersions, "a disabled default oracle cannot erase the release floor")
 	require.EqualValues(t, 10, meta.GetVersion().GetDataVersion().GetStreamingVersion(), "preparation must not mutate View metadata")
 	require.NoError(t, module.BeforeRelease(context.Background(), qviews.DataVersion{StreamingVersion: 15}))
 	meta.SchemaVersion = 4
-	require.NoError(t, module.PrepareSchema(t.Context(), meta, nil))
+	require.NoError(t, module.BindView(proto.Clone(meta).(*viewpb.QueryViewMeta)).Prepare(t.Context(), nil))
 	require.Equal(t, floor, <-captureVersions)
 }
 
@@ -181,7 +182,7 @@ func TestReleaseInFlightBlocksNewSchemaSnapshot(t *testing.T) {
 	defer unblock()
 	captures := 0
 	module := &Runtime{
-		oracles:        map[queryresource.ReadSchemaKey]*oracleRuntime{{SchemaVersion: 1}: oracle},
+		fields:         map[fieldKey]*fieldResource{{fieldID: 102}: {oracle: oracle}},
 		minDataVersion: qviews.DataVersion{StreamingVersion: 10},
 	}
 	module.cond = sync.NewCond(&module.mu)
@@ -211,10 +212,40 @@ func TestReleaseInFlightBlocksNewSchemaSnapshot(t *testing.T) {
 		t.Fatal("release did not start advancing the retained oracle")
 	}
 	meta := &viewpb.QueryViewMeta{SchemaVersion: 2, Version: &viewpb.QueryViewVersion{DataVersion: (&qviews.DataVersion{StreamingVersion: 10}).IntoProto()}}
-	require.ErrorIs(t, module.PrepareSchema(t.Context(), meta, nil), merr.ErrServiceNotReady)
+	require.ErrorIs(t, module.BindView(proto.Clone(meta).(*viewpb.QueryViewMeta)).Prepare(t.Context(), nil), merr.ErrServiceNotReady)
 	require.Zero(t, captures)
 	unblock()
 	require.NoError(t, <-released)
-	require.NoError(t, module.PrepareSchema(t.Context(), meta, nil))
+	require.NoError(t, module.BindView(proto.Clone(meta).(*viewpb.QueryViewMeta)).Prepare(t.Context(), nil))
 	require.Equal(t, 1, captures)
+}
+
+func TestReleaseWaitsForCanceledLazyReaderToExit(t *testing.T) {
+	oracle := newLazyOracle(t)
+	module := &Runtime{fields: map[fieldKey]*fieldResource{{fieldID: 102}: {oracle: oracle}}}
+	defer module.Close()
+	entered, canceled, unwind := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(unwind) })
+	defer unblock()
+	patch := mockey.Mock((*Provider).getSealedBM25Resources).To(func(_ *Provider, ctx context.Context, _ int64, _ string, _ qviews.DataVersion, _ []int64, _ uint64) ([]*datapb.StreamingNodeBM25Resource, error) {
+		close(entered)
+		<-ctx.Done()
+		close(canceled)
+		<-unwind
+		return nil, ctx.Err()
+	}).Build()
+	defer patch.UnPatch()
+	queryCtx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	queryDone := make(chan error, 1)
+	go func() { queryDone <- oracle.ensureMaterialized(queryCtx) }()
+	<-entered
+	cancel()
+	require.ErrorIs(t, <-queryDone, context.Canceled)
+	released := make(chan error, 1)
+	go func() { released <- module.BeforeRelease(t.Context(), qviews.DataVersion{StreamingVersion: 11}) }()
+	<-canceled
+	require.Never(t, func() bool { return len(released) > 0 }, 20*time.Millisecond, time.Millisecond)
+	unblock()
+	require.NoError(t, <-released)
 }

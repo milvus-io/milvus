@@ -7,7 +7,6 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 // QueryRuntimeModule is a concrete vchannel resource module managed by
@@ -19,13 +18,6 @@ type QueryRuntimeModule interface {
 	ApplyLiveEvent(context.Context, walview.VChannelResourceEvent)
 	Advance(qviews.DataVersion)
 	Close()
-}
-
-// QueryRuntimePrepareModule prepares shared resources before a QueryView is ready.
-// Preparation selects the exact schema and load scope from the view metadata.
-// It does not retain a separate aggregate per DataVersion.
-type QueryRuntimePrepareModule interface {
-	PrepareSchemaDataVersion(context.Context, *viewpb.QueryViewMeta) error
 }
 
 // QueryRuntimeWriteSchemaModule reports progress on the ordered WAL write path.
@@ -58,10 +50,4 @@ type QueryViewLoadInfo struct {
 // QueryRuntimeReleaseModule completes resource transitions before a DataView may Drop.
 type QueryRuntimeReleaseModule interface {
 	BeforeRelease(context.Context, qviews.DataVersion) error
-}
-
-// QueryRuntimeSchemaModule rebuilds schema-dependent resources before readiness.
-// Live event application remains independent of its resource I/O.
-type QueryRuntimeSchemaModule interface {
-	PrepareSchema(context.Context, *viewpb.QueryViewMeta, LoadInfoProvider) error
 }
