@@ -117,6 +117,7 @@ func TestCommitManifestUpdates_InvalidBaseManifest(t *testing.T) {
 	})
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 }
+
 func TestReadManifestColumnGroupEntries(t *testing.T) {
 	paramtable.InitWithBaseTable(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 	cfg := manifestTestStorageConfig(t)
@@ -130,7 +131,7 @@ func TestReadManifestColumnGroupEntries(t *testing.T) {
 			Properties: map[string]string{"file_size": "1234", "footer_size": "256", "custom_property": "preserved"},
 		}}},
 	}
-	manifest, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{ColumnGroups: groups})
+	manifest, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{ColumnGroups: groups})
 	require.NoError(t, err)
 
 	t.Run("preserve properties after releasing native manifest", func(t *testing.T) {
@@ -138,7 +139,7 @@ func TestReadManifestColumnGroupEntries(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, groups[1:], entries)
 		// Commit only Go-owned descriptors after the reader has freed its C handle.
-		roundTrip, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{ColumnGroups: entries})
+		roundTrip, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{ColumnGroups: entries})
 		require.NoError(t, err)
 		actual, err := readManifestColumnGroupEntries(roundTrip, cfg, []string{"101", "102"})
 		require.NoError(t, err)
@@ -374,7 +375,7 @@ func TestRefreshMilvusTableManifestSingleCommit(t *testing.T) {
 						{Key: "json_stats.102", Files: []string{path.Join(base, "_stats/json_stats.102/keys")}, Metadata: map[string]string{"version": "9", "build_id": "10", "json_key_stats_data_format": "1"}},
 					}
 				}
-				oldManifest, err := CommitManifestUpdates(base, ManifestEarliest, cfg, updates)
+				oldManifest, err := CommitManifestUpdates(MarshalManifestPath(base, ManifestEarliest), cfg, updates)
 				require.NoError(t, err)
 				_, oldVersion, err := UnmarshalManifestPath(oldManifest)
 				require.NoError(t, err)
