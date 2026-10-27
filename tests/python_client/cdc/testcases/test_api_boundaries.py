@@ -7,7 +7,7 @@ from google.protobuf.message_factory import GetMessageClass
 from pymilvus import MilvusException
 from pymilvus.grpc_gen import milvus_pb2
 
-from .contract_helpers import rpc
+from .contract_helpers import assert_index_sync, rows_equal, rpc
 
 pytestmark = pytest.mark.tags(CaseLabel.CDC, CaseLabel.L3)
 
@@ -94,8 +94,8 @@ class TestCDCSnapshotBoundary:
         c.upstream.insert(name, c.data(10))
         c.assert_rows(name, c.data() + c.data(10))
 
-    def test_restore_snapshot_business_state_is_complete(self, cdc_contract):
-        """Expose partial replication: a successful restore must not leave an empty replica."""
+    def test_restore_snapshot_data_stays_local_and_cdc_continues(self, cdc_contract):
+        """Restore data stays on the primary; metadata and subsequent DML still replicate."""
         c = cdc_contract
         name = c.collection()
         c.upstream.insert(name, c.data())
@@ -115,8 +115,19 @@ class TestCDCSnapshotBoundary:
         c.wait(completed, "source restore completion")
         assert any(info.job_id == job for info in c.upstream.list_restore_snapshot_jobs(collection_name=target))
         c.sync_schema(target)
+        assert_index_sync(c.upstream, c.downstream, target, "vector", c.timeout)
         c.upstream.load_collection(target)
-        c.assert_rows(target, c.data())
+        c.control_barrier()
+        c.wait(lambda: rows_equal(c.upstream, target, c.data()), "primary restored rows")
+        c.wait(lambda: rows_equal(c.downstream, target, []), "secondary restored collection remains empty")
+        assert not c.downstream.list_restore_snapshot_jobs(collection_name=target, timeout=10)
+
+        # Observe subsequent DML on the same collection before checking absence again.
+        new_rows = c.data(100)
+        c.upstream.insert(target, new_rows)
+        c.wait(lambda: rows_equal(c.downstream, target, new_rows), "DML after local snapshot restore")
+        rows_equal(c.upstream, target, c.data() + new_rows)
+        assert not c.downstream.list_restore_snapshot_jobs(collection_name=target, timeout=10)
 
     def test_manifest_secondary_rejected_without_data_changes(self, cdc_contract):
         c = cdc_contract

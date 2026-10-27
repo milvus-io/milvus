@@ -267,11 +267,18 @@ collection and row checks use `MilvusClient`.
 | File | Contracts checked |
 | --- | --- |
 | `test_api_mutations.py` | Add/drop scalar and struct fields; function/output-index lifecycle; rejected legacy Function calls; truncate; partial update; field/index properties; secondary write rejection; FlushAll |
-| `test_api_boundaries.py` | Eight unimplemented RPCs on both roles; snapshot local lifecycle; primary-only snapshot/manifest calls; complete snapshot restore data |
+| `test_api_boundaries.py` | Eight unimplemented RPCs on both roles; snapshot local lifecycle; primary-only snapshot/manifest calls; local restore data with continued DML replication |
 | `test_api_control.py` | RestoreRBAC, AlterRole, restored credentials and effective permissions; phrase slop; local heartbeat/telemetry/client commands |
-| `test_api_storage.py` | Local file-resource registration/removal; external refresh/list/progress; snapshot export/state and external restore |
+| `test_api_storage.py` | Local file-resource registration/removal; local external refresh across two rounds and secondary rejection without side effects; snapshot export/state and local external restore |
 | `test_import_2pc.py` | Manual import commit/abort, rejected auto-commit without visible rows, and subsequent successful imports |
 | `test_resource_group.py` | Actual create/update/drop/transfer calls, with local/replicated-state assertions |
+
+RestoreSnapshot, RestoreExternalSnapshot and RefreshExternalCollection currently
+emit unreplicable task messages. Their boundary cases assert successful primary
+data changes, no corresponding secondary job or restored/refreshed rows after a
+control-channel barrier, and continued ordinary DML replication. Collection and
+index DDL still replicate independently. These are executable boundary tests,
+not expected failures of full-data replication tests.
 
 Run from `tests/python_client` with the repository virtual environment active:
 
