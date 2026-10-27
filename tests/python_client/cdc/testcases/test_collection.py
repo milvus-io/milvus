@@ -7,7 +7,7 @@ import time
 
 import pytest
 from common.common_type import CaseLabel
-from pymilvus import Collection, DataType, MilvusException
+from pymilvus import DataType, MilvusException
 from pymilvus.client.types import LoadState
 
 from .base import TestCDCSyncBase, logger
@@ -391,8 +391,9 @@ class TestCDCSyncCollectionManagement(TestCDCSyncBase):
             raise
 
         def replicas():
-            assert len(Collection(name=name, using=c.upstream._using).get_replicas().groups) == 2
-            assert len(Collection(name=name, using=c.downstream._using).get_replicas().groups) == 1
+            for client, expected in ((c.upstream, 2), (c.downstream, 1)):
+                replicas = client.describe_replica(name, timeout=10)
+                assert len(replicas) == expected, replicas
 
         c.wait(replicas, "primary replicas and default secondary-local replica configuration")
         c.assert_rows(name, c.data())
