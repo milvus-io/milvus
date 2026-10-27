@@ -273,12 +273,14 @@ func (b *broadcastTask) MessageTypeWithVersion() message.MessageTypeWithVersion 
 }
 
 // PendingSchemaFileResourceSnapshot returns the collection and file resource
-// IDs referenced by a non-tombstone CreateCollection or AlterCollection task.
+// IDs referenced by a CreateCollection or AlterCollection task that is neither
+// a tombstone nor a tombstone being dropped (DONE).
 func (b *broadcastTask) PendingSchemaFileResourceSnapshot() (int64, []int64, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
+	if b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE ||
+		b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
 		return 0, nil, false
 	}
 	switch b.messageTypeWithVersion {
