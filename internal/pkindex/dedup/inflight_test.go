@@ -187,7 +187,7 @@ func TestLockKeyCollisionOnlyAddsWork(t *testing.T) {
 			close(decided)
 			return
 		}
-		decided <- second.Decision().CompanionDeletePKs
+		decided <- second.CompanionDeletePKs()
 		second.Appended(20)
 	}()
 	select {
@@ -272,7 +272,7 @@ func TestInflightStressWithObserve(t *testing.T) {
 					t.Error(err)
 					return
 				}
-				misses.Add(int64(len(values) - len(intent.Decision().CompanionDeletePKs)))
+				misses.Add(int64(len(values) - len(intent.CompanionDeletePKs())))
 				tt := appendToLog(int64PKs(values...))
 				if r.Intn(4) == 0 {
 					time.Sleep(time.Microsecond) // let observe overtake the commit
@@ -312,7 +312,7 @@ func TestTwoWritersOnTheSamePK(t *testing.T) {
 			close(second)
 			return
 		}
-		second <- intent.Decision().CompanionDeletePKs
+		second <- intent.CompanionDeletePKs()
 		intent.Appended(11)
 	}()
 	select {
@@ -360,7 +360,7 @@ func TestCanceledWaiterKeepsItsPlace(t *testing.T) {
 			close(third)
 			return
 		}
-		third <- intent.Decision().CompanionDeletePKs
+		third <- intent.CompanionDeletePKs()
 		intent.Appended(12)
 	}()
 	require.Eventually(t, func() bool { return InflightLenForTest(d) == 3 }, 5*time.Second, time.Millisecond)

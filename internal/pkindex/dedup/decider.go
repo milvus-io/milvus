@@ -173,18 +173,21 @@ func (d *decider) decide(ctx context.Context, intent *WriteIntent) (*WriteIntent
 		if err := intent.acquire(ctx, intent.txn.allPKs()); err != nil {
 			return nil, err
 		}
-		hits, err := d.existing(ctx, intent.write, intent.txn.companionCandidates())
+		hits, err := d.existing(ctx, intent.write, intent.txn.insertedPKs())
 		if err != nil {
 			intent.abort()
 			return nil, err
 		}
-		intent.decision.CompanionDeletePKs = hits
+		intent.companionDeletePKs = hits
 		return intent, nil
 	case req.TxnID != 0:
 		// A transaction body takes effect at the commit time tick, so it is decided at commit.
 		return intent, nil
 	}
 
+	if req.Kind == KindDelete {
+		panic("an autocommit delete reached the primary key index decider, it needs no decision")
+	}
 	if err := d.waitError(); err != nil {
 		return nil, err
 	}
@@ -196,12 +199,7 @@ func (d *decider) decide(ctx context.Context, intent *WriteIntent) (*WriteIntent
 		intent.abort()
 		return nil, err
 	}
-	switch req.Kind {
-	case KindInsert:
-		intent.decision.CompanionDeletePKs = present
-	case KindDelete:
-		intent.decision.PresentPKs = present
-	}
+	intent.companionDeletePKs = present
 	return intent, nil
 }
 

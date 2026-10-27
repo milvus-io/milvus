@@ -73,7 +73,7 @@ func decideInsert(t *testing.T, d Decider, values ...int64) (*WriteIntent, []PK)
 	t.Helper()
 	intent, err := d.Decide(context.Background(), DecideRequest{Kind: KindInsert, PKs: int64PKs(values...)})
 	require.NoError(t, err)
-	return intent, intent.Decision().CompanionDeletePKs
+	return intent, intent.CompanionDeletePKs()
 }
 
 func TestAutocommitInsert(t *testing.T) {
@@ -151,35 +151,44 @@ func TestInDoubtBelowObserved(t *testing.T) {
 	require.Equal(t, 0, InflightLenForTest(d))
 }
 
-func TestAutocommitDelete(t *testing.T) {
-	ctx := context.Background()
-	d, a := newTestDecider(t)
-	seed(t, a, 100, 1, 2)
+func TestAutocommitDeletePanics(t *testing.T) {
+	d, _ := newTestDecider(t)
+	require.Panics(t, func() {
+		_, _ = d.Decide(context.Background(), DecideRequest{Kind: KindDelete, PKs: int64PKs(1)})
+	})
+	require.Equal(t, 0, InflightLenForTest(d))
+}
 
-	t.Run("all present", func(t *testing.T) {
-		intent, err := d.Decide(ctx, DecideRequest{Kind: KindDelete, PKs: int64PKs(1, 2)})
-		require.NoError(t, err)
-		require.Equal(t, Decision{PresentPKs: int64PKs(1, 2)}, intent.Decision())
-		intent.NotAppended()
-	})
-	t.Run("partly present", func(t *testing.T) {
-		intent, err := d.Decide(ctx, DecideRequest{Kind: KindDelete, PKs: int64PKs(1, 9)})
-		require.NoError(t, err)
-		require.Equal(t, Decision{PresentPKs: int64PKs(1)}, intent.Decision())
-		intent.NotAppended()
-	})
-	t.Run("none present", func(t *testing.T) {
-		intent, err := d.Decide(ctx, DecideRequest{Kind: KindDelete, PKs: int64PKs(8, 9)})
-		require.NoError(t, err)
-		require.Equal(t, Decision{}, intent.Decision())
-		intent.Appended(11)
-	})
-	t.Run("an applied delete counts as present", func(t *testing.T) {
-		// The set only answers whether a key exists. A key of a delete in
-		// flight gets a companion delete, which is always correct.
-		_, companion := decideInsert(t, d, 8)
-		require.Equal(t, int64PKs(8), companion)
-	})
+// An autocommit delete is not registered. A later insert of its keys may then
+// find a key that the delete removed but observe has not applied yet, and get
+// a companion delete that deletes nothing. It never misses a key that exists.
+func TestInsertAfterAnUnregisteredDelete(t *testing.T) {
+	ctx := context.Background()
+	d, _ := newTestDecider(t)
+
+	first, companion := decideInsert(t, d, 1)
+	require.Empty(t, companion)
+	first.Appended(10)
+	require.NoError(t, ObserveForTest(ctx, d, 10, 100, int64PKs(1), nil))
+
+	// A delete of key 1 is appended at 11 without a decision. Observe has not
+	// applied it, so the engine still holds key 1.
+	again, companion := decideInsert(t, d, 1)
+	require.Equal(t, int64PKs(1), companion, "a key that is gone may still get a companion delete")
+	again.NotAppended()
+
+	require.NoError(t, ObserveForTest(ctx, d, 11, 0, nil, int64PKs(1)))
+	third, companion := decideInsert(t, d, 1)
+	require.Empty(t, companion, "after observe applied the delete the key is absent")
+	third.NotAppended()
+
+	// An insert in flight keeps its key present for a later insert, with or
+	// without an unregistered delete of the key between them.
+	inFlight, _ := decideInsert(t, d, 2)
+	inFlight.Appended(12)
+	later, companion := decideInsert(t, d, 2)
+	require.Equal(t, int64PKs(2), companion)
+	later.NotAppended()
 }
 
 func TestTxnDecidesAtCommit(t *testing.T) {
@@ -189,7 +198,7 @@ func TestTxnDecidesAtCommit(t *testing.T) {
 
 	body, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, PKs: int64PKs(8), TxnID: txnID})
 	require.NoError(t, err)
-	require.Equal(t, Decision{}, body.Decision())
+	require.Empty(t, body.CompanionDeletePKs())
 	body.Appended(11)
 	require.Equal(t, 0, InflightLenForTest(d), "a body registers nothing, it takes effect at commit")
 
@@ -200,18 +209,20 @@ func TestTxnDecidesAtCommit(t *testing.T) {
 
 	commit, err := d.Decide(ctx, DecideRequest{Kind: KindCommitTxn, TxnID: txnID})
 	require.NoError(t, err)
-	require.Equal(t, int64PKs(8), commit.Decision().CompanionDeletePKs)
+	require.Equal(t, int64PKs(8), commit.CompanionDeletePKs())
 	commit.Appended(15)
 	require.Equal(t, 2, InflightLenForTest(d))
 
 	// the pending set is gone: committing again decides nothing.
 	again, err := d.Decide(ctx, DecideRequest{Kind: KindCommitTxn, TxnID: txnID})
 	require.NoError(t, err)
-	require.Equal(t, Decision{}, again.Decision())
+	require.Empty(t, again.CompanionDeletePKs())
 	again.NotAppended()
 }
 
-func TestTxnOwnDeleteSuppressesCompanionDelete(t *testing.T) {
+// A delete of the transaction can cover one partition only, so it does not
+// replace the companion delete of a key that the transaction also inserts.
+func TestTxnOwnDeleteKeepsCompanionDelete(t *testing.T) {
 	ctx := context.Background()
 	d, a := newTestDecider(t)
 	seed(t, a, 100, 1, 2)
@@ -223,14 +234,46 @@ func TestTxnOwnDeleteSuppressesCompanionDelete(t *testing.T) {
 	ins.Appended(11)
 	del, err := d.Decide(ctx, DecideRequest{Kind: KindDelete, PKs: int64PKs(1), TxnID: txnID})
 	require.NoError(t, err)
-	require.Equal(t, Decision{}, del.Decision())
+	require.Empty(t, del.CompanionDeletePKs())
 	del.Appended(12)
 
 	commit, err := d.Decide(ctx, DecideRequest{Kind: KindCommitTxn, TxnID: txnID})
 	require.NoError(t, err)
-	require.Equal(t, int64PKs(2), commit.Decision().CompanionDeletePKs)
+	require.ElementsMatch(t, int64PKs(1, 2), commit.CompanionDeletePKs())
 	commit.Appended(13)
 	require.Equal(t, 2, InflightLenForTest(d), "the commit registers every key of its bodies")
+}
+
+func TestTxnInsertAndDeleteOfSameKey(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		exists bool
+		want   []PK
+	}{
+		{"key exists", true, int64PKs(7)},
+		{"key absent", false, nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ctx := context.Background()
+			d, a := newTestDecider(t)
+			if c.exists {
+				seed(t, a, 100, 7)
+			}
+			const txnID = 10
+
+			del, err := d.Decide(ctx, DecideRequest{Kind: KindDelete, PKs: int64PKs(7), TxnID: txnID})
+			require.NoError(t, err)
+			del.Appended(11)
+			ins, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, PKs: int64PKs(7), TxnID: txnID})
+			require.NoError(t, err)
+			ins.Appended(12)
+
+			commit, err := d.Decide(ctx, DecideRequest{Kind: KindCommitTxn, TxnID: txnID})
+			require.NoError(t, err)
+			require.ElementsMatch(t, c.want, commit.CompanionDeletePKs())
+			commit.Appended(13)
+		})
+	}
 }
 
 func TestTxnDeleteOnly(t *testing.T) {
@@ -244,7 +287,7 @@ func TestTxnDeleteOnly(t *testing.T) {
 	del.Appended(12)
 	commit, err := d.Decide(ctx, DecideRequest{Kind: KindCommitTxn, TxnID: txnID})
 	require.NoError(t, err)
-	require.Empty(t, commit.Decision().CompanionDeletePKs)
+	require.Empty(t, commit.CompanionDeletePKs())
 	commit.Appended(13)
 }
 
@@ -333,8 +376,6 @@ func TestNotReadyWaits(t *testing.T) {
 	_, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, PKs: int64PKs(1, 2)})
 	wait := requireWaitError(t, err, 0)
 	require.Contains(t, err.Error(), "installed")
-	_, err = d.Decide(ctx, DecideRequest{Kind: KindDelete, PKs: int64PKs(1)})
-	requireWaitError(t, err, 0)
 	require.Equal(t, 0, InflightLenForTest(d))
 	body, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, PKs: int64PKs(3), TxnID: 8})
 	require.NoError(t, err, "a transaction body does not wait")
@@ -486,8 +527,6 @@ func TestWaitUntil(t *testing.T) {
 
 	_, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, PKs: int64PKs(1, 2)})
 	requireWaitError(t, err, 10)
-	_, err = d.Decide(ctx, DecideRequest{Kind: KindDelete, PKs: int64PKs(1)})
-	requireWaitError(t, err, 10)
 	require.Equal(t, 0, InflightLenForTest(d), "a write that waits registers nothing")
 
 	const txnID = 7
@@ -514,7 +553,7 @@ func TestWaitUntil(t *testing.T) {
 	insert.Appended(11)
 	commit, err = d.Decide(ctx, DecideRequest{Kind: KindCommitTxn, TxnID: txnID})
 	require.NoError(t, err)
-	require.Equal(t, int64PKs(1), commit.Decision().CompanionDeletePKs)
+	require.Equal(t, int64PKs(1), commit.CompanionDeletePKs())
 }
 
 // Wait returns once observe reaches the time tick, with ctx.Err() when ctx ends
@@ -650,7 +689,7 @@ func TestSameKeyDecisionsAreSerialized(t *testing.T) {
 				t.Error(err)
 				return
 			}
-			if len(intent.Decision().CompanionDeletePKs) == 0 {
+			if len(intent.CompanionDeletePKs()) == 0 {
 				misses.Add(1)
 			}
 			time.Sleep(time.Millisecond) // stands for the WAL append
@@ -699,7 +738,7 @@ func TestTxnAndAutocommitOnSameKeyConcurrently(t *testing.T) {
 					t.Error(err)
 					return
 				}
-				if len(commit.Decision().CompanionDeletePKs) == 0 {
+				if len(commit.CompanionDeletePKs()) == 0 {
 					misses.Add(1)
 				}
 				commit.Appended(timeTick.Add(1))
@@ -717,7 +756,7 @@ func TestTxnAndAutocommitOnSameKeyConcurrently(t *testing.T) {
 					t.Error(err)
 					return
 				}
-				if len(intent.Decision().CompanionDeletePKs) == 0 {
+				if len(intent.CompanionDeletePKs()) == 0 {
 					misses.Add(1)
 				}
 				intent.Appended(timeTick.Add(1))

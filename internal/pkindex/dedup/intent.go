@@ -21,8 +21,8 @@ import (
 	"time"
 )
 
-func (i *WriteIntent) Decision() Decision {
-	return i.decision
+func (i *WriteIntent) CompanionDeletePKs() []PK {
+	return i.companionDeletePKs
 }
 
 func (i *WriteIntent) LockWait() time.Duration {

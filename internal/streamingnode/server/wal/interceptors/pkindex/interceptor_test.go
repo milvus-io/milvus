@@ -226,18 +226,22 @@ func testSchema(autoID bool) *schemapb.CollectionSchema {
 }
 
 func newInsert(vchannel string, pks ...int64) message.MutableMessage {
+	return newInsertInPartition(vchannel, testPartitionID, pks...)
+}
+
+func newInsertInPartition(vchannel string, partitionID int64, pks ...int64) message.MutableMessage {
 	return message.NewInsertMessageBuilderV1().
 		WithVChannel(vchannel).
 		WithHeader(&message.InsertMessageHeader{
 			CollectionId: testCollectionID,
 			Partitions: []*message.PartitionSegmentAssignment{
-				{PartitionId: testPartitionID, Rows: uint64(len(pks)), BinarySize: 1024},
+				{PartitionId: partitionID, Rows: uint64(len(pks)), BinarySize: 1024},
 			},
 		}).
 		WithBody(&msgpb.InsertRequest{
 			Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert},
 			CollectionID: testCollectionID,
-			PartitionID:  testPartitionID,
+			PartitionID:  partitionID,
 			NumRows:      uint64(len(pks)),
 			FieldsData: []*schemapb.FieldData{
 				{
@@ -305,13 +309,17 @@ func newVarCharDelete(vchannel string, pks ...string) message.MutableMessage {
 }
 
 func newDelete(vchannel string, pks ...int64) message.MutableMessage {
+	return newDeleteInPartition(vchannel, testPartitionID, pks...)
+}
+
+func newDeleteInPartition(vchannel string, partitionID int64, pks ...int64) message.MutableMessage {
 	return message.NewDeleteMessageBuilderV1().
 		WithVChannel(vchannel).
 		WithHeader(&message.DeleteMessageHeader{CollectionId: testCollectionID, Rows: uint64(len(pks))}).
 		WithBody(&msgpb.DeleteRequest{
 			Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_Delete},
 			CollectionID: testCollectionID,
-			PartitionID:  testPartitionID,
+			PartitionID:  partitionID,
 			PrimaryKeys:  &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: pks}}},
 			NumRows:      int64(len(pks)),
 			Timestamps:   make([]uint64, len(pks)),
@@ -781,26 +789,28 @@ func TestInsertFailsWhenTheIndexIsUnavailable(t *testing.T) {
 // A decider whose writes wait for observe makes DoAppend return
 // WaitRequiredError and append nothing. Its Wait fails when the decider closes,
 // and returns once observe reaches the time tick, and the append then succeeds.
+// An autocommit delete needs no decision, so it does not wait.
 func TestWriteThatWaitsReturnsWaitRequired(t *testing.T) {
 	i, _ := newTestInterceptor(t, nil)
 	decider := i.registry.get(testVChannel).decider
 	dedup.WaitUntilForTest(decider, 50)
 	f := newFakeAppender()
 
-	for _, msg := range []message.MutableMessage{newInsert(testVChannel, 1), newDelete(testVChannel, 1)} {
-		_, err := i.DoAppend(newTestAppendContext(), msg, f.append)
-		var wait *interceptors.WaitRequiredError
-		require.ErrorAs(t, err, &wait)
-		require.Empty(t, f.types, "nothing may be appended while the write waits")
-		require.Equal(t, 0, inflightLen(i))
-
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		require.ErrorIs(t, wait.Wait(ctx), context.Canceled)
-	}
-
 	_, err := i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
 	var wait *interceptors.WaitRequiredError
+	require.ErrorAs(t, err, &wait)
+	require.Empty(t, f.types, "nothing may be appended while the write waits")
+	require.Equal(t, 0, inflightLen(i))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, wait.Wait(ctx), context.Canceled)
+
+	_, err = i.DoAppend(newTestAppendContext(), newDelete(testVChannel, 1), f.append)
+	require.NoError(t, err, "an autocommit delete does not wait")
+	require.Equal(t, []message.MessageType{message.MessageTypeDelete}, f.types)
+	require.Equal(t, 0, inflightLen(i))
+
+	_, err = i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
 	require.ErrorAs(t, err, &wait)
 	waitDone := make(chan error, 1)
 	go func() { waitDone <- wait.Wait(context.Background()) }()
@@ -835,12 +845,20 @@ func TestDeleteOfPresentKeys(t *testing.T) {
 	require.Equal(t, []message.MessageType{message.MessageTypeDelete}, f.types)
 	require.Equal(t, []int64{1, 2}, f.deleteBodyAt(t, 0).GetPrimaryKeys().GetIntId().GetData())
 
-	// observe applies the delete. Until then the keys count as present.
+	// The delete is not registered. observe applies it, until then the engine
+	// still holds the keys.
 	for _, pk := range []int64{1, 2} {
 		_, ok := engine.segmentOf(t, pk)
 		require.True(t, ok)
 	}
-	require.Equal(t, 2, inflightLen(i))
+	require.Equal(t, 0, inflightLen(i))
+
+	// A later insert of a deleted key finds it in the engine and gets a
+	// companion delete that deletes nothing.
+	_, err = i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
+	require.NoError(t, err)
+	require.Equal(t, message.MessageTypeDelete, f.types[3])
+	require.Equal(t, []int64{1}, f.deleteBodyAt(t, 3).GetPrimaryKeys().GetIntId().GetData())
 }
 
 // A key that the index does not know may still exist in the data, so the delete
@@ -995,6 +1013,40 @@ func TestTxnCommitMiss(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []message.MessageType{message.MessageTypeCommitTxn}, f2.types)
 	require.True(t, presentOf(t, i, dedup.Int64PK(5)))
+}
+
+// An upsert without partition key mode deletes the key in its target partition
+// only. The row of the key in another partition survives that delete, so the
+// commit still gives the key a companion delete that covers all partitions.
+func TestTxnOwnDeleteOfOnePartitionKeepsTheCompanionDelete(t *testing.T) {
+	const partitionB = testPartitionID + 1
+	i, _ := newTestInterceptor(t, nil)
+
+	// key 7 exists in partition A.
+	_, err := i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 7), newFakeAppender().append)
+	require.NoError(t, err)
+
+	txnCtx := message.TxnContext{TxnID: 44, Keepalive: time.Hour}
+	f := newFakeAppender()
+	_, err = i.DoAppend(newTestAppendContext(), newDeleteInPartition(testVChannel, partitionB, 7).WithTxnContext(txnCtx), f.append)
+	require.NoError(t, err)
+	_, err = i.DoAppend(newTestAppendContext(), newInsertInPartition(testVChannel, partitionB, 7).WithTxnContext(txnCtx), f.append)
+	require.NoError(t, err)
+	require.Equal(t, []message.MessageType{message.MessageTypeDelete, message.MessageTypeInsert}, f.types)
+
+	f2 := newFakeAppender()
+	_, err = i.DoAppend(newTestAppendContext(), newCommit(testVChannel, txnCtx), f2.append)
+	require.NoError(t, err)
+	require.Equal(t, []message.MessageType{message.MessageTypeDelete, message.MessageTypeCommitTxn}, f2.types)
+	companion := f2.deleteBodyAt(t, 0)
+	require.Equal(t, []int64{7}, companion.GetPrimaryKeys().GetIntId().GetData())
+	require.Equal(t, common.AllPartitionsID, companion.GetPartitionID())
+	require.Equal(t, txnCtx.TxnID, f2.appended[0].TxnContext().TxnID)
+
+	// the delete of the client reaches the WAL unchanged.
+	own := f.deleteBodyAt(t, 0)
+	require.Equal(t, []int64{7}, own.GetPrimaryKeys().GetIntId().GetData())
+	require.Equal(t, partitionB, own.GetPartitionID())
 }
 
 func TestTxnRollbackDropsThePendingWrites(t *testing.T) {

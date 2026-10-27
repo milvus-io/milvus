@@ -71,13 +71,11 @@ func (p *pendingTxn) allPKs() []PK {
 	return pks
 }
 
-// companionCandidates returns the inserted keys that the transaction does not delete itself.
-func (p *pendingTxn) companionCandidates() []PK {
+// insertedPKs returns every key inserted by the transaction.
+func (p *pendingTxn) insertedPKs() []PK {
 	pks := make([]PK, 0, len(p.puts))
 	for pk := range p.puts {
-		if _, ok := p.deletes[pk]; !ok {
-			pks = append(pks, pk)
-		}
+		pks = append(pks, pk)
 	}
 	return pks
 }

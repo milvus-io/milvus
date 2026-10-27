@@ -29,7 +29,7 @@ import (
 
 // Decider makes the write path decisions of one vchannel.
 type Decider interface {
-	// Decide makes the decision for req. For an autocommit write and for a
+	// Decide makes the decision for req. For an autocommit insert and for a
 	// CommitTxn it registers the affected keys in the in-flight set and waits
 	// for the earlier writes of the same keys, before it reads the index. The
 	// returned WriteIntent holds that registration, which is the lock of those
@@ -38,9 +38,15 @@ type Decider interface {
 	// between Decide and that call ends the process, like every panic on the
 	// append path.
 	//
+	// An autocommit delete needs no decision, and Decide panics on one: its
+	// content depends on nothing, and an earlier write of its keys is in the
+	// in-flight set or the engine whether it is registered or not. Until
+	// observe applies it, a later insert of its keys can find them present and
+	// get a companion delete of a key that is gone, which deletes nothing.
+	//
 	// While the index is not ready (Config.Ready) or the writes of the
 	// vchannel must wait for observe (WaitUntil), Decide returns a *WaitError
-	// for an autocommit write and for a CommitTxn with pending writes. Nothing
+	// for an autocommit insert and for a CommitTxn with pending writes. Nothing
 	// is registered for that write then. Decide never blocks on that wait
 	// itself: the caller may hold a lock that the install or observe needs.
 	// It fails with an error that wraps engine.ErrClosed after Close.
@@ -128,16 +134,11 @@ type DecideRequest struct {
 	TxnID int64 // 0 for an autocommit write
 }
 
-// Decision tells the caller what to append.
-type Decision struct {
-	CompanionDeletePKs []PK // keys of an insert that need a companion delete in the same transaction
-	PresentPKs         []PK // keys of a delete that exist in the index, in request order. Nil when none exists.
-}
-
 // WriteIntent is a decision that has not been confirmed yet. It belongs to one
 // append and must not be shared between goroutines.
 //
-// Decision returns what the caller should append.
+// CompanionDeletePKs returns the keys of an insert that need a companion
+// delete in the same transaction.
 //
 // LockWait returns how long Decide waited for the earlier writes of the same keys.
 //
@@ -159,13 +160,13 @@ type Decision struct {
 // not be 0. The keys stay present in the in-flight set until observe passes
 // tt, and no longer block other writes.
 type WriteIntent struct {
-	d        *decider
-	req      DecideRequest
-	decision Decision
-	txn      *pendingTxn    // snapshot of the pending writes, for a CommitTxn
-	write    *inflightWrite // the registration in the in-flight set; nil when the write registers no key
-	lockWait time.Duration
-	resolved bool
+	d                  *decider
+	req                DecideRequest
+	companionDeletePKs []PK
+	txn                *pendingTxn    // snapshot of the pending writes, for a CommitTxn
+	write              *inflightWrite // the registration in the in-flight set; nil when the write registers no key
+	lockWait           time.Duration
+	resolved           bool
 }
 
 // PK is one primary key, either an int64 or a varchar.
