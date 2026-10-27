@@ -79,6 +79,8 @@ func planExternalRefreshOwnership(
 		)
 	}
 
+	// Files are keyed by ManifestPathKey, matching the DataNode's fragment
+	// identity, so a milvus-table source manifest is matched by revision.
 	fileIndexes := make(map[string]int64, len(files))
 	for index, file := range files {
 		if file == nil || file.GetFilePath() == "" {
@@ -87,7 +89,7 @@ func planExternalRefreshOwnership(
 				index,
 			)
 		}
-		filePath := file.GetFilePath()
+		filePath := packed.ManifestPathKey(file.GetFilePath())
 		if previous, ok := fileIndexes[filePath]; ok {
 			return nil, summary, merr.WrapErrDataIntegrityMsg(
 				"external refresh Explore result contains duplicate file path %q at indexes %d and %d",
@@ -128,18 +130,19 @@ func planExternalRefreshOwnership(
 		firstFileIndex := fileCount
 		lastFileIndex := int64(-1)
 		for _, fragment := range segmentFragments[segmentID] {
+			filePath := packed.ManifestPathKey(fragment.FilePath)
 			// File diff metrics compare unique paths, not fragment row ranges.
-			if fragment.FilePath != "" {
-				if _, ok := baselineFilePaths[fragment.FilePath]; !ok {
-					baselineFilePaths[fragment.FilePath] = struct{}{}
-					if _, ok := fileIndexes[fragment.FilePath]; ok {
+			if filePath != "" {
+				if _, ok := baselineFilePaths[filePath]; !ok {
+					baselineFilePaths[filePath] = struct{}{}
+					if _, ok := fileIndexes[filePath]; ok {
 						summary.UnchangedFilePaths++
 					} else {
 						summary.RemovedFilePaths++
 					}
 				}
 			}
-			if fileIndex, ok := fileIndexes[fragment.FilePath]; ok {
+			if fileIndex, ok := fileIndexes[filePath]; ok {
 				firstFileIndex = min(firstFileIndex, fileIndex)
 				lastFileIndex = max(lastFileIndex, fileIndex)
 			}

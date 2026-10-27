@@ -931,7 +931,7 @@ func (st *statsTask) shouldPublishPreparedManifest(ctx context.Context, segmentI
 		// Nothing to publish when the worker's manifest already matches the
 		// current pointer; fall through to the ordinary no-op path instead of
 		// re-publishing an identical revision.
-		result.GetManifest() != segment.GetManifestPath()
+		!packed.SameManifestPath(result.GetManifest(), segment.GetManifestPath())
 }
 
 func updateStatsResultIfManifestMatches(ctx context.Context, segmentID, taskID int64, result *workerpb.StatsResult) UpdateOperator {
@@ -944,7 +944,7 @@ func updateStatsResultIfManifestMatches(ctx context.Context, segmentID, taskID i
 				mlog.Bool("segmentMissing", current == nil))
 			return modPack.fail(errStatsResultDiscarded)
 		}
-		if result.GetBaseManifest() != "" && current.GetManifestPath() != result.GetBaseManifest() {
+		if result.GetBaseManifest() != "" && !packed.SameManifestPath(current.GetManifestPath(), result.GetBaseManifest()) {
 			mlog.Info(ctx, "discard stale stats result",
 				mlog.FieldTaskID(taskID),
 				mlog.FieldSegmentID(segmentID),
@@ -956,7 +956,7 @@ func updateStatsResultIfManifestMatches(ctx context.Context, segmentID, taskID i
 
 		hasTextStats := len(result.GetTextStatsLogs()) > 0
 		hasJSONStats := len(result.GetJsonKeyStatsLogs()) > 0
-		manifestChanged := result.GetManifest() != "" && current.GetManifestPath() != result.GetManifest()
+		manifestChanged := result.GetManifest() != "" && !packed.SameManifestPath(current.GetManifestPath(), result.GetManifest())
 		if !hasTextStats && !hasJSONStats && !manifestChanged {
 			return false
 		}
@@ -987,7 +987,7 @@ func updateStatsResultIfManifestMatches(ctx context.Context, segmentID, taskID i
 				segment.JsonKeyStats[fieldID] = logs
 			}
 		}
-		if result.GetManifest() != "" && segment.GetManifestPath() != result.GetManifest() {
+		if result.GetManifest() != "" && !packed.SameManifestPath(segment.GetManifestPath(), result.GetManifest()) {
 			segment.ManifestPath = result.GetManifest()
 		}
 		return true
