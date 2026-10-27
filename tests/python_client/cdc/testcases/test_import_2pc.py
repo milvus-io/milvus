@@ -2,7 +2,7 @@ import pytest
 from chaos.checker import Import2PCChecker
 from common import common_func as cf
 from common.common_type import CaseLabel
-from pymilvus import MilvusException, connections
+from pymilvus import MilvusException
 from pymilvus.bulk_writer import bulk_import
 
 
@@ -32,7 +32,6 @@ class TestCDCImport2PC:
                   after commit; abort leaves both clusters unchanged and permits a new import
         """
         collection_name = cf.gen_unique_str("CDCImport2PC_")
-        connections.connect("default", uri=upstream_uri, token=upstream_token)
         checker = Import2PCChecker(
             collection_name=collection_name,
             rows_per_import=import_2pc_rows,
