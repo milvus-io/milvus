@@ -95,8 +95,8 @@ AzureBlobChunkManager::AzureBlobChunkManager(
         const bool has_federated_token = federated_token_file != nullptr &&
                                          std::strlen(federated_token_file) > 0;
         const char* client_secret_env = std::getenv("AZURE_CLIENT_SECRET");
-        const bool has_client_secret = client_secret_env != nullptr &&
-                                       std::strlen(client_secret_env) > 0;
+        const bool has_client_secret =
+            client_secret_env != nullptr && std::strlen(client_secret_env) > 0;
         if (has_federated_token) {
             Azure::Identity::WorkloadIdentityCredentialOptions options;
             const char* workload_client_id = std::getenv("AZURE_CLIENT_ID");
@@ -119,7 +119,8 @@ AzureBlobChunkManager::AzureBlobChunkManager(
             if (spn_client_id == nullptr || std::strlen(spn_client_id) == 0 ||
                 spn_tenant_id == nullptr || std::strlen(spn_tenant_id) == 0) {
                 throw std::invalid_argument(
-                    "AZURE_CLIENT_ID and AZURE_TENANT_ID must be set when AZURE_CLIENT_SECRET is set");
+                    "AZURE_CLIENT_ID and AZURE_TENANT_ID must be set when "
+                    "AZURE_CLIENT_SECRET is set");
             }
             auto credential =
                 std::make_shared<Azure::Identity::ClientSecretCredential>(
