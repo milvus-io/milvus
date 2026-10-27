@@ -149,7 +149,7 @@ func TestGroupMessage(t *testing.T) {
 	d.AddTarget(newTarget(&StreamConfig{
 		VChannel: "mock_pchannel_0_2v0",
 	}, false))
-	packs := d.groupAndParseMsgs(msgstream.BuildConsumeMsgPack(&MsgPack{
+	packs, err := d.groupAndParseMsgs(msgstream.BuildConsumeMsgPack(&MsgPack{
 		BeginTs: 1,
 		EndTs:   10,
 		StartPositions: []*msgstream.MsgPosition{
@@ -182,5 +182,6 @@ func TestGroupMessage(t *testing.T) {
 			},
 		},
 	}), nil)
+	assert.NoError(t, err)
 	assert.Len(t, packs, 2)
 }

@@ -3040,6 +3040,7 @@ func (m *meta) loadableProjection(ctx context.Context, collectionID int64) ([]da
 			PartitionID:     segment.GetPartitionID(),
 			ManifestVersion: manifestVersion,
 			RowNum:          segment.GetNumOfRows(),
+			Size:            segment.GetStats().GetInsertBinlogSize(),
 		})
 	}
 	return loadable, nil

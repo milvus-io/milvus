@@ -30,8 +30,9 @@ RUN dnf install -y dnf-plugins-core && \
 
 RUN uv --no-cache python install 3.12.13 && \
     ln -s /usr/local/bin/python3.12 /usr/local/bin/python3 && \
+    rm -rf /opt/uv/python/*/lib/python3.12/site-packages/pip* && \
     uv --no-cache pip install --python python3.12 --system --break-system-packages \
-        --upgrade setuptools msgpack urllib3
+        "setuptools>=78.1.1" "msgpack>=1.2.1" "urllib3>=2.8.0"
 
 # Add Tini
 RUN curl -L -o /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH && \

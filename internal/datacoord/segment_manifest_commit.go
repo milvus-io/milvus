@@ -503,7 +503,7 @@ func validateManifestIndexTaskProjection(m *meta, segment *SegmentInfo, entry pa
 		segIdx.SegmentID,
 		segIdx.BuildID,
 		segIdx.IndexVersion,
-	).BuildPrefix()
+	).WithManifestPath(segment.GetManifestPath()).BuildPrefix()
 	expectedPath, err := packed.ManifestIndexRelativePath(basePath, indexPrefix)
 	if err != nil {
 		return err

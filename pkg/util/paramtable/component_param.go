@@ -6899,35 +6899,35 @@ segments while automatic compaction is disabled. 0 or a negative value means unl
 	}
 	p.CompactionMaxFullSegmentThreshold.Init(base.mgr)
 
+	const defaultForceMergeMemoryFactor = "4.0"
+	forceMergeMemoryFactorFormatter := func(value string) string {
+		factor, err := strconv.ParseFloat(value, 64)
+		if err != nil || math.IsNaN(factor) || math.IsInf(factor, 0) {
+			return defaultForceMergeMemoryFactor
+		}
+		if factor < 1.0 {
+			factor = 1.0
+		}
+		return strconv.FormatFloat(factor, 'f', -1, 64)
+	}
+
 	p.CompactionForceMergeDataNodeMemoryFactor = ParamItem{
 		Key:          "dataCoord.compaction.forceMerge.dataNodeMemoryFactor",
 		Version:      "2.6.8",
-		DefaultValue: "4.0",
+		DefaultValue: defaultForceMergeMemoryFactor,
 		Doc:          "Memory safety factor for DataNode during force merge compaction. Max segment size = DataNode memory / factor. Default 4.0 means segments can use up to 1/4 of DataNode memory. Must be >= 1.0.",
 		Export:       false,
-		Formatter: func(value string) string {
-			factor, err := strconv.ParseFloat(value, 64)
-			if err != nil || factor < 1.0 {
-				factor = 1.0
-			}
-			return strconv.FormatFloat(factor, 'f', -1, 64)
-		},
+		Formatter:    forceMergeMemoryFactorFormatter,
 	}
 	p.CompactionForceMergeDataNodeMemoryFactor.Init(base.mgr)
 
 	p.CompactionForceMergeQueryNodeMemoryFactor = ParamItem{
 		Key:          "dataCoord.compaction.forceMerge.queryNodeMemoryFactor",
 		Version:      "2.6.8",
-		DefaultValue: "4.0",
+		DefaultValue: defaultForceMergeMemoryFactor,
 		Doc:          "Memory safety factor for QueryNode when loading segments after force merge. Max segment size = QueryNode memory / factor. Default 4.0 means segments can use up to 1/4 of QueryNode memory. Must be >= 1.0.",
 		Export:       false,
-		Formatter: func(value string) string {
-			factor, err := strconv.ParseFloat(value, 64)
-			if err != nil || factor < 1.0 {
-				factor = 1.0
-			}
-			return strconv.FormatFloat(factor, 'f', -1, 64)
-		},
+		Formatter:    forceMergeMemoryFactorFormatter,
 	}
 	p.CompactionForceMergeQueryNodeMemoryFactor.Init(base.mgr)
 
@@ -7172,7 +7172,8 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 		Version:      "3.0.0",
 		DefaultValue: "false",
 		Doc: `Whether completed StorageV3 index artifacts are published in segment manifests. Off (the default) keeps the legacy path: every SegmentIndex task record stays in etcd and no manifest index entry is produced. On still persists Unissued, InProgress, Failed, fake-finished, and other task states in etcd; only a successful build with artifact files is published to the manifest, and that commit atomically deletes the corresponding Finished etcd row. StorageV1/V2 always use etcd.
-The setting may be switched in either direction. Turning it off changes where new completions are written; records already published to manifests remain recoverable through the segment's sticky manifest_has_index marker.
+New StorageV3 builds also write artifacts under the segment manifest base/_index/<build>/<version> (path version 2). Upgrade all workers and QueryNodes before enabling. Old-layout tasks keep their original etcd publication mode; external index paths are never added.
+The setting applies when a build task is created. Existing builds keep their persisted mode across switches and restarts: path version 2 publishes to manifests, while versions 0/1 finish in etcd. Published records remain recoverable through the segment's manifest_has_index marker.
 The value must be exactly true or false. A value that does not parse as a boolean, such as yes, is silently read as false, i.e. the legacy etcd behavior.`,
 		Export: true,
 	}
@@ -9214,47 +9215,6 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 		Export:       false,
 	}
 	p.ExternalCollectionTargetRowsPerSegment.Init(base.mgr)
-}
-
-type queryViewConfig struct {
-	IDFLazyLoadSealedStats             ParamItem `refreshable:"true"`
-	IDFSealedStatsLoadConcurrencyRatio ParamItem `refreshable:"true"`
-	LeaseDuration                      ParamItem `refreshable:"false"`
-}
-
-func (p *queryViewConfig) init(base *BaseTable) {
-	p.IDFLazyLoadSealedStats = ParamItem{
-		Key:          "queryView.idfOracle.lazyLoadSealedStats",
-		Version:      "3.1.0",
-		Export:       true,
-		DefaultValue: "false",
-		Doc:          "Whether QueryView IDF runtimes defer sealed BM25 resource discovery and stats materialization until the first BM25 search.",
-	}
-	p.IDFLazyLoadSealedStats.Init(base.mgr)
-
-	p.IDFSealedStatsLoadConcurrencyRatio = ParamItem{
-		Key:          "queryView.idfOracle.sealedStatsLoadConcurrencyRatio",
-		Version:      "3.1.0",
-		Export:       true,
-		DefaultValue: "4",
-		Doc:          "Maximum process-wide concurrency for loading sealed BM25 stats, expressed as a ratio of CPU cores.",
-		Formatter: func(v string) string {
-			if getAsFloat(v) <= 0 {
-				return "1"
-			}
-			return v
-		},
-	}
-	p.IDFSealedStatsLoadConcurrencyRatio.Init(base.mgr)
-
-	p.LeaseDuration = ParamItem{
-		Key:          "queryView.leaseDuration",
-		Version:      "3.1.0",
-		DefaultValue: "60s",
-		Doc:          "Renewable SN Up-view retention after query access. Delays normal Down; non-positive durations disable timed retention. Not refreshable.",
-		Export:       true,
-	}
-	p.LeaseDuration.Init(base.mgr)
 }
 
 type streamingConfig struct {

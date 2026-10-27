@@ -1731,11 +1731,14 @@ func (s *statsTaskSuite) TestQueryTaskOnWorkerDiscardsStaleStatsResult() {
 				}).Build()
 			defer mockDropStats.UnPatch()
 			st := newStatsTask(task, 1, s.mt, nil, nil, newIndexEngineVersionManager())
+			drainStatsBuildChForTest()
+			defer drainStatsBuildChForTest()
 
 			st.QueryTaskOnWorker(cluster)
 
 			s.Equal(indexpb.JobState_JobStateNone, st.GetState())
 			s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(s.segID, indexpb.StatsSubJob_TextIndexJob))
+			s.Equal([]UniqueID{s.segID}, drainStatsBuildChForTest(), "a rejected result must send the segment back to discovery")
 			s.Equal([]int64{task.GetTaskID()}, droppedStatsTasks)
 			s.Equal([]int64{task.GetTaskID()}, droppedWorkerTasks)
 			if testCase.expectCleanup {

@@ -44,7 +44,7 @@ import (
 
 func TestManifestIndexPathMatchesSegmentIdentity(t *testing.T) {
 	segment := &datapb.SegmentInfo{CollectionID: 1, PartitionID: 2, ID: 3}
-	for _, layout := range []indexpb.IndexStorePathVersion{0, 1} {
+	for _, layout := range []indexpb.IndexStorePathVersion{0, 1, 2} {
 		entry := packed.ManifestIndexInfo{
 			IndexID: 4, BuildID: 5, IndexVersion: 6, IndexName: "idx", IndexType: "HNSW",
 			IndexStorePathVersion: layout, IndexFileKeys: []string{"data"},

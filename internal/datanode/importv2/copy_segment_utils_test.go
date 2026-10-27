@@ -295,6 +295,7 @@ func TestCollectSegmentFiles_LocalV3ManifestKeysAreCompletePaths(t *testing.T) {
 		SegmentId:      10,
 		StorageVersion: storage.StorageV3,
 		ManifestPath:   manifestPath,
+		IndexFiles:     []*indexpb.IndexFilePathInfo{{IndexFilePaths: []string{path.Join(basePath, "_index/7/1/live")}}},
 		DeltaBinlogs: []*datapb.FieldBinlog{{
 			Binlogs: []*datapb.Binlog{{LogPath: path.Join(basePath, "_delta/7")}},
 		}},
@@ -304,7 +305,7 @@ func TestCollectSegmentFiles_LocalV3ManifestKeysAreCompletePaths(t *testing.T) {
 		func(_ context.Context, cm storage.ChunkManager, gotBasePath string) ([]string, error) {
 			assert.Same(t, sourceCM, cm)
 			assert.Equal(t, basePath, gotBasePath)
-			return []string{path.Join(basePath, "_data/0")}, nil
+			return []string{path.Join(basePath, "_data/0"), path.Join(basePath, "_index/7/1/live"), path.Join(basePath, "_index/6/1/stale")}, nil
 		}).Build()
 	defer mList.UnPatch()
 
@@ -321,6 +322,7 @@ func TestCollectSegmentFiles_LocalV3ManifestKeysAreCompletePaths(t *testing.T) {
 	files, err := collectSegmentFiles(context.Background(), sourceCM, sourceCfg, source)
 	require.NoError(t, err)
 	assert.Equal(t, []string{path.Join(basePath, "_data/0")}, files.InsertBinlogs)
+	assert.Equal(t, []string{path.Join(basePath, "_index/7/1/live")}, files.VectorScalarIndex)
 	assert.Equal(t, []string{path.Join(root, "insert_log/100/1/lobs/101/_data/0")}, files.LobFiles)
 	assert.Equal(t, []string{path.Join(basePath, "_delta/7")}, files.DeltaBinlogs)
 }
@@ -3763,11 +3765,12 @@ func TestBuildTargetManifestIndexes(t *testing.T) {
 	}
 	indexInfos := map[int64]*datapb.VectorScalarIndexInfo{
 		888: {
-			IndexName:      "vec_idx",
-			BuildId:        888,
-			Version:        2,
-			IndexSize:      1024,
-			IndexFilePaths: []string{"files/index/100/200/300/888/2/a", "files/index/100/200/300/888/2/b"},
+			IndexName:             "vec_idx",
+			IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+			BuildId:               888,
+			Version:               2,
+			IndexSize:             1024,
+			IndexFilePaths:        []string{"files/insert_log/100/200/300/_index/888/2/a", "files/insert_log/100/200/300/_index/888/2/b"},
 		},
 	}
 
@@ -3790,12 +3793,10 @@ func TestBuildTargetManifestIndexes(t *testing.T) {
 	assert.Equal(t, "16", entry.Properties["M"])
 	assert.Equal(t, "HNSW", entry.Properties[common.IndexTypeKey])
 
-	expectedPath, err := packed.ManifestIndexRelativePath("files/insert_log/100/200/300", "files/index/100/200/300/888/2")
+	expectedPath, err := packed.ManifestIndexRelativePath("files/insert_log/100/200/300", "files/insert_log/100/200/300/_index/888/2")
 	assert.NoError(t, err)
 	assert.Equal(t, expectedPath, entry.Path)
-	// The stored path walks out of the segment base, which is exactly why an
-	// inherited entry cannot be re-based and must be re-derived here.
-	assert.True(t, strings.HasPrefix(entry.Path, ".."), "index path should escape the segment base, got %q", entry.Path)
+	assert.Equal(t, "888/2", entry.Path)
 }
 
 func TestBuildTargetManifestIndexes_NoTargetDefinition(t *testing.T) {
@@ -3833,15 +3834,15 @@ func TestBuildTargetManifestIndexes_NoArtifactPathIsSkippedNotFatal(t *testing.T
 		889: {
 			IndexName:      "real_idx",
 			BuildId:        889,
-			IndexFilePaths: []string{"files/index/100/200/300/889/2/a"},
+			IndexFilePaths: []string{"files/insert_log/100/200/300/_index/889/2/a"},
 		},
 	}
 
 	entries, err := buildTargetManifestIndexes(context.TODO(), manifestPath, target, 4096, indexInfos)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	// The empty one is dropped; the one with a real artifact still lands, so the
 	// skip cannot silently swallow a sibling index in the same segment.
-	assert.Len(t, entries, 1)
+	require.Len(t, entries, 1)
 	assert.Equal(t, "real_idx", entries[0].IndexName)
 }
 
@@ -3946,7 +3947,7 @@ func TestRepublishCopiedManifestIndexes_WritePlacementMatrix(t *testing.T) {
 			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
 			// Local storage consumes complete paths; RootPath is not prepended by the filesystem.
 			basePath := filepath.Join(cfg.GetRootPath(), "copy_manifest_write_matrix", strings.ReplaceAll(tc.name, " ", "_"))
-			sourceIndexPath := filepath.Join(cfg.GetRootPath(), "index_v1/1/2/3/6001/1")
+			sourceIndexPath := filepath.Join(basePath, "_index/6001/1")
 			relativePath, err := packed.ManifestIndexRelativePath(basePath, sourceIndexPath)
 			require.NoError(t, err)
 			copiedManifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(basePath, packed.ManifestEarliest), cfg,
@@ -3961,7 +3962,7 @@ func TestRepublishCopiedManifestIndexes_WritePlacementMatrix(t *testing.T) {
 					IndexVersion:          1,
 					NumRows:               4096,
 					IndexFileKeys:         []string{"source.bin"},
-					IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+					IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
 				}}})
 			require.NoError(t, err)
 
@@ -3977,10 +3978,11 @@ func TestRepublishCopiedManifestIndexes_WritePlacementMatrix(t *testing.T) {
 			}
 			indexInfos := map[int64]*datapb.VectorScalarIndexInfo{
 				888: {
-					IndexName:      "vec_idx",
-					BuildId:        888,
-					Version:        2,
-					IndexFilePaths: []string{filepath.Join(cfg.GetRootPath(), "index_v1/100/200/300/888/2/target.bin")},
+					IndexName:             "vec_idx",
+					IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+					BuildId:               888,
+					Version:               2,
+					IndexFilePaths:        []string{filepath.Join(basePath, "_index/888/2/target.bin")},
 				},
 			}
 
@@ -4063,7 +4065,7 @@ func TestRepublishCopiedManifestIndexes_LegacySourceStillRecordsIndexes(t *testi
 			IndexName:      "vec_idx",
 			BuildId:        888,
 			Version:        2,
-			IndexFilePaths: []string{"files/index/100/200/300/888/2/a"},
+			IndexFilePaths: []string{"files/insert_log/100/200/300/_index/888/2/a"},
 		},
 	}
 
@@ -4131,7 +4133,7 @@ func TestRepublishCopiedManifestIndexes_DropsEntriesAbsentFromShippedList(t *tes
 			IndexName:      "vec_idx",
 			BuildId:        888,
 			Version:        2,
-			IndexFilePaths: []string{"files/index/100/200/300/888/2/a"},
+			IndexFilePaths: []string{"files/insert_log/100/200/300/_index/888/2/a"},
 		},
 	}
 
@@ -4174,4 +4176,61 @@ func TestRepublishCopiedManifestIndexes_DropsEntriesAbsentFromShippedList(t *tes
 	assert.Equal(t, int64(777), gotIndexes[0].IndexID)
 	assert.Equal(t, int64(888), gotIndexes[0].BuildID)
 	assert.Equal(t, []int64{888}, publishedBuildIDs)
+}
+
+func TestGenerateTargetIndexPath_SegmentRooted(t *testing.T) {
+	source := &datapb.CopySegmentSource{CollectionId: 1, PartitionId: 2, SegmentId: 3, StorageVersion: storage.StorageV3}
+	target := &datapb.CopySegmentTarget{
+		CollectionId: 10, PartitionId: 20, SegmentId: 30, TargetRootPath: "target",
+		NewBuildIds: map[int64]int64{100: 200}, IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED.Enum(),
+	}
+	for _, tc := range []struct {
+		version indexpb.IndexStorePathVersion
+		path    string
+	}{
+		{0, "source/index_files/100/4/2/3/index.bin"},
+		{1, "source/index_v1/1/2/3/100/4/index.bin"},
+		{2, "source/insert_log/1/2/3/_index/100/4/index.bin"},
+	} {
+		got, err := generateTargetIndexPath(tc.path, source, target, IndexTypeVectorScalarV0, tc.version)
+		require.NoError(t, err)
+		require.Equal(t, "target/insert_log/10/20/30/_index/200/4/index.bin", got)
+		source.IndexFiles = []*indexpb.IndexFilePathInfo{{BuildID: 100, IndexStorePathVersion: tc.version, IndexFilePaths: []string{tc.path}}}
+		infos, _, _, err := buildIndexInfoFromSource(source, target, map[string]string{tc.path: got})
+		require.NoError(t, err)
+		require.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED, infos[200].GetIndexStorePathVersion())
+	}
+	_, err := generateTargetIndexPath("source/insert_log/1/2/3/_data/100/4/index.bin", source, target, IndexTypeVectorScalarV0, 2)
+	require.Error(t, err)
+	// An empty destination root addresses the bucket root, not the source root.
+	target.TargetRootPath = ""
+	got, err := generateTargetIndexPath("source/index_files/100/4/2/3/index.bin", source, target, IndexTypeVectorScalarV0, 0)
+	require.NoError(t, err)
+	require.Equal(t, "insert_log/10/20/30/_index/200/4/index.bin", got)
+
+	// v2 also carries collection/partition/segment IDs, but it is not v1.
+	// Converting it must keep the file offset after _index/build/version.
+	target.TargetRootPath = "target"
+	for _, tc := range []struct {
+		version indexpb.IndexStorePathVersion
+		want    string
+	}{
+		{0, "target/index_files/200/4/20/30/index.bin"},
+		{1, "target/index_v1/10/20/30/200/4/index.bin"},
+	} {
+		target.IndexStorePathVersion = tc.version.Enum()
+		got, err := generateTargetIndexPath("source/insert_log/1/2/3/_index/100/4/index.bin", source, target, IndexTypeVectorScalarV0, 2)
+		require.NoError(t, err)
+		require.Equal(t, tc.want, got)
+	}
+}
+
+func TestBuildTargetManifestIndexes_RejectsExternalPaths(t *testing.T) {
+	target := &datapb.CopySegmentTarget{TargetIndexes: []*datapb.CopySegmentTargetIndex{{IndexName: "idx", IndexId: 7}}}
+	_, err := buildTargetManifestIndexes(context.TODO(), packed.MarshalManifestPath("files/insert_log/1/2/3", 1), target, 100,
+		map[int64]*datapb.VectorScalarIndexInfo{5: {
+			IndexName: "idx", BuildId: 5, Version: 1,
+			IndexFilePaths: []string{"files/index_files/5/1/2/3/index.bin"},
+		}})
+	require.ErrorContains(t, err, "outside segment index directory")
 }
