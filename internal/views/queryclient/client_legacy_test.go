@@ -72,6 +72,7 @@ func TestLegacyClientPlainSearchUsesBatchWhenStreamingDisabled(t *testing.T) {
 }
 
 func TestLegacyClientSearchReducesIteratorVChannelStreams(t *testing.T) {
+	setupTestReplicaRouting(t)
 	collectionID := int64(100)
 	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	shardB := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_1_100v1"}
@@ -120,6 +121,7 @@ func TestLegacyClientSearchReducesIteratorVChannelStreams(t *testing.T) {
 }
 
 func TestLegacyClientPlainANNUsesStreamingWhenEnabled(t *testing.T) {
+	setupTestReplicaRouting(t)
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	queryNode := qviews.NewQueryNode(11)
 	client := NewLegacyViewQueryClient(
@@ -154,6 +156,7 @@ func TestLegacyClientPlainANNUsesStreamingWhenEnabled(t *testing.T) {
 }
 
 func TestLegacyClientGroupedSearchStreamingSwitch(t *testing.T) {
+	setupTestReplicaRouting(t)
 	for _, enabled := range []bool{false, true} {
 		t.Run(map[bool]string{false: "Batch", true: "Streaming"}[enabled], func(t *testing.T) {
 			shard := qviews.ShardID{ReplicaID: 1, VChannel: "grouped-search-vchannel"}
@@ -216,6 +219,7 @@ func TestLegacyClientGroupedSearchStreamingSwitch(t *testing.T) {
 }
 
 func TestLegacyClientIteratorSearchUsesBatchWhenStreamingDisabled(t *testing.T) {
+	setupTestReplicaRouting(t)
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	queryNode := qviews.NewQueryNode(11)
 	batchResult := newTestSearchChunk(1, []int64{10}, []float32{0.9})
@@ -250,6 +254,7 @@ func TestLegacyClientIteratorSearchUsesBatchWhenStreamingDisabled(t *testing.T) 
 }
 
 func TestLegacyClientSearchUsesBatchForUnsupportedIterator(t *testing.T) {
+	setupTestReplicaRouting(t)
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	queryNode := qviews.NewQueryNode(11)
 	batchResult := newTestSearchChunk(1, []int64{10}, []float32{0.9})
@@ -284,6 +289,7 @@ func TestLegacyClientSearchUsesBatchForUnsupportedIterator(t *testing.T) {
 }
 
 func TestLegacyClientSearchReturnsUnconsumedStream(t *testing.T) {
+	setupTestReplicaRouting(t)
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	queryNode := qviews.NewQueryNode(11)
 	childStream := &fakeSearchStream{recv: []fakeSearchStreamRecv{{err: errors.New("first receive failed")}}}
@@ -367,6 +373,7 @@ func TestLegacyClientQueryReturnsRawResults(t *testing.T) {
 }
 
 func TestLegacyClientQueryReducesIteratorVChannelStreams(t *testing.T) {
+	setupTestReplicaRouting(t)
 	collectionID := int64(100)
 	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	shardB := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_1_100v1"}
@@ -410,6 +417,7 @@ func TestLegacyClientQueryReducesIteratorVChannelStreams(t *testing.T) {
 }
 
 func TestLegacyClientQueryReducesBoundedOrdinaryVChannelStreams(t *testing.T) {
+	setupTestReplicaRouting(t)
 	collectionID := int64(100)
 	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	shardB := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_1_100v1"}
@@ -449,6 +457,7 @@ func TestLegacyClientQueryReducesBoundedOrdinaryVChannelStreams(t *testing.T) {
 }
 
 func TestLegacyClientElementFilterQueryStreamingParity(t *testing.T) {
+	setupTestReplicaRouting(t)
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
 		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
@@ -512,6 +521,7 @@ func TestLegacyClientElementFilterQueryStreamingParity(t *testing.T) {
 }
 
 func TestLegacyClientQueryReducesGroupedVChannelStreams(t *testing.T) {
+	setupTestReplicaRouting(t)
 	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	shardB := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_1_100v1"}
 	queryNode := qviews.NewQueryNode(11)
@@ -583,6 +593,7 @@ func TestLegacyClientQueryReducesGroupedVChannelStreams(t *testing.T) {
 }
 
 func TestLegacyClientQueryKeepsUnlimitedOrdinaryQueryOnBatchPath(t *testing.T) {
+	setupTestReplicaRouting(t)
 	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{}))
 	require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{Limit: 1}))
 	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{

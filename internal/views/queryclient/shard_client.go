@@ -2,6 +2,7 @@ package queryclient
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -133,75 +134,94 @@ func (s *shardViewQueryClient) SearchStreams(
 		return nil, nil, ctx.Err()
 	}
 
-	targetShardID := qviews.ShardID{ReplicaID: qviews.UnknownReplicaID, VChannel: req.VChannel}
-	planReq := &viewpb.GetQueryPlanRequest{
-		CollectionId: req.Req.GetCollectionID(),
-		ShardId:      targetShardID.IntoProto(),
-		PartitionIds: req.Req.GetPartitionIDs(),
-		Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{
-			LegacySearchRequest: req.Req,
-		},
-	}
-	plan, err := s.executeGetQueryPlan(ctx, targetShardID, planReq, &shardExecParams{
-		consistencyLevel: req.Req.GetConsistencyLevel(),
-		mvcc:             req.MVCC,
-		barrierMVCC:      req.BarrierMVCC,
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	if err := qviews.RestoreQueryPlanPayloads(plan, planReq); err != nil {
-		return nil, nil, err
-	}
 	requests := []*internalpb.SearchRequest{req.Req}
-	plannedRequests := []*internalpb.SearchRequest{plan.GetLegacySearchRequest()}
+	var err error
 	if req.Req.GetIsAdvanced() {
 		requests, err = viewquery.BuildSubSearchRequests(req.Req)
 		if err != nil {
 			return nil, nil, err
 		}
-		plannedRequests, err = viewquery.BuildSubSearchRequests(plan.GetLegacySearchRequest())
-		if err != nil {
-			return nil, nil, err
-		}
-		if len(requests) != len(plannedRequests) {
-			return nil, nil, merr.WrapErrServiceInternalMsg("Hybrid QueryPlan changed the sub-search count")
-		}
 	}
-
-	shardID := qviews.FromProtoShardID(plan.ShardId)
-	workNodes := workNodesFromPlan(plan)
+	children := make([][]searchutil.ReduceStream, len(requests))
+	var mu sync.Mutex
+	var plannedRequests []*internalpb.SearchRequest
+	plan, err := s.executeShard(ctx, req.VChannel, &shardExecParams{
+		collectionID:     req.Req.GetCollectionID(),
+		consistencyLevel: req.Req.GetConsistencyLevel(),
+		mvcc:             req.MVCC,
+		barrierMVCC:      req.BarrierMVCC,
+		buildPlanReq: func(shardID qviews.ShardID) *viewpb.GetQueryPlanRequest {
+			return &viewpb.GetQueryPlanRequest{
+				CollectionId: req.Req.GetCollectionID(), ShardId: shardID.IntoProto(), PartitionIds: req.Req.GetPartitionIDs(),
+				Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: req.Req},
+			}
+		},
+		consumeResponse: func(response *viewpb.GetQueryPlanResponse) error {
+			plannedRequests = []*internalpb.SearchRequest{response.GetPlan().GetLegacySearchRequest()}
+			if req.Req.GetIsAdvanced() {
+				var err error
+				plannedRequests, err = viewquery.BuildSubSearchRequests(response.GetPlan().GetLegacySearchRequest())
+				if err != nil {
+					return err
+				}
+			}
+			if len(requests) != len(plannedRequests) {
+				return merr.WrapErrServiceInternalMsg("Hybrid QueryPlan changed the sub-search count")
+			}
+			return nil
+		},
+		dispatchNode: func(_ context.Context, node qviews.WorkNode, plan *viewpb.QueryPlan, shardID qviews.ShardID) error {
+			selection := qviews.WorkNodeSelection(plan, node)
+			for index, plannedRequest := range plannedRequests {
+				if req.Req.GetIsAdvanced() && plan.GetLegacySearchRequest().GetSubReqs()[index].GetSkip() {
+					continue
+				}
+				segmentSelection := selection.GetSegmentSelection()
+				if req.Req.GetIsAdvanced() && len(selection.GetSubSelections()) > 0 {
+					if len(selection.GetSubSelections()) != len(requests) {
+						return merr.WrapErrServiceInternalMsg("Hybrid QueryPlan changed the sub-selection count")
+					}
+					segmentSelection = selection.GetSubSelections()[index]
+				}
+				workerRequest := proto.Clone(plannedRequest).(*internalpb.SearchRequest)
+				workerRequest.MvccTimestamp = legacyMVCCForNode(plan.GetMvcc(), node)
+				// Streams outlive fanOutToWorkNodes, whose dispatch context ends after opening.
+				stream, err := s.queryServiceClient.SearchOnViewStream(ctx, node, &viewpb.SearchOnViewRequest{
+					LegacyReq: workerRequest, SegmentSelection: segmentSelection, ShardId: shardID.IntoProto(),
+					Version: plan.Version, Mvcc: plan.GetMvcc(), StreamChunkBytes: int64(chunkBytes),
+				})
+				if err != nil {
+					return err
+				}
+				if stream == nil {
+					return merr.WrapErrServiceInternalMsg("SearchOnViewStream returned a nil stream for work node %s", node.String())
+				}
+				mu.Lock()
+				children[index] = append(children[index], stream)
+				mu.Unlock()
+			}
+			return nil
+		},
+		resetShard: func(qviews.ShardID) {
+			for index, streams := range children {
+				for _, stream := range streams {
+					stream.Close()
+				}
+				children[index] = nil
+			}
+		},
+	})
 	streams := make([]searchutil.ReduceStream, 0, len(requests))
 	for index, request := range requests {
-		childStreams := make([]searchutil.ReduceStream, 0, len(workNodes))
-		skipped := req.Req.GetIsAdvanced() && plan.GetLegacySearchRequest().GetSubReqs()[index].GetSkip()
-		for _, node := range workNodes {
-			if skipped {
-				break
-			}
-			workerRequest := proto.Clone(plannedRequests[index]).(*internalpb.SearchRequest)
-			workerRequest.MvccTimestamp = legacyMVCCForNode(plan.GetMvcc(), node)
-			childStream, openErr := s.queryServiceClient.SearchOnViewStream(ctx, node, &viewpb.SearchOnViewRequest{
-				LegacyReq: workerRequest, ShardId: shardID.IntoProto(),
-				Version: plan.Version, Mvcc: plan.GetMvcc(), StreamChunkBytes: int64(chunkBytes),
-			})
-			if openErr != nil {
-				err = openErr
-				break
-			}
-			if childStream == nil {
-				err = merr.WrapErrServiceInternalMsg("SearchOnViewStream returned a nil stream for work node %s", node.String())
-				break
-			}
-			childStreams = append(childStreams, childStream)
-		}
 		var reducedStream searchutil.ReduceStream
 		if err == nil {
-			reducedStream, err = searchutil.NewShardReduceStream(request, childStreams, chunkBytes)
+			reducedStream, err = searchutil.NewShardReduceStream(request, children[index], chunkBytes)
 		}
 		if err != nil {
-			for _, childStream := range childStreams {
-				err = errors.Join(err, childStream.Close())
+			for _, childStreams := range children {
+				for _, childStream := range childStreams {
+					err = errors.Join(err, childStream.Close())
+				}
 			}
 			for _, stream := range streams {
 				err = errors.Join(err, stream.Close())
@@ -211,12 +231,7 @@ func (s *shardViewQueryClient) SearchStreams(
 		streams = append(streams, reducedStream)
 	}
 
-	return streams, &ShardPlan{
-		ShardID:   shardID,
-		Version:   plan.Version,
-		Mvcc:      plan.GetMvcc(),
-		WorkNodes: workNodes,
-	}, nil
+	return streams, plan, nil
 }
 
 // Query executes Phase 1 + Phase 2 for a single shard's query (retrieve).
@@ -272,68 +287,54 @@ func (s *shardViewQueryClient) QueryStream(
 	if ctx.Err() != nil {
 		return nil, nil, ctx.Err()
 	}
-	targetShardID := qviews.ShardID{ReplicaID: qviews.UnknownReplicaID, VChannel: req.VChannel}
-	planReq := &viewpb.GetQueryPlanRequest{
-		CollectionId: req.Req.GetCollectionID(),
-		ShardId:      targetShardID.IntoProto(),
-		PartitionIds: req.Req.GetPartitionIDs(),
-		Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{
-			LegacyRetrieveRequest: req.Req,
-		},
-	}
-	plan, err := s.executeGetQueryPlan(ctx, targetShardID, planReq, &shardExecParams{
+	var children []queryutil.ReduceStream
+	var mu sync.Mutex
+	plan, err := s.executeShard(ctx, req.VChannel, &shardExecParams{
+		collectionID:     req.Req.GetCollectionID(),
 		consistencyLevel: req.Req.GetConsistencyLevel(),
 		mvcc:             req.MVCC,
 		barrierMVCC:      req.BarrierMVCC,
+		buildPlanReq: func(shardID qviews.ShardID) *viewpb.GetQueryPlanRequest {
+			return &viewpb.GetQueryPlanRequest{
+				CollectionId: req.Req.GetCollectionID(), ShardId: shardID.IntoProto(), PartitionIds: req.Req.GetPartitionIDs(),
+				Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: req.Req},
+			}
+		},
+		dispatchNode: func(_ context.Context, node qviews.WorkNode, plan *viewpb.QueryPlan, shardID qviews.ShardID) error {
+			// Retain the request context after the stream-opening fan-out completes.
+			stream, err := s.queryServiceClient.QueryOnViewStream(ctx, node, &viewpb.QueryOnViewRequest{
+				LegacyReq: legacyRetrieveRequestForNode(plan, node), SegmentSelection: qviews.WorkNodeSelection(plan, node).GetSegmentSelection(),
+				ShardId: shardID.IntoProto(), Version: plan.Version, Mvcc: plan.GetMvcc(), StreamChunkBytes: int64(chunkBytes),
+			})
+			if err != nil {
+				return err
+			}
+			if stream == nil {
+				return merr.WrapErrServiceInternalMsg("QueryOnViewStream returned a nil stream for work node %s", node.String())
+			}
+			mu.Lock()
+			children = append(children, stream)
+			mu.Unlock()
+			return nil
+		},
+		resetShard: func(qviews.ShardID) {
+			for _, stream := range children {
+				stream.Close()
+			}
+			children = nil
+		},
 	})
-	if err != nil {
-		return nil, nil, err
-	}
-	if err := qviews.RestoreQueryPlanPayloads(plan, planReq); err != nil {
-		return nil, nil, err
-	}
-
-	shardID := qviews.FromProtoShardID(plan.ShardId)
-	workNodes := workNodesFromPlan(plan)
-	childStreams := make([]queryutil.ReduceStream, 0, len(workNodes))
-	for _, node := range workNodes {
-		childStream, openErr := s.queryServiceClient.QueryOnViewStream(ctx, node, &viewpb.QueryOnViewRequest{
-			LegacyReq:        legacyRetrieveRequestForNode(plan, node),
-			ShardId:          shardID.IntoProto(),
-			Version:          plan.Version,
-			Mvcc:             plan.GetMvcc(),
-			StreamChunkBytes: int64(chunkBytes),
-		})
-		if openErr != nil {
-			err = openErr
-			break
-		}
-		if childStream == nil {
-			err = merr.WrapErrServiceInternalMsg("QueryOnViewStream returned a nil stream for work node %s", node.String())
-			break
-		}
-		childStreams = append(childStreams, childStream)
+	var reducedStream queryutil.ReduceStream
+	if err == nil {
+		reducedStream, err = queryutil.NewShardReduceStream(req.Req, req.Schema, children, chunkBytes)
 	}
 	if err != nil {
-		for _, childStream := range childStreams {
+		for _, childStream := range children {
 			err = errors.Join(err, childStream.Close())
 		}
 		return nil, nil, err
 	}
-
-	reducedStream, err := queryutil.NewShardReduceStream(req.Req, req.Schema, childStreams, chunkBytes)
-	if err != nil {
-		for _, childStream := range childStreams {
-			err = errors.Join(err, childStream.Close())
-		}
-		return nil, nil, err
-	}
-	return reducedStream, &ShardPlan{
-		ShardID:   shardID,
-		Version:   plan.Version,
-		Mvcc:      plan.GetMvcc(),
-		WorkNodes: workNodes,
-	}, nil
+	return reducedStream, plan, nil
 }
 
 // ============================================================================

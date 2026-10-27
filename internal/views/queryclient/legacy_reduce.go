@@ -42,7 +42,7 @@ func (c *legacyQueryCollector) Reduce(ctx context.Context, req *LegacyQueryReque
 			}
 			result.CostAggregation = mergeLegacyCosts(costs)
 		}
-		result.FeatureBits |= executionSummaryFeatureBits(plan.ExecutionSummary)
+		result.FeatureBits |= ExecutionSummaryFeatureBits(plan.ExecutionSummary)
 		result.MvccTimestamp = max(plan.Mvcc.GetGrowingTimetick(), plan.Mvcc.GetTransformingTimetick())
 		results = append(results, result)
 	}
@@ -64,7 +64,7 @@ func (c *legacySearchCollector) Reduce(ctx context.Context, req *internalpb.Sear
 		if err != nil {
 			return nil, err
 		}
-		result.FeatureBits |= executionSummaryFeatureBits(plan.ExecutionSummary)
+		result.FeatureBits |= ExecutionSummaryFeatureBits(plan.ExecutionSummary)
 		result.ChannelsMvcc = map[string]uint64{plan.ShardID.VChannel: max(plan.Mvcc.GetGrowingTimetick(), plan.Mvcc.GetTransformingTimetick())}
 		results = append(results, result)
 	}
@@ -140,9 +140,9 @@ func mergeLegacyCosts(costs []*internalpb.CostAggregation) *internalpb.CostAggre
 	return result
 }
 
-// Metrics own their bit allocation. Only known statistics-pruning facts map to
+// ExecutionSummaryFeatureBits maps known statistics-pruning facts to
 // SegmentPrune usage; partition filtering and unknown summary bits do not.
-func executionSummaryFeatureBits(summary *viewpb.ExecutionSummary) uint64 {
+func ExecutionSummaryFeatureBits(summary *viewpb.ExecutionSummary) uint64 {
 	const pruningMask uint32 = 1<<viewpb.GlobalOptimizerExecutionSummary_PrunedByScalarFiltering | 1<<viewpb.GlobalOptimizerExecutionSummary_PrunedByVectorFiltering
 	if summary.GetGlobalOptimizer().GetFlags()&pruningMask != 0 {
 		bit, _ := featureusage.ExecBit(featureusage.FeatureSegmentPrune)
