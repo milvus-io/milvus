@@ -94,6 +94,12 @@ def pytest_addoption(parser):
         help="Kubernetes namespace for Milvus deployment",
     )
     parser.addoption(
+        "--upstream-milvus-name",
+        action="store",
+        default="",
+        help="Upstream Milvus CR/release name for CDC stability Pod readiness checks",
+    )
+    parser.addoption(
         "--import-2pc-workload",
         action="store",
         default="true",
@@ -144,6 +150,14 @@ def _minio_endpoint(host):
     if ":" in host:
         return host
     return f"{host}:9000"
+
+
+@pytest.fixture(scope="session")
+def upstream_milvus_name(request):
+    name = request.config.getoption("--upstream-milvus-name")
+    if not name:
+        raise pytest.UsageError("CDC stability tests require --upstream-milvus-name for Pod readiness checks")
+    return name
 
 
 @pytest.fixture(scope="session")

@@ -251,6 +251,19 @@ The multi-replica case additionally needs two primary query nodes and, when
 StreamingNodes host replica delegators, two primary StreamingNodes. Missing
 capacity is reported as a skip, not a pass.
 
+CDC test operations and state checks use `MilvusClient`, including replica and
+file-resource inspection. CDC fixtures, stability workloads and the comparison
+script do not register ORM connections or use `MilvusSys`. Stability runs must
+pass `--upstream-milvus-name <Milvus-CR-or-release-name>` for Kubernetes Pod
+readiness checks; the CDC cluster ID is not assumed to be the release name.
+
+Protocol-only coverage uses the authenticated client channel when PyMilvus
+3.1.0rc98 has no public wrapper: unsupported namespace/prewarm RPCs, manifest
+updates, RBAC backup/restore, phrase slop, telemetry commands, snapshot
+export/external restore, and schema requests the public wrappers cannot express.
+Import jobs use the SDK bulk-import helpers and the import REST endpoints;
+collection and row checks use `MilvusClient`.
+
 | File | Contracts checked |
 | --- | --- |
 | `test_api_mutations.py` | Add/drop scalar and struct fields; function/output-index lifecycle; rejected legacy Function calls; truncate; partial update; field/index properties; secondary write rejection; FlushAll |
