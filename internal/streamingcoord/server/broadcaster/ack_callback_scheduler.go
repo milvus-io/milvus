@@ -248,6 +248,15 @@ func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx contex
 	// broadcastScheduler handles WAL append with retry; AddTask blocks until the task
 	// reaches tombstone (broadcast → ack → callback → tombstone).
 	for _, task := range incompleteTasks {
+		if s.bm.isRecordedComplete(ctx, task) {
+			// Re-driving it would append its missing replicas into vchannels its
+			// completed broadcast has since retired, which refuse them forever,
+			// and AddTask would never return.
+			s.Logger().Warn(ctx, "skip an incomplete task whose broadcast is on record as completed on this cluster",
+				mlog.FieldBroadcastID(task.Header().BroadcastID),
+				mlog.String("messageType", task.msg.MessageType().String()))
+			continue
+		}
 		pending := newPendingBroadcastTask(task)
 		if pending == nil {
 			continue // no pending messages for this task
