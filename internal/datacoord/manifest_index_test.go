@@ -59,10 +59,9 @@ func TestManifestIndexLegacyBaseRoundTrip(t *testing.T) {
 		t.Run(suffix, func(t *testing.T) {
 			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
 			base := cfg.RootPath + "/" + suffix
-			segment := &datapb.SegmentInfo{ID: 3, CollectionID: 1, PartitionID: 2}
-			version := packed.ManifestEarliest
+			segment := &datapb.SegmentInfo{ID: 3, CollectionID: 1, PartitionID: 2, ManifestPath: packed.MarshalManifestPath(base, packed.ManifestEarliest)}
 			for _, buildID := range []int64{100, 200} {
-				manifest, err := packed.CommitManifestUpdates(base, version, cfg, &packed.ManifestUpdates{
+				manifest, err := packed.CommitManifestUpdates(segment.ManifestPath, cfg, &packed.ManifestUpdates{
 					Indexes: []packed.ManifestIndexInfo{{
 						ColumnName: "vector", IndexName: "index", IndexType: "HNSW",
 						Path: fmt.Sprintf("%d/1", buildID), IndexID: buildID, BuildID: buildID,
@@ -72,8 +71,6 @@ func TestManifestIndexLegacyBaseRoundTrip(t *testing.T) {
 				})
 				require.NoError(t, err)
 				segment.ManifestPath = manifest
-				_, version, err = packed.UnmarshalManifestPath(manifest)
-				require.NoError(t, err)
 				entries, err := packed.GetManifestIndexInfos(manifest, cfg)
 				require.NoError(t, err)
 				require.Len(t, entries, int(buildID/100))
