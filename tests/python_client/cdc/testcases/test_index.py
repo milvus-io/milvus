@@ -9,9 +9,10 @@ import pytest
 from common.common_type import CaseLabel
 
 from .base import TestCDCSyncBase, logger
+from .contract_helpers import assert_index_sync
 
 
-@pytest.mark.tags(CaseLabel.CDC)
+@pytest.mark.tags(CaseLabel.CDC, CaseLabel.L3)
 class TestCDCSyncIndex(TestCDCSyncBase):
     """Test CDC sync for index operations."""
 
@@ -120,7 +121,7 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                 downstream_indexes = downstream_client.list_indexes(collection_name)
                 return len(downstream_indexes) == 0
             except Exception:
-                return True  # If error, assume index is dropped
+                return False  # A failed read does not prove deletion.
 
         assert self.wait_for_sync(check_drop, sync_timeout, f"drop index on {collection_name}")
 
@@ -253,28 +254,10 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                     )
                     upstream_client.create_index(collection_name, index_params)
 
-                    # Wait for index creation to sync
-                    def check_index():
-                        try:
-                            downstream_indexes = downstream_client.list_indexes(collection_name)
-                            return len(downstream_indexes) > 0
-                        except Exception:
-                            return False
-
-                    assert self.wait_for_sync(
-                        check_index,
-                        sync_timeout,
-                        f"create {index_test['index_type']} index on {collection_name}",
+                    assert_index_sync(
+                        upstream_client, downstream_client, collection_name,
+                        test_case["field_name"], sync_timeout,
                     )
-
-                    # Verify index details
-                    try:
-                        index_info = downstream_client.describe_index(collection_name, test_case["field_name"])
-                        logger.info(
-                            f"[INDEX_VERIFICATION] {index_test['index_type']} index created successfully: {index_info}"
-                        )
-                    except Exception as e:
-                        logger.warning(f"Failed to verify {index_test['index_type']} index details: {e}")
 
                 except Exception as e:
                     logger.error(
@@ -420,28 +403,10 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                         )
                     upstream_client.create_index(collection_name, index_params)
 
-                    # Wait for index creation to sync
-                    def check_index():
-                        try:
-                            downstream_indexes = downstream_client.list_indexes(collection_name)
-                            return len(downstream_indexes) > 0
-                        except Exception:
-                            return False
-
-                    assert self.wait_for_sync(
-                        check_index,
-                        sync_timeout,
-                        f"create {index_test['index_type']} index on {collection_name}",
+                    assert_index_sync(
+                        upstream_client, downstream_client, collection_name,
+                        test_case["field_name"], sync_timeout,
                     )
-
-                    # Verify index details
-                    try:
-                        index_info = downstream_client.describe_index(collection_name, test_case["field_name"])
-                        logger.info(
-                            f"[SCALAR_INDEX_VERIFICATION] {index_test['index_type']} index created successfully: {index_info}"
-                        )
-                    except Exception as e:
-                        logger.warning(f"Failed to verify {index_test['index_type']} scalar index details: {e}")
 
                 except Exception as e:
                     logger.error(
@@ -651,30 +616,10 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                     )
                     upstream_client.create_index(collection_name, index_params)
 
-                    # Wait for index creation to sync
-                    def check_index():
-                        try:
-                            downstream_indexes = downstream_client.list_indexes(collection_name)
-                            return len(downstream_indexes) > 0
-                        except Exception:
-                            return False
-
-                    assert self.wait_for_sync(
-                        check_index,
-                        sync_timeout,
-                        f"create {index_test['index_type']} index on {collection_name}",
+                    assert_index_sync(
+                        upstream_client, downstream_client, collection_name,
+                        test_case["field_name"], sync_timeout,
                     )
-
-                    # Verify index details
-                    try:
-                        index_info = downstream_client.describe_index(collection_name, test_case["field_name"])
-                        logger.info(
-                            f"[{test_case['field_type']}_INDEX_VERIFICATION] {index_test['index_type']} index created successfully: {index_info}"
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to verify {index_test['index_type']} {test_case['field_type']} index details: {e}"
-                        )
 
                 except Exception as e:
                     logger.error(

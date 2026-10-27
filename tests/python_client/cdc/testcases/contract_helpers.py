@@ -47,6 +47,7 @@ def assert_index_sync(upstream, downstream, name, field_name, timeout):
     def check():
         for index, definition in expected.items():
             actual = downstream.describe_index(name, index)
+            assert actual is not None, f"Index {index} has not reached the target"
             assert logical_index(actual) == definition, (definition, actual)
             assert actual["state"] == "Finished", actual
 
