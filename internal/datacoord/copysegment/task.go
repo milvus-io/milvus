@@ -39,7 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
+	snapshotadapter "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	snapshotstorage "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
@@ -1653,9 +1654,9 @@ func loadCopySnapshotWithSegments(ctx context.Context, job CopySegmentJob, snaps
 		var loaded *snapshotstorage.SnapshotData
 		var err error
 		if job.GetExternal() {
-			resolved, resolveErr := snapshotstorage.ResolveForeignStorage(
+			resolved, resolveErr := snapshotadapter.ResolveForeignStorage(
 				ctx,
-				snapshotstorage.InstanceConfigFromParamtable(Params),
+				snapshotadapter.InstanceConfigFromParamtable(Params),
 				snapshotstorage.DirectionRestore,
 				job.GetSnapshotS3Location(),
 				job.GetExternalSpec(),

@@ -38,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/snapshotio"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -50,6 +49,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	sharedsnapshot "github.com/milvus-io/milvus/pkg/v3/snapshotio"
+	snapshotio "github.com/milvus-io/milvus/pkg/v3/snapshotio/format"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -222,7 +223,7 @@ func TestSnapshotReaderFactoryConcurrentResolution(t *testing.T) {
 			original := proto.Clone(file)
 			entered, release := make(chan struct{}), make(chan struct{})
 			var resolutions, opens atomic.Int64
-			resolve := mockey.Mock(snapshotstorage.ResolveSnapshotReadStorage).To(func(ctx context.Context, _ *objectstorage.Config, uri, spec string) (*snapshotstorage.ResolvedForeignStorage, error) {
+			resolve := mockey.Mock(snapshotstorage.ResolveSnapshotReadStorage).To(func(ctx context.Context, _ *objectstorage.Config, uri, spec string) (*sharedsnapshot.ResolvedForeignStorage, error) {
 				assert.Same(t, taskCtx, ctx, "the initializing file must not own the shared client context")
 				assert.Equal(t, options[3].Value, uri)
 				assert.Equal(t, options[2].Value, spec)
@@ -230,7 +231,7 @@ func TestSnapshotReaderFactoryConcurrentResolution(t *testing.T) {
 					close(entered)
 				}
 				<-release
-				return &snapshotstorage.ResolvedForeignStorage{ForeignCM: sourceCM, ForeignStorageConfig: foreign}, nil
+				return &sharedsnapshot.ResolvedForeignStorage{ForeignCM: sourceCM, ForeignStorageConfig: foreign}, nil
 			}).Build()
 			defer resolve.UnPatch()
 			checkReader := func(ctx context.Context, cm storage.ChunkManager, cfg *indexpb.StorageConfig, source *internalpb.SnapshotImportSource) {
@@ -402,7 +403,7 @@ func TestSnapshotReaderFactoryFailureAndRetry(t *testing.T) {
 	file := &internalpb.ImportFile{SnapshotSource: &internalpb.SnapshotImportSource{Version: 2, ManifestPath: packed.MarshalManifestPath("root/data/1", 7)}}
 	ctx := context.Background()
 	var resolutions int
-	resolve := mockey.Mock(snapshotstorage.ResolveSnapshotReadStorage).To(func(context.Context, *objectstorage.Config, string, string) (*snapshotstorage.ResolvedForeignStorage, error) {
+	resolve := mockey.Mock(snapshotstorage.ResolveSnapshotReadStorage).To(func(context.Context, *objectstorage.Config, string, string) (*sharedsnapshot.ResolvedForeignStorage, error) {
 		resolutions++
 		return nil, merr.ErrIoPermissionDenied
 	}).Build()
@@ -425,9 +426,9 @@ func TestSnapshotReaderFactoryFailureAndRetry(t *testing.T) {
 		require.ErrorIs(t, err, merr.ErrIoPermissionDenied)
 	}
 	require.Equal(t, 1, resolutions, "a failed attempt must not create a client per file")
-	resolve.To(func(context.Context, *objectstorage.Config, string, string) (*snapshotstorage.ResolvedForeignStorage, error) {
+	resolve.To(func(context.Context, *objectstorage.Config, string, string) (*sharedsnapshot.ResolvedForeignStorage, error) {
 		resolutions++
-		return &snapshotstorage.ResolvedForeignStorage{ForeignCM: storage.NewLocalChunkManager()}, nil
+		return &sharedsnapshot.ResolvedForeignStorage{ForeignCM: storage.NewLocalChunkManager()}, nil
 	})
 	reader := mockey.Mock(binlog.NewStorageV3ManifestReader).Return(nil, io.EOF).Build()
 	defer reader.UnPatch()
@@ -441,7 +442,7 @@ func TestSnapshotReaderFactoryFailureAndRetry(t *testing.T) {
 	taskCtx, stopTask := context.WithCancel(ctx)
 	defer stopTask()
 	entered := make(chan struct{})
-	resolve.To(func(ctx context.Context, _ *objectstorage.Config, _, _ string) (*snapshotstorage.ResolvedForeignStorage, error) {
+	resolve.To(func(ctx context.Context, _ *objectstorage.Config, _, _ string) (*sharedsnapshot.ResolvedForeignStorage, error) {
 		close(entered)
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -527,7 +528,7 @@ func TestSnapshotReaderFactoryReaderIsolation(t *testing.T) {
 		{Key: ExternalSpec, Value: `{"extfs":{"region":"us-east-1"}}`},
 		{Key: SnapshotSourceURI, Value: "s3://source/root/snapshots/1/metadata/2.json"},
 	}
-	resolve := mockey.Mock(snapshotstorage.ResolveSnapshotReadStorage).Return(&snapshotstorage.ResolvedForeignStorage{ForeignCM: storage.NewLocalChunkManager(), ForeignStorageConfig: &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}}, nil).Build()
+	resolve := mockey.Mock(snapshotstorage.ResolveSnapshotReadStorage).Return(&sharedsnapshot.ResolvedForeignStorage{ForeignCM: storage.NewLocalChunkManager(), ForeignStorageConfig: &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}}, nil).Build()
 	defer resolve.UnPatch()
 	var owners []*ownedRecordReader
 	manifest := mockey.Mock(storage.NewManifestRecordReader).To(func(ctx context.Context, _ string, _ *schemapb.CollectionSchema, _ ...storage.RwOption) (storage.RecordReader, error) {
@@ -597,7 +598,7 @@ func TestSnapshotSharedL0StorageAndReader(t *testing.T) {
 		{Key: ExternalSpec, Value: `{"extfs":{"region":"us-east-1"}}`},
 		{Key: SnapshotSourceURI, Value: "s3://source/root/snapshots/1/metadata/2.json"},
 	}
-	resolve := mockey.Mock(snapshotstorage.ResolveSnapshotReadStorage).Return(&snapshotstorage.ResolvedForeignStorage{ForeignCM: cm, ForeignStorageConfig: foreign}, nil).Build()
+	resolve := mockey.Mock(snapshotstorage.ResolveSnapshotReadStorage).Return(&sharedsnapshot.ResolvedForeignStorage{ForeignCM: cm, ForeignStorageConfig: foreign}, nil).Build()
 	defer resolve.UnPatch()
 	input := &internalpb.SnapshotImportL0Source{SourceChannel: "source", SourcePartitionId: 10}
 	factory := NewReaderFactory(ctx, cm, target, options)
@@ -667,6 +668,19 @@ func TestSnapshotSharedL0StorageAndReader(t *testing.T) {
 	require.Equal(t, "target", target.BucketName)
 }
 
+func TestResolveSnapshotImportStorageRequiresFullChunkManager(t *testing.T) {
+	paramtable.Init()
+	resolved := &sharedsnapshot.ResolvedForeignStorage{ForeignCM: &struct{ sharedsnapshot.ChunkManager }{}}
+	patch := mockey.Mock(snapshotstorage.ResolveSnapshotReadStorage).Return(resolved, nil).Build()
+	defer patch.UnPatch()
+	_, _, err := ResolveSnapshotImportStorage(context.Background(), nil, nil, "s3://source/root/snapshots/1/metadata/2.json", Options{
+		{Key: BackupFlag, Value: "true"},
+		{Key: SourceType, Value: SourceTypeSnapshot},
+		{Key: ExternalSpec, Value: `{"extfs":{"region":"us-east-1"}}`},
+	})
+	require.ErrorContains(t, err, "requires a full chunk manager")
+}
+
 func TestImportNewReader_ExternalSnapshotStorage(t *testing.T) {
 	paramtable.Init()
 	targetCM := storage.NewLocalChunkManager()
@@ -690,10 +704,10 @@ func TestImportNewReader_ExternalSnapshotStorage(t *testing.T) {
 	var resolveErr error
 	resolve := mockey.Mock(snapshotstorage.ResolveSnapshotReadStorage).To(func(ctx context.Context, _ *objectstorage.Config,
 		uri, spec string,
-	) (*snapshotstorage.ResolvedForeignStorage, error) {
+	) (*sharedsnapshot.ResolvedForeignStorage, error) {
 		require.Equal(t, options[3].Value, uri)
 		require.Equal(t, options[2].Value, spec)
-		return &snapshotstorage.ResolvedForeignStorage{ForeignCM: sourceCM, ForeignStorageConfig: sourceConfig}, resolveErr
+		return &sharedsnapshot.ResolvedForeignStorage{ForeignCM: sourceCM, ForeignStorageConfig: sourceConfig}, resolveErr
 	}).Build()
 	defer resolve.UnPatch()
 	reads := 0
@@ -1503,7 +1517,7 @@ func TestSnapshotV2ReaderFactoryDispatch(t *testing.T) {
 			if mode == "avro_failure" {
 				readErr = merr.ErrIoPermissionDenied
 			}
-			avro := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSegmentManifest).Return(segment, readErr).Build()
+			avro := mockey.Mock((*sharedsnapshot.SnapshotReader).ReadSegmentManifest).Return(segment, readErr).Build()
 			defer avro.UnPatch()
 			v2 := mockey.Mock(binlog.NewStorageV2SnapshotReader).When(func(_ context.Context, gotCM storage.ChunkManager, _ *schemapb.CollectionSchema,
 				gotCfg *indexpb.StorageConfig, gotSegment *datapb.SegmentDescription, _, _ uint64, _ int, _ binlog.SourceEncryption,
@@ -1575,7 +1589,7 @@ func TestSnapshotV2FactoryPreparesMixedDeletes(t *testing.T) {
 	v3 := &internalpb.SnapshotImportSource{Version: 14, SourceChannel: "source", SourcePartitionId: 10, ManifestPath: packed.MarshalManifestPath("root/data", 1)}
 	files := []*internalpb.ImportFile{{SnapshotSource: v2}, {SnapshotSource: v3}}
 	l0 := &internalpb.SnapshotImportL0Source{SourceChannel: "source", SourcePartitionId: 10}
-	avro := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSegmentManifest).Return(&datapb.SegmentDescription{
+	avro := mockey.Mock((*sharedsnapshot.SnapshotReader).ReadSegmentManifest).Return(&datapb.SegmentDescription{
 		SegmentId: 20, StorageVersion: storage.StorageV2, SegmentLevel: datapb.SegmentLevel_L1, ChannelName: "source", PartitionId: 10,
 	}, nil).Build()
 	defer avro.UnPatch()

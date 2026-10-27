@@ -26,13 +26,13 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
-	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	sharedsnapshot "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -199,7 +199,7 @@ func (c *Callbacks) StartExternalRestoreSnapshotLock(
 
 // ValidateRestoreSnapshotResources validates that all required resources exist for restore.
 // This includes snapshot, collection, partitions, and indexes.
-func (c *Callbacks) ValidateRestoreSnapshotResources(ctx context.Context, collectionID int64, snapshotData *snapshotstorage.SnapshotData) error {
+func (c *Callbacks) ValidateRestoreSnapshotResources(ctx context.Context, collectionID int64, snapshotData *sharedsnapshot.SnapshotData) error {
 	log := mlog.With(mlog.FieldCollectionID(collectionID))
 
 	// ========== Validate Snapshot Exists ==========
@@ -217,7 +217,7 @@ func (c *Callbacks) ValidateRestoreSnapshotResources(ctx context.Context, collec
 }
 
 // ValidateRestoredCollectionResources validates that the collection, partitions, and indexes of snapshotData exist in collectionID.
-func (c *Callbacks) ValidateRestoredCollectionResources(ctx context.Context, collectionID int64, snapshotData *snapshotstorage.SnapshotData) error {
+func (c *Callbacks) ValidateRestoredCollectionResources(ctx context.Context, collectionID int64, snapshotData *sharedsnapshot.SnapshotData) error {
 	logger := mlog.With(mlog.Int64("collectionID", collectionID))
 
 	// ========== Validate Collection Exists ==========

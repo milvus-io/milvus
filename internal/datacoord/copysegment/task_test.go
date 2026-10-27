@@ -46,7 +46,7 @@ import (
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
+	snapshotadapter "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -55,6 +55,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	snapshotstorage "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -1789,7 +1790,7 @@ func TestAssembleCopySegmentRequest_ExternalSnapshotCarriesForeignSpecAndRef(t *
 
 	sm := &snapshotReadTarget{}
 	sourceCM := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
-	mockResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).To(
+	mockResolve := mockey.Mock(snapshotadapter.ResolveForeignStorage).To(
 		func(
 			_ context.Context,
 			_ *objectstorage.Config,
@@ -1807,7 +1808,7 @@ func TestAssembleCopySegmentRequest_ExternalSnapshotCarriesForeignSpecAndRef(t *
 		}).Build()
 	defer mockResolve.UnPatch()
 	mockReadExternal := mockey.Mock((*snapshotReadTarget).ReadExternalSnapshotDataWithChunkManager).To(
-		func(_ *snapshotReadTarget, _ context.Context, gotCM storage.ChunkManager, snapshotS3Location string, includeSegments bool) (*snapshotstorage.SnapshotData, error) {
+		func(_ *snapshotReadTarget, _ context.Context, gotCM snapshotstorage.ChunkManager, snapshotS3Location string, includeSegments bool) (*snapshotstorage.SnapshotData, error) {
 			assert.Same(t, sourceCM, gotCM)
 			assert.Equal(t, "s3://bucket/source-root/snapshots/100/metadata/1.json", snapshotS3Location)
 			assert.True(t, includeSegments)
@@ -1908,7 +1909,7 @@ func TestAssembleCopySegmentRequest_ExternalSnapshotFingerprint(t *testing.T) {
 	t.Run("recovered snapshot mismatch is rejected", func(t *testing.T) {
 		snapshotData := newSnapshot()
 		sourceCM := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
-		mockResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).Return(&snapshotstorage.ResolvedForeignStorage{
+		mockResolve := mockey.Mock(snapshotadapter.ResolveForeignStorage).Return(&snapshotstorage.ResolvedForeignStorage{
 			ForeignBucket: "bucket",
 			ForeignCM:     sourceCM,
 		}, nil).Build()
@@ -1941,14 +1942,14 @@ func TestAssembleCopySegmentRequest_ExternalSnapshotFingerprint(t *testing.T) {
 		fingerprint, err := snapshotstorage.SnapshotFingerprint(snapshotData)
 		require.NoError(t, err)
 		sourceCM := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
-		mockResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).Return(&snapshotstorage.ResolvedForeignStorage{
+		mockResolve := mockey.Mock(snapshotadapter.ResolveForeignStorage).Return(&snapshotstorage.ResolvedForeignStorage{
 			ForeignBucket: "bucket",
 			ForeignCM:     sourceCM,
 		}, nil).Build()
 		defer mockResolve.UnPatch()
 		readCalls := 0
 		mockRead := mockey.Mock((*snapshotReadTarget).ReadExternalSnapshotDataWithChunkManager).To(
-			func(*snapshotReadTarget, context.Context, storage.ChunkManager, string, bool) (*snapshotstorage.SnapshotData, error) {
+			func(*snapshotReadTarget, context.Context, snapshotstorage.ChunkManager, string, bool) (*snapshotstorage.SnapshotData, error) {
 				readCalls++
 				return snapshotData, nil
 			}).Build()
@@ -2014,7 +2015,7 @@ func TestAssembleCopySegmentRequest_AllocatesTextAndJsonBuildIDs(t *testing.T) {
 
 // assembleIndexPrecedenceFixture builds a one-segment copy request whose source
 // is a StorageV3 segment carrying the snapshot's own (etcd-derived) index
-// metadata, so a test only has to say what its manifest reports.
+// metadata. Native index discovery must not run during assembly.
 func assembleIndexPrecedenceFixture(t *testing.T,
 	mutateSegment ...func(*datapb.SegmentDescription),
 ) (*datapb.CopySegmentRequest, int) {
@@ -2049,10 +2050,6 @@ func assembleIndexPrecedenceFixture(t *testing.T,
 	require.Len(t, req.GetTargets(), 1)
 	return req, manifestReads
 }
-
-// A manifest written before index publication existed carries no index section.
-// The segment still has indexes, recorded in etcd and captured by the snapshot,
-// so the manifest must not be treated as the authority on whether they exist.
 
 // Snapshot-captured index metadata is already complete, so DataCoord does not
 // need to read the source manifest. DataNode handles inherited-entry retraction
@@ -2242,7 +2239,7 @@ func TestAssembleCopySegmentRequest_ExternalAvroIndexes(t *testing.T) {
 					defer mockey.Mock(meta.CreateStorageConfig).Return(&indexpb.StorageConfig{RootPath: "files"}).Build().UnPatch()
 					defer mockey.Mock((*EmbeddedAllocator).AllocN).To(func(count int64) (int64, int64, error) { return 9001, 9001 + count, nil }).Build().UnPatch()
 					resolves := 0
-					defer mockey.Mock(snapshotstorage.ResolveForeignStorage).To(func(context.Context, *objectstorage.Config, snapshotstorage.Direction, string, string) (*snapshotstorage.ResolvedForeignStorage, error) {
+					defer mockey.Mock(snapshotadapter.ResolveForeignStorage).To(func(context.Context, *objectstorage.Config, snapshotstorage.Direction, string, string) (*snapshotstorage.ResolvedForeignStorage, error) {
 						resolves++
 						return &snapshotstorage.ResolvedForeignStorage{}, nil
 					}).Build().UnPatch()
