@@ -607,28 +607,13 @@ class TakeBinding {
  public:
     class InputLease final {
      public:
-        ~InputLease() {
-            Release();
-        }
-
         InputLease(const InputLease&) = delete;
         InputLease&
         operator=(const InputLease&) = delete;
 
-        InputLease(InputLease&& other) noexcept
-            : binding_(std::exchange(other.binding_, nullptr)),
-              result_(std::exchange(other.result_, nullptr)) {
-        }
-
+        InputLease(InputLease&&) noexcept = default;
         InputLease&
-        operator=(InputLease&& other) noexcept {
-            if (this != &other) {
-                Release();
-                binding_ = std::exchange(other.binding_, nullptr);
-                result_ = std::exchange(other.result_, nullptr);
-            }
-            return *this;
-        }
+        operator=(InputLease&&) noexcept = default;
 
         const TakeResult&
         Result() const {
@@ -640,20 +625,18 @@ class TakeBinding {
         friend class TakeBinding;
 
         InputLease(TakeBinding* binding, const TakeResult* result)
-            : binding_(binding), result_(result) {
+            : result_(result, Release{binding}) {
         }
 
-        void
-        Release() noexcept {
-            if (binding_ != nullptr) {
-                binding_->ReleaseInput();
-                binding_ = nullptr;
-                result_ = nullptr;
+        struct Release {
+            TakeBinding* binding;
+            void
+            operator()(const TakeResult*) const noexcept {
+                binding->ReleaseInput();
             }
-        }
+        };
 
-        TakeBinding* binding_;
-        const TakeResult* result_;
+        std::unique_ptr<const TakeResult, Release> result_;
     };
 
     virtual ~TakeBinding() = default;

@@ -2,7 +2,7 @@
 // license agreements. Licensed under the Apache License, Version 2.0.
 #pragma once
 
-#include <array>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -10,6 +10,8 @@
 #include <optional>
 #include <utility>
 #include <vector>
+
+#include <folly/small_vector.h>
 
 #include "common/EasyAssert.h"
 
@@ -71,49 +73,31 @@ class TakeBatchOwners final {
 
     void
     Add(const std::shared_ptr<const TakeCellCohort>& cohort) {
-        // Repeated cells commonly share one already-captured backing cohort.
-        // Repeated captures neither take another reference nor cross a DSO
-        // call. First inline captures keep the same strong-copy semantics;
-        // overflow and invalid inputs retain the checked slow path.
-        for (size_t i = 0; i < inline_count_; ++i) {
-            if (inline_[i].get() == cohort.get()) {
-                return;
+        if (std::find(owners_.begin(), owners_.end(), cohort) ==
+            owners_.end()) {
+            if (cohort == nullptr) {
+                ReportNullOwner();
             }
+            owners_.push_back(cohort);
         }
-        if (cohort != nullptr && inline_count_ < inline_.size()) {
-            inline_[inline_count_++] = cohort;
-            return;
-        }
-        AddNewOrOverflow(cohort);
     }
 
     void
-    Clear();
+    Clear() {
+        owners_.clear();
+    }
 
     size_t
     Size() const {
-        return inline_count_ + overflow_.size();
+        return owners_.size();
     }
 
  private:
-    void
-    AddNewOrOverflow(const std::shared_ptr<const TakeCellCohort>& cohort);
+    static void
+    ReportNullOwner();
 
-    // Most prepared prefixes borrow only a few complete backing cohorts.
-    // Larger owner sets use overflow; this is not a four-cell/row limit.
-    std::array<std::shared_ptr<const TakeCellCohort>, 4> inline_;
-    size_t inline_count_{0};
-    std::vector<std::shared_ptr<const TakeCellCohort>> overflow_;
-};
-
-struct TakeDirectoryStats {
-    // Controlled allocation REQUEST bytes, including the Directory object.
-    // Excludes malloc headers/RSS, physical payload and dynamic owner-queue
-    // bookkeeping, as with the original separately allocated owner list.
-    size_t requested_bytes{0};
-    size_t peak_requested_bytes{0};
-    size_t budget_bytes{0};
-    bool complete{true};
+    // Reuse the existing inline-storage container; larger batches spill safely.
+    folly::small_vector<std::shared_ptr<const TakeCellCohort>, 4> owners_;
 };
 
 // Mutable, worker-private retention state shared by the Expr leaves in that
@@ -157,10 +141,6 @@ class TakeContext final {
     FindBorrowed(const TakeCellSource& source,
                  int64_t id,
                  TakeBatchOwners& owners);
-
-    // Cold introspection only; no per-lookup diagnostic counters are added.
-    TakeDirectoryStats
-    DirectoryStats() const;
 
     // General ordered lookup. Duplicate IDs produce distinct output lanes
     // borrowing the same physical cell, and an empty request returns {}.

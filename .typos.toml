@@ -1,9 +1,3 @@
-[default.extend-identifiers]
-# Valid upstream C++20 standard-library identifier.
-countr_zero = "countr_zero"
-
 [default.extend-words]
-# Proper name in the unchanged original NQ test sample (Fenech-Soler).
-Soler = "Soler"
-# Actor's surname in the same original-text sample (Charles Durning).
-Durning = "Durning"
+# C++20 std::countr_zero, already used by the existing Expr kernels.
+countr = "countr"

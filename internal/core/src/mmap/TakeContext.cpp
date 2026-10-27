@@ -3,7 +3,6 @@
 #include "mmap/TakeContext.h"
 
 #include <algorithm>
-#include <array>
 #include <bit>
 #include <deque>
 #include <memory_resource>
@@ -19,28 +18,13 @@ SameOwner(const Left& left, const Right& right) {
     return !left.owner_before(right) && !right.owner_before(left);
 }
 
-void
-ReportNullTakeBatchOwner() {
-    AssertInfo(false, "null take batch owner");
-}
-
 // Only directory allocation REQUEST bytes are charged here, not malloc
 // headers/RSS, retained payload or the list of physical cohort owners.
 class DirectoryResource final : public std::pmr::memory_resource {
  public:
-    explicit DirectoryResource(size_t object_bytes)
-        : used_(object_bytes), peak_(object_bytes) {
+    explicit DirectoryResource(size_t object_bytes) : used_(object_bytes) {
         AssertInfo(object_bytes < kDirectoryBudget,
                    "take directory object is too large");
-    }
-
-    size_t
-    Used() const {
-        return used_;
-    }
-    size_t
-    Peak() const {
-        return peak_;
     }
 
  private:
@@ -52,7 +36,6 @@ class DirectoryResource final : public std::pmr::memory_resource {
         auto* result =
             std::pmr::new_delete_resource()->allocate(bytes, alignment);
         used_ += bytes;
-        peak_ = std::max(peak_, used_);
         return result;
     }
 
@@ -69,7 +52,6 @@ class DirectoryResource final : public std::pmr::memory_resource {
     }
 
     size_t used_;
-    size_t peak_;
 };
 }  // namespace
 
@@ -79,27 +61,8 @@ struct TakeContext::Entry {
 };
 
 void
-TakeBatchOwners::AddNewOrOverflow(
-    const std::shared_ptr<const TakeCellCohort>& cohort) {
-    // Keep the original checked contract, without embedding exception/log
-    // formatting into the normal owner-set capture path.
-    if (cohort == nullptr) {
-        ReportNullTakeBatchOwner();
-    }
-    for (const auto& existing : overflow_) {
-        if (existing.get() == cohort.get()) {
-            return;
-        }
-    }
-    overflow_.push_back(cohort);
-}
-
-void
-TakeBatchOwners::Clear() {
-    overflow_.clear();
-    while (inline_count_ != 0) {
-        inline_[--inline_count_].reset();
-    }
+TakeBatchOwners::ReportNullOwner() {
+    AssertInfo(false, "null take batch owner");
 }
 
 // Lookup metadata only. Slots never own an Entry, generation or payload.
@@ -239,26 +202,17 @@ class TakeContext::Directory final {
         }
     }
 
-    TakeDirectoryStats
-    Stats() const {
-        bool complete = !unindexed_sources_;
-        for (const auto& [identity, source] : sources_) {
-            complete &= source.complete;
-        }
-        return {resource_.Used(), resource_.Peak(), kDirectoryBudget, complete};
-    }
-
     void
     Clear() {
         // Borrowers hold cohort owners, never these directory addresses.
         // Release nodes/epochs in place without allocating a second Directory
-        // or resetting historical peak. Top-level hash buckets may remain.
+        // or keeping old entries. Top-level hash buckets may remain.
         last_source_ = nullptr;
         last_identity_ = nullptr;
         sources_.clear();
         can_grow_ = true;
         unindexed_sources_ = false;
-        // Lookup/Stats/oversized pins never construct this lazy queue. Clear
+        // Lookup/oversized pins never construct this lazy queue. Clear
         // destroys all retained owners and its bookkeeping without allocating
         // a fresh empty deque. Active batches own cohorts, not Entry pointers.
         // A lease deleter's read-only Find also sees a complete empty index.
@@ -411,11 +365,6 @@ TakeContext::FindBorrowed(const TakeCellSource& source,
     return cell;
 }
 
-TakeDirectoryStats
-TakeContext::DirectoryStats() const {
-    return directory_->Stats();
-}
-
 std::vector<TakeContext::PinnedCell>
 TakeContext::Acquire(const TakeCellSource& source,
                      const std::vector<int64_t>& ids) {
@@ -461,27 +410,15 @@ TakeContext::AcquireUniqueMissing(const TakeCellSource& source,
     if (ids.empty()) {
         return nullptr;
     }
-    auto validate_sorted = [&](auto begin, auto end) {
-        AssertInfo(*begin >= 0, "negative take cell id {}", *begin);
-        AssertInfo(std::adjacent_find(begin, end) == end,
-                   "duplicate unique-missing take cell id");
-        for (auto it = begin; it != end; ++it) {
-            AssertInfo(Lookup(source, *it).second == nullptr,
-                       "unique-missing take cell {} is already retained",
-                       *it);
-        }
-    };
-    constexpr size_t kStackIds = 64;
-    if (ids.size() <= kStackIds) {
-        std::array<int64_t, kStackIds> sorted;
-        std::copy(ids.begin(), ids.end(), sorted.begin());
-        const auto end = sorted.begin() + ids.size();
-        std::sort(sorted.begin(), end);
-        validate_sorted(sorted.begin(), end);
-    } else {
-        auto sorted = ids;
-        std::sort(sorted.begin(), sorted.end());
-        validate_sorted(sorted.begin(), sorted.end());
+    folly::small_vector<int64_t, 64> sorted(ids.begin(), ids.end());
+    std::sort(sorted.begin(), sorted.end());
+    AssertInfo(sorted.front() >= 0, "negative take cell id {}", sorted.front());
+    AssertInfo(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end(),
+               "duplicate unique-missing take cell id");
+    for (const auto id : sorted) {
+        AssertInfo(Lookup(source, id).second == nullptr,
+                   "unique-missing take cell {} is already retained",
+                   id);
     }
     return PinAndPublish(source, ids);
 }
