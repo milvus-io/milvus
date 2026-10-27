@@ -50,18 +50,6 @@ def pytest_addoption(parser):
         default=False,
         help="run cluster-global compaction data-integrity workloads in a non-xdist stage",
     )
-    parser.addoption(
-        "--xgboost-proxy-sync",
-        action="store_true",
-        default=False,
-        help="run L3 XGBoost L2-rerank tests after verifying Proxy FileResource synchronization is enabled",
-    )
-    parser.addoption(
-        "--xgboost-proxy-uri",
-        action="append",
-        default=[],
-        help="direct Proxy Pod URI for the L3 multi-Proxy XGBoost L2-rerank case; repeat for each Proxy",
-    )
     parser.addoption("--database_name", action="store", default="default", help="name of database")
     parser.addoption("--partition_name", action="store", default="partition_name", help="name of partition")
     parser.addoption("--connect_name", action="store", default="connect_name", help="name of connect")
