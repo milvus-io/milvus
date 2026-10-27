@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -1568,4 +1569,149 @@ func TestClusterSegmentRootedIndexCapability(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestCluster_PKIndexCompaction(t *testing.T) {
+	clusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
+
+	t.Run("create", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(int64(1)).Return(mockClient, nil)
+		mockClient.EXPECT().CreateTask(mock.Anything, mock.MatchedBy(func(req *workerpb.CreateTaskRequest) bool {
+			props := taskcommon.NewProperties(req.GetProperties())
+			taskID, err := props.GetTaskID()
+			if err != nil {
+				return false
+			}
+			slot, err := props.GetTaskSlot()
+			if err != nil {
+				return false
+			}
+			return req.GetProperties()[taskcommon.ClusterIDKey] == clusterID &&
+				taskID == 77 && slot == 4 &&
+				req.GetProperties()[taskcommon.TypeKey] == taskcommon.PKIndexCompaction
+		})).Return(merr.Success(), nil)
+
+		err := cluster.CreatePKIndexCompaction(1, &pkindexpb.CompactionRequest{TaskId: 77}, 4)
+		assert.NoError(t, err)
+	})
+
+	t.Run("create rpc failed", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+		mockClient.EXPECT().CreateTask(mock.Anything, mock.Anything).Return(nil, errors.New("mock err"))
+
+		err := cluster.CreatePKIndexCompaction(1, &pkindexpb.CompactionRequest{TaskId: 77}, 4)
+		assert.Error(t, err)
+	})
+
+	t.Run("query", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(int64(1)).Return(mockClient, nil)
+
+		expected := &pkindexpb.CompactionResult{EntriesProcessed: 1234}
+		payload, err := proto.Marshal(expected)
+		assert.NoError(t, err)
+		properties := taskcommon.NewProperties(nil)
+		properties.AppendTaskState(taskcommon.Failed)
+		properties.AppendReason("disk full")
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.MatchedBy(func(req *workerpb.QueryTaskRequest) bool {
+			props := taskcommon.NewProperties(req.GetProperties())
+			taskID, err := props.GetTaskID()
+			return err == nil && taskID == 77 &&
+				req.GetProperties()[taskcommon.ClusterIDKey] == clusterID &&
+				req.GetProperties()[taskcommon.TypeKey] == taskcommon.PKIndexCompaction
+		})).Return(&workerpb.QueryTaskResponse{
+			Status:     merr.Success(),
+			Payload:    payload,
+			Properties: properties,
+		}, nil)
+
+		result, state, reason, err := cluster.QueryPKIndexCompaction(1, 77)
+		assert.NoError(t, err)
+		assert.Equal(t, taskcommon.Failed, state)
+		assert.Equal(t, "disk full", reason)
+		assert.Equal(t, int64(1234), result.GetEntriesProcessed())
+	})
+
+	t.Run("query without payload", func(t *testing.T) {
+		query := func(state taskcommon.State, withState bool) (*pkindexpb.CompactionResult, taskcommon.State, error) {
+			mockNodeManager := NewMockNodeManager(t)
+			cluster := NewCluster(mockNodeManager)
+			mockClient := mocks.NewMockDataNodeClient(t)
+			mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+			properties := taskcommon.NewProperties(nil)
+			if withState {
+				properties.AppendTaskState(state)
+			}
+			mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(&workerpb.QueryTaskResponse{
+				Status:     merr.Success(),
+				Properties: properties,
+			}, nil)
+			result, got, _, err := cluster.QueryPKIndexCompaction(1, 77)
+			return result, got, err
+		}
+
+		for _, state := range []taskcommon.State{taskcommon.Finished, taskcommon.Failed} {
+			result, got, err := query(state, true)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "state without payload")
+			assert.Nil(t, result)
+			assert.Equal(t, taskcommon.None, got)
+		}
+
+		result, got, err := query(taskcommon.InProgress, true)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, taskcommon.InProgress, got)
+
+		result, _, err = query(taskcommon.None, false)
+		assert.Error(t, err)
+		assert.Nil(t, result)
+	})
+
+	t.Run("query rpc failed", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+		mockClient.EXPECT().QueryTask(mock.Anything, mock.Anything).Return(nil, errors.New("mock err"))
+
+		result, state, _, err := cluster.QueryPKIndexCompaction(1, 77)
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Equal(t, taskcommon.None, state)
+	})
+
+	t.Run("drop", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(int64(1)).Return(mockClient, nil)
+		mockClient.EXPECT().DropTask(mock.Anything, mock.MatchedBy(func(req *workerpb.DropTaskRequest) bool {
+			props := taskcommon.NewProperties(req.GetProperties())
+			taskID, err := props.GetTaskID()
+			return err == nil && taskID == 77 &&
+				req.GetProperties()[taskcommon.ClusterIDKey] == clusterID &&
+				req.GetProperties()[taskcommon.TypeKey] == taskcommon.PKIndexCompaction
+		})).Return(merr.Success(), nil)
+
+		assert.NoError(t, cluster.DropPKIndexCompaction(1, 77))
+	})
+
+	t.Run("drop rpc failed", func(t *testing.T) {
+		mockNodeManager := NewMockNodeManager(t)
+		cluster := NewCluster(mockNodeManager)
+		mockClient := mocks.NewMockDataNodeClient(t)
+		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+		mockClient.EXPECT().DropTask(mock.Anything, mock.Anything).Return(nil, errors.New("mock err"))
+
+		assert.Error(t, cluster.DropPKIndexCompaction(1, 77))
+	})
 }

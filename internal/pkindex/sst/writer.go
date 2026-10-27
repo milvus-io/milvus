@@ -97,6 +97,13 @@ func (w *Writer) Add(key, value []byte) error {
 	return nil
 }
 
+// EstimatedSize returns the bytes the table takes on disk so far: the blocks
+// already written plus the pending data block, counted before compression. It
+// does not count the filter block that Close adds (about 1.25 bytes per key),
+// so a table comes out a little bigger than the target, never smaller. After
+// Close it is close to the file size.
+func (w *Writer) EstimatedSize() uint64 { return w.w.EstimatedSize() }
+
 // Close finalizes the SST, publishes it under its ID and returns its Info.
 func (w *Writer) Close() (Info, error) {
 	if err := w.w.Close(); err != nil {
