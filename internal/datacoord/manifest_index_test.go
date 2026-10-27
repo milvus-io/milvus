@@ -230,7 +230,7 @@ func TestManifestIndexColumnNames(t *testing.T) {
 			info, err := buildManifestIndexInfo(m, segment, &model.SegmentIndex{
 				CollectionID: collectionID, PartitionID: 2, SegmentID: 3,
 				IndexID: indexID, BuildID: 300, IndexVersion: 1,
-				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
 				IndexFileKeys:         []string{"0"},
 			})
 			require.NoError(t, err)
