@@ -314,9 +314,8 @@ Local control-plane tests use a subsequent replicated database operation as a
 CChannel progress barrier. This barrier does not prove progress on every data
 channel; data cases additionally wait for exact row contents.
 
-Snapshot restore and external refresh cases deliberately require complete
-business data on the replica after a successful source operation. If the server
-accepts an operation but only replicates the collection metadata, these tests
-fail. Such a failure must not be converted to a skip or relaxed to metadata-only
-checks. Collection/format checks do not establish an E2E pass, and adding these
-files does not by itself verify a recurring Jenkins selection.
+Supported replication cases require complete business data on the secondary.
+Local restore and refresh cases instead verify the documented nonreplication
+boundary and continued CDC progress. Collection/format checks do not establish
+an E2E pass, and adding these files does not by itself verify a recurring
+Jenkins selection.
