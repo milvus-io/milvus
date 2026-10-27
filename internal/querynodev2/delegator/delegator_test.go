@@ -1756,18 +1756,37 @@ func (s *DelegatorSuite) TestSyncIndexMeta() {
 	expectSync(2, 16, nil)
 	s.NoError(s.delegator.SyncIndexMeta(ctx, infos, 16))
 
-	// A node of an older version without the RPC does not fail the sync and is
-	// not asked again.
+	// A node that is gone, without a session or with its address now serving
+	// another node, does not fail the sync and is not recorded as having the
+	// list. A node that does not answer in time still fails it.
+	expectError := func(nodeID int64, err error) {
+		worker := cluster.NewMockWorker(s.T())
+		worker.EXPECT().SyncIndexMeta(mock.Anything, mock.Anything).Return(nil, err).Once()
+		workers[nodeID] = worker
+	}
 	infos = append(infos, &indexpb.IndexInfo{CollectionID: s.collectionID, FieldID: 104, IndexID: 4})
 	expectSync(1, 17, nil)
+	expectError(2, merr.ErrNodeNotFound)
+	s.NoError(s.delegator.SyncIndexMeta(ctx, infos, 17))
+	expectError(2, merr.WrapErrNodeNotMatch(2, 3))
+	s.NoError(s.delegator.SyncIndexMeta(ctx, infos, 18))
+	expectError(2, context.DeadlineExceeded)
+	s.Error(s.delegator.SyncIndexMeta(ctx, infos, 19))
+	expectSync(2, 20, nil)
+	s.NoError(s.delegator.SyncIndexMeta(ctx, infos, 20))
+
+	// A node of an older version without the RPC does not fail the sync and is
+	// not asked again.
+	infos = append(infos, &indexpb.IndexInfo{CollectionID: s.collectionID, FieldID: 105, IndexID: 5})
+	expectSync(1, 21, nil)
 	old := cluster.NewMockWorker(s.T())
 	old.EXPECT().SyncIndexMeta(mock.Anything, mock.Anything).
 		Return(nil, merr.WrapErrServiceUnimplemented(errors.New("unknown method SyncIndexMeta"))).Once()
 	workers[2] = old
-	s.NoError(s.delegator.SyncIndexMeta(ctx, infos, 17))
-	infos = append(infos, &indexpb.IndexInfo{CollectionID: s.collectionID, FieldID: 105, IndexID: 5})
-	expectSync(1, 18, nil)
-	s.NoError(s.delegator.SyncIndexMeta(ctx, infos, 18))
+	s.NoError(s.delegator.SyncIndexMeta(ctx, infos, 21))
+	infos = append(infos, &indexpb.IndexInfo{CollectionID: s.collectionID, FieldID: 106, IndexID: 6})
+	expectSync(1, 22, nil)
+	s.NoError(s.delegator.SyncIndexMeta(ctx, infos, 22))
 }
 
 func (s *DelegatorSuite) nextSchemaVersion() int32 {
