@@ -9,8 +9,8 @@ import (
 	"github.com/cenkalti/backoff/v4"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/internal/views/replicadiscovery"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
@@ -19,9 +19,9 @@ type StreamFactory func(context.Context) (Stream, error)
 
 const stableWatchInterval = 10 * time.Second
 
-// watcher owns one resumable PChannel stream, shared by its Manager.
+// resumableStream owns one resumable PChannel stream, shared by its Client.
 // Logical subscriptions survive physical failures; availability does not.
-type watcher struct {
+type resumableStream struct {
 	ctx           context.Context
 	cancel        context.CancelFunc
 	pchannel      string
@@ -44,7 +44,7 @@ type replicaSubscription struct {
 
 // Subscription owns one handler registration, not a goroutine.
 type Subscription struct {
-	watcher  *watcher
+	watcher  *resumableStream
 	vchannel string
 	state    *replicaSubscription
 	handler  Handler
@@ -52,9 +52,9 @@ type Subscription struct {
 	once     sync.Once
 }
 
-func newWatcher(ctx context.Context, pchannel string, factory StreamFactory) *watcher {
+func newResumableStream(ctx context.Context, pchannel string, factory StreamFactory) *resumableStream {
 	ctx, cancel := context.WithCancel(ctx)
-	w := &watcher{
+	w := &resumableStream{
 		ctx: ctx, cancel: cancel, pchannel: pchannel, factory: factory,
 		subscriptions: make(map[string]*replicaSubscription),
 		wake:          make(chan struct{}, 1), done: make(chan struct{}),
@@ -66,7 +66,7 @@ func newWatcher(ctx context.Context, pchannel string, factory StreamFactory) *wa
 	return w
 }
 
-func (w *watcher) subscribe(vchannel string, handler Handler) (*Subscription, error) {
+func (w *resumableStream) subscribe(vchannel string, handler Handler) (*Subscription, error) {
 	if vchannel == "" || funcutil.ToPhysicalChannel(vchannel) != w.pchannel {
 		return nil, status.NewInvalidRequestSeq("replica subscription VChannel does not belong to this PChannel")
 	}
@@ -98,7 +98,7 @@ func (s *Subscription) snapshotLocked() Snapshot {
 	return Snapshot{Replicas: slices.Clone(s.state.replicas), Valid: !s.closed && s.watcher.ctx.Err() == nil && s.state.valid}
 }
 
-func (s *Subscription) Close() {
+func (s *Subscription) Close() error {
 	s.once.Do(func() {
 		w := s.watcher
 		w.mu.Lock()
@@ -115,9 +115,10 @@ func (s *Subscription) Close() {
 			w.signal()
 		}
 	})
+	return nil
 }
 
-func (w *watcher) Close() {
+func (w *resumableStream) Close() {
 	w.cancel()
 	<-w.done
 	<-w.dispatchDone
@@ -134,9 +135,9 @@ func (w *watcher) Close() {
 	w.subscriptions = nil
 	w.pending = nil
 }
-func (w *watcher) Done() <-chan struct{} { return w.done }
+func (w *resumableStream) Done() <-chan struct{} { return w.done }
 
-func (w *watcher) enqueueLocked(sub *Subscription) {
+func (w *resumableStream) enqueueLocked(sub *Subscription) {
 	w.pending[sub] = struct{}{}
 	select {
 	case w.dispatchWake <- struct{}{}:
@@ -144,14 +145,14 @@ func (w *watcher) enqueueLocked(sub *Subscription) {
 	}
 }
 
-func (w *watcher) notifyLocked(state *replicaSubscription) {
+func (w *resumableStream) notifyLocked(state *replicaSubscription) {
 	for sub := range state.handlers {
 		w.enqueueLocked(sub)
 	}
 }
 
 // One dispatcher per PChannel; callbacks do not hold state/transport locks.
-func (w *watcher) dispatch() {
+func (w *resumableStream) dispatch() {
 	defer close(w.dispatchDone)
 	for {
 		select {
@@ -180,14 +181,14 @@ func (w *watcher) dispatch() {
 	}
 }
 
-func (w *watcher) signal() {
+func (w *resumableStream) signal() {
 	select {
 	case w.wake <- struct{}{}:
 	default:
 	}
 }
 
-func (w *watcher) invalidateLocked() {
+func (w *resumableStream) invalidateLocked() {
 	for _, state := range w.subscriptions {
 		if state.valid {
 			state.valid = false
@@ -197,13 +198,8 @@ func (w *watcher) invalidateLocked() {
 	}
 }
 
-func (w *watcher) run() {
-	defer func() {
-		w.mu.Lock()
-		w.invalidateLocked()
-		w.mu.Unlock()
-		close(w.done)
-	}()
+func (w *resumableStream) run() {
+	defer func() { w.mu.Lock(); w.invalidateLocked(); w.mu.Unlock(); close(w.done) }()
 	retry := backoff.NewExponentialBackOff()
 	retry.InitialInterval = 100 * time.Millisecond
 	retry.MaxInterval = 10 * time.Second
@@ -224,25 +220,36 @@ func (w *watcher) run() {
 		w.attemptCancel = cancel
 		w.mu.Unlock()
 		stream, err := w.factory(ctx)
-		stable := false
-		if err == nil {
-			started := time.Now()
-			err = w.runAttempt(ctx, cancel, stream)
-			stable = time.Since(started) >= stableWatchInterval
-		}
-		cancel()
 		w.mu.Lock()
 		w.attemptCancel = nil
-		idle := len(w.subscriptions) == 0
+		w.mu.Unlock()
+		// Only last-subscriber removal can cancel acquisition while the owner is live.
+		if ctx.Err() != nil && w.ctx.Err() == nil {
+			cancel()
+			if stream != nil {
+				_ = stream.Close()
+			}
+			continue
+		}
+		idle, stable := false, false
+		if err == nil {
+			idle, stable, err = w.runAttempt(ctx, stream)
+		}
+		cancel()
+		if stream != nil {
+			_ = stream.Close()
+		}
+		w.mu.Lock()
 		w.invalidateLocked()
 		w.mu.Unlock()
 		if w.ctx.Err() != nil {
 			return
 		}
 		if idle {
+			retry.Reset()
 			continue
 		}
-		mlog.Warn(w.ctx, "replica watch disconnected; rediscovering owner", mlog.FieldPChannel(w.pchannel), mlog.Err(err))
+		mlog.Warn(w.ctx, "replica watch unavailable; rediscovering owner", mlog.FieldPChannel(w.pchannel), mlog.Err(err))
 		if stable {
 			retry.Reset()
 		}
@@ -256,113 +263,85 @@ func (w *watcher) run() {
 	}
 }
 
-type watchedReplica struct {
-	state   *replicaSubscription
-	closing bool
-}
+const idleStreamTimeout = time.Minute
 
-func (w *watcher) runAttempt(ctx context.Context, cancel context.CancelFunc, stream Stream) error {
-	// Both directions share state under w.mu, but never hold it during I/O.
-	// Stop either direction before joining the receiver; no old attempt may
-	// publish into a replacement connection's cache.
-	active := make(map[string]*watchedReplica)
-	stop := sync.OnceFunc(func() { cancel(); stream.Close() })
-	recvErr := make(chan error, 1)
-	received := make(chan struct{})
-	defer func() { stop(); <-received }()
-	go func() {
-		defer close(received)
-		recvErr <- w.receive(stream, active)
-		stop() // A receive failure must also release a flow-controlled Send.
-	}()
-	for {
-		if err := w.reconcile(stream, active); err != nil {
-			select {
-			case err = <-recvErr:
-			default:
+// Physical subscriptions own delivery. This loop only reconciles logical demand.
+func (w *resumableStream) runAttempt(ctx context.Context, stream Stream) (bool, bool, error) {
+	active := make(map[*replicaSubscription]replicadiscovery.Subscription)
+	reconcile := func() error {
+		w.mu.Lock()
+		desired := make(map[*replicaSubscription]string, len(w.subscriptions))
+		for vc, state := range w.subscriptions {
+			desired[state] = vc
+		}
+		w.mu.Unlock()
+		for state, sub := range active {
+			if _, ok := desired[state]; !ok {
+				if err := sub.Close(); err != nil {
+					return err
+				}
+				delete(active, state)
 			}
-			return err
+		}
+		for state, vc := range desired {
+			if active[state] != nil {
+				continue
+			}
+			sub, err := stream.Subscribe(ctx, vc, func(snapshot Snapshot) {
+				w.mu.Lock()
+				defer w.mu.Unlock()
+				if w.subscriptions[vc] != state || ctx.Err() != nil {
+					return
+				}
+				if state.valid != snapshot.Valid || !slices.Equal(state.replicas, snapshot.Replicas) {
+					state.valid = snapshot.Valid
+					state.replicas = slices.Clone(snapshot.Replicas)
+					w.notifyLocked(state)
+				}
+			})
+			if err != nil {
+				return err
+			}
+			active[state] = sub
+		}
+		return nil
+	}
+	if err := reconcile(); err != nil {
+		return false, false, err
+	}
+	availableSince := time.Now()
+	timer := time.NewTimer(idleStreamTimeout)
+	timer.Stop()
+	defer timer.Stop()
+	var idleC <-chan time.Time
+	for {
+		w.mu.Lock()
+		idle := len(w.subscriptions) == 0
+		w.mu.Unlock()
+		if idle && idleC == nil {
+			timer.Reset(idleStreamTimeout)
+			idleC = timer.C
+		} else if !idle && idleC != nil {
+			timer.Stop()
+			idleC = nil
 		}
 		select {
-		case err := <-recvErr:
-			return err
 		case <-ctx.Done():
-			return ctx.Err()
+			return false, false, ctx.Err()
+		case <-stream.Done():
+			return false, time.Since(availableSince) >= stableWatchInterval, stream.Error()
+		case <-idleC:
+			idleC = nil
+			w.mu.Lock()
+			idle = len(w.subscriptions) == 0
+			w.mu.Unlock()
+			if idle {
+				return true, false, nil
+			}
 		case <-w.wake:
+			if err := reconcile(); err != nil {
+				return false, time.Since(availableSince) >= stableWatchInterval, err
+			}
 		}
 	}
-}
-
-// receive consumes responses independently of subscription sends. Callbacks
-// remain on the dispatcher, so neither Send nor handler work stalls Recv.
-func (w *watcher) receive(stream Stream, active map[string]*watchedReplica) error {
-	for {
-		response, err := stream.Recv()
-		if err != nil {
-			return err
-		}
-		if err := w.applyResponse(response, active); err != nil {
-			return err
-		}
-	}
-}
-
-func (w *watcher) applyResponse(resp *viewpb.WatchVChannelReplicasResponse, active map[string]*watchedReplica) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	switch response := resp.GetResponse().(type) {
-	case *viewpb.WatchVChannelReplicasResponse_Snapshot:
-		snapshot := response.Snapshot
-		current := active[snapshot.GetVchannel()]
-		if current == nil || current.closing || w.subscriptions[snapshot.GetVchannel()] != current.state {
-			return nil
-		}
-		state := current.state
-		replicas := replicasFromProto(snapshot.GetReplicas())
-		if !state.valid || !slices.Equal(state.replicas, replicas) {
-			state.replicas = replicas
-			state.valid = true
-			w.notifyLocked(state)
-		}
-	case *viewpb.WatchVChannelReplicasResponse_UnsubscribedVchannel:
-		current := active[response.UnsubscribedVchannel]
-		if current == nil || !current.closing {
-			return status.NewInvalidRequestSeq("unexpected replica unsubscribe acknowledgement")
-		}
-		delete(active, response.UnsubscribedVchannel)
-		w.signal()
-	default:
-		return status.NewInvalidRequestSeq("unexpected replica watch response")
-	}
-	return nil
-}
-
-func (w *watcher) reconcile(stream Stream, active map[string]*watchedReplica) error {
-	for _, request := range w.subscriptionRequests(active) {
-		if err := stream.Send(request); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (w *watcher) subscriptionRequests(active map[string]*watchedReplica) []*viewpb.WatchVChannelReplicasRequest {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	// Register transitions before sending: a fast peer may respond before Send
-	// returns. Closing entries stay active until their unsubscribe ACK arrives.
-	var requests []*viewpb.WatchVChannelReplicasRequest
-	for vc, current := range active {
-		if w.subscriptions[vc] != current.state && !current.closing {
-			current.closing = true
-			requests = append(requests, &viewpb.WatchVChannelReplicasRequest{Vchannel: vc, Unsubscribe: true})
-		}
-	}
-	for vc, state := range w.subscriptions {
-		if active[vc] == nil {
-			active[vc] = &watchedReplica{state: state}
-			requests = append(requests, &viewpb.WatchVChannelReplicasRequest{Vchannel: vc})
-		}
-	}
-	return requests
 }

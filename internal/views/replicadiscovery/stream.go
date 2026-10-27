@@ -2,110 +2,151 @@ package replicadiscovery
 
 import (
 	"context"
+	"slices"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
-// Stream is one physical attempt. Close unblocks concurrent Send/Recv.
-// Exactly one sender and one receiver use it; callbacks belong to Manager.
-type Stream interface {
-	Send(*viewpb.WatchVChannelReplicasRequest) error
-	Recv() (*viewpb.WatchVChannelReplicasResponse, error)
-	Close()
-}
-
-// Provider is the optional WAL capability shared by local and RPC adapters.
-type Provider interface{ WatchReplicas() (*Watch, error) }
-
-type remoteStream struct {
-	viewpb.ViewQueryService_WatchVChannelReplicasClient
-	cancel context.CancelFunc
-}
-
-func NewRemoteStream(stream viewpb.ViewQueryService_WatchVChannelReplicasClient, cancel context.CancelFunc) Stream {
-	return &remoteStream{ViewQueryService_WatchVChannelReplicasClient: stream, cancel: cancel}
-}
-
-func (s *remoteStream) Close() { s.cancel() }
-
-type localStream struct {
-	ctx              context.Context
-	cancel           context.CancelFunc
-	watch            *Watch
-	unavailable      <-chan struct{}
-	mu               sync.Mutex
-	acknowledgements []string
-	wake             chan struct{}
-}
-
-// NewLocalStream bridges the exact same WAL-owned directory without gRPC.
-// The supplied watch is owned by the stream and released on Close.
-func NewLocalStream(ctx context.Context, watch *Watch, unavailable <-chan struct{}) Stream {
+// AcquireStream subscribes directly to the directory. No RPC messages or ACKs
+// exist on this path. One delivery loop coalesces updates for all VChannels.
+func (d *Directory) AcquireStream(ctx context.Context, pchannel string, unavailable <-chan struct{}) Stream {
 	ctx, cancel := context.WithCancel(ctx)
-	return &localStream{ctx: ctx, cancel: cancel, watch: watch, unavailable: unavailable, wake: make(chan struct{}, 1)}
+	s := &directoryStream{ctx: ctx, cancel: cancel, pchannel: pchannel, watch: d.Watch(), unavailable: unavailable, done: make(chan struct{}), subs: make(map[string]map[*directorySubscription]struct{})}
+	go s.run()
+	return s
 }
 
-func (s *localStream) available() error {
-	select {
-	case <-s.ctx.Done():
-		return s.ctx.Err()
-	case <-s.unavailable:
-		return status.NewOnShutdownError("local replica WAL unavailable")
-	case <-s.watch.Done():
-		return status.NewOnShutdownError("local replica directory closed")
-	default:
-		return nil
-	}
+type directoryStream struct {
+	ctx         context.Context
+	cancel      context.CancelFunc
+	pchannel    string
+	watch       *Watch
+	unavailable <-chan struct{}
+	done        chan struct{}
+	mu          sync.Mutex
+	err         error
+	subs        map[string]map[*directorySubscription]struct{}
 }
 
-func (s *localStream) Send(req *viewpb.WatchVChannelReplicasRequest) error {
-	if err := s.available(); err != nil {
-		return err
+type directorySubscription struct {
+	stream   *directoryStream
+	vchannel string
+	mu       sync.Mutex
+	handler  Handler
+	snapshot Snapshot
+	closed   bool
+}
+
+func (s *directoryStream) Subscribe(ctx context.Context, vc string, handler Handler) (Subscription, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	if req.GetUnsubscribe() {
-		s.watch.Unsubscribe(req.GetVchannel())
+	if handler == nil || vc == "" || funcutil.ToPhysicalChannel(vc) != s.pchannel {
+		return nil, status.NewInvalidArgument("replica subscription requires a handler and a VChannel in this PChannel")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ctx.Err() != nil {
+		return nil, status.NewOnShutdownError("replica directory stream closed")
+	}
+	sub := &directorySubscription{stream: s, vchannel: vc, handler: handler}
+	if s.subs[vc] == nil {
+		s.subs[vc] = make(map[*directorySubscription]struct{})
+	}
+	s.subs[vc][sub] = struct{}{}
+	// Every new handler needs a full initial snapshot, even for an existing VC.
+	s.watch.Subscribe(vc)
+	s.watch.directory.mu.Lock()
+	s.watch.enqueueLocked(vc)
+	s.watch.directory.mu.Unlock()
+	return sub, nil
+}
+func (s *directoryStream) Done() <-chan struct{} { return s.done }
+func (s *directoryStream) Error() error          { s.mu.Lock(); defer s.mu.Unlock(); return s.err }
+func (s *directoryStream) Close() error          { s.cancel(); <-s.done; return s.Error() }
+func (s *directoryStream) run() {
+	defer close(s.done)
+	defer s.watch.Close()
+	defer func() {
+		s.cancel()
 		s.mu.Lock()
-		s.acknowledgements = append(s.acknowledgements, req.GetVchannel())
+		subs := s.subs
+		s.subs = nil
 		s.mu.Unlock()
-		select {
-		case s.wake <- struct{}{}:
-		default:
+		for _, handlers := range subs {
+			for sub := range handlers {
+				sub.mu.Lock()
+				sub.closed = true
+				sub.handler = nil
+				sub.mu.Unlock()
+			}
 		}
-	} else {
-		s.watch.Subscribe(req.GetVchannel())
+	}()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-s.unavailable:
+			s.fail()
+			return
+		case <-s.watch.Done():
+			s.fail()
+			return
+		case <-s.watch.Changed():
+			// Capture subscriptions and snapshot together with respect to Subscribe/Close.
+			s.mu.Lock()
+			snapshot := s.watch.Pop()
+			var subs []*directorySubscription
+			if snapshot != nil {
+				for sub := range s.subs[snapshot.GetVchannel()] {
+					subs = append(subs, sub)
+				}
+			}
+			s.mu.Unlock()
+			if snapshot != nil {
+				for _, sub := range subs {
+					sub.deliver(Snapshot{Valid: true, Replicas: ReplicasFromProto(snapshot.GetReplicas())})
+				}
+			}
+		}
+	}
+}
+
+func (s *directoryStream) fail() {
+	s.mu.Lock()
+	s.err = status.NewOnShutdownError("replica WAL owner unavailable")
+	s.mu.Unlock()
+}
+
+func (s *directorySubscription) deliver(snapshot Snapshot) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	s.snapshot = Snapshot{Valid: snapshot.Valid, Replicas: slices.Clone(snapshot.Replicas)}
+	s.handler(snapshot)
+}
+
+func (s *directorySubscription) Snapshot() Snapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return Snapshot{Valid: !s.closed && s.stream.ctx.Err() == nil && s.snapshot.Valid, Replicas: slices.Clone(s.snapshot.Replicas)}
+}
+
+func (s *directorySubscription) Close() error {
+	s.mu.Lock()
+	s.closed = true
+	s.handler = nil
+	s.mu.Unlock()
+	s.stream.mu.Lock()
+	defer s.stream.mu.Unlock()
+	delete(s.stream.subs[s.vchannel], s)
+	if len(s.stream.subs[s.vchannel]) == 0 {
+		delete(s.stream.subs, s.vchannel)
+		s.stream.watch.Unsubscribe(s.vchannel)
 	}
 	return nil
 }
-
-func (s *localStream) Recv() (*viewpb.WatchVChannelReplicasResponse, error) {
-	for {
-		if err := s.available(); err != nil {
-			return nil, err
-		}
-		s.mu.Lock()
-		var vc string
-		if len(s.acknowledgements) != 0 {
-			vc = s.acknowledgements[0]
-			s.acknowledgements[0] = ""
-			s.acknowledgements = s.acknowledgements[1:]
-		}
-		s.mu.Unlock()
-		if vc != "" {
-			return &viewpb.WatchVChannelReplicasResponse{Response: &viewpb.WatchVChannelReplicasResponse_UnsubscribedVchannel{UnsubscribedVchannel: vc}}, nil
-		}
-		if snapshot := s.watch.Pop(); snapshot != nil {
-			return &viewpb.WatchVChannelReplicasResponse{Response: &viewpb.WatchVChannelReplicasResponse_Snapshot{Snapshot: snapshot}}, nil
-		}
-		select {
-		case <-s.ctx.Done():
-		case <-s.unavailable:
-		case <-s.watch.Done():
-		case <-s.wake:
-		case <-s.watch.Changed():
-		}
-	}
-}
-
-func (s *localStream) Close() { s.cancel(); s.watch.Close() }

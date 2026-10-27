@@ -1,6 +1,7 @@
 # StreamingNode replica discovery
 
-ViewQueryService exposes a VChannel-scoped replica watch. QueryViewClient can
+StreamingNodeHandlerService exposes VChannel-scoped replica subscriptions.
+The streaming QueryViewClient can
 obtain candidate replicas and their maximum locally Up View versions without
 querying Coordinator for every request.
 The WAL-owned SNQueryViewHandler is authoritative for local View state; the RPC
@@ -47,79 +48,84 @@ locks, calls consumer code, or sends RPCs.
 
 ## Transport and ownership
 
-One bidirectional WatchVChannelReplicas stream is scoped to one PChannel owner
-and term. It multiplexes VChannel subscriptions keyed only by VChannel. Stream
-creation validates the owner and acknowledges readiness before any subscriptions.
-Subscribe returns a full snapshot immediately, including an authoritative empty
-list. Repeated Subscribe is idempotent. Subsequent eligibility or maximum-version changes send full
-replacement snapshots. Unsubscribe removes the listener and pending update before
-sending its acknowledgement. The single server sender orders all snapshots and
-acknowledgements, so none for that subscription follows its unsubscribe ACK.
+`StreamingNodeHandlerService.SubscribeReplicas` follows TransformLog's stream /
+subscription separation. Creation metadata carries the assigned PChannel and
+term. The server validates WAL ownership, acquires a domain stream, and returns
+`CreateReplicaWatchStreamResponse` before accepting subscriptions. QN does not
+implement this RPC. The former unreleased ViewQueryService Watch RPC is removed.
 
-Registration and initial snapshot capture share the directory lock. A stream
-stores only a pending VChannel set and reads the latest snapshot when sending;
-slow consumers coalesce changes rather than accumulating an event log. No
-per-VChannel goroutine, polling, replay cursor, ACKed data position, or resource
-pin is required. WAL unavailability immediately terminates associated RPCs, before resource
-draining. Handoff also closes the directory. A blocked gRPC Send must not delay
-handler return: transport cancellation then releases blocked Send/Recv workers.
-Errors use native streaming gRPC status, not response error fields.
+`ReplicaWatchRequest` and `ReplicaWatchResponse` use extensible oneofs. Creation,
+snapshot, subscription error, close-subscription and close-stream have distinct
+messages. A client-allocated positive subscription ID identifies each physical
+registration; the VChannel belongs to the stream's PChannel. IDs may arrive out
+of allocation order with concurrent callers. The client never reuses an ID in
+an attempt. Multiple registrations for one VChannel are distinct subscriptions.
+
+The server sends the create acknowledgement before that subscription's initial
+full snapshot, including an authoritative empty list. Subsequent changes send
+full replacement snapshots. Closing a subscription first detaches its domain
+listener and removes pending snapshots, then acknowledges the close. A single
+sender orders snapshots and acknowledgements, so no snapshot for that ID follows
+its close acknowledgement. A replacement registration uses a new ID.
+Subscription failures carry StreamingError; stream admission and transport errors
+use native streaming gRPC status, as with TransformLog.
+
+Registration and initial capture are synchronized by the directory. Domain
+updates coalesce per VChannel; the RPC adapter coalesces per subscription ID.
+Neither retains an event log. WAL unavailability terminates the stream before
+resource draining, independently of eventual directory Close. The RPC handler
+returns even if Send is flow-controlled, allowing gRPC cancellation to release
+its sender and receiver. No polling, replay cursor, data-position ACK or resource
+pin is needed for these latest-state routing hints.
 
 ## Client and LocalWAL
 
-`HandlerClient.QueryViewClient().SubscribeReplicas(vchannel, handler)` returns a
-Subscription. A client-owned Manager resolves PChannel and shares exactly one
-logical watcher per PChannel. Callers do not create Watchers or wait in a
-per-VChannel goroutine. Multiple handlers for the same VChannel share state and
-one physical subscription. Subscription.Snapshot() is an optional synchronous
-cache read (Replicas and Valid); notifications use callbacks, not change channels.
-Each delivered snapshot owns its replica slice and value-type versions; neither
-callbacks nor cache readers can mutate another snapshot or directory metadata. Invalid distinguishes disconnected
-or uninitialized state from an authoritative empty set.
+The domain `replicadiscovery.Stream` exposes `Subscribe`, `Done`, `Error` and
+`Close`; `Subscription` exposes `Snapshot` and `Close`. Physical handlers consume
+owned snapshots, must not block and must not synchronously close their stream
+or subscription. The upper client isolates application callbacks separately.
 
-A PChannel has a recovery loop and a callback dispatcher, plus one receiver while
-connected. VChannels and handler registrations have no goroutines. Idle watchers
-park their two control loops until reuse; physical streams are canceled when the
-last subscriber leaves. The Manager retains at most one watcher per encountered
-PChannel until HandlerClient.Close. Thus control-loop cost scales with PChannels,
-not collections, VChannels or subscribers.
+`HandlerClient.AcquireReplicaWatchStream` resolves the assignment and creates
+one physical attempt. It owns no sharing, reconnect loop or logical subscription
+manager. It first looks up a local available WAL with the exact owner term. The
+local WAL Provider returns the domain stream directly: there is no local RPC,
+Send/Recv emulation, control-message queue, or wire acknowledgement. Only the
+existing `shouldUseRemoteWAL` conditions select remote fallback; local internal
+errors are not silently redirected to RPC.
 
-Within each attempt, the receive loop directly applies snapshots and unsubscribe
-acknowledgements while the recovery loop sends subscription changes. Both share
-subscription state under a short lock; neither holds it during Send or Recv.
-Transitions are registered before sending, so responses arriving before Send
-returns are safe. A flow-controlled Send cannot prevent response consumption.
-Failure in either direction closes the attempt to unblock the other direction.
+The remote adapter owns the serialized Send path and an independent Recv loop.
+Recv directly applies snapshots and lifecycle acknowledgements to physical
+subscriptions. It never forwards responses to a goroutine that might be waiting
+for Send. Failure cancels the RPC without acquiring the send mutex. Close joins
+the receiver; the close handshake is bounded even under flow control.
 
-The callback dispatcher coalesces pending updates per handler and executes
-serially outside all state/transport locks. Handlers only update local routing
-state; they must not block on I/O or close the owning Manager/HandlerClient.
-Subscription.Close is safe inside a callback: it removes pending notifications;
-an already selected callback may finish after Close. Manager.Close cancels
-recovery and joins dispatchers and callbacks. HandlerClient closes the Manager
-before waiting for its own in-flight operations, so owner discovery cannot keep
-shutdown blocked. No callback goroutine is created per update or subscription.
+`streaming.WAL().QueryViewClient().SubscribeReplicas(vchannel, handler)` uses the
+upper streaming `replicadiscovery.NewResumingClient`. It shares one resumable
+stream per PChannel and one physical subscription per desired VChannel. Multiple
+logical handlers share the cached state. A PChannel has a recovery loop and a
+callback dispatcher, plus its physical delivery loop while connected; there are
+no goroutines per VChannel or handler registration.
 
-Each attempt uses a small Stream interface (Send, Recv, Close), not the generated
-gRPC client interface. After resolving the current assignment, HandlerClient
-first calls registry.GetLocalAvailableWAL with the exact owner term. A local WAL
-is unwrapped to its replica-directory Provider and bridged directly using
-NewLocalStream. Only existing shouldUseRemoteWAL fallback conditions choose RPC;
-local internal failures are not silently converted to a remote route. The local
-adapter preserves snapshot/unsubscribe ordering without gRPC, goroutines, WAL
-messages, or serialization. It observes both WAL Unavailable and directory Close.
-The remote adapter retains ViewQueryService and the validated Ready handshake.
+Removing the last logical subscription cancels an in-progress acquisition.
+An established physical stream remains reusable for one idle minute, following
+TransformLog's idle lifecycle, then closes. Normal idle retirement does not
+consume failure backoff. A failed attempt invalidates cached availability,
+rediscovers the owner, backs off, and recreates desired subscriptions. Local to
+remote and remote to local migration use this same loop. A replacement physical
+attempt starts only after the old one closes. Old callbacks are checked against
+the logical registration and attempt context before changing current state.
 
-The logical watcher invalidates cached availability on failure, rediscovers the
-assignment, backs off and recreates desired subscriptions. Local-to-remote and
-remote-to-local changes use the same resume loop; no separate recovery state
-machine exists. Attempt cancellation/Close unblocks Send and Recv and the old
-receiver is joined before a replacement starts. Re-subscription waits for the
-old unsubscribe acknowledgement, preventing stale snapshots from becoming the
-new initial result. No wire subscription ID is introduced.
+Each snapshot owns its replica slice and value-type versions. Invalid means
+uninitialized/disconnected, distinct from an authoritative empty set. The upper
+callback dispatcher coalesces pending notifications and invokes handlers outside
+state and transport locks. Logical Subscription.Close is safe inside a callback;
+an already selected callback may finish after Close. Application handlers must
+not block on I/O or close the owning client. Closing the resuming client joins
+its recovery loops and callbacks. WALAccesser owns it and closes it before
+waiting for HandlerClient operations or closing HandlerClient.
 
-This follows TransformLog's lifetime/dispatch patterns with an independent
-implementation. Latest-state snapshots need no cursor, replay or SyncUp.
+Latest-state discovery shares TransformLog's layering and extensible protocol
+shape, but has no cursor, replay or SyncUp semantics.
 
 ## Query routing boundary
 
@@ -150,4 +156,6 @@ handoff/reconnect, slow subscribers, cancellation, and bounded pending state.
 Key packages: `internal/views/replicadiscovery`,
 `internal/streamingnode/server/wal/snview`,
 `internal/streamingnode/server/wal/adaptor`,
-`internal/streamingnode/client/handler`.
+`internal/streamingnode/client/handler/replicadiscovery`,
+`internal/distributed/streaming/internal/replicadiscovery`,
+`internal/streamingnode/server/service/handler/replicadiscovery`.

@@ -21,7 +21,12 @@ hidden same-node gRPC retries, and wrap a missing session with
 so a racing resolver update cannot be lost. The QN session observer/transport
 implementation and Proxy ownership wiring remain in the parent integration;
 this branch supplies their contracts and verifies retry behavior through injection.
-The owner must call `Client.Close` before closing its handler clients.
+Inject `streaming.WAL().QueryViewClient()` as QueryPlanClient: it combines
+owner-routed query RPCs with the streaming-owned resuming replica client.
+`HandlerClient.QueryViewClient()` provides only query RPCs and no longer satisfies
+the discovery contract by itself. The parent Proxy must adapt this injection
+when absorbing the extraction. Query clients close their logical subscriptions
+before the shared WALAccesser shuts down; they do not close that shared owner.
 
 ## Planning, dispatch and retries
 
@@ -171,7 +176,7 @@ handling; the new response carries only a successful row count.
 ## StreamingNode replica discovery
 
 [Replica Discovery](replica_discovery.md) defines the resumable, PChannel-multiplexed
-VChannel Watch exposed by ViewQueryService. It supplies each candidate ReplicaID
+VChannel subscriptions exposed by StreamingNodeHandlerService. It supplies each candidate ReplicaID
 and its maximum locally Up QueryViewVersion, including updates when only the
 version changes. These versions are routing hints, not pinned query versions;
 QueryViewClient uses this directory for explicit selection and failover as

@@ -18,6 +18,7 @@ import (
 	streamingserviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/resolver"
+	"github.com/milvus-io/milvus/internal/views/replicadiscovery"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -118,6 +119,8 @@ type HandlerClient interface {
 
 	// AcquireTransformLogStream creates a PChannel-level transform event stream.
 	AcquireTransformLogStream(ctx context.Context, pchannel string) (wal.TransformLogStream, error)
+
+	AcquireReplicaWatchStream(ctx context.Context, pchannel string) (replicadiscovery.Stream, error)
 
 	// QueryViewSyncClient returns the QueryView sync domain client.
 	QueryViewSyncClient() QueryViewSyncClient

@@ -26,17 +26,15 @@ func setupTestReplicaRouting(t *testing.T) {
 
 type replicaTestSource struct{ QueryPlanClient }
 
-func (*replicaTestSource) SubscribeReplicas(string, replicadiscovery.Handler) (*replicadiscovery.Subscription, error) {
+func (*replicaTestSource) SubscribeReplicas(string, replicadiscovery.Handler) (replicadiscovery.Subscription, error) {
 	panic("mockey")
 }
 
 func newTestReplicaRouter(t *testing.T) (*replicaRouter, *replicadiscovery.Directory) {
 	d := replicadiscovery.NewDirectory()
-	manager := replicadiscovery.NewManager(func(ctx context.Context, _ string) (replicadiscovery.Stream, error) {
-		return replicadiscovery.NewLocalStream(ctx, d.Watch(), nil), nil
-	})
-	patch := mockey.Mock((*replicaTestSource).SubscribeReplicas).To(func(_ *replicaTestSource, vc string, h replicadiscovery.Handler) (*replicadiscovery.Subscription, error) {
-		return manager.Subscribe(vc, h)
+	manager := d.AcquireStream(t.Context(), "p", nil)
+	patch := mockey.Mock((*replicaTestSource).SubscribeReplicas).To(func(_ *replicaTestSource, vc string, h replicadiscovery.Handler) (replicadiscovery.Subscription, error) {
+		return manager.Subscribe(t.Context(), vc, h)
 	}).Build()
 	r := newReplicaRouter(&replicaTestSource{})
 	t.Cleanup(func() { r.Close(); manager.Close(); d.Close(); patch.UnPatch() })

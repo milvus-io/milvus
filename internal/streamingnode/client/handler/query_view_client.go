@@ -8,7 +8,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/internal/views/replicadiscovery"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	worknodehandler "github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -20,9 +19,6 @@ import (
 
 // QueryViewClient is the QueryView domain client under HandlerClient.
 type QueryViewClient interface {
-	// SubscribeReplicas shares discovery and callback dispatch by PChannel.
-	SubscribeReplicas(vchannel string, handler replicadiscovery.Handler) (*replicadiscovery.Subscription, error)
-
 	// GetQueryPlan generates a shard-level query plan from the StreamingNode owning the shard pchannel.
 	GetQueryPlan(ctx context.Context, shardID qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error)
 
@@ -38,7 +34,6 @@ type QueryViewClient interface {
 
 type queryViewClient struct {
 	owner            *handlerClientImpl
-	replicas         *replicadiscovery.Manager
 	queryPlanService lazygrpc.Service[viewpb.QueryPlanServiceClient]
 	viewQueryService lazygrpc.Service[viewpb.ViewQueryServiceClient]
 }
@@ -54,7 +49,6 @@ func newQueryViewClient(owner *handlerClientImpl, conn lazygrpc.Conn) QueryViewC
 		queryPlanService: lazygrpc.WithServiceCreator(conn, viewpb.NewQueryPlanServiceClient),
 		viewQueryService: lazygrpc.WithServiceCreator(conn, viewpb.NewViewQueryServiceClient),
 	}
-	client.replicas = replicadiscovery.NewManager(client.createReplicaWatchStream)
 	return client
 }
 

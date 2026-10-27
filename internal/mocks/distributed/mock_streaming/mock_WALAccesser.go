@@ -73,7 +73,7 @@ func (_c *MockWALAccesser_AnalyzerClient_Call) RunAndReturn(run func() streaming
 }
 
 // AppendMessages provides a mock function with given fields: ctx, msgs
-func (_m *MockWALAccesser) AppendMessages(ctx context.Context, msgs ...message.MutableMessage) streaming.AppendResponses {
+func (_m *MockWALAccesser) AppendMessages(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
 	_va := make([]interface{}, len(msgs))
 	for _i := range msgs {
 		_va[_i] = msgs[_i]
@@ -87,11 +87,11 @@ func (_m *MockWALAccesser) AppendMessages(ctx context.Context, msgs ...message.M
 		panic("no return value specified for AppendMessages")
 	}
 
-	var r0 streaming.AppendResponses
-	if rf, ok := ret.Get(0).(func(context.Context, ...message.MutableMessage) streaming.AppendResponses); ok {
+	var r0 types.AppendResponses
+	if rf, ok := ret.Get(0).(func(context.Context, ...message.MutableMessage) types.AppendResponses); ok {
 		r0 = rf(ctx, msgs...)
 	} else {
-		r0 = ret.Get(0).(streaming.AppendResponses)
+		r0 = ret.Get(0).(types.AppendResponses)
 	}
 
 	return r0
@@ -123,18 +123,18 @@ func (_c *MockWALAccesser_AppendMessages_Call) Run(run func(ctx context.Context,
 	return _c
 }
 
-func (_c *MockWALAccesser_AppendMessages_Call) Return(_a0 streaming.AppendResponses) *MockWALAccesser_AppendMessages_Call {
+func (_c *MockWALAccesser_AppendMessages_Call) Return(_a0 types.AppendResponses) *MockWALAccesser_AppendMessages_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockWALAccesser_AppendMessages_Call) RunAndReturn(run func(context.Context, ...message.MutableMessage) streaming.AppendResponses) *MockWALAccesser_AppendMessages_Call {
+func (_c *MockWALAccesser_AppendMessages_Call) RunAndReturn(run func(context.Context, ...message.MutableMessage) types.AppendResponses) *MockWALAccesser_AppendMessages_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // AppendMessagesWithOptions provides a mock function with given fields: ctx, msgs, opts
-func (_m *MockWALAccesser) AppendMessagesWithOptions(ctx context.Context, msgs []message.MutableMessage, opts ...streaming.AppendOption) streaming.AppendResponses {
+func (_m *MockWALAccesser) AppendMessagesWithOptions(ctx context.Context, msgs []message.MutableMessage, opts ...streaming.AppendOption) types.AppendResponses {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]
@@ -148,11 +148,11 @@ func (_m *MockWALAccesser) AppendMessagesWithOptions(ctx context.Context, msgs [
 		panic("no return value specified for AppendMessagesWithOptions")
 	}
 
-	var r0 streaming.AppendResponses
-	if rf, ok := ret.Get(0).(func(context.Context, []message.MutableMessage, ...streaming.AppendOption) streaming.AppendResponses); ok {
+	var r0 types.AppendResponses
+	if rf, ok := ret.Get(0).(func(context.Context, []message.MutableMessage, ...streaming.AppendOption) types.AppendResponses); ok {
 		r0 = rf(ctx, msgs, opts...)
 	} else {
-		r0 = ret.Get(0).(streaming.AppendResponses)
+		r0 = ret.Get(0).(types.AppendResponses)
 	}
 
 	return r0
@@ -185,12 +185,12 @@ func (_c *MockWALAccesser_AppendMessagesWithOptions_Call) Run(run func(ctx conte
 	return _c
 }
 
-func (_c *MockWALAccesser_AppendMessagesWithOptions_Call) Return(_a0 streaming.AppendResponses) *MockWALAccesser_AppendMessagesWithOptions_Call {
+func (_c *MockWALAccesser_AppendMessagesWithOptions_Call) Return(_a0 types.AppendResponses) *MockWALAccesser_AppendMessagesWithOptions_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockWALAccesser_AppendMessagesWithOptions_Call) RunAndReturn(run func(context.Context, []message.MutableMessage, ...streaming.AppendOption) streaming.AppendResponses) *MockWALAccesser_AppendMessagesWithOptions_Call {
+func (_c *MockWALAccesser_AppendMessagesWithOptions_Call) RunAndReturn(run func(context.Context, []message.MutableMessage, ...streaming.AppendOption) types.AppendResponses) *MockWALAccesser_AppendMessagesWithOptions_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -424,6 +424,53 @@ func (_c *MockWALAccesser_Local_Call) Return(_a0 streaming.Local) *MockWALAccess
 }
 
 func (_c *MockWALAccesser_Local_Call) RunAndReturn(run func() streaming.Local) *MockWALAccesser_Local_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// QueryViewClient provides a mock function with no fields
+func (_m *MockWALAccesser) QueryViewClient() streaming.QueryViewClient {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for QueryViewClient")
+	}
+
+	var r0 streaming.QueryViewClient
+	if rf, ok := ret.Get(0).(func() streaming.QueryViewClient); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(streaming.QueryViewClient)
+		}
+	}
+
+	return r0
+}
+
+// MockWALAccesser_QueryViewClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryViewClient'
+type MockWALAccesser_QueryViewClient_Call struct {
+	*mock.Call
+}
+
+// QueryViewClient is a helper method to define mock.On call
+func (_e *MockWALAccesser_Expecter) QueryViewClient() *MockWALAccesser_QueryViewClient_Call {
+	return &MockWALAccesser_QueryViewClient_Call{Call: _e.mock.On("QueryViewClient")}
+}
+
+func (_c *MockWALAccesser_QueryViewClient_Call) Run(run func()) *MockWALAccesser_QueryViewClient_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWALAccesser_QueryViewClient_Call) Return(_a0 streaming.QueryViewClient) *MockWALAccesser_QueryViewClient_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWALAccesser_QueryViewClient_Call) RunAndReturn(run func() streaming.QueryViewClient) *MockWALAccesser_QueryViewClient_Call {
 	_c.Call.Return(run)
 	return _c
 }

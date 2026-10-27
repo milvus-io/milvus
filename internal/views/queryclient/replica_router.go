@@ -26,7 +26,7 @@ type replicaRoute struct {
 	snapshot replicadiscovery.Snapshot
 	changed  chan struct{}
 	next     uint64
-	sub      *replicadiscovery.Subscription
+	sub      replicadiscovery.Subscription
 	closed   bool
 }
 

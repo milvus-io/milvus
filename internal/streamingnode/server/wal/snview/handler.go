@@ -308,3 +308,8 @@ func (h *SNQueryViewHandler) acquireUpViewForSchema(ctx context.Context, shardID
 func (h *SNQueryViewHandler) WatchReplicas() *replicadiscovery.Watch {
 	return h.replicas.Watch()
 }
+
+// AcquireReplicaWatchStream observes local eligibility without a View lease.
+func (h *SNQueryViewHandler) AcquireReplicaWatchStream(ctx context.Context, pchannel string, unavailable <-chan struct{}) replicadiscovery.Stream {
+	return h.replicas.AcquireStream(ctx, pchannel, unavailable)
+}

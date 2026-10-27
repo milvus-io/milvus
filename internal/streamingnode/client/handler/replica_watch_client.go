@@ -4,66 +4,47 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
+	remote "github.com/milvus-io/milvus/internal/streamingnode/client/handler/replicadiscovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/views/replicadiscovery"
-	worknodehandler "github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func (qvc *queryViewClient) SubscribeReplicas(vchannel string, handler replicadiscovery.Handler) (*replicadiscovery.Subscription, error) {
-	if !qvc.owner.lifetime.Add(typeutil.LifetimeStateWorking) {
+// AcquireReplicaWatchStream creates one owner-bound stream. Recovery belongs to
+// the streaming client's resuming layer, as for AcquireTransformLogStream.
+func (hc *handlerClientImpl) AcquireReplicaWatchStream(ctx context.Context, pchannel string) (replicadiscovery.Stream, error) {
+	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, ErrClientClosed
 	}
-	defer qvc.owner.lifetime.Done()
-	return qvc.replicas.Subscribe(vchannel, handler)
-}
-
-func (qvc *queryViewClient) createReplicaWatchStream(ctx context.Context, pchannel string) (replicadiscovery.Stream, error) {
-	if !qvc.owner.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return nil, ErrClientClosed
+	defer hc.lifetime.Done()
+	if pchannel == "" {
+		return nil, status.NewInvalidArgument("pchannel is required")
 	}
-	defer qvc.owner.lifetime.Done()
-	logger := mlog.With(mlog.FieldPChannel(pchannel), mlog.String("handler", "ViewQueryService.WatchVChannelReplicas"))
-	result, err := qvc.owner.createHandlerAfterStreamingNodeReady(ctx, logger, pchannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
+	logger := mlog.With(mlog.FieldPChannel(pchannel), mlog.String("handler", "replica-watch"))
+	result, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, pchannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
 		local, err := registry.GetLocalAvailableWAL(assign.Channel)
 		if err == nil {
 			provider, ok := wal.Unwrap(local).(replicadiscovery.Provider)
 			if !ok {
-				return nil, status.NewOnShutdownError("local replica directory is unavailable")
+				return nil, status.NewOnShutdownError("local replica directory unavailable")
 			}
-			watch, err := provider.WatchReplicas()
-			if err != nil {
-				return nil, err
-			}
-			return replicadiscovery.NewLocalStream(ctx, watch, local.Unavailable()), nil
+			return provider.AcquireReplicaWatchStream(ctx)
 		}
 		if !shouldUseRemoteWAL(err) {
 			return nil, err
 		}
-		client, err := qvc.viewQueryService.GetService(ctx)
+		client, err := hc.service.GetService(ctx)
 		if err != nil {
 			return nil, err
 		}
-		attemptCtx, cancel := context.WithCancel(ctx)
-		stream, err := client.WatchVChannelReplicas(worknodehandler.EncodeQueryViewPChannelToOutgoingContext(attemptCtx, assign.Channel))
-		if err == nil {
-			var response *viewpb.WatchVChannelReplicasResponse
-			response, err = stream.Recv()
-			if err == nil && !response.GetReady() {
-				err = status.NewInvalidRequestSeq("first replica watch response must acknowledge stream creation")
-			}
-		}
+		stream, err := remote.CreateEventStream(ctx, &remote.EventStreamOptions{Assignment: assign}, client)
 		if err != nil {
-			cancel()
-			return nil, status.ConvertStreamingError("ViewQueryService.WatchVChannelReplicas", err)
+			return nil, status.ConvertStreamingError("StreamingNodeHandlerService.SubscribeReplicas", err)
 		}
-		// Release the attempt child on RPC completion as well as logical cancellation.
-		context.AfterFunc(stream.Context(), cancel)
-		return replicadiscovery.NewRemoteStream(stream, cancel), nil
+		return stream, nil
 	})
 	if err != nil {
 		return nil, err

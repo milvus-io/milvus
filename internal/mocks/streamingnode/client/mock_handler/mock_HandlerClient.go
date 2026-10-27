@@ -6,7 +6,11 @@ import (
 	context "context"
 
 	handler "github.com/milvus-io/milvus/internal/streamingnode/client/handler"
+	consumer "github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
+	producer "github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
 	wal "github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	utility "github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	replicadiscovery "github.com/milvus-io/milvus/internal/views/replicadiscovery"
 	streamingpb "github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	types "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	mock "github.com/stretchr/testify/mock"
@@ -23,6 +27,65 @@ type MockHandlerClient_Expecter struct {
 
 func (_m *MockHandlerClient) EXPECT() *MockHandlerClient_Expecter {
 	return &MockHandlerClient_Expecter{mock: &_m.Mock}
+}
+
+// AcquireReplicaWatchStream provides a mock function with given fields: ctx, pchannel
+func (_m *MockHandlerClient) AcquireReplicaWatchStream(ctx context.Context, pchannel string) (replicadiscovery.Stream, error) {
+	ret := _m.Called(ctx, pchannel)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AcquireReplicaWatchStream")
+	}
+
+	var r0 replicadiscovery.Stream
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (replicadiscovery.Stream, error)); ok {
+		return rf(ctx, pchannel)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) replicadiscovery.Stream); ok {
+		r0 = rf(ctx, pchannel)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(replicadiscovery.Stream)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, pchannel)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockHandlerClient_AcquireReplicaWatchStream_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AcquireReplicaWatchStream'
+type MockHandlerClient_AcquireReplicaWatchStream_Call struct {
+	*mock.Call
+}
+
+// AcquireReplicaWatchStream is a helper method to define mock.On call
+//   - ctx context.Context
+//   - pchannel string
+func (_e *MockHandlerClient_Expecter) AcquireReplicaWatchStream(ctx interface{}, pchannel interface{}) *MockHandlerClient_AcquireReplicaWatchStream_Call {
+	return &MockHandlerClient_AcquireReplicaWatchStream_Call{Call: _e.mock.On("AcquireReplicaWatchStream", ctx, pchannel)}
+}
+
+func (_c *MockHandlerClient_AcquireReplicaWatchStream_Call) Run(run func(ctx context.Context, pchannel string)) *MockHandlerClient_AcquireReplicaWatchStream_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockHandlerClient_AcquireReplicaWatchStream_Call) Return(_a0 replicadiscovery.Stream, _a1 error) *MockHandlerClient_AcquireReplicaWatchStream_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockHandlerClient_AcquireReplicaWatchStream_Call) RunAndReturn(run func(context.Context, string) (replicadiscovery.Stream, error)) *MockHandlerClient_AcquireReplicaWatchStream_Call {
+	_c.Call.Return(run)
+	return _c
 }
 
 // AcquireTransformLogStream provides a mock function with given fields: ctx, pchannel
@@ -117,23 +180,23 @@ func (_c *MockHandlerClient_Close_Call) RunAndReturn(run func()) *MockHandlerCli
 }
 
 // CreateConsumer provides a mock function with given fields: ctx, opts
-func (_m *MockHandlerClient) CreateConsumer(ctx context.Context, opts *handler.ConsumerOptions) (handler.Consumer, error) {
+func (_m *MockHandlerClient) CreateConsumer(ctx context.Context, opts *handler.ConsumerOptions) (consumer.Consumer, error) {
 	ret := _m.Called(ctx, opts)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreateConsumer")
 	}
 
-	var r0 handler.Consumer
+	var r0 consumer.Consumer
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *handler.ConsumerOptions) (handler.Consumer, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *handler.ConsumerOptions) (consumer.Consumer, error)); ok {
 		return rf(ctx, opts)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *handler.ConsumerOptions) handler.Consumer); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *handler.ConsumerOptions) consumer.Consumer); ok {
 		r0 = rf(ctx, opts)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(handler.Consumer)
+			r0 = ret.Get(0).(consumer.Consumer)
 		}
 	}
 
@@ -165,34 +228,34 @@ func (_c *MockHandlerClient_CreateConsumer_Call) Run(run func(ctx context.Contex
 	return _c
 }
 
-func (_c *MockHandlerClient_CreateConsumer_Call) Return(_a0 handler.Consumer, _a1 error) *MockHandlerClient_CreateConsumer_Call {
+func (_c *MockHandlerClient_CreateConsumer_Call) Return(_a0 consumer.Consumer, _a1 error) *MockHandlerClient_CreateConsumer_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockHandlerClient_CreateConsumer_Call) RunAndReturn(run func(context.Context, *handler.ConsumerOptions) (handler.Consumer, error)) *MockHandlerClient_CreateConsumer_Call {
+func (_c *MockHandlerClient_CreateConsumer_Call) RunAndReturn(run func(context.Context, *handler.ConsumerOptions) (consumer.Consumer, error)) *MockHandlerClient_CreateConsumer_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // CreateProducer provides a mock function with given fields: ctx, opts
-func (_m *MockHandlerClient) CreateProducer(ctx context.Context, opts *handler.ProducerOptions) (handler.Producer, error) {
+func (_m *MockHandlerClient) CreateProducer(ctx context.Context, opts *handler.ProducerOptions) (producer.Producer, error) {
 	ret := _m.Called(ctx, opts)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreateProducer")
 	}
 
-	var r0 handler.Producer
+	var r0 producer.Producer
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *handler.ProducerOptions) (handler.Producer, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *handler.ProducerOptions) (producer.Producer, error)); ok {
 		return rf(ctx, opts)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *handler.ProducerOptions) handler.Producer); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *handler.ProducerOptions) producer.Producer); ok {
 		r0 = rf(ctx, opts)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(handler.Producer)
+			r0 = ret.Get(0).(producer.Producer)
 		}
 	}
 
@@ -224,12 +287,12 @@ func (_c *MockHandlerClient_CreateProducer_Call) Run(run func(ctx context.Contex
 	return _c
 }
 
-func (_c *MockHandlerClient_CreateProducer_Call) Return(_a0 handler.Producer, _a1 error) *MockHandlerClient_CreateProducer_Call {
+func (_c *MockHandlerClient_CreateProducer_Call) Return(_a0 producer.Producer, _a1 error) *MockHandlerClient_CreateProducer_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockHandlerClient_CreateProducer_Call) RunAndReturn(run func(context.Context, *handler.ProducerOptions) (handler.Producer, error)) *MockHandlerClient_CreateProducer_Call {
+func (_c *MockHandlerClient_CreateProducer_Call) RunAndReturn(run func(context.Context, *handler.ProducerOptions) (producer.Producer, error)) *MockHandlerClient_CreateProducer_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -351,23 +414,23 @@ func (_c *MockHandlerClient_GetLatestMVCCTimestampIfLocal_Call) RunAndReturn(run
 }
 
 // GetReplicateCheckpoint provides a mock function with given fields: ctx, channelName
-func (_m *MockHandlerClient) GetReplicateCheckpoint(ctx context.Context, channelName string) (*wal.ReplicateCheckpoint, error) {
+func (_m *MockHandlerClient) GetReplicateCheckpoint(ctx context.Context, channelName string) (*utility.ReplicateCheckpoint, error) {
 	ret := _m.Called(ctx, channelName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetReplicateCheckpoint")
 	}
 
-	var r0 *wal.ReplicateCheckpoint
+	var r0 *utility.ReplicateCheckpoint
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) (*wal.ReplicateCheckpoint, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*utility.ReplicateCheckpoint, error)); ok {
 		return rf(ctx, channelName)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) *wal.ReplicateCheckpoint); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) *utility.ReplicateCheckpoint); ok {
 		r0 = rf(ctx, channelName)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*wal.ReplicateCheckpoint)
+			r0 = ret.Get(0).(*utility.ReplicateCheckpoint)
 		}
 	}
 
@@ -399,34 +462,34 @@ func (_c *MockHandlerClient_GetReplicateCheckpoint_Call) Run(run func(ctx contex
 	return _c
 }
 
-func (_c *MockHandlerClient_GetReplicateCheckpoint_Call) Return(_a0 *wal.ReplicateCheckpoint, _a1 error) *MockHandlerClient_GetReplicateCheckpoint_Call {
+func (_c *MockHandlerClient_GetReplicateCheckpoint_Call) Return(_a0 *utility.ReplicateCheckpoint, _a1 error) *MockHandlerClient_GetReplicateCheckpoint_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockHandlerClient_GetReplicateCheckpoint_Call) RunAndReturn(run func(context.Context, string) (*wal.ReplicateCheckpoint, error)) *MockHandlerClient_GetReplicateCheckpoint_Call {
+func (_c *MockHandlerClient_GetReplicateCheckpoint_Call) RunAndReturn(run func(context.Context, string) (*utility.ReplicateCheckpoint, error)) *MockHandlerClient_GetReplicateCheckpoint_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // GetSalvageCheckpoint provides a mock function with given fields: ctx, channelName
-func (_m *MockHandlerClient) GetSalvageCheckpoint(ctx context.Context, channelName string) ([]*wal.ReplicateCheckpoint, error) {
+func (_m *MockHandlerClient) GetSalvageCheckpoint(ctx context.Context, channelName string) ([]*utility.ReplicateCheckpoint, error) {
 	ret := _m.Called(ctx, channelName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetSalvageCheckpoint")
 	}
 
-	var r0 []*wal.ReplicateCheckpoint
+	var r0 []*utility.ReplicateCheckpoint
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) ([]*wal.ReplicateCheckpoint, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) ([]*utility.ReplicateCheckpoint, error)); ok {
 		return rf(ctx, channelName)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) []*wal.ReplicateCheckpoint); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) []*utility.ReplicateCheckpoint); ok {
 		r0 = rf(ctx, channelName)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*wal.ReplicateCheckpoint)
+			r0 = ret.Get(0).([]*utility.ReplicateCheckpoint)
 		}
 	}
 
@@ -458,12 +521,12 @@ func (_c *MockHandlerClient_GetSalvageCheckpoint_Call) Run(run func(ctx context.
 	return _c
 }
 
-func (_c *MockHandlerClient_GetSalvageCheckpoint_Call) Return(_a0 []*wal.ReplicateCheckpoint, _a1 error) *MockHandlerClient_GetSalvageCheckpoint_Call {
+func (_c *MockHandlerClient_GetSalvageCheckpoint_Call) Return(_a0 []*utility.ReplicateCheckpoint, _a1 error) *MockHandlerClient_GetSalvageCheckpoint_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockHandlerClient_GetSalvageCheckpoint_Call) RunAndReturn(run func(context.Context, string) ([]*wal.ReplicateCheckpoint, error)) *MockHandlerClient_GetSalvageCheckpoint_Call {
+func (_c *MockHandlerClient_GetSalvageCheckpoint_Call) RunAndReturn(run func(context.Context, string) ([]*utility.ReplicateCheckpoint, error)) *MockHandlerClient_GetSalvageCheckpoint_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -581,6 +644,100 @@ func (_c *MockHandlerClient_PrepareReleaseManualFlushIfLocal_Call) Return(_a0 bo
 }
 
 func (_c *MockHandlerClient_PrepareReleaseManualFlushIfLocal_Call) RunAndReturn(run func(context.Context, int64, string, []int64) (bool, error)) *MockHandlerClient_PrepareReleaseManualFlushIfLocal_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// QueryViewClient provides a mock function with no fields
+func (_m *MockHandlerClient) QueryViewClient() handler.QueryViewClient {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for QueryViewClient")
+	}
+
+	var r0 handler.QueryViewClient
+	if rf, ok := ret.Get(0).(func() handler.QueryViewClient); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(handler.QueryViewClient)
+		}
+	}
+
+	return r0
+}
+
+// MockHandlerClient_QueryViewClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryViewClient'
+type MockHandlerClient_QueryViewClient_Call struct {
+	*mock.Call
+}
+
+// QueryViewClient is a helper method to define mock.On call
+func (_e *MockHandlerClient_Expecter) QueryViewClient() *MockHandlerClient_QueryViewClient_Call {
+	return &MockHandlerClient_QueryViewClient_Call{Call: _e.mock.On("QueryViewClient")}
+}
+
+func (_c *MockHandlerClient_QueryViewClient_Call) Run(run func()) *MockHandlerClient_QueryViewClient_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockHandlerClient_QueryViewClient_Call) Return(_a0 handler.QueryViewClient) *MockHandlerClient_QueryViewClient_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockHandlerClient_QueryViewClient_Call) RunAndReturn(run func() handler.QueryViewClient) *MockHandlerClient_QueryViewClient_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// QueryViewSyncClient provides a mock function with no fields
+func (_m *MockHandlerClient) QueryViewSyncClient() handler.QueryViewSyncClient {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for QueryViewSyncClient")
+	}
+
+	var r0 handler.QueryViewSyncClient
+	if rf, ok := ret.Get(0).(func() handler.QueryViewSyncClient); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(handler.QueryViewSyncClient)
+		}
+	}
+
+	return r0
+}
+
+// MockHandlerClient_QueryViewSyncClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryViewSyncClient'
+type MockHandlerClient_QueryViewSyncClient_Call struct {
+	*mock.Call
+}
+
+// QueryViewSyncClient is a helper method to define mock.On call
+func (_e *MockHandlerClient_Expecter) QueryViewSyncClient() *MockHandlerClient_QueryViewSyncClient_Call {
+	return &MockHandlerClient_QueryViewSyncClient_Call{Call: _e.mock.On("QueryViewSyncClient")}
+}
+
+func (_c *MockHandlerClient_QueryViewSyncClient_Call) Run(run func()) *MockHandlerClient_QueryViewSyncClient_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockHandlerClient_QueryViewSyncClient_Call) Return(_a0 handler.QueryViewSyncClient) *MockHandlerClient_QueryViewSyncClient_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockHandlerClient_QueryViewSyncClient_Call) RunAndReturn(run func() handler.QueryViewSyncClient) *MockHandlerClient_QueryViewSyncClient_Call {
 	_c.Call.Return(run)
 	return _c
 }

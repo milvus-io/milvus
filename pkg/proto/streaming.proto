@@ -382,6 +382,9 @@ service StreamingNodeHandlerService {
     // releases all subscriptions. Reconnection and resubscription are client-owned.
     rpc SubscribeTransform(stream TransformRequest) returns (stream TransformResponse) {};
 
+    // Latest replica snapshots, multiplexed on one validated PChannel owner.
+    rpc SubscribeReplicas(stream ReplicaWatchRequest) returns (stream ReplicaWatchResponse) {};
+
     // RunAnalyzer analyzes text using inline parameters on any ready StreamingNode
     // or a collection field's current analyzer on its PChannel owner. Neither mode
     // requires loaded segments. Streaming failures use gRPC errors; analyzer and
@@ -1199,3 +1202,64 @@ message StreamingNodeValidateAnalyzerResponse {
     repeated int64 resource_ids = 1;
     common.Status status = 2;
 }
+
+// Sent in creation metadata, before any subscription request.
+message CreateReplicaWatchStreamRequest {
+    PChannelInfo pchannel = 1;
+}
+
+message ReplicaWatchRequest {
+    oneof request {
+        CreateReplicaWatchSubscriptionRequest create = 1;
+        CloseReplicaWatchSubscriptionRequest close_subscription = 2;
+        CloseReplicaWatchStreamRequest close_stream = 3;
+    }
+}
+
+message CreateReplicaWatchSubscriptionRequest {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+}
+
+message CloseReplicaWatchSubscriptionRequest {
+    int64 subscription_id = 1;
+}
+
+message CloseReplicaWatchStreamRequest {}
+
+message ReplicaWatchResponse {
+    oneof response {
+        CreateReplicaWatchSubscriptionResponse create = 1;
+        ReplicaWatchSnapshot snapshot = 2;
+        ReplicaWatchSubscriptionError subscription_error = 3;
+        CloseReplicaWatchSubscriptionResponse close_subscription = 4;
+        CloseReplicaWatchStreamResponse close_stream = 5;
+        // Acknowledges owner validation before subscription requests are read.
+        CreateReplicaWatchStreamResponse create_stream = 6;
+    }
+}
+
+message CreateReplicaWatchStreamResponse {}
+
+message CreateReplicaWatchSubscriptionResponse {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+}
+
+message ReplicaWatchSnapshot {
+    int64 subscription_id = 1;
+    view.VChannelReplicas snapshot = 2;
+}
+
+message ReplicaWatchSubscriptionError {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+    StreamingError error = 3;
+}
+
+message CloseReplicaWatchSubscriptionResponse {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+}
+
+message CloseReplicaWatchStreamResponse {}

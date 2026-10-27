@@ -184,6 +184,7 @@ type Balancer interface {
 type WALAccesser interface {
 	// TransformLogStreamManager returns independently closeable transform streams.
 	TransformLogStreamManager() wal.TransformLogStreamManager
+	QueryViewClient() QueryViewClient
 
 	// AnalyzerClient returns the analyzer domain client backed by streaming discovery.
 	AnalyzerClient() AnalyzerClient

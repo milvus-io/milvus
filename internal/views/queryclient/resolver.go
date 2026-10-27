@@ -12,7 +12,7 @@ import (
 // Implementation handles StreamingNode resolution and gRPC connection management internally.
 // ShardID is used as the routing key to locate the owning StreamingNode.
 type QueryPlanClient interface {
-	SubscribeReplicas(vchannel string, handler replicadiscovery.Handler) (*replicadiscovery.Subscription, error)
+	SubscribeReplicas(vchannel string, handler replicadiscovery.Handler) (replicadiscovery.Subscription, error)
 
 	// GetQueryPlan generates a shard-level query plan from the StreamingNode owning the given shard.
 	GetQueryPlan(ctx context.Context, shardID qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error)

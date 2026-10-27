@@ -387,10 +387,7 @@ func (hc *handlerClientImpl) waitForNextBackoff(ctx context.Context, pchannel st
 // Close closes the handler client.
 func (hc *handlerClientImpl) Close() {
 	hc.lifetime.SetState(typeutil.LifetimeStateStopped)
-	// Cancel discovery before waiting: stream creation can be waiting for an owner.
-	if client, ok := hc.queryViewClient.(*queryViewClient); ok && client.replicas != nil {
-		client.replicas.Close()
-	}
+	// Owners close resumable clients before joining physical stream acquisition.
 	hc.lifetime.Wait()
 
 	hc.watcher.Close()
