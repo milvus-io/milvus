@@ -529,3 +529,30 @@ func TestForcePromoteSplitShardRestartMidway(t *testing.T) {
 	assert.Less(t, runs[0][fpSplitSource].TimeTick, runs[0][fpSplitTargetA].TimeTick)
 	assert.Less(t, runs[0][fpSplitSource].TimeTick, runs[0][fpSplitTargetB].TimeTick)
 }
+
+// TestForcePromoteSkipsASplitTaskRecordedAsCompleted: a task rebuilt from a late
+// duplicate target replica (only that target acked) whose split is on record as
+// completed on this cluster. Re-driving it would append its source replica into
+// a source the completed split has retired, which refuses it forever and keeps
+// the promotion from finishing; the promotion skips it instead.
+func TestForcePromoteSkipsASplitTaskRecordedAsCompleted(t *testing.T) {
+	recorder := initForcePromoteSplitShardGlobals(t)
+	registry.RegisterAppendFirstReplicaRecordedChecker(func(_ context.Context, vchannel string) (bool, error) {
+		return vchannel == fpSplitSource, nil
+	})
+
+	orphan := fpReplicatedSplitTask(t, []string{fpSplitTargetA})
+	promote := createReplicatedForcePromoteTask(fpPromoteID, []string{"cc_vcchan", "v1", "v2"}, []string{"cc_vcchan", "v1", "v2"})
+
+	catalog := newFPCatalog()
+	wal := &fpWAL{t: t, catalog: catalog, nextTick: fpPromotedTickBase}
+	bc := startPromotedCoord(t, []*streamingpb.BroadcastTask{orphan, promote}, catalog, wal)
+	defer bc.Close()
+
+	require.Eventually(t, func() bool {
+		return catalog.tombstoned.Contain(fpPromoteID)
+	}, 30*time.Second, 10*time.Millisecond, "the promotion must finish past the orphan")
+	assert.Empty(t, splitRecords(wal.records()), "no replica of the orphan is re-driven")
+	assert.False(t, catalog.tombstoned.Contain(fpSplitBroadcastID))
+	assert.Empty(t, recorder.runs(), "the completed split's callback does not run again")
+}

@@ -345,6 +345,13 @@ func (bm *broadcastTaskManager) Ack(ctx context.Context, msg message.ImmutableMe
 	ctx, cancel := contextutil.MergeContext(ctx, bm.ctx)
 	defer cancel()
 
+	if bm.isLateReplicaOfRecordedBroadcast(ctx, msg) {
+		bm.Logger().Info(ctx,
+			"ignored the ack of a late replica: its broadcast already completed and was collected on this cluster",
+			mlog.FieldBroadcastID(msg.BroadcastHeader().BroadcastID),
+			mlog.FieldVChannel(msg.VChannel()))
+		return nil
+	}
 	t, ok := bm.getOrCreateBroadcastTask(msg)
 	if !ok {
 		bm.Logger().Debug(ctx,
@@ -467,10 +474,11 @@ var appendFirstRecordedRecheckInterval = 5 * time.Second
 // broadcast completed here:
 //   - once the task has been tombstoned and collected, nothing recreates it
 //     except the ack of a replica that already passed this gate;
-//   - once one such copy has passed and been acked, getOrCreateBroadcastTask
-//     rebuilds the task from it alone, and a second copy -- of another target, or
-//     of the same one -- would wait on that task for a source ack that already
-//     happened and is never delivered again.
+//   - once one such copy has passed and been acked, its ack does not rebuild the
+//     task when the record is there (isLateReplicaOfRecordedBroadcast), but it
+//     does when the checker could not answer, and a second copy -- of another
+//     target, or of the same one -- would then wait on that rebuilt task for a
+//     source ack that already happened and is never delivered again.
 //
 // A record is sufficient on its own because a checker answers true only after
 // the named replica landed in this cluster's WAL, which is exactly what the
@@ -493,6 +501,45 @@ func (bm *broadcastTaskManager) appendFirstReplicasRecorded(ctx context.Context,
 		}
 	}
 	return true
+}
+
+// isLateReplicaOfRecordedBroadcast reports whether msg is a replica whose
+// broadcast has no task here although its append-first replicas are on record,
+// i.e. a second copy the primary wrote by retrying an append that had landed,
+// arriving after the broadcast completed here and its task was collected.
+//
+// The record is written by the broadcast's own ack callback (a split's
+// T_switch, by CommitShardSplit), which runs only once every replica is acked,
+// so a broadcast on record has nothing left to wait for. Rebuilding its task
+// from this replica alone would leave one that never completes: the replicas
+// acked under the collected task never ack again, and a later force promote
+// would re-drive the missing ones into a source that refuses them forever.
+//
+// A broadcast whose task is still here is not late, whatever the record says:
+// its ack goes to that task as usual.
+func (bm *broadcastTaskManager) isLateReplicaOfRecordedBroadcast(ctx context.Context, msg message.ImmutableMessage) bool {
+	if msg.ReplicateHeader() == nil {
+		return false
+	}
+	bh := msg.BroadcastHeader()
+	if len(bh.AppendFirstVChannels) == 0 {
+		return false
+	}
+	if _, ok := bm.getBroadcastTaskByID(bh.BroadcastID); ok {
+		return false
+	}
+	return bm.appendFirstReplicasRecorded(ctx, bh.BroadcastID, bh.AppendFirstVChannels)
+}
+
+// isRecordedComplete reports whether an incomplete task is one the record says
+// already completed here: a task rebuilt from a late replica before this check
+// existed, or while the checker could not answer.
+func (bm *broadcastTaskManager) isRecordedComplete(ctx context.Context, task *broadcastTask) bool {
+	bh := task.Header()
+	if len(bh.AppendFirstVChannels) == 0 {
+		return false
+	}
+	return bm.appendFirstReplicasRecorded(ctx, bh.BroadcastID, bh.AppendFirstVChannels)
 }
 
 func (bm *broadcastTaskManager) logAppendGateOpenedByRecord(ctx context.Context, broadcastID uint64, vchannels []string) {

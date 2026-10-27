@@ -503,22 +503,55 @@ func TestWaitVChannelsAckedOnACollectedBroadcast(t *testing.T) {
 		}
 	})
 
-	t.Run("a task rebuilt from a first duplicate does not hold a second one", func(t *testing.T) {
+	t.Run("the ack of a duplicate on record does not rebuild the collected task", func(t *testing.T) {
 		bm := collected(t)
 		defer bm.Close()
 		registry.RegisterAppendFirstReplicaRecordedChecker(func(_ context.Context, vchannel string) (bool, error) {
 			return vchannel == source, nil
 		})
-		// The first duplicate passes and is acked: the manager rebuilds the task
-		// from that replica alone, with the source unacked in it.
+		// The first duplicate passes and is acked. Its broadcast is on record, so
+		// the ack is dropped instead of rebuilding a task the source never acks.
 		require.NoError(t, waitBriefly(bm))
+		msg := createNewSplitShardBroadcastMsg([]string{source, target}, source).WithBroadcastID(broadcastID)
+		require.NoError(t, bm.Ack(context.Background(), replicatedReplicaOf(msg, target, 400)))
+		_, ok := bm.getBroadcastTaskByID(broadcastID)
+		assert.False(t, ok, "a late replica of a recorded broadcast must not leave an orphan task")
+		assert.Empty(t, bm.getIncompleteBroadcastTasks())
+		// A second duplicate still passes.
+		assert.NoError(t, waitBriefly(bm))
+	})
+
+	t.Run("without a record the ack of a duplicate still rebuilds the task", func(t *testing.T) {
+		bm := collected(t)
+		defer bm.Close()
+		registry.RegisterAppendFirstReplicaRecordedChecker(func(context.Context, string) (bool, error) {
+			return false, errors.New("mock datacoord unavailable")
+		})
+		// A checker that cannot answer keeps the old behavior: the replica may
+		// belong to a broadcast that has not completed here, whose task it starts.
 		msg := createNewSplitShardBroadcastMsg([]string{source, target}, source).WithBroadcastID(broadcastID)
 		require.NoError(t, bm.Ack(context.Background(), replicatedReplicaOf(msg, target, 400)))
 		rebuilt, ok := bm.getBroadcastTaskByID(broadcastID)
 		require.True(t, ok)
-		require.Equal(t, []string{source}, rebuilt.UnackedVChannels([]string{source}))
-		// A second duplicate still passes.
-		assert.NoError(t, waitBriefly(bm))
+		assert.Equal(t, []string{source}, rebuilt.UnackedVChannels([]string{source}))
+	})
+
+	t.Run("a replica of a task still here is acked into it whatever the record says", func(t *testing.T) {
+		bm := newWaitTestManager(t)
+		defer bm.Close()
+		registry.RegisterAppendFirstReplicaRecordedChecker(func(context.Context, string) (bool, error) { return true, nil })
+		msg := createNewSplitShardBroadcastMsg([]string{source, target}, source).WithBroadcastID(broadcastID)
+		require.NoError(t, bm.Ack(context.Background(), replicatedReplicaOf(msg, source, 600)))
+		_, ok := bm.getBroadcastTaskByID(broadcastID)
+		require.False(t, ok, "the first replica of a recorded broadcast must not create a task either")
+
+		registry.RegisterAppendFirstReplicaRecordedChecker(func(context.Context, string) (bool, error) { return false, nil })
+		require.NoError(t, bm.Ack(context.Background(), replicatedReplicaOf(msg, source, 600)))
+		registry.RegisterAppendFirstReplicaRecordedChecker(func(context.Context, string) (bool, error) { return true, nil })
+		require.NoError(t, bm.Ack(context.Background(), replicatedReplicaOf(msg, target, 601)))
+		task, ok := bm.getBroadcastTaskByID(broadcastID)
+		require.True(t, ok)
+		assert.Empty(t, task.UnackedVChannels([]string{source, target}))
 	})
 
 	t.Run("a record that appears while the gate waits on an existing task opens it", func(t *testing.T) {
