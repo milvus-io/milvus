@@ -1237,6 +1237,9 @@ func (t *QueryTask) executeByQueryView(ctx context.Context) error {
 			if closeErr != nil {
 				return closeErr
 			}
+			for _, plan := range result.Plans {
+				reducedResult.FeatureBits |= queryclient.ExecutionSummaryFeatureBits(plan.ExecutionSummary)
+			}
 			t.resultBuf.Insert(reducedResult)
 		}
 

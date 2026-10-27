@@ -1649,6 +1649,7 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 		}
 
 		for _, plan := range result.Plans {
+			featureBits |= queryclient.ExecutionSummaryFeatureBits(plan.ExecutionSummary)
 			queryChannelsTs[plan.ShardID.VChannel] = max(plan.Mvcc.GetGrowingTimetick(), plan.Mvcc.GetTransformingTimetick())
 		}
 		var reducedResult *milvuspb.SearchResults

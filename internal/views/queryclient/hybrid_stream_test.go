@@ -3,6 +3,7 @@ package queryclient
 import (
 	"context"
 	"io"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -29,6 +30,7 @@ func hybridStreamRequest() *internalpb.SearchRequest {
 }
 
 func TestHybridStreamsShareOptimizedShardPlan(t *testing.T) {
+	setupTestReplicaRouting(t)
 	for _, skipped := range []bool{false, true} {
 		t.Run(map[bool]string{false: "both", true: "skipped"}[skipped], func(t *testing.T) {
 			request := hybridStreamRequest()
@@ -43,6 +45,7 @@ func TestHybridStreamsShareOptimizedShardPlan(t *testing.T) {
 			plan.Request = &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: planned}
 			planClient := &fakeQueryPlanClient{plan: plan}
 			var opened []*fakeSearchStream
+			var mu sync.Mutex
 			service := &fakeViewQueryServiceClient{searchOnViewStream: func(_ context.Context, node qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
 				require.False(t, req.GetLegacyReq().GetIsAdvanced())
 				require.Empty(t, req.GetLegacyReq().GetSubReqs())
@@ -58,7 +61,9 @@ func TestHybridStreamsShareOptimizedShardPlan(t *testing.T) {
 					require.EqualValues(t, 102, req.GetLegacyReq().GetFieldId())
 				}
 				stream := &fakeSearchStream{}
+				mu.Lock()
 				opened = append(opened, stream)
+				mu.Unlock()
 				return stream, nil
 			}}
 			streams, retainedPlan, err := newShardViewQueryClient(1, planClient, service).SearchStreams(context.Background(), &ShardSearchRequest{Req: request, VChannel: shard.VChannel}, 20)
@@ -82,6 +87,7 @@ func TestHybridStreamsShareOptimizedShardPlan(t *testing.T) {
 }
 
 func TestHybridStreamSetupFailureClosesEarlierSubSearches(t *testing.T) {
+	setupTestReplicaRouting(t)
 	request := hybridStreamRequest()
 	shard := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	plan := legacySearchPlan(shard, qviews.NewQueryNode(11))
@@ -101,6 +107,7 @@ func TestHybridStreamSetupFailureClosesEarlierSubSearches(t *testing.T) {
 }
 
 func TestHybridStreamsPreserveElementAndEmbeddingListRequests(t *testing.T) {
+	setupTestReplicaRouting(t)
 	request := hybridStreamRequest()
 	for index, kind := range []commonpb.PlaceholderType{commonpb.PlaceholderType_FloatVector, commonpb.PlaceholderType_EmbListFloatVector} {
 		var err error
@@ -130,6 +137,7 @@ func TestHybridStreamsPreserveElementAndEmbeddingListRequests(t *testing.T) {
 }
 
 func TestSearchStreamsPreserveRangeAndIterativeFilterPlans(t *testing.T) {
+	setupTestReplicaRouting(t)
 	for _, hybrid := range []bool{false, true} {
 		t.Run(map[bool]string{false: "ordinary", true: "hybrid"}[hybrid], func(t *testing.T) {
 			request := hybridStreamRequest()
@@ -172,6 +180,7 @@ func TestSearchStreamsPreserveRangeAndIterativeFilterPlans(t *testing.T) {
 }
 
 func TestLegacyHybridStreamsReduceEachSubSearchAcrossVChannels(t *testing.T) {
+	setupTestReplicaRouting(t)
 	request := hybridStreamRequest()
 	plans := make(map[string]*viewpb.QueryPlan)
 	channels := []string{"by-dev-rootcoord-dml_0_100v0", "by-dev-rootcoord-dml_1_100v1"}

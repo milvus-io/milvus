@@ -52,6 +52,7 @@ func TestSearchOnViewStreamSendsChunksAndEOF(t *testing.T) {
 	defer cleanup()
 	request := streamTestRequest()
 	request.StreamChunkBytes = 20
+	request.SegmentSelection = &viewpb.SegmentSelection{SegmentIds: []int64{123}, Mode: viewpb.SegmentSelection_Include}
 	stream, err := searchutil.NewGRPCReduceStream(context.Background(), client, request)
 	require.NoError(t, err)
 
@@ -78,6 +79,7 @@ func TestSearchOnViewStreamSendsChunksAndEOF(t *testing.T) {
 	require.NoError(t, stream.Close())
 	require.Equal(t, 1, tasks.releaseCount)
 	require.Equal(t, int64(10), provider.request.GetCollectionID())
+	require.Equal(t, []int64{123}, provider.selection.GetSegmentIds())
 }
 
 func TestSearchOnViewStreamSendsEmptyChunkWithMetadata(t *testing.T) {
@@ -272,6 +274,7 @@ func TestQueryOnViewStreamSendsChunksAndEOF(t *testing.T) {
 		},
 		Mvcc:             &viewpb.QueryPlanMVCC{GrowingTimetick: 10},
 		StreamChunkBytes: 32,
+		SegmentSelection: &viewpb.SegmentSelection{SegmentIds: []int64{456}, Mode: viewpb.SegmentSelection_Include},
 	}
 	stream, err := queryutil.NewGRPCReduceStream(context.Background(), client, request)
 	require.NoError(t, err)
@@ -296,6 +299,7 @@ func TestQueryOnViewStreamSendsChunksAndEOF(t *testing.T) {
 	require.NoError(t, stream.Close())
 	require.Equal(t, 1, tasks.releaseCount)
 	require.Equal(t, int64(10), provider.queryRequest.GetCollectionID())
+	require.Equal(t, []int64{456}, provider.selection.GetSegmentIds())
 }
 
 func TestQueryOnViewStreamPreservesElementIndices(t *testing.T) {
@@ -527,6 +531,7 @@ type streamTestProvider struct {
 	request      *internalpb.SearchRequest
 	queryTasks   QuerySegmentTasks
 	queryRequest *internalpb.RetrieveRequest
+	selection    *viewpb.SegmentSelection
 }
 
 func (p *streamTestProvider) AcquireSearchSegmentTasks(
@@ -535,8 +540,10 @@ func (p *streamTestProvider) AcquireSearchSegmentTasks(
 	_ qviews.QueryViewVersion,
 	_ *viewpb.QueryPlanMVCC,
 	request *internalpb.SearchRequest,
+	selection *viewpb.SegmentSelection,
 ) (SearchSegmentTasks, error) {
 	p.request = request
+	p.selection = selection
 	if p.searchErr != nil {
 		return nil, p.searchErr
 	}
@@ -549,8 +556,10 @@ func (p *streamTestProvider) AcquireQuerySegmentTasks(
 	_ qviews.QueryViewVersion,
 	_ *viewpb.QueryPlanMVCC,
 	request *internalpb.RetrieveRequest,
+	selection *viewpb.SegmentSelection,
 ) (QuerySegmentTasks, error) {
 	p.queryRequest = request
+	p.selection = selection
 	return p.queryTasks, nil
 }
 
