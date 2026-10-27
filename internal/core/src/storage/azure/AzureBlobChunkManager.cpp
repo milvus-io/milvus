@@ -119,7 +119,7 @@ AzureBlobChunkManager::AzureBlobChunkManager(
             const char* spn_tenant_id = std::getenv("AZURE_TENANT_ID");
             if (spn_client_id == nullptr || std::strlen(spn_client_id) == 0 ||
                 spn_tenant_id == nullptr || std::strlen(spn_tenant_id) == 0) {
-                ThrowInfo(ConfigInvalid,
+                ThrowInfo(milvus::ErrorCode::ConfigInvalid,
                           "AZURE_CLIENT_ID and AZURE_TENANT_ID must be set "
                           "when AZURE_CLIENT_SECRET is set");
             }
