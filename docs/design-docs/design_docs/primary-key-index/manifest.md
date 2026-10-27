@@ -52,10 +52,9 @@ message Manifest {
   string vchannel = 2;
   int64 version = 3;               // increases by 1 on every committed edit
   int64 last_flush_term = 4;       // pchannel term of the last flush
-  schema.DataType pk_data_type = 5;
-  uint64 checkpoint_time_tick = 6; // SSTs cover all WAL messages at or below it
-  repeated SSTRef ssts = 7;        // newest first
-  string sst_base_path = 8;        // object key prefix of the SST files
+  uint64 checkpoint_time_tick = 5; // SSTs cover all WAL messages at or below it
+  repeated SSTRef ssts = 6;        // newest first
+  string sst_base_path = 7;        // object key prefix of the SST files
 }
 
 message SSTRef {
@@ -92,8 +91,9 @@ Rules of the model:
   small, and DataCoord keeps the current version of every vchannel in memory.
 - **No file checksum.** The block checksums and the footer of the SST protect
   its content.
-- **`pk_data_type`.** The first flush of a vchannel sets it. Each later flush
-  must send the same type.
+- **No primary key type.** The manifest and the SSTs hold only encoded keys.
+  No reader of the manifest decodes a key, and the primary key type of a
+  collection does not change, so the manifest does not record it.
 - **`last_flush_term`.** Only a flush writes it. It tells a retry from a
   regression when the checkpoint of a flush does not move forward. Fencing does
   not use it.
@@ -139,9 +139,8 @@ current version.
 ### Flush
 
 The snapshot side commits a flush with `CommitFlush`. A flush carries the
-vchannel, the term, the primary key data type, the new SSTs (newest first), and
-the new checkpoint. The pchannel of the flush is the pchannel part of the
-vchannel name.
+vchannel, the term, the new SSTs (newest first), and the new checkpoint. The
+pchannel of the flush is the pchannel part of the vchannel name.
 
 The flush term is first checked against `channel.term` of the pchannel meta.
 The manager reads the meta from the meta kv on every flush. It keeps the
@@ -163,8 +162,7 @@ Then the flush is applied to the manifest:
 
 | Condition | Result |
 |---|---|
-| No manifest | Apply the flush to an empty manifest. The result is version 1 with the `sst_base_path` of the layout and the `pk_data_type` of the flush |
-| `pk_data_type` differs from the manifest | `ErrSchemaMismatch` |
+| No manifest | Apply the flush to an empty manifest. The result is version 1 with the `sst_base_path` of the layout |
 | Checkpoint does not move forward, flush term = `last_flush_term` | No write. Return the current version |
 | Checkpoint does not move forward, flush term ≠ `last_flush_term` | `ErrCheckpointRegressed` |
 | An SST ID is in the manifest, or is twice in the flush | `ErrDuplicateSST` |
@@ -375,7 +373,6 @@ marks those failures as `ErrUnavailable`, and the mark must win.
 | No targets, more than 10000 targets, or a repeated target | Request check, `GetRecoveryManifests` | `ServiceInternal` | No (caller bug) |
 | `pchannel_term` is not positive | Request check, `CommitFlush` | `ServiceInternal` | No (caller bug) |
 | The `vchannel` name has no pchannel part | Request check, `CommitFlush` | `ServiceInternal` | No (caller bug) |
-| `pk_data_type` is not `Int64` or `VarChar` | Request check, `CommitFlush` | `ServiceInternal` | No (caller bug) |
 | `checkpoint_time_tick` is 0 | Request check, `CommitFlush` | `ServiceInternal` | No (caller bug) |
 | `ErrFenced` | Flush | `ChannelNotAvailable` | No. Stop the writes on the pchannel |
 | Meta kv or object storage failure (`ErrUnavailable`) | Load, write, read-back, walk | `ServiceUnavailable` | Yes |
@@ -383,7 +380,7 @@ marks those failures as `ErrUnavailable`, and the mark must win.
 | Pointer write failed, for example on a failed condition, and the read-back does not show the new value | Commit step 5 | `ServiceUnavailable` | Yes |
 | Missing body object (`ErrCorrupted`) | Load | `DataIntegrity` | No |
 | Body, pointer or pchannel meta does not decode, or has no body key, version 0 or term 0, or versions differ (`ErrCorrupted`) | Load | `DataIntegrity` | No |
-| `ErrTermNotAssigned`, `ErrNoManifest`, `ErrCheckpointRegressed`, `ErrDuplicateSST`, `ErrStaleEdit`, `ErrSchemaMismatch` | Edits | `ServiceInternal` | No (caller bug) |
+| `ErrTermNotAssigned`, `ErrNoManifest`, `ErrCheckpointRegressed`, `ErrDuplicateSST`, `ErrStaleEdit` | Edits | `ServiceInternal` | No (caller bug) |
 | Error with no category | Any | `ServiceInternal` | No |
 
 Notes:

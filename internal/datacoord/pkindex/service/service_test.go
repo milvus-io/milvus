@@ -26,7 +26,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/internal/pkindex"
@@ -49,7 +48,7 @@ func newService() (*Service, *manifest.FakeMetaStore, *manifest.FakeObjectStore)
 
 func flushReq(vchannel string, term int64, sst int64, tick uint64) *pkindexpb.CommitFlushRequest {
 	return &pkindexpb.CommitFlushRequest{
-		CollectionId: 1, Vchannel: vchannel, PchannelTerm: term, PkDataType: schemapb.DataType_Int64,
+		CollectionId: 1, Vchannel: vchannel, PchannelTerm: term,
 		AddSsts: []*pkindexpb.SSTRef{{Id: sst}}, CheckpointTimeTick: tick,
 	}
 }
@@ -207,19 +206,6 @@ func TestDuplicateSST(t *testing.T) {
 	assertCode(t, resp.GetStatus(), merr.Code(merr.ErrServiceInternal), false)
 }
 
-func TestSchemaMismatch(t *testing.T) {
-	s, p, _ := newService()
-	ctx := context.Background()
-	p.AssignPChannel(pch, 1)
-	_, err := s.CommitFlush(ctx, flushReq(vch, 1, 1, 9))
-	require.NoError(t, err)
-	req := flushReq(vch, 1, 2, 10)
-	req.PkDataType = schemapb.DataType_VarChar
-	resp, err := s.CommitFlush(ctx, req)
-	require.NoError(t, err)
-	assertCode(t, resp.GetStatus(), merr.Code(merr.ErrServiceInternal), false)
-}
-
 func TestMetaStoreUnavailable(t *testing.T) {
 	s, p, _ := newService()
 	ctx := context.Background()
@@ -298,7 +284,6 @@ func TestToMerr(t *testing.T) {
 		{"checkpoint regressed", manifest.ErrCheckpointRegressed, merr.Code(merr.ErrServiceInternal), false},
 		{"duplicate sst", manifest.ErrDuplicateSST, merr.Code(merr.ErrServiceInternal), false},
 		{"stale edit", manifest.ErrStaleEdit, merr.Code(merr.ErrServiceInternal), false},
-		{"schema mismatch", manifest.ErrSchemaMismatch, merr.Code(merr.ErrServiceInternal), false},
 		{"unavailable", errors.Mark(errors.New("x"), pkindex.ErrUnavailable), merr.Code(merr.ErrServiceUnavailable), true},
 		{"corrupted", errors.Mark(errors.New("x"), pkindex.ErrCorrupted), merr.Code(merr.ErrDataIntegrity), false},
 		{"unmarked", errors.New("x"), merr.Code(merr.ErrServiceInternal), false},
@@ -363,10 +348,6 @@ func TestInvalidFlush(t *testing.T) {
 		"pchannel name as vchannel":  func(r *pkindexpb.CommitFlushRequest) { r.Vchannel = "by-dev-dml_0" },
 		"zero term":                  func(r *pkindexpb.CommitFlushRequest) { r.PchannelTerm = 0 },
 		"zero checkpoint":            func(r *pkindexpb.CommitFlushRequest) { r.CheckpointTimeTick = 0 },
-		"no pk data type":            func(r *pkindexpb.CommitFlushRequest) { r.PkDataType = schemapb.DataType_None },
-		"int32 pk data type":         func(r *pkindexpb.CommitFlushRequest) { r.PkDataType = schemapb.DataType_Int32 },
-		"string pk data type":        func(r *pkindexpb.CommitFlushRequest) { r.PkDataType = schemapb.DataType_String },
-		"vector pk data type":        func(r *pkindexpb.CommitFlushRequest) { r.PkDataType = schemapb.DataType_FloatVector },
 	}
 	for name, change := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -379,19 +360,12 @@ func TestInvalidFlush(t *testing.T) {
 	}
 }
 
-// Both primary key data types are accepted, and a real vchannel name maps to
-// its pchannel.
+// A real vchannel name maps to its pchannel.
 func TestValidFlush(t *testing.T) {
-	for _, pkType := range []schemapb.DataType{schemapb.DataType_Int64, schemapb.DataType_VarChar} {
-		t.Run(pkType.String(), func(t *testing.T) {
-			s, p, _ := newService()
-			ctx := context.Background()
-			p.AssignPChannel("by-dev-dml_0", 1)
-			req := flushReq("by-dev-dml_0_449v0", 1, 1, 1)
-			req.PkDataType = pkType
-			resp, err := s.CommitFlush(ctx, req)
-			require.NoError(t, merr.CheckRPCCall(resp, err))
-			assert.Equal(t, pkType, resp.GetManifest().GetPkDataType())
-		})
-	}
+	s, p, _ := newService()
+	ctx := context.Background()
+	p.AssignPChannel("by-dev-dml_0", 1)
+	resp, err := s.CommitFlush(ctx, flushReq("by-dev-dml_0_449v0", 1, 1, 1))
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assert.Equal(t, "by-dev-dml_0_449v0", resp.GetManifest().GetVchannel())
 }
