@@ -10,6 +10,31 @@ Proxy assembles and forwards requests directly, without a scheduler task or TSO
 allocation. QueryCoord, QueryNode and ManagerClient are not involved in this call
 path. Analyzer calls do not use the DQL task queue or its concurrency limit.
 
+The unpublished request uses two independent oneofs: `source` selects the
+analyzer, and `operation` selects `TokenizeOptions` or `PhraseMatchOptions`.
+`placeholder` is shared input. Tokenization options carry `with_detail` and
+`with_hash`; phrase options carry `query_text`. Responses have a matching
+`result` oneof (`TokenizeResult` or `PhraseMatchResult`) and a common business
+Status. An absent operation is rejected; there is no legacy-field fallback.
+
+Public `ComputePhraseMatchSlop` adapts to this same RunAnalyzer RPC with inline
+parameters. It needs no Coordinator, QueryNode, collection or load state. The
+StreamingNode tokenizes each query/data pair with detailed native positions,
+then computes the smallest range covering aligned occurrences of all query
+terms. The position calculation matches the legacy Tantivy implementation,
+including repeated terms and stop-word position gaps. A missing term yields
+`is_match=false, slop=-1`; empty query or empty batch yields an empty result.
+Analyzer construction, resource loading and execution failures return business
+Status rather than being treated as non-matches. No new native ABI is needed.
+
+Both operations share native tokenization and the same analyzer resource leases.
+Inline resources live until the tokenizer and token streams are destroyed;
+returned token strings and positions are Go-owned, so slop computation retains
+no native pointer. Field operations hold the existing WAL lifetime and runner
+pin during tokenization. Each query/data pair uses the same named field analyzer.
+The old QueryCoord/QueryNode ComputePhraseMatchSlop RPCs remain implemented, but
+Proxy no longer calls them.
+
 The request selects one of two sources:
 
 - Inline `analyzer_params`: call the existing handler service without a target
@@ -222,7 +247,7 @@ an unsupported new RPC surfaces as Unimplemented.
 - `internal/streamingnode/server/wal/adaptor/analyzer.go` — WAL field execution.
 - `internal/util/function/manager.go` — schema selection and runner lifetime.
 - `internal/proxy/impl.go` — SDK adaptation and collection identity.
-- `pkg/proto/streaming.proto` — additive request/response and service method.
+- `pkg/proto/streaming.proto` — analyzer source, operation and result oneofs.
 - `internal/util/fileresource/pull.go` — process-wide analyzer resource manager access.
 - `internal/util/fileresource/analyzer_resource_manager.go` — ID-keyed loading, download flights, resource ownership and idle leases.
 - `internal/rootcoord/file_resource_fetch.go` — Fetch and name resolution.

@@ -37,10 +37,16 @@ func TestWALFieldAnalyzerCurrentSchema(t *testing.T) {
 		require.NoError(t, fm.Alloc(collectionID, key, schema))
 		defer fm.Release(collectionID, key)
 		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{lifetime: typeutil.NewLifetime()}, rwWALImpls: &analyzerWALTest{}}
-		req := &streamingpb.StreamingNodeRunAnalyzerRequest{Placeholder: [][]byte{[]byte("hello-world")}, Source: &streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer{FieldAnalyzer: &streamingpb.StreamingFieldAnalyzer{CollectionId: collectionID, Vchannel: "p_1v0", FieldId: 101}}}
+		req := &streamingpb.StreamingNodeRunAnalyzerRequest{Placeholder: [][]byte{[]byte("hello-world")}, Source: &streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer{FieldAnalyzer: &streamingpb.StreamingFieldAnalyzer{CollectionId: collectionID, Vchannel: "p_1v0", FieldId: 101}}, Operation: &streamingpb.StreamingNodeRunAnalyzerRequest_Tokenize{Tokenize: &streamingpb.TokenizeOptions{}}}
 		resp, err := w.RunAnalyzer(context.Background(), req)
 		require.NoError(t, err)
-		require.Len(t, resp.GetResults()[0].Tokens, 2)
+		require.Len(t, resp.GetTokenize().GetResults()[0].Tokens, 2)
+		phrase := proto.Clone(req).(*streamingpb.StreamingNodeRunAnalyzerRequest)
+		phrase.Operation = &streamingpb.StreamingNodeRunAnalyzerRequest_PhraseMatch{PhraseMatch: &streamingpb.PhraseMatchOptions{QueryText: "hello world"}}
+		phraseResp, err := w.RunAnalyzer(t.Context(), phrase)
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(phraseResp.GetStatus()))
+		require.Equal(t, []int64{0}, phraseResp.GetPhraseMatch().GetSlops())
 		updated := proto.Clone(schema).(*schemapb.CollectionSchema)
 		updated.Version++
 		updated.Fields[0].TypeParams = append(updated.Fields[0].TypeParams, &commonpb.KeyValuePair{Key: "analyzer_params", Value: `{"tokenizer":"whitespace"}`})
@@ -48,8 +54,12 @@ func TestWALFieldAnalyzerCurrentSchema(t *testing.T) {
 		resp, err = w.RunAnalyzer(context.Background(), req)
 		require.NoError(t, err)
 		require.NoError(t, merr.Error(resp.GetStatus()))
-		require.Len(t, resp.GetResults()[0].Tokens, 1)
-		require.Equal(t, "hello-world", resp.GetResults()[0].Tokens[0].Token)
+		require.Len(t, resp.GetTokenize().GetResults()[0].Tokens, 1)
+		require.Equal(t, "hello-world", resp.GetTokenize().GetResults()[0].Tokens[0].Token)
+		phraseResp, err = w.RunAnalyzer(t.Context(), phrase)
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(phraseResp.GetStatus()))
+		require.Equal(t, []int64{-1}, phraseResp.GetPhraseMatch().GetSlops())
 		w.lifetime.SetState(typeutil.LifetimeStateStopped)
 		_, err = w.RunAnalyzer(context.Background(), req)
 		require.True(t, status.AsStreamingError(err).IsOnShutdown())
@@ -89,7 +99,7 @@ func TestWALFieldAnalyzerLifetimeAndNames(t *testing.T) {
 			return [][]*milvuspb.AnalyzerToken{{{Token: "one"}}, {{Token: "two"}}}, nil
 		}).Build()
 		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{lifetime: typeutil.NewLifetime()}, rwWALImpls: &analyzerWALTest{}}
-		req := &streamingpb.StreamingNodeRunAnalyzerRequest{Placeholder: [][]byte{[]byte("one"), []byte("two")}, Source: &streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer{FieldAnalyzer: &streamingpb.StreamingFieldAnalyzer{CollectionId: 7, Vchannel: "p_7v0"}}}
+		req := &streamingpb.StreamingNodeRunAnalyzerRequest{Placeholder: [][]byte{[]byte("one"), []byte("two")}, Source: &streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer{FieldAnalyzer: &streamingpb.StreamingFieldAnalyzer{CollectionId: 7, Vchannel: "p_7v0"}}, Operation: &streamingpb.StreamingNodeRunAnalyzerRequest_Tokenize{Tokenize: &streamingpb.TokenizeOptions{}}}
 		req.GetFieldAnalyzer().AnalyzerNames = []string{"one", "two", "three"}
 		resp, err := w.RunAnalyzer(context.Background(), req)
 		require.NoError(t, err)
@@ -104,7 +114,7 @@ func TestWALFieldAnalyzerLifetimeAndNames(t *testing.T) {
 		done := make(chan error, 1)
 		go func() {
 			resp, err := w.RunAnalyzer(context.Background(), req)
-			if err == nil && len(resp.Results) != 2 {
+			if err == nil && len(resp.GetTokenize().Results) != 2 {
 				err = merr.ErrServiceInternal
 			}
 			done <- err

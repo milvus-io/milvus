@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"net"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
@@ -28,13 +30,41 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
+func TestAnalyzerPhraseRemoteResources(t *testing.T) {
+	paramtable.Init()
+	require.NoError(t, analyzer.InitOptions())
+	file := filepath.Join(t.TempDir(), "stop.txt")
+	require.NoError(t, os.WriteFile(file, []byte("the\n"), 0o600))
+	resourceID := time.Now().UnixNano()
+	lookups := 0
+	fileresource.SetResourceFetcher(storage.NewLocalChunkManager(), func(_ context.Context, ids []int64, names []string) ([]*internalpb.FileResourceInfo, error) {
+		require.Empty(t, ids)
+		require.Equal(t, []string{"phrase_dictionary"}, names)
+		lookups++
+		return []*internalpb.FileResourceInfo{{Id: resourceID, Name: "phrase_dictionary", Path: file}}, nil
+	})
+	defer fileresource.SetResourceFetcher(nil, nil)
+	req := inlineAnalyzerRequest(`{"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"remote","resource_name":"phrase_dictionary","file_name":"stop.txt"}}]}`)
+	req.Operation = &streamingpb.StreamingNodeRunAnalyzerRequest_PhraseMatch{PhraseMatch: &streamingpb.PhraseMatchOptions{QueryText: "hello the world"}}
+	req.Placeholder = [][]byte{[]byte("hello x world"), []byte("hello world"), []byte("missing")}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	resp, err := NewHandlerService(nil).RunAnalyzer(ctx, req)
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(resp.GetStatus()))
+	// The stop word is removed while its position gap is preserved.
+	require.Equal(t, []int64{0, 1, -1}, resp.GetPhraseMatch().GetSlops())
+	require.Equal(t, 1, lookups)
+}
+
 func inlineAnalyzerRequest(params string) *streamingpb.StreamingNodeRunAnalyzerRequest {
 	return &streamingpb.StreamingNodeRunAnalyzerRequest{
-		Placeholder: [][]byte{[]byte("Hello world"), []byte("")}, WithDetail: true, WithHash: true,
-		Source: &streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer{InlineAnalyzer: &streamingpb.StreamingInlineAnalyzer{AnalyzerParams: params}},
+		Placeholder: [][]byte{[]byte("Hello world"), []byte("")},
+		Source:      &streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer{InlineAnalyzer: &streamingpb.StreamingInlineAnalyzer{AnalyzerParams: params}}, Operation: &streamingpb.StreamingNodeRunAnalyzerRequest_Tokenize{Tokenize: &streamingpb.TokenizeOptions{WithDetail: true, WithHash: true}},
 	}
 }
 
@@ -53,11 +83,30 @@ func TestAnalyzerNativeTransport(t *testing.T) {
 	defer cancel()
 	resp, err := client.RunAnalyzer(ctx, inlineAnalyzerRequest(`{"tokenizer":"standard"}`))
 	require.NoError(t, err)
-	require.Len(t, resp.Results, 2)
-	require.Equal(t, "Hello", resp.Results[0].Tokens[0].Token)
-	require.Equal(t, int64(0), resp.Results[0].Tokens[0].StartOffset)
-	require.NotZero(t, resp.Results[0].Tokens[0].Hash)
-	require.Empty(t, resp.Results[1].Tokens)
+	require.Len(t, resp.GetTokenize().Results, 2)
+	require.Equal(t, "Hello", resp.GetTokenize().Results[0].Tokens[0].Token)
+	require.Equal(t, int64(0), resp.GetTokenize().Results[0].Tokens[0].StartOffset)
+	require.NotZero(t, resp.GetTokenize().Results[0].Tokens[0].Hash)
+	require.Empty(t, resp.GetTokenize().Results[1].Tokens)
+	phrase := inlineAnalyzerRequest(`{"tokenizer":"standard"}`)
+	phrase.Placeholder = [][]byte{[]byte("hello world"), []byte("world hello"), []byte("hello there")}
+	phrase.Operation = &streamingpb.StreamingNodeRunAnalyzerRequest_PhraseMatch{PhraseMatch: &streamingpb.PhraseMatchOptions{QueryText: "hello world"}}
+	resp, err = client.RunAnalyzer(ctx, phrase)
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(resp.GetStatus()))
+	require.Nil(t, resp.GetTokenize())
+	require.Equal(t, []bool{true, true, false}, resp.GetPhraseMatch().GetIsMatch())
+	require.Equal(t, []int64{0, 2, -1}, resp.GetPhraseMatch().GetSlops())
+	phrase.Operation = nil
+	resp, err = client.RunAnalyzer(ctx, phrase)
+	require.NoError(t, err)
+	require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+	phrase.Operation = &streamingpb.StreamingNodeRunAnalyzerRequest_PhraseMatch{PhraseMatch: &streamingpb.PhraseMatchOptions{QueryText: "hello world"}}
+	phrase.GetInlineAnalyzer().AnalyzerParams = `{"tokenizer":"not_a_tokenizer"}`
+	resp, err = client.RunAnalyzer(ctx, phrase)
+	require.NoError(t, err)
+	require.Error(t, merr.Error(resp.GetStatus()))
+	require.Nil(t, resp.GetResult())
 	resp, err = client.RunAnalyzer(ctx, &streamingpb.StreamingNodeRunAnalyzerRequest{})
 	require.Error(t, err)
 	require.Nil(t, resp)
@@ -88,7 +137,7 @@ func TestAnalyzerFieldNativeTransport(t *testing.T) {
 		req := &streamingpb.StreamingNodeRunAnalyzerRequest{Source: &streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer{FieldAnalyzer: &streamingpb.StreamingFieldAnalyzer{
 			CollectionId: 7, Vchannel: "p_7v0", FieldId: 101,
 			Pchannel: &streamingpb.PChannelInfo{Name: "p", Term: 2},
-		}}}
+		}}, Operation: &streamingpb.StreamingNodeRunAnalyzerRequest_Tokenize{Tokenize: &streamingpb.TokenizeOptions{}}}
 		var ownershipErr, executionErr error
 		mockey.Mock((*analyzerManager).GetAvailableWAL).To(func(_ *analyzerManager, channel types.PChannelInfo) (wal.WAL, error) {
 			require.Equal(t, "p", channel.Name)
@@ -336,7 +385,7 @@ func TestRunAnalyzerPreparationStatus(t *testing.T) {
 			require.Equal(t, merr.Code(prepareErr), resp.GetStatus().GetCode())
 			require.Equal(t, merr.IsRetryableErr(prepareErr), resp.GetStatus().GetRetriable())
 			require.Equal(t, merr.GetErrorType(prepareErr), merr.GetErrorType(merr.Error(resp.GetStatus())))
-			require.Empty(t, resp.GetResults())
+			require.Empty(t, resp.GetTokenize().GetResults())
 			require.Zero(t, native.Times())
 		})
 	}

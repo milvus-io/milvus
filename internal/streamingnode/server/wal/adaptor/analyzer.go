@@ -5,6 +5,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
+	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -22,36 +23,39 @@ func (w *walAdaptorImpl) RunAnalyzer(ctx context.Context, req *streamingpb.Strea
 		return nil, status.NewUnrecoverableError("analyzer requires the primary WAL")
 	}
 	field := req.GetFieldAnalyzer()
-	texts := make([]string, len(req.GetPlaceholder()))
-	for i, text := range req.GetPlaceholder() {
-		texts[i] = string(text)
-	}
-	var tokens [][]*milvuspb.AnalyzerToken
-	ok, err := function.GetManager().RunWithAnalyzer(ctx, field.GetCollectionId(), shard.WALFunctionRunnerKey(field.GetVchannel()), field.GetFieldId(), func(a function.Analyzer) error {
-		if err := ctx.Err(); err != nil {
-			return err
+	key := shard.WALFunctionRunnerKey(field.GetVchannel())
+	return analyzer.RunOperation(ctx, req, func(inputs [][]byte, withDetail, withHash bool, names []string) ([]*milvuspb.AnalyzerResult, error) {
+		texts := make([]string, len(inputs))
+		for i, text := range inputs {
+			texts[i] = string(text)
 		}
-		var err error
-		if len(a.GetInputFields()) == 1 {
-			tokens, err = a.BatchAnalyze(req.GetWithDetail(), req.GetWithHash(), texts)
-		} else {
-			names, nameErr := function.NormalizeAnalyzerNames(field.GetAnalyzerNames(), len(texts))
-			if nameErr != nil {
-				return nameErr
+		var tokens [][]*milvuspb.AnalyzerToken
+		ok, err := function.GetManager().RunWithAnalyzer(ctx, field.GetCollectionId(), key, field.GetFieldId(), func(a function.Analyzer) error {
+			if err := ctx.Err(); err != nil {
+				return err
 			}
-			tokens, err = a.BatchAnalyze(req.GetWithDetail(), req.GetWithHash(), texts, names)
+			var err error
+			if len(a.GetInputFields()) == 1 {
+				tokens, err = a.BatchAnalyze(withDetail, withHash, texts)
+			} else {
+				normalized, nameErr := function.NormalizeAnalyzerNames(names, len(texts))
+				if nameErr != nil {
+					return nameErr
+				}
+				tokens, err = a.BatchAnalyze(withDetail, withHash, texts, normalized)
+			}
+			return err
+		})
+		if err != nil {
+			return nil, err
 		}
-		return err
-	})
-	if err != nil {
-		return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(err)}, nil
-	}
-	if !ok {
-		return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(merr.WrapErrParameterInvalidMsg("analyzer is not enabled for field %d", field.GetFieldId()))}, nil
-	}
-	results := make([]*milvuspb.AnalyzerResult, len(tokens))
-	for i, token := range tokens {
-		results[i] = &milvuspb.AnalyzerResult{Tokens: token}
-	}
-	return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Success(), Results: results}, nil
+		if !ok {
+			return nil, merr.WrapErrParameterInvalidMsg("analyzer is not enabled for field %d", field.GetFieldId())
+		}
+		results := make([]*milvuspb.AnalyzerResult, len(tokens))
+		for i, token := range tokens {
+			results[i] = &milvuspb.AnalyzerResult{Tokens: token}
+		}
+		return results, nil
+	}), nil
 }
