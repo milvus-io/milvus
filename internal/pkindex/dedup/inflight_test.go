@@ -229,6 +229,14 @@ func TestInflightStressWithObserve(t *testing.T) {
 		defer close(observerDone)
 		next := 0
 		for {
+			// stop is read before the log: the writers close it after their last
+			// append, so a log read after it holds every record.
+			stopped := false
+			select {
+			case <-stop:
+				stopped = true
+			default:
+			}
 			logMu.Lock()
 			pending := log[next:]
 			logMu.Unlock()
@@ -239,12 +247,8 @@ func TestInflightStressWithObserve(t *testing.T) {
 				}
 				next++
 			}
-			select {
-			case <-stop:
-				if len(pending) == 0 {
-					return
-				}
-			default:
+			if stopped && len(pending) == 0 {
+				return
 			}
 		}
 	}()
