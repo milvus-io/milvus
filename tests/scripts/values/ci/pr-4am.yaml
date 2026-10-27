@@ -6,9 +6,6 @@ log:
 
 extraConfigFiles:
   user.yaml: |+
-    proxy:
-      # Temporary preview switch; removed together with the element-null / nested Array gate.
-      enableElementNullAndNestedArray: true
     indexCoord:
       scheduler:
         interval: 100

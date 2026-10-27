@@ -205,9 +205,3 @@ standalone:
     limits:
       cpu: "4"
 
-
-extraConfigFiles:
-  user.yaml: |+
-    proxy:
-      # Temporary preview switch; removed together with the element-null / nested Array gate.
-      enableElementNullAndNestedArray: true
