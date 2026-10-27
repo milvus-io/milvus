@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	sharedstorage "github.com/milvus-io/milvus/pkg/v3/storagev2"
 )
 
 func TestGetFilesystemMetricsWithConfig(t *testing.T) {
@@ -78,7 +79,7 @@ func TestListFilesystemMetrics(t *testing.T) {
 	metricsList, err := ListFilesystemMetrics()
 	require.NoError(t, err)
 
-	localPrefix := "file://" + LoonLocalFSRootPath + "#fs:"
+	localPrefix := "file://" + sharedstorage.LoonLocalFSRootPath + "#fs:"
 	localEntries := 0
 	for _, fsMetrics := range metricsList {
 		if !strings.HasPrefix(fsMetrics.DisplayKey, localPrefix) {

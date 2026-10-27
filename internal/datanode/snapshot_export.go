@@ -25,10 +25,11 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
+	snapshotadapter "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	snapshotstorage "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -145,14 +146,14 @@ func (e *snapshotExportExecutor) create(req *datapb.SnapshotExportCopyRequest) e
 
 func (e *snapshotExportExecutor) execute(ctx context.Context, t *snapshotExportExecution) error {
 	req := t.req
-	sourceConfig := snapshotstorage.ObjectStorageConfigFromIndexConfig(req.GetSourceStorageConfig())
+	sourceConfig := snapshotadapter.ObjectStorageConfigFromIndexConfig(req.GetSourceStorageConfig())
 	sourceConfig.SkipBucketCheck = true
 	sourceCM, err := storage.NewRemoteChunkManager(ctx, sourceConfig)
 	if err != nil {
 		return err
 	}
 	defer closeSnapshotExportClient(sourceCM)
-	resolved, err := snapshotstorage.ResolveForeignStorage(ctx, sourceConfig, snapshotstorage.DirectionExport, req.GetTargetUri(), req.GetExternalSpec())
+	resolved, err := snapshotadapter.ResolveForeignStorage(ctx, sourceConfig, snapshotstorage.DirectionExport, req.GetTargetUri(), req.GetExternalSpec())
 	if err != nil {
 		return err
 	}
@@ -172,7 +173,7 @@ func (e *snapshotExportExecutor) execute(ctx context.Context, t *snapshotExportE
 	return nil
 }
 
-func closeSnapshotExportClient(cm storage.ChunkManager) {
+func closeSnapshotExportClient(cm snapshotstorage.ChunkManager) {
 	if remote, ok := cm.(*storage.RemoteChunkManager); ok {
 		if closer, ok := remote.UnderlyingObjectStorage().(io.Closer); ok {
 			_ = closer.Close()

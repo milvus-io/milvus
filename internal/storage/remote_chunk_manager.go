@@ -20,20 +20,17 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"net/http"
 	"strings"
-	"syscall"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
 	"golang.org/x/exp/mmap"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/api/googleapi"
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	objectstore "github.com/milvus-io/milvus/pkg/v3/objectstorage/store"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -42,26 +39,10 @@ import (
 // ChunkObjectWalkFunc is the callback function for walking objects.
 // If return false, WalkWithObjects will stop.
 // Otherwise, WalkWithObjects will continue until reach the last object.
-type ChunkObjectWalkFunc func(chunkObjectInfo *ChunkObjectInfo) bool
-
-type CrossBucketCopier interface {
-	CopyCrossBucket(ctx context.Context, srcBucket, srcObject, dstBucket, dstObject string) error
-}
-
-// SizedCrossBucketCopier returns the physical byte count of a successful copy.
-// The source must remain immutable for the duration of the operation.
-type SizedCrossBucketCopier interface {
-	CrossBucketCopier
-	CopyCrossBucketAndGetSize(ctx context.Context, srcBucket, srcObject, dstBucket, dstObject string) (int64, error)
-}
+type ChunkObjectWalkFunc = objectstorage.ChunkObjectWalkFunc
 
 type sizedObjectStorage interface {
 	CopyObjectCrossBucketAndGetSize(ctx context.Context, srcBucket, srcObject, dstBucket, dstObject string) (int64, error)
-}
-
-// snapshotObjectStorage keeps immutable retry semantics out of ordinary Copy.
-type snapshotObjectStorage interface {
-	copySnapshotObjectCrossBucket(ctx context.Context, srcBucket, srcObject, dstBucket, dstObject string) error
 }
 
 type ObjectStorage interface {
@@ -184,7 +165,7 @@ func (mcm *RemoteChunkManager) Size(ctx context.Context, filePath string) (int64
 			return false, nil
 		}
 		mlog.Warn(ctx, "failed to get object size", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
-		err = mapObjectStorageError(filePath, err)
+		err = objectstorage.ToMilvusIoError(filePath, err)
 		if merr.IsRetryableErr(err) {
 			return true, err
 		}
@@ -245,7 +226,7 @@ func (mcm *RemoteChunkManager) Read(ctx context.Context, filePath string) ([]byt
 		// Prefetch object data
 		var empty []byte
 		_, err = object.Read(empty)
-		err = mapObjectStorageError(filePath, err)
+		err = objectstorage.ToMilvusIoError(filePath, err)
 		if err != nil {
 			mlog.Warn(ctx, "failed to read object", mlog.String("path", filePath), mlog.Err(err))
 			return err
@@ -256,7 +237,7 @@ func (mcm *RemoteChunkManager) Read(ctx context.Context, filePath string) ([]byt
 			return err
 		}
 		data, err = read(object, size)
-		err = mapObjectStorageError(filePath, err)
+		err = objectstorage.ToMilvusIoError(filePath, err)
 		if err != nil {
 			mlog.Warn(ctx, "failed to read object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
 			return err
@@ -303,7 +284,7 @@ func (mcm *RemoteChunkManager) ReadAt(ctx context.Context, filePath string, off 
 	defer object.Close()
 
 	data, err := read(object, length)
-	err = mapObjectStorageError(filePath, err)
+	err = objectstorage.ToMilvusIoError(filePath, err)
 	if err != nil {
 		mlog.Warn(ctx, "failed to read object", mlog.String("bucket", mcm.bucketName), mlog.String("path", filePath), mlog.Err(err))
 		return nil, err
@@ -465,12 +446,13 @@ func (mcm *RemoteChunkManager) removeObject(ctx context.Context, bucketName, obj
 	return err
 }
 
+// ToMilvusIoError exposes the shared classifier to server-side storage consumers.
 func ToMilvusIoError(fileName string, err error) error {
-	return mapObjectStorageError(fileName, err)
+	return objectstorage.ToMilvusIoError(fileName, err)
 }
 
 func (mcm *RemoteChunkManager) Copy(ctx context.Context, srcFilePath string, dstFilePath string) error {
-	_, err := mcm.copyObject(ctx, mcm.bucketName, srcFilePath, mcm.bucketName, dstFilePath, false, false)
+	_, err := mcm.copyObject(ctx, mcm.bucketName, srcFilePath, mcm.bucketName, dstFilePath, false)
 	if err != nil {
 		mlog.Warn(ctx, "failed to copy object", mlog.String("bucket", mcm.bucketName), mlog.String("src", srcFilePath), mlog.String("dst", dstFilePath), mlog.Err(err))
 		return err
@@ -478,17 +460,8 @@ func (mcm *RemoteChunkManager) Copy(ctx context.Context, srcFilePath string, dst
 	return nil
 }
 
-func (mcm *RemoteChunkManager) CopyCrossBucket(ctx context.Context, srcBucket, srcFilePath, dstBucket, dstFilePath string) error {
-	_, err := mcm.copyCrossBucket(ctx, srcBucket, srcFilePath, dstBucket, dstFilePath, false)
-	return err
-}
-
-func (mcm *RemoteChunkManager) CopyCrossBucketAndGetSize(ctx context.Context, srcBucket, srcFilePath, dstBucket, dstFilePath string) (int64, error) {
-	return mcm.copyCrossBucket(ctx, srcBucket, srcFilePath, dstBucket, dstFilePath, true)
-}
-
-func (mcm *RemoteChunkManager) copyCrossBucket(ctx context.Context, srcBucket, srcFilePath, dstBucket, dstFilePath string, returnSize bool) (int64, error) {
-	size, err := mcm.copyObject(ctx, srcBucket, srcFilePath, dstBucket, dstFilePath, returnSize, true)
+func (mcm *RemoteChunkManager) copyCrossBucket(ctx context.Context, srcBucket, srcFilePath, dstBucket, dstFilePath string) (int64, error) {
+	size, err := mcm.copyObject(ctx, srcBucket, srcFilePath, dstBucket, dstFilePath, true)
 	if err != nil {
 		mlog.Warn(ctx, "failed to copy object across buckets",
 			mlog.String("srcBucket", srcBucket),
@@ -501,7 +474,7 @@ func (mcm *RemoteChunkManager) copyCrossBucket(ctx context.Context, srcBucket, s
 	return size, nil
 }
 
-func (mcm *RemoteChunkManager) copyObject(ctx context.Context, srcBucket, srcObjectName, dstBucket, dstObjectName string, returnSize, snapshot bool) (int64, error) {
+func (mcm *RemoteChunkManager) copyObject(ctx context.Context, srcBucket, srcObjectName, dstBucket, dstObjectName string, returnSize bool) (int64, error) {
 	start := timerecord.NewTimeRecorder("copyObject")
 
 	var size int64
@@ -509,17 +482,16 @@ func (mcm *RemoteChunkManager) copyObject(ctx context.Context, srcBucket, srcObj
 	if client, ok := mcm.client.(sizedObjectStorage); ok && returnSize {
 		size, err = client.CopyObjectCrossBucketAndGetSize(ctx, srcBucket, srcObjectName, dstBucket, dstObjectName)
 	} else {
-		if client, ok := mcm.client.(snapshotObjectStorage); ok && snapshot {
-			err = client.copySnapshotObjectCrossBucket(ctx, srcBucket, srcObjectName, dstBucket, dstObjectName)
-		} else {
-			err = mcm.client.CopyObjectCrossBucket(ctx, srcBucket, srcObjectName, dstBucket, dstObjectName)
-		}
+		err = mcm.client.CopyObjectCrossBucket(ctx, srcBucket, srcObjectName, dstBucket, dstObjectName)
 		if err == nil && returnSize {
 			size, err = mcm.getObjectSize(ctx, dstBucket, dstObjectName)
+			if err != nil {
+				err = &objectstore.CopySizeError{Err: err}
+			}
 		}
 	}
 	if err == nil && size < 0 {
-		err = merr.WrapErrDataIntegrityMsg("copied object size cannot be negative")
+		err = &objectstore.CopySizeError{Err: merr.WrapErrDataIntegrityMsg("copied object size cannot be negative")}
 	}
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataPutLabel, metrics.TotalLabel).Inc()
 	if err == nil {
@@ -535,135 +507,6 @@ func (mcm *RemoteChunkManager) copyObject(ctx context.Context, srcBucket, srcObj
 	}
 
 	return size, err
-}
-
-// Error code constants for cloud provider error mapping.
-const (
-	// Azure Blob Storage error codes
-	azureBlobNotFound      = "BlobNotFound"
-	azureServerBusy        = "ServerBusy"
-	azureAuthFailed        = "AuthenticationFailed"
-	azureAuthFailure       = "AuthorizationFailure"
-	azureContainerNotFound = "ContainerNotFound"
-	azureInvalidParam      = "InvalidParameterValue"
-	azureInvalidRange      = "InvalidRange"
-	azureRequestBodyTooLg  = "RequestBodyTooLarge"
-
-	// S3-compatible error codes (AWS S3, MinIO, Aliyun OSS, Tencent COS, etc.)
-	minioNoSuchKey      = "NoSuchKey"
-	minioSlowDown       = "SlowDown"
-	minioTooMany        = "TooManyRequestsException"
-	minioAccessDenied   = "AccessDenied"
-	minioInvalidKeyId   = "InvalidAccessKeyId"
-	minioSigMismatch    = "SignatureDoesNotMatch"
-	minioNoSuchBucket   = "NoSuchBucket"
-	minioInvalidToken   = "InvalidToken"
-	minioExpiredToken   = "ExpiredToken"
-	minioInvalidArg     = "InvalidArgument"
-	minioInvalidRequest = "InvalidRequest"
-	minioInvalidRange   = "InvalidRange"
-	minioEntityTooLarge = "EntityTooLarge"
-	minioMaxMessage     = "MaxMessageLengthExceeded"
-	// Aliyun OSS specific error codes (S3-compatible, via MinIO client)
-	ossSecurityTokenExpired = "SecurityTokenExpired"
-	ossInvalidAccessKeyId   = "InvalidAccessKeyId.Inactive"
-)
-
-func mapObjectStorageError(fileName string, err error) error {
-	if err == nil {
-		return nil
-	}
-
-	// If error is already a Milvus error, return it as-is to avoid double-wrapping
-	if merr.IsMilvusError(err) {
-		return err
-	}
-
-	// Preserve context termination so callers can stop retries and classify
-	// canceled operations correctly.
-	if merr.IsCanceledOrTimeout(err) {
-		return err
-	}
-
-	switch err := err.(type) {
-	case *azcore.ResponseError:
-		switch err.ErrorCode {
-		case azureBlobNotFound:
-			return merr.WrapErrIoKeyNotFound(fileName, err.Error())
-		case azureServerBusy:
-			return merr.WrapErrIoTooManyRequests(fileName, err)
-		case azureAuthFailed, azureAuthFailure:
-			return merr.WrapErrIoPermissionDenied(fileName, err)
-		case azureContainerNotFound:
-			return merr.WrapErrIoBucketNotFound(fileName, err)
-		case azureInvalidParam:
-			return merr.WrapErrIoInvalidArgument(fileName, err)
-		case azureInvalidRange:
-			return merr.WrapErrIoInvalidRange(fileName, err)
-		case azureRequestBodyTooLg:
-			return merr.WrapErrIoEntityTooLarge(fileName, err)
-		default:
-			return merr.WrapErrIoFailed(fileName, err)
-		}
-	case minio.ErrorResponse:
-		switch err.Code {
-		case minioNoSuchKey:
-			return merr.WrapErrIoKeyNotFound(fileName, err.Error())
-		case minioSlowDown, minioTooMany:
-			return merr.WrapErrIoTooManyRequests(fileName, err)
-		case minioAccessDenied, minioInvalidKeyId, minioSigMismatch, ossInvalidAccessKeyId:
-			return merr.WrapErrIoPermissionDenied(fileName, err)
-		case minioNoSuchBucket:
-			return merr.WrapErrIoBucketNotFound(fileName, err)
-		case minioInvalidToken, minioExpiredToken, ossSecurityTokenExpired:
-			return merr.WrapErrIoInvalidCredentials(fileName, err)
-		case minioInvalidArg, minioInvalidRequest:
-			return merr.WrapErrIoInvalidArgument(fileName, err)
-		case minioInvalidRange:
-			return merr.WrapErrIoInvalidRange(fileName, err)
-		case minioEntityTooLarge, minioMaxMessage:
-			return merr.WrapErrIoEntityTooLarge(fileName, err)
-		default:
-			return merr.WrapErrIoFailed(fileName, err)
-		}
-	case *googleapi.Error:
-		switch err.Code {
-		case http.StatusNotFound:
-			return merr.WrapErrIoKeyNotFound(fileName, err.Error())
-		case http.StatusTooManyRequests:
-			return merr.WrapErrIoTooManyRequests(fileName, err)
-		case http.StatusForbidden:
-			return merr.WrapErrIoPermissionDenied(fileName, err)
-		case http.StatusUnauthorized:
-			return merr.WrapErrIoInvalidCredentials(fileName, err)
-		case http.StatusBadRequest:
-			return merr.WrapErrIoInvalidArgument(fileName, err)
-		case http.StatusRequestedRangeNotSatisfiable:
-			return merr.WrapErrIoInvalidRange(fileName, err)
-		case http.StatusRequestEntityTooLarge:
-			return merr.WrapErrIoEntityTooLarge(fileName, err)
-		default:
-			return merr.WrapErrIoFailed(fileName, err)
-		}
-	}
-
-	// GCP cloud.google.com/go/storage sentinel errors (not *googleapi.Error).
-	// The library wraps them with a multi-%w, so plain errors.Is misses them.
-	if objectstorage.IsGcsObjectNotExist(err) {
-		return merr.WrapErrIoKeyNotFound(fileName, err.Error())
-	}
-	if objectstorage.IsGcsBucketNotExist(err) {
-		return merr.WrapErrIoBucketNotFound(fileName, err)
-	}
-
-	// syscall.ECONNRESET is typically triggered by rate limiting
-	if errors.Is(err, syscall.ECONNRESET) {
-		return merr.WrapErrIoTooManyRequests(fileName, err)
-	}
-	if err == io.ErrUnexpectedEOF {
-		return merr.WrapErrIoUnexpectEOF(fileName, err)
-	}
-	return merr.WrapErrIoFailed(fileName, err)
 }
 
 // Learn from file.ReadFile

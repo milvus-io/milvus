@@ -27,16 +27,17 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	sharedsnapshot "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -425,7 +426,7 @@ func (r *reader) initStorageV3Manifest(manifestPath string, tsStart, tsEnd uint6
 			if err := r.validatePath(path); err != nil {
 				return err
 			}
-			deltaPaths[i] = snapshotstorage.NormalizeSnapshotObjectPath(path)
+			deltaPaths[i] = sharedsnapshot.NormalizeSnapshotObjectPath(path)
 		}
 	}
 	rr, err := storage.NewManifestRecordReader(r.ctx, manifestPath, r.schema, rwOptions...)
@@ -476,7 +477,7 @@ func (r *reader) collectStorageV3Files(manifestPath string) error {
 				return err
 			}
 		}
-		files[snapshotstorage.NormalizeSnapshotObjectPath(fragment.FilePath)] = struct{}{}
+		files[sharedsnapshot.NormalizeSnapshotObjectPath(fragment.FilePath)] = struct{}{}
 	}
 	textFields := typeutil.NewSet[int64]()
 	for _, field := range r.schema.GetFields() {
@@ -506,7 +507,7 @@ func (r *reader) collectStorageV3Files(manifestPath string) error {
 			}
 			// Positive manifest-reported sizes bypass Size() object lookups.
 			// Check these too, even if all rows referencing the LOB are deleted.
-			exists, err := r.cm.Exist(r.ctx, snapshotstorage.NormalizeSnapshotObjectPath(lobFile.Path))
+			exists, err := r.cm.Exist(r.ctx, sharedsnapshot.NormalizeSnapshotObjectPath(lobFile.Path))
 			if err != nil {
 				return merr.Wrap(err, "failed to check snapshot LOB")
 			}
@@ -532,7 +533,7 @@ func (r *reader) collectStorageV3Files(manifestPath string) error {
 			r.storageV3LobSize += lobFile.FileSizeBytes
 			continue
 		}
-		files[snapshotstorage.NormalizeSnapshotObjectPath(lobFile.Path)] = struct{}{}
+		files[sharedsnapshot.NormalizeSnapshotObjectPath(lobFile.Path)] = struct{}{}
 	}
 	r.storageV3Files = lo.Keys(files)
 	return nil
@@ -706,7 +707,7 @@ func multiReadWithRetry(ctx context.Context, cm storage.ChunkManager, attempts u
 		if e == nil {
 			return false, nil
 		}
-		e = storage.ToMilvusIoError(representative, e)
+		e = objectstorage.ToMilvusIoError(representative, e)
 		if merr.IsNonRetryableErr(e) {
 			return false, e
 		}

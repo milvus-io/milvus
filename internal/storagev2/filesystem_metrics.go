@@ -31,6 +31,7 @@ import (
 	"unsafe"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	sharedstorage "github.com/milvus-io/milvus/pkg/v3/storagev2"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -152,7 +153,7 @@ func makePropertiesFromConfig(storageConfig *indexpb.StorageConfig) (C.LoonPrope
 	}
 	// Same root rule as packed.MakePropertiesFromStorageConfig, otherwise the
 	// metrics lookup addresses a filesystem that was never created.
-	if v := LoonFSRootPath(storageConfig); v != "" {
+	if v := sharedstorage.LoonFSRootPath(storageConfig); v != "" {
 		keys = append(keys, propRootPath)
 		values = append(values, v)
 	}

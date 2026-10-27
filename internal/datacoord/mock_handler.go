@@ -7,8 +7,8 @@ import (
 
 	msgpb "github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	metacache "github.com/milvus-io/milvus/internal/metacache"
-	storage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	snapshotio "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -119,23 +119,23 @@ func (_c *NMockHandler_FinishDropChannel_Call) RunAndReturn(run func(string, int
 }
 
 // GenSnapshot provides a mock function with given fields: ctx, collectionID, channelSeekPositions
-func (_m *NMockHandler) GenSnapshot(ctx context.Context, collectionID int64, channelSeekPositions []*msgpb.MsgPosition) (*storage.SnapshotData, error) {
+func (_m *NMockHandler) GenSnapshot(ctx context.Context, collectionID int64, channelSeekPositions []*msgpb.MsgPosition) (*snapshotio.SnapshotData, error) {
 	ret := _m.Called(ctx, collectionID, channelSeekPositions)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GenSnapshot")
 	}
 
-	var r0 *storage.SnapshotData
+	var r0 *snapshotio.SnapshotData
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, []*msgpb.MsgPosition) (*storage.SnapshotData, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, int64, []*msgpb.MsgPosition) (*snapshotio.SnapshotData, error)); ok {
 		return rf(ctx, collectionID, channelSeekPositions)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64, []*msgpb.MsgPosition) *storage.SnapshotData); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, int64, []*msgpb.MsgPosition) *snapshotio.SnapshotData); ok {
 		r0 = rf(ctx, collectionID, channelSeekPositions)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*storage.SnapshotData)
+			r0 = ret.Get(0).(*snapshotio.SnapshotData)
 		}
 	}
 
@@ -168,12 +168,12 @@ func (_c *NMockHandler_GenSnapshot_Call) Run(run func(ctx context.Context, colle
 	return _c
 }
 
-func (_c *NMockHandler_GenSnapshot_Call) Return(_a0 *storage.SnapshotData, _a1 error) *NMockHandler_GenSnapshot_Call {
+func (_c *NMockHandler_GenSnapshot_Call) Return(_a0 *snapshotio.SnapshotData, _a1 error) *NMockHandler_GenSnapshot_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *NMockHandler_GenSnapshot_Call) RunAndReturn(run func(context.Context, int64, []*msgpb.MsgPosition) (*storage.SnapshotData, error)) *NMockHandler_GenSnapshot_Call {
+func (_c *NMockHandler_GenSnapshot_Call) RunAndReturn(run func(context.Context, int64, []*msgpb.MsgPosition) (*snapshotio.SnapshotData, error)) *NMockHandler_GenSnapshot_Call {
 	_c.Call.Return(run)
 	return _c
 }

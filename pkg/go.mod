@@ -70,7 +70,7 @@ require (
 require (
 	github.com/ebitengine/purego v0.9.0 // indirect
 	github.com/gopherjs/gopherjs v1.12.80 // indirect
-	github.com/iskorotkov/avro/v2 v2.33.1 // indirect
+	github.com/iskorotkov/avro/v2 v2.33.1
 	github.com/jtolds/gls v4.20.0+incompatible // indirect
 	github.com/smartystreets/assertions v1.2.0 // indirect
 	github.com/smartystreets/goconvey v1.7.2 // indirect
