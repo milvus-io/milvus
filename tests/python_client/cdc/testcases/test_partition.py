@@ -239,8 +239,9 @@ class TestCDCSyncPartition(TestCDCSyncBase):
                 if state != LoadState.NotLoad:
                     return False
                 # Releasing one partition must not unload the default partition.
-                rows = client.query(collection_name, filter="", output_fields=["count(*)"],
-                                    partition_names=["_default"])
+                rows = client.query(
+                    collection_name, filter="", output_fields=["count(*)"], partition_names=["_default"]
+                )
                 if rows[0]["count(*)"] != 100:
                     return False
             return True

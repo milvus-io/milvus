@@ -255,8 +255,11 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                     upstream_client.create_index(collection_name, index_params)
 
                     assert_index_sync(
-                        upstream_client, downstream_client, collection_name,
-                        test_case["field_name"], sync_timeout,
+                        upstream_client,
+                        downstream_client,
+                        collection_name,
+                        test_case["field_name"],
+                        sync_timeout,
                     )
 
                 except Exception as e:
@@ -404,8 +407,11 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                     upstream_client.create_index(collection_name, index_params)
 
                     assert_index_sync(
-                        upstream_client, downstream_client, collection_name,
-                        test_case["field_name"], sync_timeout,
+                        upstream_client,
+                        downstream_client,
+                        collection_name,
+                        test_case["field_name"],
+                        sync_timeout,
                     )
 
                 except Exception as e:
@@ -617,8 +623,11 @@ class TestCDCSyncIndex(TestCDCSyncBase):
                     upstream_client.create_index(collection_name, index_params)
 
                     assert_index_sync(
-                        upstream_client, downstream_client, collection_name,
-                        test_case["field_name"], sync_timeout,
+                        upstream_client,
+                        downstream_client,
+                        collection_name,
+                        test_case["field_name"],
+                        sync_timeout,
                     )
 
                 except Exception as e:
