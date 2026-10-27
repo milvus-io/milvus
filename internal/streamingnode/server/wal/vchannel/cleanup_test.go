@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
@@ -318,17 +319,69 @@ func TestManagerGatesRetiredSplitSourceOnItsCheckpointUpdater(t *testing.T) {
 	manager := newCleanupTestManager(t, streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED, nil)
 	fenceCleanupTestVChannel(t, manager)
 	updater := newPChannelCheckpointUpdater("p1", manager.activeVChannels,
-		func() *utility.WALCheckpoint { return nil }, nil)
+		func() *utility.WALCheckpoint { return nil }, nil, &stubStoredCheckpointReader{})
 	manager.checkpointUpdater = updater
 	cleanup := moduleapi.CleanupContext{PhysicalTimeTick: 11, SummaryRetired: func(string, uint64) bool { return true }}
 
-	updater.markReported([]string{"v1"}, 9)
-	require.Empty(t, manager.ConsumeCleanupSnapshots(cleanup), "a report below the drop tick is not enough")
+	updater.markStored("v1", 9)
+	require.Empty(t, manager.ConsumeCleanupSnapshots(cleanup), "a stored checkpoint below the drop tick is not enough")
 
-	updater.markReported([]string{"v1"}, 10)
+	updater.markStored("v1", 10)
 	snapshots := manager.ConsumeCleanupSnapshots(cleanup)
 	require.Len(t, snapshots, 1)
 	snapshots[0].MarkPersisted()
 	require.Nil(t, manager.Module("v1"))
 	assert.False(t, updater.Reported("v1", 10), "a removed vchannel is forgotten")
+}
+
+// TestRetiredSplitSourceWaitsWhenDataCoordDropsItsCheckpoint: DataCoord's
+// batch UpdateChannelCheckpoint answers success while silently dropping a
+// vchannel whose WAL it places on another node (a pchannel mid-rebalance).
+// The retired source must not be cleaned up on that success: it stays, and
+// stays reported, until a read back shows the checkpoint stored.
+func TestRetiredSplitSourceWaitsWhenDataCoordDropsItsCheckpoint(t *testing.T) {
+	manager := newCleanupTestManager(t, streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED, nil)
+	fenceCleanupTestVChannel(t, manager)
+	reporter := &stubCheckpointReporter{}
+	reader := &stubStoredCheckpointReader{}
+	updater := newPChannelCheckpointUpdater("p1", manager.activeVChannels,
+		func() *utility.WALCheckpoint {
+			return &utility.WALCheckpoint{MessageID: rmq.NewRmqID(1), TimeTick: 20, Magic: 1}
+		}, reporter, reader)
+	manager.checkpointUpdater = updater
+	cleanup := moduleapi.CleanupContext{PhysicalTimeTick: 21, SummaryRetired: func(string, uint64) bool { return true }}
+
+	require.Empty(t, manager.ConsumeCleanupSnapshots(cleanup))
+	for i := 0; i < 3; i++ {
+		updater.execute()
+		calls, cps := reporter.snap()
+		require.Equal(t, i+1, calls)
+		require.Len(t, cps, 1)
+		require.Equal(t, "v1", cps[0].GetChannelName(), "the source is still reported")
+		require.Equal(t, []string{"v1"}, reader.takeReads())
+		require.Empty(t, manager.ConsumeCleanupSnapshots(cleanup), "success with the source filtered out does not release it")
+		require.NotNil(t, manager.Module("v1"))
+	}
+
+	reader.set("v1", 20, nil)
+	updater.execute()
+	snapshots := manager.ConsumeCleanupSnapshots(cleanup)
+	require.Len(t, snapshots, 1)
+	require.Equal(t, moduleapi.SnapshotOpDelete, snapshots[0].Op())
+	snapshots[0].MarkPersisted()
+	require.Nil(t, manager.Module("v1"))
+}
+
+// TestManagerWithoutStoredReaderDoesNotGate: an updater that cannot read back
+// is not wired in, so cleanup does not wait on an answer that never comes.
+func TestManagerWithoutStoredReaderDoesNotGate(t *testing.T) {
+	manager := newCleanupTestManager(t, streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED, nil)
+	fenceCleanupTestVChannel(t, manager)
+	manager.checkpointUpdater = newPChannelCheckpointUpdater("p1", manager.activeVChannels,
+		func() *utility.WALCheckpoint { return nil }, &stubCheckpointReporter{}, nil)
+	snapshots := manager.ConsumeCleanupSnapshots(moduleapi.CleanupContext{
+		PhysicalTimeTick: 11,
+		SummaryRetired:   func(string, uint64) bool { return true },
+	})
+	require.Len(t, snapshots, 1)
 }
