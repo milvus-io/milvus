@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/csv"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/json"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/lance"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/numpy"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/parquet"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
