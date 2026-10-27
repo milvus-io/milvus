@@ -1,13 +1,15 @@
-import time
 import json
 import os
+import time
 from collections import defaultdict
+
 import pytest
-from pymilvus import Collection
 from base.client_base import TestcaseBase
-from deploy.common import get_chaos_test_collections
 from chaos import constants
+from chaos.recovery_continuation import is_recovery_collection
 from common.common_type import CaseLabel
+from deploy.common import get_chaos_test_collections
+from pymilvus import Collection
 from utils.util_log import test_log as log
 
 
@@ -18,6 +20,7 @@ class TestGetCollections(TestcaseBase):
     def test_get_collections_by_prefix(self,):
         self._connect()
         all_collections = self.utility_wrap.list_collections()[0]
+        recovery_collections = [name for name in all_collections if is_recovery_collection(name)]
         all_collections = [c_name for c_name in all_collections if c_name.startswith("Checker")]
         selected_collections_map = {}
         for c_name in all_collections:
@@ -33,6 +36,9 @@ class TestGetCollections(TestcaseBase):
         selected_collections = []
         for value in selected_collections_map.values():
             selected_collections.extend(value)
+        # Never call num_entities on these collections: it can force a flush.
+        # Keep every dedicated ledger owner, including small growing workloads.
+        selected_collections.extend(recovery_collections)
         log.info(f"find {len(selected_collections)} collections:")
         log.info(selected_collections)
         data = {
