@@ -574,10 +574,6 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	if err := checkArrayFeatureGate(t.schema); err != nil {
-		return err
-	}
-
 	t.Schema, err = proto.Marshal(t.schema)
 	if err != nil {
 		return err
@@ -667,9 +663,6 @@ func (t *AddCollectionFieldTask) PreExecute(ctx context.Context) error {
 	if err := ValidateField(t.fieldSchema, t.oldSchema); err != nil {
 		return err
 	}
-	if err := checkArrayFeatureGateField(t.fieldSchema); err != nil {
-		return err
-	}
 	mlog.Info(context.TODO(), "PreExecute addField task done", mlog.Any("field schema", t.fieldSchema))
 	return nil
 }
@@ -749,9 +742,6 @@ func (t *AddCollectionStructFieldTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	if err := validateNativeListArrayGrowingSourceFlush(t.oldSchema, t.structFieldSchema.GetFields()...); err != nil {
-		return err
-	}
-	if err := checkArrayFeatureGateStruct(t.structFieldSchema); err != nil {
 		return err
 	}
 	transformStructArrayFieldSubNames(t.structFieldSchema)
@@ -1062,15 +1052,7 @@ func (t *AlterCollectionSchemaTask) PreExecute(ctx context.Context) error {
 
 	switch action.GetOp().(type) {
 	case *milvuspb.AlterCollectionSchemaRequest_Action_AddRequest:
-		if err := t.preExecuteAdd(ctx); err != nil {
-			return err
-		}
-		for _, fieldInfo := range action.GetAddRequest().GetFieldInfos() {
-			if err := checkArrayFeatureGateField(fieldInfo.GetFieldSchema()); err != nil {
-				return err
-			}
-		}
-		return nil
+		return t.preExecuteAdd(ctx)
 	case *milvuspb.AlterCollectionSchemaRequest_Action_DropRequest:
 		return t.preExecuteDrop(ctx)
 	default:

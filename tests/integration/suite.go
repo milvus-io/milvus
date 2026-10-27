@@ -99,12 +99,6 @@ func (s *MiniClusterSuite) WithOptions(options ...ClusterSuiteOption) {
 // After it is called, the cluster is ready for tests.
 func (s *MiniClusterSuite) SetupSuite() {
 	paramtable.Init()
-	// Element-nullable and nested Array fields are gated at the proxy until the
-	// feature is complete; integration suites exercise them.
-	enableKey := paramtable.Get().ProxyCfg.EnableElementNullAndNestedArray.Key
-	if _, ok := s.envConfigs[strings.ToUpper(strings.ReplaceAll(enableKey, ".", "_"))]; !ok {
-		s.WithMilvusConfig(enableKey, "true")
-	}
 	s.T().Log("Setup test...")
 	s.T().Log("Setup case timeout", caseTimeout)
 	ctx, cancel := context.WithTimeout(context.Background(), caseTimeout) //nolint:gosec // cancel is stored and called in TearDownSuite()
