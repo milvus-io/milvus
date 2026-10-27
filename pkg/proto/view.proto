@@ -204,11 +204,18 @@ message QueryPlanWorkNode {
     repeated SegmentSelection sub_selections = 4;
 }
 
-// Absent means all View members in scope. Present inclusion with no IDs means
-// none; exclusion with no IDs means all. Use the smaller side on the wire.
+// Selection is relative to the existing View/request scope. All and None carry
+// no IDs; Include and Exclude carry the smaller nonempty side of a partial set.
+// An absent selection defaults to All. Hybrid entries remain positional.
 message SegmentSelection {
+    enum Mode {
+        All = 0;
+        Include = 1;
+        Exclude = 2;
+        None = 3;
+    }
     repeated int64 segment_ids = 1 [packed = true];
-    bool exclude = 2;
+    Mode mode = 2;
 }
 
 //

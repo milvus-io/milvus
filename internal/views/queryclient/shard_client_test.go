@@ -41,8 +41,8 @@ func TestShardSearchReturnsQueryPlanMVCCForRequery(t *testing.T) {
 			},
 		},
 	}
-	selection := &viewpb.SegmentSelection{SegmentIds: []int64{100}, Exclude: true}
-	subSelections := []*viewpb.SegmentSelection{{SegmentIds: []int64{101}}, {Exclude: true}}
+	selection := &viewpb.SegmentSelection{SegmentIds: []int64{100}, Mode: viewpb.SegmentSelection_Exclude}
+	subSelections := []*viewpb.SegmentSelection{{SegmentIds: []int64{101}, Mode: viewpb.SegmentSelection_Include}, {Mode: viewpb.SegmentSelection_All}}
 	planClient.executionSummary = &viewpb.ExecutionSummary{GlobalOptimizer: &viewpb.GlobalOptimizerExecutionSummary{Flags: 1 << viewpb.GlobalOptimizerExecutionSummary_PrunedByScalarFiltering}}
 	planClient.plan.WorkNodes[0].SegmentSelection = selection
 	planClient.plan.WorkNodes[0].SubSelections = subSelections

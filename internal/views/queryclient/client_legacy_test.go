@@ -285,7 +285,7 @@ func TestLegacyRequeryUsesRetainedViewWithoutReplanning(t *testing.T) {
 	mockey.PatchConvey("requery preserves the exact parent plan, including failures", t, func() {
 		node := qviews.NewQueryNode(9)
 		plan := ShardPlan{ShardID: qviews.ShardID{VChannel: "p_1v0", ReplicaID: 2}, Version: &viewpb.QueryViewVersion{QueryVersion: 5}, Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 90}, WorkNodes: []qviews.WorkNode{node}}
-		selection := &viewpb.SegmentSelection{SegmentIds: []int64{777}}
+		selection := &viewpb.SegmentSelection{SegmentIds: []int64{777}, Mode: viewpb.SegmentSelection_Include}
 		plan.Selections = []*viewpb.QueryPlanWorkNode{{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: 9}}, SegmentSelection: selection}}
 		service := &fakeViewQueryServiceClient{}
 		client := &legacyClient{shardClient: &shardViewQueryClient{queryServiceClient: service}}

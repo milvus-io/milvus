@@ -246,11 +246,11 @@ func TestHybridSelectionsEncodeWithinPartitionScope(t *testing.T) {
 				}
 				require.ElementsMatch(t, expected[i], actual, "slot %d", i)
 			}
-			require.True(t, worker.SubSelections[0].Exclude)
+			require.Equal(t, viewpb.SegmentSelection_All, worker.SubSelections[0].GetMode())
 			require.Empty(t, worker.SubSelections[0].SegmentIds)
-			require.False(t, worker.SubSelections[3].Exclude, "skipped slot is none")
+			require.Equal(t, viewpb.SegmentSelection_None, worker.SubSelections[3].GetMode(), "skipped slot is none")
 			require.Empty(t, worker.SubSelections[3].SegmentIds)
-			require.False(t, worker.SubSelections[4].Exclude, "empty local scope is none")
+			require.Equal(t, viewpb.SegmentSelection_None, worker.SubSelections[4].GetMode(), "empty local scope is none")
 			require.Empty(t, worker.SubSelections[4].SegmentIds)
 			// Requery may carry a broader outer scope. Its union must still exclude
 			// the skipped subquery's partition unless another active subquery selected it.

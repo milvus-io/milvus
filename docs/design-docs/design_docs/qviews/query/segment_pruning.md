@@ -113,9 +113,12 @@ never uses vector-distance pruning. A different searched vector field must not
 use the clustering field's centroids. Growing candidates retain existing SN
 scope/visibility handling and are not filtered using sealed partition statistics.
 
-QueryPlan records per-worker segment selection. An absent selection means all
-View members in request scope. An explicit empty inclusion means none. Inclusion
-or exclusion lists encode the smaller side, using packed IDs. Entirely empty QN
+QueryPlan records per-worker segment selection with four explicit modes:
+`All`, `Include`, `Exclude`, and `None`. `All` and `None` carry no IDs;
+partial selections use the smaller nonempty inclusion or exclusion list, with
+packed IDs. `All` is the default enum value, so an absent singular selection
+also means all View members in scope. Repeated hybrid entries are explicit so
+an `All` or `None` slot cannot shift subsequent subqueries. Entirely empty QN
 workers are omitted; this does not remove SN growing work. QN intersects the
 selection with its exact View and partition scope before acquiring physical
 handles, then keeps the existing exact-registration Transform MVCC wait.
@@ -124,7 +127,7 @@ Pruning does not mutate View membership or release prepared segment resources.
 Hybrid subqueries have separate selections, encoded relative to each node's
 membership within that subrequest's partition scope. A fully selected scope
 therefore needs no segment IDs. Empty local scopes and skipped slots are explicit
-empty inclusions and preserve positional identity. Each subquery executes its
+`None` entries and preserve positional identity. Each subquery executes its
 own selection after partition filtering. The worker union remains encoded against
 full node membership: it must preserve the original candidate set even if a
 retained requery carries a broader partition scope. Retained requery uses the original View/MVCC/workers

@@ -99,14 +99,7 @@ func (o globalOptimizer) OptimizePlan(ctx context.Context, plan *viewpb.QueryPla
 						}
 					}
 				}
-				selection := &viewpb.SegmentSelection{} // No candidates means none, not all.
-				if len(scoped) != 0 {
-					selection = qviews.SelectSegments(scoped, removed)
-					if selection == nil {
-						selection = &viewpb.SegmentSelection{Exclude: true}
-					}
-				}
-				worker.SubSelections = append(worker.SubSelections, selection)
+				worker.SubSelections = append(worker.SubSelections, qviews.SelectSegments(scoped, removed))
 			}
 		}
 		if len(union) == 0 {
@@ -119,6 +112,10 @@ func (o globalOptimizer) OptimizePlan(ctx context.Context, plan *viewpb.QueryPla
 			}
 		}
 		worker.SegmentSelection = qviews.SelectSegments(all, removed)
+		if worker.SegmentSelection.GetMode() == viewpb.SegmentSelection_All {
+			// Singular All can omit the envelope; hybrid slots cannot be omitted.
+			worker.SegmentSelection = nil
+		}
 		workers = append(workers, worker)
 	}
 	plan.WorkNodes = workers
