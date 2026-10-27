@@ -292,6 +292,9 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 		L0MaterializeBytes:    uint64(paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64()),
 		GetRecoveryCheckpoint: func() *utility.WALCheckpoint { return r.GetCheckpoint(context.TODO()) },
 		CoordinatorBroker:     coordinatorBroker,
+		// A batch report's success does not prove DataCoord kept each
+		// vchannel, so a retired split source's cleanup reads it back.
+		StoredCheckpointReader: storedCheckpointReader{coord: coord},
 	})
 	if err != nil {
 		return err
