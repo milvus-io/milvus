@@ -869,6 +869,39 @@ func (s *CompactionPlanHandlerSuite) TestIsFullAtMaxTaskNum() {
 	}
 }
 
+func (s *CompactionPlanHandlerSuite) TestRemainingCapacityAtMaxTaskNum() {
+	for _, tc := range []struct {
+		name             string
+		maxTaskNum       string
+		pending, running int
+		// want is the remaining capacity; -1 stands for the room left in the queue.
+		want int
+	}{
+		{"0 leaves the queue room", "0", 2, 2, -1},
+		{"below the limit", "5", 2, 2, 1},
+		{"pending and running tasks reach the limit", "4", 2, 2, 0},
+		{"over the limit", "3", 2, 2, 0},
+	} {
+		s.Run(tc.name, func() {
+			paramtable.Get().Save(Params.DataCoordCfg.CompactionMaxTaskNum.Key, tc.maxTaskNum)
+			defer paramtable.Get().Reset(Params.DataCoordCfg.CompactionMaxTaskNum.Key)
+			inspector := newCompactionInspector(s.mockMeta, nil, nil, nil, nil, newMockVersionManager())
+			for i := 0; i < tc.pending; i++ {
+				s.Require().NoError(inspector.submitTask(newMixCompactionTask(&datapb.CompactionTask{PlanID: int64(1 + i)}, nil, s.mockMeta, newMockVersionManager())))
+			}
+			for i := 0; i < tc.running; i++ {
+				inspector.executingTasks[int64(100+i)] = newMixCompactionTask(&datapb.CompactionTask{PlanID: int64(100 + i)}, nil, s.mockMeta, newMockVersionManager())
+			}
+			want := tc.want
+			if want < 0 {
+				want = inspector.queueTasks.capacity - tc.pending
+			}
+			s.Equal(want, inspector.getRemainingCapacity())
+			s.Equal(want == 0, inspector.isFull())
+		})
+	}
+}
+
 func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
 	s.SetupTest()
 	s.mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything, mock.Anything).Return(true, true).Maybe()

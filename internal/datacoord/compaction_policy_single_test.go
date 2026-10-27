@@ -334,7 +334,7 @@ func (s *SingleCompactionPolicySuite) TestTriggerAdmitsAcrossCollections() {
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Unset()
 	for _, collID := range []int64{100, 200} {
 		coll := &collectionInfo{ID: collID, Schema: newTestSchema()}
-		meta.collections.Insert(collID, coll)
+		meta.metaStore.PutCollection(coll)
 		s.handler.EXPECT().GetCollection(mock.Anything, collID).Return(coll, nil).Maybe()
 		for i := int64(1); i <= 3; i++ {
 			id := collID + i
@@ -369,7 +369,7 @@ func (s *SingleCompactionPolicySuite) TestTriggerBoundedByInspectorCapacity() {
 	meta := s.singlePolicy.meta
 	collID := int64(100)
 	coll := &collectionInfo{ID: collID, Schema: newTestSchema()}
-	meta.collections.Insert(collID, coll)
+	meta.metaStore.PutCollection(coll)
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Unset()
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil).Maybe()
 	for i := int64(1); i <= 5; i++ {

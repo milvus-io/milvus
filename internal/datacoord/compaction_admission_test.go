@@ -517,3 +517,57 @@ func TestAdmissionEvenBudgetFullyUsedWhenShared(t *testing.T) {
 		assert.Len(t, second, 2, "round %d", round)
 	}
 }
+
+// With a budget that refills only partly between rounds (two tokens per 120s,
+// rounds every 60s), the producer whose round happens to run first would take
+// the one token of every cycle under a per-round half-budget cap. Sharing by
+// cumulative service hands the tokens to the producer served less, so both
+// producers make progress.
+func TestAdmissionPartialRefillServesBothProducers(t *testing.T) {
+	paramtable.Init()
+	withAdmissionParams(t, "0", "2", "120", "200")
+	now := time.Unix(1000, 0)
+	a := newSingleCompactionAdmitter(func() time.Time { return now })
+
+	var legacy, policy []*singleCandidate
+	for i := int64(1); i <= 10; i++ {
+		legacy = append(legacy, admissionSegment(i, 1, 5, 0.5, singleReasonAccumulation))
+		policy = append(policy, admissionSegment(100+i, 2, 5, 0.5, singleReasonAccumulation))
+	}
+	served := map[string]int{}
+	for round := 0; round < 7; round++ {
+		admitted, _ := a.admit(context.Background(), admissionSourceTrigger, legacy, -1)
+		served[admissionSourceTrigger] += len(admitted)
+		admitted, _ = a.admit(context.Background(), admissionSourcePolicy, policy, -1)
+		served[admissionSourcePolicy] += len(admitted)
+		now = now.Add(60 * time.Second)
+	}
+	// Two tokens at the start, then one per round.
+	assert.Equal(t, 8, served[admissionSourceTrigger]+served[admissionSourcePolicy], "%v", served)
+	assert.GreaterOrEqual(t, served[admissionSourcePolicy], 3, "the second producer is served too: %v", served)
+	assert.GreaterOrEqual(t, served[admissionSourceTrigger], 3, "the first producer is not starved either: %v", served)
+}
+
+// A refund gives the tokens back to the producer's share as well as to the
+// bucket, so a contested producer whose admitted candidates never reached the
+// queue is not counted as served.
+func TestAdmissionRefundRestoresShare(t *testing.T) {
+	paramtable.Init()
+	withAdmissionParams(t, "0", "4", "60", "200")
+	now := time.Unix(1000, 0)
+	a := newSingleCompactionAdmitter(func() time.Time { return now })
+
+	var legacy, policy []*singleCandidate
+	for i := int64(1); i <= 10; i++ {
+		legacy = append(legacy, admissionSegment(i, 1, 5, 0.5, singleReasonAccumulation))
+		policy = append(policy, admissionSegment(100+i, 2, 5, 0.5, singleReasonAccumulation))
+	}
+	a.admit(context.Background(), admissionSourceTrigger, legacy, -1)
+	a.admit(context.Background(), admissionSourcePolicy, policy, -1)
+	now = now.Add(60 * time.Second)
+	admitted, _ := a.admit(context.Background(), admissionSourceTrigger, legacy, -1)
+	require.Len(t, admitted, 2)
+	a.refund(admissionSourceTrigger, 2)
+	assert.Equal(t, 0, a.served[admissionSourceTrigger])
+	assert.Equal(t, 4.0, a.tokens)
+}

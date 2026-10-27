@@ -59,9 +59,10 @@ import (
 // runs, in which case they go through admission themselves) and the single
 // compaction policy (L2 segments). Each keeps its own fairness cursors. Their
 // rounds run on the same interval and nearly in phase, so while the other
-// producer has a backlog a producer takes at most half of the budget, the
-// odd token going to the two in turn; otherwise whichever runs first would take
-// the whole refill every round.
+// producer has a backlog the two are entitled to half of the budget each, by
+// cumulative service rather than per round: otherwise whichever runs first
+// would take the whole refill every round, or, when a round refills only part
+// of the budget, the only tokens there are.
 //
 // Both knobs are refreshable; jitter=0 and tokens=0 restore legacy behavior.
 
@@ -161,10 +162,10 @@ type singleCompactionAdmitter struct {
 	interleavedOddTurn map[string]bool
 
 	// Sharing between producers: when each producer last ended a round with
-	// candidates deferred for lack of tokens, and which producer took the odd
-	// token the last time tokens were split.
+	// candidates deferred for lack of tokens, and how many tokens each has
+	// taken since the budget became contested.
 	backloggedAt map[string]time.Time
-	oddTokenTo   string
+	served       map[string]int
 
 	nowFn func() time.Time // injectable for tests
 }
@@ -199,6 +200,7 @@ func newSingleCompactionAdmitter(nowFn func() time.Time) *singleCompactionAdmitt
 		lastCollection:     make(map[admissionCursorKey]int64),
 		interleavedOddTurn: make(map[string]bool),
 		backloggedAt:       make(map[string]time.Time),
+		served:             make(map[string]int),
 	}
 }
 
@@ -280,7 +282,7 @@ func (a *singleCompactionAdmitter) admit(ctx context.Context, producer string, c
 	}
 	a.lastRefill = now
 
-	tokens := a.tokenShare(producer, int(a.tokens), budget, now)
+	tokens, contested := a.tokenShare(producer, int(a.tokens), budget, now)
 	available := tokens
 	if capacity >= 0 && capacity < available {
 		available = capacity
@@ -293,6 +295,9 @@ func (a *singleCompactionAdmitter) admit(ctx context.Context, producer string, c
 	admitted = plan.queue[:available]
 	deferred = len(plan.queue) - available
 	a.tokens -= float64(available)
+	if contested {
+		a.served[producer] += available
+	}
 	// Advance the cursors only by what was admitted from the interleaved
 	// section: the class turn flips once per interleaved pick, and each
 	// class's round-robin resumes after the collection of the last candidate
@@ -322,14 +327,17 @@ func (a *singleCompactionAdmitter) admit(ctx context.Context, producer string, c
 }
 
 // tokenShare returns how many of the whole tokens a producer may use this
-// round. While another producer has a recent backlog, each may take half of
-// the budget (not of the current balance, so the second producer's round is
-// not left with a quarter and the rest discarded at the next refill), and the
-// odd token of an odd budget goes to the producers in turn, so the one whose
-// round happens to run first cannot take every refill.
-func (a *singleCompactionAdmitter) tokenShare(producer string, tokens int, budget float64, now time.Time) int {
+// round, and whether the budget is contested. It is while another producer
+// has a recent backlog: the two are then entitled to half of the budget
+// each, counted on cumulative service since the contention began rather than
+// per round. A producer may run ahead of the other by at most half of the
+// budget (rounded up, so the odd token of an odd budget goes to the two in
+// turn), so when a round refills only part of the budget the tokens go to
+// the producer served less, and a stable ordering of the rounds cannot starve
+// the other. An uncontested round takes what is there, and the service
+// counters start afresh.
+func (a *singleCompactionAdmitter) tokenShare(producer string, tokens int, budget float64, now time.Time) (share int, contested bool) {
 	stale := 2 * Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second)
-	contested := false
 	for other, at := range a.backloggedAt {
 		if other != producer && now.Sub(at) <= stale {
 			contested = true
@@ -337,20 +345,24 @@ func (a *singleCompactionAdmitter) tokenShare(producer string, tokens int, budge
 		}
 	}
 	if !contested {
-		return tokens
+		clear(a.served)
+		return tokens, false
 	}
-	half := int(budget) / 2
-	share := half
-	if int(budget)%2 == 1 && a.oddTokenTo != producer && tokens > half {
-		share++
-		a.oddTokenTo = producer
+	othersServed := 0
+	for other, n := range a.served {
+		if other != producer {
+			othersServed = max(othersServed, n)
+		}
 	}
-	return min(share, tokens)
+	lead := (int(budget) + 1) / 2
+	share = othersServed + lead - a.served[producer]
+	return max(min(share, tokens), 0), true
 }
 
-// refund returns the tokens of admitted candidates that were not submitted
-// after all, so the budget only counts work that actually reached the queue.
-func (a *singleCompactionAdmitter) refund(n int) {
+// refund returns the tokens of candidates a producer admitted but did not
+// submit after all, so the budget, and the producer's share of it, only count
+// work that actually reached the queue.
+func (a *singleCompactionAdmitter) refund(producer string, n int) {
 	if n <= 0 {
 		return
 	}
@@ -364,6 +376,7 @@ func (a *singleCompactionAdmitter) refund(n int) {
 	if a.tokens > budget {
 		a.tokens = budget
 	}
+	a.served[producer] = max(a.served[producer]-n, 0)
 }
 
 // admissionOrder is the service order of one round: urgent over-cap

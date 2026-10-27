@@ -604,7 +604,7 @@ func (m *CompactionTriggerManager) SubmitSingleViewToScheduler(ctx context.Conte
 	if mixView, ok := view.(*MixSegmentView); ok && mixView.admitted {
 		defer func() {
 			if !enqueued {
-				getSingleCompactionAdmitter().refund(1)
+				getSingleCompactionAdmitter().refund(admissionSourcePolicy, 1)
 			}
 		}()
 	}

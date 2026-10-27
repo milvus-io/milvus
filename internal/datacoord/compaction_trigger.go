@@ -136,8 +136,14 @@ type compactionTrigger struct {
 	// it (auto compaction disabled globally at startup) collection-scoped
 	// signals are the only rounds left and plan single compaction themselves.
 	globalLoopRunning atomic.Bool
-	closeCh           lifetime.SafeChan
-	closeWaiter       sync.WaitGroup
+	// deferredRetries holds, per collection, the retry armed when one of its
+	// collection-scoped rounds deferred single compaction candidates while no
+	// global round runs: no later round would reconsider them otherwise,
+	// unless the collection happened to flush again.
+	deferredRetryMu sync.Mutex
+	deferredRetries map[int64]*time.Timer
+	closeCh         lifetime.SafeChan
+	closeWaiter     sync.WaitGroup
 
 	indexEngineVersionManager IndexEngineVersionManager
 
@@ -167,6 +173,7 @@ func newCompactionTrigger(
 		inspector:                 inspector,
 		indexEngineVersionManager: indexVersionManager,
 		handler:                   handler,
+		deferredRetries:           make(map[int64]*time.Timer),
 		closeCh:                   lifetime.NewSafeChan(),
 		ctx:                       ctx,
 		cancel:                    cancel,
@@ -241,6 +248,54 @@ func (t *compactionTrigger) stop() {
 	t.closeWaiter.Wait()
 	if t.cancel != nil {
 		t.cancel()
+	}
+	t.deferredRetryMu.Lock()
+	for collectionID, timer := range t.deferredRetries {
+		timer.Stop()
+		delete(t.deferredRetries, collectionID)
+	}
+	t.deferredRetryMu.Unlock()
+}
+
+// armDeferredRetry schedules one retry for a collection whose
+// collection-scoped round deferred single compaction candidates while no
+// global round runs. After the cadence a global round would have had, the
+// collection gets a plain signal, so its deferred segments are reconsidered
+// once the bucket has refilled even if it never flushes again. One retry per
+// collection is pending at a time; a retry round that still defers arms the
+// next one.
+func (t *compactionTrigger) armDeferredRetry(collectionID int64) {
+	t.deferredRetryMu.Lock()
+	defer t.deferredRetryMu.Unlock()
+	if t.closeCh.IsClosed() {
+		return
+	}
+	if _, pending := t.deferredRetries[collectionID]; pending {
+		return
+	}
+	if t.deferredRetries == nil {
+		t.deferredRetries = make(map[int64]*time.Timer)
+	}
+	delay := Params.DataCoordCfg.MixCompactionTriggerInterval.GetAsDuration(time.Second)
+	t.deferredRetries[collectionID] = time.AfterFunc(delay, func() { t.fireDeferredRetry(collectionID) })
+}
+
+// fireDeferredRetry sends the retry signal armed by armDeferredRetry. A
+// signal that cannot be queued is armed again rather than dropped, since
+// nothing else would reconsider the deferred segments.
+func (t *compactionTrigger) fireDeferredRetry(collectionID int64) {
+	t.deferredRetryMu.Lock()
+	delete(t.deferredRetries, collectionID)
+	t.deferredRetryMu.Unlock()
+	if t.closeCh.IsClosed() {
+		return
+	}
+	ctx := t.triggerContext()
+	_, err := t.TriggerCompaction(ctx, NewCompactionSignal().WithWaitResult(false).WithCollectionID(collectionID))
+	if err != nil {
+		mlog.Warn(ctx, "failed to retry deferred single compaction candidates, will retry later",
+			mlog.FieldCollectionID(collectionID), mlog.Err(err))
+		t.armDeferredRetry(collectionID)
 	}
 }
 
@@ -493,6 +548,12 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 			log.RatedInfo(context.TODO(), rate.Limit(10), "deferred single compaction candidates by admission limit",
 				mlog.Int("admitted", admitted),
 				mlog.Int("deferred", deferred))
+			if !signal.isGlobal() {
+				// A collection-scoped round plans single compaction only when
+				// no global round runs, so nothing would reconsider the
+				// deferred candidates unless the collection flushes again.
+				t.armDeferredRetry(signal.collectionID)
+			}
 		}
 	}
 
@@ -650,7 +711,7 @@ func (a *singleAdmission) settle(admitter *singleCompactionAdmitter) {
 	if a == nil {
 		return
 	}
-	admitter.refund(len(a.admitted) - len(a.reached))
+	admitter.refund(admissionSourceTrigger, len(a.admitted)-len(a.reached))
 }
 
 func (t *compactionTrigger) generatePlansTwoTier(segments []*SegmentInfo, signal *compactionSignal, compactTime *compactTime, expectedSize int64, admission *singleAdmission) []*compactionBucket {
@@ -1008,7 +1069,8 @@ func hasTooManyDeletions(segment *SegmentInfo) bool {
 	}
 
 	// The proportion of deleted rows is too large, int64 PK tends to accumulates deleted row counts.
-	if float64(totalDeletedRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat()*mult {
+	// The jittered ratio is capped at 1 so a fully deleted segment always qualifies.
+	if float64(totalDeletedRows)/float64(segment.GetNumOfRows()) >= min(Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat()*mult, 1) {
 		mlog.Info(context.TODO(), "deleted entities rows proportion exceeds threshold",
 			mlog.FieldSegmentID(segment.ID),
 			mlog.Int64("number of rows", segment.GetNumOfRows()),
@@ -1138,9 +1200,10 @@ func (t *compactionTrigger) singleCompactionReason(segment *SegmentInfo, compact
 	// the segment-wide average. To prevent over-triggering on segments
 	// whose precise expired-byte sum sits exactly at threshold, we shift
 	// the fraction down one 20% bucket.
-	// Accumulation-type expiry thresholds share the per-segment jitter.
+	// The expiry thresholds share the per-segment jitter; the jittered ratio is
+	// capped at 1 so a fully expired segment always qualifies.
 	expiryMult := singleCompactionThresholdMultiplier(segment.ID)
-	ratio := Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() * expiryMult
+	ratio := min(Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat()*expiryMult, 1)
 	expiredFraction := 0.0
 	if commitTs > 0 {
 		if commitTs < compactTime.expireTime {

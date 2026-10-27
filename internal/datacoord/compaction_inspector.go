@@ -58,7 +58,7 @@ type CompactionInspector interface {
 	// tasks reach dataCoord.compaction.maxTaskNum
 	isFull() bool
 	// getRemainingCapacity returns how many tasks can still be enqueued before
-	// the pool is full; a negative value means the pool is unbounded
+	// isFull holds; a negative value means the pool is unbounded
 	getRemainingCapacity() int
 	// get compaction tasks by signal id
 	getCompactionTasksNumBySignalID(signalID int64) int
