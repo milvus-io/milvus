@@ -97,13 +97,16 @@ class TestMilvusClientFunctionChainBuiltinIndependent(TestMilvusClientV2Base):
         return response
 
     @staticmethod
-    def _assert_scores(result, rows, scores, ids=None):
+    def _assert_scores(result, rows, scores, ids=None, *, exact=False):
         expected = dict(zip([r["id"] for r in rows], scores))
         order = ids if ids is not None else sorted(expected, key=lambda pk: (-expected[pk], pk))
+        expected_scores = [expected[pk] for pk in order]
+        if not exact:
+            expected_scores = pytest.approx(expected_scores, rel=2e-6, abs=2e-7)
         assert len(result) == 2
         for hits in result:
             assert [h["id"] for h in hits] == order
-            assert [h["distance"] for h in hits] == pytest.approx([expected[pk] for pk in order], rel=2e-6, abs=2e-7)
+            assert [h["distance"] for h in hits] == expected_scores
             for hit in hits:
                 # Only the requested stored field is projected; temporary/input columns stay private.
                 assert hit["entity"] == {"label": f"row_{hit['id']}"}
@@ -215,7 +218,8 @@ class TestMilvusClientFunctionChainBuiltinIndependent(TestMilvusClientV2Base):
         client = self._client()
         name, rows = self._collection(client, [(16777217.0, 0.0), (1e20, -1e20), (1e-46, 0.0), (-0.0, 0.0)])
         chain = self._finish(FunctionChain(stage).map("$score", self._combine("sum")))
-        self._assert_scores(self._search(client, name, chain, len(rows)), rows, [16777216.0, 0.0, 0.0, 0.0])
+        # These Float32 values are exactly representable; tolerance would hide rounding and underflow errors.
+        self._assert_scores(self._search(client, name, chain, len(rows)), rows, [16777216.0, 0.0, 0.0, 0.0], exact=True)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("stage", STAGES, ids=["l0", "l1", "l2"])
