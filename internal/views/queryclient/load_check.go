@@ -37,9 +37,10 @@ type collectionLoadCheck struct {
 }
 
 type loadStateCall struct {
-	done      chan struct{}
-	err       error
-	nextCheck time.Time
+	done          chan struct{}
+	err           error
+	ownerCanceled bool
+	nextCheck     time.Time
 }
 
 func newCollectionLoadChecks(client LoadInfoClient) *collectionLoadChecks {
@@ -83,7 +84,7 @@ func (s *collectionLoadCheck) check(ctx context.Context) (time.Time, error) {
 			case <-call.done:
 				// The caller owning the RPC can be canceled independently of
 				// other queries sharing this probe. Let those queries try again.
-				if merr.IsCanceledOrTimeout(call.err) && ctx.Err() == nil {
+				if call.ownerCanceled {
 					continue
 				}
 				return call.nextCheck, call.err
@@ -101,10 +102,14 @@ func (s *collectionLoadCheck) check(ctx context.Context) (time.Time, error) {
 		if s.owner.client == nil {
 			call.err = merr.WrapErrServiceInternalMsg("query client requires a Coordinator load-info client")
 		} else {
-			probeCtx, cancel := context.WithTimeout(ctx, loadStateCheckInterval)
-			info, err := s.owner.client.GetQueryViewLoadInfo(probeCtx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: s.collectionID})
+			info, err := s.owner.client.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: s.collectionID})
 			call.err = merr.CheckRPCCall(info, err)
-			cancel()
+		}
+		// Use the RPC owner's context, not the transport's error representation,
+		// to keep its cancellation independent of other queries sharing the call.
+		if err := ctx.Err(); err != nil {
+			call.ownerCanceled = true
+			call.err = err
 		}
 		s.mu.Lock()
 		if call.err == nil {

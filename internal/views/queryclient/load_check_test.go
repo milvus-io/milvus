@@ -10,6 +10,8 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -88,6 +90,44 @@ func TestReplicaLoadCheckRepeatsWithoutWatchUpdate(t *testing.T) {
 	require.Equal(t, 2, calls, "release with an unchanged empty directory must be detected")
 }
 
+func TestReplicaLoadCheckWaitsBeyondOneSecond(t *testing.T) {
+	route := &replicaRoute{changed: make(chan struct{}), snapshot: qviews.ReplicaSnapshot{Valid: true}}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	checks := patchLoadCheck(t, func(probeCtx context.Context, _ *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
+		timer := time.NewTimer(1200 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-probeCtx.Done():
+			return nil, status.FromContextError(probeCtx.Err()).Err()
+		case <-timer.C:
+		}
+		publishTestRoute(route, qviews.ReplicaSnapshot{Valid: true, Replicas: []qviews.Replica{{ReplicaID: 7}}})
+		return &querypb.GetQueryViewLoadInfoResponse{Status: merr.Success()}, nil
+	})
+	check := checks.acquire(100)
+	defer check.release()
+	replica, _, err := route.nextReplica(ctx, nil, nil, check.check)
+	require.NoError(t, err, "a slow load check must use the query deadline")
+	require.EqualValues(t, 7, replica.ReplicaID)
+	require.NoError(t, ctx.Err())
+}
+
+func TestReplicaLoadCheckHonorsQueryDeadline(t *testing.T) {
+	route := &replicaRoute{changed: make(chan struct{}), snapshot: qviews.ReplicaSnapshot{Valid: true}}
+	checks := patchLoadCheck(t, func(ctx context.Context, _ *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
+		<-ctx.Done()
+		return nil, status.FromContextError(ctx.Err()).Err()
+	})
+	check := checks.acquire(100)
+	defer check.release()
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	_, _, err := route.nextReplica(ctx, nil, nil, check.check)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Zero(t, check.nextCheck, "a canceled probe must not cache a successful load check")
+}
+
 func TestReplicaLoadCheckDoesNotOverrideNewReplica(t *testing.T) {
 	route := &replicaRoute{changed: make(chan struct{}), snapshot: qviews.ReplicaSnapshot{Valid: true}}
 	checks := patchLoadCheck(t, func(context.Context, *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
@@ -134,7 +174,7 @@ func TestReplicaLoadCheckSharesProbesAndReleasesEntries(t *testing.T) {
 }
 
 func TestReplicaLoadCheckPreservesErrorsAndDoesNotCacheNotLoaded(t *testing.T) {
-	for _, failure := range []error{merr.WrapErrCollectionNotLoaded(100), merr.WrapErrServiceNotReadyMsg("recovering"), context.Canceled} {
+	for _, failure := range []error{merr.WrapErrCollectionNotLoaded(100), merr.WrapErrServiceNotReadyMsg("recovering"), context.Canceled, context.DeadlineExceeded, status.Error(codes.Canceled, "remote cancellation"), status.Error(codes.DeadlineExceeded, "remote timeout")} {
 		t.Run(failure.Error(), func(t *testing.T) {
 			calls := 0
 			checks := patchLoadCheck(t, func(context.Context, *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
@@ -174,38 +214,63 @@ func TestReplicaLoadCheckAllQueryEntrypoints(t *testing.T) {
 	require.Empty(t, checks.collections)
 }
 
+// loadCheckWaitContext signals when a query selects on an in-flight probe.
+type loadCheckWaitContext struct {
+	context.Context
+	waiting chan struct{}
+	once    sync.Once
+}
+
+func (c *loadCheckWaitContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.waiting) })
+	return c.Context.Done()
+}
+
 func TestReplicaLoadCheckCancellationDoesNotCancelOtherQueries(t *testing.T) {
-	entered := make(chan struct{})
-	var calls atomic.Int64
-	checks := patchLoadCheck(t, func(ctx context.Context, _ *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
-		if calls.Add(1) == 1 {
-			close(entered)
-			<-ctx.Done()
-			return nil, ctx.Err()
-		}
-		return &querypb.GetQueryViewLoadInfoResponse{Status: merr.Success()}, nil
-	})
-	check := checks.acquire(100)
-	defer check.release()
-	ownerCtx, cancelOwner := context.WithCancel(t.Context())
-	defer cancelOwner()
-	ownerDone := make(chan error, 1)
-	go func() { _, err := check.check(ownerCtx); ownerDone <- err }()
-	<-entered
-	// A waiter may time out without terminating the shared RPC or changing its result.
-	waiterCtx, cancelWaiter := context.WithTimeout(t.Context(), 20*time.Millisecond)
-	defer cancelWaiter()
-	_, err := check.check(waiterCtx)
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-	require.EqualValues(t, 1, calls.Load())
-	otherDone := make(chan error, 1)
-	go func() { _, err := check.check(t.Context()); otherDone <- err }()
-	cancelOwner()
-	require.ErrorIs(t, <-ownerDone, context.Canceled)
-	require.NoError(t, <-otherDone, "a canceled RPC owner must not fail another live query")
-	require.EqualValues(t, 2, calls.Load())
-	_, err = check.check(ownerCtx)
-	require.ErrorIs(t, err, context.Canceled, "cancellation must beat a cached successful check")
+	for name, rpcError := range map[string]func(context.Context) error{
+		"context": func(ctx context.Context) error { return ctx.Err() },
+		"grpc":    func(ctx context.Context) error { return status.FromContextError(ctx.Err()).Err() },
+		"wrapped grpc": func(ctx context.Context) error {
+			return merr.Wrap(status.FromContextError(ctx.Err()).Err(), "load check")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			entered := make(chan struct{})
+			var calls atomic.Int64
+			checks := patchLoadCheck(t, func(ctx context.Context, _ *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
+				if calls.Add(1) == 1 {
+					close(entered)
+					<-ctx.Done()
+					return nil, rpcError(ctx)
+				}
+				return &querypb.GetQueryViewLoadInfoResponse{Status: merr.Success()}, nil
+			})
+			check := checks.acquire(100)
+			defer check.release()
+			ownerCtx, cancelOwner := context.WithCancel(t.Context())
+			defer cancelOwner()
+			ownerDone := make(chan error, 1)
+			go func() { _, err := check.check(ownerCtx); ownerDone <- err }()
+			<-entered
+			// A waiter may time out without terminating the shared RPC or changing its result.
+			waiterCtx, cancelWaiter := context.WithTimeout(t.Context(), 20*time.Millisecond)
+			defer cancelWaiter()
+			_, err := check.check(waiterCtx)
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+			require.EqualValues(t, 1, calls.Load())
+			otherDone := make(chan error, 1)
+			waiting := make(chan struct{})
+			otherCtx := &loadCheckWaitContext{Context: t.Context(), waiting: waiting}
+			go func() { _, err := check.check(otherCtx); otherDone <- err }()
+			<-waiting
+			cancelOwner()
+			require.ErrorIs(t, <-ownerDone, context.Canceled)
+			require.NoError(t, <-otherDone, "a canceled RPC owner must not fail another live query")
+			require.EqualValues(t, 2, calls.Load())
+			_, err = check.check(ownerCtx)
+			require.ErrorIs(t, err, context.Canceled, "cancellation must beat a cached successful check")
+		})
+	}
 }
 
 func TestReplicaLoadCheckMissingDependency(t *testing.T) {

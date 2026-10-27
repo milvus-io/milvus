@@ -54,8 +54,12 @@ Concurrent empty-directory requests share one probe per Collection. Successful
 checks are reused for one second while requests remain active, then checked
 again even without a Watch notification: a collection can be released before SN
 ever receives its first View. Negative results are not cached for future probes.
-Each probe is bounded by the caller deadline and a one-second timeout. The
-helper owns no background goroutines and releases its entry after the last
+Each probe uses its initiating query's context without an additional timeout;
+the one-second interval controls successful-result reuse and rechecks only.
+If that query is canceled, other live waiters retry independently of the RPC
+error's representation. While a probe is in flight, its initiating query
+rechecks Watch updates after the RPC returns or its context is canceled.
+The helper owns no background goroutines and releases its entry after the last
 active waiter exits; normal queries with available replicas do not acquire it.
 AutoLoad's pre-execution EnsureCollectionReady avoids the ordinary initial
 unloaded case, but cannot prevent a subsequent concurrent release.
