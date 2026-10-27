@@ -11,22 +11,29 @@
 package packed
 
 import (
+	"context"
+	"fmt"
 	"path"
 	"testing"
+	"unsafe"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // manifestTestStorageConfig returns a storage config wired to a per-test
 // temp dir for use with CommitManifestUpdates / FFIPackedWriter.
+// Local Loon filesystems are rooted at "/", so callers must include RootPath
+// in each complete file key instead of relying on an implicit root prefix.
 func manifestTestStorageConfig(t *testing.T) *indexpb.StorageConfig {
 	t.Helper()
 	paramtable.Init()
@@ -62,6 +69,366 @@ func TestCommitManifestUpdates_EmptyShortCircuit(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, MarshalManifestPath(basePath, ManifestEarliest), got,
 				"empty updates must return the unchanged manifest path")
+		})
+	}
+}
+
+func TestReadManifestColumnGroupEntries(t *testing.T) {
+	paramtable.InitWithBaseTable(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+	cfg := manifestTestStorageConfig(t)
+	basePath := path.Join(cfg.RootPath, "read_column_group_entries/seg1")
+	groups := []ColumnGroupEntry{
+		{Columns: []string{"100"}, Format: "parquet", Files: []ColumnGroupFileEntry{{
+			Path: path.Join(basePath, "input.parquet"), EndIndex: 10,
+		}}},
+		{Columns: []string{"101", "102"}, Format: "vortex", Files: []ColumnGroupFileEntry{{
+			Path: path.Join(basePath, "output.vortex"), StartIndex: 2, EndIndex: 10,
+			Properties: map[string]string{"file_size": "1234", "footer_size": "256", "custom_property": "preserved"},
+		}}},
+	}
+	manifest, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{ColumnGroups: groups})
+	require.NoError(t, err)
+
+	t.Run("preserve properties after releasing native manifest", func(t *testing.T) {
+		entries, err := readManifestColumnGroupEntries(manifest, cfg, []string{"101", "102", "101"})
+		require.NoError(t, err)
+		require.Equal(t, groups[1:], entries)
+		// Commit only Go-owned descriptors after the reader has freed its C handle.
+		roundTrip, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{ColumnGroups: entries})
+		require.NoError(t, err)
+		actual, err := readManifestColumnGroupEntries(roundTrip, cfg, []string{"101", "102"})
+		require.NoError(t, err)
+		require.Equal(t, entries, actual)
+	})
+	for _, tc := range []struct {
+		name    string
+		columns []string
+		message string
+	}{
+		{name: "no requested columns"},
+		{name: "missing columns", columns: []string{"999", "888"}, message: "missing columns [888 999]"},
+		{name: "mixed column group", columns: []string{"101"}, message: "mixes requested columns"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			entries, err := readManifestColumnGroupEntries(manifest, cfg, tc.columns)
+			require.Empty(t, entries)
+			if tc.message == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, merr.ErrDataIntegrity)
+				require.ErrorContains(t, err, tc.message)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "nil manifest"},
+		{name: "read error", err: merr.WrapErrStorageMsg("read failed")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			patch := mockey.Mock(GetManifestHandle).Return(nil, tc.err).Build()
+			defer patch.UnPatch()
+			entries, err := readManifestColumnGroupEntries(manifest, cfg, []string{"101"})
+			require.Empty(t, entries)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+			} else {
+				require.ErrorIs(t, err, merr.ErrDataIntegrity)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name  string
+		group ColumnGroupEntry
+		err   error
+	}{
+		{name: "decoder failure", err: merr.WrapErrServiceInternalMsg("incomplete property")},
+		{name: "no files", group: ColumnGroupEntry{Columns: []string{"101"}, Format: "vortex"}},
+		{name: "no format", group: ColumnGroupEntry{Columns: []string{"101"}, Files: groups[1].Files}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			patch := mockey.Mock(columnGroupEntriesFromC).Return([]ColumnGroupEntry{tc.group}, tc.err).Build()
+			defer patch.UnPatch()
+			entries, err := readManifestColumnGroupEntries(manifest, cfg, []string{"101"})
+			require.Empty(t, entries)
+			require.ErrorIs(t, err, merr.ErrDataIntegrity)
+		})
+	}
+}
+
+func TestColumnGroupEntriesFromCValidatesNativeArrays(t *testing.T) {
+	cfg := manifestTestStorageConfig(t)
+	schema := arrow.NewSchema([]arrow.Field{{Name: "101", Type: arrow.PrimitiveTypes.Int64}}, nil)
+	basePath := path.Join(cfg.RootPath, "column_group_entries/seg1")
+	writer, err := NewFFIPackedWriter(basePath, schema,
+		[]storagecommon.ColumnGroup{{Columns: []int{0}, GroupID: 101}}, cfg, nil)
+	require.NoError(t, err)
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+	defer builder.Release()
+	builder.Field(0).(*array.Int64Builder).Append(42)
+	record := builder.NewRecord()
+	defer record.Release()
+	require.NoError(t, writer.WriteRecordBatch(record))
+	output, err := writer.Close()
+	require.NoError(t, err)
+	defer output.Destroy()
+	cgroups := output.(*ColumnGroups).cColumnGroups
+	require.EqualValues(t, 1, cgroups.num_of_column_groups)
+	group := &unsafe.Slice(cgroups.column_group_array, 1)[0]
+	require.EqualValues(t, 1, group.num_of_files)
+	file := &unsafe.Slice(group.files, 1)[0]
+	require.Positive(t, int(file.num_properties))
+	columns := unsafe.Slice(group.columns, int(group.num_of_columns))
+	keys := unsafe.Slice(file.property_keys, int(file.num_properties))
+	values := unsafe.Slice(file.property_values, int(file.num_properties))
+	originalGroups, originalGroup, originalFile := *cgroups, *group, *file
+	originalColumn, originalKey, originalValue := columns[0], keys[0], values[0]
+
+	entries, err := columnGroupEntriesFromC(nil)
+	require.NoError(t, err)
+	require.Nil(t, entries)
+	for _, tc := range []struct {
+		name    string
+		mutate  func()
+		wantErr bool
+	}{
+		{name: "valid", mutate: func() {}},
+		{name: "no groups", mutate: func() { cgroups.num_of_column_groups = 0 }},
+		{name: "missing groups", mutate: func() { cgroups.column_group_array = nil }, wantErr: true},
+		{name: "no columns", mutate: func() { group.columns = nil; group.num_of_columns = 0 }},
+		{name: "missing columns", mutate: func() { group.columns = nil }, wantErr: true},
+		{name: "nil column", mutate: func() { columns[0] = nil }, wantErr: true},
+		{name: "no files", mutate: func() { group.files = nil; group.num_of_files = 0 }},
+		{name: "missing files", mutate: func() { group.files = nil }, wantErr: true},
+		{name: "nil path", mutate: func() { file.path = nil }, wantErr: true},
+		{name: "no properties", mutate: func() { file.num_properties = 0 }},
+		{name: "missing keys", mutate: func() { file.property_keys = nil }, wantErr: true},
+		{name: "missing values", mutate: func() { file.property_values = nil }, wantErr: true},
+		{name: "nil key is skipped", mutate: func() { keys[0] = nil }},
+		{name: "nil value is skipped", mutate: func() { values[0] = nil }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Restore every native pointer before the owning writer output is freed.
+			defer func() {
+				*cgroups, *group, *file = originalGroups, originalGroup, originalFile
+				columns[0], keys[0], values[0] = originalColumn, originalKey, originalValue
+			}()
+			tc.mutate()
+			entries, err := columnGroupEntriesFromC(cgroups)
+			if tc.wantErr {
+				require.ErrorIs(t, err, merr.ErrServiceInternal)
+				require.Nil(t, entries)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestRefreshMilvusTableManifestErrorsReturnEmptyResult(t *testing.T) {
+	oldManifest := MarshalManifestPath("files/refresh_errors/seg1", 1)
+	for _, stage := range []string{"invalid path", "canceled", "columns", "stats", "transaction"} {
+		t.Run(stage, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			manifest := oldManifest
+			if stage == "invalid path" {
+				manifest = "invalid"
+			}
+			if stage == "canceled" {
+				cancel()
+			}
+			failure := merr.WrapErrStorageMsg("injected %s failure", stage)
+			var columns []string
+			if stage == "columns" {
+				columns = []string{"101"}
+				patch := mockey.Mock(readManifestColumnGroupEntries).Return(nil, failure).Build()
+				defer patch.UnPatch()
+			}
+			readPatch := mockey.Mock(GetManifestStats).
+				To(func(_ string, _ *indexpb.StorageConfig) (map[string]ManifestStat, error) {
+					if stage == "stats" {
+						return nil, failure
+					}
+					return nil, nil
+				}).Build()
+			defer readPatch.UnPatch()
+			commitCalls := 0
+			commitPatch := mockey.Mock(createMilvusTableManifest).
+				To(func(_ context.Context, _ string, _ []string, _ []Fragment, _ *indexpb.StorageConfig,
+					_ ExternalSpecContext, _ *ManifestUpdates,
+				) (string, error) {
+					commitCalls++
+					return "", failure
+				}).Build()
+			defer commitPatch.UnPatch()
+			result, err := RefreshMilvusTableManifest(ctx, manifest, nil, nil, nil, ExternalSpecContext{}, columns, nil)
+			switch stage {
+			case "invalid path":
+				require.ErrorIs(t, err, merr.ErrDataIntegrity)
+			case "canceled":
+				require.ErrorIs(t, err, context.Canceled)
+			default:
+				require.ErrorIs(t, err, failure)
+			}
+			require.Equal(t, MilvusTableRefreshResult{}, result)
+			if stage == "transaction" {
+				require.Equal(t, 1, commitCalls)
+			} else {
+				require.Zero(t, commitCalls, "preparation failure must not reach the transaction")
+			}
+		})
+	}
+}
+
+func TestRefreshMilvusTableManifestSingleCommit(t *testing.T) {
+	for _, mode := range []MilvusTablePrimaryKeyMode{MilvusTablePrimaryKeyModeExternal, MilvusTablePrimaryKeyModeVirtual} {
+		for _, withStats := range []bool{false, true} {
+			t.Run(fmt.Sprintf("mode_%d_stats_%t", mode, withStats), func(t *testing.T) {
+				cfg := manifestTestStorageConfig(t)
+				sourceBase := path.Join(cfg.RootPath, "source")
+				source := createBaseManifest(t, sourceBase, cfg)
+				sourceDelta := path.Join(sourceBase, "_delta/22")
+				source, err := AddDeltaLogsToManifestOverwrite(source, cfg, []DeltaLogEntry{{Path: sourceDelta, NumEntries: 2}})
+				require.NoError(t, err)
+				source, err = AddStatsToManifest(source, cfg, []StatEntry{
+					{Key: "bloom_filter.100", Files: []string{path.Join(sourceBase, "_stats/bloom")}, Metadata: map[string]string{"generation": "source"}},
+					{Key: "text_index.101", Files: []string{path.Join(sourceBase, "_stats/text")}, Metadata: map[string]string{"version": "99"}},
+				})
+				require.NoError(t, err)
+				base := path.Join(cfg.RootPath, "target")
+				updates := &ManifestUpdates{DeltaLogs: []DeltaLogEntry{{Path: path.Join(base, "_delta/old"), NumEntries: 1}}}
+				if withStats {
+					updates.Stats = []StatEntry{
+						{Key: "bloom_filter.100", Files: []string{path.Join(base, "_stats/bloom")}, Metadata: map[string]string{"generation": "target"}},
+						{Key: "text_index.101", Files: []string{path.Join(base, "_stats/text")}, Metadata: map[string]string{"version": "7", "build_id": "8"}},
+						{Key: "json_stats.102", Files: []string{path.Join(base, "_stats/json_stats.102/keys")}, Metadata: map[string]string{"version": "9", "build_id": "10", "json_key_stats_data_format": "1"}},
+					}
+				}
+				oldManifest, err := CommitManifestUpdates(base, ManifestEarliest, cfg, updates)
+				require.NoError(t, err)
+				_, oldVersion, err := UnmarshalManifestPath(oldManifest)
+				require.NoError(t, err)
+				oldStats, err := GetManifestStats(oldManifest, cfg)
+				require.NoError(t, err)
+				// A post-commit stats read must not be necessary for a successful
+				// refresh. Fail any read other than the old, retained snapshot.
+				reads := 0
+				readPatch := mockey.Mock(GetManifestStats).
+					To(func(manifest string, _ *indexpb.StorageConfig) (map[string]ManifestStat, error) {
+						reads++
+						require.Equal(t, oldManifest, manifest)
+						if manifest != oldManifest {
+							return nil, merr.WrapErrStorageMsg("unexpected post-commit stats read")
+						}
+						return oldStats, nil
+					}).Build()
+				defer readPatch.UnPatch()
+				newDelta := path.Join(base, "_delta/new")
+				result, err := RefreshMilvusTableManifest(context.Background(), oldManifest, []string{"pk", "ts"},
+					[]Fragment{{FilePath: source, EndRow: 1, RowCount: 1}}, cfg,
+					ExternalSpecContext{MilvusTablePKMode: mode}, nil, []DeltaLogEntry{{Path: newDelta, NumEntries: 3}})
+				require.NoError(t, err)
+				require.Equal(t, 1, reads)
+				readPatch.UnPatch()
+				actualBase, version, err := UnmarshalManifestPath(result.ManifestPath)
+				require.NoError(t, err)
+				require.Equal(t, base, actualBase)
+				require.Equal(t, oldVersion+1, version, "one refresh must write exactly one manifest")
+				paths, err := GetDeltaLogPathsFromManifest(result.ManifestPath, cfg)
+				require.NoError(t, err)
+				if mode == MilvusTablePrimaryKeyModeExternal {
+					require.ElementsMatch(t, []string{newDelta, sourceDelta}, paths)
+				} else {
+					require.Equal(t, []string{newDelta}, paths, "virtual PK must not import raw source-PK deletes")
+				}
+				stats, err := GetManifestStats(result.ManifestPath, cfg)
+				require.NoError(t, err)
+				if mode == MilvusTablePrimaryKeyModeExternal {
+					require.Equal(t, "source", stats["bloom_filter.100"].Metadata["generation"])
+				} else if withStats {
+					require.Equal(t, "target", stats["bloom_filter.100"].Metadata["generation"])
+				}
+				if withStats {
+					require.Equal(t, oldStats["text_index.101"], stats["text_index.101"])
+					require.Equal(t, oldStats["json_stats.102"], stats["json_stats.102"])
+					require.Contains(t, result.TextStatsLogs, int64(101))
+					require.Contains(t, result.JSONKeyStats, int64(102))
+					require.EqualValues(t, 7, result.TextStatsLogs[101].Version)
+					require.EqualValues(t, 9, result.JSONKeyStats[102].Version)
+					require.Equal(t, []string{"keys"}, result.JSONKeyStats[102].Files)
+				} else {
+					require.NotContains(t, stats, "text_index.101")
+					require.Empty(t, result.TextStatsLogs)
+					require.Empty(t, result.JSONKeyStats)
+				}
+				groups, err := readManifestColumnGroupEntries(result.ManifestPath, cfg, []string{"pk", "ts"})
+				require.NoError(t, err)
+				require.Equal(t, source, groups[0].Files[0].Properties[milvusTableSourceManifestPathProperty])
+				_, err = ReadFile(cfg, manifestObjectPath(base, oldVersion))
+				require.NoError(t, err, "old published manifest must stay readable")
+			})
+		}
+	}
+}
+
+func TestCreateMilvusTableManifestRejectsInvalidRetainedGroups(t *testing.T) {
+	group := func(column string, rows int64) ColumnGroupEntry {
+		return ColumnGroupEntry{Columns: []string{column}, Format: "parquet", Files: []ColumnGroupFileEntry{{Path: "output", EndIndex: rows}}}
+	}
+	for _, tc := range []struct {
+		name   string
+		groups []ColumnGroupEntry
+	}{
+		{name: "overlaps source column", groups: []ColumnGroupEntry{group("pk", 1)}},
+		{name: "duplicate output ownership", groups: []ColumnGroupEntry{group("101", 1), group("101", 1)}},
+		{name: "row count mismatch", groups: []ColumnGroupEntry{group("101", 2)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Run the real boundary, with no storage configuration: malformed
+			// bundles must be rejected before any native transaction is opened.
+			manifest, err := createMilvusTableManifest(context.Background(), "target", []string{"pk"},
+				[]Fragment{{FilePath: "source", EndRow: 1, RowCount: 1}}, nil, ExternalSpecContext{},
+				&ManifestUpdates{ColumnGroups: tc.groups})
+			require.ErrorIs(t, err, merr.ErrDataIntegrity)
+			require.Empty(t, manifest)
+		})
+	}
+}
+
+func TestRefreshMilvusTableManifestPreparationFailureDoesNotCommit(t *testing.T) {
+	for _, stage := range []string{"missing source", "canceled after stats"} {
+		t.Run(stage, func(t *testing.T) {
+			cfg := manifestTestStorageConfig(t)
+			base := path.Join(cfg.RootPath, "target")
+			oldManifest := createBaseManifest(t, base, cfg)
+			source := createBaseManifest(t, path.Join(cfg.RootPath, "source"), cfg)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if stage == "missing source" {
+				source = MarshalManifestPath(path.Join(cfg.RootPath, "missing"), 1)
+			} else {
+				stats, err := GetManifestStats(oldManifest, cfg)
+				require.NoError(t, err)
+				readPatch := mockey.Mock(GetManifestStats).
+					To(func(_ string, _ *indexpb.StorageConfig) (map[string]ManifestStat, error) {
+						cancel()
+						return stats, nil
+					}).Build()
+				defer readPatch.UnPatch()
+			}
+			result, err := RefreshMilvusTableManifest(ctx, oldManifest, []string{"pk", "ts"},
+				[]Fragment{{FilePath: source, EndRow: 1, RowCount: 1}}, cfg, ExternalSpecContext{}, nil, nil)
+			require.Error(t, err)
+			require.Equal(t, MilvusTableRefreshResult{}, result)
+			_, oldVersion, err := UnmarshalManifestPath(oldManifest)
+			require.NoError(t, err)
+			_, err = ReadFile(cfg, manifestObjectPath(base, oldVersion+1))
+			require.Error(t, err, "source preparation/cancellation must not write an intermediate manifest")
+			_, err = ReadFile(cfg, manifestObjectPath(base, oldVersion))
+			require.NoError(t, err)
 		})
 	}
 }
