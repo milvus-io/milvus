@@ -49,8 +49,8 @@ class TestCDCAPIChanges:
         c.upstream.create_index(name, indexes)
         assert_index_sync(c.upstream, c.downstream, name, "value", c.timeout)
         c.assert_rows(name, rows)
-        description = rpc(c.upstream, "DescribeCollection", milvus_pb2.DescribeCollectionRequest(collection_name=name))
-        field_id = next(f.fieldID for f in description.schema.fields if f.name == "value")
+        description = c.upstream.describe_collection(name)
+        field_id = next(f["field_id"] for f in description["fields"] if f["name"] == "value")
         kwargs = {"field_id": field_id} if by_id else {"field_name": "value"}
         c.upstream.drop_collection_field(name, **kwargs)
         c.sync_schema(name)

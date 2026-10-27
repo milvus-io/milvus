@@ -3,9 +3,6 @@
 import pytest
 from common.common_type import CaseLabel
 from pymilvus import MilvusException
-from pymilvus.grpc_gen import milvus_pb2
-
-from .contract_helpers import rpc
 
 pytestmark = pytest.mark.tags(CaseLabel.CDC, CaseLabel.L3)
 
@@ -53,11 +50,9 @@ class TestCDCSyncResourceGroup:
         c.upstream.insert(name, c.data())
         c.assert_rows(name, c.data())
         default = "__default_resource_group"
-        description = rpc(c.upstream, "DescribeCollection", milvus_pb2.DescribeCollectionRequest(collection_name=name))
 
         def groups(client):
-            response = rpc(client, "GetReplicas", milvus_pb2.GetReplicasRequest(collectionID=description.collectionID))
-            return sorted(info.resource_group_name for info in response.replicas)
+            return sorted(info.resource_group for info in client.describe_replica(name, timeout=10))
 
         with c.unchanged(name):
             with pytest.raises(MilvusException, match="(?i)not primary|secondary"):

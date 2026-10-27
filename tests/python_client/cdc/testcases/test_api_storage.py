@@ -54,10 +54,7 @@ class TestCDCStorageAPI:
             c.request.addfinalizer(lambda target=target: target.remove_file_resource(name))
 
         def names(target):
-            return {
-                resource.name
-                for resource in rpc(target, "ListFileResources", milvus_pb2.ListFileResourcesRequest()).resources
-            }
+            return {resource.name for resource in target.list_file_resources(timeout=10)}
 
         client.add_file_resource(name, path)
         c.control_barrier()
