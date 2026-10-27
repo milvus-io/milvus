@@ -33,9 +33,8 @@ type Decider interface {
 	// CommitTxn it registers the affected keys in the in-flight set and waits
 	// for the earlier writes of the same keys, before it reads the index. The
 	// returned WriteIntent holds that registration, which is the lock of those
-	// keys until Committed or Aborted. The caller must call exactly one of
-	// Committed, Aborted and InDoubt, exactly once, after the downstream
-	// append. A panic between Decide and that call ends the process, like
+	// keys until the caller reports the outcome of the downstream append with
+	// exactly one of Appended, NotAppended and InDoubt, exactly once. A panic between Decide and that call ends the process, like
 	// every panic on the append path.
 	//
 	// While the index is not ready (Config.Ready) or the writes of the
@@ -133,18 +132,20 @@ type Decision struct {
 //
 // LockWait returns how long Decide waited for the earlier writes of the same keys.
 //
-// Committed confirms the decision after the whole group of messages was
-// appended. tt is the time tick at which the write takes effect: the time tick
-// of the CommitTxn for a write that was upgraded to a transaction. It does not
-// write the engine: observe applies the appended messages. For a registered
-// write it fills in the time tick, which releases the lock of its keys; the
-// keys stay present in the in-flight set until observe applies them.
+// Appended reports that the whole group of messages is in the WAL. tt is the
+// time tick at which the write takes effect: the time tick of the CommitTxn
+// for a write that was upgraded to a transaction. It does not write the
+// engine: observe applies the appended messages. For a registered write it
+// fills in the time tick, which releases the lock of its keys; the keys stay
+// present in the in-flight set until observe applies them. For a transaction
+// body it records the keys as pending writes of the transaction, and for a
+// RollbackTxn it forgets them.
 //
-// Aborted ends a decision whose append failed and is known not to be in the
+// NotAppended reports that the append failed and is known not to be in the
 // WAL, a redo for example. The registration is removed. Pending writes of a
 // transaction are kept: the client may retry the commit.
 //
-// InDoubt ends a decision whose append failed but may be in the WAL at a time
+// InDoubt reports that the append failed but may be in the WAL at a time
 // tick up to tt, a CommitTxn that may have been persisted for example. tt must
 // not be 0. The keys stay present in the in-flight set until observe passes
 // tt, and no longer block other writes.

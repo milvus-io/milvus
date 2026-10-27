@@ -65,7 +65,7 @@ func TestEnqueueRacesWithObserve(t *testing.T) {
 			defer d.Close()
 
 			first, _ := decideInsert(t, d, 1)
-			first.Committed(ctx, 10)
+			first.Appended(ctx, 10)
 
 			observe := func() { require.NoError(t, ObserveForTest(ctx, d, 10, 500, int64PKs(1), nil)) }
 			if c.observeBefore {
@@ -92,7 +92,7 @@ func TestCommitRacesWithObserve(t *testing.T) {
 	require.NoError(t, ObserveForTest(ctx, d, 10, 500, int64PKs(1), nil))
 	require.Equal(t, 1, InflightLenForTest(d), "observe skips a write that is not committed")
 
-	intent.Committed(ctx, 10)
+	intent.Appended(ctx, 10)
 	require.Equal(t, 0, InflightLenForTest(d), "the commit removes a write that observe passed")
 	requireSegment(t, a, 1, 500)
 
@@ -188,14 +188,14 @@ func TestLockKeyCollisionOnlyAddsWork(t *testing.T) {
 			return
 		}
 		decided <- second.Decision().CompanionDeletePKs
-		second.Committed(ctx, 20)
+		second.Appended(ctx, 20)
 	}()
 	select {
 	case <-decided:
 		t.Fatal("the second writer did not wait for the first one")
 	case <-time.After(50 * time.Millisecond):
 	}
-	first.Committed(ctx, 10)
+	first.Appended(ctx, 10)
 	require.Equal(t, []PK{a}, <-decided)
 }
 
@@ -273,7 +273,7 @@ func TestInflightStressWithObserve(t *testing.T) {
 				if r.Intn(4) == 0 {
 					time.Sleep(time.Microsecond) // let observe overtake the commit
 				}
-				intent.Committed(ctx, tt)
+				intent.Appended(ctx, tt)
 			}
 		}(int64(w))
 	}
@@ -309,14 +309,14 @@ func TestTwoWritersOnTheSamePK(t *testing.T) {
 			return
 		}
 		second <- intent.Decision().CompanionDeletePKs
-		intent.Committed(ctx, 11)
+		intent.Appended(ctx, 11)
 	}()
 	select {
 	case <-second:
 		t.Fatal("the second writer did not wait for the first one")
 	case <-time.After(50 * time.Millisecond):
 	}
-	first.Committed(ctx, 10)
+	first.Appended(ctx, 10)
 	require.Equal(t, int64PKs(1), <-second)
 }
 
@@ -328,8 +328,8 @@ func TestWritersOnOtherPKsDoNotWait(t *testing.T) {
 	first, _ := decideInsert(t, d, 1, 2)
 	second, companion := decideInsert(t, d, 3, 4)
 	require.Empty(t, companion)
-	second.Committed(ctx, 11)
-	first.Committed(ctx, 10)
+	second.Appended(ctx, 11)
+	first.Appended(ctx, 10)
 }
 
 // A writer whose context ends while it waits keeps its place until the writes it
@@ -358,7 +358,7 @@ func TestCanceledWaiterKeepsItsPlace(t *testing.T) {
 			return
 		}
 		third <- intent.Decision().CompanionDeletePKs
-		intent.Committed(ctx, 12)
+		intent.Appended(ctx, 12)
 	}()
 	require.Eventually(t, func() bool { return InflightLenForTest(d) == 3 }, 5*time.Second, time.Millisecond)
 
@@ -369,7 +369,7 @@ func TestCanceledWaiterKeepsItsPlace(t *testing.T) {
 		t.Fatal("the third writer ran while the first write was pending")
 	case <-time.After(50 * time.Millisecond):
 	}
-	first.Committed(ctx, 10)
+	first.Appended(ctx, 10)
 	require.Equal(t, int64PKs(1), <-third)
 	require.Equal(t, 2, InflightLenForTest(d), "the canceled write left the set")
 }
@@ -406,11 +406,11 @@ func TestMultiKeyWritesDoNotDeadlock(t *testing.T) {
 				}
 				switch r.Intn(10) {
 				case 0:
-					intent.Aborted(ctx, nil)
+					intent.NotAppended(ctx, nil)
 				case 1:
 					intent.InDoubt(ctx, nil, tt.Add(1))
 				default:
-					intent.Committed(ctx, tt.Add(1))
+					intent.Appended(ctx, tt.Add(1))
 				}
 			}
 		}(int64(w))
@@ -499,7 +499,7 @@ func BenchmarkInflightLock(b *testing.B) {
 						lockWait.Add(int64(intent.LockWait()))
 						time.Sleep(appendRTT)
 						t := tt.Add(1)
-						intent.Committed(ctx, t)
+						intent.Appended(ctx, t)
 						_ = ObserveForTest(ctx, d, t, int64(t), pks, nil)
 					}
 				}(int64(w))
@@ -606,7 +606,7 @@ func BenchmarkWritePathOf1000Keys(b *testing.B) {
 				b.Fatal(err)
 			}
 			tt := uint64(i + 1)
-			intent.Committed(ctx, tt)
+			intent.Appended(ctx, tt)
 			d.inflight.observe(tt, pks)
 		}
 	})
