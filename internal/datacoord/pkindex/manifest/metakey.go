@@ -21,6 +21,16 @@ import (
 	"strings"
 )
 
+// The functions below build and parse the meta keys of the primary key index.
+// The keys are relative to the root path of the DataCoord meta kv:
+//
+//	pkindex-meta/manifest/<collectionID>/<vchannel>    ManifestPointer{version, body_key}
+//
+// For example: pkindex-meta/manifest/449/by-dev-rootcoord-dml_0_449v0
+//
+// A flush also reads streamingcoord-meta/pchannel/<pchannel> (PChannelMeta)
+// to check its term, and does not write it (see pchannel_term.go).
+
 // PointerPrefix is the meta key prefix of all manifest pointers.
 const PointerPrefix = "pkindex-meta/manifest/"
 
