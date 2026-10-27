@@ -647,6 +647,93 @@ func TestRecordBuilderBuildReleasesCreatorRefs(t *testing.T) {
 	alloc.AssertSize(t, 0)
 }
 
+func TestRecordBuilderAppendResolvesColumnsOncePerCall(t *testing.T) {
+	const pkField, payloadField = FieldID(100), FieldID(101)
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: pkField, Name: "pk", DataType: schemapb.DataType_Int64},
+		{FieldID: payloadField, Name: "payload", DataType: schemapb.DataType_Int64},
+	}}
+	rb := NewRecordBuilder(schema)
+	defer rb.Release()
+
+	for i := range 2 {
+		base := mergeSortTestRec(t, map[FieldID][]int64{
+			pkField:      {int64(i*3 + 1), int64(i*3 + 2), int64(i*3 + 3)},
+			payloadField: {int64(i*30 + 10), int64(i*30 + 20), int64(i*30 + 30)},
+		}, nil)
+		defer base.Release()
+		record := &columnCountingRecord{Record: base, columnCalls: make(map[FieldID]int)}
+		require.NoError(t, rb.Append(record, i, 3))
+		require.Equal(t, map[FieldID]int{pkField: 1, payloadField: 1}, record.columnCalls)
+	}
+
+	out := rb.Build()
+	defer out.Release()
+	require.Equal(t, []int64{1, 2, 3, 5, 6}, out.Column(pkField).(*array.Int64).Int64Values())
+	require.Equal(t, []int64{10, 20, 30, 50, 60}, out.Column(payloadField).(*array.Int64).Int64Values())
+}
+
+func TestRecordBuilderAppendClearsBorrowedColumns(t *testing.T) {
+	for _, dataType := range []schemapb.DataType{schemapb.DataType_Int64, schemapb.DataType_Text} {
+		t.Run(dataType.String(), func(t *testing.T) {
+			base := mergeSortTestRec(t, map[FieldID][]int64{100: {1}}, nil)
+			defer base.Release()
+			rb := NewRecordBuilder(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "value", DataType: dataType},
+			}})
+			defer rb.Release()
+
+			err := rb.Append(base, 0, 1)
+			if dataType == schemapb.DataType_Text {
+				require.ErrorContains(t, err, "failed to append value")
+			} else {
+				require.NoError(t, err)
+			}
+			// Scratch storage must not keep borrowed source arrays after either
+			// a successful append or a failed append.
+			for _, column := range rb.columns {
+				require.Nil(t, column)
+			}
+		})
+	}
+}
+
+func TestRecordBuilderAppendEmptyRangeDoesNotReadColumns(t *testing.T) {
+	rb := NewRecordBuilder(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "value", DataType: schemapb.DataType_Int64},
+	}})
+	defer rb.Release()
+	require.NoError(t, rb.Append(nil, 0, 0))
+	require.Zero(t, rb.GetRowNum())
+}
+
+// Alternating kept/deleted rows make compaction append one-row ranges.
+// With destination capacity reserved, those calls must not allocate per range.
+func TestRecordBuilderAppendSingleRowDoesNotAllocate(t *testing.T) {
+	field := &schemapb.FieldSchema{FieldID: 100, Name: "value", DataType: schemapb.DataType_Int64}
+	source := array.NewInt64Builder(memory.DefaultAllocator)
+	defer source.Release()
+	source.AppendValues([]int64{7, 8}, nil)
+	values := source.NewArray()
+	defer values.Release()
+	rec := NewSimpleArrowRecord(array.NewRecord(arrow.NewSchema([]arrow.Field{{Name: "value", Type: arrow.PrimitiveTypes.Int64}}, nil), []arrow.Array{values}, 2), map[FieldID]int{100: 0})
+	defer rec.Release()
+	rb := NewRecordBuilder(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}})
+	defer rb.Release()
+	rb.builders[0].Reserve(1024)
+	require.NoError(t, rb.Append(rec, 0, 1))
+	allocs := testing.AllocsPerRun(100, func() {
+		if err := rb.Append(rec, 0, 1); err != nil {
+			panic(err)
+		}
+	})
+	require.Zero(t, allocs, "single-row Append must not allocate a source-column slice")
+	out := rb.Build()
+	defer out.Release()
+	require.Equal(t, 102, out.Column(100).Len())
+	require.Equal(t, int64(7), out.Column(100).(*array.Int64).Value(101))
+}
+
 func TestRecordBuilderAccountsForNullBuffers(t *testing.T) {
 	fields := make([]*schemapb.FieldSchema, 243)
 	arrowFields := make([]arrow.Field, len(fields))
