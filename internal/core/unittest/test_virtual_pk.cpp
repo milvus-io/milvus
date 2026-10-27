@@ -219,22 +219,29 @@ TEST_F(VirtualPKChunkedColumnTest, GetVirtualPKAt) {
     }
 }
 
-TEST_F(VirtualPKChunkedColumnTest, BulkPrimitiveValueAt) {
+TEST_F(VirtualPKChunkedColumnTest, BatchTake) {
     int64_t segment_id = 200;
     int64_t num_rows = 100;
 
     VirtualPKChunkedColumn column(segment_id, num_rows);
 
-    // Test with sequential offsets
-    std::vector<int64_t> offsets = {0, 5, 10, 50, 99};
-    std::vector<int64_t> results(offsets.size());
-
-    column.BulkPrimitiveValueAt(
-        nullptr, results.data(), offsets.data(), offsets.size());
+    std::vector<int64_t> offsets = {99, 0, 10, 50, 10};
+    auto take = column.Take(nullptr,
+                            ChunkedColumnInterface::TakeOptions{
+                                ChunkedColumnInterface::OffsetView::From(
+                                    offsets.data(), offsets.size()),
+                                ChunkedColumnInterface::TargetType::Int64,
+                                nullptr,
+                                TakePinPolicy::Batch});
+    ASSERT_NE(take, nullptr);
+    ASSERT_EQ(take->Size(), offsets.size());
 
     for (size_t i = 0; i < offsets.size(); i++) {
         int64_t expected = GetVirtualPK(segment_id, offsets[i]);
-        ASSERT_EQ(results[i], expected);
+        const auto item = take->Get<int64_t>(i);
+        EXPECT_TRUE(item.is_valid);
+        ASSERT_TRUE(item.value.has_value());
+        ASSERT_EQ(*item.value, expected);
     }
 }
 

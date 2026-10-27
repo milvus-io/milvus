@@ -194,13 +194,6 @@ class VortexColumn final : public ChunkedColumnInterface {
                 int64_t count) override;
 
     void
-    BulkPrimitiveValueAt(milvus::OpContext* op_ctx,
-                         void* dst,
-                         const int64_t* offsets,
-                         int64_t count,
-                         bool small_int_raw_type = false) override;
-
-    void
     BulkVectorValueAt(milvus::OpContext* op_ctx,
                       void* dst,
                       const int64_t* offsets,
@@ -219,18 +212,6 @@ class VortexColumn final : public ChunkedColumnInterface {
                   const uint32_t* row_offsets,
                   const uint32_t* value_offsets,
                   int64_t count) const override;
-
-    void
-    BulkArrayAt(milvus::OpContext* op_ctx,
-                std::function<void(const ArrayView&, size_t)> fn,
-                const int64_t* offsets,
-                int64_t count) const override;
-
-    void
-    BulkArrayValueAt(milvus::OpContext* op_ctx,
-                     std::function<void(ScalarFieldProto&&, size_t)> fn,
-                     const int64_t* offsets,
-                     int64_t count) const override;
 
     void
     BulkVectorArrayAt(milvus::OpContext* op_ctx,

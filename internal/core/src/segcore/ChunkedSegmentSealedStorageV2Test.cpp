@@ -1555,8 +1555,15 @@ TEST_P(TestLazyManifest,
     ASSERT_GT(column->num_chunks(), 0);
     EXPECT_FALSE(column->CellsLoaded(&first_offset, 1));
 
-    int64_t value = 0;
-    column->BulkPrimitiveValueAt(nullptr, &value, &first_offset, 1);
+    auto take = column->Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(&first_offset, 1),
+            ChunkedColumnInterface::TargetType::Int64,
+            nullptr,
+            TakePinPolicy::Batch});
+    ASSERT_NE(take, nullptr);
+    EXPECT_TRUE(take->Get<int64_t>(0).is_valid);
     EXPECT_TRUE(column->CellsLoaded(&first_offset, 1));
 }
 
@@ -2331,9 +2338,12 @@ TEST_P(TestLazyManifest, LazyManifestReopenRebindsGeneration) {
 
     auto read_value = [](const std::shared_ptr<ChunkedColumnInterface>& column,
                          int64_t offset) {
-        int64_t value = -1;
-        column->BulkPrimitiveValueAt(nullptr, &value, &offset, 1);
-        return value;
+        auto take = column->Take(
+            nullptr,
+            ChunkedColumnInterface::TakeOptions{
+                ChunkedColumnInterface::OffsetView::From(&offset, 1),
+                ChunkedColumnInterface::TargetType::Int64});
+        return *take->Get<int64_t>(0).value;
     };
     EXPECT_EQ(read_value(old_column, 40), 40);
 
@@ -2444,9 +2454,12 @@ TEST_P(TestLazyManifest, LazyManifestSchemaOnlyDropKeepsSurvivorTask) {
     // keeps the unchanged physical Task for surviving fields.
     auto read_int64 = [](const std::shared_ptr<ChunkedColumnInterface>& column,
                          int64_t offset) {
-        int64_t value = -1;
-        column->BulkPrimitiveValueAt(nullptr, &value, &offset, 1);
-        return value;
+        auto take = column->Take(
+            nullptr,
+            ChunkedColumnInterface::TakeOptions{
+                ChunkedColumnInterface::OffsetView::From(&offset, 1),
+                ChunkedColumnInterface::TargetType::Int64});
+        return *take->Get<int64_t>(0).value;
     };
 
     EXPECT_EQ(read_int64(new_survivor, kOffset), kOffset);
@@ -2643,11 +2656,16 @@ TEST(LazyManifest, ExternalMappedColumnsStayColdUntilRead) {
 
         ASSERT_TRUE(fs->Move(hidden_path, parquet_path).ok());
         restore_file.dismiss();
-        int64_t values[4];
-        number_column->BulkPrimitiveValueAt(
-            nullptr, values, offsets, 4, /*small_int_raw_type=*/false);
+        auto take = number_column->Take(
+            nullptr,
+            ChunkedColumnInterface::TakeOptions{
+                ChunkedColumnInterface::OffsetView::From(offsets, 4),
+                ChunkedColumnInterface::TargetType::Int64,
+                nullptr,
+                TakePinPolicy::Batch});
+        ASSERT_NE(take, nullptr);
         for (int i = 0; i < 4; ++i) {
-            EXPECT_EQ(values[i], offsets[i]);
+            EXPECT_EQ(*take->Get<int64_t>(i).value, offsets[i]);
         }
         EXPECT_TRUE(number_column->IsMaterialized());
         // Separate Tasks from the same physical CG materialize independently.

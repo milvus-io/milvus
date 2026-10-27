@@ -1227,24 +1227,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return {last_chunk_id, last_offset};
     }
 
-    template <typename S, typename T = S>
+    template <typename S, typename T = S, typename SetValidity>
     static void
-    bulk_subscript_impl(milvus::OpContext* op_ctx,
-                        const void* src_raw,
-                        const int64_t* seg_offsets,
-                        int64_t count,
-                        T* dst_raw);
-
-    template <typename S, typename T = S>
-    static void
-    bulk_subscript_impl(
-        milvus::OpContext* op_ctx,
-        ChunkedColumnInterface* field,
-        const int64_t* seg_offsets,
-        int64_t count,
-        T* dst_raw,
-        bool small_int_raw_type = false,
-        const ChunkedColumnInterface::OwnedTakeData* taken_data = nullptr);
+    bulk_subscript_impl(const ChunkedColumnInterface::TakeResult& take,
+                        T* dst_raw,
+                        SetValidity&& set_validity);
 
     static void
     bulk_subscript_impl(milvus::OpContext* op_ctx,
@@ -1254,38 +1241,25 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                         int64_t count,
                         void* dst_raw);
 
-    template <typename S>
+    template <typename S, typename SetValidity>
     static void
     bulk_subscript_ptr_impl(
-        milvus::OpContext* op_ctx,
-        ChunkedColumnInterface* field,
-        const int64_t* seg_offsets,
-        int64_t count,
+        const ChunkedColumnInterface::TakeResult& take,
         google::protobuf::RepeatedPtrField<std::string>* dst_raw,
-        const ChunkedColumnInterface::OwnedTakeData* taken_data = nullptr,
-        bool* validity = nullptr);
+        SetValidity&& set_validity);
 
-    template <typename S, typename T = S>
+    template <typename S, typename T = S, typename SetValidity>
     static void
-    bulk_subscript_ptr_impl(
-        milvus::OpContext* op_ctx,
-        const ChunkedColumnInterface* field,
-        const int64_t* seg_offsets,
-        int64_t count,
-        T* dst,
-        const ChunkedColumnInterface::OwnedTakeData* taken_data = nullptr,
-        TargetBitmap* validity = nullptr);
+    bulk_subscript_ptr_impl(const ChunkedColumnInterface::TakeResult& take,
+                            T* dst,
+                            SetValidity&& set_validity);
 
-    template <typename T>
+    template <typename T, typename SetValidity>
     static void
-    bulk_subscript_array_impl(
-        milvus::OpContext* op_ctx,
-        ChunkedColumnInterface* column,
-        const int64_t* seg_offsets,
-        int64_t count,
-        google::protobuf::RepeatedPtrField<T>* dst,
-        bool nested_array,
-        const ChunkedColumnInterface::OwnedTakeData* taken_data = nullptr);
+    bulk_subscript_array_impl(const ChunkedColumnInterface::TakeResult& take,
+                              google::protobuf::RepeatedPtrField<T>* dst,
+                              bool nested_array,
+                              SetValidity&& set_validity);
 
     template <typename T>
     static void
@@ -1301,15 +1275,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // pinned snapshot avoid re-capturing the published state.
     void
     bulk_subscript_text_impl(
-        milvus::OpContext* op_ctx,
         FieldId field_id,
         const std::shared_ptr<const RuntimeResourceState>& runtime,
-        const ChunkedColumnInterface* column,
-        const int64_t* seg_offsets,
-        int64_t count,
+        const ChunkedColumnInterface::TakeResult& take,
         google::protobuf::RepeatedPtrField<std::string>* dst,
-        const ChunkedColumnInterface::OwnedTakeData* taken_data =
-            nullptr) const;
+        bool* validity) const;
 
     std::unique_ptr<DataArray>
     fill_with_empty(FieldId field_id,

@@ -419,24 +419,27 @@ RunStorageV3SealedRetrieve(bool enable_mmap,
         EXPECT_FALSE(
             column->CellsLoaded(lazy_offsets.data(), lazy_offsets.size()));
 
-        // The first call must materialize through BulkArrayValueAt itself,
+        // The first call must materialize through Take itself,
         // without a layout/size getter preparing the column beforehand.
         milvus::OpContext op_ctx;
         for (int attempt = 0; attempt < 2; ++attempt) {
             SCOPED_TRACE(attempt);
             std::vector<ScalarFieldProto> actual(lazy_offsets.size());
-            size_t callback_count = 0;
-            ASSERT_NO_THROW(column->BulkArrayValueAt(
+            auto take = column->Take(
                 &op_ctx,
-                [&](ScalarFieldProto&& value, size_t i) {
-                    ASSERT_LT(i, actual.size());
-                    actual[i] = std::move(value);
-                    ++callback_count;
-                },
-                lazy_offsets.data(),
-                lazy_offsets.size()));
-            EXPECT_EQ(callback_count, lazy_offsets.size());
+                ChunkedColumnInterface::TakeOptions{
+                    ChunkedColumnInterface::OffsetView::From(
+                        lazy_offsets.data(), lazy_offsets.size()),
+                    ChunkedColumnInterface::TargetType::ArrayValueView,
+                    nullptr,
+                    TakePinPolicy::Batch});
+            ASSERT_NE(take, nullptr);
+            ASSERT_EQ(take->Size(), lazy_offsets.size());
+            const auto values = take->Access<ArrayValueView>();
             for (size_t i = 0; i < lazy_offsets.size(); ++i) {
+                const auto item = values[i];
+                actual[i] = item.is_valid ? item.value->output_data()
+                                          : ScalarFieldProto{};
                 AssertProtoEqual(rows[lazy_offsets[i]], actual[i]);
             }
             EXPECT_TRUE(
@@ -1333,11 +1336,11 @@ TEST(ArrayValue, SealedStorageV3RetrieveNestedArrayFromMmapChunk) {
     RunStorageV3SealedRetrieve(true, false);
 }
 
-TEST(ArrayValue, LazyManifestBulkArrayValueAtFromMemoryChunk) {
+TEST(ArrayValue, LazyManifestTakeFromMemoryChunk) {
     RunStorageV3SealedRetrieve(false, false, true);
 }
 
-TEST(ArrayValue, LazyManifestBulkArrayValueAtFromMmapChunk) {
+TEST(ArrayValue, LazyManifestTakeFromMmapChunk) {
     RunStorageV3SealedRetrieve(true, false, true);
 }
 

@@ -22,6 +22,7 @@
 #include <string_view>
 #include <tuple>
 #include <unordered_map>
+#include <variant>
 
 #include <fmt/format.h>
 
@@ -580,6 +581,12 @@ struct VortexColumn::OrderedTakeOwner {
 
 template <bool HasCandidateMask>
 class VortexTakeResult final : public ChunkedColumnInterface::TakeResult {
+    struct Selection {
+        const TargetBitmap* mask;
+        std::vector<int64_t> value_indices;
+        mutable std::optional<ChunkedColumnInterface::OwnedTakeData> dense;
+    };
+
  public:
     VortexTakeResult(ChunkedColumnInterface::ValueView values,
                      ValidityView validity,
@@ -587,20 +594,28 @@ class VortexTakeResult final : public ChunkedColumnInterface::TakeResult {
                      std::shared_ptr<void> owner,
                      int64_t size,
                      DataType data_type,
-                     const TargetBitmap* candidate_mask)
+                     const TargetBitmap* candidate_mask,
+                     std::vector<int64_t> value_indices)
         : values_(values),
           validity_(validity),
           data_skipped_(data_skipped),
           owner_(std::move(owner)),
           size_(size),
-          data_type_(data_type),
-          candidate_mask_(candidate_mask) {
+          data_type_(data_type) {
+        if constexpr (HasCandidateMask) {
+            selection_.mask = candidate_mask;
+            selection_.value_indices = std::move(value_indices);
+            AssertInfo(selection_.value_indices.size() == size_,
+                       "vortex take mapping size does not match input {}",
+                       size_);
+        }
         AssertInfo(size_ >= 0, "vortex take result has invalid size {}", size_);
         AssertInfo(CanReadAsTargetType(data_type_, values_.target_type),
                    "vortex take type {} does not match target {}",
                    data_type_,
                    static_cast<int>(values_.target_type));
-        AssertInfo(size_ == 0 || values_.data != nullptr,
+        AssertInfo(size_ == 0 || values_.data != nullptr ||
+                       (HasCandidateMask && candidate_mask->none()),
                    "non-empty vortex take result has no values");
         AssertInfo(values_.offset >= 0,
                    "vortex take result has invalid value offset {}",
@@ -625,11 +640,59 @@ class VortexTakeResult final : public ChunkedColumnInterface::TakeResult {
 
     bool
     IsOwned() const override {
+        if constexpr (HasCandidateMask) {
+            // Owned compact data is not yet a dense logical result.
+            return selection_.dense.has_value();
+        }
         return true;
     }
 
     ChunkedColumnInterface::OwnedTakeData
     GetOwn() const override {
+        if constexpr (HasCandidateMask) {
+            if (!selection_.dense) {
+                switch (values_.target_type) {
+                    case TargetType::Bool:
+                        selection_.dense = ExpandOwn<bool>();
+                        break;
+                    case TargetType::Int8:
+                        selection_.dense = ExpandOwn<int8_t>();
+                        break;
+                    case TargetType::Int16:
+                        selection_.dense = ExpandOwn<int16_t>();
+                        break;
+                    case TargetType::Int32:
+                        selection_.dense = ExpandOwn<int32_t>();
+                        break;
+                    case TargetType::Int64:
+                        selection_.dense = ExpandOwn<int64_t>();
+                        break;
+                    case TargetType::Float:
+                        selection_.dense = ExpandOwn<float>();
+                        break;
+                    case TargetType::Double:
+                        selection_.dense = ExpandOwn<double>();
+                        break;
+                    case TargetType::StringView:
+                        selection_.dense = ExpandOwn<std::string_view>();
+                        break;
+                    case TargetType::Json:
+                        selection_.dense = ExpandOwn<Json>();
+                        break;
+                    case TargetType::ArrayView:
+                        selection_.dense = ExpandOwn<ArrayView>();
+                        break;
+                    case TargetType::ArrayValueView:
+                        selection_.dense = ExpandOwn<ArrayValueView>();
+                        break;
+                    default:
+                        ThrowInfo(ErrorCode::Unsupported,
+                                  "unsupported vortex owned take target {}",
+                                  static_cast<int>(values_.target_type));
+                }
+            }
+            return *selection_.dense;
+        }
         return ChunkedColumnInterface::OwnedTakeData{
             values_, validity_, owner_, size_, data_skipped_};
     }
@@ -638,10 +701,11 @@ class VortexTakeResult final : public ChunkedColumnInterface::TakeResult {
     ChunkedColumnInterface::TakeItemState
     PrepareItem(int64_t index, bool read_data) const override {
         if constexpr (HasCandidateMask) {
-            AssertInfo((*candidate_mask_)[index],
+            AssertInfo((*selection_.mask)[index],
                        "Take position {} was excluded by the candidate mask",
                        index);
         }
+        index = ValueIndex(index);
         return ChunkedColumnInterface::TakeItemState{
             !validity_ || validity_[index],
             read_data && data_skipped_ && data_skipped_[index]};
@@ -653,7 +717,7 @@ class VortexTakeResult final : public ChunkedColumnInterface::TakeResult {
             return nullptr;
         }
         return static_cast<const char*>(values_.data) +
-               (values_.offset + index) * values_.byte_width;
+               (values_.offset + ValueIndex(index)) * values_.byte_width;
     }
 
     std::string_view
@@ -662,7 +726,7 @@ class VortexTakeResult final : public ChunkedColumnInterface::TakeResult {
             return {};
         }
         return static_cast<const std::string_view*>(
-            values_.data)[values_.offset + index];
+            values_.data)[values_.offset + ValueIndex(index)];
     }
 
     std::string_view
@@ -670,8 +734,8 @@ class VortexTakeResult final : public ChunkedColumnInterface::TakeResult {
         if (!PrepareValue(index, state)) {
             return {};
         }
-        const auto& value =
-            static_cast<const Json*>(values_.data)[values_.offset + index];
+        const auto& value = static_cast<const Json*>(
+            values_.data)[values_.offset + ValueIndex(index)];
         return value.data();
     }
 
@@ -681,7 +745,7 @@ class VortexTakeResult final : public ChunkedColumnInterface::TakeResult {
             return {};
         }
         return static_cast<const ArrayView*>(
-            values_.data)[values_.offset + index];
+            values_.data)[values_.offset + ValueIndex(index)];
     }
 
     ArrayValueView
@@ -690,10 +754,72 @@ class VortexTakeResult final : public ChunkedColumnInterface::TakeResult {
             return {};
         }
         return static_cast<const ArrayValueView*>(
-            values_.data)[values_.offset + index];
+            values_.data)[values_.offset + ValueIndex(index)];
     }
 
  private:
+    int64_t
+    ValueIndex(int64_t index) const {
+        if constexpr (HasCandidateMask) {
+            return selection_.value_indices[index];
+        }
+        return index;
+    }
+
+    template <typename T>
+    ChunkedColumnInterface::OwnedTakeData
+    ExpandOwn() const {
+        struct DenseOwner {
+            std::shared_ptr<void> source;
+            std::conditional_t<std::is_same_v<T, bool>,
+                               FixedVector<bool>,
+                               std::vector<T>>
+                values;
+            TargetBitmap validity;
+            TargetBitmap skipped;
+        };
+        auto owner = std::make_shared<DenseOwner>();
+        if constexpr (!std::is_arithmetic_v<T> && !std::is_same_v<T, Json>) {
+            owner->source = owner_;
+        }
+        owner->values.resize(size_);
+        if (validity_) {
+            owner->validity.resize(size_, true);
+        }
+        owner->skipped.resize(size_, true);
+        const auto* source =
+            values_.data == nullptr ? nullptr : values_.template data_as<T>();
+        for (int64_t i = 0; i < size_; ++i) {
+            if (!(*selection_.mask)[i]) {
+                continue;
+            }
+            const auto index = ValueIndex(i);
+            const auto valid = !validity_ || validity_[index];
+            const auto skipped = data_skipped_ && data_skipped_[index];
+            if (validity_) {
+                owner->validity.set(i, valid);
+            }
+            owner->skipped.set(i, skipped);
+            if (valid && !skipped) {
+                if constexpr (std::is_same_v<T, Json>) {
+                    // Preserve owning Json copies from an explicit GetOwn.
+                    owner->values[i] =
+                        Json(MakePaddedJson(source[index].data()));
+                } else {
+                    owner->values[i] = source[index];
+                }
+            }
+        }
+        auto values = values_;
+        values.offset = 0;
+        values.data = owner->values.data();
+        return {values,
+                PackedValidityView(owner->validity),
+                owner,
+                size_,
+                PackedValidityView(owner->skipped)};
+    }
+
     void
     ValidateValueWidth() const {
         int32_t expected = 0;
@@ -749,7 +875,9 @@ class VortexTakeResult final : public ChunkedColumnInterface::TakeResult {
     std::shared_ptr<void> owner_;
     int64_t size_;
     DataType data_type_;
-    const TargetBitmap* candidate_mask_;
+    [[no_unique_address]] std::
+        conditional_t<HasCandidateMask, Selection, std::monostate>
+            selection_;
 };
 
 class VortexColumn::ArrowStringLikeColumn {
@@ -3172,31 +3300,36 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
         VortexCellPin pin;
     };
 
+    const auto value_count =
+        options.candidate_mask == nullptr
+            ? offsets.size
+            : static_cast<int64_t>(options.candidate_mask->count());
+    std::vector<int64_t> value_indices;
+    if (options.candidate_mask != nullptr) {
+        value_indices.resize(offsets.size);
+    }
     auto owner = std::make_shared<OrderedTakeOwner>();
     if (IsNullable()) {
-        owner->validity.resize(offsets.size, true);
+        owner->validity.resize(value_count, true);
     }
     const auto has_filter = options.filter != nullptr;
     if (has_filter) {
-        owner->data_skipped.resize(offsets.size, false);
+        owner->data_skipped.resize(value_count, false);
     }
     bool has_data_skipped = false;
 
     std::vector<OffsetEntry> entries;
-    entries.reserve(offsets.size);
+    entries.reserve(value_count);
     const auto add_entries = [&]<bool HasCandidateMask>() {
         for (int64_t i = 0; i < offsets.size; ++i) {
             if constexpr (HasCandidateMask) {
                 if (!(*options.candidate_mask)[i]) {
-                    if (owner->data_skipped.empty()) {
-                        owner->data_skipped.resize(offsets.size, false);
-                    }
-                    owner->data_skipped.set(i);
-                    has_data_skipped = true;
                     continue;
                 }
+                value_indices[i] = entries.size();
             }
-            entries.emplace_back(OffsetEntry{offsets[i], i});
+            entries.emplace_back(
+                OffsetEntry{offsets[i], static_cast<int64_t>(entries.size())});
         }
     };
     if (options.candidate_mask == nullptr) {
@@ -3334,7 +3467,7 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
     auto fill_primitive =
         [&]<typename ArrowArrayT, typename ValueT, typename ContainerT>(
             ContainerT& output, bool normalize) {
-            output.resize(offsets.size);
+            output.resize(value_count);
             for (const auto& group : groups) {
                 auto take = TakeArrowFromFile(
                     op_ctx, group.file_id, group.unique_offsets, group.pin);
@@ -3411,7 +3544,7 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
         case DataType::TEXT:
         case DataType::JSON:
         case DataType::GEOMETRY: {
-            owner->string_views.resize(offsets.size);
+            owner->string_views.resize(value_count);
             for (const auto& group : groups) {
                 auto take = TakeArrowFromFile(
                     op_ctx, group.file_id, group.unique_offsets, group.pin);
@@ -3482,7 +3615,7 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
             } else {
                 owner->arrays.reserve(unique_count);
             }
-            std::vector<int64_t> ordered_array_indices(offsets.size, -1);
+            std::vector<int64_t> ordered_array_indices(value_count, -1);
             for (const auto& group : groups) {
                 auto take = TakeArrowFromFile(
                     op_ctx, group.file_id, group.unique_offsets, group.pin);
@@ -3537,8 +3670,8 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
             }
 
             if (target_type == TargetType::ArrayValueView) {
-                owner->array_value_views.resize(offsets.size);
-                for (int64_t i = 0; i < offsets.size; ++i) {
+                owner->array_value_views.resize(value_count);
+                for (int64_t i = 0; i < value_count; ++i) {
                     if ((has_data_skipped && owner->data_skipped[i]) ||
                         (IsNullable() && !owner->validity[i])) {
                         continue;
@@ -3559,8 +3692,8 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
                 values.data = owner->array_value_views.data();
                 values.byte_width = sizeof(ArrayValueView);
             } else {
-                owner->array_views.resize(offsets.size);
-                for (int64_t i = 0; i < offsets.size; ++i) {
+                owner->array_views.resize(value_count);
+                for (int64_t i = 0; i < value_count; ++i) {
                     if ((has_data_skipped && owner->data_skipped[i]) ||
                         (IsNullable() && !owner->validity[i])) {
                         continue;
@@ -3612,83 +3745,12 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
             std::move(owner),
             offsets.size,
             data_type_,
-            options.candidate_mask);
+            options.candidate_mask,
+            std::move(value_indices));
     };
     return options.candidate_mask == nullptr
                ? make_result.template operator()<false>()
                : make_result.template operator()<true>();
-}
-
-void
-VortexColumn::BulkPrimitiveValueAt(milvus::OpContext* op_ctx,
-                                   void* dst,
-                                   const int64_t* offsets,
-                                   int64_t count,
-                                   bool small_int_raw_type) {
-    if (count == 0) {
-        return;
-    }
-    const auto target_type = PrimitiveTargetType(data_type_);
-    auto take = Take(
-        op_ctx, TakeOptions{OffsetView::From(offsets, count), target_type});
-    AssertInfo(take != nullptr,
-               "vortex primitive take is unsupported for type {}",
-               data_type_);
-    AssertInfo(take->Size() == count,
-               "vortex primitive take returned {} rows, expected {}",
-               take->Size(),
-               count);
-    auto owned = take->GetOwn();
-    AssertInfo(owned.values.target_type == target_type,
-               "vortex primitive expected target {}, got {}",
-               static_cast<int>(target_type),
-               static_cast<int>(owned.values.target_type));
-
-    auto copy_values = [&]<typename SrcT, typename DstT>() {
-        const auto* values = owned.values.data_as<SrcT>();
-        auto* output = static_cast<DstT*>(dst);
-        for (int64_t i = 0; i < count; ++i) {
-            output[i] = static_cast<DstT>(values[i]);
-        }
-    };
-
-    switch (data_type_) {
-        case DataType::INT8:
-            if (small_int_raw_type) {
-                copy_values.template operator()<int8_t, int8_t>();
-            } else {
-                copy_values.template operator()<int8_t, int32_t>();
-            }
-            break;
-        case DataType::INT16:
-            if (small_int_raw_type) {
-                copy_values.template operator()<int16_t, int16_t>();
-            } else {
-                copy_values.template operator()<int16_t, int32_t>();
-            }
-            break;
-        case DataType::INT32:
-            copy_values.template operator()<int32_t, int32_t>();
-            break;
-        case DataType::INT64:
-        case DataType::TIMESTAMPTZ:
-            copy_values.template operator()<int64_t, int64_t>();
-            break;
-        case DataType::FLOAT:
-            copy_values.template operator()<float, float>();
-            break;
-        case DataType::DOUBLE:
-            copy_values.template operator()<double, double>();
-            break;
-        case DataType::BOOL:
-            copy_values.template operator()<bool, bool>();
-            break;
-        default:
-            ThrowInfo(ErrorCode::Unsupported,
-                      "VortexColumn::BulkPrimitiveValueAt unsupported data "
-                      "type {}",
-                      data_type_);
-    }
 }
 
 void
@@ -3742,71 +3804,6 @@ VortexColumn::BulkRawBsonAt(
         },
         offsets.data(),
         count);
-}
-
-void
-VortexColumn::BulkArrayAt(milvus::OpContext* op_ctx,
-                          std::function<void(const ArrayView&, size_t)> fn,
-                          const int64_t* offsets,
-                          int64_t count) const {
-    if (!IsChunkedArrayColumnDataType(data_type_)) {
-        ThrowInfo(ErrorCode::Unsupported,
-                  "VortexColumn::BulkArrayAt only supports array fields");
-    }
-    if (field_meta_.is_nested_array()) {
-        ThrowInfo(ErrorCode::Unsupported,
-                  "BulkArrayAt does not support nested ARRAY");
-    }
-    if (count == 0) {
-        return;
-    }
-    auto take = Take(
-        op_ctx,
-        TakeOptions{OffsetView::From(offsets, count), TargetType::ArrayView});
-    AssertInfo(take != nullptr, "vortex array take is unsupported");
-    AssertInfo(take->Size() == count,
-               "vortex array take returned {} rows, expected {}",
-               take->Size(),
-               count);
-    const auto items = take->Access<ArrayView>();
-    for (int64_t i = 0; i < count; ++i) {
-        const auto item = items[i];
-        fn(item.value.value_or(ArrayView{}), i);
-    }
-}
-
-void
-VortexColumn::BulkArrayValueAt(
-    milvus::OpContext* op_ctx,
-    std::function<void(ScalarFieldProto&&, size_t)> fn,
-    const int64_t* offsets,
-    int64_t count) const {
-    if (!IsChunkedArrayColumnDataType(data_type_) ||
-        !field_meta_.is_nested_array()) {
-        ThrowInfo(ErrorCode::Unsupported,
-                  "VortexColumn::BulkArrayValueAt only supports recursive "
-                  "ARRAY fields");
-    }
-    if (count == 0) {
-        return;
-    }
-    auto take = Take(op_ctx,
-                     TakeOptions{OffsetView::From(offsets, count),
-                                 TargetType::ArrayValueView});
-    AssertInfo(take != nullptr, "vortex recursive array take is unsupported");
-    AssertInfo(take->Size() == count,
-               "vortex recursive array take returned {} rows, expected {}",
-               take->Size(),
-               count);
-    const auto items = take->Access<ArrayValueView>();
-    for (int64_t i = 0; i < count; ++i) {
-        const auto item = items[i];
-        if (!item.value.has_value()) {
-            fn(ScalarFieldProto{}, i);
-            continue;
-        }
-        fn(item.value->output_data(), i);
-    }
 }
 
 void

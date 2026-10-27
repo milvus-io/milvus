@@ -234,16 +234,6 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
     }
 
     void
-    BulkPrimitiveValueAt(milvus::OpContext* op_ctx,
-                         void* dst,
-                         const int64_t* offsets,
-                         int64_t count,
-                         bool small_int_raw_type = false) override {
-        ThrowInfo(ErrorCode::Unsupported,
-                  "BulkPrimitiveValueAt only supported for ChunkedColumn");
-    }
-
-    void
     BulkVectorValueAt(milvus::OpContext* op_ctx,
                       void* dst,
                       const int64_t* offsets,
@@ -451,91 +441,6 @@ class ChunkedColumn : public ChunkedColumnBase {
         }
     }
 
-    template <typename S, typename T>
-    void
-    BulkPrimitiveValueAtImpl(milvus::OpContext* op_ctx,
-                             void* dst,
-                             const int64_t* offsets,
-                             int64_t count) {
-        static_assert(std::is_fundamental_v<S> && std::is_fundamental_v<T>);
-        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
-        auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
-        auto typed_dst = static_cast<T*>(dst);
-        for (int64_t i = 0; i < count; i++) {
-            auto chunk = ca->get_cell_of(cids[i]);
-            auto value = chunk->ValueAt(offsets_in_chunk[i]);
-            typed_dst[i] =
-                *static_cast<const S*>(static_cast<const void*>(value));
-        }
-    }
-
-    void
-    BulkPrimitiveValueAt(milvus::OpContext* op_ctx,
-                         void* dst,
-                         const int64_t* offsets,
-                         int64_t count,
-                         bool small_int_raw_type) override {
-        switch (data_type_) {
-            case DataType::INT8: {
-                if (small_int_raw_type) {
-                    BulkPrimitiveValueAtImpl<int8_t, int8_t>(
-                        op_ctx, dst, offsets, count);
-                } else {
-                    BulkPrimitiveValueAtImpl<int8_t, int32_t>(
-                        op_ctx, dst, offsets, count);
-                }
-                break;
-            }
-            case DataType::INT16: {
-                if (small_int_raw_type) {
-                    BulkPrimitiveValueAtImpl<int16_t, int16_t>(
-                        op_ctx, dst, offsets, count);
-                } else {
-                    BulkPrimitiveValueAtImpl<int16_t, int32_t>(
-                        op_ctx, dst, offsets, count);
-                }
-                break;
-            }
-            case DataType::INT32: {
-                BulkPrimitiveValueAtImpl<int32_t, int32_t>(
-                    op_ctx, dst, offsets, count);
-                break;
-            }
-            case DataType::INT64: {
-                BulkPrimitiveValueAtImpl<int64_t, int64_t>(
-                    op_ctx, dst, offsets, count);
-                break;
-            }
-            case DataType::TIMESTAMPTZ: {
-                BulkPrimitiveValueAtImpl<int64_t, int64_t>(
-                    op_ctx, dst, offsets, count);
-                break;
-            }
-            case DataType::FLOAT: {
-                BulkPrimitiveValueAtImpl<float, float>(
-                    op_ctx, dst, offsets, count);
-                break;
-            }
-            case DataType::DOUBLE: {
-                BulkPrimitiveValueAtImpl<double, double>(
-                    op_ctx, dst, offsets, count);
-                break;
-            }
-            case DataType::BOOL: {
-                BulkPrimitiveValueAtImpl<bool, bool>(
-                    op_ctx, dst, offsets, count);
-                break;
-            }
-            default: {
-                ThrowInfo(
-                    ErrorCode::Unsupported,
-                    "BulkScalarValueAt is not supported for unknown scalar "
-                    "data type: {}",
-                    data_type_);
-            }
-        }
-    }
-
     void
     BulkVectorValueAt(milvus::OpContext* op_ctx,
                       void* dst,
@@ -671,40 +576,6 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
                                 const FieldMeta& field_meta)
         : ChunkedColumnBase(std::move(slot), field_meta),
           is_nested_array_(field_meta.is_nested_array()) {
-    }
-
-    void
-    BulkArrayAt(milvus::OpContext* op_ctx,
-                std::function<void(const ArrayView&, size_t)> fn,
-                const int64_t* offsets,
-                int64_t count) const override {
-        if (is_nested_array_) {
-            ThrowInfo(ErrorCode::Unsupported,
-                      "legacy ArrayView API does not support nested ARRAY");
-        }
-        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
-        auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
-        for (int64_t i = 0; i < count; i++) {
-            auto view = static_cast<ArrayChunk*>(ca->get_cell_of(cids[i]))
-                            ->View(offsets_in_chunk[i]);
-            fn(view, i);
-        }
-    }
-
-    void
-    BulkArrayValueAt(milvus::OpContext* op_ctx,
-                     std::function<void(ScalarFieldProto&&, size_t)> fn,
-                     const int64_t* offsets,
-                     int64_t count) const override {
-        AssertInfo(is_nested_array_,
-                   "BulkArrayValueAt requires a nested ARRAY field");
-        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
-        auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
-        for (int64_t i = 0; i < count; ++i) {
-            auto* chunk =
-                static_cast<ColumnarArrayChunk*>(ca->get_cell_of(cids[i]));
-            fn(chunk->output_data(offsets_in_chunk[i]), i);
-        }
     }
 
     PinWrapper<std::pair<std::vector<ArrayView>, ValidityView>>
