@@ -1983,7 +1983,7 @@ it landed, and `SplitShard` has no WAL-level dedup, so the primary WAL can hold
 two copies of one target's genesis; the second carries a later replicate tick.
 It can reach a secondary after the broadcast completed there, and then the task
 cannot answer for it: once the task is collected nothing recreates it, and once
-a first copy has passed, its ack rebuilds a task that holds only that replica,
+a first copy has passed, its ack would rebuild a task that holds only that replica,
 so a second copy would wait on a source ack that is never delivered again. So
 `WaitVChannelsAcked` also opens when every named vchannel's replica is **on
 record** as landed on this cluster, asked through a checker DataCoord registers
@@ -1994,6 +1994,19 @@ append result on this cluster, a source is fenced by at most one split (another
 task's fence is refused before any of its targets is appended), and task records
 are never removed. It is asked before the wait and every 5s during it; a checker
 error counts as not recorded. No timeout lets a replica through.
+
+The same record keeps such a copy from leaving an **orphan task**. Its ack would
+otherwise rebuild the collected broadcast as a REPLICATED task holding only
+that target, which never completes; a later force promote re-drives every
+incomplete task, appends the orphan's source replica into the source the split
+has since retired, gets an unrecoverable refusal, and retries it forever
+without finishing the promotion. So the ack of a replicated replica whose task
+is gone and whose append-first replicas are on record is dropped
+(`isLateReplicaOfRecordedBroadcast`): the record is written by the broadcast's
+own callback, which runs only once every replica is acked, so there is nothing
+left to wait for. The force-promote re-drive skips an incomplete task on record
+the same way (`isRecordedComplete`), for an orphan built while the checker
+could not answer.
 
 *Why it cannot wedge replication.* A gated replica blocks its whole pchannel
 stream, so "the source never waits" is not the argument. Progress rests on
