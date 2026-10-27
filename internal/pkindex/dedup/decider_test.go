@@ -318,30 +318,47 @@ func TestIntentResolvedOnce(t *testing.T) {
 	require.Panics(t, func() { intent.InDoubt(ctx, nil, 1) })
 }
 
-// A not-ready index is degraded, not blocked: Decide returns at once and
-// treats every key as present, so an insert gets a companion delete for
-// every key and a delete writes a tombstone for every key.
-func TestNotReadyDecidesDegraded(t *testing.T) {
+// A write of a not-ready index waits for the install: Decide returns a
+// WaitError and registers nothing. A transaction body and a rollback do not
+// wait. Once the index is ready, the decision is exact.
+func TestNotReadyWaits(t *testing.T) {
 	ctx := context.Background()
 	eng := NewMemoryEngine()
-	ready := false
-	d := New(eng, Config{Degraded: func() bool { return !ready }})
+	seed(t, eng, 7, 1)
+	ready := make(chan struct{})
+	d := New(eng, Config{Ready: ready})
 	defer d.Close()
 
-	intent, companion := decideInsert(t, d, 1, 2)
-	require.Equal(t, int64PKs(1, 2), companion, "absent keys count as present")
-	intent.Committed(ctx, 5)
-	require.NoError(t, ObserveForTest(ctx, d, 5, 10, int64PKs(1, 2), int64PKs(1, 2)))
+	_, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1, 2)})
+	wait := requireWaitError(t, err, 0)
+	require.Contains(t, err.Error(), "installed")
+	_, err = d.Decide(ctx, DecideRequest{Kind: KindDelete, VChannel: "v1", PKs: int64PKs(1)})
+	requireWaitError(t, err, 0)
+	require.Equal(t, 0, InflightLenForTest(d))
+	body, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(3), TxnID: 8})
+	require.NoError(t, err, "a transaction body does not wait")
+	body.Committed(ctx, 5)
+	_, err = d.Decide(ctx, DecideRequest{Kind: KindCommitTxn, VChannel: "v1", TxnID: 8})
+	requireWaitError(t, err, 0)
 
-	del, err := d.Decide(ctx, DecideRequest{Kind: KindDelete, VChannel: "v1", PKs: int64PKs(2, 3)})
-	require.NoError(t, err)
-	require.Equal(t, int64PKs(2, 3), del.Decision().PresentPKs, "a tombstone for every key")
-	del.Committed(ctx, 6)
-	require.NoError(t, ObserveForTest(ctx, d, 6, 0, nil, int64PKs(2, 3)))
+	done := make(chan error, 1)
+	go func() { done <- wait.Wait(ctx) }()
+	select {
+	case err := <-done:
+		t.Fatalf("Wait returned before the index was ready: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(ready)
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Wait did not return after the index was ready")
+	}
 
-	ready = true
-	_, companion = decideInsert(t, d, 1, 3)
+	insert, companion := decideInsert(t, d, 1, 2)
 	require.Equal(t, int64PKs(1), companion, "ready: only the present key")
+	insert.Committed(ctx, 6)
 }
 
 // A Decide after Close fails with the closed error. An open intent still
@@ -542,16 +559,73 @@ func TestWaitErrorWait(t *testing.T) {
 	}
 }
 
-// A not-ready index decides degraded and never waits, even below the time
-// tick of WaitUntil.
-func TestNotReadyDoesNotWait(t *testing.T) {
+// A not-ready index below the time tick of WaitUntil waits for both: Wait
+// returns only when the index is ready and observe reached the time tick.
+// Close ends the wait for the install.
+func TestNotReadyAndWaitUntil(t *testing.T) {
 	ctx := context.Background()
-	d := New(NewMemoryEngine(), Config{Degraded: func() bool { return true }}).(*decider)
+	ready := make(chan struct{})
+	d := New(NewMemoryEngine(), Config{Ready: ready}).(*decider)
 	defer d.Close()
 	d.WaitUntil(10)
-	intent, companion := decideInsert(t, d, 1, 2)
-	require.Equal(t, int64PKs(1, 2), companion)
-	intent.Committed(ctx, 5)
+	_, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
+	wait := requireWaitError(t, err, 10)
+
+	done := make(chan error, 1)
+	go func() { done <- wait.Wait(ctx) }()
+	ObserveTimeTickForTest(d, 10)
+	select {
+	case err := <-done:
+		t.Fatalf("Wait returned before the index was ready: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(ready)
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Wait did not return after the index was ready")
+	}
+
+	notReady := New(NewMemoryEngine(), Config{Ready: make(chan struct{})})
+	_, err = notReady.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
+	wait = requireWaitError(t, err, 0)
+	go func() { done <- wait.Wait(ctx) }()
+	notReady.Close()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, engine.ErrClosed)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Wait did not return after Close")
+	}
+}
+
+// A WaitUntil that comes after a write passed the wait check, while the write
+// waits for an earlier write of the same key, makes that write wait too: it
+// gets a WaitError and its registration is removed.
+func TestWaitUntilAfterTheCheck(t *testing.T) {
+	ctx := context.Background()
+	d, _ := newTestDecider(t)
+	first, _ := decideInsert(t, d, 1)
+
+	type result struct {
+		intent *WriteIntent
+		err    error
+	}
+	second := make(chan result, 1)
+	go func() {
+		intent, err := d.Decide(ctx, DecideRequest{Kind: KindInsert, VChannel: "v1", PKs: int64PKs(1)})
+		second <- result{intent, err}
+	}()
+	require.Eventually(t, func() bool { return InflightLenForTest(d) == 2 }, 5*time.Second, time.Millisecond,
+		"the second write waits behind the first")
+	d.WaitUntil(10)
+	first.Committed(ctx, 5)
+
+	r := <-second
+	require.Nil(t, r.intent)
+	requireWaitError(t, r.err, 10)
+	require.Equal(t, 1, InflightLenForTest(d), "only the committed first write stays")
 }
 
 // The decision order of one key must equal the order in which writers pass the
