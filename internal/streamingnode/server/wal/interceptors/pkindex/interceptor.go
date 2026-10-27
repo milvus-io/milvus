@@ -163,7 +163,7 @@ func (i *appendInterceptor) appendInsert(ctx context.Context, t *target, msg mes
 		return nil, err
 	}
 
-	companionPKs := intent.Decision().CompanionDeletePKs
+	companionPKs := intent.CompanionDeletePKs()
 	if len(companionPKs) == 0 {
 		id, tt, err := utility.AppendAndGetTimeTick(ctx, appendOp, msg)
 		if err != nil {
@@ -205,27 +205,33 @@ func (i *appendInterceptor) appendDelete(ctx context.Context, t *target, msg mes
 	if len(body.GetSerializedExprPlan()) > 0 {
 		panic("a delete by expression reached the primary key index, the index does not support it")
 	}
-	keys, err := primarykey.KeysOfDelete(body)
-	if err != nil {
-		return nil, err
-	}
 	i.rememberCipher(t, msg)
-
-	intent, err := i.decide(ctx, t, dedup.DecideRequest{
-		Kind:  dedup.KindDelete,
-		PKs:   toPKs(keys),
-		TxnID: txnIDOf(msg),
-	})
-	if err != nil {
-		return nil, err
-	}
 
 	// The delete reaches the WAL unchanged. The index only ever adds deletes, it never
 	// removes one: it is a subset of the data, because rows written by bulk import or
 	// while the switch was off are not in it, and because it starts empty on every WAL
 	// open. A key that the index does not know may still exist in the data.
-	// The decision (PresentPKs) is used for the metrics only.
+	// So an autocommit delete needs no decision and is not registered (see
+	// Decider.Decide). A delete in a transaction is recorded as a pending write, so
+	// that its keys enter the in-flight set at commit. It does not remove a key from
+	// the companion delete decision, because it can cover one partition only.
 	// TODO: narrow or skip a delete once the index is proven complete for the collection.
+	txnID := txnIDOf(msg)
+	if txnID == 0 {
+		return appendOp(ctx, msg)
+	}
+	keys, err := primarykey.KeysOfDelete(body)
+	if err != nil {
+		return nil, err
+	}
+	intent, err := i.decide(ctx, t, dedup.DecideRequest{
+		Kind:  dedup.KindDelete,
+		PKs:   toPKs(keys),
+		TxnID: txnID,
+	})
+	if err != nil {
+		return nil, err
+	}
 	id, tt, err := utility.AppendAndGetTimeTick(ctx, appendOp, msg)
 	if err != nil {
 		discard(intent, err, tt)
@@ -244,7 +250,7 @@ func (i *appendInterceptor) appendCommit(ctx context.Context, t *target, msg mes
 		return nil, err
 	}
 
-	companionPKs := intent.Decision().CompanionDeletePKs
+	companionPKs := intent.CompanionDeletePKs()
 	// With no companion delete, AppendInTxn appends only the CommitTxn, which is
 	// the plain append. The companion delete is encrypted with the cipher config
 	// remembered for this vchannel, and this handler never remembers one itself.
@@ -339,12 +345,8 @@ func (i *appendInterceptor) decide(ctx context.Context, t *target, req dedup.Dec
 		// the ratio of the two wrong. Only the duration and the lock wait are
 		// observed until the decider reports the size of the pending snapshot.
 		i.metrics.observeCommitDecide(time.Since(start), intent.LockWait())
-	case req.TxnID == 0 && (req.Kind == dedup.KindInsert || req.Kind == dedup.KindDelete):
-		d := intent.Decision()
-		hit := len(d.CompanionDeletePKs)
-		if req.Kind == dedup.KindDelete {
-			hit = len(d.PresentPKs)
-		}
+	case req.TxnID == 0 && req.Kind == dedup.KindInsert:
+		hit := len(intent.CompanionDeletePKs())
 		i.metrics.observeDecide(time.Since(start), intent.LockWait(), len(req.PKs), hit)
 	}
 	return intent, nil

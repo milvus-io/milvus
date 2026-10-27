@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/pkindex"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -316,7 +317,8 @@ func TestPKIndexChainClientTxn(t *testing.T) {
 }
 
 // TestPKIndexChainUpsertLikeTxn checks that a transaction that deletes a key and
-// inserts it again gets no companion delete of its own.
+// inserts it again still gets a companion delete of the key. The delete of the
+// client can cover one partition only, the companion delete covers all of them.
 func TestPKIndexChainUpsertLikeTxn(t *testing.T) {
 	w := openPKIndexWAL(t, "pkindex-upsert-like-txn")
 	ctx := context.Background()
@@ -344,11 +346,15 @@ func TestPKIndexChainUpsertLikeTxn(t *testing.T) {
 
 	require.Equal(t, commit.TimeTick, msgs[1].TimeTick())
 	bodies := pkChainTxnBodies(t, msgs[1])
-	require.Equal(t, 2, message.AsImmutableTxnMessage(msgs[1]).Size(), "the transaction keeps the two bodies of the client")
-	require.Equal(t, []message.MessageType{message.MessageTypeDelete, message.MessageTypeInsert}, pkChainTypesOf(bodies))
+	require.Equal(t, 3, message.AsImmutableTxnMessage(msgs[1]).Size(), "the two bodies of the client and the companion delete")
+	require.Equal(t, []message.MessageType{message.MessageTypeDelete, message.MessageTypeInsert, message.MessageTypeDelete}, pkChainTypesOf(bodies))
 	for _, body := range bodies {
 		require.Equal(t, commit.TimeTick, body.TimeTick())
 	}
+	require.Equal(t, []int64{6}, pkChainDeleteKeys(t, bodies[2]))
+	companion, err := message.MustAsImmutableDeleteMessageV1(bodies[2]).Body(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, common.AllPartitionsID, companion.GetPartitionID())
 }
 
 // TestPKIndexChainDropCollection checks that the index of a vchannel is dropped

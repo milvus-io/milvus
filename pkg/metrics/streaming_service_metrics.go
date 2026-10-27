@@ -212,7 +212,7 @@ var (
 
 	StreamingNodePKIndexProbedKeysTotal = newStreamingNodeCounterVec(prometheus.CounterOpts{
 		Name: "pkindex_probed_keys_total",
-		Help: "Primary keys probed in the primary key index on the write path, by result",
+		Help: "Primary keys of autocommit inserts probed in the primary key index on the write path, by result",
 	}, pkIndexProbeResultLabelName)
 
 	StreamingNodePKIndexCompanionDeleteKeysTotal = newStreamingNodeCounterVec(prometheus.CounterOpts{

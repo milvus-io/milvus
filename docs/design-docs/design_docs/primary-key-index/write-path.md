@@ -176,8 +176,13 @@ tt=15  CommitTxn(T1)          the insert of T1 takes effect at tt=15: two rows o
 So a body is only recorded as a pending write of its transaction. The decision
 happens when the CommitTxn arrives: the pending keys are probed, and the
 companion delete is appended as one more body of the transaction, before the
-CommitTxn. A key that the transaction deletes itself gets no companion delete.
-The pending writes are dropped when the transaction commits, rolls back, or
+CommitTxn. Every inserted key of the transaction is probed, also a key that
+the transaction deletes itself. A delete of the client can cover one partition
+only, while a companion delete covers all partitions. For example, an upsert
+without partition key mode deletes the key in its target partition only, so a
+row of the key in another partition survives that delete. A redundant companion
+delete is harmless: it has the TimeTick of the CommitTxn and removes only older
+rows. The pending writes are dropped when the transaction commits, rolls back, or
 expires.
 
 The decision at CommitTxn is a snapshot of the pending writes. It relies on the
@@ -194,8 +199,20 @@ while the switch was off, and every row written before the current WAL open are
 not in it. A key that the index does not know may still exist in the data.
 
 So the index only ever adds deletes. A delete of a client reaches the WAL
-unchanged. The decider still computes which keys of the delete exist, but that
-result is used for the metrics only.
+unchanged. An autocommit delete needs no decision: the interceptor does not
+call the decider for it, does not register its keys in the in-flight set, and
+does not probe the engine. A delete in a transaction is recorded as a pending
+write of the transaction, so that its keys enter the in-flight set at commit.
+It does not remove a key from the companion delete decision, because it can
+cover one partition only.
+
+Not registering the delete is safe. An earlier write of its keys is in the
+in-flight set or in the engine whether the delete is registered or not, so a
+later insert never misses a key that exists. Until observe applies the delete,
+a later insert can find a key that the delete removed and get a companion
+delete of it, which deletes nothing. A registered delete would give the same
+companion delete, because the in-flight set counts any earlier write of a key
+as present.
 
 ### Failure
 
@@ -378,10 +395,10 @@ the exclusive message and the TimeTick block each other forever.
 So the wait is in the redo interceptor, which is above the lock interceptor and
 holds no lock:
 
-1. `Decide` returns a `*dedup.WaitError` for an autocommit insert or delete,
-   and for a CommitTxn with pending writes, while observe is below `T`. It
-   registers nothing and probes nothing. A transaction body and a rollback do
-   not wait.
+1. `Decide` returns a `*dedup.WaitError` for an autocommit insert and for a
+   CommitTxn with pending writes, while observe is below `T`. It registers
+   nothing and probes nothing. A transaction body and a rollback do not wait,
+   and an autocommit delete does not reach the decider.
 2. The pkindex interceptor returns `interceptors.WaitRequiredError` with the
    `Wait` of that error. Nothing of the message is appended.
 3. The lock interceptor releases `glock` when the inner chain returns.
@@ -392,8 +409,9 @@ holds no lock:
 
 ### Contract of the interceptor
 
-The interceptor calls `Decide`, the WAL append, then exactly one of
-`Appended`, `NotAppended` and `InDoubt` on the returned `WriteIntent`. A panic in
+For every write except an autocommit delete, the interceptor calls `Decide`,
+the WAL append, then exactly one of `Appended`, `NotAppended` and `InDoubt` on
+the returned `WriteIntent`. A panic in
 between ends the process, like every panic on the append path, so no decision
 is left unresolved in a live node.
 
@@ -411,7 +429,8 @@ expects deduplication and does not get it.
 
 ## Metrics
 
-- `pkindex_probed_keys_total{result="hit"|"miss"}`
+- `pkindex_probed_keys_total{result="hit"|"miss"}`: the keys of autocommit
+  inserts. A hit gets a companion delete.
 - `pkindex_companion_delete_keys_total`
 - `pkindex_decide_duration_seconds`
 - `pkindex_lock_wait_duration_seconds`
