@@ -34,8 +34,9 @@ type Decider interface {
 	// for the earlier writes of the same keys, before it reads the index. The
 	// returned WriteIntent holds that registration, which is the lock of those
 	// keys until the caller reports the outcome of the downstream append with
-	// exactly one of Appended, NotAppended and InDoubt, exactly once. A panic between Decide and that call ends the process, like
-	// every panic on the append path.
+	// exactly one of Appended, NotAppended and InDoubt, exactly once. A panic
+	// between Decide and that call ends the process, like every panic on the
+	// append path.
 	//
 	// While the index is not ready (Config.Ready) or the writes of the
 	// vchannel must wait for observe (WaitUntil), Decide returns a *WaitError

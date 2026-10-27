@@ -26,7 +26,7 @@ import (
 
 // This file reads the records of the index, PK → codec.PKEntry, on top of the
 // byte interface of the engine. The decider only reads: the observe of the
-// WAL recovery writes the engine, through the Index.
+// WAL recovery writes the engine.
 
 // errValueCountMismatch reports an engine whose MultiGet result does not align with the keys.
 var errValueCountMismatch = errors.New("primary key index engine returned a wrong number of values")
