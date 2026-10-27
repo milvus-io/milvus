@@ -92,8 +92,8 @@ BUILD_UNITTEST="OFF"
 INSTALL_PREFIX="${CPP_SRC_DIR}/output"
 BUILD_COVERAGE="OFF"
 RUN_CPPLINT="OFF"
-CUDA_COMPILER=/usr/local/cuda/bin/nvcc
-GPU_VERSION="OFF" #defaults to CPU version
+CUDA_COMPILER=${CUDACXX:-/usr/local/cuda/bin/nvcc}
+WITH_GPU=""
 CUDA_ARCH="DEFAULT"
 EMBEDDED_MILVUS="OFF"
 BUILD_DISK_ANN="OFF"
@@ -114,7 +114,7 @@ fi
 : "${USE_UNITY_BUILD:="OFF"}"
 : "${USE_SPLIT_DWARF:="OFF"}"
 
-while getopts "p:t:s:n:a:y:x:f:S:R:ulcgbZh" arg; do
+while getopts "p:t:s:n:a:y:x:G:f:S:R:ulcbZh" arg; do
   case $arg in
   p)
     INSTALL_PREFIX=$OPTARG
@@ -131,9 +131,6 @@ while getopts "p:t:s:n:a:y:x:f:S:R:ulcgbZh" arg; do
     ;;
   c)
     BUILD_COVERAGE="ON"
-    ;;
-  g)
-    GPU_VERSION="ON"
     ;;
   s)
     CUDA_ARCH=$OPTARG
@@ -157,6 +154,9 @@ while getopts "p:t:s:n:a:y:x:f:S:R:ulcgbZh" arg; do
   x)
     INDEX_ENGINE=$OPTARG
     ;;
+  G)
+    WITH_GPU=$OPTARG
+    ;;
   S)
     USE_SVS=$OPTARG
     ;;
@@ -176,7 +176,8 @@ parameter:
 -u: building unit test options(default: OFF)
 -l: run cpplint, clang-format and clang-tidy(default: OFF)
 -c: code coverage(default: OFF)
--g: build GPU version(default: OFF)
+-x: index engine: knowhere/cardinal(default: knowhere)
+-G: build with GPU support: ON/OFF(default: ON for cardinal, OFF for knowhere)
 -e: build without prometheus(default: OFF)
 -s: build with CUDA arch(default:DEFAULT), for example '-gencode=compute_61,code=sm_61;-gencode=compute_75,code=sm_75'
 -b: build embedded milvus(default: OFF)
@@ -192,7 +193,7 @@ TANTIVY_ANALYZER_REMOTE_TLS: ON/OFF (default: ON). Set OFF for FIPS builds that 
   (disables Lindera online dictionary download and gRPC tokenizer TLS).
 
 usage:
-./core_build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -s \${CUDA_ARCH} -f \${TANTIVY_FEATURES} [-u] [-l] [-c] [-z] [-g] [-m] [-e] [-h] [-b] [-o] [-R \${WITH_CRT}]
+./core_build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -s \${CUDA_ARCH} -f \${TANTIVY_FEATURES} [-x \${INDEX_ENGINE}] [-G \${WITH_GPU}] [-u] [-l] [-c] [-z] [-m] [-e] [-h] [-b] [-o] [-R \${WITH_CRT}]
                 "
     exit 0
     ;;
@@ -202,6 +203,14 @@ usage:
     ;;
   esac
 done
+
+if [[ -z "${WITH_GPU}" ]]; then
+  if [[ "${INDEX_ENGINE}" == "cardinal" ]]; then
+    WITH_GPU="ON"
+  else
+    WITH_GPU="OFF"
+  fi
+fi
 
 # Azure SDK build has been removed as we now use Arrow with Azure support directly
 
@@ -284,7 +293,7 @@ ${CMAKE_EXTRA_ARGS} \
 -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
 -DCMAKE_LIBRARY_ARCHITECTURE=${arch} \
 -DBUILD_COVERAGE=${BUILD_COVERAGE} \
--DMILVUS_GPU_VERSION=${GPU_VERSION} \
+-DWITH_GPU=${WITH_GPU} \
 -DMILVUS_CUDA_ARCH=${CUDA_ARCH} \
 -DEMBEDDED_MILVUS=${EMBEDDED_MILVUS} \
 -DBUILD_DISK_ANN=${BUILD_DISK_ANN} \
