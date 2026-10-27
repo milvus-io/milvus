@@ -112,3 +112,30 @@ func TestRestoreCallbackPersistsJobBeforeSegments(t *testing.T) {
 		require.Equal(t, 1, allocated.Times())
 	})
 }
+
+func TestRestoreCollectionExternalPreflightFingerprint(t *testing.T) {
+	body := &messagespb.RestoreSnapshotMessageBody{
+		CollectionHeader: &message.CreateCollectionMessageHeader{CollectionId: 100, DbId: 1},
+		Collection:       &message.CreateCollectionRequest{CollectionID: 100, VirtualChannelNames: []string{"v1"}},
+	}
+	capture := &meta.CaptureBroadcastAPI{}
+	defer mockey.Mock(broadcast.StartBroadcastWithResourceKeys).Return(capture, nil).Build().UnPatch()
+	defer mockey.Mock((*rootcoord.Core).CheckRestoreTargetAbsent).Return(merr.WrapErrCollectionNotFound("target")).Build().UnPatch()
+	defer mockey.Mock((*rootcoord.Core).PrepareRestoreCollection).Return(body, func() {}, nil).Build().UnPatch()
+	defer mockey.Mock((*restoreAllocatorTarget).AllocID).Return(int64(77), nil).Build().UnPatch()
+	snapshot := &snapshotstorage.SnapshotData{
+		SnapshotInfo:  &datapb.SnapshotInfo{Id: 1, CollectionId: 10, Name: "snapshot"},
+		Collection:    &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{Name: "source"}},
+		ManifestPaths: []string{"snapshots/10/manifests/1.avro"},
+	}
+	sm := &Manager{CollectionRestorer: &rootcoord.Core{}, Allocator: &restoreAllocatorTarget{}}
+	_, err := sm.finishRestoreSnapshot(t.Context(), nil, snapshot, "snapshot", 10, "target", "default", 0, true, "s3://bucket/snapshot", "", nil, nil, nil)
+	require.NoError(t, err)
+	fingerprint := message.MustAsBroadcastRestoreSnapshotMessageV2(capture.Captured).Header().GetSnapshotFingerprint()
+	require.NotEmpty(t, fingerprint)
+	// Loading Avro in the callback must not look like a change to preflight metadata.
+	snapshot.Segments = []*datapb.SegmentDescription{{SegmentId: 1, NumOfRows: 100}}
+	require.NoError(t, snapshotstorage.ValidateSnapshotPreflightFingerprint(snapshot, fingerprint))
+	snapshot.Collection.Schema.Name = "changed"
+	require.ErrorIs(t, snapshotstorage.ValidateSnapshotPreflightFingerprint(snapshot, fingerprint), merr.ErrDataIntegrity)
+}

@@ -85,6 +85,7 @@ func TestRejectedCopyCleanupIncludesLegacySibling(t *testing.T) {
 				},
 			}, copies, m, dm.IndexMeta)
 			require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+			require.Equal(t, 1, patch.Times(), "legacy worker results must read back the native manifest")
 			require.Empty(t, dm.IndexMeta.GetAllSegmentIndexes(2002))
 			persisted, err := catalog.ListSegmentIndexes(ctx, 100)
 			require.NoError(t, err)
