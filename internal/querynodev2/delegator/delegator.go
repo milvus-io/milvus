@@ -1233,6 +1233,16 @@ type publishedIndexMeta struct {
 // existed, and is not asked again: the call failed with Unimplemented, which
 // makes the client reset its connection to the node, and an upgraded node
 // comes back as a new process with a new node ID.
+//
+// A node that is gone does not fail the sync either: it has no session any
+// more, or its address now serves another node. Its process has exited or
+// exits once it sees that its session is lost, and node IDs are not reused,
+// so it serves nothing with any list. Its segments stay in this shard until
+// QueryCoord loads them elsewhere or the target drops them, and QueryCoord
+// does not load the ones that only the current target has: failing the sync
+// would keep both the target and those segments where they are. The node is
+// not recorded as having the list. A node that does not answer in time still
+// fails the sync, as it may be alive and serve the new target.
 func (sd *shardDelegator) SyncIndexMeta(ctx context.Context, indexInfos []*indexpb.IndexInfo, version int64) error {
 	log := sd.getLogger(ctx).With(zap.Int64("indexInfoVersion", version))
 	if err := sd.lifetime.Add(sd.NotStopped); err != nil {
@@ -1253,6 +1263,7 @@ func (sd *shardDelegator) SyncIndexMeta(ctx context.Context, indexInfos []*index
 	}
 	synced := make([]bool, len(targets))
 	unsupported := make([]bool, len(targets))
+	gone := make([]bool, len(targets))
 	group, gctx := errgroup.WithContext(ctx)
 	for i, nodeID := range targets {
 		group.Go(func() error {
@@ -1263,8 +1274,12 @@ func (sd *shardDelegator) SyncIndexMeta(ctx context.Context, indexInfos []*index
 			nodeReq := typeutil.Clone(req)
 			nodeReq.GetBase().TargetID = nodeID
 			if err := merr.CheckRPCCall(worker.SyncIndexMeta(gctx, nodeReq)); err != nil {
-				if errors.Is(err, merr.ErrServiceUnimplemented) {
+				switch {
+				case errors.Is(err, merr.ErrServiceUnimplemented):
 					unsupported[i] = true
+					return nil
+				case errors.Is(err, merr.ErrNodeNotFound) || grpcclient.IsServerIDMismatchErr(err):
+					gone[i] = true
 					return nil
 				}
 				return merr.Wrapf(err, "failed to sync index meta to node %d", nodeID)
@@ -1275,9 +1290,12 @@ func (sd *shardDelegator) SyncIndexMeta(ctx context.Context, indexInfos []*index
 	}
 	err := group.Wait()
 
-	var syncedNodes, unsupportedNodes []int64
+	var syncedNodes, unsupportedNodes, goneNodes []int64
 	sd.indexMetaMu.Lock()
 	for i, nodeID := range targets {
+		if gone[i] {
+			goneNodes = append(goneNodes, nodeID)
+		}
 		if unsupported[i] {
 			sd.indexMeta.unsupported.Insert(nodeID)
 			unsupportedNodes = append(unsupportedNodes, nodeID)
@@ -1294,6 +1312,9 @@ func (sd *shardDelegator) SyncIndexMeta(ctx context.Context, indexInfos []*index
 	if len(unsupportedNodes) > 0 {
 		log.Warn("nodes do not support SyncIndexMeta, they keep the index meta of their loads until they are upgraded",
 			zap.Int64s("nodes", unsupportedNodes))
+	}
+	if len(goneNodes) > 0 {
+		log.Warn("nodes are gone, skip syncing index meta to them", zap.Int64s("nodes", goneNodes))
 	}
 	if err != nil {
 		log.Warn("failed to sync index meta", zap.Int64s("nodes", targets), zap.Error(err))
