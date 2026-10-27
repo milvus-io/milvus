@@ -67,8 +67,6 @@ type FakeMetaStore struct {
 	MultiLoadErr error
 	// ListErr is returned by the next List.
 	ListErr error
-	// MultiLoads counts the MultiLoad calls.
-	MultiLoads int
 	// LastSave holds the saves of the last Save call.
 	LastSave map[string]string
 }
@@ -105,7 +103,6 @@ func (p *FakeMetaStore) MultiLoad(ctx context.Context, keys []string) ([]string,
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.MultiLoads++
 	if err := p.MultiLoadErr; err != nil {
 		p.MultiLoadErr = nil
 		return nil, nil, err

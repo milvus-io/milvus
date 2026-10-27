@@ -308,56 +308,43 @@ func TestCommitCompaction(t *testing.T) {
 	p.LoadErr, p.LoadErrKey = nil, ""
 }
 
-// The pointer swap reports an error after it took effect: the manager reads
-// the pointer back and reports success.
-func TestSwapUncertainButApplied(t *testing.T) {
-	m, p, s := assigned(t, 1)
-	ctx := context.Background()
-	_, err := m.CommitFlush(ctx, flush(1, 1))
-	require.NoError(t, err)
-	p.WriteErr, p.WriteApplies = errors.New("timeout"), true
-	got, err := m.CommitFlush(ctx, flush(1, 5, 1))
-	require.NoError(t, err)
-	assert.EqualValues(t, 2, got.GetVersion())
+// The pointer write reports an error after it took effect, for the first
+// version and for a later one: the commit reports a retryable error and drops
+// its cache, and the retry of the same flush returns the applied version
+// without another write.
+func TestUncertainWriteThatApplied(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		before  []*pkindexpb.CommitFlushRequest
+		version int64
+	}{
+		{name: "create", version: 1},
+		{name: "swap", before: []*pkindexpb.CommitFlushRequest{flush(1, 1)}, version: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, p, s := assigned(t, 1)
+			ctx := context.Background()
+			for _, req := range tc.before {
+				_, err := m.CommitFlush(ctx, req)
+				require.NoError(t, err)
+			}
+			p.WriteErr, p.WriteApplies = errors.New("timeout"), true
+			_, err := m.CommitFlush(ctx, flush(1, 5, 1))
+			assert.True(t, errors.Is(err, pkindex.ErrUnavailable))
 
-	read, _, err := get(ctx, New(p, s, testRoot), 1, vch)
-	require.NoError(t, err)
-	assert.True(t, proto.Equal(got, read))
-}
+			p.LastSave = nil
+			got, err := m.CommitFlush(ctx, flush(1, 5, 1))
+			require.NoError(t, err)
+			assert.Equal(t, tc.version, got.GetVersion())
+			assert.Equal(t, []int64{1}, sstIDs(got))
+			assert.Nil(t, p.LastSave, "the retry does not write")
 
-// The caller's ctx ends during the pointer swap and the swap took effect: the
-// read back does not use the ended ctx, and the commit reports success.
-func TestSwapUncertainAfterCallerCtxEnds(t *testing.T) {
-	m, p, s := assigned(t, 1)
-	_, err := m.CommitFlush(context.Background(), flush(1, 1))
-	require.NoError(t, err)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	p.BeforeWrite = cancel
-	p.WriteErr, p.WriteApplies = context.Canceled, true
-	got, err := m.CommitFlush(ctx, flush(1, 5, 1))
-	require.NoError(t, err)
-	assert.EqualValues(t, 2, got.GetVersion())
-
-	read, _, err := get(context.Background(), New(p, s, testRoot), 1, vch)
-	require.NoError(t, err)
-	assert.True(t, proto.Equal(got, read))
-}
-
-// The first pointer write reports an error after it took effect: the manager
-// reads the pointer back and reports success.
-func TestCreateUncertainButApplied(t *testing.T) {
-	m, p, s := assigned(t, 1)
-	ctx := context.Background()
-	p.WriteErr, p.WriteApplies = errors.New("timeout"), true
-	got, err := m.CommitFlush(ctx, flush(1, 5, 1))
-	require.NoError(t, err)
-	assert.EqualValues(t, 1, got.GetVersion())
-
-	read, found, err := get(ctx, New(p, s, testRoot), 1, vch)
-	require.NoError(t, err)
-	require.True(t, found)
-	assert.True(t, proto.Equal(got, read))
+			read, found, err := get(ctx, New(p, s, testRoot), 1, vch)
+			require.NoError(t, err)
+			require.True(t, found)
+			assert.True(t, proto.Equal(got, read))
+		})
+	}
 }
 
 // The first pointer write fails and did not take effect: the error is
@@ -388,25 +375,6 @@ func TestSwapFailedIsRetryable(t *testing.T) {
 	_, err = m.CommitFlush(ctx, flush(1, 5, 1))
 	assert.True(t, errors.Is(err, pkindex.ErrUnavailable))
 	assert.True(t, errors.Is(err, cause), "the cause stays in the chain")
-	got, err := m.CommitFlush(ctx, flush(1, 5, 1))
-	require.NoError(t, err)
-	assert.EqualValues(t, 2, got.GetVersion())
-	assert.Equal(t, []int64{1}, sstIDs(got))
-}
-
-// The pointer swap took effect, but the read back fails: the commit reports a
-// retryable error and drops its cache, so the retry loads the applied version.
-func TestReadBackFails(t *testing.T) {
-	m, p, _ := assigned(t, 1)
-	ctx := context.Background()
-	_, err := m.CommitFlush(ctx, flush(1, 1))
-	require.NoError(t, err)
-	p.WriteErr, p.WriteApplies = errors.New("timeout"), true
-	p.LoadErr = errors.New("etcd down")
-	_, err = m.CommitFlush(ctx, flush(1, 5, 1))
-	assert.True(t, errors.Is(err, pkindex.ErrUnavailable))
-	assert.Contains(t, fmt.Sprintf("%+v", err), "etcd down", "the read-back error is kept")
-
 	got, err := m.CommitFlush(ctx, flush(1, 5, 1))
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, got.GetVersion())
@@ -681,12 +649,12 @@ func TestTwoWriters(t *testing.T) {
 	assert.Equal(t, maxTick, got.GetCheckpointTimeTick())
 }
 
-// LoadPointers reads the store in batches and returns one result per target,
-// in order: found, not found, and corrupted targets each get their own result.
+// LoadPointers returns one result per target, in order: found, not found,
+// and corrupted targets each get their own result.
 func TestLoadPointers(t *testing.T) {
 	m, p, _ := assigned(t, 1)
 	ctx := context.Background()
-	const n = 2*pointerBatchSize + 5
+	const n = 10
 	targets := make([]Target, 0, n)
 	for i := 0; i < n; i++ {
 		v := fmt.Sprintf("%s_1v%d", pch, i)
@@ -698,47 +666,37 @@ func TestLoadPointers(t *testing.T) {
 	}
 	p.Put(PointerKey(1, targets[1].VChannel), "\xff")
 
-	p.MultiLoads = 0
 	results := m.LoadPointers(ctx, targets)
 	require.Len(t, results, n)
-	assert.Equal(t, 3, p.MultiLoads, "%d targets are read in batches of %d", n, pointerBatchSize)
 	for i, r := range results {
 		switch {
 		case i == 1:
 			assert.True(t, errors.Is(r.Err, pkindex.ErrCorrupted), "target %d", i)
-			assert.False(t, r.Found)
+			assert.Nil(t, r.Pointer)
 		case i%3 == 0:
 			require.NoError(t, r.Err, "target %d", i)
-			assert.True(t, r.Found)
 			assert.EqualValues(t, 1, r.Pointer.GetVersion())
 			assert.Contains(t, r.Pointer.GetBodyKey(), pkindex.ManifestDir(testRoot, 1, targets[i].VChannel)+"/")
 		default:
 			require.NoError(t, r.Err, "target %d", i)
-			assert.False(t, r.Found)
 			assert.Nil(t, r.Pointer)
 		}
 	}
 }
 
-// The failure of one batch read fails the targets of that batch only.
-func TestLoadPointersBatchFailure(t *testing.T) {
+// A failed read fails all targets with a retryable error.
+func TestLoadPointersReadFailure(t *testing.T) {
 	m, p, _ := assigned(t, 1)
 	ctx := context.Background()
-	targets := make([]Target, 0, pointerBatchSize+1)
-	for i := 0; i <= pointerBatchSize; i++ {
-		targets = append(targets, Target{CollectionID: 1, VChannel: fmt.Sprintf("%s_1v%d", pch, i)})
-	}
-	last := targets[pointerBatchSize].VChannel
-	_, err := m.CommitFlush(ctx, flushOn(last, 1, 10, 1))
+	_, err := m.CommitFlush(ctx, flush(1, 10, 1))
 	require.NoError(t, err)
 
 	p.MultiLoadErr = errors.New("etcd down")
-	results := m.LoadPointers(ctx, targets)
-	for _, r := range results[:pointerBatchSize] {
+	results := m.LoadPointers(ctx, []Target{{CollectionID: 1, VChannel: vch}, {CollectionID: 1, VChannel: pch + "_1v9"}})
+	for _, r := range results {
 		assert.True(t, errors.Is(r.Err, pkindex.ErrUnavailable))
+		assert.Nil(t, r.Pointer)
 	}
-	require.NoError(t, results[pointerBatchSize].Err)
-	assert.True(t, results[pointerBatchSize].Found)
 }
 
 // LoadPointers reads the store, so it sees a commit of another manager.
