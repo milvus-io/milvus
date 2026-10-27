@@ -367,7 +367,8 @@ func TestRefreshMilvusTableManifestSingleCommit(t *testing.T) {
 				groups, err := readManifestColumnGroupEntries(result.ManifestPath, cfg, []string{"pk", "ts"})
 				require.NoError(t, err)
 				require.Equal(t, source, groups[0].Files[0].Properties[milvusTableSourceManifestPathProperty])
-				_, err = ReadFile(cfg, manifestObjectPath(base, oldVersion))
+				// Read the physical Avro object, not the logical JSON manifest handle.
+				_, err = ReadFile(cfg, fmt.Sprintf("%s/_metadata/manifest-%d.avro", base, oldVersion))
 				require.NoError(t, err, "old published manifest must stay readable")
 			})
 		}
@@ -425,9 +426,9 @@ func TestRefreshMilvusTableManifestPreparationFailureDoesNotCommit(t *testing.T)
 			require.Equal(t, MilvusTableRefreshResult{}, result)
 			_, oldVersion, err := UnmarshalManifestPath(oldManifest)
 			require.NoError(t, err)
-			_, err = ReadFile(cfg, manifestObjectPath(base, oldVersion+1))
+			_, err = ReadFile(cfg, fmt.Sprintf("%s/_metadata/manifest-%d.avro", base, oldVersion+1))
 			require.Error(t, err, "source preparation/cancellation must not write an intermediate manifest")
-			_, err = ReadFile(cfg, manifestObjectPath(base, oldVersion))
+			_, err = ReadFile(cfg, fmt.Sprintf("%s/_metadata/manifest-%d.avro", base, oldVersion))
 			require.NoError(t, err)
 		})
 	}
