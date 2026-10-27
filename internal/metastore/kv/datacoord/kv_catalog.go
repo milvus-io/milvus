@@ -1430,6 +1430,54 @@ func (kc *Catalog) DropExportSnapshotJob(ctx context.Context, jobID int64) error
 	return kc.MetaKv.Remove(ctx, buildExportSnapshotJobKey(jobID))
 }
 
+func exportSnapshotTaskPrefix(jobID int64) string {
+	return fmt.Sprintf("%s/export-snapshot-task/%d/", MetaPrefix, jobID)
+}
+
+func (kc *Catalog) SaveExportSnapshotTasks(ctx context.Context, jobID int64, job *datapb.ExportSnapshotJob, tasks []*datapb.SnapshotExportCopyTask, removed []int64) error {
+	saves := make(map[string]string, len(tasks)+1)
+	if job != nil {
+		value, err := proto.Marshal(job)
+		if err != nil {
+			return err
+		}
+		saves[buildExportSnapshotJobKey(jobID)] = string(value)
+	}
+	prefix := exportSnapshotTaskPrefix(jobID)
+	for _, task := range tasks {
+		value, err := proto.Marshal(task)
+		if err != nil {
+			return err
+		}
+		saves[prefix+strconv.FormatInt(task.GetTaskId(), 10)] = string(value)
+	}
+	removals := make([]string, 0, len(removed))
+	for _, id := range removed {
+		removals = append(removals, prefix+strconv.FormatInt(id, 10))
+	}
+	return kc.MetaKv.MultiSaveAndRemove(ctx, saves, removals)
+}
+
+func (kc *Catalog) ListExportSnapshotTasks(ctx context.Context, jobID int64) ([]*datapb.SnapshotExportCopyTask, error) {
+	var tasks []*datapb.SnapshotExportCopyTask
+	err := kc.MetaKv.WalkWithPrefix(ctx, exportSnapshotTaskPrefix(jobID), kc.paginationSize, func(key, value []byte) error {
+		task := &datapb.SnapshotExportCopyTask{}
+		if err := proto.Unmarshal(value, task); err != nil {
+			return err
+		}
+		if !strings.HasSuffix("/"+string(key), "/"+exportSnapshotTaskPrefix(jobID)+strconv.FormatInt(task.GetTaskId(), 10)) {
+			return merr.WrapErrDataIntegrityMsg("snapshot export task key does not match its ID")
+		}
+		tasks = append(tasks, task)
+		return nil
+	})
+	return tasks, err
+}
+
+func (kc *Catalog) DropExportSnapshotTasks(ctx context.Context, jobID int64) error {
+	return kc.MetaKv.RemoveWithPrefix(ctx, exportSnapshotTaskPrefix(jobID))
+}
+
 // ListSegmentChangeGroups lists all segment change groups from etcd.
 //
 // A malformed value is an ERROR, not a skip: unlike DataView snapshots (which

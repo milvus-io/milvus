@@ -154,6 +154,10 @@ type DataCoordCatalog interface {
 	DropSnapshot(ctx context.Context, collectionID int64, snapshotID int64) error
 	ListSnapshots(ctx context.Context) ([]*datapb.SnapshotInfo, error)
 	SaveExportSnapshotJob(ctx context.Context, job *datapb.ExportSnapshotJob) error
+	// SaveExportSnapshotTasks atomically updates a bounded set of tasks and optionally their job.
+	SaveExportSnapshotTasks(ctx context.Context, jobID int64, job *datapb.ExportSnapshotJob, tasks []*datapb.SnapshotExportCopyTask, removed []int64) error
+	ListExportSnapshotTasks(ctx context.Context, jobID int64) ([]*datapb.SnapshotExportCopyTask, error)
+	DropExportSnapshotTasks(ctx context.Context, jobID int64) error
 	ListExportSnapshotJobs(ctx context.Context) ([]*datapb.ExportSnapshotJob, error)
 	DropExportSnapshotJob(ctx context.Context, jobID int64) error
 

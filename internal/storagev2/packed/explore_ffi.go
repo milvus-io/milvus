@@ -338,6 +338,10 @@ func ExploreFilesReturnManifestPath(
 		if err != nil {
 			return nil, "", merr.Wrap(err, "read milvus snapshot metadata")
 		}
+		rebaser, err := newMilvusTableSnapshotRootRebaser(metadataBytes, metadataPath)
+		if err != nil {
+			return nil, "", err
+		}
 		cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 		if err != nil {
 			return nil, "", merr.Wrap(err, "failed to create properties")
@@ -347,7 +351,11 @@ func ExploreFilesReturnManifestPath(
 			return nil, "", merr.Wrap(err, "inject extfs")
 		}
 		resolveSourcePath := func(sourcePath string) (string, error) {
-			return resolveExternalSourcePath(sourcePath, cProperties, extfs)
+			rebased, err := rebaser.rebasePath(sourcePath)
+			if err != nil {
+				return "", err
+			}
+			return resolveExternalSourcePath(rebased, cProperties, extfs)
 		}
 		fileInfos, err := buildMilvusTableFileInfosFromSnapshotMetadata(
 			metadataBytes,

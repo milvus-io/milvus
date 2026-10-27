@@ -19,7 +19,10 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,6 +30,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -37,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -44,19 +49,37 @@ import (
 type snapshotExportCatalogFake struct {
 	metastore.DataCoordCatalog
 
-	mu         sync.Mutex
-	jobs       map[int64]*datapb.ExportSnapshotJob
-	listErr    error
-	saveErr    error
-	dropErr    error
-	beforeSave func(*datapb.ExportSnapshotJob)
+	mu                  sync.Mutex
+	jobs                map[int64]*datapb.ExportSnapshotJob
+	tasks               map[int64]map[int64]*datapb.SnapshotExportCopyTask
+	taskSaveErr         error
+	taskSaveResponseErr error // Inject an ambiguous result after committing the task records.
+	taskListErr         error
+	taskWrites          int
+	listErr             error
+	saveErr             error
+	dropErr             error
+	beforeSave          func(*snapshotExportJobView)
 }
 
-func newSnapshotExportCatalogFake(jobs ...*datapb.ExportSnapshotJob) *snapshotExportCatalogFake {
-	catalog := &snapshotExportCatalogFake{jobs: make(map[int64]*datapb.ExportSnapshotJob)}
+func newSnapshotExportCatalogFake(jobs ...*snapshotExportJobView) *snapshotExportCatalogFake {
+	catalog := &snapshotExportCatalogFake{jobs: make(map[int64]*datapb.ExportSnapshotJob), tasks: make(map[int64]map[int64]*datapb.SnapshotExportCopyTask)}
 	for _, job := range jobs {
 		if job != nil {
-			catalog.jobs[job.GetJobId()] = proto.Clone(job).(*datapb.ExportSnapshotJob)
+			record := exportJobRecord(job.record)
+			// Fixtures with tasks describe a complete plan unless a partition size is explicit.
+			if job.record.GetCopySegmentsPerTask() == 0 {
+				record.CopyPlanComplete = job.record.GetCopyPlanComplete() || len(job.copyTasks) > 0
+				for _, task := range job.copyTasks {
+					record.CopySegmentCount = max(record.CopySegmentCount, task.GetSegmentEnd())
+				}
+			}
+			job.record.CopyPlanComplete, job.record.CopySegmentCount = record.CopyPlanComplete, record.CopySegmentCount
+			catalog.jobs[job.record.GetJobId()] = record
+			catalog.tasks[job.record.GetJobId()] = make(map[int64]*datapb.SnapshotExportCopyTask)
+			for _, task := range exportTaskRecords(job) {
+				catalog.tasks[job.record.GetJobId()][task.GetTaskId()] = task
+			}
 		}
 	}
 	return catalog
@@ -71,7 +94,7 @@ func (c *snapshotExportCatalogFake) SaveExportSnapshotJob(_ context.Context, job
 		return saveErr
 	}
 	if beforeSave != nil {
-		beforeSave(proto.Clone(job).(*datapb.ExportSnapshotJob))
+		beforeSave(&snapshotExportJobView{record: proto.Clone(job).(*datapb.ExportSnapshotJob)})
 	}
 	c.mu.Lock()
 	c.jobs[job.GetJobId()] = proto.Clone(job).(*datapb.ExportSnapshotJob)
@@ -99,6 +122,68 @@ func (c *snapshotExportCatalogFake) DropExportSnapshotJob(_ context.Context, job
 		return c.dropErr
 	}
 	delete(c.jobs, jobID)
+	return nil
+}
+
+func (c *snapshotExportCatalogFake) SaveExportSnapshotTasks(_ context.Context, jobID int64, job *datapb.ExportSnapshotJob, tasks []*datapb.SnapshotExportCopyTask, removed []int64) error {
+	c.mu.Lock()
+	err, hook := c.saveErr, c.beforeSave
+	if c.taskSaveErr != nil {
+		err = c.taskSaveErr
+	}
+	var snapshot *datapb.ExportSnapshotJob
+	if hook != nil {
+		snapshot = job
+		if snapshot == nil {
+			snapshot = c.jobs[jobID]
+		}
+		snapshot = proto.Clone(snapshot).(*datapb.ExportSnapshotJob)
+	}
+	c.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	if hook != nil {
+		hook(&snapshotExportJobView{record: snapshot})
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.taskWrites++
+	if job != nil {
+		c.jobs[jobID] = proto.Clone(job).(*datapb.ExportSnapshotJob)
+	}
+	if c.tasks[jobID] == nil {
+		c.tasks[jobID] = make(map[int64]*datapb.SnapshotExportCopyTask)
+	}
+	for _, task := range tasks {
+		c.tasks[jobID][task.GetTaskId()] = proto.Clone(task).(*datapb.SnapshotExportCopyTask)
+	}
+	for _, id := range removed {
+		delete(c.tasks[jobID], id)
+	}
+	return c.taskSaveResponseErr
+}
+
+func (c *snapshotExportCatalogFake) ListExportSnapshotTasks(_ context.Context, jobID int64) ([]*datapb.SnapshotExportCopyTask, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.taskListErr != nil {
+		return nil, c.taskListErr
+	}
+	var result []*datapb.SnapshotExportCopyTask
+	for _, task := range c.tasks[jobID] {
+		result = append(result, proto.Clone(task).(*datapb.SnapshotExportCopyTask))
+	}
+	return result, nil
+}
+
+func (c *snapshotExportCatalogFake) DropExportSnapshotTasks(_ context.Context, jobID int64) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.dropErr != nil {
+		return c.dropErr
+	}
+	delete(c.tasks, jobID)
 	return nil
 }
 
@@ -252,84 +337,86 @@ func createTestSnapshotMetaLoaded(t *testing.T) *snapshotMeta {
 
 func TestSnapshotExportMeta_DurableUpdatesAndDefensiveCopies(t *testing.T) {
 	ctx := context.Background()
-	job := &datapb.ExportSnapshotJob{
-		JobId:          9001,
-		SnapshotName:   "snapshot-1",
-		CollectionId:   100,
-		CollectionName: "collection-1",
-		ExternalSpec:   `{"extfs":{"access_key_id":"AK","access_key_value":"SK"}}`,
-		State:          datapb.ExportSnapshotJobState_ExportSnapshotJobPending,
+	job := &snapshotExportJobView{
+		record: &datapb.ExportSnapshotJob{
+			JobId:          9001,
+			SnapshotName:   "snapshot-1",
+			CollectionId:   100,
+			CollectionName: "collection-1",
+			ExternalSpec:   `{"extfs":{"access_key_id":"AK","access_key_value":"SK"}}`,
+			State:          datapb.ExportSnapshotJobState_ExportSnapshotJobPending,
+		},
 	}
 	catalog := newSnapshotExportCatalogFake(job)
 	meta, err := newSnapshotExportMeta(ctx, catalog)
 	require.NoError(t, err)
 
-	loaded, ok := meta.GetJob(job.GetJobId())
+	loaded, ok := meta.GetJob(job.record.GetJobId())
 	require.True(t, ok)
-	loaded.Progress = 77
-	unchanged, ok := meta.GetJob(job.GetJobId())
+	loaded.record.Progress = 77
+	unchanged, ok := meta.GetJob(job.record.GetJobId())
 	require.True(t, ok)
-	assert.Zero(t, unchanged.GetProgress())
+	assert.Zero(t, unchanged.record.GetProgress())
 
-	var retained *datapb.ExportSnapshotJob
-	catalog.beforeSave = func(persisting *datapb.ExportSnapshotJob) {
-		cached, exists := meta.GetJob(job.GetJobId())
+	var retained *snapshotExportJobView
+	catalog.beforeSave = func(persisting *snapshotExportJobView) {
+		cached, exists := meta.GetJob(job.record.GetJobId())
 		require.True(t, exists)
-		assert.Equal(t, datapb.ExportSnapshotJobState_ExportSnapshotJobPending, cached.GetState())
-		assert.Equal(t, datapb.ExportSnapshotJobState_ExportSnapshotJobExecuting, persisting.GetState())
+		assert.Equal(t, datapb.ExportSnapshotJobState_ExportSnapshotJobPending, cached.record.GetState())
+		assert.Equal(t, datapb.ExportSnapshotJobState_ExportSnapshotJobExecuting, persisting.record.GetState())
 	}
-	updated, applied, err := meta.UpdateJob(ctx, job.GetJobId(), func(candidate *datapb.ExportSnapshotJob) (bool, error) {
+	updated, applied, err := meta.UpdateJob(ctx, job.record.GetJobId(), func(candidate *snapshotExportJobView) (bool, error) {
 		retained = candidate
-		candidate.State = datapb.ExportSnapshotJobState_ExportSnapshotJobExecuting
-		candidate.Progress = 5
+		candidate.record.State = datapb.ExportSnapshotJobState_ExportSnapshotJobExecuting
+		candidate.record.Progress = 5
 		return false, nil
 	})
 	require.NoError(t, err)
 	require.True(t, applied)
-	assert.Equal(t, int32(5), updated.GetProgress())
+	assert.Equal(t, int32(5), updated.record.GetProgress())
 
-	retained.Progress = 90
-	cached, ok := meta.GetJob(job.GetJobId())
+	retained.record.Progress = 90
+	cached, ok := meta.GetJob(job.record.GetJobId())
 	require.True(t, ok)
-	assert.Equal(t, int32(5), cached.GetProgress())
+	assert.Equal(t, int32(5), cached.record.GetProgress())
 
 	catalog.beforeSave = nil
 	saveErr := errors.New("etcd unavailable")
 	catalog.saveErr = saveErr
-	_, applied, err = meta.UpdateJob(ctx, job.GetJobId(), func(candidate *datapb.ExportSnapshotJob) (bool, error) {
-		candidate.Progress = 10
+	_, applied, err = meta.UpdateJob(ctx, job.record.GetJobId(), func(candidate *snapshotExportJobView) (bool, error) {
+		candidate.record.Progress = 10
 		return false, nil
 	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, errSnapshotExportJobPersistence)
 	assert.ErrorIs(t, err, saveErr)
 	assert.False(t, applied)
-	cached, ok = meta.GetJob(job.GetJobId())
+	cached, ok = meta.GetJob(job.record.GetJobId())
 	require.True(t, ok)
-	assert.Equal(t, int32(5), cached.GetProgress())
+	assert.Equal(t, int32(5), cached.record.GetProgress())
 
 	catalog.saveErr = nil
-	updated, applied, err = meta.UpdateJob(ctx, job.GetJobId(), func(candidate *datapb.ExportSnapshotJob) (bool, error) {
-		candidate.State = datapb.ExportSnapshotJobState_ExportSnapshotJobFailed
-		candidate.ExternalSpec = ""
+	updated, applied, err = meta.UpdateJob(ctx, job.record.GetJobId(), func(candidate *snapshotExportJobView) (bool, error) {
+		candidate.record.State = datapb.ExportSnapshotJobState_ExportSnapshotJobFailed
+		candidate.record.ExternalSpec = ""
 		return false, nil
 	})
 	require.NoError(t, err)
 	require.True(t, applied)
-	assert.Empty(t, updated.GetExternalSpec())
+	assert.Empty(t, updated.record.GetExternalSpec())
 
-	meta.locks.Lock(job.GetJobId())
-	_, acquired, applied, err := meta.TryUpdateJob(ctx, job.GetJobId(), func(candidate *datapb.ExportSnapshotJob) (bool, error) {
-		candidate.Progress = 100
+	meta.locks.Lock(job.record.GetJobId())
+	_, acquired, applied, err := meta.TryUpdateJob(ctx, job.record.GetJobId(), func(candidate *snapshotExportJobView) (bool, error) {
+		candidate.record.Progress = 100
 		return false, nil
 	})
-	meta.locks.Unlock(job.GetJobId())
+	meta.locks.Unlock(job.record.GetJobId())
 	require.NoError(t, err)
 	assert.False(t, acquired)
 	assert.False(t, applied)
 
-	require.NoError(t, meta.DropJob(ctx, job.GetJobId()))
-	_, ok = meta.GetJob(job.GetJobId())
+	require.NoError(t, meta.DropJob(ctx, job.record.GetJobId()))
+	_, ok = meta.GetJob(job.record.GetJobId())
 	assert.False(t, ok)
 }
 
@@ -349,10 +436,10 @@ func TestSnapshotExportMeta_LoadErrors(t *testing.T) {
 
 func TestSnapshotExportMeta_ErrorAndEdgePaths(t *testing.T) {
 	t.Run("duplicate jobs fail loading", func(t *testing.T) {
-		job := &datapb.ExportSnapshotJob{JobId: 9001}
+		job := &snapshotExportJobView{record: &datapb.ExportSnapshotJob{JobId: 9001}}
 		catalog := newSnapshotExportCatalogFake()
 		mockList := mockey.Mock((*snapshotExportCatalogFake).ListExportSnapshotJobs).Return(
-			[]*datapb.ExportSnapshotJob{job, proto.Clone(job).(*datapb.ExportSnapshotJob)}, nil).Build()
+			[]*datapb.ExportSnapshotJob{job.record, proto.Clone(job.record).(*datapb.ExportSnapshotJob)}, nil).Build()
 		defer mockList.UnPatch()
 		_, err := newSnapshotExportMeta(context.Background(), catalog)
 		require.Error(t, err)
@@ -363,37 +450,37 @@ func TestSnapshotExportMeta_ErrorAndEdgePaths(t *testing.T) {
 		meta, err := newSnapshotExportMeta(context.Background(), newSnapshotExportCatalogFake())
 		require.NoError(t, err)
 		require.Error(t, meta.CreateJob(context.Background(), nil))
-		require.Error(t, meta.CreateJob(context.Background(), &datapb.ExportSnapshotJob{}))
-		job := &datapb.ExportSnapshotJob{JobId: 9001}
+		require.Error(t, meta.CreateJob(context.Background(), &snapshotExportJobView{record: &datapb.ExportSnapshotJob{}}))
+		job := &snapshotExportJobView{record: &datapb.ExportSnapshotJob{JobId: 9001}}
 		require.NoError(t, meta.CreateJob(context.Background(), job))
 		require.Error(t, meta.CreateJob(context.Background(), job))
 	})
 
 	t.Run("jobs with equal start time are ordered by id", func(t *testing.T) {
 		meta, err := newSnapshotExportMeta(context.Background(), newSnapshotExportCatalogFake(
-			&datapb.ExportSnapshotJob{JobId: 9002, StartTime: 100},
-			&datapb.ExportSnapshotJob{JobId: 9001, StartTime: 100},
+			&snapshotExportJobView{record: &datapb.ExportSnapshotJob{JobId: 9002, StartTime: 100}},
+			&snapshotExportJobView{record: &datapb.ExportSnapshotJob{JobId: 9001, StartTime: 100}},
 		))
 		require.NoError(t, err)
 		jobs := meta.GetJobs()
 		require.Len(t, jobs, 2)
-		assert.Equal(t, int64(9001), jobs[0].GetJobId())
-		assert.Equal(t, int64(9002), jobs[1].GetJobId())
+		assert.Equal(t, int64(9001), jobs[0].record.GetJobId())
+		assert.Equal(t, int64(9002), jobs[1].record.GetJobId())
 	})
 
 	t.Run("missing update and failed drop preserve cache", func(t *testing.T) {
-		job := &datapb.ExportSnapshotJob{JobId: 9001}
+		job := &snapshotExportJobView{record: &datapb.ExportSnapshotJob{JobId: 9001}}
 		catalog := newSnapshotExportCatalogFake(job)
 		meta, err := newSnapshotExportMeta(context.Background(), catalog)
 		require.NoError(t, err)
-		_, _, err = meta.UpdateJob(context.Background(), 9999, func(*datapb.ExportSnapshotJob) (bool, error) {
+		_, _, err = meta.UpdateJob(context.Background(), 9999, func(*snapshotExportJobView) (bool, error) {
 			return false, nil
 		})
 		require.Error(t, err)
 
 		catalog.dropErr = errors.New("catalog unavailable")
-		require.Error(t, meta.DropJob(context.Background(), job.GetJobId()))
-		_, ok := meta.GetJob(job.GetJobId())
+		require.Error(t, meta.DropJob(context.Background(), job.record.GetJobId()))
+		_, ok := meta.GetJob(job.record.GetJobId())
 		assert.True(t, ok)
 	})
 }
@@ -4688,4 +4775,309 @@ func TestSnapshotMeta_HasActivePins(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, has200, "collection 200 has an active pin")
 	})
+}
+
+func TestSnapshotMeta_RestoreManifestReadsShareBudget(t *testing.T) {
+	for _, mode := range []string{"success", "cancel", "read error"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+			data := &snapshotstorage.SnapshotData{SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100, Name: "snap"}, Collection: &datapb.CollectionDescription{}}
+			for i := 0; i < 32; i++ {
+				data.Segments = append(data.Segments, &datapb.SegmentDescription{SegmentId: int64(i + 1)})
+				data.SegmentIDs = append(data.SegmentIDs, int64(i+1))
+			}
+			metadata, _, err := snapshotstorage.NewSnapshotWriter(cm).SaveToRootWithSize(ctx, data, cm.RootPath(), datapb.SnapshotLayout_SnapshotLayoutReferenced)
+			require.NoError(t, err)
+			defer mockey.Mock((*kv_datacoord.Catalog).ListSnapshots).Return([]*datapb.SnapshotInfo{}, nil).Build().UnPatch()
+			sm, err := newSnapshotMeta(ctx, &kv_datacoord.Catalog{}, cm)
+			require.NoError(t, err)
+			defer sm.Close()
+			info := proto.Clone(data.SnapshotInfo).(*datapb.SnapshotInfo)
+			info.S3Location = metadata
+			defer mockey.Mock((*snapshotMeta).getSnapshotByName).Return(info, nil).Build().UnPatch()
+			started := make(chan struct{}, 64)
+			release := make(chan struct{})
+			var once sync.Once
+			defer once.Do(func() { close(release) })
+			var active, peak atomic.Int64
+			defer mockey.Mock((*storage.LocalChunkManager).Read).To(func(ctx context.Context, key string) ([]byte, error) {
+				if !strings.HasSuffix(key, ".avro") {
+					return os.ReadFile(key)
+				}
+				n := active.Add(1)
+				defer active.Add(-1)
+				for old := peak.Load(); n > old; old = peak.Load() {
+					if peak.CompareAndSwap(old, n) {
+						break
+					}
+				}
+				started <- struct{}{}
+				select {
+				case <-release:
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+				if mode == "read error" {
+					return nil, merr.ErrIoPermissionDenied
+				}
+				return os.ReadFile(key)
+			}).Build().UnPatch()
+			type result struct {
+				data *snapshotstorage.SnapshotData
+				err  error
+			}
+			done := make(chan result, 2)
+			go func() { d, e := sm.ReadSnapshotData(ctx, 100, "snap", true); done <- result{d, e} }()
+			go func() {
+				d, e := sm.ReadExternalSnapshotDataWithChunkManager(ctx, cm, metadata, true)
+				done <- result{d, e}
+			}()
+			for i := 0; i < cap(snapshotManifestReadPermits); i++ {
+				select {
+				case <-started:
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				}
+			}
+			select {
+			case <-started:
+				t.Fatal("named and external readers exceeded their shared budget")
+			case <-time.After(20 * time.Millisecond):
+			}
+			if mode == "cancel" {
+				cancel()
+			} else {
+				once.Do(func() { close(release) })
+			}
+			for i := 0; i < 2; i++ {
+				var r result
+				select {
+				case r = <-done:
+				case <-time.After(10 * time.Second):
+					t.Fatal("readers failed to join")
+				}
+				switch mode {
+				case "success":
+					require.NoError(t, r.err)
+					require.Len(t, r.data.Segments, 32)
+				case "cancel":
+					require.ErrorIs(t, r.err, context.Canceled)
+				case "read error":
+					require.ErrorIs(t, r.err, merr.ErrIoPermissionDenied)
+				}
+			}
+			require.EqualValues(t, cap(snapshotManifestReadPermits), peak.Load())
+			require.Zero(t, active.Load())
+			require.Empty(t, snapshotManifestReadPermits)
+		})
+	}
+}
+
+func TestSnapshotExportMeta_SeparateTaskRecords(t *testing.T) {
+	ctx := context.Background()
+	// Duplicate credentials are stripped from the durable job, and task count cannot inflate it.
+	job := &snapshotExportJobView{record: &datapb.ExportSnapshotJob{
+		JobId: 1, State: datapb.ExportSnapshotJobState_ExportSnapshotJobExecuting,
+		ExternalSpec: strings.Repeat("x", 800<<10), CopyRequest: &datapb.SnapshotExportCopyRequest{TargetUri: "s3://bucket/exports/job", ExternalSpec: strings.Repeat("x", 800<<10)},
+	}}
+	recordBeforeTasks, err := proto.Marshal(exportJobRecord(job.record))
+	require.NoError(t, err)
+	for id := int64(1); id <= 3000; id++ {
+		job.copyTasks = append(job.copyTasks, &datapb.SnapshotExportCopyTask{TaskId: id, SegmentStart: id - 1, SegmentEnd: id})
+	}
+	recordAfterTasks, err := proto.Marshal(exportJobRecord(job.record))
+	require.NoError(t, err)
+	require.Equal(t, recordBeforeTasks, recordAfterTasks)
+	require.Greater(t, proto.Size(job.record), 1500<<10)
+	catalog := newSnapshotExportCatalogFake(job)
+	// Loading only reads existing records; it must not rewrite a job or its tasks.
+	catalog.saveErr = merr.ErrServiceUnavailable
+	meta, err := newSnapshotExportMeta(ctx, catalog)
+	require.NoError(t, err)
+	catalog.saveErr = nil
+	require.Zero(t, catalog.taskWrites)
+	require.Empty(t, catalog.jobs[1].GetExternalSpec())
+	require.Less(t, proto.Size(catalog.jobs[1]), 1<<20)
+	all, _ := meta.GetJob(1)
+	require.Len(t, all.copyTasks, 3000)
+	require.Equal(t, job.record.ExternalSpec, all.record.ExternalSpec)
+	require.Equal(t, job.record.CopyRequest.GetTargetUri(), all.record.CopyRequest.GetTargetUri())
+	jobBytes, err := proto.Marshal(catalog.jobs[1])
+	require.NoError(t, err)
+	// Replacement must commit both records or neither, without rewriting the job.
+	replace := func(job *snapshotExportJobView) (bool, error) { replaceExportTask(job, 1, 4001); return false, nil }
+	catalog.taskSaveErr = merr.ErrServiceUnavailable
+	_, _, err = meta.UpdateTask(ctx, 1, 1, replace)
+	require.ErrorIs(t, err, errSnapshotExportJobPersistence)
+	require.Nil(t, catalog.tasks[1][4001])
+	require.False(t, catalog.tasks[1][1].Retired)
+	catalog.taskSaveErr = nil
+	_, _, err = meta.UpdateTask(ctx, 1, 1, replace)
+	require.ErrorIs(t, err, errSnapshotExportJobPersistence, "confirmed replay requires the caller to refresh its state")
+	require.True(t, catalog.tasks[1][1].Retired)
+	require.NotNil(t, catalog.tasks[1][4001])
+	after, err := proto.Marshal(catalog.jobs[1])
+	require.NoError(t, err)
+	require.Equal(t, jobBytes, after)
+	one, _ := meta.getJob(1, 4001)
+	require.Len(t, one.copyTasks, 1)
+	one.copyTasks[0].NodeId = 99
+	one, _ = meta.getJob(1, 4001)
+	require.Zero(t, one.copyTasks[0].NodeId)
+	reloaded, err := newSnapshotExportMeta(ctx, catalog)
+	require.NoError(t, err)
+	all, _ = reloaded.GetJob(1)
+	require.Len(t, all.copyTasks, 3000)
+	require.Len(t, all.retiredTasks, 1)
+	require.EqualValues(t, 4001, all.copyTasks[0].TaskId)
+	// Oversized results fail permanently, and never poison the cached task.
+	_, _, err = meta.UpdateTask(ctx, 1, 4001, func(job *snapshotExportJobView) (bool, error) {
+		job.copyTasks[0].Result = &datapb.SnapshotExportCopyResponse{Reason: strings.Repeat("x", 1<<20)}
+		return false, nil
+	})
+	require.Error(t, err)
+	require.NotErrorIs(t, err, errSnapshotExportJobPersistence)
+	one, _ = meta.getJob(1, 4001)
+	require.Nil(t, one.copyTasks[0].Result)
+	// The job survives a failed task-prefix deletion; retry removes both layers.
+	catalog.dropErr = merr.ErrServiceUnavailable
+	require.Error(t, meta.DropJob(ctx, 1))
+	require.NotNil(t, catalog.jobs[1])
+	catalog.dropErr = nil
+	require.NoError(t, meta.DropJob(ctx, 1))
+	require.Empty(t, catalog.tasks)
+	require.Empty(t, catalog.jobs)
+}
+
+func TestSnapshotExportMeta_TaskRecordRecoveryErrors(t *testing.T) {
+	ctx := context.Background()
+	for _, mode := range []string{"task load", "invalid task", "duplicate task", "job drop", "ID collision"} {
+		t.Run(mode, func(t *testing.T) {
+			job := &snapshotExportJobView{record: &datapb.ExportSnapshotJob{JobId: 1, CopyRequest: &datapb.SnapshotExportCopyRequest{}}, copyTasks: []*datapb.SnapshotExportCopyTask{{TaskId: 1, SegmentEnd: 1}}}
+			catalog := newSnapshotExportCatalogFake(job)
+			switch mode {
+			case "invalid task":
+				catalog.tasks[1][1].TaskId = 0
+			case "task load":
+				catalog.taskListErr = merr.ErrServiceUnavailable
+			case "duplicate task":
+				catalog.tasks[1][2] = proto.Clone(catalog.tasks[1][1]).(*datapb.SnapshotExportCopyTask)
+			}
+			meta, err := newSnapshotExportMeta(ctx, catalog)
+			if mode != "job drop" && mode != "ID collision" {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			if mode == "ID collision" {
+				_, _, err = meta.UpdateTask(ctx, 1, 2, func(j *snapshotExportJobView) (bool, error) { j.copyTasks = job.copyTasks; return false, nil })
+				require.ErrorIs(t, err, merr.ErrDataIntegrity)
+				return
+			}
+			patch := mockey.Mock((*snapshotExportCatalogFake).DropExportSnapshotJob).Return(merr.ErrServiceUnavailable).Build()
+			require.Error(t, meta.DropJob(ctx, 1))
+			patch.UnPatch()
+			require.NotNil(t, catalog.jobs[1])
+			meta, err = newSnapshotExportMeta(ctx, catalog)
+			require.NoError(t, err)
+			require.NoError(t, meta.DropJob(ctx, 1))
+		})
+	}
+}
+
+func TestSnapshotExportMeta_StoreLimitAndConcurrentTasks(t *testing.T) {
+	ctx := context.Background()
+	catalog := newSnapshotExportCatalogFake()
+	meta, err := newSnapshotExportMeta(ctx, catalog)
+	require.NoError(t, err)
+	job := &snapshotExportJobView{record: &datapb.ExportSnapshotJob{JobId: 1}, copyTasks: []*datapb.SnapshotExportCopyTask{{TaskId: 1}}, retiredTasks: []*datapb.SnapshotExportCopyTask{{TaskId: 2}, {TaskId: 3}}}
+	require.NoError(t, meta.CreateJob(ctx, job))
+	require.Len(t, meta.GetJobs()[0].retiredTasks, 2)
+	for _, cause := range []error{
+		rpctypes.ErrRequestTooLarge,
+		merr.WrapErrIoFailed("export-job", rpctypes.ErrRequestTooLarge),
+		merr.WrapErrIoFailedReason("execute etcd txn failed", rpctypes.ErrRequestTooLarge.Error()),
+	} {
+		catalog.saveErr = cause
+		_, _, err = meta.UpdateJob(ctx, 1, func(j *snapshotExportJobView) (bool, error) { j.record.Progress++; return false, nil })
+		require.ErrorIs(t, err, cause)
+		require.NotErrorIs(t, err, errSnapshotExportJobPersistence)
+		_, _, err = meta.UpdateTask(ctx, 1, 1, func(j *snapshotExportJobView) (bool, error) { j.copyTasks[0].NodeId++; return false, nil })
+		require.ErrorIs(t, err, cause)
+		require.NotErrorIs(t, err, errSnapshotExportJobPersistence)
+	}
+	catalog.saveErr = merr.WrapErrIoFailed("export-job", merr.ErrServiceUnavailable)
+	_, _, err = meta.UpdateJob(ctx, 1, func(j *snapshotExportJobView) (bool, error) { j.record.Progress++; return false, nil })
+	require.ErrorIs(t, err, errSnapshotExportJobPersistence)
+	catalog.saveErr = nil
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for n := 0; n < 25; n++ {
+				_, _, e := meta.UpdateTask(ctx, 1, 1, func(j *snapshotExportJobView) (bool, error) { j.copyTasks[0].NodeId++; return false, nil })
+				assert.NoError(t, e)
+				assert.Len(t, meta.GetJobs(), 1)
+			}
+		}()
+	}
+	wg.Wait()
+	saved, _ := meta.getJob(1, 1)
+	require.EqualValues(t, 100, saved.copyTasks[0].NodeId)
+}
+
+func TestSnapshotExportJobView_Isolation(t *testing.T) {
+	job := &snapshotExportJobView{
+		record:       &datapb.ExportSnapshotJob{JobId: 1, CopyRequest: &datapb.SnapshotExportCopyRequest{TargetUri: "s3://bucket/export"}},
+		copyTasks:    []*datapb.SnapshotExportCopyTask{{TaskId: 2, Result: &datapb.SnapshotExportCopyResponse{CopiedFiles: 3}}},
+		retiredTasks: []*datapb.SnapshotExportCopyTask{{TaskId: 4, Result: &datapb.SnapshotExportCopyResponse{CopiedFiles: 5}}},
+	}
+	_, serializable := any(job).(proto.Message)
+	require.False(t, serializable, "runtime views must not implement the protobuf serialization API")
+	fields := job.record.ProtoReflect().Descriptor().Fields()
+	require.Nil(t, fields.ByNumber(26))
+	require.Nil(t, fields.ByNumber(27))
+	require.Nil(t, fields.ByName("copy_tasks"))
+	require.Nil(t, fields.ByName("retired_copy_tasks"))
+
+	clone := job.clone()
+	require.True(t, equalSnapshotExportJobViews(job, clone))
+	clone.record.CopyRequest.TargetUri = "s3://bucket/other"
+	clone.copyTasks[0].Result.CopiedFiles = 30
+	clone.retiredTasks[0].Result.CopiedFiles = 50
+	require.Equal(t, "s3://bucket/export", job.record.CopyRequest.TargetUri)
+	require.EqualValues(t, 3, job.copyTasks[0].Result.CopiedFiles)
+	require.EqualValues(t, 5, job.retiredTasks[0].Result.CopiedFiles)
+
+	var absent *snapshotExportJobView
+	require.Nil(t, absent.clone())
+	require.Nil(t, findExportTask(absent, 1))
+	require.False(t, isRetiredExportTask(absent, 1))
+	replaceExportTask(absent, 1, 2)
+	require.NoError(t, snapshotExportAdvanceError(context.Background(), absent))
+	require.ErrorIs(t, ensureSnapshotExportCanAdvance(context.Background(), absent), errSnapshotExportJobStopped)
+	require.ErrorIs(t, ensureSnapshotExportCanPublish(context.Background(), absent), errSnapshotExportJobStopped)
+}
+
+func equalSnapshotExportJobViews(a, b *snapshotExportJobView) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if !proto.Equal(a.record, b.record) || len(a.copyTasks) != len(b.copyTasks) || len(a.retiredTasks) != len(b.retiredTasks) {
+		return false
+	}
+	for i, task := range a.copyTasks {
+		if !proto.Equal(task, b.copyTasks[i]) {
+			return false
+		}
+	}
+	for i, task := range a.retiredTasks {
+		if !proto.Equal(task, b.retiredTasks[i]) {
+			return false
+		}
+	}
+	return true
 }

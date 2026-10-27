@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/iskorotkov/avro/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -1234,6 +1235,210 @@ func TestMilvusTableSourceIngestion_EqualHostAndBucket(t *testing.T) {
 	assert.Equal(t, metadata.GetManifestList(), gotMetadata.GetManifestList())
 	assert.Equal(t, []externalPathForm{externalPathSource, externalPathResolved, externalPathSource}, forms)
 	assert.Equal(t, []string{"minio/metadata/v1.json", "minio/metadata/10.avro", "minio/metadata/v1.json"}, keys)
+}
+
+func TestMilvusTableSourceIngestion_RewrittenV5Snapshot(t *testing.T) {
+	for _, move := range []string{"unchanged", "sibling", "nested"} {
+		t.Run(move, func(t *testing.T) {
+			root := t.TempDir()
+			bundle := filepath.Join(root, "exported")
+			metadataPath := filepath.Join(bundle, "snapshots/100/metadata/1.json")
+			metadata := &datapb.SnapshotMetadata{
+				FormatVersion: 5, Layout: datapb.SnapshotLayout_SnapshotLayoutSelfContained,
+				SnapshotInfo:          &datapb.SnapshotInfo{Id: 1, CollectionId: 100, S3Location: metadataPath},
+				ManifestList:          []string{filepath.Join(bundle, "snapshots/100/manifests/1/10.avro"), filepath.Join(bundle, "snapshots/100/manifests/1/11.avro")},
+				Storagev2ManifestList: []*datapb.StorageV2SegmentManifest{{SegmentId: 10, Manifest: MarshalManifestPath(filepath.Join(bundle, "files/insert_log/10"), 2)}},
+			}
+			schema, err := snapshotio.ManifestSchemaByVersion(5)
+			require.NoError(t, err)
+			segments := []*datapb.SegmentDescription{
+				{SegmentId: 10, NumOfRows: 100, StorageVersion: 3, SegmentLevel: datapb.SegmentLevel_L1},
+				{SegmentId: 11, SegmentLevel: datapb.SegmentLevel_L0, Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: filepath.Join(bundle, "files/delta_log/11/1"), LogID: 1}}}}},
+			}
+			files := make(map[string][]byte)
+			for _, segment := range segments {
+				data, err := avro.Marshal(schema, snapshotio.SegmentToManifestEntry(segment))
+				require.NoError(t, err)
+				files[fmt.Sprintf("snapshots/100/manifests/1/%d.avro", segment.GetSegmentId())] = data
+			}
+			data, err := protojson.Marshal(metadata)
+			require.NoError(t, err)
+			files["snapshots/100/metadata/1.json"] = data
+			files["files/delta_log/11/1"] = []byte("delta")
+			for key, data := range files {
+				file := filepath.Join(bundle, key)
+				require.NoError(t, os.MkdirAll(filepath.Dir(file), 0o755))
+				require.NoError(t, os.WriteFile(file, data, 0o600))
+			}
+			moved := bundle
+			if move != "unchanged" {
+				moved = filepath.Join(root, "moved")
+				require.NoError(t, os.Rename(bundle, moved))
+				if move == "nested" {
+					require.NoError(t, os.MkdirAll(bundle, 0o755))
+					nested := filepath.Join(bundle, "nested")
+					require.NoError(t, os.Rename(moved, nested))
+					moved = nested
+				}
+				for key := range files {
+					_, err := os.Stat(filepath.Join(bundle, key))
+					require.True(t, os.IsNotExist(err), "old object must be unavailable: %s", key)
+				}
+			}
+			metadataPath = filepath.Join(moved, "snapshots/100/metadata/1.json")
+			config := &indexpb.StorageConfig{StorageType: "local", BucketName: root, RootPath: root}
+			infos, _, err := ExploreFilesReturnManifestPath(nil, "milvus-table", root, metadataPath, config, ExternalSpecContext{Spec: `{"format":"milvus-table"}`})
+			require.NoError(t, err)
+			require.Len(t, infos, 1)
+			require.Equal(t, MarshalManifestPath(filepath.Join(moved, "files/insert_log/10"), 2), infos[0].FilePath)
+			require.EqualValues(t, 100, infos[0].NumRows)
+			require.Equal(t, filepath.Join(moved, "files/delta_log/11/1"), infos[0].Deltalogs[0].GetBinlogs()[0].GetLogPath())
+			for key, original := range files {
+				data, err := os.ReadFile(filepath.Join(moved, key))
+				require.NoError(t, err)
+				require.Equal(t, original, data, "relocation must not rewrite the bundle")
+			}
+		})
+	}
+}
+
+func TestMilvusTableSourceIngestion_RelocatedRemoteV6Snapshot(t *testing.T) {
+	root := t.TempDir()
+	config := &indexpb.StorageConfig{StorageType: "local", BucketName: root, RootPath: root}
+	extfs := ExternalSpecContext{
+		CollectionID: 42,
+		Source:       "s3://new-bucket/new/snapshots/100/metadata/1.json",
+		Spec:         `{"format":"milvus-table","extfs":{"endpoint_url":"http://minio","region":"us-east-1","access_key_id":"ak","access_key_value":"sk"}}`,
+	}
+	metadataBytes, err := protojson.Marshal(&datapb.SnapshotMetadata{
+		FormatVersion: snapshotio.SnapshotFormatVersion, Layout: datapb.SnapshotLayout_SnapshotLayoutSelfContained,
+		SnapshotInfo:          &datapb.SnapshotInfo{S3Location: "s3://old-bucket/old/snapshots/100/metadata/1.json"},
+		ManifestList:          []string{"s3://old-bucket/old/snapshots/100/manifests/1/10.avro", "old/snapshots/100/manifests/1/11.avro"},
+		Storagev2ManifestList: []*datapb.StorageV2SegmentManifest{{SegmentId: 10, Manifest: MarshalManifestPath("s3://old-bucket/old/files/insert_log/10", 2)}},
+	})
+	require.NoError(t, err)
+	segmentBytes, err := snapshotio.MarshalSegmentManifest(&datapb.SegmentDescription{SegmentId: 10, SegmentLevel: datapb.SegmentLevel_L1, NumOfRows: 100})
+	require.NoError(t, err)
+	deltaBytes, err := snapshotio.MarshalSegmentManifest(&datapb.SegmentDescription{
+		SegmentId: 11, SegmentLevel: datapb.SegmentLevel_L0,
+		Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "s3://old-bucket/old/files/delta_log/11/1"}}}},
+	})
+	require.NoError(t, err)
+	props, err := MakePropertiesFromStorageConfig(config, nil)
+	require.NoError(t, err)
+	defer FreeProperties(props)
+	require.NoError(t, injectExternalSpecProperties(props, extfs.CollectionID, extfs.Source, extfs.Spec))
+	var keys []string
+	defer mockey.Mock(readFileWithExternalSpec).To(func(_ *indexpb.StorageConfig, path string, context ExternalSpecContext, form externalPathForm) ([]byte, error) {
+		lookupPath, key, err := normalizeExternalPathForFilesystemForm(path, props, context, form)
+		require.NoError(t, err)
+		assert.Equal(t, "s3://minio/new-bucket/"+key, lookupPath)
+		keys = append(keys, key)
+		switch key {
+		case "new/snapshots/100/metadata/1.json":
+			return metadataBytes, nil
+		case "new/snapshots/100/manifests/1/10.avro":
+			return segmentBytes, nil
+		case "new/snapshots/100/manifests/1/11.avro":
+			return deltaBytes, nil
+		default:
+			return nil, merr.WrapErrIoKeyNotFound(key)
+		}
+	}).Build().UnPatch()
+	infos, _, err := ExploreFilesReturnManifestPath(nil, "milvus-table", root, extfs.Source, config, extfs)
+	require.NoError(t, err)
+	require.Len(t, infos, 1)
+	assert.Equal(t, MarshalManifestPath("s3://minio/new-bucket/new/files/insert_log/10", 2), infos[0].FilePath)
+	assert.Equal(t, "s3://minio/new-bucket/new/files/delta_log/11/1", infos[0].Deltalogs[0].GetBinlogs()[0].GetLogPath())
+	assert.Equal(t, []string{"new/snapshots/100/metadata/1.json", "new/snapshots/100/manifests/1/10.avro", "new/snapshots/100/manifests/1/11.avro"}, keys)
+}
+
+func TestMilvusTableSourceIngestion_RejectsInvalidBundleReferences(t *testing.T) {
+	for _, invalid := range []string{"metadata_anchor", "avro", "native_manifest", "l0_delta"} {
+		t.Run(invalid, func(t *testing.T) {
+			root := t.TempDir()
+			actual := filepath.Join(root, "new/snapshots/100/metadata/1.json")
+			if invalid == "metadata_anchor" {
+				actual = filepath.Join(root, "metadata.json")
+			}
+			metadata := &datapb.SnapshotMetadata{
+				FormatVersion: 5, Layout: datapb.SnapshotLayout_SnapshotLayoutSelfContained,
+				SnapshotInfo:          &datapb.SnapshotInfo{S3Location: filepath.Join(root, "old/snapshots/100/metadata/1.json")},
+				ManifestList:          []string{filepath.Join(root, "old/snapshots/100/manifests/1/10.avro")},
+				Storagev2ManifestList: []*datapb.StorageV2SegmentManifest{{SegmentId: 10, Manifest: MarshalManifestPath(filepath.Join(root, "old/files/insert_log/10"), 2)}},
+			}
+			segment := &datapb.SegmentDescription{SegmentId: 10, SegmentLevel: datapb.SegmentLevel_L1, NumOfRows: 100}
+			switch invalid {
+			case "avro":
+				metadata.ManifestList[0] = filepath.Join(root, "outside/10.avro")
+			case "native_manifest":
+				metadata.Storagev2ManifestList[0].Manifest = MarshalManifestPath(filepath.Join(root, "outside/insert_log/10"), 2)
+			case "l0_delta":
+				segment.SegmentLevel = datapb.SegmentLevel_L0
+				segment.Deltalogs = []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: filepath.Join(root, "outside/delta_log/10/1")}}}}
+			}
+			metadataBytes, err := protojson.Marshal(metadata)
+			require.NoError(t, err)
+			segmentBytes, err := snapshotio.MarshalSegmentManifest(segment)
+			require.NoError(t, err)
+			defer mockey.Mock(readFileWithExternalSpec).To(func(_ *indexpb.StorageConfig, path string, _ ExternalSpecContext, _ externalPathForm) ([]byte, error) {
+				switch path {
+				case actual:
+					return metadataBytes, nil
+				case filepath.Join(root, "new/snapshots/100/manifests/1/10.avro"):
+					return segmentBytes, nil
+				default:
+					t.Fatalf("invalid reference must be rejected before reading: %s", path)
+					return nil, nil
+				}
+			}).Build().UnPatch()
+			_, manifest, err := ExploreFilesReturnManifestPath(nil, "milvus-table", root, actual,
+				&indexpb.StorageConfig{StorageType: "local", BucketName: root, RootPath: root}, ExternalSpecContext{Spec: `{"format":"milvus-table"}`})
+			require.Error(t, err)
+			assert.Equal(t, merr.Code(merr.ErrDataIntegrity), merr.Code(err))
+			assert.Empty(t, manifest, "invalid references must not publish an explore result")
+		})
+	}
+}
+
+func TestMilvusTableSnapshotRootRebaser(t *testing.T) {
+	for _, tc := range []struct {
+		name, location, actual, src, want string
+		layout                            datapb.SnapshotLayout
+		wantErr                           bool
+	}{
+		{name: "self_contained_uri", layout: datapb.SnapshotLayout_SnapshotLayoutSelfContained, location: "s3://old-bucket/old/snapshots/100/metadata/1.json", actual: "s3://new-bucket/new/snapshots/100/metadata/1.json", src: "s3://old-bucket/old/files/data", want: "new/files/data"},
+		{name: "same_key_new_bucket", layout: datapb.SnapshotLayout_SnapshotLayoutSelfContained, location: "s3://old-bucket/old/snapshots/100/metadata/1.json", actual: "s3://new-bucket/old/snapshots/100/metadata/1.json", src: "s3://old-bucket/old/files/data", want: "old/files/data"},
+		{name: "bucket_root", layout: datapb.SnapshotLayout_SnapshotLayoutSelfContained, location: "s3://old-bucket/snapshots/100/metadata/1.json", actual: "s3://new-bucket/new/snapshots/100/metadata/1.json", src: "files/data", want: "new/files/data"},
+		{name: "missing_old_anchor", layout: datapb.SnapshotLayout_SnapshotLayoutSelfContained, actual: "new/snapshots/100/metadata/1.json", src: "new/files/data", want: "new/files/data"},
+		{name: "empty_optional_path", layout: datapb.SnapshotLayout_SnapshotLayoutSelfContained, location: "old/snapshots/100/metadata/1.json", actual: "new/snapshots/100/metadata/1.json"},
+		{name: "outside_bundle", layout: datapb.SnapshotLayout_SnapshotLayoutSelfContained, location: "old/snapshots/100/metadata/1.json", actual: "new/snapshots/100/metadata/1.json", src: "older/files/data", wantErr: true},
+		{name: "malformed_object_path", layout: datapb.SnapshotLayout_SnapshotLayoutSelfContained, location: "old/snapshots/100/metadata/1.json", actual: "new/snapshots/100/metadata/1.json", src: "old/../data", wantErr: true},
+		{name: "malformed_actual_path", layout: datapb.SnapshotLayout_SnapshotLayoutSelfContained, actual: "s3://%zz/key", wantErr: true},
+		{name: "missing_actual_anchor", layout: datapb.SnapshotLayout_SnapshotLayoutSelfContained, actual: "new/metadata.json", wantErr: true},
+		{name: "malformed_old_path", layout: datapb.SnapshotLayout_SnapshotLayoutSelfContained, location: "s3://%zz/key", actual: "new/snapshots/100/metadata/1.json", wantErr: true},
+		{name: "referenced_unchanged", layout: datapb.SnapshotLayout_SnapshotLayoutReferenced, location: "old/snapshots/100/metadata/1.json", actual: "new/snapshots/100/metadata/1.json", src: "s3://old-bucket/old/files/data", want: "s3://old-bucket/old/files/data"},
+		{name: "legacy_unchanged", src: "old/files/data", want: "old/files/data"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data, err := protojson.Marshal(&datapb.SnapshotMetadata{FormatVersion: 5, Layout: tc.layout, SnapshotInfo: &datapb.SnapshotInfo{S3Location: tc.location}})
+			require.NoError(t, err)
+			rebaser, err := newMilvusTableSnapshotRootRebaser(data, tc.actual)
+			var got string
+			if err == nil {
+				got, err = rebaser.rebasePath(tc.src)
+			}
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Equal(t, merr.Code(merr.ErrDataIntegrity), merr.Code(err))
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+	_, err := newMilvusTableSnapshotRootRebaser([]byte("{"), "new/snapshots/100/metadata/1.json")
+	require.Error(t, err)
 }
 
 func TestNormalizeExternalSourcePath_InputBoundaries(t *testing.T) {

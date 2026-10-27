@@ -741,13 +741,15 @@ func (sm *snapshotManager) RestoreSnapshot(
 		}
 	}()
 
-	// Phase 1: Read snapshot data (now protected by the refcount guard)
-	snapshotData, err := sm.ReadSnapshotData(ctx, sourceCollectionID, snapshotName)
+	// Only top-level definitions are needed before creating target resources.
+	// Load Avro once in job creation, under the source pin acquired above, and
+	// reuse that validated view for all copy tasks.
+	snapshotData, err := sm.snapshotMeta.ReadSnapshotData(ctx, sourceCollectionID, snapshotName, false)
 	if err != nil {
 		return 0, merr.Wrap(err, "failed to read snapshot data")
 	}
-	mlog.Info(context.TODO(), "snapshot data loaded",
-		mlog.Int("segmentCount", len(snapshotData.Segments)),
+	mlog.Info(ctx, "snapshot data loaded",
+		mlog.Int("manifestCount", len(snapshotData.ManifestPaths)),
 		mlog.Int("indexCount", len(snapshotData.Indexes)))
 
 	// Phase 1.5: Validate CMEK compatibility
@@ -841,12 +843,14 @@ func (sm *snapshotManager) RestoreExternalSnapshot(
 		return 0, err
 	}
 
+	// Only collection/schema/index definitions are needed before creating the
+	// target. Load and validate Avro/file references once in the WAL callback
+	// that creates the copy job; those failures become queryable failed jobs.
 	snapshotData, err := sm.snapshotMeta.ReadAndValidateExternalSnapshotDataWithChunkManager(
 		ctx,
 		resolved.ForeignCM,
 		snapshotS3Location,
-		true,
-		resolved.ForeignStorageConfig,
+		false,
 	)
 	if err != nil {
 		return 0, merr.Wrap(err, "failed to read external snapshot data")
@@ -860,7 +864,7 @@ func (sm *snapshotManager) RestoreExternalSnapshot(
 	logger.Info(ctx, "external snapshot data loaded",
 		mlog.String("snapshotName", snapshotName),
 		mlog.Int64("sourceCollectionID", sourceCollectionID),
-		mlog.Int("segmentCount", len(snapshotData.Segments)),
+		mlog.Int("manifestCount", len(snapshotData.ManifestPaths)),
 		mlog.Int("indexCount", len(snapshotData.Indexes)))
 
 	if err := sm.validateCMEKCompatibility(ctx, snapshotData, targetDbName); err != nil {
@@ -910,7 +914,7 @@ func (sm *snapshotManager) finishRestoreSnapshot(
 ) (jobID int64, err error) {
 	snapshotFingerprint := ""
 	if external {
-		snapshotFingerprint, err = snapshotstorage.SnapshotFingerprint(snapshotData)
+		snapshotFingerprint, err = snapshotstorage.SnapshotMetadataFingerprint(snapshotData)
 		if err != nil {
 			return 0, merr.Wrap(err, "failed to fingerprint external snapshot")
 		}
@@ -1308,14 +1312,16 @@ func (sm *snapshotManager) restoreData(
 		mlog.Int64("jobID", jobID),
 		mlog.Bool("external", external),
 		mlog.Bool("externalSpecSet", externalSpec != ""))
-	handleExternalError := func(operation string, err error) (int64, error) {
-		return sm.handleExternalRestoreSourceError(
+	handleSourceError := func(operation string, err error) (int64, error) {
+		return sm.handleRestoreSourceError(
 			ctx,
 			sourceCollectionID,
 			snapshotName,
 			snapshotS3Location,
 			collectionID,
 			jobID,
+			pinID,
+			external,
 			operation,
 			err,
 		)
@@ -1340,14 +1346,13 @@ func (sm *snapshotManager) restoreData(
 			externalSpec,
 		)
 		if resolveErr != nil {
-			return handleExternalError("failed to resolve external snapshot storage", resolveErr)
+			return handleSourceError("failed to resolve external snapshot storage", resolveErr)
 		}
 		snapshotData, err = sm.snapshotMeta.ReadAndValidateExternalSnapshotDataWithChunkManager(
 			ctx,
 			resolved.ForeignCM,
 			snapshotS3Location,
 			true,
-			resolved.ForeignStorageConfig,
 		)
 	} else {
 		snapshotData, err = sm.ReadSnapshotData(ctx, sourceCollectionID, snapshotName)
@@ -1355,21 +1360,21 @@ func (sm *snapshotManager) restoreData(
 	if err != nil {
 		mlog.Error(context.TODO(), "failed to read snapshot data", mlog.Err(err))
 		if external {
-			return handleExternalError("failed to read external snapshot data", err)
+			return handleSourceError("failed to read external snapshot data", err)
 		}
-		return 0, merr.Wrap(err, "failed to read snapshot data")
+		return handleSourceError("failed to read snapshot data", err)
 	}
 	actualSnapshotFingerprint := ""
 	if external {
+		if err := snapshotstorage.ValidateSnapshotPreflightFingerprint(snapshotData, expectedSnapshotFingerprint); err != nil {
+			return handleSourceError("snapshot fingerprint mismatch", err)
+		}
+		// The WAL fingerprint protects target definitions established by API
+		// preflight. Persist the fully validated snapshot fingerprint in the job
+		// so recovery also detects changes to Avro segment contents.
 		actualSnapshotFingerprint, err = snapshotstorage.SnapshotFingerprint(snapshotData)
 		if err != nil {
-			return handleExternalError("failed to fingerprint external snapshot", err)
-		}
-		if expectedSnapshotFingerprint != "" && actualSnapshotFingerprint != expectedSnapshotFingerprint {
-			fingerprintErr := merr.WrapErrDataIntegrityMsg(
-				"external snapshot changed after preflight validation",
-			)
-			return handleExternalError("snapshot fingerprint mismatch", fingerprintErr)
+			return handleSourceError("failed to fingerprint external snapshot", err)
 		}
 	}
 
@@ -1378,7 +1383,7 @@ func (sm *snapshotManager) restoreData(
 	if err != nil {
 		mlog.Error(context.TODO(), "failed to build partition mapping", mlog.Err(err))
 		if external {
-			return handleExternalError("partition mapping failed", err)
+			return handleSourceError("partition mapping failed", err)
 		}
 		return 0, merr.Wrap(err, "partition mapping failed")
 	}
@@ -1389,7 +1394,7 @@ func (sm *snapshotManager) restoreData(
 	if err != nil {
 		mlog.Error(context.TODO(), "failed to build channel mapping", mlog.Err(err))
 		if external {
-			return handleExternalError("channel mapping failed", err)
+			return handleSourceError("channel mapping failed", err)
 		}
 		return 0, merr.Wrap(err, "channel mapping failed")
 	}
@@ -1411,7 +1416,7 @@ func (sm *snapshotManager) restoreData(
 	); err != nil {
 		mlog.Error(context.TODO(), "failed to create restore job", mlog.Err(err))
 		if external {
-			return handleExternalError("restore job creation failed", err)
+			return handleSourceError("restore job creation failed", err)
 		}
 		return 0, merr.Wrap(err, "restore job creation failed")
 	}
@@ -1423,13 +1428,15 @@ func (sm *snapshotManager) restoreData(
 	return jobID, nil
 }
 
-func (sm *snapshotManager) handleExternalRestoreSourceError(
+func (sm *snapshotManager) handleRestoreSourceError(
 	ctx context.Context,
 	sourceCollectionID int64,
 	snapshotName string,
 	snapshotS3Location string,
 	collectionID int64,
 	jobID int64,
+	pinID int64,
+	external bool,
 	operation string,
 	err error,
 ) (int64, error) {
@@ -1448,7 +1455,8 @@ func (sm *snapshotManager) handleExternalRestoreSourceError(
 			CompleteTs:         now,
 			SnapshotName:       snapshotName,
 			SourceCollectionId: sourceCollectionID,
-			External:           true,
+			PinId:              pinID,
+			External:           external,
 			SnapshotS3Location: snapshotS3Location,
 		},
 		tr: timerecord.NewTimeRecorder("copy segment job"),
@@ -1456,12 +1464,26 @@ func (sm *snapshotManager) handleExternalRestoreSourceError(
 	UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed)(failedJob)
 	UpdateCopyJobReason(wrappedErr.Error())(failedJob)
 	if addErr := sm.copySegmentMeta.AddJob(ctx, failedJob); addErr != nil {
-		return 0, merr.Wrap(addErr, "failed to persist failed external restore job")
+		return 0, merr.Wrap(addErr, "failed to persist failed restore job")
 	}
 
-	mlog.Warn(ctx, "external snapshot restore failed permanently; restore job marked failed",
+	// The job is already terminal when inserted, so the normal terminal-transition
+	// hook cannot release its pin. Persist first: a failed save must leave the pin
+	// intact for WAL retry. Unpin failure/crash retains the existing TTL safety net.
+	if pinID > 0 {
+		collID, name, remaining, unpinErr := sm.snapshotMeta.UnpinSnapshot(ctx, pinID)
+		if unpinErr != nil {
+			mlog.Warn(ctx, "failed to unpin source snapshot for failed restore job; pin will expire via TTL",
+				mlog.FieldJobID(jobID), mlog.Int64("pinID", pinID), mlog.Err(unpinErr))
+		} else if name != "" {
+			setSnapshotActivePinsGauge(collID, name, remaining)
+		}
+	}
+
+	mlog.Warn(ctx, "snapshot restore failed permanently; restore job marked failed",
 		mlog.FieldJobID(jobID),
-		mlog.Int64("collectionID", collectionID),
+		mlog.FieldCollectionID(collectionID),
+		mlog.Bool("external", external),
 		mlog.String("snapshotS3Location", snapshotstorage.RedactSnapshotObjectPath(snapshotS3Location)),
 		mlog.Err(wrappedErr))
 	return jobID, nil
@@ -1638,7 +1660,7 @@ func (sm *snapshotManager) createRestoreJob(
 	// Create ID mappings and pre-register target segments
 	idMappings := make([]*datapb.CopySegmentIDMapping, 0, len(validSegments))
 	totalRows := int64(0)
-	targetSegments := make(map[int64]*SegmentInfo, len(validSegments))
+	targetSegments := make([]*SegmentInfo, 0, len(validSegments))
 	for i, segDesc := range validSegments {
 		sourceSegmentID := segDesc.GetSegmentId()
 		targetSegmentID := targetSegmentIDStart + int64(i)
@@ -1678,10 +1700,14 @@ func (sm *snapshotManager) createRestoreJob(
 		// Prepare positions with correct channel names
 		startPos := segDesc.GetStartPosition()
 		dmlPos := segDesc.GetDmlPosition()
+		// Keep the source descriptions immutable: internal jobs reuse them when
+		// assembling copy tasks. Target positions must not alias cached input.
 		if startPos != nil {
+			startPos = proto.Clone(startPos).(*msgpb.MsgPosition)
 			startPos.ChannelName = targetChannelName
 		}
 		if dmlPos != nil {
+			dmlPos = proto.Clone(dmlPos).(*msgpb.MsgPosition)
 			dmlPos.ChannelName = targetChannelName
 		}
 
@@ -1706,13 +1732,13 @@ func (sm *snapshotManager) createRestoreJob(
 			CommitTimestamp:     segDesc.GetCommitTimestamp(),
 			IsImporting:         true,
 		})
-		targetSegments[targetSegmentID] = newSegment
+		targetSegments = append(targetSegments, newSegment)
 	}
 
-	// Pre-register all target segments in meta to ensure they exist when copy tasks run
-	for _, targetSegment := range targetSegments {
-		if err := sm.meta.AddSegment(ctx, targetSegment); err != nil {
-			mlog.Error(context.TODO(), "failed to pre-register target segment", mlog.Err(err))
+	// Register targets before publishing the copy job, as ordinary Import does.
+	for _, target := range targetSegments {
+		if err := sm.meta.AddSegment(ctx, target); err != nil {
+			mlog.Error(ctx, "failed to pre-register target segment", mlog.Err(err))
 			return err
 		}
 	}
@@ -1755,8 +1781,11 @@ func (sm *snapshotManager) createRestoreJob(
 			ExternalSpec:        externalSpec,
 			SnapshotFingerprint: snapshotFingerprint,
 		},
-		tr:            timerecord.NewTimeRecorder("copy segment job"),
-		snapshotCache: &copySegmentSnapshotCache{},
+		tr: timerecord.NewTimeRecorder("copy segment job"),
+		// Use the validated job-creation view for every task, including external
+		// restores. External source objects must remain unchanged during restore.
+		// Recovery starts with an empty cache and rechecks the persisted fingerprint.
+		snapshotCache: &copySegmentSnapshotCache{data: snapshotData},
 	}
 
 	// NOTE: The restore reference has already been claimed in Phase 0 of

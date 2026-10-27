@@ -27,11 +27,13 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	dctask "github.com/milvus-io/milvus/internal/datacoord/task"
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
@@ -191,8 +193,16 @@ func TestRejectedCopyCleanupSkipsActivePublication(t *testing.T) {
 	task := createTestCopyTask(100, 2001).(*copySegmentTask)
 	copies, m := newCopySegmentTaskTestMeta(t, task)
 	task.meta, task.copyMeta = m, copies
+	m.indexMeta = createTestIndexMeta(t, 100, map[int64]*model.Index{
+		300: {CollectionID: 100, FieldID: 101, IndexID: 300, IndexName: "vec_idx"},
+	}, m.catalog)
 	root := t.TempDir()
 	m.chunkManager = storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	// Publication exercises the real readback validator against a fixed inventory.
+	entry := copiedManifestReviewEntry()
+	entry.IndexType, entry.Properties = GetIndexType(nil), nil
+	entry.Path = path.Join(root, "index_files/9001/0/10/2001")
+	defer mockey.Mock(packed.GetManifestIndexInfosAsync).Return([]packed.ManifestIndexInfo{entry}, nil).Build().UnPatch()
 	segment := newTestCopySegment(2001)
 	segment.StorageVersion = storage.StorageV3
 	segment.IsImporting = true
@@ -212,26 +222,33 @@ func TestRejectedCopyCleanupSkipsActivePublication(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	var releaseOnce sync.Once
 	unblock := func() { releaseOnce.Do(func() { close(release) }) }
-	patch := mockey.Mock(packed.GetManifestIndexInfosAsync).To(func(context.Context, *packed.ManifestIOContext, string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+	var install func(*indexMeta, context.Context, *model.SegmentIndex) error
+	patch := mockey.Mock((*indexMeta).AddSegmentIndexFromManifest).To(func(im *indexMeta, ctx context.Context, index *model.SegmentIndex) error {
 		close(entered)
 		<-release
-		return nil, nil
-	}).Build()
+		return install(im, ctx, index)
+	}).Origin(&install).Build()
 	defer patch.UnPatch()
 	finished := make(chan error, 1)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		finished <- SyncCopySegmentTask(task, &datapb.QueryCopySegmentResponse{
-			State:          datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
-			SegmentResults: []*datapb.CopySegmentResult{{SegmentId: 2001, ManifestPath: packed.MarshalManifestPath(base, 3)}},
+			State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+			SegmentResults: []*datapb.CopySegmentResult{{
+				SegmentId: 2001, ManifestPath: packed.MarshalManifestPath(base, 3),
+				ManifestIndexRewritten: proto.Bool(true), ManifestIndexBuildIds: []int64{9001},
+				IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{
+					9001: {BuildId: 9001, FieldId: 101, IndexName: "vec_idx", IndexFilePaths: []string{"index.bin"}},
+				},
+			}},
 		}, copies, m)
 	}()
 	defer func() { unblock(); <-done }()
 	select {
 	case <-entered:
 	case <-time.After(10 * time.Second):
-		t.Fatal("verification did not start")
+		t.Fatal("index installation did not start")
 	}
 	require.True(t, task.GetCleanupRequired())
 	checker := &copySegmentChecker{ctx: ctx, meta: m, copyMeta: copies}

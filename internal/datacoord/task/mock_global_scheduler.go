@@ -50,9 +50,9 @@ func (_c *MockGlobalScheduler_AbortAndRemoveTask_Call) RunAndReturn(run func(int
 	return _c
 }
 
-// Enqueue provides a mock function with given fields: _a0
-func (_m *MockGlobalScheduler) Enqueue(_a0 Task) {
-	_m.Called(_a0)
+// Enqueue provides a mock function with given fields: task
+func (_m *MockGlobalScheduler) Enqueue(task Task) {
+	_m.Called(task)
 }
 
 // MockGlobalScheduler_Enqueue_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Enqueue'
@@ -61,12 +61,12 @@ type MockGlobalScheduler_Enqueue_Call struct {
 }
 
 // Enqueue is a helper method to define mock.On call
-//   - _a0 Task
-func (_e *MockGlobalScheduler_Expecter) Enqueue(_a0 interface{}) *MockGlobalScheduler_Enqueue_Call {
-	return &MockGlobalScheduler_Enqueue_Call{Call: _e.mock.On("Enqueue", _a0)}
+//   - task Task
+func (_e *MockGlobalScheduler_Expecter) Enqueue(task interface{}) *MockGlobalScheduler_Enqueue_Call {
+	return &MockGlobalScheduler_Enqueue_Call{Call: _e.mock.On("Enqueue", task)}
 }
 
-func (_c *MockGlobalScheduler_Enqueue_Call) Run(run func(_a0 Task)) *MockGlobalScheduler_Enqueue_Call {
+func (_c *MockGlobalScheduler_Enqueue_Call) Run(run func(task Task)) *MockGlobalScheduler_Enqueue_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(Task))
 	})
@@ -126,6 +126,39 @@ func (_c *MockGlobalScheduler_GetPendingTaskCount_Call) Return(_a0 int) *MockGlo
 
 func (_c *MockGlobalScheduler_GetPendingTaskCount_Call) RunAndReturn(run func(string) int) *MockGlobalScheduler_GetPendingTaskCount_Call {
 	_c.Call.Return(run)
+	return _c
+}
+
+// RemoveTask provides a mock function with given fields: taskID
+func (_m *MockGlobalScheduler) RemoveTask(taskID int64) {
+	_m.Called(taskID)
+}
+
+// MockGlobalScheduler_RemoveTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveTask'
+type MockGlobalScheduler_RemoveTask_Call struct {
+	*mock.Call
+}
+
+// RemoveTask is a helper method to define mock.On call
+//   - taskID int64
+func (_e *MockGlobalScheduler_Expecter) RemoveTask(taskID interface{}) *MockGlobalScheduler_RemoveTask_Call {
+	return &MockGlobalScheduler_RemoveTask_Call{Call: _e.mock.On("RemoveTask", taskID)}
+}
+
+func (_c *MockGlobalScheduler_RemoveTask_Call) Run(run func(taskID int64)) *MockGlobalScheduler_RemoveTask_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *MockGlobalScheduler_RemoveTask_Call) Return() *MockGlobalScheduler_RemoveTask_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockGlobalScheduler_RemoveTask_Call) RunAndReturn(run func(int64)) *MockGlobalScheduler_RemoveTask_Call {
+	_c.Run(run)
 	return _c
 }
 

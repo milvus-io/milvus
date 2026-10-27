@@ -159,24 +159,6 @@ func TestComponentParam_DataCoordBumpSchemaVersionCompactionParams(t *testing.T)
 	assert.EqualValues(t, 1, params.DataCoordCfg.BumpSchemaVersionCompactionSlotUsage.GetAsInt64())
 }
 
-func TestComponentParam_DataCoordSnapshotExportCopyConcurrency(t *testing.T) {
-	Init()
-	params := Get()
-	key := params.DataCoordCfg.SnapshotExportCopyConcurrency.Key
-	params.Reset(key)
-	t.Cleanup(func() { params.Reset(key) })
-
-	assert.Equal(t, 16, params.DataCoordCfg.SnapshotExportCopyConcurrency.GetAsInt())
-
-	params.Save(key, "3")
-	assert.Equal(t, 3, params.DataCoordCfg.SnapshotExportCopyConcurrency.GetAsInt())
-
-	for _, invalid := range []string{"0", "-1", "invalid"} {
-		params.Save(key, invalid)
-		assert.Equal(t, 16, params.DataCoordCfg.SnapshotExportCopyConcurrency.GetAsInt())
-	}
-}
-
 func TestComponentParam_DataCoordJSONStatsWriteBatchSize(t *testing.T) {
 	Init()
 	params := Get()
@@ -1935,4 +1917,30 @@ func TestPartialUpdateRecoveryDecodeTimeoutConfig(t *testing.T) {
 	assert.Equal(t, time.Duration(0), item.GetAsDurationByParse())
 	assert.NoError(t, params.Reset(item.Key))
 	assert.Equal(t, 5*time.Second, item.GetAsDurationByParse())
+}
+
+func TestSnapshotCopyConcurrency(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable())
+	for _, tc := range []struct {
+		cfg      *ParamItem
+		fallback int64
+		overflow string
+	}{
+		{&params.DataCoordCfg.SnapshotCopyConcurrency, 128, "2147483648"},
+		{&params.DataCoordCfg.SnapshotTaskSlotUsage, 1, "9223372036854775808"},
+	} {
+		t.Run(tc.cfg.Key, func(t *testing.T) {
+			assert.False(t, tc.cfg.Export)
+			assert.Equal(t, tc.fallback, tc.cfg.GetAsInt64())
+			for _, value := range []string{"16", "0", "-1", "invalid", tc.overflow} {
+				params.Save(tc.cfg.Key, value)
+				want := tc.fallback
+				if value == "16" {
+					want = 16
+				}
+				assert.Equal(t, want, tc.cfg.GetAsInt64())
+			}
+		})
+	}
 }
