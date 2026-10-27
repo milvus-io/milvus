@@ -118,9 +118,4 @@ func MakeTestCopySegmentBinlogs() []*datapb.FieldBinlog {
 // go1.26 `go vet` printf-pass panic on method expressions of anonymous structs.
 type EmbeddedAllocator struct{ allocator.Allocator }
 
-var (
-	SyncVectorScalarIndexesForTest = syncVectorScalarIndexes
-	SyncJSONKeyIndexesForTest      = syncJSONKeyIndexes
-)
-
 var TaskIndexWriteToManifestForTest = taskIndexWriteToManifest
