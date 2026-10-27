@@ -5,7 +5,6 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/reduce"
@@ -27,25 +26,9 @@ func (c *legacyQueryCollector) Reduce(ctx context.Context, req *LegacyQueryReque
 		if len(inputs) == 0 {
 			inputs = []*internalpb.RetrieveResults{{Status: merr.Success()}}
 		}
-		// A worker with no selected segments returns a fieldless empty result.
-		// Aggregation still needs its typed identity (count=0, empty groups, ...)
-		// before either this shard reducer or Proxy can merge it.
-		if len(req.Req.GetGroupByFieldIds()) > 0 || len(req.Req.GetAggregates()) > 0 {
-			for i, input := range inputs {
-				if len(input.GetFieldsData()) != 0 {
-					continue
-				}
-				empty, err := agg.NewGroupAggReducer(req.Req.GetGroupByFieldIds(), req.Req.GetAggregates(), -1, req.Schema).EmptyAggResult()
-				if err != nil {
-					return nil, err
-				}
-				normalized := proto.Clone(input).(*internalpb.RetrieveResults)
-				normalized.FieldsData = empty.GetFieldDatas()
-				inputs[i] = normalized
-			}
-		}
+		hasAggregation := len(req.Req.GetGroupByFieldIds()) > 0 || len(req.Req.GetAggregates()) > 0
 		var result *internalpb.RetrieveResults
-		if len(inputs) == 1 {
+		if len(inputs) == 1 && !hasAggregation {
 			result = inputs[0]
 		} else {
 			var err error

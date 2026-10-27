@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestEmptyPlanPreservesFeatureAndSnapshot(t *testing.T) {
@@ -80,11 +81,11 @@ func TestEmptyCountResults(t *testing.T) {
 				require.NoError(t, err)
 				require.Len(t, result, 1)
 				require.Len(t, result[0].GetFieldsData(), 1)
-				expected := int64(0)
 				if len(input) == 2 {
-					expected = 5
+					require.Equal(t, []int64{5}, result[0].FieldsData[0].GetScalars().GetLongData().GetData())
+				} else {
+					require.Equal(t, []int64{0}, result[0].FieldsData[0].GetScalars().GetLongData().GetData())
 				}
-				require.Equal(t, []int64{expected}, result[0].FieldsData[0].GetScalars().GetLongData().GetData())
 				require.Equal(t, expectedBit, result[0].FeatureBits&bit)
 			}
 		})
@@ -178,7 +179,7 @@ func TestEmptyNonCountAggregateResults(t *testing.T) {
 			}
 			plan := ShardPlan{ShardID: qviews.ShardID{VChannel: "p_1v0", ReplicaID: 1}, Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 90}, ExecutionSummary: &viewpb.ExecutionSummary{GlobalOptimizer: &viewpb.GlobalOptimizerExecutionSummary{Flags: 1 << viewpb.GlobalOptimizerExecutionSummary_PrunedByScalarFiltering}}}
 			// No workers and fieldless responses must agree, including the
-			// multi-worker reduction path. Use the established QN empty values.
+			// multi-worker reduction path. The wire carries null aggregate states.
 			for _, workerCount := range []int{0, 1, 2} {
 				collector := newLegacyQueryCollector()
 				inputs := make([]*internalpb.RetrieveResults, workerCount)
@@ -196,14 +197,12 @@ func TestEmptyNonCountAggregateResults(t *testing.T) {
 				}
 				field := results[0].FieldsData[0]
 				require.Equal(t, tc.resultType, field.GetType())
-				switch tc.resultType {
-				case schemapb.DataType_Int64:
-					require.Equal(t, []int64{0}, field.GetScalars().GetLongData().GetData())
-				case schemapb.DataType_Double:
-					require.Equal(t, []float64{0}, field.GetScalars().GetDoubleData().GetData())
-				case schemapb.DataType_Float:
-					require.Equal(t, []float32{0}, field.GetScalars().GetFloatData().GetData())
-				}
+				accessor, err := agg.NewFieldAccessor(field.GetType())
+				require.NoError(t, err)
+				accessor.SetVals(field)
+				require.Equal(t, 1, accessor.RowCount())
+				require.True(t, accessor.IsNullAt(0))
+				require.Equal(t, []bool{false}, typeutil.GetFieldDataValidData(field))
 				require.Equal(t, uint64(100), results[0].GetMvccTimestamp())
 				bit, _ := featureusage.ExecBit(featureusage.FeatureSegmentPrune)
 				require.Equal(t, bit, results[0].FeatureBits&bit)

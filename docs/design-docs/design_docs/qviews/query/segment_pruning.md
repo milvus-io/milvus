@@ -171,8 +171,21 @@ Summaries are not forwarded to Phase 2 workers and never control execution.
 Every successfully executed shard
 plan with no collected results contributes an empty result and its MVCC snapshot,
 including plans with no workers; this behavior does not depend on pruning.
-Fieldless empty worker results are normalized using the existing schema-aware
-aggregation identity before reduction (for example, count=0).
+Aggregation uses `PartialAggregationResult` at QN and shard reduction boundaries.
+A fieldless or typed zero-row payload decodes to Empty, the merge identity;
+a scalar NULL or a real zero remains a value. On the existing RPC, global Empty
+is represented by one identity-state row: count=0 and NULL for min/max/sum.
+GROUP BY Empty has zero rows in every column. Global zero-row RPC payloads
+cannot be emitted because released 3.0 reducers read row zero. Wire validity is
+projected with the shared validity helper so both released and current consumers
+observe the NULL state, without version-dependent merge rules.
+Execution metadata (including View/MVCC, feature bits and cost) remains independent
+of the payload. Proxy alone calls `Finalize` to obtain `FinalAggregationResult`
+before output remapping. Global empty input returns count=0 and NULL for
+aggregates without candidates; avg remains a sum/count composition. These states
+prevent empty shards from changing positive min or negative max, and preserve
+NULL when all contributions are NULL. AllRetrieveCount is never an emptiness
+criterion. There is no new protobuf field or production Proxy routing switch.
 StatisticsOnView remains physical row counting and does not apply pruning.
 
 ## Validation

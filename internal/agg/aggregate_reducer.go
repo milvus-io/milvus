@@ -3,11 +3,12 @@ package agg
 import (
 	"context"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -16,7 +17,6 @@ import (
 type GroupAggReducer struct {
 	groupByFieldIds []int64
 	aggregates      []*planpb.Aggregate
-	hashValsMap     map[uint64]*Bucket
 	groupLimit      int64
 	schema          *schemapb.CollectionSchema
 }
@@ -25,82 +25,76 @@ func NewGroupAggReducer(groupByFieldIds []int64, aggregates []*planpb.Aggregate,
 	return &GroupAggReducer{
 		groupByFieldIds: groupByFieldIds,
 		aggregates:      aggregates,
-		hashValsMap:     make(map[uint64]*Bucket), // Initialize hashValsMap
 		groupLimit:      groupLimit,
 		schema:          schema,
 	}
 }
 
-type AggregationResult struct {
+// PartialAggregationResult is a mergeable aggregate contribution. No columns
+// represents Empty, the merge identity; otherwise columns contain aggregate rows.
+// Its zero value is Empty. Construct Values through DecodePartial.
+// AllRetrieveCount is accounting metadata, never an emptiness discriminator.
+type PartialAggregationResult struct {
 	fieldDatas       []*schemapb.FieldData
 	allRetrieveCount int64
 }
 
-func NewAggregationResult(fieldDatas []*schemapb.FieldData, allRetrieveCount int64) *AggregationResult {
+func newPartialAggregationResult(fieldDatas []*schemapb.FieldData, allRetrieveCount int64) *PartialAggregationResult {
 	if fieldDatas == nil {
 		fieldDatas = make([]*schemapb.FieldData, 0)
 	}
-	return &AggregationResult{
+	return &PartialAggregationResult{
 		fieldDatas:       fieldDatas,
 		allRetrieveCount: allRetrieveCount,
 	}
 }
 
 // GetFieldDatas returns the fieldDatas slice
-func (ar *AggregationResult) GetFieldDatas() []*schemapb.FieldData {
+func (ar *PartialAggregationResult) GetFieldDatas() []*schemapb.FieldData {
 	return ar.fieldDatas
 }
 
-func (ar *AggregationResult) GetAllRetrieveCount() int64 {
+func (ar *PartialAggregationResult) GetAllRetrieveCount() int64 {
 	return ar.allRetrieveCount
 }
 
-func (reducer *GroupAggReducer) EmptyAggResult() (*AggregationResult, error) {
+// emptyFields describes the aggregate layout without inventing a contribution.
+func (reducer *GroupAggReducer) emptyFields() ([]*schemapb.FieldData, error) {
 	helper, err := typeutil.CreateSchemaHelper(reducer.schema)
 	if err != nil {
 		return nil, err
 	}
-	ret := NewAggregationResult(nil, 0)
-	appendEmptyField := func(fieldId int64) error {
-		field, err := helper.GetFieldFromID(fieldId)
-		if err != nil {
-			return err
-		}
-		emptyFieldData, err := typeutil.GenEmptyFieldData(field)
-		if err != nil {
-			return err
-		}
-		ret.fieldDatas = append(ret.fieldDatas, emptyFieldData)
-		return nil
-	}
-
-	for _, grpFid := range reducer.groupByFieldIds {
-		err := appendEmptyField(grpFid)
+	fields := make([]*schemapb.FieldData, 0, len(reducer.groupByFieldIds)+len(reducer.aggregates))
+	for _, id := range reducer.groupByFieldIds {
+		field, err := helper.GetFieldFromID(id)
 		if err != nil {
 			return nil, err
 		}
-	}
-	for _, agg := range reducer.aggregates {
-		if agg.GetOp() == planpb.AggregateOp_count {
-			countField := genEmptyLongFieldData(schemapb.DataType_Int64, []int64{0})
-			ret.fieldDatas = append(ret.fieldDatas, countField)
-		} else {
-			field, err := helper.GetFieldFromID(agg.GetFieldId())
-			if err != nil {
-				return nil, merr.Wrapf(err, "failed to get field schema for aggregate fieldID %d", agg.GetFieldId())
-			}
-			resultType, err := getAggregateResultType(agg.GetOp(), field.GetDataType())
-			if err != nil {
-				return nil, merr.Wrapf(err, "failed to get result type for aggregate fieldID %d", agg.GetFieldId())
-			}
-			emptyFieldData, err := genEmptyFieldDataByType(resultType)
-			if err != nil {
-				return nil, merr.Wrapf(err, "failed to generate empty field data for result type %s", resultType.String())
-			}
-			ret.fieldDatas = append(ret.fieldDatas, emptyFieldData)
+		column, err := typeutil.GenEmptyFieldData(field)
+		if err != nil {
+			return nil, err
 		}
+		fields = append(fields, column)
 	}
-	return ret, nil
+	for _, aggregate := range reducer.aggregates {
+		resultType := schemapb.DataType_Int64
+		if aggregate.GetOp() != planpb.AggregateOp_count {
+			field, err := helper.GetFieldFromID(aggregate.GetFieldId())
+			if err != nil {
+				return nil, err
+			}
+			resultType, err = getAggregateResultType(aggregate.GetOp(), field.GetDataType())
+			if err != nil {
+				return nil, err
+			}
+		}
+		column, err := genEmptyFieldDataByType(resultType)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, column)
+	}
+	return fields, nil
 }
 
 func genEmptyLongFieldData(dataType schemapb.DataType, data []int64) *schemapb.FieldData {
@@ -118,13 +112,13 @@ func genEmptyLongFieldData(dataType schemapb.DataType, data []int64) *schemapb.F
 func genEmptyFieldDataByType(dataType schemapb.DataType) (*schemapb.FieldData, error) {
 	switch dataType {
 	case schemapb.DataType_Int64:
-		return genEmptyLongFieldData(dataType, []int64{0}), nil
+		return genEmptyLongFieldData(dataType, nil), nil
 	case schemapb.DataType_Double:
 		return &schemapb.FieldData{
 			Type: dataType,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: []float64{0}}},
+					Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: nil}},
 				},
 			},
 		}, nil
@@ -133,7 +127,7 @@ func genEmptyFieldDataByType(dataType schemapb.DataType) (*schemapb.FieldData, e
 			Type: dataType,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{0}}},
+					Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: nil}},
 				},
 			},
 		}, nil
@@ -142,7 +136,7 @@ func genEmptyFieldDataByType(dataType schemapb.DataType) (*schemapb.FieldData, e
 			Type: dataType,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: []float32{0}}},
+					Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: nil}},
 				},
 			},
 		}, nil
@@ -156,7 +150,7 @@ func genEmptyFieldDataByType(dataType schemapb.DataType) (*schemapb.FieldData, e
 			},
 		}, nil
 	case schemapb.DataType_Timestamptz:
-		return genEmptyLongFieldData(dataType, []int64{0}), nil
+		return &schemapb.FieldData{Type: dataType, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_TimestamptzData{TimestamptzData: &schemapb.TimestamptzArray{}}}}}, nil
 	default:
 		// For other types, try to use the original field's GenEmptyFieldData
 		return nil, merr.WrapErrParameterInvalidMsg("unsupported data type for aggregate result: %s", dataType.String())
@@ -193,12 +187,12 @@ func getAggregateResultType(op planpb.AggregateOp, inputType schemapb.DataType) 
 	}
 }
 
-// validateAggregationResults validates the input AggregationResult slice
+// validatePartialAggregationResults validates the input PartialAggregationResult slice
 // It checks:
 // 1. Each result's fieldDatas length equals numGroupingKeys + numAggs
 // 2. No nil fieldData in any result
 // 3. Each fieldData's Type matches the expected type from schema
-func (reducer *GroupAggReducer) validateAggregationResults(results []*AggregationResult) error {
+func (reducer *GroupAggReducer) validatePartialAggregationResults(results []*PartialAggregationResult) error {
 	if reducer.schema == nil {
 		return merr.WrapErrParameterInvalidMsg("schema is nil, cannot validate field types")
 	}
@@ -275,16 +269,7 @@ func (reducer *GroupAggReducer) validateAggregationResults(results []*Aggregatio
 	return nil
 }
 
-func (reducer *GroupAggReducer) Reduce(ctx context.Context, results []*AggregationResult) (*AggregationResult, error) {
-	if len(results) == 0 {
-		return reducer.EmptyAggResult()
-	}
-
-	// Validate input results before processing
-	if err := reducer.validateAggregationResults(results); err != nil {
-		return nil, err
-	}
-
+func (reducer *GroupAggReducer) mergeValues(ctx context.Context, results []*PartialAggregationResult) (*PartialAggregationResult, error) {
 	if len(results) == 1 {
 		return results[0], nil
 	}
@@ -317,7 +302,7 @@ func (reducer *GroupAggReducer) Reduce(ctx context.Context, results []*Aggregati
 			accumulators[idx-numGroupingKeys] = accessor
 		}
 	}
-	reducedResult := NewAggregationResult(nil, 0)
+	reducedResult := newPartialAggregationResult(nil, 0)
 	isGlobal := numGroupingKeys == 0
 	if isGlobal {
 		reducedResult.fieldDatas = typeutil.PrepareResultFieldData(firstFieldData, 1)
@@ -345,7 +330,8 @@ func (reducer *GroupAggReducer) Reduce(ctx context.Context, results []*Aggregati
 		return reducedResult, nil
 	}
 
-	// 2. compute hash values for all rows in the result retrieved
+	// 2. compute hash values for this merge only.
+	hashValsMap := make(map[uint64]*Bucket)
 	var totalGroupCount int64 = 0
 	maxGroupByGroups := paramtable.Get().CommonCfg.GroupByMaxGroups.GetAsInt64()
 	limitReached := false
@@ -406,7 +392,7 @@ func (reducer *GroupAggReducer) Reduce(ctx context.Context, results []*Aggregati
 				}
 			}
 			newRow := NewRow(rowFieldValues)
-			if bucket := reducer.hashValsMap[hashVal]; bucket == nil {
+			if bucket := hashValsMap[hashVal]; bucket == nil {
 				// New group: check groupLimit before adding.
 				// When limitReached, new groups/sub-groups are skipped, but
 				// accumulation into existing groups continues (line 434).
@@ -420,7 +406,7 @@ func (reducer *GroupAggReducer) Reduce(ctx context.Context, results []*Aggregati
 				newBucket := NewBucket()
 				newBucket.AddRow(newRow)
 				totalGroupCount++
-				reducer.hashValsMap[hashVal] = newBucket
+				hashValsMap[hashVal] = newBucket
 				if reducer.groupLimit != -1 && totalGroupCount >= reducer.groupLimit {
 					limitReached = true
 				}
@@ -452,7 +438,7 @@ func (reducer *GroupAggReducer) Reduce(ctx context.Context, results []*Aggregati
 
 	// 3. assemble reduced buckets into retrievedResult
 	reducedResult.fieldDatas = typeutil.PrepareResultFieldData(firstFieldData, totalGroupCount)
-	for _, bucket := range reducer.hashValsMap {
+	for _, bucket := range hashValsMap {
 		err := AssembleBucket(bucket, reducedResult.GetFieldDatas())
 		if err != nil {
 			return nil, err
@@ -461,31 +447,129 @@ func (reducer *GroupAggReducer) Reduce(ctx context.Context, results []*Aggregati
 	return reducedResult, nil
 }
 
-func InternalResult2AggResult(results []*internalpb.RetrieveResults) []*AggregationResult {
-	aggResults := make([]*AggregationResult, len(results))
-	for i := 0; i < len(results); i++ {
-		aggResults[i] = NewAggregationResult(results[i].GetFieldsData(), results[i].GetAllRetrieveCount())
+// FinalAggregationResult is presentation data and cannot be passed to Merge.
+// Only the final consumer (Proxy) may finalize an aggregate contribution.
+type FinalAggregationResult struct {
+	fieldDatas       []*schemapb.FieldData
+	allRetrieveCount int64
+}
+
+func (r *FinalAggregationResult) GetFieldDatas() []*schemapb.FieldData { return r.fieldDatas }
+func (r *FinalAggregationResult) GetAllRetrieveCount() int64           { return r.allRetrieveCount }
+func (r *PartialAggregationResult) IsEmpty() bool                      { return len(r.fieldDatas) == 0 }
+
+// DecodePartial validates the wire columns and canonicalizes a zero-row payload
+// to Empty. NULL rows and real zero values remain Values.
+func (reducer *GroupAggReducer) DecodePartial(fields []*schemapb.FieldData, count int64) (*PartialAggregationResult, error) {
+	result := newPartialAggregationResult(fields, count)
+	if result.IsEmpty() {
+		return result, nil
 	}
-	return aggResults
-}
-
-func AggResult2internalResult(aggRes *AggregationResult) *internalpb.RetrieveResults {
-	return &internalpb.RetrieveResults{FieldsData: aggRes.GetFieldDatas(), AllRetrieveCount: aggRes.GetAllRetrieveCount()}
-}
-
-func SegcoreResults2AggResult(results []*segcorepb.RetrieveResults) ([]*AggregationResult, error) {
-	aggResults := make([]*AggregationResult, len(results))
-	for i := 0; i < len(results); i++ {
-		if results[i] == nil {
-			return nil, merr.WrapErrServiceInternalMsg("input segcore query results from any sources cannot be nil")
+	if err := reducer.validatePartialAggregationResults([]*PartialAggregationResult{result}); err != nil {
+		return nil, err
+	}
+	rows := -1
+	for i, field := range fields {
+		accessor, err := NewFieldAccessor(field.GetType())
+		if err != nil {
+			return nil, err
 		}
-		fieldsData := results[i].GetFieldsData()
-		allRetrieveCount := results[i].GetAllRetrieveCount()
-		aggResults[i] = NewAggregationResult(fieldsData, allRetrieveCount)
+		accessor.SetVals(field)
+		n := accessor.RowCount()
+		if rows == -1 {
+			rows = n
+		}
+		if n != rows || (len(typeutil.GetFieldDataValidData(field)) != 0 && len(typeutil.GetFieldDataValidData(field)) != n) {
+			return nil, merr.WrapErrServiceInternalMsg("inconsistent aggregate column cardinality at column %d", i)
+		}
 	}
-	return aggResults, nil
+	if len(reducer.groupByFieldIds) == 0 && rows > 1 {
+		return nil, merr.WrapErrServiceInternalMsg("global aggregate partial has %d rows, expected at most one", rows)
+	}
+	if rows == 0 {
+		return newPartialAggregationResult(nil, count), nil
+	}
+	return result, nil
 }
 
-func AggResult2segcoreResult(aggRes *AggregationResult) *segcorepb.RetrieveResults {
-	return &segcorepb.RetrieveResults{FieldsData: aggRes.GetFieldDatas(), AllRetrieveCount: aggRes.GetAllRetrieveCount()}
+func (reducer *GroupAggReducer) DecodeInternalResults(results []*internalpb.RetrieveResults) ([]*PartialAggregationResult, error) {
+	partials := make([]*PartialAggregationResult, 0, len(results))
+	for _, result := range results {
+		if result == nil {
+			return nil, merr.WrapErrServiceInternalMsg("nil aggregate response")
+		}
+		partial, err := reducer.DecodePartial(result.GetFieldsData(), result.GetAllRetrieveCount())
+		if err != nil {
+			return nil, err
+		}
+		partials = append(partials, partial)
+	}
+	return partials, nil
+}
+
+// Merge preserves Empty as an identity at every level of distributed reduction.
+func (reducer *GroupAggReducer) Merge(ctx context.Context, results []*PartialAggregationResult) (*PartialAggregationResult, error) {
+	values := make([]*PartialAggregationResult, 0, len(results))
+	var count int64
+	for _, result := range results {
+		if result == nil {
+			return nil, merr.WrapErrServiceInternalMsg("nil aggregate partial")
+		}
+		count += result.allRetrieveCount
+		if !result.IsEmpty() {
+			values = append(values, result)
+		}
+	}
+	if len(values) == 0 {
+		return newPartialAggregationResult(nil, count), nil
+	}
+	merged, err := reducer.mergeValues(ctx, values)
+	if err != nil {
+		return nil, err
+	}
+	return newPartialAggregationResult(merged.fieldDatas, count), nil
+}
+
+// EncodePartial projects mergeable states onto the existing RPC layout.
+// Global Empty has one identity row (count=0, other states=NULL); GROUP BY
+// Empty has zero groups. A global zero-row payload would break older reducers
+// that read row zero. No version-dependent merge rules are needed.
+func (reducer *GroupAggReducer) EncodePartial(result *PartialAggregationResult) (*internalpb.RetrieveResults, error) {
+	fields := result.fieldDatas
+	if result.IsEmpty() {
+		var err error
+		fields, err = reducer.emptyFields()
+		if err != nil {
+			return nil, err
+		}
+		if len(reducer.groupByFieldIds) == 0 {
+			for i, aggregate := range reducer.aggregates {
+				value := NewNullFieldValue()
+				if aggregate.GetOp() == planpb.AggregateOp_count {
+					value = NewFieldValue(int64(0))
+				}
+				if err := AssembleSingleValue(value, fields[i]); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	// This is a wire boundary. Project validity for released consumers without
+	// modifying the state that may still participate in another merge.
+	wireFields := make([]*schemapb.FieldData, len(fields))
+	for i, field := range fields {
+		wireFields[i] = proto.Clone(field).(*schemapb.FieldData)
+		typeutil.ProjectFieldDataValidDataForLegacy(wireFields[i])
+	}
+	return &internalpb.RetrieveResults{FieldsData: wireFields, AllRetrieveCount: result.allRetrieveCount}, nil
+}
+
+// Finalize ends reduction. Empty global input yields count=0 and NULL for
+// aggregates with no candidate; empty GROUP BY input yields zero groups.
+func (reducer *GroupAggReducer) Finalize(result *PartialAggregationResult) (*FinalAggregationResult, error) {
+	wire, err := reducer.EncodePartial(result)
+	if err != nil {
+		return nil, err
+	}
+	return &FinalAggregationResult{fieldDatas: wire.FieldsData, allRetrieveCount: wire.AllRetrieveCount}, nil
 }
