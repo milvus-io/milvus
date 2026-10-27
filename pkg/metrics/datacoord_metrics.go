@@ -88,7 +88,7 @@ var (
 			collectionIDLabelName,
 		}, collectionGaugeAggregateSum)
 
-	DataCoordL0DeltalogFileNum = prometheus.NewGaugeVec(
+	DataCoordL0DeltalogFileNum = newCollectionGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
@@ -97,7 +97,7 @@ var (
 		}, []string{
 			databaseLabelName,
 			collectionIDLabelName,
-		})
+		}, collectionGaugeAggregateSum)
 
 	// DataCoordSegmentDeltalogFileCount publishes summary-style quantiles
 	// (0.5/0.9/0.99/1.0) of the per-segment deltalog file count over healthy
@@ -113,7 +113,9 @@ var (
 	// delete-driven compaction, while p50/p90 rising toward the threshold
 	// reveals a same-batch cohort building up toward a synchronized
 	// compaction wave (a lone dirty segment leaves them unmoved).
-	DataCoordSegmentDeltalogFileCount = prometheus.NewGaugeVec(
+	// Quantiles do not add up across collections, so aggregate mode suppresses
+	// this gauge and the two below.
+	DataCoordSegmentDeltalogFileCount = newCollectionGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
@@ -125,9 +127,9 @@ var (
 			collectionIDLabelName,
 			segmentLevelLabelName,
 			quantileLabelName,
-		})
+		}, collectionGaugeAggregateDisabled)
 
-	DataCoordSegmentDeltalogSize = prometheus.NewGaugeVec(
+	DataCoordSegmentDeltalogSize = newCollectionGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
@@ -140,9 +142,9 @@ var (
 			collectionIDLabelName,
 			segmentLevelLabelName,
 			quantileLabelName,
-		})
+		}, collectionGaugeAggregateDisabled)
 
-	DataCoordSegmentDeletedRowsRatio = prometheus.NewGaugeVec(
+	DataCoordSegmentDeletedRowsRatio = newCollectionGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
@@ -156,7 +158,7 @@ var (
 			collectionIDLabelName,
 			segmentLevelLabelName,
 			quantileLabelName,
-		})
+		}, collectionGaugeAggregateDisabled)
 
 	// DataCoordNumStoredRows all metrics will be cleaned up after removing matched collectionID and
 	// segment state labels in CleanupDataCoordNumStoredRows method.

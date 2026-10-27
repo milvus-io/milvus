@@ -3855,6 +3855,7 @@ func TestGetQuotaInfoCollectionMetrics(t *testing.T) {
 		binlogFileCount  map[string]float64
 		storedRows       map[string]float64
 		l0DeleteEntries  map[string]float64
+		l0DeltalogFiles  map[string]float64
 	}{
 		{
 			mode: metrics.CollectionLevelMetricsModeFull,
@@ -3866,7 +3867,7 @@ func TestGetQuotaInfoCollectionMetrics(t *testing.T) {
 				"db-b|3|" + flushed: 60,
 				"db-c|5|" + growing: 150,
 			},
-			binlogFileCount: map[string]float64{"1": 4, "2": 4, "3": 6, "5": 3},
+			binlogFileCount: map[string]float64{"1": 6, "2": 4, "3": 10, "5": 3},
 			storedRows: map[string]float64{
 				"db-a|1|coll-1|" + flushed: 10,
 				"db-a|1|coll-1|" + growing: 20,
@@ -3876,6 +3877,7 @@ func TestGetQuotaInfoCollectionMetrics(t *testing.T) {
 				"db-c|5|coll-5|" + growing: 15,
 			},
 			l0DeleteEntries: map[string]float64{"db-a|1": 3, "db-b|3": 6},
+			l0DeltalogFiles: map[string]float64{"db-a|1": 2, "db-a|2": 0, "db-b|3": 4, "db-c|5": 0},
 		},
 		{
 			mode: metrics.CollectionLevelMetricsModeAggregate,
@@ -3886,7 +3888,7 @@ func TestGetQuotaInfoCollectionMetrics(t *testing.T) {
 				"db-b|all|" + flushed: 60,
 				"db-c|all|" + growing: 150,
 			},
-			binlogFileCount: map[string]float64{"all": 17},
+			binlogFileCount: map[string]float64{"all": 23},
 			storedRows: map[string]float64{
 				"db-a|all|all|" + flushed: 50,
 				"db-a|all|all|" + growing: 20,
@@ -3895,6 +3897,7 @@ func TestGetQuotaInfoCollectionMetrics(t *testing.T) {
 				"db-c|all|all|" + growing: 15,
 			},
 			l0DeleteEntries: map[string]float64{"db-a|all": 3, "db-b|all": 6},
+			l0DeltalogFiles: map[string]float64{"db-a|all": 2, "db-b|all": 4},
 		},
 	}
 	for _, tc := range cases {
@@ -3907,6 +3910,9 @@ func TestGetQuotaInfoCollectionMetrics(t *testing.T) {
 				metrics.DataCoordSegmentBinLogFileCount.Reset()
 				metrics.DataCoordNumStoredRows.Reset()
 				metrics.DataCoordL0DeleteEntriesNum.Reset()
+				// Prune the deltalog series this run published.
+				reportDeltalogMetrics(nil)
+				metrics.DataCoordL0DeltalogFileNum.Reset()
 			})
 
 			meta, err := newMemoryMeta(t)
@@ -3926,18 +3932,19 @@ func TestGetQuotaInfoCollectionMetrics(t *testing.T) {
 				state                         commonpb.SegmentState
 				level                         datapb.SegmentLevel
 				rows, size, binlogs, deletes  int64
+				deltalogs                     int64
 				importing                     bool
 			}{
 				{id: 1, collectionID: 1, partitionID: 10, state: commonpb.SegmentState_Flushed, level: datapb.SegmentLevel_L1, rows: 10, size: 100, binlogs: 1},
 				{id: 2, collectionID: 1, partitionID: 11, state: commonpb.SegmentState_Growing, level: datapb.SegmentLevel_L1, rows: 20, size: 200, binlogs: 2},
-				{id: 3, collectionID: 1, partitionID: 10, state: commonpb.SegmentState_Flushed, level: datapb.SegmentLevel_L0, size: 30, binlogs: 1, deletes: 3},
+				{id: 3, collectionID: 1, partitionID: 10, state: commonpb.SegmentState_Flushed, level: datapb.SegmentLevel_L0, size: 30, binlogs: 1, deletes: 3, deltalogs: 2},
 				{id: 4, collectionID: 2, partitionID: 20, state: commonpb.SegmentState_Flushed, level: datapb.SegmentLevel_L1, rows: 40, size: 400, binlogs: 4},
 				{id: 5, collectionID: 3, partitionID: 30, state: commonpb.SegmentState_Growing, level: datapb.SegmentLevel_L1, rows: 50, size: 500, binlogs: 5},
-				{id: 6, collectionID: 3, partitionID: 30, state: commonpb.SegmentState_Flushed, level: datapb.SegmentLevel_L0, size: 60, binlogs: 1, deletes: 6},
+				{id: 6, collectionID: 3, partitionID: 30, state: commonpb.SegmentState_Flushed, level: datapb.SegmentLevel_L0, size: 60, binlogs: 1, deletes: 6, deltalogs: 4},
 				// db-c has no L0 segment, so it has no L0 delete entry series.
 				{id: 10, collectionID: 5, partitionID: 50, state: commonpb.SegmentState_Growing, level: datapb.SegmentLevel_L1, rows: 15, size: 150, binlogs: 3},
 				// Collection 4 is not in meta, so no collection or database series counts it.
-				{id: 7, collectionID: 4, partitionID: 40, state: commonpb.SegmentState_Flushed, level: datapb.SegmentLevel_L0, rows: 70, size: 700, binlogs: 7, deletes: 7},
+				{id: 7, collectionID: 4, partitionID: 40, state: commonpb.SegmentState_Flushed, level: datapb.SegmentLevel_L0, rows: 70, size: 700, binlogs: 7, deletes: 7, deltalogs: 5},
 				// Dropped and importing segments count nowhere.
 				{id: 8, collectionID: 1, partitionID: 10, state: commonpb.SegmentState_Dropped, level: datapb.SegmentLevel_L1, rows: 80, size: 800, binlogs: 8},
 				{id: 9, collectionID: 2, partitionID: 20, state: commonpb.SegmentState_Flushed, level: datapb.SegmentLevel_L1, rows: 90, size: 900, binlogs: 9, importing: true},
@@ -3951,6 +3958,7 @@ func TestGetQuotaInfoCollectionMetrics(t *testing.T) {
 					InsertBinlogSize:  seg.size,
 					InsertBinlogCount: seg.binlogs,
 					DeleteNumRows:     seg.deletes,
+					DeltaBinlogCount:  seg.deltalogs,
 				}
 				require.NoError(t, meta.AddSegment(context.Background(), segment))
 			}
@@ -3968,6 +3976,8 @@ func TestGetQuotaInfoCollectionMetrics(t *testing.T) {
 			assert.Equal(t, tc.storedRows, testutils.GaugeSeries(t, metrics.DataCoordNumStoredRows,
 				"db_name", "collection_id", "collection_name", "segment_state"))
 			assert.Equal(t, tc.l0DeleteEntries, testutils.GaugeSeries(t, metrics.DataCoordL0DeleteEntriesNum,
+				"db_name", "collection_id"))
+			assert.Equal(t, tc.l0DeltalogFiles, testutils.GaugeSeries(t, metrics.DataCoordL0DeltalogFileNum,
 				"db_name", "collection_id"))
 		})
 	}

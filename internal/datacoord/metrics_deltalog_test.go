@@ -134,7 +134,7 @@ func TestReportDeltalogMetricsPrunesStaleLevel(t *testing.T) {
 	agg100 = &deltalogAggregate{dbName: "db1"}
 	agg100.observe(makeDeltaMetricSegment(datapb.SegmentLevel_L2, commonpb.SegmentState_Flushed, 1000, 183, 1, 1024))
 	reportDeltalogMetrics(map[string]*deltalogAggregate{"100": agg100, "200": agg200})
-	for _, vec := range []*prometheus.GaugeVec{
+	for _, vec := range []prometheus.Collector{
 		metrics.DataCoordSegmentDeltalogFileCount,
 		metrics.DataCoordSegmentDeltalogSize,
 		metrics.DataCoordSegmentDeletedRowsRatio,
@@ -157,7 +157,7 @@ func TestReportDeltalogMetricsPrunesStaleLevel(t *testing.T) {
 // hasDeltalogSeries reports whether vec currently holds any series of the
 // given collection and segment level (a curried vec still collects the whole
 // vec, so the label pairs are inspected directly).
-func hasDeltalogSeries(vec *prometheus.GaugeVec, collectionID, level string) bool {
+func hasDeltalogSeries(vec prometheus.Collector, collectionID, level string) bool {
 	ch := make(chan prometheus.Metric, 64)
 	vec.Collect(ch)
 	close(ch)
