@@ -42,7 +42,7 @@ type MetaStore interface {
 	// Load returns the value of key and whether key exists.
 	Load(ctx context.Context, key string) (value string, found bool, err error)
 	// MultiLoad returns the value of each key and whether it exists, in the
-	// order of keys, from one read. An error applies to all keys.
+	// order of keys. An error applies to all keys.
 	MultiLoad(ctx context.Context, keys []string) (values []string, found []bool, err error)
 	// Save writes all saves in one transaction, only when every predicate
 	// holds. A predicate on a key that is not in saves must still conflict
@@ -87,14 +87,6 @@ var (
 )
 
 var marshal = proto.MarshalOptions{Deterministic: true}
-
-// pointerBatchSize is the number of keys in one MultiLoad of the pointers. It
-// stays within the default limit of 128 operations in one etcd transaction.
-const pointerBatchSize = 128
-
-// readBackTimeout is the time limit of the read of a key after a write whose
-// result is not known.
-const readBackTimeout = 5 * time.Second
 
 // vchannelManifest is the current version of the manifest of one vchannel.
 // pointer is the pointer to it as it is stored in the meta store.
@@ -168,39 +160,33 @@ type Target struct {
 	VChannel     string
 }
 
-// PointerResult is the manifest pointer of one Target. Found and Pointer are
-// set only when Err is nil and the pointer exists.
+// PointerResult is the manifest pointer of one Target. Pointer is nil when Err
+// is set or the vchannel has no manifest.
 type PointerResult struct {
-	Found   bool
 	Pointer *pkindexpb.ManifestPointer
 	Err     error
 }
 
 // LoadPointers reads the manifest pointer of each target from the store, not
-// from the cache, in batches of pointerBatchSize keys. It returns one result
-// per target, in the order of the targets. The failure of a batch read
-// applies to the targets of that batch only.
+// from the cache. It returns one result per target, in the order of the
+// targets. A failed read fails all targets.
 func (m *Manager) LoadPointers(ctx context.Context, targets []Target) []PointerResult {
+	keys := make([]string, 0, len(targets))
+	for _, t := range targets {
+		keys = append(keys, PointerKey(t.CollectionID, t.VChannel))
+	}
+	values, found, err := m.meta.MultiLoad(ctx, keys)
+	if err == nil && (len(values) != len(keys) || len(found) != len(keys)) {
+		err = errors.Newf("meta store returned %d values and %d flags for %d keys", len(values), len(found), len(keys))
+	}
 	results := make([]PointerResult, len(targets))
-	for start := 0; start < len(targets); start += pointerBatchSize {
-		end := min(start+pointerBatchSize, len(targets))
-		keys := make([]string, 0, end-start)
-		for _, t := range targets[start:end] {
-			keys = append(keys, PointerKey(t.CollectionID, t.VChannel))
-		}
-		values, found, err := m.meta.MultiLoad(ctx, keys)
-		if err == nil && (len(values) != len(keys) || len(found) != len(keys)) {
-			err = errors.Newf("meta store returned %d values and %d flags for %d keys", len(values), len(found), len(keys))
-		}
-		for i, key := range keys {
-			r := &results[start+i]
-			switch {
-			case err != nil:
-				r.Err = markUnavailable(err, "load manifest pointer %s", key)
-			case found[i]:
-				r.Pointer, r.Err = decodePointer(key, values[i])
-				r.Found = r.Err == nil
-			}
+	for i, key := range keys {
+		r := &results[i]
+		switch {
+		case err != nil:
+			r.Err = markUnavailable(err, "load manifest pointer %s", key)
+		case found[i]:
+			r.Pointer, r.Err = decodePointer(key, values[i])
 		}
 	}
 	return results
@@ -254,31 +240,13 @@ func (m *Manager) commit(ctx context.Context, collectionID int64, vchannel strin
 		pointerPred = predicates.ValueEqual(key, cur.pointer)
 	}
 	if err := m.meta.Save(ctx, map[string]string{key: ptr}, append([]predicates.Predicate{pointerPred}, preds...)...); err != nil {
-		// the write may have taken effect: the stored pointer decides
-		if err := decideByReadBack(ctx, m.meta, key, ptr, err); err != nil {
-			m.forget(key)
-			return nil, markUnavailable(err, "write manifest pointer %s version %d", key, next.GetVersion())
-		}
+		// The write may have taken effect. The next commit loads the stored
+		// pointer, and a retry of an applied edit returns its version.
+		m.forget(key)
+		return nil, markUnavailable(err, "write manifest pointer %s version %d", key, next.GetVersion())
 	}
 	m.remember(key, &vchannelManifest{pb: next, pointer: ptr})
 	return next, nil
-}
-
-// decideByReadBack reads key from meta after a write of value that returned
-// writeErr, whose result is not known. It returns nil when key holds value,
-// and otherwise writeErr with the read error, if any, attached. The read does
-// not use the cancellation of ctx, and it stops after readBackTimeout.
-func decideByReadBack(ctx context.Context, meta MetaStore, key, value string, writeErr error) error {
-	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), readBackTimeout)
-	defer cancel()
-	got, found, err := meta.Load(rctx, key)
-	if err != nil {
-		return errors.WithSecondaryError(writeErr, err)
-	}
-	if !found || got != value {
-		return writeErr
-	}
-	return nil
 }
 
 // load returns the cached manifest of the pointer key, or reads it from the

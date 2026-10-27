@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -51,15 +52,24 @@ func (p metaKVStore) Load(ctx context.Context, key string) (string, bool, error)
 	return v, true, nil
 }
 
-// MultiLoad reads keys in one meta kv call. A key is missing when the meta kv
-// returns an empty value for it; a stored pointer or pchannel meta is never empty.
+// MultiLoad reads keys in meta kv calls of at most MaxTxnOps keys each. A key
+// is missing when the meta kv returns an empty value for it; a stored pointer
+// or pchannel meta is never empty.
 func (p metaKVStore) MultiLoad(ctx context.Context, keys []string) ([]string, []bool, error) {
-	values, err := p.kv.MultiLoad(ctx, keys)
-	if err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
-		return nil, nil, err
+	limit := p.kv.MaxTxnOps()
+	if limit <= 0 {
+		return nil, nil, merr.WrapErrServiceInternalMsg("meta kv txn limit must be positive, got %d", limit)
 	}
-	if len(values) != len(keys) {
-		return nil, nil, merr.WrapErrServiceInternal(fmt.Sprintf("meta kv returned %d values for %d keys", len(values), len(keys)))
+	values := make([]string, 0, len(keys))
+	for batch := range slices.Chunk(keys, limit) {
+		got, err := p.kv.MultiLoad(ctx, batch)
+		if err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
+			return nil, nil, err
+		}
+		if len(got) != len(batch) {
+			return nil, nil, merr.WrapErrServiceInternal(fmt.Sprintf("meta kv returned %d values for %d keys", len(got), len(batch)))
+		}
+		values = append(values, got...)
 	}
 	found := make([]bool, len(keys))
 	for i, v := range values {

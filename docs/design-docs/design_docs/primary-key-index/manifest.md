@@ -233,18 +233,17 @@ Manager (holds the vchannel lock)
        a flush also: on the condition ValueEqual(pchannel meta key, bytes
        that the flush term was checked against); the transaction does not
        write the pchannel meta key
-  5. On an error in step 4, read the pointer again, with a new context
-     (no cancel from the caller, 5 s timeout).
-       It names the new body: the commit took effect.
-       Otherwise: forget the cache entry of the vchannel, and return a
-       retryable error.
+  5. On an error in step 4: forget the cache entry of the vchannel, and
+     return a retryable error.
   6. Put the new version in the cache and return it.
 ```
 
-The read-back in step 5 does not use the context of the caller. A timeout is
-the most frequent cause of an unknown result. At that time the context of the
-caller is often expired, and a read with it always fails. The manager uses
-`context.WithoutCancel` on the caller context, with a timeout of 5 seconds.
+An error in step 4 does not tell whether the write took effect. The manager
+does not read the pointer back to find out. The caller retries the same edit,
+and the retry loads the pointer from the meta kv. When the write took effect,
+the retry is an applied retry: a flush with the same term whose checkpoint does
+not move forward, or a compaction whose outputs are all in the list. It
+returns the current version and writes nothing.
 
 The pointer value is the deterministic encoding of `ManifestPointer`. The body
 key has a UUID, so each version has a unique pointer value. `ValueEqual` thus
@@ -285,7 +284,7 @@ Crash windows:
 |---|---|---|
 | Before step 3 completes | No new object, or a partial upload | Caller retries |
 | After step 3, before step 4 | An unreferenced body | GC deletes it after `grace` while its version is above the current version. After a later commit reaches its version, GC deletes it by the body retention rules |
-| During step 4, result unknown | Pointer is old or new | Step 5 reads the pointer and decides |
+| During step 4, result unknown | Pointer is old or new | Caller retries. The retry loads the pointer and applies the edit, or finds an applied retry |
 | After step 4, before the reply | New version is committed | A flush retry with the same term is idempotent |
 
 Cache rules:
@@ -316,11 +315,11 @@ reads the body from object storage.
 
 - The response has one `ManifestPointerEntry` per target, in the order of the
   targets: a status, `found`, and the pointer.
-- Each entry has its own status. The failure of one target, for example a
-  pointer that does not decode, does not fail the others.
-- The service reads the pointers from the meta kv in batches of 128 keys, the
-  default limit of operations in one etcd transaction. A failed batch read
-  fails the entries of that batch only.
+- Each entry has its own status. A pointer that does not decode fails only its
+  own entry. A failed meta kv read fails all entries.
+- The meta kv store reads the pointers in calls of at most `MaxTxnOps` keys
+  (`metastore.maxEtcdTxnNum` on etcd), because one etcd `MultiLoad` is one
+  transaction.
 - A request has 1 to 10000 targets without duplicates. Other requests get
   `ServiceInternal`. A caller with more vchannels sends more requests.
 - The coordinator reads only the meta kv, not object storage. The body is
@@ -375,9 +374,9 @@ marks those failures as `ErrUnavailable`, and the mark must win.
 | The `vchannel` name has no pchannel part | Request check, `CommitFlush` | `ServiceInternal` | No (caller bug) |
 | `checkpoint_time_tick` is 0 | Request check, `CommitFlush` | `ServiceInternal` | No (caller bug) |
 | `ErrFenced` | Flush | `ChannelNotAvailable` | No. Stop the writes on the pchannel |
-| Meta kv or object storage failure (`ErrUnavailable`) | Load, write, read-back, walk | `ServiceUnavailable` | Yes |
+| Meta kv or object storage failure (`ErrUnavailable`) | Load, write, walk | `ServiceUnavailable` | Yes |
 | Object storage failure that a retry does not fix: permission denied, bucket not found, invalid credentials, entity too large | Load, write | Its own code (`IoPermissionDenied`, `IoBucketNotFound`, `IoInvalidCredentials`, `IoEntityTooLarge`) | No |
-| Pointer write failed, for example on a failed condition, and the read-back does not show the new value | Commit step 5 | `ServiceUnavailable` | Yes |
+| Pointer write failed, for example on a failed condition | Commit step 5 | `ServiceUnavailable` | Yes |
 | Missing body object (`ErrCorrupted`) | Load | `DataIntegrity` | No |
 | Body, pointer or pchannel meta does not decode, or has no body key, version 0 or term 0, or versions differ (`ErrCorrupted`) | Load | `DataIntegrity` | No |
 | `ErrTermNotAssigned`, `ErrNoManifest`, `ErrCheckpointRegressed`, `ErrDuplicateSST`, `ErrStaleEdit` | Edits | `ServiceInternal` | No (caller bug) |
@@ -537,10 +536,6 @@ The first version has no pointer to compare with. `ValueEqual` cannot express
 - **Tables in use by streaming nodes.** Lazy reads from object storage will let
   a streaming node read an SST after a compaction replaced it in the manifest.
   GC has no input for these tables yet.
-- **Compaction commit retry.** If the pointer write of a compaction commit took
-  effect but the read-back failed, the service reports the commit as
-  unavailable. A retry of the same edit returns the current version, because
-  the compaction rule accepts an applied retry.
 - **Pointer listing cost.** Each GC round lists all pointers in one call. The
   cost with very many vchannels is not measured.
 - **Stalled commits.** A commit that stalls longer than `grace` loses its

@@ -95,7 +95,7 @@ func (s *Service) GetRecoveryManifests(ctx context.Context, req *pkindexpb.GetRe
 			entries = append(entries, &pkindexpb.ManifestPointerEntry{Status: merr.Status(toMerr(r.Err, targets[i].VChannel))})
 			continue
 		}
-		entries = append(entries, &pkindexpb.ManifestPointerEntry{Status: merr.Success(), Found: r.Found, Pointer: r.Pointer})
+		entries = append(entries, &pkindexpb.ManifestPointerEntry{Status: merr.Success(), Found: r.Pointer != nil, Pointer: r.Pointer})
 	}
 	return &pkindexpb.GetRecoveryManifestsResponse{Status: merr.Success(), Entries: entries}, nil
 }

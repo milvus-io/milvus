@@ -95,6 +95,15 @@ func TestPKIndexMetaKVStore(t *testing.T) {
 	assert.Equal(t, []string{"d", "", "t1"}, values)
 	assert.Equal(t, []bool{true, false, true}, founds)
 
+	// keys above the txn limit are read in several calls, in order
+	txnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.Key
+	paramtable.Get().Save(txnNum, "2")
+	defer paramtable.Get().Reset(txnNum)
+	values, founds, err = p.MultiLoad(ctx, []string{manifest.PointerKey(1, "missing_v0"), key, pchannelMeta, manifest.PointerKey(1, "missing_v1"), key})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"", "d", "t1", "", "d"}, values)
+	assert.Equal(t, []bool{false, true, true, false, true}, founds)
+
 	keys, values, err := p.List(ctx, manifest.PointerPrefix)
 	require.NoError(t, err)
 	assert.Equal(t, []string{key}, keys)
