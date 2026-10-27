@@ -258,6 +258,9 @@ func (it *ImportTask) PreExecute(ctx context.Context) error {
 			}
 		}
 	}
+	if err := checkArrayFeatureGate(schema.CollectionSchema); err != nil {
+		return err
+	}
 	it.partitionIDs = partitionIDs
 	return nil
 }
