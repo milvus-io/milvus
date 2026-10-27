@@ -27,7 +27,6 @@ namespace milvus::storage {
 namespace {
 
 constexpr int64_t kHoleSize = 1024 * 1024;
-constexpr int64_t kRangeSize = 64 * 1024 * 1024;
 
 // Pins the configured properties to known values and restores arrow's defaults
 // afterwards, because the configuration is process-wide.
@@ -35,12 +34,12 @@ class ArrowReaderPropertiesTest : public ::testing::Test {
  protected:
     void
     SetUp() override {
-        ConfigureArrowReaderProperties(kHoleSize, kRangeSize);
+        ConfigureArrowReaderProperties(kHoleSize);
     }
 
     void
     TearDown() override {
-        ConfigureArrowReaderProperties(0, 0);
+        ConfigureArrowReaderProperties(0);
     }
 };
 
@@ -50,7 +49,10 @@ TEST_F(ArrowReaderPropertiesTest, WithoutEagerPrebufferKeepsConfigured) {
 
     EXPECT_EQ(options.lazy, configured.lazy);
     EXPECT_EQ(options.hole_size_limit, kHoleSize);
-    EXPECT_EQ(options.range_size_limit, kRangeSize);
+    EXPECT_EQ(options.range_size_limit,
+              parquet::default_arrow_reader_properties()
+                  .cache_options()
+                  .range_size_limit);
 }
 
 TEST_F(ArrowReaderPropertiesTest, EagerPrebufferReadsAllRangesAtOnce) {
@@ -69,7 +71,10 @@ TEST_F(ArrowReaderPropertiesTest, EagerPrebufferKeepsTheConfiguredCoalescing) {
     auto options = GetArrowReaderProperties(true).cache_options();
 
     EXPECT_EQ(options.hole_size_limit, kHoleSize);
-    EXPECT_EQ(options.range_size_limit, kRangeSize);
+    EXPECT_EQ(options.range_size_limit,
+              parquet::default_arrow_reader_properties()
+                  .cache_options()
+                  .range_size_limit);
 }
 
 TEST_F(ArrowReaderPropertiesTest, EagerPrebufferDoesNotChangeConfigured) {

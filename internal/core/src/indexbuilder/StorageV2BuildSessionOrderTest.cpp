@@ -255,16 +255,18 @@ TEST_F(StorageV2BuildSessionOrderTest, VectorAndOptionalFieldKeepRowIds) {
             excluded[row / 8] &= static_cast<uint8_t>(~(1U << (row % 8)));
         }
     }
+    // Request all rows so exact search checks row-ID alignment independently
+    // of HNSW recall.
     SearchResult result;
     vectors->Search(GenDataset(1, dim, query.data()),
                     index::VectorSearchParams{
-                        .search_params_ = {{knowhere::indexparam::EF, 64}},
+                        .search_params_ = {{knowhere::indexparam::EF, rows}},
                         .metric_type_ = "L2",
-                        .topk_ = 1},
+                        .topk_ = rows},
                     BitsetView(excluded.data(), rows),
                     nullptr,
                     result);
-    ASSERT_EQ(result.seg_offsets_.size(), 1);
+    ASSERT_EQ(result.seg_offsets_.size(), rows);
     EXPECT_EQ(result.seg_offsets_[0], 0);
 
     // Check the optional scalar's physical row IDs independently of HNSW's

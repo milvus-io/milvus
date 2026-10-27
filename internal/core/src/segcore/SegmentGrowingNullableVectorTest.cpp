@@ -59,7 +59,7 @@ VectorRows(const DataArray& field, int64_t dim) {
             break;
         case proto::schema::BFloat16Vector:
             bytes = vectors.bfloat16_vector();
-            width = dim * sizeof(bfloat16);
+            width = dim * sizeof(milvus::bfloat16);
             break;
         case proto::schema::BinaryVector:
             bytes = vectors.binary_vector();

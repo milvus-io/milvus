@@ -38,6 +38,7 @@
 #include "index/test_utils/TestArtifactIO.h"
 #include "index/vector/KnowhereEngine.h"
 #include "index/vector/VectorMemBuilder.h"
+#include "knowhere/build_scheduler.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/version.h"
 #include "storage/artifact/LoadOptions.h"
@@ -453,6 +454,34 @@ INSTANTIATE_TEST_SUITE_P(LegacyVectorFamilies,
                          [](const ::testing::TestParamInfo<Profile>& info) {
                              return std::string(info.param.name);
                          });
+
+TEST(VectorFamilyEdgeTest, EmptyEmbeddingListsReturnDefaultReservation) {
+    auto adapted = AdaptIndexType({
+        .index_type = knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+        .field_type = DataType::VECTOR_ARRAY,
+        .element_type = DataType::VECTOR_FLOAT,
+        .index_engine_version =
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+        .params = {{METRIC_TYPE, knowhere::metric::MAX_SIM_L2},
+                   {DIM_KEY, kDim}},
+    });
+    adapted.params[INDEX_NUM_ROWS_KEY] = 2;
+    auto builder = BuilderRegistry<VectorBuildInput<float>>::Instance().Create(
+        adapted.family, adapted.params);
+    ASSERT_NE(builder, nullptr);
+    ASSERT_TRUE(builder->TryReserveBuild({0, kDim, 2}));
+    auto& scheduler = knowhere::BuildScheduler::Instance();
+    EXPECT_FALSE(scheduler.TryReserve());
+    const std::array<size_t, 3> offsets{0, 0, 0};
+    auto artifact = std::move(*builder).Build(VectorBuildInput<float>{
+        .logical_rows = 2,
+        .physical_rows = 0,
+        .dim = kDim,
+        .embedding_offsets = std::span<const size_t>(offsets),
+    });
+    ASSERT_NE(artifact, nullptr);
+    EXPECT_TRUE(scheduler.TryReserve());
+}
 
 TEST(VectorFamilyEdgeTest, SparseExplicitAndImplicitEmptyRows) {
     for (const auto& type : {knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,

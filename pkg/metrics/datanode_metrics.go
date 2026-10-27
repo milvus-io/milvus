@@ -304,7 +304,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.IndexNodeRole,
 			Name:      "knowhere_build_index_latency",
-			Help:      "latency of building the index by knowhere",
+			Help:      "latency of index preparation, input loading and construction, excluding queueing, build admission waits and upload",
 			Buckets:   indexBucket,
 		}, []string{nodeIDLabelName})
 

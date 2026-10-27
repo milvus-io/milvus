@@ -594,11 +594,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(0), Params.LoadAdmissionSlots.GetAsInt64())
 
 		assert.Equal(t, int64(0), Params.ArrowReaderHoleSizeLimitBytes.GetAsInt64())
-		assert.Equal(t, int64(0), Params.ArrowReaderRangeSizeLimitBytes.GetAsInt64())
 		params.Save(Params.ArrowReaderHoleSizeLimitBytes.Key, "1048576")
-		params.Save(Params.ArrowReaderRangeSizeLimitBytes.Key, "67108864")
 		assert.Equal(t, int64(1048576), Params.ArrowReaderHoleSizeLimitBytes.GetAsInt64())
-		assert.Equal(t, int64(67108864), Params.ArrowReaderRangeSizeLimitBytes.GetAsInt64())
 
 		assert.Equal(t, int32(0), Params.StorageReaderThreadPoolSize.GetAsInt32())
 		assert.Equal(t, int64(0), Params.IndexBuildReadWindowBytes.GetAsInt64())

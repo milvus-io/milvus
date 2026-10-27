@@ -111,6 +111,18 @@ PROTOC_GEN_GO_GRPC_OUTPUT := $(shell echo | $(INSTALL_PATH)/protoc-gen-go-grpc  
 INSTALL_PROTOC_GEN_GO_GRPC := $(findstring $(PROTOC_GEN_GO_GRPC_VERSION),$(PROTOC_GEN_GO_GRPC_OUTPUT))
 
 index_engine = knowhere
+ifeq ($(index_engine),cardinal)
+    WITH_GPU ?= ON
+else
+    WITH_GPU ?= OFF
+endif
+unexport WITH_GPU
+
+ifneq ($(filter ON on TRUE True true 1,$(WITH_GPU)),)
+    ifneq ($(index_engine),cardinal)
+        MILVUS_GO_BUILD_TAGS := $(MILVUS_GO_BUILD_TAGS),cuda
+    endif
+endif
 
 # Ensure git works inside containers where .git is owned by a different user.
 # Must use git config --global because git's ownership check runs before
@@ -132,13 +144,6 @@ build-go:
 		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
 		$(GOEXPERIMENT_FLAG) CGO_LDFLAGS="$(CGO_LDFLAGS)" CGO_CFLAGS="$(CGO_CFLAGS)" GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="$(SONIC_PLUGIN_SYNC_LDFLAG) -r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)' -X '$(OBJPREFIX).MilvusVersion=$(MILVUS_VERSION)'" \
 		-tags "$(MILVUS_GO_BUILD_TAGS)" -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
-
-milvus-gpu: build-cpp-gpu print-gpu-build-info build-pyudf-runtime-wheel
-	@echo "Building Milvus-gpu ..."
-	@source $(PWD)/scripts/setenv.sh && \
-		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
-		CGO_LDFLAGS="$(CGO_LDFLAGS)" CGO_CFLAGS="$(CGO_CFLAGS)" GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="$(SONIC_PLUGIN_SYNC_LDFLAG) -r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS_GPU)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)' -X '$(OBJPREFIX).MilvusVersion=$(MILVUS_VERSION)'" \
-		-tags "$(MILVUS_GO_BUILD_TAGS),cuda" -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
 
 get-build-deps:
 	@(env bash $(PWD)/scripts/install_deps.sh)
@@ -287,7 +292,9 @@ integration-test-cmek: getdeps build-cmek-fixtures
 	@(env MILVUS_CMEK_FIXTURE_DIR="$(CMEK_FIXTURE_PATH)" MILVUS_INTEGRATION_COVERAGE_APPEND="$(MILVUS_INTEGRATION_COVERAGE_APPEND)" bash $(PWD)/scripts/run_intergration_test.sh --package ./cmek "$(INSTALL_PATH)/gotestsum --")
 
 BUILD_TAGS = $(shell git describe --tags --always --dirty="-dev")
-BUILD_TAGS_GPU = ${BUILD_TAGS}-gpu
+ifneq ($(filter ON on TRUE True true 1,$(WITH_GPU)),)
+    BUILD_TAGS := $(BUILD_TAGS)-gpu
+endif
 BUILD_TIME = $(shell date -u)
 GIT_COMMIT = $(shell git rev-parse --short HEAD)
 GO_VERSION = $(shell go version)
@@ -296,12 +303,6 @@ MILVUS_VERSION := $(shell tag=$$(git describe --exact-match --tags --match 'v*' 
 
 print-build-info:
 	@echo "Build Tag: $(BUILD_TAGS)"
-	@echo "Build Time: $(BUILD_TIME)"
-	@echo "Git Commit: $(GIT_COMMIT)"
-	@echo "Go Version: $(GO_VERSION)"
-
-print-gpu-build-info:
-	@echo "Build Tag: $(BUILD_TAGS_GPU)"
 	@echo "Build Time: $(BUILD_TIME)"
 	@echo "Git Commit: $(GIT_COMMIT)"
 	@echo "Go Version: $(GO_VERSION)"
@@ -340,19 +341,15 @@ check-segcore-codes-product: generate-segcore-codes
 
 build-cpp: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp library ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
-
-build-cpp-gpu: generated-proto plan-parser-lib
-	@echo "Building Milvus cpp gpu library ... "
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -g -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -G ${WITH_GPU} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
 
 build-cpp-with-unittest: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp library with unittest ... "
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -u -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -u -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -G ${WITH_GPU} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
 
 build-cpp-with-coverage: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp library with coverage and unittest ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -u -c -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -u -c -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -G ${WITH_GPU} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
 
 check-proto-product: generated-proto
 	 @(env bash $(PWD)/scripts/check_proto_product.sh)
@@ -547,14 +544,9 @@ codecov-cpp: build-cpp-with-coverage
 # Build each component and install binary to $GOPATH/bin.
 # Package builds audit the AWS runtime even without native unit tests.
 # An explicit environment or command-line value can override this default.
-install gpu-install: export MILVUS_AUDIT_AWS_RUNTIME ?= ON
+install: export MILVUS_AUDIT_AWS_RUNTIME ?= ON
 
 install: milvus build-pyudf-runtime-wheel
-	@echo "Installing binary to './bin'"
-	@(env GOPATH=$(GOPATH) LIBRARY_PATH=$(LIBRARY_PATH) bash $(PWD)/scripts/install_milvus.sh)
-	@echo "Installation successful."
-
-gpu-install: milvus-gpu build-pyudf-runtime-wheel
 	@echo "Installing binary to './bin'"
 	@(env GOPATH=$(GOPATH) LIBRARY_PATH=$(LIBRARY_PATH) bash $(PWD)/scripts/install_milvus.sh)
 	@echo "Installation successful."

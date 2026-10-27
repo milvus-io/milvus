@@ -46,8 +46,7 @@ parquet::ArrowReaderProperties
 GetArrowReaderProperties(bool eager_prebuffer);
 
 void
-ConfigureArrowReaderProperties(int64_t hole_size_limit_bytes,
-                               int64_t range_size_limit_bytes);
+ConfigureArrowReaderProperties(int64_t hole_size_limit_bytes);
 
 std::string
 EncodeKeyMetadata(int64_t ez_id, int64_t collection_id, std::string key);

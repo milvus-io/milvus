@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-if(MILVUS_GPU_VERSION STREQUAL "ON")
+if(WITH_GPU AND NOT INDEX_ENGINE STREQUAL "cardinal")
     project(core CXX C CUDA)
 else()
     project(core CXX C)

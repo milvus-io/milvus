@@ -32,6 +32,7 @@
 #include "index/vector/RangeSearchParams.h"
 #include "index/vector/VectorDiskAnnUtils.h"
 #include "index/vector/VectorIndexValidDataUtils.h"
+#include "index/vector/VectorParamUtils.h"
 #include "index/vector/VectorReaderUtils.h"
 #include "index/vector/VectorReaderValidation.h"
 #include "index/vector/VectorTypeUtils.h"
@@ -634,6 +635,14 @@ VectorIndexReader::SearchDisk(const DatasetPtr& dataset,
         if (params.search_params_.contains(DISK_ANN_QUERY_LIST)) {
             search_config[DISK_ANN_SEARCH_LIST_SIZE] =
                 params.search_params_.at(DISK_ANN_QUERY_LIST);
+            if (!params.search_params_.contains(RADIUS) &&
+                vector_params::ParsePositiveInt32(
+                    params.search_params_.at(DISK_ANN_QUERY_LIST),
+                    DISK_ANN_QUERY_LIST) < topk) {
+                ThrowInfo(ConfigInvalid,
+                          "disk vector search list must be at least topk {}",
+                          topk);
+            }
         }
         search_config[DISK_ANN_QUERY_BEAMWIDTH] =
             static_cast<int32_t>(disk_ann_beamwidth_);

@@ -4020,9 +4020,9 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
                 vec_num, dim, query_vec.data(), query_vec_offsets);
         } else if (element_type == DataType::VECTOR_BFLOAT16) {
             std::vector<float> float_vec = generate_float_vector(vec_num, dim);
-            std::vector<bfloat16> query_vec(vec_num * dim);
+            std::vector<milvus::bfloat16> query_vec(vec_num * dim);
             for (size_t i = 0; i < vec_num * dim; ++i) {
-                query_vec[i] = bfloat16(float_vec[i]);
+                query_vec[i] = milvus::bfloat16(float_vec[i]);
             }
             ph_group_raw =
                 CreatePlaceholderGroupFromBlob<EmbListBFloat16Vector>(
@@ -4092,9 +4092,9 @@ TEST_P(SealedVectorArrayTest, SearchVectorArray) {
                 vec_num, dim, query_vec.data(), query_vec_offsets);
         } else if (element_type == DataType::VECTOR_BFLOAT16) {
             std::vector<float> float_vec = generate_float_vector(vec_num, dim);
-            std::vector<bfloat16> query_vec(vec_num * dim);
+            std::vector<milvus::bfloat16> query_vec(vec_num * dim);
             for (size_t i = 0; i < vec_num * dim; ++i) {
-                query_vec[i] = bfloat16(float_vec[i]);
+                query_vec[i] = milvus::bfloat16(float_vec[i]);
             }
             ph_group_raw =
                 CreatePlaceholderGroupFromBlob<EmbListBFloat16Vector>(

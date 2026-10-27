@@ -125,6 +125,16 @@ InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config) {
     CGO_CATCH_AND_RETURN_CSTATUS
 }
 
+CStatus
+InitS3CrtQueueSizes(uint32_t crt_queue_sizes) {
+    try {
+        milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+            .SetS3CrtQueueSizes(crt_queue_sizes);
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
 void
 SetArrowFileSystemChunkManagerEnabled(bool enable) {
     milvus::storage::SetUseArrowFileSystemChunkManager(enable);
@@ -229,17 +239,10 @@ InitArrowReaderConfig(CArrowReaderConfig c_arrow_reader_config) {
                 milvus::ConfigInvalid,
                 "arrow reader hole size limit must be non-negative");
         }
-        if (c_arrow_reader_config.range_size_limit_bytes < 0) {
-            return milvus::FailureCStatus(
-                milvus::ConfigInvalid,
-                "arrow reader range size limit must be non-negative");
-        }
         milvus::storage::ConfigureArrowReaderProperties(
-            c_arrow_reader_config.hole_size_limit_bytes,
-            c_arrow_reader_config.range_size_limit_bytes);
+            c_arrow_reader_config.hole_size_limit_bytes);
         milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
-            .SetArrowReaderConfig(c_arrow_reader_config.hole_size_limit_bytes,
-                                  c_arrow_reader_config.range_size_limit_bytes);
+            .SetArrowReaderConfig(c_arrow_reader_config.hole_size_limit_bytes);
         return milvus::SuccessCStatus();
     }
     CGO_CATCH_AND_RETURN_CSTATUS

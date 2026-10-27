@@ -145,6 +145,12 @@ func callWithTimeout(fn func(), timeoutHandler func(), timeout time.Duration) {
 	}
 }
 
+// InitS3CrtQueueSizes publishes node-local tuning for per-job storage configurations.
+func InitS3CrtQueueSizes(params *paramtable.ComponentParam) error {
+	status := C.InitS3CrtQueueSizes(C.uint32_t(params.MinioCfg.CRTQueueSizes.GetAsUint32()))
+	return HandleCStatus(&status, "InitS3CrtQueueSizes failed")
+}
+
 func InitStorageV2FileSystem(params *paramtable.ComponentParam) error {
 	if params.CommonCfg.StorageType.GetValue() == "local" {
 		return initLocalArrowFileSystem(params.LocalStorageCfg.Path.GetValue(), params)
@@ -182,6 +188,7 @@ func initLocalArrowFileSystem(path string, params *paramtable.ComponentParam) er
 		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
 		talon_max_idle_per_addr:         C.uint32_t(params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32()),
 		talon_enable_for_external_table: C.bool(params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool()),
+		crt_queue_sizes:                 C.uint32_t(params.MinioCfg.CRTQueueSizes.GetAsUint32()),
 	}
 	status := C.InitArrowFileSystem(storageConfig)
 	return HandleCStatus(&status, "InitArrowFileSystem failed")
@@ -243,6 +250,7 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
 		talon_max_idle_per_addr:         C.uint32_t(params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32()),
 		talon_enable_for_external_table: C.bool(params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool()),
+		crt_queue_sizes:                 C.uint32_t(params.MinioCfg.CRTQueueSizes.GetAsUint32()),
 	}
 
 	status := C.InitArrowFileSystem(storageConfig)
@@ -317,6 +325,7 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
 		talon_max_idle_per_addr:         C.uint32_t(params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32()),
 		talon_enable_for_external_table: C.bool(params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool()),
+		crt_queue_sizes:                 C.uint32_t(params.MinioCfg.CRTQueueSizes.GetAsUint32()),
 	}
 
 	status := C.InitRemoteChunkManagerSingleton(storageConfig)
@@ -628,8 +637,7 @@ func EffectiveLoonReaderThreadPoolSize() int32 {
 
 func InitArrowReaderConfig(params *paramtable.ComponentParam) error {
 	arrowReaderConfig := C.CArrowReaderConfig{
-		hole_size_limit_bytes:  C.int64_t(params.CommonCfg.ArrowReaderHoleSizeLimitBytes.GetAsInt64()),
-		range_size_limit_bytes: C.int64_t(params.CommonCfg.ArrowReaderRangeSizeLimitBytes.GetAsInt64()),
+		hole_size_limit_bytes: C.int64_t(params.CommonCfg.ArrowReaderHoleSizeLimitBytes.GetAsInt64()),
 	}
 	status := C.InitArrowReaderConfig(arrowReaderConfig)
 	return HandleCStatus(&status, "InitArrowReaderConfig failed")

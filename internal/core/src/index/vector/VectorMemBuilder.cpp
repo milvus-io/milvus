@@ -418,6 +418,14 @@ VectorMemBuilder<T>::InputSpec() const {
 }
 
 template <typename T>
+bool
+VectorMemBuilder<T>::TryReserveBuild(const BuildInputShape& shape) {
+    EnsureOpen("reserve");
+    return vector_builder::TryReserveBuild(
+        engine_.native_index, build_params_, shape);
+}
+
+template <typename T>
 storage::ArtifactPtr
 VectorMemBuilder<T>::Build(const VectorBuildInput<T>& input) && {
     EnsureOpen("build");
@@ -455,6 +463,8 @@ VectorMemBuilder<T>::Build(const VectorBuildInput<T>& input) && {
                                build_params_,
                                is_sparse);
             }
+            // Empty lists bypass Knowhere Build but still produce an artifact.
+            engine.native_index.Node()->ReleaseBuildReservation();
             auto offsets = std::vector<size_t>(input.embedding_offsets->begin(),
                                                input.embedding_offsets->end());
             return std::make_unique<VectorMemArtifact>(std::move(engine),
@@ -490,8 +500,11 @@ VectorMemBuilder<T>::Build(const VectorBuildInput<T>& input) && {
         }
 
         auto config = PrepareBuildConfig(build_params_);
-        const auto status = engine.native_index.Build(
-            dataset, config, engine.UseBuildPool(), prepared.options);
+        const auto status = engine.native_index.Build(dataset,
+                                                      config,
+                                                      engine.UseBuildPool(),
+                                                      prepared.options,
+                                                      input.op_context);
         if (status != knowhere::Status::success) {
             ThrowInfo(KnowhereBuildStatusToErrorCode(status),
                       "failed to build memory vector index: status {} ({})",

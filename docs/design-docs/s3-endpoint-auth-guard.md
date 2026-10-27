@@ -145,7 +145,7 @@ are cached until the library or checker changes.
 The audit defaults to the unit-test build setting. `scripts/core_build.sh`
 passes that setting explicitly on every configure, so switching from a normal
 build to the CI unit/coverage build enables it even with an existing CMake
-cache. `make install` and `make gpu-install` also default the audit to ON for
+cache. `make install` and `make install WITH_GPU=ON` also default the audit to ON for
 packaged builds. Developers can opt in or out with the
 `MILVUS_AUDIT_AWS_RUNTIME=ON/OFF` environment or make variable; direct CMake
 invocations use `-DMILVUS_AUDIT_AWS_RUNTIME=ON/OFF`.
