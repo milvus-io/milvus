@@ -15,7 +15,7 @@ This test suite validates CDC (Change Data Capture) synchronization between upst
 - Automatic CDC topology setup at test start
 - Query-based verification to ensure data consistency
 - Configurable sync timeout with progress logging
-- Comprehensive test coverage for all CDC-supported operations
+- Explicit checks for replicated state, local operations, and rejected interfaces
 
 ## Prerequisites
 
@@ -27,7 +27,10 @@ Before running the tests, ensure you have:
 
 2. **Python dependencies:**
    ```bash
-   pip install pymilvus>=2.6.0 pytest numpy
+   # From the repository root
+   uv venv -p 3.12
+   source .venv/bin/activate
+   uv pip install -r tests/python_client/requirements.txt
    ```
 
 3. **Network connectivity:**
@@ -77,8 +80,8 @@ The test suite is organized into the following categories:
 **File:** `test_resource_group.py`
 - CREATE_RESOURCE_GROUP
 - DROP_RESOURCE_GROUP
-- TRANSFER_NODE
-- TRANSFER_REPLICA
+- UPDATE_RESOURCE_GROUP (local on both roles)
+- TRANSFER_REPLICA (primary assignment and default secondary-local override)
 
 ### 3. RBAC Operations
 **File:** `test_rbac.py`
@@ -233,3 +236,66 @@ testcases/
 ├── test_alias.py               # Alias operation tests
 └── test_partition.py           # Partition operation tests
 ```
+
+## Interface contract regression
+
+The supplemental cases use the repository-pinned PyMilvus version and require a
+CDC pair, so they are tagged `CDC,L3`. Run them serially: topology changes and
+Import 2PC use session-wide state. Both clusters must use
+`common.storage.useLoonFFI=true`,
+`dataCoord.compaction.bumpSchemaVersion.enabled=true`, and
+`dataCoord.compaction.storageVersion.enabled=true` for the function-field lifecycle case. Replica
+assignment cases assume the default
+`streaming.replication.useLocalReplicaConfig=true` and one secondary replica.
+The multi-replica case additionally needs two primary query nodes; missing
+capacity is reported as a skip, not a pass.
+
+| File | Contracts checked |
+| --- | --- |
+| `test_api_mutations.py` | Add/drop scalar and struct fields; function/output-index lifecycle; rejected legacy Function calls; truncate; partial update; field/index properties; secondary write rejection; FlushAll |
+| `test_api_boundaries.py` | Eight unimplemented RPCs on both roles; snapshot local lifecycle; primary-only snapshot/manifest calls; complete snapshot restore data |
+| `test_api_control.py` | RestoreRBAC, AlterRole, restored credentials and effective permissions; phrase slop; local heartbeat/telemetry/client commands |
+| `test_api_storage.py` | Local file-resource registration/removal; external refresh/list/progress; snapshot export/state and external restore |
+| `test_import_2pc.py` | Manual import commit/abort, rejected auto-commit without visible rows, and subsequent successful imports |
+| `test_resource_group.py` | Actual create/update/drop/transfer calls, with local/replicated-state assertions |
+
+Run from `tests/python_client` with the repository virtual environment active:
+
+```bash
+pytest cdc/testcases --tags L3 -n 0 \
+  -k 'TestCDCAPIChanges or TestCDCUnsupportedAPI or TestCDCSnapshotBoundary or TestCDCControlAPI or TestCDCStorageAPI or TestCDCImport2PC or TestCDCSyncResourceGroup' \
+  --upstream-uri "$CDC_SOURCE_URI" --downstream-uri "$CDC_TARGET_URI" \
+  --source-cluster-id "$CDC_SOURCE_ID" --target-cluster-id "$CDC_TARGET_ID" \
+  --import-2pc-minio-host "$CDC_SOURCE_MINIO" \
+  --import-2pc-minio-bucket "$CDC_SOURCE_BUCKET" \
+  --import-2pc-downstream-minio-host "$CDC_TARGET_MINIO" \
+  --import-2pc-downstream-minio-bucket "$CDC_TARGET_BUCKET" \
+  --sync-timeout 120 --timeout 600
+```
+
+Import cases require `dataCoord.import.enableInReplicatingCluster=true` on both
+clusters. They verify manual commit/abort and rejection of `auto_commit=true`.
+Keep the effective `dataCoord.import.enableIDRangeMsg` value consistent across
+both clusters. For a homogeneous build supporting the UpdateImport WAL message,
+set it to `true` on both Milvus CRs for these tests. Its default `auto` gate
+resolves independently in each cluster; a secondary that enables it while the
+primary keeps the legacy path can wait indefinitely for ID ranges. Do not force
+the new WAL message on older nodes that cannot replay it.
+MinIO endpoints must be reachable by the runner and Milvus servers. Use the
+actual bucket names from each deployment's runtime configuration. Objects are
+created under unique per-test prefixes. Storage API cases remove their objects
+in finalizers; the shared Import2PCChecker retains its staged import files.
+
+Rejected requests must return the expected error and preserve collection schema,
+index definitions, partitions, and exact rows on both clusters. Unimplemented
+RPCs require gRPC `UNIMPLEMENTED`; transport errors do not count as success.
+Local control-plane tests use a subsequent replicated database operation as a
+CChannel progress barrier. This barrier does not prove progress on every data
+channel; data cases additionally wait for exact row contents.
+
+Snapshot restore and external refresh cases deliberately require complete
+business data on the replica after a successful source operation. If the server
+accepts an operation but only replicates the collection metadata, these tests
+fail. Such a failure must not be converted to a skip or relaxed to metadata-only
+checks. Collection/format checks do not establish an E2E pass, and adding these
+files does not by itself verify a recurring Jenkins selection.
