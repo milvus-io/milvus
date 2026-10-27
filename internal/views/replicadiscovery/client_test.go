@@ -2,9 +2,11 @@ package replicadiscovery
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -298,5 +300,113 @@ func TestReplicaWatchSlowReaderDoesNotBlockOwnerShutdown(t *testing.T) {
 	case <-exited:
 	case <-time.After(time.Second):
 		t.Fatal("handler return did not release the blocked sender")
+	}
+}
+
+func TestReplicaWatchRemoteBulkSubscribe(t *testing.T) {
+	_, client := newDirectoryTransport(t)
+	gate := make(chan struct{})
+	w := newWatcher(t.Context(), "p", func(ctx context.Context) (Stream, error) {
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		stream, err := client.WatchVChannelReplicas(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if _, err = stream.Recv(); err != nil {
+			return nil, err
+		}
+		return NewRemoteStream(stream, func() {}), nil
+	})
+	defer w.Close()
+	var ready atomic.Int64
+	const count = 5000
+	for i := 0; i < count; i++ {
+		_, err := w.subscribe(fmt.Sprintf("p_%s%dv0", strings.Repeat("1", 64), i), func(s Snapshot) {
+			if s.Valid {
+				ready.Add(1)
+			}
+		})
+		require.NoError(t, err)
+	}
+	close(gate)
+	require.Eventually(t, func() bool { return ready.Load() == count }, 10*time.Second, 10*time.Millisecond,
+		"all remote subscriptions must receive initial snapshots while sends are still draining")
+}
+
+func TestReplicaWatchReceivesWhileSendBlocked(t *testing.T) {
+	for _, ownerLoss := range []bool{false, true} {
+		name := "close"
+		if ownerLoss {
+			name = "owner-loss-and-resume"
+		}
+		t.Run(name, func(t *testing.T) {
+			directory, replacement := NewDirectory(), NewDirectory()
+			defer directory.Close()
+			defer replacement.Close()
+			replacement.Set("p_1v0", 9, &qviews.QueryViewVersion{})
+			entered, exited := make(chan struct{}), make(chan struct{})
+			var blocked atomic.Bool
+			var original func(*localStream, *viewpb.WatchVChannelReplicasRequest) error
+			patch := mockey.Mock((*localStream).Send).Origin(&original).To(func(s *localStream, req *viewpb.WatchVChannelReplicasRequest) error {
+				err := original(s, req)
+				if err == nil && req.GetVchannel() == "p_2v0" && blocked.CompareAndSwap(false, true) {
+					// The peer can reply before Send returns. Hold the sender until
+					// cancellation, while allowing real directory responses through.
+					close(entered)
+					defer close(exited)
+					<-s.ctx.Done()
+					return s.ctx.Err()
+				}
+				return err
+			}).Build()
+			defer patch.UnPatch()
+			var attempts atomic.Int64
+			w := newWatcher(t.Context(), "p", func(ctx context.Context) (Stream, error) {
+				d := directory
+				if attempts.Add(1) > 1 {
+					d = replacement
+				}
+				return NewLocalStream(ctx, d.Watch(), nil), nil
+			})
+			defer w.Close()
+			first, err := w.subscribe("p_1v0", func(Snapshot) {})
+			require.NoError(t, err)
+			waitReplicaSnapshot(t, first, nil)
+			second, err := w.subscribe("p_2v0", func(Snapshot) {})
+			require.NoError(t, err)
+			select {
+			case <-entered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("Send did not start")
+			}
+			waitReplicaSnapshot(t, second, nil)
+			directory.Set("p_1v0", 7, &qviews.QueryViewVersion{})
+			waitReplicaSnapshot(t, first, []int64{7})
+			if ownerLoss {
+				// Recv must observe owner loss and release Send without any
+				// external cancellation of this logical watcher.
+				directory.Close()
+				waitReplicaSnapshot(t, first, []int64{9})
+				waitReplicaSnapshot(t, second, nil)
+				require.EqualValues(t, 2, attempts.Load())
+			} else {
+				closed := make(chan struct{})
+				go func() { w.Close(); close(closed) }()
+				select {
+				case <-closed:
+				case <-time.After(5 * time.Second):
+					t.Fatal("Close did not join blocked Send and Recv")
+				}
+			}
+			select {
+			case <-exited:
+			default:
+				t.Fatal("blocked Send was not joined")
+			}
+		})
 	}
 }

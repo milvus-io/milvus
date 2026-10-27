@@ -261,104 +261,108 @@ type watchedReplica struct {
 	closing bool
 }
 
-type watchResponse struct {
-	response *viewpb.WatchVChannelReplicasResponse
-	err      error
-}
-
 func (w *watcher) runAttempt(ctx context.Context, cancel context.CancelFunc, stream Stream) error {
-	// The attempt is canceled before joining Recv. No old receiver may publish
-	// into a replacement connection's cache, or block logical Close.
-	responses := make(chan watchResponse)
+	// Both directions share state under w.mu, but never hold it during I/O.
+	// Stop either direction before joining the receiver; no old attempt may
+	// publish into a replacement connection's cache.
+	active := make(map[string]*watchedReplica)
+	stop := sync.OnceFunc(func() { cancel(); stream.Close() })
+	recvErr := make(chan error, 1)
 	received := make(chan struct{})
-	defer func() { cancel(); stream.Close(); <-received }()
+	defer func() { stop(); <-received }()
 	go func() {
 		defer close(received)
-		for {
-			resp, err := stream.Recv()
-			select {
-			case responses <- watchResponse{resp, err}:
-			case <-ctx.Done():
-				return
-			}
-			if err != nil {
-				return
-			}
-		}
+		recvErr <- w.receive(stream, active)
+		stop() // A receive failure must also release a flow-controlled Send.
 	}()
-	active := make(map[string]*watchedReplica)
-	reconcile := true
 	for {
-		if reconcile {
-			if err := w.reconcile(stream, active); err != nil {
-				return err
+		if err := w.reconcile(stream, active); err != nil {
+			select {
+			case err = <-recvErr:
+			default:
 			}
-			reconcile = false
+			return err
 		}
 		select {
+		case err := <-recvErr:
+			return err
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-w.wake:
-			reconcile = true
-		case result := <-responses:
-			if result.err != nil {
-				return result.err
-			}
-			switch response := result.response.GetResponse().(type) {
-			case *viewpb.WatchVChannelReplicasResponse_Snapshot:
-				snapshot := response.Snapshot
-				current := active[snapshot.GetVchannel()]
-				if current == nil || current.closing {
-					continue
-				}
-				w.mu.Lock()
-				if w.subscriptions[snapshot.GetVchannel()] == current.state {
-					state := current.state
-					replicas := replicasFromProto(snapshot.GetReplicas())
-					if !state.valid || !slices.Equal(state.replicas, replicas) {
-						state.replicas = replicas
-						state.valid = true
-						w.notifyLocked(state)
-					}
-				}
-				w.mu.Unlock()
-			case *viewpb.WatchVChannelReplicasResponse_UnsubscribedVchannel:
-				current := active[response.UnsubscribedVchannel]
-				if current == nil || !current.closing {
-					return status.NewInvalidRequestSeq("unexpected replica unsubscribe acknowledgement")
-				}
-				delete(active, response.UnsubscribedVchannel)
-				reconcile = true
-			default:
-				return status.NewInvalidRequestSeq("unexpected replica watch response")
-			}
 		}
 	}
 }
 
-func (w *watcher) reconcile(stream Stream, active map[string]*watchedReplica) error {
-	// Snapshot desired state under mu; never hold it during network I/O.
-	w.mu.Lock()
-	desired := make(map[string]*replicaSubscription, len(w.subscriptions))
-	for vc, state := range w.subscriptions {
-		desired[vc] = state
-	}
-	w.mu.Unlock()
-	for vc, current := range active {
-		if desired[vc] != current.state && !current.closing {
-			current.closing = true
-			if err := stream.Send(&viewpb.WatchVChannelReplicasRequest{Vchannel: vc, Unsubscribe: true}); err != nil {
-				return err
-			}
+// receive consumes responses independently of subscription sends. Callbacks
+// remain on the dispatcher, so neither Send nor handler work stalls Recv.
+func (w *watcher) receive(stream Stream, active map[string]*watchedReplica) error {
+	for {
+		response, err := stream.Recv()
+		if err != nil {
+			return err
+		}
+		if err := w.applyResponse(response, active); err != nil {
+			return err
 		}
 	}
-	for vc, state := range desired {
-		if active[vc] == nil {
-			active[vc] = &watchedReplica{state: state}
-			if err := stream.Send(&viewpb.WatchVChannelReplicasRequest{Vchannel: vc}); err != nil {
-				return err
-			}
+}
+
+func (w *watcher) applyResponse(resp *viewpb.WatchVChannelReplicasResponse, active map[string]*watchedReplica) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	switch response := resp.GetResponse().(type) {
+	case *viewpb.WatchVChannelReplicasResponse_Snapshot:
+		snapshot := response.Snapshot
+		current := active[snapshot.GetVchannel()]
+		if current == nil || current.closing || w.subscriptions[snapshot.GetVchannel()] != current.state {
+			return nil
+		}
+		state := current.state
+		replicas := replicasFromProto(snapshot.GetReplicas())
+		if !state.valid || !slices.Equal(state.replicas, replicas) {
+			state.replicas = replicas
+			state.valid = true
+			w.notifyLocked(state)
+		}
+	case *viewpb.WatchVChannelReplicasResponse_UnsubscribedVchannel:
+		current := active[response.UnsubscribedVchannel]
+		if current == nil || !current.closing {
+			return status.NewInvalidRequestSeq("unexpected replica unsubscribe acknowledgement")
+		}
+		delete(active, response.UnsubscribedVchannel)
+		w.signal()
+	default:
+		return status.NewInvalidRequestSeq("unexpected replica watch response")
+	}
+	return nil
+}
+
+func (w *watcher) reconcile(stream Stream, active map[string]*watchedReplica) error {
+	for _, request := range w.subscriptionRequests(active) {
+		if err := stream.Send(request); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func (w *watcher) subscriptionRequests(active map[string]*watchedReplica) []*viewpb.WatchVChannelReplicasRequest {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	// Register transitions before sending: a fast peer may respond before Send
+	// returns. Closing entries stay active until their unsubscribe ACK arrives.
+	var requests []*viewpb.WatchVChannelReplicasRequest
+	for vc, current := range active {
+		if w.subscriptions[vc] != current.state && !current.closing {
+			current.closing = true
+			requests = append(requests, &viewpb.WatchVChannelReplicasRequest{Vchannel: vc, Unsubscribe: true})
+		}
+	}
+	for vc, state := range w.subscriptions {
+		if active[vc] == nil {
+			active[vc] = &watchedReplica{state: state}
+			requests = append(requests, &viewpb.WatchVChannelReplicasRequest{Vchannel: vc})
+		}
+	}
+	return requests
 }

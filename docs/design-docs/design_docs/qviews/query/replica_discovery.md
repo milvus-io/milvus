@@ -84,6 +84,13 @@ last subscriber leaves. The Manager retains at most one watcher per encountered
 PChannel until HandlerClient.Close. Thus control-loop cost scales with PChannels,
 not collections, VChannels or subscribers.
 
+Within each attempt, the receive loop directly applies snapshots and unsubscribe
+acknowledgements while the recovery loop sends subscription changes. Both share
+subscription state under a short lock; neither holds it during Send or Recv.
+Transitions are registered before sending, so responses arriving before Send
+returns are safe. A flow-controlled Send cannot prevent response consumption.
+Failure in either direction closes the attempt to unblock the other direction.
+
 The callback dispatcher coalesces pending updates per handler and executes
 serially outside all state/transport locks. Handlers only update local routing
 state; they must not block on I/O or close the owning Manager/HandlerClient.
