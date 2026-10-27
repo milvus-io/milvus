@@ -16,43 +16,38 @@
 
 package dedup
 
+import "maps"
+
 // pendingTxn collects the primary keys written by the bodies of a transaction
 // that has not been committed yet. The CommitTxn decides on them, because the
 // bodies take effect at its time tick.
 type pendingTxn struct {
-	puts    map[string]PK // encoded key -> a key inserted by a body
-	deletes map[string]PK // encoded key -> a key deleted by a body
+	puts    map[PK]struct{} // keys inserted by a body
+	deletes map[PK]struct{} // keys deleted by a body
 }
 
 func newPendingTxn() *pendingTxn {
 	return &pendingTxn{
-		puts:    make(map[string]PK),
-		deletes: make(map[string]PK),
+		puts:    make(map[PK]struct{}),
+		deletes: make(map[PK]struct{}),
 	}
 }
 
 func (p *pendingTxn) recordInsert(pks []PK) {
 	for _, pk := range pks {
-		p.puts[string(pk.Encode())] = pk
+		p.puts[pk] = struct{}{}
 	}
 }
 
 func (p *pendingTxn) recordDelete(pks []PK) {
 	for _, pk := range pks {
-		p.deletes[string(pk.Encode())] = pk
+		p.deletes[pk] = struct{}{}
 	}
 }
 
 // snapshot returns a copy, so that it can be used outside pendingMu.
 func (p *pendingTxn) snapshot() *pendingTxn {
-	s := newPendingTxn()
-	for k, v := range p.puts {
-		s.puts[k] = v
-	}
-	for k, v := range p.deletes {
-		s.deletes[k] = v
-	}
-	return s
+	return &pendingTxn{puts: maps.Clone(p.puts), deletes: maps.Clone(p.deletes)}
 }
 
 // changedSince reports whether p holds a different number of puts or deletes
@@ -65,11 +60,11 @@ func (p *pendingTxn) changedSince(snapshot *pendingTxn) bool {
 // allPKs returns every key touched by the transaction, for locking.
 func (p *pendingTxn) allPKs() []PK {
 	pks := make([]PK, 0, len(p.puts)+len(p.deletes))
-	for _, put := range p.puts {
-		pks = append(pks, put)
+	for pk := range p.puts {
+		pks = append(pks, pk)
 	}
-	for k, pk := range p.deletes {
-		if _, ok := p.puts[k]; !ok {
+	for pk := range p.deletes {
+		if _, ok := p.puts[pk]; !ok {
 			pks = append(pks, pk)
 		}
 	}
@@ -79,9 +74,9 @@ func (p *pendingTxn) allPKs() []PK {
 // companionCandidates returns the inserted keys that the transaction does not delete itself.
 func (p *pendingTxn) companionCandidates() []PK {
 	pks := make([]PK, 0, len(p.puts))
-	for k, put := range p.puts {
-		if _, ok := p.deletes[k]; !ok {
-			pks = append(pks, put)
+	for pk := range p.puts {
+		if _, ok := p.deletes[pk]; !ok {
+			pks = append(pks, pk)
 		}
 	}
 	return pks

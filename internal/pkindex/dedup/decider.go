@@ -250,19 +250,30 @@ func (d *decider) existing(ctx context.Context, vchannel string, w *inflightWrit
 	return present, nil
 }
 
+// errValueCountMismatch reports an engine whose MultiGet result does not align with the keys.
+var errValueCountMismatch = errors.New("primary key index engine returned a wrong number of values")
+
 // probe returns the keys of pks that the engine holds, in the order of pks.
+// Only the presence of a key matters, so the values are not decoded.
 func (d *decider) probe(ctx context.Context, pks []PK) ([]PK, error) {
 	if len(pks) == 0 {
 		return nil, nil
 	}
-	entries, err := lookup(ctx, d.eng, pks)
+	keys := make([][]byte, len(pks))
+	for i, pk := range pks {
+		keys[i] = pk.Encode()
+	}
+	values, err := d.eng.MultiGet(ctx, keys)
 	if err != nil {
 		return nil, err
 	}
+	if len(values) != len(keys) {
+		return nil, errors.Wrapf(errValueCountMismatch, "%d values for %d keys", len(values), len(keys))
+	}
 	var present []PK
-	for i, entry := range entries {
-		if entry != nil {
-			present = append(present, pks[i])
+	for i, pk := range pks {
+		if values[i] != nil {
+			present = append(present, pk)
 		}
 	}
 	return present, nil
