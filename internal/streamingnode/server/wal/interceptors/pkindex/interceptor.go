@@ -130,6 +130,9 @@ func (i *appendInterceptor) appendCreateCollection(ctx context.Context, msg mess
 func (i *appendInterceptor) appendDropCollection(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	id, err := appendOp(ctx, msg)
 	if err != nil {
+		// TODO: a DropCollection whose append fails but is persisted leaves the
+		// index of the vchannel open until the WAL closes. The shard interceptor
+		// rejects the later writes of the vchannel, so only memory is held.
 		return id, err
 	}
 	if funcutil.IsControlChannel(msg.VChannel()) {

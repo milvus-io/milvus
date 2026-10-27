@@ -57,6 +57,9 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 	}
 
 	reg := newRegistry()
+	// TODO: GetAllCollectionSchemaInfos skips a collection whose schema the
+	// shard manager does not hold, so that collection gets no index and its
+	// writes pass through.
 	if lister, ok := param.ShardManager.(collectionSchemaLister); ok {
 		for collectionID, info := range lister.GetAllCollectionSchemaInfos() {
 			// A collection that exists can not have a schema the index rejects, and

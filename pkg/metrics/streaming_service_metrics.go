@@ -228,7 +228,7 @@ var (
 
 	StreamingNodePKIndexLockWaitDurationSeconds = newStreamingNodeHistogramVec(prometheus.HistogramOpts{
 		Name:    "pkindex_lock_wait_duration_seconds",
-		Help:    "Time one primary key index decision waited for its lock stripes",
+		Help:    "Time one primary key index decision waited for the earlier writes of the same keys",
 		Buckets: secondsBuckets,
 	})
 

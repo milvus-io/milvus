@@ -75,7 +75,7 @@ func New(eng engine.RW, cfg Config) Decider {
 // While observe has not reached it, Decide returns a *WaitError for every write
 // that registers keys, before it registers or probes anything. The caller waits
 // for it outside the WAL lock and decides again. A write that waits gets an
-// exact decision afterwards, not a companion delete for every key.
+// decision from the engine afterwards, not a companion delete for every key.
 //
 // It covers the events that the in-flight set can not cover, because writes that
 // took effect before them did not pass through this decider.

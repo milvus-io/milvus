@@ -98,7 +98,9 @@ idempotency → redo → lock → replicate → [pkindex] → timetick → shard
   BeginTxn needs the smallest one.
 - Below `lock`: the whole group runs under the one shared vchannel lock of the
   original append. An exclusive message waits for that lock, so it can not fail
-  the transaction halfway.
+  the transaction halfway. No test confirms yet that the messages of the group
+  never enter the lock interceptor again (a TODO in the interceptor); a test
+  only shows that no deadlock occurs with an exclusive DDL.
 - Below `replicate`: a replicated message passed the role check already. The
   interceptor lets it through untouched. A secondary cluster does not maintain
   the index in this step.
@@ -204,7 +206,9 @@ Decide ✓ (entry registered ●) → BeginTxn ✓ → Insert ✓ → Delete ✗
 → client ◀ the error
 ```
 
-A RollbackTxn is appended after every failed step, including a failed CommitTxn.
+For a transaction that the helper built, a RollbackTxn is appended after every
+failed step, including a failed CommitTxn. A failed extra body of a client
+transaction gets no RollbackTxn: the client ends its transaction.
 The timetick interceptor persists a rollback only while the session is still in
 flight, so a rollback can not undo a commit that took effect. When the
 transaction that the helper built ends with a transaction error, the helper
@@ -213,8 +217,9 @@ autocommit append and its retry starts a new transaction.
 
 A failed append is one of two kinds:
 
-- **Not written.** The failure is known to leave nothing in the WAL. The entry
-  is removed. These are: no TimeTick was assigned to the message, a redo, and
+- **No effect.** The failure is known to leave nothing in the WAL that takes
+  effect. Messages of the group may be in the WAL, a BeginTxn, a body or a
+  RollbackTxn, but the transaction can not commit. The entry is removed. These are: no TimeTick was assigned to the message, a redo, and
   every failure that `AppendInTxn` reports with `NotCommitted`. That is a
   failure before the CommitTxn, a failed CommitTxn followed by a persisted
   RollbackTxn, and a failed extra body of a client transaction.
@@ -348,16 +353,18 @@ keys (lock escalation) is an open item.
 `WaitUntil(T)` makes the writes of a vchannel wait until observe reaches
 TimeTick `T`. It covers events whose earlier writes did not pass through the
 in-flight set: the index is enabled for an existing collection, a secondary is
-promoted to primary, or the engine recovers from a failure. After the wait, the
-decision is exact, so an insert gets a companion delete only for the keys that
-exist. This step adds the mechanism only. Nothing calls it yet.
+promoted to primary, or the engine recovers from a failure. After the wait,
+the engine answers for every key that is not in the in-flight set, so an
+insert gets a companion delete only for the keys that exist or that an earlier
+write in the set touches. This step adds the mechanism only. Nothing calls it yet.
 
 A write of an index that is not ready waits the same way. `Config.Ready` is a
 channel that the owner of the index closes when the engine holds every record
 of the vchannel, after the install of its committed tables. Until then
 `Decide` returns a `*WaitError` with `TimeTick` 0, and `Wait` returns when the
 channel is closed. The decider has no degraded mode, where every key would
-count as present: every decision is exact. A `WaitUntil` that comes after a
+count as present: a key counts as present only when the engine holds it or an
+earlier write in the in-flight set touches it. A `WaitUntil` that comes after a
 write passed this check, while the write waits for an earlier write of the
 same key, also makes that write wait: the decider removes its registration and
 returns a `*WaitError`.
@@ -426,7 +433,9 @@ insert, so WAL record and byte counts under-report such an append.
   CreateCollection message is appended. When the index can not be created, the
   CreateCollection is rejected as unrecoverable and the collection is not
   created. A collection that the WAL serves always has its index, or has an
-  autoID primary key and needs none. At WAL open, a collection whose index can
+  autoID primary key and needs none. The exception is a collection whose schema
+  the shard manager does not hold at WAL open: it gets no index, and its writes
+  pass through (a TODO in the builder). At WAL open, a collection whose index can
   not be created makes the open panic.
 - A retry of an idempotent insert after a WAL open still finds its record: the
   CommitTxn of the group carries the idempotency key.
@@ -442,7 +451,8 @@ insert, so WAL record and byte counts under-report such an append.
 - Lock escalation for writes of many keys, and its threshold, are open.
 - An empty map is set to nil so that it does not keep its peak memory.
   Keeping the maps would make the lock of a 1000-key write about 30% faster
-  (140 µs instead of 193 µs, measured with the earlier 64-shard set).
+  (140 µs instead of 193 µs, measured with the earlier 64-shard set; the
+  current set takes 173 µs, see the cost table).
 - Rule A needs an engine write to be visible to reads as soon as it returns.
   A test must check this for the Pebble engine when observe writes it.
 - Pending writes of a transaction are not rebuilt at WAL open.
