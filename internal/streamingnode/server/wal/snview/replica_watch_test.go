@@ -36,7 +36,9 @@ func TestReplicaDirectoryLocalLifecycle(t *testing.T) {
 	watch := h.replicas.Watch()
 	defer watch.Close()
 	watch.Subscribe(first.ShardID().VChannel)
-	require.Empty(t, watch.Pop().GetReplicas(), "UpRecovering is not locally Up")
+	initial := watch.Pop()
+	require.True(t, initial.preparing, "recovery must defer the initial subscriber result")
+	require.Empty(t, initial.GetReplicas(), "UpRecovering is not locally Up")
 	version1 := first.QueryViewKey().QueryViewVersion
 	version2 := second.QueryViewKey().QueryViewVersion
 	shard.notifyRecoveringDone(version1)
@@ -83,7 +85,10 @@ func TestReplicaDirectoryRecoveryFailure(t *testing.T) {
 	require.Empty(t, watch.Pop().GetReplicas())
 	shard := h.shards[view.ShardID()]
 	shard.notifyUnrecoverable(view.QueryViewKey().QueryViewVersion)
-	require.Nil(t, watch.Pop(), "failed recovery must never advertise an Up replica")
+	snapshot := watch.Pop()
+	require.NotNil(t, snapshot, "failed recovery must unblock initial subscribers")
+	require.Empty(t, snapshot.GetReplicas())
+	require.False(t, snapshot.preparing)
 }
 
 func TestReplicaDirectoryMaximumRetirementAndRecoveryOrder(t *testing.T) {
@@ -132,5 +137,48 @@ func TestReplicaDirectoryMaximumRetirementAndRecoveryOrder(t *testing.T) {
 			require.Len(t, snapshot.Replicas, 1)
 			require.Equal(t, versions[i-1], qviews.FromProtoQueryViewVersion(snapshot.Replicas[0].MaxUpViewVersion))
 		}
+	}
+}
+
+func TestReplicaDirectoryPreparingReadyAndTerminalStates(t *testing.T) {
+	acquire := mockey.Mock((*mockResourceManager).Acquire).Return().Build()
+	defer acquire.UnPatch()
+	persist := mockey.Mock((*snShardView).consumeAndPersist).Return(true).Build()
+	defer persist.UnPatch()
+	released := make(chan struct{})
+	close(released)
+	release := mockey.Mock((*snShardView).startReleaseLocked).Return((<-chan struct{})(released)).Build()
+	defer release.UnPatch()
+	for _, terminal := range []viewpb.QueryViewState{viewpb.QueryViewState_QueryViewStateUp, viewpb.QueryViewState_QueryViewStateUnrecoverable, viewpb.QueryViewState_QueryViewStateDropped} {
+		t.Run(terminal.String(), func(t *testing.T) {
+			h := recoverSNQueryViewHandler(t.Context(), testPChannel, nil, &mockResourceManager{}, nil)
+			defer h.CloseForHandoff()
+			view := newPreparingSNView(1)
+			h.ApplyViews([]handler.ApplyView{{View: view}})
+			shard := h.shards[view.ShardID()]
+			watch := h.replicas.Watch()
+			defer watch.Close()
+			watch.Subscribe(view.ShardID().VChannel)
+			initial := watch.Pop()
+			require.True(t, initial.preparing)
+			require.Empty(t, initial.GetReplicas())
+			if terminal != viewpb.QueryViewState_QueryViewStateUnrecoverable {
+				shard.notifyReady(view.QueryViewKey().QueryViewVersion)
+				require.Nil(t, watch.Pop(), "Ready still waits for Coordinator Up")
+			}
+			if terminal == viewpb.QueryViewState_QueryViewStateUnrecoverable {
+				shard.notifyUnrecoverable(view.QueryViewKey().QueryViewVersion)
+			} else {
+				h.ApplyViews([]handler.ApplyView{{View: newSNViewWithState(1, terminal)}})
+			}
+			result := watch.Pop()
+			require.NotNil(t, result, "Up, failure and release all finish the initialization wait")
+			require.False(t, result.preparing)
+			if terminal == viewpb.QueryViewState_QueryViewStateUp {
+				require.Len(t, result.GetReplicas(), 1)
+			} else {
+				require.Empty(t, result.GetReplicas())
+			}
+		})
 	}
 }

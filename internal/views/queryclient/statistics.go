@@ -41,7 +41,8 @@ func (c *legacyClient) Statistics(ctx context.Context, collectionID int64, req *
 func (s *shardViewQueryClient) statistics(ctx context.Context, channel string, collectionID int64, req *viewpb.StatisticsRequest, barrierMVCC uint64) (int64, error) {
 	var rows atomic.Int64
 	_, err := s.executeShard(ctx, channel, &shardExecParams{
-		barrierMVCC: barrierMVCC,
+		collectionID: collectionID,
+		barrierMVCC:  barrierMVCC,
 		buildPlanReq: func(shard qviews.ShardID) *viewpb.GetQueryPlanRequest {
 			return &viewpb.GetQueryPlanRequest{
 				CollectionId: collectionID, ShardId: shard.IntoProto(),

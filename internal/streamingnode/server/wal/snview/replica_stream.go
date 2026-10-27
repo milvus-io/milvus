@@ -109,7 +109,7 @@ func (s *directoryStream) run() {
 			s.mu.Unlock()
 			if snapshot != nil {
 				for _, sub := range subs {
-					sub.deliver(qviews.ReplicaSnapshot{Valid: true, Replicas: qviews.ReplicasFromProto(snapshot.GetReplicas())})
+					sub.deliver(snapshot)
 				}
 			}
 		}
@@ -122,13 +122,19 @@ func (s *directoryStream) fail() {
 	s.mu.Unlock()
 }
 
-func (s *directorySubscription) deliver(snapshot qviews.ReplicaSnapshot) {
+func (s *directorySubscription) deliver(update *replicaDirectorySnapshot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return
 	}
-	s.snapshot = qviews.ReplicaSnapshot{Valid: snapshot.Valid, Replicas: slices.Clone(snapshot.Replicas)}
+	// Defer only the first snapshot. Existing subscribers must see retired
+	// Up replicas disappear even while replacement views are preparing.
+	if !s.snapshot.Valid && len(update.GetReplicas()) == 0 && update.preparing {
+		return
+	}
+	snapshot := qviews.ReplicaSnapshot{Valid: true, Replicas: qviews.ReplicasFromProto(update.GetReplicas())}
+	s.snapshot = qviews.ReplicaSnapshot{Valid: true, Replicas: slices.Clone(snapshot.Replicas)}
 	s.handler(snapshot)
 }
 

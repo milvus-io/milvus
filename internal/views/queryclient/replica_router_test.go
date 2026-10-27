@@ -50,35 +50,35 @@ func TestReplicaRouterWaitsForNonemptyAndRotates(t *testing.T) {
 	require.NoError(t, err)
 	require.Same(t, route, same)
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
-	_, _, err = route.nextReplica(ctx, map[qviews.Replica]bool{}, nil)
+	_, _, err = route.nextReplica(ctx, map[qviews.Replica]bool{}, nil, testCollectionLoaded)
 	cancel()
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	version := qviews.QueryViewVersion{QueryVersion: 1}
-	d.Set("p_1v0", 1, &version)
-	d.Set("p_1v0", 2, &version)
+	d.Set("p_1v0", 1, &version, false)
+	d.Set("p_1v0", 2, &version, false)
 	require.Eventually(t, func() bool { route.mu.Lock(); defer route.mu.Unlock(); return len(route.snapshot.Replicas) == 2 }, time.Second, time.Millisecond)
 	tried := make(map[qviews.Replica]bool)
-	first, _, err := route.nextReplica(t.Context(), tried, nil)
+	first, _, err := route.nextReplica(t.Context(), tried, nil, testCollectionLoaded)
 	require.NoError(t, err)
 	tried[first] = true
-	second, _, err := route.nextReplica(t.Context(), tried, nil)
+	second, _, err := route.nextReplica(t.Context(), tried, nil, testCollectionLoaded)
 	require.NoError(t, err)
 	require.NotEqual(t, first.ReplicaID, second.ReplicaID)
 	tried[second] = true
 	ctx, cancel = context.WithTimeout(t.Context(), 2*replicaRetryInterval)
-	_, _, err = route.nextReplica(ctx, tried, nil)
+	_, _, err = route.nextReplica(ctx, tried, nil, testCollectionLoaded)
 	cancel()
 	require.ErrorIs(t, err, context.DeadlineExceeded, "dead candidates must not be retried on timer")
 	version.QueryVersion++
-	d.Set("p_1v0", first.ReplicaID, &version)
+	d.Set("p_1v0", first.ReplicaID, &version, false)
 	ctx, cancel = context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
-	next, _, err := route.nextReplica(ctx, tried, nil)
+	next, _, err := route.nextReplica(ctx, tried, nil, testCollectionLoaded)
 	require.NoError(t, err)
 	require.Equal(t, first.ReplicaID, next.ReplicaID)
 	require.Equal(t, version, next.MaxUpViewVersion)
 	r.Close()
-	_, _, err = route.nextReplica(t.Context(), tried, nil)
+	_, _, err = route.nextReplica(t.Context(), tried, nil, testCollectionLoaded)
 	require.Error(t, err)
 	_, err = r.route("p_1v0")
 	require.Error(t, err)
@@ -87,15 +87,15 @@ func TestReplicaRouterWaitsForNonemptyAndRotates(t *testing.T) {
 func TestReplicaRouterTransientFailureRetriesWithoutDirectoryChange(t *testing.T) {
 	r, d := newTestReplicaRouter(t)
 	version := qviews.QueryViewVersion{QueryVersion: 1}
-	d.Set("p_1v0", 1, &version)
+	d.Set("p_1v0", 1, &version, false)
 	route, err := r.route("p_1v0")
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
-	candidate, _, err := route.nextReplica(ctx, map[qviews.Replica]bool{}, nil)
+	candidate, _, err := route.nextReplica(ctx, map[qviews.Replica]bool{}, nil, testCollectionLoaded)
 	require.NoError(t, err)
 	start := time.Now()
-	next, _, err := route.nextReplica(ctx, map[qviews.Replica]bool{candidate: false}, nil)
+	next, _, err := route.nextReplica(ctx, map[qviews.Replica]bool{candidate: false}, nil, testCollectionLoaded)
 	require.NoError(t, err)
 	require.Equal(t, candidate, next)
 	require.GreaterOrEqual(t, time.Since(start), replicaRetryInterval)
@@ -104,7 +104,7 @@ func TestReplicaRouterTransientFailureRetriesWithoutDirectoryChange(t *testing.T
 func TestShardFailoverRechecksDeadNodesAfterVersionChange(t *testing.T) {
 	r, d := newTestReplicaRouter(t)
 	version := qviews.QueryViewVersion{DataVersion: qviews.DataVersion{StreamingVersion: 1}, QueryVersion: 1}
-	d.Set("p_1v0", 1, &version)
+	d.Set("p_1v0", 1, &version, false)
 	source := &fakeQueryPlanClient{}
 	service := &fakeViewQueryServiceClient{}
 	plans, calls := 0, 0
@@ -116,7 +116,7 @@ func TestShardFailoverRechecksDeadNodesAfterVersionChange(t *testing.T) {
 		if plans == 2 {
 			next := version
 			next.QueryVersion = 3
-			d.Set("p_1v0", 1, &next)
+			d.Set("p_1v0", 1, &next, false)
 		}
 		if plans == 3 {
 			node = 12
@@ -131,7 +131,7 @@ func TestShardFailoverRechecksDeadNodesAfterVersionChange(t *testing.T) {
 		if node.(qviews.QueryNode).ID == 11 {
 			next := version
 			next.QueryVersion = 2
-			d.Set("p_1v0", 1, &next)
+			d.Set("p_1v0", 1, &next, false)
 			return nil, picker.ErrSubConnNotExist
 		}
 		return &viewpb.SearchOnViewResponse{}, nil
@@ -152,8 +152,8 @@ func TestShardFailoverTriesHealthyReplica(t *testing.T) {
 		t.Run(failure.Error(), func(t *testing.T) {
 			r, d := newTestReplicaRouter(t)
 			version := qviews.QueryViewVersion{QueryVersion: 1}
-			d.Set("p_1v0", 1, &version)
-			d.Set("p_1v0", 2, &version)
+			d.Set("p_1v0", 1, &version, false)
+			d.Set("p_1v0", 2, &version, false)
 			route, err := r.route("p_1v0")
 			require.NoError(t, err)
 			require.Eventually(t, func() bool { route.mu.Lock(); defer route.mu.Unlock(); return len(route.snapshot.Replicas) == 2 }, time.Second, time.Millisecond)
@@ -189,7 +189,7 @@ func TestShardFailoverTriesHealthyReplica(t *testing.T) {
 func TestShardReconsidersMissingSessionOnResolverUpdate(t *testing.T) {
 	r, d := newTestReplicaRouter(t)
 	version := qviews.QueryViewVersion{QueryVersion: 1}
-	d.Set("p_1v0", 1, &version)
+	d.Set("p_1v0", 1, &version, false)
 	source := &fakeQueryPlanClient{}
 	service := &fakeViewQueryServiceClient{}
 	changed := make(chan struct{})
@@ -225,18 +225,18 @@ func TestReplicaRouterRejectsInvalidSubscriptionAndCancelsBackoff(t *testing.T) 
 	require.Error(t, err)
 	require.Empty(t, r.channels)
 	version := qviews.QueryViewVersion{QueryVersion: 1}
-	d.Set("p_1v0", 1, &version)
+	d.Set("p_1v0", 1, &version, false)
 	route, err := r.route("p_1v0")
 	require.NoError(t, err)
-	candidate, _, err := route.nextReplica(t.Context(), map[qviews.Replica]bool{}, nil)
+	candidate, _, err := route.nextReplica(t.Context(), map[qviews.Replica]bool{}, nil, testCollectionLoaded)
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
-	_, _, err = route.nextReplica(ctx, map[qviews.Replica]bool{candidate: false}, nil)
+	_, _, err = route.nextReplica(ctx, map[qviews.Replica]bool{candidate: false}, nil, testCollectionLoaded)
 	cancel()
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	ctx, cancel = context.WithCancel(t.Context())
 	cancel()
-	_, _, err = route.nextReplica(ctx, map[qviews.Replica]bool{}, nil)
+	_, _, err = route.nextReplica(ctx, map[qviews.Replica]bool{}, nil, testCollectionLoaded)
 	require.ErrorIs(t, err, context.Canceled, "cached replicas cannot bypass caller cancellation")
 }
 
@@ -288,7 +288,7 @@ func TestGenericAndLegacyShareReplicaRouter(t *testing.T) {
 	defer cancel()
 	exited := make(chan error, 2)
 	for _, route := range []*replicaRoute{staged, legacy} {
-		go func() { _, _, err := route.nextReplica(ctx, nil, nil); exited <- err }()
+		go func() { _, _, err := route.nextReplica(ctx, nil, nil, testCollectionLoaded); exited <- err }()
 	}
 	client.Close()
 	for range 2 {
@@ -304,4 +304,8 @@ func TestGenericAndLegacyShareReplicaRouter(t *testing.T) {
 	require.True(t, subscriptions[1].Snapshot().Valid, "standalone Legacy retains its own subscription")
 	standalone.Close()
 	require.False(t, subscriptions[1].Snapshot().Valid)
+}
+
+func testCollectionLoaded(context.Context) (time.Time, error) {
+	return time.Now().Add(loadStateCheckInterval), nil
 }

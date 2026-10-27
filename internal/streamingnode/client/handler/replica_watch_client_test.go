@@ -108,7 +108,7 @@ func TestReplicaWatchClientRediscoversRejectedOwner(t *testing.T) {
 		}).Build()
 		directory := snview.NewReplicaDirectoryForTest()
 		defer directory.Close()
-		directory.Set("p_1v0", 9, &qviews.QueryViewVersion{})
+		directory.Set("p_1v0", 9, &qviews.QueryViewVersion{}, false)
 		mockey.Mock(streamingpb.UnimplementedStreamingNodeHandlerServiceServer.SubscribeReplicas).To(func(_ streamingpb.UnimplementedStreamingNodeHandlerServiceServer, stream streamingpb.StreamingNodeHandlerService_SubscribeReplicasServer) error {
 			create, err := contextutil.GetCreateReplicaWatchStream(stream.Context())
 			pc := types.NewPChannelInfoFromProto(create.GetPchannel())

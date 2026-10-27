@@ -9,24 +9,27 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
-// replicaDirectory belongs to one WAL owner. It contains only locally serving replicas.
+// replicaDirectory belongs to one WAL owner. It advertises only locally serving
+// replicas and tracks preparing replicas to defer subscription initialization.
 // All listener registration and publication is serialized by mu. No consumer
 // callback, network operation, or shard lock is taken under this lock.
 type replicaDirectory struct {
 	mu        sync.Mutex
 	replicas  map[string]map[int64]qviews.QueryViewVersion
+	preparing map[string]map[int64]bool
 	listeners map[string]map[*replicaWatch]struct{}
 	done      chan struct{}
 	closed    bool
 }
 
 func newReplicaDirectory() *replicaDirectory {
-	return &replicaDirectory{replicas: make(map[string]map[int64]qviews.QueryViewVersion), listeners: make(map[string]map[*replicaWatch]struct{}), done: make(chan struct{})}
+	return &replicaDirectory{replicas: make(map[string]map[int64]qviews.QueryViewVersion), preparing: make(map[string]map[int64]bool), listeners: make(map[string]map[*replicaWatch]struct{}), done: make(chan struct{})}
 }
 
-// Set publishes the maximum locally Up version; nil removes the replica.
+// Set publishes the maximum locally Up version and whether the shard has any
+// Preparing, Ready or UpRecovering views. Nil removes its serving eligibility.
 // The version is copied, never retained by pointer.
-func (d *replicaDirectory) Set(vchannel string, replicaID int64, version *qviews.QueryViewVersion) {
+func (d *replicaDirectory) Set(vchannel string, replicaID int64, version *qviews.QueryViewVersion, preparing bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.closed {
@@ -34,7 +37,20 @@ func (d *replicaDirectory) Set(vchannel string, replicaID int64, version *qviews
 	}
 	replicas := d.replicas[vchannel]
 	old, exists := replicas[replicaID]
-	if (version == nil && !exists) || (version != nil && exists && old.EQ(*version)) {
+	unchanged := (version == nil && !exists) || (version != nil && exists && old.EQ(*version))
+	oldPreparing := len(d.preparing[vchannel]) > 0
+	if preparing {
+		if d.preparing[vchannel] == nil {
+			d.preparing[vchannel] = make(map[int64]bool)
+		}
+		d.preparing[vchannel][replicaID] = true
+	} else {
+		delete(d.preparing[vchannel], replicaID)
+		if len(d.preparing[vchannel]) == 0 {
+			delete(d.preparing, vchannel)
+		}
+	}
+	if unchanged && (len(replicas) > 0 || oldPreparing == (len(d.preparing[vchannel]) > 0)) {
 		return
 	}
 	if version != nil {
@@ -65,6 +81,7 @@ func (d *replicaDirectory) Close() {
 	if !d.closed {
 		d.closed = true
 		d.replicas = nil
+		d.preparing = nil
 		d.listeners = nil
 		close(d.done)
 	}
@@ -124,8 +141,13 @@ func (w *replicaWatch) enqueueLocked(vchannel string) {
 	}
 }
 
+type replicaDirectorySnapshot struct {
+	*viewpb.VChannelReplicas
+	preparing bool
+}
+
 // Pop returns an owned latest snapshot. Read and publication share the same lock.
-func (w *replicaWatch) Pop() *viewpb.VChannelReplicas {
+func (w *replicaWatch) Pop() *replicaDirectorySnapshot {
 	d := w.directory
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -146,7 +168,7 @@ func (w *replicaWatch) Pop() *viewpb.VChannelReplicas {
 			default:
 			}
 		}
-		return result
+		return &replicaDirectorySnapshot{VChannelReplicas: result, preparing: len(d.preparing[vc]) > 0}
 	}
 	return nil
 }

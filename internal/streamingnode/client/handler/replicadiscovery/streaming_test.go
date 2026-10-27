@@ -58,6 +58,29 @@ func remoteForTest(t *testing.T) (*EventStream, *snview.ReplicaDirectoryForTest)
 	return stream, d
 }
 
+func TestReplicaWatchRemoteInitializationWait(t *testing.T) {
+	stream, d := remoteForTest(t)
+	d.Set("p_1v0", 1, nil, true)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	sub, err := stream.Subscribe(ctx, "p_1v0", func(qviews.ReplicaSnapshot) {})
+	require.NoError(t, err, "creation ACK must not wait for View preparation")
+	other, err := stream.Subscribe(ctx, "p_2v0", func(qviews.ReplicaSnapshot) {})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return other.Snapshot().Valid }, time.Second, time.Millisecond)
+	require.False(t, sub.Snapshot().Valid, "creation ACK does not initialize the replica list")
+	d.Set("p_1v0", 1, &qviews.QueryViewVersion{QueryVersion: 5}, false)
+	require.Eventually(t, func() bool { return len(sub.Snapshot().Replicas) == 1 }, time.Second, time.Millisecond)
+	require.EqualValues(t, 5, sub.Snapshot().Replicas[0].MaxUpViewVersion.QueryVersion)
+
+	d.Set("p_3v0", 1, nil, true)
+	failed, err := stream.Subscribe(ctx, "p_3v0", func(qviews.ReplicaSnapshot) {})
+	require.NoError(t, err)
+	d.Set("p_3v0", 1, nil, false)
+	require.Eventually(t, func() bool { return failed.Snapshot().Valid }, time.Second, time.Millisecond)
+	require.Empty(t, failed.Snapshot().Replicas)
+}
+
 func TestReplicaWatchReceiveProgressDuringBlockedSend(t *testing.T) {
 	stream, d := remoteForTest(t)
 	entered, exited := make(chan struct{}), make(chan struct{})
@@ -100,7 +123,7 @@ func TestReplicaWatchReceiveProgressDuringBlockedSend(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("receive waits for sender")
 	}
-	d.Set("p_1v0", 7, &qviews.QueryViewVersion{})
+	d.Set("p_1v0", 7, &qviews.QueryViewVersion{}, false)
 	require.Eventually(t, func() bool { return len(first.Snapshot().Replicas) == 1 }, time.Second, time.Millisecond)
 	d.Close()
 	select {
@@ -130,7 +153,7 @@ func TestReplicaWatchPhysicalSubscriptionLifetime(t *testing.T) {
 	second, err := stream.Subscribe(t.Context(), "p_1v0", func(qviews.ReplicaSnapshot) {})
 	require.NoError(t, err)
 	require.NotEqual(t, first.(*eventSubscription).ID(), second.(*eventSubscription).ID())
-	d.Set("p_1v0", 9, &qviews.QueryViewVersion{})
+	d.Set("p_1v0", 9, &qviews.QueryViewVersion{}, false)
 	require.Eventually(t, func() bool { return len(second.Snapshot().Replicas) == 1 }, time.Second, time.Millisecond)
 	require.False(t, first.Snapshot().Valid)
 	require.NoError(t, stream.Close())

@@ -24,6 +24,18 @@ query reference or renews serving leases. Publication follows local persistence,
 including asynchronous recovery/failure and lease-expiry transitions. Dropping
 and WAL shutdown remove eligibility. No extra persistence is introduced.
 
+The local directory also tracks whether any version is Preparing, Ready or
+UpRecovering. These states never become query candidates. When a subscription
+has not received its first snapshot, no Up replica plus at least one such pending
+version defers that snapshot until a replica becomes Up or all pending versions
+fail/retire. With neither Up nor pending versions, it immediately publishes an
+empty snapshot. Any available Up replicas take precedence over other pending
+versions. Recovery registers all pending entries before starting preparation.
+This is an event-driven delivery gate for each physical registration, not a
+blocking Subscribe call or a per-VChannel goroutine. Existing subscriptions
+still receive removal of their Up replicas immediately, including when replacement
+versions are preparing; they must not retain retired routing hints.
+
 `VChannelReplicas` carries the VChannel once and a repeated `Replica` containing
 `replica_id` and `max_up_view_version`. VChannel plus ReplicaID identifies the
 ShardID without repeating the VChannel string. It does not replicate the full
@@ -62,7 +74,8 @@ of allocation order with concurrent callers. The client never reuses an ID in
 an attempt. Multiple registrations for one VChannel are distinct subscriptions.
 
 The server sends the create acknowledgement before that subscription's initial
-full snapshot, including an authoritative empty list. Subsequent changes send
+full snapshot, subject to the initialization gate above. Creation acknowledgement
+does not certify an initialized replica list. Subsequent changes send
 full replacement snapshots. Closing a subscription first detaches its domain
 listener and removes pending snapshots, then acknowledges the close. A single
 sender orders snapshots and acknowledgements, so no snapshot for that ID follows

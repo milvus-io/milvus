@@ -81,7 +81,7 @@ func (r *replicaRouter) Close() {
 // A permanently unavailable candidate is retried only after its advertised
 // maximum or QN session directory changes. The caller additionally rejects
 // plans containing dead nodes.
-func (r *replicaRoute) nextReplica(ctx context.Context, tried map[qviews.Replica]bool, sessionChanged <-chan struct{}) (qviews.Replica, bool, error) {
+func (r *replicaRoute) nextReplica(ctx context.Context, tried map[qviews.Replica]bool, sessionChanged <-chan struct{}, checkLoad func(context.Context) (time.Time, error)) (qviews.Replica, bool, error) {
 	for {
 		select {
 		case <-sessionChanged:
@@ -113,7 +113,24 @@ func (r *replicaRoute) nextReplica(ctx context.Context, tried map[qviews.Replica
 		r.mu.Unlock()
 		var timer *time.Timer
 		var ready <-chan time.Time
-		if retry {
+		if snapshot.Valid && len(snapshot.Replicas) == 0 {
+			nextCheck, err := checkLoad(ctx)
+			if ctx.Err() != nil {
+				return qviews.Replica{}, false, ctx.Err()
+			}
+			// A replica publication/reconnect racing the probe supersedes its result.
+			r.mu.Lock()
+			stale := r.changed != changed || r.closed
+			r.mu.Unlock()
+			if stale {
+				continue
+			}
+			if err != nil {
+				return qviews.Replica{}, false, err
+			}
+			timer = time.NewTimer(time.Until(nextCheck))
+			ready = timer.C
+		} else if retry {
 			timer = time.NewTimer(replicaRetryInterval)
 			ready = timer.C
 		}

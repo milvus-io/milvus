@@ -118,6 +118,9 @@ func recoverSNQueryViewHandler(
 	for shardID, shardViews := range grouped {
 		shard := recoverSnShardView(ctx, pchannel, shardID, shardViews, catalog, resMgr)
 		shard.replicas = h.replicas
+		for _, entry := range shard.views {
+			shard.publishReplicaLocked(entry)
+		}
 		shard.leaseDuration = h.leaseDuration
 		shard.onEmpty = h.makeOnEmpty(shardID)
 		h.shards[shardID] = shard

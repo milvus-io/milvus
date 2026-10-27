@@ -2,6 +2,7 @@ package queryclient
 
 import (
 	"context"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"golang.org/x/sync/errgroup"
@@ -28,6 +29,7 @@ import (
 // in what request goes into the GetQueryPlanRequest and which Phase 2 RPC is called.
 type shardViewQueryClient struct {
 	maxRetries         int
+	loadChecks         *collectionLoadChecks
 	replicas           *replicaRouter
 	queryPlanClient    QueryPlanClient
 	queryServiceClient ViewQueryServiceClient
@@ -40,6 +42,7 @@ func newShardViewQueryClient(
 ) *shardViewQueryClient {
 	return &shardViewQueryClient{
 		maxRetries:         maxRetries,
+		loadChecks:         newCollectionLoadChecks(nil),
 		replicas:           newReplicaRouter(queryPlanClient),
 		queryPlanClient:    queryPlanClient,
 		queryServiceClient: queryServiceClient,
@@ -69,6 +72,7 @@ type ShardQueryRequest struct {
 // Returns the ShardPlan for potential requery.
 func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchRequest) (*ShardPlan, error) {
 	return s.executeShard(ctx, req.VChannel, &shardExecParams{
+		collectionID:     req.Req.CollectionID,
 		consistencyLevel: req.Req.ConsistencyLevel,
 		mvcc:             req.MVCC,
 		barrierMVCC:      req.BarrierMVCC,
@@ -105,6 +109,7 @@ func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchReque
 // Returns the ShardPlan for potential requery.
 func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest) (*ShardPlan, error) {
 	return s.executeShard(ctx, req.VChannel, &shardExecParams{
+		collectionID:     req.Req.CollectionID,
 		consistencyLevel: req.Req.ConsistencyLevel,
 		mvcc:             req.MVCC,
 		barrierMVCC:      req.BarrierMVCC,
@@ -145,6 +150,7 @@ func (s *shardViewQueryClient) Query(ctx context.Context, req *ShardQueryRequest
 // shardExecParams parameterizes the per-shard Phase 1 + Phase 2 execution.
 // Both Search and Query use the same executeShard loop, differing only in these callbacks.
 type shardExecParams struct {
+	collectionID     int64
 	consistencyLevel commonpb.ConsistencyLevel
 	mvcc             *viewpb.QueryPlanMVCC
 	barrierMVCC      uint64
@@ -171,6 +177,18 @@ func (s *shardViewQueryClient) executeShard(
 	params *shardExecParams,
 ) (*ShardPlan, error) {
 	var lastErr error
+	var loadCheck *collectionLoadCheck
+	defer func() {
+		if loadCheck != nil {
+			loadCheck.release()
+		}
+	}()
+	checkLoad := func(ctx context.Context) (time.Time, error) {
+		if loadCheck == nil {
+			loadCheck = s.loadChecks.acquire(params.collectionID)
+		}
+		return loadCheck.check(ctx)
+	}
 	route, err := s.replicas.route(vchannel)
 	if err != nil {
 		return nil, err
@@ -186,7 +204,7 @@ func (s *shardViewQueryClient) executeShard(
 			return nil, lastErr
 		}
 
-		candidate, sessionsUpdated, err := route.nextReplica(ctx, tried, sessionChanged)
+		candidate, sessionsUpdated, err := route.nextReplica(ctx, tried, sessionChanged, checkLoad)
 		if sessionsUpdated {
 			clear(deadNodes)
 			clear(tried)

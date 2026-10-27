@@ -36,7 +36,7 @@ func TestReplicaWatchServiceOwnerFence(t *testing.T) {
 	mockey.PatchConvey("owner term checked before stream acknowledgement, unavailability ends stream", t, func() {
 		d := snview.NewReplicaDirectoryForTest()
 		defer d.Close()
-		d.Set("p_1v0", 17, &qviews.QueryViewVersion{})
+		d.Set("p_1v0", 17, &qviews.QueryViewVersion{}, false)
 		unavailable := make(chan struct{})
 		mockey.Mock((*replicaManager).GetAvailableWAL).To(func(_ *replicaManager, pc types.PChannelInfo) (wal.WAL, error) {
 			if pc.Term != 7 {

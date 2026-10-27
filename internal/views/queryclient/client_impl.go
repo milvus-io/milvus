@@ -17,7 +17,9 @@ const defaultMaxRetries = 3
 
 // ViewQueryClientConfig holds configuration for the ViewQueryClient.
 type ViewQueryClientConfig struct {
-	MaxRetries int // Maximum per-shard attempts; zero defaults to 3. At least one full candidate pass is allowed.
+	// LoadInfoClient confirms current load state when an initialized directory is empty.
+	LoadInfoClient LoadInfoClient
+	MaxRetries     int // Maximum per-shard attempts; zero defaults to 3. At least one full candidate pass is allowed.
 }
 
 // viewQueryClientImpl implements ViewQueryClient.
@@ -57,6 +59,7 @@ func NewViewQueryClient(
 		cfg.MaxRetries = defaultMaxRetries
 	}
 	shardClient := newShardViewQueryClient(cfg.MaxRetries, queryPlanClient, queryServiceClient)
+	shardClient.loadChecks = newCollectionLoadChecks(cfg.LoadInfoClient)
 	return &viewQueryClientImpl{
 		shardClient:            shardClient,
 		legacyClient:           &legacyClient{shardClient: shardClient, shardResolver: shardResolver},

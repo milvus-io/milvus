@@ -67,7 +67,7 @@ func TestClientCallbacksMayCloseAndAreJoined(t *testing.T) {
 	require.NoError(t, err)
 	require.Same(t, sub.(*Subscription).state, same.(*Subscription).state)
 	same.Close()
-	d.Set("p_1v0", 3, &qviews.QueryViewVersion{})
+	d.Set("p_1v0", 3, &qviews.QueryViewVersion{}, false)
 	waitReplicaSnapshot(t, sub, []int64{3})
 	// One blocked callback must not block state updates or create more workers.
 	entered, release := make(chan struct{}), make(chan struct{})
@@ -81,7 +81,7 @@ func TestClientCallbacksMayCloseAndAreJoined(t *testing.T) {
 	require.NoError(t, err)
 	<-entered
 	for i := int64(0); i < 100; i++ {
-		d.Set("p_1v0", 4, testUpVersion(i%2 == 0))
+		d.Set("p_1v0", 4, testUpVersion(i%2 == 0), false)
 	}
 	w := sub.(*Subscription).watcher
 	w.mu.Lock()

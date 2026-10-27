@@ -30,14 +30,36 @@ owner-routed query RPCs with the streaming-owned resuming replica client.
 the discovery contract by itself. The parent Proxy must adapt this injection
 when absorbing the extraction. Query clients close their logical subscriptions
 before the shared WALAccesser shuts down; they do not close that shared owner.
+Both client constructors also require `ViewQueryClientConfig.LoadInfoClient`
+to be supplied by the Coordinator client. This is a separate dependency from
+the streaming transport; parent Proxy wiring must inject its MixCoord client.
 
 ## Planning, dispatch and retries
 
 For each resolved VChannel, the client retains one replica subscription from the
 primary StreamingNode. Its callback updates a local route snapshot and wakes
 queries without per-VChannel workers. The client round-robins explicit ReplicaIDs;
-there is no UnknownReplicaID fallback. Invalid/uninitialized and authoritative
-empty directories wait for discovery under the request context. `Client.Close`
+there is no UnknownReplicaID fallback. Invalid/uninitialized directories wait
+for a valid snapshot from the current stream attempt; a subscription creation
+ACK or an invalid callback does not initialize the list. An initialized empty
+directory triggers `GetQueryViewLoadInfo(CollectionID, version=0)` to check the
+current Coordinator load configuration. Confirmed CollectionNotLoaded is
+returned to the caller, including Proxy's AutoLoad retry when enabled. Existing
+configuration means continue waiting, even before readiness reaches 100%.
+Coordinator errors retain their original identity; transport failure does not
+imply an unloaded collection. A racing directory revision supersedes the probe
+result and is re-evaluated before returning an error.
+
+Concurrent empty-directory requests share one probe per Collection. Successful
+checks are reused for one second while requests remain active, then checked
+again even without a Watch notification: a collection can be released before SN
+ever receives its first View. Negative results are not cached for future probes.
+Each probe is bounded by the caller deadline and a one-second timeout. The
+helper owns no background goroutines and releases its entry after the last
+active waiter exits; normal queries with available replicas do not acquire it.
+AutoLoad's pre-execution EnsureCollectionReady avoids the ordinary initial
+unloaded case, but cannot prevent a subsequent concurrent release.
+`Client.Close`
 unsubscribes and wakes waiters before the underlying handler clients shut down.
 TODO: reclaim idle route subscriptions together with Proxy metadata GC.
 

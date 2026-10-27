@@ -87,7 +87,7 @@ func waitReplicaSnapshot(t *testing.T, sub wal.ReplicaWatchSubscription, want []
 
 func TestReplicaWatchReconnectAndSharedSubscriptions(t *testing.T) {
 	endpoint, client := newDirectoryTransport(t)
-	endpoint.directory.Set("p_1v0", 1, &qviews.QueryViewVersion{})
+	endpoint.directory.Set("p_1v0", 1, &qviews.QueryViewVersion{}, false)
 	w := resumableForClient(t, client)
 	first, err := w.subscribe("p_1v0", func(Snapshot) {})
 	require.NoError(t, err)
@@ -96,7 +96,7 @@ func TestReplicaWatchReconnectAndSharedSubscriptions(t *testing.T) {
 	require.Same(t, first.state, second.state)
 	waitReplicaSnapshot(t, first, []int64{1})
 	first.Close()
-	endpoint.directory.Set("p_1v0", 2, &qviews.QueryViewVersion{})
+	endpoint.directory.Set("p_1v0", 2, &qviews.QueryViewVersion{}, false)
 	waitReplicaSnapshot(t, second, []int64{1, 2})
 	empty, err := w.subscribe("p_2v0", func(Snapshot) {})
 	require.NoError(t, err)
@@ -104,7 +104,7 @@ func TestReplicaWatchReconnectAndSharedSubscriptions(t *testing.T) {
 	endpoint.mu.Lock()
 	old := endpoint.directory
 	replacement := NewDirectory()
-	replacement.Set("p_1v0", 3, &qviews.QueryViewVersion{})
+	replacement.Set("p_1v0", 3, &qviews.QueryViewVersion{}, false)
 	endpoint.directory = replacement
 	endpoint.mu.Unlock()
 	old.Close()
@@ -166,7 +166,7 @@ func TestReplicaWatchUnsubscribeWireOrdering(t *testing.T) {
 	snapshot, err := stream.Recv()
 	require.NoError(t, err)
 	require.NotNil(t, snapshot.GetSnapshot())
-	endpoint.directory.Set("p_1v0", 1, &qviews.QueryViewVersion{})
+	endpoint.directory.Set("p_1v0", 1, &qviews.QueryViewVersion{}, false)
 	require.NoError(t, stream.Send(closeRequest(1)))
 	for {
 		response, err := stream.Recv()
@@ -175,7 +175,7 @@ func TestReplicaWatchUnsubscribeWireOrdering(t *testing.T) {
 			break
 		}
 	}
-	endpoint.directory.Set("p_1v0", 2, &qviews.QueryViewVersion{})
+	endpoint.directory.Set("p_1v0", 2, &qviews.QueryViewVersion{}, false)
 	require.NoError(t, stream.Send(createRequest(2, "p_1v0")))
 	created, err = stream.Recv()
 	require.NoError(t, err)
@@ -232,7 +232,7 @@ func TestReplicaWatchInvalidatesSnapshotDuringReconnect(t *testing.T) {
 	endpoint.mu.Lock()
 	old := endpoint.directory
 	endpoint.directory = NewDirectory()
-	endpoint.directory.Set("p_1v0", 8, &qviews.QueryViewVersion{})
+	endpoint.directory.Set("p_1v0", 8, &qviews.QueryViewVersion{}, false)
 	endpoint.mu.Unlock()
 	old.Close()
 	select {
@@ -272,7 +272,7 @@ func TestReplicaWatchSlowReaderDoesNotBlockOwnerShutdown(t *testing.T) {
 	endpoint, client := newDirectoryTransport(t, grpc.StreamInterceptor(func(srv any, stream grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		return handler(srv, &snapshotBlockedStream{ServerStream: stream})
 	}))
-	endpoint.directory.Set("p_1v0", 1, &qviews.QueryViewVersion{})
+	endpoint.directory.Set("p_1v0", 1, &qviews.QueryViewVersion{}, false)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	stream, err := client.SubscribeReplicas(ctx)
@@ -362,9 +362,9 @@ func TestReplicaWatchLocalRemoteLocal(t *testing.T) {
 	local1, local2 := NewDirectory(), NewDirectory()
 	defer local1.Close()
 	defer local2.Close()
-	local1.Set("p_1v0", 1, &qviews.QueryViewVersion{})
-	endpoint.directory.Set("p_1v0", 2, &qviews.QueryViewVersion{})
-	local2.Set("p_1v0", 3, &qviews.QueryViewVersion{})
+	local1.Set("p_1v0", 1, &qviews.QueryViewVersion{}, false)
+	endpoint.directory.Set("p_1v0", 2, &qviews.QueryViewVersion{}, false)
+	local2.Set("p_1v0", 3, &qviews.QueryViewVersion{}, false)
 	var attempts atomic.Int64
 	w := newResumableStream(t.Context(), "p", func(ctx context.Context) (Stream, error) {
 		switch attempts.Add(1) {
