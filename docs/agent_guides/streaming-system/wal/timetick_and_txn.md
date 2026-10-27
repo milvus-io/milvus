@@ -210,7 +210,8 @@ share a TimeTick. A transaction is the only way.
   LastConfirmedMessageID of CommitTxn. The TxnContext is removed from the append
   result, because the client did not ask for a transaction.
 - **Metrics**: one `wal.Append` records one metric entry for the whole group, so
-  the WAL record count and byte count under-report an upgraded append.
+  the WAL record count and byte count under-report an append that becomes a
+  transaction.
 
 ## LastConfirmedMessageID
 

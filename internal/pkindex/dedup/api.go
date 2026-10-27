@@ -144,7 +144,7 @@ type DecideRequest struct {
 //
 // Appended reports that the whole group of messages is in the WAL. tt is the
 // time tick at which the write takes effect: the time tick of the CommitTxn
-// for a write that was upgraded to a transaction. It does not write the
+// for an insert appended as a transaction. It does not write the
 // engine: observe applies the appended messages. For a registered write it
 // fills in the time tick, which releases the lock of its keys; the keys stay
 // present in the in-flight set until observe applies them. For a transaction

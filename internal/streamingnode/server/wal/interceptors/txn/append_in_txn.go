@@ -69,19 +69,10 @@ func (e *inTxnError) Error() string { return e.err.Error() }
 
 func (e *inTxnError) Unwrap() error { return e.err }
 
-// InTxnResult is the outcome of AppendInTxn.
-type InTxnResult struct {
-	// Main is the appended form of main. For an autocommit main it is the copy that
-	// was written as a transaction body, carrying the time tick, the txn context
-	// and any header rewritten downstream. For a CommitTxn main it equals Commit.
-	Main message.ImmutableMessage
-	// Commit is the appended CommitTxn. Its message id and time tick are what the
-	// client of the original append should observe.
-	Commit message.ImmutableMessage
-}
-
 // AppendInTxn appends main together with extras as one transaction, so that the
-// consumer sees all of them at the time tick of the CommitTxn.
+// consumer sees all of them at the time tick of the CommitTxn. It returns the
+// appended CommitTxn: its message id and time tick are what the client of the
+// original append should observe.
 //
 // It must be called from an interceptor that sits above the timetick interceptor
 // and below the lock interceptor: every message needs its own time tick, and the
@@ -113,10 +104,10 @@ type InTxnResult struct {
 // removed from the append result of an autocommit main, so that the client of the
 // original append does not see a transaction it did not ask for.
 //
-// TODO: every redo of an upgraded insert writes one BeginTxn/RollbackTxn pair.
+// TODO: every redo of an insert appended as a transaction writes one BeginTxn/RollbackTxn pair.
 // TODO: rolled-back transactions written here are not yet covered by recovery and replication tests.
 // TODO: when the client retries a CommitTxn, extras are appended again.
-func AppendInTxn(ctx context.Context, appendOp AppendOp, main message.MutableMessage, extras []message.MutableMessage) (*InTxnResult, error) {
+func AppendInTxn(ctx context.Context, appendOp AppendOp, main message.MutableMessage, extras []message.MutableMessage) (message.ImmutableMessage, error) {
 	if err := validateInTxnInput(main, extras); err != nil {
 		return nil, markNotCommitted(err)
 	}
@@ -126,17 +117,17 @@ func AppendInTxn(ctx context.Context, appendOp AppendOp, main message.MutableMes
 		allocated = max(allocated, tt)
 		return id, err
 	}
-	var result *InTxnResult
+	var commit message.ImmutableMessage
 	var err error
 	if main.MessageType() == message.MessageTypeCommitTxn {
-		result, err = appendExtrasThenCommit(ctx, recordingAppendOp, main, extras)
+		commit, err = appendExtrasThenCommit(ctx, recordingAppendOp, main, extras)
 	} else {
-		result, err = appendAsNewTxn(ctx, recordingAppendOp, main, extras)
+		commit, err = appendAsNewTxn(ctx, recordingAppendOp, main, extras)
 	}
 	if err != nil && allocated > 0 {
 		return nil, &inTxnError{err: err, allocated: allocated}
 	}
-	return result, err
+	return commit, err
 }
 
 func validateInTxnInput(main message.MutableMessage, extras []message.MutableMessage) error {
@@ -184,7 +175,7 @@ func validateInTxnInput(main message.MutableMessage, extras []message.MutableMes
 	return nil
 }
 
-func appendAsNewTxn(ctx context.Context, appendOp AppendOp, main message.MutableMessage, extras []message.MutableMessage) (*InTxnResult, error) {
+func appendAsNewTxn(ctx context.Context, appendOp AppendOp, main message.MutableMessage, extras []message.MutableMessage) (message.ImmutableMessage, error) {
 	begin := message.NewBeginTxnMessageBuilderV2().
 		WithVChannel(main.VChannel()).
 		WithHeader(&message.BeginTxnMessageHeader{}).
@@ -212,8 +203,7 @@ func appendAsNewTxn(ctx context.Context, appendOp AppendOp, main message.Mutable
 	}
 
 	body := message.CloneMutableMessage(main).WithTxnContext(*txnCtx)
-	mainID, err := appendOp(ctx, body)
-	if err != nil {
+	if _, err := appendOp(ctx, body); err != nil {
 		rollbackTxn(ctx, appendOp, main.VChannel(), *txnCtx)
 		return nil, markNotCommitted(selfBuiltTxnError(err))
 	}
@@ -258,13 +248,10 @@ func appendAsNewTxn(ctx context.Context, appendOp AppendOp, main message.Mutable
 	if utility.GetExtraAppendResult(ctx) != nil {
 		utility.ReplaceAppendResultTxnContext(ctx, nil)
 	}
-	return &InTxnResult{
-		Main:   body.IntoImmutableMessage(mainID),
-		Commit: commit.IntoImmutableMessage(commitID),
-	}, nil
+	return commit.IntoImmutableMessage(commitID), nil
 }
 
-func appendExtrasThenCommit(ctx context.Context, appendOp AppendOp, commit message.MutableMessage, extras []message.MutableMessage) (*InTxnResult, error) {
+func appendExtrasThenCommit(ctx context.Context, appendOp AppendOp, commit message.MutableMessage, extras []message.MutableMessage) (message.ImmutableMessage, error) {
 	txnCtx := *commit.TxnContext()
 	for _, extra := range extras {
 		message.InjectTraceContext(ctx, extra)
@@ -277,8 +264,7 @@ func appendExtrasThenCommit(ctx context.Context, appendOp AppendOp, commit messa
 	if err != nil {
 		return nil, err
 	}
-	appended := commit.IntoImmutableMessage(commitID)
-	return &InTxnResult{Main: appended, Commit: appended}, nil
+	return commit.IntoImmutableMessage(commitID), nil
 }
 
 // withExtraBodies returns the CommitTxn to append after n extra bodies. The

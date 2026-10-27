@@ -10,9 +10,10 @@
 
 Add a primary key index to the WAL write path of the streaming node. When an
 insert carries a primary key that the index already holds, the interceptor
-appends the insert and a companion delete of that key as one transaction. Both
-take effect at the TimeTick of the CommitTxn, so the old row is masked and the
-new row survives. The index is per vchannel. The write path only reads it: the
+appends the insert and a companion delete of that key as one transaction:
+BeginTxn, the insert, the companion delete, CommitTxn. This document calls it
+an insert appended as a transaction. Both take effect at the TimeTick of the
+CommitTxn, so the old row is masked and the new row survives. The index is per vchannel. The write path only reads it: the
 writes reach the index when the WAL is applied to it after the append. The
 feature is off by default.
 
@@ -435,8 +436,9 @@ expects deduplication and does not get it.
 - `pkindex_decide_duration_seconds`
 - `pkindex_lock_wait_duration_seconds`
 
-One `wal.Append` metric record stands for the whole group of an upgraded
-insert, so WAL record and byte counts under-report such an append.
+One `wal.Append` metric record stands for the whole group of an insert
+appended as a transaction, so WAL record and byte counts under-report such an
+append.
 
 ## Compatibility
 
@@ -487,7 +489,8 @@ insert, so WAL record and byte counts under-report such an append.
   producer is not merged, so no delete on the WAL sets it today. The
   interceptor panics on such a delete: the index can not learn which keys it
   removes, and the producer must define that before it ships.
-- Every redo of an upgraded insert writes one BeginTxn and one RollbackTxn.
+- Every redo of an insert appended as a transaction writes one BeginTxn and
+  one RollbackTxn.
 - An index probe failure makes the append fail with a retriable error. The
   producer retries such errors without a limit, so a permanently broken engine
   stalls the writes of that collection instead of failing them.

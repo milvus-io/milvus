@@ -179,11 +179,11 @@ func (i *appendInterceptor) appendInsert(ctx context.Context, t *target, msg mes
 		intent.NotAppended()
 		return nil, status.NewInner("build the companion delete of the primary key index: %v", err)
 	}
-	// TODO: confirm with a test that the messages of the upgraded transaction go
+	// TODO: confirm with a test that the messages of the transaction built for the insert go
 	// down the chain through appendOp and never enter the lock interceptor again.
 	// TestAppendInTxnContractConcurrentWithExclusive only shows that no deadlock
 	// occurs with an exclusive DDL.
-	result, err := txn.AppendInTxn(ctx, appendOp, msg, []message.MutableMessage{companion})
+	commit, err := txn.AppendInTxn(ctx, appendOp, msg, []message.MutableMessage{companion})
 	if err != nil {
 		// A redo runs the whole chain again and makes the decision anew.
 		discard(intent, err, txn.AllocatedTimeTick(err))
@@ -191,8 +191,8 @@ func (i *appendInterceptor) appendInsert(ctx context.Context, t *target, msg mes
 	}
 	i.metrics.observeCompanionDelete(len(companionPKs))
 	// The insert and the companion delete take effect at the time tick of the CommitTxn.
-	intent.Appended(result.Commit.TimeTick())
-	return result.Commit.MessageID(), nil
+	intent.Appended(commit.TimeTick())
+	return commit.MessageID(), nil
 }
 
 func (i *appendInterceptor) appendDelete(ctx context.Context, t *target, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
@@ -267,14 +267,14 @@ func (i *appendInterceptor) appendCommit(ctx context.Context, t *target, msg mes
 		}
 		extras = append(extras, companion)
 	}
-	result, err := txn.AppendInTxn(ctx, appendOp, msg, extras)
+	commit, err := txn.AppendInTxn(ctx, appendOp, msg, extras)
 	if err != nil {
 		discard(intent, err, txn.AllocatedTimeTick(err))
 		return nil, err
 	}
 	i.metrics.observeCompanionDelete(len(companionPKs))
-	intent.Appended(result.Commit.TimeTick())
-	return result.Commit.MessageID(), nil
+	intent.Appended(commit.TimeTick())
+	return commit.MessageID(), nil
 }
 
 func (i *appendInterceptor) appendRollback(ctx context.Context, t *target, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
