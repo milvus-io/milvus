@@ -567,6 +567,9 @@ def cdc_topology_setup(request, upstream_client, downstream_client):
     target_cluster_id = request.config.getoption("--target-cluster-id")
     pchannel_num = int(request.config.getoption("--pchannel-num"))
 
+    logger.info("CDC source build: %s", upstream_client.get_server_version(detail=True))
+    logger.info("CDC target build: %s", downstream_client.get_server_version(detail=True))
+
     logger.info(f"Setting up CDC topology: {source_cluster_id} -> {target_cluster_id} (channels: {pchannel_num})...")
 
     # Create CDC replication configuration
@@ -621,3 +624,10 @@ def cdc_topology_setup(request, upstream_client, downstream_client):
 
     # Cleanup can be added here if needed
     logger.info("CDC topology teardown completed")
+
+
+@pytest.fixture
+def cdc_contract(upstream_client, downstream_client, sync_timeout, request):
+    from cdc.testcases.contract_helpers import CDCContract
+
+    return CDCContract(upstream_client, downstream_client, sync_timeout, request)
