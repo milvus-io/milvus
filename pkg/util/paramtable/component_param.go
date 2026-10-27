@@ -6366,6 +6366,10 @@ type dataCoordConfig struct {
 	// Garbage Collection
 	EnableGarbageCollection                ParamItem `refreshable:"false"`
 	GCInterval                             ParamItem `refreshable:"false"`
+	PKIndexGCInterval                      ParamItem `refreshable:"false"`
+	PKIndexGCGrace                         ParamItem `refreshable:"false"`
+	PKIndexManifestRetainVersions          ParamItem `refreshable:"false"`
+	PKIndexManifestRetainDuration          ParamItem `refreshable:"false"`
 	GCMissingTolerance                     ParamItem `refreshable:"false"`
 	GCDropTolerance                        ParamItem `refreshable:"false"`
 	GCRemoveConcurrent                     ParamItem `refreshable:"false"`
@@ -7359,6 +7363,42 @@ Startup continuously schedules bounded concurrent reads and retries failed reads
 		Export:       true,
 	}
 	p.GCInterval.Init(base.mgr)
+
+	p.PKIndexGCInterval = ParamItem{
+		Key:          "dataCoord.pkindex.gc.interval",
+		Version:      "3.1.0-beta",
+		DefaultValue: "3600",
+		Doc:          "The interval at which data coord runs garbage collection for primary key index files, unit: second.",
+		Export:       true,
+	}
+	p.PKIndexGCInterval.Init(base.mgr)
+
+	p.PKIndexGCGrace = ParamItem{
+		Key:          "dataCoord.pkindex.gc.grace",
+		Version:      "3.1.0-beta",
+		DefaultValue: "86400",
+		Doc:          "Garbage collection keeps an unreferenced primary key index file for at least this time after its last modification, unit: second. The minimum is 600 (10 minutes); a lower value disables the garbage collection of primary key index files.",
+		Export:       true,
+	}
+	p.PKIndexGCGrace.Init(base.mgr)
+
+	p.PKIndexManifestRetainVersions = ParamItem{
+		Key:          "dataCoord.pkindex.gc.manifestRetainVersions",
+		Version:      "3.1.0-beta",
+		DefaultValue: "8",
+		Doc:          "The number of the newest primary key index manifest versions that garbage collection keeps for each vchannel.",
+		Export:       true,
+	}
+	p.PKIndexManifestRetainVersions.Init(base.mgr)
+
+	p.PKIndexManifestRetainDuration = ParamItem{
+		Key:          "dataCoord.pkindex.gc.manifestRetainDuration",
+		Version:      "3.1.0-beta",
+		DefaultValue: "3600",
+		Doc:          "Garbage collection keeps every primary key index manifest version written within this time, unit: second.",
+		Export:       true,
+	}
+	p.PKIndexManifestRetainDuration.Init(base.mgr)
 
 	p.GCScanIntervalInHour = ParamItem{
 		Key:          "dataCoord.gc.scanInterval",
