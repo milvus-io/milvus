@@ -95,8 +95,8 @@ AzureBlobChunkManager::AzureBlobChunkManager(
         const bool has_federated_token = federated_token_file != nullptr &&
                                          std::strlen(federated_token_file) > 0;
         const char* client_secret_env = std::getenv("AZURE_CLIENT_SECRET");
-        const bool has_client_secret =
-            client_secret_env != nullptr && std::strlen(client_secret_env) > 0;
+        const bool has_client_secret = client_secret_env != nullptr &&
+                                       std::strlen(client_secret_env) > 0;
         if (has_federated_token) {
             Azure::Identity::WorkloadIdentityCredentialOptions options;
             const char* workload_client_id = std::getenv("AZURE_CLIENT_ID");
