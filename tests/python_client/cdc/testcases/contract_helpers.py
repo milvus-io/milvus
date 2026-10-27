@@ -28,6 +28,8 @@ def rows_equal(client, name, expected, fields=None, **kwargs):
     if fields is None:
         fields = list(expected[0]) if expected else ["id", "value", "text"]
     actual = client.query(name, filter="id >= 0", output_fields=fields, timeout=10, **kwargs)
+    # Query also returns the primary key, including an external table's virtual PK.
+    actual = [{field: row[field] for field in fields} for row in actual]
     assert sorted(actual, key=lambda r: r["id"]) == sorted(expected, key=lambda r: r["id"]), actual
 
 
@@ -66,8 +68,8 @@ class CDCContract:
         self.timeout = timeout
         self.request = request
 
-    def name(self, prefix):
-        return TestCDCSyncBase.gen_unique_name(prefix, max_length=60)
+    def name(self, prefix, max_length=60):
+        return TestCDCSyncBase.gen_unique_name(prefix, max_length=max_length)
 
     def wait(self, check, description):
         eventually(check, self.timeout, description)
@@ -119,8 +121,8 @@ class CDCContract:
         ]
 
     def assert_rows(self, name, rows, fields=None):
-        for client in (self.upstream, self.downstream):
-            self.wait(lambda: rows_equal(client, name, rows, fields), f"exact rows of {name}")
+        for role, client in (("source", self.upstream), ("target", self.downstream)):
+            self.wait(lambda: rows_equal(client, name, rows, fields), f"{role} exact rows of {name}")
 
     def control_barrier(self):
         """A subsequent database broadcast proves CChannel progress for local DDL."""
