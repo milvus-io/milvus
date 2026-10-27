@@ -48,9 +48,6 @@ import (
 
 func TestMain(m *testing.M) {
 	paramtable.Init()
-	// Element-nullable and nested Array fields are gated at the proxy until the
-	// feature is complete; the tests of this package exercise them.
-	paramtable.Get().Save(paramtable.Get().ProxyCfg.EnableElementNullAndNestedArray.Key, "true")
 	gin.SetMode(gin.TestMode)
 	streaming.SetupNoopWALForTest()
 	code := m.Run()
