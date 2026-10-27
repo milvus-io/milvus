@@ -20,11 +20,11 @@ import (
 	"net/url"
 	"os"
 	"path"
-	"strconv"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/service"
 
+	"github.com/milvus-io/milvus/internal/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
@@ -36,13 +36,13 @@ import (
 // https://host/bucket/key keep the endpoint in endpointHost and take the
 // bucket/container from the first path segment.
 func ParseForeignURI(raw string) (bucket, objectKey, endpointHost string, err error) {
-	return parseForeignURI(raw, false)
+	return snapshotio.ParseObjectURI(raw, false)
 }
 
 // ParseForeignRootURI is equivalent to ParseForeignURI, but complete URIs may
 // identify the bucket/container root without an object key.
 func ParseForeignRootURI(raw string) (bucket, objectKey, endpointHost string, err error) {
-	return parseForeignURI(raw, true)
+	return snapshotio.ParseObjectURI(raw, true)
 }
 
 // BuildInstanceSnapshotURI qualifies an instance-owned snapshot object key
@@ -225,78 +225,6 @@ func effectiveAzureSnapshotEndpoint(cfg *objectstorage.Config) (string, error) {
 	return stripDefaultEndpointPort(account+".blob."+suffix, cfg.UseSSL), nil
 }
 
-func parseForeignURI(raw string, allowEmptyObjectKey bool) (bucket, objectKey, endpointHost string, err error) {
-	if strings.TrimSpace(raw) == "" {
-		return "", "", "", merr.WrapErrParameterInvalidMsg("foreign_uri is empty")
-	}
-	if !hasURITransportScheme(raw) {
-		if err := validateRawObjectKey(raw); err != nil {
-			return "", "", "", err
-		}
-		return "", raw, "", nil
-	}
-
-	u, err := url.Parse(raw)
-	if err != nil {
-		return "", "", "", merr.WrapErrParameterInvalidMsg("invalid foreign_uri: %s", err.Error())
-	}
-	if u.User != nil {
-		return "", "", "", merr.WrapErrParameterInvalidMsg("foreign_uri must not embed credentials")
-	}
-	if u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
-		return "", "", "", merr.WrapErrParameterInvalidMsg("foreign_uri must not include query parameters or fragments")
-	}
-
-	scheme := strings.ToLower(u.Scheme)
-	if !isSupportedForeignScheme(scheme) {
-		return "", "", "", merr.WrapErrParameterInvalidMsg("foreign_uri scheme %q is not supported", scheme)
-	}
-	if u.Host == "" {
-		return "", "", "", merr.WrapErrParameterInvalidMsg("foreign_uri must include a bucket or endpoint host")
-	}
-
-	parts, err := cleanURIPathSegments(u.EscapedPath())
-	if err != nil {
-		return "", "", "", err
-	}
-
-	switch scheme {
-	case "minio", "http", "https":
-		minParts := 2
-		if allowEmptyObjectKey {
-			minParts = 1
-		}
-		if len(parts) < minParts {
-			return "", "", "", merr.WrapErrParameterInvalidMsg("foreign_uri must include bucket and object key")
-		}
-		return parts[0], joinURIPathSegments(parts[1:]), u.Host, nil
-	case "az", "azure":
-		minParts := 2
-		if allowEmptyObjectKey {
-			minParts = 1
-		}
-		if len(parts) < minParts {
-			return "", "", "", merr.WrapErrParameterInvalidMsg("foreign_uri must include container and object key")
-		}
-		return parts[0], joinURIPathSegments(parts[1:]), u.Host, nil
-	default:
-		if externalspec.IsCloudEndpointHost(u.Host) {
-			minParts := 2
-			if allowEmptyObjectKey {
-				minParts = 1
-			}
-			if len(parts) < minParts {
-				return "", "", "", merr.WrapErrParameterInvalidMsg("foreign_uri must include bucket and object key")
-			}
-			return parts[0], joinURIPathSegments(parts[1:]), u.Host, nil
-		}
-		if len(parts) == 0 && !allowEmptyObjectKey {
-			return "", "", "", merr.WrapErrParameterInvalidMsg("foreign_uri must include object key")
-		}
-		return u.Host, joinURIPathSegments(parts), "", nil
-	}
-}
-
 func DeriveForeignRoot(direction Direction, objectKey string) (string, error) {
 	objectKey = strings.Trim(objectKey, "/")
 	if direction == DirectionExport || direction == DirectionCopySource {
@@ -316,48 +244,7 @@ func DeriveForeignRoot(direction Direction, objectKey string) (string, error) {
 }
 
 func deriveSnapshotBundleAnchor(objectKey string) (root string, collectionID, snapshotID int64, ok bool) {
-	hasLeadingSlash := strings.HasPrefix(objectKey, "/")
-	segments := strings.Split(strings.Trim(objectKey, "/"), "/")
-	if len(segments) < 4 {
-		return "", 0, 0, false
-	}
-	anchor := len(segments) - 4
-	if segments[anchor] != SnapshotRootPath || segments[anchor+2] != SnapshotMetadataSubPath {
-		return "", 0, 0, false
-	}
-	collectionID, err := strconv.ParseInt(segments[anchor+1], 10, 64)
-	if err != nil || collectionID <= 0 {
-		return "", 0, 0, false
-	}
-	metadataFile := segments[anchor+3]
-	if !strings.HasSuffix(metadataFile, ".json") {
-		return "", 0, 0, false
-	}
-	snapshotID, err = strconv.ParseInt(strings.TrimSuffix(metadataFile, ".json"), 10, 64)
-	if err != nil || snapshotID <= 0 {
-		return "", 0, 0, false
-	}
-	root = joinURIPathSegments(segments[:anchor])
-	if hasLeadingSlash && root != "" {
-		root = "/" + root
-	}
-	return root, collectionID, snapshotID, true
-}
-
-func joinURIPathSegments(segments []string) string {
-	if len(segments) == 0 {
-		return ""
-	}
-	return path.Join(segments...)
-}
-
-func isSupportedForeignScheme(scheme string) bool {
-	switch scheme {
-	case "s3", "minio", "gs", "gcs", "az", "azure", "http", "https":
-		return true
-	default:
-		return false
-	}
+	return snapshotio.SnapshotBundleAnchor(objectKey)
 }
 
 // CanonicalForeignScheme returns one stable identity for supported scheme aliases.
@@ -376,32 +263,4 @@ func hasURITransportScheme(raw string) bool {
 	return strings.Contains(raw, "://")
 }
 
-func validateRawObjectKey(objectKey string) error {
-	for _, part := range strings.Split(strings.Trim(objectKey, "/"), "/") {
-		if part == "." || part == ".." {
-			return merr.WrapErrParameterInvalidMsg("foreign_uri object key must not contain path traversal")
-		}
-	}
-	return nil
-}
-
-func cleanURIPathSegments(escapedPath string) ([]string, error) {
-	unescaped, err := url.PathUnescape(escapedPath)
-	if err != nil {
-		return nil, merr.WrapErrParameterInvalidMsg("invalid foreign_uri path escape: %s", err.Error())
-	}
-	// Reject traversal on raw URI path segments before path.Join can normalize
-	// them away and silently point the snapshot reader at a different object key.
-	rawParts := strings.Split(strings.Trim(unescaped, "/"), "/")
-	parts := make([]string, 0, len(rawParts))
-	for _, part := range rawParts {
-		if part == "" {
-			continue
-		}
-		if part == "." || part == ".." {
-			return nil, merr.WrapErrParameterInvalidMsg("foreign_uri object key must not contain path traversal")
-		}
-		parts = append(parts, part)
-	}
-	return parts, nil
-}
+func validateRawObjectKey(objectKey string) error { return snapshotio.ValidateObjectKey(objectKey) }
