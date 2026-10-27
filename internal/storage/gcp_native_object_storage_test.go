@@ -32,6 +32,7 @@ import (
 	"google.golang.org/api/googleapi"
 
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	objectstore "github.com/milvus-io/milvus/pkg/v3/objectstorage/store"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -64,6 +65,42 @@ func TestGcpNativeObjectStorageCopyObjectCrossBucketUsesSeparateBuckets(t *testi
 	assert.Equal(t, "dst-bucket", gotDst.BucketName())
 	assert.Equal(t, "dst-object", gotDst.ObjectName())
 	assert.True(t, runCalled)
+}
+
+func TestGcpCopyReturnsSizeWithoutStat(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		attrs     *cstorage.ObjectAttrs
+		err       error
+		size      int64
+		sizeError bool
+	}{
+		{name: "positive", attrs: &cstorage.ObjectAttrs{Size: 42}, size: 42},
+		{name: "empty", attrs: &cstorage.ObjectAttrs{}},
+		{name: "missing", sizeError: true},
+		{name: "negative", attrs: &cstorage.ObjectAttrs{Size: -1}, sizeError: true},
+		{name: "copy failure", err: context.Canceled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			patch := mockey.Mock((*cstorage.Copier).Run).Return(tc.attrs, tc.err).Build()
+			defer patch.UnPatch()
+			stat := mockey.Mock((*GcpNativeObjectStorage).StatObject).To(func(*GcpNativeObjectStorage, context.Context, string, string) (int64, error) {
+				t.Fatal("unexpected stat")
+				return 0, nil
+			}).Build()
+			defer stat.UnPatch()
+			store := NewObjectStore(&RemoteChunkManager{client: &GcpNativeObjectStorage{client: &cstorage.Client{}}})
+			size, err := store.Copy(context.Background(), objectstore.CopyRequest{Source: objectstore.Object{Bucket: "src", Key: "object"}, Destination: objectstore.Object{Bucket: "dst", Key: "object"}})
+			require.Equal(t, tc.size, size)
+			var sizeErr *objectstore.CopySizeError
+			require.Equal(t, tc.sizeError, errors.As(err, &sizeErr))
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+			} else if !tc.sizeError {
+				require.NoError(t, err)
+			}
+		})
+	}
 }
 
 func TestGcpNativeObjectStorage(t *testing.T) {
@@ -595,7 +632,7 @@ func TestMapObjectStorageError_GCP_NewErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			gcpErr := &googleapi.Error{Code: tt.statusCode}
-			result := mapObjectStorageError("test/path", gcpErr)
+			result := objectstorage.ToMilvusIoError("test/path", gcpErr)
 			assert.True(t, errors.Is(result, tt.expectedError))
 		})
 	}
@@ -603,18 +640,18 @@ func TestMapObjectStorageError_GCP_NewErrors(t *testing.T) {
 
 func TestMapObjectStorageError_GCP_SentinelErrors(t *testing.T) {
 	t.Run("ErrObjectNotExist", func(t *testing.T) {
-		result := mapObjectStorageError("test/path", cstorage.ErrObjectNotExist)
+		result := objectstorage.ToMilvusIoError("test/path", cstorage.ErrObjectNotExist)
 		assert.ErrorIs(t, result, merr.ErrIoKeyNotFound)
 	})
 
 	t.Run("ErrBucketNotExist", func(t *testing.T) {
-		result := mapObjectStorageError("test/path", cstorage.ErrBucketNotExist)
+		result := objectstorage.ToMilvusIoError("test/path", cstorage.ErrBucketNotExist)
 		assert.ErrorIs(t, result, merr.ErrIoBucketNotFound)
 	})
 
 	t.Run("WrappedErrObjectNotExist", func(t *testing.T) {
 		wrappedErr := errors.Wrap(cstorage.ErrObjectNotExist, "get attrs failed")
-		result := mapObjectStorageError("test/path", wrappedErr)
+		result := objectstorage.ToMilvusIoError("test/path", wrappedErr)
 		assert.ErrorIs(t, result, merr.ErrIoKeyNotFound)
 	})
 
@@ -624,13 +661,13 @@ func TestMapObjectStorageError_GCP_SentinelErrors(t *testing.T) {
 
 	t.Run("MultiWrappedErrObjectNotExist", func(t *testing.T) {
 		libErr := fmt.Errorf("%w: %w", cstorage.ErrObjectNotExist, notFound)
-		result := mapObjectStorageError("test/path", libErr)
+		result := objectstorage.ToMilvusIoError("test/path", libErr)
 		assert.ErrorIs(t, result, merr.ErrIoKeyNotFound)
 	})
 
 	t.Run("MultiWrappedErrBucketNotExist", func(t *testing.T) {
 		libErr := fmt.Errorf("%w: %w", cstorage.ErrBucketNotExist, notFound)
-		result := mapObjectStorageError("test/path", libErr)
+		result := objectstorage.ToMilvusIoError("test/path", libErr)
 		assert.ErrorIs(t, result, merr.ErrIoBucketNotFound)
 	})
 }

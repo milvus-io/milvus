@@ -20,14 +20,13 @@ import (
 	"context"
 	"strings"
 
-	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
-	"github.com/milvus-io/milvus/internal/storage"
+	snapshotstorage "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func commitSnapshotExportMetadata(
 	ctx context.Context,
-	targetCM storage.ChunkManager,
+	targetCM snapshotstorage.ChunkManager,
 	targetRoot string,
 	metadataURI string,
 ) error {
@@ -48,7 +47,7 @@ func commitSnapshotExportMetadata(
 
 func cleanupSnapshotExportStagingMetadata(
 	ctx context.Context,
-	targetCM storage.ChunkManager,
+	targetCM snapshotstorage.ChunkManager,
 	targetRoot string,
 ) error {
 	if targetCM == nil || strings.TrimSpace(targetRoot) == "" {

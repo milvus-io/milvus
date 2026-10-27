@@ -22,23 +22,22 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	sharedsnapshot "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // SnapshotSource is the snapshot metadata that copy-segment code reads and unpins.
 type SnapshotSource interface {
 	// ReadSnapshotData reads the snapshot data of a named snapshot of a collection from object storage.
-	ReadSnapshotData(ctx context.Context, collectionID int64, snapshotName string, includeSegments bool) (*snapshotstorage.SnapshotData, error)
+	ReadSnapshotData(ctx context.Context, collectionID int64, snapshotName string, includeSegments bool) (*sharedsnapshot.SnapshotData, error)
 	// ReadExternalSnapshotDataWithChunkManager reads the snapshot data at an external location through the given chunk manager.
 	ReadExternalSnapshotDataWithChunkManager(
 		ctx context.Context,
-		cm storage.ChunkManager,
+		cm sharedsnapshot.ChunkManager,
 		snapshotS3Location string,
 		includeSegments bool,
-	) (*snapshotstorage.SnapshotData, error)
+	) (*sharedsnapshot.SnapshotData, error)
 	// UnpinSnapshot removes a pin ID from its snapshot and returns the collection ID, snapshot name and active pin count.
 	UnpinSnapshot(ctx context.Context, pinID int64) (int64, string, int, error)
 }

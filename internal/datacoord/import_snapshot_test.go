@@ -34,12 +34,12 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
 	"github.com/milvus-io/milvus/internal/datacoord/ddl"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
-	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	milvusstorage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	sharedsnapshot "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -71,11 +71,11 @@ func TestBroadcastSnapshotImportLargeMetadataReference(t *testing.T) {
 		t.Run(layout.String(), func(t *testing.T) {
 			snapshot := bulkimport.SnapshotImportTestData(layout)
 			metadata := &datapb.SnapshotMetadata{
-				FormatVersion: int32(snapshotstorage.SnapshotFormatVersion),
+				FormatVersion: int32(sharedsnapshot.SnapshotFormatVersion),
 				SnapshotInfo:  snapshot.SnapshotInfo, Collection: snapshot.Collection, Layout: layout,
 			}
 			metadata.SnapshotInfo.Description = strings.Repeat("x", importutilv2.SnapshotSourcePlanMaxBytes)
-			read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadMetadata).Return(metadata, nil).Build()
+			read := mockey.Mock((*sharedsnapshot.SnapshotReader).ReadMetadata).Return(metadata, nil).Build()
 			defer read.UnPatch()
 			files := []*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}}
 			// Large metadata is validated, but only its reference enters the WAL.
@@ -153,8 +153,8 @@ func TestSnapshotImportAckFailure(t *testing.T) {
 	defer handlerPatch.UnPatch()
 	allocatorPatch := mockey.Mock((*ackAllocator).AllocN).Return(int64(100), int64(110), nil).Build()
 	defer allocatorPatch.UnPatch()
-	read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadMetadata).To(
-		func(*snapshotstorage.SnapshotReader, context.Context, string) (*datapb.SnapshotMetadata, error) {
+	read := mockey.Mock((*sharedsnapshot.SnapshotReader).ReadMetadata).To(
+		func(*sharedsnapshot.SnapshotReader, context.Context, string) (*datapb.SnapshotMetadata, error) {
 			t.Fatal("ACK must not perform source I/O")
 			return nil, nil
 		}).Build()
