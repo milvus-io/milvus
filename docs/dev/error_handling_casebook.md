@@ -141,7 +141,7 @@ helper *is* the statement of intent; see §3.2 of the guide.
 
 Storage-layer corollary (a cluster of real fixes): errors from
 `ChunkObjectStorage` Read/Write/Remove/Copy are **already typed** by
-`mapObjectStorageError` (`ErrIoKeyNotFound`, `ErrIoTooManyRequests` retriable,
+`objectstorage.ToMilvusIoError` (`ErrIoKeyNotFound`, `ErrIoTooManyRequests` retriable,
 …). Wrapping them with `WrapErrIoFailedErr`/`WrapErrServiceInternalErr`
 flattens that taxonomy. Use `merr.Wrap`; originate a new Io error only for
 errors born untyped (e.g. `WalkWithObjects` historically returned raw client
@@ -311,7 +311,7 @@ via `WrapErrAsInputError(When)` at the proxy chokepoint only.
 | user's import file/data is bad | `ErrImportFailed` 2100 (Input) | `ErrImportSysFailed` | 2101 is the server-side twin — pick by blame, not by stage |
 | import broke for server-side reasons | `ErrImportSysFailed` 2101 | `ErrImportFailed` | same, reversed |
 | bad search/query expression or plan | `ErrQueryPlan` 2201 (Input) | `ErrParameterInvalid` | dedicated code, SDKs branch on it |
-| object-storage op failed (already typed by `mapObjectStorageError`) | `merr.Wrap(err, …)` | `WrapErrIoFailedErr` | Pattern 3: don't flatten Io taxonomy |
+| object-storage op failed (already typed by `objectstorage.ToMilvusIoError`) | `merr.Wrap(err, …)` | `WrapErrIoFailedErr` | Pattern 3: don't flatten Io taxonomy |
 | C++ status crossing cgo | `merr.SegcoreError(code, msg)` | hand-picked 20xx sentinel | Pattern 7: the table owns projection/retriability |
 | persisted meta / binlog is corrupt | `ErrDataIntegrity` 1009 | `ErrParameterInvalid` | stored state, not the current request |
 | function/embedding pipeline contract broke | `WrapErrFunctionFailedMsg` 2400 | `ErrServiceInternal` | that subsystem's promised code |

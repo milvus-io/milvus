@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	sharedsnapshot "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -94,10 +95,10 @@ func SnapshotImportTestSchema() *schemapb.CollectionSchema {
 	}
 }
 
-func SnapshotImportTestData(layout datapb.SnapshotLayout) *snapshotstorage.SnapshotData {
+func SnapshotImportTestData(layout datapb.SnapshotLayout) *sharedsnapshot.SnapshotData {
 	sourceSchema := proto.Clone(SnapshotImportTestSchema()).(*schemapb.CollectionSchema)
 	sourceSchema.Name = "source"
-	return &snapshotstorage.SnapshotData{
+	return &sharedsnapshot.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{Id: 2, CollectionId: 1},
 		Collection: &datapb.CollectionDescription{
 			Schema:     sourceSchema,

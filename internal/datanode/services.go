@@ -37,7 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/importv3"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
-	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
+	snapshotadapter "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	snapshotstorage "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/tracer"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -74,21 +75,8 @@ func importStateV2ToCopySegmentTaskState(state datapb.ImportTaskStateV2) datapb.
 	}
 }
 
-type chunkManagerCopier struct {
-	cm storage.ChunkManager
-}
-
-func (c chunkManagerCopier) CopyCrossBucket(ctx context.Context, srcBucket, srcObject, dstBucket, dstObject string) error {
-	if c.cm == nil {
-		return merr.WrapErrServiceInternalMsg("chunk manager is nil")
-	}
-	// Same-bucket restore can use the normal ChunkManager copy path while still
-	// satisfying the CopySegment copier interface.
-	return c.cm.Copy(ctx, srcObject, dstObject)
-}
-
 func objectstorageConfigFromIndexConfig(config *indexpb.StorageConfig) *objectstorage.Config {
-	return snapshotstorage.ObjectStorageConfigFromIndexConfig(config)
+	return snapshotadapter.ObjectStorageConfigFromIndexConfig(config)
 }
 
 func firstExternalSourceURI(sources []*datapb.CopySegmentSource) (string, error) {
@@ -617,14 +605,11 @@ func (node *DataNode) copySegment(ctx context.Context, req *datapb.CopySegmentRe
 		return merr.Status(err), nil
 	}
 
-	sourceCM := targetCM
+	var sourceCM snapshotstorage.ChunkManager = targetCM
 	sourceStorageConfig := req.GetStorageConfig()
 	targetBucket := req.GetStorageConfig().GetBucketName()
 	sourceBucket := targetBucket
-	copier, ok := targetCM.(storage.CrossBucketCopier)
-	if !ok {
-		copier = chunkManagerCopier{cm: targetCM}
-	}
+	targetStore := storage.NewObjectStore(targetCM)
 
 	if external {
 		// External copy tasks always carry a complete source root URI. Resolve it
@@ -636,7 +621,7 @@ func (node *DataNode) copySegment(ctx context.Context, req *datapb.CopySegmentRe
 			return merr.Status(err), nil
 		}
 
-		resolved, err := snapshotstorage.ResolveForeignStorage(
+		resolved, err := snapshotadapter.ResolveForeignStorage(
 			ctx,
 			objectstorageConfigFromIndexConfig(req.GetStorageConfig()),
 			snapshotstorage.DirectionCopySource,
@@ -650,7 +635,7 @@ func (node *DataNode) copySegment(ctx context.Context, req *datapb.CopySegmentRe
 
 		sourceCM = resolved.ForeignCM
 		sourceStorageConfig = resolved.ForeignStorageConfig
-		copier = resolved.Copier
+		targetStore = resolved.TargetStore
 		sourceBucket = resolved.ForeignBucket
 		targetBucket = req.GetStorageConfig().GetBucketName()
 	}
@@ -663,7 +648,7 @@ func (node *DataNode) copySegment(ctx context.Context, req *datapb.CopySegmentRe
 		sourceCM,
 		targetCM,
 		sourceStorageConfig,
-		copier,
+		targetStore,
 		sourceBucket,
 		targetBucket,
 	)

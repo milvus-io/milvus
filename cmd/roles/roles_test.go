@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	sharedstorage "github.com/milvus-io/milvus/pkg/v3/storagev2"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -78,8 +79,8 @@ func TestFilesystemMetricsRegisteredWithRolesRegistry(t *testing.T) {
 		"milvus_storage_filesystem_multi_part_upload_finished": {},
 	}
 	// Local storage shares one loon filesystem rooted at "/", whatever the
-	// configured localStorage.path is (see storagev2.LoonFSRootPath).
-	expectedDisplayKeyPrefix := "file://" + storagev2.LoonLocalFSRootPath + "#fs:"
+	// configured localStorage.path is (see sharedstorage.LoonFSRootPath).
+	expectedDisplayKeyPrefix := "file://" + sharedstorage.LoonLocalFSRootPath + "#fs:"
 	for _, family := range gathered {
 		if _, ok := missingFamilies[family.GetName()]; !ok {
 			continue

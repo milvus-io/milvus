@@ -39,6 +39,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	objectstore "github.com/milvus-io/milvus/pkg/v3/objectstorage/store"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -79,19 +80,20 @@ func TestInitRemoteChunkManager(t *testing.T) {
 	assert.NotNil(t, client)
 }
 
-func TestRemoteChunkManagerImplementsCrossBucketCopier(t *testing.T) {
-	var _ CrossBucketCopier = (*RemoteChunkManager)(nil)
+func TestServerObjectStoreInterface(t *testing.T) {
+	var _ objectstore.ObjectStore = (*chunkObjectStore)(nil)
 }
 
 type objectStorageTarget struct {
 	ObjectStorage
 }
 
-func TestRemoteChunkManagerCopyCrossBucket(t *testing.T) {
+func TestServerObjectStoreCopy(t *testing.T) {
 	ctx := context.Background()
 	copyErr := errors.New("copy failed")
 
 	t.Run("copy object across buckets successfully", func(t *testing.T) {
+		defer mockey.Mock((*objectStorageTarget).StatObject).Return(int64(7), nil).Build().UnPatch()
 		client := &objectStorageTarget{}
 		called := false
 		mockCopy := mockey.Mock((*objectStorageTarget).CopyObjectCrossBucket).To(
@@ -107,7 +109,7 @@ func TestRemoteChunkManagerCopyCrossBucket(t *testing.T) {
 		defer mockCopy.UnPatch()
 		mcm := &RemoteChunkManager{client: client}
 
-		err := mcm.CopyCrossBucket(ctx, "src-bucket", "src-object", "dst-bucket", "dst-object")
+		_, err := NewObjectStore(mcm).Copy(ctx, objectstore.CopyRequest{Source: objectstore.Object{Bucket: "src-bucket", Key: "src-object"}, Destination: objectstore.Object{Bucket: "dst-bucket", Key: "dst-object"}})
 		require.NoError(t, err)
 		assert.True(t, called)
 	})
@@ -118,7 +120,7 @@ func TestRemoteChunkManagerCopyCrossBucket(t *testing.T) {
 		defer mockCopy.UnPatch()
 		mcm := &RemoteChunkManager{client: client}
 
-		err := mcm.CopyCrossBucket(ctx, "src-bucket", "src-object", "dst-bucket", "dst-object")
+		_, err := NewObjectStore(mcm).Copy(ctx, objectstore.CopyRequest{Source: objectstore.Object{Bucket: "src-bucket", Key: "src-object"}, Destination: objectstore.Object{Bucket: "dst-bucket", Key: "dst-object"}})
 		require.ErrorIs(t, err, copyErr)
 	})
 }
@@ -1306,7 +1308,7 @@ func TestRemoteChunkManagerCanceledMetrics(t *testing.T) {
 		cancelBefore := testutil.ToFloat64(cancelCounter)
 		failBefore := testutil.ToFloat64(failCounter)
 
-		mcm.client = &canceledObjectStorage{getErr: ToMilvusIoError("test/path", context.Canceled)}
+		mcm.client = &canceledObjectStorage{getErr: objectstorage.ToMilvusIoError("test/path", context.Canceled)}
 		_, err := mcm.getObject(context.Background(), "test-bucket", "test/path", 0, 0)
 		assert.ErrorIs(t, err, context.Canceled)
 		assert.Equal(t, cancelBefore+1, testutil.ToFloat64(cancelCounter))
@@ -1319,7 +1321,7 @@ func TestRemoteChunkManagerCanceledMetrics(t *testing.T) {
 		cancelBefore := testutil.ToFloat64(cancelCounter)
 		failBefore := testutil.ToFloat64(failCounter)
 
-		mcm.client = &canceledObjectStorage{putErr: ToMilvusIoError("test/path", context.Canceled)}
+		mcm.client = &canceledObjectStorage{putErr: objectstorage.ToMilvusIoError("test/path", context.Canceled)}
 		err := mcm.putObject(context.Background(), "test-bucket", "test/path", nil, 0)
 		assert.ErrorIs(t, err, context.Canceled)
 		assert.Equal(t, cancelBefore+1, testutil.ToFloat64(cancelCounter))
@@ -1646,7 +1648,7 @@ func (*sizedObjectStorageTarget) CopyObjectCrossBucketAndGetSize(context.Context
 	panic("must be mocked")
 }
 
-func TestRemoteChunkManagerCopyCrossBucketAndGetSize(t *testing.T) {
+func TestServerObjectStoreCopySize(t *testing.T) {
 	t.Run("legacy MinIO stats source once", func(t *testing.T) {
 		var stats int
 		stat := mockey.Mock((*minio.Client).StatObject).To(func(_ *minio.Client, _ context.Context, bucket, key string, _ minio.StatObjectOptions) (minio.ObjectInfo, error) {
@@ -1659,7 +1661,8 @@ func TestRemoteChunkManagerCopyCrossBucketAndGetSize(t *testing.T) {
 		copy := mockey.Mock(minio.Core.CopyObject).Return(minio.ObjectInfo{ETag: "copied"}, nil).Build()
 		defer copy.UnPatch()
 		client := &MinioObjectStorage{Client: &minio.Client{}}
-		require.NoError(t, (&RemoteChunkManager{client: client}).CopyCrossBucket(context.Background(), "source", "src", "target", "dst"))
+		_, err := NewObjectStore(&RemoteChunkManager{client: client}).Copy(context.Background(), objectstore.CopyRequest{Source: objectstore.Object{Bucket: "source", Key: "src"}, Destination: objectstore.Object{Bucket: "target", Key: "dst"}})
+		require.NoError(t, err)
 		require.Equal(t, 1, stats)
 	})
 	// Provider routing is exercised by TestMinioObjectStorageCopyObjectCrossBucket;
@@ -1680,7 +1683,8 @@ func TestRemoteChunkManagerCopyCrossBucketAndGetSize(t *testing.T) {
 				return tc.size, tc.err
 			}).Build()
 			defer copy.UnPatch()
-			size, err := (&RemoteChunkManager{client: &sizedObjectStorageTarget{}}).CopyCrossBucketAndGetSize(context.Background(), "source", "src", "target", "dst")
+			result, err := NewObjectStore(&RemoteChunkManager{client: &sizedObjectStorageTarget{}}).Copy(context.Background(), objectstore.CopyRequest{Source: objectstore.Object{Bucket: "source", Key: "src"}, Destination: objectstore.Object{Bucket: "target", Key: "dst"}})
+			size := result
 			if tc.size < 0 {
 				require.ErrorIs(t, err, merr.ErrDataIntegrity)
 			} else {
@@ -1717,7 +1721,8 @@ func TestRemoteChunkManagerCopyCrossBucketAndGetSize(t *testing.T) {
 				return tc.size, tc.statErr
 			}).Build()
 			defer stat.UnPatch()
-			size, err := (&RemoteChunkManager{client: client}).CopyCrossBucketAndGetSize(context.Background(), "source", "src", "target", "dst")
+			result, err := NewObjectStore(&RemoteChunkManager{client: client}).Copy(context.Background(), objectstore.CopyRequest{Source: objectstore.Object{Bucket: "source", Key: "src"}, Destination: objectstore.Object{Bucket: "target", Key: "dst"}})
+			size := result
 			require.Equal(t, 1, calls)
 			if tc.copyErr != nil {
 				require.ErrorIs(t, err, tc.copyErr)
@@ -1736,6 +1741,57 @@ func TestRemoteChunkManagerCopyCrossBucketAndGetSize(t *testing.T) {
 			if err != nil {
 				require.Zero(t, size)
 			}
+			var sizeErr *objectstore.CopySizeError
+			require.Equal(t, tc.copyErr == nil && (tc.statErr != nil || tc.size < 0), errors.As(err, &sizeErr))
 		})
 	}
+}
+
+func TestServerObjectStoreLocalAndBucketRouting(t *testing.T) {
+	ctx := context.Background()
+	cm := NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	target := NewObjectStore(cm)
+	src := objectstore.Object{Key: path.Join(cm.RootPath(), "src")}
+	dst := objectstore.Object{Key: path.Join(cm.RootPath(), "dst")}
+	require.NoError(t, target.Write(ctx, src, []byte("snapshot")))
+	data, err := target.Read(ctx, src)
+	require.NoError(t, err)
+	require.Equal(t, []byte("snapshot"), data)
+	size, err := target.Copy(ctx, objectstore.CopyRequest{Source: src, Destination: dst})
+	require.NoError(t, err)
+	require.EqualValues(t, len(data), size)
+	_, err = target.Copy(ctx, objectstore.CopyRequest{Source: objectstore.Object{Bucket: "other", Key: src.Key}, Destination: dst})
+	require.ErrorIs(t, err, merr.ErrServiceUnimplemented)
+	_, err = target.Copy(ctx, objectstore.CopyRequest{Source: objectstore.Object{Key: src.Key + "missing"}, Destination: dst})
+	require.Error(t, err)
+	_, err = NewObjectStore(nil).Copy(ctx, objectstore.CopyRequest{})
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	stat := mockey.Mock((*LocalChunkManager).Size).Return(int64(0), merr.ErrIoPermissionDenied).Build()
+	_, err = target.Copy(ctx, objectstore.CopyRequest{Source: src, Destination: dst})
+	stat.UnPatch()
+	require.ErrorIs(t, err, merr.ErrIoPermissionDenied)
+	var sizeErr *objectstore.CopySizeError
+	require.ErrorAs(t, err, &sizeErr)
+	require.Contains(t, err.Error(), "copy completed but size unavailable")
+
+	remote := &RemoteChunkManager{bucketName: "original"}
+	var readBucket, writeBucket string
+	defer mockey.Mock((*RemoteChunkManager).Read).To(func(cm *RemoteChunkManager, _ context.Context, key string) ([]byte, error) {
+		readBucket = cm.bucketName
+		require.Equal(t, "key", key)
+		return []byte("remote"), nil
+	}).Build().UnPatch()
+	defer mockey.Mock((*RemoteChunkManager).Write).To(func(cm *RemoteChunkManager, _ context.Context, key string, data []byte) error {
+		writeBucket = cm.bucketName
+		require.Equal(t, "key", key)
+		require.Equal(t, []byte("remote"), data)
+		return nil
+	}).Build().UnPatch()
+	remoteStore := NewObjectStore(remote)
+	data, err = remoteStore.Read(ctx, objectstore.Object{Bucket: "read-bucket", Key: "key"})
+	require.NoError(t, err)
+	require.NoError(t, remoteStore.Write(ctx, objectstore.Object{Bucket: "write-bucket", Key: "key"}, data))
+	require.Equal(t, "read-bucket", readBucket)
+	require.Equal(t, "write-bucket", writeBucket)
+	require.Equal(t, "original", remote.bucketName)
 }

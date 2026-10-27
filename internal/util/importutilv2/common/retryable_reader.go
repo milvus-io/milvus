@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -143,7 +144,7 @@ func (r *retryableReader) reopenAtOffset() error {
 	}
 	reader, err := r.reopen(r.ctx, r.path, r.offset)
 	if err != nil {
-		return storage.ToMilvusIoError(r.path, err)
+		return objectstorage.ToMilvusIoError(r.path, err)
 	}
 	r.FileReader = reader
 	return nil
@@ -163,11 +164,11 @@ func (r *retryableReader) reopenAtOffset() error {
 // rather than with an error-classification fix.
 func (r *retryableReader) ReadAt(p []byte, off int64) (int, error) {
 	if r.FileReader == nil {
-		return 0, storage.ToMilvusIoError(r.path, io.ErrClosedPipe)
+		return 0, objectstorage.ToMilvusIoError(r.path, io.ErrClosedPipe)
 	}
 	n, err := r.FileReader.ReadAt(p, off)
 	if err != nil && !errors.Is(err, io.EOF) {
-		return n, storage.ToMilvusIoError(r.path, err)
+		return n, objectstorage.ToMilvusIoError(r.path, err)
 	}
 	return n, err
 }
@@ -178,11 +179,11 @@ func (r *retryableReader) ReadAt(p []byte, off int64) (int, error) {
 // consumer such as Arrow must not disturb it.
 func (r *retryableReader) Seek(offset int64, whence int) (int64, error) {
 	if r.FileReader == nil {
-		return 0, storage.ToMilvusIoError(r.path, io.ErrClosedPipe)
+		return 0, objectstorage.ToMilvusIoError(r.path, io.ErrClosedPipe)
 	}
 	pos, err := r.FileReader.Seek(offset, whence)
 	if err != nil {
-		return pos, storage.ToMilvusIoError(r.path, err)
+		return pos, objectstorage.ToMilvusIoError(r.path, err)
 	}
 	return pos, nil
 }
@@ -197,7 +198,7 @@ func (r *retryableReader) Read(p []byte) (int, error) {
 				return !merr.IsNonRetryableErr(reopenErr), reopenErr
 			}
 			if r.FileReader == nil {
-				err = storage.ToMilvusIoError(r.path, io.ErrClosedPipe)
+				err = objectstorage.ToMilvusIoError(r.path, io.ErrClosedPipe)
 				return false, err
 			}
 		}
@@ -213,7 +214,7 @@ func (r *retryableReader) Read(p []byte) (int, error) {
 		}
 		if errors.Is(err, io.EOF) {
 			if size, ok := r.objectSize(); ok && r.offset < size && r.reopen != nil {
-				err = storage.ToMilvusIoError(r.path, io.ErrUnexpectedEOF)
+				err = objectstorage.ToMilvusIoError(r.path, io.ErrUnexpectedEOF)
 				mlog.Warn(r.ctx, "retryable reader got premature EOF",
 					mlog.String("path", r.path),
 					mlog.Int64("offset", r.offset),
@@ -234,7 +235,7 @@ func (r *retryableReader) Read(p []byte) (int, error) {
 			mlog.String("path", r.path),
 			mlog.Err(err),
 		)
-		err = storage.ToMilvusIoError(r.path, err)
+		err = objectstorage.ToMilvusIoError(r.path, err)
 		// Denylist check - don't retry permanent/validation errors
 		if merr.IsNonRetryableErr(err) {
 			return false, err

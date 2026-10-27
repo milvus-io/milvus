@@ -30,8 +30,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	objectstore "github.com/milvus-io/milvus/pkg/v3/objectstorage/store"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	snapshotstorage "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -52,10 +54,10 @@ type CopySegmentTask struct {
 	req            *datapb.CopySegmentRequest          // Original request with source/target pairs
 	manager        TaskManager                         // Task manager for state updates and coordination
 
-	sourceCM            storage.ChunkManager
+	sourceCM            snapshotstorage.ChunkManager
 	targetCM            storage.ChunkManager
 	sourceStorageConfig *indexpb.StorageConfig
-	copier              storage.CrossBucketCopier
+	targetStore         objectstore.ObjectStore
 	sourceBucket        string
 	targetBucket        string
 	copyPermits         chan struct{}
@@ -69,10 +71,10 @@ func NewCopySegmentTask(
 	copyPermits chan struct{},
 	req *datapb.CopySegmentRequest,
 	manager TaskManager,
-	sourceCM storage.ChunkManager,
+	sourceCM snapshotstorage.ChunkManager,
 	targetCM storage.ChunkManager,
 	sourceStorageConfig *indexpb.StorageConfig,
-	copier storage.CrossBucketCopier,
+	targetStore objectstore.ObjectStore,
 	sourceBucket string,
 	targetBucket string,
 ) Task {
@@ -129,7 +131,7 @@ func NewCopySegmentTask(
 		sourceCM:            sourceCM,
 		targetCM:            targetCM,
 		sourceStorageConfig: sourceStorageConfig,
-		copier:              copier,
+		targetStore:         targetStore,
 		copyPermits:         copyPermits,
 		sourceBucket:        sourceBucket,
 		targetBucket:        targetBucket,
@@ -221,7 +223,7 @@ func (t *CopySegmentTask) Clone() Task {
 		sourceCM:            t.sourceCM,
 		targetCM:            t.targetCM,
 		sourceStorageConfig: t.sourceStorageConfig,
-		copier:              t.copier,
+		targetStore:         t.targetStore,
 		copyPermits:         t.copyPermits,
 		sourceBucket:        t.sourceBucket,
 		targetBucket:        t.targetBucket,
@@ -340,7 +342,7 @@ func (t *CopySegmentTask) copySegments() error {
 		if err != nil {
 			return err
 		}
-		copied, err := copySegmentFiles(ctx, t.copyPermits, items, t.copier, t.sourceBucket, t.targetBucket, WrapLogFields(t))
+		copied, err := copySegmentFiles(ctx, t.copyPermits, items, t.targetStore, t.sourceBucket, t.targetBucket, WrapLogFields(t))
 		createdFiles[i] = copied // Retain confirmed writes, including cancellation races.
 		if err != nil {
 			return err
