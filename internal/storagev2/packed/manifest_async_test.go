@@ -549,11 +549,6 @@ func TestManifestIndexesAfterUpdatesUsesFieldID(t *testing.T) {
 func TestAsyncManifestIndexMarkerResult(t *testing.T) {
 	for _, scenario := range []string{"drop_one", "drop_all", "absent_drop", "drop_and_add", "stale_drop_and_add", "version_drift", "append_columns", "append_segment", "append_and_add", "append_empty_name", "append_name_collision", "append_shared_field", "add_column_group", "column_group_entry", "delta_only", "empty_updates"} {
 		t.Run(scenario, func(t *testing.T) {
-			switch scenario {
-			case "append_columns", "append_segment", "append_and_add", "append_empty_name", "append_name_collision", "append_shared_field":
-				// TODO: Re-enable after upgrading milvus-storage to invalidate indexes by FieldID.
-				t.Skip("requires the milvus-storage FieldID-based index invalidation fix")
-			}
 			cfg := manifestTestStorageConfig(t)
 			io := NewManifestIOContext(1)
 			defer io.Close()
