@@ -403,7 +403,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestRefreshMilvusTableManifestReuse
 	output, err := writer.Close()
 	s.Require().NoError(err)
 	defer output.Destroy()
-	sourceManifest, err := packed.CommitManifestUpdates(basePath, packed.ManifestEarliest, storageConfig, &packed.ManifestUpdates{
+	sourceManifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(basePath, packed.ManifestEarliest), storageConfig, &packed.ManifestUpdates{
 		NewFiles: output,
 	})
 	s.Require().NoError(err)
@@ -442,7 +442,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestRefreshMilvusTableManifestReuse
 	snapshotOutput, err := snapshotWriter.Close()
 	s.Require().NoError(err)
 	defer snapshotOutput.Destroy()
-	snapshotManifest, err := packed.CommitManifestUpdates(snapshotBase, packed.ManifestEarliest, storageConfig,
+	snapshotManifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(snapshotBase, packed.ManifestEarliest), storageConfig,
 		&packed.ManifestUpdates{NewFiles: snapshotOutput})
 	s.Require().NoError(err)
 	snapshotManifest, err = packed.AddStatsToManifest(snapshotManifest, storageConfig, []packed.StatEntry{
