@@ -171,8 +171,10 @@ func benchmarkMixBloomSizing(b *testing.B, version, rows int64, inputs, deletePe
 		{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64},
 		{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
 		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-		{FieldID: 101, Name: "vector", DataType: schemapb.DataType_BinaryVector,
-			TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "64"}}},
+		{
+			FieldID: 101, Name: "vector", DataType: schemapb.DataType_BinaryVector,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "64"}},
+		},
 	}}
 	varchar := os.Getenv("BF_BENCH_VARCHAR") == "1"
 	if varchar {
@@ -312,8 +314,10 @@ func prepareBloomBenchInputs(b *testing.B, schema *schemapb.CollectionSchema, io
 					primaryKey = storage.NewVarCharPrimaryKey(value)
 					fieldPK = value
 				}
-				values[j] = &storage.Value{PK: primaryKey, Timestamp: int64(insertTS),
-					Value: map[int64]interface{}{common.RowIDField: pk, common.TimeStampField: int64(insertTS), 100: fieldPK, 101: vector[:]}}
+				values[j] = &storage.Value{
+					PK: primaryKey, Timestamp: int64(insertTS),
+					Value: map[int64]interface{}{common.RowIDField: pk, common.TimeStampField: int64(insertTS), 100: fieldPK, 101: vector[:]},
+				}
 			}
 			record, err := storage.ValueSerializer(values, schema)
 			require.NoError(b, err)

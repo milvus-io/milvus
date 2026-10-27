@@ -229,6 +229,7 @@ func (s *BloomSizingReadbackSuite) runBloomReadback(varchar bool) {
 	reload()
 	check(preDeleted + 64)
 }
+
 func TestBloomSizingReadback(t *testing.T) {
 	for _, version := range []int64{2, 3} {
 		t.Run(fmt.Sprintf("V%d", version), func(t *testing.T) {

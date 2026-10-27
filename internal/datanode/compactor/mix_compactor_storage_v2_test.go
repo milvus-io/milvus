@@ -291,7 +291,6 @@ func (s *MixCompactionTaskStorageV2Suite) testCompactSizesBloomFilterByOutputRow
 			s.True(stats.BF.Test(key[:]), "missing retained PK %d", segID+i*3)
 		}
 	}
-
 }
 
 func (s *MixCompactionTaskStorageV2Suite) TestCompactSizesBloomFilterPerOutputSegment() {
