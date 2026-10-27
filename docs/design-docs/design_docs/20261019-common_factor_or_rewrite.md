@@ -4,7 +4,7 @@
 - **Author(s):** @pardeep-singh
 - **Status:** Draft
 - **Component:** Proxy (`internal/parser/planparserv2/rewriter`)
-- **Related Issues:** #54388 (EX01)
+- **Related Issues:** #54388 (EX01), #54692 (AND-of-ORs direction)
 
 ## Summary
 
@@ -174,6 +174,86 @@ is TRUE. So the rewrite is also safe under an outer `NOT` and as an operand
 of any larger expression. The tests check this exhaustively instead of
 assuming it (see Testing). Duplicate factors inside a branch are idempotent
 (`A ∧ A = A`), so counting them once is sound.
+
+## AND of OR clauses (#54692)
+
+Issue #54692 reports that the CNF filter
+`(C OR A0) AND (C OR A1) AND ... AND (C OR A7)` is up to 2.3x slower than the
+equivalent `C OR (A0 AND ... AND A7)`: without a rule for it, the shared `C`
+is evaluated once per clause. The dual rule runs in `mergeAndParts`, after the
+AND same-column merges and after dropping constant `true` operands (a constant
+`false` operand decides the AND):
+
+```text
+(C OR A0) AND (C OR A1) AND X  →  (C OR (A0 AND A1)) AND X
+C AND (C OR A)                 →  C
+```
+
+For one flattened AND chain with operands `P1 ... Pn`:
+
+1. Split every `Pi` into its OR disjuncts (a clause). An operand that is not
+   an OR is a clause with one disjunct, so a plain conjunct `C` takes part in
+   absorption.
+2. Compute the same structural key as the OR direction for every disjunct.
+3. Pick the key contained in the most clauses, at least two; on a tie, the
+   key seen first in source order. If there is none, the AND is unchanged.
+4. The group is the clauses that contain it. `F` is the set of keys every
+   clause of the group contains (the picked key and possibly more).
+5. If a clause of the group consists only of `F`, it absorbs the group and
+   replaces it. Otherwise the group becomes `OR(F, AND(R1 ... Rk))`, with `Ri`
+   the clause without `F`. The residual AND and the new OR go through
+   `mergeAndParts` and `mergeOrParts` again, as in the OR direction.
+6. The group's replacement takes the position of its first clause, and the new
+   chain goes through `mergeAndParts`, which forms the next group.
+
+The main difference from the OR direction is partial sharing. The OR
+direction only extracts a predicate shared by every branch, because grouping
+some OR branches would leave the others to evaluate on their own anyway.
+In an AND, a filter like `tenant == 3 AND (C OR A0) AND (C OR A1)` is
+common: the conjuncts outside the group are left alone, and AND is
+associative and commutative, so grouping a subset of the conjuncts is exact.
+
+Every group removes at least one operand, so a chain of `n` operands is
+regrouped at most `n - 1` times. Each regrouping starts with a fresh budget,
+but its input is smaller than the one that fitted the budget before. The
+budgets are the same constants: 64 operands per AND chain, 1024 visited OR
+nodes and disjuncts, and 16384 key-encoding units. Over a budget, the AND is
+kept as the same-column merges produced it.
+
+Three-valued logic: `(A ∨ B) ∧ (A ∨ C) = A ∨ (B ∧ C)` and `A ∧ (A ∨ B) = A`
+are the dual distributive and absorption laws of the same distributive
+lattice, so they hold in Kleene logic for all `3^k` assignments, as the OR
+direction's identities do. A nullable `C` or `Ai` that is UNKNOWN therefore
+gives the same TRUE/FALSE/UNKNOWN result in both forms, also under an outer
+`NOT`. For example, with `C` UNKNOWN, `A0` TRUE and `A1` FALSE, the CNF gives
+`UNKNOWN ∧ UNKNOWN = UNKNOWN` and the rewrite gives
+`UNKNOWN ∨ FALSE = UNKNOWN`. The key keeps the nullable flag, so a predicate
+on a nullable column is never matched with one on a non-nullable column.
+
+The rules compose. The output of one direction is never input for the other
+on the same predicates: the factors of `C AND (A OR B)` are not disjuncts of
+`A OR B`, and the factors of `C OR (A AND B)` are not conjuncts of
+`A AND B`, because `F` was removed from the residuals.
+
+For the issue's filter, the CNF and the original form now rewrite to the
+same plan, with `category5 IN [1, 2, 3]` evaluated once:
+
+```text
+(category5 in [1, 2, 3] or age == 1) and ... and (category5 in [1, 2, 3] or age == 8)
+  →  category5 in [1, 2, 3] or (age == 1 and ... and age == 8)
+```
+
+Tests are in `rewriter/common_factor_and_test.go` and
+`rewriter/common_factor_and_budget_test.go`. They mirror the OR direction:
+31 parser cases over the nullable schema (each checked on all rows against the
+unrewritten parse, for idempotence and against a hand-factored form or an
+atom count), the issue's filter compared with the rewritten original,
+unsupported columns and expressions, typed literal distinctions, optimizer
+disabled, no input mutation, 3000 random three-valued differential trials
+that mix CNF and DNF trees, 3000 random idempotence trials and the clause,
+node and work budgets. The parser cases keep at most one `==` predicate per
+OR clause: `combineOrEqualsToIn` emits `==` predicates on different columns in
+map order, which is a separate, pre-existing nondeterminism.
 
 ## Ownership and determinism
 

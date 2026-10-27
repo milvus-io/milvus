@@ -118,6 +118,12 @@ The rewriter can be configured via the following parameter (refreshable at runti
 - Constant `false` operands are dropped and a constant `true` operand decides the OR before factoring.
 - Budgets (constants): at most 64 OR operands, 1024 visited AND nodes and conjuncts across the branches, and 16384 key-encoding units (one per candidate plus one per IN value). Over a budget, the OR is kept as produced by the same-column merges.
 - NULL semantics: `(A AND B) OR (A AND C) = A AND (B OR C)` and `A OR (A AND B) = A` hold in three-valued (Kleene) logic, which segcore uses for AND/OR/NOT, so TRUE/FALSE/UNKNOWN is preserved for every row, including under an outer `NOT`.
+- AND of OR clauses (the dual, for CNF filters):
+  - `(t == 7 OR p > 100) AND (t == 7 OR r > 4)` → `t == 7 OR (p > 100 AND r > 4)`
+  - Absorption: a conjunct made only of the shared predicates absorbs the clauses that contain them: `t == 7 AND (t == 7 OR p > 100)` → `t == 7`
+  - Partial sharing: only the clauses that contain the factor are grouped; the other conjuncts stay as they are. `x AND (t == 7 OR p > 100) AND (t == 7 OR r > 4)` → `x AND (t == 7 OR (p > 100 AND r > 4))`. A group forms around the factor contained in the most clauses (first in source order on a tie), and the next group is formed on the result until no factor is shared by two clauses.
+  - Same factor candidates, structural key, constant handling (constant `true` dropped, constant `false` decides the AND) and budgets (per AND chain: operands, visited OR nodes and disjuncts, key work) as the OR direction.
+  - NULL semantics: `(A OR B) AND (A OR C) = A OR (B AND C)` and `A AND (A OR B) = A` also hold in Kleene logic.
 
 ### General Notes
 - All merges require operands to target the same column (same `ColumnInfo`, including nested path/element type).
@@ -150,7 +156,8 @@ The rewriter can be configured via the following parameter (refreshable at runti
   7. IN ∩ range filtering
   8. IN vs Equal redundancy elimination
   9. AND `!=` → NOT IN
-  10. Fold back to BinaryExpr
+  10. Common-factor extraction from OR clauses (drop constant `true` operands first)
+  11. Fold back to BinaryExpr
 
 Multiple `!=` predicates not consumed by the cross-rule may still combine into NOT IN under AND. Each construction of IN will be normalized (sorted and deduplicated). TEXT_MATCH OR merge concatenates literals with a single space; no tokenization, deduplication, or sorting is performed.
 
@@ -162,7 +169,7 @@ Multiple `!=` predicates not consumed by the cross-rule may still combine into N
 - `in_not_equal.go` — typed-set IN/NotEqual cross-rewrites
 - `text_match.go` — TEXT_MATCH OR merge (no options)
 - `range.go`      — range tightening/weakening and interval construction
-- `common_factor.go` — common-factor extraction from OR branches
+- `common_factor.go` — common-factor extraction from OR branches and from OR clauses of an AND
 
 ### Future Extensions
 - More IN-range algebra (e.g., `IN` vs exact equality propagation across subtrees).

@@ -89,6 +89,8 @@ func (v *visitor) visitBinaryExpr(expr *planpb.BinaryExpr) interface{} {
 		}
 		// A visited operand can itself become an AND (an OR whose common
 		// factors were extracted); splice it so the AND rules see its operands.
+		// The OR branch above does the same for an AND whose common factors
+		// were extracted into an OR.
 		return v.mergeAndParts(spliceLogicalParts(parts, planpb.BinaryExpr_LogicalAnd))
 	default:
 		left := v.visitExpr(expr.GetLeft()).(*planpb.Expr)
@@ -119,7 +121,7 @@ func (v *visitor) mergeOrParts(parts []*planpb.Expr) *planpb.Expr {
 	// Constant operands are resolved before factoring: an AlwaysTrue operand
 	// decides the OR, and an AlwaysFalse one must not block a factor that
 	// every other operand shares.
-	operands, alwaysTrue := dropOrConstants(parts)
+	operands, alwaysTrue := dropLogicalConstants(parts, planpb.BinaryExpr_LogicalOr)
 	if alwaysTrue {
 		return newAlwaysTrueExpr()
 	}
@@ -129,15 +131,21 @@ func (v *visitor) mergeOrParts(parts []*planpb.Expr) *planpb.Expr {
 	return foldBinary(planpb.BinaryExpr_LogicalOr, parts)
 }
 
-// dropOrConstants removes AlwaysFalse operands, copying only when one is
-// present, and reports whether an AlwaysTrue operand decides the OR.
-func dropOrConstants(parts []*planpb.Expr) ([]*planpb.Expr, bool) {
+// dropLogicalConstants removes the neutral constant of op (AlwaysFalse for OR,
+// AlwaysTrue for AND), copying only when one is present, and reports whether
+// the absorbing constant (AlwaysTrue for OR, AlwaysFalse for AND) decides the
+// chain.
+func dropLogicalConstants(parts []*planpb.Expr, op planpb.BinaryExpr_BinaryOp) ([]*planpb.Expr, bool) {
+	absorbing, neutral := IsAlwaysTrueExpr, IsAlwaysFalseExpr
+	if op == planpb.BinaryExpr_LogicalAnd {
+		absorbing, neutral = IsAlwaysFalseExpr, IsAlwaysTrueExpr
+	}
 	var out []*planpb.Expr
 	for i, p := range parts {
-		if IsAlwaysTrueExpr(p) {
+		if absorbing(p) {
 			return nil, true
 		}
-		if IsAlwaysFalseExpr(p) {
+		if neutral(p) {
 			if out == nil {
 				out = append(make([]*planpb.Expr, 0, len(parts)), parts[:i]...)
 			}
@@ -153,7 +161,9 @@ func dropOrConstants(parts []*planpb.Expr) ([]*planpb.Expr, bool) {
 	return out, false
 }
 
-// mergeAndParts applies AND rules to operands that have already been visited.
+// mergeAndParts applies AND rules to operands that have already been visited:
+// same-column merges first, then common-factor extraction over the OR clauses
+// of the merged operands.
 func (v *visitor) mergeAndParts(parts []*planpb.Expr) *planpb.Expr {
 	parts = combineArrayContains(parts, planpb.JSONContainsExpr_ContainsAll)
 	parts = v.combineAndRangePredicates(parts)
@@ -163,6 +173,15 @@ func (v *visitor) mergeAndParts(parts []*planpb.Expr) *planpb.Expr {
 	parts = v.combineAndInWithRange(parts)
 	parts = v.combineAndInWithEqual(parts)
 	parts = v.combineAndNotEqualsToNotIn(parts)
+	// As for OR: an AlwaysFalse operand decides the AND, and an AlwaysTrue one
+	// must not block a factor that the other clauses share.
+	operands, alwaysFalse := dropLogicalConstants(parts, planpb.BinaryExpr_LogicalAnd)
+	if alwaysFalse {
+		return newAlwaysFalseExpr()
+	}
+	if factored := v.factorCommonAndPredicates(operands); factored != nil {
+		return factored
+	}
 	return foldBinary(planpb.BinaryExpr_LogicalAnd, parts)
 }
 
