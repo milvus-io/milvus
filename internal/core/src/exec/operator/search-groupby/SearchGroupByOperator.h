@@ -316,8 +316,9 @@ class SealedDataGetter : public DataGetter<OutputType> {
         }
         if (from_data_) {
             auto id_offset_pair =
-                snapshot_ ? snapshot_->get_chunk_by_offset(field_id_, idx)
-                          : segment_.get_chunk_by_offset(field_id_, idx);
+                snapshot_
+                    ? snapshot_->get_chunk_by_offset(field_id_, idx, op_ctx_)
+                    : segment_.get_chunk_by_offset(field_id_, idx, op_ctx_);
             auto chunk_id = id_offset_pair.first;
             auto inner_offset = id_offset_pair.second;
             if constexpr (std::is_same_v<InnerRawType, std::string>) {

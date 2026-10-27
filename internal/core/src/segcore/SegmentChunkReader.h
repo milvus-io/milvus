@@ -150,6 +150,23 @@ class SegmentChunkReader {
         snapshot_ = snapshot;
     }
 
+    std::shared_ptr<const IArrayOffsets>
+    GetArrayOffsets(FieldId field_id) const {
+        return snapshot_ ? snapshot_->GetArrayOffsets(field_id)
+                         : segment_->GetArrayOffsets(field_id);
+    }
+
+    SchemaPtr
+    GetSchemaSnapshot() const {
+        if (snapshot_) {
+            auto schema = snapshot_->get_schema_snapshot();
+            AssertInfo(schema != nullptr,
+                       "chunk reader snapshot must provide a non-null schema");
+            return schema;
+        }
+        return segment_->get_schema_snapshot();
+    }
+
     // Pinned sealed chunk data view. When a request-scoped snapshot is bound,
     // read the column from the frozen published state (same generation as the
     // chunk boundaries above); otherwise fall back to the segment.
@@ -190,26 +207,29 @@ class SegmentChunkReader {
 
     int64_t
     ChunkSize(FieldId field_id, int64_t chunk_id) const {
-        return snapshot_ ? snapshot_->chunk_size(field_id, chunk_id)
-                         : segment_->chunk_size(field_id, chunk_id);
+        return snapshot_ ? snapshot_->chunk_size(field_id, chunk_id, op_ctx_)
+                         : segment_->chunk_size(field_id, chunk_id, op_ctx_);
     }
 
     int64_t
     NumRowsUntilChunk(FieldId field_id, int64_t chunk_id) const {
-        return snapshot_ ? snapshot_->num_rows_until_chunk(field_id, chunk_id)
-                         : segment_->num_rows_until_chunk(field_id, chunk_id);
+        return snapshot_ ? snapshot_->num_rows_until_chunk(
+                               field_id, chunk_id, op_ctx_)
+                         : segment_->num_rows_until_chunk(
+                               field_id, chunk_id, op_ctx_);
     }
 
     std::pair<int64_t, int64_t>
     GetChunkByOffset(FieldId field_id, int64_t offset) const {
-        return snapshot_ ? snapshot_->get_chunk_by_offset(field_id, offset)
-                         : segment_->get_chunk_by_offset(field_id, offset);
+        return snapshot_
+                   ? snapshot_->get_chunk_by_offset(field_id, offset, op_ctx_)
+                   : segment_->get_chunk_by_offset(field_id, offset, op_ctx_);
     }
 
     int64_t
     NumChunkData(FieldId field_id) const {
-        return snapshot_ ? snapshot_->num_chunk_data(field_id)
-                         : segment_->num_chunk_data(field_id);
+        return snapshot_ ? snapshot_->num_chunk_data(field_id, op_ctx_)
+                         : segment_->num_chunk_data(field_id, op_ctx_);
     }
 
     int64_t

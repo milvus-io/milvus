@@ -2382,7 +2382,7 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
     }
 
     // Get array offsets for nested index (needed for element-to-row conversion)
-    auto array_offsets = segment_->GetArrayOffsets(expr_->column_.field_id_);
+    auto array_offsets = GetArrayOffsets(expr_->column_.field_id_);
 
     // Convert terms only on an index-result cache miss. Later batches and
     // ExprResCache hits reuse the bitmap without rebuilding the term list.

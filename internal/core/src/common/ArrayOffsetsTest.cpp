@@ -17,6 +17,9 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <chrono>
+#include <future>
+#include <new>
 #include <random>
 #include <string>
 #include <thread>

@@ -247,12 +247,14 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto input = context.get_offset_input();
     SetHasOffsetInput(input != nullptr);
 
-    auto schema = segment_->get_schema_snapshot();
+    auto schema = segment_chunk_reader_.GetSchemaSnapshot();
     const auto& field_meta =
         schema->GetFirstArrayFieldInStruct(expr_->get_struct_name());
 
-    auto array_offsets = segment_->GetArrayOffsets(field_meta.get_id());
-    AssertInfo(array_offsets != nullptr, "Array offsets not available");
+    auto array_offsets =
+        segment_chunk_reader_.GetArrayOffsets(field_meta.get_id());
+    AssertInfo(array_offsets != nullptr,
+               "Struct element offsets not available");
 
     int64_t batch_rows;
     int64_t elem_start;
@@ -430,6 +432,19 @@ PhyMatchFilterExpr::ApplyStructRowValidity(ColumnVector* col_vec,
                    "offset input size {} does not match batch row count {}",
                    input->size(),
                    batch_rows);
+    }
+    auto offsets = segment_chunk_reader_.GetArrayOffsets(field_id);
+    if (offsets && offsets->HasRowValidity()) {
+        for (int64_t i = 0; i < batch_rows; ++i) {
+            const auto row_id = input ? (*input)[i] : current_pos_ + i;
+            if (!offsets->IsRowValid(row_id)) {
+                value_view[i] = false;
+                valid_view[i] = false;
+            }
+        }
+        return;
+    }
+    if (input != nullptr) {
         std::vector<int64_t> row_offsets(batch_rows);
         for (int64_t i = 0; i < batch_rows; ++i) {
             row_offsets[i] = static_cast<int64_t>((*input)[i]);

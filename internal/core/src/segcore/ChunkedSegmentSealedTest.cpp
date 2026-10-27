@@ -21,6 +21,7 @@
 #include <iosfwd>
 #include <map>
 #include <memory>
+#include <new>
 #include <numeric>
 #include <optional>
 #include <set>
@@ -180,12 +181,48 @@ BuildNullableVectorArrayChunkBuffer(
     return buffer;
 }
 
+struct OffsetsPreparationProbe {
+    enum class Failure { None, Read, Cancel, Allocation };
+    Failure failure = Failure::None;
+    int calls = 0;
+};
+
+class ProbedVectorArrayColumn : public ChunkedVectorArrayColumn {
+ public:
+    ProbedVectorArrayColumn(
+        std::shared_ptr<cachinglayer::CacheSlot<Chunk>> slot,
+        const FieldMeta& meta,
+        std::shared_ptr<OffsetsPreparationProbe> probe)
+        : ChunkedVectorArrayColumn(std::move(slot), meta),
+          probe_(std::move(probe)) {
+    }
+
+    void
+    Prepare(OpContext*) const override {
+        ++probe_->calls;
+        switch (probe_->failure) {
+            case OffsetsPreparationProbe::Failure::Read:
+                ThrowInfo(FileReadFailed, "injected offsets load failure");
+            case OffsetsPreparationProbe::Failure::Cancel:
+                ThrowInfo(FollyCancel, "injected offsets load cancellation");
+            case OffsetsPreparationProbe::Failure::Allocation:
+                throw std::bad_alloc();
+            case OffsetsPreparationProbe::Failure::None:
+                return;
+        }
+    }
+
+ private:
+    std::shared_ptr<OffsetsPreparationProbe> probe_;
+};
+
 std::shared_ptr<ChunkedColumnInterface>
 BuildNullableVectorArrayColumn(
     const FieldMeta& field_meta,
     int64_t dim,
     const std::vector<std::vector<NullableVectorArrayRow>>& chunk_rows,
-    std::vector<std::vector<char>>& buffers) {
+    std::vector<std::vector<char>>& buffers,
+    std::shared_ptr<OffsetsPreparationProbe> probe = nullptr) {
     std::vector<std::unique_ptr<Chunk>> chunks;
     std::vector<int64_t> rows_per_chunk;
     chunks.reserve(chunk_rows.size());
@@ -212,6 +249,10 @@ BuildNullableVectorArrayColumn(
     auto slot =
         cachinglayer::Manager::GetInstance().CreateCacheSlot<milvus::Chunk>(
             std::move(translator), nullptr);
+    if (probe) {
+        return std::make_shared<ProbedVectorArrayColumn>(
+            std::move(slot), field_meta, std::move(probe));
+    }
     return MakeChunkedColumnBase(
         DataType::VECTOR_ARRAY, std::move(slot), field_meta);
 }
@@ -615,11 +656,211 @@ TEST(test_chunk_segment, MissingStructArrayOffsetsReturnsEmptyForOldRows) {
     ASSERT_NE(offsets, nullptr);
     EXPECT_EQ(offsets->GetRowCount(), row_count);
     EXPECT_EQ(offsets->GetTotalElementCount(), 0);
+    ASSERT_TRUE(offsets->HasRowValidity());
+    for (int64_t i = 0; i < row_count; ++i) {
+        EXPECT_FALSE(offsets->IsRowValid(i));
+    }
     for (int64_t i = 0; i <= row_count; ++i) {
         auto [start, end] = offsets->ElementIDRangeOfRow(i);
         EXPECT_EQ(start, 0);
         EXPECT_EQ(end, 0);
     }
+}
+
+TEST(test_chunk_segment,
+     StructOffsetsBuiltDuringLoadPreferScalarAndSurviveEviction) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    // The vector's ID and registration order must not select it over scalar
+    // siblings. Among scalars, the lower ID is the deterministic source.
+    auto vector = schema->AddDebugVectorArrayField(
+        "items[vector]", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    auto label =
+        schema->AddDebugArrayField("items[label]", DataType::INT64, false);
+    auto score =
+        schema->AddDebugArrayField("items[score]", DataType::INT32, false);
+    auto unrelated = schema->AddDebugVectorArrayField(
+        "other[vector]", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    auto schema_proto = schema->ToProto();
+    auto* warmup = schema_proto.add_properties();
+    warmup->set_key("warmup.vectorIndex");
+    warmup->set_value("disable");
+    schema = Schema::ParseFrom(schema_proto);
+    constexpr int64_t rows = 5;
+    constexpr int64_t elements_per_row = 3;
+    auto dataset = segcore::DataGen(schema, rows, 42, 0, 1, elements_per_row);
+    auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareInsertBinlog(
+        kCollectionID, kPartitionID, kSegmentID, dataset, cm);
+    for (auto field : {vector, label, score, unrelated}) {
+        load_info.field_infos.at(field.get()).warmup_policy = "disable";
+    }
+    auto segment = segcore::CreateSealedSegment(schema);
+    segment->LoadFieldData(load_info);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    auto state = sealed->TestGetPublishedStateSnapshot();
+    auto offsets = state->runtime->array_offsets_map.at(vector);
+    ASSERT_NE(offsets, nullptr);
+    EXPECT_EQ(offsets, state->runtime->array_offsets_map.at(label));
+    EXPECT_EQ(offsets, state->runtime->array_offsets_map.at(score));
+    EXPECT_EQ(offsets->GetTotalElementCount(), rows * elements_per_row);
+    const int64_t first_row = 0;
+    // A complete unordered load batch must choose the scalar with the lower
+    // field ID, even when the vector has a still lower field ID.
+    EXPECT_TRUE(state->runtime->fields.at(label)->CellsLoaded(&first_row, 1));
+    for (auto field : {vector, score}) {
+        EXPECT_FALSE(
+            state->runtime->fields.at(field)->CellsLoaded(&first_row, 1));
+    }
+    // A vector-only struct pays the raw-read cost during load too.
+    auto vector_only_offsets = state->runtime->array_offsets_map.at(unrelated);
+    ASSERT_NE(vector_only_offsets, nullptr);
+    EXPECT_EQ(vector_only_offsets->GetTotalElementCount(),
+              rows * elements_per_row);
+    EXPECT_TRUE(
+        state->runtime->fields.at(unrelated)->CellsLoaded(&first_row, 1));
+
+    for (auto field : {label, unrelated}) {
+        state->runtime->fields.at(field)->ManualEvictCache();
+        EXPECT_FALSE(
+            state->runtime->fields.at(field)->CellsLoaded(&first_row, 1));
+    }
+    auto read = segment->CaptureReadSnapshot();
+    EXPECT_EQ(read->GetArrayOffsets(score), offsets);
+    EXPECT_EQ(read->GetArrayOffsets(vector), offsets);
+    EXPECT_EQ(vector_only_offsets, segment->GetArrayOffsets(unrelated));
+    for (auto field : {label, unrelated}) {
+        EXPECT_FALSE(
+            state->runtime->fields.at(field)->CellsLoaded(&first_row, 1));
+    }
+    segment->ClearData();
+    EXPECT_EQ(segment->GetArrayOffsets(label), nullptr);
+    EXPECT_EQ(read->GetArrayOffsets(label), offsets);
+}
+
+TEST(test_chunk_segment, StructOffsetsFromNullableVectorChunks) {
+    auto schema = std::make_shared<Schema>();
+    auto vector = schema->AddDebugVectorArrayField(
+        "items[vector]", DataType::VECTOR_FLOAT, 2, knowhere::metric::L2, true);
+    const auto& meta = (*schema)[vector];
+    std::vector<std::vector<char>> buffers;
+    auto column = BuildNullableVectorArrayColumn(
+        meta,
+        2,
+        {{{false, {}}, {false, {}}},
+         {{true, {}}, {true, {1, 2, 3, 4}}, {true, {5, 6}}}},
+        buffers);
+    OpContext ctx;
+    auto offsets = ArrayOffsetsSealed::BuildFromColumn(*column, meta, 5, &ctx);
+    EXPECT_EQ(offsets->GetTotalElementCount(), 3);
+    EXPECT_EQ(offsets->ElementIDToRowID(0), std::make_pair(3, 0));
+    EXPECT_EQ(offsets->ElementIDToRowID(2), std::make_pair(4, 0));
+    EXPECT_EQ(offsets->ElementIDRangeOfRow(2), std::make_pair(0, 0));
+    ASSERT_TRUE(offsets->HasRowValidity());
+    EXPECT_FALSE(offsets->IsRowValid(0));
+    EXPECT_FALSE(offsets->IsRowValid(1));
+    EXPECT_TRUE(offsets->IsRowValid(2));  // empty, rather than null
+    EXPECT_TRUE(offsets->IsRowValid(3));
+    EXPECT_TRUE(offsets->IsRowValid(4));
+}
+
+TEST(test_chunk_segment,
+     StructOffsetsLoadFailurePreservesPublishedStateAndRetries) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto field = schema->AddDebugVectorArrayField(
+        "items[vector]", DataType::VECTOR_FLOAT, 2, knowhere::metric::L2, true);
+    constexpr int64_t rows = 5;
+    auto data = segcore::DataGen(schema, rows, 42, 0, 1, 2);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, data);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    auto current = sealed->TestGetPublishedStateSnapshot();
+    auto read = segment->CaptureReadSnapshot();
+    auto old_offsets = read->GetArrayOffsets(field);
+    ASSERT_NE(old_offsets, nullptr);
+    EXPECT_EQ(old_offsets->GetTotalElementCount(), rows * 2);
+    current->runtime->fields.at(field)->ManualEvictCache();
+    auto probe = std::make_shared<OffsetsPreparationProbe>();
+    std::vector<std::vector<char>> buffers;
+    auto column = BuildNullableVectorArrayColumn((*schema)[field],
+                                                 2,
+                                                 {{{false, {}},
+                                                   {false, {}},
+                                                   {true, {}},
+                                                   {true, {1, 2, 3, 4}},
+                                                   {true, {5, 6}}}},
+                                                 buffers,
+                                                 probe);
+
+    auto publish_replacement = [&] {
+        auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+        segcore::ChunkedSegmentSealedImpl::StateDelta initial;
+        initial.schema = schema;
+        initial.load_info = current->load_info;
+        initial.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
+        initial.commit_ts = current->commit_ts;
+        auto staged = sealed->TestBuildNextPublishedState(current, initial);
+        segcore::ChunkedSegmentSealedImpl::StateDelta final;
+        final.schema = schema;
+        final.load_info = current->load_info;
+        final.commit_ts = current->commit_ts;
+        const auto calls_before_publish = probe->calls;
+        sealed->TestStageLoadFieldDataThenPublish(
+            field,
+            column,
+            rows,
+            DataType::VECTOR_ARRAY,
+            schema,
+            runtime,
+            staged.get(),
+            current,
+            final,
+            [&] {
+                EXPECT_EQ(probe->calls, calls_before_publish);
+                EXPECT_EQ(sealed->TestGetPublishedStateSnapshot(), current);
+                EXPECT_EQ(read->GetArrayOffsets(field), old_offsets);
+            });
+    };
+    for (const auto& [failure, code] :
+         {std::pair{OffsetsPreparationProbe::Failure::Read,
+                    ErrorCode::FileReadFailed},
+          std::pair{OffsetsPreparationProbe::Failure::Cancel,
+                    ErrorCode::FollyCancel},
+          std::pair{OffsetsPreparationProbe::Failure::Allocation,
+                    ErrorCode::MemAllocateFailed}}) {
+        SCOPED_TRACE(static_cast<int>(failure));
+        probe->failure = failure;
+        try {
+            publish_replacement();
+            FAIL() << "expected offsets construction to reject publication";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), code);
+        }
+        EXPECT_EQ(sealed->TestGetPublishedStateSnapshot(), current);
+        EXPECT_EQ(segment->GetArrayOffsets(field), old_offsets);
+    }
+    probe->failure = OffsetsPreparationProbe::Failure::None;
+    publish_replacement();
+    auto offsets = segment->GetArrayOffsets(field);
+    ASSERT_NE(offsets, nullptr);
+    EXPECT_NE(offsets, old_offsets);
+    EXPECT_EQ(offsets->GetTotalElementCount(), 3);
+    EXPECT_EQ(read->GetArrayOffsets(field), old_offsets);
+    EXPECT_EQ(old_offsets->GetTotalElementCount(), rows * 2);
+    EXPECT_TRUE(old_offsets->IsRowValid(0));
+    EXPECT_FALSE(offsets->IsRowValid(0));
+    EXPECT_TRUE(offsets->IsRowValid(2));  // valid empty array
+    EXPECT_EQ(probe->calls, 4);
+    column->ManualEvictCache();
+    EXPECT_EQ(segment->GetArrayOffsets(field), offsets);
+    EXPECT_EQ(probe->calls, 4);
 }
 
 // #52877: lazy reopen may skip the drop-only schema and see the old and new
