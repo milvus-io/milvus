@@ -143,10 +143,20 @@ SetFieldDataElementTypeIfNeeded(milvus::proto::schema::FieldData* field_data,
 
 CStatus
 SerializeSearchResultDataToCProto(
-    const milvus::proto::schema::SearchResultData& result_data,
+    milvus::proto::schema::SearchResultData& result_data,
     CProto* out_result,
     const char* allocation_error,
     const char* serialization_error) {
+    for (auto& field_data : *result_data.mutable_fields_data()) {
+        milvus::SyncFieldDataRowValidData(&field_data);
+    }
+    for (auto& field_data : *result_data.mutable_group_by_field_values()) {
+        milvus::SyncFieldDataRowValidData(&field_data);
+    }
+    if (result_data.has_group_by_field_value()) {
+        milvus::SyncFieldDataRowValidData(
+            result_data.mutable_group_by_field_value());
+    }
     auto size = result_data.ByteSizeLong();
     CBufferPtr buffer(malloc(size));
     if (buffer == nullptr) {

@@ -603,12 +603,9 @@ func validateColumnBasedNullableVectorFieldData(field *schemapb.FieldSchema, src
 func validateColumnBasedInsertMsgNullableVectors(schema *schemapb.CollectionSchema, msg *msgstream.InsertMsg) error {
 	srcFields := make(map[int64]*schemapb.FieldData, len(msg.GetFieldsData()))
 	for _, fieldData := range msg.GetFieldsData() {
-		if !typeutil.ValidateAndNormalizeFieldDataValidData(fieldData) {
-			return merr.WrapErrParameterInvalidMsg(
-				"field %s has different legacy and field-specific valid_data",
-				fieldData.GetFieldName(),
-			)
-		}
+		// A WAL insert message may come from an older proxy that rewrote only the
+		// legacy validity, so reconcile instead of rejecting a conflict.
+		typeutil.NormalizeFieldDataValidData(fieldData)
 		srcFields[fieldData.GetFieldId()] = fieldData
 	}
 
@@ -631,12 +628,9 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			// unreachable
 			panic("struct is not flattened")
 		}
-		if !typeutil.ValidateAndNormalizeFieldDataValidData(field) {
-			return nil, merr.WrapErrParameterInvalidMsg(
-				"field %s has different legacy and field-specific valid_data",
-				field.GetFieldName(),
-			)
-		}
+		// A WAL insert message may come from an older proxy that rewrote only the
+		// legacy validity, so reconcile instead of rejecting a conflict.
+		typeutil.NormalizeFieldDataValidData(field)
 		srcFields[field.FieldId] = field
 	}
 
