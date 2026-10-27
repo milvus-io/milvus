@@ -2,6 +2,7 @@ package queryresource
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -195,4 +196,70 @@ func TestGlobalOptimizerSummaryVectorPruning(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, summary)
 	require.Len(t, plan.WorkNodes, 3)
+}
+
+func TestHybridSelectionsEncodeWithinPartitionScope(t *testing.T) {
+	for _, unrestricted := range []bool{false, true} {
+		t.Run(fmt.Sprintf("unrestricted=%t", unrestricted), func(t *testing.T) {
+			o, view := pruningFixture(t)
+			view.QueryNode = []*viewpb.QueryViewOfQueryNode{{NodeId: 1, Partitions: []*viewpb.QueryViewOfPartition{
+				{PartitionId: 2, SegmentIds: []int64{10, 11}},
+				{PartitionId: 3, SegmentIds: []int64{20, 21}},
+				{PartitionId: 4, SegmentIds: []int64{30}},
+			}}}
+			requests := []*internalpb.SubSearchRequest{
+				{PartitionIDs: []int64{3}}, // No pruning: no segment IDs need to be sent.
+				{PartitionIDs: []int64{2}, SerializedExprPlan: pruningPredicate(t, 5)},
+				{PartitionIDs: []int64{2, 3}}, // Overlapping scope.
+				{PartitionIDs: []int64{4}, Skip: true},
+				{PartitionIDs: []int64{99}}, // No members on this node: explicit none.
+			}
+			expected := [][]int64{{20, 21}, {10}, {10, 11, 20, 21}, {}, {}}
+			union := []int64{10, 11, 20, 21}
+			if unrestricted {
+				requests = append(requests, &internalpb.SubSearchRequest{})
+				expected = append(expected, []int64{10, 11, 20, 21, 30})
+				union = append(union, 30)
+			}
+			plan := &viewpb.QueryPlan{
+				WorkNodes: pruningWorkers()[:1],
+				Request: &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: &internalpb.SearchRequest{
+					IsAdvanced: true, PartitionIDs: []int64{2, 3, 4, 99}, SubReqs: requests,
+				}},
+			}
+			_, err := o.OptimizePlan(t.Context(), plan, view)
+			require.NoError(t, err)
+			require.Len(t, plan.WorkNodes, 1)
+			worker := plan.WorkNodes[0]
+			require.Len(t, worker.SubSelections, len(requests))
+			for i, request := range requests {
+				scoped := &viewpb.QueryViewOfQueryNode{NodeId: 1}
+				for _, partition := range view.QueryNode[0].Partitions {
+					if len(request.PartitionIDs) == 0 || slices.Contains(request.PartitionIDs, partition.PartitionId) {
+						scoped.Partitions = append(scoped.Partitions, partition)
+					}
+				}
+				selected := qviews.FilterSelectedSegments(scoped, worker.SubSelections[i])
+				var actual []int64
+				for _, partition := range selected.Partitions {
+					actual = append(actual, partition.SegmentIds...)
+				}
+				require.ElementsMatch(t, expected[i], actual, "slot %d", i)
+			}
+			require.True(t, worker.SubSelections[0].Exclude)
+			require.Empty(t, worker.SubSelections[0].SegmentIds)
+			require.False(t, worker.SubSelections[3].Exclude, "skipped slot is none")
+			require.Empty(t, worker.SubSelections[3].SegmentIds)
+			require.False(t, worker.SubSelections[4].Exclude, "empty local scope is none")
+			require.Empty(t, worker.SubSelections[4].SegmentIds)
+			// Requery may carry a broader outer scope. Its union must still exclude
+			// the skipped subquery's partition unless another active subquery selected it.
+			retained := qviews.FilterSelectedSegments(view.QueryNode[0], worker.SegmentSelection)
+			var actual []int64
+			for _, partition := range retained.Partitions {
+				actual = append(actual, partition.SegmentIds...)
+			}
+			require.ElementsMatch(t, union, actual)
+		})
+	}
 }

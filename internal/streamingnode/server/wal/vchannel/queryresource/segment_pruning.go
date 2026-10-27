@@ -29,6 +29,7 @@ func (o globalOptimizer) OptimizePlan(ctx context.Context, plan *viewpb.QueryPla
 		}
 	}
 	selectedBySubquery := make([]map[int64]bool, len(searches))
+	partitionScopes := make([]map[int64]bool, len(searches))
 	for i, search := range searches {
 		selectedBySubquery[i] = make(map[int64]bool)
 		if advanced && plan.GetLegacySearchRequest().GetSubReqs()[i].GetSkip() {
@@ -42,6 +43,7 @@ func (o globalOptimizer) OptimizePlan(ctx context.Context, plan *viewpb.QueryPla
 		for _, id := range partitions {
 			wanted[id] = true
 		}
+		partitionScopes[i] = wanted
 		candidates := make(map[int64][]int64)
 		for _, node := range view.GetQueryNode() {
 			for _, part := range node.GetPartitions() {
@@ -76,7 +78,7 @@ func (o globalOptimizer) OptimizePlan(ctx context.Context, plan *viewpb.QueryPla
 		for _, part := range node.GetPartitions() {
 			all = append(all, part.GetSegmentIds()...)
 		}
-		for _, selected := range selectedBySubquery {
+		for i, selected := range selectedBySubquery {
 			removed := make(map[int64]struct{})
 			for _, id := range all {
 				if selected[id] {
@@ -86,9 +88,23 @@ func (o globalOptimizer) OptimizePlan(ctx context.Context, plan *viewpb.QueryPla
 				}
 			}
 			if advanced {
-				selection := qviews.SelectSegments(all, removed)
-				if selection == nil {
-					selection = &viewpb.SegmentSelection{Exclude: true}
+				// Each subrequest executes within its own partition scope. Keep the
+				// worker union below relative to full membership for retained requery.
+				scoped := all
+				if wanted := partitionScopes[i]; len(wanted) != 0 {
+					scoped = nil
+					for _, part := range node.GetPartitions() {
+						if wanted[part.GetPartitionId()] {
+							scoped = append(scoped, part.GetSegmentIds()...)
+						}
+					}
+				}
+				selection := &viewpb.SegmentSelection{} // No candidates means none, not all.
+				if len(scoped) != 0 {
+					selection = qviews.SelectSegments(scoped, removed)
+					if selection == nil {
+						selection = &viewpb.SegmentSelection{Exclude: true}
+					}
 				}
 				worker.SubSelections = append(worker.SubSelections, selection)
 			}

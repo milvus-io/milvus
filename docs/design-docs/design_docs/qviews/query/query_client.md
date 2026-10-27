@@ -6,7 +6,10 @@
 `QueryPlanClient`, `ViewQueryServiceClient` and `ShardResolver` dependencies do
 not depend on the QueryCoord balancer or load manager. `NewLegacyViewQueryClient`
 accepts already planned internal requests and returns per-shard reduced results
-and retained `ShardPlan`s. The surrounding Proxy pipeline owns API rendering.
+and retained `ShardPlan`s. The surrounding Proxy pipeline owns API rendering. A generic ViewQueryClient
+and its Legacy facade share one shard client and replica router; the owning client
+closes that router once. Independently constructed Legacy clients own independent
+routers.
 
 This extraction adds the client and the SN execution support; it does not switch
 Proxy Search, Query, Delete, Upsert or Iterator to QueryView. QN execution and native resource preparation are separate prerequisites and

@@ -117,9 +117,13 @@ selection with its exact View and partition scope before acquiring physical
 handles, then keeps the existing exact-registration Transform MVCC wait.
 Pruning does not mutate View membership or release prepared segment resources.
 
-Hybrid subqueries have separate selections; worker dispatch uses their union,
-but each subquery executes only its own selection. Empty subquery slots preserve
-their positional identity. Retained requery uses the original View/MVCC/workers
+Hybrid subqueries have separate selections, encoded relative to each node's
+membership within that subrequest's partition scope. A fully selected scope
+therefore needs no segment IDs. Empty local scopes and skipped slots are explicit
+empty inclusions and preserve positional identity. Each subquery executes its
+own selection after partition filtering. The worker union remains encoded against
+full node membership: it must preserve the original candidate set even if a
+retained requery carries a broader partition scope. Retained requery uses the original View/MVCC/workers
 and the union of original search selections, without rerunning vector pruning.
 Retries discard the failed attempt's plan selections and partial results together.
 

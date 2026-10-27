@@ -255,3 +255,53 @@ func TestShardExhaustedAttemptsPreserveTransportError(t *testing.T) {
 	_, err := client.Search(ctx, &ShardSearchRequest{VChannel: id.VChannel, Req: &internalpb.SearchRequest{}, Reducer: fakeSearchResultReducer{}})
 	require.ErrorIs(t, err, picker.ErrSubConnNotReady, "Proxy must receive the original cause after bounded attempts")
 }
+
+func TestGenericAndLegacyShareReplicaRouter(t *testing.T) {
+	d := snview.NewReplicaDirectoryForTest()
+	defer d.Close()
+	stream := d.AcquireStream(t.Context(), "p", nil)
+	defer stream.Close()
+	var subscriptions []wal.ReplicaWatchSubscription
+	patch := mockey.Mock((*replicaTestSource).SubscribeReplicas).To(func(_ *replicaTestSource, vc string, h wal.ReplicaWatchHandler) (wal.ReplicaWatchSubscription, error) {
+		sub, err := stream.Subscribe(t.Context(), vc, h)
+		subscriptions = append(subscriptions, sub)
+		return sub, err
+	}).Build()
+	defer patch.UnPatch()
+	source := &replicaTestSource{}
+	client := NewViewQueryClient(ViewQueryClientConfig{}, source, nil, nil, nil, nil, nil, nil, nil, nil).(*viewQueryClientImpl)
+	defer client.Close()
+	staged, err := client.shardClient.replicas.route("p_1v0")
+	require.NoError(t, err)
+	legacy, err := client.legacyClient.shardClient.replicas.route("p_1v0")
+	require.NoError(t, err)
+	require.Same(t, staged, legacy)
+	require.Len(t, subscriptions, 1)
+	standalone := NewLegacyViewQueryClient(ViewQueryClientConfig{}, source, nil, nil).(*legacyOnlyClient)
+	defer standalone.Close()
+	independent, err := standalone.legacy.shardClient.replicas.route("p_1v0")
+	require.NoError(t, err)
+	require.NotSame(t, staged, independent)
+	require.Len(t, subscriptions, 2)
+	require.Eventually(t, func() bool { return subscriptions[1].Snapshot().Valid }, time.Second, time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	exited := make(chan error, 2)
+	for _, route := range []*replicaRoute{staged, legacy} {
+		go func() { _, _, err := route.nextReplica(ctx, nil, nil); exited <- err }()
+	}
+	client.Close()
+	for range 2 {
+		select {
+		case err := <-exited:
+			require.Error(t, err)
+			require.NotErrorIs(t, err, context.DeadlineExceeded)
+		case <-ctx.Done():
+			t.Fatal("shared client close did not release both waiters")
+		}
+	}
+	require.False(t, subscriptions[0].Snapshot().Valid)
+	require.True(t, subscriptions[1].Snapshot().Valid, "standalone Legacy retains its own subscription")
+	standalone.Close()
+	require.False(t, subscriptions[1].Snapshot().Valid)
+}

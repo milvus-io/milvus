@@ -56,9 +56,10 @@ func NewViewQueryClient(
 	if cfg.MaxRetries <= 0 {
 		cfg.MaxRetries = defaultMaxRetries
 	}
+	shardClient := newShardViewQueryClient(cfg.MaxRetries, queryPlanClient, queryServiceClient)
 	return &viewQueryClientImpl{
-		shardClient:            newShardViewQueryClient(cfg.MaxRetries, queryPlanClient, queryServiceClient),
-		legacyClient:           newLegacyClient(cfg, queryPlanClient, queryServiceClient, shardResolver),
+		shardClient:            shardClient,
+		legacyClient:           &legacyClient{shardClient: shardClient, shardResolver: shardResolver},
 		shardResolver:          shardResolver,
 		fieldFetchPlanner:      fieldFetchPlanner,
 		rerankerBuilder:        rerankerBuilder,
@@ -305,5 +306,4 @@ func (c *viewQueryClientImpl) queryAllShards(
 
 func (c *viewQueryClientImpl) Close() {
 	c.shardClient.replicas.Close()
-	c.legacyClient.shardClient.replicas.Close()
 }
