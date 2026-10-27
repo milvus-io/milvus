@@ -40,9 +40,10 @@ func TestVectorPruningUsesPartitionCandidatesAndMatchingField(t *testing.T) {
 		return result
 	}
 	req := &internalpb.SearchRequest{FieldId: 101, MetricType: "L2", Topk: 1, PlaceholderGroup: placeholder(0)}
-	candidates := map[int64][]int64{2: {10, 11, 12}}
+	stats[2].SegmentStats[13] = storage.SegmentStats{NumRows: 100, FieldStats: []storage.FieldStats{{FieldID: 101, Type: schemapb.DataType_FloatVector}}}
+	candidates := map[int64][]int64{2: {10, 11, 12, 13}}
 	excluded, flags := Exclude(t.Context(), schema, stats, candidates, req, nil, 0.5)
-	require.Equal(t, map[int64]struct{}{11: {}}, excluded) // unknown 12 retained; stale 99 not budgeted
+	require.Equal(t, map[int64]struct{}{11: {}}, excluded) // unknown 12 and centroid-less 13 retained; stale 99 not budgeted
 	require.Equal(t, uint32(1<<viewpb.GlobalOptimizerExecutionSummary_PrunedByVectorFiltering), flags)
 	req.PlaceholderGroup = placeholder(0, 100)
 	excluded, flags = Exclude(t.Context(), schema, stats, candidates, req, nil, 0.5)

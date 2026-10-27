@@ -1,6 +1,8 @@
 package pruning
 
 import (
+	"sort"
+
 	"github.com/bits-and-blooms/bitset"
 	"github.com/cockroachdb/errors"
 
@@ -289,5 +291,8 @@ func ParseTermExpr(exprPb *planpb.TermExpr, parseCtx *ParseContext) (Expr, error
 		}
 		scalarVals = append(scalarVals, innerVal)
 	}
+	// Internal PK plans bypass the expression rewriter and preserve caller ID
+	// order. Sort our converted values before Eval uses its upper-bound exit.
+	sort.Slice(scalarVals, func(i, j int) bool { return scalarVals[i].LT(scalarVals[j]) })
 	return NewTermExpr(scalarVals), nil
 }

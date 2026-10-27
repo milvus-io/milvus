@@ -95,7 +95,10 @@ objects with unified DataView/object GC, including recovery and other SN owners.
 Phase 1 acquires an exact-schema Up View, fixes MVCC and resolves partition scope.
 GlobalOptimizer consumes that View's statistics and sealed membership. Function
 query preprocessing (including BM25) remains in the same planning pipeline.
-Scalar pruning applies conservative range predicates. Vector pruning uses the
+Scalar pruning applies conservative range predicates. Term predicates sort their
+locally converted values before evaluating range exits, including internal PK
+plans that bypass the expression rewriter. This does not reorder the caller's
+IDs or mutate the protobuf plan. Vector pruning uses the
 existing partition-wide centroid/ratio/TopK selection across QN assignments;
 it is approximate candidate selection, not an exact exclusion proof.
 
