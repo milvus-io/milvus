@@ -78,8 +78,7 @@ type inflightWrite struct {
 //
 // TODO: lock escalation, a vchannel-wide exclusion for a write above some number
 // of keys, is open, and so is the threshold (write-path.md, open items).
-// TODO: the total budget of the set and what to do above it (back pressure or a
-// degraded write) are open.
+// TODO: the total budget of the set and the back pressure above it are open.
 func (s *inflightSet) enqueue(pks []PK) (*inflightWrite, []*inflightWrite) {
 	w := &inflightWrite{keys: lockKeys(pks), done: make(chan struct{})}
 

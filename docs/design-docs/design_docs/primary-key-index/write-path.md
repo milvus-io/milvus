@@ -350,9 +350,17 @@ TimeTick `T`. It covers events whose earlier writes did not pass through the
 in-flight set: the index is enabled for an existing collection, a secondary is
 promoted to primary, or the engine recovers from a failure. After the wait, the
 decision is exact, so an insert gets a companion delete only for the keys that
-exist. This step adds the mechanism only. Nothing calls it yet. A not-ready
-index (`Config.Degraded`) is a different case: it decides degraded, every key
-is present, and it never waits.
+exist. This step adds the mechanism only. Nothing calls it yet.
+
+A write of an index that is not ready waits the same way. `Config.Ready` is a
+channel that the owner of the index closes when the engine holds every record
+of the vchannel, after the install of its committed tables. Until then
+`Decide` returns a `*WaitError` with `TimeTick` 0, and `Wait` returns when the
+channel is closed. The decider has no degraded mode, where every key would
+count as present: every decision is exact. A `WaitUntil` that comes after a
+write passed this check, while the write waits for an earlier write of the
+same key, also makes that write wait: the decider removes its registration and
+returns a `*WaitError`.
 
 The wait can not block inside the pkindex interceptor. That interceptor runs
 under `glock.RLock` of the lock interceptor. An exclusive message waits for
@@ -429,8 +437,8 @@ insert, so WAL record and byte counts under-report such an append.
   An entry of the in-flight set then never leaves the set, so the set grows
   with every write and every written key stays present. Observe comes with the
   recovery step (#54365).
-- The total size of the in-flight set has no limit yet. What to do above a
-  limit (back pressure or degraded mode) is open.
+- The total size of the in-flight set has no limit yet. The back pressure
+  above a limit is open.
 - Lock escalation for writes of many keys, and its threshold, are open.
 - An empty map is set to nil so that it does not keep its peak memory.
   Keeping the maps would make the lock of a 1000-key write about 30% faster

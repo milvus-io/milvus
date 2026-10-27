@@ -18,7 +18,6 @@ package dedup
 
 import (
 	"context"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -43,8 +42,9 @@ import (
 // write stays in the in-flight set for the life of the index. The recovery
 // change adds the observe.
 type decider struct {
-	eng      engine.RW
-	degraded func() bool
+	eng engine.RW
+	// ready is Config.Ready: closed when the committed table set is installed.
+	ready    <-chan struct{}
 	closed   atomic.Bool
 	inflight inflightSet
 	// waitUntil is the time tick before which the writes of this vchannel wait:
@@ -64,10 +64,10 @@ type decider struct {
 // the engine: the caller closes it, after Close.
 func New(eng engine.RW, cfg Config) Decider {
 	return &decider{
-		eng:      eng,
-		degraded: cfg.Degraded,
-		stop:     make(chan struct{}),
-		pending:  make(map[int64]*pendingTxn),
+		eng:     eng,
+		ready:   cfg.Ready,
+		stop:    make(chan struct{}),
+		pending: make(map[int64]*pendingTxn),
 	}
 }
 
@@ -78,8 +78,7 @@ func New(eng engine.RW, cfg Config) Decider {
 // exact decision afterwards, not a companion delete for every key.
 //
 // It covers the events that the in-flight set can not cover, because writes that
-// took effect before them did not pass through this decider. A not-ready index
-// (Config.Degraded) never waits: it decides degraded.
+// took effect before them did not pass through this decider.
 //
 // tt must be the time tick of a persisted WAL message, or not above the observed
 // time tick. Only persisted messages move the observed time tick: the applied
@@ -101,25 +100,29 @@ func (d *decider) WaitUntil(tt uint64) {
 	}
 }
 
-// isDegraded reports whether a decision treats every key as present: the
-// committed table set is not installed (Config.Degraded), or a WaitUntil raced
-// with this decision after it passed the wait check.
-func (d *decider) isDegraded() bool {
-	if d.degraded != nil && d.degraded() {
+// isReady reports whether the committed table set is installed (Config.Ready).
+func (d *decider) isReady() bool {
+	if d.ready == nil {
 		return true
 	}
-	return d.inflight.observedTimeTick() < d.waitUntil.Load()
+	select {
+	case <-d.ready:
+		return true
+	default:
+		return false
+	}
 }
 
 // waitError returns a *WaitError when a write that registers keys must wait for
-// observe, nil otherwise. A not-ready index decides degraded and never waits.
+// the index to be ready or for observe, nil otherwise.
 func (d *decider) waitError(vchannel string) error {
-	if d.degraded != nil && d.degraded() {
-		return nil
-	}
+	ready := d.isReady()
 	target := d.waitUntil.Load()
 	if d.inflight.observedTimeTick() >= target {
-		return nil
+		if ready {
+			return nil
+		}
+		target = 0
 	}
 	return &WaitError{TimeTick: target, d: d, vchannel: vchannel}
 }
@@ -175,7 +178,7 @@ func (d *decider) decide(ctx context.Context, intent *WriteIntent) (*WriteIntent
 		if err := intent.acquire(ctx, intent.txn.allPKs()); err != nil {
 			return nil, err
 		}
-		hits, err := d.existing(ctx, intent.write, intent.txn.companionCandidates())
+		hits, err := d.existing(ctx, req.VChannel, intent.write, intent.txn.companionCandidates())
 		if err != nil {
 			intent.abort()
 			return nil, err
@@ -193,7 +196,7 @@ func (d *decider) decide(ctx context.Context, intent *WriteIntent) (*WriteIntent
 	if err := intent.acquire(ctx, req.PKs); err != nil {
 		return nil, err
 	}
-	present, err := d.existing(ctx, intent.write, req.PKs)
+	present, err := d.existing(ctx, req.VChannel, intent.write, req.PKs)
 	if err != nil {
 		intent.abort()
 		return nil, err
@@ -214,12 +217,15 @@ func (d *decider) decide(ctx context.Context, intent *WriteIntent) (*WriteIntent
 // Rule B: the in-flight set is read before the engine. Observe writes the engine
 // before it removes an entry (rule A), so a key that left the set between the two
 // reads is found in the engine.
-func (d *decider) existing(ctx context.Context, w *inflightWrite, pks []PK) ([]PK, error) {
+func (d *decider) existing(ctx context.Context, vchannel string, w *inflightWrite, pks []PK) ([]PK, error) {
 	if len(pks) == 0 {
 		return nil, nil
 	}
-	if d.isDegraded() {
-		return slices.Clone(pks), nil
+	// A WaitUntil after the check before the registration raises the time
+	// tick that the writes wait for. The engine may then miss keys, so this
+	// write waits too: the caller removes its registration.
+	if err := d.waitError(vchannel); err != nil {
+		return nil, err
 	}
 	inSet := d.inflight.keysAhead(w)
 	var probe []PK

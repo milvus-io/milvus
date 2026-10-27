@@ -38,12 +38,12 @@ type Decider interface {
 	// append. A panic between Decide and that call ends the process, like
 	// every panic on the append path.
 	//
-	// Decide never waits for the index to be ready: a not-ready index decides
-	// degraded. It fails with an error that wraps engine.ErrClosed after Close.
-	// While the writes of the vchannel must wait for observe (WaitUntil), it
-	// returns a *WaitError for an autocommit write and for a CommitTxn with
-	// pending writes, before it registers or probes anything. It never blocks
-	// on that wait itself: the caller may hold a lock that observe needs.
+	// While the index is not ready (Config.Ready) or the writes of the
+	// vchannel must wait for observe (WaitUntil), Decide returns a *WaitError
+	// for an autocommit write and for a CommitTxn with pending writes. Nothing
+	// is registered for that write then. Decide never blocks on that wait
+	// itself: the caller may hold a lock that the install or observe needs.
+	// It fails with an error that wraps engine.ErrClosed after Close.
 	Decide(ctx context.Context, req DecideRequest) (*WriteIntent, error)
 
 	// DropEndedTxns forgets the pending writes of every transaction for which
@@ -60,21 +60,19 @@ type Decider interface {
 
 // Config configures a Decider.
 type Config struct {
-	// Degraded reports whether the engine may miss records: the committed
-	// table set of the vchannel is not installed yet. While it returns true,
-	// a decision does not probe the engine and treats every key as present.
-	// An insert then gets a companion delete for every key, and a delete
-	// writes a tombstone for every key, so that a record that the install
-	// brings back later does not come back to life. Nil means never degraded.
-	// It never blocks a decision: a not-ready index is degraded, not closed.
-	Degraded func() bool
+	// Ready is closed when the engine holds every record of the vchannel: its
+	// committed table set is installed. Until then the writes that register
+	// keys wait (WaitError). Nil means ready at once.
+	Ready <-chan struct{}
 }
 
-// WaitError is returned by Decide when the write must wait until observe
-// reaches TimeTick before it can be decided. Nothing is registered for the
-// write. The caller releases the locks that the observe may need, calls Wait,
-// and then calls Decide again.
+// WaitError is returned by Decide when the write must wait before it can be
+// decided: until the index is ready, and until observe reaches TimeTick.
+// Nothing is registered for the write. The caller releases the locks that
+// the install or observe may need, calls Wait, and then calls Decide again.
 type WaitError struct {
+	// TimeTick is the time tick that observe must reach. It is 0 when the
+	// write waits only for the index to be ready.
 	TimeTick uint64
 
 	d        *decider
@@ -82,13 +80,25 @@ type WaitError struct {
 }
 
 func (e *WaitError) Error() string {
+	if e.TimeTick == 0 {
+		return fmt.Sprintf("primary key index of vchannel %s waits for its committed tables to be installed", e.vchannel)
+	}
 	return fmt.Sprintf("primary key index of vchannel %s waits for observe to reach time tick %d", e.vchannel, e.TimeTick)
 }
 
-// Wait blocks until observe reaches TimeTick. It returns ctx.Err() when ctx
-// ends first, and an error that wraps engine.ErrClosed when the decider is
-// closed first.
+// Wait blocks until the index is ready and observe reaches TimeTick. It
+// returns ctx.Err() when ctx ends first, and an error that wraps
+// engine.ErrClosed when the decider is closed first.
 func (e *WaitError) Wait(ctx context.Context) error {
+	if e.d.ready != nil {
+		select {
+		case <-e.d.ready:
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-e.d.stop:
+			return errClosed(e.vchannel)
+		}
+	}
 	return e.d.inflight.waitObserved(ctx, e.TimeTick, e.d.stop, e.vchannel)
 }
 
