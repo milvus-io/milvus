@@ -110,19 +110,16 @@ BatchReaderMemoryLimit(int64_t batch_loaded_memory_bytes,
 }
 
 arrow::Result<std::vector<std::shared_ptr<arrow::Table>>>
-ReadFileRowGroupBlock(const milvus_storage::ArrowFileSystemPtr& fs,
-                      const std::string& file,
-                      int64_t rg_offset,
-                      int64_t rg_count,
-                      int64_t reader_memory_limit) {
-    ARROW_ASSIGN_OR_RAISE(auto reader,
-                          milvus_storage::FileRowGroupReader::Make(
-                              fs,
-                              file,
-                              nullptr,
-                              reader_memory_limit,
-                              milvus::storage::GetReaderProperties(),
-                              milvus::storage::GetArrowReaderProperties()));
+ReadFileRowGroupBlock(
+    const std::shared_ptr<milvus_storage::PreparedParquetFile>& file,
+    int64_t rg_offset,
+    int64_t rg_count,
+    int64_t reader_memory_limit) {
+    ARROW_ASSIGN_OR_RAISE(
+        auto reader,
+        file->MakeReader(nullptr,
+                         reader_memory_limit,
+                         milvus::storage::GetArrowReaderProperties()));
     auto close_guard = folly::makeGuard([&reader]() { (void)reader->Close(); });
     ARROW_RETURN_NOT_OK(reader->SetRowGroupOffsetAndCount(rg_offset, rg_count));
     std::vector<std::shared_ptr<arrow::Table>> tables;
@@ -200,11 +197,15 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                  const std::vector<std::vector<int64_t>>& row_group_lists,
                  const milvus_storage::ArrowFileSystemPtr& fs,
                  const std::shared_ptr<arrow::Schema> schema,
-                 milvus::proto::common::LoadPriority priority) {
+                 milvus::proto::common::LoadPriority priority,
+                 const PreparedParquetFiles& prepared_files) {
     try {
         AssertInfo(remote_files.size() == row_group_lists.size(),
                    "[StorageV2] Number of remote files must match number of "
                    "row group lists");
+        AssertInfo(prepared_files.empty() ||
+                       prepared_files.size() == remote_files.size(),
+                   "[StorageV2] Prepared files must match remote files");
         auto& pool =
             ThreadPools::GetThreadPool(milvus::PriorityForLoad(priority));
 
@@ -215,6 +216,25 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
             if (row_groups.empty()) {
                 continue;
             }
+
+            std::shared_ptr<milvus_storage::PreparedParquetFile> prepared;
+            if (prepared_files.empty()) {
+                auto result = milvus_storage::PreparedParquetFile::Open(
+                    fs, file, milvus::storage::GetReaderProperties());
+                if (!result.ok()) {
+                    ThrowInfo(milvus::storage::ArrowStatusToErrorCode(
+                                  result.status()),
+                              "[StorageV2] Failed to prepare file {}: {}",
+                              file,
+                              result.status().ToString());
+                }
+                prepared = std::move(result).ValueOrDie();
+            } else {
+                prepared = prepared_files[file_idx];
+            }
+            AssertInfo(prepared != nullptr,
+                       "[StorageV2] Prepared file {} is null",
+                       file);
 
             // Use provided strategy to split row groups
             auto blocks = strategy->split(row_groups);
@@ -232,63 +252,59 @@ LoadWithStrategy(const std::vector<std::string>& remote_files,
                 memory_limit / blocks.size(), FILE_SLICE_SIZE.load());
 
             for (const auto& block : blocks) {
-                futures.emplace_back(pool.Submit(
-                    [block, fs, file, file_idx, schema, reader_memory_limit]() {
-                        AssertInfo(fs != nullptr,
-                                   "[StorageV2] file system is nullptr");
-                        auto result = milvus_storage::FileRowGroupReader::Make(
-                            fs,
-                            file,
-                            schema,
-                            reader_memory_limit,
-                            milvus::storage::GetReaderProperties(),
-                            milvus::storage::GetArrowReaderProperties());
-                        if (!result.ok()) {
-                            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(
-                                          result.status()),
-                                      "[StorageV2] Failed to create row group "
-                                      "reader: {}",
-                                      result.status().ToString());
-                        }
-                        auto row_group_reader = result.ValueOrDie();
-                        auto close_guard =
-                            folly::makeGuard([&row_group_reader]() {
-                                (void)row_group_reader->Close();
-                            });
+                futures.emplace_back(pool.Submit([block,
+                                                  prepared,
+                                                  file,
+                                                  file_idx,
+                                                  schema,
+                                                  reader_memory_limit]() {
+                    auto result = prepared->MakeReader(
+                        schema,
+                        reader_memory_limit,
+                        milvus::storage::GetArrowReaderProperties());
+                    if (!result.ok()) {
+                        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(
+                                      result.status()),
+                                  "[StorageV2] Failed to create row group "
+                                  "reader: {}",
+                                  result.status().ToString());
+                    }
+                    auto row_group_reader = result.ValueOrDie();
+                    auto close_guard = folly::makeGuard([&row_group_reader]() {
+                        (void)row_group_reader->Close();
+                    });
+                    auto status = row_group_reader->SetRowGroupOffsetAndCount(
+                        block.offset, block.count);
+                    if (!status.ok()) {
+                        ThrowInfo(
+                            milvus::storage::ArrowStatusToErrorCode(status),
+                            "[StorageV2] Failed to set row group offset "
+                            "and count {} and {} with error {}",
+                            block.offset,
+                            block.count,
+                            status.ToString());
+                    }
+                    auto ret = std::make_shared<ArrowDataWrapper>();
+                    for (int64_t i = 0; i < block.count; ++i) {
+                        std::shared_ptr<arrow::Table> table;
                         auto status =
-                            row_group_reader->SetRowGroupOffsetAndCount(
-                                block.offset, block.count);
+                            row_group_reader->ReadNextRowGroup(&table);
                         if (!status.ok()) {
                             ThrowInfo(
                                 milvus::storage::ArrowStatusToErrorCode(status),
-                                "[StorageV2] Failed to set row group offset "
-                                "and count {} and {} with error {}",
-                                block.offset,
-                                block.count,
+                                "[StorageV2] Failed to read row group "
+                                "{} from file {} with error {}",
+                                block.offset + i,
+                                file,
                                 status.ToString());
                         }
-                        auto ret = std::make_shared<ArrowDataWrapper>();
-                        for (int64_t i = 0; i < block.count; ++i) {
-                            std::shared_ptr<arrow::Table> table;
-                            auto status =
-                                row_group_reader->ReadNextRowGroup(&table);
-                            if (!status.ok()) {
-                                ThrowInfo(
-                                    milvus::storage::ArrowStatusToErrorCode(
-                                        status),
-                                    "[StorageV2] Failed to read row group "
-                                    "{} from file {} with error {}",
-                                    block.offset + i,
-                                    file,
-                                    status.ToString());
-                            }
-                            ret->arrow_tables.push_back(
-                                {file_idx,
-                                 static_cast<size_t>(block.offset + i),
-                                 table});
-                        }
-                        return ret;
-                    }));
+                        ret->arrow_tables.push_back(
+                            {file_idx,
+                             static_cast<size_t>(block.offset + i),
+                             table});
+                    }
+                    return ret;
+                }));
             }
 
             for (auto& future : futures) {
@@ -512,18 +528,18 @@ LoadCellBatchAsync(milvus::OpContext* op_ctx,
 }
 
 BatchReaderFactory
-MakeFileReaderFactory(std::vector<std::string> remote_files,
-                      milvus_storage::ArrowFileSystemPtr fs) {
-    auto files =
-        std::make_shared<std::vector<std::string>>(std::move(remote_files));
-    return [files, fs](size_t batch_key,
-                       int64_t rg_offset,
-                       int64_t total_rg_count,
-                       int64_t reader_memory_limit)
+MakeFileReaderFactory(PreparedParquetFiles prepared_files) {
+    return [files = std::move(prepared_files)](size_t batch_key,
+                                               int64_t rg_offset,
+                                               int64_t total_rg_count,
+                                               int64_t reader_memory_limit)
                -> arrow::Result<std::vector<std::shared_ptr<arrow::Table>>> {
-        const auto& file = (*files)[batch_key];
+        AssertInfo(batch_key < files.size() && files[batch_key] != nullptr,
+                   "[StorageV2] Missing prepared file for batch {}",
+                   batch_key);
+        const auto& file = files[batch_key];
         return ReadFileRowGroupBlock(
-            fs, file, rg_offset, total_rg_count, reader_memory_limit);
+            file, rg_offset, total_rg_count, reader_memory_limit);
     };
 }
 

@@ -14,7 +14,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
-#include "segcore/default_fs.h"
 
 #include <assert.h>
 #include <algorithm>
@@ -44,7 +43,7 @@
 #include "log/Log.h"
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/common/constants.h"
-#include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/format/parquet/file_reader.h"
 #include "mmap/Types.h"
 #include "segcore/InsertRecord.h"
 #include "segcore/Utils.h"
@@ -52,6 +51,7 @@
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/KeyRetriever.h"
+#include "storage/StatusToErrorCode.h"
 #include "storage/LoadOverheadController.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/Util.h"
@@ -70,6 +70,7 @@ GroupChunkTranslator::GroupChunkTranslator(
     GroupChunkType group_chunk_type,
     const std::unordered_map<FieldId, FieldMeta>& field_metas,
     FieldDataInfo column_group_info,
+    milvus_storage::ArrowFileSystemPtr fs,
     std::vector<std::string> insert_files,
     std::vector<milvus_storage::RowGroupMetadataVector>&& row_group_meta_list,
     bool use_mmap,
@@ -100,6 +101,7 @@ GroupChunkTranslator::GroupChunkTranslator(
       }()),
       field_metas_(field_metas),
       column_group_info_(column_group_info),
+      fs_(std::move(fs)),
       insert_files_(std::move(insert_files)),
       row_group_meta_list_(std::move(row_group_meta_list)),
       meta_(num_fields,
@@ -142,6 +144,8 @@ GroupChunkTranslator::GroupChunkTranslator(
                                    })),
       writeback_mode_(writeback_mode),
       load_priority_(load_priority) {
+    AssertInfo(insert_files_.size() == row_group_meta_list_.size(),
+               "[StorageV2] Files must match row group metadata");
     // Build prefix sum for O(1) lookup in get_cid_from_file_and_row_group_index
     file_row_group_prefix_sum_.reserve(row_group_meta_list_.size() + 1);
     file_row_group_prefix_sum_.push_back(
@@ -353,6 +357,10 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
         cells;
     cells.reserve(cids.size());
 
+    if (cids.empty()) {
+        return cells;
+    }
+
     auto max_cid = *std::max_element(cids.begin(), cids.end());
     if (max_cid >= meta_.chunk_memory_size_.size()) {
         ThrowInfo(
@@ -379,9 +387,28 @@ GroupChunkTranslator::get_cells(milvus::OpContext* ctx,
     }
 
     // Submit cell-batch loading tasks
-    auto fs = milvus::segcore::GetDefaultArrowFileSystem();
-
-    auto factory = milvus::segcore::MakeFileReaderFactory(insert_files_, fs);
+    // Preserve file_idx while preparing only files touched by this operation.
+    // Batch tasks share the contexts, but the translator never retains them.
+    PreparedParquetFiles prepared_files(insert_files_.size());
+    for (const auto& spec : cell_specs) {
+        if (prepared_files[spec.file_idx]) {
+            continue;
+        }
+        CheckCancellation(ctx, segment_id_, "GroupChunkTranslator::prepare");
+        const auto& path = insert_files_[spec.file_idx];
+        auto result = milvus_storage::PreparedParquetFile::Open(
+            fs_, path, storage::GetReaderProperties());
+        if (!result.ok()) {
+            ThrowInfo(storage::ArrowStatusToErrorCode(result.status()),
+                      "[StorageV2] Failed to prepare file {}: {}",
+                      path,
+                      result.status().ToString());
+        }
+        prepared_files[spec.file_idx] = std::move(result).ValueOrDie();
+    }
+    CheckCancellation(ctx, segment_id_, "GroupChunkTranslator::prepare");
+    auto factory =
+        milvus::segcore::MakeFileReaderFactory(std::move(prepared_files));
     auto finalize_cell =
         [this](const std::vector<std::shared_ptr<arrow::Table>>& tables,
                int64_t cid) {

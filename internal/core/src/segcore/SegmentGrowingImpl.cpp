@@ -2065,34 +2065,24 @@ SegmentGrowingImpl::load_column_group_data_internal(
         // Get all row groups for each file
         std::vector<std::vector<int64_t>> row_group_lists;
         row_group_lists.reserve(insert_files.size());
+        PreparedParquetFiles prepared_files;
+        prepared_files.reserve(insert_files.size());
         for (const auto& file : insert_files) {
-            auto result = milvus_storage::FileRowGroupReader::Make(
-                fs,
-                file,
-                milvus_storage::DEFAULT_READ_BUFFER_SIZE,
-                storage::GetReaderProperties(),
-                storage::GetArrowReaderProperties());
+            auto result = milvus_storage::PreparedParquetFile::Open(
+                fs, file, storage::GetReaderProperties());
             if (!result.ok()) {
                 ThrowInfo(
-                    milvus::storage::ArrowStatusToErrorCode(result),
-                    "[StorageV2] Failed to create file row group reader: " +
-                        result.status().ToString());
+                    milvus::storage::ArrowStatusToErrorCode(result.status()),
+                    "[StorageV2] Failed to prepare file {}: {}",
+                    file,
+                    result.status().ToString());
             }
-            auto reader = result.ValueOrDie();
-            auto row_group_num =
-                reader->file_metadata()->GetRowGroupMetadataVector().size();
+            auto prepared = std::move(result).ValueOrDie();
+            auto row_group_num = prepared->row_group_metadata().size();
             std::vector<int64_t> all_row_groups(row_group_num);
             std::iota(all_row_groups.begin(), all_row_groups.end(), 0);
             row_group_lists.push_back(all_row_groups);
-            auto status = reader->Close();
-            if (!status.ok()) {
-                ThrowInfo(milvus::storage::ArrowStatusToErrorCode(status),
-                          "[StorageV2] failed to close file reader when get "
-                          "row group "
-                          "metadata from file {} with error {}",
-                          file,
-                          status.ToString());
-            }
+            prepared_files.push_back(std::move(prepared));
         }
 
         // create parallel degree split strategy
@@ -2107,7 +2097,8 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                     row_group_lists,
                                     fs,
                                     nullptr,
-                                    infos.load_priority);
+                                    infos.load_priority,
+                                    prepared_files);
         });
 
         LOG_INFO(
