@@ -168,13 +168,12 @@ var (
 	// than "stored bytes are corrupt" — for the latter use ErrDataIntegrity.
 	ErrSerializationFailed = newMilvusError("data serialization or deserialization failed", 1004, false)
 
-	// Data integrity check failed — persisted data or a storage record violates
-	// its schema/layout (missing column, type/row-count mismatch, illegal null,
-	// malformed binlog/header/stats). Retrying the same data will not help.
-	// Detection in a writer does not prove an internal execution error, nor
-	// does this code prove on-disk corruption: preserve stage/field context.
-	// Distinct from ErrSerializationFailed (process step failed),
-	// ErrServiceInternal (execution/state contract) and caller InputError.
+	// Data integrity check failed — bytes already on disk (binlog payload,
+	// event header extras, stats buffer) don't match the layout we expect from
+	// the schema (type mismatch, valuesRead vs rows mismatch, unknown column
+	// type, malformed event header). Likely permanent corruption; retry won't
+	// help. Distinct from ErrSerializationFailed (process step failed) and
+	// ErrParameterInvalid (caller-input we control).
 	ErrDataIntegrity = newMilvusError("data integrity check failed", 1009, false)
 
 	// Storage subsystem fallback — used for non-IO / non-serde / non-client-input

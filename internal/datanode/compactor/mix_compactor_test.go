@@ -1259,18 +1259,16 @@ func getRow(magic int64, ts int64) map[int64]interface{} {
 				IntData: &schemapb.IntArray{Data: []int32{1, 2, 3}},
 			},
 		},
-		JSONField: []byte(`{"batch":ok}`),
-		// Persisted non-nullable fields already contain their defaults. This
-		// fixture bypasses proxy default filling and must not store nulls.
-		BoolFieldWithDefaultValue:    true,
-		Int8FieldWithDefaultValue:    int8(10),
-		Int16FieldWithDefaultValue:   int16(10),
-		Int32FieldWithDefaultValue:   int32(10),
-		Int64FieldWithDefaultValue:   int64(10),
-		FloatFieldWithDefaultValue:   float32(10),
-		DoubleFieldWithDefaultValue:  float64(10),
-		StringFieldWithDefaultValue:  "a",
-		VarCharFieldWithDefaultValue: "a",
+		JSONField:                    []byte(`{"batch":ok}`),
+		BoolFieldWithDefaultValue:    nil,
+		Int8FieldWithDefaultValue:    nil,
+		Int16FieldWithDefaultValue:   nil,
+		Int32FieldWithDefaultValue:   nil,
+		Int64FieldWithDefaultValue:   nil,
+		FloatFieldWithDefaultValue:   nil,
+		DoubleFieldWithDefaultValue:  nil,
+		StringFieldWithDefaultValue:  nil,
+		VarCharFieldWithDefaultValue: nil,
 	}
 }
 

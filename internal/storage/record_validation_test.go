@@ -17,18 +17,16 @@
 package storage
 
 import (
-	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
-	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -53,13 +51,116 @@ func requireIntegrityFailure(t *testing.T, err error) {
 	require.NotEqual(t, "true", status.GetExtraInfo()["is_input_error"])
 }
 
-func TestToWriterRecordRejectsMalformedRecord(t *testing.T) {
+func TestSortPreservesDefaultValues(t *testing.T) {
+	for _, nullable := range []bool{false, true} {
+		for _, path := range []string{"sort", "merge", "append"} {
+			t.Run(fmt.Sprintf("%s/nullable=%t", path, nullable), func(t *testing.T) {
+				schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+					{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64, Nullable: nullable,
+						DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 10}}},
+				}}
+				keys := mergeSortTestRec(t, map[FieldID][]int64{100: {1, 2}}, nil)
+				defer keys.Release()
+				b := array.NewInt64Builder(memory.DefaultAllocator)
+				b.AppendNull()
+				b.Append(20)
+				values := b.NewArray()
+				b.Release()
+				defer values.Release()
+				input := &validationRecord{rows: 2, columns: map[FieldID]arrow.Array{100: keys.Column(100), 101: values}}
+				var got []int64
+				writer := &MockRecordWriter{writefn: func(r Record) error {
+					out := r.Column(101).(*array.Int64)
+					require.Zero(t, out.NullN())
+					got = append(got, out.Int64Values()...)
+					return nil
+				}}
+				readers := []RecordReader{&oneShotRecordReader{rec: input}}
+				validator, err := NewRecordValidator(schema)
+				require.NoError(t, err)
+				readers[0] = validator.WrapReader(readers[0])
+				output := validator.WrapWriter(writer)
+				switch path {
+				case "sort":
+					_, _, err = Sort(1024, schema, readers, output, func(Record, int, int) bool { return true }, []int64{100})
+				case "merge":
+					_, err = MergeSort(1024, schema, readers, output, func(Record, int, int) bool { return true }, []int64{100})
+				case "append":
+					rb := NewRecordBuilder(schema)
+					defer rb.Release()
+					err = rb.Append(input, 0, input.Len())
+					if err == nil {
+						out := rb.Build()
+						defer out.Release()
+						err = writer.Write(out)
+					}
+				}
+				require.NoError(t, err)
+				require.Equal(t, []int64{10, 20}, got)
+			})
+		}
+	}
+}
+
+func TestSortValidatesOnlySurvivingOutputBeforeWriter(t *testing.T) {
+	for _, malformed := range []string{"null", "vector width"} {
+		for _, merge := range []bool{false, true} {
+			for _, filtered := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/merge=%t/filtered=%t", malformed, merge, filtered), func(t *testing.T) {
+					field := &schemapb.FieldSchema{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64}
+					var column arrow.Array
+					if malformed == "null" {
+						column = array.MakeArrayOfNull(memory.DefaultAllocator, arrow.PrimitiveTypes.Int64, 1)
+					} else {
+						field.DataType, field.Nullable = schemapb.DataType_FloatVector, true
+						field.TypeParams = []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}}
+						b := array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+						b.Append([]byte{1, 2}) // two float32 values require eight bytes
+						column = b.NewArray()
+						b.Release()
+					}
+					defer column.Release()
+					schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+						{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64}, field,
+					}}
+					keys := mergeSortTestRec(t, map[FieldID][]int64{100: {1}}, nil)
+					defer keys.Release()
+					input := &validationRecord{rows: 1, columns: map[FieldID]arrow.Array{100: keys.Column(100), 101: column}}
+					writes := 0
+					writer := &MockRecordWriter{writefn: func(Record) error { writes++; return nil }}
+					readers := []RecordReader{&oneShotRecordReader{rec: input}}
+					predicate := func(Record, int, int) bool { return !filtered }
+					validator, err := NewRecordValidator(schema)
+					require.NoError(t, err)
+					readers[0] = validator.WrapReader(readers[0])
+					output := validator.WrapWriter(writer)
+					if merge {
+						_, err = MergeSort(1024, schema, readers, output, predicate, []int64{100})
+					} else {
+						_, _, err = Sort(1024, schema, readers, output, predicate, []int64{100})
+					}
+					if filtered {
+						require.NoError(t, err)
+					} else {
+						requireIntegrityFailure(t, err)
+					}
+					require.Zero(t, writes, "invalid or filtered output must not reach writer statistics or native IO")
+				})
+			}
+		}
+	}
+}
+
+func TestRecordValidatorRejectsMalformedRecord(t *testing.T) {
 	field := &schemapb.FieldSchema{
 		FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector,
 		TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}},
 	}
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}}
 	physical, err := ConvertToArrowSchema(schema, false)
+	require.NoError(t, err)
+	validator, err := NewRecordValidator(schema)
 	require.NoError(t, err)
 	valid := array.NewFixedSizeBinaryBuilder(memory.DefaultAllocator, &arrow.FixedSizeBinaryType{ByteWidth: 8})
 	valid.Append(make([]byte, 8))
@@ -82,54 +183,10 @@ func TestToWriterRecordRejectsMalformedRecord(t *testing.T) {
 				defer input.Release()
 			}
 			require.NotPanics(t, func() {
-				record, release, err := toWriterRecord(input, schema, physical)
-				if release != nil {
-					defer release()
-				}
-				requireIntegrityFailure(t, err)
-				require.Nil(t, record)
+				requireIntegrityFailure(t, validator.Validate(input))
 			})
 		})
 	}
-}
-
-func TestToWriterRecordSlicesLogicalRowsBeforeFFI(t *testing.T) {
-	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64}}}
-	physical, err := ConvertToArrowSchema(schema, false)
-	require.NoError(t, err)
-	b := array.NewInt64Builder(memory.DefaultAllocator)
-	b.AppendValues([]int64{10, 20, 0}, []bool{true, true, false})
-	column := b.NewArray()
-	b.Release()
-	defer column.Release()
-	input := NewSimpleArrowRecord(array.NewRecord(physical, []arrow.Array{column}, 2), map[FieldID]int{100: 0})
-	defer input.Release()
-	out, release, err := toWriterRecord(input, schema, physical)
-	require.NoError(t, err)
-	defer release()
-	require.EqualValues(t, 2, out.NumRows())
-	require.Equal(t, 2, out.Column(0).Len(), "V2 FFI derives the row count from the first array")
-	require.Zero(t, out.Column(0).NullN(), "nulls beyond the logical record are not input rows")
-	require.Same(t, column.Data().Buffers()[1], out.Column(0).Data().Buffers()[1], "slicing must not copy the payload")
-}
-
-func TestToWriterRecordRejectsNullDespiteDefault(t *testing.T) {
-	field := &schemapb.FieldSchema{
-		FieldID: 100, Name: "flag", DataType: schemapb.DataType_Bool,
-		DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_BoolData{BoolData: true}},
-	}
-	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}}
-	physical, err := ConvertToArrowSchema(schema, false)
-	require.NoError(t, err)
-	col := array.MakeArrayOfNull(memory.DefaultAllocator, arrow.FixedWidthTypes.Boolean, 1)
-	defer col.Release()
-	// Defaults are filled before persistence, not by a native writer. A
-	// default does not make a non-nullable stored column nullable.
-	_, release, err := toWriterRecord(&validationRecord{rows: 1, columns: map[FieldID]arrow.Array{100: col}}, schema, physical)
-	if release != nil {
-		defer release()
-	}
-	requireIntegrityFailure(t, err)
 }
 
 func TestSortRejectsMissingFieldBeforePredicate(t *testing.T) {
@@ -137,6 +194,8 @@ func TestSortRejectsMissingFieldBeforePredicate(t *testing.T) {
 		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
 		{FieldID: 101, Name: "missing", DataType: schemapb.DataType_Int64},
 	}}
+	validator, err := NewRecordValidator(schema)
+	require.NoError(t, err)
 	input := mergeSortTestRec(t, map[FieldID][]int64{100: {1}}, nil)
 	defer input.Release()
 	for _, merge := range []bool{false, true} {
@@ -144,7 +203,7 @@ func TestSortRejectsMissingFieldBeforePredicate(t *testing.T) {
 		predicate := func(r Record, _, _ int) bool { calls++; r.Column(101); return true }
 		require.NotPanics(t, func() {
 			var err error
-			readers := []RecordReader{&oneShotRecordReader{rec: input}}
+			readers := []RecordReader{validator.WrapReader(&oneShotRecordReader{rec: input})}
 			if merge {
 				_, err = MergeSort(1024, schema, readers, nil, predicate, []int64{100})
 			} else {
@@ -156,7 +215,7 @@ func TestSortRejectsMissingFieldBeforePredicate(t *testing.T) {
 	}
 }
 
-func TestToWriterRecordValidatesVisibleVectorElements(t *testing.T) {
+func TestSortPreservesVectorElementValidation(t *testing.T) {
 	for _, elementNullable := range []bool{false, true} {
 		field := &schemapb.FieldSchema{
 			FieldID: 101, Name: "vectors", DataType: schemapb.DataType_ArrayOfVector,
@@ -166,7 +225,9 @@ func TestToWriterRecordValidatesVisibleVectorElements(t *testing.T) {
 		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}}
 		physical, err := ConvertToArrowSchema(schema, false)
 		require.NoError(t, err)
-		for _, scenario := range []string{"visible null", "null parent", "sliced parent", "wrong width"} {
+		validator, err := NewRecordValidator(schema)
+		require.NoError(t, err)
+		for _, scenario := range []string{"visible null", "null parent", "sliced parent", "wrong width", "filtered null"} {
 			if scenario == "wrong width" && !elementNullable {
 				continue
 			}
@@ -195,244 +256,32 @@ func TestToWriterRecordValidatesVisibleVectorElements(t *testing.T) {
 				}
 				input := NewSimpleArrowRecord(array.NewRecord(physical, []arrow.Array{column}, int64(column.Len())), map[FieldID]int{101: 0})
 				defer input.Release()
-				out, release, err := toWriterRecord(input, schema, physical)
-				if release != nil {
-					defer release()
-				}
-				if scenario == "wrong width" || (scenario == "visible null" && !elementNullable) {
-					requireIntegrityFailure(t, err)
-					require.Nil(t, out)
-				} else {
-					require.NoError(t, err)
+				for _, merge := range []bool{false, true} {
+					t.Run(fmt.Sprintf("merge=%t", merge), func(t *testing.T) {
+						writes := 0
+						writer := validator.WrapWriter(&MockRecordWriter{writefn: func(Record) error { writes++; return nil }})
+						readers := []RecordReader{validator.WrapReader(&oneShotRecordReader{rec: input})}
+						predicate := func(Record, int, int) bool { return scenario != "filtered null" }
+						var err error
+						if merge {
+							_, err = MergeSort(1024, schema, readers, writer, predicate, nil)
+						} else {
+							_, _, err = Sort(1024, schema, readers, writer, predicate, nil)
+						}
+						invalid := scenario == "wrong width" || (scenario == "visible null" && !elementNullable)
+						if invalid {
+							requireIntegrityFailure(t, err)
+						} else {
+							require.NoError(t, err)
+						}
+						if invalid || scenario == "filtered null" {
+							require.Zero(t, writes)
+						} else {
+							require.Positive(t, writes)
+						}
+					})
 				}
 			})
 		}
-	}
-}
-
-func TestToWriterRecordRejectsNullableVectorWrongWidth(t *testing.T) {
-	field := &schemapb.FieldSchema{
-		FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector, Nullable: true,
-		TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}},
-	}
-	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}}
-	physical, err := ConvertToArrowSchema(schema, false)
-	require.NoError(t, err)
-	b := array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
-	b.Append([]byte{1, 2})
-	b.AppendNull()
-	column := b.NewArray()
-	b.Release()
-	defer column.Release()
-	input := NewSimpleArrowRecord(array.NewRecord(physical, []arrow.Array{column}, 2), map[FieldID]int{101: 0})
-	defer input.Release()
-	out, release, err := toWriterRecord(input, schema, physical)
-	if release != nil {
-		defer release()
-	}
-	requireIntegrityFailure(t, err)
-	require.Nil(t, out)
-}
-
-func TestBinlogWritersRejectMalformedRecordBeforeInitialization(t *testing.T) {
-	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-		{FieldID: 1, Name: "ts", DataType: schemapb.DataType_Int64},
-		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-	}}
-	physical, err := ConvertToArrowSchema(schema, true)
-	require.NoError(t, err)
-	for _, kind := range []string{"v2", "v3", "text"} {
-		t.Run(kind, func(t *testing.T) {
-			// No allocator, stats collectors, or native handles: malformed input
-			// must fail before any of those stateful resources is accessed.
-			base := packedBinlogRecordWriterBase{schema: schema, arrowSchema: physical}
-			var writer BinlogRecordWriter
-			switch kind {
-			case "v2":
-				writer = &PackedBinlogRecordWriter{packedBinlogRecordWriterBase: base}
-			case "v3":
-				writer = &PackedManifestRecordWriter{packedBinlogRecordWriterBase: base}
-			case "text":
-				writer = &PackedTextManifestRecordWriter{packedBinlogRecordWriterBase: base}
-			}
-			require.NotPanics(t, func() {
-				requireIntegrityFailure(t, writer.Write(&validationRecord{rows: 1}))
-			})
-			require.Zero(t, writer.GetRowNum())
-			require.Zero(t, writer.GetWrittenUncompressed())
-		})
-	}
-}
-
-// Filtering a row does not require reading its nested payload. Input guards
-// must protect column access without scanning elements that will not be used.
-func TestSortDoesNotScanFilteredVectorElements(t *testing.T) {
-	field := &schemapb.FieldSchema{
-		FieldID: 101, Name: "vectors", DataType: schemapb.DataType_ArrayOfVector,
-		ElementType: schemapb.DataType_FloatVector,
-		TypeParams:  []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}},
-	}
-	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}}
-	physical, err := ConvertToArrowSchema(schema, true)
-	require.NoError(t, err)
-	b := array.NewBuilder(memory.DefaultAllocator, physical.Field(0).Type).(*array.ListBuilder)
-	b.Append(true)
-	b.ValueBuilder().AppendNull()
-	col := b.NewArray()
-	b.Release()
-	defer col.Release()
-	rec := NewSimpleArrowRecord(array.NewRecord(physical, []arrow.Array{col}, 1), map[FieldID]int{101: 0})
-	defer rec.Release()
-	for _, merge := range []bool{false, true} {
-		calls := 0
-		predicate := func(Record, int, int) bool { calls++; return false }
-		readers := []RecordReader{&oneShotRecordReader{rec: rec}}
-		if merge {
-			_, err = MergeSort(1024, schema, readers, nil, predicate, nil)
-		} else {
-			_, _, err = Sort(1024, schema, readers, nil, predicate, nil)
-		}
-		require.NoError(t, err)
-		require.Equal(t, 1, calls)
-	}
-}
-
-func TestRecordBuilderRejectsMalformedColumns(t *testing.T) {
-	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64}}}
-	good := mergeSortTestRec(t, map[FieldID][]int64{100: {1}}, nil)
-	defer good.Release()
-	wrong := array.MakeArrayOfNull(memory.DefaultAllocator, arrow.BinaryTypes.String, 1)
-	defer wrong.Release()
-	for name, rec := range map[string]Record{
-		"missing": mergeSortTestRec(t, map[FieldID][]int64{101: {1}}, nil),
-		"short":   &validationRecord{rows: 2, columns: map[FieldID]arrow.Array{100: good.Column(100)}},
-		"type":    &validationRecord{rows: 1, columns: map[FieldID]arrow.Array{100: wrong}},
-	} {
-		t.Run(name, func(t *testing.T) {
-			defer rec.Release()
-			builder := NewRecordBuilder(schema)
-			defer builder.Release()
-			require.NotPanics(t, func() { requireIntegrityFailure(t, builder.Append(rec, 0, rec.Len())) })
-		})
-	}
-}
-
-func TestRecordBuilderRejectsInvalidListOffsets(t *testing.T) {
-	field := &schemapb.FieldSchema{
-		FieldID: 101, Name: "vectors", DataType: schemapb.DataType_ArrayOfVector,
-		ElementType: schemapb.DataType_FloatVector,
-		TypeParams:  []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}},
-	}
-	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}}
-	physical, err := ConvertToArrowSchema(schema, true)
-	require.NoError(t, err)
-	b := array.NewBuilder(memory.DefaultAllocator, physical.Field(0).Type).(*array.ListBuilder)
-	b.Append(true)
-	b.ValueBuilder().(*array.FixedSizeBinaryBuilder).Append(make([]byte, 8))
-	col := b.NewArray()
-	b.Release()
-	defer col.Release()
-	// Corrupt only the owned offset buffer, leaving one real child value.
-	arrow.Int32Traits.CastFromBytes(col.Data().Buffers()[1].Bytes())[1] = 2
-	rec := &validationRecord{rows: 1, columns: map[FieldID]arrow.Array{101: col}}
-	builder := NewRecordBuilder(schema)
-	defer builder.Release()
-	require.NotPanics(t, func() { requireIntegrityFailure(t, builder.Append(rec, 0, 1)) })
-}
-
-func TestManifestWriterPreservesWriteErrorCodes(t *testing.T) {
-	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-		{FieldID: 1, Name: "ts", DataType: schemapb.DataType_Int64},
-		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-	}}
-	physical, err := ConvertToArrowSchema(schema, true)
-	require.NoError(t, err)
-	for _, tc := range []struct {
-		name      string
-		err       error
-		code      int32
-		retriable bool
-	}{
-		{"transient FFI", packed.ErrLoonTransient, 1008, false},
-		{"permanent FFI", packed.ErrLoonPermanent, 1008, false},
-		{"untyped", errors.New("native write failed"), 1008, false},
-		{"integrity", merr.ErrDataIntegrity, 1009, false},
-		{"typed transient", merr.ErrServiceUnavailable, 2, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			p := mockey.Mock((*packed.FFIPackedWriter).WriteRecordBatch).Return(tc.err).Build()
-			defer p.UnPatch()
-			writer := &PackedManifestRecordWriter{
-				packedBinlogRecordWriterBase: packedBinlogRecordWriterBase{
-					schema: schema, arrowSchema: physical,
-					pkCollector: &PkStatsCollector{}, bm25Collector: &Bm25StatsCollector{},
-				},
-				writer: &packedRecordBatchWriter{schema: schema, arrowSchema: physical, writer: &packed.FFIPackedWriter{}},
-			}
-			rec := mergeSortTestRec(t, map[FieldID][]int64{1: {10}, 100: {1}}, nil)
-			defer rec.Release()
-			err := writer.Write(rec)
-			require.ErrorIs(t, err, tc.err)
-			require.Equal(t, tc.code, merr.Status(err).GetCode())
-			require.Equal(t, tc.retriable, merr.Status(err).GetRetriable())
-		})
-	}
-}
-
-func TestManifestWriterValidatesOnceBeforeStatisticsAndNativeWrite(t *testing.T) {
-	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-		{FieldID: 1, Name: "ts", DataType: schemapb.DataType_Int64},
-		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-	}}
-	physical, err := ConvertToArrowSchema(schema, true)
-	require.NoError(t, err)
-	for _, textWriter := range []bool{false, true} {
-		t.Run(map[bool]string{false: "packed", true: "text"}[textWriter], func(t *testing.T) {
-			// Native IO is substituted; the validator spy delegates to the real
-			// method and checks the no-duplicate-full-scan contract.
-			validations := 0
-			var validate func(*RecordValidator, Record) error
-			p0 := mockey.Mock((*RecordValidator).Validate).To(func(v *RecordValidator, r Record) error {
-				validations++
-				return validate(v, r)
-			}).Origin(&validate).Build()
-			defer p0.UnPatch()
-			writes := 0
-			write := func(_ arrow.Record) error { writes++; return nil }
-			p1 := mockey.Mock((*packed.FFIPackedWriter).WriteRecordBatch).To(func(_ *packed.FFIPackedWriter, r arrow.Record) error { return write(r) }).Build()
-			defer p1.UnPatch()
-			p2 := mockey.Mock((*packed.FFISegmentWriter).Write).To(func(_ *packed.FFISegmentWriter, r arrow.Record) error { return write(r) }).Build()
-			defer p2.UnPatch()
-			base := packedBinlogRecordWriterBase{
-				schema: schema, arrowSchema: physical,
-				pkCollector: &PkStatsCollector{}, bm25Collector: &Bm25StatsCollector{},
-			}
-			var writer BinlogRecordWriter
-			var state *packedBinlogRecordWriterBase
-			if textWriter {
-				w := &PackedTextManifestRecordWriter{
-					packedBinlogRecordWriterBase: base,
-					writer:                       &packedTextBatchWriter{schema: schema, arrowSchema: physical, writer: &packed.FFISegmentWriter{}},
-				}
-				writer, state = w, &w.packedBinlogRecordWriterBase
-			} else {
-				w := &PackedManifestRecordWriter{
-					packedBinlogRecordWriterBase: base,
-					writer:                       &packedRecordBatchWriter{schema: schema, arrowSchema: physical, writer: &packed.FFIPackedWriter{}},
-				}
-				writer, state = w, &w.packedBinlogRecordWriterBase
-			}
-			good := mergeSortTestRec(t, map[FieldID][]int64{1: {10}, 100: {1}}, nil)
-			defer good.Release()
-			require.NoError(t, writer.Write(good))
-			require.Equal(t, 1, validations, "outer and inner writers share the prepared record")
-			bytesBefore := writer.GetWrittenUncompressed()
-			bad := mergeSortTestRec(t, map[FieldID][]int64{1: {99}}, nil)
-			defer bad.Release()
-			requireIntegrityFailure(t, writer.Write(bad))
-			require.EqualValues(t, 10, state.tsTo, "bad batch must not mutate statistics")
-			require.Equal(t, bytesBefore, writer.GetWrittenUncompressed())
-			require.Equal(t, 1, writes, "bad batch must not reach native IO")
-		})
 	}
 }

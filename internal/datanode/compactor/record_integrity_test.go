@@ -17,12 +17,16 @@
 package compactor
 
 import (
+	"context"
+
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/bytedance/mockey"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 )
 
 type missingFieldRecord struct {
@@ -66,15 +70,15 @@ func (s *SortCompactionTaskSuite) TestRecordIntegrityFailureSurvivesExecutor() {
 			call.Maybe()
 		}
 	}
-	var original func(uint64, *schemapb.CollectionSchema, []storage.RecordReader, storage.RecordWriter, func(storage.Record, int, int) bool, []int64) (int, *storage.SortTimings, error)
-	patch := mockey.Mock(storage.Sort).To(func(size uint64, schema *schemapb.CollectionSchema, readers []storage.RecordReader,
-		writer storage.RecordWriter, predicate func(storage.Record, int, int) bool, keys []int64,
-	) (int, *storage.SortTimings, error) {
-		wrapped := make([]storage.RecordReader, len(readers))
-		for i, reader := range readers {
-			wrapped[i] = &missingFieldReader{RecordReader: reader, missing: keys[0]}
+	var original func(context.Context, *datapb.CompactionSegmentBinlogs, *schemapb.CollectionSchema, *indexpb.StorageConfig, []packed.TextColumnConfig, ...storage.RwOption) (storage.RecordReader, map[int64]struct{}, error)
+	patch := mockey.Mock(newTextDecodedCompactionSegmentRecordReader).To(func(ctx context.Context, segment *datapb.CompactionSegmentBinlogs,
+		schema *schemapb.CollectionSchema, config *indexpb.StorageConfig, text []packed.TextColumnConfig, opts ...storage.RwOption,
+	) (storage.RecordReader, map[int64]struct{}, error) {
+		reader, fields, err := original(ctx, segment, schema, config, text, opts...)
+		if err != nil {
+			return nil, nil, err
 		}
-		return original(size, schema, wrapped, writer, predicate, keys)
+		return &missingFieldReader{RecordReader: reader, missing: s.task.sortByFieldIDs[0]}, fields, nil
 	}).Origin(&original).Build()
 	defer patch.UnPatch()
 

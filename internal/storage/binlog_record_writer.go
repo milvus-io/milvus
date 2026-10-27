@@ -86,7 +86,6 @@ func SegmentPartitionBasePath(rootPath string, collectionID, partitionID UniqueI
 }
 
 type packedBinlogRecordWriterBase struct {
-	validator *RecordValidator
 	// attributes
 	collectionID         UniqueID
 	partitionID          UniqueID
@@ -126,37 +125,6 @@ type packedBinlogRecordWriterBase struct {
 
 	// Track null counts per field for nullable fields
 	nullCounts map[FieldID]int64
-}
-
-// prepareRecord runs before column grouping, statistics or native writes. The
-// returned record uses exact logical lengths, so collectors cannot count tail
-// values that the record does not expose. Lower packed writers reuse this
-// validation within this synchronous Write call.
-func (pw *packedBinlogRecordWriterBase) prepareRecord(r Record) (Record, func(), error) {
-	if pw.validator == nil {
-		var err error
-		pw.validator, err = NewRecordValidator(pw.schema, pw.arrowSchema)
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-	rec, release, err := prepareWriterRecord(r, pw.schema, pw.arrowSchema, &pw.validator)
-	if err != nil {
-		return nil, nil, err
-	}
-	return &validatedWriterRecord{
-		simpleArrowRecord: &simpleArrowRecord{r: rec, field2Col: pw.validator.field2Col},
-		schema:            pw.schema,
-	}, release, nil
-}
-
-// wrapPackedRecordWriteError translates untyped native failures into the
-// existing storage fallback without masking validation or other merr codes.
-func wrapPackedRecordWriteError(err error) error {
-	if merr.IsMilvusError(err) {
-		return merr.Wrap(err, "write record batch error")
-	}
-	return merr.WrapErrStorage(err, "write record batch error")
 }
 
 func (pw *packedBinlogRecordWriterBase) getColumnStatsFromRecord(r Record, allFields []*schemapb.FieldSchema) map[int64]storagecommon.ColumnStats {
@@ -323,14 +291,6 @@ type PackedBinlogRecordWriter struct {
 }
 
 func (pw *PackedBinlogRecordWriter) Write(r Record) error {
-	r, release, err := pw.prepareRecord(r)
-	if err != nil {
-		return err
-	}
-	defer release()
-	if r.Len() == 0 {
-		return nil
-	}
 	if err := pw.initWriters(r); err != nil {
 		return err
 	}
@@ -362,9 +322,9 @@ func (pw *PackedBinlogRecordWriter) Write(r Record) error {
 
 	pw.collectNullCounts(r)
 
-	err = pw.writer.Write(r)
+	err := pw.writer.Write(r)
 	if err != nil {
-		return wrapPackedRecordWriteError(err)
+		return merr.WrapErrStorage(err, "write record batch error")
 	}
 	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
 	return nil
@@ -443,7 +403,7 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 	writerFormat string,
 	pkStatsConfig *PkStatsConfig,
 ) (*PackedBinlogRecordWriter, error) {
-	arrowSchema, err := ConvertToArrowSchema(schema, false)
+	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
 		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
 	}
@@ -497,14 +457,6 @@ type PackedManifestRecordWriter struct {
 }
 
 func (pw *PackedManifestRecordWriter) Write(r Record) error {
-	r, release, err := pw.prepareRecord(r)
-	if err != nil {
-		return err
-	}
-	defer release()
-	if r.Len() == 0 {
-		return nil
-	}
 	if err := pw.initWriters(r); err != nil {
 		return err
 	}
@@ -536,9 +488,9 @@ func (pw *PackedManifestRecordWriter) Write(r Record) error {
 
 	pw.collectNullCounts(r)
 
-	err = pw.writer.Write(r)
+	err := pw.writer.Write(r)
 	if err != nil {
-		return wrapPackedRecordWriteError(err)
+		return merr.WrapErrStorage(err, "write record batch error")
 	}
 	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
 	return nil
@@ -687,9 +639,6 @@ func newPackedManifestRecordWriter(collectionID, partitionID, segmentID UniqueID
 	if err != nil {
 		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
 	}
-	if textRefsAsBinary {
-		arrowSchema = overrideTextFieldsToBinary(schema, arrowSchema)
-	}
 
 	writer := &PackedManifestRecordWriter{
 		packedBinlogRecordWriterBase: packedBinlogRecordWriterBase{
@@ -742,14 +691,6 @@ type PackedTextManifestRecordWriter struct {
 }
 
 func (pw *PackedTextManifestRecordWriter) Write(r Record) error {
-	r, release, err := pw.prepareRecord(r)
-	if err != nil {
-		return err
-	}
-	defer release()
-	if r.Len() == 0 {
-		return nil
-	}
 	if err := pw.initWriters(r); err != nil {
 		return err
 	}
@@ -781,9 +722,9 @@ func (pw *PackedTextManifestRecordWriter) Write(r Record) error {
 
 	pw.collectNullCounts(r)
 
-	err = pw.writer.Write(r)
+	err := pw.writer.Write(r)
 	if err != nil {
-		return wrapPackedRecordWriteError(err)
+		return merr.WrapErrStorage(err, "write record batch error")
 	}
 	pw.writtenUncompressed = pw.writer.GetWrittenUncompressed()
 	return nil
@@ -889,12 +830,6 @@ func NewPackedTextManifestRecordWriter(
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
 		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
-	}
-	for _, tc := range textColumnConfigs {
-		if tc.RewriteMode {
-			arrowSchema = overrideTextFieldsToBinary(schema, arrowSchema)
-			break
-		}
 	}
 
 	writer := &PackedTextManifestRecordWriter{

@@ -595,12 +595,9 @@ func functionOutputIndexesToMaterialize(functionSchema *schemapb.FunctionSchema,
 }
 
 func stringInputsFromRecord(rec storage.Record, fieldID int64) ([]string, error) {
-	col, ok := storage.TryRecordColumn(rec, fieldID)
-	if !ok || col == nil {
-		return nil, merr.WrapErrDataIntegrityMsg("input field %d not found in record", fieldID)
-	}
-	if rec.Len() < 0 || col.Len() < rec.Len() {
-		return nil, merr.WrapErrDataIntegrityMsg("input field %d has length %d, record rows=%d", fieldID, col.Len(), rec.Len())
+	col := rec.Column(fieldID)
+	if col == nil {
+		return nil, merr.WrapErrFunctionFailedMsg("input field %d not found in record", fieldID)
 	}
 	inputs := make([]string, rec.Len())
 	switch values := col.(type) {
@@ -613,7 +610,7 @@ func stringInputsFromRecord(rec storage.Record, fieldID int64) ([]string, error)
 	case *array.Binary:
 		return nil, merr.WrapErrFunctionFailedMsg("cannot materialize bm25 from text binary values without lob decoding")
 	default:
-		return nil, merr.WrapErrDataIntegrityMsg("input field %d data type must be varchar or text for bm25 function materialization, got %T", fieldID, col)
+		return nil, merr.WrapErrFunctionFailedMsg("input field %d data type must be varchar or text for bm25 function materialization, got %T", fieldID, col)
 	}
 	return inputs, nil
 }

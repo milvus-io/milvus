@@ -25,15 +25,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// RecordValidator checks the Milvus record contract before consumers access
-// columns or cross the native writer boundary. Construct once per immutable
-// schema, not per row. Violations describe the observed data, not its origin:
-// a writer-side violation is still DataIntegrity, not proof of a writer bug.
+// RecordValidator guards compaction's sorting inputs and outputs. It is opt-in:
+// shared sort, record builders and writers retain their existing contracts.
+// Construct once per immutable schema, after choosing the materialized fields.
 type RecordValidator struct {
-	physical  *arrow.Schema
-	fields    []recordFieldContract
-	field2Col map[FieldID]int
-	reader    bool
+	fields []recordFieldContract
 }
 
 type recordFieldContract struct {
@@ -42,35 +38,23 @@ type recordFieldContract struct {
 	vectorWidth int
 }
 
-// NewRecordValidator accepts an explicit physical schema for writers (including
-// binary TEXT/LOB references). With nil physical, readers accept either TEXT
-// representation; they may legitimately preserve refs instead of decoding them.
-// Callers must omit pending function outputs from schema until materialized.
-func NewRecordValidator(schema *schemapb.CollectionSchema, physical *arrow.Schema) (*RecordValidator, error) {
+// NewRecordValidator accepts both decoded TEXT and binary LOB references.
+// Physical projection remains the writer's responsibility.
+func NewRecordValidator(schema *schemapb.CollectionSchema) (*RecordValidator, error) {
 	if schema == nil {
 		return nil, merr.WrapErrServiceInternalMsg("record validator requires a schema")
 	}
-	reader := physical == nil
-	if physical == nil {
-		var err error
-		physical, err = ConvertToArrowSchema(schema, true)
-		if err != nil {
-			return nil, err
-		}
+	physical, err := ConvertToArrowSchema(schema, true)
+	if err != nil {
+		return nil, err
 	}
 	fields := typeutil.GetAllFieldSchemas(schema)
-	if len(fields) != physical.NumFields() {
-		return nil, merr.WrapErrServiceInternalMsg("record validator schema has %d fields, physical schema has %d", len(fields), physical.NumFields())
-	}
-	v := &RecordValidator{physical: physical, reader: reader, field2Col: make(map[FieldID]int, len(fields))}
+	v := &RecordValidator{}
 	for i, field := range fields {
-		v.field2Col[field.GetFieldID()] = i
 		contract := recordFieldContract{field: field, expected: physical.Field(i).Type}
 		vectorType := field.GetDataType()
-		if vectorType == schemapb.DataType_ArrayOfVector {
-			vectorType = field.GetElementType()
-		}
-		if typeutil.IsVectorType(vectorType) && vectorType != schemapb.DataType_SparseFloatVector {
+		if field.GetNullable() && typeutil.IsVectorType(vectorType) &&
+			vectorType != schemapb.DataType_SparseFloatVector && vectorType != schemapb.DataType_ArrayOfVector {
 			dim, err := typeutil.GetDim(field)
 			if err != nil {
 				return nil, err
@@ -85,17 +69,17 @@ func NewRecordValidator(schema *schemapb.CollectionSchema, physical *arrow.Schem
 	return v, nil
 }
 
-// Validate inspects only logical rows. Arrow permits backing columns longer
-// than NumRows; readers can borrow those arrays, but writers must slice them
-// before FFI. Scalar Array payloads are protobuf Binary, not Arrow List: their
-// semantic decoding remains the responsibility of the deserializer.
+// Validate checks final output after filtering and default filling, before
+// writer statistics or native IO. Only logical rows are inspected. ArrayOfVector
+// child constraints are already enforced by appendValueAt while copying rows;
+// scalar Array payload decoding remains the deserializer's responsibility.
 func (v *RecordValidator) Validate(rec Record) error {
 	return v.validate(rec, true)
 }
 
-// ValidateForRead protects column access before predicates and sorting. Value
-// checks belong to the existing row-copy loop or the final writer boundary,
-// not a separate scan of nested payloads that filtering may discard.
+// ValidateForRead checks structure before predicates and sorting. It does not
+// reject null values: row copying may fill defaults, and filtering may discard
+// them. Final value constraints are checked by Validate on the output.
 func (v *RecordValidator) ValidateForRead(rec Record) error {
 	return v.validate(rec, false)
 }
@@ -144,52 +128,20 @@ func (v *RecordValidator) validateColumn(c recordFieldContract, col arrow.Array,
 	if col.Len() < rows {
 		return merr.WrapErrDataIntegrityMsg("short column: length=%d", col.Len())
 	}
-	if col.Len() > rows {
-		col = array.NewSlice(col, 0, int64(rows))
-		defer col.Release()
-	}
-	if err := validateColumnType(c, col, v.reader); err != nil {
+	if err := validateColumnType(c, col); err != nil {
 		return err
-	}
-	if !c.field.GetNullable() && col.NullN() != 0 {
-		return merr.WrapErrDataIntegrityMsg("non-nullable column contains %d nulls", col.NullN())
 	}
 	if !full {
 		return nil
 	}
-	if c.field.GetDataType() == schemapb.DataType_ArrayOfVector {
-		list := col.(*array.List) // physical type was checked above
-		values := list.ListValues()
-		_, fixedWidth := values.(*array.FixedSizeBinary)
-		skipChildren := fixedWidth && values.NullN() == 0
-		for row := 0; row < rows; row++ {
-			// A null parent masks its children. List slices can retain children
-			// outside their visible range; neither is a data-integrity failure.
-			if list.IsNull(row) {
-				continue
-			}
-			start, end := list.ValueOffsets(row)
-			if err := validateElementRange(start, end, values.Len()); err != nil {
-				return merr.Wrapf(err, "row %d", row)
-			}
-			if skipChildren {
-				continue
-			}
-			for i := int(start); i < int(end); i++ {
-				if values.IsNull(i) {
-					// Arrow ListOf marks its child nullable regardless of the
-					// Milvus ElementNullable setting. Enforce the latter here.
-					if !c.field.GetElementNullable() {
-						return merr.WrapErrDataIntegrityMsg("row %d: non-nullable element %d is null", row, int64(i)-start)
-					}
-					continue
-				}
-				if binary, ok := values.(*array.Binary); ok && binary.ValueLen(i) != c.vectorWidth {
-					return merr.WrapErrDataIntegrityMsg("row %d element %d: vector width=%d, expected=%d", row, int64(i)-start, binary.ValueLen(i), c.vectorWidth)
-				}
-			}
-		}
-	} else if binary, ok := col.(*array.Binary); ok && c.vectorWidth > 0 {
+	if col.Len() > rows {
+		col = array.NewSlice(col, 0, int64(rows))
+		defer col.Release()
+	}
+	if !c.field.GetNullable() && col.NullN() != 0 {
+		return merr.WrapErrDataIntegrityMsg("non-nullable column contains %d nulls", col.NullN())
+	}
+	if binary, ok := col.(*array.Binary); ok && c.vectorWidth > 0 {
 		for row := 0; row < rows; row++ {
 			if !binary.IsNull(row) && binary.ValueLen(row) != c.vectorWidth {
 				return merr.WrapErrDataIntegrityMsg("row %d: vector width=%d, expected=%d", row, binary.ValueLen(row), c.vectorWidth)
@@ -199,50 +151,57 @@ func (v *RecordValidator) validateColumn(c recordFieldContract, col arrow.Array,
 	return nil
 }
 
-func validateColumnType(c recordFieldContract, col arrow.Array, reader bool) error {
+func validateColumnType(c recordFieldContract, col arrow.Array) error {
 	if arrow.TypeEqual(col.DataType(), c.expected) {
 		return nil
 	}
-	// Readers preserve either TEXT representation. Writers may normalize an
-	// all-null column, which has no payload or LOB reference to interpret.
+	// Compaction can preserve binary TEXT references or copy decoded UTF8.
 	if c.field.GetDataType() == schemapb.DataType_Text &&
-		isTextArrowType(col.DataType()) && isTextArrowType(c.expected) &&
-		(reader || col.NullN() == col.Len()) {
+		isTextArrowType(col.DataType()) && isTextArrowType(c.expected) {
 		return nil
 	}
 	return merr.WrapErrDataIntegrityMsg("column type mismatch: got %s, expected %s", col.DataType(), c.expected)
-}
-
-func validateElementRange(start, end int64, length int) error {
-	if start < 0 || end < start || end > int64(length) {
-		return merr.WrapErrDataIntegrityMsg("invalid element range [%d,%d), child length=%d", start, end, length)
-	}
-	return nil
 }
 
 func isTextArrowType(dt arrow.DataType) bool {
 	return dt.ID() == arrow.STRING || dt.ID() == arrow.BINARY
 }
 
-// validatedWriterRecord is private to the synchronous outer-writer -> packed
-// writer call. The outer writer has projected, sliced and validated it before
-// updating statistics. Reusing that proof avoids a second nested-value scan.
-// The record and both schemas must remain immutable for this call.
-type validatedWriterRecord struct {
-	*simpleArrowRecord
-	schema *schemapb.CollectionSchema
+// WrapReader checks each borrowed batch once without changing its ownership.
+func (v *RecordValidator) WrapReader(reader RecordReader) RecordReader {
+	return &validatingRecordReader{RecordReader: reader, validator: v}
 }
 
-func prepareWriterRecord(r Record, schema *schemapb.CollectionSchema, physical *arrow.Schema, validator **RecordValidator) (arrow.Record, func(), error) {
-	if checked, ok := r.(*validatedWriterRecord); ok && checked.schema == schema && checked.r.Schema().Equal(physical) {
-		return checked.r, func() {}, nil
+type validatingRecordReader struct {
+	RecordReader
+	validator *RecordValidator
+}
+
+func (r *validatingRecordReader) Next() (Record, error) {
+	rec, err := r.RecordReader.Next()
+	if err != nil {
+		return nil, err
 	}
-	if *validator == nil {
-		var err error
-		*validator, err = NewRecordValidator(schema, physical)
-		if err != nil {
-			return nil, nil, err
-		}
+	if err := r.validator.ValidateForRead(rec); err != nil {
+		return nil, merr.Wrap(err, "compaction input validation")
 	}
-	return (*validator).toWriterRecord(r)
+	return rec, nil
+}
+
+// WrapWriter validates the completed batch before the delegate can update
+// statistics or invoke native IO. Close and error handling remain unchanged.
+func (v *RecordValidator) WrapWriter(writer RecordWriter) RecordWriter {
+	return &validatingRecordWriter{RecordWriter: writer, validator: v}
+}
+
+type validatingRecordWriter struct {
+	RecordWriter
+	validator *RecordValidator
+}
+
+func (w *validatingRecordWriter) Write(rec Record) error {
+	if err := w.validator.Validate(rec); err != nil {
+		return merr.Wrap(err, "compaction output validation")
+	}
+	return w.RecordWriter.Write(rec)
 }

@@ -227,7 +227,7 @@ func TestRecordMaterializerWrapWithSelectionReturnsColumnBuildError(t *testing.T
 
 	wrapped, err := materializer.WrapWithSelection(record, selection)
 	require.Nil(t, wrapped)
-	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	require.ErrorContains(t, err, "failed to append value")
 	require.Equal(t, 0, record.releaseCount)
 }
 
@@ -523,27 +523,6 @@ func TestStringInputsFromRecordRejectsBinaryTextWithoutLOBDecoding(t *testing.T)
 	_, err := stringInputsFromRecord(
 		&materializerTestRecord{len: 1, columns: map[storage.FieldID]arrow.Array{100: input}}, 100)
 	require.ErrorContains(t, err, "cannot materialize bm25 from text binary values without lob decoding")
-}
-
-func TestStringInputsFromRecordRejectsMalformedColumns(t *testing.T) {
-	for _, scenario := range []string{"missing", "short", "wrong type"} {
-		t.Run(scenario, func(t *testing.T) {
-			r := &materializerTestRecord{len: 2, columns: make(map[storage.FieldID]arrow.Array)}
-			switch scenario {
-			case "short":
-				r.columns[100] = newStringArray(t, []string{"one"})
-			case "wrong type":
-				r.columns[100] = newInt64Array(t, []int64{1, 2})
-			}
-			defer releaseArrowArrays(r.columns)
-			require.NotPanics(t, func() {
-				inputs, err := stringInputsFromRecord(r, 100)
-				require.Nil(t, inputs)
-				require.ErrorIs(t, err, merr.ErrDataIntegrity)
-				require.EqualValues(t, 1009, merr.Status(err).GetCode())
-			})
-		})
-	}
 }
 
 func TestBM25FunctionMaterializerMaterializesNullableInputAsNonNullableOutput(t *testing.T) {

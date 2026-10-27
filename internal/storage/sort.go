@@ -68,10 +68,6 @@ type SortTimings struct {
 func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader,
 	rw RecordWriter, predicate func(r Record, ri, i int) bool, sortByFieldIDs []int64,
 ) (int, *SortTimings, error) {
-	validator, err := NewRecordValidator(schema, nil)
-	if err != nil {
-		return 0, nil, err
-	}
 	records := make([]Record, 0)
 	indices := make([]rowIndex, 0)
 
@@ -90,9 +86,6 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 			rec, err := r.Next()
 			fetchCost += time.Since(fetchStart)
 			if err == nil {
-				if err := validator.ValidateForRead(rec); err != nil {
-					return 0, nil, merr.Wrap(err, "sort input validation")
-				}
 				rec.Retain()
 				ri := len(records)
 				records = append(records, rec)
@@ -372,10 +365,6 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 	if len(rr) == 0 {
 		return 0, nil
 	}
-	validator, err := NewRecordValidator(schema, nil)
-	if err != nil {
-		return 0, err
-	}
 
 	nk := len(sortedByFieldIDs)
 	recs := make([]Record, len(rr))
@@ -422,9 +411,6 @@ func MergeSort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordR
 			return err
 		}
 		pos[ri] = 0
-		if err := validator.ValidateForRead(rec); err != nil {
-			return merr.Wrap(err, "merge-sort input validation")
-		}
 		recNo[ri]++
 		return extractKeys(ri)
 	}

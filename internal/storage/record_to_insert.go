@@ -130,16 +130,12 @@ func TryRecordColumn(rec Record, fieldID FieldID) (col arrow.Array, ok bool) {
 		if !ok {
 			return nil, false
 		}
-		if r.r == nil || colIdx < 0 || colIdx >= int(r.r.NumCols()) {
+		if colIdx < 0 || colIdx >= int(r.r.NumCols()) {
 			return nil, false
 		}
 		return r.r.Column(colIdx), true
 	case *compositeRecord:
-		idx, found := r.index[fieldID]
-		if !found || idx < 0 || int(idx) >= len(r.recs) {
-			return nil, false
-		}
-		col := r.recs[idx]
+		col := r.Column(fieldID)
 		return col, col != nil
 	case *selectiveRecord:
 		if r.fieldId != fieldID {
