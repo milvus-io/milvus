@@ -53,6 +53,10 @@ type PChannelManagerConfig struct {
 	// lands.
 	GetRecoveryCheckpoint func() *utility.WALCheckpoint
 	CoordinatorBroker     checkpointReporter
+	// StoredCheckpointReader reads back what DataCoord stored, which a
+	// retired shard split source's cleanup waits on. Without it that cleanup
+	// does not wait.
+	StoredCheckpointReader storedCheckpointReader
 }
 
 // PChannelRecoveryManager owns all vchannel recovery modules on one pchannel.
@@ -99,6 +103,7 @@ func NewPChannelRecoveryManager(config PChannelManagerConfig) (*PChannelRecovery
 			manager.activeVChannels,
 			config.GetRecoveryCheckpoint,
 			config.CoordinatorBroker,
+			config.StoredCheckpointReader,
 		)
 	}
 	for _, vchannel := range manager.initialVChannels(config) {
@@ -229,7 +234,7 @@ func (m *PChannelRecoveryManager) ConsumeCleanupSnapshots(cleanup moduleapi.Clea
 	candidates := m.cleanupModules
 	m.cleanupModules = nil
 	m.dirtyMu.Unlock()
-	if cleanup.CheckpointReported == nil && m.checkpointUpdater != nil {
+	if cleanup.CheckpointReported == nil && m.checkpointUpdater != nil && m.checkpointUpdater.confirmsStored() {
 		cleanup.CheckpointReported = m.checkpointUpdater.Reported
 	}
 	var snapshots []moduleapi.DirtySnapshot
