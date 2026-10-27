@@ -38,6 +38,10 @@ type singleCompactionPolicy struct {
 	meta      *meta
 	allocator allocator.Allocator
 	handler   Handler
+	// remainingCapacity reports how many tasks the inspector can still take, so
+	// admission does not spend tokens on views that would be dropped. nil means
+	// unbounded.
+	remainingCapacity func() int
 }
 
 // Ensure singleCompactionPolicy implements CompactionPolicy interface
@@ -59,12 +63,16 @@ func (policy *singleCompactionPolicy) Trigger(ctx context.Context) (map[Compacti
 	collections := policy.meta.GetCollections()
 
 	events := make(map[CompactionTriggerType][]CompactionView, 0)
-	views := make([]CompactionView, 0)
 	// Invisible segments, which a flush or a clustering compaction just wrote,
 	// wait for their sort to become visible, so their sorts go first: under
 	// dataCoord.compaction.maxTaskNum only the first sorts may be submitted.
 	invisibleSortViews := make([]CompactionView, 0)
 	visibleSortViews := make([]CompactionView, 0)
+	// Single compaction candidates are gathered from every collection first and
+	// admitted in one pass, so the admission budget is shared across
+	// collections instead of being drained by the first one in the walk.
+	rounds := make(map[int64]singleCollectionRound)
+	candidates := make([]*singleCandidate, 0)
 	for _, collection := range collections {
 		if collection == nil {
 			continue
@@ -78,14 +86,40 @@ func (policy *singleCompactionPolicy) Trigger(ctx context.Context) (map[Compacti
 				mlog.FieldCollectionID(collection.ID))
 			continue
 		}
-		collectionViews, collectionInvisibleSortViews, collectionVisibleSortViews, _, err := policy.triggerOneCollection(ctx, collection.ID, false)
+		round, err := policy.triggerOneCollection(ctx, collection.ID, false)
 		if err != nil {
 			// not throw this error because no need to fail because of one collection
 			mlog.Warn(ctx, "fail to trigger single compaction", mlog.FieldCollectionID(collection.ID), mlog.Err(err))
 		}
-		views = append(views, collectionViews...)
-		invisibleSortViews = append(invisibleSortViews, collectionInvisibleSortViews...)
-		visibleSortViews = append(visibleSortViews, collectionVisibleSortViews...)
+		invisibleSortViews = append(invisibleSortViews, round.invisibleSortViews...)
+		visibleSortViews = append(visibleSortViews, round.visibleSortViews...)
+		if len(round.candidates) > 0 {
+			rounds[collection.ID] = round
+			candidates = append(candidates, round.candidates...)
+		}
+	}
+
+	capacity := -1
+	if policy.remainingCapacity != nil {
+		capacity = policy.remainingCapacity()
+	}
+	admitted, deferred := getSingleCompactionAdmitter().admit(ctx, admissionSourcePolicy, candidates, capacity)
+	views := make([]CompactionView, 0, len(admitted))
+	for _, c := range admitted {
+		round := rounds[c.collectionID]
+		segmentViews := GetViewsByInfo(c.segment)
+		views = append(views, &MixSegmentView{
+			label:         segmentViews[0].label,
+			segments:      segmentViews,
+			collectionTTL: round.collectionTTL,
+			triggerID:     round.triggerID,
+			admitted:      true,
+		})
+	}
+	if deferred > 0 {
+		mlog.RatedInfo(ctx, rate.Limit(10), "deferred single compaction candidates by admission limit",
+			mlog.Int("admitted", len(admitted)),
+			mlog.Int("deferred", deferred))
 	}
 	events[TriggerTypeSingle] = views
 	events[TriggerTypeSort] = append(invisibleSortViews, visibleSortViews...)
@@ -243,48 +277,59 @@ func (policy *singleCompactionPolicy) triggerSortCompaction(
 	return invisibleViews, visibleViews, nil
 }
 
-// triggerOneCollection returns the collection's single compaction views, the
-// sort views of its invisible and of its visible segments, and the trigger ID.
-func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, collectionID int64, manual bool) ([]CompactionView, []CompactionView, []CompactionView, int64, error) {
+// singleCollectionRound is what one collection contributes to a round of the
+// single compaction policy: its single compaction candidates, which become
+// views once admission has let them through, the sort views of its invisible
+// and of its visible unsorted segments, and the TTL and trigger id the
+// candidates' views are built with.
+type singleCollectionRound struct {
+	candidates         []*singleCandidate
+	invisibleSortViews []CompactionView
+	visibleSortViews   []CompactionView
+	collectionTTL      time.Duration
+	triggerID          int64
+}
+
+func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, collectionID int64, manual bool) (singleCollectionRound, error) {
 	log := mlog.WithLazy(mlog.FieldCollectionID(collectionID))
 	collection, err := policy.handler.GetCollection(ctx, collectionID)
 	if err != nil {
 		log.Warn(ctx, "fail to apply singleCompactionPolicy, unable to get collection from handler",
 			mlog.Err(err))
-		return nil, nil, nil, 0, err
+		return singleCollectionRound{}, err
 	}
 	if collection == nil {
 		log.Warn(ctx, "fail to apply singleCompactionPolicy, collection not exist")
-		return nil, nil, nil, 0, nil
+		return singleCollectionRound{}, nil
 	}
 	if collection.IsExternal() {
 		log.Info(ctx, "skip single compaction for external collection")
-		return nil, nil, nil, 0, nil
+		return singleCollectionRound{}, nil
 	}
 
 	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)
 	if err != nil {
 		log.Warn(ctx, "failed to apply singleCompactionPolicy, get collection ttl failed")
-		return nil, nil, nil, 0, err
+		return singleCollectionRound{}, err
 	}
 
 	newTriggerID, err := policy.allocator.AllocID(ctx)
 	if err != nil {
 		log.Warn(ctx, "fail to apply singleCompactionPolicy, unable to allocate triggerID", mlog.Err(err))
-		return nil, nil, nil, 0, err
+		return singleCollectionRound{}, err
 	}
 
 	invisibleSortViews, visibleSortViews, err := policy.triggerSortCompaction(ctx, newTriggerID, collectionID, collectionTTL)
 	if err != nil {
 		log.Warn(ctx, "failed to apply singleCompactionPolicy, trigger sort compaction failed", mlog.Err(err))
-		return nil, nil, nil, 0, err
+		return singleCollectionRound{}, err
 	}
 	if !isCollectionAutoCompactionEnabled(collection) {
 		log.RatedInfo(ctx, rate.Limit(20), "collection auto compaction disabled")
-		return nil, invisibleSortViews, visibleSortViews, 0, nil
+		return singleCollectionRound{invisibleSortViews: invisibleSortViews, visibleSortViews: visibleSortViews}, nil
 	}
 
-	views := make([]CompactionView, 0)
+	candidates := make([]*singleCandidate, 0)
 	partSegments := GetSegmentsChanPart(policy.meta, collectionID, SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return isSegmentHealthy(segment) &&
 			isFlushed(segment) &&
@@ -301,25 +346,26 @@ func (policy *singleCompactionPolicy) triggerOneCollection(ctx context.Context, 
 		}
 
 		for _, segment := range group.segments {
+			// L2 candidates are all delete-driven, so they belong to the
+			// accumulation class of the admission limiter.
 			if hasTooManyDeletions(segment) {
-				segmentViews := GetViewsByInfo(segment)
-				view := &MixSegmentView{
-					label:         segmentViews[0].label,
-					segments:      segmentViews,
-					collectionTTL: collectionTTL,
-					triggerID:     newTriggerID,
-				}
-				views = append(views, view)
+				candidates = append(candidates, newSingleCandidate(segment, singleReasonAccumulation))
 			}
 		}
 	}
 
-	if len(views) > 0 {
+	if len(candidates) > 0 {
 		log.Info(ctx, "succeeded to apply singleCompactionPolicy",
 			mlog.Int64("triggerID", newTriggerID),
-			mlog.Int("triggered view num", len(views)))
+			mlog.Int("candidate num", len(candidates)))
 	}
-	return views, invisibleSortViews, visibleSortViews, newTriggerID, nil
+	return singleCollectionRound{
+		candidates:         candidates,
+		invisibleSortViews: invisibleSortViews,
+		visibleSortViews:   visibleSortViews,
+		collectionTTL:      collectionTTL,
+		triggerID:          newTriggerID,
+	}, nil
 }
 
 var _ CompactionView = (*MixSegmentView)(nil)
@@ -329,6 +375,9 @@ type MixSegmentView struct {
 	segments      []*SegmentView
 	collectionTTL time.Duration
 	triggerID     int64
+	// admitted marks a view that took a single compaction admission token,
+	// so the token is given back if the view never reaches the queue.
+	admitted bool
 }
 
 func (v *MixSegmentView) GetGroupLabel() *CompactionGroupLabel {
