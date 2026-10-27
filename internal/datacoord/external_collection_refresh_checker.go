@@ -399,10 +399,17 @@ func externalSourceChanged(oldSchema, newSchema *schemapb.CollectionSchema) bool
 // carries this refresh's external source/spec - i.e. whether an index build
 // dispatched now would read the refreshed location rather than the previous one.
 func (c *externalCollectionRefreshChecker) refreshedSchemaVisible(job *datapb.ExternalCollectionRefreshJob) bool {
-	if c.mt == nil {
+	return externalRefreshSchemaVisible(c.mt, job)
+}
+
+// externalRefreshSchemaVisible reports whether the collection meta already
+// carries the refresh's external source/spec, which index and stats tasks read
+// at dispatch.
+func externalRefreshSchemaVisible(mt *meta, job *datapb.ExternalCollectionRefreshJob) bool {
+	if mt == nil {
 		return false
 	}
-	collection := c.mt.GetCollection(job.GetCollectionId())
+	collection := mt.GetCollection(job.GetCollectionId())
 	if collection == nil || collection.Schema == nil {
 		return false
 	}

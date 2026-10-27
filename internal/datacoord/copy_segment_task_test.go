@@ -876,8 +876,11 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_CompletedUpdatesSegment()
 		},
 	}
 
+	drainStatsBuildChForTest()
+	defer drainStatsBuildChForTest()
 	err = SyncCopySegmentTask(task, resp, copyMeta, m)
 	s.NoError(err)
+	s.Equal([]UniqueID{2001}, drainStatsBuildChForTest(), "restored segments may still need stats the snapshot did not carry")
 
 	segment := m.GetSegment(ctx, 2001)
 	s.Equal(commonpb.SegmentState_Flushed, segment.GetState())

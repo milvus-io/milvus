@@ -566,6 +566,7 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 					log.Info(c.ctx, "updated segment state to Flushed",
 						mlog.FieldSegmentID(segID))
 					notifySegmentIndexBuild(segID)
+					notifySegmentStatsBuild(segID)
 				}
 			}
 		}
