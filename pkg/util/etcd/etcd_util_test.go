@@ -40,6 +40,8 @@ func TestIsRetriableWatchErr(t *testing.T) {
 	}{
 		{"nil", nil, false},
 		{"compacted", rpctypes.ErrCompacted, true},
+		{"leader changed", rpctypes.ErrLeaderChanged, true},
+		{"wrapped leader changed", errors.Wrap(rpctypes.ErrLeaderChanged, "get sessions failed"), true},
 		{"invalid auth token", rpctypes.ErrInvalidAuthToken, true},
 		{"user empty", rpctypes.ErrUserEmpty, true},
 		{"auth old revision", rpctypes.ErrAuthOldRevision, true},
@@ -48,6 +50,10 @@ func TestIsRetriableWatchErr(t *testing.T) {
 		{"unmapped raw grpc unauthenticated", status.Error(codes.Unauthenticated, "some unmapped error"), false},
 		{"wrapped invalid auth token", errors.Wrap(rpctypes.ErrInvalidAuthToken, "watch failed"), true},
 		{"permission denied", rpctypes.ErrPermissionDenied, false},
+		{"auth failed", rpctypes.ErrAuthFailed, false},
+		{"corrupt cluster", rpctypes.ErrCorrupt, false},
+		{"context canceled", context.Canceled, false},
+		{"context deadline exceeded", context.DeadlineExceeded, false},
 		{"lease not found", rpctypes.ErrLeaseNotFound, false},
 		{"generic error", errors.New("some other error"), false},
 	}
