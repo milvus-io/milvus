@@ -3732,6 +3732,107 @@ TEST(InjectExtfsAllowlist, InvalidIcebergSnapshotIDIsRejected) {
     }
 }
 
+TEST(InjectExtfsAllowlist, PaimonSnapshotIDAcceptsStringAndNumber) {
+    const int64_t coll_id = 42;
+    {
+        milvus_storage::api::Properties props;
+        std::string spec =
+            R"({"format":"paimon-table","snapshot_id":"5320540205222981137"})";
+        ::InjectExternalSpecProperties(
+            props, coll_id, "s3://s3.amazonaws.com/bucket/key", spec);
+        EXPECT_EQ(
+            std::get<int64_t>(props.at(PROPERTY_READER_EXTTABLE_SNAPSHOT_ID)),
+            int64_t{5320540205222981137});
+    }
+    {
+        milvus_storage::api::Properties props;
+        std::string spec = R"({"format":"paimon-table","snapshot_id":7})";
+        ::InjectExternalSpecProperties(
+            props, coll_id, "s3://s3.amazonaws.com/bucket/key", spec);
+        EXPECT_EQ(
+            std::get<int64_t>(props.at(PROPERTY_READER_EXTTABLE_SNAPSHOT_ID)),
+            int64_t{7});
+    }
+}
+
+TEST(InjectExtfsAllowlist, PaimonSnapshotIDSurvivesCABIConversion) {
+    LoonProperties props{nullptr, 0};
+    auto result = loon_properties_inject_external_spec(
+        &props,
+        42,
+        "s3://s3.amazonaws.com/bucket/key",
+        R"({"format":"paimon-table","snapshot_id":"5320540205222981137"})",
+        2000,
+        5000);
+    ASSERT_NE(loon_ffi_is_success(&result), 0);
+    loon_ffi_free_result(&result);
+
+    const auto* snapshot_id =
+        loon_properties_get(&props, PROPERTY_READER_EXTTABLE_SNAPSHOT_ID);
+    ASSERT_NE(snapshot_id, nullptr);
+    EXPECT_STREQ(snapshot_id, "5320540205222981137");
+
+    const auto* use_ssl = loon_properties_get(&props, "extfs.42.use_ssl");
+    ASSERT_NE(use_ssl, nullptr);
+    EXPECT_STREQ(use_ssl, "true");
+
+    loon_properties_free(&props);
+}
+
+TEST(InjectExtfsAllowlist, PaimonSnapshotIDOptional) {
+    // Without snapshot_id the property must stay absent so the paimon
+    // planner falls back to the latest snapshot.
+    milvus_storage::api::Properties props;
+    const int64_t coll_id = 42;
+    std::string spec = R"({"format":"paimon-table"})";
+
+    ::InjectExternalSpecProperties(
+        props, coll_id, "s3://s3.amazonaws.com/bucket/key", spec);
+
+    EXPECT_EQ(props.count(PROPERTY_READER_EXTTABLE_SNAPSHOT_ID), 0u);
+}
+
+TEST(InjectExtfsAllowlist, PaimonScanModeIsInjected) {
+    for (const auto& mode : {"auto", "direct-file", "data-split"}) {
+        milvus_storage::api::Properties props;
+        const auto spec =
+            std::string(R"({"format":"paimon-table","scan_mode":")") + mode +
+            "\"}";
+        ::InjectExternalSpecProperties(
+            props, 42, "s3://s3.amazonaws.com/bucket/key", spec);
+        EXPECT_EQ(std::get<std::string>(props.at(PROPERTY_PAIMON_SCAN_MODE)),
+                  mode);
+    }
+}
+
+TEST(InjectExtfsAllowlist, PaimonScanModeDefaults) {
+    for (const auto& value : {"\"\"", "null"}) {
+        SCOPED_TRACE(value);
+        milvus_storage::api::Properties props;
+        props[PROPERTY_PAIMON_SCAN_MODE] = std::string("data-split");
+        const auto spec =
+            std::string(R"({"format":"paimon-table","scan_mode":)") + value +
+            "}";
+        ::InjectExternalSpecProperties(
+            props, 42, "s3://s3.amazonaws.com/bucket/key", spec);
+        EXPECT_EQ(std::get<std::string>(props.at(PROPERTY_PAIMON_SCAN_MODE)),
+                  "auto");
+    }
+}
+
+TEST(InjectExtfsAllowlist, InvalidPaimonScanModeIsRejected) {
+    for (const auto& value : {"\"native\"", "true", "1", "{}", "[]"}) {
+        SCOPED_TRACE(value);
+        milvus_storage::api::Properties props;
+        const auto spec =
+            std::string(R"({"format":"paimon-table","scan_mode":)") + value +
+            "}";
+        EXPECT_THROW(::InjectExternalSpecProperties(
+                         props, 42, "s3://s3.amazonaws.com/bucket/key", spec),
+                     milvus::SegcoreError);
+    }
+}
+
 // ============================================================
 // Tests for NormalizeExternalArrow and internal-vs-external
 // VARCHAR handling (regression for index build opt_field crash)

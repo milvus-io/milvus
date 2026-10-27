@@ -784,7 +784,7 @@ InjectExternalSpecProperties(
     }
 
     // Format-layer: emit per-format properties derived from spec.format.
-    // Currently only Iceberg-table → reader.exttable.snapshot_id. Future formats
+    // Iceberg and Paimon use reader.exttable.snapshot_id. Future formats
     // (Lance version, Iceberg branch, etc.) land here.
     if (external_spec.empty()) {
         return arrow::Status::OK();
@@ -797,7 +797,7 @@ InjectExternalSpecProperties(
         if (doc.find_field("format").get_string().get(format_view) ==
             simdjson::SUCCESS) {
             std::string format{format_view};
-            if (format == "iceberg-table") {
+            if (format == "iceberg-table" || format == "paimon-table") {
                 // JSON fields may appear before or after "format".
                 auto snapshot_field = doc.find_field_unordered("snapshot_id");
                 int64_t snapshot_id = 0;
@@ -812,8 +812,9 @@ InjectExternalSpecProperties(
                             int_err = simdjson::SUCCESS;
                         } catch (const std::exception& e) {
                             LOG_WARN(
-                                "iceberg snapshot_id parse failed "
+                                "{} parse failed "
                                 "(collection_id={}): {}",
+                                PROPERTY_READER_EXTTABLE_SNAPSHOT_ID,
                                 collection_id,
                                 e.what());
                         }
@@ -836,6 +837,44 @@ InjectExternalSpecProperties(
         // Top-level parse failure already caught by the extfs block above;
         // this second pass only runs after the first succeeded.
         LOG_WARN("format-props parse failed (collection_id={}): {}",
+                 collection_id,
+                 e.what());
+    }
+
+    // Paimon's path selection is a format property, not an extfs setting.
+    // Parse it independently from the on-demand snapshot pass above so JSON
+    // field order cannot affect lookup. Go validates the enum at the API
+    // boundary; milvus-storage validates it again when the property is set.
+    try {
+        const auto spec = json::parse(external_spec);
+        if (spec.value("format", std::string{}) == "paimon-table") {
+            auto scan_mode = spec.find("scan_mode");
+            if (scan_mode != spec.end()) {
+                if (!scan_mode->is_string() && !scan_mode->is_null()) {
+                    return arrow::Status::Invalid(
+                        "Paimon scan_mode must be a string");
+                }
+                // Match Go's default for an empty or null scan_mode.
+                const auto mode = scan_mode->is_null()
+                                      ? std::string{}
+                                      : scan_mode->get<std::string>();
+                const auto error = milvus_storage::api::SetValue(
+                    properties,
+                    PROPERTY_PAIMON_SCAN_MODE,
+                    mode.empty() ? "auto" : mode.c_str());
+                if (error.has_value()) {
+                    return arrow::Status::Invalid(
+                        PROPERTY_PAIMON_SCAN_MODE, ": ", *error);
+                }
+            }
+        }
+    } catch (const json::exception& e) {
+        // Every pass in this function tolerates a structurally broken spec:
+        // Go's ParseExternalSpec rejects it long before this point, and the
+        // extfs passes above still populate what they derived from the URI.
+        // Throwing here would turn that documented fallthrough into a load
+        // failure (InjectExtfsAllowlist.InvalidJsonIsHandledGracefully).
+        LOG_WARN("Paimon scan_mode parse failed (collection_id={}): {}",
                  collection_id,
                  e.what());
     }

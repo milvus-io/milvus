@@ -35,6 +35,7 @@ const (
 	FormatLanceTable   = "lance-table"
 	FormatVortex       = "vortex"
 	FormatIcebergTable = "iceberg-table"
+	FormatPaimonTable  = "paimon-table"
 	FormatMilvusTable  = "milvus-table"
 )
 
@@ -72,6 +73,7 @@ type ExternalSpec struct {
 	Columns    []string          `json:"columns"`         // optional: specific columns to load
 	Extfs      map[string]string `json:"extfs,omitempty"` // optional: extfs config overrides
 	SnapshotID *int64            `json:"snapshot_id,omitempty"`
+	ScanMode   string            `json:"scan_mode,omitempty"` // Paimon: auto, direct-file, or data-split
 }
 
 // UnmarshalJSON accepts snapshot_id as either a JSON number or a decimal
@@ -137,6 +139,7 @@ var supportedFormats = map[string]bool{
 	FormatLanceTable:   true,
 	FormatVortex:       true,
 	FormatIcebergTable: true,
+	FormatPaimonTable:  true,
 	FormatMilvusTable:  true,
 }
 
@@ -183,6 +186,18 @@ func ParseExternalSpec(specStr string) (*ExternalSpec, error) {
 	if err := json.Unmarshal([]byte(specStr), &spec); err != nil {
 		return nil, merr.WrapErrParameterInvalidErr(err, "invalid external spec JSON")
 	}
+	// Native readers consume the original JSON and use case-sensitive keys.
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(specStr), &fields); err != nil {
+		return nil, merr.WrapErrParameterInvalidErr(err, "invalid external spec JSON")
+	}
+	for key := range fields {
+		for _, expected := range []string{"format", "columns", "extfs", "snapshot_id", "scan_mode"} {
+			if key != expected && strings.EqualFold(key, expected) {
+				return nil, merr.WrapErrParameterInvalidMsg("invalid external spec key %q, did you mean %q?", key, expected)
+			}
+		}
+	}
 
 	if spec.Format == "" {
 		spec.Format = FormatParquet
@@ -191,6 +206,20 @@ func ParseExternalSpec(specStr string) (*ExternalSpec, error) {
 	if !supportedFormats[spec.Format] {
 		return nil, merr.WrapErrParameterInvalidMsg("unsupported format %q, supported formats: %s",
 			spec.Format, strings.Join(sortedKeys(supportedFormats), ", "))
+	}
+
+	if spec.Format == FormatPaimonTable {
+		if spec.ScanMode == "" {
+			spec.ScanMode = "auto"
+		}
+		switch spec.ScanMode {
+		case "auto", "direct-file", "data-split":
+		default:
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"unsupported Paimon scan_mode %q; allowed values: auto, direct-file, data-split", spec.ScanMode)
+		}
+	} else if spec.ScanMode != "" {
+		return nil, merr.WrapErrParameterInvalidMsg("scan_mode is only supported for format %q", FormatPaimonTable)
 	}
 
 	for key, val := range spec.Extfs {

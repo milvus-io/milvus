@@ -18,6 +18,7 @@ package specutil
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -83,34 +84,98 @@ func TestParseExternalSpec(t *testing.T) {
 			spec.Extfs[ExtfsKeyAzureCredentialEndpoint])
 	})
 
-	t.Run("snapshot id accepts string and number", func(t *testing.T) {
-		spec, err := ParseExternalSpec(`{"format":"iceberg-table","snapshot_id":"5320540205222981137"}`)
-		require.NoError(t, err)
-		require.NotNil(t, spec.SnapshotID)
-		require.Equal(t, int64(5320540205222981137), *spec.SnapshotID)
+	t.Run("table snapshot id accepts string and number", func(t *testing.T) {
+		for _, format := range []string{FormatIcebergTable, FormatPaimonTable} {
+			spec, err := ParseExternalSpec(fmt.Sprintf(`{"format":%q,"snapshot_id":"5320540205222981137"}`, format))
+			require.NoError(t, err)
+			require.NotNil(t, spec.SnapshotID)
+			require.Equal(t, int64(5320540205222981137), *spec.SnapshotID)
 
-		spec, err = ParseExternalSpec(`{"format":"iceberg-table","snapshot_id":5320540205222981137}`)
+			spec, err = ParseExternalSpec(fmt.Sprintf(`{"format":%q,"snapshot_id":5320540205222981137}`, format))
+			require.NoError(t, err)
+			require.NotNil(t, spec.SnapshotID)
+			require.Equal(t, int64(5320540205222981137), *spec.SnapshotID)
+		}
+	})
+
+	t.Run("paimon table with optional snapshot id", func(t *testing.T) {
+		spec, err := ParseExternalSpec(`{"format":"paimon-table"}`)
+		require.NoError(t, err)
+		require.Equal(t, FormatPaimonTable, spec.Format)
+		require.Nil(t, spec.SnapshotID)
+		require.Equal(t, "auto", spec.ScanMode)
+
+		spec, err = ParseExternalSpec(`{"format":"paimon-table","snapshot_id":7}`)
 		require.NoError(t, err)
 		require.NotNil(t, spec.SnapshotID)
-		require.Equal(t, int64(5320540205222981137), *spec.SnapshotID)
+		require.Equal(t, int64(7), *spec.SnapshotID)
+	})
+
+	t.Run("paimon scan mode", func(t *testing.T) {
+		for _, mode := range []string{"auto", "direct-file", "data-split"} {
+			spec, err := ParseExternalSpec(fmt.Sprintf(`{"format":"paimon-table","scan_mode":%q}`, mode))
+			require.NoError(t, err)
+			require.Equal(t, mode, spec.ScanMode)
+		}
+		_, err := ParseExternalSpec(`{"format":"paimon-table","scan_mode":"native"}`)
+		require.ErrorContains(t, err, "unsupported Paimon scan_mode")
+		_, err = ParseExternalSpec(`{"format":"iceberg-table","scan_mode":"auto"}`)
+		require.ErrorContains(t, err, "only supported")
+	})
+
+	t.Run("paimon scan mode defaults", func(t *testing.T) {
+		for _, value := range []string{`""`, "null"} {
+			spec, err := ParseExternalSpec(fmt.Sprintf(`{"format":"paimon-table","scan_mode":%s}`, value))
+			require.NoError(t, err)
+			require.Equal(t, "auto", spec.ScanMode)
+		}
+		for _, value := range []string{"true", "1", "{}", "[]"} {
+			_, err := ParseExternalSpec(fmt.Sprintf(`{"format":"paimon-table","scan_mode":%s}`, value))
+			require.Error(t, err)
+		}
 	})
 
 	t.Run("invalid snapshot id rejected", func(t *testing.T) {
-		_, err := ParseExternalSpec(`{"format":"iceberg-table","snapshot_id":"abc"}`)
-		require.ErrorContains(t, err, "invalid external spec JSON")
+		for _, format := range []string{FormatIcebergTable, FormatPaimonTable} {
+			_, err := ParseExternalSpec(fmt.Sprintf(`{"format":%q,"snapshot_id":"abc"}`, format))
+			require.ErrorContains(t, err, "invalid external spec JSON")
+		}
+	})
+
+	t.Run("known keys must match native spelling", func(t *testing.T) {
+		for format := range supportedFormats {
+			t.Run(format, func(t *testing.T) {
+				for _, field := range []string{
+					`"SNAPSHOT_ID":1`, `"Snapshot_Id":"1"`,
+					`"ſnapshot_id":1`, `"ſcan_mode":"direct-file"`,
+					`"SCAN_MODE":"direct-file"`, `"Scan_Mode":"data-split"`,
+					`"FORMAT":"paimon-table"`, `"COLUMNS":["pk"]`,
+					`"EXTFS":{"anonymous":"true"}`,
+					`"snapshot_id":1,"SNAPSHOT_ID":2`,
+					`"SCAN_MODE":"data-split","scan_mode":"direct-file"`,
+				} {
+					_, err := ParseExternalSpec(fmt.Sprintf(`{"format":%q,%s}`, format, field))
+					require.ErrorContains(t, err, "did you mean", field)
+				}
+				_, err := ParseExternalSpec(fmt.Sprintf(`{"format":%q,"CUSTOM_OPTION":"unchanged"}`, format))
+				require.NoError(t, err)
+			})
+		}
 	})
 }
 
 func TestExternalSpecMarshalJSON(t *testing.T) {
-	snapshotID := int64(5320540205222981137)
-	out, err := json.Marshal(ExternalSpec{
-		Format:     FormatIcebergTable,
-		SnapshotID: &snapshotID,
-	})
-	require.NoError(t, err)
-	require.Contains(t, string(out), `"snapshot_id":"5320540205222981137"`)
+	for _, format := range []string{FormatIcebergTable, FormatPaimonTable} {
+		snapshotID := int64(5320540205222981137)
+		out, err := json.Marshal(ExternalSpec{
+			Format:     format,
+			SnapshotID: &snapshotID,
+		})
+		require.NoError(t, err)
+		require.Contains(t, string(out), `"snapshot_id":"5320540205222981137"`)
+	}
 
-	out, err = json.Marshal(ExternalSpec{Format: FormatParquet})
+	out, err := json.Marshal(ExternalSpec{Format: FormatParquet})
 	require.NoError(t, err)
 	require.NotContains(t, string(out), "snapshot_id")
 }

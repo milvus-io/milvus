@@ -17,18 +17,19 @@
 package datacoord
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 )
 
-func externalRefreshPlannerFiles(paths ...string) []*datapb.ExternalFileInfo {
-	files := make([]*datapb.ExternalFileInfo, 0, len(paths))
+func externalRefreshPlannerFiles(paths ...string) []packed.FileInfo {
+	files := make([]packed.FileInfo, 0, len(paths))
 	for _, path := range paths {
-		files = append(files, &datapb.ExternalFileInfo{FilePath: path})
+		files = append(files, packed.FileInfo{FilePath: path})
 	}
 	return files
 }
@@ -115,7 +116,7 @@ func TestSummarizeExternalRefreshOwnership(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			files := externalRefreshPlannerFiles(test.files...)
-			_, summary, err := planExternalRefreshOwnership(files, test.fragments, test.filesPerTask)
+			_, summary, err := planExternalRefreshOwnership("", "", files, test.fragments, test.filesPerTask)
 			require.NoError(t, err)
 			require.Equal(t, test.expected, summary)
 		})
@@ -222,6 +223,8 @@ func TestPlanExternalRefreshOwnership(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			tasks, _, err := planExternalRefreshOwnership(
+				"",
+				"",
 				externalRefreshPlannerFiles(test.files...),
 				test.fragments,
 				test.filesPerTask,
@@ -235,7 +238,7 @@ func TestPlanExternalRefreshOwnership(t *testing.T) {
 func TestPlanExternalRefreshOwnershipRejectsInvalidInput(t *testing.T) {
 	tests := []struct {
 		name         string
-		files        []*datapb.ExternalFileInfo
+		files        []packed.FileInfo
 		fragments    packed.SegmentFragments
 		filesPerTask int64
 		errContains  string
@@ -243,14 +246,204 @@ func TestPlanExternalRefreshOwnershipRejectsInvalidInput(t *testing.T) {
 		{name: "duplicate_file_path", files: externalRefreshPlannerFiles("f0", "f1", "f0"), filesPerTask: 1, errContains: "duplicate file path"},
 		{name: "empty_explored_files", filesPerTask: 1, errContains: "at least one explored file"},
 		{name: "non_positive_files_per_task", files: externalRefreshPlannerFiles("f0"), errContains: "must be positive"},
-		{name: "invalid_explored_file", files: []*datapb.ExternalFileInfo{nil}, filesPerTask: 1, errContains: "invalid file"},
+		{name: "invalid_explored_file", files: []packed.FileInfo{{}}, filesPerTask: 1, errContains: "invalid file"},
 		{name: "non_positive_baseline_segment", files: externalRefreshPlannerFiles("f0"), fragments: packed.SegmentFragments{0: nil}, filesPerTask: 1, errContains: "non-positive segment ID"},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, _, err := planExternalRefreshOwnership(test.files, test.fragments, test.filesPerTask)
+			_, _, err := planExternalRefreshOwnership("", "", test.files, test.fragments, test.filesPerTask)
 			require.ErrorContains(t, err, test.errContains)
 		})
+	}
+}
+
+func TestPlanExternalRefreshOwnershipMultipleDataSplits(t *testing.T) {
+	files := []packed.FileInfo{
+		externalRefreshPlannerDataSplit(2, "split-a"),
+		externalRefreshPlannerDataSplit(2, "split-b"),
+		externalRefreshPlannerDataSplit(2, "split-c"),
+	}
+	fragment := func(file packed.FileInfo) packed.Fragment {
+		return packed.Fragment{FilePath: file.FilePath, EndRow: file.NumRows, RowCount: file.NumRows, Properties: file.Properties}
+	}
+	for _, test := range []struct {
+		name      string
+		fragments packed.SegmentFragments
+		expected  []externalRefreshOwnershipTaskPlan
+	}{
+		{
+			name: "initial_refresh",
+			expected: []externalRefreshOwnershipTaskPlan{
+				{FileIndexBegin: 0, FileIndexEnd: 1},
+				{FileIndexBegin: 1, FileIndexEnd: 2},
+				{FileIndexBegin: 2, FileIndexEnd: 3},
+			},
+		},
+		{
+			name:      "unchanged_split_matches_only_its_descriptor",
+			fragments: packed.SegmentFragments{10: {fragment(files[1])}},
+			expected: []externalRefreshOwnershipTaskPlan{
+				{FileIndexBegin: 0, FileIndexEnd: 1},
+				{FileIndexBegin: 1, FileIndexEnd: 2, OwnedSegmentIDs: []int64{10}},
+				{FileIndexBegin: 2, FileIndexEnd: 3},
+			},
+		},
+		{
+			name:      "old_segment_spans_task_boundary",
+			fragments: packed.SegmentFragments{10: {fragment(files[0]), fragment(files[1])}},
+			expected: []externalRefreshOwnershipTaskPlan{
+				{FileIndexBegin: 0, FileIndexEnd: 2, OwnedSegmentIDs: []int64{10}},
+				{FileIndexBegin: 2, FileIndexEnd: 3},
+			},
+		},
+		{
+			name: "replaced_or_removed_split_is_owned_once",
+			fragments: packed.SegmentFragments{
+				10: {fragment(externalRefreshPlannerDataSplit(1, "split-b"))},
+				20: {fragment(externalRefreshPlannerDataSplit(2, "removed-split"))},
+			},
+			expected: []externalRefreshOwnershipTaskPlan{
+				{FileIndexBegin: 0, FileIndexEnd: 1, OwnedSegmentIDs: []int64{10, 20}},
+				{FileIndexBegin: 1, FileIndexEnd: 2},
+				{FileIndexBegin: 2, FileIndexEnd: 3},
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tasks, summary, err := planExternalRefreshOwnership(externalspec.FormatPaimonTable, externalspec.FormatPaimonTable, files, test.fragments, 1)
+			require.NoError(t, err)
+			require.Equal(t, test.expected, tasks)
+			// Several descriptors still refer to only one physical table path.
+			require.Equal(t, 1, summary.AddedFilePaths+summary.UnchangedFilePaths)
+		})
+	}
+	t.Run("duplicate_descriptor", func(t *testing.T) {
+		_, _, err := planExternalRefreshOwnership(externalspec.FormatPaimonTable, externalspec.FormatPaimonTable, []packed.FileInfo{files[0], files[0]}, nil, 1)
+		require.ErrorContains(t, err, "duplicate file path")
+	})
+	t.Run("mixed_direct_file_and_data_split", func(t *testing.T) {
+		direct := packed.FileInfo{
+			FilePath: "s3://endpoint/bucket/table/a.parquet", NumRows: 10,
+			Properties: map[string]string{"metadata": `{"version":1,"read_path":"direct-file","record_count":10}`},
+		}
+		mixed := append(append([]packed.FileInfo(nil), files...), direct)
+		tasks, _, err := planExternalRefreshOwnership(externalspec.FormatPaimonTable, externalspec.FormatPaimonTable, mixed,
+			packed.SegmentFragments{10: {fragment(files[1]), fragment(direct)}}, 1)
+		require.NoError(t, err)
+		require.Equal(t, []externalRefreshOwnershipTaskPlan{
+			{FileIndexBegin: 0, FileIndexEnd: 1},
+			{FileIndexBegin: 1, FileIndexEnd: 4, OwnedSegmentIDs: []int64{10}},
+		}, tasks)
+	})
+	t.Run("malformed_descriptor", func(t *testing.T) {
+		invalid := files[0]
+		invalid.Properties = map[string]string{"metadata": "not-json"}
+		_, _, err := planExternalRefreshOwnership(externalspec.FormatPaimonTable, externalspec.FormatPaimonTable, []packed.FileInfo{invalid}, nil, 1)
+		require.ErrorContains(t, err, "invalid Paimon metadata descriptor")
+		_, _, err = planExternalRefreshOwnership(externalspec.FormatPaimonTable, externalspec.FormatPaimonTable, files,
+			packed.SegmentFragments{10: {fragment(invalid)}}, 1)
+		require.ErrorContains(t, err, "invalid Paimon metadata descriptor")
+	})
+}
+
+func externalRefreshPlannerDataSplit(snapshot int64, payload string) packed.FileInfo {
+	// The planner must treat the payload as opaque; decoding it belongs to Storage.
+	return packed.FileInfo{
+		FilePath: "s3://endpoint/bucket/table", NumRows: 10,
+		Properties: map[string]string{
+			"metadata": fmt.Sprintf(`{"version":1,"read_path":"data-split","data_format":"paimon","bucket":0,"snapshot_id":%d,"record_count":10,"table_location":"s3://bucket/table","codec":"paimon-split","payload":%q}`, snapshot, payload),
+		},
+	}
+}
+
+func TestPlanExternalRefreshOwnershipFileBasedFormats(t *testing.T) {
+	for _, format := range []string{
+		externalspec.FormatParquet, externalspec.FormatVortex,
+		externalspec.FormatIcebergTable, externalspec.FormatLanceTable, externalspec.FormatPaimonTable,
+	} {
+		t.Run(format, func(t *testing.T) {
+			oldProperties := map[string]string{"metadata": `{"version":1,"read_path":"direct-file","snapshot_id":1,"record_count":20}`}
+			newProperties := map[string]string{"metadata": `{"version":1,"read_path":"direct-file","snapshot_id":2,"record_count":20}`}
+			if format != externalspec.FormatPaimonTable {
+				oldProperties = map[string]string{"metadata": "opaque-old-metadata"}
+				newProperties = map[string]string{"metadata": "opaque-new-metadata"}
+			}
+			files := externalRefreshPlannerFiles("a.parquet", "b.parquet", "c.parquet")
+			for i := range files {
+				files[i].Properties = newProperties
+			}
+			fragments := packed.SegmentFragments{10: {
+				{FilePath: "b.parquet", StartRow: 0, EndRow: 10, Properties: oldProperties},
+				{FilePath: "b.parquet", StartRow: 10, EndRow: 20, Properties: oldProperties},
+				{FilePath: "c.parquet", StartRow: 0, EndRow: 10, Properties: oldProperties},
+			}}
+			tasks, _, err := planExternalRefreshOwnership(format, format, files, fragments, 1)
+			require.NoError(t, err)
+			require.Equal(t, []externalRefreshOwnershipTaskPlan{
+				{FileIndexBegin: 0, FileIndexEnd: 1},
+				{FileIndexBegin: 1, FileIndexEnd: 3, OwnedSegmentIDs: []int64{10}},
+			}, tasks)
+			_, _, err = planExternalRefreshOwnership(format, format, append(files, files[0]), nil, 1)
+			require.ErrorContains(t, err, "duplicate file path")
+		})
+	}
+}
+
+func TestPlanExternalRefreshOwnershipCrossFormatToPaimon(t *testing.T) {
+	direct := packed.FileInfo{
+		FilePath: "s3://endpoint/bucket/table/data.parquet", NumRows: 10,
+		Properties: map[string]string{"metadata": `{"version":1,"read_path":"direct-file","record_count":10}`},
+	}
+	for _, baselineFormat := range []string{externalspec.FormatParquet, externalspec.FormatIcebergTable, externalspec.FormatLanceTable} {
+		for _, file := range []packed.FileInfo{direct, externalRefreshPlannerDataSplit(1, "split-a")} {
+			readPath, _, err := packed.PaimonRoutingMeta(file.Properties)
+			require.NoError(t, err)
+			for _, samePath := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/same_path=%t", baselineFormat, readPath, samePath), func(t *testing.T) {
+					old := packed.Fragment{FilePath: "s3://endpoint/bucket/old/data.parquet", EndRow: 10, RowCount: 10}
+					if baselineFormat != externalspec.FormatParquet {
+						old.Properties = map[string]string{"metadata": "opaque-format-metadata"}
+					}
+					if samePath {
+						old.FilePath = file.FilePath
+					}
+					files := []packed.FileInfo{externalRefreshPlannerDataSplit(1, "other-split"), file}
+					tasks, _, err := planExternalRefreshOwnership(externalspec.FormatPaimonTable, baselineFormat,
+						files, packed.SegmentFragments{10: {old}}, 1)
+					require.NoError(t, err)
+					expected := []externalRefreshOwnershipTaskPlan{
+						{FileIndexBegin: 0, FileIndexEnd: 1},
+						{FileIndexBegin: 1, FileIndexEnd: 2},
+					}
+					owner := 0
+					if samePath && readPath == "direct-file" {
+						owner = 1
+					}
+					expected[owner].OwnedSegmentIDs = []int64{10}
+					require.Equal(t, expected, tasks)
+				})
+			}
+		}
+	}
+}
+
+func TestPlanExternalRefreshOwnershipEmptyPaimonSnapshot(t *testing.T) {
+	file := externalRefreshPlannerDataSplit(1, "old-split")
+	baseline := packed.SegmentFragments{10: {{FilePath: file.FilePath, Properties: file.Properties}}}
+	for _, filesPerTask := range []int64{1, 2, 1000} {
+		for _, segments := range []packed.SegmentFragments{nil, baseline} {
+			tasks, summary, err := planExternalRefreshOwnership(externalspec.FormatPaimonTable,
+				externalspec.FormatPaimonTable, nil, segments, filesPerTask)
+			require.NoError(t, err)
+			require.Len(t, tasks, 1)
+			require.Zero(t, tasks[0].FileIndexBegin)
+			require.Zero(t, tasks[0].FileIndexEnd)
+			require.Len(t, tasks[0].OwnedSegmentIDs, len(segments))
+			if len(segments) > 0 {
+				require.Equal(t, []int64{10}, tasks[0].OwnedSegmentIDs)
+			}
+			require.Equal(t, 1, summary.FinalTaskCount)
+		}
 	}
 }
