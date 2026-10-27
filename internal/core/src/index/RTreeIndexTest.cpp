@@ -16,6 +16,8 @@
 #include <cstdint>
 #include <exception>
 #include <functional>
+#include <map>
+#include <set>
 #include <new>
 #include <thread>
 #include <vector>
@@ -2195,4 +2197,263 @@ TEST_F(RTreeIndexTest, GrowingConcurrentQueryKeepsPublishedCandidates) {
         EXPECT_EQ(final_res[off], matches(off)) << "offset " << off;
     }
     EXPECT_EQ(final_res.count(), static_cast<size_t>(kAnchor / 2 + 1));
+}
+
+// Regression for issue #54138: ST_DWITHIN through the R-Tree must return the
+// same rows as the un-indexed raw path. Two defects made them disagree:
+//  1. Geometry::dwithin accepted EMPTY rows (GEOS distance 0), but the index
+//     stores a placeholder MBR for them that no query envelope away from the
+//     origin reaches, so the raw path returned them and the indexed path did
+//     not. Now neither does (PostGIS semantics).
+//  2. The coarse envelope was sized with a fixed 111320 m/deg box that was not
+//     a superset of the exact metrics (haversine for points, scaled planar
+//     GEOS distance for other shapes), so rows near the distance boundary were
+//     pruned before refinement. The reporter's three missed points are rows
+//     here, plus a polygon and a line in the 4.49..4.91 deg band that the old
+//     box cut off at latitude 35.
+// Both segments load the SAME geometry column; only one gets the index.
+TEST_F(RTreeIndexTest, GIS_DWithin_IndexPathMatchesRawPath) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("id", DataType::INT64);
+    schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto geo_id = schema->AddDebugField("geo", DataType::GEOMETRY);
+    schema->set_primary_field_id(pk_id);
+
+    const int N = 100;
+    // Interior offsets, mirroring the reporter's layout (empties are never
+    // first or last so a row-count mismatch cannot mask them).
+    const std::map<int, std::string> special = {
+        {3, "POINT EMPTY"},
+        {17, "LINESTRING EMPTY"},
+        {41, "POLYGON EMPTY"},
+        {58, "MULTIPOINT EMPTY"},
+        {77, "GEOMETRYCOLLECTION EMPTY"},
+        // Boundary rows for ST_DWITHIN(geo, 'POINT (115 35)', 500000).
+        {5, "POINT (109.513509 35.327246)"},   // haversine 500000 m
+        {23, "POINT (120.490847 35.204498)"},  // haversine 499965 m
+        {61, "POINT (115.028171 30.507155)"},  // haversine 499589 m
+        {30,
+         "POLYGON ((114.9 39.8, 115.1 39.8, 115.1 39.9, 114.9 39.9, 114.9 "
+         "39.8))"},                                   // planar 4.8 deg north
+        {45, "LINESTRING (114.5 30.2, 115.5 30.2)"},  // planar 4.8 deg south
+        // Clearly outside every query below (pruning sanity).
+        {70, "POINT (125 35)"},
+        {88, "POLYGON ((-10 -10, -9 -10, -9 -9, -10 -9, -10 -10))"},
+        // South pole, queried from (0 -29) at exactly its haversine distance:
+        // the cap touches the pole only to within rounding, so the envelope
+        // must still span every longitude (review of #54294).
+        {90, "POINT (180 -90)"},
+        // Around POINT (179.999 0) with 1000 m (review of #54294): the
+        // haversine cap wraps across +-180, so rows on both sides must
+        // survive the coarse pass, which maps only the cap's overflow to the
+        // other edge instead of every longitude.
+        {92, "POINT (179.9995 0)"},  // ~56 m
+        {93, "POINT (180 0)"},       // ~111 m
+        {94, "POINT (-180 0)"},      // same meridian, ~111 m
+        {95, "POINT (-179.996 0)"},  // across +-180, ~556 m
+        {96, "LINESTRING (179.9985 -0.0005, 179.9985 0.0005)"},  // planar
+        {97, "POINT (-179.985 0)"},  // across +-180, ~1.7 km: rejected
+        {98, "POINT (0 0)"},         // antipodal, same latitude: rejected
+    };
+    constexpr int kPoleRow = 90;
+    const std::set<int> antimeridian_near = {92, 93, 94, 95, 96};
+    const std::set<int> antimeridian_far = {97, 98};
+    // Same argument order as Geometry::dwithin (row first, then query).
+    const double pole_distance =
+        Geometry::haversine_distance_meters(-90.0, 180.0, -29.0, 0.0);
+    const std::set<int> empties = {3, 17, 41, 58, 77};
+    const std::set<int> boundary_rows = {5, 23, 61, 30, 45};
+    const std::set<int> far_rows = {70, 88};
+
+    std::vector<std::string> wkbs;
+    wkbs.reserve(N);
+    {
+        auto ctx = GEOS_init_r();
+        for (int i = 0; i < N; ++i) {
+            std::string wkt;
+            auto it = special.find(i);
+            if (it != special.end()) {
+                wkt = it->second;
+            } else if (i % 2 == 0) {
+                wkt = "POINT (" + std::to_string(10.0 + (i % 7) * 0.01) + " " +
+                      std::to_string(10.0 + (i % 5) * 0.01) + ")";
+            } else {
+                wkt = "POINT (" + std::to_string(120.0 + (i % 7) * 0.01) + " " +
+                      std::to_string(30.0 + (i % 5) * 0.01) + ")";
+            }
+            milvus::Geometry g(ctx, wkt.c_str());
+            EXPECT_TRUE(g.IsValid()) << wkt;
+            wkbs.emplace_back(g.to_wkb_string());
+        }
+        GEOS_finish_r(ctx);
+    }
+
+    auto full_ds = DataGen(schema, N);
+    auto raw =
+        CreateSealedWithFieldDataLoaded(schema, full_ds, false, {geo_id.get()});
+    auto indexed =
+        CreateSealedWithFieldDataLoaded(schema, full_ds, false, {geo_id.get()});
+
+    auto geo_field_data =
+        milvus::storage::CreateFieldData(milvus::storage::DataType::GEOMETRY,
+                                         milvus::storage::DataType::NONE,
+                                         false);
+    geo_field_data->FillFieldData(wkbs.data(), wkbs.size());
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    auto load_info = PrepareSingleFieldInsertBinlog(
+        1, 1, 1, geo_id.get(), {geo_field_data}, cm);
+    raw->LoadFieldData(load_info);
+    indexed->LoadFieldData(load_info);
+
+    // Build the R-Tree from the same column through the production bulk-load
+    // path (empty rows get the placeholder MBR there).
+    // Distinct field/index ids: the build temp dir is process-global and keyed
+    // by them (see QueryBadAllocIsClassifiedAsMemAllocateFailed).
+    auto remote_file = (temp_path_.get() / "rtree_dwithin.parquet").string();
+    milvus::storage::FieldDataMeta dw_field_meta{1, 1, 1, 54138};
+    dw_field_meta.field_schema.set_data_type(
+        ::milvus::proto::schema::DataType::Geometry);
+    milvus::storage::IndexMeta dw_index_meta{1, 54138, 1, 1};
+    WriteGeometryInsertFile(chunk_manager_, dw_field_meta, remote_file, wkbs);
+    milvus::storage::FileManagerContext fm_ctx(
+        dw_field_meta, dw_index_meta, chunk_manager_, fs_);
+    auto rtree_index =
+        std::make_unique<milvus::index::RTreeIndex<std::string>>(fm_ctx);
+    nlohmann::json build_cfg;
+    build_cfg["insert_files"] = std::vector<std::string>{remote_file};
+    build_cfg["index_type"] = milvus::index::RTREE_INDEX_TYPE;
+    rtree_index->Build(build_cfg);
+    auto stats = rtree_index->UploadUnified({});
+    nlohmann::json cfg_load;
+    cfg_load["index_files"] = stats->GetIndexFiles();
+    rtree_index->LoadUnified(cfg_load);
+    ASSERT_EQ(rtree_index->Count(), N) << "every row, empties included, must "
+                                          "be in the index";
+
+    milvus::segcore::LoadIndexInfo info{};
+    info.collection_id = 1;
+    info.partition_id = 1;
+    info.segment_id = 1;
+    info.field_id = geo_id.get();
+    info.field_type = DataType::GEOMETRY;
+    info.index_id = 1;
+    info.index_build_id = 1;
+    info.index_version = 1;
+    info.schema = proto::schema::FieldSchema();
+    info.schema.set_data_type(proto::schema::DataType::Geometry);
+    info.index_params["index_type"] = milvus::index::RTREE_INDEX_TYPE;
+    info.cache_index =
+        CreateTestCacheIndex("rtree_dwithin_key", std::move(rtree_index));
+    indexed->LoadIndex(info);
+    ASSERT_TRUE(indexed->HasIndex(geo_id));
+    ASSERT_FALSE(raw->HasIndex(geo_id));
+
+    auto run = [&](const SegmentInternalInterface* seg,
+                   const std::string& wkt,
+                   double distance) {
+        auto gis_expr = std::make_shared<milvus::expr::GISFunctionFilterExpr>(
+            milvus::expr::ColumnInfo(geo_id, DataType::GEOMETRY),
+            proto::plan::GISFunctionFilterExpr_GISOp_DWithin,
+            wkt,
+            distance);
+        auto plan = std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID,
+                                                           gis_expr);
+        return ExecuteQueryExpr(plan, seg, N, MAX_TIMESTAMP);
+    };
+
+    struct Query {
+        std::string wkt;
+        double distance;
+        // Whether both far rows lie outside this query's radius (the pole
+        // query reaches 6783 km, which covers the polygon at (-10 -10) but
+        // not the point at (125 35); the bitwise comparison above still
+        // holds either way).
+        bool far_rows_pruned;
+    };
+    const std::vector<Query> queries = {
+        {"POINT (115 35)", 500000, true},
+        {"POINT (10 10)", 50000, true},
+        {"POINT (120 30)", 50000, true},
+        {"POINT (-60 -40)", 1, true},
+        {"POINT EMPTY", 1e12, true},
+        {"POINT (0 -29)", pole_distance, false},
+        {"POINT (179.999 0)", 1000, true},
+        {"POINT (-179.999 0)", 1000, true},
+    };
+    for (const auto& q : queries) {
+        SCOPED_TRACE("ST_DWITHIN(geo, '" + q.wkt + "', " +
+                     std::to_string(q.distance) + ")");
+        BitsetType raw_bits = run(raw.get(), q.wkt, q.distance);
+        BitsetType idx_bits = run(indexed.get(), q.wkt, q.distance);
+        ASSERT_EQ(raw_bits.size(), static_cast<size_t>(N));
+        ASSERT_EQ(idx_bits.size(), static_cast<size_t>(N));
+        for (int i = 0; i < N; ++i) {
+            EXPECT_EQ(bool(raw_bits[i]), bool(idx_bits[i]))
+                << "row " << i << " raw=" << bool(raw_bits[i])
+                << " indexed=" << bool(idx_bits[i]);
+        }
+        // Empty rows match nothing, on either path, at any distance.
+        for (int i : empties) {
+            EXPECT_FALSE(raw_bits[i]) << "empty row " << i << " (raw)";
+            EXPECT_FALSE(idx_bits[i]) << "empty row " << i << " (indexed)";
+        }
+        if (q.far_rows_pruned) {
+            for (int i : far_rows) {
+                EXPECT_FALSE(idx_bits[i]) << "far row " << i;
+            }
+        }
+    }
+
+    // The boundary rows are inside 500 km of (115 35) on the exact metric and
+    // must survive the coarse pass.
+    {
+        BitsetType idx_bits = run(indexed.get(), "POINT (115 35)", 500000);
+        for (int i : boundary_rows) {
+            EXPECT_TRUE(idx_bits[i])
+                << "boundary row " << i << " pruned by the coarse envelope";
+        }
+        // Cluster rows around (120 30) are ~700 km away: still pruned.
+        for (int i = 1; i < N; i += 2) {
+            if (special.count(i) == 0) {
+                EXPECT_FALSE(idx_bits[i]) << "cluster row " << i;
+            }
+        }
+    }
+    // An empty query point matches nothing (and must not throw).
+    {
+        BitsetType idx_bits = run(indexed.get(), "POINT EMPTY", 1e12);
+        EXPECT_EQ(idx_bits.count(), 0u);
+    }
+    // The pole row sits exactly on the boundary: accepted on the raw path, so
+    // the indexed path must not prune it in the coarse pass.
+    {
+        BitsetType raw_bits = run(raw.get(), "POINT (0 -29)", pole_distance);
+        BitsetType idx_bits =
+            run(indexed.get(), "POINT (0 -29)", pole_distance);
+        ASSERT_TRUE(raw_bits[kPoleRow]) << "pole row is not on the boundary";
+        EXPECT_TRUE(idx_bits[kPoleRow]) << "pole row pruned by the envelope";
+    }
+    // Next to the antimeridian, the indexed path keeps the rows on both
+    // sides of +-180 and rejects the ones past 1 km, including the antipodal
+    // row at the same latitude that a full-longitude box would make a
+    // candidate. (The line row is planar-near only to the east query.)
+    {
+        BitsetType idx_bits = run(indexed.get(), "POINT (179.999 0)", 1000);
+        for (int i : antimeridian_near) {
+            EXPECT_TRUE(idx_bits[i]) << "antimeridian row " << i;
+        }
+        for (int i : antimeridian_far) {
+            EXPECT_FALSE(idx_bits[i]) << "antimeridian row " << i;
+        }
+    }
+
+    indexed.reset();
+    raw.reset();
+    CleanupIndexFiles(stats->GetIndexFiles(), "GIS dwithin equivalence test");
 }
