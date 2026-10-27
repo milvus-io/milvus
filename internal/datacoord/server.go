@@ -491,7 +491,8 @@ func (s *Server) initDataCoord() (initErr error) {
 	if err != nil {
 		return err
 	}
-	s.snapshotExportManager = snapshot.NewSnapshotExportManager(s.ctx, snapshotExportMeta, snapshotManager)
+	exportCluster, _ := s.cluster2.(session.SnapshotExportCluster)
+	s.snapshotExportManager = snapshot.NewSnapshotExportManager(s.ctx, snapshotExportMeta, snapshotManager, s.globalScheduler, exportCluster)
 	snapshotManager.ExportManager = s.snapshotExportManager
 	mlog.Info(s.ctx, "init snapshot manager done")
 

@@ -394,6 +394,16 @@ func (c *Checker) checkPendingJob(job CopySegmentJob) {
 
 	// Step 3: Split uncovered mappings into groups (max segments per task)
 	maxSegmentsPerTask := Params.DataCoordCfg.MaxSegmentsPerCopyTask.GetAsInt()
+	// lo.Chunk panics on non-positive sizes. Leave the job Pending so a
+	// corrected configuration can resume without allocating duplicate tasks.
+	if maxSegmentsPerTask <= 0 {
+		log.Error(c.Ctx, "copy task segment limit must be positive",
+			mlog.String("configKey", Params.DataCoordCfg.MaxSegmentsPerCopyTask.Key),
+			mlog.Int("value", maxSegmentsPerTask))
+		return
+	}
+	// TEXT segments can share partition-level LOBs across these groups.
+	// DataNode failure cleanup excludes them; reference-aware LOB GC owns them.
 	groups := lo.Chunk(pendingMappings, maxSegmentsPerTask)
 
 	// Step 4: Create task for each group
@@ -414,9 +424,9 @@ func (c *Checker) checkPendingJob(job CopySegmentJob) {
 			TaskId:       taskID,
 			JobId:        job.GetJobId(),
 			CollectionId: job.GetCollectionId(),
-			NodeId:       meta.NullNodeID,                                    // Not assigned yet
-			TaskVersion:  0,                                                  // Initial version
-			TaskSlot:     1,                                                  // Each copy task uses 1 slot
+			NodeId:       meta.NullNodeID, // Not assigned yet
+			TaskVersion:  0,               // Initial version
+			TaskSlot:     Params.DataCoordCfg.SnapshotTaskSlotUsage.GetAsInt64(),
 			State:        datapb.CopySegmentTaskState_CopySegmentTaskPending, // Initial state
 			Reason:       "",
 			IdMappings:   group, // Lightweight: only source→target segment IDs

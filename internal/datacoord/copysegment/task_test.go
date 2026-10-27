@@ -18,8 +18,10 @@ package copysegment
 
 import (
 	"context"
-	"path"
+	"fmt"
+	"reflect"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -33,6 +35,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
@@ -1010,6 +1013,9 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_UpdateSegmentsInfoErrorMa
 	s.Contains(updatedTask.GetReason(), "fieldBinlog no need to store logpath")
 }
 
+// index.CreateTestIndexMeta creates an index.IndexMeta with pre-registered index definitions for testing.
+// If catalog is nil, use the real catalog backed by an isolated memory KV.
+
 func (s *CopySegmentTaskSuite) TestClone_DeepCopiesProto() {
 	task := CreateTestCopyTask(100, 2001).(*Task)
 
@@ -1032,7 +1038,7 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_EmptyResult() {
 		IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{},
 	}
 	task := CreateTestCopyTask(1, 100)
-	err := syncVectorScalarIndexes(context.Background(), result, task, &meta.Meta{}, nil, nil, nil)
+	err := syncVectorScalarIndexes(context.Background(), result, task, &meta.Meta{}, nil, nil, copySegmentIndexLookup{})
 	s.NoError(err)
 }
 
@@ -1068,7 +1074,7 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_SingleIndex() {
 	}
 	task := CreateTestCopyTask(collectionID, segmentID)
 
-	err := syncVectorScalarIndexes(context.Background(), result, task, m, im, nil, nil)
+	err := syncVectorScalarIndexes(context.Background(), result, task, m, testCopyIndexMeta(m), nil, buildCopySegmentIndexLookup(task, m, testCopyIndexMeta(m)))
 	s.NoError(err)
 
 	// Verify the segment index was added with target indexID and Finished state
@@ -1114,7 +1120,7 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_PreservesIndexStorePa
 	}
 	task := CreateTestCopyTask(collectionID, segmentID)
 
-	err := syncVectorScalarIndexes(context.Background(), result, task, m, im, nil, nil)
+	err := syncVectorScalarIndexes(context.Background(), result, task, m, testCopyIndexMeta(m), nil, buildCopySegmentIndexLookup(task, m, testCopyIndexMeta(m)))
 	s.NoError(err)
 
 	segIdxV0, ok := im.SegmentBuildInfo.Get(2001)
@@ -1172,7 +1178,7 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_MultipleIndexesPerFie
 	}
 	task := CreateTestCopyTask(collectionID, segmentID)
 
-	err := syncVectorScalarIndexes(context.Background(), result, task, m, im, nil, nil)
+	err := syncVectorScalarIndexes(context.Background(), result, task, m, testCopyIndexMeta(m), nil, buildCopySegmentIndexLookup(task, m, testCopyIndexMeta(m)))
 	s.NoError(err)
 
 	// All three indexes should be synced with correct target indexIDs
@@ -1208,7 +1214,7 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_IndexNameNotFound() {
 	}
 	task := CreateTestCopyTask(collectionID, segmentID)
 
-	err := syncVectorScalarIndexes(context.Background(), result, task, m, im, nil, nil)
+	err := syncVectorScalarIndexes(context.Background(), result, task, m, testCopyIndexMeta(m), nil, buildCopySegmentIndexLookup(task, m, testCopyIndexMeta(m)))
 	s.NoError(err)
 
 	// Should not be added
@@ -1220,9 +1226,8 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_AddSegmentIndexError(
 	collectionID := int64(1)
 	segmentID := int64(100)
 
-	errCatalog := catalogmocks.NewDataCoordCatalog(s.T())
-	errCatalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).
-		Return(errors.New("catalog error"))
+	errCatalog := kvdatacoord.NewCatalog(meta.NewMetaMemoryKV(), "", "")
+	defer mockey.Mock((*kvdatacoord.Catalog).CreateSegmentIndex).Return(merr.ErrServiceUnavailable).Build().UnPatch()
 
 	indexes := map[int64]*model.Index{
 		300: {CollectionID: collectionID, FieldID: 101, IndexID: 300, IndexName: "vec_idx"},
@@ -1239,178 +1244,59 @@ func (s *CopySegmentTaskSuite) TestSyncVectorScalarIndexes_AddSegmentIndexError(
 	}
 	task := CreateTestCopyTask(collectionID, segmentID)
 
-	// Mock copyMeta for error path (UpdateTask and UpdateJobStateAndReleaseRef)
-	copyCatalog := catalogmocks.NewDataCoordCatalog(s.T())
-	copyCatalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
-	copyCatalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
-	copyCatalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
-	copyCatalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
-	copyMeta, cmErr := NewCopySegmentMeta(context.TODO(), copyCatalog, nil, nil, nil, nil)
-	s.NoError(cmErr)
-
-	syncErr := syncVectorScalarIndexes(context.Background(), result, task, m, im, copyMeta, nil)
+	syncErr := syncVectorScalarIndexes(context.Background(), result, task, m, testCopyIndexMeta(m), nil, buildCopySegmentIndexLookup(task, m, testCopyIndexMeta(m)))
 	s.Error(syncErr)
-	s.Contains(syncErr.Error(), "catalog error")
+	s.ErrorIs(syncErr, merr.ErrServiceUnavailable)
 }
 
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ClearsImportingFlagOnCompletion() {
-	collectionID := int64(1)
-	segmentID := int64(100)
-
-	catalog := catalogmocks.NewDataCoordCatalog(s.T())
-	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, segs []*datapb.SegmentInfo, _ ...metastore.BinlogsIncrement) error {
-		s.Require().Len(segs, 1)
-		seg := segs[0]
-		assert.Equal(s.T(), segmentID, seg.GetID())
-		assert.Equal(s.T(), commonpb.SegmentState_Flushed, seg.GetState())
-		assert.False(s.T(), seg.GetIsImporting())
-		return nil
-	}).Once()
-	ms1 := metacache.NewMetaStore(catalog)
-	mt := &meta.Meta{Ctx: context.Background(), Catalog: catalog, Segments: meta.NewSegmentsInfo(ms1), MetaStore: ms1}
-	mt.Segments.SetSegment(segmentID, meta.NewSegmentInfo(&datapb.SegmentInfo{
-		ID:            segmentID,
-		CollectionID:  collectionID,
-		PartitionID:   10,
-		InsertChannel: "ch1",
-		State:         commonpb.SegmentState_Importing,
-		IsImporting:   true,
-	}))
-
-	copyCatalog := catalogmocks.NewDataCoordCatalog(s.T())
-	copyCatalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
-	copyCatalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
-	copyCatalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
-	copyMeta, err := NewCopySegmentMeta(context.Background(), copyCatalog, nil, nil, nil, nil)
-	s.Require().NoError(err)
-
-	result := &datapb.QueryCopySegmentResponse{
-		State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
-		SegmentResults: []*datapb.CopySegmentResult{{
-			SegmentId: segmentID,
-			Binlogs: []*datapb.FieldBinlog{{
-				FieldID: 100,
-				Binlogs: []*datapb.Binlog{{LogID: 1, LogPath: "files/binlog/1"}},
-			}},
-		}},
+	for _, tc := range []struct {
+		name     string
+		version  int64
+		manifest string
+	}{
+		{"legacy", storage.StorageV1, ""},
+		{"empty manifest", storage.StorageV3, ""},
+		{"acknowledged manifest", storage.StorageV3, `{"ver":3,"base_path":"files/insert_log/1/10/100"}`},
+	} {
+		s.Run(tc.name, func() {
+			// An explicit empty index acknowledgement publishes without storage I/O.
+			reader := mockey.Mock(packed.GetManifestIndexInfosAsync).Return(nil, merr.ErrServiceUnavailable).Build()
+			defer reader.UnPatch()
+			catalog := kvdatacoord.NewCatalog(meta.NewMetaMemoryKV(), "", "")
+			ms := metacache.NewMetaStore(catalog)
+			mt := &meta.Meta{Ctx: context.Background(), Catalog: catalog, Segments: meta.NewSegmentsInfo(ms), MetaStore: ms}
+			mt.Segments.SetSegment(100, meta.NewSegmentInfo(&datapb.SegmentInfo{
+				ID: 100, CollectionID: 1, PartitionID: 10, InsertChannel: "ch1",
+				State: commonpb.SegmentState_Importing, IsImporting: true, StorageVersion: tc.version,
+			}))
+			copyMeta, err := NewCopySegmentMeta(context.Background(), catalog, nil, testCopyIndexMeta(nil), nil, nil)
+			s.Require().NoError(err)
+			result := &datapb.QueryCopySegmentResponse{
+				State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+				SegmentResults: []*datapb.CopySegmentResult{{
+					SegmentId: 100, ManifestPath: tc.manifest,
+					Binlogs: []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
+				}},
+			}
+			if tc.manifest != "" {
+				result.SegmentResults[0].ManifestIndexRewritten = proto.Bool(true)
+			}
+			s.Require().NoError(SyncCopySegmentTask(CreateTestCopyTask(1, 100), result, copyMeta, mt, testCopyIndexMeta(mt)))
+			updated := mt.GetSegment(context.Background(), 100)
+			s.Require().NotNil(updated)
+			s.Equal(commonpb.SegmentState_Flushed, updated.GetState())
+			s.False(updated.GetIsImporting())
+			s.Equal(tc.manifest, updated.GetManifestPath())
+			s.Zero(reader.Times())
+		})
 	}
-	task := CreateTestCopyTask(collectionID, segmentID)
-
-	err = SyncCopySegmentTask(task, result, copyMeta, mt, nil)
-	s.Require().NoError(err)
-	updated := mt.GetSegment(context.Background(), segmentID)
-	s.Require().NotNil(updated)
-	s.Equal(commonpb.SegmentState_Flushed, updated.GetState())
-	s.False(updated.GetIsImporting())
 }
 
-func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_EmptyManifestStillClearsImportingFlag() {
-	collectionID := int64(1)
-	segmentID := int64(101)
-
-	catalog := catalogmocks.NewDataCoordCatalog(s.T())
-	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
-	ms3 := metacache.NewMetaStore(catalog)
-	mt := &meta.Meta{Ctx: context.Background(), Catalog: catalog, Segments: meta.NewSegmentsInfo(ms3), MetaStore: ms3}
-	mt.Segments.SetSegment(segmentID, meta.NewSegmentInfo(&datapb.SegmentInfo{
-		ID:             segmentID,
-		CollectionID:   collectionID,
-		PartitionID:    10,
-		InsertChannel:  "ch1",
-		State:          commonpb.SegmentState_Importing,
-		IsImporting:    true,
-		StorageVersion: 3,
-	}))
-
-	copyCatalog := catalogmocks.NewDataCoordCatalog(s.T())
-	copyCatalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
-	copyCatalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
-	copyCatalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
-	copyMeta, err := NewCopySegmentMeta(context.Background(), copyCatalog, nil, nil, nil, nil)
-	s.Require().NoError(err)
-
-	result := &datapb.QueryCopySegmentResponse{
-		State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
-		SegmentResults: []*datapb.CopySegmentResult{{
-			SegmentId:    segmentID,
-			ManifestPath: "",
-			Binlogs: []*datapb.FieldBinlog{{
-				FieldID: 100,
-				Binlogs: []*datapb.Binlog{{LogID: 2, LogPath: "files/binlog/2"}},
-			}},
-		}},
-	}
-	task := CreateTestCopyTask(collectionID, segmentID)
-
-	err = SyncCopySegmentTask(task, result, copyMeta, mt, nil)
-	s.Require().NoError(err)
-	updated := mt.GetSegment(context.Background(), segmentID)
-	s.Require().NotNil(updated)
-	s.Equal(commonpb.SegmentState_Flushed, updated.GetState())
-	s.False(updated.GetIsImporting())
-	s.Empty(updated.GetManifestPath())
-}
-
-func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateAndClearImportingFlag() {
-	meta.MockManifestIndexSubmissions(s.T())
-	collectionID := int64(1)
-	segmentID := int64(102)
-	manifestPath := `{"ver":3,"base_path":"files/insert_log/1/10/102"}`
-
-	// A StorageV3 pointer is read back before publication; this worker's
-	// manifest carries no index entries, so it passes.
-	defer mockey.Mock(meta.CreateStorageConfig).Return(nil).Build().UnPatch()
-	defer mockey.Mock(packed.GetManifestIndexInfosAsync).Return(nil, nil).Build().UnPatch()
-
-	catalog := catalogmocks.NewDataCoordCatalog(s.T())
-	// A fresh StorageV3 copy target publishes its first manifest inline via
-	// UpdateManifest/UpdateSegmentsInfo, which writes through AlterSegments.
-	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
-	ms4 := metacache.NewMetaStore(catalog)
-	mt := &meta.Meta{Ctx: context.Background(), Catalog: catalog, Segments: meta.NewSegmentsInfo(ms4), MetaStore: ms4}
-	mt.Segments.SetSegment(segmentID, meta.NewSegmentInfo(&datapb.SegmentInfo{
-		ID:             segmentID,
-		CollectionID:   collectionID,
-		PartitionID:    10,
-		InsertChannel:  "ch1",
-		State:          commonpb.SegmentState_Importing,
-		IsImporting:    true,
-		StorageVersion: 3,
-	}))
-
-	copyCatalog := catalogmocks.NewDataCoordCatalog(s.T())
-	copyCatalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
-	copyCatalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
-	copyCatalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
-	copyMeta, err := NewCopySegmentMeta(context.Background(), copyCatalog, nil, nil, nil, nil)
-	s.Require().NoError(err)
-
-	result := &datapb.QueryCopySegmentResponse{
-		State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
-		SegmentResults: []*datapb.CopySegmentResult{{
-			SegmentId:    segmentID,
-			ManifestPath: manifestPath,
-			Binlogs: []*datapb.FieldBinlog{{
-				FieldID: 100,
-				Binlogs: []*datapb.Binlog{{LogID: 3, LogPath: "files/binlog/3"}},
-			}},
-		}},
-	}
-	task := CreateTestCopyTask(collectionID, segmentID)
-
-	err = SyncCopySegmentTask(task, result, copyMeta, mt, nil)
-	s.Require().NoError(err)
-	updated := mt.GetSegment(context.Background(), segmentID)
-	s.Require().NotNil(updated)
-	s.Equal(commonpb.SegmentState_Flushed, updated.GetState())
-	s.False(updated.GetIsImporting())
-	s.Equal(manifestPath, updated.GetManifestPath())
-}
-
-// newCopiedManifestReadBackFixture wires a StorageV3 copy target plus a target
+// newCopiedManifestResultFixture wires a StorageV3 copy target plus a target
 // index definition (indexID 300, "vec_idx") into the sync-path test meta, so a
-// test only has to say what reading back the worker's manifest pointer reports.
-func (s *CopySegmentTaskSuite) newCopiedManifestReadBackFixture() (CopySegmentTask, CopySegmentMeta, *meta.Meta, *index.IndexMeta, *datapb.QueryCopySegmentResponse) {
+// test can vary the worker acknowledgement and mocked manifest contents.
+func (s *CopySegmentTaskSuite) newCopiedManifestResultFixture() (CopySegmentTask, CopySegmentMeta, *meta.Meta, *datapb.QueryCopySegmentResponse) {
 	task := CreateTestCopyTask(100, 2001).(*Task)
 	copyMeta, m := NewCopySegmentTaskTestMeta(s.T(), task)
 	m.ChunkManager = storage.NewLocalChunkManager(objectstorage.RootPath("files"))
@@ -1436,67 +1322,31 @@ func (s *CopySegmentTaskSuite) newCopiedManifestReadBackFixture() (CopySegmentTa
 		TaskID: 1001,
 		State:  datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 		SegmentResults: []*datapb.CopySegmentResult{{
-			SegmentId:    2001,
-			Binlogs:      MakeTestCopySegmentBinlogs(),
-			ManifestPath: `{"ver":3,"base_path":"files/insert_log/100/10/2001"}`,
+			SegmentId:              2001,
+			Binlogs:                MakeTestCopySegmentBinlogs(),
+			ManifestPath:           `{"ver":3,"base_path":"files/insert_log/100/10/2001"}`,
+			ManifestIndexRewritten: proto.Bool(true),
+			ManifestIndexBuildIds:  []int64{9001},
 			IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{9001: {
 				FieldId: 101, BuildId: 9001, IndexName: "vec_idx", IndexFilePaths: []string{"index.bin"},
 			}},
 		}},
 	}
-	return task, copyMeta, m, im, resp
+	return task, copyMeta, m, resp
 }
 
-// A worker result whose target manifest still carries an index entry foreign to
-// the target collection is the fingerprint of an old DataNode that skipped the
-// republication (it ignores target_indexes and sends no acknowledgement).
-// The pointer must be rejected before publication and surface as a hard task
-// failure, not silent metadata pollution.
-func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ForeignManifestIndexEntryFailsTask() {
-	meta.MockManifestIndexSubmissions(s.T())
-	ctx := context.Background()
-	task, copyMeta, m, im, resp := s.newCopiedManifestReadBackFixture()
-
-	defer mockey.Mock(meta.CreateStorageConfig).Return(nil).Build().UnPatch()
-	defer mockey.Mock(packed.GetManifestIndexInfosAsync).Return([]packed.ManifestIndexInfo{
-		// The target's own re-derived entry may coexist with the leftover; only
-		// the foreign one is the failure.
-		copiedManifestReviewEntry(),
-		// Inherited from the SOURCE collection - its stored path walks back to
-		// the source's artifacts.
-		{IndexID: 5001, BuildID: 6001, IndexName: "vec_idx"},
-	}, nil).Build().UnPatch()
-
-	err := SyncCopySegmentTask(task, resp, copyMeta, m, im)
-	s.Require().Error(err)
-	s.ErrorIs(err, merr.ErrServiceInternal)
-	s.Contains(err.Error(), "2001", "the error must name the segment")
-	s.Contains(err.Error(), "5001", "the error must name the foreign index ID")
-
-	// The poisoned pointer was never published and the segment was not flushed.
-	segment := m.GetSegment(ctx, 2001)
-	s.Require().NotNil(segment)
-	s.Equal(commonpb.SegmentState_Importing, segment.GetState())
-	s.Empty(segment.GetManifestPath())
-
-	updatedTask := copyMeta.GetTask(ctx, 1001)
-	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, updatedTask.GetState())
-	s.Contains(updatedTask.GetReason(), "5001")
-}
-
-// A read-back that finds only target-owned entries (an upgraded worker that ran
-// the republication) publishes the pointer as before.
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_CleanManifestReadBackPublishes() {
 	meta.MockManifestIndexSubmissions(s.T())
 	ctx := context.Background()
-	task, copyMeta, m, im, resp := s.newCopiedManifestReadBackFixture()
+	task, copyMeta, m, resp := s.newCopiedManifestResultFixture()
+	resp.SegmentResults[0].ManifestIndexRewritten = nil
 
 	defer mockey.Mock(meta.CreateStorageConfig).Return(nil).Build().UnPatch()
 	defer mockey.Mock(packed.GetManifestIndexInfosAsync).Return([]packed.ManifestIndexInfo{
 		copiedManifestReviewEntry(),
 	}, nil).Build().UnPatch()
 
-	err := SyncCopySegmentTask(task, resp, copyMeta, m, im)
+	err := SyncCopySegmentTask(task, resp, copyMeta, m, testCopyIndexMeta(m))
 	s.Require().NoError(err)
 
 	segment := m.GetSegment(ctx, 2001)
@@ -1512,11 +1362,12 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_CleanManifestReadBackPubl
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PlacementMismatchFailsBeforePublish() {
 	meta.MockManifestIndexSubmissions(s.T())
 	ctx := context.Background()
-	task, copyMeta, m, im, resp := s.newCopiedManifestReadBackFixture()
+	task, copyMeta, m, resp := s.newCopiedManifestResultFixture()
 	s.Require().NoError(copyMeta.UpdateTask(ctx, task.GetTaskId(), UpdateCopyTaskIndexWriteToManifest(true)))
 	task = copyMeta.GetTask(ctx, task.GetTaskId())
 	result := resp.GetSegmentResults()[0]
 	result.ManifestIndexRewritten = proto.Bool(true)
+	result.ManifestIndexBuildIds = nil
 	result.IndexInfos = map[int64]*datapb.VectorScalarIndexInfo{
 		9001: {
 			FieldId:        101,
@@ -1532,10 +1383,10 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PlacementMismatchFailsBef
 			return nil, merr.WrapErrIoFailedReason("must not be read")
 		}).Build().UnPatch()
 
-	err := SyncCopySegmentTask(task, resp, copyMeta, m, im)
+	err := SyncCopySegmentTask(task, resp, copyMeta, m, testCopyIndexMeta(m))
 	s.Require().Error(err)
 	s.Contains(err.Error(), "path version")
-	s.Zero(manifestReads, "current worker acknowledgement must be used without read-back")
+	s.Zero(manifestReads, "explicitly acknowledged empty indexes need no readback")
 
 	segment := m.GetSegment(ctx, result.GetSegmentId())
 	s.Require().NotNil(segment)
@@ -1653,9 +1504,9 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_IndexWritePlacementMatrix
 
 			s.Require().NoError(SyncCopySegmentTask(task, resp, copyMeta, m, dm.IndexMeta))
 			if tc.enabled {
-				s.Equal(1, store.ReadCount, "artifact-bearing results must verify the dispatched index identity")
+				s.Greater(store.ReadCount, 0, "nonempty manifest indexes must be read back")
 			} else {
-				s.Zero(store.ReadCount, "acknowledged empty manifests need no read-back")
+				s.Zero(store.ReadCount, "explicitly acknowledged empty indexes need no readback")
 			}
 
 			io := packed.NewManifestIOContext(1)
@@ -1804,6 +1655,60 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PreservesImportingFlagOnF
 	s.Empty(meta.DrainStatsBuildChForTest(), "failed finalization must not enqueue stats")
 }
 
+func TestAssembleCopySegmentRequest_MarksExternalCollection(t *testing.T) {
+	snapshotData := &snapshotstorage.SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{
+			CollectionId: 100,
+			Name:         "test_snapshot",
+		},
+		Collection: &datapb.CollectionDescription{
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "external_pk", ExternalField: "pk"},
+				},
+			},
+		},
+		Segments: []*datapb.SegmentDescription{
+			{
+				SegmentId:   1,
+				PartitionId: 10,
+				IndexFiles: []*indexpb.IndexFilePathInfo{{
+					IndexFilePaths: []string{
+						"source-root/files/files/index_files/1001/2001/3001/index",
+					},
+				}},
+			},
+		},
+	}
+
+	sm := &snapshotReadTarget{}
+	mockReadSnapshot := mockey.Mock((*snapshotReadTarget).ReadSnapshotData).Return(snapshotData, nil).Build()
+	defer mockReadSnapshot.UnPatch()
+
+	mockStorageConfig := mockey.Mock(meta.CreateStorageConfig).Return(nil).Build()
+	defer mockStorageConfig.UnPatch()
+
+	task := CreateTestCopyTask(100, 2001).(*Task)
+	task.SnapshotMeta = sm
+	task.Alloc = &EmbeddedAllocator{}
+	mockAlloc := mockey.Mock((*EmbeddedAllocator).AllocN).To(func(count int64) (typeutil.UniqueID, typeutil.UniqueID, error) { return 9001, 9001 + count, nil }).Build()
+	defer mockAlloc.UnPatch()
+	job := &Job{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:        100,
+			CollectionId: 100,
+			SnapshotName: "test_snapshot",
+		},
+		Tr:            timerecord.NewTimeRecorder("test_job"),
+		SnapshotCache: &CopySegmentSnapshotCache{},
+	}
+
+	req, err := AssembleCopySegmentRequest(task, job)
+	assert.NoError(t, err)
+	assert.Len(t, req.GetSources(), 1)
+	assert.True(t, req.GetSources()[0].GetIsExternalCollection())
+}
+
 func TestDeriveSnapshotSourceRootURI_ByLayout(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1858,7 +1763,327 @@ func TestDeriveSnapshotSourceRootURI_ByLayout(t *testing.T) {
 	}
 }
 
-func newManifestFallbackAssembleFixture(ctx context.Context, segmentIDs ...int64) (*Task, *Job) {
+func TestAssembleCopySegmentRequest_ExternalSnapshotCarriesForeignSpecAndRef(t *testing.T) {
+	key := Params.DataCoordCfg.SnapshotCopyConcurrency.Key
+	Params.Save(key, "3")
+	defer Params.Reset(key)
+	snapshotData := &snapshotstorage.SnapshotData{
+		SnapshotInfo: &datapb.SnapshotInfo{
+			Id:           1,
+			CollectionId: 100,
+			Name:         "test_snapshot",
+		},
+		Layout: datapb.SnapshotLayout_SnapshotLayoutSelfContained,
+		Segments: []*datapb.SegmentDescription{
+			{
+				SegmentId:   1,
+				PartitionId: 10,
+				IndexFiles: []*indexpb.IndexFilePathInfo{{
+					IndexFilePaths: []string{
+						"source-root/files/files/index_files/1001/2001/3001/index",
+					},
+				}},
+			},
+		},
+	}
+
+	sm := &snapshotReadTarget{}
+	sourceCM := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	mockResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).To(
+		func(
+			_ context.Context,
+			_ *objectstorage.Config,
+			direction snapshotstorage.Direction,
+			foreignURI string,
+			externalSpec string,
+		) (*snapshotstorage.ResolvedForeignStorage, error) {
+			assert.Equal(t, snapshotstorage.DirectionRestore, direction)
+			assert.Equal(t, "s3://bucket/source-root/snapshots/100/metadata/1.json", foreignURI)
+			assert.Equal(t, `{"extfs":{"region":"us-west-2"}}`, externalSpec)
+			return &snapshotstorage.ResolvedForeignStorage{
+				ForeignBucket: "bucket",
+				ForeignCM:     sourceCM,
+			}, nil
+		}).Build()
+	defer mockResolve.UnPatch()
+	mockReadExternal := mockey.Mock((*snapshotReadTarget).ReadExternalSnapshotDataWithChunkManager).To(
+		func(_ *snapshotReadTarget, _ context.Context, gotCM storage.ChunkManager, snapshotS3Location string, includeSegments bool) (*snapshotstorage.SnapshotData, error) {
+			assert.Same(t, sourceCM, gotCM)
+			assert.Equal(t, "s3://bucket/source-root/snapshots/100/metadata/1.json", snapshotS3Location)
+			assert.True(t, includeSegments)
+			return snapshotData, nil
+		}).Build()
+	defer mockReadExternal.UnPatch()
+	mockStorage := mockey.Mock(meta.CreateStorageConfig).Return(&indexpb.StorageConfig{RootPath: "target-root"}).Build()
+	defer mockStorage.UnPatch()
+
+	nextID := int64(9001)
+	alloc := &EmbeddedAllocator{}
+	mockAlloc := mockey.Mock((*EmbeddedAllocator).AllocN).To(func(count int64) (typeutil.UniqueID, typeutil.UniqueID, error) {
+		start := nextID
+		nextID += count
+		return start, nextID, nil
+	}).Build()
+	defer mockAlloc.UnPatch()
+
+	task := &Task{
+		Ctx:          context.Background(),
+		SnapshotMeta: sm,
+		Alloc:        alloc,
+		Tr:           timerecord.NewTimeRecorder("test"),
+		Times:        taskcommon.NewTimes(),
+	}
+	task.Task.Store(&datapb.CopySegmentTask{
+		TaskId:       1001,
+		TaskSlot:     16,
+		JobId:        100,
+		CollectionId: 200,
+		IdMappings: []*datapb.CopySegmentIDMapping{
+			{SourceSegmentId: 1, TargetSegmentId: 2001, PartitionId: 20},
+		},
+	})
+
+	job := &Job{
+		CopySegmentJob: &datapb.CopySegmentJob{
+			JobId:              100,
+			CollectionId:       200,
+			SnapshotName:       "test_snapshot",
+			External:           true,
+			SnapshotS3Location: "s3://bucket/source-root/snapshots/100/metadata/1.json",
+			ExternalSpec:       `{"extfs":{"region":"us-west-2"}}`,
+		},
+		Tr:            timerecord.NewTimeRecorder("test_job"),
+		SnapshotCache: &CopySegmentSnapshotCache{},
+	}
+
+	req, err := AssembleCopySegmentRequest(task, job)
+
+	require.NoError(t, err)
+	require.NotNil(t, req)
+	assert.EqualValues(t, 3, req.GetCopyConcurrency())
+	assert.EqualValues(t, 16, req.GetTaskSlot())
+	assert.Equal(t, `{"extfs":{"region":"us-west-2"}}`, req.GetExternalSpec())
+	require.Len(t, req.GetSources(), 1)
+	assert.Equal(t, "s3://bucket/source-root/files", req.GetSources()[0].GetSourceRootPath())
+}
+
+func TestAssembleCopySegmentRequest_ExternalSnapshotFingerprint(t *testing.T) {
+	const snapshotLocation = "s3://bucket/source-root/snapshots/100/metadata/1.json"
+	newSnapshot := func() *snapshotstorage.SnapshotData {
+		return &snapshotstorage.SnapshotData{
+			SnapshotInfo: &datapb.SnapshotInfo{
+				Id:           1,
+				CollectionId: 100,
+				Name:         "test_snapshot",
+				S3Location:   snapshotLocation,
+			},
+			Collection: &datapb.CollectionDescription{},
+			Layout:     datapb.SnapshotLayout_SnapshotLayoutReferenced,
+			Segments: []*datapb.SegmentDescription{{
+				SegmentId:   1,
+				PartitionId: 10,
+			}},
+		}
+	}
+	newTask := func(sm *snapshotReadTarget) *Task {
+		task := &Task{
+			Ctx:          context.Background(),
+			SnapshotMeta: sm,
+			Tr:           timerecord.NewTimeRecorder("test"),
+			Times:        taskcommon.NewTimes(),
+		}
+		task.Task.Store(&datapb.CopySegmentTask{
+			TaskId:       1001,
+			JobId:        100,
+			CollectionId: 200,
+			IdMappings: []*datapb.CopySegmentIDMapping{{
+				SourceSegmentId: 1,
+				TargetSegmentId: 2001,
+				PartitionId:     20,
+			}},
+		})
+		return task
+	}
+
+	t.Run("recovered snapshot mismatch is rejected", func(t *testing.T) {
+		snapshotData := newSnapshot()
+		sourceCM := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+		mockResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).Return(&snapshotstorage.ResolvedForeignStorage{
+			ForeignBucket: "bucket",
+			ForeignCM:     sourceCM,
+		}, nil).Build()
+		defer mockResolve.UnPatch()
+		mockRead := mockey.Mock((*snapshotReadTarget).ReadExternalSnapshotDataWithChunkManager).
+			Return(snapshotData, nil).Build()
+		defer mockRead.UnPatch()
+
+		job := &Job{
+			CopySegmentJob: &datapb.CopySegmentJob{
+				JobId:               100,
+				CollectionId:        200,
+				SnapshotName:        "test_snapshot",
+				External:            true,
+				SnapshotS3Location:  snapshotLocation,
+				SnapshotFingerprint: "different-fingerprint",
+			},
+			SnapshotCache: &CopySegmentSnapshotCache{},
+		}
+
+		req, err := AssembleCopySegmentRequest(newTask(&snapshotReadTarget{}), job)
+
+		require.Error(t, err)
+		assert.Nil(t, req)
+		assert.True(t, errors.Is(err, merr.ErrDataIntegrity))
+	})
+
+	t.Run("matching snapshot is cached per job", func(t *testing.T) {
+		snapshotData := newSnapshot()
+		fingerprint, err := snapshotstorage.SnapshotFingerprint(snapshotData)
+		require.NoError(t, err)
+		sourceCM := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+		mockResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).Return(&snapshotstorage.ResolvedForeignStorage{
+			ForeignBucket: "bucket",
+			ForeignCM:     sourceCM,
+		}, nil).Build()
+		defer mockResolve.UnPatch()
+		readCalls := 0
+		mockRead := mockey.Mock((*snapshotReadTarget).ReadExternalSnapshotDataWithChunkManager).To(
+			func(*snapshotReadTarget, context.Context, storage.ChunkManager, string, bool) (*snapshotstorage.SnapshotData, error) {
+				readCalls++
+				return snapshotData, nil
+			}).Build()
+		defer mockRead.UnPatch()
+		mockStorage := mockey.Mock(meta.CreateStorageConfig).Return(&indexpb.StorageConfig{RootPath: "target-root"}).Build()
+		defer mockStorage.UnPatch()
+
+		job := &Job{
+			CopySegmentJob: &datapb.CopySegmentJob{
+				JobId:               100,
+				CollectionId:        200,
+				SnapshotName:        "test_snapshot",
+				External:            true,
+				SnapshotS3Location:  snapshotLocation,
+				SnapshotFingerprint: fingerprint,
+			},
+			SnapshotCache: &CopySegmentSnapshotCache{},
+		}
+		task := newTask(&snapshotReadTarget{})
+
+		first, err := AssembleCopySegmentRequest(task, job)
+		require.NoError(t, err)
+		second, err := AssembleCopySegmentRequest(task, job)
+		require.NoError(t, err)
+		assert.Equal(t, first, second)
+		assert.Equal(t, 1, readCalls)
+	})
+}
+
+func TestAssembleCopySegmentRequest_AllocatesTextAndJsonBuildIDs(t *testing.T) {
+	task, job := newAvroAssembleFixture(context.Background(), 1)
+	segment := job.SnapshotCache.data.Segments[0]
+	segment.IndexFiles = []*indexpb.IndexFilePathInfo{{BuildID: 3001, FieldID: 100, IndexID: 1001}}
+	segment.TextIndexFiles = map[int64]*datapb.TextIndexStats{200: {FieldID: 200, BuildID: 4001}}
+	segment.JsonKeyIndexFiles = map[int64]*datapb.JsonKeyStats{300: {FieldID: 300, BuildID: 5001}}
+	defer mockey.Mock(meta.CreateStorageConfig).Return(nil).Build().UnPatch()
+	next := int64(9001)
+	defer mockey.Mock((*EmbeddedAllocator).AllocN).To(func(count int64) (int64, int64, error) {
+		start := next
+		next += count
+		return start, next, nil
+	}).Build().UnPatch()
+	// Re-dispatch must not reference artifacts from the previous attempt.
+	seen := map[int64]bool{}
+	for attempt := 0; attempt < 2; attempt++ {
+		req, err := AssembleCopySegmentRequest(task, job)
+		require.NoError(t, err)
+		require.Len(t, req.Targets, 1)
+		ids := req.Targets[0].GetNewBuildIds()
+		require.Len(t, ids, 3)
+		for _, sourceID := range []int64{3001, 4001, 5001} {
+			id, ok := ids[sourceID]
+			require.True(t, ok)
+			require.GreaterOrEqual(t, id, int64(9001))
+			require.False(t, seen[id], "build IDs must be unique across kinds and dispatch attempts")
+			seen[id] = true
+		}
+	}
+}
+
+// EmbeddedAllocator: named type for mockey interface-method patching; avoids a
+// go1.26 `go vet` printf-pass panic on method expressions of anonymous structs.
+
+// assembleIndexPrecedenceFixture builds a one-segment copy request whose source
+// is a StorageV3 segment carrying the snapshot's own (etcd-derived) index
+// metadata, so a test only has to say what its manifest reports.
+func assembleIndexPrecedenceFixture(t *testing.T,
+	mutateSegment ...func(*datapb.SegmentDescription),
+) (*datapb.CopySegmentRequest, int) {
+	meta.MockManifestIndexSubmissions(t)
+	t.Helper()
+
+	task, job := newAvroAssembleFixture(context.Background(), 1)
+	segment := job.SnapshotCache.data.Segments[0]
+	segment.ManifestHasIndex = nil
+	segment.IndexFiles = []*indexpb.IndexFilePathInfo{{BuildID: 3001, FieldID: 100, IndexID: 1001, IndexName: "vec_idx"}}
+	for _, mutate := range mutateSegment {
+		mutate(segment)
+	}
+	defer mockey.Mock(meta.CreateStorageConfig).Return(nil).Build().UnPatch()
+	manifestReads := 0
+	defer mockey.Mock(packed.GetManifestIndexInfosAsync).To(
+		func(context.Context, *packed.ManifestIOContext, string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+			manifestReads++
+			return nil, nil
+		}).Build().UnPatch()
+
+	nextID := int64(9001)
+	defer mockey.Mock((*EmbeddedAllocator).AllocN).To(func(count int64) (typeutil.UniqueID, typeutil.UniqueID, error) {
+		start := nextID
+		nextID += count
+		return start, nextID, nil
+	}).Build().UnPatch()
+
+	req, err := AssembleCopySegmentRequest(task, job)
+	require.NoError(t, err)
+	require.Len(t, req.GetSources(), 1)
+	require.Len(t, req.GetTargets(), 1)
+	return req, manifestReads
+}
+
+// A manifest written before index publication existed carries no index section.
+// The segment still has indexes, recorded in etcd and captured by the snapshot,
+// so the manifest must not be treated as the authority on whether they exist.
+
+// Snapshot-captured index metadata is already complete, so DataCoord does not
+// need to read the source manifest. DataNode handles inherited-entry retraction
+// against the copied target manifest.
+func TestAssembleCopySegmentRequest_SnapshotIndexFilesSkipManifestRead(t *testing.T) {
+	req, manifestReads := assembleIndexPrecedenceFixture(t)
+
+	// The snapshot answered which files to copy, so the manifest did not add to
+	// or replace that list.
+	indexFiles := req.GetSources()[0].GetIndexFiles()
+	require.Len(t, indexFiles, 1)
+	assert.Equal(t, int64(3001), indexFiles[0].GetBuildID())
+	assert.Equal(t, "vec_idx", indexFiles[0].GetIndexName())
+	assert.Zero(t, manifestReads)
+}
+
+func TestAssembleCopySegmentRequest_ManifestHasIndexFalseSkipsRead(t *testing.T) {
+	req, manifestReads := assembleIndexPrecedenceFixture(t,
+		func(segment *datapb.SegmentDescription) {
+			segment.IndexFiles = nil
+			segment.ManifestHasIndex = proto.Bool(false)
+		})
+
+	require.Len(t, req.GetSources(), 1)
+	assert.NotNil(t, req.GetSources()[0].ManifestHasIndex)
+	assert.False(t, req.GetSources()[0].GetManifestHasIndex())
+	assert.Empty(t, req.GetSources()[0].GetIndexFiles())
+	assert.Zero(t, manifestReads)
+}
+
+func newAvroAssembleFixture(ctx context.Context, segmentIDs ...int64) (*Task, *Job) {
 	snapshotData := &snapshotstorage.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100, Name: "test_snapshot"},
 	}
@@ -1882,213 +2107,21 @@ func newManifestFallbackAssembleFixture(ctx context.Context, segmentIDs ...int64
 		})
 	}
 
-	task := &Task{
-		Ctx:   ctx,
-		Meta:  &meta.Meta{},
-		Alloc: &EmbeddedAllocator{},
-		Tr:    timerecord.NewTimeRecorder("test"),
-		Times: taskcommon.NewTimes(),
-	}
-	task.Task.Store(&datapb.CopySegmentTask{
-		TaskId:       1001,
-		JobId:        100,
-		CollectionId: 100,
-		IdMappings:   mappings,
-	})
-	job := &Job{
-		CopySegmentJob: &datapb.CopySegmentJob{
-			JobId:        100,
-			CollectionId: 100,
-			SnapshotName: "test_snapshot",
-		},
-		Tr:            timerecord.NewTimeRecorder("test_job"),
-		SnapshotCache: &CopySegmentSnapshotCache{data: snapshotData},
-	}
+	task := CreateTestCopyTask(100, 2001).(*Task)
+	task.Ctx, task.Meta, task.Alloc = ctx, &meta.Meta{}, &EmbeddedAllocator{}
+	task.SnapshotMeta = &snapshotReadTarget{}
+	task.Task.Load().State = datapb.CopySegmentTaskState_CopySegmentTaskNone
+	task.Task.Load().IdMappings = mappings
+	job := NewTestCopyJob(100, datapb.CopySegmentJobState_CopySegmentJobNone).(*Job)
+	job.SnapshotName = snapshotData.SnapshotInfo.Name
+	job.SnapshotCache = &CopySegmentSnapshotCache{data: snapshotData}
 	return task, job
 }
 
-func TestAssembleCopySegmentRequest_ManifestFallbackBoundsConcurrency(t *testing.T) {
-	meta.MockManifestIndexSubmissions(t)
-	originalConcurrency := Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue("2")
-	defer Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue(originalConcurrency)
-	defer mockey.Mock(meta.CreateStorageConfig).Return(nil).Build().UnPatch()
-
-	var active int32
-	var maximum int32
-	started := make(chan struct{}, 6)
-	release := make(chan struct{})
-	defer mockey.Mock(packed.GetManifestIndexInfosAsync).To(
-		func(context.Context, *packed.ManifestIOContext, string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
-			current := atomic.AddInt32(&active, 1)
-			defer atomic.AddInt32(&active, -1)
-			for {
-				observed := atomic.LoadInt32(&maximum)
-				if current <= observed || atomic.CompareAndSwapInt32(&maximum, observed, current) {
-					break
-				}
-			}
-			started <- struct{}{}
-			<-release
-			return nil, nil
-		}).Build().UnPatch()
-
-	task, job := newManifestFallbackAssembleFixture(context.Background(), 1, 2, 3)
-	otherTask, otherJob := newManifestFallbackAssembleFixture(context.Background(), 4, 5, 6)
-	otherTask.Meta = task.Meta
-	result := make(chan error, 2)
-	go func() { _, err := AssembleCopySegmentRequest(otherTask, otherJob); result <- err }()
-	go func() {
-		_, err := AssembleCopySegmentRequest(task, job)
-		result <- err
-	}()
-
-	for range 2 {
-		select {
-		case <-started:
-		case <-time.After(5 * time.Second):
-			t.Fatal("timed out waiting for bounded manifest reads")
-		}
-	}
-	select {
-	case <-started:
-		t.Fatal("a third manifest read exceeded the configured concurrency")
-	case <-time.After(100 * time.Millisecond):
-	}
-	close(release)
-	require.NoError(t, <-result)
-	require.NoError(t, <-result)
-	assert.Equal(t, int32(2), atomic.LoadInt32(&maximum))
-	assert.Zero(t, atomic.LoadInt32(&active))
-}
-
-func TestAssembleCopySegmentRequest_ManifestFallbackPreservesMappingOrder(t *testing.T) {
-	meta.MockManifestIndexSubmissions(t)
-	originalConcurrency := Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue("3")
-	defer Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue(originalConcurrency)
-	defer mockey.Mock(meta.CreateStorageConfig).Return(nil).Build().UnPatch()
-
-	task, job := newManifestFallbackAssembleFixture(context.Background(), 1, 2, 3)
-	manifestToSegment := make(map[string]int64)
-	for _, segment := range job.SnapshotCache.data.Segments {
-		manifestToSegment[segment.GetManifestPath()] = segment.GetSegmentId()
-	}
-	started := make(chan int64, 3)
-	completed := make(chan int64, 3)
-	releases := map[int64]chan struct{}{1: make(chan struct{}), 2: make(chan struct{}), 3: make(chan struct{})}
-	defer mockey.Mock(packed.GetManifestIndexInfosAsync).To(
-		func(_ context.Context, _ *packed.ManifestIOContext, manifestPath string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
-			segmentID := manifestToSegment[manifestPath]
-			started <- segmentID
-			<-releases[segmentID]
-			completed <- segmentID
-			return []packed.ManifestIndexInfo{{
-				IndexID:               1000 + segmentID,
-				BuildID:               3000 + segmentID,
-				FieldID:               100,
-				IndexName:             "vec_idx",
-				IndexType:             "HNSW",
-				Path:                  "index_files/" + strconv.FormatInt(3000+segmentID, 10) + "/0/10/" + strconv.FormatInt(segmentID, 10),
-				IndexFileKeys:         []string{"index.bin"},
-				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
-			}}, nil
-		}).Build().UnPatch()
-
-	nextID := int64(9001)
-	defer mockey.Mock((*EmbeddedAllocator).AllocID).To(func(context.Context) (typeutil.UniqueID, error) {
-		id := nextID
-		nextID++
-		return id, nil
-	}).Build().UnPatch()
-
-	type assembleResult struct {
-		request *datapb.CopySegmentRequest
-		err     error
-	}
-	result := make(chan assembleResult, 1)
-	go func() {
-		request, err := AssembleCopySegmentRequest(task, job)
-		result <- assembleResult{request: request, err: err}
-	}()
-	seen := make(map[int64]struct{})
-	for range 3 {
-		select {
-		case segmentID := <-started:
-			seen[segmentID] = struct{}{}
-		case <-time.After(5 * time.Second):
-			t.Fatal("timed out waiting for parallel manifest reads")
-		}
-	}
-	require.Len(t, seen, 3)
-	for _, segmentID := range []int64{3, 2, 1} {
-		close(releases[segmentID])
-		assert.Equal(t, segmentID, <-completed)
-	}
-	assembled := <-result
-	require.NoError(t, assembled.err)
-	require.Len(t, assembled.request.GetSources(), 3)
-	require.Len(t, assembled.request.GetTargets(), 3)
-	for i, segmentID := range []int64{1, 2, 3} {
-		require.Equal(t, segmentID, assembled.request.GetSources()[i].GetSegmentId())
-		require.Len(t, assembled.request.GetSources()[i].GetIndexFiles(), 1)
-		assert.Equal(t, 3000+segmentID, assembled.request.GetSources()[i].GetIndexFiles()[0].GetBuildID())
-		assert.Equal(t, int64(9001+i), assembled.request.GetTargets()[i].GetNewBuildIds()[3000+segmentID])
-	}
-}
-
-func TestAssembleCopySegmentRequest_ManifestFallbackDrainsAfterError(t *testing.T) {
-	meta.MockManifestIndexSubmissions(t)
-	originalConcurrency := Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue("2")
-	defer Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue(originalConcurrency)
-	defer mockey.Mock(meta.CreateStorageConfig).Return(nil).Build().UnPatch()
-
-	task, job := newManifestFallbackAssembleFixture(context.Background(), 1, 2)
-	manifestToSegment := make(map[string]int64)
-	for _, segment := range job.SnapshotCache.data.Segments {
-		manifestToSegment[segment.GetManifestPath()] = segment.GetSegmentId()
-	}
-	sentinel := errors.New("manifest read failed")
-	blocked := make(chan struct{})
-	release := make(chan struct{})
-	var active int32
-	defer mockey.Mock(packed.GetManifestIndexInfosAsync).To(
-		func(_ context.Context, _ *packed.ManifestIOContext, manifestPath string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
-			atomic.AddInt32(&active, 1)
-			defer atomic.AddInt32(&active, -1)
-			if manifestToSegment[manifestPath] == 1 {
-				<-blocked // Ensure the peer was accepted before failure cancels admission.
-				return nil, sentinel
-			}
-			close(blocked)
-			<-release
-			return nil, nil
-		}).Build().UnPatch()
-
-	result := make(chan error, 1)
-	go func() {
-		_, err := AssembleCopySegmentRequest(task, job)
-		result <- err
-	}()
-	select {
-	case <-blocked:
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for the second manifest read")
-	}
-	select {
-	case err := <-result:
-		t.Fatalf("assembly returned before the started manifest read drained: %v", err)
-	case <-time.After(100 * time.Millisecond):
-	}
-	close(release)
-	err := <-result
-	require.ErrorIs(t, err, sentinel)
-	assert.Zero(t, atomic.LoadInt32(&active))
-}
-
-func TestAssembleCopySegmentRequest_ManifestFallbackPreCanceledSkipsRead(t *testing.T) {
-	meta.MockManifestIndexSubmissions(t)
+func TestAssembleCopySegmentRequest_PreCanceledSkipsRead(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	task, job := newManifestFallbackAssembleFixture(ctx, 1)
+	task, job := newAvroAssembleFixture(ctx, 1)
 	defer mockey.Mock(meta.CreateStorageConfig).Return(nil).Build().UnPatch()
 	var reads int32
 	defer mockey.Mock(packed.GetManifestIndexInfosAsync).To(
@@ -2160,28 +2193,572 @@ func (s *CopySegmentTaskSuite) TestValidateCopiedManifestIndexPlacement_FailsWhe
 	task := CreateTestCopyTask(collectionID, segmentID)
 	task.(*Task).Task.Load().IndexWriteToManifest = proto.Bool(true)
 
-	copyCatalog := catalogmocks.NewDataCoordCatalog(s.T())
-	copyCatalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
-	copyCatalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
-	copyCatalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
-	copyCatalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
-	copyMeta, cmErr := NewCopySegmentMeta(context.TODO(), copyCatalog, nil, nil, nil, nil)
-	s.Require().NoError(cmErr)
-
 	// publishedBuilds empty: the old-DataNode shape - a pointer whose index
 	// section the copy never rewrote.
-	err := validateCopiedManifestIndexPlacement(result, task, m, im, nil)
+	err := validateCopiedManifestIndexPlacement(result, task, m, testCopyIndexMeta(m), nil, buildCopySegmentIndexLookup(task, m, testCopyIndexMeta(m)))
 	s.Require().Error(err)
 	s.Contains(err.Error(), "predates manifest index republication")
 	_, installed := im.SegmentBuildInfo.Get(8001)
 	s.False(installed, "no memory-only record may be installed for an entry the manifest does not carry")
 
+	// A record with no target definition is skipped using the same task-local
+	// lookup as legacy installation; it does not require a manifest entry.
+	result.IndexInfos[8001].IndexName = "unselected_idx"
+	s.NoError(validateCopiedManifestIndexPlacement(result, task, m, testCopyIndexMeta(m), nil, buildCopySegmentIndexLookup(task, m, testCopyIndexMeta(m))))
+	result.IndexInfos[8001].IndexName = "vec_idx"
+
 	// The control: the same shape dispatched with manifest writes off records to etcd.
 	task.(*Task).Task.Load().IndexWriteToManifest = proto.Bool(false)
-	s.NoError(validateCopiedManifestIndexPlacement(result, task, m, im, nil))
-	s.NoError(syncVectorScalarIndexes(context.Background(), result, task, m, im, copyMeta, nil))
+	s.NoError(validateCopiedManifestIndexPlacement(result, task, m, testCopyIndexMeta(m), nil, buildCopySegmentIndexLookup(task, m, testCopyIndexMeta(m))))
+	s.NoError(syncVectorScalarIndexes(context.Background(), result, task, m, testCopyIndexMeta(m), nil, buildCopySegmentIndexLookup(task, m, testCopyIndexMeta(m))))
 	_, installed = im.SegmentBuildInfo.Get(8001)
 	s.True(installed)
+}
+
+func TestAssembleCopySegmentRequest_ExternalAvroIndexes(t *testing.T) {
+	for _, layout := range []datapb.SnapshotLayout{datapb.SnapshotLayout_SnapshotLayoutReferenced, datapb.SnapshotLayout_SnapshotLayoutSelfContained} {
+		for _, hasIndexes := range []bool{false, true} {
+			for _, cached := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/indexes-%t/cached-%t", layout, hasIndexes, cached), func(t *testing.T) {
+					root := "moved"
+					if layout == datapb.SnapshotLayout_SnapshotLayoutSelfContained {
+						root += "/files"
+					}
+					task, job := newAvroAssembleFixture(context.Background(), 1)
+					snapshot := job.SnapshotCache.data
+					snapshot.Layout, snapshot.ManifestFormatVersion = layout, snapshotstorage.SnapshotFormatVersion
+					segment := snapshot.Segments[0]
+					segment.ManifestPath = packed.MarshalManifestPath(root+"/insert_log/100/10/1", 3)
+					if hasIndexes {
+						segment.IndexFiles = []*indexpb.IndexFilePathInfo{{IndexID: 1001, BuildID: 3001, IndexFilePaths: []string{root + "/index_files/3001/0/10/1/index.bin"}}}
+					} else {
+						segment.ManifestHasIndex = nil
+					}
+					before := proto.Clone(segment)
+					job.External, job.SnapshotS3Location = true, "s3://foreign/moved/snapshots/100/metadata/1.json"
+					if !cached {
+						job.SnapshotCache = &CopySegmentSnapshotCache{}
+					}
+					defer mockey.Mock(meta.CreateStorageConfig).Return(&indexpb.StorageConfig{RootPath: "files"}).Build().UnPatch()
+					defer mockey.Mock((*EmbeddedAllocator).AllocN).To(func(count int64) (int64, int64, error) { return 9001, 9001 + count, nil }).Build().UnPatch()
+					resolves := 0
+					defer mockey.Mock(snapshotstorage.ResolveForeignStorage).To(func(context.Context, *objectstorage.Config, snapshotstorage.Direction, string, string) (*snapshotstorage.ResolvedForeignStorage, error) {
+						resolves++
+						return &snapshotstorage.ResolvedForeignStorage{}, nil
+					}).Build().UnPatch()
+					defer mockey.Mock((*snapshotReadTarget).ReadExternalSnapshotDataWithChunkManager).Return(snapshot, nil).Build().UnPatch()
+					defer mockey.Mock(packed.GetManifestIndexInfosAsync).To(func(context.Context, *packed.ManifestIOContext, string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+						t.Error("source native indexes must never be read during request assembly")
+						return nil, merr.ErrServiceUnavailable
+					}).Build().UnPatch()
+					for range 2 {
+						req, err := AssembleCopySegmentRequest(task, job)
+						require.NoError(t, err)
+						require.Equal(t, "s3://foreign/"+root, req.Sources[0].SourceRootPath)
+						require.Equal(t, segment.IndexFiles, req.Sources[0].IndexFiles)
+						require.True(t, proto.Equal(before, segment))
+						if hasIndexes {
+							require.EqualValues(t, 9001, req.Targets[0].NewBuildIds[3001])
+						} else {
+							require.Empty(t, req.Targets[0].NewBuildIds)
+						}
+					}
+					if cached {
+						require.Zero(t, resolves)
+					} else {
+						require.Equal(t, 1, resolves)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestCopySegmentSnapshotCache_SharedIndexAndRetry(t *testing.T) {
+	data := &snapshotstorage.SnapshotData{Segments: []*datapb.SegmentDescription{{SegmentId: 1}, {SegmentId: 2}}}
+	for _, recovered := range []bool{false, true} {
+		t.Run(strconv.FormatBool(recovered), func(t *testing.T) {
+			cache := &CopySegmentSnapshotCache{data: data}
+			if recovered {
+				cache = &CopySegmentSnapshotCache{}
+			}
+			if recovered {
+				_, index, err := cache.load(func() (*snapshotstorage.SnapshotData, error) { return nil, merr.ErrServiceUnavailable })
+				require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+				require.Nil(t, index)
+				require.Nil(t, cache.data, "failed loads must not poison the cache")
+			}
+			var loads atomic.Int64
+			var wg sync.WaitGroup
+			indexes := make([]map[int64]*datapb.SegmentDescription, 8)
+			for i := range indexes {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					got, index, err := cache.load(func() (*snapshotstorage.SnapshotData, error) {
+						loads.Add(1)
+						return data, nil
+					})
+					assert.NoError(t, err)
+					assert.Same(t, data, got)
+					indexes[i] = index
+				}()
+			}
+			wg.Wait()
+			if recovered {
+				require.EqualValues(t, 1, loads.Load())
+			} else {
+				require.Zero(t, loads.Load())
+			}
+			for _, index := range indexes {
+				require.Same(t, data.Segments[0], index[1])
+				require.Equal(t, reflect.ValueOf(indexes[0]).Pointer(), reflect.ValueOf(index).Pointer(), "all tasks reuse the same lookup table")
+			}
+			job := &Job{CopySegmentJob: &datapb.CopySegmentJob{}, SnapshotCache: cache}
+			require.Same(t, cache, job.Clone().(*Job).SnapshotCache)
+		})
+	}
+}
+
+// Every result has independent partition/build IDs so publication cannot
+// accidentally install one segment's mapping or stats on a different target.
+func (s *CopySegmentTaskSuite) newCopiedResultsFixture(count int, version int64) (CopySegmentTask, CopySegmentMeta, *meta.Meta, *datapb.QueryCopySegmentResponse, *mockey.Mocker) {
+	ctx := context.Background()
+	task, copies, m, resp := s.newCopiedManifestResultFixture()
+	m.Ctx = ctx
+	s.Require().NoError(copies.AddJob(ctx, NewTestCopyJob(task.GetJobId(), datapb.CopySegmentJobState_CopySegmentJobExecuting)))
+	base := resp.SegmentResults[0]
+	resp.SegmentResults = nil
+	mappings := make([]*datapb.CopySegmentIDMapping, 0, count)
+	for i := 0; i < count; i++ {
+		id, partition, build := int64(2001+i), int64(10+i), int64(9001+i)
+		segment := meta.NewSegmentInfo(&datapb.SegmentInfo{
+			ID: id, CollectionID: 100, PartitionID: partition, NumOfRows: int64(100 + i),
+			State: commonpb.SegmentState_Importing, IsImporting: true, InsertChannel: "ch1", StorageVersion: version,
+		})
+		if i == 0 {
+			m.Segments.SetSegment(id, segment)
+		} else {
+			s.Require().NoError(m.AddSegment(ctx, segment))
+		}
+		result := proto.Clone(base).(*datapb.CopySegmentResult)
+		result.SegmentId = id
+		result.ManifestPath = packed.MarshalManifestPath(fmt.Sprintf("files/insert_log/100/%d/%d", partition, id), 1)
+		result.ManifestIndexBuildIds = []int64{build}
+		index := proto.Clone(base.IndexInfos[9001]).(*datapb.VectorScalarIndexInfo)
+		index.BuildId = build
+		result.IndexInfos = map[int64]*datapb.VectorScalarIndexInfo{build: index}
+		result.TextIndexInfos = map[int64]*datapb.TextIndexStats{102: {FieldID: 102, BuildID: build + 1000, Files: []string{fmt.Sprintf("text-%d", id)}}}
+		result.JsonKeyIndexInfos = map[int64]*datapb.JsonKeyStats{103: {FieldID: 103, BuildID: build + 2000, Files: []string{fmt.Sprintf("json-%d", id)}}}
+		if version < storage.StorageV3 {
+			result.ManifestPath, result.ManifestIndexBuildIds, result.ManifestIndexRewritten = "", nil, nil
+		}
+		resp.SegmentResults = append(resp.SegmentResults, result)
+		mappings = append(mappings, &datapb.CopySegmentIDMapping{SourceSegmentId: int64(i + 1), TargetSegmentId: id, PartitionId: partition})
+	}
+	s.Require().NoError(copies.UpdateTask(ctx, task.GetTaskId(), func(t CopySegmentTask) {
+		t.(*Task).Task.Load().IdMappings = mappings
+		t.(*Task).Task.Load().IndexWriteToManifest = proto.Bool(true)
+	}))
+	meta.MockManifestIndexSubmissions(s.T())
+	reader := mockey.Mock(packed.GetManifestIndexInfosAsync).To(func(_ context.Context, _ *packed.ManifestIOContext, manifest string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+		for i, result := range resp.SegmentResults {
+			if result.ManifestPath == manifest {
+				entry := copiedManifestReviewEntry()
+				entry.BuildID = int64(9001 + i)
+				entry.Path = fmt.Sprintf("files/index_files/%d/0/%d/%d", entry.BuildID, 10+i, result.SegmentId)
+				return []packed.ManifestIndexInfo{entry}, nil
+			}
+		}
+		return nil, merr.ErrServiceInternal
+	}).Build()
+	s.T().Cleanup(func() { reader.UnPatch() })
+
+	return copies.GetTask(ctx, task.GetTaskId()), copies, m, resp, reader
+}
+
+type copyResultDataViewManager struct{ dataview.Manager }
+
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PerSegmentPublication() {
+	for _, tc := range []struct {
+		count           int
+		version         int64
+		failure         string
+		withoutDataView bool
+	}{
+		{0, storage.StorageV3, "", false},
+		{1, storage.StorageV3, "", false},
+		{1, storage.StorageV3, "", true},
+		{3, storage.StorageV3, "", false},
+		{3, storage.StorageV2, "", false},
+		{1, storage.StorageV3, "publication", false},
+		{1, storage.StorageV3, "vector", false},
+	} {
+		s.Run(fmt.Sprintf("count-%d-v%d-%s-no-view-%t", tc.count, tc.version, tc.failure, tc.withoutDataView), func() {
+			ctx := context.Background()
+			task, copies, m, resp, _ := s.newCopiedResultsFixture(tc.count, tc.version)
+			for _, result := range resp.SegmentResults {
+				segment := m.GetSegment(ctx, result.SegmentId)
+				segment.TextStatsLogs = map[int64]*datapb.TextIndexStats{99: {BuildID: 10}}
+				segment.JsonKeyStats = map[int64]*datapb.JsonKeyStats{99: {BuildID: 20}}
+			}
+			if !tc.withoutDataView {
+				m.DataViewManager = &copyResultDataViewManager{}
+			}
+			var writes int
+			var alter func(*kvdatacoord.Catalog, context.Context, []*datapb.SegmentInfo, ...metastore.BinlogsIncrement) error
+			defer mockey.Mock((*kvdatacoord.Catalog).AlterSegments).To(func(c *kvdatacoord.Catalog, ctx context.Context, segments []*datapb.SegmentInfo, logs ...metastore.BinlogsIncrement) error {
+				writes++
+				s.Len(segments, 1)
+				for _, segment := range segments {
+					// The catalog callback holds segMu; inspect the protected map.
+					s.True(m.Segments.GetSegment(segment.GetID()).GetIsImporting())
+					s.Len(segment.GetTextStatsLogs(), 2)
+					s.Len(segment.GetJsonKeyStats(), 2)
+					if !segment.GetIsImporting() {
+						s.Len(testCopyIndexMeta(m).GetSegmentIndexes(100, segment.GetID()), 1)
+					}
+					if tc.failure == "publication" {
+						return merr.ErrServiceUnavailable
+					}
+				}
+				return alter(c, ctx, segments, logs...)
+			}).Origin(&alter).Build().UnPatch()
+			notifications := make(map[int64]struct{})
+			defer mockey.Mock((*copyResultDataViewManager).Recompute).To(func(_ *copyResultDataViewManager, _ context.Context, collection int64) error {
+				for _, result := range resp.SegmentResults {
+					if !m.GetSegment(ctx, result.GetSegmentId()).GetIsImporting() {
+						notifications[result.GetSegmentId()] = struct{}{}
+					}
+				}
+				s.EqualValues(100, collection)
+				return nil
+			}).Build().UnPatch()
+			// Count real lookups without Origin's shared per-call argument adapter.
+			lookups := mockey.Mock((*index.IndexMeta).GetIndexesForCollection).Build()
+			defer lookups.UnPatch()
+			var install func(*index.IndexMeta, context.Context, *model.SegmentIndex) error
+			defer mockey.Mock((*index.IndexMeta).AddSegmentIndexFromManifest).To(func(im *index.IndexMeta, ctx context.Context, index *model.SegmentIndex) error {
+				segment := m.GetSegment(ctx, index.SegmentID)
+				s.True(segment.GetIsImporting())
+				s.Equal(commonpb.SegmentState_Importing, segment.GetState())
+				s.Empty(segment.GetManifestPath())
+				s.NotContains(segment.TextStatsLogs, int64(102))
+				s.NotContains(segment.JsonKeyStats, int64(103))
+				if tc.failure == "vector" {
+					return merr.ErrServiceUnavailable
+				}
+				return install(im, ctx, index)
+			}).Origin(&install).Build().UnPatch()
+			err := SyncCopySegmentTask(task, resp, copies, m, testCopyIndexMeta(m))
+			if tc.failure != "" {
+				s.ErrorIs(err, merr.ErrServiceUnavailable)
+				s.True(m.GetSegment(ctx, 2001).GetIsImporting())
+				s.True(copies.GetTask(ctx, task.GetTaskId()).GetCleanupRequired())
+				s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, copies.GetTask(ctx, task.GetTaskId()).GetState())
+				return
+			}
+			s.Require().NoError(err)
+			expectedLookups := 1
+			if tc.version >= storage.StorageV3 {
+				expectedLookups += tc.count
+			}
+			s.EqualValues(expectedLookups, lookups.Times())
+			s.Equal(tc.count, writes)
+			if tc.withoutDataView {
+				s.Empty(notifications)
+			} else {
+				s.Len(notifications, tc.count)
+			}
+			for _, result := range resp.SegmentResults {
+				segment := m.GetSegment(ctx, result.SegmentId)
+				s.False(segment.GetIsImporting())
+				s.EqualValues(10, segment.TextStatsLogs[99].BuildID)
+				s.EqualValues(20, segment.JsonKeyStats[99].BuildID)
+				s.True(proto.Equal(segment.TextStatsLogs[102], result.TextIndexInfos[102]))
+				s.True(proto.Equal(segment.JsonKeyStats[103], result.JsonKeyIndexInfos[103]))
+				index, ok := testCopyIndexMeta(m).GetIndexJob(result.SegmentId + 7000)
+				s.Require().True(ok)
+				s.Equal(segment.GetPartitionID(), index.PartitionID)
+				paths, err := meta.SegmentIndexFilePaths(m.ChunkManager.RootPath(), index, segment.SegmentInfo)
+				s.Require().NoError(err)
+				s.Require().Len(paths, 1)
+				s.Contains(paths[0], fmt.Sprint(index.BuildID))
+			}
+			s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskCompleted, copies.GetTask(ctx, task.GetTaskId()).GetState())
+			s.False(copies.GetTask(ctx, task.GetTaskId()).GetCleanupRequired())
+			persisted, err := m.Catalog.ListSegments(ctx, 100)
+			s.Require().NoError(err)
+			byID := make(map[int64]*datapb.SegmentInfo)
+			for _, segment := range persisted {
+				byID[segment.GetID()] = segment
+			}
+			for _, result := range resp.SegmentResults {
+				segment := byID[result.SegmentId]
+				s.Require().NotNil(segment)
+				s.False(segment.GetIsImporting())
+				s.EqualValues(10, segment.TextStatsLogs[99].BuildID)
+				s.EqualValues(20, segment.JsonKeyStats[99].BuildID)
+				s.Len(segment.GetTextStatsLogs(), 2)
+				s.Len(segment.GetJsonKeyStats(), 2)
+			}
+		})
+	}
+}
+
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_LaterSegmentFailureAndRecovery() {
+	for _, failure := range []string{"partial publication", "index"} {
+		s.Run(failure, func() {
+			ctx := context.Background()
+			task, copies, m, resp, reader := s.newCopiedResultsFixture(5, storage.StorageV3)
+			m.DataViewManager = &copyResultDataViewManager{}
+			notifications := make(map[int64]struct{})
+			defer mockey.Mock((*copyResultDataViewManager).Recompute).To(func(*copyResultDataViewManager, context.Context, int64) error {
+				for _, result := range resp.SegmentResults {
+					if !m.GetSegment(ctx, result.GetSegmentId()).GetIsImporting() {
+						notifications[result.GetSegmentId()] = struct{}{}
+					}
+				}
+				return nil
+			}).Build().UnPatch()
+			writes := 0
+			var alter func(*kvdatacoord.Catalog, context.Context, []*datapb.SegmentInfo, ...metastore.BinlogsIncrement) error
+			patch := mockey.Mock((*kvdatacoord.Catalog).AlterSegments).To(func(c *kvdatacoord.Catalog, ctx context.Context, segments []*datapb.SegmentInfo, logs ...metastore.BinlogsIncrement) error {
+				writes++
+				if failure == "partial publication" && writes == 2 {
+					// Model a catalog save that persists the segment before returning
+					// an error. Memory must stay unchanged until a successful save.
+					s.Require().NoError(alter(c, ctx, segments[:1], logs...))
+					return merr.ErrServiceUnavailable
+				}
+				return alter(c, ctx, segments, logs...)
+			}).Origin(&alter).Build()
+			defer patch.UnPatch()
+			if failure == "index" {
+				var install func(*index.IndexMeta, context.Context, *model.SegmentIndex) error
+				defer mockey.Mock((*index.IndexMeta).AddSegmentIndexFromManifest).To(func(im *index.IndexMeta, ctx context.Context, index *model.SegmentIndex) error {
+					if index.SegmentID == 2004 {
+						return merr.ErrServiceUnavailable
+					}
+					return install(im, ctx, index)
+				}).Origin(&install).Build().UnPatch()
+			}
+			s.ErrorIs(SyncCopySegmentTask(task, resp, copies, m, testCopyIndexMeta(m)), merr.ErrServiceUnavailable)
+			patch.UnPatch()
+			visible := 1
+			if failure == "index" {
+				visible = 3
+			}
+			s.Len(notifications, visible, "successful segments were reconciled before the failure")
+			for _, result := range resp.SegmentResults {
+				segment := m.GetSegment(ctx, result.SegmentId)
+				s.Equal(result.SegmentId >= int64(2001+visible), segment.GetIsImporting())
+				if result.SegmentId == 2005 {
+					s.Equal(commonpb.SegmentState_Importing, segment.GetState(), "later segments must not be attempted")
+				}
+			}
+			persisted, err := m.Catalog.ListSegments(ctx, 100)
+			s.Require().NoError(err)
+			recoveredStore := metacache.NewMetaStore(m.Catalog)
+			recovered := &meta.Meta{
+				Ctx: ctx, Catalog: m.Catalog, Segments: meta.NewSegmentsInfo(recoveredStore), MetaStore: recoveredStore,
+				ChunkManager: storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart")),
+				IndexCatalog: index.CreateTestIndexMeta(s.T(), 100, copyIndexDefinitions(testCopyIndexMeta(m), 100), m.Catalog),
+			}
+			// Use the real startup manifest-index recovery against persisted
+			// segment rows. Only immutable native storage is replaced by a fake.
+			entries := make(map[string][]packed.ManifestIndexInfo)
+			for _, result := range resp.SegmentResults {
+				id := result.SegmentId
+				build := result.ManifestIndexBuildIds[0]
+				entries[result.ManifestPath] = []packed.ManifestIndexInfo{{
+					IndexName: "vec_idx", IndexType: "HNSW", ColumnName: "vector", FieldID: 101,
+					IndexID: 300, BuildID: build, NumRows: 100,
+					Path:          fmt.Sprintf("/tmp/test-restart/index_files/%d/0/%d/%d", build, id-1991, id),
+					IndexFileKeys: []string{"index.bin"},
+				}}
+			}
+			for _, segment := range persisted {
+				recovered.Segments.SetSegment(segment.GetID(), meta.NewSegmentInfo(segment))
+				if !segment.GetIsImporting() {
+					s.Len(segment.GetTextStatsLogs(), 1)
+					s.Len(segment.GetJsonKeyStats(), 1)
+					s.True(segment.GetManifestHasIndex())
+				}
+			}
+			reader.UnPatch()
+			defer mockey.Mock(packed.GetManifestIndexInfosAsync).To(func(_ context.Context, _ *packed.ManifestIOContext, path string, _ *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
+				return entries[path], nil
+			}).Build().UnPatch()
+			s.Require().NoError(recovered.ReloadSegmentIndexesFromManifests(ctx))
+			for _, segment := range persisted {
+				if segment.GetManifestHasIndex() {
+					s.Len(testCopyIndexMeta(recovered).GetSegmentIndexes(100, segment.GetID()), 1)
+				}
+			}
+			recoveredCopies, err := NewCopySegmentMeta(ctx, m.Catalog, recovered, testCopyIndexMeta(recovered), nil, nil)
+			s.Require().NoError(err)
+			recoveredTask := recoveredCopies.GetTask(ctx, task.GetTaskId())
+			s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, recoveredTask.GetState())
+			s.True(recoveredTask.GetCleanupRequired())
+			s.Equal(datapb.CopySegmentJobState_CopySegmentJobFailed, recoveredCopies.GetJob(ctx, task.GetJobId()).GetState())
+			s.Require().NoError(CleanupRejectedCopy(ctx, recoveredTask, recovered, recoveredCopies))
+			s.True(recoveredCopies.GetTask(ctx, task.GetTaskId()).GetCleanupRequired(), "existing segment metadata must prevent prefix deletion")
+		})
+	}
+}
+
+func TestAssembleCopySegmentRequest_BuildIDRanges(t *testing.T) {
+	for _, tc := range []struct {
+		name                        string
+		fields, segments, builds    int
+		failCall, expectedCalls     int
+		err                         error
+		rangeSize                   int64
+		cancelBefore, cancelInAlloc bool
+	}{
+		{name: "one range for task", fields: 2, segments: 3, builds: 7, expectedCalls: 1},
+		{name: "refill", fields: 1, segments: 2, builds: 25, rangeSize: 20, expectedCalls: 3},
+		{name: "no indexes", fields: 1, segments: 2},
+		{name: "missing schema", segments: 2, builds: 3, expectedCalls: 1},
+		{name: "allocation error", fields: 1, segments: 2, builds: 1, failCall: 1, expectedCalls: 1, err: merr.ErrServiceUnavailable},
+		{name: "refill error", fields: 1, segments: 2, builds: 21, failCall: 2, rangeSize: 20, expectedCalls: 2, err: merr.ErrServiceUnavailable},
+		{name: "cancel before allocation", fields: 1, segments: 1, builds: 1, cancelBefore: true, err: context.Canceled},
+		{name: "cancel during allocation", fields: 1, segments: 1, builds: 1, cancelInAlloc: true, expectedCalls: 1, err: context.Canceled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			snapshot := &snapshotstorage.SnapshotData{
+				SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100, Name: "snapshot"},
+			}
+			if tc.fields > 0 {
+				snapshot.Collection = &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{}}
+				for i := 0; i < tc.fields; i++ {
+					snapshot.Collection.Schema.Fields = append(snapshot.Collection.Schema.Fields,
+						&schemapb.FieldSchema{FieldID: int64(100 + i), DataType: schemapb.DataType_JSON})
+				}
+			}
+			task := CreateTestCopyTask(100, 2001).(*Task)
+			task.Ctx, task.Alloc = ctx, &EmbeddedAllocator{}
+			task.Task.Load().IdMappings = nil
+			for i := 0; i < tc.segments; i++ {
+				segment := &datapb.SegmentDescription{
+					SegmentId: int64(i + 1), PartitionId: 10,
+					TextIndexFiles:    map[int64]*datapb.TextIndexStats{102: {BuildID: 0}},
+					JsonKeyIndexFiles: map[int64]*datapb.JsonKeyStats{103: {BuildID: 0}},
+				}
+				for j := 0; j < tc.builds; j++ {
+					segment.IndexFiles = append(segment.IndexFiles,
+						&indexpb.IndexFilePathInfo{BuildID: int64(3001 + j), FieldID: 100})
+				}
+				if tc.builds > 0 {
+					// Duplicate references and kinds consume one ID within a segment;
+					// the same source build in another target consumes a fresh ID.
+					segment.IndexFiles = append(segment.IndexFiles, segment.IndexFiles[0])
+					segment.TextIndexFiles[104] = &datapb.TextIndexStats{BuildID: 3001}
+					segment.JsonKeyIndexFiles[105] = &datapb.JsonKeyStats{BuildID: 3001}
+				}
+				snapshot.Segments = append(snapshot.Segments, segment)
+				task.Task.Load().IdMappings = append(task.Task.Load().IdMappings,
+					&datapb.CopySegmentIDMapping{SourceSegmentId: segment.SegmentId, TargetSegmentId: int64(2001 + i), PartitionId: 10})
+			}
+			job := &Job{
+				CopySegmentJob: &datapb.CopySegmentJob{JobId: 100, CollectionId: 100, SnapshotName: "snapshot"},
+				SnapshotCache:  &CopySegmentSnapshotCache{data: snapshot},
+			}
+			defer mockey.Mock(meta.CreateStorageConfig).To(func() *indexpb.StorageConfig {
+				if tc.cancelBefore {
+					cancel()
+				}
+				return nil
+			}).Build().UnPatch()
+			read := mockey.Mock((*snapshotReadTarget).ReadSnapshotData).Return(nil, merr.ErrServiceUnavailable).Build()
+			defer read.UnPatch()
+			individual := mockey.Mock((*EmbeddedAllocator).AllocID).Return(int64(0), merr.ErrServiceUnavailable).Build()
+			defer individual.UnPatch()
+			var counts []int64
+			next := int64(9001)
+			defer mockey.Mock((*EmbeddedAllocator).AllocN).To(func(count int64) (int64, int64, error) {
+				counts = append(counts, count)
+				if len(counts) == tc.failCall {
+					return 0, 0, merr.ErrServiceUnavailable
+				}
+				if tc.cancelInAlloc {
+					cancel()
+				}
+				start := next
+				allocated := count
+				if tc.rangeSize > 0 {
+					// Inject a shorter returned range to exercise exhaustion without
+					// constructing a million-index snapshot. Every request is still 1M.
+					allocated = tc.rangeSize
+				}
+				next += allocated
+				return start, next, nil
+			}).Build().UnPatch()
+
+			request, err := AssembleCopySegmentRequest(task, job)
+			for _, count := range counts {
+				require.EqualValues(t, 1_000_000, count)
+			}
+			require.Zero(t, read.Times(), "assembly must reuse the existing snapshot cache")
+			require.Zero(t, individual.Times(), "build IDs must never use individual allocation")
+			require.Len(t, counts, tc.expectedCalls)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+				require.Nil(t, request)
+				return
+			}
+			require.NoError(t, err)
+			needed := tc.builds * tc.segments
+			seen := make(map[int64]struct{}, needed)
+			for _, target := range request.Targets {
+				require.Len(t, target.NewBuildIds, tc.builds)
+				for _, id := range target.NewBuildIds {
+					require.GreaterOrEqual(t, id, int64(9001))
+					require.Less(t, id, next)
+					_, exists := seen[id]
+					require.False(t, exists, "different target builds must not share an ID")
+					seen[id] = struct{}{}
+				}
+			}
+			require.Len(t, seen, needed)
+		})
+	}
+}
+
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ForeignManifestIndexEntryFailsTask() {
+	meta.MockManifestIndexSubmissions(s.T())
+	ctx := context.Background()
+	task, copyMeta, m, resp := s.newCopiedManifestResultFixture()
+	resp.SegmentResults[0].ManifestIndexRewritten = nil
+
+	defer mockey.Mock(meta.CreateStorageConfig).Return(nil).Build().UnPatch()
+	defer mockey.Mock(packed.GetManifestIndexInfosAsync).Return([]packed.ManifestIndexInfo{
+		// The target's own re-derived entry may coexist with the leftover; only
+		// the foreign one is the failure.
+		copiedManifestReviewEntry(),
+		// Inherited from the SOURCE collection - its stored path walks back to
+		// the source's artifacts.
+		{IndexID: 5001, BuildID: 6001, IndexName: "vec_idx"},
+	}, nil).Build().UnPatch()
+
+	err := SyncCopySegmentTask(task, resp, copyMeta, m, testCopyIndexMeta(m))
+	s.Require().Error(err)
+	s.ErrorIs(err, merr.ErrServiceInternal)
+	s.Contains(err.Error(), "2001", "the error must name the segment")
+	s.Contains(err.Error(), "5001", "the error must name the foreign index ID")
+
+	// The poisoned pointer was never published and the segment was not flushed.
+	segment := m.GetSegment(ctx, 2001)
+	s.Require().NotNil(segment)
+	s.Equal(commonpb.SegmentState_Importing, segment.GetState())
+	s.Empty(segment.GetManifestPath())
+
+	updatedTask := copyMeta.GetTask(ctx, 1001)
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, updatedTask.GetState())
+	s.Contains(updatedTask.GetReason(), "5001")
 }
 
 func copiedManifestReviewEntry() packed.ManifestIndexInfo {
@@ -2195,10 +2772,11 @@ func copiedManifestReviewEntry() packed.ManifestIndexInfo {
 func (s *CopySegmentTaskSuite) TestCopiedManifestRejectsChangedIdentityAndPaths() {
 	meta.MockManifestIndexSubmissions(s.T())
 	for _, acknowledged := range []bool{false, true} {
-		for _, scenario := range []string{"recreated", "index type", "foreign path", "wrong files"} {
+		for _, scenario := range []string{"recreated", "index type", "foreign path", "wrong files", "duplicate build", "missing acknowledged build", "unacknowledged build"} {
 			s.Run(strconv.FormatBool(acknowledged)+"/"+scenario, func() {
-				task, copyMeta, m, im, resp := s.newCopiedManifestReadBackFixture()
+				task, copyMeta, m, resp := s.newCopiedManifestResultFixture()
 				result := resp.GetSegmentResults()[0]
+				result.ManifestIndexRewritten = nil
 				if acknowledged {
 					result.ManifestIndexRewritten = proto.Bool(true)
 					result.ManifestIndexBuildIds = []int64{9001}
@@ -2206,8 +2784,8 @@ func (s *CopySegmentTaskSuite) TestCopiedManifestRejectsChangedIdentityAndPaths(
 				entry := copiedManifestReviewEntry()
 				switch scenario {
 				case "recreated":
-					s.Require().NoError(im.MarkIndexAsDeleted(context.Background(), 100, []int64{300}))
-					s.Require().NoError(im.CreateIndex(context.Background(), &model.Index{
+					s.Require().NoError(testCopyIndexMeta(m).MarkIndexAsDeleted(context.Background(), 100, []int64{300}))
+					s.Require().NoError(testCopyIndexMeta(m).CreateIndex(context.Background(), &model.Index{
 						CollectionID: 100, FieldID: 101, IndexID: 301, IndexName: "vec_idx",
 						IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}},
 					}))
@@ -2219,12 +2797,30 @@ func (s *CopySegmentTaskSuite) TestCopiedManifestRejectsChangedIdentityAndPaths(
 				case "wrong files":
 					entry.IndexFileKeys = []string{"other.bin"}
 				}
-				defer mockey.Mock(packed.GetManifestIndexInfosAsync).Return([]packed.ManifestIndexInfo{entry}, nil).Build().UnPatch()
-				s.Error(SyncCopySegmentTask(task, resp, copyMeta, m, im))
+				entries := []packed.ManifestIndexInfo{entry}
+				switch scenario {
+				case "duplicate build":
+					entries = append(entries, entry)
+				case "missing acknowledged build":
+					result.ManifestIndexRewritten = proto.Bool(true)
+					result.ManifestIndexBuildIds = []int64{1234}
+				case "unacknowledged build":
+					result.ManifestIndexRewritten = proto.Bool(true)
+					result.ManifestIndexBuildIds = []int64{9001}
+					extra := entry
+					extra.BuildID = 9002
+					extra.Path = "files/index_files/9002/0/10/2001"
+					entries = append(entries, extra)
+					info := proto.Clone(result.IndexInfos[9001]).(*datapb.VectorScalarIndexInfo)
+					info.BuildId = 9002
+					result.IndexInfos[9002] = info
+				}
+				defer mockey.Mock(packed.GetManifestIndexInfosAsync).Return(entries, nil).Build().UnPatch()
+				s.Error(SyncCopySegmentTask(task, resp, copyMeta, m, testCopyIndexMeta(m)))
 				segment := m.GetSegment(context.Background(), 2001)
 				s.Equal(commonpb.SegmentState_Importing, segment.GetState())
 				s.False(segment.GetManifestHasIndex())
-				s.Empty(im.GetSegmentIndexes(100, 2001))
+				s.Empty(testCopyIndexMeta(m).GetSegmentIndexes(100, 2001))
 				s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, copyMeta.GetTask(context.Background(), task.GetTaskId()).GetState())
 			})
 		}
@@ -2236,7 +2832,8 @@ func (s *CopySegmentTaskSuite) TestCopiedManifestIgnoresCollectionProperties() {
 	for _, acknowledged := range []bool{false, true} {
 		for _, legacyProperties := range []bool{false, true} {
 			s.Run(strconv.FormatBool(acknowledged)+"/legacyProperties="+strconv.FormatBool(legacyProperties), func() {
-				task, copyMeta, m, im, resp := s.newCopiedManifestReadBackFixture()
+				task, copyMeta, m, resp := s.newCopiedManifestResultFixture()
+				im := testCopyIndexMeta(m)
 				result := resp.GetSegmentResults()[0]
 				if acknowledged {
 					result.ManifestIndexRewritten = proto.Bool(true)
@@ -2265,27 +2862,27 @@ func (s *CopySegmentTaskSuite) TestCopiedManifestIgnoresCollectionProperties() {
 
 func (s *CopySegmentTaskSuite) TestCopiedManifestKeepsVerifiedIndexIDDuringInstall() {
 	ctx := context.Background()
-	task, _, m, im, resp := s.newCopiedManifestReadBackFixture()
+	task, _, m, resp := s.newCopiedManifestResultFixture()
 	result := resp.GetSegmentResults()[0]
-	verified, err := verifyCopiedManifestIndexOwnership(result, task, m, im, m.GetSegment(ctx, result.GetSegmentId()), meta.CreateStorageConfig().GetRootPath(), []packed.ManifestIndexInfo{copiedManifestReviewEntry()})
+	verified, err := verifyCopiedManifestIndexOwnership(result, task, m, testCopyIndexMeta(m), m.GetSegment(ctx, result.GetSegmentId()), meta.CreateStorageConfig().GetRootPath(), []packed.ManifestIndexInfo{copiedManifestReviewEntry()})
 	s.Require().NoError(err)
 	// Recreate after verification but before the in-memory record is installed.
-	s.Require().NoError(im.MarkIndexAsDeleted(ctx, 100, []int64{300}))
-	s.Require().NoError(im.CreateIndex(ctx, &model.Index{
+	s.Require().NoError(testCopyIndexMeta(m).MarkIndexAsDeleted(ctx, 100, []int64{300}))
+	s.Require().NoError(testCopyIndexMeta(m).CreateIndex(ctx, &model.Index{
 		CollectionID: 100, FieldID: 101, IndexID: 301, IndexName: "vec_idx",
 	}))
-	s.Require().NoError(syncVectorScalarIndexes(ctx, result, task, m, im, nil, verified))
-	record, ok := im.GetIndexJob(9001)
+	s.Require().NoError(syncVectorScalarIndexes(ctx, result, task, m, testCopyIndexMeta(m), verified, buildCopySegmentIndexLookup(task, m, testCopyIndexMeta(m))))
+	record, ok := testCopyIndexMeta(m).GetIndexJob(9001)
 	s.Require().True(ok)
 	s.EqualValues(300, record.IndexID, "the artifact belongs to the retired definition, never its replacement")
-	s.NotContains(im.GetSegmentIndexes(100, 2001), int64(301))
+	s.NotContains(testCopyIndexMeta(m).GetSegmentIndexes(100, 2001), int64(301))
 }
 
 func (s *CopySegmentTaskSuite) TestCopyManifestVerificationParallelAndFailClosed() {
 	meta.MockManifestIndexSubmissions(s.T())
 	old := Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue("2")
 	defer Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue(old)
-	task, copies, m, im, resp := s.newCopiedManifestReadBackFixture()
+	task, copies, m, resp := s.newCopiedManifestResultFixture()
 	original := resp.GetSegmentResults()[0]
 	for _, id := range []int64{2002, 2003} {
 		segment := m.GetSegment(context.Background(), 2001).Clone()
@@ -2304,7 +2901,7 @@ func (s *CopySegmentTaskSuite) TestCopyManifestVerificationParallelAndFailClosed
 		return nil, merr.ErrServiceUnavailable
 	}).Build().UnPatch()
 	finished := make(chan error, 1)
-	go func() { finished <- SyncCopySegmentTask(task, resp, copies, m, im) }()
+	go func() { finished <- SyncCopySegmentTask(task, resp, copies, m, testCopyIndexMeta(m)) }()
 	for range 2 {
 		select {
 		case <-started:
@@ -2323,6 +2920,41 @@ func (s *CopySegmentTaskSuite) TestCopyManifestVerificationParallelAndFailClosed
 		s.Equal(commonpb.SegmentState_Importing, m.GetSegment(context.Background(), id).GetState())
 	}
 	s.True(copies.GetTask(context.Background(), task.GetTaskId()).GetCleanupRequired())
+}
+
+func (s *CopySegmentTaskSuite) TestCopiedManifestEmptyAndExplicitFailure() {
+	meta.MockManifestIndexSubmissions(s.T())
+	for _, scenario := range []string{"legacy empty", "acknowledged empty", "explicit failure", "no manifest"} {
+		s.Run(scenario, func() {
+			task, copies, m, resp := s.newCopiedManifestResultFixture()
+			result := resp.SegmentResults[0]
+			result.IndexInfos, result.ManifestIndexBuildIds = nil, nil
+			result.ManifestIndexRewritten = nil
+			switch scenario {
+			case "acknowledged empty":
+				result.ManifestIndexRewritten = proto.Bool(true)
+			case "explicit failure":
+				result.ManifestIndexRewritten = proto.Bool(false)
+			case "no manifest":
+				result.ManifestPath = ""
+			}
+			reader := mockey.Mock(packed.GetManifestIndexInfosAsync).Return(nil, nil).Build()
+			defer reader.UnPatch()
+			err := SyncCopySegmentTask(task, resp, copies, m, testCopyIndexMeta(m))
+			if scenario == "explicit failure" {
+				s.ErrorContains(err, "rewrite was not completed")
+				s.True(m.GetSegment(context.Background(), 2001).GetIsImporting())
+			} else {
+				s.NoError(err)
+				s.False(m.GetSegment(context.Background(), 2001).GetIsImporting())
+			}
+			if scenario == "legacy empty" {
+				s.Equal(1, reader.Times())
+			} else {
+				s.Zero(reader.Times())
+			}
+		})
+	}
 }
 
 func (s *CopySegmentTaskSuite) TestQueryCompletedCopyRetriesCleanupIntentFailure() {
@@ -2345,32 +2977,6 @@ func (s *CopySegmentTaskSuite) TestQueryCompletedCopyRetriesCleanupIntentFailure
 	task.QueryTaskOnWorker(cluster)
 	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskCompleted, task.GetState())
 	s.False(task.GetCleanupRequired())
-}
-
-func TestAssembleCopySegmentRequest_ManifestFallbackSingleWorker(t *testing.T) {
-	original := Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue("1")
-	defer Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue(original)
-	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
-	defer mockey.Mock(meta.CreateStorageConfig).Return(cfg).Build().UnPatch()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	task, job := newManifestFallbackAssembleFixture(ctx, 1, 2, 3)
-	for _, segment := range job.SnapshotCache.data.Segments {
-		base := path.Join(cfg.RootPath, "insert_log/100/10", strconv.FormatInt(segment.GetSegmentId(), 10))
-		manifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(base, 0), cfg, &packed.ManifestUpdates{
-			DeltaLogs: []packed.DeltaLogEntry{{Path: base + "/_delta/1", NumEntries: 1}},
-		})
-		require.NoError(t, err)
-		segment.ManifestPath = manifest
-	}
-	request, err := AssembleCopySegmentRequest(task, job)
-	require.NoError(t, err)
-	require.Len(t, request.GetSources(), 3)
-	for i, source := range request.GetSources() {
-		require.EqualValues(t, i+1, source.GetSegmentId())
-		require.Equal(t, job.SnapshotCache.data.Segments[i].GetManifestPath(), source.GetManifestPath())
-		require.Empty(t, source.GetIndexFiles())
-	}
 }
 
 func TestCopyTaskPinsSegmentIndexLayout(t *testing.T) {
@@ -2430,7 +3036,7 @@ func TestCopiedSegmentIndexType(t *testing.T) {
 			verified, err := verifyCopiedManifestIndexOwnership(result, task, m, im, segment, "files", []packed.ManifestIndexInfo{entry})
 			require.NoError(t, err)
 			for _, published := range []map[int64]int64{nil, verified} {
-				require.NoError(t, syncVectorScalarIndexes(ctx, result, task, m, im, nil, published))
+				require.NoError(t, syncVectorScalarIndexes(ctx, result, task, m, im, published, buildCopySegmentIndexLookup(task, m, im)))
 				restored, ok := im.GetIndexJob(5001)
 				require.True(t, ok)
 				assert.Equal(t, indexType, restored.IndexType)
@@ -2448,5 +3054,43 @@ func TestCopiedSegmentIndexType(t *testing.T) {
 			_, err = verifyCopiedManifestIndexOwnership(result, task, m, im, segment, "files", []packed.ManifestIndexInfo{entry})
 			require.NoError(t, err)
 		})
+	}
+}
+
+func testCopyIndexMeta(m *meta.Meta) *index.IndexMeta {
+	if m == nil {
+		return nil
+	}
+	im, _ := m.IndexCatalog.(*index.IndexMeta)
+	return im
+}
+
+func copyIndexDefinitions(im *index.IndexMeta, collectionID int64) map[int64]*model.Index {
+	result := make(map[int64]*model.Index)
+	for _, def := range im.GetIndexesForCollection(collectionID, "") {
+		result[def.IndexID] = def
+	}
+	return result
+}
+
+type snapshotReadTarget struct{ SnapshotSource }
+
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_NewCollectionRemainsImporting() {
+	ctx := context.Background()
+	task, copies, m, resp, _ := s.newCopiedResultsFixture(2, storage.StorageV3)
+	job := copies.GetJob(ctx, task.GetJobId()).Clone().(*Job)
+	job.CreatesCollection = true
+	s.Require().NoError(copies.AddJob(ctx, job))
+	s.Require().NoError(SyncCopySegmentTask(task, resp, copies, m, testCopyIndexMeta(m)))
+	s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskCompleted, copies.GetTask(ctx, task.GetTaskId()).GetState())
+	persisted, err := m.Catalog.ListSegments(ctx, task.GetCollectionId())
+	s.Require().NoError(err)
+	s.Len(persisted, 2)
+	for _, result := range resp.SegmentResults {
+		s.True(m.GetSegment(ctx, result.GetSegmentId()).GetIsImporting())
+		s.Len(testCopyIndexMeta(m).GetSegmentIndexes(task.GetCollectionId(), result.GetSegmentId()), 1)
+	}
+	for _, segment := range persisted {
+		s.True(segment.GetIsImporting())
 	}
 }

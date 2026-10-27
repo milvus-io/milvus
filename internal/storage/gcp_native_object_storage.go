@@ -259,3 +259,6 @@ func (gcsReader *GcsReader) Seek(offset int64, whence int) (int64, error) {
 func (gcsReader *GcsReader) Size() (int64, error) {
 	return gcsReader.objectSize, nil
 }
+
+// Close releases the SDK resources of request-scoped storage clients.
+func (gcs *GcpNativeObjectStorage) Close() error { return gcs.client.Close() }

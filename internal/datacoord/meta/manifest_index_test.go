@@ -28,14 +28,17 @@ import (
 )
 
 func TestManifestIndexFileKeysRejectPathTraversal(t *testing.T) {
-	_, ok := manifestIndexFilePathInfo(3, packed.ManifestIndexInfo{
+	entry := packed.ManifestIndexInfo{
 		IndexName:             "index",
 		IndexType:             "HNSW",
 		Path:                  "index_v1/1/2/3/102/4",
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
-		IndexFileKeys:         []string{"../other-build/file"},
-	})
-	require.False(t, ok)
+	}
+	for _, key := range []string{"", ".", "..", "/absolute", "dir/file", "../other-build/file"} {
+		entry.IndexFileKeys = []string{key}
+		_, ok := manifestIndexFilePathInfo(3, entry)
+		require.False(t, ok, key)
+	}
 }
 
 // validateManifestIndexPublishable must apply exactly the reader predicate.
@@ -83,4 +86,49 @@ func TestManifestIndexFilePathInfoPreservesIndexType(t *testing.T) {
 	require.Equal(t, "HNSW_SQ", info.GetIndexType())
 	require.Equal(t, "HNSW_SQ", GetIndexType(info.GetIndexParams()))
 	require.Equal(t, "custom_vector", info.GetIndexName())
+}
+
+func TestManifestIndexMetadataProjection(t *testing.T) {
+	prefix := "root/index_v1/1/2/3/500/1"
+	entry := packed.ManifestIndexInfo{
+		IndexID: 10, BuildID: 500, IndexVersion: 1, FieldID: 101,
+		IndexName: "vec_index", IndexType: "HNSW", NumRows: 1000, Path: prefix,
+		SerializedSize: 2048, MemSize: 4096, CurrentIndexVersion: 5,
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		IndexFileKeys:         []string{"0", "1"}, Properties: map[string]string{"metric_type": "L2"},
+	}
+	got, ok := manifestIndexFilePathInfo(3, entry)
+	require.True(t, ok)
+	require.Equal(t, []string{prefix + "/0", prefix + "/1"}, got.GetIndexFilePaths())
+	require.Equal(t, int64(10), got.GetIndexID())
+	require.Equal(t, int64(500), got.GetBuildID())
+	require.Equal(t, uint64(2048), got.GetSerializedSize())
+	require.Equal(t, uint64(4096), got.GetMemSize())
+	require.Equal(t, int32(5), got.GetCurrentIndexVersion())
+	require.Equal(t, []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}}, got.IndexParams)
+	for _, mode := range []string{"path", "name", "type", "version", "rows", "serialized-size", "memory-size", "keys"} {
+		t.Run(mode, func(t *testing.T) {
+			bad := entry
+			switch mode {
+			case "path":
+				bad.Path = ""
+			case "name":
+				bad.IndexName = ""
+			case "type":
+				bad.IndexType = ""
+			case "version":
+				bad.IndexStorePathVersion = -1
+			case "rows":
+				bad.NumRows = -1
+			case "serialized-size":
+				bad.SerializedSize = -1
+			case "memory-size":
+				bad.MemSize = -1
+			case "keys":
+				bad.IndexFileKeys = nil
+			}
+			_, ok := manifestIndexFilePathInfo(3, bad)
+			require.False(t, ok)
+		})
+	}
 }
