@@ -31,7 +31,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
@@ -61,7 +60,7 @@ func flush(term int64, tick uint64, ids ...int64) *pkindexpb.CommitFlushRequest 
 func flushOn(vchannel string, term int64, tick uint64, ids ...int64) *pkindexpb.CommitFlushRequest {
 	req := &pkindexpb.CommitFlushRequest{
 		CollectionId: 1, Vchannel: vchannel, PchannelTerm: term,
-		PkDataType: schemapb.DataType_Int64, CheckpointTimeTick: tick,
+		CheckpointTimeTick: tick,
 	}
 	for _, id := range ids {
 		req.AddSsts = append(req.AddSsts, &pkindexpb.SSTRef{Id: id})
@@ -116,7 +115,7 @@ func TestFlushDoesNotWritePChannelMeta(t *testing.T) {
 }
 
 // The first flush of a vchannel creates version 1 with the SST base path of
-// the vchannel and the primary key data type of the flush.
+// the vchannel.
 func TestFirstFlushCreatesVersion1(t *testing.T) {
 	m, p, s := assigned(t, 3)
 	ctx := context.Background()
@@ -125,7 +124,6 @@ func TestFirstFlushCreatesVersion1(t *testing.T) {
 	assert.EqualValues(t, 1, got.GetVersion())
 	assert.Equal(t, "files/pk_index/1/p_1v0/sst", got.GetSstBasePath())
 	assert.Equal(t, pkindex.SSTBasePath("files", 1, vch), got.GetSstBasePath())
-	assert.Equal(t, schemapb.DataType_Int64, got.GetPkDataType())
 	assert.EqualValues(t, 3, got.GetLastFlushTerm())
 	assert.Equal(t, []int64{9}, sstIDs(got))
 
@@ -761,7 +759,7 @@ func TestLoadPointersIgnoresCache(t *testing.T) {
 // primary key.
 func editFlush(term int64, tick uint64, ids ...int64) *pkindexpb.CommitFlushRequest {
 	return &pkindexpb.CommitFlushRequest{
-		CollectionId: 1, Vchannel: "v", PkDataType: schemapb.DataType_Int64,
+		CollectionId: 1, Vchannel: "v",
 		PchannelTerm: term, AddSsts: ssts(ids...), CheckpointTimeTick: tick,
 	}
 }
@@ -788,7 +786,6 @@ func TestFlushCreatesFirstVersion(t *testing.T) {
 	assert.EqualValues(t, 1, m.GetCollectionId())
 	assert.Equal(t, "v", m.GetVchannel())
 	assert.Equal(t, "b", m.GetSstBasePath())
-	assert.Equal(t, schemapb.DataType_Int64, m.GetPkDataType())
 	assert.EqualValues(t, 5, m.GetLastFlushTerm())
 	assert.EqualValues(t, 100, m.GetCheckpointTimeTick())
 	assert.Equal(t, []int64{2, 1}, sstIDs(m))
@@ -815,11 +812,6 @@ func TestFlush(t *testing.T) {
 	assert.Nil(t, old)
 	_, err = applyEditFlush(m2, editFlush(5, 300, 1))
 	assert.True(t, errors.Is(err, ErrDuplicateSST))
-
-	other := editFlush(6, 300, 9)
-	other.PkDataType = schemapb.DataType_VarChar
-	_, err = applyEditFlush(m2, other)
-	assert.True(t, errors.Is(err, ErrSchemaMismatch))
 
 	up, err := applyEditFlush(m2, editFlush(6, 300, 9))
 	require.NoError(t, err)

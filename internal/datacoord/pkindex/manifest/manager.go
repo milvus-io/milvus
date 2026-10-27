@@ -84,8 +84,6 @@ var (
 	// of the manifest SST list, except an applied retry: no input is in the
 	// list and all outputs are in the list.
 	ErrStaleEdit = errors.New("compaction inputs are not in the manifest")
-	// ErrSchemaMismatch reports a primary key data type that differs from the manifest.
-	ErrSchemaMismatch = errors.New("primary key data type does not match the manifest")
 )
 
 var marshal = proto.MarshalOptions{Deterministic: true}
@@ -378,14 +376,13 @@ type Compaction struct {
 
 // applyFlush applies a flush to cur, which is nil when the vchannel has no
 // manifest; then the flush applies to an empty manifest of version 0 that
-// takes the collection, vchannel and primary key data type from the flush and
-// sstBasePath. It returns a new version when the checkpoint moves forward: the
-// new SSTs go in front of the SST list, the checkpoint is raised, and the
-// flush term becomes the last flush term. A flush with no SSTs only moves the
+// takes the collection and vchannel from the flush and sstBasePath. It returns
+// a new version when the checkpoint moves forward: the new SSTs go in front of
+// the SST list, the checkpoint is raised, and the flush term becomes the last
+// flush term. A flush with no SSTs only moves the
 // checkpoint. When the checkpoint does not move forward and the flush term
 // equals the last flush term, the flush is an applied retry and applyFlush
 // returns nil; it does not look at the SSTs of the flush. It returns
-// ErrSchemaMismatch when the primary key data type differs from cur,
 // ErrCheckpointRegressed when the checkpoint does not move forward and the
 // flush term differs from the last flush term, and ErrDuplicateSST when the
 // checkpoint moves forward and an SST is already in cur or is listed twice in
@@ -397,12 +394,8 @@ func applyFlush(cur *pkindexpb.Manifest, req *pkindexpb.CommitFlushRequest, sstB
 		base = &pkindexpb.Manifest{
 			CollectionId: req.GetCollectionId(),
 			Vchannel:     req.GetVchannel(),
-			PkDataType:   req.GetPkDataType(),
 			SstBasePath:  sstBasePath,
 		}
-	}
-	if req.GetPkDataType() != base.GetPkDataType() {
-		return nil, errors.Wrapf(ErrSchemaMismatch, "vchannel %s: manifest %s, flush %s", base.GetVchannel(), base.GetPkDataType(), req.GetPkDataType())
 	}
 	if req.GetCheckpointTimeTick() <= base.GetCheckpointTimeTick() {
 		if req.GetPchannelTerm() != base.GetLastFlushTerm() {

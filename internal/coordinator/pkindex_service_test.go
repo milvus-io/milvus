@@ -23,7 +23,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -48,7 +47,6 @@ func TestRegisterPKIndexCoordGRPCServiceBeforeActivation(t *testing.T) {
 		Vchannel:           "by-dev-rootcoord-dml_0_1v0",
 		PchannelTerm:       1,
 		CheckpointTimeTick: 1,
-		PkDataType:         schemapb.DataType_Int64,
 	})
 	require.NoError(t, err)
 	assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)

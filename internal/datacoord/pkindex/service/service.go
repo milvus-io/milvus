@@ -25,7 +25,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
@@ -127,8 +126,8 @@ func validateRecoveryTargets(in []*pkindexpb.ManifestTarget) ([]manifest.Target,
 }
 
 // validateFlush checks the content of a flush request: a valid target whose
-// vchannel name has a pchannel, a positive term, a checkpoint that is not 0,
-// and a primary key data type of Int64 or VarChar.
+// vchannel name has a pchannel, a positive term, and a checkpoint that is not
+// 0.
 func validateFlush(req *pkindexpb.CommitFlushRequest) error {
 	if err := validateTarget(req.GetCollectionId(), req.GetVchannel()); err != nil {
 		return err
@@ -141,9 +140,6 @@ func validateFlush(req *pkindexpb.CommitFlushRequest) error {
 	}
 	if req.GetCheckpointTimeTick() == 0 {
 		return merr.WrapErrServiceInternalMsg("checkpoint_time_tick must not be 0")
-	}
-	if t := req.GetPkDataType(); t != schemapb.DataType_Int64 && t != schemapb.DataType_VarChar {
-		return merr.WrapErrServiceInternalMsg("pk_data_type must be Int64 or VarChar, got %s", t)
 	}
 	return nil
 }

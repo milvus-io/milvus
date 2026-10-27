@@ -26,7 +26,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/pkindex/manifest"
 	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
@@ -95,7 +94,7 @@ func (e *env) upload(t *testing.T, vchannel string, ids ...int64) {
 func flushWith(t *testing.T, m *manifest.Manager, vchannel string, tick uint64, ids ...int64) {
 	_, err := m.CommitFlush(context.Background(), &pkindexpb.CommitFlushRequest{
 		CollectionId: 1, Vchannel: vchannel, PchannelTerm: 1,
-		PkDataType: schemapb.DataType_Int64, AddSsts: refs(ids...), CheckpointTimeTick: tick,
+		AddSsts: refs(ids...), CheckpointTimeTick: tick,
 	})
 	require.NoError(t, err)
 }
@@ -245,7 +244,7 @@ func TestGCDoesNotDependOnManagerCache(t *testing.T) {
 	flushWith(t, other, "v", 40, 5) // version 6
 	// a retry of the applied flush at checkpoint 10 returns the cached version
 	stale, err := e.mgr.CommitFlush(ctx, &pkindexpb.CommitFlushRequest{
-		CollectionId: 1, Vchannel: "v", PchannelTerm: 1, PkDataType: schemapb.DataType_Int64, CheckpointTimeTick: 10,
+		CollectionId: 1, Vchannel: "v", PchannelTerm: 1, CheckpointTimeTick: 10,
 	})
 	require.NoError(t, err)
 	require.EqualValues(t, 2, stale.GetVersion())

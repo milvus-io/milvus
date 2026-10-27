@@ -5,7 +5,6 @@ package milvus.proto.pkindex;
 option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb";
 
 import "common.proto";
-import "schema.proto";
 
 // Manifest is the durable state of the primary key index of one vchannel.
 // The body is stored in object storage. etcd stores only a ManifestPointer.
@@ -17,16 +16,15 @@ message Manifest {
   // The pchannel term (PChannelInfo.term) of the last flush that changed
   // this manifest. It is 0 before the first flush.
   int64 last_flush_term = 4;
-  schema.DataType pk_data_type = 5;
   // The SSTs hold the effects of all WAL messages with a time tick at or
   // below this value.
-  uint64 checkpoint_time_tick = 6;
+  uint64 checkpoint_time_tick = 5;
   // Newest first. For one key, the first SST that holds the key has the
   // current value, including a tombstone.
-  repeated SSTRef ssts = 7;
+  repeated SSTRef ssts = 6;
   // Complete object key prefix of the SST files. The object key of an SST
   // is <sst_base_path>/<id>.sst.
-  string sst_base_path = 8;
+  string sst_base_path = 7;
 }
 
 // SSTRef describes one SST. The fields mirror the engine's sst.Info.
@@ -55,9 +53,6 @@ message CommitFlushRequest {
   // Newest first.
   repeated SSTRef add_ssts = 4;
   uint64 checkpoint_time_tick = 5;
-  // Used when the flush creates the first version of the manifest. It must
-  // equal the pk_data_type of an existing manifest.
-  schema.DataType pk_data_type = 6;
 }
 
 message CommitFlushResponse {
