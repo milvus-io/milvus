@@ -262,10 +262,11 @@ template <typename LocalChunkManagerPtr>
 void
 WriteDiskValidData(const LocalChunkManagerPtr& local_chunk_manager,
                    const std::string& valid_data_path,
-                   const knowhere::IdMap& id_map) {
-    auto total_count = static_cast<size_t>(id_map.ValidBitmap().size());
-    auto wire_count = static_cast<uint64_t>(total_count);
-    auto packed_data = PackValidDataBitmap(id_map);
+                   const knowhere::Index<knowhere::IndexNode>& index) {
+    auto validity = ExportValidData(index);
+    AssertInfo(validity.has_value(), "nullable validity is missing");
+    auto wire_count = validity->logical_row_count;
+    auto& packed_data = validity->packed_bits;
     if (!local_chunk_manager->Exist(valid_data_path)) {
         local_chunk_manager->CreateFile(valid_data_path);
     }
@@ -364,12 +365,17 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
     auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
     auto disk_valid_data =
         ReadDiskValidData(local_chunk_manager, valid_data_path);
-    const auto restored_id_map =
-        RestoreIdMapFromValidData(index_.GetIdMap(),
-                                  disk_valid_data.View(),
-                                  &load_config,
-                                  local_index_path_prefix);
-    bool all_null_nullable = restored_id_map.IsAllNullNullable();
+    const auto load_options = MakeNullableLoadInput(
+        disk_valid_data.View(), load_config, local_index_path_prefix);
+    const auto full_bytes = disk_valid_data.count / 8;
+    const auto tail_bits = disk_valid_data.count % 8;
+    const bool all_null_nullable =
+        disk_valid_data.found &&
+        std::none_of(disk_valid_data.bitmap.begin(),
+                     disk_valid_data.bitmap.begin() + full_bytes,
+                     [](uint8_t byte) { return byte != 0; }) &&
+        (tail_bits == 0 ||
+         (disk_valid_data.bitmap[full_bytes] & ((1U << tail_bits) - 1)) == 0);
     auto empty_emb_list_state = ReadDiskEmptyEmbListOffsets(
         local_chunk_manager,
         local_index_path_prefix + "/" + EMPTY_EMB_LIST_OFFSET_KEY);
@@ -381,7 +387,8 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
             nostd_span_load_engine(span_load_engine);
         auto engine_scope = opentelemetry::trace::Tracer::WithActiveSpan(
             nostd_span_load_engine);
-        auto stat = index_.Deserialize(knowhere::BinarySet(), load_config);
+        auto stat = index_.Deserialize(
+            knowhere::BinarySet(), load_config, load_options);
         if (stat != knowhere::Status::success)
             ThrowInfo(ErrorCode::UnexpectedError,
                       "failed to Deserialize index, {}",
@@ -398,12 +405,8 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
         SetDim(empty_emb_list_state->dim);
         empty_emb_list_offsets_ = std::move(empty_emb_list_state->offsets);
     }
-    if (restored_id_map.has_valid_data) {
-        if (all_null_nullable || empty_emb_list_state.has_value()) {
-            FinalizeRestoredIdMap(index_.Node(),
-                                  ErrorCode::UnexpectedError,
-                                  "disk metadata-only load");
-        }
+    if (all_null_nullable || empty_emb_list_state.has_value()) {
+        ImportValidData(index_, load_options);
     }
 }
 
@@ -411,8 +414,7 @@ template <typename T>
 IndexStatsPtr
 VectorDiskAnnIndex<T>::Upload(const Config& config) {
     BinarySet ret;
-    const auto& id_map = GetIdMap();
-    if (!IsAllNullNullable(id_map) && !IsEmptyEmbListIndex()) {
+    if (!IsAllNullNullable(index_) && !IsEmptyEmbListIndex()) {
         auto stat = index_.Serialize(ret);
         if (stat != knowhere::Status::success) {
             ThrowInfo(ErrorCode::UnexpectedError,
@@ -468,15 +470,19 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
         ReadDiskValidData(local_chunk_manager, valid_data_path);
     auto dim = GetValueFromConfig<int64_t>(build_config, DIM_KEY);
     auto id_map_dataset =
-        GenIdMapDatasetFromValidData(index_.GetIdMap(),
-                                     static_cast<int64_t>(raw_data_rows),
-                                     dim.value_or(0),
-                                     disk_valid_data.View(),
-                                     build_config,
-                                     local_index_path_prefix);
+        disk_valid_data.found
+            ? GenIdMapDataset(static_cast<int64_t>(raw_data_rows),
+                              dim.value_or(0),
+                              disk_valid_data.View())
+            : nullptr;
+    knowhere::BuildOptions build_options;
+    if (disk_valid_data.found) {
+        build_options.mmap =
+            NullableMmapOptions(build_config, local_index_path_prefix);
+    }
     auto build_metadata_id_map = [&](const DatasetPtr& dataset,
                                      const char* context) {
-        auto stat = index_.Build(dataset, build_config);
+        auto stat = index_.Build(dataset, build_config, true, build_options);
         if (stat != knowhere::Status::success) {
             ThrowInfo(ErrorCode::IndexBuildError,
                       "failed to build {}, {}",
@@ -574,7 +580,7 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
 
     build_config.erase(INSERT_FILES_KEY);
     build_config.erase(VEC_OPT_FIELDS);
-    auto stat = index_.Build(id_map_dataset, build_config);
+    auto stat = index_.Build(id_map_dataset, build_config, true, build_options);
     if (stat != knowhere::Status::success)
         ThrowInfo(ErrorCode::IndexBuildError,
                   "failed to build disk index, {}",
@@ -615,12 +621,11 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
         file_manager_->AcquireLocalDirWriteLease(local_index_path_prefix);
     build_config[DISK_ANN_PREFIX_PATH] = local_index_path_prefix;
 
-    if (dataset != nullptr && dataset->HasIdMapData() &&
-        !index_.GetIdMap().IsEnabled()) {
-        index_.GetIdMap().SetType(knowhere::IdMap::Type::SEALED);
+    knowhere::BuildOptions build_options;
+    if (dataset != nullptr && dataset->HasIdMapData()) {
+        build_options.mmap =
+            NullableMmapOptions(build_config, local_index_path_prefix);
     }
-    ConfigureIdMapMmapForDataset(
-        index_.GetIdMap(), dataset, build_config, local_index_path_prefix);
     const auto id_map_only_build =
         GetIdMapOnlyBuildPlan(dataset, is_embedding_list);
     if (id_map_only_build.enabled) {
@@ -636,14 +641,14 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
                                          empty_emb_list_offsets_);
             file_manager_->AddFile(empty_offsets_path);
         }
-        auto stat = index_.Build(dataset, build_config);
+        auto stat = index_.Build(dataset, build_config, true, build_options);
         if (stat != knowhere::Status::success) {
             ThrowInfo(ErrorCode::IndexBuildError,
                       "failed to build metadata-only disk id map, {}",
                       KnowhereStatusString(stat));
         }
         auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
-        WriteDiskValidData(local_chunk_manager, valid_data_path, GetIdMap());
+        WriteDiskValidData(local_chunk_manager, valid_data_path, index_);
         file_manager_->AddFile(valid_data_path);
         file_manager_->RemoveRawDataFiles();
         return;
@@ -701,7 +706,7 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
         build_config[EMB_LIST_OFFSETS_PATH] = offsets_path;
     }
 
-    auto stat = index_.Build(dataset, build_config);
+    auto stat = index_.Build(dataset, build_config, true, build_options);
     if (stat != knowhere::Status::success)
         ThrowInfo(ErrorCode::IndexBuildError,
                   "failed to build index, {}",
@@ -709,7 +714,7 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
 
     if (HasValidData()) {
         auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
-        WriteDiskValidData(local_chunk_manager, valid_data_path, GetIdMap());
+        WriteDiskValidData(local_chunk_manager, valid_data_path, index_);
         file_manager_->AddFile(valid_data_path);
     }
 
@@ -733,8 +738,7 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
 
     knowhere::Json search_config = PrepareSearchParams(search_info);
 
-    const auto& id_map = GetIdMap();
-    if (IsAllNullNullable(id_map) || IsEmptyEmbListIndex()) {
+    if (IsAllNullNullable(index_) || IsEmptyEmbListIndex()) {
         auto offsets =
             dataset->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
         auto num_queries = dataset->GetRows();
@@ -845,8 +849,7 @@ VectorDiskAnnIndex<T>::VectorIterators(const DatasetPtr dataset,
         return iterators;
     };
 
-    const auto& id_map = GetIdMap();
-    if (IsAllNullNullable(id_map) || IsEmptyEmbListIndex()) {
+    if (IsAllNullNullable(index_) || IsEmptyEmbListIndex()) {
         auto offsets =
             dataset->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
         auto num_queries = dataset->GetRows();
@@ -871,8 +874,7 @@ VectorDiskAnnIndex<T>::VectorIterators(const DatasetPtr dataset,
 template <typename T>
 const bool
 VectorDiskAnnIndex<T>::HasRawData() const {
-    const auto& id_map = GetIdMap();
-    if (IsAllNullNullable(id_map) || IsEmptyEmbListIndex()) {
+    if (IsAllNullNullable(index_) || IsEmptyEmbListIndex()) {
         return true;
     }
     return index_.HasRawData(GetMetricType());
@@ -881,8 +883,7 @@ VectorDiskAnnIndex<T>::HasRawData() const {
 template <typename T>
 bool
 VectorDiskAnnIndex<T>::IsIndexRefineEnabled() const {
-    const auto& id_map = GetIdMap();
-    if (IsAllNullNullable(id_map) || IsEmptyEmbListIndex()) {
+    if (IsAllNullNullable(index_) || IsEmptyEmbListIndex()) {
         return false;
     }
     return index_.IsIndexRefineEnabled();
@@ -902,8 +903,7 @@ VectorDiskAnnIndex<T>::GetVector(const DatasetPtr dataset) const {
         return {};
     }
 
-    const auto& id_map = GetIdMap();
-    if (IsAllNullNullable(id_map)) {
+    if (IsAllNullNullable(index_)) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "failed to get vector, nullable vector index contains no "
                   "valid vectors");

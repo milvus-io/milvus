@@ -198,7 +198,7 @@ InterimSealedIndexTranslator::get_cells(
     int64_t total_valid_count =
         nullable ? offset_mapping.GetValidCount() : vec_data_->NumRows();
     if (nullable) {
-        vec_index->SetIdMapType(knowhere::IdMap::Type::GROWING);
+        vec_index->SetGrowingMapping();
     }
 
     if (total_valid_count == 0) {
