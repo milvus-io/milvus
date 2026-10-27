@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
@@ -100,7 +101,7 @@ func (bw *BulkPackWriter) writeBlob(ctx context.Context, key string, blob []byte
 		if err == nil {
 			return false, nil
 		}
-		err = storage.ToMilvusIoError(key, err)
+		err = objectstorage.ToMilvusIoError(key, err)
 		if merr.IsNonRetryableErr(err) {
 			return false, err
 		}

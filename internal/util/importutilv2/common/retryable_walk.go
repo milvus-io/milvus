@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
@@ -44,7 +45,7 @@ func WalkWithPrefixRetry(ctx context.Context, cm storage.ChunkManager,
 			mlog.Err(err),
 		)
 		// Map raw storage error to Milvus IO error for consistent classification
-		err = storage.ToMilvusIoError(prefix, err)
+		err = objectstorage.ToMilvusIoError(prefix, err)
 		// Denylist: don't retry permanent/validation errors
 		if merr.IsNonRetryableErr(err) {
 			return retry.Unrecoverable(err)

@@ -20,20 +20,16 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/minio/minio-go/v7"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	objectstore "github.com/milvus-io/milvus/pkg/v3/objectstorage/store"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 var _ ObjectStorage = (*MinioObjectStorage)(nil)
-
-// minio-go caps a single CopyObject request at 5 GiB, regardless of the configured threshold.
-const minioSingleCopyObjectMaxSize = 5 * 1024 * 1024 * 1024
 
 type MinioObjectStorage struct {
 	*minio.Client
@@ -73,12 +69,12 @@ func (minioObjectStorage *MinioObjectStorage) GetObject(ctx context.Context, buc
 		err := opts.SetRange(offset, end)
 		if err != nil {
 			mlog.Warn(ctx, "failed to set range", mlog.String("bucket", bucketName), mlog.String("path", objectName), mlog.Err(err))
-			return nil, mapObjectStorageError(objectName, err)
+			return nil, objectstorage.ToMilvusIoError(objectName, err)
 		}
 	}
 	object, err := minioObjectStorage.Client.GetObject(ctx, bucketName, objectName, opts)
 	if err != nil {
-		return nil, mapObjectStorageError(objectName, err)
+		return nil, objectstorage.ToMilvusIoError(objectName, err)
 	}
 	return &ObjectReader{
 		Object: object,
@@ -87,7 +83,7 @@ func (minioObjectStorage *MinioObjectStorage) GetObject(ctx context.Context, buc
 
 func (minioObjectStorage *MinioObjectStorage) PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error {
 	_, err := minioObjectStorage.Client.PutObject(ctx, bucketName, objectName, reader, objectSize, minioObjectStorage.putObjectOptions())
-	return mapObjectStorageError(objectName, err)
+	return objectstorage.ToMilvusIoError(objectName, err)
 }
 
 func (minioObjectStorage *MinioObjectStorage) putObjectOptions() minio.PutObjectOptions {
@@ -101,7 +97,7 @@ func (minioObjectStorage *MinioObjectStorage) putObjectOptions() minio.PutObject
 
 func (minioObjectStorage *MinioObjectStorage) StatObject(ctx context.Context, bucketName, objectName string) (int64, error) {
 	info, err := minioObjectStorage.Client.StatObject(ctx, bucketName, objectName, minio.StatObjectOptions{})
-	return info.Size, mapObjectStorageError(objectName, err)
+	return info.Size, objectstorage.ToMilvusIoError(objectName, err)
 }
 
 func (minioObjectStorage *MinioObjectStorage) WalkWithObjects(ctx context.Context, bucketName string, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) (err error) {
@@ -117,7 +113,7 @@ func (minioObjectStorage *MinioObjectStorage) WalkWithObjects(ctx context.Contex
 
 	for object := range in {
 		if object.Err != nil {
-			return mapObjectStorageError(prefix, object.Err)
+			return objectstorage.ToMilvusIoError(prefix, object.Err)
 		}
 		if !walkFunc(&ChunkObjectInfo{FilePath: object.Key, ModifyTime: object.LastModified}) {
 			return nil
@@ -131,7 +127,7 @@ func (minioObjectStorage *MinioObjectStorage) RemoveObject(ctx context.Context, 
 	if isDeleteSucceededWithOK(err) {
 		return nil
 	}
-	return mapObjectStorageError(objectName, err)
+	return objectstorage.ToMilvusIoError(objectName, err)
 }
 
 // isDeleteSucceededWithOK reports whether a RemoveObject error only says that the
@@ -151,41 +147,20 @@ func (minioObjectStorage *MinioObjectStorage) CopyObjectCrossBucket(ctx context.
 	return err
 }
 
-// CopyObjectCrossBucketAndGetSize discovers the immutable source size at copy time.
-func (minioObjectStorage *MinioObjectStorage) CopyObjectCrossBucketAndGetSize(ctx context.Context, srcBucket, srcObjectName, dstBucket, dstObjectName string) (int64, error) {
-	threshold := paramtable.Get().MinioCfg.MultipartCopyThreshold.GetAsInt64()
-	partSize := paramtable.Get().MinioCfg.MultipartCopyPartSize.GetAsInt64()
-	srcInfo, err := minioObjectStorage.Client.StatObject(ctx, srcBucket, srcObjectName, minio.StatObjectOptions{})
+// CopyObjectCrossBucketAndGetSize resolves Milvus configuration at the boundary;
+// the public object store shares the existing client and provider-side implementation.
+func (s *MinioObjectStorage) CopyObjectCrossBucketAndGetSize(ctx context.Context, srcBucket, srcObjectName, dstBucket, dstObjectName string) (int64, error) {
+	options := objectstore.DefaultS3Options()
+	options.MultipartThreshold = paramtable.Get().MinioCfg.MultipartCopyThreshold.GetAsInt64()
+	options.PartSize = paramtable.Get().MinioCfg.MultipartCopyPartSize.GetAsInt64()
+	options.DisableMultipart = s.cloudProvider == objectstorage.CloudProviderGCP
+	store, err := objectstore.NewS3Store(s.Client, options)
 	if err != nil {
-		return 0, mapObjectStorageError(srcObjectName, err)
+		return 0, err
 	}
-	if srcInfo.Size < 0 {
-		return 0, merr.WrapErrDataIntegrityMsg("source object size cannot be negative")
-	}
-	srcOpts := minio.CopySrcOptions{Bucket: srcBucket, Object: srcObjectName}
-	dstOpts := minio.CopyDestOptions{Bucket: dstBucket, Object: dstObjectName}
-	// GCS's XML API has no multipart copy: x-amz-copy-source-range (emitted by
-	// UploadPartCopy) has no x-goog-* equivalent. Its whole-object copy has no
-	// 5GiB cap though, so GCP always takes the single-copy path.
-	multipart := srcInfo.Size >= max(threshold, minioCopyPartSize) || srcInfo.Size > minioSingleCopyObjectMaxSize
-	if !multipart || minioObjectStorage.cloudProvider == objectstorage.CloudProviderGCP {
-		// minio-go v7.0.73 Client.CopyObject returns the ETag from the HTTP
-		// header, but S3 puts it in the XML body. Core.CopyObject reads the
-		// body correctly, so use it without upgrading the shared SDK.
-		core := minio.Core{Client: minioObjectStorage.Client}
-		var result minio.ObjectInfo
-		result, err = core.CopyObject(ctx, srcBucket, srcObjectName, dstBucket, dstObjectName, nil, srcOpts, minio.PutObjectOptions{})
-		// Both SDK paths can decode HTTP 200 <Error> as an empty result.
-		// Require the body ETag before reporting success or counting bytes;
-		// an empty ETag does not confirm a copy and remains a retriable I/O error.
-		if err == nil && strings.TrimSpace(result.ETag) == "" {
-			return 0, merr.WrapErrIoFailedMsg("single-object copy returned an empty ETag")
-		}
-	} else {
-		err = minioObjectStorage.copyObjectMultipart(ctx, dstOpts, srcOpts, srcInfo, partSize)
-	}
-	if err != nil {
-		return 0, mapObjectStorageError(srcObjectName, err)
-	}
-	return srcInfo.Size, nil
+	size, err := store.Copy(ctx, objectstore.CopyRequest{
+		Source:      objectstore.Object{Bucket: srcBucket, Key: srcObjectName},
+		Destination: objectstore.Object{Bucket: dstBucket, Key: dstObjectName},
+	})
+	return size, objectstorage.ToMilvusIoError(srcObjectName, err)
 }

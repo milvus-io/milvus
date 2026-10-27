@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	sharedsnapshot "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/parameterutil"
@@ -165,7 +166,7 @@ func readSnapshotImportMetadata(ctx context.Context, cm milvusstorage.ChunkManag
 	if err != nil {
 		return nil, err
 	}
-	return storage.NewSnapshotReader(cm).ReadMetadata(ctx, uri)
+	return sharedsnapshot.NewSnapshotReader(cm).ReadMetadata(ctx, uri)
 }
 
 // prepareSnapshotImportFiles records the top-level metadata URI and layout
@@ -189,7 +190,7 @@ func PrepareSnapshotImportFiles(ctx context.Context, partitions []int64, cm milv
 		return nil, nil, merr.WrapErrImportFailedMsg("snapshot-source import requires exactly one metadata URI")
 	}
 	uri := strings.TrimSpace(files[0].GetPaths()[0])
-	bucket, _, _, err := storage.ParseForeignURI(uri)
+	bucket, _, _, err := sharedsnapshot.ParseForeignURI(uri)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -206,7 +207,7 @@ func PrepareSnapshotImportFiles(ctx context.Context, partitions []int64, cm milv
 	if err != nil {
 		return nil, nil, err
 	}
-	reader := storage.NewSnapshotReader(cm)
+	reader := sharedsnapshot.NewSnapshotReader(cm)
 	metadata, err := reader.ReadMetadata(ctx, uri)
 	if err != nil {
 		return nil, nil, err
@@ -215,13 +216,13 @@ func PrepareSnapshotImportFiles(ctx context.Context, partitions []int64, cm milv
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := storage.RebaseBareImportSelfContainedSnapshot(uri, metadata.GetSnapshotInfo().GetS3Location(), snapshot); err != nil {
+	if err := sharedsnapshot.RebaseBareImportSelfContainedSnapshot(uri, metadata.GetSnapshotInfo().GetS3Location(), snapshot); err != nil {
 		return nil, nil, err
 	}
-	if err := storage.ValidateSnapshotMetadataLocation(uri, snapshot.SnapshotInfo); err != nil {
+	if err := sharedsnapshot.ValidateSnapshotMetadataLocation(uri, snapshot.SnapshotInfo); err != nil {
 		return nil, nil, err
 	}
-	if err := storage.ValidateSnapshotImportPaths(uri, snapshot, nil); err != nil {
+	if err := sharedsnapshot.ValidateSnapshotImportPaths(uri, snapshot, nil); err != nil {
 		return nil, nil, err
 	}
 	options, err = prepareSnapshotImportOptions(schema, snapshot.Collection.GetSchema(), options)
@@ -275,7 +276,7 @@ func expandSnapshotImportFiles(
 	// Keep the captured URI's storage identity when resolving source readers
 	// for pending jobs, including retries and recovery. Already-expanded jobs
 	// skip preparation and retain their existing representation.
-	bucket, _, _, err := storage.ParseForeignURI(metadataPath)
+	bucket, _, _, err := sharedsnapshot.ParseForeignURI(metadataPath)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -292,10 +293,10 @@ func expandSnapshotImportFiles(
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if err := storage.ValidateSnapshotObjectPathForBucket(cm, "snapshot_source", metadataPath, ""); err != nil {
+	if err := sharedsnapshot.ValidateSnapshotObjectPathForBucket(cm, "snapshot_source", metadataPath, ""); err != nil {
 		return nil, nil, nil, err
 	}
-	reader := storage.NewSnapshotReader(cm)
+	reader := sharedsnapshot.NewSnapshotReader(cm)
 	snapshot, err := reader.ReadSnapshotFromMetadata(ctx, metadataPath, metadata, true)
 	if err != nil {
 		return nil, nil, nil, merr.Wrap(err, "failed to read snapshot import source")
@@ -303,10 +304,10 @@ func expandSnapshotImportFiles(
 	if snapshot == nil {
 		return nil, nil, nil, merr.WrapErrImportSysFailed("snapshot reader returned no data")
 	}
-	if err := storage.RebaseBareImportSelfContainedSnapshot(metadataPath, metadata.GetSnapshotInfo().GetS3Location(), snapshot); err != nil {
+	if err := sharedsnapshot.RebaseBareImportSelfContainedSnapshot(metadataPath, metadata.GetSnapshotInfo().GetS3Location(), snapshot); err != nil {
 		return nil, nil, nil, err
 	}
-	if err := storage.ValidateSnapshotMetadataLocation(metadataPath, snapshot.SnapshotInfo); err != nil {
+	if err := sharedsnapshot.ValidateSnapshotMetadataLocation(metadataPath, snapshot.SnapshotInfo); err != nil {
 		return nil, nil, nil, err
 	}
 	if snapshot.Layout != datapb.SnapshotLayout_SnapshotLayoutReferenced &&
@@ -380,7 +381,7 @@ func expandSnapshotImportFiles(
 				SnapshotFormatVersion: metadata.GetFormatVersion(),
 			}
 			if snapshot.Layout == datapb.SnapshotLayout_SnapshotLayoutSelfContained {
-				if prefix, found := storage.DeriveSnapshotRootPath(metadata.GetSnapshotInfo().GetS3Location()); found {
+				if prefix, found := sharedsnapshot.DeriveSnapshotRootPath(metadata.GetSnapshotInfo().GetS3Location()); found {
 					ref.OriginalKeyPrefix = &prefix
 				}
 			}
@@ -427,7 +428,7 @@ func expandSnapshotImportFiles(
 	// Validate metadata references without listing prefixes or opening physical
 	// manifests. Batch the references so the metadata manifest list is scanned
 	// only once, not once per segment. Workers validate discovered references.
-	refs := make([]storage.SnapshotFileRef, 0, len(validationSegments))
+	refs := make([]sharedsnapshot.SnapshotFileRef, 0, len(validationSegments))
 	for _, segment := range validationSegments {
 		if segment.GetManifestPath() == "" {
 			continue
@@ -440,9 +441,9 @@ func expandSnapshotImportFiles(
 				return nil, nil, nil, err
 			}
 		}
-		refs = append(refs, storage.SnapshotFileRef{Path: base, NormalizedPath: storage.NormalizeSnapshotObjectPath(base)})
+		refs = append(refs, sharedsnapshot.SnapshotFileRef{Path: base, NormalizedPath: sharedsnapshot.NormalizeSnapshotObjectPath(base)})
 	}
-	if err := storage.ValidateSnapshotImportPaths(metadataPath, snapshot, refs); err != nil {
+	if err := sharedsnapshot.ValidateSnapshotImportPaths(metadataPath, snapshot, refs); err != nil {
 		return nil, nil, nil, err
 	}
 	needsSourceContext := hasV2 || len(applicable) != 0
@@ -564,7 +565,7 @@ func snapshotImportL0Segments(all, data []*datapb.SegmentDescription) ([]*datapb
 // Enforce incremental size limits here; prepareSnapshotJob validates the final
 // plan with real options after external/routing transforms and ID allocation.
 func attachSnapshotImportSources(ctx context.Context, cm milvusstorage.ChunkManager, metadataPath string,
-	snapshot *storage.SnapshotData, data, deltas []*datapb.SegmentDescription, files []*internalpb.ImportFile,
+	snapshot *sharedsnapshot.SnapshotData, data, deltas []*datapb.SegmentDescription, files []*internalpb.ImportFile,
 ) ([]*internalpb.SnapshotImportL0Source, error) {
 	type scope struct {
 		channel     string
@@ -605,7 +606,7 @@ func attachSnapshotImportSources(ctx context.Context, cm milvusstorage.ChunkMana
 	kinds := make(map[string]bool)
 	// The caller has already checked the full metadata manifest list. Retain
 	// the layout/root boundary for each L0 reference without rescanning it.
-	pathBoundary := &storage.SnapshotData{Layout: snapshot.Layout}
+	pathBoundary := &sharedsnapshot.SnapshotData{Layout: snapshot.Layout}
 	for _, delta := range deltas {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -636,11 +637,11 @@ func attachSnapshotImportSources(ctx context.Context, cm milvusstorage.ChunkMana
 			if packedDelta {
 				objectPath, _, _ = packed.UnmarshalManifestPath(path)
 			}
-			if err := storage.ValidateSnapshotObjectPathForBucket(cm, "snapshot L0", objectPath, ""); err != nil {
+			if err := sharedsnapshot.ValidateSnapshotObjectPathForBucket(cm, "snapshot L0", objectPath, ""); err != nil {
 				return nil, err
 			}
-			if err := storage.ValidateSnapshotImportPaths(metadataPath, pathBoundary, []storage.SnapshotFileRef{{
-				Path: objectPath, NormalizedPath: storage.NormalizeSnapshotObjectPath(objectPath), Type: storage.SnapshotFileTypeDeltaBinlog,
+			if err := sharedsnapshot.ValidateSnapshotImportPaths(metadataPath, pathBoundary, []sharedsnapshot.SnapshotFileRef{{
+				Path: objectPath, NormalizedPath: sharedsnapshot.NormalizeSnapshotObjectPath(objectPath), Type: sharedsnapshot.SnapshotFileTypeDeltaBinlog,
 			}}); err != nil {
 				return nil, err
 			}
@@ -648,9 +649,9 @@ func attachSnapshotImportSources(ctx context.Context, cm milvusstorage.ChunkMana
 			// object key and must agree on its decoder even across source scopes.
 			if packedDelta {
 				_, version, _ := packed.UnmarshalManifestPath(path)
-				path = packed.MarshalManifestPath(storage.NormalizeSnapshotObjectPath(objectPath), version)
+				path = packed.MarshalManifestPath(sharedsnapshot.NormalizeSnapshotObjectPath(objectPath), version)
 			} else {
-				path = storage.NormalizeSnapshotObjectPath(path)
+				path = sharedsnapshot.NormalizeSnapshotObjectPath(path)
 			}
 			if previous, ok := kinds[path]; ok && previous != packedDelta {
 				return nil, merr.WrapErrDataIntegrityMsg("snapshot delete object has conflicting decoder contracts")

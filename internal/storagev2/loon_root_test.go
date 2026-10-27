@@ -22,17 +22,18 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	sharedstorage "github.com/milvus-io/milvus/pkg/v3/storagev2"
 )
 
 // Milvus keys already carry the storage prefix, so the loon filesystem must be
 // rooted at the namespace root: "/" for local, and the configured root path
 // (which milvus-storage does not apply for object storage) for remote.
 func TestLoonFSRootPath(t *testing.T) {
-	assert.Equal(t, "/", LoonFSRootPath(&indexpb.StorageConfig{StorageType: "local", RootPath: "/var/lib/milvus/data"}))
-	assert.Equal(t, "/", LoonFSRootPath(&indexpb.StorageConfig{StorageType: "local", RootPath: "data"}))
-	assert.Equal(t, "/", LoonFSRootPath(&indexpb.StorageConfig{StorageType: "local"}))
-	assert.Equal(t, "files", LoonFSRootPath(&indexpb.StorageConfig{StorageType: "remote", RootPath: "files"}))
-	assert.Equal(t, "files", LoonFSRootPath(&indexpb.StorageConfig{StorageType: "minio", RootPath: "files"}))
-	assert.Equal(t, "", LoonFSRootPath(&indexpb.StorageConfig{StorageType: "remote"}))
-	assert.Equal(t, "", LoonFSRootPath(nil))
+	assert.Equal(t, "/", sharedstorage.LoonFSRootPath(&indexpb.StorageConfig{StorageType: "local", RootPath: "/var/lib/milvus/data"}))
+	assert.Equal(t, "/", sharedstorage.LoonFSRootPath(&indexpb.StorageConfig{StorageType: "local", RootPath: "data"}))
+	assert.Equal(t, "/", sharedstorage.LoonFSRootPath(&indexpb.StorageConfig{StorageType: "local"}))
+	assert.Equal(t, "files", sharedstorage.LoonFSRootPath(&indexpb.StorageConfig{StorageType: "remote", RootPath: "files"}))
+	assert.Equal(t, "files", sharedstorage.LoonFSRootPath(&indexpb.StorageConfig{StorageType: "minio", RootPath: "files"}))
+	assert.Equal(t, "", sharedstorage.LoonFSRootPath(&indexpb.StorageConfig{StorageType: "remote"}))
+	assert.Equal(t, "", sharedstorage.LoonFSRootPath(nil))
 }
