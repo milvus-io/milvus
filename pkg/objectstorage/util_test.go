@@ -613,13 +613,15 @@ func TestNewAzureClientSPNMissingVarsReturnsError(t *testing.T) {
 }
 
 func TestNewAzureClientWITakesPriorityOverSPN(t *testing.T) {
-	// Both WI and SPN vars set — WI must be selected first (WI → SPN → MI order).
-	// NewWorkloadIdentityCredential fails because the token file does not exist,
-	// but that error is distinct from the SPN missing-vars error, proving WI was chosen.
+	// Set WI token file + SPN secret, but leave CLIENT_ID and TENANT_ID empty.
+	// WI is checked first (correct WI→SPN→MI order): NewWorkloadIdentityCredential
+	// fails because CLIENT_ID/TENANT_ID are missing — this is a WI construction error,
+	// NOT the SPN validation error ("SPN authentication requires..."), proving the WI
+	// branch was entered rather than the SPN branch.
 	t.Setenv("AZURE_FEDERATED_TOKEN_FILE", "/nonexistent/token/file")
 	t.Setenv("AZURE_CLIENT_SECRET", "fake-secret")
-	t.Setenv("AZURE_CLIENT_ID", "00000000-0000-0000-0000-000000000001")
-	t.Setenv("AZURE_TENANT_ID", "00000000-0000-0000-0000-000000000002")
+	t.Setenv("AZURE_CLIENT_ID", "")
+	t.Setenv("AZURE_TENANT_ID", "")
 
 	cfg := &Config{
 		Address:         "core.windows.net",
@@ -630,7 +632,8 @@ func TestNewAzureClientWITakesPriorityOverSPN(t *testing.T) {
 	}
 
 	_, err := NewAzureObjectStorageClient(context.Background(), cfg)
-	// WI path taken: error comes from WorkloadIdentityCredential, not SPN validation.
+	// WI path taken: error is from WorkloadIdentityCredential (missing tenant/client),
+	// not from SPN validation (which would say "SPN authentication requires...").
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "SPN authentication requires")
 }
