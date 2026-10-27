@@ -116,7 +116,7 @@ internal/streamingnode/server/wal/interceptors/pkindex   the interceptor (a thin
         ▼
 internal/pkindex/dedup                                   the write path decision
         │ Decider: in-flight set (also the key lock), probe, pending writes of transactions
-        │ WriteIntent: the decision until Committed, Aborted or InDoubt
+        │ WriteIntent: the decision until Appended, NotAppended or InDoubt
         ▼
 internal/pkindex/engine                                  the storage behind it
                                                          (engine.RW: MultiGet, Write)
@@ -150,7 +150,7 @@ wal.Append(Insert pk=1,2)
        │    ├ Insert (copy) → timetick → shard → …                       tt=101
        │    ├ Delete(1)     → timetick → shard → …                       tt=102
        │    └ CommitTxn     → timetick → …                               tt=103
-       └ Committed: set tt=103 in the entry. Later writes of 1 and 2 stop waiting.
+       └ Appended: set tt=103 in the entry. Later writes of 1 and 2 stop waiting.
 client ◀ MessageID and TimeTick of the CommitTxn (tt=103)
 consumer: one Txn message at tt=103 with Insert and Delete. The row of key 1 is masked.
 observe: writes 1 and 2 into the engine at tt=103, then removes the entry.
@@ -200,7 +200,7 @@ result is used for the metrics only.
 ```
 Decide ✓ (entry registered ●) → BeginTxn ✓ → Insert ✓ → Delete ✗
 → the helper appends RollbackTxn
-→ Aborted: the transaction can not have committed, so the entry is removed ○
+→ NotAppended: the transaction can not have committed, so the entry is removed ○
 → client ◀ the error
 ```
 
@@ -386,7 +386,7 @@ holds no lock:
 ### Contract of the interceptor
 
 The interceptor calls `Decide`, the WAL append, then exactly one of
-`Committed`, `Aborted` and `InDoubt` on the returned `WriteIntent`. A panic in
+`Appended`, `NotAppended` and `InDoubt` on the returned `WriteIntent`. A panic in
 between ends the process, like every panic on the append path, so no decision
 is left unresolved in a live node.
 

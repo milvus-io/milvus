@@ -30,7 +30,7 @@ func (i *WriteIntent) LockWait() time.Duration {
 	return i.lockWait
 }
 
-func (i *WriteIntent) Committed(_ context.Context, tt uint64) {
+func (i *WriteIntent) Appended(_ context.Context, tt uint64) {
 	i.resolve()
 
 	switch {
@@ -73,7 +73,7 @@ func (i *WriteIntent) Committed(_ context.Context, tt uint64) {
 	}
 }
 
-func (i *WriteIntent) Aborted(_ context.Context, _ error) {
+func (i *WriteIntent) NotAppended(_ context.Context, _ error) {
 	i.resolve()
 	if i.write != nil {
 		i.d.inflight.abort(i.write)

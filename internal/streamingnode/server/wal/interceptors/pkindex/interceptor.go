@@ -168,13 +168,13 @@ func (i *appendInterceptor) appendInsert(ctx context.Context, t *target, msg mes
 			discard(ctx, intent, err, tt)
 			return id, err
 		}
-		intent.Committed(ctx, msg.TimeTick())
+		intent.Appended(ctx, msg.TimeTick())
 		return id, nil
 	}
 
 	companion, err := newCompanionDelete(msg.VChannel(), t, companionPKs)
 	if err != nil {
-		intent.Aborted(ctx, err)
+		intent.NotAppended(ctx, err)
 		return nil, status.NewInner("build the companion delete of the primary key index: %v", err)
 	}
 	// TODO: confirm with a test that the messages of the upgraded transaction go
@@ -189,7 +189,7 @@ func (i *appendInterceptor) appendInsert(ctx context.Context, t *target, msg mes
 	}
 	i.metrics.observeCompanionDelete(len(companionPKs))
 	// The insert and the companion delete take effect at the time tick of the CommitTxn.
-	intent.Committed(ctx, result.Commit.TimeTick())
+	intent.Appended(ctx, result.Commit.TimeTick())
 	return result.Commit.MessageID(), nil
 }
 
@@ -230,7 +230,7 @@ func (i *appendInterceptor) appendDelete(ctx context.Context, t *target, msg mes
 		discard(ctx, intent, err, tt)
 		return id, err
 	}
-	intent.Committed(ctx, msg.TimeTick())
+	intent.Appended(ctx, msg.TimeTick())
 	return id, nil
 }
 
@@ -256,7 +256,7 @@ func (i *appendInterceptor) appendCommit(ctx context.Context, t *target, msg mes
 	if len(companionPKs) > 0 {
 		companion, err := newCompanionDelete(msg.VChannel(), t, companionPKs)
 		if err != nil {
-			intent.Aborted(ctx, err)
+			intent.NotAppended(ctx, err)
 			return nil, status.NewInner("build the companion delete of the primary key index: %v", err)
 		}
 		extras = append(extras, companion)
@@ -267,7 +267,7 @@ func (i *appendInterceptor) appendCommit(ctx context.Context, t *target, msg mes
 		return nil, err
 	}
 	i.metrics.observeCompanionDelete(len(companionPKs))
-	intent.Committed(ctx, result.Commit.TimeTick())
+	intent.Appended(ctx, result.Commit.TimeTick())
 	return result.Commit.MessageID(), nil
 }
 
@@ -284,10 +284,10 @@ func (i *appendInterceptor) appendRollback(ctx context.Context, t *target, msg m
 	id, err := appendOp(ctx, msg)
 	if err != nil {
 		// A rollback registers no key, so there is nothing to keep.
-		intent.Aborted(ctx, err)
+		intent.NotAppended(ctx, err)
 		return id, err
 	}
-	intent.Committed(ctx, msg.TimeTick())
+	intent.Appended(ctx, msg.TimeTick())
 	return id, nil
 }
 
@@ -301,7 +301,7 @@ func discard(ctx context.Context, intent *dedup.WriteIntent, err error, tt uint6
 	// was written. The shard interceptor returns ErrRedo before anything is
 	// written, and AppendInTxn reports when its transaction can not have committed.
 	if tt == 0 || errors.Is(err, redo.ErrRedo) || txn.NotCommitted(err) {
-		intent.Aborted(ctx, err)
+		intent.NotAppended(ctx, err)
 		return
 	}
 	intent.InDoubt(ctx, err, tt)

@@ -131,9 +131,10 @@ func (d *decider) waitError(vchannel string) error {
 // every write up to tt to the engine. pks are the keys of the write at tt, none
 // for a TimeTick. It removes the committed entries of pks from the in-flight
 // set (rule A: the engine first, then the set), raises the observed time tick
-// and removes the in-doubt entries that it passed. The pchannel
-// calls it for every index when its driver wakes, so an idle vchannel sheds
-// them too.
+// and removes the in-doubt entries that it passed.
+//
+// TODO: the observe of the WAL recovery calls it for every applied write and
+// for every TimeTick. Nothing calls it yet.
 func (d *decider) Observe(tt uint64, pks []PK) {
 	d.inflight.observe(tt, pks)
 }
@@ -162,8 +163,8 @@ func (d *decider) decide(ctx context.Context, intent *WriteIntent) (*WriteIntent
 			// "Transaction Lifecycle", Commit): a producer appends the CommitTxn
 			// only after it received the results of all bodies, and one producer
 			// drives one transaction. So no body of the same transaction is
-			// applied between this snapshot and Committed of this WriteIntent.
-			// Committed ends the process when that rule is broken.
+			// applied between this snapshot and Appended of this WriteIntent.
+			// Appended ends the process when that rule is broken.
 			intent.txn = txn.snapshot()
 		}
 		d.pendingMu.Unlock()
@@ -174,7 +175,7 @@ func (d *decider) decide(ctx context.Context, intent *WriteIntent) (*WriteIntent
 			return nil, err
 		}
 		// pendingMu must be released before the wait: a body of another
-		// transaction takes pendingMu in Committed.
+		// transaction takes pendingMu in Appended.
 		if err := intent.acquire(ctx, intent.txn.allPKs()); err != nil {
 			return nil, err
 		}
