@@ -256,7 +256,7 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 		if err != nil {
 			return nil, err
 		}
-		return lance.NewReader(ctx, cm, schema, importFile.GetPaths()[0], bufferSize, ver)
+		return lance.NewReader(ctx, cm, schema, importFile.GetPaths()[0], ver, bufferSize)
 	}
 	return nil, merr.WrapErrImportFailed("unexpected import file")
 }
