@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/ce"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -111,30 +112,6 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 
-	// RLS property values are validated before looking up the collection.
-	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
-		DbName:         dbName,
-		CollectionName: collectionName,
-		Properties:     []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "invalid"}},
-	})
-	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
-
-	// rls.enabled delete key must use the exact property key casing.
-	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
-		DbName:         dbName,
-		CollectionName: collectionName,
-		DeleteKeys:     []string{"RLS.Enabled"},
-	})
-	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
-
-	// rls.force delete key must use the exact property key casing.
-	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
-		DbName:         dbName,
-		CollectionName: collectionName,
-		DeleteKeys:     []string{"RLS.Force"},
-	})
-	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
-
 	// Alter a database that does not exist should return error.
 	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
 		DbName:         dbName,
@@ -158,15 +135,6 @@ func TestDDLCallbacksAlterCollectionProperties(t *testing.T) {
 	// atler a property of a collection.
 	createCollectionAndAliasForTest(t, ctx, core, dbName, collectionName)
 	assertReplicaNumber(t, ctx, core, dbName, collectionName, 1)
-
-	// Existing collections can enable RLS through the normal property path.
-	resp, err = core.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
-		DbName:         dbName,
-		CollectionName: collectionName,
-		Properties:     []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
-	})
-	alterErr := merr.CheckRPCCall(resp, err)
-	require.NoError(t, alterErr)
 
 	for _, tc := range []struct {
 		name       string
@@ -461,12 +429,15 @@ func TestDDLCallbacksAlterCollectionV2AckCallback_StopRetryOnResourceGroupNotFou
 
 	raw := message.NewAlterCollectionMessageBuilderV2().
 		WithHeader(&messagespb.AlterCollectionMessageHeader{
-			CollectionId:     1,
-			CacheExpirations: newRLSCacheExpirations("db", "coll", 1, commonpb.MsgType_AlterCollection),
+			CollectionId: 1,
+			CacheExpirations: ce.NewBuilder().WithLegacyProxyCollectionMetaCache(
+				ce.OptLPCMDBName("db"), ce.OptLPCMCollectionName("coll"),
+				ce.OptLPCMCollectionID(1), ce.OptLPCMMsgType(commonpb.MsgType_AlterCollection),
+			).Build(),
 		}).
 		WithBody(&messagespb.AlterCollectionMessageBody{
 			Updates: &messagespb.AlterCollectionMessageUpdates{
-				Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
+				Properties: []*commonpb.KeyValuePair{{Key: common.CollectionReplicaNumber, Value: "1"}},
 				AlterLoadConfig: &messagespb.AlterLoadConfigOfAlterCollection{
 					ReplicaNumber:  1,
 					ResourceGroups: []string{"rg_not_exist"},

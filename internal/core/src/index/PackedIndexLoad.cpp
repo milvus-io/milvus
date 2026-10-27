@@ -15,6 +15,8 @@
 // limitations under the License.
 
 #include "index/PackedIndexLoad.h"
+
+#include <cstdlib>
 #include "folly/ScopeGuard.h"
 
 #include <cstring>
@@ -48,11 +50,14 @@ FinishPackedLoad(PackedFinishFn finish,
 }
 
 // Read only directory/metadata for family selection; the caller owns the blocking boundary.
-folly::coro::Task<std::unique_ptr<storage::AsyncIndexEntryReader>>
+folly::coro::Task<PackedIndexSource>
 InspectPackedScalarIndex(const std::vector<std::string>& files,
                          const storage::FileManagerContext& context,
                          storage::ArtifactStorageNamespace storage_namespace,
-                         bool use_async_load) {
+                         bool use_async_load,
+                         proto::common::LoadPriority priority,
+                         folly::CancellationToken token) {
+    storage::ThrowIfCancelled(token, "inspect packed index metadata");
     AssertInfo(files.size() == 1 && context.Valid(),
                "Async scalar load requires one V3 file and a valid context");
     storage::MemFileManagerImpl manager(context);
@@ -60,44 +65,63 @@ InspectPackedScalarIndex(const std::vector<std::string>& files,
         storage_namespace == storage::ArtifactStorageNamespace::Index;
     std::shared_ptr<InputStream> input;
     if (use_async_load) {
+        auto metadata_lease =
+            co_await storage::AcquireMetadataLoadSlotAsync(priority, token);
+        storage::ThrowIfCancelled(token, "open packed index metadata");
         input = co_await folly::coro::co_withCancellation(
             folly::CancellationToken{},
             manager.OpenInputStreamAsync(files.front(), is_index_file));
     } else {
         input = manager.OpenInputStream(files.front(), is_index_file);
     }
+    storage::ThrowIfCancelled(token, "open packed index metadata");
     AssertInfo(input != nullptr, "Failed to open packed scalar index");
-    co_return co_await storage::AsyncIndexEntryReader::Open(
-        std::move(input),
-        context.fieldDataMeta.collection_id,
-        proto::common::LoadPriority::HIGH,
-        {});
+    if (!use_async_load) {
+        co_return PackedIndexSource{std::shared_ptr<storage::IndexEntryReader>(
+            storage::IndexEntryReader::Open(input,
+                                            input->Size(),
+                                            context.fieldDataMeta.collection_id,
+                                            milvus::PriorityForLoad(priority),
+                                            token))};
+    }
+    auto reader = co_await storage::AsyncIndexEntryReader::Open(
+        std::move(input), context.fieldDataMeta.collection_id, priority, token);
+    co_return PackedIndexSource{
+        std::shared_ptr<storage::AsyncIndexEntryReader>(std::move(reader))};
 }
 
 }  // namespace
 
-std::unique_ptr<storage::AsyncIndexEntryReader>
+PackedIndexSource
 InspectPackedIndexFile(const std::vector<std::string>& files,
                        const storage::FileManagerContext& context,
-                       storage::ArtifactStorageNamespace storage_namespace) {
+                       storage::ArtifactStorageNamespace storage_namespace,
+                       milvus::OpContext* op_ctx) {
     const bool use_async = context.use_async_load.value_or(
         segcore::storagev2translator::StorageV2AsyncLoadEnabled());
-    auto task =
-        InspectPackedScalarIndex(files, context, storage_namespace, use_async);
+    const auto priority =
+        op_ctx && op_ctx->runtime_load_priority.value_or(0) != 0
+            ? proto::common::LoadPriority::LOW
+            : proto::common::LoadPriority::HIGH;
+    auto task = InspectPackedScalarIndex(
+        files,
+        context,
+        storage_namespace,
+        use_async,
+        priority,
+        op_ctx ? op_ctx->cancellation_token : folly::CancellationToken{});
     return use_async ? folly::coro::blockingWait(folly::coro::co_withExecutor(
-                           storage::ResolveAsyncLoadExecutor(
-                               {}, proto::common::LoadPriority::HIGH),
+                           storage::ResolveAsyncLoadExecutor({}, priority),
                            std::move(task)))
                      : folly::coro::blockingWait(std::move(task));
 }
 
 folly::coro::Task<IIndexReaderBasePtr>
 RunPackedIndexLoad(PackedIndexSource& source,
-                   const storage::LoadOptions& fixed_options,
+                   storage::LoadOptions options,
                    PackedPlanFn make_plan,
                    PackedFinishFn finish,
                    milvus::OpContext* context) {
-    auto options = fixed_options;
     options.op_ctx = context;
     const auto priority =
         context && context->runtime_load_priority.value_or(0) != 0
@@ -110,8 +134,8 @@ RunPackedIndexLoad(PackedIndexSource& source,
     if (const auto* sync =
             std::get_if<std::shared_ptr<storage::IndexEntryReader>>(
                 &source.reader)) {
-        // Keep planning, streaming and finalization on the synchronous caller;
-        // the Task interface alone must not introduce an executor hop.
+        // Keep planning and finalization on the synchronous caller. Stream
+        // tasks consume their slices on the existing HIGH/LOW executor.
         auto& entry_reader = **sync;
         entry_reader.SetLoadContext(
             priority == proto::common::LoadPriority::HIGH
@@ -134,29 +158,93 @@ RunPackedIndexLoad(PackedIndexSource& source,
             AssertInfo(expected <= storage::EntryTargetSize(entry.target),
                        "packed entry exceeds planned destination: {}",
                        entry.name);
-            size_t offset = 0;
-            entry_reader.ReadEntryStream(
-                entry.name, [&](const uint8_t* bytes, size_t size) {
-                    storage::ThrowIfCancelled(token, "read packed index");
-                    AssertInfo(offset <= expected && size <= expected - offset,
-                               "packed entry exceeds declared size: {}",
-                               entry.name);
-                    if (const auto* memory =
-                            std::get_if<storage::MemoryEntryTarget>(
-                                &entry.target)) {
-                        if (size != 0) {
-                            std::memcpy(memory->data + offset, bytes, size);
-                        }
-                    } else {
-                        const auto& file =
-                            std::get<storage::FileEntryTarget>(entry.target);
-                        file.staging->WriteAt(
-                            file.offset + offset, bytes, size);
+            auto write = [&](size_t offset, const uint8_t* bytes, size_t size) {
+                storage::ThrowIfCancelled(token, "read packed index");
+                AssertInfo(offset <= expected && size <= expected - offset,
+                           "packed entry exceeds declared size: {}",
+                           entry.name);
+                if (const auto* memory =
+                        std::get_if<storage::MemoryEntryTarget>(
+                            &entry.target)) {
+                    if (size != 0) {
+                        std::memcpy(memory->data + offset, bytes, size);
                     }
-                    offset += size;
-                });
-            AssertInfo(
-                offset == expected, "short packed entry: {}", entry.name);
+                } else {
+                    const auto& file =
+                        std::get<storage::FileEntryTarget>(entry.target);
+                    AssertInfo(
+                        file.offset <= file.staging->file_size &&
+                            offset <= file.staging->file_size - file.offset &&
+                            size <=
+                                file.staging->file_size - file.offset - offset,
+                        "packed file target exceeds file size: {}",
+                        entry.name);
+                    const auto absolute = file.offset + offset;
+                    const auto full_padding =
+                        (-size) & storage::FileWriter::ALIGNMENT_MASK;
+                    const auto padding =
+                        std::min(full_padding,
+                                 file.staging->file_size - absolute - size);
+                    if (plan.worker_writes && padding != 0 &&
+                        absolute + size != file.staging->file_size &&
+                        file.staging->write_mode !=
+                            storage::FileWriter::WriteMode::BUFFERED) {
+                        // Match the async plan's per-entry alignment region.
+                        // Aligned scratch avoids another bounce buffer in WriteAt.
+                        AssertInfo(offset <= file.bytes &&
+                                       size <= file.bytes - offset &&
+                                       padding <= file.bytes - offset - size &&
+                                       padding <= file.staging->file_size -
+                                                      absolute - size,
+                                   "packed entry lacks alignment padding: {}",
+                                   entry.name);
+                        if (padding != full_padding) {
+                            // Some plans reserve only a small EOF safety pad
+                            // (FM-index), not a complete aligned block. Write
+                            // the aligned prefix first, then a small EOF tail;
+                            // do not retain two whole-slice bounce buffers.
+                            const auto prefix =
+                                size & ~storage::FileWriter::ALIGNMENT_MASK;
+                            if (prefix != 0) {
+                                file.staging->WriteAt(absolute, bytes, prefix);
+                            }
+                            std::vector<uint8_t> tail(size - prefix + padding,
+                                                      0);
+                            std::memcpy(
+                                tail.data(), bytes + prefix, size - prefix);
+                            file.staging->WriteAt(
+                                absolute + prefix, tail.data(), tail.size());
+                            return;
+                        }
+                        auto* padded = static_cast<uint8_t*>(std::aligned_alloc(
+                            storage::FileWriter::ALIGNMENT_BYTES,
+                            size + padding));
+                        if (padded == nullptr) {
+                            ThrowInfo(ErrorCode::MemAllocateFailed,
+                                      "cannot allocate aligned packed slice");
+                        }
+                        auto release =
+                            folly::makeGuard([&] { std::free(padded); });
+                        std::memcpy(padded, bytes, size);
+                        std::memset(padded + size, 0, padding);
+                        file.staging->WriteAt(absolute, padded, size + padding);
+                    } else {
+                        file.staging->WriteAt(absolute, bytes, size);
+                    }
+                }
+            };
+            if (plan.worker_writes) {
+                entry_reader.ReadEntryStreamAt(entry.name, write);
+            } else {
+                size_t offset = 0;
+                entry_reader.ReadEntryStream(
+                    entry.name, [&](const uint8_t* bytes, size_t size) {
+                        write(offset, bytes, size);
+                        offset += size;
+                    });
+                AssertInfo(
+                    offset == expected, "short packed entry: {}", entry.name);
+            }
         }
         for (const auto& file : files) {
             file->Finish();

@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -76,7 +77,7 @@ func (s *CopySegmentCheckerSuite) SetupTest() {
 	s.broker = broker.NewMockBroker(s.T())
 	s.broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
-	s.meta, err = newMeta(context.TODO(), s.catalog, nil, s.broker)
+	s.meta, err = newMeta(context.TODO(), s.catalog, nil, metacache.NewMetaStore(s.catalog), s.broker)
 	s.NoError(err)
 	s.meta.AddCollection(&collectionInfo{
 		ID:     s.collectionID,
@@ -780,6 +781,11 @@ func (s *CopySegmentCheckerSuite) TestClose() {
 }
 
 func (s *CopySegmentCheckerSuite) TestFinishJob_UpdateSegmentStates() {
+	drainBuildIndexChForTest()
+	defer drainBuildIndexChForTest()
+	drainStatsBuildChForTest()
+	defer drainStatsBuildChForTest()
+
 	s.catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Times(2)
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
 	s.catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
@@ -837,6 +843,10 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_UpdateSegmentStates() {
 	// Target segment should be in Flushed state
 	segment := s.meta.GetSegment(context.TODO(), 101)
 	s.Equal(commonpb.SegmentState_Flushed, segment.GetState())
+	// and enqueued for index building and stats discovery.
+	assertBuildIndexEvents(s.T(), 101)
+	assertNoBuildIndexEvent(s.T())
+	s.Equal([]UniqueID{101}, drainStatsBuildChForTest())
 
 	// Job should be completed
 	updatedJob := s.copyMeta.GetJob(context.TODO(), s.jobID)

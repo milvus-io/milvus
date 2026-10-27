@@ -40,6 +40,7 @@ import (
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -212,6 +213,35 @@ func createTestSnapshotData() *snapshotstorage.SnapshotData {
 	}
 }
 
+func TestSnapshotCommitTimestampRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	for _, commit := range []uint64{0, 300} {
+		for _, layout := range []datapb.SnapshotLayout{datapb.SnapshotLayout_SnapshotLayoutReferenced, datapb.SnapshotLayout_SnapshotLayoutSelfContained} {
+			t.Run(fmt.Sprintf("%s/%d", layout, commit), func(t *testing.T) {
+				root := t.TempDir()
+				cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+				data := &snapshotstorage.SnapshotData{
+					SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 2},
+					Collection:   &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{Name: "source"}, Partitions: map[string]int64{"default": 10}},
+					Segments: []*datapb.SegmentDescription{
+						{SegmentId: 20, PartitionId: 10, SegmentLevel: datapb.SegmentLevel_L1, CommitTimestamp: commit},
+						{SegmentId: 30, PartitionId: common.AllPartitionsID, SegmentLevel: datapb.SegmentLevel_L0},
+					},
+				}
+				uri, _, err := snapshotstorage.NewSnapshotWriter(cm).SaveToRootWithSize(ctx, data, root, layout)
+				require.NoError(t, err)
+				read, err := snapshotstorage.NewSnapshotReader(cm).ReadSnapshot(ctx, uri, true)
+				require.NoError(t, err)
+				commits := make(map[int64]uint64)
+				for _, segment := range read.Segments {
+					commits[segment.SegmentId] = segment.CommitTimestamp
+				}
+				require.Equal(t, map[int64]uint64{20: commit, 30: 0}, commits)
+			})
+		}
+	}
+}
+
 func readManifestFileForTest(t *testing.T, cm storage.ChunkManager, manifestPath string, formatVersion int) []*datapb.SegmentDescription {
 	t.Helper()
 	data, err := cm.Read(context.Background(), snapshotstorage.NormalizeSnapshotObjectPath(manifestPath))
@@ -225,7 +255,7 @@ func readSnapshotMetadataForTest(t *testing.T, cm storage.ChunkManager, metadata
 	t.Helper()
 	data, err := cm.Read(context.Background(), snapshotstorage.NormalizeSnapshotObjectPath(metadataPath))
 	require.NoError(t, err)
-	metadata, err := snapshotio.ParseSnapshotMetadataWithVersionCheck(data)
+	metadata, err := snapshotio.ParseSnapshotMetadata(data)
 	require.NoError(t, err)
 	return metadata
 }
@@ -336,6 +366,14 @@ func TestSnapshotWriter_Save_RealAvro(t *testing.T) {
 		writeCallCount++
 		// Verify that written content is not empty mock data
 		assert.NotEmpty(t, content)
+		if path.Ext(filePath) == ".json" {
+			metadata, err := snapshotio.ParseSnapshotMetadata(content)
+			require.NoError(t, err)
+			assert.Equal(t, int32(6), metadata.GetFormatVersion())
+		} else {
+			_, err := snapshotio.ParseSegmentManifest(content, 6)
+			require.NoError(t, err)
+		}
 		return nil
 	}).Build()
 	defer mockWrite.UnPatch()
@@ -655,7 +693,7 @@ func TestSnapshotReader_ReadSnapshot_Success(t *testing.T) {
 	}
 
 	// Pre-generate valid Avro data for manifest using the real schema (single record)
-	manifestSchema, _ := snapshotio.ManifestSchema()
+	manifestSchema, _ := snapshotio.ManifestSchemaByVersion(0)
 	validManifestData, _ := avro.Marshal(manifestSchema, manifestEntry)
 
 	metadataFilePath := "snapshots/100/metadata/00001-uuid.json"
@@ -832,6 +870,22 @@ func TestSnapshotReader_ReadSnapshot_RejectsSensitivePathInReferencedManifest(t 
 	assert.True(t, errors.Is(err, merr.ErrDataIntegrity))
 	assert.NotContains(t, err.Error(), "TOPSECRET")
 	assert.NotContains(t, err.Error(), "X-Amz-Signature")
+}
+
+func TestSnapshotReader_CapturedMetadataErrors(t *testing.T) {
+	reader := snapshotstorage.NewSnapshotReader(nil)
+	ctx := context.Background()
+	_, err := reader.ReadMetadata(ctx, "s3://user:secret@source/key")
+	require.Error(t, err)
+	for _, metadata := range []*datapb.SnapshotMetadata{
+		nil,
+		{},
+		{SnapshotInfo: &datapb.SnapshotInfo{}},
+		{SnapshotInfo: &datapb.SnapshotInfo{}, Collection: &datapb.CollectionDescription{}, ManifestList: []string{"s3://user:secret@source/key"}},
+	} {
+		_, err := reader.ReadSnapshotFromMetadata(ctx, "root/snapshots/1/metadata/2.json", metadata, false)
+		require.Error(t, err)
+	}
 }
 
 func TestSnapshotReader_ReadSnapshot_EmptyPath(t *testing.T) {
@@ -1531,6 +1585,14 @@ func TestListSnapshotDataFiles_StorageV3IncludesManifestRootObjectsAndLobs(t *te
 	require.NoError(t, cm.Write(ctx, pathlessDeltaPath, []byte("pathless delta")))
 	siblingPath := basePath + "0/manifest"
 	require.NoError(t, cm.Write(ctx, siblingPath, []byte("sibling")))
+	indexPath := path.Join(basePath, "_index/7001/2/index")
+	obsoleteAttemptPath := path.Join(basePath, "_index/7001/1/index")
+	unpinnedIndexPath := path.Join(basePath, "_index/7004/1/index")
+	legacyIndexPath := path.Join(tempDir, "files/index_files/7005/1/20/1001/index")
+	similarPrefixPath := path.Join(basePath, "_index_extra/data")
+	for _, file := range []string{indexPath, obsoleteAttemptPath, unpinnedIndexPath, legacyIndexPath, similarPrefixPath} {
+		require.NoError(t, cm.Write(ctx, file, []byte("index")))
+	}
 
 	snapshot := createTestSnapshotData()
 	segment := snapshot.Segments[0]
@@ -1566,7 +1628,10 @@ func TestListSnapshotDataFiles_StorageV3IncludesManifestRootObjectsAndLobs(t *te
 		},
 	}}
 	segment.Bm25Statslogs = nil
-	segment.IndexFiles = nil
+	segment.IndexFiles = []*indexpb.IndexFilePathInfo{
+		{BuildID: 7001, IndexFilePaths: []string{indexPath}},
+		{BuildID: 7005, IndexFilePaths: []string{legacyIndexPath}},
+	}
 
 	foreignStorageConfig := &indexpb.StorageConfig{
 		BucketName: "foreign-bucket",
@@ -1607,7 +1672,18 @@ func TestListSnapshotDataFiles_StorageV3IncludesManifestRootObjectsAndLobs(t *te
 	assert.NotContains(t, byPath, siblingPath)
 	assert.Contains(t, byPath, deltaPath)
 	assert.Contains(t, byPath, pathlessDeltaPath)
-	assert.Len(t, byPath, 6)
+	assert.Equal(t, snapshotstorage.SnapshotFileTypeIndexFile, byPath[indexPath].Type)
+	assert.Equal(t, snapshotstorage.SnapshotFileTypeIndexFile, byPath[legacyIndexPath].Type)
+	assert.NotContains(t, byPath, obsoleteAttemptPath)
+	assert.NotContains(t, byPath, unpinnedIndexPath)
+	assert.Contains(t, byPath, similarPrefixPath)
+	assert.Len(t, byPath, 9)
+
+	// GC of an unreferenced build must not change the export input on recovery.
+	require.NoError(t, cm.Remove(ctx, unpinnedIndexPath))
+	refsAfterGC, err := snapshotstorage.ListSnapshotDataFiles(ctx, cm, snapshot, foreignStorageConfig)
+	require.NoError(t, err)
+	assert.Equal(t, refs, refsAfterGC)
 
 	// Rewriting keeps the pathless summary pathless instead of failing on a
 	// missing mapping for "".
@@ -1624,6 +1700,8 @@ func TestListSnapshotDataFiles_StorageV3IncludesManifestRootObjectsAndLobs(t *te
 		"s3://bucket/bundle/snapshots/100/metadata/1.json",
 	)
 	require.NoError(t, err)
+	assert.Equal(t, mappings[indexPath], rewritten.Segments[0].GetIndexFiles()[0].GetIndexFilePaths()[0])
+	assert.Equal(t, mappings[legacyIndexPath], rewritten.Segments[0].GetIndexFiles()[1].GetIndexFilePaths()[0])
 	assert.Equal(t, mappings[deltaPath], rewritten.Segments[0].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
 	assert.Empty(t, rewritten.Segments[0].GetDeltalogs()[0].GetBinlogs()[1].GetLogPath())
 	assert.Equal(t, int64(8), rewritten.Segments[0].GetDeltalogs()[0].GetBinlogs()[1].GetLogID())
@@ -2648,10 +2726,7 @@ func TestSnapshotReader_ReadSnapshot_RebasesRelocatedSelfContainedBundleBeforeMa
 		StorageVersion:    2,
 		CommitTimestamp:   10,
 	}
-	manifestEntry := snapshotio.SegmentToManifestEntry(segment)
-	manifestSchema, err := snapshotio.ManifestSchemaByVersion(snapshotio.SnapshotFormatVersion)
-	require.NoError(t, err)
-	manifestBytes, err := avro.Marshal(manifestSchema, manifestEntry)
+	manifestBytes, err := snapshotio.MarshalSegmentManifest(segment)
 	require.NoError(t, err)
 
 	readPaths := make([]string, 0, 2)
@@ -2678,6 +2753,26 @@ func TestSnapshotReader_ReadSnapshot_RebasesRelocatedSelfContainedBundleBeforeMa
 	assert.Equal(t, newBinlogPath, got.Segments[0].GetBinlogs()[0].GetBinlogs()[0].GetLogPath())
 	assert.Contains(t, readPaths, newManifestPath)
 	assert.NotContains(t, readPaths, oldManifestPath)
+	// Capturing metadata and retrying preparation must not mutate its original
+	// root or reopen the top-level object after Create has returned.
+	frozen := proto.Clone(metadata).(*datapb.SnapshotMetadata)
+	readPaths = nil
+	for attempt := 0; attempt < 2; attempt++ {
+		got, err = reader.ReadSnapshotFromMetadata(ctx, newMetadataPath, metadata, true)
+		require.NoError(t, err)
+		require.Equal(t, newBinlogPath, got.Segments[0].GetBinlogs()[0].GetBinlogs()[0].GetLogPath())
+		require.True(t, proto.Equal(frozen, metadata))
+	}
+	require.Equal(t, []string{newManifestPath, newManifestPath}, readPaths)
+	rebaseMetadata := mockey.Mock(snapshotstorage.RebaseSelfContainedSnapshotMetadata).Return(merr.ErrIoFailed).Build()
+	defer rebaseMetadata.UnPatch()
+	_, err = reader.ReadSnapshotFromMetadata(ctx, newMetadataPath, metadata, true)
+	require.ErrorIs(t, err, merr.ErrIoFailed)
+	rebaseMetadata.UnPatch()
+	rebaseData := mockey.Mock(snapshotstorage.RebaseSelfContainedSnapshotData).Return(merr.ErrIoFailed).Build()
+	defer rebaseData.UnPatch()
+	_, err = reader.ReadSnapshotFromMetadata(ctx, newMetadataPath, metadata, true)
+	require.ErrorIs(t, err, merr.ErrIoFailed)
 }
 
 func TestSnapshotReader_ReadSnapshot_AcceptsSelfContainedBundleAtBucketRoot(t *testing.T) {
@@ -2795,10 +2890,6 @@ func TestSnapshotReader_ReadSnapshot_ClassifiesPermanentMetadataErrorsAsDataInte
 		{
 			name: "invalid json",
 			data: []byte("{"),
-		},
-		{
-			name: "unsupported format version",
-			data: []byte(`{"format_version":999}`),
 		},
 	}
 
@@ -3241,10 +3332,7 @@ func TestSnapshotReader_ReadSnapshot_RebasesStorageV2ManifestListBeforeFillingSe
 		StorageVersion:    2,
 		CommitTimestamp:   10,
 	}
-	manifestEntry := snapshotio.SegmentToManifestEntry(segment)
-	manifestSchema, err := snapshotio.ManifestSchemaByVersion(snapshotio.SnapshotFormatVersion)
-	require.NoError(t, err)
-	manifestBytes, err := avro.Marshal(manifestSchema, manifestEntry)
+	manifestBytes, err := snapshotio.MarshalSegmentManifest(segment)
 	require.NoError(t, err)
 
 	mockRead := mockey.Mock((*storage.LocalChunkManager).Read).To(func(ctx context.Context, filePath string) ([]byte, error) {
@@ -3334,10 +3422,9 @@ func TestValidateFormatVersion(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:        "version_100_future",
-			version:     100,
-			wantErr:     true,
-			errContains: "too new",
+			name:    "version_100_future",
+			version: 100,
+			wantErr: false,
 		},
 	}
 
@@ -3483,7 +3570,7 @@ func TestSnapshotReader_ReadSnapshot_LegacyVersion(t *testing.T) {
 }
 
 func TestSnapshotReader_ReadSnapshot_FutureVersion(t *testing.T) {
-	// Test that reading a snapshot with future version fails
+	// A future writer version alone does not prevent metadata reading.
 	tempDir := t.TempDir()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
 	reader := snapshotstorage.NewSnapshotReader(cm)
@@ -3511,7 +3598,32 @@ func TestSnapshotReader_ReadSnapshot_FutureVersion(t *testing.T) {
 	}).Build()
 	defer mockRead.UnPatch()
 
-	_, err := reader.ReadSnapshot(context.Background(), metadataFilePath, false)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "too new")
+	snapshot, err := reader.ReadSnapshot(context.Background(), metadataFilePath, false)
+	require.NoError(t, err)
+	assert.Equal(t, "future_snapshot", snapshot.SnapshotInfo.GetName())
+}
+
+func TestSnapshotReader_FutureManifest(t *testing.T) {
+	root := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	ctx := context.Background()
+	metadataPath := path.Join(root, "metadata.json")
+	manifestPath := path.Join(root, "segment.avro")
+	metadata := &datapb.SnapshotMetadata{
+		FormatVersion: 7,
+		SnapshotInfo:  &datapb.SnapshotInfo{Id: 1, CollectionId: 10, Name: "future", S3Location: metadataPath},
+		Collection:    &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{Name: "source"}},
+		ManifestList:  []string{manifestPath},
+		SegmentIds:    []int64{123},
+	}
+	data, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(metadata)
+	require.NoError(t, err)
+	require.NoError(t, cm.Write(ctx, metadataPath, data))
+	data, err = snapshotio.MarshalSegmentManifest(&datapb.SegmentDescription{SegmentId: 123})
+	require.NoError(t, err)
+	require.NoError(t, cm.Write(ctx, manifestPath, data))
+	snapshot, err := snapshotstorage.NewSnapshotReader(cm).ReadSnapshot(ctx, metadataPath, true)
+	require.NoError(t, err)
+	require.Len(t, snapshot.Segments, 1)
+	assert.Equal(t, int64(123), snapshot.Segments[0].GetSegmentId())
 }

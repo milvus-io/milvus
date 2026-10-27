@@ -6,7 +6,7 @@ use std::io::BufRead;
 
 pub fn get_string_list(value: &json::Value, label: &str) -> Result<Vec<String>> {
     if !value.is_array() {
-        return Err(TantivyBindingError::InternalError(
+        return Err(TantivyBindingError::InvalidArgument(
             format!("{} should be array", label).to_string(),
         ));
     }
@@ -17,7 +17,7 @@ pub fn get_string_list(value: &json::Value, label: &str) -> Result<Vec<String>> 
         match element.as_str() {
             Some(word) => str_list.push(word.to_string()),
             _ => {
-                return Err(TantivyBindingError::InternalError(
+                return Err(TantivyBindingError::InvalidArgument(
                     format!("{} list item should be string", label).to_string(),
                 ))
             }

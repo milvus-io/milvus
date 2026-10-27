@@ -294,7 +294,7 @@ func (t *clusteringCompactionTask) init() error {
 	t.logIDAlloc = logIDAlloc
 	t.segIDAlloc = segIDAlloc
 
-	var pkField *schemapb.FieldSchema
+	var pkField, clusteringKeyField *schemapb.FieldSchema
 	if t.plan.Schema == nil {
 		return merr.WrapErrIllegalCompactionPlan("empty schema in compactionPlan")
 	}
@@ -303,8 +303,16 @@ func (t *clusteringCompactionTask) init() error {
 			pkField = field
 		}
 		if field.GetFieldID() == t.plan.GetClusteringKeyField() {
-			t.clusteringKeyField = field
+			clusteringKeyField = field
 		}
+	}
+	// Required fields are an internal plan contract, so missing fields use
+	// ServiceInternal. The nil-schema check retains its legacy error code.
+	if pkField == nil {
+		return merr.WrapErrServiceInternalMsg("no primary key field found")
+	}
+	if clusteringKeyField == nil {
+		return merr.WrapErrServiceInternalMsg("clustering key field %d not found in compaction schema", t.plan.GetClusteringKeyField())
 	}
 
 	for _, function := range t.plan.Schema.Functions {
@@ -314,6 +322,7 @@ func (t *clusteringCompactionTask) init() error {
 	}
 
 	t.primaryKeyField = pkField
+	t.clusteringKeyField = clusteringKeyField
 	t.ttlFieldID = getTTLFieldID(t.plan.GetSchema())
 	t.isVectorClusteringKey = typeutil.IsVectorType(t.clusteringKeyField.DataType)
 	t.currentTime = time.Now()
@@ -718,11 +727,21 @@ func (t *clusteringCompactionTask) mappingSegment(
 			return err
 		}
 
-		pkColumn := r.Column(t.primaryKeyField.GetFieldID())
+		// clusteringScalarValue checks nil columns for PK, TTL, and scalar
+		// clustering keys; their lookup booleans are intentionally ignored.
+		// Timestamp is read directly, so validate its presence and type here.
+		pkColumn, _ := storage.TryRecordColumn(r, t.primaryKeyField.GetFieldID())
 		ts, exists := storage.TryRecordColumn(r, common.TimeStampField)
 		tsColumn, ok := ts.(*array.Int64)
 		if !exists || !ok {
 			return merr.WrapErrServiceInternalMsg("timestamp field is not an int64 column in clustering compaction record")
+		}
+		var ttlColumn, clusteringKeyColumn arrow.Array
+		if hasTTLField {
+			ttlColumn, _ = storage.TryRecordColumn(r, t.ttlFieldID)
+		}
+		if !t.isVectorClusteringKey {
+			clusteringKeyColumn, _ = storage.TryRecordColumn(r, t.clusteringKeyField.GetFieldID())
 		}
 		for row := 0; row < r.Len(); row++ {
 			select {
@@ -737,7 +756,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 			}
 			expireTs := int64(-1)
 			if hasTTLField {
-				value, err := clusteringScalarValue(r.Column(t.ttlFieldID), ttlField, row)
+				value, err := clusteringScalarValue(ttlColumn, ttlField, row)
 				if err != nil {
 					return err
 				}
@@ -753,7 +772,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 			if t.isVectorClusteringKey {
 				clusterBuffer = t.offsetToBufferFunc(offset, mappingStats.GetCentroidIdMapping())
 			} else {
-				key, err := clusteringScalarValue(r.Column(t.clusteringKeyField.FieldID), t.clusteringKeyField, row)
+				key, err := clusteringScalarValue(clusteringKeyColumn, t.clusteringKeyField, row)
 				if err != nil {
 					return err
 				}
@@ -798,6 +817,9 @@ func (t *clusteringCompactionTask) mappingSegment(
 // clusteringScalarValue reads only the routing/filter columns. Keep null and
 // default-value semantics consistent with the scalar analysis deserializer.
 func clusteringScalarValue(column arrow.Array, field *schemapb.FieldSchema, row int) (any, error) {
+	if column == nil {
+		return nil, merr.WrapErrServiceInternalMsg("missing required column for field %d in clustering compaction", field.GetFieldID())
+	}
 	if column.IsNull(row) {
 		if field.GetDefaultValue() != nil {
 			return storage.GetDefaultValue(field), nil
@@ -1034,6 +1056,11 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	}
 
 	pkIter := storage.NewDeserializeReader(rr, func(r storage.Record, v []*storage.Value) error {
+		for _, field := range selectedFields {
+			if column, ok := storage.TryRecordColumn(r, field.GetFieldID()); !ok || column == nil {
+				return merr.WrapErrServiceInternalMsg("missing clustering analyze column for field %d", field.GetFieldID())
+			}
+		}
 		return storage.ValueDeserializerWithSelectedFields(r, v, selectedFields, true)
 	})
 	defer pkIter.Close()

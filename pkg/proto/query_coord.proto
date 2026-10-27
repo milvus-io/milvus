@@ -5,6 +5,7 @@ package milvus.proto.query;
 option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/querypb";
 
 import "common.proto";
+import "messages.proto";
 import "milvus.proto";
 import "rg.proto";
 import "internal.proto";
@@ -14,6 +15,7 @@ import "data_coord.proto";
 import "index_coord.proto";
 
 service QueryCoord {
+    rpc GetQueryViewLoadInfo(GetQueryViewLoadInfoRequest) returns (GetQueryViewLoadInfoResponse) {}
     rpc ShowLoadCollections(ShowCollectionsRequest)
         returns (ShowCollectionsResponse) {
     }
@@ -160,6 +162,9 @@ service QueryNode {
     // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
     rpc GetMetrics(milvus.GetMetricsRequest)
         returns (milvus.GetMetricsResponse) {
+    }
+    rpc GetFeatureUsage(internal.GetFeatureUsageRequest)
+        returns (internal.GetFeatureUsageResponse) {
     }
 
     rpc GetDataDistribution(GetDataDistributionRequest)
@@ -373,6 +378,10 @@ message SyncNewCreatedPartitionRequest {
     common.MsgBase base = 1;
     int64 collectionID = 2;
     int64 partitionID = 3;
+    // When true, the request returns after the partition joins the load meta
+    // and its target update is triggered, without waiting until the partition
+    // is queryable.
+    bool skip_wait_ready = 4;
 }
 
 // -----------------query node grpc request and response proto----------------
@@ -788,6 +797,7 @@ message CollectionLoadInfo {
     repeated int64 load_fields = 8;
     int64 dbID= 9;
     bool user_specified_replica_mode = 10;
+    repeated messages.LoadFieldConfig required_fields = 11; // Materialized internal scope; empty only in legacy persisted records.
 }
 
 message PartitionLoadInfo {
@@ -1193,4 +1203,21 @@ message ListLoadedSegmentsRequest {
 message ListLoadedSegmentsResponse {
     common.Status status = 1;
     repeated int64 segmentIDs = 2;
+}
+
+
+message GetQueryViewLoadInfoRequest {
+    common.MsgBase base = 1;
+    int64 collectionID = 2;
+    uint64 version = 3;
+}
+
+message GetQueryViewLoadInfoResponse {
+    common.Status status = 1;
+    int64 collectionID = 2;
+    uint64 version = 3;
+    repeated int64 partitionIDs = 4;
+    repeated messages.LoadFieldConfig load_fields = 5;
+    repeated index.IndexInfo index_info_list = 6;
+    repeated messages.LoadFieldConfig required_fields = 7;
 }

@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -53,8 +52,6 @@ type ImportTask struct {
 	partitionIDs []int64
 	collectionID UniqueID
 	schema       *schemaInfo
-	rlsPrincipal string
-	skipRLS      bool // set only after the request-scoped bypass is authorized
 	resp         *internalpb.ImportResponse
 }
 
@@ -104,11 +101,10 @@ func (it *ImportTask) PreExecute(ctx context.Context) error {
 	if err := importutilv2.ValidateNoDuplicateKeys(req.GetOptions()); err != nil {
 		return err
 	}
-	rlsPrincipal, requestedSkipRLS, err := importutilv2.GetRLSOptions(req.GetOptions())
-	if err != nil {
+
+	if err := importutilv2.ValidateSnapshotSourceRequest(req.GetOptions()); err != nil {
 		return err
 	}
-
 	collectionID, err := it.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
@@ -128,25 +124,6 @@ func (it *ImportTask) PreExecute(ctx context.Context) error {
 	canonicalCollectionName := colInfo.Schema.GetName()
 	req.DbName = canonicalDBName
 	req.CollectionName = canonicalCollectionName
-
-	rlsEnabled := colInfo.RlsEnabled
-	// Keep this before skip authorization: an old DataCoord cannot re-check a
-	// concurrent rls.force transition before it creates the import job.
-	if rlsEnabled && !paramtable.Get().ProxyCfg.RLSImportEnforcementEnabled.GetAsBool() {
-		return merr.WrapErrServiceUnavailable("RLS import enforcement is unavailable until the cluster upgrade completes")
-	}
-	if rlsEnabled && requestedSkipRLS {
-		rlsEnabled, err = node.ResolveRLSEnforcement(ctx, it.GetMetaCache(), rlsEnabled, colInfo.RlsForce, requestedSkipRLS,
-			canonicalDBName, canonicalCollectionName, "import")
-		if err != nil {
-			return err
-		}
-		it.skipRLS = !rlsEnabled
-	}
-	it.rlsPrincipal, _, err = rlsutil.ResolveRuntimePrincipal(rlsEnabled, rlsPrincipal, "import")
-	if err != nil {
-		return err
-	}
 
 	schema := colInfo.Schema
 	if schema.CollectionSchema == nil || len(schema.GetFields()) == 0 {
@@ -181,7 +158,25 @@ func (it *ImportTask) PreExecute(ctx context.Context) error {
 	hasPartitionKey := typeutil.HasPartitionKey(schema.CollectionSchema)
 
 	var partitionIDs []int64
-	if isBackup {
+	partitionMapping, err := importutilv2.GetPartitionMapping(req.GetOptions())
+	if err != nil {
+		return err
+	}
+	// Snapshot import rewrites rows using ordinary target partition routing.
+	// Its backup flag preserves source PKs; it does not require the legacy
+	// binlog backup contract of restoring one explicitly named partition.
+	if partitionMapping != nil {
+		if req.GetPartitionName() != "" || hasPartitionKey {
+			return merr.WrapErrImportFailedMsg("partition_mapping cannot be combined with partition_name or a partition-key target collection")
+		}
+		for _, name := range importutilv2.PartitionMappingTargets(partitionMapping) {
+			id, err := it.GetMetaCache().GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), name)
+			if err != nil {
+				return err
+			}
+			partitionIDs = append(partitionIDs, id)
+		}
+	} else if isBackup && !importutilv2.IsSnapshotSource(req.GetOptions()) {
 		if req.GetPartitionName() == "" {
 			return merr.WrapErrParameterMissingMsg("partition not specified")
 		}
@@ -244,6 +239,12 @@ func (it *ImportTask) PreExecute(ctx context.Context) error {
 	if len(req.Files) == 0 {
 		return merr.WrapErrParameterInvalidMsg("import request is empty")
 	}
+	if importutilv2.IsSnapshotSource(req.GetOptions()) &&
+		(len(req.Files) != 1 || len(req.Files[0].GetPaths()) != 1) {
+		return merr.WrapErrImportFailedMsg(
+			"snapshot-source import requires exactly one snapshot metadata path",
+		)
+	}
 	if len(req.Files) > paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt() {
 		return merr.WrapErrImportFailedMsg("The max number of import files should not exceed %d, but got %d",
 			paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(req.Files))
@@ -293,8 +294,6 @@ func (it *ImportTask) Execute(ctx context.Context) error {
 		Options:        it.req.GetOptions(),
 		DataTimestamp:  0, // DO NOT set - used to differentiate proxy call from ack callback
 		JobID:          0, // Let DataCoord allocate
-		RlsPrincipal:   it.rlsPrincipal,
-		SkipRls:        it.skipRLS,
 	}
 
 	resp, err := it.mixCoord.ImportV2(ctx, importReq)

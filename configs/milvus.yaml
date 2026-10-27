@@ -461,7 +461,7 @@ proxy:
   maxVectorFieldNum: 10 # The maximum number of vector fields that can be specified in a collection
   maxShardNum: 16 # The maximum number of shards can be created when creating in a collection.
   maxMembershipFilterSize: 67108864 # The maximum byte size of one client pre-built membership_match filter body accepted by the proxy (the fixed 32-byte MBF1/MRB1 header is allowed on top). The blob is embedded into the query plan and fanned out to every QueryNode, so this bounds per-membership-filter memory/network amplification. Must not exceed the format cap (128 MiB). Bloom SBBF bodies are powers of two, so the default admits bodies up to 64 MiB: ~48.6M int64 members at the default fpr=0.005, ~55.4M at fpr=0.01. Raising the member count past a tier boundary requires raising the fpr too, not only this limit. Roaring filters remain independently limited to 262144 high containers and a 64 MiB decoded-memory estimate per filter. Keep proxy.grpc.serverMaxRecvSize above this plus the rest of the request.
-  maxMembershipFilterPlanSize: 134217728 # The request-wide large-filter budget in bytes. It independently limits the aggregate serialized size of membership-filter-bearing plans and RLS-bearing HybridSearch plans, and the aggregate estimated decoded size of Roaring filters. The proxy checks assembled plans with proto.Size before proto.Marshal, and hybrid sub-searches and scorer filters share the applicable totals. Must be positive; invalid values fall back to 128 MiB.
+  maxMembershipFilterPlanSize: 134217728 # The request-wide large-filter budget in bytes. It independently limits the aggregate serialized size of membership-filter-bearing plans, and the aggregate estimated decoded size of Roaring filters. The proxy checks assembled plans with proto.Size before proto.Marshal, and hybrid sub-searches and scorer filters share the applicable totals. Must be positive; invalid values fall back to 128 MiB.
   maxDimension: 32768 # The maximum number of dimensions of a vector can have when creating in a collection.
   # Whether to produce gin logs.\n
   # please adjust in embedded Milvus: false
@@ -489,20 +489,6 @@ proxy:
   # If the number of derived result entries exceeds this limit, the search aggregation request will be rejected.
   # Disabled if the value is less or equal to 0.
   maxSearchAggregationResultEntries: 10000
-  rls:
-    maxPoliciesPerCollection: 100 # Maximum number of row policies allowed on one collection.
-    maxTagsPerPrincipal: 50 # Maximum number of tags allowed on one collection-scoped RLS principal.
-    maxExpressionLength: 4096 # Maximum length of one RLS using_expr or check_expr in bytes.
-    maxCombinedExpressionLength: 16384 # Maximum length of the final combined RLS expression in bytes.
-    maxPolicyNameLength: 255 # Maximum RLS policy name length in bytes.
-    maxPolicyDescriptionLength: 1024 # Maximum RLS policy description length in bytes.
-    maxPrincipalNameLength: 255 # Maximum RLS principal name length in bytes.
-    maxTagKeyLength: 128 # Maximum RLS principal tag key length in bytes.
-    maxTagValueLength: 1024 # Maximum RLS principal string tag value or array string element length in bytes.
-    maxArrayLiteralElements: 1024 # Maximum elements for RLS array tags and in or array_contains* predicates.
-    maxPrincipalCacheEntries: 65536 # Maximum number of principal-tag entries cached per RLS collection or materialized by one non-paginated principal list.
-    maxPrincipalCacheBytes: 67108864 # Maximum accounted bytes of principal names, tag keys, tag values, and array element storage cached per RLS collection or materialized by one non-paginated principal list.
-    metaRefreshInterval: 3600 # Maximum policy-cache age before request-time refresh, and principal-cache age before periodic eviction and refresh on next use, in seconds.
   accessLog:
     enable: false # Whether to enable the access log feature.
     minioEnable: false # Whether to upload local access log files to MinIO. This parameter can be specified when proxy.accessLog.filename is not empty.
@@ -910,6 +896,7 @@ dataCoord:
   # if param forceRebuildScalarSegmentIndex is not enabled, the newly created scalar index will be aligned with the newer one of scalar index engine's version and targetScalarIndexVersion.
   # if param targetScalarIndexVersion is not set, the default value is -1, which means no target scalar index version, then the scalar index will be aligned with scalar index engine's version
   targetScalarIndexVersion: -1
+  enableArraySortIndex: auto # Whether ordinary ARRAY HYBRID may select STL_SORT, ordinary ARRAY may use explicit STL_SORT, and typed JSON ARRAY paths may use HYBRID or STL_SORT. auto: enable once all registered online components reach 3.1.0 and the stability window elapses; false: keep ordinary ARRAY HYBRID high cardinality on INVERTED, downgrade affected AUTOINDEX requests to INVERTED, and reject explicit ARRAY STL_SORT or JSON ARRAY HYBRID/STL_SORT; true: force enable and bypass the software-version gate.
   segmentFlushInterval: 2 # the minimal interval duration(unit: Seconds) between flushing operation on same segment
   manifestCommitConcurrency: 16 # Maximum concurrent DataCoord manifest commits across L0 compaction, index and stats publication, schema materialization, and GC. Values are clamped to [1, 256]. Workers start on demand. Read once during metadata initialization; changes require restart.
   # Switch value to control if to enable segment compaction.
@@ -929,6 +916,11 @@ dataCoord:
     # mix is prioritized by level: mix compactions first, then L0 compactions, then clustering compactions.
     taskPrioritizer: level
     taskQueueCapacity: 100000 # compaction task queue size
+    # Soft cap on pending and running compaction tasks: once reached, automatic compaction, including sort compaction and
+    # target-based compaction, stops planning and submitting tasks, so concurrent submissions can briefly exceed it.
+    # Manual compaction, import and the sort of clustering compaction outputs are not capped, nor is the sort of flushed
+    # segments while automatic compaction is disabled. 0 or a negative value means unlimited.
+    maxTaskNum: 0
     rpcTimeout: 10
     maxParallelTaskNum: -1 # Deprecated, see datanode.slot.slotCap
     dropTolerance: 3600 # Compaction task will be cleaned after finish longer than this time(in seconds)
@@ -980,7 +972,8 @@ dataCoord:
     # Layout 1 is additionally gated on no QueryNode still reporting an older release line, so setting this to 1 during a 2.6 -> 3.0 upgrade still builds layout 0 until every QueryNode is upgraded. That check reads the version each QueryNode publishes in its session, which is a per-release-line constant, so it separates 2.6.x from 3.0.x but does not differentiate binaries within the same release line.
     storePathVersion: 0
     # Whether completed StorageV3 index artifacts are published in segment manifests. Off (the default) keeps the legacy path: every SegmentIndex task record stays in etcd and no manifest index entry is produced. On still persists Unissued, InProgress, Failed, fake-finished, and other task states in etcd; only a successful build with artifact files is published to the manifest, and that commit atomically deletes the corresponding Finished etcd row. StorageV1/V2 always use etcd.
-    # The setting may be switched in either direction. Turning it off changes where new completions are written; records already published to manifests remain recoverable through the segment's sticky manifest_has_index marker.
+    # New StorageV3 builds also write artifacts under the segment manifest base/_index/<build>/<version> (path version 2). Upgrade all workers and QueryNodes before enabling. Old-layout tasks keep their original etcd publication mode; external index paths are never added.
+    # The setting applies when a build task is created. Existing builds keep their persisted mode across switches and restarts: path version 2 publishes to manifests, while versions 0/1 finish in etcd. Published records remain recoverable through the segment's manifest_has_index marker.
     # The value must be exactly true or false. A value that does not parse as a boolean, such as yes, is silently read as false, i.e. the legacy etcd behavior.
     writeSegmentIndexToManifest: false
     # Concurrency of StorageV3 manifest index reads during startup and snapshot restore. Reads await asynchronous transaction callbacks in Go. Values are clamped to [1, 256], and the coordinator read limit is also capped by positive minio.maxConnections values. Restore assembly and verification share the same budget.
@@ -1009,6 +1002,9 @@ dataCoord:
   taskRetryBackoffInterval: 1 # Initial backoff in seconds before re-dispatching a task (compaction/stats/index/import) that failed on a worker; doubles on each consecutive failure up to dataCoord.taskRetryBackoffMaxInterval. 0 disables the backoff (legacy behavior: failed tasks are re-dispatched every scheduling tick).
   taskRetryBackoffMaxInterval: 60 # Maximum backoff in seconds between re-dispatches of a task that keeps failing on workers.
   brokerTimeout: 5000 # 5000ms, dataCoord broker rpc timeout
+  segmentChange:
+    stagingTimeout: 3600 # The maximum duration in seconds a segment change group may stay staged before the batch is aborted (STAGED -> ABORTED), bounding unconvergeable or externally-dropped batches.
+    maxMembersPerGroup: 512 # The maximum number of output segments one segment change group may carry before oversized task outputs are split into sequentially published subgroups.
   autoBalance: true # Enable auto balance
   checkAutoBalanceConfigInterval: 10 # the interval of check auto balance config
   import:
@@ -1019,7 +1015,7 @@ dataCoord:
     # importJob entries stay in etcd, each carrying its schema, file list and options
     # plus every preimport and import task under it.
     # The 48h default exists for BulkImport idempotency and only for it: the idempotency
-    # window is bounded by streaming.walBroadcaster.tombstone.maxLifetime, so a job GC'd
+    # window can extend beyond streaming.walBroadcaster.tombstone.maxLifetime, so a job GC'd
     # earlier than its tombstone lets an in-window retry resolve to a jobID that
     # GetImportProgress can no longer find. Keep this at >= 2x that lifetime for as long
     # as clients send an Idempotency-Key. Twice rather than equal because a tombstone's
@@ -1027,11 +1023,12 @@ dataCoord:
     # remaining life by up to another maxLifetime, while this retention keeps counting
     # from the job's own completion. Equal values hold only for a window with no restart,
     # which is not a property a default may assume. Raise it further if StreamingCoord
-    # restarts more than once inside one tombstone lifetime.
+    # restarts more than once inside one tombstone lifetime or WAL checkpoint lag extends
+    # tombstone retention. No fixed multiple bounds retention during a checkpoint stall.
     # A cluster whose clients never send an Idempotency-Key is under no such requirement
     # and can lower this freely; 10800 was the default before idempotency keys existed.
     taskRetention: 172800
-    maxSizeInMBPerImportTask: 16384 # To prevent generating of small segments, we will re-group imported files. This parameter represents the sum of file sizes in each group (each ImportTask).
+    maxSizeInMBPerImportTask: 8192 # To prevent generating of small segments, we will re-group imported files. This parameter represents the sum of file sizes in each group (each ImportTask).
     scheduleInterval: 2 # The interval for scheduling import, measured in seconds.
     checkIntervalHigh: 2 # The interval for checking import, measured in seconds, is set to a high frequency for the import checker.
     checkIntervalLow: 120 # The interval for checking import, measured in seconds, is set to a low frequency for the import checker.
@@ -1039,9 +1036,19 @@ dataCoord:
     maxImportJobNum: 1024 # Maximum number of import jobs that are executing or pending.
     waitForIndex: true # Indicates whether the import operation waits for the completion of index building.
     enableInReplicatingCluster: false # Whether to allow import in a replicating cluster. When enabled, only auto_commit=false imports are accepted.
+    enableImportV3: false # One-way rollout gate for creating ImportTaskV3 jobs from new ordinary or backup import requests. Keep disabled until all DataNodes and all DataCoords that may become active support Import V3. The gate only selects the version for new requests; persisted WAL messages and jobs always resume with their stored version. Disabling the gate again after activation is unsupported.
     enableL0Import: false # Whether to allow importing L0 (delete-only) segments during a binlog/backup import. Disabled by default because restoring L0 segments is incompatible with commit_timestamp (two-phase-commit / replication imports), where it silently breaks delete semantics. Fold the L0 deletes into per-segment deltalogs before restore instead; set to true only to re-enable the legacy L0 import behavior.
+    # Largest parquet footer, in bytes, that import sizing will read to obtain an exact row count.
+    # A file declaring a longer footer is rejected at submit. Footer size tracks row_groups * columns, so
+    # raise this for files written with small row groups, many columns, or untruncated string statistics.
+    parquetFooterMaxSize: 67108864
     fileNumPerSlot: 4 # The files number per slot for pre-import/import task.
     memoryLimitPerSlot: 160 # The memory limit (in MB) of buffer size per slot for pre-import/import task.
+    fragmentSizeInMB: 128 # Target logical size in MiB for one sorted ImportTaskV3 fragment.
+    fragmentMergeFanIn: 128 # Maximum direct merge fan-in used by ImportTaskV3. Values must be in [2,1024].
+    reshardResidentBucketCap: 16 # Number of (vchannel, partition) buckets whose full in-flight working set (cap x fragmentSizeInMB) the ImportTaskV3 reshard slot estimate keeps memory-resident as a ceiling, so a job with at most this many buckets can reshard without local spill on an idle node. Beyond the cap the task keeps the SAME whole-task resident budget (cap x fragmentSizeInMB) and, when the total in-memory bytes exceed it, spills the largest bucket first into the DataNode's shared spill log, so a skewed partition hash spends the spill on the hot buckets while cold buckets stay resident. The DataNode's dynamic memory probe may still spill below this ceiling when the real process memory is tight. The cap also bounds per-task slot demand so the task stays schedulable on small nodes.
+    reshardFlushConcurrency: 2 # Number of fragment writes one ImportTaskV3 reshard task keeps detached and in flight. A full bucket's sort/encode/upload runs on its own goroutine so it overlaps reading and hashing the next batches instead of stalling them. Every detached write holds its fragment input plus one sort copy, so the reshard slot estimate charges this many of them: raising it trades node task concurrency for per-task latency.
+    reshardMemoryExpansionFactor: 1.65 # Expansion factor applied to an ImportTaskV3 reshard task's whole per-task heap footprint when estimating its memory charge: WorkingSet charges factor x (fixed IO + pipeline + resident buckets + detached fragment inputs + their structural overhead + one sort copy per detached write). It covers the Go runtime headroom and the other growth between the source/flush boundaries the run returns memory at. Must be at least 1.
     maxSegmentsPerCopyTask: 100 # Maximum number of segments that can be grouped into a single copy task during snapshot restore.
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   slot:
@@ -1105,7 +1112,8 @@ dataNode:
     concurrencyPerCPUCore: 4 # The execution concurrency unit for import/pre-import tasks per CPU core.
     maxImportFileSizeInGB: 16 # The maximum file size (in GB) for an import file, where an import file refers to either a Row-Based file or a set of Column-Based files.
     readBufferSizeInMB: 16 # The base insert buffer size (in MB) during import. The actual buffer size will be dynamically calculated based on the number of shards.
-    readDeleteBufferSizeInMB: 16 # The delete buffer size (in MB) during import.
+    readDeleteBufferSizeInMB: 128 # The delete memory budget (in MB) used for legacy L0 import slot estimation and typed snapshot delete maps. Shared-L0 snapshot tasks use bounded delete batches and pool the per-reader delete allowances for bitmaps in both phases; admission also reserves row buffers and requires an import memory allowance greater than twice this budget.
+    reshardSpillMaxStreams: 128 # Maximum number of spill files (Arrow IPC streams) one ImportTaskV3 reshard run keeps open. Buckets are mapped to streams by a fixed hash, so every range of one bucket lives in exactly one file and a run with more buckets than streams never opens more files than this cap. A stream file is removed as soon as all of its ranges are consumed; the actual stream count is min(buckets, this value). Must be at least 1.
     memoryLimitPercentage: 10 # The percentage of memory limit for import/pre-import tasks.
     # Initial backoff interval in seconds for import write retry. Must be a positive integer;
     # a non-positive or unparseable value falls back to the default.
@@ -1273,7 +1281,7 @@ common:
   indexSliceSize: 16 # Index slice size in MB
   threadCoreCoefficient:
     highPriority: 10 # This parameter specify how many times the number of threads is the number of cores in high priority pool
-    middlePriority: 5 # This parameter specify how many times the number of threads is the number of cores in middle priority pool
+    middlePriority: 5 # Thread-to-core ratio for each of the independent middle priority and search fanout pools; both follow maxThreadsSize.
     lowPriority: 1 # This parameter specify how many times the number of threads is the number of cores in low priority pool
     maxThreadsSize: 16 # The maximum number of threads in the thread pool, only effective when greater than 0
   buildIndexThreadPoolRatio: 0.75
@@ -1323,6 +1331,8 @@ common:
       # Options: error, null. error rejects the row as malformed input; null promotes the whole row to a row-level null when the field is nullable.
       # Rows whose child elements are all null are always promoted to row-level null for nullable fields, regardless of this setting.
       partialNullPolicy: error
+    externalSparseVector:
+      conversionMemoryLimit: 268435456 # Positive byte budget for estimated additional buffers per external sparse-vector normalization call. Includes output, Arrow offsets/validity, sorting and encoding scratch; excludes source data, allocator overhead and other concurrent calls. Ordered Binary arrays reused without conversion are exempt. Requires a restart.
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.
@@ -1375,8 +1385,18 @@ common:
     defaultRootPassword: Milvus
     rootShouldBindRole: false # Whether the root user should bind a role when the authorization is enabled.
     enablePublicPrivilege: true # Whether to enable public privilege
+    # Whether to expose the feature usage report at GET /management/feature_usage on the Proxy
+    # management port. The endpoint requires HTTP Basic Auth as root. See
+    # docs/design-docs/design_docs/20260902-feature-usage-reporting.md.
+    featureUsageEnabled: false
     internaltlsEnabled: false
     tlsMode: 0
+  featureUsage:
+    # Whether the components count feature usage on their request paths (Proxy, QueryNode)
+    # and at task creation (DataCoord). One branch and one atomic add per counted feature.
+    # It is read once at component start; the report endpoint is gated separately by
+    # common.security.featureUsageEnabled.
+    countersEnabled: true
   session:
     ttl: 15 # ttl value when session granting a lease to register service
     retryTimes: 30 # retry times when session sending etcd requests
@@ -1424,6 +1444,7 @@ common:
       proxy: close # File resource mode for proxy, options: [sync, close]. Default is close.
     maxFileSize: 0 # Maximum size of a single file resource accepted by AddFileResource. Set to 0 to disable the admission limit.
     downloadTimeout: 5m # Timeout for downloading a single file resource. It accepts duration strings such as 30s or 5m.
+    cacheTtl: 15m # Idle lease for on-demand analyzer resource files after their last consumer releases them. Accepts duration strings such as 30s or 15m; 0s disables retention. Takes effect on restart.
   groupBy:
     maxGroups: 100000 # Maximum number of groups allowed in GROUP BY aggregation, enforced both per segment and during cross-segment merge. Exceeding this limit fails the query.
 
@@ -1674,6 +1695,39 @@ streamingNode:
     clientMaxSendSize: 268435456 # The maximum size of each RPC request that the clients on streamingNode can send, unit: byte
     clientMaxRecvSize: 268435456 # The maximum size of each RPC request that the clients on streamingNode can receive, unit: byte
 
+# Any configuration related to query views.
+queryView:
+  idfOracle:
+    lazyLoadSealedStats: false # Whether QueryView IDF runtimes defer sealed BM25 resource discovery and stats materialization until the first BM25 search.
+    sealedStatsLoadConcurrencyRatio: 4 # Maximum process-wide concurrency for loading sealed BM25 stats, expressed as a ratio of CPU cores.
+  leaseDuration: 60s # Renewable SN Up-view retention after query access. Delays normal Down; non-positive durations disable timed retention. Not refreshable.
+  logicalSize:
+    source: rowCount # LogicalSize source: rowCount uses physical rows; insertBytes uses ceil(segment insert_binlog_size / bytesPerUnit). Unsupported values use rowCount. Missing size falls back to rows, then segmentBaseCost is added. Sampled once when the DataView manager is initialized; requires coordinator restart.
+    bytesPerUnit: 64KB # Bytes per logical unit for the insertBytes source, parsed as a size (for example 64KB or 1MB). Non-positive or invalid values use 64KB. Sampled once when the DataView manager is initialized; requires coordinator restart. Missing segment size estimates one unit per physical row.
+    segmentBaseCost: 16 # Non-negative fixed cost in logical units added to physical rows or normalized segment bytes when building each new DataView LogicalSize. Changes apply on the next DataView update, never to existing snapshots. Invalid values retain the last valid sampled cost; zero disables the fixed cost.
+  balancer:
+    reconcileInterval: 1m # Positive duration with a unit between periodic reconciles. Decrease for faster convergence and more coordinator work; increase to reduce scan frequency. Events reconcile independently.
+    optimization:
+      enabled: true # Enables optional placement optimization. Disable to stop optional movement; mandatory recovery, version updates and releases continue independently of queryCoord.autoBalance.
+      minScoreGain: 1 # Positive minimum net weighted score gain after movement and loading costs for optional optimization. Increase to reject marginal moves; decrease to accept smaller improvements.
+      maxCandidateEvaluationsPerShard: 100000 # Positive maximum optional candidate evaluations per shard pass. Increase to search more candidates at higher CPU cost; decrease to yield earlier and continue on a later reconcile. Mandatory placement is not capped.
+    scoring:
+      targetLogicalSizePerNode: 100000 # Positive concentration scale in logical size units for preferred shard fanout and the collection concentration floor. Increase to favor fewer participants; decrease to favor spreading. Not a capacity limit.
+      resourceGroup:
+        weight: 1 # Weight of RG load-band improvement. Increase to favor reducing aggregate logical-size skew over local concentration and loading cost.
+        relativeTolerance: 0.1 # Fractional RG load tolerance, in [0,1). Increase to accept more relative skew and reduce movement; decrease to pursue closer logical-size balance.
+        absoluteTolerance: 100000 # Positive minimum RG tolerance in logical size units. Increase to keep tiny shards concentrated at low total volume; decrease to rebalance smaller absolute load differences.
+      concentration:
+        shardWeight: 1 # Weight of excess shard logical size units on one node. Increase to spread large shards more strongly; small shards within their preferred footprint receive no spreading reward.
+        collectionWeight: 1 # Weight of excess collection-replica logical size units on one node. Increase to distribute large collections made of many small shards more evenly.
+        relativeTolerance: 0.1 # Fractional allowance above shard and collection concentration targets. Increase to retain more concentrated layouts; decrease to spread large data more strongly.
+      fanout:
+        weight: 1 # Weight of net excess shard fanout. Increase to favor consolidation and fewer query participants; decrease to permit wider spreading.
+        hysteresis: 0.1 # Fractional growth/shrink margin for preferred fanout, in [0,1). Increase to reduce fanout changes near size boundaries; decrease to react sooner to data growth and shrinkage.
+      movement:
+        moveCostPerUnit: 0.02 # Cost multiplier on published LogicalSize whose node changes. Increase to reduce movement; decrease to accept smaller placement improvements, even when destination resources already exist.
+        loadCostPerUnit: 0.08 # Additional cost multiplier on logical size units needing a compatible destination load. Increase to favor protected ready-resource reuse; decrease to favor balance despite additional loading.
+
 # Any configuration related to the streaming service.
 streaming:
   # Whether StreamingNode splits oversized logical messages into physical WAL records.
@@ -1731,8 +1785,8 @@ streaming:
   txn:
     defaultKeepaliveTimeout: 10s # The default keepalive timeout for wal txn, 10s by default
   walWriteAheadBuffer:
-    capacity: 64m # The capacity of write ahead buffer of each wal, 64M by default
-    keepalive: 30s # The keepalive duration for entries in write ahead buffer of each wal, 30s by default
+    capacity: 64m # WAB cache capacity. Capacity/keepalive eviction only removes records consumed by RecoveryStorage and preserves the durable catchup anchor. Also scales walRateLimit.writeAheadBuffer.slowdownRatio.
+    keepalive: 30s # WAB cache TTL. Expired records are evictable only after RecoveryStorage consumes them; the durable catchup anchor is retained.
   walReadAheadBuffer:
     # The buffer length (pending message count) of read ahead buffer of each wal scanner can be used, 128 by default.
     # Higher one will increase the throughput of wal message handling, but introduce higher memory utilization.
@@ -1765,6 +1819,8 @@ streaming:
       # The max size of l0 segment, 32m by default.
       # If the binary size of l0 segment is greater than this size, it will be flushed.
       maxSize: 32m
+  summary:
+    cacheBytesPerPChannel: 64MB # Encoded WALSummary chunk cache budget per PChannel. Zero disables residency. Indexes, in-flight reads and decoded delivery batches are accounted separately. Applied when the WAL opens.
   walRecovery:
     # The interval of persist recovery info, 10s by default. 
     # Every the interval, the recovery info of wal will try to persist, and the checkpoint of wal can be advanced.

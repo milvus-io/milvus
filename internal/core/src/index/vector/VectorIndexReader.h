@@ -26,7 +26,6 @@
 
 #include "index/contracts/query/IVectorReader.h"
 #include "index/vector/KnowhereEngine.h"
-#include "knowhere/id_map.h"
 
 namespace milvus::index {
 
@@ -194,11 +193,6 @@ class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
 
     bool
     IsEmptyEngine() const;
-
-    const knowhere::IdMap&
-    IdMap() const {
-        return engine_.native_index.GetIdMap();
-    }
 
     KnowhereEngine engine_;
     Backend backend_{Backend::Memory};

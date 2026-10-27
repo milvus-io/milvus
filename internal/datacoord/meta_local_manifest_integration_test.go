@@ -112,7 +112,7 @@ func newLocalPackedFixture(t *testing.T, displaced bool) *legacyLocalPackedFixtu
 			FieldID: 101, LobBasePath: filepath.Join(legacyRoot, "insert_log/1/2/lobs/101"),
 			InlineThreshold: 1, MaxLobFileBytes: 1 << 20, FlushThresholdBytes: 1 << 20,
 		}},
-	}, cfg)
+	}, cfg, nil)
 	require.NoError(t, err)
 	closed := false
 	t.Cleanup(func() {
@@ -133,7 +133,7 @@ func newLocalPackedFixture(t *testing.T, displaced bool) *legacyLocalPackedFixtu
 	require.NoError(t, statsWriter.GenerateByData(100, schemapb.DataType_Int64, &storage.Int64FieldData{Data: pks}))
 	statsPath := filepath.Join(base, "_stats/bloom_filter.100/42")
 	require.NoError(t, packed.WriteFile(cfg, statsPath, statsWriter.GetBuffer()))
-	physicalManifest, err := packed.CommitManifestUpdates(base, packed.ManifestEarliest, cfg, &packed.ManifestUpdates{
+	physicalManifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(base, packed.ManifestEarliest), cfg, &packed.ManifestUpdates{
 		NewFiles: output,
 		Stats:    []packed.StatEntry{{Key: "bloom_filter.100", Files: []string{statsPath}, Metadata: map[string]string{"memory_size": "24"}}},
 	})
@@ -270,7 +270,7 @@ func TestReloadLocalManifestPreservesPackedReferences(t *testing.T) {
 		report, err := localmigrate.Migrate(t.Context(), f.root, localmigrate.Options{LegacyPrefix: "files"})
 		require.NoError(t, err)
 		require.Zero(t, report.Renamed)
-		require.NoError(t, mt.reloadFromKV(context.Background(), []int64{1}))
+		require.NoError(t, loadAndNormalize(context.Background(), mt, []int64{1}))
 		loaded := mt.segments.GetSegment(3)
 		require.Equal(t, f.physicalManifest, loaded.GetManifestPath())
 		f.assertReadable(t, loaded.GetManifestPath(), f.legacyRoot)
@@ -316,7 +316,7 @@ func TestMigrateDoubleRootPackedReferencesAndGCRetry(t *testing.T) {
 		report, err = localmigrate.Migrate(t.Context(), f.root, opts)
 		require.NoError(t, err)
 		require.Zero(t, report.Renamed)
-		require.NoError(t, mt.reloadFromKV(context.Background(), []int64{1}))
+		require.NoError(t, loadAndNormalize(context.Background(), mt, []int64{1}))
 		require.Equal(t, f.segment.GetManifestPath(), mt.segments.GetSegment(3).GetManifestPath())
 		assertLocalManifestCatalogReadOnly(t, catalog)
 		f.assertReadable(t, mt.segments.GetSegment(3).GetManifestPath(), f.root)
@@ -375,7 +375,7 @@ func TestReloadLocalManifestCommitSegmentManifestCAS(t *testing.T) {
 			catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil).Twice()
 			mt := newLocalManifestTestMeta(t, catalog, f.cm)
 			ctx := context.Background()
-			require.NoError(t, mt.reloadFromKV(ctx, []int64{1}))
+			require.NoError(t, loadAndNormalize(ctx, mt, []int64{1}))
 			assertLocalManifestCatalogReadOnly(t, catalog)
 			base, version, err := packed.UnmarshalManifestPath(f.physicalManifest)
 			require.NoError(t, err)
@@ -401,7 +401,7 @@ func TestReloadLocalManifestCommitSegmentManifestCAS(t *testing.T) {
 				Mutation: ManifestMutation{Type: mutationType, Updates: updates},
 			}
 			if mutationType == ManifestMutationNoop {
-				actualPrepared, err := packed.CommitManifestUpdates(base, version, f.cfg, updates)
+				actualPrepared, err := packed.CommitManifestUpdates(f.physicalManifest, f.cfg, updates)
 				require.NoError(t, err)
 				require.Equal(t, prepared, actualPrepared)
 				commit.ExpectedManifest = f.physicalManifest
@@ -430,7 +430,7 @@ func TestReloadLocalManifestCommitSegmentManifestCAS(t *testing.T) {
 			require.ErrorIs(t, err, errSegmentManifestStale)
 			require.Equal(t, prepared, stored.GetManifestPath())
 			catalog.AssertNumberOfCalls(t, "Update", 1)
-			require.NoError(t, mt.reloadFromKV(ctx, []int64{1}))
+			require.NoError(t, loadAndNormalize(ctx, mt, []int64{1}))
 			require.Equal(t, prepared, mt.segments.GetSegment(3).GetManifestPath())
 			f.assertNoCanonicalLayout(t)
 		})

@@ -401,6 +401,7 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	writerFormat string,
+	pkStatsConfig *PkStatsConfig,
 ) (*PackedBinlogRecordWriter, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
@@ -435,6 +436,7 @@ func newPackedBinlogRecordWriter(collectionID, partitionID, segmentID UniqueID, 
 		collectionID,
 		schema,
 		maxRowNum,
+		pkStatsConfig,
 	)
 	if err != nil {
 		return nil, err
@@ -565,7 +567,8 @@ func (pw *PackedManifestRecordWriter) Close() error {
 	if err := pw.appendV3Stats(updates); err != nil {
 		return err
 	}
-	newManifest, err := packed.CommitManifestUpdates(pw.basePath, packed.ManifestEarliest, pw.storageConfig, updates)
+	newManifest, err := packed.CommitManifestUpdates(
+		packed.MarshalManifestPath(pw.basePath, packed.ManifestEarliest), pw.storageConfig, updates)
 	if err != nil {
 		return merr.Wrap(err, "PackedManifestRecordWriter.Close commit")
 	}
@@ -631,6 +634,7 @@ func newPackedManifestRecordWriter(collectionID, partitionID, segmentID UniqueID
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	textRefsAsBinary bool,
 	writerFormat string,
+	pkStatsConfig *PkStatsConfig,
 ) (*PackedManifestRecordWriter, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
@@ -666,6 +670,7 @@ func newPackedManifestRecordWriter(collectionID, partitionID, segmentID UniqueID
 		collectionID,
 		schema,
 		maxRowNum,
+		pkStatsConfig,
 	)
 	if err != nil {
 		return nil, err
@@ -736,7 +741,10 @@ func (pw *PackedTextManifestRecordWriter) initWriters(r Record) error {
 
 		var err error
 		pw.basePath = SegmentManifestBasePath(pw.storageConfig.GetRootPath(), pw.collectionID, pw.partitionID, pw.segmentID)
-		pw.writer, err = NewPackedTextBatchWriter(pw.storageConfig.GetBucketName(), pw.basePath, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.textColumnConfigs, writerFormat, schemaBasedFormats)
+		// TODO: pass pw.storagePluginContext instead of nil once the TEXT read
+		// chain supports CMEK decryption; encrypting TEXT now would make it
+		// unreadable.
+		pw.writer, err = NewPackedTextBatchWriter(pw.storageConfig.GetBucketName(), pw.basePath, pw.schema, pw.bufferSize, pw.multiPartUploadSize, pw.columnGroups, pw.storageConfig, pw.textColumnConfigs, nil, writerFormat, schemaBasedFormats)
 		if err != nil {
 			return merr.WrapErrStorage(err, "can not new packed text writer")
 		}
@@ -795,8 +803,8 @@ func (pw *PackedTextManifestRecordWriter) Close() error {
 	if err := pw.appendV3Stats(updates); err != nil {
 		return err
 	}
-	newManifest, err := packed.CommitManifestUpdates(pw.basePath, packed.ManifestEarliest, pw.storageConfig,
-		updates)
+	newManifest, err := packed.CommitManifestUpdates(
+		packed.MarshalManifestPath(pw.basePath, packed.ManifestEarliest), pw.storageConfig, updates)
 	if err != nil {
 		return merr.Wrap(err, "PackedTextManifestRecordWriter.Close commit")
 	}
@@ -816,7 +824,9 @@ func NewPackedTextManifestRecordWriter(
 	columnGroups []storagecommon.ColumnGroup,
 	storageConfig *indexpb.StorageConfig,
 	textColumnConfigs []packed.TextColumnConfig,
+	storagePluginContext *indexcgopb.StoragePluginContext,
 	writerFormat string,
+	pkStatsConfig *PkStatsConfig,
 ) (*PackedTextManifestRecordWriter, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
@@ -825,23 +835,24 @@ func NewPackedTextManifestRecordWriter(
 
 	writer := &PackedTextManifestRecordWriter{
 		packedBinlogRecordWriterBase: packedBinlogRecordWriterBase{
-			collectionID:        collectionID,
-			partitionID:         partitionID,
-			segmentID:           segmentID,
-			schema:              schema,
-			arrowSchema:         arrowSchema,
-			BlobsWriter:         blobsWriter,
-			allocator:           allocator,
-			maxRowNum:           maxRowNum,
-			bufferSize:          bufferSize,
-			multiPartUploadSize: multiPartUploadSize,
-			columnGroups:        columnGroups,
-			storageConfig:       storageConfig,
-			writerFormat:        writerFormat,
-			tsFrom:              typeutil.MaxTimestamp,
-			tsTo:                0,
-			ttlFieldID:          getTTLFieldID(schema),
-			ttlFieldValues:      make([]int64, 0),
+			collectionID:         collectionID,
+			partitionID:          partitionID,
+			segmentID:            segmentID,
+			schema:               schema,
+			arrowSchema:          arrowSchema,
+			BlobsWriter:          blobsWriter,
+			allocator:            allocator,
+			maxRowNum:            maxRowNum,
+			bufferSize:           bufferSize,
+			multiPartUploadSize:  multiPartUploadSize,
+			columnGroups:         columnGroups,
+			storageConfig:        storageConfig,
+			storagePluginContext: storagePluginContext,
+			writerFormat:         writerFormat,
+			tsFrom:               typeutil.MaxTimestamp,
+			tsTo:                 0,
+			ttlFieldID:           getTTLFieldID(schema),
+			ttlFieldValues:       make([]int64, 0),
 		},
 		textColumnConfigs: textColumnConfigs,
 	}
@@ -851,6 +862,7 @@ func NewPackedTextManifestRecordWriter(
 		collectionID,
 		schema,
 		maxRowNum,
+		pkStatsConfig,
 	)
 	if err != nil {
 		return nil, err

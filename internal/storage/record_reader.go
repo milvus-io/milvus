@@ -3,10 +3,12 @@ package storage
 import (
 	"context"
 	"io"
+	"path"
 	"strconv"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -18,11 +20,121 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+const ImportFragmentFormatParquet = "parquet"
+
+// ImportFragmentReaderSpec is the storage-layer description of one immutable
+// Import V3 fragment.  The Import proto is deliberately not referenced here:
+// DataNode validates the wire FragmentRef and then passes only the fields the
+// packed reader needs.
+type ImportFragmentReaderSpec struct {
+	Path string
+	Rows int64
+}
+
+// importFragmentRecordReader adds the Import contract that the packed FFI
+// reader itself cannot check: cancellation and an exact logical row count.
+// Sort-order validation remains in storage.MergeSort, at the point where the
+// keys are already decoded and compared.
+type importFragmentRecordReader struct {
+	ctx          context.Context
+	reader       RecordReader
+	expectedRows int64
+	readRows     int64
+	finished     bool
+}
+
+var _ RecordReader = (*importFragmentRecordReader)(nil)
+
+func (r *importFragmentRecordReader) Next() (Record, error) {
+	if err := r.ctx.Err(); err != nil {
+		return nil, err
+	}
+	if r.finished {
+		return nil, io.EOF
+	}
+	rec, err := r.reader.Next()
+	if err == io.EOF {
+		r.finished = true
+		if r.readRows != r.expectedRows {
+			return nil, merr.WrapErrDataIntegrityMsg(
+				"import fragment row count mismatch: expected=%d actual=%d", r.expectedRows, r.readRows)
+		}
+		return nil, io.EOF
+	}
+	if err != nil {
+		return nil, err
+	}
+	if rec == nil {
+		return nil, merr.WrapErrDataIntegrityMsg("import fragment reader returned a nil record without EOF")
+	}
+	r.readRows += int64(rec.Len())
+	if r.readRows > r.expectedRows {
+		return nil, merr.WrapErrDataIntegrityMsg(
+			"import fragment row count exceeds manifest: expected=%d actual=%d", r.expectedRows, r.readRows)
+	}
+	return rec, nil
+}
+
+func (r *importFragmentRecordReader) Close() error {
+	if r == nil || r.reader == nil {
+		return nil
+	}
+	return r.reader.Close()
+}
+
 type RecordReader interface {
 	// Next returns a record borrowed from the reader and valid until the next
 	// Next or Close. Callers retaining it longer must Retain and Release it.
 	Next() (Record, error)
 	Close() error
+}
+
+// NewInsertDataRecordReader materializes one normalized InsertData batch as a
+// RecordReader. It is used by Import V3 to feed the existing storage.Sort
+// implementation without introducing a second sorting path.
+func NewInsertDataRecordReader(data *InsertData, schema *schemapb.CollectionSchema) (RecordReader, error) {
+	if data == nil || schema == nil {
+		return nil, merr.WrapErrServiceInternalMsg("insert data or schema is nil")
+	}
+	if data.GetRowNum() == 0 {
+		return &IterativeRecordReader{iterate: func() (RecordReader, error) { return nil, io.EOF }}, nil
+	}
+	arrowSchema, err := ConvertToArrowSchema(schema, false)
+	if err != nil {
+		return nil, err
+	}
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+	defer builder.Release()
+	if err := BuildRecord(builder, data, schema); err != nil {
+		return nil, err
+	}
+	record := builder.NewRecord()
+	field2Col := make(map[FieldID]int)
+	for i, field := range typeutil.GetAllFieldSchemas(schema) {
+		field2Col[field.GetFieldID()] = i
+	}
+	return &singleRecordReader{record: NewSimpleArrowRecord(record, field2Col)}, nil
+}
+
+type singleRecordReader struct {
+	record Record
+	read   bool
+}
+
+func (r *singleRecordReader) Next() (Record, error) {
+	if r.read || r.record == nil {
+		return nil, io.EOF
+	}
+	r.read = true
+	return r.record, nil
+}
+
+func (r *singleRecordReader) Close() error {
+	if r.record != nil {
+		r.record.Release()
+		r.record = nil
+	}
+	return nil
 }
 
 type packedRecordReader struct {
@@ -134,6 +246,62 @@ func newFFIPackedRecordReaderFromFragments(
 	return &ffiPackedRecordReader{
 		reader:    reader,
 		field2Col: field2Col,
+	}, nil
+}
+
+// NewImportFragmentRecordReader opens exactly one immutable packed fragment.
+// It performs only cheap descriptor validation before opening the object.
+func NewImportFragmentRecordReader(
+	ctx context.Context,
+	spec ImportFragmentReaderSpec,
+	schema *schemapb.CollectionSchema,
+	option ...RwOption,
+) (RecordReader, error) {
+	if ctx == nil {
+		return nil, merr.WrapErrImportSysFailedMsg("import fragment reader context is nil")
+	}
+	if spec.Path == "" {
+		return nil, merr.WrapErrImportSysFailedMsg("import fragment path is empty")
+	}
+	if spec.Rows <= 0 {
+		return nil, merr.WrapErrImportSysFailedMsg("invalid import fragment rows=%d", spec.Rows)
+	}
+	if schema == nil {
+		return nil, merr.WrapErrImportSysFailedMsg("import fragment schema is nil")
+	}
+
+	rwOptions := DefaultReaderOptions()
+	for _, opt := range option {
+		opt(rwOptions)
+	}
+	// Import V3 fragments are always produced by the packed writer.  The
+	// storage version controls the final segment writer, not this temporary
+	// object reader, so validate only the fields needed by the FFI reader.
+	if rwOptions.storageConfig == nil {
+		return nil, merr.WrapErrImportSysFailedMsg("storage config is nil for import fragment reader")
+	}
+
+	reader, err := newFFIPackedRecordReaderFromFragments(
+		[]packed.Fragment{{
+			FilePath: spec.Path,
+			StartRow: 0,
+			EndRow:   spec.Rows,
+			RowCount: spec.Rows,
+		}},
+		ImportFragmentFormatParquet,
+		schema,
+		rwOptions.bufferSize,
+		rwOptions.storageConfig,
+		rwOptions.pluginContext,
+		rwOptions.externalReader,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &importFragmentRecordReader{
+		ctx:          ctx,
+		reader:       reader,
+		expectedRows: spec.Rows,
 	}, nil
 }
 
@@ -265,7 +433,8 @@ type ManifestReader struct {
 	externalSpecContext  packed.ExternalSpecContext
 	textColumnConfigs    []packed.TextColumnConfig
 
-	neededColumns []string
+	neededColumns  []string
+	resolveTextLob bool
 }
 
 type manifestArrowReader interface {
@@ -335,6 +504,7 @@ func NewManifestReader(manifest string,
 		storageConfig,
 		storagePluginContext,
 		rwOptions.externalReader,
+		option...,
 	)
 }
 
@@ -347,8 +517,9 @@ func NewManifestReaderWithExtfs(
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	extfs packed.ExternalSpecContext,
+	option ...RwOption,
 ) (*ManifestReader, error) {
-	return newManifestReader(manifest, schema, bufferSize, storageConfig, storagePluginContext, extfs, nil)
+	return newManifestReader(manifest, schema, bufferSize, storageConfig, storagePluginContext, extfs, nil, option...)
 }
 
 // NewTextDecodedManifestReader opens a manifest through milvus-storage's
@@ -372,7 +543,21 @@ func newManifestReader(
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	extfs packed.ExternalSpecContext,
 	textColumnConfigs []packed.TextColumnConfig,
+	option ...RwOption,
 ) (*ManifestReader, error) {
+	rwOptions := DefaultReaderOptions()
+	for _, opt := range option {
+		opt(rwOptions)
+	}
+	// milvus-storage SegmentReader resolves TEXT LOB values, but its current C
+	// API has no key-retriever plugin context. Reject this exact combination so
+	// the caller never silently drops a source key. CMEK sources without
+	// TEXT/LOB stay on PackedReader, which accepts storagePluginContext below.
+	if rwOptions.resolveTextLob && storagePluginContext != nil {
+		return nil, merr.WrapErrOperationNotSupportedMsg(
+			"CMEK-protected StorageV3 import does not support TEXT/LOB fields",
+		)
+	}
 	columnResolver := typeutil.NewStorageColumnResolver(schema, typeutil.WithStorageColumnExternalSpec(extfs.Spec))
 	arrowSchema, err := ConvertToArrowSchemaWithNameResolver(
 		schema,
@@ -383,15 +568,12 @@ func newManifestReader(
 		return nil, merr.WrapErrSerializationFailed(err, "convert collection schema [%s] to arrow schema", schema.Name)
 	}
 
-	// The Arrow schema passed to storagev2 is a physical read contract, not a
-	// generic "accept whatever the reader returns" conversion layer. TEXT is the
-	// boundary case: internal packed manifests store TEXT as binary LOB
-	// references, while external collections read source columns where TEXT is
-	// ordinary UTF8 data. Keep that storage-format split here so later
-	// RecordToInsertData conversion does not accidentally decode internal LOB
-	// references as user text. Any source type coercion must stay in the
-	// external-source normalization path, not in the internal manifest path.
-	if len(textColumnConfigs) == 0 && (!typeutil.IsExternalCollection(schema) || columnResolver.IsMilvusTable()) {
+	// The packed reader consumes internal TEXT columns as physical binary LOB
+	// references. SegmentReader is the logical reader and requires UTF8 TEXT so
+	// it can resolve those references before returning Arrow records. External
+	// source coercion remains in the external-source normalization path.
+	if len(textColumnConfigs) == 0 && !rwOptions.resolveTextLob &&
+		(!typeutil.IsExternalCollection(schema) || columnResolver.IsMilvusTable()) {
 		arrowSchema = overrideTextFieldsToBinaryByFields(
 			columnResolver.ManifestStoredFields(),
 			arrowSchema,
@@ -425,7 +607,8 @@ func newManifestReader(
 		externalSpecContext:  extfs,
 		textColumnConfigs:    textColumnConfigs,
 
-		neededColumns: neededColumns,
+		neededColumns:  neededColumns,
+		resolveTextLob: rwOptions.resolveTextLob,
 	}
 
 	err = prr.init()
@@ -437,6 +620,30 @@ func newManifestReader(
 }
 
 func (mr *ManifestReader) init() error {
+	if mr.resolveTextLob {
+		basePath, _, err := packed.UnmarshalManifestPath(mr.manifest)
+		if err != nil {
+			return merr.Wrap(err, "failed to parse manifest path for TEXT LOB resolution")
+		}
+
+		textColumns := make([]packed.TextColumnConfig, 0)
+		for _, field := range typeutil.GetAllFieldSchemas(mr.schema) {
+			if field.GetDataType() != schemapb.DataType_Text {
+				continue
+			}
+			if _, ok := mr.field2Col[field.GetFieldID()]; !ok {
+				continue
+			}
+			textColumns = append(textColumns, packed.TextColumnConfig{
+				FieldID:     field.GetFieldID(),
+				LobBasePath: path.Join(path.Dir(basePath), "lobs", strconv.FormatInt(field.GetFieldID(), 10)),
+			})
+		}
+
+		// Share the upstream logical reader with compaction; only the source
+		// LOB path derivation is specific to snapshot import.
+		mr.textColumnConfigs = textColumns
+	}
 	if len(mr.textColumnConfigs) > 0 {
 		reader, err := packed.NewFFISegmentReader(mr.manifest, mr.arrowSchema, mr.neededColumns,
 			mr.bufferSize, mr.storageConfig, mr.textColumnConfigs)
@@ -469,7 +676,9 @@ func (mr *ManifestReader) Next() (Record, error) {
 
 func (mr *ManifestReader) Close() error {
 	if mr.reader != nil {
-		return mr.reader.Close()
+		err := mr.reader.Close()
+		mr.reader = nil
+		return err
 	}
 	return nil
 }

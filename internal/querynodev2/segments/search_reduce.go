@@ -38,13 +38,13 @@ func getSearchResultDedupKey(data *schemapb.SearchResultData, idx int64, pk inte
 
 type SearchCommonReduce struct{}
 
-func reduceFieldsDataLen(searchResultData []*schemapb.SearchResultData) int {
-	for _, data := range searchResultData {
-		if len(data.GetFieldsData()) > 0 {
-			return len(data.GetFieldsData())
-		}
+// reduceFieldsData presizes the output columns for at most rowCap rows.
+func reduceFieldsData(searchResultData []*schemapb.SearchResultData, rowCap int64) []*schemapb.FieldData {
+	sources := make([][]*schemapb.FieldData, len(searchResultData))
+	for i, data := range searchResultData {
+		sources[i] = data.GetFieldsData()
 	}
-	return 0
+	return typeutil.PresizeAppendFieldData(rowCap, sources...)
 }
 
 func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.SearchResultData, info *reduce.ResultInfo) (*schemapb.SearchResultData, error) {
@@ -63,11 +63,12 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 	}
 	nq := info.GetNq()
 	topk := info.GetTopK()
+	rowCap := reduce.PresizeRows(searchResultData, nq*topk)
 	ret := &schemapb.SearchResultData{
 		NumQueries: nq,
 		TopK:       topk,
-		FieldsData: make([]*schemapb.FieldData, reduceFieldsDataLen(searchResultData)),
-		Scores:     make([]float32, 0, nq*topk),
+		FieldsData: reduceFieldsData(searchResultData, rowCap),
+		Scores:     make([]float32, 0, rowCap),
 		Ids:        &schemapb.IDs{},
 		Topks:      make([]int64, 0, nq),
 	}
@@ -200,11 +201,17 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 	}
 	nq := info.GetNq()
 	topk := info.GetTopK()
+	groupSize := info.GetGroupSize()
+	if groupSize <= 0 {
+		groupSize = 1
+	}
+	groupBound := topk * groupSize
+	rowCap := reduce.PresizeRows(searchResultData, nq*groupBound)
 	ret := &schemapb.SearchResultData{
 		NumQueries: nq,
 		TopK:       topk,
-		FieldsData: make([]*schemapb.FieldData, reduceFieldsDataLen(searchResultData)),
-		Scores:     make([]float32, 0, nq*topk),
+		FieldsData: reduceFieldsData(searchResultData, rowCap),
+		Scores:     make([]float32, 0, rowCap),
 		Ids:        &schemapb.IDs{},
 		Topks:      make([]int64, 0, nq),
 	}
@@ -265,12 +272,7 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 	var filteredCount int64
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
-	groupSize := info.GetGroupSize()
-	if groupSize <= 0 {
-		groupSize = 1
-	}
-	groupBound := info.GetTopK() * groupSize
-	acceptedRows := make([]reduce.RowRef, 0, nq*groupBound)
+	acceptedRows := make([]reduce.RowRef, 0, rowCap)
 
 	// N=1 uses a typed Go map keyed by the raw value; N>=2 uses a uint64
 	// hash map with values-equality chain (because []any is not a map key).

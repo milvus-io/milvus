@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type SearchReduceSuite struct {
@@ -493,6 +494,107 @@ func (suite *SearchReduceSuite) TestResult_SearchGroupByResult() {
 		suite.Equal(int64(topk), res.GetTopK())
 		suite.Equal(0, len(res.GetFieldsData()))
 	})
+}
+
+// presizeReduceInput is one shard result with an int64 column, a dense
+// vector column and a nullable vector column whose rows are all null.
+func presizeReduceInput(ids []int64, scores []float32, groups []int32) *schemapb.SearchResultData {
+	const dim = 4
+	data := mock_segcore.GenSearchResultData(1, int64(len(ids)), ids, scores, []int64{int64(len(ids))})
+	vectors := make([]float32, 0, len(ids)*dim)
+	for _, id := range ids {
+		for d := 0; d < dim; d++ {
+			vectors = append(vectors, float32(id))
+		}
+	}
+	data.FieldsData = []*schemapb.FieldData{
+		{
+			Type: schemapb.DataType_Int64, FieldId: 100, FieldName: "pk",
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: ids}},
+			}},
+		},
+		{
+			Type: schemapb.DataType_FloatVector, FieldId: 102, FieldName: "vec",
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:  dim,
+				Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: vectors}},
+			}},
+		},
+		{
+			Type: schemapb.DataType_FloatVector, FieldId: 103, FieldName: "null_vec",
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim:       dim,
+				ValidData: make([]bool, len(ids)),
+				Data:      &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}},
+			}},
+		},
+	}
+	data.GroupByFieldValue = &schemapb.FieldData{
+		Type: schemapb.DataType_Int32, FieldId: 101,
+		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: groups}},
+		}},
+	}
+	return data
+}
+
+func (suite *SearchReduceSuite) TestReduceSizesOutputByInputRows() {
+	const (
+		nq   = 1
+		topk = 16384
+		dim  = 4
+	)
+	cases := []struct {
+		name      string
+		groupSize int64
+	}{
+		{"common", 1},
+		{"group_by", 3},
+	}
+	for _, tc := range cases {
+		suite.Run(tc.name, func() {
+			reduceInfo := reduce.NewReduceSearchResultInfo(nq, topk).WithGroupSize(tc.groupSize)
+			if tc.groupSize > 1 {
+				reduceInfo = reduceInfo.WithGroupByFieldIdsFromProto(101, nil)
+			}
+			inputs := []*schemapb.SearchResultData{
+				presizeReduceInput([]int64{1, 2, 3}, []float32{9, 7, 5}, []int32{1, 2, 3}),
+				presizeReduceInput([]int64{4, 5}, []float32{8, 6}, []int32{4, 5}),
+			}
+			res, err := InitSearchReducer(reduceInfo).ReduceSearchResultData(context.TODO(), inputs, reduceInfo)
+			suite.Require().NoError(err)
+			suite.Equal([]int64{1, 4, 2, 5, 3}, res.GetIds().GetIntId().GetData())
+
+			// Sized by the 5 input rows, not by topK.
+			suite.Equal(5, cap(res.GetScores()))
+			suite.Equal(5, cap(res.GetFieldsData()[0].GetScalars().GetLongData().GetData()))
+			vectors := res.GetFieldsData()[1].GetVectors().GetFloatVector().GetData()
+			suite.Len(vectors, 5*dim)
+			suite.Equal(5*dim, cap(vectors))
+
+			// A nullable vector column of only null rows keeps no payload,
+			// as when the reduce built it from nil.
+			nullVec := res.GetFieldsData()[2]
+			suite.Equal([]bool{false, false, false, false, false}, typeutil.GetFieldDataValidData(nullVec))
+			suite.Nil(nullVec.GetVectors().GetData())
+		})
+
+		suite.Run(tc.name+"_no_rows", func() {
+			reduceInfo := reduce.NewReduceSearchResultInfo(nq, topk).WithGroupSize(tc.groupSize)
+			if tc.groupSize > 1 {
+				reduceInfo = reduceInfo.WithGroupByFieldIdsFromProto(101, nil)
+			}
+			inputs := []*schemapb.SearchResultData{presizeReduceInput(nil, nil, nil)}
+			inputs[0].Topks = []int64{0}
+			res, err := InitSearchReducer(reduceInfo).ReduceSearchResultData(context.TODO(), inputs, reduceInfo)
+			suite.Require().NoError(err)
+			suite.Len(res.GetFieldsData(), 3)
+			for _, fd := range res.GetFieldsData() {
+				suite.Nil(fd)
+			}
+		})
+	}
 }
 
 func (suite *SearchReduceSuite) TestElementIndices_BackfillNilForEmptyResult() {

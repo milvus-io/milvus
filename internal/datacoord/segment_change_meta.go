@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // This file implements the meta-layer of SegmentChangeGroup, the atomic
@@ -398,6 +399,32 @@ func (m *meta) HasStagedSegment(ctx context.Context, collectionID, segmentID int
 	return group != nil && (collectionID <= 0 || group.CollectionID == collectionID)
 }
 
+// aliveStagedMembers returns the set of segments currently staged by an ALIVE
+// (STAGED/READY) group of collectionID (collectionID <= 0 returns members of
+// every collection). The legacy view paths use it to exclude staged members
+// from every read surface — including ones that do not filter IsInvisible
+// (e.g. getEarliestSegmentDMLPos, design R10) — without per-segment locking.
+// Staged members are invisible by construction, but a view that only filters
+// IsImporting would otherwise leak their DML position / partition into the
+// read set.
+func (m *meta) aliveStagedMembers(ctx context.Context, collectionID int64) typeutil.UniqueSet {
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
+	members := typeutil.NewUniqueSet()
+	for _, g := range m.segmentChangeGroups {
+		if collectionID > 0 && g.CollectionID != collectionID {
+			continue
+		}
+		if g.State != model.SegmentChangeStateStaged && g.State != model.SegmentChangeStateReady {
+			continue
+		}
+		for _, id := range g.NewSegmentIDs {
+			members.Insert(id)
+		}
+	}
+	return members
+}
+
 // GetSegmentChangeGroupByReferencedSegment returns the ALIVE group that
 // references segmentID — as a staged member OR as a superseded parent — or nil
 // when the segment is claimed by no alive group. This is the "is this segment
@@ -640,10 +667,6 @@ func (m *meta) updateSegmentsInfoAndChangeGroups(ctx context.Context, dataView *
 		meta:       m,
 		segments:   make(map[int64]*SegmentInfo),
 		increments: make(map[int64]metastore.BinlogsIncrement),
-		metricMutation: &segMetricMutation{
-			stateChange:             make(segmentMetricStateChange),
-			deferSegmentLabelChange: true,
-		},
 	}
 	for _, operator := range operators {
 		operator(updatePack)
@@ -748,7 +771,6 @@ func (m *meta) updateSegmentsInfoAndChangeGroups(ctx context.Context, dataView *
 			}
 		}
 	}
-	updatePack.prepareSegmentMetricUpdates()
 
 	// C2: deterministic action order. updatePack.segments is a Go map, so a
 	// direct iteration interleaves member flips and superseded retirements
@@ -862,8 +884,8 @@ func (m *meta) updateSegmentsInfoAndChangeGroups(ctx context.Context, dataView *
 			mlog.Err(err))
 		return err
 	}
-	// Apply metric mutation and memory status after a successful meta update.
-	updatePack.metricMutation.commit()
+	// Apply memory status after a successful meta update; the MetaStore
+	// emits segment metrics as segments are installed.
 	for id, s := range updatePack.segments {
 		m.segments.SetSegment(id, s)
 	}

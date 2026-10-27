@@ -199,6 +199,17 @@ func NewSegmentInfo(info *datapb.SegmentInfo, bfs pkoracle.PkStat, bm25Stats *Se
 		}
 		mlog.Info(context.TODO(), "recover split info", mlog.FieldSegmentID(info.GetID()), mlog.Stringers("columnGroup", currentSplit))
 	}
+	// V3 catalog records retain Statistics even when their binlog arrays are
+	// omitted. Restore logical grouping here; recovery loads physical formats
+	// from the manifest before this segment can resume writing.
+	if currentSplit == nil && info.GetStorageVersion() >= storage.StorageV2 {
+		for _, group := range info.GetStats().GetLoadResource().GetColumnGroups() {
+			currentSplit = append(currentSplit, storagecommon.ColumnGroup{
+				GroupID: group.GetGroupId(),
+				Fields:  append([]int64(nil), group.GetFieldIds()...),
+			})
+		}
+	}
 	return &SegmentInfo{
 		segmentID:        info.GetID(),
 		partitionID:      info.GetPartitionID(),

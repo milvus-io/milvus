@@ -3,6 +3,7 @@ package segment
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
@@ -90,11 +91,28 @@ func (w *growingBulkPackWriter) FlushInsertBuffer(ctx context.Context, pack *flu
 		return nil, err
 	}
 
-	currentSplit, err := currentSplitForGrowingPack(schema, insertData, pack.Meta)
+	currentSplit, err := currentSplitForGrowingPack(ctx, schema, insertData, pack.Meta, w.storageConfig)
 	if err != nil {
-		return nil, retry.Unrecoverable(merr.Wrapf(err, "restore column groups for growing segment %d", pack.SegmentID))
+		err = merr.Wrapf(err, "restore column groups for growing segment %d", pack.SegmentID)
+		if errors.Is(err, merr.ErrDataIntegrity) || errors.Is(err, packed.ErrLoonPermanent) {
+			return nil, retry.Unrecoverable(err)
+		}
+		return nil, err
 	}
 	metaCache := newGrowingSegmentMetaCache(pack.Meta, schema)
+	if pack.Meta.GetStorageVersion() == storage.StorageV3 {
+		// The selected layout can come from a complete snapshot or a manifest.
+		// Seed its collector with the same IDs so a historical alias is not
+		// carried into the next publication. Leave the pack's proto untouched.
+		normalized, err := storagecommon.NormalizeColumnGroupStatistics(currentSplit, pack.Meta.GetPersistedStorage().GetStatistics())
+		if err != nil {
+			return nil, retry.Unrecoverable(merr.Wrap(err, "normalize growing segment column-group statistics"))
+		}
+		metaCache.UpdateSegments(metacache.MergeSegmentAction(
+			metacache.UpdateCurrentSplit(currentSplit),
+			metacache.SetStatistics(metacache.NewSegmentStatsFromStats(normalized, int64(pack.Meta.GetStat().GetModifiedRows()))),
+		), metacache.WithSegmentIDs(pack.SegmentID))
+	}
 	syncPack := new(syncmgr.SyncPack).
 		WithCollectionID(pack.CollectionID).
 		WithPartitionID(pack.PartitionID).
@@ -164,7 +182,7 @@ func buildGrowingInsertData(schema *schemapb.CollectionSchema, pack *flushPack) 
 			}
 			// MustBody panics on unmarshal failure, so request is never nil
 			// here.
-			request := insert.Message.MustBody()
+			request := storage.CopyInsertRequestMetadata(insert.Message.MustBody())
 			request.ShardName = pack.VChannel
 			request.CollectionID = pack.CollectionID
 			request.PartitionID = insert.Assignment.GetPartitionId()
@@ -414,9 +432,11 @@ func validateGrowingColumnGroups(schema *schemapb.CollectionSchema, groups []sto
 }
 
 func currentSplitForGrowingPack(
+	ctx context.Context,
 	schema *schemapb.CollectionSchema,
 	insertData []*storage.InsertData,
 	meta *streamingpb.SegmentAssignmentMeta,
+	storageConfig *indexpb.StorageConfig,
 ) ([]storagecommon.ColumnGroup, error) {
 	switch meta.GetStorageVersion() {
 	case storage.StorageV2, storage.StorageV3:
@@ -427,6 +447,40 @@ func currentSplitForGrowingPack(
 	currentSplit, err := currentSplitFromPersistedStorage(schema, meta.GetPersistedStorage())
 	if err != nil {
 		return nil, err
+	}
+	// Legacy V3 migration can retain Statistics and the manifest but no
+	// FieldBinlog arrays. Recover its original layout instead of sampling a
+	// different split from the first post-recovery batch.
+	if len(currentSplit) == 0 && meta.GetStorageVersion() == storage.StorageV3 {
+		persisted := meta.GetPersistedStorage()
+		if manifest := persisted.GetManifestPath(); manifest != "" {
+			_, version, err := packed.UnmarshalManifestPath(manifest)
+			if err != nil {
+				return nil, merr.WrapErrDataIntegrityMsg("invalid persisted manifest path %q", manifest)
+			}
+			if version != packed.ManifestEarliest {
+				currentSplit, err = packed.RestoreColumnGroupsFromManifest(ctx, manifest, persisted.GetStatistics(), storageConfig)
+				if err != nil {
+					return nil, err
+				}
+				if len(currentSplit) == 0 && persisted.GetStatistics().GetInsertBinlogCount() > 0 {
+					return nil, merr.WrapErrDataIntegrityMsg("persisted insert statistics have no manifest column groups")
+				}
+				fieldIndexes := make(map[int64]int)
+				for index, field := range typeutil.GetAllFieldSchemas(schema) {
+					fieldIndexes[field.GetFieldID()] = index
+				}
+				for i := range currentSplit {
+					for _, field := range currentSplit[i].Fields {
+						index, ok := fieldIndexes[field]
+						if !ok {
+							return nil, merr.WrapErrDataIntegrityMsg("persisted column group %d contains field %d absent from schema version %d", currentSplit[i].GroupID, field, schema.GetVersion())
+						}
+						currentSplit[i].Columns = append(currentSplit[i].Columns, index)
+					}
+				}
+			}
+		}
 	}
 	writerFormat := paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
 	if len(currentSplit) > 0 {

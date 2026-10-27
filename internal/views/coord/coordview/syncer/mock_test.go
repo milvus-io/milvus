@@ -74,8 +74,10 @@ func (s *mockStream) Recv() (*viewpb.SyncResponse, error) {
 	}
 }
 
-func (s *mockStream) Header() (metadata.MD, error) { return nil, nil }
-func (s *mockStream) Trailer() metadata.MD         { return nil }
+func (s *mockStream) Header() (metadata.MD, error) {
+	return nil, nil
+}
+func (s *mockStream) Trailer() metadata.MD { return nil }
 func (s *mockStream) CloseSend() error {
 	s.closed.Add(1)
 	if !s.sendReturned.Load() {

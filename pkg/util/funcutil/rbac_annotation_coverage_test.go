@@ -75,8 +75,8 @@ var rbacAnnotationAllowlist = map[protoreflect.Name]string{
 	"GetClientTelemetry": "root-only telemetry diagnostics",
 	// GetFlushAllState only polls global flush completion by timestamp.
 	"GetFlushAllState": "async global flush status polling",
-	// GetImportState is a v1 compatibility wrapper for import progress polling.
-	"GetImportState": "legacy import status polling",
+	// GetImportState delegates persisted resource authorization to Proxy.GetImportProgress.
+	"GetImportState": "resource authorization in Proxy.GetImportProgress",
 	// GetMetrics is a diagnostics endpoint for system metrics.
 	"GetMetrics": "system metrics diagnostics",
 	// GetPersistentSegmentInfo explicitly requires collection GetStatistics in Proxy.
@@ -97,8 +97,8 @@ var rbacAnnotationAllowlist = map[protoreflect.Name]string{
 	"HasCollection": "collection existence probe",
 	// ListDatabases is result-filtered by rootcoord using the caller roles.
 	"ListDatabases": "result-filtered by caller grants",
-	// ListImportTasks is a v1 compatibility wrapper for import task listing.
-	"ListImportTasks": "legacy import task listing",
+	// ListImportTasks delegates persisted resource filtering to Proxy.ListImports.
+	"ListImportTasks": "resource filtering in Proxy.ListImports",
 	// ListIndexedSegment is an unimplemented feder endpoint that returns service-unavailable.
 	"ListIndexedSegment": "unimplemented feder endpoint",
 	// ListRefreshExternalCollectionJobs lists external-collection refresh jobs, optionally scoped by collection.

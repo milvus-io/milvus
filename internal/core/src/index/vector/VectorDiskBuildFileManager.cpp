@@ -339,6 +339,12 @@ VectorDiskBuildFileManager::LoadFile(const std::string& filename) {
     }
 }
 
+void
+VectorDiskBuildFileManager::SetInputFiles(std::vector<std::string> paths) {
+    std::lock_guard lock(mutex_);
+    input_files_ = std::move(paths);
+}
+
 bool
 VectorDiskBuildFileManager::AddFile(const std::string& filename) {
     try {
@@ -369,13 +375,22 @@ VectorDiskBuildFileManager::AddFileMeta(const milvus::FileMeta& file_meta) {
                       file_meta.file_size);
         }
         std::lock_guard lock(mutex_);
+        if (const auto completed = files_.find(file_meta.file_path);
+            completed != files_.end()) {
+            if (completed->second.size != file_meta.file_size ||
+                completed->second.transport !=
+                    VectorDiskFileTransport::RawUnsliced) {
+                ThrowInfo(FileWriteFailed,
+                          "local vector output {} has conflicting size or "
+                          "transport",
+                          file_meta.file_path);
+            }
+            return true;
+        }
         AssertInfo(
             open_outputs_.find(file_meta.file_path) != open_outputs_.end(),
             "local vector output metadata {} has no open stream",
             file_meta.file_path);
-        AssertInfo(files_.find(file_meta.file_path) == files_.end(),
-                   "local vector output {} is already complete",
-                   file_meta.file_path);
         const auto [entry, inserted] =
             pending_meta_.emplace(file_meta.file_path, file_meta.file_size);
         if (!inserted && entry->second != file_meta.file_size) {
@@ -436,7 +451,14 @@ VectorDiskBuildFileManager::RemoveFile(const std::string& filename) {
 std::shared_ptr<milvus::InputStream>
 VectorDiskBuildFileManager::OpenInputStream(const std::string& filename) {
     try {
-        if (!local_files_->Owns(filename)) {
+        bool borrowed;
+        {
+            std::lock_guard lock(mutex_);
+            borrowed =
+                std::find(input_files_.begin(), input_files_.end(), filename) !=
+                input_files_.end();
+        }
+        if (!borrowed && !local_files_->Owns(filename)) {
             ThrowInfo(FileReadFailed,
                       "refusing to open unowned local vector input {}",
                       filename);

@@ -192,13 +192,13 @@ ValidateFamilyCast(std::string_view family,
     const auto index_type = ParseString(params, INDEX_TYPE);
     if (index_type == HYBRID_INDEX_TYPE) {
         const bool supported =
-            type != JsonCastType::DataType::ARRAY &&
             (element == JsonCastType::DataType::BOOL ||
              element == JsonCastType::DataType::DOUBLE ||
              element == JsonCastType::DataType::VARCHAR) &&
             (family == families::kBitmap || family == families::kSort ||
              family == families::kInverted ||
              (family == families::kMarisa &&
+              type != JsonCastType::DataType::ARRAY &&
               element == JsonCastType::DataType::VARCHAR));
         if (!supported) {
             ThrowInfo(DataTypeInvalid,
@@ -212,14 +212,13 @@ ValidateFamilyCast(std::string_view family,
         return;
     }
     const bool scalar = type != JsonCastType::DataType::ARRAY;
-    const bool supported = (family == families::kSort && scalar &&
-                            (element == JsonCastType::DataType::DOUBLE ||
-                             element == JsonCastType::DataType::VARCHAR)) ||
-                           (family == families::kBitmap && scalar &&
-                            (element == JsonCastType::DataType::BOOL ||
-                             element == JsonCastType::DataType::VARCHAR)) ||
-                           (family == families::kNgram && scalar &&
-                            element == JsonCastType::DataType::VARCHAR);
+    const bool supported =
+        (family == families::kSort && IsJsonSortCast(cast_type)) ||
+        (family == families::kBitmap && scalar &&
+         (element == JsonCastType::DataType::BOOL ||
+          element == JsonCastType::DataType::VARCHAR)) ||
+        (family == families::kNgram && scalar &&
+         element == JsonCastType::DataType::VARCHAR);
     if (!supported) {
         ThrowInfo(DataTypeInvalid,
                   "typed JSON cast {} is not supported by family {}",
@@ -514,6 +513,12 @@ AnnotateJsonProjectionCompleteness(Config params, storage::FileSource& source) {
             ? kComplete
             : kLegacyUnknown);
     return params;
+}
+
+bool
+IsJsonArrayProjection(const Config& params) {
+    return IsJsonFieldType(params) &&
+           ParseCastType(params).data_type() == JsonCastType::DataType::ARRAY;
 }
 
 ReaderCaps

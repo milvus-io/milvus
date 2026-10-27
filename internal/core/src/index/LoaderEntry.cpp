@@ -138,6 +138,9 @@ OpenIndexSource(const IndexLoadRequest& request) {
         storage_namespace == storage::ArtifactStorageNamespace::Index;
     if (use_async) {
         // Stream opening must drain before manager/input owners leave this frame.
+        auto metadata_lease =
+            co_await storage::AcquireMetadataLoadSlotAsync(priority, token);
+        storage::ThrowIfCancelled(token, "open packed index");
         auto opened =
             co_await folly::coro::co_awaitTry(folly::coro::co_withCancellation(
                 folly::CancellationToken{},
@@ -145,6 +148,7 @@ OpenIndexSource(const IndexLoadRequest& request) {
                                              is_index_file)));
         storage::ThrowIfCancelled(token, "open packed index");
         auto input = std::move(opened).value();
+        metadata_lease.Release();
         auto source = co_await storage::AsyncIndexEntryReader::Open(
             std::move(input),
             files.context.fieldDataMeta.collection_id,

@@ -2,6 +2,7 @@ import csv
 import json
 import os
 import time
+from copy import deepcopy
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -16,7 +17,14 @@ from common.common_type import CaseLabel, CheckTasks
 from minio import Minio
 from minio.commonconfig import CopySource
 from pymilvus import DataType, Function, FunctionType
-from pymilvus.bulk_writer import abort_import, bulk_import, commit_import, get_import_progress
+from pymilvus.bulk_writer import (
+    BulkFileType,
+    LocalBulkWriter,
+    abort_import,
+    bulk_import,
+    commit_import,
+    get_import_progress,
+)
 from utils.util_log import test_log as log
 
 
@@ -153,6 +161,90 @@ class TestMilvusClientImportIndependent(TestMilvusClientV2Base):
             if field.dtype == DataType.FLOAT_VECTOR:
                 index_params.add_index(field_name=field.name, index_type="FLAT", metric_type="L2")
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    # All-null sparse inserts are tracked separately in milvus-io/milvus#54330.
+    @pytest.mark.parametrize(
+        "all_null, ingress",
+        [
+            pytest.param(False, "insert", id="mixed_values-insert"),
+            pytest.param(False, "bulk_import", id="mixed_values-bulk_import"),
+            pytest.param(True, "bulk_import", id="all_null-bulk_import"),
+        ],
+    )
+    def test_bulk_writer_nullable_struct_and_sparse_match_insert(self, all_null, ingress, upload_import_file, tmp_path):
+        """
+        target: nullable StructArray and sparse-vector equivalence across insert and bulk import
+        method: write explicit nulls, omitted fields, empty arrays and populated values through both paths
+        expected: Parquet nulls and every queried value match the source, including after release/load
+        """
+        client = self._client()
+        schema = self.create_schema(client, auto_id=False, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=4)
+        struct = self.create_struct_field_schema(client)[0]
+        struct.add_field("value", DataType.INT64)
+        struct.add_field("embedding", DataType.FLOAT_VECTOR, dim=4)
+        schema.add_field(
+            "chunks", DataType.ARRAY, element_type=DataType.STRUCT, struct_schema=struct, max_capacity=2, nullable=True
+        )
+        schema.add_field("sparse", DataType.SPARSE_FLOAT_VECTOR, nullable=True)
+        indexes = self.prepare_index_params(client)[0]
+        indexes.add_index("vector", index_type="FLAT", metric_type="L2")
+        indexes.add_index(
+            "chunks[embedding]", index_type="HNSW", metric_type="MAX_SIM_COSINE", params={"M": 8, "efConstruction": 64}
+        )
+        indexes.add_index("sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="IP")
+        collection_name = cf.gen_unique_str(f"nullable_{ingress}")
+        self.create_collection(client, collection_name, schema=schema, index_params=indexes)
+
+        rows = [
+            {"id": 0, "vector": [0.0, 0.25, 0.5, 1.0], "chunks": None, "sparse": None},
+            {"id": 1, "vector": [1.0, 0.25, 0.5, 1.0]},
+        ]
+        if not all_null:
+            rows.extend(
+                [
+                    {"id": 2, "vector": [2.0, 0.25, 0.5, 1.0], "chunks": [], "sparse": {1: 0.5}},
+                    {
+                        "id": 3,
+                        "vector": [3.0, 0.25, 0.5, 1.0],
+                        "chunks": [{"value": 7, "embedding": [1.0, 0.5, 0.25, 0.0]}],
+                        "sparse": None,
+                    },
+                    {"id": 4, "vector": [4.0, 0.25, 0.5, 1.0], "chunks": None, "sparse": {3: 0.25}},
+                    {
+                        "id": 5,
+                        "vector": [5.0, 0.25, 0.5, 1.0],
+                        "chunks": [{"value": 11, "embedding": [0.0, 0.25, 0.5, 1.0]}],
+                        "sparse": {2: 0.125},
+                    },
+                ]
+            )
+        # Freeze the source oracle before either SDK path can normalize its input.
+        expected = [
+            dict(deepcopy(row), chunks=deepcopy(row.get("chunks")), sparse=deepcopy(row.get("sparse"))) for row in rows
+        ]
+        if ingress == "insert":
+            result = self.insert(client, collection_name, deepcopy(rows))[0]
+            assert result["insert_count"] == len(rows), result
+        else:
+            with LocalBulkWriter(schema=schema, local_path=str(tmp_path), file_type=BulkFileType.PARQUET) as writer:
+                for row in deepcopy(rows):
+                    writer.append_row(row)
+                writer.commit()
+                assert len(writer.batch_files) == 1 and len(writer.batch_files[0]) == 1
+                table = pq.read_table(writer.batch_files[0][0])
+                for field_name in ("chunks", "sparse"):
+                    assert table.column(field_name).null_count == sum(row[field_name] is None for row in expected)
+                files = [[upload_import_file(tmp_path / writer.batch_files[0][0])]]
+                progress = self._import_and_wait(collection_name, files)
+                assert progress["importedRows"] == progress["totalRows"] == len(rows), progress
+            self.refresh_load(client, collection_name)
+        self._assert_import_rows(client, collection_name, expected)
+        self.release_collection(client, collection_name)
+        self.load_collection(client, collection_name)
+        self._assert_import_rows(client, collection_name, expected)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("file_format", ["json", "jsonl", "csv", "parquet"])

@@ -19,6 +19,8 @@ package common
 import (
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -69,4 +71,52 @@ func WrapDecodeErr(err error, what string) error {
 		return merr.Wrap(err, what)
 	}
 	return merr.WrapErrImportFailedMsg("%s, err=%v", what, err)
+}
+
+// terminalImportV3ErrSentinels are the import-specific codes that cannot
+// recover by replaying the same request, input or result. InputError
+// (ErrParameterInvalid, ErrPrivilegeNotPermitted, ErrImportFailed) and the
+// permanent IO family are checked separately.
+var terminalImportV3ErrSentinels = []error{
+	merr.ErrDataIntegrity,
+	merr.ErrIoFailed,
+	merr.ErrImportSysFailed,
+	merr.ErrServiceQuotaExceeded,
+	merr.ErrServiceUnimplemented,
+	merr.ErrServiceInternal,
+	merr.ErrStorage,
+	packed.ErrLoonPermanent,
+}
+
+// IsTerminalImportV3Err reports whether an error is a deterministic failure of
+// the request, input or result. A nil error is not terminal.
+//
+// Raw (non-Milvus) errors are deliberately not classified here: the same
+// transport failure retries at Create, an unclassified execution error fails
+// the task, and a catalog failure retries at acceptResult, so each caller
+// decides what a raw error means before relying on this verdict.
+func IsTerminalImportV3Err(err error) bool {
+	if err == nil {
+		return false
+	}
+	// The producer already classified this as retryable; a storage wrapper must
+	// not turn it terminal.
+	if errors.Is(err, packed.ErrLoonTransient) {
+		return false
+	}
+	// ID exhaustion is recoverable: DataCoord's prepareRetry re-derives the
+	// per-file ID width before the next run. The sentinel is wrapped as
+	// ServiceInternal, which is otherwise terminal.
+	if allocator.IsIDExhausted(err) {
+		return false
+	}
+	if merr.IsNonRetryableErr(err) || merr.GetErrorType(err) == merr.InputError {
+		return true
+	}
+	for _, sentinel := range terminalImportV3ErrSentinels {
+		if errors.Is(err, sentinel) {
+			return true
+		}
+	}
+	return false
 }

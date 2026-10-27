@@ -28,6 +28,7 @@
 #include "segcore/CacheMetricAttribution.h"
 #include "segcore/Utils.h"
 #include "storage/FileManager.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 
 namespace milvus::segcore::storagev2translator {
 
@@ -58,6 +59,7 @@ JsonStatsTranslator::JsonStatsTranslator(
       info_proto_(std::move(info_proto)),
       chunk_manager_(std::move(chunk_manager)),
       fs_(std::move(fs)),
+      use_async_load_(StorageV2AsyncLoadEnabled()),
       key_(fmt::format("seginst_{}_seg_{}_jsonstats_{}_build_{}_version_{}",
                        load_info_.segment_instance_uid,
                        load_info_.segment_id,
@@ -134,6 +136,7 @@ JsonStatsTranslator::get_cells(
                                           info_proto_->version()};
     milvus::storage::FileManagerContext file_ctx(
         field_data_meta, index_meta, chunk_manager_, fs_);
+    file_ctx.use_async_load = use_async_load_;
 
     milvus::Config config;
     std::vector<std::string> files;
@@ -166,7 +169,7 @@ JsonStatsTranslator::get_cells(
                     us / 1000.0);
             },
             milvus::ScopedTimer::LogLevel::Info);
-        stats->Load(milvus::tracer::TraceContext{}, config);
+        stats->Load(milvus::tracer::TraceContext{}, config, ctx);
     }
 
     CheckCancellation(

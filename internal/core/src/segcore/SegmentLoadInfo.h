@@ -800,14 +800,9 @@ class SegmentLoadInfo {
     HasManifestColumn(const std::string& column_name) const;
 
     // Reuses manifest column groups when another load info points at the same
-    // manifest path.
+    // manifest revision.
     void
-    InheritCachedColumnGroupsFrom(const SegmentLoadInfo& source) {
-        if (source.HasManifestPath() &&
-            source.GetManifestPath() == GetManifestPath()) {
-            column_groups_ = source.column_groups_;
-        }
-    }
+    InheritCachedColumnGroupsFrom(const SegmentLoadInfo& source);
 
     /**
      * @brief Pre-populate the column group cache without parsing a manifest
@@ -1172,19 +1167,8 @@ class SegmentLoadInfo {
             field_index_id_cache_[field_id].push_back(index_info.indexid());
             auto load_index_info = ConvertFieldIndexInfoToLoadIndexInfo(
                 &index_info, info_.segmentid());
-            auto index_type_it =
-                load_index_info.index_params.find(milvus::index::INDEX_TYPE);
-            auto scalar_version_it = load_index_info.index_params.find(
-                milvus::index::SCALAR_INDEX_ENGINE_VERSION);
-            auto scalar_v3 =
-                !IsVectorDataType(load_index_info.field_type) &&
-                scalar_version_it != load_index_info.index_params.end() &&
-                std::stoi(scalar_version_it->second) >= 3;
-            auto needs_file_context =
-                scalar_v3 ||
-                (!IsVectorDataType(load_index_info.field_type) &&
-                 index_type_it != load_index_info.index_params.end() &&
-                 index_type_it->second == milvus::index::HYBRID_INDEX_TYPE);
+            // Use metadata-only estimates for capabilities, not as an override
+            // of the translator's file-aware loading resource estimate.
             auto request = milvus::index::IndexLoadResource(
                 load_index_info.field_type,
                 load_index_info.element_type,
@@ -1194,9 +1178,6 @@ class SegmentLoadInfo {
                 load_index_info.enable_mmap,
                 load_index_info.num_rows,
                 load_index_info.dim);
-            if (!needs_file_context) {
-                load_index_info.load_resource_request = request;
-            }
             if (milvus::index::CanUseIndexRawDataForField(
                     load_index_info.field_type, request.has_raw_data)) {
                 field_index_has_raw_data_.insert(field_id);

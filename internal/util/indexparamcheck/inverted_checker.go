@@ -14,7 +14,7 @@ type INVERTEDChecker struct {
 	scalarIndexChecker
 }
 
-var validJSONCastTypes = []string{"BOOL", "DOUBLE", "VARCHAR", "ARRAY_BOOL", "ARRAY_DOUBLE", "ARRAY_VARCHAR", "JSON"}
+var validJSONCastTypes = []string{"BOOL", "DOUBLE", "VARCHAR", "JSON"}
 
 var validJSONCastFunctions = []string{"STRING_TO_DOUBLE"}
 
@@ -27,7 +27,7 @@ func (c *INVERTEDChecker) CheckTrain(dataType schemapb.DataType, elementType sch
 			return merr.WrapErrParameterMissing(common.JSONCastTypeKey, "json index must specify cast type")
 		}
 
-		if !lo.Contains(validJSONCastTypes, castType) {
+		if !lo.Contains(validJSONCastTypes, castType) && !IsJSONArrayCastType(castType) {
 			return merr.WrapErrParameterInvalidMsg("json_cast_type %v is not supported", castType)
 		}
 		if err := checkJSONCastFunction(castType, params); err != nil {

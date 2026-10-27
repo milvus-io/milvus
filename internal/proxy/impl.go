@@ -45,18 +45,17 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/replicate"
-	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -65,7 +64,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -167,11 +165,6 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	collectionName := request.CollectionName
 	collectionID := request.CollectionID
 	msgType := request.GetBase().GetMsgType()
-	if request.GetBase().GetProperties()[common.RLSClearAllCacheKey] == "true" {
-		rls.InvalidateAll()
-		mlog.Info(ctx, "complete to invalidate all RLS metadata caches")
-		return merr.Success(), nil
-	}
 	var aliasName []string
 	// The shard leader cache is keyed by the cluster-unique collection id (issue #51533), so an
 	// alias/collection name is no longer a cache key. Evicting the affected collection id covers
@@ -183,33 +176,6 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		if collectionID != UniqueID(0) {
 			node.shardMgr.InvalidateShardLeaderCache([]int64{collectionID})
 		}
-	}
-
-	switch msgType {
-	case commonpb.MsgType_CreateRowPolicy,
-		commonpb.MsgType_UpdateRowPolicy,
-		commonpb.MsgType_DropRowPolicy:
-		rls.InvalidatePolicies(collectionID, request.GetBase().GetTimestamp())
-		mlog.Info(ctx, "complete to invalidate RLS policy snapshot",
-			mlog.String("type", request.GetBase().GetMsgType().String()),
-			mlog.FieldDbName(dbName),
-			mlog.FieldCollectionName(collectionName),
-			mlog.FieldCollectionID(collectionID))
-		return merr.Success(), nil
-	case commonpb.MsgType_SetRLSPrincipalTags,
-		commonpb.MsgType_DeleteRLSPrincipalTags:
-		principalName := request.GetBase().GetProperties()[common.RLSPrincipalNameKey]
-		if principalName == "" {
-			return merr.Status(merr.WrapErrServiceInternalMsg("RLS principal cache invalidation is missing principal name")), nil
-		}
-		rls.InvalidatePrincipalTags(collectionID, principalName, request.GetBase().GetTimestamp())
-		mlog.Info(ctx, "complete to invalidate RLS principal tags",
-			mlog.String("type", request.GetBase().GetMsgType().String()),
-			mlog.FieldDbName(dbName),
-			mlog.FieldCollectionName(collectionName),
-			mlog.FieldCollectionID(collectionID),
-			mlog.String("principalName", principalName))
-		return merr.Success(), nil
 	}
 
 	if node.GetMetaCache() != nil {
@@ -275,7 +241,6 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	}
 	switch msgType {
 	case commonpb.MsgType_DropCollection:
-		rls.MarkCollectionDropped(request.GetCollectionID())
 		// clean up collection level metrics
 		metrics.CleanupProxyCollectionMetrics(paramtable.GetNodeID(), dbName, collectionName)
 		for _, alias := range aliasName {
@@ -2445,7 +2410,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		limiter, _ = node.GetRateLimiter()
 	}
 
-	dr := NewDeleteRunner(node, request, node.GetMetaCache(), node.rowIDAllocator, node.tsoAllocator, node.chMgr, node.sched.DmQueue, node.lbPolicy, limiter)
+	dr := NewDeleteRunner(node, request, node.GetMetaCache(), node.rowIDAllocator, node.tsoAllocator, node.sched.DmQueue, node.lbPolicy, limiter)
 
 	mlog.Debug(context.TODO(), "init delete runner in Proxy")
 	if err := dr.Init(ctx); err != nil {
@@ -2616,9 +2581,6 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	}
 
 	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(it.UpsertMsg().InsertMsg.Size()+it.UpsertMsg().DeleteMsg.Size()))
-	if merr.Ok(it.Result().GetStatus()) {
-		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeUpsert, dbName, username).Add(float64(v))
-	}
 	successCnt := it.Result().UpsertCnt - int64(len(it.Result().ErrIndex))
 	metrics.ProxyUpsertVectors.
 		WithLabelValues(nodeID, dbName, collectionName).
@@ -2650,18 +2612,19 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
 	}
-	rlsSnapshot := &searchRLSSnapshot{}
 
 	optimizedSearch := true
 	resultSizeInsufficient := false
 	isTopkReduce := false
 	isRecallEvaluation := false
+	countFeatures := true
 	err2 := retry.Handle(ctx, func() (bool, error) {
-		rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false, rlsSnapshot)
+		rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false, countFeatures)
+		countFeatures = false
 		if merr.Ok(rsp.GetStatus()) && optimizedSearch && resultSizeInsufficient && isTopkReduce && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
 			// without optimize search
 			optimizedSearch = false
-			rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false, rlsSnapshot)
+			rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false, false)
 			metrics.ProxyRetrySearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.SearchLabel,
@@ -2684,7 +2647,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		// search for ground truth and compute recall
 		if isRecallEvaluation && merr.Ok(rsp.GetStatus()) {
 			var rspGT *milvuspb.SearchResults
-			rspGT, _, _, _, err = node.search(ctx, request, false, true, rlsSnapshot)
+			rspGT, _, _, _, err = node.search(ctx, request, false, true, false)
 			metrics.ProxyRecallSearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.SearchLabel,
@@ -2727,7 +2690,11 @@ func projectSearchResultValidDataForLegacy(result *milvuspb.SearchResults) {
 	typeutil.ProjectFieldDataValidDataForLegacy(resultData.GetGroupByFieldValue())
 }
 
-func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool, rlsSnapshot *searchRLSSnapshot) (*milvuspb.SearchResults, bool, bool, bool, error) {
+// countFeatures is true only for the first task built for a user request. The
+// Proxy can run the same request through this function again -- the
+// un-optimized retry, the recall-evaluation ground truth, a retry.Handle
+// re-entry -- and those runs must not move the feature counters again.
+func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool, countFeatures bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.SearchLabel).
@@ -2753,19 +2720,27 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search")
 	defer sp.End()
 
-	request, searchByPK, err := node.prepareSearchAttempt(ctx, request, rlsSnapshot)
-	if err != nil {
-		return &milvuspb.SearchResults{
-			Status: merr.Status(err),
-		}, false, false, false, nil
+	// Counted here, not in the search task: by the time a task exists the ids
+	// have been resolved into vectors and search_input overwritten, and this
+	// function returns before building one both when that resolution fails
+	// and when every id resolves to a null vector. The user asked for a search
+	// by primary key in all three cases. countFeatures keeps the repeat runs
+	// of one user request from counting it again.
+	if ids := request.GetIds(); countFeatures && ids != nil && typeutil.GetSizeOfIDs(ids) > 0 {
+		featureusage.Hit(featureusage.FeatureSearchByPrimaryKeys)
 	}
-	validData, rlsPredicate, err := node.transformSearchByPK(ctx, request, searchByPK)
+
+	request, searchByPK, err := node.prepareSearchByPKAttempt(ctx, request)
 	if err != nil {
 		return &milvuspb.SearchResults{
 			Status: merr.Status(err),
 		}, false, false, false, nil
 	}
 
+	validData, err := node.transformSearchByPK(ctx, request, searchByPK)
+	if err != nil {
+		return &milvuspb.SearchResults{Status: merr.Status(err)}, false, false, false, nil
+	}
 	// If all IDs have null vectors (Nq == 0), return empty results without executing search
 	if len(validData) > 0 && request.GetNq() == 0 {
 		return &milvuspb.SearchResults{
@@ -2782,9 +2757,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	}
 
 	qt := NewSearchTask(ctx, node, node.sched, request, optimizedSearch, isRecallEvaluation, tr)
-	if !rlsSnapshot.presetTask(qt) && searchByPK != nil {
-		qt.SetResolvedRLSPredicate(rlsPredicate)
-	}
+	qt.SetCountFeatures(countFeatures)
 
 	succeeded := false
 	defer func() {
@@ -2835,9 +2808,6 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	)
 
 	err = qt.WaitToFinish()
-	if ctx.Err() == nil {
-		rlsSnapshot.captureTask(qt)
-	}
 	if err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToWaitToFinish(method),
@@ -2930,16 +2900,17 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
 	}
-	rlsSnapshot := &searchRLSSnapshot{}
 	optimizedSearch := true
 	resultSizeInsufficient := false
 	isTopkReduce := false
+	countFeatures := true
 	err2 := retry.Handle(ctx, func() (bool, error) {
-		rsp, resultSizeInsufficient, isTopkReduce, err = node.hybridSearch(ctx, request, optimizedSearch, rlsSnapshot)
+		rsp, resultSizeInsufficient, isTopkReduce, err = node.hybridSearch(ctx, request, optimizedSearch, countFeatures)
+		countFeatures = false
 		if merr.Ok(rsp.GetStatus()) && optimizedSearch && resultSizeInsufficient && isTopkReduce && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
 			// without optimize search
 			optimizedSearch = false
-			rsp, resultSizeInsufficient, isTopkReduce, err = node.hybridSearch(ctx, request, optimizedSearch, rlsSnapshot)
+			rsp, resultSizeInsufficient, isTopkReduce, err = node.hybridSearch(ctx, request, optimizedSearch, false)
 			metrics.ProxyRetrySearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.HybridSearchLabel,
@@ -2983,7 +2954,9 @@ func (l *hybridSearchRequestExprLogger) String() string {
 	return builder.String()
 }
 
-func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest, optimizedSearch bool, rlsSnapshot *searchRLSSnapshot) (*milvuspb.SearchResults, bool, bool, error) {
+// countFeatures carries the same meaning as in search: only the first task
+// built for a user request moves the feature counters.
+func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest, optimizedSearch bool, countFeatures bool) (*milvuspb.SearchResults, bool, bool, error) {
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.HybridSearchLabel).
@@ -3002,9 +2975,8 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-HybridSearch")
 	defer sp.End()
 	newSearchReq := ConvertHybridSearchToSearch(request)
-	newSearchReq = rlsSnapshot.pinRequest(newSearchReq)
 	qt := NewSearchTask(ctx, node, node.sched, newSearchReq, optimizedSearch, false, tr)
-	rlsSnapshot.presetTask(qt)
+	qt.SetCountFeatures(countFeatures)
 
 	succeeded := false
 	defer func() {
@@ -3059,9 +3031,6 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	)
 
 	waitErr := qt.WaitToFinish()
-	if ctx.Err() == nil {
-		rlsSnapshot.captureTask(qt)
-	}
 	if waitErr != nil {
 		mlog.Warn(ctx,
 			rpcFailedToWaitToFinish(method),
@@ -3189,77 +3158,6 @@ func validateIDsType(pkField *schemapb.FieldSchema, ids *schemapb.IDs) error {
 
 type searchByPKPreflight struct {
 	collectionInfo *collectionInfo
-	rlsPredicate   *planpb.Expr
-}
-
-type searchRLSSnapshot struct {
-	resolved       bool
-	collectionID   int64
-	dbName         string
-	collectionName string
-	predicate      *planpb.Expr
-	searchByPK     *searchByPKPreflight
-}
-
-func (snapshot *searchRLSSnapshot) captureTask(task *searchTask) {
-	if snapshot == nil || snapshot.resolved {
-		return
-	}
-	resolved := task.ResolvedRLSSnapshot()
-	if resolved == nil {
-		return
-	}
-	snapshot.resolved = true
-	snapshot.collectionID = resolved.CollectionID
-	snapshot.dbName = resolved.DBName
-	snapshot.collectionName = resolved.CollectionName
-	snapshot.predicate = resolved.Predicate
-}
-
-func (snapshot *searchRLSSnapshot) captureSearchByPK(request *milvuspb.SearchRequest, preflight *searchByPKPreflight) {
-	if snapshot == nil || snapshot.resolved || preflight == nil || preflight.collectionInfo == nil {
-		return
-	}
-	info := preflight.collectionInfo
-	dbName := info.DBName
-	if dbName == "" {
-		dbName = request.GetDbName()
-	}
-	snapshot.resolved = true
-	snapshot.collectionID = info.CollID
-	snapshot.dbName = dbName
-	snapshot.collectionName = info.Schema.GetName()
-	snapshot.predicate = preflight.rlsPredicate
-	snapshot.searchByPK = preflight
-}
-
-func (snapshot *searchRLSSnapshot) presetTask(task *searchTask) bool {
-	if snapshot == nil || !snapshot.resolved {
-		return false
-	}
-	task.SetResolvedRLSPredicate(snapshot.predicate)
-	return true
-}
-
-func (snapshot *searchRLSSnapshot) pinRequest(request *milvuspb.SearchRequest) *milvuspb.SearchRequest {
-	if snapshot == nil || !snapshot.resolved {
-		return request
-	}
-	pinned := copySearchRequestForAttempt(request)
-	pinned.DbName = snapshot.dbName
-	pinned.CollectionName = snapshot.collectionName
-	collectionID := strconv.FormatInt(snapshot.collectionID, 10)
-	if len(pinned.GetSubReqs()) == 0 {
-		pinned.SearchParams = pinSearchCollectionID(pinned.GetSearchParams(), collectionID)
-	} else {
-		for _, subRequest := range pinned.GetSubReqs() {
-			if subRequest == nil {
-				continue
-			}
-			subRequest.SearchParams = pinSearchCollectionID(subRequest.GetSearchParams(), collectionID)
-		}
-	}
-	return pinned
 }
 
 // copySearchRequestForAttempt isolates the fields mutated while preparing a
@@ -3291,8 +3189,6 @@ func copySearchRequestForAttempt(request *milvuspb.SearchRequest) *milvuspb.Sear
 		Highlighter:           request.GetHighlighter(),
 		SearchAggregation:     request.GetSearchAggregation(),
 		FunctionChains:        request.GetFunctionChains(),
-		RlsPrincipal:          request.GetRlsPrincipal(),
-		SkipRls:               request.GetSkipRls(),
 	}
 	for _, subRequest := range request.GetSubReqs() {
 		if subRequest == nil {
@@ -3311,39 +3207,6 @@ func copySearchRequestForAttempt(request *milvuspb.SearchRequest) *milvuspb.Sear
 		})
 	}
 	return copied
-}
-
-func pinSearchCollectionID(params []*commonpb.KeyValuePair, collectionID string) []*commonpb.KeyValuePair {
-	found := false
-	for i, param := range params {
-		if param.GetKey() == CollectionID {
-			params[i] = &commonpb.KeyValuePair{Key: CollectionID, Value: collectionID}
-			found = true
-		}
-	}
-	if !found {
-		params = append(params, &commonpb.KeyValuePair{Key: CollectionID, Value: collectionID})
-	}
-	return params
-}
-
-func (node *Proxy) prepareSearchAttempt(ctx context.Context, request *milvuspb.SearchRequest, snapshot *searchRLSSnapshot) (*milvuspb.SearchRequest, *searchByPKPreflight, error) {
-	if snapshot != nil && snapshot.resolved {
-		request = snapshot.pinRequest(request)
-		if ids := request.GetIds(); ids != nil && typeutil.GetSizeOfIDs(ids) > 0 {
-			if snapshot.searchByPK == nil {
-				return request, nil, merr.WrapErrServiceInternalMsg("search-by-primary-key RLS snapshot is incomplete")
-			}
-			return request, snapshot.searchByPK, nil
-		}
-		return request, nil, nil
-	}
-
-	attempt, preflight, err := node.prepareSearchByPKAttempt(ctx, request)
-	if err == nil && preflight != nil {
-		snapshot.captureSearchByPK(attempt, preflight)
-	}
-	return attempt, preflight, err
 }
 
 func (node *Proxy) preflightSearchByPK(ctx context.Context, request *milvuspb.SearchRequest) (*searchByPKPreflight, error) {
@@ -3372,31 +3235,8 @@ func (node *Proxy) preflightSearchByPK(ctx context.Context, request *milvuspb.Se
 				"collection id %d is not consistent with resolved collection %d", requestedID, collectionInfo.CollID)
 		}
 	}
-	canonicalDBName := collectionInfo.DBName
-	if canonicalDBName == "" {
-		canonicalDBName = request.GetDbName()
-	}
-	rlsEnabled, err := resolveRLSEnforcement(ctx, node.getMetaCache(), collectionInfo.RlsEnabled, collectionInfo.RlsForce, request.GetSkipRls(),
-		canonicalDBName, collectionInfo.Schema.GetName(), "search")
-	if err != nil {
-		return nil, err
-	}
-	principalName, enforceRLS, err := rlsutil.ResolveRuntimePrincipal(rlsEnabled, request.GetRlsPrincipal(), "search")
-	if err != nil {
-		return nil, err
-	}
-	var rlsPredicate *planpb.Expr
-	if enforceRLS {
-		isIteratorStr, _ := funcutil.GetAttrByKeyFromRepeatedKV(IteratorField, request.GetSearchParams())
-		isIterator := isIteratorStr == "True" || isIteratorStr == "true"
-		rlsPredicate, err = rls.ResolveUsingPredicate(ctx, collectionInfo.CollID, principalName, rls.SearchAction(false, isIterator), collectionInfo.Schema.SchemaHelper)
-		if err != nil {
-			return nil, err
-		}
-	}
 	return &searchByPKPreflight{
 		collectionInfo: collectionInfo,
-		rlsPredicate:   rlsPredicate,
 	}, nil
 }
 
@@ -3409,15 +3249,15 @@ func (node *Proxy) prepareSearchByPKAttempt(ctx context.Context, request *milvus
 }
 
 // transformSearchByPK rewrites an ID search after its non-mutating preflight.
-func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.SearchRequest, preflight *searchByPKPreflight) ([]bool, *planpb.Expr, error) {
+func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.SearchRequest, preflight *searchByPKPreflight) ([]bool, error) {
 	if preflight == nil {
-		return nil, nil, nil
+		return nil, nil
 	}
 	ids := request.GetIds()
 	collectionInfo := preflight.collectionInfo
 
-	// Keep the internal Query and the final Search on the collection whose RLS
-	// policy was resolved during preflight, even if the input alias is repointed.
+	// Keep the internal Query and final Search on the collection resolved during
+	// preflight, even if the input alias is repointed.
 	collectionID := strconv.FormatInt(collectionInfo.CollID, 10)
 	if _, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(CollectionID, request.SearchParams); !ok {
 		request.SearchParams = append(request.SearchParams, &commonpb.KeyValuePair{Key: CollectionID, Value: collectionID})
@@ -3431,10 +3271,10 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 	inputIDsCount := typeutil.GetSizeOfIDs(ids)
 	checker, err := typeutil.NewIDsChecker(ids)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if checker.Size() != inputIDsCount {
-		return nil, nil, merr.WrapErrParameterInvalidMsg("duplicate IDs found in search request")
+		return nil, merr.WrapErrParameterInvalidMsg("duplicate IDs found in search request")
 	}
 
 	// Get anns_field from search params, or infer from schema if only one vector field exists
@@ -3442,11 +3282,11 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 	if err != nil || annsFieldName == "" {
 		vecFields := typeutil.GetVectorFieldSchemas(collectionInfo.Schema.CollectionSchema)
 		if len(vecFields) == 0 {
-			return nil, nil, merr.WrapErrParameterInvalid("valid anns_field in search_params", "missing",
+			return nil, merr.WrapErrParameterInvalid("valid anns_field in search_params", "missing",
 				"no vector field found in schema")
 		}
 		if enableMultipleVectorFields && len(vecFields) > 1 {
-			return nil, nil, merr.WrapErrParameterInvalid("valid anns_field in search_params", "missing",
+			return nil, merr.WrapErrParameterInvalid("valid anns_field in search_params", "missing",
 				"multiple vector fields exist, please specify anns_field in search_params")
 		}
 		annsFieldName = vecFields[0].Name
@@ -3456,11 +3296,11 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 	if annField == nil {
 		// annsFieldName comes from the user's search request; a missing field is
 		// the user's input error.
-		return nil, nil, merr.WrapErrAsInputError(merr.WrapErrFieldNotFound(annsFieldName, "vector field not found in schema"))
+		return nil, merr.WrapErrAsInputError(merr.WrapErrFieldNotFound(annsFieldName, "vector field not found in schema"))
 	}
 
 	if annField.GetDataType() == schemapb.DataType_ArrayOfVector {
-		return nil, nil, merr.WrapErrParameterInvalidMsg("array of vector is not supported for search by IDs")
+		return nil, merr.WrapErrParameterInvalidMsg("array of vector is not supported for search by IDs")
 	}
 
 	// Check if this is a BM25 function-based search
@@ -3471,13 +3311,13 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 	if isBM25Search {
 		// BM25 search: fetch the input text field of the BM25 function
 		if len(bm25Function.InputFieldNames) == 0 {
-			return nil, nil, merr.WrapErrParameterInvalidMsg("BM25 function has no input field")
+			return nil, merr.WrapErrParameterInvalidMsg("BM25 function has no input field")
 		}
 		fieldToFetch = bm25Function.InputFieldNames[0]
 	} else {
 		// Vector search: validate and fetch the vector field
 		if !typeutil.IsVectorType(annField.GetDataType()) {
-			return nil, nil, merr.WrapErrParameterInvalidMsg("field (%s) to search is not of vector data type", annsFieldName)
+			return nil, merr.WrapErrParameterInvalidMsg("field (%s) to search is not of vector data type", annsFieldName)
 		}
 		fieldToFetch = annsFieldName
 	}
@@ -3485,25 +3325,18 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 	// Get primary key field
 	pkField, err := collectionInfo.Schema.GetPkField()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Validate IDs type matches primary key type
 	if err := validateIDsType(pkField, ids); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Create requery plan using IDs (no expr parsing overhead)
 	plan := planparserv2.CreateRequeryPlan(pkField, ids)
 
 	// Search by primary keys uses an internal Query to fetch the input vectors.
-	// Apply the top-level Search policy pinned by the preflight, then prevent
-	// queryTask from applying a Query policy to the same internal retrieval.
-	if preflight.rlsPredicate != nil {
-		if err := rls.AttachPredicateToRequeryPlan(plan, preflight.rlsPredicate); err != nil {
-			return nil, nil, err
-		}
-	}
 
 	// Build query request to fetch data by IDs
 	// For BM25: fetch text field; for vector search: fetch vector field
@@ -3531,16 +3364,18 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 		ConsistencyLevel: request.ConsistencyLevel,
 		QueryLabel:       metrics.QueryLabel,
 	}, node.GetMetaCache(), paramtable.Get().ProxyCfg.MustUsePartitionKey.GetAsBool())
-	qt.SetSkipRuntimeRLS(true)
+	// The user issued a search, and the search path already counted it; this
+	// retrieval is how the Proxy serves it.
+	qt.MarkInternal()
 
 	// Execute query
 	queryResult, _, err := node.query(ctx, qt, nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	if !merr.Ok(queryResult.GetStatus()) {
-		return nil, nil, merr.Error(queryResult.GetStatus())
+		return nil, merr.Error(queryResult.GetStatus())
 	}
 
 	// Extract primary key field to check result count
@@ -3549,7 +3384,7 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 	})
 
 	if pkFieldData == nil {
-		return nil, nil, merr.WrapErrFieldNotFound(pkField.GetName(), "primary key field not found in query result")
+		return nil, merr.WrapErrFieldNotFound(pkField.GetName(), "primary key field not found in query result")
 	}
 
 	// Check if the returned pk count matches the input IDs count
@@ -3584,7 +3419,7 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 			}
 		}
 
-		return nil, nil, merr.WrapErrParameterInvalidMsg(
+		return nil, merr.WrapErrParameterInvalidMsg(
 			fmt.Sprintf("some of the provided primary key IDs do not exist: missing IDs = %v", missingIDs))
 	}
 
@@ -3601,7 +3436,7 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 	orderedFieldsData, err := PickFieldData(ids, pkOffset, queryResult.GetFieldsData(),
 		collectionInfo.Schema.CollectionSchema, collectionInfo.CollID)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Extract the field data from query result
@@ -3611,7 +3446,7 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 	})
 
 	if fieldData == nil {
-		return nil, nil, merr.WrapErrFieldNotFound(fieldToFetch, "field not found in query result")
+		return nil, merr.WrapErrFieldNotFound(fieldToFetch, "field not found in query result")
 	}
 
 	// validData is per requested ID: one entry per row, in request order.
@@ -3650,7 +3485,7 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 	// For vector search: converts vector to vector placeholder
 	placeholderBytes, vectorCount, err := funcutil.FieldDataToPlaceholderGroupBytesWithCount(fieldData)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	request.Nq = int64(vectorCount)
@@ -3661,7 +3496,7 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 		PlaceholderGroup: placeholderBytes,
 	}
 
-	return validData, preflight.rlsPredicate, nil
+	return validData, nil
 }
 
 // Flush notify data nodes to persist the data of collection.
@@ -5005,7 +4840,7 @@ func convertToV1GetImportResponse(rsp *internalpb.GetImportProgressResponse) *mi
 		Value: strconv.FormatInt(rsp.GetProgress(), 10),
 	})
 	var createTs int64
-	createTime, err := time.Parse("2006-01-02T15:04:05Z07:00", rsp.GetCreateTime())
+	createTime, err := time.Parse(time.RFC3339, rsp.GetCreateTime())
 	if err == nil {
 		createTs = createTime.Unix()
 	}
@@ -6466,7 +6301,32 @@ func (node *Proxy) GetImportProgress(ctx context.Context, req *internalpb.GetImp
 		mlog.Warn(context.TODO(), "get import progress failed", mlog.String("reason", resp.GetStatus().GetReason()), mlog.Err(err))
 	}
 	metrics.ProxyReqLatency.WithLabelValues(nodeID, method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return resp, err
+	if err != nil {
+		return nil, err
+	}
+	if err := merr.CheckRPCCall(resp, nil); err != nil {
+		// DataCoord uses ImportSysFailed for an absent job. Hide its existence
+		// exactly as for an existing job outside the caller's grants.
+		if !authorizationDisabled() && errors.Is(err, merr.ErrImportSysFailed) {
+			err = importPrivilegeDenied()
+		}
+		return &internalpb.GetImportProgressResponse{Status: merr.Status(err)}, nil
+	}
+	if !authorizationDisabled() {
+		subject, err := importSubject(ctx)
+		if err != nil {
+			return &internalpb.GetImportProgressResponse{Status: merr.Status(err)}, nil
+		}
+		resource, err := node.resolveImportResource(ctx, resp.GetCollectionId())
+		if err == nil {
+			err = node.authorizeImportResource(ctx, resp.GetCollectionId(), resource, subject)
+		}
+		if err != nil {
+			return &internalpb.GetImportProgressResponse{Status: merr.Status(err)}, nil
+		}
+		resp.CollectionName = resource.collectionName
+	}
+	return resp, nil
 }
 
 func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error) {
@@ -6489,8 +6349,9 @@ func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsR
 		err          error
 		collectionID UniqueID
 	)
+	dbName := GetCurDBNameFromRequestOrContext(ctx, req)
 	if req.GetCollectionName() != "" {
-		collectionID, err = node.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		collectionID, err = node.GetMetaCache().GetCollectionID(ctx, dbName, req.GetCollectionName())
 		if err != nil {
 			resp.Status = merr.Status(err)
 			return resp, nil
@@ -6503,6 +6364,13 @@ func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsR
 		mlog.Warn(context.TODO(), "list imports", mlog.String("reason", resp.GetStatus().GetReason()), mlog.Err(err))
 	}
 	metrics.ProxyReqLatency.WithLabelValues(nodeID, method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		return &internalpb.ListImportsResponse{Status: merr.Status(err)}, nil
+	}
+	resp, err = node.filterImportJobs(ctx, dbName, collectionID, resp)
+	if err != nil {
+		return &internalpb.ListImportsResponse{Status: merr.Status(err)}, nil
+	}
 	return resp, nil
 }
 
@@ -6697,388 +6565,36 @@ func (node *Proxy) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.Oper
 	return result, nil
 }
 
-func prepareRLSMsgBase(base **commonpb.MsgBase, msgType commonpb.MsgType) {
-	if *base == nil {
-		*base = &commonpb.MsgBase{}
-	}
-	(*base).MsgType = msgType
-}
-
-func nilRLSRequestStatus(method string) *commonpb.Status {
-	return merr.Status(merr.WrapErrParameterInvalidMsg("%s request is nil", method))
-}
-
-type rlsManagementRequest interface {
-	proto.Message
-	GetDbName() string
-	GetCollectionName() string
-}
-
-func (node *Proxy) resolveRLSRequestTarget(ctx context.Context, req rlsManagementRequest) (string, string, error) {
-	collectionID, err := node.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
-	if err != nil {
-		return "", "", err
-	}
-	collectionInfo, err := node.GetMetaCache().GetCollectionInfo(ctx, req.GetDbName(), "", collectionID)
-	if err != nil {
-		return "", "", err
-	}
-	if collectionInfo == nil || collectionInfo.Schema == nil || collectionInfo.Schema.GetName() == "" {
-		return "", "", merr.WrapErrServiceInternalMsg("failed to resolve canonical collection name for RLS management target %d", collectionID)
-	}
-
-	privilegeExt, err := funcutil.GetPrivilegeExtObj(req)
-	if err != nil {
-		return "", "", merr.WrapErrServiceInternalErr(err, "failed to resolve RLS management privilege")
-	}
-	dbName := collectionInfo.DBName
-	if dbName == "" {
-		dbName = req.GetDbName()
-	}
-	collectionName := collectionInfo.Schema.GetName()
-	authorizationDBName := dbName
-	authorizationCollectionName := collectionName
-	if !Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() {
-		authorizationDBName = GetCurDBNameFromRequestOrContext(ctx, req)
-		authorizationCollectionName = req.GetCollectionName()
-	}
-	permitted, err := isCurrentUserPermitted(ctx, node.GetMetaCache(), authorizationDBName, privilegeExt.ObjectType.String(), authorizationCollectionName, privilegeExt.ObjectPrivilege.String())
-	if err != nil {
-		return "", "", err
-	}
-	if !permitted {
-		return "", "", merr.WrapErrPrivilegeNotPermitted("%s is required on collection %s", privilegeExt.ObjectPrivilege.String(), authorizationCollectionName)
-	}
-	return dbName, collectionName, nil
-}
-
-func normalizeCreateRowPolicyType(req *milvuspb.CreateRowPolicyRequest) rlsutil.PolicyType {
-	if req.PolicyType == nil {
-		policyType := milvuspb.RowPolicyType_RowPolicyTypePermissive
-		req.PolicyType = &policyType
-	}
-	return req.GetPolicyType()
-}
-
 func (node *Proxy) CreateRowPolicy(ctx context.Context, req *milvuspb.CreateRowPolicyRequest) (*commonpb.Status, error) {
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CreateRowPolicy")
-	defer sp.End()
-
-	if req == nil {
-		return nilRLSRequestStatus("CreateRowPolicy"), nil
-	}
-	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		return merr.Status(err), nil
-	}
-	if err := rlsutil.ValidateRequestTarget(req.GetDbName(), req.GetCollectionName()); err != nil {
-		return merr.Status(err), nil
-	}
-	if err := rlsutil.ValidatePolicyRoles(req.GetRoles()); err != nil {
-		return merr.Status(err), nil
-	}
-	if err := rlsutil.ValidatePolicyActionCount(len(req.GetActions())); err != nil {
-		return merr.Status(err), nil
-	}
-	if err := rlsutil.ValidatePolicy(req.GetPolicyName(), normalizeCreateRowPolicyType(req), req.GetActions(), req.GetUsingExpr(), req.GetCheckExpr()); err != nil {
-		return merr.Status(err), nil
-	}
-	if err := rlsutil.ValidatePolicyDescription(req.GetDescription()); err != nil {
-		return merr.Status(err), nil
-	}
-	dbName, collectionName, err := node.resolveRLSRequestTarget(ctx, req)
-	if err != nil {
-		return merr.Status(err), nil
-	}
-	req.DbName = dbName
-	req.CollectionName = collectionName
-	prepareRLSMsgBase(&req.Base, commonpb.MsgType_CreateRowPolicy)
-	result, err := node.mixCoord.CreateRowPolicy(ctx, req)
-	if err != nil {
-		mlog.Warn(ctx, "fail to create row policy", mlog.Err(err))
-		return merr.Status(err), nil
-	}
-	return result, nil
+	return merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "RLS is not supported")), nil
 }
 
 func (node *Proxy) UpdateRowPolicy(ctx context.Context, req *milvuspb.UpdateRowPolicyRequest) (*commonpb.Status, error) {
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-UpdateRowPolicy")
-	defer sp.End()
-
-	if req == nil {
-		return nilRLSRequestStatus("UpdateRowPolicy"), nil
-	}
-	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		return merr.Status(err), nil
-	}
-	if err := rlsutil.ValidateRequestTarget(req.GetDbName(), req.GetCollectionName()); err != nil {
-		return merr.Status(err), nil
-	}
-	if err := rlsutil.ValidatePolicyRoles(req.GetRoles()); err != nil {
-		return merr.Status(err), nil
-	}
-	if err := rlsutil.ValidatePolicyActionCount(len(req.GetActions())); err != nil {
-		return merr.Status(err), nil
-	}
-	if err := rlsutil.ValidatePolicyForUpdate(req.GetPolicyName(), req.GetPolicyType(), req.GetActions(), req.GetUsingExpr(), req.GetCheckExpr()); err != nil {
-		return merr.Status(err), nil
-	}
-	if err := rlsutil.ValidatePolicyDescription(req.GetDescription()); err != nil {
-		return merr.Status(err), nil
-	}
-	dbName, collectionName, err := node.resolveRLSRequestTarget(ctx, req)
-	if err != nil {
-		return merr.Status(err), nil
-	}
-	req.DbName = dbName
-	req.CollectionName = collectionName
-	prepareRLSMsgBase(&req.Base, commonpb.MsgType_UpdateRowPolicy)
-	result, err := node.mixCoord.UpdateRowPolicy(ctx, req)
-	if err != nil {
-		mlog.Warn(ctx, "fail to update row policy", mlog.Err(err))
-		return merr.Status(err), nil
-	}
-	return result, nil
+	return merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "RLS is not supported")), nil
 }
 
 func (node *Proxy) DropRowPolicy(ctx context.Context, req *milvuspb.DropRowPolicyRequest) (*commonpb.Status, error) {
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DropRowPolicy")
-	defer sp.End()
-
-	if req == nil {
-		return nilRLSRequestStatus("DropRowPolicy"), nil
-	}
-	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		return merr.Status(err), nil
-	}
-	if err := rlsutil.ValidateRequestTarget(req.GetDbName(), req.GetCollectionName()); err != nil {
-		return merr.Status(err), nil
-	}
-	if err := rlsutil.ValidatePolicyName(req.GetPolicyName()); err != nil {
-		return merr.Status(err), nil
-	}
-	dbName, collectionName, err := node.resolveRLSRequestTarget(ctx, req)
-	if err != nil {
-		return merr.Status(err), nil
-	}
-	req.DbName = dbName
-	req.CollectionName = collectionName
-	prepareRLSMsgBase(&req.Base, commonpb.MsgType_DropRowPolicy)
-	result, err := node.mixCoord.DropRowPolicy(ctx, req)
-	if err != nil {
-		mlog.Warn(ctx, "fail to drop row policy", mlog.Err(err))
-		return merr.Status(err), nil
-	}
-	return result, nil
+	return merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "RLS is not supported")), nil
 }
 
 func (node *Proxy) ListRowPolicies(ctx context.Context, req *milvuspb.ListRowPoliciesRequest) (*milvuspb.ListRowPoliciesResponse, error) {
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ListRowPolicies")
-	defer sp.End()
-
-	if req == nil {
-		return &milvuspb.ListRowPoliciesResponse{
-			Status: nilRLSRequestStatus("ListRowPolicies"),
-		}, nil
-	}
-	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		return &milvuspb.ListRowPoliciesResponse{
-			Status:         merr.Status(err),
-			DbName:         req.GetDbName(),
-			CollectionName: req.GetCollectionName(),
-		}, nil
-	}
-	if err := rlsutil.ValidateRequestTarget(req.GetDbName(), req.GetCollectionName()); err != nil {
-		return &milvuspb.ListRowPoliciesResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	dbName, collectionName, err := node.resolveRLSRequestTarget(ctx, req)
-	if err != nil {
-		return &milvuspb.ListRowPoliciesResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	req.DbName = dbName
-	req.CollectionName = collectionName
-	prepareRLSMsgBase(&req.Base, commonpb.MsgType_ListRowPolicies)
-	resp, err := node.mixCoord.ListRowPolicies(ctx, req)
-	if err != nil {
-		mlog.Warn(ctx, "fail to list row policies", mlog.Err(err))
-		return &milvuspb.ListRowPoliciesResponse{
-			Status:         merr.Status(err),
-			DbName:         req.GetDbName(),
-			CollectionName: req.GetCollectionName(),
-		}, nil
-	}
-	return resp, nil
+	return &milvuspb.ListRowPoliciesResponse{Status: merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "RLS is not supported"))}, nil
 }
 
 func (node *Proxy) SetRLSPrincipalTags(ctx context.Context, req *milvuspb.SetRLSPrincipalTagsRequest) (*commonpb.Status, error) {
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-SetRLSPrincipalTags")
-	defer sp.End()
-
-	if req == nil {
-		return nilRLSRequestStatus("SetRLSPrincipalTags"), nil
-	}
-	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		return merr.Status(err), nil
-	}
-	if err := rlsutil.ValidateRequestTarget(req.GetDbName(), req.GetCollectionName()); err != nil {
-		return merr.Status(err), nil
-	}
-	// Proxy only enforces the fixed transport bound. RootCoord checks whether
-	// the principal already exists under the collection guard and applies the
-	// refreshable creation limit only to new principals.
-	if err := rlsutil.ValidatePrincipalName(req.GetPrincipalName()); err != nil {
-		return merr.Status(err), nil
-	}
-	tags, err := rlsutil.TagsFromJSONWithLimit(req.GetTags(), paramtable.Get().ProxyCfg.RLSMaxTagsPerPrincipal.GetAsInt())
-	if err != nil {
-		return merr.Status(err), nil
-	}
-	if err := rlsutil.ValidateTags(tags); err != nil {
-		return merr.Status(err), nil
-	}
-	dbName, collectionName, err := node.resolveRLSRequestTarget(ctx, req)
-	if err != nil {
-		return merr.Status(err), nil
-	}
-	req.DbName = dbName
-	req.CollectionName = collectionName
-	prepareRLSMsgBase(&req.Base, commonpb.MsgType_SetRLSPrincipalTags)
-	result, err := node.mixCoord.SetRLSPrincipalTags(ctx, req)
-	if err != nil {
-		mlog.Warn(ctx, "fail to set RLS principal tags", mlog.Err(err))
-		return merr.Status(err), nil
-	}
-	return result, nil
+	return merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "RLS is not supported")), nil
 }
 
 func (node *Proxy) GetRLSPrincipalTags(ctx context.Context, req *milvuspb.GetRLSPrincipalTagsRequest) (*milvuspb.GetRLSPrincipalTagsResponse, error) {
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetRLSPrincipalTags")
-	defer sp.End()
-
-	if req == nil {
-		return &milvuspb.GetRLSPrincipalTagsResponse{
-			Status: nilRLSRequestStatus("GetRLSPrincipalTags"),
-		}, nil
-	}
-	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		return &milvuspb.GetRLSPrincipalTagsResponse{
-			Status:         merr.Status(err),
-			DbName:         req.GetDbName(),
-			CollectionName: req.GetCollectionName(),
-			PrincipalName:  req.GetPrincipalName(),
-		}, nil
-	}
-	if err := rlsutil.ValidateRequestTarget(req.GetDbName(), req.GetCollectionName()); err != nil {
-		return &milvuspb.GetRLSPrincipalTagsResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	if err := rlsutil.ValidatePrincipalName(req.GetPrincipalName()); err != nil {
-		return &milvuspb.GetRLSPrincipalTagsResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	dbName, collectionName, err := node.resolveRLSRequestTarget(ctx, req)
-	if err != nil {
-		return &milvuspb.GetRLSPrincipalTagsResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	req.DbName = dbName
-	req.CollectionName = collectionName
-	prepareRLSMsgBase(&req.Base, commonpb.MsgType_GetRLSPrincipalTags)
-	resp, err := node.mixCoord.GetRLSPrincipalTags(ctx, req)
-	if err != nil {
-		mlog.Warn(ctx, "fail to get RLS principal tags", mlog.Err(err))
-		return &milvuspb.GetRLSPrincipalTagsResponse{
-			Status:         merr.Status(err),
-			DbName:         req.GetDbName(),
-			CollectionName: req.GetCollectionName(),
-			PrincipalName:  req.GetPrincipalName(),
-		}, nil
-	}
-	return resp, nil
+	return &milvuspb.GetRLSPrincipalTagsResponse{Status: merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "RLS is not supported"))}, nil
 }
 
 func (node *Proxy) ListRLSPrincipals(ctx context.Context, req *milvuspb.ListRLSPrincipalsRequest) (*milvuspb.ListRLSPrincipalsResponse, error) {
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ListRLSPrincipals")
-	defer sp.End()
-
-	if req == nil {
-		return &milvuspb.ListRLSPrincipalsResponse{
-			Status: nilRLSRequestStatus("ListRLSPrincipals"),
-		}, nil
-	}
-	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		return &milvuspb.ListRLSPrincipalsResponse{
-			Status:         merr.Status(err),
-			DbName:         req.GetDbName(),
-			CollectionName: req.GetCollectionName(),
-		}, nil
-	}
-	if err := rlsutil.ValidateRequestTarget(req.GetDbName(), req.GetCollectionName()); err != nil {
-		return &milvuspb.ListRLSPrincipalsResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	dbName, collectionName, err := node.resolveRLSRequestTarget(ctx, req)
-	if err != nil {
-		return &milvuspb.ListRLSPrincipalsResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	req.DbName = dbName
-	req.CollectionName = collectionName
-	prepareRLSMsgBase(&req.Base, commonpb.MsgType_ListRLSPrincipals)
-	resp, err := node.mixCoord.ListRLSPrincipals(ctx, req)
-	if err != nil {
-		mlog.Warn(ctx, "fail to list RLS principals", mlog.Err(err))
-		return &milvuspb.ListRLSPrincipalsResponse{
-			Status:         merr.Status(err),
-			DbName:         req.GetDbName(),
-			CollectionName: req.GetCollectionName(),
-		}, nil
-	}
-	return resp, nil
+	return &milvuspb.ListRLSPrincipalsResponse{Status: merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "RLS is not supported"))}, nil
 }
 
 func (node *Proxy) DeleteRLSPrincipalTags(ctx context.Context, req *milvuspb.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error) {
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DeleteRLSPrincipalTags")
-	defer sp.End()
-
-	if req == nil {
-		return nilRLSRequestStatus("DeleteRLSPrincipalTags"), nil
-	}
-	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		return merr.Status(err), nil
-	}
-	if err := rlsutil.ValidateRequestTarget(req.GetDbName(), req.GetCollectionName()); err != nil {
-		return merr.Status(err), nil
-	}
-	if err := rlsutil.ValidatePrincipalName(req.GetPrincipalName()); err != nil {
-		return merr.Status(err), nil
-	}
-	tagKeys, err := rlsutil.ValidateAndDeduplicateTagKeys(req.GetTagKeys())
-	if err != nil {
-		return merr.Status(err), nil
-	}
-	req.TagKeys = tagKeys
-	dbName, collectionName, err := node.resolveRLSRequestTarget(ctx, req)
-	if err != nil {
-		return merr.Status(err), nil
-	}
-	req.DbName = dbName
-	req.CollectionName = collectionName
-	prepareRLSMsgBase(&req.Base, commonpb.MsgType_DeleteRLSPrincipalTags)
-	result, err := node.mixCoord.DeleteRLSPrincipalTags(ctx, req)
-	if err != nil {
-		mlog.Warn(ctx, "fail to delete RLS principal tags", mlog.Err(err))
-		return merr.Status(err), nil
-	}
-	return result, nil
+	return merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "RLS is not supported")), nil
 }
 
 func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error) {
@@ -7090,6 +6606,8 @@ func (node *Proxy) RunAnalyzer(ctx context.Context, req *milvuspb.RunAnalyzerReq
 			Status: merr.Status(err),
 		}, nil
 	}
+	// Once per client request, whichever QueryNode ends up serving it.
+	featureusage.Hit(featureusage.FeatureRunAnalyzer)
 
 	if len(req.Placeholder) == 0 {
 		return &milvuspb.RunAnalyzerResponse{
@@ -7206,6 +6724,23 @@ func (node *Proxy) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuota
 	mlog.Info(context.TODO(), "GetQuotaMetrics success", mlog.String("metrics", metricsResp.GetMetricsInfo()))
 
 	return metricsResp, nil
+}
+
+// GetFeatureUsage returns this Proxy's request-level feature counters. The
+// counters are monotonic since process start; reading them changes nothing.
+func (node *Proxy) GetFeatureUsage(ctx context.Context, req *internalpb.GetFeatureUsageRequest) (*internalpb.GetFeatureUsageResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &internalpb.GetFeatureUsageResponse{Status: merr.Status(err)}, nil
+	}
+	return &internalpb.GetFeatureUsageResponse{
+		Status:          merr.Success(),
+		Role:            typeutil.ProxyRole,
+		NodeId:          paramtable.GetNodeID(),
+		NodeStartTime:   paramtable.GetCreateTime().Unix(),
+		CollectedAt:     time.Now().Unix(),
+		Entries:         featureusage.SnapshotFor(featureusage.RoleProxy),
+		CountersEnabled: featureusage.Enabled(),
+	}, nil
 }
 
 // AddFileResource add file resource to rootcoord

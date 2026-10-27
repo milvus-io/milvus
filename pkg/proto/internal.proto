@@ -130,6 +130,7 @@ message SubSearchRequest {
   bool ignore_growing = 13;
   string analyzer_name = 14;
   SearchType search_type = 15;
+  bool skip = 16; // Set when QueryView proves the sub-search is empty.
 }
 
 message SearchRequest {
@@ -216,6 +217,10 @@ message SearchResults {
   // Per-segment filter valid counts for two-stage search (filter-only mode).
   // Index corresponds to sealed_segmentIDs_searched.
   repeated int64 filter_valid_counts = 23;
+  // Execution features segcore used for this request (featureusage bit set),
+  // OR-merged wherever the results are merged. Zero unless the plan asked
+  // for them (PlanOption.collect_feature_bits).
+  uint64 feature_bits = 24;
 }
 
 message CostAggregation {
@@ -288,6 +293,9 @@ message RetrieveResults {
   // Actual MVCC snapshot used by a successful channel query, including empty results.
   // Zero means the QueryNode did not report a snapshot.
   uint64 mvcc_timestamp = 20;
+  // Execution features segcore used for this request; see
+  // SearchResults.feature_bits.
+  uint64 feature_bits = 21;
 }
 
 message LoadIndex {
@@ -398,6 +406,42 @@ enum ImportJobState {
   Uncommitted = 8;
   Committing  = 9;
   AssigningIDRange = 10;
+  Planning = 11;
+  Resharding = 12;
+}
+
+// Immutable, coordinator-expanded input for typed snapshot jobs.
+message SnapshotImportSource {
+  // Version 9 is a coordinator-only Pending marker, never a worker file.
+  // The metadata URI and layout are stored in job options. Expansion
+  // atomically replaces this marker with executable segment descriptors.
+  uint32 version = 1;
+  string manifest_path = 2;
+  uint64 source_commit_timestamp = 3;
+  // Retained only to detect and reject development-version inline L0 tasks.
+  // Both fields must be empty; L0 paths belong to SnapshotImportL0Source.
+  repeated string legacy_l0_deltalogs = 4;
+  repeated string manifest_l0_deltalogs = 5;
+  // Versions 3/7 (instance storage) and 4/8 (external storage) require this
+  // coordinator-resolved destination. Older consumers reject those versions
+  // instead of silently routing mapped files to the job's default partition.
+  int64 target_partition_id = 6;
+  // Versions 5-8 use a task-shared L0 inventory instead of fields 4/5.
+  string source_channel = 7;
+  int64 source_partition_id = 8;
+}
+
+// Stored once per source scope in the job after Pending preparation.
+// Channel-wide deletes use the all-partitions sentinel. Each worker task
+// receives the merged exact scope.
+message SnapshotImportL0Source {
+  string source_channel = 1;
+  int64 source_partition_id = 2;
+  // Decoder contracts, NOT SegmentDescription.storage_version: StorageV2
+  // segments can contain legacy V1 deltalogs.
+  repeated string legacy_l0_deltalogs = 3;
+  // Exact versioned manifests, resolved once by each worker task execution.
+  repeated string manifest_l0_paths = 4;
 }
 
 message ImportFile {
@@ -416,6 +460,22 @@ message ImportFile {
   // the cross-cluster divergence authority each cluster checks its local count against.
   // Unset on backup / L0 / legacy imports.
   common.IDRange id_range = 4;
+  // Mutually exclusive with paths. Empty legacy paths make old consumers fail
+  // closed instead of importing rows without the snapshot's L0 deletes.
+  SnapshotImportSource snapshot_source = 5;
+}
+
+// ImportVersion is the single execution-version number shared by the internal
+// import request (DataCoord's selection input), the WAL message
+// (msg.ImportMsg.version) and the persisted ImportJob. One number per
+// execution path, so no boundary has to translate between a "request version"
+// and a "job version".
+enum ImportVersion {
+  // In a request: DataCoord selects V2 or V3 from dataCoord.import.enableImportV3.
+  // In a WAL message or a stored job: written before this field existed, runs as V2.
+  ImportVersionUnspecified = 0;
+  ImportVersionV2 = 2; // PreImportTask + ImportTaskV2
+  ImportVersionV3 = 3; // count-only preimport + ReshardTask + ImportTaskV3
 }
 
 message ImportRequestInternal {
@@ -431,6 +491,9 @@ message ImportRequestInternal {
   int64 jobID = 10;
   string rls_principal = 11;
   bool skip_rls = 12;
+  // Internal import execution version. Direct requests may leave
+  // ImportVersionUnspecified for DataCoord to select V2 or V3.
+  ImportVersion version = 13;
 }
 
 message ImportRequest {
@@ -473,6 +536,8 @@ message GetImportProgressResponse {
   int64 imported_rows = 8;
   int64 total_rows = 9;
   string create_time = 10;
+  // Persisted job identity. Names alone cannot identify the authorization resource.
+  int64 collection_id = 11;
 }
 
 message ListImportsRequestInternal {
@@ -492,6 +557,8 @@ message ListImportsResponse {
   repeated string reasons = 4;
   repeated int64 progresses = 5;
   repeated string collection_names = 6;
+  // Aligned with jobIDs; required for resource authorization at Proxy.
+  repeated int64 collection_ids = 7;
 }
 
 message GetSegmentsInfoRequest {
@@ -531,6 +598,57 @@ message GetQuotaMetricsRequest {
 message GetQuotaMetricsResponse {
   common.Status status = 1;
   string metrics_info = 2;
+}
+
+// Feature usage reporting (see docs/design-docs/design_docs/20260902-feature-usage-reporting.md)
+
+message GetFeatureUsageRequest {
+  common.MsgBase base = 1;
+}
+
+// FeatureEntry is one record of the feature usage report.
+// The meaning of value depends on group; see the design doc.
+message FeatureEntry {
+  string group = 1;          // field_types / index_types / metric_types / functions / providers / declared /
+                             // properties / database_properties / field_params / index_params / objects /
+                             // distribution / segment / loaded / config / request
+  string name = 2;           // feature identifier, drawn from a code-defined set; never a user string
+  int64 value = 3;           // count
+  string bucket = 4;         // for group = "distribution", and for the request counters that are one
+                             // bucket of a distribution; empty otherwise
+  int64 last_used_at = 5;    // unix seconds of the most recent hit; only for group = "request", 0 otherwise
+}
+
+// GetFeatureUsageResponse is the view of one node.
+message GetFeatureUsageResponse {
+  common.Status status = 1;
+  string role = 2;
+  int64 node_id = 3;
+  int64 node_start_time = 4; // unix seconds; a change means request counters were reset
+  int64 collected_at = 5;    // unix seconds
+  repeated FeatureEntry entries = 6;
+  bool counters_enabled = 7; // false: request counters were not recorded (common.featureUsage.countersEnabled),
+                             // so a zero value or last_used_at means unknown, not unused
+}
+
+// FeatureUsageNode is one node inside the merged report.
+message FeatureUsageNode {
+  string role = 1;
+  int64 node_id = 2;
+  int64 node_start_time = 3;
+  bool reachable = 4;        // false: entries is empty and error explains why
+  string error = 5;
+  repeated FeatureEntry entries = 6;
+  bool counters_enabled = 7; // copied from GetFeatureUsageResponse.counters_enabled
+}
+
+// FeatureUsageReport is the merged report returned by MixCoord.
+message FeatureUsageReport {
+  common.Status status = 1;
+  int64 collected_at = 2;
+  string build_version = 3;
+  string deploy_mode = 4;
+  repeated FeatureUsageNode nodes = 5;
 }
 
 message FileResourceInfo {

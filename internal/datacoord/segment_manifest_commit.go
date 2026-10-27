@@ -333,7 +333,7 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 				if !matchesExpectedManifest(commit.ExpectedManifest, latest.GetManifestPath()) {
 					return staleSegmentManifestError(commit.SegmentID, commit.ExpectedManifest, latest.GetManifestPath())
 				}
-			} else if latest.GetManifestPath() != segment.GetManifestPath() {
+			} else if !packed.SameManifestPath(latest.GetManifestPath(), segment.GetManifestPath()) {
 				// A structured mutation was generated from the in-lock snapshot. The
 				// manifest lock serializes every framework writer, so a pointer that
 				// moved between that snapshot and this publication section can only
@@ -351,7 +351,7 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 			segment = latest
 		}
 
-		updated, metricMutation, err := m.applySegmentCatalogMutation(segment, commit.CatalogMutation)
+		updated, err := m.applySegmentCatalogMutation(segment, commit.CatalogMutation)
 		if err != nil {
 			// Preserve UpdateSegmentsInfo's contract for stale SaveBinlogPaths
 			// requests: the prepared immutable revision remains unpublished and
@@ -366,14 +366,6 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 		var action metastore.UpdateAction
 		if isNewSegment {
 			action = metastore.AddSegment(updated.SegmentInfo)
-			metricMutation.addNewSeg(
-				updated.GetState(),
-				updated.GetLevel(),
-				updated.GetIsSorted(),
-				updated.GetStorageVersion(),
-				segmentMetricFormatLabel(updated),
-				updated.GetNumOfRows(),
-			)
 		} else {
 			action = metastore.AlterSegment(updated.SegmentInfo)
 		}
@@ -392,7 +384,6 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 		if err := m.catalog.Update(ctx, actions...); err != nil {
 			return merr.Wrap(err, "publish segment manifest")
 		}
-		metricMutation.commit()
 		// Memory is installed only after the catalog write has succeeded while the
 		// same segMu critical section still excludes competing full-record writers.
 		m.segments.SetSegment(commit.SegmentID, updated)
@@ -512,7 +503,7 @@ func validateManifestIndexTaskProjection(m *meta, segment *SegmentInfo, entry pa
 		segIdx.SegmentID,
 		segIdx.BuildID,
 		segIdx.IndexVersion,
-	).BuildPrefix()
+	).WithManifestPath(segment.GetManifestPath()).BuildPrefix()
 	expectedPath, err := packed.ManifestIndexRelativePath(basePath, indexPrefix)
 	if err != nil {
 		return err
@@ -541,18 +532,17 @@ func (m *meta) getSegmentManifestLocks() *lock.KeyLock[int64] {
 	return m.segmentManifestLocks
 }
 
-func manifestUpdateBase(baseManifest string, commit SegmentManifestCommit) (string, int64, error) {
+// validateManifestUpdate checks a structured mutation before its I/O. The
+// packed commit parses the base pointer itself and hands it back verbatim when
+// nothing changes, so an unmoved pointer keeps its exact text.
+func validateManifestUpdate(baseManifest string, commit SegmentManifestCommit) error {
 	if baseManifest == "" {
-		return "", 0, merr.WrapErrServiceInternalMsg("cannot update an empty manifest for segmentID=%d", commit.SegmentID)
+		return merr.WrapErrServiceInternalMsg("cannot update an empty manifest for segmentID=%d", commit.SegmentID)
 	}
 	if commit.Mutation.Updates == nil {
-		return "", 0, merr.WrapErrServiceInternalMsg("manifest updates are nil for segmentID=%d", commit.SegmentID)
+		return merr.WrapErrServiceInternalMsg("manifest updates are nil for segmentID=%d", commit.SegmentID)
 	}
-	base, version, err := packed.UnmarshalManifestPath(baseManifest)
-	if err != nil {
-		return "", 0, merr.Wrap(err, "parse expected manifest")
-	}
-	return base, version, nil
+	return nil
 }
 
 func (m *meta) submitManifestMutation(ctx context.Context, io *packed.ManifestIOContext, baseManifest string, commit SegmentManifestCommit, complete func(packed.ManifestUpdateResult, error)) error {
@@ -565,11 +555,10 @@ func (m *meta) submitManifestMutation(ctx context.Context, io *packed.ManifestIO
 		complete(result, nil)
 		return nil
 	}
-	base, version, err := manifestUpdateBase(baseManifest, commit)
-	if err != nil {
+	if err := validateManifestUpdate(baseManifest, commit); err != nil {
 		return err
 	}
-	err = packed.SubmitManifestUpdates(ctx, io, base, version, commit.StorageConfig, commit.Mutation.Updates, func(result packed.ManifestUpdateResult, err error) {
+	err := packed.SubmitManifestUpdates(ctx, io, baseManifest, commit.StorageConfig, commit.Mutation.Updates, func(result packed.ManifestUpdateResult, err error) {
 		complete(result, merr.Wrap(err, "commit segment manifest"))
 	})
 	return merr.Wrap(err, "commit segment manifest")
@@ -578,11 +567,10 @@ func (m *meta) submitManifestMutation(ctx context.Context, io *packed.ManifestIO
 func (m *meta) commitManifestMutation(ctx context.Context, io *packed.ManifestIOContext, baseManifest string, commit SegmentManifestCommit) (packed.ManifestUpdateResult, error) {
 	switch commit.Mutation.Type {
 	case ManifestMutationCommitUpdates:
-		basePath, version, err := manifestUpdateBase(baseManifest, commit)
-		if err != nil {
+		if err := validateManifestUpdate(baseManifest, commit); err != nil {
 			return packed.ManifestUpdateResult{}, err
 		}
-		result, err := packed.CommitManifestUpdatesWithResultAsync(ctx, io, basePath, version, commit.StorageConfig, commit.Mutation.Updates)
+		result, err := packed.CommitManifestUpdatesWithResultAsync(ctx, io, baseManifest, commit.StorageConfig, commit.Mutation.Updates)
 		if err != nil {
 			return packed.ManifestUpdateResult{}, merr.Wrap(err, "commit segment manifest")
 		}
@@ -627,15 +615,11 @@ func validatePreparedManifest(baseManifest, preparedManifest string) error {
 	return nil
 }
 
-func (m *meta) applySegmentCatalogMutation(current *SegmentInfo, mutation SegmentCatalogMutation) (*SegmentInfo, *segMetricMutation, error) {
+func (m *meta) applySegmentCatalogMutation(current *SegmentInfo, mutation SegmentCatalogMutation) (*SegmentInfo, error) {
 	pack := &updateSegmentPack{
 		meta:       m,
 		segments:   make(map[int64]*SegmentInfo),
 		increments: make(map[int64]metastore.BinlogsIncrement),
-		metricMutation: &segMetricMutation{
-			stateChange:             make(segmentMetricStateChange),
-			deferSegmentLabelChange: true,
-		},
 	}
 	// Always seed the pack from the segment-lock snapshot. Operators then never
 	// re-read the shared SegmentsInfo map while catalog I/O is intentionally
@@ -645,11 +629,11 @@ func (m *meta) applySegmentCatalogMutation(current *SegmentInfo, mutation Segmen
 	for _, operator := range mutation.Operators {
 		operator(pack)
 		if pack.err != nil {
-			return nil, nil, pack.err
+			return nil, pack.err
 		}
 	}
 	if len(pack.l0ManifestUpdates) > 0 {
-		return nil, nil, merr.WrapErrServiceInternalMsg("segment manifest commit catalog mutation must not contain L0 manifest updates")
+		return nil, merr.WrapErrServiceInternalMsg("segment manifest commit catalog mutation must not contain L0 manifest updates")
 	}
 	segment := pack.Get(current.GetID())
 	if segment == nil {
@@ -657,13 +641,9 @@ func (m *meta) applySegmentCatalogMutation(current *SegmentInfo, mutation Segmen
 	}
 	applySegmentCatalogTypedFields(segment, mutation)
 	if err := pack.Validate(); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	// Operators prepare metric transitions as part of UpdateSegmentsInfo.
-	// Do this after applying the typed fields too, so a state mutation is
-	// reflected only once the catalog write succeeds.
-	pack.prepareSegmentMetricUpdates()
-	return segment, pack.metricMutation, nil
+	return segment, nil
 }
 
 func staleSegmentManifestError(segmentID int64, expected, current string) error {
@@ -672,7 +652,7 @@ func staleSegmentManifestError(segmentID int64, expected, current string) error 
 }
 
 func matchesExpectedManifest(expected, current string) bool {
-	return expected == "" || expected == current
+	return expected == "" || packed.SameManifestPath(expected, current)
 }
 
 // validateExpectedManifestUsage enforces the CAS contract described on
@@ -1073,7 +1053,7 @@ func (m *meta) publishSegmentManifestOperator(prepared preparedSegmentManifest) 
 			if !matchesExpectedManifest(commit.ExpectedManifest, latest.GetManifestPath()) {
 				return modPack.fail(staleSegmentManifestError(commit.SegmentID, commit.ExpectedManifest, latest.GetManifestPath()))
 			}
-		} else if latest.GetManifestPath() != prepared.baseManifest {
+		} else if !packed.SameManifestPath(latest.GetManifestPath(), prepared.baseManifest) {
 			// Same rule as CommitSegmentManifest: the pointer moved since the stage-2
 			// snapshot, so an out-of-lock writer advanced it during manifest I/O and
 			// the prepared revision does not contain that revision's contents. Abort
