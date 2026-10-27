@@ -26,6 +26,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 )
 
@@ -55,12 +56,16 @@ func seed(t *testing.T, eng engine.RW, segmentID int64, values ...int64) {
 
 func requireSegment(t *testing.T, eng engine.RW, pk int64, segmentID int64) {
 	t.Helper()
-	entry := lookupOne(t, eng, Int64PK(pk))
+	values, err := eng.MultiGet(context.Background(), [][]byte{Int64PK(pk).Encode()})
+	require.NoError(t, err)
+	require.Len(t, values, 1)
 	if segmentID == 0 {
-		require.Nil(t, entry)
+		require.Nil(t, values[0])
 		return
 	}
-	require.NotNil(t, entry)
+	require.NotNil(t, values[0])
+	entry, err := codec.DecodePKEntry(values[0])
+	require.NoError(t, err)
 	require.Equal(t, segmentID, entry.SegmentID)
 }
 

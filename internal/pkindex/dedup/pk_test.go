@@ -24,6 +24,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/internal/pkindex/codec"
 )
 
 func TestInt64PKEncodingPreservesOrder(t *testing.T) {
@@ -68,4 +70,9 @@ func TestVarCharLockKeyIsFNV1a(t *testing.T) {
 		_, _ = h.Write([]byte(s))
 		require.Equal(t, h.Sum64(), VarCharPK(s).lockKey())
 	}
+}
+
+func TestKeyUsesTheCodec(t *testing.T) {
+	require.Equal(t, codec.EncodeInt64PK(-5), Int64PK(-5).Encode())
+	require.Equal(t, codec.EncodeVarcharPK("a"), VarCharPK("a").Encode())
 }

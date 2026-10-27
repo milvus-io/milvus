@@ -13,6 +13,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 package dedup
 
 import (
@@ -20,56 +21,54 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	pkroot "github.com/milvus-io/milvus/internal/pkindex"
-	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 )
 
-func lookupOne(t *testing.T, eng engine.RW, pk PK) *codec.PKEntry {
-	t.Helper()
-	entries, err := lookup(context.Background(), eng, []PK{pk})
-	require.NoError(t, err)
-	require.Len(t, entries, 1)
-	return entries[0]
-}
-
-func TestLookupAlignsWithTheKeys(t *testing.T) {
+func TestProbeKeepsTheOrderOfTheKeys(t *testing.T) {
 	ctx := context.Background()
-	eng := NewMemoryEngine()
-	require.Nil(t, lookupOne(t, eng, Int64PK(1)))
+	d := New(NewMemoryEngine(), Config{}).(*decider)
+	defer d.Close()
 
-	require.NoError(t, writeRecords(ctx, eng, 100, int64PKs(1), nil))
-	require.NoError(t, writeRecords(ctx, eng, 200, int64PKs(2), nil))
-	entries, err := lookup(ctx, eng, []PK{Int64PK(2), Int64PK(3), Int64PK(1)})
+	present, err := d.probe(ctx, []PK{Int64PK(1)})
 	require.NoError(t, err)
-	require.Equal(t, []*codec.PKEntry{{SegmentID: 200}, nil, {SegmentID: 100}}, entries)
+	require.Empty(t, present)
+
+	require.NoError(t, writeRecords(ctx, d.eng, 100, int64PKs(1), nil))
+	require.NoError(t, writeRecords(ctx, d.eng, 200, int64PKs(2), nil))
+	present, err = d.probe(ctx, []PK{Int64PK(2), Int64PK(3), Int64PK(1)})
+	require.NoError(t, err)
+	require.Equal(t, []PK{Int64PK(2), Int64PK(1)}, present)
 
 	// a tombstone makes the key absent
-	require.NoError(t, writeRecords(ctx, eng, 0, nil, int64PKs(1)))
-	require.Nil(t, lookupOne(t, eng, Int64PK(1)))
-
-	entries, err = lookup(ctx, eng, nil)
+	require.NoError(t, writeRecords(ctx, d.eng, 0, nil, int64PKs(1)))
+	present, err = d.probe(ctx, []PK{Int64PK(1)})
 	require.NoError(t, err)
-	require.Empty(t, entries)
+	require.Empty(t, present)
+
+	present, err = d.probe(ctx, nil)
+	require.NoError(t, err)
+	require.Empty(t, present)
 }
 
-func TestLookupRejectsACorruptValue(t *testing.T) {
+func TestProbeDoesNotDecodeTheValue(t *testing.T) {
 	ctx := context.Background()
-	eng := NewMemoryEngine()
-	require.NoError(t, eng.Write(ctx, []engine.Mutation{{Key: Int64PK(1).Encode(), Value: []byte{1, 2, 3}}}))
+	d := New(NewMemoryEngine(), Config{}).(*decider)
+	defer d.Close()
+	require.NoError(t, d.eng.Write(ctx, []engine.Mutation{{Key: Int64PK(1).Encode(), Value: []byte{1, 2, 3}}}))
 
-	_, err := lookup(ctx, eng, []PK{Int64PK(1)})
-	require.Error(t, err)
-	require.True(t, errors.Is(err, pkroot.ErrCorrupted))
+	present, err := d.probe(ctx, []PK{Int64PK(1)})
+	require.NoError(t, err)
+	require.Equal(t, []PK{Int64PK(1)}, present)
 }
 
-func TestLookupAfterEngineClose(t *testing.T) {
+func TestProbeAfterEngineClose(t *testing.T) {
 	eng := NewMemoryEngine()
+	d := New(eng, Config{}).(*decider)
+	defer d.Close()
 	require.NoError(t, eng.Close())
-	_, err := lookup(context.Background(), eng, []PK{Int64PK(1)})
+	_, err := d.probe(context.Background(), []PK{Int64PK(1)})
 	require.True(t, errors.Is(err, engine.ErrClosed))
 }
 
@@ -84,7 +83,7 @@ func (e *fakeLengthEngine) MultiGet(_ context.Context, _ [][]byte) ([][]byte, er
 	return make([][]byte, e.returnLen), nil
 }
 
-func TestLookupRejectsAWrongLength(t *testing.T) {
+func TestProbeRejectsAWrongLength(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
 		name      string
@@ -94,14 +93,11 @@ func TestLookupRejectsAWrongLength(t *testing.T) {
 		{"too many values", 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := lookup(ctx, &fakeLengthEngine{returnLen: tc.returnLen}, []PK{Int64PK(1), Int64PK(2)})
+			d := New(&fakeLengthEngine{returnLen: tc.returnLen}, Config{}).(*decider)
+			defer d.Close()
+			_, err := d.probe(ctx, []PK{Int64PK(1), Int64PK(2)})
 			require.Error(t, err)
 			require.True(t, errors.Is(err, errValueCountMismatch))
 		})
 	}
-}
-
-func TestKeyUsesTheCodec(t *testing.T) {
-	assert.Equal(t, codec.EncodeInt64PK(-5), Int64PK(-5).Encode())
-	assert.Equal(t, codec.EncodeVarcharPK("a"), VarCharPK("a").Encode())
 }

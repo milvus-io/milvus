@@ -89,9 +89,9 @@ func PresentForTest(ctx context.Context, d Decider, pk PK) (bool, error) {
 	if inSet {
 		return true, nil
 	}
-	entries, err := lookup(ctx, a.eng, []PK{pk})
+	present, err := a.probe(ctx, []PK{pk})
 	if err != nil {
 		return false, err
 	}
-	return entries[0] != nil, nil
+	return len(present) > 0, nil
 }

@@ -585,11 +585,11 @@ func BenchmarkWritePathOf1000Keys(b *testing.B) {
 		}
 	})
 	b.Run("probe", func(b *testing.B) {
-		eng := NewMemoryEngine()
-		defer eng.Close()
+		d := New(NewMemoryEngine(), Config{}).(*decider)
+		defer d.Close()
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			if _, err := lookup(context.Background(), eng, batches[i%len(batches)]); err != nil {
+			if _, err := d.probe(context.Background(), batches[i%len(batches)]); err != nil {
 				b.Fatal(err)
 			}
 		}
