@@ -247,7 +247,8 @@ Import 2PC use session-wide state. Both clusters must use
 `dataCoord.compaction.storageVersion.enabled=true` for the function-field lifecycle case. Replica
 assignment cases assume the default
 `streaming.replication.useLocalReplicaConfig=true` and one secondary replica.
-The multi-replica case additionally needs two primary query nodes; missing
+The multi-replica case additionally needs two primary query nodes and, when
+StreamingNodes host replica delegators, two primary StreamingNodes. Missing
 capacity is reported as a skip, not a pass.
 
 | File | Contracts checked |

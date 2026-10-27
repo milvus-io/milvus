@@ -2,11 +2,12 @@
 CDC sync tests for collection DDL operations.
 """
 
+import re
 import time
 
 import pytest
 from common.common_type import CaseLabel
-from pymilvus import Collection, DataType
+from pymilvus import Collection, DataType, MilvusException
 from pymilvus.client.types import LoadState
 
 from .base import TestCDCSyncBase, logger
@@ -380,7 +381,14 @@ class TestCDCSyncCollectionManagement(TestCDCSyncBase):
             pytest.skip("Requires at least two query nodes in the primary default resource group")
         name = c.collection(load=False)
         c.upstream.insert(name, c.data())
-        c.upstream.load_collection(name, replica_number=2)
+        try:
+            c.upstream.load_collection(name, replica_number=2)
+        except MilvusException as error:
+            # Streaming delegators need one StreamingNode per replica on this deployment form.
+            shortage = re.search(r"currentStreamingNode=(\d+).*expectedStreamingNode=2", str(error))
+            if error.code == 12 and shortage and int(shortage.group(1)) < 2:
+                pytest.skip("Requires two StreamingNodes when streaming query nodes host replica delegators")
+            raise
 
         def replicas():
             assert len(Collection(name=name, using=c.upstream._using).get_replicas().groups) == 2
@@ -593,8 +601,9 @@ class TestCDCSyncCollectionManagement(TestCDCSyncBase):
         # Check actual projected values; a nonempty outer list can contain zero hits.
         expected = dict(zip(inserted["ids"], test_data, strict=True))
         for client in (upstream_client, downstream_client):
-            result = client.search(collection_name, data=[[0.1] * 128], limit=1,
-                                   output_fields=["varchar_field"], anns_field="float_vector")
+            result = client.search(
+                collection_name, data=[[0.1] * 128], limit=1, output_fields=["varchar_field"], anns_field="float_vector"
+            )
             assert len(result) == 1 and len(result[0]) == 1
             hit = result[0][0]
             assert hit["entity"]["varchar_field"] == expected[hit["id"]]["varchar_field"]
