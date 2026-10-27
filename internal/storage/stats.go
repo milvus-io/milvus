@@ -54,6 +54,9 @@ type PkStatsConfig struct {
 	Capacity              int64
 	BloomFilterType       string
 	MaxBloomFalsePositive float64
+	// UseDeferredBloomFilter builds a BlockedBloomFilter sized by the PKs actually added, at serialization.
+	// Capacity then only hints the initial hash cache size. It has no effect on BasicBloomFilter.
+	UseDeferredBloomFilter bool
 }
 
 // UnmarshalJSON unmarshal bytes to PrimaryKeyStats
@@ -147,6 +150,11 @@ func (stats *PrimaryKeyStats) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// ReserveSpace4BF reserves hash cache space when using a deferred BF.
+func (stats *PrimaryKeyStats) ReserveSpace4BF(additional int64) error {
+	return bloomfilter.ReserveSpace(stats.BF, additional)
+}
+
 func (stats *PrimaryKeyStats) UpdateByMsgs(msgs FieldData) {
 	switch schemapb.DataType(stats.PkType) {
 	case schemapb.DataType_Int64:
@@ -212,6 +220,11 @@ func (stats *PrimaryKeyStats) UpdateMinMax(pk PrimaryKey) {
 }
 
 func NewPrimaryKeyStats(fieldID, pkType, rowNum int64) (*PrimaryKeyStats, error) {
+	return NewPrimaryKeyStatsWithConfig(fieldID, pkType, DefaultPkStatsConfig(rowNum))
+}
+
+// DefaultPkStatsConfig returns the PkStatsConfig built from paramtable for rowNum rows.
+func DefaultPkStatsConfig(rowNum int64) PkStatsConfig {
 	config := PkStatsConfig{
 		Capacity:              rowNum,
 		BloomFilterType:       paramtable.Get().CommonCfg.BloomFilterType.GetValue(),
@@ -226,7 +239,7 @@ func NewPrimaryKeyStats(fieldID, pkType, rowNum int64) (*PrimaryKeyStats, error)
 			mlog.String("type", config.BloomFilterType))
 		config.BloomFilterType = bloomfilter.BlockBFName
 	}
-	return NewPrimaryKeyStatsWithConfig(fieldID, pkType, config)
+	return config
 }
 
 func NewPrimaryKeyStatsWithConfig(fieldID, pkType int64, config PkStatsConfig) (*PrimaryKeyStats, error) {
@@ -240,14 +253,24 @@ func NewPrimaryKeyStatsWithConfig(fieldID, pkType int64, config PkStatsConfig) (
 	if config.MaxBloomFalsePositive <= 0 || config.MaxBloomFalsePositive >= 1 {
 		return nil, merr.WrapErrParameterInvalidMsg("invalid bloom false positive rate %v", config.MaxBloomFalsePositive)
 	}
+	var bf bloomfilter.BloomFilterInterface
+	if config.UseDeferredBloomFilter && bfType == bloomfilter.BlockedBF {
+		var err error
+		bf, err = bloomfilter.NewDeferredBlockedBloomFilter(uint(config.Capacity), config.MaxBloomFalsePositive)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		bf = bloomfilter.NewBloomFilterWithType(
+			uint(config.Capacity),
+			config.MaxBloomFalsePositive,
+			config.BloomFilterType)
+	}
 	return &PrimaryKeyStats{
 		FieldID: fieldID,
 		PkType:  pkType,
 		BFType:  bfType,
-		BF: bloomfilter.NewBloomFilterWithType(
-			uint(config.Capacity),
-			config.MaxBloomFalsePositive,
-			config.BloomFilterType),
+		BF:      bf,
 	}, nil
 }
 

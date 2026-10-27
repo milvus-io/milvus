@@ -22,6 +22,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
@@ -206,6 +208,202 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactDupPK_V2ToV2Format() {
 	s.NotEmpty(segment.InsertLogs)
 	s.NotEmpty(segment.Field2StatslogPaths)
 	s.Empty(segment.Deltalogs)
+}
+
+// TestCompactSizesBloomFilterByOutputRows deletes most input rows, so the output segment has far fewer rows than
+// the input. Its PK bloom filter must be sized by the output rows, not by all input rows.
+func (s *MixCompactionTaskStorageV2Suite) TestCompactSizesBloomFilterByOutputRows() {
+	s.testCompactSizesBloomFilterByOutputRows(storage.StorageV2)
+}
+
+func (s *MixCompactionTaskStorageV2Suite) TestCompactSizesBloomFilterByOutputRowsV3() {
+	s.testCompactSizesBloomFilterByOutputRows(storage.StorageV3)
+}
+
+func (s *MixCompactionTaskStorageV2Suite) testCompactSizesBloomFilterByOutputRows(version int64) {
+	s.task.compactionParams.StorageVersion = version
+	s.task.compactionParams.UseLoonFFI = version == storage.StorageV3
+	const rowsPerSegment, deletedPerSegment = 100, 90
+	segments := []int64{1001, 1002, 1003}
+	statsBlobs := make(map[string][]byte)
+	if version == storage.StorageV2 {
+		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, kvs map[string][]byte) error {
+			for k, v := range kvs {
+				if strings.Contains(k, common.SegmentStatslogPath) {
+					statsBlobs[k] = v
+				}
+			}
+			return nil
+		})
+	}
+	alloc := allocator.NewLocalAllocator(100, math.MaxInt64)
+	deleteTs := tsoutil.ComposeTSByTime(getMilvusBirthday().Add(10 * time.Second))
+	s.task.plan.SegmentBinlogs = make([]*datapb.CompactionSegmentBinlogs, 0)
+	for _, segID := range segments {
+		s.initMultiRowsSegBuffer(segID, rowsPerSegment, 3)
+		kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
+		s.Require().NoError(err)
+		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
+			left, right := lo.Difference(keys, lo.Keys(kvs))
+			return len(left) == 0 && len(right) == 0
+		})).Return(lo.Values(kvs), nil).Once()
+
+		pks := make([]int64, 0, deletedPerSegment)
+		tss := make([]uint64, 0, deletedPerSegment)
+		for i := int64(0); i < deletedPerSegment; i++ {
+			pks = append(pks, segID+i*3)
+			tss = append(tss, deleteTs)
+		}
+		blob, err := getInt64DeltaBlobs(segID, pks, tss)
+		s.Require().NoError(err)
+		deltaPath := fmt.Sprintf("deltalog/%d", segID)
+		s.mockBinlogIO.EXPECT().Download(mock.Anything, []string{deltaPath}).
+			Return([][]byte{blob.GetValue()}, nil).Once()
+
+		s.task.plan.SegmentBinlogs = append(s.task.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
+			CollectionID: 1,
+			SegmentID:    segID,
+			FieldBinlogs: lo.Values(fBinlogs),
+			Deltalogs: []*datapb.FieldBinlog{
+				{Binlogs: []*datapb.Binlog{{LogPath: deltaPath}}},
+			},
+		})
+	}
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+
+	s.Require().Len(result.GetSegments(), 1)
+	outputRows := int64(len(segments) * (rowsPerSegment - deletedPerSegment))
+	s.Equal(outputRows, result.GetSegments()[0].GetNumOfRows())
+	if version == storage.StorageV2 {
+		s.Require().Len(statsBlobs, 1)
+	}
+	stats := s.readOutputPkStats(result.GetSegments()[0], statsBlobs, version)
+	fp := paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat()
+	inputRows := int64(len(segments) * rowsPerSegment)
+	s.Equal(bloomfilter.NewBloomFilterWithType(uint(outputRows), fp, bloomfilter.BlockBFName).Cap(), stats.BF.Cap())
+	s.Less(stats.BF.Cap(), bloomfilter.NewBloomFilterWithType(uint(inputRows), fp, bloomfilter.BlockBFName).Cap())
+	for _, segID := range segments {
+		for i := int64(deletedPerSegment); i < rowsPerSegment; i++ {
+			var key [8]byte
+			common.Endian.PutUint64(key[:], uint64(segID+i*3))
+			s.True(stats.BF.Test(key[:]), "missing retained PK %d", segID+i*3)
+		}
+	}
+
+}
+
+func (s *MixCompactionTaskStorageV2Suite) TestCompactSizesBloomFilterPerOutputSegment() {
+	s.testCompactSizesBloomFilterPerOutputSegment(storage.StorageV2)
+}
+
+func (s *MixCompactionTaskStorageV2Suite) TestCompactSizesBloomFilterPerOutputSegmentV3() {
+	s.testCompactSizesBloomFilterPerOutputSegment(storage.StorageV3)
+}
+
+func (s *MixCompactionTaskStorageV2Suite) testCompactSizesBloomFilterPerOutputSegment(version int64) {
+	s.task.compactionParams.StorageVersion = version
+	s.task.compactionParams.UseLoonFFI = version == storage.StorageV3
+	// Each input fits in one record. A one-byte target forces rotation before
+	// the next record, producing differently sized output segments.
+	rows := []int64{100, 200, 30}
+	const inputRows = 330
+	s.task.plan.MaxSize = 1
+	s.task.plan.SegmentBinlogs = nil
+	statsBlobs := make(map[string][]byte)
+	if version == storage.StorageV2 {
+		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, kvs map[string][]byte) error {
+			for k, v := range kvs {
+				if strings.Contains(k, common.SegmentStatslogPath) {
+					statsBlobs[k] = v
+				}
+			}
+			return nil
+		})
+	}
+	alloc := allocator.NewLocalAllocator(100, math.MaxInt64)
+	for i, n := range rows {
+		seed := int64(1000 * (i + 1))
+		s.initMultiRowsSegBuffer(seed, n, 1)
+		kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
+		s.Require().NoError(err)
+		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
+			left, right := lo.Difference(keys, lo.Keys(kvs))
+			return len(left) == 0 && len(right) == 0
+		})).Return(lo.Values(kvs), nil).Once()
+		s.task.plan.SegmentBinlogs = append(s.task.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
+			CollectionID: 1,
+			SegmentID:    seed,
+			FieldBinlogs: lo.Values(fBinlogs),
+		})
+	}
+
+	result, err := s.task.Compact()
+	s.Require().NoError(err)
+	s.Require().Len(result.GetSegments(), len(rows))
+	if version == storage.StorageV2 {
+		s.Require().Len(statsBlobs, len(rows))
+	}
+	fp := paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat()
+	var totalRows int64
+	for i, segment := range result.GetSegments() {
+		s.Require().Equal(rows[i], segment.GetNumOfRows())
+		totalRows += segment.GetNumOfRows()
+		stats := s.readOutputPkStats(segment, statsBlobs, version)
+		s.Equal(bloomfilter.NewBloomFilterWithType(uint(rows[i]), fp, bloomfilter.BlockBFName).Cap(), stats.BF.Cap())
+		s.Less(stats.BF.Cap(), bloomfilter.NewBloomFilterWithType(inputRows, fp, bloomfilter.BlockBFName).Cap())
+		seed := int64(1000 * (i + 1))
+		s.Equal(seed, stats.MinPk.GetValue())
+		s.Equal(seed+rows[i]-1, stats.MaxPk.GetValue())
+		for pk := seed; pk < seed+rows[i]; pk++ {
+			var key [8]byte
+			common.Endian.PutUint64(key[:], uint64(pk))
+			s.True(stats.BF.Test(key[:]), "segment %d missing PK %d", segment.GetSegmentID(), pk)
+		}
+	}
+	s.EqualValues(inputRows, totalRows)
+}
+
+// readOutputPkStats follows the output metadata, including the V3 manifest,
+// so the assertions cover the persisted BF that downstream readers will load.
+func (s *MixCompactionTaskStorageV2Suite) readOutputPkStats(
+	segment *datapb.CompactionSegment,
+	statsBlobs map[string][]byte,
+	version int64,
+) *storage.PrimaryKeyStats {
+	s.T().Helper()
+	s.Require().Equal(version, segment.GetStorageVersion())
+	var blob []byte
+	if version == storage.StorageV3 {
+		s.Require().NotEmpty(segment.GetManifest())
+		for _, fieldLogs := range segment.GetField2StatslogPaths() {
+			s.Empty(fieldLogs.GetBinlogs(), "V3 must not expose legacy PK stats files")
+		}
+		s.Empty(statsBlobs, "V3 PK stats must be written through the manifest")
+		manifestStats, err := packed.GetManifestStats(segment.GetManifest(), s.task.compactionParams.StorageConfig)
+		s.Require().NoError(err)
+		pkField, err := typeutil.GetPrimaryFieldSchema(s.task.plan.GetSchema())
+		s.Require().NoError(err)
+		stat, ok := manifestStats[fmt.Sprintf("bloom_filter.%d", pkField.GetFieldID())]
+		s.Require().True(ok, "missing BF entry for segment %d", segment.GetSegmentID())
+		s.Require().Len(stat.Paths, 1)
+		blob, err = packed.ReadFile(s.task.compactionParams.StorageConfig, stat.Paths[0])
+		s.Require().NoError(err)
+		s.Equal(fmt.Sprint(len(blob)), stat.Metadata["memory_size"])
+	} else {
+		s.Require().Len(segment.GetField2StatslogPaths(), 1)
+		logs := segment.GetField2StatslogPaths()[0].GetBinlogs()
+		s.Require().Len(logs, 1)
+		var ok bool
+		blob, ok = statsBlobs[logs[0].GetLogPath()]
+		s.Require().True(ok, "missing stats for segment %d", segment.GetSegmentID())
+	}
+	stats, err := storage.DeserializeStats([]*storage.Blob{{Value: blob}})
+	s.Require().NoError(err)
+	s.Require().Len(stats, 1)
+	s.Equal(bloomfilter.BlockedBF, stats[0].BFType)
+	return stats[0]
 }
 
 func (s *MixCompactionTaskStorageV2Suite) TestCompactTwoToOne() {
