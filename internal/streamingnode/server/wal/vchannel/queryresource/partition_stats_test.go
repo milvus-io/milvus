@@ -379,3 +379,32 @@ func TestPartitionStatsCurrentRegistrationCancellationRemainsVisible(t *testing.
 		require.Nil(t, manager.refs[key].statsSnapshots)
 	})
 }
+
+func TestPartitionStatsRepeatedAcquireOwnsOneReference(t *testing.T) {
+	manager := newPartitionStatsTestManager(t)
+	meta, key := testManagerQueryViewMetaAndKey(1)
+	req := snview.AcquireResource{Key: key, Meta: meta, PartitionStats: []*viewpb.ClusteredPartitionStats{{PartitionId: 2, Version: 7}}}
+	cm := manager.chunkManager
+	require.NoError(t, cm.Write(t.Context(), path.Join(cm.RootPath(), "part_stats/0/2/v1/7"), []byte(`{"segmentStats":{"101":{"numRows":10}}}`)))
+	manager.AcquireLocked(req, nil)
+	original := manager.refs[key]
+	for range 3 {
+		manager.AcquireLocked(req, nil)
+	}
+	require.Len(t, manager.refs, 1)
+	require.Len(t, manager.partitionStats, 1)
+	require.Equal(t, 1, original.statsResources[0].refs)
+	require.Same(t, original.resources, manager.refs[key].resources)
+	require.NoError(t, manager.prepareReady(t.Context(), key, func() {}))
+	snapshot := manager.refs[key].statsSnapshots[2]
+	require.NotNil(t, snapshot)
+	require.Equal(t, int64(7), snapshot.Version)
+	require.Equal(t, 10, snapshot.SegmentStats[101].NumRows)
+	manager.AcquireLocked(req, nil)
+	require.Same(t, snapshot, manager.refs[key].statsSnapshots[2])
+	require.Equal(t, 1, original.statsResources[0].refs)
+	manager.Release(snview.ReleaseResource{Key: key})
+	require.Empty(t, manager.refs)
+	require.Empty(t, manager.partitionStats, "one release must retire repeated registration of the same View")
+	require.ErrorIs(t, original.statsResources[0].ctx.Err(), context.Canceled)
+}

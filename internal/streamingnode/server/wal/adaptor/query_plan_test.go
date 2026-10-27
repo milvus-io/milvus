@@ -7,6 +7,7 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
@@ -321,4 +322,93 @@ func BenchmarkQueryPlanPartitionSelection(b *testing.B) {
 			}
 		})
 	}
+}
+
+func TestQueryPlanMergesOptimizerAndPartitionSummary(t *testing.T) {
+	patchQueryReadRuntime(t)
+	global := optimizer.NewNoopGlobalOptimizer()
+	for _, flags := range []uint32{
+		1 << viewpb.GlobalOptimizerExecutionSummary_PrunedByScalarFiltering,
+		1 << viewpb.GlobalOptimizerExecutionSummary_PrunedByVectorFiltering,
+		1<<viewpb.GlobalOptimizerExecutionSummary_PrunedByScalarFiltering | 1<<viewpb.GlobalOptimizerExecutionSummary_PrunedByVectorFiltering,
+	} {
+		t.Run(strconv.FormatUint(uint64(flags), 10), func(t *testing.T) {
+			mockey.PatchConvey("partition diagnostics augment existing optimizer facts", t, func() {
+				view := &viewpb.QueryViewOfShard{
+					Meta: &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: "p_1v0", ReplicaId: 1, Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 1}, QueryVersion: 1}},
+					QueryNode: []*viewpb.QueryViewOfQueryNode{
+						{NodeId: 11, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{100}}}},
+						{NodeId: 12, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 20, SegmentIds: []int64{200}}}},
+					},
+				}
+				lease := &snview.QueryViewLease{Meta: view.Meta, View: view, Version: qviews.FromProtoQueryViewVersion(view.Meta.Version), Renew: func() {}, Release: func() {}}
+				mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtSchema).Return(lease, nil).Build()
+				mockey.Mock((*queryresource.QueryRuntime).ResolvePartitions).To(func(_ *queryresource.QueryRuntime, _ uint64, ids []int64) ([]int64, error) { return ids, nil }).Build()
+				mockey.Mock(mockey.GetMethod(global, "OptimizePlan")).To(func(context.Context, *viewpb.QueryPlan, *viewpb.QueryViewOfShard) (*viewpb.GlobalOptimizerExecutionSummary, error) {
+					return &viewpb.GlobalOptimizerExecutionSummary{Flags: flags}, nil
+				}).Build()
+				w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}, viewResourceManager: &vchannel.PChannelRecoveryManager{}}
+				for _, search := range []bool{false, true} {
+					req := &viewpb.GetQueryPlanRequest{ShardId: qviews.NewShardIDFromQVMeta(view.Meta).IntoProto(), Mvcc: &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 90}}}
+					if search {
+						req.Request = &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: &internalpb.SearchRequest{CollectionID: 1, PartitionIDs: []int64{10}}}
+					} else {
+						req.Request = &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{CollectionID: 1, PartitionIDs: []int64{10}}}
+					}
+					response, err := w.GetQueryPlan(t.Context(), req)
+					require.NoError(t, err)
+					require.Equal(t, flags|1<<viewpb.GlobalOptimizerExecutionSummary_PrunedByPartitionFiltering, response.GetExecutionSummary().GetGlobalOptimizer().GetFlags())
+					require.Len(t, response.Plan.WorkNodes, 1)
+					require.EqualValues(t, 11, response.Plan.WorkNodes[0].GetQueryNode().GetNodeId())
+					require.True(t, proto.Equal(req.GetQueryPlanMvcc(), response.Plan.Mvcc))
+				}
+			})
+		})
+	}
+}
+
+func TestQueryPlanAllSubqueriesSkipped(t *testing.T) {
+	patchQueryReadRuntime(t)
+	mockey.PatchConvey("a fully skipped optimization still returns the bound plan", t, func() {
+		view := &viewpb.QueryViewOfShard{
+			Meta:          &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: "p_1v0", ReplicaId: 1, Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 1}, QueryVersion: 1}},
+			StreamingNode: &viewpb.QueryViewOfStreamingNode{},
+			QueryNode:     []*viewpb.QueryViewOfQueryNode{{NodeId: 11, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{100}}}}},
+		}
+		renewed, released := false, false
+		lease := &snview.QueryViewLease{Meta: view.Meta, View: view, Version: qviews.FromProtoQueryViewVersion(view.Meta.Version), Renew: func() { require.False(t, released); renewed = true }, Release: func() { released = true }}
+		mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtSchema).Return(lease, nil).Build()
+		mockey.Mock((*queryresource.QueryRuntime).ResolvePartitions).Return([]int64{10}, nil).Build()
+		mockey.Mock(mockey.GetMethod(optimizer.NewNoopGlobalOptimizer(), "OptimizeSearch")).To(func(_ context.Context, req *internalpb.SearchRequest) (optimizer.SearchOptimization, error) {
+			for _, sub := range req.SubReqs {
+				sub.Skip = true
+			}
+			return optimizer.SearchOptimization{Skip: true}, nil
+		}).Build()
+		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, queryViewHandler: &snview.SNQueryViewHandler{}, viewResourceManager: &vchannel.PChannelRecoveryManager{}}
+		req := &viewpb.GetQueryPlanRequest{
+			ShardId: qviews.NewShardIDFromQVMeta(view.Meta).IntoProto(),
+			Mvcc:    &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 90}},
+			Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: &internalpb.SearchRequest{CollectionID: 1, IsAdvanced: true, SubReqs: []*internalpb.SubSearchRequest{{Nq: 2, Topk: 3}, {Nq: 2, Topk: 4}}}},
+		}
+		before := proto.Clone(req)
+		response, err := w.GetQueryPlan(t.Context(), req)
+		require.NoError(t, err)
+		require.True(t, renewed)
+		require.True(t, released)
+		require.Empty(t, response.Plan.WorkNodes)
+		require.True(t, proto.Equal(req.GetQueryPlanMvcc(), response.Plan.Mvcc))
+		require.True(t, proto.Equal(view.Meta.Version, response.Plan.Version))
+		require.True(t, proto.Equal(req.ShardId, response.Plan.ShardId))
+		require.Nil(t, response.ExecutionSummary, "skipping is not evidence of partition/statistics pruning")
+		require.NoError(t, qviews.RestoreQueryPlanPayloads(response.Plan, req))
+		subs := response.Plan.GetLegacySearchRequest().GetSubReqs()
+		require.Len(t, subs, 2)
+		for i, sub := range subs {
+			require.True(t, sub.Skip)
+			require.Equal(t, req.GetLegacySearchRequest().SubReqs[i].Topk, sub.Topk)
+			require.Equal(t, []int64{10}, sub.PartitionIDs)
+		}
+		require.True(t, proto.Equal(before, req), "planning must not mutate the input")
+	})
 }

@@ -7,6 +7,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -142,6 +143,74 @@ func TestExecutionSummaryFeatureMapping(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			summary := &viewpb.ExecutionSummary{GlobalOptimizer: &viewpb.GlobalOptimizerExecutionSummary{Flags: tc.flags}}
 			require.Equal(t, tc.expected, executionSummaryFeatureBits(summary))
+		})
+	}
+}
+
+func TestEmptyNonCountAggregateResults(t *testing.T) {
+	paramtable.Init()
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+		{FieldID: 101, Name: "value", DataType: schemapb.DataType_Float},
+	}}
+	for _, tc := range []struct {
+		name       string
+		op         planpb.AggregateOp
+		fieldID    int64
+		resultType schemapb.DataType
+	}{
+		{"sum_integer", planpb.AggregateOp_sum, 100, schemapb.DataType_Int64},
+		{"sum_float", planpb.AggregateOp_sum, 101, schemapb.DataType_Double},
+		{"avg_integer", planpb.AggregateOp_avg, 100, schemapb.DataType_Int64},
+		{"min_float", planpb.AggregateOp_min, 101, schemapb.DataType_Float},
+		{"max_integer", planpb.AggregateOp_max, 100, schemapb.DataType_Int64},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := &LegacyQueryRequest{Schema: schema, Req: &internalpb.RetrieveRequest{Aggregates: []*planpb.Aggregate{{Op: tc.op, FieldId: tc.fieldID}}}}
+			// Match Proxy's decomposition: execution receives sum/count, never avg.
+			if tc.op == planpb.AggregateOp_avg {
+				operators, err := agg.NewAggregate("avg", tc.fieldID, "avg(pk)", schemapb.DataType_Int64)
+				require.NoError(t, err)
+				req.Req.Aggregates = nil
+				for _, operator := range operators {
+					req.Req.Aggregates = append(req.Req.Aggregates, operator.ToPB())
+				}
+			}
+			plan := ShardPlan{ShardID: qviews.ShardID{VChannel: "p_1v0", ReplicaID: 1}, Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 100, TransformingTimetick: 90}, ExecutionSummary: &viewpb.ExecutionSummary{GlobalOptimizer: &viewpb.GlobalOptimizerExecutionSummary{Flags: 1 << viewpb.GlobalOptimizerExecutionSummary_PrunedByScalarFiltering}}}
+			// No workers and fieldless responses must agree, including the
+			// multi-worker reduction path. Use the established QN empty values.
+			for _, workerCount := range []int{0, 1, 2} {
+				collector := newLegacyQueryCollector()
+				inputs := make([]*internalpb.RetrieveResults, workerCount)
+				for i := range inputs {
+					inputs[i] = &internalpb.RetrieveResults{}
+					require.NoError(t, collector.Add(plan.ShardID, &viewpb.QueryOnViewResponse{LegacyResults: inputs[i]}))
+				}
+				results, err := collector.Reduce(t.Context(), req, []ShardPlan{plan})
+				require.NoError(t, err)
+				require.Len(t, results, 1)
+				require.Len(t, results[0].GetFieldsData(), len(req.Req.Aggregates))
+				if tc.op == planpb.AggregateOp_avg {
+					require.Equal(t, schemapb.DataType_Int64, results[0].FieldsData[1].Type)
+					require.Equal(t, []int64{0}, results[0].FieldsData[1].GetScalars().GetLongData().GetData())
+				}
+				field := results[0].FieldsData[0]
+				require.Equal(t, tc.resultType, field.GetType())
+				switch tc.resultType {
+				case schemapb.DataType_Int64:
+					require.Equal(t, []int64{0}, field.GetScalars().GetLongData().GetData())
+				case schemapb.DataType_Double:
+					require.Equal(t, []float64{0}, field.GetScalars().GetDoubleData().GetData())
+				case schemapb.DataType_Float:
+					require.Equal(t, []float32{0}, field.GetScalars().GetFloatData().GetData())
+				}
+				require.Equal(t, uint64(100), results[0].GetMvccTimestamp())
+				bit, _ := featureusage.ExecBit(featureusage.FeatureSegmentPrune)
+				require.Equal(t, bit, results[0].FeatureBits&bit)
+				for _, input := range inputs {
+					require.Empty(t, input.FieldsData, "normalization must not mutate worker responses")
+				}
+			}
 		})
 	}
 }
