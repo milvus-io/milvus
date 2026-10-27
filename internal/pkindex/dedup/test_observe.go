@@ -28,7 +28,7 @@ import (
 
 // ObserveForTest stands in for the observe of the WAL recovery: it applies one
 // appended write with time tick tt to the engine, then removes its entries
-// from the in-flight set (rule A). For a transaction that this index upgraded,
+// from the in-flight set (rule A). For an insert appended as a transaction,
 // puts are the keys of the insert and deletes the keys of the companion
 // delete. Deletes are applied first, because both take effect at the same
 // time tick and the insert survives the delete.

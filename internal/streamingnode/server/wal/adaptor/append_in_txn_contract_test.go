@@ -51,7 +51,7 @@ import (
 // sit: between replicate and timetick.
 const (
 	inTxnKey         = "test-in-txn"
-	inTxnUpgrade     = "upgrade"      // turn an autocommit insert into a transaction
+	inTxnAsTxn       = "as-txn"       // append an autocommit insert as a transaction
 	inTxnCommitExtra = "commit-extra" // append one extra body before a client CommitTxn
 
 	inTxnCollectionID = int64(1)
@@ -65,7 +65,7 @@ type inTxnObserved struct {
 	attempts     int
 	attemptErrs  []error
 	segmentID    int64
-	mainTimeTick uint64
+	bodyTimeTick uint64
 	beginTxnIDs  []message.TxnID
 	txnManager   *txn.TxnManager
 }
@@ -94,18 +94,21 @@ func (o *inTxnObserved) recordAttemptErr(err error) {
 	o.attemptErrs = append(o.attemptErrs, err)
 }
 
-func (o *inTxnObserved) recordMain(main message.ImmutableMessage) {
+// recordInsertBody records the insert body as the chain below the test
+// interceptor returned it: the shard interceptor assigned its segment and the
+// timetick interceptor its time tick, both in place.
+func (o *inTxnObserved) recordInsertBody(body message.MutableMessage) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	header := message.MustAsImmutableInsertMessageV1(main).Header()
+	header := message.MustAsMutableInsertMessageV1(body).Header()
 	o.segmentID = header.GetPartitions()[0].GetSegmentAssignment().GetSegmentId()
-	o.mainTimeTick = main.TimeTick()
+	o.bodyTimeTick = body.TimeTick()
 }
 
-func (o *inTxnObserved) snapshot() (attempts int, attemptErrs []error, segmentID int64, mainTimeTick uint64) {
+func (o *inTxnObserved) snapshot() (attempts int, attemptErrs []error, segmentID int64, bodyTimeTick uint64) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	return o.attempts, append([]error(nil), o.attemptErrs...), o.segmentID, o.mainTimeTick
+	return o.attempts, append([]error(nil), o.attemptErrs...), o.segmentID, o.bodyTimeTick
 }
 
 type inTxnBuilder struct{ obs *inTxnObserved }
@@ -121,14 +124,19 @@ func (i *inTxnInterceptor) Name() string { return "append-in-txn-contract" }
 
 func (i *inTxnInterceptor) Close() {}
 
-// recordBeginTxn wraps appendOp to record the TxnID of every transaction that
-// AppendInTxn starts.
-func (i *inTxnInterceptor) recordBeginTxn(appendOp interceptors.Append) interceptors.Append {
+// recordAppends wraps appendOp to record the TxnID of every transaction that
+// AppendInTxn starts, and the insert body that the chain below appended.
+func (i *inTxnInterceptor) recordAppends(appendOp interceptors.Append) interceptors.Append {
 	return func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
 		msgID, err := appendOp(ctx, msg)
-		if msg.MessageType() == message.MessageTypeBeginTxn {
+		switch msg.MessageType() {
+		case message.MessageTypeBeginTxn:
 			if txnCtx := msg.TxnContext(); txnCtx != nil {
 				i.obs.recordBeginTxnID(txnCtx.TxnID)
+			}
+		case message.MessageTypeInsert:
+			if err == nil {
+				i.obs.recordInsertBody(msg)
 			}
 		}
 		return msgID, err
@@ -138,21 +146,20 @@ func (i *inTxnInterceptor) recordBeginTxn(appendOp interceptors.Append) intercep
 func (i *inTxnInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	mode, _ := msg.Properties().Get(inTxnKey)
 	switch {
-	case mode == inTxnUpgrade && msg.MessageType() == message.MessageTypeInsert:
+	case mode == inTxnAsTxn && msg.MessageType() == message.MessageTypeInsert:
 		i.obs.recordAttempt()
-		result, err := txn.AppendInTxn(ctx, i.recordBeginTxn(appendOp), msg, []message.MutableMessage{newInTxnDelete()})
+		commit, err := txn.AppendInTxn(ctx, i.recordAppends(appendOp), msg, []message.MutableMessage{newInTxnDelete()})
 		if err != nil {
 			i.obs.recordAttemptErr(err)
 			return nil, err
 		}
-		i.obs.recordMain(result.Main)
-		return result.Commit.MessageID(), nil
+		return commit.MessageID(), nil
 	case mode == inTxnCommitExtra && msg.MessageType() == message.MessageTypeCommitTxn:
-		result, err := txn.AppendInTxn(ctx, appendOp, msg, []message.MutableMessage{newInTxnDelete()})
+		commit, err := txn.AppendInTxn(ctx, appendOp, msg, []message.MutableMessage{newInTxnDelete()})
 		if err != nil {
 			return nil, err
 		}
-		return result.Commit.MessageID(), nil
+		return commit.MessageID(), nil
 	}
 	return appendOp(ctx, msg)
 }
@@ -277,21 +284,21 @@ func readInTxnMessages(t *testing.T, w wal.WAL, quiet time.Duration) []message.I
 	}
 }
 
-// TestAppendInTxnContractUpgrade checks that an autocommit insert upgraded by an
-// interceptor becomes one transaction, and that the client observes the commit.
-func TestAppendInTxnContractUpgrade(t *testing.T) {
+// TestAppendInTxnContractInsertAsTxn checks that an interceptor can append an
+// autocommit insert as one transaction, and that the client observes the commit.
+func TestAppendInTxnContractInsertAsTxn(t *testing.T) {
 	obs := &inTxnObserved{}
-	w := openInTxnWAL(t, "append-in-txn-upgrade", obs)
+	w := openInTxnWAL(t, "append-in-txn-insert-as-txn", obs)
 
-	insert := newInTxnInsert(map[string]string{inTxnKey: inTxnUpgrade})
+	insert := newInTxnInsert(map[string]string{inTxnKey: inTxnAsTxn})
 	r, err := w.Append(context.Background(), insert)
 	require.NoError(t, err)
 	require.Nil(t, insert.TxnContext(), "the caller's message must not be modified")
 	require.Nil(t, r.TxnCtx, "the client did not ask for a transaction, so it must not see one")
 
-	_, _, segmentID, mainTimeTick := obs.snapshot()
-	require.NotZero(t, segmentID, "the segment assignment must be readable from the appended main message")
-	require.Greater(t, r.TimeTick, mainTimeTick, "the client observes the commit time tick, not the insert one")
+	_, _, segmentID, bodyTimeTick := obs.snapshot()
+	require.NotZero(t, segmentID, "the shard interceptor must assign the segment of the insert body")
+	require.Greater(t, r.TimeTick, bodyTimeTick, "the client observes the commit time tick, not the insert one")
 
 	txnMsgs := readInTxnMessages(t, w, time.Second)
 	require.Len(t, txnMsgs, 1)
@@ -311,15 +318,15 @@ func TestAppendInTxnContractUpgrade(t *testing.T) {
 	require.Equal(t, []message.MessageType{message.MessageTypeInsert, message.MessageTypeDelete}, msgTypes)
 }
 
-// TestAppendInTxnContractRedo checks that a redo of an upgraded insert leaves
-// exactly one committed transaction behind.
+// TestAppendInTxnContractRedo checks that a redo of an insert appended as a
+// transaction leaves exactly one committed transaction behind.
 func TestAppendInTxnContractRedo(t *testing.T) {
 	obs := &inTxnObserved{}
 	w := openInTxnWAL(t, "append-in-txn-redo", obs)
 
 	// the first insert after a collection is created rotates the segment, so the
 	// shard interceptor asks for a redo.
-	insert := newInTxnInsert(map[string]string{inTxnKey: inTxnUpgrade})
+	insert := newInTxnInsert(map[string]string{inTxnKey: inTxnAsTxn})
 	_, err := w.Append(context.Background(), insert)
 	require.NoError(t, err)
 
@@ -378,8 +385,9 @@ func TestAppendInTxnContractCommitExtra(t *testing.T) {
 	require.Equal(t, 2, txnMsgs[0].Size())
 }
 
-// TestAppendInTxnContractConcurrentWithExclusive checks that upgraded inserts and
-// an exclusive message on the same vchannel never deadlock each other.
+// TestAppendInTxnContractConcurrentWithExclusive checks that inserts appended as
+// transactions and an exclusive message on the same vchannel never deadlock
+// each other.
 func TestAppendInTxnContractConcurrentWithExclusive(t *testing.T) {
 	obs := &inTxnObserved{}
 	w := openInTxnWAL(t, "append-in-txn-concurrent", obs)
@@ -404,7 +412,7 @@ func TestAppendInTxnContractConcurrentWithExclusive(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < perWriter; j++ {
-				if _, err := w.Append(ctx, newInTxnInsert(map[string]string{inTxnKey: inTxnUpgrade})); err != nil {
+				if _, err := w.Append(ctx, newInTxnInsert(map[string]string{inTxnKey: inTxnAsTxn})); err != nil {
 					insertErrs <- err
 				}
 			}

@@ -170,7 +170,7 @@ func TestAppendInTxnAutocommit(t *testing.T) {
 	main := message.CreateTestEmptyInsertMesage(1, nil)
 	ctx, appendResult := newTestAppendContext()
 
-	result, err := AppendInTxn(ctx, f.append, main, []message.MutableMessage{newTestDelete()})
+	commit, err := AppendInTxn(ctx, f.append, main, []message.MutableMessage{newTestDelete()})
 	require.NoError(t, err)
 
 	require.Equal(t, []message.MessageType{
@@ -186,10 +186,12 @@ func TestAppendInTxnAutocommit(t *testing.T) {
 	// the client appended one autocommit message, so it must not see a transaction.
 	require.Nil(t, appendResult.TxnCtx)
 
-	require.Equal(t, message.MessageTypeInsert, result.Main.MessageType())
-	require.Equal(t, fakeTxnID, result.Main.TxnContext().TxnID)
-	require.Equal(t, message.MessageTypeCommitTxn, result.Commit.MessageType())
-	require.Greater(t, result.Commit.TimeTick(), result.Main.TimeTick())
+	body := f.immutableAt(1)
+	require.Equal(t, message.MessageTypeInsert, body.MessageType())
+	require.Equal(t, fakeTxnID, body.TxnContext().TxnID)
+	require.Equal(t, message.MessageTypeCommitTxn, commit.MessageType())
+	require.Equal(t, f.ids[3], commit.MessageID())
+	require.Greater(t, commit.TimeTick(), body.TimeTick())
 }
 
 // TestAppendInTxnAutocommitCarriesIdempotencyKey checks that the self-built
@@ -202,12 +204,12 @@ func TestAppendInTxnAutocommitCarriesIdempotencyKey(t *testing.T) {
 	main := newTestKeyedInsert(key)
 	ctx, _ := newTestAppendContext()
 
-	result, err := AppendInTxn(ctx, f.append, main, []message.MutableMessage{newTestDelete()})
+	commit, err := AppendInTxn(ctx, f.append, main, []message.MutableMessage{newTestDelete()})
 	require.NoError(t, err)
 	require.Equal(t, key, message.IdempotencyKeyOf(main))
-	require.Equal(t, message.IdempotencyKeyOf(main), message.IdempotencyKeyOf(result.Commit))
+	require.Equal(t, message.IdempotencyKeyOf(main), message.IdempotencyKeyOf(commit))
 	// the copy of main keeps the key, like every body of a client transaction.
-	require.Equal(t, key, message.IdempotencyKeyOf(result.Main))
+	require.Equal(t, key, message.IdempotencyKeyOf(f.immutableAt(1)))
 
 	require.Equal(t, key, message.IdempotencyKeyOf(assembleTestTxn(t, f).Commit()))
 }
@@ -217,9 +219,9 @@ func TestAppendInTxnAutocommitWithoutIdempotencyKey(t *testing.T) {
 	main := message.CreateTestEmptyInsertMesage(1, nil)
 	ctx, _ := newTestAppendContext()
 
-	result, err := AppendInTxn(ctx, f.append, main, []message.MutableMessage{newTestDelete()})
+	commit, err := AppendInTxn(ctx, f.append, main, []message.MutableMessage{newTestDelete()})
 	require.NoError(t, err)
-	require.Empty(t, message.IdempotencyKeyOf(result.Commit))
+	require.Empty(t, message.IdempotencyKeyOf(commit))
 	require.Empty(t, message.IdempotencyKeyOf(assembleTestTxn(t, f).Commit()))
 }
 
@@ -255,9 +257,9 @@ func TestAppendInTxnAutocommitCountsBodies(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			f := newFakeAppender()
 			ctx, _ := newTestAppendContext()
-			result, err := AppendInTxn(ctx, f.append, message.CreateTestEmptyInsertMesage(1, nil), c.extras)
+			commit, err := AppendInTxn(ctx, f.append, message.CreateTestEmptyInsertMesage(1, nil), c.extras)
 			require.NoError(t, err)
-			require.Equal(t, c.want, message.MustAsImmutableCommitTxnMessageV2(result.Commit).Header().GetBodyCnt())
+			require.Equal(t, c.want, message.MustAsImmutableCommitTxnMessageV2(commit).Header().GetBodyCnt())
 			require.Equal(t, c.want, message.MustAsImmutableCommitTxnMessageV2(assembleTestTxn(t, f).Commit()).Header().GetBodyCnt())
 		})
 	}
@@ -281,8 +283,8 @@ func TestAppendInTxnAutocommitRollsBackOnFailure(t *testing.T) {
 			main := message.CreateTestEmptyInsertMesage(1, nil)
 			ctx, _ := newTestAppendContext()
 
-			result, err := AppendInTxn(ctx, f.append, main, []message.MutableMessage{newTestDelete()})
-			require.Nil(t, result)
+			commit, err := AppendInTxn(ctx, f.append, main, []message.MutableMessage{newTestDelete()})
+			require.Nil(t, commit)
 			require.ErrorIs(t, err, boom)
 			require.Equal(t, c.expected, f.types)
 			// the fake persists every rollback, so no failure leaves a commit behind.
@@ -436,12 +438,12 @@ func TestAppendInTxnCommit(t *testing.T) {
 	commit := newTestCommit()
 	ctx, appendResult := newTestAppendContext()
 
-	result, err := AppendInTxn(ctx, f.append, commit, []message.MutableMessage{newTestDelete()})
+	appended, err := AppendInTxn(ctx, f.append, commit, []message.MutableMessage{newTestDelete()})
 	require.NoError(t, err)
 	require.Equal(t, []message.MessageType{message.MessageTypeDelete, message.MessageTypeCommitTxn}, f.types)
 	require.Equal(t, []message.TxnID{42, 42}, f.txnIDs)
-	require.Equal(t, message.MessageTypeCommitTxn, result.Main.MessageType())
-	require.Equal(t, result.Main.MessageID(), result.Commit.MessageID())
+	require.Equal(t, message.MessageTypeCommitTxn, appended.MessageType())
+	require.Equal(t, f.ids[1], appended.MessageID())
 	// the transaction belongs to the client, so it keeps its txn context.
 	require.NotNil(t, appendResult.TxnCtx)
 }
