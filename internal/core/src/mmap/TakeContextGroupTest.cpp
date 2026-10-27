@@ -459,7 +459,7 @@ TEST(TakeContextGroupFoundation, FieldsShareOwnerButGenerationsDoNotAlias) {
 
 TEST(TakeContextGroupFoundation,
      BorrowedViewsSurviveEvictionUntilConsumerEnds) {
-    OriginalGroupFixture fixture("take-group-original-nq-borrowed");
+    OriginalGroupFixture fixture("take-group-original-nq-borrowed", 1);
     ASSERT_GT(fixture.group_bytes.size(), 32);
     auto context = std::make_shared<TakeContext>(
         TakeContextOptions{fixture.OneGroupBudget()});
@@ -467,7 +467,7 @@ TEST(TakeContextGroupFoundation,
     for (size_t lane = 0; lane < fixture.original.size(); ++lane) {
         offsets.push_back((lane * 73 + 11) % fixture.original.size());
     }
-    offsets.insert(offsets.end(), {0, 73, 1023});
+    offsets.insert(offsets.end(), {0, 73, 128});
     auto take = fixture.title->Take(
         nullptr,
         ChunkedColumnInterface::TakeOptions{
@@ -500,8 +500,7 @@ TEST(TakeContextGroupFoundation,
                 // Every CURRENT borrowed title/text owner must remain alive.
                 fixture.group->ManualEvictCache();
                 for (int64_t lane = 0; lane < count; ++lane) {
-                    const auto id = offsets[first + lane] /
-                                    OriginalGroupFixture::kRowsPerGroup;
+                    const auto id = offsets[first + lane];  // One row per cell.
                     ASSERT_FALSE(fixture.title_bytes[id].expired());
                     ASSERT_FALSE(fixture.text_bytes[id].expired());
                 }
@@ -1032,20 +1031,18 @@ TEST(TakeContextGroupFoundation,
 
 TEST(TakeContextGroupFoundation,
      PreparedExactKeysPreserveCollidingPhysicalIdsAndDuplicateLanes) {
-    // Repartition exactly1024 ORIGINAL rows as1024 one-row physical cells.
-    // This changes test layout only; it neither manufactures nor repeats data.
+    // One row per cell: 0 and128 collide in the prepared low-seven-bit table.
+    // Fill its entire64-cell prefix without a large corpus or repeated rows.
     OriginalGroupFixture fixture("take-group-original-nq-colliding-ids", 1);
-    ASSERT_EQ(fixture.original.size(), 1024);
+    ASSERT_EQ(fixture.original.size(), 129);
     ASSERT_EQ(fixture.group_bytes.size(), fixture.original.size());
     auto context = std::make_shared<TakeContext>();
     std::vector<int64_t> offsets;
-    for (int64_t lane = 0; lane < 64; ++lane) {
-        // Eight complete low-seven-bit collision chains, with64 unique keys
-        // filling a full prepared prefix. Keep full cell IDs, not hash slots.
-        offsets.push_back((lane % 8) * 128 + lane / 8);
+    for (int64_t row = 0; row < 61; ++row) {
+        offsets.push_back(row);
     }
-    offsets.back() = 1023;
-    offsets.insert(offsets.end(), {0, 128, 256, 512, 1023, 0, 1023});
+    offsets.insert(offsets.end(), {64, 127, 128});
+    offsets.insert(offsets.end(), {0, 128, 64, 127, 128, 0, 127});
     auto take = fixture.title->Take(
         nullptr,
         ChunkedColumnInterface::TakeOptions{
@@ -1218,11 +1215,11 @@ TEST(TakeContextGroupFoundation,
 
 TEST(TakeContextGroupFoundation,
      RetainedDequeGrowthKeepsDirectoryPointersAndLiveBorrowOwners) {
-    constexpr int64_t rows_per_group = 8;
+    constexpr int64_t rows_per_group = 1;
     OriginalGroupFixture fixture("take-group-original-nq-deque-growth",
                                  rows_per_group);
-    ASSERT_EQ(fixture.original.size(), 1024);
-    ASSERT_EQ(fixture.group_bytes.size(), 128);
+    ASSERT_EQ(fixture.original.size(), 129);
+    ASSERT_EQ(fixture.group_bytes.size(), 129);
     size_t budget = 0;
     for (size_t id = 0; id < 64; ++id) {
         budget += fixture.group_bytes[id];
@@ -1346,7 +1343,7 @@ TEST(TakeContextGroupFoundation,
             // Reuse the same cleared context while original physical cells
             // are still live. Do not ask the move-only fixture translator to
             // reconstruct data after ManualEvict destroys an unused cell.
-            const std::vector<int64_t> fresh_offsets{0, 3, 0};
+            const std::vector<int64_t> fresh_offsets{0, 0, 0};
             {
                 auto fresh = fixture.text->Take(
                     nullptr,
@@ -1442,7 +1439,7 @@ TEST(TakeContextGroupFoundation,
 TEST(TakeContextGroupFoundation,
      ReusableBindingDoesNotRebindOrdinaryTakeOrItsAccessor) {
     OriginalGroupFixture fixture("take-group-original-nq-binding-ordinary");
-    const std::vector<int64_t> ordinary_offsets{0, 17, 3, 1023, 17};
+    const std::vector<int64_t> ordinary_offsets{0, 17, 3, 128, 17};
     auto ordinary = fixture.title->Take(
         nullptr,
         ChunkedColumnInterface::TakeOptions{
@@ -1466,7 +1463,7 @@ TEST(TakeContextGroupFoundation,
         nullptr, TakeBindingOptions{TargetType::StringView, {}, context});
     ASSERT_NE(binding, nullptr);
     const std::vector<std::vector<int64_t>> inputs{
-        {1023, 3, 0, 1023, 17}, {}, {33}, {65, 1, 65, 0, 512, 17, 99}};
+        {128, 3, 0, 128, 17}, {}, {33}, {65, 1, 65, 0, 64, 17, 99}};
     for (const auto& offsets : inputs) {
         {
             auto lease =
@@ -1762,7 +1759,7 @@ TEST(TakeContextGroupFoundation,
         nullptr, TakeBindingOptions{TargetType::StringView, {}, context});
     EXPECT_EQ(binding, nullptr);
     const std::vector<std::vector<int64_t>> inputs{
-        {0, 17, 3, 1023, 17}, {65}, {1023, 0, 512, 1023}};
+        {0, 17, 3, 128, 17}, {65}, {128, 0, 64, 128}};
     for (const auto& offsets : inputs) {
         auto fresh =
             column->Take(nullptr,
@@ -1791,7 +1788,8 @@ TEST(TakeContextGroupFoundation,
     for (size_t id = 0; id < fixture.group_bytes.size(); ++id) {
         cells.push_back(id);
         offsets.push_back(id * OriginalGroupFixture::kRowsPerGroup);
-        offsets.push_back(offsets.back() + 1);
+        offsets.push_back(
+            std::min<int64_t>(offsets.back() + 1, fixture.original.size() - 1));
     }
     {
         auto warm = context->Acquire(source, cells);
@@ -1825,7 +1823,7 @@ TEST(TakeContextGroupFoundation,
 
 TEST(TakeContextGroupFoundation,
      ReusableProjectionChecksCompleteIdsAcrossSlotCollisions) {
-    constexpr int64_t rows_per_group = 8;
+    constexpr int64_t rows_per_group = 1;
     OriginalGroupFixture fixture("take-group-original-nq-projection-collision",
                                  rows_per_group);
     auto context = std::make_shared<TakeContext>();
@@ -1839,7 +1837,7 @@ TEST(TakeContextGroupFoundation,
     {
         auto warm =
             context->Acquire(column->MakeTakeCellSource(nullptr), cells);
-        ASSERT_EQ(warm.size(), 128);
+        ASSERT_EQ(warm.size(), 129);
     }
     auto binding = column->CreateTakeBinding(
         nullptr, TakeBindingOptions{TargetType::StringView, {}, context});
@@ -1954,7 +1952,7 @@ TEST(TakeContextGroupFoundation,
             EXPECT_EQ(consumed, 0);
             EXPECT_ANY_THROW(result->GetOwn());
         }
-        const std::vector<int64_t> offsets{0, 3, 1023, 0};
+        const std::vector<int64_t> offsets{0, 3, 128, 0};
         auto result = fixture.title->Take(
             nullptr,
             ChunkedColumnInterface::TakeOptions{

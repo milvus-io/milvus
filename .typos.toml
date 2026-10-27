@@ -1,7 +1,9 @@
-[files]
-# Preserve the original dataset text verbatim; its provenance hashes are fixed.
-extend-exclude = ["internal/core/unittest/test_data/nq_original_text_1024.json"]
-
 [default.extend-identifiers]
 # Valid upstream C++20 standard-library identifier.
 countr_zero = "countr_zero"
+
+[default.extend-words]
+# Proper name in the unchanged original NQ test sample (Fenech-Soler).
+Soler = "Soler"
+# Actor's surname in the same original-text sample (Charles Durning).
+Durning = "Durning"

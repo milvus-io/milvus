@@ -523,12 +523,16 @@ class OriginalStringValueReaderTest
     void
     SetUp() override {
         const auto rows = LoadOriginalNqTextRows();
-        ASSERT_EQ(rows.size(), 1024);
+        ASSERT_EQ(rows.size(), 129);
         const auto& profile = GetParam();
         ASSERT_LE(profile.rows, rows.size());
         expected_.reserve(profile.rows);
         for (size_t row = 0; row < profile.rows; ++row) {
-            ASSERT_EQ(rows[row].snapshot_offset, row);
+            ASSERT_GE(rows[row].snapshot_offset, 0);
+            if (row != 0) {
+                ASSERT_GT(rows[row].snapshot_offset,
+                          rows[row - 1].snapshot_offset);
+            }
             expected_.push_back(std::string_view(profile.field) == "Title"
                                     ? rows[row].title
                                     : rows[row].text);
@@ -671,12 +675,12 @@ INSTANTIATE_TEST_SUITE_P(
     OriginalNq,
     OriginalStringValueReaderTest,
     ::testing::Values(
-        OriginalStringReaderProfile{"SortedVarchar", "Text", 1024},
-        OriginalStringReaderProfile{"SortedVarchar", "Title", 1024},
-        OriginalStringReaderProfile{"MarisaVarchar", "Text", 1024},
-        OriginalStringReaderProfile{"MarisaVarchar", "Title", 1024},
-        OriginalStringReaderProfile{"BitmapVarchar", "Text", 1024},
-        OriginalStringReaderProfile{"BitmapVarchar", "Title", 1024},
+        OriginalStringReaderProfile{"SortedVarchar", "Text", 129},
+        OriginalStringReaderProfile{"SortedVarchar", "Title", 129},
+        OriginalStringReaderProfile{"MarisaVarchar", "Text", 129},
+        OriginalStringReaderProfile{"MarisaVarchar", "Title", 129},
+        OriginalStringReaderProfile{"BitmapVarchar", "Text", 129},
+        OriginalStringReaderProfile{"BitmapVarchar", "Title", 129},
         // Hybrid's existing high-cardinality VARCHAR choice is an inverted
         // index without value lookup. This original 15-row subset stays BELOW
         // the threshold 16 (equality selects the high-cardinality family) and

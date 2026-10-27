@@ -11,9 +11,10 @@
 
 #include <nlohmann/json.hpp>
 
-// The fixture JSON retains the original text's separate attribution/license,
-// source revision, immutable physical row mapping and verified snapshot hash.
-// These are original NQ records, not generated strings or renamed Cohere IDs.
+// A small original NQ subset for string views, owner lifetime and cell-ID
+// boundaries. Source attribution, revision and row mapping are in the fixture.
+// The snapshot receipt independently attests id/text; title bytes are frozen
+// captured fields, not a newly verified title-to-source comparison.
 struct OriginalNqTextRow {
     int64_t snapshot_offset;
     std::string id;
@@ -25,7 +26,7 @@ inline std::vector<OriginalNqTextRow>
 LoadOriginalNqTextRows() {
     const auto path =
         std::filesystem::path(__FILE__).parent_path().parent_path() /
-        "test_data/nq_original_text_1024.json";
+        "test_data/scalar_reader_original_text.json";
     std::ifstream input(path);
     if (!input.good()) {
         throw std::runtime_error("missing checked-in original NQ text fixture");

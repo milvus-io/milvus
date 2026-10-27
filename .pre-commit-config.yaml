@@ -8,7 +8,6 @@ repos:
     rev: v1.16.10
     hooks:
       - id: typos
-        exclude: '^internal/core/unittest/test_data/nq_original_text_1024\.json$'
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.11
     hooks:

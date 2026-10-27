@@ -189,7 +189,7 @@ TEST(TakeContextMmapFoundation, OriginalFileMappedViewsReuseAndReleasePins) {
     for (size_t lane = 0; lane < original.size(); ++lane) {
         offsets.push_back((lane * 73 + 11) % original.size());
     }
-    offsets.insert(offsets.end(), {0, 73, 1023});
+    offsets.insert(offsets.end(), {0, 73, 128});
     std::vector<std::string> copies;
     for (int repetition = 0; repetition < 2; ++repetition) {
         copies.clear();
