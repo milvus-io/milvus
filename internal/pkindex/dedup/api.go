@@ -51,6 +51,16 @@ type Decider interface {
 	// or RollbackTxn will end it. ended runs under a lock of the decider.
 	DropEndedTxns(ended func(txnID int64) bool)
 
+	// Observe tells the decider that observe applied every write up to tt to
+	// the engine. pks are the keys of the write at tt, none for a TimeTick. It
+	// removes the committed entries of pks from the in-flight set (rule A: the
+	// engine first, then the set), raises the observed time tick and removes
+	// the in-doubt entries that it passed.
+	//
+	// TODO: the observe of the WAL recovery calls it for every applied write
+	// and for every TimeTick. Nothing calls it yet.
+	Observe(tt uint64, pks []PK)
+
 	// Close stops the decider: a later Decide fails. It does not wait for the
 	// open intents, they end on their own, and it does not close the engine:
 	// the caller does, and a probe on a closed engine fails with

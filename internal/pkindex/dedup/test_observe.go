@@ -66,7 +66,7 @@ func PendingTxnIDsForTest(d Decider) []int64 {
 // ObserveTimeTickForTest is Observe of a TimeTick, for the tests of other
 // packages.
 func ObserveTimeTickForTest(d Decider, tt uint64) {
-	d.(*decider).Observe(tt, nil)
+	d.Observe(tt, nil)
 }
 
 // WaitUntilForTest is WaitUntil, for the tests of other packages.

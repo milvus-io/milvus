@@ -127,14 +127,6 @@ func (d *decider) waitError(vchannel string) error {
 	return &WaitError{TimeTick: target, d: d, vchannel: vchannel}
 }
 
-// Observe tells the decider that the observe of the WAL recovery applied
-// every write up to tt to the engine. pks are the keys of the write at tt, none
-// for a TimeTick. It removes the committed entries of pks from the in-flight
-// set (rule A: the engine first, then the set), raises the observed time tick
-// and removes the in-doubt entries that it passed.
-//
-// TODO: the observe of the WAL recovery calls it for every applied write and
-// for every TimeTick. Nothing calls it yet.
 func (d *decider) Observe(tt uint64, pks []PK) {
 	d.inflight.observe(tt, pks)
 }
