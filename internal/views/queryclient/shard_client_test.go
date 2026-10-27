@@ -156,6 +156,7 @@ func TestStrongSearchAlwaysTargetsPrimary(t *testing.T) {
 }
 
 func TestShardSearchStreamReturnsPerVChannelReduceStream(t *testing.T) {
+	setupTestReplicaRouting(t)
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	leftNode := qviews.NewQueryNode(11)
 	rightNode := qviews.NewQueryNode(12)
@@ -221,6 +222,7 @@ func TestShardSearchStreamReturnsPerVChannelReduceStream(t *testing.T) {
 }
 
 func TestShardQueryStreamReturnsPerVChannelReduceStream(t *testing.T) {
+	setupTestReplicaRouting(t)
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	leftNode := qviews.NewQueryNode(11)
 	rightNode := qviews.NewQueryNode(12)
@@ -286,6 +288,7 @@ func TestShardQueryStreamReturnsPerVChannelReduceStream(t *testing.T) {
 }
 
 func TestShardSearchStreamCloseReleasesChildStream(t *testing.T) {
+	setupTestReplicaRouting(t)
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	request := newTestSearchRequest(1)
 	plan := newTestSearchQueryPlan(shardID, &viewpb.QueryPlanMVCC{})
@@ -309,6 +312,7 @@ func TestShardSearchStreamCloseReleasesChildStream(t *testing.T) {
 }
 
 func TestShardSearchClosesOpenedStreamsOnSetupFailure(t *testing.T) {
+	setupTestReplicaRouting(t)
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	leftNode := qviews.NewQueryNode(11)
 	rightNode := qviews.NewQueryNode(12)
@@ -338,6 +342,7 @@ func TestShardSearchClosesOpenedStreamsOnSetupFailure(t *testing.T) {
 }
 
 func TestShardSearchUsesBatchPathForUnsupportedSearch(t *testing.T) {
+	setupTestReplicaRouting(t)
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	request := newTestSearchRequest(1)
 	request.GroupByFieldId = 100
@@ -393,6 +398,7 @@ func (f *fakeQueryPlanClient) GetMVCCTimestamp(_ context.Context, shardID qviews
 
 type fakeViewQueryServiceClient struct {
 	ViewQueryServiceClient
+	mu                 sync.Mutex
 	searchReq          *viewpb.SearchOnViewRequest
 	queryReq           *viewpb.QueryOnViewRequest
 	searchResponse     *viewpb.SearchOnViewResponse
@@ -404,8 +410,10 @@ type fakeViewQueryServiceClient struct {
 }
 
 func (f *fakeViewQueryServiceClient) SearchOnView(_ context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+	f.mu.Lock()
 	f.searchReq = req
 	f.searchCalls++
+	f.mu.Unlock()
 	if f.searchResponse != nil {
 		return f.searchResponse, nil
 	}
@@ -414,8 +422,10 @@ func (f *fakeViewQueryServiceClient) SearchOnView(_ context.Context, _ qviews.Wo
 }
 
 func (f *fakeViewQueryServiceClient) SearchOnViewStream(ctx context.Context, node qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+	f.mu.Lock()
 	f.searchReq = req
 	f.searchStreamCalls++
+	f.mu.Unlock()
 	if f.searchOnViewStream != nil {
 		return f.searchOnViewStream(ctx, node, req)
 	}
@@ -427,8 +437,10 @@ func (f *fakeViewQueryServiceClient) QueryOnView(context.Context, qviews.WorkNod
 }
 
 func (f *fakeViewQueryServiceClient) QueryOnViewStream(ctx context.Context, node qviews.WorkNode, req *viewpb.QueryOnViewRequest) (queryutil.ReduceStream, error) {
+	f.mu.Lock()
 	f.queryReq = req
 	f.queryStreamCalls++
+	f.mu.Unlock()
 	if f.queryOnViewStream != nil {
 		return f.queryOnViewStream(ctx, node, req)
 	}

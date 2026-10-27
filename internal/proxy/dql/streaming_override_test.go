@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/util/searchutil"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -267,4 +268,26 @@ func TestQueryTaskStreamingOverridesLeaveRetainedPlansUnchanged(t *testing.T) {
 		require.Nil(t, legacy.lastQueryRequest.EnableReduceStream)
 		require.Zero(t, legacy.lastQueryRequest.ReduceStreamChunkBytes)
 	}
+}
+
+func TestStreamingResultsPreservePlanExecutionSummary(t *testing.T) {
+	plan := queryclient.ShardPlan{ExecutionSummary: &viewpb.ExecutionSummary{GlobalOptimizer: &viewpb.GlobalOptimizerExecutionSummary{
+		Flags: 1 << viewpb.GlobalOptimizerExecutionSummary_PrunedByScalarFiltering,
+	}}}
+	bit, _ := featureusage.ExecBit(featureusage.FeatureSegmentPrune)
+	legacy := &fakeLegacyQueryClient{reduceStreamEnabled: true,
+		searchResult: &queryclient.LegacySearchResult{Plans: []queryclient.ShardPlan{plan}, Stream: &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{chunk: newFinalSearchChunk([]int64{1}, []float32{.9}, "channel")}}}},
+		queryResult:  &queryclient.LegacyQueryResult{Plans: []queryclient.ShardPlan{plan}, Stream: &fakeLegacyQueryStream{recv: []fakeLegacyQueryRecv{{chunk: newFinalQueryChunk([]int64{1}, 10)}}}},
+	}
+	search := newQueryViewSearchTask(legacy, 1)
+	require.NoError(t, search.Execute(t.Context()))
+	require.Equal(t, bit, search.reducedFeatureBits&bit)
+	query := newQueryViewQueryTask(legacy, 1)
+	require.NoError(t, query.Execute(t.Context()))
+	var featureBits uint64
+	query.resultBuf.Range(func(result *internalpb.RetrieveResults) bool {
+		featureBits |= result.GetFeatureBits()
+		return true
+	})
+	require.Equal(t, bit, featureBits&bit)
 }

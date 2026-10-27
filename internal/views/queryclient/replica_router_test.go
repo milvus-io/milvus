@@ -269,8 +269,10 @@ func TestGenericAndLegacyShareReplicaRouter(t *testing.T) {
 	}).Build()
 	defer patch.UnPatch()
 	source := &replicaTestSource{}
-	client := NewViewQueryClient(ViewQueryClientConfig{}, source, nil, nil, nil, nil, nil, nil, nil, nil).(*viewQueryClientImpl)
+	client := NewViewQueryClient(ViewQueryClientConfig{EnableReduceStream: true, ReduceStreamChunkBytes: 128}, source, nil, nil, nil, nil, nil, nil, nil, nil).(*viewQueryClientImpl)
 	defer client.Close()
+	require.True(t, client.legacyClient.enableReduceStream)
+	require.Equal(t, 128, client.legacyClient.reduceStreamChunkBytes)
 	staged, err := client.shardClient.replicas.route("p_1v0")
 	require.NoError(t, err)
 	legacy, err := client.legacyClient.shardClient.replicas.route("p_1v0")

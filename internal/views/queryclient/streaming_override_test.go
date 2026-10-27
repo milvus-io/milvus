@@ -34,6 +34,7 @@ import (
 )
 
 func TestLegacySearchStreamingOverrides(t *testing.T) {
+	setupTestReplicaRouting(t)
 	for _, defaultOn := range []bool{false, true} {
 		t.Run(fmt.Sprint(defaultOn), func(t *testing.T) {
 			shard := qviews.ShardID{ReplicaID: 1, VChannel: "stream-overrides"}
@@ -119,6 +120,7 @@ func TestLegacySearchStreamingOverrides(t *testing.T) {
 }
 
 func TestHybridStreamingChunkOverride(t *testing.T) {
+	setupTestReplicaRouting(t)
 	request := hybridStreamRequest()
 	shard := qviews.ShardID{ReplicaID: 1, VChannel: "hybrid-overrides"}
 	var calls int
@@ -158,6 +160,7 @@ func TestHybridStreamingChunkOverride(t *testing.T) {
 }
 
 func TestLegacyQueryStreamingOverrides(t *testing.T) {
+	setupTestReplicaRouting(t)
 	for _, defaultOn := range []bool{false, true} {
 		t.Run(fmt.Sprint(defaultOn), func(t *testing.T) {
 			inputs := map[string]*internalpb.RetrieveResults{
@@ -248,6 +251,7 @@ func TestLegacyQueryStreamingOverrides(t *testing.T) {
 }
 
 func TestLegacyQueryStreamingOverridesLeaveRetainedPlansOnBatch(t *testing.T) {
+	setupTestReplicaRouting(t)
 	on := true
 	for _, plans := range [][]ShardPlan{{}, {{
 		ShardID: qviews.ShardID{ReplicaID: 1, VChannel: "retained"},

@@ -44,7 +44,7 @@ type fakeLegacyViewQueryClient struct {
 	legacy queryclient.LegacyClient
 }
 
-func (c *fakeLegacyViewQueryClient) Close() {}
+func (*fakeLegacyViewQueryClient) Close() {}
 
 func (c *fakeLegacyViewQueryClient) Legacy() queryclient.LegacyClient {
 	return c.legacy
