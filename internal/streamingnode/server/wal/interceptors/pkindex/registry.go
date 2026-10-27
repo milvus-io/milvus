@@ -103,7 +103,7 @@ func (r *registry) add(ctx context.Context, vchannel string, collectionID int64,
 	// because a schema change can neither drop the primary key field nor alter
 	// its id or its data type.
 	r.targets[vchannel] = &target{
-		decider:      dedup.New(eng, dedup.Config{}),
+		decider:      dedup.New(vchannel, eng, dedup.Config{}),
 		engine:       eng,
 		collectionID: collectionID,
 		pkFieldID:    pkField.GetFieldID(),

@@ -17,7 +17,6 @@
 package dedup
 
 import (
-	"context"
 	"fmt"
 	"time"
 )
@@ -30,7 +29,7 @@ func (i *WriteIntent) LockWait() time.Duration {
 	return i.lockWait
 }
 
-func (i *WriteIntent) Appended(_ context.Context, tt uint64) {
+func (i *WriteIntent) Appended(tt uint64) {
 	i.resolve()
 
 	switch {
@@ -52,7 +51,7 @@ func (i *WriteIntent) Appended(_ context.Context, tt uint64) {
 			// contract, see Decide.
 			panic(fmt.Sprintf("a body of transaction %d on vchannel %s was applied after its commit decision, "+
 				"a producer must wait for the result of every body before it appends the CommitTxn",
-				i.req.TxnID, i.req.VChannel))
+				i.req.TxnID, i.d.vchannel))
 		}
 		i.d.dropTxn(i.req.TxnID)
 	case i.req.TxnID != 0:
@@ -73,14 +72,14 @@ func (i *WriteIntent) Appended(_ context.Context, tt uint64) {
 	}
 }
 
-func (i *WriteIntent) NotAppended(_ context.Context, _ error) {
+func (i *WriteIntent) NotAppended() {
 	i.resolve()
 	if i.write != nil {
 		i.d.inflight.abort(i.write)
 	}
 }
 
-func (i *WriteIntent) InDoubt(_ context.Context, _ error, tt uint64) {
+func (i *WriteIntent) InDoubt(tt uint64) {
 	i.resolve()
 	if tt == 0 {
 		panic("primary key index intent marked in doubt without a time tick")
