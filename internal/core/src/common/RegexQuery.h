@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include <optional>
+
 #include <functional>
 #include <string>
 #include <string_view>

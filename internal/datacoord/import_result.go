@@ -37,7 +37,14 @@ func loadImportV3Object(ctx context.Context, cm storage.ChunkManager, objectPath
 	fullPath := path.Join(cm.RootPath(), objectPath)
 	data, err := cm.Read(ctx, fullPath)
 	if err != nil {
-		return nil, merr.Wrap(err, "read import v3 object")
+		if merr.IsMilvusError(err) {
+			return nil, merr.Wrap(err, "read import v3 object")
+		}
+		// Map the raw object-store failure the same way the chunk manager maps
+		// its other paths: access/permission/bucket errors and unmapped provider
+		// faults become typed IO errors, which the import verdict treats as
+		// terminal (see IsTerminalImportV3Err).
+		return nil, storage.ToMilvusIoError(fullPath, err)
 	}
 	return data, nil
 }

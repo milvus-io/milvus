@@ -359,6 +359,7 @@ TEST_F(PackedScalarLoadRoutingTest,
                             return result;
                         };
                     auto load = [&] {
+                        // Temporary options must survive deferred task execution.
                         auto task = index::RunPackedIndexLoad(
                             source, {}, plan, &FinishPayload, &operation);
                         return folly::coro::blockingWait(

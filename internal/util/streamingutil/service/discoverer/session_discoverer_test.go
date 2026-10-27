@@ -57,6 +57,41 @@ func TestSessionDiscovererClearsStaleSessionsOnRetry(t *testing.T) {
 	}
 }
 
+func TestSessionDiscovererFiltersSessions(t *testing.T) {
+	etcdClient, _ := kvfactory.GetEtcdAndPath()
+	prefix := funcutil.RandomString(10) + "/"
+	ctx := context.Background()
+
+	sessions := map[int64]*sessionutil.SessionRaw{
+		1: {ServerID: 1, Address: "127.0.0.1:12345", Version: "0.2.0"},
+		2: {ServerID: 2, Address: "127.0.0.1:12346", Version: "0.2.0", ServerLabels: map[string]string{"skip": "true"}},
+	}
+	for id, s := range sessions {
+		val, err := json.Marshal(s)
+		assert.NoError(t, err)
+		_, err = etcdClient.Put(ctx, fmt.Sprintf("%s%d", prefix, id), string(val))
+		assert.NoError(t, err)
+	}
+
+	d := NewSessionDiscoverer(
+		etcdClient,
+		OptSDPrefix(prefix),
+		OptSDVersionRange(">=0.1.0"),
+		OptSDSessionFilter(func(session *sessionutil.SessionRaw) bool {
+			return session.ServerLabels["skip"] != "true"
+		}),
+	)
+
+	err := d.Discover(ctx, func(state VersionedState) error {
+		sessions := state.Sessions()
+		assert.Equal(t, map[int64]*sessionutil.SessionRaw{
+			1: {ServerID: 1, Address: "127.0.0.1:12345", Version: "0.2.0"},
+		}, sessions)
+		return io.EOF
+	})
+	assert.ErrorIs(t, err, io.EOF)
+}
+
 func TestSessionDiscoverer(t *testing.T) {
 	etcdClient, _ := kvfactory.GetEtcdAndPath()
 	targetVersion := "0.1.0"
