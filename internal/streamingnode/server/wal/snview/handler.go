@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/views/optimizer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/internal/views/replicadiscovery"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -67,7 +67,7 @@ var _ handler.QueryViewHandler = (*SNQueryViewHandler)(nil)
 //     Repeated Down pushes update the callback without renewing the lease.
 //   - Other states: SM handles coord push and responds accordingly.
 type SNQueryViewHandler struct {
-	replicas       *replicadiscovery.Directory
+	replicas       *replicaDirectory
 	mu             sync.Mutex
 	closed         bool
 	ctx            context.Context
@@ -89,7 +89,7 @@ func recoverSNQueryViewHandler(
 	views []*viewpb.QueryViewOfShard,
 ) *SNQueryViewHandler {
 	h := &SNQueryViewHandler{
-		replicas:       replicadiscovery.NewDirectory(),
+		replicas:       newReplicaDirectory(),
 		ctx:            ctx,
 		pchannel:       pchannel,
 		shards:         make(map[qviews.ShardID]*snShardView),
@@ -304,12 +304,7 @@ func (h *SNQueryViewHandler) acquireUpViewForSchema(ctx context.Context, shardID
 	}
 }
 
-// WatchReplicas observes local eligibility without acquiring any View lease.
-func (h *SNQueryViewHandler) WatchReplicas() *replicadiscovery.Watch {
-	return h.replicas.Watch()
-}
-
 // AcquireReplicaWatchStream observes local eligibility without a View lease.
-func (h *SNQueryViewHandler) AcquireReplicaWatchStream(ctx context.Context, pchannel string, unavailable <-chan struct{}) replicadiscovery.Stream {
+func (h *SNQueryViewHandler) AcquireReplicaWatchStream(ctx context.Context, pchannel string, unavailable <-chan struct{}) wal.ReplicaWatchStream {
 	return h.replicas.AcquireStream(ctx, pchannel, unavailable)
 }

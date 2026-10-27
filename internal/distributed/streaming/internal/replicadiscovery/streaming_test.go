@@ -21,9 +21,10 @@ import (
 
 	remote "github.com/milvus-io/milvus/internal/streamingnode/client/handler/replicadiscovery"
 	serveradapter "github.com/milvus-io/milvus/internal/streamingnode/server/service/handler/replicadiscovery"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	domain "github.com/milvus-io/milvus/internal/views/replicadiscovery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
@@ -79,7 +80,7 @@ func resumableForClient(t *testing.T, client streamingpb.StreamingNodeHandlerSer
 	return w
 }
 
-func waitReplicaSnapshot(t *testing.T, sub domain.Subscription, want []int64) {
+func waitReplicaSnapshot(t *testing.T, sub wal.ReplicaWatchSubscription, want []int64) {
 	t.Helper()
 	require.Eventually(t, func() bool { s := sub.Snapshot(); return s.Valid && slices.Equal(s.Replicas, testReplicas(want...)) }, 5*time.Second, time.Millisecond)
 }
@@ -322,11 +323,11 @@ func TestReplicaWatchRemoteBulkSubscribe(t *testing.T) {
 		"all remote subscriptions must receive initial snapshots while sends are still draining")
 }
 
-type Directory = domain.Directory
+type Directory = snview.ReplicaDirectoryForTest
 
 var (
-	NewDirectory      = domain.NewDirectory
-	replicasFromProto = domain.ReplicasFromProto
+	NewDirectory      = snview.NewReplicaDirectoryForTest
+	replicasFromProto = qviews.ReplicasFromProto
 )
 
 func openRemote(ctx context.Context, client streamingpb.StreamingNodeHandlerServiceClient) (Stream, error) {

@@ -8,8 +8,8 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/internal/views/replicadiscovery"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
@@ -267,7 +267,7 @@ const idleStreamTimeout = time.Minute
 
 // Physical subscriptions own delivery. This loop only reconciles logical demand.
 func (w *resumableStream) runAttempt(ctx context.Context, stream Stream) (bool, bool, error) {
-	active := make(map[*replicaSubscription]replicadiscovery.Subscription)
+	active := make(map[*replicaSubscription]wal.ReplicaWatchSubscription)
 	reconcile := func() error {
 		w.mu.Lock()
 		desired := make(map[*replicaSubscription]string, len(w.subscriptions))

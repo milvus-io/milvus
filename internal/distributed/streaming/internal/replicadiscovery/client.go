@@ -4,8 +4,9 @@ import (
 	"context"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/internal/views/replicadiscovery"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
@@ -25,7 +26,7 @@ func NewResumingClient(factory func(context.Context, string) (Stream, error)) *C
 	return &Client{ctx: ctx, cancel: cancel, watchers: make(map[string]*resumableStream), factory: factory}
 }
 
-func (m *Client) Subscribe(vchannel string, handler Handler) (replicadiscovery.Subscription, error) {
+func (m *Client) Subscribe(vchannel string, handler Handler) (wal.ReplicaWatchSubscription, error) {
 	if vchannel == "" || handler == nil {
 		return nil, status.NewInvalidRequestSeq("replica subscription requires VChannel and handler")
 	}
@@ -62,8 +63,8 @@ func (m *Client) Close() {
 }
 
 type (
-	Snapshot = replicadiscovery.Snapshot
-	Replica  = replicadiscovery.Replica
-	Handler  = replicadiscovery.Handler
-	Stream   = replicadiscovery.Stream
+	Snapshot = qviews.ReplicaSnapshot
+	Replica  = qviews.Replica
+	Handler  = wal.ReplicaWatchHandler
+	Stream   = wal.ReplicaWatchStream
 )

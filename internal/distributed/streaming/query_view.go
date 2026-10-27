@@ -2,7 +2,7 @@ package streaming
 
 import (
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
-	"github.com/milvus-io/milvus/internal/views/replicadiscovery"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -10,7 +10,7 @@ import (
 // HandlerClient itself provides only physical, non-resuming operations.
 type QueryViewClient interface {
 	handler.QueryViewClient
-	SubscribeReplicas(string, replicadiscovery.Handler) (replicadiscovery.Subscription, error)
+	SubscribeReplicas(string, wal.ReplicaWatchHandler) (wal.ReplicaWatchSubscription, error)
 }
 
 type queryViewClient struct {
@@ -22,7 +22,7 @@ func (w *walAccesserImpl) QueryViewClient() QueryViewClient {
 	return queryViewClient{QueryViewClient: w.handlerClient.QueryViewClient(), owner: w}
 }
 
-func (c queryViewClient) SubscribeReplicas(vc string, h replicadiscovery.Handler) (replicadiscovery.Subscription, error) {
+func (c queryViewClient) SubscribeReplicas(vc string, h wal.ReplicaWatchHandler) (wal.ReplicaWatchSubscription, error) {
 	if !c.owner.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, ErrWALAccesserClosed
 	}

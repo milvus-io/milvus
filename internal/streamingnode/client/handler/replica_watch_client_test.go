@@ -17,10 +17,10 @@ import (
 	remote "github.com/milvus-io/milvus/internal/streamingnode/client/handler/replicadiscovery"
 	serveradapter "github.com/milvus-io/milvus/internal/streamingnode/server/service/handler/replicadiscovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/internal/views/replicadiscovery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -28,7 +28,7 @@ import (
 
 type replicaLocalTestWAL struct{ wal.WAL }
 
-func (*replicaLocalTestWAL) AcquireReplicaWatchStream(context.Context) (replicadiscovery.Stream, error) {
+func (*replicaLocalTestWAL) AcquireReplicaWatchStream(context.Context) (wal.ReplicaWatchStream, error) {
 	panic("mockey")
 }
 
@@ -50,7 +50,7 @@ func TestReplicaWatchClientSelectsOwner(t *testing.T) {
 				require.Equal(t, assigned.Channel, pc)
 				return &replicaLocalTestWAL{}, lookupErr
 			}).Build()
-			d := replicadiscovery.NewDirectory()
+			d := snview.NewReplicaDirectoryForTest()
 			defer d.Close()
 			local := d.AcquireStream(t.Context(), "p", nil)
 			defer local.Close()
@@ -106,7 +106,7 @@ func TestReplicaWatchClientRediscoversRejectedOwner(t *testing.T) {
 			term.Store(2)
 			return nil
 		}).Build()
-		directory := replicadiscovery.NewDirectory()
+		directory := snview.NewReplicaDirectoryForTest()
 		defer directory.Close()
 		directory.Set("p_1v0", 9, &qviews.QueryViewVersion{})
 		mockey.Mock(streamingpb.UnimplementedStreamingNodeHandlerServiceServer.SubscribeReplicas).To(func(_ streamingpb.UnimplementedStreamingNodeHandlerServiceServer, stream streamingpb.StreamingNodeHandlerService_SubscribeReplicasServer) error {
@@ -142,15 +142,15 @@ func TestReplicaWatchClientRediscoversRejectedOwner(t *testing.T) {
 		require.NoError(t, err)
 		defer stream.Close()
 
-		snapshots := make(chan replicadiscovery.Snapshot, 8)
-		sub, err := stream.Subscribe(ctx, "p_1v0", func(s replicadiscovery.Snapshot) { snapshots <- s })
+		snapshots := make(chan qviews.ReplicaSnapshot, 8)
+		sub, err := stream.Subscribe(ctx, "p_1v0", func(s qviews.ReplicaSnapshot) { snapshots <- s })
 		require.NoError(t, err)
 		defer sub.Close()
 		for {
 			select {
 			case snapshot := <-snapshots:
 				if snapshot.Valid {
-					require.Equal(t, []replicadiscovery.Replica{{ReplicaID: 9}}, snapshot.Replicas)
+					require.Equal(t, []qviews.Replica{{ReplicaID: 9}}, snapshot.Replicas)
 					goto ready
 				}
 			case <-ctx.Done():

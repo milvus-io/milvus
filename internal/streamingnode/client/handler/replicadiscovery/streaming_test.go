@@ -14,16 +14,16 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	serveradapter "github.com/milvus-io/milvus/internal/streamingnode/server/service/handler/replicadiscovery"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	domain "github.com/milvus-io/milvus/internal/views/replicadiscovery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
 type endpoint struct {
 	streamingpb.UnimplementedStreamingNodeHandlerServiceServer
-	directory *domain.Directory
+	directory *snview.ReplicaDirectoryForTest
 }
 
 func (s *endpoint) SubscribeReplicas(rpc streamingpb.StreamingNodeHandlerService_SubscribeReplicasServer) error {
@@ -36,9 +36,9 @@ func (s *endpoint) SubscribeReplicas(rpc streamingpb.StreamingNodeHandlerService
 	return nil
 }
 
-func remoteClientForTest(t *testing.T) (streamingpb.StreamingNodeHandlerServiceClient, *domain.Directory) {
+func remoteClientForTest(t *testing.T) (streamingpb.StreamingNodeHandlerServiceClient, *snview.ReplicaDirectoryForTest) {
 	t.Helper()
-	d := domain.NewDirectory()
+	d := snview.NewReplicaDirectoryForTest()
 	listener := bufconn.Listen(65536)
 	server := grpc.NewServer()
 	streamingpb.RegisterStreamingNodeHandlerServiceServer(server, &endpoint{directory: d})
@@ -49,7 +49,7 @@ func remoteClientForTest(t *testing.T) (streamingpb.StreamingNodeHandlerServiceC
 	return streamingpb.NewStreamingNodeHandlerServiceClient(conn), d
 }
 
-func remoteForTest(t *testing.T) (*EventStream, *domain.Directory) {
+func remoteForTest(t *testing.T) (*EventStream, *snview.ReplicaDirectoryForTest) {
 	t.Helper()
 	client, d := remoteClientForTest(t)
 	stream, err := CreateEventStream(t.Context(), &EventStreamOptions{Assignment: &types.PChannelInfoAssigned{Channel: types.PChannelInfo{Name: "p", Term: 1}}}, client)
@@ -77,12 +77,12 @@ func TestReplicaWatchReceiveProgressDuringBlockedSend(t *testing.T) {
 		return err
 	}).Build()
 	defer patch.UnPatch()
-	first, err := stream.Subscribe(t.Context(), "p_1v0", func(domain.Snapshot) {})
+	first, err := stream.Subscribe(t.Context(), "p_1v0", func(qviews.ReplicaSnapshot) {})
 	require.NoError(t, err)
 	received := make(chan struct{}, 1)
 	finished := make(chan error, 1)
 	go func() {
-		_, err := stream.Subscribe(t.Context(), "p_2v0", func(domain.Snapshot) {
+		_, err := stream.Subscribe(t.Context(), "p_2v0", func(qviews.ReplicaSnapshot) {
 			select {
 			case received <- struct{}{}:
 			default:
@@ -120,14 +120,14 @@ func TestReplicaWatchReceiveProgressDuringBlockedSend(t *testing.T) {
 
 func TestReplicaWatchPhysicalSubscriptionLifetime(t *testing.T) {
 	stream, d := remoteForTest(t)
-	_, err := stream.Subscribe(t.Context(), "", func(domain.Snapshot) {})
+	_, err := stream.Subscribe(t.Context(), "", func(qviews.ReplicaSnapshot) {})
 	require.Error(t, err)
-	first, err := stream.Subscribe(t.Context(), "p_1v0", func(domain.Snapshot) {})
+	first, err := stream.Subscribe(t.Context(), "p_1v0", func(qviews.ReplicaSnapshot) {})
 	require.NoError(t, err)
 	require.Eventually(t, func() bool { return first.Snapshot().Valid }, time.Second, time.Millisecond)
 	require.NoError(t, first.Close())
 	require.NoError(t, first.Close())
-	second, err := stream.Subscribe(t.Context(), "p_1v0", func(domain.Snapshot) {})
+	second, err := stream.Subscribe(t.Context(), "p_1v0", func(qviews.ReplicaSnapshot) {})
 	require.NoError(t, err)
 	require.NotEqual(t, first.(*eventSubscription).ID(), second.(*eventSubscription).ID())
 	d.Set("p_1v0", 9, &qviews.QueryViewVersion{})
@@ -136,7 +136,7 @@ func TestReplicaWatchPhysicalSubscriptionLifetime(t *testing.T) {
 	require.NoError(t, stream.Close())
 	require.NoError(t, stream.Close())
 	require.False(t, second.Snapshot().Valid)
-	_, err = stream.Subscribe(t.Context(), "p_1v0", func(domain.Snapshot) {})
+	_, err = stream.Subscribe(t.Context(), "p_1v0", func(qviews.ReplicaSnapshot) {})
 	require.Error(t, err)
 }
 
@@ -183,7 +183,7 @@ func TestReplicaWatchHandshakeAndSubscriptionFailures(t *testing.T) {
 				if scenario == "cancel-subscribe" {
 					go func() { <-entered; cancel() }()
 				}
-				_, err = stream.Subscribe(ctx, "p_1v0", func(domain.Snapshot) {})
+				_, err = stream.Subscribe(ctx, "p_1v0", func(qviews.ReplicaSnapshot) {})
 				require.Error(t, err)
 				if scenario == "cancel-subscribe" {
 					require.ErrorIs(t, err, context.Canceled)

@@ -4,18 +4,19 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/internal/views/replicadiscovery"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 )
 
 type eventSubscription struct {
 	stream         *EventStream
 	subscriptionID int64
 	vchannel       string
-	handler        replicadiscovery.Handler
+	handler        wal.ReplicaWatchHandler
 	deliveryMu     sync.Mutex
 	closed         bool
-	snapshot       replicadiscovery.Snapshot
+	snapshot       qviews.ReplicaSnapshot
 	done           chan struct{}
 	ready          chan struct{}
 	// readyErr is the immutable creation result, published by closing ready.
@@ -29,7 +30,7 @@ type eventSubscription struct {
 	finishOnce sync.Once
 }
 
-func newEventSubscription(stream *EventStream, subscriptionID int64, vchannel string, handler replicadiscovery.Handler) *eventSubscription {
+func newEventSubscription(stream *EventStream, subscriptionID int64, vchannel string, handler wal.ReplicaWatchHandler) *eventSubscription {
 	return &eventSubscription{
 		stream:         stream,
 		subscriptionID: subscriptionID,
@@ -70,13 +71,13 @@ func (s *eventSubscription) Close() error {
 	return s.Error()
 }
 
-func (s *eventSubscription) handle(event replicadiscovery.Snapshot) {
+func (s *eventSubscription) handle(event qviews.ReplicaSnapshot) {
 	s.deliveryMu.Lock()
 	defer s.deliveryMu.Unlock()
 	if s.closed {
 		return
 	}
-	s.snapshot = replicadiscovery.Snapshot{Valid: event.Valid, Replicas: slices.Clone(event.Replicas)}
+	s.snapshot = qviews.ReplicaSnapshot{Valid: event.Valid, Replicas: slices.Clone(event.Replicas)}
 	s.handler(event)
 }
 
@@ -115,8 +116,8 @@ func (s *eventSubscription) setError(err error) {
 	}
 }
 
-func (s *eventSubscription) Snapshot() replicadiscovery.Snapshot {
+func (s *eventSubscription) Snapshot() qviews.ReplicaSnapshot {
 	s.deliveryMu.Lock()
 	defer s.deliveryMu.Unlock()
-	return replicadiscovery.Snapshot{Valid: !s.closed && s.snapshot.Valid, Replicas: slices.Clone(s.snapshot.Replicas)}
+	return qviews.ReplicaSnapshot{Valid: !s.closed && s.snapshot.Valid, Replicas: slices.Clone(s.snapshot.Replicas)}
 }

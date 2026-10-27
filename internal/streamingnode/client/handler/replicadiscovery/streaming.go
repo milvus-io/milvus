@@ -10,9 +10,10 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/internal/views/replicadiscovery"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -97,7 +98,7 @@ func (s *EventStream) Error() error {
 	return s.err
 }
 
-func (s *EventStream) Subscribe(ctx context.Context, vchannel string, handler replicadiscovery.Handler) (replicadiscovery.Subscription, error) {
+func (s *EventStream) Subscribe(ctx context.Context, vchannel string, handler wal.ReplicaWatchHandler) (wal.ReplicaWatchSubscription, error) {
 	if handler == nil || vchannel == "" {
 		return nil, status.NewInvalidArgument("replica subscription requires a VChannel and handler")
 	}
@@ -187,7 +188,7 @@ func (s *EventStream) closeSend() {
 	_ = s.stream.CloseSend()
 }
 
-func (s *EventStream) newSubscription(vchannel string, handler replicadiscovery.Handler) *eventSubscription {
+func (s *EventStream) newSubscription(vchannel string, handler wal.ReplicaWatchHandler) *eventSubscription {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	select {
@@ -302,7 +303,7 @@ func (s *EventStream) handleCreate(resp *streamingpb.CreateReplicaWatchSubscript
 
 func (s *EventStream) handleSnapshot(resp *streamingpb.ReplicaWatchSnapshot) {
 	if sub := s.getSubscription(resp.GetSubscriptionId()); sub != nil {
-		sub.handle(replicadiscovery.Snapshot{Valid: true, Replicas: replicadiscovery.ReplicasFromProto(resp.GetSnapshot().GetReplicas())})
+		sub.handle(qviews.ReplicaSnapshot{Valid: true, Replicas: qviews.ReplicasFromProto(resp.GetSnapshot().GetReplicas())})
 	}
 }
 

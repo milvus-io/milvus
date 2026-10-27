@@ -1,4 +1,4 @@
-package replicadiscovery
+package snview
 
 import (
 	"context"
@@ -12,13 +12,13 @@ import (
 )
 
 func TestDirectoryStreamDirectSubscription(t *testing.T) {
-	d := NewDirectory()
+	d := newReplicaDirectory()
 	defer d.Close()
 	unavailable := make(chan struct{})
 	stream := d.AcquireStream(t.Context(), "p", unavailable)
 	defer stream.Close()
 	var callbacks atomic.Int64
-	sub, err := stream.Subscribe(t.Context(), "p_1v0", func(snapshot Snapshot) {
+	sub, err := stream.Subscribe(t.Context(), "p_1v0", func(snapshot qviews.ReplicaSnapshot) {
 		callbacks.Add(1)
 		if len(snapshot.Replicas) > 0 {
 			snapshot.Replicas[0].ReplicaID = -1
@@ -36,7 +36,7 @@ func TestDirectoryStreamDirectSubscription(t *testing.T) {
 	snapshot.Replicas[0].ReplicaID = 99
 	require.EqualValues(t, 7, sub.Snapshot().Replicas[0].ReplicaID)
 	// A second handler gets current state even if no publication follows.
-	sibling, err := stream.Subscribe(t.Context(), "p_1v0", func(Snapshot) {})
+	sibling, err := stream.Subscribe(t.Context(), "p_1v0", func(qviews.ReplicaSnapshot) {})
 	require.NoError(t, err)
 	require.Eventually(t, func() bool { return sibling.Snapshot().Valid }, time.Second, time.Millisecond)
 	require.NoError(t, sub.Close())
@@ -57,24 +57,24 @@ func TestDirectoryStreamDirectSubscription(t *testing.T) {
 		t.Fatal("owner loss did not end physical stream")
 	}
 	require.Error(t, stream.Error())
-	_, err = stream.Subscribe(t.Context(), "p_1v0", func(Snapshot) {})
+	_, err = stream.Subscribe(t.Context(), "p_1v0", func(qviews.ReplicaSnapshot) {})
 	require.Error(t, err)
 }
 
 func TestDirectoryStreamSubscriptionValidation(t *testing.T) {
-	d := NewDirectory()
+	d := newReplicaDirectory()
 	defer d.Close()
 	stream := d.AcquireStream(t.Context(), "p", nil)
 	defer stream.Close()
 	for _, vc := range []string{"", "other_1v0"} {
-		_, err := stream.Subscribe(t.Context(), vc, func(Snapshot) {})
+		_, err := stream.Subscribe(t.Context(), vc, func(qviews.ReplicaSnapshot) {})
 		require.Error(t, err)
 	}
 	_, err := stream.Subscribe(t.Context(), "p_1v0", nil)
 	require.Error(t, err)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, err = stream.Subscribe(ctx, "p_1v0", func(Snapshot) {})
+	_, err = stream.Subscribe(ctx, "p_1v0", func(qviews.ReplicaSnapshot) {})
 	require.ErrorIs(t, err, context.Canceled)
 	require.NoError(t, stream.Close())
 	require.NoError(t, stream.Close())

@@ -10,8 +10,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	domain "github.com/milvus-io/milvus/internal/views/replicadiscovery"
 )
 
 func TestClientSharesPChannelWithoutVChannelGoroutines(t *testing.T) {
@@ -25,7 +25,7 @@ func TestClientSharesPChannelWithoutVChannelGoroutines(t *testing.T) {
 	})
 	defer manager.Close()
 	const channels = 2000
-	subscriptions := make([]domain.Subscription, 0, channels)
+	subscriptions := make([]wal.ReplicaWatchSubscription, 0, channels)
 	for i := 0; i < channels; i++ {
 		vc := "p_" + strconv.Itoa(i) + "v0"
 		sub, err := manager.Subscribe(vc, func(snapshot Snapshot) {
@@ -109,7 +109,7 @@ func TestClientCallbacksMayCloseAndAreJoined(t *testing.T) {
 	defer other.Close()
 	assigned := make(chan struct{})
 	finished := make(chan struct{}, 1)
-	var self domain.Subscription
+	var self wal.ReplicaWatchSubscription
 	self, err = other.Subscribe("p_3v0", func(Snapshot) { <-assigned; self.Close(); finished <- struct{}{} })
 	require.NoError(t, err)
 	close(assigned)

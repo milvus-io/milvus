@@ -33,7 +33,7 @@ func TestReplicaDirectoryLocalLifecycle(t *testing.T) {
 	defer h.CloseForHandoff()
 	shard := h.shards[first.ShardID()]
 	shard.leaseDuration = time.Minute
-	watch := h.WatchReplicas()
+	watch := h.replicas.Watch()
 	defer watch.Close()
 	watch.Subscribe(first.ShardID().VChannel)
 	require.Empty(t, watch.Pop().GetReplicas(), "UpRecovering is not locally Up")
@@ -77,7 +77,7 @@ func TestReplicaDirectoryRecoveryFailure(t *testing.T) {
 	view := newSNViewWithState(1, viewpb.QueryViewState_QueryViewStateUp)
 	h := recoverSNQueryViewHandler(context.Background(), testPChannel, nil, nil, []*viewpb.QueryViewOfShard{view.IntoProto()})
 	defer h.replicas.Close()
-	watch := h.WatchReplicas()
+	watch := h.replicas.Watch()
 	defer watch.Close()
 	watch.Subscribe(view.ShardID().VChannel)
 	require.Empty(t, watch.Pop().GetReplicas())
@@ -109,7 +109,7 @@ func TestReplicaDirectoryMaximumRetirementAndRecoveryOrder(t *testing.T) {
 	defer h.CloseForHandoff()
 	id := qviews.NewShardIDFromQVMeta(views[0].Meta)
 	shard := h.shards[id]
-	watch := h.WatchReplicas()
+	watch := h.replicas.Watch()
 	defer watch.Close()
 	watch.Subscribe(id.VChannel)
 	require.Empty(t, watch.Pop().GetReplicas())

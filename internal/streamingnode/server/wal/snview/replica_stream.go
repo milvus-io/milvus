@@ -1,17 +1,19 @@
-package replicadiscovery
+package snview
 
 import (
 	"context"
 	"slices"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 // AcquireStream subscribes directly to the directory. No RPC messages or ACKs
 // exist on this path. One delivery loop coalesces updates for all VChannels.
-func (d *Directory) AcquireStream(ctx context.Context, pchannel string, unavailable <-chan struct{}) Stream {
+func (d *replicaDirectory) AcquireStream(ctx context.Context, pchannel string, unavailable <-chan struct{}) wal.ReplicaWatchStream {
 	ctx, cancel := context.WithCancel(ctx)
 	s := &directoryStream{ctx: ctx, cancel: cancel, pchannel: pchannel, watch: d.Watch(), unavailable: unavailable, done: make(chan struct{}), subs: make(map[string]map[*directorySubscription]struct{})}
 	go s.run()
@@ -22,7 +24,7 @@ type directoryStream struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 	pchannel    string
-	watch       *Watch
+	watch       *replicaWatch
 	unavailable <-chan struct{}
 	done        chan struct{}
 	mu          sync.Mutex
@@ -34,12 +36,12 @@ type directorySubscription struct {
 	stream   *directoryStream
 	vchannel string
 	mu       sync.Mutex
-	handler  Handler
-	snapshot Snapshot
+	handler  wal.ReplicaWatchHandler
+	snapshot qviews.ReplicaSnapshot
 	closed   bool
 }
 
-func (s *directoryStream) Subscribe(ctx context.Context, vc string, handler Handler) (Subscription, error) {
+func (s *directoryStream) Subscribe(ctx context.Context, vc string, handler wal.ReplicaWatchHandler) (wal.ReplicaWatchSubscription, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -107,7 +109,7 @@ func (s *directoryStream) run() {
 			s.mu.Unlock()
 			if snapshot != nil {
 				for _, sub := range subs {
-					sub.deliver(Snapshot{Valid: true, Replicas: ReplicasFromProto(snapshot.GetReplicas())})
+					sub.deliver(qviews.ReplicaSnapshot{Valid: true, Replicas: qviews.ReplicasFromProto(snapshot.GetReplicas())})
 				}
 			}
 		}
@@ -120,20 +122,20 @@ func (s *directoryStream) fail() {
 	s.mu.Unlock()
 }
 
-func (s *directorySubscription) deliver(snapshot Snapshot) {
+func (s *directorySubscription) deliver(snapshot qviews.ReplicaSnapshot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return
 	}
-	s.snapshot = Snapshot{Valid: snapshot.Valid, Replicas: slices.Clone(snapshot.Replicas)}
+	s.snapshot = qviews.ReplicaSnapshot{Valid: snapshot.Valid, Replicas: slices.Clone(snapshot.Replicas)}
 	s.handler(snapshot)
 }
 
-func (s *directorySubscription) Snapshot() Snapshot {
+func (s *directorySubscription) Snapshot() qviews.ReplicaSnapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return Snapshot{Valid: !s.closed && s.stream.ctx.Err() == nil && s.snapshot.Valid, Replicas: slices.Clone(s.snapshot.Replicas)}
+	return qviews.ReplicaSnapshot{Valid: !s.closed && s.stream.ctx.Err() == nil && s.snapshot.Valid, Replicas: slices.Clone(s.snapshot.Replicas)}
 }
 
 func (s *directorySubscription) Close() error {

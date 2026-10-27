@@ -13,11 +13,11 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/internal/views/replicadiscovery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
@@ -28,13 +28,13 @@ func (*replicaManager) GetAvailableWAL(types.PChannelInfo) (wal.WAL, error) { pa
 
 type replicaWAL struct{ wal.WAL }
 
-func (*replicaWAL) AcquireReplicaWatchStream(context.Context) (replicadiscovery.Stream, error) {
+func (*replicaWAL) AcquireReplicaWatchStream(context.Context) (wal.ReplicaWatchStream, error) {
 	panic("mockey")
 }
 
 func TestReplicaWatchServiceOwnerFence(t *testing.T) {
 	mockey.PatchConvey("owner term checked before stream acknowledgement, unavailability ends stream", t, func() {
-		d := replicadiscovery.NewDirectory()
+		d := snview.NewReplicaDirectoryForTest()
 		defer d.Close()
 		d.Set("p_1v0", 17, &qviews.QueryViewVersion{})
 		unavailable := make(chan struct{})
@@ -45,7 +45,7 @@ func TestReplicaWatchServiceOwnerFence(t *testing.T) {
 			require.Equal(t, "p", pc.Name)
 			return &replicaWAL{}, nil
 		}).Build()
-		mockey.Mock((*replicaWAL).AcquireReplicaWatchStream).To(func(_ *replicaWAL, ctx context.Context) (replicadiscovery.Stream, error) {
+		mockey.Mock((*replicaWAL).AcquireReplicaWatchStream).To(func(_ *replicaWAL, ctx context.Context) (wal.ReplicaWatchStream, error) {
 			return d.AcquireStream(ctx, "p", unavailable), nil
 		}).Build()
 		listener := bufconn.Listen(65536)

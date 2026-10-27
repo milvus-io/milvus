@@ -5,7 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/views/replicadiscovery"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -23,10 +24,10 @@ type replicaRouter struct {
 
 type replicaRoute struct {
 	mu       sync.Mutex
-	snapshot replicadiscovery.Snapshot
+	snapshot qviews.ReplicaSnapshot
 	changed  chan struct{}
 	next     uint64
-	sub      replicadiscovery.Subscription
+	sub      wal.ReplicaWatchSubscription
 	closed   bool
 }
 
@@ -44,7 +45,7 @@ func (r *replicaRouter) route(vc string) (*replicaRoute, error) {
 		return route, nil
 	}
 	route := &replicaRoute{changed: make(chan struct{})}
-	sub, err := r.source.SubscribeReplicas(vc, func(snapshot replicadiscovery.Snapshot) {
+	sub, err := r.source.SubscribeReplicas(vc, func(snapshot qviews.ReplicaSnapshot) {
 		route.mu.Lock()
 		defer route.mu.Unlock()
 		if route.closed {
@@ -80,20 +81,20 @@ func (r *replicaRouter) Close() {
 // A permanently unavailable candidate is retried only after its advertised
 // maximum or QN session directory changes. The caller additionally rejects
 // plans containing dead nodes.
-func (r *replicaRoute) nextReplica(ctx context.Context, tried map[replicadiscovery.Replica]bool, sessionChanged <-chan struct{}) (replicadiscovery.Replica, bool, error) {
+func (r *replicaRoute) nextReplica(ctx context.Context, tried map[qviews.Replica]bool, sessionChanged <-chan struct{}) (qviews.Replica, bool, error) {
 	for {
 		select {
 		case <-sessionChanged:
-			return replicadiscovery.Replica{}, true, nil
+			return qviews.Replica{}, true, nil
 		default:
 		}
 		if err := ctx.Err(); err != nil {
-			return replicadiscovery.Replica{}, false, err
+			return qviews.Replica{}, false, err
 		}
 		r.mu.Lock()
 		if r.closed {
 			r.mu.Unlock()
-			return replicadiscovery.Replica{}, false, merr.Wrap(merr.ErrServiceNotReady, "replica router closed")
+			return qviews.Replica{}, false, merr.Wrap(merr.ErrServiceNotReady, "replica router closed")
 		}
 		snapshot, changed := r.snapshot, r.changed
 		retry := false
@@ -121,12 +122,12 @@ func (r *replicaRoute) nextReplica(ctx context.Context, tried map[replicadiscove
 			if timer != nil {
 				timer.Stop()
 			}
-			return replicadiscovery.Replica{}, false, ctx.Err()
+			return qviews.Replica{}, false, ctx.Err()
 		case <-sessionChanged:
 			if timer != nil {
 				timer.Stop()
 			}
-			return replicadiscovery.Replica{}, true, nil
+			return qviews.Replica{}, true, nil
 		case <-changed:
 			if timer != nil {
 				timer.Stop()
@@ -141,7 +142,7 @@ func (r *replicaRoute) nextReplica(ctx context.Context, tried map[replicadiscove
 	}
 }
 
-func (r *replicaRoute) hasUntried(tried map[replicadiscovery.Replica]bool) bool {
+func (r *replicaRoute) hasUntried(tried map[qviews.Replica]bool) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.snapshot.Valid {

@@ -1,4 +1,4 @@
-package replicadiscovery
+package snview
 
 import (
 	"sync"
@@ -10,14 +10,14 @@ import (
 )
 
 func TestDirectorySnapshotsAndCoalescing(t *testing.T) {
-	d := NewDirectory()
+	d := newReplicaDirectory()
 	defer d.Close()
 	d.Set("p_1v0", 2, &qviews.QueryViewVersion{})
 	d.Set("p_1v0", 1, &qviews.QueryViewVersion{})
 	w := d.Watch()
 	defer w.Close()
 	w.Subscribe("p_1v0")
-	require.Equal(t, testReplicas(1, 2), ReplicasFromProto(w.Pop().GetReplicas()))
+	require.Equal(t, testReplicas(1, 2), qviews.ReplicasFromProto(w.Pop().GetReplicas()))
 	require.Nil(t, w.Pop())
 	d.Set("p_1v0", 1, &qviews.QueryViewVersion{})
 	require.Nil(t, w.Pop(), "unchanged eligibility does not publish")
@@ -25,16 +25,16 @@ func TestDirectorySnapshotsAndCoalescing(t *testing.T) {
 		d.Set("p_1v0", 3, testUpVersion(i%2 == 0))
 	}
 	require.Len(t, w.pending, 1)
-	require.Equal(t, testReplicas(1, 2), ReplicasFromProto(w.Pop().GetReplicas()))
+	require.Equal(t, testReplicas(1, 2), qviews.ReplicasFromProto(w.Pop().GetReplicas()))
 	w.Subscribe("p_2v0")
 	snapshot := w.Pop()
 	require.Equal(t, "p_2v0", snapshot.GetVchannel())
-	require.Empty(t, ReplicasFromProto(snapshot.GetReplicas()))
+	require.Empty(t, qviews.ReplicasFromProto(snapshot.GetReplicas()))
 	d.Set("p_2v0", 5, &qviews.QueryViewVersion{})
 	w.Unsubscribe("p_2v0")
 	require.Nil(t, w.Pop(), "unsubscribe discards queued snapshots")
 	w.Subscribe("p_2v0")
-	require.Equal(t, testReplicas(5), ReplicasFromProto(w.Pop().GetReplicas()))
+	require.Equal(t, testReplicas(5), qviews.ReplicasFromProto(w.Pop().GetReplicas()))
 	w.Close()
 	require.Empty(t, d.listeners)
 	d.Close()
@@ -49,14 +49,14 @@ func TestDirectorySnapshotsAndCoalescing(t *testing.T) {
 
 func TestDirectoryRegistrationDoesNotLosePublication(t *testing.T) {
 	for i := 0; i < 100; i++ {
-		d := NewDirectory()
+		d := newReplicaDirectory()
 		w := d.Watch()
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() { defer wg.Done(); w.Subscribe("p_1v0") }()
 		go func() { defer wg.Done(); d.Set("p_1v0", 7, &qviews.QueryViewVersion{}) }()
 		wg.Wait()
-		require.Equal(t, testReplicas(7), ReplicasFromProto(w.Pop().GetReplicas()))
+		require.Equal(t, testReplicas(7), qviews.ReplicasFromProto(w.Pop().GetReplicas()))
 		w.Close()
 		d.Close()
 	}
@@ -69,8 +69,8 @@ func testUpVersion(up bool) *qviews.QueryViewVersion {
 	return nil
 }
 
-func testReplicas(ids ...int64) []Replica {
-	replicas := make([]Replica, len(ids))
+func testReplicas(ids ...int64) []qviews.Replica {
+	replicas := make([]qviews.Replica, len(ids))
 	for i, id := range ids {
 		replicas[i].ReplicaID = id
 	}
@@ -78,7 +78,7 @@ func testReplicas(ids ...int64) []Replica {
 }
 
 func TestDirectoryVersionChangesAndOwnership(t *testing.T) {
-	d := NewDirectory()
+	d := newReplicaDirectory()
 	defer d.Close()
 	w := d.Watch()
 	defer w.Close()

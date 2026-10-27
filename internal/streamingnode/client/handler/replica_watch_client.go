@@ -7,7 +7,6 @@ import (
 	remote "github.com/milvus-io/milvus/internal/streamingnode/client/handler/replicadiscovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/internal/views/replicadiscovery"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -15,7 +14,7 @@ import (
 
 // AcquireReplicaWatchStream creates one owner-bound stream. Recovery belongs to
 // the streaming client's resuming layer, as for AcquireTransformLogStream.
-func (hc *handlerClientImpl) AcquireReplicaWatchStream(ctx context.Context, pchannel string) (replicadiscovery.Stream, error) {
+func (hc *handlerClientImpl) AcquireReplicaWatchStream(ctx context.Context, pchannel string) (wal.ReplicaWatchStream, error) {
 	if !hc.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, ErrClientClosed
 	}
@@ -27,7 +26,7 @@ func (hc *handlerClientImpl) AcquireReplicaWatchStream(ctx context.Context, pcha
 	result, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, pchannel, func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
 		local, err := registry.GetLocalAvailableWAL(assign.Channel)
 		if err == nil {
-			provider, ok := wal.Unwrap(local).(replicadiscovery.Provider)
+			provider, ok := wal.Unwrap(local).(wal.ReplicaWatchProvider)
 			if !ok {
 				return nil, status.NewOnShutdownError("local replica directory unavailable")
 			}
@@ -49,5 +48,5 @@ func (hc *handlerClientImpl) AcquireReplicaWatchStream(ctx context.Context, pcha
 	if err != nil {
 		return nil, err
 	}
-	return result.(replicadiscovery.Stream), nil
+	return result.(wal.ReplicaWatchStream), nil
 }

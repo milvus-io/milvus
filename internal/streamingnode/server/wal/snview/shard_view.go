@@ -7,7 +7,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/internal/views/replicadiscovery"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -22,7 +21,7 @@ import (
 // contracts require that all callbacks are asynchronous, so this does not
 // cause deadlocks.
 type snShardView struct {
-	replicas        *replicadiscovery.Directory
+	replicas        *replicaDirectory
 	maxUpVersion    *qviews.QueryViewVersion
 	mu              sync.Mutex
 	recoveryChanged chan struct{}

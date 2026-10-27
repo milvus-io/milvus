@@ -80,10 +80,16 @@ pin is needed for these latest-state routing hints.
 
 ## Client and LocalWAL
 
-The domain `replicadiscovery.Stream` exposes `Subscribe`, `Done`, `Error` and
-`Close`; `Subscription` exposes `Snapshot` and `Close`. Physical handlers consume
+The domain `wal.ReplicaWatchStream` exposes `Subscribe`, `Done`, `Error` and
+`Close`; `wal.ReplicaWatchSubscription` exposes `Snapshot` and `Close`. Physical handlers consume
 owned snapshots, must not block and must not synchronously close their stream
 or subscription. The upper client isolates application callbacks separately.
+
+The contracts live in `wal/replica_watch.go`, beside TransformLog's contracts.
+`qviews.ReplicaSnapshot` and `qviews.Replica` are shared value types. The directory
+and direct local stream are private implementations inside `wal/snview`; clients
+depend on the WAL contracts and qviews values, not the directory implementation.
+There is no separate `internal/views/replicadiscovery` package.
 
 `HandlerClient.AcquireReplicaWatchStream` resolves the assignment and creates
 one physical attempt. It owns no sharing, reconnect loop or logical subscription
@@ -153,7 +159,8 @@ recovery/failure/lease retirement, no lease renewal,
 unsubscribe/re-subscribe ordering, shared local handles, stream failure and
 handoff/reconnect, slow subscribers, cancellation, and bounded pending state.
 
-Key packages: `internal/views/replicadiscovery`,
+Key packages: `internal/views/qviews`,
+`internal/streamingnode/server/wal`,
 `internal/streamingnode/server/wal/snview`,
 `internal/streamingnode/server/wal/adaptor`,
 `internal/streamingnode/client/handler/replicadiscovery`,

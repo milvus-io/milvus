@@ -8,9 +8,10 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/internal/views/replicadiscovery"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -19,21 +20,21 @@ import (
 // Existing reducer/MVCC tests isolate discovery while keeping explicit routing.
 func setupTestReplicaRouting(t *testing.T) {
 	patch := mockey.Mock((*replicaRouter).route).To(func(*replicaRouter, string) (*replicaRoute, error) {
-		return &replicaRoute{changed: make(chan struct{}), snapshot: replicadiscovery.Snapshot{Valid: true, Replicas: []replicadiscovery.Replica{{ReplicaID: 1}}}}, nil
+		return &replicaRoute{changed: make(chan struct{}), snapshot: qviews.ReplicaSnapshot{Valid: true, Replicas: []qviews.Replica{{ReplicaID: 1}}}}, nil
 	}).Build()
 	t.Cleanup(func() { patch.UnPatch() })
 }
 
 type replicaTestSource struct{ QueryPlanClient }
 
-func (*replicaTestSource) SubscribeReplicas(string, replicadiscovery.Handler) (replicadiscovery.Subscription, error) {
+func (*replicaTestSource) SubscribeReplicas(string, wal.ReplicaWatchHandler) (wal.ReplicaWatchSubscription, error) {
 	panic("mockey")
 }
 
-func newTestReplicaRouter(t *testing.T) (*replicaRouter, *replicadiscovery.Directory) {
-	d := replicadiscovery.NewDirectory()
+func newTestReplicaRouter(t *testing.T) (*replicaRouter, *snview.ReplicaDirectoryForTest) {
+	d := snview.NewReplicaDirectoryForTest()
 	manager := d.AcquireStream(t.Context(), "p", nil)
-	patch := mockey.Mock((*replicaTestSource).SubscribeReplicas).To(func(_ *replicaTestSource, vc string, h replicadiscovery.Handler) (replicadiscovery.Subscription, error) {
+	patch := mockey.Mock((*replicaTestSource).SubscribeReplicas).To(func(_ *replicaTestSource, vc string, h wal.ReplicaWatchHandler) (wal.ReplicaWatchSubscription, error) {
 		return manager.Subscribe(t.Context(), vc, h)
 	}).Build()
 	r := newReplicaRouter(&replicaTestSource{})
@@ -49,14 +50,14 @@ func TestReplicaRouterWaitsForNonemptyAndRotates(t *testing.T) {
 	require.NoError(t, err)
 	require.Same(t, route, same)
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
-	_, _, err = route.nextReplica(ctx, map[replicadiscovery.Replica]bool{}, nil)
+	_, _, err = route.nextReplica(ctx, map[qviews.Replica]bool{}, nil)
 	cancel()
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	version := qviews.QueryViewVersion{QueryVersion: 1}
 	d.Set("p_1v0", 1, &version)
 	d.Set("p_1v0", 2, &version)
 	require.Eventually(t, func() bool { route.mu.Lock(); defer route.mu.Unlock(); return len(route.snapshot.Replicas) == 2 }, time.Second, time.Millisecond)
-	tried := make(map[replicadiscovery.Replica]bool)
+	tried := make(map[qviews.Replica]bool)
 	first, _, err := route.nextReplica(t.Context(), tried, nil)
 	require.NoError(t, err)
 	tried[first] = true
@@ -91,10 +92,10 @@ func TestReplicaRouterTransientFailureRetriesWithoutDirectoryChange(t *testing.T
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
-	candidate, _, err := route.nextReplica(ctx, map[replicadiscovery.Replica]bool{}, nil)
+	candidate, _, err := route.nextReplica(ctx, map[qviews.Replica]bool{}, nil)
 	require.NoError(t, err)
 	start := time.Now()
-	next, _, err := route.nextReplica(ctx, map[replicadiscovery.Replica]bool{candidate: false}, nil)
+	next, _, err := route.nextReplica(ctx, map[qviews.Replica]bool{candidate: false}, nil)
 	require.NoError(t, err)
 	require.Equal(t, candidate, next)
 	require.GreaterOrEqual(t, time.Since(start), replicaRetryInterval)
@@ -227,15 +228,15 @@ func TestReplicaRouterRejectsInvalidSubscriptionAndCancelsBackoff(t *testing.T) 
 	d.Set("p_1v0", 1, &version)
 	route, err := r.route("p_1v0")
 	require.NoError(t, err)
-	candidate, _, err := route.nextReplica(t.Context(), map[replicadiscovery.Replica]bool{}, nil)
+	candidate, _, err := route.nextReplica(t.Context(), map[qviews.Replica]bool{}, nil)
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
-	_, _, err = route.nextReplica(ctx, map[replicadiscovery.Replica]bool{candidate: false}, nil)
+	_, _, err = route.nextReplica(ctx, map[qviews.Replica]bool{candidate: false}, nil)
 	cancel()
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	ctx, cancel = context.WithCancel(t.Context())
 	cancel()
-	_, _, err = route.nextReplica(ctx, map[replicadiscovery.Replica]bool{}, nil)
+	_, _, err = route.nextReplica(ctx, map[qviews.Replica]bool{}, nil)
 	require.ErrorIs(t, err, context.Canceled, "cached replicas cannot bypass caller cancellation")
 }
 

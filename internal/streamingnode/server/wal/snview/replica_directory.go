@@ -1,5 +1,4 @@
-// Package replicadiscovery implements the latest-state VChannel replica directory.
-package replicadiscovery
+package snview
 
 import (
 	"cmp"
@@ -10,24 +9,24 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
-// Directory belongs to one WAL owner. It contains only locally serving replicas.
+// replicaDirectory belongs to one WAL owner. It contains only locally serving replicas.
 // All listener registration and publication is serialized by mu. No consumer
 // callback, network operation, or shard lock is taken under this lock.
-type Directory struct {
+type replicaDirectory struct {
 	mu        sync.Mutex
 	replicas  map[string]map[int64]qviews.QueryViewVersion
-	listeners map[string]map[*Watch]struct{}
+	listeners map[string]map[*replicaWatch]struct{}
 	done      chan struct{}
 	closed    bool
 }
 
-func NewDirectory() *Directory {
-	return &Directory{replicas: make(map[string]map[int64]qviews.QueryViewVersion), listeners: make(map[string]map[*Watch]struct{}), done: make(chan struct{})}
+func newReplicaDirectory() *replicaDirectory {
+	return &replicaDirectory{replicas: make(map[string]map[int64]qviews.QueryViewVersion), listeners: make(map[string]map[*replicaWatch]struct{}), done: make(chan struct{})}
 }
 
 // Set publishes the maximum locally Up version; nil removes the replica.
 // The version is copied, never retained by pointer.
-func (d *Directory) Set(vchannel string, replicaID int64, version *qviews.QueryViewVersion) {
+func (d *replicaDirectory) Set(vchannel string, replicaID int64, version *qviews.QueryViewVersion) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.closed {
@@ -56,11 +55,11 @@ func (d *Directory) Set(vchannel string, replicaID int64, version *qviews.QueryV
 }
 
 // Watch allocates a multiplexed listener, not a goroutine or a resource lease.
-func (d *Directory) Watch() *Watch {
-	return &Watch{directory: d, subscribed: make(map[string]struct{}), pending: make(map[string]struct{}), changed: make(chan struct{}, 1)}
+func (d *replicaDirectory) Watch() *replicaWatch {
+	return &replicaWatch{directory: d, subscribed: make(map[string]struct{}), pending: make(map[string]struct{}), changed: make(chan struct{}, 1)}
 }
 
-func (d *Directory) Close() {
+func (d *replicaDirectory) Close() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if !d.closed {
@@ -72,18 +71,18 @@ func (d *Directory) Close() {
 }
 
 // Watch is owned by one physical RPC. Pending changes coalesce by VChannel.
-type Watch struct {
-	directory  *Directory
+type replicaWatch struct {
+	directory  *replicaDirectory
 	subscribed map[string]struct{}
 	pending    map[string]struct{}
 	changed    chan struct{}
 	closed     bool
 }
 
-func (w *Watch) Done() <-chan struct{}    { return w.directory.done }
-func (w *Watch) Changed() <-chan struct{} { return w.changed }
+func (w *replicaWatch) Done() <-chan struct{}    { return w.directory.done }
+func (w *replicaWatch) Changed() <-chan struct{} { return w.changed }
 
-func (w *Watch) Subscribe(vchannel string) {
+func (w *replicaWatch) Subscribe(vchannel string) {
 	d := w.directory
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -95,20 +94,20 @@ func (w *Watch) Subscribe(vchannel string) {
 	}
 	w.subscribed[vchannel] = struct{}{}
 	if d.listeners[vchannel] == nil {
-		d.listeners[vchannel] = make(map[*Watch]struct{})
+		d.listeners[vchannel] = make(map[*replicaWatch]struct{})
 	}
 	d.listeners[vchannel][w] = struct{}{}
 	w.enqueueLocked(vchannel)
 }
 
-func (w *Watch) Unsubscribe(vchannel string) {
+func (w *replicaWatch) Unsubscribe(vchannel string) {
 	d := w.directory
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	w.unsubscribeLocked(vchannel)
 }
 
-func (w *Watch) unsubscribeLocked(vchannel string) {
+func (w *replicaWatch) unsubscribeLocked(vchannel string) {
 	delete(w.pending, vchannel)
 	delete(w.subscribed, vchannel)
 	delete(w.directory.listeners[vchannel], w)
@@ -117,7 +116,7 @@ func (w *Watch) unsubscribeLocked(vchannel string) {
 	}
 }
 
-func (w *Watch) enqueueLocked(vchannel string) {
+func (w *replicaWatch) enqueueLocked(vchannel string) {
 	w.pending[vchannel] = struct{}{}
 	select {
 	case w.changed <- struct{}{}:
@@ -126,7 +125,7 @@ func (w *Watch) enqueueLocked(vchannel string) {
 }
 
 // Pop returns an owned latest snapshot. Read and publication share the same lock.
-func (w *Watch) Pop() *viewpb.VChannelReplicas {
+func (w *replicaWatch) Pop() *viewpb.VChannelReplicas {
 	d := w.directory
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -152,7 +151,7 @@ func (w *Watch) Pop() *viewpb.VChannelReplicas {
 	return nil
 }
 
-func (w *Watch) Close() {
+func (w *replicaWatch) Close() {
 	d := w.directory
 	d.mu.Lock()
 	defer d.mu.Unlock()

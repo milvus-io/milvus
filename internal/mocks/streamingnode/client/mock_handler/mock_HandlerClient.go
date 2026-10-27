@@ -10,7 +10,6 @@ import (
 	producer "github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
 	wal "github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	utility "github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
-	replicadiscovery "github.com/milvus-io/milvus/internal/views/replicadiscovery"
 	streamingpb "github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	types "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	mock "github.com/stretchr/testify/mock"
@@ -30,23 +29,23 @@ func (_m *MockHandlerClient) EXPECT() *MockHandlerClient_Expecter {
 }
 
 // AcquireReplicaWatchStream provides a mock function with given fields: ctx, pchannel
-func (_m *MockHandlerClient) AcquireReplicaWatchStream(ctx context.Context, pchannel string) (replicadiscovery.Stream, error) {
+func (_m *MockHandlerClient) AcquireReplicaWatchStream(ctx context.Context, pchannel string) (wal.ReplicaWatchStream, error) {
 	ret := _m.Called(ctx, pchannel)
 
 	if len(ret) == 0 {
 		panic("no return value specified for AcquireReplicaWatchStream")
 	}
 
-	var r0 replicadiscovery.Stream
+	var r0 wal.ReplicaWatchStream
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) (replicadiscovery.Stream, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) (wal.ReplicaWatchStream, error)); ok {
 		return rf(ctx, pchannel)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) replicadiscovery.Stream); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) wal.ReplicaWatchStream); ok {
 		r0 = rf(ctx, pchannel)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(replicadiscovery.Stream)
+			r0 = ret.Get(0).(wal.ReplicaWatchStream)
 		}
 	}
 
@@ -78,12 +77,12 @@ func (_c *MockHandlerClient_AcquireReplicaWatchStream_Call) Run(run func(ctx con
 	return _c
 }
 
-func (_c *MockHandlerClient_AcquireReplicaWatchStream_Call) Return(_a0 replicadiscovery.Stream, _a1 error) *MockHandlerClient_AcquireReplicaWatchStream_Call {
+func (_c *MockHandlerClient_AcquireReplicaWatchStream_Call) Return(_a0 wal.ReplicaWatchStream, _a1 error) *MockHandlerClient_AcquireReplicaWatchStream_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockHandlerClient_AcquireReplicaWatchStream_Call) RunAndReturn(run func(context.Context, string) (replicadiscovery.Stream, error)) *MockHandlerClient_AcquireReplicaWatchStream_Call {
+func (_c *MockHandlerClient_AcquireReplicaWatchStream_Call) RunAndReturn(run func(context.Context, string) (wal.ReplicaWatchStream, error)) *MockHandlerClient_AcquireReplicaWatchStream_Call {
 	_c.Call.Return(run)
 	return _c
 }

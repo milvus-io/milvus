@@ -13,7 +13,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	"github.com/milvus-io/milvus/internal/views/queryclient/reducer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/internal/views/replicadiscovery"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -176,7 +175,7 @@ func (s *shardViewQueryClient) executeShard(
 	if err != nil {
 		return nil, err
 	}
-	tried := make(map[replicadiscovery.Replica]bool)
+	tried := make(map[qviews.Replica]bool)
 	deadNodes := make(map[int64]struct{})
 	var sessionChanged <-chan struct{}
 	for attempt := 0; ; attempt++ {

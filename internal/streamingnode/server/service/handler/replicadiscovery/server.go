@@ -7,8 +7,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/internal/views/replicadiscovery"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -16,7 +17,7 @@ import (
 
 // ServeStream projects the domain interface onto RPC. Snapshot callbacks only
 // coalesce pending state, so a slow peer cannot block directory publication.
-func ServeStream(rpc streamingpb.StreamingNodeHandlerService_SubscribeReplicasServer, pc string, stream replicadiscovery.Stream) error {
+func ServeStream(rpc streamingpb.StreamingNodeHandlerService_SubscribeReplicasServer, pc string, stream wal.ReplicaWatchStream) error {
 	ctx, cancel := context.WithCancel(rpc.Context())
 	defer cancel()
 	result := make(chan error, 1)
@@ -38,7 +39,7 @@ type pendingSnapshots struct {
 	wake      chan struct{}
 }
 
-func (p *pendingSnapshots) update(id int64, vc string, snapshot replicadiscovery.Snapshot) {
+func (p *pendingSnapshots) update(id int64, vc string, snapshot qviews.ReplicaSnapshot) {
 	replicas := make([]*viewpb.VChannelReplicas_Replica, len(snapshot.Replicas))
 	for i, r := range snapshot.Replicas {
 		replicas[i] = &viewpb.VChannelReplicas_Replica{ReplicaId: r.ReplicaID, MaxUpViewVersion: r.MaxUpViewVersion.IntoProto()}
@@ -68,12 +69,12 @@ func (p *pendingSnapshots) pop() *streamingpb.ReplicaWatchSnapshot {
 	return nil
 }
 
-func run(ctx context.Context, rpc streamingpb.StreamingNodeHandlerService_SubscribeReplicasServer, pc string, stream replicadiscovery.Stream) error {
+func run(ctx context.Context, rpc streamingpb.StreamingNodeHandlerService_SubscribeReplicasServer, pc string, stream wal.ReplicaWatchStream) error {
 	if err := rpc.Send(&streamingpb.ReplicaWatchResponse{Response: &streamingpb.ReplicaWatchResponse_CreateStream{CreateStream: &streamingpb.CreateReplicaWatchStreamResponse{}}}); err != nil {
 		return err
 	}
 	pending := &pendingSnapshots{snapshots: make(map[int64]*streamingpb.ReplicaWatchSnapshot), wake: make(chan struct{}, 1)}
-	subs := make(map[int64]replicadiscovery.Subscription)
+	subs := make(map[int64]wal.ReplicaWatchSubscription)
 	channels := make(map[int64]string)
 	defer func() {
 		for _, sub := range subs {
@@ -120,7 +121,7 @@ func run(ctx context.Context, rpc streamingpb.StreamingNodeHandlerService_Subscr
 				if id <= 0 || subs[id] != nil || vc == "" || funcutil.ToPhysicalChannel(vc) != pc {
 					return status.NewInvalidRequestSeq("replica subscription requires a unique positive ID and a VChannel in this PChannel")
 				}
-				sub, err := stream.Subscribe(ctx, vc, func(snapshot replicadiscovery.Snapshot) { pending.update(id, vc, snapshot) })
+				sub, err := stream.Subscribe(ctx, vc, func(snapshot qviews.ReplicaSnapshot) { pending.update(id, vc, snapshot) })
 				if err != nil {
 					if err := rpc.Send(&streamingpb.ReplicaWatchResponse{Response: &streamingpb.ReplicaWatchResponse_SubscriptionError{SubscriptionError: &streamingpb.ReplicaWatchSubscriptionError{SubscriptionId: id, Vchannel: vc, Error: (*streamingpb.StreamingError)(status.AsStreamingError(err))}}}); err != nil {
 						return err

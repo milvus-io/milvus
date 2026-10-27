@@ -3,12 +3,12 @@ package adaptor
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/internal/views/replicadiscovery"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func (w *walAdaptorImpl) AcquireReplicaWatchStream(ctx context.Context) (replicadiscovery.Stream, error) {
+func (w *walAdaptorImpl) AcquireReplicaWatchStream(ctx context.Context) (wal.ReplicaWatchStream, error) {
 	if !w.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, status.NewOnShutdownError("replica directory WAL is unavailable")
 	}
