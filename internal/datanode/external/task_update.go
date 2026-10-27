@@ -427,7 +427,30 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 		}
 		var patchedSegment *datapb.SegmentInfo
 		if shouldRefreshDeltalogs {
-			updatedSegment, err := t.refreshMilvusTableSegmentManifest(ctx, seg, matchedNewFragments)
+			if len(outputColumns) > 0 {
+				// ChildFields is sufficient for unchanged segments, but older refreshes
+				// could leave advertised Function outputs absent from the manifest.
+				// Check the pinned manifest before translating deletes or carrying its
+				// outputs. Only confirmed absence triggers a rebuild; read errors must
+				// fail the task rather than turn a storage fault into recomputation.
+				hasOutputs, err := packed.ManifestHasColumns(seg.GetManifestPath(), t.req.GetStorageConfig(), outputColumns)
+				if err != nil {
+					return nil, merr.Wrapf(err, "check retained function output columns for segment %d", seg.GetID())
+				}
+				if !hasOutputs {
+					missingFunctionOutputSegments++
+					taskLog.Info(ctx, "Segment invalidated due to missing retained function output columns",
+						mlog.FieldSegmentID(seg.GetID()),
+						mlog.String("updateReason", "missing_function_output_columns"),
+						mlog.String("manifestPath", seg.GetManifestPath()))
+					// Nothing has marked these fragments used or retained this segment.
+					// Rebuild from the latest orphan fragments below, with new segment
+					// IDs and freshly computed Function outputs. Publication of the
+					// replacement remains the existing job-level atomic update.
+					continue
+				}
+			}
+			updatedSegment, err := t.refreshMilvusTableSegmentManifest(ctx, seg, matchedNewFragments, outputColumns)
 			if err != nil {
 				return nil, err
 			}
@@ -540,6 +563,9 @@ func (t *RefreshExternalCollectionTask) segmentHasFunctionOutputColumns(seg *dat
 	if len(outputColumns) == 0 {
 		return true, nil
 	}
+	// Trust published ChildFields on the unchanged-segment fast path. Before
+	// rebuilding a delete set, organizeSegments checks the actual output columns
+	// so historical output loss can fall back to segment creation.
 	if segmentChildFieldsContainColumns(seg, outputColumns) {
 		return true, nil
 	}
