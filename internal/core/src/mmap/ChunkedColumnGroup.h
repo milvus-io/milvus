@@ -150,6 +150,29 @@ class ChunkedColumnGroup {
         return SemiInlineGet(slot->PinCells(op_ctx, chunk_ids));
     }
 
+    size_t
+    EstimatedTakeCellBytes(milvus::OpContext* op_ctx, int64_t id) const {
+        const auto* meta =
+            static_cast<const segcore::storagev2translator::GroupCTMeta*>(
+                EnsureMaterialized(op_ctx)->meta());
+        if (id < 0 ||
+            static_cast<size_t>(id) >= meta->chunk_memory_size_.size()) {
+            return 0;
+        }
+        return std::max<int64_t>(0, meta->chunk_memory_size_[id]);
+    }
+
+    std::shared_ptr<CellAccessor<GroupChunk>>
+    PinTakeCells(milvus::OpContext* op_ctx,
+                 const std::vector<int64_t>& ids) const {
+        auto slot = EnsureMaterialized(op_ctx);
+        for (auto id : ids) {
+            AssertInfo(id >= 0 && static_cast<size_t>(id) < num_chunks_,
+                       "take group cell id is out of range");
+        }
+        return slot->PinCellsDirect(op_ctx, ids);
+    }
+
     bool
     CellsLoaded(const std::vector<cachinglayer::cid_t>& cids) const {
         if (cids.empty()) {
@@ -424,6 +447,14 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
     Take(milvus::OpContext* op_ctx, TakeOptions options) const override {
         group_->Prepare(op_ctx);
         return ChunkedColumnInterface::Take(op_ctx, std::move(options));
+    }
+
+    std::unique_ptr<milvus::TakeBinding>
+    CreateTakeBinding(milvus::OpContext* op_ctx,
+                      milvus::TakeBindingOptions options) const override {
+        group_->Prepare(op_ctx);
+        return ChunkedColumnInterface::CreateTakeBinding(op_ctx,
+                                                         std::move(options));
     }
 
     PinWrapper<const char*>
@@ -748,6 +779,41 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
                        chunk_id);
             return PinWrapper<Chunk*>(std::move(group_chunk), chunk);
         };
+    }
+
+    TakeCellSource
+    MakeTakeCellSource(milvus::OpContext* op_ctx) const override {
+        auto owner = group_;
+        auto* group = owner.get();
+        const auto field = field_id_;
+        return {
+            // identity strongly owns the immutable group for these callbacks;
+            // keep the complete source alive, not an escaped callback alone.
+            std::move(owner),
+            [group, op_ctx](const std::vector<int64_t>& ids) {
+                auto accessor = group->PinTakeCells(op_ctx, ids);
+                TakeCellCohort cohort;
+                cohort.lease = accessor;
+                cohort.cells.reserve(ids.size());
+                for (auto id : ids) {
+                    auto* cell = accessor->get_cell_of(id);
+                    cohort.cells.emplace_back(id, cell);
+                    // The pin owns every field, not only this proxy column.
+                    cohort.bytes += cell->Size();
+                }
+                return cohort;
+            },
+            [field](void* cell) {
+                auto* chunk =
+                    static_cast<GroupChunk*>(cell)->GetChunkRaw(field);
+                AssertInfo(chunk != nullptr,
+                           "field {} is missing from take group",
+                           field.get());
+                return chunk;
+            },
+            [group, op_ctx](int64_t id) {
+                return group->EstimatedTakeCellBytes(op_ctx, id);
+            }};
     }
 
     std::vector<PinWrapper<Chunk*>>

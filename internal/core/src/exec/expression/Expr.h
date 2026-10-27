@@ -461,11 +461,24 @@ class Expr : public std::enable_shared_from_this<Expr> {
     SetFeatureRecorder(FeatureRecorder* recorder) {
     }
 
+    // Bind optional worker-private positional-read state after compilation.
+    // This changes neither expression selection nor predicate semantics.
+    // Ordinary sequential/offset callers leave it unset and retain their
+    // existing read policy. Composite expressions share one worker budget.
+    virtual void
+    SetOffsetTakeContext(const std::shared_ptr<TakeContext>& context) {
+        offset_take_context_ = context;
+        for (const auto& input : inputs_) {
+            input->SetOffsetTakeContext(context);
+        }
+    }
+
  protected:
     DataType type_;
     std::vector<std::shared_ptr<Expr>> inputs_;
     std::string name_;
     milvus::OpContext* op_ctx_;
+    std::shared_ptr<TakeContext> offset_take_context_;
 
     // whether we have offset input and do expr filtering on these data
     // default is false which means we will do expr filtering on the total segment data
@@ -982,6 +995,29 @@ class SegmentExpr : public Expr {
             BindColumnFilter(skip_func, std::move(resources.second));
     }
 
+    TakeBinding*
+    EnsureDataTakeBinding(TargetType target_type) {
+        const DataTakeBindingKey key{data_take_column_.get(),
+                                     data_take_filter_.get(),
+                                     op_ctx_,
+                                     offset_take_context_.get(),
+                                     target_type};
+        if (!(key == data_take_binding_key_)) {
+            AssertInfo(data_take_binding_ == nullptr ||
+                           !data_take_binding_->HasActiveInput(),
+                       "cannot replace an active take binding");
+            auto binding = data_take_column_->CreateTakeBinding(
+                op_ctx_,
+                TakeBindingOptions{
+                    target_type, data_take_filter_, offset_take_context_});
+            data_take_binding_ = std::move(binding);
+            // Cache unsupported as well. It retains ordinary Take fallback,
+            // rather than repeatedly probing this fixed backend each batch.
+            data_take_binding_key_ = key;
+        }
+        return data_take_binding_.get();
+    }
+
     detail::ColumnFilterPtr
     BindColumnFilter(const SkipChunkFn& skip_func,
                      FieldSkipMetricsView view) const {
@@ -1469,6 +1505,87 @@ class SegmentExpr : public Expr {
                    "candidate mask size {} does not match offset batch size {}",
                    candidate_mask == nullptr ? 0 : candidate_mask->size(),
                    batch_size);
+
+        // Reuse the original direct Lookup for cheap, trivially owning values.
+        // A Gather callback plus staging would add work without avoiding a
+        // payload copy. Borrowed representations instead avoid reconstructing
+        // an owning value (e.g. string) for each requested lane. This is only a
+        // value-lifetime adapter, never a predicate/policy decision.
+        constexpr bool lookup_owns_payload =
+            !std::is_trivially_copyable_v<index::owned_t<index_value_t<T>>>;
+        if (offset_take_context_ != nullptr && lookup_owns_payload) {
+            std::vector<int64_t> selected;
+            selected.reserve(batch_size);
+            for (size_t lane = 0; lane < batch_size; ++lane) {
+                if (!has_candidate_mask || (*candidate_mask)[lane]) {
+                    selected.push_back((*input)[lane]);
+                }
+            }
+            // Expr offsets are int32, whereas the typed index reader accepts
+            // int64. Keep this explicit widening; never reinterpret the input.
+            const auto& requested = selected;
+            size_t logical = 0;
+            int64_t expected_lane = 0;
+            auto advance_inactive = [&] {
+                while (logical < batch_size && has_candidate_mask &&
+                       !(*candidate_mask)[logical]) {
+                    evaluate_batch.template operator()<FilterType::random>(
+                        nullptr,
+                        ValidityView{},
+                        nullptr,
+                        1,
+                        res + logical,
+                        valid_res + logical,
+                        values...);
+                    ++logical;
+                }
+            };
+            value_reader->Gather(
+                requested.data(),
+                requested.size(),
+                [&](int64_t lane, const index_value_t<T>* value, bool valid) {
+                    AssertInfo(lane == expected_lane++,
+                               "value Gather must emit ordered lanes");
+                    advance_inactive();
+                    AssertInfo(logical < batch_size && (!valid || value),
+                               "value Gather returned an invalid lane");
+                    if (!valid) {
+                        res[logical] = valid_res[logical] = false;
+                    }
+                    // The index may reuse its string buffer on the next lane.
+                    // Execute the original kernel before returning to Gather.
+                    // View consumers borrow directly. A legacy owning-string
+                    // kernel still needs its existing representation adapter;
+                    // do not reinterpret string_view as std::string storage.
+                    const auto evaluate = [&](const T* data) {
+                        evaluate_batch.template operator()<FilterType::random>(
+                            data,
+                            valid ? ValidityView::FromExpanded(&valid)
+                                  : ValidityView{},
+                            nullptr,
+                            1,
+                            res + logical,
+                            valid_res + logical,
+                            values...);
+                    };
+                    if constexpr (std::is_same_v<T, std::string>) {
+                        if (valid) {
+                            const std::string owning_value(*value);
+                            evaluate(&owning_value);
+                        } else {
+                            evaluate(nullptr);
+                        }
+                    } else {
+                        evaluate(valid ? value : nullptr);
+                    }
+                    ++logical;
+                });
+            advance_inactive();
+            AssertInfo(
+                logical == batch_size && expected_lane == requested.size(),
+                "value Gather omitted a requested lane");
+            return batch_size;
+        }
 
         // A scalar index is one logical index chunk for the whole segment,
         // while SkipIndex statistics remain partitioned by the original data
@@ -1972,10 +2089,27 @@ class SegmentExpr : public Expr {
         }
         const auto input_view = ChunkedColumnInterface::OffsetView::From(
             take_offsets->data(), static_cast<int64_t>(take_offsets->size()));
-        auto take = data_take_column_->Take(
-            op_ctx_,
-            ChunkedColumnInterface::TakeOptions{
-                input_view, DataTargetType<T>(), data_take_filter_});
+        // The lease ends before selected_offsets goes out of scope, including
+        // on kernel/reader failure. Ordinary callers keep immutable fresh Take
+        // results; only explicitly contextual offset execution opts into reuse.
+        std::optional<TakeBinding::InputLease> input_lease;
+        ChunkedColumnInterface::TakeResultPtr fresh_take;
+        const TakeResult* take = nullptr;
+        if (offset_take_context_ != nullptr) {
+            if (auto* binding = EnsureDataTakeBinding(DataTargetType<T>())) {
+                input_lease.emplace(binding->Bind(input_view));
+                take = &input_lease->Result();
+            }
+        }
+        if (take == nullptr) {
+            fresh_take = data_take_column_->Take(
+                op_ctx_,
+                ChunkedColumnInterface::TakeOptions{input_view,
+                                                    DataTargetType<T>(),
+                                                    data_take_filter_,
+                                                    offset_take_context_});
+            take = fresh_take.get();
+        }
         if (take == nullptr) {
             return -1;
         }
@@ -1999,6 +2133,53 @@ class SegmentExpr : public Expr {
                 valid_res,
                 values...);
             return owned.size;
+        }
+
+        if (offset_take_context_ != nullptr && !has_candidate_mask) {
+            // Consume a packed batch through the ORIGINAL random-input kernel.
+            // In particular, do not substitute the sequential SIMD arithmetic
+            // kernel, whose overflow behavior can differ. Raw string views
+            // remain borrowed and their pin cohorts live through this callback.
+            take->template VisitViews<T>(
+                32,
+                [&](const T* data,
+                    ValidityView valid,
+                    const bool* skipped,
+                    int64_t first,
+                    int64_t count) {
+                    for (int64_t begin = 0; begin < count;) {
+                        if (skipped[begin]) {
+                            ApplyValidData(valid.Subview(begin),
+                                           res + first + begin,
+                                           valid_res + first + begin,
+                                           1);
+                            func.template operator()<FilterType::random>(
+                                nullptr,
+                                valid.Subview(begin),
+                                nullptr,
+                                1,
+                                res + first + begin,
+                                valid_res + first + begin,
+                                values...);
+                            ++begin;
+                            continue;
+                        }
+                        auto end = begin + 1;
+                        while (end < count && !skipped[end]) {
+                            ++end;
+                        }
+                        func.template operator()<FilterType::random>(
+                            data + begin,
+                            valid.Subview(begin),
+                            nullptr,
+                            static_cast<int>(end - begin),
+                            res + first + begin,
+                            valid_res + first + begin,
+                            values...);
+                        begin = end;
+                    }
+                });
+            return input->size();
         }
 
         const auto items = take->template Access<T>();
@@ -4381,6 +4562,20 @@ class SegmentExpr : public Expr {
     bool data_take_resources_initialized_{false};
     std::shared_ptr<ChunkedColumnInterface> data_take_column_{nullptr};
     detail::ColumnFilterPtr data_take_filter_{nullptr};
+    struct DataTakeBindingKey {
+        const ChunkedColumnInterface* column{nullptr};
+        const detail::ColumnFilter* filter{nullptr};
+        const milvus::OpContext* op_context{nullptr};
+        const TakeContext* take_context{nullptr};
+        TargetType target_type{TargetType::None};
+
+        bool
+        operator==(const DataTakeBindingKey&) const = default;
+    };
+    DataTakeBindingKey data_take_binding_key_;
+    // Declared after the captured resources so its source/configuration are
+    // released first. No input lease survives an evaluation call or ExecContext.
+    std::unique_ptr<TakeBinding> data_take_binding_;
 
     // Unified cache for all index paths (ScalarIndex, PkIndex, TextIndex, JsonStats).
     // Populated once per segment, then sliced per batch via SliceCachedResult().

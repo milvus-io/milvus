@@ -55,12 +55,25 @@ class IScalarValueReader {
     virtual std::optional<owned_t<T>>
     Lookup(int64_t offset) const = 0;
 
-    // Batch reverse lookup. Two reasons this is a callback rather than a
-    // returned container: (1) the implementation may cluster the offsets by its
-    // internal layout, and (2) unlike `Lookup`, a view IS fine here — the
-    // implementation can keep its agent alive until the callback returns, so
-    // `const T*` only has to be valid for the duration of the call. The output
-    // is meant to plug into columnar-format's `TakeResult` convention.
+    // Batch reverse lookup over the same offset domain as Lookup. count has no
+    // mask-width limit; empty input permits offsets == nullptr and performs no
+    // callbacks. Each requested lane is reported exactly once, in ascending
+    // input index i, even when offsets themselves are repeated or unordered.
+    // A valid lane has a non-null value pointer; for an invalid lane the pointer
+    // must not be dereferenced. Invalid arguments and reader/callback failures
+    // propagate as errors, not as successful all-invalid results.
+    //
+    // The implementation may cluster physical reads by its layout, but must
+    // restore input-lane order before invoking callbacks. This lets existing
+    // batch consumers preserve their logical-position cursors without an
+    // additional value-copying/reordering adapter. Values are lent
+    // ONLY for the duration of the individual callback: both the pointer and,
+    // for string_view, its character storage may be reused by the next lane
+    // (e.g. a trie reader's call-local agent). Evaluate synchronously or copy a
+    // value that must outlive that callback; retaining a view until Gather
+    // returns is not safe in general. The caller keeps the reader and backing
+    // alive for the entire call. The output plugs into the columnar-format
+    // TakeResult convention without requiring per-offset owning Lookup copies.
     virtual void
     Gather(const int64_t* offsets,
            int64_t count,

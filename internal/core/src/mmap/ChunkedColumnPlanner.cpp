@@ -23,6 +23,34 @@
 #include <vector>
 
 namespace milvus {
+namespace {
+
+inline CellLocation
+LocateInBoundaries(const std::vector<int64_t>& boundaries,
+                   int64_t segment_offset) {
+    AssertInfo(segment_offset >= 0 && segment_offset < boundaries.back(),
+               "segment offset {} out of planner rows {}",
+               segment_offset,
+               boundaries.back());
+    if (boundaries.size() == 2) {
+        return CellLocation{0, segment_offset};
+    }
+    // The first boundary is zero and the checked row is inside the column.
+    // Keep the rightmost boundary <= row; repeated boundaries (empty cells)
+    // therefore have the same semantics as upper_bound - 1. Unlike a
+    // data-dependent binary-search branch, each step uses a pointer select.
+    const auto* base = boundaries.data();
+    auto remaining = boundaries.size();
+    while (remaining > 1) {
+        const auto half = remaining / 2;
+        base += base[half] <= segment_offset ? half : 0;
+        remaining -= half;
+    }
+    const auto cell_id = static_cast<int64_t>(base - boundaries.data());
+    return CellLocation{cell_id, segment_offset - boundaries[cell_id]};
+}
+
+}  // namespace
 
 ColumnPlanner::ColumnPlanner(const std::vector<int64_t>& num_rows_until_cell)
     : num_rows_until_cell_(&num_rows_until_cell) {
@@ -58,19 +86,41 @@ ColumnPlanner::ValidateBoundaries() const {
 
 CellLocation
 ColumnPlanner::Locate(int64_t segment_offset) const {
-    AssertInfo(segment_offset >= 0 && segment_offset < NumRows(),
-               "segment offset {} out of planner rows {}",
-               segment_offset,
-               NumRows());
-    const auto& boundaries = *num_rows_until_cell_;
-    if (boundaries.size() == 2) {
-        return CellLocation{0, segment_offset};
+    return LocateInBoundaries(*num_rows_until_cell_, segment_offset);
+}
+
+void
+ColumnPlanner::LocateBatch(OffsetView offsets,
+                           int64_t first,
+                           int64_t count,
+                           CellLocation* output) const {
+    AssertInfo(offsets.size >= 0 && first >= 0 && count >= 0 &&
+                   first <= offsets.size && count <= offsets.size - first,
+               "invalid planner offset slice first={} count={} size={}",
+               first,
+               count,
+               offsets.size);
+    if (count == 0) {
+        return;
     }
-    const auto it =
-        std::upper_bound(boundaries.begin(), boundaries.end(), segment_offset);
-    const auto cell_id =
-        static_cast<int64_t>(std::distance(boundaries.begin(), it)) - 1;
-    return CellLocation{cell_id, segment_offset - boundaries[cell_id]};
+    AssertInfo(offsets.data != nullptr && output != nullptr,
+               "non-empty planner offset slice requires input and output");
+    const auto& boundaries = *num_rows_until_cell_;
+    const auto locate = [&](const auto* values) {
+        for (int64_t i = 0; i < count; ++i) {
+            output[i] = LocateInBoundaries(boundaries, values[first + i]);
+        }
+    };
+    switch (offsets.element_type) {
+        case OffsetElementType::Int32:
+            locate(static_cast<const int32_t*>(offsets.data));
+            return;
+        case OffsetElementType::Int64:
+            locate(static_cast<const int64_t*>(offsets.data));
+            return;
+        default:
+            ThrowInfo(Unsupported, "unsupported planner offset element type");
+    }
 }
 
 int64_t

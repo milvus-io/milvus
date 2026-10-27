@@ -76,6 +76,12 @@ class RawExprCacheAdapter final : public Expr {
     void
     WaitPrefetch() override;
 
+    void
+    SetOffsetTakeContext(const std::shared_ptr<TakeContext>& context) override {
+        Expr::SetOffsetTakeContext(context);
+        input_->SetOffsetTakeContext(context);
+    }
+
     const std::shared_ptr<SegmentExpr>&
     wrapped_expr() const {
         return input_;
