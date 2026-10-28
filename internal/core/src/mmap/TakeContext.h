@@ -73,18 +73,30 @@ class TakeBatchOwners final {
 
     void
     Add(const std::shared_ptr<const TakeCellCohort>& cohort) {
-        if (std::find(owners_.begin(), owners_.end(), cohort) ==
-            owners_.end()) {
-            if (cohort == nullptr) {
-                ReportNullOwner();
-            }
-            owners_.push_back(cohort);
+        if (cohort == nullptr) {
+            ReportNullOwner();
         }
+        // A negative membership hint skips the quadratic scan when a prefix
+        // touches many different owners. Collisions ALWAYS check full pointer
+        // equality, so this changes neither deduplication nor ownership limits.
+        const auto hash =
+            (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(cohort.get())) >>
+             4) *
+            uint64_t{0x9e3779b97f4a7c15};
+        const auto bit = uint64_t{1} << (hash >> 58);
+        if ((owner_hash_mask_ & bit) != 0 &&
+            std::find(owners_.begin(), owners_.end(), cohort) !=
+                owners_.end()) {
+            return;
+        }
+        owners_.push_back(cohort);
+        owner_hash_mask_ |= bit;
     }
 
     void
     Clear() {
         owners_.clear();
+        owner_hash_mask_ = 0;
     }
 
     size_t
@@ -98,6 +110,7 @@ class TakeBatchOwners final {
 
     // Reuse the existing inline-storage container; larger batches spill safely.
     folly::small_vector<std::shared_ptr<const TakeCellCohort>, 4> owners_;
+    uint64_t owner_hash_mask_{0};
 };
 
 // Mutable, worker-private retention state shared by the Expr leaves in that
