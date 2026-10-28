@@ -2073,10 +2073,47 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReadSchemaRetainsStru
 	})
 	s.Require().NoError(err)
 	s.Require().Len(readSchema.GetStructArrayFields(), 1)
-	s.Equal(st, readSchema.GetStructArrayFields()[0])
+	s.Equal(int64(200), readSchema.GetStructArrayFields()[0].GetFieldID())
+	s.ElementsMatch([]int64{201, 202}, lo.Map(readSchema.GetStructArrayFields()[0].GetFields(), func(field *schemapb.FieldSchema, _ int) int64 {
+		return field.GetFieldID()
+	}))
 	s.ElementsMatch([]int64{common.RowIDField}, lo.Map(readSchema.GetFields(), func(field *schemapb.FieldSchema, _ int) int64 {
 		return field.GetFieldID()
 	}))
+}
+
+// The additive pass reads the sub-fields it appends plus one stored sibling
+// for their element counts, a scalar Array before an ArrayOfVector, and no
+// other sibling: a VectorArray sibling would load its whole vector payload.
+func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReadSchemaReadsOneStructShapeProvider() {
+	s.setupTest()
+	vector := &schemapb.FieldSchema{FieldID: 201, Name: "s[vec]", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector}
+	scalar := &schemapb.FieldSchema{FieldID: 202, Name: "s[ints]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}
+	otherScalar := &schemapb.FieldSchema{FieldID: 203, Name: "s[more]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}
+	added := &schemapb.FieldSchema{FieldID: 204, Name: "s[new]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true}
+	st := &schemapb.StructArrayFieldSchema{FieldID: 200, Name: "s", Fields: []*schemapb.FieldSchema{vector, scalar, otherScalar, added}}
+	s.task.plan.Schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{st}
+	readStructFieldIDs := func(existing ...int64) []int64 {
+		existingFields := map[int64]struct{}{common.RowIDField: {}}
+		for _, id := range existing {
+			existingFields[id] = struct{}{}
+		}
+		readSchema, _, err := s.task.additiveReadSchema(&schemaBumpPhysicalDiff{
+			existingFields:       existingFields,
+			absentOrdinaryFields: []*schemapb.FieldSchema{added},
+		})
+		s.Require().NoError(err)
+		s.Require().Len(readSchema.GetStructArrayFields(), 1)
+		return lo.Map(readSchema.GetStructArrayFields()[0].GetFields(), func(field *schemapb.FieldSchema, _ int) int64 {
+			return field.GetFieldID()
+		})
+	}
+	s.ElementsMatch([]int64{202, 204}, readStructFieldIDs(201, 202, 203))
+	s.ElementsMatch([]int64{201, 204}, readStructFieldIDs(201))
+	// The segment predates the struct: no sibling to read.
+	s.ElementsMatch([]int64{204}, readStructFieldIDs())
+	// The plan schema keeps the whole struct.
+	s.Len(st.GetFields(), 4)
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReadSchemaRejectsMissingSystemAnchor() {
