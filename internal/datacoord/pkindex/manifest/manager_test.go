@@ -1080,3 +1080,60 @@ func TestStoreFailureClassification(t *testing.T) {
 		})
 	}
 }
+
+// resetFlush is editFlush with a truncate at resetTT to commit.
+func resetFlush(term int64, tick, resetTT uint64, ids ...int64) *pkindexpb.CommitFlushRequest {
+	req := editFlush(term, tick, ids...)
+	req.ResetTimeTick = resetTT
+	return req
+}
+
+// A flush with a reset replaces the SST list.
+func TestFlushWithAResetReplacesTheSSTList(t *testing.T) {
+	m1, err := applyEditFlush(nil, editFlush(5, 100, 2, 1))
+	require.NoError(t, err)
+
+	m2, err := applyEditFlush(m1, resetFlush(5, 200, 150, 9))
+	require.NoError(t, err)
+	require.NotNil(t, m2)
+	assert.Equal(t, []int64{9}, sstIDs(m2))
+	assert.EqualValues(t, 200, m2.GetCheckpointTimeTick())
+	assert.EqualValues(t, 2, m2.GetVersion())
+	assert.Equal(t, []int64{2, 1}, sstIDs(m1), "the current version does not change")
+
+	empty, err := applyEditFlush(m1, resetFlush(5, 200, 150))
+	require.NoError(t, err)
+	require.NotNil(t, empty)
+	assert.Empty(t, sstIDs(empty), "a reset with no new SST empties the list")
+	assert.EqualValues(t, 2, empty.GetVersion())
+
+	// a retry of an applied reset changes nothing
+	again, err := applyEditFlush(m2, resetFlush(5, 200, 150, 9))
+	require.NoError(t, err)
+	assert.Nil(t, again)
+
+	// the old list is replaced, so a reset may add an ID of it again
+	reused, err := applyEditFlush(m1, resetFlush(5, 200, 150, 1))
+	require.NoError(t, err)
+	assert.Equal(t, []int64{1}, sstIDs(reused))
+
+	_, err = applyEditFlush(m1, resetFlush(5, 200, 150, 7, 7))
+	require.ErrorIs(t, err, ErrDuplicateSST, "an ID listed twice in the reset")
+
+	_, err = applyEditFlush(m2, resetFlush(6, 200, 150, 10))
+	require.ErrorIs(t, err, ErrCheckpointRegressed, "a reset at a checkpoint that does not move forward from another term")
+}
+
+// The manager commits a reset like any flush.
+func TestCommitFlushWithAReset(t *testing.T) {
+	m, _, _ := assigned(t, 3)
+	ctx := context.Background()
+	_, err := m.CommitFlush(ctx, flush(3, 50, 1, 2))
+	require.NoError(t, err)
+	req := flush(3, 80, 9)
+	req.ResetTimeTick = 60
+	got, err := m.CommitFlush(ctx, req)
+	require.NoError(t, err)
+	assert.Equal(t, []int64{9}, sstIDs(got))
+	assert.EqualValues(t, 80, got.GetCheckpointTimeTick())
+}

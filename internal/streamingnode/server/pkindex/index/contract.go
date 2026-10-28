@@ -75,6 +75,10 @@ type FlushArgs struct {
 	PChannelTerm       int64
 	AddTables          []TableRef
 	CheckpointTimeTick uint64
+	// ResetTimeTick is the time tick of a truncate of the collection that the
+	// flush commits, 0 when none. When set, AddTables replace the committed
+	// table set instead of going in front of it.
+	ResetTimeTick uint64
 }
 
 // Committer changes the manifest of a vchannel. The handover defines the

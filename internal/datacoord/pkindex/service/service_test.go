@@ -352,6 +352,7 @@ func TestInvalidFlush(t *testing.T) {
 		"pchannel name as vchannel":  func(r *pkindexpb.CommitFlushRequest) { r.Vchannel = "by-dev-dml_0" },
 		"zero term":                  func(r *pkindexpb.CommitFlushRequest) { r.PchannelTerm = 0 },
 		"zero checkpoint":            func(r *pkindexpb.CommitFlushRequest) { r.CheckpointTimeTick = 0 },
+		"reset after the checkpoint": func(r *pkindexpb.CommitFlushRequest) { r.ResetTimeTick = r.GetCheckpointTimeTick() + 1 },
 	}
 	for name, change := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -52,7 +52,8 @@ func (m *FakeManifest) clone() *FakeManifest {
 //   - another index ID: ErrRejected,
 //   - a checkpoint that does not move forward: cur when the term is the term
 //     of the last flush (an applied retry), else ErrRejected,
-//   - a table that is in cur or listed twice: ErrRejected,
+//   - a table that is listed twice, or in cur without a reset: ErrRejected,
+//   - a reset: the next version with only the new tables,
 //   - else the next version with the new tables in front.
 func FakeFlush(cur *FakeManifest, assigned int64, args FlushArgs, basePath string) (*FakeManifest, bool, error) {
 	if args.PChannelTerm < assigned {
@@ -74,8 +75,10 @@ func FakeFlush(cur *FakeManifest, assigned int64, args FlushArgs, basePath strin
 		return cur.clone(), false, nil
 	}
 	seen := make(map[sst.ID]struct{}, len(cur.View.Tables)+len(args.AddTables))
-	for _, t := range cur.View.Tables {
-		seen[t.ID] = struct{}{}
+	if args.ResetTimeTick == 0 {
+		for _, t := range cur.View.Tables {
+			seen[t.ID] = struct{}{}
+		}
 	}
 	for _, t := range args.AddTables {
 		if _, ok := seen[t.ID]; ok {
@@ -87,6 +90,9 @@ func FakeFlush(cur *FakeManifest, assigned int64, args FlushArgs, basePath strin
 	next.View.Version++
 	next.LastFlushTerm = args.PChannelTerm
 	next.View.CheckpointTimeTick = args.CheckpointTimeTick
-	next.View.Tables = append(append([]TableRef(nil), args.AddTables...), cur.View.Tables...)
+	next.View.Tables = append([]TableRef(nil), args.AddTables...)
+	if args.ResetTimeTick == 0 {
+		next.View.Tables = append(next.View.Tables, cur.View.Tables...)
+	}
 	return next, true, nil
 }

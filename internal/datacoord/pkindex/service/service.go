@@ -126,8 +126,8 @@ func validateRecoveryTargets(in []*pkindexpb.ManifestTarget) ([]manifest.Target,
 }
 
 // validateFlush checks the content of a flush request: a valid target whose
-// vchannel name has a pchannel, a positive term, and a checkpoint that is not
-// 0.
+// vchannel name has a pchannel, a positive term, a checkpoint that is not 0,
+// and a reset time tick that is not after the checkpoint.
 func validateFlush(req *pkindexpb.CommitFlushRequest) error {
 	if err := validateTarget(req.GetCollectionId(), req.GetIndexId(), req.GetVchannel()); err != nil {
 		return err
@@ -140,6 +140,9 @@ func validateFlush(req *pkindexpb.CommitFlushRequest) error {
 	}
 	if req.GetCheckpointTimeTick() == 0 {
 		return merr.WrapErrServiceInternalMsg("checkpoint_time_tick must not be 0")
+	}
+	if req.GetResetTimeTick() > req.GetCheckpointTimeTick() {
+		return merr.WrapErrServiceInternalMsg("reset_time_tick %d is after checkpoint_time_tick %d", req.GetResetTimeTick(), req.GetCheckpointTimeTick())
 	}
 	return nil
 }

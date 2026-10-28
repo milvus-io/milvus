@@ -57,6 +57,11 @@ message CommitFlushRequest {
   uint64 checkpoint_time_tick = 5;
   // The ID of the primary key index.
   int64 index_id = 6;
+  // The time tick of a truncate of the collection, 0 when the flush has no
+  // truncate to commit. When set, add_ssts replace the SST list of the
+  // manifest instead of going in front of it. It is at most
+  // checkpoint_time_tick.
+  uint64 reset_time_tick = 7;
 }
 
 message CommitFlushResponse {

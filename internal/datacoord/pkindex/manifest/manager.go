@@ -347,18 +347,19 @@ type Compaction struct {
 // applyFlush applies a flush to cur, which is nil when the vchannel has no
 // manifest; then the flush applies to an empty manifest of version 0 that
 // takes the collection, the index and the vchannel from the flush and
-// sstBasePath. It returns
-// a new version when the checkpoint moves forward: the new SSTs go in front of
-// the SST list, the checkpoint is raised, and the flush term becomes the last
-// flush term. A flush with no SSTs only moves the
-// checkpoint. When the checkpoint does not move forward and the flush term
-// equals the last flush term, the flush is an applied retry and applyFlush
-// returns nil; it does not look at the SSTs of the flush. It returns
-// ErrCheckpointRegressed when the checkpoint does not move forward and the
-// flush term differs from the last flush term, and ErrDuplicateSST when the
-// checkpoint moves forward and an SST is already in cur or is listed twice in
-// the flush. It does not check the flush term against the pchannel meta. It
-// does not change cur.
+// sstBasePath. It returns a new version when the checkpoint moves forward:
+// the new SSTs go in front of the SST list, the checkpoint is raised, and the
+// flush term becomes the last flush term. A flush with no SSTs only moves the
+// checkpoint. A flush with a reset time tick replaces the SST list with its
+// SSTs instead, so a reset with no SSTs empties the list. When the checkpoint
+// does not move forward and the flush term equals the last flush term, the
+// flush is an applied retry and applyFlush returns nil; it does not look at
+// the SSTs of the flush. It returns ErrCheckpointRegressed when the
+// checkpoint does not move forward and the flush term differs from the last
+// flush term, and ErrDuplicateSST when the checkpoint moves forward and an
+// SST is listed twice in the flush, or is already in cur for a flush without
+// a reset time tick. It does not check the flush term against the pchannel
+// meta. It does not change cur.
 func applyFlush(cur *pkindexpb.Manifest, req *pkindexpb.CommitFlushRequest, sstBasePath string) (*pkindexpb.Manifest, error) {
 	base := cur
 	if base == nil {
@@ -376,13 +377,23 @@ func applyFlush(cur *pkindexpb.Manifest, req *pkindexpb.CommitFlushRequest, sstB
 		}
 		return nil, nil
 	}
-	if err := checkNewSSTs(base.GetVchannel(), idSet(base.GetSsts()), req.GetAddSsts()); err != nil {
+	present := idSet(base.GetSsts())
+	if req.GetResetTimeTick() > 0 {
+		// the new SSTs replace the list, so only a repeat inside the flush
+		// is a duplicate
+		present = nil
+	}
+	if err := checkNewSSTs(base.GetVchannel(), present, req.GetAddSsts()); err != nil {
 		return nil, err
 	}
 	next := nextVersion(base)
 	next.LastFlushTerm = req.GetPchannelTerm()
 	next.CheckpointTimeTick = req.GetCheckpointTimeTick()
-	next.Ssts = append(cloneSSTs(req.GetAddSsts()), next.GetSsts()...)
+	if req.GetResetTimeTick() > 0 {
+		next.Ssts = cloneSSTs(req.GetAddSsts())
+	} else {
+		next.Ssts = append(cloneSSTs(req.GetAddSsts()), next.GetSsts()...)
+	}
 	return next, nil
 }
 
