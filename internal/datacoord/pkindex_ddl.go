@@ -44,7 +44,13 @@ import (
 // pkIndexStreamingNodeVersions is the session version range of the streaming
 // nodes that handle a primary key index CreateIndex on a data vchannel. It is
 // a variable so that tests can change it.
-var pkIndexStreamingNodeVersions = semver.MustParseRange(">=3.1.0-0")
+//
+// The range rejects the 2.x streaming nodes only. When the first release that
+// has the primary key index gets a version, the lower bound must go up to that
+// version. Until then, a 3.0 streaming node without the feature is in the
+// range: it acks the CreateIndex with no result, pkIndexStateOf makes the
+// index Failed, and the index inspector drops it.
+var pkIndexStreamingNodeVersions = semver.MustParseRange(">=3.0.0-beta")
 
 // isPKIndex reports whether idx is a primary key index.
 func isPKIndex(idx *model.Index) bool {

@@ -185,7 +185,7 @@ func newPKIndexTestServer(t *testing.T, schema *schemapb.CollectionSchema) (*Ser
 		allocator:           newMockAllocator(t),
 		notifyIndexChan:     make(chan UniqueID, 16),
 		pkIndexCompensateCh: make(chan UniqueID, 16),
-		session:             pkTestSession(t, "3.1.0"),
+		session:             pkTestSession(t, common.Version.String()),
 	}
 	RegisterDDLCallbacks(s)
 	s.stateCode.Store(commonpb.StateCode_Healthy)
@@ -235,7 +235,7 @@ func TestPKIndexCreateRejections(t *testing.T) {
 
 	t.Run("old streaming node", func(t *testing.T) {
 		s, rec := newPKIndexTestServer(t, pkTestSchema(false))
-		s.session = pkTestSession(t, "3.0.4")
+		s.session = pkTestSession(t, "2.6.5")
 		status, err := s.CreateIndex(ctx, pkCreateRequest(common.PrimaryKeyIndexType))
 		require.NoError(t, err)
 		assert.ErrorIs(t, merr.Error(status), merr.ErrServiceNotReady)
@@ -346,6 +346,27 @@ func TestPKIndexCreateOfANotEmptyVChannelFails(t *testing.T) {
 	require.NoError(t, err)
 	assert.ErrorIs(t, merr.Error(status), merr.ErrServiceNotReady)
 	assert.Len(t, rec.list(), 1)
+}
+
+// TestPKIndexCreateWithANodeThatGivesNoResultFails covers a streaming node
+// that passes the version gate but does not have the feature: it acks the
+// CreateIndex with no result.
+func TestPKIndexCreateWithANodeThatGivesNoResultFails(t *testing.T) {
+	ctx := context.Background()
+	s, rec := newPKIndexTestServer(t, pkTestSchema(false))
+	s.session = pkTestSession(t, "3.0.0-beta")
+	rec.outcomeOf = func(string) *anypb.Any { return nil }
+
+	status, err := s.CreateIndex(ctx, pkCreateRequest(common.PrimaryKeyIndexType))
+	require.NoError(t, err)
+	assert.ErrorIs(t, merr.Error(status), merr.ErrParameterInvalid)
+	assert.Contains(t, status.GetReason(), "streaming node gave no result")
+	assert.Len(t, rec.list(), 1)
+
+	indexes := s.meta.indexMeta.GetIndexesForCollection(pkTestCollectionID, "")
+	require.Len(t, indexes, 1)
+	assert.Equal(t, commonpb.IndexState_Failed, indexes[0].State)
+	assert.Equal(t, pkTestCollectionID, <-s.pkIndexCompensateCh)
 }
 
 func TestNonPKIndexCreateUsesTheControlChannelOnly(t *testing.T) {
