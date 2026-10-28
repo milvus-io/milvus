@@ -107,7 +107,7 @@ func TestGenInsertMsgsByPartitionContiguousFastPath(t *testing.T) {
 	assert.True(t, &longData[1] == &got.FieldsData[0].GetScalars().GetLongData().Data[0])
 	assert.True(t, &jsonData[1] == &got.FieldsData[1].GetScalars().GetJsonData().Data[0])
 	assert.True(t, &floatData[2] == &got.FieldsData[2].GetVectors().GetFloatVector().Data[0])
-	assert.Nil(t, got.FieldsData[2].GetValidData())
+	assert.True(t, &validData[1] == &got.FieldsData[2].ValidData[0])
 	assert.True(t, &validData[1] == &got.FieldsData[2].GetVectors().ValidData[0])
 	assert.True(t, &hashValues[1] == &got.HashValues[0])
 	assert.True(t, &timestamps[1] == &got.Timestamps[0])
