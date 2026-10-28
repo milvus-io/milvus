@@ -339,6 +339,68 @@ TEST_P(DefaultValueChunkTranslatorTest, StructOffsetsBackfillNullElements) {
     }
 }
 
+// Sealed struct offsets carry the parent row validity of the struct. The
+// backfill of an added element-nullable sub-field must take it from them:
+// a null struct row stays null, a valid row gets N null elements. No sibling
+// column is read for it.
+TEST_P(DefaultValueChunkTranslatorTest, SealedStructOffsetsSupplyRowValidity) {
+    TargetBitmap row_validity(3, true);
+    row_validity[1] = false;
+    auto offsets = std::make_shared<StructElementOffsetsSealed>(
+        std::vector<int32_t>{0, 2, 2, 5}, std::move(row_validity));
+
+    FieldMeta scalar(FieldName("items[added]"),
+                     FieldId(1501),
+                     DataType::ARRAY,
+                     DataType::INT64,
+                     true,
+                     true,
+                     std::nullopt);
+    FieldDataInfo info(scalar.get_id().get(), 3, getMmapDirPath());
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
+        segment_id_, scalar, info, GetParam(), true, offsets);
+    auto cells = translator->get_cells(nullptr, {0});
+    ASSERT_EQ(cells.size(), 1);
+    auto* chunk = dynamic_cast<ColumnarArrayChunk*>(cells[0].second.get());
+    ASSERT_NE(chunk, nullptr);
+    const bool expected_valid[] = {true, false, true};
+    const int32_t expected_lengths[] = {2, 0, 3};
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_EQ(chunk->is_valid(i), expected_valid[i]) << "row " << i;
+        EXPECT_EQ(chunk->offsets()[i + 1] - chunk->offsets()[i],
+                  expected_lengths[i]);
+        if (expected_valid[i]) {
+            auto row = chunk->output_data(i);
+            EXPECT_EQ(row.valid_data_size(), expected_lengths[i]);
+            for (bool valid : row.valid_data()) {
+                EXPECT_FALSE(valid);
+            }
+        }
+    }
+
+    FieldMeta vectors(FieldName("items[added_vectors]"),
+                      FieldId(1502),
+                      DataType::VECTOR_ARRAY,
+                      DataType::VECTOR_FLOAT,
+                      4,
+                      std::nullopt,
+                      true,
+                      true);
+    FieldDataInfo vector_info(1502, 3, getMmapDirPath());
+    auto vector_translator = MakeDefaultValueChunkTranslatorForTest(
+        segment_id_, vectors, vector_info, GetParam(), true, offsets);
+    auto vector_cells = vector_translator->get_cells(nullptr, {0});
+    ASSERT_EQ(vector_cells.size(), 1);
+    auto* vector_chunk =
+        dynamic_cast<VectorArrayChunk*>(vector_cells[0].second.get());
+    ASSERT_NE(vector_chunk, nullptr);
+    auto [views, validity] = vector_chunk->Views();
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_EQ(vector_chunk->isValid(i), expected_valid[i]) << "row " << i;
+        EXPECT_EQ(views[i].length(), expected_lengths[i]);
+    }
+}
+
 // Test various fixed-width data types with default values
 TEST_P(DefaultValueChunkTranslatorTest, TestVariousFixedWidthTypes) {
     bool use_mmap = GetParam();
