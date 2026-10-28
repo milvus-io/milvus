@@ -52,6 +52,8 @@ type MetaStore interface {
 	// List returns all keys with prefix and their values. Keys are relative to
 	// the store root, in the same form as the keys passed to Load.
 	List(ctx context.Context, prefix string) (keys, values []string, err error)
+	// Remove deletes keys. A key that does not exist is not an error.
+	Remove(ctx context.Context, keys []string) error
 }
 
 // ObjectStore is the object storage of the manifest bodies and the SSTs.
@@ -192,6 +194,35 @@ func (m *Manager) LoadPointers(ctx context.Context, targets []Target) []PointerR
 		}
 	}
 	return results
+}
+
+// DropIndex removes the manifest pointers of the index indexID of a
+// collection, one vchannel at a time under the lock of the vchannel, and
+// forgets their cache. A missing pointer is not an error, so a retry after a
+// partial failure is safe. A late flush can write a pointer again; the next
+// GC round removes it.
+// TODO: tell the compaction of the primary key index to drop the summaries
+// of these vchannels, when that compaction exists.
+func (m *Manager) DropIndex(ctx context.Context, collectionID, indexID int64, vchannels []string) error {
+	for _, vchannel := range vchannels {
+		key := PointerKey(collectionID, indexID, vchannel)
+		if err := m.dropPointer(ctx, key); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *Manager) dropPointer(ctx context.Context, key string) error {
+	m.locks.Lock(key)
+	defer m.locks.Unlock(key)
+	// Forget the cache also when the remove fails: the remove may have
+	// taken effect.
+	defer m.forget(key)
+	if err := m.meta.Remove(ctx, []string{key}); err != nil {
+		return markUnavailable(err, "remove manifest pointer %s", key)
+	}
+	return nil
 }
 
 // commit applies one edit to the current version of an index on a vchannel. apply returns

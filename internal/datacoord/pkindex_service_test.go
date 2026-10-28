@@ -28,9 +28,11 @@ import (
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	pkindexgc "github.com/milvus-io/milvus/internal/datacoord/pkindex/gc"
 	"github.com/milvus-io/milvus/internal/datacoord/pkindex/manifest"
 	pkindexservice "github.com/milvus-io/milvus/internal/datacoord/pkindex/service"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -113,6 +115,29 @@ func TestPKIndexMetaKVStore(t *testing.T) {
 	assert.Equal(t, int64(1), collectionID)
 	assert.Equal(t, int64(2), indexID)
 	assert.Equal(t, "ch_v0", vchannel)
+	// a missing key is not an error
+	require.NoError(t, p.Remove(ctx, []string{key, manifest.PointerKey(1, 2, "missing_v0")}))
+	_, found, err = p.Load(ctx, key)
+	require.NoError(t, err)
+	assert.False(t, found)
+}
+
+func TestPKIndexMetaKVStoreRemoveInBatches(t *testing.T) {
+	ctx := context.Background()
+	kv := mockkv.NewMetaKv(t)
+	kv.EXPECT().MaxTxnOps().Return(2)
+	kv.EXPECT().MultiRemove(ctx, []string{"a", "b"}).Return(nil).Once()
+	kv.EXPECT().MultiRemove(ctx, []string{"c"}).Return(nil).Once()
+	require.NoError(t, metaKVStore{kv: kv}.Remove(ctx, []string{"a", "b", "c"}))
+}
+
+func TestPKIndexPresence(t *testing.T) {
+	m := newPKIndexTestMeta()
+	assert.Equal(t, pkindexgc.IndexLive, m.pkIndexPresence(1, 1002))
+	assert.Equal(t, pkindexgc.IndexMissing, m.pkIndexPresence(1, 9999))
+	assert.Equal(t, pkindexgc.IndexMissing, m.pkIndexPresence(9, 1002))
+	m.indexes[1][1002].IsDeleted = true
+	assert.Equal(t, pkindexgc.IndexDeleted, m.pkIndexPresence(1, 1002))
 }
 
 func TestPKIndexChunkManagerStore(t *testing.T) {

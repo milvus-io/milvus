@@ -67,6 +67,8 @@ type FakeMetaStore struct {
 	MultiLoadErr error
 	// ListErr is returned by the next List.
 	ListErr error
+	// RemoveErr is returned by the next Remove, which removes nothing.
+	RemoveErr error
 	// LastSave holds the saves of the last Save call.
 	LastSave map[string]string
 }
@@ -192,6 +194,20 @@ func (p *FakeMetaStore) List(_ context.Context, prefix string) ([]string, []stri
 		}
 	}
 	return keys, vals, nil
+}
+
+// Remove deletes keys. A key that does not exist is skipped.
+func (p *FakeMetaStore) Remove(_ context.Context, keys []string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err := p.RemoveErr; err != nil {
+		p.RemoveErr = nil
+		return err
+	}
+	for _, k := range keys {
+		delete(p.kv, k)
+	}
+	return nil
 }
 
 // FakeObjectStore is an in-memory ObjectStore for tests. Now sets the modification time

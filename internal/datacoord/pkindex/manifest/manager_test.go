@@ -1137,3 +1137,37 @@ func TestCommitFlushWithAReset(t *testing.T) {
 	assert.Equal(t, []int64{9}, sstIDs(got))
 	assert.EqualValues(t, 80, got.GetCheckpointTimeTick())
 }
+
+// DropIndex removes the pointers of one index on its vchannels and forgets
+// their cache. It keeps the pointers of another index, and a retry is safe.
+func TestDropIndexRemovesThePointers(t *testing.T) {
+	m, p, _ := assigned(t, 3)
+	ctx := context.Background()
+	_, err := m.CommitFlush(ctx, flush(3, 50, 9))
+	require.NoError(t, err)
+	_, err = m.CommitFlush(ctx, flushOn("p_1v1", 3, 50, 10))
+	require.NoError(t, err)
+	other := flush(3, 60, 11)
+	other.IndexId = 3
+	_, err = m.CommitFlush(ctx, other)
+	require.NoError(t, err)
+
+	p.RemoveErr = errors.New("etcd is down")
+	require.Error(t, m.DropIndex(ctx, 1, 2, []string{vch, "p_1v1"}))
+
+	require.NoError(t, m.DropIndex(ctx, 1, 2, []string{vch, "p_1v1", "p_1v2"}))
+	for _, v := range []string{vch, "p_1v1"} {
+		_, found, err := get(ctx, m, 1, 2, v)
+		require.NoError(t, err)
+		assert.False(t, found, "the pointer and the cache of %s are gone", v)
+	}
+	_, found, err := get(ctx, m, 1, 3, vch)
+	require.NoError(t, err)
+	assert.True(t, found, "another index keeps its pointer")
+	require.NoError(t, m.DropIndex(ctx, 1, 2, []string{vch}), "a retry is safe")
+
+	// a late flush writes a new first version under the dropped index
+	late, err := m.CommitFlush(ctx, flush(3, 70, 12))
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, late.GetVersion())
+}

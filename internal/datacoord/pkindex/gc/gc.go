@@ -58,6 +58,13 @@ type Config struct {
 	// version and outside the RetainVersions newest versions before it is
 	// deleted.
 	RetainDuration time.Duration
+	// DropTolerance is the minimum age of the objects of an index that
+	// datacoord deleted, or of an index of a collection that does not exist,
+	// before the GC by index ID removes them. See runIndexes.
+	DropTolerance time.Duration
+	// MissingTolerance is the minimum age of the objects of an index ID that
+	// datacoord meta does not have before the GC by index ID removes them.
+	MissingTolerance time.Duration
 }
 
 // InFlightOutputs returns the SST IDs that running compactions of an index on
@@ -77,17 +84,24 @@ type GC struct {
 	inFlight InFlightOutputs
 	now      func() time.Time
 
+	// indexDeps and dropper are set by EnableIndexRecovery; nil disables the
+	// GC by index ID.
+	indexDeps *IndexDeps
+	dropper   IndexDropper
+
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 }
 
 // New returns a GC over the pointers in meta and the objects in store, under
 // rootPath of the object storage. It returns ErrInvalidConfig when cfg.Interval is not
-// positive, cfg.Grace is below MinGrace, or a retention value is negative.
+// positive, cfg.Grace is below MinGrace, or a retention value or a tolerance
+// is negative.
 func New(meta manifest.MetaStore, store manifest.ObjectStore, rootPath string,
 	cfg Config, inFlight InFlightOutputs,
 ) (*GC, error) {
-	if cfg.Interval <= 0 || cfg.Grace < MinGrace || cfg.RetainVersions < 0 || cfg.RetainDuration < 0 {
+	if cfg.Interval <= 0 || cfg.Grace < MinGrace || cfg.RetainVersions < 0 || cfg.RetainDuration < 0 ||
+		cfg.DropTolerance < 0 || cfg.MissingTolerance < 0 {
 		return nil, errors.Wrapf(ErrInvalidConfig, "%+v", cfg)
 	}
 	return &GC{meta: meta, store: store, rootPath: rootPath, cfg: cfg, inFlight: inFlight, now: time.Now}, nil
@@ -124,8 +138,10 @@ func (g *GC) Close() {
 	g.wg.Wait()
 }
 
-// RunOnce runs one round over all vchannels. It returns an error only when it
-// cannot list the vchannels; an error on one vchannel is logged and the round
+// RunOnce runs one round over all vchannels, then, when EnableIndexRecovery
+// was called, one round of the GC by index ID (see runIndexes). It returns an
+// error when it cannot list the vchannels, or when the GC by index ID skips
+// the round; an error on one vchannel or one index is logged and the round
 // goes on to the next. The round stops, without an error, when ctx is done.
 func (g *GC) RunOnce(ctx context.Context) error {
 	keys, _, err := g.meta.List(ctx, manifest.PointerPrefix)
@@ -145,7 +161,10 @@ func (g *GC) RunOnce(ctx context.Context) error {
 				mlog.FieldCollectionID(collectionID), mlog.Int64("indexID", indexID), mlog.FieldVChannel(vchannel), mlog.Err(err))
 		}
 	}
-	return nil
+	if g.indexDeps == nil || ctx.Err() != nil {
+		return nil
+	}
+	return g.runIndexes(ctx, keys)
 }
 
 // runVChannel collects one index on one vchannel. It reads the in-flight compaction

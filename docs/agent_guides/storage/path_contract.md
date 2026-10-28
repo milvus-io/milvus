@@ -141,10 +141,14 @@ directory from the output manifest base.
   under `pk_index/`. It finds an index on a vchannel only through its
   manifest pointer,
   and keeps the manifest bodies of the retention and the SSTs that they
-  reference. The other orphan scans do not enter `pk_index/`. Nothing deletes
-  a `pk_index/<collectionID>/<indexID>/` prefix after an index or collection
-  drop, or the objects of a vchannel whose first manifest commit never
-  succeeded.
+  reference. The other orphan scans do not enter `pk_index/`. The same GC
+  also removes a whole `pk_index/<collectionID>/<indexID>/` prefix, pointers
+  first: when the collection is gone or the index is deleted, after
+  `dataCoord.gc.dropTolerance`; when datacoord meta has no such index ID,
+  after `dataCoord.gc.missingTolerance`. The age is the newest object
+  modification time under the prefix, found with one recursive walk of
+  `pk_index/`, because a non-recursive listing gives no usable modification
+  time on every backend. It skips a collection whose GC is paused.
 - Legacy `R/M/insert_log` orphan/LOB layouts and old Explore temporary paths
   have separate cleanup gaps. Do not claim this PR repairs all such leftovers.
   Startup cannot recover indexes hidden with an old container's CWD.

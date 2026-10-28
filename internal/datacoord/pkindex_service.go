@@ -97,6 +97,20 @@ func (p metaKVStore) List(ctx context.Context, prefix string) ([]string, []strin
 	return keys, values, nil
 }
 
+// Remove deletes keys in meta kv calls of at most MaxTxnOps keys each.
+func (p metaKVStore) Remove(ctx context.Context, keys []string) error {
+	limit := p.kv.MaxTxnOps()
+	if limit <= 0 {
+		return merr.WrapErrServiceInternalMsg("meta kv txn limit must be positive, got %d", limit)
+	}
+	for batch := range slices.Chunk(keys, limit) {
+		if err := p.kv.MultiRemove(ctx, batch); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // chunkManagerStore is the manifest object store on the datacoord chunk
 // manager. Its keys are complete chunk manager keys.
 type chunkManagerStore struct{ cm storage.ChunkManager }
@@ -138,6 +152,11 @@ func (s *Server) initPKIndex(cm storage.ChunkManager) {
 		Grace:          Params.DataCoordCfg.PKIndexGCGrace.GetAsDuration(time.Second),
 		RetainVersions: Params.DataCoordCfg.PKIndexManifestRetainVersions.GetAsInt(),
 		RetainDuration: Params.DataCoordCfg.PKIndexManifestRetainDuration.GetAsDuration(time.Second),
+		// The same tolerances as the binlog GC: an index that datacoord
+		// dropped keeps its objects for dropTolerance, and an index ID that
+		// datacoord meta does not have keeps them for missingTolerance.
+		DropTolerance:    Params.DataCoordCfg.GCDropTolerance.GetAsDuration(time.Second),
+		MissingTolerance: Params.DataCoordCfg.GCMissingTolerance.GetAsDuration(time.Second),
 	}
 	gc, err := pkindexgc.New(meta, store, rootPath, cfg,
 		// TODO: pass the outputs of the in-flight compactions of the primary
@@ -145,10 +164,39 @@ func (s *Server) initPKIndex(cm storage.ChunkManager) {
 		// TODO: add to the live set the tables that a streaming node still
 		// reads on demand from object storage.
 		nil)
+	mgr := manifest.New(meta, store, rootPath)
 	if err != nil {
 		mlog.Error(s.ctx, "init primary key index gc failed, the gc is disabled", mlog.Err(err))
 	} else {
+		gc.EnableIndexRecovery(pkindexgc.IndexDeps{
+			IndexPresence: s.meta.indexMeta.pkIndexPresence,
+			HasCollection: func(ctx context.Context, collectionID int64) (bool, error) {
+				return s.broker.HasCollection(ctx, collectionID)
+			},
+			CollectionPaused: func(collectionID int64) bool {
+				return s.garbageCollector != nil && s.garbageCollector.collectionGCPaused(collectionID)
+			},
+		}, mgr)
 		s.pkindexGC = gc
 	}
-	s.pkindexService.SetManager(manifest.New(meta, store, rootPath))
+	s.pkindexService.SetManager(mgr)
+}
+
+// pkIndexPresence returns what the index meta knows about the index indexID
+// of a collection, including a deleted index. The meta GC removes a deleted
+// index from the meta on its next cycle, so a dropped index is usually
+// missing here; the GC of the primary key index then uses the newest object
+// time with the missing tolerance.
+func (m *indexMeta) pkIndexPresence(collectionID, indexID int64) pkindexgc.IndexPresence {
+	m.fieldIndexLock.RLock()
+	defer m.fieldIndexLock.RUnlock()
+	index, ok := m.indexes[collectionID][indexID]
+	switch {
+	case !ok:
+		return pkindexgc.IndexMissing
+	case index.IsDeleted:
+		return pkindexgc.IndexDeleted
+	default:
+		return pkindexgc.IndexLive
+	}
 }
