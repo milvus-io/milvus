@@ -93,7 +93,7 @@ type Recovery struct {
 	// wipe holds the vchannels whose local data is not trusted after a
 	// corruption error. Close removes their local directories, so the next
 	// open starts from the manifest.
-	wipe    map[string]struct{}
+	wipe    map[string]string // the local directory by vchannel
 	handles []nodescheduler.TaskHandle
 }
 
@@ -122,7 +122,7 @@ func Recover(ctx context.Context, mgr *pkindex.Manager, p Param) (*Recovery, err
 		onFatal: p.OnFatal,
 		logger:  mlog.With(mlog.FieldModule("pkindex-recovery"), mlog.FieldPChannel(p.PChannel.Name), mlog.Int64("term", p.PChannel.Term)),
 		targets: make(map[string]*target),
-		wipe:    make(map[string]struct{}),
+		wipe:    make(map[string]string),
 	}
 	if r.sched == nil {
 		r.sched = mgr.Scheduler()
@@ -170,7 +170,8 @@ func (r *Recovery) addCollection(ctx context.Context, vchannel string, collectio
 	if dt != schemapb.DataType_Int64 && dt != schemapb.DataType_VarChar {
 		return merr.WrapErrServiceInternalMsg("primary key of collection %d has the unsupported data type %s", collectionID, dt)
 	}
-	idx, _, err := r.m.CreateCollection(ctx, vchannel, collectionID, dt)
+	// TODO: open the index by the index ID of its enabling CreateIndex.
+	idx, _, err := r.m.CreateCollection(ctx, vchannel, collectionID, 0)
 	if err != nil {
 		return errors.Wrapf(err, "open the primary key index of vchannel %s", vchannel)
 	}
@@ -233,8 +234,7 @@ func (r *Recovery) Close(ctx context.Context) {
 		_ = h.Wait(ctx)
 	}
 	r.m.Close()
-	for vchannel := range wipe {
-		dir := index.Dir(r.mgr.Root(), vchannel)
+	for vchannel, dir := range wipe {
 		if err := os.RemoveAll(dir); err != nil {
 			r.logger.Warn(ctx, "failed to remove the local primary key index after a corruption error", mlog.FieldVChannel(vchannel), mlog.String("dir", dir), mlog.Err(err))
 			continue

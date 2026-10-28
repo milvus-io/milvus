@@ -141,7 +141,7 @@ func TestRunStartsTheDriverAndCloseForgetsThePChannel(t *testing.T) {
 	require.NotNil(t, m)
 	require.NoError(t, rec.Run(ctx))
 
-	idx, created, err := m.CreateCollection(ctx, "v2", 2, schemapb.DataType_Int64)
+	idx, created, err := m.CreateCollection(ctx, "v2", 2, 0)
 	require.NoError(t, err)
 	require.True(t, created)
 	assert.True(t, idx.Ready(), "after Run a new collection is ready at once")

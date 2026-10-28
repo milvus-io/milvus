@@ -112,12 +112,12 @@ func validateRecoveryTargets(in []*pkindexpb.ManifestTarget) ([]manifest.Target,
 	targets := make([]manifest.Target, 0, len(in))
 	seen := make(map[manifest.Target]struct{}, len(in))
 	for _, t := range in {
-		if err := validateTarget(t.GetCollectionId(), t.GetVchannel()); err != nil {
+		if err := validateTarget(t.GetCollectionId(), t.GetIndexId(), t.GetVchannel()); err != nil {
 			return nil, err
 		}
-		target := manifest.Target{CollectionID: t.GetCollectionId(), VChannel: t.GetVchannel()}
+		target := manifest.Target{CollectionID: t.GetCollectionId(), IndexID: t.GetIndexId(), VChannel: t.GetVchannel()}
 		if _, ok := seen[target]; ok {
-			return nil, merr.WrapErrServiceInternalMsg("target collection %d vchannel %q is repeated", target.CollectionID, target.VChannel)
+			return nil, merr.WrapErrServiceInternalMsg("target collection %d index %d vchannel %q is repeated", target.CollectionID, target.IndexID, target.VChannel)
 		}
 		seen[target] = struct{}{}
 		targets = append(targets, target)
@@ -129,7 +129,7 @@ func validateRecoveryTargets(in []*pkindexpb.ManifestTarget) ([]manifest.Target,
 // vchannel name has a pchannel, a positive term, and a checkpoint that is not
 // 0.
 func validateFlush(req *pkindexpb.CommitFlushRequest) error {
-	if err := validateTarget(req.GetCollectionId(), req.GetVchannel()); err != nil {
+	if err := validateTarget(req.GetCollectionId(), req.GetIndexId(), req.GetVchannel()); err != nil {
 		return err
 	}
 	if funcutil.IsPhysicalChannel(req.GetVchannel()) {
@@ -144,12 +144,16 @@ func validateFlush(req *pkindexpb.CommitFlushRequest) error {
 	return nil
 }
 
-// validateTarget checks that a request names a collection and a vchannel that
-// can form a manifest key: a positive collection ID, and a vchannel name that
-// is not empty, ".", or "..", and does not contain "/".
-func validateTarget(collectionID int64, vchannel string) error {
+// validateTarget checks that a request names a collection, an index and a
+// vchannel that can form a manifest key: a positive collection ID, a positive
+// index ID, and a vchannel name that is not empty, ".", or "..", and does not
+// contain "/".
+func validateTarget(collectionID, indexID int64, vchannel string) error {
 	if collectionID <= 0 {
 		return merr.WrapErrServiceInternalMsg("collection_id must be positive, got %d", collectionID)
+	}
+	if indexID <= 0 {
+		return merr.WrapErrServiceInternalMsg("index_id must be positive, got %d", indexID)
 	}
 	if vchannel == "" || vchannel == "." || vchannel == ".." || strings.Contains(vchannel, "/") {
 		return merr.WrapErrServiceInternalMsg("invalid vchannel %q", vchannel)

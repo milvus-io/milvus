@@ -212,9 +212,10 @@ func (m *Manager) Close() {
 	}
 }
 
-// VChannelRef names the manifest of a vchannel.
+// VChannelRef names the manifest of an index on a vchannel.
 type VChannelRef struct {
 	CollectionID int64
+	IndexID      int64
 	VChannel     string
 }
 

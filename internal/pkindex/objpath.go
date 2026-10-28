@@ -29,25 +29,60 @@ import (
 // index. All keys are complete object keys under the root path of the chunk
 // manager (rootPath):
 //
-//	<rootPath>/pk_index/<collectionID>/<vchannel>/
-//	├── sst/                        SSTBasePath
-//	│   └── <sstID>.sst             SSTKey, ParseSSTKey
-//	└── manifest/                   ManifestDir
-//	    └── <version>-<nonce>.pb    ManifestBodyKey, ParseManifestBodyKey
+//	<rootPath>/pk_index/<collectionID>/          CollectionDir
+//	└── <indexID>/                               IndexDir, ParseIndexDir
+//	    └── <vchannel>/
+//	        ├── sst/                             SSTBasePath
+//	        │   └── <sstID>.sst                  SSTKey, ParseSSTKey
+//	        └── manifest/                        ManifestDir
+//	            └── <version>-<nonce>.pb         ManifestBodyKey, ParseManifestBodyKey
 //
-// For example: files/pk_index/449/by-dev-rootcoord-dml_0_449v0/sst/450123.sst
+// For example: files/pk_index/449/451/by-dev-rootcoord-dml_0_449v0/sst/450123.sst
 //
 // A streaming node handover and a data node compaction write SSTs. DataCoord
 // writes the manifest bodies. The DataCoord GC deletes both.
 
-// vchannelDir returns the complete object key prefix of all objects of a vchannel.
-func vchannelDir(rootPath string, collectionID int64, vchannel string) string {
-	return path.Join(rootPath, common.PKIndexPath, strconv.FormatInt(collectionID, 10), vchannel)
+// CollectionDir returns the complete object key prefix of all objects of a collection.
+func CollectionDir(rootPath string, collectionID int64) string {
+	return path.Join(rootPath, common.PKIndexPath, strconv.FormatInt(collectionID, 10))
 }
 
-// SSTBasePath returns the complete object key prefix of the SSTs of a vchannel.
-func SSTBasePath(rootPath string, collectionID int64, vchannel string) string {
-	return vchannelDir(rootPath, collectionID, vchannel) + "/sst"
+// IndexDir returns the complete object key prefix of all objects of an index.
+func IndexDir(rootPath string, collectionID, indexID int64) string {
+	return CollectionDir(rootPath, collectionID) + "/" + strconv.FormatInt(indexID, 10)
+}
+
+// ParseIndexDir returns the collection ID and the index ID of an index
+// directory key under rootPath, with or without the trailing "/".
+func ParseIndexDir(rootPath, key string) (collectionID, indexID int64, ok bool) {
+	rest, ok := strings.CutPrefix(strings.TrimSuffix(key, "/"), path.Join(rootPath, common.PKIndexPath)+"/")
+	if !ok {
+		return 0, 0, false
+	}
+	collStr, indexStr, ok := strings.Cut(rest, "/")
+	if !ok || strings.Contains(indexStr, "/") {
+		return 0, 0, false
+	}
+	collectionID, err := strconv.ParseInt(collStr, 10, 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	indexID, err = strconv.ParseInt(indexStr, 10, 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	return collectionID, indexID, true
+}
+
+// vchannelDir returns the complete object key prefix of all objects of the
+// index of a vchannel.
+func vchannelDir(rootPath string, collectionID, indexID int64, vchannel string) string {
+	return IndexDir(rootPath, collectionID, indexID) + "/" + vchannel
+}
+
+// SSTBasePath returns the complete object key prefix of the SSTs of the index of a vchannel.
+func SSTBasePath(rootPath string, collectionID, indexID int64, vchannel string) string {
+	return vchannelDir(rootPath, collectionID, indexID, vchannel) + "/sst"
 }
 
 // SSTKey returns the object key of an SST from the SST base path of a manifest.
@@ -69,9 +104,10 @@ func ParseSSTKey(basePath, key string) (int64, bool) {
 	return id, err == nil
 }
 
-// ManifestDir returns the complete object key prefix of the manifest bodies of a vchannel.
-func ManifestDir(rootPath string, collectionID int64, vchannel string) string {
-	return vchannelDir(rootPath, collectionID, vchannel) + "/manifest"
+// ManifestDir returns the complete object key prefix of the manifest bodies
+// of the index of a vchannel.
+func ManifestDir(rootPath string, collectionID, indexID int64, vchannel string) string {
+	return vchannelDir(rootPath, collectionID, indexID, vchannel) + "/manifest"
 }
 
 // ManifestBodyKey returns the object key of one manifest body under dir. The

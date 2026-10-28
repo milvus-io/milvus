@@ -59,7 +59,7 @@ func flush(term int64, tick uint64, ids ...int64) *pkindexpb.CommitFlushRequest 
 // flushOn returns a flush of vchannel of collection 1 with an Int64 primary key.
 func flushOn(vchannel string, term int64, tick uint64, ids ...int64) *pkindexpb.CommitFlushRequest {
 	req := &pkindexpb.CommitFlushRequest{
-		CollectionId: 1, Vchannel: vchannel, PchannelTerm: term,
+		CollectionId: 1, IndexId: 2, Vchannel: vchannel, PchannelTerm: term,
 		CheckpointTimeTick: tick,
 	}
 	for _, id := range ids {
@@ -68,10 +68,10 @@ func flushOn(vchannel string, term int64, tick uint64, ids ...int64) *pkindexpb.
 	return req
 }
 
-// get returns the current manifest of a vchannel as m sees it, and false when
+// get returns the current manifest of an index on a vchannel as m sees it, and false when
 // the vchannel has no manifest.
-func get(ctx context.Context, m *Manager, collectionID int64, vchannel string) (*pkindexpb.Manifest, bool, error) {
-	cur, err := m.load(ctx, PointerKey(collectionID, vchannel))
+func get(ctx context.Context, m *Manager, collectionID, indexID int64, vchannel string) (*pkindexpb.Manifest, bool, error) {
+	cur, err := m.load(ctx, PointerKey(collectionID, indexID, vchannel))
 	if err != nil || cur == nil {
 		return nil, false, err
 	}
@@ -89,7 +89,7 @@ func sstIDs(m *pkindexpb.Manifest) []int64 {
 // bodyKeys returns the manifest body keys of vch in the store.
 func bodyKeys(t *testing.T, s *FakeObjectStore) []string {
 	keys := []string{}
-	err := s.Walk(context.Background(), pkindex.ManifestDir(testRoot, 1, vch)+"/", func(k string, _ time.Time) bool {
+	err := s.Walk(context.Background(), pkindex.ManifestDir(testRoot, 1, 2, vch)+"/", func(k string, _ time.Time) bool {
 		keys = append(keys, k)
 		return true
 	})
@@ -111,7 +111,40 @@ func TestFlushDoesNotWritePChannelMeta(t *testing.T) {
 	_, err := m.CommitFlush(context.Background(), flush(3, 50, 9))
 	require.NoError(t, err)
 	assert.Len(t, p.LastSave, 1)
-	assert.Contains(t, p.LastSave, PointerKey(1, vch))
+	assert.Contains(t, p.LastSave, PointerKey(1, 2, vch))
+}
+
+// Two indexes on one vchannel keep separate pointers and bodies.
+func TestIndexesOfOneVChannelAreSeparate(t *testing.T) {
+	m, p, s := assigned(t, 3)
+	ctx := context.Background()
+	a, err := m.CommitFlush(ctx, flush(3, 50, 9))
+	require.NoError(t, err)
+	other := flush(3, 60, 9)
+	other.IndexId = 3
+	b, err := m.CommitFlush(ctx, other)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, a.GetVersion())
+	assert.EqualValues(t, 1, b.GetVersion())
+	assert.EqualValues(t, 3, b.GetIndexId())
+	assert.Equal(t, pkindex.SSTBasePath("files", 1, 3, vch), b.GetSstBasePath())
+
+	results := New(p, s, testRoot).LoadPointers(ctx, []Target{
+		{CollectionID: 1, IndexID: 2, VChannel: vch},
+		{CollectionID: 1, IndexID: 3, VChannel: vch},
+		{CollectionID: 1, IndexID: 4, VChannel: vch},
+	})
+	require.Len(t, results, 3)
+	require.NoError(t, results[0].Err)
+	require.NoError(t, results[1].Err)
+	assert.Contains(t, results[0].Pointer.GetBodyKey(), pkindex.ManifestDir("files", 1, 2, vch)+"/")
+	assert.Contains(t, results[1].Pointer.GetBodyKey(), pkindex.ManifestDir("files", 1, 3, vch)+"/")
+	assert.Nil(t, results[2].Pointer)
+
+	read, found, err := get(ctx, New(p, s, testRoot), 1, 3, vch)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.EqualValues(t, 60, read.GetCheckpointTimeTick())
 }
 
 // The first flush of a vchannel creates version 1 with the SST base path of
@@ -122,13 +155,14 @@ func TestFirstFlushCreatesVersion1(t *testing.T) {
 	got, err := m.CommitFlush(ctx, flush(3, 50, 9))
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, got.GetVersion())
-	assert.Equal(t, "files/pk_index/1/p_1v0/sst", got.GetSstBasePath())
-	assert.Equal(t, pkindex.SSTBasePath("files", 1, vch), got.GetSstBasePath())
+	assert.Equal(t, "files/pk_index/1/2/p_1v0/sst", got.GetSstBasePath())
+	assert.EqualValues(t, 2, got.GetIndexId())
+	assert.Equal(t, pkindex.SSTBasePath("files", 1, 2, vch), got.GetSstBasePath())
 	assert.EqualValues(t, 3, got.GetLastFlushTerm())
 	assert.Equal(t, []int64{9}, sstIDs(got))
 
 	// a new manager reads the same state back from the stores
-	read, found, err := get(ctx, New(p, s, testRoot), 1, vch)
+	read, found, err := get(ctx, New(p, s, testRoot), 1, 2, vch)
 	require.NoError(t, err)
 	require.True(t, found)
 	assert.True(t, proto.Equal(got, read))
@@ -145,7 +179,7 @@ func TestFlushTermRules(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrFenced), "a lower term is fenced")
 	_, err = m.CommitFlush(ctx, flush(4, 10, 1))
 	assert.True(t, errors.Is(err, ErrTermNotAssigned), "a higher term is not in the pchannel meta")
-	_, found, err := get(ctx, m, 1, vch)
+	_, found, err := get(ctx, m, 1, 2, vch)
 	require.NoError(t, err)
 	assert.False(t, found)
 }
@@ -255,7 +289,7 @@ func TestFlushRetriesWhenPChannelMetaChangesBeforeWrite(t *testing.T) {
 
 		_, err = m.CommitFlush(ctx, flush(3, 20, 2))
 		assert.True(t, errors.Is(err, ErrFenced))
-		got, _, err := get(ctx, New(p, s, testRoot), 1, vch)
+		got, _, err := get(ctx, New(p, s, testRoot), 1, 2, vch)
 		require.NoError(t, err)
 		assert.Equal(t, []int64{1}, sstIDs(got))
 	})
@@ -276,7 +310,7 @@ func TestFlushRetriesWhenPChannelMetaChangesBeforeWrite(t *testing.T) {
 		require.NoError(t, err)
 		assert.EqualValues(t, 2, got.GetVersion())
 		assert.Equal(t, []int64{2, 1}, sstIDs(got))
-		read, _, err := get(ctx, New(p, s, testRoot), 1, vch)
+		read, _, err := get(ctx, New(p, s, testRoot), 1, 2, vch)
 		require.NoError(t, err)
 		assert.True(t, proto.Equal(got, read))
 	})
@@ -285,26 +319,26 @@ func TestFlushRetriesWhenPChannelMetaChangesBeforeWrite(t *testing.T) {
 func TestCommitCompaction(t *testing.T) {
 	m, p, _ := assigned(t, 1)
 	ctx := context.Background()
-	_, err := m.CommitCompaction(ctx, 1, vch, Compaction{Inputs: []int64{1}, Outputs: []*pkindexpb.SSTRef{{Id: 2}}})
+	_, err := m.CommitCompaction(ctx, 1, 2, vch, Compaction{Inputs: []int64{1}, Outputs: []*pkindexpb.SSTRef{{Id: 2}}})
 	assert.True(t, errors.Is(err, ErrNoManifest), "no manifest before the first flush")
 
 	_, err = m.CommitFlush(ctx, flush(1, 10, 3, 2, 1))
 	require.NoError(t, err)
-	got, err := m.CommitCompaction(ctx, 1, vch, Compaction{Inputs: []int64{2, 1}, Outputs: []*pkindexpb.SSTRef{{Id: 10}}})
+	got, err := m.CommitCompaction(ctx, 1, 2, vch, Compaction{Inputs: []int64{2, 1}, Outputs: []*pkindexpb.SSTRef{{Id: 10}}})
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, got.GetVersion())
 	assert.Equal(t, []int64{3, 10}, sstIDs(got))
 
-	_, err = m.CommitCompaction(ctx, 1, vch, Compaction{Inputs: []int64{2, 1}, Outputs: []*pkindexpb.SSTRef{{Id: 11}}})
+	_, err = m.CommitCompaction(ctx, 1, 2, vch, Compaction{Inputs: []int64{2, 1}, Outputs: []*pkindexpb.SSTRef{{Id: 11}}})
 	assert.True(t, errors.Is(err, ErrStaleEdit))
 
 	// a compaction does not read or check the pchannel meta
 	p.AssignPChannel(pch, 9)
 	p.LoadErr, p.LoadErrKey = errors.New("must not be read"), streamingcoord.BuildPChannelInfoPath(pch)
-	got, err = m.CommitCompaction(ctx, 1, vch, Compaction{Inputs: []int64{10}, Outputs: []*pkindexpb.SSTRef{{Id: 11}}})
+	got, err = m.CommitCompaction(ctx, 1, 2, vch, Compaction{Inputs: []int64{10}, Outputs: []*pkindexpb.SSTRef{{Id: 11}}})
 	require.NoError(t, err)
 	assert.Equal(t, []int64{3, 11}, sstIDs(got))
-	assert.Equal(t, []string{PointerKey(1, vch)}, slices.Collect(maps.Keys(p.LastSave)))
+	assert.Equal(t, []string{PointerKey(1, 2, vch)}, slices.Collect(maps.Keys(p.LastSave)))
 	p.LoadErr, p.LoadErrKey = nil, ""
 }
 
@@ -339,7 +373,7 @@ func TestUncertainWriteThatApplied(t *testing.T) {
 			assert.Equal(t, []int64{1}, sstIDs(got))
 			assert.Nil(t, p.LastSave, "the retry does not write")
 
-			read, found, err := get(ctx, New(p, s, testRoot), 1, vch)
+			read, found, err := get(ctx, New(p, s, testRoot), 1, 2, vch)
 			require.NoError(t, err)
 			require.True(t, found)
 			assert.True(t, proto.Equal(got, read))
@@ -394,7 +428,7 @@ func TestCrashBeforeSwap(t *testing.T) {
 	_, err = m.CommitFlush(ctx, flush(1, 5, 1))
 	require.Error(t, err)
 
-	got, found, err := get(ctx, New(p, s, testRoot), 1, vch)
+	got, found, err := get(ctx, New(p, s, testRoot), 1, 2, vch)
 	require.NoError(t, err)
 	require.True(t, found)
 	assert.True(t, proto.Equal(old, got))
@@ -403,7 +437,7 @@ func TestCrashBeforeSwap(t *testing.T) {
 	require.Len(t, keys, 2)
 	var orphans int
 	for _, k := range keys {
-		v, ok := pkindex.ParseManifestBodyKey(pkindex.ManifestDir(testRoot, 1, vch), k)
+		v, ok := pkindex.ParseManifestBodyKey(pkindex.ManifestDir(testRoot, 1, 2, vch), k)
 		require.True(t, ok)
 		if v == 2 {
 			orphans++
@@ -435,7 +469,7 @@ func TestTwoManagersCreateFirstVersion(t *testing.T) {
 	assert.EqualValues(t, 2, got.GetVersion())
 	assert.Equal(t, []int64{2, 1}, sstIDs(got))
 
-	read, found, err := get(ctx, New(p, s, testRoot), 1, vch)
+	read, found, err := get(ctx, New(p, s, testRoot), 1, 2, vch)
 	require.NoError(t, err)
 	require.True(t, found)
 	assert.True(t, proto.Equal(got, read))
@@ -445,15 +479,15 @@ func TestTwoManagersCreateFirstVersion(t *testing.T) {
 func TestLoadVersionMismatch(t *testing.T) {
 	m, p, s := assigned(t, 1)
 	ctx := context.Background()
-	body, err := proto.Marshal(&pkindexpb.Manifest{CollectionId: 1, Vchannel: vch, Version: 5})
+	body, err := proto.Marshal(&pkindexpb.Manifest{CollectionId: 1, IndexId: 2, Vchannel: vch, Version: 5})
 	require.NoError(t, err)
-	bodyKey := pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, vch), 5, "x")
+	bodyKey := pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, 2, vch), 5, "x")
 	require.NoError(t, s.Write(ctx, bodyKey, body))
 	ptr, err := proto.Marshal(&pkindexpb.ManifestPointer{Version: 6, BodyKey: bodyKey})
 	require.NoError(t, err)
-	p.Put(PointerKey(1, vch), string(ptr))
+	p.Put(PointerKey(1, 2, vch), string(ptr))
 
-	_, _, err = get(ctx, m, 1, vch)
+	_, _, err = get(ctx, m, 1, 2, vch)
 	assert.True(t, errors.Is(err, pkindex.ErrCorrupted))
 	_, err = m.CommitFlush(ctx, flush(1, 5, 1))
 	assert.True(t, errors.Is(err, pkindex.ErrCorrupted))
@@ -468,34 +502,34 @@ func TestLoadErrors(t *testing.T) {
 	// a fresh manager has no cache, so every read goes to the stores
 	t.Run("pointer read fails", func(t *testing.T) {
 		p.LoadErr = errors.New("etcd down")
-		_, _, err := get(ctx, New(p, s, testRoot), 1, vch)
+		_, _, err := get(ctx, New(p, s, testRoot), 1, 2, vch)
 		assert.True(t, errors.Is(err, pkindex.ErrUnavailable))
 	})
 	t.Run("body read fails", func(t *testing.T) {
 		s.ReadErr = errors.New("s3 down")
-		_, _, err := get(ctx, New(p, s, testRoot), 1, vch)
+		_, _, err := get(ctx, New(p, s, testRoot), 1, 2, vch)
 		assert.True(t, errors.Is(err, pkindex.ErrUnavailable))
 		assert.False(t, errors.Is(err, pkindex.ErrCorrupted))
 	})
 	t.Run("body missing", func(t *testing.T) {
 		require.NoError(t, s.MultiRemove(ctx, bodyKeys(t, s)))
-		_, _, err := get(ctx, New(p, s, testRoot), 1, vch)
+		_, _, err := get(ctx, New(p, s, testRoot), 1, 2, vch)
 		assert.True(t, errors.Is(err, pkindex.ErrCorrupted))
 		assert.Equal(t, merr.Code(merr.ErrDataIntegrity), merr.Code(pkindex.ToMerr(err)), "a missing body is not retryable")
 	})
 	t.Run("pointer undecodable", func(t *testing.T) {
-		p.Put(PointerKey(1, vch), "\xff")
-		_, _, err := get(ctx, New(p, s, testRoot), 1, vch)
+		p.Put(PointerKey(1, 2, vch), "\xff")
+		_, _, err := get(ctx, New(p, s, testRoot), 1, 2, vch)
 		assert.True(t, errors.Is(err, pkindex.ErrCorrupted))
 	})
 	t.Run("pointer names no body", func(t *testing.T) {
-		zeroVersion, err := proto.Marshal(&pkindexpb.ManifestPointer{BodyKey: pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, vch), 1, "x")})
+		zeroVersion, err := proto.Marshal(&pkindexpb.ManifestPointer{BodyKey: pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, 2, vch), 1, "x")})
 		require.NoError(t, err)
 		for _, ptr := range []string{"", string(zeroVersion)} {
-			p.Put(PointerKey(1, vch), ptr)
+			p.Put(PointerKey(1, 2, vch), ptr)
 			// an object store rejects an empty key as a request error, not as a missing object
 			s.ReadErr = errors.New("object name cannot be empty")
-			_, _, err := get(ctx, New(p, s, testRoot), 1, vch)
+			_, _, err := get(ctx, New(p, s, testRoot), 1, 2, vch)
 			s.ReadErr = nil
 			assert.True(t, errors.Is(err, pkindex.ErrCorrupted), "pointer %q", ptr)
 			assert.False(t, errors.Is(err, pkindex.ErrUnavailable), "pointer %q", ptr)
@@ -509,7 +543,7 @@ func TestBodyWriteFails(t *testing.T) {
 	s.WriteErr = errors.New("s3 down")
 	_, err := m.CommitFlush(ctx, flush(1, 5, 1))
 	assert.True(t, errors.Is(err, pkindex.ErrUnavailable))
-	_, found, err := get(ctx, New(p, s, testRoot), 1, vch)
+	_, found, err := get(ctx, New(p, s, testRoot), 1, 2, vch)
 	require.NoError(t, err)
 	assert.False(t, found)
 }
@@ -532,7 +566,7 @@ func TestConcurrentEdits(t *testing.T) {
 		wg.Add(1)
 		go func(id int64) {
 			defer wg.Done()
-			_, err := m.CommitCompaction(ctx, 1, vch, Compaction{Inputs: []int64{id}, Outputs: []*pkindexpb.SSTRef{{Id: 1000 + id}}})
+			_, err := m.CommitCompaction(ctx, 1, 2, vch, Compaction{Inputs: []int64{id}, Outputs: []*pkindexpb.SSTRef{{Id: 1000 + id}}})
 			assert.NoError(t, err)
 		}(int64(i))
 	}
@@ -547,7 +581,7 @@ func TestConcurrentEdits(t *testing.T) {
 	}()
 	wg.Wait()
 
-	got, found, err := get(ctx, New(p, s, testRoot), 1, vch)
+	got, found, err := get(ctx, New(p, s, testRoot), 1, 2, vch)
 	require.NoError(t, err)
 	require.True(t, found)
 	// the first flush, then every concurrent edit
@@ -623,7 +657,7 @@ func TestTwoWriters(t *testing.T) {
 	}
 	wg.Wait()
 
-	got, found, err := get(ctx, New(p, s, testRoot), 1, vch)
+	got, found, err := get(ctx, New(p, s, testRoot), 1, 2, vch)
 	require.NoError(t, err)
 	require.True(t, found)
 
@@ -658,13 +692,13 @@ func TestLoadPointers(t *testing.T) {
 	targets := make([]Target, 0, n)
 	for i := 0; i < n; i++ {
 		v := fmt.Sprintf("%s_1v%d", pch, i)
-		targets = append(targets, Target{CollectionID: 1, VChannel: v})
+		targets = append(targets, Target{CollectionID: 1, IndexID: 2, VChannel: v})
 		if i%3 == 0 {
 			_, err := m.CommitFlush(ctx, flushOn(v, 1, 10, int64(i+1)))
 			require.NoError(t, err)
 		}
 	}
-	p.Put(PointerKey(1, targets[1].VChannel), "\xff")
+	p.Put(PointerKey(1, 2, targets[1].VChannel), "\xff")
 
 	results := m.LoadPointers(ctx, targets)
 	require.Len(t, results, n)
@@ -676,7 +710,7 @@ func TestLoadPointers(t *testing.T) {
 		case i%3 == 0:
 			require.NoError(t, r.Err, "target %d", i)
 			assert.EqualValues(t, 1, r.Pointer.GetVersion())
-			assert.Contains(t, r.Pointer.GetBodyKey(), pkindex.ManifestDir(testRoot, 1, targets[i].VChannel)+"/")
+			assert.Contains(t, r.Pointer.GetBodyKey(), pkindex.ManifestDir(testRoot, 1, 2, targets[i].VChannel)+"/")
 		default:
 			require.NoError(t, r.Err, "target %d", i)
 			assert.Nil(t, r.Pointer)
@@ -692,7 +726,7 @@ func TestLoadPointersReadFailure(t *testing.T) {
 	require.NoError(t, err)
 
 	p.MultiLoadErr = errors.New("etcd down")
-	results := m.LoadPointers(ctx, []Target{{CollectionID: 1, VChannel: vch}, {CollectionID: 1, VChannel: pch + "_1v9"}})
+	results := m.LoadPointers(ctx, []Target{{CollectionID: 1, IndexID: 2, VChannel: vch}, {CollectionID: 1, IndexID: 2, VChannel: pch + "_1v9"}})
 	for _, r := range results {
 		assert.True(t, errors.Is(r.Err, pkindex.ErrUnavailable))
 		assert.Nil(t, r.Pointer)
@@ -708,7 +742,7 @@ func TestLoadPointersIgnoresCache(t *testing.T) {
 	got, err := New(p, s, testRoot).CommitFlush(ctx, flush(1, 20, 2))
 	require.NoError(t, err)
 
-	results := a.LoadPointers(ctx, []Target{{CollectionID: 1, VChannel: vch}})
+	results := a.LoadPointers(ctx, []Target{{CollectionID: 1, IndexID: 2, VChannel: vch}})
 	require.NoError(t, results[0].Err)
 	assert.Equal(t, got.GetVersion(), results[0].Pointer.GetVersion())
 }
@@ -717,7 +751,7 @@ func TestLoadPointersIgnoresCache(t *testing.T) {
 // primary key.
 func editFlush(term int64, tick uint64, ids ...int64) *pkindexpb.CommitFlushRequest {
 	return &pkindexpb.CommitFlushRequest{
-		CollectionId: 1, Vchannel: "v",
+		CollectionId: 1, IndexId: 2, Vchannel: "v",
 		PchannelTerm: term, AddSsts: ssts(ids...), CheckpointTimeTick: tick,
 	}
 }
@@ -963,30 +997,35 @@ func TestFlushAndCompactCommute(t *testing.T) {
 }
 
 func TestKeys(t *testing.T) {
-	assert.Equal(t, "pkindex-meta/manifest/7/by-dev-dml_0_7v0", PointerKey(7, "by-dev-dml_0_7v0"))
-	assert.Equal(t, "files/pk_index/7/by-dev-dml_0_7v0/sst", pkindex.SSTBasePath("files", 7, "by-dev-dml_0_7v0"))
-	assert.Equal(t, "files/pk_index/7/by-dev-dml_0_7v0/sst/42.sst", pkindex.SSTKey("files/pk_index/7/by-dev-dml_0_7v0/sst", 42))
-	assert.Equal(t, "files/pk_index/7/by-dev-dml_0_7v0/manifest/3-abc.pb", pkindex.ManifestBodyKey(pkindex.ManifestDir("files", 7, "by-dev-dml_0_7v0"), 3, "abc"))
+	assert.Equal(t, "pkindex-meta/manifest/7/8/by-dev-dml_0_7v0", PointerKey(7, 8, "by-dev-dml_0_7v0"))
+	assert.Equal(t, "files/pk_index/7/8/by-dev-dml_0_7v0/sst", pkindex.SSTBasePath("files", 7, 8, "by-dev-dml_0_7v0"))
+	assert.Equal(t, "files/pk_index/7/8/by-dev-dml_0_7v0/sst/42.sst", pkindex.SSTKey("files/pk_index/7/8/by-dev-dml_0_7v0/sst", 42))
+	assert.Equal(t, "files/pk_index/7/8/by-dev-dml_0_7v0/manifest/3-abc.pb", pkindex.ManifestBodyKey(pkindex.ManifestDir("files", 7, 8, "by-dev-dml_0_7v0"), 3, "abc"))
 }
 
-func TestParsePointerKey(t *testing.T) {
-	coll, vch, ok := ParsePointerKey("pkindex-meta/manifest/7/by-dev-dml_0_7v0")
+func TestPointerKeyWithIndexID(t *testing.T) {
+	k := PointerKey(449, 451, "dml_0_449v0")
+	assert.Equal(t, "pkindex-meta/manifest/449/451/dml_0_449v0", k)
+	c, i, v, ok := ParsePointerKey(k)
 	assert.True(t, ok)
-	assert.EqualValues(t, 7, coll)
-	assert.Equal(t, "by-dev-dml_0_7v0", vch)
+	assert.Equal(t, []any{int64(449), int64(451), "dml_0_449v0"}, []any{c, i, v})
 	for _, bad := range []string{
-		"pkindex-meta/manifest/x/v",
-		"pkindex-meta/manifest/7/a/b",
-		"pkindex-meta/manifest/7/",
-		"pkindex-meta/manifest/7",
+		"pkindex-meta/manifest/449/dml_0_449v0",
+		"pkindex-meta/manifest/x/451/v",
+		"pkindex-meta/manifest/449/x/v",
+		"pkindex-meta/manifest/449/451/a/b",
+		"pkindex-meta/manifest/449/451/",
+		"pkindex-meta/manifest/449/451",
+		"pkindex-meta/manifest/449",
+		"other/449/451/v",
 	} {
-		_, _, ok = ParsePointerKey(bad)
+		_, _, _, ok = ParsePointerKey(bad)
 		assert.False(t, ok, bad)
 	}
 }
 
 func TestParseSSTKey(t *testing.T) {
-	base := "files/pk_index/7/v/sst"
+	base := "files/pk_index/7/8/v/sst"
 	id, ok := pkindex.ParseSSTKey(base, base+"/42.sst")
 	assert.True(t, ok)
 	assert.EqualValues(t, 42, id)
@@ -997,7 +1036,7 @@ func TestParseSSTKey(t *testing.T) {
 }
 
 func TestParseManifestBodyKey(t *testing.T) {
-	dir := pkindex.ManifestDir("files", 7, "v")
+	dir := pkindex.ManifestDir("files", 7, 8, "v")
 	v, ok := pkindex.ParseManifestBodyKey(dir, dir+"/12-abc.pb")
 	assert.True(t, ok)
 	assert.EqualValues(t, 12, v)

@@ -208,7 +208,7 @@ func (c *FakeCommitter) CommitFlush(ctx context.Context, args index.FlushArgs) (
 		c.commitErrs = c.commitErrs[1:]
 		return index.ManifestView{}, err
 	}
-	basePath := pkroot.SSTBasePath(fakeStorageRoot, args.CollectionID, args.VChannel)
+	basePath := pkroot.SSTBasePath(fakeStorageRoot, args.CollectionID, args.IndexID, args.VChannel)
 	next, changed, err := index.FakeFlush(c.manifests[args.VChannel], c.assignedTerm, args, basePath)
 	if err != nil {
 		c.applyErrs = append(c.applyErrs, err)

@@ -48,7 +48,7 @@ func newService() (*Service, *manifest.FakeMetaStore, *manifest.FakeObjectStore)
 
 func flushReq(vchannel string, term int64, sst int64, tick uint64) *pkindexpb.CommitFlushRequest {
 	return &pkindexpb.CommitFlushRequest{
-		CollectionId: 1, Vchannel: vchannel, PchannelTerm: term,
+		CollectionId: 1, IndexId: 2, Vchannel: vchannel, PchannelTerm: term,
 		AddSsts: []*pkindexpb.SSTRef{{Id: sst}}, CheckpointTimeTick: tick,
 	}
 }
@@ -56,7 +56,7 @@ func flushReq(vchannel string, term int64, sst int64, tick uint64) *pkindexpb.Co
 func getReq(vchannels ...string) *pkindexpb.GetRecoveryManifestsRequest {
 	req := &pkindexpb.GetRecoveryManifestsRequest{}
 	for _, v := range vchannels {
-		req.Targets = append(req.Targets, &pkindexpb.ManifestTarget{CollectionId: 1, Vchannel: v})
+		req.Targets = append(req.Targets, &pkindexpb.ManifestTarget{CollectionId: 1, IndexId: 2, Vchannel: v})
 	}
 	return req
 }
@@ -104,7 +104,7 @@ func TestFlow(t *testing.T) {
 	require.NoError(t, merr.Error(found.GetStatus()))
 	assert.True(t, found.GetFound())
 	assert.EqualValues(t, 1, found.GetPointer().GetVersion())
-	assert.Contains(t, found.GetPointer().GetBodyKey(), "files/pk_index/1/p_1v0/manifest/1-")
+	assert.Contains(t, found.GetPointer().GetBodyKey(), "files/pk_index/1/2/p_1v0/manifest/1-")
 	require.NoError(t, merr.Error(missing.GetStatus()))
 	assert.False(t, missing.GetFound())
 	assert.Nil(t, missing.GetPointer())
@@ -118,7 +118,7 @@ func TestRecoveryManifestsItemStatus(t *testing.T) {
 	p.AssignPChannel(pch, 1)
 	_, err := s.CommitFlush(ctx, flushReq(vch, 1, 1, 1))
 	require.NoError(t, err)
-	p.Put(manifest.PointerKey(1, "p_1v1"), "\xff")
+	p.Put(manifest.PointerKey(1, 2, "p_1v1"), "\xff")
 
 	get, err := s.GetRecoveryManifests(ctx, getReq("p_1v1", vch, "p_1v2"))
 	require.NoError(t, merr.CheckRPCCall(get, err))
@@ -255,7 +255,7 @@ func TestMissingBody(t *testing.T) {
 func TestEmptyPointer(t *testing.T) {
 	s, p, st := newService()
 	p.AssignPChannel(pch, 1)
-	p.Put(manifest.PointerKey(1, vch), "")
+	p.Put(manifest.PointerKey(1, 2, vch), "")
 	st.ReadErr = errors.New("object name cannot be empty")
 	flush, err := s.CommitFlush(context.Background(), flushReq(vch, 1, 1, 1))
 	require.NoError(t, err)
@@ -312,27 +312,31 @@ func TestInvalidTarget(t *testing.T) {
 	cases := []struct {
 		name         string
 		collectionID int64
+		indexID      int64
 		vchannel     string
 	}{
-		{"zero collection", 0, vch},
-		{"negative collection", -1, vch},
-		{"empty vchannel", 1, ""},
-		{"slash in vchannel", 1, "p_1v0/b"},
-		{"dot vchannel", 1, "."},
-		{"dot dot vchannel", 1, ".."},
-		{"leading slash in vchannel", 1, "/p_1v0"},
+		{"zero collection", 0, 2, vch},
+		{"negative collection", -1, 2, vch},
+		{"zero index", 1, 0, vch},
+		{"negative index", 1, -1, vch},
+		{"empty vchannel", 1, 2, ""},
+		{"slash in vchannel", 1, 2, "p_1v0/b"},
+		{"dot vchannel", 1, 2, "."},
+		{"dot dot vchannel", 1, 2, ".."},
+		{"leading slash in vchannel", 1, 2, "/p_1v0"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			req := flushReq(c.vchannel, 1, 1, 1)
 			req.CollectionId = c.collectionID
+			req.IndexId = c.indexID
 			flush, err := s.CommitFlush(ctx, req)
 			require.NoError(t, err)
 			assertCode(t, flush.GetStatus(), merr.Code(merr.ErrServiceInternal), false)
 
 			get, err := s.GetRecoveryManifests(ctx, &pkindexpb.GetRecoveryManifestsRequest{Targets: []*pkindexpb.ManifestTarget{
-				{CollectionId: 1, Vchannel: vch},
-				{CollectionId: c.collectionID, Vchannel: c.vchannel},
+				{CollectionId: 1, IndexId: 2, Vchannel: vch},
+				{CollectionId: c.collectionID, IndexId: c.indexID, Vchannel: c.vchannel},
 			}})
 			require.NoError(t, err)
 			assertCode(t, get.GetStatus(), merr.Code(merr.ErrServiceInternal), false)

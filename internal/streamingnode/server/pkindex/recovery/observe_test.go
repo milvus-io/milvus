@@ -638,7 +638,7 @@ func TestCloseWipesTheVChannelAfterACorruptedWrite(t *testing.T) {
 	rec := recoverV1WithFatal(t, env, func(err error) { fatals = append(fatals, err) })
 	require.NoError(t, rec.Run(ctx))
 	idx := env.Manager.GetForTest("p").IndexForTest("v1")
-	dir := index.Dir(env.Manager.Root(), "v1")
+	dir := index.Dir(env.Manager.Root(), "v1", idx.IndexID())
 	_, err := os.Stat(dir)
 	require.NoError(t, err)
 

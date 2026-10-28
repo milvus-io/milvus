@@ -106,7 +106,8 @@ func (r *registry) add(ctx context.Context, vchannel string, collectionID int64,
 	}
 	// The engine open does disk IO, so it runs outside mu. Writes of other
 	// vchannels keep reading the registry meanwhile.
-	_, created, err := r.ch.CreateCollection(ctx, vchannel, collectionID, pkField.GetDataType())
+	// TODO: open the index by the index ID of its enabling CreateIndex.
+	_, created, err := r.ch.CreateCollection(ctx, vchannel, collectionID, 0)
 	if err != nil {
 		return false, errors.Mark(errors.Wrapf(err, "create primary key index engine of vchannel %s", vchannel), errOpenIndex)
 	}

@@ -24,7 +24,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
@@ -141,8 +140,8 @@ func (c *PChannelIndexManager) start(driver bool) {
 	c.startDriver()
 }
 
-// CreateCollection opens the Index of a vchannel and returns it, with whether
-// this call opened it. It returns the existing Index and false when the Index
+// CreateCollection opens the Index of the index indexID on a vchannel and
+// returns it, with whether this call opened it. It returns the existing Index and false when the Index
 // exists, so a caller that rolls back after a failure removes only an Index
 // that it opened. It returns the error of the engine open.
 //
@@ -150,7 +149,7 @@ func (c *PChannelIndexManager) start(driver bool) {
 // it after the install of its committed table set. After Start, the Index is
 // ready at once: a collection created after the recovery has a new collection
 // ID in its vchannel name, so no manifest can exist for it.
-func (c *PChannelIndexManager) CreateCollection(ctx context.Context, vchannel string, collectionID int64, pkDataType schemapb.DataType) (*index.Index, bool, error) {
+func (c *PChannelIndexManager) CreateCollection(ctx context.Context, vchannel string, collectionID, indexID int64) (*index.Index, bool, error) {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, false, errClosed("pchannel " + c.info.Name)
 	}
@@ -161,7 +160,7 @@ func (c *PChannelIndexManager) CreateCollection(ctx context.Context, vchannel st
 	if idx := c.get(vchannel); idx != nil {
 		return idx, false, nil
 	}
-	idx, err := index.Open(ctx, c.indexConfig(vchannel, collectionID, pkDataType))
+	idx, err := index.Open(ctx, c.indexConfig(vchannel, collectionID, indexID))
 	if err != nil {
 		return nil, false, err
 	}
@@ -191,7 +190,7 @@ func (c *PChannelIndexManager) remove(ctx context.Context, vchannel string) {
 }
 
 // DropCollection closes the Index of a vchannel, then removes the local
-// directory of the vchannel. It removes the directory also when no Index is
+// directory of the vchannel, with the directories of all its indexes. It removes the directory also when no Index is
 // open. No open of the vchannel wipes the files later, because a vchannel name
 // embeds the id of its collection. It is also the rollback of a
 // CreateCollection whose append failed.
@@ -203,7 +202,7 @@ func (c *PChannelIndexManager) DropCollection(ctx context.Context, vchannel stri
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
 	c.closeIndex(ctx, vchannel)
-	dir := index.Dir(c.m.cfg.Root, vchannel)
+	dir := index.VChannelDir(c.m.cfg.Root, vchannel)
 	if err := os.RemoveAll(dir); err != nil {
 		return pkroot.MarkIO(err, "remove dir %s", dir)
 	}
@@ -245,12 +244,12 @@ func (c *PChannelIndexManager) detachLocked(idx *index.Index) {
 }
 
 // indexConfig is what an Index of this PChannelIndexManager needs, see index.Config.
-func (c *PChannelIndexManager) indexConfig(vchannel string, collectionID int64, pkDataType schemapb.DataType) index.Config {
+func (c *PChannelIndexManager) indexConfig(vchannel string, collectionID, indexID int64) index.Config {
 	cfg := c.m.cfg
 	return index.Config{
 		VChannel:        vchannel,
 		CollectionID:    collectionID,
-		PKDataType:      pkDataType,
+		IndexID:         indexID,
 		Term:            c.info.Term,
 		Ctx:             c.ctx,
 		Logger:          c.logger,

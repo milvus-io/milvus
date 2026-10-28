@@ -27,12 +27,12 @@ Explore is a separate layout: local temporary manifests live under
 - Writers use shared layout helpers: `storage.SegmentManifestBasePath`,
   `SegmentPartitionBasePath`, and the binlog/index helpers in `metautil`.
 - Primary key index objects live under
-  `minio.rootPath/pk_index/<collectionID>/<vchannel>/`: manifest bodies in
+  `minio.rootPath/pk_index/<collectionID>/<indexID>/<vchannel>/`: manifest bodies in
   `manifest/<version>-<uuid>.pb` and SSTs in `sst/<id>.sst`. All writers, the
   manifest service and its GC build these keys with
   `internal/pkindex/objpath.go`. `pk_index` is `common.PKIndexPath` and is
   listed in `InternalStorageRootSegments`. The manifest pointers are meta kv
-  keys under `pkindex-meta/manifest/`, built by
+  keys `pkindex-meta/manifest/<collectionID>/<indexID>/<vchannel>`, built by
   `internal/datacoord/pkindex/manifest`. A flush also reads the streaming
   coordinator key `streamingcoord-meta/pchannel/<pchannel>`, built by
   `BuildPChannelInfoPath` in `internal/metastore/kv/streamingcoord`.
@@ -138,11 +138,13 @@ directory from the output manifest base.
 - Therefore an uncommitted stats file inside a live V3 segment is not guaranteed
   to be reclaimed by DataCoord's orphan scan.
 - Primary key index: only the GC in `internal/datacoord/pkindex/gc` deletes
-  under `pk_index/`. It finds a vchannel only through its manifest pointer,
+  under `pk_index/`. It finds an index on a vchannel only through its
+  manifest pointer,
   and keeps the manifest bodies of the retention and the SSTs that they
   reference. The other orphan scans do not enter `pk_index/`. Nothing deletes
-  a `pk_index/<collectionID>/` prefix after a collection drop, or the objects
-  of a vchannel whose first manifest commit never succeeded.
+  a `pk_index/<collectionID>/<indexID>/` prefix after an index or collection
+  drop, or the objects of a vchannel whose first manifest commit never
+  succeeded.
 - Legacy `R/M/insert_log` orphan/LOB layouts and old Explore temporary paths
   have separate cleanup gaps. Do not claim this PR repairs all such leftovers.
   Startup cannot recover indexes hidden with an old container's CWD.

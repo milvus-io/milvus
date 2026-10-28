@@ -62,8 +62,8 @@ func TestLeftoverInCommittedOnlyIsKeptAtOpen(t *testing.T) {
 	ctx := context.Background()
 	idx := openTestIndex(t)
 	idx.Close(ctx)
-	require.NoError(t, os.RemoveAll(Dir(idx.root, testVChannel)))
-	committed := filepath.Join(Dir(idx.root, testVChannel), "committed")
+	require.NoError(t, os.RemoveAll(Dir(idx.root, testVChannel, testIndexID)))
+	committed := filepath.Join(Dir(idx.root, testVChannel, testIndexID), "committed")
 	require.NoError(t, os.MkdirAll(committed, 0o755))
 	leftover := filepath.Join(committed, "1001.sst.download-123")
 	require.NoError(t, os.WriteFile(leftover, []byte("partial"), 0o600))
@@ -84,7 +84,7 @@ func TestOpenKeepsCommittedDirAndWipesEngineDir(t *testing.T) {
 	kept := filepath.Join(idx.committedDir, "7.sst")
 	require.NoError(t, os.WriteFile(kept, []byte("table"), 0o600))
 	idx.insert(t, 1, 5)
-	engineDir := filepath.Join(Dir(idx.root, testVChannel), "engine")
+	engineDir := filepath.Join(Dir(idx.root, testVChannel, testIndexID), "engine")
 	idx.Close(ctx) // keeps the files, like a restart
 	require.DirExists(t, engineDir)
 

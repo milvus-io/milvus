@@ -60,13 +60,13 @@ type Config struct {
 	RetainDuration time.Duration
 }
 
-// InFlightOutputs returns the SST IDs that running compactions of a vchannel
-// may still commit. It must list an output from before its upload until its
+// InFlightOutputs returns the SST IDs that running compactions of an index on
+// a vchannel may still commit. It must list an output from before its upload until its
 // commit takes effect or its task is abandoned for good. A nil function means
 // that no compaction runs.
-type InFlightOutputs func(ctx context.Context, collectionID int64, vchannel string) ([]int64, error)
+type InFlightOutputs func(ctx context.Context, collectionID, indexID int64, vchannel string) ([]int64, error)
 
-// GC deletes, for each vchannel that has a manifest pointer, the manifest
+// GC deletes, for each index on a vchannel that has a manifest pointer, the manifest
 // bodies outside the retention and the SSTs that no retained body references.
 // It reads the current version from the meta store, never from a cache.
 type GC struct {
@@ -136,30 +136,30 @@ func (g *GC) RunOnce(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		collectionID, vchannel, ok := manifest.ParsePointerKey(key)
+		collectionID, indexID, vchannel, ok := manifest.ParsePointerKey(key)
 		if !ok {
 			continue
 		}
-		if err := g.runVChannel(ctx, collectionID, vchannel); err != nil {
+		if err := g.runVChannel(ctx, collectionID, indexID, vchannel); err != nil {
 			mlog.Warn(ctx, "pkindex gc of vchannel failed",
-				mlog.FieldCollectionID(collectionID), mlog.FieldVChannel(vchannel), mlog.Err(err))
+				mlog.FieldCollectionID(collectionID), mlog.Int64("indexID", indexID), mlog.FieldVChannel(vchannel), mlog.Err(err))
 		}
 	}
 	return nil
 }
 
-// runVChannel collects one vchannel. It reads the in-flight compaction
+// runVChannel collects one index on one vchannel. It reads the in-flight compaction
 // outputs, then the pointer and the current body, then the other manifest
 // bodies, then the SSTs. It deletes nothing when the current body key is not
-// directly under the manifest dir of the vchannel or the current
-// sst_base_path is not the SST base path of the vchannel (see pkindex.SSTBasePath). It
+// directly under the manifest dir of the index on the vchannel or the current
+// sst_base_path is not its SST base path (see pkindex.SSTBasePath). It
 // deletes the bodies outside the retention, and, when every
 // retained body could be read, the SSTs older than Grace that are neither
 // referenced by a retained body nor an in-flight output.
-func (g *GC) runVChannel(ctx context.Context, collectionID int64, vchannel string) error {
+func (g *GC) runVChannel(ctx context.Context, collectionID, indexID int64, vchannel string) error {
 	live := map[int64]struct{}{}
 	if g.inFlight != nil {
-		outputs, err := g.inFlight(ctx, collectionID, vchannel)
+		outputs, err := g.inFlight(ctx, collectionID, indexID, vchannel)
 		if err != nil {
 			return markUnavailable(err, "read in-flight compaction outputs of %s", vchannel)
 		}
@@ -167,14 +167,14 @@ func (g *GC) runVChannel(ctx context.Context, collectionID int64, vchannel strin
 			live[id] = struct{}{}
 		}
 	}
-	cur, curKey, err := g.current(ctx, collectionID, vchannel)
+	cur, curKey, err := g.current(ctx, collectionID, indexID, vchannel)
 	if err != nil || cur == nil {
 		return err
 	}
-	dir := pkindex.ManifestDir(g.rootPath, collectionID, vchannel)
-	if _, ok := pkindex.ParseManifestBodyKey(dir, curKey); !ok || cur.GetSstBasePath() != pkindex.SSTBasePath(g.rootPath, collectionID, vchannel) {
+	dir := pkindex.ManifestDir(g.rootPath, collectionID, indexID, vchannel)
+	if _, ok := pkindex.ParseManifestBodyKey(dir, curKey); !ok || cur.GetSstBasePath() != pkindex.SSTBasePath(g.rootPath, collectionID, indexID, vchannel) {
 		mlog.Warn(ctx, "pkindex gc skips vchannel whose manifest does not match the layout",
-			mlog.FieldCollectionID(collectionID), mlog.FieldVChannel(vchannel),
+			mlog.FieldCollectionID(collectionID), mlog.Int64("indexID", indexID), mlog.FieldVChannel(vchannel),
 			mlog.String("bodyKey", curKey), mlog.String("sstBasePath", cur.GetSstBasePath()))
 		return nil
 	}
@@ -210,7 +210,7 @@ func (g *GC) runVChannel(ctx context.Context, collectionID int64, vchannel strin
 	if err := g.addRetainedSSTs(ctx, live, kept); err != nil {
 		// the live set is incomplete: delete no SST of this vchannel
 		mlog.Warn(ctx, "pkindex gc skips the sst sweep of vchannel",
-			mlog.FieldCollectionID(collectionID), mlog.FieldVChannel(vchannel), mlog.Err(err))
+			mlog.FieldCollectionID(collectionID), mlog.Int64("indexID", indexID), mlog.FieldVChannel(vchannel), mlog.Err(err))
 	} else {
 		base := cur.GetSstBasePath()
 		err = g.store.Walk(ctx, base+"/", func(key string, mod time.Time) bool {
@@ -235,16 +235,16 @@ func (g *GC) runVChannel(ctx context.Context, collectionID int64, vchannel strin
 		return markUnavailable(err, "remove %d objects of %s", len(drop), vchannel)
 	}
 	mlog.Info(ctx, "pkindex gc removed objects",
-		mlog.FieldCollectionID(collectionID), mlog.FieldVChannel(vchannel),
+		mlog.FieldCollectionID(collectionID), mlog.Int64("indexID", indexID), mlog.FieldVChannel(vchannel),
 		mlog.Int64("currentVersion", cur.GetVersion()),
 		mlog.Int("bodies", bodies), mlog.Int("ssts", len(drop)-bodies))
 	return nil
 }
 
-// current reads the pointer of a vchannel and the body it names. It returns
+// current reads the pointer of an index on a vchannel and the body it names. It returns
 // nil when the vchannel has no pointer.
-func (g *GC) current(ctx context.Context, collectionID int64, vchannel string) (*pkindexpb.Manifest, string, error) {
-	key := manifest.PointerKey(collectionID, vchannel)
+func (g *GC) current(ctx context.Context, collectionID, indexID int64, vchannel string) (*pkindexpb.Manifest, string, error) {
+	key := manifest.PointerKey(collectionID, indexID, vchannel)
 	value, found, err := g.meta.Load(ctx, key)
 	if err != nil {
 		return nil, "", markUnavailable(err, "load manifest pointer %s", key)

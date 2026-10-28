@@ -50,7 +50,7 @@ func (r *Recovery) lookupManifests(ctx context.Context, committer pkindex.Commit
 
 	refs := make([]pkindex.VChannelRef, 0, len(r.targets))
 	for vchannel, t := range r.targets {
-		refs = append(refs, pkindex.VChannelRef{CollectionID: t.idx.CollectionID(), VChannel: vchannel})
+		refs = append(refs, pkindex.VChannelRef{CollectionID: t.idx.CollectionID(), IndexID: t.idx.IndexID(), VChannel: vchannel})
 	}
 	found := make(map[string]pkindex.RecoveryManifest)
 	for start := 0; start < len(refs); start += manifestLookupBatch {

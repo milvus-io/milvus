@@ -20,11 +20,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
@@ -41,7 +41,7 @@ type Index struct {
 	cfg          Config
 	vchannel     string
 	collectionID int64
-	pkDataType   schemapb.DataType
+	indexID      int64
 	committedDir string
 	eng          *engine.Engine
 	auth         dedup.Decider
@@ -95,7 +95,9 @@ type Params struct {
 type Config struct {
 	VChannel     string
 	CollectionID int64
-	PKDataType   schemapb.DataType
+	// IndexID is the ID of the primary key index. It names the local
+	// directory and the object keys of the Index.
+	IndexID int64
 	// Term is the term of the pchannel, sent with every flush.
 	Term int64
 	// Ctx ends when the Channel closes. The Index derives its own from it.
@@ -136,7 +138,7 @@ type Config struct {
 // restart does not download the tables it already has.
 func Open(ctx context.Context, cfg Config) (*Index, error) {
 	params := cfg.Params()
-	dir := Dir(cfg.Root, cfg.VChannel)
+	dir := Dir(cfg.Root, cfg.VChannel, cfg.IndexID)
 	// engine.Destroy removes the engine dir, so the committed tables live outside it
 	engineDir := filepath.Join(dir, "engine")
 	committedDir := filepath.Join(dir, "committed")
@@ -166,15 +168,15 @@ func Open(ctx context.Context, cfg Config) (*Index, error) {
 		cfg:          cfg,
 		vchannel:     cfg.VChannel,
 		collectionID: cfg.CollectionID,
-		pkDataType:   cfg.PKDataType,
+		indexID:      cfg.IndexID,
 		committedDir: committedDir,
 		eng:          eng,
-		logger:       cfg.Logger.With(mlog.FieldVChannel(cfg.VChannel), mlog.FieldCollectionID(cfg.CollectionID)),
+		logger:       cfg.Logger.With(mlog.FieldVChannel(cfg.VChannel), mlog.FieldCollectionID(cfg.CollectionID), mlog.Int64("indexID", cfg.IndexID)),
 		ctx:          idxCtx,
 		cancel:       cancel,
 		lifetime:     typeutil.NewLifetime(),
 		ready:        make(chan struct{}),
-		sstBasePath:  pkroot.SSTBasePath(cfg.StorageRootPath, cfg.CollectionID, cfg.VChannel),
+		sstBasePath:  pkroot.SSTBasePath(cfg.StorageRootPath, cfg.CollectionID, cfg.IndexID, cfg.VChannel),
 	}
 	// the decider only reads the engine: the observe of the WAL recovery
 	// writes it, through Apply
@@ -188,6 +190,9 @@ func (idx *Index) VChannel() string { return idx.vchannel }
 // CollectionID returns the collection of the Index.
 func (idx *Index) CollectionID() int64 { return idx.collectionID }
 
+// IndexID returns the ID of the primary key index of the Index.
+func (idx *Index) IndexID() int64 { return idx.indexID }
+
 // Logger returns the logger of the Index, with its vchannel and collection.
 func (idx *Index) Logger() *mlog.Logger { return idx.logger }
 
@@ -198,10 +203,15 @@ func (idx *Index) HasPending() bool { return idx.pending.Load() != nil }
 // holds, the size that triggers a handover.
 func (idx *Index) ActiveBytes() uint64 { return idx.eng.Stats().ActiveBytes }
 
-// Dir is the local directory of the Index of a vchannel under root. It holds
-// the engine directory and the committed directory.
-func Dir(root, vchannel string) string {
+// VChannelDir is the local directory of all Indexes of a vchannel under root.
+func VChannelDir(root, vchannel string) string {
 	return filepath.Join(root, vchannel)
+}
+
+// Dir is the local directory of the Index of the index indexID on a vchannel
+// under root. It holds the engine directory and the committed directory.
+func Dir(root, vchannel string, indexID int64) string {
+	return filepath.Join(VChannelDir(root, vchannel), strconv.FormatInt(indexID, 10))
 }
 
 // hasLeftover reports whether any of dirs exists and is not empty.

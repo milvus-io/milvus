@@ -27,11 +27,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
 
 // TestIndexCreatedBeforeStartWaitsForTheRecovery checks that an Index opened
@@ -49,7 +49,7 @@ func TestIndexCreatedBeforeStartWaitsForTheRecovery(t *testing.T) {
 
 	ch.start(false)
 	assert.False(t, v0.Ready(), "Start does not mark an existing Index, the recovery does")
-	v1, created, err := ch.CreateCollection(context.Background(), "v1", testCollectionID, schemapb.DataType_Int64)
+	v1, created, err := ch.CreateCollection(context.Background(), "v1", testCollectionID, testIndexID)
 	require.NoError(t, err)
 	require.True(t, created)
 	assert.True(t, v1.Ready(), "a collection created after Start is ready at once")
@@ -66,7 +66,7 @@ func TestAddOfAnExistingIndexReportsNotCreated(t *testing.T) {
 	idx := env.add(ch, "v0")
 	insert(t, ch, idx, 10, 1)
 
-	_, created, err := ch.CreateCollection(context.Background(), "v0", testCollectionID, schemapb.DataType_Int64)
+	_, created, err := ch.CreateCollection(context.Background(), "v0", testCollectionID, testIndexID)
 	require.NoError(t, err)
 	assert.False(t, created, "a caller that rolls back must not remove the Index in use")
 	assert.Same(t, idx, ch.get("v0"))
@@ -144,7 +144,7 @@ func TestClosedChannelAndIndex(t *testing.T) {
 	idx := env.add(ch, "v0")
 	ch.Close()
 
-	_, _, err := ch.CreateCollection(context.Background(), "v1", testCollectionID, schemapb.DataType_Int64)
+	_, _, err := ch.CreateCollection(context.Background(), "v1", testCollectionID, testIndexID)
 	assert.True(t, errors.Is(err, engine.ErrClosed))
 	_, err = idx.Decider().Decide(context.Background(), insertRequest(idx, 1))
 	assert.True(t, errors.Is(err, engine.ErrClosed))
@@ -159,7 +159,7 @@ func TestManagerCloseClosesChannels(t *testing.T) {
 	env.mgr.Close()
 	assert.Nil(t, ch.get("v0"))
 	closed := env.channel(0)
-	_, _, err := closed.CreateCollection(context.Background(), "v0", testCollectionID, schemapb.DataType_Int64)
+	_, _, err := closed.CreateCollection(context.Background(), "v0", testCollectionID, testIndexID)
 	assert.True(t, errors.Is(err, engine.ErrClosed))
 }
 
@@ -298,3 +298,28 @@ func refNames(refs []VChannelRef) []string {
 	}
 	return out
 }
+
+// TestIndexesOfOneVChannelUseSeparateDirs checks that the local directory
+// and the object keys of an Index carry its index ID.
+func TestIndexesOfOneVChannelUseSeparateDirs(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	env := NewFakeEnv(t, root)
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	idx, _, err := c.CreateCollection(ctx, "v1", 1, 7)
+	require.NoError(t, err)
+	assert.EqualValues(t, 7, idx.IndexID())
+	assert.Equal(t, "root/pk_index/1/7/v1/sst", idx.SSTBasePathForTest())
+	assert.DirExists(t, filepath.Join(index.Dir(root, "v1", 7), "engine"))
+	require.NoError(t, c.DropCollection(ctx, "v1"))
+	assert.NoDirExists(t, index.VChannelDir(root, "v1"))
+
+	idx, _, err = c.CreateCollection(ctx, "v1", 1, 8)
+	require.NoError(t, err)
+	assert.Equal(t, "root/pk_index/1/8/v1/sst", idx.SSTBasePathForTest())
+	assert.DirExists(t, filepath.Join(index.Dir(root, "v1", 8), "engine"))
+	assert.NoDirExists(t, index.Dir(root, "v1", 7))
+	assert.NotEqual(t, index.Dir(root, "v1", 7), index.Dir(root, "v1", 8))
+	c.Close()
+}
+

@@ -73,7 +73,11 @@ func (r *Recovery) ObserveMessage(ctx context.Context, msg message.ImmutableMess
 func (r *Recovery) fail(ctx context.Context, msg message.ImmutableMessage, err error) {
 	class := errorClass(err)
 	if errors.Is(err, pkroot.ErrCorrupted) {
-		r.wipe[msg.VChannel()] = struct{}{}
+		dir := index.VChannelDir(r.mgr.Root(), msg.VChannel())
+		if t, ok := r.targets[msg.VChannel()]; ok {
+			dir = index.Dir(r.mgr.Root(), msg.VChannel(), t.idx.IndexID())
+		}
+		r.wipe[msg.VChannel()] = dir
 	}
 	wrapped := errors.Wrapf(err, "apply %s of vchannel %s to the primary key index", msg.MessageType(), msg.VChannel())
 	if !r.finished {

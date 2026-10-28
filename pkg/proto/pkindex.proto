@@ -6,7 +6,7 @@ option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb";
 
 import "common.proto";
 
-// Manifest is the durable state of the primary key index of one vchannel.
+// Manifest is the durable state of one primary key index on one vchannel.
 // The body is stored in object storage. etcd stores only a ManifestPointer.
 message Manifest {
   int64 collection_id = 1;
@@ -25,6 +25,8 @@ message Manifest {
   // Complete object key prefix of the SST files. The object key of an SST
   // is <sst_base_path>/<id>.sst.
   string sst_base_path = 7;
+  // The ID of the primary key index.
+  int64 index_id = 8;
 }
 
 // SSTRef describes one SST. The fields mirror the engine's sst.Info.
@@ -38,7 +40,7 @@ message SSTRef {
   int64 num_entries = 6;
 }
 
-// ManifestPointer is the etcd value of one vchannel.
+// ManifestPointer is the etcd value of one primary key index on one vchannel.
 message ManifestPointer {
   int64 version = 1;
   // Complete object key of the Manifest body.
@@ -53,6 +55,8 @@ message CommitFlushRequest {
   // Newest first.
   repeated SSTRef add_ssts = 4;
   uint64 checkpoint_time_tick = 5;
+  // The ID of the primary key index.
+  int64 index_id = 6;
 }
 
 message CommitFlushResponse {
@@ -61,10 +65,12 @@ message CommitFlushResponse {
   Manifest manifest = 2;
 }
 
-// ManifestTarget names the manifest of one vchannel.
+// ManifestTarget names the manifest of one primary key index on one vchannel.
 message ManifestTarget {
   int64 collection_id = 1;
   string vchannel = 2;
+  // The ID of the primary key index.
+  int64 index_id = 3;
 }
 
 message GetRecoveryManifestsRequest {

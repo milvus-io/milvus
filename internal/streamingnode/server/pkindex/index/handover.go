@@ -101,9 +101,9 @@ func (idx *Index) prepare(ctx context.Context) (*pendingHandover, error) {
 	if len(refs) > 0 {
 		p.request = &FlushArgs{
 			CollectionID:       idx.collectionID,
+			IndexID:            idx.indexID,
 			VChannel:           idx.vchannel,
 			PChannelTerm:       idx.cfg.Term,
-			PKDataType:         idx.pkDataType,
 			AddTables:          refs,
 			CheckpointTimeTick: covered,
 		}

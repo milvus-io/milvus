@@ -129,34 +129,36 @@ func New(meta MetaStore, store ObjectStore, rootPath string) *Manager {
 }
 
 // CommitFlush applies a flush (see applyFlush) and returns the resulting
-// version. The pchannel of the flush is the pchannel of the vchannel name.
+// version. The flush names the index by its collection ID, index ID and
+// vchannel. The pchannel of the flush is the pchannel of the vchannel name.
 // The flush term must equal the term of the streamingcoord pchannel meta of
 // that pchannel (see checkPChannelTerm), and the pointer write has the
 // predicate that the pchannel meta has not changed since the check. The first
-// version of a vchannel gets the SST base path of the vchannel under the root
-// path.
+// version of an index on a vchannel gets the SST base path of the index on
+// the vchannel under the root path.
 func (m *Manager) CommitFlush(ctx context.Context, req *pkindexpb.CommitFlushRequest) (*pkindexpb.Manifest, error) {
 	pchannelPred, err := checkPChannelTerm(ctx, m.meta, funcutil.ToPhysicalChannel(req.GetVchannel()), req.GetPchannelTerm())
 	if err != nil {
 		return nil, err
 	}
-	sstBasePath := pkindex.SSTBasePath(m.rootPath, req.GetCollectionId(), req.GetVchannel())
-	return m.commit(ctx, req.GetCollectionId(), req.GetVchannel(), []predicates.Predicate{pchannelPred}, func(cur *pkindexpb.Manifest) (*pkindexpb.Manifest, error) {
+	sstBasePath := pkindex.SSTBasePath(m.rootPath, req.GetCollectionId(), req.GetIndexId(), req.GetVchannel())
+	return m.commit(ctx, req.GetCollectionId(), req.GetIndexId(), req.GetVchannel(), []predicates.Predicate{pchannelPred}, func(cur *pkindexpb.Manifest) (*pkindexpb.Manifest, error) {
 		return applyFlush(cur, req, sstBasePath)
 	})
 }
 
 // CommitCompaction applies a compaction (see applyCompaction) and returns the
 // resulting version.
-func (m *Manager) CommitCompaction(ctx context.Context, collectionID int64, vchannel string, c Compaction) (*pkindexpb.Manifest, error) {
-	return m.commit(ctx, collectionID, vchannel, nil, func(cur *pkindexpb.Manifest) (*pkindexpb.Manifest, error) {
+func (m *Manager) CommitCompaction(ctx context.Context, collectionID, indexID int64, vchannel string, c Compaction) (*pkindexpb.Manifest, error) {
+	return m.commit(ctx, collectionID, indexID, vchannel, nil, func(cur *pkindexpb.Manifest) (*pkindexpb.Manifest, error) {
 		return applyCompaction(cur, c)
 	})
 }
 
-// Target names the manifest of one vchannel.
+// Target names the manifest of one index on one vchannel.
 type Target struct {
 	CollectionID int64
+	IndexID      int64
 	VChannel     string
 }
 
@@ -173,7 +175,7 @@ type PointerResult struct {
 func (m *Manager) LoadPointers(ctx context.Context, targets []Target) []PointerResult {
 	keys := make([]string, 0, len(targets))
 	for _, t := range targets {
-		keys = append(keys, PointerKey(t.CollectionID, t.VChannel))
+		keys = append(keys, PointerKey(t.CollectionID, t.IndexID, t.VChannel))
 	}
 	values, found, err := m.meta.MultiLoad(ctx, keys)
 	if err == nil && (len(values) != len(keys) || len(found) != len(keys)) {
@@ -192,16 +194,16 @@ func (m *Manager) LoadPointers(ctx context.Context, targets []Target) []PointerR
 	return results
 }
 
-// commit applies one edit to the current version of a vchannel. apply returns
+// commit applies one edit to the current version of an index on a vchannel. apply returns
 // the new version, or nil when the edit does not change the manifest. When the
 // edit changes the manifest, commit writes the new body under a unique key, then
 // writes the pointer on the predicate that the stored pointer is still the
 // one it loaded, or does not exist for the first version. The same write also
 // requires preds; it does not write their keys.
-func (m *Manager) commit(ctx context.Context, collectionID int64, vchannel string, preds []predicates.Predicate,
+func (m *Manager) commit(ctx context.Context, collectionID, indexID int64, vchannel string, preds []predicates.Predicate,
 	apply func(cur *pkindexpb.Manifest) (*pkindexpb.Manifest, error),
 ) (*pkindexpb.Manifest, error) {
-	key := PointerKey(collectionID, vchannel)
+	key := PointerKey(collectionID, indexID, vchannel)
 	m.locks.Lock(key)
 	defer m.locks.Unlock(key)
 
@@ -221,7 +223,7 @@ func (m *Manager) commit(ctx context.Context, collectionID int64, vchannel strin
 		return curManifest, nil
 	}
 
-	bodyKey := pkindex.ManifestBodyKey(pkindex.ManifestDir(m.rootPath, collectionID, vchannel), next.GetVersion(), uuid.NewString())
+	bodyKey := pkindex.ManifestBodyKey(pkindex.ManifestDir(m.rootPath, collectionID, indexID, vchannel), next.GetVersion(), uuid.NewString())
 	body, err := marshal.Marshal(next)
 	if err != nil {
 		return nil, errors.Wrapf(err, "marshal manifest of %s", vchannel)
@@ -344,7 +346,8 @@ type Compaction struct {
 
 // applyFlush applies a flush to cur, which is nil when the vchannel has no
 // manifest; then the flush applies to an empty manifest of version 0 that
-// takes the collection and vchannel from the flush and sstBasePath. It returns
+// takes the collection, the index and the vchannel from the flush and
+// sstBasePath. It returns
 // a new version when the checkpoint moves forward: the new SSTs go in front of
 // the SST list, the checkpoint is raised, and the flush term becomes the last
 // flush term. A flush with no SSTs only moves the
@@ -361,6 +364,7 @@ func applyFlush(cur *pkindexpb.Manifest, req *pkindexpb.CommitFlushRequest, sstB
 	if base == nil {
 		base = &pkindexpb.Manifest{
 			CollectionId: req.GetCollectionId(),
+			IndexId:      req.GetIndexId(),
 			Vchannel:     req.GetVchannel(),
 			SstBasePath:  sstBasePath,
 		}

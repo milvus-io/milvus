@@ -44,6 +44,7 @@ func TestRegisterPKIndexCoordGRPCServiceBeforeActivation(t *testing.T) {
 
 	resp, err := core.pkindexService.CommitFlush(context.Background(), &pkindexpb.CommitFlushRequest{
 		CollectionId:       1,
+		IndexId:            2,
 		Vchannel:           "by-dev-rootcoord-dml_0_1v0",
 		PchannelTerm:       1,
 		CheckpointTimeTick: 1,

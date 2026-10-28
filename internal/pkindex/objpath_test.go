@@ -23,8 +23,8 @@ import (
 )
 
 func TestSSTKey(t *testing.T) {
-	base := SSTBasePath("files", 100, "by-dev-rootcoord-dml_0_100v0")
-	assert.Equal(t, "files/pk_index/100/by-dev-rootcoord-dml_0_100v0/sst", base)
+	base := SSTBasePath("files", 100, 101, "by-dev-rootcoord-dml_0_100v0")
+	assert.Equal(t, "files/pk_index/100/101/by-dev-rootcoord-dml_0_100v0/sst", base)
 	key := SSTKey(base, 42)
 	assert.Equal(t, base+"/42.sst", key)
 
@@ -39,8 +39,8 @@ func TestSSTKey(t *testing.T) {
 }
 
 func TestManifestBodyKey(t *testing.T) {
-	dir := ManifestDir("files", 100, "by-dev-rootcoord-dml_0_100v0")
-	assert.Equal(t, "files/pk_index/100/by-dev-rootcoord-dml_0_100v0/manifest", dir)
+	dir := ManifestDir("files", 100, 101, "by-dev-rootcoord-dml_0_100v0")
+	assert.Equal(t, "files/pk_index/100/101/by-dev-rootcoord-dml_0_100v0/manifest", dir)
 	key := ManifestBodyKey(dir, 7, "uuid")
 	assert.Equal(t, dir+"/7-uuid.pb", key)
 
@@ -50,6 +50,28 @@ func TestManifestBodyKey(t *testing.T) {
 
 	for _, bad := range []string{dir + "/7.pb", dir + "/7-.pb", dir + "/x-uuid.pb", dir + "/a/7-uuid.pb", dir + "/7-uuid.sst"} {
 		_, ok := ParseManifestBodyKey(dir, bad)
+		assert.False(t, ok, bad)
+	}
+}
+
+func TestObjectKeysWithIndexID(t *testing.T) {
+	base := SSTBasePath("files", 449, 451, "dml_0_449v0")
+	assert.Equal(t, "files/pk_index/449/451/dml_0_449v0/sst", base)
+	assert.Equal(t, "files/pk_index/449/451/dml_0_449v0/manifest", ManifestDir("files", 449, 451, "dml_0_449v0"))
+	assert.Equal(t, "files/pk_index/449", CollectionDir("files", 449))
+	assert.Equal(t, "files/pk_index/449/451", IndexDir("files", 449, 451))
+
+	for _, key := range []string{"files/pk_index/449/451/", "files/pk_index/449/451"} {
+		coll, idx, ok := ParseIndexDir("files", key)
+		assert.True(t, ok, key)
+		assert.Equal(t, int64(449), coll)
+		assert.Equal(t, int64(451), idx)
+	}
+	for _, bad := range []string{
+		"files/pk_index/449/", "files/pk_index/449/451/v0/", "files/pk_index/x/451/",
+		"files/pk_index/449/x/", "other/pk_index/449/451/", "files/pk_index//451/",
+	} {
+		_, _, ok := ParseIndexDir("files", bad)
 		assert.False(t, ok, bad)
 	}
 }

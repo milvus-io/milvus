@@ -26,7 +26,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
@@ -37,6 +36,7 @@ import (
 const (
 	testVChannel     = "v0"
 	testCollectionID = int64(100)
+	testIndexID      = int64(101)
 	testTerm         = int64(3)
 	testStorageRoot  = "root"
 )
@@ -70,7 +70,7 @@ func (c *fakeCommitter) CommitFlush(ctx context.Context, args FlushArgs) (Manife
 		c.commitErrs = c.commitErrs[1:]
 		return ManifestView{}, err
 	}
-	next, changed, err := FakeFlush(c.cur, testTerm, args, pkroot.SSTBasePath(testStorageRoot, args.CollectionID, args.VChannel))
+	next, changed, err := FakeFlush(c.cur, testTerm, args, pkroot.SSTBasePath(testStorageRoot, args.CollectionID, args.IndexID, args.VChannel))
 	if err != nil {
 		return ManifestView{}, err
 	}
@@ -188,7 +188,7 @@ func (ti *testIndex) open(t *testing.T) {
 	idx, err := Open(context.Background(), Config{
 		VChannel:        testVChannel,
 		CollectionID:    testCollectionID,
-		PKDataType:      schemapb.DataType_Int64,
+		IndexID:         testIndexID,
 		Term:            testTerm,
 		Ctx:             context.Background(),
 		Logger:          mlog.With(mlog.FieldModule("pkindex")),

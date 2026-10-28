@@ -26,7 +26,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
 )
@@ -66,14 +65,14 @@ type ManifestView struct {
 	Tables []TableRef
 }
 
-// FlushArgs adds tables to the manifest of a vchannel and moves its
-// checkpoint to CheckpointTimeTick. The first flush of a vchannel creates
-// its manifest with PKDataType.
+// FlushArgs adds tables to the manifest of the index IndexID on a vchannel
+// and moves its checkpoint to CheckpointTimeTick. The first flush of the
+// index on the vchannel creates its manifest.
 type FlushArgs struct {
 	CollectionID       int64
+	IndexID            int64
 	VChannel           string
 	PChannelTerm       int64
-	PKDataType         schemapb.DataType
 	AddTables          []TableRef
 	CheckpointTimeTick uint64
 }

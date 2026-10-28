@@ -53,7 +53,7 @@ func TestPKIndexMetaKVStore(t *testing.T) {
 	kv := etcdkv.NewEtcdKV(client, root)
 	defer func() { _ = kv.RemoveWithPrefix(ctx, "") }()
 	p := metaKVStore{kv: kv}
-	key := manifest.PointerKey(1, "ch_v0")
+	key := manifest.PointerKey(1, 2, "ch_v0")
 
 	_, found, err := p.Load(ctx, key)
 	require.NoError(t, err)
@@ -90,7 +90,7 @@ func TestPKIndexMetaKVStore(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "t1", v)
 
-	values, founds, err = p.MultiLoad(ctx, []string{key, manifest.PointerKey(1, "missing_v0"), pchannelMeta})
+	values, founds, err = p.MultiLoad(ctx, []string{key, manifest.PointerKey(1, 2, "missing_v0"), pchannelMeta})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"d", "", "t1"}, values)
 	assert.Equal(t, []bool{true, false, true}, founds)
@@ -99,7 +99,7 @@ func TestPKIndexMetaKVStore(t *testing.T) {
 	txnNum := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.Key
 	paramtable.Get().Save(txnNum, "2")
 	defer paramtable.Get().Reset(txnNum)
-	values, founds, err = p.MultiLoad(ctx, []string{manifest.PointerKey(1, "missing_v0"), key, pchannelMeta, manifest.PointerKey(1, "missing_v1"), key})
+	values, founds, err = p.MultiLoad(ctx, []string{manifest.PointerKey(1, 2, "missing_v0"), key, pchannelMeta, manifest.PointerKey(1, 2, "missing_v1"), key})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"", "d", "t1", "", "d"}, values)
 	assert.Equal(t, []bool{false, true, true, false, true}, founds)
@@ -108,9 +108,10 @@ func TestPKIndexMetaKVStore(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{key}, keys)
 	assert.Equal(t, []string{"d"}, values, "the pchannel meta is not under the pointer prefix")
-	collectionID, vchannel, ok := manifest.ParsePointerKey(keys[0])
+	collectionID, indexID, vchannel, ok := manifest.ParsePointerKey(keys[0])
 	assert.True(t, ok)
 	assert.Equal(t, int64(1), collectionID)
+	assert.Equal(t, int64(2), indexID)
 	assert.Equal(t, "ch_v0", vchannel)
 }
 
@@ -120,13 +121,13 @@ func TestPKIndexChunkManagerStore(t *testing.T) {
 	s := chunkManagerStore{cm: cm}
 	root := cm.RootPath()
 
-	_, err := s.Read(ctx, pkindex.ManifestBodyKey(pkindex.ManifestDir(root, 1, "ch_v0"), 1, "n"))
+	_, err := s.Read(ctx, pkindex.ManifestBodyKey(pkindex.ManifestDir(root, 1, 2, "ch_v0"), 1, "n"))
 	assert.True(t, errors.Is(err, pkindex.ErrCorrupted))
 
 	written := []string{
-		pkindex.ManifestBodyKey(pkindex.ManifestDir(root, 1, "ch_v0"), 1, "n1"),
-		pkindex.ManifestBodyKey(pkindex.ManifestDir(root, 1, "ch_v0"), 2, "n2"),
-		pkindex.SSTKey(pkindex.SSTBasePath(root, 1, "ch_v0"), 7),
+		pkindex.ManifestBodyKey(pkindex.ManifestDir(root, 1, 2, "ch_v0"), 1, "n1"),
+		pkindex.ManifestBodyKey(pkindex.ManifestDir(root, 1, 2, "ch_v0"), 2, "n2"),
+		pkindex.SSTKey(pkindex.SSTBasePath(root, 1, 2, "ch_v0"), 7),
 	}
 	for _, key := range written {
 		require.NoError(t, s.Write(ctx, key, []byte(key)))
@@ -136,7 +137,7 @@ func TestPKIndexChunkManagerStore(t *testing.T) {
 	assert.Equal(t, []byte(written[0]), b)
 
 	var walked []string
-	require.NoError(t, s.Walk(ctx, pkindex.ManifestDir(root, 1, "ch_v0")+"/", func(key string, _ time.Time) bool {
+	require.NoError(t, s.Walk(ctx, pkindex.ManifestDir(root, 1, 2, "ch_v0")+"/", func(key string, _ time.Time) bool {
 		walked = append(walked, key)
 		return true
 	}))
@@ -144,7 +145,7 @@ func TestPKIndexChunkManagerStore(t *testing.T) {
 	assert.Equal(t, written[:2], walked)
 
 	walked = nil
-	require.NoError(t, s.Walk(ctx, pkindex.SSTBasePath(root, 1, "ch_v0")+"/", func(key string, _ time.Time) bool {
+	require.NoError(t, s.Walk(ctx, pkindex.SSTBasePath(root, 1, 2, "ch_v0")+"/", func(key string, _ time.Time) bool {
 		walked = append(walked, key)
 		return true
 	}))
@@ -173,7 +174,7 @@ func TestInitPKIndexInvalidGCConfig(t *testing.T) {
 	assert.Nil(t, s.pkindexGC)
 
 	resp, err := s.pkindexService.GetRecoveryManifests(context.Background(), &pkindexpb.GetRecoveryManifestsRequest{
-		Targets: []*pkindexpb.ManifestTarget{{CollectionId: 1, Vchannel: "v"}},
+		Targets: []*pkindexpb.ManifestTarget{{CollectionId: 1, IndexId: 2, Vchannel: "v"}},
 	})
 	require.NoError(t, err)
 	assert.NotEqual(t, merr.Code(merr.ErrServiceNotReady), resp.GetStatus().GetCode())

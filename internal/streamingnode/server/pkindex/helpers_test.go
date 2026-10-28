@@ -27,7 +27,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
@@ -39,6 +38,7 @@ import (
 
 const (
 	testCollectionID = int64(100)
+	testIndexID      = int64(101)
 	testTerm         = int64(3)
 	waitTimeout      = 10 * time.Second
 )
@@ -191,7 +191,7 @@ func (env *testEnv) channel(seed uint64) *PChannelIndexManager {
 func (env *testEnv) recoveredChannel(seed uint64, vchannels ...string) *PChannelIndexManager {
 	ch := env.openChannel(seed)
 	for _, v := range vchannels {
-		_, created, err := ch.CreateCollection(context.Background(), v, testCollectionID, schemapb.DataType_Int64)
+		_, created, err := ch.CreateCollection(context.Background(), v, testCollectionID, testIndexID)
 		require.NoError(env.t, err)
 		require.True(env.t, created)
 	}
@@ -234,7 +234,7 @@ func (env *testEnv) waitFatal() error {
 
 // add opens the Index of vchannel and waits until it is ready.
 func (env *testEnv) add(ch *PChannelIndexManager, vchannel string) *index.Index {
-	idx, created, err := ch.CreateCollection(context.Background(), vchannel, testCollectionID, schemapb.DataType_Int64)
+	idx, created, err := ch.CreateCollection(context.Background(), vchannel, testCollectionID, testIndexID)
 	require.NoError(env.t, err)
 	require.True(env.t, created)
 	require.NotNil(env.t, idx)

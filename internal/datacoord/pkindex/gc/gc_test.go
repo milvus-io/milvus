@@ -54,11 +54,11 @@ func newEnv(t *testing.T, cfg Config) *env {
 	e.store = manifest.NewFakeObjectStore()
 	e.store.Now = func() time.Time { return e.now }
 	e.mgr = manifest.New(e.pointers, e.store, testRoot)
-	g, err := New(e.pointers, e.store, testRoot, cfg, func(ctx context.Context, collectionID int64, vchannel string) ([]int64, error) {
+	g, err := New(e.pointers, e.store, testRoot, cfg, func(ctx context.Context, collectionID, indexID int64, vchannel string) ([]int64, error) {
 		if e.inFlight == nil {
 			return nil, nil
 		}
-		return e.inFlight(ctx, collectionID, vchannel)
+		return e.inFlight(ctx, collectionID, indexID, vchannel)
 	})
 	require.NoError(t, err)
 	g.now = func() time.Time { return e.now }
@@ -74,7 +74,7 @@ func (e *env) create(t *testing.T, vchannel string) {
 }
 
 func sstKey(vchannel string, id int64) string {
-	return pkindex.SSTKey(pkindex.SSTBasePath(testRoot, 1, vchannel), id)
+	return pkindex.SSTKey(pkindex.SSTBasePath(testRoot, 1, 2, vchannel), id)
 }
 
 func refs(ids ...int64) []*pkindexpb.SSTRef {
@@ -93,7 +93,7 @@ func (e *env) upload(t *testing.T, vchannel string, ids ...int64) {
 
 func flushWith(t *testing.T, m *manifest.Manager, vchannel string, tick uint64, ids ...int64) {
 	_, err := m.CommitFlush(context.Background(), &pkindexpb.CommitFlushRequest{
-		CollectionId: 1, Vchannel: vchannel, PchannelTerm: 1,
+		CollectionId: 1, IndexId: 2, Vchannel: vchannel, PchannelTerm: 1,
 		AddSsts: refs(ids...), CheckpointTimeTick: tick,
 	})
 	require.NoError(t, err)
@@ -111,7 +111,7 @@ func (e *env) has(key string) bool {
 // bodies returns the manifest body keys of a vchannel.
 func (e *env) bodies(t *testing.T, vchannel string) []string {
 	keys := []string{}
-	err := e.store.Walk(context.Background(), pkindex.ManifestDir(testRoot, 1, vchannel)+"/", func(k string, _ time.Time) bool {
+	err := e.store.Walk(context.Background(), pkindex.ManifestDir(testRoot, 1, 2, vchannel)+"/", func(k string, _ time.Time) bool {
 		keys = append(keys, k)
 		return true
 	})
@@ -121,7 +121,7 @@ func (e *env) bodies(t *testing.T, vchannel string) []string {
 
 // pointer returns the stored manifest pointer of a vchannel.
 func (e *env) pointer(t *testing.T, vchannel string) *pkindexpb.ManifestPointer {
-	v, found, err := e.pointers.Load(context.Background(), manifest.PointerKey(1, vchannel))
+	v, found, err := e.pointers.Load(context.Background(), manifest.PointerKey(1, 2, vchannel))
 	require.NoError(t, err)
 	require.True(t, found)
 	p := &pkindexpb.ManifestPointer{}
@@ -150,9 +150,9 @@ func TestSSTSweep(t *testing.T) {
 	e.create(t, "v")
 	e.upload(t, "v", 1, 2, 3, 4, 5)
 	e.flush(t, "v", 10, 2, 1)
-	_, err := e.mgr.CommitCompaction(ctx, 1, "v", manifest.Compaction{Inputs: []int64{2, 1}, Outputs: refs(3)})
+	_, err := e.mgr.CommitCompaction(ctx, 1, 2, "v", manifest.Compaction{Inputs: []int64{2, 1}, Outputs: refs(3)})
 	require.NoError(t, err)
-	e.inFlight = func(context.Context, int64, string) ([]int64, error) { return []int64{4}, nil }
+	e.inFlight = func(context.Context, int64, int64, string) ([]int64, error) { return []int64{4}, nil }
 
 	// within the grace window nothing is deleted
 	require.NoError(t, e.gc.RunOnce(ctx))
@@ -205,7 +205,7 @@ func TestBodyRetentionKeepsRecentBodies(t *testing.T) {
 	require.NoError(t, e.gc.RunOnce(ctx))
 	got := map[int64]bool{}
 	for _, k := range e.bodies(t, "v") {
-		v, ok := pkindex.ParseManifestBodyKey(pkindex.ManifestDir(testRoot, 1, "v"), k)
+		v, ok := pkindex.ParseManifestBodyKey(pkindex.ManifestDir(testRoot, 1, 2, "v"), k)
 		require.True(t, ok)
 		got[v] = true
 	}
@@ -218,7 +218,7 @@ func TestKeepsCASLosersWithinRetainedVersions(t *testing.T) {
 	e.create(t, "v")
 	e.flush(t, "v", 10, 1)
 	e.upload(t, "v", 9)
-	loser := pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, "v"), 2, "loser")
+	loser := pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, 2, "v"), 2, "loser")
 	e.writeBody(t, loser, &pkindexpb.Manifest{Version: 2, Ssts: refs(9)})
 	e.now = e.now.Add(3 * time.Hour)
 
@@ -238,13 +238,13 @@ func TestGCDoesNotDependOnManagerCache(t *testing.T) {
 	other := manifest.New(e.pointers, e.store, testRoot)
 	flushWith(t, other, "v", 20, 2) // version 3
 	// version 4
-	_, err := other.CommitCompaction(ctx, 1, "v", manifest.Compaction{Inputs: []int64{2, 1}, Outputs: refs(3)})
+	_, err := other.CommitCompaction(ctx, 1, 2, "v", manifest.Compaction{Inputs: []int64{2, 1}, Outputs: refs(3)})
 	require.NoError(t, err)
 	flushWith(t, other, "v", 30, 4) // version 5
 	flushWith(t, other, "v", 40, 5) // version 6
 	// a retry of the applied flush at checkpoint 10 returns the cached version
 	stale, err := e.mgr.CommitFlush(ctx, &pkindexpb.CommitFlushRequest{
-		CollectionId: 1, Vchannel: "v", PchannelTerm: 1, CheckpointTimeTick: 10,
+		CollectionId: 1, IndexId: 2, Vchannel: "v", PchannelTerm: 1, CheckpointTimeTick: 10,
 	})
 	require.NoError(t, err)
 	require.EqualValues(t, 2, stale.GetVersion())
@@ -266,10 +266,10 @@ func TestOrphanBodyAfterGrace(t *testing.T) {
 	e.create(t, "v")
 	e.upload(t, "v", 9, 10)
 	// bodies of commits that never swapped the pointer
-	oldOrphan := pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, "v"), 2, "old")
+	oldOrphan := pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, 2, "v"), 2, "old")
 	e.writeBody(t, oldOrphan, &pkindexpb.Manifest{Version: 2, Ssts: refs(9)})
 	e.now = e.now.Add(2 * time.Hour)
-	youngOrphan := pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, "v"), 2, "young")
+	youngOrphan := pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, 2, "v"), 2, "young")
 	e.writeBody(t, youngOrphan, &pkindexpb.Manifest{Version: 2, Ssts: refs(10)})
 	e.now = e.now.Add(10 * time.Minute)
 
@@ -291,10 +291,10 @@ func TestCompactionCommittedBetweenReads(t *testing.T) {
 
 	// The compaction wrote its body before the grace window and swaps the
 	// pointer after the GC read the in-flight outputs.
-	e.inFlight = func(context.Context, int64, string) ([]int64, error) {
+	e.inFlight = func(context.Context, int64, int64, string) ([]int64, error) {
 		e.store.Now = func() time.Time { return t0 }
 		defer func() { e.store.Now = func() time.Time { return e.now } }()
-		_, err := e.mgr.CommitCompaction(ctx, 1, "v", manifest.Compaction{Inputs: []int64{2, 1}, Outputs: refs(3)})
+		_, err := e.mgr.CommitCompaction(ctx, 1, 2, "v", manifest.Compaction{Inputs: []int64{2, 1}, Outputs: refs(3)})
 		require.NoError(t, err)
 		return nil, nil
 	}
@@ -352,7 +352,7 @@ func TestUndecodableRetainedBodySkipsSSTSweep(t *testing.T) {
 	e.upload(t, "v", 1, 2, 9)
 	var v1, v2 string
 	for _, k := range e.bodies(t, "v") {
-		switch v, _ := pkindex.ParseManifestBodyKey(pkindex.ManifestDir(testRoot, 1, "v"), k); v {
+		switch v, _ := pkindex.ParseManifestBodyKey(pkindex.ManifestDir(testRoot, 1, 2, "v"), k); v {
 		case 1:
 			v1 = k
 		case 2:
@@ -373,10 +373,10 @@ func TestForeignObjectsAreKept(t *testing.T) {
 	ctx := context.Background()
 	e.create(t, "v")
 	foreign := []string{
-		pkindex.SSTBasePath(testRoot, 1, "v") + "/x.tmp",
-		pkindex.SSTBasePath(testRoot, 1, "v") + "/sub/7.sst",
-		pkindex.ManifestDir(testRoot, 1, "v") + "/x.tmp",
-		pkindex.ManifestDir(testRoot, 1, "v") + "/1.pb",
+		pkindex.SSTBasePath(testRoot, 1, 2, "v") + "/x.tmp",
+		pkindex.SSTBasePath(testRoot, 1, 2, "v") + "/sub/7.sst",
+		pkindex.ManifestDir(testRoot, 1, 2, "v") + "/x.tmp",
+		pkindex.ManifestDir(testRoot, 1, 2, "v") + "/1.pb",
 	}
 	for _, k := range foreign {
 		require.NoError(t, e.store.Write(ctx, k, []byte("x")))
@@ -478,15 +478,22 @@ func TestLayoutMismatchSkipsVChannel(t *testing.T) {
 	// or sst_base_path is not the layout's
 	cases := map[string]func(m *pkindexpb.Manifest) string{
 		"body key outside the manifest dir": func(m *pkindexpb.Manifest) string {
-			return pkindex.ManifestDir(testRoot, 1, "other") + "/" + "9-x.pb"
+			return pkindex.ManifestDir(testRoot, 1, 2, "other") + "/" + "9-x.pb"
 		},
 		"sst base path differs": func(m *pkindexpb.Manifest) string {
-			m.SstBasePath = pkindex.SSTBasePath(testRoot, 1, "other")
-			return pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, "bad"), m.GetVersion(), "x")
+			m.SstBasePath = pkindex.SSTBasePath(testRoot, 1, 2, "other")
+			return pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, 2, "bad"), m.GetVersion(), "x")
+		},
+		"sst base path of another index": func(m *pkindexpb.Manifest) string {
+			m.SstBasePath = pkindex.SSTBasePath(testRoot, 1, 3, "bad")
+			return pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, 2, "bad"), m.GetVersion(), "x")
+		},
+		"body key under another index": func(m *pkindexpb.Manifest) string {
+			return pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, 3, "bad"), m.GetVersion(), "x")
 		},
 		"empty sst base path": func(m *pkindexpb.Manifest) string {
 			m.SstBasePath = ""
-			return pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, "bad"), m.GetVersion(), "x")
+			return pkindex.ManifestBodyKey(pkindex.ManifestDir(testRoot, 1, 2, "bad"), m.GetVersion(), "x")
 		},
 	}
 	for name, change := range cases {
@@ -510,12 +517,12 @@ func TestLayoutMismatchSkipsVChannel(t *testing.T) {
 			e.writeBody(t, key, m)
 			ptr, err := proto.Marshal(&pkindexpb.ManifestPointer{Version: m.GetVersion(), BodyKey: key})
 			require.NoError(t, err)
-			e.pointers.Put(manifest.PointerKey(1, "bad"), string(ptr))
+			e.pointers.Put(manifest.PointerKey(1, 2, "bad"), string(ptr))
 			badBodies, otherBodies := len(e.bodies(t, "bad")), len(e.bodies(t, "other"))
 			e.now = e.now.Add(3 * time.Hour)
 
 			// collect "bad" alone, so that "other" stays as it was
-			require.NoError(t, e.gc.runVChannel(ctx, 1, "bad"))
+			require.NoError(t, e.gc.runVChannel(ctx, 1, 2, "bad"))
 			assert.Len(t, e.bodies(t, "bad"), badBodies)
 			assert.Len(t, e.bodies(t, "other"), otherBodies)
 			for _, vch := range []string{"bad", "other"} {
@@ -536,11 +543,11 @@ func TestInFlightErrorIsUnavailable(t *testing.T) {
 	e.create(t, "v")
 	e.upload(t, "v", 9)
 	e.now = e.now.Add(3 * time.Hour)
-	e.inFlight = func(context.Context, int64, string) ([]int64, error) {
+	e.inFlight = func(context.Context, int64, int64, string) ([]int64, error) {
 		return nil, errors.New("task meta unavailable")
 	}
 
-	err := e.gc.runVChannel(context.Background(), 1, "v")
+	err := e.gc.runVChannel(context.Background(), 1, 2, "v")
 	assert.True(t, errors.Is(err, pkindex.ErrUnavailable))
 	assert.True(t, e.has(sstKey("v", 9)))
 }
@@ -552,7 +559,7 @@ func TestRunOnceStopsWhenContextDone(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	calls := 0
-	e.inFlight = func(context.Context, int64, string) ([]int64, error) {
+	e.inFlight = func(context.Context, int64, int64, string) ([]int64, error) {
 		calls++
 		cancel()
 		return nil, nil
@@ -586,7 +593,7 @@ func TestRetainedBodyReadFailureSkipsSSTSweep(t *testing.T) {
 	e.upload(t, "v", 1, 2, 9)
 	var v1, v2 string
 	for _, k := range e.bodies(t, "v") {
-		switch v, _ := pkindex.ParseManifestBodyKey(pkindex.ManifestDir(testRoot, 1, "v"), k); v {
+		switch v, _ := pkindex.ParseManifestBodyKey(pkindex.ManifestDir(testRoot, 1, 2, "v"), k); v {
 		case 1:
 			v1 = k
 		case 2:

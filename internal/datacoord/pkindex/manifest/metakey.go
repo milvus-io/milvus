@@ -24,9 +24,9 @@ import (
 // The functions below build and parse the meta keys of the primary key index.
 // The keys are relative to the root path of the DataCoord meta kv:
 //
-//	pkindex-meta/manifest/<collectionID>/<vchannel>    ManifestPointer{version, body_key}
+//	pkindex-meta/manifest/<collectionID>/<indexID>/<vchannel>    ManifestPointer{version, body_key}
 //
-// For example: pkindex-meta/manifest/449/by-dev-rootcoord-dml_0_449v0
+// For example: pkindex-meta/manifest/449/451/by-dev-rootcoord-dml_0_449v0
 //
 // A flush also reads streamingcoord-meta/pchannel/<pchannel> (PChannelMeta)
 // to check its term, and does not write it (see pchannel_term.go).
@@ -34,24 +34,29 @@ import (
 // PointerPrefix is the meta key prefix of all manifest pointers.
 const PointerPrefix = "pkindex-meta/manifest/"
 
-// PointerKey returns the meta key of the manifest pointer of a vchannel.
-func PointerKey(collectionID int64, vchannel string) string {
-	return PointerPrefix + strconv.FormatInt(collectionID, 10) + "/" + vchannel
+// PointerKey returns the meta key of the manifest pointer of the index of a vchannel.
+func PointerKey(collectionID, indexID int64, vchannel string) string {
+	return PointerPrefix + strconv.FormatInt(collectionID, 10) + "/" + strconv.FormatInt(indexID, 10) + "/" + vchannel
 }
 
-// ParsePointerKey returns the collection ID and the vchannel of a pointer key.
-func ParsePointerKey(key string) (int64, string, bool) {
+// ParsePointerKey returns the collection ID, the index ID and the vchannel of
+// a pointer key.
+func ParsePointerKey(key string) (collectionID, indexID int64, vchannel string, ok bool) {
 	rest, ok := strings.CutPrefix(key, PointerPrefix)
 	if !ok {
-		return 0, "", false
+		return 0, 0, "", false
 	}
-	coll, vchannel, ok := strings.Cut(rest, "/")
-	if !ok || vchannel == "" || strings.Contains(vchannel, "/") {
-		return 0, "", false
+	parts := strings.Split(rest, "/")
+	if len(parts) != 3 || parts[2] == "" {
+		return 0, 0, "", false
 	}
-	id, err := strconv.ParseInt(coll, 10, 64)
+	collectionID, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
-		return 0, "", false
+		return 0, 0, "", false
 	}
-	return id, vchannel, true
+	indexID, err = strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return 0, 0, "", false
+	}
+	return collectionID, indexID, parts[2], true
 }

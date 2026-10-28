@@ -27,7 +27,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
@@ -96,7 +95,7 @@ func TestHandoverNormal(t *testing.T) {
 	assert.Equal(t, testCollectionID, req.CollectionID)
 	assert.Equal(t, testVChannel, req.VChannel)
 	assert.Equal(t, testTerm, req.PChannelTerm)
-	assert.Equal(t, schemapb.DataType_Int64, req.PKDataType)
+	assert.Equal(t, testIndexID, req.IndexID)
 	require.NotEmpty(t, req.AddTables)
 
 	for _, ref := range req.AddTables {
@@ -127,14 +126,14 @@ func TestHandoverNormal(t *testing.T) {
 // handover.
 func TestFirstHandoverCreatesTheManifest(t *testing.T) {
 	idx := newTestIndex(t)
-	assert.Equal(t, "root/pk_index/100/v0/sst", idx.sstBasePath)
+	assert.Equal(t, "root/pk_index/100/101/v0/sst", idx.sstBasePath)
 
 	idx.insert(t, 10, 1)
 	idx.observed.Store(10)
 	require.True(t, idx.handover(t))
 	reqs := idx.committer.requestList()
 	require.Len(t, reqs, 1)
-	assert.Equal(t, schemapb.DataType_Int64, reqs[0].PKDataType)
+	assert.Equal(t, testIndexID, reqs[0].IndexID)
 	m := idx.committer.manifest()
 	assert.EqualValues(t, 1, m.Version)
 	assert.Equal(t, idx.sstBasePath, m.SSTBasePath)

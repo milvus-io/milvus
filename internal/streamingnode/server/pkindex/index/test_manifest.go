@@ -21,7 +21,6 @@ package index
 import (
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
 )
 
@@ -31,7 +30,8 @@ type FakeManifest struct {
 	View ManifestView
 	// LastFlushTerm is the term of the last flush that changed the manifest.
 	LastFlushTerm int64
-	PKDataType    schemapb.DataType
+	// IndexID is the index ID of the first flush.
+	IndexID int64
 }
 
 // clone returns a copy of m that shares no slice with m.
@@ -49,7 +49,7 @@ func (m *FakeManifest) clone() *FakeManifest {
 //   - a term below assigned: ErrFenced,
 //   - a term above assigned: ErrRejected (not the assigned term),
 //   - no manifest: a new one, so the flush gives version 1,
-//   - another primary key type: ErrRejected,
+//   - another index ID: ErrRejected,
 //   - a checkpoint that does not move forward: cur when the term is the term
 //     of the last flush (an applied retry), else ErrRejected,
 //   - a table that is in cur or listed twice: ErrRejected,
@@ -62,10 +62,10 @@ func FakeFlush(cur *FakeManifest, assigned int64, args FlushArgs, basePath strin
 		return nil, false, errors.Wrapf(ErrRejected, "vchannel %s: term %d is not the assigned term", args.VChannel, args.PChannelTerm)
 	}
 	if cur == nil {
-		cur = &FakeManifest{View: ManifestView{SSTBasePath: basePath}, PKDataType: args.PKDataType}
+		cur = &FakeManifest{View: ManifestView{SSTBasePath: basePath}, IndexID: args.IndexID}
 	}
-	if args.PKDataType != cur.PKDataType {
-		return nil, false, errors.Wrapf(ErrRejected, "vchannel %s: primary key type %s, flush %s", args.VChannel, cur.PKDataType, args.PKDataType)
+	if args.IndexID != cur.IndexID {
+		return nil, false, errors.Wrapf(ErrRejected, "vchannel %s: index %d, flush %d", args.VChannel, cur.IndexID, args.IndexID)
 	}
 	if args.CheckpointTimeTick <= cur.View.CheckpointTimeTick {
 		if args.PChannelTerm != cur.LastFlushTerm {
