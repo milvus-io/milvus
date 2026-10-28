@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -198,6 +199,276 @@ func TestL0CompactionTaskMetricsFastFinish(t *testing.T) {
 
 func TestCompactionPlanHandlerSuite(t *testing.T) {
 	suite.Run(t, new(CompactionPlanHandlerSuite))
+}
+
+func TestSummaryCompactionState(t *testing.T) {
+	testCases := []struct {
+		name            string
+		taskState       datapb.CompactionTaskState
+		terminalState   datapb.CompactionTaskState
+		publicState     commonpb.CompactionState
+		executingCnt    int
+		completedCnt    int
+		failedCnt       int
+		timeoutCnt      int
+		unclassifiedCnt int
+	}{
+		{name: "unknown", taskState: datapb.CompactionTaskState_unknown, publicState: commonpb.CompactionState_UndefiedState, unclassifiedCnt: 1},
+		{name: "executing", taskState: datapb.CompactionTaskState_executing, publicState: commonpb.CompactionState_Executing, executingCnt: 1},
+		{name: "pipelining", taskState: datapb.CompactionTaskState_pipelining, publicState: commonpb.CompactionState_Executing, executingCnt: 1},
+		{name: "completed", taskState: datapb.CompactionTaskState_completed, publicState: commonpb.CompactionState_Completed, completedCnt: 1},
+		{name: "failed", taskState: datapb.CompactionTaskState_failed, publicState: commonpb.CompactionState_Completed, failedCnt: 1},
+		{name: "timeout", taskState: datapb.CompactionTaskState_timeout, publicState: commonpb.CompactionState_Completed, timeoutCnt: 1},
+		{name: "analyzing", taskState: datapb.CompactionTaskState_analyzing, publicState: commonpb.CompactionState_Executing, executingCnt: 1},
+		{name: "indexing", taskState: datapb.CompactionTaskState_indexing, publicState: commonpb.CompactionState_Executing, executingCnt: 1},
+		{name: "cleaned legacy", taskState: datapb.CompactionTaskState_cleaned, publicState: commonpb.CompactionState_Completed, completedCnt: 1},
+		{name: "cleaned after success", taskState: datapb.CompactionTaskState_cleaned, terminalState: datapb.CompactionTaskState_completed, publicState: commonpb.CompactionState_Completed, completedCnt: 1},
+		{name: "cleaned after failure", taskState: datapb.CompactionTaskState_cleaned, terminalState: datapb.CompactionTaskState_failed, publicState: commonpb.CompactionState_Completed, failedCnt: 1},
+		{name: "cleaned after timeout", taskState: datapb.CompactionTaskState_cleaned, terminalState: datapb.CompactionTaskState_timeout, publicState: commonpb.CompactionState_Completed, timeoutCnt: 1},
+		{name: "cleaned with nonterminal outcome", taskState: datapb.CompactionTaskState_cleaned, terminalState: datapb.CompactionTaskState_executing, publicState: commonpb.CompactionState_UndefiedState, unclassifiedCnt: 1},
+		{name: "meta_saved", taskState: datapb.CompactionTaskState_meta_saved, publicState: commonpb.CompactionState_Executing, executingCnt: 1},
+		{name: "statistic", taskState: datapb.CompactionTaskState_statistic, publicState: commonpb.CompactionState_Executing, executingCnt: 1},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			info := summaryCompactionState(100, []*datapb.CompactionTask{{
+				TriggerID:     100,
+				PlanID:        1,
+				State:         testCase.taskState,
+				TerminalState: testCase.terminalState,
+			}})
+
+			assert.Equal(t, testCase.publicState, info.state)
+			assert.Equal(t, testCase.executingCnt, info.executingCnt)
+			assert.Equal(t, testCase.completedCnt, info.completedCnt)
+			assert.Equal(t, testCase.failedCnt, info.failedCnt)
+			assert.Equal(t, testCase.timeoutCnt, info.timeoutCnt)
+			assert.Equal(t, testCase.unclassifiedCnt, info.unclassifiedCnt)
+			assert.Equal(t, 1, len(info.mergeInfos))
+		})
+	}
+
+	t.Run("mixed states remain undefined when any task is unclassified", func(t *testing.T) {
+		tasks := make([]*datapb.CompactionTask, 0, len(testCases)+1)
+		for index, testCase := range testCases {
+			tasks = append(tasks, &datapb.CompactionTask{
+				TriggerID:     100,
+				PlanID:        int64(index + 1),
+				State:         testCase.taskState,
+				TerminalState: testCase.terminalState,
+			})
+		}
+		tasks = append(tasks, nil)
+
+		info := summaryCompactionState(100, tasks)
+
+		assert.Equal(t, commonpb.CompactionState_UndefiedState, info.state)
+		assert.Equal(t, 6, info.executingCnt)
+		assert.Equal(t, 3, info.completedCnt)
+		assert.Equal(t, 2, info.failedCnt)
+		assert.Equal(t, 2, info.timeoutCnt)
+		assert.Equal(t, 2, info.unclassifiedCnt)
+		assert.Equal(t, len(testCases), len(info.mergeInfos))
+	})
+
+	t.Run("completed task cannot mask an unknown task", func(t *testing.T) {
+		info := summaryCompactionState(100, []*datapb.CompactionTask{
+			{PlanID: 1, State: datapb.CompactionTaskState_completed},
+			{PlanID: 2, State: datapb.CompactionTaskState_unknown},
+		})
+
+		assert.Equal(t, commonpb.CompactionState_UndefiedState, info.state)
+		assert.Equal(t, 1, info.completedCnt)
+		assert.Equal(t, 1, info.unclassifiedCnt)
+	})
+
+	t.Run("no-op id completes without tasks", func(t *testing.T) {
+		info := summaryCompactionState(-1, nil)
+
+		assert.Equal(t, commonpb.CompactionState_Completed, info.state)
+		assert.Equal(t, 0, info.executingCnt)
+		assert.Equal(t, 0, info.completedCnt)
+		assert.Equal(t, 0, len(info.mergeInfos))
+	})
+
+	t.Run("unknown id stays undefined without tasks", func(t *testing.T) {
+		info := summaryCompactionState(999999, nil)
+
+		assert.Equal(t, commonpb.CompactionState_UndefiedState, info.state)
+		assert.Equal(t, 0, info.executingCnt)
+		assert.Equal(t, 0, info.completedCnt)
+		assert.Equal(t, 0, len(info.mergeInfos))
+	})
+}
+
+type targetAwareCompactionMeta struct {
+	CompactionMeta
+	targetMeta *compactionTargetMeta
+}
+
+func (m *targetAwareCompactionMeta) GetCompactionTargetMeta() *compactionTargetMeta {
+	return m.targetMeta
+}
+
+func TestGetCompactionInfoUsesTargetRuntimeState(t *testing.T) {
+	ctx := context.Background()
+	targetMeta := newLoadedCompactionTargetMeta(t, ctx,
+		&datapb.CompactionTarget{
+			TargetID:     100,
+			CollectionID: 1,
+			Intent:       datapb.TargetIntent_INTENT_REWRITE,
+			State:        datapb.TargetState_TARGET_STATE_ACTIVE,
+		},
+		&datapb.CompactionTarget{
+			TargetID:     200,
+			CollectionID: 1,
+			Intent:       datapb.TargetIntent_INTENT_REWRITE,
+			State:        datapb.TargetState_TARGET_STATE_INACTIVE,
+		},
+		&datapb.CompactionTarget{
+			TargetID:     300,
+			CollectionID: 1,
+			Intent:       datapb.TargetIntent_INTENT_REWRITE,
+			State:        datapb.TargetState_TARGET_STATE_ACTIVE,
+		},
+		&datapb.CompactionTarget{
+			TargetID:     400,
+			CollectionID: 1,
+			Intent:       datapb.TargetIntent_INTENT_REWRITE,
+			Properties: map[string]string{
+				compactionTargetPropertySegmentIDs: "not-json",
+			},
+			State: datapb.TargetState_TARGET_STATE_ACTIVE,
+		},
+		&datapb.CompactionTarget{
+			TargetID:     500,
+			CollectionID: 1,
+			Intent:       datapb.TargetIntent_INTENT_REWRITE,
+			State:        datapb.TargetState_TARGET_STATE_INACTIVE,
+		},
+		&datapb.CompactionTarget{
+			TargetID:     600,
+			CollectionID: 1,
+			Intent:       datapb.TargetIntent_INTENT_REWRITE,
+			State:        datapb.TargetState_TARGET_STATE_ACTIVE,
+		},
+		&datapb.CompactionTarget{
+			TargetID:     700,
+			CollectionID: 1,
+			Intent:       datapb.TargetIntent_INTENT_REWRITE,
+			State:        datapb.TargetState_TARGET_STATE_ACTIVE,
+		},
+		&datapb.CompactionTarget{
+			TargetID:     800,
+			CollectionID: 1,
+			Intent:       datapb.TargetIntent_INTENT_REWRITE,
+			State:        datapb.TargetState_TARGET_STATE_INACTIVE,
+		},
+	)
+	mockMeta := NewMockCompactionMeta(t)
+	mockMeta.EXPECT().GetCompactionTasksByTriggerID(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, triggerID int64) []*datapb.CompactionTask {
+			switch triggerID {
+			case 300:
+				return []*datapb.CompactionTask{{
+					TriggerID: triggerID,
+					PlanID:    1,
+					State:     datapb.CompactionTaskState_completed,
+				}}
+			case 500:
+				return []*datapb.CompactionTask{{
+					TriggerID: triggerID,
+					PlanID:    2,
+					State:     datapb.CompactionTaskState_unknown,
+				}}
+			case 600:
+				return []*datapb.CompactionTask{{
+					TriggerID: triggerID,
+					PlanID:    3,
+					State:     datapb.CompactionTaskState_unknown,
+				}}
+			case 700:
+				return []*datapb.CompactionTask{{
+					TriggerID:     triggerID,
+					PlanID:        4,
+					State:         datapb.CompactionTaskState_cleaned,
+					TerminalState: datapb.CompactionTaskState_executing,
+				}}
+			case 800:
+				return []*datapb.CompactionTask{{
+					TriggerID: triggerID,
+					PlanID:    5,
+					State:     datapb.CompactionTaskState_executing,
+				}}
+			}
+			return nil
+		},
+	)
+	inspector := &compactionInspector{meta: &targetAwareCompactionMeta{
+		CompactionMeta: mockMeta,
+		targetMeta:     targetMeta,
+	}}
+
+	active := inspector.getCompactionInfo(ctx, 100)
+	inactive := inspector.getCompactionInfo(ctx, 200)
+	materialized := inspector.getCompactionInfo(ctx, 300)
+	inert := inspector.getCompactionInfo(ctx, 400)
+	inactiveWithUnknownTask := inspector.getCompactionInfo(ctx, 500)
+	activeWithUnknownTask := inspector.getCompactionInfo(ctx, 600)
+	activeWithInvalidCleanedTask := inspector.getCompactionInfo(ctx, 700)
+	inactiveWithExecutingTask := inspector.getCompactionInfo(ctx, 800)
+	unknown := inspector.getCompactionInfo(ctx, 999)
+
+	assert.Equal(t, commonpb.CompactionState_Executing, active.state)
+	assert.Equal(t, 0, active.executingCnt)
+	assert.Equal(t, commonpb.CompactionState_Completed, inactive.state)
+	assert.Equal(t, 0, inactive.completedCnt)
+	assert.Equal(t, commonpb.CompactionState_Executing, materialized.state)
+	assert.Equal(t, 1, materialized.completedCnt)
+	assert.Equal(t, commonpb.CompactionState_UndefiedState, inert.state)
+	assert.Equal(t, commonpb.CompactionState_UndefiedState, inactiveWithUnknownTask.state)
+	assert.Equal(t, commonpb.CompactionState_UndefiedState, activeWithUnknownTask.state)
+	assert.Equal(t, commonpb.CompactionState_UndefiedState, activeWithInvalidCleanedTask.state)
+	assert.Equal(t, commonpb.CompactionState_Executing, inactiveWithExecutingTask.state)
+	assert.Equal(t, 1, inactiveWithExecutingTask.executingCnt)
+	assert.Equal(t, commonpb.CompactionState_UndefiedState, unknown.state)
+}
+
+func TestSetCompactionTaskStatePreservesTerminalOutcome(t *testing.T) {
+	for _, terminalState := range []datapb.CompactionTaskState{
+		datapb.CompactionTaskState_completed,
+		datapb.CompactionTaskState_failed,
+		datapb.CompactionTaskState_timeout,
+	} {
+		t.Run(terminalState.String(), func(t *testing.T) {
+			task := &datapb.CompactionTask{State: datapb.CompactionTaskState_executing}
+			setState(terminalState)(task)
+
+			assert.Equal(t, terminalState, task.GetState())
+			assert.Equal(t, terminalState, task.GetTerminalState())
+
+			setState(datapb.CompactionTaskState_cleaned)(task)
+
+			assert.Equal(t, datapb.CompactionTaskState_cleaned, task.GetState())
+			assert.Equal(t, terminalState, task.GetTerminalState())
+		})
+	}
+
+	t.Run("capture terminal state from task created before upgrade", func(t *testing.T) {
+		task := &datapb.CompactionTask{State: datapb.CompactionTaskState_failed}
+		setState(datapb.CompactionTaskState_cleaned)(task)
+
+		assert.Equal(t, datapb.CompactionTaskState_failed, task.GetTerminalState())
+	})
+
+	t.Run("terminal outcome is immutable", func(t *testing.T) {
+		task := &datapb.CompactionTask{State: datapb.CompactionTaskState_executing}
+		setState(datapb.CompactionTaskState_failed)(task)
+		setState(datapb.CompactionTaskState_completed)(task)
+
+		assert.Equal(t, datapb.CompactionTaskState_failed, task.GetTerminalState())
+	})
 }
 
 type CompactionPlanHandlerSuite struct {
@@ -780,6 +1051,33 @@ func (s *CompactionPlanHandlerSuite) TestCompactionQueueFull() {
 	s.Error(s.handler.submitTask(t2))
 }
 
+func (s *CompactionPlanHandlerSuite) TestIsFullAtMaxTaskNum() {
+	for _, tc := range []struct {
+		name             string
+		maxTaskNum       string
+		pending, running int
+		full             bool
+	}{
+		{"0 is unlimited", "0", 2, 2, false},
+		{"-1 is unlimited", "-1", 2, 2, false},
+		{"below the limit", "5", 2, 2, false},
+		{"pending and running tasks reach the limit", "4", 2, 2, true},
+	} {
+		s.Run(tc.name, func() {
+			paramtable.Get().Save(Params.DataCoordCfg.CompactionMaxTaskNum.Key, tc.maxTaskNum)
+			defer paramtable.Get().Reset(Params.DataCoordCfg.CompactionMaxTaskNum.Key)
+			inspector := newCompactionInspector(s.mockMeta, nil, nil, nil, nil, newMockVersionManager())
+			for i := 0; i < tc.pending; i++ {
+				s.Require().NoError(inspector.submitTask(newMixCompactionTask(&datapb.CompactionTask{PlanID: int64(1 + i)}, nil, s.mockMeta, newMockVersionManager())))
+			}
+			for i := 0; i < tc.running; i++ {
+				inspector.executingTasks[int64(100+i)] = newMixCompactionTask(&datapb.CompactionTask{PlanID: int64(100 + i)}, nil, s.mockMeta, newMockVersionManager())
+			}
+			s.Equal(tc.full, inspector.isFull())
+		})
+	}
+}
+
 func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
 	s.SetupTest()
 	s.mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything, mock.Anything).Return(true, true).Maybe()
@@ -902,14 +1200,14 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 	// s.mockMeta.EXPECT().UpdateSegmentsInfo(mock.Anything).Return(nil)
 	s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil)
 	s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
+		func(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) ([]*SegmentInfo, error) {
 			if t.GetPlanID() == 2 {
 				segment := NewSegmentInfo(&datapb.SegmentInfo{ID: 100})
-				return []*SegmentInfo{segment}, &segMetricMutation{}, nil
+				return []*SegmentInfo{segment}, nil
 			} else if t.GetPlanID() == 6 {
-				return nil, nil, errors.Errorf("intended error")
+				return nil, errors.Errorf("intended error")
 			}
-			return nil, nil, errors.Errorf("unexpected error")
+			return nil, errors.Errorf("unexpected error")
 		}).Twice()
 
 	for _, t := range inTasks {
@@ -962,6 +1260,20 @@ func (s *CompactionPlanHandlerSuite) TestCompactionGC() {
 			State:     datapb.CompactionTaskState_cleaned,
 			StartTime: time.Now().Unix(),
 		},
+		{
+			PlanID:    4,
+			Type:      datapb.CompactionType_MixCompaction,
+			State:     datapb.CompactionTaskState_cleaned,
+			StartTime: time.Now().Add(-time.Second * 100000).Unix(),
+			EndTime:   time.Now().Unix(),
+		},
+		{
+			PlanID:    5,
+			Type:      datapb.CompactionType_MixCompaction,
+			State:     datapb.CompactionTaskState_cleaned,
+			StartTime: time.Now().Add(-time.Second * 100000).Unix(),
+			EndTime:   time.Now().Add(-time.Second * 100000).Unix(),
+		},
 	}
 
 	catalog := &datacoord.Catalog{MetaKv: NewMetaMemoryKV()}
@@ -973,9 +1285,11 @@ func (s *CompactionPlanHandlerSuite) TestCompactionGC() {
 	}
 
 	s.handler.cleanCompactionTaskMeta()
-	// two task should be cleaned, one remains
-	tasks := s.handler.meta.GetCompactionTaskMeta().GetCompactionTasks()
-	s.Equal(1, len(tasks))
+	tasks := s.handler.meta.GetCompactionTaskMeta().GetCompactionTasksByTriggerID(0)
+	remainingPlanIDs := lo.Map(tasks, func(task *datapb.CompactionTask, _ int) int64 {
+		return task.GetPlanID()
+	})
+	s.ElementsMatch([]int64{1, 3, 4}, remainingPlanIDs)
 }
 
 func (s *CompactionPlanHandlerSuite) TestProcessCompleteCompaction() {
@@ -996,8 +1310,7 @@ func (s *CompactionPlanHandlerSuite) TestProcessCompleteCompaction() {
 	segment := NewSegmentInfo(&datapb.SegmentInfo{ID: 100})
 	s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil)
 	s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything, mock.Anything).Return(
-		[]*SegmentInfo{segment},
-		&segMetricMutation{}, nil).Once()
+		[]*SegmentInfo{segment}, nil).Once()
 
 	dataNodeID := UniqueID(111)
 
@@ -1190,7 +1503,7 @@ func (s *CompactionPlanHandlerSuite) TestCleanClusteringCompactionCommitFail() {
 			},
 		}, nil).Once()
 	s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil)
-	s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil, errors.New("mock error"))
+	s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
 
 	s.handler.submitTask(task)
 	s.handler.schedule()
@@ -1428,8 +1741,10 @@ func (s *CompactionPlanHandlerSuite) TestCreateCompactTaskRejectsSnapshotProtect
 		s.Run(test.name, func() {
 			snapshotMeta := createTestSnapshotMetaLoaded(s.T())
 			test.block(snapshotMeta)
+			store := metacache.NewMetaStore(nil)
 			meta := &meta{
-				segments:     NewSegmentsInfo(),
+				segments:     NewSegmentsInfo(store),
+				metaStore:    store,
 				snapshotMeta: snapshotMeta,
 			}
 			meta.segments.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{

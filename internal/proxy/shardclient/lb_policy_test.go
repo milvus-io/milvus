@@ -880,6 +880,13 @@ func (s *LBPolicySuite) TestNewLBPolicy() {
 	policy = NewLBPolicyImpl(mgr)
 	s.Equal(reflect.TypeOf(policy.getBalancer()).String(), "*shardclient.LookAsideBalancer")
 	policy.Close()
+
+	params.Save(params.ProxyCfg.ReplicaSelectionPolicy.Key, "refined_look_aside")
+	policy = NewLBPolicyImpl(mgr)
+	s.Equal(reflect.TypeOf(policy.getBalancer()).String(), "*shardclient.RefinedLookAsideBalancer")
+	policy.Close()
+
+	params.Save(params.ProxyCfg.ReplicaSelectionPolicy.Key, "look_aside")
 }
 
 func (s *LBPolicySuite) TestGetShard() {

@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/flushcommon/broker"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
@@ -30,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/flushcommon/writebuffer"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
@@ -40,7 +43,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -147,6 +152,11 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 	// segmentPks := typeutil.NewConcurrentMap[int64, []*storage.PkStatistics]()
 	segmentPks := typeutil.NewConcurrentMap[int64, pkoracle.PkStat]()
 	segmentBm25 := typeutil.NewConcurrentMap[int64, map[int64]*storage.BM25Stats]()
+	type recoveredColumnGroups struct {
+		split      []storagecommon.ColumnGroup
+		statistics *metacache.SegmentStats
+	}
+	segmentGroups := typeutil.NewConcurrentMap[int64, recoveredColumnGroups]()
 
 	loadSegmentStats := func(segType string, segments []*datapb.SegmentInfo) {
 		for _, item := range segments {
@@ -158,6 +168,27 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 			)
 			segment := item
 			future := io.GetOrCreateStatsPool().Submit(func() (any, error) {
+				if segType == "growing" && segment.GetStorageVersion() == storage.StorageV3 && segment.GetLevel() != datapb.SegmentLevel_L0 && segment.GetNumOfRows() > 0 {
+					split, err := packed.RestoreColumnGroupsFromManifest(initCtx, segment.GetManifestPath(), segment.GetStats(), nil)
+					var normalized *datapb.Statistics
+					if err == nil {
+						normalized, err = storagecommon.NormalizeColumnGroupStatistics(split, segment.GetStats())
+					}
+					if err != nil {
+						err = merr.Wrapf(err, "restore column groups for segment %d", segment.GetID())
+						if errors.Is(err, merr.ErrDataIntegrity) || errors.Is(err, packed.ErrLoonPermanent) {
+							return nil, retry.Unrecoverable(err)
+						}
+						return nil, err
+					}
+					if len(split) == 0 {
+						return nil, retry.Unrecoverable(merr.WrapErrDataIntegrityMsg("segment %d has persisted rows but no manifest column groups", segment.GetID()))
+					}
+					segmentGroups.Insert(segment.GetID(), recoveredColumnGroups{
+						split:      split,
+						statistics: metacache.NewSegmentStatsFromStats(normalized, segment.GetNumOfRows()),
+					})
+				}
 				pkField, err := typeutil.GetPrimaryFieldSchema(info.GetSchema())
 				if err != nil {
 					return nil, err
@@ -226,9 +257,15 @@ func initMetaCache(initCtx context.Context, chunkManager storage.ChunkManager, i
 		return segmentStats
 	}
 	// return channel, nil
-	metacache := metacache.NewMetaCache(info, pkStatsFactory, bm25StatsFactor, schemaManager)
+	cache := metacache.NewMetaCache(info, pkStatsFactory, bm25StatsFactor, schemaManager)
+	segmentGroups.Range(func(segmentID int64, groups recoveredColumnGroups) bool {
+		cache.UpdateSegments(metacache.MergeSegmentAction(
+			metacache.UpdateCurrentSplit(groups.split), metacache.SetStatistics(groups.statistics),
+		), metacache.WithSegmentIDs(segmentID))
+		return true
+	})
 
-	return metacache, nil
+	return cache, nil
 }
 
 func getServiceWithChannel(initCtx context.Context, params *util.PipelineParams,

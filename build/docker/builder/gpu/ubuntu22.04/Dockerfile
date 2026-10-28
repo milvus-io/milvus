@@ -31,11 +31,11 @@ RUN uv python install 3.12.13 && \
 
 
 # Install go
-RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.26.6.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go
+RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.26.10.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go
 # Install conan
 # Install rust
 RUN curl https://sh.rustup.rs -sSf | \
-    sh -s -- --default-toolchain=1.92 -y
+    sh -s -- --default-toolchain=1.94 -y
 ENV PATH=/root/.cargo/bin:/usr/local/bin:/usr/local/go/bin:$PATH
 
 # refer: https://code.visualstudio.com/docs/remote/containers-advanced#_avoiding-extension-reinstalls-on-container-rebuild

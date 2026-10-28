@@ -481,6 +481,9 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
             }
             return;
         }
+        if (count == 0) {
+            return;
+        }
         ForEachResolvedRow(
             op_ctx,
             offsets,
@@ -505,9 +508,17 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         return group_->num_chunks();
     }
 
+    void
+    Prepare(milvus::OpContext* op_ctx) const override {
+        group_->Prepare(op_ctx);
+    }
+
     size_t
     DataByteSize() const override {
-        return group_->memory_size();
+        const auto fields = group_->NumFieldsInGroup();
+        AssertInfo(fields > 0, "column group must contain at least one field");
+        const auto total = group_->memory_size();
+        return total / fields + (total % fields != 0);
     }
 
 #ifdef MILVUS_UNIT_TEST

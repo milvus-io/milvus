@@ -5,6 +5,7 @@ package segments
 import (
 	context "context"
 
+	arrow "github.com/apache/arrow/go/v17/arrow"
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	msgpb "github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	pkoracle "github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
@@ -1814,6 +1815,74 @@ func (_c *MockSegment_Retrieve_Call) Return(_a0 *segcorepb.RetrieveResults, _a1 
 }
 
 func (_c *MockSegment_Retrieve_Call) RunAndReturn(run func(context.Context, *segcore.RetrievePlan) (*segcorepb.RetrieveResults, error)) *MockSegment_Retrieve_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RetrieveArrow provides a mock function with given fields: ctx, plan
+func (_m *MockSegment) RetrieveArrow(ctx context.Context, plan *segcore.RetrievePlan) (*segcorepb.RetrieveResults, arrow.Record, error) {
+	ret := _m.Called(ctx, plan)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RetrieveArrow")
+	}
+
+	var r0 *segcorepb.RetrieveResults
+	var r1 arrow.Record
+	var r2 error
+	if rf, ok := ret.Get(0).(func(context.Context, *segcore.RetrievePlan) (*segcorepb.RetrieveResults, arrow.Record, error)); ok {
+		return rf(ctx, plan)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *segcore.RetrievePlan) *segcorepb.RetrieveResults); ok {
+		r0 = rf(ctx, plan)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*segcorepb.RetrieveResults)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *segcore.RetrievePlan) arrow.Record); ok {
+		r1 = rf(ctx, plan)
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(arrow.Record)
+		}
+	}
+
+	if rf, ok := ret.Get(2).(func(context.Context, *segcore.RetrievePlan) error); ok {
+		r2 = rf(ctx, plan)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// MockSegment_RetrieveArrow_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RetrieveArrow'
+type MockSegment_RetrieveArrow_Call struct {
+	*mock.Call
+}
+
+// RetrieveArrow is a helper method to define mock.On call
+//   - ctx context.Context
+//   - plan *segcore.RetrievePlan
+func (_e *MockSegment_Expecter) RetrieveArrow(ctx interface{}, plan interface{}) *MockSegment_RetrieveArrow_Call {
+	return &MockSegment_RetrieveArrow_Call{Call: _e.mock.On("RetrieveArrow", ctx, plan)}
+}
+
+func (_c *MockSegment_RetrieveArrow_Call) Run(run func(ctx context.Context, plan *segcore.RetrievePlan)) *MockSegment_RetrieveArrow_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*segcore.RetrievePlan))
+	})
+	return _c
+}
+
+func (_c *MockSegment_RetrieveArrow_Call) Return(_a0 *segcorepb.RetrieveResults, _a1 arrow.Record, _a2 error) *MockSegment_RetrieveArrow_Call {
+	_c.Call.Return(_a0, _a1, _a2)
+	return _c
+}
+
+func (_c *MockSegment_RetrieveArrow_Call) RunAndReturn(run func(context.Context, *segcore.RetrievePlan) (*segcorepb.RetrieveResults, arrow.Record, error)) *MockSegment_RetrieveArrow_Call {
 	_c.Call.Return(run)
 	return _c
 }

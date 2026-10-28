@@ -23,7 +23,7 @@
 
 #include "cachinglayer/Translator.h"
 #include "common/Types.h"
-#include "index/json_stats/JsonKeyStats.h"
+#include "segcore/json_stats/JsonKeyStats.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "pb/index_cgo_msg.pb.h"
 #include "storage/ChunkManager.h"
@@ -82,6 +82,7 @@ class JsonStatsTranslator
         info_proto_;
     milvus::storage::ChunkManagerPtr chunk_manager_;
     milvus_storage::ArrowFileSystemPtr fs_;
+    const bool use_async_load_;
     std::string key_;
     milvus::cachinglayer::Meta meta_;
 };

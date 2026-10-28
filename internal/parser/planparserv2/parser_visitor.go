@@ -24,6 +24,13 @@ type ParserVisitorArgs struct {
 	// hybrid sub-request and every scorer filter share one preflight budget and
 	// one validation cache. Nil means single-expression scope.
 	MembershipBudget *MembershipPreflightBudget
+	// OnParsedExpr, when set, sees every expression this parse produces --
+	// the main predicate and each scorer filter -- after template values are
+	// filled in and before the rewriter runs. The rewriter changes the
+	// operators (a one-value IN becomes ==, an OR of equalities becomes IN,
+	// "arr == []" becomes array_length), so a feature count taken from the
+	// final plan would describe the rewriter's choices, not the user's.
+	OnParsedExpr func(*planpb.Expr)
 }
 
 // int64OverflowError is a special error type used to handle the case where
@@ -1158,6 +1165,18 @@ func isTermExprTargetSupported(dataType schemapb.DataType) bool {
 
 // VisitTerm translates expr to term plan.
 func (v *ParserVisitor) VisitTerm(ctx *parser.TermContext) interface{} {
+	// A bracketed left-hand side of two or more plain fields, e.g.
+	// `[a, b] in [[1,2],[3,4]]`, is a correlated multi-column tuple IN, not a
+	// single-column term: dispatch to tuple_term_filter.go's builder instead
+	// of falling into the single-column path below, whose generic Accept(v)
+	// would route through VisitArray and reject every column reference as
+	// "not a generic value". A non-identifier bracketed LHS (e.g. `[1, 2] in
+	// [...]`) is intentionally left to fall through unchanged, so it still
+	// hits today's existing error path.
+	if lhsArray, ok := ctx.Expr(0).(*parser.ArrayContext); ok && isTupleTermLHS(lhsArray) {
+		return v.buildTupleTermExpr(ctx, lhsArray)
+	}
+
 	child := ctx.Expr(0).Accept(v)
 	if err := getError(child); err != nil {
 		return err

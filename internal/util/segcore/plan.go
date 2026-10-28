@@ -88,6 +88,14 @@ func (plan *SearchPlan) HasTargetEntries() bool {
 	return bool(C.HasTargetEntries(plan.cSearchPlan))
 }
 
+// FeatureBits returns the execution feature bits the plan recorded across
+// every segment it ran on (featureusage.SetExecBits decodes them), or 0 when
+// the plan does not collect them. Read it after the searches finish and
+// before the plan is deleted.
+func (plan *SearchPlan) FeatureBits() uint64 {
+	return uint64(C.GetSearchPlanFeatureBits(plan.cSearchPlan))
+}
+
 func (plan *SearchPlan) delete() {
 	C.DeleteSearchPlan(plan.cSearchPlan)
 }
@@ -185,6 +193,14 @@ func (req *SearchRequest) EnableExprCache() bool {
 	return req.enableExprCache
 }
 
+// FeatureBits returns the execution feature bits of the request's plan.
+func (req *SearchRequest) FeatureBits() uint64 {
+	if req == nil || req.plan == nil {
+		return 0
+	}
+	return req.plan.FeatureBits()
+}
+
 func (req *SearchRequest) Delete() {
 	if req.plan != nil {
 		req.plan.delete()
@@ -246,6 +262,12 @@ func (plan *RetrievePlan) SetTakeForOutputAllowed(allowed bool) {
 
 func (plan *RetrievePlan) IsIgnoreNonPk() bool {
 	return plan.ignoreNonPk
+}
+
+// FeatureBits returns the execution feature bits the plan recorded across
+// every segment it ran on, or 0 when the plan does not collect them.
+func (plan *RetrievePlan) FeatureBits() uint64 {
+	return uint64(C.GetRetrievePlanFeatureBits(plan.cRetrievePlan))
 }
 
 func (plan *RetrievePlan) MsgID() int64 {

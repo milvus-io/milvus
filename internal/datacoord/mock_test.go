@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
@@ -99,7 +100,11 @@ func newMemoryMeta(t *testing.T) (*meta, error) {
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	return newMeta(context.TODO(), catalog, nil, broker)
+	m, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
+	if m != nil {
+		t.Cleanup(m.closeManifestCommitExecutor)
+	}
+	return m, err
 }
 
 func newMetaWithEtcd(t *testing.T, rootPath string) (*meta, error) {
@@ -108,7 +113,11 @@ func newMetaWithEtcd(t *testing.T, rootPath string) (*meta, error) {
 	catalog := datacoord.NewCatalog(catalogKV, "", rootPath)
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	return newMeta(context.TODO(), catalog, nil, broker)
+	m, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
+	if m != nil {
+		t.Cleanup(m.closeManifestCommitExecutor)
+	}
+	return m, err
 }
 
 func newMockAllocator(t *testing.T) *allocator.MockAllocator {
@@ -234,6 +243,10 @@ func (m *mockMixCoord) AddCollectionStructField(ctx context.Context, req *milvus
 }
 
 func (m *mockMixCoord) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
+	panic("implement me")
+}
+
+func (m *mockMixCoord) GetFeatureUsage(ctx context.Context, req *internalpb.GetFeatureUsageRequest) (*internalpb.FeatureUsageReport, error) {
 	panic("implement me")
 }
 
@@ -1192,4 +1205,12 @@ func newMockHandlerWithMeta(meta *meta) *mockHandler {
 	return &mockHandler{
 		meta: meta,
 	}
+}
+
+func (*mockMixCoord) GetQueryViewLoadInfo(context.Context, *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
+	return nil, merr.WrapErrServiceInternalMsg("GetQueryViewLoadInfo is not configured by this test")
+}
+
+func (*mockMixCoord) GetStreamingNodeQueryViewResources(context.Context, *datapb.GetStreamingNodeQueryViewResourcesRequest) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
+	return nil, merr.WrapErrServiceInternalMsg("GetStreamingNodeQueryViewResources is not configured by this test")
 }

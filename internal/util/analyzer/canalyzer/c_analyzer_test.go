@@ -93,7 +93,8 @@ func TestAnalyzer(t *testing.T) {
 		require.NoError(t, err)
 		defer analyzer.Destroy()
 
-		tokenStream := analyzer.NewTokenStream("A&B")
+		tokenStream, err := analyzer.NewTokenStream("A&B")
+		require.NoError(t, err)
 		defer tokenStream.Destroy()
 
 		require.True(t, tokenStream.Advance())
@@ -111,7 +112,8 @@ func TestAnalyzer(t *testing.T) {
 		require.NoError(t, err)
 		defer analyzer.Destroy()
 
-		tokenStream := analyzer.NewTokenStream("ab")
+		tokenStream, err := analyzer.NewTokenStream("ab")
+		require.NoError(t, err)
 		defer tokenStream.Destroy()
 
 		require.True(t, tokenStream.Advance())
@@ -135,7 +137,8 @@ func TestAnalyzer(t *testing.T) {
 		require.NoError(t, err)
 		defer analyzer.Destroy()
 
-		tokenStream := analyzer.NewTokenStream("ab")
+		tokenStream, err := analyzer.NewTokenStream("ab")
+		require.NoError(t, err)
 		defer tokenStream.Destroy()
 
 		require.True(t, tokenStream.Advance())

@@ -5,7 +5,10 @@ use tantivy_binding::analyzer::create_analyzer;
 
 fn test_analyzer(tokenizer: &mut TextAnalyzer) {
     let text = "(AI Focus evaluates subject movement, automatically sets either one-shot AF or AI Servo AF automatically.) Drive mode is set to Single Shot, ISO is set to Auto, and the metering mode is set to Evaluative";
-    tokenizer.token_stream(text);
+    let mut stream = tokenizer.token_stream(text);
+    while stream.advance() {
+        black_box(stream.token());
+    }
 }
 
 fn clone_analyzer(tokenizer: &mut TextAnalyzer) {

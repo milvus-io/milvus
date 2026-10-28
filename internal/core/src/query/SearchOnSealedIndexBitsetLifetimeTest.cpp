@@ -42,8 +42,7 @@
 #include "common/QueryResult.h"
 #include "common/Schema.h"
 #include "common/Types.h"
-#include "index/IndexFactory.h"
-#include "index/VectorIndex.h"
+#include "index/contracts/query/IVectorReader.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
 #include "mmap/ChunkedColumn.h"
@@ -54,7 +53,8 @@
 #include "exec/operator/search-groupby/SearchGroupByOperator.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
-#include "segcore/SealedIndexingRecord.h"
+#include "segcore/SegmentSealed.h"
+#include "segcore/test_utils/ConsumerIndexTestUtils.h"
 #include "segcore/Utils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/SegcoreConfigUtils.h"
@@ -192,15 +192,6 @@ AssertVectorIteratorUsableAfterSearchReturns(SearchResult& search_result,
     ASSERT_GT(result_count, 0);
 }
 
-segcore::SealedIndexingEntry
-MakeSealedIndexingEntry(const MetricType& metric_type,
-                        index::CacheIndexBasePtr indexing) {
-    segcore::SealedIndexingEntry entry;
-    entry.metric_type_ = metric_type;
-    entry.indexing_ = std::move(indexing);
-    return entry;
-}
-
 const DataArray&
 FindFieldData(const segcore::GeneratedData& dataset, FieldId field_id) {
     for (const auto& field_data : dataset.raw_->fields_data()) {
@@ -294,41 +285,81 @@ BuildNullableFloatVectorColumn(const FieldMeta& field_meta,
     return column;
 }
 
-std::unique_ptr<index::IndexBase>
+test::consumer::OpenedIndex
 BuildNullableVectorIndex(
     int64_t total_count,
     int64_t dim,
     const bool* valid_data,
     const std::vector<float>& vectors,
     const std::string& index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
-    index::CreateIndexInfo create_index_info;
-    create_index_info.field_type = DataType::VECTOR_FLOAT;
-    create_index_info.metric_type = knowhere::metric::COSINE;
-    create_index_info.index_type = index_type;
-    create_index_info.index_engine_version =
-        knowhere::Version::GetCurrentVersion().VersionNumber();
+    return test::consumer::BuildVectorReader<float>(
+        DataType::VECTOR_FLOAT,
+        index_type,
+        knowhere::metric::COSINE,
+        dim,
+        total_count,
+        vectors.data(),
+        index_type == "HNSW" ? Config{{"M", 16}, {"efConstruction", 100}}
+                             : Config{{knowhere::indexparam::NLIST, "128"}},
+        true,
+        ValidityView::FromExpanded(valid_data),
+        vectors.size() / dim);
+}
 
-    auto index_base = index::IndexFactory::GetInstance().CreateIndex(
-        create_index_info, storage::FileManagerContext());
-    auto* vector_index = dynamic_cast<index::VectorIndex*>(index_base.get());
-    if (vector_index == nullptr) {
-        ADD_FAILURE() << "failed to create vector index";
-        return index_base;
+void
+AssertNullableReaderMapping(const index::IVectorReader& reader,
+                            int64_t total_count,
+                            int64_t valid_count,
+                            const bool* valid_data) {
+    ASSERT_TRUE(reader.HasValidData());
+    ASSERT_EQ(reader.ValidCount(), valid_count);
+    for (int64_t row = 0; row < total_count; ++row) {
+        ASSERT_EQ(reader.IsRowValid(row), valid_data[row])
+            << "logical row " << row;
     }
+    EXPECT_FALSE(reader.IsRowValid(total_count));
+}
 
-    auto build_dataset =
-        knowhere::GenDataSet(vectors.size() / dim, dim, vectors.data());
-    build_dataset->SetIdMapData(
-        knowhere::IdMapData::FromValidData(valid_data, total_count));
-    auto build_conf = knowhere::Json{
-        {knowhere::meta::METRIC_TYPE, knowhere::metric::COSINE},
-        {knowhere::meta::DIM, std::to_string(dim)},
-        {knowhere::indexparam::NLIST, "128"},
-        {"M", "16"},
-        {"efConstruction", "100"},
-    };
-    index_base->BuildWithDataset(build_dataset, build_conf);
-    return index_base;
+segcore::LoadIndexInfo
+MakeNullableIndexLoadInfo(test::consumer::OpenedIndex opened,
+                          FieldId field_id,
+                          int64_t logical_rows,
+                          milvus::OpContext** observed_ctx = nullptr) {
+    segcore::LoadIndexInfo info{};
+    info.field_id = field_id.get();
+    info.field_type = DataType::VECTOR_FLOAT;
+    info.index_id = test::expr_index::NextFixtureId();
+    info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    info.index_family = opened.family;
+    info.index_value_type = opened.reader->ValueType();
+    info.index_caps = opened.caps;
+    info.num_rows = logical_rows;
+    const auto* reader =
+        dynamic_cast<const index::IVectorReader*>(opened.reader.get());
+    info.dim = reader->Dim();
+    for (const auto& [key, value] : opened.params.items()) {
+        info.index_params.emplace(
+            key, value.is_string() ? value.get<std::string>() : value.dump());
+    }
+    info.load_resource_request = LoadResourceRequest{};
+    info.cache_index =
+        CreateTestCacheIndex("nullable-vector-" + std::to_string(info.index_id),
+                             std::move(opened.reader),
+                             observed_ctx);
+    return info;
+}
+
+segcore::SegmentSealedUPtr
+BuildIndexSearchSegment(const SchemaPtr& schema,
+                        FieldId vector_field,
+                        int64_t logical_rows,
+                        segcore::LoadIndexInfo& info) {
+    auto data = segcore::DataGen(schema, logical_rows);
+    auto segment = CreateSealedWithFieldDataLoaded(
+        schema, data, false, {vector_field.get()});
+    segment->LoadIndex(info);
+    return segment;
 }
 
 struct NullableRawVectorFixture {
@@ -422,7 +453,7 @@ MakeGrowingNullableRawVectorSegment(const NullableRawVectorFixture& fixture) {
                     fixture.total_count,
                     row_ids.data(),
                     timestamps.data(),
-                    insert_data.get());
+                    std::make_shared<InsertRecordProto>(*insert_data));
     return segment;
 }
 
@@ -553,9 +584,8 @@ TEST(StrictGroupHnswSearch, PreservesParametersForIndependentPhaseTwo) {
     std::fill_n(valid.get(), n, true);
     auto index =
         BuildNullableVectorIndex(n, kDim, valid.get(), vectors, "HNSW");
-    auto entry = MakeSealedIndexingEntry(
-        knowhere::metric::COSINE,
-        CreateTestCacheIndex("strict-hnsw-ef-regression", std::move(index)));
+    const auto& entry =
+        dynamic_cast<const index::IVectorReader&>(*index.reader);
     for (const auto& [ef, as_string] : std::vector<std::pair<int, bool>>{
              {0, false}, {32, false}, {64, false}, {32, true}, {64, true}}) {
         SCOPED_TRACE(ef);
@@ -646,10 +676,8 @@ TEST(StrictGroupIvfSearch, IndependentPhaseTwoPreservesSearchParameters) {
     auto valid = std::make_unique<bool[]>(n);
     std::fill_n(valid.get(), n, true);
     auto index = BuildNullableVectorIndex(n, kDim, valid.get(), vectors);
-    auto entry = MakeSealedIndexingEntry(
-        knowhere::metric::COSINE,
-        CreateTestCacheIndex("strict-ivf-independent-search",
-                             std::move(index)));
+    const auto& entry =
+        dynamic_cast<const index::IVectorReader&>(*index.reader);
     auto info = MakeGroupBySearchInfo(field, group, knowhere::metric::COSINE);
     info.topk_ = 2;
     info.group_size_ = 5;
@@ -690,16 +718,11 @@ TEST(SearchOnSealedIndexBitsetLifetime,
 
     auto index_base =
         BuildNullableVectorIndex(total_count, kDim, valid_data.get(), vectors);
-    auto* vector_index = dynamic_cast<index::VectorIndex*>(index_base.get());
+    auto* vector_index =
+        dynamic_cast<const index::IVectorReader*>(index_base.reader.get());
     ASSERT_NE(vector_index, nullptr);
-    ASSERT_TRUE(vector_index->HasValidData());
-    ASSERT_EQ(vector_index->GetIdMap().OutCount(), total_count);
-    ASSERT_EQ(vector_index->GetValidCount(), valid_count);
-
-    auto indexing_entry = MakeSealedIndexingEntry(
-        knowhere::metric::COSINE,
-        CreateTestCacheIndex("nullable-vector-bitset-lifetime",
-                             std::move(index_base)));
+    AssertNullableReaderMapping(
+        *vector_index, total_count, valid_count, valid_data.get());
 
     auto logical_bitset_bytes = MakeLogicalBitsetBytes(total_count);
     BitsetView logical_bitset(logical_bitset_bytes.data(), total_count);
@@ -710,7 +733,7 @@ TEST(SearchOnSealedIndexBitsetLifetime,
 
     SearchResult search_result;
     SearchOnSealedIndex(*schema,
-                        indexing_entry,
+                        *vector_index,
                         search_info,
                         query.data(),
                         nullptr,
@@ -733,7 +756,7 @@ TEST(SearchOnSealedIndexBitsetLifetime,
     non_strict_search_info.strict_group_size_ = false;
     SearchResult non_strict_result;
     SearchOnSealedIndex(*schema,
-                        indexing_entry,
+                        *vector_index,
                         non_strict_search_info,
                         query.data(),
                         nullptr,
@@ -747,7 +770,7 @@ TEST(SearchOnSealedIndexBitsetLifetime,
     single_group_result_search_info.group_size_ = 1;
     SearchResult single_group_result;
     SearchOnSealedIndex(*schema,
-                        indexing_entry,
+                        *vector_index,
                         single_group_result_search_info,
                         query.data(),
                         nullptr,
@@ -761,7 +784,7 @@ TEST(SearchOnSealedIndexBitsetLifetime,
     two_queries.insert(two_queries.end(), query.begin(), query.end());
     SearchResult multiple_query_result;
     SearchOnSealedIndex(*schema,
-                        indexing_entry,
+                        *vector_index,
                         search_info,
                         two_queries.data(),
                         nullptr,
@@ -784,20 +807,22 @@ TEST(SearchOnSealedIndexCachePinLifetime,
     auto vector_field = schema->AddDebugField(
         "vector", DataType::VECTOR_FLOAT, kDim, knowhere::metric::COSINE, true);
     auto group_by_field = schema->AddDebugField("group_by", DataType::INT8);
-    schema->set_primary_field_id(group_by_field);
+    auto pk_field = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_field);
 
     auto index_base =
         BuildNullableVectorIndex(total_count, kDim, valid_data.get(), vectors);
-    auto* vector_index = dynamic_cast<index::VectorIndex*>(index_base.get());
+    auto* vector_index =
+        dynamic_cast<const index::IVectorReader*>(index_base.reader.get());
     ASSERT_NE(vector_index, nullptr);
-    ASSERT_TRUE(vector_index->HasValidData());
-    ASSERT_EQ(vector_index->GetIdMap().OutCount(), total_count);
-    ASSERT_EQ(vector_index->GetValidCount(), valid_count);
+    AssertNullableReaderMapping(
+        *vector_index, total_count, valid_count, valid_data.get());
 
-    auto cache_index = CreateTestCacheIndex(
-        "nullable-vector-index-pin-lifetime", std::move(index_base));
-    auto indexing_entry =
-        MakeSealedIndexingEntry(knowhere::metric::COSINE, cache_index);
+    auto load_info = MakeNullableIndexLoadInfo(
+        std::move(index_base), vector_field, total_count);
+    auto cache_index = load_info.cache_index;
+    auto segment =
+        BuildIndexSearchSegment(schema, vector_field, total_count, load_info);
 
     std::vector<float> query(vectors.begin(), vectors.begin() + kDim);
     auto search_info = MakeGroupBySearchInfo(
@@ -805,15 +830,16 @@ TEST(SearchOnSealedIndexCachePinLifetime,
 
     {
         SearchResult search_result;
-        SearchOnSealedIndex(*schema,
-                            indexing_entry,
-                            search_info,
-                            query.data(),
-                            nullptr,
-                            1,
-                            BitsetView{},
-                            nullptr,
-                            search_result);
+        // The segment is the consumer responsible for retaining the reader
+        // cache pin after SearchOnSealedIndex returns borrowed iterators.
+        segment->vector_search(search_info,
+                               query.data(),
+                               nullptr,
+                               1,
+                               MAX_TIMESTAMP,
+                               BitsetView{},
+                               nullptr,
+                               search_result);
 
         ASSERT_TRUE(search_result.vector_iterators_.has_value());
         ASSERT_FALSE(search_result.vector_iterators_->empty());
@@ -844,11 +870,10 @@ TEST(SearchOnSealedIndexCancellation, PinVectorIndexUsesCallerOpContext) {
         BuildNullableVectorIndex(total_count, kDim, valid_data.get(), vectors);
 
     milvus::OpContext* observed_ctx = nullptr;
-    auto indexing_entry = MakeSealedIndexingEntry(
-        knowhere::metric::COSINE,
-        CreateTestCacheIndex("cancellable-search-on-sealed-index",
-                             std::move(index_base),
-                             &observed_ctx));
+    auto load_info = MakeNullableIndexLoadInfo(
+        std::move(index_base), vector_field, total_count, &observed_ctx);
+    auto segment =
+        BuildIndexSearchSegment(schema, vector_field, total_count, load_info);
 
     SearchInfo search_info;
     search_info.field_id_ = vector_field;
@@ -862,15 +887,14 @@ TEST(SearchOnSealedIndexCancellation, PinVectorIndexUsesCallerOpContext) {
     folly::CancellationSource source;
     milvus::OpContext op_context(source.getToken());
     SearchResult search_result;
-    SearchOnSealedIndex(*schema,
-                        indexing_entry,
-                        search_info,
-                        vectors.data(),
-                        nullptr,
-                        1,
-                        BitsetView{},
-                        &op_context,
-                        search_result);
+    segment->vector_search(search_info,
+                           vectors.data(),
+                           nullptr,
+                           1,
+                           MAX_TIMESTAMP,
+                           BitsetView{},
+                           &op_context,
+                           search_result);
 
     EXPECT_EQ(observed_ctx, &op_context);
 }
@@ -892,16 +916,11 @@ TEST(SearchOnSealedIndexNullableNoFilter,
 
     auto index_base =
         BuildNullableVectorIndex(total_count, kDim, valid_data.get(), vectors);
-    auto* vector_index = dynamic_cast<index::VectorIndex*>(index_base.get());
+    auto* vector_index =
+        dynamic_cast<const index::IVectorReader*>(index_base.reader.get());
     ASSERT_NE(vector_index, nullptr);
-    ASSERT_TRUE(vector_index->HasValidData());
-    ASSERT_EQ(vector_index->GetIdMap().OutCount(), total_count);
-    ASSERT_EQ(vector_index->GetValidCount(), valid_count);
-
-    auto indexing_entry = MakeSealedIndexingEntry(
-        knowhere::metric::COSINE,
-        CreateTestCacheIndex("nullable-vector-empty-bitset",
-                             std::move(index_base)));
+    AssertNullableReaderMapping(
+        *vector_index, total_count, valid_count, valid_data.get());
 
     SearchInfo search_info;
     search_info.field_id_ = vector_field;
@@ -914,7 +933,7 @@ TEST(SearchOnSealedIndexNullableNoFilter,
 
     SearchResult search_result;
     SearchOnSealedIndex(*schema,
-                        indexing_entry,
+                        *vector_index,
                         search_info,
                         vectors.data(),
                         nullptr,
@@ -948,10 +967,11 @@ TEST(SearchOnSealedIndexNullableIteratorNoFilter,
 
     auto index_base =
         BuildNullableVectorIndex(total_count, kDim, valid_data.get(), vectors);
-    auto indexing_entry = MakeSealedIndexingEntry(
-        knowhere::metric::COSINE,
-        CreateTestCacheIndex("nullable-vector-empty-bitset-iterator",
-                             std::move(index_base)));
+    auto* vector_index =
+        dynamic_cast<const index::IVectorReader*>(index_base.reader.get());
+    ASSERT_NE(vector_index, nullptr);
+    AssertNullableReaderMapping(
+        *vector_index, total_count, valid_count, valid_data.get());
 
     SearchInfo search_info;
     search_info.field_id_ = vector_field;
@@ -966,7 +986,7 @@ TEST(SearchOnSealedIndexNullableIteratorNoFilter,
 
     SearchResult search_result;
     SearchOnSealedIndex(*schema,
-                        indexing_entry,
+                        *vector_index,
                         search_info,
                         vectors.data(),
                         nullptr,
@@ -1017,7 +1037,7 @@ TEST(SearchOnGrowingBitsetLifetime,
                     total_count,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
     auto* growing_segment =
         dynamic_cast<segcore::SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_segment, nullptr);
@@ -1097,7 +1117,7 @@ TEST(SearchOnGrowingBitsetLifetime, NullableGrowingEmptyBitsetMeansNoFilter) {
                     total_count,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    std::make_shared<InsertRecordProto>(*dataset.raw_));
     auto* growing_segment =
         dynamic_cast<segcore::SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_segment, nullptr);
@@ -1238,7 +1258,7 @@ TEST(SearchOnGrowingNullableRawBruteForce,
                     row_count,
                     row_ids.data(),
                     timestamps.data(),
-                    insert_data.get());
+                    std::make_shared<InsertRecordProto>(*insert_data));
 
     auto* growing_segment =
         dynamic_cast<segcore::SegmentGrowingImpl*>(segment.get());
@@ -1295,7 +1315,7 @@ AssertDirectGrowingFallbackUsesACompatibleSnapshot(bool iterator_v2) {
                     initial_count,
                     initial_data.row_ids_.data(),
                     initial_data.timestamps_.data(),
-                    initial_data.raw_);
+                    std::make_shared<InsertRecordProto>(*initial_data.raw_));
 
     auto appended_data =
         segcore::DataGen(schema, appended_count, 43, initial_count);
@@ -1385,7 +1405,7 @@ AssertDirectGrowingFallbackUsesACompatibleSnapshot(bool iterator_v2) {
                     appended_count,
                     appended_data.row_ids_.data(),
                     appended_data.timestamps_.data(),
-                    appended_data.raw_);
+                    std::make_shared<InsertRecordProto>(*appended_data.raw_));
     ASSERT_EQ(segment->get_row_count(), initial_count + appended_count);
 
     gate.Release();
@@ -1471,13 +1491,18 @@ AssertGrowingIndexEmptyBitsetHonorsPlannedPrefix(bool nullable) {
                     initial_count,
                     first.row_ids_.data(),
                     first.timestamps_.data(),
-                    first.raw_);
+                    std::make_shared<InsertRecordProto>(*first.raw_));
 
     auto* growing_segment =
         dynamic_cast<segcore::SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_segment, nullptr);
-    ASSERT_TRUE(
-        growing_segment->get_indexing_record().SyncDataWithIndex(vector_field));
+    const auto planned_index_pin =
+        growing_segment->PinGrowingIndex(vector_field);
+    ASSERT_TRUE(planned_index_pin);
+    ASSERT_NE(
+        dynamic_cast<const index::IVectorReader*>(&planned_index_pin.Reader()),
+        nullptr);
+    ASSERT_EQ(planned_index_pin.CoveredRowEnd(), initial_count);
     const auto planned_count = growing_segment->get_row_count();
     ASSERT_EQ(planned_count, initial_count);
 
@@ -1516,8 +1541,14 @@ AssertGrowingIndexEmptyBitsetHonorsPlannedPrefix(bool nullable) {
                     appended_count,
                     appended.row_ids_.data(),
                     appended.timestamps_.data(),
-                    appended.raw_);
+                    std::make_shared<InsertRecordProto>(*appended.raw_));
     ASSERT_EQ(growing_segment->get_row_count(), initial_count + appended_count);
+    const auto appended_index_pin =
+        growing_segment->PinGrowingIndex(vector_field);
+    ASSERT_TRUE(appended_index_pin);
+    ASSERT_EQ(appended_index_pin.CoveredRowEnd(),
+              initial_count + appended_count);
+    EXPECT_EQ(planned_index_pin.CoveredRowEnd(), planned_count);
 
     SearchInfo search_info;
     search_info.field_id_ = vector_field;
@@ -1811,10 +1842,19 @@ TEST(ElementNullableVectorArraySearch, RejectsUnsupportedRepresentation) {
     search_info.metric_type_ = knowhere::metric::L2;
     std::vector<float> query(kDim, 0.0F);
 
-    segcore::SealedIndexingEntry entry;
+    auto opened = test::consumer::BuildVectorReader<float>(
+        DataType::VECTOR_FLOAT,
+        knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+        knowhere::metric::L2,
+        kDim,
+        1,
+        query.data());
+    const auto* reader =
+        dynamic_cast<const index::IVectorReader*>(opened.reader.get());
+    ASSERT_NE(reader, nullptr);
     SearchResult sealed_index_result;
     EXPECT_ANY_THROW(SearchOnSealedIndex(*schema,
-                                         entry,
+                                         *reader,
                                          search_info,
                                          query.data(),
                                          nullptr,

@@ -1591,10 +1591,10 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 
 	t.Run("normal with analyzer", func(t *testing.T) {
 		mixcoord := mocks.NewMixCoord(t)
-		mixcoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.Anything).Return(&querypb.ValidateAnalyzerResponse{
-			Status:      merr.Status(nil),
-			ResourceIds: []int64{1, 2, 3},
-		}, nil)
+		setValidateAnalyzer := mockAnalyzerValidation(t)
+		setValidateAnalyzer(func(_ context.Context, infos []*querypb.AnalyzerInfo) ([]int64, error) {
+			return []int64{1, 2, 3}, nil
+		})
 
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().IncFileResourceRefCnt(mock.Anything).Return(nil)
@@ -1647,10 +1647,10 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 
 	t.Run("normal with file resource observer", func(t *testing.T) {
 		mixcoord := mocks.NewMixCoord(t)
-		mixcoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.Anything).Return(&querypb.ValidateAnalyzerResponse{
-			Status:      merr.Status(nil),
-			ResourceIds: []int64{1, 2, 3},
-		}, nil)
+		setValidateAnalyzer := mockAnalyzerValidation(t)
+		setValidateAnalyzer(func(_ context.Context, infos []*querypb.AnalyzerInfo) ([]int64, error) {
+			return []int64{1, 2, 3}, nil
+		})
 
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().IncFileResourceRefCnt(mock.Anything).Return(nil)
@@ -1699,7 +1699,6 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 
 		// with file resource observer
 		fileResourceObserver := NewMockFileResourceObserver(t)
-		fileResourceObserver.EXPECT().CheckAllQnReady().Return(nil)
 
 		task.fileResourceObserver = fileResourceObserver
 		err = task.prepareSchema(context.TODO())
@@ -2120,11 +2119,10 @@ func TestPrepareMilvusTableSnapshotSchemaErrors(t *testing.T) {
 		wantErr error
 	}{
 		{"corrupt metadata", `{`, nil, merr.ErrDataIntegrity},
-		{"unsupported snapshot version", `{"format_version":99999}`, nil, merr.ErrOperationNotSupported},
 		{"metadata read timeout", "", context.DeadlineExceeded, context.DeadlineExceeded},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, parseErr := snapshotio.ParseSnapshotMetadataWithVersionCheck([]byte(tc.data))
+			_, parseErr := snapshotio.ParseSnapshotMetadata([]byte(tc.data))
 			if tc.readErr != nil {
 				parseErr = tc.readErr
 			}
@@ -2392,50 +2390,6 @@ func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
 		err := task.Prepare(context.Background())
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid namespace.mode")
-	})
-
-	t.Run("reject invalid rls enabled property", func(t *testing.T) {
-		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).Return(&model.Database{
-			Name: "foo",
-			ID:   1,
-		}, nil).Twice()
-		meta.EXPECT().GetAvailableCollectionCount(mock.Anything, util.DefaultDBID).Return(2, 2, true).Once()
-		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0).Once()
-		defer cleanTestEnv()
-
-		collectionName := funcutil.GenRandomStr()
-		field1 := funcutil.GenRandomStr()
-
-		ticker := newRocksMqTtSynchronizer()
-		core := newTestCore(withValidIDAllocator(), withTtSynchronizer(ticker), withMeta(meta))
-
-		schema := &schemapb.CollectionSchema{
-			Name: collectionName,
-			Fields: []*schemapb.FieldSchema{
-				{Name: field1, DataType: schemapb.DataType_Int64},
-			},
-		}
-
-		task := createCollectionTask{
-			Core: core,
-			Req: &milvuspb.CreateCollectionRequest{
-				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
-				CollectionName: collectionName,
-				ShardsNum:      common.DefaultShardsNum,
-				Properties: []*commonpb.KeyValuePair{
-					{Key: common.RLSEnabledKey, Value: "yes"},
-				},
-			},
-			header: &message.CreateCollectionMessageHeader{},
-			body: &message.CreateCollectionRequest{
-				CollectionSchema: schema,
-			},
-		}
-
-		err := task.Prepare(context.Background())
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid rls.enabled")
 	})
 
 	t.Run("persist valid namespace mode", func(t *testing.T) {

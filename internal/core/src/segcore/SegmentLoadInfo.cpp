@@ -21,7 +21,6 @@
 #include "index/Meta.h"
 #include "log/Log.h"
 #include "common/resource_c.h"
-#include "index/IndexFactory.h"
 #include "milvus-storage/column_groups.h"
 #include "milvus-storage/manifest.h"
 #include "pb/schema.pb.h"
@@ -53,6 +52,14 @@ SegmentLoadInfo::GetColumnGroups() const {
     column_groups_ = std::make_shared<milvus_storage::api::ColumnGroups>(
         loon_manifest->columnGroups());
     return column_groups_;
+}
+
+void
+SegmentLoadInfo::InheritCachedColumnGroupsFrom(const SegmentLoadInfo& source) {
+    if (source.HasManifestPath() &&
+        ::IsSameLoonManifestPath(source.GetManifestPath(), GetManifestPath())) {
+        column_groups_ = source.column_groups_;
+    }
 }
 
 // Looks up a storage column in the cached manifest column groups only.
@@ -993,7 +1000,10 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info) {
     if (HasManifestPath()) {
         AssertInfo(new_info.HasManifestPath(),
                    "manifest could only be updated with other manifest");
-        if (GetManifestPath() != new_info.GetManifestPath()) {
+        // Compare revisions, not text: another spelling of the same manifest
+        // revision must not reload anything.
+        if (!::IsSameLoonManifestPath(GetManifestPath(),
+                                      new_info.GetManifestPath())) {
             diff.manifest_updated = true;
             diff.new_manifest_path = new_info.GetManifestPath();
         }

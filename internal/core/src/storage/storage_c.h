@@ -53,6 +53,11 @@ ResizeTheadPool(int64_t priority, float ratio);
 CStatus
 InitDiskFileWriterConfig(CDiskWriteConfig c_disk_write_config);
 
+// Configure process-wide Arrow CPU/IO pools and the shared storage Tokio
+// runtime. The caller must invoke this once before the first Rust bridge use.
+CStatus
+InitStorageRuntime(int cpu_threads, int io_threads);
+
 CStatus
 InitArrowReaderConfig(CArrowReaderConfig c_arrow_reader_config);
 
@@ -61,6 +66,12 @@ SetExternalVectorPartialNullAsRowNull(bool enabled);
 
 bool
 GetExternalVectorPartialNullAsRowNull();
+
+bool
+SetExternalSparseConversionMemoryLimit(int64_t bytes);
+
+int64_t
+GetExternalSparseConversionMemoryLimit();
 
 CStatus
 InitLoonReaderThreadPool(int32_t num_threads);

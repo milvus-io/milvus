@@ -202,7 +202,6 @@ func TestPartitionKey(t *testing.T) {
 				IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{0, 1}}},
 			},
 			idAllocator:  idAllocator,
-			chMgr:        chMgr,
 			collectionID: collectionID,
 			vChannels:    []string{"test-channel"},
 		}
@@ -373,7 +372,6 @@ func TestDefaultPartition(t *testing.T) {
 				IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{0, 1}}},
 			},
 			idAllocator:  idAllocator,
-			chMgr:        chMgr,
 			collectionID: collectionID,
 			vChannels:    []string{"test-channel"},
 		}

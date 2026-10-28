@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/proxy/ddl"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -79,6 +80,12 @@ func keywordStructFieldForTest(name string) *schemapb.StructArrayFieldSchema {
 		Name: name, Nullable: true,
 		Fields: []*schemapb.FieldSchema{keywordArrayFieldForTest("values")},
 	}
+}
+
+// validateFieldNameForTest runs the live DDL field validator, whose first
+// check is the field-name validation.
+func validateFieldNameForTest(name string) error {
+	return ddl.ValidateField(&schemapb.FieldSchema{Name: name, DataType: schemapb.DataType_Int64}, keywordValidationSchemaForTest())
 }
 
 func createKeywordSchemaForTest(t *testing.T, schema *schemapb.CollectionSchema) error {
@@ -140,13 +147,13 @@ func TestFieldNameKeywordPolicy(t *testing.T) {
 		})
 		require.NoError(t, err)
 		add := &addCollectionFieldTask{
-			oldSchema:                 keywordValidationSchemaForTest(),
 			AddCollectionFieldRequest: &milvuspb.AddCollectionFieldRequest{Schema: field},
 		}
+		add.SetOldSchema(keywordValidationSchemaForTest())
 		requireKeywordValidationForTest(t, add.PreExecute(context.Background()), reserved)
 
 		// Struct sub-fields already use the shared field-name validator.
-		requireKeywordValidationForTest(t, ValidateFieldsInStruct(
+		requireKeywordValidationForTest(t, ddl.ValidateFieldsInStruct(
 			keywordArrayFieldForTest(name), keywordValidationSchemaForTest()), reserved)
 
 		// Check sub-field failures through actual create/add struct tasks too,
@@ -157,11 +164,11 @@ func TestFieldNameKeywordPolicy(t *testing.T) {
 		structSchema.StructArrayFields = []*schemapb.StructArrayFieldSchema{structField}
 		requireKeywordValidationForTest(t, createKeywordSchemaForTest(t, structSchema), reserved)
 		addStruct := &addCollectionStructFieldTask{
-			oldSchema: keywordValidationSchemaForTest(),
 			AddCollectionStructFieldRequest: &milvuspb.AddCollectionStructFieldRequest{
 				StructArrayFieldSchema: structField,
 			},
 		}
+		addStruct.SetOldSchema(keywordValidationSchemaForTest())
 		requireKeywordValidationForTest(t, addStruct.PreExecute(context.Background()), reserved)
 	}
 
@@ -188,11 +195,11 @@ func TestStructArrayFieldKeywordPolicy(t *testing.T) {
 		requireKeywordValidationForTest(t, createKeywordSchemaForTest(t, schema), reserved)
 
 		add := &addCollectionStructFieldTask{
-			oldSchema: keywordValidationSchemaForTest(),
 			AddCollectionStructFieldRequest: &milvuspb.AddCollectionStructFieldRequest{
 				StructArrayFieldSchema: keywordStructFieldForTest(name),
 			},
 		}
+		add.SetOldSchema(keywordValidationSchemaForTest())
 		requireKeywordValidationForTest(t, add.PreExecute(context.Background()), reserved)
 	}
 
@@ -211,7 +218,7 @@ func TestStructArrayFieldKeywordPolicy(t *testing.T) {
 		t.Run("invalid_"+name, func(t *testing.T) { check(t, name, true) })
 	}
 	t.Run("parent_name_is_checked_before_children", func(t *testing.T) {
-		err := ValidateStructArrayField(&schemapb.StructArrayFieldSchema{Name: "AND"}, keywordValidationSchemaForTest())
+		err := ddl.ValidateStructArrayField(&schemapb.StructArrayFieldSchema{Name: "AND"}, keywordValidationSchemaForTest())
 		requireKeywordValidationForTest(t, err, true)
 	})
 }
@@ -221,7 +228,7 @@ func TestFieldNameErrorClassification(t *testing.T) {
 	// Factory and validation paths must agree on the wire and metric cause.
 	factoryErr := merr.WrapErrFieldNameInvalid("Like", "Invalid field name: Like. Like is keyword in milvus.")
 	requireKeywordValidationForTest(t, factoryErr, true)
-	validationErr := validateFieldName("Like")
+	validationErr := validateFieldNameForTest("Like")
 	requireKeywordValidationForTest(t, validationErr, true)
 	require.Equal(t, factoryErr.Error(), validationErr.Error())
 	require.Equal(t, merr.Status(factoryErr).GetErrorCode(), merr.Status(validationErr).GetErrorCode())
@@ -244,7 +251,7 @@ func TestFieldNameErrorClassification(t *testing.T) {
 	t.Run("meta_keeps_existing_api_error_codes", func(t *testing.T) {
 		// Creation and direct name validation reject '$' with 1701. AddField
 		// already rejects system fields earlier with 1100; preserve that code.
-		requireKeywordValidationForTest(t, validateFieldName(common.MetaFieldName), true)
+		requireKeywordValidationForTest(t, validateFieldNameForTest(common.MetaFieldName), true)
 		schema := keywordValidationSchemaForTest()
 		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
 			Name: common.MetaFieldName, DataType: schemapb.DataType_Int64,
@@ -256,9 +263,9 @@ func TestFieldNameErrorClassification(t *testing.T) {
 		})
 		require.NoError(t, err)
 		add := &addCollectionFieldTask{
-			oldSchema:                 keywordValidationSchemaForTest(),
 			AddCollectionFieldRequest: &milvuspb.AddCollectionFieldRequest{Schema: field},
 		}
+		add.SetOldSchema(keywordValidationSchemaForTest())
 		requireInputValidationErrorForTest(t, add.PreExecute(context.Background()), merr.ErrParameterInvalid, 1100)
 	})
 }

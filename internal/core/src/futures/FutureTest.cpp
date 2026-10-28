@@ -37,7 +37,7 @@
 #include "futures/future_c.h"
 #include "futures/future_c_types.h"
 #include "gtest/gtest.h"
-#include "index/json_stats/JsonStatsBuildMemoryBudget.h"
+#include "segcore/json_stats/JsonStatsBuildMemoryBudget.h"
 
 using namespace milvus::futures;
 

@@ -10,7 +10,7 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 ARG MILVUS_BASE_IMAGE_REPO="milvusdb/milvus-base"
 ARG MILVUS_BASE_IMAGE_TAG="gpu-20230822-34f9067"
-FROM ghcr.io/astral-sh/uv:0.11.23 AS uv
+FROM ghcr.io/astral-sh/uv:0.12.24 AS uv
 FROM ${MILVUS_BASE_IMAGE_REPO}:${MILVUS_BASE_IMAGE_TAG}
 
 ARG MILVUS_RUNTIME_USER=milvus:milvus
@@ -22,11 +22,14 @@ ENV PYTHON=python3.12
 
 # Upgrade openssl to fix CVE-2026-45447 (base image is a pinned/legacy ubuntu20.04 build)
 RUN apt-get update && \
-    apt-get upgrade -y openssl libssl1.1 && \
+    apt-get upgrade -y openssl libssl1.1 curl libcurl4 tar zlib1g libc6 libc-bin && \
     rm -rf /var/lib/apt/lists/*
 
 RUN uv --no-cache python install 3.12.13 && \
-    ln -s /usr/local/bin/python3.12 /usr/local/bin/python3
+    ln -s /usr/local/bin/python3.12 /usr/local/bin/python3 && \
+    rm -rf /opt/uv/python/*/lib/python3.12/site-packages/pip* && \
+    uv --no-cache pip install --python python3.12 --system --break-system-packages \
+        "setuptools>=78.1.1" "msgpack>=1.2.1" "urllib3>=2.8.0"
 
 RUN groupadd -r milvus && useradd -r -g milvus milvus && \
     install -d -o milvus -g milvus /milvus /milvus/bin /var/lib/milvus

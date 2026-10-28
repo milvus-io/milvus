@@ -18,8 +18,9 @@
 #include "cachinglayer/Translator.h"
 #include "common/Types.h"
 #include "common/LoadInfo.h"
-#include "index/json_stats/bson_inverted.h"
+#include "segcore/json_stats/bson_inverted.h"
 #include "storage/FileManager.h"
+#include "common/resource_c.h"
 
 namespace milvus::segcore::storagev1translator {
 
@@ -43,7 +44,8 @@ class BsonInvertedIndexTranslator : public milvus::cachinglayer::Translator<
  public:
     BsonInvertedIndexTranslator(
         BsonInvertedIndexLoadInfo load_info,
-        milvus::storage::FileManagerContext file_manager_context);
+        milvus::storage::FileManagerContext file_manager_context,
+        milvus::OpContext* op_ctx = nullptr);
 
     ~BsonInvertedIndexTranslator() override = default;
 
@@ -77,6 +79,8 @@ class BsonInvertedIndexTranslator : public milvus::cachinglayer::Translator<
     milvus::storage::FileManagerContext file_manager_context_;
     std::string key_;
     milvus::cachinglayer::Meta meta_;
+    std::optional<LoadResourceRequest> async_load_resource_;
+    std::unique_ptr<storage::V1RemoteSource> prepared_source_;
 };
 
 }  // namespace milvus::segcore::storagev1translator

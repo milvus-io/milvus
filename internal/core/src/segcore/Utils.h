@@ -21,11 +21,12 @@
 #include "common/QueryResult.h"
 #include "common/type_c.h"
 #include "common/Types.h"
-#include "index/Index.h"
 #include "cachinglayer/Utils.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/Types.h"
 #include "common/Consts.h"
+#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/Meta.h"
 #include "segcore/SegmentInterface.h"
 
 namespace milvus::segcore {
@@ -149,7 +150,7 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                const FieldMeta& field_meta);
 
 std::unique_ptr<DataArray>
-ReverseDataFromIndex(const index::IndexBase* index,
+ReverseDataFromIndex(const index::IIndexReaderBase* index,
                      const int64_t* seg_offsets,
                      int64_t count,
                      const FieldMeta& field_meta);
@@ -275,13 +276,13 @@ GetEffectiveSearchTopk(const SearchInfo& search_info) {
                     lower_bound);
 }
 
-// SortEqualScoresByPks normalizes the in-segment ordering by sorting
-// equal-score runs by PK ASC, in place. The C++ search engine returns rows in
-// score DESC order but with undefined PK order within equal-score runs; the
+// SortEqualScoresByPks normalizes the in-segment ordering by sorting runs of
+// exactly equal scores by PK ASC, in place. The C++ search engine returns rows
+// in score DESC order but with undefined PK order within equal-score runs; the
 // Go reduce path requires a deterministic order so PK dedup picks the same
-// row across runs. Operates on seg_offsets_, distances_, primary_keys_, and
-// (if present) element_indices_ and composite_group_by_values_, using an in-place
-// cyclic permutation.
+// row across runs. Permutes primary_keys_, seg_offsets_, and (if present)
+// element_indices_ and composite_group_by_values_ using in-place cycles.
+// distances_ remain unchanged because each run contains only equal scores.
 void
 SortEqualScoresByPks(SearchResult* search_result);
 

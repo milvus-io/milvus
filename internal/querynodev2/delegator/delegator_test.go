@@ -229,7 +229,7 @@ func (s *DelegatorSuite) TestCreateDelegatorWithFunction() {
 		// once - a schema with several functions, or a re-init of the entry this
 		// mock keeps failing. Signal the first invocation only; closing these
 		// channels per invocation would panic with "close of closed channel".
-		patch := mockey.Mock(function.BuildEmbeddingRunner).To(func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema) (function.FunctionRunner, error) {
+		patch := mockey.Mock(function.BuildEmbeddingRunner).To(func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema, _ ...string) (function.FunctionRunner, error) {
 			defer doneOnce.Do(func() { close(initDone) })
 			startedOnce.Do(func() { close(initStarted) })
 			return nil, errors.New("mock runner init failure")

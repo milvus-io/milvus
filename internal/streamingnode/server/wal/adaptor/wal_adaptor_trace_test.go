@@ -476,14 +476,13 @@ func newTraceTestScannerAdaptor() *scannerAdaptorImpl {
 	logger := mlog.With()
 	scanMetrics := metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()
 	return &scannerAdaptorImpl{
-		logger:          logger,
-		filterFunc:      func(message.ImmutableMessage) bool { return true },
-		reorderBuffer:   utility.NewReOrderBuffer(),
-		pendingQueue:    utility.NewPendingQueue(),
-		txnBuffer:       utility.NewTxnBuffer(logger, scanMetrics),
-		ScannerHelper:   helper.NewScannerHelper("trace-test"),
-		metrics:         scanMetrics,
-		readRateCounter: utility.NewAverageRateCounter(10 * time.Second),
+		logger:        logger,
+		filterFunc:    func(message.ImmutableMessage) bool { return true },
+		reorderBuffer: utility.NewReOrderBuffer(),
+		pendingQueue:  utility.NewPendingQueue(),
+		txnBuffer:     utility.NewTxnBuffer(logger, scanMetrics),
+		ScannerHelper: helper.NewScannerHelper("trace-test"),
+		metrics:       scanMetrics,
 	}
 }
 
