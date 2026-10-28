@@ -15,38 +15,52 @@
 
 #include <folly/CancellationToken.h>
 #include <folly/ScopeGuard.h>
+#include <folly/system/ThreadName.h>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <functional>
+#include <future>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
+#include "cachinglayer/Manager.h"
 #include "common/Consts.h"
 #include "common/IndexMeta.h"
 #include "common/PrometheusClient.h"
 #include "common/QueryResult.h"
 #include "common/Schema.h"
 #include "common/Json.h"
+#include "futures/Executor.h"
 #include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
+#include "monitor/Monitor.h"
 #include "pb/plan.pb.h"
 #include "pb/cgo_msg.pb.h"
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
 #include "query/PlanProto.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/Utils.h"
 #include "segcore/reduce/Reduce.h"
 #include "segcore/search_result_export_c.h"
+#include "storage/ThreadPools.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/output_field_test_utils.h"
+#include "test_utils/skip_metrics_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
 using milvus::DataType;
@@ -59,6 +73,7 @@ using milvus::query::Plan;
 using milvus::query::VectorPlanNode;
 using milvus::segcore::ReduceHelper;
 using milvus::segcore::SortEqualScoresByPks;
+using milvus::test::AssertCompletesInChild;
 
 static std::string
 BuildSimpleVectorSearchPlan(milvus::FieldId vec_fid, int topk);
@@ -145,6 +160,81 @@ AttachSealedRequestLease(SearchResult& result,
         result.read_snapshot_ = sealed->CaptureReadSnapshot();
     }
 }
+
+class BlockingSearchOutputColumn : public milvus::TestMetricsColumn {
+ public:
+    BlockingSearchOutputColumn(
+        std::shared_ptr<milvus::ChunkedColumnInterface> column,
+        std::function<void(milvus::OpContext*)> before_read,
+        std::function<void(milvus::OpContext*)> after_read = {})
+        : TestMetricsColumn(std::move(column), {}),
+          before_read_(std::move(before_read)),
+          after_read_(std::move(after_read)) {
+    }
+
+    void
+    BulkPrimitiveValueAt(milvus::OpContext* op_ctx,
+                         void* dst,
+                         const int64_t* offsets,
+                         int64_t count,
+                         bool small_int_raw_type) override {
+        before_read_(op_ctx);
+        TestMetricsColumn::BulkPrimitiveValueAt(
+            op_ctx, dst, offsets, count, small_int_raw_type);
+        if (after_read_) {
+            after_read_(op_ctx);
+        }
+    }
+
+ private:
+    std::function<void(milvus::OpContext*)> before_read_;
+    std::function<void(milvus::OpContext*)> after_read_;
+};
+
+class InstrumentedGrowingSearchSegment
+    : public milvus::segcore::SegmentGrowingImpl {
+ public:
+    explicit InstrumentedGrowingSearchSegment(milvus::SchemaPtr schema)
+        : SegmentGrowingImpl(std::move(schema),
+                             nullptr,
+                             milvus::segcore::SegcoreConfig::default_config(),
+                             101) {
+    }
+
+    using SegmentGrowingImpl::bulk_subscript;
+
+    void
+    FillTargetEntry(const milvus::query::Plan* plan,
+                    SearchResult& result,
+                    milvus::OpContext* ctx) const override {
+        EXPECT_TRUE(folly::getCurrentThreadName().value_or("").starts_with(
+            "MILVUS_SEARCH_"));
+        SegmentGrowingImpl::FillTargetEntry(plan, result, ctx);
+    }
+
+    std::shared_ptr<const milvus::segcore::SegmentReadSnapshot>
+    CaptureReadSnapshot() const override {
+        EXPECT_TRUE(folly::getCurrentThreadName().value_or("").starts_with(
+            "MILVUS_SEARCH_"));
+        return SegmentGrowingImpl::CaptureReadSnapshot();
+    }
+
+    std::unique_ptr<milvus::DataArray>
+    bulk_subscript(milvus::OpContext* ctx,
+                   FieldId field_id,
+                   const int64_t* offsets,
+                   int64_t count) const override {
+        EXPECT_TRUE(folly::getCurrentThreadName().value_or("").starts_with(
+            "SRCH_FAN_POOL"));
+        if (before_read) {
+            before_read(field_id, ctx);
+        }
+        return SegmentGrowingImpl::bulk_subscript(
+            ctx, field_id, offsets, count);
+    }
+
+    std::function<void(FieldId, milvus::OpContext*)> before_read;
+};
 
 // ---------------------------------------------------------------------------
 // SortEqualScoresByPks
@@ -1737,6 +1827,10 @@ TEST(
     int64_t segment_offsets[] = {2, 0};
     ArrowSchema out_schema{};
     ArrowArray out_array{};
+    ThreadPools::GetThreadPool(ThreadPoolPriority::SEARCH_FANOUT);
+    auto submitted_before =
+        milvus::monitor::
+            internal_storage_pool_task_submitted_total_search_fanout.Value();
 
     auto status = FillFieldsOrderedAsArrowRecordBatchWithInputPlan(
         c_results.data(),
@@ -1751,6 +1845,11 @@ TEST(
         &out_array,
         nullptr);
     ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    EXPECT_EQ(milvus::monitor::
+                      internal_storage_pool_task_submitted_total_search_fanout
+                          .Value() -
+                  submitted_before,
+              2);
     auto batch_result = ImportExportedRecordBatch(&out_array, &out_schema);
     ASSERT_TRUE(batch_result.ok()) << batch_result.status().ToString();
     ASSERT_NE(*batch_result, nullptr);
@@ -2659,6 +2758,22 @@ TEST(SearchResultExport,
     auto values_b = raw_data_b.get_col<int64_t>(field_fid);
     auto segment_a = CreateSealedWithFieldDataLoaded(schema, raw_data_a);
     auto segment_b = CreateSealedWithFieldDataLoaded(schema, raw_data_b);
+    std::atomic<int> reads_a{0};
+    std::atomic<int> reads_b{0};
+    auto count_reads = [field_fid](SegmentInterface* segment,
+                                   std::atomic<int>& reads) {
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment);
+        ASSERT_NE(sealed, nullptr);
+        sealed->SetUseTakeForOutputForTesting(false);
+        auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+        runtime->fields[field_fid] =
+            std::make_shared<BlockingSearchOutputColumn>(
+                runtime->fields.at(field_fid),
+                [reads_ptr = &reads](milvus::OpContext*) { ++*reads_ptr; });
+        sealed->TestPublishRuntimeResourceState(std::move(runtime));
+    };
+    count_reads(segment_a.get(), reads_a);
+    count_reads(segment_b.get(), reads_b);
 
     auto plan_bytes = BuildSimpleVectorSearchPlan(vec_fid, /*topk=*/3);
     auto plan = milvus::query::CreateSearchPlanByExpr(
@@ -2704,6 +2819,56 @@ TEST(SearchResultExport,
     EXPECT_EQ(values->Value(0), values_b[2]);
     EXPECT_EQ(values->Value(1), values_a[1]);
     EXPECT_EQ(values->Value(2), values_b[0]);
+    EXPECT_EQ(reads_a.load(), 1);
+    EXPECT_EQ(reads_b.load(), 1);
+
+    plan->target_entries_ = {field_fid};
+    CProto out_proto{};
+    status = FillOutputFieldsOrdered(c_results.data(),
+                                     c_results.size(),
+                                     reinterpret_cast<CSearchPlan>(plan.get()),
+                                     seg_indices,
+                                     seg_offsets,
+                                     3,
+                                     &out_proto,
+                                     nullptr);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    EXPECT_EQ(reads_a.load(), 2);
+    EXPECT_EQ(reads_b.load(), 2);
+    milvus::proto::schema::SearchResultData result_data;
+    ASSERT_TRUE(
+        result_data.ParseFromArray(out_proto.proto_blob, out_proto.proto_size));
+    ASSERT_EQ(result_data.fields_data_size(), 1);
+    EXPECT_EQ(result_data.fields_data(0).scalars().long_data().data(0),
+              values_b[2]);
+    EXPECT_EQ(result_data.fields_data(0).scalars().long_data().data(1),
+              values_a[1]);
+    EXPECT_EQ(result_data.fields_data(0).scalars().long_data().data(2),
+              values_b[0]);
+    free(const_cast<void*>(out_proto.proto_blob));
+
+    CSearchResult single_result = c_results[0];
+    int32_t single_seg_index[] = {0};
+    int64_t single_seg_offset[] = {1};
+    CProto single_proto{};
+    status = FillOutputFieldsOrdered(&single_result,
+                                     1,
+                                     reinterpret_cast<CSearchPlan>(plan.get()),
+                                     single_seg_index,
+                                     single_seg_offset,
+                                     1,
+                                     &single_proto,
+                                     nullptr);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    EXPECT_EQ(reads_a.load(), 3);
+    EXPECT_EQ(reads_b.load(), 2);
+    milvus::proto::schema::SearchResultData single_result_data;
+    ASSERT_TRUE(single_result_data.ParseFromArray(single_proto.proto_blob,
+                                                  single_proto.proto_size));
+    ASSERT_EQ(single_result_data.fields_data_size(), 1);
+    EXPECT_EQ(single_result_data.fields_data(0).scalars().long_data().data(0),
+              values_a[1]);
+    free(const_cast<void*>(single_proto.proto_blob));
 }
 
 TEST(
@@ -2873,6 +3038,798 @@ TEST(
     EXPECT_EQ(out_array.release, nullptr);
     ASSERT_NE(status.error_msg, nullptr);
     free(const_cast<char*>(status.error_msg));
+}
+
+TEST(SearchResultExport,
+     FillOutputFieldsOrdered_ParallelFieldsWhileMiddleIsSaturated) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::SEARCH_FANOUT);
+    auto original_pool_size = pool.GetMaxThreadNum();
+    if (original_pool_size < 2) {
+        pool.Resize(2);
+    }
+    auto restore_pool =
+        folly::makeGuard([&] { pool.Resize(original_pool_size); });
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto first = schema->AddDebugField("first", DataType::INT64);
+    auto last = schema->AddDebugField("last", DataType::INT64);
+    auto vector = schema->AddDebugField(
+        "vector", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->set_primary_field_id(pk);
+    auto data = DataGen(schema, 4, /*seed=*/1);
+    auto first_values = data.get_col<int64_t>(first);
+    auto last_values = data.get_col<int64_t>(last);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, data);
+    auto* chunked = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(chunked, nullptr);
+    chunked->SetUseTakeForOutputForTesting(false);
+
+    std::promise<void> last_started;
+    auto last_ready = last_started.get_future().share();
+    std::atomic<bool> reads_overlapped{false};
+    std::atomic<int64_t> expected_remote_bytes{0};
+    std::atomic<int64_t> expected_total_bytes{0};
+    auto record_cost = [&](milvus::OpContext* ctx) {
+        expected_remote_bytes += ctx->storage_usage.scanned_cold_bytes.load();
+        expected_total_bytes += ctx->storage_usage.scanned_total_bytes.load();
+    };
+    auto runtime = chunked->TestCloneMutableRuntimeResourceState();
+    runtime->fields[first] = std::make_shared<BlockingSearchOutputColumn>(
+        runtime->fields.at(first),
+        [&](milvus::OpContext* ctx) {
+            ctx->storage_usage.scanned_cold_bytes += 7;
+            ctx->storage_usage.scanned_total_bytes += 11;
+            reads_overlapped = last_ready.wait_for(std::chrono::seconds(5)) ==
+                               std::future_status::ready;
+        },
+        record_cost);
+    runtime->fields[last] = std::make_shared<BlockingSearchOutputColumn>(
+        runtime->fields.at(last),
+        [&](milvus::OpContext* ctx) {
+            ctx->storage_usage.scanned_cold_bytes += 7;
+            ctx->storage_usage.scanned_total_bytes += 11;
+            last_started.set_value();
+        },
+        record_cost);
+    chunked->TestPublishRuntimeResourceState(std::move(runtime));
+
+    auto plan_bytes = BuildSimpleVectorSearchPlan(vector, /*topk=*/2);
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        schema, plan_bytes.data(), plan_bytes.size());
+    plan->target_entries_ = {first, last};
+    SearchResult result;
+    AttachSealedRequestLease(result, segment.get());
+    std::vector<CSearchResult> c_results = {
+        reinterpret_cast<CSearchResult>(&result)};
+    int32_t segment_indices[] = {0, 0};
+    int64_t segment_offsets[] = {3, 1};
+    auto& middle = ThreadPools::GetThreadPool(ThreadPoolPriority::MIDDLE);
+    const auto original_middle_size = middle.GetMaxThreadNum();
+    middle.Resize(2);
+    auto restore_middle =
+        folly::makeGuard([&] { middle.Resize(original_middle_size); });
+    std::promise<void> release_middle;
+    auto middle_released = release_middle.get_future().share();
+    std::vector<std::promise<void>> middle_started(2);
+    std::vector<std::future<void>> middle_tasks;
+    auto unblock_middle = folly::makeGuard([&] {
+        release_middle.set_value();
+        for (auto& task : middle_tasks) {
+            task.get();
+        }
+    });
+    for (auto& started : middle_started) {
+        auto ready = started.get_future();
+        middle_tasks.emplace_back(
+            middle.Submit([started = &started, middle_released] {
+                started->set_value();
+                middle_released.wait_for(std::chrono::seconds(10));
+            }));
+        ASSERT_EQ(ready.wait_for(std::chrono::seconds(5)),
+                  std::future_status::ready);
+    }
+    const auto middle_submitted_before =
+        milvus::monitor::internal_storage_pool_task_submitted_total_middle
+            .Value();
+    auto submitted_before =
+        milvus::monitor::
+            internal_storage_pool_task_submitted_total_search_fanout.Value();
+
+    CProto c_proto{};
+    auto pending = std::async(std::launch::async, [&] {
+        return FillOutputFieldsOrdered(
+            c_results.data(),
+            c_results.size(),
+            reinterpret_cast<CSearchPlan>(plan.get()),
+            segment_indices,
+            segment_offsets,
+            2,
+            &c_proto,
+            nullptr);
+    });
+    const auto completion = pending.wait_for(std::chrono::seconds(5));
+    release_middle.set_value();
+    unblock_middle.dismiss();
+    for (auto& task : middle_tasks) {
+        task.get();
+    }
+    auto status = pending.get();
+    EXPECT_EQ(completion, std::future_status::ready);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    EXPECT_EQ(milvus::monitor::internal_storage_pool_task_submitted_total_middle
+                  .Value(),
+              middle_submitted_before);
+    EXPECT_TRUE(reads_overlapped.load());
+    EXPECT_EQ(result.search_storage_cost_.scanned_remote_bytes,
+              expected_remote_bytes.load());
+    EXPECT_EQ(result.search_storage_cost_.scanned_total_bytes,
+              expected_total_bytes.load());
+    EXPECT_EQ(milvus::monitor::
+                      internal_storage_pool_task_submitted_total_search_fanout
+                          .Value() -
+                  submitted_before,
+              2);
+
+    milvus::proto::schema::SearchResultData result_data;
+    ASSERT_TRUE(
+        result_data.ParseFromArray(c_proto.proto_blob, c_proto.proto_size));
+    ASSERT_EQ(result_data.fields_data_size(), 2);
+    EXPECT_EQ(result_data.fields_data(0).field_id(), first.get());
+    EXPECT_EQ(result_data.fields_data(1).field_id(), last.get());
+    for (int i = 0; i < 2; ++i) {
+        EXPECT_EQ(result_data.fields_data(0).scalars().long_data().data(i),
+                  first_values[segment_offsets[i]]);
+        EXPECT_EQ(result_data.fields_data(1).scalars().long_data().data(i),
+                  last_values[segment_offsets[i]]);
+    }
+    free(const_cast<void*>(c_proto.proto_blob));
+}
+
+// Exercise both ordinary Search output and explicit Arrow/function inputs.
+class GrowingSearchOutputFieldsTest : public ::testing::TestWithParam<bool> {
+ protected:
+    void
+    SetUp() override {
+        auto& pool = milvus::ThreadPools::GetThreadPool(
+            milvus::ThreadPoolPriority::SEARCH_FANOUT);
+        original_pool_size_ = pool.GetMaxThreadNum();
+        pool.Resize(2);
+        schema_ = std::make_shared<Schema>();
+        pk_ = schema_->AddDebugField("pk", DataType::INT64);
+        first_ = schema_->AddDebugField("first", DataType::INT64);
+        last_ = schema_->AddDebugField("last", DataType::INT64);
+        // Concurrent inserts must be able to update variable-field size stats.
+        schema_->AddDebugField("variable", DataType::VARCHAR);
+        vector_ = schema_->AddDebugField(
+            "vector", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+        schema_->set_primary_field_id(pk_);
+        data_.emplace(milvus::segcore::DataGen(schema_, 4, /*seed=*/1));
+        segment_ = std::make_unique<InstrumentedGrowingSearchSegment>(schema_);
+        InsertBatch(segment_.get(), *data_);
+        auto plan_bytes = BuildSimpleVectorSearchPlan(vector_, /*topk=*/3);
+        plan_ = milvus::query::CreateSearchPlanByExpr(
+            schema_, plan_bytes.data(), plan_bytes.size());
+        plan_->target_entries_ = {first_, last_};
+        result_.segment_ = segment_.get();
+    }
+
+    void
+    TearDown() override {
+        ResetOutput();
+        milvus::ThreadPools::GetThreadPool(
+            milvus::ThreadPoolPriority::SEARCH_FANOUT)
+            .Resize(original_pool_size_);
+    }
+
+    static void
+    InsertBatch(milvus::segcore::SegmentGrowing* segment,
+                const milvus::segcore::GeneratedData& data) {
+        const auto rows = data.raw_->num_rows();
+        const auto offset = segment->PreInsert(rows);
+        segment->Insert(
+            offset,
+            rows,
+            data.row_ids_.data(),
+            data.timestamps_.data(),
+            std::make_shared<milvus::InsertRecordProto>(*data.raw_));
+    }
+
+    void
+    ResetOutput() {
+        free(const_cast<void*>(proto_.proto_blob));
+        proto_ = {};
+        if (array_.release != nullptr) {
+            array_.release(&array_);
+        }
+        if (arrow_schema_.release != nullptr) {
+            arrow_schema_.release(&arrow_schema_);
+        }
+    }
+
+    CStatus
+    Export(std::vector<CSearchResult> results,
+           const std::vector<int32_t>& indices,
+           const std::vector<int64_t>& offsets,
+           folly::CancellationSource* cancellation = nullptr) {
+        ResetOutput();
+        if (!GetParam()) {
+            return FillOutputFieldsOrdered(
+                results.data(),
+                results.size(),
+                reinterpret_cast<CSearchPlan>(plan_.get()),
+                indices.data(),
+                offsets.data(),
+                offsets.size(),
+                &proto_,
+                cancellation);
+        }
+        milvus::proto::cgo::FunctionChainInputPlan input_plan;
+        for (auto field_id : plan_->target_entries_) {
+            const auto& meta = plan_->schema_->operator[](field_id);
+            *input_plan.add_inputs() = ScalarInputProjection(
+                field_id, meta.get_data_type(), meta.get_name().get());
+        }
+        const auto bytes = input_plan_override_.empty()
+                               ? input_plan.SerializeAsString()
+                               : input_plan_override_;
+        return FillFieldsOrderedAsArrowRecordBatchWithInputPlan(
+            results.data(),
+            results.size(),
+            reinterpret_cast<CSearchPlan>(plan_.get()),
+            bytes.data(),
+            bytes.size(),
+            indices.data(),
+            offsets.data(),
+            offsets.size(),
+            &arrow_schema_,
+            &array_,
+            cancellation);
+    }
+
+    CStatus
+    Export(folly::CancellationSource* cancellation = nullptr) {
+        return Export({&result_}, {0, 0, 0}, offsets_, cancellation);
+    }
+
+    void
+    ExpectValues(const std::vector<std::vector<int64_t>>& expected) {
+        if (GetParam()) {
+            auto batch = ImportExportedRecordBatch(&array_, &arrow_schema_);
+            ASSERT_TRUE(batch.ok()) << batch.status().ToString();
+            ASSERT_EQ((*batch)->num_columns(), expected.size());
+            for (size_t i = 0; i < expected.size(); ++i) {
+                auto values = std::static_pointer_cast<arrow::Int64Array>(
+                    (*batch)->column(i));
+                ASSERT_EQ(values->length(), expected[i].size());
+                for (size_t j = 0; j < expected[i].size(); ++j) {
+                    ASSERT_FALSE(values->IsNull(j));
+                    ASSERT_EQ(values->Value(j), expected[i][j]);
+                }
+            }
+        } else {
+            milvus::proto::schema::SearchResultData output;
+            ASSERT_TRUE(
+                output.ParseFromArray(proto_.proto_blob, proto_.proto_size));
+            ASSERT_EQ(output.fields_data_size(), expected.size());
+            for (size_t i = 0; i < expected.size(); ++i) {
+                ASSERT_EQ(output.fields_data(i).field_id(),
+                          plan_->target_entries_[i].get());
+                const auto& values =
+                    output.fields_data(i).scalars().long_data();
+                ASSERT_EQ(values.data_size(), expected[i].size());
+                for (size_t j = 0; j < expected[i].size(); ++j) {
+                    ASSERT_EQ(values.data(j), expected[i][j]);
+                }
+            }
+        }
+    }
+
+    int original_pool_size_{1};
+    milvus::SchemaPtr schema_;
+    FieldId pk_{0}, first_{0}, last_{0}, vector_{0};
+    std::optional<milvus::segcore::GeneratedData> data_;
+    std::unique_ptr<InstrumentedGrowingSearchSegment> segment_;
+    std::unique_ptr<Plan> plan_;
+    SearchResult result_;
+    const std::vector<int64_t> offsets_{3, 1, 3};
+    CProto proto_{};
+    ArrowSchema arrow_schema_{};
+    ArrowArray array_{};
+    std::string input_plan_override_;
+};
+
+INSTANTIATE_TEST_SUITE_P(OutputFormats,
+                         GrowingSearchOutputFieldsTest,
+                         ::testing::Bool(),
+                         [](const ::testing::TestParamInfo<bool>& param) {
+                             return param.param ? "Arrow" : "Proto";
+                         });
+
+TEST_P(GrowingSearchOutputFieldsTest, BothPoolsMakeProgressWithOneWorker) {
+    AssertCompletesInChild([&] {
+        using namespace milvus;
+        using namespace milvus::segcore;
+
+        auto second_data = DataGen(schema_, 4, /*seed=*/2);
+        // Distinct Growing objects may share the same logical segment id.
+        auto second =
+            std::make_unique<InstrumentedGrowingSearchSegment>(schema_);
+        InsertBatch(second.get(), second_data);
+        auto sealed = CreateSealedWithFieldDataLoaded(schema_, second_data);
+        static_cast<ChunkedSegmentSealedImpl*>(sealed.get())
+            ->SetUseTakeForOutputForTesting(false);
+        auto& pool =
+            ThreadPools::GetThreadPool(ThreadPoolPriority::SEARCH_FANOUT);
+        pool.Resize(1);
+        auto* search = milvus::futures::getSearchCPUExecutor();
+        const auto original_search_size = search->numThreads();
+        search->setNumThreads(1);
+        auto restore_search = folly::makeGuard(
+            [&] { search->setNumThreads(original_search_size); });
+        const std::vector<std::vector<SegmentInternalInterface*>> layouts = {
+            {segment_.get()},
+            {segment_.get(), sealed.get()},
+            {segment_.get(), second.get()},
+            {segment_.get(), segment_.get()},
+        };
+        for (const auto& layout : layouts) {
+            SCOPED_TRACE(::testing::Message() << "segments=" << layout.size()
+                                              << ", last=" << layout.back());
+            plan_->target_entries_ = {last_};
+            if (layout.size() > 1) {
+                plan_->target_entries_.push_back(first_);
+            }
+            std::vector<SearchResult> results(layout.size());
+            std::vector<CSearchResult> c_results;
+            for (size_t i = 0; i < layout.size(); ++i) {
+                if (layout[i]->type() == SegmentType::Sealed) {
+                    AttachSealedRequestLease(results[i], layout[i]);
+                } else {
+                    results[i].segment_ = layout[i];
+                }
+                c_results.push_back(&results[i]);
+            }
+            const std::vector<int64_t> offsets{3, 1, 3, 0};
+            std::vector<int32_t> indices;
+            std::vector<std::vector<int64_t>> expected(
+                plan_->target_entries_.size());
+            for (size_t i = 0; i < offsets.size(); ++i) {
+                indices.push_back(i % layout.size());
+                const auto& data = layout[indices.back()] == segment_.get()
+                                       ? *data_
+                                       : second_data;
+                for (size_t j = 0; j < expected.size(); ++j) {
+                    expected[j].push_back(data.get_col<int64_t>(
+                        plan_->target_entries_[j])[offsets[i]]);
+                }
+            }
+            const auto fanout_before =
+                milvus::monitor::
+                    internal_storage_pool_task_submitted_total_search_fanout
+                        .Value();
+            auto pending = std::async(std::launch::async, [&] {
+                return Export(c_results, indices, offsets);
+            });
+            ASSERT_EQ(pending.wait_for(std::chrono::seconds(5)),
+                      std::future_status::ready);
+            auto status = pending.get();
+            ASSERT_EQ(status.error_code, 0) << status.error_msg;
+            EXPECT_EQ(
+                milvus::monitor::
+                        internal_storage_pool_task_submitted_total_search_fanout
+                            .Value() -
+                    fanout_before,
+                layout.size() * plan_->target_entries_.size());
+            ExpectValues(expected);
+        }
+    });
+}
+
+TEST_P(GrowingSearchOutputFieldsTest, FieldReadsOverlap) {
+    std::promise<void> last_started;
+    auto last_ready = last_started.get_future();
+    std::atomic<bool> overlapped{false};
+    milvus::OpContext* contexts[2]{};
+    segment_->before_read = [&](FieldId field, milvus::OpContext* ctx) {
+        contexts[field.get() == first_.get() ? 0 : 1] = ctx;
+        if (field.get() == first_.get()) {
+            overlapped = last_ready.wait_for(std::chrono::seconds(5)) ==
+                         std::future_status::ready;
+        } else {
+            last_started.set_value();
+        }
+    };
+    auto status = Export();
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    EXPECT_TRUE(overlapped.load());
+    EXPECT_NE(contexts[0], nullptr);
+    EXPECT_NE(contexts[1], nullptr);
+    EXPECT_NE(contexts[0], contexts[1]);
+    std::vector<std::vector<int64_t>> expected;
+    for (auto field : plan_->target_entries_) {
+        const auto values = data_->get_col<int64_t>(field);
+        expected.push_back({values[3], values[1], values[3]});
+    }
+    ExpectValues(expected);
+}
+
+TEST_P(GrowingSearchOutputFieldsTest, FailureDrainsOtherFieldsBeforeReturn) {
+    using namespace milvus;
+    std::promise<void> first_started, last_failed, release_first;
+    auto first_ready = first_started.get_future().share();
+    auto failure_ready = last_failed.get_future();
+    auto released = release_first.get_future().share();
+    std::atomic<bool> first_exited{false};
+    segment_->before_read = [&](FieldId field, milvus::OpContext*) {
+        if (field.get() == first_.get()) {
+            first_started.set_value();
+            released.wait_for(std::chrono::seconds(5));
+            first_exited = true;
+        } else {
+            EXPECT_EQ(first_ready.wait_for(std::chrono::seconds(5)),
+                      std::future_status::ready);
+            last_failed.set_value();
+            throw SegcoreError(FileReadFailed,
+                               "injected growing field failure");
+        }
+    };
+    // Collect the failed future first, with the other field still in flight.
+    plan_->target_entries_ = {last_, first_};
+    auto pending = std::async(std::launch::async, [&] { return Export(); });
+    EXPECT_EQ(failure_ready.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(50)),
+              std::future_status::timeout);
+    release_first.set_value();
+    auto status = pending.get();
+    EXPECT_EQ(status.error_code, FileReadFailed);
+    free(const_cast<char*>(status.error_msg));
+    EXPECT_TRUE(first_exited.load());
+    EXPECT_EQ(proto_.proto_blob, nullptr);
+    EXPECT_EQ(array_.release, nullptr);
+    EXPECT_EQ(arrow_schema_.release, nullptr);
+}
+
+TEST_P(GrowingSearchOutputFieldsTest,
+       CancellationDrainsRunningFieldsBeforeReturn) {
+    using namespace milvus;
+    std::promise<void> first_started, last_started, release;
+    auto first_ready = first_started.get_future();
+    auto last_ready = last_started.get_future();
+    auto released = release.get_future().share();
+    std::atomic<int> exited{0};
+    segment_->before_read = [&](FieldId field, milvus::OpContext* ctx) {
+        (field.get() == first_.get() ? first_started : last_started)
+            .set_value();
+        released.wait_for(std::chrono::seconds(5));
+        ++exited;
+        segcore::CheckCancellation(ctx, segment_->get_segment_id(), "field");
+    };
+    folly::CancellationSource cancellation;
+    auto pending =
+        std::async(std::launch::async, [&] { return Export(&cancellation); });
+    EXPECT_EQ(first_ready.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    EXPECT_EQ(last_ready.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    cancellation.requestCancellation();
+    EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(50)),
+              std::future_status::timeout);
+    release.set_value();
+    auto status = pending.get();
+    EXPECT_EQ(status.error_code, FollyCancel);
+    free(const_cast<char*>(status.error_msg));
+    EXPECT_EQ(exited.load(), 2);
+    EXPECT_EQ(proto_.proto_blob, nullptr);
+    EXPECT_EQ(array_.release, nullptr);
+    EXPECT_EQ(arrow_schema_.release, nullptr);
+}
+
+TEST_P(GrowingSearchOutputFieldsTest, FieldReadsOverlapInsert) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+    std::promise<void> readers_started, writer_started;
+    auto readers_ready = readers_started.get_future();
+    auto writer_ready = writer_started.get_future().share();
+    std::atomic<int> readers{0}, read_batches{0};
+    std::atomic<bool> writer_done{false};
+    std::map<FieldId, std::string> expected;
+    for (auto field : plan_->target_entries_) {
+        expected[field] =
+            segment_
+                ->SegmentGrowingImpl::bulk_subscript(
+                    nullptr, field, offsets_.data(), offsets_.size())
+                ->SerializeAsString();
+    }
+    segment_->before_read = [&](FieldId field, milvus::OpContext* ctx) {
+        if (++readers == 2) {
+            readers_started.set_value();
+        }
+        EXPECT_EQ(writer_ready.wait_for(std::chrono::seconds(5)),
+                  std::future_status::ready);
+        const auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        do {
+            auto value = segment_->SegmentGrowingImpl::bulk_subscript(
+                ctx, field, offsets_.data(), offsets_.size());
+            EXPECT_EQ(value->SerializeAsString(), expected.at(field));
+            ++read_batches;
+            std::this_thread::yield();
+        } while (!writer_done && std::chrono::steady_clock::now() < deadline);
+        EXPECT_TRUE(writer_done.load());
+    };
+    auto writer = std::async(std::launch::async, [&] {
+        auto finished = folly::makeGuard([&] { writer_done = true; });
+        EXPECT_EQ(readers_ready.wait_for(std::chrono::seconds(5)),
+                  std::future_status::ready);
+        writer_started.set_value();
+        for (int i = 0; i < 4; ++i) {
+            InsertBatch(segment_.get(), *data_);
+            std::this_thread::yield();
+        }
+    });
+    auto status = Export();
+    writer.get();
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    EXPECT_EQ(readers.load(), 2);
+    EXPECT_GT(read_batches.load(), 0);
+    EXPECT_EQ(segment_->get_row_count(), 4 * 5);
+    std::vector<std::vector<int64_t>> values;
+    for (auto field : plan_->target_entries_) {
+        const auto data = data_->get_col<int64_t>(field);
+        values.push_back({data[3], data[1], data[3]});
+    }
+    ExpectValues(values);
+}
+
+TEST_P(GrowingSearchOutputFieldsTest,
+       DynamicAndMissingFieldsPreserveSemantics) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+    auto data_schema = std::make_shared<Schema>(*schema_);
+    auto dynamic = data_schema->AddDebugField("$meta", DataType::JSON);
+    data_schema->set_dynamic_field_id(dynamic);
+    auto data = DataGen(data_schema, 4);
+    for (auto& field : *data.raw_->mutable_fields_data()) {
+        if (field.field_id() == dynamic.get()) {
+            for (auto& json : *field.mutable_scalars()
+                                   ->mutable_json_data()
+                                   ->mutable_data()) {
+                json = R"({"keep":42,"drop":99})";
+            }
+        }
+    }
+    segment_ = std::make_unique<InstrumentedGrowingSearchSegment>(data_schema);
+    InsertBatch(segment_.get(), data);
+    result_.segment_ = segment_.get();
+    auto evolved = std::make_shared<Schema>(*data_schema);
+    DefaultValueType default_value;
+    default_value.set_long_data(123);
+    const auto added = evolved->AddDebugFieldWithDefaultValue(
+        "added", DataType::INT64, default_value);
+    auto bytes = BuildSimpleVectorSearchPlan(vector_, /*topk=*/3);
+    plan_ = milvus::query::CreateSearchPlanByExpr(
+        evolved, bytes.data(), bytes.size());
+    plan_->target_entries_ = {dynamic, added};
+    plan_->target_dynamic_fields_ = {"drop"};
+    // Arrow needs the full JSON root, not ordinary Search's "drop" extraction.
+    input_plan_override_ = SerializeInputPlan(
+        {JSONInputProjection(dynamic, DataType::INT64, "keep", {"keep"}),
+         ScalarInputProjection(added, DataType::INT64, "added")});
+    auto status = Export();
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    if (GetParam()) {
+        ExpectValues({{42, 42, 42}, {123, 123, 123}});
+    } else {
+        proto::schema::SearchResultData output;
+        ASSERT_TRUE(
+            output.ParseFromArray(proto_.proto_blob, proto_.proto_size));
+        ASSERT_EQ(output.fields_data_size(), 2);
+        const auto& json = output.fields_data(0).scalars().json_data();
+        const auto& defaults = output.fields_data(1).scalars().long_data();
+        ASSERT_EQ(json.data_size(), offsets_.size());
+        ASSERT_EQ(defaults.data_size(), offsets_.size());
+        for (size_t i = 0; i < offsets_.size(); ++i) {
+            EXPECT_EQ(json.data(i), R"({"drop":99})");
+            EXPECT_EQ(defaults.data(i), 123);
+        }
+    }
+}
+
+TEST(SearchResultExport,
+     FillOutputFieldsOrdered_SegmentFailureDrainsOtherSegments) {
+    AssertCompletesInChild([&] {
+        using namespace milvus;
+        using namespace milvus::segcore;
+
+        auto& pool =
+            ThreadPools::GetThreadPool(ThreadPoolPriority::SEARCH_FANOUT);
+        auto original_pool_size = pool.GetMaxThreadNum();
+        if (original_pool_size < 2) {
+            pool.Resize(2);
+        }
+        auto restore_pool =
+            folly::makeGuard([&] { pool.Resize(original_pool_size); });
+        auto* search = milvus::futures::getSearchCPUExecutor();
+        const auto original_search_size = search->numThreads();
+        search->setNumThreads(2);
+        auto restore_search = folly::makeGuard(
+            [&] { search->setNumThreads(original_search_size); });
+
+        auto schema = std::make_shared<Schema>();
+        auto pk = schema->AddDebugField("pk", DataType::INT64);
+        auto field = schema->AddDebugField("value", DataType::INT64);
+        auto vector = schema->AddDebugField(
+            "vector", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+        schema->set_primary_field_id(pk);
+        auto data = DataGen(schema, 4, /*seed=*/1);
+        auto failed_segment = CreateSealedWithFieldDataLoaded(schema, data);
+        auto blocked_segment = CreateSealedWithFieldDataLoaded(schema, data);
+        auto* failed =
+            dynamic_cast<ChunkedSegmentSealedImpl*>(failed_segment.get());
+        auto* blocked =
+            dynamic_cast<ChunkedSegmentSealedImpl*>(blocked_segment.get());
+        ASSERT_NE(failed, nullptr);
+        ASSERT_NE(blocked, nullptr);
+        failed->SetUseTakeForOutputForTesting(false);
+        blocked->SetUseTakeForOutputForTesting(false);
+
+        std::promise<void> blocked_started, segment_failed, release_blocked;
+        auto blocked_ready = blocked_started.get_future().share();
+        auto failure_ready = segment_failed.get_future();
+        auto released = release_blocked.get_future().share();
+        std::atomic<bool> blocked_exited{false};
+        auto failed_runtime = failed->TestCloneMutableRuntimeResourceState();
+        failed_runtime->fields[field] =
+            std::make_shared<BlockingSearchOutputColumn>(
+                failed_runtime->fields.at(field), [&](milvus::OpContext*) {
+                    EXPECT_EQ(blocked_ready.wait_for(std::chrono::seconds(5)),
+                              std::future_status::ready);
+                    segment_failed.set_value();
+                    throw SegcoreError(ErrorCode::FileReadFailed,
+                                       "injected search segment failure");
+                });
+        failed->TestPublishRuntimeResourceState(std::move(failed_runtime));
+        auto blocked_runtime = blocked->TestCloneMutableRuntimeResourceState();
+        blocked_runtime->fields[field] =
+            std::make_shared<BlockingSearchOutputColumn>(
+                blocked_runtime->fields.at(field), [&](milvus::OpContext*) {
+                    blocked_started.set_value();
+                    EXPECT_EQ(released.wait_for(std::chrono::seconds(5)),
+                              std::future_status::ready);
+                    blocked_exited = true;
+                });
+        blocked->TestPublishRuntimeResourceState(std::move(blocked_runtime));
+
+        auto plan_bytes = BuildSimpleVectorSearchPlan(vector, /*topk=*/2);
+        auto plan = milvus::query::CreateSearchPlanByExpr(
+            schema, plan_bytes.data(), plan_bytes.size());
+        plan->target_entries_ = {field};
+        SearchResult failed_result, blocked_result;
+        AttachSealedRequestLease(failed_result, failed_segment.get());
+        AttachSealedRequestLease(blocked_result, blocked_segment.get());
+        CSearchResult c_results[] = {&failed_result, &blocked_result};
+        int32_t segment_indices[] = {0, 1};
+        int64_t segment_offsets[] = {1, 2};
+        CProto c_proto{};
+        auto pending = std::async(std::launch::async, [&] {
+            return FillOutputFieldsOrdered(
+                c_results,
+                2,
+                reinterpret_cast<CSearchPlan>(plan.get()),
+                segment_indices,
+                segment_offsets,
+                2,
+                &c_proto,
+                nullptr);
+        });
+        EXPECT_EQ(failure_ready.wait_for(std::chrono::seconds(5)),
+                  std::future_status::ready);
+        EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(50)),
+                  std::future_status::timeout);
+        EXPECT_FALSE(blocked_exited.load());
+        release_blocked.set_value();
+        auto status = pending.get();
+        EXPECT_EQ(status.error_code, ErrorCode::FileReadFailed);
+        EXPECT_TRUE(blocked_exited.load());
+        EXPECT_EQ(c_proto.proto_blob, nullptr);
+        if (status.error_code != 0 && status.error_msg != nullptr) {
+            free(const_cast<char*>(status.error_msg));
+        }
+    });
+}
+
+TEST(SearchResultExport,
+     FillOutputFieldsOrdered_CancellationDrainsRunningFields) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    auto& pool = ThreadPools::GetThreadPool(ThreadPoolPriority::SEARCH_FANOUT);
+    auto original_pool_size = pool.GetMaxThreadNum();
+    if (original_pool_size < 2) {
+        pool.Resize(2);
+    }
+    auto restore_pool =
+        folly::makeGuard([&] { pool.Resize(original_pool_size); });
+
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto first = schema->AddDebugField("first", DataType::INT64);
+    auto last = schema->AddDebugField("last", DataType::INT64);
+    auto vector = schema->AddDebugField(
+        "vector", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->set_primary_field_id(pk);
+    auto data = DataGen(schema, 4, /*seed=*/1);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, data);
+    auto* chunked = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(chunked, nullptr);
+    chunked->SetUseTakeForOutputForTesting(false);
+
+    std::promise<void> first_started;
+    auto first_ready = first_started.get_future();
+    std::promise<void> last_started;
+    auto last_ready = last_started.get_future();
+    std::promise<void> release;
+    auto released = release.get_future().share();
+    std::atomic<int> exited{0};
+    auto before_read = [&](std::promise<void>& started,
+                           milvus::OpContext* ctx) {
+        started.set_value();
+        released.wait_for(std::chrono::seconds(5));
+        ++exited;
+        CheckCancellation(ctx, segment->get_segment_id(), "search field");
+    };
+    auto runtime = chunked->TestCloneMutableRuntimeResourceState();
+    runtime->fields[first] = std::make_shared<BlockingSearchOutputColumn>(
+        runtime->fields.at(first),
+        [&](milvus::OpContext* ctx) { before_read(first_started, ctx); });
+    runtime->fields[last] = std::make_shared<BlockingSearchOutputColumn>(
+        runtime->fields.at(last),
+        [&](milvus::OpContext* ctx) { before_read(last_started, ctx); });
+    chunked->TestPublishRuntimeResourceState(std::move(runtime));
+
+    auto plan_bytes = BuildSimpleVectorSearchPlan(vector, /*topk=*/2);
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        schema, plan_bytes.data(), plan_bytes.size());
+    plan->target_entries_ = {first, last};
+    SearchResult result;
+    AttachSealedRequestLease(result, segment.get());
+    std::vector<CSearchResult> c_results = {
+        reinterpret_cast<CSearchResult>(&result)};
+    int32_t segment_indices[] = {0};
+    int64_t segment_offsets[] = {1};
+    folly::CancellationSource source;
+    CProto c_proto{};
+    auto pending = std::async(std::launch::async, [&] {
+        return FillOutputFieldsOrdered(
+            c_results.data(),
+            c_results.size(),
+            reinterpret_cast<CSearchPlan>(plan.get()),
+            segment_indices,
+            segment_offsets,
+            1,
+            &c_proto,
+            &source);
+    });
+    EXPECT_EQ(first_ready.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    EXPECT_EQ(last_ready.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    source.requestCancellation();
+    EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(50)),
+              std::future_status::timeout);
+    release.set_value();
+    auto status = pending.get();
+    EXPECT_EQ(status.error_code, ErrorCode::FollyCancel);
+    EXPECT_EQ(exited.load(), 2);
+    EXPECT_EQ(c_proto.proto_blob, nullptr);
+    if (status.error_msg != nullptr) {
+        free(const_cast<char*>(status.error_msg));
+    }
 }
 
 TEST(SearchResultExport, FillOutputFieldsOrdered_Basic) {

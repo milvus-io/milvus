@@ -19,7 +19,14 @@
 #include <arrow/compute/api.h>
 #include <arrow/table.h>
 #include <arrow/type.h>
+#include <folly/ScopeGuard.h>
+#include <folly/system/ThreadName.h>
+#include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <cstdlib>
+#include <functional>
+#include <future>
 #include <memory>
 #include <optional>
 #include <string>
@@ -33,22 +40,30 @@
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "common/VirtualPK.h"
+#include "futures/Executor.h"
 #include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
 #include "milvus-storage/lob_column/lob_reference.h"
 #include "milvus-storage/properties.h"
 #include "milvus-storage/reader.h"
+#include "monitor/Monitor.h"
 #include "query/PlanImpl.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealed.h"
+#include "segcore/search_result_export_c.h"
+#include "storage/ThreadPools.h"
 #include "storage/Util.h"
 #include "storage/loon_ffi/external_spec_c.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
 #include "test_utils/cachinglayer_test_utils.h"
+#include "test_utils/DataGen.h"
+#include "test_utils/output_field_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
+using milvus::test::AssertCompletesInChild;
 
 namespace {
 
@@ -157,6 +172,7 @@ CreateExternalSegment(SegmentSealedUPtr& holder,
 class MockTakeReader : public milvus_storage::api::Reader {
  public:
     std::shared_ptr<arrow::Table> table_;
+    std::function<void()> before_take;
 
     explicit MockTakeReader(std::shared_ptr<arrow::Table> table)
         : table_(std::move(table)) {
@@ -183,6 +199,10 @@ class MockTakeReader : public milvus_storage::api::Reader {
          size_t,
          const std::shared_ptr<std::vector<std::string>>& needed_columns)
         override {
+        take_calls_.fetch_add(1, std::memory_order_relaxed);
+        if (before_take) {
+            before_take();
+        }
         if (!table_) {
             return arrow::Status::Invalid("no table");
         }
@@ -205,12 +225,19 @@ class MockTakeReader : public milvus_storage::api::Reader {
         return SelectRows(table_, row_indices);
     }
 
+    int64_t
+    take_calls() const {
+        return take_calls_.load(std::memory_order_relaxed);
+    }
+
     void
     set_keyretriever(
         const std::function<std::string(const std::string&)>&) override {
     }
 
  private:
+    std::atomic<int64_t> take_calls_{0};
+
     // Select rows from table at given indices using arrow::compute::Take.
     static arrow::Result<std::shared_ptr<arrow::Table>>
     SelectRows(const std::shared_ptr<arrow::Table>& table,
@@ -1603,6 +1630,194 @@ TEST(ExternalTakeTest, TryTakeForSearch_MultiTypes) {
     // Row 1: [4,5,6,7], Row 3: [12,13,14,15]
     EXPECT_FLOAT_EQ(vec_arr->vectors().float_vector().data(0), 4.0f);
     EXPECT_FLOAT_EQ(vec_arr->vectors().float_vector().data(4), 12.0f);
+}
+
+TEST(ExternalTakeTest,
+     OrderedSearchOutputKeepsBatchTakeForOneOrMultipleFields) {
+    auto [schema,
+          bool_id,
+          int8_id,
+          int16_id,
+          int32_id,
+          int64_id,
+          float_id,
+          double_id,
+          varchar_id,
+          vec_id] = BuildExternalSchema();
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, schema);
+    auto reader = std::make_unique<MockTakeReader>(BuildTestArrowTable());
+    auto* reader_ptr = reader.get();
+    segment->SetReaderForTesting(std::move(reader));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    ThreadPools::GetThreadPool(ThreadPoolPriority::MIDDLE);
+    ThreadPools::GetThreadPool(ThreadPoolPriority::SEARCH_FANOUT);
+    const auto middle_submitted =
+        milvus::monitor::internal_storage_pool_task_submitted_total_middle
+            .Value();
+    const auto search_fanout_submitted =
+        milvus::monitor::
+            internal_storage_pool_task_submitted_total_search_fanout.Value();
+
+    query::Plan plan(schema);
+    plan.target_entries_ = {int64_id, varchar_id};
+    SearchResult result;
+    result.segment_ = segment;
+    result.read_lease_ = segment->AcquireReadLease(folly::CancellationToken());
+    result.read_snapshot_ = segment->CaptureReadSnapshot();
+    CSearchResult c_results[] = {reinterpret_cast<CSearchResult>(&result)};
+    int32_t segment_indices[] = {0, 0};
+    int64_t segment_offsets[] = {1, 3};
+    CProto c_proto{};
+    auto status = FillOutputFieldsOrdered(c_results,
+                                          1,
+                                          reinterpret_cast<CSearchPlan>(&plan),
+                                          segment_indices,
+                                          segment_offsets,
+                                          2,
+                                          &c_proto,
+                                          nullptr);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    milvus::proto::schema::SearchResultData output;
+    ASSERT_TRUE(output.ParseFromArray(c_proto.proto_blob, c_proto.proto_size));
+    ASSERT_EQ(output.fields_data_size(), 2);
+    EXPECT_EQ(output.fields_data(0).scalars().long_data().data(0), 10000);
+    EXPECT_EQ(output.fields_data(0).scalars().long_data().data(1), 30000);
+    EXPECT_EQ(output.fields_data(1).scalars().string_data().data(0), "row_1");
+    EXPECT_EQ(output.fields_data(1).scalars().string_data().data(1), "row_3");
+    EXPECT_EQ(reader_ptr->take_calls(), 1);
+    EXPECT_EQ(milvus::monitor::internal_storage_pool_task_submitted_total_middle
+                  .Value(),
+              middle_submitted);
+    EXPECT_EQ(
+        milvus::monitor::
+            internal_storage_pool_task_submitted_total_search_fanout.Value(),
+        search_fanout_submitted);
+    free(const_cast<void*>(c_proto.proto_blob));
+
+    plan.target_entries_ = {int64_id};
+    CProto single_field_proto{};
+    status = FillOutputFieldsOrdered(c_results,
+                                     1,
+                                     reinterpret_cast<CSearchPlan>(&plan),
+                                     segment_indices,
+                                     segment_offsets,
+                                     2,
+                                     &single_field_proto,
+                                     nullptr);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    milvus::proto::schema::SearchResultData single_field_output;
+    ASSERT_TRUE(single_field_output.ParseFromArray(
+        single_field_proto.proto_blob, single_field_proto.proto_size));
+    ASSERT_EQ(single_field_output.fields_data_size(), 1);
+    EXPECT_EQ(single_field_output.fields_data(0).scalars().long_data().data(0),
+              10000);
+    EXPECT_EQ(single_field_output.fields_data(0).scalars().long_data().data(1),
+              30000);
+    EXPECT_EQ(reader_ptr->take_calls(), 2);
+    EXPECT_EQ(milvus::monitor::internal_storage_pool_task_submitted_total_middle
+                  .Value(),
+              middle_submitted);
+    EXPECT_EQ(
+        milvus::monitor::
+            internal_storage_pool_task_submitted_total_search_fanout.Value(),
+        search_fanout_submitted);
+    free(const_cast<void*>(single_field_proto.proto_blob));
+}
+
+TEST(ExternalTakeTest, OrderedSearchOutputOtherSegmentReadsDuringTake) {
+    AssertCompletesInChild([&] {
+        class SignallingGrowingSegment : public SegmentGrowingImpl {
+         public:
+            using SegmentGrowingImpl::bulk_subscript;
+            using SegmentGrowingImpl::SegmentGrowingImpl;
+
+            std::unique_ptr<DataArray>
+            bulk_subscript(milvus::OpContext* ctx,
+                           FieldId field_id,
+                           const int64_t* offsets,
+                           int64_t count) const override {
+                EXPECT_TRUE(
+                    folly::getCurrentThreadName().value_or("").starts_with(
+                        "SRCH_FAN_POOL"));
+                on_read();
+                return SegmentGrowingImpl::bulk_subscript(
+                    ctx, field_id, offsets, count);
+            }
+
+            std::function<void()> on_read;
+        };
+
+        auto info = BuildExternalSchema();
+        auto* search = milvus::futures::getSearchCPUExecutor();
+        auto& fanout =
+            ThreadPools::GetThreadPool(ThreadPoolPriority::SEARCH_FANOUT);
+        const auto original_search_size = search->numThreads();
+        const auto original_fanout_size = fanout.GetMaxThreadNum();
+        search->setNumThreads(2);
+        fanout.Resize(1);
+        auto restore_pools = folly::makeGuard([&] {
+            search->setNumThreads(original_search_size);
+            fanout.Resize(original_fanout_size);
+        });
+
+        std::promise<void> field_started;
+        auto field_ready = field_started.get_future();
+        SegmentSealedUPtr holder;
+        auto* sealed = CreateExternalSegment(holder, info.schema);
+        auto reader = std::make_unique<MockTakeReader>(BuildTestArrowTable());
+        reader->before_take = [&] {
+            EXPECT_TRUE(folly::getCurrentThreadName().value_or("").starts_with(
+                "MILVUS_SEARCH_"));
+            // One segment's take must not hold up another segment's field reads.
+            EXPECT_EQ(field_ready.wait_for(std::chrono::seconds(5)),
+                      std::future_status::ready);
+        };
+        sealed->SetReaderForTesting(std::move(reader));
+        sealed->SetUseTakeForOutputForTesting(true);
+
+        SignallingGrowingSegment growing(
+            info.schema, nullptr, SegcoreConfig::default_config(), 102);
+        auto data = DataGen(info.schema, kTestRows);
+        auto reserved = growing.PreInsert(kTestRows);
+        growing.Insert(reserved,
+                       kTestRows,
+                       data.row_ids_.data(),
+                       data.timestamps_.data(),
+                       std::make_shared<InsertRecordProto>(*data.raw_));
+        growing.on_read = [&] { field_started.set_value(); };
+
+        query::Plan plan(info.schema);
+        plan.target_entries_ = {info.int64_id};
+        SearchResult sealed_result, growing_result;
+        sealed_result.segment_ = sealed;
+        sealed_result.read_lease_ =
+            sealed->AcquireReadLease(folly::CancellationToken());
+        sealed_result.read_snapshot_ = sealed->CaptureReadSnapshot();
+        growing_result.segment_ = &growing;
+        CSearchResult results[] = {&sealed_result, &growing_result};
+        int32_t indices[] = {0, 1};
+        int64_t offsets[] = {1, 3};
+        CProto output{};
+        auto release_output = folly::makeGuard(
+            [&] { free(const_cast<void*>(output.proto_blob)); });
+        auto pending = std::async(std::launch::async, [&] {
+            return FillOutputFieldsOrdered(
+                results, 2, &plan, indices, offsets, 2, &output, nullptr);
+        });
+        ASSERT_EQ(pending.wait_for(std::chrono::seconds(10)),
+                  std::future_status::ready);
+        auto status = pending.get();
+        ASSERT_EQ(status.error_code, 0) << status.error_msg;
+        proto::schema::SearchResultData decoded;
+        ASSERT_TRUE(
+            decoded.ParseFromArray(output.proto_blob, output.proto_size));
+        ASSERT_EQ(decoded.fields_data_size(), 1);
+        EXPECT_EQ(decoded.fields_data(0).scalars().long_data().data(0), 10000);
+        EXPECT_EQ(decoded.fields_data(0).scalars().long_data().data(1),
+                  data.get_col<int64_t>(info.int64_id)[3]);
+    });
 }
 
 TEST(ExternalTakeTest, TryTakeForSearch_FunctionOutputStoredColumn) {
