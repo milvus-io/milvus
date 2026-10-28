@@ -607,21 +607,23 @@ func (s *ImportTaskSuite) TestExecute_PassesTheRequestContextToMixCoord() {
 // under test sit at both ends of PreExecute -- the duplicate-key rejection runs
 // before anything is resolved, the privilege gate runs after the schema and
 // vchannels are -- so the mocks must satisfy everything in between.
-func newImportTaskForPreExecute(t *testing.T, options []*commonpb.KeyValuePair) *ImportTask {
+func newImportTaskForPreExecute(t *testing.T, options []*commonpb.KeyValuePair, schemas ...*schemapb.CollectionSchema) *ImportTask {
+	collectionSchema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+	}
+	if len(schemas) > 0 {
+		collectionSchema = schemas[0]
+	}
 	mockCache := NewMockCache(t)
 	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).
 		Return(int64(100), nil).Maybe()
 	mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(100)).
 		Return(&collectionInfo{
 			CollID: int64(100),
-			Schema: &schemaInfo{
-				CollectionSchema: &schemapb.CollectionSchema{
-					Name: "test_collection",
-					Fields: []*schemapb.FieldSchema{
-						{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-					},
-				},
-			},
+			Schema: &schemaInfo{CollectionSchema: collectionSchema},
 		}, nil).Maybe()
 
 	// Only reached by the ordinary-import case, which runs past the gate into
