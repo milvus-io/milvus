@@ -36,6 +36,14 @@ type checkpointReporter interface {
 	UpdateChannelCheckpoint(ctx context.Context, channelCPs []*msgpb.MsgPosition) error
 }
 
+// storedCheckpointReader reads back the time tick of the channel checkpoint
+// DataCoord has stored for a vchannel. A successful UpdateChannelCheckpoint
+// does not prove that: DataCoord silently drops a channel whose WAL it does
+// not place on the reporting node, and still answers success.
+type storedCheckpointReader interface {
+	StoredChannelCheckpoint(ctx context.Context, vchannel string) (uint64, error)
+}
+
 // PChannelCheckpointUpdater periodically reports the pchannel-level recovery
 // checkpoint to DataCoord through DataCoord.UpdateChannelCheckpoint, so that
 // GetFlushState can observe flush progress.
@@ -52,8 +60,17 @@ type PChannelCheckpointUpdater struct {
 	vchannels     func() []string
 	getCheckpoint func() *utility.WALCheckpoint
 	reporter      checkpointReporter
+	storedReader  storedCheckpointReader
 
 	tickInterval time.Duration
+
+	// storedMu guards stored and awaited. stored is the time tick of the
+	// checkpoint DataCoord was read back to hold, per vchannel; awaited is the
+	// tick a caller of Reported waits for, per vchannel not yet there. Only an
+	// awaited vchannel is read back.
+	storedMu sync.Mutex
+	stored   map[string]uint64
+	awaited  map[string]uint64
 
 	closeCh   chan struct{}
 	closeOnce sync.Once
@@ -68,15 +85,19 @@ func newPChannelCheckpointUpdater(
 	vchannels func() []string,
 	getCheckpoint func() *utility.WALCheckpoint,
 	reporter checkpointReporter,
+	storedReader storedCheckpointReader,
 ) *PChannelCheckpointUpdater {
 	return &PChannelCheckpointUpdater{
 		pchannel:      pchannel,
 		vchannels:     vchannels,
 		getCheckpoint: getCheckpoint,
 		reporter:      reporter,
+		storedReader:  storedReader,
 		// Same cadence as the removed flusher's ChannelCheckpointUpdater
 		// (dataNode.channel.channelCheckpointUpdateTickInSeconds).
 		tickInterval: paramtable.Get().DataNodeCfg.ChannelCheckpointUpdateTickInSeconds.GetAsDuration(time.Second),
+		stored:       make(map[string]uint64),
+		awaited:      make(map[string]uint64),
 		closeCh:      make(chan struct{}),
 	}
 }
@@ -143,6 +164,84 @@ func (u *PChannelCheckpointUpdater) execute() {
 		mlog.String("pchannel", u.pchannel),
 		mlog.Uint64("checkpointTimeTick", checkpoint.TimeTick),
 		mlog.Int("vchannels", len(vchannels)))
+	u.readBackAwaited(timeout)
+}
+
+// readBackAwaited reads back the stored checkpoint of every awaited vchannel.
+// It runs after a successful report, so the read sees that report if
+// DataCoord kept it.
+func (u *PChannelCheckpointUpdater) readBackAwaited(timeout time.Duration) {
+	if u.storedReader == nil {
+		return
+	}
+	u.storedMu.Lock()
+	awaited := make(map[string]uint64, len(u.awaited))
+	for vchannel, through := range u.awaited {
+		awaited[vchannel] = through
+	}
+	u.storedMu.Unlock()
+	for vchannel, through := range awaited {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		timeTick, err := u.storedReader.StoredChannelCheckpoint(ctx, vchannel)
+		cancel()
+		if err != nil {
+			mlog.Warn(ctx, "read back stored channel checkpoint failed",
+				mlog.String("pchannel", u.pchannel),
+				mlog.String("vchannel", vchannel),
+				mlog.Err(err))
+			continue
+		}
+		u.markStored(vchannel, timeTick)
+		if timeTick < through {
+			mlog.Info(ctx, "stored channel checkpoint is still below the awaited time tick",
+				mlog.String("pchannel", u.pchannel),
+				mlog.String("vchannel", vchannel),
+				mlog.Uint64("storedTimeTick", timeTick),
+				mlog.Uint64("awaitedTimeTick", through))
+		}
+	}
+}
+
+func (u *PChannelCheckpointUpdater) markStored(vchannel string, timeTick uint64) {
+	u.storedMu.Lock()
+	defer u.storedMu.Unlock()
+	if u.stored[vchannel] < timeTick {
+		u.stored[vchannel] = timeTick
+	}
+	if u.awaited[vchannel] <= u.stored[vchannel] {
+		delete(u.awaited, vchannel)
+	}
+}
+
+// Reported reports whether DataCoord was read back to hold a checkpoint of
+// vchannel at or past through. A false answer marks the vchannel awaited, so
+// the next successful report reads it back. What is held is memory only:
+// after a restart the vchannel is still present, so it is reported and read
+// back again before it can pass.
+func (u *PChannelCheckpointUpdater) Reported(vchannel string, through uint64) bool {
+	u.storedMu.Lock()
+	defer u.storedMu.Unlock()
+	if u.stored[vchannel] >= through {
+		return true
+	}
+	if u.awaited[vchannel] < through {
+		u.awaited[vchannel] = through
+	}
+	return false
+}
+
+// confirmsStored reports whether the updater can read back what DataCoord
+// stored, which Reported needs to ever answer true.
+func (u *PChannelCheckpointUpdater) confirmsStored() bool {
+	return u.storedReader != nil
+}
+
+// Forget drops what was recorded for a vchannel that is no longer reported.
+func (u *PChannelCheckpointUpdater) Forget(vchannel string) {
+	u.storedMu.Lock()
+	defer u.storedMu.Unlock()
+	delete(u.stored, vchannel)
+	delete(u.awaited, vchannel)
 }
 
 // Close stops the report loop. It is idempotent.

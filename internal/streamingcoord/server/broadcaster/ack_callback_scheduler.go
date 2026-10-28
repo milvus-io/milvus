@@ -248,6 +248,15 @@ func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx contex
 	// broadcastScheduler handles WAL append with retry; AddTask blocks until the task
 	// reaches tombstone (broadcast → ack → callback → tombstone).
 	for _, task := range incompleteTasks {
+		if s.bm.isRecordedComplete(ctx, task) {
+			// Re-driving it would append its missing replicas into vchannels its
+			// completed broadcast has since retired, which refuse them forever,
+			// and AddTask would never return.
+			s.Logger().Warn(ctx, "skip an incomplete task whose broadcast is on record as completed on this cluster",
+				mlog.FieldBroadcastID(task.Header().BroadcastID),
+				mlog.String("messageType", task.msg.MessageType().String()))
+			continue
+		}
 		pending := newPendingBroadcastTask(task)
 		if pending == nil {
 			continue // no pending messages for this task
@@ -290,14 +299,7 @@ func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) (
 	logger.Debug(context.TODO(), "all vchannels are acked")
 
 	msg, result := bt.BroadcastResult()
-	makeMap := make(map[string]*message.AppendResult, len(result))
-	for vchannel, result := range result {
-		makeMap[vchannel] = &message.AppendResult{
-			MessageID:              result.MessageID,
-			LastConfirmedMessageID: result.LastConfirmedMessageID,
-			TimeTick:               result.TimeTick,
-		}
-	}
+	makeMap := toCallbackAppendResults(result)
 	// call the ack callback until done, under the persisted trace context.
 	bt.ObserveAckCallbackBegin()
 	if err := runAckCallbackWithTrace(s.notifier.Context(), msg, func(spanCtx context.Context) error {
