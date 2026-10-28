@@ -263,15 +263,22 @@ func TestShardQueryStreamReturnsPerVChannelReduceStream(t *testing.T) {
 	planClient := &fakeQueryPlanClient{plan: plan}
 	client := newShardViewQueryClient(1, planClient, queryService)
 
+	// Size two complete protobuf Units, excluding result metadata.
+	oneUnit := newTestQueryChunk([]int64{1})
+	timestamp := proto.Clone(rightChunk.FieldsData[1]).(*schemapb.FieldData)
+	timestamp.GetScalars().GetLongData().Data = timestamp.GetScalars().GetLongData().Data[:1]
+	oneUnit.FieldsData = append(oneUnit.FieldsData, timestamp)
+	chunkBytes := 2 * proto.Size(&internalpb.RetrieveResults{Ids: oneUnit.Ids, FieldsData: oneUnit.FieldsData})
+
 	stream, shardPlan, err := client.QueryStream(context.Background(), &ShardQueryRequest{
 		VChannel: shardID.VChannel,
 		Req:      request, BarrierMVCC: 123,
-	}, 32)
+	}, chunkBytes)
 
 	require.NoError(t, err)
 	require.Equal(t, shardID, shardPlan.ShardID)
 	require.Equal(t, uint64(123), planClient.planReq.GetBarrierMvcc())
-	require.Equal(t, int64(32), queryService.queryReq.GetStreamChunkBytes())
+	require.Equal(t, int64(chunkBytes), queryService.queryReq.GetStreamChunkBytes())
 	require.Equal(t, request.GetSerializedExprPlan(), queryService.queryReq.GetLegacyReq().GetSerializedExprPlan())
 	chunk, err := stream.Recv()
 	require.NoError(t, err)

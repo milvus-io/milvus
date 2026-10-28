@@ -144,7 +144,7 @@ func TestSplitRetrieveResultWithGroupedUnits(t *testing.T) {
 
 func TestSplitRetrieveResultIncludesElementIndexBytes(t *testing.T) {
 	result := makeElementLevelResult([]int64{1, 2}, []int64{10, 20}, [][]int32{{0}, {1, 2, 3, 4, 5, 6, 7, 8}})
-	expectedBytes := int(newRowSizeCalculator(result).rowSize(0)) + 8 + 4
+	expectedBytes := queryUnitReferenceSize(t, retrieveUnit{result: result})
 	require.Equal(t, expectedBytes, queryChunkBytes(t, result, 1))
 	chunks, err := SplitRetrieveResult(result, expectedBytes+1)
 	require.NoError(t, err)

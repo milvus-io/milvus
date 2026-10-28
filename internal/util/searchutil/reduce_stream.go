@@ -22,6 +22,7 @@ import (
 	"io"
 	"sync"
 
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -43,11 +44,12 @@ type ReduceStream interface {
 }
 
 type orderedUnit struct {
-	result     *internalpb.SearchResults
-	data       *schemapb.SearchResultData
-	queryIndex int64
-	rowIndex   int64
-	byteSize   int
+	result             *internalpb.SearchResults
+	data               *schemapb.SearchResultData
+	queryIndex         int64
+	rowIndex           int64
+	byteSize           int
+	fieldIndexComputer *typeutil.FieldDataIdxComputer
 }
 
 func (u orderedUnit) score() float32 {
@@ -68,103 +70,53 @@ func (b *orderedOutputBuffer) isEmpty() bool {
 }
 
 func (u orderedUnit) reducibleByteSize() (int, error) {
-	if size, ok := u.scalarByteSize(); ok {
-		return size, nil
+	data, row := u.data, u.rowIndex
+	if data == nil || row < 0 || row >= int64(len(data.GetScores())) {
+		return 0, merr.WrapErrServiceInternalMsg("Search Unit row %d is out of range", row)
 	}
-	chunk, err := buildSearchChunk(
-		[]orderedUnit{u},
-		u.data.GetNumQueries(),
-		u.data.GetTopK(),
-		"",
-		false,
-		false,
-	)
+	idsSize, err := reduce.IDsRowSize(data.GetIds(), row)
 	if err != nil {
 		return 0, err
 	}
-	data := chunk.GetResultData()
-	return proto.Size(&schemapb.SearchResultData{
-		FieldsData:         data.GetFieldsData(),
-		Scores:             data.GetScores(),
-		Ids:                data.GetIds(),
-		ElementIndices:     data.GetElementIndices(),
-		GroupByFieldValue:  data.GetGroupByFieldValue(),
-		GroupByFieldValues: data.GetGroupByFieldValues(),
-	}), nil
-}
-
-// scalarByteSize sizes the same protobuf payload without copying scalar rows.
-func (u orderedUnit) scalarByteSize() (int, bool) {
-	data := u.data
-	row := u.rowIndex
-	if data == nil || row < 0 || row >= int64(len(data.GetScores())) || u.queryIndex < 0 || u.queryIndex >= data.GetNumQueries() || data.GetElementIndices() != nil || data.GetGroupByFieldValue() != nil || len(data.GetGroupByFieldValues()) != 0 {
-		return 0, false
+	size := protowire.SizeTag(4) + protowire.SizeBytes(4) +
+		protowire.SizeTag(5) + protowire.SizeBytes(idsSize)
+	computer := u.fieldIndexComputer
+	if computer == nil {
+		computer = typeutil.NewFieldDataIdxComputer(data.GetFieldsData())
 	}
-	ids := &schemapb.IDs{}
-	switch values := data.GetIds().GetIdField().(type) {
-	case *schemapb.IDs_IntId:
-		if values.IntId == nil || row >= int64(len(values.IntId.Data)) {
-			return 0, false
+	fieldIndexes := computer.Compute(row)
+	for i, field := range data.GetFieldsData() {
+		dataRow := row
+		if fieldIndexes != nil {
+			dataRow = fieldIndexes[i]
 		}
-		ids.IdField = &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: values.IntId.Data[row : row+1]}}
-	case *schemapb.IDs_StrId:
-		if values.StrId == nil || row >= int64(len(values.StrId.Data)) {
-			return 0, false
+		fieldSize, err := reduce.FieldDataRowSize(field, row, dataRow, true)
+		if err != nil {
+			return 0, err
 		}
-		ids.IdField = &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: values.StrId.Data[row : row+1]}}
-	default:
-		return 0, false
+		size += protowire.SizeTag(3) + protowire.SizeBytes(fieldSize)
 	}
-	fields := make([]*schemapb.FieldData, 0, len(data.GetFieldsData()))
-	for _, field := range data.GetFieldsData() {
-		if field == nil || field.GetScalars() == nil {
-			return 0, false
+	if indices := data.GetElementIndices(); indices != nil {
+		if row >= int64(len(indices.GetData())) {
+			return 0, merr.WrapErrServiceInternalMsg("Search Unit element index %d is out of range", row)
 		}
-		scalar := &schemapb.ScalarField{}
-		valid := typeutil.GetFieldDataValidData(field)
-		if len(valid) > 0 {
-			if row >= int64(len(valid)) {
-				return 0, false
-			}
-			scalar.ValidData = valid[row : row+1]
-		}
-		switch values := field.GetScalars().Data.(type) {
-		case *schemapb.ScalarField_BoolData:
-			if values.BoolData == nil || row >= int64(len(values.BoolData.Data)) {
-				return 0, false
-			}
-			scalar.Data = &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: values.BoolData.Data[row : row+1]}}
-		case *schemapb.ScalarField_IntData:
-			if values.IntData == nil || row >= int64(len(values.IntData.Data)) {
-				return 0, false
-			}
-			scalar.Data = &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: values.IntData.Data[row : row+1]}}
-		case *schemapb.ScalarField_LongData:
-			if values.LongData == nil || row >= int64(len(values.LongData.Data)) {
-				return 0, false
-			}
-			scalar.Data = &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: values.LongData.Data[row : row+1]}}
-		case *schemapb.ScalarField_FloatData:
-			if values.FloatData == nil || row >= int64(len(values.FloatData.Data)) {
-				return 0, false
-			}
-			scalar.Data = &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: values.FloatData.Data[row : row+1]}}
-		case *schemapb.ScalarField_DoubleData:
-			if values.DoubleData == nil || row >= int64(len(values.DoubleData.Data)) {
-				return 0, false
-			}
-			scalar.Data = &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: values.DoubleData.Data[row : row+1]}}
-		case *schemapb.ScalarField_StringData:
-			if values.StringData == nil || row >= int64(len(values.StringData.Data)) {
-				return 0, false
-			}
-			scalar.Data = &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: values.StringData.Data[row : row+1]}}
-		default:
-			return 0, false
-		}
-		fields = append(fields, &schemapb.FieldData{Type: field.Type, FieldName: field.FieldName, FieldId: field.FieldId, IsDynamic: field.IsDynamic, Field: &schemapb.FieldData_Scalars{Scalars: scalar}})
+		payload := protowire.SizeTag(1) + protowire.SizeBytes(protowire.SizeVarint(uint64(indices.Data[row])))
+		size += protowire.SizeTag(15) + protowire.SizeBytes(payload)
 	}
-	return proto.Size(&schemapb.SearchResultData{FieldsData: fields, Scores: data.Scores[row : row+1], Ids: ids}), true
+	groupFields := data.GetGroupByFieldValues()
+	groupTag := protowire.Number(17)
+	if len(groupFields) == 0 && data.GetGroupByFieldValue() != nil {
+		groupFields = []*schemapb.FieldData{data.GetGroupByFieldValue()}
+		groupTag = 8
+	}
+	for _, field := range groupFields {
+		fieldSize, err := reduce.GroupByFieldRowSize(field, row)
+		if err != nil {
+			return 0, err
+		}
+		size += protowire.SizeTag(groupTag) + protowire.SizeBytes(fieldSize)
+	}
+	return size, nil
 }
 
 type orderedChildBuffer struct {
@@ -217,13 +169,15 @@ func (b *orderedChildBuffer) accept(chunk *internalpb.SearchResults, nq, topK in
 	b.units = make([]orderedUnit, 0, hitCount)
 	b.cursor = 0
 	rowIndex := int64(0)
+	fieldIndexComputer := typeutil.NewFieldDataIdxComputer(data.GetFieldsData())
 	for queryIndex, count := range data.GetTopks() {
 		for i := int64(0); i < count; i++ {
 			b.units = append(b.units, orderedUnit{
-				result:     chunk,
-				data:       data,
-				queryIndex: int64(queryIndex),
-				rowIndex:   rowIndex,
+				result:             chunk,
+				data:               data,
+				queryIndex:         int64(queryIndex),
+				rowIndex:           rowIndex,
+				fieldIndexComputer: fieldIndexComputer,
 			})
 			rowIndex++
 		}
