@@ -204,6 +204,7 @@ func (s *statsInspectorSuite) SetupTest() {
 
 	s.inspector = newStatsInspector(
 		s.ctx,
+		make(chan int64, 1),
 		s.mt,
 		s.scheduler,
 		s.alloc,
@@ -245,6 +246,12 @@ func (s *statsInspectorSuite) putExternalStatsTask(taskID, segmentID UniqueID, s
 	})
 }
 
+// processSegments runs one notification round over the given segments.
+func (s *statsInspectorSuite) processSegments(segIDs ...UniqueID) {
+	s.inspector.notifyStatsSegments(segIDs...)
+	s.inspector.processStatsSegments(s.ctx, false)
+}
+
 func (s *statsInspectorSuite) TestStart() {
 	s.inspector.Start()
 	time.Sleep(10 * time.Millisecond) // Give goroutines some time to start
@@ -253,7 +260,7 @@ func (s *statsInspectorSuite) TestStart() {
 	s.False(s.inspector.ctx.Done() == nil, "Context should be canceled")
 }
 
-func (s *statsInspectorSuite) TestTriggerTextStatsTaskFileResourcesByMode() {
+func (s *statsInspectorSuite) TestProcessTextStatsFileResourcesByMode() {
 	resources := []*internalpb.FileResourceInfo{
 		{Id: 7, Name: "dict", Path: "dict.jieba"},
 	}
@@ -279,7 +286,7 @@ func (s *statsInspectorSuite) TestTriggerTextStatsTaskFileResourcesByMode() {
 			s.mt.statsTaskMeta.tasks = typeutil.NewConcurrentMap[int64, *indexpb.StatsTask]()
 			s.mt.statsTaskMeta.segmentID2Tasks = typeutil.NewConcurrentMap[string, *indexpb.StatsTask]()
 
-			s.inspector.triggerTextStatsTask()
+			s.processSegments(20)
 
 			task := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(20, indexpb.StatsSubJob_TextIndexJob)
 			s.Require().NotNil(task)
@@ -290,6 +297,69 @@ func (s *statsInspectorSuite) TestTriggerTextStatsTaskFileResourcesByMode() {
 			}
 		})
 	}
+}
+
+// A failed file resource lookup or task submission keeps the segment for the
+// ticker instead of dropping it or retrying it on every notification.
+func (s *statsInspectorSuite) TestProcessStatsSegmentsRequeuesFailures() {
+	s.Run("file resources", func() {
+		paramtable.Get().Save(Params.CommonCfg.DNFileResourceMode.Key, "ref")
+		defer paramtable.Get().Reset(Params.CommonCfg.DNFileResourceMode.Key)
+		collection := s.mt.GetCollection(1)
+		collection.Schema.FileResourceIds = []int64{7}
+		defer func() { collection.Schema.FileResourceIds = nil }()
+		resourceBroker := broker.NewMockBroker(s.T())
+		resourceBroker.EXPECT().GetFileResources(mock.Anything, int64(7)).Return(nil, errors.New("mock error")).Once()
+		s.mt.broker = resourceBroker
+
+		s.processSegments(20)
+
+		s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(20, indexpb.StatsSubJob_TextIndexJob))
+		s.Empty(s.inspector.popStatsSegments(false))
+		s.Equal([]UniqueID{20}, s.inspector.popStatsSegments(true))
+	})
+
+	s.Run("submission", func() {
+		alloc := allocator.NewMockAllocator(s.T())
+		alloc.EXPECT().AllocID(mock.Anything).Return(0, errors.New("mock error")).Once()
+		s.inspector.allocator = alloc
+
+		s.processSegments(20)
+
+		s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(20, indexpb.StatsSubJob_TextIndexJob))
+		s.Empty(s.inspector.popStatsSegments(false))
+		s.Equal([]UniqueID{20}, s.inspector.popStatsSegments(true))
+	})
+}
+
+// A segment that appears after Start is submitted through its notification
+// alone, while the segment the startup scan left pending waits for the ticker:
+// the tick and reconcile intervals are far beyond the wait below.
+func (s *statsInspectorSuite) TestStartSubmitsNotifiedSegment() {
+	drainStatsBuildChForTest()
+	defer drainStatsBuildChForTest()
+	interval := &Params.DataCoordCfg.TaskCheckInterval
+	defer interval.SwapTempValue(interval.SwapTempValue("60"))
+	s.inspector.Start()
+	defer s.inspector.Stop()
+
+	s.mt.segments.SetSegment(40, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID:           40,
+		CollectionID: 1,
+		PartitionID:  2,
+		IsSorted:     true,
+		State:        commonpb.SegmentState_Flushed,
+		NumOfRows:    1000,
+		MaxRowNum:    2000,
+		Level:        datapb.SegmentLevel_L1,
+	}})
+	notifySegmentStatsBuild(40)
+
+	s.Eventually(func() bool {
+		return s.mt.statsTaskMeta.HasStatsTask(40, indexpb.StatsSubJob_TextIndexJob)
+	}, 5*time.Second, 10*time.Millisecond)
+	s.False(s.mt.statsTaskMeta.HasStatsTask(20, indexpb.StatsSubJob_TextIndexJob))
+	s.Equal([]UniqueID{20}, s.inspector.popStatsSegments(true))
 }
 
 func (s *statsInspectorSuite) TestSubmitStatsTask() {
@@ -336,109 +406,72 @@ func (s *statsInspectorSuite) TestSubmitStatsTaskPendingLimit() {
 	})
 }
 
-// A segment whose task is already in meta must be dropped by the segment
-// selector, so a repeated tick never reaches SubmitStatsTask at all. Asserting
-// on side effects (no ID allocated, nothing enqueued) would not prove this:
-// SubmitStatsTask's own duplicate guard produces exactly the same side effects,
-// so the assertion has to be on whether SubmitStatsTask is called.
-func (s *statsInspectorSuite) TestTriggerTextStatsTaskSkipsSubmittedSegments() {
-	submitted := make([]UniqueID, 0)
-	mockSubmit := mockey.Mock((*statsInspector).SubmitStatsTask).To(
-		func(_ *statsInspector, originSegmentID, _ int64, _ indexpb.StatsSubJob, _ bool, _ []*internalpb.FileResourceInfo) error {
-			submitted = append(submitted, originSegmentID)
-			return nil
-		}).Build()
-	defer mockSubmit.UnPatch()
+// A segment whose task is already in meta must not be a candidate, so the
+// reconcile scan never re-submits it.
+func (s *statsInspectorSuite) TestGetStatsCandidateSegmentsSkipsSubmittedSegments() {
+	s.Equal([]UniqueID{20}, s.inspector.getStatsCandidateSegments(s.ctx, s.mt.GetCollection(1)))
 
-	// Without a task in meta the segment is a candidate.
-	s.inspector.triggerTextStatsTask()
-	s.Equal([]UniqueID{20}, submitted)
-
-	// Once the task is recorded the selector must drop the segment.
 	s.NoError(s.mt.statsTaskMeta.AddStatsTask(&indexpb.StatsTask{
 		CollectionID: 1,
 		TaskID:       1001,
 		SegmentID:    20,
 		SubJobType:   indexpb.StatsSubJob_TextIndexJob,
 	}))
-	submitted = submitted[:0]
-	s.inspector.triggerTextStatsTask()
-	s.Empty(submitted)
+	s.Empty(s.inspector.getStatsCandidateSegments(s.ctx, s.mt.GetCollection(1)))
 }
 
-// The sub-jobs share one admission budget, so the trigger that runs first wins
-// it. Consecutive rounds must not give the same sub-job first claim.
-func (s *statsInspectorSuite) TestTriggerStatsTasksAlternatesSubJobOrder() {
+// Both sub-jobs of a segment are submitted in the same round, so a text-index
+// backlog cannot starve JSON shredding.
+func (s *statsInspectorSuite) TestProcessStatsSegmentsSubmitsBothSubJobs() {
 	s.putExternalSegment(220, false, storage.StorageV3, packed.MarshalManifestPath("files/insert_log/2/3/220", 1))
 
-	order := make([]indexpb.StatsSubJob, 0)
-	mockSubmit := mockey.Mock((*statsInspector).SubmitStatsTask).To(
-		func(_ *statsInspector, _, _ int64, subJobType indexpb.StatsSubJob, _ bool, _ []*internalpb.FileResourceInfo) error {
-			order = append(order, subJobType)
-			return nil
-		}).Build()
-	defer mockSubmit.UnPatch()
+	s.processSegments(220)
 
-	// Both sub-jobs have candidates, so the first entry is the one that would
-	// have claimed the budget had it been exhausted.
-	s.inspector.triggerStatsTasks(0)
-	s.Require().NotEmpty(order)
-	s.Equal(indexpb.StatsSubJob_TextIndexJob, order[0])
-	s.Contains(order, indexpb.StatsSubJob_JsonKeyIndexJob)
-
-	order = order[:0]
-	s.inspector.triggerStatsTasks(1)
-	s.Require().NotEmpty(order)
-	s.Equal(indexpb.StatsSubJob_JsonKeyIndexJob, order[0])
-	s.Contains(order, indexpb.StatsSubJob_TextIndexJob)
+	s.NotNil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(220, indexpb.StatsSubJob_TextIndexJob))
+	s.NotNil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(220, indexpb.StatsSubJob_JsonKeyIndexJob))
+	s.Empty(s.inspector.popStatsSegments(true))
 }
 
 // jsonShreddingTriggerCount is deprecated, but 0 used to disable JSON key index
 // submission outright and must keep doing so instead of silently turning
 // shredding back on after an upgrade.
-func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskHonorsDeprecatedZero() {
+func (s *statsInspectorSuite) TestProcessJSONStatsHonorsDeprecatedZero() {
 	segmentID := UniqueID(230)
 	s.putExternalSegment(segmentID, false, storage.StorageV3, packed.MarshalManifestPath("files/insert_log/2/3/230", 1))
 
-	// Sanity check: the segment is a candidate while the deprecated key is unset.
-	s.inspector.triggerJSONKeyIndexStatsTask()
-	s.NotNil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob))
-	s.NoError(s.mt.statsTaskMeta.DropStatsTask(s.ctx,
-		s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob).GetTaskID()))
-
 	Params.Save(Params.DataCoordCfg.JSONStatsTriggerCount.Key, "0")
 	defer Params.Reset(Params.DataCoordCfg.JSONStatsTriggerCount.Key)
-	s.inspector.allocator = allocator.NewMockAllocator(s.T())
-
-	s.inspector.triggerJSONKeyIndexStatsTask()
+	s.processSegments(segmentID)
 	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob))
+
+	// Sanity check: the segment is a candidate again once the deprecated key is unset.
+	Params.Reset(Params.DataCoordCfg.JSONStatsTriggerCount.Key)
+	s.Contains(s.inspector.getStatsCandidateSegments(s.ctx, s.mt.GetCollection(2)), segmentID)
 }
 
-// Every trigger loop must give up as soon as the scheduler is backlogged instead
-// of walking the remaining collections. The call count is what proves it: the
-// text and JSON loops each ask once for the first collection they look at and
-// then return, while the BM25 loop returns before asking because BM25 is not
-// docked yet. Walking on (continue) would ask once per collection instead.
-func (s *statsInspectorSuite) TestTriggerStatsTaskStopsWhenSchedulerBacklogged() {
+// A backlogged scheduler ends the round at the first segment that would need a
+// task, instead of checking every remaining one, and keeps all of them pending.
+// The single admission check is what proves it.
+func (s *statsInspectorSuite) TestProcessStatsSegmentsStopsWhenSchedulerBacklogged() {
 	scheduler := task.NewMockGlobalScheduler(s.T())
 	scheduler.EXPECT().GetPendingTaskCount(taskcommon.Stats).
-		Return(Params.DataCoordCfg.StatsTaskPendingLimit.GetAsInt() + 1).Times(2)
+		Return(Params.DataCoordCfg.StatsTaskPendingLimit.GetAsInt() + 1).Once()
 	s.inspector.scheduler = scheduler
 	s.inspector.allocator = allocator.NewMockAllocator(s.T())
 
 	s.putExternalSegment(210, false, storage.StorageV3, packed.MarshalManifestPath("files/insert_log/2/3/210", 1))
 
-	s.inspector.triggerTextStatsTask()
-	s.inspector.triggerJSONKeyIndexStatsTask()
-	s.inspector.triggerBM25StatsTask()
+	s.processSegments(20, 210)
 
 	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(20, indexpb.StatsSubJob_TextIndexJob))
 	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(210, indexpb.StatsSubJob_JsonKeyIndexJob))
+	s.Empty(s.inspector.popStatsSegments(false), "a deferred segment must not ride on notifications")
+	s.ElementsMatch([]UniqueID{20, 210}, s.inspector.popStatsSegments(true))
 }
 
-// The loop keeps submitting while the pending count is at the limit and stops on
-// the first segment that would exceed it, mid-collection.
-func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskStopsAtPendingLimit() {
+// The round keeps submitting while the pending count is at the limit and stops
+// on the first task that would exceed it; the unprocessed segments stay pending.
+func (s *statsInspectorSuite) TestProcessStatsSegmentsStopsAtPendingLimit() {
 	Params.Save(Params.DataCoordCfg.StatsTaskPendingLimit.Key, "1")
 	defer Params.Reset(Params.DataCoordCfg.StatsTaskPendingLimit.Key)
 
@@ -454,17 +487,12 @@ func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskStopsAtPendingLimi
 	scheduler.EXPECT().Enqueue(mock.Anything).Run(func(_ task.Task) { pending++ }).Return()
 	s.inspector.scheduler = scheduler
 
-	s.inspector.triggerJSONKeyIndexStatsTask()
+	s.processSegments(segmentIDs...)
 
 	// pending 0 -> allowed, 1 -> allowed (== limit), 2 -> skipped (> limit).
-	submitted := 0
-	for _, segmentID := range segmentIDs {
-		if s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob) != nil {
-			submitted++
-		}
-	}
-	s.Equal(2, submitted)
 	s.Equal(2, pending)
+	s.Equal(2, s.mt.statsTaskMeta.tasks.Len())
+	s.Len(s.inspector.popStatsSegments(true), 3)
 }
 
 func (s *statsInspectorSuite) TestSubmitStatsTaskSkipExternalCollection() {
@@ -497,17 +525,17 @@ func (s *statsInspectorSuite) TestSubmitStatsTaskSkipExternalJSONWithoutV3Manife
 	s.Nil(jsonTask)
 }
 
-func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskExternalCollectionUnsortedV3() {
+func (s *statsInspectorSuite) TestProcessJSONStatsExternalCollectionUnsortedV3() {
 	segmentID := UniqueID(201)
 	s.putExternalSegment(segmentID, false, storage.StorageV3, packed.MarshalManifestPath("files/insert_log/2/3/201", 1))
 
-	s.inspector.triggerJSONKeyIndexStatsTask()
+	s.processSegments(segmentID)
 
 	jsonTask := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob)
 	s.NotNil(jsonTask)
 }
 
-func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskExternalCollectionSkipsInvalidManifestSegments() {
+func (s *statsInspectorSuite) TestProcessJSONStatsExternalCollectionSkipsInvalidManifestSegments() {
 	testCases := []struct {
 		name           string
 		segmentID      UniqueID
@@ -532,7 +560,7 @@ func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskExternalCollection
 		s.Run(testCase.name, func() {
 			s.putExternalSegment(testCase.segmentID, false, testCase.storageVersion, testCase.manifestPath)
 
-			s.inspector.triggerJSONKeyIndexStatsTask()
+			s.processSegments(testCase.segmentID)
 
 			jsonTask := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(testCase.segmentID, indexpb.StatsSubJob_JsonKeyIndexJob)
 			s.Nil(jsonTask)
@@ -584,20 +612,19 @@ func (s *statsInspectorSuite) TestDropStatsTask() {
 	s.NoError(err) // Non-existent tasks should return success
 }
 
-func (s *statsInspectorSuite) TestTriggerTextStatsTask() {
+func (s *statsInspectorSuite) TestProcessTextStats() {
 	// Set up a sorted segment without text index
 	segment := s.mt.segments.GetSegment(20)
 	segment.IsSorted = true
 	segment.TextStatsLogs = nil
 
-	// Test triggering text index stats task
-	s.inspector.triggerTextStatsTask()
+	s.processSegments(20)
 
 	// Verify task creation
 	s.alloc.AssertCalled(s.T(), "AllocID", mock.Anything)
 }
 
-func (s *statsInspectorSuite) TestTriggerTextStatsTaskExternalCollection() {
+func (s *statsInspectorSuite) TestProcessTextStatsExternalCollection() {
 	segmentID := UniqueID(200)
 	seg := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
@@ -614,35 +641,23 @@ func (s *statsInspectorSuite) TestTriggerTextStatsTaskExternalCollection() {
 	}
 	s.mt.segments.SetSegment(segmentID, seg)
 
-	s.inspector.triggerTextStatsTask()
+	s.processSegments(segmentID)
 
 	task := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_TextIndexJob)
 	s.NotNil(task)
 }
 
-func (s *statsInspectorSuite) TestTriggerBM25StatsTask() {
-	// BM25 functionality is disabled in current version
-	s.inspector.triggerBM25StatsTask()
-
-	// No tasks should be created
-	// Because enableBM25() returns false
-}
-
-func (s *statsInspectorSuite) TestTriggerStatsTaskLoop() {
-	// Simulate short-term triggerStatsTaskLoop execution
+// A collection notification makes the loop check every segment of the
+// collection, without waiting for the reconcile scan.
+func (s *statsInspectorSuite) TestTriggerStatsTaskLoopCollectionNotify() {
 	s.inspector.loopWg.Add(1)
 	go s.inspector.triggerStatsTaskLoop()
 
-	// Wait for goroutine to execute
-	time.Sleep(1500 * time.Millisecond)
+	notifyCollectionStatsBuild(s.inspector.notifyStatsChan, 1)
 
-	// Send a segment ID to the channel
-	getStatsTaskChSingleton() <- 10
-
-	// Wait for processing
-	time.Sleep(500 * time.Millisecond)
-
-	// Stop the loop
+	s.Eventually(func() bool {
+		return s.mt.statsTaskMeta.HasStatsTask(20, indexpb.StatsSubJob_TextIndexJob)
+	}, 5*time.Second, 10*time.Millisecond)
 	s.cancel()
 	s.inspector.loopWg.Wait()
 }
@@ -806,10 +821,4 @@ func (s *statsInspectorSuite) TestNeedDoTextIndex() {
 	segment.TextStatsLogs = map[int64]*datapb.TextIndexStats{102: {}}
 	result = needDoTextIndex(segment, []int64{101}, true)
 	s.True(result, "Segment should build missing text index field")
-}
-
-func (s *statsInspectorSuite) TestEnableBM25() {
-	// Test if BM25 is enabled
-	result := s.inspector.enableBM25()
-	s.False(result, "BM25 should be disabled by default")
 }

@@ -8,7 +8,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -100,7 +99,9 @@ func (r *resourceKeyLocker) FastLock(keys ...message.ResourceKey) (*lockGuards, 
 			continue
 		}
 		g.Unlock()
-		return nil, merr.Wrapf(errFastLockFailed, "fast lock failed at resource key %s", key.String())
+		// The ACK scheduler retries a blocked task on every pass, so fail without
+		// building an error.
+		return nil, errFastLockFailed
 	}
 	return g, nil
 }

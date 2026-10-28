@@ -695,8 +695,9 @@ func TestManagerRecoveryAndDrop(t *testing.T) {
 		Shards: []*viewpb.DataViewOfShard{{
 			Vchannel: "ch-1",
 			Partitions: []*viewpb.DataViewOfPartition{{
-				PartitionId: 10,
-				SegmentIds:  []int64{100, 200},
+				PartitionId:             10,
+				SegmentIds:              []int64{100, 200},
+				SegmentManifestVersions: []int64{0, 0},
 			}},
 		}},
 	}))
@@ -954,6 +955,13 @@ func TestManagerRecoveryValidation(t *testing.T) {
 		{CollectionId: 1},
 		{CollectionId: 0, DataVersion: version(1, 0)},
 		{CollectionId: 1, DataVersion: version(0, 1)},
+		{
+			CollectionId: 1,
+			DataVersion:  version(1, 0),
+			Shards: []*viewpb.DataViewOfShard{{Partitions: []*viewpb.DataViewOfPartition{{
+				SegmentIds: []int64{1},
+			}}}},
+		},
 		{
 			CollectionId: 1,
 			DataVersion:  version(1, 0),
@@ -1462,8 +1470,9 @@ func TestManagerRecoveryRestoresRowStats(t *testing.T) {
 		Shards: []*viewpb.DataViewOfShard{{
 			Vchannel: "ch-1",
 			Partitions: []*viewpb.DataViewOfPartition{{
-				PartitionId: 10,
-				SegmentIds:  []int64{100},
+				PartitionId:             10,
+				SegmentIds:              []int64{100},
+				SegmentManifestVersions: []int64{0},
 			}},
 		}},
 	}))

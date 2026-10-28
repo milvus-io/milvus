@@ -867,13 +867,13 @@ func (s *PackWriterV3Suite) TestWrite_RetryDoesNotLeakVersionBumps() {
 	s.Require().NoError(err)
 
 	var calls int32
-	var origin func(string, int64, *indexpb.StorageConfig, *packed.ManifestUpdates) (string, error)
+	var origin func(string, *indexpb.StorageConfig, *packed.ManifestUpdates) (string, error)
 	patched := mockey.Mock(packed.CommitManifestUpdates).
-		To(func(basePath string, baseVersion int64, cfg *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+		To(func(baseManifest string, cfg *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
 			if atomic.AddInt32(&calls, 1) == 1 {
 				return "", packed.ErrLoonTransient
 			}
-			return origin(basePath, baseVersion, cfg, updates)
+			return origin(baseManifest, cfg, updates)
 		}).
 		Origin(&origin).
 		Build()

@@ -6,11 +6,13 @@ import random
 import time
 
 import pytest
+from common.common_type import CaseLabel
 from pymilvus import AnnSearchRequest, DataType, RRFRanker
 
 from .base import TestCDCSyncBase, logger
 
 
+@pytest.mark.tags(CaseLabel.CDC, CaseLabel.L3)
 class TestCDCSyncFTSAndText(TestCDCSyncBase):
     """Test CDC sync for full-text search, text match, and phrase match operations."""
 
@@ -667,8 +669,20 @@ class TestCDCSyncFTSAndText(TestCDCSyncBase):
             # Insert 50 more docs to the new source (original downstream)
             extra_data = self.generate_fts_data(50)
             logger.info(f"[PHASE2] Inserting {len(extra_data)} additional docs to new source (downstream_client)")
-            downstream_client.insert(collection_name, extra_data)
+            extra_ids = downstream_client.insert(collection_name, extra_data)["ids"]
             downstream_client.flush(collection_name)
+
+            expected_text = {pk: row["text_field"] for pk, row in zip(extra_ids, extra_data)}
+
+            def check_extra_rows():
+                rows = upstream_client.query(
+                    collection_name,
+                    filter=f"id in {extra_ids}",
+                    output_fields=["id", "text_field"],
+                )
+                return {row["id"]: row["text_field"] for row in rows} == expected_text
+
+            assert self.wait_for_sync(check_extra_rows, sync_timeout, "new FTS rows after switchover")
 
             # Phase 3: Verify FTS search works on new downstream (original upstream)
             query_text = "distributed database replication"
@@ -683,7 +697,7 @@ class TestCDCSyncFTSAndText(TestCDCSyncBase):
                         search_params={"metric_type": "BM25"},
                         output_fields=["text_field"],
                     )
-                    return results is not None and len(results) > 0
+                    return bool(results and results[0])
                 except Exception as e:
                     logger.warning(f"FTS on new downstream check failed: {e}")
                     return False

@@ -198,6 +198,7 @@ milvus_storage	internal/core/src/segcore/TextColumnCache.cpp
 milvus_storage	internal/core/src/segcore/TextColumnCache.h
 milvus_storage	internal/core/src/storage/ArrowFileSystemChunkManager.cpp
 milvus_storage	internal/core/src/storage/ArrowFileSystemChunkManager.h
+milvus_storage	internal/core/src/storage/ChunkManager.cpp
 milvus_storage	internal/core/src/storage/FileManager.h
 milvus_storage	internal/core/src/storage/IndexEntryEncryptedLocalWriter.cpp
 milvus_storage	internal/core/src/storage/IndexEntryEncryptedLocalWriter.h

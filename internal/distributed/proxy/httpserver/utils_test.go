@@ -18,6 +18,7 @@ package httpserver
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"math"
 	"net/http"
@@ -2195,7 +2196,7 @@ func TestSerialize(t *testing.T) {
 		{schemapb.DataType_Float16Vector, typeutil.Float32ArrayToFloat16Bytes, "\n\f\n\x02$0\x10e\x1a\x04\x1c/\x1c3"},
 		{schemapb.DataType_BFloat16Vector, typeutil.Float32ArrayToBFloat16Bytes, "\n\f\n\x02$0\x10e\x1a\x04\xe3=c>"},
 	} {
-		values, err = serializeFloatOrByteVectors(vectors, testcase.dataType, 2, testcase.serializeFunc)
+		values, err = serializeFloatOrByteVectors(vectors, testcase.dataType, 2, 4, testcase.serializeFunc)
 		assert.Nil(t, err)
 		placeholderValue := &commonpb.PlaceholderValue{
 			Tag:    "$0",
@@ -8566,9 +8567,11 @@ func TestCheckAndSetDataRejectsStringWrappedVector(t *testing.T) {
 	// Int8Vector was listed as accepting base64 and so skipped the null-literal
 	// check, where "null" decodes to a nil slice without an error; it went in as
 	// an empty vector. No decoder reads base64 for it, so it is not on the list.
+	// FloatVector has a base64 spelling now, and its "null" is refused by the
+	// length check instead; TestCheckAndSetDataBase64FloatVector covers it.
 	t.Run("a null literal is refused for every type without base64", func(t *testing.T) {
 		for _, dataType := range []schemapb.DataType{
-			schemapb.DataType_Int8Vector, schemapb.DataType_FloatVector,
+			schemapb.DataType_Int8Vector,
 		} {
 			t.Run(dataType.String(), func(t *testing.T) {
 				err := insert(t, schemaFor(dataType, "2"), `"null"`)
@@ -8582,6 +8585,7 @@ func TestCheckAndSetDataRejectsStringWrappedVector(t *testing.T) {
 	t.Run("base64 spellings still work", func(t *testing.T) {
 		require.NoError(t, insert(t, schemaFor(schemapb.DataType_BinaryVector, "8"), `"AQ=="`))
 		require.NoError(t, insert(t, schemaFor(schemapb.DataType_Float16Vector, "2"), `[0.1, 0.2]`))
+		require.NoError(t, insert(t, schemaFor(schemapb.DataType_FloatVector, "2"), `"zczMPc3MTD4="`))
 	})
 
 	t.Run("compatibility mode takes the text back", func(t *testing.T) {
@@ -9348,7 +9352,8 @@ func TestBase64NullIsAValidBinaryVector(t *testing.T) {
 	require.Len(t, rows, 1)
 	assert.Equal(t, []byte{0x9e, 0xe9, 0x65}, rows[0]["bv"])
 
-	// a float vector has no base64 spelling, so "null" there is still a null
+	// A float vector's base64 is dim*4 bytes, which the three bytes of "null"
+	// can never be, so there it is still refused.
 	floatField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
 	floatField.Name = "fv"
 	floatSchema := &schemapb.CollectionSchema{
@@ -9476,6 +9481,302 @@ func TestConvertBinaryVectorToArray(t *testing.T) {
 			got, err = convertBinaryVectorToArray([][]byte{{}, {}}, 0, test.dataType)
 			require.NoError(t, err)
 			require.Equal(t, []byte{}, got)
+		})
+	}
+}
+
+// base64Float32 is the base64 spelling of a FloatVector: its little-endian
+// float32 bytes, as numpy's astype('<f4').tobytes() produces them.
+func base64Float32(v ...float32) string {
+	return base64.StdEncoding.EncodeToString(typeutil.Float32ArrayToBytes(v))
+}
+
+// Compared as bits because -0 == 0, so float equality cannot see a lost sign.
+func float32Bits(v []float32) []uint32 {
+	bits := make([]uint32, len(v))
+	for i, f := range v {
+		bits[i] = math.Float32bits(f)
+	}
+	return bits
+}
+
+// lossyFloat32s are values a decimal spelling of a vector can lose: 0.1 has no
+// exact decimal form, a subnormal is easily flushed, and -0 is often written
+// as 0. The constant -0.0 is +0 in Go, hence Copysign.
+var lossyFloat32s = []float32{0.1, math.SmallestNonzeroFloat32, float32(math.Copysign(0, -1)), 1.0 / 3}
+
+func base64FloatVectorSchema() *schemapb.CollectionSchema {
+	vectorField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
+	vectorField.Name = "vector"
+	vectorField.TypeParams = []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}
+	return &schemapb.CollectionSchema{
+		Name: DefaultCollectionName,
+		Fields: []*schemapb.FieldSchema{
+			generatePrimaryField(schemapb.DataType_Int64, false), vectorField,
+		},
+	}
+}
+
+func floatVectorColumn(t *testing.T, columns []*schemapb.FieldData, name string) []float32 {
+	t.Helper()
+	for _, column := range columns {
+		if column.GetFieldName() == name {
+			return column.GetVectors().GetFloatVector().GetData()
+		}
+	}
+	require.Failf(t, "column not found", "no column %s", name)
+	return nil
+}
+
+func TestCheckAndSetDataBase64FloatVector(t *testing.T) {
+	paramtable.Init()
+	schema := base64FloatVectorSchema()
+	insert := func(t *testing.T, values ...string) ([]map[string]interface{}, error) {
+		t.Helper()
+		rows := make([]string, 0, len(values))
+		for i, value := range values {
+			rows = append(rows, fmt.Sprintf(`{"%s": %d, "vector": %s}`, FieldBookID, i, value))
+		}
+		got, _, err := checkAndSetData([]byte(`{"data": [`+strings.Join(rows, ",")+`]}`), schema, false)
+		return got, err
+	}
+
+	t.Run("round trip is bit-exact", func(t *testing.T) {
+		rows, err := insert(t, strconv.Quote(base64Float32(lossyFloat32s...)))
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		assert.Equal(t, float32Bits(lossyFloat32s), float32Bits(rows[0]["vector"].([]float32)))
+
+		// the column builder is what reaches the proxy, and needs no change
+		// for it: the row already holds a []float32
+		columns, err := anyToColumns(rows, nil, schema, true, false)
+		require.NoError(t, err)
+		assert.Equal(t, float32Bits(lossyFloat32s), float32Bits(floatVectorColumn(t, columns, "vector")))
+	})
+
+	t.Run("array and base64 rows mix in one request", func(t *testing.T) {
+		rows, err := insert(t, `[1, 2, 3, 4]`, strconv.Quote(base64Float32(5, 6, 7, 8)), `[9, 10, 11, 12]`)
+		require.NoError(t, err)
+		columns, err := anyToColumns(rows, nil, schema, true, false)
+		require.NoError(t, err)
+		assert.Equal(t, []float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}, floatVectorColumn(t, columns, "vector"))
+	})
+
+	// A length that is not a whole number of floats would otherwise lose its
+	// tail in BytesToFloat32Vector and reach the column builder as a vector of
+	// the right dimension.
+	t.Run("a decoded length other than dim*4 names the field", func(t *testing.T) {
+		whole := typeutil.Float32ArrayToBytes([]float32{1, 2, 3, 4})
+		for _, tt := range []struct {
+			name string
+			raw  []byte
+		}{
+			{"one byte short", whole[:15]},
+			{"one byte over", append(append([]byte{}, whole...), 0)},
+			{"one float short", whole[:12]},
+			{"one float over", append(append([]byte{}, whole...), whole[:4]...)},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				_, err := insert(t, strconv.Quote(base64.StdEncoding.EncodeToString(tt.raw)))
+				require.Error(t, err)
+				assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+				assert.Contains(t, err.Error(), "field vector")
+				assert.Contains(t, err.Error(), fmt.Sprintf("expect 16 (dim 4), got %d", len(tt.raw)))
+			})
+		}
+	})
+
+	t.Run("malformed base64 names the field", func(t *testing.T) {
+		padded := base64Float32(1, 2, 3, 4)
+		for _, value := range []string{
+			"not base64!",
+			strings.TrimRight(padded, "="),                  // unpadded
+			strings.ReplaceAll(padded, "A", "-"),            // URL-safe alphabet
+			padded + " ",                                    // trailing blank
+			strings.Repeat("=", 4) + padded[:len(padded)-4], // padding up front
+		} {
+			t.Run(value, func(t *testing.T) {
+				_, err := insert(t, strconv.Quote(value))
+				require.Error(t, err)
+				assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+				assert.Contains(t, err.Error(), "field vector")
+			})
+		}
+	})
+
+	t.Run("empty and null strings are parameter errors", func(t *testing.T) {
+		_, err := insert(t, `""`)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "missing vector field: vector")
+
+		// "null" is valid base64 for three bytes, so it fails on length
+		_, err = insert(t, `"null"`)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "field vector")
+		assert.Contains(t, err.Error(), "got 3")
+
+		_, err = insert(t, `null`)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "not nullable")
+	})
+
+	// A quoted array was refused before FloatVector had a base64 spelling,
+	// and still is: base64 has no '[' to be confused with.
+	t.Run("a quoted array is still the text of a vector", func(t *testing.T) {
+		_, err := insert(t, `"[1, 2, 3, 4]"`)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "the text of one")
+	})
+
+	t.Run("compatibility mode reads base64 and the quoted array", func(t *testing.T) {
+		key := paramtable.Get().HTTPCfg.CompatibilityMode.Key
+		paramtable.Get().Save(key, "true")
+		defer paramtable.Get().Reset(key)
+
+		rows, err := insert(t, `"[1, 2, 3, 4]"`, strconv.Quote(base64Float32(lossyFloat32s...)))
+		require.NoError(t, err)
+		require.Len(t, rows, 2)
+		assert.Equal(t, []float32{1, 2, 3, 4}, rows[0]["vector"])
+		assert.Equal(t, float32Bits(lossyFloat32s), float32Bits(rows[1]["vector"].([]float32)))
+
+		_, err = insert(t, `"null"`)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+}
+
+func TestConvertQueries2PlaceholderBase64FloatVector(t *testing.T) {
+	paramtable.Init()
+	query := func(t *testing.T, data string) *commonpb.PlaceholderValue {
+		t.Helper()
+		phv, err := convertQueries2Placeholder(`{"data": `+data+`}`, schemapb.DataType_FloatVector, 4)
+		require.NoError(t, err)
+		assert.Equal(t, commonpb.PlaceholderType_FloatVector, phv.GetType())
+		return phv
+	}
+
+	t.Run("base64 is passed through bit-exact", func(t *testing.T) {
+		phv := query(t, fmt.Sprintf(`[%q, %q]`, base64Float32(lossyFloat32s...), base64Float32(1, 2, 3, 4)))
+		assert.Equal(t, [][]byte{
+			typeutil.Float32ArrayToBytes(lossyFloat32s),
+			typeutil.Float32ArrayToBytes([]float32{1, 2, 3, 4}),
+		}, phv.GetValues())
+	})
+
+	// Only values an array can carry are compared. The array decoder reads -0
+	// as +0, and refuses -3.4028235e+38, the shortest spelling of
+	// -MaxFloat32, as out of float32 range.
+	t.Run("base64 and array give the same placeholder", func(t *testing.T) {
+		values := []float32{0.1, math.SmallestNonzeroFloat32, 1.0 / 3, -123.456}
+		literals := make([]string, len(values))
+		for i, v := range values {
+			literals[i] = strconv.FormatFloat(float64(v), 'g', -1, 32)
+		}
+		fromArray := query(t, `[[`+strings.Join(literals, ", ")+`]]`)
+		fromBase64 := query(t, fmt.Sprintf(`[%q]`, base64Float32(values...)))
+		assert.Equal(t, fromArray.GetValues(), fromBase64.GetValues())
+	})
+
+	t.Run("a decoded length other than dim*4 is a parameter error", func(t *testing.T) {
+		whole := typeutil.Float32ArrayToBytes([]float32{1, 2, 3, 4})
+		for _, raw := range [][]byte{whole[:15], append(append([]byte{}, whole...), 0)} {
+			_, err := convertQueries2Placeholder(
+				fmt.Sprintf(`{"data": [%q]}`, base64.StdEncoding.EncodeToString(raw)), schemapb.DataType_FloatVector, 4)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), fmt.Sprintf("bytesLen: 16, but length of []byte: %d", len(raw)))
+		}
+	})
+
+	t.Run("malformed base64 is a parameter error", func(t *testing.T) {
+		_, err := convertQueries2Placeholder(`{"data": ["not base64!"]}`, schemapb.DataType_FloatVector, 4)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	// The 16-bit floats share serializeFloatOrByteVectors and must still be
+	// measured at two bytes a coordinate.
+	t.Run("16-bit floats keep their byte length", func(t *testing.T) {
+		for _, dataType := range []schemapb.DataType{schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector} {
+			_, err := convertQueries2Placeholder(`{"data": ["AQIDBAUGBwg="]}`, dataType, 4)
+			require.NoError(t, err)
+			_, err = convertQueries2Placeholder(fmt.Sprintf(`{"data": [%q]}`, base64Float32(1, 2, 3, 4)), dataType, 4)
+			require.Error(t, err)
+		}
+	})
+}
+
+func TestEmbeddingListBase64FloatVector(t *testing.T) {
+	first := base64Float32(lossyFloat32s...)
+	body := fmt.Sprintf(`{"data": [[%q, [1, 2, 3, 4]], [[5, 6, 7, 8]]]}`, first)
+	require.True(t, isEmbeddingListData(body))
+
+	phv, err := convertEmbListQueries2Placeholder(body, schemapb.DataType_FloatVector, 4)
+	require.NoError(t, err)
+	assert.Equal(t, commonpb.PlaceholderType_EmbListFloatVector, phv.GetType())
+	require.Len(t, phv.GetValues(), 2)
+	assert.Equal(t,
+		append(typeutil.Float32ArrayToBytes(lossyFloat32s), typeutil.Float32ArrayToBytes([]float32{1, 2, 3, 4})...),
+		phv.GetValues()[0])
+	assert.Equal(t, typeutil.Float32ArrayToBytes([]float32{5, 6, 7, 8}), phv.GetValues()[1])
+
+	t.Run("a base64-only list is recognized", func(t *testing.T) {
+		assert.True(t, isEmbeddingListData(fmt.Sprintf(`{"data": [[%q]]}`, first)))
+	})
+
+	for _, tt := range []struct {
+		name  string
+		value string
+	}{
+		{"wrong length", strconv.Quote(base64.StdEncoding.EncodeToString(make([]byte, 15)))},
+		{"malformed", `"not base64!"`},
+		{"neither array nor string", `4`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := encodeEmbListQuery(gjson.Parse(`[[1, 2, 3, 4], `+tt.value+`]`).Array(), schemapb.DataType_FloatVector, 4, 0)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "search data[0][1]")
+		})
+	}
+}
+
+func TestStructSubVectorBase64FloatVector(t *testing.T) {
+	schema := buildStructArrayTestSchema()
+	insert := func(subVecs string) ([]map[string]interface{}, error) {
+		body := []byte(`{"data":[{"id":1,"vec":[0.1,0.2,0.3,0.4],` +
+			`"my_struct":[` + subVecs + `]}]}`)
+		rows, _, err := checkAndSetData(body, schema, false)
+		return rows, err
+	}
+
+	rows, err := insert(fmt.Sprintf(`{"sub_int":10,"sub_vec":%q},{"sub_int":11,"sub_vec":[1, 2, 3, 4]}`,
+		base64Float32(lossyFloat32s...)))
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	subVec := rows[0]["my_struct"].(structArrayRow)["sub_vec"].(*schemapb.VectorField)
+	assert.Equal(t, int64(4), subVec.GetDim())
+	assert.Equal(t,
+		float32Bits(append(append([]float32{}, lossyFloat32s...), 1, 2, 3, 4)),
+		float32Bits(subVec.GetFloatVector().GetData()))
+
+	for _, tt := range []struct {
+		name  string
+		value string
+	}{
+		{"wrong length", strconv.Quote(base64.StdEncoding.EncodeToString(make([]byte, 17)))},
+		{"malformed", `"not base64!"`},
+		{"neither array nor string", `4`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := insert(`{"sub_int":10,"sub_vec":` + tt.value + `}`)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "sub_vec")
 		})
 	}
 }

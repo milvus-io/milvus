@@ -134,7 +134,7 @@ func TestGetManifestFieldIDs_InvalidColumnName(t *testing.T) {
 	out, err := writer.Close()
 	require.NoError(t, err)
 	defer out.Destroy()
-	manifest, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{NewFiles: out})
+	manifest, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 
 	fields, err := GetManifestFieldIDs(manifest, cfg)
@@ -182,7 +182,7 @@ func TestGetManifestFieldIDs_FromPackedWriterManifest(t *testing.T) {
 	out, err := writer.Close()
 	require.NoError(t, err)
 	defer out.Destroy()
-	manifest, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{NewFiles: out})
+	manifest, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 
 	fields, err := GetManifestFieldIDs(manifest, cfg)
@@ -236,7 +236,7 @@ func TestResolveManifestSingleWriterFormat_FromPackedWriterManifest(t *testing.T
 	out, err := writer.Close()
 	require.NoError(t, err)
 	defer out.Destroy()
-	manifest, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{NewFiles: out})
+	manifest, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 
 	format, err := ResolveManifestSingleWriterFormat(manifest, cfg, []string{"100"}, "")
@@ -297,14 +297,12 @@ func TestResolveManifestSingleWriterFormat_FiltersMixedAddColumnGroups(t *testin
 	}
 
 	parquetOut := writeColumn("100", 100, "parquet", false)
-	manifest, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{NewFiles: parquetOut})
+	manifest, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{NewFiles: parquetOut})
 	parquetOut.Destroy()
 	require.NoError(t, err)
 
-	committedBasePath, version, err := UnmarshalManifestPath(manifest)
-	require.NoError(t, err)
 	vortexOut := writeColumn("101", 101, "vortex", true)
-	manifest, err = CommitManifestUpdates(committedBasePath, version, cfg, &ManifestUpdates{NewFiles: vortexOut})
+	manifest, err = CommitManifestUpdates(manifest, cfg, &ManifestUpdates{NewFiles: vortexOut})
 	vortexOut.Destroy()
 	require.NoError(t, err)
 
@@ -426,7 +424,7 @@ func TestPackedFFIWriter(t *testing.T) {
 					assertPackedWriterParquetReadback(t, out, key, rec)
 				}
 
-				manifest, err := CommitManifestUpdates(basePath, version, cfg,
+				manifest, err := CommitManifestUpdates(MarshalManifestPath(basePath, version), cfg,
 					&ManifestUpdates{NewFiles: out})
 				require.NoError(t, err)
 				require.NotEmpty(t, manifest)
@@ -522,7 +520,7 @@ func TestFFIPackedWriter_CloseThenCommitUpdates(t *testing.T) {
 	require.NotNil(t, out)
 	defer out.Destroy()
 
-	mfPath, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg,
+	mfPath, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg,
 		&ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 

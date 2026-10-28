@@ -12,7 +12,9 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
+#include <utility>
 
 #include "common/type_c.h"
 #include "milvus-storage/ffi_c.h"
@@ -78,6 +80,26 @@ std::shared_ptr<milvus_storage::api::Manifest>
 GetLoonManifest(
     const std::string& path,
     const std::shared_ptr<milvus_storage::api::Properties>& properties);
+
+/**
+ * @brief Parse a manifest path JSON into its base path and version
+ *
+ * @return (base_path, ver), or std::nullopt when path is not a JSON object
+ *         with a string "base_path" and an integer "ver"
+ */
+std::optional<std::pair<std::string, int64_t>>
+ParseLoonManifestPath(const std::string& path);
+
+/**
+ * @brief Check whether two manifest paths name the same manifest revision
+ *
+ * A manifest path is identified by its "base_path" and "ver"; JSON key order
+ * and optional fields do not change the revision. Values that are not
+ * manifest path JSON are compared as plain strings. Mirrors Go's
+ * packed.SameManifestPath.
+ */
+bool
+IsSameLoonManifestPath(const std::string& lhs, const std::string& rhs);
 
 /**
  * @brief Inject every external_spec-derived property for external collections.

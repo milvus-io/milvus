@@ -305,6 +305,22 @@ Each accepted sync registers callbacks:
 
 Callbacks for an already removed view stop tracking without creating new work.
 
+The `milvus_qv_view_state_max_age_seconds` metric measures time since the last
+state transition or resource progress, rather than total time in a state.
+While Preparing, an increase in a QueryNode's cumulative ready-segment count
+or a node reaching Ready advances progress. While Dropping, a node confirming
+Dropped advances cleanup. Compare each report with that same node's previously
+accepted report; percentages from different nodes are not comparable. Duplicate
+reports, including replay after reconnect, do not renew the timer. A node that
+loses resources and later prepares them again can make fresh progress relative
+to its latest accepted report. This does not impose a total loading deadline.
+
+The manager attaches this progress decision to its observer event before
+replacing the node's previous report. The observer updates readiness buckets on
+every report, but renews the timer and oldest-view candidate only on progress or
+a view-state transition. Worker-side newly-ready segment callbacks carry deltas,
+so any nonempty callback represents progress under that callback contract.
+
 ### 4.7 AddPreparing
 
 1. Validate the new DataVersion against all resident views.

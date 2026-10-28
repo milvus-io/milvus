@@ -2,6 +2,7 @@ package broadcaster
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -159,24 +160,25 @@ func (s *tombstoneScheduler) triggerGCTombstone() {
 		toDrop[eligible[i]] = struct{}{}
 	}
 
-	retained := s.tombstones[:0]
-	for idx, tombstone := range s.tombstones {
-		if _, ok := toDrop[tombstone.broadcastID]; !ok {
-			retained = append(retained, tombstone)
-			continue
-		}
-		dropped, err := s.bm.DropTombstone(ctx, tombstone.broadcastID, checkpoints)
-		if err != nil {
-			s.Logger().Warn(ctx, "failed to drop tombstone", mlog.Err(err))
-			retained = append(retained, s.tombstones[idx:]...)
-			break
-		}
-		if !dropped {
-			// A lagging PChannel must not block unrelated eligible tombstones.
-			retained = append(retained, tombstone)
+	if len(toDrop) == 0 {
+		return
+	}
+	ids := make([]uint64, 0, len(toDrop))
+	for _, tombstone := range s.tombstones {
+		if _, ok := toDrop[tombstone.broadcastID]; ok {
+			ids = append(ids, tombstone.broadcastID)
 		}
 	}
-	s.tombstones = retained
+	// The catalog retries until the context ends, so a failure means shutdown:
+	// keep the entries, and recovery collects the keys that remain.
+	if err := s.bm.DropTombstones(ctx, ids); err != nil {
+		s.Logger().Warn(ctx, "failed to drop tombstones", mlog.Int("count", len(ids)), mlog.Err(err))
+		return
+	}
+	s.tombstones = slices.DeleteFunc(s.tombstones, func(tombstone tombstoneItem) bool {
+		_, ok := toDrop[tombstone.broadcastID]
+		return ok
+	})
 }
 
 // loadCheckpoints reads the durable recovery boundary once per PChannel per GC

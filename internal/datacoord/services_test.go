@@ -1328,7 +1328,7 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 	})
 
 	t.Run("test meta non exist", func(t *testing.T) {
-		s := &Server{meta: newEmptyTestMeta()}
+		s := &Server{meta: newEmptyTestMeta(), notifyStatsChan: make(chan UniqueID, 1)}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		req := &datapb.AlterCollectionRequest{
@@ -1340,12 +1340,13 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		assert.NotNil(t, resp)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(s.meta.ListCollections()))
+		assert.Equal(t, UniqueID(1), <-s.notifyStatsChan)
 	})
 
 	t.Run("test update meta", func(t *testing.T) {
 		ms := metacache.NewMetaStore(nil)
 		ms.PutCollection(&collectionInfo{ID: 1})
-		s := &Server{meta: &meta{metaStore: ms}}
+		s := &Server{meta: &meta{metaStore: ms}, notifyStatsChan: make(chan UniqueID, 1)}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		req := &datapb.AlterCollectionRequest{
@@ -1363,6 +1364,7 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		coll = s.meta.GetCollection(1)
 		assert.NotNil(t, coll)
 		assert.NotNil(t, coll.Properties)
+		assert.Equal(t, UniqueID(1), <-s.notifyStatsChan, "an altered schema may add fields that need stats")
 	})
 
 	t.Run("published external source notifies index build", func(t *testing.T) {
@@ -6669,9 +6671,10 @@ func TestLoadableProjectionUsesFinalSegments(t *testing.T) {
 			InsertChannel: channel,
 			State:         state,
 			IsInvisible:   invisible,
+			Stats:         &datapb.Statistics{InsertBinlogSize: 2048, StatsBinlogSize: 1024, DeltaBinlogSize: 512},
 			Binlogs: []*datapb.FieldBinlog{{
 				FieldID: 100,
-				Binlogs: []*datapb.Binlog{{LogID: id}},
+				Binlogs: []*datapb.Binlog{{LogID: id, MemorySize: 999999}},
 			}},
 		}})
 	}
@@ -6684,8 +6687,8 @@ func TestLoadableProjectionUsesFinalSegments(t *testing.T) {
 	actual, err := meta.loadableProjection(ctx, 100)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []dataview.LoadableSegment{
-		{SegmentID: 110, VChannel: "vchan-0", PartitionID: 10},
-		{SegmentID: 120, VChannel: "vchan-0", PartitionID: 10},
+		{SegmentID: 110, VChannel: "vchan-0", PartitionID: 10, Size: 2048},
+		{SegmentID: 120, VChannel: "vchan-0", PartitionID: 10, Size: 2048},
 	}, actual)
 }
 

@@ -18,7 +18,6 @@
 #include "storage/minio/GuardedS3EndpointProvider.h"
 
 #include <aws/core/auth/AWSCredentials.h>
-#include <aws/core/auth/AWSCredentialsProviderChain.h>
 #include <aws/s3/model/CreateBucketRequest.h>
 #include <aws/s3/model/DeleteBucketRequest.h>
 #include <aws/s3/model/DeleteObjectRequest.h>
@@ -57,6 +56,7 @@
 #include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/filesystem/gcp/gcp_credential_registry.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/filesystem/s3/s3_filesystem_producer.h"
 #include "monitor/Monitor.h"
 #include "prometheus/counter.h"
 #include "prometheus/histogram.h"
@@ -244,7 +244,7 @@ MinioChunkManager::BuildS3Client(
     const Aws::Client::ClientConfiguration& config) {
     if (storage_config.useIAM) {
         auto provider =
-            std::make_shared<Aws::Auth::DefaultAWSCredentialsProviderChain>();
+            std::make_shared<milvus_storage::AwsCredentialsProviderChain>();
         auto aws_credentials = provider->GetAWSCredentials();
         if (!(!aws_credentials.GetAWSAccessKeyId().empty())) {
             ThrowInfo(ErrorCode::ConfigInvalid,
@@ -254,11 +254,6 @@ MinioChunkManager::BuildS3Client(
             ThrowInfo(ErrorCode::ConfigInvalid,
                       "if use iam, secret key should not be empty");
         }
-        if (!(!aws_credentials.GetSessionToken().empty())) {
-            ThrowInfo(ErrorCode::ConfigInvalid,
-                      "if use iam, token should not be empty");
-        }
-
         client_ = std::make_shared<Aws::S3::S3Client>(
             provider,
             config,

@@ -62,7 +62,7 @@ func TestManifestIndexLegacyBaseRoundTrip(t *testing.T) {
 			segment := &datapb.SegmentInfo{ID: 3, CollectionID: 1, PartitionID: 2}
 			version := packed.ManifestEarliest
 			for _, buildID := range []int64{100, 200} {
-				manifest, err := packed.CommitManifestUpdates(base, version, cfg, &packed.ManifestUpdates{
+				manifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(base, version), cfg, &packed.ManifestUpdates{
 					Indexes: []packed.ManifestIndexInfo{{
 						ColumnName: "vector", IndexName: "index", IndexType: "HNSW",
 						Path: fmt.Sprintf("%d/1", buildID), IndexID: buildID, BuildID: buildID,
@@ -626,9 +626,9 @@ func mockManifestUpdateResult(manifestPath string, updates *packed.ManifestUpdat
 // CommitManifestUpdatesWithResultAsync mock, since the real wrapper calls the submit API.
 func mockManifestUpdateSubmissions(t *testing.T) {
 	t.Helper()
-	mock := mockey.Mock(packed.SubmitManifestUpdates).To(func(ctx context.Context, io *packed.ManifestIOContext, base string, version int64, config *indexpb.StorageConfig, updates *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
+	mock := mockey.Mock(packed.SubmitManifestUpdates).To(func(ctx context.Context, io *packed.ManifestIOContext, baseManifest string, config *indexpb.StorageConfig, updates *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
 		go func() {
-			manifestPath, err := packed.CommitManifestUpdatesWithResultAsync(ctx, io, base, version, config, updates)
+			manifestPath, err := packed.CommitManifestUpdatesWithResultAsync(ctx, io, baseManifest, config, updates)
 			complete(manifestPath, err)
 		}()
 		return nil
@@ -643,12 +643,16 @@ func newFakeManifestStore(t *testing.T) *fakeManifestStore {
 	s := &fakeManifestStore{revisions: make(map[string][]packed.ManifestIndexInfo)}
 
 	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
-		func(_ context.Context, _ *packed.ManifestIOContext, basePath string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
+		func(_ context.Context, _ *packed.ManifestIOContext, baseManifest string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
+			published, err := advanceManifest(baseManifest, 1)
+			if err != nil {
+				return packed.ManifestUpdateResult{}, err
+			}
 			s.mu.Lock()
 			defer s.mu.Unlock()
 			s.commitCount++
 			// A revision is a full snapshot resolved onto the one it opens at.
-			current := s.revisions[packed.MarshalManifestPath(basePath, version)]
+			current := s.revisions[baseManifest]
 			next := make([]packed.ManifestIndexInfo, 0, len(current)+len(updates.Indexes))
 			for _, entry := range current {
 				dropped := false
@@ -663,7 +667,6 @@ func newFakeManifestStore(t *testing.T) *fakeManifestStore {
 				}
 			}
 			next = append(next, updates.Indexes...)
-			published := packed.MarshalManifestPath(basePath, version+1)
 			s.revisions[published] = next
 			hasIndexes := len(next) > 0
 			return packed.ManifestUpdateResult{ManifestPath: published, HasIndexes: &hasIndexes}, nil

@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func (s *ServerSuite) setupFlushVersionCatalog() (*datacoordkv.Catalog, dataview.Manager) {
@@ -264,4 +265,41 @@ func TestFlushVersionDoesNotExpandCompactionCommit(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, views, 1)
 	require.Equal(t, int64(1), views[0].GetDataVersion().GetCompactVersion())
+}
+
+func (s *ServerSuite) TestFlushPublishesCommittedSize() {
+	p := paramtable.Get()
+	mode, cost := &p.QueryViewCfg.LogicalSizeSource, &p.QueryViewCfg.LogicalSizeSegmentBaseCost
+	originalMode, originalCost := mode.GetValue(), cost.GetValue()
+	defer func() {
+		require.NoError(s.T(), p.Save(mode.Key, originalMode))
+		require.NoError(s.T(), p.Save(cost.Key, originalCost))
+	}()
+	require.NoError(s.T(), p.Save(mode.Key, "insertBytes"))
+	require.NoError(s.T(), p.Save(cost.Key, "10"))
+	_, manager := s.setupFlushVersionCatalog()
+	req := s.addFlushVersionSegment(10, 100)
+	req.Stats = &datapb.Statistics{InsertBinlogSize: 2048, StatsBinlogSize: 1024, DeltaBinlogSize: 1}
+	s.flushVersion(req)
+	ref, err := manager.Latest(s.T().Context(), 100)
+	require.NoError(s.T(), err)
+	defer ref.Deref()
+	stat, ok := ref.Stats(10)
+	require.True(s.T(), ok)
+	require.Equal(s.T(), int64(100), stat.RowNum)
+	require.Equal(s.T(), int64(2048), stat.Size)
+	require.Equal(s.T(), int64(11), stat.LogicalSize)
+	require.Equal(s.T(), s.testServer.meta.GetSegment(s.T().Context(), 10).GetStats().GetInsertBinlogSize(), stat.Size)
+
+	// No request Statistics: use the row estimate even if binlog descriptors exist.
+	missing := s.addFlushVersionSegment(20, 7)
+	missing.Field2BinlogPaths[0].Binlogs[0].MemorySize = 4096
+	s.flushVersion(missing)
+	next, err := manager.Latest(s.T().Context(), 100)
+	require.NoError(s.T(), err)
+	defer next.Deref()
+	stat, ok = next.Stats(20)
+	require.True(s.T(), ok)
+	require.Zero(s.T(), stat.Size)
+	require.Equal(s.T(), int64(17), stat.LogicalSize)
 }

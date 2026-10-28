@@ -176,7 +176,7 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 	bw.initialManifestPath = bw.manifestPath
 	bw.statsBlobSize = 0
 
-	basePath, baseVersion, parseErr := packed.UnmarshalManifestPath(bw.initialManifestPath)
+	basePath, _, parseErr := packed.UnmarshalManifestPath(bw.initialManifestPath)
 	if parseErr != nil {
 		err = parseErr
 		return
@@ -225,7 +225,7 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 	// packed.ErrLoonTransient; loon's own optimistic retry covers
 	// manifest-version conflicts within a single attempt.
 	err = retry.Do(ctx, func() error {
-		newPath, commitErr := packed.CommitManifestUpdates(basePath, baseVersion, bw.storageConfig, updates)
+		newPath, commitErr := packed.CommitManifestUpdates(bw.initialManifestPath, bw.storageConfig, updates)
 		if commitErr != nil {
 			return classifyLoonErr(commitErr)
 		}
