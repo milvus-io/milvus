@@ -360,6 +360,8 @@ func (st *statsTask) discardRejectedStatsResult(ctx context.Context, cluster ses
 		log.Warn(ctx, "failed to drop rejected stats task meta", mlog.Err(err))
 		return
 	}
+	// The segment changed under the task; check it again against current meta.
+	notifySegmentStatsBuild(st.GetSegmentID())
 	st.SetState(indexpb.JobState_JobStateNone, reason)
 	log.Info(ctx, "discard rejected stats result", mlog.String("reason", reason))
 }
@@ -732,6 +734,9 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 	mlog.Info(ctx, "SetJobInfo for stats task success", mlog.FieldTaskID(st.GetTaskID()),
 		mlog.Int64("oldSegmentID", st.GetSegmentID()), mlog.Int64("targetSegmentID", st.GetTargetSegmentID()),
 		mlog.String("subJobType", st.GetSubJobType().String()), mlog.String("state", st.GetState().String()))
+	if st.GetSubJobType() == indexpb.StatsSubJob_Sort && st.meta.GetHealthySegment(ctx, st.GetTargetSegmentID()) != nil {
+		notifySegmentIndexBuild(st.GetTargetSegmentID())
+	}
 	return nil
 }
 

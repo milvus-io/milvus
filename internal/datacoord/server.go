@@ -37,6 +37,8 @@ import (
 	globalIDAllocator "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	pkindexgc "github.com/milvus-io/milvus/internal/datacoord/pkindex/gc"
+	pkindexservice "github.com/milvus-io/milvus/internal/datacoord/pkindex/service"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/dataview"
@@ -123,6 +125,8 @@ type Server struct {
 	mixCoord         types.MixCoord
 	garbageCollector *garbageCollector
 	gcOpt            GcOption
+	pkindexService   *pkindexservice.Service
+	pkindexGC        *pkindexgc.GC
 	handler          Handler
 	importMeta       ImportMeta
 	importInspector  ImportInspector
@@ -145,6 +149,7 @@ type Server struct {
 
 	flushCh         chan UniqueID
 	notifyIndexChan chan UniqueID
+	notifyStatsChan chan UniqueID
 	factory         dependency.Factory
 
 	session          sessionutil.SessionInterface
@@ -229,6 +234,15 @@ func WithCatalog(catalog metastore.DataCoordCatalog) Option {
 	}
 }
 
+// WithPKIndexService returns an Option to set the primary key index manifest
+// service that datacoord gives its manager to. The caller registers the
+// service on its gRPC server.
+func WithPKIndexService(svc *pkindexservice.Service) Option {
+	return func(svr *Server) {
+		svr.pkindexService = svc
+	}
+}
+
 // CreateServer creates a `Server` instance
 func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Option) *Server {
 	rand.Seed(time.Now().UnixNano())
@@ -238,10 +252,12 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		factory:             factory,
 		flushCh:             make(chan UniqueID, 1024),
 		notifyIndexChan:     make(chan UniqueID, 1024),
+		notifyStatsChan:     make(chan UniqueID, 1024),
 		dataNodeCreator:     defaultDataNodeCreatorFunc,
 		importJobLock:       lock.NewKeyLock[int64](),
 		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
 		metricsRequest:      metricsinfo.NewMetricsRequest(),
+		pkindexService:      pkindexservice.New(),
 	}
 
 	for _, opt := range opts {
@@ -374,6 +390,9 @@ func (s *Server) initDataCoord() (initErr error) {
 	mlog.Info(s.ctx, "init segment manager done")
 
 	s.initGarbageCollection(storageCli)
+
+	s.initPKIndex(storageCli)
+	mlog.Info(s.ctx, "init primary key index manifest service done")
 
 	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, importCheckerHooks{
 		commitImport:        s.broadcastCommitImportMessage,
@@ -773,7 +792,7 @@ func (s *Server) initIndexInspector(storageCli storage.ChunkManager) {
 
 func (s *Server) initStatsInspector() {
 	if s.statsInspector == nil {
-		s.statsInspector = newStatsInspector(s.ctx, s.meta, s.globalScheduler, s.allocator, s.handler, s.compactionInspector, s.indexEngineVersionManager)
+		s.statsInspector = newStatsInspector(s.ctx, s.notifyStatsChan, s.meta, s.globalScheduler, s.allocator, s.handler, s.compactionInspector, s.indexEngineVersionManager)
 	}
 }
 
@@ -787,7 +806,7 @@ func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager
 	// Initialize Manager (handles job submission, query, and internal inspector/checker)
 	if s.externalCollectionRefreshManager == nil {
 		s.externalCollectionRefreshManager = NewExternalCollectionRefreshManager(
-			s.ctx, s.meta, s.globalScheduler, s.allocator, s.meta.externalCollectionRefreshMeta, s.cluster2, s.handler.GetCollection, s.updateExternalSchemaViaWAL, storageCli)
+			s.ctx, s.meta, s.globalScheduler, s.allocator, s.meta.externalCollectionRefreshMeta, s.cluster2, s.handler.GetCollection, s.updateExternalSchemaViaWAL, storageCli, s.notifyIndexChan)
 	}
 }
 
@@ -854,6 +873,9 @@ func (s *Server) startServerLoop() {
 	// construction (bounded by s.ctx); nothing to do here.
 
 	s.garbageCollector.start()
+	if s.pkindexGC != nil {
+		s.pkindexGC.Start(s.serverLoopCtx)
+	}
 
 	s.meta.statsTaskMeta.StartCleanupDeprecatedSortTasks(s.serverLoopCtx, &s.serverLoopWg)
 }
@@ -1083,16 +1105,14 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 		return merr.WrapErrSegmentNotFound(segmentID, "segment not found, might be a faked segment, ignore post flush")
 	}
 
-	if enableSortCompaction() {
+	collection := s.meta.GetCollection(segment.GetCollectionID())
+	if enableSortCompaction() && (collection == nil || !collection.IsExternal()) {
 		select {
 		case getStatsTaskChSingleton() <- segmentID:
 		default:
 		}
 	} else {
-		select {
-		case getBuildIndexChSingleton() <- segmentID:
-		default:
-		}
+		notifySegmentIndexBuild(segmentID)
 	}
 
 	// Insert / delta counts come from Statistics. Stats array is iterated
@@ -1178,6 +1198,10 @@ func (s *Server) Stop() error {
 	mlog.Info(s.ctx, "datacoord server shutdown")
 	s.garbageCollector.close()
 	mlog.Info(s.ctx, "datacoord garbage collector stopped")
+	if s.pkindexGC != nil {
+		s.pkindexGC.Close()
+		mlog.Info(s.ctx, "datacoord primary key index gc stopped")
+	}
 	if s.snapshotExportManager != nil {
 		s.snapshotExportManager.Close()
 		mlog.Info(s.ctx, "datacoord snapshot export manager stopped")

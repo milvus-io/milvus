@@ -119,9 +119,10 @@ func (m *dataViewManager) PublishChange(ctx context.Context, event ChangeGroupDa
 	for _, id := range event.SupersededSegmentIDs {
 		delete(stats, id)
 	}
-	for segmentID, rows := range buildSegmentRowStats(event.NewSegments) {
+	for segmentID, rows := range buildSegmentStats(event.NewSegments) {
 		stats[segmentID] = rows
 	}
+	m.prepareLogicalSizes(stats)
 
 	var once sync.Once
 	commit := func() {

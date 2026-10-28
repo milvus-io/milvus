@@ -20,10 +20,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"math"
+	"strings"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/sbinet/npyio"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -31,6 +34,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // malformedNpy builds a .npy prefix whose declared header length is hdrLen but
@@ -162,6 +166,25 @@ func Test_NumRowsAndBytesReportsDecodedLogicalSize(t *testing.T) {
 	})
 }
 
+// Test_NumRowsAndBytesRejectsTruncatedPayload pins that a .npy whose header
+// declares more data than the object holds is rejected at preimport with a
+// terminal input error. The count-only preimport must fail the job here, like
+// V2's full read does: the payload is immutable, so Reshard retrying it can
+// never succeed.
+func Test_NumRowsAndBytesRejectsTruncatedPayload(t *testing.T) {
+	buf := new(bytes.Buffer)
+	require.NoError(t, npyio.Write(buf, []int64{1, 2, 3, 4}))
+	payload := buf.Bytes()
+	require.Greater(t, len(payload), 4)
+
+	cm := cmServing(t, "pk.npy", payload[:len(payload)-3])
+	_, _, _, err := NumRowsAndBytes(context.Background(), cm, numpySchema("pk"), []string{"pk.npy"})
+	require.Error(t, err)
+	require.Contains(t, strings.ToLower(err.Error()), "eof")
+	require.True(t, errors.Is(err, merr.ErrImportFailed),
+		"a truncated payload must be an input error: %v", err)
+}
+
 // TestShapeProductAndDataTypeSize pins the two byte-math helpers the decoded
 // size is built from: shapeProduct multiplies the dimensions (0 when any is
 // non-positive) and npyDataTypeSize parses the dtype's item size (0 for an
@@ -178,4 +201,34 @@ func TestShapeProductAndDataTypeSize(t *testing.T) {
 	assert.Equal(t, int64(40), npyDataTypeSize("<U10"))
 	assert.Equal(t, int64(8), npyDataTypeSize("O"))
 	assert.Equal(t, int64(0), npyDataTypeSize("notatype"))
+}
+
+// objectDtypeNpy builds a valid v1 .npy whose dtype is '|O' (a pickled
+// payload), padded the way numpy pads its header.
+func objectDtypeNpy(t *testing.T, rows int, payload []byte) []byte {
+	t.Helper()
+	dict := fmt.Sprintf("{'descr': '|O', 'fortran_order': False, 'shape': (%d,), }", rows)
+	pad := (64 - (10+len(dict)+1)%64) % 64
+	header := dict + strings.Repeat(" ", pad) + "\n"
+
+	buf := new(bytes.Buffer)
+	buf.Write([]byte{0x93, 'N', 'U', 'M', 'P', 'Y', 1, 0})
+	require.NoError(t, binary.Write(buf, binary.LittleEndian, uint16(len(header))))
+	buf.WriteString(header)
+	buf.Write(payload)
+	return buf.Bytes()
+}
+
+// Test_NumRowsAndBytesSkipsObjectDtypeTruncationCheck pins the dtype exception:
+// an object array holds a pickle, not fixed-size elements, so its declared shape
+// cannot be multiplied into a byte count. Reporting it as truncated would send
+// the user looking for a corrupt file; the reader rejects the dtype later.
+func Test_NumRowsAndBytesSkipsObjectDtypeTruncationCheck(t *testing.T) {
+	content := objectDtypeNpy(t, 2, []byte{0x80, 0x04})
+	cm := cmServing(t, "vec.npy", content)
+
+	rows, _, size, err := NumRowsAndBytes(context.Background(), cm, numpySchema("vec"), []string{"vec.npy"})
+	require.NoError(t, err)
+	require.Equal(t, int64(2), rows)
+	require.Equal(t, int64(len(content)), size)
 }

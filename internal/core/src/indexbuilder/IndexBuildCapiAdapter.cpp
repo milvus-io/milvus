@@ -331,6 +331,7 @@ MakeFileManagerContext(const proto::indexcgo::BuildIndexInfo& info,
                                   params.at(DIM_KEY).get<int64_t>(),
                                   IndexNonEncoding(params),
                                   info.index_store_path_version()};
+    index_meta.index_file_prefix = info.index_file_prefix();
 
     auto chunk_manager = storage::CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);

@@ -17,6 +17,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -121,10 +123,29 @@ func (s *sourceStream) next() (*storage.InsertData, *internalpb.ImportFile, bool
 			continue
 		}
 		if err != nil {
-			return nil, nil, false, merr.Wrapf(err, "prepare import source %d", s.file.GetId())
+			return nil, nil, false, sourceReadErr(s.file.GetId(), err)
 		}
 		return batch, s.file, true, nil
 	}
+}
+
+// sourceReadErr classifies a failure raised while reading a source batch.
+//
+// A source whose object ends inside a declared value surfaces as
+// io.ErrUnexpectedEOF: the decoder's io.ReadFull saw the object end mid-value,
+// and the retryable reader only reports a raw EOF once the object's own size is
+// exhausted (a premature EOF before that is mapped to a typed IO error and
+// retried by the reader). The object is immutable, so a new run can never
+// succeed; fail the task with an input error, exactly as preimport does for a
+// payload whose header declares more bytes than the file holds, instead of
+// letting DataCoord schedule another run forever. Everything else keeps the
+// existing retry classification.
+func sourceReadErr(fileID int64, err error) error {
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		return merr.WrapErrImportFailedMsg(
+			"read import source %d: %v", fileID, err)
+	}
+	return merr.Wrapf(err, "prepare import source %d", fileID)
 }
 
 // open starts the next source's reader and prepare stage.

@@ -1,0 +1,94 @@
+syntax = "proto3";
+
+package milvus.proto.pkindex;
+
+option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb";
+
+import "common.proto";
+
+// Manifest is the durable state of the primary key index of one vchannel.
+// The body is stored in object storage. etcd stores only a ManifestPointer.
+message Manifest {
+  int64 collection_id = 1;
+  string vchannel = 2;
+  // Increases by 1 on every committed edit.
+  int64 version = 3;
+  // The pchannel term (PChannelInfo.term) of the last flush that changed
+  // this manifest. It is 0 before the first flush.
+  int64 last_flush_term = 4;
+  // The SSTs hold the effects of all WAL messages with a time tick at or
+  // below this value.
+  uint64 checkpoint_time_tick = 5;
+  // Newest first. For one key, the first SST that holds the key has the
+  // current value, including a tombstone.
+  repeated SSTRef ssts = 6;
+  // Complete object key prefix of the SST files. The object key of an SST
+  // is <sst_base_path>/<id>.sst.
+  string sst_base_path = 7;
+}
+
+// SSTRef describes one SST. The fields mirror the engine's sst.Info.
+message SSTRef {
+  int64 id = 1;
+  // Pebble sstable table format of the file.
+  uint32 table_format = 2;
+  int64 size = 3;
+  bytes min_key = 4;
+  bytes max_key = 5;
+  int64 num_entries = 6;
+}
+
+// ManifestPointer is the etcd value of one vchannel.
+message ManifestPointer {
+  int64 version = 1;
+  // Complete object key of the Manifest body.
+  string body_key = 2;
+}
+
+message CommitFlushRequest {
+  int64 collection_id = 1;
+  // The pchannel of the flush is the pchannel of this vchannel name.
+  string vchannel = 2;
+  int64 pchannel_term = 3;
+  // Newest first.
+  repeated SSTRef add_ssts = 4;
+  uint64 checkpoint_time_tick = 5;
+}
+
+message CommitFlushResponse {
+  common.Status status = 1;
+  // The complete manifest after the commit.
+  Manifest manifest = 2;
+}
+
+// ManifestTarget names the manifest of one vchannel.
+message ManifestTarget {
+  int64 collection_id = 1;
+  string vchannel = 2;
+}
+
+message GetRecoveryManifestsRequest {
+  // At most 10000 targets, without duplicates.
+  repeated ManifestTarget targets = 1;
+}
+
+// ManifestPointerEntry is the result for one ManifestTarget.
+message ManifestPointerEntry {
+  // The result of this target. found and pointer are set only on success.
+  common.Status status = 1;
+  bool found = 2;
+  ManifestPointer pointer = 3;
+}
+
+message GetRecoveryManifestsResponse {
+  common.Status status = 1;
+  // One entry per target, in the order of the targets.
+  repeated ManifestPointerEntry entries = 2;
+}
+
+service PKIndexCoordService {
+  rpc CommitFlush(CommitFlushRequest) returns (CommitFlushResponse) {}
+  // Returns the manifest pointer of each vchannel; the caller reads the body
+  // from object storage.
+  rpc GetRecoveryManifests(GetRecoveryManifestsRequest) returns (GetRecoveryManifestsResponse) {}
+}

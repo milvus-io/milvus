@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -58,6 +59,10 @@ import (
 var errIndexOperationIgnored = errors.New("index operation ignored")
 
 func validateIndexStorePathVersionForFinish(buildID int64, requested, actual indexpb.IndexStorePathVersion) error {
+	if metautil.IsSegmentRooted(requested) && actual != requested {
+		return merr.WrapErrServiceInternalMsg("index worker changed segment-rooted path layout, buildID=%d, requested=%s, actual=%s",
+			buildID, requested.String(), actual.String())
+	}
 	if actual > requested {
 		return merr.WrapErrParameterInvalidMsg(
 			"index store path version returned by worker is newer than requested, buildID=%d, requested=%s, actual=%s",
@@ -282,9 +287,9 @@ func (m *indexMeta) updateSegmentIndex(segIdx *model.SegmentIndex) {
 	m.segmentBuildInfo.Add(segIdx)
 }
 
-// writeSegmentIndexToManifest reports whether completed StorageV3 index
-// artifacts are published through segment manifests. SegmentIndex remains the
-// durable task record while a build is active or failed. Only a successful
+// writeSegmentIndexToManifest selects manifest publication for new StorageV3
+// tasks. Existing index builds follow their persisted path version. SegmentIndex
+// remains the durable task record while a build is active or failed. Only a successful
 // publication retires its Finished etcd row.
 func writeSegmentIndexToManifest() bool {
 	return paramtable.Get().DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool()
@@ -321,6 +326,12 @@ func (m *indexMeta) updateSegIndexMeta(segIdx *model.SegmentIndex, updateFunc fu
 // Precondition: the caller holds keyLock for taskInfo.BuildID.
 func (m *indexMeta) buildFinishedSegmentIndex(segIdx *model.SegmentIndex, taskInfo *workerpb.IndexTaskInfo) (*model.SegmentIndex, uint64, error) {
 	actualPathVersion := taskInfo.GetIndexStorePathVersion()
+	// Failed/empty results may be synthesized by the scheduler without a
+	// worker payload. They carry no artifact layout; retain the dispatched
+	// version so terminal tasks can retire and GC can reclaim their uploads.
+	if taskInfo.GetState() != commonpb.IndexState_Finished || len(taskInfo.GetIndexFileKeys()) == 0 {
+		actualPathVersion = segIdx.IndexStorePathVersion
+	}
 	if err := validateIndexStorePathVersionForFinish(taskInfo.GetBuildID(), segIdx.IndexStorePathVersion, actualPathVersion); err != nil {
 		mlog.Warn(m.ctx, "invalid index store path version returned by worker",
 			mlog.Int64("buildID", taskInfo.GetBuildID()),
@@ -903,35 +914,49 @@ func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, ind
 }
 
 func (m *indexMeta) IsUnIndexedSegment(collectionID UniqueID, segID UniqueID) bool {
+	return m.GetUnIndexedSegmentIDsForIndexTask(collectionID, []UniqueID{segID}).Contain(segID)
+}
+
+func (m *indexMeta) GetUnIndexedSegmentIDsForIndexTask(collectionID UniqueID, segIDs []UniqueID) typeutil.UniqueSet {
+	unindexed := typeutil.NewUniqueSet()
+	if len(segIDs) == 0 {
+		return unindexed
+	}
+
 	m.fieldIndexLock.RLock()
 	fieldIndexesMap, ok := m.indexes[collectionID]
 	if !ok {
 		m.fieldIndexLock.RUnlock()
-		return false
+		return unindexed
 	}
-	// Copy the map to avoid data race after releasing the lock
-	fieldIndexes := make(map[UniqueID]*model.Index, len(fieldIndexesMap))
-	for id, index := range fieldIndexesMap {
-		fieldIndexes[id] = index
+	activeIndexIDs := make([]UniqueID, 0, len(fieldIndexesMap))
+	for _, index := range fieldIndexesMap {
+		if !index.IsDeleted {
+			activeIndexIDs = append(activeIndexIDs, index.IndexID)
+		}
 	}
 	m.fieldIndexLock.RUnlock()
-
-	// the segment should be unindexed status if the fieldIndexes is not nil
-	segIndexInfos, ok := m.segmentIndexes.Get(segID)
-	if !ok || segIndexInfos.Len() == 0 {
-		return true
+	if len(activeIndexIDs) == 0 {
+		return unindexed
 	}
 
-	for _, index := range fieldIndexes {
-		if !index.IsDeleted {
-			if _, ok := segIndexInfos.Get(index.IndexID); !ok {
+	for _, segID := range segIDs {
+		// the segment should be unindexed status if the fieldIndexes is not nil
+		segIndexInfos, ok := m.segmentIndexes.Get(segID)
+		if !ok || segIndexInfos.Len() == 0 {
+			unindexed.Insert(segID)
+			continue
+		}
+		for _, indexID := range activeIndexIDs {
+			if _, ok := segIndexInfos.Get(indexID); !ok {
 				// the segment should be unindexed status if the segment index is not found within field indexes
-				return true
+				unindexed.Insert(segID)
+				break
 			}
 		}
 	}
 
-	return false
+	return unindexed
 }
 
 func (m *indexMeta) GetSegmentsIndexes(collectionID UniqueID, segIDs []UniqueID) map[int64]map[UniqueID]*model.SegmentIndex {

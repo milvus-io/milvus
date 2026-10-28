@@ -12,7 +12,7 @@ ChunkManager receives complete keys; it does not prepend its root.
 | Local | Absolute filesystem path including `localStorage.path` | `/var/lib/milvus/data/insert_log/1/2/3/...` |
 | Remote | Bucket-relative object key, normally including `minio.rootPath` | `files/insert_log/1/2/3/...` |
 
-**New local segment/index namespaces never use minio.rootPath.** Updates to an
+**New local segment namespaces never use minio.rootPath.** Updates to an
 existing legacy manifest retain its base path, including the historical prefix;
 do not rebase that manifest while appending data or stats. A remote key does not include
 the bucket name or a URI scheme. Local loon/Arrow filesystems use `/` as their
@@ -26,6 +26,16 @@ Explore is a separate layout: local temporary manifests live under
 
 - Writers use shared layout helpers: `storage.SegmentManifestBasePath`,
   `SegmentPartitionBasePath`, and the binlog/index helpers in `metautil`.
+- Primary key index objects live under
+  `minio.rootPath/pk_index/<collectionID>/<vchannel>/`: manifest bodies in
+  `manifest/<version>-<uuid>.pb` and SSTs in `sst/<id>.sst`. All writers, the
+  manifest service and its GC build these keys with
+  `internal/pkindex/objpath.go`. `pk_index` is `common.PKIndexPath` and is
+  listed in `InternalStorageRootSegments`. The manifest pointers are meta kv
+  keys under `pkindex-meta/manifest/`, built by
+  `internal/datacoord/pkindex/manifest`. A flush also reads the streaming
+  coordinator key `streamingcoord-meta/pchannel/<pchannel>`, built by
+  `BuildPChannelInfoPath` in `internal/metastore/kv/streamingcoord`.
 - Readers consume the complete key recorded in metadata or the manifest.
   They must not prepend another root.
 - Some API fields describe relative file names rather than complete keys.
@@ -34,6 +44,23 @@ Explore is a separate layout: local temporary manifests live under
   consuming boundary.
 - Cleanup uses the same layout as the producer. Preserve remote keys exactly:
   `.`, `..`, and repeated separators are literal object-key components.
+
+## Manifest index artifacts
+
+When `dataCoord.index.writeSegmentIndexToManifest` is enabled, new StorageV3
+vector/scalar index builds select `IndexStorePathVersion=2` and write to
+`<manifest base>/_index/<build>/<version>/<file>`. This includes new indexes on
+legacy local segments: they follow that existing manifest base. Disabling the
+switch preserves the existing version-0/1 layout selection for new tasks.
+New or updated index entries must stay inside that `_index` directory; parent
+traversal and external namespaces are errors. Existing entries are not migrated.
+Builds retain their creation-time publication mode across switch changes and
+restarts: version 2 finishes in the manifest, while version 0/1 finishes in etcd.
+Readers and cleanup use each artifact's persisted version.
+Resolving v2 index files requires the owning segment's manifest base; load and
+snapshot consumers report missing or invalid metadata instead of guessing the
+canonical base. Snapshot generation uses its selected segment metadata.
+See [design and compatibility](../../design-docs/design_docs/20261019-segment-rooted-index-artifacts.md).
 
 ## Local upgrade compatibility
 
@@ -102,8 +129,20 @@ directory from the output manifest base.
 - V3 orphan scan: enumerate `insert_log` and reclaim files without segment
   metadata after the protection period. Files belonging to registered V3
   segments are skipped, even if an individual file is absent from the manifest.
+- A dedicated build-aware scan handles canonical `insert_log/.../_index`
+  orphans, including those in live V3 segments; snapshot and import protections
+  still apply.
+- Malformed `_index` paths are skipped by the orphan scan because their build
+  ownership cannot be established. Dropped-segment directory cleanup still
+  covers them; malformed objects without a segment row can remain orphaned.
 - Therefore an uncommitted stats file inside a live V3 segment is not guaranteed
   to be reclaimed by DataCoord's orphan scan.
+- Primary key index: only the GC in `internal/datacoord/pkindex/gc` deletes
+  under `pk_index/`. It finds a vchannel only through its manifest pointer,
+  and keeps the manifest bodies of the retention and the SSTs that they
+  reference. The other orphan scans do not enter `pk_index/`. Nothing deletes
+  a `pk_index/<collectionID>/` prefix after a collection drop, or the objects
+  of a vchannel whose first manifest commit never succeeded.
 - Legacy `R/M/insert_log` orphan/LOB layouts and old Explore temporary paths
   have separate cleanup gaps. Do not claim this PR repairs all such leftovers.
   Startup cannot recover indexes hidden with an old container's CWD.
@@ -117,6 +156,9 @@ directory from the output manifest base.
 - Compatibility: `internal/datacoord/meta_local_manifest*.go` and
   `snapshot_local_manifest_test.go`.
 - Cleanup: `internal/datacoord/garbage_collector*.go` and `task_stats*.go`.
+- Primary key index: `internal/pkindex/objpath.go`,
+  `internal/datacoord/pkindex/manifest/metakey.go`,
+  `internal/datacoord/pkindex/gc`.
 
 Source review and unit tests do not replace a real version-to-version upgrade
 test. Report which versions, layouts, and failure cases were actually exercised.

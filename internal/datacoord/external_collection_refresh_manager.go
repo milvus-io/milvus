@@ -168,6 +168,10 @@ type externalCollectionRefreshManager struct {
 	// same physical location the FFI wrote to.
 	chunkManager storage.ChunkManager
 
+	// notifyIndexChan asks the index inspector to enqueue a collection's
+	// unindexed segments once a refresh's source/spec is visible.
+	notifyIndexChan chan<- UniqueID
+
 	// Internal components (private, composed)
 	inspector *externalCollectionRefreshInspector
 	checker   *externalCollectionRefreshChecker
@@ -223,6 +227,7 @@ func NewExternalCollectionRefreshManager(
 	collectionGetter func(ctx context.Context, collectionID int64) (*collectionInfo, error),
 	schemaUpdater func(ctx context.Context, collectionID int64, externalSource, externalSpec string) error,
 	chunkManager storage.ChunkManager,
+	notifyIndexChan chan<- UniqueID,
 ) ExternalCollectionRefreshManager {
 	closeChan := make(chan struct{})
 
@@ -236,6 +241,7 @@ func NewExternalCollectionRefreshManager(
 		collectionGetter: collectionGetter,
 		schemaUpdater:    schemaUpdater,
 		chunkManager:     chunkManager,
+		notifyIndexChan:  notifyIndexChan,
 		closeChan:        closeChan,
 		notifiedJobs:     make(map[int64]struct{}),
 		cleanedJobs:      make(map[int64]struct{}),
@@ -508,7 +514,7 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 	// self-heals them. Segment-level validation still rejects schema-version
 	// rollback, but drop, rename, or type changes need a schema gate or lock
 	// before they are supported.
-	return applyExternalCollectionSegmentUpdateForBaseline(
+	if err := applyExternalCollectionSegmentUpdateForBaseline(
 		ctx,
 		m.mt,
 		job.GetCollectionId(),
@@ -516,7 +522,18 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 		keptSegments,
 		updatedSegments,
 		mlog.FieldJobID(job.GetJobId()),
-	)
+	); err != nil {
+		return err
+	}
+	// A stats task reads the external source/spec at dispatch. While this
+	// refresh's are still being published, wait for that publish: its
+	// BroadcastAlteredCollection notifies the whole collection.
+	if externalRefreshSchemaVisible(m.mt, job) {
+		for _, segment := range updatedSegments {
+			notifySegmentStatsBuild(segment.GetID())
+		}
+	}
+	return nil
 }
 
 // wrapTask builds a scheduler-facing task wrapper around a persisted proto
@@ -645,8 +662,11 @@ func (m *externalCollectionRefreshManager) handleJobFinished(ctx context.Context
 
 	if currentSource == newSource && currentSpec == newSpec {
 		// Nothing to deliver - the collection already describes this refresh.
-		// That is a delivered publish, so keep the key.
+		// That is a delivered publish, so keep the key. The source/spec is already
+		// visible, so the applied segments can be indexed now; otherwise
+		// BroadcastAlteredCollection enqueues them when the publish lands.
 		published = true
+		notifyCollectionIndexBuild(m.notifyIndexChan, job.GetCollectionId())
 		return
 	}
 

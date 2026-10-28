@@ -36,6 +36,44 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
+func TestInitSparseInterimIndexAlgorithms(t *testing.T) {
+	params := &paramtable.ComponentParam{}
+	params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+	cfg := &params.QueryNodeCfg
+	t.Cleanup(func() {
+		params.Reset(cfg.InterimIndexSparseIPAlgo.Key)
+		params.Reset(cfg.InterimIndexSparseBM25Algo.Key)
+		params.Reset(cfg.InterimIndexTargetIndexVersion.Key)
+		require.NoError(t, InitInterminIndexConfig(params))
+	})
+	for _, tc := range []struct {
+		name, ip, bm25, version string
+		wantErr                 bool
+	}{
+		{name: "inherit", version: "8"},
+		{name: "independent", ip: "sindi", bm25: "daat_wand", version: "10"},
+		{name: "bm25_sindi", ip: "TAAT_NAIVE", bm25: "SINDI", version: "10"},
+		{name: "invalid_ip", ip: "INVALID", version: "10", wantErr: true},
+		{name: "invalid_bm25", bm25: "INVALID", version: "10", wantErr: true},
+		{name: "ip_old_version", ip: "SINDI", version: "9", wantErr: true},
+		{name: "bm25_old_version", bm25: "SINDI", version: "9", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NoError(t, params.Save(cfg.InterimIndexSparseIPAlgo.Key, tc.ip))
+			require.NoError(t, params.Save(cfg.InterimIndexSparseBM25Algo.Key, tc.bm25))
+			require.NoError(t, params.Save(cfg.InterimIndexTargetIndexVersion.Key, tc.version))
+			err := InitInterminIndexConfig(params)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Equal(t, int32(merr.CodeConfigInvalid), merr.Code(err))
+				assert.False(t, merr.IsRetryableErr(err))
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestResolveArrowIOThreadPoolCapacity(t *testing.T) {
 	paramtable.Init()
 	pt := paramtable.Get()

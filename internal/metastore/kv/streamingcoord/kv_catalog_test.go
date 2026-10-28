@@ -91,10 +91,11 @@ func newTestCatalog(t *testing.T) (metastore.StreamingCoordCataLog, map[string]s
 func TestCatalogMetaKeys(t *testing.T) {
 	assert.Equal(t, canonicalCChannelMetaKeyForTest, CChannelMetaKey)
 	assert.Equal(t, canonicalVersionKeyForTest, VersionKey)
+	assert.Equal(t, "streamingcoord-meta/pchannel/by-dev-dml_0", BuildPChannelInfoPath("by-dev-dml_0"))
 }
 
 func TestCatalog(t *testing.T) {
-	catalog, _, kv := newTestCatalog(t)
+	catalog, kvStorage, kv := newTestCatalog(t)
 
 	metas, err := catalog.ListPChannel(context.Background())
 	assert.NoError(t, err)
@@ -136,6 +137,7 @@ func TestCatalog(t *testing.T) {
 	metas, err = catalog.ListPChannel(context.Background())
 	assert.NoError(t, err)
 	assert.Len(t, metas, 2)
+	assert.Contains(t, kvStorage, BuildPChannelInfoPath("test"))
 
 	// BroadcastTask test
 	err = catalog.SaveBroadcastTask(context.Background(), 1, &streamingpb.BroadcastTask{

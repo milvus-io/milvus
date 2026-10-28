@@ -14,8 +14,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// This file builds and parses the object keys of the primary key index. All
-// keys are complete object keys under the root path of the object storage.
 package pkindex
 
 import (
@@ -26,6 +24,21 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
 )
+
+// The functions below build and parse the object keys of the primary key
+// index. All keys are complete object keys under the root path of the chunk
+// manager (rootPath):
+//
+//	<rootPath>/pk_index/<collectionID>/<vchannel>/
+//	├── sst/                        SSTBasePath
+//	│   └── <sstID>.sst             SSTKey, ParseSSTKey
+//	└── manifest/                   ManifestDir
+//	    └── <version>-<nonce>.pb    ManifestBodyKey, ParseManifestBodyKey
+//
+// For example: files/pk_index/449/by-dev-rootcoord-dml_0_449v0/sst/450123.sst
+//
+// A streaming node handover and a data node compaction write SSTs. DataCoord
+// writes the manifest bodies. The DataCoord GC deletes both.
 
 // vchannelDir returns the complete object key prefix of all objects of a vchannel.
 func vchannelDir(rootPath string, collectionID int64, vchannel string) string {

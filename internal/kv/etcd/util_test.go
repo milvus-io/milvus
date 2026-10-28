@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
@@ -52,9 +53,14 @@ func (s *EtcdKVUtilSuite) TestParsePredicates() {
 
 	badPredicate := predicates.NewMockPredicate(s.T())
 	badPredicate.EXPECT().Target().Return(0)
+	badExistencePredicate := predicates.NewMockPredicate(s.T())
+	badExistencePredicate.EXPECT().Target().Return(predicates.PredTargetKeyExistence)
+	badExistencePredicate.EXPECT().Type().Return(0)
 
 	cases := []testCase{
 		{tag: "normal_value_equal", input: []predicates.Predicate{predicates.ValueEqual("a", "b")}, expectSucceed: true},
+		{tag: "key_not_exist", input: []predicates.Predicate{predicates.KeyNotExist("a")}, expectSucceed: true},
+		{tag: "key_existence_bad_type", input: []predicates.Predicate{badExistencePredicate}, expectSucceed: false},
 		{tag: "empty_input", input: nil, expectSucceed: true},
 		{tag: "bad_predicates", input: []predicates.Predicate{badPredicate}, expectSucceed: false},
 	}
@@ -70,6 +76,14 @@ func (s *EtcdKVUtilSuite) TestParsePredicates() {
 			}
 		})
 	}
+}
+
+func (s *EtcdKVUtilSuite) TestParseKeyNotExistPredicate() {
+	result, err := parsePredicates("root", predicates.KeyNotExist("a"))
+	s.Require().NoError(err)
+	s.Require().Len(result, 1)
+	expected := clientv3.Compare(clientv3.CreateRevision(util.GetPath("root", "a")), "=", 0)
+	s.Equal(expected, result[0])
 }
 
 func (s *EtcdKVUtilSuite) TestGetContextWithTimeout() {
