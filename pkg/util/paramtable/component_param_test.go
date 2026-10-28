@@ -65,6 +65,18 @@ func TestQueryNodeSparseInterimIndexAlgorithms(t *testing.T) {
 	assert.Equal(t, "DAAT_MAXSCORE", cfg.InterimIndexSparseBM25Algo.GetValue())
 }
 
+func TestForbidIAMOnCustomObjectStorage(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+	cfg := &params.CommonCfg.ForbidIAMOnCustomObjectStorage
+	require.True(t, cfg.GetAsBool())
+	require.Equal(t, "3.0.5", cfg.Version)
+	require.NoError(t, params.Save(cfg.Key, "false"))
+	require.False(t, cfg.GetAsBool())
+	require.NoError(t, params.Reset(cfg.Key))
+	require.True(t, cfg.GetAsBool())
+}
+
 func TestQueryNodeStrictGroupSettings(t *testing.T) {
 	params := &ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true)))

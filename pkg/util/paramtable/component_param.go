@@ -372,12 +372,13 @@ type commonConfig struct {
 	DiskWriteRateLimiterMiddlePriorityRatio ParamItem `refreshable:"true"`
 	DiskWriteRateLimiterLowPriorityRatio    ParamItem `refreshable:"true"`
 
-	AuthorizationEnabled  ParamItem `refreshable:"false"`
-	AdminAuthEnabled      ParamItem `refreshable:"true"`
-	SuperUsers            ParamItem `refreshable:"true"`
-	DefaultRootPassword   ParamItem `refreshable:"false"`
-	RootShouldBindRole    ParamItem `refreshable:"true"`
-	EnablePublicPrivilege ParamItem `refreshable:"false"`
+	ForbidIAMOnCustomObjectStorage ParamItem `refreshable:"false"`
+	AuthorizationEnabled           ParamItem `refreshable:"false"`
+	AdminAuthEnabled               ParamItem `refreshable:"true"`
+	SuperUsers                     ParamItem `refreshable:"true"`
+	DefaultRootPassword            ParamItem `refreshable:"false"`
+	RootShouldBindRole             ParamItem `refreshable:"true"`
+	EnablePublicPrivilege          ParamItem `refreshable:"false"`
 
 	ClusterName ParamItem `refreshable:"false"`
 
@@ -1060,6 +1061,17 @@ For example, if the rate limit is 100KB/s, and the high priority ratio is 2, the
 		Export:       true,
 	}
 	p.AuthorizationEnabled.Init(base.mgr)
+
+	p.ForbidIAMOnCustomObjectStorage = ParamItem{
+		Key:          "common.security.forbidIAMOnCustomObjectStorage",
+		Version:      "3.0.5",
+		DefaultValue: "true",
+		Doc: "Reject external collection creation and refresh when extfs.endpoint_url " +
+			"is combined with use_iam=true or role_arn. Does not revoke existing open " +
+			"filesystems. Set false to allow these combinations. Requires restart.",
+		Export: false,
+	}
+	p.ForbidIAMOnCustomObjectStorage.Init(base.mgr)
 
 	p.AdminAuthEnabled = ParamItem{
 		Key:          "common.security.adminAuthEnabled",

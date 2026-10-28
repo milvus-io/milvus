@@ -211,7 +211,7 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 	// too. When a source is eventually supplied via alter/refresh, validation
 	// runs there.
 	if typeutil.IsExternalCollection(schema) && schema.GetExternalSource() != "" {
-		if err := externalspec.ValidateSourceAndSpec(schema.GetExternalSource(), schema.GetExternalSpec()); err != nil {
+		if err := externalspec.ValidateSourceAndSpecWithIAMPolicy(schema.GetExternalSource(), schema.GetExternalSpec(), paramtable.Get().CommonCfg.ForbidIAMOnCustomObjectStorage.GetAsBool()); err != nil {
 			return err
 		}
 	}
@@ -487,7 +487,7 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 	}
 	// Validate before reading snapshot metadata so RootCoord keeps the same
 	// external source boundary even if a request bypasses Proxy.
-	if err := externalspec.ValidateSourceAndSpec(schema.GetExternalSource(), schema.GetExternalSpec()); err != nil {
+	if err := externalspec.ValidateSourceAndSpecWithIAMPolicy(schema.GetExternalSource(), schema.GetExternalSpec(), paramtable.Get().CommonCfg.ForbidIAMOnCustomObjectStorage.GetAsBool()); err != nil {
 		return err
 	}
 	spec, err := externalspec.ParseExternalSpec(schema.GetExternalSpec())
