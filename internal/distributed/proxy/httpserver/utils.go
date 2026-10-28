@@ -2619,6 +2619,7 @@ func buildStructArrayFieldDataInternal(structSchema *schemapb.StructArrayFieldSc
 
 type structArrayRowAccessor struct {
 	vectorEncoding outputVectorEncoding
+	vectorScratch  *[]byte
 
 	fieldData    *schemapb.FieldData
 	subFields    []*schemapb.FieldData
@@ -2734,7 +2735,7 @@ func (accessor *structArrayRowAccessor) row(rowIdx int, enableInt64 bool) ([]map
 			}
 			for i, v := range values {
 				if accessor.vectorEncoding == "base64" && va.GetElementType() == schemapb.DataType_FloatVector {
-					v = accessor.vectorEncoding.floatVector(v.([]float32))
+					v = accessor.vectorEncoding.floatVector(v.([]float32), accessor.vectorScratch)
 				}
 				out[i][short] = v
 			}
@@ -4159,6 +4160,7 @@ func buildQueryRespWithEncoding(rowsNum int64, needFields []string, fieldDataLis
 	scores []float32, enableInt64 bool, collectionSchema *schemapb.CollectionSchema, vectorEncoding outputVectorEncoding,
 ) ([]map[string]interface{}, error) {
 	nativeJSON := paramtable.Get().HTTPCfg.NativeJSONResponse.GetAsBool()
+	var vectorScratch []byte
 	jsonFieldNames := make(map[string]struct{})
 	jsonAllValid := true
 
@@ -4201,6 +4203,7 @@ func buildQueryRespWithEncoding(rowsNum int64, needFields []string, fieldDataLis
 			}
 			structArrayAccessors[idx] = structAccessor
 			structAccessor.vectorEncoding = vectorEncoding
+			structAccessor.vectorScratch = &vectorScratch
 		}
 	}
 	queryResp := make([]map[string]interface{}, 0, rowsNum)
@@ -4263,7 +4266,7 @@ func buildQueryRespWithEncoding(rowsNum int64, needFields []string, fieldDataLis
 					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetBinaryVector()[dataIdx*(fieldDataList[j].GetVectors().GetDim()/8) : (dataIdx+1)*(fieldDataList[j].GetVectors().GetDim()/8)]
 				case schemapb.DataType_FloatVector:
 					vector := fieldDataList[j].GetVectors().GetFloatVector().GetData()[dataIdx*fieldDataList[j].GetVectors().GetDim() : (dataIdx+1)*fieldDataList[j].GetVectors().GetDim()]
-					row[fieldDataList[j].GetFieldName()] = vectorEncoding.floatVector(vector)
+					row[fieldDataList[j].GetFieldName()] = vectorEncoding.floatVector(vector, &vectorScratch)
 				case schemapb.DataType_Float16Vector:
 					row[fieldDataList[j].GetFieldName()] = fieldDataList[j].GetVectors().GetFloat16Vector()[dataIdx*(fieldDataList[j].GetVectors().GetDim()*2) : (dataIdx+1)*(fieldDataList[j].GetVectors().GetDim()*2)]
 				case schemapb.DataType_BFloat16Vector:

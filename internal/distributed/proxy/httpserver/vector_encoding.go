@@ -43,27 +43,38 @@ func (e *outputVectorEncoding) UnmarshalJSON(data []byte) error {
 	}
 }
 
-func (e outputVectorEncoding) floatVector(values []float32) any {
+func (e outputVectorEncoding) floatVector(values []float32, scratch *[]byte) any {
 	if e == "base64" && values != nil {
-		return base64FloatVector(values)
+		return base64FloatVector{values: values, scratch: scratch}
 	}
 	return values
 }
 
 // base64FloatVector retains the original vector slice. Bytes are materialized
 // only when the response encoder visits this field, never for the whole result.
-type base64FloatVector []float32
+type base64FloatVector struct {
+	values  []float32
+	scratch *[]byte
+}
 
 func (v base64FloatVector) MarshalText() ([]byte, error) {
-	// Reserve both regions once. TextMarshaler leaves JSON quoting/escaping to
+	// All vectors in one result share scratch during serial encoding. Sonic
+	// copies MarshalText's output into its JSON buffer before visiting the next
+	// value, so the next vector may overwrite this storage. Do not share a result
+	// between concurrent encoders or retain MarshalText's borrowed bytes.
+	// TextMarshaler leaves JSON quoting/escaping to
 	// Sonic, without JSONMarshaler's additional JSON compaction pass. It also
 	// avoids Sonic's []byte encoder's small capacity increments, which can copy
 	// the accumulated batch once per vector (notably on ARM64).
-	rawLen := len(v) * 4
+	rawLen := len(v.values) * 4
 	encodedLen := base64.StdEncoding.EncodedLen(rawLen)
-	storage := make([]byte, rawLen+encodedLen)
+	size := rawLen + encodedLen
+	if cap(*v.scratch) < size {
+		*v.scratch = make([]byte, size)
+	}
+	storage := (*v.scratch)[:size]
 	raw, encoded := storage[:rawLen], storage[rawLen:]
-	for i, value := range v {
+	for i, value := range v.values {
 		bits := math.Float32bits(value)
 		if bits&0x7f800000 == 0x7f800000 {
 			return nil, merr.WrapErrServiceInternalMsg("non-finite FLOAT_VECTOR coordinate in result")

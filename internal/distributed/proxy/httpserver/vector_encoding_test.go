@@ -180,7 +180,7 @@ func TestOutputVectorEncodingProjection(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, rows[0]["vec"])
 	view := rows[1]["vec"].(base64FloatVector)
-	require.Same(t, &values[0], &view[0], "projection must retain a view, not allocate full-result bytes")
+	require.Same(t, &values[0], &view.values[0], "projection must retain a view, not allocate full-result bytes")
 	var out bytes.Buffer
 	require.NoError(t, writeDQLJSON(context.Background(), &out, map[string]interface{}{"data": rows}, 1))
 	require.Equal(t, `"AACAPwAAAMA="`, gjson.Get(out.String(), "data.1.vec").Raw)
@@ -215,11 +215,12 @@ func TestOutputVectorEncodingFailure(t *testing.T) {
 		for _, count := range []int{1, 257} {
 			t.Run(fmt.Sprintf("h2=%t/rows=%d", h2, count), func(t *testing.T) {
 				s := queryStreamServer(t, func(c *gin.Context) {
+					var scratch []byte
 					rows := make([]map[string]interface{}, count)
 					for i := range rows {
-						rows[i] = map[string]interface{}{"vec": base64FloatVector{1, -2}}
+						rows[i] = map[string]interface{}{"vec": outputVectorEncoding("base64").floatVector([]float32{1, -2}, &scratch)}
 					}
-					rows[count-1]["vec"] = base64FloatVector{float32(math.NaN())}
+					rows[count-1]["vec"] = outputVectorEncoding("base64").floatVector([]float32{float32(math.NaN())}, &scratch)
 					HTTPReturnStream(c, 200, gin.H{"code": 0, "data": rows})
 				}, h2)
 				resp, err := s.Client().Post(s.URL+"/query", "application/json", nil)
