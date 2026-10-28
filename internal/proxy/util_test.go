@@ -662,7 +662,7 @@ func TestValidateFieldType(t *testing.T) {
 		})
 	}
 
-	t.Run("nested array with type schema", func(t *testing.T) {
+	t.Run("top-level nested array with type schema", func(t *testing.T) {
 		sch := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
@@ -677,7 +677,8 @@ func TestValidateFieldType(t *testing.T) {
 				},
 			},
 		}
-		assert.NoError(t, validateFieldType(sch))
+		err := validateFieldType(sch)
+		require.ErrorContains(t, err, "nested array can only be in a struct array field")
 	})
 }
 

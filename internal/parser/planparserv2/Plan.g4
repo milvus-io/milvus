@@ -41,7 +41,7 @@ expr:
 	| op=(STEuqals | STTouches | STOverlaps | STCrosses | STContains | STIntersects | STWithin) '(' fieldName ',' expr ')'  # SpatialBinary
 	| STDWithin'('fieldName',' expr',' expr')'                                                             # STDWithin
 	| STIsValid'('fieldName')'                                  			 	                            # STIsValid
-	| ArrayLength'('(fieldName | JSONIdentifier | StructFieldIdentifier)')'      # ArrayLength
+	| ArrayLength'('(fieldName | JSONIdentifier | StructFieldIdentifier | StructSubFieldIdentifier)')'      # ArrayLength
 	| function=Identifier '(' field=fieldReference ',' expr ',' option=Identifier ASSIGN kind=Identifier ')' # MembershipMatchWithOption
 	| Identifier '(' ( expr (',' expr )* ','? )? ')'                                                        # Call
 	| expr op1 = (LT | LE) (fieldName | JSONIdentifier | StructSubFieldIdentifier | StructIndexFieldIdentifier) op2 = (LT | LE) expr	# Range

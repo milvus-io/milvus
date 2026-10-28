@@ -387,6 +387,11 @@ func validateFieldType(schema *schemapb.CollectionSchema) error {
 		case schemapb.DataType_None:
 			return merr.WrapErrParameterInvalidMsg("data type None is not valid")
 		case schemapb.DataType_Array:
+			if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+				return merr.WrapErrParameterInvalidMsg(
+					"nested array can only be in a struct array field, field name: %s",
+					field.GetName())
+			}
 			if field.GetTypeSchema() == nil {
 				if err := typeutil.ValidateArrayElementType(field.GetElementType()); err != nil {
 					return err
