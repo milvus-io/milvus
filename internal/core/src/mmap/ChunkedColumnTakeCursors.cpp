@@ -672,6 +672,7 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
 
     struct CachedProjection {
         uint64_t publication{0};
+        uint64_t retention_epoch{0};
         int64_t id{-1};
         void* backing{nullptr};
         Chunk* chunk{nullptr};
@@ -706,7 +707,7 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
 
     // A hot, non-null raw prefix needs no missing-cell plan or unique-cell
     // scratch. Only reuse projections that already belong to the current pin
-    // publication, and still capture the live cohort for EVERY batch. No
+    // retained-owner epoch, and still capture the live cohort for EVERY batch. No
     // backend callback/pin/eviction occurs here; a miss retains captured owners
     // and falls through to the original bounded preparation below.
     bool
@@ -718,19 +719,17 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
             return false;
         }
         auto& workspace = *prepared_workspace_;
-        const auto publication = context_->Stats().bulk_pins;
         for (int64_t lane = 0; lane < count; ++lane) {
             const auto location = workspace.locations[lane];
             const auto id = location.cell_id;
             auto& cached = workspace.projections[static_cast<uint64_t>(id) %
                                                  workspace.projections.size()];
-            if (cached.id != id || cached.publication != publication ||
-                (!strings && cached.fixed_data == nullptr)) {
+            if (cached.id != id || (!strings && cached.fixed_data == nullptr)) {
                 return false;
             }
             const auto hit = context_->FindBorrowedCached(
                 source_, id, prepared_owners_, cached.borrowed);
-            if (!hit || *hit != cached.backing) {
+            if (!hit || !ProjectionIsCurrent(cached, id, *hit)) {
                 return false;
             }
             workspace.row_ids[lane] = id;
@@ -751,27 +750,55 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
         return true;
     }
 
+    bool
+    ProjectionIsCurrent(const CachedProjection& cached,
+                        int64_t id,
+                        void* backing) const {
+        if (cached.id != id || cached.backing != backing ||
+            cached.chunk == nullptr) {
+            return false;
+        }
+        if (cached.retention_epoch == 0) {
+            // Unknown/oversized owners are not retained. Their next physical
+            // pin must still invalidate a pointer, including address reuse.
+            return cached.publication == context_->Stats().bulk_pins;
+        }
+        const auto& hint = cached.borrowed;
+        return cached.retention_epoch == context_->borrow_epoch_ &&
+               hint.context == context_.get() &&
+               hint.epoch == cached.retention_epoch && hint.id == id &&
+               hint.cell == backing && hint.entry != nullptr;
+    }
+
     const CachedProjection&
     ProjectPreparedCell(int64_t id, void* backing) const {
         // The caller has ALREADY captured this exact backing's current owner.
         // A cache collision only misses: compare the complete ID and pointer.
-        // Publication prevents physical-pointer ABA after eviction/reload.
-        // Clear without publication cannot hit FindBorrowed, so its next pin
-        // also invalidates this entry. No cache entry retains a payload owner.
+        // Eviction/Clear invalidates retained Entry hints BEFORE releasing
+        // owners. An unrelated publication must not discard still-owned field
+        // projections. Non-retained cells keep the physical-pin epoch check.
+        // No cache entry retains a payload owner.
         const auto publication = context_->Stats().bulk_pins;
         auto& projections = prepared_workspace_->projections;
         auto& cached =
             projections[static_cast<uint64_t>(id) % projections.size()];
-        if (cached.id == id && cached.publication == publication &&
-            cached.backing == backing) {
+        if (ProjectionIsCurrent(cached, id, backing)) {
             return cached;
         }
+        // A freshly pinned missing cell has not populated its Entry hint yet.
+        // Capture it if retained, but never substitute another backing for
+        // the one whose active batch owner the caller already acquired.
+        const auto retained = context_->FindBorrowedCached(
+            source_, id, prepared_owners_, cached.borrowed);
+        const auto retention_epoch =
+            retained && *retained == backing ? context_->borrow_epoch_ : 0;
         auto* chunk = source_.project(backing);
         AssertInfo(chunk != nullptr,
                    "take source projected a null prepared cell");
         // Use the epoch from BEFORE project: a reentrant publication during
         // that callback must not promote an old backing into the newer epoch.
         cached.publication = publication;
+        cached.retention_epoch = retention_epoch;
         cached.id = id;
         cached.backing = backing;
         cached.chunk = chunk;
