@@ -9,6 +9,7 @@ import (
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -20,11 +21,13 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	pulsar2 "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/pulsar"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // createContextWithClusterID creates a context with cluster ID in metadata (simulating incoming context)
@@ -188,6 +191,46 @@ func TestReplicateStreamServer_IgnoredMessageSendsConfirmation(t *testing.T) {
 	// Close the stream to stop execution
 	mockStreamServer.CloseSend()
 	wg.Wait()
+}
+
+// TestReplicateStreamServerCountsAReplicateViolation: a violation ends the
+// stream like any append failure (the client reconnects), and is counted on the
+// replica's pchannel.
+func TestReplicateStreamServerCountsAReplicateViolation(t *testing.T) {
+	ctx := createContextWithClusterID("test-cluster")
+	mockStreamServer := newMockReplicateStreamServer(ctx)
+
+	replicateService := mock_streaming.NewMockReplicateService(t)
+	replicateService.EXPECT().Append(mock.Anything, mock.Anything).
+		Return(nil, status.NewReplicateViolation("the primary's replicas disagree"))
+	mockWAL := mock_streaming.NewMockWALAccesser(t)
+	mockWAL.EXPECT().Replicate().Return(replicateService)
+	streaming.SetWALForTest(mockWAL)
+
+	counter := metrics.StreamingServiceClientReplicateViolations.WithLabelValues(paramtable.GetStringNodeID(), "test-violation-pchannel")
+	before := testutil.ToFloat64(counter)
+
+	server, err := CreateReplicateServer(mockStreamServer)
+	assert.NoError(t, err)
+	done := make(chan error, 1)
+	go func() { done <- server.Execute() }()
+
+	messageID := pulsar2.NewPulsarID(pulsar.EarliestMessageID())
+	msg := message.NewInsertMessageBuilderV1().
+		WithVChannel("test-violation-pchannel_1v0").
+		WithHeader(&messagespb.InsertMessageHeader{}).
+		WithBody(&msgpb.InsertRequest{}).
+		MustBuildMutable().WithTimeTick(1).
+		WithLastConfirmed(messageID)
+	mockStreamServer.SendRequest(&milvuspb.ReplicateRequest{
+		Request: &milvuspb.ReplicateRequest_ReplicateMessage{
+			ReplicateMessage: &milvuspb.ReplicateMessage{
+				Message: message.ImmutableMessageToMilvusMessage(commonpb.WALName_Pulsar.String(), msg.IntoImmutableMessage(messageID)),
+			},
+		},
+	})
+	<-done
+	assert.Equal(t, before+1, testutil.ToFloat64(counter))
 }
 
 func TestReplicateStreamServer_recvLoop_RecvError(t *testing.T) {

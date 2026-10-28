@@ -292,6 +292,9 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 		L0MaterializeBytes:    uint64(paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64()),
 		GetRecoveryCheckpoint: func() *utility.WALCheckpoint { return r.GetCheckpoint(context.TODO()) },
 		CoordinatorBroker:     coordinatorBroker,
+		// A batch report's success does not prove DataCoord kept each
+		// vchannel, so a retired split source's cleanup reads it back.
+		StoredCheckpointReader: storedCheckpointReader{coord: coord},
 	})
 	if err != nil {
 		return err
@@ -588,6 +591,16 @@ func (r *recoveryStorageImpl) observeModulesMessage(
 		r.summaryManager.ObserveMessage(ctx, retained.Message())
 	}
 	r.vchannelManager.ObserveMessage(ctx, retained)
+	// A message that ends its vchannel's traffic for good has to ask the
+	// summary to seal what that vchannel staged. Nothing else will: the
+	// summary seals on its own only at FlushMaxBytes, and LastAcked caps the
+	// published checkpoint (see vchannel.RequiresSummarySeal). Asked AFTER the
+	// observation above, so the sealed span's coverage includes this message,
+	// and outside every module lock -- RequestFlushThrough takes the summary's
+	// own lock and submits tasks.
+	if r.summaryManager != nil && vchannel.RequiresSummarySeal(retained.Message()) {
+		r.summaryManager.RequestFlushThrough(retained.Message().TimeTick())
+	}
 }
 
 // startLiveScanner continues the same stream after its startup barrier.
