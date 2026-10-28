@@ -15,7 +15,6 @@
 // limitations under the License.
 
 #include <aws/core/auth/AWSCredentials.h>
-#include <aws/core/auth/AWSCredentialsProviderChain.h>
 #include <aws/core/auth/STSCredentialsProvider.h>
 #include <aws/core/utils/logging/ConsoleLogSystem.h>
 #include <aws/s3/model/CreateBucketRequest.h>
@@ -31,6 +30,7 @@
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "log/Log.h"
+#include "milvus-storage/filesystem/s3/s3_filesystem_producer.h"
 
 namespace milvus::storage {
 
@@ -88,8 +88,11 @@ AwsChunkManager::AwsChunkManager(const StorageConfig& storage_config) {
 
     Aws::Client::ClientConfiguration config = generateConfig(storage_config);
     if (storage_config.useIAM) {
+        // Storage only assembles SDK providers here. Credential failures still
+        // produce empty AK/SK and use the existing ConfigInvalid checks below;
+        // allocation failures remain classified by the cgo boundary.
         auto provider =
-            std::make_shared<Aws::Auth::DefaultAWSCredentialsProviderChain>();
+            std::make_shared<milvus_storage::AwsCredentialsProviderChain>();
         auto aws_credentials = provider->GetAWSCredentials();
         if (!(!aws_credentials.GetAWSAccessKeyId().empty())) {
             ThrowInfo(ErrorCode::ConfigInvalid,
@@ -99,11 +102,6 @@ AwsChunkManager::AwsChunkManager(const StorageConfig& storage_config) {
             ThrowInfo(ErrorCode::ConfigInvalid,
                       "if use iam, secret key should not be empty");
         }
-        if (!(!aws_credentials.GetSessionToken().empty())) {
-            ThrowInfo(ErrorCode::ConfigInvalid,
-                      "if use iam, token should not be empty");
-        }
-
         client_ = std::make_shared<Aws::S3::S3Client>(
             provider,
             config,

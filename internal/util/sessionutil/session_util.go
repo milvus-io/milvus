@@ -947,7 +947,8 @@ func (w *sessionWatcher) handleWatchErr(err error) error {
 	// Only recoverable errors are re-watched. ErrCompacted needs a fresh
 	// revision; auth-token errors (etcd auth enabled) need the watch
 	// re-established because clientv3 won't refresh the token on a live watch
-	// stream. Any other error closes the channel. See etcd.IsRetriableWatchErr.
+	// stream. Leader changes during authentication also need re-watching.
+	// Any other error closes the channel. See etcd.IsRetriableWatchErr.
 	if !etcd.IsRetriableWatchErr(err) {
 		// close event channel
 		mlog.Warn(context.TODO(), "Watch service found error", mlog.Err(err))

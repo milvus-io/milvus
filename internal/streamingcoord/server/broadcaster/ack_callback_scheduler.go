@@ -9,6 +9,7 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"go.opentelemetry.io/otel/codes"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -170,7 +171,6 @@ func (s *ackCallbackScheduler) triggerAckCallback() {
 
 		g, err := s.rkLocker.FastLock(task.Header().ResourceKeys.Collect()...)
 		if err != nil {
-			s.Logger().Warn(context.TODO(), "lock is occupied, delay the ack callback", mlog.FieldBroadcastID(task.Header().BroadcastID), mlog.Err(err))
 			pendingTasks = append(pendingTasks, task)
 			continue
 		}
@@ -179,6 +179,13 @@ func (s *ackCallbackScheduler) triggerAckCallback() {
 		go s.doAckCallback(task, g)
 	}
 	s.pendingAckedTasks = pendingTasks
+	if len(pendingTasks) > 0 {
+		// Blocked tasks are retried on every wakeup: log a rate-limited summary,
+		// not one line per task.
+		s.Logger().RatedWarn(s.notifier.Context(), rate.Every(time.Second), "lock is occupied, delay the ack callbacks",
+			mlog.Int("blockedTaskCount", len(pendingTasks)),
+			mlog.Uint64("firstBlockedBroadcastID", pendingTasks[0].Header().BroadcastID))
+	}
 }
 
 // doForcePromoteFixIncompleteBroadcasts handles the full force promote lifecycle:

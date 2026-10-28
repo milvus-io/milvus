@@ -540,9 +540,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) materializeAdditiveManifest(segme
 	delta := segment.GetManifestDelta()
 	s.Require().NotNil(delta, "additive result must ship a manifest delta")
 	s.Require().NotEmpty(delta.GetColumnGroups())
-	basePath, baseVersion, err := packed.UnmarshalManifestPath(segment.GetBaseManifest())
-	s.Require().NoError(err)
-	manifest, err := packed.CommitManifestUpdates(basePath, baseVersion, s.task.compactionParams.StorageConfig, &packed.ManifestUpdates{
+	manifest, err := packed.CommitManifestUpdates(segment.GetBaseManifest(), s.task.compactionParams.StorageConfig, &packed.ManifestUpdates{
 		ColumnGroups: packed.ColumnGroupEntriesFromProto(delta.GetColumnGroups()),
 		Stats:        packed.StatEntriesFromProto(delta.GetStats()),
 	})

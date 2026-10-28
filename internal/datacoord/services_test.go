@@ -1328,7 +1328,7 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 	})
 
 	t.Run("test meta non exist", func(t *testing.T) {
-		s := &Server{meta: newEmptyTestMeta()}
+		s := &Server{meta: newEmptyTestMeta(), notifyStatsChan: make(chan UniqueID, 1)}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		req := &datapb.AlterCollectionRequest{
@@ -1340,12 +1340,13 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		assert.NotNil(t, resp)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(s.meta.ListCollections()))
+		assert.Equal(t, UniqueID(1), <-s.notifyStatsChan)
 	})
 
 	t.Run("test update meta", func(t *testing.T) {
 		ms := metacache.NewMetaStore(nil)
 		ms.PutCollection(&collectionInfo{ID: 1})
-		s := &Server{meta: &meta{metaStore: ms}}
+		s := &Server{meta: &meta{metaStore: ms}, notifyStatsChan: make(chan UniqueID, 1)}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		req := &datapb.AlterCollectionRequest{
@@ -1363,6 +1364,7 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		coll = s.meta.GetCollection(1)
 		assert.NotNil(t, coll)
 		assert.NotNil(t, coll.Properties)
+		assert.Equal(t, UniqueID(1), <-s.notifyStatsChan, "an altered schema may add fields that need stats")
 	})
 
 	t.Run("published external source notifies index build", func(t *testing.T) {

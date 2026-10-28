@@ -23,6 +23,8 @@ exchange; task inspection, resource locking, callbacks, and GC run outside that
 mutex. ACK enqueue and callback completion send coalesced, nonblocking wakeups.
 The ACK loop drains its inbox before each scheduling pass, appending new tasks
 after existing blocked tasks to preserve FIFO scheduling for conflicting keys.
+Each pass retries every blocked task: a held key fails `FastLock` with a plain
+sentinel error, and the pass logs one rate-limited summary of blocked tasks.
 Tombstone GC remains timer-driven.
 
 ## Idempotent Broadcast
@@ -122,9 +124,14 @@ do not count toward `maxCount`, so the total retained count can exceed that limi
 Expired eligible tombstones leave the quota before count eviction is selected,
 avoiding unnecessary eviction of younger tombstones. Count eviction orders by
 BroadcastID, not callback completion or enqueue time. A blocked tombstone
-does not prevent eligible, unrelated tombstones from being collected. Failed
-catalog deletion retains the entry for retry. Task and idempotency-index removal
-continue through the existing DONE transition.
+does not prevent eligible, unrelated tombstones from being collected.
+A pass marks the selected tasks DONE and deletes their keys with one catalog
+call, which commits them in transactions of at most `metastore.maxEtcdTxnNum`
+keys instead of one etcd write per tombstone. A save racing the deletion writes
+DONE, which the catalog turns into a removal. The catalog retries until its
+context ends, so deletion fails only on shutdown; the entries are then retained
+and recovery collects the keys that remain. Task and idempotency-index removal
+follow a successful deletion.
 
 The existing retention clock starts when the scheduler receives the persisted
 TOMBSTONE. It is not stored in the task proto: coordinator recovery starts a new
