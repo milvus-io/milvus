@@ -1190,7 +1190,7 @@ TEST_F(FlushGrowingSegmentTest, FlushVectorArrayRoundTrip) {
         auto actual = static_cast<const milvus::VectorArray*>(
             field_datas[0]->RawValue(i));
         ASSERT_NE(actual, nullptr);
-        EXPECT_EQ(actual->length(), array_len);
+        EXPECT_EQ(actual->physical_length(), array_len);
         EXPECT_EQ(actual->output_data().SerializeAsString(),
                   expected[i].SerializeAsString());
     }
@@ -1356,7 +1356,7 @@ TEST_F(FlushGrowingSegmentTest, FlushVectorArrayElementTypesRoundTrip) {
             auto actual = static_cast<const milvus::VectorArray*>(
                 field_datas[0]->RawValue(i));
             ASSERT_NE(actual, nullptr);
-            EXPECT_EQ(actual->length(), array_len);
+            EXPECT_EQ(actual->physical_length(), array_len);
             EXPECT_EQ(actual->get_element_type(), test_case.element_type);
             EXPECT_EQ(actual->output_data().SerializeAsString(),
                       expected[i].SerializeAsString());

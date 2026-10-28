@@ -40,7 +40,7 @@ TEST(FieldDataOwnershipTest, VectorArrayTakesOwnershipOfDecodedBuffer) {
         const auto* address = buffer.get();
         VectorArray array(std::move(buffer), 2, dim, type);
         EXPECT_EQ(array.data(), address);
-        EXPECT_EQ(array.length(), 2);
+        EXPECT_EQ(array.physical_length(), 2);
         EXPECT_EQ(array.byte_size(), size);
         EXPECT_EQ(std::string_view(array.data(), size), std::string(size, 42));
         const VectorArray copied(address, 2, dim, type);
@@ -82,7 +82,8 @@ TEST(FieldDataOwnershipTest, ScalarArraysSurviveSlicedArrowBatches) {
                     const auto& row =
                         *static_cast<const Array*>(field.RawValue(i));
                     ASSERT_EQ(row.length(), 1);
-                    EXPECT_EQ(row.get_data<std::string>(0), *expected[i]);
+                    EXPECT_EQ(row.get_data_unchecked<std::string>(0),
+                              *expected[i]);
                 }
             }
         }
@@ -144,7 +145,8 @@ TEST(FieldDataOwnershipTest, VectorArraysKeepCompactedNullableLayout) {
                         continue;
                     }
                     const auto& row = rows[nullable ? valid_row++ : i];
-                    EXPECT_EQ(row.length(), expected[i]->size() / width);
+                    EXPECT_EQ(row.physical_length(),
+                              expected[i]->size() / width);
                     EXPECT_EQ(row.byte_size(), expected[i]->size());
                     if (!expected[i]->empty()) {
                         EXPECT_EQ(std::string_view(row.data(), row.byte_size()),

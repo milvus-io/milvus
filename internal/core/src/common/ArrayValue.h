@@ -220,7 +220,7 @@ class ArrayValueView {
 
     template <typename T>
     T
-    get_data(size_t index) const {
+    get_data_unchecked(size_t index) const {
         assert(type_ != nullptr && child_ != nullptr);
         const auto length = static_cast<size_t>(end_ - begin_);
         AssertInfo(index < length,
