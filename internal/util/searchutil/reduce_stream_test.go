@@ -113,6 +113,57 @@ type testHit struct {
 	score float32
 }
 
+func TestScalarByteSizeMatchesChunk(t *testing.T) {
+	result := newSearchChunk(1, 2, []testHit{{id: 1, score: 0}, {id: 129, score: 0.5}})
+	result.ResultData.FieldsData = append(result.ResultData.FieldsData,
+		&schemapb.FieldData{Type: schemapb.DataType_VarChar, FieldName: "text", FieldId: 120, IsDynamic: true, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"", "hello"}}}, ValidData: []bool{false, true}}}},
+		&schemapb.FieldData{Type: schemapb.DataType_Bool, FieldName: "flag", FieldId: 121, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: []bool{false, true}}}}}},
+		&schemapb.FieldData{Type: schemapb.DataType_Int32, FieldName: "int", FieldId: 122, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{-1, 128}}}}}},
+		&schemapb.FieldData{Type: schemapb.DataType_Float, FieldName: "float", FieldId: 123, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: []float32{0, 1}}}}}},
+		&schemapb.FieldData{Type: schemapb.DataType_Double, FieldName: "double", FieldId: 124, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: []float64{0, 1}}}}}},
+	)
+	for _, stringPK := range []bool{false, true} {
+		if stringPK {
+			result.ResultData.Ids = &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"", "pk"}}}}
+		}
+		for row := int64(0); row < 2; row++ {
+			unit := orderedUnit{data: result.ResultData, rowIndex: row}
+			got, ok := unit.scalarByteSize()
+			require.True(t, ok)
+			chunk, err := buildSearchChunk([]orderedUnit{unit}, 1, 2, "", false, false)
+			require.NoError(t, err)
+			data := chunk.GetResultData()
+			want := proto.Size(&schemapb.SearchResultData{FieldsData: data.FieldsData, Scores: data.Scores, Ids: data.Ids, ElementIndices: data.ElementIndices, GroupByFieldValue: data.GroupByFieldValue, GroupByFieldValues: data.GroupByFieldValues})
+			require.Equal(t, want, got)
+		}
+	}
+}
+
+func BenchmarkScalarByteSize(b *testing.B) {
+	result := newSearchChunk(1, 1, []testHit{{id: 129, score: 0.5}})
+	unit := orderedUnit{data: result.ResultData}
+	b.Run("scalar", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_, ok := unit.scalarByteSize()
+			if !ok {
+				b.Fatal("scalar path unavailable")
+			}
+		}
+	})
+	b.Run("chunk", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			chunk, err := buildSearchChunk([]orderedUnit{unit}, 1, 1, "", false, false)
+			if err != nil {
+				b.Fatal(err)
+			}
+			data := chunk.GetResultData()
+			_ = proto.Size(&schemapb.SearchResultData{FieldsData: data.FieldsData, Scores: data.Scores, Ids: data.Ids, ElementIndices: data.ElementIndices, GroupByFieldValue: data.GroupByFieldValue, GroupByFieldValues: data.GroupByFieldValues})
+		}
+	})
+}
+
 func searchChunkBytes(t *testing.T, hits ...testHit) int {
 	t.Helper()
 	result := newSearchChunk(1, int64(len(hits)), hits)
