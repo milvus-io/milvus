@@ -45,28 +45,45 @@ type priorityQueuePolicy struct {
 	heap  *taskHeap
 }
 
-// taskHeap implements a min-heap for Task objects, sorted by taskID
-type taskHeap []Task
+// taskHeap implements a min-heap for Task objects, sorted by taskID.
+type taskHeap struct {
+	tasks []Task
+	// positions is maintained only for the live heap, never for a snapshot.
+	positions map[int64]int
+}
 
-func (h taskHeap) Len() int           { return len(h) }
-func (h taskHeap) Less(i, j int) bool { return h[i].GetTaskID() < h[j].GetTaskID() }
-func (h taskHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h taskHeap) Len() int           { return len(h.tasks) }
+func (h taskHeap) Less(i, j int) bool { return h.tasks[i].GetTaskID() < h.tasks[j].GetTaskID() }
+func (h taskHeap) Swap(i, j int) {
+	h.tasks[i], h.tasks[j] = h.tasks[j], h.tasks[i]
+	if h.positions != nil {
+		h.positions[h.tasks[i].GetTaskID()] = i
+		h.positions[h.tasks[j].GetTaskID()] = j
+	}
+}
 
 func (h *taskHeap) Push(x interface{}) {
-	*h = append(*h, x.(Task))
+	task := x.(Task)
+	if h.positions != nil {
+		h.positions[task.GetTaskID()] = len(h.tasks)
+	}
+	h.tasks = append(h.tasks, task)
 }
 
 func (h *taskHeap) Pop() interface{} {
-	old := *h
-	n := len(old)
-	item := old[n-1]
-	*h = old[0 : n-1]
+	n := len(h.tasks)
+	item := h.tasks[n-1]
+	h.tasks[n-1] = nil
+	h.tasks = h.tasks[:n-1]
+	if h.positions != nil {
+		delete(h.positions, item.GetTaskID())
+	}
 	return item
 }
 
 // NewPriorityQueuePolicy creates a new priority queue policy
 func NewPriorityQueuePolicy() *priorityQueuePolicy {
-	h := &taskHeap{}
+	h := &taskHeap{positions: make(map[int64]int)}
 	heap.Init(h)
 	return &priorityQueuePolicy{
 		tasks: make(map[int64]Task),
@@ -131,7 +148,7 @@ func (pqp *priorityQueuePolicy) TaskIDs() []int64 {
 	defer pqp.lock.RUnlock()
 
 	taskIDs := make([]int64, 0, len(pqp.tasks))
-	for _, t := range *pqp.heap {
+	for _, t := range pqp.heap.tasks {
 		taskIDs = append(taskIDs, t.GetTaskID())
 	}
 	return taskIDs
@@ -139,7 +156,7 @@ func (pqp *priorityQueuePolicy) TaskIDs() []int64 {
 
 func (pqp *priorityQueuePolicy) TaskIDsByPriority() []int64 {
 	pqp.lock.RLock()
-	snapshot := slices.Clone(*pqp.heap)
+	snapshot := taskHeap{tasks: slices.Clone(pqp.heap.tasks)}
 	pqp.lock.RUnlock()
 
 	// Reuse the queue's comparator without holding its lock while ordering.
@@ -155,17 +172,11 @@ func (pqp *priorityQueuePolicy) Remove(taskID int64) {
 	pqp.lock.Lock()
 	defer pqp.lock.Unlock()
 
-	if _, exists := pqp.tasks[taskID]; !exists {
+	index, exists := pqp.heap.positions[taskID]
+	if !exists {
 		return
 	}
 
+	heap.Remove(pqp.heap, index)
 	delete(pqp.tasks, taskID)
-
-	// Find and remove from heap
-	for i, task := range *pqp.heap {
-		if task.GetTaskID() == taskID {
-			heap.Remove(pqp.heap, i)
-			break
-		}
-	}
 }

@@ -151,6 +151,48 @@ func (q *orderedSnapshotQueue) TaskIDsByPriority() []int64 {
 	return append([]int64(nil), q.ids...)
 }
 
+type snapshotCountingQueue struct {
+	PriorityQueue
+	snapshots int
+}
+
+func (q *snapshotCountingQueue) TaskIDsByPriority() []int64 {
+	q.snapshots++
+	return q.PriorityQueue.TaskIDsByPriority()
+}
+
+func TestGlobalScheduler_SkipsSnapshotWithoutDispatchCandidates(t *testing.T) {
+	for _, pending := range []bool{false, true} {
+		name := "empty queue"
+		if pending {
+			name = "no workers"
+		}
+		t.Run(name, func(t *testing.T) {
+			cluster := session.NewMockCluster(t)
+			s := NewGlobalTaskScheduler(context.Background(), cluster).(*globalTaskScheduler)
+			t.Cleanup(s.execPool.Release)
+			t.Cleanup(s.checkPool.Release)
+			queue := &snapshotCountingQueue{PriorityQueue: s.pendingTasks}
+			s.pendingTasks = queue
+			if pending {
+				cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{}).Once()
+				task := NewMockTask(t)
+				task.EXPECT().GetTaskID().Return(int64(1))
+				task.EXPECT().GetTaskSlot().Return(int64(1)).Maybe()
+				queue.Push(task)
+			}
+
+			s.schedule()
+
+			assert.Zero(t, queue.snapshots, "no candidate can be dispatched, so ordering the queue is unnecessary")
+			if pending {
+				assert.Equal(t, 1, queue.TaskCount(), "tasks must remain visible for cancellation")
+				assert.NotNil(t, queue.Get(1))
+			}
+		})
+	}
+}
+
 func TestGlobalScheduler_UsesQueuePriority(t *testing.T) {
 	cluster := session.NewMockCluster(t)
 	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
@@ -789,7 +831,9 @@ func TestGlobalScheduler_RejectedDispatchKeepsTaskPending(t *testing.T) {
 
 func TestGlobalScheduler_AbortBeforeNoSlotDecision(t *testing.T) {
 	cluster := session.NewMockCluster(t)
-	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{}).Once()
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
+		1: {NodeID: 1, AvailableSlots: 0},
+	}).Once()
 	s := NewGlobalTaskScheduler(context.Background(), cluster).(*globalTaskScheduler)
 	selected, release := make(chan struct{}), make(chan struct{})
 	releaseOnce := sync.OnceFunc(func() { close(release) })

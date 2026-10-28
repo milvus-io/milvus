@@ -261,13 +261,19 @@ func (s *globalTaskScheduler) pickNode(slotHeap typeutil.Heap[*nodeSlotEntry], t
 }
 
 func (s *globalTaskScheduler) schedule() {
-	taskIDs := s.pendingTasks.TaskIDsByPriority()
-	if len(taskIDs) == 0 {
+	if s.pendingTasks.TaskCount() == 0 {
+		return
+	}
+	nodeSlots := s.cluster.QuerySlot()
+	if len(nodeSlots) == 0 {
 		return
 	}
 	// A round visits each candidate once in the queue's priority order.
 	// Keep candidates in pending until a worker callback acquires their task lock.
-	nodeSlots := s.cluster.QuerySlot()
+	taskIDs := s.pendingTasks.TaskIDsByPriority()
+	if len(taskIDs) == 0 {
+		return
+	}
 	mlog.Info(s.ctx, "scheduling pending tasks...", mlog.Int("num", len(taskIDs)), mlog.Any("nodeSlots", nodeSlots))
 
 	// Build the node-slot max-heap once per round and reuse it across all picks,
