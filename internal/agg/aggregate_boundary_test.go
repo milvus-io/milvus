@@ -71,8 +71,7 @@ func TestAggregateOutputOwnsEnvelopeAndSharesReadOnlyPayload(t *testing.T) {
 				require.NotSame(t, input, field)
 				require.Same(t, input.GetScalars().GetLongData(), field.GetScalars().GetLongData())
 				field.FieldName = "output"
-				typeutil.ProjectFieldDataValidDataForLegacy(field)
-				field.ValidData[0] = true // wire bitmap is owned by the response
+				typeutil.SetFieldDataValidData(field, []bool{true}) // replace the owned envelope's bitmap reference
 			}
 			require.True(t, proto.Equal(original, input), "response metadata must not mutate a retained partial")
 			again, err := r.EncodePartial(partial)

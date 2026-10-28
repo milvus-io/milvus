@@ -180,12 +180,12 @@ A fieldless or typed zero-row payload decodes to Empty, the merge identity;
 a scalar NULL or a real zero remains a value. On the existing RPC, global Empty
 is represented by one identity-state row: count=0 and NULL for min/max/sum.
 GROUP BY Empty has zero rows in every column. Global zero-row RPC payloads
-cannot be emitted because released 3.0 reducers read row zero. Wire validity is
-projected with the shared validity helper at the QN and shard response boundaries,
-after ORDER BY and limit have finished rebuilding columns, so both released and
-current consumers observe the NULL state without version-dependent merge rules.
+cannot be emitted because released 3.0 reducers read row zero. The shared validity
+setter writes both legacy and field-specific bitmaps,
+including when ORDER BY and limit rebuild columns. Both released and current
+consumers therefore observe the NULL state without an extra response projection.
 Intermediate encoding and finalization create independent field envelopes while
-sharing read-only scalar payloads; output renaming and protocol projection cannot
+sharing read-only scalar payloads; output renaming and bitmap replacement cannot
 mutate retained partials and do not deep-copy entire value arrays.
 Execution metadata (including View/MVCC, feature bits and cost) remains independent
 of the payload. Proxy alone calls `Finalize` to obtain `FinalAggregationResult`

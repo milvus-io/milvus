@@ -542,8 +542,8 @@ func (reducer *GroupAggReducer) Merge(ctx context.Context, results []*PartialAgg
 // EncodePartial materializes mergeable columns for the reduction pipeline.
 // Global Empty has one identity row (count=0, other states=NULL); GROUP BY
 // Empty has zero groups. A global zero-row payload would break older reducers
-// that read row zero. Legacy validity projection belongs after all sorting and
-// slicing, at the response boundary, not inside this intermediate operation.
+// that read row zero. The shared validity setter keeps both wire locations in
+// sync, including when later sorting and slicing materialize new columns.
 func (reducer *GroupAggReducer) EncodePartial(result *PartialAggregationResult) (*internalpb.RetrieveResults, error) {
 	fields := result.fieldDatas
 	if result.IsEmpty() {

@@ -70,6 +70,11 @@ func TestWALFieldAnalyzerCurrentSchema(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, merr.Error(resp.GetStatus()))
 		require.Len(t, resp.GetTokenize().GetResults()[0].Tokens, 2)
+		phrase.GetFieldAnalyzer().ReadSchemaVersion = &schema.Version
+		phraseResp, err = w.RunAnalyzer(t.Context(), phrase)
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(phraseResp.GetStatus()))
+		require.Equal(t, []int64{0}, phraseResp.GetPhraseMatch().GetSlops())
 		w.lifetime.SetState(typeutil.LifetimeStateStopped)
 		_, err = w.RunAnalyzer(context.Background(), req)
 		require.True(t, status.AsStreamingError(err).IsOnShutdown())
