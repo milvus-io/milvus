@@ -501,6 +501,9 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 								if row.GetData() == nil {
 									return 0, merr.WrapErrParameterInvalidMsg("nil array data")
 								}
+								if typeutil.IsNestedArrayTypeSchema(subFieldSchema.GetTypeSchema()) {
+									return len(row.GetArrayData().GetData()), nil
+								}
 								switch subFieldSchema.GetElementType() {
 								case schemapb.DataType_Bool:
 									return len(row.GetBoolData().GetData()), nil

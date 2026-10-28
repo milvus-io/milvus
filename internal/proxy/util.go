@@ -376,34 +376,31 @@ func validateDuplicatedFieldName(schema *schemapb.CollectionSchema) error {
 	return nil
 }
 
-func validateElementType(dataType schemapb.DataType) error {
-	switch dataType {
-	case schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32,
-		schemapb.DataType_Int64, schemapb.DataType_Float, schemapb.DataType_Double, schemapb.DataType_VarChar:
-		return nil
-	case schemapb.DataType_String:
-		return merr.WrapErrParameterInvalidMsg("string data type not supported yet, please use VarChar type instead")
-	case schemapb.DataType_None:
-		return merr.WrapErrParameterInvalidMsg("element data type None is not valid")
-	}
-	return merr.WrapErrParameterInvalidMsg("element type %s is not supported", dataType.String())
-}
-
 func validateFieldType(schema *schemapb.CollectionSchema) error {
 	for _, field := range schema.GetFields() {
+		if err := typeutil.ValidateFieldTypeSchema(field); err != nil {
+			return err
+		}
 		switch field.GetDataType() {
 		case schemapb.DataType_String:
 			return merr.WrapErrParameterInvalidMsg("string data type not supported yet, please use VarChar type instead")
 		case schemapb.DataType_None:
 			return merr.WrapErrParameterInvalidMsg("data type None is not valid")
 		case schemapb.DataType_Array:
-			if err := validateElementType(field.GetElementType()); err != nil {
-				return err
+			if field.GetTypeSchema() == nil {
+				if err := typeutil.ValidateArrayElementType(field.GetElementType()); err != nil {
+					return err
+				}
 			}
+		case schemapb.DataType_ArrayOfVector:
+			return merr.WrapErrParameterInvalidMsg("array of vector can only be in the struct array field, field name: %s", field.Name)
 		}
 	}
 	for _, structArrayField := range schema.StructArrayFields {
 		for _, field := range structArrayField.Fields {
+			if err := typeutil.ValidateFieldTypeSchema(field); err != nil {
+				return err
+			}
 			if field.GetDataType() != schemapb.DataType_Array && field.GetDataType() != schemapb.DataType_ArrayOfVector {
 				return merr.WrapErrParameterInvalidMsg("fields in StructArrayField must be Array or ArrayOfVector, field name = %s, field type = %s",
 					field.GetName(), field.GetDataType().String())
@@ -1518,6 +1515,9 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 								row := scalarArray.GetData()[physicalRow]
 								if row.GetData() == nil {
 									return 0, merr.WrapErrParameterInvalidMsg("nil array data")
+								}
+								if typeutil.IsNestedArrayTypeSchema(subFieldSchema.GetTypeSchema()) {
+									return len(row.GetArrayData().GetData()), nil
 								}
 								switch subFieldSchema.GetElementType() {
 								case schemapb.DataType_Bool:

@@ -27,6 +27,7 @@
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Utils.h"
 #include "common/Array.h"
+#include "common/ColumnarArrayChunk.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/OpContext.h"
@@ -445,6 +446,22 @@ ArrayOffsetsSealed::BuildFromColumn(const ChunkedColumnInterface& column,
                 }
 
                 append_array_length(array_len, !valid_flags || valid_flags[i]);
+            }
+        }
+    } else if (field_meta.is_nested_array()) {
+        for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
+            CheckOffsetsCancellation(op_ctx);
+            auto pinned_chunk = column.GetChunk(op_ctx, chunk_id);
+            auto* array_chunk =
+                dynamic_cast<ColumnarArrayChunk*>(pinned_chunk.get());
+            AssertInfo(array_chunk != nullptr,
+                       "nested ARRAY field {} must use ColumnarArrayChunk",
+                       field_meta.get_id().get());
+
+            const auto& offsets = array_chunk->offsets();
+            for (size_t i = 0; i < array_chunk->row_count(); ++i) {
+                const auto array_len = offsets[i + 1] - offsets[i];
+                append_array_length(array_len, array_chunk->is_valid(i));
             }
         }
     } else {

@@ -56,6 +56,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func testArrayTypeSchema(element *schemapb.TypeSchema, params ...*commonpb.KeyValuePair) *schemapb.TypeSchema {
+	return &schemapb.TypeSchema{
+		Kind:       &schemapb.TypeSchema_ArrayElement{ArrayElement: element},
+		TypeParams: params,
+	}
+}
+
 func captureProxyLogs(t *testing.T) *mlog.TestSink {
 	t.Helper()
 
@@ -654,6 +661,24 @@ func TestValidateFieldType(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("nested array with type schema", func(t *testing.T) {
+		sch := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					DataType:    schemapb.DataType_Array,
+					ElementType: schemapb.DataType_Array,
+					TypeSchema: testArrayTypeSchema(
+						testArrayTypeSchema(&schemapb.TypeSchema{
+							Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+						}, &commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "32"}),
+						&commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "32"},
+					),
+				},
+			},
+		}
+		assert.NoError(t, validateFieldType(sch))
+	})
 }
 
 func TestValidateMultipleVectorFields(t *testing.T) {

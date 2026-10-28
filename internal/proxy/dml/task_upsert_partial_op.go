@@ -73,6 +73,7 @@ func (p *fieldPartialUpdatePlan) isPathReplace() bool {
 	return p != nil && p.op == schemapb.FieldPartialUpdateOp_PATH_REPLACE
 }
 
+// TODO: Recursive Array fields do not support ARRAY_APPEND or ARRAY_REMOVE.
 func resolveFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb.CollectionSchema) (map[string]*fieldPartialUpdatePlan, bool, error) {
 	fieldOps := req.GetFieldOps()
 	if len(fieldOps) == 0 {
@@ -213,6 +214,10 @@ func resolveFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb.
 
 		switch op {
 		case schemapb.FieldPartialUpdateOp_ARRAY_APPEND, schemapb.FieldPartialUpdateOp_ARRAY_REMOVE:
+			if typeutil.IsNestedArrayTypeSchema(fieldSchema.GetTypeSchema()) {
+				return nil, false, merr.WrapErrParameterInvalidMsg(
+					"op %s is not supported for recursive ARRAY field %q", op.String(), name)
+			}
 			if fieldSchema.GetDataType() != schemapb.DataType_Array {
 				return nil, false, merr.WrapErrParameterInvalidMsg(
 					fmt.Sprintf("op %s requires Array field, but field %q is %s",
