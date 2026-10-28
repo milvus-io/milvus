@@ -333,6 +333,10 @@ const (
 	JSONStatsDataFormatVersion = 3
 )
 
+// PrimaryKeyIndexType is the index type of the primary key index. The index
+// deduplicates writes by primary key. It has no per-segment build.
+const PrimaryKeyIndexType = "PRIMARY_KEY"
+
 // Search, Index parameter keys
 const (
 	TopKKey                             = "topk"

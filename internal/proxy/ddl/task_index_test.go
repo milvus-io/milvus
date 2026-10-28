@@ -2604,3 +2604,78 @@ func Test_mapVectorMetricToEmbListMetric(t *testing.T) {
 		})
 	}
 }
+
+func newPrimaryKeyIndexTask(t *testing.T, field *schemapb.FieldSchema, extra ...*commonpb.KeyValuePair) *CreateIndexTask {
+	schema := &schemapb.CollectionSchema{
+		Name: "pk_index_test",
+		Fields: []*schemapb.FieldSchema{
+			field,
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+		},
+	}
+	mockCache := NewMockCache(t)
+	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(UniqueID(1), nil).Maybe()
+	mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(mustNewSchemaInfo(schema), nil).Maybe()
+	mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
+	return &CreateIndexTask{
+		baseTask: baseTask{MetaCache: mockCache},
+		ctx:      context.Background(),
+		req: &milvuspb.CreateIndexRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateIndex},
+			CollectionName: "pk_index_test",
+			FieldName:      field.GetName(),
+			ExtraParams:    append([]*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexPrimaryKey}}, extra...),
+		},
+	}
+}
+
+func TestCreateIndexTask_PrimaryKeyIndex(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	pk := &schemapb.FieldSchema{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64}
+
+	t.Run("switch off", func(t *testing.T) {
+		params.Save(params.StreamingCfg.PKIndexEnabled.Key, "false")
+		defer params.Reset(params.StreamingCfg.PKIndexEnabled.Key)
+		cit := newPrimaryKeyIndexTask(t, pk)
+		err := cit.PreExecute(context.Background())
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	params.Save(params.StreamingCfg.PKIndexEnabled.Key, "true")
+	defer params.Reset(params.StreamingCfg.PKIndexEnabled.Key)
+
+	t.Run("scalar auto index keeps the index type", func(t *testing.T) {
+		params.Save(params.AutoIndexConfig.ScalarAutoIndexEnable.Key, "true")
+		defer params.Reset(params.AutoIndexConfig.ScalarAutoIndexEnable.Key)
+		cit := newPrimaryKeyIndexTask(t, pk)
+		assert.NoError(t, cit.PreExecute(context.Background()))
+		assert.False(t, cit.isAutoIndex)
+		assert.Equal(t, []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexPrimaryKey}}, cit.newIndexParams)
+	})
+
+	t.Run("varchar primary key", func(t *testing.T) {
+		cit := newPrimaryKeyIndexTask(t, &schemapb.FieldSchema{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "64"}}})
+		assert.NoError(t, cit.PreExecute(context.Background()))
+	})
+
+	t.Run("not the primary key", func(t *testing.T) {
+		cit := newPrimaryKeyIndexTask(t, &schemapb.FieldSchema{FieldID: 100, Name: "age", DataType: schemapb.DataType_Int64})
+		assert.ErrorIs(t, cit.PreExecute(context.Background()), merr.ErrParameterInvalid)
+	})
+
+	t.Run("autoID primary key", func(t *testing.T) {
+		cit := newPrimaryKeyIndexTask(t, &schemapb.FieldSchema{FieldID: 100, Name: "pk", IsPrimaryKey: true, AutoID: true, DataType: schemapb.DataType_Int64})
+		assert.ErrorIs(t, cit.PreExecute(context.Background()), merr.ErrParameterInvalid)
+	})
+
+	t.Run("mmap enabled", func(t *testing.T) {
+		cit := newPrimaryKeyIndexTask(t, pk, &commonpb.KeyValuePair{Key: common.MmapEnabledKey, Value: "true"})
+		assert.ErrorIs(t, cit.PreExecute(context.Background()), merr.ErrParameterInvalid)
+	})
+
+	t.Run("extra index param", func(t *testing.T) {
+		cit := newPrimaryKeyIndexTask(t, pk, &commonpb.KeyValuePair{Key: "foo", Value: "bar"})
+		assert.ErrorIs(t, cit.PreExecute(context.Background()), merr.ErrParameterInvalid)
+	})
+}

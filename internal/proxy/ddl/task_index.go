@@ -184,6 +184,10 @@ func (cit *CreateIndexTask) parseIndexParams(ctx context.Context) error {
 	}
 
 	specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
+	if specifyIndexType == indexparamcheck.IndexPrimaryKey && !paramtable.Get().StreamingCfg.PKIndexEnabled.GetAsBool() {
+		return merr.WrapErrParameterInvalidMsg("%s index is not enabled, set %s to true to use it",
+			indexparamcheck.IndexPrimaryKey, paramtable.Get().StreamingCfg.PKIndexEnabled.Key)
+	}
 	if exist && specifyIndexType != "" {
 		// todo(SpadeA): mmap check for struct array index
 		if err := indexparamcheck.ValidateMmapIndexParams(specifyIndexType, indexParamsMap); err != nil {
@@ -209,7 +213,8 @@ func (cit *CreateIndexTask) parseIndexParams(ctx context.Context) error {
 		specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
 		autoIndexEnable := paramtable.Get().AutoIndexConfig.ScalarAutoIndexEnable.GetAsBool()
 
-		if autoIndexEnable || !exist || specifyIndexType == AutoIndexName {
+		// The scalar AUTOINDEX rewrite keeps the primary key index type.
+		if specifyIndexType != indexparamcheck.IndexPrimaryKey && (autoIndexEnable || !exist || specifyIndexType == AutoIndexName) {
 			getPrimitiveIndexType := func(dataType schemapb.DataType) string {
 				if typeutil.IsBoolType(dataType) {
 					return paramtable.Get().AutoIndexConfig.ScalarBoolIndexType.GetValue()

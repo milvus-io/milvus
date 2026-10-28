@@ -60,6 +60,7 @@ func (mgr *indexCheckerMgrImpl) registerIndexChecker() {
 	mgr.checkers[AutoIndex] = newAUTOINDEXChecker()
 	mgr.checkers[IndexNGRAM] = newNgramIndexChecker()
 	mgr.checkers[IndexFMINDEX] = newFMIndexChecker()
+	mgr.checkers[IndexPrimaryKey] = newPrimaryKeyChecker()
 }
 
 func newIndexCheckerMgr() *indexCheckerMgrImpl {

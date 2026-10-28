@@ -37,6 +37,9 @@ const (
 	IndexFMINDEX  IndexType = "FMINDEX"
 	IndexRTREE    IndexType = "RTREE"
 
+	// IndexPrimaryKey is the primary key index.
+	IndexPrimaryKey IndexType = common.PrimaryKeyIndexType
+
 	AutoIndex IndexType = "AUTOINDEX"
 )
 
@@ -44,6 +47,12 @@ func IsScalarIndexType(indexType IndexType) bool {
 	return indexType == IndexSTLSORT || indexType == IndexTRIE || indexType == IndexTrie ||
 		indexType == IndexBitmap || indexType == IndexHybrid || indexType == IndexINVERTED ||
 		indexType == IndexNGRAM || indexType == IndexFMINDEX
+}
+
+// IsBuiltPerSegment reports whether an index of indexType has a build task
+// and index files for each segment. The primary key index has neither.
+func IsBuiltPerSegment(indexType IndexType) bool {
+	return indexType != IndexPrimaryKey
 }
 
 func IsGpuIndex(indexType IndexType) bool {
