@@ -374,8 +374,17 @@ func CheckCheckPointsHealth(meta *meta) error {
 			mlog.RatedWarn(context.TODO(), rate.Limit(60), "can't parse collection id from vchannel, skip check cp lag", mlog.FieldVChannel(channel))
 			continue
 		}
-		if meta.GetCollection(collectionID) == nil {
+		coll := meta.GetCollection(collectionID)
+		if coll == nil {
 			mlog.RatedWarn(context.TODO(), rate.Limit(60), "corresponding the collection doesn't exists, skip check cp lag", mlog.FieldVChannel(channel))
+			continue
+		}
+		if isVChannelDelisted(coll, channel) {
+			// A shard split's retired source: adoption takes it off the
+			// collection's vchannel list and drops its WAL module, so nothing
+			// reports its checkpoint any more, but it is never dropped through
+			// DropVirtualChannel either -- its row stays, frozen at the retire.
+			mlog.RatedInfo(context.TODO(), rate.Limit(60), "vchannel is no longer listed by its collection, skip check cp lag", mlog.FieldVChannel(channel))
 			continue
 		}
 		ts, _ := tsoutil.ParseTS(cp.Timestamp)
@@ -385,6 +394,12 @@ func CheckCheckPointsHealth(meta *meta) error {
 		}
 	}
 	return nil
+}
+
+// isVChannelDelisted reports whether the collection no longer lists the
+// vchannel. An entry without any vchannel list cannot tell, so it lists all.
+func isVChannelDelisted(coll *collectionInfo, vchannel string) bool {
+	return len(coll.VChannelNames) > 0 && !lo.Contains(coll.VChannelNames, vchannel)
 }
 
 func createStorageConfig() *indexpb.StorageConfig {

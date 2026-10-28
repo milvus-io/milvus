@@ -53,6 +53,10 @@ type PChannelManagerConfig struct {
 	// lands.
 	GetRecoveryCheckpoint func() *utility.WALCheckpoint
 	CoordinatorBroker     checkpointReporter
+	// StoredCheckpointReader reads back what DataCoord stored, which a
+	// retired shard split source's cleanup waits on. Without it that cleanup
+	// does not wait.
+	StoredCheckpointReader storedCheckpointReader
 }
 
 // PChannelRecoveryManager owns all vchannel recovery modules on one pchannel.
@@ -99,6 +103,7 @@ func NewPChannelRecoveryManager(config PChannelManagerConfig) (*PChannelRecovery
 			manager.activeVChannels,
 			config.GetRecoveryCheckpoint,
 			config.CoordinatorBroker,
+			config.StoredCheckpointReader,
 		)
 	}
 	for _, vchannel := range manager.initialVChannels(config) {
@@ -229,6 +234,9 @@ func (m *PChannelRecoveryManager) ConsumeCleanupSnapshots(cleanup moduleapi.Clea
 	candidates := m.cleanupModules
 	m.cleanupModules = nil
 	m.dirtyMu.Unlock()
+	if cleanup.CheckpointReported == nil && m.checkpointUpdater != nil && m.checkpointUpdater.confirmsStored() {
+		cleanup.CheckpointReported = m.checkpointUpdater.Reported
+	}
 	var snapshots []moduleapi.DirtySnapshot
 	for _, module := range candidates {
 		snapshots = append(snapshots, module.ConsumeCleanupSnapshots(cleanup)...)
@@ -332,7 +340,7 @@ func (m *PChannelRecoveryManager) moduleForMessage(
 		return nil
 	}
 	module, _ := m.modules.Get(vchannel)
-	if module != nil || msg.MessageType() != message.MessageTypeCreateCollection {
+	if module != nil || !isVChannelGenesisMessage(msg) {
 		return module
 	}
 	module, err := m.newModule(vchannel)
@@ -341,6 +349,26 @@ func (m *PChannelRecoveryManager) moduleForMessage(
 	}
 	module, _ = m.modules.GetOrInsert(vchannel, module)
 	return module
+}
+
+// isVChannelGenesisMessage reports whether a message creates the vchannel it
+// is addressed to, so a module must be built for it.
+//
+// CreateCollection is one. The TARGET replica of a SplitShard broadcast is the
+// other: a shard split's targets are brand-new vchannels, and that replica is
+// their genesis. The SOURCE replica of the same broadcast is not -- it fences
+// a vchannel this pchannel already holds -- and neither is the control channel
+// replica, which the dispatch drops before this point.
+func isVChannelGenesisMessage(msg message.ImmutableMessage) bool {
+	switch msg.MessageType() {
+	case message.MessageTypeCreateCollection:
+		return true
+	case message.MessageTypeSplitShard:
+		header := message.MustAsImmutableSplitShardMessageV2(msg).Header()
+		return message.SplitShardRoleOf(header, msg.VChannel()) == message.SplitShardRoleTarget
+	default:
+		return false
+	}
 }
 
 func (m *PChannelRecoveryManager) newModule(vchannel string) (*VChannelRecoveryModule, error) {
@@ -401,6 +429,9 @@ func (m *PChannelRecoveryManager) removeModule(module *VChannelRecoveryModule) {
 		delete(m.cleanupModules, module.vchannel)
 	}
 	m.dirtyMu.Unlock()
+	if m.checkpointUpdater != nil {
+		m.checkpointUpdater.Forget(module.vchannel)
+	}
 	// Report the GC boundary to the summary: the dropped vchannel's cleanup
 	// snapshot is durable, so its records — staged or already chunked — may
 	// be released by retention GC.
