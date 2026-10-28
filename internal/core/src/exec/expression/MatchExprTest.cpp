@@ -1060,9 +1060,9 @@ TEST(MatchExprNestedArrayExpressions, MatchFamilyGrowingAndSealed) {
     {
         auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
         const auto saved_growing_mmap = mmap_config.GetEnableGrowingMmap();
-        mmap_config.SetEnableGrowingMmap(true);
+        mmap_config.growing_enable_mmap = true;
         auto mmap_guard = folly::makeGuard([&mmap_config, saved_growing_mmap] {
-            mmap_config.SetEnableGrowingMmap(saved_growing_mmap);
+            mmap_config.growing_enable_mmap = saved_growing_mmap;
         });
 
         auto& config = SegcoreConfig::default_config();
