@@ -55,6 +55,42 @@ func TestSplitRetrieveResult(t *testing.T) {
 	require.False(t, chunks[1].GetHasMoreResult())
 }
 
+func TestQueryStreamPreservesNullableFields(t *testing.T) {
+	result := newQueryTestChunk([]int64{1, 2, 3}, []int64{10, 20, 30})
+	result.FieldsData = append(result.FieldsData,
+		&schemapb.FieldData{Type: schemapb.DataType_VarChar, FieldId: 102,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				ValidData: []bool{true, false, true},
+				Data:      &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a", "", "b"}}},
+			}}},
+		&schemapb.FieldData{Type: schemapb.DataType_FloatVector, FieldId: 103,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim: 2, ValidData: []bool{true, false, true},
+				Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}},
+			}}},
+	)
+	chunks, err := SplitRetrieveResult(result, 1)
+	require.NoError(t, err)
+	require.Len(t, chunks, 3)
+	for i, chunk := range chunks {
+		require.Equal(t, []bool{i != 1}, chunk.GetFieldsData()[1].GetScalars().GetValidData())
+		require.Equal(t, []bool{i != 1}, chunk.GetFieldsData()[2].GetVectors().GetValidData())
+	}
+	child := &queryTestStream{}
+	for _, chunk := range chunks {
+		child.recv = append(child.recv, queryTestRecv{chunk: chunk})
+	}
+	stream, err := NewReduceStream(&internalpb.RetrieveRequest{Limit: 3}, nil, []ReduceStream{child}, 1<<20)
+	require.NoError(t, err)
+	merged, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []bool{true, false, true}, merged.GetFieldsData()[1].GetScalars().GetValidData())
+	require.Equal(t, []string{"a", "", "b"}, merged.GetFieldsData()[1].GetScalars().GetStringData().GetData())
+	require.Equal(t, []bool{true, false, true}, merged.GetFieldsData()[2].GetVectors().GetValidData())
+	require.Equal(t, []float32{1, 2, 3, 4}, merged.GetFieldsData()[2].GetVectors().GetFloatVector().GetData())
+	require.NoError(t, stream.Close())
+}
+
 func TestSplitRetrieveResultAcceptsUnitThatCrossesThreshold(t *testing.T) {
 	result := newQueryTestChunk([]int64{1, 2, 3}, []int64{10, 20, 30})
 	chunkBytes := queryChunkBytes(t, result, 2) - 1
