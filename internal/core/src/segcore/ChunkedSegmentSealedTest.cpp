@@ -1145,6 +1145,132 @@ TEST(test_chunk_segment,
     EXPECT_EQ(result->scalars().array_data().data(2).valid_data_size(), 2);
 }
 
+namespace {
+
+// A collection schema with an INT64 primary key (field 100) and, when
+// struct_children is not empty, a nullable struct "items" (field 101) with
+// nullable INT32 Array sub-fields; element_nullable marks sub-fields added
+// after the struct was created.
+SchemaPtr
+ParseStructProviderSchema(
+    int32_t version,
+    const std::vector<std::pair<int64_t, bool>>& struct_children) {
+    proto::schema::CollectionSchema proto;
+    proto.set_name("struct_provider");
+    proto.set_version(version);
+    auto* pk = proto.add_fields();
+    pk->set_fieldid(100);
+    pk->set_name("pk");
+    pk->set_data_type(proto::schema::DataType::Int64);
+    pk->set_is_primary_key(true);
+    if (!struct_children.empty()) {
+        auto* items = proto.add_struct_array_fields();
+        items->set_fieldid(101);
+        items->set_name("items");
+        items->set_nullable(true);
+        for (const auto& [field_id, element_nullable] : struct_children) {
+            auto* child = items->add_fields();
+            child->set_fieldid(field_id);
+            child->set_name(field_id == 102 ? "items[old]" : "items[added]");
+            child->set_data_type(proto::schema::DataType::Array);
+            child->set_element_type(proto::schema::DataType::Int32);
+            child->set_nullable(true);
+            child->set_element_nullable(element_nullable);
+            auto* capacity = child->add_type_params();
+            capacity->set_key("max_capacity");
+            capacity->set_value("16");
+        }
+    }
+    // Schema::ParseFrom ignores proto.version(); Reopen compares schema
+    // versions, so set it the way segment_c.cpp does.
+    auto schema = Schema::ParseFrom(proto);
+    schema->set_schema_version(version);
+    return schema;
+}
+
+proto::segcore::SegmentLoadInfo
+StructProviderLoadInfo(const std::vector<int64_t>& stored_fields,
+                       int64_t rows) {
+    proto::segcore::SegmentLoadInfo info;
+    info.set_segmentid(kSegmentID);
+    info.set_num_of_rows(rows);
+    for (auto field_id : stored_fields) {
+        auto* binlog = info.add_binlog_paths();
+        binlog->set_fieldid(field_id);
+        auto* log = binlog->add_binlogs();
+        log->set_entries_num(rows);
+        log->set_log_path(fmt::format("struct_provider/{}/0", field_id));
+    }
+    return info;
+}
+
+}  // namespace
+
+// The field-id rule of the struct offsets fallback: a segment that stores a
+// field written after the struct appeared but none of the struct's current
+// sub-fields lost its offsets provider; a segment that stores only older
+// fields predates the struct.
+TEST(test_chunk_segment,
+     StructProviderCheckTellsDroppedProviderFromOlderSegment) {
+    auto schema = ParseStructProviderSchema(3, {{103, true}});
+    auto check = [&](const std::vector<int64_t>& stored) {
+        segcore::SegmentLoadInfo info(StructProviderLoadInfo(stored, 3),
+                                      schema);
+        segcore::ChunkedSegmentSealedImpl::TestCheckStructProviderNotDropped(
+            *schema, info, "items");
+    };
+    try {
+        check({100, 102});
+        FAIL() << "a segment whose struct sub-fields were all dropped must "
+                  "not get all-zero offsets";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::DataFormatBroken);
+    }
+    EXPECT_NO_THROW(check({100}));       // predates the struct
+    EXPECT_NO_THROW(check({100, 103}));  // provider stored, not loaded yet
+}
+
+// Sealed load and Reopen: a struct added after the segment was written gives
+// its old rows null struct rows.
+TEST(test_chunk_segment, ReopenWholeStructAddedLaterStaysNull) {
+    auto schema = ParseStructProviderSchema(1, {});
+    constexpr int64_t rows = 3;
+    auto dataset = segcore::DataGen(schema, rows, 42, 0, 1, 2);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    segment->SetLoadInfo(StructProviderLoadInfo({100}, rows));
+
+    segment->Reopen(ParseStructProviderSchema(2, {{103, true}}));
+    const int64_t row_ids[] = {0, 1, 2};
+    milvus::OpContext op_ctx;
+    auto result = segment->bulk_subscript(&op_ctx, FieldId(103), row_ids, rows);
+    const auto& validity = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(validity.size(), rows);
+    for (int i = 0; i < rows; ++i) {
+        EXPECT_FALSE(validity[i]);
+    }
+}
+
+// After a sub-field was added and the only stored one dropped, the segment's
+// struct offsets would come from the backfilled sub-field. In this process it
+// still holds the counts of the dropped one, but a cold load of the same
+// segment has nothing to derive them from, so Reopen fails in both cases.
+TEST(test_chunk_segment, ReopenAfterProviderDropFailsEvenWithBackfillInMemory) {
+    auto schema = ParseStructProviderSchema(1, {{102, false}});
+    constexpr int64_t rows = 3;
+    auto dataset = segcore::DataGen(schema, rows, 42, 0, 1, 2);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    segment->SetLoadInfo(StructProviderLoadInfo({100, 102}, rows));
+
+    segment->Reopen(ParseStructProviderSchema(2, {{102, false}, {103, true}}));
+    try {
+        segment->Reopen(ParseStructProviderSchema(3, {{103, true}}));
+        FAIL() << "dropping the only stored struct sub-field must fail the "
+                  "reopen";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::DataFormatBroken);
+    }
+}
+
 TEST(test_chunk_segment, ReopenKeepsOffsetsAfterDroppingOnlyRealChild) {
     auto schema = std::make_shared<Schema>();
     schema->set_schema_version(1);

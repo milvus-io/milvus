@@ -624,6 +624,17 @@ class Schema {
     const FieldMeta&
     GetFirstArrayFieldInStruct(const std::string& struct_name) const;
 
+    // Field ID of the struct array field itself. Only schemas parsed from a
+    // CollectionSchema proto know it.
+    std::optional<FieldId>
+    GetStructFieldId(const std::string& struct_name) const {
+        auto it = struct_field_ids_.find(struct_name);
+        if (it == struct_field_ids_.end()) {
+            return std::nullopt;
+        }
+        return it->second;
+    }
+
     DataType
     GetFieldType(const FieldId& field_id) const {
         AssertInfo(fields_.count(field_id),
@@ -718,6 +729,9 @@ class Schema {
 
     // Cache for struct_name -> first array field mapping (built during AddField)
     std::unordered_map<std::string, FieldId> struct_array_field_cache_;
+
+    // struct_name -> field ID of the struct array field (built in ParseFrom)
+    std::unordered_map<std::string, FieldId> struct_field_ids_;
 
     // warmup policy settings
     // Valid values: "disable", "sync", "async" (empty string means no setting)

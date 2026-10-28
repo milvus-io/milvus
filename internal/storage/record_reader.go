@@ -689,6 +689,9 @@ type ChunkedBlobsReader func() ([]*Blob, error)
 type CompositeBinlogRecordReader struct {
 	fields  map[FieldID]*schemapb.FieldSchema
 	structs map[FieldID]*schemapb.StructArrayFieldSchema
+	// stored is the set of field IDs the segment physically stores, including
+	// fields that are no longer in the schema.
+	stored  map[FieldID]struct{}
 	index   map[FieldID]int16
 	brs     []*BinlogReader
 	rrs     []array.RecordReader
@@ -749,13 +752,16 @@ func (crr *CompositeBinlogRecordReader) Next() (Record, error) {
 	for _, f := range nonExistingFields {
 		var arr arrow.Array
 		var err error
-		if st := crr.structs[f.GetFieldID()]; st != nil && f.GetElementNullable() {
+		if st := crr.structs[f.GetFieldID()]; st != nil {
 			sibling := pickStructSibling(st, func(id int64) bool {
 				idx, ok := crr.index[id]
 				return ok && recs[idx] != nil
 			})
-			if sibling != nil {
+			switch {
+			case sibling != nil && f.GetElementNullable():
 				arr, err = GenerateNullElementsArrayFromSibling(f, recs[crr.index[sibling.GetFieldID()]], sibling, nRows)
+			case sibling == nil:
+				err = checkStructProviderNotDropped(st, f, crr.stored)
 			}
 		}
 		if arr == nil && err == nil {
@@ -853,13 +859,16 @@ func (r *absentFieldFillRecordReader) Next() (Record, error) {
 	for _, f := range r.fill {
 		var arr arrow.Array
 		var genErr error
-		if st := r.structs[f.GetFieldID()]; st != nil && f.GetElementNullable() {
+		if st := r.structs[f.GetFieldID()]; st != nil {
 			sibling := pickStructSibling(st, func(id int64) bool {
 				_, ok := r.present[id]
 				return ok
 			})
-			if sibling != nil {
+			switch {
+			case sibling != nil && f.GetElementNullable():
 				arr, genErr = GenerateNullElementsArrayFromSibling(f, base.Column(sibling.GetFieldID()), sibling, base.Len())
+			case sibling == nil:
+				genErr = checkStructProviderNotDropped(st, f, r.present)
 			}
 		}
 		if arr == nil && genErr == nil {

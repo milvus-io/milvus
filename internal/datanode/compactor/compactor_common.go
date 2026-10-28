@@ -364,11 +364,11 @@ func newCompactionSegmentRecordReaderWithFields(ctx context.Context, segment *da
 		return nil, nil, err
 	}
 
-	if segment.GetStorageVersion() != storage.StorageV1 {
-		// existingFields is the segment's physically-present field set; hand it
-		// over so the reader does not read the packed footers again.
-		opts = append(opts, storage.WithPresentFields(existingFields))
-	}
+	// existingFields is the segment's physically-present field set. Packed
+	// readers use it instead of reading the footers again; the V1 reader,
+	// whose binlogs were filtered to the read schema above, uses it to see
+	// struct sub-fields that were dropped since the segment was written.
+	opts = append(opts, storage.WithPresentFields(existingFields))
 	reader, err := storage.NewBinlogRecordReader(ctx, fieldBinlogs, readSchema, opts...)
 	return reader, existingFields, err
 }

@@ -340,6 +340,60 @@ CopyTakenPrimitive(const ChunkedColumnInterface::OwnedTakeData& data,
 
 }  // namespace
 
+// Called when a struct's element offsets cannot be built from a real column
+// of the segment: no sub-field of the struct that is in the schema has data
+// loaded from storage. Throws when the segment stores sub-fields of the
+// struct that have been dropped, and returns when the segment predates the
+// struct.
+//
+// If the segment stores a current sub-field of the struct (not loaded yet),
+// nothing is decided here. Otherwise field IDs tell two cases apart. They
+// are allocated in increasing order and the sub-fields of a struct get IDs
+// above the struct's own ID, so a segment written (or rewritten) after the
+// struct appeared stores the sub-fields the struct had then:
+//   - the segment stores a field ID above the struct's ID: it holds rows
+//     written after the struct appeared, but every sub-field it stores was
+//     dropped. All-zero offsets would turn rows with elements into null or
+//     empty rows, and a sub-field backfilled earlier would only carry the
+//     counts of the current process, so the load fails;
+//   - otherwise the segment predates the struct, its rows are null struct
+//     rows, and all-zero offsets (or a backfilled sub-field, which holds the
+//     same) are correct.
+// The drop rule (schemautil.CheckStructKeepsOriginalSubField in Go) keeps an
+// original sub-field in every struct, so this only fires for data whose
+// sub-fields were dropped without that rule. Schemas that do not carry the
+// struct's own ID (built in tests without a proto) skip the check.
+void
+CheckStructProviderNotDropped(const Schema& schema,
+                              const SegmentLoadInfo& load_info,
+                              const std::string& struct_name,
+                              int64_t segment_id) {
+    auto struct_id = schema.GetStructFieldId(struct_name);
+    if (!struct_id.has_value()) {
+        return;
+    }
+    const auto stored = load_info.GetStoredFieldIds();
+    for (const auto& field_id : stored) {
+        if (schema.has_field(field_id) &&
+            GetStructNameForArrayField(schema[field_id]) == struct_name) {
+            return;
+        }
+    }
+    for (const auto& field_id : stored) {
+        if (field_id.get() > struct_id->get()) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "segment {} stores field {}, written after struct field "
+                      "{} (id {}) was created, but none of the struct's "
+                      "current sub-fields; the stored sub-fields that give "
+                      "its element counts were dropped",
+                      segment_id,
+                      field_id.get(),
+                      struct_name,
+                      struct_id->get());
+        }
+    }
+}
+
 // Prepares manifest projections and shared size-estimate state per column group.
 // With async loading enabled, opens regular projections before worker dispatch.
 // Lazy projections defer reader opening and size estimation to materialization;
@@ -8322,13 +8376,26 @@ ChunkedSegmentSealedImpl::BuildStructElementOffsets(
             }
 
             std::shared_ptr<StructElementOffsetsSealed> offsets;
-            if (auto source =
-                    SelectStructElementOffsetsSource(runtime,
-                                                     *schema_snapshot,
-                                                     segment_load_info,
-                                                     name,
-                                                     newly_loaded_fields,
-                                                     excluded_fields)) {
+            auto source = SelectStructElementOffsetsSource(runtime,
+                                                           *schema_snapshot,
+                                                           segment_load_info,
+                                                           name,
+                                                           newly_loaded_fields,
+                                                           excluded_fields);
+            // Without a real source the offsets come from a backfilled
+            // sub-field or are all zeros; both are only correct when the
+            // segment predates the struct.
+            const bool real_source =
+                source.has_value() &&
+                !(segment_load_info.IsFieldFilledWithDefault(*source) &&
+                  newly_loaded_fields.count(*source) == 0);
+            if (!real_source) {
+                CheckStructProviderNotDropped(*schema_snapshot,
+                                              segment_load_info,
+                                              name,
+                                              segment_load_info.GetSegmentID());
+            }
+            if (source) {
                 offsets = StructElementOffsetsSealed::BuildFromColumn(
                     *runtime.fields.at(*source),
                     (*schema_snapshot)[*source],
@@ -9009,6 +9076,8 @@ ChunkedSegmentSealedImpl::fill_empty_field(
                        field_id.get());
             struct_offsets = it->second;
         } else {
+            CheckStructProviderNotDropped(
+                *schema_snapshot, segment_load_info, *name, id_);
             auto zeros = StructElementOffsetsSealed::BuildAllZeros(
                 size, !field_meta.is_nullable());
             runtime.struct_to_element_offsets[*name] = zeros;
@@ -9231,6 +9300,8 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
                            field_id.get());
                 struct_offsets = it->second;
             } else {
+                CheckStructProviderNotDropped(
+                    *schema_snapshot, segment_load_info, *name, id_);
                 auto zeros = StructElementOffsetsSealed::BuildAllZeros(
                     size, !field_meta.is_nullable());
                 committer.runtime()->struct_to_element_offsets[*name] = zeros;
