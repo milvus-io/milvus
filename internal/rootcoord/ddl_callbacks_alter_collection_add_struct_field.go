@@ -56,6 +56,11 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 	if err := normalizeAndCheckAddedStructField(structArrayField); err != nil {
 		return err
 	}
+	// Sub-fields of a whole struct added here are original sub-fields of that
+	// struct: they get no origin marker, and users cannot supply one.
+	if err := rejectStructSubFieldOriginMarkers([]*schemapb.StructArrayFieldSchema{structArrayField}); err != nil {
+		return err
+	}
 	if err := checkStructArrayFieldSchema([]*schemapb.StructArrayFieldSchema{structArrayField}); err != nil {
 		return errors.Wrap(err, "failed to check struct array field schema")
 	}

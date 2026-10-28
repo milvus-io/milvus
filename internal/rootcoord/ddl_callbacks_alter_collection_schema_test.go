@@ -2241,6 +2241,76 @@ func TestBuildSchemaForDropStructSubField(t *testing.T) {
 	}
 }
 
+// A sub-field added to an existing struct is marked, and a struct must keep
+// an original (unmarked) sub-field: dropping the last original one would
+// leave segments written before the add without a stored sibling for the
+// added sub-field.
+func TestAlterCollectionSchemaDropKeepsOriginalStructSubField(t *testing.T) {
+	coll := rootStructSubFieldTestCollection(true)
+	field := &schemapb.FieldSchema{
+		Name: "added", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+		ElementNullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+	}
+	plan := &schemautil.AlterSchemaAddPlan{Kind: schemautil.AlterSchemaAddStructSubField, StructPath: "items", Field: field}
+	require.NoError(t, prepareAlterSchemaAddStructSubField(coll, plan))
+	schema, properties, err := buildAlterSchemaAddSchema(coll, plan)
+	require.NoError(t, err)
+	require.NoError(t, validateSchemaEvolution(coll, schema))
+	subFields := schema.GetStructArrayFields()[0].GetFields()
+	require.False(t, schemautil.IsAddedStructSubField(subFields[0]))
+	require.True(t, schemautil.IsAddedStructSubField(subFields[1]))
+
+	afterAdd := coll.Clone()
+	afterAdd.SchemaVersion = schema.GetVersion()
+	afterAdd.Properties = properties
+	afterAdd.StructArrayFields[0].Fields = append(afterAdd.StructArrayFields[0].Fields, model.UnmarshalFieldModel(subFields[1]))
+
+	// Dropping the original sub-field passes the drop builder, which only
+	// rejects the last sub-field, and is then rejected by schema evolution.
+	dropped, _, _, err := buildSchemaForDropField(afterAdd, "items[old]", 0)
+	require.NoError(t, err)
+	err = validateSchemaEvolution(afterAdd, dropped)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.ErrorContains(t, err, `cannot drop sub-field "items[old]" of struct field "items"`)
+
+	// Dropping the added sub-field keeps the original one.
+	dropped, _, _, err = buildSchemaForDropField(afterAdd, "items[added]", 0)
+	require.NoError(t, err)
+	require.NoError(t, validateSchemaEvolution(afterAdd, dropped))
+
+	// Dropping the whole struct is always allowed.
+	dropped, _, _, err = buildSchemaForDropField(afterAdd, "items", 0)
+	require.NoError(t, err)
+	require.NoError(t, validateSchemaEvolution(afterAdd, dropped))
+}
+
+// Users cannot supply the internal origin marker when they create a
+// collection, add a field, a struct or a struct sub-field, or alter a field.
+func TestRootCoordRejectsStructSubFieldOriginMarker(t *testing.T) {
+	marked := func(field *schemapb.FieldSchema) *schemapb.FieldSchema {
+		field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{Key: common.StructSubFieldAddedKey, Value: "true"})
+		return field
+	}
+
+	err := checkFieldSchema([]*schemapb.FieldSchema{marked(&schemapb.FieldSchema{Name: "f", DataType: schemapb.DataType_Int64})})
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.ErrorContains(t, err, "is reserved")
+
+	structs := []*schemapb.StructArrayFieldSchema{newRootAddStructFieldSchema("profile")}
+	require.NoError(t, rejectStructSubFieldOriginMarkers(structs))
+	marked(structs[0].Fields[0])
+	require.ErrorIs(t, rejectStructSubFieldOriginMarkers(structs), merr.ErrParameterInvalid)
+
+	field := marked(&schemapb.FieldSchema{
+		Name: "added", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+		ElementNullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+	})
+	plan := &schemautil.AlterSchemaAddPlan{Kind: schemautil.AlterSchemaAddStructSubField, StructPath: "items", Field: field}
+	err = prepareAlterSchemaAddStructSubField(rootStructSubFieldTestCollection(true), plan)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.ErrorContains(t, err, "is reserved")
+}
+
 func TestAlterCollectionV2AckCallbackCascadesDroppedStructSubFieldIndex(t *testing.T) {
 	// Install the real callback dispatch and WAL control channel used by the
 	// inline index cascade, then capture the synthetic DropIndex callback.

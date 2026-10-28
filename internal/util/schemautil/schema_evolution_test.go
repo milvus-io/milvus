@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestValidateSchemaEvolutionAllowed(t *testing.T) {
@@ -621,7 +622,91 @@ func evolutionStructChild(id int64, name string, nullable bool) *schemapb.FieldS
 	child.ElementType = schemapb.DataType_Int64
 	child.ElementNullable = true
 	child.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}}
+	// The helper builds sub-fields added to an existing struct, which rootcoord
+	// marks as added.
+	MarkAddedStructSubField(child)
 	return child
+}
+
+// The drop rule keeps an original sub-field in every kept struct. Segments
+// written before a sub-field was added only store the original sub-fields, so
+// dropping the last of them would leave those segments without a stored
+// sibling for the added ones.
+func TestValidateSchemaEvolutionKeepsOriginalStructSubField(t *testing.T) {
+	withAdded := func() *schemapb.CollectionSchema {
+		schema := evolutionSchemaWithStruct()
+		schema.StructArrayFields[0].Fields = append(schema.StructArrayFields[0].Fields, evolutionStructChild(108, "profile[added]", true))
+		setMaxFieldID(schema, 108)
+		return schema
+	}
+
+	t.Run("drop the last original sub-field", func(t *testing.T) {
+		oldSchema := withAdded()
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		newSchema.StructArrayFields[0].Fields = newSchema.StructArrayFields[0].Fields[1:]
+		err := ValidateSchemaEvolution(oldSchema, newSchema)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, "every remaining sub-field was added after the struct was created")
+	})
+
+	t.Run("drop an added sub-field", func(t *testing.T) {
+		oldSchema := withAdded()
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		newSchema.StructArrayFields[0].Fields = newSchema.StructArrayFields[0].Fields[:1]
+		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+	})
+
+	t.Run("drop an original sub-field while another original remains", func(t *testing.T) {
+		oldSchema := withAdded()
+		second := evolutionField(109, "profile[second]", schemapb.DataType_Array, true)
+		second.ElementType = schemapb.DataType_Int64
+		second.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}}
+		oldSchema.StructArrayFields[0].Fields = append(oldSchema.StructArrayFields[0].Fields, second)
+		setMaxFieldID(oldSchema, 109)
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		newSchema.StructArrayFields[0].Fields = newSchema.StructArrayFields[0].Fields[1:]
+		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+	})
+
+	t.Run("drop the whole struct", func(t *testing.T) {
+		oldSchema := withAdded()
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		newSchema.StructArrayFields = nil
+		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+	})
+
+	t.Run("unmarked sub-fields are original", func(t *testing.T) {
+		oldSchema := evolutionSchemaWithStruct()
+		second := evolutionField(108, "profile[second]", schemapb.DataType_Array, true)
+		second.ElementType = schemapb.DataType_Int64
+		second.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}}
+		oldSchema.StructArrayFields[0].Fields = append(oldSchema.StructArrayFields[0].Fields, second)
+		setMaxFieldID(oldSchema, 108)
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		newSchema.StructArrayFields[0].Fields = newSchema.StructArrayFields[0].Fields[1:]
+		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+	})
+
+	t.Run("added sub-field without the marker", func(t *testing.T) {
+		oldSchema := evolutionSchemaWithStruct()
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		child := evolutionStructChild(108, "profile[extra]", true)
+		child.TypeParams = StripStructSubFieldOriginMarker(child.TypeParams)
+		newSchema.StructArrayFields[0].Fields = append(newSchema.StructArrayFields[0].Fields, child)
+		setMaxFieldID(newSchema, 108)
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "has no origin marker")
+	})
+
+	t.Run("marker cannot change in place", func(t *testing.T) {
+		oldSchema := withAdded()
+		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+		added := newSchema.StructArrayFields[0].Fields[1]
+		added.TypeParams = StripStructSubFieldOriginMarker(added.TypeParams)
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "origin marker")
+		MarkAddedStructSubField(newSchema.StructArrayFields[0].Fields[0])
+		added.TypeParams = oldSchema.StructArrayFields[0].Fields[1].TypeParams
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "origin marker")
+	})
 }
 
 func TestValidateSchemaEvolutionRejectsProtectedDrops(t *testing.T) {
