@@ -2120,12 +2120,16 @@ SegmentGrowingImpl::load_column_group_data_internal(
         // pushing into the bounded channel. If the consumer loop below
         // throws, unblock the task and wait for it before unwinding
         // (see #46958).
+        bool channel_exhausted = false;
         auto drain_on_unwind = folly::makeGuard([&]() {
-            try {
-                std::shared_ptr<milvus::ArrowDataWrapper> discard;
-                while (column_group_info.arrow_reader_channel->pop(discard)) {
+            if (!channel_exhausted) {
+                try {
+                    std::shared_ptr<milvus::ArrowDataWrapper> discard;
+                    while (
+                        column_group_info.arrow_reader_channel->pop(discard)) {
+                    }
+                } catch (...) {
                 }
-            } catch (...) {
             }
             storage::DrainFuture(load_future);
         });
@@ -2186,6 +2190,8 @@ SegmentGrowingImpl::load_column_group_data_internal(
                 }
             }
         }
+        // The loop consumed the close marker, even if the producer failed.
+        channel_exhausted = true;
         // access underlying feature to get exception if any
         load_future.get();
         drain_on_unwind.dismiss();
