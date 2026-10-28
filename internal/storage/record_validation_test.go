@@ -205,6 +205,7 @@ func TestRecordValidatorRejectsMalformedInputStructure(t *testing.T) {
 	require.NoError(t, err)
 	valid := array.NewFixedSizeBinaryBuilder(memory.DefaultAllocator, &arrow.FixedSizeBinaryType{ByteWidth: 8})
 	valid.Append(make([]byte, 8))
+	valid.Append(make([]byte, 8))
 	column := valid.NewArray()
 	valid.Release()
 	defer column.Release()
@@ -215,7 +216,8 @@ func TestRecordValidatorRejectsMalformedInputStructure(t *testing.T) {
 	for name, input := range map[string]Record{
 		"nil record":     nil,
 		"missing column": &validationRecord{rows: 1},
-		"short column":   &validationRecord{rows: 2, columns: map[FieldID]arrow.Array{101: column}},
+		"short column":   &validationRecord{rows: 3, columns: map[FieldID]arrow.Array{101: column}},
+		"long column":    &validationRecord{rows: 1, columns: map[FieldID]arrow.Array{101: column}},
 		"wrong type":     &validationRecord{rows: 1, columns: map[FieldID]arrow.Array{101: wrong}},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -233,6 +235,46 @@ func TestRecordValidatorRejectsMalformedInputStructure(t *testing.T) {
 		require.NoError(t, validator.ValidateForRead(record))
 		requireIntegrityFailure(t, validator.Validate(record))
 	})
+}
+
+func TestSortRejectsColumnLengthMismatchBeforePredicate(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
+		{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64},
+	}}
+	validator, err := NewRecordValidator(schema)
+	require.NoError(t, err)
+	keys := mergeSortTestRec(t, map[FieldID][]int64{100: {1, 2}}, nil)
+	defer keys.Release()
+	for name, values := range map[string][]int64{
+		"short": {10},
+		"long":  {10, 20, 30},
+	} {
+		for _, merge := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/merge=%t", name, merge), func(t *testing.T) {
+				column := mergeSortTestRec(t, map[FieldID][]int64{101: values}, nil)
+				defer column.Release()
+				input := &validationRecord{rows: 2, columns: map[FieldID]arrow.Array{
+					100: keys.Column(100), 101: column.Column(101),
+				}}
+				predicateCalls, writes := 0, 0
+				predicate := func(Record, int, int) bool { predicateCalls++; return true }
+				writer := validator.WrapWriter(&MockRecordWriter{writefn: func(Record) error { writes++; return nil }})
+				readers := []RecordReader{validator.WrapReader(&oneShotRecordReader{rec: input})}
+				require.NotPanics(t, func() {
+					var err error
+					if merge {
+						_, err = MergeSort(1024, schema, readers, writer, predicate, []int64{100})
+					} else {
+						_, _, err = Sort(1024, schema, readers, writer, predicate, []int64{100})
+					}
+					requireIntegrityFailure(t, err)
+				})
+				require.Zero(t, predicateCalls)
+				require.Zero(t, writes)
+			})
+		}
+	}
 }
 
 func TestSortRejectsMissingFieldBeforePredicate(t *testing.T) {

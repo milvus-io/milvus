@@ -124,8 +124,8 @@ func (v *RecordValidator) ValidateForRead(rec Record) error {
 			return merr.WrapErrDataIntegrityMsg("field %s (ID=%d): missing column, record rows=%d",
 				contract.field.GetName(), contract.field.GetFieldID(), rows)
 		}
-		if col.Len() < rows {
-			return merr.WrapErrDataIntegrityMsg("field %s (ID=%d): short column, length=%d, record rows=%d",
+		if col.Len() != rows {
+			return merr.WrapErrDataIntegrityMsg("field %s (ID=%d): column length mismatch, length=%d, record rows=%d",
 				contract.field.GetName(), contract.field.GetFieldID(), col.Len(), rows)
 		}
 		if err := validateColumnType(contract, col); err != nil {
