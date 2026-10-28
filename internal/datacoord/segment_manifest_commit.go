@@ -164,13 +164,20 @@ type SegmentManifestCommit struct {
 
 // CommitSegmentManifest is the only DataCoord primitive that both creates a
 // StorageV3 manifest revision and advances SegmentInfo.manifest_path. Lock
-// order is segmentManifestLocks[segmentID] -> indexMeta.keyLock -> segMu. No
-// caller may enter this protocol while holding segMu. Manifest I/O runs outside
-// segMu; the final catalog mutation is rebased onto the latest SegmentInfo and
-// catalog + memory publication stays in one segMu critical section. No lock is
-// ever acquired inside that section: the fieldIndexLock-guarded index gauge
-// update a staged SegmentIndex mutation defers runs only after segMu is
-// released (still under keyLock).
+// order is segmentManifestLocks[segmentID] -> indexMeta.keyLock ->
+// indexMeta.fieldIndexLock (read) -> segMu: a backfill replace holds the
+// fieldIndexLock read side from its index-removal re-resolution through the
+// publication section, so the retraction check and the pointer advance are
+// atomic with index creation. No caller may enter this protocol while holding
+// segMu, and code holding segMu must NEVER take fieldIndexLock: a commit that
+// already holds its read side while waiting for segMu would deadlock against
+// the segMu holder (and RWMutex writer-preference can pin that read behind a
+// pending CreateIndex/DropIndex). Manifest I/O runs outside segMu; the final
+// catalog mutation is rebased onto the latest SegmentInfo and catalog + memory
+// publication stays in one segMu critical section. No lock is ever acquired
+// inside that section: the fieldIndexLock-guarded index gauge update a staged
+// SegmentIndex mutation defers runs only after segMu is released (still under
+// keyLock).
 func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifestCommit) error {
 	if commit.SegmentID == 0 {
 		return merr.WrapErrServiceInternalMsg("segment manifest commit requires a segment ID")
