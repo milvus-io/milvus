@@ -29,6 +29,10 @@ var _ interceptors.InterceptorWithMetrics = (*shardInterceptor)(nil)
 type shardInterceptor struct {
 	shardManager shards.ShardManager
 	ops          map[message.MessageType]interceptors.AppendInterceptorCall
+	// nameGates lists the message types whose handler is keyed by collection id
+	// and must therefore only run for the vchannel this pchannel holds. See
+	// passNameGate.
+	nameGates map[message.MessageType]nameGate
 }
 
 // initOpTable initializes the operation table for the segment interceptor.
@@ -48,7 +52,9 @@ func (impl *shardInterceptor) initOpTable() {
 		message.MessageTypeFlush:              impl.handleFlushSegment,
 		message.MessageTypeFlushAll:           impl.handleFlushAllMessage,
 		message.MessageTypeTruncateCollection: impl.handleTruncateCollectionMessage,
+		message.MessageTypeSplitShard:         impl.handleSplitShardMessage,
 	}
+	impl.initNameGates()
 }
 
 // Name returns the name of the interceptor.
@@ -59,13 +65,16 @@ func (impl *shardInterceptor) Name() string {
 // DoAppend assigns segment for every partition in the message.
 func (impl *shardInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (msgID message.MessageID, err error) {
 	op, ok := impl.ops[msg.MessageType()]
-	if ok && (!funcutil.IsControlChannel(msg.VChannel()) || msg.IsPChannelLevel()) {
-		// If the message type is registered in the interceptor, use the registered operation.
-		// control channel message is only used to determine the DDL/DCL order,
-		// perform no effect on the shard manager, so skip it.
-		return op(ctx, msg, appendOp)
+	if !ok || (funcutil.IsControlChannel(msg.VChannel()) && !msg.IsPChannelLevel()) {
+		// Only a registered message type has shard-manager work. A control
+		// channel message is only used to determine the DDL/DCL order and
+		// performs no effect on the shard manager, so skip it.
+		return appendOp(ctx, msg)
 	}
-	return appendOp(ctx, msg)
+	if gate, gated := impl.nameGates[msg.MessageType()]; gated {
+		return impl.passNameGate(ctx, msg, gate, op, appendOp)
+	}
+	return op(ctx, msg, appendOp)
 }
 
 // handleCreateCollection handles the create collection message.
@@ -158,12 +167,18 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 	// Assign segment for insert message.
 	// !!! Current implementation a insert message only has one parition, but we need to merge the message for partition-key in future.
 	header := insertMsg.Header()
+
 	collectionID := header.GetCollectionId()
 	schemaVersion := header.GetSchemaVersion()
-	correctSchemaVersion, err := impl.shardManager.CheckIfCollectionSchemaVersionMatch(header)
+	// Both admission questions -- may this vchannel be written, and does the
+	// header's schema version match -- under one read lock. They were already
+	// consistent with each other (the vchannel-exclusive lock upstream keeps the
+	// fence from flipping between them); this only stops paying for the second
+	// acquisition on the hot path.
+	correctSchemaVersion, err := impl.shardManager.CheckWritableAndSchemaVersion(msg.VChannel(), header)
 	if err != nil {
-		if errors.Is(err, shards.ErrCollectionNotFound) {
-			return nil, status.NewUnrecoverableError("collection %d not found", collectionID)
+		if errors.IsAny(err, shards.ErrVChannelFenced, shards.ErrCollectionNotFound) {
+			return nil, rejectUnwritableVChannel(msg.VChannel(), collectionID, err)
 		}
 		if errors.Is(err, shards.ErrCollectionSchemaNotFound) {
 			return nil, status.NewUnrecoverableError("collection %d schema not provided by create collection message", collectionID)
@@ -178,12 +193,12 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 			return nil, status.NewSchemaVersionMismatch("schema version mismatch, input schema version: %d, collection schema version: %d",
 				schemaVersion, correctSchemaVersion)
 		}
-		impl.shardManager.Logger().Error(ctx, "unexpected error from CheckIfCollectionSchemaVersionMatch",
+		impl.shardManager.Logger().Error(ctx, "unexpected error from CheckWritableAndSchemaVersion",
 			mlog.FieldCollectionID(collectionID),
 			mlog.Bool("schemaVersionProvided", header.SchemaVersion != nil),
 			mlog.Int32("schemaVersion", schemaVersion),
 			mlog.Err(err))
-		return nil, status.NewUnrecoverableError("unexpected error from CheckIfCollectionSchemaVersionMatch: %s", err.Error())
+		return nil, status.NewUnrecoverableError("unexpected error from CheckWritableAndSchemaVersion: %s", err.Error())
 	}
 	schemaVersion = correctSchemaVersion
 	if header.SchemaVersion == nil {
@@ -268,10 +283,12 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	deleteMessage := message.MustAsMutableDeleteMessageV1(msg)
 	header := deleteMessage.Header()
-	if err := impl.shardManager.CheckIfCollectionExists(header.GetCollectionId()); err != nil {
-		// The collection can not be deleted at current shard, ignored
-		return nil, status.NewUnrecoverableError(err.Error())
+	if err := impl.shardManager.CheckIfVChannelCanBeWritten(header.GetCollectionId(), msg.VChannel()); err != nil {
+		return nil, rejectUnwritableVChannel(msg.VChannel(), header.GetCollectionId(), err)
 	}
+	// No separate existence check: the admission above already answers
+	// ErrCollectionNotFound when this pchannel holds no entry for the
+	// collection, so a second lock acquisition would ask the same question.
 
 	impl.shardManager.ApplyDelete(deleteMessage)
 	return appendOp(ctx, msg)
@@ -283,7 +300,7 @@ func (impl *shardInterceptor) handleManualFlushMessage(ctx context.Context, msg 
 	header := manualFlushMsg.Header()
 	segmentIDs, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(header.GetCollectionId(), msg.TimeTick())
 	if err != nil {
-		if !msg.IsUnreplicable() || msg.ReplicateHeader() != nil || !errors.Is(err, shards.ErrCollectionNotFound) {
+		if !isLocalManualFlush(msg) || !errors.Is(err, shards.ErrCollectionNotFound) {
 			return nil, status.NewUnrecoverableError(err.Error())
 		}
 		// DataCoord admits a local flush only for an existing collection, after
@@ -335,6 +352,23 @@ func (impl *shardInterceptor) handleSchemaChange(ctx context.Context, msg messag
 func (impl *shardInterceptor) handleAlterCollection(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	putCollectionMsg := message.MustAsMutableAlterCollectionMessageV2(msg)
 	header := putCollectionMsg.Header()
+
+	// A routing commit that no longer names this vchannel retires it: the same
+	// broadcast that grows the collection's vchannel list is what delists the
+	// spent source, so this replica is about one retired shard, not about the
+	// collection's state. The collection-wide apply below must not run for it.
+	// Header gate first, so an ordinary AlterCollection does not pay a body
+	// decode to learn that it is not a routing commit.
+	if messageutil.IsShardSplitRouting(header) &&
+		messageutil.RetiresVChannel(header, putCollectionMsg.MustBody().GetUpdates(), msg.VChannel()) {
+		// Nothing is left to do: the registration went at the fence and so did
+		// the vchannel's function-runner key. The replica is still appended --
+		// the vchannel's own recovery module turns it into that vchannel's drop
+		// -- but it must not fall through to the
+		// collection-wide apply below, which is keyed by collection id and
+		// would flush and re-schema whichever vchannel now holds the entry.
+		return appendOp(ctx, msg)
+	}
 
 	// AlterCollection atomically flushes+fences segments (if schema change) and updates
 	// in-memory schema — all within one critical region of the shard manager.

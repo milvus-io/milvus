@@ -23,6 +23,7 @@ const (
 	messageChunkIndex                       = "_ci"  // payload chunk index (0-based) of a chunked WAL record.
 	messageChunkTotal                       = "_ct"  // total chunk count of a chunked WAL record.
 	messageIdempotencyKey                   = "_ik"  // scoped idempotency key of an idempotent write, see `IdempotencyKey`.
+	messageAppendExtra                      = "_ae"  // the extra append response the WAL attached to this record, see `SetAppendExtra`.
 )
 
 var (

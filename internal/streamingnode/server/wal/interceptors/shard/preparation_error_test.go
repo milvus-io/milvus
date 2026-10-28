@@ -40,7 +40,7 @@ type preparationShardManager struct{ shards.ShardManager }
 
 func (*preparationShardManager) Logger() *mlog.Logger { panic("unpatched") }
 
-func (*preparationShardManager) CheckIfCollectionSchemaVersionMatch(*message.InsertMessageHeader) (int32, error) {
+func (*preparationShardManager) CheckWritableAndSchemaVersion(string, *message.InsertMessageHeader) (int32, error) {
 	panic("unpatched")
 }
 
@@ -64,7 +64,7 @@ func TestMaterializationDefersPreparation(t *testing.T) {
 			mockey.Mock(function.GetManager).Return(manager).Build()
 			build := mockey.Mock(function.BuildEmbeddingRunner).Return(nil, merr.ErrServiceInternal).Build()
 			mockey.Mock((*preparationShardManager).Logger).Return(mlog.With()).Build()
-			mockey.Mock((*preparationShardManager).CheckIfCollectionSchemaVersionMatch).Return(int32(1), nil).Build()
+			mockey.Mock((*preparationShardManager).CheckWritableAndSchemaVersion).Return(int32(1), nil).Build()
 			schema := &schemapb.CollectionSchema{
 				Version: 1, FileResourceIds: []int64{7},
 				Fields: []*schemapb.FieldSchema{
