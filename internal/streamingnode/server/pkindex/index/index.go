@@ -70,8 +70,16 @@ type Index struct {
 	installedVersion int64
 	installedPaths   map[sst.ID]string
 	// recovered is the manifest of the vchannel at the open, set by
-	// SetCommitted and installed by Install. Nil when the vchannel had none.
+	// SetCommitted and installed by Install. Nil when the vchannel had none,
+	// or after a Reset.
 	recovered *ManifestView
+	// resetEpoch counts the Resets. A handover prepared before a Reset does
+	// not install its result. installMu guards it.
+	resetEpoch uint64
+	// resetTT is the time tick of the last Reset, 0 when none. Until a
+	// handover commits a checkpoint at or above it, the next handover
+	// replaces the committed table set (see FlushArgs.ResetTimeTick).
+	resetTT atomic.Uint64
 
 	// failWrites, when set, makes every engine write of Apply fail with it.
 	// Only the tests set it, see FailWritesForTest.
@@ -296,7 +304,9 @@ func (idx *Index) currentInstalledVersion() int64 {
 func (idx *Index) LastCommittedTimeTick() uint64 { return idx.lastCommitted.Load() }
 
 // installIfNewer installs the tables of m when m is newer than the installed
-// manifest, and retires gens in the same step. local maps the tables of this
+// manifest, and retires gens in the same step. It installs nothing from a
+// manifest whose checkpoint is before the last Reset: its tables hold keys
+// that the reset removed. local maps the tables of this
 // handover to their local files.
 //
 // It finds the local file of every table of m in this order: local, the
@@ -305,6 +315,10 @@ func (idx *Index) LastCommittedTimeTick() uint64 { return idx.lastCommitted.Load
 // outside installMu and checks the version again under it.
 func (idx *Index) installIfNewer(ctx context.Context, m ManifestView, local map[sst.ID]string, gens ...engine.Generation) error {
 	idx.installMu.Lock()
+	if m.CheckpointTimeTick < idx.resetTT.Load() {
+		idx.installMu.Unlock()
+		return nil
+	}
 	newer := m.Version > idx.installedVersion
 	known := make(map[sst.ID]string, len(m.Tables))
 	for _, ref := range m.Tables {
@@ -329,6 +343,9 @@ func (idx *Index) installIfNewer(ctx context.Context, m ManifestView, local map[
 
 	idx.installMu.Lock()
 	defer idx.installMu.Unlock()
+	if m.CheckpointTimeTick < idx.resetTT.Load() {
+		return nil
+	}
 	if m.Version <= idx.installedVersion {
 		return idx.retireCoveredLocked(ctx, m, gens)
 	}

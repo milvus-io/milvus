@@ -400,6 +400,31 @@ func (c *PChannelIndexManager) apply(ctx context.Context, idx *index.Index, w in
 	return nil
 }
 
+// ResetIndex empties the Index of a vchannel at tt, the time tick of a
+// TruncateCollection, see index.Index.Reset. It adds the Index to the
+// LastAcked heap when the reset made it dirty, and asks for a handover that
+// covers tt, so the reset commits soon. A vchannel without an Index is
+// ignored, and so is an Index that a drop detached meanwhile. The observe of
+// the WAL recovery is the only caller.
+func (c *PChannelIndexManager) ResetIndex(ctx context.Context, vchannel string, tt uint64) error {
+	idx := c.get(vchannel)
+	if idx == nil {
+		return nil
+	}
+	dirtied, err := idx.Reset(ctx, tt)
+	if err != nil {
+		if errors.Is(err, engine.ErrClosed) && !c.attached(idx) {
+			return nil
+		}
+		return err
+	}
+	if dirtied {
+		c.trackDirty(idx)
+	}
+	c.observeFlush(idx, tt)
+	return nil
+}
+
 // ObserveTimeTick records that the observe of the WAL recovery applied every
 // write up to tt, with the WAL tail as the recovery storage sees it now. It
 // never moves lastObserved back. It passes tt to the Decider of every index,

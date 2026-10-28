@@ -142,6 +142,17 @@ func (r *Recovery) observe(ctx context.Context, msg message.ImmutableMessage) (f
 			return nil, nil
 		}
 		return r.observeDropIndex(msg.VChannel(), header.GetIndexIds(), msg.TimeTick()), nil
+	case message.MessageTypeTruncateCollection:
+		if funcutil.IsControlChannel(msg.VChannel()) {
+			return nil, nil
+		}
+		if _, ok := r.targets[msg.VChannel()]; !ok {
+			return nil, nil
+		}
+		// The rows before the truncate are gone, so the index forgets their
+		// keys. The Index stays: the writes after the truncate that the
+		// append path decided are in its in-flight set.
+		return nil, r.m.ResetIndex(ctx, msg.VChannel(), msg.TimeTick())
 	case message.MessageTypeDropCollection:
 		if funcutil.IsControlChannel(msg.VChannel()) {
 			return nil, nil

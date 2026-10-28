@@ -921,3 +921,60 @@ func TestObserveCreateIndexOfAnotherIndexTypeOrTheControlChannelDoesNothing(t *t
 	assert.Nil(t, m.IndexForTest("p_"+funcutil.ControlChannelSuffix))
 	require.NoError(t, rec.Run(ctx))
 }
+
+func truncateMsg(vchannel string, collectionID int64, tt uint64) message.ImmutableMessage {
+	return at(message.NewTruncateCollectionMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.TruncateCollectionMessageHeader{CollectionId: collectionID}).
+		WithBody(&message.TruncateCollectionMessageBody{}).
+		MustBuildMutable(), tt)
+}
+
+// TestObserveReplayOfATruncateResetsTheIndex checks the replay of a
+// truncate after the checkpoint of the manifest: the index holds only the
+// keys after the truncate, and the recovered manifest is not installed.
+func TestObserveReplayOfATruncateResetsTheIndex(t *testing.T) {
+	ctx := context.Background()
+	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env.Committer.SetManifest("v1", &index.FakeManifest{View: index.ManifestView{Version: 1, CheckpointTimeTick: 100, SSTBasePath: "root/1/v1"}})
+	sched := nodescheduler.New(1)
+	t.Cleanup(sched.Close)
+	rec := recoverV1(t, env, sched)
+	idx := env.Manager.GetForTest("p").IndexForTest("v1")
+
+	rec.ObserveMessage(ctx, insertMsg("v1", 101, 7, 1))
+	rec.ObserveMessage(ctx, truncateMsg("v1", 1, 102))
+	rec.ObserveMessage(ctx, insertMsg("v1", 103, 7, 2))
+	rec.ObserveMessage(ctx, truncateMsg("p_"+funcutil.ControlChannelSuffix, 1, 104))
+	require.NoError(t, rec.Run(ctx))
+	select {
+	case <-idx.ReadyForTest():
+	case <-time.After(10 * time.Second):
+		t.Fatal("the index did not get ready")
+	}
+	assert.Equal(t, []dedup.PK{dedup.Int64PK(2)}, present(t, idx, 1, 2))
+	assert.True(t, idx.Dirty(), "the reset waits for its handover")
+	assert.Equal(t, uint64(100), idx.LastCommittedTimeTick())
+}
+
+// TestObserveReplayOfACommittedTruncateDoesNothing checks the skip rule: a
+// truncate at or before the checkpoint of the manifest is committed already.
+func TestObserveReplayOfACommittedTruncateDoesNothing(t *testing.T) {
+	ctx := context.Background()
+	env := pkindex.NewFakeEnv(t, t.TempDir())
+	env.Committer.SetManifest("v1", &index.FakeManifest{View: index.ManifestView{Version: 1, CheckpointTimeTick: 100, SSTBasePath: "root/1/v1"}})
+	sched := nodescheduler.New(1)
+	t.Cleanup(sched.Close)
+	rec := recoverV1(t, env, sched)
+	idx := env.Manager.GetForTest("p").IndexForTest("v1")
+
+	rec.ObserveMessage(ctx, insertMsg("v1", 101, 7, 1))
+	rec.ObserveMessage(ctx, truncateMsg("v1", 1, 100))
+	require.NoError(t, rec.Run(ctx))
+	select {
+	case <-idx.ReadyForTest():
+	case <-time.After(10 * time.Second):
+		t.Fatal("the index did not get ready")
+	}
+	assert.Equal(t, []dedup.PK{dedup.Int64PK(1)}, present(t, idx, 1))
+}
