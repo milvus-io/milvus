@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type fakeStreamRecv struct {
@@ -113,7 +114,7 @@ type testHit struct {
 	score float32
 }
 
-func TestScalarByteSizeMatchesChunk(t *testing.T) {
+func TestSearchUnitByteSizeMatchesChunk(t *testing.T) {
 	result := newSearchChunk(1, 2, []testHit{{id: 1, score: 0}, {id: 129, score: 0.5}})
 	result.ResultData.FieldsData = append(result.ResultData.FieldsData,
 		&schemapb.FieldData{Type: schemapb.DataType_VarChar, FieldName: "text", FieldId: 120, IsDynamic: true, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"", "hello"}}}, ValidData: []bool{false, true}}}},
@@ -128,8 +129,8 @@ func TestScalarByteSizeMatchesChunk(t *testing.T) {
 		}
 		for row := int64(0); row < 2; row++ {
 			unit := orderedUnit{data: result.ResultData, rowIndex: row}
-			got, ok := unit.scalarByteSize()
-			require.True(t, ok)
+			got, err := unit.reducibleByteSize()
+			require.NoError(t, err)
 			chunk, err := buildSearchChunk([]orderedUnit{unit}, 1, 2, "", false, false)
 			require.NoError(t, err)
 			data := chunk.GetResultData()
@@ -139,29 +140,95 @@ func TestScalarByteSizeMatchesChunk(t *testing.T) {
 	}
 }
 
-func BenchmarkScalarByteSize(b *testing.B) {
-	result := newSearchChunk(1, 1, []testHit{{id: 129, score: 0.5}})
-	unit := orderedUnit{data: result.ResultData}
-	b.Run("scalar", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			_, ok := unit.scalarByteSize()
-			if !ok {
-				b.Fatal("scalar path unavailable")
-			}
+func TestSearchUnitByteSizeCompound(t *testing.T) {
+	result := newSearchChunk(2, 2, []testHit{{id: 1, score: 1}, {id: 2, score: 0.5}}, []testHit{{id: 3, score: 0.3}})
+	data := result.ResultData
+	data.FieldsData = append(data.FieldsData,
+		&schemapb.FieldData{Type: schemapb.DataType_JSON, FieldName: "json", FieldId: 200, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: [][]byte{[]byte("{}"), []byte("[1]"), nil}}}}}},
+		&schemapb.FieldData{Type: schemapb.DataType_Array, FieldName: "array", FieldId: 201, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{ElementType: schemapb.DataType_Int64, Data: []*schemapb.ScalarField{
+			{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{127, 128, -1}}}},
+			{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{}}},
+			{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{16384}}}},
+		}}}}}},
+		&schemapb.FieldData{Type: schemapb.DataType_FloatVector, FieldId: 202, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, ValidData: []bool{true, false, true}, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}}}}},
+		&schemapb.FieldData{Type: schemapb.DataType_SparseFloatVector, FieldId: 203, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 1000, ValidData: []bool{true, false, true}, Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{Dim: 1000, Contents: [][]byte{make([]byte, 8), make([]byte, 16)}}}}}},
+	)
+	data.ElementIndices = &schemapb.LongArray{Data: []int64{0, 128, -1}}
+	group := &schemapb.FieldData{Type: schemapb.DataType_Int64, FieldName: "group", FieldId: 204, IsDynamic: true, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10000, 10000, -1}}}, ValidData: []bool{true, false, true}}}}
+	for _, legacy := range []bool{false, true} {
+		data.GroupByFieldValues, data.GroupByFieldValue = nil, nil
+		if legacy {
+			data.GroupByFieldValue = group
+		} else {
+			data.GroupByFieldValues = []*schemapb.FieldData{group}
 		}
-	})
-	b.Run("chunk", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			chunk, err := buildSearchChunk([]orderedUnit{unit}, 1, 1, "", false, false)
-			if err != nil {
-				b.Fatal(err)
-			}
-			data := chunk.GetResultData()
-			_ = proto.Size(&schemapb.SearchResultData{FieldsData: data.FieldsData, Scores: data.Scores, Ids: data.Ids, ElementIndices: data.ElementIndices, GroupByFieldValue: data.GroupByFieldValue, GroupByFieldValues: data.GroupByFieldValues})
+		buffer := &orderedChildBuffer{}
+		_, err := buffer.accept(result, 2, 2)
+		require.NoError(t, err)
+		for _, unit := range buffer.units {
+			got, err := unit.reducibleByteSize()
+			require.NoError(t, err)
+			chunk, err := buildSearchChunk([]orderedUnit{unit}, 2, 2, "", false, false)
+			require.NoError(t, err)
+			row := chunk.GetResultData()
+			want := proto.Size(&schemapb.SearchResultData{FieldsData: row.FieldsData, Ids: row.Ids, Scores: row.Scores, ElementIndices: row.ElementIndices, GroupByFieldValue: row.GroupByFieldValue, GroupByFieldValues: row.GroupByFieldValues})
+			require.Equal(t, want, got, "legacy=%v row=%d", legacy, unit.rowIndex)
+			require.Zero(t, testing.AllocsPerRun(100, func() { _, err = unit.reducibleByteSize() }))
+			require.NoError(t, err)
 		}
-	})
+	}
+}
+
+func BenchmarkSearchUnitByteSize(b *testing.B) {
+	for _, shape := range []string{"scalar", "wide", "dense_vector", "sparse_vector", "grouped", "array"} {
+		result := newSearchChunk(1, 1, []testHit{{id: 129, score: 0.5}})
+		data := result.ResultData
+		switch shape {
+		case "wide":
+			for i := 0; i < 64; i++ {
+				field := proto.Clone(data.FieldsData[0]).(*schemapb.FieldData)
+				field.FieldId = int64(200 + i)
+				data.FieldsData = append(data.FieldsData, field)
+			}
+		case "dense_vector":
+			data.FieldsData = append(data.FieldsData, &schemapb.FieldData{Type: schemapb.DataType_FloatVector, FieldId: 200,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 768,
+					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, 768)}}}}})
+		case "sparse_vector":
+			data.FieldsData = append(data.FieldsData, &schemapb.FieldData{Type: schemapb.DataType_SparseFloatVector, FieldId: 200,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{Contents: [][]byte{make([]byte, 256)}}}}}})
+		case "grouped":
+			data.GroupByFieldValues = data.FieldsData
+		case "array":
+			data.FieldsData = append(data.FieldsData, &schemapb.FieldData{Type: schemapb.DataType_Array, FieldId: 200,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{ElementType: schemapb.DataType_Int64, Data: []*schemapb.ScalarField{
+						{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: make([]int64, 256)}}},
+					}},
+				}}}})
+		}
+		unit := orderedUnit{data: data, fieldIndexComputer: typeutil.NewFieldDataIdxComputer(data.FieldsData)}
+		for _, mode := range []string{"direct", "materialized"} {
+			b.Run(shape+"/"+mode, func(b *testing.B) {
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					if mode == "direct" {
+						if _, err := unit.reducibleByteSize(); err != nil {
+							b.Fatal(err)
+						}
+					} else {
+						chunk, err := buildSearchChunk([]orderedUnit{unit}, 1, 1, "", false, false)
+						if err != nil {
+							b.Fatal(err)
+						}
+						row := chunk.GetResultData()
+						_ = proto.Size(&schemapb.SearchResultData{FieldsData: row.FieldsData, Scores: row.Scores, Ids: row.Ids, ElementIndices: row.ElementIndices, GroupByFieldValue: row.GroupByFieldValue, GroupByFieldValues: row.GroupByFieldValues})
+					}
+				}
+			})
+		}
+	}
 }
 
 func searchChunkBytes(t *testing.T, hits ...testHit) int {
