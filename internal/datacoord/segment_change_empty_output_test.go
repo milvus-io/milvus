@@ -126,7 +126,7 @@ func TestSegmentChangeEmptyOutputRecovery(t *testing.T) {
 	ctx := t.Context()
 	m, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
-	g := seedPublishMeta(t, m, model.SegmentChangeSourceMixCompaction)
+	seedPublishMeta(t, m, model.SegmentChangeSourceMixCompaction)
 	empty := m.GetSegment(ctx, 1001).Clone()
 	empty.NumOfRows = 0
 	empty.State = commonpb.SegmentState_Dropped
@@ -147,7 +147,7 @@ func TestSegmentChangeEmptyOutputRecovery(t *testing.T) {
 	// A caller cannot smuggle a zero-row output into the committed visible set.
 	m, err = meta.NewMemoryMeta(t)
 	require.NoError(t, err)
-	g = seedPublishMeta(t, m, model.SegmentChangeSourceMixCompaction)
+	g := seedPublishMeta(t, m, model.SegmentChangeSourceMixCompaction)
 	require.NoError(t, m.UpdateSegmentsInfo(ctx, func(pack *updateSegmentPack) bool { pack.Get(1001).NumOfRows = 0; return true }))
 	g.State = model.SegmentChangeStateCommitted
 	require.ErrorIs(t, m.UpdateSegmentsInfoAndChangeGroups(ctx, []metastore.UpdateAction{metastore.SaveSegmentChangeGroup(g)},
