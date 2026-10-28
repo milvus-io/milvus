@@ -177,12 +177,17 @@ a scalar NULL or a real zero remains a value. On the existing RPC, global Empty
 is represented by one identity-state row: count=0 and NULL for min/max/sum.
 GROUP BY Empty has zero rows in every column. Global zero-row RPC payloads
 cannot be emitted because released 3.0 reducers read row zero. Wire validity is
-projected with the shared validity helper so both released and current consumers
-observe the NULL state, without version-dependent merge rules.
+projected with the shared validity helper at the QN and shard response boundaries,
+after ORDER BY and limit have finished rebuilding columns, so both released and
+current consumers observe the NULL state without version-dependent merge rules.
+Intermediate encoding and finalization create independent field envelopes while
+sharing read-only scalar payloads; output renaming and protocol projection cannot
+mutate retained partials and do not deep-copy entire value arrays.
 Execution metadata (including View/MVCC, feature bits and cost) remains independent
 of the payload. Proxy alone calls `Finalize` to obtain `FinalAggregationResult`
 before output remapping. Global empty input returns count=0 and NULL for
-aggregates without candidates; avg remains a sum/count composition. These states
+aggregates without candidates; avg remains a sum/count composition and returns
+NULL when count is zero or sum is NULL, while other rows remain computable. These states
 prevent empty shards from changing positive min or negative max, and preserve
 NULL when all contributions are NULL. AllRetrieveCount is never an emptiness
 criterion. There is no new protobuf field or production Proxy routing switch.

@@ -21,7 +21,7 @@ func TestPartialAggregationIdentity(t *testing.T) {
 			encoded, err := r.EncodePartial(empty)
 			require.NoError(t, err)
 			require.Len(t, encoded.FieldsData[0].GetScalars().GetLongData().GetData(), 1)
-			require.Equal(t, []bool{op == planpb.AggregateOp_count}, encoded.FieldsData[0].GetValidData())
+			require.Equal(t, []bool{op == planpb.AggregateOp_count}, typeutil.GetFieldDataValidData(encoded.FieldsData[0]))
 			decoded, err := r.DecodePartial(encoded.FieldsData, encoded.AllRetrieveCount)
 			require.NoError(t, err)
 			require.False(t, decoded.IsEmpty(), "the legacy RPC layout carries an identity row")

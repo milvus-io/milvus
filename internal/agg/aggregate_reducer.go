@@ -3,8 +3,6 @@ package agg
 import (
 	"context"
 
-	"google.golang.org/protobuf/proto"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -68,7 +66,7 @@ func (reducer *GroupAggReducer) emptyFields() ([]*schemapb.FieldData, error) {
 	for _, id := range reducer.groupByFieldIds {
 		field, err := helper.GetFieldFromID(id)
 		if err != nil {
-			return nil, err
+			return nil, merr.Wrapf(err, "failed to get group-by field schema %d", id)
 		}
 		column, err := typeutil.GenEmptyFieldData(field)
 		if err != nil {
@@ -81,7 +79,7 @@ func (reducer *GroupAggReducer) emptyFields() ([]*schemapb.FieldData, error) {
 		if aggregate.GetOp() != planpb.AggregateOp_count {
 			field, err := helper.GetFieldFromID(aggregate.GetFieldId())
 			if err != nil {
-				return nil, err
+				return nil, merr.Wrapf(err, "failed to get aggregate field schema %d", aggregate.GetFieldId())
 			}
 			resultType, err = getAggregateResultType(aggregate.GetOp(), field.GetDataType())
 			if err != nil {
@@ -479,7 +477,8 @@ func (reducer *GroupAggReducer) DecodePartial(fields []*schemapb.FieldData, coun
 		if rows == -1 {
 			rows = n
 		}
-		if n != rows || (len(typeutil.GetFieldDataValidData(field)) != 0 && len(typeutil.GetFieldDataValidData(field)) != n) {
+		validity := typeutil.GetFieldDataValidData(field)
+		if n != rows || (len(validity) != 0 && len(validity) != n) {
 			return nil, merr.WrapErrServiceInternalMsg("inconsistent aggregate column cardinality at column %d", i)
 		}
 	}
@@ -530,10 +529,11 @@ func (reducer *GroupAggReducer) Merge(ctx context.Context, results []*PartialAgg
 	return newPartialAggregationResult(merged.fieldDatas, count), nil
 }
 
-// EncodePartial projects mergeable states onto the existing RPC layout.
+// EncodePartial materializes mergeable columns for the reduction pipeline.
 // Global Empty has one identity row (count=0, other states=NULL); GROUP BY
 // Empty has zero groups. A global zero-row payload would break older reducers
-// that read row zero. No version-dependent merge rules are needed.
+// that read row zero. Legacy validity projection belongs after all sorting and
+// slicing, at the response boundary, not inside this intermediate operation.
 func (reducer *GroupAggReducer) EncodePartial(result *PartialAggregationResult) (*internalpb.RetrieveResults, error) {
 	fields := result.fieldDatas
 	if result.IsEmpty() {
@@ -554,12 +554,18 @@ func (reducer *GroupAggReducer) EncodePartial(result *PartialAggregationResult) 
 			}
 		}
 	}
-	// This is a wire boundary. Project validity for released consumers without
-	// modifying the state that may still participate in another merge.
+	// Each consumer owns its field envelopes (names, IDs and validity reference).
+	// Scalar payloads and validity bitmaps remain read-only; sorting/slicing
+	// materializes new columns. Even the single-input fast path can therefore
+	// share data without letting output remapping modify a retained partial.
 	wireFields := make([]*schemapb.FieldData, len(fields))
 	for i, field := range fields {
-		wireFields[i] = proto.Clone(field).(*schemapb.FieldData)
-		typeutil.ProjectFieldDataValidDataForLegacy(wireFields[i])
+		wireFields[i] = &schemapb.FieldData{
+			Type: field.GetType(), FieldName: field.GetFieldName(), FieldId: field.GetFieldId(),
+			IsDynamic: field.GetIsDynamic(),
+			Field:     &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: field.GetScalars().GetData()}},
+		}
+		typeutil.SetFieldDataValidData(wireFields[i], typeutil.GetFieldDataValidData(field))
 	}
 	return &internalpb.RetrieveResults{FieldsData: wireFields, AllRetrieveCount: result.allRetrieveCount}, nil
 }

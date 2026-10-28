@@ -294,6 +294,7 @@ func extractSegcoreResult(
 		}
 	}
 
+	projectAggregateValidity(req, merged.FieldsData)
 	return merged, nil
 }
 
@@ -355,6 +356,7 @@ func RunDelegatorQueryPipeline(
 		}
 	}
 
+	projectAggregateValidity(req, output.FieldsData)
 	return output, nil
 }
 
@@ -395,6 +397,7 @@ func emptySegcoreResult(req *querypb.QueryRequest, schema *schemapb.CollectionSc
 		if err != nil {
 			return nil, err
 		}
+		projectAggregateValidity(req, wire.FieldsData)
 		return &segcorepb.RetrieveResults{FieldsData: wire.FieldsData, AllRetrieveCount: wire.AllRetrieveCount}, nil
 	}
 
@@ -403,4 +406,17 @@ func emptySegcoreResult(req *querypb.QueryRequest, schema *schemapb.CollectionSc
 		return nil, err
 	}
 	return empty, nil
+}
+
+// projectAggregateValidity is the response boundary for materialized aggregate
+// columns. Run it after ORDER BY/limit, which may rebuild their validity bitmap.
+// Aggregation reducers return owned field envelopes with read-only scalar data;
+// projection only writes the envelope's legacy validity copy.
+func projectAggregateValidity(req *querypb.QueryRequest, fields []*schemapb.FieldData) {
+	if len(req.GetReq().GetGroupByFieldIds()) == 0 && len(req.GetReq().GetAggregates()) == 0 {
+		return
+	}
+	for _, field := range fields {
+		typeutil.ProjectFieldDataValidDataForLegacy(field)
+	}
 }

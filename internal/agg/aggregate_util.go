@@ -579,7 +579,6 @@ func ComputeAvgFromSumAndCount(sumFieldData *schemapb.FieldData, countFieldData 
 	}
 
 	countData := countFieldData.GetScalars().GetLongData().GetData()
-	rowCount := len(countData)
 
 	// Create result FieldData with Double type
 	result := &schemapb.FieldData{
@@ -587,42 +586,47 @@ func ComputeAvgFromSumAndCount(sumFieldData *schemapb.FieldData, countFieldData 
 		Field: &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_DoubleData{
-					DoubleData: &schemapb.DoubleArray{Data: make([]float64, 0, rowCount)},
+					DoubleData: &schemapb.DoubleArray{},
 				},
 			},
 		},
 	}
 
-	resultData := make([]float64, 0, rowCount)
-
-	// Compute avg = sum / count for each row
+	sumValid := typeutil.GetFieldDataValidData(sumFieldData)
+	countValid := typeutil.GetFieldDataValidData(countFieldData)
+	var values []float64
+	var validity []bool
+	var err error
 	switch sumType {
 	case schemapb.DataType_Int64:
-		sumData := sumFieldData.GetScalars().GetLongData().GetData()
-		if len(sumData) != rowCount {
-			return nil, merr.WrapErrParameterInvalidMsg("sum and count field data must have the same length, got sum:%d, count:%d", len(sumData), rowCount)
-		}
-		for i := 0; i < rowCount; i++ {
-			if countData[i] == 0 {
-				return nil, merr.WrapErrParameterInvalidMsg("division by zero: count is 0 at row %d", i)
-			}
-			resultData = append(resultData, float64(sumData[i])/float64(countData[i]))
-		}
+		values, validity, err = computeAvgValues(sumFieldData.GetScalars().GetLongData().GetData(), countData, sumValid, countValid)
 	case schemapb.DataType_Double:
-		sumData := sumFieldData.GetScalars().GetDoubleData().GetData()
-		if len(sumData) != rowCount {
-			return nil, merr.WrapErrParameterInvalidMsg("sum and count field data must have the same length, got sum:%d, count:%d", len(sumData), rowCount)
-		}
-		for i := 0; i < rowCount; i++ {
-			if countData[i] == 0 {
-				return nil, merr.WrapErrParameterInvalidMsg("division by zero: count is 0 at row %d", i)
-			}
-			resultData = append(resultData, sumData[i]/float64(countData[i]))
-		}
+		values, validity, err = computeAvgValues(sumFieldData.GetScalars().GetDoubleData().GetData(), countData, sumValid, countValid)
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("unsupported sum field type for avg computation: %s", sumType.String())
 	}
-
-	result.GetScalars().GetDoubleData().Data = resultData
+	if err != nil {
+		return nil, err
+	}
+	result.GetScalars().GetDoubleData().Data = values
+	typeutil.SetFieldDataValidData(result, validity)
 	return result, nil
+}
+
+func computeAvgValues[T int64 | float64](sums []T, counts []int64, sumValid, countValid []bool) ([]float64, []bool, error) {
+	if len(sums) != len(counts) {
+		return nil, nil, merr.WrapErrParameterInvalidMsg("sum and count field data must have the same length, got sum:%d, count:%d", len(sums), len(counts))
+	}
+	values := make([]float64, len(counts))
+	validity := make([]bool, len(counts))
+	for i, count := range counts {
+		// Match terminateAvg: a group with no contributors has no average.
+		// Keep its row and a dense placeholder; validity distinguishes it from 0.
+		if count == 0 || (len(sumValid) > 0 && !sumValid[i]) || (len(countValid) > 0 && !countValid[i]) {
+			continue
+		}
+		values[i] = float64(sums[i]) / float64(count)
+		validity[i] = true
+	}
+	return values, validity, nil
 }
