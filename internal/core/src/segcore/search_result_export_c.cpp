@@ -1147,7 +1147,8 @@ MaterializeOrderedFields(
                 continue;
             }
             const auto& field_data = it->second;
-            if (field_data->valid_data_size() == 0) {
+            const auto& valid_data = milvus::GetFieldDataRowValidData(*field_data);
+            if (valid_data.empty()) {
                 continue;
             }
             int64_t valid_index = 0;
@@ -1157,7 +1158,7 @@ MaterializeOrderedFields(
                 auto position = materialized.result_positions[row_index];
                 result_pairs[position].setValidDataOffset(field_id,
                                                           valid_index);
-                if (field_data->valid_data(row_index)) {
+                if (valid_data[row_index]) {
                     ++valid_index;
                 }
             }

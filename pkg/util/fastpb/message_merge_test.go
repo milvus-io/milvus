@@ -144,6 +144,26 @@ func TestRepeatedMessageOneofMerge(t *testing.T) {
 		assert.True(t, proto.Equal(got, want), "got=%v want=%v", got, want)
 	})
 
+	t.Run("IDs different variants remain last-wins", func(t *testing.T) {
+		for _, msgs := range [][]proto.Message{
+			{
+				&schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"first"}}}},
+				&schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{2}}}},
+			},
+			{
+				&schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
+				&schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"second"}}}},
+			},
+		} {
+			wire := concat(t, msgs...)
+			want := &schemapb.IDs{}
+			require.NoError(t, proto.Unmarshal(wire, want))
+			got := &schemapb.IDs{}
+			require.NoError(t, dec{}.ids(wire, got))
+			assert.True(t, proto.Equal(got, want), "got=%v want=%v", got, want)
+		}
+	})
+
 	t.Run("different variants remain last-wins", func(t *testing.T) {
 		wire := concat(t,
 			&schemapb.FieldData{Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{}}},

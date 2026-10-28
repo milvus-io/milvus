@@ -31,6 +31,88 @@ type GColumn[T any] interface {
 	AppendValue(v T)
 }
 
+func getFieldDataValidData(fd *schemapb.FieldData) []bool {
+	if legacy := fd.GetValidData(); len(legacy) > 0 {
+		return legacy
+	}
+	var current []bool
+	if scalars := fd.GetScalars(); scalars != nil {
+		current = scalars.GetValidData()
+	} else {
+		current = fd.GetVectors().GetValidData()
+	}
+	return current
+}
+
+func setFieldDataValidData(fd *schemapb.FieldData, validData []bool) {
+	if fd == nil {
+		return
+	}
+
+	if scalars := fd.GetScalars(); scalars != nil {
+		scalars.ValidData = validData
+	} else if vectors := fd.GetVectors(); vectors != nil {
+		vectors.ValidData = validData
+	} else {
+		return
+	}
+
+	fd.ValidData = nil
+}
+
+func validateAndNormalizeFieldDataValidData(fd *schemapb.FieldData) bool {
+	if !fieldDataValidDataConsistent(fd) {
+		return false
+	}
+	normalizeFieldDataValidData(fd)
+	return true
+}
+
+func fieldDataValidDataConsistent(fd *schemapb.FieldData) bool {
+	if fd == nil {
+		return true
+	}
+
+	legacy := fd.GetValidData()
+	var current []bool
+	if scalars := fd.GetScalars(); scalars != nil {
+		current = scalars.GetValidData()
+	} else {
+		current = fd.GetVectors().GetValidData()
+	}
+	if len(legacy) > 0 && len(current) > 0 && !slices.Equal(legacy, current) {
+		return false
+	}
+
+	for _, subField := range fd.GetStructArrays().GetFields() {
+		if !fieldDataValidDataConsistent(subField) {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeFieldDataValidData(fd *schemapb.FieldData) {
+	if fd == nil {
+		return
+	}
+	switch fd.Field.(type) {
+	case *schemapb.FieldData_Scalars, *schemapb.FieldData_Vectors:
+		if validData := getFieldDataValidData(fd); len(validData) > 0 {
+			setFieldDataValidData(fd, validData)
+		} else {
+			fd.ValidData = nil
+		}
+	case *schemapb.FieldData_StructArrays:
+		fd.ValidData = nil
+		for _, subField := range fd.GetStructArrays().GetFields() {
+			normalizeFieldDataValidData(subField)
+		}
+	default:
+		fd.ValidData = nil
+	}
+}
+
 var _ Column = (*genericColumnBase[any])(nil)
 
 // genericColumnBase implements `Column` interface
@@ -153,7 +235,7 @@ func (c *genericColumnBase[T]) FieldData() *schemapb.FieldData {
 	fd.FieldName = c.name
 	fd.Type = schemapb.DataType(c.fieldType)
 	if c.nullable {
-		fd.ValidData = c.validData
+		setFieldDataValidData(fd, c.validData)
 	}
 	return fd
 }

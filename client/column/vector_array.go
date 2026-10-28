@@ -241,7 +241,7 @@ func (c *columnVectorArrayBase[T]) FieldData() *schemapb.FieldData {
 		},
 	}
 	if c.nullable {
-		fd.ValidData = c.validData
+		setFieldDataValidData(fd, c.validData)
 	}
 	return fd
 }

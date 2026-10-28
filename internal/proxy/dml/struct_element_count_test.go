@@ -245,9 +245,9 @@ func TestCheckAndFlattenStructFieldDataAllowsNullableNullRowAndPresentRow(t *tes
 		},
 	}
 	field1 := structElementCountTestScalarArray("field1", []int32{1, 2})
-	field1.ValidData = []bool{false, true}
+	typeutil.SetFieldDataValidData(field1, []bool{false, true})
 	field2 := structElementCountTestVectorArray("field2", []float32{0.1, 0.2, 0.3, 0.4})
-	field2.ValidData = []bool{false, true}
+	typeutil.SetFieldDataValidData(field2, []bool{false, true})
 	insertMsg := structElementCountTestInsertMsg(structElementCountTestStructData(field1, field2))
 
 	err := checkAndFlattenStructFieldData(schema, insertMsg)

@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // makeNullableSchema builds a minimal CollectionSchema marking the given
@@ -91,12 +92,12 @@ func TestGetRowCountNullableCompactVectorWithoutIDsUsesLogicalRows(t *testing.T)
 				FieldName: "nullable_vec",
 				FieldId:   100,
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim: 2,
+					ValidData: []bool{true, false, true},
+					Dim:       2,
 					Data: &schemapb.VectorField_FloatVector{
 						FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}},
 					},
 				}},
-				ValidData: []bool{true, false, true},
 			},
 		},
 	}
@@ -116,9 +117,9 @@ func TestBuildMergedFieldData_ValidData(t *testing.T) {
 			{
 				Type: schemapb.DataType_Int64, FieldId: 100,
 				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10, 20}}},
+					ValidData: []bool{true, false}, // row 0 valid, row 1 null
+					Data:      &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10, 20}}},
 				}},
-				ValidData: []bool{true, false}, // row 0 valid, row 1 null
 			},
 		},
 	}
@@ -128,9 +129,9 @@ func TestBuildMergedFieldData_ValidData(t *testing.T) {
 			{
 				Type: schemapb.DataType_Int64, FieldId: 100,
 				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{30}}},
+					ValidData: []bool{true},
+					Data:      &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{30}}},
 				}},
-				ValidData: []bool{true},
 			},
 		},
 	}
@@ -147,7 +148,7 @@ func TestBuildMergedFieldData_ValidData(t *testing.T) {
 	require.Len(t, merged.FieldsData, 1)
 
 	fd := merged.FieldsData[0]
-	assert.Equal(t, []bool{true, false, true}, fd.ValidData)
+	assert.Equal(t, []bool{true, false, true}, typeutil.GetFieldDataValidData(fd))
 	assert.Equal(t, []int64{10, 20, 30}, fd.GetScalars().GetLongData().GetData())
 }
 
@@ -160,9 +161,9 @@ func TestBuildMergedFieldData_ValidData_MixedNullable(t *testing.T) {
 			{
 				Type: schemapb.DataType_Int64, FieldId: 100,
 				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10}}},
+					ValidData: []bool{false}, // null
+					Data:      &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10}}},
 				}},
-				ValidData: []bool{false}, // null
 			},
 		},
 	}
@@ -172,9 +173,9 @@ func TestBuildMergedFieldData_ValidData_MixedNullable(t *testing.T) {
 			{
 				Type: schemapb.DataType_Int64, FieldId: 100,
 				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{20}}},
+					ValidData: []bool{true}, // explicit valid (segcore always includes ValidData for nullable fields)
+					Data:      &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{20}}},
 				}},
-				ValidData: []bool{true}, // explicit valid (segcore always includes ValidData for nullable fields)
 			},
 		},
 	}
@@ -189,7 +190,7 @@ func TestBuildMergedFieldData_ValidData_MixedNullable(t *testing.T) {
 	require.NoError(t, err)
 
 	fd := merged.FieldsData[0]
-	assert.Equal(t, []bool{false, true}, fd.ValidData)
+	assert.Equal(t, []bool{false, true}, typeutil.GetFieldDataValidData(fd))
 }
 
 // =========================================================================
@@ -784,11 +785,11 @@ func TestCalcRowSize_NullableDenseVectorUsesLogicalValidity(t *testing.T) {
 		{
 			name: "float_vector",
 			field: &schemapb.FieldData{
-				Type:      schemapb.DataType_FloatVector,
-				ValidData: []bool{false, true},
+				Type: schemapb.DataType_FloatVector,
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim:  2,
-					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2}}},
+					ValidData: []bool{false, true},
+					Dim:       2,
+					Data:      &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2}}},
 				}},
 			},
 			wantSize: 8,
@@ -796,11 +797,11 @@ func TestCalcRowSize_NullableDenseVectorUsesLogicalValidity(t *testing.T) {
 		{
 			name: "binary_vector",
 			field: &schemapb.FieldData{
-				Type:      schemapb.DataType_BinaryVector,
-				ValidData: []bool{false, true},
+				Type: schemapb.DataType_BinaryVector,
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim:  16,
-					Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{0x01, 0x02}},
+					ValidData: []bool{false, true},
+					Dim:       16,
+					Data:      &schemapb.VectorField_BinaryVector{BinaryVector: []byte{0x01, 0x02}},
 				}},
 			},
 			wantSize: 2,
@@ -808,11 +809,11 @@ func TestCalcRowSize_NullableDenseVectorUsesLogicalValidity(t *testing.T) {
 		{
 			name: "float16_vector",
 			field: &schemapb.FieldData{
-				Type:      schemapb.DataType_Float16Vector,
-				ValidData: []bool{false, true},
+				Type: schemapb.DataType_Float16Vector,
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim:  2,
-					Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{0x01, 0x02, 0x03, 0x04}},
+					ValidData: []bool{false, true},
+					Dim:       2,
+					Data:      &schemapb.VectorField_Float16Vector{Float16Vector: []byte{0x01, 0x02, 0x03, 0x04}},
 				}},
 			},
 			wantSize: 4,
@@ -820,11 +821,11 @@ func TestCalcRowSize_NullableDenseVectorUsesLogicalValidity(t *testing.T) {
 		{
 			name: "bfloat16_vector",
 			field: &schemapb.FieldData{
-				Type:      schemapb.DataType_BFloat16Vector,
-				ValidData: []bool{false, true},
+				Type: schemapb.DataType_BFloat16Vector,
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim:  2,
-					Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{0x01, 0x02, 0x03, 0x04}},
+					ValidData: []bool{false, true},
+					Dim:       2,
+					Data:      &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{0x01, 0x02, 0x03, 0x04}},
 				}},
 			},
 			wantSize: 4,
@@ -832,11 +833,11 @@ func TestCalcRowSize_NullableDenseVectorUsesLogicalValidity(t *testing.T) {
 		{
 			name: "int8_vector",
 			field: &schemapb.FieldData{
-				Type:      schemapb.DataType_Int8Vector,
-				ValidData: []bool{false, true},
+				Type: schemapb.DataType_Int8Vector,
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim:  4,
-					Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{0x01, 0x02, 0x03, 0x04}},
+					ValidData: []bool{false, true},
+					Dim:       4,
+					Data:      &schemapb.VectorField_Int8Vector{Int8Vector: []byte{0x01, 0x02, 0x03, 0x04}},
 				}},
 			},
 			wantSize: 4,
@@ -887,10 +888,10 @@ func TestCalcRowSize_NullableSparseVectorUsesCompactMapping(t *testing.T) {
 			r := &internalpb.RetrieveResults{
 				FieldsData: []*schemapb.FieldData{
 					{
-						Type:      schemapb.DataType_SparseFloatVector,
-						ValidData: tt.validData,
+						Type: schemapb.DataType_SparseFloatVector,
 						Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-							Dim: 4,
+							ValidData: tt.validData,
+							Dim:       4,
 							Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{
 								Dim:      4,
 								Contents: tt.contents,
@@ -1110,9 +1111,9 @@ func TestBuildMergedVectorField_NullableStructVectorArray_AllNull(t *testing.T) 
 				Type:    schemapb.DataType_ArrayOfVector,
 				FieldId: fieldID,
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim: dim,
+					ValidData: []bool{false},
+					Dim:       dim,
 				}},
-				ValidData: []bool{false},
 			},
 		},
 	}
@@ -1139,7 +1140,7 @@ func TestBuildMergedVectorField_NullableStructVectorArray_AllNull(t *testing.T) 
 
 	merged, err := buildMergedRetrieveResults([]*internalpb.RetrieveResults{result}, []rowRef{{resultIdx: 0, rowIdx: 0}}, schema)
 	require.NoError(t, err)
-	assert.Equal(t, []bool{false}, merged.FieldsData[0].GetValidData())
+	assert.Equal(t, []bool{false}, typeutil.GetFieldDataValidData(merged.FieldsData[0]))
 	va := merged.FieldsData[0].GetVectors().GetVectorArray()
 	require.NotNil(t, va)
 	assert.Equal(t, dim, va.GetDim())
@@ -1158,13 +1159,13 @@ func TestBuildMergedVectorField_NullableStructVectorArray_AllNullWithEmptyVector
 				Type:    schemapb.DataType_ArrayOfVector,
 				FieldId: fieldID,
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim: dim,
+					ValidData: []bool{false, false},
+					Dim:       dim,
 					Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
 						Dim:         dim,
 						ElementType: schemapb.DataType_FloatVector,
 					}},
 				}},
-				ValidData: []bool{false, false},
 			},
 		},
 	}
@@ -1177,7 +1178,7 @@ func TestBuildMergedVectorField_NullableStructVectorArray_AllNullWithEmptyVector
 		schema,
 	)
 	require.NoError(t, err)
-	assert.Equal(t, []bool{false}, merged.FieldsData[0].GetValidData())
+	assert.Equal(t, []bool{false}, typeutil.GetFieldDataValidData(merged.FieldsData[0]))
 	va := merged.FieldsData[0].GetVectors().GetVectorArray()
 	require.NotNil(t, va)
 	assert.Equal(t, dim, va.GetDim())
@@ -1224,14 +1225,14 @@ func TestBuildMergedVectorField_NullableArrayOfVector_RejectsValidDataRowOutOfRa
 				Type:    schemapb.DataType_ArrayOfVector,
 				FieldId: fieldID,
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim: dim,
+					ValidData: []bool{true},
+					Dim:       dim,
 					Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
 						Dim:         dim,
 						Data:        []*schemapb.VectorField{{Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1.0, 2.0}}}}, {Dim: dim, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{3.0, 4.0}}}}},
 						ElementType: schemapb.DataType_FloatVector,
 					}},
 				}},
-				ValidData: []bool{true},
 			},
 		},
 	}
@@ -1256,9 +1257,9 @@ func TestBuildMergedVectorField_NullableArrayOfVectorMixedAllNullSourceKeepsRowD
 				Type:    schemapb.DataType_ArrayOfVector,
 				FieldId: fieldID,
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim: dim,
+					ValidData: []bool{false},
+					Dim:       dim,
 				}},
-				ValidData: []bool{false},
 			},
 		},
 	}
@@ -1269,14 +1270,14 @@ func TestBuildMergedVectorField_NullableArrayOfVectorMixedAllNullSourceKeepsRowD
 				Type:    schemapb.DataType_ArrayOfVector,
 				FieldId: fieldID,
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim: dim,
+					ValidData: []bool{true},
+					Dim:       dim,
 					Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
 						Dim:         dim,
 						Data:        []*schemapb.VectorField{v1},
 						ElementType: schemapb.DataType_FloatVector,
 					}},
 				}},
-				ValidData: []bool{true},
 			},
 		},
 	}
@@ -1289,7 +1290,7 @@ func TestBuildMergedVectorField_NullableArrayOfVectorMixedAllNullSourceKeepsRowD
 		schema,
 	)
 	require.NoError(t, err)
-	assert.Equal(t, []bool{false, true}, merged.FieldsData[0].GetValidData())
+	assert.Equal(t, []bool{false, true}, typeutil.GetFieldDataValidData(merged.FieldsData[0]))
 	va := merged.FieldsData[0].GetVectors().GetVectorArray()
 	require.Len(t, va.GetData(), 2)
 	assert.Empty(t, va.GetData()[0].GetFloatVector().GetData())
@@ -1310,14 +1311,14 @@ func TestBuildMergedVectorField_NullableArrayOfVectorUsesLogicalRowIndex(t *test
 				Type:    schemapb.DataType_ArrayOfVector,
 				FieldId: fieldID,
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim: dim,
+					ValidData: []bool{true, false, true, false},
+					Dim:       dim,
 					Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{
 						Dim:         dim,
 						Data:        []*schemapb.VectorField{v1, empty, v3, empty},
 						ElementType: schemapb.DataType_FloatVector,
 					}},
 				}},
-				ValidData: []bool{true, false, true, false},
 			},
 		},
 	}
@@ -1330,7 +1331,7 @@ func TestBuildMergedVectorField_NullableArrayOfVectorUsesLogicalRowIndex(t *test
 		schema,
 	)
 	require.NoError(t, err)
-	assert.Equal(t, []bool{true, false, true}, merged.FieldsData[0].GetValidData())
+	assert.Equal(t, []bool{true, false, true}, typeutil.GetFieldDataValidData(merged.FieldsData[0]))
 
 	va := merged.FieldsData[0].GetVectors().GetVectorArray()
 	require.Len(t, va.GetData(), 3)
@@ -1580,10 +1581,10 @@ func TestBuildCompactIndices_NullableVector(t *testing.T) {
 			{
 				Type: schemapb.DataType_FloatVector, FieldId: 100,
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim:  2,
-					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}},
+					ValidData: []bool{true, false, true}, // row0=valid(idx0), row1=null, row2=valid(idx1)
+					Dim:       2,
+					Data:      &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}},
 				}},
-				ValidData: []bool{true, false, true}, // row0=valid(idx0), row1=null, row2=valid(idx1)
 			},
 		},
 	}
@@ -1634,7 +1635,9 @@ func TestBuildCompactIndices_FailFast_LengthMismatch(t *testing.T) {
 		FieldsData: []*schemapb.FieldData{
 			{
 				Type: schemapb.DataType_FloatVector, FieldId: 100,
-				ValidData: []bool{true, false}, // 2 entries but 3 rows → mismatch
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{ValidData: []bool{true, false}}, // 2 entries but 3 rows -> mismatch
+				},
 			},
 		},
 	}
@@ -1716,11 +1719,11 @@ func TestBuildMergedVectorField_SparseVector_TruncatedContents(t *testing.T) {
 		FieldsData: []*schemapb.FieldData{{
 			FieldId: 100, Type: schemapb.DataType_SparseFloatVector,
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				ValidData: []bool{true, true}, // claims 2 valid rows
 				Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{
 					Contents: [][]byte{makeTestSparseVec(1, 0.5)}, // only 1 content
 				}},
 			}},
-			ValidData: []bool{true, true}, // claims 2 valid rows
 		}},
 	}
 	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 0}, {resultIdx: 0, rowIdx: 1}}
@@ -1739,10 +1742,10 @@ func TestBuildMergedVectorField_NullableCompact_BinaryVector(t *testing.T) {
 		FieldsData: []*schemapb.FieldData{{
 			FieldId: 100, Type: schemapb.DataType_BinaryVector,
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-				Dim:  8,
-				Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{0xAA, 0xBB}}, // 2 compact rows
+				ValidData: []bool{true, false, true},
+				Dim:       8,
+				Data:      &schemapb.VectorField_BinaryVector{BinaryVector: []byte{0xAA, 0xBB}}, // 2 compact rows
 			}},
-			ValidData: []bool{true, false, true},
 		}},
 	}
 	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 2}, {resultIdx: 0, rowIdx: 0}, {resultIdx: 0, rowIdx: 1}}
@@ -1753,7 +1756,7 @@ func TestBuildMergedVectorField_NullableCompact_BinaryVector(t *testing.T) {
 
 	// row2 → compact idx 1 → 0xBB, row0 → compact idx 0 → 0xAA, row1 → null (skipped)
 	assert.Equal(t, []byte{0xBB, 0xAA}, merged.FieldsData[0].GetVectors().GetBinaryVector())
-	assert.Equal(t, []bool{true, true, false}, merged.FieldsData[0].ValidData)
+	assert.Equal(t, []bool{true, true, false}, typeutil.GetFieldDataValidData(merged.FieldsData[0]))
 }
 
 func TestBuildMergedVectorField_NullableCompact_Float16Vector(t *testing.T) {
@@ -1764,10 +1767,10 @@ func TestBuildMergedVectorField_NullableCompact_Float16Vector(t *testing.T) {
 		FieldsData: []*schemapb.FieldData{{
 			FieldId: 100, Type: schemapb.DataType_Float16Vector,
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-				Dim:  1,
-				Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{0x01, 0x02}}, // 1 compact row
+				ValidData: []bool{false, true},
+				Dim:       1,
+				Data:      &schemapb.VectorField_Float16Vector{Float16Vector: []byte{0x01, 0x02}}, // 1 compact row
 			}},
-			ValidData: []bool{false, true},
 		}},
 	}
 	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 1}, {resultIdx: 0, rowIdx: 0}}
@@ -1778,7 +1781,7 @@ func TestBuildMergedVectorField_NullableCompact_Float16Vector(t *testing.T) {
 
 	// row1 → compact idx 0 → [0x01, 0x02], row0 → null (skipped)
 	assert.Equal(t, []byte{0x01, 0x02}, merged.FieldsData[0].GetVectors().GetFloat16Vector())
-	assert.Equal(t, []bool{true, false}, merged.FieldsData[0].ValidData)
+	assert.Equal(t, []bool{true, false}, typeutil.GetFieldDataValidData(merged.FieldsData[0]))
 }
 
 func TestBuildMergedVectorField_Float16Vector_TruncatedData(t *testing.T) {
@@ -1811,10 +1814,10 @@ func TestBuildMergedVectorField_NullableCompact_BFloat16Vector(t *testing.T) {
 		FieldsData: []*schemapb.FieldData{{
 			FieldId: 100, Type: schemapb.DataType_BFloat16Vector,
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-				Dim:  1,
-				Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{0xAA, 0xBB, 0xCC, 0xDD}},
+				ValidData: []bool{true, false, true},
+				Dim:       1,
+				Data:      &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{0xAA, 0xBB, 0xCC, 0xDD}},
 			}},
-			ValidData: []bool{true, false, true},
 		}},
 	}
 	// Select row1(null), row2(valid), row0(valid)
@@ -1826,7 +1829,7 @@ func TestBuildMergedVectorField_NullableCompact_BFloat16Vector(t *testing.T) {
 
 	// row1 → null (skipped), row2 → compact idx 1 → [0xCC,0xDD], row0 → compact idx 0 → [0xAA,0xBB]
 	assert.Equal(t, []byte{0xCC, 0xDD, 0xAA, 0xBB}, merged.FieldsData[0].GetVectors().GetBfloat16Vector())
-	assert.Equal(t, []bool{false, true, true}, merged.FieldsData[0].ValidData)
+	assert.Equal(t, []bool{false, true, true}, typeutil.GetFieldDataValidData(merged.FieldsData[0]))
 }
 
 func TestBuildMergedVectorField_BFloat16Vector_TruncatedData(t *testing.T) {
@@ -1859,10 +1862,10 @@ func TestBuildMergedVectorField_NullableCompact_Int8Vector(t *testing.T) {
 		FieldsData: []*schemapb.FieldData{{
 			FieldId: 100, Type: schemapb.DataType_Int8Vector,
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-				Dim:  2,
-				Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{0x11, 0x22}},
+				ValidData: []bool{false, true},
+				Dim:       2,
+				Data:      &schemapb.VectorField_Int8Vector{Int8Vector: []byte{0x11, 0x22}},
 			}},
-			ValidData: []bool{false, true},
 		}},
 	}
 	selectedRows := []rowRef{{resultIdx: 0, rowIdx: 0}, {resultIdx: 0, rowIdx: 1}}
@@ -1873,7 +1876,7 @@ func TestBuildMergedVectorField_NullableCompact_Int8Vector(t *testing.T) {
 
 	// row0 → null (skipped), row1 → compact idx 0 → [0x11,0x22]
 	assert.Equal(t, []byte{0x11, 0x22}, merged.FieldsData[0].GetVectors().GetInt8Vector())
-	assert.Equal(t, []bool{false, true}, merged.FieldsData[0].ValidData)
+	assert.Equal(t, []bool{false, true}, typeutil.GetFieldDataValidData(merged.FieldsData[0]))
 }
 
 func TestBuildMergedVectorField_Int8Vector_TruncatedData(t *testing.T) {
@@ -2238,9 +2241,9 @@ func TestGetFieldValue(t *testing.T) {
 			name: "nullable_null",
 			fd: &schemapb.FieldData{
 				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{99}}},
+					ValidData: []bool{false},
+					Data:      &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{99}}},
 				}},
-				ValidData: []bool{false},
 			},
 			rowIdx: 0, expected: nil, isNull: true,
 		},
@@ -2743,24 +2746,24 @@ func TestSliceFieldData_ValidData(t *testing.T) {
 	fd := &schemapb.FieldData{
 		Type: schemapb.DataType_Int64, FieldId: 100,
 		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
-			Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10, 20, 30}}},
+			ValidData: []bool{true, false, true},
+			Data:      &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10, 20, 30}}},
 		}},
-		ValidData: []bool{true, false, true},
 	}
 	sliced := requireSliceFieldData(t, fd, []int{2, 0})
-	assert.Equal(t, []bool{true, true}, sliced.GetValidData())
+	assert.Equal(t, []bool{true, true}, typeutil.GetFieldDataValidData(sliced))
 }
 
 func TestRangeSliceFieldData_ValidData(t *testing.T) {
 	fd := &schemapb.FieldData{
 		Type: schemapb.DataType_Int64, FieldId: 100,
 		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
-			Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10, 20, 30}}},
+			ValidData: []bool{true, false, true},
+			Data:      &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10, 20, 30}}},
 		}},
-		ValidData: []bool{true, false, true},
 	}
 	sliced := requireRangeSliceFieldData(t, fd, 0, 2)
-	assert.Equal(t, []bool{true, false}, sliced.GetValidData())
+	assert.Equal(t, []bool{true, false}, typeutil.GetFieldDataValidData(sliced))
 }
 
 // =========================================================================
@@ -3120,10 +3123,10 @@ func TestBuildMergedVectorField_NullableCompact_FloatVector(t *testing.T) {
 			{
 				Type: schemapb.DataType_FloatVector, FieldId: 100,
 				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-					Dim:  2,
-					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}},
+					ValidData: []bool{true, false, true},
+					Dim:       2,
+					Data:      &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}},
 				}},
-				ValidData: []bool{true, false, true},
 			},
 		},
 	}
@@ -3133,7 +3136,7 @@ func TestBuildMergedVectorField_NullableCompact_FloatVector(t *testing.T) {
 	require.NoError(t, err)
 	// row2 → compact idx 1 → [3,4], row1 → null (skipped), row0 → compact idx 0 → [1,2]
 	assert.Equal(t, []float32{3, 4, 1, 2}, merged.FieldsData[0].GetVectors().GetFloatVector().GetData())
-	assert.Equal(t, []bool{true, false, true}, merged.FieldsData[0].ValidData)
+	assert.Equal(t, []bool{true, false, true}, typeutil.GetFieldDataValidData(merged.FieldsData[0]))
 }
 
 // =========================================================================
@@ -3243,13 +3246,13 @@ func TestBuildMergedVectorField_NullableSparse_RejectsEmptyValidData(t *testing.
 		FieldsData: []*schemapb.FieldData{{
 			FieldId: 100,
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				ValidData: []bool{true},
 				Data: &schemapb.VectorField_SparseFloatVector{
 					SparseFloatVector: &schemapb.SparseFloatArray{
 						Contents: [][]byte{makeTestSparseVec(1, 0.5)},
 					},
 				},
 			}},
-			ValidData: []bool{true},
 		}},
 	}
 
@@ -3261,11 +3264,11 @@ func TestBuildMergedVectorField_NullableSparse_RejectsEmptyValidData(t *testing.
 		FieldsData: []*schemapb.FieldData{{
 			FieldId: 100,
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				ValidData: nil,
 				Data: &schemapb.VectorField_SparseFloatVector{
 					SparseFloatVector: &schemapb.SparseFloatArray{Contents: nil},
 				},
 			}},
-			ValidData: nil,
 		}},
 	}
 
@@ -3287,13 +3290,13 @@ func TestBuildMergedVectorField_NullableSparse_RejectsMultipleRowsWithEmptyValid
 		FieldsData: []*schemapb.FieldData{{
 			FieldId: 100,
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				ValidData: []bool{true},
 				Data: &schemapb.VectorField_SparseFloatVector{
 					SparseFloatVector: &schemapb.SparseFloatArray{
 						Contents: [][]byte{makeTestSparseVec(1, 0.1)},
 					},
 				},
 			}},
-			ValidData: []bool{true},
 		}},
 	}
 
@@ -3302,11 +3305,11 @@ func TestBuildMergedVectorField_NullableSparse_RejectsMultipleRowsWithEmptyValid
 		FieldsData: []*schemapb.FieldData{{
 			FieldId: 100,
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				ValidData: nil,
 				Data: &schemapb.VectorField_SparseFloatVector{
 					SparseFloatVector: &schemapb.SparseFloatArray{Contents: nil},
 				},
 			}},
-			ValidData: nil,
 		}},
 	}
 
@@ -3332,11 +3335,11 @@ func TestBuildMergedVectorField_NullableSparseVector_AllNullWithValidData(t *tes
 		FieldsData: []*schemapb.FieldData{{
 			FieldId: 100,
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				ValidData: []bool{false, false},
 				Data: &schemapb.VectorField_SparseFloatVector{
 					SparseFloatVector: &schemapb.SparseFloatArray{Contents: nil},
 				},
 			}},
-			ValidData: []bool{false, false},
 		}},
 	}
 	results := []*internalpb.RetrieveResults{r}
@@ -3344,7 +3347,7 @@ func TestBuildMergedVectorField_NullableSparseVector_AllNullWithValidData(t *tes
 
 	merged, err := buildMergedRetrieveResults(results, selectedRows, sparseSchema)
 	require.NoError(t, err)
-	assert.Equal(t, []bool{false, false}, merged.FieldsData[0].ValidData)
+	assert.Equal(t, []bool{false, false}, typeutil.GetFieldDataValidData(merged.FieldsData[0]))
 	assert.Empty(t, merged.FieldsData[0].GetVectors().GetSparseFloatVector().GetContents())
 }
 
@@ -3358,13 +3361,13 @@ func TestBuildMergedVectorField_NullableSparseVector_Mixed(t *testing.T) {
 		FieldsData: []*schemapb.FieldData{{
 			FieldId: 100,
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				ValidData: []bool{true, false, true},
 				Data: &schemapb.VectorField_SparseFloatVector{
 					SparseFloatVector: &schemapb.SparseFloatArray{
 						Contents: [][]byte{makeTestSparseVec(1, 0.1), makeTestSparseVec(3, 0.3)},
 					},
 				},
 			}},
-			ValidData: []bool{true, false, true},
 		}},
 	}
 	results := []*internalpb.RetrieveResults{r}
@@ -3373,7 +3376,7 @@ func TestBuildMergedVectorField_NullableSparseVector_Mixed(t *testing.T) {
 
 	merged, err := buildMergedRetrieveResults(results, selectedRows, sparseSchema)
 	require.NoError(t, err)
-	assert.Equal(t, []bool{true, false}, merged.FieldsData[0].ValidData)
+	assert.Equal(t, []bool{true, false}, typeutil.GetFieldDataValidData(merged.FieldsData[0]))
 	// Only 1 non-null row in output
 	assert.Len(t, merged.FieldsData[0].GetVectors().GetSparseFloatVector().GetContents(), 1)
 }
@@ -3393,13 +3396,13 @@ func TestBuildMergedVectorField_NullableVector_RejectsEmptyValidData(t *testing.
 		FieldsData: []*schemapb.FieldData{{
 			FieldId: 100,
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				ValidData: []bool{true},
 				Data: &schemapb.VectorField_SparseFloatVector{
 					SparseFloatVector: &schemapb.SparseFloatArray{
 						Contents: [][]byte{makeTestSparseVec(1, 0.5)},
 					},
 				},
 			}},
-			ValidData: []bool{true},
 		}},
 	}
 	// rB: ValidData absent → contract violation for nullable vector
@@ -3408,11 +3411,11 @@ func TestBuildMergedVectorField_NullableVector_RejectsEmptyValidData(t *testing.
 		FieldsData: []*schemapb.FieldData{{
 			FieldId: 100,
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				ValidData: nil,
 				Data: &schemapb.VectorField_SparseFloatVector{
 					SparseFloatVector: &schemapb.SparseFloatArray{Contents: nil},
 				},
 			}},
-			ValidData: nil,
 		}},
 	}
 

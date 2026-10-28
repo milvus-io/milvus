@@ -51,6 +51,7 @@
 #include "common/Schema.h"
 #include "common/Span.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "common/VectorArray.h"
 #include "glog/logging.h"
 #include "index/Index.h"
@@ -247,6 +248,7 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
                     int64_t num_rows,
                     int32_t* array_lengths) {
     auto data_type = field_meta.get_data_type();
+    const auto& valid_data = GetFieldDataRowValidData(field_data);
     if (data_type == DataType::VECTOR_ARRAY) {
         const auto& vector_array = field_data.vectors().vector_array();
         int64_t dim = field_meta.get_dim();
@@ -254,15 +256,15 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
         bool compact_nullable = false;
         if (field_meta.is_nullable()) {
             int64_t valid_count = 0;
-            if (field_data.valid_data_size() == num_rows) {
+            if (valid_data.size() == num_rows) {
                 for (int64_t i = 0; i < num_rows; ++i) {
-                    if (field_data.valid_data(i)) {
+                    if (valid_data[i]) {
                         ++valid_count;
                     }
                 }
             }
             auto dense_aligned = vector_array.data_size() == num_rows;
-            compact_nullable = field_data.valid_data_size() == num_rows &&
+            compact_nullable = valid_data.size() == num_rows &&
                                vector_array.data_size() == valid_count;
             AssertInfo(
                 dense_aligned || compact_nullable,
@@ -272,7 +274,7 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
                 "got data_size {}, valid_data_size {}, num_rows {}, "
                 "valid_count {}",
                 vector_array.data_size(),
-                field_data.valid_data_size(),
+                valid_data.size(),
                 num_rows,
                 valid_count);
             compact_nullable = compact_nullable && !dense_aligned;
@@ -284,11 +286,10 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
                        num_rows);
         }
         int64_t physical_row = 0;
-        auto has_valid_data = field_data.valid_data_size() == num_rows;
+        auto has_valid_data = valid_data.size() == num_rows;
 
         for (int i = 0; i < num_rows; ++i) {
-            if (field_meta.is_nullable() && has_valid_data &&
-                !field_data.valid_data(i)) {
+            if (field_meta.is_nullable() && has_valid_data && !valid_data[i]) {
                 array_lengths[i] = 0;
                 continue;
             }
@@ -341,8 +342,7 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
     }
 
     // Handle nullable fields
-    if (field_meta.is_nullable() && field_data.valid_data_size() > 0) {
-        const auto& valid_data = field_data.valid_data();
+    if (field_meta.is_nullable() && !valid_data.empty()) {
         for (int i = 0; i < num_rows; ++i) {
             if (!valid_data[i]) {
                 array_lengths[i] = 0;  // null → empty array
@@ -369,8 +369,8 @@ ValidateGeometryInsertDataShape(const proto::schema::FieldData& field_data,
 
     if (field_meta.is_nullable()) {
         // Validity is one entry per logical row, resolved the same way the
-        // ingest path reads it (FieldData.valid_data on 3.0).
-        const auto valid_size = field_data.valid_data_size();
+        // ingest path reads it (GetFieldDataRowValidData).
+        const auto valid_size = GetFieldDataRowValidData(field_data).size();
         AssertInfo(valid_size == num_rows,
                    "nullable geometry field {} valid_data size {} must match "
                    "num_rows {}",
@@ -916,13 +916,10 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                     .string_data()
                     .data()
                     .end());
-            FixedVector<bool> texts_valid_data(
-                insert_record_proto->fields_data(data_offset)
-                    .valid_data()
-                    .begin(),
-                insert_record_proto->fields_data(data_offset)
-                    .valid_data()
-                    .end());
+            const auto& row_valid_data = GetFieldDataRowValidData(
+                insert_record_proto->fields_data(data_offset));
+            FixedVector<bool> texts_valid_data(row_valid_data.begin(),
+                                               row_valid_data.end());
             AddTexts(field_id,
                      texts.data(),
                      texts_valid_data.data(),
@@ -1840,7 +1837,7 @@ SegmentGrowingImpl::bulk_subscript(
     auto result = CreateEmptyScalarDataArray(count, field_meta);
     if (field_meta.is_nullable()) {
         auto valid_data_ptr = insert_record_.get_valid_data(field_id);
-        auto res = result->mutable_valid_data()->mutable_data();
+        auto res = MutableFieldDataRowValidData(result.get())->mutable_data();
         for (int64_t i = 0; i < count; ++i) {
             auto offset = seg_offsets[i];
             res[i] = valid_data_ptr->is_valid(offset);
@@ -1963,7 +1960,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
     auto result = CreateEmptyScalarDataArray(count, field_meta);
     if (field_meta.is_nullable()) {
         auto valid_data_ptr = insert_record_.get_valid_data(field_id);
-        auto res = result->mutable_valid_data()->mutable_data();
+        auto res = MutableFieldDataRowValidData(result.get())->mutable_data();
         for (int64_t i = 0; i < count; ++i) {
             auto offset = seg_offsets[i];
             res[i] = valid_data_ptr->is_valid(offset);
@@ -3418,7 +3415,7 @@ SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
 
         // Process geometry data from DataArray
         const auto& geometry_data = data_array->scalars().geometry_data();
-        const auto& valid_data = data_array->valid_data();
+        const auto& valid_data = GetFieldDataRowValidData(*data_array);
 
         AssertInfo(geometry_data.data_size() == num_rows,
                    "geometry payload size {} must match cache append size {}",

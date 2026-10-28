@@ -968,8 +968,8 @@ TEST_P(TestLazyManifest, LazyManifestNullableVectorMaterializesOnRetrieve) {
         EXPECT_FLOAT_EQ(actual_values.Get(i), expected_values.Get(i));
     }
 
-    const auto& actual_valid = actual_field.valid_data();
-    const auto& expected_valid = expected_field->valid_data();
+    const auto& actual_valid = GetFieldDataRowValidData(actual_field);
+    const auto& expected_valid = GetFieldDataRowValidData(*expected_field);
     ASSERT_EQ(actual_valid.size(), kNumRows);
     ASSERT_EQ(actual_valid.size(), expected_valid.size());
     for (int64_t i = 0; i < kNumRows; ++i) {
@@ -1475,7 +1475,8 @@ TEST_P(TestLazyManifest, LazyManifestRetrieveSizeAndValuesAreCorrect) {
         expected_data.get_col<std::string>(fields.at("string1"));
     const auto expected_valid =
         expected_data.get_col_valid(fields.at("string1"));
-    const auto& actual_valid = results->fields_data(0).valid_data();
+    const auto& actual_valid =
+        GetFieldDataRowValidData(results->fields_data(0));
     ASSERT_EQ(actual_valid.size(), kNumRows);
     for (int64_t i = 0; i < kNumRows; ++i) {
         EXPECT_EQ(actual_valid[i], expected_valid[i]) << "row " << i;

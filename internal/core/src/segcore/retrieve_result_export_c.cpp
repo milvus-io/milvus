@@ -346,7 +346,8 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                     if (it == materialized.fields.end()) {
                         continue;
                     }
-                    const auto& valid_data = it->second->valid_data();
+                    const auto& valid_data =
+                        milvus::GetFieldDataRowValidData(*it->second);
                     if (valid_data.empty()) {
                         continue;
                     }

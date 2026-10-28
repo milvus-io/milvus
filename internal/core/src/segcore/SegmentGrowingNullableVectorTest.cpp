@@ -152,13 +152,17 @@ class GrowingNullableVectorTest : public ::testing::Test {
                 continue;
             }
             if (nulls_at_end) {
-                std::reverse(field.mutable_valid_data()->begin(),
-                             field.mutable_valid_data()->end());
+                auto reversed_valid_data = GetFieldDataRowValidData(field);
+                std::reverse(reversed_valid_data.begin(),
+                             reversed_valid_data.end());
+                MutableFieldDataRowValidData(&field)->Swap(
+                    &reversed_valid_data);
             }
+            const auto& valid_data = GetFieldDataRowValidData(field);
             auto rows = VectorRows(field, kDim);
             size_t physical = 0;
             for (int64_t i = 0; i < count; ++i) {
-                if (field.valid_data_size() == 0 || field.valid_data(i)) {
+                if (valid_data.empty() || valid_data[i]) {
                     expected_.emplace_back(rows.at(physical++));
                 } else {
                     expected_.emplace_back(std::nullopt);
@@ -181,14 +185,15 @@ class GrowingNullableVectorTest : public ::testing::Test {
             nullptr, vec_, offsets.data(), offsets.size());
         auto rows = VectorRows(*output, kDim);
         const bool nullable = (*schema_)[vec_].is_nullable();
-        ASSERT_EQ(output->valid_data_size(), nullable ? offsets.size() : 0);
+        const auto& valid_data = GetFieldDataRowValidData(*output);
+        ASSERT_EQ(valid_data.size(), nullable ? offsets.size() : 0);
         size_t physical = 0;
         for (size_t i = 0; i < offsets.size(); ++i) {
             const auto offset = offsets[i];
             const bool valid = offset >= 0 && offset < expected_.size() &&
                                expected_[offset].has_value();
             if (nullable) {
-                EXPECT_EQ(output->valid_data(i), valid) << offset;
+                EXPECT_EQ(valid_data[i], valid) << offset;
             }
             if (valid) {
                 ASSERT_LT(physical, rows.size());

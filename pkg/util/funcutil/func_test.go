@@ -491,9 +491,9 @@ func TestValidateNullableVectorFieldDataCompact(t *testing.T) {
 		fieldData := &schemapb.FieldData{
 			FieldName: "vec",
 			Type:      schemapb.DataType_FloatVector,
-			ValidData: []bool{true, false, true},
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-				Dim: 2,
+				ValidData: []bool{true, false, true},
+				Dim:       2,
 				Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{
 					Data: []float32{1, 2, 3, 4},
 				}},
@@ -506,9 +506,9 @@ func TestValidateNullableVectorFieldDataCompact(t *testing.T) {
 		fieldData := &schemapb.FieldData{
 			FieldName: "vec",
 			Type:      schemapb.DataType_FloatVector,
-			ValidData: []bool{true, false, true},
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-				Dim: 2,
+				ValidData: []bool{true, false, true},
+				Dim:       2,
 				Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{
 					Data: []float32{1, 2, 3, 4, 5, 6},
 				}},
@@ -523,10 +523,10 @@ func TestValidateNullableVectorFieldDataCompact(t *testing.T) {
 		fieldData := &schemapb.FieldData{
 			FieldName: "vec",
 			Type:      schemapb.DataType_Float16Vector,
-			ValidData: []bool{true, false},
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-				Dim:  2,
-				Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2}},
+				ValidData: []bool{true, false},
+				Dim:       2,
+				Data:      &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2}},
 			}},
 		}
 		err := ValidateNullableVectorFieldDataCompact(fieldData, 2, true)
@@ -538,8 +538,8 @@ func TestValidateNullableVectorFieldDataCompact(t *testing.T) {
 		fieldData := &schemapb.FieldData{
 			FieldName: "vec",
 			Type:      schemapb.DataType_SparseFloatVector,
-			ValidData: []bool{false, true, true},
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				ValidData: []bool{false, true, true},
 				Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{
 					Contents: [][]byte{
 						typeutil.CreateSparseFloatRow([]uint32{1}, []float32{1}),
@@ -572,9 +572,9 @@ func TestValidateNullableVectorFieldDataCompact(t *testing.T) {
 		fieldData := &schemapb.FieldData{
 			FieldName: "vec",
 			Type:      schemapb.DataType_BinaryVector,
-			ValidData: []bool{true, false},
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
-				Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{0xff}},
+				ValidData: []bool{true, false},
+				Data:      &schemapb.VectorField_BinaryVector{BinaryVector: []byte{0xff}},
 			}},
 		}
 		require.NoError(t, ValidateNullableVectorFieldDataCompactWithDim(fieldData, 2, true, 8))

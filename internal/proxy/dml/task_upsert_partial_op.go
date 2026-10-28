@@ -430,7 +430,7 @@ func validatePathReplaceStructChildRows(fd *schemapb.FieldData, schema *schemapb
 }
 
 func validateNonNullOperandRows(fd *schemapb.FieldData, rowCount int) error {
-	validData := fd.GetValidData()
+	validData := typeutil.GetFieldDataValidData(fd)
 	if len(validData) != 0 && len(validData) != rowCount {
 		return merr.WrapErrParameterInvalidMsg("PATH_REPLACE field %q valid_data has length %d, expected %d", fd.GetFieldName(), len(validData), rowCount)
 	}
@@ -593,7 +593,7 @@ func validateExistingArrayPathRows(field *schemapb.FieldData, dataIndices, rowIn
 	if arrayData.GetElementType() != plan.arrayParent.GetElementType() {
 		return merr.WrapErrServiceInternalMsg("retrieved field %q has element type %s, expected %s", field.GetFieldName(), arrayData.GetElementType().String(), plan.arrayParent.GetElementType().String())
 	}
-	parentValidData := field.GetValidData()
+	parentValidData := typeutil.GetFieldDataValidData(field)
 	for i, dataIndex := range dataIndices {
 		rowIndex := rowIndices[i]
 		if len(parentValidData) > 0 {
@@ -660,7 +660,7 @@ func validateExistingStructPathRows(field *schemapb.FieldData, plan *fieldPartia
 		parentValid := true
 		for childIndex, childData := range children {
 			childSchema := plan.structParent.GetFields()[childIndex]
-			validData := childData.GetValidData()
+			validData := typeutil.GetFieldDataValidData(childData)
 			currentParentValid := true
 			if len(validData) > 0 {
 				if rowIndex < 0 || int(rowIndex) >= len(validData) {
