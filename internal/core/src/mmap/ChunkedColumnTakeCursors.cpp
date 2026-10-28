@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <memory>
 #include <optional>
 #include <string>
@@ -201,8 +202,8 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
                     // cohort can evict FIFO entries. Cells borrow that batch
                     // owner set, not one shared_ptr copy per physical cell.
                     auto& cached =
-                        workspace.projections[static_cast<uint64_t>(id) %
-                                              workspace.projections.size()];
+                        workspace.projections[static_cast<uint64_t>(id) &
+                                              workspace.projection_mask];
                     auto hit = context_->FindBorrowedCached(
                         source_, id, prepared_owners_, cached.borrowed);
                     if (!hit.has_value()) {
@@ -683,7 +684,9 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
 
     struct PreparedWorkspace {
         explicit PreparedWorkspace(int64_t cells)
-            : projections(std::clamp<int64_t>(cells, kPreparedRows, 1024)) {
+            : projections(std::bit_ceil(static_cast<size_t>(
+                  std::clamp<int64_t>(cells, kPreparedRows, 1024)))),
+              projection_mask(projections.size() - 1) {
         }
         std::array<CellLocation, kPreparedRows> locations;
         // Prepare already resolves each lane. Keep the gather inputs in their
@@ -700,6 +703,9 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
         // Avoid needless projection collisions for ordinary multi-cell columns
         // while keeping arbitrarily large sources bounded and fully supported.
         std::vector<CachedProjection> projections;
+        // Power-of-two metadata capacity eliminates division in the row loop.
+        // Full IDs/backings still distinguish collisions above this capacity.
+        size_t projection_mask;
         // Only bounded IDs, never owners or data; capacity is reused across
         // inputs so a cache-hit prefix does not allocate a missing-ID vector.
         std::vector<int64_t> missing;
@@ -722,8 +728,8 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
         for (int64_t lane = 0; lane < count; ++lane) {
             const auto location = workspace.locations[lane];
             const auto id = location.cell_id;
-            auto& cached = workspace.projections[static_cast<uint64_t>(id) %
-                                                 workspace.projections.size()];
+            auto& cached = workspace.projections[static_cast<uint64_t>(id) &
+                                                 workspace.projection_mask];
             if (cached.id != id || (!strings && cached.fixed_data == nullptr)) {
                 return false;
             }
@@ -780,8 +786,8 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
         // No cache entry retains a payload owner.
         const auto publication = context_->Stats().bulk_pins;
         auto& projections = prepared_workspace_->projections;
-        auto& cached =
-            projections[static_cast<uint64_t>(id) % projections.size()];
+        auto& cached = projections[static_cast<uint64_t>(id) &
+                                   prepared_workspace_->projection_mask];
         if (ProjectionIsCurrent(cached, id, backing)) {
             return cached;
         }
