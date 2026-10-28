@@ -426,7 +426,10 @@ func (s *SegmentsInfo) AddAllocation(segmentID UniqueID, allocation *Allocation)
 		seg.LastExpireTime = allocation.ExpireTime
 	})
 	s.updateDCState(segmentID, func(dc *dcSegmentState) {
-		dc.allocations = append(slices.Clip(dc.allocations), allocation)
+		// Writers of the segment are serialized by its writer lock and earlier
+		// states read only up to their own length, so the append may reuse
+		// spare capacity.
+		dc.allocations = append(dc.allocations, allocation)
 	})
 }
 

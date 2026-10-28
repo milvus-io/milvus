@@ -893,12 +893,16 @@ func (p *updateSegmentPack) Validate() error {
 	return nil
 }
 
+// Get returns a copy of a segment to modify, or nil if the segment does not
+// exist, or if another write holds it (that run is then discarded).
 func (p *updateSegmentPack) Get(segmentID int64) *SegmentInfo {
 	if segment, ok := p.segments[segmentID]; ok {
 		return segment
 	}
 
-	p.lock(segmentID)
+	if !p.lock(segmentID) {
+		return nil
+	}
 	segment := p.meta.segments.GetSegment(segmentID)
 	if segment == nil {
 		mlog.Warn(p.meta.ctx, "meta update: get segment failed - segment not found",
@@ -913,16 +917,19 @@ func (p *updateSegmentPack) Get(segmentID int64) *SegmentInfo {
 }
 
 // Peek returns the current value of a segment, without a copy to modify, for
-// an operator that decides on it. It must not be modified.
+// an operator that decides on it. It must not be modified. Like Get, it
+// returns nil for a segment another write holds.
 func (p *updateSegmentPack) Peek(segmentID int64) *SegmentInfo {
-	p.lock(segmentID)
+	if !p.lock(segmentID) {
+		return nil
+	}
 	return p.meta.segments.GetSegment(segmentID)
 }
 
-func (p *updateSegmentPack) lock(segmentID int64) {
-	if p.locks != nil {
-		p.locks.lock(segmentID)
-	}
+// lock takes the writer lock of segmentID and reports whether the pack holds
+// it. A pack without locks holds every segment.
+func (p *updateSegmentPack) lock(segmentID int64) bool {
+	return p.locks == nil || p.locks.lock(segmentID)
 }
 
 type UpdateOperator func(*updateSegmentPack) bool

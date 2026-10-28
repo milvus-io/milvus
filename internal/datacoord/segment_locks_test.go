@@ -230,11 +230,16 @@ func TestUpdateSegmentsInfoRerunsWhenItReachesASmallerHeldSegment(t *testing.T) 
 	m, catalog := newSegmentLockTestMeta(t, flushedTestSegment(1, 10), flushedTestSegment(2, 10))
 
 	unlock := m.lockSegments(1)
-	var runs atomic.Int64
+	var runs, absent atomic.Int64
 	derive := func(pack *updateSegmentPack) bool {
 		runs.Inc()
 		segment := pack.Get(2)
 		source := pack.Peek(1)
+		if source == nil {
+			// The run that cannot take segment 1's lock reads it as absent.
+			absent.Inc()
+			return false
+		}
 		segment.MaxRowNum = source.GetMaxRowNum() + 1
 		return true
 	}
@@ -260,6 +265,7 @@ func TestUpdateSegmentsInfoRerunsWhenItReachesASmallerHeldSegment(t *testing.T) 
 	waitDone(t, done, "the write")
 	require.EqualValues(t, 11, m.GetSegment(ctx, 2).GetMaxRowNum())
 	require.EqualValues(t, 2, runs.Load())
+	require.EqualValues(t, 1, absent.Load())
 	require.Equal(t, writesBefore+1, catalog.writes.Load())
 }
 
@@ -273,7 +279,10 @@ func TestCrossingSegmentWritesDoNotDeadlock(t *testing.T) {
 			pack.Get(first).MaxRowNum++
 			// Give the other write time to take its first segment.
 			time.Sleep(time.Millisecond)
-			pack.Get(second).MaxRowNum++
+			// A run that cannot take the second segment's lock is discarded.
+			if segment := pack.Get(second); segment != nil {
+				segment.MaxRowNum++
+			}
 			return true
 		}
 	}

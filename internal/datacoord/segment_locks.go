@@ -37,8 +37,10 @@ import (
 // operators) takes each lock as it reaches it; when it reaches a segment with
 // a smaller ID than one it holds and another write holds that segment, the
 // run is discarded before any I/O and runs again with every lock it reached
-// taken in ID order. A discarded run must leave no trace: operators change
-// only the pack, never their inputs or state shared between runs.
+// taken in ID order. The rest of that run reads the segment as absent (Get
+// and Peek return nil), so operators never read a segment another write
+// holds. A discarded run must leave no trace: operators change only the pack,
+// never their inputs or state shared between runs.
 //
 // A write that selects segments by a range (a partition, a channel) locks the
 // segments selected and selects again, until the selection is all locked. A
@@ -82,23 +84,24 @@ func (s *segmentLockSet) add(segmentID int64) {
 	s.held[segmentID] = struct{}{}
 }
 
-// lock takes the lock of segmentID: it waits for it when the set holds only
-// smaller IDs, and otherwise only takes it if no other write holds it,
-// recording a miss.
-func (s *segmentLockSet) lock(segmentID int64) {
+// lock takes the lock of segmentID and reports whether the set holds it: it
+// waits for it when the set holds only smaller IDs, and otherwise only takes
+// it if no other write holds it, recording a miss.
+func (s *segmentLockSet) lock(segmentID int64) bool {
 	if _, ok := s.held[segmentID]; ok {
-		return
+		return true
 	}
 	if len(s.held) == 0 || segmentID > s.maxID {
 		s.locks.Lock(segmentID)
 		s.add(segmentID)
-		return
+		return true
 	}
 	if s.locks.TryLock(segmentID) {
 		s.add(segmentID)
-		return
+		return true
 	}
 	s.missed[segmentID] = struct{}{}
+	return false
 }
 
 // complete reports whether the set holds every lock it was asked for.
