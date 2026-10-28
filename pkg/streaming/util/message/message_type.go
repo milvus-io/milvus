@@ -124,11 +124,18 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 	MessageTypeRestoreRBAC:         {},
 	MessageTypeAlterResourceGroup:  {},
 	MessageTypeDropResourceGroup:   {},
-	MessageTypeCreateIndex:         {},
-	MessageTypeAlterIndex:          {},
-	MessageTypeDropIndex:           {},
-	MessageTypeAlterRLSMetadata:    {},
-	MessageTypeDropRLSMetadata:     {},
+	// The control-channel copy of an index message takes the shared lock, so
+	// the exclusive lock applies only to the copies on the data vchannels.
+	// Only a primary key index message goes to the data vchannels.
+	MessageTypeCreateIndex: {
+		ExclusiveRequired: true,
+	},
+	MessageTypeAlterIndex: {},
+	MessageTypeDropIndex: {
+		ExclusiveRequired: true,
+	},
+	MessageTypeAlterRLSMetadata: {},
+	MessageTypeDropRLSMetadata:  {},
 	MessageTypeFlushAll: {
 		ExclusiveRequired: true,
 	},

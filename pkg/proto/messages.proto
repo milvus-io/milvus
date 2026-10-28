@@ -637,6 +637,8 @@ message CreateIndexMessageHeader {
     int64 field_id = 3;
     int64 index_id = 4;
     string index_name = 5;
+    // The index type, the value of the index_type index param.
+    string index_type = 6;
 }
 
 // CreateIndexMessageBody is the body of create index message.
@@ -659,6 +661,9 @@ message AlterIndexMessageBody {
 message DropIndexMessageHeader {
     int64 collection_id = 1;
     repeated int64 index_ids = 2; // drop all indexes if empty.
+    // PRIMARY_KEY when index_ids include the primary key index of the
+    // collection, or index_ids is empty and the collection has one. Empty otherwise.
+    string index_type = 3;
 }
 
 // DropIndexMessageBody is the body of drop index message.
