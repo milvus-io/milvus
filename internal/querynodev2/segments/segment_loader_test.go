@@ -24,6 +24,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -34,9 +37,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/segcore/loadresource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -130,6 +135,285 @@ func (eofRecordReader) Next() (storage.Record, error) {
 
 func (eofRecordReader) Close() error {
 	return nil
+}
+
+type reopenTestCore struct{ segcore.CSegment }
+
+type reopenDeltaReader struct {
+	record storage.Record
+	read   bool
+}
+
+func (r *reopenDeltaReader) Next() (storage.Record, error) {
+	if r.read {
+		return nil, io.EOF
+	}
+	r.read = true
+	return r.record, nil
+}
+
+func (r *reopenDeltaReader) Close() error {
+	r.record.Release()
+	return nil
+}
+
+func newReopenTestSegment(schema *schemapb.CollectionSchema, info *querypb.SegmentLoadInfo) *LocalSegment {
+	return &LocalSegment{
+		baseSegment: baseSegment{
+			collection: NewCollectionWithoutSegcoreForTest(info.GetCollectionID(), schema),
+			loadInfo:   atomic.NewPointer(info),
+		},
+		ptrLock:            state.NewLoadStateLock(state.LoadStateDataLoaded),
+		csegment:           &reopenTestCore{},
+		lastDeltaTimestamp: atomic.NewUint64(0),
+		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
+	}
+}
+
+func TestReopenSegmentsExternalDeltalogs(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	statsKey := params.CommonCfg.EnabledJSONKeyStats.Key
+	statsValue := params.CommonCfg.EnabledJSONKeyStats.GetValue()
+	require.NoError(t, params.Save(statsKey, "false"))
+	t.Cleanup(func() { require.NoError(t, params.Save(statsKey, statsValue)) })
+	for _, scenario := range []struct {
+		name      string
+		virtualPK bool
+		failure   string
+	}{
+		{name: "real_pk_success", failure: "none"},
+		{name: "virtual_pk_success", virtualPK: true, failure: "none"},
+		{name: "reopen_failure", failure: "reopen"},
+		{name: "read_failure", failure: "read"},
+		{name: "apply_failure", failure: "apply"},
+		{name: "virtual_pk_read_failure", virtualPK: true, failure: "read"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			failure := scenario.failure
+			ctx := context.Background()
+			manager := NewManager()
+			schema := milvusTableCollectionSchema(scenario.virtualPK)
+			schema.ExternalSource = "s3://source-bucket/snapshots/100/metadata/200.json"
+			manager.Collection.(*collectionManager).collections[1000] = NewCollectionWithoutSegcoreForTest(1000, schema)
+			oldInfo := &querypb.SegmentLoadInfo{
+				CollectionID: 1000, SegmentID: 3000,
+				ManifestPath: packed.MarshalManifestPath("files/insert_log/1000/2000/3000", 1),
+			}
+			newInfo := &querypb.SegmentLoadInfo{
+				CollectionID: 1000, SegmentID: 3000,
+				ManifestPath: packed.MarshalManifestPath("files/insert_log/1000/2000/3000", 2),
+			}
+			segment := newReopenTestSegment(schema, oldInfo)
+			// Deletes from the old manifest were already applied; replay only
+			// reads the newly added deltalog.
+			segment.lastDeltaTimestamp.Store(50)
+			manager.Segment.(*segmentManager).globalSegments.Put(ctx, SegmentTypeSealed, segment)
+			loader := &segmentLoader{manager: manager, loadingSegments: typeutil.NewConcurrentMap[int64, *loadResult]()}
+			resourcePatch := mockey.Mock((*segmentLoader).requestResource).Return(requestResourceResult{}, nil).Build()
+			defer resourcePatch.UnPatch()
+			freePatch := mockey.Mock((*segmentLoader).freeRequestResource).Return().Build()
+			defer freePatch.UnPatch()
+
+			injected := merr.Wrap(merr.ErrIoTooManyRequests, "injected reopen failure")
+			var calls []string
+			failed := false
+			expectedInfo := oldInfo
+			failOnce := func(stage string) error {
+				calls = append(calls, stage)
+				assert.Same(t, expectedInfo, segment.LoadInfo(), "load info must not be published before replay completes")
+				if failure == stage && !failed {
+					failed = true
+					return injected
+				}
+				return nil
+			}
+			corePatch := mockey.Mock((*reopenTestCore).Reopen).To(
+				func(_ *reopenTestCore, _ context.Context, req *segcore.ReopenRequest) error {
+					assert.Same(t, newInfo, req.LoadInfo)
+					return failOnce("reopen")
+				}).Build()
+			defer corePatch.UnPatch()
+			sourcePath := "s3://source-bucket/files/insert_log/1/_delta/100"
+			manifestPatch := mockey.Mock(packed.GetDeltaLogsFromManifestWithExtfs).To(
+				func(path string, _ *indexpb.StorageConfig, _ packed.ExternalSpecContext) ([]*datapb.FieldBinlog, error) {
+					assert.Equal(t, newInfo.ManifestPath, path)
+					return []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{
+						{LogPath: "s3://source-bucket/files/insert_log/1/_delta/40", TimestampTo: 40, EntriesNum: 1},
+						{LogPath: sourcePath, TimestampTo: 100, EntriesNum: 1},
+					}}}, nil
+				}).Build()
+			defer manifestPatch.UnPatch()
+			pathsPatch := mockey.Mock(packed.GetDeltaLogPathsFromManifest).To(
+				func(path string, _ *indexpb.StorageConfig) ([]string, error) {
+					assert.Equal(t, newInfo.ManifestPath, path)
+					return []string{sourcePath}, nil
+				}).Build()
+			defer pathsPatch.UnPatch()
+			readerPatch := mockey.Mock(storage.NewDeltalogReader).To(
+				func(_ context.Context, _ schemapb.DataType, paths []string, _ ...storage.RwOption) (storage.RecordReader, error) {
+					assert.Equal(t, []string{sourcePath}, paths, "applied deltalogs are skipped")
+					if err := failOnce("read"); err != nil {
+						return nil, err
+					}
+					builder := array.NewRecordBuilder(memory.DefaultAllocator, arrow.NewSchema([]arrow.Field{
+						{Name: "pk", Type: arrow.PrimitiveTypes.Int64},
+						{Name: "ts", Type: arrow.PrimitiveTypes.Int64},
+					}, nil))
+					defer builder.Release()
+					builder.Field(0).(*array.Int64Builder).Append(42)
+					builder.Field(1).(*array.Int64Builder).Append(100)
+					return &reopenDeltaReader{record: storage.NewSimpleArrowRecord(builder.NewRecord(), map[storage.FieldID]int{0: 0, 1: 1})}, nil
+				}).Build()
+			defer readerPatch.UnPatch()
+			var applied bool
+			applyPatch := mockey.Mock((*LocalSegment).LoadDeltaData).To(
+				func(_ *LocalSegment, _ context.Context, data *storage.DeltaData) error {
+					require.EqualValues(t, 1, data.DeleteRowCount())
+					assert.Equal(t, storage.NewInt64PrimaryKey(42), data.DeletePks().Get(0))
+					assert.Equal(t, []uint64{100}, data.DeleteTimestamps())
+					if err := failOnce("apply"); err != nil {
+						return err
+					}
+					applied = true
+					return nil
+				}).Build()
+			defer applyPatch.UnPatch()
+
+			err := loader.ReopenSegments(ctx, []*querypb.SegmentLoadInfo{newInfo})
+			if failure != "none" {
+				require.ErrorIs(t, err, injected)
+				assert.Equal(t, merr.Code(injected), merr.Code(err))
+				assert.True(t, merr.Status(err).GetRetriable())
+				// The old load info stays reported, so QueryCoord retries the reopen.
+				require.Same(t, oldInfo, segment.LoadInfo())
+				require.False(t, applied)
+				switch failure {
+				case "reopen":
+					assert.Equal(t, []string{"reopen"}, calls)
+				case "read":
+					assert.Equal(t, []string{"reopen", "read"}, calls)
+				case "apply":
+					assert.Equal(t, []string{"reopen", "read", "apply"}, calls)
+				}
+				calls = nil
+				err = loader.ReopenSegments(ctx, []*querypb.SegmentLoadInfo{newInfo})
+			}
+			require.NoError(t, err)
+			assert.True(t, applied)
+			assert.Equal(t, []string{"reopen", "read", "apply"}, calls)
+			assert.Same(t, newInfo, segment.LoadInfo())
+		})
+	}
+}
+
+func TestReopenSegmentsNonMilvusTableSkipsReplay(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	manager := NewManager()
+	schema := mock_segcore.GenTestCollectionSchema("test", schemapb.DataType_Int64, false)
+	schema.ExternalSource = "s3://bucket/data"
+	schema.ExternalSpec = `{"format":"parquet"}`
+	schema.Fields[0].ExternalField = "id"
+	manager.Collection.(*collectionManager).collections[1000] = NewCollectionWithoutSegcoreForTest(1000, schema)
+	loader := &segmentLoader{manager: manager, loadingSegments: typeutil.NewConcurrentMap[int64, *loadResult]()}
+	resourcePatch := mockey.Mock((*segmentLoader).requestResource).Return(requestResourceResult{}, nil).Build()
+	defer resourcePatch.UnPatch()
+	freePatch := mockey.Mock((*segmentLoader).freeRequestResource).Return().Build()
+	defer freePatch.UnPatch()
+	coreCalls := 0
+	corePatch := mockey.Mock((*reopenTestCore).Reopen).To(
+		func(_ *reopenTestCore, _ context.Context, _ *segcore.ReopenRequest) error {
+			coreCalls++
+			return nil
+		}).Build()
+	defer corePatch.UnPatch()
+	statsPatch := mockey.Mock((*LocalSegment).syncFieldJSONStatsFromLoadInfo).Return().Build()
+	defer statsPatch.UnPatch()
+	replayPatch := mockey.Mock((*segmentLoader).loadDeltalogs).To(
+		func(_ *segmentLoader, _ context.Context, _ Segment, _ *querypb.SegmentLoadInfo) error {
+			t.Fatal("non-milvus-table reopen must not load deltalogs")
+			return nil
+		}).Build()
+	defer replayPatch.UnPatch()
+	info := &querypb.SegmentLoadInfo{CollectionID: 1000, SegmentID: 1}
+	segment := newReopenTestSegment(schema, info)
+	manager.Segment.(*segmentManager).globalSegments.Put(ctx, SegmentTypeSealed, segment)
+	newInfo := &querypb.SegmentLoadInfo{CollectionID: 1000, SegmentID: 1}
+	require.NoError(t, loader.ReopenSegments(ctx, []*querypb.SegmentLoadInfo{newInfo}))
+	assert.Equal(t, 1, coreCalls)
+	assert.Same(t, newInfo, segment.LoadInfo())
+}
+
+func TestReopenSegmentsSkipsReplayForUnchangedDeltaSource(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	manager := NewManager()
+	schema := milvusTableCollectionSchema(false)
+	schema.ExternalSource = "s3://source-bucket/snapshot"
+	manager.Collection.(*collectionManager).collections[1000] = NewCollectionWithoutSegcoreForTest(1000, schema)
+	loader := &segmentLoader{manager: manager, loadingSegments: typeutil.NewConcurrentMap[int64, *loadResult]()}
+	resourcePatch := mockey.Mock((*segmentLoader).requestResource).Return(requestResourceResult{}, nil).Build()
+	defer resourcePatch.UnPatch()
+	freePatch := mockey.Mock((*segmentLoader).freeRequestResource).Return().Build()
+	defer freePatch.UnPatch()
+	coreCalls := 0
+	corePatch := mockey.Mock((*reopenTestCore).Reopen).To(
+		func(_ *reopenTestCore, _ context.Context, _ *segcore.ReopenRequest) error {
+			coreCalls++
+			return nil
+		}).Build()
+	defer corePatch.UnPatch()
+	statsPatch := mockey.Mock((*LocalSegment).syncFieldJSONStatsFromLoadInfo).Return().Build()
+	defer statsPatch.UnPatch()
+	replays := 0
+	replayPatch := mockey.Mock((*segmentLoader).loadDeltalogs).To(
+		func(_ *segmentLoader, _ context.Context, _ Segment, _ *querypb.SegmentLoadInfo) error {
+			replays++
+			return nil
+		}).Build()
+	defer replayPatch.UnPatch()
+
+	manifest := packed.MarshalManifestPath("files/insert_log/1000/2000/3000", 2)
+	deltalogs := func(path string) []*datapb.FieldBinlog {
+		return []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: path, TimestampTo: 100}}}}
+	}
+	current := &querypb.SegmentLoadInfo{CollectionID: 1000, SegmentID: 3000, ManifestPath: manifest, Deltalogs: deltalogs("delta/1")}
+	segment := newReopenTestSegment(schema, current)
+	manager.Segment.(*segmentManager).globalSegments.Put(ctx, SegmentTypeSealed, segment)
+
+	for _, test := range []struct {
+		name     string
+		mutate   func(*querypb.SegmentLoadInfo)
+		replayed bool
+	}{
+		{name: "index_only", mutate: func(i *querypb.SegmentLoadInfo) {
+			i.IndexInfos = []*querypb.FieldIndexInfo{{FieldID: 101, IndexID: 10}}
+		}},
+		{name: "manifest_changed", replayed: true, mutate: func(i *querypb.SegmentLoadInfo) {
+			i.ManifestPath = packed.MarshalManifestPath("files/insert_log/1000/2000/3000", 3)
+		}},
+		{name: "deltalogs_changed", replayed: true, mutate: func(i *querypb.SegmentLoadInfo) {
+			i.Deltalogs = deltalogs("delta/2")
+		}},
+		{name: "child_manifests", replayed: true, mutate: func(i *querypb.SegmentLoadInfo) {
+			i.ChildManifestPaths = []string{"child"}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			segment.loadInfo.Store(current)
+			coreCalls, replays = 0, 0
+			incoming := &querypb.SegmentLoadInfo{CollectionID: 1000, SegmentID: 3000, ManifestPath: manifest, Deltalogs: deltalogs("delta/1")}
+			test.mutate(incoming)
+			require.NoError(t, loader.ReopenSegments(ctx, []*querypb.SegmentLoadInfo{incoming}))
+			assert.Equal(t, 1, coreCalls)
+			if test.replayed {
+				assert.Equal(t, 1, replays)
+			} else {
+				assert.Zero(t, replays)
+			}
+		})
+	}
 }
 
 type deltaLoadTestSegment struct {

@@ -1202,6 +1202,13 @@ func (s *LocalSegment) Load(ctx context.Context) error {
 }
 
 func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo) error {
+	return s.reopen(ctx, newLoadInfo, nil)
+}
+
+// reopen runs the optional delete replay before publishing newLoadInfo. If the
+// replay fails, the old load info stays reported so QueryCoord retries the
+// reopen; segcore has already switched views, so the retry only replays deletes.
+func (s *LocalSegment) reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo, replayDeletes func() error) error {
 	if !s.ptrLock.PinIfNotReleased() {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released during reopen")
 	}
@@ -1222,6 +1229,11 @@ func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentL
 	})
 	if err != nil {
 		return err
+	}
+	if replayDeletes != nil {
+		if err := replayDeletes(); err != nil {
+			return merr.Wrap(err, "replay deltalogs after reopen")
+		}
 	}
 	s.syncFieldIndexes(newLoadInfo.GetIndexInfos())
 	if s.relatedDataSize != nil {
