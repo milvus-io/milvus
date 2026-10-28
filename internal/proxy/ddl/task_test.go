@@ -8008,6 +8008,14 @@ func TestAlterCollectionSchemaTask_StructSubFieldAdd(t *testing.T) {
 		require.NoError(t, preExecute(structSubFieldDDLTestSchema(false), field, nil, ""))
 		assert.False(t, field.GetNullable())
 	})
+	// The new sub-field is stored as profile[x]; only that name can clash
+	// with a top-level field or a struct, so a top-level name or the struct's
+	// own name is a valid sub-field name, as at create collection.
+	t.Run("sub-field names of other containers", func(t *testing.T) {
+		for _, name := range []string{"profile[id]", "profile[vec]", "profile[profile]"} {
+			require.NoError(t, preExecute(structSubFieldDDLTestSchema(true), newField(name), nil, ""), name)
+		}
+	})
 	t.Run("nested array nullability propagation", func(t *testing.T) {
 		for _, nullable := range []bool{false, true} {
 			field := newField("profile[nested]")
@@ -8049,7 +8057,6 @@ func TestAlterCollectionSchemaTask_StructSubFieldAdd(t *testing.T) {
 		{"dynamic", "profile[c]", "protected role", func(_ *schemapb.CollectionSchema, f *schemapb.FieldSchema) { f.IsDynamic = true }},
 		{"external", "profile[c]", "does not support external field mapping", func(_ *schemapb.CollectionSchema, f *schemapb.FieldSchema) { f.ExternalField = "source" }},
 		{"duplicate sibling", "profile[a]", "duplicated field name", nil},
-		{"duplicate top level", "profile[vec]", "duplicated field name", nil},
 		{"capacity mismatch", "profile[c]", "same max_capacity", func(_ *schemapb.CollectionSchema, f *schemapb.FieldSchema) { f.TypeParams[0].Value = "32" }},
 		{"nullable child of non nullable parent", "profile[c]", "cannot be nullable individually", func(s *schemapb.CollectionSchema, f *schemapb.FieldSchema) {
 			s.StructArrayFields[0].Nullable = false
