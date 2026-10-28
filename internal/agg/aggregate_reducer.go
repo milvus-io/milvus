@@ -2,6 +2,7 @@ package agg
 
 import (
 	"context"
+	"sync"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
@@ -17,15 +18,25 @@ type GroupAggReducer struct {
 	aggregates      []*planpb.Aggregate
 	groupLimit      int64
 	schema          *schemapb.CollectionSchema
+	layout          func() (*aggregationLayout, error)
+}
+
+// aggregationLayout is immutable and scoped to one reducer's read schema.
+// Payload validation and empty materialization share this schema-derived layout.
+type aggregationLayout struct {
+	groupFields []*schemapb.FieldSchema
+	columnTypes []schemapb.DataType
 }
 
 func NewGroupAggReducer(groupByFieldIds []int64, aggregates []*planpb.Aggregate, groupLimit int64, schema *schemapb.CollectionSchema) *GroupAggReducer {
-	return &GroupAggReducer{
+	reducer := &GroupAggReducer{
 		groupByFieldIds: groupByFieldIds,
 		aggregates:      aggregates,
 		groupLimit:      groupLimit,
 		schema:          schema,
 	}
+	reducer.layout = sync.OnceValues(reducer.prepareLayout)
+	return reducer
 }
 
 // PartialAggregationResult is a mergeable aggregate contribution. No columns
@@ -58,34 +69,19 @@ func (ar *PartialAggregationResult) GetAllRetrieveCount() int64 {
 
 // emptyFields describes the aggregate layout without inventing a contribution.
 func (reducer *GroupAggReducer) emptyFields() ([]*schemapb.FieldData, error) {
-	helper, err := typeutil.CreateSchemaHelper(reducer.schema)
+	layout, err := reducer.layout()
 	if err != nil {
 		return nil, err
 	}
-	fields := make([]*schemapb.FieldData, 0, len(reducer.groupByFieldIds)+len(reducer.aggregates))
-	for _, id := range reducer.groupByFieldIds {
-		field, err := helper.GetFieldFromID(id)
-		if err != nil {
-			return nil, merr.Wrapf(err, "failed to get group-by field schema %d", id)
-		}
+	fields := make([]*schemapb.FieldData, 0, len(layout.columnTypes))
+	for _, field := range layout.groupFields {
 		column, err := typeutil.GenEmptyFieldData(field)
 		if err != nil {
 			return nil, err
 		}
 		fields = append(fields, column)
 	}
-	for _, aggregate := range reducer.aggregates {
-		resultType := schemapb.DataType_Int64
-		if aggregate.GetOp() != planpb.AggregateOp_count {
-			field, err := helper.GetFieldFromID(aggregate.GetFieldId())
-			if err != nil {
-				return nil, merr.Wrapf(err, "failed to get aggregate field schema %d", aggregate.GetFieldId())
-			}
-			resultType, err = getAggregateResultType(aggregate.GetOp(), field.GetDataType())
-			if err != nil {
-				return nil, err
-			}
-		}
+	for _, resultType := range layout.columnTypes[len(layout.groupFields):] {
 		column, err := genEmptyFieldDataByType(resultType)
 		if err != nil {
 			return nil, err
@@ -185,35 +181,35 @@ func getAggregateResultType(op planpb.AggregateOp, inputType schemapb.DataType) 
 	}
 }
 
-// validatePartialAggregationResults validates the input PartialAggregationResult slice
-// It checks:
-// 1. Each result's fieldDatas length equals numGroupingKeys + numAggs
-// 2. No nil fieldData in any result
-// 3. Each fieldData's Type matches the expected type from schema
-func (reducer *GroupAggReducer) validatePartialAggregationResults(results []*PartialAggregationResult) error {
+// prepareLayout resolves the fixed grouping and aggregate types once, rather
+// than rebuilding the full schema index for every segment or worker response.
+func (reducer *GroupAggReducer) prepareLayout() (*aggregationLayout, error) {
 	if reducer.schema == nil {
-		return merr.WrapErrParameterInvalidMsg("schema is nil, cannot validate field types")
+		return nil, merr.WrapErrParameterInvalidMsg("schema is nil, cannot validate field types")
 	}
 
 	helper, err := typeutil.CreateSchemaHelper(reducer.schema)
 	if err != nil {
-		return merr.Wrap(err, "failed to create schema helper")
+		return nil, merr.Wrap(err, "failed to create schema helper")
 	}
 
 	numGroupingKeys := len(reducer.groupByFieldIds)
 	numAggs := len(reducer.aggregates)
 	expectedColumnCount := numGroupingKeys + numAggs
 
-	// Build expected types for each column
-	expectedTypes := make([]schemapb.DataType, 0, expectedColumnCount)
+	layout := &aggregationLayout{
+		groupFields: make([]*schemapb.FieldSchema, 0, numGroupingKeys),
+		columnTypes: make([]schemapb.DataType, 0, expectedColumnCount),
+	}
 
 	// Add types for grouping keys
 	for _, fieldID := range reducer.groupByFieldIds {
 		field, err := helper.GetFieldFromID(fieldID)
 		if err != nil {
-			return merr.Wrapf(err, "failed to get field schema for groupBy fieldID %d", fieldID)
+			return nil, merr.Wrapf(err, "failed to get field schema for groupBy fieldID %d", fieldID)
 		}
-		expectedTypes = append(expectedTypes, field.GetDataType())
+		layout.groupFields = append(layout.groupFields, field)
+		layout.columnTypes = append(layout.columnTypes, field.GetDataType())
 	}
 
 	// Add types for aggregates
@@ -225,15 +221,29 @@ func (reducer *GroupAggReducer) validatePartialAggregationResults(results []*Par
 		} else {
 			field, err := helper.GetFieldFromID(agg.GetFieldId())
 			if err != nil {
-				return merr.Wrapf(err, "failed to get field schema for aggregate fieldID %d", agg.GetFieldId())
+				return nil, merr.Wrapf(err, "failed to get field schema for aggregate fieldID %d", agg.GetFieldId())
 			}
 			expectedType, err = getAggregateResultType(agg.GetOp(), field.GetDataType())
 			if err != nil {
-				return merr.Wrapf(err, "failed to get aggregate result type for aggregate fieldID %d", agg.GetFieldId())
+				return nil, merr.Wrapf(err, "failed to get aggregate result type for aggregate fieldID %d", agg.GetFieldId())
 			}
 		}
-		expectedTypes = append(expectedTypes, expectedType)
+		layout.columnTypes = append(layout.columnTypes, expectedType)
 	}
+
+	return layout, nil
+}
+
+// validatePartialAggregationResults checks every payload against the shared
+// layout. Only schema resolution is cached; payload validation always runs.
+func (reducer *GroupAggReducer) validatePartialAggregationResults(results []*PartialAggregationResult) error {
+	layout, err := reducer.layout()
+	if err != nil {
+		return err
+	}
+	expectedTypes := layout.columnTypes
+	expectedColumnCount := len(expectedTypes)
+	numGroupingKeys, numAggs := len(reducer.groupByFieldIds), len(reducer.aggregates)
 
 	// Validate each result
 	for resultIdx, result := range results {

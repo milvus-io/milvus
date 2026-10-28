@@ -172,6 +172,10 @@ Every successfully executed shard
 plan with no collected results contributes an empty result and its MVCC snapshot,
 including plans with no workers; this behavior does not depend on pruning.
 Aggregation uses `PartialAggregationResult` at QN and shard reduction boundaries.
+Each reducer prepares an immutable column layout once for its fixed read schema.
+Individual and batched decoding reuse that layout, while every response still
+undergoes type, cardinality and validity checks. Empty materialization uses the
+same layout; no schema cache is shared across reducers or schema versions.
 A fieldless or typed zero-row payload decodes to Empty, the merge identity;
 a scalar NULL or a real zero remains a value. On the existing RPC, global Empty
 is represented by one identity-state row: count=0 and NULL for min/max/sum.
