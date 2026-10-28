@@ -28,97 +28,97 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-type historicalTestScanner struct {
+type catchUpTestScanner struct {
 	walimpls.ScannerImpls
 	ch  chan message.ImmutableMessage
 	err error
 }
 
-func (s *historicalTestScanner) Chan() <-chan message.ImmutableMessage { return s.ch }
-func (s *historicalTestScanner) Error() error                          { return s.err }
-func (s *historicalTestScanner) Close() error                          { return nil }
+func (s *catchUpTestScanner) Chan() <-chan message.ImmutableMessage { return s.ch }
+func (s *catchUpTestScanner) Error() error                          { return s.err }
+func (s *catchUpTestScanner) Close() error                          { return nil }
 
-type historicalTestOpener struct {
+type catchUpTestOpener struct {
 	walimpls.OpenerImpls
 	open func(*walimpls.OpenOption) (walimpls.WALImpls, error)
 }
 
-func (o historicalTestOpener) Open(_ context.Context, opt *walimpls.OpenOption) (walimpls.WALImpls, error) {
+func (o catchUpTestOpener) Open(_ context.Context, opt *walimpls.OpenOption) (walimpls.WALImpls, error) {
 	return o.open(opt)
 }
 
-type historicalTestWAL struct {
+type catchUpTestWAL struct {
 	walimpls.WALImpls
 	read  func(walimpls.ReadOption) (walimpls.ScannerImpls, error)
 	close func()
 }
 
-func (w historicalTestWAL) WALName() message.WALName { return message.WALNameTest }
-func (w historicalTestWAL) Read(_ context.Context, opt walimpls.ReadOption) (walimpls.ScannerImpls, error) {
+func (w catchUpTestWAL) WALName() message.WALName { return message.WALNameTest }
+func (w catchUpTestWAL) Read(_ context.Context, opt walimpls.ReadOption) (walimpls.ScannerImpls, error) {
 	return w.read(opt)
 }
-func (w historicalTestWAL) Close() { w.close() }
+func (w catchUpTestWAL) Close() { w.close() }
 
-type historicalTestHandler struct {
+type catchUpTestHandler struct {
 	messages []message.ImmutableMessage
 	closed   bool
 	handle   func(message.HandleParam) message.HandleResult
 }
 
-func (h *historicalTestHandler) Handle(p message.HandleParam) message.HandleResult {
+func (h *catchUpTestHandler) Handle(p message.HandleParam) message.HandleResult {
 	if h.handle != nil {
 		return h.handle(p)
 	}
 	h.messages = append(h.messages, p.Message)
 	return message.HandleResult{MessageHandled: true}
 }
-func (h *historicalTestHandler) Close() { h.closed = true }
+func (h *catchUpTestHandler) Close() { h.closed = true }
 
-func newHistoricalTestReader(t *testing.T, filters ...options.DeliverFilter) *historicalReader {
+func newCatchUpTestReader(t *testing.T, filters ...options.DeliverFilter) *walSwitchCatchUpReader {
 	t.Helper()
 	metrics := metricsutil.NewScanMetrics(types.PChannelInfo{Name: "p"}).NewScannerMetrics()
 	t.Cleanup(metrics.Close)
-	return newHistoricalReader("p", "v1", mlog.With(), metrics, filters)
+	return newWALSwitchCatchUpReader("p", "v1", mlog.With(), metrics, filters)
 }
 
-func historyMessage(msg message.MutableMessage, ts uint64) message.ImmutableMessage {
+func catchUpMessage(msg message.MutableMessage, ts uint64) message.ImmutableMessage {
 	return msg.WithTimeTick(ts).WithLastConfirmed(walimplstest.NewTestMessageID(0)).IntoImmutableMessage(walimplstest.NewTestMessageID(int64(ts)))
 }
 
-func historyInsert(ts uint64, vchannel string, txn *message.TxnContext) message.ImmutableMessage {
+func catchUpInsert(ts uint64, vchannel string, txn *message.TxnContext) message.ImmutableMessage {
 	msg := message.NewInsertMessageBuilderV1().WithVChannel(vchannel).
 		WithHeader(&message.InsertMessageHeader{}).WithBody(&msgpb.InsertRequest{}).MustBuildMutable()
 	if txn != nil {
 		msg = msg.WithTxnContext(*txn)
 	}
-	return historyMessage(msg, ts)
+	return catchUpMessage(msg, ts)
 }
 
-func historyAlter(ts uint64) message.ImmutableMessage {
-	return historyMessage(message.NewAlterWALMessageBuilderV2().WithAllVChannel().
+func catchUpAlterWAL(ts uint64) message.ImmutableMessage {
+	return catchUpMessage(message.NewAlterWALMessageBuilderV2().WithAllVChannel().
 		WithHeader(&message.AlterWALMessageHeader{TargetWalName: commonpb.WALName_WoodPecker}).
 		WithBody(&message.AlterWALMessageBody{}).MustBuildMutable(), ts)
 }
 
-func historyInput(messages ...message.ImmutableMessage) *historicalTestScanner {
+func newCatchUpTestInput(messages ...message.ImmutableMessage) *catchUpTestScanner {
 	ch := make(chan message.ImmutableMessage, len(messages))
 	for _, msg := range messages {
 		ch <- msg
 	}
 	// Deliberately keep the channel open: completion cannot depend on EOF or TT.
-	return &historicalTestScanner{ch: ch}
+	return &catchUpTestScanner{ch: ch}
 }
 
-func TestHistoricalReaderEndsAtAlterWALWithoutTimeTick(t *testing.T) {
-	r := newHistoricalTestReader(t, options.DeliverFilterTimeTickGT(10), options.DeliverFilterMessageType(message.MessageTypeInsert))
-	h := &historicalTestHandler{}
-	first, second := historyInsert(20, "v1", nil), historyInsert(30, "v1", nil)
-	input := historyInput(second, historyInsert(25, "other", nil), historyInsert(5, "v1", nil), first, first, historyAlter(40), historyInsert(50, "v1", nil))
+func TestWALSwitchCatchUpStopsAtAlterWALWithoutTrailingTimeTick(t *testing.T) {
+	r := newCatchUpTestReader(t, options.DeliverFilterTimeTickGT(10), options.DeliverFilterMessageType(message.MessageTypeInsert))
+	h := &catchUpTestHandler{}
+	first, second := catchUpInsert(20, "v1", nil), catchUpInsert(30, "v1", nil)
+	input := newCatchUpTestInput(second, catchUpInsert(25, "other", nil), catchUpInsert(5, "v1", nil), first, first, catchUpAlterWAL(40), catchUpInsert(50, "v1", nil))
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
-	cut, err := r.Read(ctx, input, h)
+	alterWALTimeTick, err := r.Read(ctx, input, h)
 	require.NoError(t, err)
-	require.EqualValues(t, 40, cut)
+	require.EqualValues(t, 40, alterWALTimeTick)
 	require.Equal(t, []message.ImmutableMessage{first, second}, h.messages)
 	require.Empty(t, r.TxnBuffer.GetUncommittedMessageBuilder())
 	require.Zero(t, r.PendingQueue.Len())
@@ -126,33 +126,33 @@ func TestHistoricalReaderEndsAtAlterWALWithoutTimeTick(t *testing.T) {
 	require.False(t, h.closed)
 }
 
-func TestHistoricalReaderReusesTxnAssemblyAndBoundaryAbort(t *testing.T) {
-	r := newHistoricalTestReader(t)
-	h := &historicalTestHandler{}
+func TestWALSwitchCatchUpAssemblesCommittedTransactionsAndAbortsUnfinished(t *testing.T) {
+	r := newCatchUpTestReader(t)
+	h := &catchUpTestHandler{}
 	committed := message.TxnContext{TxnID: 1, Keepalive: message.TxnKeepaliveInfinite}
 	unfinished := message.TxnContext{TxnID: 2, Keepalive: message.TxnKeepaliveInfinite}
 	begin := func(txn message.TxnContext, ts uint64) message.ImmutableMessage {
-		return historyMessage(message.NewBeginTxnMessageBuilderV2().WithVChannel("v1").
+		return catchUpMessage(message.NewBeginTxnMessageBuilderV2().WithVChannel("v1").
 			WithHeader(&message.BeginTxnMessageHeader{}).WithBody(&message.BeginTxnMessageBody{}).
 			MustBuildMutable().WithTxnContext(txn), ts)
 	}
-	commit := historyMessage(message.NewCommitTxnMessageBuilderV2().WithVChannel("v1").
+	commit := catchUpMessage(message.NewCommitTxnMessageBuilderV2().WithVChannel("v1").
 		WithHeader(&message.CommitTxnMessageHeader{}).WithBody(&message.CommitTxnMessageBody{}).
 		MustBuildMutable().WithTxnContext(committed), 30)
-	input := historyInput(commit, begin(unfinished, 21), historyInsert(22, "v1", &unfinished), historyInsert(12, "v1", &committed), begin(committed, 11), historyAlter(40))
-	cut, err := r.Read(t.Context(), input, h)
+	input := newCatchUpTestInput(commit, begin(unfinished, 21), catchUpInsert(22, "v1", &unfinished), catchUpInsert(12, "v1", &committed), begin(committed, 11), catchUpAlterWAL(40))
+	alterWALTimeTick, err := r.Read(t.Context(), input, h)
 	require.NoError(t, err)
-	require.EqualValues(t, 40, cut)
+	require.EqualValues(t, 40, alterWALTimeTick)
 	require.Len(t, h.messages, 1)
 	require.Equal(t, message.MessageTypeTxn, h.messages[0].MessageType())
 	require.EqualValues(t, 30, h.messages[0].TimeTick())
 	require.Empty(t, r.TxnBuffer.GetUncommittedMessageBuilder())
 }
 
-func TestHistoricalReaderWaitsForDeliveryAndHonorsCancellation(t *testing.T) {
-	r := newHistoricalTestReader(t)
+func TestWALSwitchCatchUpWaitsForDeliveryAndHonorsCancellation(t *testing.T) {
+	r := newCatchUpTestReader(t)
 	entered := make(chan struct{})
-	h := &historicalTestHandler{handle: func(p message.HandleParam) message.HandleResult {
+	h := &catchUpTestHandler{handle: func(p message.HandleParam) message.HandleResult {
 		close(entered)
 		<-p.Ctx.Done()
 		return message.HandleResult{Error: p.Ctx.Err()}
@@ -161,8 +161,8 @@ func TestHistoricalReaderWaitsForDeliveryAndHonorsCancellation(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		cut, err := r.Read(ctx, historyInput(historyInsert(10, "v1", nil), historyAlter(20)), h)
-		if cut != 0 {
+		alterWALTimeTick, err := r.Read(ctx, newCatchUpTestInput(catchUpInsert(10, "v1", nil), catchUpAlterWAL(20)), h)
+		if alterWALTimeTick != 0 {
 			done <- errors.New("premature boundary success")
 			return
 		}
@@ -185,15 +185,15 @@ func TestHistoricalReaderWaitsForDeliveryAndHonorsCancellation(t *testing.T) {
 	require.Equal(t, 2, r.PendingQueue.Len(), "cancel must not turn pending output into success")
 }
 
-func TestHistoricalReaderFailureBeforeBoundary(t *testing.T) {
+func TestWALSwitchCatchUpFailsWithoutAlterWAL(t *testing.T) {
 	expected := errors.New("backend read failed")
 	for _, err := range []error{nil, expected} {
-		r := newHistoricalTestReader(t)
-		input := historyInput(historyInsert(10, "v1", nil))
+		r := newCatchUpTestReader(t)
+		input := newCatchUpTestInput(catchUpInsert(10, "v1", nil))
 		input.err = err
 		close(input.ch)
-		cut, got := r.Read(t.Context(), input, &historicalTestHandler{})
-		require.Zero(t, cut)
+		alterWALTimeTick, got := r.Read(t.Context(), input, &catchUpTestHandler{})
+		require.Zero(t, alterWALTimeTick)
 		require.Error(t, got)
 		if err != nil {
 			require.ErrorIs(t, got, expected)
@@ -203,17 +203,17 @@ func TestHistoricalReaderFailureBeforeBoundary(t *testing.T) {
 	}
 }
 
-func TestHistoricalHelperOwnsRetryProgress(t *testing.T) {
+func TestWALSwitchCatchUpRetriesFromHandledProgress(t *testing.T) {
 	paramtable.Init()
 	for _, cancelRetry := range []bool{false, true} {
-		name := "complete"
+		name := "resume_without_replaying_handled_messages"
 		if cancelRetry {
-			name = "cancel"
+			name = "cancel_during_retry_backoff"
 		}
 		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 			defer cancel()
-			h := &historicalTestHandler{}
+			h := &catchUpTestHandler{}
 			if cancelRetry {
 				h.handle = func(p message.HandleParam) message.HandleResult {
 					h.messages = append(h.messages, p.Message)
@@ -223,37 +223,37 @@ func TestHistoricalHelperOwnsRetryProgress(t *testing.T) {
 					return message.HandleResult{MessageHandled: true}
 				}
 			}
-			tick := historyMessage(message.NewTimeTickMessageBuilderV1().WithAllVChannel().
+			tick := catchUpMessage(message.NewTimeTickMessageBuilderV1().WithAllVChannel().
 				WithHeader(&message.TimeTickMessageHeader{}).WithBody(&msgpb.TimeTickMsg{}).MustBuildMutable(), 20)
 			opens, closes := 0, 0
-			opener := historicalTestOpener{open: func(opt *walimpls.OpenOption) (walimpls.WALImpls, error) {
+			opener := catchUpTestOpener{open: func(opt *walimpls.OpenOption) (walimpls.WALImpls, error) {
 				opens++
 				require.Equal(t, types.AccessModeRO, opt.Channel.AccessMode)
-				return historicalTestWAL{close: func() { closes++ }, read: func(opt walimpls.ReadOption) (walimpls.ScannerImpls, error) {
+				return catchUpTestWAL{close: func() { closes++ }, read: func(opt walimpls.ReadOption) (walimpls.ScannerImpls, error) {
 					require.Equal(t, options.DeliverPolicyStartFrom(walimplstest.NewTestMessageID(0)), opt.DeliverPolicy)
 					if opens == 1 {
-						input := historyInput(historyInsert(10, "v1", nil), tick)
+						input := newCatchUpTestInput(catchUpInsert(10, "v1", nil), tick)
 						input.err = status.NewUnrecoverableError("history failed after delivering a prefix")
 						close(input.ch)
 						return input, nil
 					}
-					return historyInput(historyInsert(10, "v1", nil), tick, historyInsert(30, "v1", nil), historyAlter(40)), nil
+					return newCatchUpTestInput(catchUpInsert(10, "v1", nil), tick, catchUpInsert(30, "v1", nil), catchUpAlterWAL(40)), nil
 				}}, nil
 			}}
-			opts := HistoricalReadOptions{
+			opts := WALSwitchCatchUpOptions{
 				PChannel: "p", VChannel: "v1", MessageHandler: h,
 				DeliverPolicy:  options.DeliverPolicyStartFrom(walimplstest.NewTestMessageID(0)),
 				DeliverFilters: []options.DeliverFilter{options.DeliverFilterTimeTickGT(1), options.DeliverFilterMessageType(message.MessageTypeInsert)},
 			}
-			cut, err := readHistoricalWAL(ctx, opts, nil, opener)
+			alterWALTimeTick, err := catchUpWALWithRetry(ctx, opts, nil, opener)
 			if cancelRetry {
 				require.ErrorIs(t, err, context.Canceled)
-				require.Zero(t, cut)
+				require.Zero(t, alterWALTimeTick)
 				require.Equal(t, 1, opens)
 				require.Len(t, h.messages, 2)
 			} else {
 				require.NoError(t, err)
-				require.EqualValues(t, 40, cut)
+				require.EqualValues(t, 40, alterWALTimeTick)
 				require.Equal(t, 2, opens)
 				require.Len(t, h.messages, 3, "retry must not repeat the handled prefix")
 				require.EqualValues(t, 30, h.messages[2].TimeTick())
@@ -261,31 +261,31 @@ func TestHistoricalHelperOwnsRetryProgress(t *testing.T) {
 			require.Equal(t, opens, closes)
 			require.False(t, h.closed)
 			require.Len(t, opts.DeliverFilters, 2)
-			require.True(t, options.GetFilterFunc(opts.DeliverFilters)(historyInsert(10, "v1", nil)), "caller filters must remain unchanged")
+			require.True(t, options.GetFilterFunc(opts.DeliverFilters)(catchUpInsert(10, "v1", nil)), "caller filters must remain unchanged")
 		})
 	}
 }
 
-func TestHistoricalReaderStartAfterStillObservesBoundary(t *testing.T) {
-	for _, start := range []message.ImmutableMessage{historyInsert(10, "v1", nil), historyAlter(20)} {
-		r := newHistoricalTestReader(t)
-		r.ExcludeMessageID = start.MessageID()
-		h := &historicalTestHandler{}
-		input := historyInput(start)
+func TestWALSwitchCatchUpStartAfterStillReadsAlterWAL(t *testing.T) {
+	for _, start := range []message.ImmutableMessage{catchUpInsert(10, "v1", nil), catchUpAlterWAL(20)} {
+		r := newCatchUpTestReader(t)
+		r.StartAfterMessageID = start.MessageID()
+		h := &catchUpTestHandler{}
+		input := newCatchUpTestInput(start)
 		if start.MessageType() != message.MessageTypeAlterWAL {
-			input = historyInput(start, historyAlter(20))
+			input = newCatchUpTestInput(start, catchUpAlterWAL(20))
 		}
-		cut, err := r.Read(t.Context(), input, h)
+		alterWALTimeTick, err := r.Read(t.Context(), input, h)
 		require.NoError(t, err)
-		require.EqualValues(t, 20, cut)
+		require.EqualValues(t, 20, alterWALTimeTick)
 		require.Empty(t, h.messages)
 	}
 }
 
-func TestHistoricalReaderLegacyMessagesShareTimeTick(t *testing.T) {
-	r := newHistoricalTestReader(t)
-	h := &historicalTestHandler{}
-	input := historyInput()
+func TestWALSwitchCatchUpPreservesLegacyMessagesSharingTimeTick(t *testing.T) {
+	r := newCatchUpTestReader(t)
+	h := &catchUpTestHandler{}
+	input := newCatchUpTestInput()
 	input.ch = make(chan message.ImmutableMessage, 3)
 	for _, id := range []int64{1, 2} {
 		payload, err := proto.Marshal(&msgpb.InsertRequest{
@@ -296,10 +296,10 @@ func TestHistoricalReaderLegacyMessagesShareTimeTick(t *testing.T) {
 		require.NoError(t, err)
 		input.ch <- message.NewImmutableMesasge(walimplstest.NewTestMessageID(id), payload, map[string]string{})
 	}
-	input.ch <- historyAlter(20)
-	cut, err := r.Read(t.Context(), input, h)
+	input.ch <- catchUpAlterWAL(20)
+	alterWALTimeTick, err := r.Read(t.Context(), input, h)
 	require.NoError(t, err)
-	require.EqualValues(t, 20, cut)
+	require.EqualValues(t, 20, alterWALTimeTick)
 	require.Len(t, h.messages, 2, "legacy records sharing a TimeTick are distinct messages")
 	for _, msg := range h.messages {
 		require.Equal(t, message.VersionOld, msg.Version())
@@ -307,38 +307,38 @@ func TestHistoricalReaderLegacyMessagesShareTimeTick(t *testing.T) {
 	}
 }
 
-func TestHistoricalReaderReassemblesChunksBeforeBoundary(t *testing.T) {
-	r := newHistoricalTestReader(t)
-	h := &historicalTestHandler{}
+func TestWALSwitchCatchUpReassemblesChunksBeforeAlterWAL(t *testing.T) {
+	r := newCatchUpTestReader(t)
+	h := &catchUpTestHandler{}
 	mutable := message.NewDeleteMessageBuilderV1().WithVChannel("v1").WithHeader(&message.DeleteMessageHeader{}).
 		WithBody(&msgpb.DeleteRequest{CollectionID: 1, Int64PrimaryKeys: []int64{1, 2, 3, 4, 5}}).MustBuildMutable().
 		WithTimeTick(10).WithLastConfirmed(walimplstest.NewTestMessageID(0))
 	parts := message.SplitIntoChunks(mutable, 3)
 	require.Greater(t, len(parts), 1)
-	input := historyInput()
+	input := newCatchUpTestInput()
 	input.ch = make(chan message.ImmutableMessage, len(parts)+1)
 	for i, part := range parts {
 		input.ch <- part.IntoImmutableMessage(walimplstest.NewTestMessageID(int64(i + 1)))
 	}
-	input.ch <- historyAlter(20)
+	input.ch <- catchUpAlterWAL(20)
 	_, err := r.Read(t.Context(), input, h)
 	require.NoError(t, err)
 	require.Len(t, h.messages, 1)
 	require.Equal(t, mutable.IntoMessageProto().Payload, h.messages[0].Payload())
 }
 
-func TestHistoricalReaderRejectsCorruptChunks(t *testing.T) {
-	r := newHistoricalTestReader(t)
+func TestWALSwitchCatchUpRejectsMalformedChunks(t *testing.T) {
+	r := newCatchUpTestReader(t)
 	corrupted := message.NewMutableMessageBeforeAppend([]byte("broken"), map[string]string{
 		"_t": "x", "_tt": "!", "_ci": "0", "_ct": "2", "_v": message.VersionV1.String(),
 	}).IntoImmutableMessage(walimplstest.NewTestMessageID(1))
-	cut, err := r.Read(t.Context(), historyInput(corrupted, historyAlter(20)), &historicalTestHandler{})
-	require.Zero(t, cut)
+	alterWALTimeTick, err := r.Read(t.Context(), newCatchUpTestInput(corrupted, catchUpAlterWAL(20)), &catchUpTestHandler{})
+	require.Zero(t, alterWALTimeTick)
 	require.Error(t, err)
 	require.True(t, status.AsStreamingError(err).IsUnrecoverable())
 }
 
-func TestHistoricalReaderReadsStandaloneRocksMQAfterWriterClose(t *testing.T) {
+func TestWALSwitchCatchUpReadsRocksMQHistoryAfterWriterClose(t *testing.T) {
 	paramtable.Init()
 	oldRole := paramtable.GetRole()
 	paramtable.SetRole(typeutil.StandaloneRole)
@@ -368,21 +368,21 @@ func TestHistoricalReaderReadsStandaloneRocksMQAfterWriterClose(t *testing.T) {
 	_, err = writer.Append(t.Context(), marker)
 	require.NoError(t, err)
 	writer.Close()
-	h := &historicalTestHandler{}
+	h := &catchUpTestHandler{}
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
-	cut, err := ReadHistoricalWAL(ctx, HistoricalReadOptions{
+	alterWALTimeTick, err := CatchUpWALAfterSwitch(ctx, WALSwitchCatchUpOptions{
 		PChannel: channel.Name, VChannel: "v1", DeliverPolicy: options.DeliverPolicyStartFrom(firstID), MessageHandler: h,
 	})
 	require.NoError(t, err)
-	require.EqualValues(t, 30, cut)
+	require.EqualValues(t, 30, alterWALTimeTick)
 	require.Len(t, h.messages, 2)
 	require.EqualValues(t, 10, h.messages[0].TimeTick())
 	require.EqualValues(t, 20, h.messages[1].TimeTick())
 	require.False(t, h.closed)
 }
 
-func TestHistoricalReaderConcurrentRocksMQWritesEndAtAlterWAL(t *testing.T) {
+func TestWALSwitchCatchUpOrdersConcurrentRocksMQWritesThroughAlterWAL(t *testing.T) {
 	paramtable.Init()
 	oldRole := paramtable.GetRole()
 	paramtable.SetRole(typeutil.StandaloneRole)
@@ -400,17 +400,17 @@ func TestHistoricalReaderConcurrentRocksMQWritesEndAtAlterWAL(t *testing.T) {
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
-	h := &historicalTestHandler{}
+	h := &catchUpTestHandler{}
 	type outcome struct {
-		cut uint64
-		err error
+		alterWALTimeTick uint64
+		err              error
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		cut, err := ReadHistoricalWAL(ctx, HistoricalReadOptions{
+		alterWALTimeTick, err := CatchUpWALAfterSwitch(ctx, WALSwitchCatchUpOptions{
 			PChannel: channel.Name, VChannel: "v1", DeliverPolicy: options.DeliverPolicyStartFrom(rmqwal.NewRmqID(-1)), MessageHandler: h,
 		})
-		done <- outcome{cut, err}
+		done <- outcome{alterWALTimeTick, err}
 	}()
 	var tick atomic.Uint64
 	var producers sync.WaitGroup
@@ -447,17 +447,17 @@ func TestHistoricalReaderConcurrentRocksMQWritesEndAtAlterWAL(t *testing.T) {
 		t.Fatalf("reader completed before AlterWAL: %+v", result)
 	default:
 	}
-	cut := tick.Add(1)
+	alterWALTimeTick := tick.Add(1)
 	marker := message.NewAlterWALMessageBuilderV2().WithAllVChannel().
 		WithHeader(&message.AlterWALMessageHeader{TargetWalName: commonpb.WALName_WoodPecker}).
-		WithBody(&message.AlterWALMessageBody{}).MustBuildMutable().WithTimeTick(cut).WithLastConfirmedUseMessageID()
+		WithBody(&message.AlterWALMessageBody{}).MustBuildMutable().WithTimeTick(alterWALTimeTick).WithLastConfirmedUseMessageID()
 	_, err = writer.Append(ctx, marker)
 	require.NoError(t, err)
 	writer.Close()
 	select {
 	case result := <-done:
 		require.NoError(t, result.err)
-		require.Equal(t, cut, result.cut)
+		require.Equal(t, alterWALTimeTick, result.alterWALTimeTick)
 	case <-ctx.Done():
 		t.Fatal("reader did not finish at AlterWAL")
 	}

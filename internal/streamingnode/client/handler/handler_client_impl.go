@@ -250,44 +250,44 @@ func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerO
 	// Use a local variable to track DeliverPolicy, so modifications in the closure don't affect the original opts
 	deliverPolicy := opts.DeliverPolicy
 	deliverFilters := append([]options.DeliverFilter(nil), opts.DeliverFilters...)
-	caughtUp := false
-	catchUp := func() error {
+	oldWALCaughtUp := false
+	catchUpOldWAL := func() error {
 		// Legacy records may need a VChannel lookup. Current-format reads
 		// never create this client or initialize any SN resources.
-		var mix milvustypes.MixCoordClient
-		var legacy *vchantempstore.VChannelTempStorage
+		var mixCoordClient milvustypes.MixCoordClient
+		var legacyVChannelLookup *vchantempstore.VChannelTempStorage
 		defer func() {
-			if mix != nil {
-				_ = mix.Close()
+			if mixCoordClient != nil {
+				_ = mixCoordClient.Close()
 			}
 		}()
-		cut, err := utility.ReadHistoricalWAL(ctx, utility.HistoricalReadOptions{
+		alterWALTimeTick, err := utility.CatchUpWALAfterSwitch(ctx, utility.WALSwitchCatchUpOptions{
 			PChannel: opts.PChannel, VChannel: opts.VChannel,
 			DeliverPolicy: deliverPolicy, DeliverFilters: deliverFilters,
 			MessageHandler: opts.MessageHandler, IgnorePauseConsumption: opts.IgnorePauseConsumption,
-			ResolveVChannel: func(ctx context.Context, collection int64, pchannel string) (string, error) {
-				if legacy == nil {
+			ResolveVChannel: func(ctx context.Context, collectionID int64, pchannel string) (string, error) {
+				if legacyVChannelLookup == nil {
 					var err error
-					mix, err = grpcmixcoordclient.NewClient(ctx)
+					mixCoordClient, err = grpcmixcoordclient.NewClient(ctx)
 					if err != nil {
 						return "", err
 					}
-					future := syncutil.NewFuture[milvustypes.MixCoordClient]()
-					future.Set(mix)
-					legacy = vchantempstore.NewVChannelTempStorage(future)
+					mixCoordClientFuture := syncutil.NewFuture[milvustypes.MixCoordClient]()
+					mixCoordClientFuture.Set(mixCoordClient)
+					legacyVChannelLookup = vchantempstore.NewVChannelTempStorage(mixCoordClientFuture)
 				}
-				return legacy.GetVChannelByPChannelOfCollection(ctx, collection, pchannel)
+				return legacyVChannelLookup.GetVChannelByPChannelOfCollection(ctx, collectionID, pchannel)
 			},
 		})
 		if err != nil {
 			return err
 		}
 		deliverPolicy = options.DeliverPolicyAll()
-		deliverFilters = append(deliverFilters, options.DeliverFilterTimeTickGT(cut))
-		caughtUp = true
+		deliverFilters = append(deliverFilters, options.DeliverFilterTimeTickGT(alterWALTimeTick))
+		oldWALCaughtUp = true
 		return nil
 	}
-	create := func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
+	createConsumer := func(ctx context.Context, assign *types.PChannelInfoAssigned) (any, error) {
 		// Check if the localWAL is assigned at local
 		localWAL, err := registry.GetLocalAvailableWAL(assign.Channel)
 		if err == nil {
@@ -300,8 +300,8 @@ func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerO
 			})
 			// Catch up the old WAL before retrying the new WAL with DeliverPolicyAll.
 			if err != nil && status.AsStreamingError(err).IsWALNameMismatch() {
-				if catchupErr := catchUp(); catchupErr != nil {
-					return nil, catchupErr
+				if catchUpErr := catchUpOldWAL(); catchUpErr != nil {
+					return nil, catchUpErr
 				}
 				logger.Info(ctx, "historical WAL catch-up completed, retry with DeliverPolicyAll", mlog.Err(err))
 				return nil, err
@@ -331,8 +331,8 @@ func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerO
 
 		// Catch up the old WAL before retrying the new WAL with DeliverPolicyAll.
 		if err != nil && status.AsStreamingError(err).IsWALNameMismatch() {
-			if catchupErr := catchUp(); catchupErr != nil {
-				return nil, catchupErr
+			if catchUpErr := catchUpOldWAL(); catchUpErr != nil {
+				return nil, catchUpErr
 			}
 			logger.Info(ctx, "historical WAL catch-up completed, retry with DeliverPolicyAll", mlog.Err(err))
 			return nil, err
@@ -343,21 +343,21 @@ func (hc *handlerClientImpl) CreateConsumer(ctx context.Context, opts *ConsumerO
 		}
 		return remoteScanner, nil
 	}
-	c, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, opts.PChannel, create)
-	// A failed live subscription must retain the completed catch-up locally;
+	c, err := hc.createHandlerAfterStreamingNodeReady(ctx, logger, opts.PChannel, createConsumer)
+	// A failed live subscription must retain the completed old-WAL catch-up locally;
 	// the outer construction retry still holds its original old-WAL options.
-	delay := 100 * time.Millisecond
-	for caughtUp && err != nil && ctx.Err() == nil && !errors.IsAny(err, context.Canceled, ErrClientClosed) {
+	liveRetryBackoff := 100 * time.Millisecond
+	for oldWALCaughtUp && err != nil && ctx.Err() == nil && !errors.IsAny(err, context.Canceled, ErrClientClosed) {
 		logger.RatedWarn(ctx, 1, "retry live subscription after historical WAL catch-up", mlog.Err(err))
-		timer := time.NewTimer(delay)
+		timer := time.NewTimer(liveRetryBackoff)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
 			return nil, ctx.Err()
 		case <-timer.C:
 		}
-		delay = min(delay*2, 5*time.Second)
-		c, err = hc.createHandlerAfterStreamingNodeReady(ctx, logger, opts.PChannel, create)
+		liveRetryBackoff = min(liveRetryBackoff*2, 5*time.Second)
+		c, err = hc.createHandlerAfterStreamingNodeReady(ctx, logger, opts.PChannel, createConsumer)
 	}
 	if err != nil {
 		return nil, err

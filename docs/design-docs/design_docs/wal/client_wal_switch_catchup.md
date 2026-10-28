@@ -17,7 +17,7 @@ process. The helper adds no RocksMQ bootstrap or restart recovery mechanism.
 ## Recovery sequence
 
 1. Local or remote consumer creation returns typed WALNameMismatch.
-2. The handler invokes ReadHistoricalWAL with the original position, filters and
+2. The handler invokes CatchUpWALAfterSwitch with the original position, filters and
    upper message handler. The helper opens the explicitly named backend read-only.
 3. Assemble chunks and reuse existing ReOrderBuffer, TxnBuffer and PendingQueue
    utilities to filter, deduplicate, order and deliver the old prefix.

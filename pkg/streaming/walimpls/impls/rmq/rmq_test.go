@@ -47,7 +47,7 @@ func TestRegistry(t *testing.T) {
 	assert.True(t, id.EQ(rmqID(-1)))
 }
 
-func TestRWClosePreservesTopicForHistoricalRead(t *testing.T) {
+func TestReadWriteWALClosePreservesHistoryForCatchUp(t *testing.T) {
 	opener, err := (&builderImpl{}).Build()
 	require.NoError(t, err)
 	defer opener.Close()

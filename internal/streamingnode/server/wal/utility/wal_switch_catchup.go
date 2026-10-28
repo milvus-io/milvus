@@ -26,13 +26,13 @@ import (
 )
 
 var (
-	historicalReadSlots = make(chan struct{}, 4)
-	historicalReadRate  = rate.NewLimiter(16<<20, 1<<20)
-	historicalReaderID  atomic.Int64
+	walCatchUpSlots       = make(chan struct{}, 4)
+	walCatchUpReadLimiter = rate.NewLimiter(16<<20, 1<<20)
+	walCatchUpScannerID   atomic.Int64
 )
 
-// HistoricalReadOptions describes one maintenance read of the previous WAL.
-type HistoricalReadOptions struct {
+// WALSwitchCatchUpOptions selects the old WAL position and messages to replay after a switch.
+type WALSwitchCatchUpOptions struct {
 	PChannel               string
 	VChannel               string
 	DeliverPolicy          options.DeliverPolicy
@@ -42,17 +42,17 @@ type HistoricalReadOptions struct {
 	ResolveVChannel        func(context.Context, int64, string) (string, error)
 }
 
-// ReadHistoricalWAL opens the explicitly named old backend read-only and drains
-// selected messages through AlterWAL. It never owns or closes MessageHandler.
-func ReadHistoricalWAL(ctx context.Context, opts HistoricalReadOptions) (uint64, error) {
-	var id, excluded message.MessageID
+// CatchUpWALAfterSwitch replays the old WAL read-only through AlterWAL and returns
+// its TimeTick after selected messages are handled. It never closes MessageHandler.
+func CatchUpWALAfterSwitch(ctx context.Context, opts WALSwitchCatchUpOptions) (uint64, error) {
+	var startMessageID, startAfterMessageID message.MessageID
 	var err error
 	switch policy := opts.DeliverPolicy.GetPolicy().(type) {
 	case *streamingpb.DeliverPolicy_StartFrom:
-		id, err = message.UnmarshalMessageID(policy.StartFrom)
+		startMessageID, err = message.UnmarshalMessageID(policy.StartFrom)
 	case *streamingpb.DeliverPolicy_StartAfter:
-		id, err = message.UnmarshalMessageID(policy.StartAfter)
-		excluded = id
+		startMessageID, err = message.UnmarshalMessageID(policy.StartAfter)
+		startAfterMessageID = startMessageID
 	default:
 		return 0, status.NewUnrecoverableError("historical catch-up requires a WAL-specific position")
 	}
@@ -60,74 +60,74 @@ func ReadHistoricalWAL(ctx context.Context, opts HistoricalReadOptions) (uint64,
 		return 0, merr.Wrap(err, "decode historical WAL position")
 	}
 	// Open inclusively so StartAfter on AlterWAL cannot hide the stop marker.
-	opts.DeliverPolicy = options.DeliverPolicyStartFrom(id)
+	opts.DeliverPolicy = options.DeliverPolicyStartFrom(startMessageID)
 	select {
-	case historicalReadSlots <- struct{}{}:
-		defer func() { <-historicalReadSlots }()
+	case walCatchUpSlots <- struct{}{}:
+		defer func() { <-walCatchUpSlots }()
 	case <-ctx.Done():
 		return 0, ctx.Err()
 	}
 	// RocksMQ shares the existing standalone server during this switch.
-	if id.WALName() == message.WALNameRocksmq && (!paramtable.IsStandalone() || server.Rmq == nil) {
+	if startMessageID.WALName() == message.WALNameRocksmq && (!paramtable.IsStandalone() || server.Rmq == nil) {
 		return 0, status.NewUnrecoverableError("historical RocksMQ requires the existing standalone server")
 	}
 	// Backend init registers its ID unmarshaler and builder together, so a
 	// successfully decoded position already identifies a registered backend.
-	opener, err := registry.MustGetBuilder(id.WALName()).Build()
+	opener, err := registry.MustGetBuilder(startMessageID.WALName()).Build()
 	if err != nil {
 		return 0, err
 	}
 	defer opener.Close()
-	return readHistoricalWAL(ctx, opts, excluded, opener)
+	return catchUpWALWithRetry(ctx, opts, startAfterMessageID, opener)
 }
 
 // Once any output has been handled, retry here with its checkpoint instead of
 // returning stale construction options to Resuming. All state is call-local.
-func readHistoricalWAL(ctx context.Context, opts HistoricalReadOptions, excluded message.MessageID, opener walimpls.OpenerImpls) (uint64, error) {
+func catchUpWALWithRetry(ctx context.Context, opts WALSwitchCatchUpOptions, startAfterMessageID message.MessageID, opener walimpls.OpenerImpls) (uint64, error) {
 	logger := mlog.With(mlog.FieldPChannel(opts.PChannel), mlog.FieldVChannel(opts.VChannel))
 	channel := types.PChannelInfo{Name: opts.PChannel, AccessMode: types.AccessModeRO}
 	metrics := metricsutil.NewScanMetrics(channel).NewScannerMetrics()
 	// Standalone may share these metric series with SN; release this scanner's
 	// contribution without deleting the shared series.
 	defer metrics.Close()
-	progress := &historicalProgress{Handler: opts.MessageHandler}
-	backoff := 100 * time.Millisecond
+	progress := &catchUpProgressHandler{Handler: opts.MessageHandler}
+	readRetryBackoff := 100 * time.Millisecond
 	for {
 		for !opts.IgnorePauseConsumption && paramtable.Get().StreamingCfg.WALScannerPauseConsumption.GetAsBool() {
-			if err := waitHistoricalRetry(ctx, 100*time.Millisecond); err != nil {
+			if err := waitForCatchUpRetry(ctx, 100*time.Millisecond); err != nil {
 				return 0, err
 			}
 		}
-		cut, err := func() (uint64, error) {
+		alterWALTimeTick, err := func() (uint64, error) {
 			w, err := opener.Open(ctx, &walimpls.OpenOption{Channel: channel})
 			if err != nil {
 				return 0, err
 			}
 			defer w.Close()
 			scanner, err := w.Read(ctx, walimpls.ReadOption{
-				Name:          fmt.Sprintf("historical-%d-%d", paramtable.GetNodeID(), historicalReaderID.Add(1)),
+				Name:          fmt.Sprintf("wal-switch-catchup-%d-%d", paramtable.GetNodeID(), walCatchUpScannerID.Add(1)),
 				DeliverPolicy: opts.DeliverPolicy, ReadAheadBufferSize: 1,
 			})
 			if err != nil {
 				return 0, err
 			}
 			defer scanner.Close()
-			r := newHistoricalReader(opts.PChannel, opts.VChannel, logger, metrics, opts.DeliverFilters)
-			r.ResolveVChannel, r.WaitRead, r.ExcludeMessageID = opts.ResolveVChannel, waitHistoricalRead, excluded
+			r := newWALSwitchCatchUpReader(opts.PChannel, opts.VChannel, logger, metrics, opts.DeliverFilters)
+			r.ResolveVChannel, r.WaitForReadBudget, r.StartAfterMessageID = opts.ResolveVChannel, waitForCatchUpReadBudget, startAfterMessageID
 			return r.Read(ctx, scanner, progress)
 		}()
 		if err == nil {
-			return cut, nil
+			return alterWALTimeTick, nil
 		}
 		if ctx.Err() != nil {
 			return 0, ctx.Err()
 		}
-		if errors.Is(err, context.Canceled) || progress.last == nil {
+		if errors.Is(err, context.Canceled) || progress.lastHandledMessage == nil {
 			return 0, err
 		}
-		if confirmed := progress.last.LastConfirmedMessageID(); confirmed != nil {
-			opts.DeliverPolicy = options.DeliverPolicyStartFrom(confirmed)
-			excluded = nil
+		if lastConfirmedMessageID := progress.lastHandledMessage.LastConfirmedMessageID(); lastConfirmedMessageID != nil {
+			opts.DeliverPolicy = options.DeliverPolicyStartFrom(lastConfirmedMessageID)
+			startAfterMessageID = nil
 		}
 		filters := make([]options.DeliverFilter, 0, len(opts.DeliverFilters)+1)
 		for _, filter := range opts.DeliverFilters {
@@ -135,20 +135,20 @@ func readHistoricalWAL(ctx context.Context, opts HistoricalReadOptions, excluded
 				filters = append(filters, filter)
 			}
 		}
-		if progress.last.Version() == message.VersionOld {
-			opts.DeliverFilters = append(filters, options.DeliverFilterTimeTickGTE(progress.last.TimeTick()))
+		if progress.lastHandledMessage.Version() == message.VersionOld {
+			opts.DeliverFilters = append(filters, options.DeliverFilterTimeTickGTE(progress.lastHandledMessage.TimeTick()))
 		} else {
-			opts.DeliverFilters = append(filters, options.DeliverFilterTimeTickGT(progress.last.TimeTick()))
+			opts.DeliverFilters = append(filters, options.DeliverFilterTimeTickGT(progress.lastHandledMessage.TimeTick()))
 		}
 		logger.RatedWarn(ctx, 1, "retry historical WAL from successfully handled progress", mlog.Err(err))
-		if err := waitHistoricalRetry(ctx, backoff); err != nil {
+		if err := waitForCatchUpRetry(ctx, readRetryBackoff); err != nil {
 			return 0, err
 		}
-		backoff = min(backoff*2, 5*time.Second)
+		readRetryBackoff = min(readRetryBackoff*2, 5*time.Second)
 	}
 }
 
-func waitHistoricalRetry(ctx context.Context, delay time.Duration) error {
+func waitForCatchUpRetry(ctx context.Context, delay time.Duration) error {
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	select {
@@ -159,10 +159,10 @@ func waitHistoricalRetry(ctx context.Context, delay time.Duration) error {
 	}
 }
 
-func waitHistoricalRead(ctx context.Context, size int) error {
+func waitForCatchUpReadBudget(ctx context.Context, size int) error {
 	for size > 0 {
-		n := min(size, historicalReadRate.Burst())
-		if err := historicalReadRate.WaitN(ctx, n); err != nil {
+		n := min(size, walCatchUpReadLimiter.Burst())
+		if err := walCatchUpReadLimiter.WaitN(ctx, n); err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
@@ -173,50 +173,50 @@ func waitHistoricalRead(ctx context.Context, size int) error {
 	return nil
 }
 
-type historicalProgress struct {
+type catchUpProgressHandler struct {
 	message.Handler
-	last message.ImmutableMessage
+	lastHandledMessage message.ImmutableMessage
 }
 
-func (p *historicalProgress) Handle(param message.HandleParam) message.HandleResult {
+func (p *catchUpProgressHandler) Handle(param message.HandleParam) message.HandleResult {
 	result := p.Handler.Handle(param)
 	if result.MessageHandled && param.Message != nil {
-		p.last = param.Message
+		p.lastHandledMessage = param.Message
 	}
 	return result
 }
 
-func (*historicalProgress) Close() {}
+func (*catchUpProgressHandler) Close() {}
 
-// historicalReader directly composes the existing low-level SN buffers. It has
+// walSwitchCatchUpReader directly composes the existing low-level SN buffers. It has
 // no WAB, scanner lifecycle, recovery catalog, or normal-reader mode to manage.
-type historicalReader struct {
-	legacyWindow     int
-	PChannel         string
-	VChannel         string
-	Metrics          *metricsutil.ScannerMetrics
-	Filter           func(message.ImmutableMessage) bool
-	ReorderBuffer    *ReOrderByTimeTickBuffer
-	TxnBuffer        *TxnBuffer
-	PendingQueue     *PendingQueue
-	ResolveVChannel  func(context.Context, int64, string) (string, error)
-	WaitRead         func(context.Context, int) error
-	ExcludeMessageID message.MessageID
+type walSwitchCatchUpReader struct {
+	legacyConfirmWindowSize int
+	PChannel                string
+	VChannel                string
+	Metrics                 *metricsutil.ScannerMetrics
+	Filter                  func(message.ImmutableMessage) bool
+	ReorderBuffer           *ReOrderByTimeTickBuffer
+	TxnBuffer               *TxnBuffer
+	PendingQueue            *PendingQueue
+	ResolveVChannel         func(context.Context, int64, string) (string, error)
+	WaitForReadBudget       func(context.Context, int) error
+	StartAfterMessageID     message.MessageID
 }
 
-func newHistoricalReader(pchannel, vchannel string, logger *mlog.Logger, metrics *metricsutil.ScannerMetrics, filters []options.DeliverFilter) *historicalReader {
-	window := paramtable.Get().StreamingCfg.OldVersionLastConfirmedWindowSize.GetAsInt()
-	return &historicalReader{
-		legacyWindow: window,
-		PChannel:     pchannel, VChannel: vchannel, Metrics: metrics,
+func newWALSwitchCatchUpReader(pchannel, vchannel string, logger *mlog.Logger, metrics *metricsutil.ScannerMetrics, filters []options.DeliverFilter) *walSwitchCatchUpReader {
+	legacyConfirmWindowSize := paramtable.Get().StreamingCfg.OldVersionLastConfirmedWindowSize.GetAsInt()
+	return &walSwitchCatchUpReader{
+		legacyConfirmWindowSize: legacyConfirmWindowSize,
+		PChannel:                pchannel, VChannel: vchannel, Metrics: metrics,
 		Filter: options.GetFilterFunc(filters), ReorderBuffer: NewReOrderBuffer(),
 		TxnBuffer: NewTxnBuffer(logger, metrics), PendingQueue: NewPendingQueue(),
 	}
 }
 
-func (r *historicalReader) Read(ctx context.Context, scanner walimpls.ScannerImpls, handler message.Handler) (uint64, error) {
+func (r *walSwitchCatchUpReader) Read(ctx context.Context, scanner walimpls.ScannerImpls, handler message.Handler) (uint64, error) {
 	var chunks message.ChunkAssembler
-	var legacyIDs []message.MessageID
+	var legacyMessageIDs []message.MessageID
 	for {
 		select {
 		case <-ctx.Done():
@@ -228,8 +228,8 @@ func (r *historicalReader) Read(ctx context.Context, scanner walimpls.ScannerImp
 				}
 				return 0, status.NewUnrecoverableError("historical WAL ended before AlterWAL on %s", r.PChannel)
 			}
-			if r.WaitRead != nil {
-				if err := r.WaitRead(ctx, msg.EstimateSize()); err != nil {
+			if r.WaitForReadBudget != nil {
+				if err := r.WaitForReadBudget(ctx, msg.EstimateSize()); err != nil {
 					return 0, err
 				}
 			}
@@ -246,12 +246,12 @@ func (r *historicalReader) Read(ctx context.Context, scanner walimpls.ScannerImp
 			if msg.Version() == message.VersionOld {
 				// Mirror the existing SN compatibility window locally; no normal
 				// scanner or tracker needs to change for this maintenance path.
-				legacyIDs = append(legacyIDs, msg.MessageID())
-				confirmed := legacyIDs[0]
-				if len(legacyIDs) > r.legacyWindow {
-					legacyIDs = legacyIDs[1:]
+				legacyMessageIDs = append(legacyMessageIDs, msg.MessageID())
+				lastConfirmedMessageID := legacyMessageIDs[0]
+				if len(legacyMessageIDs) > r.legacyConfirmWindowSize {
+					legacyMessageIDs = legacyMessageIDs[1:]
 				}
-				msg, err = ConvertOldVersionMessage(ctx, r.PChannel, confirmed, msg, r.ResolveVChannel)
+				msg, err = ConvertOldVersionMessage(ctx, r.PChannel, lastConfirmedMessageID, msg, r.ResolveVChannel)
 				if errors.Is(err, vchantempstore.ErrNotFound) {
 					continue
 				}
@@ -262,8 +262,8 @@ func (r *historicalReader) Read(ctx context.Context, scanner walimpls.ScannerImp
 					chunks.AdvanceTimeTick(msg.TimeTick())
 				}
 			}
-			end := msg.MessageType() == message.MessageTypeAlterWAL
-			if err := r.buffer(msg, end); err != nil {
+			isAlterWAL := msg.MessageType() == message.MessageTypeAlterWAL
+			if err := r.bufferMessage(msg, isAlterWAL); err != nil {
 				return 0, err
 			}
 			for r.PendingQueue.Len() > 0 {
@@ -276,7 +276,7 @@ func (r *historicalReader) Read(ctx context.Context, scanner walimpls.ScannerImp
 					r.Metrics.UpdatePendingQueueSize(r.PendingQueue.Bytes())
 					return pending.TimeTick(), nil
 				}
-				if r.ExcludeMessageID == nil || !pending.MessageID().EQ(r.ExcludeMessageID) {
+				if r.StartAfterMessageID == nil || !pending.MessageID().EQ(r.StartAfterMessageID) {
 					result := handler.Handle(message.HandleParam{Ctx: ctx, Message: pending})
 					if result.Error != nil {
 						return 0, result.Error
@@ -292,18 +292,18 @@ func (r *historicalReader) Read(ctx context.Context, scanner walimpls.ScannerImp
 	}
 }
 
-func (r *historicalReader) buffer(msg message.ImmutableMessage, end bool) error {
-	if !end && !r.Filter(msg) {
+func (r *walSwitchCatchUpReader) bufferMessage(msg message.ImmutableMessage, isAlterWAL bool) error {
+	if !isAlterWAL && !r.Filter(msg) {
 		return nil
 	}
 	r.Metrics.ObserveMessage(false, msg.MessageType(), msg.EstimateSize())
-	if end || messageutil.IsTimeTickConfirmBarrier(msg.MessageType()) {
+	if isAlterWAL || messageutil.IsTimeTickConfirmBarrier(msg.MessageType()) {
 		ordered := r.ReorderBuffer.PopUtilTimeTick(msg.TimeTick())
-		if end {
+		if isAlterWAL {
 			ordered = append(ordered, msg)
 		}
 		output := r.TxnBuffer.HandleImmutableMessages(ordered, msg.TimeTick())
-		if !end && (msg.MessageType() != message.MessageTypeTimeTick || msg.IsPersisted() || len(output) == 0) {
+		if !isAlterWAL && (msg.MessageType() != message.MessageTypeTimeTick || msg.IsPersisted() || len(output) == 0) {
 			output = append(output, msg)
 		}
 		r.PendingQueue.Add(output)

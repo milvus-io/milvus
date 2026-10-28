@@ -11,8 +11,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 )
 
-// ConvertOldVersionMessage creates a new immutable message from the old version message.
-// Because some old version message didn't have vchannel, so we need to recognize it from the pchnnel and some data field.
+// ConvertOldVersionMessage decodes a legacy V0 record into the streaming message
+// format while retaining its V0 version for resume filtering. Records without a
+// VChannel use resolveVChannel to look it up from the collection and PChannel.
 func ConvertOldVersionMessage(
 	ctx context.Context,
 	pchannel string,
