@@ -4741,6 +4741,42 @@ func TestQueryOrderByFields(t *testing.T) {
 	assert.Equal(t, []string{"word_count:desc,book_id:asc"}, orderByValues)
 }
 
+func TestQueryNegativeLimitOrOffset(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Times(3)
+
+	testEngine := initHTTPServerV2(mp, false)
+	validateTestCases(t, testEngine, []requestBodyTestCase{
+		{
+			path:        QueryAction,
+			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "limit": -1}`),
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+			errMsg:      "limit [-1] is invalid, should be greater than 0",
+		},
+		{
+			path:        QueryAction,
+			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "limit": -100, "offset": 1}`),
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+			errMsg:      "limit [-100] is invalid, should be greater than 0",
+		},
+		{
+			path:        QueryAction,
+			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "offset": -1}`),
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+			errMsg:      "offset [-1] is invalid, should be gte than 0",
+		},
+	}, false)
+}
+
 func TestQueryGroupByFields(t *testing.T) {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")

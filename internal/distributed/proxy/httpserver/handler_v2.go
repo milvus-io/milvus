@@ -1584,6 +1584,22 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 	}
 	req.ExprTemplateValues = templateValues
 	c.Set(ContextRequest, req)
+	if httpReq.Offset < 0 {
+		err := merr.WrapErrParameterInvalidMsg("offset [%d] is invalid, should be gte than 0", httpReq.Offset)
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: err.Error(),
+		})
+		return nil, err
+	}
+	if httpReq.Limit < 0 {
+		err := merr.WrapErrParameterInvalidMsg("limit [%d] is invalid, should be greater than 0", httpReq.Limit)
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(err),
+			HTTPReturnMessage: err.Error(),
+		})
+		return nil, err
+	}
 	if httpReq.Offset > 0 {
 		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: proxy.OffsetKey, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
 	}
