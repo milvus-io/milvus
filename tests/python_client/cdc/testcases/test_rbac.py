@@ -8,7 +8,7 @@ from common.common_type import CaseLabel
 from .base import TestCDCSyncBase, logger
 
 
-@pytest.mark.tags(CaseLabel.CDC)
+@pytest.mark.tags(CaseLabel.CDC, CaseLabel.L3)
 class TestCDCSyncRBAC(TestCDCSyncBase):
     """Test CDC sync for RBAC operations."""
 
@@ -701,7 +701,7 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
 
         # Wait for add privileges to sync
         def check_downstream():
-            client = upstream_client
+            client = downstream_client
             try:
                 groups = client.list_privilege_groups()
                 print(f"DEBUG: groups in check_add: {groups}")
@@ -795,7 +795,7 @@ class TestCDCSyncRBAC(TestCDCSyncBase):
 
         # Wait for add privileges to sync
         def check_downstream():
-            client = upstream_client
+            client = downstream_client
             try:
                 groups = client.list_privilege_groups()
                 print(f"DEBUG: groups in check_add: {groups}")
