@@ -430,6 +430,43 @@ Growing segments of the same schema seal at 0.6–2.9 M rows (112 MB × 0.12
 seal proportion, counted in 12 B insert rows, x86 standalone); on a 10 M-row
 insert the compaction outputs stayed at or below 3.45 M rows.
 
+**Varchar primary key, same stack and machine (2026-10-28).** 44 M rows with
+a 16-character zero-padded `varchar` pk and an `int32`, imported from one
+parquet file. With `max_length` 256 the estimate is 276 B per row, above the
+268 B threshold, so the target stays at 1 GB: import writes 2 segments of
+24.85 M and 19.15 M rows (241 MiB and 186 MiB of binlog). With `max_length`
+32 the estimate is 52 B and the target 208 MB: import writes 8 segments of
+4.67–6.54 M rows (45–63 MiB each), compaction outputs after the deletes are
+3.74–5.14 M rows.
+
+| Step | `max_length` 256 (no cap) | `max_length` 32 (208 MB) |
+|---|---:|---:|
+| Import | 69 s, 2 segments | 63 s, 8 segments |
+| `INVERTED` on `int32` | 16.6 s | 8.6 s |
+| Load with no index | 4.9 s, RSS +5.2 GB | 3.1 s, RSS +5.5 GB |
+| Delete 1 % by expression, stall | 0.36 s | 0.35 s |
+| Delete 10 % by expression, stall | 3.0 s | 2.74 s |
+| Delete 10 % by pk list, 44 × 100 k, stall | 0.08 s | 0.07 s |
+| Release and load again, 9.24 M deletes | 4.9 s | 3.5 s |
+| Point / count query | 1–4 ms | 1–3 ms |
+
+Before PR #54543 the same 10 % expression delete on one 44 M-row varchar
+segment was rejected by the query result size limit and a 1 % delete on eight
+segments stalled 2.7 s (Section 3.1).
+
+**Distributed deployment and gate flip (2026-10-28, x86).** The same branch
+run as five processes (mixcoord, proxy, querynode, datanode, streamingnode
+on Pulsar): create, insert, load with no index, query, delete, scalar index,
+manual compaction with visible outputs, and the `search` / add-vector-field
+rejections behave as in standalone. With a vectorless collection loaded,
+every role was restarted one at a time with
+`common.enableCollectionWithoutVector=false`: the existing collection kept
+serving count, insert, get, delete, filter queries and a release-and-load
+cycle, a new vectorless `CreateCollection` was rejected with
+"schema does not contain vector field", and collections with a vector field
+were created as before. Restarting the roles again with the default restored
+the vectorless create.
+
 ## References
 
 - Review comments on PR #53983 (xiaofan-luan, 2026-10-10) and review feedback from Li Liu (2026-10-21, phase split)
