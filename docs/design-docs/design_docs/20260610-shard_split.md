@@ -2004,7 +2004,13 @@ without finishing the promotion. So the ack of a replicated replica whose task
 is gone and whose append-first replicas are on record is dropped
 (`isLateReplicaOfRecordedBroadcast`): the record is written by the broadcast's
 own callback, which runs only once every replica is acked, so there is nothing
-left to wait for. The force-promote re-drive skips an incomplete task on record
+left to wait for. The lookup comes first and the record second, inside the one
+creation path (`getOrCreateBroadcastTask`), and the creation re-reads the map
+under the lock. A task is removed only after its callback completed, and the
+callback writes the record before it completes, so a task found missing and
+then not on record never completed here. Reading the record before the lookup
+would leave a window in which a task found present skips the record and is
+removed before the creation step rebuilds it from the one late replica. The force-promote re-drive skips an incomplete task on record
 the same way (`isRecordedComplete`), for an orphan built while the checker
 could not answer.
 
