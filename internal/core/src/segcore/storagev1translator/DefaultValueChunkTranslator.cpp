@@ -15,7 +15,6 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
-#include <numeric>
 
 #include "arrow/api.h"
 #include "arrow/array/builder_base.h"
@@ -45,8 +44,7 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
     bool mmap_populate,
     const std::string& warmup_policy,
     MmapChunkWritebackMode writeback_mode,
-    std::shared_ptr<const IStructElementOffsets> struct_offsets,
-    std::shared_ptr<const ChunkedColumnInterface> struct_provider)
+    std::shared_ptr<const IStructElementOffsets> struct_offsets)
     : total_rows_(field_data_info.row_count),
       segment_id_(segment_id),
       key_(
@@ -104,28 +102,6 @@ DefaultValueChunkTranslator::DefaultValueChunkTranslator(
                          meta_.vcid_to_cid_arr_);
 
     field_id_ = field_data_info.field_id;
-    if (struct_offsets_) {
-        struct_row_validity_.resize(total_rows_, !field_meta_.is_nullable());
-        if (struct_provider) {
-            milvus::OpContext op_ctx;
-            constexpr int64_t kValidityBatchRows = 4096;
-            for (int64_t begin = 0; begin < total_rows_;
-                 begin += kValidityBatchRows) {
-                const auto count =
-                    std::min(kValidityBatchRows, total_rows_ - begin);
-                std::vector<int64_t> row_ids(count);
-                std::iota(row_ids.begin(), row_ids.end(), begin);
-                struct_provider->BulkIsValid(
-                    &op_ctx,
-                    [&](bool valid, size_t index) {
-                        struct_row_validity_[begin + index] = valid;
-                    },
-                    row_ids.data(),
-                    count);
-            }
-        }
-    }
-
     // Buffer sharing is only safe for non-nullable fixed-width types, where
     // there is no null bitmap and data_start_ == data_ regardless of row count.
     // For nullable types, the null bitmap size (ceil(row_nums/8)) affects
@@ -270,6 +246,20 @@ DefaultValueChunkTranslator::key() const {
     return key_;
 }
 
+bool
+DefaultValueChunkTranslator::struct_row_is_valid(int64_t row) const {
+    // Sealed struct offsets are built from the struct's offsets provider
+    // (BuildFromColumn) or as all-zero offsets for a struct the segment
+    // predates (BuildAllZeros); both record the parent row validity, so the
+    // backfill takes it from the offsets and never reads a sibling column
+    // again. Offsets without row validity (growing offsets, used by tests)
+    // keep the previous rule: rows of a nullable struct are null.
+    if (struct_offsets_->HasRowValidity()) {
+        return struct_offsets_->IsRowValid(row);
+    }
+    return !field_meta_.is_nullable();
+}
+
 milvus::ChunkBuffer
 DefaultValueChunkTranslator::build_buffer_for_rows(
     int64_t row_begin, int64_t num_rows, const std::string& suffix) const {
@@ -285,7 +275,7 @@ DefaultValueChunkTranslator::build_buffer_for_rows(
         struct_offsets_->CopyRowElementStarts(
             row_begin, num_rows, starts.data());
         for (int64_t i = 0; i < num_rows; ++i) {
-            const bool valid = struct_row_validity_[row_begin + i] != 0;
+            const bool valid = struct_row_is_valid(row_begin + i);
             auto elements = starts[i + 1] - starts[i];
             AssertInfo(valid || elements == 0,
                        "null struct row {} has {} elements",

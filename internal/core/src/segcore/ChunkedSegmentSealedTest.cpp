@@ -193,6 +193,7 @@ struct OffsetsPreparationProbe {
     enum class Failure { None, Read, Cancel, Allocation };
     Failure failure = Failure::None;
     int calls = 0;
+    int bulk_is_valid_calls = 0;
 };
 
 class ProbedVectorArrayColumn : public ChunkedVectorArrayColumn {
@@ -218,6 +219,16 @@ class ProbedVectorArrayColumn : public ChunkedVectorArrayColumn {
             case OffsetsPreparationProbe::Failure::None:
                 return;
         }
+    }
+
+    void
+    BulkIsValid(OpContext* op_ctx,
+                std::function<void(bool, size_t)> fn,
+                const int64_t* offsets = nullptr,
+                int64_t count = 0) const override {
+        ++probe_->bulk_is_valid_calls;
+        ChunkedVectorArrayColumn::BulkIsValid(
+            op_ctx, std::move(fn), offsets, count);
     }
 
  private:
@@ -1043,6 +1054,89 @@ TEST(test_chunk_segment, ReopenBackfillsNullableStructRows) {
     auto result = segment->bulk_subscript(&op_ctx, added, row_ids, 3);
     const auto& validity = GetFieldDataRowValidData(*result);
     ASSERT_EQ(validity.size(), 3);
+    EXPECT_TRUE(validity[0]);
+    EXPECT_FALSE(validity[1]);
+    EXPECT_TRUE(validity[2]);
+    EXPECT_EQ(result->scalars().array_data().data(0).valid_data_size(), 2);
+    EXPECT_EQ(result->scalars().array_data().data(1).valid_data_size(), 0);
+    EXPECT_EQ(result->scalars().array_data().data(2).valid_data_size(), 2);
+}
+
+// The backfill of an added element-nullable sub-field takes the parent row
+// validity from the struct offsets, which were built from the scalar child.
+// It must not read the validity of a VectorArray sibling that comes first in
+// the schema, because reading it pins the vector payload of a cold column.
+TEST(test_chunk_segment,
+     ReopenBackfillReadsRowValidityFromOffsetsNotVectorSibling) {
+    auto schema = std::make_shared<Schema>();
+    schema->set_schema_version(1);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto vec = schema->AddDebugVectorArrayField(
+        "items[vec]", DataType::VECTOR_FLOAT, 2, knowhere::metric::L2, true);
+    auto ints =
+        schema->AddDebugArrayField("items[ints]", DataType::INT32, true);
+    constexpr int64_t rows = 3;
+    auto dataset = segcore::DataGen(schema, rows, 42, 0, 1, 2);
+    for (auto& data : *dataset.raw_->mutable_fields_data()) {
+        if (data.field_id() == ints.get()) {
+            MutableFieldDataRowValidData(&data)->Set(1, false);
+            data.mutable_scalars()
+                ->mutable_array_data()
+                ->mutable_data(1)
+                ->Clear();
+        }
+    }
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    auto probe = std::make_shared<OffsetsPreparationProbe>();
+    std::vector<std::vector<char>> buffers;
+    auto column = BuildNullableVectorArrayColumn(
+        (*schema)[vec],
+        2,
+        {{{true, {1, 2, 3, 4}}, {false, {}}, {true, {5, 6, 7, 8}}}},
+        buffers,
+        probe);
+    auto runtime = sealed->TestCloneMutableRuntimeResourceState();
+    runtime->fields[vec] = column;
+    sealed->TestPublishRuntimeResourceState(runtime);
+
+    auto next = std::make_shared<Schema>();
+    next->set_schema_version(2);
+    next->AddField(FieldName("pk"), pk, DataType::INT64, false, std::nullopt);
+    next->set_primary_field_id(pk);
+    next->AddField(FieldMeta(FieldName("items[vec]"),
+                             vec,
+                             DataType::VECTOR_ARRAY,
+                             DataType::VECTOR_FLOAT,
+                             2,
+                             knowhere::metric::L2,
+                             true,
+                             false));
+    next->AddField(FieldName("items[ints]"),
+                   ints,
+                   DataType::ARRAY,
+                   DataType::INT32,
+                   true,
+                   false);
+    FieldId added(ints.get() + 1);
+    next->AddField(FieldName("items[added]"),
+                   added,
+                   DataType::ARRAY,
+                   DataType::INT32,
+                   true,
+                   true);
+    segment->Reopen(next);
+
+    EXPECT_EQ(probe->bulk_is_valid_calls, 0);
+    const int64_t row_ids[] = {0, 1, 2};
+    milvus::OpContext op_ctx;
+    auto result = segment->bulk_subscript(&op_ctx, added, row_ids, rows);
+    const auto& validity = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(validity.size(), rows);
     EXPECT_TRUE(validity[0]);
     EXPECT_FALSE(validity[1]);
     EXPECT_TRUE(validity[2]);

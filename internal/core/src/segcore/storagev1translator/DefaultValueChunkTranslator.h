@@ -28,7 +28,6 @@
 #include "common/FieldMeta.h"
 #include "common/OpContext.h"
 #include "mmap/Types.h"
-#include "mmap/ChunkedColumnInterface.h"
 #include "segcore/storagev1translator/ChunkTranslator.h"
 
 namespace milvus::segcore::storagev1translator {
@@ -45,9 +44,7 @@ class DefaultValueChunkTranslator
         bool mmap_populate,
         const std::string& warmup_policy,
         MmapChunkWritebackMode writeback_mode,
-        std::shared_ptr<const IStructElementOffsets> struct_offsets = nullptr,
-        std::shared_ptr<const ChunkedColumnInterface> struct_provider =
-            nullptr);
+        std::shared_ptr<const IStructElementOffsets> struct_offsets = nullptr);
     ~DefaultValueChunkTranslator() override;
     size_t
     num_cells() const override;
@@ -82,6 +79,10 @@ class DefaultValueChunkTranslator
 
  private:
     // Build a ChunkBuffer for the given number of rows
+    // Parent struct row validity of a backfilled struct sub-field row.
+    bool
+    struct_row_is_valid(int64_t row) const;
+
     milvus::ChunkBuffer
     build_buffer_for_rows(int64_t row_begin,
                           int64_t num_rows,
@@ -117,7 +118,6 @@ class DefaultValueChunkTranslator
     CTMeta meta_;
     milvus::FieldMeta field_meta_;
     std::shared_ptr<const IStructElementOffsets> struct_offsets_;
-    std::vector<uint8_t> struct_row_validity_;
 };
 
 }  // namespace milvus::segcore::storagev1translator

@@ -8997,7 +8997,6 @@ ChunkedSegmentSealedImpl::fill_empty_field(
     auto warmup_policy = resolve_field_data_warmup_policy(
         field_id, segment_load_info, schema_snapshot);
     std::shared_ptr<const IStructElementOffsets> struct_offsets;
-    std::shared_ptr<const ChunkedColumnInterface> struct_provider;
     if (auto name = field_meta.is_element_nullable()
                         ? GetStructNameForArrayField(field_meta)
                         : std::nullopt) {
@@ -9015,27 +9014,6 @@ ChunkedSegmentSealedImpl::fill_empty_field(
             runtime.struct_to_element_offsets[*name] = zeros;
             struct_offsets = zeros;
         }
-        std::shared_ptr<const ChunkedColumnInterface> filled_provider;
-        for (auto sibling_id : schema_snapshot->get_field_ids()) {
-            if (GetStructNameForArrayField((*schema_snapshot)[sibling_id]) ==
-                    name &&
-                sibling_id != field_id) {
-                auto column = runtime.fields.find(sibling_id);
-                if (column != runtime.fields.end()) {
-                    if (!segment_load_info.IsFieldFilledWithDefault(
-                            sibling_id)) {
-                        struct_provider = column->second;
-                        break;
-                    }
-                    if (!filled_provider) {
-                        filled_provider = column->second;
-                    }
-                }
-            }
-        }
-        if (!struct_provider) {
-            struct_provider = std::move(filled_provider);
-        }
     }
     std::unique_ptr<cachinglayer::Translator<milvus::Chunk>> translator =
         std::make_unique<storagev1translator::DefaultValueChunkTranslator>(
@@ -9046,8 +9024,7 @@ ChunkedSegmentSealedImpl::fill_empty_field(
             mmap_config.GetMmapPopulate(),
             warmup_policy,
             writeback_mode,
-            struct_offsets,
-            struct_provider);
+            struct_offsets);
     auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot(
         std::move(translator), nullptr);
     auto column = MakeChunkedColumnBase(data_type, std::move(slot), field_meta);
@@ -9241,7 +9218,6 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
         auto warmup_policy = resolve_field_data_warmup_policy(
             field_id, segment_load_info, schema_snapshot);
         std::shared_ptr<const IStructElementOffsets> struct_offsets;
-        std::shared_ptr<const ChunkedColumnInterface> struct_provider;
         if (auto name = field_meta.is_element_nullable()
                             ? GetStructNameForArrayField(field_meta)
                             : std::nullopt) {
@@ -9260,27 +9236,6 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
                 committer.runtime()->struct_to_element_offsets[*name] = zeros;
                 struct_offsets = zeros;
             }
-            std::shared_ptr<const ChunkedColumnInterface> filled_provider;
-            for (auto sibling_id : schema_snapshot->get_field_ids()) {
-                if (GetStructNameForArrayField(
-                        (*schema_snapshot)[sibling_id]) == name &&
-                    sibling_id != field_id) {
-                    auto column = committer.runtime()->fields.find(sibling_id);
-                    if (column != committer.runtime()->fields.end()) {
-                        if (!segment_load_info.IsFieldFilledWithDefault(
-                                sibling_id)) {
-                            struct_provider = column->second;
-                            break;
-                        }
-                        if (!filled_provider) {
-                            filled_provider = column->second;
-                        }
-                    }
-                }
-            }
-            if (!struct_provider) {
-                struct_provider = std::move(filled_provider);
-            }
         }
         std::unique_ptr<cachinglayer::Translator<milvus::Chunk>> translator =
             std::make_unique<storagev1translator::DefaultValueChunkTranslator>(
@@ -9291,8 +9246,7 @@ ChunkedSegmentSealedImpl::FillDefaultValueFields(
                 mmap_config.GetMmapPopulate(),
                 warmup_policy,
                 writeback_mode,
-                struct_offsets,
-                struct_provider);
+                struct_offsets);
         auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot(
             std::move(translator), nullptr);
         auto column =
