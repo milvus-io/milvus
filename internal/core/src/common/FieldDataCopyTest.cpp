@@ -234,6 +234,47 @@ TEST(FieldDataOwnershipTest, BinaryVectorListKeepsCompactPayload) {
     EXPECT_EQ(proto.float_vector().data_size(), 2);
 }
 
+// Rows of an element-nullable VECTOR_ARRAY hold only their valid vectors: a
+// row of null elements (an old row of a sub-field added to a struct) holds no
+// vector payload, and a partly null row holds exactly its valid vectors.
+TEST(FieldDataOwnershipTest, NullElementVectorArrayRowsHoldOnlyValidVectors) {
+    for (const auto type : {DataType::VECTOR_FLOAT,
+                            DataType::VECTOR_FLOAT16,
+                            DataType::VECTOR_BFLOAT16,
+                            DataType::VECTOR_INT8,
+                            DataType::VECTOR_BINARY}) {
+        constexpr int dim = 16;
+        constexpr int elements = 64;
+        const auto width = vector_bytes_per_element(type, dim);
+        arrow::ListBuilder builder(arrow::default_memory_pool(),
+                                   std::make_shared<arrow::BinaryBuilder>());
+        auto* values =
+            static_cast<arrow::BinaryBuilder*>(builder.value_builder());
+        const std::string vector(width, 'v');
+        ASSERT_TRUE(builder.Append().ok());
+        ASSERT_TRUE(values->AppendNulls(elements).ok());
+        ASSERT_TRUE(builder.Append().ok());
+        for (int i = 0; i < elements; ++i) {
+            ASSERT_TRUE((i == 3 || i == 40 ? values->Append(vector)
+                                           : values->AppendNull())
+                            .ok());
+        }
+        std::shared_ptr<arrow::Array> array;
+        ASSERT_TRUE(builder.Finish(&array).ok());
+
+        FieldData<VectorArray> data(dim, type);
+        data.FillFieldData(array);
+        ASSERT_EQ(data.Length(), 2);
+        const auto* rows = static_cast<const VectorArray*>(data.Data());
+        EXPECT_EQ(rows[0].length(), elements);
+        EXPECT_EQ(rows[0].physical_length(), 0);
+        EXPECT_EQ(rows[0].byte_size(), 0);
+        EXPECT_EQ(rows[1].length(), elements);
+        EXPECT_EQ(rows[1].physical_length(), 2);
+        EXPECT_EQ(rows[1].byte_size(), 2 * width);
+    }
+}
+
 TEST(FieldDataOwnershipTest, ScalarArraysSurviveSlicedArrowBatches) {
     for (bool nullable : {false, true}) {
         for (int capacity : {0, 32}) {

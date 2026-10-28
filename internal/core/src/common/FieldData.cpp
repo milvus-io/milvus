@@ -589,45 +589,73 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
                             list_array->value_offset(index + 1);
                         int64_t num_vectors = end_offset - start_offset;
 
-                        std::string compact;
-                        compact.reserve(num_vectors * bytes_per_vec);
+                        if (fixed_array != nullptr) {
+                            for (int64_t i = 0; i < num_vectors; i++) {
+                                AssertInfo(
+                                    fixed_array->IsValid(start_offset + i),
+                                    "non-element-nullable VECTOR_ARRAY "
+                                    "contains null element");
+                            }
+                            auto data_size = num_vectors * bytes_per_vec;
+                            auto data_ptr =
+                                data_size > 0
+                                    ? std::make_unique<char[]>(data_size)
+                                    : nullptr;
+                            if (data_size > 0) {
+                                milvus::fastmem::FastMemcpy(
+                                    data_ptr.get(),
+                                    fixed_array->GetValue(start_offset),
+                                    data_size);
+                            }
+                            values.emplace_back(std::move(data_ptr),
+                                                num_vectors,
+                                                dim,
+                                                element_type);
+                            continue;
+                        }
+
+                        // The compact payload holds only the valid vectors;
+                        // size it by their count, not by the row's logical
+                        // length, so a row of null elements (such as an old
+                        // row of a sub-field added to a struct) allocates no
+                        // vector payload.
+                        int64_t valid_vectors = 0;
+                        for (int64_t i = 0; i < num_vectors; i++) {
+                            valid_vectors +=
+                                binary_array->IsValid(start_offset + i);
+                        }
+                        auto data_ptr = valid_vectors > 0
+                                            ? std::make_unique<char[]>(
+                                                  valid_vectors * bytes_per_vec)
+                                            : nullptr;
                         std::vector<uint8_t> bitmap(
                             (num_vectors + 7) / 8 + sizeof(uint64_t), 0);
+                        int64_t physical = 0;
                         for (int64_t i = 0; i < num_vectors; i++) {
                             const auto item = start_offset + i;
-                            if (values_array->IsNull(item)) {
-                                AssertInfo(binary_array != nullptr,
-                                           "non-element-nullable VECTOR_ARRAY "
-                                           "contains null element");
+                            if (binary_array->IsNull(item)) {
                                 continue;
                             }
+                            auto value = binary_array->GetView(item);
+                            AssertInfo(value.size() == bytes_per_vec,
+                                       "VECTOR_ARRAY vector width {} "
+                                       "does not match {}",
+                                       value.size(),
+                                       bytes_per_vec);
                             bitmap[i >> 3] |= uint8_t{1} << (i & 7);
-                            if (binary_array != nullptr) {
-                                auto value = binary_array->GetView(item);
-                                AssertInfo(value.size() == bytes_per_vec,
-                                           "VECTOR_ARRAY vector width {} "
-                                           "does not match {}",
-                                           value.size(),
-                                           bytes_per_vec);
-                                compact.append(value.data(), value.size());
-                            } else {
-                                compact.append(reinterpret_cast<const char*>(
-                                                   fixed_array->GetValue(item)),
-                                               bytes_per_vec);
-                            }
+                            milvus::fastmem::FastMemcpy(
+                                data_ptr.get() + physical * bytes_per_vec,
+                                value.data(),
+                                bytes_per_vec);
+                            ++physical;
                         }
-                        if (binary_array != nullptr) {
-                            values.emplace_back(
-                                compact.data(),
-                                num_vectors,
-                                dim,
-                                element_type,
-                                TargetBitmapView(bitmap.data(), num_vectors),
-                                true);
-                        } else {
-                            values.emplace_back(
-                                compact.data(), num_vectors, dim, element_type);
-                        }
+                        values.emplace_back(
+                            std::move(data_ptr),
+                            num_vectors,
+                            dim,
+                            element_type,
+                            TargetBitmapView(bitmap.data(), num_vectors),
+                            true);
                     }
                     break;
                 }

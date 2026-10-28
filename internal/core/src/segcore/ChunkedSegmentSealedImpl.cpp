@@ -10681,10 +10681,19 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
                 int64_t num_vectors = end - start;
                 auto* vf = va->Add();
                 if (binary_values != nullptr) {
-                    std::string compact;
-                    compact.reserve(num_vectors * width);
+                    // Size the payload by the valid vectors only: a row of
+                    // null elements allocates no vector payload.
+                    int64_t valid_vectors = 0;
+                    for (int64_t j = 0; j < num_vectors; ++j) {
+                        valid_vectors += binary_values->IsValid(start + j);
+                    }
+                    auto payload =
+                        valid_vectors > 0
+                            ? std::make_unique<char[]>(valid_vectors * width)
+                            : nullptr;
                     std::vector<uint8_t> bitmap(
                         (num_vectors + 7) / 8 + sizeof(uint64_t), 0);
+                    int64_t physical = 0;
                     for (int64_t j = 0; j < num_vectors; ++j) {
                         if (binary_values->IsNull(start + j))
                             continue;
@@ -10696,10 +10705,14 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
                                    value.size(),
                                    width);
                         bitmap[j >> 3] |= uint8_t{1} << (j & 7);
-                        compact.append(value.data(), value.size());
+                        milvus::fastmem::FastMemcpy(
+                            payload.get() + physical * width,
+                            value.data(),
+                            width);
+                        ++physical;
                     }
                     VectorArray vec_arr(
-                        compact.data(),
+                        std::move(payload),
                         num_vectors,
                         dim,
                         element_type,

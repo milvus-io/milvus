@@ -104,3 +104,71 @@ func TestArrowFieldsToProtoRejectsNonemptyNullVectorArray(t *testing.T) {
 	_, err = arrowListToVectorArray(col, field, col.Len())
 	require.ErrorContains(t, err, "null ArrayOfVector row")
 }
+
+// The vector payload of an element-nullable VectorArray row is sized by its
+// valid elements: an all-null row reserves nothing, a partly null row
+// reserves exactly its valid vectors.
+func TestArrowListToVectorArrayReservesValidElementsOnly(t *testing.T) {
+	const dim = 16
+	for _, tc := range []struct {
+		elemType  schemapb.DataType
+		byteWidth int
+	}{
+		{schemapb.DataType_FloatVector, dim * 4},
+		{schemapb.DataType_Float16Vector, dim * 2},
+		{schemapb.DataType_BFloat16Vector, dim * 2},
+		{schemapb.DataType_Int8Vector, dim},
+		{schemapb.DataType_BinaryVector, dim / 8},
+	} {
+		t.Run(tc.elemType.String(), func(t *testing.T) {
+			field := &schemapb.FieldSchema{
+				FieldID: 104, Name: "vectors", DataType: schemapb.DataType_ArrayOfVector,
+				ElementType: tc.elemType, ElementNullable: true, Nullable: true,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "16"}},
+			}
+			typ, err := storage.ArrowTypeForField(field)
+			require.NoError(t, err)
+			b := array.NewBuilder(memory.DefaultAllocator, typ).(*array.ListBuilder)
+			defer b.Release()
+			child := b.ValueBuilder().(*array.BinaryBuilder)
+			vector := make([]byte, tc.byteWidth)
+			// Row 0: 64 null elements. Row 1: 64 elements, 2 of them valid.
+			b.Append(true)
+			child.AppendNulls(64)
+			b.Append(true)
+			for i := 0; i < 64; i++ {
+				if i == 3 || i == 40 {
+					child.Append(vector)
+				} else {
+					child.AppendNull()
+				}
+			}
+			col := b.NewArray()
+			defer col.Release()
+			result, err := arrowListToVectorArray(col, field, col.Len())
+			require.NoError(t, err)
+			rows := result.Vectors.GetVectorArray().GetData()
+			require.Len(t, rows, 2)
+			payloadCap := func(row *schemapb.VectorField) int {
+				switch data := row.GetData().(type) {
+				case *schemapb.VectorField_FloatVector:
+					return cap(data.FloatVector.GetData()) * 4
+				case *schemapb.VectorField_Float16Vector:
+					return cap(data.Float16Vector)
+				case *schemapb.VectorField_Bfloat16Vector:
+					return cap(data.Bfloat16Vector)
+				case *schemapb.VectorField_Int8Vector:
+					return cap(data.Int8Vector)
+				case *schemapb.VectorField_BinaryVector:
+					return cap(data.BinaryVector)
+				}
+				t.Fatalf("unexpected vector data %T", row.GetData())
+				return 0
+			}
+			require.Len(t, typeutil.GetVectorArrayElementValidData(rows[0]), 64)
+			require.Equal(t, 0, payloadCap(rows[0]))
+			require.Len(t, typeutil.GetVectorArrayElementValidData(rows[1]), 64)
+			require.Equal(t, 2*tc.byteWidth, payloadCap(rows[1]))
+		})
+	}
+}

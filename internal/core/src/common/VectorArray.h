@@ -40,16 +40,39 @@ class VectorArray : public milvus::VectorTrait {
                 int num_vectors,
                 int64_t dim,
                 DataType element_type)
+        : VectorArray(std::move(data),
+                      num_vectors,
+                      dim,
+                      element_type,
+                      TargetBitmapView(),
+                      false) {
+    }
+
+    // Takes ownership of data. num_vectors is the logical count. For an
+    // element-nullable row, data holds only the vectors selected by
+    // element_valid_data, in compact order, and may be null when none is
+    // valid.
+    VectorArray(std::unique_ptr<char[]> data,
+                int num_vectors,
+                int64_t dim,
+                DataType element_type,
+                const TargetBitmapView& element_valid_data,
+                bool element_nullable)
         : dim_(dim),
           data_(std::move(data)),
           length_(num_vectors),
-          physical_length_(num_vectors),
-          size_(num_vectors *
-                milvus::vector_bytes_per_element(element_type, dim)),
-          element_type_(element_type) {
-        assert(data_ != nullptr || num_vectors == 0);
+          element_type_(element_type),
+          element_nullable_(element_nullable) {
         assert(num_vectors >= 0);
         assert(dim > 0);
+
+        init_element_valid_data(element_valid_data);
+        physical_length_ = element_nullable_
+                               ? static_cast<int>(element_valid_data_.count())
+                               : length_;
+        size_ = physical_length_ *
+                milvus::vector_bytes_per_element(element_type, dim);
+        assert(data_ != nullptr || size_ == 0);
     }
 
     VectorArray(const void* data,

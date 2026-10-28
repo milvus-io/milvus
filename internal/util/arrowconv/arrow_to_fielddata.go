@@ -516,6 +516,11 @@ func arrowListToVectorArray(col arrow.Array, schema *schemapb.FieldSchema, numRo
 
 		vf := &schemapb.VectorField{Dim: dim}
 		length := int(end - start)
+		// The payload holds only the valid elements; size it by their count,
+		// not by the row's logical length. A sub-field added to a struct gives
+		// each old row N null elements, and reserving N vectors for them would
+		// keep that unused capacity alive in the result.
+		validCount := length
 		if !schema.GetElementNullable() {
 			for k := int(start); k < int(end); k++ {
 				if innerArr.IsNull(k) {
@@ -525,14 +530,18 @@ func arrowListToVectorArray(col arrow.Array, schema *schemapb.FieldSchema, numRo
 		}
 		if schema.GetElementNullable() {
 			valid := make([]bool, length)
+			validCount = 0
 			for k := int(start); k < int(end); k++ {
 				valid[k-int(start)] = innerArr.IsValid(k)
+				if valid[k-int(start)] {
+					validCount++
+				}
 			}
 			typeutil.SetVectorArrayElementValidData(vf, valid)
 		}
 		switch elemType {
 		case schemapb.DataType_FloatVector:
-			floatData := make([]float32, 0, length*int(dim))
+			floatData := make([]float32, 0, validCount*int(dim))
 			for k := int(start); k < int(end); k++ {
 				if innerArr.IsNull(k) {
 					continue
@@ -557,7 +566,7 @@ func arrowListToVectorArray(col arrow.Array, schema *schemapb.FieldSchema, numRo
 			case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
 				byteWidth *= 2
 			}
-			raw := make([]byte, 0, length*byteWidth)
+			raw := make([]byte, 0, validCount*byteWidth)
 			for k := int(start); k < int(end); k++ {
 				if innerArr.IsNull(k) {
 					continue
