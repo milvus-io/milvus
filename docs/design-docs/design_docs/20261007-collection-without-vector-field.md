@@ -238,14 +238,21 @@ keeps its current target. That covers every float vector with dim > 61. For
 target through the estimated row width, and each path then measures bytes in
 its own unit: import and compaction count binlog bytes, the StreamingNode
 seal counts the bytes of the insert messages. For `int64 + int32` a binlog
-row is about 10.6 B and an insert row 12 B, against the 28 B estimate, so a
-112 MB target gives import segments of 11–13 M rows, compaction outputs of
-up to 10 M rows and growing segments that seal at about 1 M rows (measured in
-Appendix B). The rows per segment are therefore
-`maxRows × rowWidth(c) / (bytes per row in that path)`, 2.5–3× `maxRows`
-for this schema. This is accepted: the per-segment costs the target bounds
-were measured at these sizes and are within budget, and the same byte rule
-on both sides is what keeps compaction from oscillating (next paragraph).
+row is about 11 B and an insert row 12 B, against the 28 B estimate. Measured
+with the 112 MB target (Appendix B): import keeps its own split and writes
+segments of 5.6–12.6 M rows, compaction outputs stay at or below 4.8 M rows,
+and growing segments seal at 0.6–2.9 M rows. The rows per segment are
+therefore `maxRows × rowWidth(c) / (bytes per row in that path)`, up to 3×
+`maxRows` on the import path for this schema. This is accepted: the
+per-segment costs the target bounds were measured at these sizes and are
+within budget, and the same byte rule on both sides is what keeps compaction
+from oscillating (next paragraph).
+
+The estimate counts the RowID and Timestamp columns exactly once. The schema
+RootCoord stores and hands to DataCoord and the StreamingNode carries them as
+two `int64` fields, so the helper subtracts them before adding the fixed
+16 B overhead; the first measurement on 2026-10-23 counted them twice
+(44 B per row, a 176 MB target) and was redone.
 A row count enforced as such would need the planner's fullness test, the
 writer's split and import assignment to count rows as well (Section 7).
 
@@ -400,27 +407,28 @@ Streaming insert of the narrow schema seals at 4.85–4.9 M rows (137 MB)
 against a 123 MB seal threshold. The wire size per row (26 B) is lower than
 `MemorySize` (29.6 B), the same ratio that applies to `maxSize` today.
 
-**Phase-1 stack, 2026-10-23 (aarch64, same machine).** Branch
-`nonvec-phase1-stack` on master `f0f7677664`: the four phase-1 changes plus
-PR #54543. Collection `int64` pk + `int32`, no vector field, 44 M rows
-imported from one parquet file, auto compaction on, `maxRows` 4 M.
+**Phase-1 stack, 2026-10-28 (aarch64, same machine).** Branch
+`nonvec-phase1-enable` at `5ee87283ba` on master `3f0e3b9a77` (PR #54543 is
+in master). Collection `int64` pk + `int32`, no vector field, 44 M rows
+imported from one parquet file, auto compaction on, `maxRows` 4 M, size
+target 112 MB.
 
 | Step | Result |
 |---|---:|
-| Import (48 s), segments after sort compaction | 5 segments: 12.59 M, 11.82 M, 11.19 M, 4.20 M, 4.20 M rows; binlog 10.6 B per row |
+| Import (48 s), segments after sort compaction | 5 segments: 12.59 M, 10.42 M, 8.39 M, 7.00 M, 5.60 M rows (59–133 MiB of binlog each, 11 B per row) |
 | `INVERTED` on `int32`, 44 M rows | 10.6 s (28.6 s on one 44 M segment, 8.5 s on eight) |
-| Load with no index | 3.5 s, RSS +3.6 GB (+5.3 GB before) |
-| Delete 1 % by expression, tsafe stall | 0.38 s (3.8 s before) |
-| Delete 10 % by expression, tsafe stall | 1.62 s (28.6 s before) |
-| Delete 10 % by pk list, 44 requests of 100 k, stall | 0.07 s (24 s before) |
-| Delete-ratio compaction after 20 % deleted | ran within 2 min, outputs visible, 8 segments, largest 7.19 M rows |
-| Release and load again, 9.24 M deletes replayed | 4.9 s |
+| Load with no index | 3.7 s, RSS +4.6 GB (+5.3 GB before) |
+| Delete 1 % by expression, tsafe stall | 0.17 s (3.8 s before) |
+| Delete 10 % by expression, tsafe stall | 1.32 s (28.6 s before) |
+| Delete 10 % by pk list, 44 requests of 100 k, stall | 0.06 s (24 s before) |
+| Delete-ratio compaction after 20 % deleted | ran within 2 min, outputs visible; 8 segments, compaction outputs 0.96–4.79 M rows, the untouched 10.42 M import segment kept |
+| Release and load again, 9.24 M deletes replayed | 3.5 s |
 | Point / filter / count query | 1–4 ms throughout |
 | `search`, `hybrid_search`, add vector field | rejected with the unified error; adding a scalar field succeeds |
 
-Growing segments of the same schema seal at 0.5–1.0 M rows (112 MB × 0.12
-seal proportion, counted in 12 B insert rows); on a 6 M-row insert the
-compaction outputs stayed at or below 2.8 M rows.
+Growing segments of the same schema seal at 0.6–2.9 M rows (112 MB × 0.12
+seal proportion, counted in 12 B insert rows, x86 standalone); on a 10 M-row
+insert the compaction outputs stayed at or below 3.45 M rows.
 
 ## References
 
