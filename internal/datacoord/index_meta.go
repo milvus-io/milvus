@@ -832,7 +832,7 @@ func (m *indexMeta) GetIndexesForCollection(collID UniqueID, indexName string) [
 // so the segment index machinery (build, readiness, describe progress) skips
 // it.
 func builtPerSegment(idx *model.Index) bool {
-	return indexparamcheck.IsBuiltPerSegment(indexparamcheck.IndexType(GetIndexType(idx.IndexParams)))
+	return indexparamcheck.IsBuiltPerSegment(GetIndexType(idx.IndexParams))
 }
 
 // GetBuiltPerSegmentIndexes returns the indexes of a collection that are not

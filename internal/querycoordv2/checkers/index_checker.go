@@ -225,7 +225,7 @@ func (c *IndexChecker) checkSegment(segment *meta.Segment, indexInfos []*indexpb
 // builtPerSegment reports whether segments build the index of indexInfo.
 // The primary key index has no segment index.
 func builtPerSegment(indexInfo *indexpb.IndexInfo) bool {
-	return indexparamcheck.IsBuiltPerSegment(indexparamcheck.IndexType(common.GetIndexType(indexInfo.GetIndexParams())))
+	return indexparamcheck.IsBuiltPerSegment(common.GetIndexType(indexInfo.GetIndexParams()))
 }
 
 // checkRedundantIndices returns redundant indexIDs for each segment
