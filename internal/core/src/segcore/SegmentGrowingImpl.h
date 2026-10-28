@@ -658,9 +658,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     std::shared_ptr<const IStructElementOffsets>
     GetStructElementOffsets(FieldId field_id) const override {
-        if (!get_schema_snapshot()->has_field(field_id)) {
-            return nullptr;
-        }
+        // No check against the current schema: a reader may have taken the
+        // previous schema before a Reopen published a new one, and the alias
+        // of a sub-field that schema dropped must still resolve for it (see
+        // Reopen). Field IDs are never reused, so a kept alias cannot answer
+        // for a different field.
         std::shared_lock lock(struct_element_offsets_map_mutex_);
         auto it = struct_element_offsets_map_.find(field_id);
         if (it != struct_element_offsets_map_.end()) {
