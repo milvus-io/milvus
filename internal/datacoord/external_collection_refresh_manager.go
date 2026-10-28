@@ -1184,7 +1184,7 @@ func (m *externalCollectionRefreshManager) exploreExternalFiles(
 	// Empty source is legal (see typeutil.IsExternalCollection); only validate
 	// when both present.
 	if job.GetExternalSource() != "" {
-		if err := externalspec.ValidateSourceAndSpec(job.GetExternalSource(), job.GetExternalSpec()); err != nil {
+		if err := externalspec.ValidateSourceAndSpecWithIAMPolicy(job.GetExternalSource(), job.GetExternalSpec(), paramtable.Get().CommonCfg.ForbidIAMOnCustomObjectStorage.GetAsBool()); err != nil {
 			return nil, "", merr.Wrap(err, "external source/spec failed revalidation")
 		}
 	}

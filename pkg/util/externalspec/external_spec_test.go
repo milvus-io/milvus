@@ -29,6 +29,47 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+func TestValidateSourceAndSpec_CustomEndpointIAM(t *testing.T) {
+	for _, enabled := range []string{"true", "false"} {
+		t.Run("forbid_"+enabled, func(t *testing.T) {
+			for _, test := range []struct {
+				name        string
+				credentials map[string]string
+				usesIAM     bool
+			}{
+				{"iam", map[string]string{"use_iam": "true"}, true},
+				{"role", map[string]string{"role_arn": "arn:aws:iam::1:role/r"}, true},
+				{"role_with_iam", map[string]string{"use_iam": "true", "role_arn": "arn:aws:iam::1:role/r"}, true},
+				{"role_with_iam_false", map[string]string{"use_iam": "false", "role_arn": "arn:aws:iam::1:role/r"}, true},
+				{"static", map[string]string{"access_key_id": "AK", "access_key_value": "SK"}, false},
+				{"static_iam_false", map[string]string{"use_iam": "false", "access_key_id": "AK", "access_key_value": "SK"}, false},
+				{"anonymous", map[string]string{"anonymous": "true"}, false},
+			} {
+				t.Run(test.name, func(t *testing.T) {
+					for _, endpoint := range []string{"", "https://storage.example.com"} {
+						extfs := map[string]string{"region": "us-east-1", "cloud_provider": "aws"}
+						for key, value := range test.credentials {
+							extfs[key] = value
+						}
+						if endpoint != "" {
+							extfs["endpoint_url"] = endpoint
+						}
+						spec, err := json.Marshal(ExternalSpec{Format: FormatParquet, Extfs: extfs})
+						require.NoError(t, err)
+						err = ValidateSourceAndSpecWithIAMPolicy("s3://bucket/data/", string(spec), enabled == "true")
+						if enabled == "true" && endpoint != "" && test.usesIAM {
+							require.ErrorIs(t, err, merr.ErrParameterInvalid)
+							require.Contains(t, err.Error(), "common.security.forbidIAMOnCustomObjectStorage")
+						} else {
+							require.NoError(t, err)
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestParseExternalSpec_Empty(t *testing.T) {
 	spec, err := ParseExternalSpec("")
 	require.NoError(t, err)

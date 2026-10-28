@@ -283,6 +283,13 @@ func validateEndpointURL(sourceURL *url.URL, extfs map[string]string) (bool, err
 // Errors retain their typed validation code while adding field context.
 // Called from Proxy and RootCoord (defense in depth) on create-collection.
 func ValidateSourceAndSpec(externalSource, externalSpec string) error {
+	return ValidateSourceAndSpecWithIAMPolicy(externalSource, externalSpec, false)
+}
+
+// ValidateSourceAndSpecWithIAMPolicy also enforces the caller's policy on IAM
+// credentials combined with an explicit endpoint. Keep configuration ownership
+// at the caller to avoid coupling this package to process-level configuration.
+func ValidateSourceAndSpecWithIAMPolicy(externalSource, externalSpec string, forbidIAMOnCustomObjectStorage bool) error {
 	if err := ValidateExternalSource(externalSource); err != nil {
 		return merr.Wrap(err, "external_source is invalid")
 	}
@@ -292,6 +299,12 @@ func ValidateSourceAndSpec(externalSource, externalSpec string) error {
 	}
 	if err := ValidateExtfsComplete(externalSource, spec.Extfs); err != nil {
 		return merr.Wrap(err, "external_spec is invalid")
+	}
+	_, hasEndpointURL := spec.Extfs[ExtfsKeyEndpointURL]
+	if forbidIAMOnCustomObjectStorage && hasEndpointURL &&
+		(spec.Extfs[ExtfsKeyUseIAM] == "true" || spec.Extfs[ExtfsKeyRoleARN] != "") {
+		return merr.WrapErrParameterInvalidMsg(
+			"IAM authentication (use_iam=true or role_arn) with extfs.endpoint_url is disabled by common.security.forbidIAMOnCustomObjectStorage")
 	}
 	return nil
 }
