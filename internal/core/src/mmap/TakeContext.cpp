@@ -353,6 +353,30 @@ TakeContext::Find(const TakeCellSource& source, int64_t id) {
 }
 
 std::optional<void*>
+TakeContext::FindBorrowedCached(const TakeCellSource& source,
+                                int64_t id,
+                                TakeBatchOwners& owners,
+                                BorrowedCellCache& cached) {
+    if (cached.context == this && cached.epoch == borrow_epoch_ &&
+        cached.id == id && cached.entry != nullptr &&
+        cached.entry->source.get() == source.identity.get() &&
+        SameOwner(cached.entry->source, source.identity)) {
+        owners.Add(cached.entry->cohort);
+        ++stats_.cache_hits;
+        return cached.cell;
+    }
+    const auto [entry, cell] = Lookup(source, id);
+    if (cell == nullptr) {
+        cached = {};
+        return std::nullopt;
+    }
+    owners.Add(entry->cohort);
+    cached = {this, borrow_epoch_, id, entry, cell};
+    ++stats_.cache_hits;
+    return cell;
+}
+
+std::optional<void*>
 TakeContext::FindBorrowed(const TakeCellSource& source,
                           int64_t id,
                           TakeBatchOwners& owners) {
@@ -471,6 +495,7 @@ TakeContext::PinAndPublish(const TakeCellSource& source,
 
 void
 TakeContext::Clear() {
+    ++borrow_epoch_;
     directory_->Clear();
     stats_.retained_bytes = 0;
 }
@@ -481,6 +506,7 @@ TakeContext::EvictBack() {
     AssertInfo(owners != nullptr && !owners->empty(),
                "take owner queue is unexpectedly empty");
     const auto& entry = owners->back();
+    ++borrow_epoch_;
     TakeCellSource source;
     source.identity = entry.source;
     directory_->Erase(source, *entry.cohort, &entry);

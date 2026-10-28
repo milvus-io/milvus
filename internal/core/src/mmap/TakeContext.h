@@ -169,6 +169,23 @@ class TakeContext final {
     struct Entry;
     class Directory;
 
+    // A binding-local lookup hint, never a payload owner. Entry addresses
+    // survive deque insertion, but not eviction/Clear. Check context + epoch
+    // BEFORE dereferencing entry, and capture the cohort for every batch.
+    struct BorrowedCellCache {
+        const TakeContext* context{nullptr};
+        uint64_t epoch{0};
+        int64_t id{-1};
+        const Entry* entry{nullptr};
+        void* cell{nullptr};
+    };
+
+    std::optional<void*>
+    FindBorrowedCached(const TakeCellSource& source,
+                       int64_t id,
+                       TakeBatchOwners& owners,
+                       BorrowedCellCache& cached);
+
     std::pair<const Entry*, void*>
     Lookup(const TakeCellSource& source, int64_t id) const;
 
@@ -184,6 +201,8 @@ class TakeContext final {
 
     TakeContextOptions options_;
     TakeContextStats stats_;
+    // Invalidate non-owning Entry hints BEFORE any retained owner is released.
+    uint64_t borrow_epoch_{1};
     std::unique_ptr<Directory> directory_;
 };
 }  // namespace milvus

@@ -147,7 +147,8 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
             // unique-cell records are overwritten before their count publishes.
             // Ordinary noncontextual Take never allocates this workspace.
             if (prepared_workspace_ == nullptr) {
-                prepared_workspace_ = std::make_unique<PreparedWorkspace>();
+                prepared_workspace_ =
+                    std::make_unique<PreparedWorkspace>(planner_->NumCells());
             }
             auto& workspace = *prepared_workspace_;
             // CellLocation has default member initializers. Keep this bounded
@@ -195,8 +196,11 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
                     // Capture each distinct backing owner once BEFORE a new
                     // cohort can evict FIFO entries. Cells borrow that batch
                     // owner set, not one shared_ptr copy per physical cell.
-                    auto hit =
-                        context_->FindBorrowed(source_, id, prepared_owners_);
+                    auto& cached =
+                        workspace.projections[static_cast<uint64_t>(id) %
+                                              workspace.projections.size()];
+                    auto hit = context_->FindBorrowedCached(
+                        source_, id, prepared_owners_, cached.borrowed);
                     if (!hit.has_value()) {
                         const auto bytes = source_.estimated_bytes
                                                ? source_.estimated_bytes(id)
@@ -246,7 +250,11 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
                 auto& cell = cells[i];
                 // Project each physical cell once; duplicate output lanes
                 // reuse the field pointer and the same complete backing owner.
-                cell.chunk = ProjectPreparedCell(cell_ids[i], cell.backing);
+                const auto& projected =
+                    ProjectPreparedCell(cell_ids[i], cell.backing);
+                cell.chunk = projected.chunk;
+                cell.fixed_data = projected.fixed_data;
+                cell.fixed_stride = projected.fixed_stride;
             }
             for (int64_t lane = 0; lane < count; ++lane) {
                 const auto slot = lane_slots[lane];
@@ -256,6 +264,19 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
                 if (target_type_ == TargetType::StringView) {
                     workspace.string_chunks[lane] =
                         static_cast<const StringChunk*>(chunk);
+                } else if (target_type_ >= TargetType::Bool &&
+                           target_type_ <= TargetType::Double && !nullable_ &&
+                           filter_ == nullptr) {
+                    // Fixed-width payloads expose an immutable strided Span.
+                    // Resolve that storage representation once per cell, not
+                    // through a virtual ValueAt call for every output lane.
+                    // Other Chunk implementations retain their getter path.
+                    const auto& cell = cells[slot];
+                    workspace.fixed_values[lane] =
+                        cell.fixed_data != nullptr
+                            ? cell.fixed_data + workspace.row_offsets[lane] *
+                                                    cell.fixed_stride
+                            : chunk->ValueAt(workspace.row_offsets[lane]);
                 }
             }
             prepared_count_ = count;
@@ -640,6 +661,8 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
     struct PreparedCell {
         void* backing{nullptr};
         Chunk* chunk{nullptr};
+        const char* fixed_data{nullptr};
+        int64_t fixed_stride{0};
     };
 
     struct CachedProjection {
@@ -647,9 +670,15 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
         int64_t id{-1};
         void* backing{nullptr};
         Chunk* chunk{nullptr};
+        const char* fixed_data{nullptr};
+        int64_t fixed_stride{0};
+        TakeContext::BorrowedCellCache borrowed;
     };
 
     struct PreparedWorkspace {
+        explicit PreparedWorkspace(int64_t cells)
+            : projections(std::clamp<int64_t>(cells, kPreparedRows, 1024)) {
+        }
         std::array<CellLocation, kPreparedRows> locations;
         // Prepare already resolves each lane. Keep the gather inputs in their
         // final contiguous layout instead of repacking the same metadata into
@@ -660,13 +689,17 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
         std::array<size_t, kPreparedRows> row_offsets;
         std::array<Chunk*, kPreparedRows> row_chunks;
         std::array<const StringChunk*, kPreparedRows> string_chunks;
-        std::array<CachedProjection, kPreparedRows> projections;
+        std::array<const char*, kPreparedRows> fixed_values;
+        // Metadata only, at most 1024 entries, never payload owners.
+        // Avoid needless projection collisions for ordinary multi-cell columns
+        // while keeping arbitrarily large sources bounded and fully supported.
+        std::vector<CachedProjection> projections;
         // Only bounded IDs, never owners or data; capacity is reused across
         // inputs so a cache-hit prefix does not allocate a missing-ID vector.
         std::vector<int64_t> missing;
     };
 
-    Chunk*
+    const CachedProjection&
     ProjectPreparedCell(int64_t id, void* backing) const {
         // The caller has ALREADY captured this exact backing's current owner.
         // A cache collision only misses: compare the complete ID and pointer.
@@ -679,15 +712,28 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
             projections[static_cast<uint64_t>(id) % projections.size()];
         if (cached.id == id && cached.publication == publication &&
             cached.backing == backing) {
-            return cached.chunk;
+            return cached;
         }
         auto* chunk = source_.project(backing);
         AssertInfo(chunk != nullptr,
                    "take source projected a null prepared cell");
         // Use the epoch from BEFORE project: a reentrant publication during
         // that callback must not promote an old backing into the newer epoch.
-        cached = {publication, id, backing, chunk};
-        return chunk;
+        cached.publication = publication;
+        cached.id = id;
+        cached.backing = backing;
+        cached.chunk = chunk;
+        cached.fixed_data = nullptr;
+        cached.fixed_stride = 0;
+        if (target_type_ != TargetType::StringView && !nullable_ &&
+            filter_ == nullptr) {
+            if (auto* fixed = dynamic_cast<FixedWidthChunk*>(chunk)) {
+                const auto span = fixed->Span();
+                cached.fixed_data = static_cast<const char*>(span.data());
+                cached.fixed_stride = span.element_sizeof();
+            }
+        }
+        return cached;
     }
 
     template <typename T>
@@ -718,11 +764,9 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
                 return true;
             }
             for (int64_t lane = 0; lane < count; ++lane) {
-                const auto offset = workspace.row_offsets[lane];
-                auto* chunk = workspace.row_chunks[lane];
                 if constexpr (!std::is_same_v<T, std::string_view>) {
                     values[lane] = *static_cast<const T*>(
-                        static_cast<const void*>(chunk->ValueAt(offset)));
+                        static_cast<const void*>(workspace.fixed_values[lane]));
                 }
                 validity[lane] = true;
                 skipped[lane] = false;
