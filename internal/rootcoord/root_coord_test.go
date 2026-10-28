@@ -1967,6 +1967,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
 		ctx := context.Background()
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(ctx, &milvuspb.AddFileResourceRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
@@ -1974,6 +1975,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 
 	t.Run("empty name", func(t *testing.T) {
 		c := newTestCore(withHealthyCode())
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
 			Path: "/path/to/file",
 		})
@@ -1987,6 +1989,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock))
 		ctx := context.Background()
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(ctx, &milvuspb.AddFileResourceRequest{
 			Name: "test_resource",
 			Path: "/path/to/file",
@@ -2001,6 +2004,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock))
 		ctx := context.Background()
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(ctx, &milvuspb.AddFileResourceRequest{
 			Name: "test_resource",
 			Path: "/path/to/file",
@@ -2025,6 +2029,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		meta.EXPECT().AddFileResource(mock.Anything, mock.Anything).Return(nil)
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock), withTsoAllocator(tsoAllocator), withMeta(meta))
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
 			Name: "test_resource",
 			Path: "/path/to/file",
@@ -2047,10 +2052,11 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		}
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0))
+		meta.EXPECT().FindFileResource(mock.Anything, mock.Anything).Return(nil)
 		meta.EXPECT().AddFileResource(mock.Anything, mock.Anything).Return(nil)
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock), withTsoAllocator(tsoAllocator), withMeta(meta))
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
 			Name: "test_resource",
 			Path: "/path/to/file",
@@ -2068,9 +2074,10 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(101), nil)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0))
+		meta.EXPECT().FindFileResource(mock.Anything, mock.Anything).Return(nil)
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock), withMeta(meta))
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
 			Name: "test_resource",
 			Path: "/path/to/file",
@@ -2093,13 +2100,16 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		storageMock.EXPECT().Exist(mock.Anything, request.GetPath()).Return(true, nil)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{
+		meta.EXPECT().FindFileResource(mock.Anything, mock.Anything).Return(&internalpb.FileResourceInfo{
 			Id:   99,
 			Name: request.GetName(),
 			Path: request.GetPath(),
-		}}, uint64(1))
+		})
+
+		meta.EXPECT().AddFileResource(mock.Anything, mock.MatchedBy(func(r *internalpb.FileResourceInfo) bool { return r.GetId() == 99 })).Return(nil)
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock), withMeta(meta))
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(context.Background(), request)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
@@ -2117,13 +2127,14 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		storageMock.EXPECT().Exist(mock.Anything, request.GetPath()).Return(true, nil)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{
+		meta.EXPECT().FindFileResource(mock.Anything, mock.Anything).Return(&internalpb.FileResourceInfo{
 			Id:   99,
 			Name: request.GetName(),
 			Path: "/path/to/old-file",
-		}}, uint64(1))
+		})
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock), withMeta(meta))
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(context.Background(), request)
 		assert.NoError(t, err)
 		assert.ErrorIs(t, merr.Error(resp), merr.ErrParameterInvalid)
@@ -2139,9 +2150,10 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(0), sizeErr)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0))
+		meta.EXPECT().FindFileResource(mock.Anything, mock.Anything).Return(nil)
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock), withMeta(meta))
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
 			Name: "test_resource",
 			Path: "/path/to/file",
@@ -2159,9 +2171,10 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(-1), nil)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0))
+		meta.EXPECT().FindFileResource(mock.Anything, mock.Anything).Return(nil)
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock), withMeta(meta))
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
 			Name: "test_resource",
 			Path: "/path/to/file",
@@ -2181,6 +2194,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock), withTsoAllocator(tsoAllocator))
 		ctx := context.Background()
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(ctx, &milvuspb.AddFileResourceRequest{
 			Name: "test_resource",
 			Path: "/path/to/file",
@@ -2203,6 +2217,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock), withTsoAllocator(tsoAllocator), withMeta(meta))
 		ctx := context.Background()
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(ctx, &milvuspb.AddFileResourceRequest{
 			Name: "test_resource",
 			Path: "/path/to/file",
@@ -2230,6 +2245,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		c := newTestCore(withHealthyCode(), withStorage(storageMock), withTsoAllocator(tsoAllocator), withMeta(meta), withMixCoord(mixc))
 		c.SetFileResourceObserver(observer)
 		ctx := context.Background()
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(ctx, &milvuspb.AddFileResourceRequest{
 			Name: "test_resource",
 			Path: "/path/to/file",
@@ -2243,6 +2259,7 @@ func TestRootCoord_RemoveFileResource(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
 		ctx := context.Background()
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.RemoveFileResource(ctx, &milvuspb.RemoveFileResourceRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
@@ -2250,13 +2267,14 @@ func TestRootCoord_RemoveFileResource(t *testing.T) {
 
 	t.Run("remove legacy empty name", func(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().RemoveFileResource(mock.Anything, "").Return(nil, true)
+		meta.EXPECT().RemoveFileResource(mock.Anything, "", int64(100)).Return(nil, true)
 
 		observer := NewMockFileResourceObserver(t)
 		observer.EXPECT().Sync().Return(nil)
 
 		c := newTestCore(withHealthyCode(), withMeta(meta))
 		c.SetFileResourceObserver(observer)
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.RemoveFileResource(context.Background(), &milvuspb.RemoveFileResourceRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
@@ -2264,10 +2282,11 @@ func TestRootCoord_RemoveFileResource(t *testing.T) {
 
 	t.Run("meta remove file resource error", func(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().RemoveFileResource(mock.Anything, mock.Anything).Return(errors.New("meta error"), false)
+		meta.EXPECT().RemoveFileResource(mock.Anything, mock.Anything, int64(100)).Return(errors.New("meta error"), false)
 
 		c := newTestCore(withHealthyCode(), withMeta(meta))
 		ctx := context.Background()
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.RemoveFileResource(ctx, &milvuspb.RemoveFileResourceRequest{
 			Name: "test_resource",
 		})
@@ -2277,13 +2296,14 @@ func TestRootCoord_RemoveFileResource(t *testing.T) {
 
 	t.Run("success with resource not exist", func(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().RemoveFileResource(mock.Anything, mock.Anything).Return(nil, false)
+		meta.EXPECT().PrepareRemoveFileResource(mock.Anything, mock.Anything).Return(nil, nil)
 
 		observer := NewMockFileResourceObserver(t)
 
 		c := newTestCore(withHealthyCode(), withMeta(meta))
 		c.SetFileResourceObserver(observer)
 		ctx := context.Background()
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.RemoveFileResource(ctx, &milvuspb.RemoveFileResourceRequest{
 			Name: "test_resource",
 		})
@@ -2293,7 +2313,7 @@ func TestRootCoord_RemoveFileResource(t *testing.T) {
 
 	t.Run("success with resource exist", func(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().RemoveFileResource(mock.Anything, mock.Anything).Return(nil, true)
+		meta.EXPECT().RemoveFileResource(mock.Anything, mock.Anything, int64(100)).Return(nil, true)
 
 		observer := NewMockFileResourceObserver(t)
 		observer.EXPECT().Sync().Return(nil)
@@ -2302,6 +2322,7 @@ func TestRootCoord_RemoveFileResource(t *testing.T) {
 		c := newTestCore(withHealthyCode(), withMeta(meta), withMixCoord(mixc))
 		c.SetFileResourceObserver(observer)
 		ctx := context.Background()
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.RemoveFileResource(ctx, &milvuspb.RemoveFileResourceRequest{
 			Name: "test_resource",
 		})
