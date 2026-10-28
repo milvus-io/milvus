@@ -31,7 +31,7 @@ For an ordinary scalar field with a default value, these paths backfill old rows
   - The row's struct is non-null with N elements (N taken from any sibling): the new sub-field holds N null elements; for N=0 it is a non-null empty array.
 
   Row validity is shared by all sub-fields, so this is the same rule the siblings follow, the struct invariant holds exactly, and nothing downstream needs a special case.
-- **Dropped sub-field.** Removed from the schema; its column, index and offsets alias are released like a dropped top-level field. Dropping the struct's last sub-field is rejected; to remove the whole struct, drop the struct explicitly (`DropRequest{field_name:"s"}` or the struct's field id), and existing rootcoord logic puts the struct id and all sub-field ids into `droppedFieldIds`. Existing rules apply: cannot drop the collection's last vector field, cannot drop a sub-field referenced by a function.
+- **Dropped sub-field.** Removed from the schema; its column, index and offsets alias are released like a dropped top-level field. Dropping the struct's last sub-field is rejected, and so is a drop that would leave only sub-fields added after the struct was created (see "Original sub-fields" below); to remove the whole struct, drop the struct explicitly (`DropRequest{field_name:"s"}` or the struct's field id), and existing rootcoord logic puts the struct id and all sub-field ids into `droppedFieldIds`. Existing rules apply: cannot drop the collection's last vector field, cannot drop a sub-field referenced by a function.
 - **Struct row validity and "first sub-field" semantics.** Row validity is shared by all sub-fields, so `struct IS NULL` and `MatchExpr`'s struct validity keep working whichever sub-field is first. New sub-fields are appended, so the first sub-field only changes when the first one is dropped; the offsets provider is then re-picked (below).
 
 ### API
@@ -82,6 +82,14 @@ AlterCollectionSchemaRequest{ action:{ drop_request: DropRequest{ field_name:"s"
 Replace the two blanket rejections for kept structs with:
 - an added sub-field must be `element_nullable=true`, must not carry a default value or any protected role, must have a fresh id above `max_field_id`, and must have the struct's `nullable` (true or false);
 - a dropped sub-field must not be the struct's last sub-field, the collection's last vector, or a function input/output;
+- after a drop, the struct must keep at least one original sub-field (below);
+
+### Original sub-fields
+
+A segment written before a sub-field was added stores no column for it, and every reader (Go record readers, compaction, sealed load and Reopen) derives its per-row element counts and row validity from a sibling that the segment stores and the schema still has. An original sub-field is one that has been in the schema since the struct appeared: it was declared at collection creation or came with the whole struct through `AddCollectionStructField`. Every segment holding a row written after the struct appeared stores every original sub-field, so a remaining original sub-field is always a usable sibling.
+
+- Rootcoord marks a sub-field added through `FieldInfo.struct_path` with the internal type param `__struct_sub_field_added__`. A sub-field without the marker is original; existing collections are not migrated. Users cannot set, alter or delete the key (create, add field, add struct, add sub-field and alter field reject it), DescribeCollection strips it, and index creation does not copy it into index type params.
+- Drop rule: a drop that leaves a struct with only added sub-fields is rejected with a parameter error, in the proxy and in rootcoord schema evolution. Dropping the whole struct is always allowed. The rule is conservative: once all original sub-fields are gone the struct can only be dropped as a whole, even after compaction has written the added sub-fields into every segment.
 - everything else about kept sub-fields stays immutable.
 
 ### Producing the N-null-elements value

@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -8112,6 +8113,23 @@ func TestValidateDropStructSubField(t *testing.T) {
 	protected := proto.Clone(schema).(*schemapb.CollectionSchema)
 	protected.StructArrayFields[0].Fields[1].IsPartitionKey = true
 	require.ErrorContains(t, validateDropField(protected, "profile[b]"), "protected role")
+}
+
+// A struct must keep an original sub-field: old segments only store the
+// original sub-fields, so they are the only stored siblings for the added
+// ones.
+func TestValidateDropStructSubFieldKeepsOriginal(t *testing.T) {
+	schema := structSubFieldDDLTestSchema(true)
+	schemautil.MarkAddedStructSubField(schema.StructArrayFields[0].Fields[1])
+
+	err := validateDropField(schema, "profile[a]")
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.ErrorContains(t, err, `cannot drop sub-field "profile[a]" of struct field "profile"`)
+	require.NoError(t, validateDropField(schema, "profile[b]"))
+	require.NoError(t, validateDropField(schema, "profile"))
+
+	// Without the marker both sub-fields are original.
+	require.NoError(t, validateDropField(structSubFieldDDLTestSchema(true), "profile[a]"))
 }
 
 func TestValidateDropFunction(t *testing.T) {

@@ -178,6 +178,8 @@ func validateKeptEvolutionField(oldField, newField *schemapb.FieldSchema) error 
 		return merr.WrapErrParameterInvalidMsg("cannot change the nullability of field %q in place", name)
 	case !oldField.GetIsFunctionOutput() && newField.GetIsFunctionOutput():
 		return merr.WrapErrParameterInvalidMsg("cannot repurpose existing field %q as a function output", name)
+	case IsAddedStructSubField(oldField) != IsAddedStructSubField(newField):
+		return merr.WrapErrParameterInvalidMsg("cannot change the origin marker of struct sub-field %q in place", name)
 	case oldField.GetIsPrimaryKey() != newField.GetIsPrimaryKey(),
 		oldField.GetIsPartitionKey() != newField.GetIsPartitionKey(),
 		oldField.GetIsClusteringKey() != newField.GetIsClusteringKey(),
@@ -287,6 +289,11 @@ func validateAddedEvolutionFields(oldFields, newFields *evolutionFieldMaps, newS
 }
 
 func validateAddedEvolutionStructSubField(field *schemapb.FieldSchema, parent *schemapb.StructArrayFieldSchema) error {
+	// Rootcoord marks every sub-field added to an existing struct, so that the
+	// drop rule can tell it from the original sub-fields.
+	if !IsAddedStructSubField(field) {
+		return merr.WrapErrServiceInternalMsg("added sub-field %q of struct field %q has no origin marker", field.GetName(), parent.GetName())
+	}
 	if !field.GetElementNullable() {
 		return merr.WrapErrParameterInvalidMsg("added sub-field %q of struct field %q must set element_nullable=true", field.GetName(), parent.GetName())
 	}
@@ -363,8 +370,15 @@ func validateDroppedEvolutionFields(oldFields, newFields *evolutionFieldMaps, ne
 			continue
 		}
 		if parentID, isSubField := oldFields.structParents[id]; isSubField {
-			if parent, parentKept := newFields.structFields[parentID]; parentKept && len(parent.GetFields()) == 0 {
-				return merr.WrapErrParameterInvalidMsg("cannot drop the last sub-field %q of struct field %q, drop the struct field instead", field.GetName(), parent.GetName())
+			if parent, parentKept := newFields.structFields[parentID]; parentKept {
+				if len(parent.GetFields()) == 0 {
+					return merr.WrapErrParameterInvalidMsg("cannot drop the last sub-field %q of struct field %q, drop the struct field instead", field.GetName(), parent.GetName())
+				}
+				// The struct stays: it must keep an original sub-field so that
+				// readers of old segments still have a stored sibling.
+				if err := CheckStructKeepsOriginalSubField(parent.GetName(), field.GetName(), parent.GetFields()); err != nil {
+					return err
+				}
 			}
 		}
 		if err := validateDroppedEvolutionField(field, newSchema); err != nil {

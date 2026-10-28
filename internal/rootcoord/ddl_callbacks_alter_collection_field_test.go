@@ -85,6 +85,24 @@ func TestDDLCallbacksAlterCollectionField(t *testing.T) {
 	assertFieldProperties(t, ctx, core, dbName, collectionName, "field1", "key1", "value1")
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
 
+	// The struct sub-field origin marker is internal: it can be neither set
+	// nor deleted as a field property.
+	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldName:      fieldName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.StructSubFieldAddedKey, Value: "true"}},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldName:      fieldName,
+		DeleteKeys:     []string{common.StructSubFieldAddedKey},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
+
 	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,

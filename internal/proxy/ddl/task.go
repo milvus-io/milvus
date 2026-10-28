@@ -1373,6 +1373,17 @@ func validateDropStructSubField(schema *schemapb.CollectionSchema, parent *schem
 	if len(parent.GetFields()) <= 1 {
 		return merr.WrapErrParameterInvalidMsg("cannot drop the last sub-field %q of struct field %q, drop the struct field instead", storedName, parent.GetName())
 	}
+	// The struct must keep an original sub-field; rootcoord enforces the same
+	// rule in schema evolution.
+	remaining := make([]*schemapb.FieldSchema, 0, len(parent.GetFields())-1)
+	for _, field := range parent.GetFields() {
+		if field.GetFieldID() != sub.GetFieldID() {
+			remaining = append(remaining, field)
+		}
+	}
+	if err := schemautil.CheckStructKeepsOriginalSubField(parent.GetName(), storedName, remaining); err != nil {
+		return err
+	}
 	if sub.GetIsPrimaryKey() || sub.GetAutoID() || sub.GetIsPartitionKey() || sub.GetIsClusteringKey() || sub.GetIsDynamic() || sub.GetIsFunctionOutput() || sub.GetExternalField() != "" {
 		return merr.WrapErrParameterInvalidMsg("cannot drop struct sub-field %q with a protected role", sub.GetName())
 	}

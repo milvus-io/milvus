@@ -475,6 +475,13 @@ const (
 	DisableFuncRuntimeCheck = "disable_func_runtime_check"
 	MaxFieldIDKey           = "max_field_id"
 
+	// StructSubFieldAddedKey is an internal type param of a struct sub-field
+	// that was added after its struct appeared (AlterCollectionSchema with
+	// FieldInfo.struct_path). Rootcoord writes it; users cannot set or delete
+	// it, and DescribeCollection does not return it. See
+	// internal/util/schemautil/struct_subfield_origin.go.
+	StructSubFieldAddedKey = "__struct_sub_field_added__"
+
 	// query mode
 	QueryModeKey       = "query_mode"
 	QueryModeLargeTopK = "large_topk"

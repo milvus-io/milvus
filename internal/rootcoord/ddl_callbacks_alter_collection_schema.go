@@ -355,6 +355,14 @@ func prepareAlterSchemaAddStructSubField(coll *model.Collection, plan *schemauti
 	if err := validateAddedStructSubFieldProperties(originalName, field); err != nil {
 		return err
 	}
+	if err := schemautil.RejectStructSubFieldOriginMarker(field); err != nil {
+		return err
+	}
+	// Segments written before this add have no column for the new sub-field;
+	// the marker keeps it from becoming the only remaining sub-field, which
+	// would leave those segments without a stored sibling (see
+	// schemautil.CheckStructKeepsOriginalSubField).
+	schemautil.MarkAddedStructSubField(field)
 
 	field.Nullable = parent.Nullable
 	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
