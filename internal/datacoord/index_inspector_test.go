@@ -997,3 +997,14 @@ func TestIndexInspector_FunctionOutputSchemaVersionGate(t *testing.T) {
 		assert.Contains(t, m.indexMeta.GetSegmentIndexes(collID, segment.GetID()), UniqueID(14))
 	})
 }
+
+func TestIndexInspectorCreatesNoSegmentIndexForThePrimaryKeyIndex(t *testing.T) {
+	m := &meta{indexMeta: newPKIndexTestMeta()}
+	// the handler is nil: a segment index build would resolve the schema
+	// through it and panic
+	inspector := &indexInspector{meta: m}
+	segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 20, CollectionID: 2, State: commonpb.SegmentState_Flushed, IsSorted: true, Level: datapb.SegmentLevel_L1,
+	}}
+	assert.NoError(t, inspector.createIndexesForSegment(context.Background(), segment))
+}

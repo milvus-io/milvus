@@ -2784,3 +2784,84 @@ func TestSegmentIndexTaskStatesAlwaysPersistToEtcd(t *testing.T) {
 		})
 	}
 }
+
+// newPKIndexTestMeta returns an index meta where collection 1 has an STL_SORT
+// index (1001 on field 101) and a primary key index (1002 on field 100), and
+// collection 2 has only a primary key index (2002 on field 100). Segment 10 of
+// collection 1 finished its STL_SORT index; segment 20 of collection 2 has no
+// segment index.
+func newPKIndexTestMeta() *indexMeta {
+	typeParam := func(t string) []*commonpb.KeyValuePair {
+		return []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: t}}
+	}
+	m := &indexMeta{
+		segmentBuildInfo: newSegmentIndexBuildInfo(),
+		segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			1: {
+				1001: {CollectionID: 1, FieldID: 101, IndexID: 1001, IndexName: "sort", IndexParams: typeParam("STL_SORT")},
+				1002: {CollectionID: 1, FieldID: 100, IndexID: 1002, IndexName: "pk", IndexParams: typeParam(common.PrimaryKeyIndexType), State: commonpb.IndexState_Finished},
+			},
+			2: {
+				2002: {
+					CollectionID: 2, FieldID: 100, IndexID: 2002, IndexName: "pk", IndexParams: typeParam(common.PrimaryKeyIndexType),
+					State: commonpb.IndexState_Failed, FailReason: "collection is not empty",
+				},
+			},
+		},
+	}
+	built := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	built.Insert(1001, &model.SegmentIndex{CollectionID: 1, SegmentID: 10, IndexID: 1001, IndexState: commonpb.IndexState_Finished})
+	m.segmentIndexes.Insert(10, built)
+	return m
+}
+
+func TestIndexMetaSkipsThePrimaryKeyIndexInSegmentChecks(t *testing.T) {
+	m := newPKIndexTestMeta()
+
+	assert.False(t, m.IsUnIndexedSegment(1, 10), "the STL_SORT index is built, the primary key index has no segment index")
+	assert.Empty(t, m.GetUnindexedSegments(1, []int64{10}))
+	assert.True(t, m.HasIndex(1))
+	assert.Equal(t, []int64{10}, m.GetIndexedSegments(1, []int64{10}, []int64{101}))
+	indexed, fields := m.GetSegmentIndexedFields(1, 10)
+	assert.True(t, indexed)
+	assert.Len(t, fields, 1)
+	assert.Len(t, m.GetBuiltPerSegmentIndexes(1), 1)
+
+	assert.False(t, m.HasIndex(2), "segments build no index of collection 2")
+	assert.Empty(t, m.GetBuiltPerSegmentIndexes(2))
+	assert.Empty(t, m.GetUnIndexedSegmentIDsForIndexTask(2, []int64{20}).Collect())
+	assert.Empty(t, m.GetUnindexedSegments(2, []int64{20}))
+	assert.Len(t, m.GetIndexesForCollection(2, ""), 1, "the primary key index is still an index of the collection")
+
+	built := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
+	m.segmentIndexes.Insert(20, built)
+	state := m.GetSegmentIndexState(2, 20, 2002)
+	assert.Equal(t, commonpb.IndexState_Failed, state.GetState())
+	assert.Equal(t, "collection is not empty", state.GetFailReason())
+}
+
+func TestCompleteIndexInfoOfThePrimaryKeyIndex(t *testing.T) {
+	m := newPKIndexTestMeta()
+	segments := map[int64]*indexStats{
+		10: {ID: 10, numRows: 5, state: commonpb.SegmentState_Flushed},
+		11: {ID: 11, numRows: 7, state: commonpb.SegmentState_Dropped},
+	}
+	s := &Server{}
+	for _, tc := range []struct {
+		index  *model.Index
+		state  commonpb.IndexState
+		reason string
+	}{
+		{m.indexes[1][1002], commonpb.IndexState_Finished, ""},
+		{m.indexes[2][2002], commonpb.IndexState_Failed, "collection is not empty"},
+	} {
+		info := &indexpb.IndexInfo{}
+		s.completeIndexInfo(info, tc.index, segments, false, 0)
+		assert.Equal(t, tc.state, info.GetState())
+		assert.Equal(t, tc.reason, info.GetIndexStateFailReason())
+		assert.EqualValues(t, 5, info.GetTotalRows())
+		assert.EqualValues(t, 5, info.GetIndexedRows())
+		assert.EqualValues(t, 0, info.GetPendingIndexRows())
+	}
+}

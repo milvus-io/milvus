@@ -315,7 +315,8 @@ func (i *indexInspector) createIndexesForSegment(ctx context.Context, segment *S
 		return nil
 	}
 
-	indexes := i.meta.indexMeta.GetIndexesForCollection(segment.CollectionID, "")
+	// the primary key index has no segment index to build
+	indexes := i.meta.indexMeta.GetBuiltPerSegmentIndexes(segment.CollectionID)
 	indexIDToSegIndexes := i.meta.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
 
 	for _, index := range indexes {

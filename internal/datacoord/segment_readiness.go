@@ -106,11 +106,13 @@ func (m *meta) prepareReadiness(collection *collectionInfo) *segmentReadiness {
 	// FilterInIndexedSegments). A pure-scalar collection leaves the vector set
 	// empty: the term would otherwise be vacuously satisfied, so degrade to
 	// "every scalar index on the collection is Finished" (design §5.3, O3).
+	// HasIndex and GetBuiltPerSegmentIndexes skip the primary key index: no
+	// segment builds it, so a segment never waits for it.
 	if m.indexMeta != nil && m.indexMeta.HasIndex(collection.ID) {
 		r.hasIndex = true
 		r.targetFieldIDs = append(r.targetFieldIDs, vectorFieldIDs...)
 		if len(vectorFieldIDs) == 0 || Params.DataCoordCfg.DVForceAllIndexReady.GetAsBool() {
-			for _, index := range m.indexMeta.GetIndexesForCollection(collection.ID, "") {
+			for _, index := range m.indexMeta.GetBuiltPerSegmentIndexes(collection.ID) {
 				r.targetFieldIDs = append(r.targetFieldIDs, index.FieldID)
 			}
 		}

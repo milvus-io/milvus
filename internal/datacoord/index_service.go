@@ -965,6 +965,22 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.In
 		pendingIndexRows = int64(0)
 	)
 
+	if !builtPerSegment(index) {
+		// No segment builds the index. Its state is persisted with the index,
+		// and it covers every row.
+		for _, seg := range segments {
+			if seg.state == commonpb.SegmentState_Flushed || seg.state == commonpb.SegmentState_Flushing {
+				totalRows += seg.numRows
+			}
+		}
+		indexInfo.TotalRows = totalRows
+		indexInfo.IndexedRows = totalRows
+		indexInfo.PendingIndexRows = 0
+		indexInfo.State = index.State
+		indexInfo.IndexStateFailReason = index.FailReason
+		return
+	}
+
 	minIndexVersion := int32(math.MaxInt32)
 	maxIndexVersion := int32(math.MinInt32)
 	indexCovered := newIndexCoverageChecker(index.IndexID, segments)

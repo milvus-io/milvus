@@ -90,6 +90,8 @@ func FilterInIndexedSegments(ctx context.Context, handler Handler, mt *meta, ski
 	ret := make([]*SegmentInfo, 0)
 	for collection, segmentList := range collectionSegments {
 		// No segments will be filtered if there are no indices in the collection.
+		// HasIndex counts only the indexes that segments build, so a collection
+		// with only a primary key index is not filtered either.
 		if skipNoIndexCollection && !mt.indexMeta.HasIndex(collection) {
 			ret = append(ret, segmentList...)
 			continue
@@ -115,7 +117,7 @@ func FilterInIndexedSegments(ctx context.Context, handler Handler, mt *meta, ski
 
 		// include all scalar fields with index
 		if paramtable.Get().DataCoordCfg.DVForceAllIndexReady.GetAsBool() {
-			indices := mt.indexMeta.GetIndexesForCollection(collection, "")
+			indices := mt.indexMeta.GetBuiltPerSegmentIndexes(collection)
 			for _, index := range indices {
 				targetFieldIds = append(targetFieldIds, index.FieldID)
 			}

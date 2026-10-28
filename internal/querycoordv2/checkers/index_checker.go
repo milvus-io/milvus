@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -204,6 +205,10 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 func (c *IndexChecker) checkSegment(segment *meta.Segment, indexInfos []*indexpb.IndexInfo) (fieldIDs []int64) {
 	var result []int64
 	for _, indexInfo := range indexInfos {
+		if !builtPerSegment(indexInfo) {
+			// no segment has the index, so no segment loads it
+			continue
+		}
 		fieldID, indexID := indexInfo.FieldID, indexInfo.IndexID
 		info, ok := segment.IndexInfo[indexID]
 		if !ok {
@@ -215,6 +220,12 @@ func (c *IndexChecker) checkSegment(segment *meta.Segment, indexInfos []*indexpb
 		}
 	}
 	return result
+}
+
+// builtPerSegment reports whether segments build the index of indexInfo.
+// The primary key index has no segment index.
+func builtPerSegment(indexInfo *indexpb.IndexInfo) bool {
+	return indexparamcheck.IsBuiltPerSegment(indexparamcheck.IndexType(common.GetIndexType(indexInfo.GetIndexParams())))
 }
 
 // checkRedundantIndices returns redundant indexIDs for each segment

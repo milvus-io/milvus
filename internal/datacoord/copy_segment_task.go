@@ -1500,7 +1500,8 @@ func buildCopySegmentTargetIndexes(m *meta, collectionID int64, writeToManifest 
 	if m == nil || m.indexMeta == nil {
 		return nil
 	}
-	indexes := m.indexMeta.GetIndexesForCollection(collectionID, "")
+	// a copied segment carries only the indexes that segments build
+	indexes := m.indexMeta.GetBuiltPerSegmentIndexes(collectionID)
 	if len(indexes) == 0 {
 		return nil
 	}

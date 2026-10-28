@@ -726,6 +726,13 @@ func (m *indexMeta) GetSegmentIndexState(collID, segmentID UniqueID, indexID Uni
 	}
 
 	if index, ok := fieldIndexes[indexID]; ok && !index.IsDeleted {
+		if !builtPerSegment(index) {
+			// no segment builds the index, so its state is the state of the index
+			state.IndexName = index.IndexName
+			state.State = index.State
+			state.FailReason = index.FailReason
+			return state
+		}
 		if segIdx, ok := indexes.Get(indexID); ok && !segIdx.IsDeleted {
 			state.IndexName = index.IndexName
 			state.State = segIdx.IndexState
@@ -758,7 +765,7 @@ func (m *indexMeta) GetIndexedSegments(collectionID int64, segmentIDs, fieldIDs 
 	matchedFields := typeutil.NewUniqueSet()
 
 	targetIndices := lo.Filter(lo.Values(fieldIndexes), func(index *model.Index, _ int) bool {
-		return fieldIDSet.Contain(index.FieldID) && !index.IsDeleted
+		return fieldIDSet.Contain(index.FieldID) && !index.IsDeleted && builtPerSegment(index)
 	})
 	for _, index := range targetIndices {
 		matchedFields.Insert(index.FieldID)
@@ -807,6 +814,22 @@ func (m *indexMeta) GetIndexesForCollection(collID UniqueID, indexName string) [
 		}
 	}
 	return indexInfos
+}
+
+// builtPerSegment reports whether segments build idx: the index has a build
+// task and index files for each segment. The primary key index has neither,
+// so the segment index machinery (build, readiness, describe progress) skips
+// it.
+func builtPerSegment(idx *model.Index) bool {
+	return indexparamcheck.IsBuiltPerSegment(indexparamcheck.IndexType(GetIndexType(idx.IndexParams)))
+}
+
+// GetBuiltPerSegmentIndexes returns the indexes of a collection that are not
+// deleted and that segments build, see builtPerSegment.
+func (m *indexMeta) GetBuiltPerSegmentIndexes(collID UniqueID) []*model.Index {
+	return lo.Filter(m.GetIndexesForCollection(collID, ""), func(index *model.Index, _ int) bool {
+		return builtPerSegment(index)
+	})
 }
 
 // ListAllIndexes returns a clone of every index that is not deleted, across all
@@ -931,7 +954,7 @@ func (m *indexMeta) GetUnIndexedSegmentIDsForIndexTask(collectionID UniqueID, se
 	}
 	activeIndexIDs := make([]UniqueID, 0, len(fieldIndexesMap))
 	for _, index := range fieldIndexesMap {
-		if !index.IsDeleted {
+		if !index.IsDeleted && builtPerSegment(index) {
 			activeIndexIDs = append(activeIndexIDs, index.IndexID)
 		}
 	}
@@ -1503,7 +1526,7 @@ func (m *indexMeta) getSegmentsIndexStates(collectionID UniqueID, segmentIDs []U
 }
 
 func (m *indexMeta) GetUnindexedSegments(collectionID int64, segmentIDs []int64) []int64 {
-	indexes := m.GetIndexesForCollection(collectionID, "")
+	indexes := m.GetBuiltPerSegmentIndexes(collectionID)
 	if len(indexes) == 0 {
 		// doesn't have index
 		return nil
@@ -1538,6 +1561,9 @@ func (m *indexMeta) AllDenseWithDiskIndex(collectionID int64, schema *schemapb.C
 	return len(vectorFields) == len(vectorFieldsWithDiskIndex)
 }
 
+// HasIndex reports whether the collection has an index that is not deleted
+// and that segments build. The primary key index does not count: segments do
+// not wait for it, see builtPerSegment.
 func (m *indexMeta) HasIndex(collectionID int64) bool {
 	m.fieldIndexLock.RLock()
 	defer m.fieldIndexLock.RUnlock()
@@ -1545,7 +1571,7 @@ func (m *indexMeta) HasIndex(collectionID int64) bool {
 	indexes, ok := m.indexes[collectionID]
 	if ok {
 		for _, index := range indexes {
-			if !index.IsDeleted {
+			if !index.IsDeleted && builtPerSegment(index) {
 				return true
 			}
 		}
@@ -1617,6 +1643,9 @@ func (m *indexMeta) GetSegmentIndexedFields(collectionID UniqueID, segmentID Uni
 	isIndexed := true
 	var segmentIndexes []*metricsinfo.IndexedField
 	for _, index := range fieldIndexes {
+		if !builtPerSegment(index) {
+			continue
+		}
 		if si, ok := segIndexInfos.Get(index.IndexID); !index.IsDeleted {
 			buildID := int64(-1)
 			serializedSize := int64(0)

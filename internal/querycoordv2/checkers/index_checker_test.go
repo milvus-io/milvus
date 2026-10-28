@@ -21,10 +21,12 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metacache"
@@ -35,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -672,4 +675,21 @@ func (suite *IndexCheckerSuite) TestCreateNewJsonIndex() {
 
 func TestIndexChecker(t *testing.T) {
 	suite.Run(t, new(IndexCheckerSuite))
+}
+
+func TestCheckSegmentSkipsThePrimaryKeyIndex(t *testing.T) {
+	c := &IndexChecker{}
+	segment := utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel")
+	pkIndex := &indexpb.IndexInfo{
+		FieldID:     100,
+		IndexID:     1000,
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: common.PrimaryKeyIndexType}},
+	}
+	sortIndex := &indexpb.IndexInfo{
+		FieldID:     101,
+		IndexID:     1001,
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "STL_SORT"}},
+	}
+	assert.Empty(t, c.checkSegment(segment, []*indexpb.IndexInfo{pkIndex}), "no segment loads the primary key index")
+	assert.Equal(t, []int64{101}, c.checkSegment(segment, []*indexpb.IndexInfo{pkIndex, sortIndex}))
 }

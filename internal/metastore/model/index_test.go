@@ -52,3 +52,18 @@ func TestUnmarshalIndexModel(t *testing.T) {
 	assert.Equal(t, indexModel.IndexID, ret.IndexID)
 	assert.Nil(t, UnmarshalIndexModel(nil))
 }
+
+func TestIndexModelKeepsTheState(t *testing.T) {
+	idx := &Index{IndexID: 7, State: commonpb.IndexState_Failed, FailReason: "collection is not empty"}
+	pb := MarshalIndexModel(idx)
+	assert.Equal(t, commonpb.IndexState_Failed, pb.GetIndexInfo().GetState())
+	assert.Equal(t, "collection is not empty", pb.GetIndexInfo().GetIndexStateFailReason())
+
+	back := UnmarshalIndexModel(pb)
+	assert.Equal(t, commonpb.IndexState_Failed, back.State)
+	assert.Equal(t, "collection is not empty", back.FailReason)
+
+	cloned := CloneIndex(idx)
+	assert.Equal(t, idx.State, cloned.State)
+	assert.Equal(t, idx.FailReason, cloned.FailReason)
+}

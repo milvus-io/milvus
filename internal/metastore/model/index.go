@@ -19,6 +19,12 @@ type Index struct {
 	IndexParams     []*commonpb.KeyValuePair
 	IsAutoIndex     bool
 	UserIndexParams []*commonpb.KeyValuePair
+	// State is the persisted state of an index that segments do not build,
+	// the primary key index. It is IndexStateNone for the other indexes,
+	// whose state datacoord computes from their segment indexes.
+	State commonpb.IndexState
+	// FailReason is the reason of a Failed State.
+	FailReason string
 }
 
 func UnmarshalIndexModel(indexInfo *indexpb.FieldIndex) *Index {
@@ -37,6 +43,8 @@ func UnmarshalIndexModel(indexInfo *indexpb.FieldIndex) *Index {
 		IndexParams:     indexInfo.IndexInfo.GetIndexParams(),
 		IsAutoIndex:     indexInfo.IndexInfo.GetIsAutoIndex(),
 		UserIndexParams: indexInfo.IndexInfo.GetUserIndexParams(),
+		State:           indexInfo.IndexInfo.GetState(),
+		FailReason:      indexInfo.IndexInfo.GetIndexStateFailReason(),
 	}
 }
 
@@ -47,14 +55,16 @@ func MarshalIndexModel(index *Index) *indexpb.FieldIndex {
 
 	return &indexpb.FieldIndex{
 		IndexInfo: &indexpb.IndexInfo{
-			CollectionID:    index.CollectionID,
-			FieldID:         index.FieldID,
-			IndexName:       index.IndexName,
-			IndexID:         index.IndexID,
-			TypeParams:      index.TypeParams,
-			IndexParams:     index.IndexParams,
-			IsAutoIndex:     index.IsAutoIndex,
-			UserIndexParams: index.UserIndexParams,
+			CollectionID:         index.CollectionID,
+			FieldID:              index.FieldID,
+			IndexName:            index.IndexName,
+			IndexID:              index.IndexID,
+			TypeParams:           index.TypeParams,
+			IndexParams:          index.IndexParams,
+			IsAutoIndex:          index.IsAutoIndex,
+			UserIndexParams:      index.UserIndexParams,
+			State:                index.State,
+			IndexStateFailReason: index.FailReason,
 		},
 		Deleted:    index.IsDeleted,
 		CreateTime: index.CreateTime,
@@ -124,6 +134,8 @@ func CloneIndex(index *Index) *Index {
 		IndexParams:     make([]*commonpb.KeyValuePair, len(index.IndexParams)),
 		IsAutoIndex:     index.IsAutoIndex,
 		UserIndexParams: make([]*commonpb.KeyValuePair, len(index.UserIndexParams)),
+		State:           index.State,
+		FailReason:      index.FailReason,
 	}
 	for i, param := range index.TypeParams {
 		clonedIndex.TypeParams[i] = proto.Clone(param).(*commonpb.KeyValuePair)
