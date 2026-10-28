@@ -602,6 +602,14 @@ class SegmentLoadInfo {
         return info_.use_take_for_output();
     }
 
+    // Field IDs the segment physically stores (binlogs, column groups of the
+    // manifest, and indexes with raw data), including fields that are no
+    // longer in the schema.
+    [[nodiscard]] std::set<FieldId>
+    GetStoredFieldIds() const {
+        return CollectDataFields();
+    }
+
     [[nodiscard]] bool
     HasFieldInSchema(FieldId field_id) const {
         return field_id.get() < START_USER_FIELDID ||

@@ -4535,6 +4535,12 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta,
                     return !validity || validity[i];
                 });
         } else {
+            // No sibling holds rows: the growing segment predates the struct.
+            // A growing segment created after the struct stores its original
+            // sub-fields, and the drop rule keeps one of them in the schema
+            // (schemautil.CheckStructKeepsOriginalSubField), so the rows here
+            // are null struct rows. Unlike a sealed segment there is no stored
+            // field set to check: a dropped sub-field's data is released.
             data = bulk_subscript_not_exist_field(field_meta, missing);
         }
         if (insert_record_.is_valid_data_exist(field_id)) {
