@@ -18,6 +18,7 @@ package adaptor_test
 
 import (
 	"context"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -28,12 +29,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	snpkindex "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/pkindex"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -51,22 +52,46 @@ const (
 	pkChainCollectionID = int64(11)
 	pkChainPartitionID  = int64(12)
 	pkChainPKFieldID    = int64(100)
+	pkChainIndexID      = int64(13)
 	// pkChainLastProperty marks the message that ends a read.
 	pkChainLastProperty = "pkindex-chain-last"
 )
 
-// openPKIndexWAL turns the index on, opens the index of the pchannel the way
-// the WAL recovery will (New, then Start), opens a WAL whose chain contains the
-// index interceptor and creates the collection the chain tests write to. The
-// observe of the recovery is not wired yet, so nothing writes the engine: the
-// decisions see the earlier writes through the in-flight set of the index.
+// openPKIndexWAL turns the index on, opens a WAL whose chain contains the
+// index interceptor, creates the collection the chain tests write to and
+// enables its primary key index. The WAL recovery opens the index of the
+// pchannel and observes the WAL.
 func openPKIndexWAL(t *testing.T, name string) wal.WAL {
+	w, _ := openPKIndexWALWithManager(t, name)
+	return w
+}
+
+// openPKIndexWALWithManager is openPKIndexWAL that also returns the index
+// manager of the streaming node.
+func openPKIndexWALWithManager(t *testing.T, name string) (wal.WAL, *snpkindex.Manager) {
 	setPKIndexEnabled(t, "true")
 	mgr := snpkindex.NewManagerForTest(t, t.TempDir())
-	mgr.New(snpkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: name, Term: 1}}).Start()
 	w := openChainWALWithPKIndex(t, name, pkindex.NewInterceptorBuilder(), mgr)
 	appendPKChainCreateCollection(t, w, pkChainCollectionID, pkChainPartitionID)
-	return w
+	appendPKChainCreateIndex(t, w, pkChainCollectionID, pkChainIndexID)
+	waitPKChainIndex(t, mgr, name, pkChainIndexID)
+	return w, mgr
+}
+
+// waitPKChainIndex waits until the observe of the WAL recovery opened the
+// index indexID of testVChannel. The interceptor reads a write history that
+// the observe updates, so the observe decides a CreateIndex that follows the
+// CreateCollection at once.
+func waitPKChainIndex(t *testing.T, mgr *snpkindex.Manager, pchannel string, indexID int64) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		ch := mgr.GetForTest(pchannel)
+		if ch == nil {
+			return false
+		}
+		idx := ch.IndexForTest(testVChannel)
+		return idx != nil && idx.IndexID() == indexID
+	}, 10*time.Second, 10*time.Millisecond, "the observe did not open the primary key index")
 }
 
 // setPKIndexEnabled sets the switch of the index and restores it after the test.
@@ -97,6 +122,24 @@ func appendPKChainCreateCollection(t *testing.T, w wal.WAL, collectionID int64, 
 				DataType:     schemapb.DataType_Int64,
 			}},
 		}}).
+		WithVChannel(testVChannel).
+		MustBuildMutable()
+	_, err := w.Append(context.Background(), create)
+	require.NoError(t, err)
+}
+
+// appendPKChainCreateIndex enables the primary key index of a collection
+// on testVChannel.
+func appendPKChainCreateIndex(t *testing.T, w wal.WAL, collectionID int64, indexID int64) {
+	t.Helper()
+	create := message.NewCreateIndexMessageBuilderV2().
+		WithHeader(&message.CreateIndexMessageHeader{
+			CollectionId: collectionID,
+			FieldId:      pkChainPKFieldID,
+			IndexId:      indexID,
+			IndexType:    common.PrimaryKeyIndexType,
+		}).
+		WithBody(&message.CreateIndexMessageBody{}).
 		WithVChannel(testVChannel).
 		MustBuildMutable()
 	_, err := w.Append(context.Background(), create)
@@ -365,33 +408,36 @@ func TestPKIndexChainUpsertLikeTxn(t *testing.T) {
 	require.Equal(t, common.AllPartitionsID, companion.GetPartitionID())
 }
 
-// TestPKIndexChainDropCollection checks that the index of a vchannel is dropped
-// with its collection, so a key of the dropped collection is not a duplicate for
-// the next one.
+// TestPKIndexChainDropCollection checks that the observe of the WAL recovery
+// drops the primary key index of a dropped collection: it closes the Index
+// and removes its local files. A vchannel name embeds the ID of its
+// collection, so no later collection uses the vchannel again.
 func TestPKIndexChainDropCollection(t *testing.T) {
-	w := openPKIndexWAL(t, "pkindex-drop-collection")
+	w, mgr := openPKIndexWALWithManager(t, "pkindex-drop-collection")
 	ctx := context.Background()
+	idx := mgr.GetForTest("pkindex-drop-collection").IndexForTest(testVChannel)
+	require.NotNil(t, idx)
+	dir := index.Dir(mgr.Root(), testVChannel, idx.IndexID())
+	require.DirExists(t, dir)
 
-	_, err := w.Append(ctx, newPKChainInsert([]int64{1}, nil))
+	_, err := w.Append(ctx, newPKChainInsert([]int64{1}, pkChainLastMarker()))
 	require.NoError(t, err)
-
 	// a drop collection conflicts with an in flight transaction, the same wait as
 	// in wal_test.go.
 	time.Sleep(2 * time.Second)
 	appendPKChainDropCollection(t, w, pkChainCollectionID)
 
-	const nextCollectionID = int64(21)
-	const nextPartitionID = int64(22)
-	appendPKChainCreateCollection(t, w, nextCollectionID, nextPartitionID)
-	last, err := w.Append(ctx, newPKChainInsertIn(nextCollectionID, nextPartitionID, []int64{1}, pkChainLastMarker()))
-	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		ch := mgr.GetForTest("pkindex-drop-collection")
+		return ch != nil && ch.IndexForTest(testVChannel) == nil
+	}, 10*time.Second, 10*time.Millisecond, "the observe drops the index of the dropped collection")
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(index.VChannelDir(mgr.Root(), testVChannel))
+		return os.IsNotExist(err)
+	}, 10*time.Second, 10*time.Millisecond, "the drop removes the local files of the vchannel")
 
 	msgs := readPKChainMessages(t, w)
-	require.Equal(t, []message.MessageType{
-		message.MessageTypeInsert, message.MessageTypeInsert,
-	}, pkChainTypesOf(msgs))
-	requireAscendingTimeTicks(t, msgs)
-	require.Equal(t, last.TimeTick, msgs[1].TimeTick(), "the key of the dropped collection is not in the index of the new one")
+	require.Equal(t, []message.MessageType{message.MessageTypeInsert}, pkChainTypesOf(msgs))
 }
 
 // TestPKIndexChainConcurrentSameKey checks that the decisions of one key are

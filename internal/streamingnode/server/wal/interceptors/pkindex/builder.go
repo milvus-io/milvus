@@ -65,24 +65,18 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 	ch := param.InitialRecoverSnapshot.PKIndex
 	onFatal := onFatalOf(param)
 	reg := newRegistry(ch)
+	// The WAL recovery opened the Index of every vchannel whose primary key
+	// index is enabled. The writes of those vchannels are decided.
 	// TODO: GetAllCollectionSchemaInfos skips a collection whose schema the
-	// shard manager does not hold, so that collection gets no index and its
+	// shard manager does not hold, so that collection gets no target and its
 	// writes pass through.
 	if lister, ok := param.ShardManager.(collectionSchemaLister); ok {
 		for collectionID, info := range lister.GetAllCollectionSchemaInfos() {
-			_, err := reg.add(ctx, info.VChannel, collectionID, info.Schema)
-			if err == nil {
-				continue
+			if err := reg.adopt(ctx, info.VChannel, collectionID, info.Schema); err != nil {
+				// The recovery checked the primary key of the index when it
+				// opened it, so the schema can not be rejected here.
+				panic(fmt.Sprintf("adopt the primary key index of vchannel %s at wal open: %v", info.VChannel, err))
 			}
-			// The WAL can not serve the vchannel without its index. A local disk
-			// error makes the WAL reject all appends, and the next open of the WAL
-			// tries again. It does not stop the other WALs of the node.
-			if errors.Is(err, errOpenIndex) {
-				onFatal(err)
-				break
-			}
-			// A collection that exists can not have a schema the index rejects.
-			panic(fmt.Sprintf("create the primary key index of vchannel %s at wal open: %v", info.VChannel, err))
 		}
 	}
 	// param.TxnManager is a pointer, so it must not be assigned to the interface

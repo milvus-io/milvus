@@ -344,6 +344,11 @@ func (c *PChannelIndexManager) Decider(vchannel string) dedup.Decider {
 	return idx.Decider()
 }
 
+// IndexOf returns the open Index of a vchannel, nil when it has none.
+func (c *PChannelIndexManager) IndexOf(vchannel string) *index.Index {
+	return c.get(vchannel)
+}
+
 // get returns the Index of a vchannel, nil when it does not exist.
 func (c *PChannelIndexManager) get(vchannel string) *index.Index {
 	c.mu.Lock()

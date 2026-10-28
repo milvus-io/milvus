@@ -18,6 +18,7 @@ package pkindex
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -32,9 +33,10 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
@@ -61,8 +63,10 @@ func (i *appendInterceptor) Name() string {
 
 func (i *appendInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	switch msg.MessageType() {
-	case message.MessageTypeCreateCollection:
-		return i.appendCreateCollection(ctx, msg, appendOp)
+	case message.MessageTypeCreateIndex:
+		return i.appendCreateIndex(ctx, msg, appendOp)
+	case message.MessageTypeDropIndex:
+		return i.appendDropIndex(ctx, msg, appendOp)
 	case message.MessageTypeDropCollection:
 		return i.appendDropCollection(ctx, msg, appendOp)
 	case message.MessageTypeTimeTick:
@@ -86,8 +90,22 @@ func (i *appendInterceptor) DoAppend(ctx context.Context, msg message.MutableMes
 	if msg.ReplicateHeader() != nil {
 		return appendOp(ctx, msg)
 	}
-	t := i.registry.get(msg.VChannel())
+	t, err := i.registry.lookup(ctx, msg.VChannel())
+	if err != nil {
+		if errors.Is(err, errEnablePending) {
+			// The client retries, and the observe decides meanwhile.
+			return nil, status.NewInner("primary key index is being enabled: %v", err)
+		}
+		return nil, status.NewInner("look up the primary key index: %v", err)
+	}
 	if t == nil {
+		return appendOp(ctx, msg)
+	}
+	if i.ch.Decider(msg.VChannel()) == nil && !i.ch.Closed() {
+		// The observe of the WAL recovery dropped the Index: the vchannel was
+		// not empty at the enabling CreateIndex, or a drop whose append
+		// failed is in the WAL. The writes pass through from now on.
+		i.registry.forget(msg.VChannel())
 		return appendOp(ctx, msg)
 	}
 
@@ -107,39 +125,65 @@ func (i *appendInterceptor) Close() {
 	i.registry.close()
 }
 
-func (i *appendInterceptor) appendCreateCollection(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
-	// The control channel copy of a DDL message only orders the DDL. It carries
-	// no write of a data vchannel, so the registry never sees it.
-	if funcutil.IsControlChannel(msg.VChannel()) {
+// appendCreateIndex appends a CreateIndex and enables the primary key index
+// of a data vchannel after a successful append, when no row was ever written
+// to the vchannel. The CreateIndex holds the exclusive lock of the vchannel,
+// so no write of the vchannel is appended until this call returns. The
+// observe of the WAL recovery may still lag the writes appended before it by
+// about one tick, so the write history read here can still say NEVER for a
+// vchannel that is not empty. The observe decides again at the position of
+// the CreateIndex and drops a wrong Index.
+//
+// An append that fails after it got a time tick may be in the WAL. The
+// writes of the vchannel then wait for the observe, see registry.lookup. A
+// replicated CreateIndex passes through: the observe opens its Index.
+func (i *appendInterceptor) appendCreateIndex(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	header := message.MustAsMutableCreateIndexMessageV2(msg).Header()
+	if funcutil.IsControlChannel(msg.VChannel()) || header.GetIndexType() != common.PrimaryKeyIndexType || msg.ReplicateHeader() != nil {
 		return appendOp(ctx, msg)
 	}
-	// The shard interceptor below reads the message the same way and rejects a
-	// message without a schema, so a message this interceptor can not read is a
-	// message the WAL can not take.
-	create := message.MustAsMutableCreateCollectionMessageV1(msg)
-	schema := messageutil.MustGetSchemaFromCreateCollectionMessageBody(create.MustBody())
-	// The index is created before the append, so a collection whose index can not
-	// be created is not created either. CreateCollection holds the exclusive lock
-	// of the vchannel, no write of it is in flight. The observe of the WAL
-	// recovery finds the index when it reaches the message: the open is
-	// get-or-create on both sides.
-	// TODO: the enabling message of the index is a CreateIndex of type
-	// PRIMARY_KEY, opened after a successful append, with a retriable error
-	// for the writes of the vchannel while the result of the append is
-	// unknown. The CreateIndex message carries no index type yet and goes to
-	// the control channel only, so the index is opened here until then.
-	created, err := i.registry.add(ctx, msg.VChannel(), create.Header().GetCollectionId(), schema)
+	state, _ := i.ch.VChannelState(msg.VChannel())
+	id, tt, err := utility.AppendAndGetTimeTick(ctx, appendOp, msg)
 	if err != nil {
-		return nil, status.NewUnrecoverableError("create the primary key index of the collection: %v", err)
-	}
-	id, err := appendOp(ctx, msg)
-	if err != nil {
-		// A duplicate CreateCollection finds the target of the existing collection
-		// in use, so only a target that this call created is removed.
-		if created {
-			i.registry.drop(ctx, msg.VChannel())
+		if tt != 0 && !errors.Is(err, redo.ErrRedo) {
+			i.registry.markPending(msg.VChannel(), tt)
 		}
 		return id, err
+	}
+	if state.EverWritten != streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_NEVER {
+		return id, nil
+	}
+	spec := snpkindex.IndexSpec{
+		VChannel:       msg.VChannel(),
+		CollectionID:   header.GetCollectionId(),
+		IndexID:        header.GetIndexId(),
+		EnableTimeTick: msg.TimeTick(),
+	}
+	if err := i.registry.enable(ctx, spec, header.GetFieldId(), state.Schema); err != nil {
+		// The message is in the WAL. The reopen of the WAL enables the index
+		// through the observe.
+		mlog.Error(ctx, "failed to enable the primary key index after its CreateIndex, the WAL becomes unavailable",
+			mlog.FieldVChannel(msg.VChannel()), mlog.Int64("indexID", header.GetIndexId()), mlog.Err(err))
+		i.onFatal(errors.Wrap(err, "enable the primary key index after its CreateIndex"))
+	}
+	return id, nil
+}
+
+// appendDropIndex appends a DropIndex and drops the target of the vchannel
+// when the DropIndex names its open index, or names no index. The index stays
+// open: the observe of the WAL recovery closes it when it reaches the drop.
+func (i *appendInterceptor) appendDropIndex(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	id, err := appendOp(ctx, msg)
+	if err != nil {
+		return id, err
+	}
+	header := message.MustAsMutableDropIndexMessageV2(msg).Header()
+	if funcutil.IsControlChannel(msg.VChannel()) || header.GetIndexType() != common.PrimaryKeyIndexType {
+		return id, nil
+	}
+	idx := i.ch.IndexOf(msg.VChannel())
+	if idx != nil && (len(header.GetIndexIds()) == 0 || slices.Contains(header.GetIndexIds(), idx.IndexID())) {
+		i.registry.drop(msg.VChannel())
 	}
 	return id, nil
 }
@@ -147,17 +191,16 @@ func (i *appendInterceptor) appendCreateCollection(ctx context.Context, msg mess
 func (i *appendInterceptor) appendDropCollection(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	id, err := appendOp(ctx, msg)
 	if err != nil {
-		// TODO: a DropCollection whose append fails but is persisted leaves the
-		// index of the vchannel open until the WAL closes. The shard interceptor
-		// rejects the later writes of the vchannel, so only memory is held.
+		// A DropCollection whose append fails but is persisted is in the WAL:
+		// the observe closes the index, and the next write forgets the target.
 		return id, err
 	}
 	if funcutil.IsControlChannel(msg.VChannel()) {
 		return id, nil
 	}
 	// The index stays open: the observe of the WAL recovery closes it when
-	// it reaches the drop, see registry.forget.
-	i.registry.forget(msg.VChannel())
+	// it reaches the drop, see registry.drop.
+	i.registry.drop(msg.VChannel())
 	return id, nil
 }
 
