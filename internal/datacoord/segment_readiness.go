@@ -25,7 +25,7 @@ import (
 // schema-derived index / sort / stats / schema requirements, then evaluates a
 // candidate member against the same sources of truth the async pipeline uses:
 //
-//   - data: the segment is Flushed/Flushing with a data footprint (binlogs or a
+//   - data: the segment has rows and is Flushed/Flushing with a footprint (binlogs or a
 //     V3 manifest);
 //   - index: every target index on the collection is Finished for the segment,
 //     unless the collection has no index requirement or the small sorted-leaf
@@ -33,7 +33,7 @@ import (
 //   - sort: the segment carries the sorted flag when sort compaction is enabled
 //     and the collection is not external;
 //   - stats: text / JSON-key stats have been written back (the same needDo*
-//     predicates the statsInspector uses to schedule tasks);
+//     artifact checks also used by statsInspector, without scheduling gates);
 //   - schema: the segment's SchemaVersion is not behind the collection's.
 //
 // A segment is "ready" when every term passes. Ready never reads IsInvisible:
@@ -138,11 +138,11 @@ func (r *segmentReadiness) Predicate() func(*SegmentInfo) bool {
 	return r.Ready
 }
 
-// dataReady requires the segment to be in a flush state with a data footprint.
+// dataReady requires a nonempty segment in a flush state with a data footprint.
 // It deliberately does NOT require !IsInvisible: staged members are still
 // invisible through STAGED→READY and the flip happens at publish.
 func (r *segmentReadiness) dataReady(segment *SegmentInfo) bool {
-	if !isFlushState(segment.GetState()) {
+	if !isFlushState(segment.GetState()) || segment.GetNumOfRows() <= 0 {
 		return false
 	}
 	return len(segment.GetBinlogs()) > 0 || segment.GetManifestPath() != ""
@@ -187,19 +187,18 @@ func (r *segmentReadiness) sortReady(segment *SegmentInfo) bool {
 	return segment.GetIsSorted() || segment.GetIsSortedByNamespace()
 }
 
-// statsReady requires text / JSON-key stats to have converged when the
-// collection declares the corresponding requirement. Convergence uses the same
-// needDo* predicates the statsInspector uses to schedule tasks, so write-time
-// readiness can never drift from what the pipeline actually produces.
+// statsReady checks produced artifacts independently of scheduling eligibility.
+// An unsorted segment that the stats scheduler skips is still missing stats.
 func (r *segmentReadiness) statsReady(segment *SegmentInfo) bool {
 	if !r.requireTextStats && !r.requireJSONKeyStats {
 		return true
 	}
-	allowUnsorted := r.collection.IsExternal()
-	if r.requireTextStats && needDoTextIndex(segment, r.textStatsFieldIDs, allowUnsorted) {
-		return false
+	if r.requireTextStats {
+		if !hasRequiredTextStats(segment, r.textStatsFieldIDs) {
+			return false
+		}
 	}
-	if r.requireJSONKeyStats && !r.jsonKeyStatsConverged(segment, allowUnsorted) {
+	if r.requireJSONKeyStats && !r.jsonKeyStatsConverged(segment) {
 		return false
 	}
 	return true
@@ -209,11 +208,11 @@ func (r *segmentReadiness) statsReady(segment *SegmentInfo) bool {
 // satisfied for the segment. External collections only build JSON-key stats on
 // V3 manifest segments; a non-buildable segment never gets a task (mirroring
 // statsInspector's capability gate) and is therefore exempt.
-func (r *segmentReadiness) jsonKeyStatsConverged(segment *SegmentInfo, allowUnsorted bool) bool {
+func (r *segmentReadiness) jsonKeyStatsConverged(segment *SegmentInfo) bool {
 	if r.collection.IsExternal() && !canBuildExternalJSONKeyIndex(segment) {
 		return true
 	}
-	return !needDoJSONKeyIndex(segment, r.jsonKeyStatsFieldIDs, allowUnsorted)
+	return hasRequiredJSONKeyStats(segment, r.jsonKeyStatsFieldIDs)
 }
 
 // schemaReady requires the segment to carry the collection's current schema

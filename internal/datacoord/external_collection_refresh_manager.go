@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -297,6 +298,13 @@ func (m *externalCollectionRefreshManager) forgetJob(jobID int64) {
 // removal is forgetJob at GC. handleJobFinished, which ensureJobFinishedNotified
 // still fires for such a job, owns the publish.
 func (m *externalCollectionRefreshManager) handleJobFailed(jobID int64) {
+	if m.mt != nil {
+		if g := m.mt.producerChangeGroup(model.SegmentChangeSourceExternalRefresh, jobID, ""); g != nil {
+			if err := m.mt.abortProducerChange(m.ctx, g, "external refresh job failed"); err != nil {
+				mlog.Warn(m.ctx, "cannot reclaim failed external refresh publication", mlog.FieldJobID(jobID), mlog.Err(err))
+			}
+		}
+	}
 	m.cleanupExploreTempOnce(jobID)
 }
 
@@ -366,6 +374,15 @@ func (m *externalCollectionRefreshManager) cleanupExploreTempForJob(jobID int64)
 // An owned baseline segment absent from both kept and updated results is treated
 // as removed, but a task may classify only the baseline segments it owns.
 func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error {
+	if m.mt != nil {
+		if g := m.mt.producerChangeGroup(model.SegmentChangeSourceExternalRefresh, job.GetJobId(), ""); g != nil {
+			err := m.mt.requirePublishedChange(ctx, g)
+			if err == nil {
+				m.mt.recomputeDataView(ctx, job.GetCollectionId())
+			}
+			return err
+		}
+	}
 	tasks, err := m.refreshMeta.GetCommittedTaskResultsByJobID(job.GetJobId())
 	if err != nil {
 		return err
@@ -514,10 +531,11 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 	// self-heals them. Segment-level validation still rejects schema-version
 	// rollback, but drop, rename, or type changes need a schema gate or lock
 	// before they are supported.
-	if err := applyExternalCollectionSegmentUpdateForBaseline(
+	if err := applyExternalCollectionSegmentUpdateWithGroup(
 		ctx,
 		m.mt,
 		job.GetCollectionId(),
+		job.GetJobId(),
 		baselineSegmentIDs,
 		keptSegments,
 		updatedSegments,

@@ -292,6 +292,7 @@ var statsSubJobs = []indexpb.StatsSubJob{indexpb.StatsSubJob_TextIndexJob, index
 type statsFields struct {
 	text, json []UniqueID
 	external   bool
+	staged     typeutil.UniqueSet
 }
 
 func getStatsFields(collection *collectionInfo) statsFields {
@@ -315,12 +316,13 @@ func getStatsFields(collection *collectionInfo) statsFields {
 // segmentNeedsStats reports whether the segment itself lacks the stats of
 // subJobType. It reads only the segment, so it may run under meta.segMu.
 func segmentNeedsStats(segment *SegmentInfo, fields statsFields, subJobType indexpb.StatsSubJob) bool {
+	allowUnsorted := fields.external || (!enableSortCompaction() && fields.staged.Contain(segment.GetID()))
 	switch subJobType {
 	case indexpb.StatsSubJob_TextIndexJob:
-		return needDoTextIndex(segment, fields.text, fields.external)
+		return needDoTextIndex(segment, fields.text, allowUnsorted)
 	case indexpb.StatsSubJob_JsonKeyIndexJob:
 		return (!fields.external || canBuildExternalJSONKeyIndex(segment)) &&
-			needDoJSONKeyIndex(segment, fields.json, fields.external)
+			needDoJSONKeyIndex(segment, fields.json, allowUnsorted)
 	default:
 		return false
 	}
@@ -339,6 +341,7 @@ func (si *statsInspector) getStatsCandidateSegments(ctx context.Context, collect
 	var segIDs []UniqueID
 	for _, collection := range collections {
 		fields := getStatsFields(collection)
+		fields.staged = si.mt.stagedSegmentMembers(collection.ID)
 		// No field to build stats for means no candidate segment, so skip the
 		// collection before scanning all of its segments.
 		if len(fields.text) == 0 && len(fields.json) == 0 {
@@ -377,6 +380,7 @@ func (si *statsInspector) processStatsSegments(ctx context.Context, withPending 
 		fields, ok := fieldsByCollection[collection.ID]
 		if !ok {
 			fields = getStatsFields(collection)
+			fields.staged = si.mt.stagedSegmentMembers(collection.ID)
 			fieldsByCollection[collection.ID] = fields
 		}
 		for _, subJobType := range statsSubJobs {
@@ -435,15 +439,16 @@ func needDoTextIndex(segment *SegmentInfo, fieldIDs []UniqueID, allowUnsorted bo
 		return false
 	}
 
+	return !hasRequiredTextStats(segment, fieldIDs)
+}
+
+func hasRequiredTextStats(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 	for _, fieldID := range fieldIDs {
-		if segment.GetTextStatsLogs() == nil {
-			return true
-		}
 		if segment.GetTextStatsLogs()[fieldID] == nil {
-			return true
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 func needDoJSONKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID, allowUnsorted bool) bool {
@@ -454,20 +459,21 @@ func needDoJSONKeyIndex(segment *SegmentInfo, fieldIDs []UniqueID, allowUnsorted
 		return false
 	}
 
+	return !hasRequiredJSONKeyStats(segment, fieldIDs)
+}
+
+func hasRequiredJSONKeyStats(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 	for _, fieldID := range fieldIDs {
-		if segment.GetJsonKeyStats() == nil {
-			return true
-		}
 		if segment.GetJsonKeyStats()[fieldID] == nil {
-			return true
+			return false
 		}
 		// if the data format version is less than the current version, we need to do the stats task again
 		// because the data format is updated, the old data format need to be converted to the new data format
 		if segment.GetJsonKeyStats()[fieldID].GetJsonKeyStatsDataFormat() < common.JSONStatsDataFormatVersion {
-			return true
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 func canBuildExternalJSONKeyIndex(segment *SegmentInfo) bool {

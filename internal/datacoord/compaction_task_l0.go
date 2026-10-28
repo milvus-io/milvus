@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var _ CompactionTask = (*l0CompactionTask)(nil)
@@ -313,10 +314,15 @@ func (t *l0CompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.Compac
 
 func (t *l0CompactionTask) selectFlushedSegment() ([]*SegmentInfo, []*datapb.CompactionSegmentBinlogs, error) {
 	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
+	excluded := typeutil.NewUniqueSet()
+	if m, ok := t.meta.(*meta); ok {
+		excluded = m.unpublishedSegmentMembers(context.TODO(), taskProto.GetCollectionID())
+	}
 	// Select flushed L1/L2 segments for LevelZero compaction that meets the condition:
 	// dmlPos < triggerInfo.pos
 	flushedSegments := t.meta.SelectSegments(context.TODO(), WithCollection(taskProto.GetCollectionID()), SegmentFilterFunc(func(info *SegmentInfo) bool {
-		return (taskProto.GetPartitionID() == common.AllPartitionsID || info.GetPartitionID() == taskProto.GetPartitionID()) &&
+		return !excluded.Contain(info.GetID()) &&
+			(taskProto.GetPartitionID() == common.AllPartitionsID || info.GetPartitionID() == taskProto.GetPartitionID()) &&
 			info.GetInsertChannel() == taskProto.GetChannel() &&
 			(info.GetState() == commonpb.SegmentState_Sealed || isFlushState(info.GetState())) &&
 			!info.GetIsImporting() &&

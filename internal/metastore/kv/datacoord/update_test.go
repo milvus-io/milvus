@@ -587,3 +587,36 @@ func TestCatalog_Update_DataViewEntryEncoding(t *testing.T) {
 	assert.NoError(t, proto.Unmarshal([]byte(value), decoded))
 	assert.True(t, proto.Equal(dv, decoded))
 }
+
+func TestCatalog_Update_ClusteringPublicationFallbackMarkers(t *testing.T) {
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(3).Maybe()
+	stats := &datapb.PartitionStatsInfo{CollectionID: 10, PartitionID: 100, VChannel: "ch-1", Version: 5000, SegmentIDs: []int64{1001}}
+	group := newTestCatalogGroup()
+	group.Source = model.SegmentChangeSourceClustering
+	group.SourceJobID = 5000
+	group.GroupID = 5000
+	group.PartitionID = 100
+	group.State = model.SegmentChangeStateCommitted
+	group.PartitionStats = stats
+	view := &viewpb.DataViewOfCollection{CollectionId: 10, DataVersion: &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 1}}
+	statsKey, _, err := buildPartitionStatsInfoKv(stats)
+	assert.NoError(t, err)
+	metakv.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, saves map[string]string) error {
+		assert.Contains(t, saves, statsKey)
+		assert.NotContains(t, saves, buildCurrentPartitionStatsVersionPath(10, 100, "ch-1"))
+		return nil
+	}).Once()
+	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, saves map[string]string, _ []string, _ ...predicates.Predicate) error {
+			assert.Len(t, saves, 3)
+			assert.Contains(t, saves, buildSegmentChangeGroupKey(10, 5000))
+			assert.Contains(t, saves, buildCurrentPartitionStatsVersionPath(10, 100, "ch-1"))
+			assert.Contains(t, saves, buildDataViewVersionKey(10, 1, 1))
+			return nil
+		}).Once()
+	c := NewCatalog(metakv, "", "")
+	assert.NoError(t, c.Update(context.TODO(), metastore.AddPartitionStats(stats),
+		metastore.SavePartitionStatsVersion(10, 100, "ch-1", 5000),
+		metastore.SaveSegmentChangeGroup(group), metastore.SaveDataView(view)))
+}

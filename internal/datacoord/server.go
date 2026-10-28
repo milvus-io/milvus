@@ -733,6 +733,12 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		return err
 	}
 
+	// Resolve interrupted group writes before RecoverManager projects any
+	// SegmentMeta or starts its asynchronous recompute worker.
+	if err := recoveredMeta.reconcileSegmentChangeGroups(s.ctx, s.allocator, s.dataViewCollectionRecoveryValidator); err != nil {
+		return err
+	}
+
 	collections := recoveredMeta.GetCollections()
 	collectionIDs := lo.Map(collections, func(c *collectionInfo, _ int) int64 { return c.ID })
 	collectionVChannels := lo.SliceToMap(collections, func(c *collectionInfo) (int64, []string) {
@@ -741,15 +747,32 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	var manager dataview.Manager
 	if err := retry.Do(s.ctx, func() error {
 		var err error
+		recoveryCtx, cancel := context.WithCancel(s.ctx)
+		recovered := false
+		defer func() {
+			if !recovered {
+				cancel()
+			}
+		}()
 		manager, err = dataview.RecoverManager(
-			s.ctx,
+			recoveryCtx,
 			catalog,
 			s.dataViewCollectionRecoveryValidator,
 			recoveredMeta.loadableProjection,
 			collectionIDs,
 			collectionVChannels,
 		)
-		return err
+		if err != nil {
+			return err
+		}
+		// RecoverManager's general rebuild is best-effort. Group recovery
+		// requires a confirmed snapshot before exposing the recovered meta.
+		if err := recoveredMeta.reconcileSegmentChangeDataViews(s.ctx, manager); err != nil {
+			return err
+		}
+		// The successfully recovered manager lives until s.ctx is canceled.
+		recovered = true
+		return nil
 	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
 		return err
 	}
@@ -795,6 +818,7 @@ func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager
 
 func (s *Server) initCompaction() {
 	cph := newCompactionInspector(s.meta, s.allocator, s.handler, s.globalScheduler, s.globalScheduler, s.indexEngineVersionManager)
+	cph.copySegmentMeta = s.copySegmentMeta
 	cph.loadMeta()
 	s.compactionInspector = cph
 	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.indexEngineVersionManager)

@@ -57,6 +57,7 @@ func deleteGroupCleanup(t *testing.T, m *meta, collectionID, groupID int64) {
 		aborted := group.Clone()
 		aborted.State = model.SegmentChangeStateAborted
 		require.NoError(t, m.UpdateSegmentChangeGroup(ctx, aborted))
+		require.NoError(t, m.reclaimSegmentChangeGroup(ctx, aborted))
 	}
 	require.NoError(t, m.DeleteSegmentChangeGroup(ctx, collectionID, groupID))
 }
@@ -197,11 +198,13 @@ func TestMeta_UpdateSegmentsInfoAndChangeGroups_Publish(t *testing.T) {
 	// Seeded meta: staged member 1001 (invisible), superseded 2001 (visible).
 	for _, seg := range []*SegmentInfo{
 		NewSegmentInfo(&datapb.SegmentInfo{
-			ID: 1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+			NumOfRows: 42,
+			ID:        1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, IsInvisible: true,
 		}),
 		NewSegmentInfo(&datapb.SegmentInfo{
-			ID: 2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+			NumOfRows: 42,
+			ID:        2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
 		}),
 	} {
@@ -265,11 +268,13 @@ func TestMeta_UpdateSegmentsInfoAndChangeGroupsAndDataView_Publish(t *testing.T)
 	// Seeded meta: staged member 1001 (invisible), superseded 2001 (visible).
 	for _, seg := range []*SegmentInfo{
 		NewSegmentInfo(&datapb.SegmentInfo{
-			ID: 1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+			NumOfRows: 42,
+			ID:        1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, IsInvisible: true,
 		}),
 		NewSegmentInfo(&datapb.SegmentInfo{
-			ID: 2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+			NumOfRows: 42,
+			ID:        2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
 		}),
 	} {
@@ -426,7 +431,8 @@ func TestMeta_UpdateSegmentsInfoAndChangeGroups_OwnershipChecks(t *testing.T) {
 
 	for _, seg := range []*SegmentInfo{
 		NewSegmentInfo(&datapb.SegmentInfo{
-			ID: 2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+			NumOfRows: 42,
+			ID:        2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
 		}),
 	} {
@@ -514,11 +520,13 @@ func TestMeta_UpdateSegmentsInfoAndChangeGroups_SupersededAlreadyDropped(t *test
 	ctx := context.Background()
 
 	require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
-		ID: 1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+		NumOfRows: 42,
+		ID:        1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, IsInvisible: true,
 	})))
 	require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
-		ID: 2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+		NumOfRows: 42,
+		ID:        2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
 	})))
 
@@ -554,7 +562,8 @@ func TestMeta_LoadSegmentChangeGroups_L0ExemptionPersistedStable(t *testing.T) {
 	ctx := context.Background()
 
 	require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
-		ID: 4001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+		NumOfRows: 42,
+		ID:        4001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L0,
 	})))
 
@@ -592,11 +601,13 @@ func TestMeta_PublishRequiresVisibleMembers(t *testing.T) {
 		m, err := newMemoryMeta(t)
 		require.NoError(t, err)
 		require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
-			ID: 1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+			NumOfRows: 42,
+			ID:        1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, IsInvisible: true,
 		})))
 		require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
-			ID: 2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+			NumOfRows: 42,
+			ID:        2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
 		})))
 		group := newTestGroup()
@@ -727,8 +738,10 @@ func TestMeta_UpdateSegmentsInfoAndChangeGroups_SaveBinlogStale(t *testing.T) {
 	})
 
 	t.Run("already-flushed target maps to no-op (C16)", func(t *testing.T) {
+		// Keep the stale target independent of group 1 from the prior subtest.
 		require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
-			ID: 1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+			NumOfRows: 42,
+			ID:        1004, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
 		})))
 		group := newTestGroup()
@@ -744,7 +757,7 @@ func TestMeta_UpdateSegmentsInfoAndChangeGroups_SaveBinlogStale(t *testing.T) {
 		ready.State = model.SegmentChangeStateReady
 		err := m.UpdateSegmentsInfoAndChangeGroups(ctx,
 			[]metastore.UpdateAction{metastore.SaveSegmentChangeGroup(ready)},
-			UpdateBinlogsFromSaveBinlogPathsOperator(1001, nil, nil, nil, nil),
+			UpdateBinlogsFromSaveBinlogPathsOperator(1004, nil, nil, nil, nil),
 		)
 		require.NoError(t, err)
 		require.Equal(t, model.SegmentChangeStateReady, m.GetSegmentChangeGroup(ctx, 10, 2).State)
@@ -761,7 +774,8 @@ func TestMeta_UpdateSegmentChangeGroup_PreservesL0Exemption(t *testing.T) {
 	ctx := context.Background()
 
 	require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
-		ID: 4001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+		NumOfRows: 42,
+		ID:        4001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L0,
 	})))
 
@@ -861,11 +875,13 @@ func TestMeta_PublishRequiresSupersededRetired(t *testing.T) {
 	ctx := context.Background()
 
 	require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
-		ID: 1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+		NumOfRows: 42,
+		ID:        1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, IsInvisible: true,
 	})))
 	require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
-		ID: 2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+		NumOfRows: 42,
+		ID:        2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
 	})))
 
@@ -905,11 +921,13 @@ func TestMeta_PublishSupersededParentGcResidue(t *testing.T) {
 	ctx := context.Background()
 
 	require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
-		ID: 1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+		NumOfRows: 42,
+		ID:        1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, IsInvisible: true,
 	})))
 	require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
-		ID: 2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+		NumOfRows: 42,
+		ID:        2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
 	})))
 
@@ -973,7 +991,8 @@ func TestMeta_UpdateSegmentsInfoAndChangeGroups_OneTxnConflictingCreates(t *test
 
 	for _, seg := range []*SegmentInfo{
 		NewSegmentInfo(&datapb.SegmentInfo{
-			ID: 2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+			NumOfRows: 42,
+			ID:        2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
 		}),
 	} {
@@ -1069,16 +1088,19 @@ func TestMeta_AddSegmentChangeGroup_AntiDuplication(t *testing.T) {
 
 	for _, seg := range []*SegmentInfo{
 		NewSegmentInfo(&datapb.SegmentInfo{
-			ID: 2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+			NumOfRows: 42,
+			ID:        2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
 		}),
 		NewSegmentInfo(&datapb.SegmentInfo{
-			ID: 3001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+			NumOfRows: 42,
+			ID:        3001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
 		}),
 		// L0 superseded parent, used for the L0 exemption below.
 		NewSegmentInfo(&datapb.SegmentInfo{
-			ID: 4001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+			NumOfRows: 42,
+			ID:        4001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L0,
 		}),
 	} {
@@ -1171,7 +1193,8 @@ func TestMeta_LoadSegmentChangeGroups_ConflictFailClosed(t *testing.T) {
 
 	for _, seg := range []*SegmentInfo{
 		NewSegmentInfo(&datapb.SegmentInfo{
-			ID: 2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+			NumOfRows: 42,
+			ID:        2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
 		}),
 	} {
