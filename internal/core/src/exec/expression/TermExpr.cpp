@@ -410,19 +410,19 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
         arg_inited_ = true;
     }
 
-    // An empty set matches nothing. A subscripted operand is still read,
-    // because a missing or null element is UNKNOWN, not FALSE.
-    if (arg_set_->Empty() && index == kWholeArrayOperand) {
-        res.reset();
-        MoveCursor();
-        return res_vec;
-    }
-
     if (is_nested_array_field_) {
         ThrowInfo(ErrorCode::Unsupported,
                   "nested ARRAY field {} does not support element term "
                   "predicates",
                   field_id_.get());
+    }
+
+    // `x IN ()` is FALSE for every x, including NULL: a null row, a missing
+    // element and a null element are all FALSE, not UNKNOWN.
+    if (arg_set_->Empty()) {
+        res.reset();
+        MoveCursor();
+        return res_vec;
     }
     int processed_cursor = 0;
     auto make_sub_batch = [&]<typename ArrayType>() {
@@ -457,12 +457,6 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable(EvalCtx& context) {
                 if (!HasArrayElementAt(data[offset], index)) {
                     res[i] = false;
                     valid_res[i] = false;
-                    continue;
-                }
-                // Checked before the read: an empty set's value type is a
-                // placeholder, not the element type.
-                if (term_set->Empty()) {
-                    res[i] = false;
                     continue;
                 }
                 if (has_bitmap_input && !bitmap_input[processed_cursor + i]) {
@@ -910,11 +904,33 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable(EvalCtx& context) {
 template <typename T>
 VectorPtr
 PhyTermFilterExpr::ExecVisitorImpl(EvalCtx& context) {
+    if (expr_->column_.element_level_ && expr_->vals_.empty()) {
+        return ExecElementLevelEmptyTerm(context);
+    }
     if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
         return ExecVisitorImplForIndex<T>();
     } else {
         return ExecVisitorImplForData<T>(context);
     }
+}
+
+// `$[x] IN ()` is FALSE for every element, including a null one. Keyed on
+// the literal list, not on the values left after dropping the ones that
+// overflow the element type: `$[i8] IN (1000)` on a null element is UNKNOWN.
+VectorPtr
+PhyTermFilterExpr::ExecElementLevelEmptyTerm(EvalCtx& context) {
+    auto* input = context.get_offset_input();
+    auto next_batch_size = GetNextRealBatchSize(input, true);
+    if (!next_batch_size.has_value()) {
+        return nullptr;
+    }
+    auto real_batch_size = *next_batch_size;
+    if (auto res = AdvanceEmptyElementBatch(input, true, real_batch_size)) {
+        return res;
+    }
+    MoveCursor();
+    return std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                          TargetBitmap(real_batch_size, true));
 }
 
 template <typename T>
