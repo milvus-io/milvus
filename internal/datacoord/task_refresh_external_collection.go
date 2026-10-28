@@ -229,11 +229,14 @@ func applyExternalCollectionSegmentUpdateWithGroup(ctx context.Context, mt *meta
 		return merr.WrapErrServiceInternalMsg("meta is nil, cannot update segments")
 	}
 	if g := mt.producerChangeGroup(model.SegmentChangeSourceExternalRefresh, jobID, ""); jobID != 0 && g != nil {
-		err := mt.requirePublishedChange(ctx, g)
-		if err == nil {
+		if g.State == model.SegmentChangeStateCommitted {
 			mt.recomputeDataView(ctx, collectionID)
+			return nil
 		}
-		return err
+		if g.IsTerminal() {
+			return mt.requirePublishedChange(ctx, g)
+		}
+		return nil // The checker retains the job until this group publishes.
 	}
 	staging := jobID != 0 && Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool()
 	mlog.Info(ctx, "processing external collection update response",
@@ -357,6 +360,18 @@ func applyExternalCollectionSegmentUpdateWithGroup(ctx context.Context, mt *meta
 		normalizedUpsertSegmentMap[normalized.GetID()] = normalized
 	}
 	upsertSegmentMap = normalizedUpsertSegmentMap
+	// A same-ID patch changes a visible segment's manifest. The current group
+	// record carries only membership, so it cannot roll that patch back if
+	// publication fails. Keep mixed and patch-only refreshes on the legacy
+	// composite update until content patches are part of the group protocol.
+	if staging {
+		for id := range upsertSegmentMap {
+			if _, patch := baselineSegmentMap[id]; patch {
+				staging = false
+				break
+			}
+		}
+	}
 
 	// Build update operators
 	var operators []UpdateOperator
@@ -508,7 +523,7 @@ func applyExternalCollectionSegmentUpdateWithGroup(ctx context.Context, mt *meta
 				newIDs = append(newIDs, seg.GetID())
 			}
 		}
-		g, _, err := mt.stageAdmittedChange(mt.ctx, &model.SegmentChangeGroup{
+		_, _, err := mt.stageAdmittedChange(mt.ctx, &model.SegmentChangeGroup{
 			GroupID: jobID, SourceJobID: jobID,
 			Source: model.SegmentChangeSourceExternalRefresh, CollectionID: collectionID, NewSegmentIDs: newIDs, SupersededSegmentIDs: segmentsToDrop,
 		}, true, operators...)
@@ -518,7 +533,7 @@ func applyExternalCollectionSegmentUpdateWithGroup(ctx context.Context, mt *meta
 		for _, id := range newIDs {
 			notifySegmentIndexBuild(id)
 		}
-		return mt.requirePublishedChange(ctx, g)
+		return nil // Registration succeeded; publication is a later job phase.
 	}
 	if err := mt.UpdateSegmentsInfo(ctx, operators...); err != nil {
 		mlog.Warn(ctx, "failed to update segments atomically", mlog.Err(err))

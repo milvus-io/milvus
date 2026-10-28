@@ -129,6 +129,11 @@ func TestSegmentChangeImportSubgroupsWaitForFence(t *testing.T) {
 		require.Equal(t, model.SegmentChangeStateReady, m.GetSegmentChangeGroup(t.Context(), 10, g.GroupID).State)
 		require.True(t, m.GetSegment(t.Context(), g.NewSegmentIDs[0]).GetIsInvisible())
 	}
+	beforeAck := m.GetSegmentChangeGroup(t.Context(), 10, groups[0].GroupID)
+	beforeAck.CreateTS = time.Now().Add(-2 * time.Hour).Unix()
+	require.False(t, inspector.stagingTimedOut(beforeAck), "a durable WAL ack may arrive after this timestamp")
+	inspector.tryPublish(t.Context(), beforeAck)
+	require.Equal(t, model.SegmentChangeStateReady, m.GetSegmentChangeGroup(t.Context(), 10, groups[0].GroupID).State)
 	// The preparation survives restart and opt-out without publishing before WAL.
 	recovered := reloadSegmentChangeMeta(t, m)
 	require.NoError(t, recovered.reconcileSegmentChangeGroups(t.Context(), nil, liveSegmentChangeCollection))
@@ -294,7 +299,7 @@ func TestSegmentChangeExternalRefreshMembership(t *testing.T) {
 		Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{LogID: 1001, EntriesNum: 84}}}},
 	}
 	err := applyExternalCollectionSegmentUpdateWithGroup(t.Context(), m, 10, 8000, []int64{2001, 2002}, []int64{2002}, []*datapb.SegmentInfo{incoming})
-	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.NoError(t, err, "registration retains the job for asynchronous publication")
 	require.True(t, m.GetSegment(t.Context(), 1001).GetIsInvisible())
 	require.Equal(t, commonpb.SegmentState_Flushed, m.GetSegment(t.Context(), 2001).GetState())
 	require.NoError(t, m.UpdateSegmentsInfo(t.Context(), func(pack *updateSegmentPack) bool {
@@ -308,6 +313,30 @@ func TestSegmentChangeExternalRefreshMembership(t *testing.T) {
 	require.ElementsMatch(t, []int64{1001, 2002}, segmentChangeViewIDs(t, m))
 	require.NoError(t, Params.Save(Params.DataCoordCfg.SegmentChangeEnabled.Key, "false"))
 	require.NoError(t, applyExternalCollectionSegmentUpdateWithGroup(t.Context(), m, 10, 8000, []int64{2001, 2002}, []int64{2002}, []*datapb.SegmentInfo{incoming}))
+}
+
+func TestSegmentChangeExternalRefreshMixedPatchKeepsLegacyApply(t *testing.T) {
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "true")
+	m, _, _ := seedMixProducer(t)
+	m.GetCollection(10).Schema = readinessExternalSchema()
+	m.GetCollection(10).Partitions = []int64{100}
+	patch := &datapb.SegmentInfo{
+		ID: 2002, CollectionID: 10, NumOfRows: 42,
+		ManifestPath: packed.MarshalManifestPath("/private/tmp/external/10/100/2002", 2),
+		Binlogs:      []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 2002, EntriesNum: 42}}}},
+	}
+	newSegment := &datapb.SegmentInfo{
+		ID: 1001, CollectionID: 10, NumOfRows: 84,
+		ManifestPath:   packed.MarshalManifestPath("/private/tmp/external/10/100/1001", 1),
+		StorageVersion: 3,
+		Binlogs:        []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 1001, EntriesNum: 84}}}},
+	}
+	require.NoError(t, applyExternalCollectionSegmentUpdateWithGroup(t.Context(), m, 10, 8000,
+		[]int64{2001, 2002}, nil, []*datapb.SegmentInfo{patch, newSegment}))
+	require.Nil(t, m.producerChangeGroup(model.SegmentChangeSourceExternalRefresh, 8000, ""))
+	require.Equal(t, commonpb.SegmentState_Dropped, m.GetSegment(t.Context(), 2001).GetState())
+	require.Equal(t, patch.ManifestPath, m.GetSegment(t.Context(), 2002).GetManifestPath())
+	require.False(t, m.GetSegment(t.Context(), 1001).GetIsInvisible())
 }
 
 func TestSegmentChangeClusteringPublication(t *testing.T) {

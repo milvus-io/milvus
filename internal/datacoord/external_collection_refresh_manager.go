@@ -376,11 +376,14 @@ func (m *externalCollectionRefreshManager) cleanupExploreTempForJob(jobID int64)
 func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error {
 	if m.mt != nil {
 		if g := m.mt.producerChangeGroup(model.SegmentChangeSourceExternalRefresh, job.GetJobId(), ""); g != nil {
-			err := m.mt.requirePublishedChange(ctx, g)
-			if err == nil {
+			if g.State == model.SegmentChangeStateCommitted {
 				m.mt.recomputeDataView(ctx, job.GetCollectionId())
+				return nil
 			}
-			return err
+			if g.IsTerminal() {
+				return m.mt.requirePublishedChange(ctx, g)
+			}
+			return nil // A durable job wait marker drives publication later.
 		}
 	}
 	tasks, err := m.refreshMeta.GetCommittedTaskResultsByJobID(job.GetJobId())

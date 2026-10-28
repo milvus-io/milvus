@@ -2058,6 +2058,45 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 	})
 }
 
+func TestExternalCollectionRefreshChecker_WaitsForSegmentChangePublication(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	previous := pt.DataCoordCfg.SegmentChangeEnabled.SwapTempValue("true")
+	defer pt.DataCoordCfg.SegmentChangeEnabled.SwapTempValue(previous)
+	mockey.PatchConvey("staged refresh remains active", t, func() {
+		ctx := context.Background()
+		catalog := &stubCatalog{}
+		mockey.Mock((*stubCatalog).ListExternalCollectionRefreshJobs).Return([]*datapb.ExternalCollectionRefreshJob{{
+			JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, TaskIds: []int64{1001},
+		}}, nil).Build()
+		mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return([]*datapb.ExternalCollectionRefreshTask{{
+			TaskId: 1001, JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateFinished, Progress: 100,
+		}}, nil).Build()
+		refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+		require.NoError(t, err)
+		mt := &meta{segmentChangeGroups: map[int64]*model.SegmentChangeGroup{1: {
+			GroupID: 1, Source: model.SegmentChangeSourceExternalRefresh, SourceJobID: 1,
+			CollectionID: 100, State: model.SegmentChangeStateStaged,
+		}}}
+		applies := 0
+		checker := newRefreshChecker(ctx, mt, refreshMeta, make(chan struct{}), nil,
+			func(context.Context, *datapb.ExternalCollectionRefreshJob) error { applies++; return nil }, nil, nil, nil)
+		checker.aggregateJobState(refreshMeta.GetJob(1))
+		held := refreshMeta.GetJob(1)
+		require.Equal(t, indexpb.JobState_JobStateInProgress, held.GetState())
+		require.NotZero(t, held.GetIndexWaitStartedTime())
+		require.Equal(t, 1, applies)
+		checker.aggregateJobState(held)
+		require.Equal(t, indexpb.JobState_JobStateInProgress, refreshMeta.GetJob(1).GetState())
+		mt.segMu.Lock()
+		mt.segmentChangeGroups[1].State = model.SegmentChangeStateCommitted
+		mt.segMu.Unlock()
+		checker.aggregateJobState(refreshMeta.GetJob(1))
+		require.Equal(t, indexpb.JobState_JobStateFinished, refreshMeta.GetJob(1).GetState())
+		require.Equal(t, 1, applies, "publication must not replay the segment apply")
+	})
+}
+
 // TestExternalCollectionRefreshChecker_IndexWait_TimeoutInEntryPassPublishes
 // pins the one ordering in which the wait can commit segments without ever
 // telling the collection where they came from.

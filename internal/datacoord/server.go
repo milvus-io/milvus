@@ -400,6 +400,9 @@ func (s *Server) initDataCoord() (initErr error) {
 	if err != nil {
 		return err
 	}
+	if cph, ok := s.compactionInspector.(*compactionInspector); ok {
+		cph.copySegmentMeta = s.copySegmentMeta
+	}
 
 	s.importInspector = NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler, s.copySegmentMeta)
 	s.copySegmentInspector = NewCopySegmentInspector(
@@ -818,7 +821,6 @@ func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager
 
 func (s *Server) initCompaction() {
 	cph := newCompactionInspector(s.meta, s.allocator, s.handler, s.globalScheduler, s.globalScheduler, s.indexEngineVersionManager)
-	cph.copySegmentMeta = s.copySegmentMeta
 	cph.loadMeta()
 	s.compactionInspector = cph
 	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.indexEngineVersionManager)

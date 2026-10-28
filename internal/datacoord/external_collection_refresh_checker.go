@@ -18,11 +18,13 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -228,6 +230,32 @@ func (c *externalCollectionRefreshChecker) indexWaitEnabled() bool {
 		c.mt.indexMeta != nil &&
 		c.applyJobInfo != nil &&
 		Params.DataCoordCfg.RefreshWaitForIndex.GetAsBool()
+}
+
+func (c *externalCollectionRefreshChecker) groupPublicationWaitNeeded(job *datapb.ExternalCollectionRefreshJob) bool {
+	return c.mt != nil && c.applyJobInfo != nil &&
+		(Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool() ||
+			c.mt.producerChangeGroup(model.SegmentChangeSourceExternalRefresh, job.GetJobId(), "") != nil)
+}
+
+func (c *externalCollectionRefreshChecker) groupPublicationReady(job *datapb.ExternalCollectionRefreshJob) bool {
+	if c.mt == nil {
+		return true
+	}
+	g := c.mt.producerChangeGroup(model.SegmentChangeSourceExternalRefresh, job.GetJobId(), "")
+	if g == nil || g.State == model.SegmentChangeStateCommitted {
+		return true
+	}
+	if g.IsTerminal() {
+		applied, err := c.refreshMeta.UpdateJobState(job.GetJobId(), indexpb.JobState_JobStateFailed,
+			fmt.Sprintf("segment change group %d ended in %s: %s", g.GroupID, g.State, g.FailReason))
+		if err != nil {
+			mlog.Warn(c.ctx, "failed to mark external refresh publication as failed", mlog.FieldJobID(job.GetJobId()), mlog.Err(err))
+		} else if applied && c.onJobFailed != nil {
+			c.onJobFailed(job.GetJobId())
+		}
+	}
+	return false
 }
 
 // beginIndexWait applies the job's results and puts it into the index wait, in
@@ -487,6 +515,9 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 	// disabling. Off now simply means release the job: finish it at once
 	// without waiting, which is what an operator disabling the hold wants.
 	if state == indexpb.JobState_JobStateFinished && job.GetIndexWaitStartedTime() != 0 {
+		if !c.groupPublicationReady(job) {
+			return
+		}
 		if c.indexWaitEnabled() && !c.indexWaitDone(job) {
 			return
 		}
@@ -496,7 +527,7 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 		c.finishAfterIndexWait(job)
 		return
 	}
-	if state == indexpb.JobState_JobStateFinished && c.indexWaitEnabled() {
+	if state == indexpb.JobState_JobStateFinished && (c.indexWaitEnabled() || c.groupPublicationWaitNeeded(job)) {
 		if !c.beginIndexWait(job) {
 			return
 		}
@@ -511,7 +542,7 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 		// Re-read rather than reuse the snapshot: the snapshot predates the
 		// marker and still carries whatever progress the ingest last reported.
 		entered := c.refreshMeta.GetJob(job.GetJobId())
-		if entered == nil || !c.indexWaitDone(entered) {
+		if entered == nil || !c.groupPublicationReady(entered) || (c.indexWaitEnabled() && !c.indexWaitDone(entered)) {
 			return
 		}
 		c.finishAfterIndexWait(entered)
