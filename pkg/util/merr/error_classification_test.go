@@ -117,6 +117,7 @@ func TestSentinelErrorTypeClassification(t *testing.T) {
 		"IncorrectParameterFormat":  ErrIncorrectParameterFormat,
 		"MissingRequiredParameters": ErrMissingRequiredParameters,
 		"InvalidInsertData":         ErrInvalidInsertData,
+		"FieldInvalidName":          ErrFieldInvalidName,
 	}
 	for name, err := range inputSentinels {
 		assert.Equal(t, InputError, GetErrorType(err), "%s should be InputError", name)
