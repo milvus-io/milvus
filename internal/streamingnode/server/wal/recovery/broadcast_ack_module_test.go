@@ -9,6 +9,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/messageack"
@@ -39,7 +40,7 @@ func TestBroadcastAckLegacyImportRetriesBeforeAck(t *testing.T) {
 		return nil
 	}).Build()
 	defer patch.UnPatch()
-	module.ack = func(context.Context, message.ImmutableMessage) error {
+	module.ack = func(context.Context, message.ImmutableMessage, *anypb.Any) error {
 		events = append(events, "ack")
 		return nil
 	}
@@ -48,7 +49,7 @@ func TestBroadcastAckLegacyImportRetriesBeforeAck(t *testing.T) {
 		WithBody(&message.CommitImportMessageBody{}).WithBroadcast([]string{"v1"}), 1, 100)
 	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
 	owner := tracker.Track(msg)
-	module.Accept(owner)
+	module.Accept(owner, nil)
 	require.NoError(t, scheduler.waitTask(t).Execute(context.Background()))
 	require.Equal(t, []string{"rpc"}, events)
 	require.Zero(t, tracker.CompletedPoint().TimeTick)
@@ -78,7 +79,7 @@ func TestBroadcastAckHoldsOwnerUntilExclusiveAndAckSucceeds(t *testing.T) {
 	module := newBroadcastAckModule(moduleapi.Runtime{Scheduler: scheduler})
 	t.Cleanup(module.Close)
 	module.retryDelay = time.Millisecond
-	module.ack = func(context.Context, message.ImmutableMessage) error { return nil }
+	module.ack = func(context.Context, message.ImmutableMessage, *anypb.Any) error { return nil }
 	msg := newBroadcastAckMessage(t, message.NewCreateCollectionMessageBuilderV1().
 		WithBroadcast([]string{"v1"}).
 		WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 1, PartitionIds: []int64{10}}).
@@ -87,7 +88,7 @@ func TestBroadcastAckHoldsOwnerUntilExclusiveAndAckSucceeds(t *testing.T) {
 	owner := tracker.Track(msg)
 	other := owner.Clone()
 
-	module.Accept(owner)
+	module.Accept(owner, nil)
 
 	require.Empty(t, scheduler.snapshot())
 	assert.Same(t, msg, owner.Message())
@@ -105,7 +106,7 @@ func TestBroadcastAckPoisonKeepsConflictingTasksBlocked(t *testing.T) {
 	module := newBroadcastAckModule(moduleapi.Runtime{Scheduler: scheduler})
 	t.Cleanup(module.Close)
 	var acked []uint64
-	module.ack = func(_ context.Context, msg message.ImmutableMessage) error {
+	module.ack = func(_ context.Context, msg message.ImmutableMessage, _ *anypb.Any) error {
 		acked = append(acked, msg.TimeTick())
 		return nil
 	}
@@ -119,9 +120,9 @@ func TestBroadcastAckPoisonKeepsConflictingTasksBlocked(t *testing.T) {
 	}
 	first := makeOwner(1, 10, "c1")
 	failed := first.Clone()
-	module.Accept(first)
-	module.Accept(makeOwner(2, 20, "c1"))
-	module.Accept(makeOwner(3, 30, "c2"))
+	module.Accept(first, nil)
+	module.Accept(makeOwner(2, 20, "c1"), nil)
+	module.Accept(makeOwner(3, 30, "c2"), nil)
 	failed.PoisonedRelease()
 	module.dispatchReadyTasks()
 	require.Panics(t, func() { first.Message() }, "poison releases payload memory")
@@ -138,7 +139,7 @@ func TestBroadcastAckSubmitsExclusiveOwnerImmediately(t *testing.T) {
 	module := newBroadcastAckModule(moduleapi.Runtime{Scheduler: scheduler})
 	t.Cleanup(module.Close)
 	module.retryDelay = time.Millisecond
-	module.ack = func(context.Context, message.ImmutableMessage) error { return nil }
+	module.ack = func(context.Context, message.ImmutableMessage, *anypb.Any) error { return nil }
 	msg := newBroadcastAckMessage(t, message.NewCreateCollectionMessageBuilderV1().
 		WithBroadcast([]string{"v1"}).
 		WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 1}).
@@ -146,7 +147,7 @@ func TestBroadcastAckSubmitsExclusiveOwnerImmediately(t *testing.T) {
 	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
 	owner := tracker.Track(msg)
 
-	module.Accept(owner)
+	module.Accept(owner, nil)
 
 	assert.Same(t, msg, owner.Message())
 	task := scheduler.waitTask(t)
@@ -163,7 +164,7 @@ func TestBroadcastAckReleasesNonBroadcastOwnerImmediately(t *testing.T) {
 	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
 	owner := tracker.Track(raw)
 
-	module.Accept(owner)
+	module.Accept(owner, nil)
 
 	assert.Equal(t, raw.TimeTick(), tracker.CompletedPoint().TimeTick)
 	assert.Empty(t, scheduler.snapshot())
@@ -175,7 +176,7 @@ func TestBroadcastAckRetriesSameTaskAfterFailure(t *testing.T) {
 	module := newBroadcastAckModule(moduleapi.Runtime{Scheduler: scheduler})
 	t.Cleanup(module.Close)
 	attempts := 0
-	module.ack = func(context.Context, message.ImmutableMessage) error {
+	module.ack = func(context.Context, message.ImmutableMessage, *anypb.Any) error {
 		attempts++
 		if attempts == 1 {
 			return errors.New("coordinator unavailable")
@@ -188,7 +189,7 @@ func TestBroadcastAckRetriesSameTaskAfterFailure(t *testing.T) {
 		WithBody(&msgpb.CreateCollectionRequest{}))
 	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
 	owner := tracker.Track(msg)
-	module.Accept(owner)
+	module.Accept(owner, nil)
 
 	first := scheduler.waitTask(t)
 	require.NoError(t, first.Execute(context.Background()))
@@ -205,7 +206,7 @@ func TestBroadcastAckAllowsReadyNonConflictingTaskToPass(t *testing.T) {
 	scheduler := &recordingAckTaskScheduler{}
 	module := newBroadcastAckModule(moduleapi.Runtime{Scheduler: scheduler})
 	t.Cleanup(module.Close)
-	module.ack = func(context.Context, message.ImmutableMessage) error { return nil }
+	module.ack = func(context.Context, message.ImmutableMessage, *anypb.Any) error { return nil }
 	firstMsg := newBroadcastAckMessageWith(t, message.NewCreateCollectionMessageBuilderV1().
 		WithBroadcast([]string{"v1"}).
 		WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 1, PartitionIds: []int64{10}}).
@@ -221,8 +222,8 @@ func TestBroadcastAckAllowsReadyNonConflictingTaskToPass(t *testing.T) {
 	firstConsumer := firstOwner.Clone()
 	secondOwner := tracker.Track(secondMsg)
 
-	module.Accept(firstOwner)
-	module.Accept(secondOwner)
+	module.Accept(firstOwner, nil)
+	module.Accept(secondOwner, nil)
 	secondTask := scheduler.waitTask(t)
 	require.NoError(t, secondTask.Execute(context.Background()))
 	assert.Same(t, firstMsg, firstOwner.Message())
@@ -240,7 +241,7 @@ func TestBroadcastAckKeepsConflictingTasksOrderedAcrossRetry(t *testing.T) {
 	t.Cleanup(module.Close)
 	var acked []uint64
 	failFirst := true
-	module.ack = func(_ context.Context, msg message.ImmutableMessage) error {
+	module.ack = func(_ context.Context, msg message.ImmutableMessage, _ *anypb.Any) error {
 		if msg.TimeTick() == 10 && failFirst {
 			failFirst = false
 			return errors.New("coordinator unavailable")
@@ -261,8 +262,8 @@ func TestBroadcastAckKeepsConflictingTasksOrderedAcrossRetry(t *testing.T) {
 	firstOwner := tracker.Track(firstMsg)
 	secondOwner := tracker.Track(secondMsg)
 
-	module.Accept(firstOwner)
-	module.Accept(secondOwner)
+	module.Accept(firstOwner, nil)
+	module.Accept(secondOwner, nil)
 	firstTask := scheduler.waitTask(t)
 
 	require.NoError(t, firstTask.Execute(context.Background()))
@@ -285,7 +286,7 @@ func TestBroadcastAckSharedTasksDoNotConflict(t *testing.T) {
 	scheduler := &recordingAckTaskScheduler{}
 	module := newBroadcastAckModule(moduleapi.Runtime{Scheduler: scheduler})
 	t.Cleanup(module.Close)
-	module.ack = func(context.Context, message.ImmutableMessage) error { return nil }
+	module.ack = func(context.Context, message.ImmutableMessage, *anypb.Any) error { return nil }
 	key := message.NewSharedCollectionNameResourceKey("db", "collection")
 	firstMsg := newBroadcastAckMessageWith(t, message.NewCreateCollectionMessageBuilderV1().
 		WithBroadcast([]string{"v1"}).
@@ -300,8 +301,8 @@ func TestBroadcastAckSharedTasksDoNotConflict(t *testing.T) {
 	firstConsumer := firstOwner.Clone()
 	secondOwner := tracker.Track(secondMsg)
 
-	module.Accept(firstOwner)
-	module.Accept(secondOwner)
+	module.Accept(firstOwner, nil)
+	module.Accept(secondOwner, nil)
 	secondTask := scheduler.waitTask(t)
 	require.NoError(t, secondTask.Execute(context.Background()))
 
@@ -314,7 +315,7 @@ func TestBroadcastAckExclusiveClusterPreservesBarrierOrder(t *testing.T) {
 	scheduler := &recordingAckTaskScheduler{}
 	module := newBroadcastAckModule(moduleapi.Runtime{Scheduler: scheduler})
 	t.Cleanup(module.Close)
-	module.ack = func(context.Context, message.ImmutableMessage) error { return nil }
+	module.ack = func(context.Context, message.ImmutableMessage, *anypb.Any) error { return nil }
 	firstMsg := newBroadcastAckMessageWith(t, message.NewCreateCollectionMessageBuilderV1().
 		WithBroadcast([]string{"v1"}).
 		WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 1}).
@@ -336,9 +337,9 @@ func TestBroadcastAckExclusiveClusterPreservesBarrierOrder(t *testing.T) {
 	barrierOwner := tracker.Track(barrierMsg)
 	lastOwner := tracker.Track(lastMsg)
 
-	module.Accept(firstOwner)
-	module.Accept(barrierOwner)
-	module.Accept(lastOwner)
+	module.Accept(firstOwner, nil)
+	module.Accept(barrierOwner, nil)
+	module.Accept(lastOwner, nil)
 	require.Never(t, func() bool { return len(scheduler.snapshot()) != 0 }, 50*time.Millisecond, time.Millisecond)
 
 	firstConsumer.Release()
@@ -386,7 +387,7 @@ func TestBroadcastAckCloseCancelsPendingConsumerWait(t *testing.T) {
 	owner := tracker.Track(msg)
 	consumer := owner.Clone()
 
-	module.Accept(owner)
+	module.Accept(owner, nil)
 	module.Close()
 	consumer.Release()
 
@@ -400,7 +401,7 @@ func TestBroadcastAckCloseCancelsPendingRetry(t *testing.T) {
 	module := newBroadcastAckModule(moduleapi.Runtime{Scheduler: scheduler})
 	t.Cleanup(module.Close)
 	module.retryDelay = time.Hour
-	module.ack = func(context.Context, message.ImmutableMessage) error {
+	module.ack = func(context.Context, message.ImmutableMessage, *anypb.Any) error {
 		return errors.New("coordinator unavailable")
 	}
 	msg := newBroadcastAckMessage(t, message.NewCreateCollectionMessageBuilderV1().
@@ -409,7 +410,7 @@ func TestBroadcastAckCloseCancelsPendingRetry(t *testing.T) {
 		WithBody(&msgpb.CreateCollectionRequest{}))
 	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
 	owner := tracker.Track(msg)
-	module.Accept(owner)
+	module.Accept(owner, nil)
 
 	first := scheduler.waitTask(t)
 	require.NoError(t, first.Execute(context.Background()))

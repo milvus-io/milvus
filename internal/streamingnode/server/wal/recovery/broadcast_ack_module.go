@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"google.golang.org/protobuf/types/known/anypb"
+
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
@@ -33,7 +35,7 @@ type broadcastAckModule struct {
 	ackTaskMu  sync.Mutex
 	ackTasks   []*broadcastAckTask
 	wakeup     chan struct{}
-	ack        func(context.Context, message.ImmutableMessage) error
+	ack        func(context.Context, message.ImmutableMessage, *anypb.Any) error
 }
 
 func newBroadcastAckModule(runtime moduleapi.Runtime) *broadcastAckModule {
@@ -44,8 +46,8 @@ func newBroadcastAckModule(runtime moduleapi.Runtime) *broadcastAckModule {
 		cancel:     cancel,
 		retryDelay: broadcastAckRetryInterval,
 		wakeup:     make(chan struct{}, 1),
-		ack: func(ctx context.Context, msg message.ImmutableMessage) error {
-			return streaming.WAL().Broadcast().Ack(ctx, msg, nil)
+		ack: func(ctx context.Context, msg message.ImmutableMessage, extra *anypb.Any) error {
+			return streaming.WAL().Broadcast().Ack(ctx, msg, extra)
 		},
 	}
 	m.workerWG.Add(1)
@@ -53,8 +55,11 @@ func newBroadcastAckModule(runtime moduleapi.Runtime) *broadcastAckModule {
 	return m
 }
 
+// Accept takes the owner of a message to ack. extra is the result that the
+// ack carries, nil for most messages.
 func (m *broadcastAckModule) Accept(
 	owner message.OwnedImmutableMessage,
+	extra *anypb.Any,
 ) {
 	if owner.Message().BroadcastHeader() == nil {
 		owner.Release()
@@ -63,6 +68,7 @@ func (m *broadcastAckModule) Accept(
 	task := &broadcastAckTask{
 		module:       m,
 		owner:        owner,
+		extra:        extra,
 		resourceKeys: normalizeBroadcastAckResourceKeys(owner.Message().BroadcastHeader().ResourceKeys.Collect()),
 	}
 	m.ackTaskMu.Lock()
@@ -187,6 +193,7 @@ func (m *broadcastAckModule) compactCompletedTasksLocked() {
 type broadcastAckTask struct {
 	module       *broadcastAckModule
 	owner        message.OwnedImmutableMessage
+	extra        *anypb.Any
 	resourceKeys []message.ResourceKey
 	exclusive    atomic.Bool
 	poisoned     bool // Published by exclusive.Store after the last consumer releases.
@@ -199,7 +206,7 @@ func (t *broadcastAckTask) Execute(ctx context.Context) error {
 		t.module.retry(t)
 		return nil
 	}
-	if err := t.module.ack(ctx, t.owner.Message()); err != nil {
+	if err := t.module.ack(ctx, t.owner.Message(), t.extra); err != nil {
 		t.module.retry(t)
 		return nil
 	}

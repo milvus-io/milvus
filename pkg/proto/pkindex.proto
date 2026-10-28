@@ -92,3 +92,20 @@ service PKIndexCoordService {
   // from object storage.
   rpc GetRecoveryManifests(GetRecoveryManifestsRequest) returns (GetRecoveryManifestsResponse) {}
 }
+
+// CreateIndexAckResult is the result of a primary key index CreateIndex on
+// one vchannel. A streaming node attaches it to the broadcast ack.
+message CreateIndexAckResult {
+  enum Outcome {
+    OUTCOME_UNSPECIFIED = 0;
+    // No row was written to the vchannel at the CreateIndex. The index is
+    // enabled on the vchannel.
+    ENABLED = 1;
+    // Rows were written to the vchannel before the CreateIndex, or the
+    // write history of the vchannel is unknown. The index is not enabled.
+    NOT_EMPTY = 2;
+    // streaming.pkindex.enabled is false on the streaming node.
+    DISABLED = 3;
+  }
+  Outcome outcome = 1;
+}

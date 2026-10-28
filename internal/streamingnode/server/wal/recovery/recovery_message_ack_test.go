@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -112,7 +113,7 @@ func TestBroadcastDataMessageCompletesAfterConsumersAndCoordinatorAck(t *testing
 	storage.broadcastAck = newBroadcastAckModule(moduleapi.Runtime{Scheduler: scheduler})
 	storage.broadcastAck.retryDelay = time.Millisecond
 	attempts := 0
-	storage.broadcastAck.ack = func(context.Context, message.ImmutableMessage) error {
+	storage.broadcastAck.ack = func(context.Context, message.ImmutableMessage, *anypb.Any) error {
 		attempts++
 		if attempts == 1 {
 			return errors.New("coordinator unavailable")
@@ -519,7 +520,7 @@ func TestBroadcastFlushWaitsForL0AndCloseDoesNotCompleteIt(t *testing.T) {
 			storage.vchannelManager = manager
 			storage.summaryManager = summary
 			acked := false
-			storage.broadcastAck.ack = func(context.Context, message.ImmutableMessage) error { acked = true; return nil }
+			storage.broadcastAck.ack = func(context.Context, message.ImmutableMessage, *anypb.Any) error { acked = true; return nil }
 			raw := newBroadcastAckMessageWith(t, message.NewManualFlushMessageBuilderV2().WithBroadcast([]string{"v1"}).
 				WithHeader(&message.ManualFlushMessageHeader{}).WithBody(&message.ManualFlushMessageBody{}), 1, 20)
 			storage.observeMessage(ctx, raw)
@@ -572,7 +573,7 @@ func TestBroadcastFlushAllWaitsForEveryVChannel(t *testing.T) {
 	storage.vchannelManager = manager
 	storage.summaryManager = summary
 	acked := false
-	storage.broadcastAck.ack = func(context.Context, message.ImmutableMessage) error {
+	storage.broadcastAck.ack = func(context.Context, message.ImmutableMessage, *anypb.Any) error {
 		acked = true
 		return nil
 	}

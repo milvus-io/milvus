@@ -615,7 +615,7 @@ func (r *recoveryStorageImpl) observeMessage(ctx context.Context, msg message.Im
 	after = r.observeModulesMessage(ctx, dispatch)
 	dispatch.Release()
 	r.updatePChannelControl(msg)
-	r.broadcastAck.Accept(owner)
+	r.broadcastAck.Accept(owner, r.broadcastAckExtraLocked(msg))
 	completed := r.ackTracker.CompletedPoint()
 	r.metrics.ObServeInMemMetrics(completed.TimeTick)
 

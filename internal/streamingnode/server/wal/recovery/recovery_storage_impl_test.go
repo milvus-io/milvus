@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -371,7 +372,7 @@ func TestRecoveryStorageSkipsCompletedBroadcasts(t *testing.T) {
 			// Observe the ACK dispatch boundary synchronously, without contacting
 			// a coordinator. A completed broadcast must never reach this module.
 			var acked []uint64
-			patch := mockey.Mock((*broadcastAckModule).Accept).To(func(_ *broadcastAckModule, owner message.OwnedImmutableMessage) {
+			patch := mockey.Mock((*broadcastAckModule).Accept).To(func(_ *broadcastAckModule, owner message.OwnedImmutableMessage, _ *anypb.Any) {
 				if owner.Message().BroadcastHeader() != nil {
 					acked = append(acked, owner.Message().TimeTick())
 				}
