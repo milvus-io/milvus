@@ -23,6 +23,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -47,10 +48,10 @@ type ReduceStream interface {
 }
 
 type retrieveUnit struct {
-	result         *internalpb.RetrieveResults
-	rowIndex       int64
-	byteSize       int
-	sizeCalculator *rowSizeCalculator
+	result             *internalpb.RetrieveResults
+	rowIndex           int64
+	byteSize           int
+	fieldIndexComputer *typeutil.FieldDataIdxComputer
 }
 
 func (u retrieveUnit) pk() any {
@@ -105,33 +106,49 @@ func compareRetrieveUnits(left, right retrieveUnit, orderByFields []*planpb.Orde
 	return comparePK(left.pk(), right.pk()), nil
 }
 
-// reducibleByteSize uses Query's existing row payload accounting without copying a row.
+// reducibleByteSize counts the encoded reducible fields of one Unit.
 func (u retrieveUnit) reducibleByteSize() (int, error) {
 	if u.rowIndex < 0 || u.rowIndex >= int64(GetRowCount(u.result)) {
 		return 0, merr.WrapErrServiceInternalMsg("Query Unit row index %d is out of range", u.rowIndex)
 	}
-	calculator := u.sizeCalculator
-	if calculator == nil {
-		calculator = newRowSizeCalculator(u.result)
+	computer := u.fieldIndexComputer
+	if computer == nil {
+		computer = typeutil.NewFieldDataIdxComputer(u.result.GetFieldsData())
 	}
-	size := int(calculator.rowSize(u.rowIndex))
-	switch ids := u.result.GetIds().GetIdField().(type) {
-	case *schemapb.IDs_IntId:
-		size += 8
-	case *schemapb.IDs_StrId:
-		size += len(ids.StrId.GetData()[u.rowIndex])
+	fieldIndexes := computer.Compute(u.rowIndex)
+	size := 0
+	for i, field := range u.result.GetFieldsData() {
+		dataRow := u.rowIndex
+		if fieldIndexes != nil {
+			dataRow = fieldIndexes[i]
+		}
+		fieldSize, err := reduce.FieldDataRowSize(field, u.rowIndex, dataRow, false)
+		if err != nil {
+			return 0, err
+		}
+		size += protowire.SizeTag(5) + protowire.SizeBytes(fieldSize)
 	}
-	if indices := u.result.GetElementIndices(); len(indices) > 0 {
-		size += 4 * len(indices[u.rowIndex].GetIndices())
+	if ids := u.result.GetIds(); ids.GetIdField() != nil {
+		idsSize, err := reduce.IDsRowSize(ids, u.rowIndex)
+		if err != nil {
+			return 0, err
+		}
+		size += protowire.SizeTag(4) + protowire.SizeBytes(idsSize)
+	}
+	if indices := u.result.GetElementIndices(); u.result.GetElementLevel() && len(indices) > 0 {
+		if u.rowIndex >= int64(len(indices)) {
+			return 0, merr.WrapErrServiceInternalMsg("Query Unit element index %d is out of range", u.rowIndex)
+		}
+		size += protowire.SizeTag(19) + protowire.SizeBytes(proto.Size(indices[u.rowIndex]))
 	}
 	return size, nil
 }
 
 type orderedChildBuffer struct {
-	chunk          *internalpb.RetrieveResults
-	cursor         int64
-	hasMoreResult  bool // Retained from the first Chunk after its rows are consumed.
-	sizeCalculator *rowSizeCalculator
+	chunk              *internalpb.RetrieveResults
+	cursor             int64
+	hasMoreResult      bool // Retained from the first Chunk after its rows are consumed.
+	fieldIndexComputer *typeutil.FieldDataIdxComputer
 }
 
 func (b *orderedChildBuffer) hasUnit() bool {
@@ -139,7 +156,7 @@ func (b *orderedChildBuffer) hasUnit() bool {
 }
 
 func (b *orderedChildBuffer) front() retrieveUnit {
-	return retrieveUnit{result: b.chunk, rowIndex: b.cursor, sizeCalculator: b.sizeCalculator}
+	return retrieveUnit{result: b.chunk, rowIndex: b.cursor, fieldIndexComputer: b.fieldIndexComputer}
 }
 
 func (b *orderedChildBuffer) pop() retrieveUnit {
@@ -148,7 +165,7 @@ func (b *orderedChildBuffer) pop() retrieveUnit {
 	if !b.hasUnit() {
 		b.chunk = nil
 		b.cursor = 0
-		b.sizeCalculator = nil
+		b.fieldIndexComputer = nil
 	}
 	return unit
 }
@@ -170,7 +187,7 @@ func (b *orderedChildBuffer) accept(chunk *internalpb.RetrieveResults) error {
 	}
 	b.chunk = chunk
 	b.cursor = 0
-	b.sizeCalculator = newRowSizeCalculator(chunk)
+	b.fieldIndexComputer = typeutil.NewFieldDataIdxComputer(chunk.GetFieldsData())
 	return nil
 }
 
@@ -702,9 +719,9 @@ func SplitRetrieveResult(result *internalpb.RetrieveResults, chunkBytes int) ([]
 	chunks := make([]*internalpb.RetrieveResults, 0)
 	units := make([]retrieveUnit, 0)
 	accumulatedBytes := 0
-	sizeCalculator := newRowSizeCalculator(result)
+	fieldIndexComputer := typeutil.NewFieldDataIdxComputer(result.GetFieldsData())
 	for row := 0; row < rowCount; row++ {
-		unit := retrieveUnit{result: result, rowIndex: int64(row), sizeCalculator: sizeCalculator}
+		unit := retrieveUnit{result: result, rowIndex: int64(row), fieldIndexComputer: fieldIndexComputer}
 		unitBytes, err := unit.reducibleByteSize()
 		if err != nil {
 			return nil, err
