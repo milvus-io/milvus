@@ -54,6 +54,8 @@ func (suite *UtilSuite) TestCompactionMergeInfoEnums() {
 		datapb.CompactionType_PartitionKeySortCompaction:           commonpb.CompactionType_CompactionTypePartitionKeySort,
 		datapb.CompactionType_ClusteringPartitionKeySortCompaction: commonpb.CompactionType_CompactionTypeClusteringPartitionKeySort,
 		datapb.CompactionType_BumpSchemaVersionCompaction:          commonpb.CompactionType_CompactionTypeBumpSchemaVersion,
+		// No public member yet; reported as Undefined (publicCompactionType).
+		datapb.CompactionType_HashSplitCompaction: commonpb.CompactionType_CompactionTypeUndefined,
 	}
 	states := map[datapb.CompactionTaskState]commonpb.CompactionTaskState{
 		datapb.CompactionTaskState_unknown:    commonpb.CompactionTaskState_CompactionTaskStateUnknown,

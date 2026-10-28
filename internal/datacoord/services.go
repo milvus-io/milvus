@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -1086,7 +1087,12 @@ func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetCompon
 }
 
 // GetRecoveryInfo get recovery info for segment.
-// Called by: QueryCoord.
+//
+// Legacy: it has no live caller -- QueryCoord's broker declares the call but
+// nothing in QueryCoord invokes it; targets are built from GetRecoveryInfoV2.
+// It carries no shard split attribution: during a split's lineage window a
+// source's view here takes in its targets' flushed segments, but they are
+// reported under their own channels. Use GetRecoveryInfoV2.
 func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
 	collectionID := req.GetCollectionID()
 	partitionID := req.GetPartitionID()
@@ -1253,10 +1259,28 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			Status: merr.Status(err),
 		}, nil
 	}
+	// The lineage window of a shard split: while a split source is listed, its
+	// targets' flushed data is served by the source delegator
+	// (shard_split_lineage.go). The family is resolved once for the whole call,
+	// so the sources' views are built from the same lineage the targets are
+	// attributed and skipped by.
+	viewer, resolvesFamily := s.handler.(splitFamilyQueryViewer)
+	var lineage map[string]string
+	if resolvesFamily && s.shardSplitManager != nil {
+		lineage = s.shardSplitManager.SplitLineageOfListedSources(
+			typeutil.NewSet(lo.Map(channels, func(ch RWChannel, _ int) string { return ch.GetName() })...))
+	}
+	families := splitFamiliesOf(lineage)
 	channelInfos := make([]*datapb.VchannelInfo, 0, len(channels))
 	flushedIDs := make(typeutil.UniqueSet)
 	for _, ch := range channels {
-		channelInfo := s.handler.GetQueryVChanPositions(ch, partitionIDs...)
+		var channelInfo *datapb.VchannelInfo
+		if resolvesFamily {
+			channelInfo = viewer.GetQueryVChanPositionsOfSplitFamily(ch, families[ch.GetName()], partitionIDs...)
+		} else {
+			// A handler that cannot take a resolved family opens no window.
+			channelInfo = s.handler.GetQueryVChanPositions(ch, partitionIDs...)
+		}
 		channelInfos = append(channelInfos, channelInfo)
 		mlog.Info(context.TODO(), "datacoord append channelInfo in GetRecoveryInfo",
 			mlog.String("channel", channelInfo.GetChannelName()),
@@ -1269,6 +1293,13 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			mlog.Time("# of check point", tsoutil.PhysicalTime(channelInfo.GetSeekPosition().GetTimestamp())),
 			mlog.Time("# of delete check point", tsoutil.PhysicalTime(channelInfo.GetDeleteCheckpoint().GetTimestamp())),
 		)
+		if _, attributed := lineage[ch.GetName()]; attributed {
+			// The source's merged view already holds this target's flushed
+			// segments, normalized against the source's own: taking the
+			// target's own list too would report a rewrite's input and its
+			// outputs together.
+			continue
+		}
 		flushedIDs.Insert(channelInfo.GetFlushedSegmentIds()...)
 	}
 
@@ -1309,7 +1340,7 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			ID:                  segment.ID,
 			PartitionID:         segment.PartitionID,
 			CollectionID:        segment.CollectionID,
-			InsertChannel:       segment.InsertChannel,
+			InsertChannel:       splitAttributedInsertChannel(segment, lineage),
 			NumOfRows:           rowCount,
 			Level:               segment.GetLevel(),
 			IsSorted:            segment.GetIsSorted(),
@@ -1322,6 +1353,12 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 	resp.Channels = channelInfos
 	resp.Segments = segmentInfos
 	return resp, nil
+}
+
+// splitFamilyQueryViewer builds a channel's query recovery view over a split
+// family resolved by the caller; implemented by *ServerHandler.
+type splitFamilyQueryViewer interface {
+	GetQueryVChanPositionsOfSplitFamily(ch RWChannel, splitTargets []string, partitionIDs ...UniqueID) *datapb.VchannelInfo
 }
 
 // GetChannelRecoveryInfo get recovery channel info.
@@ -1920,6 +1957,24 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 	if existing := s.meta.GetCollection(req.GetCollectionID()); existing != nil {
 		info.CreatedAt = existing.CreatedAt
 		oldSchema = existing.Schema
+		// A shard split and its adoption change the vchannel list while the
+		// collection lives, and rootcoord announces the new list only through
+		// this broadcast; every datacoord reader of the cached list -- the
+		// split trigger, flush, import, force merge -- takes it from here.
+		if !slices.Equal(info.VChannelNames, existing.VChannelNames) {
+			mlog.Info(ctx, "the altered collection changes its vchannels",
+				mlog.FieldCollectionID(req.GetCollectionID()),
+				mlog.Strings("oldVChannels", existing.VChannelNames),
+				mlog.Strings("newVChannels", info.VChannelNames))
+		}
+		// A vchannel the collection stops listing without being dropped -- a
+		// shard split's retired source -- stops reporting its checkpoint, so
+		// its gauge would otherwise stay frozen at the retire forever.
+		for _, vchannel := range existing.VChannelNames {
+			if isVChannelDelisted(info, vchannel) {
+				metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(paramtable.GetStringNodeID(), vchannel)
+			}
+		}
 	}
 	s.meta.AddCollection(info)
 	// A refresh that rebinds an external collection applies its segments before
@@ -2495,6 +2550,25 @@ func (s *Server) DropSegmentsByTime(ctx context.Context, collectionID int64, flu
 	return nil
 }
 
+// checkSnapshotSupported refuses a snapshot of a collection that has been shard
+// split, which a non-zero routing modulus says. A snapshot records only the
+// vchannel list and the shard count: while a split source is still listed the
+// two disagree and a restore fails on the channel count, and once it is
+// delisted a restore would silently rebuild the collection under the legacy
+// hash % shards placement over rows laid out by residue.
+//
+// The request is valid and the topology was produced by Milvus itself, so this
+// is a capability the build lacks, not the caller's fault: it rides the
+// non-retriable ErrOperationNotSupported, not an InputError code.
+func checkSnapshotSupported(coll *milvuspb.DescribeCollectionResponse) error {
+	if modulus := coll.GetRoutingModulus(); modulus != 0 {
+		return merr.WrapErrOperationNotSupportedMsg(
+			"snapshot is not supported for collection %s (id=%d) because it has been shard split (routing modulus %d)",
+			coll.GetCollectionName(), coll.GetCollectionID(), modulus)
+	}
+	return nil
+}
+
 func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
@@ -2582,6 +2656,23 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 	}
 
 	// Business-channel Acks prove L1/L0 persistence through each snapshot fence.
+
+	// Refuse a collection that has been shard split. Checked under the exclusive
+	// collection-name lock. A SplitShard broadcast must be issued under the same
+	// key (an obligation on its issuer, which does not exist on this branch) and
+	// then holds it until its ack callback has committed the routing; given
+	// that, the modulus read here cannot change before this snapshot's own
+	// callback runs.
+	collDesc, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionId())
+	if err != nil {
+		mlog.Warn(ctx, "CreateSnapshot: failed to describe collection after lock", mlog.Err(err))
+		return merr.Status(err), nil
+	}
+	if err := checkSnapshotSupported(collDesc); err != nil {
+		mlog.Warn(ctx, "CreateSnapshot refused", mlog.Err(err))
+		return merr.Status(err), nil
+	}
+
 	// Broadcast CreateSnapshot message via DDL framework
 	// Snapshot ID is allocated in the callback
 	if _, err := broadcaster.Broadcast(ctx, message.NewCreateSnapshotMessageBuilderV2().

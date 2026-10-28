@@ -149,6 +149,33 @@ func ComposeDeleteFromDeltalogs(
 	return buildPk2TsMap(pks, tss), nil
 }
 
+// ComposeDeleteFromSegments reads the deltalogs of several segments and returns
+// one pk -> latest delete timestamp map covering all of them.
+//
+// It is ComposeDeleteFromDeltalogs over a delete set that lives in more than one
+// segment: a hash-split rewrite folds its input's own deltalogs together with
+// the source channel's L0 segments, which hold the deletes that never reached an
+// L1 deltalog. buildPk2TsMap keeps the latest timestamp per pk, so the order the
+// segments are read in does not matter.
+func ComposeDeleteFromSegments(
+	ctx context.Context,
+	pkType schemapb.DataType,
+	segments []*datapb.CompactionSegmentBinlogs,
+	option ...storage.RwOption,
+) (map[any]typeutil.Timestamp, error) {
+	var allPks []storage.PrimaryKey
+	var allTss []typeutil.Timestamp
+	for _, segment := range segments {
+		pks, tss, err := readFromSegment(ctx, pkType, segment, option...)
+		if err != nil {
+			return nil, err
+		}
+		allPks = append(allPks, pks...)
+		allTss = append(allTss, tss...)
+	}
+	return buildPk2TsMap(allPks, allTss), nil
+}
+
 // ComposeDeleteDataFromDeltalogs reads deltalogs from segment and returns DeleteData.
 // Auto-detects V1/V2 based on segment.GetManifest().
 func ComposeDeleteDataFromDeltalogs(

@@ -125,3 +125,24 @@ func TestBackgroundTimestampSyncReturnsAllocationFailure(t *testing.T) {
 	require.Zero(t, manager.lastAllocatedTimeTick)
 	require.Zero(t, manager.notAckHeap.Len())
 }
+
+func TestFreshTimestampAllocationRetriesUntilSuccess(t *testing.T) {
+	manager := newAllocationRetryManager(t)
+	attempts := 0
+	fresh := mockey.Mock((*retryTestTSOAllocator).AllocateFresh).To(func(_ *retryTestTSOAllocator, ctx context.Context) (uint64, error) {
+		require.NoError(t, ctx.Err())
+		attempts++
+		if attempts == 1 {
+			return 0, merr.WrapErrServiceUnavailable("coordinator recovering")
+		}
+		return 100, nil
+	}).Build()
+	defer fresh.UnPatch()
+
+	acker, err := manager.AllocateFreshForAppend(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 2, attempts)
+	require.EqualValues(t, 100, acker.Timestamp())
+	require.Equal(t, 1, manager.notAckHeap.Len(), "failed attempts must not publish ack state")
+	acker.Ack(OptSync())
+}
