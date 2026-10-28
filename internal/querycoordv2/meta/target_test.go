@@ -19,6 +19,7 @@ package meta
 import (
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -289,4 +290,69 @@ func TestPersistedTargetDropsGarbageCollectedSegments(t *testing.T) {
 	assert.False(t, recovered.ContainSegment(2), "a GC'd segment must not be restored")
 	assert.True(t, recovered.Ready(), "dropping a GC'd segment must not disable balancing")
 	assert.Equal(t, int64(500), recovered.GetRowCount())
+}
+
+// TestCollectionTargetResolvesUnderItsOwnAttribution pins that a resolved
+// segment reports the channel the target attributes it to, not the channel the
+// shared store records. Inside a shard split's lineage window datacoord
+// attributes a split target's flushed segment to the still-listed source while
+// its segment meta -- the store -- records the target; every consumer that
+// routes by InsertChannel must see the attribution, and the store's proto must
+// stay untouched.
+func TestCollectionTargetResolvesUnderItsOwnAttribution(t *testing.T) {
+	store := metacache.NewMetaStore(nil)
+	recorded := &datapb.SegmentInfo{
+		ID: 11, CollectionID: 100, PartitionID: 10,
+		InsertChannel: "t1", NumOfRows: 7, State: commonpb.SegmentState_Flushed,
+	}
+	store.PutSegment(recorded)
+	store.PutSegment(&datapb.SegmentInfo{
+		ID: 1, CollectionID: 100, PartitionID: 10,
+		InsertChannel: "src", NumOfRows: 5, State: commonpb.SegmentState_Flushed,
+	})
+	dmChannels := map[string]*DmChannel{
+		"src": {VchannelInfo: &datapb.VchannelInfo{ChannelName: "src", CollectionID: 100}},
+		"t1":  {VchannelInfo: &datapb.VchannelInfo{ChannelName: "t1", CollectionID: 100}},
+	}
+
+	// the window pull: 11 is attributed to the source.
+	window := NewCollectionTarget(map[int64]*datapb.SegmentInfo{
+		1:  {ID: 1, CollectionID: 100, PartitionID: 10, InsertChannel: "src"},
+		11: {ID: 11, CollectionID: 100, PartitionID: 10, InsertChannel: "src"},
+	}, dmChannels, []int64{10}, store)
+
+	seg, ok := window.GetSegment(11)
+	require.True(t, ok)
+	assert.Equal(t, "src", seg.GetInsertChannel(), "the attribution of the pull, not the recorded channel")
+	assert.Equal(t, int64(7), seg.GetNumOfRows(), "everything else is the live proto")
+	assert.Equal(t, "t1", recorded.GetInsertChannel(), "the store's proto is not rewritten")
+	assert.Equal(t, "src", window.GetAllSegments()[11].GetInsertChannel())
+	chSegs := window.GetChannelSegments("src")
+	assert.Len(t, chSegs, 2)
+	for _, s := range chSegs {
+		assert.Equal(t, "src", s.GetInsertChannel())
+	}
+	assert.Empty(t, window.GetChannelSegments("t1"))
+
+	// an untouched segment resolves to the store's proto itself.
+	seg, ok = window.GetSegment(1)
+	require.True(t, ok)
+	assert.Equal(t, "src", seg.GetInsertChannel())
+	assert.Same(t, lo.Must(store.GetSegment(1)), seg, "no copy when attribution and record agree")
+
+	// the post-adoption pull attributes 11 to the target: the same store, the
+	// new attribution.
+	adopted := NewCollectionTarget(map[int64]*datapb.SegmentInfo{
+		11: {ID: 11, CollectionID: 100, PartitionID: 10, InsertChannel: "t1"},
+	}, dmChannels, []int64{10}, store)
+	seg, ok = adopted.GetSegment(11)
+	require.True(t, ok)
+	assert.Equal(t, "t1", seg.GetInsertChannel())
+	assert.Same(t, recorded, seg)
+
+	// the attribution survives the grouping-based rebuilds.
+	trimmed := newCollectionTargetFromGrouping(window.segmentIDs, window.channel2SegmentIDs,
+		window.partition2SegmentIDs, window.dmChannels, []int64{10}, false, store)
+	assert.Equal(t, "src", trimmed.GetAllSegments()[11].GetInsertChannel())
+	assert.Equal(t, "src", window.withoutChannels(typeutil.NewSet("t1")).GetAllSegments()[11].GetInsertChannel())
 }

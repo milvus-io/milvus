@@ -111,6 +111,9 @@ type Server struct {
 
 	// Checkers
 	checkerController *checkers.CheckerController
+	// splitState is the one view of the collections' shard split states, shared
+	// by every querycoord component that reasons about a split window.
+	splitState *meta.ShardSplitStateCache
 
 	// Observers
 	collectionObserver   *observers.CollectionObserver
@@ -346,13 +349,15 @@ func (s *Server) initQueryCoord() error {
 
 	// Init checker controller
 	mlog.Info(s.ctx, "init checker controller")
-	s.checkerController = checkers.NewCheckerController(
+	// s.splitState is built in initMeta, next to the target manager that shares it.
+	s.checkerController = checkers.NewCheckerControllerWithSplitState(
 		s.meta,
 		s.dist,
 		s.targetMgr,
 		s.nodeMgr,
 		s.taskScheduler,
 		s.broker,
+		s.splitState,
 	)
 
 	// Init observers
@@ -414,8 +419,11 @@ func (s *Server) initMeta() error {
 	}
 
 	s.dist = meta.NewDistributionManager(s.nodeMgr)
-	targetMgr := meta.NewTargetManager(s.broker, s.meta, s.metaView)
-	s.targetMgr = targetMgr
+	// One split state view for the target manager (window marks on each
+	// next-target pull), the target observer (window-end refresh) and the
+	// checkers, so none of them disagrees about when a window ended.
+	s.splitState = checkers.NewSplitStateCache(s.broker)
+	s.targetMgr = meta.NewTargetManagerWithSplitState(s.broker, s.meta, s.metaView, s.splitState)
 	err = s.targetMgr.Recover(s.ctx, s.store)
 	if err != nil {
 		mlog.Warn(s.ctx, "failed to recover collection targets", mlog.Err(err))
@@ -427,13 +435,14 @@ func (s *Server) initMeta() error {
 
 func (s *Server) initObserver() {
 	mlog.Info(s.ctx, "init observers")
-	s.targetObserver = observers.NewTargetObserver(
+	s.targetObserver = observers.NewTargetObserverWithSplitState(
 		s.meta,
 		s.targetMgr,
 		s.dist,
 		s.broker,
 		s.cluster,
 		s.nodeMgr,
+		s.splitState,
 	)
 	s.collectionObserver = observers.NewCollectionObserver(
 		s.dist,
@@ -455,6 +464,7 @@ func (s *Server) initObserver() {
 	s.leaderCacheObserver = observers.NewLeaderCacheObserver(
 		s.proxyClientManager,
 	)
+	s.targetObserver.SetShardLeaderInvalidator(s.leaderCacheObserver.RegisterEvent)
 
 	if s.fileResourceObserver != nil {
 		s.fileResourceObserver.InitQueryCoord(s.nodeMgr, s.cluster)

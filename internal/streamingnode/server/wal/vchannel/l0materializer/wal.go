@@ -61,16 +61,19 @@ type WALMaterializer struct {
 	materialized              uint64
 	observed                  uint64
 	pending                   []message.RetainedImmutableMessage
-	pendingBytes              uint64
-	pendingSince              time.Time
-	flushThrough              uint64
-	maxBytes                  uint64
-	maxRows                   uint64
-	runtime                   moduleapi.Runtime
-	writer                    Materializer
-	onMaterialized            func(uint64)
-	task                      *walMaterializeTask
-	terminalErr               error
+	// pendingBoundary[i] is isL0Boundary(pending[i]), decided once when the
+	// message is observed so scheduling never decodes it again under mu.
+	pendingBoundary []bool
+	pendingBytes    uint64
+	pendingSince    time.Time
+	flushThrough    uint64
+	maxBytes        uint64
+	maxRows         uint64
+	runtime         moduleapi.Runtime
+	writer          Materializer
+	onMaterialized  func(uint64)
+	task            *walMaterializeTask
+	terminalErr     error
 }
 
 func NewWALMaterializer(config WALConfig) *WALMaterializer {
@@ -95,7 +98,7 @@ func (m *WALMaterializer) MaterializedTimeTick() uint64 {
 
 func (m *WALMaterializer) ObserveMessage(retained message.RetainedImmutableMessage) {
 	msg := retained.Message()
-	flush := isL0FlushMessage(msg.MessageType())
+	flush := m.isL0Boundary(msg)
 	deleted := messageutil.ClassifyTransformLogMessage(msg) == messageutil.TransformLogKindDelete
 	m.mu.Lock()
 	if m.terminalErr != nil {
@@ -118,6 +121,7 @@ func (m *WALMaterializer) ObserveMessage(retained message.RetainedImmutableMessa
 		m.pendingSince = time.Now()
 	}
 	m.pending = append(m.pending, retained.Clone())
+	m.pendingBoundary = append(m.pendingBoundary, flush)
 	if deleted {
 		// Account only Delete payloads, even for mixed Insert/Delete transactions.
 		m.pendingBytes += deleteBytes(msg)
@@ -130,12 +134,50 @@ func (m *WALMaterializer) ObserveMessage(retained message.RetainedImmutableMessa
 	m.submit(task)
 }
 
-// isL0FlushMessage identifies explicit WAL boundaries for L0 materialization.
+// isL0Boundary identifies explicit WAL boundaries for L0 materialization: the
+// messages after which this vchannel's delete prefix must be durable.
+func (m *WALMaterializer) isL0Boundary(msg message.ImmutableMessage) bool {
+	if msg.MessageType() == message.MessageTypeAlterCollection {
+		alterHeader := message.MustAsImmutableAlterCollectionMessageV2(msg).Header()
+		if !messageutil.IsShardSplitRouting(alterHeader) {
+			// Not a routing commit, so not this vchannel's drop. Checked on the
+			// header, before the body is decoded: every other AlterCollection
+			// would otherwise pay a decode here for nothing.
+			return false
+		}
+		// A shard split's routing commit whose post-image no longer names this
+		// vchannel is the vchannel's drop, like DropCollection below. The
+		// vchannel's tombstone cannot be published before the materialization
+		// frontier passes the drop tick, so the drop has to end the batch or
+		// the retirement waits for the stale-flush timer.
+		alter := message.MustAsImmutableAlterCollectionMessageV2(msg)
+		return messageutil.RetiresVChannel(alterHeader, alter.MustBody().GetUpdates(), m.vchannel)
+	}
+	if msg.MessageType() == message.MessageTypeSplitShard {
+		// Only the source's replica is the fence. A target's is its genesis:
+		// nothing precedes it on the new vchannel, so it would only cut an
+		// empty batch.
+		header := message.MustAsImmutableSplitShardMessageV2(msg).Header()
+		return message.SplitShardRoleOf(header, m.vchannel) == message.SplitShardRoleSource
+	}
+	return isL0FlushMessage(msg.MessageType())
+}
+
+// isL0FlushMessage identifies the message types that are always an L0
+// boundary, whatever they carry.
 func isL0FlushMessage(t message.MessageType) bool {
 	switch t {
 	case message.MessageTypeManualFlush, message.MessageTypeFlushAll,
 		message.MessageTypeDropCollection, message.MessageTypeDropPartition,
-		message.MessageTypeTruncateCollection, message.MessageTypeAlterWAL, message.MessageTypeCreateSnapshot:
+		message.MessageTypeTruncateCollection, message.MessageTypeAlterWAL, message.MessageTypeCreateSnapshot,
+		// A shard split's fence (its source replica; see isL0Boundary) is a
+		// boundary like any other: the source takes
+		// no delete after it, so its last deletes must be materialized at
+		// T_switch rather than whenever the sync period next comes round. The
+		// drop that retires the source cannot complete before the L0 frontier
+		// passes its tick, and the split's redistribution reads the source's
+		// L0 output, so both would otherwise wait on a timer.
+		message.MessageTypeSplitShard:
 		return true
 	default:
 		return false
@@ -190,8 +232,8 @@ func (m *WALMaterializer) scheduleLocked() *walMaterializeTask {
 	// Every explicit WAL flush message ends a batch, including when it queues
 	// behind an active task. Later deletes belong to the next batch.
 	end := len(m.pending)
-	for i, handle := range m.pending {
-		if isL0FlushMessage(handle.Message().MessageType()) {
+	for i, boundary := range m.pendingBoundary {
+		if boundary {
 			end = i + 1
 			break
 		}
@@ -199,11 +241,13 @@ func (m *WALMaterializer) scheduleLocked() *walMaterializeTask {
 	handles := m.pending[:end:end]
 	task := &walMaterializeTask{owner: m, handles: handles, through: handles[len(handles)-1].Message().TimeTick()}
 	m.pending = m.pending[end:]
+	m.pendingBoundary = m.pendingBoundary[end:]
 	for _, handle := range handles {
 		m.pendingBytes -= deleteBytes(handle.Message())
 	}
 	if len(m.pending) == 0 {
 		m.pending = nil
+		m.pendingBoundary = nil
 		m.pendingSince = time.Time{}
 	}
 	m.task = task
@@ -291,6 +335,7 @@ func (t *walMaterializeTask) poison(ctx context.Context, err error) {
 	m.terminalErr = err
 	pending := m.pending
 	m.pending = nil
+	m.pendingBoundary = nil
 	m.pendingBytes = 0
 	m.pendingSince = time.Time{}
 	m.task = nil

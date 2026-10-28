@@ -23,8 +23,11 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -34,7 +37,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // createMockPriorityQueue creates a mock priority queue for testing
@@ -61,7 +66,7 @@ func createTestBalanceChecker() *BalanceChecker {
 	balance.ResetGlobalBalancerFactoryForTest()
 	balance.InitGlobalBalancerFactory(scheduler, nodeMgr, dist, targetMgr)
 
-	return NewBalanceChecker(metaInstance, dist, targetMgr, nodeMgr, scheduler)
+	return NewBalanceChecker(metaInstance, dist, targetMgr, nodeMgr, scheduler, nil)
 }
 
 // =============================================================================
@@ -1962,4 +1967,272 @@ func TestBalanceChecker_Check_TimeoutWarning(t *testing.T) {
 
 	assert.Nil(t, result)
 	assert.Greater(t, duration, 100*time.Millisecond) // Should trigger log
+}
+
+// C1: adoption delists the source and lifts the Splitting state, but the current
+// target keeps listing the source until it flips to a pull taken after the
+// adoption. A balance or stopping-balance move of the source in that gap rebuilds
+// it on another node without the in-process children it fronts, and reads still
+// route to it. Balance stays frozen while the current target lists a vchannel
+// the collection no longer lists, and lifts once the current target drops it.
+// The freeze is evaluated when the collection's tasks are submitted.
+func TestBalanceChecker_SubmitFrozenWhileADelistedSourceIsCurrent(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(1)
+	adopted := &milvuspb.DescribeCollectionResponse{
+		VirtualChannelNames: []string{"v1", "v2"},
+		ShardInfos: []*schemapb.CollectionShardInfo{
+			{State: schemapb.ShardState_ShardNormal},
+			{State: schemapb.ShardState_ShardNormal},
+		},
+	}
+	channels := func(names ...string) map[string]*meta.DmChannel {
+		out := make(map[string]*meta.DmChannel, len(names))
+		for _, name := range names {
+			out[name] = &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: name}}
+		}
+		return out
+	}
+
+	// run returns how many of one channel move and one segment move of v0 the
+	// balance checker would submit, over a normal and a stopping round.
+	var runWith func(t *testing.T, stopping bool, current map[string]*meta.DmChannel, window []string, describe func(*meta.MockBroker)) int
+	run := func(t *testing.T, current map[string]*meta.DmChannel, window []string, describe func(*meta.MockBroker)) (submitted int) {
+		return runWith(t, false, current, window, describe) + runWith(t, true, current, window, describe)
+	}
+	runWith = func(t *testing.T, stopping bool, current map[string]*meta.DmChannel, window []string, describe func(*meta.MockBroker)) (submitted int) {
+		checker := createTestBalanceChecker()
+		mockChannels := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetDmChannelsByCollection")).
+			To(func(_ context.Context, _ int64, scope meta.TargetScope) map[string]*meta.DmChannel {
+				if scope == meta.CurrentTarget {
+					return current
+				}
+				return channels("v1", "v2")
+			}).Build()
+		defer mockChannels.UnPatch()
+		mockWindow := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetSplitWindowTargets")).
+			To(func(_ context.Context, _ int64, scope meta.TargetScope) typeutil.Set[string] {
+				if scope == meta.NextTarget && len(window) > 0 {
+					return typeutil.NewSet(window...)
+				}
+				return nil
+			}).Build()
+		defer mockWindow.UnPatch()
+
+		broker := meta.NewMockBroker(t)
+		describe(broker)
+		checker.splitState = meta.NewShardSplitStateCache(broker, time.Minute)
+		segmentTasks, channelTasks := balanceTasksOn(t, "v0")
+		segmentTasks, channelTasks = checker.dropShardSplitFrozen(ctx, collectionID, segmentTasks, channelTasks, stopping)
+		return len(segmentTasks) + len(channelTasks)
+	}
+	describeAs := func(resp *milvuspb.DescribeCollectionResponse) func(*meta.MockBroker) {
+		return func(broker *meta.MockBroker) {
+			broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(resp, nil).Maybe()
+		}
+	}
+
+	t.Run("delisted source still current: frozen", func(t *testing.T) {
+		assert.Zero(t, run(t, channels("v0"), nil, describeAs(adopted)),
+			"balance must not move a delisted source still in the current target")
+	})
+	t.Run("current target flipped past the source: unfrozen", func(t *testing.T) {
+		assert.Equal(t, 4, run(t, channels("v1", "v2"), nil, describeAs(adopted)))
+	})
+	t.Run("fresh fence, cached state still pre-fence, next target marks window targets: frozen", func(t *testing.T) {
+		// the TTL cache still holds a read from before the fence: v0 Normal, no
+		// target listed yet. The next target's pull read the states fresh and
+		// marked the new targets, which is what gives the fence away.
+		preFence := &milvuspb.DescribeCollectionResponse{
+			VirtualChannelNames: []string{"v0"},
+			ShardInfos:          []*schemapb.CollectionShardInfo{{State: schemapb.ShardState_ShardNormal}},
+		}
+		assert.Zero(t, run(t, channels("v0"), []string{"v1", "v2"}, describeAs(preFence)),
+			"a freshly fenced source must not be balanced on a stale state")
+	})
+	t.Run("shard states unknown: frozen", func(t *testing.T) {
+		assert.Zero(t, run(t, channels("v0"), nil, func(broker *meta.MockBroker) {
+			broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).
+				Return(nil, merr.WrapErrServiceUnavailable("rootcoord down")).Maybe()
+		}), "without the shard states the freeze cannot be ruled out")
+	})
+}
+
+// splitFreezeChecker is a balance checker over a collection 1 whose shard v0 is
+// a fenced split source (v1, v2 its Creating targets, v9 untouched), with a
+// balance queue built before the fence still holding the collection.
+func splitFreezeChecker(t *testing.T) (*BalanceChecker, *assign.PriorityQueue) {
+	checker := createTestBalanceChecker()
+	broker := meta.NewMockBroker(t)
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{
+		VirtualChannelNames: []string{"v0", "v1", "v2", "v9"},
+		ShardInfos: []*schemapb.CollectionShardInfo{
+			{State: schemapb.ShardState_ShardSplitting},
+			{State: schemapb.ShardState_ShardCreating},
+			{State: schemapb.ShardState_ShardCreating},
+			{State: schemapb.ShardState_ShardNormal},
+		},
+	}, nil).Maybe()
+	checker.splitState = meta.NewShardSplitStateCache(broker, time.Minute)
+	queue := assign.NewPriorityQueuePtr()
+	queue.Push(newCollectionBalanceItem(1, 100, "byrowcount"))
+	return checker, queue
+}
+
+// balanceTasksOn returns one channel move and one segment move on each of the
+// given shards of collection 1.
+func balanceTasksOn(t *testing.T, shards ...string) ([]task.Task, []task.Task) {
+	ctx := context.Background()
+	replica := meta.NewReplica(&querypb.Replica{ID: 10, CollectionID: 1, Nodes: []int64{1, 2}}, typeutil.NewUniqueSet(1, 2))
+	var segmentTasks, channelTasks []task.Task
+	for i, shard := range shards {
+		segmentTask, err := task.NewSegmentTask(ctx, time.Minute, utils.BalanceChecker, 1, replica, commonpb.LoadPriority_LOW,
+			task.NewSegmentAction(2, task.ActionTypeGrow, shard, int64(100+i)),
+			task.NewSegmentAction(1, task.ActionTypeReduce, shard, int64(100+i)))
+		assert.NoError(t, err)
+		channelTask, err := task.NewChannelTask(ctx, time.Minute, utils.BalanceChecker, 1, replica,
+			task.NewChannelAction(2, task.ActionTypeGrow, shard),
+			task.NewChannelAction(1, task.ActionTypeReduce, shard))
+		assert.NoError(t, err)
+		segmentTasks = append(segmentTasks, segmentTask)
+		channelTasks = append(channelTasks, channelTask)
+	}
+	return segmentTasks, channelTasks
+}
+
+// runSplitFreezeRound pops the collection from a queue built before the fence,
+// lets the balancer plan moves on the given shards, and returns the shards of
+// the tasks that reached the scheduler.
+func runSplitFreezeRound(t *testing.T, stopping bool, shards ...string) []string {
+	checker, queue := splitFreezeChecker(t)
+	mockWindow := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetSplitWindowTargets")).Return(typeutil.Set[string](nil)).Build()
+	defer mockWindow.UnPatch()
+	mockChannels := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetDmChannelsByCollection")).
+		Return(map[string]*meta.DmChannel{
+			"v0": {VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v0"}},
+			"v9": {VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v9"}},
+		}).Build()
+	defer mockChannels.UnPatch()
+	segmentTasks, channelTasks := balanceTasksOn(t, shards...)
+	mockGenerate := mockey.Mock((*BalanceChecker).generateBalanceTasksFromReplicas).Return(segmentTasks, channelTasks).Build()
+	defer mockGenerate.UnPatch()
+	var submitted []string
+	mockSubmit := mockey.Mock((*BalanceChecker).submitTasks).To(func(_ *BalanceChecker, segmentTasks, channelTasks []task.Task) {
+		for _, submittedTask := range append(append([]task.Task{}, segmentTasks...), channelTasks...) {
+			submitted = append(submitted, submittedTask.Shard())
+		}
+	}).Build()
+	defer mockSubmit.UnPatch()
+
+	config := balanceConfig{segmentBatchSize: 5, channelBatchSize: 5, maxCheckCollectionCount: 5, balanceOnMultipleCollections: true}
+	checker.processBalanceQueue(context.Background(), balance.GetGlobalBalancerFactory().GetBalancer(),
+		func(context.Context, int64) []int64 { return []int64{10} },
+		func(context.Context) *assign.PriorityQueue { return queue },
+		func() *assign.PriorityQueue { return queue },
+		config, stopping)
+	return submitted
+}
+
+// AV-L6-H1: a balance queue outlives the round that built it, so a collection
+// queued before its fence is popped and balanced after it. The freeze is
+// re-checked when the collection's tasks are submitted, not only when the
+// queue is built: nothing of a collection mid split is moved by normal balance.
+func TestBalanceChecker_ProcessBalanceQueue_RechecksShardSplitFreezeAtSubmit(t *testing.T) {
+	assert.Empty(t, runSplitFreezeRound(t, false, "v0", "v9"),
+		"normal balance must not move anything of a collection a split froze after its queue was built")
+}
+
+// AV-L6-M-H: building a balance queue must not describe every loaded
+// collection -- the checker runs every few hundred milliseconds, and a slow
+// coordinator would stall it. The freeze is evaluated when a collection's
+// tasks are about to be submitted (see RechecksShardSplitFreezeAtSubmit).
+func TestBalanceChecker_QueueConstructionReadsNoShardStates(t *testing.T) {
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
+	// no DescribeCollection expectation: a call fails the test.
+	checker.splitState = meta.NewShardSplitStateCache(meta.NewMockBroker(t), time.Minute)
+
+	mockGetCollection := mockey.Mock(mockey.GetMethod(checker.meta.CollectionManager, "GetCollection")).Return(&meta.Collection{}).Build()
+	defer mockGetCollection.UnPatch()
+	mockGetAll := mockey.Mock((*meta.CollectionManager).GetAll).Return([]int64{1, 2, 3}).Build()
+	defer mockGetAll.UnPatch()
+	mockIsNextTargetExist := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsNextTargetExist")).Return(true).Build()
+	defer mockIsNextTargetExist.UnPatch()
+	mockRowCount := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetCollectionRowCount")).Return(int64(100)).Build()
+	defer mockRowCount.UnPatch()
+
+	assert.Equal(t, 3, checker.constructStoppingBalanceQueue(ctx).Len())
+	assert.True(t, checker.readyToCheck(ctx, 1))
+}
+
+// CZ-L6 / AV-L6-M3: a stopping node must still be drained of everything a
+// split does not involve. Stopping balance moves the untouched shard v9 and
+// its segments, and keeps only the split's source and targets in place;
+// normal balance stays frozen for the whole collection.
+func TestBalanceChecker_StoppingBalanceMovesWhatASplitDoesNotInvolve(t *testing.T) {
+	assert.ElementsMatch(t, []string{"v9", "v9"}, runSplitFreezeRound(t, true, "v0", "v1", "v9"),
+		"stopping balance moves the channel and the segment of the untouched shard only")
+	assert.Empty(t, runSplitFreezeRound(t, false, "v0", "v1", "v9"),
+		"normal balance keeps the collection frozen as a whole")
+}
+
+// segmentDrainBalancer plans only the frozen source's channel off the stopping
+// node, as the stopping balancer does while any channel is left there, and
+// plans segments only when asked for segments alone.
+type segmentDrainBalancer struct {
+	balance.Balance
+	replica  *meta.Replica
+	segments []string
+}
+
+func (b *segmentDrainBalancer) BalanceReplicaSegments(_ context.Context, replica *meta.Replica) []assign.SegmentAssignPlan {
+	plans := make([]assign.SegmentAssignPlan, 0, len(b.segments))
+	for i, shard := range b.segments {
+		plans = append(plans, assign.SegmentAssignPlan{
+			Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: int64(200 + i), CollectionID: 1, InsertChannel: shard}},
+			Replica: replica, From: 1, To: 2,
+		})
+	}
+	return plans
+}
+
+// CZ-L6 / AV-L6-M3: the stopping balancer plans segments only once no channel
+// is left to move off the stopping node. A frozen split source that stays
+// there would otherwise block every segment of the collection from draining:
+// when every channel it plans is frozen, the checker asks for the segments
+// alone, and moves those of the shards the split does not involve.
+func TestBalanceChecker_StoppingBalanceDrainsSegmentsPastAFrozenChannel(t *testing.T) {
+	checker, queue := splitFreezeChecker(t)
+	replica := meta.NewReplica(&querypb.Replica{ID: 10, CollectionID: 1, Nodes: []int64{1, 2}}, typeutil.NewUniqueSet(1, 2))
+	mockReplica := mockey.Mock(mockey.GetMethod(checker.meta.ReplicaManager, "Get")).Return(replica).Build()
+	defer mockReplica.UnPatch()
+	mockWindow := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetSplitWindowTargets")).Return(typeutil.Set[string](nil)).Build()
+	defer mockWindow.UnPatch()
+	mockChannels := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetDmChannelsByCollection")).
+		Return(map[string]*meta.DmChannel{
+			"v0": {VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v0"}},
+			"v9": {VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v9"}},
+		}).Build()
+	defer mockChannels.UnPatch()
+	_, channelTasks := balanceTasksOn(t, "v0")
+	mockGenerate := mockey.Mock((*BalanceChecker).generateBalanceTasksFromReplicas).Return([]task.Task{}, channelTasks).Build()
+	defer mockGenerate.UnPatch()
+	var submitted []string
+	mockSubmit := mockey.Mock((*BalanceChecker).submitTasks).To(func(_ *BalanceChecker, segmentTasks, channelTasks []task.Task) {
+		for _, submittedTask := range append(append([]task.Task{}, segmentTasks...), channelTasks...) {
+			submitted = append(submitted, submittedTask.Shard())
+		}
+	}).Build()
+	defer mockSubmit.UnPatch()
+
+	config := balanceConfig{segmentBatchSize: 5, channelBatchSize: 5, maxCheckCollectionCount: 5, balanceOnMultipleCollections: true}
+	segments, channels := checker.processBalanceQueue(context.Background(),
+		&segmentDrainBalancer{replica: replica, segments: []string{"v0", "v9"}},
+		func(context.Context, int64) []int64 { return []int64{10} },
+		func(context.Context) *assign.PriorityQueue { return queue },
+		func() *assign.PriorityQueue { return queue },
+		config, true)
+	assert.Equal(t, []string{"v9"}, submitted, "the untouched shard's segment drains; the source's stays")
+	assert.Equal(t, 1, segments)
+	assert.Zero(t, channels)
 }

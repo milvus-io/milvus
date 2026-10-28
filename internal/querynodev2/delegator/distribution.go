@@ -47,6 +47,12 @@ const (
 	unreadableTargetVersion = int64(-2)
 )
 
+// InitialTargetVersion is the target version a delegator is born with before
+// querycoord injects a real one via SyncTargetVersion. A delegator at this
+// version is non-serviceable, which is exactly what a shard-split child needs
+// while it is fronted by the source delegator and invisible to querycoord.
+const InitialTargetVersion = initialTargetVersion
+
 var (
 	closedCh  chan struct{}
 	closeOnce sync.Once
@@ -173,6 +179,73 @@ func (d *distribution) SetIDFOracle(idfOracle IDFOracle) {
 
 // return segment distribution in query view
 func (d *distribution) PinReadableSegments(requiredLoadRatio float64, partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry, sealedRowCount map[int64]int64, version int64, err error) {
+	return d.pinReadableSegments(requiredLoadRatio, false, partitions...)
+}
+
+// PinReadableSegmentsAsChild pins this delegator's readable segments for a
+// shard-split fronting fan-out, skipping the serviceability gate. A split child
+// is externally non-serviceable (no querycoord target version) and is reached
+// only in-process by its source delegator, which is itself serviceable; this
+// method lets the source read the child's growing data without exposing the
+// child to proxy reads.
+func (d *distribution) PinReadableSegmentsAsChild(requiredLoadRatio float64, partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry, sealedRowCount map[int64]int64, version int64, err error) {
+	return d.pinReadableSegments(requiredLoadRatio, true, partitions...)
+}
+
+// PinGrowingSegmentsAsChild pins only the growing segments this delegator
+// contributes to the fronting phase of its source's read, while the source
+// still serves the split shard's sealed data itself.
+//
+// It differs from PinReadableSegmentsAsChild in two ways, both required in that
+// phase:
+//   - No sealed segment is returned. The source reads its own sealed view,
+//     which through the datacoord attribution already covers the flushed data of
+//     every split target; this delegator's own sealed view would either repeat
+//     those rows under the rewrite's new segment IDs, which no ID exclusion can
+//     deduplicate, or not be readable at all.
+//   - Every growing segment present is returned, whatever its target version,
+//     redundant ones included. A delegator querycoord has synced marks a growing
+//     segment redundant as soon as its flushed twin is in the target, but the
+//     twin is only physically released after the current-target flip; until the
+//     source loads that twin, a redundant growing segment is the only copy of
+//     those rows the family holds. The source's pins are excluded by ID
+//     afterwards (splitReadScope), which is what keeps a twin the source does
+//     hold from being counted twice.
+//
+// The partition gate still applies: a request naming a partition this view does
+// not hold is refused, and genSnapshot has already stamped every entry outside
+// the view's partitions unreadable.
+//
+// requiredLoadRatio is ignored — a fronted delegator is read through the
+// serviceability bypass, so no load ratio gates it — and is taken only so that
+// the three pin methods share one signature.
+func (d *distribution) PinGrowingSegmentsAsChild(_ float64, partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry, sealedRowCount map[int64]int64, version int64, err error) {
+	d.mut.RLock()
+	defer d.mut.RUnlock()
+
+	current := d.current.Load()
+	for _, partition := range partitions {
+		if !current.partitions.Contain(partition) {
+			return nil, nil, nil, -1, merr.WrapErrPartitionNotLoaded(partition)
+		}
+	}
+	_, growing = current.Get(partitions...)
+	growing = lo.Filter(growing, frontedGrowingFilter)
+	// No sealed segment is read, so no sealed row count is reported either: a
+	// partial-result evaluator counting this delegator's sealed rows against
+	// segments it was never asked to read would reject an exact result.
+	return nil, growing, nil, current.version, nil
+}
+
+// frontedGrowingFilter admits every growing segment a fronted delegator
+// contributes to its source's read. L0 is never readable, and
+// unreadableTargetVersion on a growing entry is how genSnapshot marks an entry
+// outside the query view's partitions — the partition gate, which still applies.
+func frontedGrowingFilter(entry SegmentEntry, _ int) bool {
+	return entry.Level != datapb.SegmentLevel_L0 && entry.TargetVersion != unreadableTargetVersion
+}
+
+func (d *distribution) pinReadableSegments(requiredLoadRatio float64, skipServiceableCheck bool, partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry, sealedRowCount map[int64]int64, version int64, err error) {
 	d.mut.RLock()
 	defer d.mut.RUnlock()
 
@@ -185,7 +258,7 @@ func (d *distribution) PinReadableSegments(requiredLoadRatio float64, partitions
 		isServiceable = loadRatioSatisfy
 	}
 
-	if !isServiceable {
+	if !skipServiceableCheck && !isServiceable {
 		mlog.Warn(context.TODO(), "channel distribution is not serviceable",
 			mlog.String("channel", d.channelName),
 			mlog.Float64("requiredLoadRatio", requiredLoadRatio),
@@ -206,7 +279,13 @@ func (d *distribution) PinReadableSegments(requiredLoadRatio float64, partitions
 	sealed, growing = current.Get(partitions...)
 	version = current.version
 	sealedRowCount = d.queryView.sealedSegmentRowCount
-	if d.queryView.Serviceable() {
+	// A shard-split child is fronted in-process (skipServiceableCheck): it is
+	// externally non-serviceable but owns growing segments at the initial target
+	// version that the source must read. Route it through the target-version
+	// readable filter (which admits initial-target-version segments) instead of
+	// the partial-result branch, whose queryView.growingSegments set is only
+	// populated by querycoord adoption and so would drop all of the child's data.
+	if skipServiceableCheck || d.queryView.Serviceable() {
 		// if query view is serviceable, we can use current target version to filter segments
 		targetVersion := current.GetTargetVersion()
 		filterReadable := d.readableFilter(targetVersion)
@@ -308,6 +387,22 @@ func (d *distribution) getTargetVersion() int64 {
 // Serviceable returns wether current snapshot is serviceable.
 func (d *distribution) Serviceable() bool {
 	return d.queryView.Serviceable()
+}
+
+// SyncedAndServiceable reports, in one read of the query view, whether
+// querycoord has synced a target version into this delegator and the delegator
+// is fully loaded against it.
+//
+// A shard-split read uses it to tell a delegator that has taken its own
+// vchannel over from one whose data its source is still fronting: only a
+// delegator querycoord has synced holds a complete view of its own shard, and
+// (with QC2's window gating) that sync is built from a target pulled after the
+// split drained, so it misses nothing the source holds.
+func (d *distribution) SyncedAndServiceable() bool {
+	d.mut.RLock()
+	defer d.mut.RUnlock()
+
+	return d.queryView.syncedByCoord && d.queryView.Serviceable()
 }
 
 // for now, delegator become serviceable only when watchDmChannel is done
@@ -460,6 +555,31 @@ func (d *distribution) MarkOfflineSegments(segmentIDs ...int64) {
 // 2. update readable channel view to support full result after new distribution is serviceable
 // Notice: if we don't need to be compatible with 2.5.x, we can just update new query view to support query,
 // and new query view will become serviceable automatically, a sync action after distribution is serviceable is unnecessary
+// SyncPartitions replaces the readable partition set, leaving the rest of the
+// query view alone.
+//
+// It exists for shard-split children. A child's view is built once, at spawn,
+// and afterwards only querycoord's SyncTargetVersion refreshes it — which an
+// unadopted child never receives, because querycoord does not know it exists
+// yet. So a partition created after the fence stayed missing from the child for
+// the whole fronting window, and the child rejected, with "partition not
+// loaded", a request its own source had already accepted.
+//
+// Widening the set is all this does, and it cannot make a child serve data it
+// does not hold: a child only ever holds segments of its own vchannel.
+func (d *distribution) SyncPartitions(partitions []int64) {
+	d.mut.Lock()
+	defer d.mut.Unlock()
+
+	updated := typeutil.NewUniqueSet(partitions...)
+	if len(updated) == len(d.queryView.partitions) &&
+		d.queryView.partitions.Contain(updated.Collect()...) {
+		return // unchanged: do not churn a new snapshot on every sync
+	}
+	d.queryView.partitions = updated
+	d.genSnapshot()
+}
+
 func (d *distribution) SyncTargetVersion(action *querypb.SyncAction, partitions []int64) {
 	d.mut.Lock()
 	defer d.mut.Unlock()
