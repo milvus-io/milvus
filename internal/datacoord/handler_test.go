@@ -2432,9 +2432,21 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 		StartPosition: &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 500},
 		DmlPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 600},
 	})
-	candidates := []*SegmentInfo{manifestSeg, growingSeg, emptySeg}
+	stagedSeg := NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 2004, CollectionID: 200, PartitionID: 0, InsertChannel: "ch-1",
+		State: commonpb.SegmentState_Flushed, StorageVersion: storage.StorageV3,
+		ManifestPath:  packed.MarshalManifestPath("/data/segments/2004", 3),
+		StartPosition: &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 500},
+		DmlPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 600},
+	})
+	candidates := []*SegmentInfo{manifestSeg, growingSeg, emptySeg, stagedSeg}
 
-	mockMeta := &meta{indexMeta: &indexMeta{}}
+	mockMeta := &meta{indexMeta: &indexMeta{}, segmentChangeGroups: map[int64]*model.SegmentChangeGroup{
+		5000: {
+			GroupID: 5000, CollectionID: 200, State: model.SegmentChangeStateStaged,
+			NewSegmentIDs: []int64{2004}, SupersededSegmentIDs: []int64{2001},
+		},
+	}}
 	handler := &ServerHandler{
 		s: &Server{
 			broker: broker.NewCoordinatorBroker(newMockMixCoord()),
@@ -2513,6 +2525,7 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	assert.Equal(t, int64(2001), snapshotData.Segments[0].GetSegmentId())
 	assert.NotEmpty(t, snapshotData.Segments[0].GetManifestPath())
 	assert.EqualValues(t, 700, snapshotData.Segments[0].GetCommitTimestamp())
+	delete(mockMeta.segmentChangeGroups, 5000)
 
 	candidates = []*SegmentInfo{NewSegmentInfo(&datapb.SegmentInfo{
 		ID:             2004,

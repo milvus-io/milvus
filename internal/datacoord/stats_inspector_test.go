@@ -823,6 +823,7 @@ func (s *statsInspectorSuite) TestNeedDoTextIndex() {
 	result = needDoTextIndex(segment, []int64{101}, true)
 	s.True(result, "Segment should build missing text index field")
 }
+
 func (s *statsInspectorSuite) TestUnsortedStatsConvergeWhenSortingDisabled() {
 	previous := Params.DataCoordCfg.EnableSortCompaction.SwapTempValue("false")
 	defer Params.DataCoordCfg.EnableSortCompaction.SwapTempValue(previous)

@@ -141,6 +141,9 @@ func (i *segmentChangeInspector) evaluateStaged(ctx context.Context, g *model.Se
 	for _, id := range g.NewSegmentIDs {
 		seg := i.mt.GetSegment(ctx, id)
 		if seg == nil || (seg.GetState() == commonpb.SegmentState_Dropped && !isEmptySegmentChangeOutput(seg)) {
+			if g.AwaitCommitFence && g.CommitTS == 0 {
+				return // WAL may already be durable; the job owns pre-fence failure.
+			}
 			i.failGroup(ctx, g, fmt.Sprintf("member %d externally dropped", id))
 			return
 		}
@@ -152,6 +155,9 @@ func (i *segmentChangeInspector) evaluateStaged(ctx context.Context, g *model.Se
 		// advance a staged member's SchemaVersion. Fail immediately instead of
 		// waiting out the staging timeout.
 		if !readiness.schemaReady(seg) {
+			if g.AwaitCommitFence && g.CommitTS == 0 {
+				return
+			}
 			i.failGroup(ctx, g, fmt.Sprintf("member %d schema version behind collection while staged (C23)", id))
 			return
 		}
@@ -166,7 +172,7 @@ func (i *segmentChangeInspector) evaluateStaged(ctx context.Context, g *model.Se
 			return
 		}
 		if !isEmptySegmentChangeOutput(seg) && !readiness.Ready(seg) {
-			if i.stagingTimedOut(g) {
+			if !g.AwaitCommitFence && i.stagingTimedOut(g) {
 				i.abortGroup(ctx, g, "staging timeout")
 				return
 			}
@@ -197,9 +203,8 @@ func (i *segmentChangeInspector) evaluateStaged(ctx context.Context, g *model.Se
 //   - a member gone from meta or Dropped -> FAILED (unconvergeable);
 //   - every other error is transient -> keep READY, retry next round.
 func (i *segmentChangeInspector) tryPublish(ctx context.Context, g *model.SegmentChangeGroup) {
-	if g.AwaitCommitFence && g.CommitTS == 0 && i.stagingTimedOut(g) {
-		i.abortGroup(ctx, g, "import commit fence timeout")
-		return
+	if g.AwaitCommitFence && g.CommitTS == 0 {
+		return // Only the WAL ack callback can bind the channel's commit TS.
 	}
 	err := i.mt.publishGroup(ctx, g, i.alloc)
 	if err == nil {
@@ -296,7 +301,10 @@ func (i *segmentChangeInspector) groupUnconvergeable(ctx context.Context, g *mod
 // stagingTimedOut reports whether the group exceeded SegmentChangeStagingTimeout
 // since CreateTS (Unix seconds). A zero CreateTS (legacy record) never times out.
 func (i *segmentChangeInspector) stagingTimedOut(g *model.SegmentChangeGroup) bool {
-	if groupHasCommittedImportFence(g) {
+	// The WAL can be durable before the ack callback binds its timetick to
+	// every group. Only the import job's explicit failure path may abandon a
+	// group waiting for that fence.
+	if g.AwaitCommitFence {
 		return false
 	}
 	if g.CreateTS <= 0 {
