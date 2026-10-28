@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
@@ -25,13 +26,21 @@ func (hs *handlerServiceImpl) RunAnalyzer(ctx context.Context, req *streamingpb.
 	}
 	switch source := req.GetSource().(type) {
 	case *streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer:
-		resources, err := fileresource.Acquire(ctx, nil, source.InlineAnalyzer.GetAnalyzerParams())
-		if err != nil {
-			return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(err)}, nil
-		}
-		defer resources.Close()
-		results, err := analyzer.Run(ctx, source.InlineAnalyzer.GetAnalyzerParams(), req.GetPlaceholder(), req.GetWithDetail(), req.GetWithHash(), resources.ExtraInfo())
-		return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(err), Results: results}, nil
+		return analyzer.RunOperation(ctx, req, func(use func(analyzer.BatchRun, []string) error) error {
+			resources, err := fileresource.Acquire(ctx, nil, source.InlineAnalyzer.GetAnalyzerParams())
+			if err != nil {
+				return err
+			}
+			defer resources.Close()
+			tokenizer, err := analyzer.NewAnalyzer(source.InlineAnalyzer.GetAnalyzerParams(), resources.ExtraInfo())
+			if err != nil {
+				return err
+			}
+			defer tokenizer.Destroy()
+			return use(func(texts [][]byte, withDetail, withHash bool, _ []string) ([]*milvuspb.AnalyzerResult, error) {
+				return analyzer.RunWithAnalyzer(ctx, tokenizer, texts, withDetail, withHash)
+			}, nil)
+		}), nil
 	case *streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer:
 		field := source.FieldAnalyzer
 		if field.GetCollectionId() == 0 || field.GetVchannel() == "" || field.GetPchannel() == nil || field.GetPchannel().GetName() != funcutil.ToPhysicalChannel(field.GetVchannel()) {
