@@ -4296,6 +4296,9 @@ func replaceArrayRowElement(base, update *schemapb.ScalarField, elementType sche
 	if base == nil || update == nil {
 		return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE requires non-nil Array rows")
 	}
+	if len(GetArrayElementValidData(base)) != 0 || len(GetArrayElementValidData(update)) != 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE does not support Array element valid_data")
+	}
 
 	// Keep row metadata and unknown protobuf fields, and never mutate request
 	// operands or a query result that still shares the original base payload.

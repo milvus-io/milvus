@@ -11,11 +11,14 @@
 
 This branch backports [Milvus PR 53163](https://github.com/milvus-io/milvus/pull/53163)
 using [milvus-proto PR 672](https://github.com/milvus-io/milvus-proto/pull/672).
-The operation semantics below are unchanged. The 3.0 schema has no recursive
-typed Arrays or scalar/vector element-level validity fields; this backport
-does not introduce them. Field-level validity uses the existing `FieldData`
-bitmap. REST operand checks are scoped to `PATH_REPLACE`; ordinary 3.0 REST
-write conversion is unchanged. Metrics use the existing 3.0 cleanup hooks.
+The initial backport omitted recursive typed Arrays and scalar/vector
+element-level validity handling. The nested-array and element-nullability
+prerequisites now restore the corresponding PATH_REPLACE checks and preserve
+non-target nested Array children. Immediate-element validity metadata remains
+unsupported by PATH_REPLACE. Field-level validity is written to both the
+legacy `FieldData` bitmap and the field-specific bitmap. REST operand checks
+are scoped to `PATH_REPLACE`; ordinary 3.0 REST write conversion is unchanged.
+Metrics use the existing 3.0 cleanup hooks.
 
 ## Summary
 
@@ -325,9 +328,9 @@ The protobuf-level shapes are:
 | Explicit JSON path | `type = JSON`, one `JSONArray.data` entry per entity | Encoded JSON value, including JSON `null` |
 
 Every immediate typed-Array replacement element must carry one concrete,
-non-null value. The 3.0 schema has no element-level `valid_data`; this backport
-does not introduce element nullability. Field-level validity remains governed
-by the existing parent-field
+non-null value. `PATH_REPLACE` does not introduce or interpret element-level
+`valid_data`; an operand carrying immediate-element validity metadata is
+rejected. Field-level validity remains governed by the existing parent-field
 contract, and every operand parent row must be present and not database NULL.
 The JSON literal `null` is a present JSON value, not a null parent row.
 
@@ -534,7 +537,8 @@ values still pass the existing type, dimension, capacity, and length checks.
   if other fields use ordinary replacement.
 - Every `PATH_REPLACE` parent and operand row must be present and not database
   NULL. JSON literal `null` is a present value, not a false field-validity entry.
-  This feature does not extend typed-Array or Struct element nullability.
+  This feature does not extend typed-Array or Struct element nullability;
+  `element_nullable` does not relax the non-null replacement requirement.
 - Each array index must satisfy `0 <= index < oldArrayLength` independently
   for every entity. Indexing never appends, pads, or resizes an array. Replacing
   a selected complete JSON array is different: the new array may have another
@@ -555,7 +559,7 @@ listed [separately below](#current-implementation-differences-and-limitations).
 | Struct `[index][age]` operand also supplies `city` | Reject; only the selected child is permitted | Supply only `age`; use a complete element to replace all children |
 | Update two of three Struct children in one request | Cannot express a proper multi-child subset with one path | Make explicit separate child requests, or supply a complete element; these are different operations |
 | Typed Array/Struct element or child replacement is `null` | Reject; replacements must be concrete, non-null values | Use a non-null value; JSON `null` is a separate contract |
-| Immediate scalar/vector operand needs element-level `valid_data` | Not representable in the 3.0 schema | Send the supported non-null singleton representation |
+| Immediate scalar/vector operand includes element-level `valid_data` | Reject; `PATH_REPLACE` does not interpret element nullability metadata | Send the supported non-null singleton representation |
 | Target or operand parent row is missing or database NULL | Reject; there is no existing container or concrete operand | Provide a present operand; use ordinary field replacement to initialize a null parent |
 | Array index is out of range, including every index into an empty array | Reject; indexing does not create elements | Initialize or resize through an ordinary whole-field replacement |
 | Nested typed Array, a nested Array child of Struct, or a standalone Struct parent | Not a supported replacement target; a full Struct replacement also fails if any child has an unsupported replacement type | A supported single-child path can preserve non-target nested Array children |
@@ -779,7 +783,7 @@ Representative failures:
 | Missing/null JSON intermediate container or wrong container type | InputError |
 | Wrong operand type/count/mask | InputError |
 | Database-NULL operand row | InputError |
-| Null typed-Array replacement | InputError |
+| Null typed-Array replacement or typed immediate-element `valid_data` | InputError |
 | Malformed JSON operand or merged JSON exceeding depth/size limits | InputError |
 | Query returns duplicate PKs or malformed aligned Struct data | SystemError |
 | Internal schema lookup fails after successful earlier resolution | SystemError |
