@@ -3357,6 +3357,9 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job bulkimpor
 		return err
 	}
 	defer broadcaster.Close()
+	if err := s.prepareImportPublication(ctx, job); err != nil {
+		return err
+	}
 
 	msg := message.NewCommitImportMessageBuilderV2().
 		WithHeader(&message.CommitImportMessageHeader{
@@ -3576,6 +3579,11 @@ func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCom
 	// reenter importMeta while updating segment visibility.
 	ids := bulkimport.GetImportSegmentIDsByVchannel(ctx, s.importMeta, s.meta, req.GetJobId(), req.GetVchannel())
 	err := s.importMeta.HandleCommitVchannel(ctx, req.GetJobId(), req.GetVchannel(), func() error {
+		if job != nil {
+			if staged, err := s.stageImportChange(ctx, job, req.GetVchannel(), ids, req.GetCommitTimestamp()); staged {
+				return err
+			}
+		}
 		ops := make([]meta.UpdateOperator, 0, len(ids)*2)
 		for _, id := range ids {
 			ops = append(ops, meta.UpdateCommitTimestamp(id, req.GetCommitTimestamp()), meta.UpdateIsImporting(id, false))

@@ -25,6 +25,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"golang.org/x/time/rate"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
@@ -95,10 +96,34 @@ type Inspector struct {
 	handler               meta.Handler
 	scheduler             task.GlobalScheduler
 	ievm                  index.IndexEngineVersionManager
+	copySegmentMeta       interface{ ActiveCopyCollectionIDs() []int64 }
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
 	stopWg   sync.WaitGroup
+}
+
+func (c *Inspector) SetCopySegmentMeta(provider any) {
+	c.copySegmentMeta, _ = provider.(interface{ ActiveCopyCollectionIDs() []int64 })
+}
+
+func (c *Inspector) segmentChangeL0Exclusions() typeutil.Set[string] {
+	channels := typeutil.NewSet[string]()
+	m, ok := c.meta.(*meta.Meta)
+	if !ok {
+		return channels
+	}
+	if paramtable.Get().DataCoordCfg.SegmentChangeEnabled.GetAsBool() && c.copySegmentMeta != nil {
+		for _, id := range c.copySegmentMeta.ActiveCopyCollectionIDs() {
+			if coll := m.GetCollection(id); coll != nil {
+				channels.Insert(coll.VChannelNames...)
+			}
+		}
+	}
+	for channel := range m.SegmentChangeL0Channels() {
+		channels.Insert(channel)
+	}
+	return channels
 }
 
 func (c *Inspector) GetCompactionInfo(ctx context.Context, triggerID int64) *policy.CompactionInfo {
@@ -211,6 +236,7 @@ func (c *Inspector) schedule() []ctask.CompactionTask {
 	clusterChannelExcludes := typeutil.NewSet[string]()
 	mixLabelExcludes := typeutil.NewSet[string]()
 	clusterLabelExcludes := typeutil.NewSet[string]()
+	stagedL0Excludes := c.segmentChangeL0Exclusions()
 
 	c.executingGuard.RLock()
 	for _, t := range c.executingTasks {
@@ -246,6 +272,25 @@ func (c *Inspector) schedule() []ctask.CompactionTask {
 
 		switch t.GetTaskProto().GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:
+			if stagedL0Excludes.Contain(t.GetTaskProto().GetChannel()) {
+				// Never-dispatched L0 work can be replanned after publication.
+				// Remove it from the queue so it cannot consume the planning
+				// budget needed by the group's internal sort tasks.
+				failed := proto.Clone(t.GetTaskProto()).(*datapb.CompactionTask)
+				failed.State = datapb.CompactionTaskState_failed
+				failed.FailReason = "L0 deferred while segment change publication is pending"
+				if err := c.compactionTaskMeta.SaveCompactionTask(context.TODO(), failed); err != nil {
+					excluded = append(excluded, t)
+					continue
+				}
+				t.SetTask(failed)
+				c.cleaningGuard.Lock()
+				c.cleaningTasks[t.GetTaskID()] = t
+				c.cleaningGuard.Unlock()
+				metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetTaskProto().GetNodeID()), t.GetTaskProto().GetType().String(), metrics.Pending).Dec()
+				metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", t.GetTaskProto().GetNodeID()), t.GetTaskProto().GetType().String(), metrics.Done).Inc()
+				continue
+			}
 			if mixChannelExcludes.Contain(t.GetTaskProto().GetChannel()) ||
 				clusterChannelExcludes.Contain(t.GetTaskProto().GetChannel()) {
 				excluded = append(excluded, t)
@@ -627,6 +672,39 @@ func (c *Inspector) EnqueueCompaction(task *datapb.CompactionTask) error {
 
 // set segments compacting, one segment can only participate one compactionTask
 func (c *Inspector) createCompactTask(t *datapb.CompactionTask) (ctask.CompactionTask, error) {
+	if t.GetType() == datapb.CompactionType_Level0DeleteCompaction && c.segmentChangeL0Exclusions().Contain(t.GetChannel()) {
+		return nil, merr.WrapErrServiceUnavailableMsg("L0 compaction is deferred while segment change publication is pending")
+	}
+	if m, ok := c.meta.(*meta.Meta); ok {
+		group, err := m.GetCompactionChangeGroup(t)
+		if err != nil {
+			return nil, err
+		}
+		if group != nil {
+			// Recovery of a durable output/group transaction must not reserve
+			// its own parents a second time or dispatch another worker task.
+			restored := proto.Clone(t).(*datapb.CompactionTask)
+			switch restored.GetState() {
+			case datapb.CompactionTaskState_failed, datapb.CompactionTaskState_timeout, datapb.CompactionTaskState_completed:
+				// Preserve terminal task decisions; Clean will abort an unpublished
+				// group rather than revive a canceled/failed compaction on restart.
+			default:
+				restored.State = datapb.CompactionTaskState_meta_saved
+				if t.GetType() == datapb.CompactionType_ClusteringCompaction {
+					restored.State = datapb.CompactionTaskState_indexing
+				}
+			}
+			restored.ResultSegments = meta.CompactionGroupResultIDs(group, t)
+			m.SetSegmentsCompacting(context.TODO(), t.GetInputSegments(), true)
+			if t.GetType() == datapb.CompactionType_ClusteringCompaction {
+				return ctask.NewClusteringCompactionTask(restored, c.allocator, c.meta, c.compactionTaskMeta, c.indexMeta, c.analyzeMeta, c.partitionStatsMeta, c.partitionStatsCleaner, c.handler, c.analyzeScheduler, c.ievm), nil
+			}
+			if t.GetType() == datapb.CompactionType_BumpSchemaVersionCompaction {
+				return ctask.NewBumpSchemaVersionTask(restored, c.allocator, c.meta, c.compactionTaskMeta, c.ievm), nil
+			}
+			return ctask.NewMixCompactionTask(restored, c.allocator, c.meta, c.compactionTaskMeta, c.ievm), nil
+		}
+	}
 	var task ctask.CompactionTask
 	switch t.GetType() {
 	case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction:
@@ -644,6 +722,9 @@ func (c *Inspector) createCompactTask(t *datapb.CompactionTask) (ctask.Compactio
 	// after planning cannot enter the task queue unchecked.
 	if err := c.meta.ValidateSegmentStateBeforeCompleteCompactionMutation(t); err != nil {
 		return nil, err
+	}
+	if m, ok := c.meta.(*meta.Meta); ok && m.ReserveGroupSort(t) {
+		return task, nil
 	}
 	exist, succeed := c.meta.CheckAndSetSegmentsCompacting(context.TODO(), t.GetInputSegments())
 	if !exist {

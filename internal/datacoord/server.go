@@ -862,6 +862,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	if err := retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime)); err != nil {
 		return err
 	}
+	recoveredMeta.PartitionStats = recoveredDomainMetas.partitionStatsMeta
 	defer func() {
 		if s.meta != recoveredMeta {
 			recoveredMeta.CloseManifestCommitExecutor()
@@ -875,6 +876,12 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		return err
 	}
 
+	// Resolve interrupted group writes before RecoverManager projects any
+	// SegmentMeta or starts its asynchronous recompute worker.
+	if err := recoveredMeta.ReconcileSegmentChangeGroups(s.ctx, s.allocator, s.dataViewCollectionRecoveryValidator); err != nil {
+		return err
+	}
+
 	collections := recoveredMeta.GetCollections()
 	collectionIDs := lo.Map(collections, func(c *meta.CollectionInfo, _ int) int64 { return c.ID })
 	collectionVChannels := lo.SliceToMap(collections, func(c *meta.CollectionInfo) (int64, []string) {
@@ -883,15 +890,32 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	var manager dataview.Manager
 	if err := retry.Do(s.ctx, func() error {
 		var err error
+		recoveryCtx, cancel := context.WithCancel(s.ctx)
+		recovered := false
+		defer func() {
+			if !recovered {
+				cancel()
+			}
+		}()
 		manager, err = dataview.RecoverManager(
-			s.ctx,
+			recoveryCtx,
 			catalog,
 			s.dataViewCollectionRecoveryValidator,
 			recoveredMeta.LoadableProjection,
 			collectionIDs,
 			collectionVChannels,
 		)
-		return err
+		if err != nil {
+			return err
+		}
+		// RecoverManager's general rebuild is best-effort. Group recovery
+		// requires a confirmed snapshot before exposing the recovered meta.
+		if err := recoveredMeta.ReconcileSegmentChangeDataViews(s.ctx, manager); err != nil {
+			return err
+		}
+		// The successfully recovered manager lives until s.ctx is canceled.
+		recovered = true
+		return nil
 	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
 		return err
 	}
@@ -939,6 +963,7 @@ func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager
 func (s *Server) initCompaction() {
 	partitionStatsCleaner := partitionstats.NewPartitionStatsCleaner(s.meta.ChunkManager, s.catalog, s.analyzeMeta, s.partitionStatsMeta)
 	cph := compaction.NewCompactionInspector(s.meta, s.compactionTaskMeta, s.indexMeta, s.analyzeMeta, s.partitionStatsMeta, s.compactionTargetMeta, partitionStatsCleaner, s.allocator, s.handler, s.globalScheduler, s.globalScheduler, s.indexEngineVersionManager)
+	cph.SetCopySegmentMeta(s.copySegmentMeta)
 	cph.LoadMeta()
 	s.compactionInspector = cph
 	s.compactionTriggerManager = compaction.NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.indexMeta, s.compactionTaskMeta, s.partitionStatsMeta, s.compactionTargetMeta, s.indexEngineVersionManager)

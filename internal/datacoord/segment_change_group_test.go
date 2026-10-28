@@ -43,13 +43,13 @@ func seedPublishMeta(t *testing.T, m *meta.Meta, source model.SegmentChangeSourc
 		meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, IsInvisible: true,
-			NumOfRows: 42,
-			Stats:     &datapb.Statistics{InsertBinlogSize: 131073, StatsBinlogSize: 65536, DeltaBinlogSize: 65536},
-			Binlogs:   []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
+			NumOfRows: 42, IsSorted: true,
+			Stats:   &datapb.Statistics{InsertBinlogSize: 131073, StatsBinlogSize: 65536, DeltaBinlogSize: 65536},
+			Binlogs: []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
 		}),
 		meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
-			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
+			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, NumOfRows: 42,
 			Binlogs: []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 2}}}},
 		}),
 	} {
@@ -215,7 +215,12 @@ func TestPublishGroup_IdempotentReplay(t *testing.T) {
 	// evidence" (design C7): the members were flipped by an earlier chunked
 	// fallback flush while the commit marker did not land. The group is still
 	// ALIVE (READY), so a replayed publish must converge idempotently.
-	require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.SetSegmentIsInvisible(1001, false)))
+	// Inject the persisted crash state directly; ordinary metadata writes are
+	// forbidden from exposing an ALIVE member outside its owning publish.
+	partial := m.GetSegment(ctx, 1001).Clone()
+	partial.IsInvisible = false
+	require.NoError(t, m.Catalog.AlterSegments(ctx, []*datapb.SegmentInfo{partial.SegmentInfo}))
+	m.Segments.SetSegment(1001, partial)
 
 	require.NoError(t, m.PublishGroup(ctx, ready, meta.NewMockAllocator(t)))
 
@@ -255,6 +260,8 @@ func TestPublishGroup_IndexRegressionRejected(t *testing.T) {
 	m, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	ctx := context.Background()
+	previous := Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.SwapTempValue("0")
+	defer Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.SwapTempValue(previous)
 	m.IndexCatalog = newReadinessIndexMeta(10, map[int64]*model.Index{10: vectorIndex(2, 10)}, nil)
 
 	ready := seedPublishMeta(t, m, model.SegmentChangeSourceMixCompaction)

@@ -308,7 +308,7 @@ message SegmentChangeGroup {
   int64  partition_id;          // 0 = cross-partition (import usually)
   int64  source_job_id;         // import jobID / compaction planID / copy taskID
   SegmentChangeState state;
-  repeated int64 new_segment_ids;         // staged members
+  repeated int64 new_segment_ids;         // current staged outputs; controlled sort replacement described below
   repeated int64 superseded_segment_ids;  // parents retired at publication
   // superseded_l0_segment_ids: the subset of superseded_segment_ids exempted
   // from the anti-duplication invariant as L0 delta segments at REGISTRATION
@@ -332,6 +332,13 @@ message SegmentChangeGroup {
 Write-time constraints (violation ⇒ `merr.WrapErrDataIntegrityMsg`):
 
 - `new_segment_ids` and `superseded_segment_ids` are disjoint;
+- `new_segment_ids` may be empty: compaction can retire parents with no output,
+  and an empty import can complete as a no-op. Public state transitions cannot
+  change membership. The private STAGED sort-materialization path may replace
+  one member with its sort result; the JSON model preserves the producer's
+  `initialSegmentIds` and records each plan/input/output in `sortJobs`. This is
+  a composite group/output write with ownership checks, not a second group.
+  Finalized zero-row outputs are retired rather than published.
 - **an L1/L2 segment may be referenced — as a `new_segment` or as a
   `superseded` parent — by at most one ALIVE (`STAGED`/`READY`) group per
   collection.** This is the anti-duplication invariant: two alive groups that
@@ -415,8 +422,8 @@ Recovery order (`reloadFromMeta`):
 | 2 | STAGED→STAGED | `groupInspector` periodic re-eval | none (re-eval not persisted) | — | — |
 | 3 | STAGED→READY | `groupInspector`: all members satisfy §5.3 | group `state=READY, ready_ts` (independent catalog txn) | half write (etcd txn atomic, impossible) | recovery: READY → publish replay |
 | 4 | STAGED/READY→FAILED | `groupInspector`: any member terminally failed / schema fence unconvergeable | group `state=FAILED, fail_reason` | crash | recovery: FAILED → member reclamation (§8) |
-| 5 | STAGED→ABORTED | timeout (`SegmentChangeStagingTimeout`) / superseded externally dropped / member zero-row dropped / collection drop | group `state=ABORTED` | crash | recovery: ABORTED → member reclamation |
-| 6 | READY→STAGED | R5 readiness regression: publish Phase-2 re-check rejects a member whose index regressed / schema went behind after READY | group `state=STAGED, ready_ts=0` (independent catalog txn) | half write (etcd txn atomic, impossible) | recovery: STAGED → re-evaluate (§7) |
+| 5 | STAGED→ABORTED | timeout (`SegmentChangeStagingTimeout`) / superseded externally dropped / collection drop | group `state=ABORTED` | crash | recovery: ABORTED → member reclamation |
+| 6 | READY→STAGED | R5 readiness regression: publish Phase-2 re-check rejects a nonempty member whose data/index/sort/stats/schema readiness regressed after READY | group `state=STAGED, ready_ts=0` (independent catalog txn) | half write (etcd txn atomic, impossible) | recovery: STAGED → re-evaluate (§7) |
 | 7 | READY→COMMITTED | `publishGroup` (§5.4) | **same txn**: group COMMITTED + member flips + superseded Dropped + DataView snapshot | §5.4 failure matrix | recovery: COMMITTED → keep |
 | 8 | COMMITTED→(deleted) | `groupCleaner`: superseded all Dropped and no longer referenced by any snapshot | delete group key | crash | recovery: leftover COMMITTED kept then rescanned |
 
@@ -445,7 +452,7 @@ SegmentMeta + DataView snapshot in one txn). There is therefore **no
 
 ### Readiness Predicate (precise)
 
-`groupInspector` evaluates every `new_segment_id`; all must pass to flip
+`groupInspector` evaluates every nonempty `new_segment_id`; all must pass to flip
 STAGED→READY. It shares its source of truth with
 `FilterInIndexedSegments`/`loadableProjection` (extract a shared predicate to
 avoid write/read drift):
@@ -461,7 +468,7 @@ ready(segment) :=
 
 Per-term definition and edge cases:
 
-- **dataReady**: `isFlushState(state)` and has a data footprint
+- **dataReady**: `NumOfRows > 0`, `isFlushState(state)`, and has a data footprint
   (`len(Binlogs)>0 || ManifestPath!=""`). **Note**: members are still
   `IsInvisible=true` during STAGED→READY (flip happens at publish), so dataReady
   must **not** require `!IsInvisible`. This is a deliberate difference from
@@ -488,8 +495,14 @@ Per-term definition and edge cases:
   `IsSorted=true`; direct import segments (sort disabled) need no sorted flag.
 - **statsReady**: exempt when the collection has no text-index requirement and
   no JSON-key-index requirement; otherwise requires the corresponding
-  `statsTaskMeta` `StatsSubJob` to have converged (text/JSON-key stats written
-  back or already present in the V3 manifest).
+  text/JSON-key stats artifacts to be recorded in SegmentMeta (including the
+  committed V3-manifest completion markers). Text stats must exist for every
+  required field; JSON-key stats must also use the current data format. Task
+  scheduling eligibility is not evidence of completion: an unsorted segment
+  still requires its artifacts when sort compaction is disabled. In that mode
+  the stats inspector builds directly on unsorted ALIVE-group outputs;
+  group-less segments retain their existing scheduling behavior. The existing
+  external non-V3 JSON-key capability exemption is retained.
 - **schemaReady**: `segment.SchemaVersion >= collection.SchemaVersion`
   (including the function-field materialization constraint). **Edge case (C23)**:
   a schema bump landing while a group is staged is UNCONVERGEABLE, not a wait —
@@ -505,7 +518,19 @@ Per-term definition and edge cases:
 Excluded from readiness evaluation:
 
 - **L0 segments**: never staged (§6.2).
-- **Zero-row members** (C32): a zero-row member discovered AFTER registration (import `createSortCompactionTask` today) can NOT be removed from the group — the member set is fixed at registration (`validateSegmentChangeGroupTransitionLocked`) and `Validate` requires a non-empty member set — so the whole group must be ABORTED (and the batch redone) rather than pruned member-by-member. Members discovered zero-row before registration are simply never added.
+- **Zero-row outputs** (C32, revised): a finalized zero-row result means **no
+  output**, matching mix/sort compaction's Dropped result and import's skipped
+  sort task. Before registration, producers may omit the segment entirely.
+  After registration, retain its producer identity, skip its
+  readiness terms, and mark it Dropped in the publish write; never add it to
+  DataView or assign it a row commit timestamp. A pre-existing Dropped zero-row
+  result is also valid. GC retains such a member's metadata while the group is
+  ALIVE, preserving the no-output evidence across restart; after the group
+  finishes it can delete the tombstone normally. Growing/Flushing/Importing zero counts
+  are provisional and must wait for finalization. Missing members remain errors.
+  All-empty groups still commit the superseded retirement; with no superseded
+  parents they complete as no-ops without advancing DataView. Zero-row outputs
+  do not abort the rest of a batch.
 - **Members marked compacting**: `SetSegmentsCompacting` does not affect the
   predicate, but publish must re-verify the member is still healthy.
 
@@ -548,7 +573,9 @@ publishGroup(ctx, g):
       seg := m.segments.GetSegment(id)
       must(seg != nil && seg.change_group_id == g.group_id && seg.IsInvisible)
       must(seg.SchemaVersion >= collSchemaVersion(seg.CollectionID))
-      must(manifest complete / binlogs non-empty or zero-row already excluded)
+      if finalized zero-row output: continue        # retired, not loaded
+      must(ready(seg))                              # recheck all five terms
+      must(manifest complete / binlogs non-empty)
       must(commitTs >= max(binlog.TimestampTo))      # existing invariant, §9.1
       must(index state re-checked in phase 2 is still Finished or exempt)  # §5.5 R5
   for id in g.superseded_segment_ids:
@@ -570,16 +597,22 @@ publishGroup(ctx, g):
   # Phase 4: one catalog txn (SegmentMeta + DataView snapshot + group state)
   ops := []
   for id in g.new_segment_ids:
+      if finalized zero-row output:
+          ops += UpdateStatusOperator(id, Dropped)
+          continue
       ops += SetSegmentIsInvisible(id, false)
       # C5: commit_ts applies ONLY to sources whose rows carry a data timestamp
-      # allocated at creation (import / CDC / copy): those rows become
+      # allocated at creation (import / CDC; normalized copy implementations): those rows become
       # "officially present" at commit_ts. Compaction outputs (mix/sort/
       # clustering/forcemerge) MUST keep CommitTimestamp=0 — their rows keep
       # per-input normalized timestamps, and a non-zero commit_ts makes segcore
       # treat every row as inserted at commit_ts, dropping any delete with
       # timestamps[i] <= commit_ts and resurrecting already-deleted rows
       # (MVCC/TTL shift).
-      if source.usesPublishCommitTs(g): ops += UpdateCommitTimestamp(id, commitTs)
+      # Current file-copy workers set preserveMemberTimestamps and keep their
+      # existing row/delete timeline; see §6.7.
+      if source.usesPublishCommitTs(g) && !g.preserveMemberTimestamps:
+          ops += UpdateCommitTimestamp(id, commitTs)
       ops += (optional) UpdateSegmentPartitionStatsVersionOperator(id, <planID>)
   for id in g.superseded_segment_ids:
       ops += UpdateStatusOperator(id, Dropped)        # superseded semantics; M:N see §6.3
@@ -635,7 +668,7 @@ only briefly (bounded catalog I/O) and never request manifest, so
 | 0 | manifest-lock acquisition timeout / ctx canceled | untouched | retry / defer to next inspector round |
 | 1 | collection dropped (state==nil) | untouched | group→ABORTED, reclaim members |
 | 2 validate | member missing / externally dropped / `change_group_id` mismatch | untouched | group→FAILED (external drop is unconvergeable) |
-| 2 validate | schema version behind | untouched | stay STAGED waiting for bump convergence (**not** FAILED) |
+| 2 validate | schema version behind | untouched | reject publish; regress to STAGED, then FAILED under C23 (staged rows cannot converge through visible-only schema bump) |
 | 2 validate | superseded already Dropped | untouched | treated as idempotent, skip (not fail) — covers **same-group publish replay** and **external DDL racing the parent** (truncate/drop-partition dropped it first); it is NOT a path that legitimizes two alive groups sharing a parent, which is rejected at registration by the anti-duplication invariant (§1.1) |
 | 2 validate | publish does not retire a superseded parent (chyezh#C) | untouched | group→FAILED. A COMMITTED publish must drop every superseded parent in the same write (unless it is already Dropped in meta): otherwise the parent and the now-visible member both cover the same rows — duplicated query results — and the terminal group can no longer repair it |
 | 3 | `PublishChange` monotonicity conflict (manifest version pushed higher by L0 then re-read lower) | untouched | stale error, back to STAGED, re-read and retry |
@@ -657,9 +690,9 @@ compensating write** is introduced.
 | R3 publish ∥ single-segment stats/index/GC | no DataView-lock participant | manifest locks / segMu mutually exclude; GC only recycles Dropped, staged members unaffected | locks |
 | R4 publish ∥ flush (same collection) | `publishGroup` vs `SaveBinlogPaths` | serialized by DataView lock; flush advances streaming_version, publish advances compact_version, lexicographically compatible | lock order |
 | R5 groupInspector READY ∥ member index task failure | inspector vs index task | after READY a member's index state can regress (retry in flight) → publish Phase 2 re-checks `GetSegmentIndexState`; not Finished → abort back to STAGED | Phase-2 recheck |
-| R6 member manifest advanced by L0 ∥ publish | L0 task vs publish | **C29 caveat**: `selectFlushedSegment` (L0) does NOT filter `IsInvisible`, so a staged (Flushed, invisible) member CAN be an L0 target. The invariant holds only once the L0 selector gains an `IsInvisible` exclusion (scheduled in §11); until then the publish/recompute monotonicity (§5.4.3) keeps the manifest version safe even if L0 materializes into a staged member | §5.4.3 + §11 |
+| R6 member manifest advanced by L0 ∥ publish | L0 task vs publish | L0 target selection excludes unpublished group members. New L0 plans are deferred on channels with unpublished groups or active copy admissions; queued undispatched plans are cleaned without retiring delete inputs. Ordinary group-less invisible flush inputs remain eligible. | selector + admission guard |
 | R7 superseded dropped externally (partition/truncate/collection) ∥ publish | DDL vs publish | publish treats superseded idempotently (already Dropped → skip); non-idempotent for `new_segment` → FAILED | §5.4.3 |
-| R8 member re-selected for a second compaction ∥ publish | planner vs publish | **C29/C33 caveat**: the `IsInvisible` exclusion (`compaction_util.go:126`) applies only to the manual/force-merge selector; `canTriggerSortCompaction` deliberately SELECTS invisible segments (they are the awaiting-sort marker, §6.1) and the storage-version policy does not exclude them. A staged member is therefore re-selectable by sort — the guard must exclude ALIVE-GROUP members (staged-membership index), not all invisible segments, and must be scheduled in §11 before the "no defensive gap" invariant (§1.1) is relied upon | invariant + §11 |
+| R8 member re-selected for a second compaction ∥ publish | planner vs publish | Selectors and reservation exclude ALIVE-group members and parents, except that a single unsorted STAGED member can enter its owning group's Sort subtask. The exception is rechecked under `segMu`; group-less awaiting-sort flush inputs retain their old admission. | membership index + reservation |
 | R9 two alive groups referencing the same L1/L2 segment (new or superseded) | registration vs registration | **rejected at `AddSegmentChangeGroup`** via the `stagedSegmentToGroup`/`supersededSegmentToGroup` reverse indexes (anti-duplication invariant §1.1); a registration race is serialized by segMu | invariant + §1.1 |
 | R10 seek-position read ∥ staged | `getEarliestSegmentDMLPos` (`handler.go:583`) | **existing bug**: filters `IsImporting` but not staged members; a staged segment's DML position can pollute the channel-seek fallback. **Scope note**: this fix targets the LEGACY (non-dataview) view only — the dataview path (`loadableProjection`) already excludes staged members natively. Filter by **ALIVE-group membership** (`stagedSegmentToGroup` reverse index, exposed as `aliveStagedMembers`), NOT by blanket `IsInvisible`: sort-enabled flush's awaiting-sort segments (§6.1) are `IsInvisible=true` but not group members and must keep their growing/DML contribution — a blanket filter would regress the sort-enabled collection's seek. Applies to `getEarliestSegmentDMLPos`, `GetQueryVChanPositions`, `GetCurrentSegmentsView`. This is a deliberate deviation from the earlier "filter `IsInvisible`" wording, gated on O1 (§6.1): if O1 later makes awaiting-sort segments fully invisible, the filter widens to `IsInvisible` | ALIVE-group filter (§10) |
 | R11 metrics/partition stats ∥ staged | none | clustering's `UpdateSegmentPartitionStatsVersionOperator` runs only at publish | publish txn |
@@ -723,17 +756,16 @@ After staging:
 - sort compaction **disabled**: the original `PrepareFlush` path, member visible
   immediately (`SOURCE_STREAMING_FLUSH` trivial semantics, `streaming_version`
   +1); staging does not intervene.
-- sort compaction **enabled**: the flushed segment becomes `IsInvisible=true`
-  but is **not** published into DataView (`change_group_id` stays 0, marked
-  "awaiting sort" rather than a group member); the later sort-compaction output
-  enters a group. **Note**: this changes the #52537 semantics of "flush
-  synchronously advances streaming_version" — the advance is deferred until the
-  sort output publishes, which directly affects StreamingNode's
-  growing→sealed handoff watermark. That handoff depends on
-  `transform_start_after_timetick` (explicitly unimplemented in #52537), so the
-  correctness of this path depends on the QueryView/SN shard barrier landing.
-  This is a prerequisite/parallel dependency of staging and **must** be listed
-  as an open question (O1, §15), not silently changed.
+- sort compaction **enabled**: preserve the existing synchronous publication
+  and `sealed_at_data_version` binding. The raw flush remains "awaiting sort"
+  (`IsInvisible=true`, no group); its sorted output enters a group that retires
+  the raw input only on publish. `loadableProjection` retains raw invisible
+  segments with a durable seal binding so an unrelated recompute cannot remove
+  the already-published input while sorting/indexing proceeds. The output
+  replaces it by advancing `compact_version`, not `streaming_version`.
+- Deferring the raw flush's first publication remains a separate handoff change
+  requiring `transform_start_after_timetick`; this implementation selects the
+  compatibility branch of O1 and does not defer the SN handshake.
 
 ### 6.2 L0 — never staged
 
@@ -741,6 +773,13 @@ L0 is a delta segment with no sort/index; L0 compaction only advances target
 segments' manifest versions without changing membership. Keep the #52537
 behavior: `recomputeDataView` (content change → `compact_version` +1).
 **No group**.
+
+While a change group is unpublished, new L0 work on its channel is deferred.
+Already queued, undispatched L0 tasks are failed and cleaned so they release
+their planning slots without dropping their L0 inputs; the next planner pass
+can retry them after publication. Pending or executing copy jobs also block
+new L0 admission on their collection channels because copied rows preserve
+their original timestamps. Existing groups keep this guard after opt-out.
 
 ### 6.3 Mix / Sort compaction — deferred superseded retirement
 
@@ -788,19 +827,32 @@ Today's chain: import segments (`IsImporting=true`) → sort-compaction outputs
 
 After staging:
 
-- sort **disabled**: import segments become visible directly after commit
-  (`HandleCommitVchannel`), stats/index async — **not staged** (no readiness
-  gate, same as today).
-- sort **enabled**: import segments stay `IsImporting=true` (invisible); the
-  sort-compaction output enters a group (`superseded=import segment`); after
-  stats→index convergence the group publishes as a whole and the superseded
-  import segment retires. `HandleCommitVchannel`'s `recomputeDataView` is
-  replaced by "publish if the vchannel's group is READY".
-- **Edge case**: one import job has multiple tasks/vchannels → one group per
-  task's sorted segments (or one group per job, depending on the txn-size
-  threshold §6.8). Groups of the same job may publish in sequence (subgroup
-  splitting), preserving import 2PC semantics (`WaitForIndex` and progress
-  computation read group state instead of scanning meta).
+- Before primary CommitImport append, both sort-enabled and sort-disabled
+  imports register their final private outputs and wait for readiness under
+  the collection resource key. `awaitCommitFence=true` with `commitTS=0` prevents
+  premature publication while async work runs. Existing import preparation/sort
+  remains private before registration; retired originals and outputs already
+  published by a partial legacy commit are omitted. After staging, `IsInvisible`
+  plus group membership protects the outputs while `IsImporting` is cleared
+  for async work.
+- Each group uses its business vchannel's WAL commit timestamp, including CDC
+  replay; it does not allocate a new row timestamp. The primary validates the
+  readiness/schema fence before appending CommitImport. The callback assigns
+  each group's WAL timestamp, then waits for publication before job completion.
+  With staging opted in it also completes legacy jobs; per-channel SN RPCs are
+  idempotent participants. CDC receivers may prepare their local groups only
+  when the replicated commit arrives and then wait for local artifacts.
+- **A durable WAL commit cannot be aborted by a staging timeout.** Once the
+  fence is assigned, groups retain data and retry publication. Missing outputs
+  during recovery fail startup instead of reclaiming accepted import rows.
+  Before the fence, ordinary C23 failure/timeout and user rollback still apply;
+  failed-job cleanup aborts those private groups.
+- **Large imports** split independent outputs into bounded groups per vchannel,
+  using the first local output ID as group ID. `subgroupOrdinal` and
+  `previousGroupID` persist the order. Every subgroup may become READY before
+  WAL commit, but publication waits for its predecessor to become COMMITTED.
+  Job completion waits for every subgroup. An already-admitted job finishes
+  its remaining subgroups even after opt-out.
 
 ### 6.6 Backfill / BatchUpdateManifest — no group
 
@@ -819,9 +871,16 @@ lower version and the group returns to STAGED and re-reads.
 - copy segment: new segments, data complete; readiness speed depends on whether
   indexes are copied → enters a group (`SOURCE_COPY_SEGMENT`); if the copy
   already carries full index/stats it is ready immediately upon creation.
+  The current worker copies files without normalizing historical row/delete
+  timestamps. Such groups persist `preserveMemberTimestamps=true`: publication
+  changes visibility/DataView while preserving each copied segment's existing
+  commit timestamp. Retimestamping copied rows would suppress historical deletes.
+  Worker-task completion releases its slot; copy-job completion waits for groups.
 - external refresh: enters a group (`SOURCE_EXTERNAL_REFRESH`);
   `allowUnsorted` exempts the sort term (external tables have no PK ordering
-  requirement).
+  requirement). New segment admission and baseline retirement use the group;
+  same-ID manifest patches keep their existing content-update protocol, with
+  recompute after publication. A failed refresh aborts unpublished new outputs.
 - CDC-replicated import: `SOURCE_CDC_REPLICATED`; commit_ts comes from the CDC
   source; the publish txn uses `max(source commit_ts, existing invariant)`.
 
@@ -930,7 +989,7 @@ Replay safety:
 
 ## GC and Staged-Member Reclamation
 
-- **Staged (unpublished) members**: state is Flushed + `IsInvisible`.
+- **Staged (unpublished) nonempty members**: state is Flushed + `IsInvisible`.
   `recycleDroppedSegments` only recycles Dropped, so staged members are **never
   physically GC'd** — safe, but they still consume object storage and meta
   entries; long-tailed groups can leave files resident.
@@ -948,6 +1007,14 @@ Replay safety:
 - **Snapshot export** (`snapshot_manager.go`): export must contain only
   published members — staged (invisible) members must not enter the exported
   set; restore/import likewise. Add the filter in Phase 1.
+
+- **Zero-row result metadata**: a Dropped zero-row member of an ALIVE group
+  remains a durable no-output marker until the group terminates. `DropSegment`
+  defers deleting this record; zero-row files can follow existing cleanup.
+  Publish/recovery skip its manifest, stats and indexes and retire it rather
+  than making it visible. A READY group with only zero-row/no output members
+  completes parent retirement before DataView reconstruction even though there
+  are no visible output members to probe.
 
 ## Temporal-Semantics Interactions
 
@@ -979,6 +1046,104 @@ Replay safety:
 
 ## Implementation Notes
 
+### Producer prerequisites (2026-10-27)
+
+The recovery, reclamation and ownership prerequisites are implemented before
+enabling producers. The first producer slice below is opt-in.
+
+- Startup reconciles groups **before** `dataview.RecoverManager` projects
+  SegmentMeta or starts its worker. An entirely unpublished STAGED/READY group
+  resumes through the inspector after startup. A missing/dropped member fails
+  an entirely unpublished group and reclaims its remaining members. Collections
+  with group records require a successful synchronous DataView rebuild before
+  startup completes; the general recovery manager's best-effort rebuild alone
+  is insufficient for this barrier.
+- A READY group with visible members is an interrupted publish. Recovery
+  completes its member flips and parent retirement before DataView recovery,
+  without re-evaluating readiness. Import/copy/CDC member timestamps already
+  written by the publish are preserved. Visible STAGED members, an incomplete
+  partially published batch, inconsistent timestamps, or visible members of a
+  FAILED/ABORTED group fail startup rather than reclaiming possibly-live data.
+- The inspector retries FAILED/ABORTED member retirement; recovery retries it
+  as well. Only invisible members may be reclaimed, parents are untouched,
+  and a failed group cannot be deleted before its members are Dropped/GC'd.
+- Legacy views/seek and the DataView projection exclude unpublished members,
+  including terminal groups awaiting reclamation. Ordinary segment/manifest
+  writes cannot expose an ALIVE member; only its owning COMMITTED composite
+  write may do so.
+- Sort/storage-version selectors exclude unpublished members and ALIVE
+  superseded parents; the compaction reservation rechecks ALIVE claims under
+  `segMu`. L0 selection excludes unpublished members, while still allowing
+  delta application to visible parents. These prerequisite selector guards use
+  group membership rather than a blanket `IsInvisible` exclusion, preserving
+  existing group-less awaiting-sort behavior. This refines the broader C29
+  selector proposal above without resolving O1 or changing flush semantics.
+
+### Opt-in producer coverage (2026-10-28)
+
+`dataCoord.segmentChange.enabled` defaults to `false` and is refreshable. It
+controls admission of **new** groups only. Group recovery, readiness evaluation,
+publication and reclamation run regardless of its value, so disabling it drains
+existing groups instead of stranding their invisible outputs or releasing their
+parents early.
+
+- Mix compaction registers its output metadata and a STAGED group in the same
+  composite write. The globally allocated plan ID is also the group ID, and
+  `source_job_id` records the plan ID. This durable identity covers zero-output
+  tasks too; retries consult it before the flag or input-health checks.
+- Sorted and unsorted Mix results both enter the protocol. Sort admission has a
+  narrow exception for unsorted STAGED members; all other compactions still
+  exclude them. A sort result replaces its private input inside the same group,
+  preserving initial producer IDs and per-sort identities for replay. Recovery
+  also reclaims historical private sort inputs if registration was interrupted.
+  Each inner Sort task completes and releases its planning slot once its output
+  is registered; the root task continues waiting for group publication. Cleaning
+  a completed inner Sort never aborts the root group.
+- Input metadata stays live and reserved while the group is STAGED/READY.
+  The task waits in `meta_saved`, which releases its worker execution slot.
+  Group publication marks the inputs Dropped/Compacted and publishes the outputs
+  in the DataView together; only then does the task complete. FAILED/ABORTED
+  groups fail the task; explicit task cleanup aborts and reclaims unpublished
+  outputs.
+- Recovery recognizes the plan/group identity even when the task-meta save was
+  lost after output registration. Active tasks resume `meta_saved` rather than
+  reserving their own parents again or dispatching another worker. Terminal task
+  decisions are preserved for cleanup. An empty output already
+  collected after COMMITTED does not invalidate this identity.
+- Flush keeps its synchronous version handshake; both Flush→Mix and Flush→Sort
+  publish their replacement through a group and preserve SN retry bindings.
+- Clustering registers final private results after its TMP/sort preparation.
+  Its persisted group carries partition-stats publication metadata. The stats
+  info, current-version pointer, member visibility, input/TMP retirement and
+  DataView publication share the composite write. The version pointer is a
+  final commit marker on the chunked path; zero-row outputs are omitted from
+  the published stats set. Restart restores the clustering task at indexing.
+- Import/CDC, copy and external refresh use the producer anchors described
+  above. Import registers ordered bounded groups per vchannel; copy uses its
+  task ID and bounds newly planned task size by the group limit; refresh uses
+  its job ID. Retries find existing
+  groups before consulting the flag, including after member GC.
+  A copy task with an existing group resumes publication without re-running
+  the file-copy worker, including when its task record is still in progress.
+- Schema bump's full-rewrite replacement uses a group and waits in meta_saved;
+  its in-place manifest/materialization form has no membership change and keeps
+  its existing manifest transaction. Force-merge and storage-version rewrites
+  routed through Mix inherit Mix staging. L0, backfill and BatchUpdateManifest
+  remain content-only operations with no group.
+
+Tests cover opt-in versus legacy behavior, the private sort chain, group/task
+recovery after disabling the flag, nonempty/empty/no-output results, transient
+catalog failure, missing stats, cancellation, L0 retention, snapshot protection and the flush
+version handshake. These are coordinator integration/unit tests, not a running
+cluster e2e validation of query results.
+
+Periodic terminal-record deletion, codec migration and removing the legacy
+lineage fallback remain follow-ups. The failure matrix follows C23 fail-fast
+for nonempty staged members before a durable import fence; committed imports
+instead retain data and retry, with corrupt recovery failing closed.
+Publish rechecks all five readiness terms; finalized zero-row outputs are
+retired as no output. See C32 for the revised empty-result semantics.
+
 ### New modules
 
 ```
@@ -1000,9 +1165,9 @@ internal/datacoord/
   PR #52537 directly: `addSegments` Manifest-version monotonicity validation,
   `canonicalizeDataView`, `persistMemoryLocked`, and the idempotent
   commit/abort callbacks.
-- **`meta.loadableProjection` unchanged**: staged segments (`IsInvisible=true` /
-  `IsImporting=true`) are natively filtered, so even if `Recompute` fires during
-  Phase 1/2 from other offline tasks it cannot project unpublished members early.
+- **`meta.loadableProjection`** excludes unpublished group members, including
+  failed/aborted groups awaiting reclamation. Raw invisible flush inputs with a
+  durable seal binding remain projected until their replacement publishes.
 - **Replace wiring points**: the `meta.recomputeDataView(...)` calls scattered
   across compaction / copy / import commit / BatchUpdateManifest in PR #52537
   are replaced path-by-path with "publishGroup once the staged group is ready";
@@ -1043,14 +1208,14 @@ subgroups to bound single-txn size and the "entire batch invisible" wait.
 | File | Change |
 |---|---|
 | `internal/dataview/manager.go` | add `PublishChange` (§5.4); reuse `lockStateForMutation` |
-| `internal/datacoord/meta.go` | `UpdateSegmentsInfoAndDataView` supports `SaveSegmentChangeGroup` action; `loadableProjection` unchanged |
+| `internal/datacoord/meta.go` | composite group updates and `loadableProjection` group exclusion; retain the raw invisible flush while its sorted replacement is staged |
 | `internal/datacoord/segment_change_*.go` | new files (§Implementation Notes) |
 | `internal/datacoord/handler.go` | `getEarliestSegmentDMLPos` / `GetQueryVChanPositions` / `GetCurrentSegmentsView` exclude ALIVE-group members via `aliveStagedMembers` (R10; NOT blanket `IsInvisible` — see §6.1 awaiting-sort, gated on O1); view read path deletes `retrieveSegment` (Phase 2) |
 | `internal/datacoord/compaction_task_mix.go` / `sort` / `clustering` / `bump_schema_version` | outputs enter groups, retirement deferred to publish, `recomputeDataView` replaced by publish trigger |
-| `internal/datacoord/services.go` | `SaveBinlogPaths` sort-enabled branch: "awaiting sort, not published" (§6.1, subject to O1); `HandleCommitVchannel` triggers publish |
+| `internal/datacoord/services.go` | `SaveBinlogPaths` preserves synchronous seal binding; `HandleCommitVchannel` joins staged import publication |
 | `internal/datacoord/copy_segment_task.go` | completion enters a group |
-| `internal/datacoord/compaction_trigger.go` | `canTriggerSortCompaction` excludes members of ALIVE groups via the staged-membership index, NOT by `IsInvisible` alone (C33): ordinary streaming flush sets `IsInvisible=true` as the awaiting-sort marker (§6.1) and sort compaction is the ONLY path that sorts those segments into a group, so a blanket exclusion would leave every sort-enabled flush invisible forever |
-| `internal/datacoord/compaction_task_l0.go` | `selectFlushedSegment` gains a `!IsInvisible` exclusion (C29) |
+| `internal/datacoord/compaction_policy_single.go` | allow Sort only for unsorted STAGED group members and ordinary group-less awaiting-sort flush outputs; reject other group members |
+| `internal/datacoord/compaction_task_l0.go` / `compaction_inspector.go` | exclude unpublished members as targets; defer new and queued L0 on channels with unpublished groups or active copy jobs |
 | `internal/datacoord/compaction_policy_storage_version.go` | segment selector gains a `!IsInvisible` exclusion (C29) |
 | `internal/datacoord/garbage_collector.go` | unchanged (§8 protections already hold) |
 | `internal/datacoord/snapshot_manager.go` | export/import filters staged members |
@@ -1156,12 +1321,9 @@ DataView entity (PR #52537) as prerequisite/parallel:
 
 ## Open Questions (require review adjudication)
 
-- **O1 (blocking)**: §6.1 — sort-enabled flush's `streaming_version` semantics
-  and the QueryView/SN growing→sealed handoff depend on
-  `transform_start_after_timetick` (unimplemented in #52537). If changing
-  `streaming_version` is rejected, sort-enabled flush segments must remain
-  "published but invisible" (keeping #52537's current contradiction) and staging
-  covers only compaction/import outputs. Pick one.
+- **O1 (compatibility branch selected)**: §6.1 preserves raw flush publication
+  and the synchronous SN seal binding; the sorted replacement is staged.
+  Deferring first publication still requires the separate QueryView/SN barrier.
 - **O2**: during Phase-1 dual-track, "staged groups retire late" and "unstaged
   compaction retires immediately" coexist in one collection; must the
   `retrieveSegment` compatibility path keep its present-parents normalization

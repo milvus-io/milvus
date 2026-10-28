@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
@@ -486,10 +487,19 @@ func (c *Callbacks) CommitImportV2AckCallback(ctx context.Context, result messag
 		return merr.WrapErrImportSysFailedMsg("job %d is in state %s, waiting for Uncommitted", jobID, job.GetState())
 	}
 
-	// Legacy callbacks only enter Committing. The message consumer still owns
-	// per-channel visibility and the checker observes the committed markers.
-	if !result.Message.Header().GetCommitByCoordinator() {
+	// Without staging, legacy callbacks only enter Committing and consumers
+	// own channel visibility. Opted-in jobs finish here so the collection
+	// resource key remains held through group publication; old SN RPCs safely
+	// join the same groups.
+	stagedCommit := Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool()
+	if c.Meta != nil && !stagedCommit {
+		stagedCommit = len(c.Meta.ProducerChangeGroups(model.SegmentChangeSourceImportJob, jobID, ""))+len(c.Meta.ProducerChangeGroups(model.SegmentChangeSourceCDCReplicated, jobID, "")) > 0
+	}
+	if !result.Message.Header().GetCommitByCoordinator() && !stagedCommit {
 		return nil
+	}
+	if stagedCommit && c.StageImportChange == nil {
+		return merr.WrapErrServiceUnavailableMsg("import segment change publisher is unavailable")
 	}
 
 	// Each business vchannel has its own WAL commit fence. Use that channel's
@@ -502,6 +512,18 @@ func (c *Callbacks) CommitImportV2AckCallback(ctx context.Context, result messag
 			continue
 		}
 		segIDs := bulkimport.GetImportSegmentIDsByVchannel(ctx, c.ImportMeta, c.Meta, jobID, vchannel)
+		source := model.SegmentChangeSourceImportJob
+		if result.Message.ReplicateHeader() != nil && result.Message.Header().GetCommitByCoordinator() {
+			source = model.SegmentChangeSourceCDCReplicated
+		}
+		if c.StageImportChange != nil {
+			if staged, err := c.StageImportChange(ctx, job, vchannel, segIDs, appendResult.TimeTick, source); staged {
+				if err != nil {
+					return err
+				}
+				continue
+			}
+		}
 		if len(segIDs) == 0 {
 			continue
 		}
