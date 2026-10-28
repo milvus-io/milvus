@@ -766,6 +766,15 @@ SegmentLoadInfo::ResolveLegacyBinlogChildFields(const SegmentLoadInfo* known) {
 
 std::set<FieldId>
 SegmentLoadInfo::CollectDataFields() const {
+    auto fields = CollectRowColumnFields();
+    for (const auto& field_id : field_index_has_raw_data_) {
+        fields.insert(field_id);
+    }
+    return fields;
+}
+
+std::set<FieldId>
+SegmentLoadInfo::CollectRowColumnFields() const {
     std::set<FieldId> fields;
 
     for (int i = 0; i < GetBinlogPathCount(); i++) {
@@ -778,10 +787,6 @@ SegmentLoadInfo::CollectDataFields() const {
         for (auto child_id : child_fields) {
             fields.emplace(child_id);
         }
-    }
-
-    for (const auto& field_id : field_index_has_raw_data_) {
-        fields.insert(field_id);
     }
 
     if (HasManifestPath()) {

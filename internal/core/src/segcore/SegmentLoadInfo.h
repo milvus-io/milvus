@@ -602,12 +602,21 @@ class SegmentLoadInfo {
         return info_.use_take_for_output();
     }
 
-    // Field IDs the segment physically stores (binlogs, column groups of the
-    // manifest, and indexes with raw data), including fields that are no
-    // longer in the schema.
+    // Field IDs of the segment's row columns (binlogs and column groups of
+    // the manifest), including fields that are no longer in the schema.
+    // Unlike CollectDataFields it leaves out fields that only an index with
+    // raw data provides: such an index can be built from a field's default
+    // for a segment that has no row column of it, so it does not show when
+    // the segment's rows were written.
     [[nodiscard]] std::set<FieldId>
-    GetStoredFieldIds() const {
-        return CollectDataFields();
+    GetRowColumnFieldIds() const {
+        return CollectRowColumnFields();
+    }
+
+    // Whether an index of the field provides its raw data.
+    [[nodiscard]] bool
+    FieldIndexHasRawData(FieldId field_id) const {
+        return field_index_has_raw_data_.count(field_id) > 0;
     }
 
     [[nodiscard]] bool
@@ -1234,6 +1243,10 @@ class SegmentLoadInfo {
 
     [[nodiscard]] std::set<FieldId>
     CollectDataFields() const;
+
+    // Binlog and manifest column-group fields, without index raw data.
+    [[nodiscard]] std::set<FieldId>
+    CollectRowColumnFields() const;
 
     ProtoType info_;
 

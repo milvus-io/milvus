@@ -359,6 +359,10 @@ CopyTakenPrimitive(const ChunkedColumnInterface::OwnedTakeData& data,
 //   - otherwise the segment predates the struct, its rows are null struct
 //     rows, and all-zero offsets (or a backfilled sub-field, which holds the
 //     same) are correct.
+// Only the segment's row columns (binlogs, manifest column groups) count. An
+// index with raw data does not: it can be built after the struct appeared
+// from a later field's default, for a segment with no row column of that
+// field, so its field ID says nothing about when the rows were written.
 // The drop rule (schemautil.CheckStructKeepsOriginalSubField in Go) keeps an
 // original sub-field in every struct, so this only fires for data whose
 // sub-fields were dropped without that rule. Schemas that do not carry the
@@ -372,7 +376,7 @@ CheckStructProviderNotDropped(const Schema& schema,
     if (!struct_id.has_value()) {
         return;
     }
-    const auto stored = load_info.GetStoredFieldIds();
+    const auto stored = load_info.GetRowColumnFieldIds();
     for (const auto& field_id : stored) {
         if (schema.has_field(field_id) &&
             GetStructNameForArrayField(schema[field_id]) == struct_name) {
