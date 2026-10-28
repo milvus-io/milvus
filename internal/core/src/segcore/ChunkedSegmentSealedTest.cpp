@@ -1150,11 +1150,13 @@ namespace {
 // A collection schema with an INT64 primary key (field 100) and, when
 // struct_children is not empty, a nullable struct "items" (field 101) with
 // nullable INT32 Array sub-fields; element_nullable marks sub-fields added
-// after the struct was created.
+// after the struct was created. with_late_field adds a nullable INT64 field
+// "late" (field 104), added after the struct.
 SchemaPtr
 ParseStructProviderSchema(
     int32_t version,
-    const std::vector<std::pair<int64_t, bool>>& struct_children) {
+    const std::vector<std::pair<int64_t, bool>>& struct_children,
+    bool with_late_field = false) {
     proto::schema::CollectionSchema proto;
     proto.set_name("struct_provider");
     proto.set_version(version);
@@ -1181,6 +1183,13 @@ ParseStructProviderSchema(
             capacity->set_value("16");
         }
     }
+    if (with_late_field) {
+        auto* late = proto.add_fields();
+        late->set_fieldid(104);
+        late->set_name("late");
+        late->set_data_type(proto::schema::DataType::Int64);
+        late->set_nullable(true);
+    }
     // Schema::ParseFrom ignores proto.version(); Reopen compares schema
     // versions, so set it the way segment_c.cpp does.
     auto schema = Schema::ParseFrom(proto);
@@ -1188,9 +1197,12 @@ ParseStructProviderSchema(
     return schema;
 }
 
+// Binlogs for stored_fields, plus an STL_SORT index (which has raw data) for
+// each of indexed_fields, built without a binlog of that field.
 proto::segcore::SegmentLoadInfo
 StructProviderLoadInfo(const std::vector<int64_t>& stored_fields,
-                       int64_t rows) {
+                       int64_t rows,
+                       const std::vector<int64_t>& indexed_fields = {}) {
     proto::segcore::SegmentLoadInfo info;
     info.set_segmentid(kSegmentID);
     info.set_num_of_rows(rows);
@@ -1200,6 +1212,18 @@ StructProviderLoadInfo(const std::vector<int64_t>& stored_fields,
         auto* log = binlog->add_binlogs();
         log->set_entries_num(rows);
         log->set_log_path(fmt::format("struct_provider/{}/0", field_id));
+    }
+    for (auto field_id : indexed_fields) {
+        auto* index = info.add_index_infos();
+        index->set_fieldid(field_id);
+        index->set_indexid(field_id * 10);
+        index->set_buildid(field_id * 10);
+        index->set_num_rows(rows);
+        index->add_index_file_paths(
+            fmt::format("struct_provider/index/{}", field_id));
+        auto* index_type = index->add_index_params();
+        index_type->set_key("index_type");
+        index_type->set_value("STL_SORT");
     }
     return info;
 }
@@ -1230,6 +1254,27 @@ TEST(test_chunk_segment,
     EXPECT_NO_THROW(check({100, 103}));  // provider stored, not loaded yet
 }
 
+// An index built after the struct appeared, for a field the segment has no
+// binlog of (built from the field's default), does not show when the
+// segment's rows were written: a segment whose row columns all predate the
+// struct still gets null struct rows.
+TEST(test_chunk_segment, StructProviderCheckIgnoresIndexOnlyFields) {
+    auto schema = ParseStructProviderSchema(3, {{103, true}}, true);
+    auto check = [&](const std::vector<int64_t>& stored,
+                     const std::vector<int64_t>& indexed) {
+        segcore::SegmentLoadInfo info(
+            StructProviderLoadInfo(stored, 3, indexed), schema);
+        // Fixture guard: the index must count as raw data for the load, or
+        // this test would not cover the index-only field.
+        ASSERT_TRUE(info.FieldIndexHasRawData(FieldId(104)));
+        segcore::ChunkedSegmentSealedImpl::TestCheckStructProviderNotDropped(
+            *schema, info, "items");
+    };
+    EXPECT_NO_THROW(check({100}, {104}));
+    // A row column of a dropped sub-field still fails, index or not.
+    EXPECT_THROW(check({100, 102}, {104}), SegcoreError);
+}
+
 // Sealed load and Reopen: a struct added after the segment was written gives
 // its old rows null struct rows.
 TEST(test_chunk_segment, ReopenWholeStructAddedLaterStaysNull) {
@@ -1240,6 +1285,27 @@ TEST(test_chunk_segment, ReopenWholeStructAddedLaterStaysNull) {
     segment->SetLoadInfo(StructProviderLoadInfo({100}, rows));
 
     segment->Reopen(ParseStructProviderSchema(2, {{103, true}}));
+    const int64_t row_ids[] = {0, 1, 2};
+    milvus::OpContext op_ctx;
+    auto result = segment->bulk_subscript(&op_ctx, FieldId(103), row_ids, rows);
+    const auto& validity = GetFieldDataRowValidData(*result);
+    ASSERT_EQ(validity.size(), rows);
+    for (int i = 0; i < rows; ++i) {
+        EXPECT_FALSE(validity[i]);
+    }
+}
+
+// The same on Reopen when the segment's only field newer than the struct
+// comes from an index with raw data built from the field's default: the
+// segment has no row column of it, so its rows still predate the struct.
+TEST(test_chunk_segment, ReopenWholeStructAddedLaterIgnoresIndexOnlyField) {
+    auto schema = ParseStructProviderSchema(1, {}, true);
+    constexpr int64_t rows = 3;
+    auto dataset = segcore::DataGen(schema, rows, 42, 0, 1, 2);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
+    segment->SetLoadInfo(StructProviderLoadInfo({100}, rows, {104}));
+
+    segment->Reopen(ParseStructProviderSchema(2, {{103, true}}, true));
     const int64_t row_ids[] = {0, 1, 2};
     milvus::OpContext op_ctx;
     auto result = segment->bulk_subscript(&op_ctx, FieldId(103), row_ids, rows);
