@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	datacoordkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
@@ -1526,6 +1527,18 @@ func TestRollbackImportCallback_AfterCommit_NoOp(t *testing.T) {
 	assert.Equal(t, internalpb.ImportJobState_Committing, updatedJob.GetState())
 }
 
+func TestRollbackImportCallback_AfterBroadcastStarted_NoOp(t *testing.T) {
+	ctx := t.Context()
+	imports, _ := newTestImportMeta(t)
+	require.NoError(t, imports.AddJob(ctx, &importJob{
+		ImportJob: &datapb.ImportJob{JobID: 5, State: internalpb.ImportJobState_Uncommitted, CommitBroadcastStarted: true},
+		tr:        timerecord.NewTimeRecorder("test"),
+	}))
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: imports}}
+	require.NoError(t, callbacks.rollbackImportV2AckCallback(ctx, buildRollbackImportBroadcastResult(5)))
+	require.Equal(t, internalpb.ImportJobState_Uncommitted, imports.GetJob(ctx, 5).GetState())
+}
+
 // TestImportAckCallbacks_CommitVsAbort_Race fires commit and rollback ack
 // callbacks concurrently against the same Uncommitted job. In production these
 // callbacks are serialized by the broadcaster's exclusive collection-level
@@ -1656,6 +1669,41 @@ func TestBroadcastCommitImportMessagePreservesJobProtocol(t *testing.T) {
 		msg := message.MustAsSpecializedBroadcastMessage[*message.CommitImportMessageHeader, *message.CommitImportMessageBody](capture.captured)
 		assert.Equal(t, coordinator, msg.Header().GetCommitByCoordinator())
 	}
+}
+
+func TestBroadcastCommitImportMarksStartedAfterPreparation(t *testing.T) {
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "true")
+	ctx := t.Context()
+	catalog := &datacoordkv.Catalog{MetaKv: NewMetaMemoryKV()}
+	imports, err := NewImportMeta(ctx, catalog, nil, nil)
+	require.NoError(t, err)
+	job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID: 7, CollectionID: 100, Vchannels: []string{"v1"}, State: internalpb.ImportJobState_Uncommitted,
+	}}
+	require.NoError(t, imports.AddJob(ctx, job))
+	capture := &captureBroadcastAPI{}
+	start := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(capture, nil).Build()
+	defer start.UnPatch()
+	ready := false
+	prepare := mockey.Mock((*Server).prepareImportPublication).To(func(_ *Server, _ context.Context, _ ImportJob) error {
+		if !ready {
+			return merr.WrapErrServiceUnavailableMsg("group is not ready")
+		}
+		return nil
+	}).Build()
+	defer prepare.UnPatch()
+	server := &Server{importMeta: imports}
+	require.ErrorIs(t, server.broadcastCommitImportMessage(ctx, job), merr.ErrServiceUnavailable)
+	require.False(t, imports.GetJob(ctx, 7).GetCommitBroadcastStarted())
+	require.Nil(t, capture.captured)
+
+	ready = true
+	require.NoError(t, server.broadcastCommitImportMessage(ctx, job))
+	require.NotNil(t, capture.captured)
+	require.True(t, imports.GetJob(ctx, 7).GetCommitBroadcastStarted())
+	restored, err := NewImportMeta(ctx, catalog, nil, nil)
+	require.NoError(t, err)
+	require.True(t, restored.GetJob(ctx, 7).GetCommitBroadcastStarted())
 }
 
 // TestBroadcastRollbackImportMessage_TargetsDataVchannels asserts that the

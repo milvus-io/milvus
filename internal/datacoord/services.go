@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -3348,6 +3349,26 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 	if err := s.prepareImportPublication(ctx, job); err != nil {
 		return err
 	}
+	if Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool() ||
+		(s.meta != nil && len(s.meta.producerChangeGroups(model.SegmentChangeSourceImportJob, job.GetJobID(), "")) > 0) {
+		// Preparation may have registered groups long before they became READY.
+		// Persist the point of no return immediately before starting the WAL
+		// broadcast. Timeout and other failure updates share importMeta's lock
+		// with this action and cannot reclaim a possibly durable commit.
+		if err := s.importMeta.UpdateJob(ctx, job.GetJobID(), UpdateJobCommitBroadcastStarted); err != nil {
+			return err
+		}
+		current := s.importMeta.GetJob(ctx, job.GetJobID())
+		if current == nil {
+			return merr.WrapErrServiceUnavailableMsg("import job %d disappeared before commit broadcast", job.GetJobID())
+		}
+		if current.GetState() == internalpb.ImportJobState_Committing || current.GetState() == internalpb.ImportJobState_Completed {
+			return nil
+		}
+		if current.GetState() != internalpb.ImportJobState_Uncommitted || !current.GetCommitBroadcastStarted() {
+			return merr.WrapErrServiceUnavailableMsg("import job %d became %s before commit broadcast", job.GetJobID(), current.GetState())
+		}
+	}
 
 	msg := message.NewCommitImportMessageBuilderV2().
 		WithHeader(&message.CommitImportMessageHeader{
@@ -3535,6 +3556,10 @@ func (s *Server) AbortImport(ctx context.Context, req *datapb.AbortImportRequest
 			// NOT fire for it and each abort re-broadcasts (see the note above).
 			if state == internalpb.ImportJobState_Failed && job.GetReason() == importJobReasonAbortedByUser {
 				return merr.Success()
+			}
+			if job.GetCommitBroadcastStarted() {
+				return merr.Status(merr.WrapErrImportFailed(
+					fmt.Sprintf("job %d commit broadcast may have started, abort not allowed", req.GetJobId())))
 			}
 			// Committed states are truly terminal and cannot be rolled back.
 			if UnfailableJobStates.Contain(state) {

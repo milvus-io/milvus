@@ -187,10 +187,11 @@ func TestSegmentChangeMixTaskRecoveryAndFlagOff(t *testing.T) {
 		t.Run(shape, func(t *testing.T) {
 			setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "true")
 			m, task, result := seedMixProducer(t)
-			if shape == "empty" {
+			switch shape {
+			case "empty":
 				result.Segments[0].NumOfRows = 0
 				result.Segments[0].InsertLogs = nil
-			} else if shape == "no_outputs" {
+			case "no_outputs":
 				result.Segments = nil
 			}
 			_, err := m.CompleteCompactionMutation(t.Context(), task, result)

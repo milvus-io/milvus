@@ -3510,7 +3510,7 @@ func (m *meta) completeSortCompactionMutation(
 	// Import and clustering prepare their private sort chains before their
 	// enclosing producer registers the final publication group.
 	if Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool() && !oldSegment.GetIsImporting() &&
-		!(oldSegment.GetCreatedByCompaction() && oldSegment.GetIsInvisible()) {
+		(!oldSegment.GetCreatedByCompaction() || !oldSegment.GetIsInvisible()) {
 		if err := m.stageCompactionOutputsLocked(m.ctx, t, []*SegmentInfo{segment}); err != nil {
 			return nil, err
 		}

@@ -575,10 +575,11 @@ func (c *DDLCallbacks) rollbackImportV2AckCallback(ctx context.Context, result m
 		return nil
 	}
 	state := job.GetState()
-	if state == internalpb.ImportJobState_Committing ||
+	if job.GetCommitBroadcastStarted() ||
+		state == internalpb.ImportJobState_Committing ||
 		state == internalpb.ImportJobState_Completed ||
 		state == internalpb.ImportJobState_Failed {
-		mlog.Info(ctx, "RollbackImport: job already in terminal/committed state, no-op",
+		mlog.Info(ctx, "RollbackImport: commit may have started or job is terminal, no-op",
 			mlog.FieldJobID(jobID), mlog.String("state", state.String()))
 		return nil
 	}
