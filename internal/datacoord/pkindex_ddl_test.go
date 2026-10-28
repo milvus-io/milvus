@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/blang/semver/v4"
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metacache"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
@@ -43,12 +45,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -189,7 +193,9 @@ func newPKIndexTestServer(t *testing.T, schema *schemapb.CollectionSchema) (*Ser
 		Schema:              schema,
 		VirtualChannelNames: []string{pkTestVChannel0, pkTestVChannel1},
 	}, nil).Maybe()
+	mixCoord.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{Status: merr.Success()}, nil).Maybe()
 	s.broker = broker.NewCoordinatorBroker(mixCoord)
+	s.mixCoord = mixCoord
 	return s, rec
 }
 
@@ -410,4 +416,158 @@ func TestCanCreateIndexWhileAFailedPKIndexIsDropped(t *testing.T) {
 		IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: common.PrimaryKeyIndexType}}}
 	_, err = m.CanCreateIndex(sameAsFinished, false)
 	assert.ErrorIs(t, err, errIndexOperationIgnored)
+}
+
+// failPKIndexCreate creates a primary key index whose CreateIndex fails on
+// one vchannel, and returns its index ID.
+func failPKIndexCreate(t *testing.T, s *Server, rec *pkTestBroadcasts) int64 {
+	rec.outcomeOf = func(vchannel string) *anypb.Any {
+		return pkAck(t, pkindexpb.CreateIndexAckResult_NOT_EMPTY)
+	}
+	status, err := s.CreateIndex(context.Background(), pkCreateRequest(common.PrimaryKeyIndexType))
+	require.NoError(t, err)
+	require.ErrorIs(t, merr.Error(status), merr.ErrParameterInvalid)
+	indexes := s.meta.indexMeta.GetIndexesForCollection(pkTestCollectionID, "")
+	require.Len(t, indexes, 1)
+	return indexes[0].IndexID
+}
+
+func mockReplicationRole(role replicateutil.Role) *mockey.Mocker {
+	return mockey.Mock((*Server).getReplicationRole).Return(role, role != replicateutil.RolePrimary, nil).Build()
+}
+
+func TestDropFailedPKIndex(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("primary drops it on its vchannels", func(t *testing.T) {
+		s, rec := newPKIndexTestServer(t, pkTestSchema(false))
+		indexID := failPKIndexCreate(t, s, rec)
+		role := mockReplicationRole(replicateutil.RolePrimary)
+		defer role.UnPatch()
+
+		inspector := &indexInspector{meta: s.meta}
+		inspector.SetPKIndexCompensation(nil, s.dropFailedPKIndex)
+		inspector.compensateFailedPKIndexes(ctx, typeutil.NewUniqueSet())
+
+		msgs := rec.list()
+		require.Len(t, msgs, 2)
+		drop := message.MustAsBroadcastDropIndexMessageV2(msgs[1])
+		assert.Equal(t, common.PrimaryKeyIndexType, drop.Header().GetIndexType())
+		assert.Equal(t, []int64{indexID}, drop.Header().GetIndexIds())
+		assert.ElementsMatch(t, []string{pkTestVChannel0, pkTestVChannel1}, msgs[1].BroadcastHeader().VChannels)
+		assert.Empty(t, s.meta.indexMeta.GetIndexesForCollection(pkTestCollectionID, ""), "the callback marked it deleted")
+
+		// nothing is left to drop
+		inspector.compensateFailedPKIndexes(ctx, typeutil.NewUniqueSet())
+		assert.Len(t, rec.list(), 2)
+		// and the create goes on now
+		rec.outcomeOf = func(string) *anypb.Any { return pkAck(t, pkindexpb.CreateIndexAckResult_ENABLED) }
+		status, err := s.CreateIndex(ctx, pkCreateRequest(common.PrimaryKeyIndexType))
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(status))
+	})
+
+	t.Run("secondary waits for the primary", func(t *testing.T) {
+		s, rec := newPKIndexTestServer(t, pkTestSchema(false))
+		failPKIndexCreate(t, s, rec)
+		role := mockReplicationRole(replicateutil.RoleSecondary)
+		defer role.UnPatch()
+
+		calls := 0
+		inspector := &indexInspector{meta: s.meta}
+		inspector.SetPKIndexCompensation(nil, func(ctx context.Context, index *model.Index) error {
+			calls++
+			return s.dropFailedPKIndex(ctx, index)
+		})
+		skipped := typeutil.NewUniqueSet()
+		inspector.compensateFailedPKIndexes(ctx, skipped)
+		inspector.compensateFailedPKIndexes(ctx, skipped)
+		assert.Equal(t, 2, calls)
+		assert.Equal(t, 1, skipped.Len())
+		assert.Len(t, rec.list(), 1, "no DropIndex on a secondary")
+		assert.ErrorIs(t, s.dropFailedPKIndex(ctx, s.meta.indexMeta.GetIndexesForCollection(pkTestCollectionID, "")[0]), errNotPrimaryCluster)
+	})
+
+	t.Run("a finished index is kept", func(t *testing.T) {
+		s, rec := newPKIndexTestServer(t, pkTestSchema(false))
+		rec.outcomeOf = func(string) *anypb.Any { return pkAck(t, pkindexpb.CreateIndexAckResult_ENABLED) }
+		status, err := s.CreateIndex(ctx, pkCreateRequest(common.PrimaryKeyIndexType))
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(status))
+		role := mockReplicationRole(replicateutil.RolePrimary)
+		defer role.UnPatch()
+
+		inspector := &indexInspector{meta: s.meta}
+		inspector.SetPKIndexCompensation(nil, func(context.Context, *model.Index) error {
+			t.Fatal("a finished index is not dropped")
+			return nil
+		})
+		inspector.compensateFailedPKIndexes(ctx, typeutil.NewUniqueSet())
+		assert.NoError(t, s.dropFailedPKIndex(ctx, s.meta.indexMeta.GetIndexesForCollection(pkTestCollectionID, "")[0]))
+		assert.Len(t, rec.list(), 1)
+	})
+}
+
+func TestUserDropIndexOfThePKIndex(t *testing.T) {
+	ctx := context.Background()
+	s, rec := newPKIndexTestServer(t, pkTestSchema(false))
+	rec.outcomeOf = func(string) *anypb.Any { return pkAck(t, pkindexpb.CreateIndexAckResult_ENABLED) }
+	status, err := s.CreateIndex(ctx, pkCreateRequest(common.PrimaryKeyIndexType))
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(status))
+	sort := pkCreateRequest("STL_SORT")
+	sort.FieldID, sort.IndexName = 101, "sort"
+	sort.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "IVF_FLAT"}, {Key: common.MetricTypeKey, Value: "L2"}, {Key: "nlist", Value: "8"}}
+	sort.TypeParams = []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}
+	status, err = s.CreateIndex(ctx, sort)
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(status))
+	created := len(rec.list())
+
+	t.Run("an index of another type goes to the control channel only", func(t *testing.T) {
+		status, err := s.DropIndex(ctx, &indexpb.DropIndexRequest{CollectionID: pkTestCollectionID, IndexName: "sort"})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(status))
+		msgs := rec.list()
+		require.Len(t, msgs, created+1)
+		assert.Empty(t, msgs[created].BroadcastHeader().VChannels)
+		assert.Empty(t, message.MustAsBroadcastDropIndexMessageV2(msgs[created]).Header().GetIndexType())
+	})
+
+	t.Run("the primary key index goes to every vchannel", func(t *testing.T) {
+		status, err := s.DropIndex(ctx, &indexpb.DropIndexRequest{CollectionID: pkTestCollectionID, IndexName: "pk_idx"})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(status))
+		msgs := rec.list()
+		require.Len(t, msgs, created+2)
+		assert.ElementsMatch(t, []string{pkTestVChannel0, pkTestVChannel1}, msgs[created+1].BroadcastHeader().VChannels)
+		assert.Equal(t, common.PrimaryKeyIndexType, message.MustAsBroadcastDropIndexMessageV2(msgs[created+1]).Header().GetIndexType())
+		assert.Empty(t, s.meta.indexMeta.GetIndexesForCollection(pkTestCollectionID, ""))
+	})
+}
+
+func TestUserDropAllWithThePKIndex(t *testing.T) {
+	ctx := context.Background()
+	s, rec := newPKIndexTestServer(t, pkTestSchema(false))
+	rec.outcomeOf = func(string) *anypb.Any { return pkAck(t, pkindexpb.CreateIndexAckResult_ENABLED) }
+	status, err := s.CreateIndex(ctx, pkCreateRequest(common.PrimaryKeyIndexType))
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(status))
+	vec := pkCreateRequest("IVF_FLAT")
+	vec.FieldID, vec.IndexName = 101, "vec"
+	vec.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "IVF_FLAT"}, {Key: common.MetricTypeKey, Value: "L2"}, {Key: "nlist", Value: "8"}}
+	vec.TypeParams = []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}
+	status, err = s.CreateIndex(ctx, vec)
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(status))
+
+	status, err = s.DropIndex(ctx, &indexpb.DropIndexRequest{CollectionID: pkTestCollectionID, DropAll: true})
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(status))
+	msgs := rec.list()
+	last := msgs[len(msgs)-1]
+	header := message.MustAsBroadcastDropIndexMessageV2(last).Header()
+	assert.Equal(t, common.PrimaryKeyIndexType, header.GetIndexType())
+	assert.Len(t, header.GetIndexIds(), 2)
+	assert.ElementsMatch(t, []string{pkTestVChannel0, pkTestVChannel1}, last.BroadcastHeader().VChannels)
 }

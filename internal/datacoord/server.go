@@ -791,6 +791,7 @@ func (s *Server) initAnalyzeInspector() {
 func (s *Server) initIndexInspector(storageCli storage.ChunkManager) {
 	if s.indexInspector == nil {
 		s.indexInspector = newIndexInspector(s.ctx, s.notifyIndexChan, s.meta, s.globalScheduler, s.allocator, s.handler, storageCli, s.indexEngineVersionManager)
+		s.indexInspector.SetPKIndexCompensation(s.pkIndexCompensateCh, s.dropFailedPKIndex)
 	}
 }
 

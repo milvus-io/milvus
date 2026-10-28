@@ -1357,18 +1357,17 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 		return merr.Status(err), nil
 	}
 	indexIDs := make([]UniqueID, 0)
+	hasPKIndex := false
 	for _, index := range indexes {
 		indexIDs = append(indexIDs, index.IndexID)
+		hasPKIndex = hasPKIndex || isPKIndex(index)
 	}
 
-	msg := message.NewDropIndexMessageBuilderV2().
-		WithHeader(&message.DropIndexMessageHeader{
-			CollectionId: req.GetCollectionID(),
-			IndexIds:     indexIDs,
-		}).
-		WithBody(&message.DropIndexMessageBody{}).
-		WithControlChannelBroadcast().
-		MustBuildBroadcast()
+	msg, err := s.buildDropIndexMessage(ctx, req.GetCollectionID(), indexIDs, hasPKIndex)
+	if err != nil {
+		mlog.Warn(ctx, "failed to build drop index message", mlog.Err(err))
+		return merr.Status(err), nil
+	}
 
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		mlog.Warn(context.TODO(), "failed to broadcast drop index message", mlog.Err(err))

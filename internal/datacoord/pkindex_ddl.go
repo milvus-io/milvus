@@ -22,6 +22,7 @@ import (
 	"slices"
 
 	"github.com/blang/semver/v4"
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -36,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -198,5 +200,75 @@ func (s *Server) pkIndexCreateResult(collectionID, indexID int64) error {
 			return merr.WrapErrParameterInvalidMsg("%s", index.FailReason)
 		}
 	}
+	return nil
+}
+
+// buildDropIndexMessage builds the DropIndex of indexIDs of a collection.
+// When indexIDs hold the primary key index, the header carries its type and
+// the message goes to every vchannel, so that each streaming node closes
+// its Index at the position of the drop. Otherwise it goes to the control
+// channel only.
+func (s *Server) buildDropIndexMessage(ctx context.Context, collectionID int64, indexIDs []int64, hasPKIndex bool) (message.BroadcastMutableMessage, error) {
+	header := &message.DropIndexMessageHeader{CollectionId: collectionID, IndexIds: indexIDs}
+	builder := message.NewDropIndexMessageBuilderV2().WithBody(&message.DropIndexMessageBody{})
+	if !hasPKIndex {
+		return builder.WithHeader(header).WithControlChannelBroadcast().MustBuildBroadcast(), nil
+	}
+	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+	if err := merr.CheckRPCCall(coll, err); err != nil {
+		return nil, err
+	}
+	header.IndexType = common.PrimaryKeyIndexType
+	return builder.WithHeader(header).WithBroadcast(coll.GetVirtualChannelNames()).MustBuildBroadcast(), nil
+}
+
+// errNotPrimaryCluster reports that the cluster is a secondary of a
+// replication, which does not compensate a failed primary key index: the
+// DropIndex of the primary reaches it through the replication.
+var errNotPrimaryCluster = errors.New("the cluster is not the primary of the replication")
+
+// dropFailedPKIndex broadcasts the DropIndex of a primary key index whose
+// CreateIndex failed. It re-reads the index under the collection lock and
+// does nothing when the index is deleted or not Failed, so a repeated call is
+// safe. A collection that is gone needs no drop: the drop of the collection
+// marks its indexes deleted. It returns errNotPrimaryCluster on a secondary.
+func (s *Server) dropFailedPKIndex(ctx context.Context, idx *model.Index) error {
+	role, _, err := s.getReplicationRole(ctx)
+	if err != nil {
+		return err
+	}
+	if role != replicateutil.RolePrimary {
+		return errNotPrimaryCluster
+	}
+	broadcaster, err := s.startBroadcastWithCollectionID(ctx, idx.CollectionID)
+	if err != nil {
+		if errors.Is(err, merr.ErrCollectionNotFound) {
+			return nil
+		}
+		return err
+	}
+	defer broadcaster.Close()
+
+	var cur *model.Index
+	for _, index := range s.meta.indexMeta.GetIndexesForCollection(idx.CollectionID, "") {
+		if index.IndexID == idx.IndexID {
+			cur = index
+		}
+	}
+	if cur == nil || cur.State != commonpb.IndexState_Failed {
+		return nil
+	}
+	msg, err := s.buildDropIndexMessage(ctx, idx.CollectionID, []int64{idx.IndexID}, true)
+	if err != nil {
+		if errors.Is(err, merr.ErrCollectionNotFound) {
+			return nil
+		}
+		return err
+	}
+	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
+		return err
+	}
+	mlog.Info(ctx, "failed primary key index dropped",
+		mlog.FieldCollectionID(idx.CollectionID), mlog.FieldIndexID(idx.IndexID), mlog.String("failReason", cur.FailReason))
 	return nil
 }

@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
@@ -55,6 +57,11 @@ type indexInspector struct {
 	handler                   Handler
 	storageCli                storage.ChunkManager
 	indexEngineVersionManager IndexEngineVersionManager
+
+	// pkIndexCompensateCh and dropFailedPKIndex run the compensation of a
+	// failed primary key index, see SetPKIndexCompensation.
+	pkIndexCompensateCh <-chan int64
+	dropFailedPKIndex   func(ctx context.Context, index *model.Index) error
 }
 
 func newIndexInspector(
@@ -126,6 +133,14 @@ func (i *indexInspector) popIndexSegments(withPending bool) []UniqueID {
 	return pending.Collect()
 }
 
+// SetPKIndexCompensation makes the inspector drop every primary key index
+// whose CreateIndex failed: on each tick, and when ch receives a collection
+// ID. dropFailed broadcasts the DropIndex of one index. Call it before Start.
+func (i *indexInspector) SetPKIndexCompensation(ch <-chan int64, dropFailed func(ctx context.Context, index *model.Index) error) {
+	i.pkIndexCompensateCh = ch
+	i.dropFailedPKIndex = dropFailed
+}
+
 func (i *indexInspector) Start() {
 	// Become the buildIndexCh consumer before any producer starts.
 	setBuildIndexConsumer(i.ctx.Done())
@@ -135,6 +150,57 @@ func (i *indexInspector) Start() {
 	i.requeuePendingIndexSegments(i.getUnIndexTaskSegments(i.ctx)...)
 	i.wg.Add(1)
 	go i.createIndexForSegmentLoop(i.ctx)
+	if i.dropFailedPKIndex != nil {
+		i.wg.Add(1)
+		go i.pkIndexCompensationLoop(i.ctx)
+	}
+}
+
+// pkIndexCompensationLoop drops the failed primary key indexes on every tick
+// and on every notification, until ctx is done.
+func (i *indexInspector) pkIndexCompensationLoop(ctx context.Context) {
+	defer i.wg.Done()
+	ticker := time.NewTicker(Params.DataCoordCfg.TaskCheckInterval.GetAsDuration(time.Second))
+	defer ticker.Stop()
+	// skipped holds the indexes that a secondary cluster does not drop, so
+	// that each one is logged once.
+	skipped := typeutil.NewUniqueSet()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		case <-i.pkIndexCompensateCh:
+		}
+		i.compensateFailedPKIndexes(ctx, skipped)
+	}
+}
+
+// compensateFailedPKIndexes drops every primary key index that is Failed and
+// not deleted. A failed drop is retried on the next round.
+func (i *indexInspector) compensateFailedPKIndexes(ctx context.Context, skipped typeutil.UniqueSet) {
+	for _, index := range i.meta.indexMeta.ListAllIndexes() {
+		if ctx.Err() != nil {
+			return
+		}
+		if !isPKIndex(index) || index.State != commonpb.IndexState_Failed {
+			continue
+		}
+		err := i.dropFailedPKIndex(ctx, index)
+		switch {
+		case err == nil:
+			skipped.Remove(index.IndexID)
+		case errors.Is(err, errNotPrimaryCluster):
+			if !skipped.Contain(index.IndexID) {
+				skipped.Insert(index.IndexID)
+				mlog.Info(ctx, "failed primary key index waits for the DropIndex of the primary cluster",
+					mlog.FieldCollectionID(index.CollectionID), mlog.FieldIndexID(index.IndexID))
+			}
+		default:
+			mlog.Warn(ctx, "failed to drop a failed primary key index, retry later",
+				mlog.FieldCollectionID(index.CollectionID), mlog.FieldIndexID(index.IndexID), mlog.Err(err))
+		}
+	}
 }
 
 func (i *indexInspector) Stop() {
