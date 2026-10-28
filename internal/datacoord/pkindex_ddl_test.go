@@ -420,14 +420,18 @@ func TestPKIndexStateOf(t *testing.T) {
 func TestCanCreateIndexWhileAFailedPKIndexIsDropped(t *testing.T) {
 	m := newPKIndexTestMeta()
 	// collection 2 has a failed primary key index on field 100
-	req := &indexpb.CreateIndexRequest{CollectionID: 2, FieldID: 100, IndexName: "pk",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: common.PrimaryKeyIndexType}}}
+	req := &indexpb.CreateIndexRequest{
+		CollectionID: 2, FieldID: 100, IndexName: "pk",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: common.PrimaryKeyIndexType}},
+	}
 	_, err := m.CanCreateIndex(req, false)
 	assert.ErrorIs(t, err, merr.ErrServiceNotReady)
 
 	// another field is not blocked
-	other := &indexpb.CreateIndexRequest{CollectionID: 2, FieldID: 101, IndexName: "sort",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "STL_SORT"}}}
+	other := &indexpb.CreateIndexRequest{
+		CollectionID: 2, FieldID: 101, IndexName: "sort",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "STL_SORT"}},
+	}
 	_, err = m.CanCreateIndex(other, false)
 	assert.NoError(t, err)
 
@@ -437,8 +441,10 @@ func TestCanCreateIndexWhileAFailedPKIndexIsDropped(t *testing.T) {
 	assert.NoError(t, err)
 
 	// a finished primary key index: the same request is ignored
-	sameAsFinished := &indexpb.CreateIndexRequest{CollectionID: 1, FieldID: 100, IndexName: "pk",
-		IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: common.PrimaryKeyIndexType}}}
+	sameAsFinished := &indexpb.CreateIndexRequest{
+		CollectionID: 1, FieldID: 100, IndexName: "pk",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: common.PrimaryKeyIndexType}},
+	}
 	_, err = m.CanCreateIndex(sameAsFinished, false)
 	assert.ErrorIs(t, err, errIndexOperationIgnored)
 }
