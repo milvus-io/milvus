@@ -83,9 +83,13 @@ func MakeBlobsReader(blobs []*Blob) ChunkedBlobsReader {
 	}
 }
 
+// newCompositeBinlogRecordReader reads one chunk of V1 binlogs. stored is the
+// set of field IDs the segment physically stores; nil means the fields of the
+// given blobs.
 func newCompositeBinlogRecordReader(
 	schema *schemapb.CollectionSchema,
 	neededFields typeutil.Set[int64],
+	stored map[FieldID]struct{},
 	blobs []*Blob,
 	opts ...BinlogReaderOption,
 ) (*CompositeBinlogRecordReader, error) {
@@ -113,11 +117,13 @@ func newCompositeBinlogRecordReader(
 
 	rrs := make([]array.RecordReader, len(allFields))
 	brs := make([]*BinlogReader, len(allFields))
+	blobFields := make(map[FieldID]struct{}, len(blobs))
 	for _, b := range blobs {
 		reader, err := NewBinlogReader(b.Value, opts...)
 		if err != nil {
 			return nil, err
 		}
+		blobFields[reader.FieldID] = struct{}{}
 
 		er, err := reader.NextEventReader()
 		if err != nil {
@@ -132,9 +138,13 @@ func newCompositeBinlogRecordReader(
 		brs[i] = reader
 	}
 
+	if stored == nil {
+		stored = blobFields
+	}
 	return &CompositeBinlogRecordReader{
 		fields:  fields,
 		structs: structs,
+		stored:  stored,
 		index:   index,
 		rrs:     rrs,
 		brs:     brs,
@@ -147,13 +157,26 @@ func newIterativeCompositeBinlogRecordReader(
 	chunkedBlobs ChunkedBlobsReader,
 	opts ...BinlogReaderOption,
 ) *IterativeRecordReader {
+	return newIterativeCompositeBinlogRecordReaderWithStored(schema, neededFields, nil, chunkedBlobs, opts...)
+}
+
+// newIterativeCompositeBinlogRecordReaderWithStored is
+// newIterativeCompositeBinlogRecordReader with the segment's physically
+// stored field IDs; see newCompositeBinlogRecordReader.
+func newIterativeCompositeBinlogRecordReaderWithStored(
+	schema *schemapb.CollectionSchema,
+	neededFields typeutil.Set[int64],
+	stored map[FieldID]struct{},
+	chunkedBlobs ChunkedBlobsReader,
+	opts ...BinlogReaderOption,
+) *IterativeRecordReader {
 	return &IterativeRecordReader{
 		iterate: func() (RecordReader, error) {
 			blobs, err := chunkedBlobs()
 			if err != nil {
 				return nil, err
 			}
-			return newCompositeBinlogRecordReader(schema, neededFields, blobs, opts...)
+			return newCompositeBinlogRecordReader(schema, neededFields, stored, blobs, opts...)
 		},
 	}
 }

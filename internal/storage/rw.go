@@ -377,7 +377,17 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 		if err != nil {
 			return nil, err
 		}
-		rr = newIterativeCompositeBinlogRecordReader(schema, rwOptions.neededFields, blobsReader, binlogReaderOpts...)
+		// A caller that filtered binlogs (V1 compaction keeps only the read
+		// schema's fields) passes the segment's complete stored field set, so
+		// the struct fill can see sub-fields that were dropped since.
+		stored := rwOptions.presentFields
+		if stored == nil {
+			stored = make(map[FieldID]struct{}, len(binlogs))
+			for _, fb := range binlogs {
+				stored[fb.GetFieldID()] = struct{}{}
+			}
+		}
+		rr = newIterativeCompositeBinlogRecordReaderWithStored(schema, rwOptions.neededFields, stored, blobsReader, binlogReaderOpts...)
 	case StorageV2, StorageV3:
 		if len(binlogs) <= 0 {
 			return nil, io.EOF

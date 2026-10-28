@@ -110,6 +110,15 @@ enum class VortexColumnGroupLocalFormat {
     Raw,
 };
 
+// Rejects building struct offsets for a segment that stores none of the
+// struct's current sub-fields but does store fields written after the struct
+// was created; see the definition for the rule.
+void
+CheckStructProviderNotDropped(const Schema& schema,
+                              const SegmentLoadInfo& load_info,
+                              const std::string& struct_name,
+                              int64_t segment_id);
+
 class ChunkedSegmentSealedImpl : public SegmentSealed {
     friend class CommitTimestampV2TestAccess;
 
@@ -2399,6 +2408,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     SchemaPtr
     TestGetSchemaSnapshot() const {
         return CapturePublishedState()->schema;
+    }
+
+    // Runs the check that rejects building struct offsets for a segment whose
+    // stored sub-fields of the struct were all dropped.
+    static void
+    TestCheckStructProviderNotDropped(const Schema& schema,
+                                      const SegmentLoadInfo& load_info,
+                                      const std::string& struct_name) {
+        CheckStructProviderNotDropped(schema, load_info, struct_name, 0);
     }
 
     bool

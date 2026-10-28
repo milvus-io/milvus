@@ -31,6 +31,42 @@ func pickStructSibling(structSchema *schemapb.StructArrayFieldSchema, present fu
 	return legacy
 }
 
+// checkStructProviderNotDropped is called when a struct child must be filled
+// and no sibling column can provide its element counts and row validity.
+// stored is the set of field IDs the segment physically stores.
+//
+// If the segment stores a sub-field of st that is still in the schema, the
+// sibling is only not part of this read; nothing is decided here. Otherwise
+// the field IDs tell two cases apart. Field IDs are allocated in increasing
+// order and the sub-fields of a struct get IDs above the struct's own ID, so
+// a segment written (or rewritten) after st appeared stores the sub-fields st
+// had then, all with IDs above st's ID:
+//   - the segment stores a field ID above st's ID: it holds rows written after
+//     st appeared, but every sub-field it stores has been dropped. Its rows
+//     may be non-null with elements, and filling them with null rows or empty
+//     arrays would be wrong data, so this returns a data-integrity error;
+//   - otherwise the segment predates st, its rows are null struct rows, and
+//     the caller fills whole-row nulls as before.
+//
+// The drop rule (schemautil.CheckStructKeepsOriginalSubField) keeps an
+// original sub-field in every struct, so the error only fires for data whose
+// sub-fields were dropped without that rule.
+func checkStructProviderNotDropped(st *schemapb.StructArrayFieldSchema, field *schemapb.FieldSchema, stored map[FieldID]struct{}) error {
+	for _, child := range st.GetFields() {
+		if _, ok := stored[child.GetFieldID()]; ok {
+			return nil
+		}
+	}
+	for id := range stored {
+		if id > st.GetFieldID() {
+			return merr.WrapErrDataIntegrityMsg(
+				"cannot fill struct sub-field %s: the segment stores field %d, written after struct field %s (id %d) was created, but none of the struct's current sub-fields; the stored sub-fields that give its element counts were dropped",
+				field.GetName(), id, st.GetName(), st.GetFieldID())
+		}
+	}
+	return nil
+}
+
 // GenerateNullElementsArrayFromSibling backfills a newly added struct child.
 // A null struct row has no child elements; a valid row inherits the sibling's
 // logical element count, with each new element null.

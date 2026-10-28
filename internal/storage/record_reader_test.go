@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type importFragmentTestReader struct {
@@ -456,6 +457,86 @@ func TestAbsentFieldFillReaderUsesStructSiblingCounts(t *testing.T) {
 			require.True(t, filled.ListValues().IsNull(1))
 		})
 	}
+}
+
+// droppedProviderStructSchema is a struct (id 200) whose only stored sub-field
+// (201) was dropped after an element-nullable sub-field (202) was added.
+func droppedProviderStructSchema() *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64}},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 200, Name: "s", Nullable: true, Fields: []*schemapb.FieldSchema{
+				{FieldID: 202, Name: "s[added]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true, ElementNullable: true},
+			},
+		}},
+	}
+}
+
+// A segment that stores a field written after the struct appeared (the
+// dropped sub-field 201) but none of the struct's current sub-fields has lost
+// the column that gives the element counts. The fill must fail instead of
+// turning its rows into null struct rows.
+func TestAbsentFieldFillReaderErrorsWhenStructProviderDropped(t *testing.T) {
+	idb := array.NewInt64Builder(memory.DefaultAllocator)
+	defer idb.Release()
+	idb.AppendValues([]int64{1, 2}, nil)
+	idArr := idb.NewArray()
+	defer idArr.Release()
+	base := &compositeRecord{index: map[FieldID]int16{100: 0}, recs: []arrow.Array{idArr}}
+
+	rr := NewAbsentFieldFillRecordReader(&sliceRecordReader{recs: []Record{base}}, droppedProviderStructSchema(),
+		map[FieldID]struct{}{100: {}, 201: {}})
+	defer rr.Close()
+	_, err := rr.Next()
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	require.ErrorContains(t, err, "s[added]")
+}
+
+// A segment that stores only fields older than the struct predates it: its
+// rows are null struct rows, and the fill keeps producing them.
+func TestAbsentFieldFillReaderWholeStructAddedLater(t *testing.T) {
+	idb := array.NewInt64Builder(memory.DefaultAllocator)
+	defer idb.Release()
+	idb.AppendValues([]int64{1, 2}, nil)
+	idArr := idb.NewArray()
+	defer idArr.Release()
+	base := &compositeRecord{index: map[FieldID]int16{100: 0}, recs: []arrow.Array{idArr}}
+
+	rr := NewAbsentFieldFillRecordReader(&sliceRecordReader{recs: []Record{base}}, droppedProviderStructSchema(),
+		map[FieldID]struct{}{100: {}})
+	defer rr.Close()
+	rec, err := rr.Next()
+	require.NoError(t, err)
+	require.Equal(t, 2, rec.Column(202).Len())
+	require.Equal(t, 2, rec.Column(202).NullN())
+}
+
+// The V1 binlog reader applies the same rule to the stored field set it is
+// given.
+func TestCompositeBinlogRecordReaderErrorsWhenStructProviderDropped(t *testing.T) {
+	schema := droppedProviderStructSchema()
+	added := schema.GetStructArrayFields()[0].GetFields()[0]
+	newReader := func(stored map[FieldID]struct{}) *CompositeBinlogRecordReader {
+		return &CompositeBinlogRecordReader{
+			fields:  map[FieldID]*schemapb.FieldSchema{202: added},
+			structs: map[FieldID]*schemapb.StructArrayFieldSchema{202: schema.GetStructArrayFields()[0]},
+			stored:  stored,
+			index:   map[FieldID]int16{202: 0},
+			rrs:     make([]array.RecordReader, 1),
+			brs:     make([]*BinlogReader, 1),
+		}
+	}
+
+	reader := newReader(map[FieldID]struct{}{100: {}, 201: {}})
+	_, err := reader.Next()
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	require.NoError(t, reader.Close())
+
+	reader = newReader(map[FieldID]struct{}{100: {}})
+	rec, err := reader.Next()
+	require.NoError(t, err)
+	require.Equal(t, 0, rec.Column(202).Len())
+	require.NoError(t, reader.Close())
 }
 
 // TestAbsentFieldFillReaderReturnsInnerWhenAllPresent pins the short-circuit: when
