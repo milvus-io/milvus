@@ -31,12 +31,12 @@ endif ()
 # Disable benchmark for milvus-storage (we don't need it and it may have missing deps)
 set(WITH_BENCHMARK OFF CACHE BOOL "" FORCE)
 
-# milvus-storage's Rust bridge now depends on crates that require Rust 1.92.
+# milvus-storage's Rust bridge now depends on crates that require Rust 1.94.1.
 # The top-level CMake cache may have been initialized by other Rust components
 # that intentionally build with 1.89, so reset Corrosion's cached Rust toolchain
-# before adding milvus-storage. Use rustup's channel name so Corrosion can
+# before adding milvus-storage. Use rustup's toolchain name so Corrosion can
 # append the current host triple on Linux and macOS.
-set(Rust_TOOLCHAIN "1.92" CACHE STRING "" FORCE)
+set(Rust_TOOLCHAIN "1.94.1" CACHE STRING "" FORCE)
 unset(Rust_COMPILER_CACHED CACHE)
 unset(Rust_CARGO_CACHED CACHE)
 unset(_CORROSION_RUSTC CACHE)
