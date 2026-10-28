@@ -179,7 +179,7 @@ type Engine struct {
 	logger *mlog.Logger
 
 	// cycleMu serializes the structural operations (RotateIncrement,
-	// StageFrozen, InstallCommitted, DropFrozen, Close). They do their disk
+	// StageFrozen, InstallCommitted, DropFrozen, Reset, Close). They do their disk
 	// IO holding only cycleMu, which MultiGet and Write never take, and hold mu
 	// or commitMu just long enough to swap pointers.
 	// Lock order: cycleMu, mu, commitMu.

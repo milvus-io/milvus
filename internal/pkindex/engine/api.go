@@ -165,6 +165,17 @@ type Lifecycle interface {
 	// as frozen and the caller drops it again.
 	DropFrozen(ctx context.Context, gens ...Generation) error
 
+	// Reset empties the engine: it starts a new empty active generation,
+	// retires the old active generation and every frozen generation, and
+	// clears the committed set, in one step under the structural lock. A
+	// lookup before it sees the old state, a lookup after it sees an empty
+	// engine. A StageFrozen, InstallCommitted or DropFrozen that names a
+	// generation that Reset retired returns ErrNotFrozen. Reset does no
+	// network IO; it waits for a running structural operation (local disk IO).
+	// A generation that fails to retire is out of the read path either way,
+	// and the next Open removes what is left of it.
+	Reset(ctx context.Context) error
+
 	// Stats snapshots the engine's shape, for triggering policies and metrics.
 	Stats() Stats
 

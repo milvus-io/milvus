@@ -521,3 +521,69 @@ func TestInstallCommittedLeavesStateOnOpenFailure(t *testing.T) {
 	assert.Equal(t, 1, e.Stats().CommittedTables)
 	requireSegment(t, e, pk(1), 10)
 }
+
+// TestReset checks that Reset empties every part of the engine in one step:
+// the active generation, the frozen generations and the committed set.
+func TestReset(t *testing.T) {
+	e := newTestEngine(t)
+	ctx := context.Background()
+	baseDir := t.TempDir()
+
+	require.NoError(t, e.Write(ctx, []Mutation{put(pk(1), 1)}))
+	committedGen, err := e.RotateIncrement(ctx)
+	require.NoError(t, err)
+	flushed, err := e.StageFrozen(ctx, committedGen)
+	require.NoError(t, err)
+	tables := commitTables(t, e, baseDir, flushed, nil, committedGen)
+	require.NoError(t, e.Write(ctx, []Mutation{put(pk(2), 2)}))
+	frozenGen, err := e.RotateIncrement(ctx)
+	require.NoError(t, err)
+	_, err = e.StageFrozen(ctx, frozenGen)
+	require.NoError(t, err)
+	require.NoError(t, e.Write(ctx, []Mutation{put(pk(3), 3)}))
+	requireSegment(t, e, pk(1), 1)
+
+	require.NoError(t, e.Reset(ctx))
+	for _, k := range []int64{1, 2, 3} {
+		assert.Nil(t, getOne(t, e, pk(k)), "key %d", k)
+	}
+	assert.Empty(t, e.FrozenGenerations())
+	s := e.Stats()
+	assert.Zero(t, s.CommittedTables)
+	assert.Zero(t, s.FrozenGenerations)
+
+	// a step of a handover that started before the reset finds its generation gone
+	require.ErrorIs(t, e.InstallCommitted(ctx, tables, frozenGen), ErrNotFrozen)
+	assert.Zero(t, e.Stats().CommittedTables, "a failed install changes nothing")
+	require.ErrorIs(t, e.DropFrozen(ctx, frozenGen), ErrNotFrozen)
+	_, err = e.StageFrozen(ctx, frozenGen)
+	require.ErrorIs(t, err, ErrNotFrozen)
+
+	// the engine takes writes after the reset
+	require.NoError(t, e.Write(ctx, []Mutation{put(pk(4), 4)}))
+	requireSegment(t, e, pk(4), 4)
+
+	// a restart brings back none of the retired generations; the memtable
+	// of the active generation is not durable
+	cfg := e.cfg
+	require.NoError(t, e.Close())
+	reopened, err := Open(ctx, cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { reopened.Close() })
+	for _, k := range []int64{1, 2, 3} {
+		assert.Nil(t, getOne(t, reopened, pk(k)), "key %d", k)
+	}
+	assert.Empty(t, reopened.FrozenGenerations())
+	ents, err := os.ReadDir(cfg.Dir)
+	require.NoError(t, err)
+	for _, ent := range ents {
+		assert.NotContains(t, ent.Name(), retiredDirPrefix, "a retired generation stays on disk")
+	}
+}
+
+// TestResetOfAClosedEngineFails checks the closed engine.
+func TestResetOfAClosedEngineFails(t *testing.T) {
+	e := newTestEngine(t)
+	require.NoError(t, e.Close())
+	require.ErrorIs(t, e.Reset(context.Background()), ErrClosed)
+}

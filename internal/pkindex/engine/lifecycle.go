@@ -210,6 +210,48 @@ func (e *Engine) DropFrozen(ctx context.Context, gens ...Generation) error {
 	return nil
 }
 
+// Reset empties the engine in one step, see Lifecycle.Reset.
+func (e *Engine) Reset(ctx context.Context) error {
+	e.cycleMu.Lock()
+	defer e.cycleMu.Unlock()
+	if e.closed {
+		return errClosed
+	}
+	// only structural operations replace e.active, and cycleMu excludes them
+	old := e.active
+	g, err := openGeneration(e.cfg, old.gen+1)
+	if err != nil {
+		return err
+	}
+	// one critical section: a reader holds both locks for its whole call, so
+	// it sees either the whole old state or the empty one
+	e.mu.Lock()
+	e.commitMu.Lock()
+	retiring := append([]*generation{old}, e.frozen...)
+	committed := e.committed
+	e.active = g
+	e.frozen = nil
+	e.committed = nil
+	e.commitMu.Unlock()
+	e.mu.Unlock()
+
+	for _, cr := range committed {
+		cr.reader.Close()
+	}
+	for _, r := range retiring {
+		if err := r.retire(); err != nil {
+			// out of the read path either way, see InstallCommitted
+			e.logger.Warn(ctx, "pkindex failed to remove a generation at reset",
+				mlog.Int64("gen", int64(r.gen)), mlog.Err(err))
+		}
+	}
+	e.logger.Info(ctx, "pkindex engine reset",
+		mlog.Int64("activeGen", int64(g.gen)),
+		mlog.Int("retired", len(retiring)),
+		mlog.Int("committedTables", len(committed)))
+	return nil
+}
+
 // resolveRetire checks the generations a caller wants to retire and returns
 // them, without changing anything. Each must be frozen and named once, and
 // together they must be the oldest frozen generations, with none left
