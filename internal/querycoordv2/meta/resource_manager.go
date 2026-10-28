@@ -35,9 +35,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -1095,7 +1097,15 @@ func (rm *ResourceManager) unassignNode(ctx context.Context, node int64) (string
 		mrg.UnassignNode(node)
 		rg := mrg.ToResourceGroup()
 
-		if err := rm.catalog.SaveResourceGroup(ctx, rg.GetMeta()); err != nil {
+		// Saving the whole resource group is an unconditional overwrite, so it is
+		// safe to retry a transient etcd error (e.g. leader changed during an etcd
+		// restart) even if the failed attempt was applied. The retry is bounded
+		// because rm.rwmutex is held; a persistent failure still exits to reload
+		// a consistent state.
+		err := retry.Do(ctx, func() error {
+			return rm.catalog.SaveResourceGroup(ctx, rg.GetMeta())
+		}, retry.RetryErr(etcd.IsRetriableEtcdErr))
+		if err != nil {
 			mlog.Fatal(context.TODO(), "unassign node from resource group",
 				mlog.String("rgName", rg.GetName()),
 				mlog.Int64("node", node),
