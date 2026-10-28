@@ -645,13 +645,14 @@ TEST(Expr, TestArraySubscriptMissingElementIsUnknown) {
              {true, false, false},
              {false, false, false},
              {true, false, false}},
+            // An empty set is FALSE even where the element is missing.
             {"term_empty",
              std::make_shared<expr::TermFilterExpr>(
                  column, std::vector<proto::plan::GenericValue>{}),
              {false, false, false},
-             {true, false, false},
-             {true, false, false},
-             {true, false, false}},
+             {true, true, true},
+             {true, true, true},
+             {true, true, true}},
             {"arith",
              std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
                  column,
@@ -4641,6 +4642,8 @@ namespace {
 //           [[1, 2], [NULL, 4]], [], [NULL, [7]], NULL, [[5], [6, 6]]
 //   s[vec]  (ArrayOfVector, element nullable):
 //           [v, NULL, v], [], [NULL], NULL, [v, v]
+// And a top-level nullable Array<Int64> `arr` (elements never null):
+//           [1, 2], [], [3], NULL, [5, 6]
 constexpr int64_t kElementNullRows = 5;
 constexpr int64_t kElementNullVecDim = 4;
 
@@ -4651,6 +4654,7 @@ struct ElementNullableStruct {
     FieldId name;
     FieldId tags;
     FieldId vec;
+    FieldId arr;
     std::unique_ptr<InsertRecordProto> insert;
 };
 
@@ -4663,6 +4667,7 @@ BuildElementNullableStruct() {
     auto schema = std::make_shared<Schema>();
     out.pk = schema->AddDebugField("pk", DataType::INT64);
     schema->set_primary_field_id(out.pk);
+    out.arr = schema->AddDebugArrayField("arr", DataType::INT64, true, false);
     out.b = schema->AddDebugArrayField("s[b]", DataType::INT64, true, true);
     out.name =
         schema->AddDebugArrayField("s[name]", DataType::VARCHAR, true, true);
@@ -4725,6 +4730,15 @@ BuildElementNullableStruct() {
             row->add_valid_data(leaf.has_value());
         }
     };
+    auto* arr_rows = add_array_field(out.arr, proto::schema::DataType::Int64);
+    for (const auto& row :
+         std::vector<std::vector<int64_t>>{{1, 2}, {}, {3}, {}, {5, 6}}) {
+        auto* data = arr_rows->add_data()->mutable_long_data();
+        for (auto value : row) {
+            data->add_data(value);
+        }
+    }
+
     auto* b_rows = add_array_field(out.b, proto::schema::DataType::Int64);
     for (const auto& row : std::vector<Leaves>{
              {1, std::nullopt, 3}, {}, {std::nullopt}, {}, {5, 6}}) {
@@ -5043,7 +5057,11 @@ RunElementNullableRowFilters(SegmentInternalInterface* segment,
         column(data.b, DataType::INT64, {"99999999999999999999"});
     const auto b_negative = column(data.b, DataType::INT64, {"-1"});
     const auto tags_huge = column(data.tags, DataType::INT64, {"2147483648"});
+    const auto arr0 = column(data.arr, DataType::INT64, {"0"});
+    const auto arr1 = column(data.arr, DataType::INT64, {"1"});
+    const auto arr_huge = column(data.arr, DataType::INT64, {"2147483648"});
     const ElementNullExpected all_unknown = {-1, -1, -1, -1, -1};
+    const ElementNullExpected all_false = {0, 0, 0, 0, 0};
     auto term = [](expr::ColumnInfo col,
                    std::vector<proto::plan::GenericValue> vals) {
         return std::make_shared<expr::TermFilterExpr>(col, std::move(vals));
@@ -5173,11 +5191,20 @@ RunElementNullableRowFilters(SegmentInternalInterface* segment,
          {0, -1, -1, -1, 0}},
         {"length(tags[1]) == 2", length(tags1, 2), {1, -1, 0, -1, 1}},
         {"length(tags[0]) == 1", length(tags0, 1), {0, -1, -1, -1, 1}},
-        // C3 with an empty set: an existing element is FALSE, a missing or
-        // null one is still UNKNOWN.
-        {"b[0] in []", term(b0, {}), {0, -1, -1, -1, 0}},
-        {"b[1] in []", term(b1, {}), {-1, -1, -1, -1, 0}},
-        {"b[2147483648] in []", term(b_huge, {}), all_unknown},
+        // An empty set is FALSE on every row, including a null row, a
+        // missing element and a null element, so NOT makes it TRUE.
+        {"b[0] in []", term(b0, {}), all_false},
+        {"b[1] in []", term(b1, {}), all_false},
+        {"b[2147483648] in []", term(b_huge, {}), all_false},
+        // The same on a top-level Array. A non-empty set still makes a
+        // missing element or a null row UNKNOWN.
+        {"arr[0] in []", term(arr0, {}), all_false},
+        {"arr[1] in []", term(arr1, {}), all_false},
+        {"arr[2147483648] in []", term(arr_huge, {}), all_false},
+        {"arr[0] in [3]", term(arr0, {ElementNullInt(3)}), {0, -1, 1, -1, 0}},
+        {"arr[1] in [2, 6]",
+         term(arr1, {ElementNullInt(2), ElementNullInt(6)}),
+         {1, -1, -1, -1, 1}},
         // C3 / 4.2.2 with a subscript beyond int: out of bounds, UNKNOWN.
         {"b[2147483648] > 0",
          unary(b_huge, OpType::GreaterThan, ElementNullInt(0)),
@@ -5319,13 +5346,16 @@ RunElementNullableParsedRowFilters(SegmentInternalInterface* segment,
         {"array_contains_any(s[0][tags], [2, 5])", {1, -1, -1, -1, 1}},
         {"array_contains(s[1][tags], 0)", {0, -1, 0, -1, 0}},
         {"array_length(s[1][tags]) == 2", {1, -1, 0, -1, 1}},
-        // C3 with an empty set
-        {"s[0][b] in []", {0, -1, -1, -1, 0}},
-        {"s[1][b] in []", {-1, -1, -1, -1, 0}},
+        // An empty set is FALSE on every row
+        {"s[0][b] in []", {0, 0, 0, 0, 0}},
+        {"s[1][b] in []", {0, 0, 0, 0, 0}},
+        {"s[2147483648][b] in []", {0, 0, 0, 0, 0}},
+        {"arr[1] in []", {0, 0, 0, 0, 0}},
+        {"arr[2147483648] in []", {0, 0, 0, 0, 0}},
+        {"arr[1] in [2, 6]", {1, -1, -1, -1, 1}},
         // Subscripts beyond int / int64: out of bounds, UNKNOWN
         {"s[2147483648][b] > 0", {-1, -1, -1, -1, -1}},
         {"s[99999999999999999999][b] == 0", {-1, -1, -1, -1, -1}},
-        {"s[2147483648][b] in []", {-1, -1, -1, -1, -1}},
         {"array_contains(s[2147483648][tags], 4)", {-1, -1, -1, -1, -1}},
         {"array_length(s[2147483648][tags]) == 0", {-1, -1, -1, -1, -1}},
         {"s[2147483648][tags] == [1, 2]", {-1, -1, -1, -1, -1}},
@@ -6502,10 +6532,20 @@ BuildElementLevelCases(const ElementLevelFixture& f) {
              return TvOf(e.b, [](int64_t x) { return x == 1 || x == 3; });
          }},
         {"$[b] in [0]", E::Term(b, {E::Int(0)}), b_is(0)},
+        // An empty set is FALSE on a null element too.
         {"$[b] in []",
          E::Term(b, {}),
-         [](const ElemValue&
-                e) { return TvOf(e.b, [](int64_t) { return false; }); }},
+         [](const ElemValue&) { return TvBool(false); }},
+        {"$[i8] in []",
+         E::Term(i8, {}),
+         [](const ElemValue&) { return TvBool(false); }},
+        // An overflowing literal leaves the set empty after conversion; it
+        // still matches nothing and a null element stays UNKNOWN.
+        {"$[i8] in [1000]",
+         E::Term(i8, {E::Int(1000)}),
+         [](const ElemValue& e) {
+             return TvOf(e.i8, [](int64_t) { return false; });
+         }},
         {"$[i8] in [1, 1000]",
          E::Term(i8, {E::Int(1), E::Int(1000)}),
          [](const ElemValue& e) {
