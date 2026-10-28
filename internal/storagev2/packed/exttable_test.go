@@ -263,26 +263,23 @@ func TestAppendSegmentManifestColumnsUsesCommitManifestUpdates(t *testing.T) {
 	mockRead := mockey.Mock(readColumnGroupsFromManifest).Return(nil, nil).Build()
 	defer mockRead.UnPatch()
 
-	var gotBasePath string
-	var gotVersion int64
+	var gotBaseManifest string
 	var gotAddNewColumnGroups bool
 	mockCommit := mockey.Mock(CommitManifestUpdates).
-		To(func(basePath string, baseVersion int64, storageConfig *indexpb.StorageConfig, updates *ManifestUpdates) (string, error) {
-			gotBasePath = basePath
-			gotVersion = baseVersion
+		To(func(baseManifest string, storageConfig *indexpb.StorageConfig, updates *ManifestUpdates) (string, error) {
+			gotBaseManifest = baseManifest
 			cgs, ok := updates.NewFiles.(*ColumnGroups)
 			require.True(t, ok)
 			require.NotNil(t, cgs.cColumnGroups)
 			gotAddNewColumnGroups = cgs.addNewColumnGroups
-			return MarshalManifestPath(basePath, baseVersion+1), nil
+			return MarshalManifestPath("segment", 4), nil
 		}).Build()
 	defer mockCommit.UnPatch()
 
 	got, err := AppendSegmentManifestColumns(ctx, oldManifestPath, "parquet", []string{"score"}, fragments, config)
 	require.NoError(t, err)
 	assert.Equal(t, MarshalManifestPath("segment", 4), got)
-	assert.Equal(t, "segment", gotBasePath)
-	assert.Equal(t, int64(3), gotVersion)
+	assert.Equal(t, oldManifestPath, gotBaseManifest)
 	assert.True(t, gotAddNewColumnGroups)
 }
 
@@ -331,8 +328,8 @@ func TestAppendSegmentManifestColumnsReadAndNoopPaths(t *testing.T) {
 	mockReadParse := mockey.Mock(readColumnGroupsFromManifest).Return(nil, nil).Build()
 	_, err = AppendSegmentManifestColumns(context.Background(), "not-json", "parquet", []string{"score"}, fragments, config)
 	mockReadParse.UnPatch()
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to parse manifest path")
+	assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+	assert.Contains(t, err.Error(), "parse base manifest path")
 }
 
 func TestFileInfo_Struct(t *testing.T) {
@@ -824,6 +821,30 @@ func TestMarshalManifestPath_EmptyBasePath(t *testing.T) {
 	assert.Equal(t, int64(0), ver)
 }
 
+func TestManifestPathKey(t *testing.T) {
+	canonical := MarshalManifestPath("files/insert_log/1/2/3", 7)
+	// The C++ milvus-table writer emits nlohmann's sorted keys, and a newer
+	// writer may add optional fields; neither changes the revision.
+	reordered := `{"base_path":"files/insert_log/1/2/3","ver":7}`
+	extended := `{"ver":7,"base_path":"files/insert_log/1/2/3","size":1024}`
+
+	assert.Equal(t, canonical, ManifestPathKey(canonical))
+	assert.Equal(t, canonical, ManifestPathKey(reordered))
+	assert.Equal(t, canonical, ManifestPathKey(extended))
+	assert.Equal(t, canonical, ManifestPathKey(" \n\t"+reordered))
+	assert.True(t, SameManifestPath(reordered, extended))
+
+	assert.False(t, SameManifestPath(canonical, MarshalManifestPath("files/insert_log/1/2/3", 8)))
+	assert.False(t, SameManifestPath(canonical, MarshalManifestPath("files/insert_log/1/2/4", 7)))
+
+	// Values that are not manifest paths, such as external table files, are
+	// their own key.
+	for _, raw := range []string{"", "s3://bucket/data/part-0.parquet", "{not json", `{"ver":1}`} {
+		assert.Equal(t, raw, ManifestPathKey(raw))
+	}
+	assert.False(t, SameManifestPath("s3://bucket/a.parquet", "s3://bucket/b.parquet"))
+}
+
 func TestCreateSegmentManifestWithBasePath_CanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -925,6 +946,107 @@ func TestNormalizeFileInfos_StableSortAndFilter(t *testing.T) {
 	assert.Equal(t, "data/part-1.parquet", gotA[0].FilePath)
 	assert.Equal(t, "data/part-2.parquet", gotA[1].FilePath)
 	assert.Equal(t, skippedA, skippedB)
+}
+
+func TestMakePropertiesFromStorageConfig_Talon(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		mode             string
+		enableExternal   bool
+		wantExternalMode string
+	}{
+		{name: "external_disabled", mode: "2", wantExternalMode: "0"},
+		{name: "external_small_reads", mode: "2", enableExternal: true, wantExternalMode: "2"},
+		{name: "external_all_reads", mode: "1", enableExternal: true, wantExternalMode: "1"},
+		{name: "talon_disabled", mode: "0", enableExternal: true, wantExternalMode: "0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params := &paramtable.ComponentParam{}
+			params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+			defer mockey.Mock(paramtable.Get).Return(params).Build().UnPatch()
+			for key, value := range map[string]string{
+				"mode":               tc.mode,
+				"smallReadThreshold": "65536",
+				"coordinator":        "127.0.0.1:7000",
+				"blockSize":          "8388608",
+				"maxIdlePerAddr":     "32",
+			} {
+				require.NoError(t, params.Save("common.storage.talon."+key, value))
+			}
+			if tc.enableExternal {
+				require.NoError(t, params.Save("common.storage.talon.enableForExternalTable", "true"))
+			}
+
+			for _, storageType := range []string{"remote", "local"} {
+				t.Run(storageType, func(t *testing.T) {
+					require.NoError(t, params.Save(params.CommonCfg.StorageType.Key, storageType))
+					require.NoError(t, params.Save(params.CommonCfg.StorageTalonMode.Key, tc.mode))
+					config := CreateStorageConfig()
+					// The request configuration must not be overwritten by later process changes.
+					require.NoError(t, params.Save(params.CommonCfg.StorageTalonMode.Key, "0"))
+					cConfig := GetCStorageConfig(config)
+					assert.Equal(t, config.GetTalonMode(), uint32(cConfig.talon_mode))
+					assert.Equal(t, config.GetTalonEnableForExternalTable(), bool(cConfig.talon_enable_for_external_table))
+					DeleteCStorageConfig(cConfig)
+					props, err := MakePropertiesFromStorageConfig(config, nil)
+					require.NoError(t, err)
+					defer FreeProperties(props)
+					if storageType == "local" {
+						assert.Equal(t, "0", loonPropertyString(props, "fs.talon.mode"))
+					} else {
+						for key, want := range map[string]string{
+							"mode":                 tc.mode,
+							"small_read_threshold": "65536",
+							"coordinator":          "127.0.0.1:7000",
+							"block_size":           "8388608",
+							"max_idle_per_addr":    "32",
+						} {
+							assert.Equal(t, want, loonPropertyString(props, "fs.talon."+key), key)
+						}
+					}
+					require.NoError(t, injectExternalSpecProperties(props, 42, "s3://bucket/data/", `{"format":"parquet"}`))
+					assert.Equal(t, tc.wantExternalMode, loonPropertyString(props, "extfs.42.talon.mode"))
+					assert.Equal(t, "127.0.0.1:7000", loonPropertyString(props, "extfs.42.talon.coordinator"))
+					require.NoError(t, injectExternalSpecProperties(props, 42, "s3://bucket/data/", `{"format":"parquet","extfs":{"storage_type":"local"}}`))
+					assert.Empty(t, loonPropertyString(props, "extfs.42.talon.mode"))
+				})
+			}
+		})
+	}
+}
+
+func TestMakePropertiesFromStorageConfig_TalonThresholdDefault(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		override string
+		want     uint32
+	}{
+		{name: "default", want: 524288},
+		{name: "configured", override: "1048576", want: 1048576},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params := &paramtable.ComponentParam{}
+			params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true), paramtable.Files(nil)))
+			defer mockey.Mock(paramtable.Get).Return(params).Build().UnPatch()
+			require.NoError(t, params.Save(params.CommonCfg.StorageTalonMode.Key, "2"))
+			require.NoError(t, params.Save(params.CommonCfg.StorageTalonCoordinator.Key, "talon:7000"))
+			require.NoError(t, params.Save(params.CommonCfg.StorageTalonEnableForExternalTable.Key, "true"))
+			if tc.override != "" {
+				require.NoError(t, params.Save(params.CommonCfg.StorageTalonSmallReadThreshold.Key, tc.override))
+			}
+			config := CreateStorageConfig()
+			assert.Equal(t, tc.want, config.GetTalonSmallReadThreshold())
+			cConfig := GetCStorageConfig(config)
+			assert.Equal(t, tc.want, uint32(cConfig.talon_small_read_threshold))
+			DeleteCStorageConfig(cConfig)
+			props, err := MakePropertiesFromStorageConfig(config, nil)
+			require.NoError(t, err)
+			defer FreeProperties(props)
+			assert.Equal(t, fmt.Sprint(tc.want), loonPropertyString(props, "fs.talon.small_read_threshold"))
+			require.NoError(t, injectExternalSpecProperties(props, 42, "s3://bucket/data/", ""))
+			assert.Equal(t, fmt.Sprint(tc.want), loonPropertyString(props, "extfs.42.talon.small_read_threshold"))
+		})
+	}
 }
 
 func TestMakePropertiesFromStorageConfig_ExtraKVsOverride(t *testing.T) {
@@ -1989,7 +2111,6 @@ func TestMilvusTableSnapshotMetadataInvalid(t *testing.T) {
 		{"truncated_json", `{"corrupt manifest`, merr.ErrDataIntegrity},
 		{"empty_object", "", merr.ErrDataIntegrity},
 		{"invalid_field_type", `{"format_version":"invalid"}`, merr.ErrDataIntegrity},
-		{"unsupported_version", `{"format_version":99999}`, merr.ErrOperationNotSupported},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// Exercise both consumers with real parsing. Only object I/O is patched.
@@ -2026,12 +2147,17 @@ func TestReadMilvusTableSnapshotMetadata_ReadFailureIsNotInvalidMetadata(t *test
 }
 
 func TestReadMilvusTableSnapshotMetadata_ValidMetadata(t *testing.T) {
-	read := mockey.Mock(readExternalSourceFile).Return([]byte(`{"format_version":2}`), nil).Build()
-	defer read.UnPatch()
-	metadata, err := ReadMilvusTableSnapshotMetadata("s3://bucket/metadata.json",
-		`{"format":"milvus-table"}`, nil, ExternalSpecContext{})
-	require.NoError(t, err)
-	assert.Equal(t, int32(2), metadata.GetFormatVersion())
+	for _, version := range []int32{2, 99999} {
+		t.Run(fmt.Sprintf("version_%d", version), func(t *testing.T) {
+			data := []byte(fmt.Sprintf(`{"format_version":%d}`, version))
+			read := mockey.Mock(readExternalSourceFile).Return(data, nil).Build()
+			defer read.UnPatch()
+			metadata, err := ReadMilvusTableSnapshotMetadata("s3://bucket/metadata.json",
+				`{"format":"milvus-table"}`, nil, ExternalSpecContext{})
+			require.NoError(t, err)
+			assert.Equal(t, version, metadata.GetFormatVersion())
+		})
+	}
 }
 
 func TestReadMilvusTableSnapshotMetadata_InvalidSource(t *testing.T) {

@@ -1307,6 +1307,38 @@ func (coord *MixCoordMock) OperatePrivilegeGroup(ctx context.Context, req *milvu
 	return &commonpb.Status{}, nil
 }
 
+func (coord *MixCoordMock) CreateRowPolicy(ctx context.Context, req *milvuspb.CreateRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
+func (coord *MixCoordMock) UpdateRowPolicy(ctx context.Context, req *milvuspb.UpdateRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
+func (coord *MixCoordMock) DropRowPolicy(ctx context.Context, req *milvuspb.DropRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
+func (coord *MixCoordMock) ListRowPolicies(ctx context.Context, req *milvuspb.ListRowPoliciesRequest, opts ...grpc.CallOption) (*milvuspb.ListRowPoliciesResponse, error) {
+	return &milvuspb.ListRowPoliciesResponse{}, nil
+}
+
+func (coord *MixCoordMock) SetRLSPrincipalTags(ctx context.Context, req *milvuspb.SetRLSPrincipalTagsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
+func (coord *MixCoordMock) GetRLSPrincipalTags(ctx context.Context, req *milvuspb.GetRLSPrincipalTagsRequest, opts ...grpc.CallOption) (*milvuspb.GetRLSPrincipalTagsResponse, error) {
+	return &milvuspb.GetRLSPrincipalTagsResponse{}, nil
+}
+
+func (coord *MixCoordMock) ListRLSPrincipals(ctx context.Context, req *milvuspb.ListRLSPrincipalsRequest, opts ...grpc.CallOption) (*milvuspb.ListRLSPrincipalsResponse, error) {
+	return &milvuspb.ListRLSPrincipalsResponse{}, nil
+}
+
+func (coord *MixCoordMock) DeleteRLSPrincipalTags(ctx context.Context, req *milvuspb.DeleteRLSPrincipalTagsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
 func (coord *MixCoordMock) Flush(ctx context.Context, req *datapb.FlushRequest, opts ...grpc.CallOption) (*datapb.FlushResponse, error) {
 	panic("implement me")
 }
@@ -1586,6 +1618,14 @@ func (coord *MixCoordMock) GetReplicas(ctx context.Context, in *milvuspb.GetRepl
 	}, nil
 }
 
+func (coord *MixCoordMock) GetQueryViewLoadInfo(ctx context.Context, in *querypb.GetQueryViewLoadInfoRequest, opts ...grpc.CallOption) (*querypb.GetQueryViewLoadInfoResponse, error) {
+	return nil, merr.WrapErrServiceInternalMsg("GetQueryViewLoadInfo is not configured by this test")
+}
+
+func (coord *MixCoordMock) GetStreamingNodeQueryViewResources(ctx context.Context, in *datapb.GetStreamingNodeQueryViewResourcesRequest, opts ...grpc.CallOption) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
+	return nil, merr.WrapErrServiceInternalMsg("GetStreamingNodeQueryViewResources is not configured by this test")
+}
+
 func (coord *MixCoordMock) GetShardLeaders(ctx context.Context, in *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
 	if coord.GetShardLeadersFunc != nil {
 		return coord.GetShardLeadersFunc(ctx, in)
@@ -1779,6 +1819,10 @@ func (coord *MixCoordMock) GetQuotaMetrics(ctx context.Context, in *internalpb.G
 	return &internalpb.GetQuotaMetricsResponse{}, nil
 }
 
+func (coord *MixCoordMock) GetFeatureUsage(ctx context.Context, in *internalpb.GetFeatureUsageRequest, opts ...grpc.CallOption) (*internalpb.FeatureUsageReport, error) {
+	return &internalpb.FeatureUsageReport{Status: merr.Success()}, nil
+}
+
 func (coord *MixCoordMock) ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
 	return &internalpb.ClearReadTaskQueueResponse{Status: merr.Success()}, nil
 }
@@ -1906,3 +1950,7 @@ type ImportFunc func(ctx context.Context, req *milvuspb.ImportRequest, opts ...g
 type DropCollectionFunc func(ctx context.Context, request *milvuspb.DropCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 
 type GetGetCredentialFunc func(ctx context.Context, req *rootcoordpb.GetCredentialRequest, opts ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error)
+
+func (*MixCoordMock) FetchFileResources(context.Context, *rootcoordpb.FetchFileResourcesRequest, ...grpc.CallOption) (*rootcoordpb.FetchFileResourcesResponse, error) {
+	panic("mock FetchFileResources with mockey")
+}

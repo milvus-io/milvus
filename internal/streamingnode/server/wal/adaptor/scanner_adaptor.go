@@ -36,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/ratelimit"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
@@ -106,7 +105,6 @@ func newScannerAdaptor(
 		cleanup:          cleanup,
 		ScannerHelper:    helper.NewScannerHelper(name),
 		metrics:          scanMetrics,
-		readRateCounter:  utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
 	}
 	go s.execute()
 	return s
@@ -127,10 +125,9 @@ type scannerAdaptorImpl struct {
 	pendingQueue     *utility.PendingQueue
 	txnBuffer        *utility.TxnBuffer // txn buffer for txn message.
 
-	cleanup         func()
-	clearOnce       sync.Once
-	metrics         *metricsutil.ScannerMetrics
-	readRateCounter *utility.AverageRateCounter // tracks read rate (bytes/sec)
+	cleanup   func()
+	clearOnce sync.Once
+	metrics   *metricsutil.ScannerMetrics
 }
 
 // Channel returns the channel assignment info of the wal.
@@ -232,21 +229,6 @@ func (s *scannerAdaptorImpl) produceEventLoop(msgChan chan<- message.ImmutableMe
 	)
 	s.logger.Info(context.TODO(), "start produce loop of scanner at model", mlog.String("model", getScannerModel(scanner)))
 	for {
-		if s.readOption.RateLimitControl != nil {
-			// if the scanner is working with rate limit control,
-			// 1. when the scanner is working at catchup mode, the write operation is fast than the consume operation,
-			// so we need to enter slowdown mode to protect the wal from being overloaded.
-			// 2. when the scanner is working at tailing mode, the write operation is slow than the consume operation,
-			// so we enter into recovery mode to speed up the rate limit.
-			if _, ok := scanner.(*catchupScanner); ok {
-				// Create a checker that returns false when read rate > append rate.
-				// This indicates the scanner has caught up and slowdown should stop.
-				checker := s.createSlowdownChecker()
-				s.readOption.RateLimitControl.EnterSlowdownMode(checker)
-			} else {
-				s.readOption.RateLimitControl.EnterRecoveryMode()
-			}
-		}
 		if scanner, err = scanner.Do(s.Context()); err != nil {
 			return err
 		}
@@ -341,39 +323,6 @@ func (s *scannerAdaptorImpl) waitUntilStartConsumption() {
 	}
 }
 
-// createSlowdownChecker creates a SlowdownChecker for rate limit control.
-// The checker returns false when read rate > append rate, indicating the scanner has caught up.
-func (s *scannerAdaptorImpl) createSlowdownChecker() ratelimit.SlowdownChecker {
-	appendRateCounter := s.readOption.AppendRateCounter
-	if appendRateCounter == nil {
-		// No append rate counter available, always continue slowdown.
-		return nil
-	}
-	return &slowdownCheckerImpl{
-		readRateCounter:   s.readRateCounter,
-		appendRateCounter: appendRateCounter,
-	}
-}
-
-// slowdownCheckerImpl implements ratelimit.SlowdownChecker interface.
-type slowdownCheckerImpl struct {
-	readRateCounter   *utility.AverageRateCounter
-	appendRateCounter *utility.AverageRateCounter
-}
-
-// Check returns true if slowdown should continue, false if it should exit to recovery.
-// Continue slowdown if read rate <= append rate (still catching up).
-// Stop slowdown if read rate > append rate (caught up).
-func (c *slowdownCheckerImpl) Check() bool {
-	return c.readRateCounter.Rate() < c.appendRateCounter.Rate()*0.9
-}
-
-// SlowdownStartupHWM returns the high watermark to start slowdown from.
-// Uses the current read rate as the startup HWM.
-func (c *slowdownCheckerImpl) SlowdownStartupHWM() int64 {
-	return int64(c.readRateCounter.Rate())
-}
-
 // handleUpstream handles the incoming message from the upstream.
 func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) error {
 	// Filtering the message if needed.
@@ -381,9 +330,6 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) error 
 	if s.filterFunc != nil && !s.filterFunc(msg) {
 		return nil
 	}
-
-	// Track read rate for rate limiting control.
-	s.readRateCounter.Add(int64(msg.EstimateSize()))
 
 	// Observe the message.
 	var isTailing bool

@@ -9,19 +9,34 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
+FROM ghcr.io/astral-sh/uv:0.11.23 AS uv
+
 FROM ubuntu:focal-20220426
 
 ARG TARGETARCH
 
 RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-certificates gnupg2 \
     g++ gcc gfortran gdb gdbserver ninja-build git make ccache libssl-dev zlib1g-dev zip unzip \
-    clang-format-12 clang-tidy-12 lcov libtool m4 autoconf automake python3 python3-pip \
+    clang-format-12 clang-tidy-12 lcov libtool m4 autoconf automake \
     pkg-config uuid-dev libaio-dev software-properties-common && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && \
         ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
         echo "Etc/UTC" > /etc/timezone && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
+
+COPY --from=uv /uv /usr/local/bin/uv
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python
+ENV UV_PYTHON_BIN_DIR=/usr/local/bin
+ENV UV_TOOL_DIR=/opt/uv/tools
+ENV UV_TOOL_BIN_DIR=/usr/local/bin
+ENV PYTHON=python3.12
+RUN uv python install 3.12.13 && \
+    ln -s /usr/local/bin/python3.12 /usr/local/bin/python3 && \
+    uv pip install --python python3.12 --system --break-system-packages \
+        setuptools==80.9.0 wheel==0.45.1 && \
+    uv tool install --python python3.12 conan==2.25.1
+
 
 # Upgrade GCC to 11 (focal default is 9, which folly 2024.08.12.00 rejects)
 RUN add-apt-repository ppa:ubuntu-toolchain-r/test -y && \
@@ -32,7 +47,6 @@ RUN add-apt-repository ppa:ubuntu-toolchain-r/test -y && \
     unlink gcov && ln -s gcov-11 gcov && \
     rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install conan==2.25.1
 
 RUN echo "target arch $TARGETARCH"
 RUN wget -qO- "https://cmake.org/files/v3.27/cmake-3.27.5-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local
@@ -42,7 +56,7 @@ ENV GOPATH /go
 ENV GOROOT /usr/local/go
 ENV GO111MODULE on
 ENV PATH $GOPATH/bin:$GOROOT/bin:$PATH
-RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.26.6.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go && \
+RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.26.10.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go && \
     mkdir -p "$GOPATH/src" "$GOPATH/bin" && \
     go clean --modcache && \
     chmod -R 777 "$GOPATH" && chmod -R a+w $(go env GOTOOLDIR)
@@ -55,7 +69,7 @@ RUN mkdir -p /home/milvus/.vscode-server/extensions \
 COPY --chown=0:0 build/docker/builder/entrypoint.sh /
 
 RUN curl https://sh.rustup.rs -sSf | \
-    sh -s -- --default-toolchain=1.92 -y
+    sh -s -- --default-toolchain=1.94 -y
 
 ENV PATH=/root/.cargo/bin:$PATH
 

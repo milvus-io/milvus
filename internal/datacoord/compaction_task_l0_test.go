@@ -49,6 +49,7 @@ func TestL0CompactionTaskSuite(t *testing.T) {
 }
 
 func TestL0CompactionCommitsDeltalogsToV3Manifest(t *testing.T) {
+	mockManifestUpdateSubmissions(t)
 	basePath := "/tmp/milvus/insert_log/1/10/200"
 	oldManifest := packed.MarshalManifestPath(basePath, 7)
 	newManifest := packed.MarshalManifestPath(basePath, 8)
@@ -65,12 +66,11 @@ func TestL0CompactionCommitsDeltalogsToV3Manifest(t *testing.T) {
 	deltalogs := []*datapb.FieldBinlog{{
 		Binlogs: []*datapb.Binlog{{LogID: 9001, LogPath: deltaPath, EntriesNum: 3, MemorySize: 128}},
 	}}
-	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
-			require.Equal(t, basePath, base)
-			require.EqualValues(t, 7, version)
+	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, baseManifest string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
+			require.Equal(t, oldManifest, baseManifest)
 			require.Equal(t, []packed.DeltaLogEntry{{Path: deltaPath, NumEntries: 3}}, updates.DeltaLogs)
-			return newManifest, nil
+			return mockManifestUpdateResult(newManifest, updates), nil
 		},
 	).Build()
 	defer commit.UnPatch()
@@ -85,6 +85,7 @@ func TestL0CompactionCommitsDeltalogsToV3Manifest(t *testing.T) {
 }
 
 func TestL0CompactionV3ManifestCommitIsIdempotentOnRetry(t *testing.T) {
+	mockManifestUpdateSubmissions(t)
 	basePath := "/tmp/milvus/insert_log/1/10/201"
 	oldManifest := packed.MarshalManifestPath(basePath, 7)
 	newManifest := packed.MarshalManifestPath(basePath, 8)
@@ -106,10 +107,10 @@ func TestL0CompactionV3ManifestCommitIsIdempotentOnRetry(t *testing.T) {
 	}
 
 	var commitCount int
-	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(_ string, _ int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, _ string, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 			commitCount++
-			return newManifest, nil
+			return mockManifestUpdateResult(newManifest, nil), nil
 		},
 	).Build()
 	defer commit.UnPatch()
@@ -280,9 +281,10 @@ func TestL0CompactionSaveSegmentMetaFailsOnManifestCommitError(t *testing.T) {
 // via the timeout error instead of hanging. This drives the real primitive end to
 // end — atomic multi-lock acquisition, then the parallel per-target manifest I/O.
 func TestL0CompactionSaveSegmentMetaCommitsV3TargetsInParallel(t *testing.T) {
+	mockManifestUpdateSubmissions(t)
 	const targets = 3
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.Key, "16")
-	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.L0ManifestUpdatePoolSize.Key)
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ManifestCommitConcurrency.Key, "16")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.ManifestCommitConcurrency.Key)
 
 	mt, err := newMemoryMeta(t)
 	require.NoError(t, err)
@@ -306,16 +308,17 @@ func TestL0CompactionSaveSegmentMetaCommitsV3TargetsInParallel(t *testing.T) {
 
 	release := make(chan struct{})
 	var entered atomic.Int32
-	mockCommit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (string, error) {
+	mockCommit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, baseManifest string, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 			if entered.Add(1) == targets {
 				close(release)
 			}
 			select {
 			case <-release:
-				return packed.MarshalManifestPath(base, version+1), nil
+				published, err := advanceManifest(baseManifest, 1)
+				return mockManifestUpdateResult(published, nil), err
 			case <-time.After(30 * time.Second):
-				return "", errors.New("v3 manifest commits did not overlap; batch fan-out is serial")
+				return mockManifestUpdateResult("", nil), errors.New("v3 manifest commits did not overlap; batch fan-out is serial")
 			}
 		}).Build()
 	defer mockCommit.UnPatch()

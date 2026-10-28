@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -1579,6 +1580,65 @@ func TestGetCurrentSegmentsView(t *testing.T) {
 	assert.ElementsMatch(t, []int64{9}, view.ImportingSegmentIDs)
 }
 
+func TestGetCurrentSegmentsViewExternalCollection(t *testing.T) {
+	svr := newTestServer(t)
+	defer closeTestServer(t, svr)
+	schema := newTestSchema()
+	svr.meta.AddCollection(&collectionInfo{
+		ID:         0,
+		Partitions: []int64{0},
+		Schema:     schema,
+	})
+
+	// External collection segments are produced by refresh, not the WAL, so they
+	// carry neither start nor dml position. A committed manifest or fake binlogs
+	// must still admit them, otherwise GetPersistentSegmentInfo returns nothing
+	// for external collections while GetQuerySegmentInfo does report them.
+	manifestSeg := &datapb.SegmentInfo{
+		ID:             100,
+		CollectionID:   0,
+		PartitionID:    0,
+		InsertChannel:  "ch1",
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath("/data/segments/100", 1),
+		NumOfRows:      100,
+	}
+	err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(manifestSeg))
+	assert.NoError(t, err)
+
+	// Fake binlogs are stripped on persistence, but before a restart they are the
+	// only marker a freshly refreshed external segment carries.
+	binlogSeg := &datapb.SegmentInfo{
+		ID:            101,
+		CollectionID:  0,
+		PartitionID:   0,
+		InsertChannel: "ch1",
+		State:         commonpb.SegmentState_Flushed,
+		Binlogs: []*datapb.FieldBinlog{
+			{FieldID: 1, Binlogs: []*datapb.Binlog{{LogID: 1, EntriesNum: 100}}},
+		},
+		NumOfRows: 100,
+	}
+	err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(binlogSeg))
+	assert.NoError(t, err)
+
+	// A segment with no position, no manifest and no binlogs is still dropped.
+	emptySeg := &datapb.SegmentInfo{
+		ID:            102,
+		CollectionID:  0,
+		PartitionID:   0,
+		InsertChannel: "ch1",
+		State:         commonpb.SegmentState_Flushed,
+		NumOfRows:     100,
+	}
+	err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(emptySeg))
+	assert.NoError(t, err)
+
+	view := svr.handler.GetCurrentSegmentsView(context.Background(), &channelMeta{Name: "ch1", CollectionID: 0})
+	assert.ElementsMatch(t, []int64{100, 101}, view.FlushedSegmentIDs)
+}
+
 func TestShouldDropChannel(t *testing.T) {
 	type myRootCoord struct {
 		mocks2.MockRootCoordClient
@@ -2339,15 +2399,16 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	schema := newTestSchema()
 	// Committed V3 manifest with empty legacy arrays must be kept.
 	manifestSeg := NewSegmentInfo(&datapb.SegmentInfo{
-		ID:             2001,
-		CollectionID:   200,
-		PartitionID:    0,
-		InsertChannel:  "ch-1",
-		State:          commonpb.SegmentState_Flushed,
-		StartPosition:  &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 500},
-		DmlPosition:    &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 600},
-		StorageVersion: storage.StorageV3,
-		ManifestPath:   packed.MarshalManifestPath("/data/segments/2001", 3),
+		ID:              2001,
+		CollectionID:    200,
+		PartitionID:     0,
+		InsertChannel:   "ch-1",
+		State:           commonpb.SegmentState_Flushed,
+		StartPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 500},
+		DmlPosition:     &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 600},
+		StorageVersion:  storage.StorageV3,
+		ManifestPath:    packed.MarshalManifestPath("/data/segments/2001", 3),
+		CommitTimestamp: 700,
 	})
 	// A growing V3 segment only has an allocation placeholder and must be dropped.
 	growingSeg := NewSegmentInfo(&datapb.SegmentInfo{
@@ -2451,6 +2512,7 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	require.Len(t, snapshotData.Segments, 1)
 	assert.Equal(t, int64(2001), snapshotData.Segments[0].GetSegmentId())
 	assert.NotEmpty(t, snapshotData.Segments[0].GetManifestPath())
+	assert.EqualValues(t, 700, snapshotData.Segments[0].GetCommitTimestamp())
 
 	candidates = []*SegmentInfo{NewSegmentInfo(&datapb.SegmentInfo{
 		ID:             2004,
@@ -2467,6 +2529,68 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	assert.Nil(t, snapshotData)
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 	assert.Contains(t, err.Error(), "invalid manifest path for segment 2004")
+}
+
+func TestGenSnapshotDependencyErrors(t *testing.T) {
+	type snapshotBroker struct{ broker.Broker }
+	for _, stage := range []string{"describe", "partitions", "empty_positions", "empty_channel", "decompress", "compact_delta", "index_files", "success"} {
+		t.Run(stage, func(t *testing.T) {
+			wantErr := merr.ErrServiceNotReady
+			errFor := func(name string) error {
+				if stage == name {
+					return wantErr
+				}
+				return nil
+			}
+			handler := &ServerHandler{s: &Server{broker: &snapshotBroker{}, meta: &meta{
+				indexMeta: &indexMeta{}, chunkManager: storage.NewLocalChunkManager(),
+			}}}
+			describe := mockey.Mock((*snapshotBroker).DescribeCollectionInternal).Return(
+				&milvuspb.DescribeCollectionResponse{Schema: newTestSchema()}, errFor("describe")).Build()
+			defer describe.UnPatch()
+			partitions := mockey.Mock((*snapshotBroker).ShowPartitions).Return(
+				&milvuspb.ShowPartitionsResponse{PartitionNames: []string{"_default"}, PartitionIDs: []int64{10}}, errFor("partitions")).Build()
+			defer partitions.UnPatch()
+			position := &msgpb.MsgPosition{ChannelName: "v1", Timestamp: 100}
+			if stage == "empty_channel" {
+				position.ChannelName = ""
+			}
+			positions := []*msgpb.MsgPosition{position}
+			if stage == "empty_positions" {
+				positions = nil
+			}
+			indexes := mockey.Mock((*indexMeta).GetIndexesForCollection).Return([]*model.Index(nil)).Build()
+			defer indexes.UnPatch()
+			segment := NewSegmentInfo(&datapb.SegmentInfo{
+				ID: 1, CollectionID: 2, PartitionID: 10, InsertChannel: "v1", State: commonpb.SegmentState_Flushed,
+				Binlogs:      []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
+				JsonKeyStats: map[int64]*datapb.JsonKeyStats{101: {FieldID: 101}},
+			})
+			segments := mockey.Mock((*meta).SelectSegments).Return([]*SegmentInfo{segment}).Build()
+			defer segments.UnPatch()
+			decompress := mockey.Mock(binlog.DecompressMultiBinLogs).Return(errFor("decompress")).Build()
+			defer decompress.UnPatch()
+			deltas := mockey.Mock((*ServerHandler).GetDeltaLogFromCompactTo).Return([]*datapb.FieldBinlog(nil), errFor("compact_delta")).Build()
+			defer deltas.UnPatch()
+			indexFiles := mockey.Mock(uncompressIndexFiles).Return([]*indexpb.IndexFilePathInfo(nil), errFor("index_files")).Build()
+			defer indexFiles.UnPatch()
+
+			snapshot, err := handler.GenSnapshot(context.Background(), 2, positions)
+			switch stage {
+			case "compact_delta", "success":
+				// Preserve the existing best-effort compact-to lookup behavior.
+				require.NoError(t, err)
+				require.Len(t, snapshot.Segments, 1)
+				require.Contains(t, snapshot.Segments[0].JsonKeyIndexFiles, int64(101))
+			case "empty_positions", "empty_channel":
+				require.ErrorIs(t, err, merr.ErrServiceInternal)
+				require.Nil(t, snapshot)
+			default:
+				require.ErrorIs(t, err, wantErr)
+				require.Nil(t, snapshot)
+			}
+		})
+	}
 }
 
 func TestGenSnapshot_RejectsSegmentWithoutChannelSeekPosition(t *testing.T) {
@@ -2556,6 +2680,7 @@ func TestGenSnapshot_RejectsSegmentWithoutChannelSeekPosition(t *testing.T) {
 }
 
 func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
+	version := indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED
 	handler := &ServerHandler{
 		s: &Server{
 			meta: &meta{
@@ -2576,7 +2701,7 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 				IndexVersion:          40,
 				IndexState:            commonpb.IndexState_Finished,
 				IndexFileKeys:         []string{"index_data"},
-				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+				IndexStorePathVersion: version,
 			},
 		}
 	}).Build()
@@ -2594,11 +2719,32 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 	mockTypeParams := mockey.Mock((*indexMeta).GetTypeParams).Return(nil).Build()
 	defer mockTypeParams.UnPatch()
 
-	indexFiles := uncompressIndexFiles(handler, 1, 2)
+	indexFiles, err := uncompressIndexFiles(handler, &datapb.SegmentInfo{CollectionID: 1, ID: 2})
+	require.NoError(t, err)
 
 	require.Len(t, indexFiles, 1)
+	assert.Equal(t, int64(2), indexFiles[0].GetSegmentID())
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, indexFiles[0].GetIndexStorePathVersion())
 	assert.Equal(t, []string{"files/index_v1/1/20/2/30/40/index_data"}, indexFiles[0].GetIndexFilePaths())
+
+	// There is no segment store in this handler. The selected snapshot segment
+	// must be sufficient, including when its base differs from the current root.
+	version = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
+	segment := &datapb.SegmentInfo{
+		CollectionID: 1, ID: 2,
+		ManifestPath: packed.MarshalManifestPath("/data/legacy/insert_log/1/20/2", 1),
+	}
+	indexFiles, err = uncompressIndexFiles(handler, segment)
+	require.NoError(t, err)
+	require.Len(t, indexFiles, 1)
+	assert.Equal(t, segment.GetID(), indexFiles[0].GetSegmentID())
+	assert.Equal(t, version, indexFiles[0].GetIndexStorePathVersion())
+	assert.Equal(t, []string{"/data/legacy/insert_log/1/20/2/_index/30/40/index_data"}, indexFiles[0].GetIndexFilePaths())
+
+	segment.ManifestPath = ""
+	indexFiles, err = uncompressIndexFiles(handler, segment)
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	assert.Empty(t, indexFiles)
 }
 
 func TestUncompressJsonStatsForSnapshotPaths(t *testing.T) {

@@ -583,10 +583,18 @@ func (kc *Catalog) ShouldDropChannel(ctx context.Context, channel string) bool {
 	return true
 }
 
-func (kc *Catalog) ChannelExists(ctx context.Context, channel string) bool {
+// ChannelExists reports whether the channel marker is active. Missing keys are
+// treated as absent; other lookup failures are returned to the caller.
+func (kc *Catalog) ChannelExists(ctx context.Context, channel string) (bool, error) {
 	key := buildChannelRemovePath(channel)
 	v, err := kc.MetaKv.Load(ctx, key)
-	return err == nil && v == NonRemoveFlagTomestone
+	if errors.Is(err, merr.ErrIoKeyNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, merr.Wrapf(err, "failed to load channel marker %s", channel)
+	}
+	return v == NonRemoveFlagTomestone, nil
 }
 
 // DropChannel removes channel remove flag after whole procedure is finished
@@ -872,6 +880,40 @@ func (kc *Catalog) DropPreImportTask(ctx context.Context, taskID int64) error {
 	return kc.MetaKv.Remove(ctx, key)
 }
 
+func (kc *Catalog) SavePreImportTaskV3(ctx context.Context, task *datapb.PreImportTaskV3) error {
+	key := buildPreImportTaskV3Key(task.GetTaskId())
+	value, err := proto.Marshal(task)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.Save(ctx, key, string(value))
+}
+
+func (kc *Catalog) ListPreImportTasksV3(ctx context.Context) ([]*datapb.PreImportTaskV3, error) {
+	tasks := make([]*datapb.PreImportTaskV3, 0)
+
+	applyFn := func(key []byte, value []byte) error {
+		task := &datapb.PreImportTaskV3{}
+		err := proto.Unmarshal(value, task)
+		if err != nil {
+			return err
+		}
+		tasks = append(tasks, task)
+		return nil
+	}
+
+	err := kc.MetaKv.WalkWithPrefix(ctx, PreImportTaskV3Prefix+"/", kc.paginationSize, applyFn)
+	if err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+func (kc *Catalog) DropPreImportTaskV3(ctx context.Context, taskID int64) error {
+	key := buildPreImportTaskV3Key(taskID)
+	return kc.MetaKv.Remove(ctx, key)
+}
+
 func (kc *Catalog) SaveImportTask(ctx context.Context, task *datapb.ImportTaskV2) error {
 	key := buildImportTaskKey(task.GetTaskID())
 	value, err := proto.Marshal(task)
@@ -904,6 +946,58 @@ func (kc *Catalog) ListImportTasks(ctx context.Context) ([]*datapb.ImportTaskV2,
 func (kc *Catalog) DropImportTask(ctx context.Context, taskID int64) error {
 	key := buildImportTaskKey(taskID)
 	return kc.MetaKv.Remove(ctx, key)
+}
+
+func (kc *Catalog) SaveReshardTask(ctx context.Context, task *datapb.ReshardTask) error {
+	key := buildReshardTaskKey(task.GetTaskId())
+	value, err := proto.Marshal(task)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.Save(ctx, key, string(value))
+}
+
+func (kc *Catalog) ListReshardTasks(ctx context.Context) ([]*datapb.ReshardTask, error) {
+	tasks := make([]*datapb.ReshardTask, 0)
+	err := kc.MetaKv.WalkWithPrefix(ctx, ReshardTaskPrefix+"/", kc.paginationSize, func(_ []byte, value []byte) error {
+		task := &datapb.ReshardTask{}
+		if err := proto.Unmarshal(value, task); err != nil {
+			return err
+		}
+		tasks = append(tasks, task)
+		return nil
+	})
+	return tasks, err
+}
+
+func (kc *Catalog) DropReshardTask(ctx context.Context, taskID int64) error {
+	return kc.MetaKv.Remove(ctx, buildReshardTaskKey(taskID))
+}
+
+func (kc *Catalog) SaveImportTaskV3(ctx context.Context, task *datapb.ImportTaskV3) error {
+	key := buildImportTaskV3Key(task.GetTaskId())
+	value, err := proto.Marshal(task)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.Save(ctx, key, string(value))
+}
+
+func (kc *Catalog) ListImportTasksV3(ctx context.Context) ([]*datapb.ImportTaskV3, error) {
+	tasks := make([]*datapb.ImportTaskV3, 0)
+	err := kc.MetaKv.WalkWithPrefix(ctx, ImportTaskV3Prefix+"/", kc.paginationSize, func(_ []byte, value []byte) error {
+		task := &datapb.ImportTaskV3{}
+		if err := proto.Unmarshal(value, task); err != nil {
+			return err
+		}
+		tasks = append(tasks, task)
+		return nil
+	})
+	return tasks, err
+}
+
+func (kc *Catalog) DropImportTaskV3(ctx context.Context, taskID int64) error {
+	return kc.MetaKv.Remove(ctx, buildImportTaskV3Key(taskID))
 }
 
 func (kc *Catalog) SaveCopySegmentJob(ctx context.Context, job *datapb.CopySegmentJob) error {

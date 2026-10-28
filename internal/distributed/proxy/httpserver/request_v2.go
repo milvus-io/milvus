@@ -496,7 +496,7 @@ type CollectionDataReq struct {
 	DbName         string                    `json:"dbName"`
 	CollectionName string                    `json:"collectionName" binding:"required"`
 	PartitionName  string                    `json:"partitionName"`
-	Data           []map[string]interface{}  `json:"data" binding:"required"`
+	Data           []map[string]interface{}  `json:"data"`
 	PartialUpdate  bool                      `json:"partialUpdate"`
 	FieldOps       []FieldPartialUpdateOpReq `json:"fieldOps"`
 }

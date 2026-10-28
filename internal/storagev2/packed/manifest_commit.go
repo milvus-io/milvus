@@ -41,6 +41,9 @@ type WriterOutput interface {
 	// applyTo stages the output onto a loon transaction handle. Called by
 	// applyManifestUpdates as part of CommitManifestUpdates.
 	applyTo(handle C.LoonTransactionHandle) error
+	// Appending files invalidates indexes on columns with new files. Adding new
+	// column groups and registering LOBs do not invalidate existing indexes.
+	invalidatedIndexColumns() []string
 }
 
 // ManifestUpdates bundles every data-file-level change a single caller
@@ -50,8 +53,8 @@ type WriterOutput interface {
 // one shot, and commits.
 //
 // NewFiles holds C memory produced by an FFI writer and MUST be released
-// by the caller via Destroy after CommitManifestUpdates returns (success
-// or failure).
+// by the caller via Destroy after the blocking commit returns (success or
+// failure), or after the terminal callback when using SubmitManifestUpdates.
 type ManifestUpdates struct {
 	// NewFiles is the column-groups / LOB payload returned by an FFI
 	// writer's Close. nil if no insert files were written.
@@ -95,31 +98,36 @@ func (u *ManifestUpdates) isEmpty() bool {
 		len(u.Indexes) == 0 && len(u.DropIndexes) == 0
 }
 
-// CommitManifestUpdates opens a loon transaction at (basePath, baseVersion),
-// applies every change in updates, commits, and returns the new manifest
-// path. With no effective changes it returns the unchanged manifest path
-// without opening a transaction.
+// CommitManifestUpdates opens a loon transaction at the revision named by
+// baseManifestPath, applies every change in updates, commits, and returns the
+// new manifest path. With no effective changes it returns baseManifestPath
+// itself without opening a transaction: a pointer that did not move keeps its
+// exact text, so callers comparing pointers never see a phantom change.
 //
 // The caller retains ownership of any WriterOutput referenced by updates
 // and is responsible for calling Destroy on it after CommitManifestUpdates
 // returns.
-func CommitManifestUpdates(basePath string, baseVersion int64,
+func CommitManifestUpdates(baseManifestPath string,
 	storageConfig *indexpb.StorageConfig, updates *ManifestUpdates,
 ) (string, error) {
 	if updates.isEmpty() {
-		return MarshalManifestPath(basePath, baseVersion), nil
+		return baseManifestPath, nil
+	}
+	basePath, baseVersion, err := UnmarshalManifestPath(baseManifestPath)
+	if err != nil {
+		return "", merr.WrapErrDataIntegrity(err, "parse base manifest path %q", baseManifestPath)
 	}
 
 	// Resolve drops against the exact revision the transaction will open at,
 	// before opening it: a drop that no longer applies must not turn into an
 	// empty commit, which loon rejects with "no updates recorded".
-	dropIndexIDs, err := resolveDropIndexes(basePath, baseVersion, storageConfig, updates.DropIndexes)
+	dropIndexIDs, err := resolveDropIndexes(baseManifestPath, storageConfig, updates.DropIndexes)
 	if err != nil {
 		return "", err
 	}
 	if updates.NewFiles == nil && len(updates.ColumnGroups) == 0 && len(updates.DeltaLogs) == 0 &&
 		len(updates.Stats) == 0 && len(updates.Indexes) == 0 && len(dropIndexIDs) == 0 {
-		return MarshalManifestPath(basePath, baseVersion), nil
+		return baseManifestPath, nil
 	}
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
@@ -138,8 +146,8 @@ func CommitManifestUpdates(basePath string, baseVersion int64,
 	// resolve mode keeps the API simple and matches the prior
 	// AddStatsToManifest behavior.
 	var handle C.LoonTransactionHandle
-	res := C.loon_transaction_begin(cBasePath, cProperties,
-		C.int64_t(baseVersion),
+	res := C.loon_transaction_open(cBasePath, cProperties,
+		C.int64_t(baseVersion), C.int64_t(-1),
 		C.LOON_TRANSACTION_RESOLVE_OVERWRITE,
 		getRetryLimit(), &handle)
 	if err := HandleLoonFFIResult(res); err != nil {
@@ -154,7 +162,7 @@ func CommitManifestUpdates(basePath string, baseVersion int64,
 	}
 
 	var commitVersion C.int64_t
-	res = C.loon_transaction_commit(handle, &commitVersion)
+	res = C.loon_transaction_commit(handle, &commitVersion, nil)
 	if err := HandleLoonFFIResult(res); err != nil {
 		return "", merr.WrapErrStorage(err, "commit manifest commit")
 	}
@@ -215,17 +223,20 @@ func applyManifestUpdates(handle C.LoonTransactionHandle, updates *ManifestUpdat
 // revision. An index that is present under a different build was republished
 // by a rebuild after the caller collected its metadata; dropping it by ID
 // would delete the live artifact, so the whole commit is refused.
-func resolveDropIndexes(basePath string, baseVersion int64,
+func resolveDropIndexes(manifestPath string,
 	storageConfig *indexpb.StorageConfig, drops []DropIndexEntry,
 ) ([]int64, error) {
 	if len(drops) == 0 {
 		return nil, nil
 	}
-	manifestPath := MarshalManifestPath(basePath, baseVersion)
 	current, err := GetManifestIndexInfos(manifestPath, storageConfig)
 	if err != nil {
 		return nil, merr.Wrap(err, "resolve manifest index drops")
 	}
+	return resolveManifestIndexDrops(manifestPath, current, drops)
+}
+
+func resolveManifestIndexDrops(manifestPath string, current []ManifestIndexInfo, drops []DropIndexEntry) ([]int64, error) {
 	buildIDs := make(map[int64]int64, len(current))
 	for _, index := range current {
 		buildIDs[index.IndexID] = index.BuildID

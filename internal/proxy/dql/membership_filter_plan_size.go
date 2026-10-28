@@ -74,7 +74,7 @@ func MarshalPlanWithMembershipFilterSizeLimit(plan *planpb.PlanNode, accumulated
 		maxSize := paramtable.Get().ProxyCfg.MaxMembershipFilterPlanSize.GetAsInt64()
 		if accumulatedSize > maxSize || planSize > maxSize-accumulatedSize {
 			return nil, accumulatedSize, merr.WrapErrParameterTooLarge(fmt.Sprintf(
-				"aggregate membership-filter plan size exceeds proxy.maxMembershipFilterPlanSize: %d + %d > %d bytes",
+				"aggregate filter plan size exceeds proxy.maxMembershipFilterPlanSize: %d + %d > %d bytes",
 				accumulatedSize, planSize, maxSize))
 		}
 		nextSize += planSize

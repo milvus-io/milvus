@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
@@ -145,6 +146,7 @@ func authenticate(c *gin.Context) {
 	if ok {
 		if proxy.PasswordVerify(c, username, password) {
 			mlog.Debug(c.Request.Context(), "auth successful", mlog.String("username", username))
+			featureusage.Hit(featureusage.FeatureAuthPassword)
 			c.Set(httpserver.ContextUsername, username)
 			c.Set(httpserver.ContextToken, fmt.Sprintf("%s%s%s", username, util.CredentialSeparator, password))
 			return
@@ -154,6 +156,7 @@ func authenticate(c *gin.Context) {
 	if rawToken != "" && !strings.Contains(rawToken, util.CredentialSeparator) {
 		user, err := proxy.VerifyAPIKey(rawToken)
 		if err == nil {
+			featureusage.Hit(featureusage.FeatureAuthAPIKey)
 			c.Set(httpserver.ContextUsername, user)
 			c.Set(httpserver.ContextToken, rawToken)
 			return
@@ -262,7 +265,7 @@ func (s *Server) startHTTPServer(errChan chan error) {
 	http2Server := &http2.Server{}
 	Params := &proxy.Params.HTTPCfg
 	s.httpServer = &http.Server{
-		Handler:           h2c.NewHandler(s.httpHandler(ginHandler), http2Server),
+		Handler:           h2c.NewHandler(s.httpHandler(httpserver.DQLStreamingHTTPHandler(ginHandler)), http2Server),
 		ReadHeaderTimeout: Params.ReadHeaderTimeout.GetAsDurationByParse(),
 		ReadTimeout:       Params.ReadTimeout.GetAsDurationByParse(),
 		WriteTimeout:      Params.WriteTimeout.GetAsDurationByParse(),
@@ -1182,6 +1185,38 @@ func (s *Server) OperatePrivilegeGroup(ctx context.Context, req *milvuspb.Operat
 	return s.proxy.OperatePrivilegeGroup(ctx, req)
 }
 
+func (s *Server) CreateRowPolicy(ctx context.Context, req *milvuspb.CreateRowPolicyRequest) (*commonpb.Status, error) {
+	return s.proxy.CreateRowPolicy(ctx, req)
+}
+
+func (s *Server) UpdateRowPolicy(ctx context.Context, req *milvuspb.UpdateRowPolicyRequest) (*commonpb.Status, error) {
+	return s.proxy.UpdateRowPolicy(ctx, req)
+}
+
+func (s *Server) DropRowPolicy(ctx context.Context, req *milvuspb.DropRowPolicyRequest) (*commonpb.Status, error) {
+	return s.proxy.DropRowPolicy(ctx, req)
+}
+
+func (s *Server) ListRowPolicies(ctx context.Context, req *milvuspb.ListRowPoliciesRequest) (*milvuspb.ListRowPoliciesResponse, error) {
+	return s.proxy.ListRowPolicies(ctx, req)
+}
+
+func (s *Server) SetRLSPrincipalTags(ctx context.Context, req *milvuspb.SetRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	return s.proxy.SetRLSPrincipalTags(ctx, req)
+}
+
+func (s *Server) GetRLSPrincipalTags(ctx context.Context, req *milvuspb.GetRLSPrincipalTagsRequest) (*milvuspb.GetRLSPrincipalTagsResponse, error) {
+	return s.proxy.GetRLSPrincipalTags(ctx, req)
+}
+
+func (s *Server) ListRLSPrincipals(ctx context.Context, req *milvuspb.ListRLSPrincipalsRequest) (*milvuspb.ListRLSPrincipalsResponse, error) {
+	return s.proxy.ListRLSPrincipals(ctx, req)
+}
+
+func (s *Server) DeleteRLSPrincipalTags(ctx context.Context, req *milvuspb.DeleteRLSPrincipalTagsRequest) (*commonpb.Status, error) {
+	return s.proxy.DeleteRLSPrincipalTags(ctx, req)
+}
+
 func (s *Server) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
 	return s.proxy.RefreshPolicyInfoCache(ctx, req)
 }
@@ -1314,6 +1349,10 @@ func (s *Server) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegment
 
 func (s *Server) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
 	return s.proxy.GetQuotaMetrics(ctx, req)
+}
+
+func (s *Server) GetFeatureUsage(ctx context.Context, req *internalpb.GetFeatureUsageRequest) (*internalpb.GetFeatureUsageResponse, error) {
+	return s.proxy.GetFeatureUsage(ctx, req)
 }
 
 func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {

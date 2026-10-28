@@ -59,7 +59,7 @@ func newLOBManifestCache(ttl time.Duration) *lobManifestCache {
 }
 
 // Get retrieves LOB files from cache or fetches from storage
-func (c *lobManifestCache) Get(ctx context.Context, manifestPath string, storageConfig *indexpb.StorageConfig) ([]packed.LobFileInfo, error) {
+func (c *lobManifestCache) Get(ctx context.Context, io *packed.ManifestIOContext, manifestPath string, storageConfig *indexpb.StorageConfig) ([]packed.LobFileInfo, error) {
 	c.mu.RLock()
 	entry, ok := c.cache[manifestPath]
 	if ok && time.Since(entry.cachedAt) < c.ttl {
@@ -69,7 +69,7 @@ func (c *lobManifestCache) Get(ctx context.Context, manifestPath string, storage
 	c.mu.RUnlock()
 
 	// cache miss or expired, fetch from storage
-	lobFiles, err := packed.GetManifestLobFiles(manifestPath, storageConfig)
+	lobFiles, err := packed.GetManifestLobFilesAsync(ctx, io, manifestPath, storageConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -188,6 +188,9 @@ func (gc *garbageCollector) recycleUnusedLOBFiles(ctx context.Context) {
 // Returns error if any segment's manifest cannot be read, to prevent
 // orphan deletion from removing files that are still in use.
 func (lobCtx *lobGCContext) collectUsedLOBFiles(ctx context.Context) (typeutil.Set[string], error) {
+	// This scan reads manifests sequentially and owns one executor until it ends.
+	io := packed.NewManifestIOContext(1)
+	defer io.Close()
 	usedFiles := typeutil.NewSet[string]()
 
 	// Collect from active (non-dropped) segments
@@ -195,7 +198,7 @@ func (lobCtx *lobGCContext) collectUsedLOBFiles(ctx context.Context) (typeutil.S
 		return si.GetState() != commonpb.SegmentState_Dropped
 	}))
 	for _, segment := range activeSegments {
-		if err := lobCtx.collectLOBFilesFromSegment(ctx, segment, usedFiles); err != nil {
+		if err := lobCtx.collectLOBFilesFromSegment(ctx, io, segment, usedFiles); err != nil {
 			return nil, err
 		}
 	}
@@ -217,7 +220,7 @@ func (lobCtx *lobGCContext) collectUsedLOBFiles(ctx context.Context) (typeutil.S
 				continue
 			}
 			if snapshotMeta.IsSegmentGCBlocked(segment.GetCollectionID(), segment.GetID()) {
-				if err := lobCtx.collectLOBFilesFromSegment(ctx, segment, usedFiles); err != nil {
+				if err := lobCtx.collectLOBFilesFromSegment(ctx, io, segment, usedFiles); err != nil {
 					return nil, err
 				}
 			}
@@ -231,7 +234,7 @@ func (lobCtx *lobGCContext) collectUsedLOBFiles(ctx context.Context) (typeutil.S
 // and adds them to the usedFiles set.
 // Returns error if the manifest cannot be read, so the caller can abort GC
 // and avoid deleting files that may still be referenced.
-func (lobCtx *lobGCContext) collectLOBFilesFromSegment(ctx context.Context, segment *SegmentInfo, usedFiles typeutil.Set[string]) error {
+func (lobCtx *lobGCContext) collectLOBFilesFromSegment(ctx context.Context, io *packed.ManifestIOContext, segment *SegmentInfo, usedFiles typeutil.Set[string]) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -240,7 +243,7 @@ func (lobCtx *lobGCContext) collectLOBFilesFromSegment(ctx context.Context, segm
 		return nil
 	}
 
-	lobFiles, err := lobCtx.cache.Get(ctx, manifestPath, lobCtx.storageConfig)
+	lobFiles, err := lobCtx.cache.Get(ctx, io, manifestPath, lobCtx.storageConfig)
 	if err != nil {
 		return merr.WrapErrServiceInternalErr(err, "failed to get LOB files from manifest for segment %d (path=%s)", segment.GetID(), manifestPath)
 	}

@@ -181,10 +181,38 @@ func (r *recoveryStorageImpl) migrateLegacyRecoveryInfo(
 	if err != nil {
 		return false, err
 	}
+	for id, segment := range normalizedSegments {
+		if segment.GetSchemaVersion() != 0 {
+			continue
+		}
+		// DataCoord metadata written by 2.6 has no schema version. Preserve
+		// a version already recorded in the allocation before resolving zero.
+		if version := segments[id].GetSchemaVersion(); version != 0 {
+			segment.SchemaVersion = version
+			continue
+		}
+		timeTick := segment.GetStat().GetCreateSegmentTimeTick()
+		schema, usedLatest := legacySegmentSchemaByTime(vchannels[segment.GetVchannel()], timeTick)
+		if schema == nil {
+			continue
+		}
+		segment.SchemaVersion = schema.GetSchema().GetVersion()
+		if usedLatest {
+			r.Logger().Warn(ctx, "legacy segment schema history unavailable, using latest schema",
+				mlog.Int64("segmentID", segment.GetSegmentId()),
+				mlog.Uint64("createSegmentTimeTick", timeTick),
+				mlog.Int64("schemaVersion", int64(segment.GetSchemaVersion())),
+			)
+		}
+	}
 	clear(segments)
 	maps.Copy(segments, normalizedSegments)
 
 	migratedCheckpoint := checkpoint.Clone()
+	// Legacy seek timestamps are inclusive replay positions, not completed
+	// prefixes. Keep the safe physical start and let replay establish the V2
+	// completed TimeTick, including the message at the legacy boundary.
+	migratedCheckpoint.TimeTick = 0
 	migratedCheckpoint.Magic = utility.RecoveryMagicRecoveryStorageV2
 	migratedCheckpoint.Term = r.channel.Term
 	if err := r.persistLegacyRecoveryMigration(ctx, &legacyRecoveryMigration{
@@ -192,14 +220,16 @@ func (r *recoveryStorageImpl) migrateLegacyRecoveryInfo(
 		segments:          normalizedSegments,
 		removedSegmentIDs: removedSegmentIDs,
 		checkpoint:        migratedCheckpoint,
+		legacyTimeTick:    checkpoint.TimeTick,
 	}); err != nil {
 		return false, merr.Wrap(err, "persist legacy recovery migration")
 	}
 
 	r.installCheckpoint(migratedCheckpoint)
 	r.Logger().Info(ctx, "legacy recovery metadata migrated",
-		mlog.String("checkpoint", checkpoint.MessageID.String()),
-		mlog.Uint64("checkpointTimeTick", checkpoint.TimeTick),
+		mlog.String("checkpoint", migratedCheckpoint.MessageID.String()),
+		mlog.Uint64("checkpointTimeTick", migratedCheckpoint.TimeTick),
+		mlog.Uint64("legacySeekTimeTick", checkpoint.TimeTick),
 	)
 	return true, nil
 }
@@ -209,6 +239,33 @@ type legacyRecoveryMigration struct {
 	segments          map[int64]*streamingpb.SegmentAssignmentMeta
 	removedSegmentIDs []int64
 	checkpoint        *utility.WALCheckpoint
+	legacyTimeTick    uint64
+}
+
+// Resolve the schema with the same timestamp semantics as the legacy flusher.
+// A missing timestamp or unavailable history falls back to the latest schema.
+// A dropped entry ends the historical lookup instead of reviving an older one.
+func legacySegmentSchemaByTime(vchannel *streamingpb.VChannelMeta, timeTick uint64) (*streamingpb.CollectionSchemaOfVChannel, bool) {
+	schemas := vchannel.GetCollectionInfo().GetSchemas()
+	if timeTick != 0 {
+		for i := len(schemas) - 1; i >= 0; i-- {
+			schema := schemas[i]
+			if schema.GetCheckpointTimeTick() > timeTick {
+				continue
+			}
+			if schema.GetState() == streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL && schema.GetSchema() != nil {
+				return schema, false
+			}
+			break
+		}
+	}
+	if len(schemas) != 0 {
+		schema := schemas[len(schemas)-1]
+		if schema.GetState() == streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL && schema.GetSchema() != nil {
+			return schema, true
+		}
+	}
+	return nil, true
 }
 
 // Reconcile allocation state with the old flusher's durable state. Neither
@@ -517,6 +574,9 @@ func (r *recoveryStorageImpl) persistLegacyRecoveryMigration(
 	// though the final format marker has not yet been published.
 	legacyCheckpoint := checkpoint.Clone()
 	legacyCheckpoint.Magic = utility.RecoveryMagicStreamingInitialized
+	// An interrupted migration still needs the legacy timestamp to rebuild
+	// component baselines. Only the final V2 checkpoint has a zero TimeTick.
+	legacyCheckpoint.TimeTick = migration.legacyTimeTick
 	if err := resource.Resource().StreamingNodeCatalog().SaveRecoverySnapshot(ctx, r.channel.Name, &metastore.WALRecoverySnapshot{
 		ConsumeCheckpoint: legacyCheckpoint.IntoProto(),
 	}); err != nil {

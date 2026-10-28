@@ -62,12 +62,23 @@ for UNITTEST_DIR in "${UNITTEST_DIRS[@]}"; do
     fi
   fi
 
+  if [[ "$(uname -s)" == "Linux" ]]; then
+    echo "Running AWS runtime link checker self-test"
+    (
+      cd "${MILVUS_CMAKE_BUILD_DIR:-${SCRIPTS_DIR}/../cmake_build}/unittest" &&
+      ctest -R '^aws_runtime_link_check$' --output-on-failure --no-tests=error
+    ) || exit 1
+  fi
+
   echo "Running all unittest ..."
   ${UNITTEST_DIR}/all_tests
   if [ $? -ne 0 ]; then
       echo ${UNITTEST_DIR}/all_tests "run failed"
       exit 1
   fi
+  echo "Running index unittest"
+  INDEX_TEST_BINARY="${UNITTEST_DIR}/index_tests" "${SCRIPTS_DIR}/run_index_unittest.sh"
+
   if [ -f "${UNITTEST_DIR}/dynamic_simd_test" ]; then
       echo "Running dynamic simd test"
       ${UNITTEST_DIR}/dynamic_simd_test

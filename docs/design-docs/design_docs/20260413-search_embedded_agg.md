@@ -297,7 +297,7 @@ After the sweep, finalize each bucket's metrics, apply `order`, truncate to `Siz
 
 #### 5.4.3 Pipeline integration
 
-`internal/proxy/search_pipeline.go` gets a new variant `searchWithAggPipe` consisting of a single `aggregateOp` that takes raw `[]*internalpb.SearchResults` and produces `*milvuspb.SearchResults` carrying new `SearchResultData.agg_buckets` / `agg_topks` proto fields. No intermediate `searchReduceOp` and no `endOp` / `highlightNode` post-processing — the computer assembles the final response directly. Routing picks this pipeline when `searchTask.aggCtx != nil`.
+`internal/proxy/dql/search_pipeline.go` routes requests with `SearchTask.aggCtx != nil` through `searchWithAggPipe`: `searchReduceOp` performs cross-shard composite-key reduction, then `aggregateOp` builds the hierarchy and produces `*milvuspb.SearchResults` with `SearchResultData.agg_buckets` / `agg_topks`. The reducer restores raw metric values (for example, positive L2 distances) and passes its resolved metric type to aggregation along with the reduced rows. There is no `endOp` / `highlightNode` post-processing; aggregation serializes the final response and applies hit-score rounding after ranking.
 
 ### 5.5 Per-group metrics (R4)
 
@@ -340,11 +340,13 @@ Nested `sub_group` parents carrying metrics are supported. Parent metrics aggreg
 
 Multiple criteria give explicit tiebreakers; each has independent `asc`/`desc`.
 
-Default (when `order` is omitted): keep today's behavior for `group_by_field` — buckets ordered by best hit score. This is applied as an implicit `order=[{'_score': 'desc'}]` where `_score` reads the best (highest) hit score in the bucket. Milvus normalizes score direction at the kernel level so that higher = more similar regardless of metric type (L2 / IP / cosine), so a single `desc` default is uniform across metrics. This default is an **internal implicit rule** applied only when the user omits `order`; it is independent of the Q4 restriction on user-supplied explicit `_score` order keys (which still require `avg/max/min(_score)` wrapping).
+Default (when `order` is omitted): preserve first-seen bucket order from the reduced ANN hits. Segcore normalizes scores to higher-is-better for reduction, but the proxy reducer restores raw metric values **before** aggregation: smaller L2 / Hamming / Jaccard distances are better, while larger IP / cosine scores are better. Aggregation must use the resolved metric type whenever similarity determines hit order; it cannot assume numeric descending order for every metric. Explicit bucket `order` remains a numeric / lexicographic comparison of `_count`, `_key`, or a metric alias.
 
 #### 5.6.2 R5 — `TopHits.sort` orders docs inside a bucket
 
-`TopHits.sort` applies only to the `TopHits.size` docs returned per bucket. It does **not** change which docs entered the metric accumulator or the bucket count — same display-only semantics as ES `top_hits.sort`. Phase 1 allowed sort keys: numeric + varchar + `_score`.
+`TopHits.sort` orders the observed rows in a bucket before truncating to `TopHits.size`. It does **not** change which rows enter the metric accumulator, the bucket count, or the child aggregation. Phase 1 allowed sort keys: numeric + varchar + `_score`.
+
+With no sort, hits are ordered by similarity according to the resolved metric, then by primary key. An omitted `_score` direction uses the same metric-aware order; explicit `_score: asc` / `desc` sorts the raw score numerically. Scalar sort directions retain their default `desc`; ties after all explicit criteria use similarity and then primary key. Hit scores and `_score` metrics retain their raw values. This ranking also determines which rows survive when a parent combines multiple child keys or when a level has a smaller `top_hits.size` than the downstream per-key retrieval budget.
 
 #### 5.6.3 Early-stop impact
 

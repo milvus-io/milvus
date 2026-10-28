@@ -9,15 +9,28 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
+FROM ghcr.io/astral-sh/uv:0.12.24 AS uv
+
 FROM amazonlinux:2023
 
 ARG TARGETARCH
 ARG MILVUS_ASAN_LIB
 ARG MILVUS_RUNTIME_USER=milvus:milvus
 
+COPY --from=uv /uv /usr/local/bin/uv
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python
+ENV UV_PYTHON_BIN_DIR=/usr/local/bin
+ENV PYTHON=python3.12
+
 RUN yum install -y wget libgomp libaio libatomic tzdata && \
-    yum upgrade -y openssl openssl-libs && \
+    yum upgrade -y openssl openssl-libs curl tar zlib glibc && \
     rm -rf /var/cache/yum/*
+
+RUN uv --no-cache python install 3.12.13 && \
+    ln -s /usr/local/bin/python3.12 /usr/local/bin/python3 && \
+    rm -rf /opt/uv/python/*/lib/python3.12/site-packages/pip* && \
+    uv --no-cache pip install --python python3.12 --system --break-system-packages \
+        "setuptools>=78.1.1" "msgpack>=1.2.1" "urllib3>=2.8.0"
 
 # Add Tini
 RUN curl -L -o /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH && \
@@ -30,6 +43,10 @@ COPY --chown=milvus:milvus --chmod=774 ./bin/milvus /milvus/bin/milvus
 COPY --chown=milvus:milvus --chmod=774 ./configs/ /milvus/configs/
 
 COPY --chown=milvus:milvus --chmod=774 ./lib/ /milvus/lib/
+
+RUN uv --no-cache pip install --python python3.12 --system --break-system-packages \
+        /milvus/lib/pyudf/milvus_pyudf_runtime-*.whl && \
+    rm -rf /milvus/lib/pyudf
 
 ENV PATH=/milvus/bin:$PATH
 ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib

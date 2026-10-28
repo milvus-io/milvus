@@ -363,7 +363,7 @@ func TestQueryTaskMembershipFilterPlanSizeLimit(t *testing.T) {
 	schema, templateValues := bloomPlanSizeIntegrationFixture(t)
 	cache := newTestCache()
 	mockTest(t, (*metacache.MetaCache).GetCollectionID, int64(1), nil)
-	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{}, nil)
+	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: schema}, nil)
 	mockTest(t, (*metacache.MetaCache).GetCollectionSchema, schema, nil)
 	task := &QueryTask{
 		baseTask: baseTask{

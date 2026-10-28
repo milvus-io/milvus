@@ -1,20 +1,33 @@
+FROM ghcr.io/astral-sh/uv:0.12.24 AS uv
+
 FROM nvidia/cuda:12.9.1-runtime-ubuntu22.04
 
 ARG TARGETARCH
 ARG MILVUS_RUNTIME_USER=milvus:milvus
+
+COPY --from=uv /uv /usr/local/bin/uv
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python
+ENV UV_PYTHON_BIN_DIR=/usr/local/bin
+ENV PYTHON=python3.12
 
 # Install ca-certificates first, then switch to HTTPS and install other packages
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates && \
     sed -i 's/http:/https:/g' /etc/apt/sources.list && \
     apt-get update && \
-    apt-get upgrade -y openssl libssl3 && \
+    apt-get upgrade -y openssl libssl3 curl libcurl4 tar zlib1g libc6 libc-bin && \
     apt-get install -y --no-install-recommends curl libaio-dev libgomp1 && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && \
         ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
         echo "Etc/UTC" > /etc/timezone && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
+
+RUN uv --no-cache python install 3.12.13 && \
+    ln -s /usr/local/bin/python3.12 /usr/local/bin/python3 && \
+    rm -rf /opt/uv/python/*/lib/python3.12/site-packages/pip* && \
+    uv --no-cache pip install --python python3.12 --system --break-system-packages \
+        "setuptools>=78.1.1" "msgpack>=1.2.1" "urllib3>=2.8.0"
 
 # Add Tini
 RUN curl -L -o /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH && \
@@ -25,6 +38,10 @@ RUN groupadd -r milvus && useradd -r -g milvus milvus && \
 COPY --chown=milvus:milvus --chmod=774 ./bin/milvus /milvus/bin/milvus
 COPY --chown=milvus:milvus --chmod=774 ./configs/ /milvus/configs/
 COPY --chown=milvus:milvus --chmod=774 ./lib/ /milvus/lib/
+
+RUN uv --no-cache pip install --python python3.12 --system --break-system-packages \
+        /milvus/lib/pyudf/milvus_pyudf_runtime-*.whl && \
+    rm -rf /milvus/lib/pyudf
 
 ENV PATH=/milvus/bin:$PATH
 ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib

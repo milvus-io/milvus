@@ -22,8 +22,11 @@ func (c *STLSORTChecker) CheckTrain(dataType schemapb.DataType, elementType sche
 		if !exist {
 			return merr.WrapErrParameterMissing(common.JSONCastTypeKey, "json index must specify cast type")
 		}
-		if !lo.Contains(validSTLSORTJSONCastTypes, castType) {
+		if !lo.Contains(validSTLSORTJSONCastTypes, castType) && !IsJSONArrayCastType(castType) {
 			return merr.WrapErrParameterInvalidMsg("json_cast_type %v is not supported for STL_SORT index", castType)
+		}
+		if err := checkJSONCastFunction(castType, params); err != nil {
+			return err
 		}
 		if _, exist := params[common.JSONPathKey]; !exist {
 			return merr.WrapErrParameterMissing(common.JSONPathKey, "json index must specify json path")
@@ -34,12 +37,14 @@ func (c *STLSORTChecker) CheckTrain(dataType schemapb.DataType, elementType sche
 
 func (c *STLSORTChecker) CheckValidDataType(indexType IndexType, field *schemapb.FieldSchema) error {
 	dataType := field.GetDataType()
-	if typeutil.IsArrayType(dataType) && typeutil.IsStructSubField(field.GetName()) {
+	if typeutil.IsArrayType(dataType) {
 		elemType := field.GetElementType()
-		if !typeutil.IsArithmetic(elemType) && !typeutil.IsStringType(elemType) && !typeutil.IsTimestamptzType(elemType) {
-			return merr.WrapErrParameterInvalidMsg("STL_SORT are only supported on numeric, varchar or timestamptz field, got struct sub-field of %s", field.GetElementType())
+		nested := typeutil.IsStructSubField(field.GetName())
+		if typeutil.IsArithmetic(elemType) || typeutil.IsStringType(elemType) ||
+			(nested && typeutil.IsTimestamptzType(elemType)) || (!nested && elemType == schemapb.DataType_Bool) {
+			return nil
 		}
-		return nil
+		return merr.WrapErrParameterInvalidMsg("STL_SORT does not support array element type %s", elemType)
 	}
 	if typeutil.IsJSONType(dataType) {
 		return nil

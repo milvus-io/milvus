@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/importid"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -167,6 +168,14 @@ func (t *ImportTask) Clone() Task {
 }
 
 func (t *ImportTask) Execute() []*conc.Future[any] {
+	if err := importutilv2.ValidateSnapshotTaskPartitions(t.req.GetFiles(), t.GetPartitionIDs()); err != nil {
+		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
+		return []*conc.Future[any]{conc.Go(func() (any, error) { return nil, err })}
+	}
+	if err := importutilv2.ValidateSnapshotImportTask(t.req.GetFiles(), t.req.GetOptions(), t.req.GetSnapshotL0Source()); err != nil {
+		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
+		return []*conc.Future[any]{conc.Go(func() (any, error) { return nil, err })}
+	}
 	bufferSize := t.GetBufferSize()
 	mlog.Info(t.ctx, "start to import", WrapLogFields(t,
 		mlog.Int64("bufferSize", bufferSize),
@@ -177,9 +186,10 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
 
 	req := t.req
+	readers := importutilv2.NewReaderFactory(t.ctx, t.cm, req.GetStorageConfig(), req.GetOptions())
 
-	fn := func(file *internalpb.ImportFile) error {
-		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, req.GetOptions(), int(bufferSize), t.req.GetStorageConfig())
+	fn := func(ctx context.Context, file *internalpb.ImportFile, rowBuffer, deleteBudget int64, shared *binlog.SnapshotL0Deletes) error {
+		reader, err := readers.NewReader(ctx, t.GetSchema(), file, int(rowBuffer), deleteBudget, shared)
 		if err != nil {
 			mlog.Warn(t.ctx, "new reader failed", WrapLogFields(t, mlog.String("file", file.String()), mlog.Err(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
@@ -210,17 +220,44 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 		return nil
 	}
 
+	if source := req.GetSnapshotL0Source(); source != nil {
+		return executeSnapshotSharedRead(t.ctx, t, t.manager, len(req.GetFiles()),
+			func(ctx context.Context, budget, bitmapBudget int64) (*binlog.SnapshotL0Deletes, error) {
+				return readers.PrepareSnapshotDeletes(ctx, t.GetSchema(), req.GetFiles(), source, budget, bitmapBudget)
+			},
+			func(ctx context.Context, i int, rowBuffer, budget int64, shared *binlog.SnapshotL0Deletes) error {
+				return fn(ctx, req.GetFiles()[i], rowBuffer, budget, shared)
+			})
+	}
+
 	futures := make([]*conc.Future[any], 0, len(req.GetFiles()))
 	for _, file := range req.GetFiles() {
 		file := file
 		f := GetExecPool().Submit(func() (any, error) {
-			// Use blocking allocation - this will wait until memory is available
-			GetMemoryAllocator().BlockingAllocate(t.GetTaskID(), bufferSize)
+			if file.GetSnapshotSource() != nil {
+				rowBuffer, budget, release, err := reserveSnapshotRead(t.ctx, t.GetTaskID(), bufferSize)
+				if err != nil {
+					t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
+					return nil, err
+				}
+				defer func() {
+					release()
+					debug.FreeOSMemory()
+				}()
+				err = fn(t.ctx, file, rowBuffer, budget, nil)
+				return err, err
+			}
+			// Wait until memory is available. A canceled task leaves the wait
+			// without charging memory, so there is nothing to release.
+			if err := GetMemoryAllocator().BlockingAllocate(t.ctx, t.GetTaskID(), bufferSize); err != nil {
+				mlog.Warn(t.ctx, "import task canceled while waiting for memory", WrapLogFields(t, mlog.Err(err))...)
+				return err, err
+			}
 			defer func() {
 				GetMemoryAllocator().Release(t.GetTaskID(), bufferSize)
 				debug.FreeOSMemory()
 			}()
-			err := fn(file)
+			err := fn(t.ctx, file, bufferSize, 0, nil)
 			return err, err
 		})
 		futures = append(futures, f)

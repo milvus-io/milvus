@@ -211,40 +211,44 @@ func TestChunkAssemblerRejectsMalformedTimeTick(t *testing.T) {
 }
 
 func TestChunkAssemblerUsesSparseSlotsAndDiscardsOrphansAtTimeTick(t *testing.T) {
-	oldHead := NewMutableMessageBeforeAppend([]byte("old"), map[string]string{
-		messageTypeKey:    "x",
-		messageTimeTick:   "100",
-		messageChunkIndex: "0",
-		messageChunkTotal: "1000000000",
-	}).IntoImmutableMessage(testMessageID("old-head"))
+	for _, typ := range []MessageType{MessageTypeTimeTick, MessageTypeMVCCBarrier} {
+		t.Run(typ.String(), func(t *testing.T) {
+			oldHead := NewMutableMessageBeforeAppend([]byte("old"), map[string]string{
+				messageTypeKey:    "x",
+				messageTimeTick:   "100",
+				messageChunkIndex: "0",
+				messageChunkTotal: "1000000000",
+			}).IntoImmutableMessage(testMessageID("old-head"))
 
-	future := SplitIntoChunks(NewMutableMessageBeforeAppend(
-		[]byte{0xAA, 0xBB},
-		map[string]string{messageTypeKey: "x", messageTimeTick: "200"},
-	), 1)
+			future := SplitIntoChunks(NewMutableMessageBeforeAppend(
+				[]byte{0xAA, 0xBB},
+				map[string]string{messageTypeKey: "x", messageTimeTick: "200"},
+			), 1)
 
-	var assembler ChunkAssembler
-	requireChunkPush(t, &assembler, oldHead)
-	requireChunkPush(t, &assembler, future[0].IntoImmutableMessage(testMessageID("future-head")))
-	oldTimeTick := oldHead.TimeTick()
-	futureTimeTick := future[0].TimeTick()
-	require.Len(t, assembler.runs[oldTimeTick].slots, 1, "declared total must not preallocate slots")
+			var assembler ChunkAssembler
+			requireChunkPush(t, &assembler, oldHead)
+			requireChunkPush(t, &assembler, future[0].IntoImmutableMessage(testMessageID("future-head")))
+			oldTimeTick := oldHead.TimeTick()
+			futureTimeTick := future[0].TimeTick()
+			require.Len(t, assembler.runs[oldTimeTick].slots, 1, "declared total must not preallocate slots")
 
-	timeTick := NewMutableMessageBeforeAppend(nil, map[string]string{
-		messageTypeKey:  MessageTypeTimeTick.marshal(),
-		messageTimeTick: "150",
-	}).IntoImmutableMessage(testMessageID("timetick"))
-	assembled, handled := requireChunkPush(t, &assembler, timeTick)
-	assert.False(t, handled)
-	assert.Nil(t, assembled)
-	assert.NotContains(t, assembler.runs, oldTimeTick)
-	assert.Contains(t, assembler.runs, futureTimeTick, "a run newer than the TimeTick remains live")
+			timeTick := NewMutableMessageBeforeAppend(nil, map[string]string{
+				messageTypeKey:  typ.marshal(),
+				messageTimeTick: "150",
+			}).IntoImmutableMessage(testMessageID("timetick"))
+			assembled, handled := requireChunkPush(t, &assembler, timeTick)
+			assert.False(t, handled)
+			assert.Nil(t, assembled)
+			assert.NotContains(t, assembler.runs, oldTimeTick)
+			assert.Contains(t, assembler.runs, futureTimeTick, "a run newer than the TimeTick remains live")
 
-	assembled, handled = requireChunkPush(t, &assembler, future[1].IntoImmutableMessage(testMessageID("future-tail")))
-	assert.True(t, handled)
-	require.NotNil(t, assembled)
-	assert.Equal(t, []byte{0xAA, 0xBB}, assembled.Payload())
-	assert.Empty(t, assembler.runs)
+			assembled, handled = requireChunkPush(t, &assembler, future[1].IntoImmutableMessage(testMessageID("future-tail")))
+			assert.True(t, handled)
+			require.NotNil(t, assembled)
+			assert.Equal(t, []byte{0xAA, 0xBB}, assembled.Payload())
+			assert.Empty(t, assembler.runs)
+		})
+	}
 }
 
 func stringPtr(value string) *string {

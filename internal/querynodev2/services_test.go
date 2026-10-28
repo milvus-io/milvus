@@ -520,13 +520,6 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
 }
 
-// TestWatchDmChannels_CanceledContextRollsBack covers the commit-point check
-// added at services.go: WatchDmChannels checks ctx.Err() once, right before
-// pipeline.Start()/delegator.Start(), so a caller whose context is canceled
-// (e.g. the coordinator's task deadline expired while this call was in
-// flight) doesn't leave the node subscribed to a channel the coordinator has
-// already given up on. This asserts the rollback actually happens: the
-// delegator this call registers is not left behind on failure.
 // TestWatchDmChannels_RebuildsUnserviceableDelegator covers the check added at
 // services.go: a delegator whose stream terminated stays registered and nothing
 // else removes it, because it is skipped in the distribution report and so
@@ -578,6 +571,13 @@ func (suite *ServiceSuite) TestWatchDmChannels_RebuildsUnserviceableDelegator() 
 	suite.NotSame(stale, rebuilt, "the unserviceable delegator must have been replaced")
 }
 
+// TestWatchDmChannels_CanceledContextRollsBack covers the commit-point check
+// added at services.go: WatchDmChannels checks ctx.Err() once, right before
+// pipeline.Start()/delegator.Start(), so a caller whose context is canceled
+// (e.g. the coordinator's task deadline expired while this call was in
+// flight) doesn't leave the node subscribed to a channel the coordinator has
+// already given up on. This asserts the rollback actually happens: the
+// delegator this call registers is not left behind on failure.
 func (suite *ServiceSuite) TestWatchDmChannels_CanceledContextRollsBack() {
 	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 	indexInfos := mock_segcore.GenTestIndexInfoList(suite.collectionID, schema)
@@ -789,6 +789,7 @@ func (suite *ServiceSuite) genSegmentLoadInfos(schema *schemapb.CollectionSchema
 					1000,
 				)
 				suite.Require().NoError(err)
+				index.NumRows = 1000
 				indexes = append(indexes, index)
 			}
 		}

@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
@@ -92,10 +93,10 @@ func receiveRecoveryTestMessage(t *testing.T, stream recovery.RecoveryStream) me
 
 func TestRecoveryScannerPreservesPartialTransaction(t *testing.T) {
 	for _, tc := range []struct {
-		name            string
-		rollback, evict bool
+		name                string
+		rollback, pressured bool
 	}{
-		{name: "commit"}, {name: "rollback", rollback: true}, {name: "evicted barrier", evict: true},
+		{name: "commit"}, {name: "rollback", rollback: true}, {name: "protected barrier under pressure", pressured: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resource.InitForTest(t)
@@ -106,7 +107,7 @@ func TestRecoveryScannerPreservesPartialTransaction(t *testing.T) {
 			appendRecoveryTestMessage(t, l, message.MessageTypeTimeTick, 4)
 			barrier := appendRecoveryTestMessage(t, l, message.MessageTypeRecoveryBarrier, 5)
 			capacity := 1024 * 1024
-			if tc.evict {
+			if tc.pressured {
 				capacity = 1
 			}
 			buffer := wab.NewWriteAheadBuffer(l.Channel().Name, mlog.With(), capacity, time.Hour, barrier)
@@ -130,14 +131,14 @@ func TestRecoveryScannerPreservesPartialTransaction(t *testing.T) {
 			require.Len(t, bodies, 1)
 			require.True(t, body.MessageID().EQ(bodies[0].MessageID()))
 
-			// The writer can confirm more data while recovery is paused. With a tiny
-			// WAB this evicts the handoff position, requiring continued durable catchup.
-			if tc.evict {
+			// The writer can confirm more data while recovery is paused. Even a tiny
+			// WAB must preserve the handoff and every unconsumed message.
+			if tc.pressured {
 				after := appendRecoveryTestMessage(t, l, message.MessageTypeInsert, 6)
 				tt := appendRecoveryTestMessage(t, l, message.MessageTypeTimeTick, 7)
 				buffer.Append([]message.ImmutableMessage{after}, tt)
 				_, err := buffer.ReadFromExclusiveTimeTick(context.Background(), barrier.TimeTick())
-				require.ErrorIs(t, err, wab.ErrEvicted)
+				require.NoError(t, err, "unconsumed recovery prefix must remain in WAB")
 			}
 			select {
 			case <-stream.Chan():
@@ -145,7 +146,7 @@ func TestRecoveryScannerPreservesPartialTransaction(t *testing.T) {
 			default:
 			}
 			close(liveReady)
-			if tc.evict {
+			if tc.pressured {
 				require.Equal(t, uint64(7), receiveRecoveryTestMessage(t, stream).TimeTick())
 			}
 
@@ -158,9 +159,9 @@ func TestRecoveryScannerPreservesPartialTransaction(t *testing.T) {
 			after := recoveryTestMessage(t, message.MessageTypeInsert, 8).IntoImmutableMessage(walimplstest.NewTestMessageID(100))
 			finish := recoveryTestMessage(t, kind, 9).IntoImmutableMessage(walimplstest.NewTestMessageID(101))
 			tt := recoveryTestMessage(t, message.MessageTypeTimeTick, 10).IntoImmutableMessage(walimplstest.NewTestMessageID(102))
-			if tc.evict {
-				// If the tail reader has already opened, evict it again. Both catchup
-				// paths must retain the same partial transaction until its durable commit.
+			if tc.pressured {
+				// Keep producing beyond capacity while the same tail reader retains
+				// its partial transaction until the durable commit.
 				after = appendRecoveryTestMessage(t, l, message.MessageTypeInsert, 8)
 				finish = appendRecoveryTestMessage(t, l, kind, 9)
 				tt = appendRecoveryTestMessage(t, l, message.MessageTypeTimeTick, 10)
@@ -170,7 +171,7 @@ func TestRecoveryScannerPreservesPartialTransaction(t *testing.T) {
 				txn := receiveRecoveryTestMessage(t, stream)
 				require.Equal(t, message.MessageTypeTxn, txn.MessageType())
 				want := 2
-				if tc.evict {
+				if tc.pressured {
 					want++
 				}
 				require.Equal(t, want, txn.(message.ImmutableTxnMessage).Size())
@@ -218,4 +219,73 @@ func TestRecoveryScannerCloseWhilePaused(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRecoveryScannerDeliversQueuedVolatileMVCCBarriers(t *testing.T) {
+	resource.InitForTest(t)
+	l := newRecoveryTestWAL(t)
+	barrier := appendRecoveryTestMessage(t, l, message.MessageTypeRecoveryBarrier, 5)
+	// Cached barriers are delivered individually, including repeated scopes.
+	buffer := wab.NewWriteAheadBuffer(l.Channel().Name, mlog.With(), 1, 0, barrier)
+	t.Cleanup(buffer.Close)
+	ro := adaptImplsToROWAL(l, func() {}, nil)
+	t.Cleanup(ro.Close)
+	ready := make(chan struct{})
+	stream := newRecoveryStreamBuilder(ro, buffer, ready).Build(recovery.BuildRecoveryStreamParam{
+		StartCheckpoint: barrier.MessageID(), RecoveryBarrier: barrier,
+	})
+	t.Cleanup(func() { _ = stream.Close() })
+	require.EqualValues(t, 5, receiveRecoveryTestMessage(t, stream).TimeTick())
+	for i, channel := range []string{"a", "b", "a"} {
+		msg := message.NewMVCCBarrierMessageBuilderV2().WithAllVChannel().WithNotPersisted().
+			WithHeader(&message.MVCCBarrierMessageHeader{Vchannels: []string{channel}}).
+			WithBody(&message.MVCCBarrierMessageBody{}).MustBuildMutable().
+			WithTimeTick(uint64(10 + i)).WithLastConfirmed(barrier.MessageID()).IntoImmutableMessage(barrier.MessageID())
+		buffer.Append(nil, msg)
+	}
+	latest := message.NewTimeTickMessageBuilderV1().WithAllVChannel().WithNotPersisted().
+		WithHeader(&message.TimeTickMessageHeader{}).WithBody(&msgpb.TimeTickMsg{}).MustBuildMutable().
+		WithTimeTick(20).WithLastConfirmed(barrier.MessageID()).IntoImmutableMessage(barrier.MessageID())
+	buffer.Append(nil, latest)
+	close(ready)
+	for i, channel := range []string{"a", "b", "a"} {
+		msg := receiveRecoveryTestMessage(t, stream)
+		require.Equal(t, message.MessageTypeMVCCBarrier, msg.MessageType())
+		require.EqualValues(t, 10+i, msg.TimeTick())
+		require.False(t, msg.IsPersisted())
+		require.Equal(t, []string{channel}, message.MustAsImmutableMVCCBarrierMessageV2(msg).Header().GetVchannels())
+	}
+}
+
+func TestOrdinaryCatchupReturnsToIdleWABAfterRecoveryConsumption(t *testing.T) {
+	resource.InitForTest(t)
+	l := newRecoveryTestWAL(t)
+	durable := appendRecoveryTestMessage(t, l, message.MessageTypeTimeTick, 100)
+	buffer := wab.NewWriteAheadBuffer(l.Channel().Name, mlog.With(), 1, 0, durable)
+	defer buffer.Close()
+	scoped := message.NewMVCCBarrierMessageBuilderV2().WithAllVChannel().WithNotPersisted().
+		WithHeader(&message.MVCCBarrierMessageHeader{Vchannels: []string{"v1"}}).
+		WithBody(&message.MVCCBarrierMessageBody{}).MustBuildMutable().WithTimeTick(110).
+		WithLastConfirmed(durable.MessageID()).IntoImmutableMessage(durable.MessageID())
+	buffer.Append(nil, scoped)
+	heartbeat := message.NewTimeTickMessageBuilderV1().WithAllVChannel().WithNotPersisted().
+		WithHeader(&message.TimeTickMessageHeader{}).WithBody(&msgpb.TimeTickMsg{}).
+		MustBuildMutable().WithTimeTick(120).WithLastConfirmed(durable.MessageID()).IntoImmutableMessage(durable.MessageID())
+	buffer.Append(nil, heartbeat)
+	buffer.ReleaseThrough(120)
+	messages := make(chan message.ImmutableMessage, 8)
+	scanner := newSwithableScanner("idle-catchup", mlog.With(), l, buffer,
+		options.DeliverPolicyStartFrom(durable.MessageID()), messages, nil, nil, nil)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	next, err := scanner.Do(ctx)
+	require.NoError(t, err, "catchup must switch without another durable write")
+	tailing, ok := next.(*tailingScanner)
+	require.True(t, ok)
+	require.Equal(t, durable.TimeTick(), (<-messages).TimeTick())
+	// The scoped barrier was consumed and expired; catchup must still reach
+	// the latest volatile heartbeat without another durable write.
+	msg, err := tailing.reader.Next(ctx)
+	require.NoError(t, err)
+	require.EqualValues(t, 120, msg.TimeTick())
 }

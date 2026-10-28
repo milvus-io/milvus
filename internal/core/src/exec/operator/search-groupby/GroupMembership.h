@@ -27,7 +27,9 @@ namespace milvus::exec {
 
 // One raw-column pass classifies eligible logical row offsets into groups.
 // Missing or incomplete raw data returns nullopt; retain the original iterator
-// rather than rescanning an indexed column once for each target group.
+// rather than rescanning an indexed column once for each target group. When a
+// request-scoped sealed read snapshot is available, the raw scan reads the
+// pinned column and chunk boundaries from the frozen published state.
 template <typename T>
 std::optional<std::vector<std::vector<int64_t>>>
 BuildGroupOffsets(milvus::OpContext* op_ctx,
@@ -35,6 +37,7 @@ BuildGroupOffsets(milvus::OpContext* op_ctx,
                   FieldId field_id,
                   int64_t row_count,
                   const std::vector<std::optional<T>>& groups,
-                  const TargetBitmap* base_filter);
+                  const TargetBitmap* base_filter,
+                  const segcore::SegmentReadSnapshot* snapshot = nullptr);
 
 }  // namespace milvus::exec

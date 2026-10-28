@@ -23,6 +23,7 @@ import (
 	gojson "encoding/json"
 	"fmt"
 	"io"
+	"iter"
 	"math"
 	"net/http"
 	"reflect"
@@ -32,6 +33,7 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+	"unsafe"
 
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
@@ -75,7 +77,7 @@ func HTTPReturn(c *gin.Context, code int, result gin.H) {
 }
 
 // HTTPReturnStream uses custom jsonRender that encodes JSON data directly into the response writer.
-// Timeout-wrapped REST routes still buffer encoded bytes before committing them to the client.
+// Buffered routes retain encoded bytes until completion; V2 DQL routes can encode rows in reusable batches.
 func HTTPReturnStream(c *gin.Context, code int, result gin.H) {
 	c.Set(HTTPReturnCode, result[HTTPReturnCode])
 	if errorMsg, ok := result[HTTPReturnMessage]; ok {
@@ -778,8 +780,8 @@ func jsonNumberLiteral(field string, raw string) (json.Number, error) {
 			"field %s integer %s exceeds the 64-bit range supported by the JSON engine, "+
 				"write it as a floating-point literal or as a string", field, raw)
 	}
-	// The request binder already rejects numbers outside the float64 range, so
-	// this only guards against that gate changing.
+	// The metadata-only binder validates JSON syntax without converting data
+	// numbers to float64. Enforce the float64 range for strict dynamic fields here.
 	if value, err := strconv.ParseFloat(raw, 64); err != nil || math.IsInf(value, 0) {
 		return "", merr.WrapErrParameterInvalidMsg(
 			"field %s number %s is outside the range representable as a double", field, raw)
@@ -835,12 +837,28 @@ func stringFieldValue(field string, value gjson.Result, compatibilityMode bool) 
 // disagreeing with itself rather than being generous.
 //
 // A string is a vector only where the type has a base64 spelling for one.
+//
+// FloatVector gained its base64 spelling after this check was already refusing
+// its quoted array, and that refusal is kept. Base64 has no '[' in its
+// alphabet, so a string holding an array is never the base64 spelling and
+// still means what it meant before: the text of a vector.
 func checkVectorSpelling(field string, dataType schemapb.DataType, value gjson.Result) error {
-	if value.Type != gjson.String || vectorAcceptsBase64(dataType) {
+	if value.Type != gjson.String {
+		return nil
+	}
+	if vectorAcceptsBase64(dataType) &&
+		(dataType != schemapb.DataType_FloatVector || !isArrayText(value.Str)) {
 		return nil
 	}
 	return merr.WrapErrParameterInvalidMsg(
 		"field %s expects a vector, got the text of one: %s", field, value.Raw)
+}
+
+// isArrayText reports whether s is the text of a JSON array. Only the first
+// non-blank character is looked at, which is enough to tell an array from
+// base64 and does not walk a long base64 vector.
+func isArrayText(s string) bool {
+	return strings.HasPrefix(strings.TrimLeft(s, " \t\r\n"), "[")
 }
 
 // vectorAcceptsBase64 reports whether a vector of this type may arrive as a
@@ -851,9 +869,15 @@ func checkVectorSpelling(field string, dataType schemapb.DataType, value gjson.R
 // entry exempted it from the check below, where "null" decodes to a nil slice
 // without an error and was stored as an empty vector. The list has to say what
 // the decoders do, not what the type name suggests.
+//
+// FloatVector is listed because the insert branch, convertQueries2Placeholder,
+// encodeEmbListQuery and buildStructSubVectorField all read base64 for it. The
+// exemption this gives it from the "null" check is safe: "null" decodes to
+// three bytes, which is never the dim*4 bytes decodeBase64FloatVector demands.
 func vectorAcceptsBase64(dataType schemapb.DataType) bool {
 	switch dataType {
 	case schemapb.DataType_BinaryVector,
+		schemapb.DataType_FloatVector,
 		schemapb.DataType_Float16Vector,
 		schemapb.DataType_BFloat16Vector:
 		return true
@@ -896,6 +920,32 @@ func nullElementIn(value gjson.Result) (int, bool) {
 	return idx, found
 }
 
+// dataRows preserves the single-object input accepted by V1 while iterating
+// arrays without allocating a []gjson.Result for every element.
+func dataRows(result gjson.Result) iter.Seq[gjson.Result] {
+	return func(yield func(gjson.Result) bool) {
+		if result.Type == gjson.Null {
+			return
+		}
+		if !result.IsArray() {
+			yield(result)
+			return
+		}
+		result.ForEach(func(_, row gjson.Result) bool {
+			return yield(row)
+		})
+	}
+}
+
+// dataResultFromBody borrows the request body without copying the entire data
+// array as GetBytes does. Result.Raw/Str and converted field strings can alias
+// this mutable []byte after checkAndSetData returns. Gin does not make the
+// cached body read-only: callers must never modify or reuse its backing array
+// while any derived string remains live, including during the downstream RPC.
+func dataResultFromBody(body []byte) gjson.Result {
+	return gjson.Get(unsafe.String(unsafe.SliceData(body), len(body)), HTTPRequestData)
+}
+
 func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partialUpdate bool, fieldOps ...*schemapb.FieldPartialUpdateOp) ([]map[string]interface{}, map[string][]bool, error) {
 	var reallyDataArray []map[string]interface{}
 	validDataMap := make(map[string][]bool)
@@ -909,11 +959,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 	// Read once per request rather than per field.
 	compatibilityMode := paramtable.Get().HTTPCfg.CompatibilityMode.GetAsBool()
 	nativeJSONResponse := paramtable.Get().HTTPCfg.NativeJSONResponse.GetAsBool()
-	dataResult := gjson.GetBytes(body, HTTPRequestData)
-	dataResultArray := dataResult.Array()
-	if len(dataResultArray) == 0 {
-		return reallyDataArray, validDataMap, merr.ErrMissingRequiredParameters
-	}
+	dataResult := dataResultFromBody(body)
 
 	fieldNames := make([]string, 0, len(collSchema.Fields)+len(collSchema.StructArrayFields))
 	for _, field := range collSchema.Fields {
@@ -926,11 +972,16 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 		fieldNames = append(fieldNames, structField.GetName())
 	}
 
-	for _, data := range dataResultArray {
+	hasData := false
+	for data := range dataRows(dataResult) {
+		hasData = true
 		reallyData := map[string]interface{}{}
-		if data.Type == gjson.JSON {
+		if data.IsObject() {
+			// Schema field names are literal keys. Reuse this map for dynamic fields
+			// below instead of rescanning the row for every schema field.
+			rowFields := data.Map()
 			for _, structField := range collSchema.StructArrayFields {
-				rawValue := gjson.Get(data.Raw, structField.GetName())
+				rawValue := rowFields[structField.GetName()]
 				if !rawValue.Exists() {
 					if partialUpdate {
 						continue
@@ -968,7 +1019,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 				}
 				fieldType := field.DataType
 				fieldName := field.Name
-				fieldValue := data.Get(fieldName)
+				fieldValue := rowFields[fieldName]
 
 				// Replacement operands are JSON values, not SQL NULL or an encoded
 				// document string. Preserve their type regardless of compatibility mode.
@@ -1068,8 +1119,24 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					if dataString == "" {
 						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName)
 					}
+					// A string is the base64 spelling of the vector, unless it
+					// holds an array. That only gets this far in compatibility
+					// mode, where checkVectorSpelling is skipped and the quoted
+					// array is still read as the array it always was.
+					if fieldValue.Type == gjson.String && !isArrayText(dataString) {
+						dim, err := getDim(field)
+						if err != nil {
+							return reallyDataArray, validDataMap, merr.WrapErrServiceInternalErr(err, "field %s has no dim in its schema", fieldName)
+						}
+						vectorArray, err := decodeBase64FloatVector(fieldValue, dim)
+						if err != nil {
+							return reallyDataArray, validDataMap, merr.Wrapf(err, "field %s", fieldName)
+						}
+						reallyData[fieldName] = vectorArray
+						break
+					}
 					var vectorArray []float32
-					err := json.Unmarshal([]byte(dataString), &vectorArray)
+					err := json.UnmarshalFromString(dataString, &vectorArray)
 					if err != nil {
 						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error())
 					}
@@ -1080,7 +1147,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 					}
 					vectorStr := fieldValue.Raw
 					var vectorArray []byte
-					err := json.Unmarshal([]byte(vectorStr), &vectorArray)
+					err := json.UnmarshalFromString(vectorStr, &vectorArray)
 					if err != nil {
 						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error())
 					}
@@ -1108,7 +1175,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 						// `data` is a float32 vector
 						// same as `case schemapb.DataType_FloatVector`
 						var vectorArray []float32
-						err := json.Unmarshal([]byte(dataString), &vectorArray)
+						err := json.UnmarshalFromString(dataString, &vectorArray)
 						if err != nil {
 							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error())
 						}
@@ -1118,7 +1185,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 						// same as `case schemapb.DataType_BinaryVector`
 						vectorStr := fieldValue.Raw
 						var vectorArray []byte
-						err := json.Unmarshal([]byte(vectorStr), &vectorArray)
+						err := json.UnmarshalFromString(vectorStr, &vectorArray)
 						if err != nil {
 							return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error())
 						}
@@ -1131,7 +1198,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName)
 					}
 					var vectorArray []int8
-					err := json.Unmarshal([]byte(dataString), &vectorArray)
+					err := json.UnmarshalFromString(dataString, &vectorArray)
 					if err != nil {
 						return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error())
 					}
@@ -1373,7 +1440,7 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 			// Two keys that differ only in a lone surrogate escape both decode to
 			// U+FFFD, so Map() collapses them and one field disappears without a
 			// word. The decoded key passes utf8.ValidString, so it has to be
-			// caught on the raw text before the map is built.
+			// caught on the raw text rather than on the decoded map keys.
 			if !compatibilityMode {
 				var keyErr error
 				data.ForEach(func(key, _ gjson.Result) bool {
@@ -1393,9 +1460,9 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 			// twice, so {"dyn": 1, "dyn": 2} silently stores 1. Duplicate keys
 			// *inside* a dynamic value are rejected, which makes the two
 			// inconsistent, but catching this one needs a scan of the whole row
-			// before the map is built and the behavior predates this change, so
+			// rather than the map and the behavior predates this change, so
 			// it is left alone deliberately.
-			for mapKey, mapValue := range data.Map() {
+			for mapKey, mapValue := range rowFields {
 				if !containsString(fieldNames, mapKey) {
 					if collSchema.EnableDynamicField {
 						if mapKey == common.MetaFieldName {
@@ -1473,8 +1540,11 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 
 			reallyDataArray = append(reallyDataArray, reallyData)
 		} else {
-			return reallyDataArray, validDataMap, merr.WrapErrParameterInvalid(gjson.JSON, data.Type, "NULL:0, FALSE:1, NUMBER:2, STRING:3, TRUE:4, JSON:5")
+			return reallyDataArray, validDataMap, merr.WrapErrParameterInvalidMsg("data[%d] must be a JSON object", len(reallyDataArray))
 		}
+	}
+	if !hasData {
+		return reallyDataArray, validDataMap, merr.ErrMissingRequiredParameters
 	}
 	return reallyDataArray, validDataMap, nil
 }
@@ -1494,10 +1564,7 @@ func schemaForPathReplaceOperands(body []byte, collSchema *schemapb.CollectionSc
 		return collSchema, nil
 	}
 
-	rows := gjson.GetBytes(body, HTTPRequestData).Array()
-	if len(rows) == 0 {
-		return collSchema, nil
-	}
+	var arrayFields []*schemapb.FieldSchema
 	for _, field := range collSchema.GetFields() {
 		if field.GetDataType() != schemapb.DataType_Array {
 			continue
@@ -1505,7 +1572,21 @@ func schemaForPathReplaceOperands(body []byte, collSchema *schemapb.CollectionSc
 		if _, targeted := targets[field.GetName()]; !targeted {
 			continue
 		}
-		for rowIndex, row := range rows {
+		arrayFields = append(arrayFields, field)
+	}
+	var structFields []*schemapb.StructArrayFieldSchema
+	for _, structSchema := range collSchema.GetStructArrayFields() {
+		if _, targeted := targets[structSchema.GetName()]; targeted {
+			structFields = append(structFields, structSchema)
+		}
+	}
+	expectedMasks := make(map[string][]string, len(structFields))
+	rowIndex := 0
+	for row := range dataRows(dataResultFromBody(body)) {
+		if !row.IsObject() {
+			return nil, merr.WrapErrParameterInvalidMsg("data[%d] must be a JSON object", rowIndex)
+		}
+		for _, field := range arrayFields {
 			rawValue := gjson.Get(row.Raw, field.GetName())
 			if !rawValue.Exists() || rawValue.Type == gjson.Null {
 				continue
@@ -1520,24 +1601,28 @@ func schemaForPathReplaceOperands(body []byte, collSchema *schemapb.CollectionSc
 					rowIndex, field.GetName(), index)
 			}
 		}
-	}
-	requestSchema := proto.Clone(collSchema).(*schemapb.CollectionSchema)
-	for _, structSchema := range requestSchema.GetStructArrayFields() {
-		if _, targeted := targets[structSchema.GetName()]; !targeted {
-			continue
-		}
-		var expectedMask []string
-		for rowIndex, row := range rows {
+		for _, structSchema := range structFields {
 			rawValue := gjson.Get(row.Raw, structSchema.GetName())
 			if !rawValue.Exists() || rawValue.Type == gjson.Null {
 				return nil, merr.WrapErrParameterInvalidMsg("row %d PATH_REPLACE struct field %q must not be missing or null", rowIndex, structSchema.GetName())
 			}
-			elements := rawValue.Array()
-			if !rawValue.IsArray() || len(elements) != 1 || !elements[0].IsObject() {
+			if !rawValue.IsArray() {
+				return nil, merr.WrapErrParameterInvalidMsg("row %d PATH_REPLACE struct field %q must contain exactly one object", rowIndex, structSchema.GetName())
+			}
+			var element gjson.Result
+			elementCount := 0
+			rawValue.ForEach(func(_, value gjson.Result) bool {
+				elementCount++
+				if elementCount == 1 {
+					element = value
+				}
+				return elementCount == 1 && element.IsObject()
+			})
+			if elementCount != 1 || !element.IsObject() {
 				return nil, merr.WrapErrParameterInvalidMsg("row %d PATH_REPLACE struct field %q must contain exactly one object", rowIndex, structSchema.GetName())
 			}
 			mask := make([]string, 0)
-			elements[0].ForEach(func(key, _ gjson.Result) bool {
+			element.ForEach(func(key, _ gjson.Result) bool {
 				mask = append(mask, key.String())
 				return true
 			})
@@ -1545,12 +1630,24 @@ func schemaForPathReplaceOperands(body []byte, collSchema *schemapb.CollectionSc
 			if len(mask) == 0 {
 				return nil, merr.WrapErrParameterInvalidMsg("row %d PATH_REPLACE struct field %q child mask must not be empty", rowIndex, structSchema.GetName())
 			}
-			if rowIndex == 0 {
-				expectedMask = mask
+			if expectedMask, ok := expectedMasks[structSchema.GetName()]; !ok {
+				expectedMasks[structSchema.GetName()] = mask
 			} else if !slices.Equal(expectedMask, mask) {
 				return nil, merr.WrapErrParameterInvalidMsg("row %d PATH_REPLACE struct field %q child mask %v does not match request mask %v", rowIndex, structSchema.GetName(), mask, expectedMask)
 			}
 		}
+		rowIndex++
+	}
+	if rowIndex == 0 {
+		return collSchema, nil
+	}
+
+	requestSchema := proto.Clone(collSchema).(*schemapb.CollectionSchema)
+	for _, structSchema := range requestSchema.GetStructArrayFields() {
+		if _, targeted := targets[structSchema.GetName()]; !targeted {
+			continue
+		}
+		expectedMask := expectedMasks[structSchema.GetName()]
 
 		path := targets[structSchema.GetName()]
 		if strings.Count(path, "[") == 1 {
@@ -2153,8 +2250,16 @@ func buildStructSubVectorField(sub *schemapb.FieldSchema, vals []gjson.Result) (
 	case schemapb.DataType_FloatVector:
 		packed := &schemapb.FloatArray{}
 		for _, v := range vals {
+			if v.Type == gjson.String {
+				row, err := decodeBase64FloatVector(v, dim)
+				if err != nil {
+					return nil, wrapStructSubParseError(sub, v, err.Error())
+				}
+				packed.Data = append(packed.Data, row...)
+				continue
+			}
 			if !v.IsArray() {
-				return nil, wrapStructSubParseError(sub, v, "expect float vector array")
+				return nil, wrapStructSubParseError(sub, v, "expect float vector array or base64 string")
 			}
 			var row []float32
 			if err := json.Unmarshal([]byte(v.Raw), &row); err != nil {
@@ -2242,6 +2347,27 @@ func buildStructSubVectorField(sub *schemapb.FieldSchema, vals []gjson.Result) (
 			"sub-field %s has unsupported vector element type %s",
 			sub.GetName(), sub.GetElementType())
 	}
+}
+
+// decodeBase64FloatVector reads the base64 spelling of a float vector: the
+// little-endian float32 bytes that Float32ArrayToBytes builds for a search
+// placeholder.
+//
+// The 16-bit floats leave their length check to the column builder, but this
+// one cannot wait: BytesToFloat32Vector drops a trailing partial float, so
+// dim*4+1 bytes would arrive there as a well-formed vector of dim floats.
+func decodeBase64FloatVector(v gjson.Result, dim int64) ([]float32, error) {
+	// Decoded as a JSON []byte rather than with the base64 package so that the
+	// accepted spelling is exactly the one the other base64 vectors accept.
+	var raw []byte
+	if err := json.UnmarshalFromString(v.Raw, &raw); err != nil {
+		return nil, merr.WrapErrParameterInvalidErr(err, "float vector is not valid base64")
+	}
+	if int64(len(raw)) != dim*4 {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"base64 float vector byte length mismatch: expect %d (dim %d), got %d", dim*4, dim, len(raw))
+	}
+	return typeutil.BytesToFloat32Vector(raw), nil
 }
 
 func decodeByteVectorElement(v gjson.Result, dim, bytesPerVec int64, isFloat16 bool) ([]byte, error) {
@@ -2374,9 +2500,17 @@ func encodeEmbListQuery(vecs []gjson.Result, elemType schemapb.DataType, dim int
 	case schemapb.DataType_FloatVector:
 		buf := make([]byte, 0, int(dim*4)*len(vecs))
 		for vIdx, v := range vecs {
+			if v.Type == gjson.String {
+				row, err := decodeBase64FloatVector(v, dim)
+				if err != nil {
+					return nil, merr.Wrapf(err, "search data[%d][%d]", qIdx, vIdx)
+				}
+				buf = append(buf, typeutil.Float32ArrayToBytes(row)...)
+				continue
+			}
 			if !v.IsArray() {
 				return nil, merr.WrapErrParameterInvalidMsg(
-					"search data[%d][%d] must be a float vector array", qIdx, vIdx)
+					"search data[%d][%d] must be a float vector array or base64 string", qIdx, vIdx)
 			}
 			var row []float32
 			if err := json.Unmarshal([]byte(v.Raw), &row); err != nil {
@@ -2865,15 +2999,16 @@ func vectorFieldToInterfaces(vf *schemapb.VectorField, elemType schemapb.DataTyp
 }
 
 func convertFloatVectorToArray(vector [][]float32, dim int64) ([]float32, error) {
-	floatArray := make([]float32, 0)
+	// Validate before allocating the final column, including on malformed rows.
 	for _, arr := range vector {
 		if int64(len(arr)) != dim {
 			return nil, merr.WrapErrParameterInvalidMsg("[]float32 size %d doesn't equal to vector dimension %d of %s",
 				len(arr), dim, schemapb.DataType_name[int32(schemapb.DataType_FloatVector)])
 		}
-		for i := int64(0); i < dim; i++ {
-			floatArray = append(floatArray, arr[i])
-		}
+	}
+	floatArray := make([]float32, 0, len(vector)*int(dim))
+	for _, arr := range vector {
+		floatArray = append(floatArray, arr...)
 	}
 	return floatArray, nil
 }
@@ -2894,22 +3029,22 @@ func convertBinaryVectorToArray(vector [][]byte, dim int64, dataType schemapb.Da
 			return nil, merr.WrapErrParameterInvalidMsg("[]byte size %d doesn't equal to vector dimension %d of %s",
 				len(arr), dim, schemapb.DataType_name[int32(dataType)])
 		}
-		for i := int64(0); i < bytesLen; i++ {
-			binaryArray = append(binaryArray, arr[i])
-		}
+		binaryArray = append(binaryArray, arr...)
 	}
 	return binaryArray, nil
 }
 
 func convertInt8VectorToArray(vector [][]int8, dim int64) ([]byte, error) {
-	byteArray := make([]byte, 0)
 	for _, arr := range vector {
 		if int64(len(arr)) != dim {
 			return nil, merr.WrapErrParameterInvalidMsg("[]int8 size %d doesn't equal to vector dimension %d of %s",
 				len(arr), dim, schemapb.DataType_name[int32(schemapb.DataType_Int8Vector)])
 		}
-		for i := int64(0); i < dim; i++ {
-			byteArray = append(byteArray, byte(arr[i]))
+	}
+	byteArray := make([]byte, 0, len(vector)*int(dim))
+	for _, arr := range vector {
+		for _, value := range arr {
+			byteArray = append(byteArray, byte(value))
 		}
 	}
 	return byteArray, nil
@@ -3563,18 +3698,20 @@ func serializeByteVectors(vectorStr string, dataType schemapb.DataType, dimensio
 
 // serializeFloatOrByteVectors serializes float32/float16/bfloat16 vectors.
 // `[[1, 2, 3], [4.0, 5.0, 6.0]] is float32 vector,
-// `["4z1jPgAAgL8=", "gD+AP4A/gD8="]` is float16/bfloat16 vector.
-func serializeFloatOrByteVectors(jsonResult gjson.Result, dataType schemapb.DataType, dimension int64, fpArrayToBytesFunc func([]float32) []byte) ([][]byte, error) {
+// `["4z1jPgAAgL8=", "gD+AP4A/gD8="]` is float16/bfloat16 vector, or float32
+// when bytesLen is dimension*4. bytesLen is the encoded size of one vector,
+// which the base64 form is checked against.
+func serializeFloatOrByteVectors(jsonResult gjson.Result, dataType schemapb.DataType, dimension, bytesLen int64, fpArrayToBytesFunc func([]float32) []byte) ([][]byte, error) {
 	firstElement := jsonResult.Get("0")
 
 	// Clients may send float32 vector because they are inconvenient of processing float16 or bfloat16.
 	// Float32 vector is an array in JSON format, like `[1.0, 2.0, 3.0]`, `[1, 2, 3]`, etc,
 	// while float16 or bfloat16 vector is a string in JSON format, like `"4z1jPgAAgL8="`, `"gD+AP4A/gD8="`, etc.
 	if firstElement.IsArray() {
-		return serializeFloatVectors(jsonResult.Raw, dataType, dimension, dimension*2, fpArrayToBytesFunc)
+		return serializeFloatVectors(jsonResult.Raw, dataType, dimension, bytesLen, fpArrayToBytesFunc)
 	} else if firstElement.Type == gjson.String || !firstElement.Exists() {
 		// consider corner case: `[]`
-		return serializeByteVectors(jsonResult.Raw, dataType, dimension, dimension*2)
+		return serializeByteVectors(jsonResult.Raw, dataType, dimension, bytesLen)
 	}
 	return nil, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(dataType)], jsonResult.Raw, "invalid type")
 }
@@ -3638,16 +3775,18 @@ func convertQueries2Placeholder(body string, dataType schemapb.DataType, dimensi
 	switch dataType {
 	case schemapb.DataType_FloatVector:
 		valueType = commonpb.PlaceholderType_FloatVector
-		values, err = serializeFloatVectors(gjson.Get(body, HTTPRequestData).Raw, dataType, dimension, dimension*4, typeutil.Float32ArrayToBytes)
+		// The base64 form is already the placeholder's byte layout, so it is
+		// passed through as the 16-bit floats' is, after its length check.
+		values, err = serializeFloatOrByteVectors(gjson.Get(body, HTTPRequestData), dataType, dimension, dimension*4, typeutil.Float32ArrayToBytes)
 	case schemapb.DataType_BinaryVector:
 		valueType = commonpb.PlaceholderType_BinaryVector
 		values, err = serializeByteVectors(gjson.Get(body, HTTPRequestData).Raw, dataType, dimension, dimension/8)
 	case schemapb.DataType_Float16Vector:
 		valueType = commonpb.PlaceholderType_Float16Vector
-		values, err = serializeFloatOrByteVectors(gjson.Get(body, HTTPRequestData), dataType, dimension, typeutil.Float32ArrayToFloat16Bytes)
+		values, err = serializeFloatOrByteVectors(gjson.Get(body, HTTPRequestData), dataType, dimension, dimension*2, typeutil.Float32ArrayToFloat16Bytes)
 	case schemapb.DataType_BFloat16Vector:
 		valueType = commonpb.PlaceholderType_BFloat16Vector
-		values, err = serializeFloatOrByteVectors(gjson.Get(body, HTTPRequestData), dataType, dimension, typeutil.Float32ArrayToBFloat16Bytes)
+		values, err = serializeFloatOrByteVectors(gjson.Get(body, HTTPRequestData), dataType, dimension, dimension*2, typeutil.Float32ArrayToBFloat16Bytes)
 	case schemapb.DataType_SparseFloatVector:
 		valueType = commonpb.PlaceholderType_SparseFloatVector
 		values, err = serializeSparseFloatVectors(gjson.Get(body, HTTPRequestData).Array(), dataType)
@@ -4107,6 +4246,8 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 			case *schemapb.IDs_StrId:
 				stringPks := ids.GetStrId().GetData()
 				rowsNum = int64(len(stringPks))
+			case nil:
+				// An empty search result can carry IDs with no IdField set.
 			default:
 				return nil, asSafeMessage(merr.WrapErrParameterInvalidMsg("the type of primary key(id) is not supported, use other sdk please"))
 			}
@@ -4605,13 +4746,6 @@ func CheckLimiter(ctx context.Context, req interface{}, pxy types.ProxyComponent
 	if !paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
 		return nil, nil
 	}
-	// apply limiter for http/http2 server
-	limiter, err := pxy.GetRateLimiter()
-	if err != nil {
-		mlog.Error(ctx, "Get proxy rate limiter for httpV1/V2 server failed", mlog.Err(err))
-		return nil, err
-	}
-
 	request, ok := req.(proto.Message)
 	if !ok {
 		return nil, merr.WrapErrParameterInvalidMsg("wrong req format when check limiter")
@@ -4620,6 +4754,15 @@ func CheckLimiter(ctx context.Context, req interface{}, pxy types.ProxyComponent
 	metaCache := getProxyMetaCache(pxy)
 	dbID, collectionIDToPartIDs, rt, n, err := proxy.GetRequestInfo(ctx, metaCache(), request)
 	if err != nil {
+		return nil, err
+	}
+	if n == 0 {
+		return nil, nil
+	}
+	// Resolve the limiter only for requests that consume quota.
+	limiter, err := pxy.GetRateLimiter()
+	if err != nil {
+		mlog.Error(ctx, "Get proxy rate limiter for httpV1/V2 server failed", mlog.Err(err))
 		return nil, err
 	}
 	err = limiter.Check(dbID, collectionIDToPartIDs, rt, n)

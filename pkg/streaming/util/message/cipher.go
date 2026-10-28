@@ -2,14 +2,20 @@ package message
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -57,18 +63,48 @@ func isKmsKeyInvalidError(err error) bool {
 	return errors.Is(err, ErrKmsKeyInvalid) || strings.Contains(err.Error(), "kms key invalid")
 }
 
-// getDecryptorWithRetry wraps cipher.GetDecryptor with retry logic for streaming node consumption.
-// It retries with exponential backoff if the error is KmsKeyInvalid (retriable).
-// For other errors, it returns immediately without retry.
-func getDecryptorWithRetry(ezID, collectionID int64, safeKey []byte) (hook.Decryptor, error) {
-	return getDecryptorWithRetryContext(context.Background(), ezID, collectionID, safeKey)
+// TryDecryptPayload makes one decryption attempt, leaving retries to the caller.
+// Terminal cipher failures panic as in Payload.
+func TryDecryptPayload(msg BasicMessage) ([]byte, error) {
+	wire := msg.IntoMessageProto()
+	header, ok := wire.Properties[messageCipherHeader]
+	if !ok {
+		return wire.Payload, nil
+	}
+	ch := &messagespb.CipherHeader{}
+	if err := DecodeProto(header, ch); err != nil {
+		panic(fmt.Sprintf("can not decode message payload: %s", err))
+	}
+	c, err := getCipher()
+	var payload []byte
+	if err == nil {
+		var decryptor hook.Decryptor
+		decryptor, err = c.GetDecryptor(ch.EzId, ch.CollectionId, ch.SafeKey)
+		if err == nil {
+			payload, err = decryptor.Decrypt(wire.Payload)
+		}
+	}
+	if err != nil {
+		if isKmsKeyInvalidError(err) {
+			return nil, errors.Mark(err, ErrKmsKeyInvalid)
+		}
+		if isRetryableCipherError(err) {
+			return nil, err
+		}
+		panic(fmt.Sprintf("can not decode message payload: %s", err))
+	}
+	return payload, nil
 }
 
-func getDecryptorWithRetryContext(
-	ctx context.Context,
-	ezID, collectionID int64,
-	safeKey []byte,
-) (hook.Decryptor, error) {
+// IsRetryableCipherError shares the existing cipher retry classification with consumers.
+func IsRetryableCipherError(err error) bool {
+	return isRetryableCipherError(err)
+}
+
+// decryptPayloadWithRetry retries only recoverable cipher failures, before any
+// consumer applies the message. Reacquire the decryptor after each failure so a
+// refreshed key can replace the previous one. There is no per-message goroutine.
+func decryptPayloadWithRetry(ctx context.Context, ezID, collectionID int64, safeKey, payload []byte) ([]byte, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -80,37 +116,29 @@ func getDecryptorWithRetryContext(
 		return nil, err
 	}
 
-	const (
-		initialBackoff = 100 * time.Millisecond
-		maxBackoff     = 3 * time.Second
-		backoffFactor  = 2.0
-	)
-
-	backoff := initialBackoff
-	attempt := 0
-
-	for {
-		attempt++
+	backoff := 100 * time.Millisecond
+	for attempt := 1; ; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		decryptor, err := cipher.GetDecryptor(ezID, collectionID, safeKey)
 		if err == nil {
-			return decryptor, nil
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			var decoded []byte
+			decoded, err = decryptor.Decrypt(payload)
+			if err == nil {
+				return decoded, nil
+			}
 		}
-
-		// If it's NOT a KMS key invalid error, fail immediately (non-retriable)
-		if !isKmsKeyInvalidError(err) {
-			mlog.Error(ctx, "failed to get decryptor with non-retriable error",
-				mlog.Int64("ezID", ezID),
-				mlog.FieldCollectionID(collectionID),
-				mlog.Int("attempt", attempt),
-				mlog.Err(err))
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if !isRetryableCipherError(err) {
 			return nil, err
 		}
-
-		// KMS key invalid error - log and retry
-		mlog.Warn(ctx, "KMS key invalid, will retry",
+		mlog.Warn(ctx, "message decryption failed, will retry",
 			mlog.Int64("ezID", ezID),
 			mlog.FieldCollectionID(collectionID),
 			mlog.Int("attempt", attempt),
@@ -124,12 +152,37 @@ func getDecryptorWithRetryContext(
 			return nil, ctx.Err()
 		case <-timer.C:
 		}
+		backoff = min(backoff*2, 3*time.Second)
+	}
+}
 
-		// Exponential backoff with max cap
-		backoff = time.Duration(float64(backoff) * backoffFactor)
-		if backoff > maxBackoff {
-			backoff = maxBackoff
-		}
+// Unknown plugin errors stay terminal: retrying corrupt ciphertext forever
+// would hide the failure. Preserve the existing KMS key restoration contract.
+func isRetryableCipherError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if isKmsKeyInvalidError(err) {
+		return true
+	}
+	if merr.IsMilvusError(err) {
+		return merr.IsRetryableErr(err)
+	}
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	if errors.IsAny(err, context.DeadlineExceeded, syscall.ECONNRESET, syscall.ECONNREFUSED, syscall.EPIPE) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	switch status.Code(err) {
+	case codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted:
+		return true
+	default:
+		return false
 	}
 }
 

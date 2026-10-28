@@ -2,10 +2,13 @@ package coordview
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -38,7 +41,7 @@ func (*immediateLostRecoverySyncer) Close() error { return nil }
 // an empty catalog.
 func newTestRegistry(t *testing.T, catalog *mockCatalog, s *mockSyncer) *ShardViewRegistry {
 	t.Helper()
-	reg, err := RecoverShardViewRegistry(context.Background(), catalog, s)
+	reg, err := RecoverShardViewRegistryWithDataViews(context.Background(), catalog, s, stubDataViewRefProvider{})
 	require.NoError(t, err)
 	t.Cleanup(reg.Close)
 	return reg
@@ -130,15 +133,25 @@ func TestRegistry_RemovesManagerAfterLastViewDurablyDropped(t *testing.T) {
 	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
 	simulateNodeResponse(t, s, qviews.NewStreamingNodeFromVChannel(shardID.VChannel), version, qviews.QueryViewStateUp)
 	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
+	var removals atomic.Int64
+	stop := reg.RegisterShardRemovalListener(100, func() { removals.Add(1) })
+	defer stop()
 	require.NoError(t, manager.RequestRelease(context.Background()))
 	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
 	simulateNodeResponse(t, s, qviews.NewStreamingNodeFromVChannel(shardID.VChannel), version, qviews.QueryViewStateDown)
 	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
 	simulateNodeResponse(t, s, qviews.NewStreamingNodeFromVChannel(shardID.VChannel), version, qviews.QueryViewStateDropped)
 	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
+	require.Zero(t, removals.Load(), "the remaining QueryNode still needs cleanup")
+	batch := reg.Begin()
+	defer batch.Commit()
 	simulateNodeResponse(t, s, testQN1, version, qviews.QueryViewStateDropped)
+	require.Same(t, manager, reg.Get(shardID))
+	require.Zero(t, removals.Load(), "node acknowledgements must not notify before durable deletion")
+	batch.Commit()
 	require.NoError(t, reg.flushScheduler.Flush(context.Background()))
 
+	assert.Equal(t, int64(1), removals.Load())
 	assert.Nil(t, reg.Get(shardID))
 	assert.Empty(t, reg.ShardIDs())
 	assert.Empty(t, reg.CollectionShards(100))
@@ -150,7 +163,10 @@ func TestRegistry_DoesNotRemoveReplacementManager(t *testing.T) {
 	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_100v0"}
 	oldManager := reg.Ensure(shardID)
-	replacement := newShardViewManager(context.Background(), shardID, reg.flushScheduler, nil)
+	removals := 0
+	stop := reg.RegisterShardRemovalListener(100, func() { removals++ })
+	defer stop()
+	replacement := newShardViewManager(context.Background(), shardID, reg.flushScheduler, nil, stubDataViewRefProvider{})
 	replacement.SetStatsObserver(reg.onShardStatsChanged)
 	replacement.setOnReleasedEmpty(reg.removeReleasedManager)
 
@@ -160,13 +176,14 @@ func TestRegistry_DoesNotRemoveReplacementManager(t *testing.T) {
 	reg.removeReleasedManager(shardID, oldManager)
 
 	assert.Same(t, replacement, reg.Get(shardID))
+	assert.Zero(t, removals, "a stale manager must not publish removal of its replacement")
 }
 
 func TestRegistry_IgnoresStatsFromEvictedManager(t *testing.T) {
 	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_100v0"}
 	oldManager := reg.Ensure(shardID)
-	replacement := newShardViewManager(context.Background(), shardID, reg.flushScheduler, nil)
+	replacement := newShardViewManager(context.Background(), shardID, reg.flushScheduler, nil, stubDataViewRefProvider{})
 	replacement.SetStatsObserver(reg.onShardStatsChanged)
 	replacement.setOnReleasedEmpty(reg.removeReleasedManager)
 
@@ -212,7 +229,7 @@ func TestRegistry_RecoverWithPersistedViews(t *testing.T) {
 	// we need to populate the listed views manually.
 	catalog.listed = []*viewpb.QueryViewOfShard{viewA, viewB}
 
-	reg, err := RecoverShardViewRegistry(context.Background(), catalog, newMockSyncer())
+	reg, err := RecoverShardViewRegistryWithDataViews(context.Background(), catalog, newMockSyncer(), stubDataViewRefProvider{})
 	require.NoError(t, err)
 	t.Cleanup(reg.Close)
 
@@ -246,7 +263,7 @@ func TestRegistry_RecoveryPublishesImmediateQueryNodeLoss(t *testing.T) {
 	catalog.listed = []*viewpb.QueryViewOfShard{view}
 	s := &immediateLostRecoverySyncer{}
 
-	reg, err := RecoverShardViewRegistry(context.Background(), catalog, s)
+	reg, err := RecoverShardViewRegistryWithDataViews(context.Background(), catalog, s, stubDataViewRefProvider{})
 	require.NoError(t, err)
 	t.Cleanup(reg.Close)
 	require.Equal(t, int64(1), s.lostCallbacks.Load())
@@ -480,4 +497,225 @@ func shardStatsForNodes(segmentNodes map[int64][]int64) *ShardStats {
 		}
 	}
 	return stats
+}
+
+func TestRegistry_SnapshotForCollection(t *testing.T) {
+	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_100v0"}
+	shardB := qviews.ShardID{ReplicaID: 2, VChannel: shardA.VChannel}
+	other := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_200v0"}
+	statsA, statsB := &ShardStats{}, &ShardStats{}
+	reg := &ShardViewRegistry{
+		version:          1,
+		stats:            map[qviews.ShardID]*ShardStats{shardA: statsA, other: {}},
+		collectionShards: map[int64]map[qviews.ShardID]struct{}{100: {shardA: {}}, 200: {other: {}}},
+	}
+	first := reg.SnapshotForCollection(100)
+	require.Equal(t, uint64(1), first.Version())
+	require.Equal(t, map[qviews.ShardID]*ShardStats{shardA: statsA}, first.StatsMap())
+	require.Empty(t, reg.SnapshotForCollection(300).StatsMap())
+	reg.mu.Lock()
+	reg.stats[shardB] = statsB
+	reg.collectionShards[100][shardB] = struct{}{}
+	delete(reg.stats, shardA)
+	delete(reg.collectionShards[100], shardA)
+	reg.version++
+	reg.mu.Unlock()
+	next := reg.SnapshotForCollection(100)
+	require.Equal(t, uint64(2), next.Version())
+	require.Equal(t, map[qviews.ShardID]*ShardStats{shardB: statsB}, next.StatsMap())
+	require.Equal(t, map[qviews.ShardID]*ShardStats{shardA: statsA}, first.StatsMap(), "previous snapshot remains immutable")
+}
+
+func TestRecoverShardViewRegistryRebuildsReferences(t *testing.T) {
+	catalog := newMockCatalog()
+	view := buildTestViewWithVersion(1, 3, 1, 2)
+	catalog.listed = []*viewpb.QueryViewOfShard{view}
+
+	var acquired []qviews.DataVersion
+	mockey.Mock((*stubDataViewRefProvider).Get).To(func(_ *stubDataViewRefProvider, _ context.Context, _ int64, version *viewpb.DataVersion) (qviews.DataViewRef, error) {
+		acquired = append(acquired, qviews.FromProtoDataVersion(version))
+		return stubDataViewRef{version: qviews.FromProtoDataVersion(version)}, nil
+	}).Build()
+	defer mockey.UnPatchAll()
+
+	_, err := RecoverShardViewRegistryWithDataViews(context.Background(), catalog, newMockSyncer(), stubDataViewRefProvider{})
+	require.NoError(t, err)
+	require.Equal(t, []qviews.DataVersion{{StreamingVersion: 3, CompactVersion: 1}}, acquired)
+}
+
+func TestRecoverShardViewRegistryAllowsTerminalCleanup(t *testing.T) {
+	catalog := newMockCatalog()
+	view := buildTestViewWithVersion(1, 3, 1, 2)
+	view.Meta.State = viewpb.QueryViewState_QueryViewStatePreparing
+	catalog.listed = []*viewpb.QueryViewOfShard{view}
+
+	// RefAt reports the referenced DataView version is gone (nil ref): the
+	// recovered view must advance terminally, with no ref released.
+	derefs := 0
+	mockey.Mock((*stubDataViewRefProvider).Get).To(func(_ *stubDataViewRefProvider, _ context.Context, _ int64, _ *viewpb.DataVersion) (qviews.DataViewRef, error) {
+		return nil, nil
+	}).Build()
+	mockey.Mock(stubDataViewRef.Deref).To(func(_ stubDataViewRef) { derefs++ }).Build()
+	defer mockey.UnPatchAll()
+
+	s := newMockSyncer()
+	registry, err := RecoverShardViewRegistryWithDataViews(context.Background(), catalog, s, stubDataViewRefProvider{})
+	require.NoError(t, err)
+	manager := registry.Get(qviews.NewShardIDFromQVMeta(view.GetMeta()))
+	require.NotNil(t, manager)
+	manager.mu.Lock()
+	require.Equal(t, qviews.QueryViewStateDropping, manager.views[testVersion(3, 1, 2)].State())
+	manager.mu.Unlock()
+	require.Zero(t, derefs)
+
+	version := testVersion(3, 1, 2)
+	simulateNodeResponse(t, s, testSN, version, qviews.QueryViewStateDropped)
+	simulateNodeResponse(t, s, testQN1, version, qviews.QueryViewStateDropped)
+	require.NoError(t, registry.flushScheduler.Flush(context.Background()))
+	require.Nil(t, registry.Get(qviews.NewShardIDFromQVMeta(view.GetMeta())))
+}
+
+func TestRecoverShardViewRegistryRollsBackReferencesOnFailure(t *testing.T) {
+	catalog := newMockCatalog()
+	viewA := buildTestViewWithVersion(1, 3, 1, 1)
+	viewA.Meta.ReplicaId = 1
+	viewA.Meta.Vchannel = "v0"
+	viewB := buildTestViewWithVersion(1, 4, 1, 1)
+	viewB.Meta.ReplicaId = 2
+	viewB.Meta.Vchannel = "v1"
+	catalog.listed = []*viewpb.QueryViewOfShard{viewA, viewB}
+
+	// Shards are recovered in map order. Fail the second acquisition so the
+	// first acquired reference must be released regardless of that order.
+	acquisitions := 0
+	derefs := 0
+	mockey.Mock((*stubDataViewRefProvider).Get).To(func(_ *stubDataViewRefProvider, _ context.Context, _ int64, version *viewpb.DataVersion) (qviews.DataViewRef, error) {
+		acquisitions++
+		if acquisitions == 2 {
+			return nil, errors.New("recover failed")
+		}
+		return stubDataViewRef{version: qviews.FromProtoDataVersion(version)}, nil
+	}).Build()
+	mockey.Mock(stubDataViewRef.Deref).To(func(_ stubDataViewRef) { derefs++ }).Build()
+	defer mockey.UnPatchAll()
+
+	_, err := RecoverShardViewRegistryWithDataViews(context.Background(), catalog, newMockSyncer(), stubDataViewRefProvider{})
+	require.EqualError(t, err, "recover failed")
+	require.Equal(t, 2, acquisitions)
+	require.Equal(t, 1, derefs)
+}
+
+func TestRegistryShardRemovalListener(t *testing.T) {
+	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
+	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "p_100v0"}
+	first := reg.Ensure(shardID)
+	other := reg.Ensure(qviews.ShardID{ReplicaID: 3, VChannel: "p_200v0"})
+	removals, otherRemovals := 0, 0
+	stop := reg.RegisterShardRemovalListener(100, func() { removals++ })
+	defer stop()
+	stopOther := reg.RegisterShardRemovalListener(200, func() { otherRemovals++ })
+	defer stopOther()
+	require.Zero(t, removals, "registration must not replay resident shards")
+	require.Zero(t, otherRemovals)
+
+	second := reg.Ensure(qviews.ShardID{ReplicaID: 2, VChannel: "p_100v0"})
+	reg.onShardStatsChanged(shardID, first, emptyShardStats())
+	require.Zero(t, removals, "creation and stats changes are not removal events")
+	require.NoError(t, other.RequestRelease(t.Context()))
+	require.Zero(t, removals, "another collection must not notify this listener")
+	require.Equal(t, 1, otherRemovals)
+
+	require.NoError(t, first.RequestRelease(t.Context()))
+	require.Equal(t, 1, removals)
+	require.NoError(t, first.RequestRelease(t.Context()))
+	require.Equal(t, 1, removals, "repeated release must not repeat the removal event")
+	require.NoError(t, second.RequestRelease(t.Context()))
+	require.Equal(t, 2, removals, "each replica's final removal must notify")
+	require.Equal(t, 1, otherRemovals)
+}
+
+func TestRegistryShardRemovalListenerUnsubscribe(t *testing.T) {
+	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
+	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "p_100v0"}
+	manager := reg.Ensure(shardID)
+	first, second, replacement := 0, 0, 0
+	stopFirst := reg.RegisterShardRemovalListener(100, func() { first++ })
+	defer stopFirst()
+	stopSecond := reg.RegisterShardRemovalListener(100, func() { second++ })
+	defer stopSecond()
+	stopFirst()
+	stopFirst()
+	require.Len(t, reg.shardRemovalListeners[100], 1)
+	require.NoError(t, manager.RequestRelease(t.Context()))
+	require.Zero(t, first)
+	require.Equal(t, 1, second, "unsubscribing one listener must preserve other waiters")
+	stopSecond()
+	require.Empty(t, reg.shardRemovalListeners, "empty collection buckets must be reclaimed")
+
+	stopReplacement := reg.RegisterShardRemovalListener(100, func() { replacement++ })
+	defer stopReplacement()
+	stopSecond()
+	require.NoError(t, reg.Ensure(shardID).RequestRelease(t.Context()))
+	require.Equal(t, 1, replacement, "an old unsubscribe must not remove a new subscription")
+	require.Equal(t, 1, second)
+	stopReplacement()
+	require.Empty(t, reg.shardRemovalListeners)
+}
+
+func TestRegistryShardRemovalListenerConcurrent(t *testing.T) {
+	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
+	const shards = 32
+	managers := make([]*ShardViewManager, shards)
+	for i := range managers {
+		managers[i] = reg.Ensure(qviews.ShardID{ReplicaID: int64(i + 1), VChannel: "p_100v0"})
+	}
+	var removals atomic.Int64
+	stop := reg.RegisterShardRemovalListener(100, func() { removals.Add(1) })
+	defer stop()
+	start := make(chan struct{})
+	var workers sync.WaitGroup
+	for _, manager := range managers {
+		workers.Add(2)
+		go func() {
+			defer workers.Done()
+			<-start
+			assert.NoError(t, manager.RequestRelease(t.Context()))
+		}()
+		go func() {
+			defer workers.Done()
+			<-start
+			unsubscribe := reg.RegisterShardRemovalListener(100, func() {})
+			unsubscribe()
+			unsubscribe()
+		}()
+	}
+	close(start)
+	workers.Wait()
+	require.Equal(t, int64(shards), removals.Load())
+	require.Empty(t, reg.CollectionShards(100))
+	stop()
+	require.Empty(t, reg.shardRemovalListeners)
+}
+
+func TestRegistryPublicationReplayRejectsRetiredManager(t *testing.T) {
+	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
+	old := reg.Ensure(testShardID)
+	var published []*ShardStats
+	stop := reg.RegisterPublicationListener(func(id qviews.ShardID, stats *ShardStats) {
+		require.Equal(t, testShardID, id)
+		published = append(published, stats)
+	})
+	require.Len(t, published, 1)
+	callback := func(id qviews.ShardID, stats *ShardStats) { reg.onShardStatsChanged(id, old, stats) }
+	require.NoError(t, old.RequestRelease(context.Background()))
+	require.Len(t, published, 3)
+	require.Nil(t, published[2])
+	replacement := reg.Ensure(testShardID)
+	require.Len(t, published, 4)
+	require.NotSame(t, old, replacement)
+	callback(testShardID, &ShardStats{})
+	require.Len(t, published, 4, "late callback must not overwrite replacement")
+	stop()
+	require.NoError(t, replacement.RequestRelease(context.Background()))
+	require.Len(t, published, 4)
 }

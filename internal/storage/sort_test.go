@@ -20,10 +20,12 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"runtime"
 	"slices"
 	"strconv"
 	"testing"
 	"time"
+	"weak"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -109,6 +111,16 @@ func (r *sliceRecordReader) Next() (Record, error) {
 }
 
 func (r *sliceRecordReader) Close() error { return nil }
+
+type columnCountingRecord struct {
+	Record
+	columnCalls map[FieldID]int
+}
+
+func (r *columnCountingRecord) Column(fieldID FieldID) arrow.Array {
+	r.columnCalls[fieldID]++
+	return r.Record.Column(fieldID)
+}
 
 func TestRadixSortByInt64(t *testing.T) {
 	t.Run("edge values across records", func(t *testing.T) {
@@ -412,9 +424,233 @@ func TestMergeSort(t *testing.T) {
 	})
 }
 
+func TestMergeSortResolvesOutputColumnsOncePerRecord(t *testing.T) {
+	const (
+		pkField      = FieldID(100)
+		payloadField = FieldID(101)
+	)
+
+	base := mergeSortTestRec(t, map[FieldID][]int64{
+		pkField:      {1, 2, 3},
+		payloadField: {10, 20, 30},
+	}, nil)
+	defer base.Release()
+	record := &columnCountingRecord{Record: base, columnCalls: make(map[FieldID]int)}
+
+	writer := &MockRecordWriter{
+		writefn: func(Record) error { return nil },
+		closefn: func() error { return nil },
+	}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: pkField, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: payloadField, Name: "payload", DataType: schemapb.DataType_Int64},
+	}}
+
+	rows, err := MergeSort(1024, schema, []RecordReader{&sliceRecordReader{recs: []Record{record}}}, writer,
+		func(Record, int, int) bool { return true }, []int64{pkField})
+	require.NoError(t, err)
+	require.Equal(t, 3, rows)
+	require.Equal(t, 2, record.columnCalls[pkField], "merge key and output binding should each resolve the PK once")
+	require.Equal(t, 1, record.columnCalls[payloadField], "output binding should resolve the payload once")
+}
+
+func TestMergeSortClearsOutputColumnsOnReaderError(t *testing.T) {
+	const pkField, payloadField = FieldID(100), FieldID(101)
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: pkField, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: payloadField, Name: "payload", DataType: schemapb.DataType_Int64},
+	}}
+	makeRecord := func(keys, payload []int64) *countedRecord {
+		columns := make([]arrow.Array, 0, 2)
+		for _, values := range [][]int64{keys, payload} {
+			builder := array.NewInt64Builder(memory.DefaultAllocator)
+			builder.AppendValues(values, nil)
+			columns = append(columns, builder.NewArray())
+			builder.Release()
+		}
+		return &countedRecord{Record: &compositeRecord{
+			index: map[FieldID]int16{pkField: 0, payloadField: 1}, recs: columns,
+		}, live: 1}
+	}
+	for _, terminalErr := range []error{io.EOF, io.ErrUnexpectedEOF} {
+		t.Run(terminalErr.Error(), func(t *testing.T) {
+			first := makeRecord([]int64{1}, []int64{10})
+			reader := &IterativeRecordReader{
+				cur:     &borrowingRecordReader{recs: []Record{first}},
+				iterate: func() (RecordReader, error) { return nil, terminalErr },
+			}
+			defer reader.Close()
+			other := &borrowingRecordReader{recs: []Record{makeRecord([]int64{2, 3}, []int64{20, 30})}}
+			defer other.Close()
+
+			// Observe the cache's backing slice without depending on GC timing.
+			var finishedColumns []arrow.Array
+			assertCleared := func() {
+				require.Zero(t, first.live, "the reader must release its finished record")
+				require.Len(t, finishedColumns, 2)
+				for _, column := range finishedColumns {
+					require.Nil(t, column, "finished reader must not keep borrowed output columns")
+				}
+			}
+			var appendColumns func(*RecordBuilder, []arrow.Array, int, int) error
+			mock := mockey.Mock((*RecordBuilder).appendColumns).To(func(b *RecordBuilder, columns []arrow.Array, start, end int) error {
+				if finishedColumns == nil {
+					finishedColumns = columns
+				} else {
+					// Reader 0 is already at EOF while reader 1 still has rows.
+					assertCleared()
+				}
+				return appendColumns(b, columns, start, end)
+			}).Origin(&appendColumns).Build()
+			defer mock.UnPatch()
+
+			var gotKeys, gotPayload []int64
+			writer := &MockRecordWriter{writefn: func(rec Record) error {
+				gotKeys = append(gotKeys, rec.Column(pkField).(*array.Int64).Int64Values()...)
+				gotPayload = append(gotPayload, rec.Column(payloadField).(*array.Int64).Int64Values()...)
+				return nil
+			}}
+			rows, err := MergeSort(1<<20, schema, []RecordReader{reader, other}, writer,
+				func(Record, int, int) bool { return true }, []int64{pkField})
+			assertCleared()
+			if terminalErr == io.EOF {
+				require.NoError(t, err)
+				require.Equal(t, 3, rows)
+				require.Equal(t, []int64{1, 2, 3}, gotKeys)
+				require.Equal(t, []int64{10, 20, 30}, gotPayload)
+			} else {
+				require.ErrorIs(t, err, terminalErr)
+				require.Empty(t, gotKeys)
+			}
+		})
+	}
+}
+
+func TestMergeSortReleasesExhaustedReaderKeys(t *testing.T) {
+	const intField, stringField = FieldID(100), FieldID(101)
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: intField, Name: "int_key", DataType: schemapb.DataType_Int64},
+		{FieldID: stringField, Name: "string_key", DataType: schemapb.DataType_VarChar},
+	}}
+	makeReader := func(ints []int64, strings []string) (RecordReader, weak.Pointer[int64], weak.Pointer[array.String]) {
+		builder := array.NewRecordBuilder(memory.NewGoAllocator(), arrow.NewSchema([]arrow.Field{
+			{Name: "int_key", Type: arrow.PrimitiveTypes.Int64},
+			{Name: "string_key", Type: arrow.BinaryTypes.String},
+		}, nil))
+		// Keep the tracked buffer out of Go's tiny-allocation batches, whose
+		// unrelated live objects can delay clearing a weak pointer.
+		builder.Field(0).Reserve(128)
+		builder.Field(0).(*array.Int64Builder).AppendValues(ints, nil)
+		builder.Field(1).(*array.StringBuilder).AppendValues(strings, nil)
+		record := builder.NewRecord()
+		builder.Release()
+		intBuffer := weak.Make(&record.Column(0).(*array.Int64).Int64Values()[0])
+		stringColumn := weak.Make(record.Column(1).(*array.String))
+		reader := &IterativeRecordReader{
+			cur: &singleRecordReader{record: NewSimpleArrowRecord(record,
+				map[FieldID]int{intField: 0, stringField: 1})},
+			iterate: func() (RecordReader, error) { return nil, io.EOF },
+		}
+		return reader, intBuffer, stringColumn
+	}
+	first, intBuffer, stringColumn := makeReader([]int64{1}, []string{"first"})
+	defer first.Close()
+	other, _, _ := makeReader([]int64{2, 3}, []string{"second", "third"})
+	defer other.Close()
+
+	var gotInts []int64
+	var gotStrings []string
+	writer := &MockRecordWriter{writefn: func(record Record) error {
+		gotInts = append(gotInts, record.Column(intField).(*array.Int64).Int64Values()...)
+		strings := record.Column(stringField).(*array.String)
+		for i := 0; i < strings.Len(); i++ {
+			gotStrings = append(gotStrings, strings.Value(i))
+		}
+		if len(gotInts) == 2 {
+			// Reader 0 reached EOF and released its record; reader 1 still has
+			// another row. Neither cache may keep reader 0's keys reachable.
+			runtime.GC()
+			assert.Nil(t, intBuffer.Value(), "exhausted reader retains its int64 buffer")
+			assert.Nil(t, stringColumn.Value(), "exhausted reader retains its string column")
+		}
+		return nil
+	}}
+	rows, err := MergeSort(1, schema, []RecordReader{first, other}, writer,
+		func(Record, int, int) bool { return true }, []int64{intField, stringField})
+	require.NoError(t, err)
+	require.Equal(t, 3, rows)
+	require.Equal(t, []int64{1, 2, 3}, gotInts)
+	require.Equal(t, []string{"first", "second", "third"}, gotStrings)
+}
+
+func TestMergeSortCachedColumnsPreserveTextAcrossRecords(t *testing.T) {
+	const pkField, textField = FieldID(100), FieldID(101)
+	makeRecord := func(pkValue int64, missingText bool) Record {
+		pkBuilder := array.NewInt64Builder(memory.DefaultAllocator)
+		pkBuilder.Append(pkValue)
+		pkColumn := pkBuilder.NewArray()
+		pkBuilder.Release()
+		defer pkColumn.Release()
+		var textColumn arrow.Array
+		if missingText {
+			textColumn = array.MakeArrayOfNull(memory.DefaultAllocator, arrow.BinaryTypes.Binary, 1)
+		} else {
+			textBuilder := array.NewStringBuilder(memory.DefaultAllocator)
+			textBuilder.Append("decoded text")
+			textColumn = textBuilder.NewArray()
+			textBuilder.Release()
+		}
+		defer textColumn.Release()
+		return NewSimpleArrowRecord(array.NewRecord(
+			arrow.NewSchema([]arrow.Field{
+				{Name: "pk", Type: arrow.PrimitiveTypes.Int64},
+				{Name: "text", Type: textColumn.DataType(), Nullable: true},
+			}, nil), []arrow.Array{pkColumn, textColumn}, 1,
+		), map[FieldID]int{pkField: 0, textField: 1})
+	}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: pkField, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: textField, Name: "text", DataType: schemapb.DataType_Text, Nullable: true},
+	}}
+	for _, tc := range []struct {
+		name         string
+		missingFirst bool
+	}{
+		{name: "null before text", missingFirst: true},
+		{name: "null after text"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			first, second := makeRecord(1, tc.missingFirst), makeRecord(2, !tc.missingFirst)
+			defer first.Release()
+			defer second.Release()
+			writes := 0
+			writer := &MockRecordWriter{writefn: func(rec Record) error {
+				writes++
+				require.Equal(t, 2, rec.Len())
+				text, ok := rec.Column(textField).(*array.String)
+				require.True(t, ok, "decoded TEXT must keep its UTF8 representation")
+				nullRow, textRow := 1, 0
+				if tc.missingFirst {
+					nullRow, textRow = 0, 1
+				}
+				require.True(t, text.IsNull(nullRow))
+				require.Equal(t, "decoded text", text.Value(textRow))
+				return nil
+			}, closefn: func() error { return nil }}
+			rows, err := MergeSort(1<<20, schema, []RecordReader{&sliceRecordReader{recs: []Record{first, second}}}, writer,
+				func(Record, int, int) bool { return true }, []int64{pkField})
+			require.NoError(t, err)
+			require.Equal(t, 2, rows)
+			require.Equal(t, 1, writes)
+		})
+	}
+}
+
 func TestMergeSortReturnsRecordBuilderAppendError(t *testing.T) {
-	textBuilder := array.NewStringBuilder(memory.DefaultAllocator)
-	textBuilder.Append("not-a-lob-ref")
+	// UTF8 is valid decoded TEXT. An integer column violates both supported
+	// TEXT representations and must still propagate the Append error.
+	textBuilder := array.NewInt64Builder(memory.DefaultAllocator)
+	textBuilder.Append(42)
 	textColumn := textBuilder.NewArray()
 	defer textColumn.Release()
 	textBuilder.Release()
@@ -428,7 +664,7 @@ func TestMergeSortReturnsRecordBuilderAppendError(t *testing.T) {
 	rec := NewSimpleArrowRecord(array.NewRecord(
 		arrow.NewSchema([]arrow.Field{
 			{Name: "pk", Type: arrow.PrimitiveTypes.Int64},
-			{Name: "text", Type: arrow.BinaryTypes.String},
+			{Name: "text", Type: arrow.PrimitiveTypes.Int64},
 		}, nil),
 		[]arrow.Array{pkColumn, textColumn},
 		1,

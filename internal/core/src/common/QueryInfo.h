@@ -19,13 +19,21 @@
 #include <memory>
 #include <optional>
 
-#include "ArrayOffsets.h"
+#include "StructElementOffsets.h"
 #include "common/Tracer.h"
 #include "common/Types.h"
-#include "knowhere/config.h"
+#include "nlohmann/json.hpp"
+
+// SearchInfo is the execution layer's aggregate. Vector callers project its
+// search parameters, metric, topk, and trace context into VectorSearchParams.
+// Use nlohmann::json here to avoid a knowhere configuration-header dependency;
+// the parameter contents still follow knowhere's search schema.
 
 namespace milvus {
 
+// The search-parameter blob. Same underlying type as `knowhere::Json`, named
+// without the knowhere header — see the note above.
+using SearchParamsJson = nlohmann::json;
 enum class StrictGroupStrategy { Original, PerGroup };
 
 struct SearchIteratorV2Info {
@@ -55,7 +63,7 @@ struct SearchInfo {
     int64_t round_decimal_{0};
     FieldId field_id_;
     MetricType metric_type_;
-    knowhere::Json search_params_;
+    SearchParamsJson search_params_;
     BruteForceIndexParams brute_force_index_params_;
     std::vector<FieldId>
         group_by_field_ids_;  // Group by field IDs (single or multi-field)
@@ -66,7 +74,7 @@ struct SearchInfo {
     std::optional<std::string> json_path_;
     std::optional<milvus::DataType> json_type_;
     bool strict_cast_{false};
-    std::shared_ptr<const IArrayOffsets> array_offsets_{
+    std::shared_ptr<const IStructElementOffsets> struct_element_offsets_{
         nullptr};  // For element-level search
     bool global_refine_enable_{false};
     float search_topk_ratio_{0.0f};
@@ -90,7 +98,7 @@ struct SearchInfo {
 
     bool
     element_level() const {
-        return array_offsets_ != nullptr;
+        return struct_element_offsets_ != nullptr;
     }
 
     bool

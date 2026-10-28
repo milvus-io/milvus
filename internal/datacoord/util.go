@@ -143,6 +143,10 @@ func FilterInIndexedSegments(ctx context.Context, handler Handler, mt *meta, ski
 	return ret
 }
 
+func isFlushState(state commonpb.SegmentState) bool {
+	return state == commonpb.SegmentState_Flushing || state == commonpb.SegmentState_Flushed
+}
+
 func getZeroTime() time.Time {
 	var t time.Time
 	return t
@@ -392,39 +396,44 @@ func createStorageConfig() *indexpb.StorageConfig {
 			StorageType: Params.CommonCfg.StorageType.GetValue(),
 			// External collections may reference an s3:// source even when the
 			// primary storage is local, so the connection cap still applies.
-			MaxConnections: uint32(Params.MinioCfg.MaxConnections.GetAsInt()),
+			MaxConnections:              uint32(Params.MinioCfg.MaxConnections.GetAsInt()),
+			TalonMode:                   Params.CommonCfg.StorageTalonMode.GetAsUint32(),
+			TalonSmallReadThreshold:     Params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32(),
+			TalonCoordinator:            Params.CommonCfg.StorageTalonCoordinator.GetValue(),
+			TalonBlockSize:              Params.CommonCfg.StorageTalonBlockSize.GetAsUint32(),
+			TalonMaxIdlePerAddr:         Params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32(),
+			TalonEnableForExternalTable: Params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool(),
 		}
 	} else {
 		storageConfig = &indexpb.StorageConfig{
-			Address:           Params.MinioCfg.Address.GetValue(),
-			AccessKeyID:       Params.MinioCfg.AccessKeyID.GetValue(),
-			SecretAccessKey:   Params.MinioCfg.SecretAccessKey.GetValue(),
-			UseSSL:            Params.MinioCfg.UseSSL.GetAsBool(),
-			SslCACert:         Params.MinioCfg.SslCACert.GetValue(),
-			BucketName:        Params.MinioCfg.BucketName.GetValue(),
-			RootPath:          Params.MinioCfg.RootPath.GetValue(),
-			UseIAM:            Params.MinioCfg.UseIAM.GetAsBool(),
-			IAMEndpoint:       Params.MinioCfg.IAMEndpoint.GetValue(),
-			StorageType:       Params.CommonCfg.StorageType.GetValue(),
-			Region:            Params.MinioCfg.Region.GetValue(),
-			UseVirtualHost:    Params.MinioCfg.UseVirtualHost.GetAsBool(),
-			CloudProvider:     Params.MinioCfg.CloudProvider.GetValue(),
-			RequestTimeoutMs:  Params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
-			MaxConnections:    uint32(Params.MinioCfg.MaxConnections.GetAsInt()),
-			GcpCredentialJSON: Params.MinioCfg.GcpCredentialJSON.GetValue(),
-			SslTlsMinVersion:  Params.MinioCfg.SslTLSMinVersion.GetValue(),
-			UseCrc32CChecksum: Params.MinioCfg.UseCRC32C.GetAsBool(),
+			Address:                     Params.MinioCfg.Address.GetValue(),
+			AccessKeyID:                 Params.MinioCfg.AccessKeyID.GetValue(),
+			SecretAccessKey:             Params.MinioCfg.SecretAccessKey.GetValue(),
+			UseSSL:                      Params.MinioCfg.UseSSL.GetAsBool(),
+			SslCACert:                   Params.MinioCfg.SslCACert.GetValue(),
+			BucketName:                  Params.MinioCfg.BucketName.GetValue(),
+			RootPath:                    Params.MinioCfg.RootPath.GetValue(),
+			UseIAM:                      Params.MinioCfg.UseIAM.GetAsBool(),
+			IAMEndpoint:                 Params.MinioCfg.IAMEndpoint.GetValue(),
+			StorageType:                 Params.CommonCfg.StorageType.GetValue(),
+			Region:                      Params.MinioCfg.Region.GetValue(),
+			UseVirtualHost:              Params.MinioCfg.UseVirtualHost.GetAsBool(),
+			CloudProvider:               Params.MinioCfg.CloudProvider.GetValue(),
+			RequestTimeoutMs:            Params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
+			MaxConnections:              uint32(Params.MinioCfg.MaxConnections.GetAsInt()),
+			GcpCredentialJSON:           Params.MinioCfg.GcpCredentialJSON.GetValue(),
+			SslTlsMinVersion:            Params.MinioCfg.SslTLSMinVersion.GetValue(),
+			UseCrc32CChecksum:           Params.MinioCfg.UseCRC32C.GetAsBool(),
+			TalonMode:                   Params.CommonCfg.StorageTalonMode.GetAsUint32(),
+			TalonSmallReadThreshold:     Params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32(),
+			TalonCoordinator:            Params.CommonCfg.StorageTalonCoordinator.GetValue(),
+			TalonBlockSize:              Params.CommonCfg.StorageTalonBlockSize.GetAsUint32(),
+			TalonMaxIdlePerAddr:         Params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32(),
+			TalonEnableForExternalTable: Params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool(),
 		}
 	}
 
 	return storageConfig
-}
-
-func getSortStatus(sorted bool) string {
-	if sorted {
-		return "sorted"
-	}
-	return "unsorted"
 }
 
 const (

@@ -41,12 +41,19 @@ using namespace milvus::cachinglayer;
 
 class ChunkedColumnInterface : public FieldChunkMetricsProvider {
  public:
+    enum class LocalFormat {
+        Raw,
+        Vortex,
+    };
+
     using TargetType = milvus::TargetType;
     using ValueView = milvus::ValueView;
     using ScanBatch = milvus::ScanBatch;
     using ScanReadMode = milvus::ScanReadMode;
     using ScanCursor = milvus::ScanCursor;
     using ScanPinPolicy = milvus::ScanPinPolicy;
+    using ScanOutput = milvus::ScanOutput;
+    using ScanPredicate = milvus::ScanPredicate;
     using ScanOptions = milvus::ScanOptions;
     using ScanResult = milvus::ScanResult;
     using OffsetView = milvus::OffsetView;
@@ -59,6 +66,12 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
     using TakeResultPtr = milvus::TakeResultPtr;
 
     ~ChunkedColumnInterface() override = default;
+
+    // Materialize a lazy column's chunk directory with the caller's context
+    // before using context-free layout accessors. This does not pin raw data.
+    virtual void
+    Prepare(milvus::OpContext* op_ctx) const {
+    }
 
     // Optional per-cell skip metrics owned by this column's generation.
     // Storage V2 proxy columns override both accessors; an ordinary V1 column
@@ -81,6 +94,16 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
     // Used to guard DropFieldData from breaking shared storage.
     virtual bool
     IsInMultiFieldColumnGroup() const {
+        return false;
+    }
+
+    virtual LocalFormat
+    GetLocalFormat() const {
+        return LocalFormat::Raw;
+    }
+
+    virtual bool
+    SupportsScanPushdown(const ScanOptions&) const {
         return false;
     }
 
@@ -369,6 +392,9 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
                   "variable length type");
     }
 
+    // TODO(local-format): Replace this JSON-only adapter with Column.Take;
+    // use Get/Access for immediate reads and GetOwn for escaping results.
+    // Preserve legacy Raw behavior until migration; Vortex is a temporary bridge.
     virtual void
     BulkRawJsonAt(milvus::OpContext* op_ctx,
                   std::function<void(Json, size_t, bool)> fn,

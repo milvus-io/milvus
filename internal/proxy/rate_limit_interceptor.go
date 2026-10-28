@@ -54,6 +54,9 @@ func RateLimitInterceptorWithMetaCache(GetMetaCache func() Cache, limiter types.
 			mlog.Warn(context.TODO(), "failed to get request info", mlog.Err(err))
 			return handler(ctx, req)
 		}
+		if n == 0 {
+			return handler(ctx, req)
+		}
 		if rt == internalpb.RateType_DMLBulkLoad {
 			if importReq, ok := req.(*milvuspb.ImportRequest); ok {
 				if importutilv2.SkipDiskQuotaCheck(importReq.GetOptions()) {
@@ -201,14 +204,6 @@ func getCollectionID(metaCache Cache, r reqCollName) (int64, map[int64][]int64) 
 	}
 	collectionID, _ := metaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
 	return db.DBID, map[int64][]int64{collectionID: {}}
-}
-
-func getDatabaseID(metaCache Cache, dbName string) int64 {
-	db, _ := metaCache.GetDatabaseInfo(context.TODO(), dbName)
-	if db == nil {
-		return util.InvalidDBID
-	}
-	return db.DBID
 }
 
 // failedMutationResult returns failed mutation result.

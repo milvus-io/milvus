@@ -32,8 +32,10 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -55,9 +57,19 @@
 #include "filemanager/OutputStream.h"
 #include "gtest/gtest.h"
 #include "index/Meta.h"
+#include "index/IndexTypeAdapter.h"
+#include "index/contracts/Registry.h"
+#include "index/contracts/build/ScalarBuildInput.h"
+#include "index/contracts/query/IScalarPredicateReader.h"
+#include "index/contracts/query/IScalarValueReader.h"
+#include "index/contracts/query/IVectorReader.h"
+#include "indexbuilder/BuildSession.h"
+#include "indexbuilder/VectorDiskBuildMaterializer.h"
 #include "knowhere/binaryset.h"
+#include "knowhere/index/index_factory.h"
 #include "knowhere/operands.h"
 #include "knowhere/sparse_utils.h"
+#include "knowhere/version.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "pb/common.pb.h"
 #include "pb/index_coord.pb.h"
@@ -68,18 +80,16 @@
 #include "storage/InsertData.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
+#include "storage/MemFileManagerImpl.h"
 #include "storage/PayloadReader.h"
 #include "storage/ThreadPool.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "storage/artifact/FileSink.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
-#include "index/BitmapIndex.h"
-#include "index/StringIndexMarisa.h"
-#include "index/StringIndexSort.h"
-#include "index/VectorDiskIndex.h"
-#include "index/VectorIndexValidDataUtils.h"
+#include "index/vector/VectorIndexValidDataUtils.h"
 
 class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectDOUBLE_Test;
 class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectFLOAT_Test;
@@ -116,6 +126,170 @@ class DiskAnnFileManagerTest : public testing::Test {
 
 namespace {
 
+// These storage consumers publish real artifacts and open independent readers;
+// neither the builder nor an in-memory index survives the persistence boundary.
+struct PublishedConsumerIndex {
+    index::AdaptedIndexType type;
+    storage::ArtifactStats stats;
+    bool packed{false};
+
+    std::vector<std::string>
+    Files() const {
+        std::vector<std::string> files;
+        for (const auto& file : stats.Files()) {
+            files.push_back(file.file_name);
+        }
+        return files;
+    }
+
+    index::IIndexReaderBasePtr
+    Open(storage::FileManagerContext context,
+         const milvus::Config& overrides = milvus::Config::object()) const {
+        storage::LoadOptions options;
+        options.params = type.params;
+        options.params.update(overrides);
+        options.enable_mmap = options.params.value(index::ENABLE_MMAP, false);
+        options.mmap_dir_path = TestLocalPath;
+        context.set_for_loading_index(true);
+        const auto loader =
+            index::LoaderRegistry::Instance().Lookup(type.family);
+        AssertInfo(static_cast<bool>(loader), "storage consumer has no loader");
+        if (packed) {
+            return loader.Load(
+                {index::IndexFiles{std::move(context),
+                                   Files(),
+                                   index::PackedIndexStorageConfig{}},
+                 std::move(options)});
+        }
+        return loader.Load(
+            {index::IndexFiles{
+                 std::move(context),
+                 Files(),
+                 index::LegacyIndexStorageConfig{
+                     type.family == index::families::kVectorDisk
+                         ? storage::V1SourceLayout::DiskFiles
+                         : storage::V1SourceLayout::MemoryEntries}},
+             std::move(options)});
+    }
+};
+
+int64_t
+PersistedVectorRowCount(const PublishedConsumerIndex& published,
+                        storage::FileManagerContext context) {
+    context.set_for_loading_index(true);
+    storage::DiskFileManagerImpl manager(context);
+    const auto valid_files =
+        index::FilterValidDataDiskFileSlices(published.Files());
+    AssertInfo(!valid_files.empty(),
+               "nullable consumer has no valid_data file");
+    manager.CacheIndexToDisk(valid_files, proto::common::LoadPriority::HIGH);
+    auto local = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    const auto path =
+        manager.GetLocalIndexObjectPrefix() + "/" + index::VALID_DATA_KEY;
+    uint64_t wire_count = 0;
+    local->Read(path, &wire_count, sizeof(wire_count));
+    return index::FromValidDataCount(wire_count);
+}
+
+template <typename T>
+PublishedConsumerIndex
+PublishScalarV3(const storage::FileManagerContext& context,
+                DataType field_type,
+                const std::string& index_type,
+                std::span<const T> values) {
+    milvus::Config params = {{index::FIELD_ID, context.fieldDataMeta.field_id},
+                             {index::SCALAR_INDEX_ENGINE_VERSION, 3},
+                             {"nullable", false},
+                             {NUM_ROWS_KEY, values.size()}};
+    auto adapted = index::AdaptIndexType({.index_type = index_type,
+                                          .field_type = field_type,
+                                          .params = std::move(params)});
+    auto builder =
+        index::BuilderRegistry<index::ScalarBuildInput<T>>::Instance().Create(
+            adapted.family, adapted.params);
+    AssertInfo(builder != nullptr, "storage consumer has no scalar builder");
+    const index::ScalarBuildBatch<T> batch{values, {}};
+    auto artifact =
+        std::move(*builder).Build(index::ScalarBuildInput<T>{{&batch, 1}});
+    builder.reset();
+
+    storage::MemFileManagerImpl manager(context);
+    const auto name = index::PackedScalarIndexFileName(adapted.artifact_type);
+    auto writer = manager.CreateIndexEntryWriterUnified(name);
+    AssertInfo(writer != nullptr, "storage consumer has no packed writer");
+    artifact->Serialize(*writer);
+    writer->Finish();
+    const auto bytes = static_cast<int64_t>(writer->GetTotalBytesWritten());
+    storage::ArtifactStats stats(
+        bytes, {{manager.GetRemoteIndexObjectPrefix() + "/" + name, bytes}});
+    return {std::move(adapted), std::move(stats), true};
+}
+
+index::AdaptedIndexType
+DiskConsumerType(const storage::FileManagerContext& context,
+                 int64_t rows,
+                 milvus::Config params) {
+    const auto& schema = context.fieldDataMeta.field_schema;
+    const auto field_type = static_cast<DataType>(schema.data_type());
+    const auto element_type = static_cast<DataType>(schema.element_type());
+    params[index::METRIC_TYPE] = knowhere::metric::L2;
+    params[index::FIELD_ID] = context.fieldDataMeta.field_id;
+    params[DIM_KEY] = context.indexMeta.dim;
+    params[NUM_ROWS_KEY] = rows;
+    params["nullable"] = schema.nullable();
+    params["local_dir"] = TestLocalPath;
+    params[index::DISK_ANN_LOAD_THREAD_NUM] = "1";
+    return index::AdaptIndexType(
+        {.index_type = knowhere::IndexEnum::INDEX_DISKANN,
+         .field_type = field_type,
+         .element_type = element_type,
+         .index_engine_version =
+             knowhere::Version::GetCurrentVersion().VersionNumber(),
+         .params = std::move(params)});
+}
+
+PublishedConsumerIndex
+PublishDiskResident(const storage::FileManagerContext& context,
+                    const FieldDataPtr& data,
+                    milvus::Config params) {
+    auto adapted =
+        DiskConsumerType(context, data->get_num_rows(), std::move(params));
+    indexbuilder::VectorDiskBuildMaterializer materializer(
+        TestLocalPath,
+        data->get_data_type(),
+        adapted.value_type,
+        context.indexMeta.dim,
+        data->IsNullable(),
+        data->get_num_rows(),
+        adapted.family,
+        adapted.params);
+    materializer.Add(data);
+    materializer.FinishPrimary();
+    auto artifact = std::move(materializer).Build();
+    storage::V1DiskSink sink(context);
+    artifact->Serialize(sink);
+    auto stats = sink.Finish();
+    sink.ReleaseLocalStaging();
+    return {std::move(adapted), std::move(stats)};
+}
+
+FieldDataPtr
+NullableDiskVectors(int64_t rows,
+                    int64_t dim,
+                    const float* compact_values,
+                    const bool* validity) {
+    auto data = storage::CreateFieldData(
+        DataType::VECTOR_FLOAT, DataType::NONE, true, dim);
+    std::vector<uint8_t> packed((rows + 7) / 8, 0);
+    for (int64_t row = 0; row < rows; ++row) {
+        if (validity[row]) {
+            packed[row / 8] |= uint8_t{1} << (row % 8);
+        }
+    }
+    data->FillFieldData(compact_values, packed.data(), rows, 0);
+    return data;
+}
+
 std::string
 GeneratedIndexIdentifierPrefixForTest(const IndexMeta& index_meta) {
     return std::to_string(index_meta.build_id) + "_" +
@@ -125,12 +299,12 @@ GeneratedIndexIdentifierPrefixForTest(const IndexMeta& index_meta) {
 }
 
 std::vector<std::string>
-CollectIdMapMmapFiles(const std::string& root_path,
-                      const IndexMeta& index_meta) {
-    std::vector<std::string> files;
+CollectIdMapMmapDirectories(const std::string& root_path,
+                            const IndexMeta& index_meta) {
+    std::vector<std::string> directories;
     boost::filesystem::path root(root_path);
     if (!boost::filesystem::exists(root)) {
-        return files;
+        return directories;
     }
 
     const auto index_identifier =
@@ -139,41 +313,18 @@ CollectIdMapMmapFiles(const std::string& root_path,
          it != end;
          ++it) {
         const auto& path = it->path();
-        if (!boost::filesystem::is_regular_file(path)) {
+        if (!boost::filesystem::is_directory(path)) {
             continue;
         }
         if (path.string().find(index_identifier) == std::string::npos) {
             continue;
         }
-        if (path.parent_path().filename().string() ==
-            milvus::index::ID_MAP_MMAP_DIR) {
-            files.emplace_back(path.string());
+        if (path.filename().string() == milvus::index::ID_MAP_MMAP_DIR) {
+            directories.emplace_back(path.string());
         }
     }
-    std::sort(files.begin(), files.end());
-    return files;
-}
-
-bool
-HasIdMapMmapFilePrefix(const std::vector<std::string>& files,
-                       const std::string& prefix) {
-    const auto prefix_with_generation = prefix + ".";
-    return std::any_of(files.begin(), files.end(), [&](const auto& file) {
-        return boost::filesystem::path(file).filename().string().rfind(
-                   prefix_with_generation, 0) == 0;
-    });
-}
-
-std::vector<std::string>
-NewFilesAfter(const std::vector<std::string>& before,
-              const std::vector<std::string>& after) {
-    std::vector<std::string> files;
-    for (const auto& file : after) {
-        if (!std::binary_search(before.begin(), before.end(), file)) {
-            files.emplace_back(file);
-        }
-    }
-    return files;
+    std::sort(directories.begin(), directories.end());
+    return directories;
 }
 
 }  // namespace
@@ -476,17 +627,49 @@ TEST_F(DiskAnnFileManagerTest, GetRemoteIndexObjectPrefix_V1CollectionRooted) {
                 std::string::npos);
 }
 
+TEST_F(DiskAnnFileManagerTest, SegmentRootedIndexUploadAndRead) {
+    auto conf = milvus_storage::ArrowFileSystemConfig();
+    conf.storage_type = "local";
+    conf.root_path = TestLocalPath + "segment_rooted_index";
+    auto result = milvus_storage::CreateArrowFileSystem(conf);
+    ASSERT_TRUE(result.ok());
+    auto fs = result.ValueOrDie();
+    FieldDataMeta field_meta{100, 20, 30, 5};
+    IndexMeta index_meta{30, 5, 1000, 1};
+    index_meta.index_store_path_version = milvus::proto::index::
+        IndexStorePathVersion::INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED;
+    // An existing legacy local manifest must retain its actual base.
+    index_meta.index_file_prefix =
+        conf.root_path + "/legacy/insert_log/100/20/30/_index/1000/1";
+    auto fm = std::make_shared<DiskFileManagerImpl>(
+        FileManagerContext(field_meta, index_meta, cm_, fs));
+    EXPECT_EQ(fm->GetRemoteIndexObjectPrefix(), index_meta.index_file_prefix);
+    const std::string local_path =
+        fm->GetLocalIndexObjectPrefix() + "index_data";
+    auto output = fm->OpenOutputStream(local_path);
+    const uint64_t expected = 42;
+    output->Write(expected);
+    output->Close();
+    auto input =
+        fm->OpenInputStream(index_meta.index_file_prefix + "/index_data");
+    uint64_t actual = 0;
+    input->Read(actual);
+    EXPECT_EQ(actual, expected);
+    auto info = fs->GetFileInfo(index_meta.index_file_prefix + "/index_data");
+    ASSERT_TRUE(info.ok());
+    EXPECT_EQ(info->type(), arrow::fs::FileType::File);
+    boost::filesystem::remove_all(conf.root_path);
+}
+
 TEST_F(DiskAnnFileManagerTest, V3PackedIndexPathMismatch) {
     FieldDataMeta filed_data_meta = {1, 2, 3, 100};
     IndexMeta index_meta = {3, 100, 1000, 1, "index"};
     storage::FileManagerContext context(filed_data_meta, index_meta, cm_, fs_);
 
-    milvus::index::ScalarIndexSort<int64_t> index(context);
     std::vector<int64_t> values = {1, 2, 3};
-    index.Build(values.size(), values.data());
-
-    auto stats = index.UploadUnified({});
-    auto files = stats->GetIndexFiles();
+    auto published = PublishScalarV3<int64_t>(
+        context, DataType::INT64, index::ASCENDING_SORT, values);
+    auto files = published.Files();
     ASSERT_EQ(files.size(), 1);
 
     storage::MemFileManagerImpl file_manager(context);
@@ -929,13 +1112,6 @@ TEST_F(DiskAnnFileManagerTest, LoadStreamIndexCachesOnlyValidDataSidecar) {
     local_chunk_manager->Remove(valid_data_path);
     ASSERT_FALSE(local_chunk_manager->Exist(valid_data_path));
 
-    milvus::index::VectorDiskAnnIndex<float> loaded_index(
-        DataType::NONE,
-        knowhere::IndexEnum::INDEX_DISKANN,
-        knowhere::metric::L2,
-        knowhere::Version::GetCurrentVersion().VersionNumber(),
-        file_manager_context);
-
     file_manager->CacheIndexToDisk(cache_files,
                                    milvus::proto::common::LoadPriority::HIGH);
 
@@ -952,16 +1128,22 @@ TEST_F(DiskAnnFileManagerTest, LoadStreamIndexCachesOnlyValidDataSidecar) {
     std::memcpy(&cached_wire_count, cached_valid_data.data(), sizeof(uint64_t));
     ASSERT_EQ(milvus::index::FromValidDataCount(cached_wire_count),
               total_count);
-    loaded_index.SetIdMapType(knowhere::IdMap::Type::SEALED);
-    loaded_index.GetIdMap().AddFromData(knowhere::IdMapData::FromValidBitmap(
-        cached_valid_data.data() + sizeof(uint64_t), total_count));
-    loaded_index.GetIdMap().FinalizeVectorIds();
-    loaded_index.SetDim(128);
-
-    ASSERT_TRUE(loaded_index.HasValidData());
-    EXPECT_EQ(loaded_index.GetIdMap().OutCount(), total_count);
-    EXPECT_EQ(loaded_index.GetValidCount(), valid_count);
-    EXPECT_EQ(loaded_index.GetDim(), 128);
+    auto created = knowhere::IndexFactory::Instance().Create<float>(
+        knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+        knowhere::Version::GetCurrentVersion().VersionNumber());
+    ASSERT_TRUE(created.has_value());
+    auto loaded = std::move(created.value());
+    const auto input = index::MakeNullableLoadInput(
+        index::ValidDataView{true,
+                             static_cast<size_t>(total_count),
+                             cached_valid_data.data() + sizeof(uint64_t)});
+    ASSERT_TRUE(input.validity.has_value());
+    ASSERT_EQ(loaded.ImportValidity(*input.validity),
+              knowhere::Status::success);
+    EXPECT_TRUE(loaded.HasValidity().value());
+    EXPECT_EQ(loaded.LogicalCount().value(), total_count);
+    EXPECT_EQ(loaded.ValidCount().value(), valid_count);
+    EXPECT_EQ(file_manager_context.indexMeta.dim, 128);
 
     local_chunk_manager->Remove(valid_data_path);
     for (const auto& remote_path_to_size : remote_paths_to_size) {
@@ -1679,6 +1861,8 @@ TEST_F(DiskAnnFileManagerTest, BuildAllNullNullableDiskVectorIndexFromDataset) {
     FieldDataMeta field_data_meta = {
         collection_id, partition_id, segment_id, field_id};
     field_data_meta.field_schema.set_nullable(true);
+    field_data_meta.field_schema.set_data_type(
+        proto::schema::DataType::FloatVector);
 
     IndexMeta index_meta = {segment_id,
                             field_id,
@@ -1690,34 +1874,32 @@ TEST_F(DiskAnnFileManagerTest, BuildAllNullNullableDiskVectorIndexFromDataset) {
                             dim};
     storage::FileManagerContext file_manager_context(
         field_data_meta, index_meta, cm_, fs_);
-    milvus::index::VectorDiskAnnIndex<float> index(
-        DataType::NONE,
-        knowhere::IndexEnum::INDEX_DISKANN,
-        knowhere::metric::L2,
-        knowhere::Version::GetCurrentVersion().VersionNumber(),
-        file_manager_context);
 
     std::unique_ptr<bool[]> valid_data(new bool[num_rows]);
     std::fill_n(valid_data.get(), num_rows, false);
 
     std::vector<float> vec_data(dim, 0.0f);
-    auto dataset = knowhere::GenDataSet(0, dim, vec_data.data());
-    dataset->SetIdMapData(
-        knowhere::IdMapData::FromValidData(valid_data.get(), num_rows));
+    auto data =
+        NullableDiskVectors(num_rows, dim, vec_data.data(), valid_data.get());
 
     milvus::Config config;
     config[DIM_KEY] = dim;
     config[milvus::index::DISK_ANN_BUILD_THREAD_NUM] = "1";
 
-    index.BuildWithDataset(dataset, config);
+    auto published = PublishDiskResident(file_manager_context, data, config);
+    EXPECT_EQ(PersistedVectorRowCount(published, file_manager_context),
+              num_rows);
+    auto reader = published.Open(file_manager_context);
+    const auto& vector = dynamic_cast<const index::IVectorReader&>(*reader);
+    ASSERT_TRUE(vector.HasValidData());
+    EXPECT_EQ(reader->Count(), 0);
+    EXPECT_EQ(vector.ValidCount(), 0);
+    EXPECT_EQ(vector.Dim(), dim);
+    for (int64_t row = 0; row < num_rows; ++row) {
+        EXPECT_FALSE(vector.IsRowValid(row));
+    }
 
-    ASSERT_TRUE(index.HasValidData());
-    EXPECT_EQ(index.GetIdMap().OutCount(), num_rows);
-    EXPECT_EQ(index.GetValidCount(), 0);
-    EXPECT_EQ(index.GetDim(), dim);
-
-    auto stats = index.Upload(config);
-    auto files = stats->GetIndexFiles();
+    auto files = published.Files();
     ASSERT_EQ(files.size(), 1);
     EXPECT_NE(files[0].find(milvus::index::VALID_DATA_KEY), std::string::npos);
 
@@ -1726,8 +1908,7 @@ TEST_F(DiskAnnFileManagerTest, BuildAllNullNullableDiskVectorIndexFromDataset) {
     }
 }
 
-TEST_F(DiskAnnFileManagerTest,
-       BuildNullableDiskVectorIndexCreatesIdMapMmapFilesInCompatibleDir) {
+TEST_F(DiskAnnFileManagerTest, NullableDiskVectorLoadsIsolateMmapDirectories) {
     const int64_t collection_id = 1;
     const int64_t partition_id = 2;
     const int64_t segment_id = 3003;
@@ -1738,6 +1919,8 @@ TEST_F(DiskAnnFileManagerTest,
     FieldDataMeta field_data_meta = {
         collection_id, partition_id, segment_id, field_id};
     field_data_meta.field_schema.set_nullable(true);
+    field_data_meta.field_schema.set_data_type(
+        proto::schema::DataType::FloatVector);
 
     IndexMeta index_meta = {segment_id,
                             field_id,
@@ -1749,12 +1932,6 @@ TEST_F(DiskAnnFileManagerTest,
                             dim};
     storage::FileManagerContext file_manager_context(
         field_data_meta, index_meta, cm_, fs_);
-    milvus::index::VectorDiskAnnIndex<float> index(
-        DataType::NONE,
-        knowhere::IndexEnum::INDEX_DISKANN,
-        knowhere::metric::L2,
-        knowhere::Version::GetCurrentVersion().VersionNumber(),
-        file_manager_context);
 
     std::unique_ptr<bool[]> valid_data(new bool[num_rows]);
     int64_t valid_count = 0;
@@ -1769,9 +1946,8 @@ TEST_F(DiskAnnFileManagerTest,
     for (size_t i = 0; i < vec_data.size(); ++i) {
         vec_data[i] = static_cast<float>(i % 100);
     }
-    auto dataset = knowhere::GenDataSet(valid_count, dim, vec_data.data());
-    dataset->SetIdMapData(
-        knowhere::IdMapData::FromValidData(valid_data.get(), num_rows));
+    auto data =
+        NullableDiskVectors(num_rows, dim, vec_data.data(), valid_data.get());
 
     milvus::Config config;
     config[DIM_KEY] = dim;
@@ -1785,26 +1961,31 @@ TEST_F(DiskAnnFileManagerTest,
 
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    const auto mmap_files_before_build =
-        CollectIdMapMmapFiles(local_chunk_manager->GetRootPath(), index_meta)
+    const auto mmap_directory_count_before_build =
+        CollectIdMapMmapDirectories(local_chunk_manager->GetRootPath(),
+                                    index_meta)
             .size();
 
-    index.BuildWithDataset(dataset, config);
+    auto published = PublishDiskResident(file_manager_context, data, config);
+    EXPECT_EQ(PersistedVectorRowCount(published, file_manager_context),
+              num_rows);
+    // Each consumer owns an independent staging directory. Backends may
+    // consume and release temporary mapping arrays during load.
+    auto reader = published.Open(file_manager_context);
+    const auto& vector = dynamic_cast<const index::IVectorReader&>(*reader);
+    ASSERT_TRUE(vector.HasValidData());
+    EXPECT_EQ(reader->Count(), valid_count);
+    EXPECT_EQ(vector.ValidCount(), valid_count);
+    for (int64_t row = 0; row < num_rows; ++row) {
+        EXPECT_EQ(vector.IsRowValid(row), valid_data[row]);
+    }
 
-    ASSERT_TRUE(index.HasValidData());
-    EXPECT_EQ(index.GetIdMap().OutCount(), num_rows);
-    EXPECT_EQ(index.GetValidCount(), valid_count);
+    const auto mmap_directories_after_build = CollectIdMapMmapDirectories(
+        local_chunk_manager->GetRootPath(), index_meta);
+    EXPECT_EQ(mmap_directories_after_build.size(),
+              mmap_directory_count_before_build + 1);
 
-    const auto mmap_files_after_build =
-        CollectIdMapMmapFiles(local_chunk_manager->GetRootPath(), index_meta);
-    EXPECT_GT(mmap_files_after_build.size(), mmap_files_before_build);
-    EXPECT_TRUE(
-        HasIdMapMmapFilePrefix(mmap_files_after_build, "in_to_out_ids"));
-    EXPECT_TRUE(
-        HasIdMapMmapFilePrefix(mmap_files_after_build, "out_to_in_ids"));
-
-    auto stats = index.Upload(config);
-    auto files = stats->GetIndexFiles();
+    auto files = published.Files();
     ASSERT_GT(files.size(), 1);
 
     milvus::Config load_config;
@@ -1814,27 +1995,37 @@ TEST_F(DiskAnnFileManagerTest,
     load_config[milvus::index::ENABLE_MMAP_I2O_MAP] = true;
     load_config[milvus::index::ENABLE_MMAP_O2I_MAP] = true;
 
-    const auto mmap_files_before_load =
-        CollectIdMapMmapFiles(local_chunk_manager->GetRootPath(), index_meta);
+    const auto mmap_directories_before_load = CollectIdMapMmapDirectories(
+        local_chunk_manager->GetRootPath(), index_meta);
 
-    milvus::index::VectorDiskAnnIndex<float> loaded_index(
-        DataType::NONE,
-        knowhere::IndexEnum::INDEX_DISKANN,
-        knowhere::metric::L2,
-        knowhere::Version::GetCurrentVersion().VersionNumber(),
-        file_manager_context);
+    auto loaded_reader = published.Open(file_manager_context, load_config);
+    const auto& loaded_vector =
+        dynamic_cast<const index::IVectorReader&>(*loaded_reader);
+    ASSERT_TRUE(loaded_vector.HasValidData());
+    EXPECT_EQ(loaded_reader->Count(), valid_count);
+    EXPECT_EQ(loaded_vector.ValidCount(), valid_count);
+    for (int64_t row = 0; row < num_rows; ++row) {
+        EXPECT_EQ(loaded_vector.IsRowValid(row), valid_data[row]);
+    }
 
-    loaded_index.Load(milvus::tracer::TraceContext{}, load_config);
-    ASSERT_TRUE(loaded_index.HasValidData());
-    EXPECT_EQ(loaded_index.GetIdMap().OutCount(), num_rows);
-    EXPECT_EQ(loaded_index.GetValidCount(), valid_count);
-
-    const auto mmap_files_after_load =
-        CollectIdMapMmapFiles(local_chunk_manager->GetRootPath(), index_meta);
-    const auto loaded_mmap_files =
-        NewFilesAfter(mmap_files_before_load, mmap_files_after_load);
-    EXPECT_TRUE(HasIdMapMmapFilePrefix(loaded_mmap_files, "in_to_out_ids"));
-    EXPECT_TRUE(HasIdMapMmapFilePrefix(loaded_mmap_files, "out_to_in_ids"));
+    const auto mmap_directories_after_load = CollectIdMapMmapDirectories(
+        local_chunk_manager->GetRootPath(), index_meta);
+    EXPECT_EQ(mmap_directories_after_load.size(),
+              mmap_directories_before_load.size() + 1);
+    EXPECT_TRUE(std::includes(mmap_directories_after_load.begin(),
+                              mmap_directories_after_load.end(),
+                              mmap_directories_before_load.begin(),
+                              mmap_directories_before_load.end()));
+    reader.reset();
+    EXPECT_EQ(CollectIdMapMmapDirectories(local_chunk_manager->GetRootPath(),
+                                          index_meta)
+                  .size(),
+              mmap_directory_count_before_build + 1);
+    loaded_reader.reset();
+    EXPECT_EQ(CollectIdMapMmapDirectories(local_chunk_manager->GetRootPath(),
+                                          index_meta)
+                  .size(),
+              mmap_directory_count_before_build);
 
     for (const auto& file : files) {
         cm_->Remove(file);
@@ -1852,6 +2043,8 @@ TEST_F(DiskAnnFileManagerTest, LoadAllNullNullableDiskVectorIndexFromDataset) {
     FieldDataMeta field_data_meta = {
         collection_id, partition_id, segment_id, field_id};
     field_data_meta.field_schema.set_nullable(true);
+    field_data_meta.field_schema.set_data_type(
+        proto::schema::DataType::FloatVector);
 
     IndexMeta index_meta = {segment_id,
                             field_id,
@@ -1864,31 +2057,18 @@ TEST_F(DiskAnnFileManagerTest, LoadAllNullNullableDiskVectorIndexFromDataset) {
     storage::FileManagerContext file_manager_context(
         field_data_meta, index_meta, cm_, fs_);
 
-    std::vector<std::string> files;
-    {
-        milvus::index::VectorDiskAnnIndex<float> index(
-            DataType::NONE,
-            knowhere::IndexEnum::INDEX_DISKANN,
-            knowhere::metric::L2,
-            knowhere::Version::GetCurrentVersion().VersionNumber(),
-            file_manager_context);
-
-        std::unique_ptr<bool[]> valid_data(new bool[num_rows]);
-        std::fill_n(valid_data.get(), num_rows, false);
-
-        std::vector<float> vec_data(dim, 0.0f);
-        auto dataset = knowhere::GenDataSet(0, dim, vec_data.data());
-        dataset->SetIdMapData(
-            knowhere::IdMapData::FromValidData(valid_data.get(), num_rows));
-
-        milvus::Config config;
-        config[DIM_KEY] = dim;
-        config[milvus::index::DISK_ANN_BUILD_THREAD_NUM] = "1";
-
-        index.BuildWithDataset(dataset, config);
-        auto stats = index.Upload(config);
-        files = stats->GetIndexFiles();
-    }
+    std::unique_ptr<bool[]> valid_data(new bool[num_rows]);
+    std::fill_n(valid_data.get(), num_rows, false);
+    std::vector<float> vec_data(dim, 0.0f);
+    auto data =
+        NullableDiskVectors(num_rows, dim, vec_data.data(), valid_data.get());
+    milvus::Config config;
+    config[DIM_KEY] = dim;
+    config[index::DISK_ANN_BUILD_THREAD_NUM] = "1";
+    auto published = PublishDiskResident(file_manager_context, data, config);
+    EXPECT_EQ(PersistedVectorRowCount(published, file_manager_context),
+              num_rows);
+    auto files = published.Files();
 
     ASSERT_EQ(files.size(), 1);
     EXPECT_NE(files[0].find(milvus::index::VALID_DATA_KEY), std::string::npos);
@@ -1900,54 +2080,52 @@ TEST_F(DiskAnnFileManagerTest, LoadAllNullNullableDiskVectorIndexFromDataset) {
 
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    const auto mmap_file_count_before_load =
-        CollectIdMapMmapFiles(local_chunk_manager->GetRootPath(), index_meta)
+    const auto mmap_directory_count_before_load =
+        CollectIdMapMmapDirectories(local_chunk_manager->GetRootPath(),
+                                    index_meta)
             .size();
 
     {
         auto generic_mmap_load_config = load_config;
         generic_mmap_load_config[milvus::index::ENABLE_MMAP] = true;
 
-        milvus::index::VectorDiskAnnIndex<float> loaded_index(
-            DataType::NONE,
-            knowhere::IndexEnum::INDEX_DISKANN,
-            knowhere::metric::L2,
-            knowhere::Version::GetCurrentVersion().VersionNumber(),
-            file_manager_context);
-
-        loaded_index.Load(milvus::tracer::TraceContext{},
-                          generic_mmap_load_config);
-        ASSERT_TRUE(loaded_index.HasValidData());
-        EXPECT_EQ(loaded_index.GetIdMap().OutCount(), num_rows);
-        EXPECT_EQ(loaded_index.GetValidCount(), 0);
-        EXPECT_EQ(loaded_index.GetDim(), dim);
+        auto loaded_reader =
+            published.Open(file_manager_context, generic_mmap_load_config);
+        const auto& vector =
+            dynamic_cast<const index::IVectorReader&>(*loaded_reader);
+        ASSERT_TRUE(vector.HasValidData());
+        EXPECT_EQ(loaded_reader->Count(), 0);
+        EXPECT_EQ(vector.ValidCount(), 0);
+        EXPECT_EQ(vector.Dim(), dim);
+        for (int64_t row = 0; row < num_rows; ++row) {
+            EXPECT_FALSE(vector.IsRowValid(row));
+        }
     }
 
-    EXPECT_EQ(
-        CollectIdMapMmapFiles(local_chunk_manager->GetRootPath(), index_meta)
-            .size(),
-        mmap_file_count_before_load);
+    EXPECT_EQ(CollectIdMapMmapDirectories(local_chunk_manager->GetRootPath(),
+                                          index_meta)
+                  .size(),
+              mmap_directory_count_before_load);
 
     auto id_map_mmap_load_config = load_config;
     id_map_mmap_load_config[milvus::index::ENABLE_MMAP_I2O_MAP] = true;
     id_map_mmap_load_config[milvus::index::ENABLE_MMAP_O2I_MAP] = true;
 
-    milvus::index::VectorDiskAnnIndex<float> loaded_index(
-        DataType::NONE,
-        knowhere::IndexEnum::INDEX_DISKANN,
-        knowhere::metric::L2,
-        knowhere::Version::GetCurrentVersion().VersionNumber(),
-        file_manager_context);
-
-    loaded_index.Load(milvus::tracer::TraceContext{}, id_map_mmap_load_config);
-    ASSERT_TRUE(loaded_index.HasValidData());
-    EXPECT_EQ(loaded_index.GetIdMap().OutCount(), num_rows);
-    EXPECT_EQ(loaded_index.GetValidCount(), 0);
-    EXPECT_EQ(loaded_index.GetDim(), dim);
-    EXPECT_EQ(
-        CollectIdMapMmapFiles(local_chunk_manager->GetRootPath(), index_meta)
-            .size(),
-        mmap_file_count_before_load);
+    auto loaded_reader =
+        published.Open(file_manager_context, id_map_mmap_load_config);
+    const auto& vector =
+        dynamic_cast<const index::IVectorReader&>(*loaded_reader);
+    ASSERT_TRUE(vector.HasValidData());
+    EXPECT_EQ(loaded_reader->Count(), 0);
+    EXPECT_EQ(vector.ValidCount(), 0);
+    EXPECT_EQ(vector.Dim(), dim);
+    for (int64_t row = 0; row < num_rows; ++row) {
+        EXPECT_FALSE(vector.IsRowValid(row));
+    }
+    EXPECT_EQ(CollectIdMapMmapDirectories(local_chunk_manager->GetRootPath(),
+                                          index_meta)
+                  .size(),
+              mmap_directory_count_before_load);
 
     for (const auto& file : files) {
         cm_->Remove(file);
@@ -1993,7 +2171,7 @@ TEST_F(DiskAnnFileManagerTest, BuildAllValidEmptyEmbListDiskIndexFromBinlog) {
     auto serialized_data = insert_data.Serialize(storage::StorageType::Remote);
 
     std::string insert_file_path =
-        TestLocalPath + "diskann/empty_emb_list_binlog";
+        TestLocalPath + "diskann/empty_emb_list_binlog/1";
     boost::filesystem::remove_all(insert_file_path);
     cm_->Write(
         insert_file_path, serialized_data.data(), serialized_data.size());
@@ -2008,23 +2186,34 @@ TEST_F(DiskAnnFileManagerTest, BuildAllValidEmptyEmbListDiskIndexFromBinlog) {
                             dim};
     storage::FileManagerContext file_manager_context(
         field_data_meta, index_meta, cm_, fs_);
-    milvus::index::VectorDiskAnnIndex<float> index(
-        DataType::VECTOR_FLOAT,
-        knowhere::IndexEnum::INDEX_DISKANN,
-        knowhere::metric::L2,
-        knowhere::Version::GetCurrentVersion().VersionNumber(),
-        file_manager_context);
 
     milvus::Config config;
     config[INSERT_FILES_KEY] = std::vector<std::string>{insert_file_path};
     config[DIM_KEY] = dim;
     config[milvus::index::DISK_ANN_BUILD_THREAD_NUM] = "1";
 
-    index.Build(config);
+    auto adapted = DiskConsumerType(file_manager_context, num_rows, config);
+    indexbuilder::BuildRequest request;
+    request.family = adapted.family;
+    request.params = adapted.params;
+    request.value_type = adapted.value_type;
+    request.field_id = FieldId(field_id);
+    request.source = indexbuilder::V1BinlogBuildSource{{insert_file_path}};
+    request.expected_rows = num_rows;
+    request.staging_parent = TestLocalPath;
+    storage::ArtifactStats stats;
+    {
+        indexbuilder::BuildSession session(request, file_manager_context);
+        session.BuildFromSource();
+        stats = session.Publish();
+    }
+    PublishedConsumerIndex published{std::move(adapted), std::move(stats)};
+    auto reader = published.Open(file_manager_context);
+    const auto& vector = dynamic_cast<const index::IVectorReader&>(*reader);
 
-    EXPECT_EQ(index.Count(), 0);
-    EXPECT_TRUE(index.HasRawData());
-    EXPECT_EQ(index.GetDim(), dim);
+    EXPECT_EQ(reader->Count(), 0);
+    EXPECT_TRUE(vector.HasRawData());
+    EXPECT_EQ(vector.Dim(), dim);
 
     std::vector<float> vec_data(dim, 0.0f);
     auto query_dataset = knowhere::GenDataSet(0, dim, vec_data.data());
@@ -2034,24 +2223,24 @@ TEST_F(DiskAnnFileManagerTest, BuildAllValidEmptyEmbListDiskIndexFromBinlog) {
     query_dataset->Set(knowhere::meta::EMB_LIST_COUNT, num_rows);
     query_dataset->Set(knowhere::meta::NQ, num_rows);
 
-    SearchInfo search_info;
+    index::VectorSearchParams search_info;
+    search_info.search_params_ = milvus::Config::object();
     search_info.metric_type_ = knowhere::metric::L2;
     search_info.topk_ = 2;
 
     SearchResult search_result;
-    index.Query(query_dataset,
-                search_info,
-                milvus::BitsetView{},
-                nullptr,
-                search_result);
+    vector.Search(query_dataset,
+                  search_info,
+                  milvus::BitsetView{},
+                  nullptr,
+                  search_result);
     EXPECT_EQ(search_result.total_nq_, num_rows);
     ASSERT_EQ(search_result.seg_offsets_.size(), num_rows * search_info.topk_);
     for (auto offset : search_result.seg_offsets_) {
         EXPECT_EQ(offset, INVALID_SEG_OFFSET);
     }
 
-    auto stats = index.Upload(config);
-    auto files = stats->GetIndexFiles();
+    auto files = published.Files();
     ASSERT_EQ(files.size(), 1);
     EXPECT_NE(files[0].find("empty_emb_list_offsets"), std::string::npos);
 
@@ -2139,27 +2328,25 @@ TEST_F(DiskAnnFileManagerTest, ScalarIndexSortV3Roundtrip) {
         values[i] = static_cast<int64_t>(i * 3);
     }
 
-    milvus::index::ScalarIndexSort<int64_t> build_index(context);
-    build_index.Build(N, values.data());
-    ASSERT_EQ(build_index.Count(), static_cast<int64_t>(N));
+    auto published = PublishScalarV3<int64_t>(
+        context, DataType::INT64, index::ASCENDING_SORT, values);
+    auto build_reader = published.Open(context);
+    ASSERT_EQ(build_reader->Count(), static_cast<int64_t>(N));
 
-    auto stats = build_index.UploadUnified({});
-    ASSERT_NE(stats, nullptr);
-    auto files = stats->GetIndexFiles();
+    auto files = published.Files();
     ASSERT_EQ(files.size(), 1);
 
-    milvus::index::ScalarIndexSort<int64_t> load_index(context);
-    milvus::Config load_config;
-    load_config[milvus::index::INDEX_FILES] =
-        std::vector<std::string>{files[0]};
-    load_config[milvus::index::ENABLE_MMAP] = false;
-    load_index.LoadUnified(load_config);
-
-    EXPECT_EQ(load_index.Count(), static_cast<int64_t>(N));
+    auto loaded_reader = published.Open(context);
+    const auto& predicate =
+        dynamic_cast<const index::IScalarPredicateReader<int64_t>&>(
+            *loaded_reader);
+    EXPECT_EQ(loaded_reader->Count(), static_cast<int64_t>(N));
+    const auto& value_reader =
+        dynamic_cast<const index::IScalarValueReader<int64_t>&>(*loaded_reader);
 
     {
         std::vector<int64_t> query_vals = {0, 3, 6};
-        auto bitset = load_index.In(query_vals.size(), query_vals.data());
+        auto bitset = predicate.In(query_vals.size(), query_vals.data());
         EXPECT_TRUE(bitset[0]);
         EXPECT_TRUE(bitset[1]);
         EXPECT_TRUE(bitset[2]);
@@ -2167,15 +2354,15 @@ TEST_F(DiskAnnFileManagerTest, ScalarIndexSortV3Roundtrip) {
     }
 
     {
-        auto bitset =
-            load_index.Range(static_cast<int64_t>(6), milvus::OpType::LessThan);
+        auto bitset = predicate.Range(static_cast<int64_t>(6),
+                                      index::CompareOp::LessThan);
         EXPECT_TRUE(bitset[0]);
         EXPECT_TRUE(bitset[1]);
         EXPECT_FALSE(bitset[2]);
     }
 
     {
-        auto bitset = load_index.Range(
+        auto bitset = predicate.Range(
             static_cast<int64_t>(3), true, static_cast<int64_t>(9), false);
         EXPECT_FALSE(bitset[0]);
         EXPECT_TRUE(bitset[1]);
@@ -2184,7 +2371,7 @@ TEST_F(DiskAnnFileManagerTest, ScalarIndexSortV3Roundtrip) {
     }
 
     for (size_t i = 0; i < N; ++i) {
-        auto val = load_index.Reverse_Lookup(i);
+        auto val = value_reader.Lookup(i);
         ASSERT_TRUE(val.has_value());
         EXPECT_EQ(val.value(), values[i]);
     }
@@ -2201,27 +2388,23 @@ TEST_F(DiskAnnFileManagerTest, BitmapIndexV3Roundtrip) {
         values[i] = static_cast<int64_t>(i % 100);
     }
 
-    milvus::index::BitmapIndex<int64_t> build_index(context);
-    build_index.Build(N, values.data());
-    ASSERT_EQ(build_index.Count(), static_cast<int64_t>(N));
+    auto published = PublishScalarV3<int64_t>(
+        context, DataType::INT64, index::BITMAP_INDEX_TYPE, values);
+    auto build_reader = published.Open(context);
+    ASSERT_EQ(build_reader->Count(), static_cast<int64_t>(N));
 
-    auto stats = build_index.UploadUnified({});
-    ASSERT_NE(stats, nullptr);
-    auto files = stats->GetIndexFiles();
+    auto files = published.Files();
     ASSERT_EQ(files.size(), 1);
 
-    milvus::index::BitmapIndex<int64_t> load_index(context);
-    milvus::Config load_config;
-    load_config[milvus::index::INDEX_FILES] =
-        std::vector<std::string>{files[0]};
-    load_config[milvus::index::ENABLE_MMAP] = false;
-    load_index.LoadUnified(load_config);
-
-    EXPECT_EQ(load_index.Count(), static_cast<int64_t>(N));
+    auto loaded_reader = published.Open(context);
+    const auto& predicate =
+        dynamic_cast<const index::IScalarPredicateReader<int64_t>&>(
+            *loaded_reader);
+    EXPECT_EQ(loaded_reader->Count(), static_cast<int64_t>(N));
 
     {
         std::vector<int64_t> query_vals = {0, 1};
-        auto bitset = load_index.In(query_vals.size(), query_vals.data());
+        auto bitset = predicate.In(query_vals.size(), query_vals.data());
         for (size_t i = 0; i < N; ++i) {
             if (values[i] == 0 || values[i] == 1) {
                 EXPECT_TRUE(bitset[i]) << "offset " << i;
@@ -2245,27 +2428,24 @@ TEST_F(DiskAnnFileManagerTest, StringIndexMarisaV3Roundtrip) {
         values[i] = buf;
     }
 
-    milvus::index::StringIndexMarisa build_index(context);
-    build_index.Build(N, values.data());
-    ASSERT_EQ(build_index.Count(), static_cast<int64_t>(N));
+    std::vector<std::string_view> value_views(values.begin(), values.end());
+    auto published = PublishScalarV3<std::string_view>(
+        context, DataType::VARCHAR, index::MARISA_TRIE, value_views);
+    auto build_reader = published.Open(context);
+    ASSERT_EQ(build_reader->Count(), static_cast<int64_t>(N));
 
-    auto stats = build_index.UploadUnified({});
-    ASSERT_NE(stats, nullptr);
-    auto files = stats->GetIndexFiles();
+    auto files = published.Files();
     ASSERT_EQ(files.size(), 1);
 
-    milvus::index::StringIndexMarisa load_index(context);
-    milvus::Config load_config;
-    load_config[milvus::index::INDEX_FILES] =
-        std::vector<std::string>{files[0]};
-    load_config[milvus::index::ENABLE_MMAP] = false;
-    load_index.LoadUnified(load_config);
-
-    EXPECT_EQ(load_index.Count(), static_cast<int64_t>(N));
+    auto loaded_reader = published.Open(context);
+    const auto& predicate =
+        dynamic_cast<const index::IScalarPredicateReader<std::string_view>&>(
+            *loaded_reader);
+    EXPECT_EQ(loaded_reader->Count(), static_cast<int64_t>(N));
 
     {
-        std::vector<std::string> query_vals = {"str_000", "str_001"};
-        auto bitset = load_index.In(query_vals.size(), query_vals.data());
+        std::vector<std::string_view> query_vals = {"str_000", "str_001"};
+        auto bitset = predicate.In(query_vals.size(), query_vals.data());
         EXPECT_TRUE(bitset[0]);
         EXPECT_TRUE(bitset[1]);
         for (size_t i = 2; i < N; ++i) {
@@ -2287,27 +2467,27 @@ TEST_F(DiskAnnFileManagerTest, StringIndexSortV3Roundtrip) {
         values[i] = buf;
     }
 
-    milvus::index::StringIndexSort build_index(context);
-    build_index.Build(N, values.data());
-    ASSERT_EQ(build_index.Count(), static_cast<int64_t>(N));
+    std::vector<std::string_view> value_views(values.begin(), values.end());
+    auto published = PublishScalarV3<std::string_view>(
+        context, DataType::VARCHAR, index::ASCENDING_SORT, value_views);
+    auto build_reader = published.Open(context);
+    ASSERT_EQ(build_reader->Count(), static_cast<int64_t>(N));
 
-    auto stats = build_index.UploadUnified({});
-    ASSERT_NE(stats, nullptr);
-    auto files = stats->GetIndexFiles();
+    auto files = published.Files();
     ASSERT_EQ(files.size(), 1);
 
-    milvus::index::StringIndexSort load_index(context);
-    milvus::Config load_config;
-    load_config[milvus::index::INDEX_FILES] =
-        std::vector<std::string>{files[0]};
-    load_config[milvus::index::ENABLE_MMAP] = false;
-    load_index.LoadUnified(load_config);
-
-    EXPECT_EQ(load_index.Count(), static_cast<int64_t>(N));
+    auto loaded_reader = published.Open(context);
+    const auto& predicate =
+        dynamic_cast<const index::IScalarPredicateReader<std::string_view>&>(
+            *loaded_reader);
+    EXPECT_EQ(loaded_reader->Count(), static_cast<int64_t>(N));
+    const auto& value_reader =
+        dynamic_cast<const index::IScalarValueReader<std::string_view>&>(
+            *loaded_reader);
 
     {
-        std::vector<std::string> query_vals = {"str_000", "str_001"};
-        auto bitset = load_index.In(query_vals.size(), query_vals.data());
+        std::vector<std::string_view> query_vals = {"str_000", "str_001"};
+        auto bitset = predicate.In(query_vals.size(), query_vals.data());
         EXPECT_TRUE(bitset[0]);
         EXPECT_TRUE(bitset[1]);
         for (size_t i = 2; i < N; ++i) {
@@ -2316,7 +2496,7 @@ TEST_F(DiskAnnFileManagerTest, StringIndexSortV3Roundtrip) {
     }
 
     {
-        auto val = load_index.Reverse_Lookup(0);
+        auto val = value_reader.Lookup(0);
         ASSERT_TRUE(val.has_value());
         EXPECT_EQ(val.value(), "str_000");
     }

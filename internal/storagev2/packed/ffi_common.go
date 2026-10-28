@@ -4,6 +4,7 @@ package packed
 #cgo pkg-config: milvus_core milvus-storage
 #include <stdlib.h>
 #include "milvus-storage/ffi_c.h"
+#include "storage/loon_ffi/ffi_writer_c.h"
 #include "storage/loon_ffi/external_spec_c.h"
 #include "arrow/c/abi.h"
 #include "arrow/c/helpers.h"
@@ -14,12 +15,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/storagev2"
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -77,6 +80,36 @@ var (
 	PropertyWriterEncMeta   = C.GoString(C.loon_properties_writer_enc_meta)      // Encoded metadata containing zone ID, collection ID, and key version
 	PropertyWriterEncAlgo   = C.GoString(C.loon_properties_writer_enc_algorithm) // Encryption algorithm (e.g., "AES_GCM_V1")
 )
+
+func writerEncryptionProperties(storagePluginContext *indexcgopb.StoragePluginContext) (map[string]string, error) {
+	if storagePluginContext == nil {
+		return nil, nil
+	}
+
+	var cKey *C.char
+	var cMeta *C.char
+	encKey := C.CString(storagePluginContext.EncryptionKey)
+	defer C.free(unsafe.Pointer(encKey))
+
+	pluginContext := C.CPluginContext{
+		ez_id:         C.int64_t(storagePluginContext.EncryptionZoneId),
+		collection_id: C.int64_t(storagePluginContext.CollectionId),
+		key:           encKey,
+	}
+	status := C.GetEncParams(&pluginContext, &cKey, &cMeta)
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return nil, err
+	}
+	defer C.free(unsafe.Pointer(cKey))
+	defer C.free(unsafe.Pointer(cMeta))
+
+	return map[string]string{
+		PropertyWriterEncEnable: "true",
+		PropertyWriterEncKey:    C.GoString(cKey),
+		PropertyWriterEncMeta:   C.GoString(cMeta),
+		PropertyWriterEncAlgo:   "AES_GCM_V1",
+	}, nil
+}
 
 // ExtfsPrefixForCollection returns the per-collection extfs property prefix.
 func ExtfsPrefixForCollection(collectionID int64) string {
@@ -203,9 +236,38 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	keys = append(keys, PropertyWriterFormat)
 	values = append(values, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
 
-	// No extfs.default.* properties here. Per-collection extfs properties
-	// (extfs.{collectionID}.*) are injected downstream via
-	// InjectExternalSpecProperties (C++ InjectExternalSpecProperties pipeline).
+	// Store the External Table mode in the same properties map; it is consumed
+	// by InjectExternalSpecProperties once the collection is known.
+	externalMode := uint32(0)
+	if storageConfig.GetTalonEnableForExternalTable() {
+		externalMode = storageConfig.GetTalonMode()
+	}
+	keys = append(keys, "milvus.talon.external_mode")
+	values = append(values, strconv.FormatUint(uint64(externalMode), 10))
+	for _, property := range []struct {
+		key   string
+		value uint32
+	}{
+		{"fs.talon.mode", storageConfig.GetTalonMode()},
+		{"fs.talon.small_read_threshold", storageConfig.GetTalonSmallReadThreshold()},
+		{"fs.talon.block_size", storageConfig.GetTalonBlockSize()},
+		{"fs.talon.max_idle_per_addr", storageConfig.GetTalonMaxIdlePerAddr()},
+	} {
+		isMode := property.key == "fs.talon.mode"
+		if !isMode && property.value == 0 {
+			continue // Older StorageConfig messages use the storage defaults.
+		}
+		value := property.value
+		if isMode && storageConfig.GetStorageType() == "local" {
+			value = 0
+		}
+		keys = append(keys, property.key)
+		values = append(values, strconv.FormatUint(uint64(value), 10))
+	}
+	if coordinator := storageConfig.GetTalonCoordinator(); coordinator != "" {
+		keys = append(keys, "fs.talon.coordinator")
+		values = append(values, coordinator)
+	}
 
 	// Add extra kvs (override existing keys if present)
 	for k, v := range extraKVs {
@@ -418,6 +480,28 @@ func CompareManifestPath(a, b string) (int, error) {
 	}
 }
 
+// ManifestPathKey returns the identity of a manifest path: its base path and
+// version. Spellings of the same revision (JSON key order, optional fields)
+// share one key, so compare and index manifest paths by this key rather than
+// by their text. A value that is not a manifest path, such as an external
+// table file path, is returned unchanged.
+func ManifestPathKey(path string) string {
+	// UnmarshalManifestPath accepts leading whitespace too.
+	if !strings.HasPrefix(strings.TrimSpace(path), "{") {
+		return path
+	}
+	basePath, version, err := UnmarshalManifestPath(path)
+	if err != nil || basePath == "" {
+		return path
+	}
+	return MarshalManifestPath(basePath, version)
+}
+
+// SameManifestPath reports whether two manifest paths name the same revision.
+func SameManifestPath(a, b string) bool {
+	return a == b || ManifestPathKey(a) == ManifestPathKey(b)
+}
+
 // LobFileInfo represents metadata for a LOB (Large Object) file.
 // used for TEXT column compaction strategy decision (hole ratio calculation)
 type LobFileInfo struct {
@@ -447,7 +531,7 @@ func AddLobFilesToTransaction(basePath string, version int64, storageConfig *ind
 
 	// open transaction
 	var cTransactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
+	result := C.loon_transaction_open(cBasePath, cProperties, C.int64_t(version), C.int64_t(-1), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return 0, merr.WrapErrStorage(err, "failed to begin transaction")
 	}
@@ -475,7 +559,7 @@ func AddLobFilesToTransaction(basePath string, version int64, storageConfig *ind
 
 	// commit transaction
 	var committedVersion C.int64_t
-	result = C.loon_transaction_commit(cTransactionHandle, &committedVersion)
+	result = C.loon_transaction_commit(cTransactionHandle, &committedVersion, nil)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return 0, merr.WrapErrStorage(err, "failed to commit transaction")
 	}
@@ -502,7 +586,7 @@ func GetManifestLobFiles(manifestPath string, storageConfig *indexpb.StorageConf
 
 	// open transaction to get manifest
 	var cTransactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
+	result := C.loon_transaction_open(cBasePath, cProperties, C.int64_t(version), C.int64_t(-1), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, merr.WrapErrStorage(err, "failed to begin transaction")
 	}
@@ -516,6 +600,10 @@ func GetManifestLobFiles(manifestPath string, storageConfig *indexpb.StorageConf
 	}
 	defer C.loon_manifest_destroy(cManifest)
 
+	return manifestLobFiles(cManifest), nil
+}
+
+func manifestLobFiles(cManifest *C.LoonManifest) []LobFileInfo {
 	// extract LOB files from manifest
 	numFiles := int(cManifest.lob_files.num_files)
 	lobFiles := make([]LobFileInfo, 0, numFiles)
@@ -534,5 +622,5 @@ func GetManifestLobFiles(manifestPath string, storageConfig *indexpb.StorageConf
 		}
 	}
 
-	return lobFiles, nil
+	return lobFiles
 }

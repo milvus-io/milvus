@@ -83,7 +83,8 @@ type DataCoordCatalog interface {
 	// TODO: From MarkChannelAdded to DropChannel, it's totally a redundant design by now, remove it in future.
 	MarkChannelAdded(ctx context.Context, channel string) error
 	ShouldDropChannel(ctx context.Context, channel string) bool
-	ChannelExists(ctx context.Context, channel string) bool
+	// ChannelExists returns lookup errors separately from an absent channel.
+	ChannelExists(ctx context.Context, channel string) (bool, error)
 	DropChannel(ctx context.Context, channel string) error
 
 	ListChannelCheckpoint(ctx context.Context) (map[string]*msgpb.MsgPosition, error)
@@ -162,4 +163,15 @@ type DataCoordCatalog interface {
 	// List/Drop provide recovery scanning and collection-drop cleanup.
 	ListSegmentChangeGroups(ctx context.Context) ([]*model.SegmentChangeGroup, error)
 	DropSegmentChangeGroups(ctx context.Context, collectionID int64) error
+
+	// Import V3 control-plane records.
+	SaveReshardTask(ctx context.Context, task *datapb.ReshardTask) error
+	ListReshardTasks(ctx context.Context) ([]*datapb.ReshardTask, error)
+	DropReshardTask(ctx context.Context, taskID int64) error
+	SaveImportTaskV3(ctx context.Context, task *datapb.ImportTaskV3) error
+	ListImportTasksV3(ctx context.Context) ([]*datapb.ImportTaskV3, error)
+	DropImportTaskV3(ctx context.Context, taskID int64) error
+	SavePreImportTaskV3(ctx context.Context, task *datapb.PreImportTaskV3) error
+	ListPreImportTasksV3(ctx context.Context) ([]*datapb.PreImportTaskV3, error)
+	DropPreImportTaskV3(ctx context.Context, taskID int64) error
 }

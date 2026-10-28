@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -612,13 +611,6 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 		}
 	}
 
-	mlog.Info(ctx, "meta update success", mlog.String("requestDatabase", database), mlog.String("database", bucketDB),
-		mlog.String("collectionName", collectionName),
-		mlog.String("actual collection Name", collection.Schema.GetName()), mlog.Int64("collectionID", collection.CollectionID),
-		mlog.Uint64("version", collection.GetRequestTime()), mlog.Any("Aliases", collection.Aliases),
-		mlog.Bool("partition key isolation", isolation), mlog.String("QueryMode", queryMode),
-	)
-
 	return info, nil
 }
 
@@ -985,22 +977,19 @@ func (m *MetaCache) GetPartitions(ctx context.Context, database, collectionName 
 // the collection cache on a miss. Partition caches are keyed by the entry's
 // cluster-unique id, so every collection has exactly ONE partition-cache
 // location no matter how it is addressed, invalidation stales exact id-keys,
-// and a drop+recreate can never alias into old entries (new id). It also
-// returns the canonical (db, name) to address rootcoord with.
-func (m *MetaCache) resolvePartitionCollection(ctx context.Context, database, collectionName string) (typeutil.UniqueID, string, string, error) {
+// and a drop+recreate can never alias into old entries (new id). Return the
+// entry itself so the partition fill can reuse its already-parsed schema rather
+// than describing the same collection a second time.
+func (m *MetaCache) resolvePartitionCollection(ctx context.Context, database, collectionName string) (*CollectionInfo, string, error) {
 	info, err := m.GetCollectionInfo(ctx, database, collectionName, 0)
 	if err != nil {
-		return 0, "", "", err
+		return nil, "", err
 	}
 	db := info.DBName
 	if db == "" {
 		db = normalizeDBName(database)
 	}
-	name := collectionName
-	if info.Schema != nil && info.Schema.GetName() != "" {
-		name = info.Schema.GetName()
-	}
-	return info.CollID, db, name, nil
+	return info, db, nil
 }
 
 func (m *MetaCache) GetPartitionInfo(ctx context.Context, database, collectionName string, partitionName string) (*PartitionInfo, error) {
@@ -1042,10 +1031,11 @@ func (m *MetaCache) GetPartitionInfos(ctx context.Context, database, collectionN
 	method := "GetPartitionInfo"
 	// See resolvePartitionCollection: entries are keyed by the collection id, so
 	// they have exactly one location and invalidation stales exact id-keys.
-	collectionID, rpcDB, rpcName, err := m.resolvePartitionCollection(ctx, database, collectionName)
+	collection, rpcDB, err := m.resolvePartitionCollection(ctx, database, collectionName)
 	if err != nil {
 		return nil, err
 	}
+	collectionID := collection.CollID
 	key := buildPartitionCacheKey(collectionID)
 	m.mu.RLock()
 	cached, ok := m.partitionCache[key]
@@ -1061,26 +1051,9 @@ func (m *MetaCache) GetPartitionInfos(ctx context.Context, database, collectionN
 	m.fillMu.RLock()
 	defer m.fillMu.RUnlock()
 	partitionsInfo, err, _ := m.sfPartitionCache.Do(key, func() (*PartitionInfos, error) {
-		// Describe/show BY ID (collectionID resolved above), not by name: the
-		// cache key is that id, and resolving by name here would let a
-		// concurrent same-name drop+recreate return the NEW collection's
-		// partitions and cache them under the OLD id (wrong partition context,
-		// and with no GC an entry nothing can clean). By id, a dropped old id
-		// returns not-found and the fill fails (the caller re-resolves) rather
-		// than caching a mismatch. The empty name forces id-only resolution.
-		collection, err := m.describeCollection(ctx, rpcDB, "", collectionID)
-		if err != nil {
-			return nil, err
-		}
-		if collection.GetCollectionID() != collectionID {
-			// defense: the id and the returned collection must be the same one
-			return nil, merr.WrapErrCollectionNotFound(rpcName)
-		}
-		schemaInfo, err := NewSchemaInfo(collection.Schema)
-		if err != nil {
-			return nil, err
-		}
-
+		// Partition-key status is fixed at creation, so the resolved schema answers
+		// it; ShowPartitions stays ID-addressed so a same-name recreate cannot leak in.
+		isPartitionKey := collection.Schema.IsPartitionKeyCollection()
 		resp, err := m.showPartitions(ctx, rpcDB, "", collectionID)
 		if err != nil {
 			return nil, err
@@ -1094,25 +1067,26 @@ func (m *MetaCache) GetPartitionInfos(ctx context.Context, database, collectionN
 				CreatedUtcTimestamp: resp.CreatedUtcTimestamps[i],
 			})
 		}
-		partitionsInfo := parsePartitionsInfo(partitions, schemaInfo.IsPartitionKeyCollection())
+		partitionsInfo := parsePartitionsInfo(partitions, isPartitionKey)
 		// Write-back under m.mu, ordered against invalidations by fillMu (held
 		// across this whole closure): an invalidation drains in-flight fills
 		// before deleting, so this insert either lands before the delete (and is
 		// cleaned by it) or the fill was issued after the DDL. No version floor.
 		//
 		// Only cache the list while the collection's PRIMARY entry is still live.
-		// collectionID was resolved before we took fillMu.RLock; an invalidation
-		// in that window evicts the primary AND its partition list, but the fill
-		// still describes/shows the collection successfully (it lives at rootcoord
-		// for Load/Release/Alter). Writing anyway would leave a partition entry
-		// with NO primary owner: a later Create/DropPartition invalidation routes
-		// through evictCollectionEntryLocked, which no-ops when the primary is
-		// absent, so the stale list would survive and be re-adopted when the
-		// primary re-fills. fillMu.RLock is held here, so no invalidation can run
-		// between this check and the write -- if the primary is present now it
-		// stays present until we release, and any future eviction of it cleans
-		// the list. Absent primary => skip the cache; the caller still gets the
-		// correct list, just uncached (one extra fill next time).
+		// The primary can be gone here in two ways: an invalidation in the
+		// resolve-to-lock gap (collectionID was resolved before fillMu.RLock was
+		// taken), or RemoveDatabase's batched primary-store walk, which runs after
+		// it releases fillMu and so can overlap this RPC. Either way the
+		// collection may still exist and ShowPartitions succeeds, but writing
+		// anyway would leave a partition entry with NO primary owner: a later
+		// Create/DropPartition invalidation routes through
+		// evictCollectionEntryLocked, which no-ops when the primary is absent, so
+		// the stale list would survive and be re-adopted when the primary
+		// re-fills. The check and the write share m.mu, so a primary present here
+		// owns the list and any later eviction of it drops the list too. Absent
+		// primary => skip the cache; the caller still gets the id-addressed
+		// result, just uncached (one extra fill next time).
 		m.mu.Lock()
 		if _, ok := m.collections[collectionID]; ok {
 			m.partitionCache[key] = partitionsInfo
@@ -1508,9 +1482,6 @@ func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
 	evicted := 0
 	for start := 0; start < len(ids); start += removeBatch {
 		end := min(start+removeBatch, len(ids))
-		for _, id := range ids[start:end] {
-			rls.MarkCollectionDropped(id)
-		}
 		m.mu.Lock()
 		for _, id := range ids[start:end] {
 			// Unified eviction, not a raw delete: if a fill racing this walk has

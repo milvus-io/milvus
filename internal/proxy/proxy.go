@@ -29,10 +29,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	internalhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
-	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/adminauth"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
+	"github.com/milvus-io/milvus/internal/util/function/pyudf"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -221,6 +222,12 @@ func (node *Proxy) TsoAllocator() taskmodel.TsoAllocator {
 	return node.tsoAllocator
 }
 
+// CheckClusterPrivilege authorizes a cluster-scoped privilege via the
+// root-owned casbin enforcement path.
+func (node *Proxy) CheckClusterPrivilege(ctx context.Context, req interface{}, fullMethod string, objectPrivilege string) error {
+	return CheckClusterPrivilege(ctx, req, fullMethod, objectPrivilege)
+}
+
 // IsDQLQueueFull reports whether the next DQL enqueue would be rejected with
 // TooManyRequests. The REST layer probes it (via interface assertion, like
 // GetMetaCache) to reject search/query before paying for body decoding.
@@ -348,12 +355,6 @@ func (node *Proxy) Init() error {
 	node.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 	mlog.Debug(node.ctx, "create metrics cache manager done", mlog.String("role", typeutil.ProxyRole))
 
-	if err := rls.Init(node.ctx, node.mixCoord); err != nil {
-		mlog.Warn(node.ctx, "failed to init RLS metadata manager", mlog.String("role", typeutil.ProxyRole), mlog.Err(err))
-		return err
-	}
-	mlog.Debug(node.ctx, "init RLS metadata manager done", mlog.String("role", typeutil.ProxyRole))
-
 	node.managementRootVerifier = newManagementRootVerifier(node.mixCoord)
 	internalhttp.RegisterManagementVerifier(internalhttp.VerifierSlotProxy, node.managementRootVerifier.Verify)
 
@@ -368,6 +369,10 @@ func (node *Proxy) Init() error {
 	// Only proxy generates UUID for now, and one Milvus process only has one proxy
 	uuid.EnableRandPool()
 	mlog.Debug(node.ctx, "enable rand pool for UUIDv4 generation")
+
+	if err := pyudf.StartSupervisor(node.ctx); err != nil {
+		return merr.Wrap(err, "initialize Proxy PyUDF process")
+	}
 
 	mlog.Info(node.ctx, "init proxy done", mlog.FieldNodeID(paramtable.GetNodeID()), mlog.String("Address", node.address))
 	return nil
@@ -405,6 +410,9 @@ func (node *Proxy) Start() error {
 	mlog.Debug(node.ctx, "update state code", mlog.String("role", typeutil.ProxyRole), mlog.String("State", commonpb.StateCode_Healthy.String()))
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
+	// request-level feature counters (see internal/featureusage)
+	featureusage.SetEnabled(Params.CommonCfg.FeatureUsageCountersEnabled.GetAsBool())
+
 	// register devops api
 	RegisterMgrRoute(node)
 
@@ -423,6 +431,14 @@ func (node *Proxy) Stop() error {
 		}
 	}()
 
+	// Notify Python before closing the scheduler so UDF execution cannot delay
+	// shutdown. The supervisor owns worker termination and reaping.
+	// Cleanup follows existing resources, even if enabled changed after startup.
+	// PyUDF cleanup errors do not fail Proxy shutdown.
+	if err := pyudf.StopSupervisor(context.Background()); err != nil {
+		mlog.Warn(node.ctx, "PyUDF supervisor cleanup failed; continuing Proxy shutdown", mlog.Err(err))
+	}
+
 	if node.rowIDAllocator != nil {
 		node.rowIDAllocator.Close()
 		mlog.Info(node.ctx, "close id allocator", mlog.String("role", typeutil.ProxyRole))
@@ -431,6 +447,10 @@ func (node *Proxy) Stop() error {
 	if node.sched != nil {
 		node.sched.Close()
 		mlog.Info(node.ctx, "close scheduler", mlog.String("role", typeutil.ProxyRole))
+	}
+
+	if err := pyudf.CloseClients(); err != nil {
+		mlog.Warn(node.ctx, "PyUDF client cleanup failed; continuing Proxy shutdown", mlog.Err(err))
 	}
 
 	for _, cb := range node.closeCallbacks {

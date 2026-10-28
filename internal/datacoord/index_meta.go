@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -58,6 +59,10 @@ import (
 var errIndexOperationIgnored = errors.New("index operation ignored")
 
 func validateIndexStorePathVersionForFinish(buildID int64, requested, actual indexpb.IndexStorePathVersion) error {
+	if metautil.IsSegmentRooted(requested) && actual != requested {
+		return merr.WrapErrServiceInternalMsg("index worker changed segment-rooted path layout, buildID=%d, requested=%s, actual=%s",
+			buildID, requested.String(), actual.String())
+	}
 	if actual > requested {
 		return merr.WrapErrParameterInvalidMsg(
 			"index store path version returned by worker is newer than requested, buildID=%d, requested=%s, actual=%s",
@@ -77,6 +82,7 @@ type indexMeta struct {
 	// collID -> indexID -> index
 	fieldIndexLock sync.RWMutex
 	indexes        map[UniqueID]map[UniqueID]*model.Index
+	taskCounts     indexTaskCounts
 
 	// buildID2Meta records building index meta information of the segment
 	segmentBuildInfo *segmentBuildInfo
@@ -225,6 +231,8 @@ func (m *indexMeta) reloadFromKV(collectionIDs []int64) error {
 					indexes.Insert(segIdx.IndexID, segIdx)
 					m.segmentIndexes.Insert(segIdx.SegmentID, indexes)
 				}
+				old, _ := m.segmentBuildInfo.Get(segIdx.BuildID)
+				m.taskCounts.replaceTask(old, segIdx)
 				m.segmentBuildInfo.AddForRecovery(segIdx)
 			}
 		}
@@ -258,6 +266,7 @@ func (m *indexMeta) reloadFromKV(collectionIDs []int64) error {
 }
 
 func (m *indexMeta) updateCollectionIndex(index *model.Index) {
+	m.taskCounts.replaceIndex(m.indexes[index.CollectionID][index.IndexID], index)
 	if _, ok := m.indexes[index.CollectionID]; !ok {
 		m.indexes[index.CollectionID] = make(map[UniqueID]*model.Index)
 	}
@@ -265,6 +274,8 @@ func (m *indexMeta) updateCollectionIndex(index *model.Index) {
 }
 
 func (m *indexMeta) updateSegmentIndex(segIdx *model.SegmentIndex) {
+	old, _ := m.segmentBuildInfo.Get(segIdx.BuildID)
+	m.taskCounts.replaceTask(old, segIdx)
 	indexes, ok := m.segmentIndexes.Get(segIdx.SegmentID)
 	if ok {
 		indexes.Insert(segIdx.IndexID, segIdx)
@@ -276,9 +287,9 @@ func (m *indexMeta) updateSegmentIndex(segIdx *model.SegmentIndex) {
 	m.segmentBuildInfo.Add(segIdx)
 }
 
-// writeSegmentIndexToManifest reports whether completed StorageV3 index
-// artifacts are published through segment manifests. SegmentIndex remains the
-// durable task record while a build is active or failed. Only a successful
+// writeSegmentIndexToManifest selects manifest publication for new StorageV3
+// tasks. Existing index builds follow their persisted path version. SegmentIndex
+// remains the durable task record while a build is active or failed. Only a successful
 // publication retires its Finished etcd row.
 func writeSegmentIndexToManifest() bool {
 	return paramtable.Get().DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool()
@@ -315,6 +326,12 @@ func (m *indexMeta) updateSegIndexMeta(segIdx *model.SegmentIndex, updateFunc fu
 // Precondition: the caller holds keyLock for taskInfo.BuildID.
 func (m *indexMeta) buildFinishedSegmentIndex(segIdx *model.SegmentIndex, taskInfo *workerpb.IndexTaskInfo) (*model.SegmentIndex, uint64, error) {
 	actualPathVersion := taskInfo.GetIndexStorePathVersion()
+	// Failed/empty results may be synthesized by the scheduler without a
+	// worker payload. They carry no artifact layout; retain the dispatched
+	// version so terminal tasks can retire and GC can reclaim their uploads.
+	if taskInfo.GetState() != commonpb.IndexState_Finished || len(taskInfo.GetIndexFileKeys()) == 0 {
+		actualPathVersion = segIdx.IndexStorePathVersion
+	}
 	if err := validateIndexStorePathVersionForFinish(taskInfo.GetBuildID(), segIdx.IndexStorePathVersion, actualPathVersion); err != nil {
 		mlog.Warn(m.ctx, "invalid index store path version returned by worker",
 			mlog.Int64("buildID", taskInfo.GetBuildID()),
@@ -359,40 +376,16 @@ func (m *indexMeta) recordFinishedTask(old, updated *model.SegmentIndex, oldSize
 	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(taskInfo.GetIndexFileKeys())))
 }
 
+func (m *indexMeta) indexTaskCountsSnapshot() indexTaskStateCounts {
+	return m.taskCounts.snapshot()
+}
+
 func (m *indexMeta) updateIndexTasksMetrics() {
-	taskMetrics := make(map[indexpb.JobState]int)
-	taskMetrics[indexpb.JobState_JobStateNone] = 0
-	taskMetrics[indexpb.JobState_JobStateInit] = 0
-	taskMetrics[indexpb.JobState_JobStateInProgress] = 0
-	taskMetrics[indexpb.JobState_JobStateFinished] = 0
-	taskMetrics[indexpb.JobState_JobStateFailed] = 0
-	taskMetrics[indexpb.JobState_JobStateRetry] = 0
-	for _, segIdx := range m.segmentBuildInfo.List() {
-		if segIdx.IsDeleted || !m.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
-			continue
-		}
-
-		switch segIdx.IndexState {
-		case commonpb.IndexState_IndexStateNone:
-			taskMetrics[indexpb.JobState_JobStateNone]++
-		case commonpb.IndexState_Unissued:
-			taskMetrics[indexpb.JobState_JobStateInit]++
-		case commonpb.IndexState_InProgress:
-			taskMetrics[indexpb.JobState_JobStateInProgress]++
-		case commonpb.IndexState_Finished:
-			taskMetrics[indexpb.JobState_JobStateFinished]++
-		case commonpb.IndexState_Failed:
-			taskMetrics[indexpb.JobState_JobStateFailed]++
-		case commonpb.IndexState_Retry:
-			taskMetrics[indexpb.JobState_JobStateRetry]++
-		}
-	}
-
+	counts := m.indexTaskCountsSnapshot()
 	jobType := indexpb.JobType_JobTypeIndexJob.String()
-	for k, v := range taskMetrics {
-		metrics.IndexStatsTaskNum.WithLabelValues(jobType, k.String()).Set(float64(v))
+	for state, count := range counts {
+		metrics.IndexStatsTaskNum.WithLabelValues(jobType, indexTaskMetricStates[state].String()).Set(float64(count))
 	}
-	mlog.Info(m.ctx, "update index metric", mlog.Int("collectionNum", len(taskMetrics)))
 }
 
 func checkIdenticalJSON(index *model.Index, req *indexpb.CreateIndexRequest) bool {
@@ -733,7 +726,7 @@ func (m *indexMeta) GetSegmentIndexState(collID, segmentID UniqueID, indexID Uni
 	}
 
 	if index, ok := fieldIndexes[indexID]; ok && !index.IsDeleted {
-		if segIdx, ok := indexes.Get(indexID); ok {
+		if segIdx, ok := indexes.Get(indexID); ok && !segIdx.IsDeleted {
 			state.IndexName = index.IndexName
 			state.State = segIdx.IndexState
 			state.FailReason = segIdx.FailReason
@@ -779,7 +772,7 @@ func (m *indexMeta) GetIndexedSegments(collectionID int64, segmentIDs, fieldIDs 
 	checkSegmentState := func(indexes *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]) bool {
 		indexedFields := 0
 		for _, index := range targetIndices {
-			if segIdx, ok := indexes.Get(index.IndexID); ok && segIdx.IndexState == commonpb.IndexState_Finished {
+			if segIdx, ok := indexes.Get(index.IndexID); ok && !segIdx.IsDeleted && segIdx.IndexState == commonpb.IndexState_Finished {
 				indexedFields += 1
 			}
 		}
@@ -814,6 +807,24 @@ func (m *indexMeta) GetIndexesForCollection(collID UniqueID, indexName string) [
 		}
 	}
 	return indexInfos
+}
+
+// ListAllIndexes returns a clone of every index that is not deleted, across all
+// collections. Used by the feature usage report.
+func (m *indexMeta) ListAllIndexes() []*model.Index {
+	m.fieldIndexLock.RLock()
+	defer m.fieldIndexLock.RUnlock()
+
+	out := make([]*model.Index, 0)
+	for _, indexes := range m.indexes {
+		for _, index := range indexes {
+			if index.IsDeleted {
+				continue
+			}
+			out = append(out, model.CloneIndex(index))
+		}
+	}
+	return out
 }
 
 func (m *indexMeta) GetFieldIndexes(collID, fieldID UniqueID, indexName string) []*model.Index {
@@ -878,7 +889,7 @@ func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, ind
 
 	deletedSet := make(map[UniqueID]struct{}, len(indexes))
 	for _, index := range indexes {
-		m.indexes[index.CollectionID][index.IndexID] = index
+		m.updateCollectionIndex(index)
 		deletedSet[index.IndexID] = struct{}{}
 	}
 
@@ -903,35 +914,49 @@ func (m *indexMeta) MarkIndexAsDeleted(ctx context.Context, collID UniqueID, ind
 }
 
 func (m *indexMeta) IsUnIndexedSegment(collectionID UniqueID, segID UniqueID) bool {
+	return m.GetUnIndexedSegmentIDsForIndexTask(collectionID, []UniqueID{segID}).Contain(segID)
+}
+
+func (m *indexMeta) GetUnIndexedSegmentIDsForIndexTask(collectionID UniqueID, segIDs []UniqueID) typeutil.UniqueSet {
+	unindexed := typeutil.NewUniqueSet()
+	if len(segIDs) == 0 {
+		return unindexed
+	}
+
 	m.fieldIndexLock.RLock()
 	fieldIndexesMap, ok := m.indexes[collectionID]
 	if !ok {
 		m.fieldIndexLock.RUnlock()
-		return false
+		return unindexed
 	}
-	// Copy the map to avoid data race after releasing the lock
-	fieldIndexes := make(map[UniqueID]*model.Index, len(fieldIndexesMap))
-	for id, index := range fieldIndexesMap {
-		fieldIndexes[id] = index
+	activeIndexIDs := make([]UniqueID, 0, len(fieldIndexesMap))
+	for _, index := range fieldIndexesMap {
+		if !index.IsDeleted {
+			activeIndexIDs = append(activeIndexIDs, index.IndexID)
+		}
 	}
 	m.fieldIndexLock.RUnlock()
-
-	// the segment should be unindexed status if the fieldIndexes is not nil
-	segIndexInfos, ok := m.segmentIndexes.Get(segID)
-	if !ok || segIndexInfos.Len() == 0 {
-		return true
+	if len(activeIndexIDs) == 0 {
+		return unindexed
 	}
 
-	for _, index := range fieldIndexes {
-		if !index.IsDeleted {
-			if _, ok := segIndexInfos.Get(index.IndexID); !ok {
+	for _, segID := range segIDs {
+		// the segment should be unindexed status if the fieldIndexes is not nil
+		segIndexInfos, ok := m.segmentIndexes.Get(segID)
+		if !ok || segIndexInfos.Len() == 0 {
+			unindexed.Insert(segID)
+			continue
+		}
+		for _, indexID := range activeIndexIDs {
+			if _, ok := segIndexInfos.Get(indexID); !ok {
 				// the segment should be unindexed status if the segment index is not found within field indexes
-				return true
+				unindexed.Insert(segID)
+				break
 			}
 		}
 	}
 
-	return false
+	return unindexed
 }
 
 func (m *indexMeta) GetSegmentsIndexes(collectionID UniqueID, segIDs []UniqueID) map[int64]map[UniqueID]*model.SegmentIndex {
@@ -951,15 +976,11 @@ func (m *indexMeta) GetSegmentIndexes(collectionID UniqueID, segID UniqueID) map
 }
 
 // GetAllSegmentIndexes returns a deep-clone of every SegmentIndex recorded
-// for segID, including ones whose parent field index has been marked
-// IsDeleted — that is the case dropped-segment GC needs to clean up.
+// for segID, including deleted tasks and records whose parent field index has
+// been deleted. GC needs their file keys until cleanup completes.
 //
-// Intentionally does NOT acquire fieldIndexLock: this method only reads
-// m.segmentIndexes (a ConcurrentMap, self-synchronized) and never touches
-// m.indexes (which fieldIndexLock protects). Do not add an IsDeleted
-// filter here without first taking fieldIndexLock — that change would
-// silently start requiring the lock, unlike GetSegmentIndexes above which
-// already holds it.
+// It only reads the self-synchronized segmentIndexes map and does not acquire
+// fieldIndexLock or consult field-index definitions.
 func (m *indexMeta) GetAllSegmentIndexes(segID UniqueID) []*model.SegmentIndex {
 	if m.segmentIndexes == nil {
 		return nil
@@ -991,7 +1012,7 @@ func (m *indexMeta) getSegmentIndexes(collectionID UniqueID, segID UniqueID) map
 	}
 
 	for _, segIdx := range segIndexInfos.Values() {
-		if index, ok := fieldIndexes[segIdx.IndexID]; ok && !index.IsDeleted {
+		if index, ok := fieldIndexes[segIdx.IndexID]; ok && !index.IsDeleted && !segIdx.IsDeleted {
 			ret[segIdx.IndexID] = model.CloneSegmentIndex(segIdx)
 		}
 	}
@@ -1165,6 +1186,10 @@ func (m *indexMeta) DeleteTask(buildID int64) error {
 		return nil
 	}
 
+	if segIdx.IsDeleted {
+		return nil
+	}
+
 	updateFunc := func(segIdx *model.SegmentIndex) error {
 		segIdx.IsDeleted = true
 		return m.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
@@ -1261,8 +1286,8 @@ func (m *indexMeta) subtractStoredIndexSizeOnRemoval(segIdx *model.SegmentIndex)
 }
 
 // removeSegmentIndexRecordInMemory is the record half: it mutates only the
-// in-memory segment-index maps and acquires no locks, so it is safe to run
-// inside a segMu critical section.
+// in-memory segment-index maps and the memory-only task counters. It never
+// acquires fieldIndexLock, so it is safe to run inside a segMu critical section.
 func (m *indexMeta) removeSegmentIndexRecordInMemory(segIdx *model.SegmentIndex) {
 	segIndexes, ok := m.segmentIndexes.Get(segIdx.SegmentID)
 	if ok {
@@ -1274,6 +1299,7 @@ func (m *indexMeta) removeSegmentIndexRecordInMemory(segIdx *model.SegmentIndex)
 		}
 	}
 
+	m.taskCounts.replaceTask(segIdx, nil)
 	m.segmentBuildInfo.Remove(segIdx.BuildID)
 }
 
@@ -1288,7 +1314,7 @@ var errSegmentIndexRecordGone = errors.New("segment index record no longer exist
 // write. action is nil when the mutation resolves to no catalog write at all;
 // record is the locked task projection used to validate manifest contents.
 //
-// install performs the in-memory record change only — it acquires no locks, so
+// install performs in-memory changes only — it never acquires fieldIndexLock, so
 // the manifest commit may run it inside its segMu critical section. It returns
 // the observability update it deferred (never nil): the stored-index-size gauge
 // must serialize against MarkIndexAsDeleted via fieldIndexLock, whose write
@@ -1407,6 +1433,7 @@ func (m *indexMeta) RemoveIndex(ctx context.Context, collID, indexID UniqueID) e
 		return err
 	}
 
+	m.taskCounts.replaceIndex(m.indexes[collID][indexID], nil)
 	delete(m.indexes[collID], indexID)
 	if len(m.indexes[collID]) == 0 {
 		delete(m.indexes, collID)
@@ -1456,7 +1483,7 @@ func (m *indexMeta) getSegmentsIndexStates(collectionID UniqueID, segmentIDs []U
 		ret[segID] = make(map[int64]*indexpb.SegmentIndexState)
 
 		for _, segIdx := range segIndexInfos.Values() {
-			if index, ok := fieldIndexes[segIdx.IndexID]; ok && !index.IsDeleted {
+			if index, ok := fieldIndexes[segIdx.IndexID]; ok && !index.IsDeleted && !segIdx.IsDeleted {
 				indexVersion := segIdx.CurrentIndexVersion
 				if indexparamcheck.IsScalarIndexType(segIdx.IndexType) {
 					indexVersion = segIdx.CurrentScalarIndexVersion

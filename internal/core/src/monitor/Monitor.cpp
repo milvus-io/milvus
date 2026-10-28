@@ -442,6 +442,8 @@ DEFINE_PROMETHEUS_GAUGE(internal_cgo_executing_task_total_load,
 // storage thread pool metrics
 std::map<std::string, std::string> highPoolLabel = {{"priority", "high"}};
 std::map<std::string, std::string> middlePoolLabel = {{"priority", "middle"}};
+std::map<std::string, std::string> searchFanoutPoolLabel = {
+    {"priority", "search_fanout"}};
 std::map<std::string, std::string> lowPoolLabel = {{"priority", "low"}};
 
 DEFINE_PROMETHEUS_GAUGE_FAMILY(internal_storage_pool_capacity,
@@ -452,6 +454,9 @@ DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_capacity_high,
 DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_capacity_middle,
                         internal_storage_pool_capacity,
                         middlePoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_capacity_search_fanout,
+                        internal_storage_pool_capacity,
+                        searchFanoutPoolLabel);
 DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_capacity_low,
                         internal_storage_pool_capacity,
                         lowPoolLabel);
@@ -464,6 +469,9 @@ DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_active_threads_high,
 DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_active_threads_middle,
                         internal_storage_pool_active_threads,
                         middlePoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_active_threads_search_fanout,
+                        internal_storage_pool_active_threads,
+                        searchFanoutPoolLabel);
 DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_active_threads_low,
                         internal_storage_pool_active_threads,
                         lowPoolLabel);
@@ -476,6 +484,9 @@ DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_idle_threads_high,
 DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_idle_threads_middle,
                         internal_storage_pool_idle_threads,
                         middlePoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_idle_threads_search_fanout,
+                        internal_storage_pool_idle_threads,
+                        searchFanoutPoolLabel);
 DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_idle_threads_low,
                         internal_storage_pool_idle_threads,
                         lowPoolLabel);
@@ -488,6 +499,9 @@ DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_queue_depth_high,
 DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_queue_depth_middle,
                         internal_storage_pool_queue_depth,
                         middlePoolLabel);
+DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_queue_depth_search_fanout,
+                        internal_storage_pool_queue_depth,
+                        searchFanoutPoolLabel);
 DEFINE_PROMETHEUS_GAUGE(internal_storage_pool_queue_depth_low,
                         internal_storage_pool_queue_depth,
                         lowPoolLabel);
@@ -500,6 +514,10 @@ DEFINE_PROMETHEUS_COUNTER(internal_storage_pool_task_submitted_total_high,
 DEFINE_PROMETHEUS_COUNTER(internal_storage_pool_task_submitted_total_middle,
                           internal_storage_pool_task_submitted_total,
                           middlePoolLabel);
+DEFINE_PROMETHEUS_COUNTER(
+    internal_storage_pool_task_submitted_total_search_fanout,
+    internal_storage_pool_task_submitted_total,
+    searchFanoutPoolLabel);
 DEFINE_PROMETHEUS_COUNTER(internal_storage_pool_task_submitted_total_low,
                           internal_storage_pool_task_submitted_total,
                           lowPoolLabel);
@@ -512,6 +530,10 @@ DEFINE_PROMETHEUS_COUNTER(internal_storage_pool_task_completed_total_high,
 DEFINE_PROMETHEUS_COUNTER(internal_storage_pool_task_completed_total_middle,
                           internal_storage_pool_task_completed_total,
                           middlePoolLabel);
+DEFINE_PROMETHEUS_COUNTER(
+    internal_storage_pool_task_completed_total_search_fanout,
+    internal_storage_pool_task_completed_total,
+    searchFanoutPoolLabel);
 DEFINE_PROMETHEUS_COUNTER(internal_storage_pool_task_completed_total_low,
                           internal_storage_pool_task_completed_total,
                           lowPoolLabel);
@@ -528,6 +550,11 @@ DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
     internal_storage_pool_queue_duration_seconds_middle,
     internal_storage_pool_queue_duration_seconds,
     middlePoolLabel,
+    secondsBuckets);
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_storage_pool_queue_duration_seconds_search_fanout,
+    internal_storage_pool_queue_duration_seconds,
+    searchFanoutPoolLabel,
     secondsBuckets);
 DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
     internal_storage_pool_queue_duration_seconds_low,
@@ -547,6 +574,11 @@ DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
     internal_storage_pool_execute_duration_seconds_middle,
     internal_storage_pool_execute_duration_seconds,
     middlePoolLabel,
+    secondsBuckets);
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_storage_pool_execute_duration_seconds_search_fanout,
+    internal_storage_pool_execute_duration_seconds,
+    searchFanoutPoolLabel,
     secondsBuckets);
 DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
     internal_storage_pool_execute_duration_seconds_low,

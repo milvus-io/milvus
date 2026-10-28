@@ -31,7 +31,7 @@
 #include <utility>
 #include <vector>
 
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/ChunkWriter.h"
 #include "common/Consts.h"
 #include "common/FieldData.h"
@@ -342,13 +342,13 @@ RunStorageV3SealedRetrieve(bool enable_mmap,
         pks[i] = 3000 + i;
     }
 
-    InsertRecordProto insert;
-    insert.set_num_rows(row_count);
-    insert.mutable_fields_data()->AddAllocated(
+    auto insert = std::make_shared<InsertRecordProto>();
+    insert->set_num_rows(row_count);
+    insert->mutable_fields_data()->AddAllocated(
         segcore::CreateDataArrayFrom(
             pks.data(), nullptr, row_count, (*schema)[FieldId(100)])
             .release());
-    auto* nested_data = insert.add_fields_data();
+    auto* nested_data = insert->add_fields_data();
     nested_data->set_field_id(nested_field.get());
     nested_data->set_type(proto::schema::DataType::Array);
     auto* array_data = nested_data->mutable_scalars()->mutable_array_data();
@@ -360,7 +360,7 @@ RunStorageV3SealedRetrieve(bool enable_mmap,
     const auto insert_offset = growing->PreInsert(row_count);
     ASSERT_EQ(insert_offset, 0);
     ASSERT_NO_THROW(growing->Insert(
-        insert_offset, row_count, row_ids.data(), timestamps.data(), &insert));
+        insert_offset, row_count, row_ids.data(), timestamps.data(), insert));
 
     auto schema_blob = schema->ToProto().SerializeAsString();
     std::string column_group_pattern = "0|1|100,101";
@@ -951,16 +951,16 @@ TEST(ArrayValue, GrowingSegmentInsertAndRetrieveNestedArray) {
         NestedArrayRow(proto::schema::DataType::Int32, {IntArrayRow({99})});
     auto row2 = NestedArrayRow(proto::schema::DataType::Int32, {});
 
-    InsertRecordProto insert;
-    insert.set_num_rows(3);
-    auto* pk_data = insert.add_fields_data();
+    auto insert = std::make_shared<InsertRecordProto>();
+    insert->set_num_rows(3);
+    auto* pk_data = insert->add_fields_data();
     pk_data->set_field_id(pk.get());
     pk_data->set_type(proto::schema::DataType::Int64);
     pk_data->mutable_scalars()->mutable_long_data()->add_data(10);
     pk_data->mutable_scalars()->mutable_long_data()->add_data(11);
     pk_data->mutable_scalars()->mutable_long_data()->add_data(12);
 
-    auto* nested_data = insert.add_fields_data();
+    auto* nested_data = insert->add_fields_data();
     nested_data->set_field_id(array_field.get());
     nested_data->set_type(proto::schema::DataType::Array);
     nested_data->mutable_scalars()->add_valid_data(true);
@@ -976,7 +976,7 @@ TEST(ArrayValue, GrowingSegmentInsertAndRetrieveNestedArray) {
     std::vector<Timestamp> timestamps{1, 2, 3};
     const auto offset = segment->PreInsert(3);
     ASSERT_NO_THROW(
-        segment->Insert(offset, 3, row_ids.data(), timestamps.data(), &insert));
+        segment->Insert(offset, 3, row_ids.data(), timestamps.data(), insert));
 
     std::vector<int64_t> result_offsets{0, 1, 2};
     auto result = segment->bulk_subscript(
@@ -1190,7 +1190,7 @@ TEST(ColumnarArrayChunk, SealedFactoriesUseRecursiveChunk) {
     verify_views(proxy_column);
 }
 
-TEST(ColumnarArrayChunk, SealedArrayOffsetsUseRecursiveRootOffsets) {
+TEST(ColumnarArrayChunk, SealedStructElementOffsetsUseRecursiveRootOffsets) {
     auto type = NestedArrayType(LeafArrayType(proto::schema::DataType::Int32));
     const auto field_id = FieldId(100);
     auto field_meta = NestedArrayFieldMeta(field_id, type);
@@ -1219,21 +1219,110 @@ TEST(ColumnarArrayChunk, SealedArrayOffsetsUseRecursiveRootOffsets) {
     fields.emplace(field_id, std::shared_ptr<Chunk>(std::move(chunk)));
     std::vector<std::unique_ptr<GroupChunk>> group_chunks;
     group_chunks.push_back(std::make_unique<GroupChunk>(std::move(fields)));
-    auto translator =
-        std::make_unique<TestGroupChunkTranslator>(1,
-                                                   std::vector<int64_t>{5},
-                                                   "recursive_array_offsets",
-                                                   std::move(group_chunks));
+    auto translator = std::make_unique<TestGroupChunkTranslator>(
+        1,
+        std::vector<int64_t>{5},
+        "recursive_struct_element_offsets",
+        std::move(group_chunks));
     auto group = std::make_shared<ChunkedColumnGroup>(std::move(translator));
     ProxyChunkColumn column(group, field_id, field_meta);
 
-    auto offsets = ArrayOffsetsSealed::BuildFromColumn(column, field_meta, 5);
+    auto offsets =
+        StructElementOffsetsSealed::BuildFromColumn(column, field_meta, 5);
     EXPECT_EQ(offsets->ElementIDRangeOfRow(0), std::make_pair(0, 2));
     EXPECT_EQ(offsets->ElementIDRangeOfRow(1), std::make_pair(2, 2));
     EXPECT_EQ(offsets->ElementIDRangeOfRow(2), std::make_pair(2, 3));
     EXPECT_EQ(offsets->ElementIDRangeOfRow(3), std::make_pair(3, 3));
     EXPECT_EQ(offsets->ElementIDRangeOfRow(4), std::make_pair(3, 4));
     EXPECT_EQ(offsets->GetTotalElementCount(), 4);
+    ASSERT_TRUE(offsets->HasRowValidity());
+    EXPECT_TRUE(offsets->IsRowValid(0));
+    EXPECT_FALSE(offsets->IsRowValid(1));
+    EXPECT_TRUE(offsets->IsRowValid(2));
+    EXPECT_TRUE(offsets->IsRowValid(3));  // valid empty array
+    EXPECT_TRUE(offsets->IsRowValid(4));
+}
+
+TEST(ColumnarArrayChunk, StructOffsetsBuildPropagatesContextAndReadFailures) {
+    class FailOnceTranslator : public TestGroupChunkTranslator {
+     public:
+        using TestGroupChunkTranslator::TestGroupChunkTranslator;
+
+        std::vector<std::pair<cid_t, std::unique_ptr<GroupChunk>>>
+        get_cells(OpContext* ctx, const std::vector<cid_t>& cids) override {
+            if (!failed_) {
+                failed_ = true;
+                ThrowInfo(FileReadFailed, "injected raw chunk read failure");
+            }
+            return TestGroupChunkTranslator::get_cells(ctx, cids);
+        }
+
+     private:
+        bool failed_{false};
+    };
+    auto type = NestedArrayType(LeafArrayType(proto::schema::DataType::Int32));
+    const auto field_id = FieldId(100);
+    auto field_meta = NestedArrayFieldMeta(field_id, type);
+    auto row0 = NestedArrayRow(proto::schema::DataType::Int32,
+                               {IntArrayRow({1}), IntArrayRow({2, 3})});
+    auto row2 = NestedArrayRow(proto::schema::DataType::Int32, {});
+    arrow::BinaryBuilder builder;
+    ASSERT_TRUE(builder.Append(row0.SerializeAsString()).ok());
+    ASSERT_TRUE(builder.AppendNull().ok());
+    ASSERT_TRUE(builder.Append(row2.SerializeAsString()).ok());
+    std::shared_ptr<arrow::Array> arrow_array;
+    ASSERT_TRUE(builder.Finish(&arrow_array).ok());
+    std::unordered_map<FieldId, std::shared_ptr<Chunk>> fields;
+    fields.emplace(
+        field_id,
+        std::shared_ptr<Chunk>(create_chunk(field_meta, {arrow_array})));
+    std::vector<std::unique_ptr<GroupChunk>> chunks;
+    chunks.push_back(std::make_unique<GroupChunk>(std::move(fields)));
+    int opens = 0;
+    OpContext* observed = nullptr;
+    auto group = std::make_shared<ChunkedColumnGroup>(
+        3, 1, [&](OpContext* ctx) -> std::unique_ptr<Translator<GroupChunk>> {
+            observed = ctx;
+            if (++opens == 1) {
+                ThrowInfo(DataFormatBroken, "injected manifest open failure");
+            }
+            return std::make_unique<FailOnceTranslator>(
+                1,
+                std::vector<int64_t>{3},
+                "lazy_struct_offsets_context",
+                std::move(chunks));
+        });
+    ProxyChunkColumn column(group, field_id, field_meta);
+    OpContext ctx;
+    ctx.runtime_load_priority = 1;
+    auto build = [&] {
+        return StructElementOffsetsSealed::BuildFromColumn(
+            column, field_meta, 3, &ctx);
+    };
+    try {
+        build();
+        FAIL() << "expected manifest open failure";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::DataFormatBroken);
+    }
+    EXPECT_EQ(observed, &ctx);
+    EXPECT_FALSE(group->IsMaterialized());
+    try {
+        build();
+        FAIL() << "expected raw chunk read failure";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FileReadFailed);
+    }
+    EXPECT_TRUE(group->IsMaterialized());
+    auto offsets = build();
+    EXPECT_EQ(observed, &ctx);
+    EXPECT_EQ(opens, 2);
+    ASSERT_TRUE(offsets->HasRowValidity());
+    EXPECT_EQ(offsets->GetTotalElementCount(), 2);
+    EXPECT_TRUE(offsets->IsRowValid(0));
+    EXPECT_FALSE(offsets->IsRowValid(1));
+    EXPECT_TRUE(offsets->IsRowValid(2));
+    EXPECT_EQ(opens, 2);
 }
 
 TEST(ArrayValue, SealedStorageV3RetrieveNestedArrayFromMemoryChunk) {

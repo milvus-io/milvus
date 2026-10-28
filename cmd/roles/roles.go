@@ -83,6 +83,7 @@ func init() {
 		for _, entry := range entries {
 			metricsList = append(metricsList, metrics.FilesystemMetrics{
 				DisplayKey:              entry.DisplayKey,
+				Source:                  entry.Source,
 				ReadCount:               entry.ReadCount,
 				WriteCount:              entry.WriteCount,
 				ReadBytes:               entry.ReadBytes,
@@ -502,6 +503,13 @@ func (mr *MilvusRoles) Run() {
 
 	mr.setupLogger()
 	defer mlog.Cleanup()
+
+	// All components, including coordinator manifest readers, must see the
+	// configured runtime before any Rust bridge can initialize Tokio lazily.
+	if err := initcore.InitStorageRuntime(); err != nil {
+		mlog.Error(ctx, "failed to initialize storage runtime", mlog.Err(err))
+		panic(err)
+	}
 
 	// Worker nodes (querynode, datanode, streamingnode) host no credential
 	// metadata, so without this their management plane and pprof would answer

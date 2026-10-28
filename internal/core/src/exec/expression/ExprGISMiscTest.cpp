@@ -92,7 +92,7 @@ TEST_P(ExprTest, TestGISFunction) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     // Define GIS test cases: {expression, description}
@@ -248,7 +248,7 @@ TEST_P(ExprTest, TestGISFunctionWithControlledData) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -354,7 +354,7 @@ TEST_P(ExprTest, TestSTIsValidFunction) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     auto seg_promote = dynamic_cast<SegmentInternalInterface*>(seg.get());
@@ -451,7 +451,7 @@ TEST_P(ExprTest, TestSTDWithinFunction) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
 
     auto seg_promote = dynamic_cast<SegmentInternalInterface*>(seg.get());
@@ -622,7 +622,7 @@ TEST(ExprTest, TestBinaryRangeExprMixedTypesForJSON) {
                 N,
                 raw_data.row_ids_.data(),
                 raw_data.timestamps_.data(),
-                raw_data.raw_);
+                std::make_shared<InsertRecordProto>(*raw_data.raw_));
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
 
     // Test case 1: lower_val is int64, upper_val is float
@@ -1004,7 +1004,7 @@ RunGrowingConjunctSkipTest(bool with_rtree_index) {
                 N,
                 raw_data.row_ids_.data(),
                 raw_data.timestamps_.data(),
-                raw_data.raw_);
+                std::make_shared<InsertRecordProto>(*raw_data.raw_));
     ASSERT_EQ(seg->HasIndex(geo_fid), with_rtree_index);
 
     {
@@ -1136,7 +1136,7 @@ TEST_P(ExprTest, TestGeometryNullExprOnGrowingWithRTreeIndex) {
                      N,
                      dataset.row_ids_.data(),
                      dataset.timestamps_.data(),
-                     dataset.raw_);
+                     std::make_shared<InsertRecordProto>(*dataset.raw_));
     ASSERT_TRUE(seg_impl->HasIndex(geo_fid));
 
     auto valid_data = dataset.get_col_valid(geo_fid);
@@ -1293,7 +1293,7 @@ TEST_P(ExprTest, TestGeometrySpatialExprOnGrowingWithRTreeIndex) {
                      N,
                      dataset.row_ids_.data(),
                      dataset.timestamps_.data(),
-                     dataset.raw_);
+                     std::make_shared<InsertRecordProto>(*dataset.raw_));
         return seg;
     };
 
@@ -1398,7 +1398,7 @@ TEST_P(ExprTest, TestGeometryConjunctionShortCircuitOnGrowingWithRTreeIndex) {
                      N,
                      dataset.row_ids_.data(),
                      dataset.timestamps_.data(),
-                     dataset.raw_);
+                     std::make_shared<InsertRecordProto>(*dataset.raw_));
         return seg;
     };
 

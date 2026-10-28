@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"context"
 	"io"
 	"testing"
 
@@ -29,6 +30,26 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
+
+type importFragmentTestReader struct {
+	records []Record
+	index   int
+	closed  bool
+}
+
+func (r *importFragmentTestReader) Next() (Record, error) {
+	if r.index >= len(r.records) {
+		return nil, io.EOF
+	}
+	record := r.records[r.index]
+	r.index++
+	return record, nil
+}
+
+func (r *importFragmentTestReader) Close() error {
+	r.closed = true
+	return nil
+}
 
 // exhaustedChunkReader is a minimal RecordReader that is already at EOF and
 // records whether it was closed. It stands in for a binlog chunk that opened
@@ -107,6 +128,55 @@ func TestPackedRecordReader_CloseNilReceiverDoesNotPanic(t *testing.T) {
 	})
 }
 
+func TestImportFragmentRecordReaderChecksExactRows(t *testing.T) {
+	builder := array.NewInt64Builder(memory.DefaultAllocator)
+	builder.AppendValues([]int64{1, 2}, nil)
+	column := builder.NewArray()
+	builder.Release()
+	record := array.NewRecord(arrow.NewSchema([]arrow.Field{{Name: "100", Type: arrow.PrimitiveTypes.Int64}}, nil),
+		[]arrow.Array{column}, 2)
+	column.Release()
+	defer record.Release()
+
+	inner := &importFragmentTestReader{records: []Record{NewSimpleArrowRecord(record, map[int64]int{100: 0})}}
+	reader := &importFragmentRecordReader{ctx: context.Background(), reader: inner, expectedRows: 3}
+	got, err := reader.Next()
+	require.NoError(t, err)
+	require.Equal(t, 2, got.Len())
+	_, err = reader.Next()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "row count mismatch")
+	require.NoError(t, reader.Close())
+	require.True(t, inner.closed)
+}
+
+func TestImportFragmentRecordReaderHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	inner := &importFragmentTestReader{}
+	reader := &importFragmentRecordReader{ctx: ctx, reader: inner, expectedRows: 1}
+	_, err := reader.Next()
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
+func TestNewInsertDataRecordReader(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+		FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true,
+	}}}
+	data, err := NewInsertData(schema)
+	require.NoError(t, err)
+	require.NoError(t, data.Data[100].AppendDataRows([]int64{3, 1, 2}))
+
+	reader, err := NewInsertDataRecordReader(data, schema)
+	require.NoError(t, err)
+	record, err := reader.Next()
+	require.NoError(t, err)
+	require.Equal(t, []int64{3, 1, 2}, record.Column(100).(*array.Int64).Int64Values())
+	_, err = reader.Next()
+	require.ErrorIs(t, err, io.EOF)
+	require.NoError(t, reader.Close())
+}
+
 func TestCompositeBinlogRecordReaderOwnsCurrentRecord(t *testing.T) {
 	newCurrent := func(allocator *memory.CheckedAllocator) Record {
 		builder := array.NewInt64Builder(allocator)
@@ -169,6 +239,11 @@ func TestAbsentFieldFillReaderFillsDefaultAndNull(t *testing.T) {
 	require.Equal(t, []int64{42, 42, 42}, []int64{def.Value(0), def.Value(1), def.Value(2)}) // default materialized
 	require.Equal(t, 3, rec.Column(nullField).(*array.Int64).NullN())                        // no default -> null
 	require.Equal(t, int64(2), rec.Column(idField).(*array.Int64).Value(1))                  // present passthrough
+	column, ok := TryRecordColumn(rec, defField)
+	require.True(t, ok)
+	require.Same(t, def, column)
+	_, ok = TryRecordColumn(rec, 999)
+	require.False(t, ok)
 }
 
 func TestAbsentFieldFillReaderRejectsNonNullableAbsent(t *testing.T) {

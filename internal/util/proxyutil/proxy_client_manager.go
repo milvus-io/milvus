@@ -40,8 +40,7 @@ import (
 )
 
 type ExpireCacheConfig struct {
-	msgType    commonpb.MsgType
-	properties map[string]string
+	msgType commonpb.MsgType
 }
 
 func (c ExpireCacheConfig) Apply(req *proxypb.InvalidateCollMetaCacheRequest) {
@@ -49,14 +48,6 @@ func (c ExpireCacheConfig) Apply(req *proxypb.InvalidateCollMetaCacheRequest) {
 		req.Base = commonpbutil.NewMsgBase()
 	}
 	req.Base.MsgType = c.msgType
-	if len(c.properties) > 0 {
-		if req.Base.Properties == nil {
-			req.Base.Properties = make(map[string]string, len(c.properties))
-		}
-		for key, value := range c.properties {
-			req.Base.Properties[key] = value
-		}
-	}
 }
 
 func DefaultExpireCacheConfig() ExpireCacheConfig {
@@ -68,15 +59,6 @@ type ExpireCacheOpt func(c *ExpireCacheConfig)
 func SetMsgType(msgType commonpb.MsgType) ExpireCacheOpt {
 	return func(c *ExpireCacheConfig) {
 		c.msgType = msgType
-	}
-}
-
-func SetMsgProperty(key, value string) ExpireCacheOpt {
-	return func(c *ExpireCacheConfig) {
-		if c.properties == nil {
-			c.properties = make(map[string]string)
-		}
-		c.properties[key] = value
 	}
 }
 
@@ -211,6 +193,25 @@ func (p *ProxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, 
 		opt(&c)
 	}
 	c.Apply(request)
+	invalidate := func(proxyID int64, client types.ProxyClient) error {
+		sta, err := client.InvalidateCollectionMetaCache(ctx, request)
+		if err != nil {
+			if errors.Is(err, merr.ErrNodeNotFound) {
+				mlog.Warn(ctx, "InvalidateCollectionMetaCache failed due to proxy service not found", mlog.Err(err))
+				return nil
+			}
+
+			if errors.Is(err, merr.ErrServiceUnimplemented) {
+				return nil
+			}
+
+			return merr.Wrapf(err, "InvalidateCollectionMetaCache failed, proxyID = %d", proxyID)
+		}
+		if sta.ErrorCode != commonpb.ErrorCode_Success {
+			return merr.Wrapf(merr.Error(sta), "InvalidateCollectionMetaCache failed, proxyID = %d", proxyID)
+		}
+		return nil
+	}
 
 	if p.proxyClient.Len() == 0 {
 		mlog.Warn(ctx, "proxy client is empty, InvalidateCollectionMetaCache will not send to any client")
@@ -221,23 +222,7 @@ func (p *ProxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, 
 	p.proxyClient.Range(func(key int64, value types.ProxyClient) bool {
 		k, v := key, value
 		group.Go(func() error {
-			sta, err := v.InvalidateCollectionMetaCache(ctx, request)
-			if err != nil {
-				if errors.Is(err, merr.ErrNodeNotFound) {
-					mlog.Warn(ctx, "InvalidateCollectionMetaCache failed due to proxy service not found", mlog.Err(err))
-					return nil
-				}
-
-				if errors.Is(err, merr.ErrServiceUnimplemented) {
-					return nil
-				}
-
-				return merr.Wrapf(err, "InvalidateCollectionMetaCache failed, proxyID = %d", k)
-			}
-			if sta.ErrorCode != commonpb.ErrorCode_Success {
-				return merr.Wrapf(merr.Error(sta), "InvalidateCollectionMetaCache failed, proxyID = %d", k)
-			}
-			return nil
+			return invalidate(k, v)
 		})
 		return true
 	})

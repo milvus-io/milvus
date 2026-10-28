@@ -20,14 +20,12 @@ import (
 	"context"
 	"testing"
 
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -130,6 +128,28 @@ func TestDDLCallbacksAlterCollectionField(t *testing.T) {
 	assertFieldProperties(t, ctx, core, dbName, collectionName, fieldName, "key1", "value1")
 	assertFieldPropertiesNotFound(t, ctx, core, dbName, collectionName, fieldName, "key2")
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 3)
+
+	// A description-only edit preserves the existing field properties.
+	req := &milvuspb.AlterCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldName:      fieldName,
+		Properties: []*commonpb.KeyValuePair{
+			{Key: "key1", Value: "value1"},
+			{Key: common.FieldDescriptionKey, Value: "updated description"},
+		},
+	}
+	resp, err = core.AlterCollectionField(ctx, req)
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	require.Equal(t, "updated description", getAlterCollectionField(coll.ToCollectionSchemaPB(), fieldName).GetDescription())
+	assertFieldProperties(t, ctx, core, dbName, collectionName, fieldName, "key1", "value1")
+
+	req.Properties[0].Value = "value2"
+	resp, err = core.AlterCollectionField(ctx, req)
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	assertFieldProperties(t, ctx, core, dbName, collectionName, fieldName, "key1", "value2")
 }
 
 func TestDDLCallbacksAlterNestedArrayRootCapacity(t *testing.T) {
@@ -242,7 +262,6 @@ func TestDDLCallbacksAlterCollectionFieldAnalyzerValidation(t *testing.T) {
 	}
 	meta.fileResourceRefCnt = map[int64]int{}
 
-	mixCoord := core.mixCoord.(*mocks.MixCoord)
 	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -255,15 +274,13 @@ func TestDDLCallbacksAlterCollectionFieldAnalyzerValidation(t *testing.T) {
 	assertFieldProperties(t, ctx, core, dbName, collectionName, fieldName, common.AnalyzerParamKey, `{"tokenizer":"standard"}`)
 	require.Equal(t, 0, meta.fileResourceRefCnt[resourceID])
 
-	mixCoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.MatchedBy(func(req *querypb.ValidateAnalyzerRequest) bool {
-		infos := req.GetAnalyzerInfos()
-		return len(infos) == 1 &&
+	setValidateAnalyzer := mockAnalyzerValidation(t)
+	setValidateAnalyzer(func(_ context.Context, infos []*querypb.AnalyzerInfo) ([]int64, error) {
+		require.True(t, len(infos) == 1 &&
 			infos[0].GetField() == fieldName &&
-			infos[0].GetParams() == `{"tokenizer":"standard"}`
-	})).Return(&querypb.ValidateAnalyzerResponse{
-		Status:      merr.Success(),
-		ResourceIds: []int64{resourceID},
-	}, nil).Once()
+			infos[0].GetParams() == `{"tokenizer":"standard"}`)
+		return []int64{resourceID}, nil
+	})
 
 	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
 		DbName:         dbName,
@@ -330,14 +347,12 @@ func TestDDLCallbacksAlterCollectionFieldAnalyzerValidation(t *testing.T) {
 	assertFieldProperties(t, ctx, core, dbName, collectionName, fieldName, common.AnalyzerParamKey, `{"tokenizer":"bad"}`)
 	require.Equal(t, 0, meta.fileResourceRefCnt[resourceID])
 
-	mixCoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.MatchedBy(func(req *querypb.ValidateAnalyzerRequest) bool {
-		infos := req.GetAnalyzerInfos()
-		return len(infos) == 1 &&
+	setValidateAnalyzer(func(_ context.Context, infos []*querypb.AnalyzerInfo) ([]int64, error) {
+		require.True(t, len(infos) == 1 &&
 			infos[0].GetField() == fieldName &&
-			infos[0].GetParams() == `{"tokenizer":"bad"}`
-	})).Return(&querypb.ValidateAnalyzerResponse{
-		Status: merr.Status(merr.WrapErrParameterInvalidMsg("bad analyzer")),
-	}, nil).Once()
+			infos[0].GetParams() == `{"tokenizer":"bad"}`)
+		return nil, merr.WrapErrParameterInvalidMsg("bad analyzer")
+	})
 	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -351,15 +366,12 @@ func TestDDLCallbacksAlterCollectionFieldAnalyzerValidation(t *testing.T) {
 	assertFieldPropertiesNotFound(t, ctx, core, dbName, collectionName, fieldName, common.EnableAnalyzerKey)
 	require.Equal(t, 0, meta.fileResourceRefCnt[resourceID])
 
-	mixCoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.MatchedBy(func(req *querypb.ValidateAnalyzerRequest) bool {
-		infos := req.GetAnalyzerInfos()
-		return len(infos) == 1 &&
+	setValidateAnalyzer(func(_ context.Context, infos []*querypb.AnalyzerInfo) ([]int64, error) {
+		require.True(t, len(infos) == 1 &&
 			infos[0].GetField() == fieldName &&
-			infos[0].GetParams() == `{"tokenizer":"standard"}`
-	})).Return(&querypb.ValidateAnalyzerResponse{
-		Status:      merr.Success(),
-		ResourceIds: []int64{resourceID},
-	}, nil).Once()
+			infos[0].GetParams() == `{"tokenizer":"standard"}`)
+		return []int64{resourceID}, nil
+	})
 	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,

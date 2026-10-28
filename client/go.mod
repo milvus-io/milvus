@@ -10,7 +10,7 @@ require (
 	github.com/cockroachdb/errors v1.9.1
 	github.com/google/uuid v1.6.0
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
-	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260914122923-ae7fea6ab2f4
+	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261014040338-d453f0648677
 	github.com/quasilyte/go-ruleguard/dsl v0.3.23
 	github.com/samber/lo v1.52.0
 	github.com/stretchr/testify v1.11.1
@@ -18,7 +18,7 @@ require (
 	github.com/x448/float16 v0.8.4
 	go.uber.org/atomic v1.11.0
 	golang.org/x/sync v0.22.0
-	google.golang.org/grpc v1.83.2
+	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.11
 )
 
@@ -46,7 +46,7 @@ require (
 	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260706201446-f0a921348800 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

@@ -219,7 +219,13 @@ For every file it owns:
 - one footer reader;
 - immutable footer-backed planners for the projected fields;
 - one cache slot and Cell translator;
-- metadata memory accounting.
+- physical file-size accounting.
+
+`DataByteSize` for a Vortex group means the physical bytes of its files, not
+the decoded in-memory size of any logical field. Those shared file bytes are
+attributed across the group's logical columns only so additive segment
+accounting counts the files once; the per-column value is not a decoded-size
+estimate.
 
 Footer and optional zone-map bytes are loaded when the group is initialized,
 not once per field or query. Field-level `VortexColumn` objects reuse this group
@@ -322,6 +328,10 @@ duplicates are preserved. Filtered positions stay aligned and carry
 `Get(i)` returns the value, validity, and skip state for one position.
 `IsValid(i)` reads validity without constructing data. `GetOwn()` materializes
 an ordered, contiguous result independent of backend pins.
+
+A caller that needs both values and validity obtains both from the same
+`TakeResult`; it must not issue a separate validity read. `BulkIsValid` remains
+for paths that need validity alone.
 
 Raw keeps at most the currently accessed Cell pinned and copies only when owned
 output is requested. Vortex may sort, group, and deduplicate offsets internally

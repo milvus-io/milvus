@@ -180,6 +180,16 @@ service RootCoord {
     rpc ListPrivilegeGroups(milvus.ListPrivilegeGroupsRequest) returns (milvus.ListPrivilegeGroupsResponse) {}
     rpc OperatePrivilegeGroup(milvus.OperatePrivilegeGroupRequest) returns (common.Status) {}
 
+    // Row-Level Security (RLS) management APIs.
+    rpc CreateRowPolicy(milvus.CreateRowPolicyRequest) returns (common.Status) {}
+    rpc DropRowPolicy(milvus.DropRowPolicyRequest) returns (common.Status) {}
+    rpc ListRowPolicies(milvus.ListRowPoliciesRequest) returns (milvus.ListRowPoliciesResponse) {}
+    rpc UpdateRowPolicy(milvus.UpdateRowPolicyRequest) returns (common.Status) {}
+    rpc SetRLSPrincipalTags(milvus.SetRLSPrincipalTagsRequest) returns (common.Status) {}
+    rpc GetRLSPrincipalTags(milvus.GetRLSPrincipalTagsRequest) returns (milvus.GetRLSPrincipalTagsResponse) {}
+    rpc ListRLSPrincipals(milvus.ListRLSPrincipalsRequest) returns (milvus.ListRLSPrincipalsResponse) {}
+    rpc DeleteRLSPrincipalTags(milvus.DeleteRLSPrincipalTagsRequest) returns (common.Status) {}
+
     // Internal collection-scoped snapshot API used by Proxy RLS caches.
     rpc GetRLSMetadata(GetRLSMetadataRequest) returns (GetRLSMetadataResponse) {}
 
@@ -194,6 +204,7 @@ service RootCoord {
     rpc AlterDatabase(AlterDatabaseRequest) returns(common.Status){}
 
     rpc GetQuotaMetrics(internal.GetQuotaMetricsRequest) returns (internal.GetQuotaMetricsResponse) {}
+    rpc GetFeatureUsage(internal.GetFeatureUsageRequest) returns (internal.FeatureUsageReport) {}
     rpc ClearReadTaskQueue(internal.ClearReadTaskQueueRequest) returns (internal.ClearReadTaskQueueResponse) {}
     rpc BackupEzk(internal.BackupEzkRequest) returns (internal.BackupEzkResponse) {}
     // File Resource Management
@@ -207,6 +218,8 @@ service RootCoord {
     rpc PushClientCommand(milvus.PushClientCommandRequest) returns (milvus.PushClientCommandResponse) {}
     rpc DeleteClientCommand(milvus.DeleteClientCommandRequest) returns (milvus.DeleteClientCommandResponse) {}
     rpc ListClientCommands(ListClientCommandsRequest) returns (ListClientCommandsResponse) {}
+
+    rpc FetchFileResources(FetchFileResourcesRequest) returns (FetchFileResourcesResponse) {}
 }
 
 // ListClientCommandsRequest asks for the commands the coordinator is currently holding for
@@ -396,4 +409,18 @@ message GetRLSMetadataResponse {
   int64 collection_id = 4;
   repeated RLSPolicyInfo policies = 5;
   repeated RLSPrincipalInfo principals = 6;
+}
+
+// Fetch only the requested resources, never the full inventory.
+message FetchFileResourcesRequest {
+  // Supply IDs for bound schemas or names for unbound analyzer parameters.
+  // The two selectors must not be combined in one request.
+  repeated int64 resource_ids = 1;
+  repeated string resource_names = 2;
+}
+
+message FetchFileResourcesResponse {
+  common.Status status = 1;
+  // Complete results in request order on success. No partial list on failure.
+  repeated internal.FileResourceInfo resources = 2;
 }

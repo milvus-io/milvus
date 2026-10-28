@@ -6,6 +6,7 @@ import (
 	context "context"
 
 	streaming "github.com/milvus-io/milvus/internal/distributed/streaming"
+	wal "github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	types "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	mock "github.com/stretchr/testify/mock"
@@ -22,6 +23,53 @@ type MockWALAccesser_Expecter struct {
 
 func (_m *MockWALAccesser) EXPECT() *MockWALAccesser_Expecter {
 	return &MockWALAccesser_Expecter{mock: &_m.Mock}
+}
+
+// AnalyzerClient provides a mock function with no fields
+func (_m *MockWALAccesser) AnalyzerClient() streaming.AnalyzerClient {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for AnalyzerClient")
+	}
+
+	var r0 streaming.AnalyzerClient
+	if rf, ok := ret.Get(0).(func() streaming.AnalyzerClient); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(streaming.AnalyzerClient)
+		}
+	}
+
+	return r0
+}
+
+// MockWALAccesser_AnalyzerClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AnalyzerClient'
+type MockWALAccesser_AnalyzerClient_Call struct {
+	*mock.Call
+}
+
+// AnalyzerClient is a helper method to define mock.On call
+func (_e *MockWALAccesser_Expecter) AnalyzerClient() *MockWALAccesser_AnalyzerClient_Call {
+	return &MockWALAccesser_AnalyzerClient_Call{Call: _e.mock.On("AnalyzerClient")}
+}
+
+func (_c *MockWALAccesser_AnalyzerClient_Call) Run(run func()) *MockWALAccesser_AnalyzerClient_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWALAccesser_AnalyzerClient_Call) Return(_a0 streaming.AnalyzerClient) *MockWALAccesser_AnalyzerClient_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWALAccesser_AnalyzerClient_Call) RunAndReturn(run func() streaming.AnalyzerClient) *MockWALAccesser_AnalyzerClient_Call {
+	_c.Call.Return(run)
+	return _c
 }
 
 // AppendMessages provides a mock function with given fields: ctx, msgs
@@ -546,6 +594,100 @@ func (_c *MockWALAccesser_Replicate_Call) Return(_a0 streaming.ReplicateService)
 }
 
 func (_c *MockWALAccesser_Replicate_Call) RunAndReturn(run func() streaming.ReplicateService) *MockWALAccesser_Replicate_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SchemaClient provides a mock function with no fields
+func (_m *MockWALAccesser) SchemaClient() streaming.SchemaClient {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for SchemaClient")
+	}
+
+	var r0 streaming.SchemaClient
+	if rf, ok := ret.Get(0).(func() streaming.SchemaClient); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(streaming.SchemaClient)
+		}
+	}
+
+	return r0
+}
+
+// MockWALAccesser_SchemaClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SchemaClient'
+type MockWALAccesser_SchemaClient_Call struct {
+	*mock.Call
+}
+
+// SchemaClient is a helper method to define mock.On call
+func (_e *MockWALAccesser_Expecter) SchemaClient() *MockWALAccesser_SchemaClient_Call {
+	return &MockWALAccesser_SchemaClient_Call{Call: _e.mock.On("SchemaClient")}
+}
+
+func (_c *MockWALAccesser_SchemaClient_Call) Run(run func()) *MockWALAccesser_SchemaClient_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWALAccesser_SchemaClient_Call) Return(_a0 streaming.SchemaClient) *MockWALAccesser_SchemaClient_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWALAccesser_SchemaClient_Call) RunAndReturn(run func() streaming.SchemaClient) *MockWALAccesser_SchemaClient_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// TransformLogStreamManager provides a mock function with no fields
+func (_m *MockWALAccesser) TransformLogStreamManager() wal.TransformLogStreamManager {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for TransformLogStreamManager")
+	}
+
+	var r0 wal.TransformLogStreamManager
+	if rf, ok := ret.Get(0).(func() wal.TransformLogStreamManager); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(wal.TransformLogStreamManager)
+		}
+	}
+
+	return r0
+}
+
+// MockWALAccesser_TransformLogStreamManager_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TransformLogStreamManager'
+type MockWALAccesser_TransformLogStreamManager_Call struct {
+	*mock.Call
+}
+
+// TransformLogStreamManager is a helper method to define mock.On call
+func (_e *MockWALAccesser_Expecter) TransformLogStreamManager() *MockWALAccesser_TransformLogStreamManager_Call {
+	return &MockWALAccesser_TransformLogStreamManager_Call{Call: _e.mock.On("TransformLogStreamManager")}
+}
+
+func (_c *MockWALAccesser_TransformLogStreamManager_Call) Run(run func()) *MockWALAccesser_TransformLogStreamManager_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWALAccesser_TransformLogStreamManager_Call) Return(_a0 wal.TransformLogStreamManager) *MockWALAccesser_TransformLogStreamManager_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockWALAccesser_TransformLogStreamManager_Call) RunAndReturn(run func() wal.TransformLogStreamManager) *MockWALAccesser_TransformLogStreamManager_Call {
 	_c.Call.Return(run)
 	return _c
 }

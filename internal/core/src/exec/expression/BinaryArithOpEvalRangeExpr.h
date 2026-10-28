@@ -17,6 +17,8 @@
 #pragma once
 
 #include <cmath>
+#include <memory>
+#include <optional>
 #include <fmt/core.h>
 
 #include "common/EasyAssert.h"
@@ -448,9 +450,8 @@ struct ArithOpIndexFunc {
                                int64_t,
                                T>
         HighPrecisonType;
-    using Index = index::ScalarIndex<T>;
     TargetBitmap
-    operator()(Index* index,
+    operator()(const index::IScalarValueReader<T>* index,
                size_t size,
                HighPrecisonType val,
                HighPrecisonType right_operand,
@@ -471,7 +472,7 @@ struct ArithOpIndexFunc {
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
             }
-            auto raw = index->Reverse_Lookup(offset);
+            auto raw = index->Lookup(offset);
             if (!raw.has_value()) {
                 res[i] = false;
                 continue;
@@ -738,11 +739,6 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
 
     void
     DetermineExecPath() override {
-        SegmentExpr::DetermineExecPath();
-        if (exec_path_ != ExprExecPath::ScalarIndex) {
-            return;
-        }
-
         auto data_type = expr_->column_.data_type_;
         if (expr_->column_.element_level_) {
             data_type = expr_->column_.element_type_;
@@ -752,6 +748,13 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
         if (data_type == DataType::JSON || data_type == DataType::ARRAY ||
             data_type == DataType::VECTOR_ARRAY) {
             exec_path_ = ExprExecPath::RawData;
+            return;
+        }
+
+        auto req = MakeIndexRequirement(RequiredReader::ValueLookup);
+        req.value_type = data_type;
+        SelectAndPinIndex(req);
+        if (exec_path_ != ExprExecPath::ScalarIndex) {
             return;
         }
 
@@ -853,11 +856,33 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
     VectorPtr
     ExecArrayLength(OffsetVector* input = nullptr);
 
+    // Row-level ARRAY length on a sealed ArrayChunk column: each chunk
+    // stores (offset, length) per row, so the predicate reads that table
+    // directly instead of building an ArrayView per row.
+    bool
+    UseArrayChunkLengths() const;
+
+    template <typename ValueType>
+    VectorPtr
+    ExecArrayLengthFromChunks(OffsetVector* input, int64_t real_batch_size);
+
+ public:
+    // The chunk-length path reads no element data and keeps no per-batch
+    // state beyond the data cursor, so it can run in one pass like an
+    // indexed expression; otherwise this one raw-data leaf would force the
+    // whole plan back to per-batch execution.
+    bool
+    CanExecuteAllAtOnce() const override {
+        return UseArrayChunkLengths() || SegmentExpr::CanExecuteAllAtOnce();
+    }
+
  private:
     std::shared_ptr<const milvus::expr::BinaryArithOpEvalRangeExpr> expr_;
     SingleElement right_operand_arg_;
     SingleElement value_arg_;
     bool arg_inited_{false};
+    mutable std::optional<bool> use_array_chunk_lengths_;
+    std::shared_ptr<ChunkedColumnInterface> array_length_column_;
 };
 
 }  //namespace exec

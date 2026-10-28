@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -71,7 +72,7 @@ func (s *ClusteringCompactionTaskSuite) SetupTest() {
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
 	broker := broker.NewMockBroker(s.T())
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	meta, err := newMeta(ctx, catalog, cm, broker)
+	meta, err := newMeta(ctx, catalog, cm, metacache.NewMetaStore(catalog), broker)
 	s.NoError(err)
 	s.meta = meta
 
@@ -1072,13 +1073,17 @@ func (s *ClusteringCompactionTaskSuite) TestProcessStatsState() {
 	s.Run("not enable stats task", func() {
 		Params.Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
 		defer Params.Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
+		drainBuildIndexChForTest()
+		defer drainBuildIndexChForTest()
 		task := s.generateBasicTask(false)
 		task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_statistic), setTmpSegments(task.GetTaskProto().GetResultSegments()), setResultSegments(nil))
 		task.maxRetryTimes = 3
+		expectedSegments := append([]UniqueID{}, task.GetTaskProto().GetTmpSegments()...)
 
 		s.False(task.Process())
 		s.Equal(datapb.CompactionTaskState_indexing, task.GetTaskProto().GetState())
 		s.Equal(int32(0), task.GetTaskProto().RetryTimes)
+		assertBuildIndexEvents(s.T(), expectedSegments...)
 	})
 }
 

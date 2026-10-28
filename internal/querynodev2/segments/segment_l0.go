@@ -20,6 +20,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/samber/lo"
 
 	storage "github.com/milvus-io/milvus/internal/storage"
@@ -152,6 +153,12 @@ func (s *L0Segment) Search(ctx context.Context, searchReq *segcore.SearchRequest
 
 func (s *L0Segment) Retrieve(ctx context.Context, plan *segcore.RetrievePlan) (*segcorepb.RetrieveResults, error) {
 	return nil, nil
+}
+
+// RetrieveArrow mirrors Retrieve: an L0 segment holds deletes only, so there is
+// nothing to retrieve and nothing to release.
+func (s *L0Segment) RetrieveArrow(ctx context.Context, plan *segcore.RetrievePlan) (*segcorepb.RetrieveResults, arrow.Record, error) {
+	return nil, nil, nil
 }
 
 func (s *L0Segment) RetrieveByOffsets(ctx context.Context, plan *segcore.RetrievePlanWithOffsets) (*segcorepb.RetrieveResults, error) {

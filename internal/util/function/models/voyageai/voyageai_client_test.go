@@ -17,6 +17,7 @@
 package voyageai
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -73,7 +74,7 @@ func TestEmbeddingOK(t *testing.T) {
 
 	{
 		c, _ := NewVoyageAIClient("mock_key")
-		r, err := c.Embedding(url, "voyage-3", []string{"sentence"}, 0, "query", "float", true, 0)
+		r, err := c.Embedding(context.Background(), url, "voyage-3", []string{"sentence"}, 0, "query", "float", true, 0)
 		ret := r.(*EmbeddingResponse[float32])
 		assert.True(t, err == nil)
 		assert.Equal(t, ret.Data[0].Index, 0)
@@ -131,7 +132,7 @@ func TestEmbeddingInt8Embed(t *testing.T) {
 
 	{
 		c, _ := NewVoyageAIClient("mock_key")
-		r, err := c.Embedding(url, "voyage-3", []string{"sentence"}, 0, "query", "int8", false, 0)
+		r, err := c.Embedding(context.Background(), url, "voyage-3", []string{"sentence"}, 0, "query", "int8", false, 0)
 		ret := r.(*EmbeddingResponse[int8])
 		assert.True(t, err == nil)
 		assert.Equal(t, ret.Data[0].Index, 0)
@@ -142,7 +143,7 @@ func TestEmbeddingInt8Embed(t *testing.T) {
 		assert.Equal(t, ret.Data[1].Embedding, []int8{3, 4})
 		assert.Equal(t, ret.Data[2].Embedding, []int8{5, 6})
 
-		_, err = c.Embedding(url, "voyage-3", []string{"sentence"}, 0, "query", "unknow", true, 0)
+		_, err = c.Embedding(context.Background(), url, "voyage-3", []string{"sentence"}, 0, "query", "unknow", true, 0)
 		assert.Error(t, err)
 	}
 }
@@ -157,7 +158,7 @@ func TestEmbeddingFailed(t *testing.T) {
 
 	{
 		c, _ := NewVoyageAIClient("mock_key")
-		_, err := c.Embedding(url, "voyage-3", []string{"sentence"}, 0, "query", "float", false, 0)
+		_, err := c.Embedding(context.Background(), url, "voyage-3", []string{"sentence"}, 0, "query", "float", false, 0)
 		assert.True(t, err != nil)
 	}
 }
@@ -180,7 +181,7 @@ func TestRerankOK(t *testing.T) {
 
 	{
 		c, _ := NewVoyageAIClient("mock_key")
-		r, err := c.Rerank(url, "voyage-3", "query", []string{"t1", "t2", "t3"}, nil, 0)
+		r, err := c.Rerank(context.Background(), url, "voyage-3", "query", []string{"t1", "t2", "t3"}, nil, 0)
 		assert.True(t, err == nil)
 		assert.Equal(t, r.Data[0].Index, 0)
 		assert.Equal(t, r.Data[1].Index, 1)
@@ -201,7 +202,39 @@ func TestRerankFailed(t *testing.T) {
 
 	{
 		c, _ := NewVoyageAIClient("mock_key")
-		_, err := c.Rerank(url, "voyage-3", "query", []string{"t1", "t2", "t3"}, nil, 0)
+		_, err := c.Rerank(context.Background(), url, "voyage-3", "query", []string{"t1", "t2", "t3"}, nil, 0)
 		assert.True(t, err != nil)
+	}
+}
+
+// VoyageAI defaults `truncation` to true when the field is absent, so the
+// request must carry the caller's value explicitly, including false.
+func TestEmbeddingSendsTruncation(t *testing.T) {
+	cases := []struct {
+		name       string
+		truncation bool
+	}{
+		{name: "truncation true", truncation: true},
+		{name: "truncation false", truncation: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got map[string]any
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(`{"object":"list","data":[{"object":"embedding","embedding":[0.1,0.2],"index":0}]}`))
+			}))
+			defer ts.Close()
+
+			c, err := NewVoyageAIClient("mock_key")
+			assert.NoError(t, err)
+			_, err = c.Embedding(context.Background(), ts.URL, "voyage-3", []string{"sentence"}, 0, "query", "float", tc.truncation, 0)
+			assert.NoError(t, err)
+
+			value, ok := got["truncation"]
+			assert.True(t, ok, "request body must contain truncation, got %v", got)
+			assert.Equal(t, tc.truncation, value)
+		})
 	}
 }

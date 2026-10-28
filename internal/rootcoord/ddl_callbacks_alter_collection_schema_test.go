@@ -40,7 +40,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/tso"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
-	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -746,16 +745,13 @@ func TestDDLCallbacksAlterCollectionSchemaAnalyzerFileResourceRefs(t *testing.T)
 	}
 	meta.fileResourceRefCnt = map[int64]int{}
 
-	mixCoord := core.mixCoord.(*imocks.MixCoord)
-	mixCoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.MatchedBy(func(req *querypb.ValidateAnalyzerRequest) bool {
-		infos := req.GetAnalyzerInfos()
-		return len(infos) == 1 &&
+	setValidateAnalyzer := mockAnalyzerValidation(t)
+	setValidateAnalyzer(func(_ context.Context, infos []*querypb.AnalyzerInfo) ([]int64, error) {
+		require.True(t, len(infos) == 1 &&
 			infos[0].GetField() == fieldName &&
-			infos[0].GetParams() == `{"tokenizer":"standard"}`
-	})).Return(&querypb.ValidateAnalyzerResponse{
-		Status:      merr.Success(),
-		ResourceIds: []int64{resourceID},
-	}, nil).Once()
+			infos[0].GetParams() == `{"tokenizer":"standard"}`)
+		return []int64{resourceID}, nil
+	})
 
 	resp, err := core.AlterCollectionSchema(ctx, buildAlterSchemaAddFieldSchemaReq(dbName, collectionName, &schemapb.FieldSchema{
 		Name:     fieldName,
@@ -967,33 +963,6 @@ func TestDDLCallbacksAlterCollectionDropField(t *testing.T) {
 	assertFieldExists(t, ctx, core, dbName, collectionName, "field4", 103)
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 5)
 	assertMaxFieldIDProperty(t, ctx, core, dbName, collectionName, 103)
-
-	meta := core.meta.(*MetaTable)
-	coll, err := meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
-	require.NoError(t, err)
-	meta.ddLock.Lock()
-	meta.collID2Meta[coll.CollectionID].Properties = append(
-		meta.collID2Meta[coll.CollectionID].Properties,
-		&commonpb.KeyValuePair{Key: common.RLSEnabledKey, Value: "true"},
-	)
-	meta.ddLock.Unlock()
-
-	policy, err := core.meta.PrepareCreateRLSPolicy(ctx, &rlsutil.CreateRowPolicyRequest{
-		DbName:         dbName,
-		CollectionName: collectionName,
-		PolicyName:     "field4_guard",
-		PolicyType:     rlsutil.PolicyTypePermissive,
-		Actions:        []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
-		UsingExpr:      "field4 == 1",
-	}, 1001)
-	require.NoError(t, err)
-	require.NoError(t, core.meta.ApplyAlterRLSPolicy(ctx, policy))
-
-	resp, err = core.AlterCollectionSchema(ctx, dropFieldReq("field4"))
-	require.ErrorIs(t, merr.CheckRPCCall(resp.GetAlterStatus(), err), merr.ErrParameterInvalid)
-	require.Contains(t, resp.GetAlterStatus().GetReason(), "RLS policies")
-	assertFieldExists(t, ctx, core, dbName, collectionName, "field4", 103)
-	assertSchemaVersion(t, ctx, core, dbName, collectionName, 5)
 }
 
 func TestDDLCallbacksAlterCollectionDropFieldWaitsForSchemaDropReady(t *testing.T) {
