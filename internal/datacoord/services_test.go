@@ -5534,11 +5534,11 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		defer paramtable.Get().Reset(Params.LocalStorageCfg.Path.Key)
 
 		cfg := createStorageConfig()
-		basePath := path.Join("files", "backfill_replace_indexed", "seg810")
+		basePath := path.Join(localRoot, "backfill_replace_indexed", "seg810")
 		oldPath := path.Join(basePath, "_data", "100_old.parquet")
 		// Seed a manifest holding an old group for field 100 plus an index
 		// entry on that column.
-		seedManifest, err := packed.CommitManifestUpdates(basePath, packed.ManifestEarliest, cfg, &packed.ManifestUpdates{
+		seedManifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(basePath, packed.ManifestEarliest), cfg, &packed.ManifestUpdates{
 			ColumnGroups: []packed.ColumnGroupEntry{{
 				Columns: []string{"100"},
 				Format:  "parquet",
@@ -5546,7 +5546,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 			}},
 			Indexes: []packed.ManifestIndexInfo{{
 				ColumnName: "100", IndexName: "idx_100", IndexType: "HNSW",
-				Path: "../idx_100.idx", FieldID: 100, IndexID: 10, BuildID: 500,
+				Path: "_index/idx_100.idx", FieldID: 100, IndexID: 10, BuildID: 500,
 				IndexVersion: 1, NumRows: 5, SerializedSize: 2048, MemSize: 4096,
 				CurrentIndexVersion: 5, CurrentScalarIndexVersion: 6,
 				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
@@ -5631,12 +5631,12 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		defer paramtable.Get().Reset(Params.LocalStorageCfg.Path.Key)
 
 		cfg := createStorageConfig()
-		basePath := path.Join("files", "backfill_replay", "seg810")
+		basePath := path.Join(localRoot, "backfill_replay", "seg810")
 		// Seed a manifest with a 5-row group for field 101. Column-group file
 		// paths are absolute object keys under the segment base (the form the
 		// loon writer emits); ToRelative strips `<base>/_data/` at write and
 		// ToAbsolute re-adds it at read.
-		seedManifest, err := packed.CommitManifestUpdates(basePath, packed.ManifestEarliest, cfg, &packed.ManifestUpdates{
+		seedManifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(basePath, packed.ManifestEarliest), cfg, &packed.ManifestUpdates{
 			ColumnGroups: []packed.ColumnGroupEntry{{
 				Columns: []string{"101"},
 				Format:  "parquet",
@@ -5713,9 +5713,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		defer paramtable.Get().Reset(Params.LocalStorageCfg.Path.Key)
 
 		cfg := createStorageConfig()
-		basePath := path.Join("files", "backfill_conflict", "seg811")
+		basePath := path.Join(localRoot, "backfill_conflict", "seg811")
 		oldPath := path.Join(basePath, "_data", "100_old.parquet")
-		seedManifest, err := packed.CommitManifestUpdates(basePath, packed.ManifestEarliest, cfg, &packed.ManifestUpdates{
+		seedManifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(basePath, packed.ManifestEarliest), cfg, &packed.ManifestUpdates{
 			ColumnGroups: []packed.ColumnGroupEntry{{
 				Columns: []string{"100"},
 				Format:  "parquet",
@@ -6104,9 +6104,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		defer paramtable.Get().Reset(Params.LocalStorageCfg.Path.Key)
 
 		cfg := createStorageConfig()
-		basePath := path.Join("files", "backfill_replace_race", "seg812")
+		basePath := path.Join(localRoot, "backfill_replace_race", "seg812")
 		oldPath := path.Join(basePath, "_data", "100_old.parquet")
-		_, err := packed.CommitManifestUpdates(basePath, packed.ManifestEarliest, cfg, &packed.ManifestUpdates{
+		_, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(basePath, packed.ManifestEarliest), cfg, &packed.ManifestUpdates{
 			ColumnGroups: []packed.ColumnGroupEntry{{
 				Columns: []string{"100"},
 				Format:  "parquet",
@@ -6194,9 +6194,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		defer paramtable.Get().Reset(Params.LocalStorageCfg.Path.Key)
 
 		cfg := createStorageConfig()
-		basePath := path.Join("files", "backfill_replace_idx_window", "seg814")
+		basePath := path.Join(localRoot, "backfill_replace_idx_window", "seg814")
 		oldPath := path.Join(basePath, "_data", "100_old.parquet")
-		_, err := packed.CommitManifestUpdates(basePath, packed.ManifestEarliest, cfg, &packed.ManifestUpdates{
+		_, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(basePath, packed.ManifestEarliest), cfg, &packed.ManifestUpdates{
 			ColumnGroups: []packed.ColumnGroupEntry{{
 				Columns: []string{"100"},
 				Format:  "parquet",
@@ -6427,9 +6427,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		defer paramtable.Get().Reset(Params.LocalStorageCfg.Path.Key)
 
 		cfg := createStorageConfig()
-		basePath := path.Join("files", "backfill_replace_text_stats", "seg815")
+		basePath := path.Join(localRoot, "backfill_replace_text_stats", "seg815")
 		oldPath := path.Join(basePath, "_data", "100_old.parquet")
-		_, err := packed.CommitManifestUpdates(basePath, packed.ManifestEarliest, cfg, &packed.ManifestUpdates{
+		_, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(basePath, packed.ManifestEarliest), cfg, &packed.ManifestUpdates{
 			ColumnGroups: []packed.ColumnGroupEntry{{
 				Columns: []string{"100"}, Format: "parquet",
 				Files: []packed.ColumnGroupFileEntry{{Path: oldPath, StartIndex: 0, EndIndex: 5}},
@@ -6497,9 +6497,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		defer paramtable.Get().Reset(Params.LocalStorageCfg.Path.Key)
 
 		cfg := createStorageConfig()
-		basePath := path.Join("files", "backfill_replay_race", "seg813")
+		basePath := path.Join(localRoot, "backfill_replay_race", "seg813")
 		aPath := path.Join(basePath, "_data", "100_a.parquet")
-		_, err := packed.CommitManifestUpdates(basePath, packed.ManifestEarliest, cfg, &packed.ManifestUpdates{
+		_, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(basePath, packed.ManifestEarliest), cfg, &packed.ManifestUpdates{
 			ColumnGroups: []packed.ColumnGroupEntry{{
 				Columns: []string{"100"},
 				Format:  "parquet",

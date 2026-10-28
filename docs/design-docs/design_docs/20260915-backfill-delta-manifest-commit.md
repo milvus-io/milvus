@@ -233,8 +233,15 @@ CommitBackfillResult
   goroutine per segment) instead of serially.
 - **Lock hygiene in the single-segment commit:** the backfill index-removal set
   is re-resolved from current definitions AFTER manifest I/O but BEFORE taking
-  `segMu`; the publication section only scans the segment's records. No
-  `fieldIndexLock` is acquired inside `segMu`, so a replace commit overlapping a
+  `segMu`, and `fieldIndexLock`'s read side is held from that re-resolution
+  THROUGH the publication section (released after `segMu`, before the deferred
+  gauge closures that re-enter it). This makes the final check and the pointer
+  advance atomic with index creation: a `CreateIndex` for a dropped column either
+  completed before the re-resolution (its index ID is in the removal set and its
+  records are caught by `verifyNoUnexpectedIndexRecords`) or is blocked until the
+  replace publishes (its build then reads the new manifest, so no index built
+  from the pre-replace column values can be accepted). The read side is taken
+  before `segMu` — never acquired inside it — so a replace commit overlapping a
   `CreateIndex`/`DropIndex` (which holds that lock's write side across an etcd
   round trip) cannot stall every segment reader behind `segMu`.
 - **DataView reconciliation:** after any V3 commit succeeds, the handler calls

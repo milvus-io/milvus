@@ -353,12 +353,27 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	// definitions AFTER manifest I/O but BEFORE taking segMu: an index created
 	// during the commit window (including while the manifest transaction was in
 	// flight) is enumerated here. The result feeds verifyNoUnexpectedIndexRecords
-	// inside segMu, which must not take fieldIndexLock (index DDL holds its write
-	// side across an etcd round trip; acquiring it while holding segMu would stall
-	// every segment reader).
-	var verifyIndexIDs map[int64]struct{}
-	if segment != nil {
-		verifyIndexIDs = m.indexIDsByDroppedColumns(segment.GetCollectionID(), commit)
+	// inside segMu.
+	//
+	// fieldIndexLock's read side is held from this re-resolution THROUGH the
+	// publication section, so the final check and the pointer advance are atomic
+	// with index creation: a CreateIndex for a dropped column either completed
+	// before this re-resolution (its index ID lands in verifyIndexIDs and its
+	// records are caught by verifyNoUnexpectedIndexRecords) or is blocked until
+	// after the replace publishes (its build then reads the new manifest, so no
+	// index built from the pre-replace column values can be accepted). Index DDL
+	// holds the write side across an etcd round trip and sync.RWMutex is
+	// writer-preferring, so the read side is acquired HERE — before segMu — and
+	// released after the publication section, before the deferred gauge closures
+	// that re-enter it; it is never acquired inside segMu.
+	var (
+		verifyIndexIDs   map[int64]struct{}
+		releaseIndexLock func()
+	)
+	if segment != nil && commitDropsColumns(commit) {
+		m.indexMeta.fieldIndexLock.RLock()
+		releaseIndexLock = m.indexMeta.fieldIndexLock.RUnlock
+		verifyIndexIDs = m.indexIDsByDroppedColumnsLocked(segment.GetCollectionID(), commit)
 	}
 
 	// Re-enter segMu only for the final full-record publication. Ordinary
@@ -472,13 +487,21 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 		}
 		return nil
 	}(); err != nil {
+		if releaseIndexLock != nil {
+			releaseIndexLock()
+		}
 		return err
 	}
-	// segMu is released; the segment manifest lock and keyLock(buildID) are
-	// still held, so the deferred gauge update stays serialized against
-	// MarkIndexAsDeleted (via fieldIndexLock) and ordered before the next
-	// writer of the same build, without ever awaiting fieldIndexLock inside
-	// segMu.
+	// segMu is released. The fieldIndexLock read side held since the verify-set
+	// re-resolution is released before the deferred gauge closures, which
+	// re-enter that lock after segMu is released; the segment manifest lock and
+	// keyLock(buildID) are still held, so the deferred gauge update stays
+	// serialized against MarkIndexAsDeleted (via fieldIndexLock) and ordered
+	// before the next writer of the same build, without ever awaiting
+	// fieldIndexLock inside segMu.
+	if releaseIndexLock != nil {
+		releaseIndexLock()
+	}
 	for _, deferredIndexMetric := range deferredIndexMetrics {
 		deferredIndexMetric()
 	}
@@ -657,12 +680,38 @@ func clearedStatsForDroppedColumns(segment *SegmentInfo, commit SegmentManifestC
 	return textStats, jsonKeyStats
 }
 
+// commitDropsColumns reports whether the commit's structured mutation carries a
+// DropColumns payload. Only a backfill "replace" commit does today; it is the
+// shape that must hold fieldIndexLock's read side across publication so the
+// index-retraction check is atomic with index creation.
+func commitDropsColumns(commit SegmentManifestCommit) bool {
+	return commit.Mutation.Type == ManifestMutationCommitUpdates &&
+		commit.Mutation.Updates != nil && len(commit.Mutation.Updates.DropColumns) > 0
+}
+
 // indexIDsByDroppedColumns returns the set of index IDs whose field the commit
-// drops, resolved from the CURRENT index definitions. Called outside segMu (an
-// index definition may be created during the commit window; taking fieldIndexLock
-// inside segMu would stall every segment reader behind an index DDL's etcd round
-// trip). Returns nil when the commit drops no columns.
+// drops, resolved from the CURRENT index definitions. It takes fieldIndexLock's
+// read side for its own lookup; a caller that must hold that read side across a
+// larger critical section (the commit's re-resolution before publication) uses
+// indexIDsByDroppedColumnsLocked instead, which assumes it is already held.
+// Called outside segMu. Returns nil when the commit drops no columns.
 func (m *meta) indexIDsByDroppedColumns(collectionID int64, commit SegmentManifestCommit) map[int64]struct{} {
+	if !commitDropsColumns(commit) {
+		return nil
+	}
+	m.indexMeta.fieldIndexLock.RLock()
+	defer m.indexMeta.fieldIndexLock.RUnlock()
+	return m.indexIDsByDroppedColumnsLocked(collectionID, commit)
+}
+
+// indexIDsByDroppedColumnsLocked is indexIDsByDroppedColumns without its own
+// lock acquisition: the caller must already hold indexMeta.fieldIndexLock's
+// read side. It lets the backfill replace commit hold that read side from the
+// re-resolution through the publication section so the final check and the
+// pointer advance are atomic with index creation, without re-entering the
+// mutex (Go's RWMutex would block a reentrant read behind a pending writer).
+// Returns nil when the commit drops no columns.
+func (m *meta) indexIDsByDroppedColumnsLocked(collectionID int64, commit SegmentManifestCommit) map[int64]struct{} {
 	if commit.Mutation.Type != ManifestMutationCommitUpdates || commit.Mutation.Updates == nil {
 		return nil
 	}
@@ -674,7 +723,10 @@ func (m *meta) indexIDsByDroppedColumns(collectionID int64, commit SegmentManife
 		return nil
 	}
 	indexIDs := make(map[int64]struct{})
-	for _, index := range m.indexMeta.GetIndexesForCollection(collectionID, "") {
+	for _, index := range m.indexMeta.indexes[collectionID] {
+		if index.IsDeleted {
+			continue
+		}
 		if _, ok := dropped[strconv.FormatInt(index.FieldID, 10)]; ok {
 			indexIDs[index.IndexID] = struct{}{}
 		}

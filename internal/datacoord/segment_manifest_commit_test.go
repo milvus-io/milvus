@@ -405,7 +405,7 @@ func TestCommitSegmentManifestClearsDroppedColumnStats(t *testing.T) {
 	})))
 
 	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
-		func(context.Context, *packed.ManifestIOContext, string, int64, *indexpb.StorageConfig, *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
+		func(context.Context, *packed.ManifestIOContext, string, *indexpb.StorageConfig, *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 			return mockManifestUpdateResult(newManifest, nil), nil
 		},
 	).Build()
@@ -1448,4 +1448,101 @@ func TestCommitSegmentManifestDefersFieldIndexLockOutsideSegMu(t *testing.T) {
 		"commit is holding segMu while blocked on fieldIndexLock: a concurrent index DDL would stall every segment reader")
 	assert.NotEqual(t, baseManifest, publishedManifest,
 		"publication must complete before the commit waits on fieldIndexLock")
+}
+
+// A backfill replace holds fieldIndexLock's read side across its publication
+// section, so a CreateIndex for the replaced field that starts while the
+// replace is committing is blocked until the new pointer is published. Without
+// that hold, the definition could be created between the verify-set
+// re-resolution and the check, and its build would read the pre-replace
+// manifest in that gap — FinishTask would then accept an index built from the
+// old column values after backfill succeeded.
+func TestCommitSegmentManifestReplaceBlocksIndexCreationUntilPublished(t *testing.T) {
+	const (
+		collectionID = int64(1)
+		segmentID    = int64(310)
+	)
+	basePath := "/tmp/milvus/insert_log/1/10/310"
+	oldManifest := packed.MarshalManifestPath(basePath, 3)
+	newManifest := packed.MarshalManifestPath(basePath, 4)
+
+	meta, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID:             segmentID,
+		CollectionID:   collectionID,
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   oldManifest,
+	})))
+
+	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+		func(_ context.Context, _ *packed.ManifestIOContext, baseManifest string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
+			require.Equal(t, oldManifest, baseManifest)
+			require.Equal(t, []string{"100"}, updates.DropColumns)
+			return mockManifestUpdateResult(newManifest, updates), nil
+		},
+	).Build()
+	defer commit.UnPatch()
+
+	// Park the commit inside its segMu publication section (blocked in the
+	// catalog write). At that point it holds fieldIndexLock's read side, which
+	// the fix keeps through the pointer advance.
+	enteredCatalog := make(chan struct{})
+	releaseCatalog := make(chan struct{})
+	meta.catalog = &blockingManifestCatalog{
+		DataCoordCatalog: meta.catalog,
+		entered:          enteredCatalog,
+		release:          releaseCatalog,
+	}
+
+	result := make(chan error, 1)
+	go func() {
+		result <- meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
+			SegmentID:     segmentID,
+			StorageConfig: &indexpb.StorageConfig{},
+			Mutation: ManifestMutation{
+				Type:    ManifestMutationCommitUpdates,
+				Updates: &packed.ManifestUpdates{DropColumns: []string{"100"}},
+			},
+		})
+	}()
+
+	select {
+	case <-enteredCatalog:
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "commit did not reach the publication section")
+	}
+
+	created := make(chan error, 1)
+	go func() {
+		created <- meta.indexMeta.CreateIndex(context.Background(), &model.Index{
+			CollectionID: collectionID, FieldID: 100, IndexID: 10, IndexName: "idx_100",
+		})
+	}()
+
+	// The CreateIndex must wait on fieldIndexLock until the replace publishes;
+	// without the fix nothing held fieldIndexLock during publication, so the
+	// definition could slip in between the verify-set re-resolution and the
+	// pointer advance.
+	select {
+	case err := <-created:
+		require.FailNow(t, "CreateIndex completed while the replace was committing", "err=%v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(releaseCatalog)
+	require.NoError(t, <-result)
+
+	select {
+	case err := <-created:
+		require.NoError(t, err)
+	case <-time.After(30 * time.Second):
+		t.Fatal("CreateIndex did not complete after the replace published")
+	}
+
+	// The replace published and the index definition arrived only afterwards, so
+	// its build reads the new column values, never the pre-replace ones.
+	require.Equal(t, newManifest, meta.GetSegment(context.Background(), segmentID).GetManifestPath())
+	require.True(t, meta.indexMeta.IsIndexExist(collectionID, 10))
 }

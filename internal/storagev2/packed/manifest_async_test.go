@@ -650,7 +650,7 @@ func TestAsyncManifestDropColumns(t *testing.T) {
 	ctx := context.Background()
 	base := path.Join(cfg.RootPath, "async_drop_columns", "seg1")
 
-	seed, err := CommitManifestUpdates(base, 0, cfg, &ManifestUpdates{
+	seed, err := CommitManifestUpdates(MarshalManifestPath(base, 0), cfg, &ManifestUpdates{
 		ColumnGroups: []ColumnGroupEntry{{
 			Columns: []string{"100"},
 			Format:  "parquet",
@@ -662,10 +662,7 @@ func TestAsyncManifestDropColumns(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, fields, int64(100))
 
-	_, version, err := UnmarshalManifestPath(seed)
-	require.NoError(t, err)
-
-	dropped, err := CommitManifestUpdatesWithResultAsync(ctx, io, base, version, cfg, &ManifestUpdates{
+	dropped, err := CommitManifestUpdatesWithResultAsync(ctx, io, seed, cfg, &ManifestUpdates{
 		DropColumns: []string{"100"},
 	})
 	require.NoError(t, err)

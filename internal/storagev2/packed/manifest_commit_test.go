@@ -383,7 +383,7 @@ func TestFFIPackedWriter_DoubleCloseRejected(t *testing.T) {
 // column in one transaction) keeps the column while advancing one revision.
 func TestCommitManifestUpdates_DropColumns(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
-	basePath := "files/commit_drop_columns/seg1"
+	basePath := path.Join(cfg.RootPath, "commit_drop_columns/seg1")
 
 	// Seed a manifest with two single-field column groups (100 and 101).
 	schema := arrow.NewSchema([]arrow.Field{
@@ -419,7 +419,7 @@ func TestCommitManifestUpdates_DropColumns(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, seedEntries, 2)
 
-	base, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{NewFiles: out})
+	base, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 	fields, err := GetManifestFieldIDs(base, cfg)
 	require.NoError(t, err)
@@ -428,7 +428,7 @@ func TestCommitManifestUpdates_DropColumns(t *testing.T) {
 
 	// Replace: drop field 100 and re-register it in one transaction (the
 	// backfill "replace" shape) -> both fields survive, version advances once.
-	replaced, err := CommitManifestUpdates(basePath, 1, cfg, &ManifestUpdates{
+	replaced, err := CommitManifestUpdates(MarshalManifestPath(basePath, 1), cfg, &ManifestUpdates{
 		DropColumns: []string{"100"},
 		ColumnGroups: []ColumnGroupEntry{{
 			Columns: []string{"100"},
@@ -451,7 +451,7 @@ func TestCommitManifestUpdates_DropColumns(t *testing.T) {
 
 	// Drop: removing a column from the latest revision retracts it from the
 	// field set.
-	dropped, err := CommitManifestUpdates(basePath, 2, cfg, &ManifestUpdates{
+	dropped, err := CommitManifestUpdates(MarshalManifestPath(basePath, 2), cfg, &ManifestUpdates{
 		DropColumns: []string{"100"},
 	})
 	require.NoError(t, err)
@@ -470,7 +470,7 @@ func TestCommitManifestUpdates_DropColumns(t *testing.T) {
 // auto-drops the indexes attached to it.
 func TestCommitManifestUpdates_DropColumns_AbsentColumnAndIndexAutoDrop(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
-	basePath := "files/commit_drop_columns_extra/seg1"
+	basePath := path.Join(cfg.RootPath, "commit_drop_columns_extra/seg1")
 
 	// Seed a manifest with a single column group (100).
 	schema := arrow.NewSchema([]arrow.Field{
@@ -495,13 +495,13 @@ func TestCommitManifestUpdates_DropColumns_AbsentColumnAndIndexAutoDrop(t *testi
 	require.NoError(t, err)
 	defer out.Destroy()
 
-	base, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{NewFiles: out})
+	base, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 	_ = base
 
 	// Dropping an absent column alongside real work is tolerated (no-op drop);
 	// the real work here is registering a brand-new column group 102.
-	got, err := CommitManifestUpdates(basePath, 1, cfg, &ManifestUpdates{
+	got, err := CommitManifestUpdates(MarshalManifestPath(basePath, 1), cfg, &ManifestUpdates{
 		DropColumns: []string{"999"},
 		ColumnGroups: []ColumnGroupEntry{{
 			Columns: []string{"102"},
@@ -521,12 +521,12 @@ func TestCommitManifestUpdates_DropColumns_AbsentColumnAndIndexAutoDrop(t *testi
 
 	// Seed an index on column 100, then drop the column: the index must be
 	// auto-dropped with it.
-	indexed, err := CommitManifestUpdates(basePath, 2, cfg, &ManifestUpdates{
+	indexed, err := CommitManifestUpdates(MarshalManifestPath(basePath, 2), cfg, &ManifestUpdates{
 		Indexes: []ManifestIndexInfo{{
 			ColumnName:                "100",
 			IndexName:                 "vec_index",
 			IndexType:                 "HNSW",
-			Path:                      "../vec.idx",
+			Path:                      "_index/vec.idx",
 			FieldID:                   100,
 			IndexID:                   10,
 			BuildID:                   500,
@@ -546,7 +546,7 @@ func TestCommitManifestUpdates_DropColumns_AbsentColumnAndIndexAutoDrop(t *testi
 	require.Len(t, indexes, 1)
 	require.Equal(t, "100", indexes[0].ColumnName)
 
-	dropped, err := CommitManifestUpdates(basePath, 3, cfg, &ManifestUpdates{
+	dropped, err := CommitManifestUpdates(MarshalManifestPath(basePath, 3), cfg, &ManifestUpdates{
 		DropColumns: []string{"100"},
 	})
 	require.NoError(t, err)
@@ -564,10 +564,10 @@ func TestCommitManifestUpdates_DropColumns_AbsentColumnAndIndexAutoDrop(t *testi
 // comparison (backfill delta replay detection) can match op files exactly.
 func TestReadManifestColumnGroups(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
-	basePath := "files/read_column_groups/seg1"
+	basePath := path.Join(cfg.RootPath, "read_column_groups/seg1")
 	dataPath := path.Join(basePath, "_data", "100_a.parquet")
 
-	committed, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
+	committed, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{
 		ColumnGroups: []ColumnGroupEntry{{
 			Columns: []string{"100"},
 			Format:  "parquet",
