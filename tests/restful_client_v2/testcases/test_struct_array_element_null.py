@@ -245,8 +245,8 @@ class TestRestfulStructArrayElementNull(TestBase):
     def test_rest_v2_element_null_insert_rejected(self):
         """
         target: test REST v2 rejects element values the schema does not allow
-        method: insert a null or a missing value for a sub-field that is not element nullable, an unknown
-            sub-field key, and an inner array that is not an array
+        method: insert a null or a missing value for a sub-field that is not element nullable, an inner array
+            that is not an array, and a null vector coordinate
         expected: each insert is rejected and nothing is written
         """
         name = gen_collection_name()
@@ -256,7 +256,6 @@ class TestRestfulStructArrayElementNull(TestBase):
         bad_clips = [
             [{"lang": "en", "score": None}],
             [{"lang": "en"}],
-            [{"lang": "en", "score": 1, "unknown": 1}],
             [{"lang": "en", "score": 1, "tags": "a"}],
             [{"lang": "en", "score": 1, "emb": [0.5] * (self.dim - 1) + [None]}],
         ]
@@ -270,6 +269,38 @@ class TestRestfulStructArrayElementNull(TestBase):
             assert rsp["code"] != 0, (clips, rsp)
 
         assert self._query_clips(name) == {}
+
+    def test_rest_v2_element_unknown_key_ignored(self):
+        """
+        target: test REST v2 ignores struct element keys that name no sub-field
+        method: insert elements that carry unknown keys, with a value or null, next to known sub-fields
+        expected: the insert succeeds; the unknown keys are not stored and the sub-fields read back as written
+        """
+        name = gen_collection_name()
+        self.name = name
+        self._create_collection(name)
+
+        row = {
+            "id": 1,
+            "normal_vector": gen_vector(1),
+            "clips": [
+                {"lang": "en", "score": 1, "emb": gen_vector(10), "unknown": 1},
+                {"score": 2, "tags": ["a"], "unknown": None, "extra": {"x": 1}},
+            ],
+        }
+        self._insert(name, [row])
+
+        rsp = self.vector_client.vector_query(
+            {"collectionName": name, "filter": "id >= 0", "outputFields": ["id", "clips"], "limit": 10}
+        )
+        assert rsp["code"] == 0, rsp
+        assert len(rsp["data"]) == 1, rsp
+        for element in rsp["data"][0]["clips"]:
+            assert "unknown" not in element and "extra" not in element, element
+        assert normalize_clips(rsp["data"][0]["clips"]) == [
+            {"lang": "en", "score": 1, "emb": gen_vector(10), "tags": None},
+            {"lang": None, "score": 2, "emb": None, "tags": ["a"]},
+        ]
 
     def test_rest_v2_element_filter_query_offset(self):
         """
@@ -381,7 +412,7 @@ class TestRestfulStructArrayElementNull(TestBase):
         target: test REST v2 add and drop of a struct sub-field through fields/add and fields/drop
         method: add clips[note] as an element-nullable VarChar, read old and new rows, then drop it
         expected: old rows read note as null in every element; new rows read it as written; after the drop
-            note is gone from describe and from writes
+            note is gone from describe and from reads, and a write that still carries note ignores it
         """
         name = gen_collection_name()
         self.name = name
@@ -434,14 +465,11 @@ class TestRestfulStructArrayElementNull(TestBase):
         expected = {row_id: normalize_clips(value) for row_id, value in expected.items()}
         assert self._query_clips(name) == expected
 
-        # a write that still carries the dropped sub-field is rejected
-        rsp = self.vector_client.vector_insert(
-            {
-                "collectionName": name,
-                "data": [{"id": 7, "normal_vector": gen_vector(7), "clips": [{"score": 70, "note": "x"}]}],
-            }
-        )
-        assert rsp["code"] != 0, rsp
+        # a write that still carries the dropped sub-field succeeds and the key is ignored
+        stale_row = {"id": 7, "normal_vector": gen_vector(7), "clips": [{"score": 70, "note": "x"}]}
+        self._insert(name, [stale_row])
+        expected[7] = normalize_clips(stale_row["clips"])
+        assert self._query_clips(name) == expected
 
     def test_rest_v2_add_struct_sub_field_rejected(self):
         """
