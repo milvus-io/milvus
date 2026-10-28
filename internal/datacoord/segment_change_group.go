@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -50,6 +51,14 @@ import (
 // reclaim its members.
 var errSegmentChangeGroupCollectionDropped = errors.New("segment change group publish: collection data views dropped")
 
+// Finalized zero-row outputs represent absence, including the Dropped
+// tombstones produced by mix/sort compaction. Growing/Flushing/Importing row
+// counts can still be provisional. L0 carries deletes, not rows.
+func isEmptySegmentChangeOutput(seg *SegmentInfo) bool {
+	return seg != nil && seg.GetNumOfRows() == 0 && seg.GetLevel() != datapb.SegmentLevel_L0 &&
+		(seg.GetState() == commonpb.SegmentState_Flushed || seg.GetState() == commonpb.SegmentState_Dropped)
+}
+
 // groupUsesPublishCommitTS reports whether the group's source allocates a
 // publish commit timestamp (design §5.4, C5): import / CDC / copy rows carry a
 // data timestamp allocated at creation and become "officially present" at
@@ -66,6 +75,10 @@ func groupUsesPublishCommitTS(source model.SegmentChangeSource) bool {
 	default:
 		return false
 	}
+}
+
+func groupWritesMemberCommitTS(g *model.SegmentChangeGroup) bool {
+	return groupUsesPublishCommitTS(g.Source) && !g.PreserveMemberTimestamps
 }
 
 // publishGroup atomically publishes a READY group (design §5.4): one catalog
@@ -98,13 +111,36 @@ func (m *meta) publishGroup(ctx context.Context, g *model.SegmentChangeGroup, al
 		return merr.WrapErrServiceInternalMsg(
 			"segment change group %d cannot be published in state %s (requires READY)", g.GroupID, g.State)
 	}
+	if g.AwaitCommitFence && g.CommitTS == 0 {
+		return merr.WrapErrServiceUnavailableMsg("segment change group %d is waiting for its WAL commit fence", g.GroupID)
+	}
+	if g.PreviousGroupID != 0 {
+		previous := m.GetSegmentChangeGroup(ctx, g.CollectionID, g.PreviousGroupID)
+		if previous == nil || previous.State != model.SegmentChangeStateCommitted {
+			return merr.WrapErrServiceUnavailableMsg("segment change group %d is waiting for subgroup %d", g.GroupID, g.PreviousGroupID)
+		}
+	}
+	if g.Source == model.SegmentChangeSourceMixCompaction || g.Source == model.SegmentChangeSourceSortCompaction || g.Source == model.SegmentChangeSourceClustering || g.Source == model.SegmentChangeSourceBumpSchema {
+		if m.isCollectionCompactionBlocked(g.CollectionID) {
+			return merr.WrapErrServiceUnavailableMsg("segment change group %d is waiting for collection snapshot protection", g.GroupID)
+		}
+		for _, id := range g.SupersededSegmentIDs {
+			if m.isSegmentCompactionProtected(id) {
+				return merr.WrapErrServiceUnavailableMsg("segment change group %d is waiting for parent %d snapshot protection", g.GroupID, id)
+			}
+		}
+	}
 
 	// Phase -1: allocate commit_ts before holding any lock, so the rootcoord TSO
 	// RTT never sits on a lock. TSO only increases; a failure may retry with a
 	// fresh value.
-	commitTs, err := alloc.AllocTimestamp(ctx)
-	if err != nil {
-		return err
+	commitTs := g.CommitTS
+	var err error
+	if !groupWritesMemberCommitTS(g) || commitTs == 0 {
+		commitTs, err = alloc.AllocTimestamp(ctx)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Phase 0: acquire the members' manifest locks as one atomic operation, so
@@ -127,6 +163,9 @@ func (m *meta) publishGroup(ctx context.Context, g *model.SegmentChangeGroup, al
 	// and the caller regresses the group to STAGED for re-evaluation.
 	coll := m.GetCollection(g.CollectionID)
 	readiness := m.prepareReadiness(coll)
+	if readiness == nil {
+		return merr.WrapErrServiceInternalMsg("segment change group %d collection or schema is unavailable at publish", g.GroupID)
+	}
 
 	// Phase 2: read and validate the members under segMu.RLock and build the
 	// loadable projection. The read lock is released before the DataView lock is
@@ -135,6 +174,7 @@ func (m *meta) publishGroup(ctx context.Context, g *model.SegmentChangeGroup, al
 	// not yet on SegmentInfo).
 	m.segMu.RLock()
 	loadable := make([]dataview.LoadableSegment, 0, len(g.NewSegmentIDs))
+	retired := append([]int64(nil), g.SupersededSegmentIDs...)
 	for _, id := range g.NewSegmentIDs {
 		seg := m.segments.GetSegment(id)
 		if seg == nil {
@@ -142,7 +182,7 @@ func (m *meta) publishGroup(ctx context.Context, g *model.SegmentChangeGroup, al
 			return merr.WrapErrDataIntegrityMsg(
 				"segment change group %d publish: member %d is missing from meta (externally dropped?)", g.GroupID, id)
 		}
-		if seg.GetState() == commonpb.SegmentState_Dropped {
+		if seg.GetState() == commonpb.SegmentState_Dropped && !isEmptySegmentChangeOutput(seg) {
 			m.segMu.RUnlock()
 			return merr.WrapErrDataIntegrityMsg(
 				"segment change group %d publish: member %d was externally dropped", g.GroupID, id)
@@ -152,22 +192,26 @@ func (m *meta) publishGroup(ctx context.Context, g *model.SegmentChangeGroup, al
 			return merr.WrapErrDataIntegrityMsg(
 				"segment change group %d publish: member %d is not staged by this group", g.GroupID, id)
 		}
+		if isEmptySegmentChangeOutput(seg) {
+			retired = append(retired, id)
+			continue // No logical output; retired in the same publish write.
+		}
 		if len(seg.GetBinlogs()) == 0 && seg.GetManifestPath() == "" {
 			m.segMu.RUnlock()
 			return merr.WrapErrDataIntegrityMsg(
 				"segment change group %d publish: member %d has no data footprint", g.GroupID, id)
 		}
-		if readiness != nil {
-			if !readiness.schemaReady(seg) {
-				m.segMu.RUnlock()
-				return merr.WrapErrDataIntegrityMsg(
-					"segment change group %d publish: member %d schema version behind collection at publish (C23)", g.GroupID, id)
-			}
-			if !readiness.indexReady(seg) {
-				m.segMu.RUnlock()
-				return merr.WrapErrDataIntegrityMsg(
-					"segment change group %d publish: member %d index state regressed after READY (R5)", g.GroupID, id)
-			}
+		if !readiness.schemaReady(seg) {
+			m.segMu.RUnlock()
+			return merr.WrapErrServiceUnavailableMsg("segment change group %d publish: member %d schema version behind collection", g.GroupID, id)
+		}
+		if !readiness.indexReady(seg) {
+			m.segMu.RUnlock()
+			return merr.WrapErrServiceUnavailableMsg("segment change group %d publish: member %d index state regressed after READY", g.GroupID, id)
+		}
+		if !readiness.Ready(seg) {
+			m.segMu.RUnlock()
+			return merr.WrapErrServiceUnavailableMsg("segment change group %d publish: member %d readiness regressed after READY", g.GroupID, id)
 		}
 		l, err := loadableSegmentOf(seg)
 		if err != nil {
@@ -190,7 +234,7 @@ func (m *meta) publishGroup(ctx context.Context, g *model.SegmentChangeGroup, al
 		view, commitView, abortView, err = m.dataViewManager.PublishChange(ctx, dataview.ChangeGroupDataViewEvent{
 			CollectionID:         g.CollectionID,
 			NewSegments:          loadable,
-			SupersededSegmentIDs: g.SupersededSegmentIDs,
+			SupersededSegmentIDs: retired,
 		})
 		if err != nil {
 			// Monotonicity conflict: the manifest version was pushed higher by a
@@ -209,25 +253,7 @@ func (m *meta) publishGroup(ctx context.Context, g *model.SegmentChangeGroup, al
 	// snapshot). The composite write owns ordering (members before superseded,
 	// terminal group + DataView commit-marked last) and the C3 checks (every
 	// member flipped visible, every superseded retired).
-	operators := make([]UpdateOperator, 0, len(g.NewSegmentIDs)*2+len(g.SupersededSegmentIDs)+len(extraOperators))
-	for _, id := range g.NewSegmentIDs {
-		operators = append(operators, SetSegmentIsInvisible(id, false))
-		if groupUsesPublishCommitTS(g.Source) {
-			operators = append(operators, UpdateCommitTimestamp(id, commitTs))
-		}
-	}
-	for _, id := range g.SupersededSegmentIDs {
-		operators = append(operators, UpdateStatusOperator(id, commonpb.SegmentState_Dropped))
-	}
-	operators = append(operators, extraOperators...)
-
-	committed := g.Clone()
-	committed.State = model.SegmentChangeStateCommitted
-	committed.CommitTS = commitTs
-	committed.CommitTime = time.Now().Unix()
-	groupActions := []metastore.UpdateAction{metastore.SaveSegmentChangeGroup(committed)}
-
-	if err := m.UpdateSegmentsInfoAndChangeGroupsAndDataView(ctx, view, groupActions, operators...); err != nil {
+	if err := m.commitSegmentChangeGroup(ctx, g, commitTs, view, extraOperators...); err != nil {
 		if abortView != nil {
 			abortView()
 		}
@@ -238,11 +264,55 @@ func (m *meta) publishGroup(ctx context.Context, g *model.SegmentChangeGroup, al
 	}
 	mlog.Info(ctx, "segment change group published",
 		mlog.Int64("groupID", g.GroupID),
-		mlog.Int64("collectionID", g.CollectionID),
+		mlog.FieldCollectionID(g.CollectionID),
 		mlog.String("source", g.Source.String()),
 		mlog.Int64s("members", g.NewSegmentIDs),
 		mlog.Uint64("commitTS", commitTs))
 	return nil
+}
+
+// commitSegmentChangeGroup also finishes interrupted publishes behind the
+// startup barrier, before DataView reconstruction. An already-started publish
+// must finish even when readiness has regressed: its parents may be retired.
+func (m *meta) commitSegmentChangeGroup(ctx context.Context, g *model.SegmentChangeGroup, commitTs uint64, view *viewpb.DataViewOfCollection, extraOperators ...UpdateOperator) error {
+	operators := make([]UpdateOperator, 0, len(g.NewSegmentIDs)*2+len(g.SupersededSegmentIDs)+len(extraOperators))
+	for _, id := range g.NewSegmentIDs {
+		if isEmptySegmentChangeOutput(m.GetSegment(ctx, id)) {
+			operators = append(operators, UpdateStatusOperator(id, commonpb.SegmentState_Dropped))
+			continue
+		}
+		operators = append(operators, SetSegmentIsInvisible(id, false))
+		operators = append(operators, UpdateIsImporting(id, false))
+		if g.PartitionStats != nil {
+			operators = append(operators, UpdateSegmentPartitionStatsVersionOperator(id, g.PartitionStats.GetVersion()))
+		}
+		if groupWritesMemberCommitTS(g) {
+			operators = append(operators, UpdateCommitTimestamp(id, commitTs))
+		}
+	}
+	for _, id := range g.SupersededSegmentIDs {
+		operators = append(operators, UpdateStatusOperator(id, commonpb.SegmentState_Dropped))
+		if g.Source == model.SegmentChangeSourceMixCompaction || g.Source == model.SegmentChangeSourceSortCompaction || g.Source == model.SegmentChangeSourceClustering || g.Source == model.SegmentChangeSourceBumpSchema {
+			operators = append(operators, UpdateCompactedOperator(id))
+		}
+	}
+	operators = append(operators, extraOperators...)
+
+	committed := g.Clone()
+	if committed.PartitionStats != nil {
+		committed.PartitionStats.SegmentIDs = nil
+		for _, id := range g.NewSegmentIDs {
+			if !isEmptySegmentChangeOutput(m.GetSegment(ctx, id)) {
+				committed.PartitionStats.SegmentIDs = append(committed.PartitionStats.SegmentIDs, id)
+			}
+		}
+	}
+	committed.State = model.SegmentChangeStateCommitted
+	committed.CommitTS = commitTs
+	committed.CommitTime = time.Now().Unix()
+	groupActions := []metastore.UpdateAction{metastore.SaveSegmentChangeGroup(committed)}
+
+	return m.UpdateSegmentsInfoAndChangeGroupsAndDataView(ctx, view, groupActions, operators...)
 }
 
 // loadableSegmentOf converts a segment into the DataView loadable projection,

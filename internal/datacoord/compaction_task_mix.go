@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -119,6 +120,22 @@ func (t *mixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clu
 
 func (t *mixCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	task := t.GetTaskProto()
+	// Group registration is the durable result anchor. A worker result or
+	// task-meta response can be lost after it commits; resume without asking
+	// the worker to execute the same logical change again.
+	if m, ok := t.meta.(*meta); ok {
+		group, err := m.getCompactionChangeGroup(task)
+		if err != nil {
+			mlog.Warn(m.ctx, "cannot resume compaction change group", mlog.Int64("planID", task.GetPlanID()), mlog.Err(err))
+			return
+		}
+		if group != nil {
+			if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setResultSegments(compactionGroupResultIDs(group, task))); err == nil {
+				t.processMetaSaved()
+			}
+			return
+		}
+	}
 	result, err := cluster.QueryCompaction(task.GetNodeID(), &datapb.CompactionStateRequest{
 		PlanID: task.GetPlanID(),
 	})
@@ -218,7 +235,32 @@ func newMixCompactionTask(t *datapb.CompactionTask,
 }
 
 func (t *mixCompactionTask) processMetaSaved() bool {
-	if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed)); err != nil {
+	if m, ok := t.meta.(*meta); ok {
+		group, err := m.getCompactionChangeGroup(t.GetTaskProto())
+		if err != nil {
+			return false
+		}
+		if group != nil {
+			switch group.State {
+			case model.SegmentChangeStateStaged, model.SegmentChangeStateReady:
+				if _, materialized := group.SortJobs[t.GetTaskID()]; !materialized {
+					return false
+				}
+			case model.SegmentChangeStateFailed, model.SegmentChangeStateAborted:
+				if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(group.FailReason)); err != nil {
+					return false
+				}
+				return true
+			}
+		}
+	}
+	var resultOpts []compactionTaskOpt
+	if m, ok := t.meta.(*meta); ok {
+		if group, err := m.getCompactionChangeGroup(t.GetTaskProto()); err == nil && group != nil {
+			resultOpts = append(resultOpts, setResultSegments(compactionGroupResultIDs(group, t.GetTaskProto())))
+		}
+	}
+	if err := t.updateAndSaveTaskMeta(append(resultOpts, setState(datapb.CompactionTaskState_completed))...); err != nil {
 		mlog.Warn(context.TODO(), "mixCompactionTask failed to proccessMetaSaved", mlog.Err(err))
 		return false
 	}
@@ -246,13 +288,19 @@ func (t *mixCompactionTask) saveSegmentMeta(result *datapb.CompactionPlanResult)
 	notifySegmentIndexBuild(newSegmentIDs...)
 	notifySegmentStatsBuild(newSegmentIDs...)
 
-	// The SegmentMeta mutation is committed (inputs dropped, outputs visible,
-	// manifest versions advanced); schedule an asynchronous DataView snapshot
-	// reconciliation. The recompute runs on the latest SegmentMeta, so it
-	// observes both the output publish and the input retirement in one
-	// projection.
+	// Legacy mutations publish immediately and need an asynchronous snapshot
+	// reconciliation. Staged results leave the inputs live; the group inspector
+	// owns their later DataView publication and retirement.
 	if meta, ok := t.meta.(*meta); ok {
-		meta.recomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
+		group, err := meta.getCompactionChangeGroup(t.GetTaskProto())
+		if err != nil {
+			return err
+		}
+		if group == nil {
+			meta.recomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
+		} else {
+			newSegmentIDs = compactionGroupResultIDs(group, t.GetTaskProto())
+		}
 	}
 
 	err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setResultSegments(newSegmentIDs))
@@ -321,6 +369,26 @@ func (t *mixCompactionTask) Clean() bool {
 }
 
 func (t *mixCompactionTask) doClean() error {
+	if m, ok := t.meta.(*meta); ok {
+		group, err := m.getCompactionChangeGroup(t.GetTaskProto())
+		if err != nil {
+			return err
+		}
+		materialized := false
+		if group != nil {
+			_, materialized = group.SortJobs[t.GetTaskID()]
+		}
+		if group != nil && !group.IsTerminal() && !materialized {
+			group.State = model.SegmentChangeStateAborted
+			group.FailReason = "compaction task canceled before group publication"
+			if err := m.UpdateSegmentChangeGroup(context.TODO(), group); err != nil {
+				return err
+			}
+			if err := m.reclaimSegmentChangeGroup(context.TODO(), group); err != nil {
+				return err
+			}
+		}
+	}
 	err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_cleaned))
 	if err != nil {
 		mlog.Warn(context.TODO(), "mixCompactionTask fail to updateAndSaveTaskMeta", mlog.Err(err))
@@ -384,6 +452,16 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		MaxSize:                   taskProto.GetMaxSize(),
 		JsonParams:                compactionParams,
 		CurrentScalarIndexVersion: t.ievm.ResolveScalarIndexVersion(),
+	}
+	if taskProto.GetType() == datapb.CompactionType_SortCompaction && len(taskProto.GetInputSegments()) == 1 {
+		if m, ok := t.meta.(*meta); ok {
+			if g := m.GetSegmentChangeGroupBySegmentID(m.ctx, taskProto.GetInputSegments()[0]); g != nil && g.AwaitCommitFence {
+				// Pending import rows acquire their effective timestamp at the
+				// commit fence. Their provisional file timestamps must not cause
+				// relative collection TTL to remove rows during preparation.
+				plan.CollectionTtl = 0
+			}
+		}
 	}
 
 	// Both SortCompaction and MixCompaction build text indexes inline and need the analyzer resources in ref mode.

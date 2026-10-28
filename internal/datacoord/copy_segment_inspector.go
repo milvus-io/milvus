@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -288,6 +289,15 @@ func (s *copySegmentInspector) processPending(task CopySegmentTask) {
 // - Logs warnings if drop fails but continues processing other segments
 // - Failed drops will be retried on next inspection cycle
 func (s *copySegmentInspector) processFailed(task CopySegmentTask) {
+	if group := s.meta.producerChangeGroup(model.SegmentChangeSourceCopySegment, task.GetTaskId(), ""); group != nil {
+		if group.State == model.SegmentChangeStateCommitted {
+			return
+		}
+		if err := s.meta.abortProducerChange(s.ctx, group, "copy task failed"); err != nil {
+			mlog.Warn(s.ctx, "cannot reclaim failed copy publication", mlog.FieldTaskID(task.GetTaskId()), mlog.Err(err))
+			return
+		}
+	}
 	// Drop target segments if copy failed
 	for _, mapping := range task.GetIdMappings() {
 		targetSegID := mapping.GetTargetSegmentId()

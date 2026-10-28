@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/importid"
@@ -847,6 +848,20 @@ func (c *importChecker) checkCommittingJob(job ImportJob) {
 }
 
 func (c *importChecker) checkFailedJob(job ImportJob) {
+	if c.meta != nil {
+		for _, source := range []model.SegmentChangeSource{model.SegmentChangeSourceImportJob, model.SegmentChangeSourceCDCReplicated} {
+			for _, g := range c.meta.producerChangeGroups(source, job.GetJobID(), "") {
+				if groupHasCommittedImportFence(g) {
+					mlog.Warn(c.ctx, "refusing failed-job cleanup after an import WAL commit", mlog.FieldJobID(job.GetJobID()))
+					return
+				}
+				if err := c.meta.abortProducerChange(c.ctx, g, "import job failed before WAL commit"); err != nil {
+					mlog.Warn(c.ctx, "cannot reclaim failed import group", mlog.FieldJobID(job.GetJobID()), mlog.Err(err))
+					return
+				}
+			}
+		}
+	}
 	c.tryFailingTasks(job)
 }
 

@@ -6401,6 +6401,7 @@ type dataCoordConfig struct {
 	BrokerTimeout                  ParamItem `refreshable:"false"`
 
 	// segment change staging
+	SegmentChangeEnabled         ParamItem `refreshable:"true"`
 	SegmentChangeStagingTimeout  ParamItem `refreshable:"true"`
 	SegmentChangeGroupMaxMembers ParamItem `refreshable:"true"`
 
@@ -7594,6 +7595,15 @@ Startup continuously schedules bounded concurrent reads and retries failed reads
 		Export:       true,
 	}
 	p.MinSegmentNumRowsToEnableIndex.Init(base.mgr)
+
+	p.SegmentChangeEnabled = ParamItem{
+		Key:          "dataCoord.segmentChange.enabled",
+		Version:      "3.0.4",
+		DefaultValue: "false",
+		Doc:          "Opt in new segment membership changes to staged publication. Existing groups always finish after disabling this switch. Flush keeps its synchronous version handshake; content-only updates retain their existing protocol.",
+		Export:       true,
+	}
+	p.SegmentChangeEnabled.Init(base.mgr)
 
 	p.SegmentChangeStagingTimeout = ParamItem{
 		Key:          "dataCoord.segmentChange.stagingTimeout",

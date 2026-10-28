@@ -98,6 +98,24 @@ type CopySegmentMeta interface {
 	RemoveTask(ctx context.Context, taskID int64) error
 }
 
+// Snapshot the scalar admission state without cloning large restore plans.
+// L0 must retain deletes while a copy may still introduce historical rows.
+func (m *copySegmentMeta) activeCopyCollectionIDs() []int64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	seen := make(map[int64]bool)
+	for _, job := range m.jobs {
+		if job.GetState() == datapb.CopySegmentJobState_CopySegmentJobPending || job.GetState() == datapb.CopySegmentJobState_CopySegmentJobExecuting {
+			seen[job.GetCollectionId()] = true
+		}
+	}
+	ids := make([]int64, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 // ===========================================================================================
 // Task Collection Management
 // ===========================================================================================

@@ -114,6 +114,15 @@ func (m *meta) loadSegmentChangeGroups(ctx context.Context) (map[int64]*model.Se
 			superseded[id] = group.GroupID
 		}
 	}
+	for _, g := range byID {
+		if g.PreviousGroupID == 0 {
+			continue
+		}
+		previous := byID[g.PreviousGroupID]
+		if previous == nil || previous.CollectionID != g.CollectionID || previous.Source != g.Source || previous.SourceJobID != g.SourceJobID || previous.VChannel != g.VChannel || previous.SubgroupOrdinal+1 != g.SubgroupOrdinal {
+			return nil, nil, nil, merr.WrapErrDataIntegrityMsg("invalid predecessor of segment change subgroup %d", g.GroupID)
+		}
+	}
 	return byID, staged, superseded, nil
 }
 
@@ -198,6 +207,9 @@ func (m *meta) validateSegmentChangeGroupOwnershipLocked(group *model.SegmentCha
 // break the invariant at the persistence layer. The caller holds segMu.
 func (m *meta) validateSegmentChangeGroupOwnershipAgainstLocked(group *model.SegmentChangeGroup, staged, superseded map[int64]int64) error {
 	for _, id := range group.NewSegmentIDs {
+		if seg := m.segments.GetSegment(id); seg != nil && ((!seg.GetIsInvisible() && !seg.GetIsImporting() && !isEmptySegmentChangeOutput(seg)) || seg.GetCollectionID() != group.CollectionID || seg.GetLevel() == datapb.SegmentLevel_L0) {
+			return merr.WrapErrDataIntegrityMsg("segment change group %d cannot stage visible, foreign, or L0 member %d", group.GroupID, id)
+		}
 		if owner, ok := staged[id]; ok {
 			return merr.WrapErrDataIntegrityMsg(
 				"segment %d is already staged by segment change group %d", id, owner)
@@ -249,6 +261,16 @@ func (m *meta) validateSegmentChangeGroupTransitionLocked(group *model.SegmentCh
 		return merr.WrapErrDataIntegrityMsg(
 			"illegal segment change group %d transition %s -> %s",
 			group.GroupID, current.State, group.State)
+	}
+	if group.State == model.SegmentChangeStateFailed || group.State == model.SegmentChangeStateAborted {
+		if groupHasCommittedImportFence(current) {
+			return merr.WrapErrDataIntegrityMsg("cannot abandon WAL-committed import group %d", group.GroupID)
+		}
+		for _, id := range current.NewSegmentIDs {
+			if seg := m.segments.GetSegment(id); seg != nil && seg.GetState() != commonpb.SegmentState_Dropped && !seg.GetIsInvisible() {
+				return merr.WrapErrDataIntegrityMsg("segment change group %d cannot fail or abort after member %d became visible", group.GroupID, id)
+			}
+		}
 	}
 	// C17: only the caller-owned member sets are compared. SupersededL0SegmentIDs
 	// is meta-computed at registration (stampSupersededL0ExemptionsLocked) and a
@@ -399,30 +421,54 @@ func (m *meta) HasStagedSegment(ctx context.Context, collectionID, segmentID int
 	return group != nil && (collectionID <= 0 || group.CollectionID == collectionID)
 }
 
-// aliveStagedMembers returns the set of segments currently staged by an ALIVE
-// (STAGED/READY) group of collectionID (collectionID <= 0 returns members of
-// every collection). The legacy view paths use it to exclude staged members
-// from every read surface — including ones that do not filter IsInvisible
-// (e.g. getEarliestSegmentDMLPos, design R10) — without per-segment locking.
-// Staged members are invisible by construction, but a view that only filters
-// IsImporting would otherwise leak their DML position / partition into the
-// read set.
-func (m *meta) aliveStagedMembers(ctx context.Context, collectionID int64) typeutil.UniqueSet {
+// unpublishedSegmentMembers covers ALIVE and FAILED/ABORTED members awaiting
+// reclamation. Releasing ALIVE ownership must not expose such members as
+// growing segments in the legacy view during a cleanup retry.
+func (m *meta) unpublishedSegmentMembers(ctx context.Context, collectionID int64) typeutil.UniqueSet {
 	m.segMu.RLock()
 	defer m.segMu.RUnlock()
-	members := typeutil.NewUniqueSet()
-	for _, g := range m.segmentChangeGroups {
-		if collectionID > 0 && g.CollectionID != collectionID {
-			continue
-		}
-		if g.State != model.SegmentChangeStateStaged && g.State != model.SegmentChangeStateReady {
-			continue
-		}
-		for _, id := range g.NewSegmentIDs {
-			members.Insert(id)
+	return m.segmentChangeExclusionsLocked(collectionID, false)
+}
+
+// stagedSegmentMembers is the async-work set: terminal groups remain excluded
+// from queries, but must not acquire new stats work while awaiting reclamation.
+func (m *meta) stagedSegmentMembers(collectionID int64) typeutil.UniqueSet {
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
+	ids := typeutil.NewUniqueSet()
+	for id, groupID := range m.stagedSegmentToGroup {
+		if g := m.segmentChangeGroups[groupID]; g != nil && (collectionID <= 0 || g.CollectionID == collectionID) {
+			ids.Insert(id)
 		}
 	}
-	return members
+	return ids
+}
+
+// segmentChangeExclusionsLocked optionally protects the still-visible parents
+// from a second compaction while their replacement is staged. The reservation
+// check under segMu remains authoritative if registration races selection.
+func (m *meta) segmentChangeExclusionsLocked(collectionID int64, includeParents bool) typeutil.UniqueSet {
+	ids := typeutil.NewUniqueSet()
+	for _, g := range m.segmentChangeGroups {
+		if (collectionID > 0 && g.CollectionID != collectionID) || g.State == model.SegmentChangeStateCommitted {
+			continue
+		}
+		ids.Insert(g.UnpublishedSegmentIDs()...)
+		if includeParents && !g.IsTerminal() {
+			for _, id := range g.SupersededSegmentIDs {
+				if !containsInt64(g.SupersededL0SegmentIDs, id) {
+					ids.Insert(id)
+				}
+			}
+		}
+	}
+	return ids
+}
+
+func (m *meta) segmentChangeCompactionExclusions(collectionID int64) typeutil.UniqueSet {
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
+	return m.segmentChangeExclusionsLocked(collectionID, true)
 }
 
 // GetSegmentChangeGroupByReferencedSegment returns the ALIVE group that
@@ -484,6 +530,9 @@ func (m *meta) DeleteSegmentChangeGroup(ctx context.Context, collectionID, group
 		return merr.WrapErrDataIntegrityMsg(
 			"cannot delete non-terminal segment change group %d (state %s); abort or fail it first",
 			groupID, current.State)
+	}
+	if err := m.validateSegmentChangeGroupDeletionLocked(current, nil); err != nil {
+		return err
 	}
 	// C9: the delete key is derived from the RECORD's collectionID, not the
 	// caller's parameter, so a mismatched collectionID cannot strand the etcd
@@ -566,14 +615,27 @@ func (m *meta) UpdateSegmentsInfoAndChangeGroupsAndDataView(ctx context.Context,
 }
 
 func (m *meta) updateSegmentsInfoAndChangeGroups(ctx context.Context, dataView *viewpb.DataViewOfCollection, groupActions []metastore.UpdateAction, operators ...UpdateOperator) error {
+	m.segMu.Lock()
+	defer m.segMu.Unlock()
+	return m.updateSegmentsInfoAndChangeGroupsLocked(ctx, dataView, groupActions, operators...)
+}
+
+// updateSegmentsInfoAndChangeGroupsLocked is shared with compaction completion,
+// whose input validation and output registration already hold segMu.
+func (m *meta) updateSegmentsInfoAndChangeGroupsLocked(ctx context.Context, dataView *viewpb.DataViewOfCollection, groupActions []metastore.UpdateAction, operators ...UpdateOperator) error {
+	return m.updateSegmentsInfoAndChangeGroupsMaterializedLocked(ctx, dataView, groupActions, nil, operators...)
+}
+
+// replacement is constructed only by completeGroupSortLocked after validating
+// the input claim and new output ownership. Public transitions cannot change
+// membership or the durable producer identity.
+func (m *meta) updateSegmentsInfoAndChangeGroupsMaterializedLocked(ctx context.Context, dataView *viewpb.DataViewOfCollection, groupActions []metastore.UpdateAction, replacement *model.SegmentChangeGroup, operators ...UpdateOperator) error {
 	for _, action := range groupActions {
 		if _, ok := action.Entry.(metastore.SegmentChangeGroupEntry); !ok {
 			return merr.WrapErrServiceInternalMsg(
 				"UpdateSegmentsInfoAndChangeGroups only accepts segment change group actions, got %T", action.Entry)
 		}
 	}
-	m.segMu.Lock()
-	defer m.segMu.Unlock()
 	m.ensureSegmentChangeGroupStoreLocked()
 
 	// Semantic validation of every group action, under segMu, before any write.
@@ -640,6 +702,8 @@ func (m *meta) updateSegmentsInfoAndChangeGroups(ctx context.Context, dataView *
 					}
 					claimedSuperseded[id] = entry.Group.GroupID
 				}
+			} else if replacement != nil && replacement == entry.Group {
+				// Validated by the sort materialization caller under this segMu.
 			} else if err := m.validateSegmentChangeGroupTransitionLocked(entry.Group); err != nil {
 				return err
 			} else {
@@ -672,6 +736,23 @@ func (m *meta) updateSegmentsInfoAndChangeGroups(ctx context.Context, dataView *
 		operator(updatePack)
 		if updatePack.err != nil {
 			return updatePack.err
+		}
+	}
+	if err := m.validateSegmentChangeVisibilityLocked(updatePack.segments, groupActions); err != nil {
+		return err
+	}
+	for _, action := range groupActions {
+		entry := action.Entry.(metastore.SegmentChangeGroupEntry)
+		if action.Type == metastore.ActionDelete {
+			if err := m.validateSegmentChangeGroupDeletionLocked(m.segmentChangeGroups[entry.GroupID], updatePack.segments); err != nil {
+				return err
+			}
+		} else if m.segmentChangeGroups[entry.Group.GroupID] == nil {
+			for _, id := range entry.Group.NewSegmentIDs {
+				if seg := updatePack.segments[id]; seg != nil && ((!seg.GetIsInvisible() && !isEmptySegmentChangeOutput(seg)) || seg.GetCollectionID() != entry.Group.CollectionID || seg.GetLevel() == datapb.SegmentLevel_L0) {
+					return merr.WrapErrDataIntegrityMsg("segment change group %d registration must keep member %d invisible in its own collection", entry.Group.GroupID, id)
+				}
+			}
 		}
 	}
 	if err := commitL0ManifestUpdates(ctx, m.manifestCommitExecutor, updatePack.l0ManifestUpdates); err != nil {
@@ -730,11 +811,24 @@ func (m *meta) updateSegmentsInfoAndChangeGroups(ctx context.Context, dataView *
 	// write only SaveSegmentChangeGroup(COMMITTED): the group reaches a
 	// terminal state with no visible replacement. The design's failure matrix
 	// requires the caller to mark the group FAILED here.
+	viewMembers := make(map[int64]struct{})
+	if dataView != nil {
+		for _, shard := range dataView.GetShards() {
+			for _, partition := range shard.GetPartitions() {
+				for _, id := range partition.GetSegmentIds() {
+					viewMembers[id] = struct{}{}
+				}
+			}
+		}
+	}
 	for _, action := range groupActions {
 		entry, ok := action.Entry.(metastore.SegmentChangeGroupEntry)
 		if !ok || action.Type != metastore.ActionUpdate || entry.Group == nil ||
 			entry.Group.State != model.SegmentChangeStateCommitted {
 			continue
+		}
+		if dataView != nil && dataView.GetCollectionId() != entry.Group.CollectionID {
+			return merr.WrapErrDataIntegrityMsg("segment change group %d publish: DataView belongs to another collection", entry.Group.GroupID)
 		}
 		for _, id := range entry.Group.NewSegmentIDs {
 			segment, ok := updatePack.segments[id]
@@ -743,10 +837,30 @@ func (m *meta) updateSegmentsInfoAndChangeGroups(ctx context.Context, dataView *
 					"segment change group %d publish: member %d is absent from meta or was dropped by a stale operation (externally dropped?)",
 					entry.Group.GroupID, id)
 			}
+			if segment.GetCollectionID() != entry.Group.CollectionID || segment.GetLevel() == datapb.SegmentLevel_L0 {
+				return merr.WrapErrDataIntegrityMsg("segment change group %d publish: member %d is not a loadable member of this collection", entry.Group.GroupID, id)
+			}
+			if isEmptySegmentChangeOutput(segment) {
+				if segment.GetState() != commonpb.SegmentState_Dropped {
+					return merr.WrapErrDataIntegrityMsg("segment change group %d publish: zero-row output %d must be retired", entry.Group.GroupID, id)
+				}
+				if _, present := viewMembers[id]; present {
+					return merr.WrapErrDataIntegrityMsg("segment change group %d publish: zero-row output %d must be absent from DataView", entry.Group.GroupID, id)
+				}
+				continue
+			}
+			if segment.GetNumOfRows() <= 0 || segment.GetState() == commonpb.SegmentState_Dropped || segment.GetIsImporting() {
+				return merr.WrapErrDataIntegrityMsg("segment change group %d publish: member %d is not a nonempty loadable output", entry.Group.GroupID, id)
+			}
 			if segment.GetIsInvisible() {
 				return merr.WrapErrDataIntegrityMsg(
 					"segment change group %d publish: member %d is still invisible (no visibility flip in this write)",
 					entry.Group.GroupID, id)
+			}
+			if dataView != nil {
+				if _, present := viewMembers[id]; !present || dataView.GetCollectionId() != entry.Group.CollectionID {
+					return merr.WrapErrDataIntegrityMsg("segment change group %d publish: nonempty output %d must be present in its collection DataView", entry.Group.GroupID, id)
+				}
 			}
 		}
 		// C (chyezh): a COMMITTED publish must also retire every superseded
@@ -755,6 +869,9 @@ func (m *meta) updateSegmentsInfoAndChangeGroups(ctx context.Context, dataView *
 		// never repair it. Each parent must either already be Dropped in meta
 		// (the idempotent skip) or be dropped by this write's operators.
 		for _, id := range entry.Group.SupersededSegmentIDs {
+			if inMeta := m.segments.GetSegment(id); inMeta != nil && inMeta.GetCollectionID() != entry.Group.CollectionID {
+				return merr.WrapErrDataIntegrityMsg("segment change group %d publish: superseded parent %d belongs to another collection", entry.Group.GroupID, id)
+			}
 			// tedxu: a superseded parent that is gone from meta entirely — the
 			// drop/truncate + GC cycle ran while the group was STAGED/READY —
 			// is already retired; nil (GC'd) and Dropped are both idempotent
@@ -842,6 +959,27 @@ func (m *meta) updateSegmentsInfoAndChangeGroups(ctx context.Context, dataView *
 	// TERMINAL group actions (COMMITTED publish / FAILED / ABORTED) come LAST:
 	// the kv dispatch commit-marks them, so the fallback flush lands them after
 	// every non-commit op as the visibility marker.
+	var publishedStats []*datapb.PartitionStatsInfo
+	for _, action := range groupActions {
+		entry, ok := action.Entry.(metastore.SegmentChangeGroupEntry)
+		if ok && entry.Group != nil && entry.Group.State == model.SegmentChangeStateCommitted && entry.Group.PartitionStats != nil {
+			info := entry.Group.Clone().PartitionStats
+			info.SegmentIDs = nil
+			for _, id := range entry.Group.NewSegmentIDs {
+				if seg := updatePack.segments[id]; seg != nil && !isEmptySegmentChangeOutput(seg) {
+					info.SegmentIDs = append(info.SegmentIDs, id)
+				}
+			}
+			publishedStats = append(publishedStats, info)
+		}
+	}
+	if len(publishedStats) > 0 {
+		m.partitionStatsMeta.Lock()
+		defer m.partitionStatsMeta.Unlock()
+		for _, info := range publishedStats {
+			actions = append(actions, metastore.AddPartitionStats(info), metastore.SavePartitionStatsVersion(info.GetCollectionID(), info.GetPartitionID(), info.GetVChannel(), info.GetVersion()))
+		}
+	}
 	for _, action := range groupActions {
 		entry, ok := action.Entry.(metastore.SegmentChangeGroupEntry)
 		if !ok || action.Type != metastore.ActionUpdate || entry.Group == nil || !entry.Group.IsTerminal() {
@@ -888,6 +1026,9 @@ func (m *meta) updateSegmentsInfoAndChangeGroups(ctx context.Context, dataView *
 	// emits segment metrics as segments are installed.
 	for id, s := range updatePack.segments {
 		m.segments.SetSegment(id, s)
+	}
+	for _, info := range publishedStats {
+		m.partitionStatsMeta.applySavedPartitionStatsLocked(info, info.GetVersion())
 	}
 	for _, action := range groupActions {
 		m.applySegmentChangeGroupActionMemoryLocked(action)

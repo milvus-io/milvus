@@ -15,6 +15,7 @@ import (
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore"
 	datacoordkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -22,6 +23,115 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+// Flush keeps its synchronous SN handoff while opt-in compaction changes the
+// subsequent physical layout through a separate compact_version publication.
+func (s *ServerSuite) TestSegmentChangeFlushToMix() {
+	t := s.T()
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "true")
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.EnableSortCompaction, "false")
+	ctx := t.Context()
+	_, manager := s.setupFlushVersionCatalog()
+	m := s.testServer.meta
+	m.dataViewManager = manager
+	schema := readinessVectorSchema()
+	m.AddCollection(&collectionInfo{ID: 100, Schema: schema, VChannelNames: []string{"ch1"}})
+	req := s.addFlushVersionSegment(10, 10)
+	firstFlush := s.flushVersion(req)
+	s.flushVersion(s.addFlushVersionSegment(20, 10))
+	task := &datapb.CompactionTask{
+		PlanID: 5000, CollectionID: 100, PartitionID: 10, Channel: "ch1",
+		InputSegments: []int64{10, 20}, Type: datapb.CompactionType_MixCompaction, Schema: schema,
+	}
+	_, err := m.CompleteCompactionMutation(ctx, task, &datapb.CompactionPlanResult{
+		PlanID: 5000, Segments: []*datapb.CompactionSegment{{
+			SegmentID: 30, NumOfRows: 20,
+			InsertLogs: []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 30, EntriesNum: 20}}}},
+		}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, commonpb.SegmentState_Flushed, m.GetSegment(ctx, 10).GetState())
+	require.True(t, proto.Equal(firstFlush, s.flushVersion(req)), "SN retry must keep the original seal binding while a group waits")
+	before, err := manager.Latest(ctx, 100)
+	require.NoError(t, err)
+	defer before.Deref()
+	inspector := newSegmentChangeInspector(ctx, m, newMockAllocator(t))
+	inspector.checkAllGroups(ctx)
+	inspector.checkAllGroups(ctx)
+	require.Equal(t, model.SegmentChangeStateCommitted, m.GetSegmentChangeGroup(ctx, 100, 5000).State)
+	require.Equal(t, commonpb.SegmentState_Dropped, m.GetSegment(ctx, 10).GetState())
+	require.True(t, proto.Equal(firstFlush, s.flushVersion(req)), "SN retry after compaction must not republish the retired source")
+	after, err := manager.Latest(ctx, 100)
+	require.NoError(t, err)
+	defer after.Deref()
+	require.Equal(t, before.Version().GetStreamingVersion(), after.Version().GetStreamingVersion())
+	require.Equal(t, before.Version().GetCompactVersion()+1, after.Version().GetCompactVersion())
+	var ids []int64
+	for _, shard := range after.DataView().GetShards() {
+		for _, partition := range shard.GetPartitions() {
+			ids = append(ids, partition.GetSegmentIds()...)
+		}
+	}
+	require.Equal(t, []int64{30}, ids)
+}
+
+func (s *ServerSuite) TestSegmentChangePreservesSortEnabledFlushHandoff() {
+	t := s.T()
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "true")
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.EnableCompaction, "true")
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.EnableSortCompaction, "true")
+	_, manager := s.setupFlushVersionCatalog()
+	req := s.addFlushVersionSegment(10, 10)
+	version := s.flushVersion(req)
+	require.NotNil(t, version)
+	seg := s.testServer.meta.GetSegment(t.Context(), 10)
+	require.True(t, seg.GetIsInvisible())
+	require.True(t, proto.Equal(version, seg.GetSealedAtDataVersion()))
+	require.False(t, s.testServer.meta.HasStagedSegment(t.Context(), 100, 10))
+	ref, err := manager.Latest(t.Context(), 100)
+	require.NoError(t, err)
+	defer ref.Deref()
+	require.Equal(t, []int64{10}, ref.DataView().GetShards()[0].GetPartitions()[0].GetSegmentIds())
+	require.True(t, proto.Equal(version, s.flushVersion(req)))
+}
+
+func (s *ServerSuite) TestSegmentChangeFlushToSort() {
+	t := s.T()
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "true")
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.EnableCompaction, "true")
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.EnableSortCompaction, "true")
+	_, manager := s.setupFlushVersionCatalog()
+	m := s.testServer.meta
+	m.dataViewManager = manager
+	schema := readinessVectorSchema()
+	m.AddCollection(&collectionInfo{ID: 100, Schema: schema, VChannelNames: []string{"ch1"}})
+	req := s.addFlushVersionSegment(10, 10)
+	seal := s.flushVersion(req)
+	_, err := m.CompleteCompactionMutation(t.Context(), &datapb.CompactionTask{
+		PlanID: 5000, CollectionID: 100, PartitionID: 10, Channel: "ch1",
+		Type: datapb.CompactionType_SortCompaction, InputSegments: []int64{10}, Schema: schema,
+	}, &datapb.CompactionPlanResult{
+		PlanID:   5000,
+		Segments: []*datapb.CompactionSegment{{SegmentID: 20, NumOfRows: 10, IsSorted: true, InsertLogs: []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 20, EntriesNum: 10}}}}}},
+	})
+	require.NoError(t, err)
+	_, err = manager.RecomputeNow(t.Context(), 100, m.loadableProjection)
+	require.NoError(t, err)
+	ref, err := manager.Latest(t.Context(), 100)
+	require.NoError(t, err)
+	require.Equal(t, []int64{10}, ref.DataView().GetShards()[0].GetPartitions()[0].GetSegmentIds())
+	ref.Deref()
+	inspector := newSegmentChangeInspector(t.Context(), m, newMockAllocator(t))
+	inspector.checkAllGroups(t.Context())
+	inspector.checkAllGroups(t.Context())
+	require.Equal(t, model.SegmentChangeStateCommitted, m.GetSegmentChangeGroup(t.Context(), 100, 5000).State)
+	ref, err = manager.Latest(t.Context(), 100)
+	require.NoError(t, err)
+	defer ref.Deref()
+	require.Equal(t, []int64{20}, ref.DataView().GetShards()[0].GetPartitions()[0].GetSegmentIds())
+	require.Equal(t, seal.GetStreamingVersion(), ref.Version().GetStreamingVersion())
+	require.True(t, proto.Equal(seal, s.flushVersion(req)))
+}
 
 func (s *ServerSuite) setupFlushVersionCatalog() (*datacoordkv.Catalog, dataview.Manager) {
 	catalog := datacoordkv.NewCatalog(NewMetaMemoryKV(), "", "")

@@ -43,8 +43,7 @@ import (
 //     contention, monotonicity conflict, catalog retry exhaustion) leaves the
 //     group READY for the next round.
 //
-// Member reclamation for FAILED/ABORTED groups is the reconciler's job (PR-C),
-// not this inspector's.
+// FAILED/ABORTED members are reclaimed here and during startup recovery.
 //
 // The inspector is nil-safe by construction: with no persisted groups the loop
 // is a no-op, and every meta access guards nil (a dataview-less DataCoord runs
@@ -111,6 +110,8 @@ func (i *segmentChangeInspector) checkAllGroups(ctx context.Context) {
 			i.evaluateStaged(ctx, g)
 		case model.SegmentChangeStateReady:
 			i.tryPublish(ctx, g)
+		case model.SegmentChangeStateFailed, model.SegmentChangeStateAborted:
+			i.reclaimGroup(ctx, g)
 		}
 	}
 }
@@ -139,9 +140,12 @@ func (i *segmentChangeInspector) evaluateStaged(ctx context.Context, g *model.Se
 	// First pass: unconvergeable conditions (fail-fast, never a wait).
 	for _, id := range g.NewSegmentIDs {
 		seg := i.mt.GetSegment(ctx, id)
-		if seg == nil || seg.GetState() == commonpb.SegmentState_Dropped {
+		if seg == nil || (seg.GetState() == commonpb.SegmentState_Dropped && !isEmptySegmentChangeOutput(seg)) {
 			i.failGroup(ctx, g, fmt.Sprintf("member %d externally dropped", id))
 			return
+		}
+		if isEmptySegmentChangeOutput(seg) {
+			continue
 		}
 		// C23: a schema bump landing while a group is staged is UNCONVERGEABLE —
 		// the bump materialization only targets visible segments, so nothing can
@@ -161,7 +165,7 @@ func (i *segmentChangeInspector) evaluateStaged(ctx context.Context, g *model.Se
 			// the next round's unconvergeable scan fail-fast (FAILED).
 			return
 		}
-		if !readiness.Ready(seg) {
+		if !isEmptySegmentChangeOutput(seg) && !readiness.Ready(seg) {
 			if i.stagingTimedOut(g) {
 				i.abortGroup(ctx, g, "staging timeout")
 				return
@@ -193,6 +197,10 @@ func (i *segmentChangeInspector) evaluateStaged(ctx context.Context, g *model.Se
 //   - a member gone from meta or Dropped -> FAILED (unconvergeable);
 //   - every other error is transient -> keep READY, retry next round.
 func (i *segmentChangeInspector) tryPublish(ctx context.Context, g *model.SegmentChangeGroup) {
+	if g.AwaitCommitFence && g.CommitTS == 0 && i.stagingTimedOut(g) {
+		i.abortGroup(ctx, g, "import commit fence timeout")
+		return
+	}
 	err := i.mt.publishGroup(ctx, g, i.alloc)
 	if err == nil {
 		return
@@ -233,7 +241,7 @@ func (i *segmentChangeInspector) groupNoLongerReady(ctx context.Context, g *mode
 	}
 	for _, id := range g.NewSegmentIDs {
 		seg := i.mt.GetSegment(ctx, id)
-		if seg != nil && !readiness.Ready(seg) {
+		if seg != nil && !isEmptySegmentChangeOutput(seg) && !readiness.Ready(seg) {
 			return true
 		}
 	}
@@ -267,6 +275,9 @@ func (i *segmentChangeInspector) regressToStaged(ctx context.Context, g *model.S
 func (i *segmentChangeInspector) groupUnconvergeable(ctx context.Context, g *model.SegmentChangeGroup) bool {
 	for _, id := range g.NewSegmentIDs {
 		seg := i.mt.GetSegment(ctx, id)
+		if isEmptySegmentChangeOutput(seg) {
+			continue
+		}
 		if seg == nil || seg.GetState() == commonpb.SegmentState_Dropped {
 			return true
 		}
@@ -285,6 +296,9 @@ func (i *segmentChangeInspector) groupUnconvergeable(ctx context.Context, g *mod
 // stagingTimedOut reports whether the group exceeded SegmentChangeStagingTimeout
 // since CreateTS (Unix seconds). A zero CreateTS (legacy record) never times out.
 func (i *segmentChangeInspector) stagingTimedOut(g *model.SegmentChangeGroup) bool {
+	if groupHasCommittedImportFence(g) {
+		return false
+	}
 	if g.CreateTS <= 0 {
 		return false
 	}
@@ -315,9 +329,17 @@ func (i *segmentChangeInspector) applyTerminalTransition(ctx context.Context, g 
 			mlog.Err(err))
 		return
 	}
+	i.reclaimGroup(ctx, terminal)
 	mlog.Info(ctx, "segment change group reached terminal state",
 		mlog.Int64("groupID", g.GroupID),
 		mlog.Int64("collectionID", g.CollectionID),
 		mlog.String("state", state.String()),
 		mlog.String("reason", reason))
+}
+
+func (i *segmentChangeInspector) reclaimGroup(ctx context.Context, g *model.SegmentChangeGroup) {
+	if err := i.mt.reclaimSegmentChangeGroup(ctx, g); err != nil {
+		mlog.Warn(ctx, "segment change member reclamation failed, will retry",
+			mlog.Int64("groupID", g.GroupID), mlog.Err(err))
+	}
 }
