@@ -273,6 +273,7 @@ class Op(Enum):
     create_collection = "create_collection"
     create_partition = "create_partition"
     insert = "insert"
+    recovery_continuation = "recovery_continuation"
     insert_freshness = "insert_freshness"
     upsert = "upsert"
     upsert_freshness = "upsert_freshness"
