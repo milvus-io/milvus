@@ -5,10 +5,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
@@ -534,6 +536,78 @@ func TestWaitVChannelsAckedOnACollectedBroadcast(t *testing.T) {
 		rebuilt, ok := bm.getBroadcastTaskByID(broadcastID)
 		require.True(t, ok)
 		assert.Equal(t, []string{source}, rebuilt.UnackedVChannels([]string{source}))
+	})
+
+	t.Run("a control-channel duplicate racing the removal of its tombstone does not rebuild it", func(t *testing.T) {
+		const control = "p0_vcchan"
+		bm := newWaitTestManager(t)
+		defer bm.Close()
+		recorded := atomic.NewBool(false)
+		recordReads := atomic.NewInt32(0)
+		registry.RegisterAppendFirstReplicaRecordedChecker(func(_ context.Context, vchannel string) (bool, error) {
+			recordReads.Inc()
+			return recorded.Load() && vchannel == source, nil
+		})
+		msg := createNewSplitShardBroadcastMsg([]string{source, target, control}, source).WithBroadcastID(broadcastID)
+		for i, vchannel := range []string{source, target} {
+			require.NoError(t, bm.Ack(context.Background(), replicatedReplicaOf(msg, vchannel, uint64(200+i))))
+		}
+		task, ok := bm.getBroadcastTaskByID(broadcastID)
+		require.True(t, ok)
+		// The callback completed: it wrote the record, and the task is a
+		// tombstone, the only state the tombstone GC ever removes.
+		require.NoError(t, task.MarkAckCallbackDone(context.Background()))
+		require.False(t, task.isLive())
+		recorded.Store(true)
+		recordReads.Store(0)
+
+		// The GC wins the race: the tombstone is found by the ack's lookup and
+		// removed before the ack takes its next step.
+		var origin func(*broadcastTaskManager, uint64) (*broadcastTask, bool)
+		removed := false
+		patch := mockey.Mock((*broadcastTaskManager).getBroadcastTaskByID).To(func(bm *broadcastTaskManager, id uint64) (*broadcastTask, bool) {
+			t, ok := origin(bm, id)
+			if ok && id == broadcastID && !removed {
+				removed = true
+				bm.removeBroadcastTask(broadcastID)
+			}
+			return t, ok
+		}).Origin(&origin).Build()
+		defer patch.UnPatch()
+
+		require.NoError(t, bm.Ack(context.Background(), replicatedReplicaOf(msg, control, 400)))
+		require.True(t, removed, "the hook must have removed the tombstone after the lookup found it")
+		_, ok = bm.getBroadcastTaskByID(broadcastID)
+		assert.False(t, ok, "a control-channel duplicate must not rebuild a task whose tombstone was just collected")
+		assert.Empty(t, bm.getIncompleteBroadcastTasks(), "nothing is left for a force promote to re-drive")
+		assert.Zero(t, recordReads.Load(), "a replica whose task was found is acked without reading the record")
+
+		// With the tombstone gone, the next duplicate reads the record and is dropped.
+		require.NoError(t, bm.Ack(context.Background(), replicatedReplicaOf(msg, control, 401)))
+		_, ok = bm.getBroadcastTaskByID(broadcastID)
+		assert.False(t, ok)
+		assert.Empty(t, bm.getIncompleteBroadcastTasks())
+		assert.Equal(t, int32(1), recordReads.Load())
+	})
+
+	t.Run("a task rebuilt by another replica while the record is read is reused", func(t *testing.T) {
+		bm := newWaitTestManager(t)
+		defer bm.Close()
+		msg := createNewSplitShardBroadcastMsg([]string{source, target}, source).WithBroadcastID(broadcastID)
+		nested := atomic.NewBool(false)
+		registry.RegisterAppendFirstReplicaRecordedChecker(func(ctx context.Context, _ string) (bool, error) {
+			// While the target's ack reads the record, the source's ack lands and
+			// rebuilds the task first.
+			if nested.CompareAndSwap(false, true) {
+				require.NoError(t, bm.Ack(ctx, replicatedReplicaOf(msg, source, 500)))
+			}
+			return false, nil
+		})
+		require.NoError(t, bm.Ack(context.Background(), replicatedReplicaOf(msg, target, 501)))
+		task, ok := bm.getBroadcastTaskByID(broadcastID)
+		require.True(t, ok)
+		assert.Empty(t, task.UnackedVChannels([]string{source, target}), "both acks land in the one task")
+		assert.True(t, nested.Load())
 	})
 
 	t.Run("a replica of a task still here is acked into it whatever the record says", func(t *testing.T) {

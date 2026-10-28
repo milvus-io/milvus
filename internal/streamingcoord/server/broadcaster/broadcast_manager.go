@@ -345,17 +345,10 @@ func (bm *broadcastTaskManager) Ack(ctx context.Context, msg message.ImmutableMe
 	ctx, cancel := contextutil.MergeContext(ctx, bm.ctx)
 	defer cancel()
 
-	if bm.isLateReplicaOfRecordedBroadcast(ctx, msg) {
-		bm.Logger().Info(ctx,
-			"ignored the ack of a late replica: its broadcast already completed and was collected on this cluster",
-			mlog.FieldBroadcastID(msg.BroadcastHeader().BroadcastID),
-			mlog.FieldVChannel(msg.VChannel()))
-		return nil
-	}
-	t, ok := bm.getOrCreateBroadcastTask(msg)
+	t, ok := bm.getOrCreateBroadcastTask(ctx, msg)
 	if !ok {
 		bm.Logger().Debug(ctx,
-			"task is tombstone, ignored the ack request",
+			"no live task takes the ack, ignored the ack request",
 			mlog.FieldBroadcastID(msg.BroadcastHeader().BroadcastID),
 			mlog.String("vchannel", msg.VChannel()))
 		return nil
@@ -517,15 +510,15 @@ func (bm *broadcastTaskManager) appendFirstReplicasRecorded(ctx context.Context,
 //
 // A broadcast whose task is still here is not late, whatever the record says:
 // its ack goes to that task as usual.
+//
+// Only meaningful once the caller has observed that the task is missing: a
+// replica of a task still here is acked into it whatever the record says.
 func (bm *broadcastTaskManager) isLateReplicaOfRecordedBroadcast(ctx context.Context, msg message.ImmutableMessage) bool {
 	if msg.ReplicateHeader() == nil {
 		return false
 	}
 	bh := msg.BroadcastHeader()
 	if len(bh.AppendFirstVChannels) == 0 {
-		return false
-	}
-	if _, ok := bm.getBroadcastTaskByID(bh.BroadcastID); ok {
 		return false
 	}
 	return bm.appendFirstReplicasRecorded(ctx, bh.BroadcastID, bh.AppendFirstVChannels)
@@ -809,31 +802,50 @@ func (bm *broadcastTaskManager) getOrAddBroadcastTask(
 	return newIncomingTask, true
 }
 
-// getOrCreateBroadcastTask returns the task by the broadcastID
-// return false if the task is tombstone.
-// if the task is not found, it will create a new task.
-func (bm *broadcastTaskManager) getOrCreateBroadcastTask(msg message.ImmutableMessage) (*broadcastTask, bool) {
-	bm.mu.Lock()
+// getOrCreateBroadcastTask returns the task by the broadcastID, rebuilding it
+// from a replicate message when it is missing. The bool is false when no live
+// task takes the ack: the task is a tombstone or done, the message is not a
+// replica, or the replica is a late one of a broadcast already collected here.
+//
+// The lookup comes first, the record second, and the creation last, and the
+// order carries the correctness. A task is removed only after its ack callback
+// completed, and the SplitShard callback writes the record before it completes,
+// so a task found missing and then NOT on record belongs to a broadcast that
+// never completed here: it is safe to rebuild. Checking the record before the
+// lookup would leave a window in which the task is found present, skips the
+// record, and is removed before the creation step rebuilds it from this one
+// replica. The record is an RPC, so it is read outside bm.mu, and the creation
+// re-reads the map under the lock in case another replica's ack rebuilt the
+// task meanwhile.
+func (bm *broadcastTaskManager) getOrCreateBroadcastTask(ctx context.Context, msg message.ImmutableMessage) (*broadcastTask, bool) {
 	bh := msg.BroadcastHeader()
-	t, ok := bm.tasks[bh.BroadcastID]
-	if ok {
-		bm.mu.Unlock()
-		state := t.State()
-		return t, state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE && state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE
+	if t, ok := bm.getBroadcastTaskByID(bh.BroadcastID); ok {
+		return t, t.isLive()
 	}
 	if msg.ReplicateHeader() == nil {
-		bm.mu.Unlock()
-		bm.Logger().Warn(context.TODO(), "try to recover task from the wal from non-replicate message, ignore it")
+		bm.Logger().Warn(ctx, "try to recover task from the wal from non-replicate message, ignore it")
+		return nil, false
+	}
+	if bm.isLateReplicaOfRecordedBroadcast(ctx, msg) {
+		bm.Logger().Info(ctx,
+			"ignored the ack of a late replica: its broadcast already completed and was collected on this cluster",
+			mlog.FieldBroadcastID(bh.BroadcastID),
+			mlog.FieldVChannel(msg.VChannel()))
 		return nil, false
 	}
 
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	if t, ok := bm.tasks[bh.BroadcastID]; ok {
+		// Rebuilt by another replica's ack while the record was read.
+		return t, t.isLive()
+	}
 	newBroadcastTask := newBroadcastTaskFromImmutableMessage(msg, bm.metrics, bm.ackScheduler)
 	newBroadcastTask.SetLogger(bm.Logger())
 	bm.tasks[bh.BroadcastID] = newBroadcastTask
 	newBroadcastTask.schemaTasks = bm.schemaTasks
 	bm.idempotencyIndex.Add(newBroadcastTask.IdempotencyScope(), bh.BroadcastID)
 	bm.notifyBroadcastTaskCreated(bh.BroadcastID)
-	bm.mu.Unlock()
 	return newBroadcastTask, true
 }
 

@@ -130,7 +130,7 @@ func TestGetOrCreateDoesNotHoldManagerLockWhileInspectingTask(t *testing.T) {
 	}).Build()
 	defer patch.UnPatch()
 
-	got, ok := bm.getOrCreateBroadcastTask(ackMsg)
+	got, ok := bm.getOrCreateBroadcastTask(context.Background(), ackMsg)
 	require.Equal(t, 1, stateCalls, "must inspect the existing task")
 	require.True(t, managerUnlocked, "getOrCreate held bm.mu when acquiring task.mu")
 	require.True(t, ok)

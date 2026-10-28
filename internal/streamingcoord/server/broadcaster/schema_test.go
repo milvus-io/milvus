@@ -171,7 +171,7 @@ func TestSchemaTargetSecondaryAndRecovery(t *testing.T) {
 		// a version, as legacy ALTERs need not increment it.
 		for _, id := range []uint64{9, 10, 11} {
 			ack := schemaTestAck(schemaTestMessage(100, id), "v1", id)
-			task, found := bm.getOrCreateBroadcastTask(ack)
+			task, found := bm.getOrCreateBroadcastTask(context.Background(), ack)
 			require.True(t, found)
 			require.Equal(t, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED, task.State())
 			require.Equal(t, int(id-9), bm.schemaTaskCount(100), "registration alone is not durable")

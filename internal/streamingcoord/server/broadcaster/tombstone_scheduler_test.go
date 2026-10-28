@@ -299,7 +299,7 @@ func TestTombstoneGCFailuresAndLegacyPositions(t *testing.T) {
 	}
 	s = gcTestScheduler(bm, 1, 2) // Retry with a live scheduler context.
 	// Deletion failure left DONE in memory: a duplicate still must not be processed.
-	_, process := bm.getOrCreateBroadcastTask(gcTestMessages(1, []string{"p0_vcchan"}, true)[0])
+	_, process := bm.getOrCreateBroadcastTask(context.Background(), gcTestMessages(1, []string{"p0_vcchan"}, true)[0])
 	require.False(t, process)
 	s.triggerGCTombstone()
 	require.Len(t, s.tombstones, 1)

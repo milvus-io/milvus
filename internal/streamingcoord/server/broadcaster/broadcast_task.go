@@ -252,6 +252,14 @@ func (b *broadcastTask) State() streamingpb.BroadcastTaskState {
 	return b.task.State
 }
 
+// isLive reports whether the task still takes acks: neither a tombstone nor a
+// tombstone being dropped (DONE).
+func (b *broadcastTask) isLive() bool {
+	state := b.State()
+	return state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE &&
+		state != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE
+}
+
 // PendingBroadcastMessages returns the pending broadcast message of current broadcast.
 // If the vchannel is already acked, it will be filtered out.
 func (b *broadcastTask) PendingBroadcastMessages() []message.MutableMessage {
