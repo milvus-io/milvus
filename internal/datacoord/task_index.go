@@ -545,7 +545,12 @@ func isMissingVectorArrayFieldOnStaleSchema(err error, segment *datapb.SegmentIn
 	for _, structField := range schema.GetStructArrayFields() {
 		for _, subField := range structField.GetFields() {
 			if subField.GetFieldID() == field.GetFieldID() {
-				return subField.GetElementNullable()
+				// Two schema changes leave an old segment without this child's
+				// binlog: adding the child to an existing struct (the child is
+				// element-nullable) and adding the whole nullable struct with
+				// AddCollectionStructField (its old rows are null struct rows,
+				// whatever the child's element_nullable).
+				return structField.GetNullable() || subField.GetElementNullable()
 			}
 		}
 	}

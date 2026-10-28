@@ -728,9 +728,12 @@ func (s *indexTaskSuite) TestMissingVectorArraySubFieldOnStaleSchema() {
 	// evolution. Its missing binlog is not evidence of an empty added field.
 	child.ElementNullable = false
 	s.False(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, stale, schema, child))
+	// A whole nullable struct added after the segment was written: its old
+	// rows are null struct rows, so the missing binlog is an empty field even
+	// for a child that is not element-nullable.
 	child.Nullable = true
 	schema.StructArrayFields[0].Nullable = true
-	s.False(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, stale, schema, child))
+	s.True(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, stale, schema, child))
 	child.ElementNullable = true
 	s.True(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, stale, schema, child))
 
@@ -739,6 +742,35 @@ func (s *indexTaskSuite) TestMissingVectorArraySubFieldOnStaleSchema() {
 	s.False(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, stale, schema, topLevel))
 	topLevel.Nullable = true
 	s.True(isMissingVectorArrayFieldOnStaleSchema(errVectorArrayFieldBinlogNotFound, stale, schema, topLevel))
+}
+
+// A nullable struct added with AddCollectionStructField after a segment was
+// flushed: its ordinary (not element-nullable) ArrayOfVector child has no
+// binlog in that segment, and the index build must treat it as empty instead
+// of failing the task.
+func (s *indexTaskSuite) TestEstimateVectorArrayElementCountForAddedNullableStruct() {
+	child := &schemapb.FieldSchema{
+		FieldID: s.fieldID, Name: "events[embedding]", DataType: schemapb.DataType_ArrayOfVector,
+		ElementType: schemapb.DataType_FloatVector, Nullable: true,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}},
+	}
+	schema := &schemapb.CollectionSchema{
+		Version: 2,
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			Name: "events", Nullable: true, Fields: []*schemapb.FieldSchema{child},
+		}},
+	}
+	stale := &datapb.SegmentInfo{SchemaVersion: 1}
+	estimate, err := estimateVectorArrayElementCountForIndexBuild(stale, schema, child)
+	s.NoError(err)
+	s.True(estimate.emptyOnStaleSchema)
+	s.Zero(estimate.vectorCount)
+
+	// The segment-version and missing-binlog conditions still apply.
+	current := &datapb.SegmentInfo{SchemaVersion: 2}
+	_, err = estimateVectorArrayElementCountForIndexBuild(current, schema, child)
+	s.ErrorIs(err, errVectorArrayFieldBinlogNotFound)
+	s.False(isMissingVectorArrayFieldOnStaleSchema(fmt.Errorf("other failure"), stale, schema, child))
 }
 
 func (s *indexTaskSuite) TestPrepareJobRequestUsesNullableStructArrayParentForSubField() {
