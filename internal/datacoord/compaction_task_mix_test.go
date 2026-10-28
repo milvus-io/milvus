@@ -370,8 +370,7 @@ func TestMixCompactionTaskMetricsRetryDoesNotDrift(t *testing.T) {
 	).Maybe()
 	meta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).RunAndReturn(taskMeta.SaveCompactionTask).Maybe()
 	meta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Times(2)
-	meta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything, mock.Anything).Return(
-		nil, &segMetricMutation{}, nil).Times(2)
+	meta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Times(2)
 	meta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, false).Return().Times(2)
 
 	alloc := allocator.NewMockAllocator(t)
