@@ -548,6 +548,7 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 	var total int64
 	storedBinlogSize := make(map[string]map[string]int64) // map[collectionID]map[segment_state]size
 	binlogFileCount := make(map[string]int64)             // map[collectionID]count
+	deltalogAggregates := make(map[string]*deltalogAggregate)
 	coll2DbName := make(map[string]string)
 
 	for _, segment := range segments {
@@ -573,6 +574,13 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 
 				storedBinlogSize[collIDStr][segment.GetState().String()] += segmentSize
 				binlogFileCount[collIDStr] += int64(getBinlogFileCount(segment.SegmentInfo))
+
+				agg, ok := deltalogAggregates[collIDStr]
+				if !ok {
+					agg = &deltalogAggregate{dbName: coll.DatabaseName}
+					deltalogAggregates[collIDStr] = agg
+				}
+				agg.observe(segment)
 			}
 
 			if _, ok := collectionRowsNum[segment.GetCollectionID()]; !ok {
@@ -616,6 +624,8 @@ func (m *meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 			metrics.DataCoordL0DeleteEntriesNum.WithLabelValues(coll.DatabaseName, strconv.FormatInt(collectionID, 10)).Set(float64(entriesNum))
 		}
 	}
+
+	reportDeltalogMetrics(deltalogAggregates)
 
 	info.TotalBinlogSize = total
 	info.CollectionBinlogSize = collectionBinlogSize
@@ -1277,11 +1287,7 @@ func (u *l0ManifestUpdate) submitManifest(ctx context.Context, io *packed.Manife
 		complete(updateManifestPathIfNewer(u.segment, u.manifestPath))
 		return nil
 	}
-	base, version, err := packed.UnmarshalManifestPath(u.segment.GetManifestPath())
-	if err != nil {
-		return err
-	}
-	return packed.SubmitManifestUpdates(ctx, io, base, version, u.storageConfig,
+	return packed.SubmitManifestUpdates(ctx, io, u.segment.GetManifestPath(), u.storageConfig,
 		&packed.ManifestUpdates{DeltaLogs: u.entries}, func(result packed.ManifestUpdateResult, err error) {
 			if err == nil {
 				u.manifestPath = result.ManifestPath
@@ -1743,8 +1749,11 @@ func UpdateManifest(segmentID int64, manifestPath string) UpdateOperator {
 				mlog.Int64("segmentID", segmentID))
 			return false
 		}
-		// skip empty manifest update and same manifest
-		if manifestPath == "" || segment.ManifestPath == manifestPath {
+		// Skip an empty update and a re-report of the current revision. The
+		// revision decides, not the text: rewriting the pointer to another
+		// spelling of the same revision would look like a manifest change to
+		// every exact comparison downstream.
+		if manifestPath == "" || packed.SameManifestPath(segment.ManifestPath, manifestPath) {
 			return false
 		}
 		// Inline publication is used by single-writer manifest paths: the flush of
@@ -1789,7 +1798,7 @@ func UpdateManifestHasIndex(segmentID int64) UpdateOperator {
 func clearEmptyManifestIndexMarker(segmentID int64, expectedManifest string) UpdateOperator {
 	return func(pack *updateSegmentPack) bool {
 		segment := pack.Get(segmentID)
-		if segment == nil || segment.GetManifestPath() != expectedManifest || !segment.GetManifestHasIndex() {
+		if segment == nil || !packed.SameManifestPath(segment.GetManifestPath(), expectedManifest) || !segment.GetManifestHasIndex() {
 			return false
 		}
 		segment.ManifestHasIndex = false
@@ -3031,6 +3040,7 @@ func (m *meta) loadableProjection(ctx context.Context, collectionID int64) ([]da
 			PartitionID:     segment.GetPartitionID(),
 			ManifestVersion: manifestVersion,
 			RowNum:          segment.GetNumOfRows(),
+			Size:            segment.GetStats().GetInsertBinlogSize(),
 		})
 	}
 	return loadable, nil
@@ -3091,61 +3101,6 @@ func (m *meta) GetCompactionTo(segmentID int64) ([]*SegmentInfo, bool) {
 	return m.segments.GetCompactionTo(segmentID)
 }
 
-// GetMinGrowingSegmentCheckpoint returns the minimum DmlPosition of all growing
-// segments on the given channel that belong to TEXT collections.
-// This is used to prevent the channel checkpoint from advancing beyond unflushed
-// growing segment data (critical for TEXT collections where QueryNode manages
-// insert flush independently).
-//
-// Only TEXT collections need clamping because their growing segment data is
-// flushed by QueryNode (not StreamNode/DataNode). For normal collections,
-// StreamNode owns both the data flush and checkpoint, so clamping would
-// incorrectly slow down checkpoint advancement.
-//
-// Returns nil if no TEXT collection growing segments exist on the channel.
-func (m *meta) GetMinGrowingSegmentCheckpoint(channel string) *msgpb.MsgPosition {
-	segments := m.SelectSegments(context.TODO(), WithChannel(channel))
-
-	// Cache collection TEXT field check results to avoid repeated schema scans
-	// within the same call (many segments may belong to the same collection).
-	textCollectionCache := make(map[int64]bool)
-
-	var minPos *msgpb.MsgPosition
-	for _, s := range segments {
-		// Only consider growing (unflushed) segments at L1 level
-		if s.GetState() != commonpb.SegmentState_Growing {
-			continue
-		}
-		if s.GetLevel() == datapb.SegmentLevel_L0 {
-			continue
-		}
-
-		// Only clamp for TEXT collections — normal collections don't need it.
-		collID := s.GetCollectionID()
-		isText, cached := textCollectionCache[collID]
-		if !cached {
-			isText = m.collectionHasTextFields(collID)
-			textCollectionCache[collID] = isText
-		}
-		if !isText {
-			continue
-		}
-
-		pos := s.GetDmlPosition()
-		if pos == nil {
-			pos = s.GetStartPosition()
-		}
-		if pos == nil {
-			continue
-		}
-
-		if minPos == nil || pos.GetTimestamp() < minPos.GetTimestamp() {
-			minPos = pos
-		}
-	}
-	return minPos
-}
-
 // collectionTextFieldIDs returns the field IDs of all TEXT type fields in the collection schema.
 func (m *meta) collectionTextFieldIDs(collectionID int64) []int64 {
 	coll := m.GetCollection(collectionID)
@@ -3161,29 +3116,16 @@ func (m *meta) collectionTextFieldIDs(collectionID int64) []int64 {
 	return ids
 }
 
-// collectionHasTextFields returns true if the collection has any TEXT type fields.
-func (m *meta) collectionHasTextFields(collectionID int64) bool {
-	return len(m.collectionTextFieldIDs(collectionID)) > 0
-}
-
 // UpdateChannelCheckpoint updates and saves channel checkpoint.
 func (m *meta) UpdateChannelCheckpoint(ctx context.Context, vChannel string, pos *msgpb.MsgPosition) error {
 	if pos == nil || pos.GetMsgID() == nil {
 		return merr.WrapErrServiceInternalMsg("channelCP is nil, vChannel=%s", vChannel)
 	}
 
-	// Clamp checkpoint to not advance beyond min growing segment checkpoint.
-	// This prevents TEXT collection data loss where StreamNode (L0 delete) checkpoint
-	// may advance beyond QueryNode's (L1 insert) unflushed data.
-	minGrowingCP := m.GetMinGrowingSegmentCheckpoint(vChannel)
-	if minGrowingCP != nil && pos.GetTimestamp() > minGrowingCP.GetTimestamp() {
-		mlog.Info(ctx, "clamping channel checkpoint to min growing segment checkpoint",
-			mlog.String("vChannel", vChannel),
-			mlog.Uint64("requestedTs", pos.GetTimestamp()),
-			mlog.Uint64("clampedTs", minGrowingCP.GetTimestamp()))
-		pos = minGrowingCP
-	}
-
+	// The writer reports a safe channel position after accounting for buffered
+	// data, in-flight syncs and metadata publication. A Growing segment's last
+	// DmlPosition is a data-flush position, not a limit on later idle progress.
+	// Clamping to it would pin TEXT channels indefinitely after a data sync.
 	m.channelSync.channelLocks.Lock(vChannel)
 	defer m.channelSync.channelLocks.Unlock(vChannel)
 
@@ -3201,21 +3143,6 @@ func (m *meta) MarkChannelCheckpointDropped(ctx context.Context, channel string)
 
 // UpdateChannelCheckpoints updates and saves channel checkpoints.
 func (m *meta) UpdateChannelCheckpoints(ctx context.Context, positions []*msgpb.MsgPosition) error {
-	// Clamp each position to not advance beyond min growing segment checkpoint.
-	for i, pos := range positions {
-		if pos == nil || pos.GetChannelName() == "" {
-			continue
-		}
-		minGrowingCP := m.GetMinGrowingSegmentCheckpoint(pos.GetChannelName())
-		if minGrowingCP != nil && pos.GetTimestamp() > minGrowingCP.GetTimestamp() {
-			mlog.Info(ctx, "clamping channel checkpoint to min growing segment checkpoint",
-				mlog.String("vChannel", pos.GetChannelName()),
-				mlog.Uint64("requestedTs", pos.GetTimestamp()),
-				mlog.Uint64("clampedTs", minGrowingCP.GetTimestamp()))
-			positions[i] = minGrowingCP
-		}
-	}
-
 	// Serialize with single-channel updates on the same channels. Locks are
 	// taken in sorted order so overlapping batches cannot deadlock.
 	channelSet := make(map[string]struct{}, len(positions))
@@ -3613,8 +3540,8 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	}
 	// Optimistic-concurrency CAS on the manifest pointer. Adopt the in-place
 	// result only when it is a valid successor of the current pointer:
-	//   - result == current: idempotent replay of an adoption whose task state
-	//     was lost to a crash after AlterSegments but before meta_saved.
+	//   - result is the current revision: idempotent replay of an adoption whose
+	//     task state was lost to a crash after AlterSegments but before meta_saved.
 	//   - base == current AND result strictly newer on the same base path: a
 	//     fresh forward commit built on the current pointer.
 	// Reject anything else — a stale base (a concurrent stats/index/bump commit
@@ -3627,8 +3554,9 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	if baseManifest == "" {
 		return nil, merr.WrapErrIllegalCompactionPlan("schema bump result missing base manifest")
 	}
-	if resultManifest != currentManifest {
-		if baseManifest != currentManifest {
+	replay := packed.SameManifestPath(resultManifest, currentManifest)
+	if !replay {
+		if !packed.SameManifestPath(baseManifest, currentManifest) {
 			return nil, merr.WrapErrIllegalCompactionPlanMsg("schema bump result base manifest %s no longer matches current %s", baseManifest, currentManifest)
 		}
 		cmp, err := packed.CompareManifestPath(resultManifest, currentManifest)
@@ -3675,18 +3603,21 @@ func (m *meta) completeBumpSchemaVersionCompactionMutation(
 	}
 
 	cloned.StorageVersion = resultSegment.GetStorageVersion()
-	cloned.ManifestPath = resultManifest
+	// A replay keeps the stored pointer text, so a differently spelled copy of
+	// the same revision neither rewrites it nor bumps DataVersion below.
+	if !replay {
+		cloned.ManifestPath = resultManifest
+	}
 	// Statistics semantics depend on the adoption path: this branch updates an
 	// existing SegmentInfo, so a non-nil result Stats is an INCREMENT to add
 	// onto the segment's current value. See CompactionSegment.stats.
 	//
-	// The gate is the exactly-once token. resultManifest != currentManifest is
-	// the forward-commit branch of the CAS above; result == current is a replay
-	// of an adoption that already persisted, and its increment is already in
-	// Stats. Loosening the CAS silently double-counts.
+	// The gate is the exactly-once token. !replay is the forward-commit branch
+	// of the CAS above; a replay is an adoption that already persisted, and its
+	// increment is already in Stats. Loosening the CAS silently double-counts.
 	//
 	// runSchemaVersionBumpOnly ships nil, which preserves oldSegment.Stats.
-	if resultManifest != currentManifest {
+	if !replay {
 		if delta := resultSegment.GetStats(); delta != nil {
 			cloned.Stats = addStatsDelta(m.ctx, segmentID, cloned.GetStats(), delta)
 			mlog.Info(m.ctx, "meta update: applied schema bump stats increment",

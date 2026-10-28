@@ -130,9 +130,10 @@ func reduceSearchResultDataWithGroupBy(
 	}
 	ret.GetResults().AllSearchCount = allSearchCount
 
+	rowCap := reduce.PresizeRows(subSearchResultData, nq*groupBound)
 	for _, result := range subSearchResultData {
 		if len(result.GetFieldsData()) > 0 {
-			ret.GetResults().FieldsData = typeutil.PrepareResultFieldData(result.GetFieldsData(), limit)
+			ret.GetResults().FieldsData = typeutil.PrepareResultFieldData(result.GetFieldsData(), rowCap)
 			break
 		}
 	}
@@ -652,14 +653,6 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 		ret.GetResults().AllSearchCount = allSearchCount
 	}
 
-	// Find the first non-empty FieldsData as template
-	for _, result := range subSearchResultData {
-		if len(result.GetFieldsData()) > 0 {
-			ret.GetResults().FieldsData = typeutil.PrepareResultFieldData(result.GetFieldsData(), limit)
-			break
-		}
-	}
-
 	subSearchNum := len(subSearchResultData)
 	if subSearchNum == 1 && offset == 0 {
 		// sorting is not needed if there is only one shard and no offset, assigning the result directly.
@@ -671,6 +664,15 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 			ret.Results.TopK = topks[len(topks)-1]
 		}
 	} else {
+		// Find the first non-empty FieldsData as template.
+		rowCap := reduce.PresizeRows(subSearchResultData, nq*limit)
+		for _, result := range subSearchResultData {
+			if len(result.GetFieldsData()) > 0 {
+				ret.GetResults().FieldsData = typeutil.PrepareResultFieldData(result.GetFieldsData(), rowCap)
+				break
+			}
+		}
+
 		var realTopK int64 = -1
 		var retSize int64
 

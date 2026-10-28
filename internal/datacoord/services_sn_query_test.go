@@ -50,7 +50,7 @@ func TestStreamingNodeResourcesExpandBM25LogIDs(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	version := &viewpb.DataVersion{StreamingVersion: 1}
-	view := &viewpb.DataViewOfCollection{CollectionId: 1, DataVersion: version, Shards: []*viewpb.DataViewOfShard{{Vchannel: "v1", Partitions: []*viewpb.DataViewOfPartition{{PartitionId: 2, SegmentIds: []int64{3}}}}}}
+	view := &viewpb.DataViewOfCollection{CollectionId: 1, DataVersion: version, Shards: []*viewpb.DataViewOfShard{{Vchannel: "v1", Partitions: []*viewpb.DataViewOfPartition{{PartitionId: 2, SegmentIds: []int64{3}, SegmentManifestVersions: []int64{0}}}}}}
 	patch := mockey.Mock((*catalogkv.Catalog).ListAllDataViews).Return([]*viewpb.DataViewOfCollection{view}, nil).Build()
 	defer patch.UnPatch()
 	manager, err := dataview.RecoverManager(ctx, &catalogkv.Catalog{}, func(context.Context, int64) (bool, error) { return true, nil }, nil, nil, nil)

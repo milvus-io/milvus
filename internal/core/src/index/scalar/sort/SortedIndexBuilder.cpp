@@ -372,7 +372,6 @@ class NumericArrayBuilderImpl final : public SortedArrayIndexBuilder::Impl {
  public:
     void
     AddRow(const ArrayView& value, int32_t coordinate) override {
-        data_.reserve(data_.size() + static_cast<size_t>(value.length()));
         for (int i = 0; i < value.length(); ++i) {
             data_.emplace_back(ArrayValue<T>(value, i), coordinate);
         }

@@ -10,7 +10,7 @@ from common.common_type import CaseLabel
 from .base import TestCDCSyncBase, logger
 
 
-@pytest.mark.tags(CaseLabel.CDC)
+@pytest.mark.tags(CaseLabel.CDC, CaseLabel.L3)
 class TestCDCSyncAlias(TestCDCSyncBase):
     """Test CDC sync for alias operations."""
 
@@ -213,7 +213,7 @@ class TestCDCSyncAlias(TestCDCSyncBase):
                 return is_dropped
             except Exception as e:
                 logger.warning(f"Error checking downstream aliases during drop: {e}")
-                return True  # If error, assume alias is dropped
+                return False  # A failed read does not prove deletion.
 
         assert self.wait_for_sync(check_drop, sync_timeout, f"drop alias {alias_name}")
         logger.info("=== test_drop_alias completed successfully ===")

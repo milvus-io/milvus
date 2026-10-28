@@ -17,6 +17,7 @@
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <cstring>
+#include <thread>
 #include <filesystem>
 #include <arrow/filesystem/localfs.h>
 #include <roaring/roaring.hh>
@@ -24,6 +25,7 @@
 #include "index/LoadResource.h"
 #include "index/Families.h"
 #include "index/Meta.h"
+#include "monitor/Monitor.h"
 #include "index/scalar/spatial/RTreeIndexReader.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/AsyncLoadExecutor.h"
@@ -31,11 +33,13 @@
 #include "storage/IndexEntryEncryptedLocalWriter.h"
 #include "storage/LoadOverheadController.h"
 #include "storage/MemFileManagerImpl.h"
+#include "storage/LocalChunkManager.h"
 #include "storage/PluginLoader.h"
 #include "storage/Util.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "segcore/storagev1translator/SealedIndexTranslator.h"
 #include "segcore/Types.h"
+#include "segcore/SegmentLoadInfo.h"
 #include "test_utils/PlannerCipherPlugin.h"
 #include "test_utils/AsyncLoadTestUtils.h"
 #include "storage/artifact/LocalDirectory.h"
@@ -106,24 +110,406 @@ class RecordingOpenFileSystem : public arrow::fs::LocalFileSystem {
     explicit RecordingOpenFileSystem(std::shared_ptr<arrow::fs::FileSystem> fs)
         : fs_(std::move(fs)) {
     }
+    std::string
+    type_name() const override {
+        return injected_input ? "metadata_test" : "local";
+    }
     arrow::Result<std::shared_ptr<arrow::io::RandomAccessFile>>
     OpenInputFile(const std::string& path) override {
         ++sync_opens;
-        return fs_->OpenInputFile(path);
+        return OpenTrackedFile(path);
     }
     arrow::Future<std::shared_ptr<arrow::io::RandomAccessFile>>
     OpenInputFileAsync(const std::string& path) override {
         ++async_opens;
         return arrow::Future<std::shared_ptr<arrow::io::RandomAccessFile>>::
-            MakeFinished(fs_->OpenInputFile(path));
+            MakeFinished(OpenTrackedFile(path));
     }
     int sync_opens{0};
     int async_opens{0};
+    std::shared_ptr<milvus::test::AsyncTrackingRandomAccessFile> input;
+    std::shared_ptr<arrow::io::RandomAccessFile> injected_input;
 
  private:
+    arrow::Result<std::shared_ptr<arrow::io::RandomAccessFile>>
+    OpenTrackedFile(const std::string& path) {
+        if (injected_input)
+            return injected_input;
+        ARROW_ASSIGN_OR_RAISE(auto file, fs_->OpenInputFile(path));
+        ARROW_ASSIGN_OR_RAISE(const auto size, file->GetSize());
+        ARROW_ASSIGN_OR_RAISE(auto bytes, file->ReadAt(0, size));
+        input = std::make_shared<milvus::test::AsyncTrackingRandomAccessFile>(
+            std::vector<uint8_t>(bytes->data(), bytes->data() + bytes->size()));
+        return input;
+    }
+
     std::shared_ptr<arrow::fs::FileSystem> fs_;
 };
+
+class MetadataChunkManager : public storage::LocalChunkManager {
+ public:
+    using LocalChunkManager::LocalChunkManager;
+    uint64_t
+    Size(const std::string& path) override {
+        ++size_calls;
+        return LocalChunkManager::Size(path);
+    }
+    uint64_t
+    Read(const std::string& path, void* data, uint64_t bytes) override {
+        const auto count = LocalChunkManager::Read(path, 0, data, bytes);
+        if (after_read)
+            after_read();
+        return count;
+    }
+    std::atomic<size_t> size_calls{0};
+    std::function<void()> after_read;
+};
 }  // namespace
+
+class IndexMetadataContextTest : public ::testing::Test {
+ protected:
+    segcore::LoadIndexInfo
+    Persist(bool packed) {
+        segcore::LoadIndexInfo info{};
+        info.field_type = DataType::INT64;
+        info.element_type = DataType::NONE;
+        info.field_id = 101;
+        info.num_rows = 1;
+        info.index_engine_version = 3;
+        info.warmup_policy = "disable";
+        info.index_params = {{INDEX_TYPE, HYBRID_INDEX_TYPE},
+                             {SCALAR_INDEX_ENGINE_VERSION, packed ? "3" : "1"}};
+        if (packed) {
+            info.index_files = {fixture.WritePacked(
+                {{"index_data", std::vector<uint8_t>(8)}},
+                {{INDEX_TYPE,
+                  static_cast<uint8_t>(ScalarIndexType::STLSORT)}})};
+            info.index_size = fixture.Size(info.index_files.front());
+        } else {
+            storage::MemFileManagerImpl manager(fixture.context);
+            BinarySet payload;
+            payload.Append(INDEX_TYPE,
+                           std::shared_ptr<uint8_t[]>(new uint8_t[1]{
+                               static_cast<uint8_t>(ScalarIndexType::STLSORT)}),
+                           1);
+            payload.Append(
+                "index_data", std::shared_ptr<uint8_t[]>(new uint8_t[8]()), 8);
+            EXPECT_TRUE(manager.AddFile(payload));
+            for (const auto& [path, size] :
+                 manager.GetRemotePathsToFileSize()) {
+                info.index_files.push_back(path);
+                info.index_size += size;
+            }
+        }
+        return info;
+    }
+
+    static void
+    ExpectCancelled(const std::function<void()>& run) {
+        try {
+            run();
+            FAIL() << "expected metadata cancellation";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), FollyCancel);
+        }
+    }
+
+    void
+    Construct(const segcore::LoadIndexInfo& info,
+              OpContext& ctx,
+              bool resource_only = false) {
+        if (resource_only) {
+            if (fixture.context.use_async_load.value_or(false) &&
+                info.index_params.at(SCALAR_INDEX_ENGINE_VERSION) == "1") {
+                storage::LoadOptions options;
+                options.op_ctx = &ctx;
+                auto estimate =
+                    [&]() -> folly::coro::Task<LoadResourceRequest> {
+                    auto source = co_await storage::V1RemoteSource::OpenAsync(
+                        fixture.context,
+                        info.index_files,
+                        options,
+                        storage::ArtifactStorageNamespace::Index,
+                        storage::V1SourceLayout::DiskFiles);
+                    co_return co_await LegacyScalarIndexLoadResourceAsync(
+                        info.field_type,
+                        info.index_size,
+                        info.index_params,
+                        false,
+                        info.num_rows,
+                        *source);
+                };
+                folly::coro::blockingWait(folly::coro::co_withExecutor(
+                    storage::ResolveAsyncLoadExecutor(
+                        {},
+                        ctx.runtime_load_priority.value_or(0) != 0
+                            ? proto::common::LoadPriority::LOW
+                            : proto::common::LoadPriority::HIGH),
+                    estimate()));
+                return;
+            }
+            ScalarIndexFileLoadResource(
+                info.field_type,
+                info.index_size,
+                info.index_params,
+                false,
+                info.num_rows,
+                info.index_files,
+                fixture.context,
+                storage::ArtifactStorageNamespace::Index,
+                &ctx);
+            return;
+        }
+        Config config(info.index_params);
+        config["load_priority"] = 1;
+        segcore::storagev1translator::SealedIndexTranslator translator(
+            &info,
+            tracer::TraceContext{},
+            fixture.context,
+            std::move(config),
+            &ctx);
+    }
+
+    ResourceFixture fixture;
+};
+
+TEST_F(IndexMetadataContextTest, CancelledConstructionDoesNotOpenFiles) {
+    for (bool packed : {false, true}) {
+        const auto info = Persist(packed);
+        auto fs = std::make_shared<RecordingOpenFileSystem>(fixture.context.fs);
+        fixture.context.fs = fs;
+        auto chunks =
+            std::make_shared<MetadataChunkManager>(fixture.root->Path());
+        fixture.context.chunkManagerPtr = chunks;
+        for (bool async : {false, true}) {
+            SCOPED_TRACE(::testing::Message() << packed << "/" << async);
+            fixture.context.use_async_load = async;
+            folly::CancellationSource cancel;
+            cancel.requestCancellation();
+            OpContext ctx(cancel.getToken());
+            ExpectCancelled([&] { Construct(info, ctx); });
+            ExpectCancelled([&] { Construct(info, ctx, true); });
+            EXPECT_EQ(fs->sync_opens + fs->async_opens, 0);
+            EXPECT_EQ(chunks->size_calls.load(), 0);
+        }
+    }
+}
+
+TEST_F(IndexMetadataContextTest, LowPriorityMetadataWaitIsCancellable) {
+    auto& budget = storage::LoadAdmissionController::GetInstance();
+    const auto previous_slots = budget.CapacitySlots();
+    auto restore =
+        folly::makeGuard([&] { budget.SetCapacitySlots(previous_slots); });
+    budget.SetCapacitySlots(1);
+    for (bool packed : {false, true}) {
+        const auto info = Persist(packed);
+        for (bool resource_only : {false, true}) {
+            SCOPED_TRACE(::testing::Message()
+                         << packed << "/" << resource_only);
+            fixture.context.use_async_load = true;
+            auto held = folly::coro::blockingWait(budget.AcquireAsync(
+                {0, 1}, storage::LoadAdmissionPriority::High));
+            folly::CancellationSource cancel;
+            OpContext ctx(cancel.getToken());
+            ctx.runtime_load_priority = 1;
+            if (!resource_only)
+                ctx.runtime_load_priority.reset();
+            const auto original_priority = ctx.runtime_load_priority;
+            auto task = std::async(std::launch::async, [&] {
+                Construct(info, ctx, resource_only);
+            });
+            auto release = folly::makeGuard([&] {
+                cancel.requestCancellation();
+                held.Release();
+                task.wait();
+            });
+            const auto deadline =
+                std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            do {
+                budget.UpdateMetrics();
+                if (monitor::internal_load_admission_pending_requests_low
+                            .Value() +
+                        monitor::internal_load_admission_pending_requests_high
+                            .Value() >
+                    0)
+                    break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            } while (std::chrono::steady_clock::now() < deadline);
+            EXPECT_EQ(
+                monitor::internal_load_admission_pending_requests_low.Value(),
+                1);
+            EXPECT_EQ(
+                monitor::internal_load_admission_pending_requests_high.Value(),
+                0);
+            cancel.requestCancellation();
+            EXPECT_EQ(task.wait_for(std::chrono::seconds(2)),
+                      std::future_status::ready);
+            held.Release();
+            release.dismiss();
+            ExpectCancelled([&] { task.get(); });
+            EXPECT_EQ(ctx.runtime_load_priority, original_priority);
+        }
+    }
+}
+
+TEST_F(IndexMetadataContextTest, SyncHybridCancellationDoesNotFallBack) {
+    const auto info = Persist(false);
+    fixture.context.use_async_load = false;
+    auto chunks = std::make_shared<MetadataChunkManager>(fixture.root->Path());
+    fixture.context.chunkManagerPtr = chunks;
+    for (bool resource_only : {false, true}) {
+        folly::CancellationSource cancel;
+        OpContext ctx(cancel.getToken());
+        chunks->after_read = [&] { cancel.requestCancellation(); };
+        ExpectCancelled([&] { Construct(info, ctx, resource_only); });
+        chunks->after_read = {};
+    }
+}
+
+TEST_F(IndexMetadataContextTest, AsyncCancellationDrainsIssuedMetadataRead) {
+    const auto original_fs = fixture.context.fs;
+    for (bool packed : {false, true}) {
+        SCOPED_TRACE(packed);
+        const auto info = Persist(packed);
+        fixture.context.use_async_load = true;
+        // The legacy selector is the first payload read during family selection.
+        auto path = info.index_files.front();
+        if (!packed) {
+            for (const auto& file : info.index_files)
+                if (std::filesystem::path(file).filename() == INDEX_TYPE)
+                    path = file;
+        }
+        auto file = fixture.context.fs->OpenInputFile(path).ValueOrDie();
+        const auto bytes =
+            file->ReadAt(0, file->GetSize().ValueOrDie()).ValueOrDie();
+        auto input = std::make_shared<milvus::test::ControlledDirectReadFile>(
+            std::vector<uint8_t>(bytes->data(), bytes->data() + bytes->size()));
+        input->SetAutoComplete(false);
+        auto fs = std::make_shared<RecordingOpenFileSystem>(fixture.context.fs);
+        fs->injected_input = input;
+        fixture.context.fs = fs;
+        folly::CancellationSource cancel;
+        OpContext ctx(cancel.getToken());
+        auto task =
+            std::async(std::launch::async, [&] { Construct(info, ctx); });
+        const bool started = input->WaitForCallCount(1);
+        EXPECT_TRUE(started);
+        cancel.requestCancellation();
+        EXPECT_EQ(task.wait_for(std::chrono::milliseconds(20)),
+                  std::future_status::timeout);
+        input->SetAutoComplete(true);
+        if (started)
+            input->Complete(0);
+        ExpectCancelled([&] { task.get(); });
+        EXPECT_EQ(input->DirectReadCalls().size(), 1);
+        fixture.context.fs = original_fs;
+    }
+}
+
+TEST(LegacyLoadResourceTest, SegmentMetadataPreservesFileAwareEstimates) {
+    ResourceFixture fixture;
+    storage::MemFileManagerImpl manager(fixture.context);
+    BinarySet payload;
+    payload.Append(
+        "index_data", std::shared_ptr<uint8_t[]>(new uint8_t[4096]()), 4096);
+    ASSERT_TRUE(manager.AddFile(payload));
+    for (bool vector : {false, true}) {
+        auto schema = std::make_shared<Schema>();
+        const auto field =
+            vector ? schema->AddDebugField(
+                         "value", DataType::VECTOR_FLOAT, int64_t{4}, "L2")
+                   : schema->AddDebugField("value", DataType::INT64);
+        proto::segcore::SegmentLoadInfo metadata;
+        metadata.set_collectionid(1);
+        metadata.set_partitionid(2);
+        metadata.set_segmentid(3);
+        auto* index = metadata.add_index_infos();
+        index->set_fieldid(field.get());
+        index->set_indexid(1000);
+        index->set_buildid(1000);
+        index->set_index_version(10000);
+        index->set_index_size(4096);
+        index->set_num_rows(256);
+        for (const auto& [path, size] : manager.GetRemotePathsToFileSize())
+            index->add_index_file_paths(path);
+        for (const auto& [key, value] : std::map<std::string, std::string>{
+                 {INDEX_TYPE, vector ? "FLAT" : ASCENDING_SORT},
+                 {METRIC_TYPE, "L2"},
+                 {"mmap.enabled", "false"}}) {
+            auto* param = index->add_index_params();
+            param->set_key(key);
+            param->set_value(value);
+        }
+        segcore::SegmentLoadInfo segment(metadata, schema);
+        const auto infos = segment.GetFieldIndexInfos(field);
+        ASSERT_EQ(infos.size(), 1);
+        const auto& info = infos.front();
+        const auto generic = IndexLoadResource(info.field_type,
+                                               info.element_type,
+                                               info.index_engine_version,
+                                               info.index_size,
+                                               info.index_params,
+                                               info.enable_mmap,
+                                               info.num_rows,
+                                               info.dim);
+        for (bool async : {false, true}) {
+            SCOPED_TRACE(::testing::Message()
+                         << "vector=" << vector << " async=" << async);
+            fixture.context.use_async_load = async;
+            auto expected = generic;
+            if (async) {
+                storage::LoadOptions options;
+                options.params = Config(info.index_params);
+                auto estimate =
+                    [&]() -> folly::coro::Task<LoadResourceRequest> {
+                    auto source = co_await storage::V1RemoteSource::OpenAsync(
+                        fixture.context, info.index_files, options);
+                    if (vector) {
+                        co_return co_await LegacyVectorFileLoadResourceAsync(
+                            generic, false, options, *source);
+                    }
+                    co_return co_await LegacyScalarIndexLoadResourceAsync(
+                        info.field_type,
+                        info.index_size,
+                        info.index_params,
+                        info.enable_mmap,
+                        info.num_rows,
+                        *source);
+                };
+                expected =
+                    folly::coro::blockingWait(folly::coro::co_withExecutor(
+                        storage::ResolveAsyncLoadExecutor(
+                            {}, proto::common::LoadPriority::HIGH),
+                        estimate()));
+                EXPECT_GT(expected.max_memory_cost, generic.max_memory_cost);
+            } else if (!vector) {
+                expected = ScalarIndexFileLoadResource(info.field_type,
+                                                       info.index_size,
+                                                       info.index_params,
+                                                       info.enable_mmap,
+                                                       info.num_rows,
+                                                       info.index_files,
+                                                       fixture.context)
+                               .request;
+            }
+            segcore::storagev1translator::SealedIndexTranslator translator(
+                &info,
+                tracer::TraceContext{},
+                fixture.context,
+                Config(info.index_params));
+            const auto [resident, transient] =
+                translator.estimated_byte_size_of_cell(0);
+            EXPECT_EQ(resident,
+                      (cachinglayer::ResourceUsage{expected.final_memory_cost,
+                                                   expected.final_disk_cost}));
+            EXPECT_EQ(
+                transient,
+                (cachinglayer::ResourceUsage{
+                    expected.max_memory_cost - expected.final_memory_cost,
+                    2 * expected.max_disk_cost - expected.final_disk_cost}));
+        }
+    }
+}
 
 TEST(LegacyHybridResourceEstimate, ResolvesPersistedChildType) {
     using namespace milvus;
@@ -191,30 +577,54 @@ TEST(LegacyHybridResourceEstimate, ResolvesPersistedChildType) {
                     SCOPED_TRACE(::testing::Message()
                                  << name << " version=" << version
                                  << " async=" << async << " mmap=" << mmap);
-                    const auto& files = async ? async_files : sync_files;
-                    const auto expected =
-                        async ? ScalarIndexFileLoadResource(DataType::INT64,
-                                                            index_size,
-                                                            child_params,
-                                                            mmap,
-                                                            rows,
-                                                            files,
-                                                            ctx)
-                                    .request
-                              : ScalarIndexLoadResource(DataType::INT64,
-                                                        0,
-                                                        index_size,
-                                                        child_params,
-                                                        mmap,
-                                                        rows);
-                    const auto resources =
-                        ScalarIndexFileLoadResource(DataType::INT64,
-                                                    index_size,
-                                                    params,
-                                                    mmap,
-                                                    rows,
-                                                    files,
-                                                    ctx);
+                    LoadResourceRequest expected;
+                    ScalarIndexLoadResources resources;
+                    if (async) {
+                        storage::LoadOptions options;
+                        auto estimate = [&]() -> folly::coro::Task<void> {
+                            auto source =
+                                co_await storage::V1RemoteSource::OpenAsync(
+                                    ctx,
+                                    async_files,
+                                    options,
+                                    storage::ArtifactStorageNamespace::Index,
+                                    storage::V1SourceLayout::DiskFiles);
+                            expected =
+                                co_await LegacyScalarIndexLoadResourceAsync(
+                                    DataType::INT64,
+                                    index_size,
+                                    child_params,
+                                    mmap,
+                                    rows,
+                                    *source);
+                            resources.request =
+                                co_await LegacyScalarIndexLoadResourceAsync(
+                                    DataType::INT64,
+                                    index_size,
+                                    params,
+                                    mmap,
+                                    rows,
+                                    *source);
+                        };
+                        folly::coro::blockingWait(folly::coro::co_withExecutor(
+                            storage::ResolveAsyncLoadExecutor(
+                                {}, proto::common::LoadPriority::HIGH),
+                            estimate()));
+                    } else {
+                        expected = ScalarIndexLoadResource(DataType::INT64,
+                                                           0,
+                                                           index_size,
+                                                           child_params,
+                                                           mmap,
+                                                           rows);
+                        resources = ScalarIndexFileLoadResource(DataType::INT64,
+                                                                index_size,
+                                                                params,
+                                                                mmap,
+                                                                rows,
+                                                                sync_files,
+                                                                ctx);
+                    }
                     EXPECT_EQ(resources.request.final_memory_cost,
                               expected.final_memory_cost);
                     EXPECT_EQ(resources.request.final_disk_cost,
@@ -277,25 +687,74 @@ TEST(LegacyHybridResourceEstimate, FallsBackWhenChildTypeIsUnavailable) {
     }
 }
 
-TEST(ScalarIndexV3ResourceTest, ResourceInspectionSelectsStreamOpenMode) {
+TEST(ScalarIndexV3ResourceTest,
+     ResourceInspectionSelectsStreamOpenAndReadMode) {
     ResourceFixture fixture;
     // Inspection needs real directory bytes, but must never initialize an engine.
     const auto path = fixture.WritePacked({{"index_data", {1, 2, 3}}});
     const auto size = fixture.Size(path);
     auto fs = std::make_shared<RecordingOpenFileSystem>(fixture.context.fs);
     fixture.context.fs = fs;
-    for (const bool async : {false, true}) {
-        fixture.context.use_async_load = async;
-        fs->sync_opens = fs->async_opens = 0;
-        static_cast<void>(ScalarIndexFileLoadResource(DataType::INT32,
-                                                      size,
-                                                      V3Params(ASCENDING_SORT),
-                                                      false,
-                                                      4,
-                                                      {path},
-                                                      fixture.context));
-        EXPECT_EQ(fs->sync_opens, async ? 0 : 1);
-        EXPECT_EQ(fs->async_opens, async ? 1 : 0);
+    const auto old_enabled =
+        segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+    auto restore = folly::makeGuard([&] {
+        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(old_enabled);
+    });
+    for (const bool enabled : {false, true}) {
+        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(enabled);
+        for (const auto pinned : {std::optional<bool>{},
+                                  std::optional<bool>{false},
+                                  std::optional<bool>{true}}) {
+            fixture.context.use_async_load = pinned;
+            const bool async = pinned.value_or(enabled);
+            SCOPED_TRACE(::testing::Message()
+                         << "global=" << enabled << ", pinned="
+                         << (pinned ? (*pinned ? "async" : "sync") : "unset"));
+            fs->sync_opens = fs->async_opens = 0;
+            static_cast<void>(
+                ScalarIndexFileLoadResource(DataType::INT32,
+                                            size,
+                                            V3Params(ASCENDING_SORT),
+                                            false,
+                                            4,
+                                            {path},
+                                            fixture.context));
+            EXPECT_EQ(fs->sync_opens, async ? 0 : 1);
+            EXPECT_EQ(fs->async_opens, async ? 1 : 0);
+            ASSERT_NE(fs->input, nullptr);
+            EXPECT_EQ(fs->input->ReadAtCalls() == 0, async);
+            EXPECT_EQ(fs->input->AsyncReadCalls() > 0, async);
+        }
+    }
+}
+
+TEST(ScalarIndexV3ResourceTest,
+     ResourceInspectionRejectsTruncatedFilesInBothModes) {
+    ResourceFixture fixture;
+    for (const auto size :
+         {size_t{0},
+          storage::MILVUS_V3_MAGIC_SIZE - 1,
+          storage::MILVUS_V3_MAGIC_SIZE + storage::MILVUS_V3_FOOTER_SIZE - 1}) {
+        const auto path = fixture.WritePacked({{"index_data", {1, 2, 3}}});
+        std::filesystem::resize_file(path, size);
+        for (const bool async : {false, true}) {
+            SCOPED_TRACE(::testing::Message()
+                         << "size=" << size << ", async=" << async);
+            fixture.context.use_async_load = async;
+            try {
+                static_cast<void>(
+                    ScalarIndexFileLoadResource(DataType::INT32,
+                                                size,
+                                                V3Params(ASCENDING_SORT),
+                                                false,
+                                                4,
+                                                {path},
+                                                fixture.context));
+                FAIL() << "expected truncated packed index to be rejected";
+            } catch (const SegcoreError& error) {
+                EXPECT_EQ(error.get_error_code(), ErrorCode::DataFormatBroken);
+            }
+        }
     }
 }
 
@@ -621,7 +1080,7 @@ TEST(ScalarIndexV3ResourceTest, EncryptedEstimatesRetainFullScratch) {
     }
 }
 
-TEST(ScalarIndexV3ResourceTest, StringValidityStagingPreventsSyncSharing) {
+TEST(ScalarIndexV3ResourceTest, StringValidityDestinationAllowsSyncSharing) {
     ResourceFixture fixture;
     constexpr size_t rows = 9;
     const auto path = fixture.WritePacked(
@@ -638,7 +1097,7 @@ TEST(ScalarIndexV3ResourceTest, StringValidityStagingPreventsSyncSharing) {
                                         rows,
                                         {path},
                                         fixture.context);
-        EXPECT_EQ(resources.overhead.has_value(), async);
+        EXPECT_TRUE(resources.overhead.has_value());
     }
 }
 TEST(ScalarIndexV3ResourceTest,
@@ -768,6 +1227,9 @@ TEST(ScalarIndexV3ResourceTest, BitmapTranslatorKeepsRequestLocalOverhead) {
         EXPECT_GT(transient.memory_bytes, 0);
         EXPECT_EQ(fs->sync_opens, use_async ? 0 : 1);
         EXPECT_EQ(fs->async_opens, use_async ? 1 : 0);
+        ASSERT_NE(fs->input, nullptr);
+        EXPECT_EQ(fs->input->ReadAtCalls() == 0, use_async);
+        EXPECT_EQ(fs->input->AsyncReadCalls() > 0, use_async);
     }
 }
 }  // namespace milvus::index

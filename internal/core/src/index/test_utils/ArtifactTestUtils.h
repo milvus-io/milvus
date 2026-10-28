@@ -134,12 +134,14 @@ inline IIndexReaderBasePtr
 OpenV3(const ReaderBackend& backend,
        const TestArtifactData& artifact,
        const BackendCaseMetadata& metadata = {},
-       bool use_async = false) {
+       bool use_async = false,
+       milvus::OpContext* context = nullptr) {
     auto input = std::make_shared<storage::RemoteInputStream>(
         std::make_shared<arrow::io::BufferReader>(
             MakePackedArtifactBuffer(artifact)));
     auto source = storage::IndexEntryReader::Open(input, input->Size());
     storage::LoadOptions options;
+    options.op_ctx = context;
     options.enable_mmap = backend.MmapRequested();
     if (options.enable_mmap) {
         options.mmap_dir_path = std::filesystem::temp_directory_path().string();

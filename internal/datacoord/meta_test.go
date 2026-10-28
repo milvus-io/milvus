@@ -2281,6 +2281,46 @@ func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
 		suite.EqualValues(5, got.GetInsertBinlogCount())
 	})
 
+	suite.Run("replay naming the current revision in another spelling stays a replay", func() {
+		// The result names the current revision with reordered JSON keys, so it is
+		// the adoption that already persisted: it must not add the stats increment
+		// again, rewrite the pointer text, or bump DataVersion.
+		currentManifest := packed.MarshalManifestPath("/data/segments/1", 12)
+		segs := makeSegments(1, commonpb.SegmentState_Flushed)
+		old := segs.GetSegment(1)
+		old.StorageVersion = storage.StorageV3
+		old.ManifestPath = currentManifest
+		old.SchemaVersion = 3
+		old.DataVersion = 7
+		old.Stats = &datapb.Statistics{InsertBinlogSize: 1024, InsertBinlogCount: 1}
+		m := &meta{
+			catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
+			segments: segs,
+		}
+		task := &datapb.CompactionTask{
+			InputSegments: []int64{1},
+			Type:          datapb.CompactionType_BumpSchemaVersionCompaction,
+			Schema:        &schemapb.CollectionSchema{Version: 3},
+		}
+		result := &datapb.CompactionPlanResult{
+			Segments: []*datapb.CompactionSegment{{
+				SegmentID:      1,
+				NumOfRows:      5,
+				Manifest:       `{"base_path":"/data/segments/1","ver":12}`,
+				BaseManifest:   packed.MarshalManifestPath("/data/segments/1", 10),
+				StorageVersion: storage.StorageV3,
+				Stats:          &datapb.Statistics{InsertBinlogSize: 768, InsertBinlogCount: 2},
+			}},
+		}
+		infos, err := m.completeBumpSchemaVersionCompactionMutation(task, result)
+		suite.NoError(err)
+		suite.Require().Len(infos, 1)
+		suite.Equal(currentManifest, infos[0].GetManifestPath())
+		suite.EqualValues(1024, infos[0].GetStats().GetInsertBinlogSize())
+		suite.EqualValues(1, infos[0].GetStats().GetInsertBinlogCount())
+		suite.EqualValues(7, infos[0].GetDataVersion())
+	})
+
 	suite.Run("in-place result atomically merges ordinary and function-output column groups", func() {
 		// The compactor ships only the groups this run wrote, so the receiver
 		// must upsert them: the live Binlogs keeps the complete column set and
@@ -6072,279 +6112,6 @@ func Test_meta_DropSegmentsOfPartition(t *testing.T) {
 	assert.Equal(t, commonpb.SegmentState_Dropped, segment.GetState())
 	segment = meta.GetSegment(context.Background(), 3)
 	assert.NotEqual(t, commonpb.SegmentState_Dropped, segment.GetState())
-}
-
-func TestGetMinGrowingSegmentCheckpoint(t *testing.T) {
-	mockVChannel := "fake-by-dev-rootcoord-dml-1-testgrowing-v0"
-
-	t.Run("empty returns nil", func(t *testing.T) {
-		meta, err := newMemoryMeta(t)
-		assert.NoError(t, err)
-
-		pos := meta.GetMinGrowingSegmentCheckpoint(mockVChannel)
-		assert.Nil(t, pos)
-	})
-
-	t.Run("growing L1 segments return min DmlPosition", func(t *testing.T) {
-		meta, err := newMemoryMeta(t)
-		assert.NoError(t, err)
-
-		// Register a TEXT collection so the checkpoint logic applies
-		meta.AddCollection(&collectionInfo{
-			ID: 1,
-			Schema: &schemapb.CollectionSchema{
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
-					{FieldID: 101, Name: "text_field", DataType: schemapb.DataType_Text},
-				},
-			},
-		})
-
-		// Growing L1 segment with T300
-		seg1 := &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:            1,
-				CollectionID:  1,
-				PartitionID:   1,
-				InsertChannel: mockVChannel,
-				State:         commonpb.SegmentState_Growing,
-				Level:         datapb.SegmentLevel_L1,
-				DmlPosition: &msgpb.MsgPosition{
-					ChannelName: mockVChannel,
-					MsgID:       []byte{1},
-					Timestamp:   300,
-				},
-			},
-		}
-		err = meta.AddSegment(context.TODO(), seg1)
-		assert.NoError(t, err)
-
-		// Growing L1 segment with T500
-		seg2 := &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:            2,
-				CollectionID:  1,
-				PartitionID:   1,
-				InsertChannel: mockVChannel,
-				State:         commonpb.SegmentState_Growing,
-				Level:         datapb.SegmentLevel_L1,
-				DmlPosition: &msgpb.MsgPosition{
-					ChannelName: mockVChannel,
-					MsgID:       []byte{2},
-					Timestamp:   500,
-				},
-			},
-		}
-		err = meta.AddSegment(context.TODO(), seg2)
-		assert.NoError(t, err)
-
-		pos := meta.GetMinGrowingSegmentCheckpoint(mockVChannel)
-		assert.NotNil(t, pos)
-		assert.Equal(t, uint64(300), pos.GetTimestamp())
-	})
-
-	t.Run("L0 segments excluded", func(t *testing.T) {
-		meta, err := newMemoryMeta(t)
-		assert.NoError(t, err)
-
-		// Growing L0 segment with T100
-		seg := &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:            1,
-				CollectionID:  1,
-				PartitionID:   1,
-				InsertChannel: mockVChannel,
-				State:         commonpb.SegmentState_Growing,
-				Level:         datapb.SegmentLevel_L0,
-				DmlPosition: &msgpb.MsgPosition{
-					ChannelName: mockVChannel,
-					MsgID:       []byte{1},
-					Timestamp:   100,
-				},
-			},
-		}
-		err = meta.AddSegment(context.TODO(), seg)
-		assert.NoError(t, err)
-
-		pos := meta.GetMinGrowingSegmentCheckpoint(mockVChannel)
-		assert.Nil(t, pos)
-	})
-
-	t.Run("non-Growing segments excluded", func(t *testing.T) {
-		meta, err := newMemoryMeta(t)
-		assert.NoError(t, err)
-
-		// Flushed L1 segment with T100
-		seg := &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:            1,
-				CollectionID:  1,
-				PartitionID:   1,
-				InsertChannel: mockVChannel,
-				State:         commonpb.SegmentState_Flushed,
-				Level:         datapb.SegmentLevel_L1,
-				DmlPosition: &msgpb.MsgPosition{
-					ChannelName: mockVChannel,
-					MsgID:       []byte{1},
-					Timestamp:   100,
-				},
-			},
-		}
-		err = meta.AddSegment(context.TODO(), seg)
-		assert.NoError(t, err)
-
-		pos := meta.GetMinGrowingSegmentCheckpoint(mockVChannel)
-		assert.Nil(t, pos)
-	})
-}
-
-func TestUpdateChannelCheckpoint_ClampedByGrowing(t *testing.T) {
-	mockVChannel := "fake-by-dev-rootcoord-dml-1-testclamp-v0"
-
-	meta, err := newMemoryMeta(t)
-	assert.NoError(t, err)
-
-	// Register a TEXT collection so clamping is enabled
-	meta.AddCollection(&collectionInfo{
-		ID: 1,
-		Schema: &schemapb.CollectionSchema{
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
-				{FieldID: 101, Name: "text_field", DataType: schemapb.DataType_Text},
-			},
-		},
-	})
-
-	// Add a growing L1 segment at T300
-	seg := &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{
-			ID:            1,
-			CollectionID:  1,
-			PartitionID:   1,
-			InsertChannel: mockVChannel,
-			State:         commonpb.SegmentState_Growing,
-			Level:         datapb.SegmentLevel_L1,
-			DmlPosition: &msgpb.MsgPosition{
-				ChannelName: mockVChannel,
-				MsgID:       []byte{1},
-				Timestamp:   300,
-			},
-		},
-	}
-	err = meta.AddSegment(context.TODO(), seg)
-	assert.NoError(t, err)
-
-	// Update checkpoint with T500, should be clamped to T300 (TEXT collection)
-	err = meta.UpdateChannelCheckpoint(context.TODO(), mockVChannel, &msgpb.MsgPosition{
-		ChannelName: mockVChannel,
-		MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
-		Timestamp:   500,
-	})
-	assert.NoError(t, err)
-
-	cp := meta.GetChannelCheckpoint(mockVChannel)
-	assert.NotNil(t, cp)
-	assert.Equal(t, uint64(300), cp.GetTimestamp())
-}
-
-func TestUpdateChannelCheckpoint_NotClampedForNonTextCollection(t *testing.T) {
-	mockVChannel := "fake-by-dev-rootcoord-dml-1-testclamp-notext-v0"
-
-	meta, err := newMemoryMeta(t)
-	assert.NoError(t, err)
-
-	// Register a non-TEXT collection — clamping should NOT apply
-	meta.AddCollection(&collectionInfo{
-		ID: 2,
-		Schema: &schemapb.CollectionSchema{
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
-				{FieldID: 101, Name: "varchar_field", DataType: schemapb.DataType_VarChar},
-			},
-		},
-	})
-
-	// Add a growing L1 segment at T300 for the non-TEXT collection
-	seg := &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{
-			ID:            10,
-			CollectionID:  2,
-			PartitionID:   1,
-			InsertChannel: mockVChannel,
-			State:         commonpb.SegmentState_Growing,
-			Level:         datapb.SegmentLevel_L1,
-			DmlPosition: &msgpb.MsgPosition{
-				ChannelName: mockVChannel,
-				MsgID:       []byte{1},
-				Timestamp:   300,
-			},
-		},
-	}
-	err = meta.AddSegment(context.TODO(), seg)
-	assert.NoError(t, err)
-
-	// Update checkpoint with T500 — should NOT be clamped (non-TEXT collection)
-	err = meta.UpdateChannelCheckpoint(context.TODO(), mockVChannel, &msgpb.MsgPosition{
-		ChannelName: mockVChannel,
-		MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
-		Timestamp:   500,
-	})
-	assert.NoError(t, err)
-
-	cp := meta.GetChannelCheckpoint(mockVChannel)
-	assert.NotNil(t, cp)
-	assert.Equal(t, uint64(500), cp.GetTimestamp()) // NOT clamped
-}
-
-func TestUpdateChannelCheckpoints_ClampedByGrowing(t *testing.T) {
-	mockVChannel := "fake-by-dev-rootcoord-dml-1-testclampbatch-v0"
-
-	meta, err := newMemoryMeta(t)
-	assert.NoError(t, err)
-
-	// Register a TEXT collection so clamping is enabled
-	meta.AddCollection(&collectionInfo{
-		ID: 1,
-		Schema: &schemapb.CollectionSchema{
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64},
-				{FieldID: 101, Name: "text_field", DataType: schemapb.DataType_Text},
-			},
-		},
-	})
-
-	// Add a growing L1 segment at T300
-	seg := &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{
-			ID:            1,
-			CollectionID:  1,
-			PartitionID:   1,
-			InsertChannel: mockVChannel,
-			State:         commonpb.SegmentState_Growing,
-			Level:         datapb.SegmentLevel_L1,
-			DmlPosition: &msgpb.MsgPosition{
-				ChannelName: mockVChannel,
-				MsgID:       []byte{1},
-				Timestamp:   300,
-			},
-		},
-	}
-	err = meta.AddSegment(context.TODO(), seg)
-	assert.NoError(t, err)
-
-	// Batch update checkpoint with T500, should be clamped to T300 (TEXT collection)
-	err = meta.UpdateChannelCheckpoints(context.TODO(), []*msgpb.MsgPosition{
-		{
-			ChannelName: mockVChannel,
-			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
-			Timestamp:   500,
-		},
-	})
-	assert.NoError(t, err)
-
-	cp := meta.GetChannelCheckpoint(mockVChannel)
-	assert.NotNil(t, cp)
-	assert.Equal(t, uint64(300), cp.GetTimestamp())
 }
 
 func TestCompactionCompletionRecordsSegmentCreateTsFromTaskCreateTs(t *testing.T) {

@@ -606,6 +606,7 @@ ReadManifestWithFFI(const std::string& manifest_path,
     ThrowIfFFIError(loon_transaction_open(base_path.c_str(),
                                           properties,
                                           version,
+                                          -1,
                                           LOON_TRANSACTION_RESOLVE_FAIL,
                                           1,
                                           &transaction.handle),
@@ -857,6 +858,7 @@ loon_milvus_table_create_manifest_from_segment_manifests(
             loon_transaction_open(base_path,
                                   properties,
                                   0,
+                                  -1,
                                   LOON_TRANSACTION_RESOLVE_OVERWRITE,
                                   10,
                                   &transaction.handle),
@@ -914,9 +916,9 @@ loon_milvus_table_create_manifest_from_segment_manifests(
         AppendImportedStats(transaction.handle, imported_stats);
 
         int64_t committed_version = 0;
-        ThrowIfFFIError(
-            loon_transaction_commit(transaction.handle, &committed_version),
-            "commit milvus-table target manifest");
+        ThrowIfFFIError(loon_transaction_commit(
+                            transaction.handle, &committed_version, nullptr),
+                        "commit milvus-table target manifest");
         json manifest_path = {
             {"base_path", std::string(base_path)},
             {"ver", committed_version},

@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
@@ -499,11 +498,6 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// validate row level security
-	if err := common.ValidateRLSProperties(t.GetProperties()...); err != nil {
-		return err
-	}
-
 	// Validate timezone
 	tz, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.GetProperties())
 	if exist && !timestamptz.IsTimezoneValid(tz) {
@@ -568,6 +562,10 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 	}
 
 	if err := t.validateTTL(); err != nil {
+		return err
+	}
+
+	if err := checkArrayFeatureGate(t.schema); err != nil {
 		return err
 	}
 
@@ -660,6 +658,9 @@ func (t *AddCollectionFieldTask) PreExecute(ctx context.Context) error {
 	if err := ValidateField(t.fieldSchema, t.oldSchema); err != nil {
 		return err
 	}
+	if err := checkArrayFeatureGateField(t.fieldSchema); err != nil {
+		return err
+	}
 	mlog.Info(context.TODO(), "PreExecute addField task done", mlog.Any("field schema", t.fieldSchema))
 	return nil
 }
@@ -736,6 +737,9 @@ func (t *AddCollectionStructFieldTask) PreExecute(ctx context.Context) error {
 
 	t.structFieldSchema = proto.Clone(t.GetStructArrayFieldSchema()).(*schemapb.StructArrayFieldSchema)
 	if err := validateAddStructFieldRequest(t.oldSchema, t.structFieldSchema); err != nil {
+		return err
+	}
+	if err := checkArrayFeatureGateStruct(t.structFieldSchema); err != nil {
 		return err
 	}
 	transformStructArrayFieldSubNames(t.structFieldSchema)
@@ -1046,7 +1050,15 @@ func (t *AlterCollectionSchemaTask) PreExecute(ctx context.Context) error {
 
 	switch action.GetOp().(type) {
 	case *milvuspb.AlterCollectionSchemaRequest_Action_AddRequest:
-		return t.preExecuteAdd(ctx)
+		if err := t.preExecuteAdd(ctx); err != nil {
+			return err
+		}
+		for _, fieldInfo := range action.GetAddRequest().GetFieldInfos() {
+			if err := checkArrayFeatureGateField(fieldInfo.GetFieldSchema()); err != nil {
+				return err
+			}
+		}
+		return nil
 	case *milvuspb.AlterCollectionSchemaRequest_Action_DropRequest:
 		return t.preExecuteDrop(ctx)
 	default:
@@ -2087,39 +2099,6 @@ func (t *AlterCollectionTask) PreExecute(ctx context.Context) error {
 		t.CollectionID = collectionID
 		return nil
 	}
-	requiresManageRLS := false
-	for _, property := range t.GetProperties() {
-		if property.GetKey() == common.RLSEnabledKey || property.GetKey() == common.RLSForceKey {
-			requiresManageRLS = true
-			break
-		}
-	}
-	if !requiresManageRLS {
-		for _, key := range t.GetDeleteKeys() {
-			if key == common.RLSEnabledKey || key == common.RLSForceKey {
-				requiresManageRLS = true
-				break
-			}
-		}
-	}
-	if requiresManageRLS {
-		if err := resolveCollectionInfo(); err != nil {
-			return err
-		}
-		canonicalDBName := collInfo.DBName
-		if canonicalDBName == "" {
-			canonicalDBName = t.GetDbName()
-		}
-		// The node is always injected by the composition root; white-box tests
-		// that build the task without a node run with authorization disabled,
-		// for which the root privilege check is a no-op anyway.
-		if t.node != nil {
-			if err := t.node.CheckManageRLSPrivilege(ctx, t.GetMetaCache(), t.AlterCollectionRequest,
-				canonicalDBName, collInfo.Schema.GetName()); err != nil {
-				return err
-			}
-		}
-	}
 
 	// External source/spec form an atomic tuple bound to the physical data
 	// layout. The only supported way to change them is RefreshExternalCollection,
@@ -2140,16 +2119,6 @@ func (t *AlterCollectionTask) PreExecute(ctx context.Context) error {
 	}
 	if err := common.ValidateNamespaceShardingEnabledNotAltered(t.GetProperties(), t.GetDeleteKeys()); err != nil {
 		return err
-	}
-	if err := common.ValidateRLSProperties(t.GetProperties()...); err != nil {
-		return err
-	}
-	for _, key := range t.GetDeleteKeys() {
-		for _, expected := range []string{common.RLSEnabledKey, common.RLSForceKey} {
-			if strings.EqualFold(key, expected) && key != expected {
-				return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", key, expected)
-			}
-		}
 	}
 
 	if err := resolveCollectionInfo(); err != nil {

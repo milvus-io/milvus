@@ -244,10 +244,15 @@ func Handle(ctx context.Context, fn func() (bool, error), opts ...Option) error 
 // retriable/InputError classification of whatever was wrapped.
 var errUnrecoverable = errors.New("unrecoverable error")
 
-// Unrecoverable method wrap an error to unrecoverableError. This will make retry
-// quick return.
+// Unrecoverable marks an error so retry returns immediately, without changing
+// its code, classification or underlying cause.
 func Unrecoverable(err error) error {
-	return merr.Combine(err, errUnrecoverable)
+	if err == nil {
+		return errUnrecoverable
+	}
+	// Combine exposes only its tail through Unwrap, hiding the original error
+	// from merr.Code and errors.As. A mark preserves that chain for RPC Status.
+	return merr.Mark(err, errUnrecoverable)
 }
 
 // IsRecoverable is used to judge whether the error is wrapped by unrecoverableError.

@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
@@ -80,15 +81,30 @@ func TestDeletePartitionIsolation(t *testing.T) {
 func TestBootstrapRetriesTransformReads(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	manager := walsummary.NewManager(walsummary.ManagerConfig{PChannel: "p1"})
-	manager.ObserveMessage(ctx, newPartitionDeleteMessage(t, 10, true))
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	store := walsummary.NewStore(cm, "p1", 1)
+	entry := messageutil.BuildTransformLogEntry(newPartitionDeleteMessage(t, 10, true), messageutil.TransformEntryOption{})
+	footer, size, err := store.WriteChunk(ctx, 0, map[string]*walsummary.ChunkSections{
+		"v1": {Transform: []*streamingpb.VChannelSummaryTransformRecord{{TimeTick: entry.GetTimeTick(), Delete: entry.GetDelete()}}},
+	}, walsummary.TimeTickRange{Start: 1, End: 100})
+	require.NoError(t, err)
+	require.NoError(t, store.WriteManifest(ctx, &streamingpb.PChannelSummaryManifest{
+		Chunks: []*streamingpb.PChannelSummaryChunkIndexEntry{{
+			Generation: 0, Term: 1, ObjectSize: size, StartTimeTick: 1, EndTimetick: 100, Vchannels: footer.GetChunks(),
+		}},
+		Coverage: &streamingpb.SummaryCoverage{Generation: 0, Term: 1, StartTimeTick: 1, EndTimeTick: 100},
+	}))
+	manager := walsummary.NewManager(walsummary.ManagerConfig{PChannel: "p1", Term: 1, Store: store})
+	require.NoError(t, manager.Restore(ctx))
+	// Inject below the shared load so bootstrap exercises real chunk retry,
+	// decoding and delivery rather than bypassing the owner of retries.
 	var reads atomic.Int64
-	var original func(*walsummary.Manager, context.Context, string, uint64, uint64, walsummary.ReadLimits) (walsummary.TransformBatch, error)
-	readPatch := mockey.Mock((*walsummary.Manager).ReadTransform).Origin(&original).To(func(m *walsummary.Manager, ctx context.Context, vc string, after, through uint64, limits walsummary.ReadLimits) (walsummary.TransformBatch, error) {
+	var original func(*storage.LocalChunkManager, context.Context, string) ([]byte, error)
+	readPatch := mockey.Mock((*storage.LocalChunkManager).Read).Origin(&original).To(func(cm *storage.LocalChunkManager, ctx context.Context, key string) ([]byte, error) {
 		if reads.Add(1) <= 2 {
-			return walsummary.TransformBatch{}, merr.ErrIoFailed
+			return nil, merr.ErrIoTooManyRequests
 		}
-		return original(m, ctx, vc, after, through, limits)
+		return original(cm, ctx, key)
 	}).Build()
 	defer readPatch.UnPatch()
 	var applied int

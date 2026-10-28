@@ -14,6 +14,9 @@ extraConfigFiles:
       fileResource:
         mode:
           proxy: sync
+    proxy:
+      # Temporary preview switch; removed together with the element-null / nested Array gate.
+      enableElementNullAndNestedArray: true
     indexCoord:
       scheduler:
         interval: 100

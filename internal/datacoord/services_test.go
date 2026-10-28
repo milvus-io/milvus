@@ -1328,7 +1328,7 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 	})
 
 	t.Run("test meta non exist", func(t *testing.T) {
-		s := &Server{meta: newEmptyTestMeta()}
+		s := &Server{meta: newEmptyTestMeta(), notifyStatsChan: make(chan UniqueID, 1)}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		req := &datapb.AlterCollectionRequest{
@@ -1340,12 +1340,13 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		assert.NotNil(t, resp)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(s.meta.ListCollections()))
+		assert.Equal(t, UniqueID(1), <-s.notifyStatsChan)
 	})
 
 	t.Run("test update meta", func(t *testing.T) {
 		ms := metacache.NewMetaStore(nil)
 		ms.PutCollection(&collectionInfo{ID: 1})
-		s := &Server{meta: &meta{metaStore: ms}}
+		s := &Server{meta: &meta{metaStore: ms}, notifyStatsChan: make(chan UniqueID, 1)}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		req := &datapb.AlterCollectionRequest{
@@ -1363,6 +1364,32 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		coll = s.meta.GetCollection(1)
 		assert.NotNil(t, coll)
 		assert.NotNil(t, coll.Properties)
+		assert.Equal(t, UniqueID(1), <-s.notifyStatsChan, "an altered schema may add fields that need stats")
+	})
+
+	t.Run("published external source notifies index build", func(t *testing.T) {
+		spec := `{"format":"parquet"}`
+		ms := metacache.NewMetaStore(nil)
+		ms.PutCollection(&collectionInfo{ID: 100, Schema: externalRefreshIndexSchema("s3://bucket/a", spec)})
+		notifyIndexChan := make(chan UniqueID, 1)
+		s := &Server{meta: &meta{metaStore: ms}, notifyIndexChan: notifyIndexChan}
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+		ctx := context.Background()
+
+		resp, err := s.BroadcastAlteredCollection(ctx, &datapb.AlterCollectionRequest{
+			CollectionID: 100,
+			Schema:       externalRefreshIndexSchema("s3://bucket/a", spec),
+		})
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+		assert.Empty(t, notifyIndexChan)
+
+		resp, err = s.BroadcastAlteredCollection(ctx, &datapb.AlterCollectionRequest{
+			CollectionID: 100,
+			Schema:       externalRefreshIndexSchema("s3://bucket/b", spec),
+		})
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+		require.Len(t, notifyIndexChan, 1)
+		assert.Equal(t, UniqueID(100), <-notifyIndexChan)
 	})
 
 	// RootCoord rebuilds this request from its authoritative meta on every
@@ -2560,8 +2587,11 @@ func TestServer_FlushAll(t *testing.T) {
 		defer mockGetClusterChannels.UnPatch()
 
 		// Mock broadcaster
+		var broadcastMsg message.BroadcastMutableMessage
 		bapi := mock_broadcaster.NewMockBroadcastAPI(t)
 		bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, msg message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
+			broadcastMsg = msg
+			require.True(t, msg.IsUnreplicable())
 			require.True(t, msg.BroadcastHeader().AckSyncUp, "FlushAll must wait for consuming-side completion")
 			results := make(map[string]*message.AppendResult)
 			for _, vchannel := range msg.BroadcastHeader().VChannels {
@@ -2591,12 +2621,12 @@ func TestServer_FlushAll(t *testing.T) {
 
 		// Register mock broadcaster
 		mb := mock_broadcaster.NewMockBroadcaster(t)
-		mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything).Return(bapi, nil)
+		mb.EXPECT().WithUnreplicableResourceKeys(mock.Anything, mock.Anything).Return(bapi, nil)
 		mb.EXPECT().Close().Return().Maybe()
 		broadcast.ResetBroadcaster()
 		broadcast.Register(mb)
 
-		// Register mock balancer for balance.GetWithContext in StartBroadcastWithResourceKeys
+		// Register mock balancer for balance.GetWithContext in StartUnreplicableBroadcastWithResourceKeys
 		b := mock_balancer.NewMockBalancer(t)
 		b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil)
 		b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, callback balancer.WatchChannelAssignmentsCallback) error {
@@ -2613,8 +2643,19 @@ func TestServer_FlushAll(t *testing.T) {
 		req := &datapb.FlushAllRequest{}
 		resp, err := server.FlushAll(context.Background(), req)
 
-		assert.NoError(t, err)
-		assert.NoError(t, merr.Error(resp.GetStatus()))
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		require.Len(t, resp.GetFlushAllMsgs(), 2)
+		for pchannel, protoMsg := range resp.GetFlushAllMsgs() {
+			msg := message.MilvusMessageToImmutableMessage(protoMsg)
+			assert.False(t, msg.IsUnreplicable(), "backup must be able to replicate the returned position")
+			assert.Equal(t, message.MessageTypeFlushAll, msg.MessageType())
+			assert.Equal(t, pchannel, msg.PChannel())
+			assert.True(t, rmq.NewRmqID(1).EQ(msg.MessageID()))
+			assert.True(t, rmq.NewRmqID(1).EQ(msg.LastConfirmedMessageID()))
+			assert.NotZero(t, msg.TimeTick())
+		}
+		assert.True(t, broadcastMsg.IsUnreplicable(), "the original WAL broadcast must remain local")
 	})
 }
 
@@ -5461,6 +5502,8 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 		ctx := context.Background()
 
 		registry.ResetRegistration()
+		drainBuildIndexChForTest()
+		defer drainBuildIndexChForTest()
 
 		mockUpdateSegmentsInfo := mockey.Mock((*meta).UpdateSegmentsInfo).To(
 			func(m *meta, ctx context.Context, operators ...UpdateOperator) error {
@@ -5499,6 +5542,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 			},
 		})
 		assert.NoError(t, err)
+		assertBuildIndexEvents(t, 1, 2)
 
 		recomputeManager.mu.Lock()
 		defer recomputeManager.mu.Unlock()
@@ -5539,6 +5583,8 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 		ctx := context.Background()
 
 		registry.ResetRegistration()
+		drainBuildIndexChForTest()
+		defer drainBuildIndexChForTest()
 
 		mockUpdateSegmentsInfo := mockey.Mock((*meta).UpdateSegmentsInfo).To(
 			func(m *meta, ctx context.Context, operators ...UpdateOperator) error {
@@ -5573,6 +5619,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 			},
 		})
 		assert.Error(t, err)
+		assertNoBuildIndexEvent(t)
 	})
 
 	t.Run("v2_column_groups_dispatches_operator", func(t *testing.T) {
@@ -6597,6 +6644,35 @@ func TestHandleCommitVchannelRPCIsNoOpForCoordinatorOwnedJob(t *testing.T) {
 	require.Error(t, merr.CheckRPCCall(resp, err))
 }
 
+func TestHandleCommitVchannelRPC_MissingJob_PrimaryIsNoOp(t *testing.T) {
+	importMeta, _ := newTestImportMeta(t)
+	mockReplicateConfiguration(t, nil)
+	server := &Server{importMeta: importMeta}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	// A StreamingNode replaying an old CommitImport after checkGC removed the
+	// job must get success, or it retries forever and blocks the pchannel.
+	resp, err := server.HandleCommitVchannel(context.Background(), &datapb.HandleCommitVchannelRequest{
+		JobId: 13, Vchannel: "vchan-0", CommitTimestamp: 300,
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	require.Nil(t, importMeta.GetJob(context.Background(), 13))
+}
+
+func TestHandleCommitVchannelRPC_MissingJob_SecondaryRetries(t *testing.T) {
+	importMeta, _ := newTestImportMeta(t)
+	mockReplicateConfiguration(t, secondaryReplicateConfiguration())
+	server := &Server{importMeta: importMeta}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	resp, err := server.HandleCommitVchannel(context.Background(), &datapb.HandleCommitVchannelRequest{
+		JobId: 13, Vchannel: "vchan-0", CommitTimestamp: 300,
+	})
+	err = merr.CheckRPCCall(resp, err)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, merr.ErrImportSysFailed))
+}
+
 func TestLoadableProjectionUsesFinalSegments(t *testing.T) {
 	ctx := context.Background()
 	segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
@@ -6608,9 +6684,10 @@ func TestLoadableProjectionUsesFinalSegments(t *testing.T) {
 			InsertChannel: channel,
 			State:         state,
 			IsInvisible:   invisible,
+			Stats:         &datapb.Statistics{InsertBinlogSize: 2048, StatsBinlogSize: 1024, DeltaBinlogSize: 512},
 			Binlogs: []*datapb.FieldBinlog{{
 				FieldID: 100,
-				Binlogs: []*datapb.Binlog{{LogID: id}},
+				Binlogs: []*datapb.Binlog{{LogID: id, MemorySize: 999999}},
 			}},
 		}})
 	}
@@ -6623,8 +6700,8 @@ func TestLoadableProjectionUsesFinalSegments(t *testing.T) {
 	actual, err := meta.loadableProjection(ctx, 100)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []dataview.LoadableSegment{
-		{SegmentID: 110, VChannel: "vchan-0", PartitionID: 10},
-		{SegmentID: 120, VChannel: "vchan-0", PartitionID: 10},
+		{SegmentID: 110, VChannel: "vchan-0", PartitionID: 10, Size: 2048},
+		{SegmentID: 120, VChannel: "vchan-0", PartitionID: 10, Size: 2048},
 	}, actual)
 }
 

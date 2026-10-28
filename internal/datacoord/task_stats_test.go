@@ -1183,6 +1183,36 @@ func (s *statsTaskSuite) TestSetJobInfo() {
 	s.mt.segments = origSegments
 }
 
+func (s *statsTaskSuite) TestSetSortJobInfoEnqueuesTargetSegment() {
+	drainBuildIndexChForTest()
+	defer drainBuildIndexChForTest()
+
+	s.mt.segments.SetSegment(s.targetID, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            s.targetID,
+			CollectionID:  s.collID,
+			PartitionID:   s.partID,
+			InsertChannel: "ch1",
+			State:         commonpb.SegmentState_Flushed,
+		},
+	})
+	st := newStatsTask(&indexpb.StatsTask{
+		TaskID:          s.taskID,
+		SegmentID:       s.segID,
+		TargetSegmentID: s.targetID,
+		SubJobType:      indexpb.StatsSubJob_Sort,
+		State:           indexpb.JobState_JobStateInProgress,
+	}, 1, s.mt, nil, nil, newIndexEngineVersionManager())
+
+	err := st.SetJobInfo(context.Background(), &workerpb.StatsResult{
+		TaskID: s.taskID,
+		State:  indexpb.JobState_JobStateFinished,
+	})
+
+	s.NoError(err)
+	assertBuildIndexEvents(s.T(), s.targetID)
+}
+
 // TestSetJobInfoJSONStatsResultManifestHandling exercises the structured-delta
 // publish path for a standalone JsonKeyIndexJob: DataCoord rebuilds the JSON key
 // StatEntries from the worker's raw result and runs the manifest transaction
@@ -1250,12 +1280,11 @@ func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
 
 			commitCalled := false
 			mockCommit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
-				func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
+				func(_ context.Context, _ *packed.ManifestIOContext, baseManifest string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 					commitCalled = true
 					// Rebased on the segment's current manifest (version 2), not the
 					// worker's plan-time base.
-					s.Equal(basePath, base)
-					s.EqualValues(2, version)
+					s.Equal(currentManifest, baseManifest)
 					s.Require().Len(updates.Stats, 1)
 					s.Equal("json_stats.500", updates.Stats[0].Key)
 					// Manifest stores absolute paths reconstructed from the relative result.
@@ -1370,12 +1399,11 @@ func (s *statsTaskSuite) TestSetJobInfoTextStatsResultManifestHandling() {
 
 			commitCalled := false
 			mockCommit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
-				func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
+				func(_ context.Context, _ *packed.ManifestIOContext, baseManifest string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 					commitCalled = true
 					// Rebased on the segment's current manifest (version 2), not the
 					// worker's plan-time base.
-					s.Equal(basePath, base)
-					s.EqualValues(2, version)
+					s.Equal(currentManifest, baseManifest)
 					s.Require().Len(updates.Stats, 1)
 					s.Equal("text_index.500", updates.Stats[0].Key)
 					s.Equal(files, updates.Stats[0].Files)
@@ -1703,11 +1731,14 @@ func (s *statsTaskSuite) TestQueryTaskOnWorkerDiscardsStaleStatsResult() {
 				}).Build()
 			defer mockDropStats.UnPatch()
 			st := newStatsTask(task, 1, s.mt, nil, nil, newIndexEngineVersionManager())
+			drainStatsBuildChForTest()
+			defer drainStatsBuildChForTest()
 
 			st.QueryTaskOnWorker(cluster)
 
 			s.Equal(indexpb.JobState_JobStateNone, st.GetState())
 			s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(s.segID, indexpb.StatsSubJob_TextIndexJob))
+			s.Equal([]UniqueID{s.segID}, drainStatsBuildChForTest(), "a rejected result must send the segment back to discovery")
 			s.Equal([]int64{task.GetTaskID()}, droppedStatsTasks)
 			s.Equal([]int64{task.GetTaskID()}, droppedWorkerTasks)
 			if testCase.expectCleanup {

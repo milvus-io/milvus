@@ -10,7 +10,26 @@ import (
 // The snapshot is taken under the ShardViewManager's mutex, so all fields are
 // consistent with each other: segment placements reflect exactly the views whose
 // state is reported.
+// SchemaUpView is the newest serving view for one exact read schema.
+type SchemaUpView struct {
+	Version         qviews.QueryViewVersion
+	LoadInfoVersion uint64
+}
+
 type ShardStats struct {
+	UpBySchema map[int32]SchemaUpView
+
+	// Per-view placements are independent of merged physical resource progress.
+	UpPlacement        *ViewPlacement
+	PreparingPlacement *ViewPlacement
+	// Exact view footprints, including empty partitions and retained Dropping
+	// references. ResidentNodes disappear only after durable view removal.
+	UpNodes        []int64
+	PreparingNodes []int64
+	ResidentNodes  []int64
+	// Resources contains confirmed ready resources. Matching the full key is
+	// conservative: a different DataVersion may still be physically reusable.
+	Resources map[int64]map[ResourceKey]struct{}
 	// UpVersion is the version of the current Up view, if any.
 	// Nil when no view is currently Up.
 	UpVersion *qviews.QueryViewVersion
@@ -19,6 +38,10 @@ type ShardStats struct {
 	// Zero when no view is currently Up.
 	UpLoadInfoVersion uint64
 
+	// Schema revisions of the serving and in-flight views.
+	UpSchemaVersion        int32
+	PreparingSchemaVersion int32
+
 	// PreparingVersion is the version of the current Preparing or Ready view,
 	// if any. Nil when there is no in-flight view.
 	PreparingVersion *qviews.QueryViewVersion
@@ -26,11 +49,34 @@ type ShardStats struct {
 	// Segments lists every segment currently placed for this shard, keyed by
 	// segmentID. The value is node-level state: the same segment may appear on
 	// multiple nodes while views overlap, but one node has at most one state.
+	// Each segment also carries the published LogicalSize footprint (see
+	// SegmentStats.LogicalSize).
 	//
 	// Down view placements are reported as Ready because QueryNodes do not
 	// receive Down and the loaded segments are still more reusable than
 	// Preparing placements. Dropping and Dropped views are excluded.
 	Segments map[int64]*SegmentStats
+}
+
+// ViewPlacement is immutable after publication. Missing statistics can be completed
+// from the cache's retained footprint without confusing known zero with absent.
+type ViewPlacement struct {
+	Assignments map[int64]int64
+	// PartitionSizes keeps exact per-view footprints by partition and node so
+	// a released partition can leave target accounting before view teardown.
+	PartitionSizes map[int64]map[int64]int64
+	// LostStats lists Segment IDs without a published footprint.
+	LostStats []int64
+}
+
+// ResourceKey identifies a compatible loading requirement within a collection.
+// DataVersion covers membership/manifest revisions; LoadInfoVersion covers fields
+// and indexes. Unknown load versions are not published as reusable resources.
+type ResourceKey struct {
+	PartitionID     int64
+	SegmentID       int64
+	DataVersion     qviews.DataVersion
+	LoadInfoVersion uint64
 }
 
 // SegmentState is the per-node segment progress observed by Coord. Larger
@@ -65,4 +111,11 @@ type SegmentStats struct {
 	// on multiple nodes while views overlap, but one node only has one state for
 	// a given segment.
 	Nodes map[int64]SegmentState
+
+	// RowNum and LogicalSize are one footprint from a retained DataViewRef.
+	// LostStats means the entire footprint is unavailable; zero values alone
+	// never indicate missing statistics.
+	RowNum      int64
+	LogicalSize int64
+	LostStats   bool
 }

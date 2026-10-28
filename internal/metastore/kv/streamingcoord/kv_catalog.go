@@ -203,6 +203,20 @@ func (c *catalog) SaveBroadcastTask(ctx context.Context, broadcastID uint64, tas
 	return c.metaKV.Save(ctx, key, string(v))
 }
 
+func (c *catalog) RemoveBroadcastTasks(ctx context.Context, broadcastIDs []uint64) error {
+	keys := make([]string, 0, len(broadcastIDs))
+	for _, id := range broadcastIDs {
+		keys = append(keys, buildBroadcastTaskPath(id))
+	}
+	maxTxnNum := max(1, paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt())
+	return etcd.RemoveByBatchWithLimit(keys, maxTxnNum, func(batch []string) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return c.metaKV.MultiRemove(ctx, batch)
+	})
+}
+
 // buildPChannelInfoPath builds the path for pchannel info.
 func buildPChannelInfoPath(name string) string {
 	return PChannelMetaPrefix + name

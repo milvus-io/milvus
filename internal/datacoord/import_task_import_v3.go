@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -194,15 +194,12 @@ func (t *importTaskV3) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 	err = cluster.CreateImportV3(nodeID, req, t.GetCollectionID())
 	if err != nil {
 		mlog.Warn(context.TODO(), "create import v3 task failed", WrapTaskLog(t, mlog.Err(err))...)
-		if errors.Is(err, merr.ErrNodeNotFound) || !common.IsTerminalImportV3Err(err) {
-			// Never re-use a run whose Create result is uncertain, and treat a
-			// vanished node as ownership lost. prepareRetry allocates a fresh
-			// segment id and log range, records the superseded segment id in
-			// old_segment_ids, and increments run_id; this segment is created
-			// again only by the next dispatch.
-			t.prepareRetry(cluster)
-		} else {
+		// Raw transport errors are not terminal and retry; a deterministic
+		// rejection fails the task.
+		if importcommon.IsTerminalImportV3Err(err) {
 			t.fail(err.Error())
+		} else {
+			t.prepareRetry(cluster)
 		}
 		return
 	}
@@ -217,11 +214,8 @@ func (t *importTaskV3) QueryTaskOnWorker(cluster session.Cluster) {
 	p := t.task.Load()
 	resp, err := cluster.QueryImportV3(t.GetNodeID(), &datapb.QueryImportTaskV3Request{JobId: p.GetJobId(), TaskId: p.GetTaskId(), RunId: p.GetRunId()})
 	if err != nil {
-		if errors.Is(err, merr.ErrNodeNotFound) || !common.IsTerminalImportV3Err(err) {
-			t.prepareRetry(cluster)
-		} else {
-			t.fail(err.Error())
-		}
+		// The dispatch/query outcome is unknown, so never reuse this run.
+		t.prepareRetry(cluster)
 		return
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Retry {
@@ -248,7 +242,7 @@ func (t *importTaskV3) QueryTaskOnWorker(cluster session.Cluster) {
 			oldRows = segment.GetNumOfRows()
 		}
 		if err := t.acceptResult(resp.GetSegments()); err != nil {
-			if common.IsTerminalImportV3Err(err) {
+			if importcommon.IsTerminalImportV3Err(err) {
 				t.fail(err.Error())
 				return
 			}
@@ -256,10 +250,8 @@ func (t *importTaskV3) QueryTaskOnWorker(cluster session.Cluster) {
 			return
 		}
 		if results := resp.GetSegments(); len(results) == 1 && results[0].GetRows() > 0 {
-			select {
-			case getBuildIndexChSingleton() <- p.GetSegmentId():
-			default:
-			}
+			notifySegmentIndexBuild(p.GetSegmentId())
+			notifySegmentStatsBuild(p.GetSegmentId())
 		}
 		if err := t.importMeta.UpdateTask(context.TODO(), t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed)); err != nil {
 			mlog.Warn(context.TODO(), "persist accepted import v3 result marker failed", WrapTaskLog(t, mlog.Err(err))...)
@@ -302,8 +294,7 @@ func (t *importTaskV3) prepareRetry(cluster session.Cluster) {
 	newSegmentID, err := t.alloc.AllocID(context.TODO())
 	if err != nil {
 		// AllocID is a mixCoord RPC with a short timeout; a transient failure
-		// must not fail the job (V2 parity: the import task path only counts
-		// the attempt and returns). Nothing was allocated yet, so there is
+		// must not fail the job. Nothing was allocated yet, so there is
 		// nothing to roll back; the next tick re-enters prepareRetry through
 		// the Query path, whose worker side reports ErrNodeNotFound for the
 		// run dropped above.

@@ -18,6 +18,8 @@
 #include "common/Schema.h"
 namespace milvus::segcore {
 
+inline constexpr int64_t kTimestampIndexSliceRows = 4096;
+
 class TimestampIndex {
  public:
     void
@@ -55,6 +57,9 @@ class TimestampIndex {
     // numSlice + 1
     std::vector<Timestamp> timestamp_barriers_;
 };
+
+TimestampIndex
+BuildTimestampIndex(const Timestamp* data, size_t num_rows);
 
 std::vector<int64_t>
 GenerateFakeSlices(const Timestamp* timestamps,

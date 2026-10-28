@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
@@ -479,6 +480,28 @@ func CompareManifestPath(a, b string) (int, error) {
 	}
 }
 
+// ManifestPathKey returns the identity of a manifest path: its base path and
+// version. Spellings of the same revision (JSON key order, optional fields)
+// share one key, so compare and index manifest paths by this key rather than
+// by their text. A value that is not a manifest path, such as an external
+// table file path, is returned unchanged.
+func ManifestPathKey(path string) string {
+	// UnmarshalManifestPath accepts leading whitespace too.
+	if !strings.HasPrefix(strings.TrimSpace(path), "{") {
+		return path
+	}
+	basePath, version, err := UnmarshalManifestPath(path)
+	if err != nil || basePath == "" {
+		return path
+	}
+	return MarshalManifestPath(basePath, version)
+}
+
+// SameManifestPath reports whether two manifest paths name the same revision.
+func SameManifestPath(a, b string) bool {
+	return a == b || ManifestPathKey(a) == ManifestPathKey(b)
+}
+
 // LobFileInfo represents metadata for a LOB (Large Object) file.
 // used for TEXT column compaction strategy decision (hole ratio calculation)
 type LobFileInfo struct {
@@ -508,7 +531,7 @@ func AddLobFilesToTransaction(basePath string, version int64, storageConfig *ind
 
 	// open transaction
 	var cTransactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_open(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
+	result := C.loon_transaction_open(cBasePath, cProperties, C.int64_t(version), C.int64_t(-1), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return 0, merr.WrapErrStorage(err, "failed to begin transaction")
 	}
@@ -536,7 +559,7 @@ func AddLobFilesToTransaction(basePath string, version int64, storageConfig *ind
 
 	// commit transaction
 	var committedVersion C.int64_t
-	result = C.loon_transaction_commit(cTransactionHandle, &committedVersion)
+	result = C.loon_transaction_commit(cTransactionHandle, &committedVersion, nil)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return 0, merr.WrapErrStorage(err, "failed to commit transaction")
 	}
@@ -563,7 +586,7 @@ func GetManifestLobFiles(manifestPath string, storageConfig *indexpb.StorageConf
 
 	// open transaction to get manifest
 	var cTransactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_open(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
+	result := C.loon_transaction_open(cBasePath, cProperties, C.int64_t(version), C.int64_t(-1), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, merr.WrapErrStorage(err, "failed to begin transaction")
 	}

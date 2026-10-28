@@ -265,6 +265,13 @@ func collectSegmentFiles(
 			return nil, merr.Wrapf(pinErr, "failed to resolve pinned manifest object for segment %d", source.GetSegmentId())
 		}
 		allFiles = excludeUnpinnedManifestRevisions(allFiles, pinnedManifest)
+		// Indexes are copied from the pinned snapshot's explicit index list below.
+		// A directory walk also sees obsolete builds, which must not be inherited
+		// under their source BuildIDs by the new segment.
+		indexPrefix := strings.TrimSuffix(walkBasePath, "/") + "/_index/"
+		allFiles = slices.DeleteFunc(allFiles, func(file string) bool {
+			return strings.HasPrefix(snapshotstorage.NormalizeSnapshotObjectPath(file), indexPrefix)
+		})
 
 		// Empty file list is OK for V3 — segment may have only deltas and no insert binlogs
 		files.InsertBinlogs = allFiles
@@ -424,6 +431,26 @@ func CopySegmentAndIndexFiles(
 	if err != nil {
 		return nil, nil, merr.Wrap(err, "failed to generate file mappings")
 	}
+	// Build index metadata before copying so path validation cannot leave files
+	// behind for a task that was already known to have an invalid destination.
+	indexInfos, textIndexInfos, jsonKeyIndexInfos, err := buildIndexInfoFromSource(source, target, mappings)
+	if err != nil {
+		return nil, nil, merr.Wrap(err, "failed to build index info")
+	}
+
+	// Validate every newly published index path before copying any bytes.
+	// Old tasks and old workers must not produce external-path entries after
+	// manifest publication is enabled.
+	if useManifest && len(target.GetTargetIndexes()) > 0 {
+		manifest, err := transformManifestPath(source.GetManifestPath(), source, target)
+		if err != nil {
+			return nil, nil, err
+		}
+		if _, err := buildTargetManifestIndexes(ctx, manifest, target, source.GetNumOfRows(), indexInfos); err != nil {
+			return nil, nil, err
+		}
+	}
+
 	// Step 3: Execute all copy operations
 	copiedFiles := make([]string, 0, len(mappings))
 	for src, dst := range mappings {
@@ -472,12 +499,6 @@ func CopySegmentAndIndexFiles(
 			mlog.Int("pbPathCount", logicalPathCount))
 	}
 
-	// Step 4: Build index metadata from source
-	indexInfos, textIndexInfos, jsonKeyIndexInfos, err := buildIndexInfoFromSource(source, target, mappings)
-	if err != nil {
-		return nil, copiedFiles, merr.Wrap(err, "failed to build index info")
-	}
-
 	// Step 5: Generate segment metadata with path mappings
 	segmentInfo, err := generateSegmentInfoFromSource(source, target, mappings)
 	if err != nil {
@@ -515,7 +536,7 @@ func CopySegmentAndIndexFiles(
 		if err != nil {
 			return nil, copiedFiles, merr.Wrap(err, "failed to republish copied manifest indexes")
 		}
-		if targetManifestPath != copiedManifestPath {
+		if !packed.SameManifestPath(targetManifestPath, copiedManifestPath) {
 			revisionFile, err := packed.ManifestFilePath(targetManifestPath)
 			if err != nil {
 				return nil, copiedFiles, err
@@ -580,11 +601,9 @@ func CopySegmentAndIndexFiles(
 // merely re-based onto the target path. That is faithful for everything stored
 // relative to the segment's base path - column groups and their per-file
 // properties, stats, LOB - which is why the copy preserves them exactly. It is
-// NOT faithful for index entries: an index artifact lives outside the segment
-// directory, so its stored relative path walks back out of the base and thereby
-// hardcodes the SOURCE collection/partition/segment/build IDs. Re-basing the
-// pointer moves where that walk starts but not the IDs it encodes, so an
-// inherited entry keeps pointing at the source's artifacts.
+// NOT faithful for index entries: legacy external paths encode source IDs,
+// and segment-rooted paths still encode the source BuildID. Both must be
+// replaced with the destination paths and newly allocated BuildIDs.
 //
 // Every inherited entry is therefore dropped and re-derived from the artifacts
 // this copy actually wrote, in one transaction on top of the copied manifest, so
@@ -641,11 +660,7 @@ func republishCopiedManifestIndexes(
 		return "", nil, err
 	}
 
-	basePath, version, err := packed.UnmarshalManifestPath(targetManifestPath)
-	if err != nil {
-		return "", nil, merr.Wrap(err, "failed to parse copied manifest path")
-	}
-	republished, err := packed.CommitManifestUpdates(basePath, version, targetStorageConfig,
+	republished, err := packed.CommitManifestUpdates(targetManifestPath, targetStorageConfig,
 		&packed.ManifestUpdates{DropIndexes: drops, Indexes: adds})
 	if err != nil {
 		return "", nil, merr.Wrap(err, "failed to commit copied manifest indexes")
@@ -1137,6 +1152,9 @@ func buildIndexInfoFromSource(
 			IndexName:                 srcIndex.GetIndexName(),
 			IndexStorePathVersion:     srcIndex.GetIndexStorePathVersion(),
 		}
+		if target.IndexStorePathVersion != nil {
+			indexInfos[buildID].IndexStorePathVersion = target.GetIndexStorePathVersion()
+		}
 	}
 
 	// Process text indexes
@@ -1287,7 +1305,9 @@ func generateTargetIndexPath(
 	var collectionOffset, partitionOffset, segmentOffset int
 
 	keyword := indexType
-	if indexType == IndexTypeVectorScalarV0 && metautil.IsCollectionRooted(pathVersion) {
+	if indexType == IndexTypeVectorScalarV0 && metautil.IsSegmentRooted(pathVersion) {
+		keyword = common.SegmentInsertLogPath
+	} else if indexType == IndexTypeVectorScalarV0 && metautil.IsCollectionRooted(pathVersion) {
 		// The caller still passes the vector/scalar logical type, but v1 files
 		// live under a different object-storage prefix.
 		keyword = IndexTypeVectorScalarV1
@@ -1298,7 +1318,12 @@ func generateTargetIndexPath(
 	var buildIDOffset int
 	switch indexType {
 	case IndexTypeVectorScalarV0:
-		if metautil.IsCollectionRooted(pathVersion) {
+		if metautil.IsSegmentRooted(pathVersion) {
+			collectionOffset = 1
+			partitionOffset = 2
+			segmentOffset = 3
+			buildIDOffset = 5
+		} else if metautil.IsCollectionRooted(pathVersion) {
 			collectionOffset = 1
 			partitionOffset = 2
 			segmentOffset = 3
@@ -1332,6 +1357,10 @@ func generateTargetIndexPath(
 		return "", merr.WrapErrParameterInvalidMsg("invalid %s path structure: %s (expected '%s' layout)",
 			indexType, sourcePath, keyword)
 	}
+	if indexType == IndexTypeVectorScalarV0 && metautil.IsSegmentRooted(pathVersion) &&
+		(keywordIdx+7 >= len(parts) || parts[keywordIdx+4] != "_index") {
+		return "", merr.WrapErrDataIntegrityMsg("invalid segment-rooted index path: %s", sourcePath)
+	}
 
 	// Replace buildID if a mapping exists in target.NewBuildIds
 	if keywordIdx+buildIDOffset < len(parts) {
@@ -1351,6 +1380,29 @@ func generateTargetIndexPath(
 	}
 	parts[keywordIdx+partitionOffset] = strconv.FormatInt(target.GetPartitionId(), 10)
 	parts[keywordIdx+segmentOffset] = strconv.FormatInt(target.GetSegmentId(), 10)
+
+	if indexType == IndexTypeVectorScalarV0 && target.IndexStorePathVersion != nil &&
+		target.GetIndexStorePathVersion() != pathVersion {
+		fileOffset := buildIDOffset + 2
+		if pathVersion == indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED {
+			fileOffset = segmentOffset + 1
+		}
+		if keywordIdx+fileOffset >= len(parts) || keywordIdx+buildIDOffset+1 >= len(parts) {
+			return "", merr.WrapErrDataIntegrityMsg("incomplete index artifact path: %s", sourcePath)
+		}
+		buildID, err := strconv.ParseInt(parts[keywordIdx+buildIDOffset], 10, 64)
+		if err != nil {
+			return "", merr.WrapErrDataIntegrityMsg("invalid index build ID in %s", sourcePath)
+		}
+		version, err := strconv.ParseInt(parts[keywordIdx+buildIDOffset+1], 10, 64)
+		if err != nil {
+			return "", merr.WrapErrDataIntegrityMsg("invalid index version in %s", sourcePath)
+		}
+		builder := metautil.NewIndexPathBuilder(target.GetTargetRootPath(), target.GetIndexStorePathVersion(),
+			target.GetCollectionId(), target.GetPartitionId(), target.GetSegmentId(), buildID, version)
+		// Preserve the literal object key so manifest validation can reject noncanonical components.
+		return builder.BuildFilePath(strings.Join(parts[keywordIdx+fileOffset:], "/")), nil //nolint:gocritic
+	}
 
 	return buildCanonicalTargetPath(parts, keywordIdx, target), nil
 }

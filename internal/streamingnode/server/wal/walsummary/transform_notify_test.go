@@ -207,11 +207,16 @@ func TestUnboundedStreamReleasesWatchOnShutdown(t *testing.T) {
 				m.setTerminalErrorLocked(want)
 				m.mu.Unlock()
 			}
-			require.ErrorIs(t, nextTransformEvent(t, h).Err, want)
 			select {
 			case <-h.done:
 			case <-time.After(time.Second):
 				t.Fatal("subscription did not close")
+			}
+			require.Empty(t, h.events)
+			if cause == "context" {
+				require.NoError(t, stream.Error(), "canceling one subscription must not fail its stream")
+			} else {
+				require.ErrorIs(t, stream.Error(), want)
 			}
 			m.mu.Lock()
 			remaining := len(m.transformNotifiers)

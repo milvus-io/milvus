@@ -1387,6 +1387,10 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
                                           load_index_info->index_version};
     index_meta.index_store_path_version =
         load_index_info->index_store_path_version;
+    if (!load_index_info->index_files.empty()) {
+        const auto& file = load_index_info->index_files.front();
+        index_meta.index_file_prefix = file.substr(0, file.rfind('/'));
+    }
     config[milvus::index::INDEX_FILES] = load_index_info->index_files;
 
     // Old persisted index_params need not contain a nested flag. The legacy
@@ -1432,7 +1436,7 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
     // use cache layer to load vector/scalar index
     auto translator = std::make_unique<
         milvus::segcore::storagev1translator::SealedIndexTranslator>(
-        load_index_info, ctx, file_manager_context, config);
+        load_index_info, ctx, file_manager_context, config, op_ctx);
     load_index_info->index_family = translator->Family();
     load_index_info->index_value_type = translator->ValueType();
     load_index_info->index_caps = translator->Caps();
@@ -1590,9 +1594,10 @@ sortEqualScoresOneNQ(size_t nq_begin,
     size_t start = nq_begin;
     while (start < nq_end) {
         size_t end = start + 1;
-        while (end < nq_end &&
-               std::fabs(search_result->distances_[end] -
-                         search_result->distances_[start]) < EPSILON) {
+        // Only identical scores can share a PK-sorted run. Grouping merely
+        // close scores would detach PKs/offsets from their original scores.
+        while (end < nq_end && search_result->distances_[end] ==
+                                   search_result->distances_[start]) {
             ++end;
         }
 

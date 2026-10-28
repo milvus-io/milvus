@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	internalhttp "github.com/milvus-io/milvus/internal/http"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
@@ -308,6 +309,8 @@ func (s *mixCoordImpl) Start() error {
 // - `activateFunc` when enableActiveStandBy is true
 func (s *mixCoordImpl) startAndUpdateHealthy() {
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
+	// task-creation feature counters (see internal/featureusage)
+	featureusage.SetEnabled(Params.CommonCfg.FeatureUsageCountersEnabled.GetAsBool())
 	s.startPosixCleanupTask()
 	RegisterMgrRoute(s)
 
@@ -490,12 +493,21 @@ func (s *mixCoordImpl) Stop() error {
 		mlog.Error(s.ctx, "Failed to stop rootCoord", mlog.Err(err))
 	}
 
+	// Created only on activation, so a standby that never became active has none.
+	if s.fileResourceObserver != nil {
+		s.fileResourceObserver.Stop()
+	}
+
+	// Cancel before stopping the session: on a standby, canceling the session
+	// makes ProcessActiveStandBy return context.Canceled, and the goroutine
+	// started in Register only treats that as a shutdown once s.ctx is done.
+	// The session context derives from s.ctx, and the lease is revoked with a
+	// background context, so the session still shuts down cleanly.
+	s.cancel()
+
 	// All coordinators have stopped. Now stop the session.
 	s.session.SetMixCoordMode(false)
 	s.session.Stop()
-
-	s.fileResourceObserver.Stop()
-	s.cancel()
 	return nil
 }
 

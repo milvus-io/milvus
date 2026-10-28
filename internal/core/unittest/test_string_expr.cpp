@@ -2389,132 +2389,178 @@ TEST(StringExpr, RegexMatchClickHouseEdgeCases) {
     EXPECT_TRUE(ci(std::string("say Hello")));
 }
 
-// Direct unit tests for extract_literals_from_regex.
-// Validates that the extractor never produces false negatives:
-// every extracted literal MUST appear in any string that matches the regex.
-TEST(StringExpr, ExtractLiteralsFromRegexDirect) {
-    using milvus::index::extract_literals_from_regex;
+namespace {
 
-    auto expect_lits = [](const std::string& pattern,
-                          const std::vector<std::string>& expected,
-                          const char* label) {
-        auto got = extract_literals_from_regex(pattern);
-        EXPECT_EQ(got, expected)
-            << "pattern: \"" << pattern << "\" (" << label << ")";
+// Canonical plan text: same-op children flattened and sorted, so RE2's
+// factoring and AND ordering do not leak into the expectations.
+std::string
+DescribeNgramRegexPlan(const RegexLiteralCondition& plan) {
+    using Op = RegexLiteralCondition::Op;
+    if (plan.IsTrue()) {
+        return "TRUE";
+    }
+    if (plan.op == Op::Literal) {
+        return plan.literal;
+    }
+    std::vector<std::string> parts;
+    std::vector<const RegexLiteralCondition*> pending{&plan};
+    while (!pending.empty()) {
+        const auto* node = pending.back();
+        pending.pop_back();
+        for (const auto& child : node->children) {
+            if (child.op == plan.op) {
+                pending.push_back(&child);
+            } else {
+                parts.push_back(DescribeNgramRegexPlan(child));
+            }
+        }
+    }
+    std::sort(parts.begin(), parts.end());
+    std::string result = "(";
+    for (size_t i = 0; i < parts.size(); ++i) {
+        result += i == 0 ? "" : plan.op == Op::And ? " & " : " | ";
+        result += parts[i];
+    }
+    return result + ")";
+}
+
+}  // namespace
+
+// Direct unit tests for NGRAM regex candidate planning. The plan is the
+// bounded RE2 condition (shared with FMINDEX) restricted to literals of at
+// least min_gram characters; TRUE means the executor scans. Every planned
+// literal MUST appear in any string that matches the regex.
+TEST(StringExpr, NgramRegexPlanDirect) {
+    using milvus::index::PlanNgramRegex;
+
+    auto expect_plan = [](const std::string& pattern,
+                          size_t min_gram,
+                          const std::string& expected) {
+        EXPECT_EQ(DescribeNgramRegexPlan(PlanNgramRegex(pattern, min_gram)),
+                  expected)
+            << "pattern: \"" << pattern << "\" min_gram=" << min_gram;
     };
 
-    auto expect_empty = [](const std::string& pattern, const char* label) {
-        auto got = extract_literals_from_regex(pattern);
-        EXPECT_TRUE(got.empty())
-            << "pattern: \"" << pattern << "\" should produce empty (" << label
-            << "), got " << got.size() << " literals";
+    // ── Literals and AND of required literals ──
+    expect_plan("hello", 2, "hello");
+    expect_plan("abc def", 2, "abc def");
+    expect_plan("abc.*def", 2, "(abc & def)");
+    expect_plan("abc+def", 2, "(abc & cdef)");
+    expect_plan("^hello$", 2, "hello");
+    expect_plan("file\\.txt", 2, "file.txt");
+    expect_plan("a\\+b", 2, "a+b");
+    expect_plan("a\\\\b", 2, "a\\b");
+    expect_plan("\\d+hello", 2, "hello");
+    expect_plan("hello\\w+world", 2, "(hello & world)");
+    expect_plan("(?P<id>\\d+)abc", 2, "abc");
+    expect_plan("colou?r", 2, "colo");
+    expect_plan("abc(de)?fg", 2, "(abc & fg)");
+    expect_plan("abc(de)?fg", 3, "abc");
+    expect_plan("a{3}bc", 2, "aaabc");
+    expect_plan("a{2,4}bc", 2, "aabc");
+    expect_plan("xa+bc", 2, "(abc & xa)");
+    expect_plan("xa+bc", 3, "abc");
+    expect_plan("abc(de)fg", 2, "abcdefg");
+    expect_plan("abc(de)+fg", 2, "(abcde & defg)");
+    expect_plan("\\p{Han}foo", 2, "foo");
+    expect_plan("[a-z]+hello", 2, "hello");
+    expect_plan("abc[0-9]def", 2, "(abc & def)");
+    // The old hand-written extractor read `{10,20}` after `.` as the literal
+    // "10,20", which dropped matching rows.
+    expect_plan("foo.{10,20}bar", 3, "(bar & foo)");
+
+    // ── Alternation: AND inside a branch, OR across branches ──
+    expect_plan("foo|bar", 2, "(bar | foo)");
+    expect_plan("^(cat|dog)$", 3, "(cat | dog)");
+    expect_plan("(cat|dog)food", 3, "((cat | dog) & food)");
+    expect_plan("(ERROR|WARN).*timeout", 3, "((ERROR | WARN) & timeout)");
+    expect_plan("(?:cat|dog)(?:food|toy)", 3, "((cat | dog) & (food | toy))");
+    expect_plan("abc(de|fg)hi", 2, "((de | fg) & abc & hi)");
+    // A short OR inside an AND is dropped; the AND keeps its other literals.
+    expect_plan("abc(de|fg)hi", 3, "abc");
+    expect_plan("hello|\\bworld", 3, "(hello | world)");
+    expect_plan("你好|世界", 2, "(世界 | 你好)");
+
+    // ── Escaped and quoted `|` are literal bytes, not alternation ──
+    expect_plan("a\\|bcd", 2, "a|bcd");
+    expect_plan("\\Qa|b\\E|tested", 3, "(a|b | tested)");
+
+    // ── A branch without a usable literal disables pruning ──
+    expect_plan("cat|do", 2, "(cat | do)");
+    expect_plan("cat|do", 3, "TRUE");
+    expect_plan("你好|世界", 3, "TRUE");
+    expect_plan("foo|", 2, "TRUE");
+    expect_plan("hello|(?i)world", 2, "TRUE");
+
+    // ── Case folding, empty matches and no literal → scan ──
+    expect_plan("(?i)hello", 2, "TRUE");
+    expect_plan("ab*c", 2, "TRUE");
+    expect_plan("", 2, "TRUE");
+    expect_plan(".*", 2, "TRUE");
+    expect_plan("[a-z]+", 2, "TRUE");
+    expect_plan("\\d+", 2, "TRUE");
+    expect_plan("(?:hello|tested)?", 2, "TRUE");
+
+    // ── Over the 127-node budget → scan, never a dropped branch ──
+    // Distinct leading bytes keep RE2 from factoring the branches: each one
+    // costs three nodes (AND of two literals) plus one binary OR node.
+    auto branches = [](size_t count) {
+        const std::string heads =
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        std::string pattern;
+        for (size_t i = 0; i < count; ++i) {
+            const auto head = heads.substr(i, 1);
+            pattern += (i == 0 ? "" : "|") + head + "q.*z" + head + "w";
+        }
+        return pattern;
     };
+    expect_plan(branches(2), 2, "((aq & zaw) | (bq & zbw))");
+    EXPECT_EQ(PlanNgramRegex(branches(32), 2).NodeCount(),
+              RegexLiteralCondition::kMaxNodes);
+    expect_plan(branches(33), 2, "TRUE");
+    expect_plan(branches(60), 2, "TRUE");
 
-    // ── Pure literals ──
-    expect_lits("hello", {"hello"}, "pure literal");
-    expect_lits("abc def", {"abc def"}, "literal with space");
+    EXPECT_ANY_THROW(PlanNgramRegex("(", 2));
 
-    // ── Metacharacters split literals ──
-    expect_lits("abc.*def", {"abc", "def"}, ".* splits");
-    expect_lits("abc.def", {"abc", "def"}, ". splits");
-    expect_lits("abc+def",
-                {"abc", "cdef"},
-                "+ flushes then restarts with repeated char");
-
-    // ── Anchors are metacharacters ──
-    expect_lits("^hello$", {"hello"}, "anchors stripped");
-    expect_lits("^hello", {"hello"}, "^ stripped");
-
-    // ── Escaped metacharacters are literal ──
-    expect_lits("file\\.txt", {"file.txt"}, "escaped dot");
-    expect_lits("a\\+b", {"a+b"}, "escaped plus");
-    expect_lits("a\\\\b", {"a\\b"}, "escaped backslash");
-    expect_lits("a\\-b", {"a-b"}, "escaped hyphen");
-
-    // ── Shorthand classes are non-literal ──
-    expect_lits("\\d+hello", {"hello"}, "\\d is non-literal");
-    expect_lits("hello\\w+world", {"hello", "world"}, "\\w splits");
-
-    // ── Alternation → bail out ──
-    expect_empty("foo|bar", "alternation");
-    expect_empty("abc(de|fg)hi", "nested alternation");
-    expect_empty("(cat|dog)food", "group alternation");
-
-    // ── Case-insensitive → bail out ──
-    expect_empty("(?i)hello", "(?i) flag");
-    expect_empty("(?mi)hello", "(?mi) flag");
-    expect_empty("(?is)hello", "(?is) flag");
-
-    // ── Named groups must NOT trigger (?i) ──
-    // Regression: (?P<id>...) was falsely treated as case-insensitive
-    expect_lits("(?P<id>\\d+)abc", {"abc"}, "named group (?P<id>)");
-    expect_lits("(?P<item>\\w+)xyz", {"xyz"}, "named group (?P<item>)");
-
-    // ── Optional elements ──
-    expect_lits("colou?r", {"colo", "r"}, "? removes preceding char");
-    expect_lits("ab*c", {"a", "c"}, "* removes preceding char");
-    expect_lits("abc(de)?fg", {"abc", "fg"}, "optional group skipped");
-
-    // ── Quantifier expansion ──
-    expect_lits("a{3}bc", {"aaabc"}, "{3} exact expansion");
-    expect_lits("a{2,4}bc", {"aa", "aabc"}, "{2,4} variable expansion");
-
-    // ── + quantifier: required, breaks contiguity, restarts ──
-    expect_lits("xa+bc", {"xa", "abc"}, "+ flush and restart");
-
-    // ── Group penetration ──
-    expect_lits("abc(de)fg", {"abcdefg"}, "required group penetration");
-    expect_lits("abc(?:de)fg", {"abcdefg"}, "non-capturing group penetration");
-    expect_lits("abc(de)+fg", {"abcde", "defg"}, "group + quantifier");
-
-    // ── Unicode property \p{...} consumed ──
-    expect_lits("\\p{Han}foo", {"foo"}, "\\p{Han} consumed");
-    expect_lits("\\P{Latin}bar", {"bar"}, "\\P{Latin} consumed");
-
-    // ── Control char escapes are non-literal ──
-    expect_lits("hello\\nworld", {"hello", "world"}, "\\n is non-literal");
-    expect_lits("a\\tb", {"a", "b"}, "\\t is non-literal");
-
-    // ── Character classes ──
-    expect_lits("[a-z]+hello", {"hello"}, "char class skipped");
-    expect_lits("abc[0-9]def", {"abc", "def"}, "char class splits");
-
-    // ── Empty / all-meta patterns ──
-    expect_empty("", "empty pattern");
-    expect_empty(".*", "all-meta .*");
-    expect_empty("[a-z]+", "pure char class");
-    expect_empty("\\d+", "pure shorthand");
-
-    // ── Verify no false negatives: for every pattern+input pair,
-    //    if RE2 PartialMatch succeeds, every extracted literal must
-    //    appear in the input string. ──
+    // ── Verify no false negatives: if RE2 PartialMatch succeeds, the plan
+    //    evaluated as substring membership must accept the input. ──
     auto verify_no_false_neg = [](const std::string& pattern,
-                                  const std::string& input,
-                                  const char* label) {
+                                  const std::string& input) {
         PartialRegexMatcher matcher(pattern);
-        if (!matcher(input))
-            return;  // doesn't match, nothing to check
-
-        auto lits = extract_literals_from_regex(pattern);
-        for (const auto& lit : lits) {
-            EXPECT_NE(input.find(lit), std::string::npos)
+        if (!matcher(input)) {
+            return;
+        }
+        for (size_t min_gram = 1; min_gram <= 4; ++min_gram) {
+            const auto plan = PlanNgramRegex(pattern, min_gram);
+            EXPECT_TRUE(plan.Evaluate(
+                [&](const std::string& literal) {
+                    return input.find(literal) != std::string::npos;
+                },
+                [] { return true; }))
                 << "FALSE NEGATIVE: pattern=\"" << pattern << "\" input=\""
-                << input << "\" extracted literal=\"" << lit
-                << "\" not found in input (" << label << ")";
+                << input << "\" min_gram=" << min_gram;
         }
     };
 
-    verify_no_false_neg(
-        "error.*timeout", "error: connection timeout", "multi-literal");
-    verify_no_false_neg("colou?r", "color red", "optional char");
-    verify_no_false_neg("colou?r", "colour blue", "optional char present");
+    verify_no_false_neg("error.*timeout", "error: connection timeout");
+    verify_no_false_neg("colou?r", "color red");
+    verify_no_false_neg("colou?r", "colour blue");
     verify_no_false_neg("\\p{Han}+foo",
                         "\xe4\xb8\xad"
-                        "foo",
-                        "Unicode Han");
-    verify_no_false_neg("(?P<id>\\d+)abc", "123abc", "named group");
-    verify_no_false_neg("a{3}bc", "aaabc", "exact quantifier");
-    verify_no_false_neg("file\\.txt", "open file.txt now", "escaped dot");
-    verify_no_false_neg("abc(de)fg", "xabcdefgy", "group penetration");
-    verify_no_false_neg("abc(de)?fg", "xabcfgy", "optional group absent");
+                        "foo");
+    verify_no_false_neg("(?P<id>\\d+)abc", "123abc");
+    verify_no_false_neg("a{3}bc", "aaabc");
+    verify_no_false_neg("file\\.txt", "open file.txt now");
+    verify_no_false_neg("abc(de)fg", "xabcdefgy");
+    verify_no_false_neg("abc(de)?fg", "xabcfgy");
+    verify_no_false_neg("foo.{10,20}bar", "foo0123456789bar");
+    verify_no_false_neg("cat|dog", "hotdog");
+    verify_no_false_neg("(ERROR|WARN).*timeout", "WARN: read timeout");
+    verify_no_false_neg("^(cat|dog)$", "cat");
+    verify_no_false_neg("a\\|bcd", "xa|bcdx");
+    verify_no_false_neg("abc(de|fg)hi", "abcfghi");
+    verify_no_false_neg("(?:cat|dog)(?:food|toy)", "dogtoy");
+    verify_no_false_neg("你好|世界", "世界和平");
+    verify_no_false_neg(branches(32), "xFq--zFwx");
+    verify_no_false_neg(branches(60), "xZq--zZwx");
 }

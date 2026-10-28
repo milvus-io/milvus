@@ -26,11 +26,9 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | Delete | Single VChannel | No | — |
 | CreateSegment *(SelfControlled)* | Single VChannel | No | — |
 | Flush *(SelfControlled)* | Single VChannel | No | — |
-| ManualFlush | Single VChannel | Yes (VChannel) | — |
+| ManualFlush | Broadcast: collection VChannels + CChannel, AckSyncUp, Unreplicable (`_ur`) | Yes (data VChannels) | SharedDBName + ExclusiveCollectionName |
 | AlterLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | DropLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName (or ExclusiveCluster) |
-| AlterRLSMetadata | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
-| DropRLSMetadata | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | BatchUpdateManifest | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
 | RefreshExternalCollection | Broadcast: CChannel | No | — |
 
@@ -50,26 +48,18 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **UpdateImport**: Assigns the per-file ID ranges to an in-progress import job once preimport reports exact row counts; replicated so both clusters derive identical PK/RowID. DataCoord ack callback only (no local recovery data work).
 - **Insert** / **Delete**: DML on a single VChannel. CipherEnabled.
 - **CreateSegment** / **Flush**: WAL-generated (SelfControlled). Allocates or seals a growing segment.
-- **ManualFlush**: Seals all growing segments for a collection on a VChannel.
+- **ManualFlush**: Flushes the collection on the receiving cluster, on either replication role. Broadcasts to all collection VChannels plus CChannel and waits for local L1/L0 completion with AckSyncUp. See [Local Flush Control](../wal/local-flush.md) for ordering between replicated transactions.
 - **AlterLoadConfig**: Modifies load configuration — partition set, replica count, load fields, etc. CChannel-only, consumed by QueryCoord.
 - **DropLoadConfig**: Removes load configuration, unloading/releasing from query nodes. Uses ExclusiveCluster when part of DropCollection flow.
-- **AlterRLSMetadata**: Persists a complete row-policy or principal-tag post-image in the ACK callback. Policy mutations invalidate the collection policy cache. Principal-tag mutations invalidate only that principal, including creation so an in-flight lookup cannot publish a pre-create miss. CChannel-only and serialized with collection/schema DDL; cache invalidation failures are retried by the broadcaster callback.
-- **DropRLSMetadata**: Drops a row policy or principal-tag record by stable logical identity in the ACK callback. A policy name resolves through RootCoord's collection metadata to its internal policy ID, allowing the callback to remove the single ID-keyed etcd record without a prefix scan. Policy drops invalidate the collection policy cache, while principal drops invalidate only that principal. CChannel-only and serialized with collection/schema DDL; cache invalidation failures are retried by the broadcaster callback.
 - **BatchUpdateManifest**: Updates segment manifest versions in batch. Used after compaction or index building. CChannel-only.
 - **RefreshExternalCollection**: Submits an external collection refresh job using a pre-allocated job ID from the WAL message. CChannel-only.
 
-RLS cache invalidation does not fetch metadata in the ACK callback. Policy
-metadata remains collection-scoped. Principal tags are cached by
-`(collectionID, principal)` and loaded lazily only when that principal sends an
-RLS-enforced request. A successful lookup for a missing principal is cached as
-an empty, TTL-bound entry; principal create, update, and drop notifications
-evict it. There is no background RLS reconciliation loop.
+The retired `AlterRLSMetadata` and `DropRLSMetadata` wire types remain decodable,
+but have no ACK callbacks and do not maintain metadata during replay.
 
 ## Replication Compatibility
 
-Current producers explicitly mark these collection-scoped broadcast messages with `Unreplicable` (`_ur`): CreateSnapshot, DropSnapshot, RestoreSnapshot, BatchUpdateManifest, and RefreshExternalCollection. Replication skips the concrete marked messages instead of classifying the whole message type as permanently unsupported, so newly generated messages can become replicable later by no longer setting `_ur`.
-
-`AlterRLSMetadata` and `DropRLSMetadata` do not set `_ur`. They are eligible for the generic CDC path: the secondary rebuilds the replicated broadcast task and invokes the same idempotent ACK callback to apply the complete post-image or stable drop identity and invalidate local Proxy RLS caches. Dedicated end-to-end RLS CDC validation is tracked separately.
+Current producers explicitly mark these collection-scoped broadcast messages with `Unreplicable` (`_ur`): CreateSnapshot, DropSnapshot, RestoreSnapshot, BatchUpdateManifest, RefreshExternalCollection, and ManualFlush. Replication skips the concrete marked messages instead of classifying the whole message type as permanently unsupported, so newly generated messages can become replicable later by no longer setting `_ur`.
 
 ## Data Lifecycle Ordering Invariants
 
@@ -109,7 +99,7 @@ Import → UpdateImport → (CommitImport | RollbackImport)
 
 DDL messages (CreateCollection, DropCollection, CreatePartition, DropPartition, TruncateCollection, ManualFlush, FlushAll) acquire exclusive locks. While held:
 - No DML (Insert/Delete) can append to locked VChannels.
-- In-flight transactions on locked VChannels are failed.
+- Locally originated in-flight transactions on locked VChannels are failed. Local flushes drain the current replicated transaction before taking the exclusive lock and hold subsequent replication until their append completes.
 
 DML (Insert/Delete) acquires **shared** locks — concurrent with each other, blocked by any exclusive lock.
 

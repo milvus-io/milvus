@@ -28,6 +28,8 @@ message DataViewOfCollection {
     int64 collection_id = 1;
     repeated DataViewOfShard shards = 2;
     DataVersion data_version = 3;
+    // Read schema supported by this exact snapshot; advanced only by schema DDL.
+    int32 schema_version = 4;
 }
 
 // DataViewOfShard groups loadable segments by partition for one vchannel.
@@ -83,6 +85,7 @@ message QueryViewMeta {
     QueryViewState state = 5;
     uint64 load_info_version = 6;
     uint64 transform_start_after_timetick = 7;
+    int32 schema_version = 8; // Exact logical schema required by this view.
 }
 
 // QueryViewOfStreamingNode is the StreamingNode-local part of a QueryView.
@@ -108,6 +111,7 @@ message QueryViewOfPartition {
     int64 partition_id = 1;
     repeated int64 segment_ids = 2;
     repeated int64 ready_segment_ids = 3;
+    repeated int64 segment_manifest_versions = 4 [packed = true];
 }
 
 // SyncRequest carries an atomic state-machine input or closes the stream.
@@ -229,6 +233,8 @@ message GetQueryPlanRequest {
     oneof mvcc {
         common.ConsistencyLevel consistency_level = 3;
         QueryPlanMVCC query_plan_mvcc = 7;
+        // Establish scoped WAL coverage, then read both frontiers at this timestamp.
+        uint64 barrier_mvcc = 8;
     }
     repeated int64 partition_ids = 4;
     // Original request for global optimization (BM25 IDF, search param tuning, etc.).

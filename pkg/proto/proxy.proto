@@ -32,6 +32,7 @@ service Proxy {
 
   rpc GetSegmentsInfo(internal.GetSegmentsInfoRequest) returns (internal.GetSegmentsInfoResponse) {}
   rpc GetQuotaMetrics(internal.GetQuotaMetricsRequest) returns (internal.GetQuotaMetricsResponse) {}
+  rpc GetFeatureUsage(internal.GetFeatureUsageRequest) returns (internal.GetFeatureUsageResponse) {}
   rpc ClearReadTaskQueue(internal.ClearReadTaskQueueRequest) returns (internal.ClearReadTaskQueueResponse) {}
   rpc SyncFileResource(internal.SyncFileResourceRequest) returns (common.Status) {}
 }

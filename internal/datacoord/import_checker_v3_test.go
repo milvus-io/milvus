@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"path"
 	"testing"
-	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/internal/datacoord/session"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
@@ -40,39 +39,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	importv3pb "github.com/milvus-io/milvus/pkg/v3/proto/importv3pb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
-
-// TestQuiesceImportJobKeepsTasksDuringRetention pins that unbound task records
-// survive until cleanupTs passes: they back the terminal job's row accounting
-// (getImportRowsInfo) during the retention window, like V2 GC.
-func TestQuiesceImportJobKeepsTasksDuringRetention(t *testing.T) {
-	ctx := context.Background()
-	importMeta := NewMockImportMeta(t)
-	checker := &importCheckerV3{ctx: ctx, importMeta: importMeta}
-
-	task := newImportTaskV3(&datapb.ImportTaskV3{
-		JobId: 1, TaskId: 10, State: datapb.ImportTaskStateV2_Completed, NodeId: NullNodeID, SegmentId: 100, Rows: 42,
-	}, importMeta, nil, nil)
-
-	job := &importJob{ImportJob: &datapb.ImportJob{
-		JobID: 1, State: internalpb.ImportJobState_Completed,
-		CleanupTs: tsoutil.ComposeTSByTime(time.Now().Add(time.Hour)),
-	}}
-	importMeta.EXPECT().GetTaskByJob(mock.Anything, int64(1)).Return([]ImportTask{task}).Once()
-	require.False(t, quiesceImportV3JobGC(newImportV3JobContext(checker, job)))
-
-	job.CleanupTs = tsoutil.ComposeTSByTime(time.Now().Add(-time.Hour))
-	importMeta.EXPECT().GetTaskByJob(mock.Anything, int64(1)).Return([]ImportTask{task}).Once()
-	importMeta.EXPECT().RemoveTask(mock.Anything, int64(10)).Return(nil).Once()
-	require.True(t, quiesceImportV3JobGC(newImportV3JobContext(checker, job)))
-}
 
 func TestCalculateImportV3TaskSlots(t *testing.T) {
 	const mib = int64(1024 * 1024)
@@ -345,14 +316,6 @@ func TestBuildReshardTaskPlanDerivesExecutionInput(t *testing.T) {
 	require.NotNil(t, plan.GetCollectionSchema())
 	require.Greater(t, plan.GetFragmentSize(), int64(0))
 
-	// The job's RLS write predicate must travel with the plan so the DataNode
-	// can enforce it per source batch (Import V3 parity with Import V2).
-	predicate := &planpb.Expr{}
-	job.RlsCheckPredicate = predicate
-	plan, err = reshardPlan(job, task, getImportV3Config())
-	require.NoError(t, err)
-	require.Same(t, predicate, plan.GetRlsCheckPredicate())
-
 	task.FileIds = []int64{9}
 	_, err = reshardPlan(job, task, getImportV3Config())
 	require.Error(t, err)
@@ -387,7 +350,7 @@ func TestCreateReshardTaskRejectsInvalidFragmentSize(t *testing.T) {
 		err = createTask(newImportV3JobContext(checker, job), 10, []reshardSource{{file: &internalpb.ImportFile{Id: 1}, size: 1}})
 		require.Error(t, err, "value=%q", invalid)
 		require.Contains(t, err.Error(), "fragmentSizeInMB")
-		require.True(t, importcommon.IsTerminalImportV3Err(err), "value=%q", invalid)
+		require.True(t, errors.Is(err, merr.ErrImportSysFailed), "value=%q", invalid)
 	}
 }
 
@@ -581,127 +544,7 @@ func TestBuildImportV3TaskPlanDerivesExecutionInput(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestImportCheckerV3CheckGCIgnoresNonTerminalJob(t *testing.T) {
-	ctx := context.Background()
-	importMeta := NewMockImportMeta(t)
-	checker := &importCheckerV3{ctx: ctx, importMeta: importMeta}
-	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, State: internalpb.ImportJobState_Importing}}
-
-	// No catalog interaction: checkGC returns before touching tasks or objects.
-	checker.checkGC(job)
-}
-
-func TestImportCheckerV3QuiesceDropsBoundTask(t *testing.T) {
-	ctx := context.Background()
-	importMeta := NewMockImportMeta(t)
-	cluster := session.NewMockCluster(t)
-	checker := &importCheckerV3{ctx: ctx, importMeta: importMeta, cluster: cluster}
-	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, State: internalpb.ImportJobState_Failed}}
-	task := newReshardTask(&datapb.ReshardTask{
-		JobId: 1, TaskId: 10, State: datapb.ImportTaskStateV2_InProgress, NodeId: 5,
-	}, importMeta, nil, nil)
-
-	importMeta.EXPECT().GetTaskByJob(mock.Anything, mock.Anything).Return([]ImportTask{task}).Once()
-	// The GC loop re-issues a version-aware best-effort Drop every tick so a
-	// transient RPC failure or a lost node cannot pin the job forever.
-	cluster.EXPECT().DropReshard(int64(5), mock.Anything).Return(nil).Once()
-	importMeta.EXPECT().UpdateTask(mock.Anything, int64(10), mock.Anything).Return(nil).Once()
-
-	require.False(t, quiesceImportV3JobGC(newImportV3JobContext(checker, job)))
-}
-
-func TestImportCheckerV3QuiesceRemovesFailedTaskAndDropsSegment(t *testing.T) {
-	ctx := context.Background()
-	meta, err := newMemoryMeta(t)
-	require.NoError(t, err)
-	segment, err := addImportSegment(ctx, meta, 100, 1, 10, 2, 3, "v0", datapb.SegmentLevel_L1, 1, 4)
-	require.NoError(t, err)
-	require.Equal(t, commonpb.SegmentState_Importing, segment.GetState())
-	importMeta := NewMockImportMeta(t)
-	checker := &importCheckerV3{ctx: ctx, meta: meta, importMeta: importMeta}
-	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, State: internalpb.ImportJobState_Failed}}
-	task := newImportTaskV3(&datapb.ImportTaskV3{
-		JobId: 1, TaskId: 10, State: datapb.ImportTaskStateV2_Completed, NodeId: NullNodeID, SegmentId: 100,
-	}, importMeta, meta, nil)
-
-	importMeta.EXPECT().GetTaskByJob(mock.Anything, mock.Anything).Return([]ImportTask{task}).Once()
-	importMeta.EXPECT().RemoveTask(mock.Anything, int64(10)).Return(nil).Once()
-
-	require.True(t, quiesceImportV3JobGC(newImportV3JobContext(checker, job)))
-	require.Equal(t, commonpb.SegmentState_Dropped, meta.GetSegment(ctx, 100).GetState())
-}
-
-func TestImportCheckerV3CheckGCWaitsForCleanupTs(t *testing.T) {
-	ctx := context.Background()
-	importMeta := NewMockImportMeta(t)
-	checker := &importCheckerV3{ctx: ctx, importMeta: importMeta}
-	job := &importJob{ImportJob: &datapb.ImportJob{
-		JobID: 1, State: internalpb.ImportJobState_Failed, CleanupTs: tsoutil.ComposeTSByTime(time.Now().Add(time.Hour)),
-	}}
-
-	// Quiesce is done (no tasks), but the retention window has not elapsed, so
-	// deleteImportJob must not run. RemoveJob is un-mocked on purpose: a call
-	// would fail the test.
-	importMeta.EXPECT().GetTaskByJob(mock.Anything, mock.Anything).Return(nil).Once()
-	checker.checkGC(job)
-}
-
-func TestImportCheckerV3CheckGCDeletesPastCleanup(t *testing.T) {
-	ctx := context.Background()
-	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
-	importMeta := NewMockImportMeta(t)
-	checker := &importCheckerV3{ctx: ctx, meta: &meta{chunkManager: cm}, importMeta: importMeta}
-	job := &importJob{ImportJob: &datapb.ImportJob{
-		JobID: 1, State: internalpb.ImportJobState_Failed, AutoCommit: true,
-		CleanupTs: tsoutil.ComposeTSByTime(time.Now().Add(-time.Hour)),
-	}}
-
-	planPath := path.Join(cm.RootPath(), metautil.BuildImportReshardResultPath(1, 10, 1))
-	require.NoError(t, cm.Write(ctx, planPath, []byte("plan")))
-	// Quiesce sees no tasks; delete runs RemoveWithPrefix then RemoveJob.
-	importMeta.EXPECT().GetTaskByJob(mock.Anything, mock.Anything).Return(nil).Twice()
-	importMeta.EXPECT().RemoveJob(mock.Anything, int64(1)).Return(nil).Once()
-
-	checker.checkGC(job)
-	exist, err := cm.Exist(ctx, planPath)
-	require.NoError(t, err)
-	require.False(t, exist) // prefix removed
-}
-
-func TestImportCheckerV3RollbackGateBlocksDelete(t *testing.T) {
-	ctx := context.Background()
-	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
-	importMeta := NewMockImportMeta(t)
-	checker := &importCheckerV3{ctx: ctx, meta: &meta{chunkManager: cm}, importMeta: importMeta}
-	job := &importJob{ImportJob: &datapb.ImportJob{
-		JobID: 1, State: internalpb.ImportJobState_Failed, AutoCommit: false,
-		CleanupTs: tsoutil.ComposeTSByTime(time.Now().Add(-time.Hour)),
-	}}
-	rollbackCalled := false
-	checker.hooks.rollbackImport = func(ctx context.Context, j ImportJob) error {
-		rollbackCalled = true
-		return merr.WrapErrServiceUnavailable("transient")
-	}
-	checker.hooks.getReplicationRole = func(ctx context.Context) (replicateutil.Role, bool, error) {
-		return replicateutil.RolePrimary, true, nil
-	}
-
-	planPath := path.Join(cm.RootPath(), metautil.BuildImportReshardResultPath(1, 10, 1))
-	require.NoError(t, cm.Write(ctx, planPath, []byte("plan")))
-
-	// Rollback broadcast fails transiently: keep the job, no delete this tick.
-	importMeta.EXPECT().GetTaskByJob(mock.Anything, mock.Anything).Return(nil).Once()
-	checker.checkGC(job)
-	require.True(t, rollbackCalled)
-
-	// Next tick rollback succeeds; delete proceeds.
-	checker.hooks.rollbackImport = func(ctx context.Context, j ImportJob) error { return nil }
-	importMeta.EXPECT().GetTaskByJob(mock.Anything, mock.Anything).Return(nil).Twice()
-	importMeta.EXPECT().RemoveJob(mock.Anything, int64(1)).Return(nil).Once()
-	checker.checkGC(job)
-}
-
-// TestImportCheckerV3PlanningQuotaFailsJob pins V2 parity for disk-quota
+// TestImportCheckerV3PlanningQuotaFailsJob pins the disk-quota
 // exhaustion during Planning, driving the production checkPlanningJob ->
 // planImportV3Job -> CheckImportV3DiskQuota path end to end: the job fails immediately
 // with the quota reason instead of retrying silently every 2s tick with a
@@ -968,13 +811,13 @@ func TestGroupSourcesBFDInvariants(t *testing.T) {
 // exhaustion: the terminal codes fail the job immediately, while retriable
 // errors (service not ready, a bare timeout) are left for the next tick.
 func TestIsTerminalImportV3JobErr(t *testing.T) {
-	require.True(t, isTerminalImportV3JobErr(merr.WrapErrDataIntegrityMsg("bad data")))
-	require.True(t, isTerminalImportV3JobErr(merr.WrapErrImportSysFailedMsg("system failure")))
-	require.True(t, isTerminalImportV3JobErr(merr.WrapErrImportFailedMsg("input defect")))
-	require.True(t, isTerminalImportV3JobErr(merr.WrapErrServiceQuotaExceeded("disk quota exceeded")))
-	require.False(t, isTerminalImportV3JobErr(merr.WrapErrServiceNotReadyMsg("collection cache warming")))
-	require.False(t, isTerminalImportV3JobErr(context.DeadlineExceeded))
-	require.False(t, isTerminalImportV3JobErr(nil))
+	require.True(t, importcommon.IsTerminalImportV3Err(merr.WrapErrDataIntegrityMsg("bad data")))
+	require.True(t, importcommon.IsTerminalImportV3Err(merr.WrapErrImportSysFailedMsg("system failure")))
+	require.True(t, importcommon.IsTerminalImportV3Err(merr.WrapErrImportFailedMsg("input defect")))
+	require.True(t, importcommon.IsTerminalImportV3Err(merr.WrapErrServiceQuotaExceeded("disk quota exceeded")))
+	require.False(t, importcommon.IsTerminalImportV3Err(merr.WrapErrServiceNotReadyMsg("collection cache warming")))
+	require.False(t, importcommon.IsTerminalImportV3Err(context.DeadlineExceeded))
+	require.False(t, importcommon.IsTerminalImportV3Err(nil))
 }
 
 // TestImportCheckerV3CheckJobNonPlanningDispatch pins checkJob's shared error
