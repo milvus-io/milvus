@@ -159,7 +159,7 @@ called once; a second call does nothing. `Close` releases everything that
 
 | Step | Where | What | Sync | Fails the open | Retries until the open ends |
 |---|---|---|---|---|---|
-| R1 open the indexes | `Recover` | `Manager.New` registers the `PChannelIndexManager` without its driver, with the WAL checkpoint as the first observed time tick. For every `VChannelMeta` in state NORMAL whose primary key is not autoID and is Int64 or VarChar, `CreateCollection` opens the `Index`, one vchannel after the other. The last schema of the meta names the primary key field. | Sync | A stopped `Manager`, an unsupported primary key type, a local disk error | — |
+| R1 open the indexes | `Recover` | `Manager.New` registers the `PChannelIndexManager` without its driver, with the WAL checkpoint as the first observed time tick. For every `VChannelMeta` in state NORMAL with a `pk_index`, `OpenIndex` opens the `Index` of that index ID, one vchannel after the other. The field of `pk_index` must be the primary key of the last schema of the meta. A vchannel without `pk_index` gets no `Index`: the index is not enabled there. | Sync | A stopped `Manager`, an unsupported primary key type, a local disk error | — |
 | R2 manifests | `Recover` | `GetRecoveryManifests` in batches of `MaxRecoveryManifests` (10000) refs. `ReadManifest` of every found body, at most `ManifestReadConcurrency` at a time. `SetCommitted(view)` on each `Index` with a manifest. `MarkReady` on each `Index` without one. The pchannel is not claimed: the manifest service fences a flush through the pchannel meta of the streaming coordinator. | Sync | `ErrRejected`, `pkindex.ErrCorrupted`, a wrong answer count, a body whose version differs from the pointer | Every other error of the lookup and the body read |
 | R3 observe | `ObserveMessage` | See [Observe](#observe). Before and after the barrier. | Sync, on the observe of the storage | The first error before `Run`, returned by `Run` | — |
 | R4 install | `Run` | One install task per `Index` with a manifest on the node scheduler. Then `Start` of the handover driver. | Async | A missing or corrupted object, through `OnFatal` | Every other error, with backoff, until the task is cancelled or the `Index` closes |
@@ -194,15 +194,14 @@ the vchannel is installed. Who calls `MarkReady`:
 - `Recover`, right after the lookup, for an `Index` without a manifest.
 - The install task, at the end of a successful `Install`, for an `Index`
   with a manifest.
-- `ObserveMessage`, for a collection that an observed CreateCollection
-  creates. A collection created in this term has no manifest. A
-  CreateCollection of a vchannel whose index is open already does nothing,
-  so the interceptor may open the index first and the observe finds it.
-  The enabling message of the index is a CreateIndex of type PRIMARY_KEY,
-  opened after a successful append; that message carries no index type
-  yet and goes to the control channel only, so the index is opened at the
-  CreateCollection until then (see [Not done](#not-done-in-this-change)).
-- `CreateCollection` after `Start`, for a new collection, as before.
+- `ObserveMessage`, for an index that an observed CreateIndex of type
+  `PRIMARY_KEY` enables. An index enabled after the checkpoint has a new
+  index ID, so it has no manifest. A CreateIndex of a vchannel whose `Index`
+  of the same index ID is open already does nothing, so the interceptor may
+  open the `Index` at the append and the observe finds it
+  ([DDL](ddl.md#streaming-node)).
+- `OpenIndex` after `Start`, for an index that the interceptor enables at the
+  append.
 
 Until then the writes of the vchannel wait: `Decide` returns a
 `*dedup.WaitError`, and the redo interceptor waits outside the WAL lock until
@@ -225,8 +224,11 @@ is serial. What each message becomes:
 |---|---|
 | TimeTick, RecoveryBarrier | `ObserveTimeTick(tt, tail)` moves the observed time tick of the pchannel to tt and evaluates the handover triggers with the WAL tail of the storage ([Coverage](snapshot.md#coverage), [Triggers](snapshot.md#triggers)). The writes before the tick are applied by then, on the same goroutine. `ObserveTimeTick` also passes the tick to the `Decider` of every vchannel (`Observe(tt, nil)`), which releases the writes that wait until it and removes the in-doubt entries up to it. |
 | ManualFlush, FlushAll | `ObserveFlush(vchannel, tt)`, `ObserveFlushAll(tt)` (trigger 5 of the handover change). |
-| CreateCollection (not the control channel) | `CreateCollection` with the schema of the body and `MarkReady`. A vchannel that is a target already is ignored. |
-| DropCollection (not the control channel) | Forgets the vchannel and returns the close of its index to the storage. The close waits for a running handover, so the storage runs it after it releases its lock, and before it observes the next message. The interceptor only forgets the vchannel at the append of the drop: a write before the drop in WAL order reaches the observe after that append returned and must still find the engine open. A failed drop is logged and does not fail the open. |
+| CreateIndex of type `PRIMARY_KEY` (not the control channel) | Reads the vchannel state that the vchannel module holds after the same message. When `pk_index` names this index at this time tick, it opens the `Index` with `OpenIndex` and `MarkReady`, or keeps the open `Index` of this index ID. Otherwise it drops an `Index` of this index ID that the interceptor opened at the append. A CreateIndex at or before the enable time tick of the open `Index` is a replay of an earlier index and does nothing. See [DDL](ddl.md#observe-side). |
+| DropIndex of type `PRIMARY_KEY` (not the control channel) | Drops the `Index` when the message names its index ID or names no index, and is after its enable time tick. |
+| TruncateCollection (not the control channel) | `ResetIndex` empties the `Index` in place at the time tick of the truncate and keeps its `Decider`. See [lifecycle](lifecycle.md#truncate-reset-the-index-in-place). |
+| DropCollection (not the control channel) | Drops the `Index` of the vchannel with index ID 0, which matches any index and removes the local directory of the vchannel. |
+| A drop (DropIndex, DropCollection, or a CreateIndex that did not enable the index) | `DetachIndex` removes the `Index` from the open set at once, so the writes after the drop are not applied and a later CreateIndex can open a new `Index`. The observe returns the close and the removal of the local directory to the storage. The close waits for a running handover, so the storage runs it after it releases its lock, and before it observes the next message. The interceptor only forgets the vchannel at the append of the drop: a write before the drop in WAL order reaches the observe after that append returned and must still find the engine open. A failed drop is logged and does not fail the open. |
 | Insert (autocommit) | `KeysOfInsert(body, pkFieldID, pkDataType)`, then `Write{Puts: {key, segment}..., TimeTick}`. The segment is `Partitions[0].SegmentAssignment.SegmentId`, as on the append path. |
 | Delete | `KeysOfDelete(body)`, then `Write{Deletes, TimeTick}`. A delete with an expression plan panics, as on the append path, which does not accept it. |
 | Transaction | One `Write` with the deletes of every body and the puts of every body, at the commit time tick. A companion delete of the append path is such a transaction. |
@@ -357,7 +359,7 @@ and evaluated in the handover change; this change delivers their inputs:
 | Case | Handling |
 |---|---|
 | A local disk error when an `Index` opens in R1 | The open fails with `pkindex.ErrIO`. The WAL is assigned again. |
-| An unsupported primary key type in a `VChannelMeta` or an observed CreateCollection | The open fails. |
+| A `pk_index` whose field is not a primary key of a supported type, in a `VChannelMeta` or an observed CreateIndex | The open fails. |
 | A stopped `Manager` | `Recover` returns an error marked `pkindex.ErrUnavailable`. The open fails. |
 | `ErrRejected` from the lookup | The open fails. A lookup reads no term, so it is never fenced: only a flush is. |
 | A transient error of the lookup or a manifest body read | `retry.Do` without an attempt limit, `BackoffBase` to `MaxBackoff`, until the context of the open ends. |
@@ -446,11 +448,6 @@ What the index follows:
 - **The adapter over the manifest service.** It implements
   `ManifestReader.ReadManifest` with the manifest proto and the `Committer`. Until
   it is injected, a streaming node with the index on panics at start.
-- **The enabling by a `CreateIndex` of type `PRIMARY_KEY`.** The index of a
-  collection is still opened at its `CreateCollection`. The enabling message
-  has to be exclusive on the data vchannels (`ExclusiveRequired` of the
-  message type, and a broadcast to the vchannels of the collection), so that
-  no write runs between the append of the message and the open of the index.
 - **The callers of `WaitUntil`** for the events the index can not see in its
   in-flight set: the promotion of a secondary cluster and the recovery from
   an engine failure.
@@ -492,10 +489,16 @@ Unit tests cover these behaviors.
 - The observe of inserts, deletes, transactions and companion deletes gives
   the same engine content as the append path, for Int64 and VarChar keys.
   Writes that the manifest covers are skipped. The control channel is
-  skipped and a replicated message is applied. An observed CreateCollection
-  creates a ready `Index`, one of an opened vchannel is ignored, and a
-  DropCollection returns the close of the index, which runs after the writes
-  before the drop, while the observe goes on. The first error before `Run`
+  skipped and a replicated message is applied. An observed CreateIndex
+  that enabled the index opens a ready `Index`, one of an opened vchannel is
+  ignored, a CreateIndex of a vchannel that is not empty drops the `Index` of
+  the append, a DropIndex closes only the named index, and a DropCollection
+  returns the close of the index, which runs after the writes before the
+  drop, while the observe goes on. The close of a dropped index does not
+  close the `Index` of a later CreateIndex. The replay of an earlier index
+  keeps the later one. The recovery opens only the vchannels with
+  `pk_index`. The replay of a truncate resets the `Index`, and the replay of
+  a committed truncate does nothing. The first error before `Run`
   is kept and `Run` returns it.
 - The replay and the live path are one: a message after `Run` is applied by
   the same observe. The delete of a transaction is applied before its put,

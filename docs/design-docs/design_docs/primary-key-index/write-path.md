@@ -466,6 +466,8 @@ append.
   the shard manager does not hold at WAL open: it gets no index, and its writes
   pass through (a TODO in the builder). At WAL open, a collection whose index can
   not be created makes the open panic.
+  A later change replaces this: a `CreateIndex` of type `PRIMARY_KEY` enables
+  the index of each vchannel, not the CreateCollection. See [DDL](ddl.md).
 - A retry of an idempotent insert after a WAL open still finds its record: the
   CommitTxn of the group carries the idempotency key.
 

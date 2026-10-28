@@ -12,9 +12,9 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | TruncateCollection | Broadcast: VChannels + CChannel (AckSyncUp) | Yes (VChannel) | SharedDBName + ExclusiveCollectionName |
 | CreatePartition | Broadcast: VChannels + CChannel | Yes (VChannel) | SharedDBName + ExclusiveCollectionName |
 | DropPartition | Broadcast: VChannels + CChannel | Yes (VChannel) | SharedDBName + ExclusiveCollectionName |
-| CreateIndex | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
+| CreateIndex | Broadcast: CChannel. `PRIMARY_KEY`: VChannels + CChannel (AckSyncUp) | Yes (data VChannels only, so only `PRIMARY_KEY`) | SharedDBName + ExclusiveCollectionName |
 | AlterIndex | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
-| DropIndex | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
+| DropIndex | Broadcast: CChannel. Header `index_type=PRIMARY_KEY`: VChannels + CChannel | Yes (data VChannels only, so only `PRIMARY_KEY`) | SharedDBName + ExclusiveCollectionName |
 | CreateSnapshot | Broadcast: All Collection VChannels + CChannel (AckSyncUp) | Yes | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
 | DropSnapshot | Broadcast: CChannel | No | ExclusiveSnapshotName |
 | RestoreSnapshot | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
@@ -37,9 +37,12 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **CreateCollection**: Creates a new collection with its partitions and VChannels.
 - **DropCollection**: Drops a collection and all its data, indexes, and load config. Implicitly flushes all growing segments.
 - **AlterCollection**: Alters collection properties, description, consistency level, or schema. Schema changes implicitly flush growing segments. When used for **RenameCollection**, the ResourceKey changes to `ExclusiveDBName(srcDB) + ExclusiveDBName(dstDB)` (deduplicated if same DB), blocking all collection DDL in both databases.
-- **TruncateCollection**: Logically truncates by sealing and dropping all segments before the truncation timestamp. Implicitly flushes all growing segments. Uses AckSyncUp.
+- **TruncateCollection**: Logically truncates by sealing and dropping all segments before the truncation timestamp. Implicitly flushes all growing segments. Uses AckSyncUp. Sets `ever_written` of each VChannel meta back to NEVER, and resets an enabled primary key index in place at the truncate position.
 - **CreatePartition** / **DropPartition**: Creates or drops a partition. DropPartition seals and flushes all earlier growing segments of the collection on each VChannel, but logically drops only the requested partition.
-- **CreateIndex** / **AlterIndex** / **DropIndex**: Manages indexes on a collection's field. CChannel-only.
+- **CreateIndex** / **AlterIndex** / **DropIndex**: Manages indexes on a collection's field. CChannel-only, except for the primary key index. The CreateIndex and DropIndex headers carry `index_type`.
+  - A CreateIndex of type `PRIMARY_KEY` goes to every VChannel of the collection with AckSyncUp. Each StreamingNode decides at the CreateIndex position whether the VChannel is empty (`ever_written` in the VChannel meta), sets `pk_index` when it is, and acks with a `CreateIndexAckResult` in the ack `extra`. The DataCoord callback writes the index state Finished or Failed from these results. The index inspector of the primary cluster broadcasts a DropIndex for a Failed index.
+  - A DropIndex whose `index_ids` hold the primary key index, or that drops all indexes of a collection that has one, carries `index_type=PRIMARY_KEY` and goes to every VChannel. The StreamingNode clears `pk_index` and closes the index.
+  - The control-channel copy of both messages takes the shared lock. See [primary key index DDL](../../../design-docs/design_docs/primary-key-index/ddl.md).
 - **CreateSnapshot**: Broadcasts to all collection VChannels plus CChannel with AckSyncUp. Flushes earlier L1/L0 data and uses each business channel's message position as the snapshot cut.
 - **DropSnapshot** / **RestoreSnapshot** / **DropSnapshotsByCollection**: Manages collection snapshots. CChannel-only.
 - **Import**: Initiates a bulk import job for a collection through its broadcast callback; CChannel is excluded from the job's data-channel list.

@@ -8,7 +8,9 @@
 
 ## Summary
 
-The primary key index of a collection keeps one LSM tree for each vchannel. The
+The primary key index of a collection keeps one LSM tree for each vchannel.
+A collection can have a dropped index and a new index at the same time, so
+every manifest is the manifest of one index ID on one vchannel. The
 streaming node writes the tree as SST files in object storage. A reader must
 know which SST files make up the tree and up to which WAL position the files
 are complete. The manifest records this state.
@@ -39,7 +41,6 @@ Out of scope (future work):
 - The streaming node recovery that reads the manifests and replays the WAL.
 - Compaction of SSTs. The edit rule and the GC input exist, but no task uses
   them.
-- Cleanup of all primary key index objects after a collection drop.
 - Snapshot protection of SST files.
 
 ## Data Model
@@ -55,6 +56,7 @@ message Manifest {
   uint64 checkpoint_time_tick = 5; // SSTs cover all WAL messages at or below it
   repeated SSTRef ssts = 6;        // newest first
   string sst_base_path = 7;        // object key prefix of the SST files
+  int64 index_id = 8;              // the ID of the primary key index
 }
 
 message SSTRef {
@@ -102,9 +104,15 @@ Rules of the model:
 
 | Store | Key | Value |
 |---|---|---|
-| Meta kv | `<metaRoot>/pkindex-meta/manifest/<collectionID>/<vchannel>` | `ManifestPointer` |
-| Object storage | `<rootPath>/pk_index/<collectionID>/<vchannel>/manifest/<version>-<uuid>.pb` | `Manifest` body |
-| Object storage | `<rootPath>/pk_index/<collectionID>/<vchannel>/sst/<id>.sst` | SST file |
+| Meta kv | `<metaRoot>/pkindex-meta/manifest/<collectionID>/<indexID>/<vchannel>` | `ManifestPointer` |
+| Object storage | `<rootPath>/pk_index/<collectionID>/<indexID>/<vchannel>/manifest/<version>-<uuid>.pb` | `Manifest` body |
+| Object storage | `<rootPath>/pk_index/<collectionID>/<indexID>/<vchannel>/sst/<id>.sst` | SST file |
+
+- The index ID level keeps a dropped index and a new index of the same
+  collection apart. Index IDs come from the global ID allocator and are not
+  reused. See [lifecycle](lifecycle.md#object-layout-and-gc-by-index-id).
+  No release has the layout without the index ID, so there is no
+  compatibility with it.
 
 - The pointer keys come from `PointerKey` in
   `internal/datacoord/pkindex/manifest`.
@@ -116,8 +124,8 @@ Rules of the model:
   the same meta kv and the same meta root path.
 - `pk_index` is `common.PKIndexPath`. No other storage prefix starts with it, so
   the existing orphan scans do not see these objects.
-- `sst_base_path` is `<rootPath>/pk_index/<collectionID>/<vchannel>/sst`. The
-  function `pkindex.SSTBasePath(rootPath, collectionID, vchannel)` in
+- `sst_base_path` is `<rootPath>/pk_index/<collectionID>/<indexID>/<vchannel>/sst`. The
+  function `pkindex.SSTBasePath(rootPath, collectionID, indexID, vchannel)` in
   `internal/pkindex/objpath.go` builds it. That file builds all object
   keys of the primary key index. The writer of the SSTs, the manifest writer
   and GC all use it, so they cannot disagree. The first version records the
@@ -139,7 +147,9 @@ current version.
 ### Flush
 
 The snapshot side commits a flush with `CommitFlush`. A flush carries the
-vchannel, the term, the new SSTs (newest first), and the new checkpoint. The
+vchannel, the index ID, the term, the new SSTs (newest first), the new
+checkpoint, and the time tick of a truncate that the flush commits
+(`reset_time_tick`, 0 when none). The
 pchannel of the flush is the pchannel part of the vchannel name.
 
 The flush term is first checked against `channel.term` of the pchannel meta.
@@ -162,10 +172,11 @@ Then the flush is applied to the manifest:
 
 | Condition | Result |
 |---|---|
-| No manifest | Apply the flush to an empty manifest. The result is version 1 with the `sst_base_path` of the layout |
+| No manifest | Apply the flush to an empty manifest. The result is version 1 with the `sst_base_path` of the layout and the index ID of the flush |
 | Checkpoint does not move forward, flush term = `last_flush_term` | No write. Return the current version |
 | Checkpoint does not move forward, flush term ≠ `last_flush_term` | `ErrCheckpointRegressed` |
 | An SST ID is in the manifest, or is twice in the flush | `ErrDuplicateSST` |
+| `reset_time_tick` is set | New version: the SSTs of the flush replace the SST list, checkpoint moves forward, `last_flush_term` becomes the flush term. An SST of the old list can come again |
 | Otherwise | New version: SSTs go to the front, checkpoint moves forward, `last_flush_term` becomes the flush term |
 
 Notes:
@@ -177,7 +188,11 @@ Notes:
 - A flush with an old checkpoint and another term is a regression. If it were
   accepted as a retry, a new owner with a bug would get a success for SSTs that
   are not in the manifest.
-- A flush with no SSTs only moves the checkpoint.
+- A flush with no SSTs only moves the checkpoint. A flush with no SSTs and a
+  `reset_time_tick` empties the SST list: this commits the truncate of a
+  collection ([lifecycle](lifecycle.md#truncate-reset-the-index-in-place)).
+  The retry of an applied reset is an applied retry, as for every flush. The
+  existing mark-sweep removes the replaced SSTs.
 - The duplicate check runs only when the checkpoint moves forward.
 - The pointer write of a flush is in the same meta kv transaction as a
   condition on the pchannel meta. See "Commit Steps and Crash Windows".
@@ -373,6 +388,8 @@ marks those failures as `ErrUnavailable`, and the mark must win.
 | `pchannel_term` is not positive | Request check, `CommitFlush` | `ServiceInternal` | No (caller bug) |
 | The `vchannel` name has no pchannel part | Request check, `CommitFlush` | `ServiceInternal` | No (caller bug) |
 | `checkpoint_time_tick` is 0 | Request check, `CommitFlush` | `ServiceInternal` | No (caller bug) |
+| `index_id` is not positive | Request check, `CommitFlush`, each target of `GetRecoveryManifests` | `ServiceInternal` | No (caller bug) |
+| `reset_time_tick` is above `checkpoint_time_tick` | Request check, `CommitFlush` | `ServiceInternal` | No (caller bug) |
 | `ErrFenced` | Flush | `ChannelNotAvailable` | No. Stop the writes on the pchannel |
 | Meta kv or object storage failure (`ErrUnavailable`) | Load, write, walk | `ServiceUnavailable` | Yes |
 | Object storage failure that a retry does not fix: permission denied, bucket not found, invalid credentials, entity too large | Load, write | Its own code (`IoPermissionDenied`, `IoBucketNotFound`, `IoInvalidCredentials`, `IoEntityTooLarge`) | No |
@@ -489,6 +506,20 @@ manifest directory, or when `sst_base_path` differs from the layout. It logs a
 warning and deletes nothing for that vchannel. This prevents deletes in a
 directory that GC does not own, for example after a root path change.
 
+### GC by index ID
+
+Each round also removes the pointers and the objects of the indexes that
+DataCoord dropped, and of the collections that are gone. It finds the indexes
+from the pointer keys and from one recursive walk of `pk_index/`. The age of
+an index is the time since the newest modification of its objects. It uses
+`dataCoord.gc.dropTolerance` for a deleted index and a dropped collection, and
+`dataCoord.gc.missingTolerance` for an index ID that the DataCoord meta does
+not have. It keeps a live index, skips a collection with a paused GC, and
+skips the round on a `HasCollection` error. `Manager.DropIndex` removes the
+pointers under the lock of each vchannel and forgets their cache. Then the GC
+removes the objects. The rules and their reasons are in
+[lifecycle](lifecycle.md#gc-rules).
+
 ### Parameters
 
 | Parameter | Default | Meaning |
@@ -523,14 +554,12 @@ The first version has no pointer to compare with. `ValueEqual` cannot express
 - **Compaction.** No compaction task exists. DataCoord passes no in-flight
   output source to GC yet. A compaction task must add one before it uploads
   outputs.
-- **Collection drop.** Nothing deletes the `pk_index/<collectionID>` prefix after
-  a collection drop.
 - **Vchannel without a pointer.** GC finds a vchannel only through its manifest
   pointer. If the first commit of a vchannel writes the body (and the streaming
   node uploads SSTs) but the pointer write never succeeds, GC does not see
   these objects. A later successful flush of the vchannel creates the pointer,
   and GC then deletes them after `grace`. If no flush of the vchannel succeeds
-  before it is dropped, they stay, like the prefix of a dropped collection.
+  before it is dropped, the GC by index ID removes them after its tolerance.
 - **Snapshot protection.** Collection snapshots protect segments and index
   builds, but not primary key index SSTs.
 - **Tables in use by streaming nodes.** Lazy reads from object storage will let

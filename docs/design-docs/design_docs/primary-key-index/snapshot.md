@@ -53,7 +53,7 @@ packages:  server/pkindex  ──▶  server/pkindex/index  ──▶  pkindex/d
 - `internal/streamingnode/server/pkindex` is the pchannel level and above:
   `Manager` opens a `PChannelIndexManager` per pchannel. The
   `PChannelIndexManager` keeps the member table of its vchannels
-  (`CreateCollection`, `DropCollection`, `Decider(vchannel)`), takes the
+  (`OpenIndex`, `DetachIndex`, `DropIndex`, `ResetIndex`, `Decider(vchannel)`), takes the
   writes and the TimeTicks from the observe of the WAL recovery (`Apply`,
   `ObserveTimeTick`), evaluates the handover triggers at each TimeTick, drives
   the handovers once the recovery started it (`Start`), and keeps
@@ -102,9 +102,9 @@ The index owns the types that it exchanges with the manifest service:
 |---|---|
 | `ManifestView` | `Version`, `SSTBasePath`, `CheckpointTimeTick`, `Tables []TableRef` |
 | `TableRef` | the table info of the core library (`sst.Info`): `ID`, `TableFormat`, `Size`, `MinKey`, `MaxKey`, `NumEntries` |
-| `VChannelRef` | `CollectionID`, `VChannel` |
+| `VChannelRef` | `CollectionID`, `IndexID`, `VChannel` |
 | `RecoveryManifest` | `Found bool`, `Version`, `BodyKey` (the object key of the manifest body), `Err` (the failure of this item) |
-| `FlushArgs` | `CollectionID`, `VChannel`, `PChannelTerm`, `PKDataType`, `AddTables`, `CheckpointTimeTick` |
+| `FlushArgs` | `CollectionID`, `IndexID`, `VChannel`, `PChannelTerm`, `AddTables`, `CheckpointTimeTick`, `ResetTimeTick` (the time tick of a truncate that the flush commits, 0 when none) |
 
 ```go
 // package pkindex (pchannel level)
@@ -122,8 +122,9 @@ type Committer interface {
   An item that fails has its own `Err`. A call has at most
   `MaxRecoveryManifests` (10000) refs. The handover only uses `Found`.
   `Version` and `BodyKey` are for recovery, which reads the manifest body.
-- The first `CommitFlush` of a vchannel creates its manifest at version 1
-  with `PKDataType`.
+- The first `CommitFlush` of an index on a vchannel creates its manifest at
+  version 1 with the index ID. The manifest does not record the primary key
+  type.
 
 The streaming node does not claim a pchannel. The manifest service fences a
 flush through the pchannel meta of the streaming coordinator: a
@@ -150,8 +151,8 @@ later change (see [Not done in this change](#not-done-in-this-change)):
 | `ServiceUnavailable`, `ServiceNotReady`, a timeout, a cancel | retryable, unchanged |
 
 The streaming node computes the SST base path of a vchannel itself, with
-`pkindex.SSTBasePath(rootPath, collectionID, vchannel)`:
-`<rootPath>/pk_index/<collectionID>/<vchannel>/sst`, where `rootPath` is
+`pkindex.SSTBasePath(rootPath, collectionID, indexID, vchannel)`:
+`<rootPath>/pk_index/<collectionID>/<indexID>/<vchannel>/sst`, where `rootPath` is
 `ChunkManager.RootPath()`. The handover uploads under the computed path. The
 manifest records its own `SSTBasePath`, and the install downloads with it.
 When the two differ, the commit is `ErrRejected`.
@@ -206,25 +207,28 @@ the primary key index:
   node.
 - The WAL recovery owns the index of a pchannel. It creates it with
   `Manager.New` (the pchannel, the seed of `lastObserved`, `OnFatal`),
-  creates the index of every existing collection with `CreateCollection`,
+  opens the `Index` of every vchannel whose meta has `pk_index` with `OpenIndex`,
   recovers them (manifest lookups, install, replay), calls `Start`, and
   closes it with the WAL (see [Readiness](#readiness)).
 - The interceptor only uses the index: `Build` reads it from the recovery
   snapshot (`RecoverySnapshot.PKIndex`), and passes the messages through when
   there is none.
-  It registers the translation of every existing collection and calls
-  `CreateCollection` for it, which finds the index that the recovery opened.
-  An open that fails on the local disk goes to `OnFatal`: the WAL rejects all
-  appends, and its next open tries again. A schema that the index rejects is
-  a broken invariant for an existing collection, and it panics. `Close` of the
+  It adopts the `Index` that the recovery opened for each existing
+  collection, and opens a new one after the append of an enabling
+  CreateIndex ([DDL](ddl.md#append-side)). An open after the append that
+  fails goes to `OnFatal`: the WAL rejects all appends, and its next open
+  enables the index through the observe. A schema that the index rejects at
+  the WAL open is a broken invariant for an existing index, and it panics. `Close` of the
   interceptor does not close the index.
-- The rollback of a failed CreateCollection calls
-  `PChannelIndexManager.DropCollection`. It closes the index and removes `<root>/<vchannel>/`. A
-  vchannel name embeds the collection ID, so no later open of the vchannel
-  would remove the files. At a DropCollection the interceptor only forgets
-  the vchannel; the observe of the WAL recovery closes the index when it
-  reaches the drop, after the writes before it (see
-  [recovery](recovery.md#observe)). A failed removal is only logged.
+- `PChannelIndexManager.DropIndex(vchannel, indexID)` closes the `Index` and
+  removes its local directory `<root>/<vchannel>/<indexID>/`. Index ID 0
+  matches any `Index` and removes `<root>/<vchannel>/`: the drop of the
+  collection. Index IDs are not reused, so no later open of the same index ID
+  would remove the files. At a DropIndex or a DropCollection the interceptor
+  only forgets the vchannel. The observe of the WAL recovery detaches the
+  `Index` when it reaches the drop, after the writes before it, and closes it
+  in a task (see [recovery](recovery.md#observe)). A failed removal is only
+  logged.
 
 ### Wiring into the streaming node
 
@@ -265,26 +269,41 @@ A handover has two phases. Only one handover of a vchannel runs at a time.
 ```
 Prepare (only when the vchannel has no pending request):
   covered := lastObserved                     read it first, see Coverage
+  reset := resetTT > lastCommittedTimeTick    a truncate is not committed yet
+  if reset and covered < resetTT: stop        wait until the observe passes the truncate
   if covered <= lastCommittedTimeTick: stop   nothing new is observed
   RotateIncrement                             freeze the active generation
   for each frozen generation, newest first:   includes leftovers of failed handovers
       StageFrozen                             same tables, same IDs on every call
       hard-link each table to <dir>/committed/<id>.sst
-  request := CommitFlushRequest{pk_data_type, add_ssts, checkpoint_time_tick = covered}
+  request := CommitFlushRequest{index_id, add_ssts, checkpoint_time_tick = covered,
+                                 reset_time_tick = resetTT if reset}
   record it as the pending request at once    no upload yet
-                                              (request is nil when there are no tables)
+                                              (request is nil when there are no tables
+                                               and no reset)
 
 Commit (a retry sends the same pending request):
+  a Reset after the prepare and before the send:  send nothing
   request is nil:  DropFrozen the generations, lastCommittedTimeTick = covered
   otherwise:       if no upload finished, or the upload is older than grace/2:
                        upload each table to <sst_base_path>/<id>
                    before := installed version
                    CommitFlush(request) → complete manifest
+                   a Reset during the flush:  install nothing, retire nothing,
+                                              keep lastCommittedTimeTick
                    manifest.version < before or
                    manifest.checkpoint < covered:  ErrRejected, keep the generations
                    installIfNewer(manifest, retire the generations)
                    lastCommittedTimeTick = covered, clear the pending request
 ```
+
+A truncate of the collection resets the `Index` in place (`Index.Reset`,
+[lifecycle](lifecycle.md#truncate-reset-the-index-in-place)). The reset sets
+`resetTT`, increments a reset epoch under the install lock, and asks for a
+handover that covers `resetTT`. The flush of that handover carries
+`reset_time_tick`, so its tables replace the table list of the manifest, also
+when it has no table. A handover that recorded an older epoch at its prepare
+detects the reset by the epoch.
 
 `Prepare` does not upload. The `Index` records its result as pending before
 `Commit` starts. So a failed upload keeps the pending request, and the retry
@@ -418,10 +437,9 @@ Who marks an `Index` ready:
   set. It replays the WAL from the checkpoints and calls
   `PChannelIndexManager.Start` when it is done. The recovery is a later
   change; this change has no caller of `MarkReady` outside the tests.
-- The `PChannelIndexManager`, for a collection created after `Start`. Its
-  vchannel name holds the new collection ID, so no manifest can exist for it,
-  and `CreateCollection` marks it ready at once. A collection created before
-  `Start` waits for the recovery.
+- The `PChannelIndexManager`, for an index enabled after `Start`. It has a
+  new index ID, so no manifest can exist for it, and `OpenIndex` marks it
+  ready at once. An index enabled before `Start` waits for the recovery.
 
 `Start` also starts the handover driver. No handover runs before it, and no
 `Index` that is not ready is a candidate: a handover of such an `Index` would
@@ -821,12 +839,16 @@ Unit tests cover these cases:
 - Fatal errors: `ErrFenced`, `ErrRejected` and `ErrCorrupted` are fatal.
   Other errors are retryable, also a merr code that no adapter translated.
 - Object key: `pkindex.SSTKey` gives `<sst_base_path>/<id>.sst`.
-- Duplicate CreateCollection: a `CreateCollection` of an `Index` that exists
-  reports that it created nothing, so the rollback after a failed append does not
-  remove the `Index` in use.
-- Drop: DropCollection and the rollback of a failed CreateCollection remove
-  the local directory, and a new create of the vchannel sees none of the old
-  keys. A drop on a closed `PChannelIndexManager` fails and keeps the files.
+- Duplicate open: an `OpenIndex` of an `Index` that exists reports that it
+  opened nothing. An `OpenIndex` of another index ID on the same vchannel
+  fails.
+- Drop: `DropIndex` removes the local directory of the index, and a new index
+  of the vchannel sees none of the old keys. Two indexes of one vchannel use
+  separate directories.
+- Reset: a reset forgets the keys before the truncate and keeps the in-flight
+  writes after it. A handover commits a reset without new writes. A reset
+  during a commit drops its result, a reset before the commit of a prepared
+  handover sends nothing, and an install after a reset installs nothing. A drop on a closed `PChannelIndexManager` fails and keeps the files.
 - WAL open: a local disk error goes to `OnFatal` and does not panic. An
   existing collection with an unsupported primary key type panics.
 - Table store: remote failures are `ErrUnavailable`, local disk failures
