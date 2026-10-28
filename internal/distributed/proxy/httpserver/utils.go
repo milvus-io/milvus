@@ -1773,12 +1773,9 @@ func parseStructArrayRow(rawJSON string, structSchema *schemapb.StructArrayField
 			name := key.String()
 			values, ok := collected[name]
 			if !ok {
-				// A key no sub-field has is most likely a sub-field that was
-				// dropped; storing the rest of the element would lose it silently.
-				keyErr = merr.WrapErrParameterInvalidMsg(
-					"struct array field %s element #%d has unknown sub-field %s",
-					structSchema.GetName(), idx, name)
-				return false
+				// A key no sub-field has, including a dropped sub-field, is
+				// ignored, as in JSON and CSV import.
+				return true
 			}
 			if len(values) > idx {
 				keyErr = merr.WrapErrParameterInvalidMsg(
