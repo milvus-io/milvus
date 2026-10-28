@@ -231,7 +231,14 @@ func (m *VChannelRecoveryModule) ObserveMessage(
 	case message.MessageTypeCreateSegment:
 		m.handleCreateSegmentMessage(ctx, message.MustAsRetainedImmutableCreateSegmentMessageV2(retained))
 	case message.MessageTypeInsert, message.MessageTypeTxn:
+		m.observeWrite(msg.TimeTick())
 		m.handleInsertMessage(ctx, retained)
+	case message.MessageTypeImport, message.MessageTypeCommitImport:
+		m.observeWrite(msg.TimeTick())
+	case message.MessageTypeCreateIndex:
+		m.handleCreateIndexMessage(message.MustAsImmutableCreateIndexMessageV2(msg))
+	case message.MessageTypeDropIndex:
+		m.handleDropIndexMessage(message.MustAsImmutableDropIndexMessageV2(msg))
 	case message.MessageTypeFlush:
 		m.handleFlushMessage(ctx, retained)
 	case message.MessageTypeManualFlush, message.MessageTypeFlushAll, message.MessageTypeAlterWAL, message.MessageTypeCreateSnapshot:

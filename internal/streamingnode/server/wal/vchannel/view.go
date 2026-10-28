@@ -74,6 +74,7 @@ func NewVChannelMetaFromCreateCollectionMessage(msg message.ImmutableCreateColle
 					CheckpointTimeTick: msg.TimeTick(),
 				},
 			},
+			EverWritten: streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_NEVER,
 		},
 		CheckpointTimeTick: msg.TimeTick(),
 	}
@@ -573,6 +574,9 @@ func (info *VChannelView) ObserveTruncateCollectionMessageV2(msg message.Immutab
 	if info.closingLocked(0) || info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
 		return false
 	}
+	// The rows before the truncate are gone. The primary key index stays
+	// enabled; the index itself is reset in place.
+	info.meta.CollectionInfo.EverWritten = streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_NEVER
 	info.meta.CheckpointTimeTick = msg.TimeTick()
 	info.dirty = true
 	return true

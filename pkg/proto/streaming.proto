@@ -864,11 +864,28 @@ message VChannelMeta {
     uint64 transform_materialized_time_tick = 5; // The L0 materialization frontier of the transform consumer. Delete entries through this timetick have been emitted as L0 output.
 }
 
+// VChannelWriteHistory tells whether rows were ever written to a vchannel
+// since its collection was created or last truncated.
+enum VChannelWriteHistory {
+    VCHANNEL_WRITE_HISTORY_UNKNOWN = 0; // vchannel created before this field existed; treated as written.
+    VCHANNEL_WRITE_HISTORY_NEVER = 1;
+    VCHANNEL_WRITE_HISTORY_WRITTEN = 2; // stays WRITTEN even if all rows are deleted later.
+}
+
+// PKIndexOfVChannel is the primary key index that is enabled on a vchannel.
+message PKIndexOfVChannel {
+    int64 index_id = 1;
+    int64 field_id = 2;
+    uint64 enable_time_tick = 3; // the time tick of the CreateIndex that enabled the index.
+}
+
 // CollectionInfoOfVChannel is the collection info in vchannel.
 message CollectionInfoOfVChannel {
     int64 collection_id = 1; // collection id.
     repeated PartitionInfoOfVChannel partitions  = 2; // partitions.
     repeated CollectionSchemaOfVChannel schemas = 3; // The schemas of the vchannel.
+    VChannelWriteHistory ever_written = 4; // whether rows were ever written since the collection was created or last truncated.
+    PKIndexOfVChannel pk_index = 5; // the enabled primary key index, unset means not enabled.
 }
 
 // CollectionSchemaOfVChannel is the collection schema in vchannel.
