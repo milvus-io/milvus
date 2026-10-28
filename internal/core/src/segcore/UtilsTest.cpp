@@ -263,6 +263,7 @@ TEST(Util_Segcore, MergeDataArrayPreservesAllNullVectorMetadata) {
         auto source = CreateEmptyVectorDataArray(0, field_meta);
         MutableFieldDataRowValidData(source.get())->Add(false);
         MutableFieldDataRowValidData(source.get())->Add(false);
+        SyncFieldDataRowValidData(source.get());
         auto expected_data_case = source->vectors().data_case();
         std::map<FieldId, std::unique_ptr<DataArray>> output_fields;
         output_fields[vec] = std::move(source);

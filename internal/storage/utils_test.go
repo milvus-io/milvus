@@ -1512,26 +1512,69 @@ func TestColumnBasedInsertMsgToInsertDataValidDataSources(t *testing.T) {
 		name    string
 		legacy  []bool
 		current []bool
-		wantErr bool
 	}{
 		{name: "legacy fallback", legacy: validData},
 		{name: "field-specific", current: validData},
 		{name: "matching dual sources", legacy: validData, current: validData},
-		{name: "mismatched dual sources", legacy: validData, current: []bool{false, true}, wantErr: true},
+		// An older proxy rewrote the legacy location and forwarded a stale
+		// field-specific copy; the legacy value wins instead of failing the
+		// WAL consumer.
+		{name: "mismatched dual sources", legacy: validData, current: []bool{false, true}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			insertData, err := ColumnBasedInsertMsgToInsertData(makeMsg(test.legacy, test.current), schema)
-			if test.wantErr {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), "different legacy and field-specific valid_data")
-				return
-			}
-
+			msg := makeMsg(test.legacy, test.current)
+			insertData, err := ColumnBasedInsertMsgToInsertData(msg, schema)
 			require.NoError(t, err)
 			fieldData := insertData.Data[100].(*Int64FieldData)
 			assert.Equal(t, validData, fieldData.ValidData)
+			assert.Equal(t, validData, msg.GetFieldsData()[0].GetValidData())
+			assert.Equal(t, validData, msg.GetFieldsData()[0].GetScalars().GetValidData())
 		})
 	}
+}
+
+func TestColumnBasedTransferInsertMsgToInsertRecordReconcilesValidData(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  100,
+				Name:     "value",
+				DataType: schemapb.DataType_Int64,
+				Nullable: true,
+			},
+		},
+	}
+	// An older proxy filled a default value, rewrote the legacy validity to all
+	// true and forwarded the stale field-specific copy.
+	msg := &msgstream.InsertMsg{
+		InsertRequest: &msgpb.InsertRequest{
+			NumRows: 2,
+			Version: msgpb.InsertDataVersion_ColumnBased,
+			FieldsData: []*schemapb.FieldData{
+				{
+					FieldId:   100,
+					FieldName: "value",
+					Type:      schemapb.DataType_Int64,
+					ValidData: []bool{true, true},
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							ValidData: []bool{true, false},
+							Data: &schemapb.ScalarField_LongData{
+								LongData: &schemapb.LongArray{Data: []int64{10, 7}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	record, _, err := TransferInsertMsgToInsertRecord(schema, msg)
+	require.NoError(t, err)
+	require.Len(t, record.GetFieldsData(), 1)
+	field := record.GetFieldsData()[0]
+	assert.Equal(t, []bool{true, true}, field.GetValidData())
+	assert.Equal(t, []bool{true, true}, field.GetScalars().GetValidData())
 }
 
 func TestColumnBasedInsertMsgToInsertDataRejectsNullableVectorNonCompactData(t *testing.T) {
@@ -3512,7 +3555,7 @@ func TestTransferInsertDataToInsertRecord_NullableArrayOfVector(t *testing.T) {
 	for _, fd := range record.FieldsData {
 		if fd.FieldId == 100 {
 			found = true
-			assert.Nil(t, fd.GetValidData())
+			assert.Equal(t, []bool{true, false}, fd.GetValidData())
 			assert.Equal(t, []bool{true, false}, fd.GetVectors().GetValidData())
 			assert.NotNil(t, fd.GetVectors().GetVectorArray())
 			assert.Equal(t, 2, len(fd.GetVectors().GetVectorArray().GetData()))

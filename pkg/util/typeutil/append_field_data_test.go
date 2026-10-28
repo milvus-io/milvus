@@ -59,6 +59,8 @@ func TestAppendFieldDataAfterLegacyAllNullVector(t *testing.T) {
 						Field: &schemapb.FieldData_Vectors{Vectors: tc.vector},
 					}}
 					src[0].ValidData = []bool{true}
+					expected := proto.Clone(src[0]).(*schemapb.FieldData)
+					SetFieldDataValidData(expected, GetFieldDataValidData(src[0]))
 					for _, dst := range [][]*schemapb.FieldData{PrepareResultFieldData(null, 3), make([]*schemapb.FieldData, 1)} {
 						AppendFieldData(dst, null, 0, -1)
 						AppendFieldData(dst, src, 0, 0)
@@ -71,7 +73,7 @@ func TestAppendFieldDataAfterLegacyAllNullVector(t *testing.T) {
 						assembled := make([]*schemapb.FieldData, 1)
 						idxs := NewFieldDataIdxComputer(dst).Compute(1)
 						AppendFieldData(assembled, dst, 1, idxs...)
-						require.True(t, proto.Equal(src[0], assembled[0]), "expected %v, got %v", src[0], assembled[0])
+						require.True(t, proto.Equal(expected, assembled[0]), "expected %v, got %v", expected, assembled[0])
 					}
 				})
 			}

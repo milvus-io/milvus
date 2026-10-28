@@ -175,8 +175,8 @@ func validateFieldDataColumns(columns []*schemapb.FieldData, schema *schemaInfo)
 }
 
 // validateAndNormalizeFieldDataValidData validates compatibility fields once
-// when a user payload enters the proxy, then keeps only the current
-// field-specific representation for internal processing.
+// when a user payload enters the proxy, then writes matching row validity
+// to both locations for internal processing.
 func validateAndNormalizeFieldDataValidData(fields []*schemapb.FieldData) error {
 	for _, field := range fields {
 		if !typeutil.ValidateAndNormalizeFieldDataValidData(field) {
@@ -639,6 +639,8 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 				Field:     subField.Field,
 				IsDynamic: subField.IsDynamic,
 			}
+
+			typeutil.SetFieldDataValidData(subFieldCopy, validData)
 
 			flattenedFields = append(flattenedFields, subFieldCopy)
 		}

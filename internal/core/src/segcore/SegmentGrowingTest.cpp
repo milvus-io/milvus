@@ -365,6 +365,7 @@ TEST(Growing, InsertRejectsTruncatedGeometryBeforeWritingSegmentData) {
 
     expect_rejected_without_ack([](DataArray* field_data) {
         MutableFieldDataRowValidData(field_data)->RemoveLast();
+        SyncFieldDataRowValidData(field_data);
     });
     expect_rejected_without_ack([](DataArray* field_data) {
         field_data->mutable_scalars()
@@ -2485,6 +2486,7 @@ TEST(Growing, InsertRejectsShortValidDataForNullableVarchar) {
             .release());
     // One validity entry short of the row count.
     MutableFieldDataRowValidData(record->mutable_fields_data(1))->RemoveLast();
+    SyncFieldDataRowValidData(record->mutable_fields_data(1));
 
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
     auto offset = segment->PreInsert(row_count);

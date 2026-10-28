@@ -157,6 +157,7 @@ class GrowingNullableVectorTest : public ::testing::Test {
                              reversed_valid_data.end());
                 MutableFieldDataRowValidData(&field)->Swap(
                     &reversed_valid_data);
+                SyncFieldDataRowValidData(&field);
             }
             const auto& valid_data = GetFieldDataRowValidData(field);
             auto rows = VectorRows(field, kDim);

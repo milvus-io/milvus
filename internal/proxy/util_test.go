@@ -3814,8 +3814,8 @@ func TestCheckAndFlattenStructFieldData_ValidDataCopied(t *testing.T) {
 	for _, fd := range insertMsg.GetFieldsData() {
 		if fd.FieldName == transformedName {
 			found = true
-			assert.Equal(t, validData, typeutil.GetFieldDataValidData(fd), "ValidData should be preserved in flattened sub-field")
-			assert.Nil(t, fd.GetValidData(), "flattened sub-field should use only field-specific ValidData")
+			assert.Equal(t, validData, fd.GetValidData(), "flattened sub-field should carry legacy ValidData")
+			assert.Equal(t, validData, fd.GetScalars().GetValidData(), "flattened sub-field should carry field-specific ValidData")
 			break
 		}
 	}

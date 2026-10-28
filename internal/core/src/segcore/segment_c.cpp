@@ -552,6 +552,9 @@ DeleteRetrieveResult(CRetrieveResult* retrieve_result) {
 CRetrieveResult*
 CreateLeakedCRetrieveResultFromProto(
     std::unique_ptr<milvus::proto::segcore::RetrieveResults> retrieve_result) {
+    for (auto& field_data : *retrieve_result->mutable_fields_data()) {
+        milvus::SyncFieldDataRowValidData(&field_data);
+    }
     auto size = retrieve_result->ByteSizeLong();
     std::unique_ptr<uint8_t[]> buffer(new uint8_t[size]);
     retrieve_result->SerializePartialToArray(buffer.get(), size);

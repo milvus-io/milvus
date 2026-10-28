@@ -202,6 +202,8 @@ func TestUpsertPreExecuteNullableVectorValidity(t *testing.T) {
 						typeutil.SetFieldDataValidData(expected, expectedValid)
 						require.True(t, proto.Equal(expected.GetVectors(), merged.GetVectors()), "expected %v, got %v", expected.GetVectors(), merged.GetVectors())
 						require.Equal(t, expectedValid, typeutil.GetFieldDataValidData(merged))
+						// Row validity is kept in both locations.
+						require.Equal(t, merged.GetVectors().GetValidData(), merged.GetValidData())
 						require.EqualValues(t, 3, task.result.InsertCnt)
 						require.EqualValues(t, len(existing), task.result.DeleteCnt)
 					})
