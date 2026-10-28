@@ -157,6 +157,10 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
             auto& locations = workspace.locations;
             planner_->LocateBatch(offsets_, first, limit, locations.data());
             prepared_first_ = first;
+            if (PrepareRetainedPrefix(limit)) {
+                prepared_count_ = limit;
+                return limit;
+            }
             auto& cells = workspace.cells;
             std::array<int64_t, kPreparedRows> cell_ids;
             std::array<size_t, kPreparedRows> lane_slots;
@@ -277,6 +281,7 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
                             ? cell.fixed_data + workspace.row_offsets[lane] *
                                                     cell.fixed_stride
                             : chunk->ValueAt(workspace.row_offsets[lane]);
+                    __builtin_prefetch(workspace.fixed_values[lane], 0, 1);
                 }
             }
             prepared_count_ = count;
@@ -698,6 +703,53 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
         // inputs so a cache-hit prefix does not allocate a missing-ID vector.
         std::vector<int64_t> missing;
     };
+
+    // A hot, non-null raw prefix needs no missing-cell plan or unique-cell
+    // scratch. Only reuse projections that already belong to the current pin
+    // publication, and still capture the live cohort for EVERY batch. No
+    // backend callback/pin/eviction occurs here; a miss retains captured owners
+    // and falls through to the original bounded preparation below.
+    bool
+    PrepareRetainedPrefix(int64_t count) const {
+        const bool strings = target_type_ == TargetType::StringView;
+        const bool primitives = target_type_ >= TargetType::Bool &&
+                                target_type_ <= TargetType::Double;
+        if (nullable_ || filter_ != nullptr || (!strings && !primitives)) {
+            return false;
+        }
+        auto& workspace = *prepared_workspace_;
+        const auto publication = context_->Stats().bulk_pins;
+        for (int64_t lane = 0; lane < count; ++lane) {
+            const auto location = workspace.locations[lane];
+            const auto id = location.cell_id;
+            auto& cached = workspace.projections[static_cast<uint64_t>(id) %
+                                                 workspace.projections.size()];
+            if (cached.id != id || cached.publication != publication ||
+                (!strings && cached.fixed_data == nullptr)) {
+                return false;
+            }
+            const auto hit = context_->FindBorrowedCached(
+                source_, id, prepared_owners_, cached.borrowed);
+            if (!hit || *hit != cached.backing) {
+                return false;
+            }
+            workspace.row_ids[lane] = id;
+            workspace.row_offsets[lane] = location.cell_offset;
+            workspace.row_chunks[lane] = cached.chunk;
+            if (strings) {
+                workspace.string_chunks[lane] =
+                    static_cast<const StringChunk*>(cached.chunk);
+            } else {
+                workspace.fixed_values[lane] =
+                    cached.fixed_data +
+                    location.cell_offset * cached.fixed_stride;
+                // Overlap independent value loads just as the original
+                // general Gather did; the Expr kernel remains untouched.
+                __builtin_prefetch(workspace.fixed_values[lane], 0, 1);
+            }
+        }
+        return true;
+    }
 
     const CachedProjection&
     ProjectPreparedCell(int64_t id, void* backing) const {
