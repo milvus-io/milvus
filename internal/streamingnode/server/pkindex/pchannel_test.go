@@ -342,6 +342,31 @@ func TestApplySkipsTheWritesBeforeTheEnable(t *testing.T) {
 	c.Close()
 }
 
+// TestResetBeforeTheEnableDoesNothing checks a truncate before the
+// CreateIndex that enabled the Index: the Index holds no write before it, so
+// the reset keeps the engine and does not make the Index dirty.
+func TestResetBeforeTheEnableDoesNothing(t *testing.T) {
+	ctx := context.Background()
+	env := NewFakeEnv(t, t.TempDir())
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	defer c.Close()
+	idx, _, err := c.OpenIndex(ctx, IndexSpec{VChannel: "v1", CollectionID: 1, IndexID: testIndexID, EnableTimeTick: 20})
+	require.NoError(t, err)
+	idx.MarkReady(ctx)
+	_, err = idx.Apply(ctx, index.Write{Puts: []index.Put{{PK: dedup.Int64PK(1), SegmentID: 7}}, TimeTick: 21})
+	require.NoError(t, err)
+
+	dirtied, err := idx.Reset(ctx, 19)
+	require.NoError(t, err)
+	assert.False(t, dirtied)
+	assert.True(t, presentIn(t, idx, 1), "a truncate before the enable keeps the keys")
+
+	dirtied, err = idx.Reset(ctx, 22)
+	require.NoError(t, err)
+	assert.False(t, dirtied, "the Index is dirty already from the write")
+	assert.False(t, presentIn(t, idx, 1), "a truncate after the enable forgets the keys")
+}
+
 // TestOpenIndexOfAnotherIndexIDFails checks that a vchannel has one Index:
 // the caller detaches the open one first.
 func TestOpenIndexOfAnotherIndexIDFails(t *testing.T) {
