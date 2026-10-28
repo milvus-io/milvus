@@ -29,6 +29,17 @@ delete_timeout = 60
 
 
 def pytest_addoption(parser):
+    parser.addoption(
+        "--run-pyudf-disabled",
+        action="store_true",
+        default=False,
+        help="Run PyUDF-disabled cases against a dedicated deployment with function.pyUDF.enabled=false",
+    )
+    parser.addoption(
+        "--pyudf-management-endpoint",
+        default=None,
+        help="Coordinator management URL for PyUDF L3 cases, e.g. http://standalone:9091",
+    )
     parser.addoption("--host", action="store", default="localhost", help="service's ip")
     parser.addoption("--service", action="store", default="", help="service address")
     parser.addoption("--port", action="store", default=19530, help="service's port")
