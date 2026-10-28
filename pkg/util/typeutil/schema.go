@@ -3169,6 +3169,12 @@ func NormalizeAndValidateExternalCollectionSchema(schema *schemapb.CollectionSch
 			return merr.WrapErrParameterInvalidMsg("external_field %q on field '%s' in external collection %s conflicts with generated function output field '%s' (field id %d)",
 				ext, field.GetName(), schema.GetName(), outputField.GetName(), outputField.GetFieldID())
 		}
+		// Numeric source names can be mistaken for internal field IDs after
+		// their mapping is dropped while an older manifest is still loaded.
+		// milvus-table uses field-ID columns intentionally.
+		if !isMilvusTable && strings.Trim(ext, "0123456789") == "" {
+			return merr.WrapErrParameterInvalidMsg("external_field %q on field '%s' in external collection %s must not be purely numeric", ext, field.GetName(), schema.GetName())
+		}
 	}
 
 	// Each external_field mapping must back at most one user field. A single

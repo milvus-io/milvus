@@ -5758,6 +5758,33 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 			},
 		}
 	}
+	t.Run("numeric source names rejected at creation", func(t *testing.T) {
+		for _, column := range []string{"0", "101", "00101", "999999999999999999999999999"} {
+			t.Run(column, func(t *testing.T) {
+				schema := buildSchema()
+				schema.Fields[1].ExternalField = column
+				before := proto.Clone(schema)
+				err := NormalizeAndValidateExternalCollectionSchema(schema)
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "must not be purely numeric")
+				assert.True(t, proto.Equal(before, schema), "validation must not mutate schema on failure")
+			})
+		}
+	})
+
+	t.Run("mixed source name allowed", func(t *testing.T) {
+		schema := buildSchema()
+		schema.Fields[1].ExternalField = "101_vec"
+		assert.NoError(t, NormalizeAndValidateExternalCollectionSchema(schema))
+	})
+
+	t.Run("milvus table numeric source name allowed", func(t *testing.T) {
+		schema := buildSchema()
+		schema.ExternalSpec = `{"format":"milvus-table"}`
+		schema.Fields[1].ExternalField = "101"
+		assert.NoError(t, NormalizeAndValidateExternalCollectionSchema(schema))
+	})
+
 	recursiveArrayField := func() *schemapb.FieldSchema {
 		return &schemapb.FieldSchema{
 			Name:          "nested_array",

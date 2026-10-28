@@ -65,11 +65,21 @@ func TestExternalFilePropertiesRoundTrip(t *testing.T) {
 			require.Len(t, fileInfos, 1)
 			assert.Equal(t, tc.properties, fileInfos[0].Properties)
 
+			// This test persists manifests, not source files. Verify that metadata
+			// discovery receives the properties recovered from the explore manifest.
+			columns := mockey.Mock(GetExternalFileColumns).To(func(format, path string, properties map[string]string, sc *indexpb.StorageConfig, extfs ExternalSpecContext) ([]string, error) {
+				assert.Equal(t, tc.format, format)
+				assert.Equal(t, filePath, path)
+				assert.Equal(t, tc.properties, properties)
+				return []string{"id", "extra_column"}, nil
+			}).Build()
+			defer columns.UnPatch()
 			fragments, err := FetchFragmentsFromExternalSourceWithRange(context.Background(), tc.format,
 				[]string{"id"}, "", config, 0, 1, explorePath, ExternalFetchOptions{RowLimit: 2})
 			require.NoError(t, err)
 			require.Len(t, fragments, 2)
 			for i, fragment := range fragments {
+				assert.Equal(t, []string{"id", "extra_column"}, fragment.Columns)
 				assert.Equal(t, tc.properties, fragment.Properties)
 				assert.Equal(t, int64(i*2), fragment.StartRow)
 				assert.Equal(t, int64(i*2+2), fragment.EndRow)
@@ -79,13 +89,18 @@ func TestExternalFilePropertiesRoundTrip(t *testing.T) {
 			require.NoError(t, err)
 			readBack, err := ReadFragmentsFromManifest(manifestPath, config, []string{"id"})
 			require.NoError(t, err)
-			assert.Equal(t, fragments, readBack)
+			// Physical inventories are transient; file properties are persisted.
+			expected := append([]Fragment(nil), fragments...)
+			for i := range expected {
+				expected[i].Columns = nil
+			}
+			assert.Equal(t, expected, readBack)
 
 			manifestPath, err = AppendSegmentManifestColumns(context.Background(), manifestPath, tc.format, []string{"extra_column"}, readBack, config)
 			require.NoError(t, err)
 			readBack, err = ReadFragmentsFromManifest(manifestPath, config, []string{"extra_column"})
 			require.NoError(t, err)
-			assert.Equal(t, fragments, readBack)
+			assert.Equal(t, expected, readBack)
 		})
 	}
 }

@@ -36,6 +36,17 @@ typedef struct {
     int count;
 } CFieldMemSizeList;
 
+// Read physical field names from format metadata without projecting a schema.
+// file_properties_json is an optional string-to-string map from the explored
+// file; it preserves format-specific snapshot identity, such as dataset_version.
+// The caller owns the returned JSON string and must free it with free().
+CStatus
+GetExternalFileColumns(const char* format,
+                       const char* path,
+                       const LoonProperties* properties,
+                       const char* file_properties_json,
+                       char** columns_json);
+
 // Sample rows from an external segment via Take API and return per-field
 // average memory size. The returned avg_mem_bytes is the Arrow buffer size
 // (decompressed), equivalent to Binlog.MemorySize for internal segments.

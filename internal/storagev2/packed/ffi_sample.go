@@ -25,6 +25,7 @@ package packed
 import "C"
 
 import (
+	"encoding/json"
 	"runtime"
 	"unsafe"
 
@@ -34,6 +35,48 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+// GetExternalFileColumns reads authoritative physical names from file metadata.
+// File properties retain the explored snapshot (for example Lance dataset_version)
+// independently of the filesystem configuration.
+// A metadata failure must propagate; it must never imply an absent column.
+func GetExternalFileColumns(format, path string, fileProperties map[string]string, storageConfig *indexpb.StorageConfig, extfs ExternalSpecContext) ([]string, error) {
+	properties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
+	if err != nil {
+		return nil, merr.Wrap(err, "create external metadata properties")
+	}
+	defer C.loon_properties_free(properties)
+	if err := injectExternalSpecProperties(properties, extfs.CollectionID, extfs.Source, extfs.Spec); err != nil {
+		return nil, merr.Wrap(err, "configure external metadata reader")
+	}
+	path, err = normalizeExternalResolvedPath(path, properties, extfs)
+	if err != nil {
+		return nil, merr.Wrap(err, "normalize external metadata path")
+	}
+	cFormat, cPath := C.CString(format), C.CString(path)
+	defer C.free(unsafe.Pointer(cFormat))
+	defer C.free(unsafe.Pointer(cPath))
+	var cFileProperties *C.char
+	if len(fileProperties) > 0 {
+		encoded, err := json.Marshal(fileProperties)
+		if err != nil {
+			return nil, merr.Wrap(err, "encode external file properties")
+		}
+		cFileProperties = C.CString(string(encoded))
+		defer C.free(unsafe.Pointer(cFileProperties))
+	}
+	var output *C.char
+	status := C.GetExternalFileColumns(cFormat, cPath, properties, cFileProperties, &output)
+	defer C.free(unsafe.Pointer(output))
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		return nil, err
+	}
+	var columns []string
+	if err := json.Unmarshal([]byte(C.GoString(output)), &columns); err != nil {
+		return nil, merr.Wrap(err, "invalid external column metadata")
+	}
+	return columns, nil
+}
 
 // SampleExternalFieldSizes samples rows from an external segment via Take API
 // and returns per-field average memory size (Arrow buffer size, decompressed).
