@@ -7011,10 +7011,15 @@ func TestCheckAndSetDataStructArrayRows(t *testing.T) {
 	assert.Contains(t, structRow, "sub_int")
 	assert.Contains(t, structRow, "sub_vec")
 
-	// A key that names no sub-field is rejected rather than dropped.
-	_, _, err = checkAndSetData([]byte(`{"data": [{"id": 1, "vec": [0.1,0.2,0.3,0.4], "my_struct": [{"sub_int": 10, "sub_vec": [1.1,1.2,1.3,1.4], "ignored": true}]}]}`), schema, false)
-	require.ErrorIs(t, err, merr.ErrParameterInvalid)
-	assert.Contains(t, err.Error(), "unknown sub-field ignored")
+	// A key that names no sub-field is ignored.
+	ignoredRows, _, err := checkAndSetData([]byte(`{"data": [{"id": 1, "vec": [0.1,0.2,0.3,0.4], "my_struct": [{"sub_int": 10, "sub_vec": [1.1,1.2,1.3,1.4], "ignored": true}]}]}`), schema, false)
+	require.NoError(t, err)
+	require.Len(t, ignoredRows, 1)
+	ignoredStructRow, ok := ignoredRows[0]["my_struct"].(structArrayRow)
+	require.True(t, ok)
+	assert.Len(t, ignoredStructRow, 2)
+	assert.True(t, proto.Equal(structRow["sub_int"].(*schemapb.ScalarField), ignoredStructRow["sub_int"].(*schemapb.ScalarField)))
+	assert.True(t, proto.Equal(structRow["sub_vec"].(*schemapb.VectorField), ignoredStructRow["sub_vec"].(*schemapb.VectorField)))
 
 	int64Schema := buildStructArrayTestSchema()
 	int64Schema.GetStructArrayFields()[0].GetFields()[0].ElementType = schemapb.DataType_Int64
@@ -7079,10 +7084,13 @@ func TestParseStructArrayRowQualifiedSchemaNames(t *testing.T) {
 	assert.Contains(t, row, "sub_int")
 	assert.Contains(t, row, "sub_vec")
 
-	// A key no sub-field has is rejected rather than dropped.
-	_, err = parseStructArrayRow(`[{"sub_int": 1, "sub_vec": [0.1,0.2], "unknown": "ignored"}]`, schema, false)
-	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-	assert.Contains(t, err.Error(), "unknown sub-field unknown")
+	// A key no sub-field has is ignored, also when it is the qualified
+	// name of a sub-field.
+	ignored, err := parseStructArrayRow(`[{"sub_int": 1, "sub_vec": [0.1,0.2], "unknown": "ignored", "my_struct[sub_int]": 2}]`, schema, false)
+	require.NoError(t, err)
+	assert.Len(t, ignored, 2)
+	assert.True(t, proto.Equal(row["sub_int"].(*schemapb.ScalarField), ignored["sub_int"].(*schemapb.ScalarField)))
+	assert.True(t, proto.Equal(row["sub_vec"].(*schemapb.VectorField), ignored["sub_vec"].(*schemapb.VectorField)))
 
 	unsupported := proto.Clone(schema).(*schemapb.StructArrayFieldSchema)
 	unsupported.Fields = append(unsupported.Fields, &schemapb.FieldSchema{Name: "bad", DataType: schemapb.DataType_Bool})
@@ -10058,6 +10066,55 @@ func TestParseStructArrayRowElementNull(t *testing.T) {
 	validateStructWithProxy(t, schema, structFD, 1)
 }
 
+// Keys that name no sub-field are ignored, the same as in JSON and CSV
+// import: a key of a dropped sub-field, an unknown key, a null or a
+// repeated one. They do not shift or replace the values of the sub-fields.
+func TestParseStructArrayRowIgnoresUnknownKeys(t *testing.T) {
+	schema := buildElementNullableStructTestSchema(false)
+	structSchema := schema.GetStructArrayFields()[0]
+	// clips[tags] was dropped; clients may still send it.
+	structSchema.Fields = structSchema.Fields[:3]
+
+	row, err := parseStructArrayRow(`[
+		{"lang": "en", "score": 1, "emb": [0.1, 0.2], "tags": ["a"], "extra": {"x": 1}},
+		{"tags": null, "score": 2, "extra": null, "extra": 3},
+		{"tags": [], "lang": "fr", "score": 3}
+	]`, structSchema, false)
+	require.NoError(t, err)
+	assert.Len(t, row, 3)
+	assert.NotContains(t, row, "tags")
+	assert.NotContains(t, row, "extra")
+
+	assert.True(t, proto.Equal(&schemapb.ScalarField{
+		Data:      &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"en", "fr"}}},
+		ValidData: []bool{true, false, true},
+	}, row["lang"].(*schemapb.ScalarField)))
+	assert.True(t, proto.Equal(&schemapb.ScalarField{
+		Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}},
+	}, row["score"].(*schemapb.ScalarField)))
+	assert.True(t, proto.Equal(&schemapb.VectorField{
+		Dim:       2,
+		Data:      &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{0.1, 0.2}}},
+		ValidData: []bool{true, false, false},
+	}, row["emb"].(*schemapb.VectorField)))
+
+	structFD, err := buildStructArrayFieldData(structSchema, []structArrayRow{row})
+	require.NoError(t, err)
+	require.Len(t, structFD.GetStructArrays().GetFields(), 3)
+	validateStructWithProxy(t, schema, structFD, 1)
+
+	// The rules for the known keys still apply.
+	_, err = parseStructArrayRow(`[{"tags": 1, "score": 1, "score": 2}]`, structSchema, false)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "duplicated sub-field score")
+	_, err = parseStructArrayRow(`[{"tags": 1, "score": null}]`, structSchema, false)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "sub-field score is not element nullable")
+	_, err = parseStructArrayRow(`[{"tags": 1, "lang": "en"}]`, structSchema, false)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "missing sub-field score")
+}
+
 func TestParseStructArrayRowElementNullErrors(t *testing.T) {
 	structSchema := buildElementNullableStructTestSchema(false).GetStructArrayFields()[0]
 	for _, tc := range []struct {
@@ -10067,7 +10124,6 @@ func TestParseStructArrayRowElementNullErrors(t *testing.T) {
 	}{
 		{"null for a non-nullable sub-field", `[{"score": null}]`, "sub-field score is not element nullable"},
 		{"missing non-nullable sub-field", `[{"lang": "en"}]`, "missing sub-field score"},
-		{"unknown key", `[{"score": 1, "extra": 1}]`, "unknown sub-field extra"},
 		{"duplicated key", `[{"score": 1, "score": 2}]`, "duplicated sub-field score"},
 		{"inner array not an array", `[{"score": 1, "tags": "a"}]`, "expect an array"},
 		{"null coordinate", `[{"score": 1, "emb": [0.1, null]}]`, "a vector element cannot be null"},
