@@ -81,7 +81,8 @@ func TestPartialUpdateRecoveryCleanupPreservesOriginalLease(t *testing.T) {
 	env.txnManager.CleanupTxnUntil(tsoutil.AddPhysicalDurationOnTs(lastBodyTS, 100*time.Millisecond))
 	require.Nil(t, env.partial.state.getTxn(1), "snapshot recovery must not renew the old lease")
 	_, err := env.txnManager.GetSessionOfTxn(1)
-	requireTransactionExpired(t, err)
+	requirePartialUpdateCode(t, err, streamingpb.StreamingCode_STREAMING_CODE_TRANSACTION_NOT_FOUND)
+	require.ErrorContains(t, err, "not found")
 }
 
 func TestPartialUpdateRecoveryUnsupportedBodyOnlyRejectsItsTransaction(t *testing.T) {
