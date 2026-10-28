@@ -69,19 +69,24 @@ func NewRecordValidator(schema *schemapb.CollectionSchema) (*RecordValidator, er
 	return v, nil
 }
 
-// Validate checks final output after filtering and default filling, before
-// writer statistics or native IO. Only logical rows are inspected. ArrayOfVector
-// child constraints are already enforced by appendValueAt while copying rows;
+// Validate checks only nullability and vector width after filtering and default
+// filling, before writer statistics or native IO. The record must be produced by
+// RecordBuilder using this validator's schema, so its structure is guaranteed by
+// construction. ArrayOfVector child constraints are enforced by appendValueAt;
 // scalar Array payload decoding remains the deserializer's responsibility.
 func (v *RecordValidator) Validate(rec Record) error {
-	return v.validate(rec, true)
-}
-
-// ValidateForRead checks structure before predicates and sorting. It does not
-// reject null values: row copying may fill defaults, and filtering may discard
-// them. Final value constraints are checked by Validate on the output.
-func (v *RecordValidator) ValidateForRead(rec Record) error {
-	return v.validate(rec, false)
+	rows := rec.Len()
+	for _, contract := range v.fields {
+		if contract.field.GetNullable() && contract.vectorWidth == 0 {
+			continue
+		}
+		col := rec.Column(contract.field.GetFieldID())
+		if err := validateColumnValues(contract, col, rows); err != nil {
+			return merr.Wrapf(err, "field %s (ID=%d), record rows=%d",
+				contract.field.GetName(), contract.field.GetFieldID(), rows)
+		}
+	}
+	return nil
 }
 
 func recordRows(rec Record) (int, error) {
@@ -105,7 +110,10 @@ func recordRows(rec Record) (int, error) {
 	return rows, nil
 }
 
-func (v *RecordValidator) validate(rec Record, full bool) error {
+// ValidateForRead checks structure before predicates and sorting. It does not
+// reject null values: row copying may fill defaults, and filtering may discard
+// them. Final value constraints are checked by Validate on the output.
+func (v *RecordValidator) ValidateForRead(rec Record) error {
 	rows, err := recordRows(rec)
 	if err != nil {
 		return err
@@ -116,7 +124,11 @@ func (v *RecordValidator) validate(rec Record, full bool) error {
 			return merr.WrapErrDataIntegrityMsg("field %s (ID=%d): missing column, record rows=%d",
 				contract.field.GetName(), contract.field.GetFieldID(), rows)
 		}
-		if err := v.validateColumn(contract, col, rows, full); err != nil {
+		if col.Len() < rows {
+			return merr.WrapErrDataIntegrityMsg("field %s (ID=%d): short column, length=%d, record rows=%d",
+				contract.field.GetName(), contract.field.GetFieldID(), col.Len(), rows)
+		}
+		if err := validateColumnType(contract, col); err != nil {
 			return merr.Wrapf(err, "field %s (ID=%d), record rows=%d, expected type=%s",
 				contract.field.GetName(), contract.field.GetFieldID(), rows, contract.expected)
 		}
@@ -124,20 +136,7 @@ func (v *RecordValidator) validate(rec Record, full bool) error {
 	return nil
 }
 
-func (v *RecordValidator) validateColumn(c recordFieldContract, col arrow.Array, rows int, full bool) error {
-	if col.Len() < rows {
-		return merr.WrapErrDataIntegrityMsg("short column: length=%d", col.Len())
-	}
-	if err := validateColumnType(c, col); err != nil {
-		return err
-	}
-	if !full {
-		return nil
-	}
-	if col.Len() > rows {
-		col = array.NewSlice(col, 0, int64(rows))
-		defer col.Release()
-	}
+func validateColumnValues(c recordFieldContract, col arrow.Array, rows int) error {
 	if !c.field.GetNullable() && col.NullN() != 0 {
 		return merr.WrapErrDataIntegrityMsg("non-nullable column contains %d nulls", col.NullN())
 	}
@@ -188,8 +187,8 @@ func (r *validatingRecordReader) Next() (Record, error) {
 	return rec, nil
 }
 
-// WrapWriter validates the completed batch before the delegate can update
-// statistics or invoke native IO. Close and error handling remain unchanged.
+// WrapWriter checks values in completed RecordBuilder batches before the delegate
+// can update statistics or invoke native IO. Close and error handling are unchanged.
 func (v *RecordValidator) WrapWriter(writer RecordWriter) RecordWriter {
 	return &validatingRecordWriter{RecordWriter: writer, validator: v}
 }

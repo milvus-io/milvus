@@ -42,6 +42,47 @@ func (r *validationRecord) Column(id FieldID) arrow.Array { return r.columns[id]
 func (r *validationRecord) Retain()                       {}
 func (r *validationRecord) Release()                      {}
 
+type structureCountingArray struct {
+	arrow.Array
+	typeChecks   int
+	lengthChecks int
+}
+
+func (a *structureCountingArray) DataType() arrow.DataType {
+	a.typeChecks++
+	return a.Array.DataType()
+}
+
+func (a *structureCountingArray) Len() int {
+	a.lengthChecks++
+	return a.Array.Len()
+}
+
+func TestRecordValidatorChecksStructureOnlyOnRead(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "value", DataType: schemapb.DataType_Int64},
+	}}
+	input := mergeSortTestRec(t, map[FieldID][]int64{100: {1, 2}}, nil)
+	defer input.Release()
+	builder := NewRecordBuilder(schema)
+	defer builder.Release()
+	require.NoError(t, builder.Append(input, 0, input.Len()))
+	output := builder.Build()
+	defer output.Release()
+	column := &structureCountingArray{Array: output.Column(100)}
+	record := &validationRecord{rows: output.Len(), columns: map[FieldID]arrow.Array{100: column}}
+	validator, err := NewRecordValidator(schema)
+	require.NoError(t, err)
+
+	require.NoError(t, validator.ValidateForRead(record))
+	require.Positive(t, column.typeChecks)
+	require.Positive(t, column.lengthChecks)
+	column.typeChecks, column.lengthChecks = 0, 0
+	require.NoError(t, validator.Validate(record))
+	require.Zero(t, column.typeChecks, "builder output must not repeat input type checks")
+	require.Zero(t, column.lengthChecks, "builder output must not repeat input length checks")
+}
+
 func requireIntegrityFailure(t *testing.T, err error) {
 	t.Helper()
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
@@ -152,7 +193,7 @@ func TestSortValidatesOnlySurvivingOutputBeforeWriter(t *testing.T) {
 	}
 }
 
-func TestRecordValidatorRejectsMalformedRecord(t *testing.T) {
+func TestRecordValidatorRejectsMalformedInputStructure(t *testing.T) {
 	field := &schemapb.FieldSchema{
 		FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector,
 		TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}},
@@ -172,21 +213,26 @@ func TestRecordValidatorRejectsMalformedRecord(t *testing.T) {
 	wrong := array.MakeArrayOfNull(memory.DefaultAllocator, arrow.PrimitiveTypes.Int64, 1)
 	defer wrong.Release()
 	for name, input := range map[string]Record{
-		"nil record":       nil,
-		"missing column":   &validationRecord{rows: 1},
-		"short column":     &validationRecord{rows: 2, columns: map[FieldID]arrow.Array{101: column}},
-		"wrong type":       &validationRecord{rows: 1, columns: map[FieldID]arrow.Array{101: wrong}},
-		"nonnullable null": NewSimpleArrowRecord(array.NewRecord(physical, []arrow.Array{nulls}, 1), map[FieldID]int{101: 0}),
+		"nil record":     nil,
+		"missing column": &validationRecord{rows: 1},
+		"short column":   &validationRecord{rows: 2, columns: map[FieldID]arrow.Array{101: column}},
+		"wrong type":     &validationRecord{rows: 1, columns: map[FieldID]arrow.Array{101: wrong}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if input != nil {
 				defer input.Release()
 			}
 			require.NotPanics(t, func() {
-				requireIntegrityFailure(t, validator.Validate(input))
+				requireIntegrityFailure(t, validator.ValidateForRead(input))
 			})
 		})
 	}
+	t.Run("nonnullable null is checked only on output", func(t *testing.T) {
+		record := NewSimpleArrowRecord(array.NewRecord(physical, []arrow.Array{nulls}, 1), map[FieldID]int{101: 0})
+		defer record.Release()
+		require.NoError(t, validator.ValidateForRead(record))
+		requireIntegrityFailure(t, validator.Validate(record))
+	})
 }
 
 func TestSortRejectsMissingFieldBeforePredicate(t *testing.T) {
