@@ -2227,3 +2227,40 @@ func TestExternalCollectionRefreshChecker_IndexWait_NudgeWaitsForPublish(t *test
 			"once the refreshed schema is visible the wait accelerates the builds that have no task yet")
 	})
 }
+
+func TestExternalCollectionRefreshChecker_WaitsForSegmentChangePublication(t *testing.T) {
+	paramtable.Init()
+	previous := Params.DataCoordCfg.SegmentChangeEnabled.SwapTempValue("true")
+	defer Params.DataCoordCfg.SegmentChangeEnabled.SwapTempValue(previous)
+	mockey.PatchConvey("staged refresh remains active", t, func() {
+		ctx := context.Background()
+		catalog := &StubCatalog{}
+		mockey.Mock((*StubCatalog).ListExternalCollectionRefreshJobs).Return([]*datapb.ExternalCollectionRefreshJob{{
+			JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateInProgress, TaskIds: []int64{1001},
+		}}, nil).Build()
+		mockey.Mock((*StubCatalog).ListExternalCollectionRefreshTasks).Return([]*datapb.ExternalCollectionRefreshTask{{
+			TaskId: 1001, JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateFinished, Progress: 100,
+		}}, nil).Build()
+		refreshMeta, err := NewExternalCollectionRefreshMeta(ctx, catalog)
+		require.NoError(t, err)
+		mt := &meta.Meta{}
+		group := &model.SegmentChangeGroup{GroupID: 1, Source: model.SegmentChangeSourceExternalRefresh, SourceJobID: 1, CollectionID: 100, State: model.SegmentChangeStateStaged}
+		mockey.Mock((*meta.Meta).ProducerChangeGroup).To(func(*meta.Meta, model.SegmentChangeSource, int64, string) *model.SegmentChangeGroup {
+			return group.Clone()
+		}).Build()
+		applies := 0
+		checker := NewRefreshChecker(ctx, mt, nil, refreshMeta, make(chan struct{}), nil,
+			func(context.Context, *datapb.ExternalCollectionRefreshJob) error { applies++; return nil }, nil, nil, nil)
+		checker.aggregateJobState(refreshMeta.GetJob(1))
+		held := refreshMeta.GetJob(1)
+		require.Equal(t, indexpb.JobState_JobStateInProgress, held.GetState())
+		require.NotZero(t, held.GetIndexWaitStartedTime())
+		require.Equal(t, 1, applies)
+		checker.aggregateJobState(held)
+		require.Equal(t, indexpb.JobState_JobStateInProgress, refreshMeta.GetJob(1).GetState())
+		group.State = model.SegmentChangeStateCommitted
+		checker.aggregateJobState(refreshMeta.GetJob(1))
+		require.Equal(t, indexpb.JobState_JobStateFinished, refreshMeta.GetJob(1).GetState())
+		require.Equal(t, 1, applies)
+	})
+}

@@ -379,11 +379,14 @@ func (m *Manager) cleanupExploreTempForJob(jobID int64) {
 func (m *Manager) applyFinishedJobSegments(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) error {
 	if m.mt != nil {
 		if g := m.mt.ProducerChangeGroup(model.SegmentChangeSourceExternalRefresh, job.GetJobId(), ""); g != nil {
-			err := m.mt.RequirePublishedChange(ctx, g)
-			if err == nil {
+			if g.State == model.SegmentChangeStateCommitted {
 				m.mt.RecomputeDataView(ctx, job.GetCollectionId())
+				return nil
 			}
-			return err
+			if g.IsTerminal() {
+				return m.mt.RequirePublishedChange(ctx, g)
+			}
+			return nil // A durable job wait marker drives publication later.
 		}
 	}
 	tasks, err := m.refreshMeta.GetCommittedTaskResultsByJobID(job.GetJobId())

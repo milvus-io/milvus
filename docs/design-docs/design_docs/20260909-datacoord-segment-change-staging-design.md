@@ -780,6 +780,11 @@ their planning slots without dropping their L0 inputs; the next planner pass
 can retry them after publication. Pending or executing copy jobs also block
 new L0 admission on their collection channels because copied rows preserve
 their original timestamps. Existing groups keep this guard after opt-out.
+This safety guard can starve L0 under continuous flush→Sort groups. A bounded
+wait alone cannot safely release deletes: new outputs may not yet contain
+them. Production opt-in requires a channel-level fairness rule that stops new
+group admission, drains existing groups, and then runs queued L0 work. This
+remains an open admission/scheduling requirement.
 
 ### 6.3 Mix / Sort compaction — deferred superseded retirement
 
@@ -842,11 +847,18 @@ After staging:
   With staging opted in it also completes legacy jobs; per-channel SN RPCs are
   idempotent participants. CDC receivers may prepare their local groups only
   when the replicated commit arrives and then wait for local artifacts.
-- **A durable WAL commit cannot be aborted by a staging timeout.** Once the
-  fence is assigned, groups retain data and retry publication. Missing outputs
-  during recovery fail startup instead of reclaiming accepted import rows.
-  Before the fence, ordinary C23 failure/timeout and user rollback still apply;
-  failed-job cleanup aborts those private groups.
+- **A durable WAL commit cannot be aborted by a staging timeout.** The WAL may
+  be durable before its ack callback assigns any group's `CommitTS`, so the
+  inspector never times out or reclaims an import group waiting for that
+  assignment. The import job's generic timeout also stops once a prepared
+  group exists: registration happens immediately before broadcast, and a
+  delayed ack is indistinguishable from an append still in flight. Explicit
+  import-job failure or rollback owns pre-fence cleanup. A broadcast that
+  never obtains an ack may now need operator intervention; a future durable
+  WAL outcome probe should restore an automatic liveness bound.
+  Once the fence is assigned, groups retain data and retry publication.
+  Missing outputs during recovery fail startup instead of reclaiming accepted
+  import rows.
 - **Large imports** split independent outputs into bounded groups per vchannel,
   using the first local output ID as group ID. `subgroupOrdinal` and
   `previousGroupID` persist the order. Every subgroup may become READY before
@@ -876,11 +888,15 @@ lower version and the group returns to STAGED and re-reads.
   changes visibility/DataView while preserving each copied segment's existing
   commit timestamp. Retimestamping copied rows would suppress historical deletes.
   Worker-task completion releases its slot; copy-job completion waits for groups.
-- external refresh: enters a group (`SOURCE_EXTERNAL_REFRESH`);
+- external refresh: a membership-only update enters a group (`SOURCE_EXTERNAL_REFRESH`);
   `allowUnsorted` exempts the sort term (external tables have no PK ordering
   requirement). New segment admission and baseline retirement use the group;
-  same-ID manifest patches keep their existing content-update protocol, with
-  recompute after publication. A failed refresh aborts unpublished new outputs.
+  the refresh job stays InProgress after registration until group publication
+  commits. Same-ID manifest patches, including mixed patch/membership jobs,
+  keep the existing content-update protocol because a group cannot currently
+  roll back a visible patch if publication fails. A failed refresh aborts
+  unpublished new outputs. Atomic mixed content/membership publication is a
+  separate protocol extension.
 - CDC-replicated import: `SOURCE_CDC_REPLICATED`; commit_ts comes from the CDC
   source; the publish txn uses `max(source commit_ts, existing invariant)`.
 
@@ -1004,9 +1020,9 @@ Replay safety:
 - **DataView snapshot GC**: `GarbageCollect(retainLatest)` is independent of the
   group table; after a publish, old snapshots (without the new members) should
   become recyclable promptly, `retainLatest ≥ 1` suffices.
-- **Snapshot export** (`snapshot_manager.go`): export must contain only
-  published members — staged (invisible) members must not enter the exported
-  set; restore/import likewise. Add the filter in Phase 1.
+- **Snapshot export** (`handler.GenSnapshot`): export contains only published
+  members. The candidate projection excludes unpublished group outputs while
+  retaining their still-visible parents; restore therefore cannot copy both.
 
 - **Zero-row result metadata**: a Dropped zero-row member of an ALIVE group
   remains a durable no-output marker until the group terminates. `DropSegment`
