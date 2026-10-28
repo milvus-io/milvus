@@ -178,6 +178,16 @@ class FmIndexReader final : public IIndexReaderBase,
     bool
     ShouldUseForOp(PatternOp op, std::string_view pattern) const override;
 
+    RegexIndexCostModel
+    GetRegexIndexCostModel() const override;
+
+    std::shared_ptr<const RegexIndexPlan>
+    PrepareRegexIndexPlan(
+        const RegexLiteralCondition& requirements) const override;
+
+    TargetBitmap
+    ExecuteRegexIndexPlan(const RegexIndexPlan& plan) const override;
+
     // ---- INullReader -----------------------------------------------
 
     TargetBitmap

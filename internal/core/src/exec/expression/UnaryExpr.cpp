@@ -21,6 +21,7 @@
 #include <folly/futures/Future.h>
 #include <simdjson.h>
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -39,6 +40,7 @@
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/Json.h"
+#include "common/RegexIndexPlan.h"
 #include "common/ScopedTimer.h"
 #include "common/Span.h"
 #include "common/Tracer.h"
@@ -47,6 +49,7 @@
 #include "exec/expression/ExprCache.h"
 #include "exec/expression/ExprCacheHelper.h"
 #include "exec/expression/JsonNumberComparison.h"
+#include "exec/expression/RegexPrefilterStats.h"
 #include "index/Families.h"
 #include "fmt/core.h"
 #include "folly/FBVector.h"
@@ -2206,6 +2209,37 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
             break;
         case DataType::VARCHAR:
         case DataType::TEXT: {
+            if (expr_->op_type_ == proto::plan::OpType::RegexMatch &&
+                PinnedIndexIsFMIndex() && pattern_reader_ != nullptr) {
+                const auto model = pattern_reader_->GetRegexIndexCostModel();
+                if (model.rows > 0) {
+                    fm_regex_deferred_ = true;
+                    can_use = segment_->type() == SegmentType::Sealed &&
+                              num_data_chunk_ > 0 &&
+                              !expr_->column_.element_level_ &&
+                              null_reader_ != nullptr;
+                    if (!can_use) {
+                        break;
+                    }
+                    const auto initial_batch_rows =
+                        std::min(batch_size_, active_count_);
+                    // These proofs require no Count or upstream bitmap.
+                    // Preserve eager raw prefetch when no later work mask
+                    // can justify preparing candidates, or no useful byte
+                    // condition exists. Useful conditions defer Count/Locate.
+                    can_use = ShouldPrepareRegexIndexPlan(model,
+                                                          active_count_,
+                                                          initial_batch_rows,
+                                                          initial_batch_rows);
+                    if (can_use) {
+                        EnsureRegexCache();
+                        fm_regex_requirements_ =
+                            cached_regex_matcher_->RequiredIndexCondition();
+                        can_use = !fm_regex_requirements_.IsTrue();
+                    }
+                    break;
+                }
+            }
             can_use = SegmentExpr::CanUseIndexForOp<std::string>(
                 expr_->op_type_, StringLiteralForCostGuard());
             break;
@@ -2592,10 +2626,76 @@ PhyUnaryRangeFilterExpr::ExecFMPatternCandidates(EvalCtx& context) {
     AssertInfo(num_data_chunk_ > 0,
                "FMINDEX pattern recheck needs sealed VARCHAR field data");
 
+    const auto& bitmap_input = context.get_bitmap_input();
+    AssertInfo(bitmap_input.empty() ||
+                   static_cast<int64_t>(bitmap_input.size()) == real_batch_size,
+               "bitmap_input size {} != real_batch_size {}",
+               bitmap_input.size(),
+               real_batch_size);
+
     // Phase 1: one segment-level index query, cached for every later batch.
     if (cached_phase1_res_ == nullptr) {
-        auto candidates = pattern_reader_->PatternMatch(
-            literal, ToIndexPatternOp(expr_->op_type_));
+        TargetBitmap candidates;
+        if (fm_regex_deferred_ &&
+            expr_->op_type_ == proto::plan::OpType::RegexMatch) {
+            const auto remaining_rows =
+                active_count_ - current_index_chunk_pos_;
+            const bool complete_window = real_batch_size == remaining_rows;
+            // A complete input mask gives exact work later. Before the cheap
+            // gates/Count, use its nonemptiness and a full-active upper bound;
+            // do not traverse the whole mask twice or scan stats for C0/caps.
+            const int64_t active_rows =
+                bitmap_input.empty() ? real_batch_size
+                : complete_window ? (bitmap_input.none() ? 0 : real_batch_size)
+                                  : static_cast<int64_t>(bitmap_input.count());
+            if (fm_regex_plan_ == nullptr) {
+                if (!ShouldPrepareRegexIndexPlan(
+                        pattern_reader_->GetRegexIndexCostModel(),
+                        remaining_rows,
+                        active_rows,
+                        normal_scan_batch_size_)) {
+                    return ExecFMRegexFallback(context);
+                }
+                fm_regex_plan_ = pattern_reader_->PrepareRegexIndexPlan(
+                    fm_regex_requirements_);
+                if (fm_regex_plan_ == nullptr || !fm_regex_plan_->Usable()) {
+                    exec_path_ = ExprExecPath::RawData;
+                    return ExecFMRegexFallback(context);
+                }
+            }
+            if (!fm_regex_plan_->empty_result &&
+                !CanRegexIndexPlanEverHelp(
+                    *fm_regex_plan_, remaining_rows, normal_scan_batch_size_)) {
+                exec_path_ = ExprExecPath::RawData;
+                return ExecFMRegexFallback(context);
+            }
+            std::optional<RegexIndexWorkStats> exact_work;
+            if (!fm_regex_plan_->empty_result && !bitmap_input.empty()) {
+                if (complete_window) {
+                    exact_work = ComputeRegexBitmapWork(
+                        bitmap_input, normal_scan_batch_size_);
+                } else {
+                    exact_work =
+                        context.get_regex_work_stats(current_index_chunk_pos_,
+                                                     remaining_rows,
+                                                     normal_scan_batch_size_);
+                }
+            }
+            if (!ShouldUseRegexIndexPlan(*fm_regex_plan_,
+                                         remaining_rows,
+                                         active_rows,
+                                         normal_scan_batch_size_,
+                                         exact_work ? &*exact_work : nullptr)) {
+                // Density/distribution rejection applies to this window.
+                // A fixed-work impossibility was already handled above.
+                return ExecFMRegexFallback(context);
+            }
+            candidates =
+                pattern_reader_->ExecuteRegexIndexPlan(*fm_regex_plan_);
+        } else {
+            candidates = pattern_reader_->PatternMatch(
+                literal, ToIndexPatternOp(expr_->op_type_));
+        }
         // FM candidate evaluation is sealed-only, and a sealed segment's active row count is
         // its complete row count. The reader must therefore answer that exact
         // domain; a mismatch is not an uncovered growing-index tail.
@@ -2617,16 +2717,22 @@ PhyUnaryRangeFilterExpr::ExecFMPatternCandidates(EvalCtx& context) {
     }
 
     const int64_t segment_offset = current_index_chunk_pos_;
+    // A complete one-shot result is the cache's last consumer. Move only
+    // locally owned bitmaps; batched evaluation and shared caches retain them.
+    const bool consume_cached_bitmaps =
+        execute_all_at_once_ && segment_offset == 0 &&
+        real_batch_size == active_count_ &&
+        cached_phase1_res_.use_count() == 1 &&
+        cached_index_chunk_valid_res_.use_count() == 1;
     TargetBitmap batch_candidates;
-    batch_candidates.append(
-        *cached_phase1_res_, segment_offset, real_batch_size);
+    if (consume_cached_bitmaps) {
+        batch_candidates = std::move(*cached_phase1_res_);
+    } else {
+        batch_candidates.append(
+            *cached_phase1_res_, segment_offset, real_batch_size);
+    }
 
-    const auto& bitmap_input = context.get_bitmap_input();
     if (!bitmap_input.empty()) {
-        AssertInfo(static_cast<int64_t>(bitmap_input.size()) == real_batch_size,
-                   "bitmap_input size {} != real_batch_size {}",
-                   bitmap_input.size(),
-                   real_batch_size);
         batch_candidates &= bitmap_input;
     }
 
@@ -2642,10 +2748,19 @@ PhyUnaryRangeFilterExpr::ExecFMPatternCandidates(EvalCtx& context) {
 
         OffsetVector offsets;
         offsets.reserve(batch_candidates.count());
-        for (int64_t i = 0; i < real_batch_size; ++i) {
-            if (batch_candidates[i]) {
-                offsets.push_back(static_cast<int32_t>(segment_offset + i));
+        // Read each bitmap word once, then enumerate its set bits in order.
+        // The final read uses only the remaining bits of a short tail.
+        const size_t size = batch_candidates.size();
+        for (size_t start = 0; start < size;) {
+            const auto width = std::min(size_t{64}, size - start);
+            auto word = batch_candidates.read(start, width);
+            while (word != 0) {
+                const auto bit = std::countr_zero(word);
+                offsets.push_back(static_cast<int32_t>(
+                    segment_offset + static_cast<int64_t>(start + bit)));
+                word &= word - 1;
             }
+            start += width;
         }
 
         TargetBitmap compact(offsets.size(), false);
@@ -2690,11 +2805,83 @@ PhyUnaryRangeFilterExpr::ExecFMPatternCandidates(EvalCtx& context) {
     }
 
     TargetBitmap valid_result;
-    valid_result.append(
-        *cached_index_chunk_valid_res_, segment_offset, real_batch_size);
+    if (consume_cached_bitmaps) {
+        valid_result = std::move(*cached_index_chunk_valid_res_);
+    } else {
+        valid_result.append(
+            *cached_index_chunk_valid_res_, segment_offset, real_batch_size);
+    }
     MoveCursor();
     return std::make_shared<ColumnVector>(std::move(batch_candidates),
                                           std::move(valid_result));
+}
+
+VectorPtr
+PhyUnaryRangeFilterExpr::ExecFMRegexFallback(EvalCtx& context) {
+    // Ordinary masked VARCHAR scan: preserve batch shape and validity and
+    // advance the data cursor once. ScalarIndex has a separate row cursor;
+    // synchronize it without MoveCursor(), which would advance data twice.
+    if (!execute_all_at_once_ || batch_size_ <= normal_scan_batch_size_) {
+        auto result = ExecRangeVisitorImplForData<std::string_view>(context);
+        current_index_chunk_pos_ = current_data_global_pos_;
+        return result;
+    }
+
+    // The consumer expects one complete logical vector, but late rejection
+    // must not construct a full-column string-view window. Use the same raw
+    // visitor and physical batch geometry as ordinary scanning internally.
+    const auto logical_rows = GetNextBatchSize();
+    const auto& input = context.get_bitmap_input();
+    AssertInfo(
+        input.empty() || input.size() == static_cast<size_t>(logical_rows),
+        "FM fallback logical mask has the wrong row count");
+    struct RestoreBatch {
+        int64_t& batch;
+        bool& all_at_once;
+        int64_t saved_batch;
+        bool saved_all_at_once;
+        ~RestoreBatch() {
+            batch = saved_batch;
+            all_at_once = saved_all_at_once;
+        }
+    } restore{
+        batch_size_, execute_all_at_once_, batch_size_, execute_all_at_once_};
+    batch_size_ = normal_scan_batch_size_;
+    execute_all_at_once_ = false;
+    TargetBitmap result;
+    TargetBitmap valid;
+    result.reserve(logical_rows);
+    valid.reserve(logical_rows);
+    EvalCtx scan_context(context.get_exec_context());
+    for (int64_t processed = 0; processed < logical_rows;) {
+        const auto size =
+            std::min(normal_scan_batch_size_, logical_rows - processed);
+        if (!input.empty()) {
+            TargetBitmap local_mask;
+            local_mask.append(input, processed, size);
+            if (local_mask.none()) {
+                result.append(TargetBitmap(size, false));
+                valid.append(TargetBitmap(size, true));
+                AdvanceDataCursor(size);
+                current_index_chunk_pos_ = current_data_global_pos_;
+                processed += size;
+                continue;
+            }
+            scan_context.set_bitmap_input(std::move(local_mask));
+        }
+        auto chunk = std::dynamic_pointer_cast<ColumnVector>(
+            ExecRangeVisitorImplForData<std::string_view>(scan_context));
+        AssertInfo(chunk != nullptr && chunk->size() == size,
+                   "FM fallback physical batch returned the wrong shape");
+        result.append(TargetBitmapView(chunk->GetRawData(), size));
+        valid.append(TargetBitmapView(chunk->GetValidRawData(), size));
+        current_index_chunk_pos_ = current_data_global_pos_;
+        processed += size;
+    }
+    // Match the ordinary masked visitor: inactive rows keep (false, valid),
+    // while active NULL rows are (false, invalid). No skipped string/validity
+    // chunk is read just to fill nonworking placeholder bits.
+    return std::make_shared<ColumnVector>(std::move(result), std::move(valid));
 }
 
 std::optional<VectorPtr>
