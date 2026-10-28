@@ -489,7 +489,11 @@ func TestRocksmq_Throughout(t *testing.T) {
 	assert.NoError(t, err)
 	defer rmq.DestroyTopic(channelName)
 
-	entityNum := 100000
+	// Each Produce now waits for WAL synchronization. Keep the unit test
+	// bounded on disks with expensive syncs while still exercising individual
+	// message acknowledgements and consumption; bulk throughput belongs in a
+	// benchmark using batched Produce calls.
+	entityNum := 1000
 
 	pt0 := time.Now().UnixNano() / int64(time.Millisecond)
 	for i := 0; i < entityNum; i++ {
@@ -525,6 +529,33 @@ func TestRocksmq_Throughout(t *testing.T) {
 		mlog.Int("Total produce item number", entityNum),
 		mlog.Int64("Total cost (ms)", cDuration),
 		mlog.Int64("Total throughout (s)", int64(entityNum)*1000/cDuration))
+}
+
+func BenchmarkRocksmqDurableProduce(b *testing.B) {
+	for _, batchSize := range []int{1, 100} {
+		b.Run(fmt.Sprintf("batch=%d", batchSize), func(b *testing.B) {
+			rmq, err := NewRocksMQ(b.TempDir())
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.Cleanup(rmq.Close)
+			topic := fmt.Sprintf("durable-benchmark-%d", batchSize)
+			if err := rmq.CreateTopic(topic); err != nil {
+				b.Fatal(err)
+			}
+			messages := make([]ProducerMessage, batchSize)
+			for i := range messages {
+				messages[i].Payload = make([]byte, 128)
+			}
+			b.SetBytes(int64(batchSize * 128))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if _, err := rmq.Produce(topic, messages); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
 }
 
 func TestRocksmq_MultiChan(t *testing.T) {

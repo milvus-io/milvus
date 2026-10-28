@@ -143,6 +143,24 @@ class LocalChunkManager : public ChunkManager {
     std::string path_prefix_;
 };
 
+// Persistent objects use completion-time synchronization. Cache/staging users
+// keep LocalChunkManager so their small positional writes do not fsync each time.
+class DurableLocalChunkManager final : public LocalChunkManager {
+ public:
+    explicit DurableLocalChunkManager(const std::string& path);
+
+    void
+    Write(const std::string& filepath, void* data, uint64_t size) override;
+    void
+    Write(const std::string& filepath,
+          uint64_t offset,
+          void* data,
+          uint64_t size) override;
+
+ private:
+    std::string durability_root_;
+};
+
 using LocalChunkManagerSPtr =
     std::shared_ptr<milvus::storage::LocalChunkManager>;
 

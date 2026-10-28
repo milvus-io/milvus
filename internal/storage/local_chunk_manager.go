@@ -29,12 +29,15 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/localstorage"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // LocalChunkManager is responsible for read and write local file.
 type LocalChunkManager struct {
-	localPath string
+	localPath      string
+	durabilityRoot string
+	initErr        error
 }
 
 var _ ChunkManager = (*LocalChunkManager)(nil)
@@ -45,9 +48,8 @@ func NewLocalChunkManager(opts ...objectstorage.Option) *LocalChunkManager {
 	for _, opt := range opts {
 		opt(c)
 	}
-	return &LocalChunkManager{
-		localPath: c.RootPath,
-	}
+	boundary, err := localstorage.PrepareRoot(c.RootPath)
+	return &LocalChunkManager{localPath: c.RootPath, durabilityRoot: boundary, initErr: err}
 }
 
 // RootPath returns lcm root path.
@@ -98,30 +100,24 @@ func (lcm *LocalChunkManager) ReaderAtOffset(ctx context.Context, filePath strin
 
 // Write writes the data to local storage.
 func (lcm *LocalChunkManager) Write(ctx context.Context, filePath string, content []byte) error {
-	dir := path.Dir(filePath)
-	exist, err := lcm.Exist(ctx, dir)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if !exist {
-		err := os.MkdirAll(dir, os.ModePerm)
-		if err != nil {
-			return merr.WrapErrIoFailed(filePath, err)
-		}
+	if lcm.initErr != nil {
+		return merr.WrapErrIoFailed(lcm.localPath, lcm.initErr)
 	}
-	return WriteFile(filePath, content, os.ModePerm)
+	return merr.WrapErrIoFailed(filePath, localstorage.WriteFile(filePath, content, os.ModePerm, lcm.durabilityRoot))
 }
 
 // MultiWrite writes the data to local storage.
 func (lcm *LocalChunkManager) MultiWrite(ctx context.Context, contents map[string][]byte) error {
-	var el error
-	for filePath, content := range contents {
-		err := lcm.Write(ctx, filePath, content)
-		if err != nil {
-			el = merr.Combine(el, merr.Wrapf(err, "write %s failed", filePath))
-		}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	return el
+	if lcm.initErr != nil {
+		return merr.WrapErrIoFailed(lcm.localPath, lcm.initErr)
+	}
+	return merr.WrapErrIoFailed("local batch", localstorage.WriteFiles(contents, os.ModePerm, lcm.durabilityRoot))
 }
 
 // Exist checks whether chunk is saved to local storage.
@@ -308,6 +304,12 @@ func (lcm *LocalChunkManager) RemoveWithPrefix(ctx context.Context, prefix strin
 }
 
 func (lcm *LocalChunkManager) Copy(ctx context.Context, srcFilePath string, dstFilePath string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if lcm.initErr != nil {
+		return merr.WrapErrIoFailed(lcm.localPath, lcm.initErr)
+	}
 	// Read source file
 	srcFile, err := Open(srcFilePath)
 	if err != nil {
@@ -315,33 +317,28 @@ func (lcm *LocalChunkManager) Copy(ctx context.Context, srcFilePath string, dstF
 	}
 	defer srcFile.Close()
 
-	// Create destination directory if not exists
-	dstDir := path.Dir(dstFilePath)
-	exist, err := lcm.Exist(ctx, dstDir)
-	if err != nil {
-		return err
-	}
-	if !exist {
-		err := os.MkdirAll(dstDir, os.ModePerm)
+	// A direct-write copy must not truncate its own source, including aliases.
+	if dstInfo, statErr := os.Stat(dstFilePath); statErr == nil {
+		srcInfo, err := srcFile.Stat()
 		if err != nil {
-			return merr.WrapErrIoFailed(dstFilePath, err)
+			return merr.WrapErrIoFailed(srcFilePath, err)
+		}
+		if os.SameFile(srcInfo, dstInfo) {
+			if err := srcFile.Sync(); err != nil {
+				return merr.WrapErrIoFailed(dstFilePath, err)
+			}
+			return merr.WrapErrIoFailed(dstFilePath, localstorage.SyncFileDirectory(lcm.durabilityRoot, dstFilePath))
 		}
 	}
 
-	// Create destination file
-	dstFile, err := os.Create(dstFilePath)
-	if err != nil {
-		return merr.WrapErrIoFailed(dstFilePath, err)
-	}
-	defer dstFile.Close()
-
-	// Copy content
-	_, err = io.Copy(dstFile, srcFile)
-	if err != nil {
-		return merr.WrapErrIoFailed(dstFilePath, err)
-	}
-
-	return nil
+	err = localstorage.Write(dstFilePath, 0o666, func(dst io.Writer) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		_, err := io.Copy(dst, srcFile)
+		return err
+	}, lcm.durabilityRoot)
+	return merr.WrapErrIoFailed(dstFilePath, err)
 }
 
 type LocalReader struct {

@@ -45,6 +45,9 @@ StorageV2FSCache::Get(const Key& key) {
     // milvus-storage regardless of root_path). See LoonFSRootPath.
     const auto fs_root_path = LoonFSRootPath(key.storage_type, key.root_path);
     props[PROPERTY_FS_ROOT_PATH] = fs_root_path;
+    if (key.storage_type == "local") {
+        props[PROPERTY_FS_LOCAL_DURABILITY_ROOT] = key.root_path;
+    }
     props[PROPERTY_FS_STORAGE_TYPE] = key.storage_type;
     props[PROPERTY_FS_CLOUD_PROVIDER] = key.cloud_provider;
     props[PROPERTY_FS_IAM_ENDPOINT] = key.iam_endpoint;
