@@ -72,7 +72,12 @@ Inline execution constructs a temporary analyzer and destroys it and each token
 stream on exit. Field execution validates assignment ownership and holds the
 WAL's Working lifetime. FunctionRunnerManager resolves collection ID +
 WAL-vchannel key + field ID using that key's current schema. No Proxy schema
-version is sent or compared. Managed BM25/MinHash analyzers are pinned
+version is sent or compared for public standalone analyzer requests. Internal
+rendering may explicitly set `read_schema_version`, including zero, to select
+the search schema. That path allocates a request-scoped function-runner key for
+the selected schema and releases it after the entire operation. Both tokenize
+and phrase-match operations use this binding across all batches.
+Managed BM25/MinHash analyzers are pinned
 through the entire operation; ordinary analyzer-enabled fields use one copied
 field schema and temporary analyzer for the operation. GC before pin returns a
 transient error; after pin it waits for execution. WAL shutdown waits for admitted field analyzer calls through
@@ -112,7 +117,8 @@ HandlerClient does not interpret business Status or retry business failures.
 Collection identity is pinned before execution: Proxy resolves field/channel
 metadata by the original collection ID, and all streaming recovery attempts retain
 that ID. A same-name drop/recreate cannot redirect a request to the new collection.
-There is no historical schema lookup or schema-version admission check.
+Public standalone requests perform no historical schema lookup or schema-version
+admission check; explicit internal read-schema selection uses the path above.
 
 ## Compatibility
 
