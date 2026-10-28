@@ -143,8 +143,10 @@ func (r *registry) adopt(ctx context.Context, vchannel string, collectionID int6
 	return nil
 }
 
-// markPending records that the enabling CreateIndex of a vchannel at tt has an
-// unknown append result.
+// markPending records that the decision of the enabling CreateIndex of a
+// vchannel at tt is left to the observe: its append result is unknown, or
+// its append read a write history that was not NEVER and that can lag the
+// observe.
 func (r *registry) markPending(vchannel string, tt uint64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -152,22 +154,28 @@ func (r *registry) markPending(vchannel string, tt uint64) {
 }
 
 // errEnablePending reports a write of a vchannel whose enabling CreateIndex
-// has an unknown append result.
+// waits for the decision of the observe, see markPending.
 var errEnablePending = errors.New("the primary key index of the vchannel is being enabled")
 
 // lookup returns the target of a vchannel, nil when its writes pass through.
 //
 // A vchannel without a target whose Index the observe of the WAL recovery
 // opened becomes a target: the append of its enabling CreateIndex read a
-// write history that the observe had not updated yet, the CreateIndex was
-// replicated, or its append result was unknown. An Index that a drop appended
-// after is not adopted again.
+// write history that was not NEVER, the CreateIndex was replicated, or its
+// append result was unknown. An Index that a drop appended after is not
+// adopted again.
 //
-// When the enabling CreateIndex of the vchannel has an unknown append result
-// and the observe opened no Index, an observe past the time tick of the
-// CreateIndex means that the message is not in the WAL. Until then lookup
-// returns an error that wraps errEnablePending.
+// When the enabling CreateIndex of the vchannel waits for the observe (see
+// markPending) and the observe opened no Index, an observe past the time
+// tick of the CreateIndex means that the observe decided not to enable the
+// index, or that the message is not in the WAL. Until then lookup returns an
+// error that wraps errEnablePending.
 func (r *registry) lookup(ctx context.Context, vchannel string) (*target, error) {
+	// The observe opens the Index at the CreateIndex before it moves past
+	// the time tick of the CreateIndex. Read the observe position before the
+	// Index, so that a position past the CreateIndex implies that the Index
+	// read below is the one that the observe opened, if any.
+	lastObserved := r.ch.LastObserved()
 	r.mu.RLock()
 	t := r.targets[vchannel]
 	tt, pending := r.pending[vchannel]
@@ -184,7 +192,7 @@ func (r *registry) lookup(ctx context.Context, vchannel string) (*target, error)
 	if !pending {
 		return nil, nil
 	}
-	if r.ch.LastObserved() > tt {
+	if lastObserved > tt {
 		r.mu.Lock()
 		defer r.mu.Unlock()
 		if r.pending[vchannel] == tt {

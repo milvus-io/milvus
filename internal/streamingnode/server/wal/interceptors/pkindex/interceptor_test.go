@@ -1541,26 +1541,65 @@ func TestCreateIndexOfAnEmptyVChannelEnablesTheIndex(t *testing.T) {
 	}, f.types, "a known key gets a companion delete")
 }
 
-func TestCreateIndexOfAWrittenVChannelDoesNotEnableTheIndex(t *testing.T) {
-	for name, history := range map[string]streamingpb.VChannelWriteHistory{
-		"written": streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_WRITTEN,
-		"unknown": streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_UNKNOWN,
-	} {
-		t.Run(name, func(t *testing.T) {
-			env := newTestIndexEnv(t)
-			i, _ := newEmptyTestInterceptor(t, env, nil)
-			env.setState(testVChannel, history, nil)
-			f := newFakeAppender()
+// TestCreateIndexOfAWrittenVChannelWaitsForTheObserve checks a CreateIndex
+// whose append reads a write history that is not NEVER. The append does not
+// enable the index, and the writes of the vchannel wait for the observe,
+// because the write history can lag the observe.
+func TestCreateIndexOfAWrittenVChannelWaitsForTheObserve(t *testing.T) {
+	appendCreateIndex := func(t *testing.T, history streamingpb.VChannelWriteHistory) (*testIndexEnv, *appendInterceptor, *testEngines, uint64) {
+		env := newTestIndexEnv(t)
+		i, engines := newEmptyTestInterceptor(t, env, nil)
+		env.setState(testVChannel, history, nil)
+		f := newFakeAppender()
+		_, err := i.DoAppend(newTestAppendContext(), newCreateIndex(testVChannel, testIndexID, common.PrimaryKeyIndexType), f.append)
+		require.NoError(t, err)
+		require.Nil(t, i.registry.get(testVChannel))
+		require.Nil(t, i.ch.IndexForTest(testVChannel), "the append does not enable the index")
 
-			_, err := i.DoAppend(newTestAppendContext(), newCreateIndex(testVChannel, testIndexID, common.PrimaryKeyIndexType), f.append)
-			require.NoError(t, err)
-			require.Nil(t, i.registry.get(testVChannel))
-			require.Nil(t, i.ch.IndexForTest(testVChannel))
-			_, err = i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
-			require.NoError(t, err)
-			require.Equal(t, []message.MessageType{message.MessageTypeCreateIndex, message.MessageTypeInsert}, f.types)
-		})
+		_, err = i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), newFakeAppender().append)
+		requireInner(t, err)
+		return env, i, engines, f.appended[0].TimeTick()
 	}
+
+	// The append read UNKNOWN because the observe had not built the state of
+	// the vchannel yet. The observe finds the vchannel empty at the
+	// CreateIndex and opens the Index, so the writes are deduplicated.
+	t.Run("unknown, the observe opens the index", func(t *testing.T) {
+		env, i, engines, tt := appendCreateIndex(t, streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_UNKNOWN)
+		env.setState(testVChannel, streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_NEVER,
+			&streamingpb.PKIndexOfVChannel{IndexId: testIndexID, FieldId: testPKFieldID, EnableTimeTick: tt})
+		_, _, err := i.ch.OpenIndex(context.Background(), snpkindex.IndexSpec{VChannel: testVChannel, CollectionID: testCollectionID, IndexID: testIndexID, EnableTimeTick: tt})
+		require.NoError(t, err)
+		i.ch.ObserveTimeTick(tt+1, snpkindex.WALTailSnapshot{})
+
+		engines.of(t, testVChannel).put(t, 1, 100)
+		f := newFakeAppender()
+		_, err = i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
+		require.NoError(t, err)
+		require.NotNil(t, i.registry.get(testVChannel))
+		require.Equal(t, []message.MessageType{
+			message.MessageTypeBeginTxn,
+			message.MessageTypeInsert,
+			message.MessageTypeDelete,
+			message.MessageTypeCommitTxn,
+		}, f.types, "a known key gets a companion delete")
+	})
+
+	// The vchannel was written before the CreateIndex. The observe passes the
+	// CreateIndex without an Index, so the writes pass through.
+	t.Run("written, the observe passes without an index", func(t *testing.T) {
+		_, i, _, tt := appendCreateIndex(t, streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_WRITTEN)
+		i.ch.ObserveTimeTick(tt, snpkindex.WALTailSnapshot{})
+		_, err := i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), newFakeAppender().append)
+		requireInner(t, err)
+
+		i.ch.ObserveTimeTick(tt+1, snpkindex.WALTailSnapshot{})
+		f := newFakeAppender()
+		_, err = i.DoAppend(newTestAppendContext(), newInsert(testVChannel, 1), f.append)
+		require.NoError(t, err)
+		require.Equal(t, []message.MessageType{message.MessageTypeInsert}, f.types)
+		require.Nil(t, i.registry.get(testVChannel))
+	})
 }
 
 // TestWriteAdoptsTheIndexThatTheObserveOpened checks a CreateIndex whose

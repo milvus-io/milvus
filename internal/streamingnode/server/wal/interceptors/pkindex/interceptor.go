@@ -134,8 +134,16 @@ func (i *appendInterceptor) Close() {
 // vchannel that is not empty. The observe decides again at the position of
 // the CreateIndex and drops a wrong Index.
 //
+// The lag also works in the other direction: the write history read here is
+// UNKNOWN when the observe has not built the state of the vchannel yet, for
+// example right after its CreateCollection. So when the write history is not
+// NEVER, the writes of the vchannel wait for the observe, as after an append
+// with an unknown result: they adopt the Index that the observe opens at the
+// CreateIndex, or pass through when the observe passes the CreateIndex
+// without one, see registry.lookup.
+//
 // An append that fails after it got a time tick may be in the WAL. The
-// writes of the vchannel then wait for the observe, see registry.lookup. A
+// writes of the vchannel then wait for the observe the same way. A
 // replicated CreateIndex passes through: the observe opens its Index.
 func (i *appendInterceptor) appendCreateIndex(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	header := message.MustAsMutableCreateIndexMessageV2(msg).Header()
@@ -151,6 +159,7 @@ func (i *appendInterceptor) appendCreateIndex(ctx context.Context, msg message.M
 		return id, err
 	}
 	if state.EverWritten != streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_NEVER {
+		i.registry.markPending(msg.VChannel(), msg.TimeTick())
 		return id, nil
 	}
 	spec := snpkindex.IndexSpec{
