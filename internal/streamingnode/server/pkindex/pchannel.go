@@ -37,13 +37,15 @@ import (
 // Index of every vchannel of the pchannel, the lastObserved that all of them
 // share, and the driver that starts their handovers.
 type PChannelIndexManager struct {
-	m        *Manager
-	info     types.PChannelInfo
-	onFatal  func(error)
-	logger   *mlog.Logger
-	ctx      context.Context
-	cancel   context.CancelFunc
-	lifetime *typeutil.Lifetime
+	m       *Manager
+	info    types.PChannelInfo
+	onFatal func(error)
+	// vchannelState is PChannelConfig.VChannelState.
+	vchannelState func(vchannel string) (VChannelState, bool)
+	logger        *mlog.Logger
+	ctx           context.Context
+	cancel        context.CancelFunc
+	lifetime      *typeutil.Lifetime
 
 	// driverDone is closed when the driver goroutine exits. It is nil when
 	// the driver does not run.
@@ -68,18 +70,21 @@ type PChannelIndexManager struct {
 	// steps counts the driver steps, for the tests.
 	steps atomic.Int64
 
-	// opMu serializes Add, Remove and Close, so that the engine IO of an Add
-	// happens outside mu.
+	// opMu serializes OpenIndex, DropIndex and Close, so that the engine IO
+	// of an open happens outside mu.
 	opMu sync.Mutex
 
-	// mu guards indexes, the LastAcked heap, schedules, ackedMax, hadIndex,
-	// closed and started.
-	mu        sync.Mutex
-	indexes   map[string]*index.Index
+	// mu guards indexes, detached, the LastAcked heap, schedules, ackedMax,
+	// hadIndex, closed and started.
+	mu      sync.Mutex
+	indexes map[string]*index.Index
+	// detached are the indexes that DetachIndex removed from indexes and no
+	// DropIndex closed yet. Close closes them.
+	detached  map[*index.Index]struct{}
 	acked     ackTracker
 	schedules map[*index.Index]*handoverSchedule // the driver bookkeeping of each Index
 	ackedMax  uint64
-	// hadIndex is set by the first CreateCollection. Before it, LastAcked
+	// hadIndex is set by the first OpenIndex. Before it, LastAcked
 	// has no index to report on.
 	hadIndex bool
 	// closed is set by Close, when the indexes are detached. LastAcked then
@@ -96,21 +101,27 @@ func newPChannelIndexManager(m *Manager, cfg PChannelConfig) *PChannelIndexManag
 	ctx, cancel := context.WithCancel(context.Background())
 	info := cfg.PChannel
 	c := &PChannelIndexManager{
-		m:         m,
-		info:      info,
-		onFatal:   cfg.OnFatal,
-		logger:    mlog.With(mlog.FieldModule("pkindex"), mlog.FieldPChannel(info.Name), mlog.Int64("term", info.Term)),
-		ctx:       ctx,
-		cancel:    cancel,
-		lifetime:  typeutil.NewLifetime(),
-		indexes:   make(map[string]*index.Index),
-		schedules: make(map[*index.Index]*handoverSchedule),
-		wake:      make(chan struct{}, 1),
+		m:             m,
+		info:          info,
+		onFatal:       cfg.OnFatal,
+		vchannelState: cfg.VChannelState,
+		logger:        mlog.With(mlog.FieldModule("pkindex"), mlog.FieldPChannel(info.Name), mlog.Int64("term", info.Term)),
+		ctx:           ctx,
+		cancel:        cancel,
+		lifetime:      typeutil.NewLifetime(),
+		indexes:       make(map[string]*index.Index),
+		detached:      make(map[*index.Index]struct{}),
+		schedules:     make(map[*index.Index]*handoverSchedule),
+		wake:          make(chan struct{}, 1),
 	}
 	c.lastObserved.Store(cfg.Seed)
 	c.tail.Store(&WALTailSnapshot{})
 	return c
 }
+
+// ErrOtherIndexOpen reports an OpenIndex of a vchannel that has an open
+// Index of another index ID.
+var ErrOtherIndexOpen = errors.New("another primary key index of the vchannel is open")
 
 // errClosed reports a call on a closed PChannelIndexManager or Index. what names it, such
 // as "pchannel <name>". It wraps engine.ErrClosed, so the caller handles it
@@ -120,7 +131,7 @@ func errClosed(what string) error {
 }
 
 // Start ends the recovery of the pchannel: it starts the handover driver,
-// and every Index that CreateCollection opens from now on is ready at once.
+// and every Index that OpenIndex opens from now on is ready at once.
 // The recovery calls it once, after it installed and replayed the indexes of
 // the existing collections. No handover runs before it.
 func (c *PChannelIndexManager) Start() {
@@ -140,16 +151,17 @@ func (c *PChannelIndexManager) start(driver bool) {
 	c.startDriver()
 }
 
-// CreateCollection opens the Index of the index indexID on a vchannel and
-// returns it, with whether this call opened it. It returns the existing Index and false when the Index
-// exists, so a caller that rolls back after a failure removes only an Index
-// that it opened. It returns the error of the engine open.
+// OpenIndex opens the Index of spec.VChannel and returns it, with whether
+// this call opened it. It returns the open Index and false when the
+// vchannel has an open Index of spec.IndexID. An open Index of another index
+// ID is an error: the caller detaches it first, see DetachIndex. It returns
+// the error of the engine open.
 //
 // Before Start, the Index is not ready: the recovery of the pchannel marks
 // it after the install of its committed table set. After Start, the Index is
-// ready at once: a collection created after the recovery has a new collection
-// ID in its vchannel name, so no manifest can exist for it.
-func (c *PChannelIndexManager) CreateCollection(ctx context.Context, vchannel string, collectionID, indexID int64) (*index.Index, bool, error) {
+// ready at once: an index enabled after the recovery has a new index ID, so
+// no manifest can exist for it.
+func (c *PChannelIndexManager) OpenIndex(ctx context.Context, spec IndexSpec) (*index.Index, bool, error) {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, false, errClosed("pchannel " + c.info.Name)
 	}
@@ -157,15 +169,18 @@ func (c *PChannelIndexManager) CreateCollection(ctx context.Context, vchannel st
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
 
-	if idx := c.get(vchannel); idx != nil {
+	if idx := c.get(spec.VChannel); idx != nil {
+		if idx.IndexID() != spec.IndexID {
+			return nil, false, errors.Wrapf(ErrOtherIndexOpen, "vchannel %s: index %d is open, open index %d", spec.VChannel, idx.IndexID(), spec.IndexID)
+		}
 		return idx, false, nil
 	}
-	idx, err := index.Open(ctx, c.indexConfig(vchannel, collectionID, indexID))
+	idx, err := index.Open(ctx, c.indexConfig(spec))
 	if err != nil {
 		return nil, false, err
 	}
 	c.mu.Lock()
-	c.indexes[vchannel] = idx
+	c.indexes[spec.VChannel] = idx
 	c.schedules[idx] = &handoverSchedule{backoff: c.newBackoff()}
 	c.hadIndex = true
 	ready := c.started
@@ -189,24 +204,77 @@ func (c *PChannelIndexManager) remove(ctx context.Context, vchannel string) {
 	c.closeIndex(ctx, vchannel)
 }
 
-// DropCollection closes the Index of a vchannel, then removes the local
-// directory of the vchannel, with the directories of all its indexes. It removes the directory also when no Index is
-// open. No open of the vchannel wipes the files later, because a vchannel name
-// embeds the id of its collection. It is also the rollback of a
-// CreateCollection whose append failed.
-func (c *PChannelIndexManager) DropCollection(ctx context.Context, vchannel string) error {
+// DetachIndex removes the Index of a vchannel from the open indexes when its
+// index ID is indexID, and reports whether it did. indexID 0 matches any
+// Index. The Index stays open until DropIndex of the same vchannel and index
+// ID, or Close, closes it: the close waits for a running handover, so the
+// observe of the WAL recovery detaches at once and drops in a task. After
+// the detach the vchannel has no Decider, its writes are not applied, and a
+// new Index of the vchannel can open.
+func (c *PChannelIndexManager) DetachIndex(vchannel string, indexID int64) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	idx, ok := c.indexes[vchannel]
+	if !ok || !matchesIndex(idx, indexID) {
+		return false
+	}
+	c.detachLocked(idx)
+	c.detached[idx] = struct{}{}
+	return true
+}
+
+// DropIndex closes the Index of a vchannel whose index ID is indexID, open or
+// detached, and removes its local directory. indexID 0 matches any Index of
+// the vchannel and removes the local directory of the vchannel: the drop of
+// its collection. It removes the directory also when no Index is open. No
+// open of the same index ID wipes the files later, because the IDs of
+// indexes are not reused.
+func (c *PChannelIndexManager) DropIndex(ctx context.Context, vchannel string, indexID int64) error {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return errClosed("pchannel " + c.info.Name)
 	}
 	defer c.lifetime.Done()
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
-	c.closeIndex(ctx, vchannel)
+
+	var closing []*index.Index
+	c.mu.Lock()
+	if idx, ok := c.indexes[vchannel]; ok && matchesIndex(idx, indexID) {
+		c.detachLocked(idx)
+		closing = append(closing, idx)
+	}
+	for idx := range c.detached {
+		if idx.VChannel() == vchannel && matchesIndex(idx, indexID) {
+			delete(c.detached, idx)
+			closing = append(closing, idx)
+		}
+	}
+	c.mu.Unlock()
+	for _, idx := range closing {
+		idx.Close(ctx)
+	}
 	dir := index.VChannelDir(c.m.cfg.Root, vchannel)
+	if indexID != 0 {
+		dir = index.Dir(c.m.cfg.Root, vchannel, indexID)
+	}
 	if err := os.RemoveAll(dir); err != nil {
 		return pkroot.MarkIO(err, "remove dir %s", dir)
 	}
 	return nil
+}
+
+// matchesIndex reports whether idx has the index ID indexID, or indexID is 0.
+func matchesIndex(idx *index.Index, indexID int64) bool {
+	return indexID == 0 || idx.IndexID() == indexID
+}
+
+// VChannelState returns what the observe of the WAL recovery knows about a
+// vchannel now, see PChannelConfig.VChannelState.
+func (c *PChannelIndexManager) VChannelState(vchannel string) (VChannelState, bool) {
+	if c.vchannelState == nil {
+		return VChannelState{}, false
+	}
+	return c.vchannelState(vchannel)
 }
 
 // closeIndex detaches and closes the Index of a vchannel, if it is open. The
@@ -244,12 +312,13 @@ func (c *PChannelIndexManager) detachLocked(idx *index.Index) {
 }
 
 // indexConfig is what an Index of this PChannelIndexManager needs, see index.Config.
-func (c *PChannelIndexManager) indexConfig(vchannel string, collectionID, indexID int64) index.Config {
+func (c *PChannelIndexManager) indexConfig(spec IndexSpec) index.Config {
 	cfg := c.m.cfg
 	return index.Config{
-		VChannel:        vchannel,
-		CollectionID:    collectionID,
-		IndexID:         indexID,
+		VChannel:        spec.VChannel,
+		CollectionID:    spec.CollectionID,
+		IndexID:         spec.IndexID,
+		EnableTimeTick:  spec.EnableTimeTick,
 		Term:            c.info.Term,
 		Ctx:             c.ctx,
 		Logger:          c.logger,
@@ -297,8 +366,9 @@ func (c *PChannelIndexManager) Info() types.PChannelInfo { return c.info }
 // The observe of the WAL recovery is the only caller: it calls Apply in
 // time tick order, one message at a time, and ObserveTimeTick after the
 // writes up to a persisted TimeTick. A vchannel without an Index is
-// ignored: the collection has no index or was dropped. So is a write that
-// finds the Index closed because a DropCollection detached it meanwhile.
+// ignored: the vchannel has no enabled index, or its index or collection was
+// dropped. So is a write that finds the Index closed because a drop detached
+// it meanwhile.
 // Every other error of the engine write is returned as it is.
 func (c *PChannelIndexManager) Apply(ctx context.Context, vchannel string, w index.Write) error {
 	idx := c.get(vchannel)
@@ -313,8 +383,8 @@ func (c *PChannelIndexManager) apply(ctx context.Context, idx *index.Index, w in
 	dirtied, err := idx.Apply(ctx, w)
 	if err != nil {
 		if errors.Is(err, engine.ErrClosed) && !c.attached(idx) {
-			// the collection was dropped after the lookup: the write is
-			// moot, and lastObserved must keep moving
+			// the index was dropped after the lookup: the write is moot,
+			// and lastObserved must keep moving
 			return nil
 		}
 		return err
@@ -427,6 +497,10 @@ func (c *PChannelIndexManager) Close() {
 	for _, idx := range indexes {
 		c.detachLocked(idx)
 	}
+	for idx := range c.detached {
+		indexes = append(indexes, idx)
+	}
+	c.detached = make(map[*index.Index]struct{})
 	c.closed = true
 	c.mu.Unlock()
 	for _, idx := range indexes {

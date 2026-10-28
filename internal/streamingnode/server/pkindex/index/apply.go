@@ -51,7 +51,8 @@ type Write struct {
 // their entries of the in-flight set (rule A: the engine first, then the
 // set). It reports whether the Index went from clean to dirty, so that the
 // caller adds it to the LastAcked heap of the pchannel. A write at or below
-// LastCommittedTimeTick is in the committed tables already and is skipped.
+// LastCommittedTimeTick is in the committed tables already and is skipped. A
+// write before EnableTimeTick is before the index was enabled and is skipped.
 // It does not decide: every delete writes a tombstone, whether the key is in
 // the index or not. A failed engine write returns the error, it does not
 // panic: the caller, the observe of the WAL recovery, classifies it.
@@ -60,7 +61,7 @@ type Write struct {
 // message at a time. The whole batch goes to one generation: engine.Write
 // holds the generation for the whole call, so a rotate can not split it.
 func (idx *Index) Apply(ctx context.Context, w Write) (dirtied bool, err error) {
-	if w.TimeTick <= idx.LastCommittedTimeTick() {
+	if w.TimeTick <= idx.LastCommittedTimeTick() || w.TimeTick < idx.cfg.EnableTimeTick {
 		return false, nil
 	}
 	muts := make([]engine.Mutation, 0, len(w.Deletes)+len(w.Puts))

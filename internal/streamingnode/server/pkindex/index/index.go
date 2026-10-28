@@ -98,6 +98,9 @@ type Config struct {
 	// IndexID is the ID of the primary key index. It names the local
 	// directory and the object keys of the Index.
 	IndexID int64
+	// EnableTimeTick is the time tick of the CreateIndex that enabled the
+	// index on the vchannel. Apply skips the writes before it.
+	EnableTimeTick uint64
 	// Term is the term of the pchannel, sent with every flush.
 	Term int64
 	// Ctx ends when the Channel closes. The Index derives its own from it.
@@ -192,6 +195,10 @@ func (idx *Index) CollectionID() int64 { return idx.collectionID }
 
 // IndexID returns the ID of the primary key index of the Index.
 func (idx *Index) IndexID() int64 { return idx.indexID }
+
+// EnableTimeTick returns the time tick of the CreateIndex that enabled the
+// index on the vchannel.
+func (idx *Index) EnableTimeTick() uint64 { return idx.cfg.EnableTimeTick }
 
 // Logger returns the logger of the Index, with its vchannel and collection.
 func (idx *Index) Logger() *mlog.Logger { return idx.logger }

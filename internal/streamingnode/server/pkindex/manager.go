@@ -29,8 +29,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -150,17 +152,42 @@ type PChannelConfig struct {
 	Seed uint64
 	// OnFatal marks the WAL unavailable. It must not block.
 	OnFatal func(error)
+	// VChannelState returns what the observe of the WAL recovery knows about
+	// a vchannel now, false when it has no collection of the vchannel. Nil
+	// means that no vchannel is known.
+	VChannelState func(vchannel string) (VChannelState, bool)
+}
+
+// VChannelState is what the observe of the WAL recovery knows about a
+// vchannel now: the vchannel meta after the last observed message.
+type VChannelState struct {
+	EverWritten streamingpb.VChannelWriteHistory
+	// PKIndex is the enabled primary key index, nil when none is enabled.
+	PKIndex *streamingpb.PKIndexOfVChannel
+	// Schema is the latest schema of the collection. It is shared and read only.
+	Schema *schemapb.CollectionSchema
+}
+
+// IndexSpec names the primary key index of a vchannel.
+type IndexSpec struct {
+	VChannel     string
+	CollectionID int64
+	IndexID      int64
+	// EnableTimeTick is the time tick of the CreateIndex that enabled the
+	// index on the vchannel.
+	EnableTimeTick uint64
 }
 
 // New creates the primary key index of a pchannel and registers it, so that
 // Close closes it with the node. It does not start the handover driver.
 //
-// The owner, the WAL recovery, creates the indexes of the existing
-// collections with CreateCollection, recovers them, and then calls Start.
+// The owner, the WAL recovery, opens the indexes of the vchannels with an
+// enabled primary key index with OpenIndex, recovers them, and then calls
+// Start.
 // It closes the PChannelIndexManager when the WAL closes.
 //
 // After Close, New returns a closed PChannelIndexManager, see
-// PChannelIndexManager.Closed: CreateCollection on it fails.
+// PChannelIndexManager.Closed: OpenIndex on it fails.
 func (m *Manager) New(cfg PChannelConfig) *PChannelIndexManager {
 	c := newPChannelIndexManager(m, cfg)
 	if !m.lifetime.Add(typeutil.LifetimeStateWorking) {

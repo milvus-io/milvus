@@ -315,10 +315,15 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 	}
 	if mgr := resource.Resource().PKIndexManager(); mgr != nil {
 		rec, err := pkrecovery.Recover(ctx, mgr, pkrecovery.Param{
-			PChannelConfig: snpkindex.PChannelConfig{PChannel: r.channel, Seed: r.checkpoint.TimeTick, OnFatal: r.fatalHandler("primary key index stopped")},
-			Metas:          vchannels,
-			Sched:          r.nodeScheduler,
-			Tail:           r.pkindexTailLocked,
+			PChannelConfig: snpkindex.PChannelConfig{
+				PChannel:      r.channel,
+				Seed:          r.checkpoint.TimeTick,
+				OnFatal:       r.fatalHandler("primary key index stopped"),
+				VChannelState: pkindexVChannelState(manager),
+			},
+			Metas: vchannels,
+			Sched: r.nodeScheduler,
+			Tail:  r.pkindexTailLocked,
 
 			ManifestReadConcurrency: paramtable.Get().StreamingCfg.PKIndexRecoveryManifestReadConcurrency.GetAsInt(),
 		})
@@ -328,6 +333,21 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 		r.pkindex = rec
 	}
 	return nil
+}
+
+// pkindexVChannelState returns the vchannel state that the primary key index
+// reads: the write history, the enabled primary key index and the schema of
+// a vchannel, as the vchannel module of manager holds them now. The observe
+// of the primary key index reads it after the vchannel module observed the
+// same message, so it holds the state at that message.
+func pkindexVChannelState(manager *vchannel.PChannelRecoveryManager) func(string) (snpkindex.VChannelState, bool) {
+	return func(vchannel string) (snpkindex.VChannelState, bool) {
+		state, ok := manager.PKIndexState(vchannel)
+		if !ok {
+			return snpkindex.VChannelState{}, false
+		}
+		return snpkindex.VChannelState{EverWritten: state.EverWritten, PKIndex: state.PKIndex, Schema: state.Schema}, true
+	}
 }
 
 // pkindexTailLocked reports the WAL tail to the primary key index at a

@@ -49,7 +49,7 @@ func TestIndexCreatedBeforeStartWaitsForTheRecovery(t *testing.T) {
 
 	ch.start(false)
 	assert.False(t, v0.Ready(), "Start does not mark an existing Index, the recovery does")
-	v1, created, err := ch.CreateCollection(context.Background(), "v1", testCollectionID, testIndexID)
+	v1, created, err := ch.OpenIndex(context.Background(), IndexSpec{VChannel: "v1", CollectionID: testCollectionID, IndexID: testIndexID})
 	require.NoError(t, err)
 	require.True(t, created)
 	assert.True(t, v1.Ready(), "a collection created after Start is ready at once")
@@ -66,7 +66,7 @@ func TestAddOfAnExistingIndexReportsNotCreated(t *testing.T) {
 	idx := env.add(ch, "v0")
 	insert(t, ch, idx, 10, 1)
 
-	_, created, err := ch.CreateCollection(context.Background(), "v0", testCollectionID, testIndexID)
+	_, created, err := ch.OpenIndex(context.Background(), IndexSpec{VChannel: "v0", CollectionID: testCollectionID, IndexID: testIndexID})
 	require.NoError(t, err)
 	assert.False(t, created, "a caller that rolls back must not remove the Index in use")
 	assert.Same(t, idx, ch.get("v0"))
@@ -82,10 +82,10 @@ func TestDropRemovesTheLocalFiles(t *testing.T) {
 	ch.step(farFuture)
 	require.DirExists(t, idx.CommittedDirForTest())
 
-	require.NoError(t, ch.DropCollection(context.Background(), "v0"))
+	require.NoError(t, ch.DropIndex(context.Background(), "v0", 0))
 	assert.Nil(t, ch.get("v0"))
 	assert.NoDirExists(t, filepath.Join(env.root, "v0"))
-	require.NoError(t, ch.DropCollection(context.Background(), "v0"), "a drop of a vchannel with no Index is a no-op")
+	require.NoError(t, ch.DropIndex(context.Background(), "v0", 0), "a drop of a vchannel with no Index is a no-op")
 
 	idx = env.add(ch, "v0")
 	assert.Zero(t, segmentOf(t, idx, 1), "the old key is gone")
@@ -98,7 +98,7 @@ func TestDropOfAClosedChannelFails(t *testing.T) {
 	env.add(ch, "v0")
 	ch.Close()
 
-	err := ch.DropCollection(context.Background(), "v0")
+	err := ch.DropIndex(context.Background(), "v0", 0)
 	require.ErrorIs(t, err, engine.ErrClosed)
 	assert.DirExists(t, filepath.Join(env.root, "v0"))
 }
@@ -144,7 +144,7 @@ func TestClosedChannelAndIndex(t *testing.T) {
 	idx := env.add(ch, "v0")
 	ch.Close()
 
-	_, _, err := ch.CreateCollection(context.Background(), "v1", testCollectionID, testIndexID)
+	_, _, err := ch.OpenIndex(context.Background(), IndexSpec{VChannel: "v1", CollectionID: testCollectionID, IndexID: testIndexID})
 	assert.True(t, errors.Is(err, engine.ErrClosed))
 	_, err = idx.Decider().Decide(context.Background(), insertRequest(idx, 1))
 	assert.True(t, errors.Is(err, engine.ErrClosed))
@@ -159,7 +159,7 @@ func TestManagerCloseClosesChannels(t *testing.T) {
 	env.mgr.Close()
 	assert.Nil(t, ch.get("v0"))
 	closed := env.channel(0)
-	_, _, err := closed.CreateCollection(context.Background(), "v0", testCollectionID, testIndexID)
+	_, _, err := closed.OpenIndex(context.Background(), IndexSpec{VChannel: "v0", CollectionID: testCollectionID, IndexID: testIndexID})
 	assert.True(t, errors.Is(err, engine.ErrClosed))
 }
 
@@ -281,7 +281,7 @@ func TestManagerApplyIgnoresADroppedIndex(t *testing.T) {
 	env := newTestEnv(t, syncScheduler{})
 	ch := env.channel(0)
 	dropped := env.add(ch, "v0")
-	require.NoError(t, ch.DropCollection(ctx, "v0"))
+	require.NoError(t, ch.DropIndex(ctx, "v0", 0))
 	require.NoError(t, ch.apply(ctx, dropped, index.Write{Puts: puts(1, 1), TimeTick: 5}))
 
 	closed := env.add(ch, "v1")
@@ -306,15 +306,15 @@ func TestIndexesOfOneVChannelUseSeparateDirs(t *testing.T) {
 	root := t.TempDir()
 	env := NewFakeEnv(t, root)
 	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
-	idx, _, err := c.CreateCollection(ctx, "v1", 1, 7)
+	idx, _, err := c.OpenIndex(ctx, IndexSpec{VChannel: "v1", CollectionID: 1, IndexID: 7})
 	require.NoError(t, err)
 	assert.EqualValues(t, 7, idx.IndexID())
 	assert.Equal(t, "root/pk_index/1/7/v1/sst", idx.SSTBasePathForTest())
 	assert.DirExists(t, filepath.Join(index.Dir(root, "v1", 7), "engine"))
-	require.NoError(t, c.DropCollection(ctx, "v1"))
+	require.NoError(t, c.DropIndex(ctx, "v1", 0))
 	assert.NoDirExists(t, index.VChannelDir(root, "v1"))
 
-	idx, _, err = c.CreateCollection(ctx, "v1", 1, 8)
+	idx, _, err = c.OpenIndex(ctx, IndexSpec{VChannel: "v1", CollectionID: 1, IndexID: 8})
 	require.NoError(t, err)
 	assert.Equal(t, "root/pk_index/1/8/v1/sst", idx.SSTBasePathForTest())
 	assert.DirExists(t, filepath.Join(index.Dir(root, "v1", 8), "engine"))
@@ -323,3 +323,43 @@ func TestIndexesOfOneVChannelUseSeparateDirs(t *testing.T) {
 	c.Close()
 }
 
+// TestApplySkipsTheWritesBeforeTheEnable checks that an Index ignores the
+// writes before the CreateIndex that enabled it.
+func TestApplySkipsTheWritesBeforeTheEnable(t *testing.T) {
+	ctx := context.Background()
+	env := NewFakeEnv(t, t.TempDir())
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	idx, _, err := c.OpenIndex(ctx, IndexSpec{VChannel: "v1", CollectionID: 1, IndexID: testIndexID, EnableTimeTick: 20})
+	require.NoError(t, err)
+	idx.MarkReady(ctx)
+	dirtied, err := idx.Apply(ctx, index.Write{Puts: []index.Put{{PK: dedup.Int64PK(1), SegmentID: 7}}, TimeTick: 19})
+	require.NoError(t, err)
+	assert.False(t, dirtied)
+	assert.False(t, idx.Dirty())
+	dirtied, err = idx.Apply(ctx, index.Write{Puts: []index.Put{{PK: dedup.Int64PK(2), SegmentID: 7}}, TimeTick: 21})
+	require.NoError(t, err)
+	assert.True(t, dirtied)
+	c.Close()
+}
+
+// TestOpenIndexOfAnotherIndexIDFails checks that a vchannel has one Index:
+// the caller detaches the open one first.
+func TestOpenIndexOfAnotherIndexIDFails(t *testing.T) {
+	ctx := context.Background()
+	env := NewFakeEnv(t, t.TempDir())
+	c := env.Manager.New(PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
+	first, _, err := c.OpenIndex(ctx, IndexSpec{VChannel: "v1", CollectionID: 1, IndexID: 7})
+	require.NoError(t, err)
+	_, _, err = c.OpenIndex(ctx, IndexSpec{VChannel: "v1", CollectionID: 1, IndexID: 8})
+	require.ErrorIs(t, err, ErrOtherIndexOpen)
+	assert.False(t, c.DetachIndex("v1", 8), "another index ID does not match")
+	assert.True(t, c.DetachIndex("v1", 7))
+	assert.Nil(t, c.Decider("v1"))
+	second, created, err := c.OpenIndex(ctx, IndexSpec{VChannel: "v1", CollectionID: 1, IndexID: 8})
+	require.NoError(t, err)
+	assert.True(t, created)
+	assert.NotSame(t, first, second)
+	c.Close() // closes the detached Index too
+	_, err = first.EngineForTest().MultiGet(ctx, [][]byte{dedup.Int64PK(1).Encode()})
+	assert.Error(t, err, "the detached Index is closed")
+}

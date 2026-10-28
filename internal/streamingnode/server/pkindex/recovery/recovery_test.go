@@ -37,10 +37,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
+// testIndexIDOf is the primary key index ID that testMeta gives a collection.
+func testIndexIDOf(collectionID int64) int64 { return 1000 + collectionID }
+
 // testMeta returns the vchannel meta of a collection with one primary key
-// field of type pk.
+// field of type pk. Without autoID, the primary key index testIndexIDOf is
+// enabled on the vchannel at time tick 1.
 func testMeta(vchannel string, collectionID int64, pk schemapb.DataType, autoID bool) *streamingpb.VChannelMeta {
-	return &streamingpb.VChannelMeta{
+	meta := &streamingpb.VChannelMeta{
 		Vchannel: vchannel,
 		State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
 		CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
@@ -48,8 +52,13 @@ func testMeta(vchannel string, collectionID int64, pk schemapb.DataType, autoID 
 			Schemas: []*streamingpb.CollectionSchemaOfVChannel{{Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: pk, AutoID: autoID},
 			}}}},
+			EverWritten: streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_NEVER,
 		},
 	}
+	if !autoID {
+		meta.CollectionInfo.PkIndex = &streamingpb.PKIndexOfVChannel{IndexId: testIndexIDOf(collectionID), FieldId: 100, EnableTimeTick: 1}
+	}
+	return meta
 }
 
 func TestRecoverOpensLooksUpAndMarksReadiness(t *testing.T) {
@@ -141,7 +150,7 @@ func TestRunStartsTheDriverAndCloseForgetsThePChannel(t *testing.T) {
 	require.NotNil(t, m)
 	require.NoError(t, rec.Run(ctx))
 
-	idx, created, err := m.CreateCollection(ctx, "v2", 2, 0)
+	idx, created, err := m.OpenIndex(ctx, pkindex.IndexSpec{VChannel: "v2", CollectionID: 2, IndexID: testIndexIDOf(2)})
 	require.NoError(t, err)
 	require.True(t, created)
 	assert.True(t, idx.Ready(), "after Run a new collection is ready at once")

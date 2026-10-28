@@ -58,7 +58,7 @@ func insert(t *testing.T, m *pkindex.PChannelIndexManager, idx *index.Index, seg
 func committedTable(t *testing.T, env *pkindex.FakeEnv, keepLocal bool) index.ManifestView {
 	ctx := context.Background()
 	m := env.Manager.New(pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}})
-	idx, _, err := m.CreateCollection(ctx, "v1", 1, 0)
+	idx, _, err := m.OpenIndex(ctx, pkindex.IndexSpec{VChannel: "v1", CollectionID: 1, IndexID: testIndexIDOf(1)})
 	require.NoError(t, err)
 	idx.MarkReady(ctx)
 	insert(t, m, idx, 1, 1, 2, 3)
@@ -181,7 +181,7 @@ func TestInstallTaskEndsWhenTheIndexCloses(t *testing.T) {
 	store.FailDownloads(1 << 30) // every download fails: the install retries until the Index closes
 	m := env.Manager.New(pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 2}})
 	t.Cleanup(m.Close)
-	idx, _, err := m.CreateCollection(ctx, "v1", 1, 0)
+	idx, _, err := m.OpenIndex(ctx, pkindex.IndexSpec{VChannel: "v1", CollectionID: 1, IndexID: testIndexIDOf(1)})
 	require.NoError(t, err)
 	idx.SetCommitted(view)
 

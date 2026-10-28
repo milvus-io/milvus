@@ -107,7 +107,7 @@ func (r *registry) add(ctx context.Context, vchannel string, collectionID int64,
 	// The engine open does disk IO, so it runs outside mu. Writes of other
 	// vchannels keep reading the registry meanwhile.
 	// TODO: open the index by the index ID of its enabling CreateIndex.
-	_, created, err := r.ch.CreateCollection(ctx, vchannel, collectionID, 0)
+	_, created, err := r.ch.OpenIndex(ctx, snpkindex.IndexSpec{VChannel: vchannel, CollectionID: collectionID})
 	if err != nil {
 		return false, errors.Mark(errors.Wrapf(err, "create primary key index engine of vchannel %s", vchannel), errOpenIndex)
 	}
@@ -145,7 +145,7 @@ func (r *registry) drop(ctx context.Context, vchannel string) {
 	if !ok {
 		return
 	}
-	if err := r.ch.DropCollection(ctx, vchannel); err != nil {
+	if err := r.ch.DropIndex(ctx, vchannel, 0); err != nil {
 		mlog.Warn(ctx, "failed to remove the local files of the primary key index",
 			mlog.FieldVChannel(vchannel), mlog.Err(err))
 	}

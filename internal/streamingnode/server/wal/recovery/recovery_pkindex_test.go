@@ -34,6 +34,7 @@ import (
 	pkrecovery "github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/recovery"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
@@ -43,8 +44,8 @@ import (
 const pkTestFieldID int64 = 100
 
 // pkTestMeta is the catalog meta of a vchannel whose collection has an Int64
-// primary key without autoID, so the primary key index recovery opens an
-// index for it.
+// primary key without autoID and an enabled primary key index, so the
+// primary key index recovery opens an index for it.
 func pkTestMeta(vchannel string, collectionID int64) *streamingpb.VChannelMeta {
 	return &streamingpb.VChannelMeta{
 		Vchannel: vchannel,
@@ -54,6 +55,8 @@ func pkTestMeta(vchannel string, collectionID int64) *streamingpb.VChannelMeta {
 			Schemas: []*streamingpb.CollectionSchemaOfVChannel{{Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 				{FieldID: pkTestFieldID, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
 			}}}},
+			EverWritten: streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_NEVER,
+			PkIndex:     &streamingpb.PKIndexOfVChannel{IndexId: 1001, FieldId: pkTestFieldID, EnableTimeTick: 1},
 		},
 	}
 }
@@ -275,4 +278,23 @@ func TestRecoveryStoragePKIndexClosesADroppedIndexInTheObserve(t *testing.T) {
 	rs.mu.Unlock()
 
 	rs.closeRecoveryResources()
+}
+
+// TestPKIndexVChannelStateReadsTheVChannelModule checks that the primary key
+// index reads the decision of the vchannel module at a CreateIndex.
+func TestPKIndexVChannelStateReadsTheVChannelModule(t *testing.T) {
+	createIndex := newAckExtraCreateIndex(t, "v1", 5, common.PrimaryKeyIndexType)
+	r := newAckExtraStorage(t, createIndex)
+	get := pkindexVChannelState(r.vchannelManager)
+
+	state, ok := get("v1")
+	require.True(t, ok)
+	assert.Equal(t, streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_NEVER, state.EverWritten)
+	assert.EqualValues(t, 7, state.PKIndex.GetIndexId())
+	assert.EqualValues(t, 100, state.PKIndex.GetFieldId())
+	assert.EqualValues(t, 5, state.PKIndex.GetEnableTimeTick())
+	assert.NotNil(t, state.Schema)
+
+	_, ok = get("v2")
+	assert.False(t, ok)
 }

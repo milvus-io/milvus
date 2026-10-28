@@ -105,7 +105,8 @@ func errClosed(what string) error {
 }
 
 // Recover creates the primary key index of the pchannel, opens the index of
-// every indexed collection in metas and reads the manifests. The handover
+// every vchannel in metas whose meta has an enabled primary key index, and
+// reads the manifests. The handover
 // driver does not run until Run. An error leaves
 // nothing open and makes the WAL open fail.
 func Recover(ctx context.Context, mgr *pkindex.Manager, p Param) (*Recovery, error) {
@@ -136,15 +137,15 @@ func Recover(ctx context.Context, mgr *pkindex.Manager, p Param) (*Recovery, err
 		}
 	}
 	for vchannel, meta := range p.Metas {
-		if meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL || meta.GetCollectionInfo() == nil {
+		info := meta.GetCollectionInfo()
+		if meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL || info.GetPkIndex() == nil {
 			continue
 		}
-		schemas := meta.GetCollectionInfo().GetSchemas()
-		if len(schemas) == 0 {
-			continue
+		var schema *schemapb.CollectionSchema
+		if schemas := info.GetSchemas(); len(schemas) > 0 {
+			schema = schemas[len(schemas)-1].GetSchema()
 		}
-		// The last schema of the vchannel names the primary key field.
-		if err := r.addCollection(ctx, vchannel, meta.GetCollectionInfo().GetCollectionId(), schemas[len(schemas)-1].GetSchema()); err != nil {
+		if err := r.openIndex(ctx, vchannel, info.GetCollectionId(), info.GetPkIndex(), schema); err != nil {
 			r.Close(ctx)
 			return nil, err
 		}
@@ -156,26 +157,29 @@ func Recover(ctx context.Context, mgr *pkindex.Manager, p Param) (*Recovery, err
 	return r, nil
 }
 
-// addCollection opens the index of a collection, when its primary key gets
-// one. An unsupported primary key type is an error.
-func (r *Recovery) addCollection(ctx context.Context, vchannel string, collectionID int64, schema *schemapb.CollectionSchema) error {
-	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
-	if err != nil {
-		return err
+// openIndex opens the index pkIndex of a vchannel and makes the vchannel a
+// target. The primary key field is the field pkIndex names in schema, the
+// latest schema of the collection. A field that is missing or of an
+// unsupported data type is an error.
+func (r *Recovery) openIndex(ctx context.Context, vchannel string, collectionID int64, pkIndex *streamingpb.PKIndexOfVChannel, schema *schemapb.CollectionSchema) error {
+	field := typeutil.GetField(schema, pkIndex.GetFieldId())
+	if field == nil || !field.GetIsPrimaryKey() {
+		return merr.WrapErrServiceInternalMsg("primary key index %d of vchannel %s names field %d, which is not the primary key", pkIndex.GetIndexId(), vchannel, pkIndex.GetFieldId())
 	}
-	if pkField.GetAutoID() {
-		return nil
-	}
-	dt := pkField.GetDataType()
+	dt := field.GetDataType()
 	if dt != schemapb.DataType_Int64 && dt != schemapb.DataType_VarChar {
 		return merr.WrapErrServiceInternalMsg("primary key of collection %d has the unsupported data type %s", collectionID, dt)
 	}
-	// TODO: open the index by the index ID of its enabling CreateIndex.
-	idx, _, err := r.m.CreateCollection(ctx, vchannel, collectionID, 0)
+	idx, _, err := r.m.OpenIndex(ctx, pkindex.IndexSpec{
+		VChannel:       vchannel,
+		CollectionID:   collectionID,
+		IndexID:        pkIndex.GetIndexId(),
+		EnableTimeTick: pkIndex.GetEnableTimeTick(),
+	})
 	if err != nil {
 		return errors.Wrapf(err, "open the primary key index of vchannel %s", vchannel)
 	}
-	r.targets[vchannel] = &target{idx: idx, pkFieldID: pkField.GetFieldID(), pkDataType: dt}
+	r.targets[vchannel] = &target{idx: idx, pkFieldID: field.GetFieldID(), pkDataType: dt}
 	return nil
 }
 

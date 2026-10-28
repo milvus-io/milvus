@@ -1515,7 +1515,7 @@ func TestCreateCollectionAfterDropBuildsAFreshIndex(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, i.registry.get(testVChannel))
 	// the observe of the WAL recovery closes the index of the dropped collection
-	require.NoError(t, i.ch.DropCollection(context.Background(), testVChannel))
+	require.NoError(t, i.ch.DropIndex(context.Background(), testVChannel, 0))
 
 	_, err = i.DoAppend(newTestAppendContext(), newCreateCollection(testVChannel, testSchema(false)), f.append)
 	require.NoError(t, err)

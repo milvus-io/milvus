@@ -19,6 +19,7 @@ package recovery
 import (
 	"context"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -36,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -206,6 +208,86 @@ func dropCollectionMsg(vchannel string, collectionID int64, tt uint64) message.I
 		MustBuildMutable(), tt)
 }
 
+func createIndexMsg(vchannel string, collectionID, indexID int64, tt uint64) message.ImmutableMessage {
+	return at(message.NewCreateIndexMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.CreateIndexMessageHeader{
+			CollectionId: collectionID,
+			FieldId:      testPKFieldID,
+			IndexId:      indexID,
+			IndexType:    common.PrimaryKeyIndexType,
+		}).
+		WithBody(&message.CreateIndexMessageBody{}).
+		MustBuildMutable(), tt)
+}
+
+func dropIndexMsg(vchannel string, collectionID int64, indexIDs []int64, tt uint64) message.ImmutableMessage {
+	return at(message.NewDropIndexMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.DropIndexMessageHeader{
+			CollectionId: collectionID,
+			IndexIds:     indexIDs,
+			IndexType:    common.PrimaryKeyIndexType,
+		}).
+		WithBody(&message.DropIndexMessageBody{}).
+		MustBuildMutable(), tt)
+}
+
+// fakeStates is the vchannel state that the vchannel module of the WAL
+// recovery keeps. A test sets it before it observes a CreateIndex, as the
+// vchannel module observes the message before the index does.
+type fakeStates struct {
+	mu     sync.Mutex
+	states map[string]pkindex.VChannelState
+}
+
+func newFakeStates() *fakeStates {
+	return &fakeStates{states: make(map[string]pkindex.VChannelState)}
+}
+
+func (s *fakeStates) get(vchannel string) (pkindex.VChannelState, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, ok := s.states[vchannel]
+	return st, ok
+}
+
+// enable records the primary key index indexID as enabled on vchannel at tt.
+func (s *fakeStates) enable(vchannel string, indexID int64, tt uint64) {
+	s.set(vchannel, streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_NEVER, &streamingpb.PKIndexOfVChannel{IndexId: indexID, FieldId: testPKFieldID, EnableTimeTick: tt})
+}
+
+// written records that rows were written to vchannel and no index is enabled.
+func (s *fakeStates) written(vchannel string) {
+	s.set(vchannel, streamingpb.VChannelWriteHistory_VCHANNEL_WRITE_HISTORY_WRITTEN, nil)
+}
+
+func (s *fakeStates) set(vchannel string, history streamingpb.VChannelWriteHistory, pk *streamingpb.PKIndexOfVChannel) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.states[vchannel] = pkindex.VChannelState{
+		EverWritten: history,
+		PKIndex:     pk,
+		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: testPKFieldID, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+		}},
+	}
+}
+
+// recoverWithStates recovers the pchannel p over metas with the vchannel
+// states of states.
+func recoverWithStates(t *testing.T, env *pkindex.FakeEnv, sched nodescheduler.Scheduler, states *fakeStates, metas map[string]*streamingpb.VChannelMeta) *Recovery {
+	ctx := context.Background()
+	rec, err := Recover(ctx, env.Manager, Param{
+		PChannelConfig: pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}, Seed: 10, VChannelState: states.get},
+		Metas:          metas,
+		Sched:          sched,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { rec.Close(ctx) })
+	return rec
+}
+
 // withReplicate marks msg as replicated from another cluster.
 func manualFlushMsg(vchannel string, tt uint64) message.ImmutableMessage {
 	return at(message.NewManualFlushMessageBuilderV2().
@@ -320,16 +402,21 @@ func TestObserveReplaysVarCharPrimaryKeys(t *testing.T) {
 	assert.Equal(t, keys[:2], presentPKs(t, idx, keys))
 }
 
-func TestObserveIgnoresACreateCollectionOfAnOpenedVChannel(t *testing.T) {
+func TestObserveIgnoresACreateIndexOfAnOpenedVChannel(t *testing.T) {
 	ctx := context.Background()
 	env := pkindex.NewFakeEnv(t, t.TempDir())
 	env.Committer.SetManifest("v1", &index.FakeManifest{View: index.ManifestView{Version: 1, CheckpointTimeTick: 100, SSTBasePath: "root/1/v1"}})
-	rec := recoverV1(t, env, env.Manager.Scheduler())
+	states := newFakeStates()
+	meta := testMeta("v1", 1, schemapb.DataType_Int64, false)
+	meta.CollectionInfo.PkIndex.EnableTimeTick = 11 // the vchannel meta was persisted after the CreateIndex
+	states.enable("v1", testIndexIDOf(1), 11)
+	rec := recoverWithStates(t, env, env.Manager.Scheduler(), states, map[string]*streamingpb.VChannelMeta{"v1": meta})
 	m := env.Manager.GetForTest("p")
 	idx := m.IndexForTest("v1")
 	require.False(t, idx.Ready())
 
-	rec.ObserveMessage(ctx, createCollectionMsg("v1", 1, 11))
+	rec.ObserveMessage(ctx, createCollectionMsg("v1", 1, 9))
+	rec.ObserveMessage(ctx, createIndexMsg("v1", 1, testIndexIDOf(1), 11))
 	assert.Same(t, idx, m.IndexForTest("v1"))
 	assert.False(t, idx.Ready(), "the index waits for its install")
 	rec.mu.Lock()
@@ -346,7 +433,8 @@ func TestObserveAppliesReplicatedMessagesAndSkipsTheControlChannel(t *testing.T)
 
 	rec.ObserveMessage(ctx, withReplicate(newInsert("v1", 7, 1), 11))
 	rec.ObserveMessage(ctx, createCollectionMsg(control, 2, 12))
-	rec.ObserveMessage(ctx, dropCollectionMsg(control, 2, 13))
+	rec.ObserveMessage(ctx, createIndexMsg(control, 2, 22, 13))
+	rec.ObserveMessage(ctx, dropCollectionMsg(control, 2, 14))
 	require.NoError(t, rec.Run(ctx))
 
 	m := env.Manager.GetForTest("p")
@@ -357,25 +445,29 @@ func TestObserveAppliesReplicatedMessagesAndSkipsTheControlChannel(t *testing.T)
 func TestObserveCreatesAndDropsCollections(t *testing.T) {
 	ctx := context.Background()
 	env := pkindex.NewFakeEnv(t, t.TempDir())
-	rec, err := Recover(ctx, env.Manager, Param{PChannelConfig: pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}}})
-	require.NoError(t, err)
-	t.Cleanup(func() { rec.Close(ctx) })
+	states := newFakeStates()
+	rec := recoverWithStates(t, env, env.Manager.Scheduler(), states, nil)
 	m := env.Manager.GetForTest("p")
 
 	rec.ObserveMessage(ctx, createCollectionMsg("v2", 2, 11))
+	assert.Nil(t, m.IndexForTest("v2"), "a collection gets its index at the CreateIndex")
+	states.enable("v2", 22, 12)
+	rec.ObserveMessage(ctx, createIndexMsg("v2", 2, 22, 12))
 	idx := m.IndexForTest("v2")
 	require.NotNil(t, idx)
-	assert.True(t, idx.Ready(), "a collection created in this term has no manifest")
-	rec.ObserveMessage(ctx, insertMsg("v2", 12, 7, 1))
+	assert.EqualValues(t, 22, idx.IndexID())
+	assert.True(t, idx.Ready(), "an index enabled in this term has no manifest")
+	rec.ObserveMessage(ctx, insertMsg("v2", 13, 7, 1))
 	assert.Equal(t, []dedup.PK{dedup.Int64PK(1)}, present(t, idx, 1))
 
-	after := rec.ObserveMessage(ctx, dropCollectionMsg("v2", 2, 13))
+	after := rec.ObserveMessage(ctx, dropCollectionMsg("v2", 2, 14))
 	require.NotNil(t, after)
-	assert.NotNil(t, m.IndexForTest("v2"), "the caller closes the index after the observe")
+	assert.Nil(t, m.IndexForTest("v2"), "the drop detaches the index at once")
+	assert.DirExists(t, index.VChannelDir(env.Manager.Root(), "v2"), "the caller closes the index after the observe")
 	after(ctx)
-	assert.Nil(t, m.IndexForTest("v2"))
-	assert.Nil(t, rec.ObserveMessage(ctx, dropCollectionMsg("v3", 3, 14)), "never seen: nothing happens")
-	assert.Nil(t, rec.ObserveMessage(ctx, insertMsg("v2", 15, 7, 1)), "dropped: nothing happens")
+	assert.NoDirExists(t, index.VChannelDir(env.Manager.Root(), "v2"))
+	assert.Nil(t, rec.ObserveMessage(ctx, dropCollectionMsg("v3", 3, 15)), "never seen: nothing happens")
+	assert.Nil(t, rec.ObserveMessage(ctx, insertMsg("v2", 16, 7, 1)), "dropped: nothing happens")
 	require.NoError(t, rec.Run(ctx))
 }
 
@@ -409,8 +501,8 @@ func TestObserveClosesADroppedIndexAfterTheWritesBeforeTheDrop(t *testing.T) {
 	rec.ObserveMessage(ctx, insertMsg("v1", 13, 7, 2)) // after the drop: skipped
 	rec.ObserveMessage(ctx, timeTickMsg(14))
 	assert.Empty(t, fatals)
-	rec.ObserveMessage(ctx, createCollectionMsg("v2", 2, 15))
-	assert.NotNil(t, m.IndexForTest("v2"), "the observe did not stop")
+	rec.ObserveMessage(ctx, insertMsg("v1", 15, 7, 3))
+	assert.Equal(t, uint64(14), m.LastObserved(), "the observe did not stop")
 }
 
 // TestObserveAppliesATransactionInOneBatch checks rule A for a transaction:
@@ -556,8 +648,10 @@ func TestObserveWritesTheEngineBeforeItMovesTheObservedTimeTick(t *testing.T) {
 func TestObserveFlushRequestsACoveringHandover(t *testing.T) {
 	ctx := context.Background()
 	env := pkindex.NewFakeEnv(t, t.TempDir())
-	rec := recoverV1(t, env, env.Manager.Scheduler())
-	rec.ObserveMessage(ctx, createCollectionMsg("v2", 2, 11))
+	states := newFakeStates()
+	states.enable("v2", 22, 11)
+	rec := recoverWithStates(t, env, env.Manager.Scheduler(), states, map[string]*streamingpb.VChannelMeta{"v1": testMeta("v1", 1, schemapb.DataType_Int64, false)})
+	rec.ObserveMessage(ctx, createIndexMsg("v2", 2, 22, 11))
 	require.NoError(t, rec.Run(ctx))
 	m := env.Manager.GetForTest("p")
 
@@ -661,4 +755,169 @@ func TestObservePanicsOnAMalformedBody(t *testing.T) {
 	bad := message.NewImmutableMesasge(good.MessageID(), []byte("not a protobuf"), good.Properties().ToRawMap())
 
 	require.Panics(t, func() { rec.ObserveMessage(ctx, bad) })
+}
+
+// TestRecoverOpensOnlyTheVChannelsWithAPKIndex checks that the recovery opens
+// an Index only for a vchannel whose meta has an enabled primary key index.
+func TestRecoverOpensOnlyTheVChannelsWithAPKIndex(t *testing.T) {
+	env := pkindex.NewFakeEnv(t, t.TempDir())
+	without := testMeta("b", 2, schemapb.DataType_Int64, false)
+	without.CollectionInfo.PkIndex = nil
+	rec := recoverWithStates(t, env, env.Manager.Scheduler(), newFakeStates(), map[string]*streamingpb.VChannelMeta{
+		"a": testMeta("a", 1, schemapb.DataType_Int64, false),
+		"b": without,
+	})
+	m := rec.Manager()
+	require.NotNil(t, m.IndexForTest("a"))
+	assert.EqualValues(t, testIndexIDOf(1), m.IndexForTest("a").IndexID())
+	assert.EqualValues(t, 1, m.IndexForTest("a").EnableTimeTick())
+	assert.Nil(t, m.Decider("b"))
+}
+
+// TestRecoverRejectsAPKIndexOnAFieldThatIsNotThePrimaryKey checks the field
+// that the vchannel meta names.
+func TestRecoverRejectsAPKIndexOnAFieldThatIsNotThePrimaryKey(t *testing.T) {
+	env := pkindex.NewFakeEnv(t, t.TempDir())
+	meta := testMeta("a", 1, schemapb.DataType_Int64, false)
+	meta.CollectionInfo.PkIndex.FieldId = 101
+	_, err := Recover(context.Background(), env.Manager, Param{
+		PChannelConfig: pkindex.PChannelConfig{PChannel: types.PChannelInfo{Name: "p", Term: 1}},
+		Metas:          map[string]*streamingpb.VChannelMeta{"a": meta},
+		Sched:          env.Manager.Scheduler(),
+	})
+	require.Error(t, err)
+	assert.Nil(t, env.Manager.GetForTest("p"))
+}
+
+// TestObserveCreateIndexOfANotEmptyVChannelDropsTheIndexOfTheAppend checks
+// that the observe drops the Index that the interceptor opened at the append
+// when the vchannel was not empty at the CreateIndex.
+func TestObserveCreateIndexOfANotEmptyVChannelDropsTheIndexOfTheAppend(t *testing.T) {
+	ctx := context.Background()
+	env := pkindex.NewFakeEnv(t, t.TempDir())
+	states := newFakeStates()
+	rec := recoverWithStates(t, env, env.Manager.Scheduler(), states, nil)
+	require.NoError(t, rec.Run(ctx))
+	m := rec.Manager()
+
+	// the interceptor read a stale write history and opened the index
+	_, created, err := m.OpenIndex(ctx, pkindex.IndexSpec{VChannel: "c", CollectionID: 3, IndexID: 8, EnableTimeTick: 20})
+	require.NoError(t, err)
+	require.True(t, created)
+	dir := index.Dir(env.Manager.Root(), "c", 8)
+	require.DirExists(t, dir)
+
+	states.written("c")
+	after := rec.ObserveMessage(ctx, createIndexMsg("c", 3, 8, 20))
+	require.NotNil(t, after)
+	assert.Nil(t, m.Decider("c"), "the observe detaches the index at once")
+	assert.DirExists(t, dir, "the caller closes the index after the observe")
+	after(ctx)
+	assert.NoDirExists(t, dir)
+	rec.ObserveMessage(ctx, insertMsg("c", 21, 7, 1)) // no index: nothing happens
+	rec.ObserveMessage(ctx, timeTickMsg(22))
+	assert.Equal(t, uint64(22), m.LastObserved())
+}
+
+// TestObserveDropIndexClosesOnlyTheNamedIndex checks that a DropIndex drops
+// the Index when it names its index ID or names no index.
+func TestObserveDropIndexClosesOnlyTheNamedIndex(t *testing.T) {
+	for name, ids := range map[string][]int64{"named": {8}, "all": nil} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			env := pkindex.NewFakeEnv(t, t.TempDir())
+			states := newFakeStates()
+			rec := recoverWithStates(t, env, env.Manager.Scheduler(), states, nil)
+			require.NoError(t, rec.Run(ctx))
+			m := rec.Manager()
+			states.enable("c", 8, 20)
+			rec.ObserveMessage(ctx, createIndexMsg("c", 3, 8, 20))
+			idx := m.IndexForTest("c")
+			require.NotNil(t, idx)
+
+			assert.Nil(t, rec.ObserveMessage(ctx, dropIndexMsg("c", 3, []int64{9}, 21)))
+			assert.Same(t, idx, m.IndexForTest("c"), "the DropIndex of another index changes nothing")
+
+			after := rec.ObserveMessage(ctx, dropIndexMsg("c", 3, ids, 22))
+			require.NotNil(t, after)
+			assert.Nil(t, m.IndexForTest("c"))
+			after(ctx)
+			assert.NoDirExists(t, index.Dir(env.Manager.Root(), "c", 8))
+		})
+	}
+}
+
+// TestObserveCreateIndexAfterADropBeforeTheDropCloses checks that the close
+// of a dropped index does not close the Index of the next index of the
+// vchannel, which opens before the close runs.
+func TestObserveCreateIndexAfterADropBeforeTheDropCloses(t *testing.T) {
+	ctx := context.Background()
+	env := pkindex.NewFakeEnv(t, t.TempDir())
+	states := newFakeStates()
+	rec := recoverWithStates(t, env, env.Manager.Scheduler(), states, nil)
+	require.NoError(t, rec.Run(ctx))
+	m := rec.Manager()
+	states.enable("c", 8, 20)
+	rec.ObserveMessage(ctx, createIndexMsg("c", 3, 8, 20))
+	drop := rec.ObserveMessage(ctx, dropIndexMsg("c", 3, []int64{8}, 21))
+	require.NotNil(t, drop)
+	states.enable("c", 9, 22)
+	rec.ObserveMessage(ctx, createIndexMsg("c", 3, 9, 22))
+	idx := m.IndexForTest("c")
+	require.NotNil(t, idx)
+	assert.EqualValues(t, 9, idx.IndexID())
+
+	// the close of index 8 runs now
+	drop(ctx)
+	assert.Same(t, idx, m.IndexForTest("c"))
+	assert.NoDirExists(t, index.Dir(env.Manager.Root(), "c", 8))
+	assert.DirExists(t, index.Dir(env.Manager.Root(), "c", 9))
+	rec.ObserveMessage(ctx, insertMsg("c", 23, 7, 1))
+	assert.Equal(t, []dedup.PK{dedup.Int64PK(1)}, present(t, idx, 1))
+}
+
+// TestObserveReplayOfAnEarlierIndexKeepsTheLaterIndex checks that the replay
+// of the CreateIndex and the DropIndex of an earlier index does not touch the
+// Index that the recovery opened from the catalog meta.
+func TestObserveReplayOfAnEarlierIndexKeepsTheLaterIndex(t *testing.T) {
+	ctx := context.Background()
+	env := pkindex.NewFakeEnv(t, t.TempDir())
+	states := newFakeStates()
+	meta := testMeta("v1", 1, schemapb.DataType_Int64, false)
+	meta.CollectionInfo.PkIndex = &streamingpb.PKIndexOfVChannel{IndexId: 9, FieldId: testPKFieldID, EnableTimeTick: 30}
+	states.enable("v1", 9, 30)
+	rec := recoverWithStates(t, env, env.Manager.Scheduler(), states, map[string]*streamingpb.VChannelMeta{"v1": meta})
+	m := rec.Manager()
+	idx := m.IndexForTest("v1")
+	require.NotNil(t, idx)
+
+	rec.ObserveMessage(ctx, createIndexMsg("v1", 1, 8, 20))
+	rec.ObserveMessage(ctx, insertMsg("v1", 21, 7, 1))
+	rec.ObserveMessage(ctx, dropIndexMsg("v1", 1, nil, 25))
+	rec.ObserveMessage(ctx, createIndexMsg("v1", 1, 9, 30))
+	rec.ObserveMessage(ctx, insertMsg("v1", 31, 7, 2))
+	require.NoError(t, rec.Run(ctx))
+	assert.Same(t, idx, m.IndexForTest("v1"))
+	assert.Equal(t, []dedup.PK{dedup.Int64PK(2)}, present(t, idx, 1, 2), "the write before the CreateIndex of the index is skipped")
+}
+
+// TestObserveCreateIndexOfAnotherIndexTypeOrTheControlChannelDoesNothing
+// checks the messages that do not enable the primary key index.
+func TestObserveCreateIndexOfAnotherIndexTypeOrTheControlChannelDoesNothing(t *testing.T) {
+	ctx := context.Background()
+	env := pkindex.NewFakeEnv(t, t.TempDir())
+	states := newFakeStates()
+	rec := recoverWithStates(t, env, env.Manager.Scheduler(), states, nil)
+	m := rec.Manager()
+	states.enable("c", 8, 20)
+	other := at(message.NewCreateIndexMessageBuilderV2().
+		WithVChannel("c").
+		WithHeader(&message.CreateIndexMessageHeader{CollectionId: 3, FieldId: testPKFieldID, IndexId: 8, IndexType: "STL_SORT"}).
+		WithBody(&message.CreateIndexMessageBody{}).
+		MustBuildMutable(), 20)
+	rec.ObserveMessage(ctx, other)
+	assert.Nil(t, m.IndexForTest("c"))
+	rec.ObserveMessage(ctx, createIndexMsg("p_"+funcutil.ControlChannelSuffix, 3, 8, 20))
+	assert.Nil(t, m.IndexForTest("p_"+funcutil.ControlChannelSuffix))
+	require.NoError(t, rec.Run(ctx))
 }

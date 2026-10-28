@@ -19,6 +19,7 @@ package recovery
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
@@ -27,10 +28,10 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -97,9 +98,9 @@ func (r *Recovery) fail(ctx context.Context, msg message.ImmutableMessage, err e
 
 // observe dispatches one message by its type. A message of the control
 // channel is not indexed. A replicated message is applied like any other:
-// the index of a secondary cluster follows its WAL. A CreateCollection of a
-// vchannel that Recover opened from the catalog does nothing. A failed
-// DropCollection is logged and does not fail the open.
+// the index of a secondary cluster follows its WAL. A CreateIndex or a
+// DropIndex of the primary key index opens or drops the Index of its
+// vchannel. A failed drop is logged and does not fail the open.
 //
 // The engine write of a message happens here, before the TimeTick after the
 // message moves the observed time tick of the pchannel. A handover reads
@@ -123,36 +124,24 @@ func (r *Recovery) observe(ctx context.Context, msg message.ImmutableMessage) (f
 		// pchannel, so it flushes every vchannel of this pchannel.
 		r.m.ObserveFlushAll(msg.TimeTick())
 		return nil, nil
-	case message.MessageTypeCreateCollection:
-		// TODO: the enabling message of the index is a CreateIndex of type
-		// PRIMARY_KEY, not the CreateCollection. The CreateIndex message does
-		// not carry the index type yet, and it is broadcast to the control
-		// channel only, so the index of a collection is opened at its
-		// CreateCollection until that message reaches the data vchannels.
+	case message.MessageTypeCreateIndex:
 		if funcutil.IsControlChannel(msg.VChannel()) {
 			return nil, nil
 		}
-		if _, ok := r.targets[msg.VChannel()]; ok {
-			// The interceptor opens the index at the append, and the observe
-			// finds it: the open is get-or-create on both sides.
+		header := message.MustAsImmutableCreateIndexMessageV2(msg).Header()
+		if header.GetIndexType() != common.PrimaryKeyIndexType {
 			return nil, nil
 		}
-		create := message.MustAsImmutableCreateCollectionMessageV1(msg)
-		body, err := readBody(ctx, r, "create collection", create.Body)
-		if err != nil {
-			return nil, errors.Wrap(err, "read the body of the create collection")
+		return r.observeCreateIndex(ctx, msg.VChannel(), header, msg.TimeTick())
+	case message.MessageTypeDropIndex:
+		if funcutil.IsControlChannel(msg.VChannel()) {
+			return nil, nil
 		}
-		schema := messageutil.MustGetSchemaFromCreateCollectionMessageBody(body)
-		if err := r.addCollection(ctx, msg.VChannel(), create.Header().GetCollectionId(), schema); err != nil {
-			return nil, err
+		header := message.MustAsImmutableDropIndexMessageV2(msg).Header()
+		if header.GetIndexType() != common.PrimaryKeyIndexType {
+			return nil, nil
 		}
-		if t, ok := r.targets[msg.VChannel()]; ok {
-			// A collection created after the checkpoint has no manifest, so its
-			// committed set is empty and the Index is ready at once, see
-			// Index.MarkReady.
-			t.idx.MarkReady(ctx)
-		}
-		return nil, nil
+		return r.observeDropIndex(msg.VChannel(), header.GetIndexIds(), msg.TimeTick()), nil
 	case message.MessageTypeDropCollection:
 		if funcutil.IsControlChannel(msg.VChannel()) {
 			return nil, nil
@@ -160,21 +149,12 @@ func (r *Recovery) observe(ctx context.Context, msg message.ImmutableMessage) (f
 		if _, ok := r.targets[msg.VChannel()]; !ok {
 			return nil, nil
 		}
-		delete(r.targets, msg.VChannel())
 		// The drop is in the WAL, so the collection is gone and the writes
-		// after it are not indexed either way. The observe closes the index,
+		// after it are not indexed either way. The observe drops the index,
 		// not the interceptor: a write before the drop in WAL order reaches
 		// the observe after the append of the drop returned, and it must
-		// still find the engine open. The close waits for a running handover,
-		// an upload, so it runs after the lock of the recovery storage is
-		// released, and before the next message is observed. A failed drop is
-		// logged, as on the append path: the collection is gone either way.
-		vchannel := msg.VChannel()
-		return func(ctx context.Context) {
-			if err := r.m.DropCollection(ctx, vchannel); err != nil {
-				r.logger.Warn(ctx, "failed to drop the primary key index of a dropped collection", mlog.FieldVChannel(vchannel), mlog.Err(err))
-			}
-		}, nil
+		// still find the engine open. See dropIndex for the close.
+		return r.dropIndex(msg.VChannel(), 0), nil
 	case message.MessageTypeTxn:
 		return nil, r.observeTxn(ctx, msg.(message.ImmutableTxnMessage))
 	case message.MessageTypeInsert, message.MessageTypeDelete:
@@ -221,6 +201,84 @@ func (r *Recovery) observeTxn(ctx context.Context, txn message.ImmutableTxnMessa
 		return errors.Wrapf(err, "txn %d", txnID)
 	}
 	return r.m.Apply(ctx, txn.VChannel(), w)
+}
+
+// observeCreateIndex enables or does not enable the primary key index of a
+// vchannel at its CreateIndex at tt. The vchannel module of the WAL recovery
+// observed the message before, so the vchannel state holds the decision at
+// tt: the index is enabled when the state names this index at tt.
+//
+// When the index is enabled, the observe opens its Index or finds the one
+// that the interceptor opened at the append, or that Recover opened from the
+// catalog meta. An Index opened here is ready at once: an index enabled after
+// the checkpoint of the pchannel has no manifest. When the index is not
+// enabled, the observe drops an Index of this index ID that the interceptor
+// opened at the append. The returned function closes a dropped Index, see
+// dropIndex.
+func (r *Recovery) observeCreateIndex(ctx context.Context, vchannel string, header *message.CreateIndexMessageHeader, tt uint64) (func(context.Context), error) {
+	state, ok := r.m.VChannelState(vchannel)
+	pk := state.PKIndex
+	enabled := ok && pk.GetIndexId() == header.GetIndexId() && pk.GetEnableTimeTick() == tt
+	if t, ok := r.targets[vchannel]; ok {
+		if t.idx.IndexID() == header.GetIndexId() || t.idx.EnableTimeTick() > tt {
+			// the index is open already, or a replay reached the CreateIndex
+			// of an index that a later index replaced
+			return nil, nil
+		}
+	}
+	if !enabled {
+		return r.dropIndex(vchannel, header.GetIndexId()), nil
+	}
+	var after func(context.Context)
+	if t, ok := r.targets[vchannel]; ok {
+		// the DropIndex of the earlier index is before tt and dropped it, so
+		// this does not happen; drop it anyway so that the open succeeds
+		after = r.dropIndex(vchannel, t.idx.IndexID())
+	}
+	if err := r.openIndex(ctx, vchannel, header.GetCollectionId(), pk, state.Schema); err != nil {
+		return after, err
+	}
+	r.targets[vchannel].idx.MarkReady(ctx)
+	return after, nil
+}
+
+// observeDropIndex drops the Index of a vchannel when the DropIndex at tt
+// names its index ID, or names no index. A DropIndex at or before the
+// CreateIndex of the open Index is the replay of a drop of an earlier index
+// and does nothing. The returned function closes the dropped Index, see
+// dropIndex.
+func (r *Recovery) observeDropIndex(vchannel string, indexIDs []int64, tt uint64) func(context.Context) {
+	t, ok := r.targets[vchannel]
+	if !ok || t.idx.EnableTimeTick() >= tt {
+		return nil
+	}
+	if len(indexIDs) > 0 && !slices.Contains(indexIDs, t.idx.IndexID()) {
+		return nil
+	}
+	return r.dropIndex(vchannel, t.idx.IndexID())
+}
+
+// dropIndex forgets the target of a vchannel and detaches the Index of
+// indexID of the vchannel at once, so the writes after the drop are not
+// applied and a later CreateIndex can open a new Index. indexID 0 matches any
+// Index, the drop of the collection. It returns nil when no Index matches.
+// Otherwise it returns a function that closes the Index and removes its local
+// files. The close waits for a running handover, an upload, so the recovery
+// storage runs the function after it releases its lock, and before it
+// observes the next message. A failed drop is logged: the index is gone
+// either way.
+func (r *Recovery) dropIndex(vchannel string, indexID int64) func(context.Context) {
+	if t, ok := r.targets[vchannel]; ok && (indexID == 0 || t.idx.IndexID() == indexID) {
+		delete(r.targets, vchannel)
+	}
+	if !r.m.DetachIndex(vchannel, indexID) {
+		return nil
+	}
+	return func(ctx context.Context) {
+		if err := r.m.DropIndex(ctx, vchannel, indexID); err != nil {
+			r.logger.Warn(ctx, "failed to drop the primary key index", mlog.FieldVChannel(vchannel), mlog.Int64("indexID", indexID), mlog.Err(err))
+		}
+	}
 }
 
 // writeOf translates an insert or a delete into index terms. A message of

@@ -191,7 +191,7 @@ func (env *testEnv) channel(seed uint64) *PChannelIndexManager {
 func (env *testEnv) recoveredChannel(seed uint64, vchannels ...string) *PChannelIndexManager {
 	ch := env.openChannel(seed)
 	for _, v := range vchannels {
-		_, created, err := ch.CreateCollection(context.Background(), v, testCollectionID, testIndexID)
+		_, created, err := ch.OpenIndex(context.Background(), IndexSpec{VChannel: v, CollectionID: testCollectionID, IndexID: testIndexID})
 		require.NoError(env.t, err)
 		require.True(env.t, created)
 	}
@@ -234,7 +234,7 @@ func (env *testEnv) waitFatal() error {
 
 // add opens the Index of vchannel and waits until it is ready.
 func (env *testEnv) add(ch *PChannelIndexManager, vchannel string) *index.Index {
-	idx, created, err := ch.CreateCollection(context.Background(), vchannel, testCollectionID, testIndexID)
+	idx, created, err := ch.OpenIndex(context.Background(), IndexSpec{VChannel: vchannel, CollectionID: testCollectionID, IndexID: testIndexID})
 	require.NoError(env.t, err)
 	require.True(env.t, created)
 	require.NotNil(env.t, idx)
