@@ -202,6 +202,7 @@ func validatePartitionTag(partitionTag string, strictCheck bool) error {
 	return nil
 }
 
+// validateFieldName validates names from user schema requests.
 func validateFieldName(fieldName string) error {
 	fieldName = strings.TrimSpace(fieldName)
 
