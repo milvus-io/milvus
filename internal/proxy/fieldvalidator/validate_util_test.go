@@ -8748,3 +8748,43 @@ func Test_fillVectorArrayNullValueImpl(t *testing.T) {
 		assert.Contains(t, err.Error(), "unsupported ArrayOfVector element type")
 	})
 }
+
+func TestValidateNullableSparseWithoutPayload(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		validData []bool
+		nullable  bool
+		wantErr   bool
+	}{
+		{"all null", []bool{false, false}, true, false},
+		{"wrong bitmap length", []bool{false}, true, true},
+		{"mixed validity without vectors", []bool{false, true}, true, true},
+		{"all valid without vectors", []bool{true, true}, true, true},
+		{"missing bitmap and vectors", nil, true, true},
+		{"nulls in non-nullable field", []bool{false, false}, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+				FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector,
+				Nullable: tc.nullable,
+			}}}
+			helper, err := typeutil.CreateSchemaHelper(schema)
+			require.NoError(t, err)
+			field := &schemapb.FieldData{
+				Type: schemapb.DataType_SparseFloatVector, FieldName: "sparse", FieldId: 102,
+				ValidData: tc.validData,
+			}
+			// DML normalizes at entry before the full validation/fill/alignment path.
+			require.True(t, typeutil.ValidateAndNormalizeFieldDataValidData(field))
+			err = NewValidateUtil().Validate([]*schemapb.FieldData{field}, helper, 2)
+			if tc.wantErr {
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, []bool{false, false}, typeutil.GetFieldDataValidData(field))
+			require.NotNil(t, field.GetVectors().GetSparseFloatVector())
+			require.Empty(t, field.GetVectors().GetSparseFloatVector().GetContents())
+		})
+	}
+}
