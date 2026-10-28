@@ -908,6 +908,13 @@ func (sm *snapshotManager) finishRestoreSnapshot(
 	rollback RollbackFunc,
 	validateResources ValidateResourcesFunc,
 ) (jobID int64, err error) {
+	// The restore copies the rows without the writes of the WAL, so the
+	// primary key index of the snapshot would miss their keys.
+	for _, index := range snapshotData.Indexes {
+		if common.GetIndexType(index.GetIndexParams()) == common.PrimaryKeyIndexType {
+			return 0, errPKIndexRejects("snapshot restore", sourceCollectionID)
+		}
+	}
 	snapshotFingerprint := ""
 	if external {
 		snapshotFingerprint, err = snapshotstorage.SnapshotFingerprint(snapshotData)
@@ -953,6 +960,20 @@ func (sm *snapshotManager) finishRestoreSnapshot(
 			restoreBroadcaster.Close()
 		}
 	}()
+
+	// A CreateIndex can take the collection lock between the restore of the
+	// collection and this point, while the collection is still empty. The
+	// restore message holds the lock from here until its callback created the
+	// copy job, which the precheck of a CreateIndex sees.
+	if sm.meta != nil && hasLivePKIndex(sm.meta.indexMeta, collectionID) {
+		logger.Warn(ctx, "a primary key index was created on the restored collection, rolling back", mlog.Int64("collectionID", collectionID))
+		restoreBroadcaster.Close()
+		restoreBroadcaster = nil
+		if rollbackErr := rollback(ctx, targetDbName, targetCollectionName); rollbackErr != nil {
+			logger.Error(ctx, "rollback failed", mlog.Err(rollbackErr))
+		}
+		return 0, errPKIndexRejects("snapshot restore", collectionID)
+	}
 
 	if valErr := validateResources(ctx, collectionID, snapshotData); valErr != nil {
 		logger.Error(ctx, "resource validation failed, rolling back", mlog.Err(valErr))

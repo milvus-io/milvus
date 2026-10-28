@@ -2569,6 +2569,11 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 		mlog.Warn(context.TODO(), "CreateSnapshot: collection not found after lock")
 		return merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionId())), nil
 	}
+	// A restore of the snapshot would copy the rows without the writes of the
+	// WAL, so a collection with a primary key index has no snapshot.
+	if s.meta != nil && hasLivePKIndex(s.meta.indexMeta, req.GetCollectionId()) {
+		return merr.Status(errPKIndexRejects("snapshot", req.GetCollectionId())), nil
+	}
 
 	// Double-check after acquiring lock — another goroutine may have created it.
 	// Same error-handling discipline as the pre-lock check above: only treat

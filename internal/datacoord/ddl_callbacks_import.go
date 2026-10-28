@@ -313,6 +313,12 @@ func (s *Server) broadcastImport(ctx context.Context,
 	if err := s.validateSnapshotPartitionTargets(ctx, collectionID, partitionIDs, options); err != nil {
 		return 0, false, err
 	}
+	// The imported rows do not go through the inserts of the WAL, so the
+	// primary key index would miss their keys. The check runs under the
+	// collection lock, which a CreateIndex also takes.
+	if s.meta != nil && hasLivePKIndex(s.meta.indexMeta, collectionID) {
+		return 0, false, errPKIndexRejects("import", collectionID)
+	}
 
 	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err := merr.CheckRPCCall(coll, err); err != nil {

@@ -272,3 +272,21 @@ func (s *Server) dropFailedPKIndex(ctx context.Context, idx *model.Index) error 
 		mlog.FieldCollectionID(idx.CollectionID), mlog.FieldIndexID(idx.IndexID), mlog.String("failReason", cur.FailReason))
 	return nil
 }
+
+// hasLivePKIndex reports whether the collection has a primary key index that
+// is not deleted, Failed ones included: a Failed index may still be enabled
+// on some vchannels until its DropIndex.
+func hasLivePKIndex(m *indexMeta, collectionID int64) bool {
+	if m == nil {
+		return false
+	}
+	return slices.ContainsFunc(m.GetIndexesForCollection(collectionID, ""), isPKIndex)
+}
+
+// errPKIndexRejects returns the Input error of an operation that adds or
+// copies rows without the writes of the WAL, on a collection with a primary
+// key index.
+func errPKIndexRejects(operation string, collectionID int64) error {
+	return merr.WrapErrParameterInvalidMsg("%s is not supported on collection %d, which has a %s index",
+		operation, collectionID, common.PrimaryKeyIndexType)
+}

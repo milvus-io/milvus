@@ -38,12 +38,16 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_broadcaster"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -570,4 +574,135 @@ func TestUserDropAllWithThePKIndex(t *testing.T) {
 	assert.Equal(t, common.PrimaryKeyIndexType, header.GetIndexType())
 	assert.Len(t, header.GetIndexIds(), 2)
 	assert.ElementsMatch(t, []string{pkTestVChannel0, pkTestVChannel1}, last.BroadcastHeader().VChannels)
+}
+
+func TestHasLivePKIndex(t *testing.T) {
+	m := newPKIndexTestMeta()
+	assert.True(t, hasLivePKIndex(m, 1))
+	assert.True(t, hasLivePKIndex(m, 2), "a failed index counts until it is dropped")
+	assert.False(t, hasLivePKIndex(m, 3))
+	m.indexes[1][1002].IsDeleted = true
+	assert.False(t, hasLivePKIndex(m, 1), "a deleted index does not count")
+	assert.False(t, hasLivePKIndex(nil, 1))
+}
+
+func TestImportIsRejectedWithAPKIndex(t *testing.T) {
+	ctx := context.Background()
+	validation := mockey.Mock((*Server).validateImportRequest).Return(nil).Build()
+	defer validation.UnPatch()
+	replication := mockey.Mock((*Server).validateImportReplication).Return(nil).Build()
+	defer replication.UnPatch()
+	targets := mockey.Mock((*Server).validateSnapshotPartitionTargets).Return(nil).Build()
+	defer targets.UnPatch()
+	api := newMockBroadcastAPIImpl()
+	start := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(api, nil).Build()
+	defer start.UnPatch()
+	broadcasted := false
+	transport := mockey.Mock((*mockBroadcastAPIImpl).Broadcast).To(
+		func(*mockBroadcastAPIImpl, context.Context, message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+			broadcasted = true
+			return &types.BroadcastAppendResult{}, nil
+		}).Build()
+	defer transport.UnPatch()
+
+	server := &Server{meta: &meta{indexMeta: newPKIndexTestMeta()}}
+	_, _, err := server.broadcastImport(ctx, 1, []int64{10},
+		[]*internalpb.ImportFile{{Paths: []string{"a.parquet"}}}, nil, 1000, []string{"v1"}, "",
+		internalpb.ImportVersion_ImportVersionV2)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.False(t, broadcasted)
+	assert.True(t, api.closeCalled.Load())
+}
+
+func TestSnapshotCreateIsRejectedWithAPKIndex(t *testing.T) {
+	ctx := context.Background()
+	patch := mockey.Mock((*snapshotManager).GetSnapshot).
+		Return(nil, merr.WrapErrSnapshotNotFound("snap", "not found")).Build()
+	defer patch.UnPatch()
+	patchCollection := mockey.Mock((*embeddedHandler).GetCollection).Return(&collectionInfo{
+		ID: 1, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "collection"},
+		VChannelNames: []string{"p1_1v0"},
+	}, nil).Build()
+	defer patchCollection.UnPatch()
+	patchExists := mockey.Mock((*embeddedBroker).HasCollection).Return(true, nil).Build()
+	defer patchExists.UnPatch()
+	patchStart := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).Return(&embeddedBroadcastAPI{}, nil).Build()
+	defer patchStart.UnPatch()
+	patchClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
+	defer patchClose.UnPatch()
+	broadcasted := false
+	patchBroadcast := mockey.Mock((*embeddedBroadcastAPI).Broadcast).To(
+		func(*embeddedBroadcastAPI, context.Context, message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+			broadcasted = true
+			return &types.BroadcastAppendResult{}, nil
+		}).Build()
+	defer patchBroadcast.UnPatch()
+
+	server := &Server{
+		meta:            &meta{indexMeta: newPKIndexTestMeta()},
+		snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+		handler:         &embeddedHandler{}, broker: &embeddedBroker{},
+	}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	resp, err := server.CreateSnapshot(ctx, &datapb.CreateSnapshotRequest{Name: "snap", CollectionId: 1})
+	require.NoError(t, err)
+	assert.ErrorIs(t, merr.Error(resp), merr.ErrParameterInvalid)
+	assert.False(t, broadcasted)
+
+	// a collection without one goes on
+	resp, err = server.CreateSnapshot(ctx, &datapb.CreateSnapshotRequest{Name: "snap", CollectionId: 3})
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(resp))
+	assert.True(t, broadcasted)
+}
+
+func TestSnapshotRestoreIsRejectedWithAPKIndex(t *testing.T) {
+	ctx := context.Background()
+	pkIndexInfo := &indexpb.IndexInfo{
+		FieldID: 100, IndexName: "pk",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: common.PrimaryKeyIndexType}},
+	}
+	finish := func(sm *snapshotManager, data *snapshotstorage.SnapshotData, rollbacks *int) (int64, error) {
+		return sm.finishRestoreSnapshot(ctx, mlog.With(), data, "snapshot", 100, "target", "default", 0, false, "", "",
+			func(context.Context, int64, string) (broadcaster.BroadcastAPI, error) {
+				return &mockBroadcastAPI{}, nil
+			},
+			func(context.Context, string, string) error { *rollbacks++; return nil },
+			func(context.Context, int64, *snapshotstorage.SnapshotData) error { return nil })
+	}
+
+	t.Run("the snapshot holds a primary key index", func(t *testing.T) {
+		restored := false
+		restore := mockey.Mock((*snapshotManager).RestoreCollection).To(
+			func(*snapshotManager, context.Context, *snapshotstorage.SnapshotData, string, string) (int64, error) {
+				restored = true
+				return 200, nil
+			}).Build()
+		defer restore.UnPatch()
+		rollbacks := 0
+		_, err := finish(&snapshotManager{}, &snapshotstorage.SnapshotData{
+			SnapshotInfo: &datapb.SnapshotInfo{Name: "snapshot"},
+			Indexes:      []*indexpb.IndexInfo{pkIndexInfo},
+		}, &rollbacks)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.False(t, restored, "no collection is created")
+		assert.Zero(t, rollbacks)
+	})
+
+	t.Run("a primary key index was created on the restored collection", func(t *testing.T) {
+		restore := mockey.Mock((*snapshotManager).RestoreCollection).Return(int64(2), nil).Build()
+		defer restore.UnPatch()
+		restoreIndexes := mockey.Mock((*snapshotManager).RestoreIndexes).Return(nil).Build()
+		defer restoreIndexes.UnPatch()
+		alloc := &embeddedAllocator{}
+		allocID := mockey.Mock((*embeddedAllocator).AllocID).Return(typeutil.UniqueID(999), nil).Build()
+		defer allocID.UnPatch()
+
+		rollbacks := 0
+		// collection 2 of the test meta has a primary key index
+		sm := &snapshotManager{allocator: alloc, meta: &meta{indexMeta: newPKIndexTestMeta()}}
+		_, err := finish(sm, &snapshotstorage.SnapshotData{SnapshotInfo: &datapb.SnapshotInfo{Name: "snapshot"}}, &rollbacks)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Equal(t, 1, rollbacks)
+	})
 }
