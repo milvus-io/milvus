@@ -65,12 +65,13 @@ func TestFileSyncFailureCannotReturnSuccess(t *testing.T) {
 }
 
 func TestDirectorySyncFailureIsNotAcknowledged(t *testing.T) {
-	name := filepath.Join(t.TempDir(), "new", "parents", "object")
+	root := t.TempDir()
+	name := filepath.Join(root, "new", "parents", "object")
 	patch := mockey.Mock(syncDirectory).Return(syscall.EIO).Build()
-	err := WriteFile(name, []byte("complete"), 0o600)
+	err := WriteFile(name, []byte("complete"), 0o600, root)
 	patch.UnPatch()
 	require.ErrorIs(t, err, syscall.EIO)
-	require.NoError(t, WriteFile(name, []byte("retry"), 0o600))
+	require.NoError(t, WriteFile(name, []byte("retry"), 0o600, root))
 }
 
 func TestCloseAndOpenErrors(t *testing.T) {
@@ -108,18 +109,83 @@ func TestBatchCoalescesDirectorySync(t *testing.T) {
 	for i := 0; i < 16; i++ {
 		files[filepath.Join(root, "same", "parent", fmt.Sprint(i))] = []byte("value")
 	}
-	require.NoError(t, WriteFiles(files, 0o600))
+	require.NoError(t, WriteFiles(files, 0o600, root))
 	require.Equal(t, len(files), fileSyncs, "synchronize each completed file exactly once")
 	for dir, count := range calls {
 		require.Equal(t, 1, count, "directory %s synchronized more than once in one batch", dir)
 	}
-	require.Contains(t, calls, filepath.Join(root, "same", "parent"))
-	require.Contains(t, calls, root)
+	physicalRoot, err := filepath.EvalSymlinks(root)
+	require.NoError(t, err)
+	require.Contains(t, calls, filepath.Join(physicalRoot, "same", "parent"))
+	require.Contains(t, calls, physicalRoot)
 	for name, expected := range files {
 		data, err := os.ReadFile(name)
 		require.NoError(t, err)
 		require.Equal(t, expected, data)
 	}
+}
+
+func TestSymlinkThenDotDotSyncsPhysicalDirectories(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(root+"/actual/child", 0o700))
+	require.NoError(t, os.MkdirAll(root+"/actual/dataset", 0o700))
+	require.NoError(t, os.Symlink(root+"/actual/child", root+"/link"))
+	physicalRoot, err := filepath.EvalSymlinks(root)
+	require.NoError(t, err)
+	calls := make(map[string]int)
+	var original func(string) error
+	patch := mockey.Mock(syncDirectory).Origin(&original).To(func(name string) error {
+		calls[name]++
+		return original(name)
+	}).Build()
+	defer patch.UnPatch()
+	name := root + "/link/../dataset/object"
+	require.NoError(t, WriteFile(name, []byte("data"), 0o600, root))
+	require.Contains(t, calls, physicalRoot+"/actual/dataset")
+	require.NotContains(t, calls, physicalRoot+"/dataset")
+	require.NotContains(t, calls, filepath.Dir(physicalRoot))
+	data, err := os.ReadFile(physicalRoot + "/actual/dataset/object")
+	require.NoError(t, err)
+	require.Equal(t, "data", string(data))
+}
+
+func TestSearchOnlyAncestorAndExistingDescendantRetry(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permissions")
+	}
+	ancestor := filepath.Join(t.TempDir(), "search")
+	root := ancestor + "/data"
+	require.NoError(t, os.MkdirAll(root, 0o700))
+	require.NoError(t, os.Chmod(ancestor, 0o111))
+	defer func() { require.NoError(t, os.Chmod(ancestor, 0o700)) }()
+	require.NoError(t, WriteFile(root+"/new/parents/object", []byte("data"), 0o600, root))
+	require.NoError(t, WriteFiles(map[string][]byte{
+		root + "/new/parents/one": []byte("one"),
+		root + "/other/two":       []byte("two"),
+	}, 0o600, root))
+	patch := mockey.Mock(syncDirectory).Return(syscall.EIO).Build()
+	err := WriteFile(root+"/failed/parents/object", []byte("data"), 0o600, root)
+	patch.UnPatch()
+	require.ErrorIs(t, err, syscall.EIO)
+	calls := make(map[string]int)
+	var original func(string) error
+	patch = mockey.Mock(syncDirectory).Origin(&original).To(func(name string) error {
+		calls[name]++
+		return original(name)
+	}).Build()
+	defer patch.UnPatch()
+	require.NoError(t, WriteFile(root+"/failed/parents/object", []byte("retry"), 0o600, root))
+	physical, err := filepath.EvalSymlinks(root)
+	require.NoError(t, err)
+	require.Contains(t, calls, physical+"/failed/parents")
+	require.Contains(t, calls, physical+"/failed")
+	require.Contains(t, calls, physical)
+	require.NotContains(t, calls, filepath.Dir(physical))
+}
+
+func TestBoundaryRejectsOutsideDirectory(t *testing.T) {
+	root := t.TempDir()
+	require.Error(t, SyncDirectories(root, filepath.Dir(root)))
 }
 
 func BenchmarkDurableBatch(b *testing.B) {
@@ -134,7 +200,7 @@ func BenchmarkDurableBatch(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				if batch {
-					if err := WriteFiles(files, 0o600); err != nil {
+					if err := WriteFiles(files, 0o600, root); err != nil {
 						b.Fatal(err)
 					}
 				} else {

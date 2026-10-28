@@ -156,6 +156,10 @@ func makePropertiesFromConfig(storageConfig *indexpb.StorageConfig) (C.LoonPrope
 		keys = append(keys, propRootPath)
 		values = append(values, v)
 	}
+	if storageConfig.GetStorageType() == "local" && storageConfig.GetRootPath() != "" {
+		keys = append(keys, "fs.local_durability_root")
+		values = append(values, storageConfig.GetRootPath())
+	}
 	if v := storageConfig.GetStorageType(); v != "" {
 		keys = append(keys, propStorageType)
 		values = append(values, v)

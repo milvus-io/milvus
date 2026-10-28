@@ -310,13 +310,23 @@ LocalChunkManager::GetSizeOfDir(const std::string& dir) {
     return total_file_size;
 }
 
+DurableLocalChunkManager::DurableLocalChunkManager(const std::string& path)
+    : LocalChunkManager(path) {
+    auto root = milvus_storage::PrepareLocalRoot(path);
+    if (!root.ok()) {
+        ThrowInfo(FileWriteFailed, root.status().ToString());
+    }
+    durability_root_ = std::move(root).ValueOrDie();
+}
+
 void
 DurableLocalChunkManager::Write(const std::string& filename,
                                 void* data,
                                 uint64_t size) {
     boost::filesystem::path path(filename);
     boost::filesystem::create_directories(path.parent_path());
-    auto opened = milvus_storage::OpenDurableLocalOutput(filename);
+    auto opened = milvus_storage::OpenDurableLocalOutput(
+        filename, false, durability_root_);
     if (!opened.ok()) {
         ThrowInfo(FileWriteFailed, opened.status().ToString());
     }
@@ -378,7 +388,8 @@ DurableLocalChunkManager::Write(const std::string& filename,
                       std::strerror(errno));
         }
         auto status = milvus_storage::SyncLocalDirectoryTree(
-            boost::filesystem::path(filename).parent_path().string());
+            boost::filesystem::path(filename).parent_path().string(),
+            durability_root_);
         if (!status.ok()) {
             ThrowInfo(FileWriteFailed, status.ToString());
         }

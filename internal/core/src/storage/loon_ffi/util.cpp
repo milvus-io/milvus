@@ -86,6 +86,11 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
             PROPERTY_FS_ROOT_PATH,
             LoonFSRootPath(storage_type, root_path).c_str());
     }
+    if (storage_type == "local" && c_storage_config.root_path != nullptr) {
+        milvus_storage::api::SetValue(*properties_map,
+                                      PROPERTY_FS_LOCAL_DURABILITY_ROOT,
+                                      c_storage_config.root_path);
+    }
     if (c_storage_config.storage_type != nullptr) {
         milvus_storage::api::SetValue(*properties_map,
                                       PROPERTY_FS_STORAGE_TYPE,

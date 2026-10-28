@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <milvus-storage/common/fiu_local.h>
 
 #include "storage/LocalChunkManager.h"
@@ -57,6 +58,29 @@ TEST_F(DurableLocalChunkManagerTest, PersistentObjectsAndPositionalWrites) {
     ASSERT_EQ(Read(path), "abXXef");
     cm.Write(path, replacement.data(), replacement.size());
     ASSERT_EQ(Read(path), "XX");
+}
+
+TEST_F(DurableLocalChunkManagerTest, SearchOnlyAncestorAndPhysicalRoot) {
+    if (::geteuid() == 0)
+        GTEST_SKIP() << "root bypasses directory permissions";
+    auto ancestor = root_ + "/search";
+    auto root = ancestor + "/data";
+    std::filesystem::create_directories(root + "/actual/child");
+    std::filesystem::create_directory_symlink(root + "/actual/child",
+                                              root + "/link");
+    ASSERT_EQ(::chmod(ancestor.c_str(), 0111), 0);
+    struct Restore {
+        std::string path;
+        ~Restore() {
+            ::chmod(path.c_str(), 0700);
+        }
+    } restore{ancestor};
+    DurableLocalChunkManager cm(root);
+    auto path = root + "/link/../index-slice";
+    std::string data = "data";
+    ASSERT_NO_THROW(cm.Write(path, data.data(), data.size()));
+    ASSERT_EQ(Read(root + "/actual/index-slice"), data);
+    ASSERT_NO_THROW(cm.Write(path, 0, data.data(), data.size()));
 }
 
 #ifdef BUILD_WITH_FIU

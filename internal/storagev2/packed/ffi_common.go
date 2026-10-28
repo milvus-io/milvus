@@ -149,6 +149,10 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 		keys = append(keys, PropertyFSRootPath)
 		values = append(values, fsRoot)
 	}
+	if storageConfig.GetStorageType() == "local" && storageConfig.GetRootPath() != "" {
+		keys = append(keys, "fs.local_durability_root")
+		values = append(values, storageConfig.GetRootPath())
+	}
 	if storageConfig.GetStorageType() != "" {
 		keys = append(keys, PropertyFSStorageType)
 		values = append(values, storageConfig.GetStorageType())

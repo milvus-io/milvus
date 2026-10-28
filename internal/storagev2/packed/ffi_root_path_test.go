@@ -42,6 +42,9 @@ func TestMakePropertiesFromStorageConfig_RootPath(t *testing.T) {
 			require.NoError(t, err)
 			defer FreeProperties(props)
 			assert.Equal(t, tc.expected, loonPropertyString(props, PropertyFSRootPath))
+			if tc.storageType == "local" {
+				assert.Equal(t, tc.rootPath, loonPropertyString(props, "fs.local_durability_root"))
+			}
 		})
 	}
 }

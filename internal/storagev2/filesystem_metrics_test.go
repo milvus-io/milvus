@@ -62,9 +62,8 @@ func TestGetFilesystemMetricsWithConfig(t *testing.T) {
 	}
 }
 
-// Every local storage config maps to the single loon filesystem rooted at "/"
-// (see LoonFSRootPath), so two local configs with different root paths share
-// one metrics entry whose display key names that root.
+// Local filesystems retain namespace root "/" but have separate durability
+// roots and therefore separate cache entries and metrics.
 func TestListFilesystemMetrics(t *testing.T) {
 	for _, dir := range []string{t.TempDir(), t.TempDir()} {
 		fsMetrics, err := GetFilesystemMetricsWithConfig(&indexpb.StorageConfig{
@@ -95,7 +94,7 @@ func TestListFilesystemMetrics(t *testing.T) {
 		assert.GreaterOrEqual(t, fsMetrics.MultiPartUploadCreated, int64(0))
 		assert.GreaterOrEqual(t, fsMetrics.MultiPartUploadFinished, int64(0))
 	}
-	require.Equal(t, 1, localEntries, "local storage shares one loon filesystem rooted at /")
+	require.GreaterOrEqual(t, localEntries, 2, "different durability roots have separate filesystem instances")
 }
 
 func TestNilConfig(t *testing.T) {

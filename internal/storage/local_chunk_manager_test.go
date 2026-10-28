@@ -55,6 +55,35 @@ func TestLocalChunkManagerDurableCopyAndSyncErrors(t *testing.T) {
 	require.Error(t, cm.MultiWrite(ctx, map[string][]byte{source: []byte("batch")}))
 }
 
+func TestLocalChunkManagerRootInitializationFailureIsSticky(t *testing.T) {
+	root := t.TempDir()
+	patch := mockey.Mock(localstorage.PrepareRoot).Return("", syscall.EIO).Build()
+	cm := NewLocalChunkManager(objectstorage.RootPath(root))
+	patch.UnPatch()
+	name := filepath.Join(root, "object")
+	require.Error(t, cm.Write(t.Context(), name, []byte("data")))
+	require.Error(t, cm.MultiWrite(t.Context(), map[string][]byte{name: []byte("data")}))
+	_, err := os.Stat(name)
+	require.True(t, os.IsNotExist(err))
+}
+
+func TestLocalChunkManagerSymlinkCopyWithSearchOnlyAncestor(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permissions")
+	}
+	ancestor := filepath.Join(t.TempDir(), "search")
+	root := ancestor + "/data"
+	require.NoError(t, os.MkdirAll(root+"/actual/child", 0o700))
+	require.NoError(t, os.Symlink(root+"/actual/child", root+"/link"))
+	require.NoError(t, os.Chmod(ancestor, 0o111))
+	defer func() { require.NoError(t, os.Chmod(ancestor, 0o700)) }()
+	cm := NewLocalChunkManager(objectstorage.RootPath(root))
+	name := root + "/link/../source"
+	require.NoError(t, cm.Write(t.Context(), name, []byte("data")))
+	require.NoError(t, cm.Copy(t.Context(), name, name))
+	require.NoError(t, cm.Copy(t.Context(), name, root+"/new/copy"))
+}
+
 var localPath string
 
 func TestLocalChunkManagerWalkWithPrefixPrunesUnrelatedDirectories(t *testing.T) {
