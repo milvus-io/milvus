@@ -19,8 +19,14 @@ Status. An absent operation is rejected; there is no legacy-field fallback.
 
 Public `ComputePhraseMatchSlop` adapts to this same RunAnalyzer RPC with inline
 parameters. It needs no Coordinator, QueryNode, collection or load state. The
-StreamingNode tokenizes each query/data pair with detailed native positions,
-then computes the smallest range covering aligned occurrences of all query
+StreamingNode tokenizes the query once per normalized analyzer name and processes
+data in batches of at most 32 rows and 64 KiB of input. An individually larger
+text is processed alone; this batching introduces no new input limit. Analyzer
+groups are processed sequentially and results retain the original row order, so
+only one group's query tokens and the current data batch are retained. Input and
+output arrays still scale with the request, and a single text's token expansion
+is not capped by the batch budget. Using detailed native positions, execution
+computes the smallest range covering aligned occurrences of all query
 terms. The position calculation matches the legacy Tantivy implementation,
 including repeated terms and stop-word position gaps. A missing term yields
 `is_match=false, slop=-1`; empty query or empty batch yields an empty result.
@@ -31,7 +37,8 @@ Both operations share native tokenization and the same analyzer resource leases.
 Inline resources live until the tokenizer and token streams are destroyed;
 returned token strings and positions are Go-owned, so slop computation retains
 no native pointer. Field operations hold the existing WAL lifetime and runner
-pin during tokenization. Each query/data pair uses the same named field analyzer.
+pin through all batches and slop calculations. Each query/data pair uses the same
+named field analyzer, even if the collection schema changes during the request.
 The old QueryCoord/QueryNode ComputePhraseMatchSlop RPCs remain implemented, but
 Proxy no longer calls them.
 
@@ -66,9 +73,9 @@ stream on exit. Field execution validates assignment ownership and holds the
 WAL's Working lifetime. FunctionRunnerManager resolves collection ID +
 WAL-vchannel key + field ID using that key's current schema. No Proxy schema
 version is sent or compared. Managed BM25/MinHash analyzers are pinned
-through BatchAnalyze; ordinary analyzer-enabled fields use a copied field schema
-and temporary analyzer. GC before pin returns a transient error; after pin it
-waits for execution. WAL shutdown waits for admitted field analyzer calls through
+through the entire operation; ordinary analyzer-enabled fields use one copied
+field schema and temporary analyzer for the operation. GC before pin returns a
+transient error; after pin it waits for execution. WAL shutdown waits for admitted field analyzer calls through
 the existing WAL lifetime. Inline analyzers own their resources, and the existing
 gRPC graceful shutdown waits for their requests to finish; the handler service
 needs no additional shutdown lifecycle. Cancellation is checked before native

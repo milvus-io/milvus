@@ -24,38 +24,48 @@ func (w *walAdaptorImpl) RunAnalyzer(ctx context.Context, req *streamingpb.Strea
 	}
 	field := req.GetFieldAnalyzer()
 	key := shard.WALFunctionRunnerKey(field.GetVchannel())
-	return analyzer.RunOperation(ctx, req, func(inputs [][]byte, withDetail, withHash bool, names []string) ([]*milvuspb.AnalyzerResult, error) {
-		texts := make([]string, len(inputs))
-		for i, text := range inputs {
-			texts[i] = string(text)
-		}
-		var tokens [][]*milvuspb.AnalyzerToken
+	return analyzer.RunOperation(ctx, req, func(use func(analyzer.BatchRun, []string) error) error {
 		ok, err := function.GetManager().RunWithAnalyzer(ctx, field.GetCollectionId(), key, field.GetFieldId(), func(a function.Analyzer) error {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			var err error
-			if len(a.GetInputFields()) == 1 {
-				tokens, err = a.BatchAnalyze(withDetail, withHash, texts)
-			} else {
-				normalized, nameErr := function.NormalizeAnalyzerNames(names, len(texts))
-				if nameErr != nil {
-					return nameErr
+			multiAnalyzer := len(a.GetInputFields()) != 1
+			var names []string
+			if multiAnalyzer {
+				var err error
+				names, err = function.NormalizeAnalyzerNames(field.GetAnalyzerNames(), len(req.GetPlaceholder()))
+				if err != nil {
+					return err
 				}
-				tokens, err = a.BatchAnalyze(withDetail, withHash, texts, normalized)
 			}
-			return err
+			return use(func(inputs [][]byte, withDetail, withHash bool, names []string) ([]*milvuspb.AnalyzerResult, error) {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+				texts := make([]string, len(inputs))
+				for i, text := range inputs {
+					texts[i] = string(text)
+				}
+				var tokens [][]*milvuspb.AnalyzerToken
+				var err error
+				if !multiAnalyzer {
+					tokens, err = a.BatchAnalyze(withDetail, withHash, texts)
+				} else {
+					tokens, err = a.BatchAnalyze(withDetail, withHash, texts, names)
+				}
+				if err != nil {
+					return nil, err
+				}
+				results := make([]*milvuspb.AnalyzerResult, len(tokens))
+				for i, token := range tokens {
+					results[i] = &milvuspb.AnalyzerResult{Tokens: token}
+				}
+				return results, nil
+			}, names)
 		})
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if !ok {
-			return nil, merr.WrapErrParameterInvalidMsg("analyzer is not enabled for field %d", field.GetFieldId())
+			return merr.WrapErrParameterInvalidMsg("analyzer is not enabled for field %d", field.GetFieldId())
 		}
-		results := make([]*milvuspb.AnalyzerResult, len(tokens))
-		for i, token := range tokens {
-			results[i] = &milvuspb.AnalyzerResult{Tokens: token}
-		}
-		return results, nil
+		return nil
 	}), nil
 }

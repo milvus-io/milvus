@@ -50,14 +50,19 @@ func TestAnalyzerPhraseRemoteResources(t *testing.T) {
 	defer fileresource.SetResourceFetcher(nil, nil)
 	req := inlineAnalyzerRequest(`{"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"remote","resource_name":"phrase_dictionary","file_name":"stop.txt"}}]}`)
 	req.Operation = &streamingpb.StreamingNodeRunAnalyzerRequest_PhraseMatch{PhraseMatch: &streamingpb.PhraseMatchOptions{QueryText: "hello the world"}}
-	req.Placeholder = [][]byte{[]byte("hello x world"), []byte("hello world"), []byte("missing")}
+	req.Placeholder = nil
+	want := make([]int64, 0, 120)
+	for i := 0; i < 40; i++ {
+		req.Placeholder = append(req.Placeholder, []byte("hello x world"), []byte("hello world"), []byte("missing"))
+		want = append(want, 0, 1, -1)
+	}
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	resp, err := NewHandlerService(nil).RunAnalyzer(ctx, req)
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(resp.GetStatus()))
 	// The stop word is removed while its position gap is preserved.
-	require.Equal(t, []int64{0, 1, -1}, resp.GetPhraseMatch().GetSlops())
+	require.Equal(t, want, resp.GetPhraseMatch().GetSlops())
 	require.Equal(t, 1, lookups)
 }
 
@@ -182,7 +187,7 @@ func TestAnalyzerGracefulStopWaitsForInline(t *testing.T) {
 		entered, release := make(chan struct{}), make(chan struct{})
 		var once sync.Once
 		defer once.Do(func() { close(release) })
-		mockey.Mock(analyzer.Run).To(func(context.Context, string, [][]byte, bool, bool, ...string) ([]*milvuspb.AnalyzerResult, error) {
+		mockey.Mock(analyzer.RunWithAnalyzer).To(func(context.Context, analyzer.Analyzer, [][]byte, bool, bool) ([]*milvuspb.AnalyzerResult, error) {
 			close(entered)
 			<-release
 			return nil, nil
@@ -374,7 +379,7 @@ func TestRunAnalyzerPreparationStatus(t *testing.T) {
 	} {
 		mockey.PatchConvey(prepareErr.Error(), t, func() {
 			mockey.Mock(fileresource.Acquire).Return(nil, prepareErr).Build()
-			native := mockey.Mock(analyzer.Run).Return(nil, nil).Build()
+			native := mockey.Mock(analyzer.NewAnalyzer).Return(nil, nil).Build()
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
 			resp, err := client.RunAnalyzer(ctx, inlineAnalyzerRequest(`{"tokenizer":"standard"}`))
@@ -466,7 +471,7 @@ func TestRunDefaultInlineAnalyzerSkipsPreparation(t *testing.T) {
 			return nil, merr.ErrServiceUnavailable
 		})
 		defer fileresource.SetResourceFetcher(nil, nil)
-		native := mockey.Mock(analyzer.Run).Return(nil, nil).Build()
+		native := mockey.Mock(analyzer.RunWithAnalyzer).Return(nil, nil).Build()
 		for _, params := range []string{"", "{}", " {} "} {
 			resp, err := NewHandlerService(nil).RunAnalyzer(t.Context(), inlineAnalyzerRequest(params))
 			require.NoError(t, err)

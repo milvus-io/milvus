@@ -26,13 +26,20 @@ func (hs *handlerServiceImpl) RunAnalyzer(ctx context.Context, req *streamingpb.
 	}
 	switch source := req.GetSource().(type) {
 	case *streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer:
-		return analyzer.RunOperation(ctx, req, func(texts [][]byte, withDetail, withHash bool, _ []string) ([]*milvuspb.AnalyzerResult, error) {
+		return analyzer.RunOperation(ctx, req, func(use func(analyzer.BatchRun, []string) error) error {
 			resources, err := fileresource.Acquire(ctx, nil, source.InlineAnalyzer.GetAnalyzerParams())
 			if err != nil {
-				return nil, err
+				return err
 			}
 			defer resources.Close()
-			return analyzer.Run(ctx, source.InlineAnalyzer.GetAnalyzerParams(), texts, withDetail, withHash, resources.ExtraInfo())
+			tokenizer, err := analyzer.NewAnalyzer(source.InlineAnalyzer.GetAnalyzerParams(), resources.ExtraInfo())
+			if err != nil {
+				return err
+			}
+			defer tokenizer.Destroy()
+			return use(func(texts [][]byte, withDetail, withHash bool, _ []string) ([]*milvuspb.AnalyzerResult, error) {
+				return analyzer.RunWithAnalyzer(ctx, tokenizer, texts, withDetail, withHash)
+			}, nil)
 		}), nil
 	case *streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer:
 		field := source.FieldAnalyzer
