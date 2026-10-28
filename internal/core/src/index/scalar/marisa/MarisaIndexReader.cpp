@@ -70,7 +70,17 @@ SetRowsForKey(const MarisaIndexStorage& data,
 }
 
 std::string_view
-ReverseKey(const marisa::Trie& trie, size_t key_id, marisa::Agent& agent) {
+ReverseKey(const marisa::Trie& trie,
+           size_t key_id,
+           marisa::Agent& agent,
+           int64_t row = -1) {
+    if (key_id >= trie.num_keys()) {
+        ThrowInfo(DataFormatBroken,
+                  "marisa key id {} exceeds key count {} for row {}",
+                  key_id,
+                  trie.num_keys(),
+                  row);
+    }
     agent.set_query(key_id);
     trie.reverse_lookup(agent);
     return {agent.key().ptr(), agent.key().length()};
@@ -320,7 +330,7 @@ MarisaIndexReader::Lookup(int64_t offset) const {
     }
     marisa::Agent agent;
     const auto value =
-        ReverseKey(*storage_->trie, static_cast<size_t>(key_id), agent);
+        ReverseKey(*storage_->trie, static_cast<size_t>(key_id), agent, offset);
     return std::string(value);
 }
 
@@ -346,8 +356,8 @@ MarisaIndexReader::Gather(
             out(i, nullptr, false);
             continue;
         }
-        const auto value =
-            ReverseKey(*storage_->trie, static_cast<size_t>(key_id), agent);
+        const auto value = ReverseKey(
+            *storage_->trie, static_cast<size_t>(key_id), agent, offset);
         out(i, &value, true);
     }
 }
