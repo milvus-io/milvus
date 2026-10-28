@@ -861,8 +861,13 @@ func inferKind(entry *BackfillSegment) string {
 }
 
 // backfillOpColumnFieldIDs returns the set of field IDs a backfill result may
-// target: user fields that are not the primary key, not a system field (row ID
-// / timestamp) and not a function output. A nil schema (a describe response
+// target: user fields that are not the primary key, not the partition key, not
+// a system field (row ID / timestamp), not a function output and not the
+// dynamic field. The partition key routes rows to partitions, so replacing it
+// would leave rows in a partition that no longer matches their key; the dynamic
+// field is the reserved $meta container for undeclared columns, not an ordinary
+// writable field. Both match the producer-side contract ("backfill targets must
+// be ordinary writable collection fields"). A nil schema (a describe response
 // without schema) yields nil, which disables the column check — production
 // describes always carry the schema.
 func backfillOpColumnFieldIDs(schema *schemapb.CollectionSchema) map[int64]struct{} {
@@ -871,7 +876,8 @@ func backfillOpColumnFieldIDs(schema *schemapb.CollectionSchema) map[int64]struc
 	}
 	fields := make(map[int64]struct{}, len(schema.GetFields()))
 	for _, field := range schema.GetFields() {
-		if field.GetIsPrimaryKey() || field.GetIsFunctionOutput() || common.IsSystemField(field.GetFieldID()) {
+		if field.GetIsPrimaryKey() || field.GetIsPartitionKey() || field.GetIsFunctionOutput() ||
+			field.GetIsDynamic() || common.IsSystemField(field.GetFieldID()) {
 			continue
 		}
 		fields[field.GetFieldID()] = struct{}{}
@@ -884,9 +890,10 @@ func backfillOpColumnFieldIDs(schema *schemapb.CollectionSchema) map[int64]struc
 // the result contract stops a producer from writing a field NAME instead: the
 // drop becomes a no-op and a phantom column group lands in the manifest while
 // the real field stays untouched, and the segment is reported committed. A
-// replace on the primary key, a system field, or a function output is the same
-// class of corruption. This is an Input error: the result violates the external
-// contract and retrying cannot fix it.
+// replace on the primary key, the partition key, a system field, a function
+// output, or the dynamic field is the same class of corruption. This is an
+// Input error: the result violates the external contract and retrying cannot
+// fix it.
 func checkBackfillOpColumns(validFields map[int64]struct{}, columns []string) error {
 	if validFields == nil {
 		return nil
@@ -898,7 +905,7 @@ func checkBackfillOpColumns(validFields map[int64]struct{}, columns []string) er
 		}
 		if _, ok := validFields[fid]; !ok {
 			return merr.WrapErrParameterInvalidMsg(
-				"backfill manifest op column %d is not a backfillable field: must be a user field that is not the primary key, a system field, or a function output", fid)
+				"backfill manifest op column %d is not a backfillable field: must be a user field that is not the primary key, the partition key, a system field, a function output, or the dynamic field", fid)
 		}
 	}
 	return nil
@@ -916,7 +923,7 @@ func checkBackfillV2GroupFields(validFields map[int64]struct{}, entry *BackfillS
 		for _, fid := range entry.ColumnGroups[i].FieldIDs {
 			if _, ok := validFields[fid]; !ok {
 				return merr.WrapErrParameterInvalidMsg(
-					"backfill V2 column group field %d is not a backfillable field: must be a user field that is not the primary key, a system field, or a function output", fid)
+					"backfill V2 column group field %d is not a backfillable field: must be a user field that is not the primary key, the partition key, a system field, a function output, or the dynamic field", fid)
 			}
 		}
 	}

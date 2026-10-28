@@ -282,6 +282,16 @@ Safety of the second (standby) execution follows from the per-cluster state:
 - Validation (`storage_version`, state, collection/partition membership,
   schema-version fence, and each delta file path lying under the target
   segment's manifest base) is evaluated against the local cluster's metadata.
+- **Backfillable-field gate:** every op column (and V2 group field ID) must be a
+  live user field that is not the primary key, the partition key, a system
+  field, a function output, or the dynamic field — the producer-side "ordinary
+  writable collection fields" contract, enforced at the receiver. The partition
+  key is a structural rejection: a replace would leave rows in a partition that
+  no longer matches their key (re-enabling it needs row re-routing, not a check
+  change). The dynamic field (`$meta`) is storage-equivalent to an ordinary JSON
+  column, so its rejection is a contract gate rather than a structural one; it
+  can be re-enabled by dropping `GetIsDynamic()` from `backfillOpColumnFieldIDs`
+  once the producer supports the dynamic-JSON-equivalent semantics.
 
 No cross-cluster coordination, no once-only marker, and no assumption about
 which cluster commits first.
@@ -358,3 +368,13 @@ which cluster commits first.
 3. Per-segment status granularity degrades to batch-level for V3 (one
    `CommitSegmentManifests` error fails its batch); acceptable under the
    existing response contract.
+4. A backfill replace retires the segment's in-memory `TextStatsLogs` /
+   `JsonKeyStats` entries atomically with the pointer, but `drop_column` leaves
+   the manifest's `text_index.<fid>` / `json_stats.<fid>` entries in place (V3
+   readers resolve stats from the manifest), and a text/JSON stats task already
+   in flight on the old column can rebase its old-data result onto the new
+   revision. Fully closing this needs a drop-stat capability in milvus-storage;
+   tracked with the segment-change-group feature ([issue #53321]) and out of
+   scope for this PR.
+
+[issue #53321]: https://github.com/milvus-io/milvus/issues/53321

@@ -6281,7 +6281,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		ctx := context.Background()
 		m, err := newMemoryMeta(t)
 		require.NoError(t, err)
-		for _, id := range []int64{701, 702, 703, 704, 705, 706} {
+		for _, id := range []int64{701, 702, 703, 704, 705, 706, 707, 708} {
 			m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: id, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 				StorageVersion: storage.StorageV3,
@@ -6289,8 +6289,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 			}})
 		}
 		// field 100 is a backfillable user field; 101 is the primary key; 102 is
-		// a function output; 0 is the row-ID system field; 999 is not in the
-		// schema; "f100" is a field NAME written where an ID belongs.
+		// a function output; 103 is the partition key; 104 is the dynamic field;
+		// 0 is the row-ID system field; 999 is not in the schema; "f100" is a
+		// field NAME written where an ID belongs.
 		cases := []struct {
 			segID   int64
 			column  string
@@ -6302,6 +6303,8 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 			{segID: 704, column: "101", wantErr: true},
 			{segID: 705, column: "102", wantErr: true},
 			{segID: 706, column: "0", wantErr: true},
+			{segID: 707, column: "103", wantErr: true},
+			{segID: 708, column: "104", wantErr: true},
 		}
 		var b strings.Builder
 		b.WriteString(`{"success": true, "collectionId": 100, "segments": {`)
@@ -6322,6 +6325,8 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 						{FieldID: 100, Name: "f100", DataType: schemapb.DataType_VarChar},
 						{FieldID: 101, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
 						{FieldID: 102, Name: "fn_out", IsFunctionOutput: true, DataType: schemapb.DataType_FloatVector},
+						{FieldID: 103, Name: "pkey", IsPartitionKey: true, DataType: schemapb.DataType_Int64},
+						{FieldID: 104, Name: "$meta", IsDynamic: true, DataType: schemapb.DataType_JSON},
 					},
 				},
 			}, nil).Maybe()
@@ -6338,8 +6343,8 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, merr.Ok(resp.GetStatus()))
 		assert.Equal(t, int32(1), resp.GetCommittedSegments())
-		assert.Equal(t, int32(5), resp.GetFailedSegments())
-		require.Len(t, resp.GetSegmentStatuses(), 6)
+		assert.Equal(t, int32(7), resp.GetFailedSegments())
+		require.Len(t, resp.GetSegmentStatuses(), 8)
 		for _, st := range resp.GetSegmentStatuses() {
 			if st.GetSegmentId() == 701 {
 				assert.True(t, st.GetOk())
@@ -6363,7 +6368,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		ctx := context.Background()
 		m, err := newMemoryMeta(t)
 		require.NoError(t, err)
-		for _, id := range []int64{201, 202} {
+		for _, id := range []int64{201, 202, 203, 204} {
 			m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: id, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 				StorageVersion: storage.StorageV2,
@@ -6382,6 +6387,16 @@ func TestServer_CommitBackfillResult(t *testing.T) {
               "version": -1, "rowCount": 100, "outputPath": "s3a://bkt/seg/202",
               "manifestPaths": ["s3a://bkt/seg/202/100/7"], "storage_version": 2,
               "column_groups": [{"field_ids":[999], "binlog_files":["s3a://bkt/seg/202/100/7"], "row_count": 100}]
+            },
+            "203": {
+              "version": -1, "rowCount": 100, "outputPath": "s3a://bkt/seg/203",
+              "manifestPaths": ["s3a://bkt/seg/203/100/7"], "storage_version": 2,
+              "column_groups": [{"field_ids":[103], "binlog_files":["s3a://bkt/seg/203/100/7"], "row_count": 100}]
+            },
+            "204": {
+              "version": -1, "rowCount": 100, "outputPath": "s3a://bkt/seg/204",
+              "manifestPaths": ["s3a://bkt/seg/204/100/7"], "storage_version": 2,
+              "column_groups": [{"field_ids":[104], "binlog_files":["s3a://bkt/seg/204/100/7"], "row_count": 100}]
             }
           }
         }`
@@ -6390,7 +6405,11 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 			Return(&milvuspb.DescribeCollectionResponse{
 				Status: merr.Success(), DbName: "default", CollectionName: "c",
 				Schema: &schemapb.CollectionSchema{
-					Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "f100", DataType: schemapb.DataType_Int64}},
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 100, Name: "f100", DataType: schemapb.DataType_Int64},
+						{FieldID: 103, Name: "pkey", IsPartitionKey: true, DataType: schemapb.DataType_Int64},
+						{FieldID: 104, Name: "$meta", IsDynamic: true, DataType: schemapb.DataType_JSON},
+					},
 				},
 			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
@@ -6400,8 +6419,8 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, int32(1), resp.GetCommittedSegments())
-		assert.Equal(t, int32(1), resp.GetFailedSegments())
-		require.Len(t, resp.GetSegmentStatuses(), 2)
+		assert.Equal(t, int32(3), resp.GetFailedSegments())
+		require.Len(t, resp.GetSegmentStatuses(), 4)
 		for _, st := range resp.GetSegmentStatuses() {
 			if st.GetSegmentId() == 201 {
 				assert.True(t, st.GetOk())
