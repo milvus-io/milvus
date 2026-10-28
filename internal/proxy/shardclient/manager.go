@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"go.uber.org/atomic"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/registry"
@@ -41,6 +42,11 @@ import (
 type ShardClientMgr interface {
 	GetShard(ctx context.Context, withCache bool, database, collectionName string, collectionID int64, channel string) ([]NodeInfo, error)
 	GetShardLeaderList(ctx context.Context, database, collectionName string, collectionID int64, withCache bool) ([]string, error)
+	// GetShardLeaders returns every channel of the collection with its
+	// leaders in one read -- one cache lookup, or with withCache=false one
+	// coordinator call that refreshes every channel at once. The map is the
+	// cache's own entry and must be treated as read-only.
+	GetShardLeaders(ctx context.Context, withCache bool, database, collectionName string, collectionID int64) (map[string][]NodeInfo, error)
 	InvalidateShardLeaderCache(collections []int64)
 	ListShardLocation() map[int64]NodeInfo
 	RemoveDatabase(database string)
@@ -126,6 +132,22 @@ func (m *shardClientMgrImpl) GetShard(ctx context.Context, withCache bool, datab
 	return cacheShardLeaders.Get(channel), nil
 }
 
+func (m *shardClientMgrImpl) GetShardLeaders(ctx context.Context, withCache bool, database, collectionName string, collectionID int64) (map[string][]NodeInfo, error) {
+	method := "GetShardLeaders"
+	// check cache first
+	cacheShardLeaders := m.getCachedShardLeaders(collectionID, method)
+	if cacheShardLeaders == nil || !withCache {
+		// refresh shard leader cache
+		newShardLeaders, err := m.updateShardLocationCache(ctx, database, collectionName, collectionID)
+		if err != nil {
+			return nil, err
+		}
+		cacheShardLeaders = newShardLeaders
+	}
+
+	return cacheShardLeaders.shardLeaders, nil
+}
+
 func (m *shardClientMgrImpl) GetShardLeaderList(ctx context.Context, database, collectionName string, collectionID int64, withCache bool) ([]string, error) {
 	method := "GetShardLeaderList"
 	// check cache first
@@ -183,7 +205,7 @@ func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, datab
 		return nil, err
 	}
 
-	shards := parseShardLeaderList2QueryNode(resp.GetShards())
+	shards := parseShardLeaderList2QueryNode(ctx, resp.GetShards())
 
 	// convert shards map to string for logging
 	if mlog.LevelEnabled(mlog.DebugLevel) {
@@ -211,14 +233,51 @@ func (m *shardClientMgrImpl) updateShardLocationCache(ctx context.Context, datab
 	return newShardLeaders, nil
 }
 
-func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) map[string][]NodeInfo {
+func parseShardLeaderList2QueryNode(ctx context.Context, shardsLeaders []*querypb.ShardLeadersList) map[string][]NodeInfo {
 	shard2QueryNodes := make(map[string][]NodeInfo)
 
 	for _, leaders := range shardsLeaders {
 		qns := make([]NodeInfo, len(leaders.GetNodeIds()))
 
+		// resource_groups is parallel to the other three arrays, but a
+		// coordinator built before that field existed fills the others and
+		// leaves this one empty -- proto3 offers no other signal, and proxy
+		// and coordinator deploy separately. Index defensively rather than
+		// assuming the lengths match, so a rolling upgrade degrades to
+		// "unknown group" instead of panicking on every cache refresh.
+		resourceGroups := leaders.GetResourceGroups()
+
+		// Two ways the array can be short, meaning opposite things, and only
+		// one of them is expected. Empty is the documented downgrade above.
+		// Non-empty but short is a broken parallel-array invariant on the
+		// coordinator side -- which is the premise the whole tag rests on: a
+		// leader dropped from one array but not the others shifts every tag
+		// after it, so the tags that ARE present are of unknown alignment
+		// and FilterByResourceGroup would route on them into the wrong group.
+		// Neutralize the whole array to the documented "unknown" -- strictly
+		// safer than a misaligned one, since an unknown entry never matches a
+		// named group -- and say so loudly, rather than let it look like an
+		// ordinary upgrade.
+		if len(resourceGroups) != 0 && len(resourceGroups) != len(leaders.GetNodeIds()) {
+			mlog.RatedWarn(ctx, rate.Limit(1.0/60.0),
+				"shard leader resource groups are not parallel to node ids, dropping the tags for this channel",
+				mlog.String("channel", leaders.GetChannelName()),
+				mlog.Int("nodeIDs", len(leaders.GetNodeIds())),
+				mlog.Int("resourceGroups", len(resourceGroups)))
+			resourceGroups = nil
+		}
+
 		for j := range qns {
-			qns[j] = NodeInfo{leaders.GetNodeIds()[j], leaders.GetNodeAddrs()[j], leaders.GetServiceable()[j]}
+			resourceGroup := ""
+			if j < len(resourceGroups) {
+				resourceGroup = resourceGroups[j]
+			}
+			qns[j] = NodeInfo{
+				NodeID:        leaders.GetNodeIds()[j],
+				Address:       leaders.GetNodeAddrs()[j],
+				Serviceable:   leaders.GetServiceable()[j],
+				ResourceGroup: resourceGroup,
+			}
 		}
 
 		shard2QueryNodes[leaders.GetChannelName()] = qns
