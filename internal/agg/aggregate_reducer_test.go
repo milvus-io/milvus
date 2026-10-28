@@ -3,6 +3,9 @@ package agg
 import (
 	"context"
 	"fmt"
+	"math"
+	"math/big"
+	"slices"
 	"strings"
 	"testing"
 
@@ -296,4 +299,208 @@ func TestGroupAggReducer_MaxGroupByGroupsJustOverLimit(t *testing.T) {
 	_, err := reducer.Reduce(context.Background(), results)
 	require.Error(t, err)
 	assert.True(t, strings.Contains(err.Error(), "too many groups"))
+}
+
+// varianceResult builds the partial result a segment reports for var_pop(x):
+// per group sum, count and m2, with m2 from the 2-pass formula so the merge is
+// checked against an independent path. A group without values has the NULL
+// state of an all-NULL segment. keys == nil builds a global result.
+func varianceResult(keys []string, groups [][]float64, intSum bool) *AggregationResult {
+	var sums, m2s []float64
+	var isums, counts []int64
+	var valid []bool
+	for _, vals := range groups {
+		var s, m2 float64
+		var is int64
+		for _, v := range vals {
+			s += v
+			is += int64(v)
+		}
+		for _, v := range vals {
+			d := v - s/float64(len(vals))
+			m2 += d * d
+		}
+		sums, isums, m2s = append(sums, s), append(isums, is), append(m2s, m2)
+		counts, valid = append(counts, int64(len(vals))), append(valid, len(vals) > 0)
+	}
+	scalar := func(dt schemapb.DataType, sf *schemapb.ScalarField, vd []bool) *schemapb.FieldData {
+		return &schemapb.FieldData{Type: dt, Field: &schemapb.FieldData_Scalars{Scalars: sf}, ValidData: vd}
+	}
+	double := func(d []float64) *schemapb.ScalarField {
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: d}}}
+	}
+	long := func(d []int64) *schemapb.ScalarField {
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: d}}}
+	}
+	sum := scalar(schemapb.DataType_Double, double(sums), valid)
+	if intSum {
+		sum = scalar(schemapb.DataType_Int64, long(isums), valid)
+	}
+	cols := []*schemapb.FieldData{sum, scalar(schemapb.DataType_Int64, long(counts), nil),
+		scalar(schemapb.DataType_Double, double(m2s), valid)}
+	if keys != nil {
+		strs := &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: keys}}}
+		cols = append([]*schemapb.FieldData{scalar(schemapb.DataType_VarChar, strs, nil)}, cols...)
+	}
+	return NewAggregationResult(cols, 1)
+}
+
+// exactVariance returns the expected result of each variance function over
+// vals, from M2 = sum(x^2) - sum(x)^2/n in exact rational arithmetic. A
+// missing key means NULL.
+func exactVariance(vals []float64) map[string]float64 {
+	s, q := new(big.Rat), new(big.Rat)
+	for _, v := range vals {
+		x := new(big.Rat).SetFloat64(v)
+		s.Add(s, x)
+		q.Add(q, new(big.Rat).Mul(x, x))
+	}
+	ret := map[string]float64{}
+	n := int64(len(vals))
+	if n == 0 {
+		return ret
+	}
+	m2 := new(big.Rat).Sub(q, new(big.Rat).Quo(new(big.Rat).Mul(s, s), big.NewRat(n, 1)))
+	pop, _ := new(big.Rat).Quo(m2, big.NewRat(n, 1)).Float64()
+	ret[kVarPop], ret[kStddevPop] = pop, math.Sqrt(pop)
+	if n > 1 {
+		samp, _ := new(big.Rat).Quo(m2, big.NewRat(n-1, 1)).Float64()
+		ret[kVarSamp], ret[kStddevSamp] = samp, math.Sqrt(samp)
+	}
+	return ret
+}
+
+// requireVariance finalizes every variance function from the reduced count
+// and m2 columns and compares row i with want.
+func requireVariance(t *testing.T, cols []*schemapb.FieldData, i int, want map[string]float64, msg string) {
+	for _, op := range []string{kVarPop, kVarSamp, kStddevPop, kStddevSamp} {
+		res, err := ComputeVarianceFromCountAndM2(op, cols[len(cols)-2], cols[len(cols)-1])
+		require.NoError(t, err)
+		w, ok := want[op]
+		require.Equal(t, ok, res.GetValidData()[i], "%s %s validity", msg, op)
+		if ok {
+			got := res.GetScalars().GetDoubleData().GetData()[i]
+			require.InDelta(t, w, got, 1e-9*math.Max(1, math.Abs(w)), "%s %s", msg, op)
+		}
+	}
+}
+
+func varianceReducer(groupBy []int64, fieldID int64, dt schemapb.DataType) *GroupAggReducer {
+	aggs, err := NewAggregate(kVarPop, fieldID, "var_pop(x)", dt)
+	if err != nil {
+		panic(err)
+	}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 1, Name: "k", DataType: schemapb.DataType_VarChar},
+		{FieldID: 2, Name: "d", DataType: schemapb.DataType_Double},
+		{FieldID: 3, Name: "i", DataType: schemapb.DataType_Int64},
+	}}
+	return NewGroupAggReducer(groupBy, AggregatesToPB(aggs), -1, schema)
+}
+
+// TestReduceMergesVarianceState splits each fixture into uneven partitions,
+// with empty partial states between them, merges them in both orders, and
+// compares the result with the exact variance of all values.
+func TestReduceMergesVarianceState(t *testing.T) {
+	noisy := make([]float64, 100)
+	for i := range noisy {
+		noisy[i] = 1e6 + math.Sin(float64(i))
+	}
+	fixtures := []struct {
+		name  string
+		vals  []float64
+		isInt bool
+	}{
+		{"example", []float64{1, 2, 3}, false},
+		{"singleton", []float64{5}, false},
+		{"constant", []float64{7, 7, 7, 7}, false},
+		{"mixed sign", []float64{-3, -1, 0, 2, 5.5}, false},
+		{"large offset", []float64{1e9 + 1, 1e9 + 2, 1e9 + 3, 1e9 + 4}, false},
+		{"noisy", noisy, false},
+		{"int64", []float64{-5, 3, 10}, true},
+		{"int64 above 2^53", []float64{1 << 53, 1<<53 + 8, 1<<53 + 16, 1<<53 + 24}, true},
+		{"int64 extremes", []float64{-(1 << 62), 0, 1 << 62}, true},
+	}
+	for _, f := range fixtures {
+		n := len(f.vals)
+		splits := [][][]float64{
+			{f.vals},
+			{{}, f.vals, {}},
+			{f.vals[:1], {}, f.vals[1:]},
+			{f.vals[:n/2], f.vals[n/2:]},
+		}
+		var each [][]float64
+		for i := range f.vals {
+			each = append(each, f.vals[i:i+1])
+		}
+		splits = append(splits, each)
+		for si, split := range splits {
+			for _, reverse := range []bool{false, true} {
+				fieldID, dt := int64(2), schemapb.DataType_Double
+				if f.isInt {
+					fieldID, dt = 3, schemapb.DataType_Int64
+				}
+				reducer := varianceReducer(nil, fieldID, dt)
+				// A QueryNode without segments reports EmptyAggResult: count 0
+				// with non-NULL zero sum and m2.
+				empty, err := reducer.EmptyAggResult()
+				require.NoError(t, err)
+				results := []*AggregationResult{empty}
+				for _, part := range split {
+					results = append(results, varianceResult(nil, [][]float64{part}, f.isInt))
+				}
+				if reverse {
+					slices.Reverse(results)
+				}
+				out, err := reducer.Reduce(context.Background(), results)
+				require.NoError(t, err)
+				requireVariance(t, out.GetFieldDatas(), 0, exactVariance(f.vals),
+					fmt.Sprintf("%s split %d reverse %v", f.name, si, reverse))
+			}
+		}
+	}
+}
+
+func TestReduceMergesGroupedVarianceState(t *testing.T) {
+	parts := []*AggregationResult{
+		varianceResult([]string{"a", "b"}, [][]float64{{1, 2}, {10}}, false),
+		varianceResult([]string{"a", "c"}, [][]float64{{3}, {}}, false),
+		varianceResult([]string{"a"}, [][]float64{{4}}, false),
+	}
+	want := map[string][]float64{"a": {1, 2, 3, 4}, "b": {10}, "c": {}}
+	for _, reverse := range []bool{false, true} {
+		results := slices.Clone(parts)
+		if reverse {
+			slices.Reverse(results)
+		}
+		out, err := varianceReducer([]int64{1}, 2, schemapb.DataType_Double).Reduce(context.Background(), results)
+		require.NoError(t, err)
+		keys := out.GetFieldDatas()[0].GetScalars().GetStringData().GetData()
+		require.ElementsMatch(t, []string{"a", "b", "c"}, keys)
+		for i, k := range keys {
+			requireVariance(t, out.GetFieldDatas(), i, exactVariance(want[k]), fmt.Sprintf("group %s reverse %v", k, reverse))
+		}
+	}
+}
+
+func TestReduceRejectsInvalidVarianceState(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 2, Name: "d", DataType: schemapb.DataType_Double},
+		{FieldID: 3, Name: "i", DataType: schemapb.DataType_Int64},
+	}}
+	part := varianceResult(nil, [][]float64{{1, 2}}, false)
+	sum, count, m2 := planpb.AggregateOp_sum, planpb.AggregateOp_count, planpb.AggregateOp_m2
+	for name, aggs := range map[string][]*planpb.Aggregate{
+		"m2 first":       {{Op: m2, FieldId: 2}, {Op: sum, FieldId: 2}, {Op: count, FieldId: 2}},
+		"count then sum": {{Op: count, FieldId: 2}, {Op: sum, FieldId: 2}, {Op: m2, FieldId: 2}},
+		"other field":    {{Op: sum, FieldId: 2}, {Op: count, FieldId: 3}, {Op: m2, FieldId: 2}},
+	} {
+		_, err := NewGroupAggReducer(nil, aggs, -1, schema).Reduce(context.Background(), []*AggregationResult{part, part})
+		require.ErrorContains(t, err, "m2 aggregate", name)
+	}
+
+	huge := varianceResult(nil, [][]float64{{1 << 62}}, true)
+	_, err := varianceReducer(nil, 3, schemapb.DataType_Int64).
+		Reduce(context.Background(), []*AggregationResult{huge, huge})
+	require.ErrorContains(t, err, "overflow")
 }

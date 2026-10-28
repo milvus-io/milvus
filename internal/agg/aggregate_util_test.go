@@ -17,10 +17,13 @@
 package agg
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
 
 func TestNewAggregationFieldMap_GroupByInvalidField(t *testing.T) {
@@ -90,4 +93,44 @@ func TestNewAggregationFieldMap_ValidGlobalAgg(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, aggMap.Count())
 	assert.Equal(t, "count(*)", aggMap.NameAt(0))
+}
+
+// TestComputeVarianceFromCountAndM2 covers [1, 2, 3, NULL] (count 3, M2 2),
+// an empty or all-NULL group (count 0), a singleton and 2 values.
+func TestComputeVarianceFromCountAndM2(t *testing.T) {
+	count := genEmptyLongFieldData(schemapb.DataType_Int64, []int64{3, 0, 1, 2})
+	m2, err := genEmptyFieldDataByType(schemapb.DataType_Double)
+	require.NoError(t, err)
+	m2.GetScalars().GetDoubleData().Data = []float64{2, 0, 0, 0.5}
+	m2.ValidData = []bool{true, false, true, true}
+
+	nan := math.NaN()
+	for op, want := range map[string][]float64{
+		"var_pop":     {2.0 / 3, nan, 0, 0.25},
+		"var_samp":    {1, nan, nan, 0.5},
+		"stddev_pop":  {math.Sqrt(2.0 / 3), nan, 0, 0.5},
+		"stddev_samp": {1, nan, nan, math.Sqrt(0.5)},
+	} {
+		res, err := ComputeVarianceFromCountAndM2(op, count, m2)
+		require.NoError(t, err)
+		require.Equal(t, schemapb.DataType_Double, res.GetType())
+		got := res.GetScalars().GetDoubleData().GetData()
+		require.Len(t, got, len(want))
+		for i, w := range want {
+			require.Equal(t, !math.IsNaN(w), res.GetValidData()[i], "%s row %d", op, i)
+			if !math.IsNaN(w) {
+				require.InDelta(t, w, got[i], 1e-15, "%s row %d", op, i)
+			}
+		}
+	}
+
+	m2.GetScalars().GetDoubleData().Data[0] = -1
+	_, err = ComputeVarianceFromCountAndM2("var_pop", count, m2)
+	require.ErrorContains(t, err, "invalid variance state")
+	m2.GetScalars().GetDoubleData().Data[0] = 2
+	m2.ValidData[0] = false
+	_, err = ComputeVarianceFromCountAndM2("var_pop", count, m2)
+	require.ErrorContains(t, err, "invalid variance state")
+	_, err = ComputeVarianceFromCountAndM2("var_pop", count, count)
+	require.ErrorContains(t, err, "invalid variance state")
 }
