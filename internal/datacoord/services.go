@@ -254,7 +254,7 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 			IntoImmutableMessageProto()
 		// Backup can explicitly replicate this response copy to align secondary
 		// positions. The broadcast persisted in the local WAL remains unreplicable.
-		delete(flushAllMsgs[pchannel].Properties, "_ur")
+		message.RemoveUnreplicable(flushAllMsgs[pchannel])
 	}
 	mlog.Info(ctx, "FlushAll successfully", mlog.FieldMessages(msgs))
 	return &datapb.FlushAllResponse{
