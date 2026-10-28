@@ -292,7 +292,7 @@ func validateMaxLengthPerRow(collectionName string, fieldName string, dataType s
 
 		maxLengthPerRow, err := strconv.ParseInt(param.Value, 10, 64)
 		if err != nil {
-			return merr.WrapErrParameterInvalidMsg("the value for %s of field %s must be an integer", common.MaxLengthKey, fieldName)
+			return merr.WrapErrParameterInvalidErr(err, "the value for %s of field %s must be an integer", common.MaxLengthKey, fieldName)
 		}
 
 		var defaultMaxLength int64
