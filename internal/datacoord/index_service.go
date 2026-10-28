@@ -220,6 +220,15 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		return merr.Status(merr.WrapErrFieldNotFound(req.GetFieldID())), nil
 	}
 
+	isPKIndexType := common.GetIndexType(req.GetIndexParams()) == common.PrimaryKeyIndexType
+	if isPKIndexType {
+		if err := s.checkPKIndexCreate(ctx, coll, req); err != nil {
+			mlog.Warn(ctx, "primary key index can not be created", mlog.FieldCollectionID(req.GetCollectionID()), mlog.Err(err))
+			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
+			return merr.Status(err), nil
+		}
+	}
+
 	if err := checkOrdinaryArraySortIndex(typeutil.GetField(schema, req.GetFieldID()), common.GetIndexType(req.GetIndexParams()), s.indexEngineVersionManager); err != nil {
 		if !req.GetIsAutoIndex() {
 			return merr.Status(err), nil
@@ -398,23 +407,39 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		return nil, err
 	}
 
-	if _, err = broadcaster.Broadcast(ctx, message.NewCreateIndexMessageBuilderV2().
+	builder := message.NewCreateIndexMessageBuilderV2().
 		WithHeader(&message.CreateIndexMessageHeader{
 			DbId:         coll.GetDbId(),
 			CollectionId: req.GetCollectionID(),
 			FieldId:      req.GetFieldID(),
 			IndexId:      indexID,
 			IndexName:    req.GetIndexName(),
+			IndexType:    common.GetIndexType(index.IndexParams),
 		}).
 		WithBody(&message.CreateIndexMessageBody{
 			FieldIndex: model.MarshalIndexModel(index),
-		}).
-		WithControlChannelBroadcast().
-		MustBuildBroadcast(),
-	); err != nil {
+		})
+	var msg message.BroadcastMutableMessage
+	if isPKIndexType {
+		// Each streaming node decides at the position of the CreateIndex on
+		// its vchannel whether the vchannel is empty, and acks the decision
+		// after its observe applied the message.
+		msg = builder.WithBroadcast(coll.GetVirtualChannelNames(), message.OptBuildBroadcastAckSyncUp()).MustBuildBroadcast()
+	} else {
+		msg = builder.WithControlChannelBroadcast().MustBuildBroadcast()
+	}
+	if _, err = broadcaster.Broadcast(ctx, msg); err != nil {
 		mlog.Error(ctx, "CreateIndex fail", mlog.Err(err))
 		metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 		return merr.Status(err), nil
+	}
+	if isPKIndexType {
+		// The broadcast returns after the callback wrote the index state.
+		if err := s.pkIndexCreateResult(req.GetCollectionID(), indexID); err != nil {
+			mlog.Warn(ctx, "primary key index creation failed", mlog.FieldCollectionID(req.GetCollectionID()), mlog.Err(err))
+			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
+			return merr.Status(err), nil
+		}
 	}
 	mlog.Info(ctx, "CreateIndex successfully",
 		mlog.String("IndexName", index.IndexName), mlog.Int64("fieldID", index.FieldID),

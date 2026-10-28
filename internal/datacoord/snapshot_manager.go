@@ -1235,6 +1235,7 @@ func (sm *snapshotManager) RestoreIndexes(
 				FieldId:      indexInfo.GetFieldID(),
 				IndexId:      indexID,
 				IndexName:    indexInfo.GetIndexName(),
+				IndexType:    common.GetIndexType(index.IndexParams),
 			}).
 			WithBody(&message.CreateIndexMessageBody{
 				FieldIndex: model.MarshalIndexModel(index),

@@ -149,8 +149,11 @@ type Server struct {
 
 	flushCh         chan UniqueID
 	notifyIndexChan chan UniqueID
-	notifyStatsChan chan UniqueID
-	factory         dependency.Factory
+	// pkIndexCompensateCh receives the collection ID of a primary key index
+	// whose CreateIndex callback wrote Failed. The index inspector drops it.
+	pkIndexCompensateCh chan UniqueID
+	notifyStatsChan     chan UniqueID
+	factory             dependency.Factory
 
 	session          sessionutil.SessionInterface
 	icSession        sessionutil.SessionInterface
@@ -252,6 +255,7 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		factory:             factory,
 		flushCh:             make(chan UniqueID, 1024),
 		notifyIndexChan:     make(chan UniqueID, 1024),
+		pkIndexCompensateCh: make(chan UniqueID, 1024),
 		notifyStatsChan:     make(chan UniqueID, 1024),
 		dataNodeCreator:     defaultDataNodeCreatorFunc,
 		importJobLock:       lock.NewKeyLock[int64](),

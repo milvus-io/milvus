@@ -501,6 +501,10 @@ func (m *indexMeta) CanCreateIndex(req *indexpb.CreateIndexRequest, isJSON bool)
 	return indexID, nil
 }
 
+// canCreateIndex checks a create request against the indexes of the
+// collection. A field has at most one index that is not deleted (a JSON field
+// one per path). This holds for the primary key index too: it blocks any other
+// index on the primary key field, and an index on that field blocks it.
 func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest, isJSON bool) (UniqueID, error) {
 	indexes, ok := m.indexes[req.CollectionID]
 	if !ok {
@@ -509,6 +513,13 @@ func (m *indexMeta) canCreateIndex(req *indexpb.CreateIndexRequest, isJSON bool)
 	for _, index := range indexes {
 		if index.IsDeleted {
 			continue
+		}
+		if (req.IndexName == index.IndexName || req.FieldID == index.FieldID) &&
+			isPKIndex(index) && index.State == commonpb.IndexState_Failed {
+			// The index inspector drops a failed primary key index without
+			// user action, so the create can succeed once the drop is done.
+			return 0, merr.WrapErrServiceNotReadyMsg("the failed %s index %s of collection %d is being dropped, retry later",
+				common.PrimaryKeyIndexType, index.IndexName, req.CollectionID)
 		}
 		if req.IndexName == index.IndexName {
 			if req.FieldID == index.FieldID && checkParams(index, req) &&

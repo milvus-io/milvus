@@ -19,14 +19,25 @@ package datacoord
 import (
 	"context"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 func (s *DDLCallbacks) createIndexV2AckCallback(ctx context.Context, result message.BroadcastResultCreateIndexMessageV2) error {
 	index := result.Message.MustBody().FieldIndex
-	if err := s.meta.indexMeta.CreateIndex(ctx, model.UnmarshalIndexModel(index)); err != nil {
+	idx := model.UnmarshalIndexModel(index)
+	if isPKIndex(idx) {
+		// The state of a primary key index is the decision of every data
+		// vchannel at the CreateIndex. The callback reads only the broadcast
+		// result, so a retry writes the same state, on a secondary too.
+		idx.State, idx.FailReason = pkIndexStateOf(result.Results)
+	}
+	if err := s.meta.indexMeta.CreateIndex(ctx, idx); err != nil {
 		return err
+	}
+	if isPKIndex(idx) && idx.State == commonpb.IndexState_Failed {
+		s.notifyPKIndexFailed(ctx, idx.CollectionID, idx.IndexID)
 	}
 	select {
 	case s.notifyIndexChan <- index.IndexInfo.CollectionID:
