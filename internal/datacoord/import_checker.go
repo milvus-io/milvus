@@ -891,18 +891,11 @@ func (c *importChecker) tryTimeoutJob(job ImportJob) {
 		// rule against the current state under importMeta's lock.
 		return
 	}
-	// Group registration occurs immediately before CommitImport broadcast. At
-	// this point the WAL may already be durable even if its ack callback has
-	// not bound CommitTS. A timer cannot distinguish those two states and must
-	// not turn the job Failed, which would reclaim accepted rows.
-	if c.meta != nil {
-		for _, source := range []model.SegmentChangeSource{model.SegmentChangeSourceImportJob, model.SegmentChangeSourceCDCReplicated} {
-			for _, g := range c.meta.producerChangeGroups(source, job.GetJobID(), "") {
-				if g.State != model.SegmentChangeStateFailed && g.State != model.SegmentChangeStateAborted {
-					return
-				}
-			}
-		}
+	// Prepared groups alone do not prove a WAL append was attempted. The
+	// durable job marker is set only after all groups pass readiness checks.
+	// UpdateJobState also guards a timeout racing the marker write.
+	if job.GetCommitBroadcastStarted() {
+		return
 	}
 	timeoutTime := tsoutil.PhysicalTime(job.GetTimeoutTs())
 	if time.Now().After(timeoutTime) {

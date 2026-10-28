@@ -850,12 +850,16 @@ After staging:
 - **A durable WAL commit cannot be aborted by a staging timeout.** The WAL may
   be durable before its ack callback assigns any group's `CommitTS`, so the
   inspector never times out or reclaims an import group waiting for that
-  assignment. The import job's generic timeout also stops once a prepared
-  group exists: registration happens immediately before broadcast, and a
-  delayed ack is indistinguishable from an append still in flight. Explicit
-  import-job failure or rollback owns pre-fence cleanup. A broadcast that
-  never obtains an ack may now need operator intervention; a future durable
-  WAL outcome probe should restore an automatic liveness bound.
+  assignment. Group registration alone does not stop the import job timeout:
+  preparation can remain STAGED or fail schema validation before any WAL
+  append. After all groups become READY, the primary durably marks the import
+  job's `commit_broadcast_started` immediately before calling Broadcast.
+  The marker and timeout/failure transitions use the import-job lock, so a
+  timeout either wins before the marker (and prevents the append) or sees the
+  marker and leaves the job intact. Explicit rollback is also rejected after
+  the marker. A broadcast that never obtains an ack may need operator
+  intervention; a future durable WAL outcome probe should restore an automatic
+  liveness bound.
   Once the fence is assigned, groups retain data and retry publication.
   Missing outputs during recovery fail startup instead of reclaiming accepted
   import rows.

@@ -1003,7 +1003,7 @@ dataCoord:
   taskRetryBackoffMaxInterval: 60 # Maximum backoff in seconds between re-dispatches of a task that keeps failing on workers.
   brokerTimeout: 5000 # 5000ms, dataCoord broker rpc timeout
   segmentChange:
-    enabled: false # Opt in new segment membership changes to staged publication. Existing groups always finish after disabling this switch. Flush keeps its synchronous version handshake; content-only updates retain their existing protocol.
+    enabled: false # Experimental opt-in for staged segment membership publication. Do not enable in production until L0 fairness is implemented: continuous Flush-to-Sort groups can starve L0 delete compaction. Existing groups finish after disabling this switch. Flush keeps its synchronous version handshake; content-only updates retain their existing protocol.
     stagingTimeout: 3600 # The maximum duration in seconds a segment change group may stay staged before the batch is aborted (STAGED -> ABORTED), bounding unconvergeable or externally-dropped batches.
     maxMembersPerGroup: 512 # The maximum number of output segments one segment change group may carry before oversized task outputs are split into sequentially published subgroups.
   autoBalance: true # Enable auto balance

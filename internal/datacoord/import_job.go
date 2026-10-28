@@ -84,7 +84,8 @@ var UnfailableJobStates = typeutil.NewSet(
 
 // isIllegalJobTransition reports whether moving job to state must be refused.
 func isIllegalJobTransition(job ImportJob, state internalpb.ImportJobState) bool {
-	return state == internalpb.ImportJobState_Failed && UnfailableJobStates.Contain(job.GetState())
+	return state == internalpb.ImportJobState_Failed &&
+		(UnfailableJobStates.Contain(job.GetState()) || job.GetCommitBroadcastStarted())
 }
 
 func UpdateJobState(state internalpb.ImportJobState) UpdateJobAction {
@@ -123,6 +124,15 @@ func UpdateJobState(state internalpb.ImportJobState) UpdateJobAction {
 func UpdateJobReason(reason string) UpdateJobAction {
 	return func(job ImportJob) {
 		job.(*importJob).Reason = reason
+	}
+}
+
+// UpdateJobCommitBroadcastStarted records the last reversible point of a
+// staged import commit. The action runs under importMeta's job lock, so a
+// concurrent timeout either wins first or observes this durable marker.
+func UpdateJobCommitBroadcastStarted(job ImportJob) {
+	if job.GetState() == internalpb.ImportJobState_Uncommitted {
+		job.(*importJob).CommitBroadcastStarted = true
 	}
 }
 
@@ -174,6 +184,7 @@ type ImportJob interface {
 	GetOptions() []*commonpb.KeyValuePair
 	GetAutoCommit() bool
 	GetCommitByCoordinator() bool
+	GetCommitBroadcastStarted() bool
 	GetTR() *timerecord.TimeRecorder
 	GetObjCleaned() bool
 	GetDataTs() uint64
