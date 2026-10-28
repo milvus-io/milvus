@@ -132,6 +132,7 @@ TextMatchIndexTranslator::TextMatchIndexTranslator(
             storage::ArtifactStorageNamespace::TextLog,
             &metadata_ctx.ctx);
         file_load_resource_request_ = resources.request;
+        shared_overhead_ = resources.shared_overhead;
         meta_.loading_overhead_config = std::move(resources.overhead);
     } else if (files && !files->empty() &&
                *file_manager_context_.use_async_load) {
@@ -183,15 +184,19 @@ TextMatchIndexTranslator::cell_id_of(milvus::cachinglayer::uid_t) const {
     return 0;
 }
 
-std::pair<milvus::cachinglayer::ResourceUsage,
-          milvus::cachinglayer::ResourceUsage>
-TextMatchIndexTranslator::estimated_byte_size_of_cell(
-    milvus::cachinglayer::cid_t) const {
+milvus::cachinglayer::LoadingResourceUsage
+TextMatchIndexTranslator::estimated_loading_usage(
+    const std::vector<milvus::cachinglayer::cid_t>& cids) const {
+    if (cids.empty()) {
+        return {};
+    }
     if (file_load_resource_request_) {
         const auto& request = *file_load_resource_request_;
         return {{request.final_memory_cost, request.final_disk_cost},
-                {request.max_memory_cost - request.final_memory_cost,
-                 request.max_disk_cost - request.final_disk_cost}};
+                {request.max_memory_cost - request.final_memory_cost -
+                     shared_overhead_.memory_bytes,
+                 request.max_disk_cost - request.final_disk_cost},
+                shared_overhead_};
     }
     // ignore the cid checking, because there is only one cell
     // Sync legacy files are decoded directly into one staging directory.

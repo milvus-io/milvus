@@ -65,6 +65,8 @@ ScalarIndexLoadResource(DataType field_type,
 struct ScalarIndexLoadResources {
     LoadResourceRequest request;
     std::optional<cachinglayer::LoadingOverheadConfig> overhead;
+    // Admitted scratch included in request.max_*_cost, excluding resident bytes.
+    cachinglayer::ResourceUsage shared_overhead;
 };
 
 // Borrow an opened legacy source so inspection can be reused by its first load.

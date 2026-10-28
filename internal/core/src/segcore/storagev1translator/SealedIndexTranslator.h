@@ -46,9 +46,9 @@ class SealedIndexTranslator : public IndexReaderTranslator {
     num_cells() const override;
     milvus::cachinglayer::cid_t
     cell_id_of(milvus::cachinglayer::uid_t uid) const override;
-    std::pair<milvus::cachinglayer::ResourceUsage,
-              milvus::cachinglayer::ResourceUsage>
-    estimated_byte_size_of_cell(milvus::cachinglayer::cid_t cid) const override;
+    milvus::cachinglayer::LoadingResourceUsage
+    estimated_loading_usage(
+        const std::vector<milvus::cachinglayer::cid_t>& cids) const override;
     const std::string&
     key() const override;
     std::vector<std::pair<milvus::cachinglayer::cid_t,
@@ -98,6 +98,7 @@ class SealedIndexTranslator : public IndexReaderTranslator {
     std::string index_key_;
     IndexLoadInfo index_load_info_;
     LoadResourceRequest load_resource_request_{};
+    cachinglayer::ResourceUsage shared_overhead_;
     // Consumed by the first get_cells attempt; never retained across eviction.
     std::shared_ptr<storage::V1RemoteSource> prepared_legacy_source_;
     bool lazy_load_{false};
