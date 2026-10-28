@@ -3,6 +3,8 @@ package broadcast
 import (
 	"context"
 
+	"google.golang.org/protobuf/types/known/anypb"
+
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -52,7 +54,7 @@ func (c *GRPCBroadcastServiceImpl) Broadcast(ctx context.Context, msg message.Br
 	}, nil
 }
 
-func (c *GRPCBroadcastServiceImpl) Ack(ctx context.Context, msg message.ImmutableMessage) error {
+func (c *GRPCBroadcastServiceImpl) Ack(ctx context.Context, msg message.ImmutableMessage, extra *anypb.Any) error {
 	client, err := c.service.GetService(ctx)
 	if err != nil {
 		return err
@@ -61,6 +63,7 @@ func (c *GRPCBroadcastServiceImpl) Ack(ctx context.Context, msg message.Immutabl
 		BroadcastId: msg.BroadcastHeader().BroadcastID,
 		Vchannel:    msg.VChannel(),
 		Message:     msg.IntoImmutableMessageProto(),
+		Extra:       extra,
 	})
 	return err
 }

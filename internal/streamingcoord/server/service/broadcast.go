@@ -157,7 +157,7 @@ func (s *broadcastServceImpl) Ack(ctx context.Context, req *streamingpb.Broadcas
 		message.MustUnmarshalMessageID(req.Message.Id),
 		req.Message.Payload,
 		req.Message.Properties,
-	)); err != nil {
+	), req.GetExtra()); err != nil {
 		return nil, err
 	}
 	return &streamingpb.BroadcastAckResponse{}, nil

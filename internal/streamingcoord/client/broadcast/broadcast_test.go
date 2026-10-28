@@ -7,6 +7,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/mocks/util/streamingutil/service/mock_lazygrpc"
@@ -30,7 +33,7 @@ func TestBroadcast(t *testing.T) {
 	assert.NoError(t, err)
 	msg1 := msg.WithBroadcastID(1).SplitIntoMutableMessage()
 	immutableMsg1 := msg1[0].IntoImmutableMessage(rmq.NewRmqID(1))
-	err = bs.Ack(context.Background(), immutableMsg1)
+	err = bs.Ack(context.Background(), immutableMsg1, nil)
 	assert.NoError(t, err)
 }
 
@@ -48,4 +51,27 @@ func newMockServer(t *testing.T, sendDelay time.Duration) lazygrpc.Service[strea
 	}, nil).Maybe()
 	c.EXPECT().Ack(mock.Anything, mock.Anything).Return(&streamingpb.BroadcastAckResponse{}, nil).Maybe()
 	return s
+}
+
+func TestBroadcastAckSendsExtra(t *testing.T) {
+	s := mock_lazygrpc.NewMockService[streamingpb.StreamingCoordBroadcastServiceClient](t)
+	c := mock_streamingpb.NewMockStreamingCoordBroadcastServiceClient(t)
+	s.EXPECT().GetService(mock.Anything).Return(c, nil)
+	extra, err := anypb.New(&streamingpb.BroadcastAckResponse{})
+	assert.NoError(t, err)
+	c.EXPECT().Ack(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *streamingpb.BroadcastAckRequest, _ ...grpc.CallOption) (*streamingpb.BroadcastAckResponse, error) {
+			assert.True(t, proto.Equal(extra, req.GetExtra()))
+			return &streamingpb.BroadcastAckResponse{}, nil
+		})
+	bs := NewGRPCBroadcastService(s)
+	msg := message.NewDropCollectionMessageBuilderV1().
+		WithHeader(&message.DropCollectionMessageHeader{}).
+		WithBody(&msgpb.DropCollectionRequest{}).
+		WithBroadcast([]string{"v1"}).
+		MustBuildBroadcast().
+		WithBroadcastID(1).
+		SplitIntoMutableMessage()[0].
+		IntoImmutableMessage(rmq.NewRmqID(1))
+	assert.NoError(t, bs.Ack(context.Background(), msg, extra))
 }

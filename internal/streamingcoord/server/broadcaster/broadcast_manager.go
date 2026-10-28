@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
@@ -323,11 +324,11 @@ func (bm *broadcastTaskManager) LegacyAck(ctx context.Context, broadcastID uint6
 		task.Logger().Warn(ctx, "vchannel is already acked, ignore the ack request", mlog.String("vchannel", vchannel))
 		return nil
 	}
-	return bm.Ack(ctx, msg)
+	return bm.Ack(ctx, msg, nil)
 }
 
 // Ack acknowledges the message at the specified vchannel.
-func (bm *broadcastTaskManager) Ack(ctx context.Context, msg message.ImmutableMessage) error {
+func (bm *broadcastTaskManager) Ack(ctx context.Context, msg message.ImmutableMessage, extra *anypb.Any) error {
 	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return status.NewOnShutdownError("broadcaster is closing")
 	}
@@ -343,7 +344,7 @@ func (bm *broadcastTaskManager) Ack(ctx context.Context, msg message.ImmutableMe
 			mlog.String("vchannel", msg.VChannel()))
 		return nil
 	}
-	return t.Ack(ctx, msg)
+	return t.Ack(ctx, msg, extra)
 }
 
 // DropTombstone drops the tombstone task from the manager.

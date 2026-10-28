@@ -143,7 +143,7 @@ func (n *noopBroadcast) Append(ctx context.Context, msg message.BroadcastMutable
 	}, nil
 }
 
-func (n *noopBroadcast) Ack(ctx context.Context, msg message.ImmutableMessage) error {
+func (n *noopBroadcast) Ack(ctx context.Context, msg message.ImmutableMessage, extra *anypb.Any) error {
 	return nil
 }
 

@@ -329,7 +329,7 @@ func TestTombstoneGCReplayAndRecovery(t *testing.T) {
 	}()
 	acks := gcTestMessages(10, []string{"p0_vcchan", "p1_1v0"}, true)
 	for _, ack := range acks {
-		require.NoError(t, bm.Ack(t.Context(), ack))
+		require.NoError(t, bm.Ack(t.Context(), ack, nil))
 	}
 	require.Eventually(t, func() bool {
 		tasks, err := coord.ListBroadcastTask(t.Context())
@@ -344,9 +344,9 @@ func TestTombstoneGCReplayAndRecovery(t *testing.T) {
 	s.triggerGCTombstone()
 	require.Len(t, s.tombstones, 1)
 	original, _ := bm.getBroadcastTaskByID(10)
-	require.NoError(t, bm.Ack(t.Context(), acks[0]), "partial replay")
+	require.NoError(t, bm.Ack(t.Context(), acks[0], nil), "partial replay")
 	for _, ack := range acks {
-		require.NoError(t, bm.Ack(t.Context(), ack))
+		require.NoError(t, bm.Ack(t.Context(), ack, nil))
 	}
 	got, _ := bm.getBroadcastTaskByID(10)
 	require.Same(t, original, got)
@@ -362,7 +362,7 @@ func TestTombstoneGCReplayAndRecovery(t *testing.T) {
 		saveGCCheckpoint(t, node, channel, 50, 2)
 	}
 	for _, ack := range acks {
-		require.NoError(t, bm.Ack(t.Context(), ack))
+		require.NoError(t, bm.Ack(t.Context(), ack, nil))
 	}
 	s = gcTestScheduler(bm, 10)
 	s.triggerGCTombstone()
@@ -382,7 +382,7 @@ func TestTombstoneGCReplayAndRecovery(t *testing.T) {
 	require.Empty(t, persisted)
 	fresh := createNewBroadcastMsg([]string{"p0_vcchan", "p1_1v0"}).WithBroadcastID(11)
 	for _, channel := range fresh.BroadcastHeader().VChannels {
-		require.NoError(t, bm.Ack(t.Context(), schemaTestAck(fresh, channel, 2000)))
+		require.NoError(t, bm.Ack(t.Context(), schemaTestAck(fresh, channel, 2000), nil))
 	}
 	require.Eventually(t, func() bool { return callbacks.Load() == 2 }, 5*time.Second, 10*time.Millisecond, "a new replicated task is still reconstructed")
 	bm.Close()

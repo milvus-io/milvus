@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
@@ -178,6 +179,7 @@ func (b *broadcastTask) broadcastResult() (message.BroadcastMutableMessage, map[
 			MessageID:              message.MustUnmarshalMessageID(cp.MessageId),
 			LastConfirmedMessageID: message.MustUnmarshalMessageID(cp.LastConfirmedMessageId),
 			TimeTick:               cp.TimeTick,
+			Extra:                  cp.GetExtra(),
 		}
 	}
 	return b.msg, result, true
@@ -406,7 +408,7 @@ func (b *broadcastTask) getImmutableMessageFromVChannel(vchannel string, result 
 
 // Ack acknowledges the message at the specified vchannel.
 // return true if all the vchannels are acked at first time, false if not.
-func (b *broadcastTask) Ack(ctx context.Context, msgs message.ImmutableMessage) (err error) {
+func (b *broadcastTask) Ack(ctx context.Context, msg message.ImmutableMessage, extra *anypb.Any) (err error) {
 	callback, err := registry.ResolveMessageAckOnceCallback(ctx, b.messageTypeWithVersion)
 	if err != nil {
 		return err
@@ -415,18 +417,22 @@ func (b *broadcastTask) Ack(ctx context.Context, msgs message.ImmutableMessage) 
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	return b.ack(ctx, callback, msgs)
+	return b.ack(ctx, callback, ackedMessage{msg: msg, extra: extra})
 }
 
 // ack acknowledges the message at the specified vchannel.
 // Caller must resolve callback before acquiring b.mu and hold b.mu while calling.
-func (b *broadcastTask) ack(ctx context.Context, callback registry.ResolvedMessageAckOnceCallback, msgs ...message.ImmutableMessage) (err error) {
-	isControlChannelAcked := b.copyAndSetAckedCheckpoints(msgs...)
+func (b *broadcastTask) ack(ctx context.Context, callback registry.ResolvedMessageAckOnceCallback, acks ...ackedMessage) (err error) {
+	isControlChannelAcked := b.copyAndSetAckedCheckpoints(acks...)
 	if !b.dirty {
 		return nil
 	}
 	// because the incoming ack operation is always with one vchannel at a time or with all the vchannels at once,
 	// so we don't need to filter the vchannel that has been acked.
+	msgs := make([]message.ImmutableMessage, 0, len(acks))
+	for _, ack := range acks {
+		msgs = append(msgs, ack.msg)
+	}
 	if err := registry.CallResolvedMessageAckOnceCallbacks(ctx, callback, msgs...); err != nil {
 		return err
 	}
@@ -495,10 +501,18 @@ func (b *broadcastTask) BlockUntilAllAck(ctx context.Context) error {
 	}
 }
 
+// ackedMessage is one ack: the message on its vchannel and the result that
+// the consumer attached, nil when it attached none.
+type ackedMessage struct {
+	msg   message.ImmutableMessage
+	extra *anypb.Any
+}
+
 // copyAndSetAckedCheckpoints copies the task and set the acked checkpoints.
-func (b *broadcastTask) copyAndSetAckedCheckpoints(msgs ...message.ImmutableMessage) (isControlChannelAcked bool) {
+func (b *broadcastTask) copyAndSetAckedCheckpoints(acks ...ackedMessage) (isControlChannelAcked bool) {
 	task := proto.Clone(b.task).(*streamingpb.BroadcastTask)
-	for _, msg := range msgs {
+	for _, ack := range acks {
+		msg := ack.msg
 		vchannel := msg.VChannel()
 		idx := findIdxOfVChannel(vchannel, b.header().VChannels)
 		if idx < 0 {
@@ -521,6 +535,7 @@ func (b *broadcastTask) copyAndSetAckedCheckpoints(msgs ...message.ImmutableMess
 			MessageId:              msg.MessageID().IntoProto(),
 			LastConfirmedMessageId: msg.LastConfirmedMessageID().IntoProto(),
 			TimeTick:               msg.TimeTick(),
+			Extra:                  ack.extra,
 		}
 		if funcutil.IsControlChannel(vchannel) {
 			isControlChannelAcked = true
@@ -571,11 +586,11 @@ func (b *broadcastTask) FastAck(ctx context.Context, broadcastResult map[string]
 	// because we need to wait for the streamingnode to ack the message,
 	// however, if the message is already write into wal, the message is determined,
 	// so we can make a fast ack operation here to speed up the ack operation.
-	msgs := make([]message.ImmutableMessage, 0, len(broadcastResult))
+	acks := make([]ackedMessage, 0, len(broadcastResult))
 	for vchannel := range broadcastResult {
-		msgs = append(msgs, b.getImmutableMessageFromVChannel(vchannel, broadcastResult[vchannel]))
+		acks = append(acks, ackedMessage{msg: b.getImmutableMessageFromVChannel(vchannel, broadcastResult[vchannel])})
 	}
-	return b.ack(ctx, callback, msgs...)
+	return b.ack(ctx, callback, acks...)
 }
 
 // canDropTombstone requires every local broadcast copy to be strictly behind

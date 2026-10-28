@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -49,7 +51,7 @@ func TestBroadcastService(t *testing.T) {
 	fb.Set(mb)
 	mba.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(&streamtypes.BroadcastAppendResult{}, nil)
 	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything).Return(mba, nil)
-	mb.EXPECT().Ack(mock.Anything, mock.Anything).Return(nil)
+	mb.EXPECT().Ack(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	mb.EXPECT().LegacyAck(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	mb.EXPECT().Close().Return().Maybe()
 	broadcast.Register(mb)
@@ -81,8 +83,8 @@ func TestBroadcastService(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	reached := make(chan struct{})
 	done := make(chan struct{})
-	mb.EXPECT().Ack(mock.Anything, mock.Anything).Unset()
-	mb.EXPECT().Ack(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, msg message.ImmutableMessage) error {
+	mb.EXPECT().Ack(mock.Anything, mock.Anything, mock.Anything).Unset()
+	mb.EXPECT().Ack(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, msg message.ImmutableMessage, extra *anypb.Any) error {
 		close(reached)
 		select {
 		case <-ctx.Done():
@@ -228,4 +230,28 @@ func TestBroadcastService_ForwardImportToDataCoord_Error(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, resp)
 	assert.Contains(t, err.Error(), "test error")
+}
+
+func TestBroadcastServiceAckPassesExtra(t *testing.T) {
+	broadcast.ResetBroadcaster()
+	mb := mock_broadcaster.NewMockBroadcaster(t)
+	extra, err := anypb.New(&streamingpb.BroadcastAckResponse{})
+	assert.NoError(t, err)
+	mb.EXPECT().Ack(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, msg message.ImmutableMessage, got *anypb.Any) error {
+			assert.True(t, proto.Equal(extra, got))
+			return nil
+		})
+	broadcast.Register(mb)
+
+	service := NewBroadcastService()
+	_, err = service.Ack(context.Background(), &streamingpb.BroadcastAckRequest{
+		Message: &commonpb.ImmutableMessage{
+			Id:         walimplstest.NewTestMessageID(1).IntoProto(),
+			Payload:    []byte("payload"),
+			Properties: map[string]string{"key": "value"},
+		},
+		Extra: extra,
+	})
+	assert.NoError(t, err)
 }

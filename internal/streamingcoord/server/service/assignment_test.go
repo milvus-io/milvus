@@ -64,7 +64,7 @@ func TestAssignmentService(t *testing.T) {
 	mba.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(&types.BroadcastAppendResult{}, nil).Maybe()
 	mba.EXPECT().Close().Return().Maybe()
 	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything).Return(mba, nil).Maybe()
-	mb.EXPECT().Ack(mock.Anything, mock.Anything).Return(nil).Maybe()
+	mb.EXPECT().Ack(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	mb.EXPECT().LegacyAck(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	mb.EXPECT().Close().Return().Maybe()
 	broadcast.Register(mb)

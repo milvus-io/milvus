@@ -45,7 +45,7 @@ func newBroadcastAckModule(runtime moduleapi.Runtime) *broadcastAckModule {
 		retryDelay: broadcastAckRetryInterval,
 		wakeup:     make(chan struct{}, 1),
 		ack: func(ctx context.Context, msg message.ImmutableMessage) error {
-			return streaming.WAL().Broadcast().Ack(ctx, msg)
+			return streaming.WAL().Broadcast().Ack(ctx, msg, nil)
 		},
 	}
 	m.workerWG.Add(1)

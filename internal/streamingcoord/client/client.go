@@ -7,6 +7,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/json"
@@ -61,7 +62,8 @@ type BroadcastService interface {
 	Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error)
 
 	// Ack sends a broadcast ack to the streaming service.
-	Ack(ctx context.Context, msg message.ImmutableMessage) error
+	// extra is the result that the consumer attaches to the ack; nil if none.
+	Ack(ctx context.Context, msg message.ImmutableMessage, extra *anypb.Any) error
 }
 
 // Client is the interface of log service client.

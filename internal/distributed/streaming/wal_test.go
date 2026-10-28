@@ -56,7 +56,7 @@ func createMockWAL(t *testing.T) (
 				AppendResults: result,
 			}, nil
 		}).Maybe()
-	broadcastServce.EXPECT().Ack(mock.Anything, mock.Anything).Return(nil).Maybe()
+	broadcastServce.EXPECT().Ack(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	coordClient.EXPECT().Broadcast().Return(broadcastServce).Maybe()
 	handler := mock_handler.NewMockHandlerClient(t)
 	c := mock_consumer.NewMockConsumer(t)

@@ -116,6 +116,7 @@ message AckedCheckpoint {
     common.MessageID message_id = 1;  // the message id that has been acked.
     common.MessageID last_confirmed_message_id = 2; // the last confirmed message id that has been acked.
     uint64 time_tick = 3; // the time tick of the message that has been acked.
+    google.protobuf.Any extra = 4; // the result that the consumer attached to the ack, unset if none.
 }
 
 //
@@ -156,6 +157,7 @@ message BroadcastAckRequest {
     uint64 broadcast_id = 1 [deprecated = true]; // broadcast id.
     string vchannel = 2 [deprecated = true];     // the vchannel that acked the message.
     common.ImmutableMessage message = 3;       // the message that to be acked.
+    google.protobuf.Any extra = 4;             // the result that the consumer attached to the ack, unset if none.
 }
 
 message BroadcastAckResponse {

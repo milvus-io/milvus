@@ -169,7 +169,7 @@ func TestBroadcaster(t *testing.T) {
 	assert.NoError(t, err)
 	_, err = broadcastAPI.Broadcast(context.Background(), createNewBroadcastMsg([]string{"v1"}))
 	assert.Error(t, err)
-	err = bc.Ack(context.Background(), mock_message.NewMockImmutableMessage(t))
+	err = bc.Ack(context.Background(), mock_message.NewMockImmutableMessage(t), nil)
 	assert.Error(t, err)
 }
 
@@ -186,7 +186,7 @@ func ack(t *testing.T, broadcaster Broadcaster, broadcastID uint64, vchannel str
 			WithLastConfirmed(walimplstest.NewTestMessageID(1)).
 			IntoImmutableMessage(walimplstest.NewTestMessageID(1))
 
-		if err := broadcaster.Ack(context.Background(), msg); err == nil {
+		if err := broadcaster.Ack(context.Background(), msg, nil); err == nil {
 			break
 		}
 	}

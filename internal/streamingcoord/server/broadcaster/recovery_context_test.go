@@ -52,7 +52,7 @@ func TestRecoveryContextDoesNotOwnBroadcasterLifetime(t *testing.T) {
 		called = true
 		return ctx.Err()
 	})
-	require.NoError(t, bc.Ack(context.Background(), newTruncateCollectionAckMessage(109, "v1")))
+	require.NoError(t, bc.Ack(context.Background(), newTruncateCollectionAckMessage(109, "v1"), nil))
 	require.True(t, called, "canceling recovery must not prevent subsequent ACKs")
 }
 

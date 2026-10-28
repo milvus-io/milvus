@@ -52,8 +52,8 @@ func TestAckWaitsForCallbackWithoutHoldingTaskOrManagerLock(t *testing.T) {
 
 	ackMsg := newTruncateCollectionAckMessage(100, "v1")
 	ackDone := make(chan error, 2)
-	go func() { ackDone <- bm.Ack(context.Background(), ackMsg) }()
-	go func() { ackDone <- bm.Ack(context.Background(), ackMsg) }()
+	go func() { ackDone <- bm.Ack(context.Background(), ackMsg, nil) }()
+	go func() { ackDone <- bm.Ack(context.Background(), ackMsg, nil) }()
 	requireNoResult(t, ackDone, 50*time.Millisecond, "ack should wait for callback registration")
 
 	stateDone := make(chan streamingpb.BroadcastTaskState, 1)
@@ -279,9 +279,9 @@ func TestAckOnceCallbackFailureRemainsRetryable(t *testing.T) {
 	task.SetLogger(mlog.With())
 	ackMsg := newTruncateCollectionAckMessage(106, "v1")
 
-	err := task.Ack(context.Background(), ackMsg)
+	err := task.Ack(context.Background(), ackMsg, nil)
 	require.EqualError(t, err, "injected callback failure")
-	require.NoError(t, task.Ack(context.Background(), ackMsg))
+	require.NoError(t, task.Ack(context.Background(), ackMsg, nil))
 	require.Equal(t, int32(2), callbackCalls.Load())
 }
 
@@ -312,7 +312,7 @@ func TestCloseCancelsAckWaitingForCallbackRegistration(t *testing.T) {
 
 	ackDone := make(chan error, 1)
 	go func() {
-		ackDone <- bm.Ack(context.WithoutCancel(context.Background()), newTruncateCollectionAckMessage(107, "v1"))
+		ackDone <- bm.Ack(context.WithoutCancel(context.Background()), newTruncateCollectionAckMessage(107, "v1"), nil)
 	}()
 	requireNoResult(t, ackDone, 50*time.Millisecond, "ack should be waiting before Close")
 

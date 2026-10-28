@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -250,5 +251,6 @@ type Broadcast interface {
 	// Ack acknowledges a broadcast message at the specified vchannel.
 	// It must be called after the message is comsumed by the unique-consumer.
 	// It will only return error when the ctx is canceled.
-	Ack(ctx context.Context, msg message.ImmutableMessage) error
+	// extra is the result that the consumer attaches to the ack; nil if none.
+	Ack(ctx context.Context, msg message.ImmutableMessage, extra *anypb.Any) error
 }

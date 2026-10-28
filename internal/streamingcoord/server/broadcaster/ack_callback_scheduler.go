@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -283,14 +284,7 @@ func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) (
 	logger.Debug(context.TODO(), "all vchannels are acked")
 
 	msg, result := bt.BroadcastResult()
-	makeMap := make(map[string]*message.AppendResult, len(result))
-	for vchannel, result := range result {
-		makeMap[vchannel] = &message.AppendResult{
-			MessageID:              result.MessageID,
-			LastConfirmedMessageID: result.LastConfirmedMessageID,
-			TimeTick:               result.TimeTick,
-		}
-	}
+	makeMap := messageAppendResults(result)
 	// call the ack callback until done, under the persisted trace context.
 	bt.ObserveAckCallbackBegin()
 	if err := runAckCallbackWithTrace(s.notifier.Context(), msg, func(spanCtx context.Context) error {
@@ -371,4 +365,19 @@ func sortByControlChannelTimeTick(tasks []*broadcastTask) {
 		}
 		return tasks[i].Header().BroadcastID < tasks[j].Header().BroadcastID
 	})
+}
+
+// messageAppendResults converts the acked results of a broadcast task into
+// the results that the ack callback receives.
+func messageAppendResults(results map[string]*types.AppendResult) map[string]*message.AppendResult {
+	out := make(map[string]*message.AppendResult, len(results))
+	for vchannel, result := range results {
+		out[vchannel] = &message.AppendResult{
+			MessageID:              result.MessageID,
+			LastConfirmedMessageID: result.LastConfirmedMessageID,
+			TimeTick:               result.TimeTick,
+			Extra:                  result.Extra,
+		}
+	}
+	return out
 }

@@ -2,6 +2,7 @@ package message
 
 import (
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -78,4 +79,7 @@ type AppendResult struct {
 	MessageID              MessageID
 	LastConfirmedMessageID MessageID
 	TimeTick               uint64
+	// Extra is the result that the consumer of the vchannel attached to its
+	// broadcast ack, nil if none.
+	Extra *anypb.Any
 }

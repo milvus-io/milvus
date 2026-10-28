@@ -146,7 +146,7 @@ func (w *walController) ackMessage(broadcastID uint64, vchannel string) {
 		IntoImmutableMessage(walimplstest.NewTestMessageID(w.idCounter.Inc()))
 
 	for {
-		if err := bc.Ack(context.Background(), msg); err == nil {
+		if err := bc.Ack(context.Background(), msg, nil); err == nil {
 			break
 		}
 		time.Sleep(5 * time.Millisecond)

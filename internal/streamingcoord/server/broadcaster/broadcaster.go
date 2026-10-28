@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -41,7 +42,9 @@ type Broadcaster interface {
 	LegacyAck(ctx context.Context, broadcastID uint64, vchannel string) error
 
 	// Ack acknowledges the message at the specified vchannel.
-	Ack(ctx context.Context, msg message.ImmutableMessage) error
+	// extra is the result that the consumer attached to the ack; nil if none.
+	// The first ack of a vchannel decides its extra.
+	Ack(ctx context.Context, msg message.ImmutableMessage, extra *anypb.Any) error
 
 	// GetPendingSchemaFileResources returns collection ID -> file resource IDs
 	// for all pending schema broadcast tasks that haven't completed their ack
