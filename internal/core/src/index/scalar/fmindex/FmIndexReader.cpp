@@ -186,11 +186,9 @@ FmIndexStorage::Create(std::shared_ptr<const FmIndexMappedFile> mapped_file,
         AssertInfo(false,
                    "FM-index state null bitmap size disagrees with row count");
     }
-    if (!nullable && !null_bitmap.none()) {
-        if (persisted) {
-            ThrowInfo(DataFormatBroken,
-                      "non-nullable FM-index contains null rows");
-        }
+    // The loader rejects a non-nullable bitmap sidecar and creates an all-zero
+    // bitmap itself. Only builder state needs this content invariant checked.
+    if (!persisted && !nullable && !null_bitmap.none()) {
         AssertInfo(false, "non-nullable FM-index state contains null rows");
     }
     AssertInfo(IsStringDataType(value_type),

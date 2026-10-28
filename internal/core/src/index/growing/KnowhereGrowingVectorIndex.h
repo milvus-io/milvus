@@ -117,6 +117,9 @@ class KnowhereGrowingVectorIndex final
     PublishAccepted();
 
     void
+    PublishPoison(std::exception_ptr error);
+
+    void
     RethrowIfPoisoned() const;
 
     const DataType value_type_;
@@ -139,6 +142,9 @@ class KnowhereGrowingVectorIndex final
     int64_t accepted_physical_count_{0};
     bool built_{false};
     bool publication_pending_{false};
+    // Queries only copy this terminal failure; they never wait for Build/Add
+    // or replay pending publication under writer_mutex_.
+    mutable std::mutex poison_mutex_;
     std::exception_ptr poison_;
 };
 

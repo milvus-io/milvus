@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include "common/FastMem.h"
+#include "common/Consts.h"
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -350,11 +351,10 @@ enum class VisitOutcome {
 
 using FieldDataVisitor = std::function<VisitControl(FieldDataPtr)>;
 
-// Visits storage-v2 data on the calling thread in numeric binlog-ID order,
-// preserving row-group order within each file. Stop takes effect after the
-// current row group: no later row group is read, but a row group is not a fixed
-// byte bound and may itself be large. Producer work for the current row group
-// is complete before the visitor is called.
+// Visits on the caller thread in numeric binlog and row-group order. Parallel
+// reads use serial windows charged by all columns' stored Arrow byte estimate;
+// oversized or unknown-size groups run alone. Stop drains and joins the current
+// window before returning. Decoder and visitor memory add to the estimate.
 VisitOutcome
 VisitFieldDataFromStorageV2(
     const std::vector<std::vector<std::string>>& remote_files,
@@ -364,6 +364,24 @@ VisitFieldDataFromStorageV2(
     int64_t dim,
     milvus_storage::ArrowFileSystemPtr fs,
     const FieldDataVisitor& visitor);
+
+namespace detail {
+
+// Internal window budget override for tests; public readers use the default.
+VisitOutcome
+VisitFieldDataFromStorageV2Paged(
+    const std::vector<std::vector<std::string>>& remote_files,
+    int64_t field_id,
+    DataType data_type,
+    DataType element_type,
+    int64_t dim,
+    milvus_storage::ArrowFileSystemPtr fs,
+    const FieldDataVisitor& visitor,
+    size_t max_rows,
+    size_t offset,
+    size_t window_bytes = DEFAULT_FIELD_MAX_MEMORY_LIMIT);
+
+}  // namespace detail
 
 std::vector<FieldDataPtr>
 GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,

@@ -3789,8 +3789,7 @@ class SegmentExpr : public Expr {
         // predicates for both int64 and double.
         return field_type_ == DataType::JSON &&
                selected_index_entry_.has_value() &&
-               selected_index_entry_->caps.json_paths &&
-               selected_index_entry_->value_type == DataType::JSON;
+               index_path_detail::IsFlatJsonIndex(*selected_index_entry_);
     }
 
     static bool
