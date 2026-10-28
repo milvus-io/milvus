@@ -3832,29 +3832,6 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
                    accepted_row_count,
                    raw_ready_end);
 
-        {
-            std::unique_lock lock(struct_element_offsets_map_mutex_);
-            for (auto it = struct_element_offsets_map_.begin();
-                 it != struct_element_offsets_map_.end();) {
-                if (!sch->has_field(it->first)) {
-                    it = struct_element_offsets_map_.erase(it);
-                } else {
-                    ++it;
-                }
-            }
-            struct_representative_fields_.clear();
-            std::unordered_set<std::string> represented_structs;
-            for (auto field_id : sch->get_field_ids()) {
-                const auto& field_meta = (*sch)[field_id];
-                auto struct_name = GetStructNameForArrayField(field_meta);
-                if (struct_name &&
-                    struct_element_offsets_map_.count(field_id) > 0 &&
-                    represented_structs.insert(*struct_name).second) {
-                    struct_representative_fields_.insert(field_id);
-                }
-            }
-        }
-
         for (const auto& field_meta : *absent_fields) {
             if (sch->is_function_output(field_meta.get_id())) {
                 continue;
@@ -3936,7 +3913,40 @@ SegmentGrowingImpl::Reopen(SchemaPtr sch) {
             EnsureStructElementOffsetsForField(
                 (*sch)[field_id], raw_ready_end, *sch);
         }
+        // Struct offsets aliases of sub-fields dropped by this schema stay in
+        // the map and keep pointing to the struct's offsets. Erasing them
+        // here, before the schema is published, would open a mixed-state
+        // window: readers take the schema and the aliases separately and
+        // hold no lock across them, so a reader still on the old schema
+        // (for example MATCH_ANY resolving the struct through its first
+        // sub-field) must keep finding every alias of that schema, both
+        // while this Reopen runs (and after it fails partway) and after the
+        // new schema is published. All aliases of a struct point to the same
+        // offsets object, so a kept alias is always correct; field IDs are
+        // never reused, so it cannot be mistaken for a later field.
+        //
+        // The representative sub-field of each struct, which Insert uses to
+        // append element counts, is staged here and swapped in with the
+        // schema: Insert holds sch_mutex_ shared, so it runs either before
+        // this Reopen or after the schema store, never in between.
+        std::unordered_set<FieldId> staged_representatives;
+        {
+            std::shared_lock lock(struct_element_offsets_map_mutex_);
+            std::unordered_set<std::string> represented_structs;
+            for (auto field_id : sch->get_field_ids()) {
+                auto struct_name = GetStructNameForArrayField((*sch)[field_id]);
+                if (struct_name &&
+                    struct_element_offsets_map_.count(field_id) > 0 &&
+                    represented_structs.insert(*struct_name).second) {
+                    staged_representatives.insert(field_id);
+                }
+            }
+        }
         growing_indexes_.RegisterBatch(std::move(staged_appenders));
+        {
+            std::unique_lock lock(struct_element_offsets_map_mutex_);
+            struct_representative_fields_.swap(staged_representatives);
+        }
         std::atomic_store_explicit(
             &schema_, std::move(sch), std::memory_order_release);
     }

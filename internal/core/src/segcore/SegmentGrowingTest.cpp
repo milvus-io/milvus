@@ -687,7 +687,13 @@ TEST(Growing, DroppingStructSubFieldsKeepsOffsetsContinuous) {
     ASSERT_NE(original_offsets, nullptr);
     segment->Reopen(
         make_schema(2, {{middle, "items[middle]"}, {last, "items[last]"}}));
-    EXPECT_EQ(segment->GetStructElementOffsets(first), nullptr);
+    // The dropped sub-field's alias stays and keeps pointing to the struct's
+    // offsets. Reopen no longer erases it: erasing it before the new schema
+    // is published opened a window (and, if Reopen failed, a lasting state)
+    // in which a reader on the old schema, which resolves the struct through
+    // this first sub-field, found no offsets.
+    EXPECT_EQ(segment->GetStructElementOffsets(first).get(),
+              original_offsets.get());
     EXPECT_EQ(segment->GetStructElementOffsets(middle).get(),
               original_offsets.get());
     append(2, 3, {middle, last});
@@ -704,9 +710,105 @@ TEST(Growing, DroppingStructSubFieldsKeepsOffsetsContinuous) {
 
     segment->Reopen(make_schema(
         4, {{middle, "items[middle]"}, {readded_first, "items[first]"}}));
-    EXPECT_EQ(segment->GetStructElementOffsets(last), nullptr);
+    EXPECT_EQ(segment->GetStructElementOffsets(last).get(),
+              original_offsets.get());
     append(4, 2, {middle, readded_first});
     EXPECT_EQ(original_offsets->ElementIDRangeOfRow(3), std::make_pair(6, 8));
+}
+
+// A growing Reopen that fails partway leaves the old schema published. Every
+// struct offsets alias of that schema must still resolve, so a query on the
+// old schema keeps working: MATCH_ANY resolves the struct through its first
+// sub-field, which the failed Reopen was dropping. A retry then publishes the
+// new schema, and inserts keep appending to the same offsets.
+TEST(Growing, FailedReopenKeepsStructOffsetsOfPublishedSchema) {
+    const FieldId pk(100);
+    const FieldId first(101);
+    const FieldId second(102);
+    const FieldId required(103);
+    auto make_schema =
+        [&](int64_t version, bool with_first, bool with_required) {
+            auto schema = std::make_shared<Schema>();
+            schema->set_schema_version(version);
+            schema->AddField(
+                FieldName("pk"), pk, DataType::INT64, false, std::nullopt);
+            schema->set_primary_field_id(pk);
+            if (with_first) {
+                schema->AddField(FieldName("items[first]"),
+                                 first,
+                                 DataType::ARRAY,
+                                 DataType::INT32,
+                                 true,
+                                 false);
+            }
+            schema->AddField(FieldName("items[second]"),
+                             second,
+                             DataType::ARRAY,
+                             DataType::INT32,
+                             true,
+                             false);
+            if (with_required) {
+                // Not nullable and no default: the backfill of the existing rows
+                // throws, after Reopen has started on the struct sub-fields.
+                schema->AddField(FieldName("required"),
+                                 required,
+                                 DataType::INT64,
+                                 false,
+                                 std::nullopt);
+            }
+            return schema;
+        };
+    auto segment =
+        CreateGrowingSegment(make_schema(1, true, false), empty_index_meta);
+    auto append = [&](int64_t row_id,
+                      int count,
+                      std::initializer_list<FieldId> children) {
+        InsertRecordProto insert;
+        insert.set_num_rows(1);
+        auto* pk_data = insert.add_fields_data();
+        pk_data->set_field_id(pk.get());
+        pk_data->set_type(proto::schema::DataType::Int64);
+        pk_data->mutable_scalars()->mutable_long_data()->add_data(row_id);
+        for (auto id : children) {
+            auto* data = insert.add_fields_data();
+            data->set_field_id(id.get());
+            data->set_type(proto::schema::DataType::Array);
+            auto* scalar = data->mutable_scalars();
+            scalar->add_valid_data(true);
+            auto* rows = scalar->mutable_array_data();
+            rows->set_element_type(proto::schema::DataType::Int32);
+            auto* row = rows->add_data();
+            for (int i = 0; i < count; ++i) {
+                row->mutable_int_data()->add_data(i);
+            }
+        }
+        const Timestamp timestamp = row_id;
+        segment->Insert(segment->PreInsert(1),
+                        1,
+                        &row_id,
+                        &timestamp,
+                        std::make_shared<InsertRecordProto>(insert));
+    };
+
+    append(1, 2, {first, second});
+    auto offsets = segment->GetStructElementOffsets(first);
+    ASSERT_NE(offsets, nullptr);
+
+    EXPECT_ANY_THROW(segment->Reopen(make_schema(2, false, true)));
+    auto schema = segment->get_schema_snapshot();
+    EXPECT_EQ(schema->get_schema_version(), 1);
+    const auto head = schema->GetFirstArrayFieldInStruct("items").get_id();
+    EXPECT_EQ(head, first);
+    EXPECT_EQ(segment->GetStructElementOffsets(head).get(), offsets.get());
+    EXPECT_EQ(segment->GetStructElementOffsets(second).get(), offsets.get());
+
+    segment->Reopen(make_schema(2, false, false));
+    schema = segment->get_schema_snapshot();
+    EXPECT_EQ(schema->get_schema_version(), 2);
+    EXPECT_EQ(schema->GetFirstArrayFieldInStruct("items").get_id(), second);
+    EXPECT_EQ(segment->GetStructElementOffsets(second).get(), offsets.get());
+    append(2, 3, {second});
+    EXPECT_EQ(offsets->ElementIDRangeOfRow(1), std::make_pair(2, 5));
 }
 
 TEST(Growing, ElementNullableStructSubFieldsHaveLogicalOffsets) {
