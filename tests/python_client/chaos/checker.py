@@ -22,7 +22,6 @@ from chaos import constants
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CheckTasks
-from common.milvus_sys import MilvusSys
 from faker import Faker
 from minio import Minio
 from prettytable import PrettyTable
@@ -572,7 +571,6 @@ class Checker:
         p_name = partition_name if partition_name is not None else "_default"
         self.p_name = p_name
         self.p_names = [self.p_name] if partition_name is not None else None
-        self.ms = MilvusSys()
         self.bucket_name = cf.param_info.param_bucket_name
 
         # Initialize MilvusClient - prioritize uri and token
@@ -591,9 +589,9 @@ class Checker:
             token = f"{cf.param_info.param_user}:{cf.param_info.param_password}"
         self.milvus_client = MilvusClient(uri=uri, token=token)
 
-        # Also create a connection for low-level APIs that MilvusClient doesn't support
-        self.alias = cf.gen_unique_str("checker_alias_")
-        connections.connect(alias=self.alias, uri=uri, token=token)
+        # Legacy workloads open an ORM connection only when they access alias.
+        self._legacy_alias = None
+        self._legacy_connection = {"uri": uri, "token": token}
 
         # Get or create schema
         collection_exists = self.milvus_client.has_collection(c_name)
@@ -832,6 +830,14 @@ class Checker:
             raise ValueError("initial_jitter_seconds must be non-negative")
         self.operation_interval_seconds = interval_seconds
         self.initial_jitter_seconds = initial_jitter_seconds
+
+    @property
+    def alias(self):
+        if self._legacy_alias is None:
+            alias = cf.gen_unique_str("checker_alias_")
+            connections.connect(alias=alias, **self._legacy_connection)
+            self._legacy_alias = alias
+        return self._legacy_alias
 
     def get_schema(self):
         collection_info = self.milvus_client.describe_collection(self.c_name)
