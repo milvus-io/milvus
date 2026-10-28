@@ -12,7 +12,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | AlterResourceGroup | Broadcast: CChannel, Unreplicable (`_ur`) | No | ExclusiveCluster |
 | DropResourceGroup | Broadcast: CChannel, Unreplicable (`_ur`) | No | ExclusiveCluster |
 
-- **FlushAll**: Flushes local growing segments across all collections on either role; CDC skips newly marked messages. Retains ExclusiveCluster and GetFlushAllState checkpoint-based persistence checks.
+- **FlushAll**: Flushes local growing segments across all collections on either role; CDC skips newly marked messages. Retains ExclusiveCluster and GetFlushAllState checkpoint-based persistence checks. Returned ImmutableMessage copies omit `_ur` so Backup can explicitly replicate them for secondary position alignment; the persisted WAL records retain the marker.
 - **AlterReplicateConfig**: Changes replication topology — enabling, disabling, or switching PRIMARY/SECONDARY roles.
 - **AlterWAL**: Switches WAL backend implementation across the entire cluster.
 - **AlterResourceGroup**: Creates, updates, or transfers nodes between query resource groups.

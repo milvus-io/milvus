@@ -26,6 +26,11 @@ It preserves `BeginGrowingSourceReleaseHandoff`, rollback on failure, the union 
 release/requested segment IDs, and `GetGrowingFlushProgress`. A successful append
 alone does not mean the growing-source release handoff is prepared.
 
+FlushAll returns per-PChannel `ImmutableMessage` copies without `_ur`, so Backup
+can explicitly replicate them to align positions on a secondary. Message IDs,
+TimeTicks and LastConfirmedMessageIDs are preserved. The persisted WAL broadcast
+still carries `_ur` and is skipped by ordinary CDC replication.
+
 ## Concurrent collection drop
 
 Proxy resolves an existing collection before sending ManualFlush. The internal
