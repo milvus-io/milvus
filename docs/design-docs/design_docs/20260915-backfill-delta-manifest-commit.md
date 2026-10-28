@@ -373,8 +373,10 @@ which cluster commits first.
    the manifest's `text_index.<fid>` / `json_stats.<fid>` entries in place (V3
    readers resolve stats from the manifest), and a text/JSON stats task already
    in flight on the old column can rebase its old-data result onto the new
-   revision. Fully closing this needs a drop-stat capability in milvus-storage;
-   tracked with the segment-change-group feature ([issue #53321]) and out of
-   scope for this PR.
-
-[issue #53321]: https://github.com/milvus-io/milvus/issues/53321
+   revision. A replaced field that feeds a BM25 / text-embedding function has
+   the same shape: the derived output column and its index keep values computed
+   from the old input. Fully closing both needs a drop-stat / derived-artifact
+   lifecycle that milvus-storage does not expose today; the plan is to wire the
+   change-group infra into `CommitBackfillResult` once it lands (the change-group
+   design §6.6 deliberately keeps backfill out of the group, so this is a
+   follow-up on top of it, not part of it) and is out of scope for this PR.
