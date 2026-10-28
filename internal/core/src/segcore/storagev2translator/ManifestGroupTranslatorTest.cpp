@@ -444,7 +444,9 @@ TEST_P(ManifestGroupTranslatorTest, TestScalarColumnGroup) {
 
     // estimated byte size
     for (size_t i = 0; i < num_cells; ++i) {
-        auto [loading, storage] = translator->estimated_byte_size_of_cell(i);
+        auto [loading, private_overhead, shared_overhead] =
+            translator->estimated_loading_usage({i});
+        const auto storage = private_overhead + shared_overhead;
         if (use_mmap) {
             EXPECT_GT(loading.file_bytes, 0) << "cid=" << i;
             EXPECT_GT(storage.file_bytes, 0) << "cid=" << i;
@@ -453,6 +455,33 @@ TEST_P(ManifestGroupTranslatorTest, TestScalarColumnGroup) {
             EXPECT_GT(storage.memory_bytes, 0) << "cid=" << i;
         }
     }
+
+    std::vector<cachinglayer::cid_t> estimate_cids{0};
+    if (translator->num_cells() > 1) {
+        estimate_cids.push_back(translator->num_cells() - 1);
+    }
+    int64_t expected_batch_bytes = 0;
+    for (const auto cid : estimate_cids) {
+        expected_batch_bytes += static_cast<GroupCTMeta*>(translator->meta())
+                                    ->chunk_memory_size_[cid];
+    }
+    const auto batch = translator->estimated_loading_usage(estimate_cids);
+    EXPECT_EQ(
+        batch.resident,
+        (use_mmap ? cachinglayer::ResourceUsage{0, expected_batch_bytes}
+                  : cachinglayer::ResourceUsage{expected_batch_bytes, 0}));
+    const cachinglayer::ResourceUsage expected_overhead{
+        expected_batch_bytes, use_mmap ? expected_batch_bytes : 0};
+    EXPECT_EQ(batch.private_overhead + batch.shared_overhead,
+              expected_overhead);
+    EXPECT_EQ(batch.shared_overhead,
+              translator->meta()->loading_overhead_config
+                  ? expected_overhead
+                  : cachinglayer::ResourceUsage{});
+    const auto empty = translator->estimated_loading_usage({});
+    EXPECT_EQ(empty.resident, cachinglayer::ResourceUsage{});
+    EXPECT_EQ(empty.private_overhead, cachinglayer::ResourceUsage{});
+    EXPECT_EQ(empty.shared_overhead, cachinglayer::ResourceUsage{});
 
     // get_cells — load all cells
     std::vector<cachinglayer::cid_t> cids;
@@ -519,7 +548,9 @@ TEST_P(ManifestGroupTranslatorTest, TestVectorColumnGroup) {
 
     // estimated byte size
     for (size_t i = 0; i < num_cells; ++i) {
-        auto [loading, storage] = translator->estimated_byte_size_of_cell(i);
+        auto [loading, private_overhead, shared_overhead] =
+            translator->estimated_loading_usage({i});
+        const auto storage = private_overhead + shared_overhead;
         if (use_mmap) {
             EXPECT_GT(loading.file_bytes, 0) << "cid=" << i;
         } else {
