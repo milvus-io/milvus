@@ -250,11 +250,10 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 // classifyLoonErr maps loon FFI failures to retryable errors and everything
 // else to retry.Unrecoverable so the outer retry loop terminates immediately.
 //
-// NOTE: today milvus-storage does not reliably preserve structured error codes
-// through every FFI path, so packed.ErrLoonTransient covers ALL loon errors,
-// including non-recoverable IO failures. The bounded retry budget keeps the
-// worst case finite. Once error codes survive end-to-end, narrow the retryable
-// set here.
+// HandleLoonFFIResult now classifies by the FFI err_code (the producer's
+// loon_ffi_is_retryable_errcode): only genuinely transient failures carry
+// packed.ErrLoonTransient; access-denied/corrupt-data/malformed-input carry
+// packed.ErrLoonPermanent and terminate the loop via retry.Unrecoverable.
 func classifyLoonErr(err error) error {
 	if err == nil {
 		return nil
@@ -295,8 +294,10 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 		mlog.Info(ctx, "using TEXT-aware writer for import",
 			mlog.Int("textFieldCount", len(textColumnConfigs)),
 			mlog.String("basePath", basePath))
+		// TODO: pass pluginContextPtr instead of nil once the TEXT read chain
+		// supports CMEK decryption; encrypting TEXT now would make it unreadable.
 		w, err = storage.NewPackedTextBatchWriter("", basePath, bw.schema,
-			bw.bufferSize, bw.multiPartUploadSize, bw.columnGroups, bw.storageConfig, textColumnConfigs, writerFormat, schemaBasedFormats)
+			bw.bufferSize, bw.multiPartUploadSize, bw.columnGroups, bw.storageConfig, textColumnConfigs, nil, writerFormat, schemaBasedFormats)
 	} else {
 		w, err = storage.NewPackedRecordBatchWriter(basePath, bw.schema,
 			bw.bufferSize, bw.multiPartUploadSize, bw.columnGroups, bw.storageConfig, pluginContextPtr, writerFormat, schemaBasedFormats)

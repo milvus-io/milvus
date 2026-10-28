@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
@@ -275,6 +274,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 	jobID int64,
 	vchannels []string,
 	idempotencyKey string,
+	version internalpb.ImportVersion,
 ) (duplicatedJobID int64, duplicated bool, err error) {
 	if err := importutilv2.ValidateSnapshotSourceRequest(options); err != nil {
 		return 0, false, err
@@ -366,10 +366,6 @@ func (s *Server) broadcastImport(ctx context.Context,
 		}
 	})
 	msgOptions := funcutil.KeyValuePair2Map(options)
-	// The control channel is added on top of the data vchannels for ordering only: the
-	// flusher drops the control-channel copy, while the ack-callback scheduler uses it as
-	// the task's ordering anchor (ControlChannelTimeTick).
-	channels := append(vchannels, streaming.WAL().ControlChannel())
 	// Build import message without deprecated MsgBase
 	msg := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{}).
@@ -386,6 +382,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 			Files:          msgFiles,
 			Schema:         schema,
 			JobID:          jobID,
+			Version:        int64(version),
 		}).
 		// Scoped to the collection by ID, so the same client key stays a distinct
 		// operation against another collection, and a rename does not move the key off
@@ -395,7 +392,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 		// importing twice. The broadcaster adds the message type; everything else about
 		// the dedup identity is this scope.
 		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(collectionID, idempotencyKey)).
-		WithBroadcast(channels).
+		WithBroadcast(vchannels).
 		MustBuildBroadcast()
 	if importutilv2.IsSnapshotSource(options) {
 		if err := validateSnapshotImportMessageSize(msg); err != nil {

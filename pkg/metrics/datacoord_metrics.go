@@ -222,6 +222,7 @@ var (
 			Buckets:   longTaskBuckets,
 		}, []string{
 			importStageLabelName,
+			jobVersionLabelName,
 		})
 
 	ImportTaskLatency = prometheus.NewHistogramVec(
@@ -233,6 +234,7 @@ var (
 			Buckets:   longTaskBuckets,
 		}, []string{
 			importStageLabelName,
+			TaskTypeLabel,
 		})
 
 	FlushedSegmentFileNum = prometheus.NewHistogramVec(
@@ -336,7 +338,7 @@ var (
 			Subsystem: typeutil.DataCoordRole,
 			Name:      "import_jobs",
 			Help:      "the import jobs grouping by state",
-		}, []string{"import_state"})
+		}, []string{"import_state", jobVersionLabelName})
 
 	ImportTasks = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{

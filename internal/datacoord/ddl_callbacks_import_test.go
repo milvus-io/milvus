@@ -40,7 +40,6 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
-	mock_streaming "github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -67,14 +66,13 @@ import (
 // Import Callbacks Test Suite
 // ================================
 
-// patchSnapshotImportWAL gives a test a WAL accesser whose ControlChannel is
-// resolvable: import broadcasts now target the control channel too, and the
-// package-level WAL accesser is nil unless a test provides one.
 func patchSnapshotImportWAL(t *testing.T) {
 	t.Helper()
-	previous := streaming.WAL()
-	streaming.SetupNoopWALForTest()
-	t.Cleanup(func() { streaming.SetWALForTest(previous) })
+	type snapshotWAL struct{ streaming.WALAccesser }
+	control := mockey.Mock((*snapshotWAL).ControlChannel).Return(funcutil.GetControlChannel("snapshot-test")).Build()
+	t.Cleanup(func() { control.UnPatch() })
+	wal := mockey.Mock(streaming.WAL).Return(&snapshotWAL{}).Build()
+	t.Cleanup(func() { wal.UnPatch() })
 }
 
 func TestSnapshotPartitionTargetsValidation(t *testing.T) {
@@ -170,7 +168,7 @@ func TestBroadcastSnapshotImportMappedPartitions(t *testing.T) {
 	s := &Server{broker: fake, meta: &meta{chunkManager: storage.NewLocalChunkManager()}}
 	opts := append(snapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.PartitionMapping, Value: `{"A":"X","B":"Y"}`})
 	_, _, err := s.broadcastImport(ctx, 100, []int64{200, 100},
-		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}}, opts, 1000, []string{"target_v1"}, "")
+		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}}, opts, 1000, []string{"target_v1"}, "", internalpb.ImportVersion_ImportVersionV2)
 	require.NoError(t, err)
 	require.True(t, called)
 	require.True(t, api.closeCalled.Load())
@@ -209,7 +207,7 @@ func TestBroadcastSnapshotImportMultipleTargetPartitions(t *testing.T) {
 	partitionIDs := []int64{20, 10}
 	_, duplicated, err := server.broadcastImport(ctx, 100, partitionIDs,
 		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}},
-		snapshotImportTestOptions(), 1000, []string{"target_v1"}, "")
+		snapshotImportTestOptions(), 1000, []string{"target_v1"}, "", internalpb.ImportVersion_ImportVersionV2)
 	require.NoError(t, err)
 	require.False(t, duplicated)
 	require.Equal(t, partitionIDs, received)
@@ -222,7 +220,7 @@ func TestBroadcastSnapshotImportMultipleTargetPartitions(t *testing.T) {
 	received = nil
 	_, _, err = server.broadcastImport(ctx, 100, partitionIDs,
 		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}},
-		snapshotImportTestOptions(), 1000, []string{"target_v1"}, "")
+		snapshotImportTestOptions(), 1000, []string{"target_v1"}, "", internalpb.ImportVersion_ImportVersionV2)
 	require.ErrorContains(t, err, "lost its shared L0 inventory")
 	require.Nil(t, received, "invalid source plans must fail before broadcast")
 }
@@ -274,8 +272,7 @@ func TestBroadcastImportBoundaryFailures(t *testing.T) {
 					for _, file := range decoded.MustBody().GetFiles() {
 						require.Nil(t, file.GetPreAllocatedAutoIds())
 					}
-					require.ElementsMatch(t, []string{"v1", funcutil.GetControlChannel("noop")},
-						msg.BroadcastHeader().VChannels)
+					require.ElementsMatch(t, []string{"v1"}, msg.BroadcastHeader().VChannels)
 					return &types.BroadcastAppendResult{}, nil
 				}).Build()
 			defer transport.UnPatch()
@@ -285,7 +282,7 @@ func TestBroadcastImportBoundaryFailures(t *testing.T) {
 			type boundaryAllocator struct{ allocator.Allocator }
 			s := &Server{meta: &meta{}, broker: &boundaryBroker{}, allocator: &boundaryAllocator{}}
 			_, _, err := s.broadcastImport(context.Background(), 100, []int64{10}, files,
-				opts, 1, []string{"v1"}, "")
+				opts, 1, []string{"v1"}, "", internalpb.ImportVersion_ImportVersionV2)
 			if stage == "auto_id" {
 				require.NoError(t, err)
 				require.Equal(t, 1, transport.Times())
@@ -352,7 +349,7 @@ func TestBroadcastSnapshotImportNormalizesEZK(t *testing.T) {
 				&commonpb.KeyValuePair{Key: importutilv2.AutoCommitKey, Value: "false"})
 			_, _, err := server.broadcastImport(ctx, 100, []int64{10},
 				[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}},
-				options, 1000, []string{"target_v1"}, "")
+				options, 1000, []string{"target_v1"}, "", internalpb.ImportVersion_ImportVersionV2)
 			require.NoError(t, err)
 			require.Equal(t, "false", received[importutilv2.AutoCommitKey])
 			require.Equal(t, importutilv2.SourceTypeSnapshot, received[importutilv2.SourceType])
@@ -635,6 +632,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_ValidationFailsReturnsError()
 		1000,
 		[]string{"v1"},
 		"",
+		internalpb.ImportVersion_ImportVersionV2,
 	)
 
 	s.Error(err)
@@ -683,6 +681,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturn
 		1000,
 		[]string{"v1"},
 		"",
+		internalpb.ImportVersion_ImportVersionV2,
 	)
 
 	s.Error(err)
@@ -743,6 +742,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 		1000,
 		[]string{"v1"},
 		"",
+		internalpb.ImportVersion_ImportVersionV2,
 	)
 
 	s.Error(err)
@@ -807,6 +807,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 		1000,
 		[]string{"v1"},
 		"",
+		internalpb.ImportVersion_ImportVersionV2,
 	)
 
 	s.Error(err)
@@ -859,10 +860,6 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
-	wal := mock_streaming.NewMockWALAccesser(s.T())
-	wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0")).Maybe()
-	streaming.SetWALForTest(wal)
-
 	_, _, err := server.broadcastImport(
 		ctx,
 		100,
@@ -872,6 +869,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 		1000,
 		[]string{"v1"},
 		"",
+		internalpb.ImportVersion_ImportVersionV2,
 	)
 
 	s.Error(err)
@@ -939,10 +937,6 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
-	wal := mock_streaming.NewMockWALAccesser(s.T())
-	wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0")).Maybe()
-	streaming.SetWALForTest(wal)
-
 	_, _, err := server.broadcastImport(
 		ctx,
 		100,
@@ -954,12 +948,11 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 		1000,
 		[]string{"v1"},
 		"",
+		internalpb.ImportVersion_ImportVersionV2,
 	)
 
 	s.NoError(err)
-	// The import message targets the data vchannels plus the control channel ordering anchor.
-	s.ElementsMatch([]string{"v1", funcutil.GetControlChannel("by-dev-rootcoord-dml_0")},
-		mockBroadcastAPI.capturedMsg.BroadcastHeader().VChannels)
+	s.ElementsMatch([]string{"v1"}, mockBroadcastAPI.capturedMsg.BroadcastHeader().VChannels)
 	msg, err := message.AsBroadcastImportMessageV1(mockBroadcastAPI.capturedMsg)
 	s.NoError(err)
 	body, err := msg.Body()
@@ -995,7 +988,7 @@ func TestBroadcastImport_RejectsChangedCanonicalSnapshot(t *testing.T) {
 	}, nil).Once()
 
 	server := &Server{broker: mockBroker}
-	_, _, err := server.broadcastImport(ctx, 100, nil, nil, nil, 1000, []string{"v1"}, "")
+	_, _, err := server.broadcastImport(ctx, 100, nil, nil, nil, 1000, []string{"v1"}, "", internalpb.ImportVersion_ImportVersionV2)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
 	assert.Nil(t, api.capturedMsg)
@@ -1289,8 +1282,11 @@ func TestImportFlowIntegration(t *testing.T) {
 
 func newTestImportMeta(t *testing.T) (ImportMeta, *mocks.DataCoordCatalog) {
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Maybe()
 
@@ -1639,14 +1635,8 @@ func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, c
 	ctx := context.Background()
 	wantVchannels := []string{"by-dev-rootcoord-dml_0_v0", "by-dev-rootcoord-dml_1_v0"}
 
-	// Import messages target the job's data vchannels plus the control channel: the
-	// data copies drive the per-vchannel work (flush/commit), the control-channel copy is
-	// the ack-callback ordering anchor.
-	controlChannel := funcutil.GetControlChannel("by-dev-rootcoord-dml_0")
-	wal := mock_streaming.NewMockWALAccesser(t)
-	wal.EXPECT().ControlChannel().Return(controlChannel).Maybe()
-	streaming.SetWALForTest(wal)
-
+	// Import messages target the job's data vchannels; the broadcaster adds the
+	// control-channel copy that anchors the ack-callback order.
 	mockBroker := broker.NewMockBroker(t)
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(7)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "test_db",
@@ -1673,8 +1663,8 @@ func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, c
 	err := broadcastFn(server, ctx, job)
 	assert.NoError(t, err)
 	assert.NotNil(t, capture.captured, "Broadcast must have been called")
-	assert.ElementsMatch(t, append(wantVchannels, controlChannel), capture.captured.BroadcastHeader().VChannels,
-		"broadcast must target the job's data vchannels plus the control channel ordering anchor")
+	assert.ElementsMatch(t, wantVchannels, capture.captured.BroadcastHeader().VChannels,
+		"broadcast must target the job's data vchannels; the broadcaster adds the control channel")
 }
 
 // TestBroadcastCommitImportMessage_TargetsDataVchannels asserts that the
@@ -2024,11 +2014,6 @@ func TestUpdateImportAckCallback_UncommittedWithoutRangesFailsJob(t *testing.T) 
 func TestAssignAndBroadcastUpdateImport_MessageShape(t *testing.T) {
 	ctx := context.Background()
 	wantVchannels := []string{"by-dev-rootcoord-dml_0_v0", "by-dev-rootcoord-dml_1_v0"}
-	controlChannel := funcutil.GetControlChannel("by-dev-rootcoord-dml_0")
-	wal := mock_streaming.NewMockWALAccesser(t)
-	wal.EXPECT().ControlChannel().Return(controlChannel).Maybe()
-	streaming.SetWALForTest(wal)
-
 	mockBroker := broker.NewMockBroker(t)
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(7)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "test_db",
@@ -2066,8 +2051,8 @@ func TestAssignAndBroadcastUpdateImport_MessageShape(t *testing.T) {
 	require.NoError(t, server.broadcastUpdateImportMessage(ctx, job, []int64{10, 0, 5}))
 
 	require.NotNil(t, capture.captured, "Broadcast must have been called")
-	assert.ElementsMatch(t, append(wantVchannels, controlChannel), capture.captured.BroadcastHeader().VChannels,
-		"UpdateImport must target the job's data vchannels plus the control channel, like ImportMsg")
+	assert.ElementsMatch(t, wantVchannels, capture.captured.BroadcastHeader().VChannels,
+		"UpdateImport must target the job's data vchannels; the broadcaster adds the control channel")
 
 	msg, err := message.AsBroadcastUpdateImportMessageV2(capture.captured)
 	require.NoError(t, err)
@@ -2203,4 +2188,38 @@ func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
 	assert.Equal(t, internalpb.ImportJobState_Pending, saved.GetState())
 	assert.Equal(t, []string{"vchannel1"}, saved.GetReadyVchannels())
 	assert.Equal(t, uint64(200), saved.GetDataTs())
+}
+
+// TestUpdateImportAckCallback_V3JobUncommittedWithoutRangesFailsJob pins the V3
+// range gate: a V3 job always needs exact ranges (no version-gate / no
+// local-allocator fallback), so an UpdateImport that finds it in Uncommitted
+// with no local ranges signals cross-cluster file divergence and must fail it.
+func TestUpdateImportAckCallback_V3JobUncommittedWithoutRangesFailsJob(t *testing.T) {
+	ctx := context.Background()
+	importMeta, _ := newTestImportMeta(t)
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:   27,
+			State:   internalpb.ImportJobState_Uncommitted,
+			Version: internalpb.ImportVersion_ImportVersionV3,
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+			}},
+			Files: []*internalpb.ImportFile{
+				{Id: 101, Paths: []string{"a.parquet"}},
+				{Id: 102, Paths: []string{"b.parquet"}},
+			},
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+	require.NoError(t, importMeta.AddJob(ctx, job))
+
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
+	require.NoError(t, callbacks.updateImportAckCallback(ctx,
+		buildUpdateImportBroadcastResult(27, validIDRangeFileRanges(), 0)))
+
+	got := importMeta.GetJob(ctx, 27)
+	require.NotNil(t, got)
+	assert.Equal(t, internalpb.ImportJobState_Failed, got.GetState())
+	assert.Contains(t, got.GetReason(), "cross-cluster file divergence")
 }
