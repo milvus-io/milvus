@@ -1178,17 +1178,25 @@ func validateAddStructSubFieldRequest(schema *schemapb.CollectionSchema, structP
 		return err
 	}
 	storedName := typeutil.ConcatStructFieldName(structPath, rawName)
+	// The new sub-field is stored as s[x], so against other containers (top
+	// level fields, structs, and sub-fields of other structs) only that full
+	// name can clash: s[id] next to a top-level id and s[s] in struct s are
+	// valid, as they are at create collection and when a whole struct is
+	// added. The short name clashes only with a sibling in the same struct.
 	for _, existing := range schema.GetFields() {
-		if existing.GetName() == rawName || existing.GetName() == storedName {
-			return merr.WrapErrParameterInvalidMsg("duplicated field name %s", rawName)
+		if existing.GetName() == storedName {
+			return merr.WrapErrParameterInvalidMsg("duplicated field name %s", storedName)
 		}
 	}
 	for _, structField := range schema.GetStructArrayFields() {
-		if structField.GetName() == rawName || structField.GetName() == storedName {
-			return merr.WrapErrParameterInvalidMsg("duplicated field name %s", rawName)
+		if structField.GetName() == storedName {
+			return merr.WrapErrParameterInvalidMsg("duplicated field name %s", storedName)
+		}
+		if structField.GetName() != structPath {
+			continue
 		}
 		for _, existing := range structField.GetFields() {
-			if structField.GetName() == structPath && (existing.GetName() == rawName || storedStructSubFieldName(structPath, existing.GetName()) == storedName) {
+			if existing.GetName() == rawName || storedStructSubFieldName(structPath, existing.GetName()) == storedName {
 				return merr.WrapErrParameterInvalidMsg("duplicated field name %s", rawName)
 			}
 		}

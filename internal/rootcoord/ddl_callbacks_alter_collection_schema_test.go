@@ -2153,6 +2153,16 @@ func TestDDLCallbacksAlterCollectionSchemaAddStructSubField(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, coll.StructArrayFields[0].Fields, 3)
 	assertMaxFieldIDProperty(t, ctx, core, dbName, collectionName, 106)
+
+	// The sub-field is stored as profile[x], so a short name equal to a
+	// top-level field or to the struct itself is valid.
+	require.NoError(t, add(newScalar("field1"), "profile"))
+	require.NoError(t, add(newScalar("profile"), "profile"))
+	coll, err = core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	subFields = coll.StructArrayFields[0].Fields
+	require.Equal(t, "profile[field1]", subFields[len(subFields)-2].Name)
+	require.Equal(t, "profile[profile]", subFields[len(subFields)-1].Name)
 }
 
 func TestBuildSchemaForDropStructSubField(t *testing.T) {
