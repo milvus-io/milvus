@@ -165,6 +165,11 @@ type QuotaCenter struct {
 
 	collectionProps map[int64]map[string]string // collection id -> collection properties
 
+	// the per-collection gauges collectMetrics rewrites every round
+	loadedEntitiesSeries  *gaugeSeries
+	totalEntitiesSeries   *gaugeSeries
+	indexedEntitiesSeries *gaugeSeries
+
 	rateLimiter *rlinternal.RateLimiterTree
 
 	tsoAllocator tso.Allocator
@@ -203,6 +208,10 @@ func NewQuotaCenter(proxies proxyutil.ProxyClientManagerInterface, mixCoord type
 		rateAllocateStrategy: DefaultRateAllocateStrategy,
 		prevRates:            make(map[string]float64),
 		stopChan:             make(chan struct{}),
+
+		loadedEntitiesSeries:  newGaugeSeries(metrics.RootCoordNumEntities),
+		totalEntitiesSeries:   newGaugeSeries(metrics.RootCoordNumEntities),
+		indexedEntitiesSeries: newGaugeSeries(metrics.RootCoordIndexedNumEntities),
 	}
 	q.clearMetrics()
 	return q
@@ -445,6 +454,7 @@ func (q *QuotaCenter) collectMetrics() error {
 		}
 
 		q.readableCollections = make(map[int64]map[int64][]int64, 0)
+		loadedEntities := q.loadedEntitiesSeries.newRound()
 		var rangeErr error
 		collections.Range(func(collectionID int64) bool {
 			coll, getErr := q.meta.GetCollectionByIDWithMaxTs(context.TODO(), collectionID)
@@ -462,10 +472,11 @@ func (q *QuotaCenter) collectMetrics() error {
 			q.collectionIDToDBID.Insert(collectionID, coll.DBID)
 			q.collections.Insert(FormatCollectionKey(coll.DBID, coll.Name), collectionID)
 			if numEntity, ok := numEntitiesLoaded[collectionID]; ok {
-				metrics.RootCoordNumEntities.WithLabelValues(coll.DBName, coll.Name, metrics.LoadedLabel).Set(float64(numEntity))
+				loadedEntities.set(float64(numEntity), coll.DBName, coll.Name, metrics.LoadedLabel)
 			}
 			return true
 		})
+		loadedEntities.complete()
 
 		return rangeErr
 	})
@@ -501,6 +512,8 @@ func (q *QuotaCenter) collectMetrics() error {
 		if cm != nil {
 			collectionMetrics = cm.Collections
 		}
+		totalEntities := q.totalEntitiesSeries.newRound()
+		indexedEntities := q.indexedEntitiesSeries.newRound()
 
 		collections.Range(func(collectionID int64) bool {
 			coll, getErr := q.meta.GetCollectionByIDWithMaxTs(context.TODO(), collectionID)
@@ -522,22 +535,28 @@ func (q *QuotaCenter) collectMetrics() error {
 				return true
 			}
 			if datacoordCollectionMetric, ok := collectionMetrics[collectionID]; ok {
-				metrics.RootCoordNumEntities.WithLabelValues(coll.DBName, coll.Name, metrics.TotalLabel).Set(float64(datacoordCollectionMetric.NumEntitiesTotal))
+				totalEntities.set(float64(datacoordCollectionMetric.NumEntitiesTotal), coll.DBName, coll.Name, metrics.TotalLabel)
 				fields := lo.KeyBy(coll.Fields, func(v *model.Field) int64 { return v.FieldID })
 				for _, indexInfo := range datacoordCollectionMetric.IndexInfo {
 					if _, ok := fields[indexInfo.FieldID]; !ok {
 						continue
 					}
 					field := fields[indexInfo.FieldID]
-					metrics.RootCoordIndexedNumEntities.WithLabelValues(
+					indexedEntities.set(float64(indexInfo.NumEntitiesIndexed),
 						coll.DBName,
 						coll.Name,
 						indexInfo.IndexName,
-						strconv.FormatBool(typeutil.IsVectorType(field.DataType))).Set(float64(indexInfo.NumEntitiesIndexed))
+						strconv.FormatBool(typeutil.IsVectorType(field.DataType)))
 				}
 			}
 			return true
 		})
+		// Without the collection metrics this round reports nothing about the
+		// entities, which is not the same as every collection having gone.
+		if collectionMetrics != nil {
+			totalEntities.complete()
+			indexedEntities.complete()
+		}
 
 		for _, collectionID := range datacoordQuotaCollections {
 			_, ok := q.collectionIDToDBID.Get(collectionID)

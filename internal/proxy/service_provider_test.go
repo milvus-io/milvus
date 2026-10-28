@@ -566,7 +566,10 @@ func TestDescribeCollectionCachedAndRemoteDatabaseNotFoundStatusEquivalent(t *te
 
 func TestInterceptorImpl_RecordsOutcomeFromErrorAndResponseStatus(t *testing.T) {
 	paramtable.Init()
-	node := &Proxy{}
+	// the collection exists, so its name is a label
+	cache := NewMockCache(t)
+	cache.EXPECT().HasCachedCollection("db", "collection").Return(true).Maybe()
+	node := &Proxy{metaCache: cache}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	request := &milvuspb.DescribeCollectionRequest{DbName: "db", CollectionName: "collection"}
 	nodeID := paramtable.GetStringNodeID()

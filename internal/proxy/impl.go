@@ -247,6 +247,11 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			metrics.CleanupProxyCollectionMetrics(paramtable.GetNodeID(), dbName, alias)
 		}
 		DeregisterSubLabel(ratelimitutil.GetCollectionSubLabel(request.GetDbName(), request.GetCollectionName()))
+	case commonpb.MsgType_RenameCollection:
+		// The request carries the old name; no series may be labeled with it
+		// any more. The aliases move with the collection, so their series stay.
+		metrics.CleanupProxyCollectionMetrics(paramtable.GetNodeID(), dbName, collectionName)
+		DeregisterSubLabel(ratelimitutil.GetCollectionSubLabel(request.GetDbName(), request.GetCollectionName()))
 	case commonpb.MsgType_DropDatabase:
 		metrics.CleanupProxyDBMetrics(paramtable.GetNodeID(), request.GetDbName())
 		DeregisterSubLabel(ratelimitutil.GetDBSubLabel(request.GetDbName()))
@@ -2686,12 +2691,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		SetDatabaseName(request.GetDbName()).
 		SetCollectionName(request.GetCollectionName())
 
-	metrics.ProxyReceivedNQ.WithLabelValues(
-		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		metrics.SearchLabel,
-		request.GetDbName(),
-		request.GetCollectionName(),
-	).Add(float64(request.GetNq()))
+	defer node.observeReceivedNQ(metrics.SearchLabel, request.GetDbName(), request.GetCollectionName(), float64(request.GetNq()))
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.SearchResults{
@@ -3679,20 +3679,13 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		QueryLabel:       metrics.QueryLabel,
 	}, node.GetMetaCache(), paramtable.Get().ProxyCfg.MustUsePartitionKey.GetAsBool())
 
-	subLabel := GetCollectionRateSubLabel(request)
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.QueryLabel).
 		SetDatabaseName(request.GetDbName()).
 		SetCollectionName(request.GetCollectionName())
-	metrics.ProxyReceivedNQ.WithLabelValues(
-		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		metrics.QueryLabel,
-		request.GetDbName(),
-		request.GetCollectionName(),
-	).Add(float64(1))
-
-	rateCol.Add(internalpb.RateType_DQLQuery.String(), 1, subLabel)
+	defer node.observeReceivedNQ(metrics.QueryLabel, request.GetDbName(), request.GetCollectionName(), float64(1))
+	defer node.addQueryRate(request)
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.QueryResults{
@@ -4919,6 +4912,8 @@ func (node *Proxy) InvalidateCredentialCache(ctx context.Context, request *proxy
 	if username == util.UserRoot && node.managementRootVerifier != nil {
 		node.managementRootVerifier.Forget()
 	}
+	// rootcoord invalidates a credential only when the user is dropped.
+	metrics.CleanupProxyUserMetrics(paramtable.GetNodeID(), username)
 	mlog.Debug(ctx, "complete to invalidate credential cache")
 
 	return merr.Success(), nil
