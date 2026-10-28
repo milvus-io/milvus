@@ -26,7 +26,9 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -453,7 +455,8 @@ func (t *bumpSchemaVersionCompactionTask) additiveReadSchema(diff *schemaBumpPhy
 	readFields := make([]*schemapb.FieldSchema, 0, len(inputSchema.GetFields())+1)
 	seen := make(map[int64]struct{}, len(inputSchema.GetFields())+1)
 	structByChild := make(map[int64]*schemapb.StructArrayFieldSchema)
-	selectedStructs := make(map[int64]struct{})
+	// Struct ID -> the sub-fields this pass reads or appends.
+	selectedStructs := make(map[int64]map[int64]struct{})
 	for _, st := range t.plan.GetSchema().GetStructArrayFields() {
 		for _, child := range st.GetFields() {
 			structByChild[child.GetFieldID()] = st
@@ -471,7 +474,10 @@ func (t *bumpSchemaVersionCompactionTask) additiveReadSchema(diff *schemaBumpPhy
 		}
 		seen[fieldID] = struct{}{}
 		if st := structByChild[fieldID]; st != nil {
-			selectedStructs[st.GetFieldID()] = struct{}{}
+			if selectedStructs[st.GetFieldID()] == nil {
+				selectedStructs[st.GetFieldID()] = make(map[int64]struct{})
+			}
+			selectedStructs[st.GetFieldID()][fieldID] = struct{}{}
 			return
 		}
 		readFields = append(readFields, field)
@@ -511,11 +517,21 @@ func (t *bumpSchemaVersionCompactionTask) additiveReadSchema(diff *schemaBumpPhy
 	schema := t.plan.GetSchema()
 	readStructs := make([]*schemapb.StructArrayFieldSchema, 0, len(selectedStructs))
 	for _, st := range schema.GetStructArrayFields() {
-		if _, selected := selectedStructs[st.GetFieldID()]; selected {
-			// The reader needs at least one stored sibling for each partial
-			// struct. Keeping the whole membership lets it prefer an Arrow list.
-			readStructs = append(readStructs, st)
+		selected, ok := selectedStructs[st.GetFieldID()]
+		if !ok {
+			continue
 		}
+		// Read only the selected sub-fields plus one stored sibling, which
+		// gives the reader the element counts and row validity it fills the
+		// absent sub-fields from. The other siblings are not needed, and a
+		// VectorArray sibling would load its whole vector payload.
+		readStruct := proto.Clone(st).(*schemapb.StructArrayFieldSchema)
+		provider := structShapeProvider(st, diff.existingFields, selected)
+		readStruct.Fields = lo.Filter(readStruct.GetFields(), func(child *schemapb.FieldSchema, _ int) bool {
+			_, isSelected := selected[child.GetFieldID()]
+			return isSelected || (provider != nil && child.GetFieldID() == provider.GetFieldID())
+		})
+		readStructs = append(readStructs, readStruct)
 	}
 	return &schemapb.CollectionSchema{
 		Name:               schema.GetName(),
@@ -525,6 +541,39 @@ func (t *bumpSchemaVersionCompactionTask) additiveReadSchema(diff *schemaBumpPhy
 		EnableDynamicField: schema.GetEnableDynamicField(),
 		Properties:         schema.GetProperties(),
 	}, logicalInputFieldIDs, nil
+}
+
+// structShapeProvider picks the stored sibling that gives a partially stored
+// struct its element counts and row validity: a selected sub-field that is
+// stored needs no other sibling; otherwise a scalar Array (a native list
+// before a legacy one) before an ArrayOfVector, whose payload is the most
+// expensive to read, then the lowest field ID, as the sealed loader prefers.
+// It returns nil when the segment stores no sub-field of the struct.
+func structShapeProvider(st *schemapb.StructArrayFieldSchema, existingFields map[int64]struct{}, selected map[int64]struct{}) *schemapb.FieldSchema {
+	rank := func(child *schemapb.FieldSchema) int {
+		switch {
+		case child.GetDataType() == schemapb.DataType_Array && typeutil.IsNativeListArrayField(child):
+			return 0
+		case child.GetDataType() == schemapb.DataType_Array:
+			return 1
+		default:
+			return 2
+		}
+	}
+	var provider *schemapb.FieldSchema
+	for _, child := range st.GetFields() {
+		if _, stored := existingFields[child.GetFieldID()]; !stored {
+			continue
+		}
+		if _, isSelected := selected[child.GetFieldID()]; isSelected {
+			return child
+		}
+		if provider == nil || rank(child) < rank(provider) ||
+			(rank(child) == rank(provider) && child.GetFieldID() < provider.GetFieldID()) {
+			provider = child
+		}
+	}
+	return provider
 }
 
 func (t *bumpSchemaVersionCompactionTask) fullRewriteSegmentID() (int64, error) {
