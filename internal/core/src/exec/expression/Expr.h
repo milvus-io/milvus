@@ -27,7 +27,7 @@
 #include <type_traits>
 
 #include "common/Array.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
 #include "common/OpContext.h"
@@ -443,10 +443,10 @@ class SegmentExpr : public Expr {
                          : segment_->num_chunk_data(field_id, op_ctx_);
     }
 
-    std::shared_ptr<const IArrayOffsets>
-    GetArrayOffsets(FieldId field_id) const {
-        return snapshot_ ? snapshot_->GetArrayOffsets(field_id)
-                         : segment_->GetArrayOffsets(field_id);
+    std::shared_ptr<const IStructElementOffsets>
+    GetStructElementOffsets(FieldId field_id) const {
+        return snapshot_ ? snapshot_->GetStructElementOffsets(field_id)
+                         : segment_->GetStructElementOffsets(field_id);
     }
 
     // Pinned sealed chunk data view. When a request-scoped snapshot is bound,
@@ -825,7 +825,7 @@ class SegmentExpr : public Expr {
             return nullptr;
         }
 
-        // ArrayOffsets already proved that this row batch has no logical
+        // StructElementOffsets already proved that this row batch has no logical
         // elements. Do not fetch or inspect ARRAY payloads just to make
         // progress; nullptr is reserved for expression exhaustion.
         MoveCursor();
@@ -838,9 +838,9 @@ class SegmentExpr : public Expr {
     // and elem_count is the total number of elements in those rows
     std::pair<int64_t, int64_t>
     GetNextBatchSizeForElementLevel() {
-        auto array_offsets = GetArrayOffsets(field_id_);
-        AssertInfo(array_offsets != nullptr,
-                   "ArrayOffsets not found for field {}",
+        auto struct_element_offsets = GetStructElementOffsets(field_id_);
+        AssertInfo(struct_element_offsets != nullptr,
+                   "StructElementOffsets not found for field {}",
                    field_id_.get());
 
         // Use index cursor or data cursor based on execution path
@@ -869,9 +869,10 @@ class SegmentExpr : public Expr {
         }
 
         // Calculate elem_count based on global row positions
-        auto [elem_start, _] = array_offsets->ElementIDRangeOfRow(current_rows);
-        auto [elem_end, __] =
-            array_offsets->ElementIDRangeOfRow(current_rows + batch_rows);
+        auto [elem_start, _] =
+            struct_element_offsets->ElementIDRangeOfRow(current_rows);
+        auto [elem_end, __] = struct_element_offsets->ElementIDRangeOfRow(
+            current_rows + batch_rows);
         auto elem_count = elem_end - elem_start;
 
         return {batch_rows, elem_count};
@@ -1500,7 +1501,7 @@ class SegmentExpr : public Expr {
             for (size_t i = 0; i < row_offsets.size(); ++i) {
                 const auto index = index_at(i);
                 AssertInfo(!valid_data || valid_data[index],
-                           "ArrayOffsets references an element in null "
+                           "StructElementOffsets references an element in null "
                            "ARRAY row {}",
                            row_offsets[i]);
                 VisitArrayElementRun<ElementType>(
@@ -1654,9 +1655,9 @@ class SegmentExpr : public Expr {
             EnsureRawDataPrefetched();
         }
 
-        auto array_offsets = GetArrayOffsets(field_id_);
-        AssertInfo(array_offsets != nullptr,
-                   "ArrayOffsets not found for field {}",
+        auto struct_element_offsets = GetStructElementOffsets(field_id_);
+        AssertInfo(struct_element_offsets != nullptr,
+                   "StructElementOffsets not found for field {}",
                    field_id_.get());
 
         auto skip_index = segment_->GetSkipIndex();
@@ -1691,7 +1692,8 @@ class SegmentExpr : public Expr {
         // covers every consecutive element id of that row.
         auto resolve_run = [&](size_t pos) -> RunInfo {
             int32_t element_id = (*element_ids)[pos];
-            const auto row = array_offsets->ElementIDToRowInfo(element_id);
+            const auto row =
+                struct_element_offsets->ElementIDToRowInfo(element_id);
             int64_t max_run = std::min<int64_t>(
                 row.row_element_end - element_id, element_ids->size() - pos);
             int64_t run_len = 1;
@@ -1798,9 +1800,9 @@ class SegmentExpr : public Expr {
                       "Json element type is not supported for "
                       "element-level filtering");
 
-        auto array_offsets = GetArrayOffsets(field_id_);
-        AssertInfo(array_offsets != nullptr,
-                   "ArrayOffsets not found for field {}",
+        auto struct_element_offsets = GetStructElementOffsets(field_id_);
+        AssertInfo(struct_element_offsets != nullptr,
+                   "StructElementOffsets not found for field {}",
                    field_id_.get());
 
         int64_t processed_rows = 0;
@@ -1827,9 +1829,10 @@ class SegmentExpr : public Expr {
 
             auto get_element_count = [&]() {
                 const auto start_range =
-                    array_offsets->ElementIDRangeOfRow(row_start);
+                    struct_element_offsets->ElementIDRangeOfRow(row_start);
                 const auto end_range =
-                    array_offsets->ElementIDRangeOfRow(row_start + size);
+                    struct_element_offsets->ElementIDRangeOfRow(row_start +
+                                                                size);
                 return int64_t{end_range.first - start_range.first};
             };
 
@@ -1837,7 +1840,7 @@ class SegmentExpr : public Expr {
             const bool chunk_active =
                 !skip_func || !skip_func(*skip_index, field_id_, i);
             if (!chunk_active) {
-                // ArrayOffsets defines the logical flattened address space:
+                // StructElementOffsets defines the logical flattened address space:
                 // null ARRAY rows contribute zero elements even if storage
                 // retains a physical payload. Derive the skipped span without
                 // reading that payload.
@@ -2263,7 +2266,7 @@ class SegmentExpr : public Expr {
             return valid_result;
         }
 
-        auto offsets = GetArrayOffsets(field_id_);
+        auto offsets = GetStructElementOffsets(field_id_);
         if (offsets && offsets->HasRowValidity()) {
             AssertInfo(row_count <= offsets->GetRowCount(),
                        "struct validity row count {} exceeds mapping rows {}",
@@ -2426,15 +2429,16 @@ class SegmentExpr : public Expr {
 
         if (need_element_slicing) {
             // Nested index with element-level result: batch by rows, slice elements
-            auto array_offsets = GetArrayOffsets(field_id_);
+            auto struct_element_offsets = GetStructElementOffsets(field_id_);
 
             auto data_pos = current_index_chunk_pos_;
             auto batch_rows = std::min(batch_size_, active_count_ - data_pos);
 
             // Calculate corresponding element range
-            auto [elem_start, _] = array_offsets->ElementIDRangeOfRow(data_pos);
-            auto [elem_end, __] =
-                array_offsets->ElementIDRangeOfRow(data_pos + batch_rows);
+            auto [elem_start, _] =
+                struct_element_offsets->ElementIDRangeOfRow(data_pos);
+            auto [elem_end, __] = struct_element_offsets->ElementIDRangeOfRow(
+                data_pos + batch_rows);
             auto elem_count = elem_end - elem_start;
 
             result.append(*cached_index_chunk_res_, elem_start, elem_count);
@@ -3137,14 +3141,15 @@ class SegmentExpr : public Expr {
         // The prefetch worker can race with compound-expression cursor moves,
         // so inspect immutable initial-batch geometry rather than live cursor
         // state. A leading zero-element batch must not touch ARRAY payloads.
-        auto array_offsets = GetArrayOffsets(field_id_);
-        AssertInfo(array_offsets != nullptr,
-                   "ArrayOffsets not found for field {}",
+        auto struct_element_offsets = GetStructElementOffsets(field_id_);
+        AssertInfo(struct_element_offsets != nullptr,
+                   "StructElementOffsets not found for field {}",
                    field_id_.get());
         const auto initial_rows = std::min(batch_size_, active_count_);
-        const auto elem_start = array_offsets->ElementIDRangeOfRow(0).first;
+        const auto elem_start =
+            struct_element_offsets->ElementIDRangeOfRow(0).first;
         const auto elem_end =
-            array_offsets->ElementIDRangeOfRow(initial_rows).first;
+            struct_element_offsets->ElementIDRangeOfRow(initial_rows).first;
         return elem_end > elem_start;
     }
 

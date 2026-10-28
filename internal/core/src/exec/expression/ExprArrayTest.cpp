@@ -605,9 +605,9 @@ class ArrayEqualityCountingSnapshot : public SegmentReadSnapshot {
     get_row_count() const override {
         return snapshot_->get_row_count();
     }
-    std::shared_ptr<const IArrayOffsets>
-    GetArrayOffsets(FieldId field) const override {
-        return snapshot_->GetArrayOffsets(field);
+    std::shared_ptr<const IStructElementOffsets>
+    GetStructElementOffsets(FieldId field) const override {
+        return snapshot_->GetStructElementOffsets(field);
     }
     SchemaPtr
     get_schema_snapshot() const override {
@@ -2388,7 +2388,7 @@ const std::vector<proto::plan::OpType> kArrayLengthOps = {
 }  // namespace
 
 // array_length on a nullable scalar ARRAY field (and a struct sub-field
-// sharing the struct's offsets) is served straight from IArrayOffsets: the
+// sharing the struct's offsets) is served straight from IStructElementOffsets: the
 // result must be bit-identical to the raw-data semantics (NULL row ->
 // res=false/valid=false; empty [] is a valid length-0 array) over sealed AND
 // growing segments, all compare ops incl. the N=0 boundary, sequential

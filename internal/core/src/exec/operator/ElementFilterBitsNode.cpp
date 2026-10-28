@@ -26,7 +26,7 @@
 #include "NamedType/named_type_impl.hpp"
 #include "bitset/bitset.h"
 #include "bitset/detail/element_vectorized.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/Schema.h"
@@ -92,15 +92,16 @@ PhyElementFilterBitsNode::GetOutput() {
     auto schema = query_context_->get_schema_snapshot();
     auto& field_meta = schema->GetFirstArrayFieldInStruct(struct_name_);
     auto field_id = field_meta.get_id();
-    auto array_offsets = query_context_->get_array_offsets(field_id);
-    if (array_offsets == nullptr) {
+    auto struct_element_offsets =
+        query_context_->get_struct_element_offsets(field_id);
+    if (struct_element_offsets == nullptr) {
         ThrowInfo(ErrorCode::UnexpectedError,
-                  "IArrayOffsets not found for field {}",
+                  "IStructElementOffsets not found for field {}",
                   field_id.get());
     }
-    query_context_->set_array_offsets(array_offsets);
-    auto [first_elem, _] =
-        array_offsets->ElementIDRangeOfRow(query_context_->get_active_count());
+    query_context_->set_struct_element_offsets(struct_element_offsets);
+    auto [first_elem, _] = struct_element_offsets->ElementIDRangeOfRow(
+        query_context_->get_active_count());
     query_context_->set_active_element_count(first_elem);
 
     if (first_elem == 0) {
@@ -125,7 +126,7 @@ PhyElementFilterBitsNode::GetOutput() {
     // Step 3: Evaluate element expression
     // Use offset mode or full mode based on selectivity
     auto [expr_result, valid_expr_result] = EvaluateElementExpression(
-        doc_bitset, doc_bitset_valid, array_offsets.get());
+        doc_bitset, doc_bitset_valid, struct_element_offsets.get());
 
     // Step 4: Set query context
     query_context_->set_struct_name(struct_name_);
@@ -141,14 +142,14 @@ PhyElementFilterBitsNode::GetOutput() {
                                                                  1000);
 
     auto filtered_count = expr_result.count();
-    tracer::AddEvent(
-        fmt::format("struct_name: {}, total_elements: {}, output_rows: {}, "
-                    "filtered: {}, cost_us: {}",
-                    struct_name_,
-                    array_offsets->GetTotalElementCount(),
-                    array_offsets->GetTotalElementCount() - filtered_count,
-                    filtered_count,
-                    total_cost));
+    tracer::AddEvent(fmt::format(
+        "struct_name: {}, total_elements: {}, output_rows: {}, "
+        "filtered: {}, cost_us: {}",
+        struct_name_,
+        struct_element_offsets->GetTotalElementCount(),
+        struct_element_offsets->GetTotalElementCount() - filtered_count,
+        filtered_count,
+        total_cost));
 
     std::vector<VectorPtr> col_res;
     col_res.push_back(std::make_shared<ColumnVector>(
@@ -160,7 +161,7 @@ std::pair<TargetBitmap, TargetBitmap>
 PhyElementFilterBitsNode::EvaluateElementExpression(
     const TargetBitmapView& doc_bitset,
     const TargetBitmapView& doc_bitset_valid,
-    const IArrayOffsets* array_offsets) {
+    const IStructElementOffsets* struct_element_offsets) {
     tracer::AutoSpan span("PhyElementFilterBitsNode::EvaluateElementExpression",
                           tracer::GetRootSpan(),
                           true);
@@ -189,7 +190,7 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
         // Offset mode: convert doc_bitset to element offsets and evaluate only on those
         // Offset mode processes all offsets in one pass
         FixedVector<int32_t> element_offsets =
-            array_offsets->RowBitsetToElementOffsets(doc_bitset, 0);
+            struct_element_offsets->RowBitsetToElementOffsets(doc_bitset, 0);
 
         tracer::AddEvent(fmt::format("offset_mode, input_elements: {}",
                                      element_offsets.size()));
@@ -290,8 +291,9 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
                    total_elements);
 
         // Convert doc_bitset to element bitset
-        auto [elem_bitset, _] = array_offsets->RowBitsetToElementBitset(
-            doc_bitset, doc_bitset_valid, 0);
+        auto [elem_bitset, _] =
+            struct_element_offsets->RowBitsetToElementBitset(
+                doc_bitset, doc_bitset_valid, 0);
 
         // AND expression result with element bitset from doc filter
         // eval_bitset: true means element matches expression

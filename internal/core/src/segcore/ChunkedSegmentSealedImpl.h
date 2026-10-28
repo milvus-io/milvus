@@ -38,7 +38,7 @@
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Utils.h"
 #include "common/Array.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/BitsetView.h"
 #include "common/Chunk.h"
 #include "common/EasyAssert.h"
@@ -269,8 +269,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                          FieldId field_id,
                          const std::string& nested_path) const override;
 
-    std::shared_ptr<const IArrayOffsets>
-    GetArrayOffsets(FieldId field_id) const override;
+    std::shared_ptr<const IStructElementOffsets>
+    GetStructElementOffsets(FieldId field_id) const override;
 
     void
     BulkGetJsonData(milvus::OpContext* op_ctx,
@@ -327,10 +327,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     struct RuntimeResourceState {
         std::unordered_map<FieldId, std::shared_ptr<ChunkedColumnInterface>>
             fields;
-        std::unordered_map<std::string, std::shared_ptr<ArrayOffsetsSealed>>
-            struct_to_array_offsets;
-        std::unordered_map<FieldId, std::shared_ptr<ArrayOffsetsSealed>>
-            array_offsets_map;
+        std::unordered_map<std::string,
+                           std::shared_ptr<StructElementOffsetsSealed>>
+            struct_to_element_offsets;
+        std::unordered_map<FieldId, std::shared_ptr<StructElementOffsetsSealed>>
+            struct_element_offsets_map;
         std::unordered_map<FieldId, index::CacheIndexBasePtr> scalar_indexings;
         std::unordered_map<FieldId, SealedIndexingEntryPtr> vector_indexings;
         std::unordered_map<FieldId, std::shared_ptr<const VecIndexConfig>>
@@ -400,17 +401,17 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // from the state (no segment pointer). See CaptureReadSnapshot().
     class SealedReadSnapshot;
 
-    static std::shared_ptr<const IArrayOffsets>
-    GetArrayOffsetsFromState(const PublishedSegmentState& state,
-                             FieldId field_id);
+    static std::shared_ptr<const IStructElementOffsets>
+    GetStructElementOffsetsFromState(const PublishedSegmentState& state,
+                                     FieldId field_id);
 
     // Complete mappings while the new runtime is still private, after every
     // column in the load/reopen batch has been staged. Queries only read them.
     static void
-    PrepareArrayOffsets(const Schema& schema,
-                        const SegmentLoadInfo& load_info,
-                        RuntimeResourceState& runtime,
-                        milvus::OpContext* op_ctx);
+    PrepareStructElementOffsets(const Schema& schema,
+                                const SegmentLoadInfo& load_info,
+                                RuntimeResourceState& runtime,
+                                milvus::OpContext* op_ctx);
 
     static std::shared_ptr<const RuntimeResourceState>
     BuildRuntimeResourceState();
@@ -617,7 +618,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     find_first_n_element(
         int64_t limit,
         const BitsetTypeView& element_bitset,
-        const IArrayOffsets* array_offsets,
+        const IStructElementOffsets* struct_element_offsets,
         const std::optional<QueryIteratorCursor>& cursor) const override;
 
     // Calculate: output[i] = Vec[seg_offset[i]]
@@ -1694,10 +1695,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                 PublishMode publish_mode = PublishMode::Drain) {
             // All load futures have completed. Do the raw read before taking
             // the publication lease, so old queries can keep using their state.
-            segment_.PrepareArrayOffsets(*staged_state_->schema,
-                                         *staged_state_->load_info,
-                                         *runtime_,
-                                         op_ctx);
+            segment_.PrepareStructElementOffsets(*staged_state_->schema,
+                                                 *staged_state_->load_info,
+                                                 *runtime_,
+                                                 op_ctx);
             std::vector<SealedIndexingEntryPtr> retired_indexings;
             std::vector<index::CacheIndexBasePtr> retired_cache_indexings;
             std::shared_ptr<PublishedSegmentState> next;
@@ -1944,19 +1945,19 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                                 const SegmentLoadInfo* load_info) const;
 
     static void
-    InvalidateStaleStructArrayOffsets(const SchemaPtr& current_schema,
-                                      const SchemaPtr& target_schema,
-                                      RuntimeResourceState& runtime);
+    InvalidateStaleStructElementOffsets(const SchemaPtr& current_schema,
+                                        const SchemaPtr& target_schema,
+                                        RuntimeResourceState& runtime);
 
     void
-    RegisterArrayOffsetsForField(const FieldMeta& field_meta,
-                                 RuntimeResourceState& runtime,
-                                 bool is_replace = false);
+    RegisterStructElementOffsetsForField(const FieldMeta& field_meta,
+                                         RuntimeResourceState& runtime,
+                                         bool is_replace = false);
 
     void
-    EnsureArrayOffsetsForStructField(const FieldMeta& field_meta,
-                                     int64_t row_count,
-                                     RuntimeResourceState& runtime);
+    EnsureStructElementOffsetsForField(const FieldMeta& field_meta,
+                                       int64_t row_count,
+                                       RuntimeResourceState& runtime);
 
     void
     FillDefaultValueFields(const std::vector<FieldId>& field_ids,
@@ -2332,9 +2333,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return FieldAccessible(field_id);
     }
 
-    std::shared_ptr<const IArrayOffsets>
-    TestGetArrayOffsets(FieldId field_id) const {
-        return GetArrayOffsets(field_id);
+    std::shared_ptr<const IStructElementOffsets>
+    TestGetStructElementOffsets(FieldId field_id) const {
+        return GetStructElementOffsets(field_id);
     }
 
     std::shared_ptr<const SegmentLoadInfo>
