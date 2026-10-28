@@ -105,6 +105,8 @@ const (
 	AbortAction  = "abort"
 )
 
+const HTTPHeaderFloatVectorEncoding = "Accept-Type-Float-Vector-Encoding"
+
 const (
 	ContextRequest                = "request"
 	ContextResponse               = "response"
