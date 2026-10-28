@@ -262,6 +262,11 @@ func expandSnapshotImportFiles(
 	if err := importutilv2.ValidateSnapshotSourceOptions(options); err != nil {
 		return nil, nil, nil, err
 	}
+	// An empty map means the job cuts at its single end_ts.
+	channelEndTS, err := importutilv2.GetSnapshotChannelEndTs(options)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	if cm == nil {
 		return nil, nil, nil, merr.WrapErrServiceInternalMsg("chunk manager cannot be nil")
 	}
@@ -342,6 +347,9 @@ func expandSnapshotImportFiles(
 	sort.Slice(segments, func(i, j int) bool {
 		return segments[i].GetSegmentId() < segments[j].GetSegmentId()
 	})
+	if err := validateSnapshotChannelEndTS(channelEndTS, segments); err != nil {
+		return nil, nil, nil, err
+	}
 	if len(segments) > paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt() {
 		return nil, nil, nil, merr.WrapErrImportFailedMsg("The max number of import files should not exceed %d, but got %d",
 			paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(segments))
@@ -411,9 +419,12 @@ func expandSnapshotImportFiles(
 		// never choose delete semantics based on where the deletes are stored.
 		needsSourceContext = needsSourceContext || segment.GetCommitTimestamp() != 0
 	}
+	// Per-channel end bounds need each file's source channel even when the
+	// collection has no deletes to bind.
+	withSourceScope := len(channelEndTS) != 0
 	var l0Sources []*internalpb.SnapshotImportL0Source
-	if needsSourceContext {
-		l0Sources, err = attachSnapshotImportSources(ctx, cm, metadataPath, snapshot, segments, applicable, result)
+	if needsSourceContext || withSourceScope {
+		l0Sources, err = attachSnapshotImportSources(ctx, cm, metadataPath, snapshot, segments, applicable, result, withSourceScope)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -430,7 +441,7 @@ func expandSnapshotImportFiles(
 		if partitionMapping != nil {
 			version += 2
 		}
-		if len(l0Sources) != 0 {
+		if len(l0Sources) != 0 || withSourceScope {
 			version += 4
 		}
 		for i, file := range result {
@@ -556,6 +567,28 @@ func snapshotImportL0Segments(all, data []*datapb.SegmentDescription) ([]*datapb
 	return result, nil
 }
 
+// validateSnapshotChannelEndTS refuses a cut that does not name the channel of
+// every data segment. A channel left out would import its bundle through the
+// freeze point, and the CDC would replay that tail again once replication
+// resumes; failing the job here is the loud version of that mistake.
+func validateSnapshotChannelEndTS(bounds map[string]uint64, segments []*datapb.SegmentDescription) error {
+	if len(bounds) == 0 {
+		return nil
+	}
+	for _, segment := range segments {
+		channel := segment.GetChannelName()
+		if strings.TrimSpace(channel) == "" {
+			return merr.WrapErrImportFailedMsg(
+				"snapshot segment %d carries no source channel for the per-channel end bounds", segment.GetSegmentId())
+		}
+		if _, ok := importutilv2.SnapshotChannelEnd(bounds, channel); !ok {
+			return merr.WrapErrImportFailedMsg(
+				"snapshot end bounds do not cover source channel %s of segment %d", channel, segment.GetSegmentId())
+		}
+	}
+	return nil
+}
+
 // Attach timestamp context per segment, but retain L0 paths once per source
 // scope. Channel-wide deletes stay separate in the durable job and are merged
 // with partition-local deletes only when constructing a worker task.
@@ -563,6 +596,7 @@ func snapshotImportL0Segments(all, data []*datapb.SegmentDescription) ([]*datapb
 // plan with real options after external/routing transforms and ID allocation.
 func attachSnapshotImportSources(ctx context.Context, cm milvusstorage.ChunkManager, metadataPath string,
 	snapshot *storage.SnapshotData, data, deltas []*datapb.SegmentDescription, files []*internalpb.ImportFile,
+	withSourceScope bool,
 ) ([]*internalpb.SnapshotImportL0Source, error) {
 	type scope struct {
 		channel     string
@@ -586,7 +620,10 @@ func attachSnapshotImportSources(ctx context.Context, cm milvusstorage.ChunkMana
 		source := &internalpb.SnapshotImportSource{
 			Version: 1, ManifestPath: segment.GetManifestPath(), SourceCommitTimestamp: segment.GetCommitTimestamp(),
 		}
-		if len(deltas) != 0 {
+		// Deletes bind to a scope; a per-channel end bound resolves through one.
+		// Either reason rides the same descriptor family, and a scope with no
+		// deletes gets an empty inventory rather than none.
+		if len(deltas) != 0 || withSourceScope {
 			source.Version = 5
 			source.SourceChannel = segment.GetChannelName()
 			source.SourcePartitionId = segment.GetPartitionId()

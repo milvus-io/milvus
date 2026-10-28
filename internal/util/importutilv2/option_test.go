@@ -434,3 +434,53 @@ func TestValidateNoDuplicateKeys_ScalesLinearly(t *testing.T) {
 	assert.Less(t, elapsed, 10*time.Second,
 		"validating %d options took %s -- a pairwise scan is back", n, elapsed)
 }
+
+// A secondary restore cuts a snapshot bundle per channel, at the source's own
+// flush boundary: the map is keyed by physical channel but accepted from either
+// spelling, because the segments name virtual channels.
+func TestSnapshotChannelEndTsOptions(t *testing.T) {
+	base := Options{{Key: BackupFlag, Value: "true"}, {Key: SourceType, Value: SourceTypeSnapshot}}
+	now := tsoutil.ComposeTSByTime(time.Now())
+	later := tsoutil.ComposeTSByTime(time.Now().Add(time.Second))
+
+	bounds, err := GetSnapshotChannelEndTs(base)
+	assert.NoError(t, err)
+	assert.Nil(t, bounds)
+
+	option := &commonpb.KeyValuePair{
+		Key:   SnapshotChannelEndTs,
+		Value: fmt.Sprintf(`{"dml_0":"%d","dml_1_4600v0":"%d"}`, now, later),
+	}
+	bounds, err = GetSnapshotChannelEndTs(append(base, option))
+	assert.NoError(t, err)
+	assert.Equal(t, map[string]uint64{"dml_0": now, "dml_1": later}, bounds)
+
+	end, ok := SnapshotChannelEnd(bounds, "dml_1_4600v0")
+	assert.True(t, ok)
+	assert.Equal(t, later, end)
+	_, ok = SnapshotChannelEnd(bounds, "dml_9_4600v0")
+	assert.False(t, ok)
+	_, ok = SnapshotChannelEnd(nil, "dml_0_4600v0")
+	assert.False(t, ok)
+
+	for _, value := range []string{
+		"", "null", "[]", "{}",
+		fmt.Sprintf(`{"":"%d"}`, now),
+		fmt.Sprintf(`{"dml_0":%d}`, now),
+		fmt.Sprintf(`{"dml_0":"%d"} {}`, now),
+		`{"dml_0":"not-a-timestamp"}`,
+		`{"dml_0":"1"}`,
+		fmt.Sprintf(`{"dml_0":"%d","dml_0_4600v0":"%d"}`, now, later),
+	} {
+		t.Run(value[:min(len(value), 40)], func(t *testing.T) {
+			_, err := GetSnapshotChannelEndTs(append(base, &commonpb.KeyValuePair{Key: SnapshotChannelEndTs, Value: value}))
+			assert.ErrorIs(t, err, merr.ErrImportFailed)
+			assert.Error(t, ValidateSnapshotSourceRequest(append(base, &commonpb.KeyValuePair{Key: SnapshotChannelEndTs, Value: value})))
+		})
+	}
+
+	// The bounds belong to a snapshot source and to exactly one option.
+	assert.NoError(t, ValidateSnapshotSourceRequest(append(base, option)))
+	assert.Error(t, ValidateSnapshotSourceRequest(Options{option}))
+	assert.Error(t, ValidateSnapshotSourceRequest(append(base, option, option)))
+}

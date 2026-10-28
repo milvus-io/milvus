@@ -61,6 +61,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -787,7 +788,7 @@ func TestSnapshotImportL0URIRead(t *testing.T) {
 	}}
 	files := []*internalpb.ImportFile{{}}
 	l0Sources, err := attachSnapshotImportSources(ctx, cm, "s3://source/"+strings.TrimPrefix(root, "/")+"/snapshots/1/metadata/2.json",
-		snapshot, data, deltas, files)
+		snapshot, data, deltas, files, false)
 	require.NoError(t, err)
 	l0Source, err := importutilv2.SnapshotTaskL0Source(files, l0Sources)
 	require.NoError(t, err)
@@ -850,7 +851,7 @@ func TestSnapshotImportL0URIValidation(t *testing.T) {
 			defer patch.UnPatch()
 			cm := milvusstorage.NewRemoteChunkManagerForTesting(nil, "source", "root")
 			files := []*internalpb.ImportFile{{}}
-			l0Sources, err := attachSnapshotImportSources(context.Background(), cm, tc.metadataURI, snapshot, data, deltas, files)
+			l0Sources, err := attachSnapshotImportSources(context.Background(), cm, tc.metadataURI, snapshot, data, deltas, files, false)
 			if tc.name == "packed_alias" || tc.name == "decoder_alias" {
 				require.NoError(t, err)
 				require.Equal(t, []string{packed.MarshalManifestPath("root/files/l0", 1)}, l0Sources[0].ManifestL0Paths)
@@ -1389,7 +1390,7 @@ func TestSnapshotImportL0PlanErrors(t *testing.T) {
 			patch := mockey.Mock(packed.GetDeltaLogPathsFromManifest).Return(paths, nil).Build()
 			defer patch.UnPatch()
 			_, err := attachSnapshotImportSources(ctx, milvusstorage.NewLocalChunkManager(), metadataPath,
-				snapshot, data, deltas, []*internalpb.ImportFile{{}})
+				snapshot, data, deltas, []*internalpb.ImportFile{{}}, false)
 			if mode == "conflicting_decoder" {
 				require.NoError(t, err, "the worker detects conflicts after manifest resolution")
 				require.Zero(t, patch.Times())
@@ -1450,7 +1451,7 @@ func TestSnapshotSharedL0PlanAndTasks(t *testing.T) {
 		[]*datapb.SegmentDescription{{
 			PartitionId: common.AllPartitionsID, ChannelName: "source", StorageVersion: milvusstorage.StorageV1,
 			Deltalogs: []*datapb.FieldBinlog{{Binlogs: logs}},
-		}}, files)
+		}}, files, false)
 	require.NoError(t, err, "300 segments must not replicate the same 10 L0 paths 300 times")
 	require.Len(t, sources, 2, "one empty partition scope plus one channel-wide inventory")
 	options := snapshotImportTestOptions()
@@ -2809,4 +2810,61 @@ func TestSnapshotImportManifestDeleteTimestamps(t *testing.T) {
 			}
 		}
 	}
+}
+
+// A per-channel end bound needs each file's source channel, which the same
+// descriptor that binds deletes carries. A scope with no deletes gets an empty
+// inventory rather than none, so the plan still validates.
+func TestExpandSnapshotImportChannelEndTs(t *testing.T) {
+	patchSnapshotImportInstance(t)
+
+	const uri = "s3://source/root/snapshots/1/metadata/2.json"
+	// The expansion sorts by segment id; the fixture lists segment 20 first.
+	channelOf := map[int64]string{10: "dml_0_4600v0", 20: "dml_1_4600v0"}
+	channels := []string{channelOf[10], channelOf[20]}
+	snapshot := snapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
+	for _, segment := range snapshot.Segments {
+		segment.ChannelName = channelOf[segment.GetSegmentId()]
+	}
+	read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
+	defer read.UnPatch()
+
+	option := func(value string) *commonpb.KeyValuePair {
+		return &commonpb.KeyValuePair{Key: importutilv2.SnapshotChannelEndTs, Value: value}
+	}
+	now := tsoutil.ComposeTSByTime(time.Now())
+	later := tsoutil.ComposeTSByTime(time.Now().Add(time.Second))
+	opts := append(snapshotImportTestOptions(),
+		option(fmt.Sprintf(`{"dml_0":"%d","dml_1":"%d"}`, now, later)))
+
+	files, normalized, l0Sources, err := expandSnapshotImportFiles(context.Background(), nil,
+		milvusstorage.NewLocalChunkManager(), snapshotImportTestSchema(), uri, opts, &datapb.SnapshotMetadata{})
+	require.NoError(t, err)
+	require.NoError(t, importutilv2.ValidateSnapshotImportFiles(files, normalized))
+	require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, normalized, l0Sources))
+	require.Len(t, files, len(channels))
+	for i, channel := range channels {
+		source := files[i].GetSnapshotSource()
+		require.Empty(t, files[i].GetPaths())
+		require.EqualValues(t, 5, source.GetVersion())
+		require.Equal(t, channel, source.GetSourceChannel())
+		shared, err := importutilv2.SnapshotTaskL0Source(files[i:i+1], l0Sources)
+		require.NoError(t, err, "a scope without deletes still binds")
+		require.Empty(t, shared.GetManifestL0Paths())
+		require.Empty(t, shared.GetLegacyL0Deltalogs())
+	}
+
+	// A channel left out of the map would import its bundle past the point
+	// replication resumes, so the job fails instead.
+	_, _, _, err = expandSnapshotImportFiles(context.Background(), nil,
+		milvusstorage.NewLocalChunkManager(), snapshotImportTestSchema(), uri,
+		append(snapshotImportTestOptions(), option(fmt.Sprintf(`{"dml_0":"%d"}`, now))), &datapb.SnapshotMetadata{})
+	require.ErrorContains(t, err, "do not cover source channel dml_1_4600v0")
+
+	// Map keys are physical channels, as the source's flush boundaries are
+	// recorded; a virtual channel spelling resolves to the same bound.
+	snapshot.Segments[0].ChannelName = ""
+	_, _, _, err = expandSnapshotImportFiles(context.Background(), nil,
+		milvusstorage.NewLocalChunkManager(), snapshotImportTestSchema(), uri, opts, &datapb.SnapshotMetadata{})
+	require.ErrorContains(t, err, "carries no source channel")
 }

@@ -1286,3 +1286,27 @@ func TestImportNewReader(t *testing.T) {
 	}
 	checkFunc("unexpected file type", req, options)
 }
+
+// A file's own channel bounds it when the job names per-channel bounds, and
+// the lower of that bound and the job's single end_ts applies.
+func TestSnapshotChannelEnd(t *testing.T) {
+	const jobEnd = uint64(500)
+
+	end, err := snapshotChannelEnd(jobEnd, nil, &internalpb.SnapshotImportSource{SourceChannel: "dml_0_4600v0"})
+	require.NoError(t, err)
+	assert.Equal(t, jobEnd, end)
+
+	end, err = snapshotChannelEnd(jobEnd, map[string]uint64{"dml_0": 100}, &internalpb.SnapshotImportSource{SourceChannel: "dml_0_4600v0"})
+	require.NoError(t, err)
+	assert.Equal(t, uint64(100), end)
+
+	end, err = snapshotChannelEnd(jobEnd, map[string]uint64{"dml_0": 900}, &internalpb.SnapshotImportSource{SourceChannel: "dml_0_4600v0"})
+	require.NoError(t, err)
+	assert.Equal(t, jobEnd, end)
+
+	_, err = snapshotChannelEnd(jobEnd, map[string]uint64{"dml_0": 100}, &internalpb.SnapshotImportSource{})
+	assert.ErrorContains(t, err, "names no source channel")
+
+	_, err = snapshotChannelEnd(jobEnd, map[string]uint64{"dml_0": 100}, &internalpb.SnapshotImportSource{SourceChannel: "dml_9_4600v0"})
+	assert.ErrorContains(t, err, "no end bound for source channel")
+}

@@ -58,6 +58,9 @@ type ReaderFactory struct {
 	cfg     *indexpb.StorageConfig
 	options Options
 	storage func() (readerStorage, error)
+	// channelEndTS is the job's per-channel end bounds, parsed once and shared
+	// by every file the task reads. Empty when the job cuts at one timestamp.
+	channelEndTS func() (map[string]uint64, error)
 }
 
 type readerStorage struct {
@@ -69,6 +72,9 @@ type readerStorage struct {
 func NewReaderFactory(ctx context.Context, cm storage.ChunkManager, cfg *indexpb.StorageConfig, options Options) *ReaderFactory {
 	return &ReaderFactory{
 		cm: cm, cfg: cfg, options: options,
+		channelEndTS: sync.OnceValues(func() (map[string]uint64, error) {
+			return GetSnapshotChannelEndTs(options)
+		}),
 		storage: sync.OnceValues(func() (readerStorage, error) {
 			// Use the task context, never the first file's context. Cache a
 			// resolution error for this attempt too; a retry creates a new factory.
@@ -125,7 +131,19 @@ func (f *ReaderFactory) NewReader(ctx context.Context, schema *schemapb.Collecti
 			return nil, err
 		}
 	}
-	return newReader(ctx, resolved.cm, schema, file, f.options, bufferSize, resolved.cfg, deleteBudget, shared, resolved.encryption)
+	bounds, err := f.channelEnd()
+	if err != nil {
+		return nil, err
+	}
+	return newReader(ctx, resolved.cm, schema, file, f.options, bufferSize, resolved.cfg, deleteBudget, shared, resolved.encryption, bounds)
+}
+
+// channelEnd is the job's per-channel end bounds, parsed on first use.
+func (f *ReaderFactory) channelEnd() (map[string]uint64, error) {
+	if f.channelEndTS == nil {
+		return nil, nil
+	}
+	return f.channelEndTS()
 }
 
 // PrepareSnapshotDeletes is task-local and shared by PreImport and Import. The
@@ -171,10 +189,34 @@ func NewReader(ctx context.Context,
 	return NewReaderFactory(ctx, cm, storageConfig, options).NewReader(ctx, schema, importFile, bufferSize, snapshotDeleteBudget, nil)
 }
 
+// snapshotChannelEnd applies the job's per-channel end bounds to one source
+// file. A bundle frozen after the source's flush can hold rows past the
+// position the restore's replay anchored replication at, so the restore names
+// each channel's boundary and the import stops there: what it reads is exactly
+// what the checkpoint covers, and the CDC's replay of the tail does not meet a
+// second copy of the same rows. Both bounds are upper bounds, so the lower one
+// wins.
+func snapshotChannelEnd(jobEnd uint64, bounds map[string]uint64, source *internalpb.SnapshotImportSource) (uint64, error) {
+	if len(bounds) == 0 {
+		return jobEnd, nil
+	}
+
+	channel := source.GetSourceChannel()
+	if channel == "" {
+		return 0, merr.WrapErrServiceInternalMsg("snapshot import carries per-channel end bounds but the file names no source channel")
+	}
+	end, ok := SnapshotChannelEnd(bounds, channel)
+	if !ok {
+		return 0, merr.WrapErrServiceInternalMsg("snapshot import carries no end bound for source channel %s", channel)
+	}
+
+	return min(jobEnd, end), nil
+}
+
 func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema,
 	importFile *internalpb.ImportFile, options Options, bufferSize int, storageConfig *indexpb.StorageConfig,
 	snapshotDeleteBudget int64, shared *binlog.SnapshotL0Deletes,
-	encryption binlog.SourceEncryption,
+	encryption binlog.SourceEncryption, channelEndTS map[string]uint64,
 ) (Reader, error) {
 	source := importFile.GetSnapshotSource()
 	if shared != nil {
@@ -198,6 +240,10 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 				return nil, err
 			}
 			if source != nil {
+				tsEnd, err = snapshotChannelEnd(tsEnd, channelEndTS, importFile.GetSnapshotSource())
+				if err != nil {
+					return nil, err
+				}
 				if shared != nil {
 					return binlog.NewStorageV3ManifestReaderWithSharedL0(ctx, cm, schema, storageConfig,
 						source.GetManifestPath(), tsStart, tsEnd, bufferSize, encryption, source, snapshotDeleteBudget, shared, validate)

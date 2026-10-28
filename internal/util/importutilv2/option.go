@@ -76,6 +76,19 @@ const (
 	// SnapshotLayout freezes the path boundary for both worker phases.
 	SnapshotLayout = "_snapshot_layout"
 
+	// SnapshotChannelEndTs is the per-channel end bound of a snapshot import: a
+	// json object of source channel to hybrid timestamp. A snapshot bundle is
+	// frozen after the source's flush, so it can hold rows past the position the
+	// restore anchored replication at; naming each channel's bound here lets the
+	// import drop that channel's tail instead of importing rows the CDC will
+	// replay a second time. A single EndTs cannot express this: the channels are
+	// flushed at their own positions.
+	//
+	// Coordinator-owned like the two reference keys: only a replay that knows
+	// the source's channel boundaries, such as a secondary restore forwarding
+	// them from the backup, sets it.
+	SnapshotChannelEndTs = "_snapshot_end_ts"
+
 	// L0Import indicates whether to import l0 segments only.
 	L0Import = "l0_import"
 
@@ -207,6 +220,66 @@ func IsBackup(options Options) bool {
 	return true
 }
 
+// GetSnapshotChannelEndTs returns the per-channel end bounds of a snapshot
+// import, keyed by physical channel, or nil when the job cuts every channel at
+// the job's single end_ts. Channel keys are normalized to their physical
+// channel, so a caller may name either a physical or a virtual channel.
+func GetSnapshotChannelEndTs(options Options) (map[string]uint64, error) {
+	value, err := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotChannelEndTs, options)
+	if err != nil {
+		return nil, nil
+	}
+	if !IsSnapshotSource(options) {
+		return nil, merr.WrapErrImportFailedMsg("%s requires %s=%s",
+			SnapshotChannelEndTs, SourceType, SourceTypeSnapshot)
+	}
+
+	var named map[string]string
+	if err := json.Unmarshal([]byte(value), &named); err != nil {
+		return nil, merr.WrapErrImportFailedMsg("%s must be a JSON object of channel to timestamp: %s",
+			SnapshotChannelEndTs, err)
+	}
+	if len(named) == 0 {
+		return nil, merr.WrapErrImportFailedMsg("%s must name at least one channel", SnapshotChannelEndTs)
+	}
+
+	bounds := make(map[string]uint64, len(named))
+	for channel, raw := range named {
+		if strings.TrimSpace(channel) == "" {
+			return nil, merr.WrapErrImportFailedMsg("%s contains an empty channel name", SnapshotChannelEndTs)
+		}
+		ts, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			return nil, merr.WrapErrImportFailedMsg("%s: channel %s has an unparsable timestamp %q",
+				SnapshotChannelEndTs, channel, raw)
+		}
+		if !tsoutil.IsValidHybridTs(ts) {
+			return nil, merr.WrapErrImportFailedMsg("%s: channel %s is not bounded by a valid hybrid timestamp, value=%s",
+				SnapshotChannelEndTs, channel, raw)
+		}
+
+		pch := funcutil.ToPhysicalChannel(channel)
+		if previous, ok := bounds[pch]; ok && previous != ts {
+			return nil, merr.WrapErrImportFailedMsg("%s bounds physical channel %s twice, at %d and %d",
+				SnapshotChannelEndTs, pch, previous, ts)
+		}
+		bounds[pch] = ts
+	}
+
+	return bounds, nil
+}
+
+// SnapshotChannelEnd resolves one source channel's end bound out of the job's
+// per-channel bounds. The second result reports whether the job carries bounds
+// at all.
+func SnapshotChannelEnd(bounds map[string]uint64, channel string) (uint64, bool) {
+	if len(bounds) == 0 {
+		return 0, false
+	}
+	ts, ok := bounds[funcutil.ToPhysicalChannel(channel)]
+	return ts, ok
+}
+
 // IsSnapshotSource reports whether the request uses snapshot metadata as its
 // backup source. The option is intentionally opt-in so StorageV1 and StorageV2
 // path-based backup imports retain their existing behavior.
@@ -220,7 +293,7 @@ func IsSnapshotSource(options Options) bool {
 // source storage version. L0 import remains a separate contract; CMEK content
 // is validated later against the source schema and supplied EZK.
 func ValidateSnapshotSourceOptions(options Options) error {
-	contractKeys := []string{SourceType, BackupFlag, L0Import, StorageVersion, EZK, ExternalSpec, SnapshotSourceURI, SnapshotLayout, PartitionMapping}
+	contractKeys := []string{SourceType, BackupFlag, L0Import, StorageVersion, EZK, ExternalSpec, SnapshotSourceURI, SnapshotLayout, PartitionMapping, SnapshotChannelEndTs}
 	counts := make(map[string]int, len(contractKeys))
 	hasSnapshotContractOption := false
 	for _, option := range options {
@@ -229,7 +302,7 @@ func ValidateSnapshotSourceOptions(options Options) error {
 			// option lists before they reach those shared helpers.
 			return merr.WrapErrImportFailedMsg("import option must not be nil")
 		}
-		if option.GetKey() == SourceType || option.GetKey() == ExternalSpec || option.GetKey() == SnapshotSourceURI || option.GetKey() == SnapshotLayout || option.GetKey() == PartitionMapping {
+		if option.GetKey() == SourceType || option.GetKey() == ExternalSpec || option.GetKey() == SnapshotSourceURI || option.GetKey() == SnapshotLayout || option.GetKey() == PartitionMapping || option.GetKey() == SnapshotChannelEndTs {
 			hasSnapshotContractOption = true
 		}
 		if lo.Contains(contractKeys, option.GetKey()) {
@@ -244,6 +317,11 @@ func ValidateSnapshotSourceOptions(options Options) error {
 		}
 	}
 	if _, err := GetPartitionMapping(options); err != nil {
+		return err
+	}
+	// The bounds are read again per source file; validating here makes every
+	// entry point (proxy, coordinator, worker) reject a malformed map once.
+	if _, err := GetSnapshotChannelEndTs(options); err != nil {
 		return err
 	}
 
