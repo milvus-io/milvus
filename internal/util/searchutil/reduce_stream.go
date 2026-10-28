@@ -68,6 +68,9 @@ func (b *orderedOutputBuffer) isEmpty() bool {
 }
 
 func (u orderedUnit) reducibleByteSize() (int, error) {
+	if size, ok := u.scalarByteSize(); ok {
+		return size, nil
+	}
 	chunk, err := buildSearchChunk(
 		[]orderedUnit{u},
 		u.data.GetNumQueries(),
@@ -88,6 +91,80 @@ func (u orderedUnit) reducibleByteSize() (int, error) {
 		GroupByFieldValue:  data.GetGroupByFieldValue(),
 		GroupByFieldValues: data.GetGroupByFieldValues(),
 	}), nil
+}
+
+// scalarByteSize sizes the same protobuf payload without copying scalar rows.
+func (u orderedUnit) scalarByteSize() (int, bool) {
+	data := u.data
+	row := u.rowIndex
+	if data == nil || row < 0 || row >= int64(len(data.GetScores())) || u.queryIndex < 0 || u.queryIndex >= data.GetNumQueries() || data.GetElementIndices() != nil || data.GetGroupByFieldValue() != nil || len(data.GetGroupByFieldValues()) != 0 {
+		return 0, false
+	}
+	ids := &schemapb.IDs{}
+	switch values := data.GetIds().GetIdField().(type) {
+	case *schemapb.IDs_IntId:
+		if values.IntId == nil || row >= int64(len(values.IntId.Data)) {
+			return 0, false
+		}
+		ids.IdField = &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: values.IntId.Data[row : row+1]}}
+	case *schemapb.IDs_StrId:
+		if values.StrId == nil || row >= int64(len(values.StrId.Data)) {
+			return 0, false
+		}
+		ids.IdField = &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: values.StrId.Data[row : row+1]}}
+	default:
+		return 0, false
+	}
+	fields := make([]*schemapb.FieldData, 0, len(data.GetFieldsData()))
+	for _, field := range data.GetFieldsData() {
+		if field == nil || field.GetScalars() == nil {
+			return 0, false
+		}
+		scalar := &schemapb.ScalarField{}
+		valid := typeutil.GetFieldDataValidData(field)
+		if len(valid) > 0 {
+			if row >= int64(len(valid)) {
+				return 0, false
+			}
+			scalar.ValidData = valid[row : row+1]
+		}
+		switch values := field.GetScalars().Data.(type) {
+		case *schemapb.ScalarField_BoolData:
+			if values.BoolData == nil || row >= int64(len(values.BoolData.Data)) {
+				return 0, false
+			}
+			scalar.Data = &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: values.BoolData.Data[row : row+1]}}
+		case *schemapb.ScalarField_IntData:
+			if values.IntData == nil || row >= int64(len(values.IntData.Data)) {
+				return 0, false
+			}
+			scalar.Data = &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: values.IntData.Data[row : row+1]}}
+		case *schemapb.ScalarField_LongData:
+			if values.LongData == nil || row >= int64(len(values.LongData.Data)) {
+				return 0, false
+			}
+			scalar.Data = &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: values.LongData.Data[row : row+1]}}
+		case *schemapb.ScalarField_FloatData:
+			if values.FloatData == nil || row >= int64(len(values.FloatData.Data)) {
+				return 0, false
+			}
+			scalar.Data = &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: values.FloatData.Data[row : row+1]}}
+		case *schemapb.ScalarField_DoubleData:
+			if values.DoubleData == nil || row >= int64(len(values.DoubleData.Data)) {
+				return 0, false
+			}
+			scalar.Data = &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: values.DoubleData.Data[row : row+1]}}
+		case *schemapb.ScalarField_StringData:
+			if values.StringData == nil || row >= int64(len(values.StringData.Data)) {
+				return 0, false
+			}
+			scalar.Data = &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: values.StringData.Data[row : row+1]}}
+		default:
+			return 0, false
+		}
+		fields = append(fields, &schemapb.FieldData{Type: field.Type, FieldName: field.FieldName, FieldId: field.FieldId, IsDynamic: field.IsDynamic, Field: &schemapb.FieldData_Scalars{Scalars: scalar}})
+	}
+	return proto.Size(&schemapb.SearchResultData{FieldsData: fields, Scores: data.Scores[row : row+1], Ids: ids}), true
 }
 
 type orderedChildBuffer struct {
