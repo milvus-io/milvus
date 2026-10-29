@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
+	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
@@ -33,6 +34,10 @@ var (
 		expr:     alwaysTrueExpr(),
 	}
 )
+
+func init() {
+	metrics.ProxyExprCacheLen = func() int { return exprCache.Len() }
+}
 
 type ExprParams struct {
 	UseJSONStats bool
