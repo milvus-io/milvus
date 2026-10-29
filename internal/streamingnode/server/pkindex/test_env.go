@@ -21,37 +21,209 @@ package pkindex
 import (
 	"context"
 	"math"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 
+	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
-// FakeCommitter is a manifest service where no vchannel has a manifest. A
-// handover is not tested with it, so CommitFlush always fails.
-type FakeCommitter struct{}
+// fakeStorageRoot is the object storage root path of NewFakeEnv.
+const fakeStorageRoot = "root"
 
-// NewFakeCommitter creates a FakeCommitter.
+// FakeCommitter applies lookups and flushes the way the manifest service
+// does, with the SST base path of a new manifest under fakeStorageRoot. The
+// fields are set by the tests of this package through set. A flush is
+// fenced or rejected until assign gives the pchannel meta the term of the
+// flush.
+type FakeCommitter struct {
+	mu sync.Mutex
+	// assignedTerm is the term of the pchannel meta of the streaming
+	// coordinator, 0 when the pchannel is not assigned. The manifest service
+	// fences a flush of another term with it; the tests set it with assign.
+	assignedTerm int64
+	manifests    map[string]*index.FakeManifest
+	// history keeps every manifest version, by vchannel.
+	history map[string][]*index.FakeManifest
+
+	lookupErrs  []error
+	lookupBlock chan struct{}
+	// itemErrs are the per-item errors of the lookups, by vchannel.
+	itemErrs map[string][]error
+	// lookups are the refs of each GetRecoveryManifests call, in order.
+	lookups [][]VChannelRef
+
+	commitErrs []error
+	loseNext   bool
+	// commitEntered gets a value when CommitFlush starts, if it is not nil.
+	commitEntered chan struct{}
+	// commitBlock blocks CommitFlush until it is closed, if it is not nil.
+	commitBlock chan struct{}
+
+	requests []index.FlushArgs
+	// applied records whether each flush that the fake manifest service
+	// accepted changed the manifest.
+	applied []bool
+	// rewrite changes the returned manifest, if it is not nil.
+	rewrite func(m index.ManifestView) index.ManifestView
+	// applyErrs are the errors of the manifest edits, such as a duplicate table.
+	applyErrs []error
+}
+
+// NewFakeCommitter creates a FakeCommitter where no vchannel has a manifest.
 func NewFakeCommitter() *FakeCommitter {
-	return &FakeCommitter{}
+	return &FakeCommitter{
+		manifests: make(map[string]*index.FakeManifest),
+		history:   make(map[string][]*index.FakeManifest),
+	}
 }
 
-// GetRecoveryManifests implements Committer. No vchannel has a
-// manifest.
+// assign makes term the term of the pchannel meta, as the streaming
+// coordinator does when it assigns the pchannel.
+func (c *FakeCommitter) assign(term int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.assignedTerm = term
+}
+
+// GetRecoveryManifests implements Committer.
 func (c *FakeCommitter) GetRecoveryManifests(ctx context.Context, refs []VChannelRef) ([]RecoveryManifest, error) {
-	return make([]RecoveryManifest, len(refs)), nil
+	c.mu.Lock()
+	c.lookups = append(c.lookups, append([]VChannelRef(nil), refs...))
+	block := c.lookupBlock
+	c.mu.Unlock()
+	if block != nil {
+		select {
+		case <-block:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.lookupErrs) > 0 {
+		err := c.lookupErrs[0]
+		c.lookupErrs = c.lookupErrs[1:]
+		return nil, err
+	}
+	out := make([]RecoveryManifest, 0, len(refs))
+	for _, ref := range refs {
+		if errs := c.itemErrs[ref.VChannel]; len(errs) > 0 {
+			c.itemErrs[ref.VChannel] = errs[1:]
+			out = append(out, RecoveryManifest{Err: errs[0]})
+			continue
+		}
+		out = append(out, FakeRecoveryManifest(c.manifests[ref.VChannel]))
+	}
+	return out, nil
 }
 
-var errFakeNoHandover = errors.New("a handover is not tested here")
+// lookupList returns the refs of each GetRecoveryManifests call.
+func (c *FakeCommitter) lookupList() [][]VChannelRef {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([][]VChannelRef(nil), c.lookups...)
+}
 
-// CommitFlush implements Committer. It always fails.
+func (c *FakeCommitter) store(vchannel string, m *index.FakeManifest, changed bool) {
+	c.manifests[vchannel] = m
+	if changed {
+		c.history[vchannel] = append(c.history[vchannel], m)
+	}
+}
+
+// CommitFlush implements Committer.
 func (c *FakeCommitter) CommitFlush(ctx context.Context, args index.FlushArgs) (index.ManifestView, error) {
-	return index.ManifestView{}, errFakeNoHandover
+	args.AddTables = append([]index.TableRef(nil), args.AddTables...)
+	c.mu.Lock()
+	c.requests = append(c.requests, args)
+	entered, block := c.commitEntered, c.commitBlock
+	c.mu.Unlock()
+	if entered != nil {
+		entered <- struct{}{}
+	}
+	if block != nil {
+		<-block
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.commitErrs) > 0 {
+		err := c.commitErrs[0]
+		c.commitErrs = c.commitErrs[1:]
+		return index.ManifestView{}, err
+	}
+	basePath := pkroot.SSTBasePath(fakeStorageRoot, args.CollectionID, args.VChannel)
+	next, changed, err := index.FakeFlush(c.manifests[args.VChannel], c.assignedTerm, args, basePath)
+	if err != nil {
+		c.applyErrs = append(c.applyErrs, err)
+		return index.ManifestView{}, err
+	}
+	c.store(args.VChannel, next, changed)
+	c.applied = append(c.applied, changed)
+	if c.loseNext {
+		c.loseNext = false
+		return index.ManifestView{}, errors.Mark(errors.New("response lost"), pkroot.ErrUnavailable)
+	}
+	if c.rewrite != nil {
+		return c.rewrite(next.View), nil
+	}
+	return next.View, nil
+}
+
+func (c *FakeCommitter) appliedList() []bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]bool(nil), c.applied...)
+}
+
+// manifest returns the current manifest of vchannel, a zero value when it
+// does not exist.
+func (c *FakeCommitter) manifest(vchannel string) index.ManifestView {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if m := c.manifests[vchannel]; m != nil {
+		return m.View
+	}
+	return index.ManifestView{}
+}
+
+// version returns version v of the manifest of vchannel, nil when it does
+// not exist.
+func (c *FakeCommitter) version(vchannel string, v int64) *index.ManifestView {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, m := range c.history[vchannel] {
+		if m.View.Version == v {
+			view := m.View
+			return &view
+		}
+	}
+	return nil
+}
+
+func (c *FakeCommitter) requestList() []index.FlushArgs {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]index.FlushArgs(nil), c.requests...)
+}
+
+func (c *FakeCommitter) applyErrList() []error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]error(nil), c.applyErrs...)
+}
+
+func (c *FakeCommitter) set(f func(c *FakeCommitter)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	f(c)
 }
 
 // neverScheduler accepts every task and never runs it.
@@ -97,7 +269,7 @@ func NewFakeEnv(t *testing.T, root string) *FakeEnv {
 		Shared:          shared,
 		AllocID:         func(context.Context) (int64, error) { return nextID.Add(1), nil },
 		Store:           index.NewFakeStore(),
-		StorageRootPath: "root",
+		StorageRootPath: fakeStorageRoot,
 		Committer:       env.Committer,
 		Sched:           neverScheduler{},
 		Params:          func() Params { return params },

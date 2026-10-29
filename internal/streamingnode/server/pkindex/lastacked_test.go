@@ -29,27 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/pkindex/index"
 )
 
-func insertRequest(idx *index.Index, pks ...int64) dedup.DecideRequest {
-	return dedup.DecideRequest{Kind: dedup.KindInsert, PKs: int64PKs(pks...)}
-}
-
-func TestCompanionDeleteDecision(t *testing.T) {
-	ctx := context.Background()
-	env := newTestEnv(t, syncScheduler{})
-	ch := env.channel(0)
-	idx := env.add(ch, "v0")
-	insert(t, ch, idx, 1, 1)
-
-	intent, err := idx.Decider().Decide(ctx, insertRequest(idx, 1, 2))
-	require.NoError(t, err)
-	assert.Equal(t, int64PKs(1), intent.CompanionDeletePKs())
-	intent.Appended(2)
-	// the observe applies the companion delete and the insert, as one message
-	require.NoError(t, ch.Apply(ctx, "v0", index.Write{Deletes: int64PKs(1), Puts: puts(2, 1, 2), TimeTick: 2}))
-	assert.EqualValues(t, 2, segmentOf(t, idx, 1))
-	assert.EqualValues(t, 2, segmentOf(t, idx, 2))
-}
-
 func TestWriteMarksTheIndexDirty(t *testing.T) {
 	ctx := context.Background()
 	env := newTestEnv(t, syncScheduler{})
@@ -157,4 +136,39 @@ func TestLastAckedHeapMatchesBruteForce(t *testing.T) {
 	}
 	assert.Empty(t, env.client.applyErrList())
 	assert.Empty(t, env.fatalList())
+}
+
+// TestLastAckedAfterClose: a closed PChannelIndexManager keeps the last value
+// it returned. Only one that never had an Index reports +inf.
+func TestLastAckedAfterClose(t *testing.T) {
+	env := newTestEnv(t, syncScheduler{})
+	empty := env.openChannel(0)
+	empty.Start()
+	empty.ObserveTimeTick(10, WALTailSnapshot{})
+	empty.Close()
+	assert.EqualValues(t, uint64(math.MaxUint64), empty.LastAcked(), "never had an Index")
+
+	// Close forgot the first PChannelIndexManager of the pchannel; a new one takes its place
+	ch := env.channel(0)
+	idx := env.add(ch, "v0")
+	ch.ObserveTimeTick(10, WALTailSnapshot{})
+	require.EqualValues(t, 10, ch.LastAcked())
+	insert(t, ch, idx, 1, 1)
+	ch.ObserveTimeTick(20, WALTailSnapshot{})
+	require.EqualValues(t, 10, ch.LastAcked(), "the dirty Index holds it")
+	ch.Close()
+	assert.EqualValues(t, 10, ch.LastAcked(), "the uncommitted writes of the closed Index are not committed by the close")
+	ch.ObserveTimeTick(30, WALTailSnapshot{})
+	assert.EqualValues(t, 10, ch.LastAcked())
+}
+
+// TestCloseKeepsLastAckedWithoutAnEarlierCall: Close records the LastAcked of
+// its moment, so a first call after Close does not see an empty heap.
+func TestCloseKeepsLastAckedWithoutAnEarlierCall(t *testing.T) {
+	env := newTestEnv(t, syncScheduler{})
+	ch := env.channel(0)
+	env.add(ch, "v0")
+	ch.ObserveTimeTick(100, WALTailSnapshot{})
+	ch.Close()
+	assert.EqualValues(t, 100, ch.LastAcked(), "the clean Index followed lastObserved at the close")
 }

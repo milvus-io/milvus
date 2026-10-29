@@ -20,7 +20,6 @@ package index
 
 import (
 	"context"
-	"time"
 
 	"github.com/milvus-io/milvus/internal/pkindex/dedup"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
@@ -75,31 +74,12 @@ func (idx *Index) InstalledVersionForTest() int64 {
 	return idx.currentInstalledVersion()
 }
 
-// SetInstalledVersionForTest sets the version of the installed table set.
-func (idx *Index) SetInstalledVersionForTest(v int64) {
-	idx.installMu.Lock()
-	defer idx.installMu.Unlock()
-	idx.installedVersion = v
-}
-
-// InstalledPathsForTest returns the local paths of the installed tables.
-func (idx *Index) InstalledPathsForTest() map[sst.ID]string {
-	idx.installMu.Lock()
-	defer idx.installMu.Unlock()
-	return idx.installedPaths
-}
-
 // ForgetInstalledPathsForTest drops the local paths of the installed tables,
 // as if the Index did not know where they are.
 func (idx *Index) ForgetInstalledPathsForTest() {
 	idx.installMu.Lock()
 	defer idx.installMu.Unlock()
 	idx.installedPaths = nil
-}
-
-// InstallIfNewerForTest installs m when it is newer than the installed set.
-func (idx *Index) InstallIfNewerForTest(ctx context.Context, m ManifestView, local map[sst.ID]string, gens ...engine.Generation) error {
-	return idx.installIfNewer(ctx, m, local, gens...)
 }
 
 // SSTBasePathForTest returns the object key prefix of the tables.
@@ -123,12 +103,9 @@ func (idx *Index) LastObservedForTest() uint64 {
 
 // The fields of a PendingHandover, for the tests of the two phases.
 
-func (p *PendingHandover) Request() *FlushArgs        { return p.request }
-func (p *PendingHandover) Covered() uint64            { return p.covered }
-func (p *PendingHandover) Local() map[sst.ID]string   { return p.local }
-func (p *PendingHandover) Gens() []engine.Generation  { return p.gens }
-func (p *PendingHandover) UploadedAt() time.Time      { return p.uploadedAt }
-func (p *PendingHandover) SetUploadedAt(at time.Time) { p.uploadedAt = at }
+func (p *PendingHandover) Request() *FlushArgs      { return p.request }
+func (p *PendingHandover) Covered() uint64          { return p.covered }
+func (p *PendingHandover) Local() map[sst.ID]string { return p.local }
 
 // CommittedPathForTest returns the local path of a committed table.
 func CommittedPathForTest(dir string, id sst.ID) string { return committedPath(dir, id) }

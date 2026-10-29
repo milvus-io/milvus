@@ -47,201 +47,7 @@ const (
 var farFuture = time.Now().Add(24 * time.Hour)
 
 // testStorageRoot is the object storage root path of the tests.
-const testStorageRoot = "root"
-
-func testBasePath(vchannel string) string {
-	return pkroot.SSTBasePath(testStorageRoot, testCollectionID, vchannel)
-}
-
-// fakeClient applies lookups and flushes the way the manifest service does.
-// The tests use one pchannel.
-type fakeClient struct {
-	mu sync.Mutex
-	// assignedTerm is the term of the pchannel meta of the streaming
-	// coordinator, 0 when the pchannel is not assigned. The manifest service
-	// fences a flush of another term with it; the tests set it with assign.
-	assignedTerm int64
-	manifests    map[string]*index.FakeManifest
-	// history keeps every manifest version, by vchannel.
-	history map[string][]*index.FakeManifest
-
-	lookupErrs  []error
-	lookupBlock chan struct{}
-	// itemErrs are the per-item errors of the lookups, by vchannel.
-	itemErrs map[string][]error
-	// lookups are the refs of each GetRecoveryManifests call, in order.
-	lookups [][]VChannelRef
-
-	commitErrs []error
-	loseNext   bool
-	// commitEntered gets a value when CommitFlush starts, if it is not nil.
-	commitEntered chan struct{}
-	// commitBlock blocks CommitFlush until it is closed, if it is not nil.
-	commitBlock chan struct{}
-
-	requests []index.FlushArgs
-	// applied records whether each flush that the fake manifest service
-	// accepted changed the manifest.
-	applied []bool
-	// rewrite changes the returned manifest, if it is not nil.
-	rewrite func(m index.ManifestView) index.ManifestView
-	// applyErrs are the errors of the manifest edits, such as a duplicate table.
-	applyErrs []error
-}
-
-func newFakeClient() *fakeClient {
-	return &fakeClient{
-		manifests: make(map[string]*index.FakeManifest),
-		history:   make(map[string][]*index.FakeManifest),
-	}
-}
-
-// assign makes term the term of the pchannel meta, as the streaming
-// coordinator does when it assigns the pchannel.
-func (c *fakeClient) assign(term int64) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.assignedTerm = term
-}
-
-func (c *fakeClient) GetRecoveryManifests(ctx context.Context, refs []VChannelRef) ([]RecoveryManifest, error) {
-	c.mu.Lock()
-	c.lookups = append(c.lookups, append([]VChannelRef(nil), refs...))
-	block := c.lookupBlock
-	c.mu.Unlock()
-	if block != nil {
-		select {
-		case <-block:
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if len(c.lookupErrs) > 0 {
-		err := c.lookupErrs[0]
-		c.lookupErrs = c.lookupErrs[1:]
-		return nil, err
-	}
-	out := make([]RecoveryManifest, 0, len(refs))
-	for _, ref := range refs {
-		if errs := c.itemErrs[ref.VChannel]; len(errs) > 0 {
-			c.itemErrs[ref.VChannel] = errs[1:]
-			out = append(out, RecoveryManifest{Err: errs[0]})
-			continue
-		}
-		out = append(out, FakeRecoveryManifest(c.manifests[ref.VChannel]))
-	}
-	return out, nil
-}
-
-// seed gives vchannel a manifest with view, as if another owner committed it.
-func (c *fakeClient) seed(vchannel string, view index.ManifestView) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	view.SSTBasePath = testBasePath(vchannel)
-	c.store(vchannel, &index.FakeManifest{View: view, LastFlushTerm: 1, PKDataType: schemapb.DataType_Int64}, true)
-}
-
-// lookupList returns the refs of each GetRecoveryManifests call.
-func (c *fakeClient) lookupList() [][]VChannelRef {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return append([][]VChannelRef(nil), c.lookups...)
-}
-
-func (c *fakeClient) store(vchannel string, m *index.FakeManifest, changed bool) {
-	c.manifests[vchannel] = m
-	if changed {
-		c.history[vchannel] = append(c.history[vchannel], m)
-	}
-}
-
-func (c *fakeClient) CommitFlush(ctx context.Context, args index.FlushArgs) (index.ManifestView, error) {
-	args.AddTables = append([]index.TableRef(nil), args.AddTables...)
-	c.mu.Lock()
-	c.requests = append(c.requests, args)
-	entered, block := c.commitEntered, c.commitBlock
-	c.mu.Unlock()
-	if entered != nil {
-		entered <- struct{}{}
-	}
-	if block != nil {
-		<-block
-	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if len(c.commitErrs) > 0 {
-		err := c.commitErrs[0]
-		c.commitErrs = c.commitErrs[1:]
-		return index.ManifestView{}, err
-	}
-	next, changed, err := index.FakeFlush(c.manifests[args.VChannel], c.assignedTerm, args, testBasePath(args.VChannel))
-	if err != nil {
-		c.applyErrs = append(c.applyErrs, err)
-		return index.ManifestView{}, err
-	}
-	c.store(args.VChannel, next, changed)
-	c.applied = append(c.applied, changed)
-	if c.loseNext {
-		c.loseNext = false
-		return index.ManifestView{}, errors.Mark(errors.New("response lost"), pkroot.ErrUnavailable)
-	}
-	if c.rewrite != nil {
-		return c.rewrite(next.View), nil
-	}
-	return next.View, nil
-}
-
-func (c *fakeClient) appliedList() []bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return append([]bool(nil), c.applied...)
-}
-
-// manifest returns the current manifest of vchannel, a zero value when it
-// does not exist.
-func (c *fakeClient) manifest(vchannel string) index.ManifestView {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if m := c.manifests[vchannel]; m != nil {
-		return m.View
-	}
-	return index.ManifestView{}
-}
-
-// version returns version v of the manifest of vchannel, nil when it does
-// not exist.
-func (c *fakeClient) version(vchannel string, v int64) *index.ManifestView {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for _, m := range c.history[vchannel] {
-		if m.View.Version == v {
-			view := m.View
-			return &view
-		}
-	}
-	return nil
-}
-
-func (c *fakeClient) requestList() []index.FlushArgs {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return append([]index.FlushArgs(nil), c.requests...)
-}
-
-func (c *fakeClient) applyErrList() []error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return append([]error(nil), c.applyErrs...)
-}
-
-func (c *fakeClient) set(f func(c *fakeClient)) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	f(c)
-}
+const testStorageRoot = fakeStorageRoot
 
 // countingStore counts uploads and downloads, and can report every object as missing.
 type countingStore struct {
@@ -313,12 +119,12 @@ func (h chanHandle) Wait(ctx context.Context) error {
 	}
 }
 
-// testEnv is a Manager over a real engine, a fake client and an in-memory store.
+// testEnv is a Manager over a real engine, a FakeCommitter and an in-memory store.
 type testEnv struct {
 	t      *testing.T
 	root   string
 	store  *countingStore
-	client *fakeClient
+	client *FakeCommitter
 	mgr    *Manager
 	params atomic.Pointer[Params]
 
@@ -342,7 +148,7 @@ func newTestEnv(t *testing.T, sched nodescheduler.Scheduler) *testEnv {
 		t:      t,
 		root:   t.TempDir(),
 		store:  &countingStore{FakeStore: index.NewFakeStore()},
-		client: newFakeClient(),
+		client: NewFakeCommitter(),
 	}
 	p := defaultTestParams()
 	env.params.Store(&p)
@@ -505,4 +311,15 @@ func picks(ch *PChannelIndexManager, now time.Time) []*index.Index {
 // scheduleOf returns the driver bookkeeping of idx.
 func scheduleOf(ch *PChannelIndexManager, idx *index.Index) *handoverSchedule {
 	return ch.scheduleOf(idx)
+}
+
+// inHeap reports whether idx is in the LastAcked heap of its PChannelIndexManager.
+func inHeap(ch *PChannelIndexManager, idx *index.Index) bool {
+	ch.mu.Lock()
+	defer ch.mu.Unlock()
+	return ch.acked.contains(idx)
+}
+
+func insertRequest(idx *index.Index, pks ...int64) dedup.DecideRequest {
+	return dedup.DecideRequest{Kind: dedup.KindInsert, PKs: int64PKs(pks...)}
 }
