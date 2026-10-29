@@ -703,46 +703,6 @@ forbidden at runtime. A read returns the value from start. The
 streaming node builds the `Manager` only when `enabled` is true, and the
 interceptor uses the index only when the `Manager` exists.
 
-## Comparison with similar systems
-
-| System | How the covered position is set | Isolation of frozen data from writes in flight | Trigger | Failure handling | Concurrency per shard |
-|---|---|---|---|---|---|
-| RocksDB | Structural bound: `SetNextLogNumber` at `SwitchMemtable`, flush writes `SetLogNumber` (`db_impl_write.cc`, `flush_job.cc`) | `WaitForPendingWrites` before the switch (`unordered_write` waits for `pending_memtable_writes_==0`). Install commits only the oldest contiguous prefix (`memtable_list.cc`) | `write_buffer_size`, `max_total_wal_size`, `WriteBufferManager` | Roll back to not flushed, report a background error | Several, installed in order |
-| Pebble | `MinUnflushedLogNum` (`compaction.go`, `flush1`) | Reserve the memtable under the same lock that assigns the seqnum. Flush only at `writerRefs==0` (`mem_table.go`) | Full memtable, threshold, forced, delayed forced | No backoff (a TODO in the source) | 1 |
-| SlateDB | Conservative `replay_after_wal_id` plus an exact `last_l0_seq` filter (`memtable_flusher/`) | Single writer. Publish only the oldest contiguous prefix | `l0_sst_size_bytes` (64 MiB), `max_wal_flushes_before_l0_flush`, `max_unflushed_bytes` | Retry without a limit, keep the same SST ID | 4 uploads, single manifest writer |
-| Neon | `last_record_lsn+1` at freeze. `remote_consistent_lsn` moves only after the index upload (`timeline.rs`) | Single ingest writer (`write_lock`) | `checkpoint_distance` (LSN distance), `checkpoint_timeout`, global memory | Exponential backoff, retry without a limit | 1, node-level semaphore |
-| TiKV v2 / unistore | Applied index at freeze (`apply_trace.rs`, `engine/flush.go`) | Single apply thread | Size, replay distance (4096000) | — | — |
-| Milvus WAL summary | `lastObserved` that the recovery scanner sees in tt order (`walsummary/manager.go`) | Observed in order | Size, tail pressure, never by time (`walsummary/async.go`) | `ErrDelay`, retry without a limit | Chunks in parallel, single manifest writer |
-
-Where the rotate runs and where the triggers are evaluated:
-
-| System | Rotate | Table write | Triggers | Source |
-|---|---|---|---|---|
-| Pebble 1.1.5 | Writer thread under `d.mu`; only swaps the memtable (`makeRoomForWrite`, `rotateMemtable`) | A flush goroutine | Size at the rotate, a timer for the delayed flush | `db.go`, `compaction.go` |
-| RocksDB 9.7 | The write thread leader under `mutex_` (`SwitchMemtable`); only creates a memtable | A background thread of the env (`BGWorkFlush`), the mutex released during the table write | In the write thread: write buffer size, write buffer manager, total WAL size | `db_impl_write.cc`, `db_impl_compaction_flush.cc` |
-| TiKV 8.5 raftstore-v2 | RocksDB seals the memtable; `on_memtable_sealed` records the applied index under the engine lock and must stay light | RocksDB background | `should_flush` on the distance between the modifications and the flushed index | `engine_traits/src/flush.rs`, `apply_trace.rs` |
-| CockroachDB 24.3 | — | — | The log truncation runs in its own task, woken by the flush-completed callback of the engine, not by a timer | `raft_log_truncator.go` |
-| Milvus WAL summary | The seal only moves records in memory, in the observe | Chunk write on the node scheduler | Size in the observe; tail pressure on a one-second loop | `walsummary/manager.go`, `async.go` |
-
-Common patterns:
-
-- A system freezes only at a point where all writes below the cut are in the
-  frozen memtable, and records a structural bound. No system takes the
-  maximum position of entries that apply concurrently. With one writer, the
-  observe, the bound is `lastObserved`.
-- Every system rotates in the writer or apply thread, and every rotate only
-  swaps pointers; the table write runs on another thread. The engine of the
-  index holds one lock across the rotate and the table write, so the rotate
-  runs outside the observe (see [Coverage](#coverage)).
-- Size triggers are evaluated by the writer or apply thread; time triggers
-  need a clock. The index uses the observed TimeTicks as that clock, and the
-  driver wakes on a signal, like the truncation task of CockroachDB.
-- Publish commits only the oldest contiguous prefix, with a monotonic check.
-  The log can be truncated only after the remote manifest commit.
-- Systems on object storage retry without a limit and keep the same file ID.
-- Neon and TiKV trigger on replay distance, not on local data size. Trigger 2
-  uses the same idea.
-
 ## Not done in this change
 
 - **The adapter over the manifest service client and its wiring.** A later
