@@ -7,7 +7,7 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from common.constants import *
-from pymilvus import AnnSearchRequest, DataType, RRFRanker, WeightedRanker
+from pymilvus import AnnSearchRequest, DataType, Function, FunctionType, RRFRanker, WeightedRanker
 from utils.util_pymilvus import *
 
 prefix = "client_hybrid_search"
@@ -33,6 +33,108 @@ default_bool_field_name = ct.default_bool_field_name
 default_string_field_name = ct.default_string_field_name
 default_int32_array_field_name = ct.default_int32_array_field_name
 default_string_array_field_name = ct.default_string_array_field_name
+
+
+class TestMilvusClientHybridSearchBoost(TestMilvusClientV2Base):
+    """Regression coverage for Proxy hybrid ranker validation (#54632)."""
+
+    @pytest.fixture
+    def boost_collection(self):
+        client = self._client()
+        name = cf.gen_unique_str("hybrid_boost")
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("number", DataType.INT64)
+        indexes = client.prepare_index_params()
+        for field in ("vec1", "vec2"):
+            schema.add_field(field, DataType.FLOAT_VECTOR, dim=4)
+            indexes.add_index(field, index_type="FLAT", metric_type="IP")
+        self.create_collection(client, name, schema=schema, index_params=indexes)
+        self.load_collection(client, name)
+        self.insert(
+            client,
+            name,
+            [
+                {"id": i, "number": 600 if i == 2 else 0, "vec1": vector, "vec2": vector}
+                for i, vector in enumerate(([1.0, 0.0, 0.0, 0.0], [0.8, 0.6, 0.0, 0.0], [0.6, 0.8, 0.0, 0.0]), start=1)
+            ],
+        )
+        # create_collection registers the collection for base-class teardown,
+        # including cleanup when an assertion below fails.
+        yield client, name
+
+    @staticmethod
+    def boost_ranker():
+        return Function(
+            name="boost",
+            function_type=FunctionType.RERANK,
+            input_field_names=[],
+            params={"reranker": "boost", "filter": "number > 500", "weight": 2},
+        )
+
+    @staticmethod
+    def boost_sub_requests():
+        return [
+            AnnSearchRequest([[1.0, 0.0, 0.0, 0.0]], field, {"metric_type": "IP", "params": {}}, 3)
+            for field in ("vec1", "vec2")
+        ]
+
+    @staticmethod
+    def search_boost_collection(client, name, **kwargs):
+        # Call the SDK directly so the RPC deadline is passed to search.
+        return client.search(
+            name,
+            data=[[1.0, 0.0, 0.0, 0.0]],
+            anns_field="vec1",
+            limit=3,
+            search_params={"metric_type": "IP", "params": {}},
+            consistency_level="Strong",
+            timeout=15,
+            **kwargs,
+        )[0]
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_hybrid_search_reject_boost_only(self, boost_collection):
+        """Boost-only FunctionScore must return a parameter error without killing the server."""
+        client, name = boost_collection
+        self.hybrid_search(
+            client,
+            name,
+            self.boost_sub_requests(),
+            self.boost_ranker(),
+            limit=3,
+            timeout=15,
+            consistency_level="Strong",
+            check_task=CheckTasks.err_res,
+            check_items={ct.err_code: 1100, ct.err_msg: "boost must be combined with a fusion ranker"},
+        )
+        assert [hit["id"] for hit in self.search_boost_collection(client, name)] == [1, 2, 3]
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_milvus_client_hybrid_search_boost_controls(self, boost_collection):
+        """Ordinary Boost scoring and supported hybrid fusion rankers remain valid."""
+        client, name = boost_collection
+        baseline = self.search_boost_collection(client, name)
+        assert [hit["id"] for hit in baseline] == [1, 2, 3]
+        scores = {hit["id"]: hit["distance"] for hit in baseline}
+        boosted = self.search_boost_collection(client, name, ranker=self.boost_ranker())
+        assert [hit["id"] for hit in boosted] == [2, 1, 3]
+        for hit in boosted:
+            expected = scores[hit["id"]] * (2 if hit["id"] == 2 else 1)
+            assert hit["distance"] == pytest.approx(expected, rel=1e-5, abs=1e-6)
+        for ranker in (None, RRFRanker(), WeightedRanker(0.5, 0.5)):
+            result, _ = self.hybrid_search(
+                client,
+                name,
+                self.boost_sub_requests(),
+                ranker,
+                limit=3,
+                timeout=15,
+                consistency_level="Strong",
+                check_task=CheckTasks.check_search_results,
+                check_items={"nq": 1, "limit": 3, "ids": [1, 2, 3]},
+            )
+            assert [hit["id"] for hit in result[0]] == [1, 2, 3]
 
 
 class TestMilvusClientHybridSearchInvalid(TestMilvusClientV2Base):
