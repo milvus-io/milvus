@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestSplitRetrieveResult(t *testing.T) {
@@ -437,9 +438,8 @@ func TestUnOrderedReduceStreamEmptyChildren(t *testing.T) {
 			}
 			var expectedCount, expectedBytes, expectedCost, expectedMVCC int64
 			if test.emptyWorker {
-				empty, err := agg.NewGroupAggReducer(request.GroupByFieldIds, request.Aggregates, -1, schema).EmptyAggResult()
+				payload, err := agg.NewGroupAggReducer(request.GroupByFieldIds, request.Aggregates, -1, schema).EncodePartial(&agg.PartialAggregationResult{})
 				require.NoError(t, err)
-				payload := agg.AggResult2internalResult(empty)
 				payload.Status = merr.Success()
 				payload.AllRetrieveCount = 3
 				payload.ScannedTotalBytes = 11
@@ -493,6 +493,133 @@ func TestUnOrderedReduceStreamEmptyChildren(t *testing.T) {
 			result, err = root.Recv()
 			require.Nil(t, result)
 			require.ErrorIs(t, err, io.EOF)
+		})
+	}
+}
+
+func TestUnOrderedReduceStreamPartialContracts(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		op      planpb.AggregateOp
+		value   int64
+		average bool
+	}{
+		{name: "sum", op: planpb.AggregateOp_sum, value: 210},
+		{name: "min", op: planpb.AggregateOp_min, value: 60},
+		{name: "max", op: planpb.AggregateOp_max, value: 150},
+		{name: "avg", op: planpb.AggregateOp_sum, value: 90, average: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "group", DataType: schemapb.DataType_Int64},
+				{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64, Nullable: true},
+			}}
+			request := &internalpb.RetrieveRequest{GroupByFieldIds: []int64{100}, Aggregates: []*planpb.Aggregate{{Op: test.op, FieldId: 101}}}
+			if test.average {
+				request.Aggregates = append(request.Aggregates, &planpb.Aggregate{Op: planpb.AggregateOp_count, FieldId: 101})
+			}
+			payload := func(groups, values, counts []int64, validity []bool) *internalpb.RetrieveResults {
+				result := newGroupQueryTestChunk(groups, values)
+				typeutil.SetFieldDataValidData(result.FieldsData[1], validity)
+				if test.average {
+					count := newGroupQueryTestChunk(groups, counts).FieldsData[1]
+					result.FieldsData = append(result.FieldsData, count)
+				}
+				return result
+			}
+			first := int64(150)
+			if test.average {
+				first = 30
+			}
+			inputs := [][]*internalpb.RetrieveResults{
+				{{Status: merr.Success(), AllRetrieveCount: 3}, payload([]int64{7, 9}, []int64{0, 0}, []int64{0, 0}, []bool{false, false}), payload([]int64{7, 8}, []int64{first, 0}, []int64{2, 1}, []bool{true, true})},
+				{payload([]int64{7}, []int64{60}, []int64{3}, []bool{true})},
+			}
+			inputs[1][0].AllRetrieveCount = 4
+			shards := make([]ReduceStream, 0, len(inputs))
+			for _, chunks := range inputs {
+				worker := &queryTestStream{}
+				for _, chunk := range chunks {
+					split, err := SplitRetrieveResult(chunk, 1)
+					require.NoError(t, err)
+					for _, part := range split {
+						worker.recv = append(worker.recv, queryTestRecv{chunk: part})
+					}
+				}
+				shard, err := NewReduceStream(request, schema, []ReduceStream{worker}, 1)
+				require.NoError(t, err)
+				shards = append(shards, shard)
+			}
+			root, err := NewReduceStream(request, schema, shards, 1)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, root.Close()) })
+			seen := map[int64]bool{}
+			var count int64
+			for {
+				chunk, err := root.Recv()
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				require.NoError(t, err)
+				count += chunk.GetAllRetrieveCount()
+				group := chunk.FieldsData[0].GetScalars().GetLongData().GetData()[0]
+				require.False(t, seen[group])
+				seen[group] = true
+				field := chunk.FieldsData[1]
+				validity := typeutil.GetFieldDataValidData(field)
+				require.Equal(t, validity, field.GetValidData())
+				require.Equal(t, validity, field.GetScalars().GetValidData())
+				if group == 9 {
+					require.Equal(t, []bool{false}, validity)
+				} else {
+					require.Equal(t, []bool{true}, validity)
+					want := int64(0)
+					if group == 7 {
+						want = test.value
+					}
+					require.Equal(t, []int64{want}, field.GetScalars().GetLongData().GetData())
+				}
+				if test.average {
+					average, err := agg.ComputeAvgFromSumAndCount(field, chunk.FieldsData[2])
+					require.NoError(t, err)
+					if group == 7 {
+						require.Equal(t, []float64{18}, average.GetScalars().GetDoubleData().GetData())
+					} else if group == 9 {
+						require.Equal(t, []bool{false}, typeutil.GetFieldDataValidData(average))
+					}
+				}
+			}
+			require.Len(t, seen, 3)
+			require.Equal(t, int64(7), count)
+		})
+	}
+}
+
+func TestUnOrderedReduceStreamRejectsMalformedPartials(t *testing.T) {
+	for _, test := range []string{"column_count", "row_count", "validity_count"} {
+		t.Run(test, func(t *testing.T) {
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "group", DataType: schemapb.DataType_Int64},
+				{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64},
+			}}
+			request := &internalpb.RetrieveRequest{GroupByFieldIds: []int64{100}, Aggregates: []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}}}
+			payload := newGroupQueryTestChunk([]int64{1}, []int64{2})
+			switch test {
+			case "column_count":
+				payload.FieldsData = payload.FieldsData[:1]
+			case "row_count":
+				payload.FieldsData[1].GetScalars().GetLongData().Data = nil
+			case "validity_count":
+				typeutil.SetFieldDataValidData(payload.FieldsData[1], []bool{true, false})
+			}
+			child := &queryTestStream{recv: []queryTestRecv{{chunk: payload}}}
+			stream, err := NewReduceStream(request, schema, []ReduceStream{child}, 64)
+			require.NoError(t, err)
+			chunk, err := stream.Recv()
+			require.Nil(t, chunk)
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
+			require.Equal(t, 1, child.closeCount())
+			require.Nil(t, stream.(*UnOrderedReduceStream).outputBuffer)
 		})
 	}
 }

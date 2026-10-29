@@ -508,6 +508,7 @@ type UnOrderedReduceStream struct {
 	childStreams *reduce.ChildStreams[*internalpb.RetrieveResults]
 	childBuffers []*internalpb.RetrieveResults
 	reducer      *agg.GroupAggReducer
+	outputBuffer *agg.GroupAggBuffer
 	chunkBytes   int
 
 	outputChunks []*internalpb.RetrieveResults
@@ -532,10 +533,12 @@ func newUnOrderedReduceStream(
 			return nil, merr.WrapErrServiceInternalMsg("Query ReduceStream child stream %d is nil", i)
 		}
 	}
+	reducer := agg.NewGroupAggReducer(request.GetGroupByFieldIds(), request.GetAggregates(), -1, schema)
 	return &UnOrderedReduceStream{
 		childStreams: reduce.NewChildStreams[*internalpb.RetrieveResults](childStreams),
 		childBuffers: make([]*internalpb.RetrieveResults, len(childStreams)),
-		reducer:      agg.NewGroupAggReducer(request.GetGroupByFieldIds(), request.GetAggregates(), -1, schema),
+		reducer:      reducer,
+		outputBuffer: reducer.NewBuffer(),
 		chunkBytes:   chunkBytes,
 	}, nil
 }
@@ -561,11 +564,15 @@ func (s *UnOrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 				break
 			}
 
-			partialResults := make([]*agg.AggregationResult, len(readyBuffers))
+			partialResults := make([]*agg.PartialAggregationResult, len(readyBuffers))
 			for i, readyBuffer := range readyBuffers {
-				partialResults[i] = agg.NewAggregationResult(readyBuffer.GetFieldsData(), 0)
+				partial, err := s.reducer.DecodePartial(readyBuffer.GetFieldsData(), 0)
+				if err != nil {
+					return nil, s.fail(err)
+				}
+				partialResults[i] = partial
 			}
-			if err := s.reducer.Merge(partialResults); err != nil {
+			if err := s.outputBuffer.Merge(partialResults); err != nil {
 				return nil, s.fail(err)
 			}
 			for i := range s.childBuffers {
@@ -573,11 +580,14 @@ func (s *UnOrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 			}
 		}
 
-		reduced, err := s.reducer.Result()
+		reduced, err := s.outputBuffer.Result()
 		if err != nil {
 			return nil, s.fail(err)
 		}
-		result := agg.AggResult2internalResult(reduced)
+		result, err := s.reducer.EncodePartial(reduced)
+		if err != nil {
+			return nil, s.fail(err)
+		}
 		result.Status = merr.Success()
 		s.attachMetadata(result)
 		s.outputChunks, err = SplitRetrieveResult(result, s.chunkBytes)
@@ -585,6 +595,7 @@ func (s *UnOrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 			return nil, s.fail(err)
 		}
 		s.reducer = nil
+		s.outputBuffer = nil
 	}
 
 	if s.outputIndex < len(s.outputChunks) {
@@ -695,6 +706,7 @@ func (s *UnOrderedReduceStream) closeChildren() error {
 		s.outputChunks[i] = nil
 	}
 	s.reducer = nil
+	s.outputBuffer = nil
 	s.metadata = nil
 	return s.closeErr
 }
