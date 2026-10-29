@@ -1,11 +1,14 @@
 use super::fetch;
-use crate::error::{Result, TantivyBindingError};
+use crate::error::Result;
+#[cfg(any(feature = "analyzer-remote-tls", feature = "lindera-unidic"))]
+use crate::error::TantivyBindingError;
+#[cfg(feature = "analyzer-remote-tls")]
 use lindera_dictionary::dictionary_builder::unidic::UnidicBuilder;
 
 #[cfg(feature = "lindera-unidic")]
 use lindera::dictionary::{load_dictionary_from_kind, DictionaryKind};
 
-#[cfg(not(feature = "lindera-unidic"))]
+#[cfg(all(feature = "analyzer-remote-tls", not(feature = "lindera-unidic")))]
 fn download(params: &fetch::FetchParams) -> Result<()> {
     fetch::fetch(params, UnidicBuilder::new()).map_err(|e| {
         TantivyBindingError::InternalError(format!(
@@ -13,6 +16,13 @@ fn download(params: &fetch::FetchParams) -> Result<()> {
             e.to_string()
         ))
     })
+}
+
+// Online download is compiled out; only a dictionary already built under
+// `build_dir` can be used.
+#[cfg(all(not(feature = "analyzer-remote-tls"), not(feature = "lindera-unidic")))]
+fn download(params: &fetch::FetchParams) -> Result<()> {
+    fetch::ensure_prebuilt(params, "unidic")
 }
 
 #[cfg(not(feature = "lindera-unidic"))]
@@ -52,7 +62,7 @@ pub fn load_ipadic(
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(feature = "lindera-unidic", feature = "analyzer-remote-tls")))]
 mod tests {
     use super::load_unidic;
     use env_logger;
