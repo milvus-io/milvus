@@ -47,6 +47,7 @@ class OffsetExpressionWorkspace final {
     ExecContext* exec_context_;
     std::shared_ptr<TakeContext> take_context_;
     ExprSet expr_set_;
+    bool supports_offset_input_{false};
     std::vector<VectorPtr> results_;
 };
 

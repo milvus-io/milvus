@@ -429,7 +429,9 @@ class TakeResult {
     // preparation. Consumers must preserve/accept the supplied first/count.
     template <typename T, typename Consumer>
     void
-    VisitViews(int64_t batch_size, Consumer&& consume) const {
+    VisitViews(int64_t batch_size,
+               Consumer&& consume,
+               bool compact_constant_state = false) const {
         AssertInfo(batch_size > 0, "take batch size must be positive");
         const auto items = Access<T>();
         const auto capacity = std::min(batch_size, items.Size());
@@ -448,7 +450,15 @@ class TakeResult {
                 } guard{this};
                 AssertInfo(count > 0 && count <= maximum,
                            "take preparation must return a nonempty prefix");
-                if (!FillBorrowedBatch(first,
+                // An opt-in consumer accepts an absent validity/skip array as
+                // all-valid/unskipped. The storage backend must prove that
+                // shape before accepting a values-only fill. Existing callers
+                // keep the expanded state contract without any API change.
+                const bool constant_state =
+                    compact_constant_state &&
+                    FillBorrowedBatch(first, count, TargetTypeOf<T>(),
+                                      values, nullptr, nullptr);
+                if (!constant_state && !FillBorrowedBatch(first,
                                        count,
                                        TargetTypeOf<T>(),
                                        values,
@@ -469,8 +479,9 @@ class TakeResult {
                     }
                 }
                 consume(values,
-                        ValidityView::FromExpanded(validity),
-                        skipped,
+                        constant_state ? ValidityView{}
+                                       : ValidityView::FromExpanded(validity),
+                        constant_state ? nullptr : skipped,
                         first,
                         count);
                 first += count;
@@ -503,7 +514,9 @@ class TakeResult {
     }
 
     // Optional storage-only bulk fill into caller-owned, type-checked buffers.
-    // count never exceeds their capacity. Return false without consuming rows
+    // count never exceeds their capacity. Both state buffers may be nullptr:
+    // accept that request ONLY when all lanes are known valid and unskipped.
+    // Return false without consuming rows
     // to retain the original GetUnchecked path. No predicate runs here.
     virtual bool
     FillBorrowedBatch(int64_t first,

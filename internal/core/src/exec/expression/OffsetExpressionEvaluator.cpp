@@ -27,16 +27,16 @@ OffsetExpressionWorkspace::OffsetExpressionWorkspace(
     for (const auto& root : expr_set_.exprs()) {
         root->SetOffsetTakeContext(take_context_);
     }
+    // The compiled offset tree is fixed for this workspace. In particular,
+    // offset execution never installs the sequential-only batch-LIKE node.
+    supports_offset_input_ = std::all_of(
+        expr_set_.exprs().begin(), expr_set_.exprs().end(),
+        [](const auto& root) { return root && root->SupportOffsetInput(); });
 }
 
 bool
 OffsetExpressionWorkspace::SupportsOffsetInput() const {
-    return std::all_of(expr_set_.exprs().begin(),
-                       expr_set_.exprs().end(),
-                       [](const auto& expression) {
-                           return expression &&
-                                  expression->SupportOffsetInput();
-                       });
+    return supports_offset_input_;
 }
 
 std::shared_ptr<ColumnVector>

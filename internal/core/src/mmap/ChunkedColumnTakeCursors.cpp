@@ -298,6 +298,7 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
     void
     EndBorrowedBatch() const override {
         prepared_count_ = 0;
+        detached_fixed_prefix_ = false;
         prepared_first_ = -1;
         // Raw metadata does not own a payload and is unreadable when count=0.
         // Keep bounded scratch, but always release the actual borrowed owners.
@@ -325,8 +326,11 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
             return false;
         }
         AssertInfo(count > 0 && target_type == target_type_ && values &&
-                       validity && skipped,
+                       ((validity == nullptr) == (skipped == nullptr)),
                    "invalid prepared take buffers");
+        if (validity == nullptr && (nullable_ || filter_ != nullptr)) {
+            return false;
+        }
         // Dispatch storage representation once, never an Expr operation.
         // Other representations retain the original item access fallback.
         switch (target_type) {
@@ -725,6 +729,36 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
             return false;
         }
         auto& workspace = *prepared_workspace_;
+        // Fixed-width values are COPIED before VisitViews calls its consumer.
+        // On a fully retained prefix there are no backend callbacks, pins or
+        // evictions between these checks and FillPrepared's plain loads. The
+        // worker-private context already owns every backing, so avoid taking
+        // one shared_ptr reference per cell/batch just to copy scalar values.
+        // Never use this proof for borrowed strings, nonretained projections,
+        // nullable/skip reads or the cold path, all of which keep their owners.
+        const auto retention_epoch = context_->borrow_epoch_;
+        if (primitives) {
+            for (int64_t lane = 0; lane < count; ++lane) {
+                const auto location = workspace.locations[lane];
+                const auto id = location.cell_id;
+                const auto& cached = workspace.projections[
+                    static_cast<uint64_t>(id) & workspace.projection_mask];
+                if (cached.id != id || cached.fixed_data == nullptr ||
+                    cached.retention_epoch == 0 ||
+                    cached.retention_epoch != retention_epoch) {
+                    return false;
+                }
+                workspace.row_ids[lane] = id;
+                workspace.row_offsets[lane] = location.cell_offset;
+                workspace.row_chunks[lane] = cached.chunk;
+                workspace.fixed_values[lane] = cached.fixed_data +
+                    location.cell_offset * cached.fixed_stride;
+                __builtin_prefetch(workspace.fixed_values[lane], 0, 1);
+            }
+            context_->stats_.cache_hits += count;
+            detached_fixed_prefix_ = true;
+            return true;
+        }
         for (int64_t lane = 0; lane < count; ++lane) {
             const auto location = workspace.locations[lane];
             const auto id = location.cell_id;
@@ -853,8 +887,18 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
                     values[lane] = *static_cast<const T*>(
                         static_cast<const void*>(workspace.fixed_values[lane]));
                 }
-                validity[lane] = true;
-                skipped[lane] = false;
+                if (validity != nullptr) {
+                    validity[lane] = true;
+                    skipped[lane] = false;
+                }
+            }
+            if (detached_fixed_prefix_) {
+                // Values now live in caller scratch. A consumer may Clear the
+                // context and then access this result again: do not expose a
+                // prepared raw-pointer shortcut after releasing that proof.
+                // Keep the outer borrow open, so nested VisitViews still fails
+                // closed and ordinary item access acquires its own live pins.
+                prepared_count_ = 0;
             }
         } else {
             // Original item access remains the authority for nullable,
@@ -1100,6 +1144,7 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
     mutable bool in_borrowed_batch_{false};
     mutable int64_t prepared_first_{-1};
     mutable int64_t prepared_count_{0};
+    mutable bool detached_fixed_prefix_{false};
     // Column/source/field configuration is immutable for this result. Arbitrary
     // physical IDs remain supported; conflicting slots simply project again.
     // Allocate only for contextual borrowed batches, not ordinary Take.

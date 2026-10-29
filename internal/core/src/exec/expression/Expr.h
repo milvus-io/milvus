@@ -2147,6 +2147,12 @@ class SegmentExpr : public Expr {
                     const bool* skipped,
                     int64_t first,
                     int64_t count) {
+                    if (skipped == nullptr) {
+                        func.template operator()<FilterType::random>(
+                            data, valid, nullptr, static_cast<int>(count),
+                            res + first, valid_res + first, values...);
+                        return;
+                    }
                     for (int64_t begin = 0; begin < count;) {
                         if (skipped[begin]) {
                             ApplyValidData(valid.Subview(begin),
@@ -2178,7 +2184,7 @@ class SegmentExpr : public Expr {
                             values...);
                         begin = end;
                     }
-                });
+                }, true);
             return input->size();
         }
 
