@@ -14,6 +14,7 @@ from pymilvus import DataType, FunctionChain, FunctionChainStage
 from pymilvus.client.embedding_list import EmbeddingList
 from pymilvus.function_chain import col
 from pymilvus.function_chain.chain import FunctionChainExpr
+from pymilvus.grpc_gen.common_pb2 import SegmentState
 from utils.util_log import test_log as log
 
 ROWS = [
@@ -69,7 +70,7 @@ class TestMilvusClientPyUDFEmbeddingList(TestMilvusClientV2Base):
                 time.sleep(0.2)
 
     @contextmanager
-    def _environment(self, minio_host, minio_bucket, case_id, element_level=False):
+    def _environment(self, minio_host, minio_bucket, case_id, element_level=False, source_rows=None):
         timings = {}
         stack = ExitStack()
         started = time.perf_counter()
@@ -128,7 +129,15 @@ class TestMilvusClientPyUDFEmbeddingList(TestMilvusClientV2Base):
                     params={"M": 8, "efConstruction": 64},
                 )
                 stack.callback(cleanup_collection)
-                self.create_collection(client, name, schema=schema, index_params=indexes, force_teardown=False)
+                self.create_collection(
+                    client,
+                    name,
+                    schema=schema,
+                    index_params=indexes,
+                    force_teardown=False,
+                    num_shards=1,
+                    consistency_level="Strong",
+                )
             with self._measure(timings, "insert_flush_load"):
                 rows = [
                     {
@@ -140,10 +149,10 @@ class TestMilvusClientPyUDFEmbeddingList(TestMilvusClientV2Base):
                             for index, vector in enumerate(row["vectors"])
                         ],
                     }
-                    for row in ROWS
+                    for row in (ROWS if source_rows is None else source_rows)
                 ]
                 result = self.insert(client, name, rows)[0]
-                assert result["insert_count"] == 3
+                assert result["insert_count"] == len(rows)
                 self.flush(client, name)
                 self.load_collection(client, name)
             with self._measure(timings, "body_search_and_assertions"):
@@ -251,6 +260,84 @@ class TestMilvusClientPyUDFEmbeddingList(TestMilvusClientV2Base):
             self._assert_results(result, nq, ids, reranked=True, page=scenario == "chain_page")
             control = self._synced_search(client, self._request(name, nq, chain=self._chain(resource)))
             self._assert_results(control, nq, [1, 2, 3], reranked=True)
+
+    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.parametrize("element_level", [False, True], ids=["embedding_list", "element"])
+    def test_pyudf_indexed_array_search_preserves_scores_and_fields(
+        self, minio_host, minio_bucket, request, record_property, element_level
+    ):
+        """target: built HNSW paths; method: verify threshold/build/load and exact oracle; expected: complete aligned hits."""
+        # L3: proving the index-build precondition requires the coordinator's
+        # management endpoint, which the ordinary CI runner does not supply.
+        import requests
+
+        endpoint = request.config.getoption("--pyudf-management-endpoint")
+        assert endpoint, "requires the coordinator --pyudf-management-endpoint"
+        key = "indexCoord.segment.minSegmentNumRowsToEnableIndex"
+        response = requests.get(endpoint.rstrip("/") + "/management/config/get", params={"keys": key}, timeout=10)
+        response.raise_for_status()
+        config = response.json()["configs"][0]
+        assert config["key"] == key, config
+        threshold = int(config["value"])
+        assert 0 < threshold <= 2048, config
+        record_property("min_index_rows", threshold)
+        # Both document and element counts exceed the checked build threshold.
+        # Negative filler scores keep the final oracle small while the baseline
+        # checks every candidate without relying on approximate topK recall.
+        rows = ROWS + [{"id": i, "ts": -i, "vectors": [[-0.6, -0.8]]} for i in range(4, 2049)]
+        with self._environment(
+            minio_host, minio_bucket, request.node.nodeid, element_level=element_level, source_rows=rows
+        ) as (client, name, resource):
+            deadline = time.monotonic() + 120
+            while True:
+                info = self.describe_index(client, name, "events[embedding]")[0]
+                if info["state"] == "Finished" and int(info["indexed_rows"]) == len(rows):
+                    break
+                assert time.monotonic() < deadline, info
+                time.sleep(0.5)
+            assert info["index_type"] == "HNSW", info
+            self.release_collection(client, name)
+            self.load_collection(client, name)
+            segments = client.list_loaded_segments(name)
+            assert len(segments) == 1, segments
+            assert segments[0].num_rows == len(rows) >= threshold, segments
+            assert segments[0].state == SegmentState.Sealed and segments[0].index_id > 0, segments
+            record_property("indexed_array_rows", len(rows))
+            record_property("loaded_index_segments", str(segments))
+
+            args = self._element_request(name, 2) if element_level else self._request(name, 2)
+            args["limit"] = sum(len(row["vectors"]) for row in rows) if element_level else len(rows)
+            args["search_params"]["params"]["ef"] = 4096
+            baseline = self.search(client, **args)[0]
+            assert len(baseline) == 2
+            ledger = {row["id"]: row for row in rows}
+            for query_vectors, hits in zip(QUERIES, baseline):
+                identities = [(h["id"], h["offset"]) for h in hits] if element_level else [h["id"] for h in hits]
+                expected = (
+                    {(row["id"], offset) for row in rows for offset in range(len(row["vectors"]))}
+                    if element_level
+                    else set(ledger)
+                )
+                assert len(identities) == len(expected) and set(identities) == expected
+                for hit in hits:
+                    row = ledger[hit["id"]]
+                    vectors = [row["vectors"][hit["offset"]]] if element_level else row["vectors"]
+                    query = query_vectors[:1] if element_level else query_vectors
+                    score = sum(
+                        max(
+                            sum(a * b for a, b in zip(q, v)) / math.sqrt(sum(a * a for a in q) * sum(b * b for b in v))
+                            for v in vectors
+                        )
+                        for q in query
+                    )
+                    assert hit["distance"] == pytest.approx(score, abs=1e-5)
+                    assert hit.get("entity", hit)["ts"] == row["ts"]
+            args["function_chains"] = self._chain(resource).limit(5 if element_level else 3)
+            result = self._synced_search(client, args)
+            if element_level:
+                self._assert_element_results(result, 2, reranked=True)
+            else:
+                self._assert_results(result, 2, [1, 2, 3], reranked=True)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("nq", [1, 2])
