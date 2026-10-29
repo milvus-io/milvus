@@ -15,7 +15,8 @@
 // limitations under the License.
 
 // Package objstore moves primary key index tables between the local disk
-// of a node and object storage.
+// of a node and object storage, and reads small objects such as manifest
+// bodies.
 package objstore
 
 import (
@@ -42,7 +43,8 @@ const (
 )
 
 // Store uploads local files to object storage and downloads objects to local
-// files. The streaming node and the data node both use it for SST files.
+// files. The streaming node and the data node both use it for SST files. It also
+// reads small objects, such as a manifest body.
 type Store struct {
 	cm storage.ChunkManager
 }
@@ -134,6 +136,19 @@ func (s *Store) DownloadFile(ctx context.Context, key, path string) error {
 		return pkindex.MarkIO(err, "rename to %s", path)
 	}
 	return syncDir(dir)
+}
+
+// ReadObject returns the bytes of the object at key. A missing object
+// returns an error marked pkindex.ErrCorrupted; any other failure of the chunk
+// manager or the object storage returns one marked pkindex.ErrUnavailable.
+// It is for small objects such as a manifest body; use DownloadFile for a
+// table.
+func (s *Store) ReadObject(ctx context.Context, key string) ([]byte, error) {
+	data, err := s.cm.Read(ctx, key)
+	if err != nil {
+		return nil, markRead(err, "read object %s", key)
+	}
+	return data, nil
 }
 
 // recordingWriter records the error of w, so that the caller of io.Copy can

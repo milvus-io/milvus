@@ -235,6 +235,25 @@ func TestDownloadFileLocalWriteFailure(t *testing.T) {
 	assert.False(t, errors.Is(err, pkindex.ErrCorrupted))
 }
 
+func TestReadObject(t *testing.T) {
+	ctx := context.Background()
+	cm, root := newLocal(t)
+	key := filepath.Join(root, "pkindex", "manifest", "1")
+	require.NoError(t, cm.Write(ctx, key, []byte("manifest bytes")))
+
+	data, err := New(cm).ReadObject(ctx, key)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("manifest bytes"), data)
+}
+
+func TestReadObjectMissing(t *testing.T) {
+	cm, root := newLocal(t)
+	_, err := New(cm).ReadObject(context.Background(), filepath.Join(root, "pkindex", "manifest", "missing"))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, pkindex.ErrCorrupted), err)
+	assert.False(t, errors.Is(err, pkindex.ErrUnavailable), err)
+}
+
 // failingWriter returns writeErr from Write.
 type failingWriter struct{ writeErr error }
 
