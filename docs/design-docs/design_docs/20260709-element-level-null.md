@@ -183,7 +183,11 @@ load into `VectorArrayChunk`, which retains compact vectors and element
 validity. For a single-level element-nullable scalar Array, `FieldMeta`
 synthesizes an internal TypeSchema so `ColumnarArrayChunk` and `ArrayValue`
 use the same representation for single-level and nested fields. Growing
-segments use `ArrayValue` for these scalar fields as well.
+segments store these scalar fields as one `ColumnarArrayChunk` per insert or
+load batch written into a growing chunk and read rows as `ArrayValueView`;
+vector Arrays are stored per
+batch as well and read as `VectorArrayView` (see
+[Recursive Array Columnar Layout](./20260724-recursive-array-struct-column-layout.md#growing-segments)).
 The growing-source flush
 path (`FlushGrowingSegmentData`/`AllowGrowingSourceFlush`) does not write
 these formats. It is in use when `common.storage.enableGrowingSourceFlush`
@@ -210,23 +214,70 @@ in that configuration. The check runs only on these DDL requests.
 
 ## Query and Index
 
-In this stage, new-format fields with a nullable level other than the row
-return a clear `not supported yet` error on Array expressions
-(`element_filter`, `MATCH`, `array_contains*`, and others), scalar index
-construction, element-level ANN, bulk import, and external tables.
-Non-nullable nested scalar Arrays retain their existing expression and index
-behavior. For element-nullable vector Arrays, MAX_SIM-family metrics and
-emb-list indexes/placeholders are out of scope for this project and are
-rejected; autoindex does not map those fields to a MAX_SIM default.
-Element-level metrics (IP, L2, COSINE, and others), with their indexes and
-search, are in scope for this project. Until query-layer support is
-available, CreateIndex with those metrics and all other search placeholders
-on those fields return `not supported yet`.
+### Element ids
 
-Later query support must apply row, bounds, and element validity in the right
-bitmap space: ordinary filters produce row bits; `element_filter` and `MATCH`
-child expressions produce element bits. Null elements contribute no value
-postings and do not participate in vector similarity search. Element-level
-ANN should use a Milvus-side bitset projection and physical-to-logical (p2l)
-mapping so returned element indices refer to original logical positions;
-knowhere does not need a change.
+Outside the index and brute-force internals, element ids are logical: every
+element of a non-null row takes an id, null elements included, and a null row
+takes none. This is the numbering of `StructElementOffsets`, so
+`element_filter` bits, element-level search results and the element indices
+returned to the user refer to the same logical positions.
+
+### Vector sub-fields
+
+An element-nullable `ArrayOfVector` sub-field is indexed and searched at
+element level with element-level metrics (L2, IP, COSINE, and others). Search
+and hybrid search accept a plain vector placeholder on it. MAX_SIM-family
+metrics, emb-list indexes and EmbeddingList placeholders are rejected;
+autoindex does not map those fields to a MAX_SIM default. Like any vector
+field, the sub-field needs an index before a load that includes it.
+CreateIndex has no separate list of index types for these fields: under an
+element-level metric the index type only has to support the element vector
+type. HNSW and DiskANN builds are covered by tests.
+
+- Index build: embedding-list mode is used only under an embedding-list
+  metric. Under an element-level metric the memory and DiskANN materializers
+  pass the flattened stored vectors without embedding offsets and, for an
+  element-nullable field, an element-domain validity bitmap with one bit per
+  logical element, so the knowhere IdMap returns logical element ids. A
+  segment whose elements are all null has a valid element count of 0, below
+  the index-build threshold, so DataCoord finishes its index task without a
+  build and search on that segment uses brute force. Only when the threshold
+  is skipped (a manifest-backed segment, below) or configured to 0 or less
+  does the worker build an IdMap-only index for it. A segment without
+  elements is skipped as empty. At load, the row-count and validity-length
+  checks do not apply to element-level VECTOR_ARRAY indexes.
+- Brute force: an element-nullable chunk stores only valid vectors. Sealed
+  columns build and cache, per chunk, the logical element id of each stored
+  vector; growing search computes the ids per searched range. The ids are
+  attached to the bitset, so filtering and results use logical element ids.
+  The cached search iterator does the same.
+- Index-build threshold: DataCoord finishes a VectorArray index task without a
+  build when the segment holds fewer vectors than
+  `indexCoord.segment.minSegmentNumRowsToEnableIndex` (default 1024); an
+  embedding-list index also needs that many rows. Binlog writers (flush and
+  the packed StorageV2/V3 writers used by compaction, import and sort stats)
+  record `Binlog.field_valid_element_counts` for every VectorArray field: the
+  number of non-null elements in the non-null rows of the binlog, zero
+  included. Only element-nullable fields use the count for the threshold.
+  When `Statistics` is aggregated
+  from binlogs, `Statistics.valid_element_counts` sums them per field and has
+  an entry only when every binlog of the field recorded a count. Bump-schema
+  additive reconciliation writes no per-binlog count; it sends the counts of
+  the fields it materializes directly as a `Statistics` delta that DataCoord
+  adds onto the segment. An element-nullable VectorArray with an entry uses it
+  for the threshold. Without an entry (older data), DataCoord falls back to
+  the estimate from binlog bytes, which counts the offset and validity bytes
+  of null elements as vectors; a sub-field absent from an older-schema
+  segment counts as zero vectors; a manifest-backed segment whose in-memory
+  binlogs do not list the field skips the vector-count threshold and leaves
+  the decision to the worker build.
+
+### Not supported
+
+- Scalar indexes on element-nullable or nested scalar Array fields;
+  CreateIndex rejects them.
+- MAX_SIM-family metrics, emb-list indexes and EmbeddingList search on
+  element-nullable vector Arrays; these are out of scope for this project.
+- Struct fields in external collections; an external collection rejects
+  every struct field, so element-nullable and nested Array sub-fields are not
+  available there either.

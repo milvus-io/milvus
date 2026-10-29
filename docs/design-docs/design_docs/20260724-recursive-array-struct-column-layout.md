@@ -161,3 +161,23 @@ deserializing proto Binary. Null list rows and null inner lists have repeated
 offsets and no child values. The legacy single-level scalar Array with
 non-nullable elements remains one proto-serialized `Binary` per row and loads
 through `ArrayChunk`.
+
+## Growing Segments
+
+Growing segments use the same columnar layout. Each growing chunk copies every
+insert or load batch it receives into memory blocks owned by the chunk (from
+the mmap chunk manager when growing mmap is on, from the heap otherwise) and
+keeps one view per row:
+
+| Field | Per-batch storage | Row view |
+| --- | --- | --- |
+| Native-list scalar Array (`ArrayValue`) | One `ColumnarArrayChunk` | `ArrayValueView` |
+| Legacy scalar Array (`Array`) | One block of row payloads | `ArrayView` |
+| Vector Array (`VectorArray`) | One block of compact vectors and, when element-nullable, one of element validity | `VectorArrayView` |
+
+An insert batch becomes a `ColumnarArrayChunk` built directly from the
+protobuf rows and shares the column's TypeSchema object; a load batch is
+built from the loaded `ArrayValue` rows and shares their TypeSchema. No block
+copies its TypeSchema. `ArrayValue`, `Array` and `VectorArray` objects exist
+only while a row is converted, for example as `FieldData` elements during
+binlog reads, writes and growing loads; no segment stores them.
