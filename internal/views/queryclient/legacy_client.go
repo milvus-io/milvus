@@ -99,6 +99,7 @@ func newLegacyClient(
 		cfg.MaxRetries = defaultMaxRetries
 	}
 	shardClient := newShardViewQueryClient(cfg.MaxRetries, queryPlanClient, queryServiceClient)
+	shardClient.queryHook = cfg.QueryHook
 	shardClient.loadChecks = newCollectionLoadChecks(cfg.LoadInfoClient)
 	return &legacyClient{
 		shardClient:   shardClient,
@@ -119,11 +120,12 @@ func (c *legacyClient) Search(ctx context.Context, req *LegacySearchRequest) (*L
 		i := i
 		g.Go(func() error {
 			plan, err := c.shardClient.Search(gCtx, &ShardSearchRequest{
-				VChannel:    vchannels[i],
-				Req:         req.Req,
-				MVCC:        req.MVCC,
-				BarrierMVCC: req.BarrierMVCC,
-				Reducer:     collector,
+				TotalChannelNum: int32(len(vchannels)),
+				VChannel:        vchannels[i],
+				Req:             req.Req,
+				MVCC:            req.MVCC,
+				BarrierMVCC:     req.BarrierMVCC,
+				Reducer:         collector,
 			})
 			if err != nil {
 				return err

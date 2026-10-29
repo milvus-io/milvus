@@ -401,7 +401,7 @@ func TestQueryPlanAllSubqueriesSkipped(t *testing.T) {
 		require.True(t, proto.Equal(view.Meta.Version, response.Plan.Version))
 		require.True(t, proto.Equal(req.ShardId, response.Plan.ShardId))
 		require.Nil(t, response.ExecutionSummary, "skipping is not evidence of partition/statistics pruning")
-		require.NoError(t, qviews.RestoreQueryPlanPayloads(response.Plan, req))
+		require.NoError(t, qviews.RestoreQueryPlanPayloads(response, req))
 		subs := response.Plan.GetLegacySearchRequest().GetSubReqs()
 		require.Len(t, subs, 2)
 		for i, sub := range subs {
@@ -411,4 +411,27 @@ func TestQueryPlanAllSubqueriesSkipped(t *testing.T) {
 		}
 		require.True(t, proto.Equal(before, req), "planning must not mutate the input")
 	})
+}
+
+func TestQueryPlanSealedSegmentCountRespectsPartitionAndPruning(t *testing.T) {
+	view := &viewpb.QueryViewOfShard{QueryNode: []*viewpb.QueryViewOfQueryNode{
+		{NodeId: 11, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 1, SegmentIds: []int64{10, 11, 12}}, {PartitionId: 2, SegmentIds: []int64{20, 21}}}},
+		{NodeId: 12, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 1, SegmentIds: []int64{30, 31}}}},
+	}}
+	for _, tc := range []struct {
+		name  string
+		mode  viewpb.SegmentSelection_Mode
+		ids   []int64
+		count uint32
+	}{
+		{"all", viewpb.SegmentSelection_All, nil, 3},
+		{"include", viewpb.SegmentSelection_Include, []int64{11}, 1},
+		{"exclude", viewpb.SegmentSelection_Exclude, []int64{11}, 2},
+		{"none", viewpb.SegmentSelection_None, nil, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := &viewpb.QueryPlan{Request: &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: &internalpb.SearchRequest{PartitionIDs: []int64{1}}}, WorkNodes: []*viewpb.QueryPlanWorkNode{{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: 11}}, SegmentSelection: &viewpb.SegmentSelection{Mode: tc.mode, SegmentIds: tc.ids}}}}
+			require.Equal(t, tc.count, queryPlanSealedSegmentCount(plan, view))
+		})
+	}
 }

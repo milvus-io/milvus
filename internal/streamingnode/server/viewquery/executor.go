@@ -41,6 +41,8 @@ func (e *DirectSegmentTaskExecutor) Search(ctx context.Context, tasks []snview.S
 		mlog.Uint64("mvccTimestamp", req.GetReq().GetMvccTimestamp()),
 		mlog.Int("segmentCount", len(selected)),
 	)
+	req.FilterOnly = tasks[0].Options.GetFilterOnly()
+	req.EnableExprCache = tasks[0].Options.GetEnableExprCache()
 	return e.searchRunner.Search(ctx, collection, selected, req, e.serverID)
 }
 

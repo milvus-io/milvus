@@ -110,6 +110,9 @@ func (s *Server) executeSearch(ctx context.Context, req *viewpb.SearchOnViewRequ
 		return emptySearchResults(searchReq), nil
 	}
 
+	if req.GetExecutionOptions() != nil {
+		tasks = &SearchTasksWithOptions{SearchSegmentTasks: tasks, Options: req.GetExecutionOptions()}
+	}
 	result, err := s.scheduler.Search(ctx, tasks)
 	if err != nil {
 		return nil, err

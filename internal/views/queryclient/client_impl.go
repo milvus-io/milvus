@@ -5,6 +5,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/views/queryclient/reducer"
 	"github.com/milvus-io/milvus/internal/views/queryclient/renderer"
 	"github.com/milvus-io/milvus/internal/views/queryclient/reranker"
@@ -17,6 +18,8 @@ const defaultMaxRetries = 3
 
 // ViewQueryClientConfig holds configuration for the ViewQueryClient.
 type ViewQueryClientConfig struct {
+	// QueryHook is initialized and owned by the hosting process.
+	QueryHook optimizers.QueryHook
 	// LoadInfoClient confirms current load state when an initialized directory is empty.
 	LoadInfoClient LoadInfoClient
 	MaxRetries     int // Maximum per-shard attempts; zero defaults to 3. At least one full candidate pass is allowed.
@@ -59,6 +62,7 @@ func NewViewQueryClient(
 		cfg.MaxRetries = defaultMaxRetries
 	}
 	shardClient := newShardViewQueryClient(cfg.MaxRetries, queryPlanClient, queryServiceClient)
+	shardClient.queryHook = cfg.QueryHook
 	shardClient.loadChecks = newCollectionLoadChecks(cfg.LoadInfoClient)
 	return &viewQueryClientImpl{
 		shardClient:            shardClient,
@@ -254,11 +258,12 @@ func (c *viewQueryClientImpl) searchAllShards(
 		i := i
 		g.Go(func() error {
 			plan, err := c.shardClient.Search(gCtx, &ShardSearchRequest{
-				VChannel:    vchannels[i],
-				Req:         req,
-				MVCC:        mvcc,
-				BarrierMVCC: barrierMVCC,
-				Reducer:     searchReducer,
+				TotalChannelNum: int32(len(vchannels)),
+				VChannel:        vchannels[i],
+				Req:             req,
+				MVCC:            mvcc,
+				BarrierMVCC:     barrierMVCC,
+				Reducer:         searchReducer,
 			})
 			if err != nil {
 				return err

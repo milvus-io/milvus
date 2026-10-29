@@ -31,15 +31,19 @@ func TestQueryPlanPayloadRoundTrip(t *testing.T) {
 		want := proto.Clone(optimized)
 		before := proto.Clone(original)
 		plan := &viewpb.QueryPlan{Request: &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: optimized}}
-		OmitUnchangedQueryPayloads(plan, original)
-		require.Less(t, proto.Size(plan), 256)
-		wire, err := proto.Marshal(plan)
+		info := &viewpb.SearchOptimizationInfo{SealedSegmentCount: 3, VectorDim: 128, IndexType: "HNSW"}
+		response := &viewpb.GetQueryPlanResponse{Plan: plan, ClientOptimizeInfo: &viewpb.QueryPlanClientOptimizeInfo{SearchOptimization: info}}
+		OmitUnchangedQueryPayloads(response, original)
+		require.Less(t, proto.Size(response), 256)
+		wire, err := proto.Marshal(response)
 		require.NoError(t, err)
-		received := new(viewpb.QueryPlan)
+		received := new(viewpb.GetQueryPlanResponse)
 		require.NoError(t, proto.Unmarshal(wire, received))
 		require.NoError(t, RestoreQueryPlanPayloads(received, original))
-		require.True(t, proto.Equal(want, received.GetLegacySearchRequest()))
+		require.True(t, proto.Equal(want, received.GetPlan().GetLegacySearchRequest()))
 		require.True(t, proto.Equal(before, original))
+		require.True(t, proto.Equal(info, received.GetClientOptimizeInfo().GetSearchOptimization()))
+		require.Nil(t, received.GetClientOptimizeInfo().GetReusedPayloads())
 	}
 }
 
@@ -53,9 +57,10 @@ func TestQueryPlanRetrievePayloadRoundTrip(t *testing.T) {
 		}
 		want := proto.Clone(optimized)
 		plan := &viewpb.QueryPlan{Request: &viewpb.QueryPlan_LegacyRetrieveRequest{LegacyRetrieveRequest: optimized}}
-		OmitUnchangedQueryPayloads(plan, original)
-		require.Less(t, proto.Size(plan), 64)
-		require.NoError(t, RestoreQueryPlanPayloads(plan, original))
+		response := &viewpb.GetQueryPlanResponse{Plan: plan}
+		OmitUnchangedQueryPayloads(response, original)
+		require.Less(t, proto.Size(response), 64)
+		require.NoError(t, RestoreQueryPlanPayloads(response, original))
 		require.True(t, proto.Equal(want, plan.GetLegacyRetrieveRequest()))
 	}
 }

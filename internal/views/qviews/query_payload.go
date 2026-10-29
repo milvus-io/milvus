@@ -10,7 +10,8 @@ import (
 // OmitUnchangedQueryPayloads consumes the planner-owned request after validation.
 // Keep the small optimized parameters explicit, but do not echo unchanged
 // vectors or expression plans through every shard's Phase 1 response.
-func OmitUnchangedQueryPayloads(plan *viewpb.QueryPlan, original *viewpb.GetQueryPlanRequest) {
+func OmitUnchangedQueryPayloads(response *viewpb.GetQueryPlanResponse, original *viewpb.GetQueryPlanRequest) {
+	plan := response.GetPlan()
 	reuse := &viewpb.QueryPayloadReuse{}
 	if search := plan.GetLegacySearchRequest(); search != nil {
 		input := original.GetLegacySearchRequest()
@@ -26,7 +27,10 @@ func OmitUnchangedQueryPayloads(plan *viewpb.QueryPlan, original *viewpb.GetQuer
 	} else if query := plan.GetLegacyRetrieveRequest(); query != nil {
 		reuse.SerializedExprPlan = omitPayload(original.GetLegacyRetrieveRequest().GetSerializedExprPlan(), &query.SerializedExprPlan)
 	}
-	plan.ReusedPayloads = reuse
+	if response.ClientOptimizeInfo == nil {
+		response.ClientOptimizeInfo = &viewpb.QueryPlanClientOptimizeInfo{}
+	}
+	response.ClientOptimizeInfo.ReusedPayloads = reuse
 }
 
 func omitPayload(original []byte, optimized *[]byte) bool {
@@ -40,8 +44,9 @@ func omitPayload(original []byte, optimized *[]byte) bool {
 // RestoreQueryPlanPayloads borrows immutable payloads from the original request.
 // Phase 2 creates its own request before applying node-specific MVCC. This also
 // preserves explicit optimizer replacements, including replacement with empty.
-func RestoreQueryPlanPayloads(plan *viewpb.QueryPlan, original *viewpb.GetQueryPlanRequest) error {
-	reuse := plan.GetReusedPayloads()
+func RestoreQueryPlanPayloads(response *viewpb.GetQueryPlanResponse, original *viewpb.GetQueryPlanRequest) error {
+	plan := response.GetPlan()
+	reuse := response.GetClientOptimizeInfo().GetReusedPayloads()
 	if search := plan.GetLegacySearchRequest(); search != nil {
 		input := original.GetLegacySearchRequest()
 		if reuse.GetPlaceholderGroup() {
@@ -65,6 +70,8 @@ func RestoreQueryPlanPayloads(plan *viewpb.QueryPlan, original *viewpb.GetQueryP
 	} else if query := plan.GetLegacyRetrieveRequest(); query != nil && reuse.GetSerializedExprPlan() {
 		query.SerializedExprPlan = original.GetLegacyRetrieveRequest().GetSerializedExprPlan()
 	}
-	plan.ReusedPayloads = nil
+	if info := response.GetClientOptimizeInfo(); info != nil {
+		info.ReusedPayloads = nil
+	}
 	return nil
 }

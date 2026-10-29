@@ -2,6 +2,7 @@ package adaptor
 
 import (
 	"context"
+	"math"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
@@ -10,11 +11,13 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
+	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
@@ -252,6 +255,17 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 			response.ExecutionSummary = &viewpb.ExecutionSummary{GlobalOptimizer: summary}
 		}
 	}
+	search := plan.GetLegacySearchRequest()
+	if search != nil && !search.GetIsAdvanced() && optimizers.ShouldUseTwoStageSearch(&querypb.SearchRequest{Req: search}, math.MaxInt) {
+		count := queryPlanSealedSegmentCount(plan, lease.View)
+		if count > 0 && optimizers.ShouldUseTwoStageSearch(&querypb.SearchRequest{Req: search}, int(count)) {
+			response.ClientOptimizeInfo = &viewpb.QueryPlanClientOptimizeInfo{}
+			response.ClientOptimizeInfo.SearchOptimization, err = readRuntime.SearchOptimizationInfo(search.GetFieldId(), count)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 	mlog.Debug(ctx, "query view plan created",
 		mlog.FieldCollectionID(lease.Meta.GetCollectionId()),
 		mlog.FieldVChannel(shardID.VChannel),
@@ -261,7 +275,7 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		mlog.Int("workNodeCount", len(plan.WorkNodes)),
 	)
 	// Preserve a full inter-phase serving window after planning completes.
-	qviews.OmitUnchangedQueryPayloads(plan, req)
+	qviews.OmitUnchangedQueryPayloads(response, req)
 	lease.Renew()
 	return response, nil
 }
@@ -484,4 +498,35 @@ func queryPlanIncludesStreamingNode(view *viewpb.QueryViewOfShard, options query
 		options.mvcc.GetTransformingTimetick(),
 		options.partitionIDs,
 	)
+}
+
+// Count the post-pruning candidates without copying or scanning Segment IDs.
+func queryPlanSealedSegmentCount(plan *viewpb.QueryPlan, view *viewpb.QueryViewOfShard) uint32 {
+	partitions := typeutil.NewSet(plan.GetLegacySearchRequest().GetPartitionIDs()...)
+	selectedNodes := make(map[int64]*viewpb.SegmentSelection, len(plan.GetWorkNodes()))
+	for _, node := range plan.GetWorkNodes() {
+		if qn := node.GetQueryNode(); qn != nil {
+			selectedNodes[qn.GetNodeId()] = node.GetSegmentSelection()
+		}
+	}
+	var count uint32
+	for _, qn := range view.GetQueryNode() {
+		selection, selected := selectedNodes[qn.GetNodeId()]
+		if !selected || selection.GetMode() == viewpb.SegmentSelection_None {
+			continue
+		}
+		if selection.GetMode() == viewpb.SegmentSelection_Include {
+			count += uint32(len(selection.GetSegmentIds()))
+			continue
+		}
+		for _, part := range qn.GetPartitions() {
+			if partitions.Len() == 0 || partitions.Contain(part.GetPartitionId()) {
+				count += uint32(len(part.GetSegmentIds()))
+			}
+		}
+		if selection.GetMode() == viewpb.SegmentSelection_Exclude {
+			count -= uint32(len(selection.GetSegmentIds()))
+		}
+	}
+	return count
 }

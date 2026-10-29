@@ -272,3 +272,14 @@ func (t *fakeQuerySegmentTasks) Tasks() []QuerySegmentTask {
 func (t *fakeQuerySegmentTasks) Release() {
 	t.releaseCount++
 }
+
+func TestServerSearchPassesExecutionOptionsAndReleasesOwner(t *testing.T) {
+	provider := &fakeTaskProvider{searchTasks: &fakeSearchSegmentTasks{tasks: []SearchSegmentTask{struct{}{}}}}
+	scheduler := &fakeScheduler{searchResult: &internalpb.SearchResults{}}
+	req := validSearchRequest()
+	req.ExecutionOptions = &viewpb.SearchExecutionOptions{FilterOnly: true, EnableExprCache: true}
+	_, err := NewServer(provider, scheduler).SearchOnView(t.Context(), req)
+	require.NoError(t, err)
+	require.Same(t, req.ExecutionOptions, SearchOptions(scheduler.searchTasks))
+	require.Equal(t, 1, provider.searchTasks.releaseCount)
+}

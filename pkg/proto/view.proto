@@ -286,6 +286,8 @@ message GetQueryPlanResponse {
     QueryPlan plan = 1;
     GrowingInlineResponse growing_inline_response = 2;
     ExecutionSummary execution_summary = 3;
+    // Consumed by QueryViewClient; not part of the reusable worker plan.
+    QueryPlanClientOptimizeInfo client_optimize_info = 4;
 }
 
 message ExecutionSummary {
@@ -332,10 +334,6 @@ message QueryPlan {
         internal.RetrieveRequest legacy_retrieve_request = 6;
         StatisticsRequest statistics_request = 8;
     }
-    // Unchanged large payloads are omitted from request and borrowed from the
-    // original Phase 1 request by Proxy. All other optimized parameters remain
-    // explicit, including empty payloads when the optimizer clears a field.
-    QueryPayloadReuse reused_payloads = 7;
 }
 
 //
@@ -378,6 +376,7 @@ message SearchOnViewRequest {
     QueryPlanMVCC mvcc = 4;
     SegmentSelection segment_selection = 5;
     repeated SegmentSelection sub_selections = 6;
+    SearchExecutionOptions execution_options = 7;
 }
 
 message SearchOnViewResponse {
@@ -418,4 +417,22 @@ message VChannelReplicas {
         int64 replica_id = 1;
         QueryViewVersion max_up_view_version = 2;
     }
+}
+
+message QueryPlanClientOptimizeInfo {
+    // Restore only explicitly marked payloads, preserving intentional clearing.
+    QueryPayloadReuse reused_payloads = 1;
+    // Present only for eligible filter-first ANN searches.
+    SearchOptimizationInfo search_optimization = 2;
+}
+
+message SearchOptimizationInfo {
+    uint32 sealed_segment_count = 1;
+    int64 vector_dim = 2;
+    string index_type = 3;
+}
+
+message SearchExecutionOptions {
+    bool filter_only = 1;
+    bool enable_expr_cache = 2;
 }

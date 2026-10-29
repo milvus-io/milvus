@@ -144,13 +144,18 @@ Proxy highlighting is not switched by this extraction.
 
 ## Payload ownership and wire compatibility
 
-Phase 1 can omit unchanged serialized plans/placeholders using `reused_payloads`.
+Phase 1 can omit unchanged serialized plans/placeholders using
+`GetQueryPlanResponse.client_optimize_info.reused_payloads`.
+`QueryPlanClientOptimizeInfo` also carries optional `SearchOptimizationInfo` for
+client-side filter-first ANN tuning. Both are response metadata, outside the
+reusable QueryPlan and never forwarded to workers. Payload restoration clears
+only the reuse markers and preserves the search optimization inputs.
 The client restores only explicitly marked fields from its original immutable
 request. Optimized, replaced or deliberately cleared fields remain authoritative.
 Hybrid sub-request count/index checks prevent accidental cross-request reuse.
 Restoration occurs before per-node cloning and dispatch.
 
-The added fields are `QueryPlan.reused_payloads` and
+The added fields are `GetQueryPlanResponse.client_optimize_info` and
 `StreamingFieldAnalyzer.read_schema_version`.
 This master-based extraction also synchronizes the query-facing schema contracts:
 `QueryViewMeta.schema_version`, Search/RetrieveRequest.schema_version,

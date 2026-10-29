@@ -210,3 +210,38 @@ and its maximum locally Up QueryViewVersion, including updates when only the
 version changes. These versions are routing hints, not pinned query versions;
 QueryViewClient uses this directory for explicit selection and failover as
 described above. Discovery itself does not choose or pin a query View.
+
+## Filter-first ANN search
+
+QueryViewClient owns the optional `autoIndex.twoStageSearch` execution. For a
+non-hybrid PURE_ANN_SEARCH_WITH_FILTER request meeting the configured TopK and
+sealed-segment thresholds, SN includes compact `SearchOptimizationInfo` in
+`GetQueryPlanResponse.client_optimize_info` after
+partition/segment pruning: selected sealed count, vector dimension and index
+type. Other requests carry no such metadata. The admission threshold uses the
+selected segment count; actual filtered cardinalities drive the tuning hook.
+The same `QueryPlanClientOptimizeInfo` groups the payload reuse markers consumed
+by client restoration. Neither belongs to the reusable worker plan. No
+per-segment row-count array or Schema is copied into the response.
+
+Within one shard attempt, the client first sends SearchOnView with FilterOnly
+and expression caching to QNs only. It retains the same View version, Schema,
+MVCC and per-worker segment selection for the subsequent ANN round. The existing
+native search executor extracts the pre-filter subtree, evaluates it and returns
+per-segment valid counts. It can reuse a cached predicate bitmap in the ANN round;
+cache retention is an optimization, never a correctness precondition.
+
+The client checks count/SegmentID correspondence, duplicate IDs, nonnegative
+counts and completeness against the planned sealed count. Missing statistics
+fall back to ordinary ANN. Invalid statistics fail the attempt. Complete counts
+feed CalculateEffectiveSegmentNum and OptimizeSearchParams with second-stage
+semantics. The hosting process supplies an initialized QueryHook through
+ViewQueryClientConfig.QueryHook. Proxy hook initialization and watcher ownership,
+and QN execution-option propagation, remain separate integration work. Without a hook, existing non-hook parameter handling remains.
+
+Only then does ANN fan out to every planned QN and SN. Filter results never enter
+the search reducer. Their execution feature bits are preserved, while the
+two_stage_search bit is attached only to ANN results after complete statistics
+and tuning. A retriable failure in either round cancels and joins that round,
+resets partial ANN results and starts a fresh shard attempt; no statistics cross
+attempts. Retained requery still uses the successful attempt's View and MVCC.

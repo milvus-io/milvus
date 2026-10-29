@@ -140,3 +140,14 @@ current drain finishes. Each QueryRuntime still applies events serially, while
 different runtimes may drain concurrently. Closing the dispatcher unregisters its
 configuration watcher and joins its workers. This adds no per-VChannel worker and
 does not change remote TransformLog delivery.
+
+## Filter-only execution controls
+
+SearchOnView optionally carries SearchExecutionOptions (FilterOnly and
+EnableExprCache). The shared server attaches these request-local controls to
+the provider's task owner; the SN scheduler and executor pass them to the native
+search adapter. Acquisition and release retain their existing ownership.
+QN adapters must propagate the same controls in their separate integration.
+Filter-first orchestration resides in QueryViewClient and uses the same View,
+Schema, MVCC and selection in both rounds; workers do not replan or call peers.
+See the [client flow](query_client.md#filter-first-ann-search).

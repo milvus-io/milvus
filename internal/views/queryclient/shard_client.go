@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	"github.com/milvus-io/milvus/internal/views/queryclient/reducer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -28,6 +29,7 @@ import (
 // Both Search and Query share the same executeShard framework, differing only
 // in what request goes into the GetQueryPlanRequest and which Phase 2 RPC is called.
 type shardViewQueryClient struct {
+	queryHook          optimizers.QueryHook
 	maxRetries         int
 	loadChecks         *collectionLoadChecks
 	replicas           *replicaRouter
@@ -51,11 +53,12 @@ func newShardViewQueryClient(
 
 // ShardSearchRequest contains the parameters for a shard-level search execution.
 type ShardSearchRequest struct {
-	VChannel    string
-	Req         *internalpb.SearchRequest
-	MVCC        *viewpb.QueryPlanMVCC
-	BarrierMVCC uint64
-	Reducer     reducer.SearchResultReducer
+	TotalChannelNum int32
+	VChannel        string
+	Req             *internalpb.SearchRequest
+	MVCC            *viewpb.QueryPlanMVCC
+	BarrierMVCC     uint64
+	Reducer         reducer.SearchResultReducer
 }
 
 // ShardQueryRequest contains the parameters for a shard-level query (retrieve) execution.
@@ -71,6 +74,7 @@ type ShardQueryRequest struct {
 // Replica resolution is handled internally. Results are fed into the provided reducer.
 // Returns the ShardPlan for potential requery.
 func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchRequest) (*ShardPlan, error) {
+	var stage twoStageSearch
 	return s.executeShard(ctx, req.VChannel, &shardExecParams{
 		collectionID:     req.Req.CollectionID,
 		consistencyLevel: req.Req.ConsistencyLevel,
@@ -86,8 +90,13 @@ func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchReque
 				},
 			}
 		},
+		beforeDispatch: func(ctx context.Context, response *viewpb.GetQueryPlanResponse, shardID qviews.ShardID) error {
+			stage = twoStageSearch{}
+			return s.prepareTwoStageSearch(ctx, response, shardID, req.TotalChannelNum, &stage)
+		},
 		dispatchNode: func(ctx context.Context, node qviews.WorkNode, plan *viewpb.QueryPlan, shardID qviews.ShardID) error {
 			resp, err := s.queryServiceClient.SearchOnView(ctx, node, &viewpb.SearchOnViewRequest{
+				ExecutionOptions: stage.options,
 				LegacyReq:        legacySearchRequestForNode(plan, node),
 				SegmentSelection: qviews.WorkNodeSelection(plan, node).GetSegmentSelection(),
 				SubSelections:    qviews.WorkNodeSelection(plan, node).GetSubSelections(),
@@ -98,6 +107,7 @@ func (s *shardViewQueryClient) Search(ctx context.Context, req *ShardSearchReque
 			if err != nil {
 				return err
 			}
+			stage.mergeFeatures(node, resp)
 			return req.Reducer.Add(shardID, resp)
 		},
 		resetShard: req.Reducer.ResetShard,
@@ -158,6 +168,8 @@ type shardExecParams struct {
 	buildPlanReq func(targetShardID qviews.ShardID) *viewpb.GetQueryPlanRequest
 	// consumeResponse accepts inline SN results before worker dispatch.
 	consumeResponse func(*viewpb.GetQueryPlanResponse) error
+	// beforeDispatch runs attempt-local preparatory execution before ANN fanout.
+	beforeDispatch func(context.Context, *viewpb.GetQueryPlanResponse, qviews.ShardID) error
 	// dispatchNode executes a Phase 2 RPC on a single work node.
 	// Called concurrently for each work node in the plan.
 	dispatchNode func(ctx context.Context, node qviews.WorkNode, plan *viewpb.QueryPlan, shardID qviews.ShardID) error
@@ -230,7 +242,7 @@ func (s *shardViewQueryClient) executeShard(
 		}
 
 		plan := response.GetPlan()
-		if err := qviews.RestoreQueryPlanPayloads(plan, planReq); err != nil {
+		if err := qviews.RestoreQueryPlanPayloads(response, planReq); err != nil {
 			return nil, err
 		}
 		// A newer advertised version does not certify removal of a dead QN.
@@ -257,7 +269,12 @@ func (s *shardViewQueryClient) executeShard(
 		workNodes := workNodesFromPlan(plan)
 
 		// Phase 2: Fan out to all work nodes concurrently.
-		err = s.fanOutToWorkNodes(ctx, workNodes, plan, shardID, params.dispatchNode)
+		if params.beforeDispatch != nil {
+			err = params.beforeDispatch(ctx, response, shardID)
+		}
+		if err == nil {
+			err = s.fanOutToWorkNodes(ctx, workNodes, plan, shardID, params.dispatchNode)
+		}
 		if err != nil {
 			if retryableQueryError(err) {
 				lastErr = err
