@@ -143,25 +143,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::vector<PinWrapper<const index::IndexBase*>>
     PinIndex(milvus::OpContext* op_ctx,
              FieldId field_id,
-             bool include_ngram = false) const override {
-        auto snapshot = CapturePublishedState();
-        if (snapshot != nullptr && snapshot->runtime != nullptr) {
-            const auto& runtime = *snapshot->runtime;
-            if (!include_ngram && runtime.ngram_fields.find(field_id) !=
-                                      runtime.ngram_fields.end()) {
-                return {};
-            }
-
-            auto iter = runtime.scalar_indexings.find(field_id);
-            if (iter != runtime.scalar_indexings.end()) {
-                auto ca = SemiInlineGet(iter->second->PinCells(op_ctx, {0}));
-                auto index = ca->get_cell_of(0);
-                return {
-                    PinWrapper<const index::IndexBase*>(std::move(ca), index)};
-            }
-        }
-        return {};
-    }
+             bool include_ngram = false) const override;
 
     std::vector<PinWrapper<const index::IndexBase*>>
     PinJsonIndex(milvus::OpContext* op_ctx,
@@ -311,17 +293,61 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     GetCommitTimestamp() const override;
 
     struct RuntimeResourceState;
+    struct DeferredBusinessIndex {
+        explicit DeferredBusinessIndex(const LoadIndexInfo& info);
+
+        SealedIndexingEntryPtr
+        Get(milvus::OpContext* op_ctx);
+
+        std::timed_mutex mutex;
+        std::function<SealedIndexingEntryPtr(milvus::OpContext*)> factory;
+        const bool is_vector;
+        const int64_t segment_id;
+        SealedIndexingEntryPtr materialized;
+        std::atomic<bool> ready{false};
+
+        void
+        CancelWarmupIfReady() const {
+            if (ready.load(std::memory_order_acquire)) {
+                materialized->indexing_->CancelWarmup();
+            }
+        }
+    };
+    struct DeferredTextIndex {
+        DeferredTextIndex(const proto::indexcgo::LoadTextIndexInfo& info,
+                          int64_t segment_id,
+                          int64_t num_rows,
+                          std::string shard);
+
+        std::shared_ptr<CacheSlot<index::TextMatchIndex>>
+        Get(milvus::OpContext* op_ctx);
+
+        std::timed_mutex mutex;
+        std::function<std::shared_ptr<CacheSlot<index::TextMatchIndex>>(
+            milvus::OpContext*)>
+            factory;
+        const int64_t segment_id;
+        std::shared_ptr<CacheSlot<index::TextMatchIndex>> slot;
+        std::atomic<bool> ready{false};
+    };
 
     using TextIndexVariant =
         std::variant<std::shared_ptr<milvus::index::TextMatchIndexHolder>,
                      std::shared_ptr<milvus::cachinglayer::CacheSlot<
-                         milvus::index::TextMatchIndex>>>;
+                         milvus::index::TextMatchIndex>>,
+                     std::shared_ptr<DeferredTextIndex>>;
 
     struct JsonIndex {
         FieldId field_id;
         std::string nested_path;
         JsonCastType cast_type{JsonCastType::UNKNOWN};
         index::CacheIndexBasePtr index;
+        std::shared_ptr<DeferredBusinessIndex> deferred;
+
+        index::CacheIndexBasePtr
+        Get(milvus::OpContext* op_ctx) const {
+            return deferred ? deferred->Get(op_ctx)->indexing_ : index;
+        }
     };
 
     struct RuntimeResourceState {
@@ -331,6 +357,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             struct_to_array_offsets;
         std::unordered_map<FieldId, std::shared_ptr<ArrayOffsetsSealed>>
             array_offsets_map;
+        // Descriptors belong to the snapshot that loaded them. First access
+        // materializes only that descriptor, never a newer published state.
+        std::unordered_map<FieldId, std::shared_ptr<DeferredBusinessIndex>>
+            deferred_business_indexes;
         std::unordered_map<FieldId, index::CacheIndexBasePtr> scalar_indexings;
         std::unordered_map<FieldId, SealedIndexingEntryPtr> vector_indexings;
         std::unordered_map<FieldId, std::shared_ptr<const VecIndexConfig>>
@@ -340,6 +370,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             FieldId,
             std::unordered_map<std::string, index::CacheIndexBasePtr>>
             ngram_indexings;
+        std::unordered_map<
+            FieldId,
+            std::unordered_map<std::string,
+                               std::shared_ptr<DeferredBusinessIndex>>>
+            deferred_ngram_indexings;
         std::unordered_map<FieldId, std::string> text_lob_paths;
         std::unordered_map<FieldId, TextIndexVariant> text_indexes;
         std::vector<JsonIndex> json_indices;
@@ -1558,10 +1593,37 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     RuntimeVectorIndexReady(const RuntimeResourceState* runtime,
                             FieldId field_id);
 
+    bool
+    CanDeferBusinessIndex(const LoadIndexInfo& info,
+                          const SchemaPtr& schema) const;
+
+    void
+    DeferBusinessIndex(LoadIndexInfo& info,
+                       bool is_replace,
+                       RuntimeResourceState* runtime,
+                       PublishedSegmentState* staged_state,
+                       StagedStateCommitter* committer);
+
+    static index::CacheIndexBasePtr
+    GetScalarIndexing(const RuntimeResourceState& runtime,
+                      FieldId field_id,
+                      milvus::OpContext* op_ctx);
+
+    bool
+    CanDeferTextIndex(const proto::indexcgo::LoadTextIndexInfo& info) const;
+
+    static std::shared_ptr<CacheSlot<index::TextMatchIndex>>
+    CreateTextIndexCacheSlot(milvus::OpContext* op_ctx,
+                             const proto::indexcgo::LoadTextIndexInfo& info,
+                             int64_t segment_id,
+                             int64_t num_rows,
+                             const std::string& shard);
+
     static SealedIndexingEntryPtr
     GetVectorIndexing(
         const std::shared_ptr<const RuntimeResourceState>& runtime,
-        FieldId field_id);
+        FieldId field_id,
+        milvus::OpContext* op_ctx = nullptr);
 
     static SealedIndexingEntryPtr
     EraseVectorIndexing(RuntimeResourceState& runtime, FieldId field_id);
@@ -1653,6 +1715,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                 RetireVectorIndexingLocked(field_id);
                 runtime_->vec_binlog_config.erase(field_id);
             }
+            runtime_->deferred_business_indexes.erase(field_id);
             runtime_->vector_indexings[field_id] =
                 BuildVectorIndexEntry(metric_type, std::move(indexing));
         }
@@ -1669,6 +1732,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             const MetricType& metric_type,
             index::CacheIndexBasePtr indexing,
             std::unique_ptr<VecIndexConfig> binlog_config) {
+            runtime_->deferred_business_indexes.erase(field_id);
             runtime_->vector_indexings[field_id] =
                 BuildVectorIndexEntry(metric_type, std::move(indexing));
             runtime_->vec_binlog_config[field_id] =
@@ -2299,6 +2363,154 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
 #ifdef MILVUS_UNIT_TEST
  public:
+    bool
+    TestCanDeferBusinessIndex(FieldId field_id,
+                              const std::vector<LoadIndexInfo>& infos) const {
+        return infos.size() == 1 && infos.front().field_id == field_id.get() &&
+               CanDeferBusinessIndex(infos.front(), CaptureSchemaSnapshot());
+    }
+
+    void
+    TestLoadBatchIndexes(
+        std::unordered_map<FieldId, std::vector<LoadIndexInfo>>& indexes,
+        bool is_replace = false) {
+        std::lock_guard<std::mutex> guard(reopen_mutex_);
+        auto current = CapturePublishedState();
+        auto runtime = CloneRuntimeResourceState(current->runtime);
+        auto staged = ClonePublishedState(current);
+        staged->runtime = runtime;
+        StagedStateCommitter committer(*this, runtime.get(), staged.get());
+        milvus::tracer::TraceContext trace_ctx{};
+        LoadBatchIndexes(trace_ctx,
+                         indexes,
+                         current->schema,
+                         nullptr,
+                         is_replace,
+                         committer);
+        auto delta = MakeStateDelta(current->schema,
+                                    current->load_info,
+                                    ToConstRuntimeState(std::move(runtime)),
+                                    current->commit_ts);
+        delta.published_index_ready_bitset =
+            staged->published_index_ready_bitset.clone();
+        delta.published_binlog_index_ready_bitset =
+            staged->published_binlog_index_ready_bitset.clone();
+        delta.published_index_has_raw_data =
+            staged->published_index_has_raw_data;
+        committer.Publish(current, delta);
+    }
+
+    static index::CacheIndexBasePtr
+    TestGetScalarIndexSlot(const RuntimeResourceState& runtime,
+                           FieldId field_id,
+                           milvus::OpContext* op_ctx = nullptr) {
+        return GetScalarIndexing(runtime, field_id, op_ctx);
+    }
+
+    void
+    TestEnsureBusinessIndexSlot(FieldId field_id) {
+        auto runtime = CaptureRuntimeResourceState();
+        if (runtime == nullptr)
+            return;
+        auto it = runtime->deferred_business_indexes.find(field_id);
+        if (it != runtime->deferred_business_indexes.end())
+            it->second->Get(nullptr);
+    }
+
+    size_t
+    TestDeferredBusinessIndexCount() const {
+        auto runtime = CaptureRuntimeResourceState();
+        if (runtime == nullptr)
+            return 0;
+        size_t count = 0;
+        for (auto& [_, descriptor] : runtime->deferred_business_indexes)
+            count += !descriptor->ready.load(std::memory_order_acquire);
+        return count;
+    }
+
+    bool
+    TestHasMaterializedBusinessIndex(FieldId field_id) const {
+        auto runtime = CaptureRuntimeResourceState();
+        if (runtime == nullptr)
+            return false;
+        auto it = runtime->deferred_business_indexes.find(field_id);
+        if (it != runtime->deferred_business_indexes.end())
+            return it->second->ready.load(std::memory_order_acquire);
+        return runtime->scalar_indexings.count(field_id) ||
+               runtime->vector_indexings.count(field_id);
+    }
+
+    void
+    TestEnsureTextIndexSlot(FieldId field_id) {
+        auto runtime = CaptureRuntimeResourceState();
+        if (runtime == nullptr)
+            return;
+        auto it = runtime->text_indexes.find(field_id);
+        if (it != runtime->text_indexes.end()) {
+            if (auto deferred = std::get_if<std::shared_ptr<DeferredTextIndex>>(
+                    &it->second))
+                (*deferred)->Get(nullptr);
+        }
+    }
+
+    size_t
+    TestDeferredTextIndexCount() const {
+        auto runtime = CaptureRuntimeResourceState();
+        if (runtime == nullptr)
+            return 0;
+        size_t count = 0;
+        for (auto& [_, index] : runtime->text_indexes) {
+            if (auto deferred =
+                    std::get_if<std::shared_ptr<DeferredTextIndex>>(&index))
+                count += !(*deferred)->ready.load(std::memory_order_acquire);
+        }
+        return count;
+    }
+
+    bool
+    TestHasMaterializedTextIndex(FieldId field_id) const {
+        auto runtime = CaptureRuntimeResourceState();
+        if (runtime == nullptr)
+            return false;
+        auto it = runtime->text_indexes.find(field_id);
+        if (it == runtime->text_indexes.end())
+            return false;
+        if (auto deferred =
+                std::get_if<std::shared_ptr<DeferredTextIndex>>(&it->second))
+            return (*deferred)->ready.load(std::memory_order_acquire);
+        return true;
+    }
+
+    void
+    TestEnsureBusinessIndexSlotUnderSegmentReadLock(FieldId field_id) {
+        std::shared_lock lock(mutex_);
+        TestEnsureBusinessIndexSlot(field_id);
+    }
+
+    void
+    TestDropLazyIndex(FieldId field_id) {
+        std::lock_guard<std::mutex> guard(reopen_mutex_);
+        DropIndex(field_id, CaptureSchemaSnapshot());
+    }
+
+    bool
+    TestCanDeferTextIndex(
+        const proto::indexcgo::LoadTextIndexInfo& info) const {
+        return CanDeferTextIndex(info);
+    }
+
+    void
+    TestLoadTextIndex(
+        milvus::OpContext* ctx,
+        std::shared_ptr<proto::indexcgo::LoadTextIndexInfo> info) {
+        std::lock_guard<std::mutex> guard(reopen_mutex_);
+        auto current = CapturePublishedState();
+        auto index = BuildTextIndexFromFiles(ctx, info, *current->load_info);
+        auto runtime = CloneRuntimeResourceState(current->runtime);
+        runtime->text_indexes[FieldId(info->fieldid())] = std::move(index);
+        PublishRuntimeStateLocked(ToConstRuntimeState(std::move(runtime)));
+    }
+
     // Test-only: inject a mock Reader for unit testing take() paths.
     void
     SetReaderForTesting(std::unique_ptr<milvus_storage::api::Reader> r) {

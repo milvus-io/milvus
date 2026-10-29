@@ -1451,3 +1451,16 @@ func TestPartialUpdateRecoveryDecodeTimeoutConfig(t *testing.T) {
 	assert.NoError(t, params.Reset(item.Key))
 	assert.Equal(t, 5*time.Second, item.GetAsDurationByParse())
 }
+
+func TestTieredLazyIndexSlotConfig(t *testing.T) {
+	Init()
+	params := Get()
+	item := &params.QueryNodeCfg.TieredLazyIndexSlotEnabled
+
+	assert.Equal(t, "false", item.DefaultValue)
+	defer params.Reset(item.Key)
+	assert.NoError(t, params.Save(item.Key, "false"))
+	assert.False(t, item.GetAsBool())
+	assert.NoError(t, params.Save(item.Key, "true"))
+	assert.True(t, item.GetAsBool())
+}

@@ -4066,6 +4066,7 @@ type queryNodeConfig struct {
 	TieredLoadingTimeoutMs          ParamItem `refreshable:"true"`
 	TieredWarmupLoadingTimeoutMs    ParamItem `refreshable:"true"`
 	StorageUsageTrackingEnabled     ParamItem `refreshable:"true"`
+	TieredLazyIndexSlotEnabled      ParamItem `refreshable:"true"`
 	TieredRejectRemoteVectorOutput  ParamItem `refreshable:"true"`
 	TieredLazyColumnGroupEnabled    ParamItem `refreshable:"true"`
 
@@ -4380,6 +4381,15 @@ Defaults to "sync".`,
 		Export:       true,
 	}
 	p.TieredLazyColumnGroupEnabled.Init(base.mgr)
+
+	p.TieredLazyIndexSlotEnabled = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.lazyIndexSlotEnabled",
+		Version:      "3.0.5",
+		DefaultValue: "false",
+		Doc:          "When enabled, sealed scalar, vector, and text index translators and cache slots with warmup=disable are created on first access instead of segment load.",
+		Export:       true,
+	}
+	p.TieredLazyIndexSlotEnabled.Init(base.mgr)
 
 	p.TieredEvictionEnabled = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.evictionEnabled",
