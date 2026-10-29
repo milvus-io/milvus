@@ -281,8 +281,13 @@ func (reducer *GroupAggReducer) mergeValues(ctx context.Context, results []*Part
 	if len(results) == 1 {
 		return results[0], nil
 	}
-
-	// 0. set up aggregates
+	if len(reducer.groupByFieldIds) > 0 {
+		buffer := reducer.NewBuffer()
+		if err := buffer.Merge(results); err != nil {
+			return nil, err
+		}
+		return buffer.Result()
+	}
 	aggs := make([]AggregateBase, len(reducer.aggregates))
 	for idx, aggPb := range reducer.aggregates {
 		agg, err := FromPB(aggPb)
@@ -292,17 +297,102 @@ func (reducer *GroupAggReducer) mergeValues(ctx context.Context, results []*Part
 		aggs[idx] = agg
 	}
 
-	// 1. set up hashers and accumulators
-	numGroupingKeys := len(reducer.groupByFieldIds)
-	numAggs := len(reducer.aggregates)
-	hashers := make([]FieldAccessor, numGroupingKeys)
-	accumulators := make([]FieldAccessor, numAggs)
-	firstFieldData := results[0].GetFieldDatas() //nolint:gosec // results[0] is safe: empty/single-result cases already returned above
+	firstFieldData := results[0].GetFieldDatas() //nolint:gosec // empty/single-result cases already returned above
 	outputColumnCount := len(firstFieldData)
+	accumulators := make([]FieldAccessor, len(reducer.aggregates))
 	for idx, fieldData := range firstFieldData {
 		accessor, err := NewFieldAccessor(fieldData.GetType())
 		if err != nil {
 			return nil, err
+		}
+		accumulators[idx] = accessor
+	}
+
+	reducedResult := newPartialAggregationResult(nil, 0)
+	reducedResult.fieldDatas = typeutil.PrepareResultFieldData(firstFieldData, 1)
+	rows := make([]*Row, len(results))
+	for idx, result := range results {
+		reducedResult.allRetrieveCount += result.GetAllRetrieveCount()
+		fieldValues := make([]*FieldValue, outputColumnCount)
+		for col := 0; col < outputColumnCount; col++ {
+			fieldData := result.GetFieldDatas()[col]
+			accumulators[col].SetVals(fieldData)
+			if accumulators[col].IsNullAt(0) {
+				fieldValues[col] = NewNullFieldValue()
+			} else {
+				fieldValues[col] = NewFieldValue(accumulators[col].ValAt(0))
+			}
+		}
+		rows[idx] = NewRow(fieldValues)
+	}
+	for row := 1; row < len(rows); row++ {
+		for col := 0; col < outputColumnCount; col++ {
+			rows[0].UpdateFieldValue(rows[row], col, aggs[col])
+		}
+	}
+	AssembleSingleRow(outputColumnCount, rows[0], reducedResult.fieldDatas)
+	return reducedResult, nil
+}
+
+// GroupAggBuffer retains one grouped accumulation independently of the reducer.
+type GroupAggBuffer struct {
+	reducer          *GroupAggReducer
+	hashValsMap      map[uint64]*Bucket
+	firstFieldData   []*schemapb.FieldData
+	totalGroupCount  int64
+	allRetrieveCount int64
+	limitReached     bool
+}
+
+// NewBuffer creates a grouped output Buffer for one merge or ReduceStream.
+func (reducer *GroupAggReducer) NewBuffer() *GroupAggBuffer {
+	return &GroupAggBuffer{reducer: reducer, hashValsMap: make(map[uint64]*Bucket)}
+}
+
+// Merge accumulates grouped partial results without assembling the output.
+func (buffer *GroupAggBuffer) Merge(results []*PartialAggregationResult) error {
+	if len(buffer.reducer.groupByFieldIds) == 0 {
+		return merr.WrapErrServiceInternalMsg("incremental group aggregation requires at least one Group By field")
+	}
+	if len(results) == 0 {
+		return nil
+	}
+	values := make([]*PartialAggregationResult, 0, len(results))
+	for _, result := range results {
+		if result == nil {
+			return merr.WrapErrServiceInternalMsg("nil aggregate partial")
+		}
+		buffer.allRetrieveCount += result.GetAllRetrieveCount()
+		if !result.IsEmpty() {
+			values = append(values, result)
+		}
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	results = values
+
+	aggs := make([]AggregateBase, len(buffer.reducer.aggregates))
+	for idx, aggPb := range buffer.reducer.aggregates {
+		agg, err := FromPB(aggPb)
+		if err != nil {
+			return err
+		}
+		aggs[idx] = agg
+	}
+
+	numGroupingKeys := len(buffer.reducer.groupByFieldIds)
+	firstFieldData := results[0].GetFieldDatas() //nolint:gosec // empty partials were filtered above
+	outputColumnCount := len(firstFieldData)
+	if buffer.firstFieldData == nil {
+		buffer.firstFieldData = typeutil.PrepareResultFieldData(firstFieldData, 0)
+	}
+	hashers := make([]FieldAccessor, numGroupingKeys)
+	accumulators := make([]FieldAccessor, len(buffer.reducer.aggregates))
+	for idx, fieldData := range firstFieldData {
+		accessor, err := NewFieldAccessor(fieldData.GetType())
+		if err != nil {
+			return err
 		}
 		if idx < numGroupingKeys {
 			hashers[idx] = accessor
@@ -310,50 +400,15 @@ func (reducer *GroupAggReducer) mergeValues(ctx context.Context, results []*Part
 			accumulators[idx-numGroupingKeys] = accessor
 		}
 	}
-	reducedResult := newPartialAggregationResult(nil, 0)
-	isGlobal := numGroupingKeys == 0
-	if isGlobal {
-		reducedResult.fieldDatas = typeutil.PrepareResultFieldData(firstFieldData, 1)
-		rows := make([]*Row, len(results))
-		for idx, result := range results {
-			reducedResult.allRetrieveCount += result.GetAllRetrieveCount()
-			fieldValues := make([]*FieldValue, outputColumnCount)
-			for col := 0; col < outputColumnCount; col++ {
-				fieldData := result.GetFieldDatas()[col]
-				accumulators[col].SetVals(fieldData)
-				if accumulators[col].IsNullAt(0) {
-					fieldValues[col] = NewNullFieldValue()
-				} else {
-					fieldValues[col] = NewFieldValue(accumulators[col].ValAt(0))
-				}
-			}
-			rows[idx] = NewRow(fieldValues)
-		}
-		for r := 1; r < len(rows); r++ {
-			for c := 0; c < outputColumnCount; c++ {
-				rows[0].UpdateFieldValue(rows[r], c, aggs[c])
-			}
-		}
-		AssembleSingleRow(outputColumnCount, rows[0], reducedResult.fieldDatas)
-		return reducedResult, nil
-	}
 
-	// 2. compute hash values for this merge only.
-	hashValsMap := make(map[uint64]*Bucket)
-	var totalGroupCount int64 = 0
 	maxGroupByGroups := paramtable.Get().CommonCfg.GroupByMaxGroups.GetAsInt64()
-	limitReached := false
 	for _, result := range results {
-		if result == nil {
-			return nil, merr.WrapErrServiceInternalMsg("input result from any sources cannot be nil")
-		}
-		reducedResult.allRetrieveCount += result.GetAllRetrieveCount()
 		fieldDatas := result.GetFieldDatas()
 		if outputColumnCount != len(fieldDatas) {
-			return nil, merr.WrapErrServiceInternalMsg("retrieved results from different segments have different size of columns")
+			return merr.WrapErrServiceInternalMsg("retrieved results from different segments have different size of columns")
 		}
 		if outputColumnCount == 0 {
-			return nil, merr.WrapErrServiceInternalMsg("retrieved results have no column data")
+			return merr.WrapErrServiceInternalMsg("retrieved results have no column data")
 		}
 		rowCount := -1
 		for i := 0; i < outputColumnCount; i++ {
@@ -367,11 +422,11 @@ func (reducer *GroupAggReducer) mergeValues(ctx context.Context, results []*Part
 				rowCount = hashers[i].RowCount()
 			} else if i < numGroupingKeys {
 				if rowCount != hashers[i].RowCount() {
-					return nil, merr.WrapErrServiceInternalMsg("field data:%d for different columns have different row count, %d vs %d, wrong state",
+					return merr.WrapErrServiceInternalMsg("field data:%d for different columns have different row count, %d vs %d, wrong state",
 						i, rowCount, hashers[i].RowCount())
 				}
 			} else if rowCount != accumulators[i-numGroupingKeys].RowCount() {
-				return nil, merr.WrapErrServiceInternalMsg("field data:%d for different columns have different row count, %d vs %d, wrong state",
+				return merr.WrapErrServiceInternalMsg("field data:%d for different columns have different row count, %d vs %d, wrong state",
 					i, rowCount, accumulators[i-numGroupingKeys].RowCount())
 			}
 		}
@@ -391,64 +446,53 @@ func (reducer *GroupAggReducer) mergeValues(ctx context.Context, results []*Part
 					} else {
 						rowFieldValues[col] = NewFieldValue(hashers[col].ValAt(row))
 					}
+				} else if accumulators[col-numGroupingKeys].IsNullAt(row) {
+					rowFieldValues[col] = NewNullFieldValue()
 				} else {
-					if accumulators[col-numGroupingKeys].IsNullAt(row) {
-						rowFieldValues[col] = NewNullFieldValue()
-					} else {
-						rowFieldValues[col] = NewFieldValue(accumulators[col-numGroupingKeys].ValAt(row))
-					}
+					rowFieldValues[col] = NewFieldValue(accumulators[col-numGroupingKeys].ValAt(row))
 				}
 			}
+
 			newRow := NewRow(rowFieldValues)
-			if bucket := hashValsMap[hashVal]; bucket == nil {
-				// New group: check groupLimit before adding.
-				// When limitReached, new groups/sub-groups are skipped, but
-				// accumulation into existing groups continues (line 434).
-				// This is intentional: groupLimit controls the number of output
-				// groups, not the amount of input data processed. Existing groups
-				// should accumulate all matching rows for correct aggregation
-				// (e.g., count/sum must reflect all data, not just early rows).
-				if limitReached {
+			bucket := buffer.hashValsMap[hashVal]
+			if bucket == nil {
+				if buffer.limitReached {
 					continue
 				}
-				newBucket := NewBucket()
-				newBucket.AddRow(newRow)
-				totalGroupCount++
-				hashValsMap[hashVal] = newBucket
-				if reducer.groupLimit != -1 && totalGroupCount >= reducer.groupLimit {
-					limitReached = true
+				bucket = NewBucket()
+				bucket.AddRow(newRow)
+				buffer.hashValsMap[hashVal] = bucket
+				buffer.totalGroupCount++
+				buffer.limitReached = buffer.reducer.groupLimit != -1 && buffer.totalGroupCount >= buffer.reducer.groupLimit
+			} else if rowIndex := bucket.Find(newRow, numGroupingKeys); rowIndex == NONE {
+				if buffer.limitReached {
+					continue
 				}
-			} else {
-				if rowIdx := bucket.Find(newRow, numGroupingKeys); rowIdx == NONE {
-					// New sub-group in existing bucket: check groupLimit
-					if limitReached {
-						continue
-					}
-					bucket.AddRow(newRow)
-					totalGroupCount++
-					if reducer.groupLimit != -1 && totalGroupCount >= reducer.groupLimit {
-						limitReached = true
-					}
-				} else {
-					if err := bucket.Accumulate(newRow, rowIdx, numGroupingKeys, aggs); err != nil {
-						return nil, err
-					}
-				}
+				bucket.AddRow(newRow)
+				buffer.totalGroupCount++
+				buffer.limitReached = buffer.reducer.groupLimit != -1 && buffer.totalGroupCount >= buffer.reducer.groupLimit
+			} else if err := bucket.Accumulate(newRow, rowIndex, numGroupingKeys, aggs); err != nil {
+				return err
 			}
-			if totalGroupCount > maxGroupByGroups {
-				return nil, merr.WrapErrParameterInvalidMsg("GROUP BY produced too many groups (%d). "+
+			if buffer.totalGroupCount > maxGroupByGroups {
+				return merr.WrapErrParameterInvalidMsg("GROUP BY produced too many groups (%d). "+
 					"Add filters or increase common.groupBy.maxGroups (current: %d)",
-					totalGroupCount, maxGroupByGroups)
+					buffer.totalGroupCount, maxGroupByGroups)
 			}
-			// Don't guarantee specific groups to be returned before milvus support order by
 		}
 	}
+	return nil
+}
 
-	// 3. assemble reduced buckets into retrievedResult
-	reducedResult.fieldDatas = typeutil.PrepareResultFieldData(firstFieldData, totalGroupCount)
-	for _, bucket := range hashValsMap {
-		err := AssembleBucket(bucket, reducedResult.GetFieldDatas())
-		if err != nil {
+// Result assembles the accumulated grouped result.
+func (buffer *GroupAggBuffer) Result() (*PartialAggregationResult, error) {
+	if buffer.firstFieldData == nil {
+		return newPartialAggregationResult(nil, buffer.allRetrieveCount), nil
+	}
+	reducedResult := newPartialAggregationResult(nil, buffer.allRetrieveCount)
+	reducedResult.fieldDatas = typeutil.PrepareResultFieldData(buffer.firstFieldData, buffer.totalGroupCount)
+	for _, bucket := range buffer.hashValsMap {
+		if err := AssembleBucket(bucket, reducedResult.GetFieldDatas()); err != nil {
 			return nil, err
 		}
 	}

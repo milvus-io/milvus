@@ -66,7 +66,7 @@ func scalarRowSize[T any](data []T, row int64, null bool, size func(T) int) (int
 }
 
 // FieldDataRowSize sizes a one-row FieldData with the retained descriptors and
-// field-specific validity. dataRow is the compact vector index, or row otherwise.
+// dual-written row validity. dataRow is the compact vector index, or row otherwise.
 // search selects Search's vector metadata rules rather than Query's. Nested
 // array values already are protobuf messages and are sized in place.
 func FieldDataRowSize(field *schemapb.FieldData, row, dataRow int64, search bool) (int, error) {
@@ -107,12 +107,14 @@ func fieldDataRowSize(field *schemapb.FieldData, row, dataRow int64, group, sear
 		payload, err = scalarFieldRowSize(data.Scalars, dataRow, null)
 		if (!group && len(validity) > 0) || (group && null) {
 			payload += bytesFieldSize(17, 1)
+			size += bytesFieldSize(6, 1)
 		}
 		size += bytesFieldSize(3, payload)
 	case *schemapb.FieldData_Vectors:
 		payload, err = vectorFieldRowSize(data.Vectors, dataRow, null, search)
 		if len(validity) > 0 || dataRow < 0 {
 			payload += bytesFieldSize(9, 1)
+			size += bytesFieldSize(6, 1)
 		}
 		size += bytesFieldSize(4, payload)
 	case *schemapb.FieldData_StructArrays:

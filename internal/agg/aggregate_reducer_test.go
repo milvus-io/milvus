@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -145,8 +146,9 @@ func TestReduceWithValidGroupResults(t *testing.T) {
 
 func TestGroupAggReducerMergesIncrementalResults(t *testing.T) {
 	reducer := makeGroupAggReducer()
-	makeResult := func(keys []string, values []int64) *AggregationResult {
-		return NewAggregationResult([]*schemapb.FieldData{
+	buffer := reducer.NewBuffer()
+	makeResult := func(keys []string, values []int64) *PartialAggregationResult {
+		return newPartialAggregationResult([]*schemapb.FieldData{
 			{
 				Type: schemapb.DataType_VarChar,
 				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
@@ -162,10 +164,10 @@ func TestGroupAggReducerMergesIncrementalResults(t *testing.T) {
 		}, int64(len(keys)))
 	}
 
-	require.NoError(t, reducer.Merge([]*AggregationResult{makeResult([]string{"a", "b"}, []int64{10, 5})}))
-	require.NoError(t, reducer.Merge([]*AggregationResult{makeResult([]string{"a", "c"}, []int64{20, 7})}))
+	require.NoError(t, buffer.Merge([]*PartialAggregationResult{makeResult([]string{"a", "b"}, []int64{10, 5})}))
+	require.NoError(t, buffer.Merge([]*PartialAggregationResult{makeResult([]string{"a", "c"}, []int64{20, 7})}))
 
-	result, err := reducer.Result()
+	result, err := buffer.Result()
 	require.NoError(t, err)
 	require.Equal(t, int64(4), result.GetAllRetrieveCount())
 	keys := result.GetFieldDatas()[0].GetScalars().GetStringData().GetData()
@@ -177,7 +179,67 @@ func TestGroupAggReducerMergesIncrementalResults(t *testing.T) {
 	require.Equal(t, map[string]int64{"a": 30, "b": 5, "c": 7}, actual)
 }
 
+func TestGroupAggBufferOwnsAccumulation(t *testing.T) {
+	reducer := NewGroupAggReducer([]int64{100}, []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}}, -1, buildTestSchema())
+	input := buildAggResult(1, 1)
+	wire, err := reducer.EncodePartial(input)
+	require.NoError(t, err)
+	before := proto.Clone(wire)
+	for range 2 {
+		merged, err := reducer.Merge(t.Context(), []*PartialAggregationResult{input, input})
+		require.NoError(t, err)
+		require.Equal(t, []int64{2}, merged.GetFieldDatas()[1].GetScalars().GetLongData().GetData())
+	}
+	buffer := reducer.NewBuffer()
+	require.NoError(t, buffer.Merge([]*PartialAggregationResult{{}, input}))
+	first, err := buffer.Result()
+	require.NoError(t, err)
+	require.NoError(t, buffer.Merge([]*PartialAggregationResult{input}))
+	second, err := buffer.Result()
+	require.NoError(t, err)
+	require.Equal(t, []int64{1}, first.GetFieldDatas()[1].GetScalars().GetLongData().GetData())
+	require.Equal(t, []int64{2}, second.GetFieldDatas()[1].GetScalars().GetLongData().GetData())
+	empty, err := reducer.NewBuffer().Result()
+	require.NoError(t, err)
+	require.True(t, empty.IsEmpty())
+	after, err := reducer.EncodePartial(input)
+	require.NoError(t, err)
+	require.True(t, proto.Equal(before, after))
+	require.Error(t, reducer.NewBuffer().Merge([]*PartialAggregationResult{nil}))
+}
+
 // TestReduceEmptyResults verifies that reduce returns an empty result for empty input.
+func TestGroupAggBufferPreservesGroupLimit(t *testing.T) {
+	for _, limit := range []int64{-1, 0, 1} {
+		t.Run(fmt.Sprint(limit), func(t *testing.T) {
+			reducer := NewGroupAggReducer([]int64{100}, []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}}, limit, buildTestSchema())
+			inputs := []*PartialAggregationResult{buildAggResult(1, 1), buildAggResult(2, 1), buildAggResult(1, 1)}
+			buffer := reducer.NewBuffer()
+			for _, input := range inputs {
+				require.NoError(t, buffer.Merge([]*PartialAggregationResult{input}))
+			}
+			stream, err := buffer.Result()
+			require.NoError(t, err)
+			batch, err := reducer.Merge(t.Context(), inputs)
+			require.NoError(t, err)
+			for _, result := range []*PartialAggregationResult{stream, batch} {
+				groups := result.GetFieldDatas()[0].GetScalars().GetLongData().GetData()
+				values := result.GetFieldDatas()[1].GetScalars().GetLongData().GetData()
+				actual := make(map[int64]int64, len(groups))
+				for i, group := range groups {
+					actual[group] = values[i]
+				}
+				if limit == -1 {
+					require.Equal(t, map[int64]int64{1: 2, 2: 1}, actual)
+				} else {
+					require.Equal(t, map[int64]int64{1: 2}, actual)
+				}
+				require.Equal(t, int64(3), result.GetAllRetrieveCount())
+			}
+		})
+	}
+}
+
 func TestReduceEmptyResults(t *testing.T) {
 	reducer := makeGroupAggReducer()
 	out, err := reducer.Merge(context.Background(), []*PartialAggregationResult{})
@@ -192,14 +254,15 @@ func TestEmptyGroupedAggregationHasZeroRows(t *testing.T) {
 	} {
 		t.Run(op.String(), func(t *testing.T) {
 			reducer := NewGroupAggReducer([]int64{1}, []*planpb.Aggregate{{Op: op, FieldId: 2}}, -1, makeTestSchema())
-			empty, err := reducer.EmptyAggResult()
+			empty := &PartialAggregationResult{}
+			batch, err := reducer.Merge(context.Background(), nil)
 			require.NoError(t, err)
-			batch, err := reducer.Reduce(context.Background(), nil)
+			stream, err := reducer.NewBuffer().Result()
 			require.NoError(t, err)
-			stream, err := reducer.Result()
-			require.NoError(t, err)
-			for _, result := range []*AggregationResult{empty, batch, stream} {
-				fields := result.GetFieldDatas()
+			for _, result := range []*PartialAggregationResult{empty, batch, stream} {
+				wire, err := reducer.EncodePartial(result)
+				require.NoError(t, err)
+				fields := wire.GetFieldsData()
 				require.Len(t, fields, 2)
 				require.Equal(t, int64(1), fields[0].GetFieldId())
 				require.Equal(t, "category", fields[0].GetFieldName())
@@ -217,15 +280,14 @@ func TestEmptyGroupedAggregationHasZeroRows(t *testing.T) {
 
 func TestEmptyGlobalCountReturnsSingleZero(t *testing.T) {
 	reducer := NewGroupAggReducer(nil, []*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 2}}, -1, makeTestSchema())
-	empty, err := reducer.EmptyAggResult()
+	empty := &PartialAggregationResult{}
+	batch, err := reducer.Merge(context.Background(), nil)
 	require.NoError(t, err)
-	batch, err := reducer.Reduce(context.Background(), nil)
-	require.NoError(t, err)
-	stream, err := reducer.Result()
-	require.NoError(t, err)
-	for _, result := range []*AggregationResult{empty, batch, stream} {
-		require.Len(t, result.GetFieldDatas(), 1)
-		require.Equal(t, []int64{0}, result.GetFieldDatas()[0].GetScalars().GetLongData().GetData())
+	for _, result := range []*PartialAggregationResult{empty, batch} {
+		wire, err := reducer.EncodePartial(result)
+		require.NoError(t, err)
+		require.Len(t, wire.GetFieldsData(), 1)
+		require.Equal(t, []int64{0}, wire.GetFieldsData()[0].GetScalars().GetLongData().GetData())
 	}
 }
 
