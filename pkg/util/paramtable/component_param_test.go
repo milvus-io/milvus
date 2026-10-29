@@ -1767,6 +1767,42 @@ func TestForbiddenItem(t *testing.T) {
 	assert.Equal(t, "by-dev", params.CommonCfg.ClusterPrefix.GetValue())
 }
 
+func TestComponentParam_ExternalCollectionCredentialPolicy(t *testing.T) {
+	params := ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+	cfg := &params.CommonCfg
+	allow := &cfg.ExternalCollectionAllowServerIdentity
+	brokers := &cfg.ExternalCollectionCredentialBrokerEndpoints
+
+	// Defaults: server identity off, no Brokers. Both keys live under
+	// common.security because they decide whose credentials reach the source.
+	assert.Equal(t, "common.security.externalCollection.allowServerIdentity", allow.Key)
+	assert.Equal(t, "common.security.externalCollection.credentialBrokerEndpoints", brokers.Key)
+	assert.False(t, allow.GetAsBool())
+	assert.Equal(t, []string{}, brokers.GetAsStrings())
+	assert.True(t, allow.Forbidden)
+	assert.True(t, brokers.Forbidden)
+
+	// RuntimeSource (Save) is the explicit process-local override.
+	params.Save(allow.Key, "true")
+	assert.True(t, allow.GetAsBool())
+	params.Save(brokers.Key, "https://broker-a.example/v1/credentials/assume-role, https://broker-b.example/")
+	assert.Equal(t, []string{"https://broker-a.example/v1/credentials/assume-role", "https://broker-b.example/"},
+		brokers.GetAsStrings())
+
+	params.Reset(allow.Key)
+	params.Reset(brokers.Key)
+	assert.False(t, allow.GetAsBool())
+	assert.Equal(t, []string{}, brokers.GetAsStrings())
+
+	// A config-source change after startup is rejected: the C++ runtime read
+	// the policy at process start, and admission must keep agreeing with it.
+	params.baseTable.mgr.OnEvent(&config.Event{Key: allow.Key, Value: "true"})
+	params.baseTable.mgr.OnEvent(&config.Event{Key: brokers.Key, Value: "https://late.example/"})
+	assert.False(t, allow.GetAsBool())
+	assert.Equal(t, []string{}, brokers.GetAsStrings())
+}
+
 func TestFormatDurationWithMillisecondFallback(t *testing.T) {
 	assert.Equal(t, "", formatDurationWithMillisecondFallback(""))
 	assert.Equal(t, "", formatDurationWithMillisecondFallback("  "))

@@ -121,6 +121,12 @@ func InitSegcore(nodeID int64) error {
 		return err
 	}
 
+	// Publish the external collection credential policy before any index
+	// build task can inject an external spec.
+	if err := initcore.InitExternalCollectionCredentialPolicy(paramtable.Get()); err != nil {
+		return err
+	}
+
 	// Apply milvus-storage reader concurrency config: the global reader
 	// thread pool (chunk/file-level fan-out) and the index-build read
 	// window (row groups prefetched in parallel per round).

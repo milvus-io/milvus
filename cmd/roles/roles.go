@@ -529,6 +529,16 @@ func (mr *MilvusRoles) Run() {
 		panic(err)
 	}
 
+	// Every role that opens an external filesystem enforces the external
+	// collection credential policy in C++ when it injects the spec. The query,
+	// streaming and data nodes also publish it in their own segcore init, but
+	// the mix coordinator's Go FFI explore path (create/refresh) has no such
+	// hook, so publish it here for every role before any component starts.
+	if err := initcore.InitExternalCollectionCredentialPolicy(paramtable.Get()); err != nil {
+		mlog.Error(ctx, "failed to initialize external collection credential policy", mlog.Err(err))
+		panic(err)
+	}
+
 	// Worker nodes (querynode, datanode, streamingnode) host no credential
 	// metadata, so without this their management plane and pprof would answer
 	// 503 to root as well as to attackers once adminAuthEnabled is on. It takes

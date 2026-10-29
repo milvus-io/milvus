@@ -20,7 +20,9 @@
 package specutil
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"sort"
 	"strconv"
 	"strings"
@@ -64,6 +66,11 @@ const (
 	ExtfsKeyAzureTenantID           = "azure_tenant_id"
 	// #nosec G101 -- configuration key name, not a credential.
 	ExtfsKeyAzureCredentialEndpoint = "azure_credential_endpoint"
+	// ExtfsKeyCredentialEndpoint is the credential Broker endpoint for GCP
+	// (with gcp_target_service_account) and Azure, where it replaces
+	// azure_credential_endpoint.
+	// #nosec G101 -- configuration key name, not a credential.
+	ExtfsKeyCredentialEndpoint = "credential_endpoint"
 )
 
 // ExternalSpec represents the parsed external collection specification.
@@ -164,6 +171,7 @@ var allowedExtfsKeys = map[string]bool{
 	ExtfsKeyAzureClientID:           true,
 	ExtfsKeyAzureTenantID:           true,
 	ExtfsKeyAzureCredentialEndpoint: true,
+	ExtfsKeyCredentialEndpoint:      true,
 }
 
 var booleanExtfsKeys = map[string]bool{
@@ -173,12 +181,87 @@ var booleanExtfsKeys = map[string]bool{
 	ExtfsKeyAnonymous:      true,
 }
 
+// topLevelSpecKeys are the ExternalSpec JSON field names. encoding/json binds
+// object keys to struct fields case-insensitively, so "Format" or "EXTFS"
+// would silently land in the same field as the canonical spelling.
+var topLevelSpecKeys = []string{"format", "columns", "extfs", "snapshot_id"}
+
+// checkSpecKeys rejects a duplicate key in any object and a non-canonical
+// spelling of a top-level field name. encoding/json keeps the last duplicate
+// while other readers of the persisted spec (simdjson in loon_ffi) see every
+// occurrence, so the two sides could disagree about what was configured.
+// JSON syntax errors are left for json.Unmarshal to report.
+func checkSpecKeys(data []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	err := walkSpecValue(dec, true)
+	if err != nil && !errors.Is(err, merr.ErrParameterInvalid) {
+		return nil
+	}
+	return err
+}
+
+// walkSpecValue consumes one JSON value from dec, checking the keys of every
+// object it contains. topLevel marks the document's root object, the only one
+// whose keys bind to ExternalSpec fields.
+func walkSpecValue(dec *json.Decoder, topLevel bool) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	delim, ok := tok.(json.Delim)
+	if !ok {
+		return nil
+	}
+	switch delim {
+	case '{':
+		seen := make(map[string]struct{})
+		for dec.More() {
+			keyTok, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			key, ok := keyTok.(string)
+			if !ok {
+				return errors.New("object key is not a string")
+			}
+			if _, dup := seen[key]; dup {
+				return merr.WrapErrParameterInvalidMsg("external spec has duplicate key %q", key)
+			}
+			seen[key] = struct{}{}
+			if topLevel {
+				for _, canonical := range topLevelSpecKeys {
+					if key != canonical && strings.EqualFold(key, canonical) {
+						return merr.WrapErrParameterInvalidMsg("external spec key %q must be spelled %q", key, canonical)
+					}
+				}
+			}
+			if err := walkSpecValue(dec, false); err != nil {
+				return err
+			}
+		}
+	case '[':
+		for dec.More() {
+			if err := walkSpecValue(dec, false); err != nil {
+				return err
+			}
+		}
+	default:
+		return nil
+	}
+	_, err = dec.Token() // closing delimiter
+	return err
+}
+
 // ParseExternalSpec parses and validates the JSON shape of an external spec.
 func ParseExternalSpec(specStr string) (*ExternalSpec, error) {
 	if specStr == "" {
 		return &ExternalSpec{Format: FormatParquet}, nil
 	}
 
+	if err := checkSpecKeys([]byte(specStr)); err != nil {
+		return nil, err
+	}
 	var spec ExternalSpec
 	if err := json.Unmarshal([]byte(specStr), &spec); err != nil {
 		return nil, merr.WrapErrParameterInvalidErr(err, "invalid external spec JSON")

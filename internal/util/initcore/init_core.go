@@ -162,6 +162,26 @@ func InitExternalIopsConfig(params *paramtable.ComponentParam) error {
 	return HandleCStatus(&status, "InitExternalIopsConfig failed")
 }
 
+// InitExternalCollectionCredentialPolicy publishes the process-wide policy
+// for the credentials an external collection may use: whether it may read
+// with this cluster's own cloud identity and which credential Brokers it may
+// name. Both settings are read at process start. The C++ spec injection
+// enforces the policy every time an external filesystem is opened, so it
+// must be published by every process that opens one: segcore loads on the
+// query/streaming node, index builds on the data node, and the Go FFI
+// explore path on the mix coordinator. Until it is published, such specs are
+// rejected.
+func InitExternalCollectionCredentialPolicy(params *paramtable.ComponentParam) error {
+	endpoints := strings.Join(params.CommonCfg.ExternalCollectionCredentialBrokerEndpoints.GetAsStrings(), ",")
+	cEndpoints := C.CString(endpoints)
+	defer C.free(unsafe.Pointer(cEndpoints))
+	status := C.SetExternalCollectionCredentialPolicy(
+		C.bool(params.CommonCfg.ExternalCollectionAllowServerIdentity.GetAsBool()),
+		cEndpoints,
+	)
+	return HandleCStatus(&status, "SetExternalCollectionCredentialPolicy failed")
+}
+
 func InitLocalArrowFileSystem(path string) error {
 	return initLocalArrowFileSystem(path, paramtable.Get())
 }

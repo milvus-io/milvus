@@ -89,6 +89,15 @@ InitIndexBuildReadWindow(int64_t window_bytes);
 CStatus
 InitExternalIopsConfig(uint32_t initial_rate, uint32_t max_rate);
 
+// Publishes common.security.externalCollection.allowServerIdentity and
+// common.security.externalCollection.credentialBrokerEndpoints (a
+// comma-separated list; entries are trimmed and a trailing '/' is ignored)
+// for this process. Until it is called, external specs that use the cluster
+// identity or a credential Broker are rejected when their files are opened.
+CStatus
+SetExternalCollectionCredentialPolicy(bool allow_server_identity,
+                                      const char* broker_endpoints_csv);
+
 // Plugin related APIs
 CStatus
 InitPluginLoader(const char* plugin_path);

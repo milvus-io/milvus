@@ -206,7 +206,7 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 	// too. When a source is eventually supplied via alter/refresh, validation
 	// runs there.
 	if typeutil.IsExternalCollection(schema) && schema.GetExternalSource() != "" {
-		if err := externalspec.ValidateSourceAndSpec(schema.GetExternalSource(), schema.GetExternalSpec()); err != nil {
+		if err := externalspec.ValidateSourceAndSpec(schema.GetExternalSource(), schema.GetExternalSpec(), externalCollectionPolicy()); err != nil {
 			return err
 		}
 	}
@@ -457,6 +457,17 @@ func (t *createCollectionTask) appendSysFields(schema *schemapb.CollectionSchema
 	})
 }
 
+// externalCollectionPolicy is the operator's credential policy for external
+// collections, read from this process's configuration. externalspec cannot
+// import paramtable, so each admission point builds the policy itself.
+func externalCollectionPolicy() externalspec.Policy {
+	cfg := &Params.CommonCfg
+	return externalspec.Policy{
+		AllowServerIdentity:       cfg.ExternalCollectionAllowServerIdentity.GetAsBool(),
+		CredentialBrokerEndpoints: cfg.ExternalCollectionCredentialBrokerEndpoints.GetAsStrings(),
+	}
+}
+
 // prepareMilvusTableSnapshotSchema validates the source snapshot and aligns
 // target field IDs before normal create-collection field ID assignment runs.
 func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Context) error {
@@ -466,7 +477,7 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 	}
 	// Validate before reading snapshot metadata so RootCoord keeps the same
 	// external source boundary even if a request bypasses Proxy.
-	if err := externalspec.ValidateSourceAndSpec(schema.GetExternalSource(), schema.GetExternalSpec()); err != nil {
+	if err := externalspec.ValidateSourceAndSpec(schema.GetExternalSource(), schema.GetExternalSpec(), externalCollectionPolicy()); err != nil {
 		return err
 	}
 	spec, err := externalspec.ParseExternalSpec(schema.GetExternalSpec())

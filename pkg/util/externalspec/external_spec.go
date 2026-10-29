@@ -65,6 +65,7 @@ const (
 	ExtfsKeyAzureClientID           = specutil.ExtfsKeyAzureClientID
 	ExtfsKeyAzureTenantID           = specutil.ExtfsKeyAzureTenantID
 	ExtfsKeyAzureCredentialEndpoint = specutil.ExtfsKeyAzureCredentialEndpoint
+	ExtfsKeyCredentialEndpoint      = specutil.ExtfsKeyCredentialEndpoint
 )
 
 // Scheme* are URL schemes accepted in external_source.
@@ -112,6 +113,47 @@ var validCloudProviders = map[string]bool{
 
 // ExternalSpec represents the parsed external collection specification.
 type ExternalSpec = specutil.ExternalSpec
+
+// Policy is the operator's credential policy for external collections, read
+// from common.security.externalCollection.* at process start. Create and
+// refresh admit a spec against it in Go, and the C++ runtime re-checks the
+// same policy when the collection's files are opened, so a collection created
+// under an older setting is caught the next time it is read. There is no
+// default: callers pass the configured policy explicitly.
+type Policy struct {
+	// AllowServerIdentity permits the credential modes that read the source
+	// with this cluster's own cloud identity: use_iam=true, role_arn (the
+	// cluster identity assumes the role), and gcp_target_service_account
+	// without a credential Broker (the cluster identity impersonates it).
+	AllowServerIdentity bool
+	// CredentialBrokerEndpoints lists the Broker URLs a spec may name in
+	// credential_endpoint (or azure_credential_endpoint). Entries match the
+	// spec value exactly, ignoring a trailing slash on either side. Empty
+	// disables Broker credentials.
+	CredentialBrokerEndpoints []string
+}
+
+// Configuration keys behind Policy; error messages name them so a rejected
+// user knows which setting the operator controls. Keep in sync with
+// pkg/util/paramtable/component_param.go (externalspec cannot import
+// paramtable: paramtable -> mlog -> externalspec).
+const (
+	policyKeyAllowServerIdentity       = "common.security.externalCollection.allowServerIdentity"
+	policyKeyCredentialBrokerEndpoints = "common.security.externalCollection.credentialBrokerEndpoints"
+)
+
+// allowsBroker reports whether endpoint is listed in CredentialBrokerEndpoints.
+// Comparison is exact apart from trailing slashes, so "https://b/v1" and
+// "https://b/v1/" are the same Broker while "https://b/v1/x" is not.
+func (p Policy) allowsBroker(endpoint string) bool {
+	want := strings.TrimRight(endpoint, "/")
+	for _, allowed := range p.CredentialBrokerEndpoints {
+		if strings.TrimRight(allowed, "/") == want {
+			return true
+		}
+	}
+	return false
+}
 
 // allowedExternalSourceSchemes lists URL schemes accepted in ExternalSource.
 // This is a defense-in-depth allowlist to prevent unvalidated SSRF / arbitrary
@@ -279,10 +321,12 @@ func validateEndpointURL(sourceURL *url.URL, extfs map[string]string) (bool, err
 	return true, nil
 }
 
-// ValidateSourceAndSpec validates URL + JSON shape + ValidateExtfsComplete.
-// Errors retain their typed validation code while adding field context.
-// Called from Proxy and RootCoord (defense in depth) on create-collection.
-func ValidateSourceAndSpec(externalSource, externalSpec string) error {
+// ValidateSourceAndSpec validates URL + JSON shape + ValidateExtfsComplete
+// under the operator's credential policy. Errors retain their typed validation
+// code while adding field context. Called from Proxy and RootCoord on
+// create-collection and from Proxy and DataCoord on refresh (defense in
+// depth), each passing the policy built from its own paramtable.
+func ValidateSourceAndSpec(externalSource, externalSpec string, policy Policy) error {
 	if err := ValidateExternalSource(externalSource); err != nil {
 		return merr.Wrap(err, "external_source is invalid")
 	}
@@ -290,7 +334,7 @@ func ValidateSourceAndSpec(externalSource, externalSpec string) error {
 	if err != nil {
 		return merr.Wrap(err, "external_spec is invalid")
 	}
-	if err := ValidateExtfsComplete(externalSource, spec.Extfs); err != nil {
+	if err := ValidateExtfsComplete(externalSource, spec.Extfs, policy); err != nil {
 		return merr.Wrap(err, "external_spec is invalid")
 	}
 	return nil
@@ -355,11 +399,18 @@ func RedactCollectionSchemaForLog(schema *schemapb.CollectionSchema) *schemapb.C
 }
 
 // ValidateExtfsComplete requires spec.extfs to be self-sufficient: exactly one
-// credential mode (AK/SK, role_arn, use_iam=true, gcp_target_service_account,
-// Azure credential broker, anonymous=true), and region for AWS-family
-// schemes. role_arn subsumes use_iam (do not double-count). No inheritance
-// from Milvus fs.* config.
-func ValidateExtfsComplete(externalSource string, extfs map[string]string) error {
+// credential mode (AK/SK, role_arn, use_iam=true, gcp_target_service_account
+// alone or with a credential_endpoint Broker, Azure credential broker,
+// anonymous=true), and region for AWS-family schemes. role_arn subsumes
+// use_iam (do not double-count). No inheritance from Milvus fs.* config.
+//
+// The spec must also pass policy: modes that use this cluster's own cloud
+// identity need AllowServerIdentity, and a Broker endpoint must be listed in
+// CredentialBrokerEndpoints. Structural errors are reported first so a
+// malformed spec gets its specific error; the policy gate follows.
+// Both create and refresh run this check, so a policy tightened after a
+// collection was created rejects it on its next refresh.
+func ValidateExtfsComplete(externalSource string, extfs map[string]string, policy Policy) error {
 	// Parse once; caller's ValidateExternalSource has already guaranteed a scheme.
 	u, err := url.Parse(externalSource)
 	scheme := ""
@@ -400,9 +451,21 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 		return merr.WrapErrParameterInvalidMsg("scheme=minio requires extfs.cloud_provider=%q, got %q", CloudProviderMinIO, cp)
 	}
 
+	// credential_endpoint is the provider-neutral Broker key; the older
+	// azure_credential_endpoint stays accepted as its Azure-only alias.
+	brokerEndpointKey, brokerEndpoint := ExtfsKeyCredentialEndpoint, extfs[ExtfsKeyCredentialEndpoint]
+	if legacy := extfs[ExtfsKeyAzureCredentialEndpoint]; legacy != "" {
+		if brokerEndpoint != "" && brokerEndpoint != legacy {
+			return merr.WrapErrParameterInvalidMsg("extfs.%s and extfs.%s must not differ",
+				ExtfsKeyCredentialEndpoint, ExtfsKeyAzureCredentialEndpoint)
+		}
+		brokerEndpointKey, brokerEndpoint = ExtfsKeyAzureCredentialEndpoint, legacy
+	}
 	hasAzureBroker := extfs[ExtfsKeyAzureClientID] != "" ||
 		extfs[ExtfsKeyAzureTenantID] != "" ||
-		extfs[ExtfsKeyAzureCredentialEndpoint] != ""
+		extfs[ExtfsKeyAzureCredentialEndpoint] != "" ||
+		(brokerEndpoint != "" && cp == CloudProviderAzure)
+	hasGCPBroker := !hasAzureBroker && brokerEndpoint != ""
 	if hasAzureBroker {
 		if cp != CloudProviderAzure || scheme != SchemeAzure {
 			return merr.WrapErrParameterInvalidMsg(
@@ -415,7 +478,7 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 		}{
 			{ExtfsKeyAzureClientID, extfs[ExtfsKeyAzureClientID]},
 			{ExtfsKeyAzureTenantID, extfs[ExtfsKeyAzureTenantID]},
-			{ExtfsKeyAzureCredentialEndpoint, extfs[ExtfsKeyAzureCredentialEndpoint]},
+			{brokerEndpointKey, brokerEndpoint},
 			{ExtfsKeyAccessKeyID, extfs[ExtfsKeyAccessKeyID]},
 			{ExtfsKeyRegion, extfs[ExtfsKeyRegion]},
 		} {
@@ -425,11 +488,8 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 			}
 		}
 
-		brokerEndpoint, err := url.Parse(extfs[ExtfsKeyAzureCredentialEndpoint])
-		if err != nil || brokerEndpoint.Host == "" ||
-			(brokerEndpoint.Scheme != "http" && brokerEndpoint.Scheme != "https") {
-			return merr.WrapErrParameterInvalidMsg(
-				"extfs.%s must be a valid HTTP(S) URL", ExtfsKeyAzureCredentialEndpoint)
+		if !isHTTPURL(brokerEndpoint) {
+			return merr.WrapErrParameterInvalidMsg("extfs.%s must be a valid HTTP(S) URL", brokerEndpointKey)
 		}
 	}
 
@@ -437,12 +497,36 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 	hasAKOnly := !hasAzureBroker &&
 		((extfs[ExtfsKeyAccessKeyID] != "") != (extfs[ExtfsKeyAccessKeyValue] != ""))
 	hasRoleARN := extfs[ExtfsKeyRoleARN] != ""
-	hasUseIAMAlone := extfs[ExtfsKeyUseIAM] == "true" && !hasRoleARN
 	hasGCPImpersonation := extfs[ExtfsKeyGCPTargetServiceAccount] != ""
+	// role_arn and gcp_target_service_account both use the cluster identity as
+	// the source of the assumed identity, so use_iam=true adds no mode.
+	hasUseIAMAlone := extfs[ExtfsKeyUseIAM] == "true" && !hasRoleARN && !hasGCPImpersonation
 	hasAnonymous := extfs[ExtfsKeyAnonymous] == "true"
 
 	if hasAKOnly {
 		return merr.WrapErrParameterMissingMsg("extfs.access_key_id and extfs.access_key_value must be set together (found one without the other)")
+	}
+
+	// GCP Broker shape is checked before the mode count so a Broker spec that
+	// lacks its target gets that error rather than "credential mode missing".
+	if hasGCPBroker {
+		if cp != CloudProviderGCP {
+			return merr.WrapErrParameterInvalidMsg(
+				"extfs.%s is only supported for cloud_provider gcp and azure, got %q", ExtfsKeyCredentialEndpoint, cp)
+		}
+		if !hasGCPImpersonation {
+			return merr.WrapErrParameterMissingMsg(
+				"extfs.%s is required with extfs.%s: the Broker issues tokens for that service account",
+				ExtfsKeyGCPTargetServiceAccount, ExtfsKeyCredentialEndpoint)
+		}
+		if extfs[ExtfsKeyUseIAM] == "true" {
+			return merr.WrapErrParameterInvalidMsg(
+				"extfs.use_iam=true conflicts with extfs.%s: use_iam selects the cluster's own identity instead of the Broker",
+				ExtfsKeyCredentialEndpoint)
+		}
+		if !isHTTPURL(brokerEndpoint) {
+			return merr.WrapErrParameterInvalidMsg("extfs.%s must be a valid HTTP(S) URL", ExtfsKeyCredentialEndpoint)
+		}
 	}
 
 	modes := 0
@@ -452,20 +536,40 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 		}
 	}
 	if modes == 0 {
-		return merr.WrapErrParameterInvalidMsg("extfs credential mode missing: set exactly one of {access_key_id+access_key_value}, role_arn, use_iam=true, gcp_target_service_account, Azure credential broker, or anonymous=true")
+		return merr.WrapErrParameterInvalidMsg("extfs credential mode missing: set exactly one of {access_key_id+access_key_value}, role_arn, use_iam=true, gcp_target_service_account (alone or with credential_endpoint), Azure credential broker, or anonymous=true")
 	}
 	if modes > 1 {
-		return merr.WrapErrParameterInvalidMsg("extfs credential modes are mutually exclusive: set exactly one of AK/SK, role_arn, use_iam=true, gcp_target_service_account, Azure credential broker, or anonymous=true")
+		return merr.WrapErrParameterInvalidMsg("extfs credential modes are mutually exclusive: set exactly one of AK/SK, role_arn, use_iam=true, gcp_target_service_account (alone or with credential_endpoint), Azure credential broker, or anonymous=true")
 	}
 
 	if hasGCPImpersonation {
-		if scheme != "" && scheme != SchemeGS && scheme != SchemeGCS && cp != CloudProviderGCP {
-			return merr.WrapErrParameterInvalidMsg("extfs.gcp_target_service_account is only valid for GCP (scheme=gs/gcs or cloud_provider=gcp), got scheme=%q cloud_provider=%q", scheme, cp)
+		if cp != CloudProviderGCP {
+			return merr.WrapErrParameterInvalidMsg("extfs.gcp_target_service_account is only valid for GCP (cloud_provider=gcp), got scheme=%q cloud_provider=%q", scheme, cp)
 		}
 		sa := extfs[ExtfsKeyGCPTargetServiceAccount]
 		if !strings.Contains(sa, "@") || !strings.HasSuffix(sa, ".gserviceaccount.com") {
 			return merr.WrapErrParameterInvalidMsg("extfs.gcp_target_service_account must be a GCP service account email ending in .gserviceaccount.com, got %q", sa)
 		}
+		if err := validateGCPTokenLifetime(extfs); err != nil {
+			return err
+		}
+	}
+
+	// Every GCP Bearer mode sends an OAuth2 token to the storage endpoint:
+	// the cluster's own token (use_iam=true), an impersonated one, or one the
+	// Broker issued. All of them get the HTTPS + Google-host check.
+	if cp == CloudProviderGCP && (hasGCPImpersonation || extfs[ExtfsKeyUseIAM] == "true") {
+		mode := "extfs." + ExtfsKeyGCPTargetServiceAccount
+		if !hasGCPImpersonation {
+			mode = "extfs.use_iam=true with extfs.cloud_provider=gcp"
+		}
+		if err := validateGCPBearerEndpoint(u, scheme, extfs, hasEndpointURL, mode); err != nil {
+			return err
+		}
+	}
+
+	if err := validateCredentialPolicy(extfs, brokerEndpointKey, brokerEndpoint, policy); err != nil {
+		return err
 	}
 
 	if awsFamilyScheme[scheme] && extfs[ExtfsKeyRegion] == "" {
@@ -509,6 +613,116 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 				return merr.WrapErrParameterInvalidMsg("cannot resolve endpoint for %q with cloud_provider=%q: set extfs.region, or use Milvus-form URI scheme://<endpoint>/<bucket>/<key>", externalSource, cp)
 			}
 		}
+	}
+	return nil
+}
+
+// isHTTPURL reports whether raw is an absolute http or https URL with a host.
+func isHTTPURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https")
+}
+
+// GCP caps impersonated token lifetimes at 3600s; milvus-storage rejects
+// lifetimes outside [900, 3600] rather than clamping them.
+const (
+	gcpMinTokenLifetimeSeconds = 900
+	gcpMaxTokenLifetimeSeconds = 3600
+)
+
+func validateGCPTokenLifetime(extfs map[string]string) error {
+	raw, ok := extfs[ExtfsKeyLoadFrequency]
+	if !ok || raw == "" {
+		return nil
+	}
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || seconds < gcpMinTokenLifetimeSeconds || seconds > gcpMaxTokenLifetimeSeconds {
+		return merr.WrapErrParameterInvalidMsg(
+			"extfs.%s must be an integer in [%d, %d] with extfs.%s, got %q", ExtfsKeyLoadFrequency,
+			gcpMinTokenLifetimeSeconds, gcpMaxTokenLifetimeSeconds, ExtfsKeyGCPTargetServiceAccount, raw)
+	}
+	return nil
+}
+
+// usesServerIdentity reports whether extfs reads the source with this
+// cluster's own cloud identity. use_iam=true and role_arn always do; a
+// gcp_target_service_account does unless a credential Broker issues its token.
+// Azure and GCP Broker modes present the Broker's credentials instead.
+func usesServerIdentity(extfs map[string]string, brokerEndpoint string) bool {
+	return extfs[ExtfsKeyUseIAM] == "true" ||
+		extfs[ExtfsKeyRoleARN] != "" ||
+		(extfs[ExtfsKeyGCPTargetServiceAccount] != "" && brokerEndpoint == "")
+}
+
+// validateCredentialPolicy is the policy gate that follows the structural
+// checks. brokerEndpointKey names the spec key the endpoint came from so the
+// message points at what the user wrote. The endpoint value itself is not
+// echoed, matching the other Broker URL errors.
+func validateCredentialPolicy(extfs map[string]string, brokerEndpointKey, brokerEndpoint string, policy Policy) error {
+	if usesServerIdentity(extfs, brokerEndpoint) && !policy.AllowServerIdentity {
+		return merr.WrapErrParameterInvalidMsg(
+			"extfs reads the source with this cluster's own cloud identity (use_iam=true, role_arn, or gcp_target_service_account without a credential Broker), which this cluster does not allow: "+
+				"use access keys, anonymous=true, or a credential Broker listed in %s, or have the operator set %s=true",
+			policyKeyCredentialBrokerEndpoints, policyKeyAllowServerIdentity)
+	}
+	if brokerEndpoint != "" && !policy.allowsBroker(brokerEndpoint) {
+		return merr.WrapErrParameterInvalidMsg(
+			"extfs.%s is not a credential Broker this cluster allows: the operator must list it in %s (exact URL; a trailing slash is ignored)",
+			brokerEndpointKey, policyKeyCredentialBrokerEndpoints)
+	}
+	return nil
+}
+
+// DeriveUseSSLFromScheme mirrors C++ DeriveUseSSLFromScheme in
+// internal/core/src/storage/loon_ffi/util.cpp: the use_ssl the runtime applies
+// when spec.extfs does not set one. Only minio:// defaults to plain HTTP.
+// Keep the two in lockstep.
+func DeriveUseSSLFromScheme(scheme string) bool {
+	return strings.ToLower(scheme) != SchemeMinIO
+}
+
+// effectiveUseSSL follows the property layering in InjectExternalSpecProperties:
+// a non-empty extfs.use_ssl wins; a missing or empty one leaves the scheme
+// default in place. endpoint_url overrides both and is handled by the caller.
+func effectiveUseSSL(scheme string, extfs map[string]string) bool {
+	if v := extfs[ExtfsKeyUseSSL]; v != "" {
+		return v == "true"
+	}
+	return DeriveUseSSLFromScheme(scheme)
+}
+
+// validateGCPBearerEndpoint requires the endpoint that receives an OAuth2
+// bearer token to be a Google API host over HTTPS. mode names the credential
+// mode for the message. The endpoint follows the resolution in
+// InjectExternalSpecProperties (internal/core/src/storage/loon_ffi/util.cpp):
+// extfs.endpoint_url when set, else the URI host when it is a cloud endpoint
+// host (Milvus-form), else the endpoint derived for cloud_provider=gcp
+// (AWS-form); use_ssl likewise comes from endpoint_url, else extfs.use_ssl,
+// else the source scheme default.
+func validateGCPBearerEndpoint(source *url.URL, sourceScheme string, extfs map[string]string, hasEndpointURL bool, mode string) error {
+	scheme := "http"
+	if effectiveUseSSL(sourceScheme, extfs) {
+		scheme = "https"
+	}
+	host := strings.TrimPrefix(DeriveEndpoint(CloudProviderGCP, ""), "https://")
+	if hasEndpointURL {
+		endpoint, err := url.Parse(extfs[ExtfsKeyEndpointURL])
+		if err != nil {
+			return merr.WrapErrParameterInvalidMsg("extfs.endpoint_url is not a valid URL")
+		}
+		scheme, host = strings.ToLower(endpoint.Scheme), endpoint.Hostname()
+	} else if source != nil && IsCloudEndpointHost(source.Hostname()) {
+		host = source.Hostname()
+	}
+	if scheme != "https" {
+		return merr.WrapErrParameterInvalidMsg(
+			"%s requires HTTPS so the OAuth2 token is not sent in clear text: remove extfs.use_ssl=false or use an https extfs.endpoint_url",
+			mode)
+	}
+	if !strings.HasSuffix(strings.ToLower(host), ".googleapis.com") {
+		return merr.WrapErrParameterInvalidMsg(
+			"%s is only supported for Google Cloud Storage endpoints (*.googleapis.com), got host %q",
+			mode, host)
 	}
 	return nil
 }

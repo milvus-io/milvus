@@ -21,6 +21,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestParseExternalSpec(t *testing.T) {
@@ -98,6 +100,82 @@ func TestParseExternalSpec(t *testing.T) {
 	t.Run("invalid snapshot id rejected", func(t *testing.T) {
 		_, err := ParseExternalSpec(`{"format":"iceberg-table","snapshot_id":"abc"}`)
 		require.ErrorContains(t, err, "invalid external spec JSON")
+	})
+
+	t.Run("GCP credential Broker key accepted", func(t *testing.T) {
+		spec, err := ParseExternalSpec(`{"format":"parquet","extfs":{"credential_endpoint":"http://broker.example/v1/credentials/assume-role"}}`)
+		require.NoError(t, err)
+		require.Equal(t, "http://broker.example/v1/credentials/assume-role", spec.Extfs[ExtfsKeyCredentialEndpoint])
+	})
+}
+
+func TestParseExternalSpecRejectsDuplicateKeys(t *testing.T) {
+	tests := []struct {
+		name string
+		spec string
+		key  string
+	}{
+		{name: "top level", spec: `{"format":"parquet","format":"vortex"}`, key: "format"},
+		{name: "extfs", spec: `{"format":"parquet","extfs":{"use_iam":"true","use_iam":"false"}}`, key: "use_iam"},
+		{name: "extfs secret", spec: `{"extfs":{"access_key_id":"a","access_key_value":"s","access_key_value":"t"}}`, key: "access_key_value"},
+		{name: "duplicate extfs object", spec: `{"extfs":{"use_iam":"true"},"extfs":{"anonymous":"true"}}`, key: "extfs"},
+		{name: "nested in unknown key", spec: `{"format":"parquet","x":{"y":[{"z":1,"z":2}]}}`, key: "z"},
+		{name: "whitespace and newlines", spec: "{\n \"format\" : \"parquet\",\n \"format\":\"parquet\"\n}", key: "format"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := ParseExternalSpec(test.spec)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, `duplicate key "`+test.key+`"`)
+		})
+	}
+
+	t.Run("same key in sibling objects is not a duplicate", func(t *testing.T) {
+		spec, err := ParseExternalSpec(`{"format":"parquet","extfs":{"region":"us-east-1"},"other":{"region":"x"}}`)
+		require.NoError(t, err)
+		require.Equal(t, "us-east-1", spec.Extfs[ExtfsKeyRegion])
+	})
+
+	t.Run("syntax errors still reported by the parser", func(t *testing.T) {
+		for _, spec := range []string{`{bad json`, `{"format":"parquet"} trailing`, `   `, `[]`, `{"format":"parquet",}`} {
+			_, err := ParseExternalSpec(spec)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid, spec)
+			require.ErrorContains(t, err, "invalid external spec JSON", spec)
+		}
+	})
+}
+
+func TestParseExternalSpecRejectsCaseAliasKeys(t *testing.T) {
+	tests := []struct {
+		spec      string
+		key       string
+		canonical string
+	}{
+		{spec: `{"Format":"vortex"}`, key: "Format", canonical: "format"},
+		{spec: `{"FORMAT":"vortex"}`, key: "FORMAT", canonical: "format"},
+		{spec: `{"Columns":["a"]}`, key: "Columns", canonical: "columns"},
+		{spec: `{"EXTFS":{"use_iam":"true"}}`, key: "EXTFS", canonical: "extfs"},
+		{spec: `{"Snapshot_ID":"1"}`, key: "Snapshot_ID", canonical: "snapshot_id"},
+		// Canonical and alias together: the alias would otherwise win silently.
+		{spec: `{"format":"parquet","Format":"vortex"}`, key: "Format", canonical: "format"},
+	}
+	for _, test := range tests {
+		t.Run(test.key, func(t *testing.T) {
+			_, err := ParseExternalSpec(test.spec)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, `key "`+test.key+`" must be spelled "`+test.canonical+`"`)
+		})
+	}
+
+	t.Run("unknown top-level keys still ignored", func(t *testing.T) {
+		spec, err := ParseExternalSpec(`{"format":"parquet","formats":"x","extra":1}`)
+		require.NoError(t, err)
+		require.Equal(t, FormatParquet, spec.Format)
+	})
+
+	t.Run("extfs keys are matched exactly by the allowlist", func(t *testing.T) {
+		_, err := ParseExternalSpec(`{"format":"parquet","extfs":{"Use_IAM":"true"}}`)
+		require.ErrorContains(t, err, `extfs key "Use_IAM" is not allowed`)
 	})
 }
 

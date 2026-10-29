@@ -1390,6 +1390,23 @@ common:
     # management port. The endpoint requires HTTP Basic Auth as root. See
     # docs/design-docs/design_docs/20260902-feature-usage-reporting.md.
     featureUsageEnabled: false
+    externalCollection:
+      # Whether an external collection may read its source with this cluster's own cloud
+      # identity: extfs.use_iam=true, extfs.role_arn (the cluster identity assumes the role), or
+      # extfs.gcp_target_service_account without a credential Broker (the cluster identity
+      # impersonates the account). Off by default: external sources then need their own access
+      # keys, anonymous access, or a credential Broker listed in
+      # common.security.externalCollection.credentialBrokerEndpoints. Checked when a collection
+      # is created or refreshed and again when its files are opened, so it also applies to
+      # collections created before the setting changed. Read at process start.
+      allowServerIdentity: false
+      # Comma-separated credential Broker URLs that external collections may name in
+      # extfs.credential_endpoint (or the older extfs.azure_credential_endpoint). Milvus asks a
+      # Broker for short-lived credentials for the account the collection names; a Broker
+      # deployment decides which accounts it issues for. Empty (the default) disables Broker
+      # credentials. Each entry must match the spec value exactly, ignoring a trailing slash.
+      # Checked at create/refresh and when files are opened. Read at process start.
+      credentialBrokerEndpoints: 
     internaltlsEnabled: false
     tlsMode: 0
   featureUsage:

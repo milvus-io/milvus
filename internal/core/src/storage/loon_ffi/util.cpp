@@ -15,6 +15,7 @@
 #include <nlohmann/json.hpp>
 #include <stdint.h>
 #include <algorithm>
+#include <cctype>
 #include <initializer_list>
 #include <map>
 #include <memory>
@@ -43,6 +44,7 @@
 #include "milvus-storage/transaction/transaction.h"
 #include "nlohmann/json_fwd.hpp"
 #include "storage/Types.h"
+#include "storage/loon_ffi/external_credential_policy.h"
 #include "storage/loon_ffi/external_spec_c.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
@@ -238,6 +240,7 @@ static const std::unordered_set<std::string> kAllowedExtfsSpecKeys = {
     "azure_client_id",
     "azure_tenant_id",
     "azure_credential_endpoint",
+    "credential_endpoint",
 };
 
 // kExtfsFields is the contract with Go extfsFields in
@@ -444,6 +447,122 @@ IsCloudEndpointHost(const std::string& host) {
     return false;
 }
 
+namespace milvus::storage {
+
+std::string
+NormalizeBrokerEndpoint(const std::string& endpoint) {
+    auto is_space = [](unsigned char c) { return std::isspace(c) != 0; };
+    size_t begin = 0;
+    size_t end = endpoint.size();
+    while (begin < end && is_space(endpoint[begin])) {
+        ++begin;
+    }
+    while (end > begin && is_space(endpoint[end - 1])) {
+        --end;
+    }
+    while (end > begin && endpoint[end - 1] == '/') {
+        --end;
+    }
+    return endpoint.substr(begin, end - begin);
+}
+
+ExternalCredentialPolicyHolder&
+ExternalCredentialPolicyHolder::GetInstance() {
+    static ExternalCredentialPolicyHolder instance;
+    return instance;
+}
+
+}  // namespace milvus::storage
+
+// Reads a Layer-2 string property, treating an absent key or a non-string
+// variant as empty.
+static std::string
+ExtfsStringOrEmpty(const milvus_storage::api::Properties& properties,
+                   const std::string& key) {
+    return PropertyValueAsString(properties, key.c_str()).value_or("");
+}
+
+// EnforceExternalCredentialPolicy applies the process-wide credential
+// policy to the fully parsed extfs namespace of one collection. It runs on
+// every injection, so a spec persisted before the operator changed the
+// settings is re-checked each time its files are opened, on every process
+// that opens them.
+//
+// Server identity means the spec reads with this cluster's own cloud
+// identity: use_iam=true, role_arn (the cluster identity assumes the role),
+// or gcp_target_service_account without a Broker (the cluster identity
+// impersonates the account). A Broker endpoint must appear in the operator's
+// allowlist. Any violation throws; nothing here logs and continues.
+static void
+EnforceExternalCredentialPolicy(
+    const milvus_storage::api::Properties& properties,
+    const std::string& extfs_prefix,
+    int64_t collection_id) {
+    // Both spec spellings (credential_endpoint, azure_credential_endpoint)
+    // were folded into this one property by Layer 2.
+    const std::string broker_endpoint =
+        ExtfsStringOrEmpty(properties, extfs_prefix + "credential_endpoint");
+
+    // milvus-storage lowercases booleans before validating them, so accept
+    // the same spellings it does.
+    std::string use_iam =
+        ExtfsStringOrEmpty(properties, extfs_prefix + "use_iam");
+    std::transform(
+        use_iam.begin(), use_iam.end(), use_iam.begin(), [](unsigned char c) {
+            return std::tolower(c);
+        });
+    const bool uses_server_identity =
+        use_iam == "true" ||
+        !ExtfsStringOrEmpty(properties, extfs_prefix + "role_arn").empty() ||
+        (!ExtfsStringOrEmpty(properties,
+                             extfs_prefix + "gcp_target_service_account")
+              .empty() &&
+         broker_endpoint.empty());
+
+    if (!uses_server_identity && broker_endpoint.empty()) {
+        // Access keys, anonymous access or no credentials at all: the policy
+        // has nothing to decide, so a process that never published one can
+        // still serve such collections.
+        return;
+    }
+
+    const auto policy =
+        milvus::storage::ExternalCredentialPolicyHolder::GetInstance().Get();
+    if (!policy.initialized) {
+        ThrowInfo(milvus::ErrorCode::ConfigInvalid,
+                  "external collection credential policy not initialized "
+                  "(collection {})",
+                  collection_id);
+    }
+    if (uses_server_identity && !policy.allow_server_identity) {
+        ThrowInfo(
+            milvus::ErrorCode::ConfigInvalid,
+            "external collection {} reads with the cluster's own cloud "
+            "identity (use_iam=true, role_arn, or "
+            "gcp_target_service_account without credential_endpoint), "
+            "which common.security.externalCollection.allowServerIdentity "
+            "disables; set it to true on every Milvus process or give "
+            "the collection its own credentials",
+            collection_id);
+    }
+    if (!broker_endpoint.empty()) {
+        const auto wanted =
+            milvus::storage::NormalizeBrokerEndpoint(broker_endpoint);
+        const bool listed = std::find(policy.broker_endpoints.begin(),
+                                      policy.broker_endpoints.end(),
+                                      wanted) != policy.broker_endpoints.end();
+        if (!listed) {
+            ThrowInfo(milvus::ErrorCode::ConfigInvalid,
+                      "external collection {} names credential Broker '{}', "
+                      "which is not listed in "
+                      "common.security.externalCollection."
+                      "credentialBrokerEndpoints on this Milvus process",
+                      collection_id,
+                      broker_endpoint);
+        }
+    }
+}
+
 static arrow::Status
 InjectExternalSpecProperties(
     milvus_storage::api::Properties& properties,
@@ -620,9 +739,17 @@ InjectExternalSpecProperties(
                         if (key == "cloud_provider" && val == "minio") {
                             continue;
                         }
+                        // milvus-storage reads the credential Broker endpoint
+                        // as fs.credential_endpoint for every provider;
+                        // azure_credential_endpoint is its older Azure-only
+                        // spec name.
+                        const std::string property =
+                            key == "azure_credential_endpoint"
+                                ? std::string("credential_endpoint")
+                                : key;
                         milvus_storage::api::SetValue(
                             properties,
-                            (extfs_prefix + key).c_str(),
+                            (extfs_prefix + property).c_str(),
                             val.c_str());
                     } catch (const simdjson::simdjson_error& per_field) {
                         LOG_WARN(
@@ -646,6 +773,11 @@ InjectExternalSpecProperties(
                       e.what());
         }
     }
+
+    // Credential policy: decided on the parsed extfs namespace, before the
+    // endpoint rewrites below, so it sees exactly the credential keys the
+    // spec supplied. Throws on violation; see EnforceExternalCredentialPolicy.
+    EnforceExternalCredentialPolicy(properties, extfs_prefix, collection_id);
 
     // Layer 3: resolve the effective endpoint.
     //

@@ -222,6 +222,14 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 		return err
 	}
 
+	// Publish the external collection credential policy before any segment
+	// load can inject an external spec. Shared by the query node and the
+	// streaming node, which both initialize through this function.
+	err = InitExternalCollectionCredentialPolicy(paramtable.Get())
+	if err != nil {
+		return err
+	}
+
 	err = InitStorageV2FileSystem(paramtable.Get())
 	if err != nil {
 		return err
