@@ -38,6 +38,7 @@ func (r *Runtime) Prepare(ctx context.Context, view walview.VChannelWALView) err
 		return context.Canceled
 	}
 	r.collection = collection
+	r.writeSchema = writeView.Schema
 	// Retain only the recapture hooks, not the snapshot payload and WAL tail.
 	r.view = walview.VChannelWALView{CaptureQueryView: view.CaptureQueryView, RuntimeContext: view.RuntimeContext}
 	if view.PartitionIDs != nil {

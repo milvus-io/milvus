@@ -31,6 +31,13 @@ exact read resources are owned by each QueryView, sharing collection/schema and
 field-semantic resources without imposing a global read-schema watermark. Preparing an
 older read schema cannot invalidate a newer View's readiness.
 
+Partition expansion captures the write schema with its WAL snapshot. The staged
+runtime advances this schema only as it replays its own ordered ALTER events;
+it never derives a new segment's encoding from the shared collection's current
+schema. The serving dispatcher can already be ahead during snapshot loading.
+Existing segments retain their allocation schema across both paths, so replaying
+an Insert before a later DropField preserves that field for retained read views.
+
 The ALTER component test exercises the native update, preservation of existing
 segment encoding and the schema selected for new segments. The complete parent's
 native initialization and legacy repeated-version recovery changes remain
@@ -104,12 +111,21 @@ embedding execution results; no second execution request is sent to SN. See the
 
 ## Function model resources
 
-Growing function-chain execution on SN resolves named XGBoost model resources
-through the same demand-download manager used by Analyzer. A fresh name lookup
-selects the immutable resource ID, then concurrent requests share its download
-and model load. The file reference covers native model construction; the native
-UBJ loader copies model state into owned memory. Queries retain a model lease
-through prediction. Idle models expire after the configured file-resource cache
-TTL; removal and shutdown cannot destroy an active model. Reusing a resource name
-with a new ID never substitutes the model held by an executing query. QN/Proxy
-without a pull manager retain their existing file-resource synchronization path.
+Growing function-chain execution on SN uses the Analyzer demand-download manager
+for XGBoost model cache misses. A local name index first checks the shared model
+cache: a hit acquires a model lease without a Coord metadata RPC or file download.
+A miss resolves the name through Coord, downloads the resource as needed and
+shares model loading by immutable resource ID and path. The file reference covers
+native construction; the UBJ loader copies model state into owned memory.
+
+The model cache remains process-wide, shared with QN/Proxy. Nodes without a pull
+manager keep their synchronized-resource lookup. Demand-model leases refresh
+idle retention on release; idle expiry and synchronization-driven eviction remove
+the model and its corresponding name index together. Active predictions retain
+their model until their final lease is released. Cold concurrent misses can still
+make separate metadata RPCs; file and model loads are shared.
+
+TODO: Bind resource IDs during query planning across shards, stages and retries.
+Until then, a warm name binding is not revalidated against Coord: deleting and
+recreating a name may continue to use the cached model until eviction. This local
+reuse does not guarantee one resource identity for the entire distributed query.

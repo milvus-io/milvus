@@ -86,6 +86,10 @@ func (r *Runtime) PreparePartitions(ctx context.Context, meta *viewpb.QueryViewM
 	}
 	next := newRuntime()
 	next.collection, next.loadedPartitions = collection, missing
+	next.writeSchema = view.WriteSchema
+	if next.writeSchema == nil {
+		next.writeSchema = view.Schema
+	}
 	defer func() {
 		// next borrows the pinned parent collection; only its untransferred segments
 		// belong to it. Closing a failed stage cannot close the serving collection.

@@ -23,6 +23,7 @@ func TestAlterSchemaPreservesSegmentEncodingAndUpdatesCollection(t *testing.T) {
 	require.NoError(t, err)
 	r := newRuntime()
 	r.collection = c
+	r.writeSchema = schema
 	defer r.Close()
 	oldSegment := r.getOrCreateSegment(100, 1)
 	require.NoError(t, oldSegment.ensureCSegment(50))

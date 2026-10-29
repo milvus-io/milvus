@@ -7,14 +7,109 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
+	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestPreparePartitionsKeepsOrderedWriteSchema(t *testing.T) {
+	mockey.PatchConvey("serving ALTER cannot change a staged segment's encoding", t, func() {
+		initSegcoreForRuntimeTest(t)
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+		schema := &schemapb.CollectionSchema{Name: "partition_schema", Version: 1, Fields: []*schemapb.FieldSchema{
+			{FieldID: 0, Name: "RowID", DataType: schemapb.DataType_Int64},
+			{FieldID: 1, Name: "Timestamp", DataType: schemapb.DataType_Int64},
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "f", DataType: schemapb.DataType_Int64},
+		}}
+		dropped := proto.Clone(schema).(*schemapb.CollectionSchema)
+		dropped.Version = 2
+		dropped.Fields = dropped.Fields[:3]
+		// The View reads S1, while the captured WAL prefix still writes S0.
+		// Using either the View schema or the later serving schema loses f.
+		snapshot := walview.VChannelWALView{CollectionID: 1, Schema: dropped, WriteSchema: schema, BaseGrowingTimeTick: 10}
+		r := newRuntime()
+		defer r.Close()
+		require.NoError(t, r.Prepare(ctx, walview.VChannelWALView{
+			CollectionID: 1, Schema: schema, WriteSchema: schema, PartitionIDs: []int64{20}, BaseGrowingTimeTick: 10,
+			CaptureQueryView: func(_ *viewpb.QueryViewMeta, install func(walview.VChannelWALView)) bool {
+				install(snapshot)
+				return true
+			},
+		}))
+		loading, resume := make(chan struct{}), make(chan struct{})
+		var prepare func(*Runtime, context.Context, walview.VChannelWALView) error
+		mockey.Mock((*Runtime).prepareSegments).Origin(&prepare).To(func(next *Runtime, ctx context.Context, view walview.VChannelWALView) error {
+			close(loading)
+			select {
+			case <-resume:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			return prepare(next, ctx, view)
+		}).Build()
+		done := make(chan error, 1)
+		go func() { done <- r.PreparePartitions(ctx, &viewpb.QueryViewMeta{}, []int64{10}) }()
+		select {
+		case <-loading:
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		create := func(id int64, tick uint64) message.ImmutableMessage {
+			return message.NewCreateSegmentMessageBuilderV2().WithVChannel("v1").WithHeader(&message.CreateSegmentMessageHeader{CollectionId: 1, PartitionId: 10, SegmentId: id}).WithBody(&message.CreateSegmentMessageBody{}).MustBuildMutable().WithTimeTick(tick).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(int64(tick)))
+		}
+		field := func(id, value int64) *schemapb.FieldData {
+			return &schemapb.FieldData{FieldId: id, Type: schemapb.DataType_Int64, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{value}}}}}}
+		}
+		insert := message.NewInsertMessageBuilderV1().WithVChannel("v1").WithHeader(&message.InsertMessageHeader{CollectionId: 1, Partitions: []*messagespb.PartitionSegmentAssignment{{PartitionId: 10, Rows: 1, SegmentAssignment: &messagespb.SegmentAssignment{SegmentId: 1000}}}}).WithBody(&msgpb.InsertRequest{CollectionID: 1, PartitionID: 10, SegmentID: 1000, Version: msgpb.InsertDataVersion_ColumnBased, NumRows: 1, RowIDs: []int64{1}, Timestamps: []uint64{12}, FieldsData: []*schemapb.FieldData{field(100, 1), field(101, 42)}}).MustBuildMutable().WithTimeTick(12).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(12))
+		alter := message.NewAlterCollectionMessageBuilderV2().WithVChannel("v1").WithHeader(&messagespb.AlterCollectionMessageHeader{CollectionId: 1, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionSchema}}}).WithBody(&messagespb.AlterCollectionMessageBody{Updates: &messagespb.AlterCollectionMessageUpdates{Schema: dropped}}).MustBuildMutable().WithTimeTick(13).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(13))
+		for _, msg := range []message.ImmutableMessage{create(1000, 11), insert, alter, create(1001, 14)} {
+			r.ApplyLiveEvent(ctx, walview.VChannelResourceEvent{Message: msg})
+		}
+		require.EqualValues(t, 2, r.WriteSchemaVersion())
+		close(resume)
+		require.NoError(t, <-done)
+		require.EqualValues(t, 1, r.segments[1000].encodingSchema.GetVersion())
+		require.EqualValues(t, 2, r.segments[1001].encodingSchema.GetVersion(), "stage must also apply its own ALTER")
+		require.EqualValues(t, 2, r.WriteSchemaVersion(), "stage must not regress the serving cursor")
+		helper, err := typeutil.CreateSchemaHelper(schema)
+		require.NoError(t, err)
+		plan, err := planparserv2.CreateRetrievePlan(helper, "pk == 1", nil)
+		require.NoError(t, err)
+		plan.OutputFieldIds = []int64{100, 101}
+		blob, err := proto.Marshal(plan)
+		require.NoError(t, err)
+		readCollection, err := newCollection(walview.VChannelWALView{CollectionID: 1, Schema: schema})
+		require.NoError(t, err)
+		defer readCollection.Release()
+		retrievePlan, err := segcore.NewRetrievePlan(readCollection, blob, 12, 0, commonpb.ConsistencyLevel_Strong, 0, 0)
+		require.NoError(t, err)
+		defer retrievePlan.Delete()
+		segment, ok := r.Segment(1000)
+		require.True(t, ok)
+		result, err := segment.Retrieve(ctx, retrievePlan)
+		require.NoError(t, err)
+		defer result.Release()
+		data, err := result.GetResult()
+		require.NoError(t, err)
+		require.Len(t, data.GetFieldsData(), 2)
+		require.Equal(t, []int64{42}, data.GetFieldsData()[1].GetScalars().GetLongData().GetData())
+	})
+}
 
 func TestPreparePartitionsReplaysSnapshotAndLiveTail(t *testing.T) {
 	mockey.PatchConvey("new partitions catch up before publication", t, func() {

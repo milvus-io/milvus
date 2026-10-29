@@ -4,6 +4,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -35,10 +36,13 @@ type Runtime struct {
 	refresh   *partitionRefresh
 	view      walview.VChannelWALView
 
-	mu                       sync.RWMutex
-	mvccCond                 *sync.Cond
-	closed                   bool
-	collection               *segcore.CCollection
+	mu         sync.RWMutex
+	mvccCond   *sync.Cond
+	closed     bool
+	collection *segcore.CCollection
+	// Each replay owns its ordered write schema, even when partition refresh
+	// borrows a collection whose serving dispatcher has already advanced.
+	writeSchema              *schemapb.CollectionSchema
 	loadedPartitions         map[int64]struct{} // nil: unrestricted; empty: none
 	segments                 map[int64]*growingSegment
 	segmentIDs               []int64
@@ -206,8 +210,5 @@ func (r *Runtime) releaseCollectionIfIdleLocked() *segcore.CCollection {
 func (r *Runtime) WriteSchemaVersion() int32 {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	if r.collection == nil {
-		return 0
-	}
-	return r.collection.Schema().GetVersion()
+	return r.writeSchema.GetVersion()
 }

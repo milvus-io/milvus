@@ -45,9 +45,10 @@ type (
 	xgboostModelCache struct {
 		resources atomic.Value // map[string]*fileresource.ResolvedFileResource
 
-		mu     sync.RWMutex
-		models map[string]*cachedXGBoostModel
-		sf     conc.Singleflight[*cachedXGBoostModel]
+		mu           sync.RWMutex
+		models       map[string]*cachedXGBoostModel
+		modelsByName map[string]*cachedXGBoostModel
+		sf           conc.Singleflight[*cachedXGBoostModel]
 
 		loader        xgboostModelLoader
 		closer        xgboostModelCloser
@@ -87,9 +88,10 @@ func init() {
 
 func newXGBoostModelCache(loader xgboostModelLoader, closer xgboostModelCloser) *xgboostModelCache {
 	cache := &xgboostModelCache{
-		models: make(map[string]*cachedXGBoostModel),
-		loader: loader,
-		closer: closer,
+		models:       make(map[string]*cachedXGBoostModel),
+		modelsByName: make(map[string]*cachedXGBoostModel),
+		loader:       loader,
+		closer:       closer,
 	}
 	cache.resources.Store(map[string]*fileresource.ResolvedFileResource{})
 	return cache
@@ -194,6 +196,7 @@ func (c *xgboostModelCache) acquireOrLoad(resource *fileresource.ResolvedFileRes
 			return existing, nil
 		}
 		c.models[key] = cached
+		c.modelsByName[resource.Name] = cached
 		onModelStored := c.onModelStored
 		c.mu.Unlock()
 		if onModelStored != nil {
@@ -217,6 +220,16 @@ func (c *xgboostModelCache) tryAcquire(key string) (*xgboostModelLease, bool) {
 	c.mu.RLock()
 	cached := c.models[key]
 	c.mu.RUnlock()
+	if cached == nil {
+		return nil, false
+	}
+	return c.acquireCached(cached)
+}
+
+func (c *xgboostModelCache) tryAcquireByName(name string) (*xgboostModelLease, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	cached := c.modelsByName[name]
 	if cached == nil {
 		return nil, false
 	}
@@ -297,10 +310,7 @@ func (c *xgboostModelCache) evictStaleModels(activeKeys map[string]struct{}) {
 		if _, ok := activeKeys[key]; ok {
 			continue
 		}
-		delete(c.models, key)
-		if cached.expiration != nil {
-			cached.expiration.Stop()
-		}
+		c.removeModelLocked(cached)
 		evicted = append(evicted, cached)
 	}
 	c.mu.Unlock()
@@ -315,10 +325,31 @@ func (c *xgboostModelCache) len() int {
 	return len(c.models)
 }
 
+// removeModelLocked removes both indexes without discarding a newer name binding.
+func (c *xgboostModelCache) removeModelLocked(model *cachedXGBoostModel) {
+	delete(c.models, model.key)
+	if c.modelsByName[model.resourceName] == model {
+		delete(c.modelsByName, model.resourceName)
+	}
+	if model.expiration != nil {
+		model.expiration.Stop()
+	}
+}
+
 // acquire resolves demand resources on SN; legacy nodes retain their synced table.
 func (c *xgboostModelCache) acquire(ctx context.Context, name string) (*xgboostModelLease, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if !fileresource.IsPullEnabled() {
 		return c.acquireByResourceName(name)
+	}
+	// TODO: Bind resource IDs during query planning across shards, stages and
+	// retries. Until then, reuse a cached name binding until model eviction;
+	// same-name deletion/recreation is not revalidated on a cache hit.
+	if lease, ok := c.tryAcquireByName(name); ok {
+		lease.afterRelease = func() { c.retainIdle(lease.cached) }
+		return lease, nil
 	}
 	files, err := fileresource.AcquireNamed(ctx, name)
 	if err != nil {
@@ -359,7 +390,7 @@ func (c *xgboostModelCache) retainIdle(model *cachedXGBoostModel) {
 			c.mu.Unlock()
 			return
 		}
-		delete(c.models, model.key)
+		c.removeModelLocked(model)
 		c.mu.Unlock()
 		model.markClosing()
 	})
