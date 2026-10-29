@@ -391,56 +391,6 @@ stalled with the default `streaming.pkindex.memTableSize` of 4 MiB (up to
 182 ms per write) and did not stall from 16 MiB on. The default is not
 changed in this change; the measurement is one vchannel on one disk.
 
-## Comparison with similar systems
-
-| System | Replay start and skip rule | Serves during the replay | Local file reuse | What bounds the log truncation | Time or stall trigger |
-|---|---|---|---|---|---|
-| Pebble v1.1.5 (`open.go`, `compaction.go`) | Replays only the WALs with `FileNum >= minUnflushedLogNum` into the memtable, flushes them to L0 inside `Open` and moves `MinUnflushedLogNum` to a new log | No: the replay completes inside `Open` under `d.mu` | Existing SSTs stay in place; `checkConsistency` checks the file sizes against the MANIFEST | After a flush, `MinUnflushedLogNum` is the log of the oldest unflushed memtable, then `deleteObsoleteFiles` | `maybeScheduleDelayedFlush`: a timer marks the memtable `flushForced` |
-| RocksDB (`db_impl_open.cc`) | `min_wal_number = max(MinLogNumberToKeep, MinLogNumberWithUnflushedData)`; `WriteBatch::InsertInto` filters each record by the `log_number` of its column family | No: `Recover` holds `mutex_`, one thread until the client has the handle | SSTs stay in place | With `avoid_flush_during_recovery`, the replayed memtables are not flushed and the WALs wait in `alive_wal_files_` for `FindObsoleteFiles` | `max_total_wal_size` forces a flush of the column family that holds the oldest WAL (not verified against the source) |
-| SlateDB (`db.rs`, `wal_replay.rs`) | Replays the WAL SSTs after `replay_after_wal_id` of the manifest, skips rows with `seq <= last_l0_seq`; the result is a memtable, no L0 is written during the replay | No: `replay_wal` is an async step that `open` waits for (call site in `builder.rs`, not verified against the source) | `preload_disk_cache_on_startup` warms the local cache from the manifest; `CachedObjectStore` reads through | WAL GC reads `replay_after_wal_id` of the manifest; a `WalTruncated` during the replay refreshes the manifest, a larger `writer_epoch` is `Fenced` | — |
-| Neon (RFC 025) | The pageserver finds `index_part.json` by generation and loads only indexes at or below its own generation | Reads download layers on demand (not verified against the source) | Local content is removed at a new attach; the RFC proposes secondary locations that keep local data for a faster failover | `remote_consistent_lsn` moves only after the index upload with a verified generation; the safekeeper drops WAL by it | — |
-| TiKV raftstore (`peer_storage.rs`) | Applies the raft log after `apply_state.applied_index` of the KV engine; `truncated_state` is the truncation point | No: no service during `SnapState::Applying` | The KV engine stays in place | `clear_meta_in_kv_and_raft` syncs the KV write before it clears the raft log; a comment says the raft log GC needs a flush first | `raft_log_gc` by size and count (not verified against the source) |
-| CockroachDB (`raft_log_queue.go`) | — | — | — | A truncated entry must be "already durably applied to the state machine"; with loose coupling it waits for a durable `RaftAppliedIndex` | `RaftLogQueueStaleThreshold` (100 entries) and `RaftLogQueueStaleSize` (64 KiB) allow a truncation; a slow follower forces one by size |
-| Milvus WAL recovery framework (`wal/recovery`) | One scanner replays from the global checkpoint to the barrier and continues live; each component skips by its own `checkpoint_time_tick` | No: no append before the barrier | The segment views come from the catalog | `CheckpointThrough(min(summary.LastAcked))` | The ack tracker sends a persist request to a stalled vchannel after `ackStallTimeout` (`dataNode.segment.syncPeriod`); an explicit flush persists the segments at once |
-
-The apply on one goroutine, which this change adds, compared the same way:
-
-| System | Apply goroutine and batch | Where the applied position lives | Engine write failure | Back pressure |
-|---|---|---|---|---|
-| TiKV raftstore (`components/raftstore/src/store/fsm/apply.rs`, v8.5.0) | An apply worker applies the entries of a region in order into one write batch (`handle_put`, `handle_delete`), committed by `ApplyContext::commit` and `finish_for` | `apply_state` goes into the same write batch as the data | `write_to_db` panics; a comment says that for local errors "just panic is ok" | `apply_yield_write_size` and `apply_yield_duration` yield the worker |
-| CockroachDB (`pkg/kv/kvserver/replica_app_batch.go`, v24.3.0) | `Stage` under `raftMu` into one `replicaAppBatch`, one commit in `ApplyToStateMachine`, no sync | `RaftAppliedIndex` goes into the same batch: if the batch is not durable, the entries are applied again at startup | The commit error is wrapped and returned; the caller ends the replica | None at the apply |
-| FoundationDB storage server (`fdbserver/storageserver.actor.cpp`, 7.3.43) | One `update()` actor applies the mutations in version order to `versionedData`, then sets `data->version` | `updateStorage()` makes versions durable later and forgets the old ones with `oldestVersion` | `update()` logs `SSUpdateError` and rethrows; a rollback throws `please_reboot` | Above `STORAGE_HARD_LIMIT_BYTES` the actor sets `behind` and waits for durability: "we need to block updates or we could run out of memory" |
-| Pebble (v1.1.5) | The writer commits its own batch; a full memtable rotates | — | — | `makeRoomForWrite` blocks the writer when the queued memtables reach `MemTableStopWritesThreshold × MemTableSize` |
-
-What the index follows:
-
-- Every system replays inside the open and serves nothing until the replay
-  is done. The index replays inside `runBoundedRecovery`, so the index is at
-  the barrier when the first append arrives.
-- Every system applies on one goroutine in log order. The index applies in
-  the observe of the storage, and the observed time tick is the applied
-  position. TiKV and CockroachDB put the applied position into the same
-  batch as the data; the position of the index is the manifest checkpoint
-  on the coordinator, so the index holds the truncation at `LastAcked` and
-  applies an uncommitted write again after a restart instead.
-- The replayed writes stay in memory, nothing flushes them early (RocksDB
-  `avoid_flush_during_recovery`, SlateDB). The observe writes into the
-  active generation, and the normal handover publishes it.
-- Each component skips by its own durable position (RocksDB by the
-  `log_number` of the column family, SlateDB by `last_l0_seq`). The index
-  skips by the `checkpoint_time_tick` of the manifest of the vchannel.
-- Local files are reused in place and checked against the metadata (Pebble
-  `checkConsistency` checks the sizes). The index reuses `committed/` and
-  checks the `Size` of the manifest.
-- The truncation waits for the durable progress of the state machine. The
-  index gives `LastAcked`.
-- Every system bounds how long the log can wait (the forced flush timer of
-  Pebble, the 100 entries or 64 KiB of CockroachDB, the stall request and
-  the explicit flush of the WAL framework). The index adds triggers 4 and 5.
-- An engine failure restarts the instance (TiKV, FoundationDB). The index
-  makes the WAL unavailable through `OnFatal` instead of ending the
-  process, so the other pchannels of the node keep serving.
-
 ## Not done in this change
 
 - **The adapter over the manifest service.** It implements
