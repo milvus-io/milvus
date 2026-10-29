@@ -378,7 +378,8 @@ ChunkedSegmentSealedImpl::ReadTimestamp(
     if (effective_commit_ts) {
         return *effective_commit_ts;
     }
-    auto timestamps = runtime != nullptr ? runtime->timestamps : nullptr;
+    const auto* timestamps =
+        runtime != nullptr ? runtime->timestamps.get() : nullptr;
     if (timestamps != nullptr && !timestamps->empty()) {
         return (*timestamps)[offset];
     }
@@ -3008,7 +3009,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                     std::vector<Timestamp> ts(num_rows, commit_ts_);
                     auto timestamp_index =
                         std::make_shared<const TimestampIndex>(
-                            build_timestamp_index(ts.data(), num_rows));
+                            BuildTimestampIndex(ts.data(), num_rows));
                     auto timestamp_data = std::make_shared<TimestampData>();
                     timestamp_data->InitFromOwnedData(std::move(ts));
                     committer.Commit(
@@ -3142,7 +3143,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
                     std::fill(timestamps.begin(), timestamps.end(), commit_ts_);
                 }
                 auto timestamp_index = std::make_shared<const TimestampIndex>(
-                    build_timestamp_index(timestamps.data(), num_rows));
+                    BuildTimestampIndex(timestamps.data(), num_rows));
                 auto timestamp_data = std::make_shared<TimestampData>();
                 timestamp_data->InitFromOwnedData(std::move(timestamps));
                 committer.Commit([this,
@@ -6683,60 +6684,6 @@ ChunkedSegmentSealedImpl::get_active_count(Timestamp ts) const {
     return this->get_row_count();
 }
 
-// Helper: apply a per-element timestamp scan over a range [beg, end),
-// calling `pred(global_offset, ts_value)` for each row.
-// Overload for TimestampData (StorageV1 / growing segment path).
-template <typename Pred>
-static void
-scan_timestamp_range(const TimestampData& ts,
-                     int64_t beg,
-                     int64_t end,
-                     Pred pred) {
-    for (int64_t c = 0; c < ts.num_chunks(); c++) {
-        auto chunk_start = ts.chunk_start_offset(c);
-        auto chunk_end = chunk_start + ts.chunk_row_count(c);
-        auto overlap_beg = std::max(beg, chunk_start);
-        auto overlap_end = std::min(end, chunk_end);
-        if (overlap_beg >= overlap_end) {
-            continue;
-        }
-        auto* data = ts.chunk_data(c);
-        auto local = overlap_beg - chunk_start;
-        for (int64_t i = overlap_beg; i < overlap_end; ++i, ++local) {
-            pred(i, data[local]);
-        }
-    }
-}
-
-// Overload for ChunkedColumnInterface (StorageV2 sealed segment path).
-// Pins each chunk on demand and releases after scanning.
-template <typename Pred>
-static void
-scan_timestamp_range(const ChunkedColumnInterface& column,
-                     int64_t beg,
-                     int64_t end,
-                     Pred pred) {
-    auto num_chunks = column.num_chunks();
-    int64_t chunk_start = 0;
-    for (int64_t c = 0; c < num_chunks; c++) {
-        auto chunk_rows = column.chunk_row_nums(c);
-        auto chunk_end = chunk_start + chunk_rows;
-        auto overlap_beg = std::max(beg, chunk_start);
-        auto overlap_end = std::min(end, chunk_end);
-        if (overlap_beg >= overlap_end) {
-            chunk_start = chunk_end;
-            continue;
-        }
-        auto pw = column.DataOfChunk(nullptr, c);
-        auto* data = reinterpret_cast<const Timestamp*>(pw.get());
-        auto local = overlap_beg - chunk_start;
-        for (int64_t i = overlap_beg; i < overlap_end; ++i, ++local) {
-            pred(i, data[local]);
-        }
-        chunk_start = chunk_end;
-    }
-}
-
 void
 ChunkedSegmentSealedImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
                                                Timestamp timestamp,
@@ -6750,15 +6697,51 @@ ChunkedSegmentSealedImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
     auto runtime = snapshot->runtime;
     AssertInfo(runtime != nullptr && runtime->timestamp_index != nullptr,
                "timestamp index is not ready");
-    auto& ts_index_data = *runtime->timestamp_index;
-    auto effective_commit_ts =
-        snapshot->commit_ts != 0 ? std::optional<Timestamp>{snapshot->commit_ts}
-                                 : std::nullopt;
     auto total_size = runtime->row_count;
+    if (total_size == 0) {
+        return;
+    }
+    const auto* timestamps = runtime->timestamps.get();
+    if (snapshot->commit_ts != 0 ||
+        (timestamps != nullptr && timestamps->is_constant_mode())) {
+        auto value =
+            snapshot->commit_ts != 0 ? snapshot->commit_ts : (*timestamps)[0];
+        if (value > timestamp ||
+            (collection_ttl > 0 && value <= collection_ttl)) {
+            bitset_chunk.set();
+        }
+        return;
+    }
+    AssertInfo(timestamps != nullptr && !timestamps->empty(),
+               "timestamp data is not ready");
+    auto& ts_index_data = *runtime->timestamp_index;
 
-    auto do_scan = [&](int64_t beg, int64_t end, auto pred) {
-        for (int64_t i = beg; i < end; ++i) {
-            pred(i, ReadTimestamp(i, runtime, effective_commit_ts));
+    auto do_scan = [&](int64_t beg,
+                       int64_t end,
+                       BitsetType& mask,
+                       Timestamp bound,
+                       bitset::CompareOpType op) {
+        if (beg >= end) {
+            return;
+        }
+        for (int64_t c = 0; c < timestamps->num_chunks(); ++c) {
+            auto chunk_start = timestamps->chunk_start_offset(c);
+            if (chunk_start >= end) {
+                break;
+            }
+            auto overlap_beg = std::max(beg, chunk_start);
+            auto overlap_end =
+                std::min(end, chunk_start + timestamps->chunk_row_count(c));
+            if (overlap_beg >= overlap_end) {
+                continue;
+            }
+            auto count = overlap_end - overlap_beg;
+            auto view = mask.view(overlap_beg, count);
+            view.inplace_compare_val<Timestamp>(
+                timestamps->chunk_data(c) + overlap_beg - chunk_start,
+                count,
+                bound,
+                op);
         }
     };
 
@@ -6773,9 +6756,11 @@ ChunkedSegmentSealedImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
             ttl_mask.reserve(total_size);
             ttl_mask.resize(range.first, true);
             ttl_mask.resize(total_size, false);
-            do_scan(range.first, range.second, [&](int64_t i, Timestamp val) {
-                ttl_mask[i] = val <= collection_ttl;
-            });
+            do_scan(range.first,
+                    range.second,
+                    ttl_mask,
+                    collection_ttl,
+                    bitset::CompareOpType::LE);
             bitset_chunk |= ttl_mask;
         }
     }
@@ -6796,9 +6781,8 @@ ChunkedSegmentSealedImpl::mask_with_timestamps(BitsetTypeView& bitset_chunk,
     mask.reserve(total_size);
     mask.resize(range.first, false);
     mask.resize(total_size, true);
-    do_scan(range.first, range.second, [&](int64_t i, Timestamp val) {
-        mask[i] = val > timestamp;
-    });
+    do_scan(
+        range.first, range.second, mask, timestamp, bitset::CompareOpType::GT);
     bitset_chunk |= mask;
 }
 
@@ -7324,17 +7308,6 @@ ChunkedSegmentSealedImpl::load_field_data_common(
         std::unique_lock lck(mutex_);
         apply_loaded_column(target_runtime, old_column, staged_state);
     });
-}
-
-TimestampIndex
-ChunkedSegmentSealedImpl::build_timestamp_index(const Timestamp* data,
-                                                size_t num_rows) {
-    TimestampIndex index;
-    auto min_slice_length = num_rows < 4096 ? 1 : 4096;
-    auto meta = GenerateFakeSlices(data, num_rows, min_slice_length);
-    index.set_length_meta(std::move(meta));
-    index.build_with(data, num_rows);
-    return index;
 }
 
 void
@@ -8595,7 +8568,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
             if (commit_ts_ != 0) {
                 std::vector<Timestamp> ts(num_rows, commit_ts_);
                 auto timestamp_index = std::make_shared<const TimestampIndex>(
-                    build_timestamp_index(ts.data(), num_rows));
+                    BuildTimestampIndex(ts.data(), num_rows));
                 auto timestamp_data = std::make_shared<TimestampData>();
                 timestamp_data->InitFromOwnedData(std::move(ts));
                 committer.Commit([this,
