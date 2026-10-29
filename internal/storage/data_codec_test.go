@@ -1076,15 +1076,15 @@ func TestInsertCodec(t *testing.T) {
 
 	insertDataEmpty := &InsertData{
 		Data: map[int64]FieldData{
-			RowIDField:     &Int64FieldData{Data: []int64{}, ValidData: nil, Nullable: false},
-			TimestampField: &Int64FieldData{Data: []int64{}, ValidData: nil, Nullable: false},
-			BoolField:      &BoolFieldData{Data: []bool{}, ValidData: nil, Nullable: false},
-			Int8Field:      &Int8FieldData{Data: []int8{}, ValidData: nil, Nullable: false},
-			Int16Field:     &Int16FieldData{Data: []int16{}, ValidData: nil, Nullable: false},
-			Int32Field:     &Int32FieldData{Data: []int32{}, ValidData: nil, Nullable: false},
-			Int64Field:     &Int64FieldData{Data: []int64{}, ValidData: nil, Nullable: false},
-			FloatField:     &FloatFieldData{Data: []float32{}, ValidData: nil, Nullable: false},
-			DoubleField:    &DoubleFieldData{Data: []float64{}, ValidData: nil, Nullable: false},
+			RowIDField:     &Int64FieldData{[]int64{}, nil, false},
+			TimestampField: &Int64FieldData{[]int64{}, nil, false},
+			BoolField:      &BoolFieldData{[]bool{}, nil, false},
+			Int8Field:      &Int8FieldData{[]int8{}, nil, false},
+			Int16Field:     &Int16FieldData{[]int16{}, nil, false},
+			Int32Field:     &Int32FieldData{[]int32{}, nil, false},
+			Int64Field:     &Int64FieldData{[]int64{}, nil, false},
+			FloatField:     &FloatFieldData{[]float32{}, nil, false},
+			DoubleField:    &DoubleFieldData{[]float64{}, nil, false},
 			StringField:    &StringFieldData{Data: []string{}, DataType: schemapb.DataType_VarChar},
 			BinaryVectorField: &BinaryVectorFieldData{
 				Data:      []byte{},
@@ -1781,15 +1781,15 @@ func TestMemorySize(t *testing.T) {
 
 	insertDataEmpty := &InsertData{
 		Data: map[int64]FieldData{
-			RowIDField:     &Int64FieldData{Data: []int64{}, ValidData: nil, Nullable: false},
-			TimestampField: &Int64FieldData{Data: []int64{}, ValidData: nil, Nullable: false},
-			BoolField:      &BoolFieldData{Data: []bool{}, ValidData: nil, Nullable: false},
-			Int8Field:      &Int8FieldData{Data: []int8{}, ValidData: nil, Nullable: false},
-			Int16Field:     &Int16FieldData{Data: []int16{}, ValidData: nil, Nullable: false},
-			Int32Field:     &Int32FieldData{Data: []int32{}, ValidData: nil, Nullable: false},
-			Int64Field:     &Int64FieldData{Data: []int64{}, ValidData: nil, Nullable: false},
-			FloatField:     &FloatFieldData{Data: []float32{}, ValidData: nil, Nullable: false},
-			DoubleField:    &DoubleFieldData{Data: []float64{}, ValidData: nil, Nullable: false},
+			RowIDField:     &Int64FieldData{[]int64{}, nil, false},
+			TimestampField: &Int64FieldData{[]int64{}, nil, false},
+			BoolField:      &BoolFieldData{[]bool{}, nil, false},
+			Int8Field:      &Int8FieldData{[]int8{}, nil, false},
+			Int16Field:     &Int16FieldData{[]int16{}, nil, false},
+			Int32Field:     &Int32FieldData{[]int32{}, nil, false},
+			Int64Field:     &Int64FieldData{[]int64{}, nil, false},
+			FloatField:     &FloatFieldData{[]float32{}, nil, false},
+			DoubleField:    &DoubleFieldData{[]float64{}, nil, false},
 			StringField:    &StringFieldData{Data: []string{}, DataType: schemapb.DataType_VarChar},
 			BinaryVectorField: &BinaryVectorFieldData{
 				Data:      []byte{},
@@ -1949,19 +1949,19 @@ func TestAddFieldDataToPayload(t *testing.T) {
 	w := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40, false)
 	e, _ := w.NextInsertEventWriter()
 	var err error
-	err = AddFieldDataToPayload(e, schemapb.DataType_Bool, &BoolFieldData{Data: []bool{}, ValidData: nil, Nullable: false})
+	err = AddFieldDataToPayload(e, schemapb.DataType_Bool, &BoolFieldData{[]bool{}, nil, false})
 	assert.Error(t, err)
-	err = AddFieldDataToPayload(e, schemapb.DataType_Int8, &Int8FieldData{Data: []int8{}, ValidData: nil, Nullable: false})
+	err = AddFieldDataToPayload(e, schemapb.DataType_Int8, &Int8FieldData{[]int8{}, nil, false})
 	assert.Error(t, err)
-	err = AddFieldDataToPayload(e, schemapb.DataType_Int16, &Int16FieldData{Data: []int16{}, ValidData: nil, Nullable: false})
+	err = AddFieldDataToPayload(e, schemapb.DataType_Int16, &Int16FieldData{[]int16{}, nil, false})
 	assert.Error(t, err)
-	err = AddFieldDataToPayload(e, schemapb.DataType_Int32, &Int32FieldData{Data: []int32{}, ValidData: nil, Nullable: false})
+	err = AddFieldDataToPayload(e, schemapb.DataType_Int32, &Int32FieldData{[]int32{}, nil, false})
 	assert.Error(t, err)
-	err = AddFieldDataToPayload(e, schemapb.DataType_Int64, &Int64FieldData{Data: []int64{}, ValidData: nil, Nullable: false})
+	err = AddFieldDataToPayload(e, schemapb.DataType_Int64, &Int64FieldData{[]int64{}, nil, false})
 	assert.Error(t, err)
-	err = AddFieldDataToPayload(e, schemapb.DataType_Float, &FloatFieldData{Data: []float32{}, ValidData: nil, Nullable: false})
+	err = AddFieldDataToPayload(e, schemapb.DataType_Float, &FloatFieldData{[]float32{}, nil, false})
 	assert.Error(t, err)
-	err = AddFieldDataToPayload(e, schemapb.DataType_Double, &DoubleFieldData{Data: []float64{}, ValidData: nil, Nullable: false})
+	err = AddFieldDataToPayload(e, schemapb.DataType_Double, &DoubleFieldData{[]float64{}, nil, false})
 	assert.Error(t, err)
 	err = AddFieldDataToPayload(e, schemapb.DataType_String, &StringFieldData{Data: []string{"test"}, DataType: schemapb.DataType_VarChar})
 	assert.Error(t, err)
