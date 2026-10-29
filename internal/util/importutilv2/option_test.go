@@ -471,6 +471,9 @@ func TestSnapshotChannelEndTsOptions(t *testing.T) {
 		`{"dml_0":"not-a-timestamp"}`,
 		`{"dml_0":"1"}`,
 		fmt.Sprintf(`{"dml_0":"%d","dml_0_4600v0":"%d"}`, now, later),
+		fmt.Sprintf(`{"dml_0":"%d","dml_0_4600v0":"%d"}`, now, now),
+		fmt.Sprintf(`{"dml_0":"%d","dml_0":"%d"}`, now, now),
+		strings.Repeat("x", 65537),
 	} {
 		t.Run(value[:min(len(value), 40)], func(t *testing.T) {
 			_, err := GetSnapshotChannelEndTs(append(base, &commonpb.KeyValuePair{Key: SnapshotChannelEndTs, Value: value}))

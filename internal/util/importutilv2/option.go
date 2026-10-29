@@ -233,11 +233,37 @@ func GetSnapshotChannelEndTs(options Options) (map[string]uint64, error) {
 		return nil, merr.WrapErrImportFailedMsg("%s requires %s=%s",
 			SnapshotChannelEndTs, SourceType, SourceTypeSnapshot)
 	}
+	if len(value) > 64*1024 {
+		return nil, merr.WrapErrImportFailedMsg("%s must be at most 64 KiB", SnapshotChannelEndTs)
+	}
 
-	var named map[string]string
-	if err := json.Unmarshal([]byte(value), &named); err != nil {
-		return nil, merr.WrapErrImportFailedMsg("%s must be a JSON object of channel to timestamp: %s",
-			SnapshotChannelEndTs, err)
+	decoder := json.NewDecoder(strings.NewReader(value))
+	start, err := decoder.Token()
+	if err != nil || start != json.Delim('{') {
+		return nil, merr.WrapErrImportFailedMsg("%s must be a JSON object of channel to timestamp", SnapshotChannelEndTs)
+	}
+	named := make(map[string]string)
+	for decoder.More() {
+		key, err := decoder.Token()
+		if err != nil {
+			return nil, merr.WrapErrImportFailedMsg("%s contains an invalid channel name", SnapshotChannelEndTs)
+		}
+		channel, ok := key.(string)
+		var raw string
+		if !ok || decoder.Decode(&raw) != nil {
+			return nil, merr.WrapErrImportFailedMsg("%s requires string timestamps", SnapshotChannelEndTs)
+		}
+		if _, exists := named[channel]; exists {
+			return nil, merr.WrapErrImportFailedMsg("%s contains duplicate channel %s", SnapshotChannelEndTs, channel)
+		}
+		named[channel] = raw
+	}
+	end, err := decoder.Token()
+	if err != nil || end != json.Delim('}') {
+		return nil, merr.WrapErrImportFailedMsg("%s must be a JSON object of channel to timestamp", SnapshotChannelEndTs)
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return nil, merr.WrapErrImportFailedMsg("%s contains trailing JSON data", SnapshotChannelEndTs)
 	}
 	if len(named) == 0 {
 		return nil, merr.WrapErrImportFailedMsg("%s must name at least one channel", SnapshotChannelEndTs)
@@ -259,7 +285,7 @@ func GetSnapshotChannelEndTs(options Options) (map[string]uint64, error) {
 		}
 
 		pch := funcutil.ToPhysicalChannel(channel)
-		if previous, ok := bounds[pch]; ok && previous != ts {
+		if previous, ok := bounds[pch]; ok {
 			return nil, merr.WrapErrImportFailedMsg("%s bounds physical channel %s twice, at %d and %d",
 				SnapshotChannelEndTs, pch, previous, ts)
 		}

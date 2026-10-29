@@ -112,6 +112,38 @@ func TestSnapshotPrepareDeleteMasks(t *testing.T) {
 	}
 }
 
+func TestSnapshotPrepareDeleteMasksChannelEnd(t *testing.T) {
+	const channelEnd = uint64(4611686018427387904)
+	options := Options{
+		{Key: BackupFlag, Value: "true"},
+		{Key: SourceType, Value: SourceTypeSnapshot},
+		{Key: StartTs, Value: fmt.Sprint(channelEnd - 100)},
+		{Key: EndTs, Value: fmt.Sprint(channelEnd + 100)},
+		{Key: SnapshotChannelEndTs, Value: fmt.Sprintf(`{"dml_0":"%d"}`, channelEnd)},
+	}
+	file := &internalpb.ImportFile{SnapshotSource: &internalpb.SnapshotImportSource{
+		Version: 5 + SnapshotBoundedVersionOffset, ManifestPath: packed.MarshalManifestPath("root/source", 1),
+		SourceChannel: "dml_0_4600v0", SourcePartitionId: 10,
+	}}
+	source := &internalpb.SnapshotImportL0Source{SourceChannel: "dml_0_4600v0", SourcePartitionId: 10}
+	factory := NewReaderFactory(context.Background(), storage.NewLocalChunkManager(), &indexpb.StorageConfig{StorageType: "local"}, options)
+	want := &binlog.SnapshotL0Deletes{}
+	prepare := mockey.Mock(binlog.BuildSnapshotDeleteMasks).To(func(_ context.Context, _ storage.ChunkManager,
+		_ *schemapb.CollectionSchema, _ *indexpb.StorageConfig, _ []*internalpb.SnapshotImportSource,
+		_ *internalpb.SnapshotImportL0Source, start, end uint64, _, _ int64, _ binlog.SourceEncryption, _ func(string) error,
+	) (*binlog.SnapshotL0Deletes, error) {
+		require.Equal(t, channelEnd-100, start)
+		require.Equal(t, channelEnd, end, "shared and segment-local deletes must stop at the same channel bound as the data")
+		return want, nil
+	}).Build()
+	defer prepare.UnPatch()
+
+	got, err := factory.PrepareSnapshotDeletes(context.Background(), nil, []*internalpb.ImportFile{file}, source, 128, 256)
+	require.NoError(t, err)
+	require.Same(t, want, got)
+	require.Equal(t, 1, prepare.Times())
+}
+
 func TestSnapshotDeferredPathBoundary(t *testing.T) {
 	cm := storage.NewRemoteChunkManagerForTesting(nil, "source", "root")
 	for _, layout := range []string{"referenced", "self-contained"} {
@@ -914,6 +946,72 @@ func TestSnapshotPartitionMappingDescriptors(t *testing.T) {
 	require.NoError(t, ValidateSnapshotTaskPartitions([]*internalpb.ImportFile{{Paths: []string{"data.json"}}}, []int64{10, 20}))
 }
 
+// The bounded family is a new number, not a reuse of 5-8: a worker that does
+// not know the per-channel bound must reject the job rather than import the
+// bundle past the point replication resumes. Versions 10-16 stay reserved, and
+// a bounded descriptor must name its file's source scope.
+func TestSnapshotBoundedVersion(t *testing.T) {
+	base := Options{{Key: BackupFlag, Value: "true"}, {Key: SourceType, Value: SourceTypeSnapshot}}
+	bounded := append(append(Options(nil), base...), &commonpb.KeyValuePair{
+		Key: SnapshotChannelEndTs, Value: `{"dml_0":"4611686018427387904"}`,
+	})
+	mapping := append(append(Options(nil), bounded...), &commonpb.KeyValuePair{Key: PartitionMapping, Value: `{"A":"X"}`})
+	external := append(append(Options(nil), bounded...),
+		&commonpb.KeyValuePair{Key: ExternalSpec, Value: `{"extfs":{"region":"us-east-1"}}`},
+		&commonpb.KeyValuePair{Key: SnapshotSourceURI, Value: "s3://source/root/snapshots/1/metadata/2.json"})
+	externalMapping := append(append(Options(nil), external...), &commonpb.KeyValuePair{Key: PartitionMapping, Value: `{"A":"X"}`})
+	manifest := packed.MarshalManifestPath("root/data", 7)
+	descriptor := func(version uint32, scoped bool, target int64) []*internalpb.ImportFile {
+		source := &internalpb.SnapshotImportSource{Version: version, ManifestPath: manifest, TargetPartitionId: target}
+		if scoped {
+			source.SourceChannel, source.SourcePartitionId = "dml_0", 10
+		}
+		return []*internalpb.ImportFile{{SnapshotSource: source}}
+	}
+
+	for _, version := range []uint32{1, 2, 3, 4, 5, 6, 7, 8} {
+		source := descriptor(version, version >= 5, 0)[0].GetSnapshotSource()
+		require.False(t, SnapshotSourceBounded(source), "version %d predates the bound", version)
+		require.Equal(t, version, SnapshotSourceBaseVersion(source))
+		require.Equal(t, version >= 5, SnapshotSourceUsesSharedL0(source))
+	}
+
+	for _, version := range []uint32{17, 18, 19, 20, 21, 22, 23, 24} {
+		source := descriptor(version, true, 0)[0].GetSnapshotSource()
+		require.True(t, SnapshotSourceBounded(source), "version %d is bounded", version)
+		require.True(t, SnapshotSourceScoped(source))
+		require.Equal(t, version-SnapshotBoundedVersionOffset, SnapshotSourceBaseVersion(source))
+		require.Equal(t, version-16 >= 5, SnapshotSourceUsesSharedL0(source), "only 21-24 also carry an inventory")
+	}
+
+	// The contract bits below the offset decide storage and routing; the offset
+	// only adds the scope the bound resolves through. The descriptor and option
+	// must also agree in both directions, or a lost option could import uncut.
+	require.NoError(t, ValidateSnapshotImportFiles(descriptor(17, true, 0), bounded))
+	require.NoError(t, ValidateSnapshotImportFiles(descriptor(18, true, 0), external))
+	require.NoError(t, ValidateSnapshotImportFiles(descriptor(19, true, 20), mapping))
+	require.NoError(t, ValidateSnapshotImportFiles(descriptor(20, true, 20), externalMapping))
+	require.NoError(t, ValidateSnapshotImportFiles(descriptor(21, true, 0), bounded))
+	require.NoError(t, ValidateSnapshotImportFiles(descriptor(22, true, 0), external))
+	require.NoError(t, ValidateSnapshotImportFiles(descriptor(23, true, 20), mapping))
+	require.NoError(t, ValidateSnapshotImportFiles(descriptor(24, true, 20), externalMapping))
+	require.Error(t, ValidateSnapshotImportFiles(descriptor(17, false, 0), bounded), "a bounded file must name its channel")
+	require.Error(t, ValidateSnapshotImportFiles(descriptor(21, false, 0), bounded))
+	require.Error(t, ValidateSnapshotImportFiles(descriptor(17, true, 0), base), "a bounded file must not lose the option")
+	require.Error(t, ValidateSnapshotImportFiles(descriptor(5, true, 0), bounded), "the option must not reuse a legacy version")
+	require.Error(t, ValidateSnapshotImportFiles(descriptor(19, true, 0), mapping), "a mapped descriptor needs its target")
+	require.Error(t, ValidateSnapshotImportFiles(descriptor(19, true, 20), bounded), "losing mapping must still fail closed")
+	require.Error(t, ValidateSnapshotImportFiles(descriptor(17, true, 20), mapping), "carrying a mapping requires its bit")
+
+	// Versions the release never wrote are rejected, not read through 1-8.
+	for _, version := range []uint32{0, 9, 10, 11, 12, 13, 14, 15, 16, 25} {
+		err := ValidateSnapshotImportFiles(descriptor(version, true, 0), base)
+		require.Error(t, err, "version %d must not be executable", version)
+	}
+	require.ErrorIs(t, ValidateSnapshotImportFiles(descriptor(16, true, 0), base), merr.ErrServiceUnimplemented)
+	require.ErrorIs(t, ValidateSnapshotImportFiles(descriptor(25, true, 0), base), merr.ErrServiceUnimplemented)
+}
+
 func TestValidateSnapshotImportFiles(t *testing.T) {
 	manifest := packed.MarshalManifestPath("snapshot/data", 7)
 	options := Options{{Key: BackupFlag, Value: "true"}, {Key: SourceType, Value: SourceTypeSnapshot}}
@@ -1309,4 +1407,34 @@ func TestSnapshotChannelEnd(t *testing.T) {
 
 	_, err = snapshotChannelEnd(jobEnd, map[string]uint64{"dml_0": 100}, &internalpb.SnapshotImportSource{SourceChannel: "dml_9_4600v0"})
 	assert.ErrorContains(t, err, "no end bound for source channel")
+}
+
+// The data reader only implements the 1-4 contract, so the scope bit leaves the
+// version it is handed — and only the handed view changes: the persisted
+// descriptor keeps the version a worker must have understood to get here.
+func TestSnapshotReaderSourceVersion(t *testing.T) {
+	manifest := packed.MarshalManifestPath("root/data", 7)
+
+	plain := &internalpb.SnapshotImportSource{Version: 1, ManifestPath: manifest}
+	require.Same(t, plain, readerSource(plain, false), "a legacy descriptor is passed through")
+
+	bounded := &internalpb.SnapshotImportSource{
+		Version: 17, ManifestPath: manifest, SourceChannel: "dml_0", SourcePartitionId: 10,
+	}
+	view := readerSource(bounded, false)
+	require.EqualValues(t, 1, view.GetVersion())
+	require.Equal(t, "dml_0", view.GetSourceChannel(), "the cut still reports which file it came from")
+	require.EqualValues(t, 17, bounded.GetVersion(), "the persisted descriptor must not be mutated")
+
+	for _, version := range []uint32{21, 23} {
+		shared := &internalpb.SnapshotImportSource{
+			Version: version, ManifestPath: manifest, SourceCommitTimestamp: 100, SourceChannel: "dml_0", SourcePartitionId: 10,
+		}
+		view := readerSource(shared, true)
+		require.EqualValues(t, version-16-4, view.GetVersion())
+		require.EqualValues(t, 100, view.GetSourceCommitTimestamp(), "the bitmap key needs the commit timestamp")
+		require.Empty(t, view.GetSourceChannel())
+		require.Zero(t, view.GetSourcePartitionId())
+		require.EqualValues(t, version, shared.GetVersion())
+	}
 }

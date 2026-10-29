@@ -430,10 +430,12 @@ func expandSnapshotImportFiles(
 		}
 	}
 	external := importutilv2.HasExternalSource(options)
-	if external || partitionMapping != nil {
+	if external || partitionMapping != nil || withSourceScope {
 		// Select the complete contract once: external storage adds 1, target
 		// routing adds 2, and shared L0 adds 4 to the base version. Older workers
-		// must reject capabilities they cannot preserve, never ignore them.
+		// must reject capabilities they cannot preserve, never ignore them — a
+		// per-channel bound adds 16, a family the worker before it does not read,
+		// so an old worker fails the job instead of importing the bundle whole.
 		version := uint32(1)
 		if external {
 			version++
@@ -441,8 +443,11 @@ func expandSnapshotImportFiles(
 		if partitionMapping != nil {
 			version += 2
 		}
-		if len(l0Sources) != 0 || withSourceScope {
+		if len(l0Sources) != 0 {
 			version += 4
+		}
+		if withSourceScope {
+			version += importutilv2.SnapshotBoundedVersionOffset
 		}
 		for i, file := range result {
 			if file.SnapshotSource == nil {
@@ -620,13 +625,16 @@ func attachSnapshotImportSources(ctx context.Context, cm milvusstorage.ChunkMana
 		source := &internalpb.SnapshotImportSource{
 			Version: 1, ManifestPath: segment.GetManifestPath(), SourceCommitTimestamp: segment.GetCommitTimestamp(),
 		}
-		// Deletes bind to a scope; a per-channel end bound resolves through one.
-		// Either reason rides the same descriptor family, and a scope with no
-		// deletes gets an empty inventory rather than none.
+		// Deletes bind to a scope, and a per-channel end bound resolves through
+		// one. Only deletes need an inventory in that scope; the caller picks the
+		// version bits, because a bound without deletes must not read as a
+		// shared-L0 job.
 		if len(deltas) != 0 || withSourceScope {
-			source.Version = 5
 			source.SourceChannel = segment.GetChannelName()
 			source.SourcePartitionId = segment.GetPartitionId()
+		}
+		if len(deltas) != 0 {
+			source.Version = 5
 			groupFor(source.SourceChannel, source.SourcePartitionId)
 		}
 		files[i].SnapshotSource = source

@@ -85,8 +85,10 @@ when **any** of the following holds:
 
 - a selected data segment has an applicable captured L0 segment;
 - any selected data segment has a nonzero source commit timestamp;
-- the request supplies `external_spec`; or
-- the request supplies `partition_mapping`.
+- the request supplies `external_spec`;
+- the request supplies `partition_mapping`; or
+- the request supplies `_snapshot_end_ts`, the per-channel source bound of
+  section 12.3.1.
 
 Only an admitted job with none of these conditions keeps one exact manifest
 in each file's `paths[0]`, with no descriptor. L0 applicability is defined by
@@ -97,10 +99,11 @@ returns records or whether those records survive the requested timestamp range.
 |---|---|
 | Ordinary file Import or legacy V1/V2 backup Import | Existing path, unchanged |
 | Legacy `l0_import=true` outside snapshot-source Import | Existing delete-import path, unchanged |
-| Snapshot satisfying none of the four activation conditions | Existing one-manifest-per-file path |
+| Snapshot satisfying none of the five activation conditions | Existing one-manifest-per-file path |
 | Snapshot with any nonzero source commit timestamp | Job-wide descriptors preserve commit-time delete semantics, including without L0 |
 | Snapshot with `external_spec` | Job-wide descriptors select source storage, including without L0 |
 | Snapshot with `partition_mapping` | Job-wide descriptors bind files to target partitions, including without L0 |
+| Snapshot with `_snapshot_end_ts` | Bounded descriptors name each file's source channel; no inventory unless the job also has applicable L0 |
 | Snapshot with applicable L0 | New descriptors and bounded read-time folding using captured timestamps |
 | Snapshot with omitted commit timestamps | Accepted with the same activation rules; omitted commit times remain zero, with the historical limitation in section 12.2 |
 | Snapshot with invalid applicable L0 input | Explicit failure, never fallback to the baseline path |
@@ -121,8 +124,22 @@ partition-mapping options, and whether applicable L0 requires a shared inventory
 | Instance storage | Present | 3 | 7 |
 | Request-scoped external storage | Present | 4 | 8 |
 
-Versions 3/4/7/8 require a positive `target_partition_id`; the others leave it
-unset. Versions 5-8 require source channel/partition. All versions prohibit
+A job carrying `_snapshot_end_ts` adds 16 to the table above, so its files use
+versions 17-24. That offset is a separate version family rather than a reuse of
+5-8, because a worker that does not know the bound must reject the job instead
+of importing the bundle past the point replication resumes. Versions 10-16 stay
+reserved: 9 remains the preparation marker, so no runnable descriptor can be
+confused with one. Bounded descriptors require source channel/partition exactly
+like 5-8, but do **not** imply a shared L0 inventory: 17-20 carry no inventory at
+all, and only 21-24 add the `+4` bit because the job also has applicable L0.
+The bounded bit is read through the offset before the storage/routing/inventory
+contract is evaluated, so the meaning of 1-8 is unchanged. The bounded bit and
+`_snapshot_end_ts` must coexist: either one without the other fails validation,
+so losing the option cannot silently restore an unbounded read.
+
+Versions 3/4/7/8 and their bounded counterparts require a positive
+`target_partition_id`; the others leave it unset. Versions 5-8 and 17-24 require
+source channel/partition. All versions prohibit
 inline L0 lists, including persisted tasks from development versions. All versions
 preserve the source manifest, applicable deletes, and
 source commit timestamp. Unsupported versions fail closed rather than losing
@@ -1196,6 +1213,50 @@ which segments are captured; they have not been established as a new universal
 per-row cutoff for Import. This design consumes the snapshot's immutable file
 inventory, matched by source channel/partition, under the existing Import
 timestamp range. It does not add global as-of snapshot semantics.
+
+### 12.3.1 Per-Channel Bound (`_snapshot_end_ts`)
+
+A bundle frozen after the source's flush can hold rows past the position the
+caller anchored replication at. Those rows are both in the bundle and replayed
+by CDC from the flush checkpoint, so a restore that imports the whole bundle
+duplicates its tail. A single `end_ts` cannot express the cut: a `FlushAll`
+broadcast appends one message per physical channel and each append takes its
+own time-tick, so every channel has its own boundary.
+
+`_snapshot_end_ts` is a snapshot-only JSON **string** mapping source channel to
+hybrid timestamp, e.g. `"{\"by-dev-rootcoord-dml_0\":\"4611686018427387904\"}"`.
+It is bounded to 64 KiB like `partition_mapping`. Keys may name a physical or a
+virtual channel; both normalize to the physical channel, and a physical channel
+may appear only once. Malformed values, an empty map and a non-snapshot job are
+rejected at admission.
+
+Unlike `_snapshot_source_uri` and `_snapshot_layout`, which the coordinator
+injects and public requests may not supply, this option is **client-supplied**:
+only the caller that saw the source's flush messages can name those positions.
+A job that carries it without `source_type=snapshot` is rejected.
+
+Each source file is read up to the smaller of its own channel's bound and the
+job's `end_ts`, for both the data read and the pre-import row count. A file whose
+channel the map does not name fails the job at expansion: importing it uncut is
+exactly the duplication the option exists to prevent, so silence is not an
+option. Bounds that leave a data segment's channel unnamed, or a data segment
+with no source channel, fail expansion as well.
+
+The bound is an **inclusive** upper bound, matching the secondary's
+`TimeTick <= checkpoint` deduplication: rows at exactly the bound are imported
+and are not replayed. That makes the map's values load-bearing in both
+directions — a bound below the checkpoint silently loses the gap, and a bound
+above it duplicates the overlap — and the server can verify coverage, not
+accuracy. A caller must derive both the map and the replication checkpoint from
+the same flush response.
+
+Deletes use the same per-channel bound as data rows, before any delete bitmap is
+built. A worker task never mixes source channel/partition scopes, so its shared
+L0 inventory has one source channel from which to resolve the bound. Bitmap
+preparation intersects the job's `end_ts` with that bound for both shared L0 and
+each data manifest's segment-local deltalogs. Deletes past the bound are not
+applied early; they are left to the replayed stream. The rule is unchanged when
+L0 compaction has already moved a delete into a data segment's manifest.
 
 ### 12.4 Empty, Missing, and Fully Deleted Inputs
 

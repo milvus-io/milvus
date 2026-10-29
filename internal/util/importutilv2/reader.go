@@ -159,6 +159,14 @@ func (f *ReaderFactory) PrepareSnapshotDeletes(ctx context.Context, schema *sche
 	if err != nil {
 		return nil, err
 	}
+	bounds, err := f.channelEnd()
+	if err != nil {
+		return nil, err
+	}
+	end, err = snapshotChannelEnd(end, bounds, source)
+	if err != nil {
+		return nil, err
+	}
 	resolved, err := f.storage()
 	if err != nil {
 		return nil, err
@@ -189,14 +197,40 @@ func NewReader(ctx context.Context,
 	return NewReaderFactory(ctx, cm, storageConfig, options).NewReader(ctx, schema, importFile, bufferSize, snapshotDeleteBudget, nil)
 }
 
+// readerSource adapts a validated descriptor to the 1-4 contract the data
+// reader implements. Only this view is narrowed: never mutate the persisted
+// descriptor, and never expand L0 paths back into a segment, because a shared
+// task borrows its prepared bitmap instead of opening L0 again.
+func readerSource(source *internalpb.SnapshotImportSource, shared bool) *internalpb.SnapshotImportSource {
+	if source == nil {
+		return nil
+	}
+	switch {
+	case shared:
+		source = proto.Clone(source).(*internalpb.SnapshotImportSource)
+		source.Version = SnapshotSourceBaseVersion(source) - 4
+		source.SourceChannel = ""
+		source.SourcePartitionId = 0
+	case SnapshotSourceScoped(source):
+		// A per-channel bound rides on tsEnd, not on the descriptor, so the
+		// scope bit only has to leave the version. The clone keeps the channel
+		// for anything that reports which file was cut.
+		source = proto.Clone(source).(*internalpb.SnapshotImportSource)
+		source.Version = SnapshotSourceBaseVersion(source)
+	}
+	return source
+}
+
+type snapshotChannelSource interface {
+	GetSourceChannel() string
+}
+
 // snapshotChannelEnd applies the job's per-channel end bounds to one source
-// file. A bundle frozen after the source's flush can hold rows past the
-// position the restore's replay anchored replication at, so the restore names
-// each channel's boundary and the import stops there: what it reads is exactly
-// what the checkpoint covers, and the CDC's replay of the tail does not meet a
-// second copy of the same rows. Both bounds are upper bounds, so the lower one
-// wins.
-func snapshotChannelEnd(jobEnd uint64, bounds map[string]uint64, source *internalpb.SnapshotImportSource) (uint64, error) {
+// file or delete scope. Data and deletes use the same inclusive bound so the
+// imported state ends exactly where replication resumes: post-bound rows are
+// not imported, and post-bound deletes are not applied early. Both the job and
+// channel bounds are upper bounds, so the lower one wins.
+func snapshotChannelEnd(jobEnd uint64, bounds map[string]uint64, source snapshotChannelSource) (uint64, error) {
 	if len(bounds) == 0 {
 		return jobEnd, nil
 	}
@@ -218,16 +252,7 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	snapshotDeleteBudget int64, shared *binlog.SnapshotL0Deletes,
 	encryption binlog.SourceEncryption, channelEndTS map[string]uint64,
 ) (Reader, error) {
-	source := importFile.GetSnapshotSource()
-	if shared != nil {
-		// Adapt only the validated reader view. Never expand L0 paths back
-		// into a segment or mutate the persisted descriptor: the reader must
-		// borrow the task's prepared bitmap instead of opening L0 again.
-		source = proto.Clone(source).(*internalpb.SnapshotImportSource)
-		source.Version -= 4
-		source.SourceChannel = ""
-		source.SourcePartitionId = 0
-	}
+	source := readerSource(importFile.GetSnapshotSource(), shared != nil)
 	if IsBackup(options) {
 		tsStart, tsEnd, err := ParseTimeRange(options)
 		if err != nil {
