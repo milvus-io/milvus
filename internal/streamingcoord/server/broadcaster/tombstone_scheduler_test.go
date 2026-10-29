@@ -279,10 +279,10 @@ func TestTombstoneGCFailuresAndLegacyPositions(t *testing.T) {
 	for _, target := range []struct {
 		receiver any
 		method   string
-	}{{coord, "ListPChannel"}, {node, "GetConsumeCheckpoint"}, {coord, "SaveBroadcastTask"}} {
+	}{{coord, "ListPChannel"}, {node, "GetConsumeCheckpoint"}, {coord, "RemoveBroadcastTasks"}} {
 		builder := mockey.Mock(mockey.GetMethod(target.receiver, target.method))
-		if target.method == "SaveBroadcastTask" {
-			builder.To(func(ctx context.Context, _ uint64, _ *streamingpb.BroadcastTask) error {
+		if target.method == "RemoveBroadcastTasks" {
+			builder.To(func(ctx context.Context, _ []uint64) error {
 				s.notifier.Cancel()
 				return ctx.Err()
 			})
@@ -304,9 +304,40 @@ func TestTombstoneGCFailuresAndLegacyPositions(t *testing.T) {
 	s.triggerGCTombstone()
 	require.Len(t, s.tombstones, 1)
 	require.Equal(t, uint64(2), s.tombstones[0].broadcastID, "legacy position is retained")
-	dropped, err := bm.DropTombstone(t.Context(), 99, nil)
+	require.NoError(t, bm.DropTombstones(t.Context(), []uint64{99}))
+}
+
+func TestTombstoneGCDeletesMoreThanOneTransaction(t *testing.T) {
+	coord, node := setupTombstoneGC(t)
+	limit := &paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum
+	old := limit.SwapTempValue("2")
+	t.Cleanup(func() { limit.SwapTempValue(old) })
+	ids := []uint64{1, 2, 3, 4, 5}
+	for _, id := range ids {
+		require.NoError(t, coord.SaveBroadcastTask(t.Context(), id, gcTestTombstone(id, []string{"p0_vcchan"}, false)))
+	}
+	saveGCCheckpoint(t, node, "p0", 1000, 1)
+	bc, err := RecoverBroadcaster(t.Context())
 	require.NoError(t, err)
-	require.True(t, dropped)
+	defer bc.Close()
+	bm := bc.(*broadcastTaskManager)
+	var tasks []*broadcastTask
+	for _, id := range ids {
+		task, ok := bm.getBroadcastTaskByID(id)
+		require.True(t, ok)
+		tasks = append(tasks, task)
+	}
+	s := gcTestScheduler(bm, ids...)
+	s.triggerGCTombstone()
+	require.Empty(t, s.tombstones)
+	persisted, err := coord.ListBroadcastTask(t.Context())
+	require.NoError(t, err)
+	require.Empty(t, persisted)
+	for i, task := range tasks {
+		_, ok := bm.getBroadcastTaskByID(ids[i])
+		require.False(t, ok)
+		require.Equal(t, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE, task.State())
+	}
 }
 
 func TestTombstoneGCReplayAndRecovery(t *testing.T) {

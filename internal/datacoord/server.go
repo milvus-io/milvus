@@ -145,6 +145,7 @@ type Server struct {
 
 	flushCh         chan UniqueID
 	notifyIndexChan chan UniqueID
+	notifyStatsChan chan UniqueID
 	factory         dependency.Factory
 
 	session          sessionutil.SessionInterface
@@ -166,6 +167,7 @@ type Server struct {
 	indexInspector                   *indexInspector
 	analyzeInspector                 *analyzeInspector
 	talonPrewarmInspector            *TalonPrewarmInspector
+	segmentChangeInspector           *segmentChangeInspector
 	externalCollectionRefreshManager ExternalCollectionRefreshManager
 	globalScheduler                  task.GlobalScheduler
 
@@ -237,6 +239,7 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		factory:             factory,
 		flushCh:             make(chan UniqueID, 1024),
 		notifyIndexChan:     make(chan UniqueID, 1024),
+		notifyStatsChan:     make(chan UniqueID, 1024),
 		dataNodeCreator:     defaultDataNodeCreatorFunc,
 		importJobLock:       lock.NewKeyLock[int64](),
 		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
@@ -360,6 +363,9 @@ func (s *Server) initDataCoord() (initErr error) {
 
 	s.initStatsInspector()
 	mlog.Info(s.ctx, "init statsJobManager done")
+
+	s.initSegmentChangeInspector()
+	mlog.Info(s.ctx, "init segment change inspector done")
 
 	s.initExternalCollectionInspector(storageCli)
 	mlog.Info(s.ctx, "init external collection inspector done")
@@ -769,7 +775,13 @@ func (s *Server) initIndexInspector(storageCli storage.ChunkManager) {
 
 func (s *Server) initStatsInspector() {
 	if s.statsInspector == nil {
-		s.statsInspector = newStatsInspector(s.ctx, s.meta, s.globalScheduler, s.allocator, s.handler, s.compactionInspector, s.indexEngineVersionManager)
+		s.statsInspector = newStatsInspector(s.ctx, s.notifyStatsChan, s.meta, s.globalScheduler, s.allocator, s.handler, s.compactionInspector, s.indexEngineVersionManager)
+	}
+}
+
+func (s *Server) initSegmentChangeInspector() {
+	if s.segmentChangeInspector == nil {
+		s.segmentChangeInspector = newSegmentChangeInspector(s.ctx, s.meta, s.allocator)
 	}
 }
 
@@ -777,7 +789,7 @@ func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager
 	// Initialize Manager (handles job submission, query, and internal inspector/checker)
 	if s.externalCollectionRefreshManager == nil {
 		s.externalCollectionRefreshManager = NewExternalCollectionRefreshManager(
-			s.ctx, s.meta, s.globalScheduler, s.allocator, s.meta.externalCollectionRefreshMeta, s.cluster2, s.handler.GetCollection, s.updateExternalSchemaViaWAL, storageCli)
+			s.ctx, s.meta, s.globalScheduler, s.allocator, s.meta.externalCollectionRefreshMeta, s.cluster2, s.handler.GetCollection, s.updateExternalSchemaViaWAL, storageCli, s.notifyIndexChan)
 	}
 }
 
@@ -874,6 +886,7 @@ func (s *Server) startTaskScheduler() {
 	s.statsInspector.Start()
 	s.indexInspector.Start()
 	s.analyzeInspector.Start()
+	s.segmentChangeInspector.Start()
 	// Note: externalCollectionInspector.Start() is called in startServerLoop as a goroutine
 	s.startCollectMetaMetrics(s.serverLoopCtx)
 }
@@ -1072,16 +1085,14 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 		return merr.WrapErrSegmentNotFound(segmentID, "segment not found, might be a faked segment, ignore post flush")
 	}
 
-	if enableSortCompaction() {
+	collection := s.meta.GetCollection(segment.GetCollectionID())
+	if enableSortCompaction() && (collection == nil || !collection.IsExternal()) {
 		select {
 		case getStatsTaskChSingleton() <- segmentID:
 		default:
 		}
 	} else {
-		select {
-		case getBuildIndexChSingleton() <- segmentID:
-		default:
-		}
+		notifySegmentIndexBuild(segmentID)
 	}
 
 	// Insert / delta counts come from Statistics. Stats array is iterated
@@ -1195,6 +1206,9 @@ func (s *Server) Stop() error {
 
 	s.statsInspector.Stop()
 	mlog.Info(s.ctx, "datacoord stats inspector stopped")
+
+	s.segmentChangeInspector.Stop()
+	mlog.Info(s.ctx, "datacoord segment change inspector stopped")
 
 	s.indexInspector.Stop()
 	mlog.Info(s.ctx, "datacoord index inspector stopped")

@@ -359,6 +359,7 @@ class SealedDataGetter : public DataGetter<OutputType> {
             }
         }
         if (from_data_) {
+            column_->Prepare(op_ctx_);
             auto id_offset_pair = column_->GetChunkIDByOffset(idx);
             auto chunk_id = id_offset_pair.first;
             auto inner_offset = id_offset_pair.second;
@@ -474,7 +475,8 @@ class SealedDataGetter : public DataGetter<OutputType> {
             requirement.json_path = json_path.value();
         }
 
-        const auto capabilities = segment_.IndexCapability(field_id_);
+        const auto capabilities =
+            segment_.ResolveIndexCapability(op_ctx_, field_id_);
         const auto decision = DetermineExecPath(requirement, capabilities);
         if (!decision.key.has_value()) {
             return false;

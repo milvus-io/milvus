@@ -33,6 +33,7 @@
 #include "index/contracts/query/IJsonIndexReader.h"
 #include "index/contracts/query/INgramReader.h"
 #include "index/contracts/query/INullReader.h"
+#include "index/contracts/query/IPatternMatchReader.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/scalar/json/JsonProjectedIndexLoad.h"
 #include "indexbuilder/BuildSession.h"
@@ -128,6 +129,38 @@ class ScalarBuildSessionTest : public ::testing::Test {
 
     std::shared_ptr<storage::LocalDirectory> root_;
 };
+
+TEST_F(ScalarBuildSessionTest, LowVersionFmPublishesPackedArtifact) {
+    const std::vector<std::string> values{"alpha", "beta", ""};
+    constexpr uint8_t validity = 0b00000011;
+    auto info = Info(DataType::VARCHAR, index::FMINDEX_INDEX_TYPE);
+    info.set_current_scalar_index_version(0);
+    info.set_num_rows(values.size());
+    info.mutable_field_schema()->set_nullable(true);
+    auto prepared = AdaptBuildIndexInfo(info, BuildPurpose::ScalarIndex);
+    ASSERT_EQ(prepared.request.output.generation, storage::Generation::V3);
+    auto data = storage::CreateFieldData(
+        DataType::VARCHAR, DataType::NONE, true, 1, values.size());
+    data->FillFieldData(values.data(), &validity, values.size(), 0);
+    info.add_insert_files(WriteBinlog(prepared.file_manager_context, data));
+    auto reader =
+        BuildAndLoad(AdaptBuildIndexInfo(info, BuildPurpose::ScalarIndex));
+    ASSERT_NE(reader, nullptr);
+    const auto* patterns =
+        dynamic_cast<const index::IPatternMatchReader*>(reader.get());
+    const auto* nulls = dynamic_cast<const index::INullReader*>(reader.get());
+    ASSERT_NE(patterns, nullptr);
+    ASSERT_NE(nulls, nullptr);
+    const auto hits =
+        patterns->PatternMatch("alp", index::PatternOp::PrefixMatch);
+    ASSERT_EQ(hits.size(), values.size());
+    EXPECT_EQ(hits.count(), 1);
+    EXPECT_TRUE(hits[0]);
+    const auto is_null = nulls->IsNull();
+    ASSERT_EQ(is_null.size(), values.size());
+    EXPECT_EQ(is_null.count(), 1);
+    EXPECT_TRUE(is_null[2]);
+}
 
 template <typename T>
 class ScalarMissingBinlogPrefixTest : public ScalarBuildSessionTest {};

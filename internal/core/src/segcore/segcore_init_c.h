@@ -60,6 +60,10 @@ SegcoreSetNprobe(const int64_t);
 CStatus
 SegcoreSetDenseVectorInterminIndexType(const char*);
 
+CStatus
+SegcoreSetSparseInterimIndexAlgorithms(const char* ip_algo,
+                                       const char* bm25_algo);
+
 void
 SegcoreSetSubDim(const int64_t);
 
@@ -114,6 +118,9 @@ SegcoreSetVisibilityFilterEnabled(const bool value);
 
 void
 SegcoreSetPreferFieldDataWhenIndexHasRawData(const bool value);
+
+void
+SegcoreSetLazyIndexSlotEnabled(const bool value);
 
 void
 SegcoreSetLazyColumnGroupEnabled(const bool value);

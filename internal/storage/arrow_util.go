@@ -450,6 +450,8 @@ type RecordBuilder struct {
 	builders    []array.Builder
 	defaults    []appendValueDefault
 	allocator   *recordBuilderAllocator
+	// Append reuses this slice and clears its borrowed columns before returning.
+	columns []arrow.Array
 
 	nRows int
 	size  uint64
@@ -497,20 +499,40 @@ func (b *RecordBuilder) prepareAppendDefaults() error {
 }
 
 func (b *RecordBuilder) Append(rec Record, start, end int) error {
+	if start >= end {
+		return b.appendColumns(nil, start, end)
+	}
+	if b.columns == nil {
+		b.columns = make([]arrow.Array, len(b.fields))
+	}
+	defer clear(b.columns)
+	for i, field := range b.fields {
+		b.columns[i] = rec.Column(field.GetFieldID())
+	}
+	return b.appendColumns(b.columns, start, end)
+}
+
+// appendColumns appends rows from source columns already resolved in builder
+// field order. MergeSort keeps these columns with each reader's current record
+// so the per-row output loop does not repeat Record.Column lookups.
+func (b *RecordBuilder) appendColumns(columns []arrow.Array, start, end int) error {
 	if err := b.prepareAppendDefaults(); err != nil {
 		return err
 	}
 	for offset := start; offset < end; offset++ {
 		for i, builder := range b.builders {
 			f := b.fields[i]
-			col := rec.Column(f.FieldID)
+			col := columns[i]
 			// TEXT may be decoded UTF8 or a binary LOB reference. Preserve the
 			// reader's representation instead of treating decoded text as a ref.
+			// Reader/writer schemas must agree on one non-null representation
+			// per TEXT field throughout a compaction task. Only nulls may cross
+			// representations; appendValueAt rejects a non-null mismatch.
 			if f.GetDataType() == schemapb.DataType_Text &&
 				(col.DataType().ID() == arrow.STRING || col.DataType().ID() == arrow.BINARY) &&
 				col.DataType().ID() != builder.Type().ID() {
 				if builder.NullN() == builder.Len() {
-					// Missing TEXT fields can have been filled with binary nulls.
+					// Missing TEXT fields may use a different null representation.
 					nulls := builder.Len()
 					builder.Release()
 					builder = array.NewBuilder(b.allocator, col.DataType())

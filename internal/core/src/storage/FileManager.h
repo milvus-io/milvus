@@ -341,6 +341,13 @@ class FileManagerImpl : public milvus::FileManager {
     virtual std::string
     GetRemoteIndexObjectPrefix() const {
         boost::filesystem::path prefix = rcm_->GetRootPath();
+        if (index_meta_.index_store_path_version ==
+            ::milvus::proto::index::IndexStorePathVersion::
+                INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED) {
+            AssertInfo(!index_meta_.index_file_prefix.empty(),
+                       "segment-rooted index requires an artifact prefix");
+            return index_meta_.index_file_prefix;
+        }
         if (index_meta_.index_store_path_version >=
             ::milvus::proto::index::IndexStorePathVersion::
                 INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED) {

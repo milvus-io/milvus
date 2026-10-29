@@ -209,6 +209,7 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 		return nil, errors.Wrap(err, "when building interceptor params")
 	}
 	resources.param = param
+	param.WriteAheadBuffer.SetPressureController(roWAL.MuxRateLimitObserverRegistryImpl)
 	queryViewCatalog := resource.Resource().StreamingNodeCatalog()
 	persistedViews, err := queryViewCatalog.ListQueryViews(ctx, opt.Channel.Name)
 	if err != nil {
@@ -221,6 +222,7 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 		cp,
 		param.LastTimeTickMessage,
 		recovery.WithRecoveryTailRateLimiter(roWAL.RecoveryStorage),
+		recovery.WithConsumedThrough(param.WriteAheadBuffer.ReleaseThrough),
 		recovery.WithRecoveryFatalHandler(roWAL.markUnavailable),
 		recovery.WithQueryViewRecovery(func(manager *vchannel.PChannelRecoveryManager) {
 			resources.queryViewHandler = snview.RecoverPChannelSNQueryViewHandler(roWAL.availableCtx, opt.Channel.Name, queryViewCatalog, manager, persistedViews)

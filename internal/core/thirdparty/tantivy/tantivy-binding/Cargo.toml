@@ -40,6 +40,10 @@ lazy_static = "1.4.0"
 serde_json = "1.0.128"
 jieba-rs = "0.6.8"
 regex = "1.11.1"
+# Match regex's default engines without enabling the full DFA compiler.
+regex-automata = { version = "0.4.10", default-features = false, features = [
+    "std", "meta", "unicode", "perf", "hybrid", "dfa-onepass", "nfa-backtrack",
+] }
 either = "1.13.0"
 icu_segmenter = "2.0.0"
 whatlang = "0.16.4"
@@ -79,6 +83,10 @@ tonic-build = "0.13.0"
 
 [[bench]]
 name = "analyzer_bench"
+harness = false
+
+[[bench]]
+name = "fixed_regex_filters"
 harness = false
 
 [lib]

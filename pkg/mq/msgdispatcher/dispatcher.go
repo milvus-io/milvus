@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -78,6 +79,9 @@ type Dispatcher struct {
 	targets *typeutil.ConcurrentMap[string, *target]
 
 	stream msgstream.MsgStream
+
+	// pendingPack is retained across pause/resume until decoding finishes.
+	pendingPack *msgstream.ConsumeMsgPack
 
 	includeSkipWhenSplit bool
 }
@@ -237,83 +241,111 @@ func (d *Dispatcher) work() {
 	log := mlog.With(mlog.FieldPChannel(d.pchannel), mlog.Int64("id", d.ID()))
 	log.Info(d.ctx, "begin to work")
 	defer d.wg.Done()
+	backoff := 100 * time.Millisecond
 	for {
-		select {
-		case <-d.done:
-			log.Info(d.ctx, "stop working")
-			return
-		case pack := <-d.stream.Chan():
-			if pack == nil || len(pack.EndPositions) != 1 {
-				log.Error(d.ctx, "consumed invalid msgPack", mlog.Any("pack", pack))
-				continue
+		pack := d.pendingPack
+		if pack == nil {
+			select {
+			case <-d.done:
+				log.Info(d.ctx, "stop working")
+				return
+			case pack = <-d.stream.Chan():
+				d.pendingPack = pack
 			}
-			d.curTs.Store(pack.EndPositions[0].GetTimestamp())
-
-			targetPacks := d.groupAndParseMsgs(pack, d.stream.GetUnmarshalDispatcher())
-			for vchannel, p := range targetPacks {
-				var err error
-				t, _ := d.targets.Get(vchannel)
-				// The dispatcher seeks from the oldest target,
-				// so for each target, msg before the target position must be filtered out.
-				//
-				// From 2.6.0, every message has a unique timetick, so we can filter out the msg by < but not <=.
-				if (d.includeSkipWhenSplit && p.EndTs < t.pos.GetTimestamp()) ||
-					(!d.includeSkipWhenSplit && p.EndTs <= t.pos.GetTimestamp()) {
-					log.Info(d.ctx, "skip msg",
+		}
+		if pack == nil || len(pack.EndPositions) != 1 {
+			log.Error(d.ctx, "consumed invalid msgPack", mlog.Any("pack", pack))
+			d.pendingPack = nil
+			continue
+		}
+		targetPacks, err := d.groupAndParseMsgs(pack, d.stream.GetUnmarshalDispatcher())
+		if message.IsRetryableCipherError(err) {
+			log.RatedWarn(d.ctx, 1.0, "message decryption failed, will retry dispatch", mlog.Err(err), mlog.Duration("backoff", backoff))
+			timer := time.NewTimer(backoff)
+			select {
+			case <-d.done:
+				timer.Stop()
+				return // Retain the pack and curTs; resume filters against the updated targets.
+			case <-timer.C:
+			}
+			backoff = min(backoff*2, 3*time.Second)
+			continue
+		}
+		backoff = 100 * time.Millisecond
+		d.pendingPack = nil
+		if err != nil {
+			log.Warn(d.ctx, "failed to decode streaming msgPack", mlog.Err(err))
+			continue
+		}
+		d.curTs.Store(pack.EndPositions[0].GetTimestamp())
+		for vchannel, p := range targetPacks {
+			var err error
+			t, _ := d.targets.Get(vchannel)
+			// The dispatcher seeks from the oldest target,
+			// so for each target, msg before the target position must be filtered out.
+			//
+			// From 2.6.0, every message has a unique timetick, so we can filter out the msg by < but not <=.
+			if (d.includeSkipWhenSplit && p.EndTs < t.pos.GetTimestamp()) ||
+				(!d.includeSkipWhenSplit && p.EndTs <= t.pos.GetTimestamp()) {
+				log.Info(d.ctx, "skip msg",
+					mlog.FieldVChannel(vchannel),
+					mlog.Int("msgCount", len(p.Msgs)),
+					mlog.Uint64("packBeginTs", p.BeginTs),
+					mlog.Uint64("packEndTs", p.EndTs),
+					mlog.Uint64("posTs", t.pos.GetTimestamp()),
+				)
+				for _, msg := range p.Msgs {
+					log.Debug(d.ctx, "skip msg info",
 						mlog.FieldVChannel(vchannel),
-						mlog.Int("msgCount", len(p.Msgs)),
+						mlog.String("msgType", msg.Type().String()),
+						mlog.Uint64("msgBeginTs", msg.BeginTs()),
+						mlog.Uint64("msgEndTs", msg.EndTs()),
 						mlog.Uint64("packBeginTs", p.BeginTs),
 						mlog.Uint64("packEndTs", p.EndTs),
 						mlog.Uint64("posTs", t.pos.GetTimestamp()),
 					)
-					for _, msg := range p.Msgs {
-						log.Debug(d.ctx, "skip msg info",
-							mlog.FieldVChannel(vchannel),
-							mlog.String("msgType", msg.Type().String()),
-							mlog.Uint64("msgBeginTs", msg.BeginTs()),
-							mlog.Uint64("msgEndTs", msg.EndTs()),
-							mlog.Uint64("packBeginTs", p.BeginTs),
-							mlog.Uint64("packEndTs", p.EndTs),
-							mlog.Uint64("posTs", t.pos.GetTimestamp()),
-						)
-					}
-					continue
 				}
-				if d.targets.Len() > 1 {
-					// for dispatcher with multiple targets, split target if err occurs
+				continue
+			}
+			if d.targets.Len() > 1 {
+				// for dispatcher with multiple targets, split target if err occurs
+				err = t.send(p)
+			} else {
+				// for dispatcher with only one target,
+				// keep retrying if err occurs, unless it paused or terminated.
+				for {
 					err = t.send(p)
-				} else {
-					// for dispatcher with only one target,
-					// keep retrying if err occurs, unless it paused or terminated.
-					for {
-						err = t.send(p)
-						if err == nil || !funcutil.CheckCtxValid(d.ctx) {
-							break
-						}
+					if err == nil || !funcutil.CheckCtxValid(d.ctx) {
+						break
 					}
 				}
-				if err != nil {
-					t.pos = typeutil.Clone(pack.StartPositions[0])
-					// replace the pChannel with vChannel
-					t.pos.ChannelName = t.vchannel
-					d.targets.GetAndRemove(vchannel)
-					log.Warn(d.ctx, "lag target", mlog.Err(err))
-				}
 			}
+			if err != nil {
+				t.pos = typeutil.Clone(pack.StartPositions[0])
+				// replace the pChannel with vChannel
+				t.pos.ChannelName = t.vchannel
+				d.targets.GetAndRemove(vchannel)
+				log.Warn(d.ctx, "lag target", mlog.Err(err))
+			}
+		}
 
-			if !d.pullbackDone && pack.EndPositions[0].GetTimestamp() >= d.pullbackEndTs {
-				d.pullbackDoneNotifier.Finish(struct{}{})
-				log.Info(d.ctx, "dispatcher pullback done",
-					mlog.Uint64("pullbackEndTs", d.pullbackEndTs),
-					mlog.Time("pullbackTime", tsoutil.PhysicalTime(d.pullbackEndTs)),
-				)
-				d.pullbackDone = true
-			}
+		if !d.pullbackDone && pack.EndPositions[0].GetTimestamp() >= d.pullbackEndTs {
+			d.pullbackDoneNotifier.Finish(struct{}{})
+			log.Info(d.ctx, "dispatcher pullback done",
+				mlog.Uint64("pullbackEndTs", d.pullbackEndTs),
+				mlog.Time("pullbackTime", tsoutil.PhysicalTime(d.pullbackEndTs)),
+			)
+			d.pullbackDone = true
 		}
 	}
 }
 
-func (d *Dispatcher) groupAndParseMsgs(pack *msgstream.ConsumeMsgPack, unmarshalDispatcher msgstream.UnmarshalDispatcher) map[string]*MsgPack {
+// deferredUnmarshaler is implemented by streaming DML kept encrypted by the adaptor.
+type deferredUnmarshaler interface {
+	TryUnmarshal() (msgstream.TsMsg, error)
+}
+
+func (d *Dispatcher) groupAndParseMsgs(pack *msgstream.ConsumeMsgPack, unmarshalDispatcher msgstream.UnmarshalDispatcher) (map[string]*MsgPack, error) {
 	// init packs for all targets, even though there's no msg in pack,
 	// but we still need to dispatch time ticks to the targets.
 	targetPacks := make(map[string]*MsgPack)
@@ -364,13 +396,23 @@ func (d *Dispatcher) groupAndParseMsgs(pack *msgstream.ConsumeMsgPack, unmarshal
 			continue
 		}
 		if _, ok := targetPacks[vchannel]; ok {
-			tsMsg, err := msg.Unmarshal(unmarshalDispatcher)
-			if err != nil {
-				mlog.Warn(d.ctx, "unmarshl message failed", mlog.Err(err))
-				continue
+			var tsMsg msgstream.TsMsg
+			var err error
+			if deferred, ok := msg.(deferredUnmarshaler); ok {
+				tsMsg, err = deferred.TryUnmarshal()
+				if err != nil {
+					// Decode the whole transaction before dispatching any of its messages.
+					return nil, err
+				}
+			} else {
+				tsMsg, err = msg.Unmarshal(unmarshalDispatcher)
+				if err != nil {
+					mlog.Warn(d.ctx, "unmarshl message failed", mlog.Err(err))
+					continue
+				}
 			}
 			targetPacks[vchannel].Msgs = append(targetPacks[vchannel].Msgs, tsMsg)
 		}
 	}
-	return targetPacks
+	return targetPacks, nil
 }

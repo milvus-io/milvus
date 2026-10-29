@@ -14,6 +14,12 @@ L1 and required L0 output has completed locally. The collection CChannel copy ha
 no data to flush. Flush responses and flush-state RPCs retain their contracts.
 No timestamp comparison across PChannels or clusters is used.
 
+FlushAll's response contains per-PChannel `ImmutableMessage` copies with `_ur`
+removed, allowing Backup to explicitly replicate them for secondary position
+alignment. Their MessageID, TimeTick and LastConfirmedMessageID are unchanged.
+Only the response copies lose the marker; the persisted local WAL broadcast
+retains `_ur` and ordinary CDC continues to skip it.
+
 ## Concurrent collection drop
 
 DataCoord validates the collection before persisting a local ManualFlush. RootCoord

@@ -500,6 +500,8 @@ func TestGetPendingSchemaFileResources(t *testing.T) {
 			3: newTask(3, alterCollectionMsg(200, nil), streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING),
 			4: newTask(4, alterCollectionMsg(300, []int64{40}), streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE),
 			5: newTask(5, createNewBroadcastMsg([]string{"v1"}), streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING),
+			// A tombstone being dropped is marked DONE until it leaves the manager.
+			6: newTask(6, createCollectionMsg(400, []int64{50}), streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE),
 		},
 	}
 

@@ -1692,8 +1692,8 @@ SortBinlogPaths(std::vector<std::string>& paths) {
 // keeps #50088's partial download: only the row groups covering
 // [offset, offset + max_rows) are read, and the visit ends once that many rows
 // have been handed to the visitor. `max_rows == 0` visits every row group.
-static VisitOutcome
-VisitFieldDataFromStorageV2Paged(
+VisitOutcome
+detail::VisitFieldDataFromStorageV2Paged(
     const std::vector<std::vector<std::string>>& remote_files,
     int64_t field_id,
     DataType data_type,
@@ -1702,13 +1702,20 @@ VisitFieldDataFromStorageV2Paged(
     milvus_storage::ArrowFileSystemPtr fs,
     const FieldDataVisitor& visitor,
     size_t max_rows,
-    size_t offset) {
+    size_t offset,
+    size_t window_bytes) {
     if (!(remote_files.size() > 0)) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "[StorageV2] remote files size is 0");
     }
     AssertInfo(static_cast<bool>(visitor),
                "[StorageV2] field-data visitor is empty");
+    AssertInfo(window_bytes > 0,
+               "[StorageV2] read window byte limit must be positive");
+    const auto slice_size = FILE_SLICE_SIZE.load();
+    AssertInfo(slice_size > 0, "[StorageV2] file slice size must be positive");
+    const auto parallel_degree =
+        std::max<uint64_t>(1, DEFAULT_FIELD_MAX_MEMORY_LIMIT / slice_size);
 
     // remote files might not followed the sequence of column group id,
     // so we need to put into map<column_group_id, remote_chunk_files>
@@ -1856,9 +1863,9 @@ VisitFieldDataFromStorageV2Paged(
             }
         }
 
-        // Preserve the source field's nullability while decoding each row
-        // group. The visitor intentionally trades the old all-row-group
-        // parallel window for a genuine row-group early-stop boundary.
+        // Preserve nullability while the bounded parallel loader reads the
+        // selected row groups. LoadWithStrategy publishes blocks in row-group
+        // order, regardless of the order in which its worker tasks finish.
         auto field_schema = reader->schema()->field(col_offset)->Copy();
         auto status = reader->Close();
         if (!status.ok()) {
@@ -1869,67 +1876,107 @@ VisitFieldDataFromStorageV2Paged(
                           " with error: " + status.ToString());
         }
 
-        for (const auto row_group : selected_row_groups) {
-            // One block produces one ArrowDataWrapper followed by the channel
-            // close marker. Capacity two lets the producer finish before this
-            // thread consumes either item, avoiding producer/consumer
-            // deadlock and ensuring no task outlives captured state.
-            auto channel = std::make_shared<ArrowReaderChannel>(2);
-            auto load_future = pool.Submit([channel,
-                                            column_group_file,
-                                            fs,
-                                            row_group]() mutable {
-                auto strategy =
-                    std::make_unique<segcore::ParallelDegreeSplitStrategy>(1);
-                LoadWithStrategy(std::vector<std::string>{column_group_file},
-                                 channel,
-                                 DEFAULT_FIELD_MAX_MEMORY_LIMIT,
-                                 std::move(strategy),
-                                 std::vector<std::vector<int64_t>>{{row_group}},
-                                 fs,
-                                 nullptr,
-                                 milvus::proto::common::LoadPriority::HIGH);
-            });
-
-            // LoadWithStrategy has published both the single wrapper and the
-            // close marker before get() returns. Any producer error is
-            // rethrown here before captured objects can leave scope.
-            load_future.get();
-
-            std::shared_ptr<milvus::ArrowDataWrapper> r;
-            while (channel->pop(r)) {
-                size_t num_rows = 0;
-                std::vector<std::shared_ptr<arrow::ChunkedArray>>
-                    chunked_arrays;
-                for (const auto& table_info : r->arrow_tables) {
-                    num_rows += table_info.table->num_rows();
-                    chunked_arrays.push_back(
-                        table_info.table->column(col_offset));
+        for (size_t begin = 0; begin < selected_row_groups.size();) {
+            size_t end = begin;
+            size_t used_bytes = 0;
+            while (end < selected_row_groups.size()) {
+                const auto group_bytes =
+                    row_group_meta_data_vector.Get(selected_row_groups[end])
+                        .memory_size();
+                if (end > begin && (group_bytes == 0 ||
+                                    group_bytes > window_bytes - used_bytes)) {
+                    break;
                 }
-                auto field_data =
-                    storage::CreateFieldData(data_type,
-                                             element_type,
-                                             field_schema->nullable(),
-                                             dim,
-                                             num_rows);
-                for (const auto& chunked_array : chunked_arrays) {
-                    field_data->FillFieldData(chunked_array);
+                ++end;
+                // A row group is indivisible. Unknown (zero) sizes are also
+                // isolated, so they cannot make an entire file appear free.
+                if (group_bytes == 0 || group_bytes >= window_bytes) {
+                    break;
                 }
-                if (visitor(std::move(field_data)) == VisitControl::Stop) {
-                    return VisitOutcome::Stopped;
-                }
-                total_num_rows += num_rows;
-                if (max_rows > 0 && total_num_rows >= max_rows) {
-                    // The page is full. The load task for this row group has
-                    // already been joined above, so returning here leaves
-                    // nothing running behind us.
-                    LOG_DEBUG(
-                        "[StorageV2] max_rows: {} reached, total rows: {}",
-                        max_rows,
-                        total_num_rows);
-                    return VisitOutcome::Exhausted;
-                }
+                used_bytes += group_bytes;
             }
+            std::vector<int64_t> row_groups(selected_row_groups.begin() + begin,
+                                            selected_row_groups.begin() + end);
+            auto channel =
+                std::make_shared<ArrowReaderChannel>(parallel_degree);
+            auto load_future =
+                pool.Submit([channel,
+                             column_group_file,
+                             fs,
+                             parallel_degree,
+                             row_groups = std::move(row_groups)]() mutable {
+                    auto strategy =
+                        std::make_unique<segcore::ParallelDegreeSplitStrategy>(
+                            parallel_degree);
+                    std::vector<std::vector<int64_t>> row_group_lists;
+                    row_group_lists.emplace_back(std::move(row_groups));
+                    LoadWithStrategy(
+                        std::vector<std::string>{column_group_file},
+                        channel,
+                        DEFAULT_FIELD_MAX_MEMORY_LIMIT,
+                        std::move(strategy),
+                        row_group_lists,
+                        fs,
+                        nullptr,
+                        milvus::proto::common::LoadPriority::HIGH);
+                });
+
+            bool channel_exhausted = false;
+            auto drain = [&] {
+                // The producer can be blocked pushing into the bounded channel,
+                // including its close marker. Consume it before joining (#46958).
+                if (!channel_exhausted) {
+                    std::shared_ptr<milvus::ArrowDataWrapper> pending;
+                    while (channel->pop(pending)) {
+                    }
+                    channel_exhausted = true;
+                }
+                DrainFuture(load_future);
+            };
+            try {
+                std::shared_ptr<milvus::ArrowDataWrapper> r;
+                while (channel->pop(r)) {
+                    size_t num_rows = 0;
+                    std::vector<std::shared_ptr<arrow::ChunkedArray>>
+                        chunked_arrays;
+                    chunked_arrays.reserve(r->arrow_tables.size());
+                    for (const auto& table_info : r->arrow_tables) {
+                        num_rows += table_info.table->num_rows();
+                        chunked_arrays.push_back(
+                            table_info.table->column(col_offset));
+                    }
+                    auto field_data =
+                        storage::CreateFieldData(data_type,
+                                                 element_type,
+                                                 field_schema->nullable(),
+                                                 dim,
+                                                 num_rows);
+                    for (const auto& chunked_array : chunked_arrays) {
+                        field_data->FillFieldData(chunked_array);
+                    }
+                    if (visitor(std::move(field_data)) == VisitControl::Stop) {
+                        drain();
+                        return VisitOutcome::Stopped;
+                    }
+                    total_num_rows += num_rows;
+                    if (max_rows > 0 && total_num_rows >= max_rows) {
+                        LOG_DEBUG(
+                            "[StorageV2] max_rows: {} reached, total rows: {}",
+                            max_rows,
+                            total_num_rows);
+                        drain();
+                        return VisitOutcome::Exhausted;
+                    }
+                }
+                channel_exhausted = true;
+                load_future.get();
+            } catch (...) {
+                drain();
+                throw;
+            }
+            // No prefetch: the current producer and every reader it owns
+            // have finished before the next window can be submitted.
+            begin = end;
         }
     }
     return VisitOutcome::Exhausted;
@@ -1944,15 +1991,15 @@ VisitFieldDataFromStorageV2(
     int64_t dim,
     milvus_storage::ArrowFileSystemPtr fs,
     const FieldDataVisitor& visitor) {
-    return VisitFieldDataFromStorageV2Paged(remote_files,
-                                            field_id,
-                                            data_type,
-                                            element_type,
-                                            dim,
-                                            std::move(fs),
-                                            visitor,
-                                            /*max_rows=*/0,
-                                            /*offset=*/0);
+    return detail::VisitFieldDataFromStorageV2Paged(remote_files,
+                                                    field_id,
+                                                    data_type,
+                                                    element_type,
+                                                    dim,
+                                                    std::move(fs),
+                                                    visitor,
+                                                    /*max_rows=*/0,
+                                                    /*offset=*/0);
 }
 
 std::vector<FieldDataPtr>
@@ -1965,7 +2012,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            size_t max_rows /*=0*/,
                            size_t offset /*=0*/) {
     std::vector<FieldDataPtr> field_data_list;
-    const auto outcome = VisitFieldDataFromStorageV2Paged(
+    const auto outcome = detail::VisitFieldDataFromStorageV2Paged(
         remote_files,
         field_id,
         data_type,
@@ -2147,13 +2194,9 @@ VisitFieldDataFromManifestPaged(
     //
     // The decode tasks go to the LOW pool, not MIDDLE. Every production
     // caller of this function is an index build (DiskFileManagerImpl /
-    // MemFileManagerImpl), i.e. background batch work, while MIDDLE is where
-    // ReduceHelper submits search reduce tasks and then blocks on
-    // future.get(). In standalone both share one ThreadPools singleton, so
-    // submitting a whole decode window to MIDDLE would queue CPU-bound
-    // tasks ahead of reduce and hold search latency up for the entire
-    // download phase. LOW carries only background segment loads and, being
-    // CPU_NUM-sized, still saturates the cores for this CPU-bound decode.
+    // MemFileManagerImpl), i.e. background batch work. Keep decode off the
+    // MIDDLE pool used by batch field and index loading. LOW's default
+    // CPU_NUM-sized capacity is sufficient for this CPU-bound decode.
     // Invariant this relies on: the calling thread blocks on decode futures,
     // so this function must not be called from a LOW-pool thread. Index
     // build tasks enter segcore from Go, so no caller does today.

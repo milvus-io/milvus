@@ -11,6 +11,7 @@
 package packed
 
 import (
+	"fmt"
 	"path"
 	"testing"
 
@@ -22,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -43,10 +45,13 @@ func manifestTestStorageConfig(t *testing.T) *indexpb.StorageConfig {
 
 // TestCommitManifestUpdates_EmptyShortCircuit verifies that an empty
 // ManifestUpdates returns the unchanged manifest path without opening a
-// loon transaction (and therefore without bumping the version).
+// loon transaction (and therefore without bumping the version). The path comes
+// back verbatim rather than re-marshaled, so a pointer spelled differently from
+// MarshalManifestPath keeps its exact text.
 func TestCommitManifestUpdates_EmptyShortCircuit(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
 	basePath := path.Join(cfg.RootPath, "commit_empty_test/seg1")
+	baseManifest := fmt.Sprintf(`{"base_path":%q,"ver":%d}`, basePath, ManifestEarliest)
 
 	cases := []struct {
 		name string
@@ -58,12 +63,23 @@ func TestCommitManifestUpdates_EmptyShortCircuit(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, tc.u)
+			got, err := CommitManifestUpdates(baseManifest, cfg, tc.u)
 			require.NoError(t, err)
-			require.Equal(t, MarshalManifestPath(basePath, ManifestEarliest), got,
-				"empty updates must return the unchanged manifest path")
+			require.Equal(t, baseManifest, got,
+				"empty updates must return the unchanged manifest path verbatim")
 		})
 	}
+}
+
+// TestCommitManifestUpdates_InvalidBaseManifest verifies that a base pointer
+// that is not a manifest path is reported as corrupt metadata before any
+// transaction is opened.
+func TestCommitManifestUpdates_InvalidBaseManifest(t *testing.T) {
+	cfg := manifestTestStorageConfig(t)
+	_, err := CommitManifestUpdates("not a manifest path", cfg, &ManifestUpdates{
+		DeltaLogs: []DeltaLogEntry{{Path: "delta/1", NumEntries: 1}},
+	})
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 }
 
 // TestCommitManifestUpdates_StatsOnly exercises the stats-without-inserts
@@ -76,7 +92,7 @@ func TestCommitManifestUpdates_StatsOnly(t *testing.T) {
 	statPath := path.Join(basePath, "_stats/bloom_filter.100/1")
 	require.NoError(t, WriteFile(cfg, statPath, []byte("bloom-blob")))
 
-	got, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
+	got, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{
 		Stats: []StatEntry{{
 			Key:      "bloom_filter.100",
 			Files:    []string{statPath},
@@ -107,7 +123,7 @@ func TestStatsBinlogSizeFromManifest(t *testing.T) {
 	require.NoError(t, WriteFile(cfg, bm25Path, []byte("bm25-blob")))
 	require.NoError(t, WriteFile(cfg, textPath, []byte("text-blob")))
 
-	got, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
+	got, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{
 		Stats: []StatEntry{
 			{Key: "bloom_filter.100", Files: []string{bloomPath}, Metadata: map[string]string{"memory_size": "10"}},
 			{Key: "bm25.101", Files: []string{bm25Path}, Metadata: map[string]string{"memory_size": "20"}},
@@ -137,7 +153,7 @@ func TestCommitManifestUpdates_DeltaOnly(t *testing.T) {
 	deltaPath := path.Join(basePath, "_delta/delta-1")
 	require.NoError(t, WriteFile(cfg, deltaPath, []byte("delta-payload")))
 
-	got, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
+	got, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{
 		DeltaLogs: []DeltaLogEntry{{Path: deltaPath, NumEntries: 7}},
 	})
 	require.NoError(t, err)
@@ -191,7 +207,7 @@ func TestCommitManifestUpdates_AllSections(t *testing.T) {
 	deltaPath := path.Join(basePath, "_delta/delta-1")
 	require.NoError(t, WriteFile(cfg, deltaPath, []byte("delta-payload")))
 
-	got, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
+	got, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{
 		NewFiles:  out,
 		DeltaLogs: []DeltaLogEntry{{Path: deltaPath, NumEntries: 4}},
 		Stats: []StatEntry{{
@@ -244,7 +260,7 @@ func TestCommitManifestUpdates_AddNewColumnGroups(t *testing.T) {
 	require.True(t, cgs.addNewColumnGroups,
 		"AsNewColumnGroups should propagate into ColumnGroups handle")
 
-	got, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg,
+	got, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg,
 		&ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 	_, version, err := UnmarshalManifestPath(got)
@@ -276,7 +292,7 @@ func TestCommitManifestUpdates_AddEmptyColumnGroup(t *testing.T) {
 	out, err := w.Close()
 	require.NoError(t, err)
 	defer out.Destroy()
-	manifest, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{NewFiles: out})
+	manifest, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 
 	fields, err := GetManifestFieldIDs(manifest, cfg)
@@ -359,4 +375,214 @@ func TestFFIPackedWriter_DoubleCloseRejected(t *testing.T) {
 	_, err = w.Close()
 	require.Error(t, err, "second Close must return an error")
 	require.Contains(t, err.Error(), "already closed")
+}
+
+// TestCommitManifestUpdates_DropColumns exercises the loon_transaction_drop_column
+// branch of applyManifestUpdates: a column dropped from a manifest is removed
+// from the resulting field set, and a replace (drop + re-add of the same
+// column in one transaction) keeps the column while advancing one revision.
+func TestCommitManifestUpdates_DropColumns(t *testing.T) {
+	cfg := manifestTestStorageConfig(t)
+	basePath := path.Join(cfg.RootPath, "commit_drop_columns/seg1")
+
+	// Seed a manifest with two single-field column groups (100 and 101).
+	schema := arrow.NewSchema([]arrow.Field{
+		{
+			Name: "100", Type: arrow.PrimitiveTypes.Int64, Nullable: true,
+			Metadata: arrow.NewMetadata([]string{ArrowFieldIdMetadataKey}, []string{"100"}),
+		},
+		{
+			Name: "101", Type: arrow.PrimitiveTypes.Int64, Nullable: true,
+			Metadata: arrow.NewMetadata([]string{ArrowFieldIdMetadataKey}, []string{"101"}),
+		},
+	}, nil)
+	columnGroups := []storagecommon.ColumnGroup{
+		{Columns: []int{0}, Fields: []int64{100}, GroupID: 100},
+		{Columns: []int{1}, Fields: []int64{101}, GroupID: 101},
+	}
+	w, err := NewFFIPackedWriter(basePath, schema, columnGroups, cfg, nil)
+	require.NoError(t, err)
+	w.AsNewColumnGroups()
+	b := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+	defer b.Release()
+	b.Field(0).(*array.Int64Builder).Append(int64(1))
+	b.Field(1).(*array.Int64Builder).Append(int64(2))
+	rec := b.NewRecord()
+	defer rec.Release()
+	require.NoError(t, w.WriteRecordBatch(rec))
+	out, err := w.Close()
+	require.NoError(t, err)
+	defer out.Destroy()
+	cgs, ok := out.(*ColumnGroups)
+	require.True(t, ok, "Close should return *ColumnGroups for FFIPackedWriter")
+	seedEntries, err := cgs.ColumnGroupEntries()
+	require.NoError(t, err)
+	require.Len(t, seedEntries, 2)
+
+	base, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{NewFiles: out})
+	require.NoError(t, err)
+	fields, err := GetManifestFieldIDs(base, cfg)
+	require.NoError(t, err)
+	require.Contains(t, fields, int64(100))
+	require.Contains(t, fields, int64(101))
+
+	// Replace: drop field 100 and re-register it in one transaction (the
+	// backfill "replace" shape) -> both fields survive, version advances once.
+	replaced, err := CommitManifestUpdates(MarshalManifestPath(basePath, 1), cfg, &ManifestUpdates{
+		DropColumns: []string{"100"},
+		ColumnGroups: []ColumnGroupEntry{{
+			Columns: []string{"100"},
+			Format:  "parquet",
+			Files: []ColumnGroupFileEntry{{
+				Path:       seedEntries[0].Files[0].Path,
+				StartIndex: 0,
+				EndIndex:   1,
+			}},
+		}},
+	})
+	require.NoError(t, err)
+	_, version, err := UnmarshalManifestPath(replaced)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), version)
+	fields, err = GetManifestFieldIDs(replaced, cfg)
+	require.NoError(t, err)
+	require.Contains(t, fields, int64(100))
+	require.Contains(t, fields, int64(101))
+
+	// Drop: removing a column from the latest revision retracts it from the
+	// field set.
+	dropped, err := CommitManifestUpdates(MarshalManifestPath(basePath, 2), cfg, &ManifestUpdates{
+		DropColumns: []string{"100"},
+	})
+	require.NoError(t, err)
+	_, version, err = UnmarshalManifestPath(dropped)
+	require.NoError(t, err)
+	require.Equal(t, int64(3), version)
+	fields, err = GetManifestFieldIDs(dropped, cfg)
+	require.NoError(t, err)
+	require.NotContains(t, fields, int64(100))
+	require.Contains(t, fields, int64(101))
+}
+
+// TestCommitManifestUpdates_DropColumns_AbsentColumnAndIndexAutoDrop covers the
+// remaining DropColumns semantics: dropping a column that is absent is a no-op
+// that must not break a transaction carrying other work, and dropping a column
+// auto-drops the indexes attached to it.
+func TestCommitManifestUpdates_DropColumns_AbsentColumnAndIndexAutoDrop(t *testing.T) {
+	cfg := manifestTestStorageConfig(t)
+	basePath := path.Join(cfg.RootPath, "commit_drop_columns_extra/seg1")
+
+	// Seed a manifest with a single column group (100).
+	schema := arrow.NewSchema([]arrow.Field{
+		{
+			Name: "100", Type: arrow.PrimitiveTypes.Int64, Nullable: true,
+			Metadata: arrow.NewMetadata([]string{ArrowFieldIdMetadataKey}, []string{"100"}),
+		},
+	}, nil)
+	columnGroups := []storagecommon.ColumnGroup{
+		{Columns: []int{0}, Fields: []int64{100}, GroupID: 100},
+	}
+	w, err := NewFFIPackedWriter(basePath, schema, columnGroups, cfg, nil)
+	require.NoError(t, err)
+	w.AsNewColumnGroups()
+	b := array.NewRecordBuilder(memory.DefaultAllocator, schema)
+	defer b.Release()
+	b.Field(0).(*array.Int64Builder).Append(int64(1))
+	rec := b.NewRecord()
+	defer rec.Release()
+	require.NoError(t, w.WriteRecordBatch(rec))
+	out, err := w.Close()
+	require.NoError(t, err)
+	defer out.Destroy()
+
+	base, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{NewFiles: out})
+	require.NoError(t, err)
+	_ = base
+
+	// Dropping an absent column alongside real work is tolerated (no-op drop);
+	// the real work here is registering a brand-new column group 102.
+	got, err := CommitManifestUpdates(MarshalManifestPath(basePath, 1), cfg, &ManifestUpdates{
+		DropColumns: []string{"999"},
+		ColumnGroups: []ColumnGroupEntry{{
+			Columns: []string{"102"},
+			Format:  "parquet",
+			Files: []ColumnGroupFileEntry{{
+				Path:       "_data/102_new.parquet",
+				StartIndex: 0,
+				EndIndex:   1,
+			}},
+		}},
+	})
+	require.NoError(t, err)
+	fields, err := GetManifestFieldIDs(got, cfg)
+	require.NoError(t, err)
+	require.Contains(t, fields, int64(100))
+	require.Contains(t, fields, int64(102))
+
+	// Seed an index on column 100, then drop the column: the index must be
+	// auto-dropped with it.
+	indexed, err := CommitManifestUpdates(MarshalManifestPath(basePath, 2), cfg, &ManifestUpdates{
+		Indexes: []ManifestIndexInfo{{
+			ColumnName:                "100",
+			IndexName:                 "vec_index",
+			IndexType:                 "HNSW",
+			Path:                      "_index/vec.idx",
+			FieldID:                   100,
+			IndexID:                   10,
+			BuildID:                   500,
+			IndexVersion:              1,
+			NumRows:                   1,
+			SerializedSize:            2048,
+			MemSize:                   4096,
+			CurrentIndexVersion:       5,
+			CurrentScalarIndexVersion: 6,
+			IndexStorePathVersion:     indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+			IndexFileKeys:             []string{"0"},
+		}},
+	})
+	require.NoError(t, err)
+	indexes, err := GetManifestIndexInfos(indexed, cfg)
+	require.NoError(t, err)
+	require.Len(t, indexes, 1)
+	require.Equal(t, "100", indexes[0].ColumnName)
+
+	dropped, err := CommitManifestUpdates(MarshalManifestPath(basePath, 3), cfg, &ManifestUpdates{
+		DropColumns: []string{"100"},
+	})
+	require.NoError(t, err)
+	indexes, err = GetManifestIndexInfos(dropped, cfg)
+	require.NoError(t, err)
+	require.Empty(t, indexes, "dropping the column must auto-drop its index")
+	fields, err = GetManifestFieldIDs(dropped, cfg)
+	require.NoError(t, err)
+	require.NotContains(t, fields, int64(100))
+}
+
+// TestReadManifestColumnGroups round-trips column-group descriptors through the
+// real manifest FFI: a group written with absolute <base>/_data/<file> paths
+// must read back with those absolute paths, so pre-commit descriptor
+// comparison (backfill delta replay detection) can match op files exactly.
+func TestReadManifestColumnGroups(t *testing.T) {
+	cfg := manifestTestStorageConfig(t)
+	basePath := path.Join(cfg.RootPath, "read_column_groups/seg1")
+	dataPath := path.Join(basePath, "_data", "100_a.parquet")
+
+	committed, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{
+		ColumnGroups: []ColumnGroupEntry{{
+			Columns: []string{"100"},
+			Format:  "parquet",
+			Files:   []ColumnGroupFileEntry{{Path: dataPath, StartIndex: 0, EndIndex: 5}},
+		}},
+	})
+	require.NoError(t, err)
+
+	groups, err := ReadManifestColumnGroups(committed, cfg)
+	require.NoError(t, err)
+	require.Len(t, groups, 1)
+	require.Equal(t, []string{"100"}, groups[0].Columns)
+	require.Equal(t, "parquet", groups[0].Format)
+	require.Len(t, groups[0].Files, 1)
+	require.Equal(t, dataPath, groups[0].Files[0].Path)
+	require.Equal(t, int64(0), groups[0].Files[0].StartIndex)
+	require.Equal(t, int64(5), groups[0].Files[0].EndIndex)
 }

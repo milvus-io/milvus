@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 	"math/rand"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -2354,11 +2355,11 @@ func TestMetaTable_reload(t *testing.T) {
 
 	t.Run("failed to list collections", func(t *testing.T) {
 		meta := createMetaTableFn(func(catalog *mocks.RootCoordCatalog) {
-			catalog.On("ListCollections",
+			catalog.On("ListCollectionsForRecovery",
 				mock.Anything,
 				mock.Anything,
 				mock.Anything,
-			).Return(nil, errors.New("error mock ListCollections"))
+			).Return(nil, errors.New("error mock ListCollectionsForRecovery"))
 		})
 
 		err := meta.reload()
@@ -2369,12 +2370,12 @@ func TestMetaTable_reload(t *testing.T) {
 	t.Run("failed to list aliases", func(t *testing.T) {
 		meta := createMetaTableFn(
 			func(catalog *mocks.RootCoordCatalog) {
-				catalog.On("ListCollections",
+				catalog.On("ListCollectionsForRecovery",
 					mock.Anything,
 					mock.Anything,
 					mock.Anything,
 				).Return(
-					[]*model.Collection{{CollectionID: 100, Name: "test"}},
+					map[int64][]*model.Collection{util.DefaultDBID: {{CollectionID: 100, Name: "test"}}},
 					nil)
 			},
 			func(catalog *mocks.RootCoordCatalog) {
@@ -2393,11 +2394,11 @@ func TestMetaTable_reload(t *testing.T) {
 	t.Run("no collections and default db doesn't exists", func(t *testing.T) {
 		meta := createMetaTableFn(
 			func(catalog *mocks.RootCoordCatalog) {
-				catalog.On("ListCollections",
+				catalog.On("ListCollectionsForRecovery",
 					mock.Anything,
 					mock.Anything,
 					mock.Anything,
-				).Return(make([]*model.Collection, 0), nil)
+				).Return(map[int64][]*model.Collection{}, nil)
 			},
 			func(catalog *mocks.RootCoordCatalog) {
 				catalog.On("ListAliases",
@@ -2432,12 +2433,14 @@ func TestMetaTable_reload(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return([]*model.Database{model.NewDefaultDatabase(nil)}, nil)
-		catalog.On("ListCollections",
+		catalog.On("ListCollectionsForRecovery",
 			mock.Anything,
 			mock.Anything,
 			mock.Anything,
 		).Return(
-			[]*model.Collection{{CollectionID: 100, Name: "test", State: pb.CollectionState_CollectionCreated}},
+			map[int64][]*model.Collection{
+				util.DefaultDBID: {{CollectionID: 100, Name: "test", State: pb.CollectionState_CollectionCreated}},
+			},
 			nil)
 		catalog.On("ListAliases",
 			mock.Anything,
@@ -2466,12 +2469,14 @@ func TestMetaTable_reload(t *testing.T) {
 	t.Run("ok", func(t *testing.T) {
 		meta := createMetaTableFn(
 			func(catalog *mocks.RootCoordCatalog) {
-				catalog.On("ListCollections",
+				catalog.On("ListCollectionsForRecovery",
 					mock.Anything,
 					mock.Anything,
 					mock.Anything,
 				).Return(
-					[]*model.Collection{{CollectionID: 100, Name: "test", State: pb.CollectionState_CollectionCreated}},
+					map[int64][]*model.Collection{
+						util.DefaultDBID: {{CollectionID: 100, Name: "test", State: pb.CollectionState_CollectionCreated}},
+					},
 					nil)
 			},
 			func(catalog *mocks.RootCoordCatalog) {
@@ -2510,6 +2515,49 @@ func TestMetaTable_reload(t *testing.T) {
 		assert.Equal(t, 1, len(colls))
 		assert.Equal(t, int64(100), colls[0])
 	})
+}
+
+func TestMetaTableReloadListsAllDatabasesInOneRecoveryCall(t *testing.T) {
+	catalog := mocks.NewRootCoordCatalog(t)
+	catalog.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(
+		[]*model.Database{
+			model.NewDefaultDatabase(nil),
+			{ID: 2, Name: "db2"},
+		},
+		nil,
+	)
+	requestedAllDatabases := mock.MatchedBy(func(dbIDs []int64) bool {
+		sorted := slices.Clone(dbIDs)
+		slices.Sort(sorted)
+		return slices.Equal(sorted, []int64{util.NonDBID, util.DefaultDBID, 2})
+	})
+	catalog.EXPECT().ListCollectionsForRecovery(mock.Anything, requestedAllDatabases, typeutil.MaxTimestamp).Return(
+		map[int64][]*model.Collection{
+			util.NonDBID: {
+				{CollectionID: 50, DBID: util.DefaultDBID, Name: "legacy", State: pb.CollectionState_CollectionCreated},
+			},
+			util.DefaultDBID: {
+				{CollectionID: 100, DBID: util.DefaultDBID, Name: "default-coll", State: pb.CollectionState_CollectionCreated},
+			},
+			2: {
+				{CollectionID: 200, DBID: 2, Name: "db2-coll", State: pb.CollectionState_CollectionCreated},
+			},
+		},
+		nil,
+	).Once()
+	catalog.EXPECT().ListAliases(mock.Anything, mock.Anything, mock.Anything).Return([]*model.Alias{}, nil)
+	catalog.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0), nil)
+
+	meta := &MetaTable{ctx: context.Background(), catalog: catalog}
+	channel.ResetStaticPChannelStatsManager()
+	require.NoError(t, meta.reload())
+	assert.Len(t, meta.collID2Meta, 3)
+	assert.Empty(t, meta.collID2Meta[50].DBName)
+	assert.Equal(t, util.DefaultDBName, meta.collID2Meta[100].DBName)
+	assert.Equal(t, "db2", meta.collID2Meta[200].DBName)
+	id, ok := meta.names.get(util.DefaultDBName, "legacy")
+	assert.True(t, ok)
+	assert.Equal(t, int64(50), id)
 }
 
 func TestMetaTable_ListAllAvailCollections(t *testing.T) {

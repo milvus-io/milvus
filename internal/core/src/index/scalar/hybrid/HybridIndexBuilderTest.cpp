@@ -19,6 +19,9 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <initializer_list>
+#include <span>
+#include <type_traits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -35,6 +38,7 @@
 #include "index/contracts/build/ScalarBuildInput.h"
 #include "index/contracts/query/IPatternMatchReader.h"
 #include "index/contracts/query/IJsonIndexReader.h"
+#include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/scalar/hybrid/HybridIndexArtifact.h"
 #include "index/scalar/sort/SortedIndexFormat.h"
@@ -538,21 +542,183 @@ TEST(HybridIndexBuilderTest, NestedLowCardinalityKeepsBitmapAtAnyVersion) {
     }
 }
 
-// A regular (non-nested) ARRAY field keeps INVERTED at high cardinality even at
-// and above the gate version: the sort family cannot handle array values, only
-// flattened elements.
-TEST(HybridIndexBuilderTest,
-     ArrayRowsHighCardinalityKeepsInvertedAtAnyVersion) {
-    for (const int32_t version : {kHybridIndexConfigVersion,
-                                  kNestedHybridStlSortMinVersion,
-                                  kNestedHybridStlSortMinVersion + 1}) {
-        EXPECT_EQ(
-            SelectorAtEngineVersion<ArrayView>("HybridInt64ArrayNonNull",
-                                               version,
-                                               ArrayCardinalityData(16, false)),
-            ScalarIndexType::INVERTED)
-            << "scalar index engine version " << version;
+// Ordinary arrays store parent-row postings, independently of the nested
+// element-domain gate. The low-cardinality branch remains BITMAP.
+template <typename T>
+OwnedArrayValue
+ArrayRow(DataType type, std::initializer_list<T> values) {
+    if constexpr (std::is_same_v<T, std::string_view>) {
+        std::vector<std::string> strings;
+        for (auto value : values) {
+            strings.emplace_back(value);
+        }
+        return OwnedArrayValue::FromStrings(type, strings);
+    } else if constexpr (std::is_same_v<T, int8_t> ||
+                         std::is_same_v<T, int16_t>) {
+        // The ARRAY wire representation uses int32 for narrow integers.
+        const std::vector<int32_t> widened(values.begin(), values.end());
+        return OwnedArrayValue::FromFixed<int32_t>(type, widened);
+    } else {
+        return OwnedArrayValue::FromFixed<T>(
+            type, std::span<const T>(values.begin(), values.size()));
     }
+}
+
+template <typename T>
+void
+CheckArrayHybridGate(std::string_view type_name, DataType type, T a, T b) {
+    for (const bool mmap : {false, true}) {
+        const auto name =
+            "Hybrid" + std::string(type_name) + "Array" + (mmap ? "Mmap" : "");
+        const auto& backend = ScalarReaderBackends().Get<ArrayView>(name);
+        ScalarTestData<ArrayView> data({ArrayRow<T>(type, {a, b, b}),
+                                        ArrayRow<T>(type, {}),
+                                        ArrayRow<T>(type, {b}),
+                                        ArrayRow<T>(type, {a, a, a})});
+        data.validity.reset(2);
+        data.batch_sizes = {1, 0, 3};
+        const ScalarTestInput<ArrayView> input(data);
+        // Explicit SORT must pass the public adapter for every ARRAY element
+        // type; it does not depend on HYBRID cardinality selection.
+        const auto adapted =
+            AdaptIndexType({.index_type = ASCENDING_SORT,
+                            .field_type = DataType::ARRAY,
+                            .element_type = type,
+                            .params = {{"nullable", true},
+                                       {SCALAR_INDEX_ENGINE_VERSION,
+                                        kArrayHybridStlSortMinVersion}}});
+        ASSERT_EQ(adapted.family, families::kSort);
+        auto explicit_builder =
+            BuilderRegistry<ScalarBuildInput<ArrayView>>::Instance().Create(
+                adapted.family, adapted.params);
+        ASSERT_NE(explicit_builder, nullptr);
+        auto explicit_artifact =
+            std::move(*explicit_builder).Build(input.View());
+        const auto& sorted = ScalarReaderBackends().Get<ArrayView>(
+            "Sorted" + std::string(type_name) + "Array" + (mmap ? "Mmap" : ""));
+        auto explicit_reader =
+            OpenV3(sorted, SerializeV3(*explicit_artifact), {.row_count = 4});
+        ASSERT_EQ(explicit_reader->Count(), 4);
+        EXPECT_FALSE(explicit_reader->Caps().value_lookup);
+        const auto* explicit_predicate =
+            dynamic_cast<const IScalarPredicateReader<T>*>(
+                explicit_reader.get());
+        const auto* explicit_nulls =
+            dynamic_cast<const INullReader*>(explicit_reader.get());
+        ASSERT_NE(explicit_predicate, nullptr);
+        ASSERT_NE(explicit_nulls, nullptr);
+        ExpectHits(explicit_predicate->In(1, &a), 4, {0, 3});
+        ExpectHits(explicit_nulls->IsNotNull(), 4, {0, 1, 3});
+        // A current format version alone must not bypass the software gate.
+        for (const auto& enabled :
+             {Config(nullptr), Config(false), Config("false")}) {
+            auto params = backend.BuildParams();
+            params[SCALAR_INDEX_ENGINE_VERSION] = kArrayHybridStlSortMinVersion;
+            params[BITMAP_INDEX_CARDINALITY_LIMIT] = 2;
+            params.erase(ENABLE_ARRAY_SORT_INDEX);
+            if (!enabled.is_null()) {
+                params[ENABLE_ARRAY_SORT_INDEX] = enabled;
+            }
+            auto builder =
+                BuilderRegistry<ScalarBuildInput<ArrayView>>::Instance().Create(
+                    families::kHybrid, params);
+            ASSERT_NE(builder, nullptr);
+            auto artifact = std::move(*builder).Build(input.View());
+            EXPECT_EQ(PersistedSelector(*artifact), ScalarIndexType::INVERTED);
+        }
+        for (const int version : {kArrayHybridStlSortMinVersion - 1,
+                                  kArrayHybridStlSortMinVersion,
+                                  kArrayHybridStlSortMinVersion + 1}) {
+            for (const int threshold : {2, 3}) {
+                SCOPED_TRACE(name + "/version=" + std::to_string(version) +
+                             "/threshold=" + std::to_string(threshold));
+                auto params = backend.BuildParams();
+                params[SCALAR_INDEX_ENGINE_VERSION] = version;
+                // Exercise the string representation sent in build params too.
+                params[ENABLE_ARRAY_SORT_INDEX] = "true";
+                // A threshold of two exercises the BOOL high-cardinality
+                // branch as well, without inventing more than two bool keys.
+                params[BITMAP_INDEX_CARDINALITY_LIMIT] = threshold;
+                auto builder =
+                    BuilderRegistry<ScalarBuildInput<ArrayView>>::Instance()
+                        .Create(families::kHybrid, params);
+                ASSERT_NE(builder, nullptr);
+                auto artifact = std::move(*builder).Build(input.View());
+                const auto expected =
+                    threshold == 3 ? ScalarIndexType::BITMAP
+                                   : (version < kArrayHybridStlSortMinVersion
+                                          ? ScalarIndexType::INVERTED
+                                          : ScalarIndexType::STLSORT);
+                EXPECT_EQ(PersistedSelector(*artifact), expected);
+                if (version != kArrayHybridStlSortMinVersion ||
+                    threshold != 2) {
+                    continue;
+                }
+
+                const auto packed = SerializeV3(*artifact);
+                for (const bool use_async : {false, true}) {
+                    SCOPED_TRACE("async=" + std::to_string(use_async));
+                    auto reader =
+                        OpenV3(backend, packed, {.row_count = 4}, use_async);
+                    ASSERT_EQ(reader->Count(), 4);
+                    EXPECT_EQ(reader->CoordDomain(), Domain::Row);
+                    EXPECT_FALSE(reader->Caps().nested);
+                    EXPECT_FALSE(reader->Caps().value_lookup);
+                    const auto* predicate =
+                        dynamic_cast<const IScalarPredicateReader<T>*>(
+                            reader.get());
+                    const auto* nulls =
+                        dynamic_cast<const INullReader*>(reader.get());
+                    ASSERT_NE(predicate, nullptr);
+                    ASSERT_NE(nulls, nullptr);
+                    ExpectHits(nulls->IsNull(), 4, {2});
+                    ExpectHits(nulls->IsNotNull(), 4, {0, 1, 3});
+                    ExpectHits(predicate->In(1, &a), 4, {0, 3});
+                    ExpectHits(predicate->In(1, &b), 4, {0});
+                    ExpectHits(predicate->NotIn(1, &a), 4, {1});
+                    // Most postings match, but row 0 also has b outside the
+                    // interval: scalar complement optimization is incorrect.
+                    ExpectHits(predicate->Range(a, true, a, true), 4, {0, 3});
+                    ExpectHits(
+                        predicate->Range(a, CompareOp::LessEqual), 4, {0, 3});
+                }
+            }
+        }
+        // A valid empty array remains distinct from NULL even when the entire
+        // sorted artifact has no postings.
+        ScalarTestData<ArrayView> empty(
+            {ArrayRow<T>(type, {}), ArrayRow<T>(type, {})});
+        empty.validity.reset(1);
+        const ScalarTestInput<ArrayView> empty_input(empty);
+        auto artifact = sorted.Build(empty_input.View());
+
+        const auto packed = SerializeV3(*artifact);
+        for (const bool use_async : {false, true}) {
+            SCOPED_TRACE(name + "/empty/async=" + std::to_string(use_async));
+            auto reader = OpenV3(sorted, packed, {.row_count = 2}, use_async);
+            const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
+            const auto* predicate =
+                dynamic_cast<const IScalarPredicateReader<T>*>(reader.get());
+            ASSERT_NE(nulls, nullptr);
+            ASSERT_NE(predicate, nullptr);
+            ExpectHits(nulls->IsNull(), 2, {1});
+            ExpectHits(nulls->IsNotNull(), 2, {0});
+            ExpectHits(predicate->In(1, &a), 2, {});
+            ExpectHits(predicate->NotIn(1, &a), 2, {0});
+        }
+    }
+}
+
+TEST(HybridIndexBuilderTest, ArrayRowsAllTypesSelectSortFromGateAndReload) {
+    CheckArrayHybridGate<bool>("Bool", DataType::BOOL, false, true);
+    CheckArrayHybridGate<int8_t>("Int8", DataType::INT8, 1, 100);
+    CheckArrayHybridGate<int16_t>("Int16", DataType::INT16, 1, 100);
+    CheckArrayHybridGate<int32_t>("Int32", DataType::INT32, 1, 100);
+    CheckArrayHybridGate<int64_t>("Int64", DataType::INT64, 1, 100);
+    CheckArrayHybridGate<float>("Float", DataType::FLOAT, 1, 100);
+    CheckArrayHybridGate<double>("Double", DataType::DOUBLE, 1, 100);
+    CheckArrayHybridGate<std::string_view>(
+        "Varchar", DataType::VARCHAR, "a", "z");
 }
 
 TEST(HybridIndexBuilderTest, InvalidPersistedSelectorIsRejected) {
@@ -631,5 +797,26 @@ TEST(HybridIndexBuilderTest, UnrecognizableSelectorlessArtifactIsRejected) {
     });
 }
 
+TEST(HybridIndexBuilderTest, LeadingPlusCardinalityLimitBuildsAndQueries) {
+    const auto& backend = ScalarReaderBackends().Get<int64_t>("HybridInt64");
+    auto data = IntegerCardinalityData(3, false);
+    const ScalarTestInput<int64_t> input(data);
+    auto params = backend.BuildParams();
+    params[BITMAP_INDEX_CARDINALITY_LIMIT] = "+4";
+    auto builder =
+        BuilderRegistry<ScalarBuildInput<int64_t>>::Instance().Create(
+            families::kHybrid, params);
+    ASSERT_NE(builder, nullptr);
+    auto artifact = std::move(*builder).Build(input.View());
+    const auto persisted = SerializeV3(*artifact);
+    EXPECT_EQ(persisted.metadata.at(INDEX_TYPE).get<uint8_t>(),
+              static_cast<uint8_t>(ScalarIndexType::BITMAP));
+    auto reader = OpenV3(backend, persisted, {.row_count = 3});
+    const auto* predicate =
+        dynamic_cast<const IScalarPredicateReader<int64_t>*>(reader.get());
+    ASSERT_NE(predicate, nullptr);
+    const int64_t key = 1;
+    ExpectHits(predicate->In(1, &key), 3, {1});
+}
 }  // namespace
 }  // namespace milvus::index::test

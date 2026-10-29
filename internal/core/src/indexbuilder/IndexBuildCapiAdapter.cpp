@@ -331,6 +331,7 @@ MakeFileManagerContext(const proto::indexcgo::BuildIndexInfo& info,
                                   params.at(DIM_KEY).get<int64_t>(),
                                   IndexNonEncoding(params),
                                   info.index_store_path_version()};
+    index_meta.index_file_prefix = info.index_file_prefix();
 
     auto chunk_manager = storage::CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
@@ -403,7 +404,8 @@ AdaptBuildIndexInfo(const proto::indexcgo::BuildIndexInfo& info,
     const auto staging_parent = LocalStagingParent();
     BuildOutputSpec output;
     output.generation =
-        !vector_field && info.current_scalar_index_version() >= 3
+        !vector_field && (info.current_scalar_index_version() >= 3 ||
+                          adapted.family == index::families::kFmIndex)
             ? storage::Generation::V3
             : storage::Generation::V1V2;
     output.storage_namespace = adapted.family == index::families::kText

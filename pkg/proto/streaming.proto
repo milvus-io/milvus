@@ -356,15 +356,38 @@ message StreamingError {
 // StreamingNodeHandlerService
 //
 
-// StreamingNodeHandlerService is the service to handle log messages.
-// All handler operation will be blocked until the channel is ready read or
-// write on that log node. Server: all log node. Running on every log node.
-// Client: all log produce or consuming node.
+// StreamingNodeHandlerService exposes WAL access and analyzer operations on
+// StreamingNodes. Channel-scoped requests target the assigned WAL owner;
+// collection-independent analyzer operations can run on any ready StreamingNode.
 service StreamingNodeHandlerService {
+    // GetCollectionSchema returns the current write schema or an exact historical
+    // schema version for a VChannel, together with its effective TimeTick.
+    // Requires the primary WAL owner and matching PChannel assignment; collection
+    // loading is not required. An unavailable historical version is not replaced
+    // with the current schema. Failures use streaming gRPC errors.
     rpc GetCollectionSchema(StreamingNodeGetCollectionSchemaRequest) returns (StreamingNodeGetCollectionSchemaResponse) {};
 
+    // ValidateAnalyzer prepares referenced file resources and validates analyzer
+    // configurations without requiring a collection or WAL assignment. On success,
+    // returns the resource IDs used by the analyzers for reservation before DDL.
+    // Validation and resource failures are reported in the response Status.
     rpc ValidateAnalyzer(StreamingNodeValidateAnalyzerRequest) returns (StreamingNodeValidateAnalyzerResponse) {};
+
+    // SubscribeTransform multiplexes VChannel TransformLog subscriptions over one
+    // bidirectional stream to a PChannel owner. CreateTransformStreamRequest is
+    // supplied in RPC metadata; stream and subscription creation acknowledgements
+    // precede their events. Each subscription delivers ordered entries after its
+    // exclusive start cursor and SyncUp progress, optionally through an end tick.
+    // Closing one subscription leaves the others active; closing the stream
+    // releases all subscriptions. Reconnection and resubscription are client-owned.
+    rpc SubscribeTransform(stream TransformRequest) returns (stream TransformResponse) {};
+
+    // RunAnalyzer analyzes text using inline parameters on any ready StreamingNode
+    // or a collection field's current analyzer on its PChannel owner. Neither mode
+    // requires loaded segments. Streaming failures use gRPC errors; analyzer and
+    // resource failures are reported in the response Status.
     rpc RunAnalyzer(StreamingNodeRunAnalyzerRequest) returns (StreamingNodeRunAnalyzerResponse) {};
+
     // GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
     // from the correct position, ensuring no duplicate or missing messages.
     rpc GetReplicateCheckpoint(GetReplicateCheckpointRequest) returns (GetReplicateCheckpointResponse) {}
@@ -1009,12 +1032,21 @@ message ReplicatePChannelMeta {
 // native gRPC errors; analyzer failures are carried by the response Status.
 message StreamingNodeRunAnalyzerRequest {
     repeated bytes placeholder = 1;
-    bool with_detail = 2;
-    bool with_hash = 3;
     oneof source {
-        StreamingInlineAnalyzer inline_analyzer = 4;
-        StreamingFieldAnalyzer field_analyzer = 5;
+        StreamingInlineAnalyzer inline_analyzer = 2;
+        StreamingFieldAnalyzer field_analyzer = 3;
     }
+    oneof operation {
+        TokenizeOptions tokenize = 4;
+        PhraseMatchOptions phrase_match = 5;
+    }
+}
+message TokenizeOptions {
+    bool with_detail = 1;
+    bool with_hash = 2;
+}
+message PhraseMatchOptions {
+    string query_text = 1;
 }
 message StreamingInlineAnalyzer {
     string analyzer_params = 1;
@@ -1029,8 +1061,105 @@ message StreamingFieldAnalyzer {
     PChannelInfo pchannel = 6;
 }
 message StreamingNodeRunAnalyzerResponse {
-    repeated milvus.AnalyzerResult results = 1;
+    oneof result {
+        TokenizeResult tokenize = 1;
+        PhraseMatchResult phrase_match = 3;
+    }
     common.Status status = 2;
+}
+message TokenizeResult {
+    repeated milvus.AnalyzerResult results = 1;
+}
+message PhraseMatchResult {
+    repeated bool is_match = 1;
+    repeated int64 slops = 2;
+}
+
+message CreateTransformStreamRequest {
+    PChannelInfo pchannel = 1;
+}
+
+message TransformRequest {
+    oneof request {
+        CreateTransformSubscriptionRequest create = 1;
+        CloseTransformSubscriptionRequest close_subscription = 2;
+        CloseTransformStreamRequest close_stream = 3;
+    }
+}
+
+message CreateTransformSubscriptionRequest {
+    uint64 end_time_tick = 4;
+    int64 subscription_id = 1;
+    string vchannel = 2;
+
+    // Exclusive. Server sends TransformLog entries with time_tick >
+    // start_after_time_tick.
+    uint64 start_after_time_tick = 3;
+}
+
+message CloseTransformSubscriptionRequest {
+    int64 subscription_id = 1;
+}
+
+message CloseTransformStreamRequest {}
+
+// TransformResponse is the response of the SubscribeTransform RPC.
+message TransformResponse {
+    oneof response {
+        CreateTransformSubscriptionResponse create = 1;
+        TransformMessageBatch message_batch = 2;
+        TransformSubscriptionSyncUp sync_up = 3;
+        TransformSubscriptionError subscription_error = 4;
+        CloseTransformSubscriptionResponse close_subscription = 5;
+        CloseTransformStreamResponse close_stream = 6;
+        // Sent after validating the PChannel owner and acquiring its stream,
+        // before receiving any VChannel subscription requests.
+        CreateTransformStreamResponse create_stream = 7;
+    }
+}
+
+message CreateTransformStreamResponse {}
+
+message CreateTransformSubscriptionResponse {
+    uint64 end_time_tick = 5;
+    int64 subscription_id = 1;
+    string vchannel = 2;
+    uint64 start_after_time_tick = 3;
+
+    // Current SN TransformLog truncation cursor.
+    uint64 truncate_time_tick = 4;
+}
+
+message CloseTransformSubscriptionResponse {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+}
+
+message TransformSubscriptionSyncUp {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+
+    // Every requested transform through this TimeTick has been delivered.
+    // This is readable coverage, not a persistence acknowledgement.
+    uint64 time_tick = 3;
+}
+
+message TransformSubscriptionError {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+    StreamingError error = 3;
+}
+
+message CloseTransformStreamResponse {}
+
+// TransformMessageBatch is an at-least-once delivery unit for transform
+// entries.
+message TransformMessageBatch {
+    int64 subscription_id = 1;
+    string vchannel = 2;
+
+    // Entries are ordered by TransformLogEntry.time_tick.
+    repeated TransformLogEntry entries = 3;
 }
 
 // Schema access is independent of collection loading. The selector distinguishes

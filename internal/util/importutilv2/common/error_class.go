@@ -19,6 +19,8 @@ package common
 import (
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -71,42 +73,50 @@ func WrapDecodeErr(err error, what string) error {
 	return merr.WrapErrImportFailedMsg("%s, err=%v", what, err)
 }
 
-// IsTerminalImportV3Err decides whether an Import V3 error should immediately
-// fail the job/task instead of retrying.
+// terminalImportV3ErrSentinels are the import-specific codes that cannot
+// recover by replaying the same request, input or result. InputError
+// (ErrParameterInvalid, ErrPrivilegeNotPermitted, ErrImportFailed) and the
+// permanent IO family are checked separately.
+var terminalImportV3ErrSentinels = []error{
+	merr.ErrDataIntegrity,
+	merr.ErrIoFailed,
+	merr.ErrImportSysFailed,
+	merr.ErrServiceQuotaExceeded,
+	merr.ErrServiceUnimplemented,
+	merr.ErrServiceInternal,
+	merr.ErrStorage,
+	packed.ErrLoonPermanent,
+}
+
+// IsTerminalImportV3Err reports whether an error is a deterministic failure of
+// the request, input or result. A nil error is not terminal.
 //
-// Denylist, matching the V2 read paths (merr.IsNonRetryableErr): only provably
-// permanent errors fail fast — the IO sentinels IsNonRetryableErr lists (key
-// not found, permission denied, bad argument, ...), the import-specific
-// terminal codes ErrDataIntegrity, ErrImportSysFailed and ErrImportFailed, and
-// ErrParameterInvalid for caller-input defects (oversized import file,
-// parquet type/dimension mismatch, string over max_length, invalid UTF-8),
-// and ErrPrivilegeNotPermitted for permission denials: the request
-// content itself forces these branches, so retrying cannot change the outcome —
-// but each retry burns a fresh segment and log range with no retry cap.
-// Everything else retries until the job timeout. That notably
-// includes ErrIoFailed: mapObjectStorageError assigns it to every unenumerated
-// S3/Azure/GCS code (InternalError, ServiceUnavailable, RequestTimeout, ...)
-// and to unrecognized network errors, so honoring its retriable=false flag as
-// a terminal verdict would let one transient 5xx fail a whole job.
-//
-// Shared by DataCoord (checker and task pollers) and DataNode (the Import V3
-// task manager's Retry/Failed classifier) so the two sides cannot drift.
-// Non-milvus errors carry no code and are treated as transient — on the worker
-// this is load-bearing: RemoteChunkManager.Write does not map object-store
-// errors, so manifest-write failures surface raw (and typically transient).
+// Raw (non-Milvus) errors are deliberately not classified here: the same
+// transport failure retries at Create, an unclassified execution error fails
+// the task, and a catalog failure retries at acceptResult, so each caller
+// decides what a raw error means before relying on this verdict.
 func IsTerminalImportV3Err(err error) bool {
 	if err == nil {
 		return false
 	}
-	if !merr.IsMilvusError(err) {
+	// The producer already classified this as retryable; a storage wrapper must
+	// not turn it terminal.
+	if errors.Is(err, packed.ErrLoonTransient) {
 		return false
 	}
-	if merr.IsNonRetryableErr(err) {
+	// ID exhaustion is recoverable: DataCoord's prepareRetry re-derives the
+	// per-file ID width before the next run. The sentinel is wrapped as
+	// ServiceInternal, which is otherwise terminal.
+	if allocator.IsIDExhausted(err) {
+		return false
+	}
+	if merr.IsNonRetryableErr(err) || merr.GetErrorType(err) == merr.InputError {
 		return true
 	}
-	return errors.Is(err, merr.ErrDataIntegrity) ||
-		errors.Is(err, merr.ErrImportSysFailed) ||
-		errors.Is(err, merr.ErrImportFailed) ||
-		errors.Is(err, merr.ErrParameterInvalid) ||
-		errors.Is(err, merr.ErrPrivilegeNotPermitted)
+	for _, sentinel := range terminalImportV3ErrSentinels {
+		if errors.Is(err, sentinel) {
+			return true
+		}
+	}
+	return false
 }

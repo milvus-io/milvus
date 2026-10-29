@@ -54,13 +54,19 @@ ParseInteger(const nlohmann::json& value, std::string_view key) {
     } else if (value.is_number_integer()) {
         return value.get<int64_t>();
     } else if (value.is_string()) {
-        const auto text = value.get<std::string>();
-        int64_t parsed = 0;
-        const auto [end, error] =
-            std::from_chars(text.data(), text.data() + text.size(), parsed);
-        if (!text.empty() && error == std::errc{} &&
-            end == text.data() + text.size()) {
-            return parsed;
+        std::string_view text = value.get_ref<const std::string&>();
+        const bool has_plus = text.starts_with('+');
+        if (has_plus) {
+            text.remove_prefix(1);
+        }
+        if (!text.empty() &&
+            (!has_plus || (text.front() >= '0' && text.front() <= '9'))) {
+            int64_t parsed = 0;
+            const auto [end, error] =
+                std::from_chars(text.data(), text.data() + text.size(), parsed);
+            if (error == std::errc{} && end == text.data() + text.size()) {
+                return parsed;
+            }
         }
     }
     ThrowInfo(DataTypeInvalid, "HYBRID parameter {} must be an integer", key);
@@ -441,23 +447,21 @@ ParseHybridBuildParams(const BuildParams& params) {
                                          kLastVersionWithoutHybridIndexConfig);
 
     if (field_type == DataType::ARRAY) {
-        // ARRAY always uses BITMAP for low cardinality. For high cardinality,
-        // a nested (struct sub-field) index feeds the delegate the FLATTENED
-        // scalar elements, so the sort family can serve it and replaces
-        // INVERTED -- but only once the whole cluster is guaranteed to run
-        // scalar index version >= kNestedHybridStlSortMinVersion. Below that,
-        // an older reader's sorted index predates nested-index support and
-        // cannot load a nested STL_SORT physical index, so a rebuild/compaction
-        // past the cardinality limit would make the index unreadable after a
-        // rollback (issue #52893). Regular ARRAY fields keep INVERTED at any
-        // version because the sort family cannot handle array values. These are
-        // hardcoded; the configurable low/high index types do not apply to
-        // ARRAY.
+        // ARRAY always uses BITMAP for low cardinality. High-cardinality
+        // nested indexes use flattened element offsets, while ordinary ARRAY
+        // indexes use parent-row postings. Each sorted representation has its
+        // own reader capability gate; ordinary ARRAY also requires the cluster
+        // software gate supplied by DataCoord. Older targets retain INVERTED. The
+        // configurable low/high index types do not apply to ARRAY.
         result.low_cardinality_family = families::kBitmap;
+        const auto min_sort_version = nested ? kNestedHybridStlSortMinVersion
+                                             : kArrayHybridStlSortMinVersion;
+        const bool sort_enabled =
+            nested || GetValueFromConfig<bool>(params, ENABLE_ARRAY_SORT_INDEX)
+                          .value_or(false);
         result.high_cardinality_family =
-            (nested && version >= kNestedHybridStlSortMinVersion)
-                ? families::kSort
-                : families::kInverted;
+            sort_enabled && version >= min_sort_version ? families::kSort
+                                                        : families::kInverted;
         return result;
     }
 

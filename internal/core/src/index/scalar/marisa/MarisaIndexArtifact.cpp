@@ -18,8 +18,10 @@
 
 #include <type_traits>
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fcntl.h>
 #include <limits>
 #include <string_view>
 #include <sys/mman.h>
@@ -61,17 +63,32 @@ SerializedTrieSize(int fd, const std::string& path) {
 }
 
 std::pair<int, storage::LocalEntryGuard>
-CreateTrieFile() {
-    auto pattern =
-        (std::filesystem::temp_directory_path() / "marisa_trie_XXXXXX")
-            .string();
+CreateTrieFile(const std::string& configured_parent) {
+    const auto directory = configured_parent.empty()
+                               ? std::filesystem::temp_directory_path()
+                               : std::filesystem::path(configured_parent);
+    if (!configured_parent.empty()) {
+        std::error_code error;
+        std::filesystem::create_directories(directory, error);
+        if (error) {
+            ThrowInfo(
+                FileCreateFailed,
+                "failed to create marisa staging parent {} (errno={}): {}",
+                directory.string(),
+                error.value(),
+                error.message());
+        }
+    }
+    auto pattern = (directory / "marisa_trie_XXXXXX").string();
     storage::LocalEntryGuard file(std::move(pattern));
-    const auto fd = mkstemp(file.MutablePath());
+    const auto fd = mkostemp(file.MutablePath(), O_CLOEXEC);
     if (fd == -1) {
         const auto error = errno;
         static_cast<void>(file.Release());
         ThrowInfo(FileCreateFailed,
-                  "failed to create marisa trie file: {}",
+                  "failed to create marisa trie file in {} (errno={}): {}",
+                  directory.string(),
+                  error,
                   std::strerror(error));
     }
     return {fd, std::move(file)};
@@ -142,12 +159,14 @@ MarisaIndexArtifact::MarisaIndexArtifact(std::shared_ptr<marisa::Trie> trie,
                                          std::vector<int64_t> str_ids,
                                          std::vector<uint32_t> csr_index,
                                          std::vector<uint32_t> csr_offsets,
-                                         DataType value_type)
+                                         DataType value_type,
+                                         std::string local_dir)
     : storage_(MakeBuilderStorage(std::move(trie),
                                   std::move(str_ids),
                                   std::move(csr_index),
                                   std::move(csr_offsets),
-                                  value_type)) {
+                                  value_type)),
+      local_dir_(std::move(local_dir)) {
     AssertInfo(storage_ != nullptr, "marisa artifact requires shared storage");
     ValidateStorage(*storage_);
 }
@@ -167,9 +186,26 @@ MarisaIndexArtifact::Serialize(storage::IndexEntryWriter& sink) const {
 template <typename Output>
 void
 MarisaIndexArtifact::SerializeImpl(Output& sink) const {
-    auto [fd, file] = CreateTrieFile();
+    auto [fd, file] = CreateTrieFile(
+        std::is_same_v<Output, storage::IndexEntryWriter> ? local_dir_
+                                                          : std::string{});
     storage::MappedRegionGuard legacy_mapping;
+    std::string trie_path;
     try {
+        trie_path = file.Path();
+        if constexpr (std::is_same_v<Output, storage::IndexEntryWriter>) {
+            // V3 consumes the open descriptor, so the name need not survive
+            // writing or streaming the trie, including an interrupted process.
+            if (::unlink(trie_path.c_str()) != 0) {
+                const auto error = errno;
+                ThrowInfo(FileWriteFailed,
+                          "failed to unlink temporary marisa trie {}: {}",
+                          trie_path,
+                          std::strerror(error));
+            }
+            // The name is no longer ours. A later creator may reuse it.
+            static_cast<void>(file.Release());
+        }
         try {
             storage_->trie->write(fd);
         } catch (const marisa::Exception& error) {
@@ -179,11 +215,11 @@ MarisaIndexArtifact::SerializeImpl(Output& sink) const {
             ThrowInfo(
                 ClassifyMarisaError(error, FileWriteFailed, DataFormatBroken),
                 "failed to write marisa trie {}: {}",
-                file.Path(),
+                trie_path,
                 error.what());
         }
         if constexpr (std::is_same_v<Output, storage::FileSink>) {
-            const auto size = SerializedTrieSize(fd, file.Path());
+            const auto size = SerializedTrieSize(fd, trie_path);
             if (size != 0) {
                 auto* mapped = static_cast<char*>(
                     mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0));
@@ -191,11 +227,21 @@ MarisaIndexArtifact::SerializeImpl(Output& sink) const {
                     const auto error = errno;
                     ThrowInfo(MmapError,
                               "failed to mmap serialized marisa trie {}: {}",
-                              file.Path(),
+                              trie_path,
                               std::strerror(error));
                 }
                 legacy_mapping = storage::MappedRegionGuard(mapped, size);
             }
+        } else {
+            const auto size = SerializedTrieSize(fd, trie_path);
+            if (::lseek(fd, 0, SEEK_SET) == -1) {
+                const auto error = errno;
+                ThrowInfo(FileReadFailed,
+                          "failed to rewind serialized marisa trie {}: {}",
+                          trie_path,
+                          std::strerror(error));
+            }
+            sink.WriteEntry(std::string(MARISA_TRIE_INDEX), fd, size);
         }
     } catch (...) {
         close(fd);
@@ -205,7 +251,7 @@ MarisaIndexArtifact::SerializeImpl(Output& sink) const {
         const auto error = errno;
         ThrowInfo(FileWriteFailed,
                   "failed to close marisa trie file {}: {}",
-                  file.Path(),
+                  trie_path,
                   std::strerror(error));
     }
     if constexpr (std::is_same_v<Output, storage::FileSink>) {
@@ -213,8 +259,6 @@ MarisaIndexArtifact::SerializeImpl(Output& sink) const {
                         legacy_mapping.Data(),
                         legacy_mapping.Size());
         legacy_mapping = {};
-    } else {
-        storage::WriteEntryFromLocalFile(sink, MARISA_TRIE_INDEX, file.Path());
     }
 
     sink.WriteEntry(

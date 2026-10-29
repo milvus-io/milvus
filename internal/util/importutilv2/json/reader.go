@@ -22,6 +22,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -155,6 +156,12 @@ func (j *reader) Read() (*storage.InsertData, error) {
 		return nil, err
 	}
 	if !j.dec.More() {
+		// More reports false both at a clean end and after a read/parse error.
+		// Ask the decoder for its stored error so a truncated source is not
+		// mistaken for a complete one (that would silently drop the tail).
+		if _, err := j.dec.Token(); err != nil && !errors.Is(err, io.EOF) {
+			return nil, wrapDecodeError(err, "read json records")
+		}
 		return nil, io.EOF
 	}
 

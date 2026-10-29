@@ -1643,6 +1643,66 @@ func (_c *RootCoordCatalog_ListCollections_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
+// ListCollectionsForRecovery provides a mock function with given fields: ctx, dbIDs, ts
+func (_m *RootCoordCatalog) ListCollectionsForRecovery(ctx context.Context, dbIDs []int64, ts uint64) (map[int64][]*model.Collection, error) {
+	ret := _m.Called(ctx, dbIDs, ts)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListCollectionsForRecovery")
+	}
+
+	var r0 map[int64][]*model.Collection
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, []int64, uint64) (map[int64][]*model.Collection, error)); ok {
+		return rf(ctx, dbIDs, ts)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, []int64, uint64) map[int64][]*model.Collection); ok {
+		r0 = rf(ctx, dbIDs, ts)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[int64][]*model.Collection)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, []int64, uint64) error); ok {
+		r1 = rf(ctx, dbIDs, ts)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RootCoordCatalog_ListCollectionsForRecovery_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListCollectionsForRecovery'
+type RootCoordCatalog_ListCollectionsForRecovery_Call struct {
+	*mock.Call
+}
+
+// ListCollectionsForRecovery is a helper method to define mock.On call
+//   - ctx context.Context
+//   - dbIDs []int64
+//   - ts uint64
+func (_e *RootCoordCatalog_Expecter) ListCollectionsForRecovery(ctx interface{}, dbIDs interface{}, ts interface{}) *RootCoordCatalog_ListCollectionsForRecovery_Call {
+	return &RootCoordCatalog_ListCollectionsForRecovery_Call{Call: _e.mock.On("ListCollectionsForRecovery", ctx, dbIDs, ts)}
+}
+
+func (_c *RootCoordCatalog_ListCollectionsForRecovery_Call) Run(run func(ctx context.Context, dbIDs []int64, ts uint64)) *RootCoordCatalog_ListCollectionsForRecovery_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].([]int64), args[2].(uint64))
+	})
+	return _c
+}
+
+func (_c *RootCoordCatalog_ListCollectionsForRecovery_Call) Return(_a0 map[int64][]*model.Collection, _a1 error) *RootCoordCatalog_ListCollectionsForRecovery_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *RootCoordCatalog_ListCollectionsForRecovery_Call) RunAndReturn(run func(context.Context, []int64, uint64) (map[int64][]*model.Collection, error)) *RootCoordCatalog_ListCollectionsForRecovery_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListCredentials provides a mock function with given fields: ctx
 func (_m *RootCoordCatalog) ListCredentials(ctx context.Context) ([]string, error) {
 	ret := _m.Called(ctx)
