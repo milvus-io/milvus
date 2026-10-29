@@ -28,6 +28,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -35,11 +36,13 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	rlinternal "github.com/milvus-io/milvus/internal/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -1795,4 +1798,62 @@ func TestDatabaseForceDenyDDL(t *testing.T) {
 			assert.EqualValues(t, 0.0, limiter.Limit())
 		}
 	})
+}
+
+// A collection that is neither loaded nor has a healthy segment is named by no
+// node metric, but the WAL lag check still covers it through its pchannel. Its
+// DB must come from RootCoord meta, or the write deny is never applied to it.
+func TestQuotaCenterDeniesWritingToWALLaggingCollectionWithoutMetrics(t *testing.T) {
+	paramtable.Init()
+	for key, value := range map[string]string{
+		Params.QuotaConfig.DMLLimitEnabled.Key:     "true",
+		Params.QuotaConfig.TtProtectionEnabled.Key: "true",
+		Params.QuotaConfig.MaxTimeTickDelay.Key:    "10.0",
+		Params.QuotaConfig.ForceDenyWriting.Key:    "false",
+	} {
+		paramtable.Get().Save(key, value)
+		defer paramtable.Get().Reset(key)
+	}
+
+	const (
+		dbID         = int64(1)
+		collectionID = int64(100)
+		pchannel     = "quota-dml_0"
+	)
+	channel.ResetStaticPChannelStatsManager()
+	channel.RecoverPChannelStatsManager([]string{fmt.Sprintf("%s_%dv0", pchannel, collectionID)})
+	t.Cleanup(channel.ResetStaticPChannelStatsManager)
+
+	meta := mockrootcoord.NewIMetaTable(t)
+	meta.EXPECT().ListAllAvailPartitions(mock.Anything).Return(map[int64]map[int64][]int64{
+		dbID: {collectionID: {1000}},
+	})
+	meta.EXPECT().GetCollectionByIDWithMaxTs(mock.Anything, collectionID).
+		Return(&model.Collection{CollectionID: collectionID, DBID: dbID}, nil).Maybe()
+	meta.EXPECT().GetDatabaseByID(mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrDatabaseNotFound).Maybe()
+
+	alloc := newMockTsoAllocator()
+	walTimeTick := tsoutil.ComposeTSByTime(time.Now())
+	alloc.GenerateTSOF = func(count uint32) (typeutil.Timestamp, error) {
+		return tsoutil.ComposeTSByTime(time.Now().Add(time.Minute)), nil
+	}
+	quotaCenter := NewQuotaCenter(proxyutil.NewMockProxyClientManager(t), mocks.NewMixCoord(t), alloc, meta)
+	// Only a streaming node reports, and only its WAL lag: no collection IDs.
+	quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
+		1: {StreamingQuota: &metricsinfo.StreamingQuotaMetrics{WALs: []metricsinfo.WALMetrics{
+			{Channel: types.ChannelID{Name: pchannel}, RecoveryTimeTick: walTimeTick},
+		}}},
+	}
+
+	require.NoError(t, quotaCenter.resetAllCurrentRates())
+	gotDBID, ok := quotaCenter.collectionIDToDBID.Get(collectionID)
+	require.True(t, ok)
+	assert.Equal(t, dbID, gotDBID)
+
+	require.NoError(t, quotaCenter.calculateWriteRates())
+	limiter := quotaCenter.rateLimiter.GetCollectionLimiters(dbID, collectionID)
+	require.NotNil(t, limiter)
+	state, ok := limiter.GetQuotaStates().Get(milvuspb.QuotaState_DenyToWrite)
+	require.True(t, ok)
+	assert.Equal(t, commonpb.ErrorCode_TimeTickLongDelay, state.ErrorCode)
 }
