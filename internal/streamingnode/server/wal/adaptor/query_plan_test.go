@@ -426,11 +426,50 @@ func TestQueryPlanSealedSegmentCountRespectsPartitionAndPruning(t *testing.T) {
 	}{
 		{"all", viewpb.SegmentSelection_All, nil, 3},
 		{"include", viewpb.SegmentSelection_Include, []int64{11}, 1},
+		{"include_other_partition", viewpb.SegmentSelection_Include, []int64{11, 20}, 1},
 		{"exclude", viewpb.SegmentSelection_Exclude, []int64{11}, 2},
+		{"exclude_other_partition", viewpb.SegmentSelection_Exclude, []int64{20, 21}, 3},
+		{"exclude_both_partitions", viewpb.SegmentSelection_Exclude, []int64{11, 20, 21}, 2},
 		{"none", viewpb.SegmentSelection_None, nil, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			plan := &viewpb.QueryPlan{Request: &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: &internalpb.SearchRequest{PartitionIDs: []int64{1}}}, WorkNodes: []*viewpb.QueryPlanWorkNode{{Node: &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: 11}}, SegmentSelection: &viewpb.SegmentSelection{Mode: tc.mode, SegmentIds: tc.ids}}}}
+			require.Equal(t, tc.count, queryPlanSealedSegmentCount(plan, view))
+		})
+	}
+}
+
+func TestQueryPlanSealedSegmentCountWithFullNodeSelection(t *testing.T) {
+	view := &viewpb.QueryViewOfShard{QueryNode: []*viewpb.QueryViewOfQueryNode{
+		{NodeId: 11, Partitions: []*viewpb.QueryViewOfPartition{
+			{PartitionId: 1, SegmentIds: []int64{10, 11, 12, 13, 14, 15, 16, 17, 18, 19}},
+			{PartitionId: 2, SegmentIds: []int64{20, 21}},
+		}},
+	}}
+	// OptimizePlan encodes worker selections against full node membership,
+	// including excluded segments outside the search's partition scope.
+	selection := qviews.SelectSegments(
+		[]int64{10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21},
+		map[int64]struct{}{11: {}, 20: {}, 21: {}},
+	)
+	require.Equal(t, viewpb.SegmentSelection_Exclude, selection.GetMode())
+	for _, tc := range []struct {
+		name       string
+		partitions []int64
+		count      uint32
+	}{
+		{"requested_partition", []int64{1}, 9},
+		{"all_partitions", nil, 9},
+		{"excluded_partition", []int64{2}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := &viewpb.QueryPlan{
+				Request: &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: &internalpb.SearchRequest{PartitionIDs: tc.partitions}},
+				WorkNodes: []*viewpb.QueryPlanWorkNode{{
+					Node:             &viewpb.QueryPlanWorkNode_QueryNode{QueryNode: &viewpb.QueryWorkNode{NodeId: 11}},
+					SegmentSelection: selection,
+				}},
+			}
 			require.Equal(t, tc.count, queryPlanSealedSegmentCount(plan, view))
 		})
 	}

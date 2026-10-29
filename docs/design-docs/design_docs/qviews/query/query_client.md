@@ -220,6 +220,11 @@ sealed-segment thresholds, SN includes compact `SearchOptimizationInfo` in
 partition/segment pruning: selected sealed count, vector dimension and index
 type. Other requests carry no such metadata. The admission threshold uses the
 selected segment count; actual filtered cardinalities drive the tuning hook.
+This count intersects each worker's selection with the request's partition scope.
+Worker exclusions are encoded against full node membership, so IDs from other
+partitions must not be subtracted from the requested partitions' count. `All`
+uses partition lengths directly; partial selections count matching IDs without
+copying the View.
 The same `QueryPlanClientOptimizeInfo` groups the payload reuse markers consumed
 by client restoration. Neither belongs to the reusable worker plan. No
 per-segment row-count array or Schema is copied into the response.

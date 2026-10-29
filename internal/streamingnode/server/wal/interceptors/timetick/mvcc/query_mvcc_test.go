@@ -30,7 +30,7 @@ func publishQueryTestPrefix(t *testing.T, cm *QueryMVCCManager, through uint64, 
 	for _, msg := range msgs {
 		immutable = append(immutable, msg.IntoImmutableMessage(nil))
 	}
-	cm.Publish(queryMVCCMessages(immutable), createQueryTestMessage(t, through, "", message.MessageTypeTimeTick, false, false).IntoImmutableMessage(nil))
+	cm.Publish(queryMVCCMessages(immutable), through, nil)
 }
 
 func TestQueryMVCCPublishesOneCompletePrefix(t *testing.T) {
@@ -87,13 +87,7 @@ func TestQueryMVCCPublicationOwnsCreateAndDrop(t *testing.T) {
 			require.Empty(t, cm.frontiers)
 			require.Empty(t, cm.pending)
 			cm.ApplyRecoveryBarrier("live", 40)
-			for _, persisted := range []bool{false, true} {
-				barrier := message.NewMVCCBarrierMessageBuilderV2().WithHeader(&message.MVCCBarrierMessageHeader{Vchannels: []string{"v", "unknown", "live"}}).WithBody(&message.MVCCBarrierMessageBody{}).WithAllVChannel()
-				if !persisted {
-					barrier.WithNotPersisted()
-				}
-				cm.Publish(nil, barrier.MustBuildMutable().WithTimeTick(50).IntoImmutableMessage(nil))
-			}
+			cm.Publish(nil, 50, []string{"v", "unknown", "live"})
 			_, err := cm.WaitSnapshot(t.Context(), "v", 40)
 			require.ErrorIs(t, err, merr.ErrChannelNotFound)
 			require.Equal(t, map[string]QueryVChannelMVCC{"live": {50, 50}}, cm.frontiers)
@@ -269,7 +263,7 @@ func TestQueryMVCCSnapshotAtMatchesScalarVisibility(t *testing.T) {
 			msg := createQueryTestMessage(t, ts, "v", kinds[op], op >= insertOnlyTxn, true).IntoImmutableMessage(nil)
 			cm.Publish(func(yield func(message.ImmutableMessage, bool) bool) {
 				yield(msg, op == insertOnlyTxn)
-			}, createQueryTestMessage(t, ts+2, "", message.MessageTypeTimeTick, false, false).IntoImmutableMessage(nil))
+			}, ts+2, nil)
 			switch op {
 			case 1, mixedTxn: // Delete all previously inserted live rows.
 				for i := range rows {
@@ -302,33 +296,22 @@ func TestQueryMVCCSnapshotAtMatchesScalarVisibility(t *testing.T) {
 	}
 }
 
-func TestQueryMVCCSnapshotAtFencesViewPublication(t *testing.T) {
-	cm := NewQueryMVCCManager(100)
-	cm.ApplyRecoveryBarrier("v", 100)
-	insert := createQueryTestMessage(t, 120, "v", message.MessageTypeInsert, false, true)
-	publishQueryTestPrefix(t, cm, 150, insert)
-	before, ready := cm.SnapshotAt("v", 130)
+func TestQueryMVCCRetainedACKsDoNotRegressPublishedBarrier(t *testing.T) {
+	cm := NewQueryMVCCManager(10)
+	create := createQueryTestMessage(t, 20, "v", message.MessageTypeCreateCollection, false, true)
+	publishQueryTestPrefix(t, cm, 30, create)
+	cm.Publish(nil, 30, []string{"v"})
+	// A canceled append entry retains its ACKs. The next sync can include
+	// the old Create again, but must preserve the already granted barrier.
+	insert := createQueryTestMessage(t, 40, "v", message.MessageTypeInsert, false, true)
+	publishQueryTestPrefix(t, cm, 50, create, insert)
+	got, ready := cm.Snapshot("v", 50)
 	require.True(t, ready)
-	require.Equal(t, QueryVChannelMVCC{120, 100}, before)
-	cm.BeginPublication(250)
-	// Flush@240 can already be consumed and publish a View serving Insert@120
-	// as sealed. T=100 from the old prefix would omit that row in this new View.
-	_, ready = cm.SnapshotAt("v", 130)
-	require.False(t, ready)
-	flush := createQueryTestMessage(t, 240, "v", message.MessageTypeFlush, false, true)
-	publishQueryTestPrefix(t, cm, 250, flush)
-	after, ready := cm.SnapshotAt("v", 130)
+	require.Equal(t, QueryVChannelMVCC{GrowingTimetick: 40, TransformingTimetick: 30}, got)
+	drop := createQueryTestMessage(t, 60, "v", message.MessageTypeDropCollection, false, true)
+	publishQueryTestPrefix(t, cm, 70, drop)
+	publishQueryTestPrefix(t, cm, 80, create, insert, drop)
+	got, ready = cm.Snapshot("v", 80)
 	require.True(t, ready)
-	require.Equal(t, QueryVChannelMVCC{120, 130}, after)
-	cm.BeginPublication(350)
-	// An append failure is ambiguous. Neither an old publication nor a
-	// smaller retry may prematurely remove its fence.
-	cm.BeginPublication(300)
-	publishQueryTestPrefix(t, cm, 300)
-	_, ready = cm.SnapshotAt("v", 130)
-	require.False(t, ready)
-	publishQueryTestPrefix(t, cm, 400)
-	after, ready = cm.SnapshotAt("v", 130)
-	require.True(t, ready)
-	require.Equal(t, QueryVChannelMVCC{120, 130}, after)
+	require.Zero(t, got)
 }

@@ -500,7 +500,9 @@ func queryPlanIncludesStreamingNode(view *viewpb.QueryViewOfShard, options query
 	)
 }
 
-// Count the post-pruning candidates without copying or scanning Segment IDs.
+// Count the intersection of each worker's selection and the search partition scope.
+// All selections need only partition lengths; partial selections scan IDs without
+// copying the View. Worker exclusions may also contain out-of-scope segments.
 func queryPlanSealedSegmentCount(plan *viewpb.QueryPlan, view *viewpb.QueryViewOfShard) uint32 {
 	partitions := typeutil.NewSet(plan.GetLegacySearchRequest().GetPartitionIDs()...)
 	selectedNodes := make(map[int64]*viewpb.SegmentSelection, len(plan.GetWorkNodes()))
@@ -515,17 +517,20 @@ func queryPlanSealedSegmentCount(plan *viewpb.QueryPlan, view *viewpb.QueryViewO
 		if !selected || selection.GetMode() == viewpb.SegmentSelection_None {
 			continue
 		}
-		if selection.GetMode() == viewpb.SegmentSelection_Include {
-			count += uint32(len(selection.GetSegmentIds()))
-			continue
-		}
+		accepts := qviews.SegmentSelector(selection)
 		for _, part := range qn.GetPartitions() {
-			if partitions.Len() == 0 || partitions.Contain(part.GetPartitionId()) {
-				count += uint32(len(part.GetSegmentIds()))
+			if partitions.Len() != 0 && !partitions.Contain(part.GetPartitionId()) {
+				continue
 			}
-		}
-		if selection.GetMode() == viewpb.SegmentSelection_Exclude {
-			count -= uint32(len(selection.GetSegmentIds()))
+			if selection.GetMode() == viewpb.SegmentSelection_All {
+				count += uint32(len(part.GetSegmentIds()))
+				continue
+			}
+			for _, id := range part.GetSegmentIds() {
+				if accepts(id) {
+					count++
+				}
+			}
 		}
 	}
 	return count

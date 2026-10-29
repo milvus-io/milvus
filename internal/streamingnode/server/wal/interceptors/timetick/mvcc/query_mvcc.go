@@ -21,7 +21,7 @@ func NewQueryMVCCManager(recoveryTimeTick uint64) *QueryMVCCManager {
 }
 
 // QueryMVCCManager owns query snapshots and their freshness bounds. Only ordered
-// WAB publication changes executable frontiers and channel membership. Append
+// ACK-prefix publication changes query targets and channel membership. Append
 // callbacks merely raise a minimum prefix for Strong reads; they may run after
 // publication because Acker.Ack precedes the callback.
 type QueryMVCCManager struct {
@@ -30,9 +30,7 @@ type QueryMVCCManager struct {
 	pending    map[string]uint64
 	pendingAll uint64
 	through    uint64
-	// A confirmation may reach WAL consumers before its frontiers are published.
-	publishingThrough uint64
-	changed           chan struct{}
+	changed    chan struct{}
 }
 
 // ApplyRecoveryBarrier runs for live channels before append admission opens.
@@ -89,27 +87,16 @@ func (cm *QueryMVCCManager) Snapshot(channel string, minimum uint64) (QueryVChan
 	return cm.frontiers[channel], cm.through >= minimum
 }
 
-// BeginPublication fences fixed-snapshot optimization before a confirmation is
-// exposed through the WAL or WAB. A consumer can publish a new View while the
-// corresponding frontier update is still pending. Do not lower that View's
-// execution timestamps using the previous prefix. Failed appends leave the
-// fence in place until a successful publication covers their possible effects.
-func (cm *QueryMVCCManager) BeginPublication(through uint64) {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
-	cm.publishingThrough = max(cm.publishingThrough, through)
-}
-
 // SnapshotAt returns execution frontiers equivalent to the fixed timestamp,
-// only after the complete published prefix covers it and any confirmation
-// already exposed to consumers. The caller acquires its View before sampling.
+// only after the complete published prefix covers it. Publication precedes
+// confirmation delivery; the caller acquires its View before sampling.
 // If a frontier is below timestamp, the covered interval contains no relevant
 // events for that frontier. Otherwise timestamp excludes all later events.
 // A ready zero pair still denotes an absent channel, as with Snapshot.
 func (cm *QueryMVCCManager) SnapshotAt(channel string, timestamp uint64) (QueryVChannelMVCC, bool) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
-	if cm.through < max(timestamp, cm.publishingThrough) {
+	if cm.through < timestamp {
 		return QueryVChannelMVCC{}, false
 	}
 	snapshot := cm.frontiers[channel]
@@ -141,33 +128,33 @@ func (cm *QueryMVCCManager) WaitSnapshot(ctx context.Context, channel string, mi
 	}
 }
 
-// Publish consumes successful ACK messages in TimeTick order after WAB.Append.
-// The serialized sync operator supplies exactly one newly completed prefix.
-func (cm *QueryMVCCManager) Publish(messages iter.Seq2[message.ImmutableMessage, bool], confirmation message.ImmutableMessage) {
+// Publish consumes a complete successful ACK prefix before its confirmation is
+// appended to WAL/WAB. The data is already durable; execution still waits for
+// consumer visibility. Retained ACKs may be supplied again after an append-entry
+// cancellation, so messages covered by the previous prefix are not reapplied.
+func (cm *QueryMVCCManager) Publish(messages iter.Seq2[message.ImmutableMessage, bool], through uint64, barrierChannels []string) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	if messages != nil {
 		for msg, insertOnly := range messages {
+			if msg.TimeTick() <= cm.through {
+				continue
+			}
 			cm.applyLocked(msg, insertOnly)
 			channel := msg.VChannel()
-			if cm.pending[channel] <= confirmation.TimeTick() {
+			if cm.pending[channel] <= through {
 				delete(cm.pending, channel)
 			}
 		}
 	}
-	if confirmation.MessageType() == message.MessageTypeMVCCBarrier {
-		for _, channel := range message.MustAsImmutableMVCCBarrierMessageV2(confirmation).Header().GetVchannels() {
-			if current, live := cm.frontiers[channel]; live {
-				current.GrowingTimetick = max(current.GrowingTimetick, confirmation.TimeTick())
-				current.TransformingTimetick = max(current.TransformingTimetick, confirmation.TimeTick())
-				cm.frontiers[channel] = current
-			}
+	for _, channel := range barrierChannels {
+		if current, live := cm.frontiers[channel]; live {
+			current.GrowingTimetick = max(current.GrowingTimetick, through)
+			current.TransformingTimetick = max(current.TransformingTimetick, through)
+			cm.frontiers[channel] = current
 		}
 	}
-	cm.through = confirmation.TimeTick()
-	if cm.publishingThrough <= cm.through {
-		cm.publishingThrough = 0
-	}
+	cm.through = max(cm.through, through)
 	if cm.pendingAll <= cm.through {
 		cm.pendingAll = 0
 	}

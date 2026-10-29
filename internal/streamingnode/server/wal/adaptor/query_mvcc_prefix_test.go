@@ -28,13 +28,11 @@ func TestQueryMVCCWaitsForCompletePrefix(t *testing.T) {
 			mockey.PatchConvey("independent append maxima are not a query snapshot", t, func() {
 				manager := mvcc.NewMVCCManager(100)
 				manager.ApplyRecoveryBarrier("v", 100)
-				tick := func(ts uint64) message.ImmutableMessage {
-					return message.NewTimeTickMessageBuilderV1().WithHeader(&message.TimeTickMessageHeader{}).WithBody(&message.TimeTickMsg{}).WithAllVChannel().WithNotPersisted().MustBuildMutable().WithTimeTick(ts).IntoImmutableMessage(nil)
-				}
+
 				msg := func(ts uint64, kind message.MessageType) message.MutableMessage {
 					return message.NewMutableMessageBeforeAppend(nil, map[string]string{"_t": strconv.FormatInt(int64(kind), 10), "_vc": "v"}).WithTimeTick(ts)
 				}
-				manager.QueryMVCC().Publish(nil, tick(100))
+				manager.QueryMVCC().Publish(nil, 100, nil)
 				insert := msg(200, message.MessageTypeInsert)
 				manager.UpdateMVCC(insert)
 				if confirmed {
@@ -69,14 +67,14 @@ func TestQueryMVCCWaitsForCompletePrefix(t *testing.T) {
 				manager.UpdateMVCC(deletion)
 				later := msg(250, message.MessageTypeInsert)
 				manager.UpdateMVCC(later)
-				manager.QueryMVCC().Publish(queryMVCCMessages([]message.ImmutableMessage{deletion.IntoImmutableMessage(nil), insert.IntoImmutableMessage(nil)}), tick(200))
+				manager.QueryMVCC().Publish(queryMVCCMessages([]message.ImmutableMessage{deletion.IntoImmutableMessage(nil), insert.IntoImmutableMessage(nil)}), 200, nil)
 				got := <-done
 				require.NoError(t, got.err)
 				require.EqualValues(t, 200, got.plan.GetGrowingTimetick())
 				require.EqualValues(t, 150, got.plan.GetTransformingTimetick())
 				require.Equal(t, 1, syncMock.Times())
 				// Subsequent Growing-only progress preserves the QueryNode wait target.
-				manager.QueryMVCC().Publish(queryMVCCMessages([]message.ImmutableMessage{later.IntoImmutableMessage(nil)}), tick(300))
+				manager.QueryMVCC().Publish(queryMVCCMessages([]message.ImmutableMessage{later.IntoImmutableMessage(nil)}), 300, nil)
 				next, err := w.GetLatestQueryPlanMVCC(ctx, "v")
 				require.NoError(t, err)
 				require.EqualValues(t, 250, next.GetGrowingTimetick())
@@ -134,7 +132,7 @@ func TestQueryMVCCConsistencySelectsCompleteSnapshots(t *testing.T) {
 		mockey.Mock((*roWALAdaptorImpl).Channel).Return(types.PChannelInfo{AccessMode: types.AccessModeRW}).Build()
 		syncs := mockey.Mock(mockey.GetMethod(resource.Resource().TimeTickInspector(), "TriggerSync")).To(func(types.PChannelInfo, bool) {
 			tick := message.NewTimeTickMessageBuilderV1().WithHeader(&message.TimeTickMessageHeader{}).WithBody(&message.TimeTickMsg{}).WithAllVChannel().WithNotPersisted().MustBuildMutable().WithTimeTick(200)
-			manager.QueryMVCC().Publish(queryMVCCMessages([]message.ImmutableMessage{insert.IntoImmutableMessage(nil)}), tick.IntoImmutableMessage(nil))
+			manager.QueryMVCC().Publish(queryMVCCMessages([]message.ImmutableMessage{insert.IntoImmutableMessage(nil)}), tick.TimeTick(), nil)
 		}).Build()
 		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: t.Context(), lifetime: typeutil.NewLifetime()}, param: &interceptors.InterceptorBuildParam{MVCCManager: manager}}
 		req := &viewpb.GetQueryPlanRequest{Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Eventually}}
@@ -179,7 +177,7 @@ func TestCustomizedGuaranteeReusesCompletePrefix(t *testing.T) {
 		manager.ApplyRecoveryBarrier("v", 100)
 		insert := message.NewMutableMessageBeforeAppend(nil, map[string]string{"_t": strconv.FormatInt(int64(message.MessageTypeInsert), 10), "_vc": "v"}).WithTimeTick(200)
 		tick := message.NewTimeTickMessageBuilderV1().WithHeader(&message.TimeTickMessageHeader{}).WithBody(&message.TimeTickMsg{}).WithAllVChannel().WithNotPersisted().MustBuildMutable().WithTimeTick(250)
-		manager.QueryMVCC().Publish(queryMVCCMessages([]message.ImmutableMessage{insert.IntoImmutableMessage(nil)}), tick.IntoImmutableMessage(nil))
+		manager.QueryMVCC().Publish(queryMVCCMessages([]message.ImmutableMessage{insert.IntoImmutableMessage(nil)}), tick.TimeTick(), nil)
 		mockey.Mock((*roWALAdaptorImpl).Channel).Return(types.PChannelInfo{AccessMode: types.AccessModeRW}).Build()
 		var target uint64
 		var barrierErr error

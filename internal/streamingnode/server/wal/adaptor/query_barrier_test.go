@@ -224,7 +224,7 @@ func TestQueryPlanBarrierReusesCompletePrefix(t *testing.T) {
 		publish := func(ts uint64, kind message.MessageType, through uint64) {
 			msg := message.NewMutableMessageBeforeAppend(nil, map[string]string{"_t": strconv.FormatInt(int64(kind), 10), "_vc": "v"}).WithTimeTick(ts)
 			tick := message.NewTimeTickMessageBuilderV1().WithHeader(&message.TimeTickMessageHeader{}).WithBody(&message.TimeTickMsg{}).WithAllVChannel().WithNotPersisted().MustBuildMutable().WithTimeTick(through)
-			manager.QueryMVCC().Publish(queryMVCCMessages([]message.ImmutableMessage{msg.IntoImmutableMessage(nil)}), tick.IntoImmutableMessage(nil))
+			manager.QueryMVCC().Publish(queryMVCCMessages([]message.ImmutableMessage{msg.IntoImmutableMessage(nil)}), tick.TimeTick(), nil)
 		}
 		publish(200, message.MessageTypeInsert, 250)
 		for _, tc := range []struct{ barrier, growing, transform uint64 }{
@@ -236,25 +236,17 @@ func TestQueryPlanBarrierReusesCompletePrefix(t *testing.T) {
 			require.EqualValues(t, tc.transform, got.TransformingTimetick)
 		}
 		require.Zero(t, ensured.Times())
-		// Consumers may be publishing a View from the next confirmation while
-		// the old pair is still installed. Preserve scalar execution meanwhile.
-		manager.QueryMVCC().BeginPublication(350)
-		inFlight, err := w.resolveBarrierMVCC(t.Context(), "v", 150)
-		require.NoError(t, err)
-		require.EqualValues(t, 150, inFlight.GrowingTimetick)
-		require.EqualValues(t, 150, inFlight.TransformingTimetick)
-		require.Equal(t, 1, ensured.Times())
 		// A later page still reads at B=150, even after a Delete above B.
 		publish(300, message.MessageTypeDelete, 350)
 		got, err := w.resolveBarrierMVCC(t.Context(), "v", 150)
 		require.NoError(t, err)
 		require.EqualValues(t, 150, got.GrowingTimetick)
 		require.EqualValues(t, 150, got.TransformingTimetick)
-		require.Equal(t, 1, ensured.Times())
+		require.Zero(t, ensured.Times())
 		publish(400, message.MessageTypeDropCollection, 450)
 		got, err = w.resolveBarrierMVCC(t.Context(), "v", 150)
 		require.Nil(t, got)
 		require.True(t, viewerror.AsViewError(err).IsViewNotFound())
-		require.Equal(t, 1, ensured.Times(), "a dropped channel must not be revived by a barrier")
+		require.Zero(t, ensured.Times(), "a dropped channel must not be revived by a barrier")
 	})
 }

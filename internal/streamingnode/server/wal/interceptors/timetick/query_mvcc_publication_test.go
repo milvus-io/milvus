@@ -34,8 +34,7 @@ func TestQueryMVCCACKPublicationPrecedesAppendCallback(t *testing.T) {
 			}
 			require.NotEmpty(t, published)
 			require.GreaterOrEqual(t, through, msg.TimeTick())
-			confirmation := NewTimeTickMsg(through, walimplstest.NewTestMessageID(0), 0, false).IntoImmutableMessage(nil)
-			cm.QueryMVCC().Publish(queryMVCCMessages(published), confirmation)
+			cm.QueryMVCC().Publish(queryMVCCMessages(published), through, nil)
 			before, ready := cm.QueryMVCC().Snapshot("v", through)
 			require.True(t, ready)
 			original(cm, msg)

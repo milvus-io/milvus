@@ -32,10 +32,10 @@ the corresponding request is planned/executed against the selected resources.
 
 `QueryMVCCManager` owns one executable frontier map, the complete published
 prefix position, and pending freshness bounds. Successful append callbacks only
-raise the pending bounds. After WAB publication, the serialized sync operator
-applies successful ACK messages in TimeTick order and atomically publishes both
-frontiers with the prefix position. A pair is never assembled from append-time
-maxima sampled at different stages.
+raise the pending bounds. Before appending the confirmation to WAL and WAB, the
+serialized sync operator applies successful ACK messages in TimeTick order and
+atomically publishes both frontiers with the complete ACK-prefix position. A pair
+is never assembled from append-time maxima sampled at different stages.
 
 Strong/Session fixes its minimum once from the completed query-relevant writes
 of this VChannel and global publication operations. Later appends do not move
@@ -64,15 +64,29 @@ requires P >= B and returns (min(G,B), min(T,B)). A zero pair denotes a missing
 channel and is rejected by planning. This reads at logical B without creating
 Transform progress solely because Growing writes or idle confirmations advanced.
 
-The sync operator calls `BeginPublication` before appending a confirmation, so
-both durable WAL readers and WAB readers are fenced before they can publish a
-new View ahead of its frontier update. `SnapshotAt` disables clipping while
-`publishingThrough > P`; planning uses the existing scalar barrier path instead.
-A failed append retains this conservative fence until a successful publication
-covers it. The fence lives in QueryMVCCManager, performs no network I/O under its
-lock, and does not change ordinary Strong/weak snapshot selection. The selected
-View is acquired before sampling; later publications cannot replace that View
-inside the attempt.
+WAL initialization constructs the MVCCManager at the opening fence. After
+bounded recovery, the opener registers recovered live channels before append
+admission and live replay resume.
+
+The live order is complete ACK prefix -> query MVCC publication -> confirmation
+append to WAL -> WAB append. Successful data entries in that prefix are already
+durable. Publication grants query targets, not consumer progress: planning and
+execution retain their Growing/Transform visibility waits. Ordinary backend
+errors retry within WAL.Append; terminal fencing/cancellation ends the writer
+and recovery determines its durable state. An append-entry cancellation can
+leave ACKs for the next sync, so publication skips already covered messages
+without replaying Create/Drop or regressing previously granted scoped frontiers.
+ACKs are retained until WAB delivery completes, and scoped sync waiters are
+completed only after that delivery.
+
+Both WAL and WAB consumers therefore receive the confirmation only after query
+MVCC publication. Flush/DataView effects and View readiness cannot overtake the
+query targets that enable them. RecoveryStorage needs no per-message publication
+wait. The selected View is acquired before sampling; later publications cannot
+replace it inside the attempt. Existing Views can reuse an adequate prefix
+without waiting for an unrelated in-flight sync; a newly granted target waits
+only for the runtime's existing data-visibility checks. Fixed snapshots retain
+the same complete-prefix clipping rule.
 
 For either frontier X, if X < B <= P, the complete prefix contains no relevant
 event in (X,B], so reading at X is equivalent to reading at B. If X >= B, the
