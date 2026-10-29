@@ -572,3 +572,68 @@ func TestNewGcpNativeClientTLSVersion(t *testing.T) {
 		t.Logf("NewGcpObjectStorageClient(SslTLSMinVersion=<empty>): success (default behavior)")
 	})
 }
+
+func TestNewAzureClientSPNCredentialPath(t *testing.T) {
+	t.Setenv("AZURE_CLIENT_SECRET", "fake-secret")
+	t.Setenv("AZURE_CLIENT_ID", "00000000-0000-0000-0000-000000000001")
+	t.Setenv("AZURE_TENANT_ID", "00000000-0000-0000-0000-000000000002")
+
+	cfg := &Config{
+		Address:         "core.windows.net",
+		BucketName:      "container",
+		AccessKeyID:     "testaccount",
+		UseIAM:          true,
+		SkipBucketCheck: true,
+	}
+
+	client, err := NewAzureObjectStorageClient(context.Background(), cfg)
+	require.NoError(t, err)
+	assert.Equal(t, "https://testaccount.blob.core.windows.net/", client.URL())
+}
+
+func TestNewAzureClientSPNMissingVarsReturnsError(t *testing.T) {
+	// AZURE_CLIENT_SECRET set but AZURE_CLIENT_ID and AZURE_TENANT_ID missing —
+	// the SPN branch must return a hard error rather than silently falling through.
+	t.Setenv("AZURE_CLIENT_SECRET", "fake-secret")
+	t.Setenv("AZURE_CLIENT_ID", "")
+	t.Setenv("AZURE_TENANT_ID", "")
+	t.Setenv("AZURE_FEDERATED_TOKEN_FILE", "")
+
+	cfg := &Config{
+		Address:         "core.windows.net",
+		BucketName:      "container",
+		AccessKeyID:     "testaccount",
+		UseIAM:          true,
+		SkipBucketCheck: true,
+	}
+
+	_, err := NewAzureObjectStorageClient(context.Background(), cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "SPN authentication requires")
+}
+
+func TestNewAzureClientWITakesPriorityOverSPN(t *testing.T) {
+	// Set WI token file + SPN secret, but leave CLIENT_ID and TENANT_ID empty.
+	// WI is checked first (correct WI→SPN→MI order): NewWorkloadIdentityCredential
+	// fails because CLIENT_ID/TENANT_ID are missing — this is a WI construction error,
+	// NOT the SPN validation error ("SPN authentication requires..."), proving the WI
+	// branch was entered rather than the SPN branch.
+	t.Setenv("AZURE_FEDERATED_TOKEN_FILE", "/nonexistent/token/file")
+	t.Setenv("AZURE_CLIENT_SECRET", "fake-secret")
+	t.Setenv("AZURE_CLIENT_ID", "")
+	t.Setenv("AZURE_TENANT_ID", "")
+
+	cfg := &Config{
+		Address:         "core.windows.net",
+		BucketName:      "container",
+		AccessKeyID:     "testaccount",
+		UseIAM:          true,
+		SkipBucketCheck: true,
+	}
+
+	_, err := NewAzureObjectStorageClient(context.Background(), cfg)
+	// WI path taken: error is from WorkloadIdentityCredential (missing tenant/client),
+	// not from SPN validation (which would say "SPN authentication requires...").
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "SPN authentication requires")
+}
