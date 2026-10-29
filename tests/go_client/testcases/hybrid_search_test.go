@@ -417,11 +417,10 @@ func TestHybridSearchMultiVectorsPagination(t *testing.T) {
 		common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
 	}
 
-	// check for invalid offset externally, not internally
+	// an offset is set on the hybrid search, a sub-request offset is rejected
 	annReqOffset := client.NewAnnRequest(common.DefaultFloat16VecFieldName, common.DefaultLimit, queryVec2...).WithOffset(common.MaxTopK + 1)
-	res, errSearch := mc.HybridSearch(ctx, client.NewHybridSearchOption(schema.CollectionName, common.DefaultLimit, annReqDef, annReqOffset))
-	common.CheckErr(t, errSearch, true)
-	common.CheckSearchResult(t, res, common.DefaultNq, common.DefaultLimit)
+	_, errSearch := mc.HybridSearch(ctx, client.NewHybridSearchOption(schema.CollectionName, common.DefaultLimit, annReqDef, annReqOffset))
+	common.CheckErr(t, errSearch, false, "in a hybrid search sub-request is not supported")
 
 	_, errSearch = mc.HybridSearch(ctx, client.NewHybridSearchOption(schema.CollectionName, common.DefaultLimit, annReqDef, annReqOffset).WithOffset(common.MaxTopK+1))
 	common.CheckErr(t, errSearch, false, "should be gte than 0", "(offset+limit) should be in range [1, 16384]")
@@ -473,7 +472,7 @@ func TestHybridSearchMultiVectorsRangeSearch(t *testing.T) {
 		client.NewWeightedReranker([]float64{0.8, 0.2}),
 		client.NewWeightedReranker([]float64{0.5, 0.5}),
 	} {
-		annReq1 := client.NewAnnRequest(common.DefaultFloatVecFieldName, common.DefaultLimit*2, queryVec1...).WithSearchParam("radius", "20").WithOffset(1).WithFilter(expr)
+		annReq1 := client.NewAnnRequest(common.DefaultFloatVecFieldName, common.DefaultLimit*2, queryVec1...).WithSearchParam("radius", "20").WithFilter(expr)
 		annReq2 := client.NewAnnRequest(common.DefaultFloat16VecFieldName, common.DefaultLimit, queryVec2...).WithSearchParam("range_filter", "0.01").WithFilter(expr)
 		// hybrid search
 		resRange, errSearch := mc.HybridSearch(ctx, client.NewHybridSearchOption(schema.CollectionName, common.DefaultLimit, annReq1, annReq2).WithReranker(reranker))
