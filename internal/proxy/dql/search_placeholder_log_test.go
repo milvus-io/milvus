@@ -265,7 +265,8 @@ func TestLogSearchPlaceholders(t *testing.T) {
 	request := &milvuspb.SearchRequest{}
 	infos := []*planpb.QueryInfo{}
 	for i := 0; i < 3; i++ {
-		request.SubReqs = append(request.SubReqs, &milvuspb.SubSearchRequest{Nq: 1,
+		request.SubReqs = append(request.SubReqs, &milvuspb.SubSearchRequest{
+			Nq:               1,
 			PlaceholderGroup: marshalLogPlaceholder(t, commonpb.PlaceholderType_VarChar, []byte(fmt.Sprintf("query-%d", i))),
 		})
 		infos = append(infos, &planpb.QueryInfo{QueryFieldId: int64(101 + i)})
