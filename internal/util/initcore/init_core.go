@@ -432,6 +432,7 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	diskHighWatermarkBytes := C.int64_t(diskHighWatermarkRatio * float64(osDiskBytes))
 	diskMaxBytes := C.int64_t(diskMaxRatio * float64(osDiskBytes))
 
+	C.SegcoreSetLazyIndexSlotEnabled(C.bool(params.QueryNodeCfg.TieredLazyIndexSlotEnabled.GetAsBool()))
 	storageUsageTrackingEnabled := C.bool(params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool())
 	lazyColumnGroupEnabled := C.bool(params.QueryNodeCfg.TieredLazyColumnGroupEnabled.GetAsBool())
 	evictionEnabled := C.bool(params.QueryNodeCfg.TieredEvictionEnabled.GetAsBool())
@@ -508,6 +509,7 @@ func UpdateTieredStorageConfig(params *paramtable.ComponentParam) error {
 
 	loadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredLoadingTimeoutMs.GetAsInt64())
 	warmupLoadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredWarmupLoadingTimeoutMs.GetAsInt64())
+	C.SegcoreSetLazyIndexSlotEnabled(C.bool(params.QueryNodeCfg.TieredLazyIndexSlotEnabled.GetAsBool()))
 	storageUsageTrackingEnabled := C.bool(params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool())
 	lazyColumnGroupEnabled := C.bool(params.QueryNodeCfg.TieredLazyColumnGroupEnabled.GetAsBool())
 	rejectRemoteVectorOutput := C.bool(params.QueryNodeCfg.TieredRejectRemoteVectorOutput.GetAsBool())
@@ -887,6 +889,7 @@ func SetupCoreConfigChangelCallback() {
 		paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.RegisterCallback(updateTieredStorageConfigCallback)
+		paramtable.Get().QueryNodeCfg.TieredLazyIndexSlotEnabled.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredLazyColumnGroupEnabled.RegisterCallback(updateTieredStorageConfigCallback)
 	})
 }
