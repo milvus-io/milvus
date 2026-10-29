@@ -171,7 +171,17 @@ func (s *Server) stageImportChangeFromSource(ctx context.Context, job ImportJob,
 	if err != nil || !handled {
 		return handled, err
 	}
+	// The WAL ack already carries this channel's fence, and preparation made
+	// the groups READY before the append. Publish subgroups in ordinal order
+	// while the callback holds the collection resource key; the inspector still
+	// retries any transient failure after the callback returns.
+	inspector := newSegmentChangeInspector(ctx, s.meta, s.allocator)
+	defer inspector.Stop()
 	for _, g := range groups {
+		current := s.meta.GetSegmentChangeGroup(ctx, g.CollectionID, g.GroupID)
+		if current != nil && current.State == model.SegmentChangeStateReady {
+			inspector.tryPublish(ctx, current)
+		}
 		if err := s.meta.requirePublishedChange(ctx, g); err != nil {
 			return true, err
 		}

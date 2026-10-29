@@ -53,8 +53,9 @@ type segmentChangeInspector struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	mt    *meta
-	alloc allocator.Allocator
+	mt      *meta
+	alloc   allocator.Allocator
+	cleaner *segmentChangeCleaner
 }
 
 func newSegmentChangeInspector(ctx context.Context, mt *meta, alloc allocator.Allocator) *segmentChangeInspector {
@@ -104,7 +105,8 @@ func (i *segmentChangeInspector) loop() {
 // by GetSegmentChangeGroupsByCollection, so the state transitions applied here
 // never mutate the table under a reader.
 func (i *segmentChangeInspector) checkAllGroups(ctx context.Context) {
-	for _, g := range i.mt.GetSegmentChangeGroupsByCollection(ctx, 0) {
+	groups := i.mt.GetSegmentChangeGroupsByCollection(ctx, 0)
+	for _, g := range groups {
 		switch g.State {
 		case model.SegmentChangeStateStaged:
 			i.evaluateStaged(ctx, g)
@@ -114,6 +116,7 @@ func (i *segmentChangeInspector) checkAllGroups(ctx context.Context) {
 			i.reclaimGroup(ctx, g)
 		}
 	}
+	i.cleaner.clean(ctx, groups)
 }
 
 // evaluateStaged re-evaluates a STAGED group's members with the shared

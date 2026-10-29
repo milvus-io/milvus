@@ -143,9 +143,9 @@ func TestSegmentChangeImportSubgroupsWaitForFence(t *testing.T) {
 	require.True(t, handled)
 	require.NoError(t, err)
 	require.ErrorIs(t, recovered.publishGroup(t.Context(), groups[1], newMockAllocator(t)), merr.ErrServiceUnavailable)
-	inspector = newSegmentChangeInspector(t.Context(), recovered, newMockAllocator(t))
-	inspector.checkAllGroups(t.Context())
-	inspector.checkAllGroups(t.Context())
+	handled, err = s.stageImportChangeFromSource(t.Context(), job, "ch-1", nil, 9000, model.SegmentChangeSourceImportJob)
+	require.True(t, handled)
+	require.NoError(t, err, "the callback publishes READY subgroups in order")
 	for _, g := range groups {
 		require.Equal(t, model.SegmentChangeStateCommitted, recovered.GetSegmentChangeGroup(t.Context(), 10, g.GroupID).State)
 		require.Equal(t, uint64(9000), recovered.GetSegment(t.Context(), g.NewSegmentIDs[0]).GetCommitTimestamp())
@@ -193,18 +193,8 @@ func TestSegmentChangeImportCallbackPublishesPreparedGroups(t *testing.T) {
 		require.Zero(t, g.CommitTS)
 	}
 	require.NoError(t, Params.Save(Params.DataCoordCfg.SegmentChangeEnabled.Key, "false"))
-	inspector := newSegmentChangeInspector(t.Context(), m, newMockAllocator(t))
-	var err error
-	for attempt := 0; attempt < 8; attempt++ {
-		err = callbacks.commitImportV2AckCallback(t.Context(), result)
-		if err == nil {
-			break
-		}
-		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
-		inspector.checkAllGroups(t.Context())
-		inspector.checkAllGroups(t.Context())
-	}
-	require.NoError(t, err)
+	require.NoError(t, callbacks.commitImportV2AckCallback(t.Context(), result),
+		"READY import groups publish in the ack callback without an inspector tick")
 	require.Equal(t, internalpb.ImportJobState_Completed, callbacks.importMeta.GetJob(t.Context(), 1).GetState())
 	for id, ts := range map[int64]uint64{10: 200, 11: 200, 20: 300} {
 		require.Equal(t, ts, m.GetSegment(t.Context(), id).GetCommitTimestamp())
