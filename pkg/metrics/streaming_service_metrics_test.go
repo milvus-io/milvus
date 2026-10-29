@@ -85,3 +85,24 @@ func TestReplicateViolationsIsACounter(t *testing.T) {
 	assert.Equal(t, "COUNTER", families[0].GetType().String())
 	StreamingServiceClientReplicateViolations.DeleteLabelValues("1", "test-violation-pchannel")
 }
+
+// TestSplitSourcesAwaitingCheckpointIsAGauge guards the retired-source gauge:
+// it rises when a source starts waiting on DataCoord and falls when the wait
+// ends, so it is a gauge, named without a counter's _total suffix.
+func TestSplitSourcesAwaitingCheckpointIsAGauge(t *testing.T) {
+	r := prometheus.NewRegistry()
+	r.MustRegister(StreamingNodeSplitSourcesAwaitingCheckpoint)
+
+	gauge := StreamingNodeSplitSourcesAwaitingCheckpoint.WithLabelValues("1", "test-awaiting-pchannel")
+	gauge.Set(2)
+	assert.Equal(t, float64(2), testutil.ToFloat64(gauge))
+	gauge.Set(0)
+	assert.Zero(t, testutil.ToFloat64(gauge))
+
+	families, err := r.Gather()
+	require.NoError(t, err)
+	require.Len(t, families, 1)
+	assert.Equal(t, "milvus_streamingnode_split_sources_awaiting_checkpoint", families[0].GetName())
+	assert.Equal(t, "GAUGE", families[0].GetType().String())
+	StreamingNodeSplitSourcesAwaitingCheckpoint.DeleteLabelValues("1", "test-awaiting-pchannel")
+}
