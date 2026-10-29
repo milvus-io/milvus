@@ -73,15 +73,11 @@ GetArrowReaderProperties(bool eager_prebuffer) {
 }
 
 void
-ConfigureArrowReaderProperties(int64_t hole_size_limit_bytes,
-                               int64_t range_size_limit_bytes) {
+ConfigureArrowReaderProperties(int64_t hole_size_limit_bytes) {
     auto properties = parquet::default_arrow_reader_properties();
     auto cache_options = properties.cache_options();
     if (hole_size_limit_bytes > 0) {
         cache_options.hole_size_limit = hole_size_limit_bytes;
-    }
-    if (range_size_limit_bytes > 0) {
-        cache_options.range_size_limit = range_size_limit_bytes;
     }
     AssertInfo(cache_options.range_size_limit > cache_options.hole_size_limit,
                "arrow reader range size limit must be greater than hole size "

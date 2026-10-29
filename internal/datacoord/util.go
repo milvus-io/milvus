@@ -556,6 +556,10 @@ func estimateFMIndexBuildPeakBytes(fieldSize, numRows int64, indexParams []*comm
 }
 
 func fmIndexBuildTaskSlots(fieldSize, numRows int64, indexParams []*commonpb.KeyValuePair) int64 {
+	return memoryTaskSlots(estimateFMIndexBuildPeakBytes(fieldSize, numRows, indexParams))
+}
+
+func memoryTaskSlots(peakBytes int64) int64 {
 	// CalculateNodeSlots exposes WorkerSlotUnit * BuildParallel slots per 8 GiB
 	// memory unit. Use the inverse conversion so the coordinator and worker
 	// account for the same amount of memory per slot.
@@ -570,7 +574,7 @@ func fmIndexBuildTaskSlots(fieldSize, numRows int64, indexParams []*commonpb.Key
 		)
 	}
 	bytesPerSlot := max(bytesPerWorkerMemoryUnit/workerSlotsPerMemoryUnit, 1)
-	return max(ceilDiv(estimateFMIndexBuildPeakBytes(fieldSize, numRows, indexParams), bytesPerSlot), 1)
+	return max(ceilDiv(peakBytes, bytesPerSlot), 1)
 }
 
 func calculateIndexTaskSlot(fieldSize, numRows int64, indexParams []*commonpb.KeyValuePair) int64 {
@@ -578,11 +582,12 @@ func calculateIndexTaskSlot(fieldSize, numRows int64, indexParams []*commonpb.Ke
 	if indexType == indexparamcheck.IndexFMINDEX {
 		return fmIndexBuildTaskSlots(fieldSize, numRows, indexParams)
 	}
-	defaultSlots := Params.DataCoordCfg.IndexTaskSlotUsage.GetAsInt64()
-	isHeavyIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
-	if !isHeavyIndex {
-		defaultSlots = Params.DataCoordCfg.ScalarIndexTaskSlotUsage.GetAsInt64()
+	if vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType) {
+		// Input, build workspace and output share a 4x host-memory allowance,
+		// regardless of which stages the index implementation accelerates.
+		return memoryTaskSlots(saturatingMul(fieldSize, 4))
 	}
+	defaultSlots := Params.DataCoordCfg.ScalarIndexTaskSlotUsage.GetAsInt64()
 	if fieldSize > 512*1024*1024 {
 		taskSlot := max(fieldSize/512/1024/1024, 1) * defaultSlots
 		return max(taskSlot, 1)

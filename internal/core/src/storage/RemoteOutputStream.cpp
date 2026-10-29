@@ -4,14 +4,17 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <utility>
 #include <vector>
 
+#include "arrow/buffer.h"
 #include "arrow/io/interfaces.h"
 #include "arrow/result.h"
 #include "arrow/status.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "log/Log.h"
 #include "storage/StatusToErrorCode.h"
 
 namespace milvus::storage {
@@ -22,6 +25,21 @@ RemoteOutputStream::RemoteOutputStream(
 }
 
 RemoteOutputStream::~RemoteOutputStream() {
+    // A failed Write skips Close. Discard an unfinished upload rather than
+    // publishing partial data or leaving its multipart upload on the server.
+    try {
+        if (!output_stream_->closed()) {
+            auto status = output_stream_->Abort();
+            if (!status.ok()) {
+                LOG_WARN("Failed to abort remote output stream: {}",
+                         status.ToString());
+            }
+        }
+    } catch (const std::exception& e) {
+        LOG_WARN("Failed to abort remote output stream: {}", e.what());
+    } catch (...) {
+        LOG_WARN("Failed to abort remote output stream: unknown exception");
+    }
 }
 
 size_t
@@ -44,6 +62,42 @@ RemoteOutputStream::Write(const void* data, size_t size) {
                   status.ToString());
     }
     return size;
+}
+
+size_t
+RemoteOutputStream::Write(const std::shared_ptr<arrow::Buffer>& buffer) {
+    const auto position = Tell();
+    int64_t offset = 0;
+    auto batch_size = std::min(buffer->size(), DEFAULT_INDEX_FILE_SLICE_SIZE);
+    do {
+        const auto size = std::min(batch_size, buffer->size() - offset);
+        auto slice = arrow::SliceBuffer(buffer, offset, size);
+        auto status = output_stream_->Write(slice);
+        // Baseline native S3 rejects a full queue before accepting bytes.
+        // Retry only an untouched slice, after draining admitted writes.
+        if (status.IsCapacityError() && Tell() == position + offset) {
+            auto flush_status = output_stream_->Flush();
+            if (!flush_status.ok()) {
+                ThrowInfo(ArrowStatusToErrorCode(flush_status),
+                          "Failed to flush output stream: {}",
+                          flush_status.ToString());
+            }
+            status = output_stream_->Write(slice);
+            if (status.IsCapacityError() && Tell() == position + offset &&
+                size > 1) {
+                // A single write may exceed even an empty queue's capacity.
+                batch_size = size / 2;
+                continue;
+            }
+        }
+        if (!status.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(status),
+                      "Failed to write to output stream: {}",
+                      status.ToString());
+        }
+        offset += size;
+    } while (offset < buffer->size());
+    return buffer->size();
 }
 
 size_t

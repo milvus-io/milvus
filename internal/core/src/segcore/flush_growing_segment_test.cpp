@@ -2216,7 +2216,7 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableFixedWidthVectorTypesRoundTrip) {
 
         std::vector<uint8_t> binary_vectors = {0x01, 0x02, 0xA0, 0xB0};
         std::vector<float16> fp16_vectors = {1, 2, 3, 4};
-        std::vector<bfloat16> bf16_vectors = {5, 6, 7, 8};
+        std::vector<milvus::bfloat16> bf16_vectors = {5, 6, 7, 8};
         const void* vector_data = nullptr;
         switch (test_case.data_type) {
             case DataType::VECTOR_BINARY:
@@ -2298,16 +2298,16 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableFixedWidthVectorTypesRoundTrip) {
                 break;
             }
             case DataType::VECTOR_BFLOAT16: {
-                auto row0 =
-                    static_cast<const bfloat16*>(field_data->RawValue(0));
-                auto row2 =
-                    static_cast<const bfloat16*>(field_data->RawValue(2));
+                auto row0 = static_cast<const milvus::bfloat16*>(
+                    field_data->RawValue(0));
+                auto row2 = static_cast<const milvus::bfloat16*>(
+                    field_data->RawValue(2));
                 ASSERT_NE(row0, nullptr);
                 ASSERT_NE(row2, nullptr);
-                EXPECT_EQ(std::vector<bfloat16>(row0, row0 + 2),
-                          std::vector<bfloat16>({5, 6}));
-                EXPECT_EQ(std::vector<bfloat16>(row2, row2 + 2),
-                          std::vector<bfloat16>({7, 8}));
+                EXPECT_EQ(std::vector<milvus::bfloat16>(row0, row0 + 2),
+                          std::vector<milvus::bfloat16>({5, 6}));
+                EXPECT_EQ(std::vector<milvus::bfloat16>(row2, row2 + 2),
+                          std::vector<milvus::bfloat16>({7, 8}));
                 break;
             }
             default:

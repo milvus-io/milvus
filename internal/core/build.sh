@@ -31,15 +31,15 @@ MAKE_CLEAN="OFF"
 BUILD_COVERAGE="OFF"
 PROFILING="OFF"
 RUN_CPPLINT="OFF"
-CUDA_COMPILER=/usr/local/cuda/bin/nvcc
-GPU_VERSION="OFF" #defaults to CPU version
+CUDA_COMPILER=${CUDACXX:-/usr/local/cuda/bin/nvcc}
+WITH_GPU=""
 WITH_PROMETHEUS="ON"
 CUDA_ARCH="DEFAULT"
 CUSTOM_THIRDPARTY_PATH=""
 BUILD_DISK_ANN="OFF"
 INDEX_ENGINE="knowhere"
 
-while getopts "p:t:s:f:o:ulrcghzmex" arg; do
+while getopts "p:t:s:f:o:x:G:ulrchzme" arg; do
   case $arg in
   f)
     CUSTOM_THIRDPARTY_PATH=$OPTARG
@@ -71,8 +71,8 @@ while getopts "p:t:s:f:o:ulrcghzmex" arg; do
   z)
     PROFILING="ON"
     ;;
-  g)
-    GPU_VERSION="ON"
+  G)
+    WITH_GPU=$OPTARG
     ;;
   e)
     WITH_PROMETHEUS="OFF"
@@ -98,12 +98,13 @@ parameter:
 -r: remove previous build directory(default: OFF)
 -c: code coverage(default: OFF)
 -z: profiling(default: OFF)
--g: build GPU version(default: OFF)
+-x: index engine: knowhere/cardinal(default: knowhere)
+-G: build with GPU support: ON/OFF(default: ON for cardinal, OFF for knowhere)
 -e: build without prometheus(default: OFF)
 -s: build with CUDA arch(default:DEFAULT), for example '-gencode=compute_61,code=sm_61;-gencode=compute_75,code=sm_75'
 -h: help
 usage:
-./build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -s \${CUDA_ARCH} -f\${CUSTOM_THIRDPARTY_PATH} [-u] [-l] [-r] [-c] [-z] [-g] [-m] [-e] [-h]
+./build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -s \${CUDA_ARCH} -f\${CUSTOM_THIRDPARTY_PATH} [-x \${INDEX_ENGINE}] [-G \${WITH_GPU}] [-u] [-l] [-r] [-c] [-z] [-m] [-e] [-h]
                 "
     exit 0
     ;;
@@ -113,6 +114,14 @@ usage:
     ;;
   esac
 done
+
+if [[ -z "${WITH_GPU}" ]]; then
+  if [[ "${INDEX_ENGINE}" == "cardinal" ]]; then
+    WITH_GPU="ON"
+  else
+    WITH_GPU="OFF"
+  fi
+fi
 
 if [[ ! -d ${BUILD_OUTPUT_DIR} ]]; then
   mkdir ${BUILD_OUTPUT_DIR}
@@ -151,11 +160,10 @@ CMAKE_CMD="cmake \
 -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
 -DBUILD_COVERAGE=${BUILD_COVERAGE} \
 -DENABLE_CPU_PROFILING=${PROFILING} \
--DMILVUS_GPU_VERSION=${GPU_VERSION} \
+-DWITH_GPU=${WITH_GPU} \
 -DMILVUS_WITH_PROMETHEUS=${WITH_PROMETHEUS} \
 -DMILVUS_CUDA_ARCH=${CUDA_ARCH} \
 -DCUSTOM_THIRDPARTY_DOWNLOAD_PATH=${CUSTOM_THIRDPARTY_PATH} \
--DKNOWHERE_GPU_VERSION=${SUPPORT_GPU} \
 -DBUILD_DISK_ANN=${BUILD_DISK_ANN} \
 -DINDEX_ENGINE=${INDEX_ENGINE} \
 ${SCRIPTS_DIR}"

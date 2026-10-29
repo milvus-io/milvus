@@ -100,6 +100,7 @@ typedef struct CStorageConfig {
     uint32_t talon_block_size;
     uint32_t talon_max_idle_per_addr;
     bool talon_enable_for_external_table;
+    uint32_t crt_queue_sizes;
 } CStorageConfig;
 
 typedef struct CDiskWriteRateLimiterConfig {
@@ -120,7 +121,6 @@ typedef struct CDiskWriteConfig {
 
 typedef struct CArrowReaderConfig {
     int64_t hole_size_limit_bytes;
-    int64_t range_size_limit_bytes;
 } CArrowReaderConfig;
 
 typedef struct CMmapConfig {

@@ -193,8 +193,8 @@ func InitStorageRuntime() error {
 }
 
 // RegisterArrowReaderConfigWatchers wires hot-reload of arrow parquet reader
-// range-coalescing limits to paramtable updates on the two hole/range size
-// keys. `source` identifies the component in the log entry.
+// hole-size limit to paramtable updates. `source` identifies the component
+// in the log entry.
 func RegisterArrowReaderConfigWatchers(pt *paramtable.ComponentParam, source string) {
 	handler := func(evt *config.Event) {
 		if !evt.HasUpdated {
@@ -207,13 +207,10 @@ func RegisterArrowReaderConfigWatchers(pt *paramtable.ComponentParam, source str
 		}
 		mlog.Info(context.TODO(), "arrow reader params reconfigured",
 			mlog.String("source", source),
-			mlog.Int64("holeSizeLimitBytes", pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.GetAsInt64()),
-			mlog.Int64("rangeSizeLimitBytes", pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.GetAsInt64()))
+			mlog.Int64("holeSizeLimitBytes", pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.GetAsInt64()))
 	}
 	pt.Watch(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key,
 		config.NewHandler(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key, handler))
-	pt.Watch(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key,
-		config.NewHandler(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, handler))
 }
 
 // RegisterLoonReaderConfigWatchers wires hot-reload of the milvus-storage

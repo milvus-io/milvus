@@ -408,37 +408,30 @@ func TestTieredLazyIndexSlotUpdate(t *testing.T) {
 }
 
 // TestRegisterArrowReaderConfigWatchers verifies the lifted helper registers
-// a handler under each of the two arrow-reader range/hole keys, using the
-// same sentinel approach as above.
+// a handler under the arrow-reader hole-size key, using the same sentinel
+// approach as above.
 func TestRegisterArrowReaderConfigWatchers(t *testing.T) {
 	paramtable.Init()
 	pt := paramtable.Get()
 	defer pt.Reset(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key)
-	defer pt.Reset(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key)
 
 	assert.NotPanics(t, func() { RegisterArrowReaderConfigWatchers(pt, "test") })
 
-	var holeFires, rangeFires atomic.Int32
+	var holeFires atomic.Int32
 	holeSentinel := config.NewHandler("sentinel-hole", func(*config.Event) { holeFires.Add(1) })
-	rangeSentinel := config.NewHandler("sentinel-range", func(*config.Event) { rangeFires.Add(1) })
 	pt.Watch(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key, holeSentinel)
-	pt.Watch(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, rangeSentinel)
 	defer pt.Unwatch(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key, holeSentinel)
-	defer pt.Unwatch(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, rangeSentinel)
 
 	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key, "32768"))
-	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, "1048576"))
 
 	assert.Positive(t, holeFires.Load(),
 		"helper must have registered a handler on ArrowReaderHoleSizeLimitBytes")
-	assert.Positive(t, rangeFires.Load(),
-		"helper must have registered a handler on ArrowReaderRangeSizeLimitBytes")
 
 	// Drive the handler's error branch: a negative value makes the C-side
 	// InitArrowReaderConfig return ConfigInvalid; the handler must log and
 	// return without panicking. This exercises the `if err != nil` branch.
 	assert.NotPanics(t, func() {
-		_ = pt.Save(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, "-1")
+		_ = pt.Save(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key, "-1")
 	})
 }
 
@@ -449,7 +442,6 @@ func TestInitArrowReaderConfig(t *testing.T) {
 	assert.NoError(t, InitArrowReaderConfig(pt))
 
 	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key, "32768"))
-	assert.NoError(t, pt.Save(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, "1048576"))
 	assert.NoError(t, InitArrowReaderConfig(pt))
 }
 

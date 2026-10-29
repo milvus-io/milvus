@@ -29,8 +29,8 @@ if ( BUILD_UNIT_TEST STREQUAL "ON" )
     add_definitions(-DWITHOUT_GO_LOGGING)
 endif()
 
-if ( MILVUS_GPU_VERSION )
-    add_definitions(-DMILVUS_GPU_VERSION)
+if ( WITH_GPU AND NOT INDEX_ENGINE STREQUAL "cardinal" )
+    add_definitions(-DMILVUS_WITH_CUVS)
 endif ()
 
 if ( USE_DYNAMIC_SIMD )
@@ -402,6 +402,11 @@ add_subdirectory( thirdparty )
 # Vendored projects may set global launch rules while they configure. Their
 # targets already retain the compiler launcher configured above.
 clear_global_ccache_launchers()
+# Match Knowhere's C++ header layout and instruction baseline.
+add_compile_definitions(NOT_COMPILE_FOR_SWIG)
+if (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86_64")
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-msse4.2>)
+endif()
 add_subdirectory( src )
 
 # Unittest lib

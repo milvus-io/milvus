@@ -20,6 +20,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <unordered_map>
 #include <variant>
 #include <vector>
@@ -30,6 +31,7 @@
 #include "index/contracts/Registry.h"
 #include "index/contracts/build/IArtifactBuilder.h"
 #include "index/contracts/build/VectorBuildInput.h"
+#include "indexbuilder/BuildInputMaterializer.h"
 #include "storage/artifact/Artifact.h"
 
 namespace milvus::indexbuilder {
@@ -128,15 +130,16 @@ class VectorScalarInfoAccumulator {
 
 // Owns one complete compact resident tensor and every side view consumed by one
 // typed vector builder. FieldData batches are released after Add.
-class VectorBuildMaterializer final {
+class VectorBuildMaterializer final : public BuildInputMaterializer {
  public:
     VectorBuildMaterializer(DataType field_type,
                             DataType value_type,
                             int64_t dim,
                             int64_t expected_rows,
                             const index::IndexFamily& family,
-                            const index::BuildParams& params);
-    ~VectorBuildMaterializer();
+                            const index::BuildParams& params,
+                            milvus::OpContext* op_context = nullptr);
+    ~VectorBuildMaterializer() override;
 
     VectorBuildMaterializer(VectorBuildMaterializer&&) noexcept;
     VectorBuildMaterializer&
@@ -147,10 +150,10 @@ class VectorBuildMaterializer final {
     operator=(const VectorBuildMaterializer&) = delete;
 
     const index::BuilderInputSpec&
-    InputSpec() const;
+    InputSpec() const override;
 
     void
-    Add(const FieldDataPtr& batch);
+    Add(const FieldDataPtr& batch) override;
 
     const VectorPrimaryLayout&
     PrimaryLayout() const;
@@ -158,8 +161,19 @@ class VectorBuildMaterializer final {
     void
     SetScalarInfo(VectorScalarInfo scalar_info);
 
+    bool
+    TryReserveBuild() override;
+
+    // The caller fills the complete non-null dense tensor before FinishInput.
+    uint8_t*
+    AllocateInput();
+
+    void
+    FinishInput(size_t rows);
+
     storage::ArtifactPtr
-    Build() &&;
+        Build() &&
+        override;
 
  private:
     template <typename T>
@@ -217,6 +231,8 @@ class VectorBuildMaterializer final {
     std::optional<VectorScalarInfo> scalar_info_;
     bool consumed_{false};
     State state_;
+    milvus::OpContext* op_context_{nullptr};
+    std::unique_ptr<uint8_t[]> input_;
 };
 
 }  // namespace milvus::indexbuilder

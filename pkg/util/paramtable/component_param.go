@@ -355,7 +355,6 @@ type commonConfig struct {
 	ArrowIOThreadPoolCoefficient        ParamItem `refreshable:"false"`
 	ArrowIOThreadPoolMaxCapacity        ParamItem `refreshable:"false"`
 	ArrowReaderHoleSizeLimitBytes       ParamItem `refreshable:"true"`
-	ArrowReaderRangeSizeLimitBytes      ParamItem `refreshable:"true"`
 	StorageReaderThreadPoolSize         ParamItem `refreshable:"true"`
 	IndexBuildReadWindowBytes           ParamItem `refreshable:"true"`
 	EnableMaterializedView              ParamItem `refreshable:"false"`
@@ -985,17 +984,6 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export: false,
 	}
 	p.ArrowReaderHoleSizeLimitBytes.Init(base.mgr)
-
-	p.ArrowReaderRangeSizeLimitBytes = ParamItem{
-		Key:          "common.arrow.reader.rangeSizeLimitBytes",
-		Version:      "2.6.16",
-		DefaultValue: "0",
-		Doc: `Maximum size in bytes of a coalesced Arrow read range. 0 keeps Arrow's ` +
-			`default. Increase this with holeSizeLimitBytes when larger remote reads ` +
-			`are needed to amortize object-store request latency.`,
-		Export: false,
-	}
-	p.ArrowReaderRangeSizeLimitBytes.Init(base.mgr)
 
 	p.StorageReaderThreadPoolSize = ParamItem{
 		Key:          "common.storage.readerThreadPoolSize",
@@ -8305,7 +8293,7 @@ re-ingesting. A job that timed out before applying carries 0 and left the collec
 	p.IndexTaskSlotUsage = ParamItem{
 		Key:          "dataCoord.slot.indexTaskSlotUsage",
 		Version:      "2.5.8",
-		Doc:          "slot usage of index task per 512mb",
+		Doc:          "Deprecated: unused. Vector task slots are estimated from input, build workspace and output memory.",
 		DefaultValue: "64",
 		PanicIfEmpty: false,
 		Export:       true,

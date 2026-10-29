@@ -307,6 +307,84 @@ TEST_F(VectorArrayBuildSessionTest, HnswValidEmptyListsFromBinlog) {
                       1);
 }
 
+TEST_F(VectorArrayBuildSessionTest, HnswNonemptyListsReserveBeforeBuild) {
+    constexpr int64_t rows = 32;
+    for (const auto* metric :
+         {knowhere::metric::MAX_SIM_L2, knowhere::metric::MAX_SIM_COSINE}) {
+        for (const bool gpu_build : {false, true}) {
+            SCOPED_TRACE(metric);
+            SCOPED_TRACE(gpu_build);
+            auto params = HnswParams();
+            params[knowhere::meta::METRIC_TYPE] = metric;
+            params["gpu_build"] = gpu_build;
+            auto prepared = Prepare(DataType::VECTOR_ARRAY,
+                                    DataType::VECTOR_FLOAT,
+                                    true,
+                                    knowhere::IndexEnum::INDEX_HNSW,
+                                    rows,
+                                    kDim,
+                                    params);
+            // Exercise native Cardinal v2 rather than the version-8 route.
+            prepared.request.params[index::INDEX_ENGINE_VERSION] =
+                knowhere::Version::GetMaximumVersion().VersionNumber();
+            std::mt19937 rng(42);
+            std::uniform_real_distribution<float> distribution(-1.0F, 1.0F);
+            std::vector<VectorArray> arrays;
+            std::vector<uint8_t> validity((rows + 7) / 8, 0);
+            for (int64_t row = 0; row < rows; ++row) {
+                if (row % 5 == 0) {
+                    continue;
+                }
+                validity[row / 8] |= static_cast<uint8_t>(1u << (row % 8));
+                // Logical rows, valid lists and flattened vectors differ.
+                const auto count = row % 4;
+                std::vector<float> values(count * kDim);
+                for (auto& value : values) {
+                    value = distribution(rng);
+                }
+                arrays.emplace_back(
+                    values.data(), count, kDim, DataType::VECTOR_FLOAT);
+            }
+            auto data = storage::CreateFieldData(
+                DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, true, kDim);
+            data->FillFieldData(arrays.data(), validity.data(), rows, 0);
+            WriteInsert(prepared, data);
+
+            BuildSession session(prepared.request,
+                                 prepared.file_manager_context);
+            session.LoadData();
+            ASSERT_TRUE(session.TryReserveBuild());
+            session.Build();
+            const auto stats = session.Publish();
+            ASSERT_FALSE(stats.Files().empty());
+            auto owner = Open(prepared, stats);
+            const auto* reader =
+                dynamic_cast<const index::IVectorReader*>(owner.get());
+            ASSERT_NE(reader, nullptr);
+            const std::vector<float> query_values(kDim, 0.5F);
+            const std::vector<size_t> query_offsets{0, 1};
+            index::VectorSearchParams search;
+            search.topk_ = 3;
+            search.metric_type_ = metric;
+            search.search_params_ =
+                Config{{knowhere::meta::METRIC_TYPE, metric},
+                       {knowhere::indexparam::EF, 16}};
+            SearchResult result;
+            reader->Search(EmbeddingQueries(query_values, query_offsets),
+                           search,
+                           nullptr,
+                           nullptr,
+                           result);
+            ASSERT_EQ(result.seg_offsets_.size(), 3);
+            for (const auto offset : result.seg_offsets_) {
+                ASSERT_GE(offset, 0);
+                ASSERT_LT(offset, rows);
+                EXPECT_NE(offset % 5, 0);
+            }
+        }
+    }
+}
+
 // A plain metric on VECTOR_ARRAY builds an element-level index, which
 // knowhere serializes without embedding-list sidecars.
 TEST_F(VectorArrayBuildSessionTest, HnswElementLevelListsFromBinlog) {

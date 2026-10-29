@@ -424,9 +424,6 @@ func TestRegisterSegcoreConfigWatcher(t *testing.T) {
 		pt.Save(pt.CommonCfg.ArrowReaderHoleSizeLimitBytes.Key, "32768")
 	})
 	assert.NotPanics(t, func() {
-		pt.Save(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, "1048576")
-	})
-	assert.NotPanics(t, func() {
 		pt.Save(pt.CommonCfg.LoadTransientBudgetBytes.Key, "67108864")
 	})
 	pt.Reset(pt.CommonCfg.LoadTransientBudgetBytes.Key)

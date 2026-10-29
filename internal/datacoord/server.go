@@ -285,6 +285,10 @@ func (s *Server) ServerExist(serverID int64) bool {
 
 // Init change server state to Initializing
 func (s *Server) Init() error {
+	if item := &Params.DataCoordCfg.IndexTaskSlotUsage; item.GetValue() != item.DefaultValue {
+		mlog.Warn(s.ctx, "deprecated configuration has no effect; vector task slots are estimated from memory usage",
+			mlog.String("key", item.Key), mlog.String("value", item.GetValue()))
+	}
 	s.registerMetricsRequest()
 	s.factory.Init(Params)
 	if err := s.initSession(); err != nil {

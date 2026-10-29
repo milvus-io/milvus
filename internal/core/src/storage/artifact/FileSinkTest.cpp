@@ -28,11 +28,13 @@
 #include <utility>
 #include <vector>
 
+#include "arrow/buffer.h"
 #include "common/Common.h"
 #include "common/Slice.h"
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
+#include "storage/RemoteOutputStream.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "storage/artifact/FileSink.h"
@@ -313,6 +315,210 @@ TEST_F(V1BorrowedFileTest, LinkFailuresPreserveDiagnosticsAndExistingEntry) {
     std::ifstream file(conflict);
     EXPECT_EQ(std::string(std::istreambuf_iterator<char>(file), {}),
               "existing");
+}
+
+class FailingOutputStream : public arrow::io::OutputStream {
+ public:
+    bool fail_write{true};
+    bool fail_abort{false};
+    int abort_count{0};
+    int close_count{0};
+
+    arrow::Status
+    Close() override {
+        ++close_count;
+        closed_ = true;
+        return arrow::Status::OK();
+    }
+
+    arrow::Status
+    Abort() override {
+        ++abort_count;
+        closed_ = true;
+        return fail_abort ? arrow::Status::IOError("abort failed")
+                          : arrow::Status::OK();
+    }
+
+    bool
+    closed() const override {
+        return closed_;
+    }
+
+    arrow::Result<int64_t>
+    Tell() const override {
+        return 0;
+    }
+
+    arrow::Status
+    Write(const void*, int64_t) override {
+        return fail_write ? arrow::Status::IOError("write failed")
+                          : arrow::Status::OK();
+    }
+
+ private:
+    bool closed_{false};
+};
+TEST(RemoteOutputStreamTest, FailedWriteAbortsWithoutMaskingError) {
+    for (bool fail_abort : {false, true}) {
+        auto underlying = std::make_shared<FailingOutputStream>();
+        underlying->fail_abort = fail_abort;
+        try {
+            RemoteOutputStream output(underlying);
+            output.Write(arrow::Buffer::FromString("payload"));
+            output.Close();
+            FAIL() << "Write must fail";
+        } catch (const SegcoreError& e) {
+            EXPECT_NE(std::string(e.what()).find("write failed"),
+                      std::string::npos);
+        }
+        EXPECT_EQ(underlying->abort_count, 1);
+        EXPECT_EQ(underlying->close_count, 0);
+    }
+}
+
+TEST(RemoteOutputStreamTest, ClosedStreamIsNotAborted) {
+    auto underlying = std::make_shared<FailingOutputStream>();
+    underlying->fail_write = false;
+    {
+        RemoteOutputStream output(underlying);
+        output.Write(arrow::Buffer::FromString("payload"));
+        output.Close();
+    }
+    EXPECT_EQ(underlying->close_count, 1);
+    EXPECT_EQ(underlying->abort_count, 0);
+}
+
+class LimitedOutputStream : public FailingOutputStream {
+ public:
+    int flush_count{0};
+    int write_count{0};
+    bool fail_flush{false};
+    bool partial_write{false};
+    std::vector<std::shared_ptr<arrow::Buffer>> buffers;
+
+    arrow::Result<int64_t>
+    Tell() const override {
+        return position_;
+    }
+
+    arrow::Status
+    Write(const std::shared_ptr<arrow::Buffer>& buffer) override {
+        ++write_count;
+        if (partial_write) {
+            ++position_;
+            return arrow::Status::CapacityError("partial write");
+        }
+        if (buffer->size() > 4 || pending_ + buffer->size() > 8) {
+            return arrow::Status::CapacityError("queue full");
+        }
+        buffers.push_back(buffer);
+        position_ += buffer->size();
+        pending_ += buffer->size();
+        return arrow::Status::OK();
+    }
+
+    arrow::Status
+    Flush() override {
+        ++flush_count;
+        if (fail_flush) {
+            return arrow::Status::IOError("flush failed");
+        }
+        pending_ = 0;
+        return arrow::Status::OK();
+    }
+
+ private:
+    int64_t position_{0};
+    int64_t pending_{0};
+};
+
+TEST(RemoteOutputStreamTest, RetriesUnacceptedSlicesWithoutCopying) {
+    auto underlying = std::make_shared<LimitedOutputStream>();
+    auto buffer = arrow::Buffer::FromString("abcdefghijklmnopqrstuvwxyz");
+    {
+        RemoteOutputStream output(underlying);
+        EXPECT_EQ(output.Write(buffer), buffer->size());
+        EXPECT_EQ(output.Tell(), buffer->size());
+        int64_t offset = 0;
+        std::string bytes;
+        for (const auto& slice : underlying->buffers) {
+            EXPECT_EQ(slice->data(), buffer->data() + offset);
+            offset += slice->size();
+            bytes += slice->ToString();
+        }
+        EXPECT_EQ(bytes, buffer->ToString());
+        EXPECT_GT(underlying->flush_count, 0);
+        EXPECT_EQ(output.Write(arrow::Buffer::FromString("tail")), 4);
+        EXPECT_EQ(output.Tell(), buffer->size() + 4);
+        EXPECT_EQ(output.Write(arrow::Buffer::FromString("")), 0);
+        output.Close();
+    }
+    EXPECT_EQ(underlying->close_count, 1);
+    EXPECT_EQ(underlying->abort_count, 0);
+}
+
+TEST(RemoteOutputStreamTest, CapacityRetryPreservesFlushFailure) {
+    auto underlying = std::make_shared<LimitedOutputStream>();
+    underlying->fail_flush = true;
+    try {
+        RemoteOutputStream output(underlying);
+        output.Write(arrow::Buffer::FromString("payload"));
+        FAIL() << "Flush must fail";
+    } catch (const SegcoreError& e) {
+        EXPECT_NE(std::string(e.what()).find("flush failed"),
+                  std::string::npos);
+    }
+    EXPECT_EQ(underlying->write_count, 1);
+    EXPECT_EQ(underlying->abort_count, 1);
+}
+
+TEST(RemoteOutputStreamTest, DoesNotReplayPartiallyAcceptedWrite) {
+    auto underlying = std::make_shared<LimitedOutputStream>();
+    underlying->partial_write = true;
+    {
+        RemoteOutputStream output(underlying);
+        EXPECT_THROW(output.Write(arrow::Buffer::FromString("payload")),
+                     SegcoreError);
+    }
+    EXPECT_EQ(underlying->write_count, 1);
+    EXPECT_EQ(underlying->flush_count, 0);
+    EXPECT_EQ(underlying->abort_count, 1);
+}
+
+TEST(V1ArtifactIOTest, RetainsRawBufferUntilUpload) {
+    auto remote_root = LocalDirectory::CreateOwned(
+        std::filesystem::temp_directory_path().string(),
+        "milvus-filesink-stream-test-XXXXXX",
+        "V1 artifact stream test");
+    StorageConfig storage_config;
+    storage_config.storage_type = "local";
+    storage_config.root_path = remote_root->Path() + "/";
+    auto chunk_manager = CreateChunkManager(storage_config);
+    auto filesystem = InitArrowFileSystem(storage_config);
+    FieldDataMeta field_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {
+        3, 100, 1000, 1, "artifact_io", "field", DataType::INT64, 1, false};
+    FileManagerContext context(
+        field_meta, index_meta, chunk_manager, filesystem);
+
+    V1DiskSink sink(context);
+    auto buffer = arrow::Buffer::FromString("payload");
+    std::weak_ptr<arrow::Buffer> retained = buffer;
+    sink.WriteRawEntry("payload", std::move(buffer));
+    EXPECT_FALSE(retained.expired());
+    for (const auto& entry :
+         std::filesystem::recursive_directory_iterator(remote_root->Path())) {
+        EXPECT_FALSE(entry.is_regular_file());
+    }
+    const auto stats = sink.Finish();
+    EXPECT_TRUE(retained.expired());
+    ASSERT_EQ(stats.Files().size(), 1);
+    auto input = filesystem->OpenInputFile(stats.Files().front().file_name);
+    ASSERT_TRUE(input.ok()) << input.status();
+    auto bytes = (*input)->ReadAt(0, 7);
+    ASSERT_TRUE(bytes.ok()) << bytes.status();
+    EXPECT_EQ((*bytes)->ToString(), "payload");
+    sink.ReleaseLocalStaging();
 }
 
 }  // namespace

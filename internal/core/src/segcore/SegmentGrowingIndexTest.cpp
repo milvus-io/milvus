@@ -977,7 +977,7 @@ TEST_P(GrowingIndexTest, AddWithoutBuildPool) {
         auto values = dataset.get_col<float16>(vec);
         build_and_add(knowhere::GenDataSet(N, dim, values.data()), index_type);
     } else if (data_type == DataType::VECTOR_BFLOAT16) {
-        auto values = dataset.get_col<bfloat16>(vec);
+        auto values = dataset.get_col<milvus::bfloat16>(vec);
         build_and_add(knowhere::GenDataSet(N, dim, values.data()), index_type);
     } else if (is_sparse) {
         // Sparse incremental Add still requires its concurrent backend.
@@ -1443,7 +1443,7 @@ TEST_P(GrowingIndexTest, GetVector) {
         // GetVector for VECTOR_FLOAT16
         for (int64_t i = 0; i < n_batch; i++) {
             auto dataset = DataGen(schema, per_batch);
-            auto fakevec = dataset.get_col<bfloat16>(vec);
+            auto fakevec = dataset.get_col<milvus::bfloat16>(vec);
             auto offset = segment->PreInsert(per_batch);
             segment->Insert(offset,
                             per_batch,
@@ -1456,11 +1456,12 @@ TEST_P(GrowingIndexTest, GetVector) {
                 nullptr, vec, ids_ds->GetIds(), num_inserted);
 
             auto vector = result.get()->mutable_vectors()->bfloat16_vector();
-            EXPECT_TRUE(vector.size() == num_inserted * dim * sizeof(bfloat16));
+            EXPECT_TRUE(vector.size() ==
+                        num_inserted * dim * sizeof(milvus::bfloat16));
             for (size_t i = 0; i < num_inserted; ++i) {
                 auto id = ids_ds->GetIds()[i];
                 for (size_t j = 0; j < dim; ++j) {
-                    EXPECT_TRUE(reinterpret_cast<bfloat16*>(
+                    EXPECT_TRUE(reinterpret_cast<milvus::bfloat16*>(
                                     vector.data())[i * dim + j] ==
                                 fakevec[(id % per_batch) * dim + j]);
                 }

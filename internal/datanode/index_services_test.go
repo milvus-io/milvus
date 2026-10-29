@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -30,6 +32,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/importv2"
+	"github.com/milvus-io/milvus/internal/datanode/importv3"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -86,6 +90,89 @@ func (fakeServiceIndex) UpLoad() (*cgopb.IndexStats, error) {
 	return &cgopb.IndexStats{SerializedIndexInfos: []*cgopb.SerializedIndexFileInfo{{FileName: "text-index", FileSize: 10}}}, nil
 }
 
+type waitingServiceIndex struct {
+	fakeServiceIndex
+	admitted atomic.Bool
+	notified sync.Once
+	waiting  chan struct{}
+	building chan struct{}
+	release  chan struct{}
+}
+
+func (*waitingServiceIndex) LoadData() error { return nil }
+func (i *waitingServiceIndex) TryReserveBuild() (bool, error) {
+	i.notified.Do(func() { close(i.waiting) })
+	return i.admitted.Load(), nil
+}
+
+func (i *waitingServiceIndex) Build() error {
+	close(i.building)
+	<-i.release
+	return nil
+}
+
+func TestQuerySlotCountsTaskWaitingForBuildAdmission(t *testing.T) {
+	paramtable.Init()
+	slots := mockey.Mock(index.CalculateNodeSlots).Return(int64(128)).Build()
+	defer slots.UnPatch()
+	builder := &waitingServiceIndex{
+		waiting: make(chan struct{}), building: make(chan struct{}), release: make(chan struct{}),
+	}
+	create := mockey.Mock(indexcgowrapper.CreateIndexBuilder).Return(builder, nil).Build()
+	defer create.UnPatch()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	node := NewDataNode(ctx)
+	defer node.cancel()
+	node.importScheduler = importv2.NewScheduler(importv2.NewTaskManager())
+	node.importV3Scheduler = importv3.NewScheduler(ctx, func() int64 { return 1 }, importv3.NewMetrics(1))
+	defer node.importV3Scheduler.Close()
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	require.NoError(t, node.taskScheduler.Start())
+	var release sync.Once
+	defer func() {
+		release.Do(func() { close(builder.release) })
+		node.taskScheduler.Close()
+		node.taskScheduler.Wait()
+	}()
+	query := func() int64 {
+		resp, err := node.QuerySlot(ctx, &datapb.QuerySlotRequest{})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		return resp.GetAvailableSlots()
+	}
+	require.EqualValues(t, 128, query())
+	taskCtx, taskCancel := context.WithCancel(ctx)
+	defer taskCancel()
+	task := index.NewIndexBuildTask(taskCtx, taskCancel, &workerpb.CreateJobRequest{
+		ClusterID: "waiting-slots", BuildID: 900, TaskSlot: 64,
+		CollectionID: 1, PartitionID: 2, SegmentID: 3, NumRows: 1, Dim: 4,
+		Field:         &schemapb.FieldSchema{FieldID: 100, DataType: schemapb.DataType_FloatVector},
+		IndexParams:   []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FLAT"}},
+		TypeParams:    []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}},
+		StorageConfig: &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()},
+	}, nil, node.taskManager, nil)
+	require.NoError(t, node.taskScheduler.TaskQueue.Enqueue(task))
+	select {
+	case <-builder.waiting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("task never reached build admission")
+	}
+	used, queued := node.taskScheduler.TaskQueue.GetSlotUsage()
+	require.EqualValues(t, 64, used)
+	require.Zero(t, queued)
+	require.EqualValues(t, 64, query())
+	builder.admitted.Store(true)
+	select {
+	case <-builder.building:
+	case <-time.After(5 * time.Second):
+		t.Fatal("task never started building")
+	}
+	require.EqualValues(t, 64, query())
+	release.Do(func() { close(builder.release) })
+	require.Eventually(t, func() bool { return query() == 128 }, 5*time.Second, time.Millisecond)
+}
+
 func TestCreateAnalyzeTaskPropagatesPluginContext(t *testing.T) {
 	paramtable.Init()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -131,7 +218,7 @@ func TestCreateAnalyzeTaskPropagatesPluginContext(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(status))
 
-	task := node.taskScheduler.TaskQueue.PopUnissuedTask()
+	task := node.taskScheduler.TaskQueue.PopUnissuedTask(true)
 	require.NotNil(t, task)
 	require.NoError(t, task.Execute(ctx))
 	require.Equal(t, expected, captured)
@@ -219,7 +306,7 @@ func TestCreateStatsTaskPropagatesPluginContext(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(status))
 
-	task := node.taskScheduler.TaskQueue.PopUnissuedTask()
+	task := node.taskScheduler.TaskQueue.PopUnissuedTask(true)
 	require.NotNil(t, task)
 	require.NoError(t, task.Execute(ctx))
 	require.NotNil(t, captured)

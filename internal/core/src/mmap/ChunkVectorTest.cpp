@@ -261,7 +261,7 @@ TEST_F(ChunkVectorTest, FillDataWithMmap) {
                                 ->mutable_vectors()
                                 ->float16_vector()
                                 .data();
-        auto bf16_vec_res = (bfloat16*)bf16_vec_result.get()
+        auto bf16_vec_res = (milvus::bfloat16*)bf16_vec_result.get()
                                 ->mutable_vectors()
                                 ->bfloat16_vector()
                                 .data();
@@ -274,7 +274,7 @@ TEST_F(ChunkVectorTest, FillDataWithMmap) {
         EXPECT_TRUE(fp32_vec_res.size() == num_inserted * dim);
         auto fp32_vec_gt = dataset.get_col<float>(fp32_vec);
         auto fp16_vec_gt = dataset.get_col<float16>(fp16_vec);
-        auto bf16_vec_gt = dataset.get_col<bfloat16>(bf16_vec);
+        auto bf16_vec_gt = dataset.get_col<milvus::bfloat16>(bf16_vec);
         auto sparse_vec_gt =
             dataset
                 .get_col<knowhere::sparse::SparseRow<milvus::SparseValueType>>(
@@ -292,7 +292,7 @@ TEST_F(ChunkVectorTest, FillDataWithMmap) {
                                sizeof(float16) * dim) == 0);
             EXPECT_TRUE(memcmp((void*)(&bf16_vec_res[i * dim]),
                                (void*)(&bf16_vec_gt[(id % per_batch) * dim]),
-                               sizeof(bfloat16) * dim) == 0);
+                               sizeof(milvus::bfloat16) * dim) == 0);
             EXPECT_TRUE(memcmp((void*)(&int8_vec_res[i * dim]),
                                (void*)(&int8_vec_gt[(id % per_batch) * dim]),
                                sizeof(int8) * dim) == 0);
