@@ -35,6 +35,7 @@
 #include "bitset/bitset.h"
 #include "common/Consts.h"
 #include "common/Utils.h"
+#include "config/ConfigKnowhere.h"
 #include "index/IndexTypeAdapter.h"
 #include "index/Meta.h"
 #include "index/contracts/Registry.h"
@@ -45,7 +46,6 @@
 #include "index/vector/VectorMemBuilder.h"
 #include "knowhere/build_scheduler.h"
 #include "knowhere/comp/index_param.h"
-#include "knowhere/comp/knowhere_config.h"
 #include "knowhere/version.h"
 #include "segcore/segcore_init_c.h"
 #include "storage/artifact/LoadOptions.h"
@@ -755,10 +755,18 @@ TEST(VectorFamilyEdgeTest, MRLRefinesWithSourceRowsAfterReload) {
     EXPECT_EQ(result.seg_offsets_[0], 1);
     EXPECT_FLOAT_EQ(result.distances_[0], 0.0F);
 
-    const auto previous = knowhere::KnowhereConfig::GetMRLRefineRatio();
+    const auto previous = milvus::config::KnowhereGetMRLRefineRatio();
+    search.search_params_[knowhere::indexparam::MRL_REFINE_RATIO] = 99.0f;
+    search.search_params_[knowhere::indexparam::REFINE_RATIO] = 4.0f;
     search.topk_ = 1;
     for (float ratio : {1.0f, 2.9f}) {
         EXPECT_EQ(SegcoreSetMRLRefineRatio(ratio).error_code, 0);
+        const auto prepared = PrepareVectorSearchParams(search);
+        EXPECT_FLOAT_EQ(
+            prepared.at(knowhere::indexparam::MRL_REFINE_RATIO).get<float>(),
+            ratio);
+        EXPECT_FLOAT_EQ(
+            prepared.at(knowhere::indexparam::REFINE_RATIO).get<float>(), 4.0f);
         result = SearchResult{};
         reader->Search(GenDataset(1, kDim, values.data() + kDim),
                        search,
@@ -770,7 +778,7 @@ TEST(VectorFamilyEdgeTest, MRLRefinesWithSourceRowsAfterReload) {
             EXPECT_EQ(result.seg_offsets_[0], ratio == 1.0f ? 0 : 1);
         }
     }
-    EXPECT_TRUE(knowhere::KnowhereConfig::SetMRLRefineRatio(previous));
+    milvus::config::KnowhereSetMRLRefineRatio(previous);
 }
 
 TEST(VectorFamilyEdgeTest, InterimIVFPQChunksBuildAddAndFilteredSearch) {
