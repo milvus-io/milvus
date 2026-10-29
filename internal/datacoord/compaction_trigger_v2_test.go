@@ -1403,3 +1403,39 @@ func (s *CompactionTriggerManagerSuite) TestHandleTicker() {
 		s.triggerManager.handleTicker(context.Background(), BumpSchemaVersionTicker)
 	})
 }
+
+// TestHandleTickerRefundsSingleViewsDroppedWhenFull checks that the single
+// views an automatic run drops at the capped dispatch, after the policy took
+// their admission tokens, give those tokens back; otherwise the shared budget
+// would stay spent on compactions that never reached the queue.
+func (s *CompactionTriggerManagerSuite) TestHandleTickerRefundsSingleViewsDroppedWhenFull() {
+	paramtable.Get().Save(Params.DataCoordCfg.SingleCompactionRateLimitTokens.Key, "2")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.SingleCompactionRateLimitTokens.Key)
+	resetSingleCompactionAdmitterForTest()
+	defer resetSingleCompactionAdmitterForTest()
+	admittedViews := func(segmentIDs ...int64) []CompactionView {
+		return lo.Map(segmentIDs, func(segmentID int64, _ int) CompactionView {
+			return &MixSegmentView{label: s.testLabel, segments: []*SegmentView{{ID: segmentID, label: s.testLabel, Size: 1}}, triggerID: 1000, admitted: true}
+		})
+	}
+	// The policy spent both tokens on the two views, in a contested round.
+	admitter := getSingleCompactionAdmitter()
+	admitter.mu.Lock()
+	admitter.tokens = 0
+	admitter.served[admissionSourcePolicy] = 2
+	admitter.mu.Unlock()
+	s.triggerManager.policies[SingleTicker] = &testCompactionPolicy{enabled: true, policyName: "test", triggerResult: map[CompactionTriggerType][]CompactionView{
+		TriggerTypeSingle: admittedViews(901, 902),
+	}}
+	// Room when the run starts, none by the time the single views are dispatched.
+	s.inspector.EXPECT().isFull().Return(false).Once()
+	s.inspector.EXPECT().isFull().Return(true).Once()
+	// No enqueueCompaction expectation is set, so a submission would fail the test.
+
+	s.triggerManager.handleTicker(context.Background(), SingleTicker)
+
+	admitter.mu.Lock()
+	defer admitter.mu.Unlock()
+	s.Equal(2.0, admitter.tokens, "both dropped views gave their tokens back")
+	s.Equal(0, admitter.served[admissionSourcePolicy], "the service charge of the dropped views is reversed")
+}

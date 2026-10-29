@@ -258,12 +258,13 @@ func (t *compactionTrigger) stop() {
 }
 
 // armDeferredRetry schedules one retry for a collection whose
-// collection-scoped round deferred single compaction candidates while no
-// global round runs. After the cadence a global round would have had, the
-// collection gets a plain signal, so its deferred segments are reconsidered
-// once the bucket has refilled even if it never flushes again. One retry per
-// collection is pending at a time; a retry round that still defers arms the
-// next one.
+// collection-scoped round left single compaction candidates unsubmitted while
+// no global round runs, whether admission deferred them, the inspector was
+// full or the queue refused their plans. After the cadence a global round
+// would have had, the collection gets a plain signal, so its segments are
+// reconsidered once the bucket has refilled or the inspector has room, even if
+// it never flushes again. One retry per collection is pending at a time; a
+// retry round that still leaves candidates behind arms the next one.
 func (t *compactionTrigger) armDeferredRetry(collectionID int64) {
 	t.deferredRetryMu.Lock()
 	defer t.deferredRetryMu.Unlock()
@@ -440,7 +441,24 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		return true
 	}
 
+	// A collection-scoped round that runs without a global loop is the only
+	// round that reconsiders its single compaction candidates, so when it ends
+	// with candidates it could not submit, deferred by admission, held back by
+	// a full inspector, refused by the queue or left behind by an error before
+	// planning, it arms its own retry. The retry signal takes this same path,
+	// so a retry that finds the inspector full is re-armed rather than lost.
+	// A collection whose segments are gone yields no candidate group and arms
+	// nothing, so the retries end with the collection.
+	plansSingle := t.plansSingleCompaction(signal)
+	retryLater := false
+	defer func() {
+		if retryLater && plansSingle && !signal.isGlobal() && !signal.isForce {
+			t.armDeferredRetry(signal.collectionID)
+		}
+	}()
+
 	if inspectorFull() {
+		retryLater = true
 		return nil
 	}
 
@@ -448,6 +466,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 	groups, err := t.getCandidates(signal)
 	if err != nil {
 		log.Warn(context.TODO(), "handle signal failed, get candidates return error", mlog.Err(err))
+		retryLater = true
 		return err
 	}
 
@@ -467,7 +486,6 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		expectedSize int64
 		candidates   []*singleCandidate
 	}
-	plansSingle := t.plansSingleCompaction(signal)
 	prepared := make([]*preparedGroup, 0, len(groups))
 	for _, group := range groups {
 		log := mlog.With(
@@ -483,6 +501,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		if err != nil {
 			log.Warn(context.TODO(), "get collection info failed, skip handling compaction", mlog.Err(err))
 			if signal.collectionID != 0 {
+				retryLater = true
 				return err
 			}
 			continue
@@ -502,6 +521,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		if err != nil {
 			log.Warn(context.TODO(), "get compact time failed, skip to handle compaction", mlog.Err(err))
 			if signal.collectionID != 0 {
+				retryLater = true
 				return err
 			}
 			continue
@@ -543,17 +563,18 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		} else {
 			admission = newSingleAdmission(nil, 0, nil)
 		}
-		defer admission.settle(getSingleCompactionAdmitter())
+		defer func() {
+			// Admitted candidates whose plan never reached the queue get
+			// their tokens back and are reconsidered by the retry.
+			if admission.settle(getSingleCompactionAdmitter()) > 0 {
+				retryLater = true
+			}
+		}()
 		if deferred > 0 {
 			log.RatedInfo(context.TODO(), rate.Limit(10), "deferred single compaction candidates by admission limit",
 				mlog.Int("admitted", admitted),
 				mlog.Int("deferred", deferred))
-			if !signal.isGlobal() {
-				// A collection-scoped round plans single compaction only when
-				// no global round runs, so nothing would reconsider the
-				// deferred candidates unless the collection flushes again.
-				t.armDeferredRetry(signal.collectionID)
-			}
+			retryLater = true
 		}
 	}
 
@@ -565,12 +586,14 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) error {
 		)
 
 		if inspectorFull() {
+			retryLater = true
 			return nil
 		}
 
 		plans := t.generatePlansWithAdmission(group.segments, signal, ct, expectedSize, admission)
 		for _, bucket := range plans {
 			if inspectorFull() {
+				retryLater = true
 				return nil
 			}
 			inputSegmentIDs := lo.Map(bucket.segments, func(s *SegmentInfo, _ int) int64 { return s.GetID() })
@@ -707,11 +730,13 @@ func (a *singleAdmission) enqueued(segmentIDs ...int64) {
 
 // settle gives back the tokens of admitted segments that never reached the
 // queue, whether the planner left them out or the enqueue failed.
-func (a *singleAdmission) settle(admitter *singleCompactionAdmitter) {
+func (a *singleAdmission) settle(admitter *singleCompactionAdmitter) (refunded int) {
 	if a == nil {
-		return
+		return 0
 	}
-	admitter.refund(admissionSourceTrigger, len(a.admitted)-len(a.reached))
+	refunded = len(a.admitted) - len(a.reached)
+	admitter.refund(admissionSourceTrigger, refunded)
+	return refunded
 }
 
 func (t *compactionTrigger) generatePlansTwoTier(segments []*SegmentInfo, signal *compactionSignal, compactTime *compactTime, expectedSize int64, admission *singleAdmission) []*compactionBucket {

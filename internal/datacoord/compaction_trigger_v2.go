@@ -426,18 +426,37 @@ func (m *CompactionTriggerManager) triggerViewForCompaction(ctx context.Context,
 	}
 }
 
+// refundUnsubmittedSingleViews gives back the admission tokens of the single
+// views a capped dispatch drops before they reach SubmitSingleViewToScheduler,
+// where a view that fails to enqueue settles its own token. The policy took
+// the tokens when it admitted the views, so a view dropped anywhere on the way
+// to the queue has to give its token back, or the shared budget stays spent
+// on a compaction that never happened.
+func refundUnsubmittedSingleViews(views []CompactionView) {
+	dropped := 0
+	for _, view := range views {
+		if mixView, ok := view.(*MixSegmentView); ok && mixView.admitted {
+			dropped++
+		}
+	}
+	getSingleCompactionAdmitter().refund(admissionSourcePolicy, dropped)
+}
+
 // notify submits the views of one trigger type. When capped, it stops once the
 // inspector is full and leaves the rest to later runs.
 func (m *CompactionTriggerManager) notify(ctx context.Context, eventType CompactionTriggerType, views []CompactionView, capped bool) {
 	log := mlog.With()
 	log.Debug(ctx, "Start to trigger compactions", mlog.String("eventType", eventType.String()))
-	for _, view := range views {
+	for i, view := range views {
 		outViews, reason := m.triggerViewForCompaction(ctx, eventType, view)
 		for _, outView := range outViews {
 			if outView != nil {
 				if capped && m.inspector.isFull() {
 					log.RatedInfo(ctx, rate.Limit(1), "Stop submitting compactions since inspector is full",
 						mlog.String("eventType", eventType.String()))
+					// A single view yields itself as its only output view,
+					// so none of the views from this one on was submitted.
+					refundUnsubmittedSingleViews(views[i:])
 					return
 				}
 				log.Info(ctx, "Success to trigger a compaction, try to submit",

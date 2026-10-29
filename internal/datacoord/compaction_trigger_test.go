@@ -4341,3 +4341,106 @@ func (s *CompactionTriggerSuite) TestCollectionSignalRetriesDeferredWithoutGloba
 	s.Equal(4, submitted, "the retry round admits the next two")
 	s.True(pendingRetry(), "two candidates are still deferred, so the next retry is armed")
 }
+
+// A deferred retry that reaches the worker while the inspector is full must
+// not be lost: the round returns before admission, so the retry is re-armed
+// for when the inspector has room again.
+func (s *CompactionTriggerSuite) TestDeferredRetryReArmedWhenInspectorFull() {
+	pt := paramtable.Get()
+	pt.Save(pt.DataCoordCfg.EnableAutoCompaction.Key, "false")
+	s.T().Cleanup(func() { pt.Reset(pt.DataCoordCfg.EnableAutoCompaction.Key) })
+	pendingRetry := func() bool {
+		s.tr.deferredRetryMu.Lock()
+		defer s.tr.deferredRetryMu.Unlock()
+		_, pending := s.tr.deferredRetries[s.collectionID]
+		return pending
+	}
+
+	s.tr.allocator = newMockAllocator(s.T())
+	s.tr.armDeferredRetry(s.collectionID)
+	s.tr.fireDeferredRetry(s.collectionID)
+	s.False(pendingRetry(), "firing consumes the pending retry")
+	var retry *compactionSignal
+	select {
+	case retry = <-s.tr.signals:
+	default:
+		s.FailNow("the retry sent no signal")
+	}
+
+	// The inspector is full: the retry round returns at once, before it
+	// looks at any candidate, and arms the next retry instead of dropping it.
+	s.inspector.EXPECT().isFull().Return(true).Once()
+	s.NoError(s.tr.handleSignal(retry))
+	s.True(pendingRetry(), "the retry is re-armed while the inspector is full")
+
+	// A global signal under the same back-pressure arms nothing: the global
+	// loop itself is the retry.
+	s.tr.deferredRetryMu.Lock()
+	s.tr.deferredRetries[s.collectionID].Stop()
+	delete(s.tr.deferredRetries, s.collectionID)
+	s.tr.deferredRetryMu.Unlock()
+	s.inspector.EXPECT().isFull().Return(true).Once()
+	s.NoError(s.tr.handleSignal(NewCompactionSignal()))
+	s.False(pendingRetry())
+}
+
+// Admitted candidates whose plans the queue refuses give their tokens back
+// and are retried, so a collection-scoped round without a global loop does
+// not lose them to a transient enqueue failure.
+func (s *CompactionTriggerSuite) TestCollectionSignalRetriesRefundedCandidates() {
+	const mb = 1024 * 1024
+	pt := paramtable.Get()
+	for key, value := range map[string]string{
+		pt.DataCoordCfg.EnableAutoCompaction.Key:                   "false",
+		pt.DataCoordCfg.IndexBasedCompaction.Key:                   "false",
+		pt.DataCoordCfg.CompactionPreAllocateIDExpansionFactor.Key: "1",
+		pt.DataCoordCfg.SegmentMaxSize.Key:                         "100",
+		pt.DataCoordCfg.SingleCompactionRatioThreshold.Key:         "0",
+		pt.DataCoordCfg.SingleCompactionThresholdJitter.Key:        "0",
+		// The budget covers all six eligible segments, so nothing is deferred
+		// and only the refund can arm the retry.
+		pt.DataCoordCfg.SingleCompactionRateLimitTokens.Key:   "10",
+		pt.DataCoordCfg.SingleCompactionRateLimitInterval.Key: "60",
+	} {
+		pt.Save(key, value)
+		s.T().Cleanup(func() { pt.Reset(key) })
+	}
+	resetSingleCompactionAdmitterForTest()
+	s.T().Cleanup(resetSingleCompactionAdmitterForTest)
+	for _, segment := range s.meta.segments.GetSegments() {
+		updated := segment.Clone()
+		updated.Binlogs[0].Binlogs[0].MemorySize = 250 * mb
+		updated.Stats = storage.BuildStatsFromFieldBinlogs(updated.GetBinlogs(), updated.GetStatslogs(), updated.GetBm25Statslogs(), updated.GetDeltalogs())
+		s.meta.segments.SetSegment(updated.GetID(), updated)
+	}
+	s.handler.EXPECT().GetCollection(mock.Anything, s.collectionID).Return(&collectionInfo{
+		ID: s.collectionID,
+		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: s.vecFieldID, DataType: schemapb.DataType_FloatVector},
+		}},
+		Properties: map[string]string{common.CollectionAutoCompactionKey: "true"},
+	}, nil)
+	s.tr.allocator = newMockAllocator(s.T())
+	s.inspector.EXPECT().isFull().Return(false)
+	s.inspector.EXPECT().getRemainingCapacity().Return(-1)
+	s.inspector.EXPECT().enqueueCompaction(mock.Anything).Return(errors.New("queue refused the plan"))
+	pendingRetry := func() bool {
+		s.tr.deferredRetryMu.Lock()
+		defer s.tr.deferredRetryMu.Unlock()
+		_, pending := s.tr.deferredRetries[s.collectionID]
+		return pending
+	}
+	admitter := getSingleCompactionAdmitter()
+	tokens := func() float64 {
+		admitter.mu.Lock()
+		defer admitter.mu.Unlock()
+		return admitter.tokens
+	}
+
+	s.NoError(s.tr.handleSignal(NewCompactionSignal().
+		WithCollectionID(s.collectionID).
+		WithPartitionID(s.partitionID).
+		WithChannel(s.channel)))
+	s.Equal(10.0, tokens(), "every admitted candidate that missed the queue gave its token back")
+	s.True(pendingRetry(), "the refunded candidates are retried")
+}
