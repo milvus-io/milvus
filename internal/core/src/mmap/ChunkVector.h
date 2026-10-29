@@ -405,7 +405,8 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
     SpanBase
     get_span(const ChunkSnapshot& snap, int64_t chunk_id) const override {
         if constexpr (IsMmap && (std::is_same_v<std::string, Type> ||
-                                 std::is_same_v<ArrayValue, Type>)) {
+                                 std::is_same_v<ArrayValue, Type> ||
+                                 std::is_same_v<VectorArray, Type>)) {
             return SpanBase(get_chunk_data(snap, chunk_id),
                             get_chunk_size(snap, chunk_id),
                             sizeof(ChunkViewType<Type>));
@@ -420,7 +421,8 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
     get_element_size() override {
         std::shared_lock<std::shared_mutex> lck(mutex_);
         if constexpr (IsMmap && (std::is_same_v<std::string, Type> ||
-                                 std::is_same_v<ArrayValue, Type>)) {
+                                 std::is_same_v<ArrayValue, Type> ||
+                                 std::is_same_v<VectorArray, Type>)) {
             return sizeof(ChunkViewType<Type>);
         }
         return sizeof(Type);
@@ -454,7 +456,8 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
     get_span(int64_t chunk_id) override {
         std::shared_lock<std::shared_mutex> lck(mutex_);
         if constexpr (IsMmap && (std::is_same_v<std::string, Type> ||
-                                 std::is_same_v<ArrayValue, Type>)) {
+                                 std::is_same_v<ArrayValue, Type> ||
+                                 std::is_same_v<VectorArray, Type>)) {
             return SpanBase(get_chunk_data(chunk_id),
                             get_chunk_size(chunk_id),
                             sizeof(ChunkViewType<Type>));
@@ -513,9 +516,11 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
             auto& src = chunk[chunk_offset];
             return VectorArrayView(const_cast<char*>(src.data()),
                                    src.dim(),
-                                   src.physical_length(),
+                                   src.length(),
                                    src.byte_size(),
-                                   src.get_element_type());
+                                   src.get_element_type(),
+                                   src.element_validity_view(),
+                                   src.is_element_nullable());
         } else if constexpr (std::is_same_v<Json, Type>) {
             return Json(chunk[chunk_offset].c_str(),
                         chunk[chunk_offset].size());

@@ -106,7 +106,8 @@ InitEmptyVectorArrayRow(proto::schema::VectorField* row,
 int64_t
 GetArrayLeafRawDataSize(
     const google::protobuf::RepeatedPtrField<ScalarFieldProto>& rows,
-    DataType element_type) {
+    DataType element_type,
+    bool native_width = false) {
     int64_t result = 0;
     switch (element_type) {
         case DataType::BOOL:
@@ -115,7 +116,17 @@ GetArrayLeafRawDataSize(
             }
             break;
         case DataType::INT8:
+            for (const auto& row : rows) {
+                result += row.int_data().data_size() *
+                          (native_width ? sizeof(int8_t) : sizeof(int));
+            }
+            break;
         case DataType::INT16:
+            for (const auto& row : rows) {
+                result += row.int_data().data_size() *
+                          (native_width ? sizeof(int16_t) : sizeof(int));
+            }
+            break;
         case DataType::INT32:
             for (const auto& row : rows) {
                 result += row.int_data().data_size() * sizeof(int);
@@ -166,9 +177,10 @@ GetNestedArrayRawDataSize(
     int64_t result = static_cast<int64_t>(offsets_size);
     const auto& element_schema = type_schema.array_element();
     if (element_schema.has_leaf_type()) {
-        return result +
-               GetArrayLeafRawDataSize(
-                   rows, static_cast<DataType>(element_schema.leaf_type()));
+        return result + GetArrayLeafRawDataSize(
+                            rows,
+                            static_cast<DataType>(element_schema.leaf_type()),
+                            true);
     }
 
     for (const auto& row : rows) {
@@ -319,7 +331,9 @@ GetRawDataSizeOfDataArray(const DataArray* data,
                         array_data, field_meta.get_array_type_schema());
                 } else {
                     result += GetArrayLeafRawDataSize(
-                        array_data, field_meta.get_element_type());
+                        array_data,
+                        field_meta.get_element_type(),
+                        field_meta.is_native_list_array());
                 }
                 break;
             }

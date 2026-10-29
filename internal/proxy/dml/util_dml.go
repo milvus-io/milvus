@@ -501,11 +501,17 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 								if row.GetData() == nil {
 									return 0, merr.WrapErrParameterInvalidMsg("nil array data")
 								}
+								if typeutil.IsNestedArrayTypeSchema(subFieldSchema.GetTypeSchema()) {
+									if row.GetArrayData() == nil {
+										return 0, merr.WrapErrParameterInvalidMsg("nested array data is nil")
+									}
+									if subFieldSchema.GetElementNullable() {
+										return len(typeutil.GetArrayElementValidData(row)), nil
+									}
+									return len(row.GetArrayData().GetData()), nil
+								}
 								if subFieldSchema.GetElementNullable() {
 									return len(typeutil.GetArrayElementValidData(row)), nil
-								}
-								if typeutil.IsNestedArrayTypeSchema(subFieldSchema.GetTypeSchema()) {
-									return len(row.GetArrayData().GetData()), nil
 								}
 								switch subFieldSchema.GetElementType() {
 								case schemapb.DataType_Bool:
@@ -615,7 +621,7 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 			for physicalRow := 0; physicalRow < expectedArrayLen; physicalRow++ {
 				count, err := refCounter.count(physicalRow)
 				if err != nil {
-					return merr.WrapErrParameterInvalidErr(err, "struct '%s' row %d sub-field '%s'",
+					return merr.Wrapf(err, "struct '%s' row %d sub-field '%s'",
 						structName, logicalRow(physicalRow), refCounter.name)
 				}
 				refElementCounts[physicalRow] = count
@@ -624,7 +630,7 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 				for physicalRow := 0; physicalRow < expectedArrayLen; physicalRow++ {
 					count, err := counter.count(physicalRow)
 					if err != nil {
-						return merr.WrapErrParameterInvalidErr(err, "struct '%s' row %d sub-field '%s'",
+						return merr.Wrapf(err, "struct '%s' row %d sub-field '%s'",
 							structName, logicalRow(physicalRow), counter.name)
 					}
 					if count != refElementCounts[physicalRow] {
