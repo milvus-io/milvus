@@ -189,6 +189,12 @@ Single-level fields use `nullable`, `element_nullable`, `data_type`, and
 `element_type` without a wire `TypeSchema`. Schema alter APIs cannot change
 `nullable` or `element_nullable`.
 
+Each Array level of a nested field carries its own `max_capacity` in
+`(0, proxy.maxArrayCapacity]`: the root node takes the struct's, the inner
+node bounds each inner Array. A VarChar leaf takes `max_length` on the leaf
+node. Insert checks the capacity of every level, and JSON/CSV import checks
+the inner capacity as well.
+
 In C++, new-format scalar fields (`list<T>` and `list<list<T>>`) load into
 `ColumnarArrayChunk` directly from Arrow `ListArray`, with leaf validity and
 native-width values; they do not pass through proto Binary. Existing scalar
@@ -350,9 +356,91 @@ including sub-fields added to an existing struct.
   CreateIndex rejects them.
 - MAX_SIM-family metrics, emb-list indexes and EmbeddingList search on
   element-nullable vector Arrays; these are out of scope for this project.
+- Binlog import (backup restore) and snapshot-source import into a collection
+  with any element-nullable (scalar or vector) or nested Array field, and
+  NumPy import into a collection with any struct field; see
+  [Bulk Import](#bulk-import).
 - Struct fields in external collections; an external collection rejects
   every struct field, so element-nullable and nested Array sub-fields are not
   available there either.
+
+## Bulk Import
+
+JSON, JSONL, CSV and Parquet imports read element-nullable and nested Array
+struct sub-fields. The readers produce the same storage layout as the insert
+path (dense scalar payload with element validity, one inner array per element
+for `Array<Array<T>>`, only the valid vectors for a vector sub-field), so an
+import and an insert of the same rows write the same records. Import
+V2 and Import V3 use the same readers and the same DataNode post-processing.
+
+### Input shapes
+
+- JSON / JSONL: a struct value is a list of element objects. For a struct
+  with sub-fields `id` (Int64), `label` (element-nullable VarChar), `tags`
+  (element-nullable `Array<Array<Int64>>` with a nullable leaf) and `emb`
+  (element-nullable 2-dim float vector), a row of three elements is
+  `[{"id": 1, "label": "a", "tags": [1, null], "emb": [0.1, 0.2]}, {"id": 2, "label": null, "tags": null, "emb": null}, {"id": 3, "tags": [], "emb": [0.3, 0.4]}]`:
+  the second element has a null label, a null inner array and a null
+  vector, the third a missing (null) label and an empty inner array.
+  A scalar sub-field takes one value per element, `null` for a null element.
+  A nested `Array<Array<T>>` sub-field takes one inner array per element:
+  `null` is a null inner array, `null` inside it a null leaf. A vector
+  sub-field takes one vector per element, `null` for a null vector. A whole
+  struct row is `null` (nullable struct only).
+- CSV: the struct cell holds the same JSON text as the JSON format; the
+  `nullkey` (or JSON `null`) marks a null struct row.
+- Parquet: one column per struct, `list<struct<sub: C, ...>>`. C is the scalar
+  type for a scalar sub-field, `list<T>` for a nested sub-field (so the column
+  is `list<struct<..., tags: list<T>>>`), and the list type of one vector for
+  a vector sub-field: `list<float32>` for a float vector, `list<uint8>` for a
+  binary, Float16 or BFloat16 vector, `list<int8>` for an Int8 vector. A null element is a null child value, a
+  null inner array or vector a null list, a null leaf a null list item; an
+  Arrow `null`-typed child means every element is null. Flat `struct[sub]`
+  columns are rejected, as before.
+
+### Rules
+
+- A `null` is accepted only where the schema allows it: the element of an
+  element-nullable sub-field, the leaf of a nested sub-field whose leaf
+  `TypeSchema` is nullable, and the row of a nullable struct. A `null`
+  anywhere else fails the import; it is never converted to a zero value.
+- A struct element cannot be null (`[null, {...}]`, or a null struct slot in
+  Parquet); set its sub-field values to null instead.
+- A missing key of an element-nullable sub-field in a JSON/CSV element, or a
+  missing child in the Parquet struct, is a null element. For a whole missing
+  Parquet child the DataNode fills each row with as many null elements as its
+  sibling sub-fields have; a null struct row stays null. When the Parquet
+  struct carries none of the current sub-fields (all its children were
+  dropped), the reader takes the element count and row validity of each row
+  from the outer list itself and fills the same null elements. Files written
+  before a sub-field was added therefore import without it.
+- A missing non-element-nullable sub-field fails the import.
+- Keys and Parquet children that are not sub-fields of the collection,
+  including dropped sub-fields, are ignored, for every struct field. REST
+  insert and upsert ignore such keys the same way; a gRPC insert or upsert
+  rejects a sub-field column the struct does not have.
+- Int8 and Int16 elements are range checked, for every struct sub-field.
+- Parquet struct children accept the integer and floating widening that
+  top-level Parquet columns accept (for example `int8` into an Int32
+  sub-field), also for sub-fields that are not element-nullable.
+- Parquet nullable flags: the reader checks the actual null values of each
+  level against the schema and never rejects a file only because of an
+  Arrow field's `nullable` flag. A file with every level marked nullable and
+  a file whose flags are stricter than the schema (for example a struct
+  object item, vector item or child marked non-nullable) are both accepted
+  when their values are valid.
+- Capacity limits count logical elements, null elements included.
+
+### Unsupported import paths
+
+- Binlog import (backup restore) and snapshot-source import into a collection
+  with an element-nullable or nested Array field are rejected with
+  ParameterInvalid before the job is accepted: they copy source binlogs and
+  cannot produce the new layout.
+- NumPy has one file per top-level field and no form for a struct field. A
+  NumPy import into a collection with any struct field is rejected with
+  ImportFailed, including collections whose struct sub-fields are neither
+  element-nullable nor nested.
 
 ## Client APIs
 
