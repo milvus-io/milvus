@@ -425,7 +425,7 @@ Recovery order (`reloadFromMeta`):
 | 5 | STAGED→ABORTED | timeout (`SegmentChangeStagingTimeout`) / superseded externally dropped / collection drop | group `state=ABORTED` | crash | recovery: ABORTED → member reclamation |
 | 6 | READY→STAGED | R5 readiness regression: publish Phase-2 re-check rejects a nonempty member whose data/index/sort/stats/schema readiness regressed after READY | group `state=STAGED, ready_ts=0` (independent catalog txn) | half write (etcd txn atomic, impossible) | recovery: STAGED → re-evaluate (§7) |
 | 7 | READY→COMMITTED | `publishGroup` (§5.4) | **same txn**: group COMMITTED + member flips + superseded Dropped + DataView snapshot | §5.4 failure matrix | recovery: COMMITTED → keep |
-| 8 | COMMITTED→(deleted) | `groupCleaner`: superseded all Dropped and no longer referenced by any snapshot | delete group key | crash | recovery: leftover COMMITTED kept then rescanned |
+| 8 | COMMITTED→(deleted) | `groupCleaner`: producer terminal, superseded retired, and no persisted successor references this group | delete group key | crash | recovery: remaining predecessor prefix is valid and rescanned |
 
 **Key invariant**: `READY → COMMITTED` persistence is atomic (group state +
 SegmentMeta + DataView snapshot in one txn). There is therefore **no
@@ -1036,6 +1036,10 @@ Replay safety:
   by the existing GC, which also enforces snapshot references. FAILED/ABORTED
   groups wait for unpublished members to be Dropped or removed. The cleaner
   then deletes the catalog key and in-memory entry; restart repeats the sweep.
+  Import subgroups form a predecessor chain. Cleanup deletes its terminal,
+  eligible successors first and retains every predecessor while a successor
+  remains, including after a failed delete. Every persisted intermediate state
+  must therefore pass the startup predecessor check.
 
 - **Zero-row result metadata**: a Dropped zero-row member of an ALIVE group
   remains a durable no-output marker until the group terminates. `DropSegment`

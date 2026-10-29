@@ -17,14 +17,39 @@
 package datacoord
 
 import (
+	"context"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+type failNthSegmentChangeDeleteCatalog struct {
+	metastore.DataCoordCatalog
+	failAt    int
+	deletedID []int64
+}
+
+func (c *failNthSegmentChangeDeleteCatalog) Update(ctx context.Context, actions ...metastore.UpdateAction) error {
+	for _, action := range actions {
+		if action.Type == metastore.ActionDelete {
+			if entry, ok := action.Entry.(metastore.SegmentChangeGroupEntry); ok {
+				c.deletedID = append(c.deletedID, entry.GroupID)
+				if len(c.deletedID) == c.failAt {
+					return merr.WrapErrServiceInternalMsg("injected segment change group deletion failure")
+				}
+			}
+		}
+	}
+	return c.DataCoordCatalog.Update(ctx, actions...)
+}
 
 func TestSegmentChangeCleanerWaitsForProducerAndRetirement(t *testing.T) {
 	m, err := newMemoryMeta(t)
@@ -107,4 +132,83 @@ func TestSegmentChangeCleanerUsesCopyTaskIdentity(t *testing.T) {
 		TaskId: 900, JobId: 700, State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 	})
 	require.True(t, cleaner.producerFinished(t.Context(), g, nil))
+}
+
+func TestSegmentChangeCleanerPreservesImportPredecessorsAcrossRestart(t *testing.T) {
+	ctx := t.Context()
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	const jobID int64 = 8000
+	for ordinal, id := range []int64{1001, 1002, 1003} {
+		group := &model.SegmentChangeGroup{
+			GroupID: id, Source: model.SegmentChangeSourceImportJob, SourceJobID: jobID,
+			CollectionID: 10, VChannel: "ch-1", SubgroupOrdinal: int64(ordinal),
+			State: model.SegmentChangeStateCommitted,
+		}
+		if ordinal > 0 {
+			group.PreviousGroupID = id - 1
+		}
+		if ordinal == 2 {
+			group.State = model.SegmentChangeStateStaged
+		}
+		require.NoError(t, m.AddSegmentChangeGroup(ctx, group))
+	}
+	require.ErrorIs(t, m.DeleteSegmentChangeGroup(ctx, 10, 1001), merr.ErrDataIntegrity)
+	require.ErrorIs(t, m.DeleteSegmentChangeGroup(ctx, 10, 1002), merr.ErrDataIntegrity)
+	require.ErrorIs(t, m.UpdateSegmentsInfoAndChangeGroups(ctx,
+		[]metastore.UpdateAction{metastore.DeleteSegmentChangeGroup(10, 1001)}), merr.ErrDataIntegrity)
+
+	importMeta := NewMockImportMeta(t)
+	importMeta.EXPECT().GetJob(mock.Anything, jobID).Return(&importJob{ImportJob: &datapb.ImportJob{
+		JobID: jobID, State: internalpb.ImportJobState_Completed,
+	}}).Maybe()
+	cleaner := &segmentChangeCleaner{mt: m, importMeta: importMeta}
+	cleaner.clean(ctx, m.GetSegmentChangeGroupsByCollection(ctx, 10))
+	require.Len(t, m.GetSegmentChangeGroupsByCollection(ctx, 10), 3,
+		"an ineligible successor must retain the entire predecessor chain")
+
+	last := m.GetSegmentChangeGroup(ctx, 10, 1003)
+	last.State = model.SegmentChangeStateAborted
+	require.NoError(t, m.UpdateSegmentChangeGroup(ctx, last))
+	failedCatalog := &failNthSegmentChangeDeleteCatalog{DataCoordCatalog: m.catalog, failAt: 2}
+	m.catalog = failedCatalog
+	cleaner.clean(ctx, m.GetSegmentChangeGroupsByCollection(ctx, 10))
+	require.Equal(t, []int64{1003, 1002}, failedCatalog.deletedID,
+		"the cleaner must delete the successor first and stop at a failed delete")
+	require.Nil(t, m.GetSegmentChangeGroup(ctx, 10, 1003))
+	require.NotNil(t, m.GetSegmentChangeGroup(ctx, 10, 1002))
+
+	recovered := reloadSegmentChangeMeta(t, m)
+	require.Len(t, recovered.GetSegmentChangeGroupsByCollection(ctx, 10), 2,
+		"the persisted intermediate state must survive a coordinator restart")
+	require.ErrorIs(t, recovered.DeleteSegmentChangeGroup(ctx, 10, 1001), merr.ErrDataIntegrity,
+		"recovery must rebuild the successor index before cleanup resumes")
+	cleaner.mt = recovered
+	cleaner.clean(ctx, recovered.GetSegmentChangeGroupsByCollection(ctx, 10))
+	require.Equal(t, []int64{1003, 1002, 1002, 1001}, failedCatalog.deletedID)
+	require.Empty(t, reloadSegmentChangeMeta(t, recovered).GetSegmentChangeGroupsByCollection(ctx, 10))
+}
+
+func TestSegmentChangeGroupCompositeWriteCannotOrphanNewSuccessor(t *testing.T) {
+	ctx := t.Context()
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	first := &model.SegmentChangeGroup{
+		GroupID: 1001, Source: model.SegmentChangeSourceImportJob, SourceJobID: 8000,
+		CollectionID: 10, VChannel: "ch-1", State: model.SegmentChangeStateCommitted,
+	}
+	require.NoError(t, m.AddSegmentChangeGroup(ctx, first))
+	successor := &model.SegmentChangeGroup{
+		GroupID: 1002, Source: model.SegmentChangeSourceImportJob, SourceJobID: 8000,
+		CollectionID: 10, VChannel: "ch-1", State: model.SegmentChangeStateStaged,
+		PreviousGroupID: 1001, SubgroupOrdinal: 1,
+	}
+	for _, actions := range [][]metastore.UpdateAction{
+		{metastore.SaveSegmentChangeGroup(successor), metastore.DeleteSegmentChangeGroup(10, 1001)},
+		{metastore.DeleteSegmentChangeGroup(10, 1001), metastore.SaveSegmentChangeGroup(successor)},
+	} {
+		require.ErrorIs(t, m.UpdateSegmentsInfoAndChangeGroups(ctx, actions), merr.ErrDataIntegrity)
+		require.NotNil(t, m.GetSegmentChangeGroup(ctx, 10, 1001))
+		require.Nil(t, m.GetSegmentChangeGroup(ctx, 10, 1002))
+	}
 }
