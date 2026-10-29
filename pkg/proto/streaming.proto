@@ -1032,12 +1032,21 @@ message ReplicatePChannelMeta {
 // native gRPC errors; analyzer failures are carried by the response Status.
 message StreamingNodeRunAnalyzerRequest {
     repeated bytes placeholder = 1;
-    bool with_detail = 2;
-    bool with_hash = 3;
     oneof source {
-        StreamingInlineAnalyzer inline_analyzer = 4;
-        StreamingFieldAnalyzer field_analyzer = 5;
+        StreamingInlineAnalyzer inline_analyzer = 2;
+        StreamingFieldAnalyzer field_analyzer = 3;
     }
+    oneof operation {
+        TokenizeOptions tokenize = 4;
+        PhraseMatchOptions phrase_match = 5;
+    }
+}
+message TokenizeOptions {
+    bool with_detail = 1;
+    bool with_hash = 2;
+}
+message PhraseMatchOptions {
+    string query_text = 1;
 }
 message StreamingInlineAnalyzer {
     string analyzer_params = 1;
@@ -1052,8 +1061,18 @@ message StreamingFieldAnalyzer {
     PChannelInfo pchannel = 6;
 }
 message StreamingNodeRunAnalyzerResponse {
-    repeated milvus.AnalyzerResult results = 1;
+    oneof result {
+        TokenizeResult tokenize = 1;
+        PhraseMatchResult phrase_match = 3;
+    }
     common.Status status = 2;
+}
+message TokenizeResult {
+    repeated milvus.AnalyzerResult results = 1;
+}
+message PhraseMatchResult {
+    repeated bool is_match = 1;
+    repeated int64 slops = 2;
 }
 
 message CreateTransformStreamRequest {

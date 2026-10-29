@@ -38,7 +38,7 @@ func NewIndexPathBuilder(rootPath string, pathVersion indexpb.IndexStorePathVers
 }
 
 func IsCollectionRooted(pathVersion indexpb.IndexStorePathVersion) bool {
-	return pathVersion >= indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED
+	return pathVersion == indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED
 }
 
 func IsSegmentRooted(pathVersion indexpb.IndexStorePathVersion) bool {
@@ -84,7 +84,9 @@ func (b *IndexPathBuilder) BuildPrefix() string {
 		return path.Join(b.rootPath, common.SegmentInsertLogPath,
 			JoinIDPath(b.collID, b.partID, b.segID), "_index", JoinIDPath(b.buildID, b.indexVersion))
 	}
-	if IsCollectionRooted(b.pathVersion) {
+	// Preserve the historical fallback for unknown future versions here;
+	// IsCollectionRooted itself identifies only the v1 layout.
+	if b.pathVersion >= indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED {
 		k := JoinIDPath(b.collID, b.partID, b.segID, b.buildID, b.indexVersion)
 		return path.Join(b.rootPath, common.SegmentIndexV1Path, k)
 	}

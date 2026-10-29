@@ -18,6 +18,7 @@ package packed
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path"
 	"strconv"
@@ -38,7 +39,7 @@ func TestAsyncManifestRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	base := path.Join(cfg.RootPath, "async-segment")
 	index := ManifestIndexInfo{ColumnName: "100", IndexName: "index", IndexType: "FLAT", Path: "artifact", FieldID: 100, IndexID: 1, BuildID: 2}
-	first, err := CommitManifestUpdatesWithResultAsync(ctx, io, base, 0, cfg, &ManifestUpdates{Indexes: []ManifestIndexInfo{index}})
+	first, err := CommitManifestUpdatesWithResultAsync(ctx, io, MarshalManifestPath(base, 0), cfg, &ManifestUpdates{Indexes: []ManifestIndexInfo{index}})
 	require.NoError(t, err)
 	entries, err := GetManifestIndexInfosAsync(ctx, io, first.ManifestPath, cfg)
 	require.NoError(t, err)
@@ -50,18 +51,14 @@ func TestAsyncManifestRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, lobs)
 	require.Equal(t, int64(2), entries[0].BuildID)
-	_, version, err := UnmarshalManifestPath(first.ManifestPath)
-	require.NoError(t, err)
-	_, err = CommitManifestUpdatesWithResultAsync(ctx, io, base, version, cfg, &ManifestUpdates{DropIndexes: []DropIndexEntry{{IndexID: 1, ExpectedBuildID: 3}}})
+	_, err = CommitManifestUpdatesWithResultAsync(ctx, io, first.ManifestPath, cfg, &ManifestUpdates{DropIndexes: []DropIndexEntry{{IndexID: 1, ExpectedBuildID: 3}}})
 	require.Error(t, err)
-	second, err := CommitManifestUpdatesWithResultAsync(ctx, io, base, version, cfg, &ManifestUpdates{DropIndexes: []DropIndexEntry{{IndexID: 1, ExpectedBuildID: 2}}})
+	second, err := CommitManifestUpdatesWithResultAsync(ctx, io, first.ManifestPath, cfg, &ManifestUpdates{DropIndexes: []DropIndexEntry{{IndexID: 1, ExpectedBuildID: 2}}})
 	require.NoError(t, err)
 	entries, err = GetManifestIndexInfosAsync(ctx, io, second.ManifestPath, cfg)
 	require.NoError(t, err)
 	require.Empty(t, entries)
-	_, version, err = UnmarshalManifestPath(second.ManifestPath)
-	require.NoError(t, err)
-	unchanged, err := CommitManifestUpdatesWithResultAsync(ctx, io, base, version, cfg, &ManifestUpdates{DropIndexes: []DropIndexEntry{{IndexID: 1, ExpectedBuildID: 2}}})
+	unchanged, err := CommitManifestUpdatesWithResultAsync(ctx, io, second.ManifestPath, cfg, &ManifestUpdates{DropIndexes: []DropIndexEntry{{IndexID: 1, ExpectedBuildID: 2}}})
 	require.NoError(t, err)
 	require.Equal(t, second.ManifestPath, unchanged.ManifestPath)
 	// Closing one owner never shuts down another coordinator's context.
@@ -72,6 +69,49 @@ func TestAsyncManifestRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	_, err = GetManifestIndexInfosAsync(ctx, io, first.ManifestPath, cfg)
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+}
+
+// Like CommitManifestUpdates, an empty update returns the base pointer verbatim
+// without I/O, so a pointer spelled differently from MarshalManifestPath keeps
+// its exact text, and a base that is not a manifest path is corrupt metadata,
+// rejected before admission.
+func TestSubmitManifestUpdatesBasePointer(t *testing.T) {
+	io := NewManifestIOContext(1)
+	defer io.Close()
+	respelled := `{"base_path":"files/insert_log/1/2/3","size":1024,"ver":5}`
+	result, err := CommitManifestUpdatesWithResultAsync(context.Background(), io, respelled, nil, &ManifestUpdates{})
+	require.NoError(t, err)
+	require.Equal(t, respelled, result.ManifestPath)
+
+	called := false
+	err = SubmitManifestUpdates(context.Background(), io, "not a manifest path", nil,
+		&ManifestUpdates{DeltaLogs: []DeltaLogEntry{{Path: "delta/1", NumEntries: 1}}},
+		func(ManifestUpdateResult, error) { called = true })
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	require.False(t, called, "rejected submissions must not deliver a callback")
+	require.Empty(t, io.slots, "rejected submission must not hold admission")
+}
+
+// A commit proven to change nothing against the loaded revision also hands back
+// the base pointer verbatim.
+func TestAsyncManifestNoopCommitKeepsBaseSpelling(t *testing.T) {
+	cfg := manifestTestStorageConfig(t)
+	io := NewManifestIOContext(1)
+	defer io.Close()
+	base := path.Join(cfg.RootPath, "async-respelled")
+	published, err := CommitManifestUpdates(MarshalManifestPath(base, ManifestEarliest), cfg, &ManifestUpdates{
+		Indexes: []ManifestIndexInfo{{ColumnName: "100", IndexName: "index", IndexType: "FLAT", Path: "artifact", FieldID: 100, IndexID: 1, BuildID: 2}},
+	})
+	require.NoError(t, err)
+	_, version, err := UnmarshalManifestPath(published)
+	require.NoError(t, err)
+	respelled := fmt.Sprintf(`{"base_path":%q,"ver":%d}`, base, version)
+	require.NotEqual(t, published, respelled)
+
+	result, err := CommitManifestUpdatesWithResultAsync(context.Background(), io, respelled, cfg,
+		&ManifestUpdates{DropIndexes: []DropIndexEntry{{IndexID: 99, ExpectedBuildID: 999}}})
+	require.NoError(t, err)
+	require.Equal(t, respelled, result.ManifestPath)
 }
 
 func TestAsyncManifestWorkersGrowOnDemand(t *testing.T) {
@@ -257,7 +297,7 @@ func TestAsyncManifestAdmissionRejection(t *testing.T) {
 		func([]ManifestIndexInfo, error) { called = true })
 	require.ErrorIs(t, err, ErrLoonTransient)
 	require.False(t, called, "rejected submissions must not deliver a callback")
-	err = SubmitManifestUpdates(context.Background(), io, path.Join(cfg.RootPath, "rejected"), 0, cfg,
+	err = SubmitManifestUpdates(context.Background(), io, MarshalManifestPath(path.Join(cfg.RootPath, "rejected"), 0), cfg,
 		&ManifestUpdates{DeltaLogs: []DeltaLogEntry{{Path: "delta", NumEntries: 1}}},
 		func(ManifestUpdateResult, error) { called = true })
 	require.ErrorIs(t, err, ErrLoonTransient)
@@ -333,7 +373,7 @@ func TestAsyncManifestNativeCommitFailureIsUnknown(t *testing.T) {
 	defer io.Close()
 	obstacle := path.Join(cfg.RootPath, "file")
 	require.NoError(t, os.WriteFile(obstacle, []byte("not a directory"), 0o600))
-	got, err := CommitManifestUpdatesWithResultAsync(context.Background(), io, path.Join(obstacle, "segment"), 0, cfg,
+	got, err := CommitManifestUpdatesWithResultAsync(context.Background(), io, MarshalManifestPath(path.Join(obstacle, "segment"), 0), cfg,
 		&ManifestUpdates{Indexes: []ManifestIndexInfo{{ColumnName: "100", IndexName: "index", IndexType: "FLAT", Path: "artifact", FieldID: 100, IndexID: 1, BuildID: 2}}})
 	require.Empty(t, got.ManifestPath)
 	require.Nil(t, got.HasIndexes, "failed commits must not publish a projected marker")
@@ -371,7 +411,7 @@ func TestAsyncManifestSingleExecutorSubmissions(t *testing.T) {
 	io := NewManifestIOContext(1)
 	defer io.Close()
 	base := path.Join(cfg.RootPath, "single-executor")
-	manifest, err := CommitManifestUpdates(base, 0, cfg, &ManifestUpdates{
+	manifest, err := CommitManifestUpdates(MarshalManifestPath(base, 0), cfg, &ManifestUpdates{
 		Indexes: []ManifestIndexInfo{{ColumnName: "100", IndexName: "index", IndexType: "FLAT", Path: "artifact", FieldID: 100, IndexID: 1, BuildID: 2}},
 	})
 	require.NoError(t, err)
@@ -434,7 +474,7 @@ func TestAsyncManifestSubmissionCancellationDrains(t *testing.T) {
 				require.NoError(t, SubmitManifestIndexInfos(ctx, io, MarshalManifestPath(path.Join(cfg.RootPath, "cancel"), 0), cfg,
 					func(_ []ManifestIndexInfo, err error) { completed <- err }))
 			} else {
-				require.NoError(t, SubmitManifestUpdates(ctx, io, path.Join(cfg.RootPath, "cancel"), 0, cfg,
+				require.NoError(t, SubmitManifestUpdates(ctx, io, MarshalManifestPath(path.Join(cfg.RootPath, "cancel"), 0), cfg,
 					&ManifestUpdates{DeltaLogs: []DeltaLogEntry{{Path: "delta", NumEntries: 1}}},
 					func(_ ManifestUpdateResult, err error) { completed <- err }))
 			}
@@ -475,7 +515,7 @@ func TestAsyncManifestCommitSubmissionsSingleWorker(t *testing.T) {
 	}
 	completed := make(chan result, count)
 	for i := range count {
-		require.NoError(t, SubmitManifestUpdates(ctx, io, path.Join(cfg.RootPath, strconv.Itoa(i)), 0, cfg,
+		require.NoError(t, SubmitManifestUpdates(ctx, io, MarshalManifestPath(path.Join(cfg.RootPath, strconv.Itoa(i)), 0), cfg,
 			&ManifestUpdates{Indexes: []ManifestIndexInfo{{ColumnName: "100", IndexName: "index", IndexType: "FLAT", Path: "artifact", FieldID: 100, IndexID: 1, BuildID: 2}}},
 			func(updateResult ManifestUpdateResult, err error) {
 				completed <- result{updateResult.ManifestPath, err}
@@ -493,29 +533,80 @@ func TestAsyncManifestCommitSubmissionsSingleWorker(t *testing.T) {
 		require.Equal(t, int64(2), entries[0].BuildID)
 	}
 	called := false
-	err := SubmitManifestUpdates(ctx, io, path.Join(cfg.RootPath, "closed"), 0, cfg,
+	err := SubmitManifestUpdates(ctx, io, MarshalManifestPath(path.Join(cfg.RootPath, "closed"), 0), cfg,
 		&ManifestUpdates{DeltaLogs: []DeltaLogEntry{{Path: "delta", NumEntries: 1}}},
 		func(ManifestUpdateResult, error) { called = true })
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 	require.False(t, called)
 }
 
+func TestManifestIndexesAfterUpdatesUsesFieldID(t *testing.T) {
+	indexes := []ManifestIndexInfo{
+		{FieldID: 100, IndexID: 1, ColumnName: "vector"},
+		{FieldID: 100, IndexID: 2, ColumnName: ""},
+		{FieldID: 101, IndexID: 3, ColumnName: "100"},
+	}
+	for _, tc := range []struct {
+		name    string
+		columns []string
+		drops   []int64
+		add     bool
+		want    bool
+	}{
+		{
+			name: "unaffected field survives despite name collision", columns: []string{"100"}, want: true,
+		},
+		{
+			name: "all affected fields invalidated regardless of names", columns: []string{"100", "101"}, want: false,
+		},
+		{
+			name: "append invalidates both indexes on the same field", columns: []string{"100"}, drops: []int64{3}, want: false,
+		},
+		{
+			name: "explicit drop preserves another index on the field", columns: []string{"101"}, drops: []int64{1}, want: true,
+		},
+		{
+			name: "additions survive invalidation", columns: []string{"100", "101"}, add: true, want: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			updates := &ManifestUpdates{}
+			for _, id := range tc.drops {
+				updates.DropIndexes = append(updates.DropIndexes, DropIndexEntry{IndexID: id})
+			}
+			if tc.add {
+				updates.Indexes = indexes[:1]
+			}
+			got := manifestIndexesAfterUpdates(indexes, updates, tc.drops, tc.columns)
+			require.NotNil(t, got)
+			require.Equal(t, tc.want, *got)
+		})
+	}
+}
+
 // Compare the in-memory marker with the actual native resolver's persisted
 // output. This also guards the adapter against drift in index invalidation rules.
 func TestAsyncManifestIndexMarkerResult(t *testing.T) {
-	for _, scenario := range []string{"drop_one", "drop_all", "absent_drop", "drop_and_add", "stale_drop_and_add", "version_drift", "append_columns", "append_segment", "append_and_add", "add_column_group", "column_group_entry", "delta_only", "empty_updates"} {
+	for _, scenario := range []string{"drop_one", "drop_all", "absent_drop", "drop_and_add", "stale_drop_and_add", "version_drift", "append_columns", "append_segment", "append_and_add", "append_empty_name", "append_name_collision", "append_shared_field", "add_column_group", "column_group_entry", "delta_only", "empty_updates"} {
 		t.Run(scenario, func(t *testing.T) {
 			cfg := manifestTestStorageConfig(t)
 			io := NewManifestIOContext(1)
 			defer io.Close()
 			base := path.Join(cfg.RootPath, scenario)
 			indexes := []ManifestIndexInfo{
-				{ColumnName: "100", IndexName: "one", IndexType: "FLAT", Path: "one", FieldID: 100, IndexID: 1, BuildID: 11},
-				{ColumnName: "101", IndexName: "two", IndexType: "FLAT", Path: "two", FieldID: 101, IndexID: 2, BuildID: 22},
+				{ColumnName: "vector", IndexName: "one", IndexType: "FLAT", Path: "one", FieldID: 100, IndexID: 1, BuildID: 11},
+				{ColumnName: "chunks[embedding]", IndexName: "two", IndexType: "FLAT", Path: "two", FieldID: 101, IndexID: 2, BuildID: 22},
 			}
-			initial, err := CommitManifestUpdates(base, 0, cfg, &ManifestUpdates{Indexes: indexes})
-			require.NoError(t, err)
-			_, version, err := UnmarshalManifestPath(initial)
+			switch scenario {
+			case "append_empty_name":
+				indexes[0].ColumnName, indexes[1].ColumnName = "", ""
+			case "append_name_collision":
+				indexes[0].ColumnName, indexes[1].ColumnName = "101", "100"
+			case "append_shared_field":
+				indexes[1].FieldID = indexes[0].FieldID
+				indexes[1].ColumnName = indexes[0].ColumnName
+			}
+			initial, err := CommitManifestUpdates(MarshalManifestPath(base, 0), cfg, &ManifestUpdates{Indexes: indexes})
 			require.NoError(t, err)
 			updates := &ManifestUpdates{}
 			wantCount, wantMarker := 2, true
@@ -531,7 +622,7 @@ func TestAsyncManifestIndexMarkerResult(t *testing.T) {
 					// input snapshot or the marker derived from it.
 					newIndex := indexes[0]
 					newIndex.IndexID, newIndex.BuildID = 3, 33
-					_, err := CommitManifestUpdates(base, version, cfg, &ManifestUpdates{Indexes: []ManifestIndexInfo{newIndex}})
+					_, err := CommitManifestUpdates(initial, cfg, &ManifestUpdates{Indexes: []ManifestIndexInfo{newIndex}})
 					require.NoError(t, err)
 				}
 			case "absent_drop":
@@ -543,9 +634,9 @@ func TestAsyncManifestIndexMarkerResult(t *testing.T) {
 				if scenario == "stale_drop_and_add" {
 					updates.DropIndexes[0].ExpectedBuildID = 99
 				}
-			case "append_columns", "append_segment", "append_and_add", "add_column_group":
+			case "append_columns", "append_segment", "append_and_add", "append_empty_name", "append_name_collision", "append_shared_field", "add_column_group":
 				columns := []string{"100"}
-				if scenario == "append_segment" || scenario == "append_and_add" {
+				if scenario == "append_segment" || scenario == "append_and_add" || scenario == "append_empty_name" {
 					columns = append(columns, "101")
 				}
 				groups, err := createColumnGroups(columns, "parquet", []Fragment{{FilePath: path.Join(base, "data.parquet"), EndRow: 1}})
@@ -566,6 +657,9 @@ func TestAsyncManifestIndexMarkerResult(t *testing.T) {
 				if scenario == "add_column_group" {
 					wantCount, wantMarker = 2, false
 				}
+				if scenario == "append_empty_name" || scenario == "append_shared_field" {
+					wantCount = 0
+				}
 			case "column_group_entry":
 				updates.ColumnGroups = []ColumnGroupEntry{{Columns: []string{"100"}, Format: "parquet"}}
 				wantMarker = false
@@ -575,7 +669,7 @@ func TestAsyncManifestIndexMarkerResult(t *testing.T) {
 				updates.DeltaLogs = []DeltaLogEntry{{Path: "delta", NumEntries: 1}}
 				wantMarker = false
 			}
-			result, err := CommitManifestUpdatesWithResultAsync(context.Background(), io, base, version, cfg, updates)
+			result, err := CommitManifestUpdatesWithResultAsync(context.Background(), io, initial, cfg, updates)
 			if scenario == "stale_drop_and_add" {
 				require.ErrorContains(t, err, "refusing to drop build 99")
 				require.Empty(t, result.ManifestPath)
@@ -586,6 +680,10 @@ func TestAsyncManifestIndexMarkerResult(t *testing.T) {
 			actual, err := GetManifestIndexInfos(result.ManifestPath, cfg)
 			require.NoError(t, err)
 			require.Len(t, actual, wantCount)
+			if scenario == "append_columns" || scenario == "append_name_collision" {
+				require.Equal(t, int64(2), actual[0].IndexID)
+				require.Equal(t, indexes[1].ColumnName, actual[0].ColumnName)
+			}
 			if wantMarker {
 				require.NotNil(t, result.HasIndexes)
 				require.Equal(t, len(actual) > 0, *result.HasIndexes)

@@ -119,6 +119,9 @@ type HandlerClient interface {
 	// AcquireTransformLogStream creates a PChannel-level transform event stream.
 	AcquireTransformLogStream(ctx context.Context, pchannel string) (wal.TransformLogStream, error)
 
+	// QueryViewSyncClient returns the QueryView sync domain client.
+	QueryViewSyncClient() QueryViewSyncClient
+
 	// Close closes the handler client.
 	// It will only stop the underlying service discovery, but don't stop the producer and consumer created by it.
 	// So please close Producer and Consumer created by it before close the handler client.
@@ -150,6 +153,7 @@ func NewHandlerClient(w types.AssignmentDiscoverWatcher) HandlerClient {
 		newConsumer:                consumer.CreateConsumer,
 		newTransformLogEventStream: transformlogclient.CreateEventStream,
 	}
+	hc.queryViewSyncClient = newQueryViewSyncClient(hc, conn)
 	return hc
 }
 

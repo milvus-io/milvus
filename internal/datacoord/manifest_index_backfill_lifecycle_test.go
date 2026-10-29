@@ -389,7 +389,7 @@ func TestManifestIndexBackfillRealManifestRestart(t *testing.T) {
 			cfg := createStorageConfig()
 			statPath := path.Join(basePath, "_stats/bloom_filter.100/1")
 			require.NoError(t, packed.WriteFile(cfg, statPath, []byte("stats")))
-			initial, err := packed.CommitManifestUpdates(basePath, packed.ManifestEarliest, cfg, &packed.ManifestUpdates{
+			initial, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(basePath, packed.ManifestEarliest), cfg, &packed.ManifestUpdates{
 				Stats: []packed.StatEntry{{Key: "bloom_filter.100", Files: []string{statPath}}},
 			})
 			require.NoError(t, err)

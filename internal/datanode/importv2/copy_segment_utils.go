@@ -536,7 +536,7 @@ func CopySegmentAndIndexFiles(
 		if err != nil {
 			return nil, copiedFiles, merr.Wrap(err, "failed to republish copied manifest indexes")
 		}
-		if targetManifestPath != copiedManifestPath {
+		if !packed.SameManifestPath(targetManifestPath, copiedManifestPath) {
 			revisionFile, err := packed.ManifestFilePath(targetManifestPath)
 			if err != nil {
 				return nil, copiedFiles, err
@@ -660,11 +660,7 @@ func republishCopiedManifestIndexes(
 		return "", nil, err
 	}
 
-	basePath, version, err := packed.UnmarshalManifestPath(targetManifestPath)
-	if err != nil {
-		return "", nil, merr.Wrap(err, "failed to parse copied manifest path")
-	}
-	republished, err := packed.CommitManifestUpdates(basePath, version, targetStorageConfig,
+	republished, err := packed.CommitManifestUpdates(targetManifestPath, targetStorageConfig,
 		&packed.ManifestUpdates{DropIndexes: drops, Indexes: adds})
 	if err != nil {
 		return "", nil, merr.Wrap(err, "failed to commit copied manifest indexes")
@@ -1384,7 +1380,7 @@ func generateTargetIndexPath(
 	if indexType == IndexTypeVectorScalarV0 && target.IndexStorePathVersion != nil &&
 		target.GetIndexStorePathVersion() != pathVersion {
 		fileOffset := buildIDOffset + 2
-		if !metautil.IsCollectionRooted(pathVersion) {
+		if pathVersion == indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED {
 			fileOffset = segmentOffset + 1
 		}
 		if keywordIdx+fileOffset >= len(parts) || keywordIdx+buildIDOffset+1 >= len(parts) {

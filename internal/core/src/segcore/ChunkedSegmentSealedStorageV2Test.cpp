@@ -769,9 +769,8 @@ INSTANTIATE_TEST_SUITE_P(TestLazyManifest, TestLazyManifest, testing::Bool());
 
 IndexInventory::RootSlot
 LazyTestIndexSlot(const IndexInventory& inventory, FieldId field) {
-    const auto capability = inventory.Capability(field);
-    for (const auto& entry : capability.entries()) {
-        if (entry.family == index::families::kVectorMem) {
+    for (const auto& entry : inventory.Entries(field)) {
+        if (entry.kind == IndexKind::Vector) {
             auto copy = inventory;
             return copy.Drop(entry.key);
         }
@@ -3067,7 +3066,8 @@ TEST(TestChunkSegmentStorageV2Regression,
 TEST_P(TestChunkSegmentStorageV2, TestColumnExprWithScalarIndexValueLookup) {
     LoadInt64ScalarIndex(index::ASCENDING_SORT);
     const auto field_id = fields.at("int64");
-    const auto capabilities = segment->IndexCapability(field_id);
+    const auto capabilities =
+        segment->ResolveIndexCapability(nullptr, field_id);
     ASSERT_EQ(capabilities.entries().size(), 1);
     ASSERT_TRUE(capabilities.entries().front().caps.value_lookup);
     // Scalar values use the value-reader contract, independently of

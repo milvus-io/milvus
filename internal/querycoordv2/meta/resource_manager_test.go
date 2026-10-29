@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
@@ -688,6 +689,37 @@ func (suite *ResourceManagerSuite) TestUnassignFail() {
 	suite.Panics(func() {
 		suite.manager.HandleNodeDown(ctx, 1)
 	})
+}
+
+func (suite *ResourceManagerSuite) TestUnassignRetriesTransientEtcdError() {
+	ctx := suite.ctx
+	mockKV := mocks.NewMetaKv(suite.T())
+	mockKV.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil)
+
+	store := querycoord.NewCatalog(mockKV)
+	suite.manager = NewResourceManager(store, session.NewNodeManager())
+
+	suite.manager.AlterResourceGroups(ctx, map[string]*rgpb.ResourceGroupConfig{
+		"rg1": newResourceGroupConfig(20, 30),
+	})
+
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.manager.HandleNodeUp(ctx, 1)
+	suite.Equal("rg1", suite.manager.GetResourceGroupByNodeID(1))
+
+	// An etcd restart makes the first save fail with leader changed.
+	mockKV.EXPECT().MultiSave(mock.Anything, mock.Anything).Unset()
+	mockKV.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(rpctypes.ErrLeaderChanged).Once()
+	mockKV.EXPECT().MultiSave(mock.Anything, mock.Anything).Return(nil).Once()
+
+	suite.NotPanics(func() {
+		suite.manager.HandleNodeDown(ctx, 1)
+	})
+	suite.Empty(suite.manager.GetResourceGroupByNodeID(1))
 }
 
 func TestGetResourceGroupsJSON(t *testing.T) {

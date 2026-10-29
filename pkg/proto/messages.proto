@@ -396,10 +396,11 @@ message AlterLoadConfigMessageHeader {
     int64 db_id = 1;
     int64 collection_id = 2; // the collection id that has to be loaded.
     repeated int64 partition_ids = 3; // the partition ids that has to be loaded, empty means no partition has to be loaded.
-    repeated LoadFieldConfig load_fields = 4; // the field id that has to be loaded.
+    repeated LoadFieldConfig load_fields = 4; // Preload hints; empty follows the target schema. Does not restrict queries.
     repeated LoadReplicaConfig replicas = 5; // the replicas that has to be loaded.
     bool user_specified_replica_mode = 6; // whether the replica mode is user specified.
     bool use_local_replica_config = 7; // when true, use local cluster-level replica config instead of the replicas field above.
+    repeated LoadFieldConfig required_fields = 8; // Internal, explicit nonempty query field scope. Never inferred from preload hints.
 }
 
 // AlterLoadConfigMessageBody is the body of alter load config message.

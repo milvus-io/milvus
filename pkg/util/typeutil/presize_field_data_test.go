@@ -390,6 +390,7 @@ func TestAppendFieldDataByColumnGrowsExistingColumn(t *testing.T) {
 				d := fd.GetScalars()
 				d.GetLongData().Data = d.GetLongData().Data[:1:1]
 				d.ValidData = d.ValidData[:1:1]
+				fd.ValidData = fd.ValidData[:1:1]
 			},
 			len: func(fd *schemapb.FieldData) int {
 				return len(fd.GetScalars().GetLongData().GetData()) + len(GetFieldDataValidData(fd))

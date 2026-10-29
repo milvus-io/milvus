@@ -551,7 +551,18 @@ func (h *ServerHandler) GetCurrentSegmentsView(ctx context.Context, channel RWCh
 		if filterWithPartition && !validPartitionsMap[s.GetPartitionID()] {
 			continue
 		}
-		if s.GetStartPosition() == nil && s.GetDmlPosition() == nil {
+		// External collection segments carry neither start nor dml position: they
+		// are produced by refresh instead of the WAL. Admit them by the same rule
+		// query recovery uses - a committed manifest or fake binlogs - otherwise
+		// GetPersistentSegmentInfo would drop every external segment. Fake binlogs
+		// are stripped on persistence, so the manifest is what survives a restart.
+		committed, err := hasCommittedManifest(s)
+		if err != nil {
+			mlog.Warn(ctx, "skip segment with invalid manifest in segments view",
+				mlog.FieldSegmentID(s.GetID()), mlog.Err(err))
+			continue
+		}
+		if !committed && s.GetStartPosition() == nil && s.GetDmlPosition() == nil && len(s.GetBinlogs()) == 0 {
 			continue
 		}
 		if aliveStaged.Contain(s.GetID()) {
@@ -1025,14 +1036,17 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 		segInfo.Deltalogs = append(segInfo.GetDeltalogs(), deltalogs...)
 	})
 
-	segDescList := lo.Map(segmentInfos, func(segInfo *datapb.SegmentInfo, _ int) *datapb.SegmentDescription {
-		segID := segInfo.GetID()
-		indexesFiles := uncompressIndexFiles(h, collectionID, segID)
+	segDescList := make([]*datapb.SegmentDescription, 0, len(segmentInfos))
+	for _, segInfo := range segmentInfos {
+		indexesFiles, err := uncompressIndexFiles(h, segInfo)
+		if err != nil {
+			return nil, err
+		}
 		uncompressedJSONStats := make(map[int64]*datapb.JsonKeyStats)
 		for id, jsonStats := range segInfo.GetJsonKeyStats() {
 			uncompressedJSONStats[id] = uncompressJSONStats(h, segInfo, jsonStats)
 		}
-		return &datapb.SegmentDescription{
+		segDescList = append(segDescList, &datapb.SegmentDescription{
 			SegmentId:         segInfo.GetID(),
 			SegmentLevel:      segInfo.GetLevel(),
 			PartitionId:       segInfo.GetPartitionID(),
@@ -1052,8 +1066,8 @@ func (h *ServerHandler) GenSnapshot(ctx context.Context, collectionID UniqueID, 
 			ManifestPath:      segInfo.GetManifestPath(),
 			ManifestHasIndex:  proto.Bool(segInfo.GetManifestHasIndex()),
 			CommitTimestamp:   segInfo.GetCommitTimestamp(),
-		}
-	})
+		})
+	}
 
 	// Clone schema and add consistency level to properties
 	// This is needed because mustConsumeConsistencyLevel in restore expects consistency level in schema.Properties
@@ -1091,30 +1105,25 @@ func uncompressJSONStats(h *ServerHandler, segInfo *datapb.SegmentInfo, jsonStat
 	return uncompressedJSONStats
 }
 
-func uncompressIndexFiles(h *ServerHandler, collectionID int64, segID int64) []*indexpb.IndexFilePathInfo {
-	segIdxes := h.s.meta.indexMeta.getSegmentIndexes(collectionID, segID)
+func uncompressIndexFiles(h *ServerHandler, segment *datapb.SegmentInfo) ([]*indexpb.IndexFilePathInfo, error) {
+	segIdxes := h.s.meta.indexMeta.getSegmentIndexes(segment.GetCollectionID(), segment.GetID())
 	indexesFiles := make([]*indexpb.IndexFilePathInfo, 0)
 	for _, segIdx := range segIdxes {
 		if segIdx.IndexState == commonpb.IndexState_Finished {
 			fieldID := h.s.meta.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID)
 			indexName := h.s.meta.indexMeta.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID)
 
-			builder := metautil.NewIndexPathBuilder(h.s.meta.chunkManager.RootPath(),
-				segIdx.IndexStorePathVersion, segIdx.CollectionID,
-				segIdx.PartitionID, segIdx.SegmentID,
-				segIdx.BuildID, segIdx.IndexVersion)
-			if metautil.IsSegmentRooted(segIdx.IndexStorePathVersion) {
-				if segment := h.s.meta.GetSegment(context.TODO(), segID); segment != nil {
-					builder.WithManifestPath(segment.GetManifestPath())
-				}
+			// Use the segment already selected for this snapshot, rather than
+			// looking it up again while metadata may be changing.
+			indexFilePaths, err := segmentIndexFilePaths(h.s.meta.chunkManager.RootPath(), segIdx, segment)
+			if err != nil {
+				return nil, err
 			}
-
-			indexFilePaths := builder.BuildFilePaths(segIdx.IndexFileKeys)
 			indexParams := h.s.meta.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
 			indexParams = append(indexParams, h.s.meta.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
 
 			indexesFiles = append(indexesFiles, &indexpb.IndexFilePathInfo{
-				SegmentID:                 segID,
+				SegmentID:                 segment.GetID(),
 				FieldID:                   fieldID,
 				IndexID:                   segIdx.IndexID,
 				BuildID:                   segIdx.BuildID,
@@ -1131,7 +1140,7 @@ func uncompressIndexFiles(h *ServerHandler, collectionID int64, segID int64) []*
 			})
 		}
 	}
-	return indexesFiles
+	return indexesFiles, nil
 }
 
 func (h *ServerHandler) GetDeltaLogFromCompactTo(ctx context.Context, segmentID UniqueID) ([]*datapb.FieldBinlog, error) {

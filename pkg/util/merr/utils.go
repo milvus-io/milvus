@@ -1199,6 +1199,16 @@ func WrapErrIoFailedMsg(fmt string, args ...any) error {
 	return wrapMsg(ErrIoFailed, fmt, args...)
 }
 
+// WrapErrIoFailedErr translates a dependency failure to the generic IO contract
+// while preserving its cause for in-process classification. Use Wrap instead
+// when the existing error's Milvus classification should be preserved.
+func WrapErrIoFailedErr(err error, format string, args ...any) error {
+	if err == nil {
+		return WrapErrIoFailedMsg(format, args...)
+	}
+	return wrapInner(ErrIoFailed, formatMsg(format, args...), err)
+}
+
 func WrapErrIoUnexpectEOF(key string, err error) error {
 	if err == nil {
 		return nil

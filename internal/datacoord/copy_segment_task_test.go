@@ -876,8 +876,11 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_CompletedUpdatesSegment()
 		},
 	}
 
+	drainStatsBuildChForTest()
+	defer drainStatsBuildChForTest()
 	err = SyncCopySegmentTask(task, resp, copyMeta, m)
 	s.NoError(err)
+	s.Equal([]UniqueID{2001}, drainStatsBuildChForTest(), "restored segments may still need stats the snapshot did not carry")
 
 	segment := m.GetSegment(ctx, 2001)
 	s.Equal(commonpb.SegmentState_Flushed, segment.GetState())
@@ -896,6 +899,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_CompletedUpdatesSegment()
 	// Replaying a finalized result must not republish or enqueue it again.
 	s.NoError(SyncCopySegmentTask(task, resp, copyMeta, m))
 	assertNoBuildIndexEvent(s.T())
+	s.Empty(drainStatsBuildChForTest(), "finalized replay must not enqueue stats again")
 }
 
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ReconcilesDataView() {
@@ -1834,6 +1838,8 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_LegacyStorageRetainsEtcdI
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PreservesImportingFlagOnFailure() {
 	drainBuildIndexChForTest()
 	defer drainBuildIndexChForTest()
+	drainStatsBuildChForTest()
+	defer drainStatsBuildChForTest()
 
 	collectionID := int64(1)
 	segmentID := int64(103)
@@ -1876,6 +1882,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PreservesImportingFlagOnF
 	s.Equal(commonpb.SegmentState_Importing, updated.GetState())
 	s.True(updated.GetIsImporting())
 	assertNoBuildIndexEvent(s.T())
+	s.Empty(drainStatsBuildChForTest(), "failed finalization must not enqueue stats")
 }
 
 func TestAssembleCopySegmentRequest_SourceSegmentNotFound(t *testing.T) {
@@ -3197,7 +3204,7 @@ func TestAssembleCopySegmentRequest_ManifestFallbackSingleWorker(t *testing.T) {
 	task, job := newManifestFallbackAssembleFixture(ctx, 1, 2, 3)
 	for _, segment := range job.snapshotCache.data.Segments {
 		base := path.Join(cfg.RootPath, "insert_log/100/10", strconv.FormatInt(segment.GetSegmentId(), 10))
-		manifest, err := packed.CommitManifestUpdates(base, 0, cfg, &packed.ManifestUpdates{
+		manifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(base, 0), cfg, &packed.ManifestUpdates{
 			DeltaLogs: []packed.DeltaLogEntry{{Path: base + "/_delta/1", NumEntries: 1}},
 		})
 		require.NoError(t, err)

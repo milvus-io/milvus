@@ -52,6 +52,41 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// Exercise storage's real relative/absolute conversion before DataCoord's
+// strict reader check, including a local legacy base outside today's layout.
+func TestManifestIndexLegacyBaseRoundTrip(t *testing.T) {
+	for _, suffix := range []string{"legacy/insert_log/1/2/3", "legacy/insert_log/1/2/3/"} {
+		t.Run(suffix, func(t *testing.T) {
+			cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+			base := cfg.RootPath + "/" + suffix
+			segment := &datapb.SegmentInfo{ID: 3, CollectionID: 1, PartitionID: 2}
+			version := packed.ManifestEarliest
+			for _, buildID := range []int64{100, 200} {
+				manifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(base, version), cfg, &packed.ManifestUpdates{
+					Indexes: []packed.ManifestIndexInfo{{
+						ColumnName: "vector", IndexName: "index", IndexType: "HNSW",
+						Path: fmt.Sprintf("%d/1", buildID), IndexID: buildID, BuildID: buildID,
+						IndexVersion: 1, FieldID: 101, IndexFileKeys: []string{"index.bin"},
+						IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+					}},
+				})
+				require.NoError(t, err)
+				segment.ManifestPath = manifest
+				_, version, err = packed.UnmarshalManifestPath(manifest)
+				require.NoError(t, err)
+				entries, err := packed.GetManifestIndexInfos(manifest, cfg)
+				require.NoError(t, err)
+				require.Len(t, entries, int(buildID/100))
+				for _, entry := range entries {
+					info, ok := manifestIndexFilePathInfoForSegment(cfg.RootPath, segment, entry)
+					require.True(t, ok, "storage round-trip path must satisfy DataCoord validation: %s", entry.Path)
+					require.Equal(t, []string{strings.TrimRight(base, "/") + fmt.Sprintf("/_index/%d/1/index.bin", entry.BuildID)}, info.IndexFilePaths)
+				}
+			}
+		})
+	}
+}
+
 // TestBuildManifestIndexInfoFromDataCoordMetadata proves the manifest entry is
 // assembled entirely from DataCoord state - no worker-supplied manifest input -
 // and that the artifact path is stored relative to the segment's _index
@@ -138,6 +173,76 @@ func TestBuildManifestIndexInfoFromDataCoordMetadata(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, expected, info.Path)
 	require.Equal(t, "102/4", info.Path)
+}
+
+// Both index publication and segment copying must preserve schema field names,
+// including qualified struct sub-field names, rather than storage column names.
+func TestManifestIndexColumnNames(t *testing.T) {
+	const collectionID = int64(1)
+	const indexID = int64(200)
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "vector"},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{
+			{FieldID: 101, Name: "chunks", Fields: []*schemapb.FieldSchema{
+				{FieldID: 102, Name: "chunks[embedding]"},
+				{FieldID: 103, Name: "chunks[label]"},
+			}},
+			{FieldID: 104, Name: "other", Fields: []*schemapb.FieldSchema{
+				{FieldID: 105, Name: "other[embedding]"},
+			}},
+		},
+	}
+	for _, tc := range []struct {
+		fieldID int64
+		name    string
+	}{
+		{100, "vector"},
+		{102, "chunks[embedding]"},
+		{103, "chunks[label]"},
+		{105, "other[embedding]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ms := metacache.NewMetaStore(nil)
+			ms.PutCollection(&collectionInfo{ID: collectionID, Schema: schema})
+			m := &meta{
+				metaStore:    ms,
+				chunkManager: storage.NewLocalChunkManager(objectstorage.RootPath("files")),
+				indexMeta: &indexMeta{
+					indexes: map[UniqueID]map[UniqueID]*model.Index{
+						collectionID: {indexID: {
+							CollectionID: collectionID,
+							FieldID:      tc.fieldID,
+							IndexID:      indexID,
+							IndexName:    "field_idx",
+						}},
+					},
+				},
+			}
+			segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID: 3, CollectionID: collectionID, PartitionID: 2,
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   packed.MarshalManifestPath("files/insert_log/1/2/3", 7),
+			}}
+			info, err := buildManifestIndexInfo(m, segment, &model.SegmentIndex{
+				CollectionID: collectionID, PartitionID: 2, SegmentID: 3,
+				IndexID: indexID, BuildID: 300, IndexVersion: 1,
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+				IndexFileKeys:         []string{"0"},
+			})
+			require.NoError(t, err)
+			require.Equal(t, tc.name, info.ColumnName)
+			require.Equal(t, tc.fieldID, info.FieldID)
+			require.Equal(t, indexID, info.IndexID)
+
+			targets := buildCopySegmentTargetIndexes(m, collectionID, true)
+			require.Len(t, targets, 1)
+			require.Equal(t, tc.name, targets[0].GetColumnName())
+			require.Equal(t, tc.fieldID, targets[0].GetFieldId())
+			require.Equal(t, indexID, targets[0].GetIndexId())
+		})
+	}
 }
 
 // TestBuildManifestIndexInfoRespectsSegmentIndexTypeOverride covers a segment
@@ -604,9 +709,9 @@ func mockManifestUpdateResult(manifestPath string, updates *packed.ManifestUpdat
 // CommitManifestUpdatesWithResultAsync mock, since the real wrapper calls the submit API.
 func mockManifestUpdateSubmissions(t *testing.T) {
 	t.Helper()
-	mock := mockey.Mock(packed.SubmitManifestUpdates).To(func(ctx context.Context, io *packed.ManifestIOContext, base string, version int64, config *indexpb.StorageConfig, updates *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
+	mock := mockey.Mock(packed.SubmitManifestUpdates).To(func(ctx context.Context, io *packed.ManifestIOContext, baseManifest string, config *indexpb.StorageConfig, updates *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
 		go func() {
-			manifestPath, err := packed.CommitManifestUpdatesWithResultAsync(ctx, io, base, version, config, updates)
+			manifestPath, err := packed.CommitManifestUpdatesWithResultAsync(ctx, io, baseManifest, config, updates)
 			complete(manifestPath, err)
 		}()
 		return nil
@@ -621,12 +726,16 @@ func newFakeManifestStore(t *testing.T) *fakeManifestStore {
 	s := &fakeManifestStore{revisions: make(map[string][]packed.ManifestIndexInfo)}
 
 	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
-		func(_ context.Context, _ *packed.ManifestIOContext, basePath string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
+		func(_ context.Context, _ *packed.ManifestIOContext, baseManifest string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
+			published, err := advanceManifest(baseManifest, 1)
+			if err != nil {
+				return packed.ManifestUpdateResult{}, err
+			}
 			s.mu.Lock()
 			defer s.mu.Unlock()
 			s.commitCount++
 			// A revision is a full snapshot resolved onto the one it opens at.
-			current := s.revisions[packed.MarshalManifestPath(basePath, version)]
+			current := s.revisions[baseManifest]
 			next := make([]packed.ManifestIndexInfo, 0, len(current)+len(updates.Indexes))
 			for _, entry := range current {
 				dropped := false
@@ -641,7 +750,6 @@ func newFakeManifestStore(t *testing.T) *fakeManifestStore {
 				}
 			}
 			next = append(next, updates.Indexes...)
-			published := packed.MarshalManifestPath(basePath, version+1)
 			s.revisions[published] = next
 			hasIndexes := len(next) > 0
 			return packed.ManifestUpdateResult{ManifestPath: published, HasIndexes: &hasIndexes}, nil

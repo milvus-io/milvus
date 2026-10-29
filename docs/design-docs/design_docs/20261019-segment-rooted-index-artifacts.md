@@ -80,7 +80,10 @@ external-path entry still fails. Target paths are validated before any file copy
 
 The segment-directory listing excludes `_index`: only the pinned snapshot's
 explicit index list selects builds to copy. Otherwise obsolete builds and old
-BuildIDs would be inherited. Cleanup prefixes and result admission use the same
+BuildIDs would be inherited. Snapshot export also excludes `_index` from its
+segment-directory listing and collects indexes from that explicit list, so
+GC of unreferenced builds does not change the export file set.
+Cleanup prefixes and result admission use the same
 persisted destination version. A result claiming a different layout is rejected
 before making the target segment visible. Result installation retains import
 protection until all index records are installed, then publishes the manifest
@@ -99,6 +102,10 @@ LIST of the prefix. It remains active even when the write switch is off, because
 historical v2 files still need reclamation. Dropped-segment GC still owns whole
 segment deletion. Historical noncanonical local namespace orphan-scan gaps
 remain as documented in the storage path contract.
+Malformed `_index` paths are deliberately retained by the orphan scan when
+their ownership cannot be parsed. Dropped-segment directory deletion still
+covers them, but malformed objects with no owning segment may remain. Age
+alone is not sufficient evidence to delete an unrecognized path.
 
 ## Validation and PR organization
 

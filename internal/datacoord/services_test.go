@@ -1328,7 +1328,7 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 	})
 
 	t.Run("test meta non exist", func(t *testing.T) {
-		s := &Server{meta: newEmptyTestMeta()}
+		s := &Server{meta: newEmptyTestMeta(), notifyStatsChan: make(chan UniqueID, 1)}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		req := &datapb.AlterCollectionRequest{
@@ -1340,12 +1340,13 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		assert.NotNil(t, resp)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(s.meta.ListCollections()))
+		assert.Equal(t, UniqueID(1), <-s.notifyStatsChan)
 	})
 
 	t.Run("test update meta", func(t *testing.T) {
 		ms := metacache.NewMetaStore(nil)
 		ms.PutCollection(&collectionInfo{ID: 1})
-		s := &Server{meta: &meta{metaStore: ms}}
+		s := &Server{meta: &meta{metaStore: ms}, notifyStatsChan: make(chan UniqueID, 1)}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		req := &datapb.AlterCollectionRequest{
@@ -1363,6 +1364,7 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		coll = s.meta.GetCollection(1)
 		assert.NotNil(t, coll)
 		assert.NotNil(t, coll.Properties)
+		assert.Equal(t, UniqueID(1), <-s.notifyStatsChan, "an altered schema may add fields that need stats")
 	})
 
 	t.Run("published external source notifies index build", func(t *testing.T) {
@@ -2585,8 +2587,10 @@ func TestServer_FlushAll(t *testing.T) {
 		defer mockGetClusterChannels.UnPatch()
 
 		// Mock broadcaster
+		var broadcastMsg message.BroadcastMutableMessage
 		bapi := mock_broadcaster.NewMockBroadcastAPI(t)
 		bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, msg message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
+			broadcastMsg = msg
 			require.True(t, msg.IsUnreplicable())
 			require.True(t, msg.BroadcastHeader().AckSyncUp, "FlushAll must wait for consuming-side completion")
 			results := make(map[string]*message.AppendResult)
@@ -2639,8 +2643,19 @@ func TestServer_FlushAll(t *testing.T) {
 		req := &datapb.FlushAllRequest{}
 		resp, err := server.FlushAll(context.Background(), req)
 
-		assert.NoError(t, err)
-		assert.NoError(t, merr.Error(resp.GetStatus()))
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		require.Len(t, resp.GetFlushAllMsgs(), 2)
+		for pchannel, protoMsg := range resp.GetFlushAllMsgs() {
+			msg := message.MilvusMessageToImmutableMessage(protoMsg)
+			assert.False(t, msg.IsUnreplicable(), "backup must be able to replicate the returned position")
+			assert.Equal(t, message.MessageTypeFlushAll, msg.MessageType())
+			assert.Equal(t, pchannel, msg.PChannel())
+			assert.True(t, rmq.NewRmqID(1).EQ(msg.MessageID()))
+			assert.True(t, rmq.NewRmqID(1).EQ(msg.LastConfirmedMessageID()))
+			assert.NotZero(t, msg.TimeTick())
+		}
+		assert.True(t, broadcastMsg.IsUnreplicable(), "the original WAL broadcast must remain local")
 	})
 }
 
@@ -6669,9 +6684,10 @@ func TestLoadableProjectionUsesFinalSegments(t *testing.T) {
 			InsertChannel: channel,
 			State:         state,
 			IsInvisible:   invisible,
+			Stats:         &datapb.Statistics{InsertBinlogSize: 2048, StatsBinlogSize: 1024, DeltaBinlogSize: 512},
 			Binlogs: []*datapb.FieldBinlog{{
 				FieldID: 100,
-				Binlogs: []*datapb.Binlog{{LogID: id}},
+				Binlogs: []*datapb.Binlog{{LogID: id, MemorySize: 999999}},
 			}},
 		}})
 	}
@@ -6684,8 +6700,8 @@ func TestLoadableProjectionUsesFinalSegments(t *testing.T) {
 	actual, err := meta.loadableProjection(ctx, 100)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []dataview.LoadableSegment{
-		{SegmentID: 110, VChannel: "vchan-0", PartitionID: 10},
-		{SegmentID: 120, VChannel: "vchan-0", PartitionID: 10},
+		{SegmentID: 110, VChannel: "vchan-0", PartitionID: 10, Size: 2048},
+		{SegmentID: 120, VChannel: "vchan-0", PartitionID: 10, Size: 2048},
 	}, actual)
 }
 

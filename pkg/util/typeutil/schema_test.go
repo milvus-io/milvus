@@ -1194,7 +1194,7 @@ func TestCreateFieldDataRangeView(t *testing.T) {
 		assert.True(t, &longData[1] == &view[0].GetScalars().GetLongData().Data[0])
 		assert.True(t, &jsonData[1] == &view[1].GetScalars().GetJsonData().Data[0])
 		assert.True(t, &floatData[2] == &view[2].GetVectors().GetFloatVector().Data[0])
-		assert.Nil(t, view[2].GetValidData())
+		assert.True(t, &validData[1] == &view[2].ValidData[0])
 		assert.True(t, &validData[1] == &view[2].GetVectors().ValidData[0])
 	})
 
@@ -1260,7 +1260,7 @@ func TestCreateFieldDataRangeView(t *testing.T) {
 		view, ok := CreateFieldDataRangeView(src, 1, 2, dataStarts, dataEnds)
 		require.True(t, ok)
 		assert.Nil(t, view[0].GetVectors().GetData())
-		assert.Nil(t, view[0].GetValidData())
+		assert.Equal(t, []bool{false}, view[0].GetValidData())
 		assert.Equal(t, []bool{false}, GetFieldDataValidData(view[0]))
 	})
 

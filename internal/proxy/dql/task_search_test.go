@@ -2988,8 +2988,9 @@ func TestTaskSearch_reduceGroupBySearchResultData(t *testing.T) {
 			expectedIDs:    []int64{1, 3, 5, 7, 9, 1, 3, 5, 7, 9},
 			expectedScores: []float32{-10, -8, -6, -4, -2, -10, -8, -6, -4, -2},
 			expectedGroupByValues: &schemapb.FieldData{
-				Type:    schemapb.DataType_Int64,
-				FieldId: 1,
+				Type:      schemapb.DataType_Int64,
+				FieldId:   1,
+				ValidData: []bool{true, true, true, true, false, true, true, true, true, false},
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
 						ValidData: []bool{true, true, true, true, false, true, true, true, true, false},

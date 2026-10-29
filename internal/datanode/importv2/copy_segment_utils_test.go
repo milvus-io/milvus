@@ -3910,7 +3910,7 @@ func TestRepublishCopiedManifestIndexes_NoTargetDefinitionsOnlyRetractsInherited
 	var gotIndexes []packed.ManifestIndexInfo
 	republished := packed.MarshalManifestPath("files/insert_log/100/200/300", 4)
 	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(_ string, _ int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+		func(_ string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
 			commitCalls++
 			gotDrops = updates.DropIndexes
 			gotIndexes = updates.Indexes
@@ -3948,7 +3948,7 @@ func TestRepublishCopiedManifestIndexes_WritePlacementMatrix(t *testing.T) {
 			sourceIndexPath := filepath.Join(basePath, "_index/6001/1")
 			relativePath, err := packed.ManifestIndexRelativePath(basePath, sourceIndexPath)
 			require.NoError(t, err)
-			copiedManifest, err := packed.CommitManifestUpdates(basePath, packed.ManifestEarliest, cfg,
+			copiedManifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(basePath, packed.ManifestEarliest), cfg,
 				&packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{{
 					ColumnName:            "vector",
 					IndexName:             "source_idx",
@@ -4089,9 +4089,7 @@ func TestRepublishCopiedManifestIndexes_LegacySourceStillRecordsIndexes(t *testi
 	var captured bool
 	republished := packed.MarshalManifestPath("files/insert_log/100/200/300", 4)
 	defer mockey.Mock(packed.CommitManifestUpdates).To(
-		func(basePath string, baseVersion int64, storageConfig *indexpb.StorageConfig,
-			updates *packed.ManifestUpdates,
-		) (string, error) {
+		func(_ string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
 			gotDrops, gotIndexes, captured = updates.DropIndexes, updates.Indexes, true
 			return republished, nil
 		}).Build().UnPatch()
@@ -4154,9 +4152,7 @@ func TestRepublishCopiedManifestIndexes_DropsEntriesAbsentFromShippedList(t *tes
 	var captured bool
 	republished := packed.MarshalManifestPath("files/insert_log/100/200/300", 4)
 	defer mockey.Mock(packed.CommitManifestUpdates).To(
-		func(basePath string, baseVersion int64, storageConfig *indexpb.StorageConfig,
-			updates *packed.ManifestUpdates,
-		) (string, error) {
+		func(_ string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
 			gotDrops, gotIndexes, captured = updates.DropIndexes, updates.Indexes, true
 			return republished, nil
 		}).Build().UnPatch()
@@ -4209,6 +4205,22 @@ func TestGenerateTargetIndexPath_SegmentRooted(t *testing.T) {
 	got, err := generateTargetIndexPath("source/index_files/100/4/2/3/index.bin", source, target, IndexTypeVectorScalarV0, 0)
 	require.NoError(t, err)
 	require.Equal(t, "insert_log/10/20/30/_index/200/4/index.bin", got)
+
+	// v2 also carries collection/partition/segment IDs, but it is not v1.
+	// Converting it must keep the file offset after _index/build/version.
+	target.TargetRootPath = "target"
+	for _, tc := range []struct {
+		version indexpb.IndexStorePathVersion
+		want    string
+	}{
+		{0, "target/index_files/200/4/20/30/index.bin"},
+		{1, "target/index_v1/10/20/30/200/4/index.bin"},
+	} {
+		target.IndexStorePathVersion = tc.version.Enum()
+		got, err := generateTargetIndexPath("source/insert_log/1/2/3/_index/100/4/index.bin", source, target, IndexTypeVectorScalarV0, 2)
+		require.NoError(t, err)
+		require.Equal(t, tc.want, got)
+	}
 }
 
 func TestBuildTargetManifestIndexes_RejectsExternalPaths(t *testing.T) {

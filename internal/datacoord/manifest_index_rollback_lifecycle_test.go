@@ -78,7 +78,7 @@ func TestManifestIndexRollbackRealManifestBatchesAndRestart(t *testing.T) {
 			base := path.Join(root, "insert_log/300/30/8001")
 			stat := path.Join(base, "_stats/bloom_filter.100/1")
 			require.NoError(t, packed.WriteFile(cfg, stat, []byte("stats")))
-			initial, err := packed.CommitManifestUpdates(base, packed.ManifestEarliest, cfg, &packed.ManifestUpdates{
+			initial, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(base, packed.ManifestEarliest), cfg, &packed.ManifestUpdates{
 				Stats: []packed.StatEntry{{Key: "bloom_filter.100", Files: []string{stat}}},
 			})
 			require.NoError(t, err)

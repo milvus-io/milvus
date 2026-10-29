@@ -105,7 +105,8 @@ func (s *VectorArraySuite) TestFloatVectorArrayBasic() {
 	s.Equal(schemapb.DataType_FloatVector, va.GetElementType())
 	s.Equal(4, len(va.GetData()))
 	s.Equal([]bool{true, true, false, true, true}, getFieldDataValidData(fd))
-	s.Nil(fd.GetValidData())
+	s.Equal([]bool{true, true, false, true, true}, fd.GetValidData())
+	s.Equal([]bool{true, true, false, true, true}, fd.GetVectors().GetValidData())
 }
 
 func (s *VectorArraySuite) TestFloat16VectorArrayBasic() {

@@ -59,11 +59,11 @@ class GeosContextGuard {
 
 RTreeIndexState::RTreeIndexState(
     std::vector<std::shared_ptr<const RTreeQueryEngine>> engines,
-    std::shared_ptr<const std::vector<size_t>> null_offsets,
+    SharedValidityBitmap::Snapshot validity,
     int64_t total_num_rows,
     int64_t memory_usage)
     : engines_(std::move(engines)),
-      null_offsets_(std::move(null_offsets)),
+      validity_(std::move(validity)),
       total_num_rows_(total_num_rows),
       memory_usage_(memory_usage) {
 }
@@ -93,22 +93,20 @@ RTreeIndexState::Create(std::shared_ptr<const RTreeQueryEngine> engine,
     engine->ValidateCoordinates(total_num_rows, *null_offsets);
     std::vector<std::shared_ptr<const RTreeQueryEngine>> engines;
     engines.push_back(std::move(engine));
+    auto validity = SharedValidityBitmap::FromValidatedNullOffsets(
+        static_cast<size_t>(total_num_rows), *null_offsets);
     return CreateFromValidatedShards(
-        std::move(engines), std::move(null_offsets), total_num_rows);
+        std::move(engines), std::move(validity), total_num_rows);
 }
 
 std::shared_ptr<const RTreeIndexState>
 RTreeIndexState::CreateFromValidatedShards(
     std::vector<std::shared_ptr<const RTreeQueryEngine>> engines,
-    std::shared_ptr<const std::vector<size_t>> null_offsets,
+    SharedValidityBitmap::Snapshot validity,
     int64_t total_num_rows) {
-    AssertInfo(null_offsets != nullptr,
-               "R-Tree state NULL offsets must not be null");
     AssertInfo(total_num_rows >= 0,
                "R-Tree state row count must not be negative");
-    int64_t memory_usage = static_cast<int64_t>(
-        sizeof(RTreeIndexState) + sizeof(std::vector<size_t>) +
-        sizeof(std::vector<std::shared_ptr<const RTreeQueryEngine>>));
+    int64_t memory_usage = static_cast<int64_t>(sizeof(RTreeIndexState));
     const auto add_bytes = [&](uint64_t bytes) {
         if (bytes > static_cast<uint64_t>(std::numeric_limits<int64_t>::max() -
                                           memory_usage)) {
@@ -126,7 +124,9 @@ RTreeIndexState::CreateFromValidatedShards(
             add_bytes(static_cast<uint64_t>(count * item_bytes));
         }
     };
-    add_capacity(null_offsets->capacity(), sizeof(size_t));
+    AssertInfo(validity.Count() == static_cast<size_t>(total_num_rows),
+               "R-Tree validity count disagrees with its reader");
+    add_bytes(validity.BufferBytes());
     add_capacity(engines.capacity(),
                  sizeof(std::shared_ptr<const RTreeQueryEngine>));
     for (const auto& engine : engines) {
@@ -136,11 +136,8 @@ RTreeIndexState::CreateFromValidatedShards(
                    "R-Tree engine memory size must not be negative");
         add_bytes(static_cast<uint64_t>(engine_bytes));
     }
-    return std::shared_ptr<const RTreeIndexState>(
-        new RTreeIndexState(std::move(engines),
-                            std::move(null_offsets),
-                            total_num_rows,
-                            memory_usage));
+    return std::shared_ptr<const RTreeIndexState>(new RTreeIndexState(
+        std::move(engines), std::move(validity), total_num_rows, memory_usage));
 }
 
 const std::vector<std::shared_ptr<const RTreeQueryEngine>>&
@@ -148,9 +145,9 @@ RTreeIndexState::Engines() const {
     return engines_;
 }
 
-const std::vector<size_t>&
-RTreeIndexState::NullOffsets() const {
-    return *null_offsets_;
+const SharedValidityBitmap::Snapshot&
+RTreeIndexState::Validity() const {
+    return validity_;
 }
 
 int64_t
@@ -201,7 +198,8 @@ RTreeIndexReader::CellByteSize() const {
     // Every referenced Boost shard is resident. No mmap/file-backed bytes
     // remain owned by this reader. MemoryUsage counts a shared shard once per
     // generation and is not additive across concurrently pinned generations;
-    // growing accounting must take the union of their shared engine owners.
+    // growing accounting must take the union of shared engine and validity-buffer
+    // owners. The embedded validity snapshot is included in sizeof(state).
     return {MemoryUsage(), 0};
 }
 
@@ -229,20 +227,21 @@ RTreeIndexReader::Candidates(SpatialOp op, const Geometry& query_geom) const {
     return result;
 }
 
+const SharedValidityBitmap::Snapshot&
+RTreeIndexReader::Validity() const {
+    return state_->Validity();
+}
+
 TargetBitmap
 RTreeIndexReader::IsNull() const {
-    TargetBitmap result(static_cast<size_t>(state_->Count()), false);
-    for (const auto offset : state_->NullOffsets()) {
-        result.set(offset);
-    }
+    auto result = IsNotNull();
+    result.flip();
     return result;
 }
 
 TargetBitmap
 RTreeIndexReader::IsNotNull() const {
-    auto result = IsNull();
-    result.flip();
-    return result;
+    return state_->Validity().ToBitmap();
 }
 
 }  // namespace milvus::index

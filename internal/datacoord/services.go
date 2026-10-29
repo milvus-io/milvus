@@ -252,6 +252,9 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 			WithLastConfirmed(appendResult.LastConfirmedMessageID).
 			IntoImmutableMessage(appendResult.MessageID).
 			IntoImmutableMessageProto()
+		// Backup can explicitly replicate this response copy to align secondary
+		// positions. The broadcast persisted in the local WAL remains unreplicable.
+		message.RemoveUnreplicable(flushAllMsgs[pchannel])
 	}
 	mlog.Info(ctx, "FlushAll successfully", mlog.FieldMessages(msgs))
 	return &datapb.FlushAllResponse{
@@ -846,6 +849,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 					PartitionID:     segment.GetPartitionID(),
 					ManifestVersion: manifestVersion,
 					RowNum:          rowNum,
+					Size:            req.GetStats().GetInsertBinlogSize(),
 				}},
 			})
 			if err != nil {
@@ -1926,6 +1930,9 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 	if externalSourceChanged(oldSchema, req.GetSchema()) {
 		notifyCollectionIndexBuild(s.notifyIndexChan, req.GetCollectionID())
 	}
+	// An added field may need text or JSON key stats on existing segments, and a
+	// published external source/spec makes refreshed segments ready for them.
+	notifyCollectionStatsBuild(s.notifyStatsChan, req.GetCollectionID())
 	return merr.Success(), nil
 }
 

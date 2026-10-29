@@ -256,9 +256,9 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 		s.Require().True(ok)
 		original := model.CloneSegmentIndex(job)
 		defer s.mt.indexMeta.segmentBuildInfo.Add(original)
-		previousSegment := s.mt.segments.GetSegment(s.segID)
-		defer s.mt.segments.SetSegment(s.segID, previousSegment)
-		segment := previousSegment.Clone()
+		originalSegment := s.mt.segments.GetSegment(s.segID)
+		defer s.mt.segments.SetSegment(s.segID, originalSegment)
+		segment := originalSegment.Clone()
 		segment.ManifestPath = packed.MarshalManifestPath("root/insert_log/1/2/1179", 1)
 		segment.StorageVersion = storage.StorageV3
 		s.mt.segments.SetSegment(s.segID, segment)

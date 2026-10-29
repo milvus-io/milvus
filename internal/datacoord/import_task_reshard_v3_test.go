@@ -21,6 +21,7 @@ import (
 	"path"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -186,32 +187,28 @@ func TestReshardTaskQueryRetryAndFailed(t *testing.T) {
 // TestReshardTaskAcceptResultClassification pins acceptResult's error classes: a
 // missing storage and an unparseable manifest are terminal, an object-store read
 // failure is transient, and a validating manifest is accepted.
-func TestReshardTaskAcceptResultClassification(t *testing.T) {
-	t.Run("storage unavailable is terminal", func(t *testing.T) {
+func TestReshardTaskAcceptResult(t *testing.T) {
+	t.Run("storage unavailable surfaces an error", func(t *testing.T) {
 		task := newReshardTask(&datapb.ReshardTask{JobId: 1, TaskId: 10, RunId: 1}, NewMockImportMeta(t), nil, nil)
-		err := task.acceptResult()
-		require.Error(t, err)
-		require.True(t, importcommon.IsTerminalImportV3Err(err))
+		require.Error(t, task.acceptResult())
 	})
 
-	t.Run("read failure is transient", func(t *testing.T) {
+	t.Run("read failure surfaces an error", func(t *testing.T) {
 		cm := mocks2.NewChunkManager(t)
 		cm.EXPECT().RootPath().Return("root").Maybe()
 		cm.EXPECT().Read(mock.Anything, mock.Anything).Return(nil, context.DeadlineExceeded).Once()
 		task := newReshardTask(&datapb.ReshardTask{JobId: 1, TaskId: 10, RunId: 1}, NewMockImportMeta(t), &meta{chunkManager: cm}, nil)
-		err := task.acceptResult()
-		require.Error(t, err)
-		require.False(t, importcommon.IsTerminalImportV3Err(err))
+		require.Error(t, task.acceptResult())
 	})
 
-	t.Run("unparseable manifest is terminal", func(t *testing.T) {
+	t.Run("unparseable manifest is data corruption", func(t *testing.T) {
 		cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
 		require.NoError(t, cm.Write(context.Background(),
 			path.Join(cm.RootPath(), metautil.BuildImportReshardResultPath(1, 10, 1)), []byte("\xff\xff\xff")))
 		task := newReshardTask(&datapb.ReshardTask{JobId: 1, TaskId: 10, RunId: 1}, NewMockImportMeta(t), &meta{chunkManager: cm}, nil)
 		err := task.acceptResult()
 		require.Error(t, err)
-		require.True(t, importcommon.IsTerminalImportV3Err(err))
+		require.True(t, errors.Is(err, merr.ErrDataIntegrity), "got %v", err)
 	})
 
 	t.Run("valid manifest accepted", func(t *testing.T) {
@@ -292,4 +289,91 @@ func TestReshardTaskDropTaskOnWorker(t *testing.T) {
 
 		task.DropTaskOnWorker(session.NewMockCluster(t))
 	})
+}
+
+// TestReshardRPCErrorVerdict pins the RPC-failure verdict: an unknown or
+// transient outcome retries with a fresh run (never reusing the run that may
+// have been accepted), while a permanent error fails the task.
+func TestReshardCreateRPCErrorVerdict(t *testing.T) {
+	cases := []struct {
+		name  string
+		err   error
+		retry bool
+	}{
+		{"transport error retries", errors.New("connection reset"), true},
+		{"node not found retries", merr.ErrNodeNotFound, true},
+		{"typed io failure fails", merr.WrapErrIoFailed("manifest", errors.New("connection reset")), false},
+		{"service unavailable retries", merr.ErrServiceUnavailable, true},
+		{"parameter invalid fails", merr.WrapErrParameterInvalidMsg("bad request"), false},
+		{"import sys failed fails", merr.WrapErrImportSysFailedMsg("invalid request"), false},
+		{"permanent io fails", merr.WrapErrIoKeyNotFound("manifest", "not found"), false},
+		{"service internal fails", merr.WrapErrServiceInternalMsg("internal"), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			importMeta := NewMockImportMeta(t)
+			cluster := session.NewMockCluster(t)
+			task := newReshardTask(&datapb.ReshardTask{JobId: 1, TaskId: 10, RunId: 1, NodeId: 5}, importMeta, nil, nil)
+
+			if c.retry {
+				job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, State: internalpb.ImportJobState_Resharding}}
+				importMeta.EXPECT().GetJob(mock.Anything, int64(1)).Return(job).Once()
+				cluster.EXPECT().DropReshard(int64(5), mock.Anything).Return(nil).Once()
+				importMeta.EXPECT().UpdateTask(mock.Anything, int64(10), mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+					Run(func(_ context.Context, _ int64, actions ...UpdateAction) {
+						clone := task.Clone().(*reshardTask)
+						for _, action := range actions {
+							action(clone)
+						}
+						require.Equal(t, datapb.ImportTaskStateV2_Pending, clone.GetState())
+						require.Equal(t, int64(2), clone.task.Load().GetRunId())
+					}).Return(nil).Once()
+			} else {
+				importMeta.EXPECT().UpdateTask(mock.Anything, int64(10), mock.Anything, mock.Anything).
+					Run(func(_ context.Context, _ int64, actions ...UpdateAction) {
+						clone := task.Clone().(*reshardTask)
+						for _, action := range actions {
+							action(clone)
+						}
+						require.Equal(t, datapb.ImportTaskStateV2_Failed, clone.GetState())
+					}).Return(nil).Once()
+			}
+
+			if importcommon.IsTerminalImportV3Err(c.err) {
+				task.fail(c.err.Error())
+			} else {
+				task.prepareRetry(cluster)
+			}
+		})
+	}
+}
+
+// TestReshardQueryFailsOnCorruptManifest pins the Query acceptance verdict: a
+// Completed run whose immutable manifest is unparseable must fail the task
+// instead of re-reading the same object every tick.
+func TestReshardQueryFailsOnCorruptManifest(t *testing.T) {
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	require.NoError(t, cm.Write(context.Background(),
+		path.Join(cm.RootPath(), metautil.BuildImportReshardResultPath(1, 10, 1)), []byte("\xff\xff\xff")))
+
+	importMeta := NewMockImportMeta(t)
+	cluster := session.NewMockCluster(t)
+	task := newReshardTask(&datapb.ReshardTask{
+		JobId: 1, TaskId: 10, RunId: 1, NodeId: 5, State: datapb.ImportTaskStateV2_InProgress,
+	}, importMeta, &meta{chunkManager: cm}, nil)
+	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, State: internalpb.ImportJobState_Resharding}}
+	cluster.EXPECT().QueryReshard(int64(5), mock.Anything).
+		Return(&datapb.QueryReshardTaskResponse{State: datapb.ImportTaskStateV2_Completed}, nil).Once()
+	importMeta.EXPECT().GetJob(mock.Anything, int64(1)).Return(job).Once()
+	importMeta.EXPECT().UpdateTask(mock.Anything, int64(10), mock.Anything, mock.Anything).
+		Run(func(_ context.Context, _ int64, actions ...UpdateAction) {
+			clone := task.Clone().(*reshardTask)
+			for _, action := range actions {
+				action(clone)
+			}
+			require.Equal(t, datapb.ImportTaskStateV2_Failed, clone.GetState())
+			require.Contains(t, clone.GetReason(), "unmarshal reshard result manifest")
+		}).Return(nil).Once()
+
+	task.QueryTaskOnWorker(cluster)
 }
