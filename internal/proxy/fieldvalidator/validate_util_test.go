@@ -2467,7 +2467,7 @@ func Test_ValidateUtil_Validate(t *testing.T) {
 
 		err = NewValidateUtil().Validate([]*schemapb.FieldData{field}, h, 2)
 		require.NoError(t, err)
-		assert.Nil(t, field.GetValidData())
+		assert.Equal(t, []bool{true, false}, field.GetValidData())
 		assert.Equal(t, []bool{true, false}, field.GetScalars().GetValidData())
 	})
 

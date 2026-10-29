@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include <marisa.h>
@@ -70,7 +71,8 @@ class MarisaIndexArtifact final : public storage::Artifact {
                         std::vector<int64_t> str_ids,
                         std::vector<uint32_t> csr_index,
                         std::vector<uint32_t> csr_offsets,
-                        DataType value_type);
+                        DataType value_type,
+                        std::string local_dir);
 
     ~MarisaIndexArtifact() override;
 
@@ -86,6 +88,7 @@ class MarisaIndexArtifact final : public storage::Artifact {
     SerializeImpl(Output& sink) const;
 
     std::shared_ptr<const MarisaIndexStorage> storage_;
+    std::string local_dir_;
 };
 
 }  // namespace milvus::index

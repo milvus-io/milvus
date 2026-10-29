@@ -26,6 +26,7 @@
 #include "common/Types.h"
 #include "index/contracts/growing/IGrowingIndex.h"
 #include "index/scalar/spatial/RTreeEngine.h"
+#include "index/scalar/spatial/RTreeIndexReader.h"
 
 // Complete append windows become immutable query shards. Binary tier carry
 // bounds active query fanout without copying the full tree on every append.
@@ -63,7 +64,7 @@ class RTreeGrowingSpatialIndex final
 
     std::mutex writer_mutex_;
     std::vector<rtree_detail::Value> pending_values_;
-    std::vector<size_t> null_offsets_;
+    SharedValidityBitmap validity_;
 
     // Each value-bearing publication has tier weight one. Binary carry keeps
     // at most one immutable shard per level, so active fanout is bounded by

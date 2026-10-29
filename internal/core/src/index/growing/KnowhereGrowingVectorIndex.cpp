@@ -432,7 +432,7 @@ KnowhereGrowingVectorIndex<T>::TryBuildAccepted() {
                       build_logical_count,
                       accepted_row_end_ - build_logical_count);
     } catch (...) {
-        poison_ = std::current_exception();
+        PublishPoison(std::current_exception());
         throw;
     }
     if (!retain_source_as_data_view_) {
@@ -459,11 +459,10 @@ KnowhereGrowingVectorIndex<T>::PublishAccepted() {
 template <typename T>
 void
 KnowhereGrowingVectorIndex<T>::CommitIfNeeded() {
-    std::lock_guard<std::mutex> lock(writer_mutex_);
+    // Append/Flush publish before the Segment advances its visibility ACK.
+    // A query can pin the previous published prefix while Build/Add is in
+    // flight. Only an already published terminal failure must be observed.
     RethrowIfPoisoned();
-    if (publication_pending_) {
-        PublishAccepted();
-    }
 }
 
 template <typename T>
@@ -596,7 +595,7 @@ KnowhereGrowingVectorIndex<T>::Append(
                          logical_rows);
             }
         } catch (...) {
-            poison_ = std::current_exception();
+            PublishPoison(std::current_exception());
             throw;
         }
         accepted_row_end_ = row_end;
@@ -609,9 +608,21 @@ KnowhereGrowingVectorIndex<T>::Append(
 
 template <typename T>
 void
+KnowhereGrowingVectorIndex<T>::PublishPoison(std::exception_ptr error) {
+    std::lock_guard lock(poison_mutex_);
+    poison_ = std::move(error);
+}
+
+template <typename T>
+void
 KnowhereGrowingVectorIndex<T>::RethrowIfPoisoned() const {
-    if (poison_ != nullptr) {
-        std::rethrow_exception(poison_);
+    std::exception_ptr error;
+    {
+        std::lock_guard lock(poison_mutex_);
+        error = poison_;
+    }
+    if (error != nullptr) {
+        std::rethrow_exception(error);
     }
 }
 

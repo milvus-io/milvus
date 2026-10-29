@@ -42,9 +42,30 @@ SetRowsForKey(const MarisaIndexStorage& data,
                "marisa key id {} exceeds key count {}",
                key_id,
                data.csr_num_keys);
-    for (size_t i = data.csr_index[key_id]; i < data.csr_index[key_id + 1];
-         ++i) {
-        result[data.csr_offsets[i]] = value;
+    const auto begin = data.csr_index[key_id];
+    const auto end = data.csr_index[key_id + 1];
+    // The terminal entry is checked against the offsets count when loaded,
+    // or generated from that count by the builder/rebuild path.
+    const auto offsets_count = data.csr_index[data.csr_num_keys];
+    if (begin > end || end > offsets_count) {
+        ThrowInfo(
+            DataFormatBroken,
+            "invalid marisa CSR range [{}, {}) for key {} with {} offsets",
+            begin,
+            end,
+            key_id,
+            offsets_count);
+    }
+    for (size_t i = begin; i < end; ++i) {
+        const auto row = data.csr_offsets[i];
+        if (row >= result.size()) {
+            ThrowInfo(DataFormatBroken,
+                      "marisa CSR row {} exceeds result size {} for key {}",
+                      row,
+                      result.size(),
+                      key_id);
+        }
+        result[row] = value;
     }
 }
 
