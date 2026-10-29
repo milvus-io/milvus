@@ -112,14 +112,14 @@ func TestSnapshotPrepareDeleteMasks(t *testing.T) {
 	}
 }
 
-func TestSnapshotPrepareDeleteMasksChannelEnd(t *testing.T) {
-	const channelEnd = uint64(4611686018427387904)
+func TestSnapshotPrepareDeleteMasksPChannelEnd(t *testing.T) {
+	const pchannelEnd = uint64(4611686018427387904)
 	options := Options{
 		{Key: BackupFlag, Value: "true"},
 		{Key: SourceType, Value: SourceTypeSnapshot},
-		{Key: StartTs, Value: fmt.Sprint(channelEnd - 100)},
-		{Key: EndTs, Value: fmt.Sprint(channelEnd + 100)},
-		{Key: SnapshotChannelEndTs, Value: fmt.Sprintf(`{"dml_0":"%d"}`, channelEnd)},
+		{Key: StartTs, Value: fmt.Sprint(pchannelEnd - 100)},
+		{Key: EndTs, Value: fmt.Sprint(pchannelEnd + 100)},
+		{Key: SnapshotPChannelEndTs, Value: fmt.Sprintf(`{"dml_0":"%d"}`, pchannelEnd)},
 	}
 	file := &internalpb.ImportFile{SnapshotSource: &internalpb.SnapshotImportSource{
 		Version: 5 + SnapshotBoundedVersionOffset, ManifestPath: packed.MarshalManifestPath("root/source", 1),
@@ -132,8 +132,8 @@ func TestSnapshotPrepareDeleteMasksChannelEnd(t *testing.T) {
 		_ *schemapb.CollectionSchema, _ *indexpb.StorageConfig, _ []*internalpb.SnapshotImportSource,
 		_ *internalpb.SnapshotImportL0Source, start, end uint64, _, _ int64, _ binlog.SourceEncryption, _ func(string) error,
 	) (*binlog.SnapshotL0Deletes, error) {
-		require.Equal(t, channelEnd-100, start)
-		require.Equal(t, channelEnd, end, "shared and segment-local deletes must stop at the same channel bound as the data")
+		require.Equal(t, pchannelEnd-100, start)
+		require.Equal(t, pchannelEnd, end, "shared and segment-local deletes must stop at the same channel bound as the data")
 		return want, nil
 	}).Build()
 	defer prepare.UnPatch()
@@ -947,13 +947,13 @@ func TestSnapshotPartitionMappingDescriptors(t *testing.T) {
 }
 
 // The bounded family is a new number, not a reuse of 5-8: a worker that does
-// not know the per-channel bound must reject the job rather than import the
+// not know the per-PChannel bound must reject the job rather than import the
 // bundle past the point replication resumes. Versions 10-16 stay reserved, and
 // a bounded descriptor must name its file's source scope.
 func TestSnapshotBoundedVersion(t *testing.T) {
 	base := Options{{Key: BackupFlag, Value: "true"}, {Key: SourceType, Value: SourceTypeSnapshot}}
 	bounded := append(append(Options(nil), base...), &commonpb.KeyValuePair{
-		Key: SnapshotChannelEndTs, Value: `{"dml_0":"4611686018427387904"}`,
+		Key: SnapshotPChannelEndTs, Value: `{"dml_0":"4611686018427387904"}`,
 	})
 	mapping := append(append(Options(nil), bounded...), &commonpb.KeyValuePair{Key: PartitionMapping, Value: `{"A":"X"}`})
 	external := append(append(Options(nil), bounded...),
@@ -1385,27 +1385,27 @@ func TestImportNewReader(t *testing.T) {
 	checkFunc("unexpected file type", req, options)
 }
 
-// A file's own channel bounds it when the job names per-channel bounds, and
+// A file's own channel bounds it when the job names per-PChannel bounds, and
 // the lower of that bound and the job's single end_ts applies.
-func TestSnapshotChannelEnd(t *testing.T) {
+func TestSnapshotPChannelEnd(t *testing.T) {
 	const jobEnd = uint64(500)
 
-	end, err := snapshotChannelEnd(jobEnd, nil, &internalpb.SnapshotImportSource{SourceChannel: "dml_0_4600v0"})
+	end, err := snapshotPChannelEnd(jobEnd, nil, &internalpb.SnapshotImportSource{SourceChannel: "dml_0_4600v0"})
 	require.NoError(t, err)
 	assert.Equal(t, jobEnd, end)
 
-	end, err = snapshotChannelEnd(jobEnd, map[string]uint64{"dml_0": 100}, &internalpb.SnapshotImportSource{SourceChannel: "dml_0_4600v0"})
+	end, err = snapshotPChannelEnd(jobEnd, map[string]uint64{"dml_0": 100}, &internalpb.SnapshotImportSource{SourceChannel: "dml_0_4600v0"})
 	require.NoError(t, err)
 	assert.Equal(t, uint64(100), end)
 
-	end, err = snapshotChannelEnd(jobEnd, map[string]uint64{"dml_0": 900}, &internalpb.SnapshotImportSource{SourceChannel: "dml_0_4600v0"})
+	end, err = snapshotPChannelEnd(jobEnd, map[string]uint64{"dml_0": 900}, &internalpb.SnapshotImportSource{SourceChannel: "dml_0_4600v0"})
 	require.NoError(t, err)
 	assert.Equal(t, jobEnd, end)
 
-	_, err = snapshotChannelEnd(jobEnd, map[string]uint64{"dml_0": 100}, &internalpb.SnapshotImportSource{})
+	_, err = snapshotPChannelEnd(jobEnd, map[string]uint64{"dml_0": 100}, &internalpb.SnapshotImportSource{})
 	assert.ErrorContains(t, err, "names no source channel")
 
-	_, err = snapshotChannelEnd(jobEnd, map[string]uint64{"dml_0": 100}, &internalpb.SnapshotImportSource{SourceChannel: "dml_9_4600v0"})
+	_, err = snapshotPChannelEnd(jobEnd, map[string]uint64{"dml_0": 100}, &internalpb.SnapshotImportSource{SourceChannel: "dml_9_4600v0"})
 	assert.ErrorContains(t, err, "no end bound for source channel")
 }
 

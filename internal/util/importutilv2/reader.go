@@ -58,9 +58,9 @@ type ReaderFactory struct {
 	cfg     *indexpb.StorageConfig
 	options Options
 	storage func() (readerStorage, error)
-	// channelEndTS is the job's per-channel end bounds, parsed once and shared
+	// pchannelEndTS is the job's per-PChannel end bounds, parsed once and shared
 	// by every file the task reads. Empty when the job cuts at one timestamp.
-	channelEndTS func() (map[string]uint64, error)
+	pchannelEndTS func() (map[string]uint64, error)
 }
 
 type readerStorage struct {
@@ -72,8 +72,8 @@ type readerStorage struct {
 func NewReaderFactory(ctx context.Context, cm storage.ChunkManager, cfg *indexpb.StorageConfig, options Options) *ReaderFactory {
 	return &ReaderFactory{
 		cm: cm, cfg: cfg, options: options,
-		channelEndTS: sync.OnceValues(func() (map[string]uint64, error) {
-			return GetSnapshotChannelEndTs(options)
+		pchannelEndTS: sync.OnceValues(func() (map[string]uint64, error) {
+			return GetSnapshotPChannelEndTs(options)
 		}),
 		storage: sync.OnceValues(func() (readerStorage, error) {
 			// Use the task context, never the first file's context. Cache a
@@ -131,19 +131,19 @@ func (f *ReaderFactory) NewReader(ctx context.Context, schema *schemapb.Collecti
 			return nil, err
 		}
 	}
-	bounds, err := f.channelEnd()
+	bounds, err := f.pchannelEnd()
 	if err != nil {
 		return nil, err
 	}
 	return newReader(ctx, resolved.cm, schema, file, f.options, bufferSize, resolved.cfg, deleteBudget, shared, resolved.encryption, bounds)
 }
 
-// channelEnd is the job's per-channel end bounds, parsed on first use.
-func (f *ReaderFactory) channelEnd() (map[string]uint64, error) {
-	if f.channelEndTS == nil {
+// pchannelEnd is the job's per-PChannel end bounds, parsed on first use.
+func (f *ReaderFactory) pchannelEnd() (map[string]uint64, error) {
+	if f.pchannelEndTS == nil {
 		return nil, nil
 	}
-	return f.channelEndTS()
+	return f.pchannelEndTS()
 }
 
 // PrepareSnapshotDeletes is task-local and shared by PreImport and Import. The
@@ -159,11 +159,11 @@ func (f *ReaderFactory) PrepareSnapshotDeletes(ctx context.Context, schema *sche
 	if err != nil {
 		return nil, err
 	}
-	bounds, err := f.channelEnd()
+	bounds, err := f.pchannelEnd()
 	if err != nil {
 		return nil, err
 	}
-	end, err = snapshotChannelEnd(end, bounds, source)
+	end, err = snapshotPChannelEnd(end, bounds, source)
 	if err != nil {
 		return nil, err
 	}
@@ -212,7 +212,7 @@ func readerSource(source *internalpb.SnapshotImportSource, shared bool) *interna
 		source.SourceChannel = ""
 		source.SourcePartitionId = 0
 	case SnapshotSourceScoped(source):
-		// A per-channel bound rides on tsEnd, not on the descriptor, so the
+		// A per-PChannel bound rides on tsEnd, not on the descriptor, so the
 		// scope bit only has to leave the version. The clone keeps the channel
 		// for anything that reports which file was cut.
 		source = proto.Clone(source).(*internalpb.SnapshotImportSource)
@@ -225,21 +225,21 @@ type snapshotChannelSource interface {
 	GetSourceChannel() string
 }
 
-// snapshotChannelEnd applies the job's per-channel end bounds to one source
+// snapshotPChannelEnd applies the job's per-PChannel end bounds to one source
 // file or delete scope. Data and deletes use the same inclusive bound so the
 // imported state ends exactly where replication resumes: post-bound rows are
 // not imported, and post-bound deletes are not applied early. Both the job and
 // channel bounds are upper bounds, so the lower one wins.
-func snapshotChannelEnd(jobEnd uint64, bounds map[string]uint64, source snapshotChannelSource) (uint64, error) {
+func snapshotPChannelEnd(jobEnd uint64, bounds map[string]uint64, source snapshotChannelSource) (uint64, error) {
 	if len(bounds) == 0 {
 		return jobEnd, nil
 	}
 
 	channel := source.GetSourceChannel()
 	if channel == "" {
-		return 0, merr.WrapErrServiceInternalMsg("snapshot import carries per-channel end bounds but the file names no source channel")
+		return 0, merr.WrapErrServiceInternalMsg("snapshot import carries per-PChannel end bounds but the file names no source channel")
 	}
-	end, ok := SnapshotChannelEnd(bounds, channel)
+	end, ok := SnapshotPChannelEnd(bounds, channel)
 	if !ok {
 		return 0, merr.WrapErrServiceInternalMsg("snapshot import carries no end bound for source channel %s", channel)
 	}
@@ -250,7 +250,7 @@ func snapshotChannelEnd(jobEnd uint64, bounds map[string]uint64, source snapshot
 func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema,
 	importFile *internalpb.ImportFile, options Options, bufferSize int, storageConfig *indexpb.StorageConfig,
 	snapshotDeleteBudget int64, shared *binlog.SnapshotL0Deletes,
-	encryption binlog.SourceEncryption, channelEndTS map[string]uint64,
+	encryption binlog.SourceEncryption, pchannelEndTS map[string]uint64,
 ) (Reader, error) {
 	source := readerSource(importFile.GetSnapshotSource(), shared != nil)
 	if IsBackup(options) {
@@ -265,7 +265,7 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 				return nil, err
 			}
 			if source != nil {
-				tsEnd, err = snapshotChannelEnd(tsEnd, channelEndTS, importFile.GetSnapshotSource())
+				tsEnd, err = snapshotPChannelEnd(tsEnd, pchannelEndTS, importFile.GetSnapshotSource())
 				if err != nil {
 					return nil, err
 				}

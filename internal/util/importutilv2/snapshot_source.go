@@ -45,7 +45,7 @@ const SnapshotSourcePlanMaxBytes = 256 * 1024
 const SnapshotPreparationVersion = 9
 
 // SnapshotBoundedVersionOffset marks descriptors whose files are cut at a
-// per-channel end bound: versions 17-24 are the 1-8 contract plus this offset.
+// per-PChannel end bound: versions 17-24 are the 1-8 contract plus this offset.
 // A new number, not a reuse of the shared-L0 family, because a worker that does
 // not know the bound must reject the job rather than import the bundle past the
 // point replication resumes and duplicate the tail. Versions 10-16 stay
@@ -135,7 +135,7 @@ func ValidateSnapshotImportFiles(files []*internalpb.ImportFile, options Options
 	// The option contracts were validated above; only presence matters when
 	// checking the coordinator-produced descriptors.
 	_, mappingErr := funcutil.GetAttrByKeyFromRepeatedKV(PartitionMapping, options)
-	_, channelEndErr := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotChannelEndTs, options)
+	_, pchannelEndErr := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotPChannelEndTs, options)
 	for _, file := range files {
 		source := file.GetSnapshotSource()
 		if source != nil && !validSnapshotSourceVersion(source) {
@@ -162,8 +162,8 @@ func ValidateSnapshotImportFiles(files []*internalpb.ImportFile, options Options
 		} else if source.GetSourceChannel() != "" || source.GetSourcePartitionId() != 0 {
 			return merr.WrapErrServiceInternalMsg("legacy snapshot descriptor contains shared source scope")
 		}
-		if (channelEndErr == nil) != SnapshotSourceBounded(source) {
-			return merr.WrapErrServiceInternalMsg("snapshot import per-channel bound and bounded descriptor disagree")
+		if (pchannelEndErr == nil) != SnapshotSourceBounded(source) {
+			return merr.WrapErrServiceInternalMsg("snapshot import per-PChannel bound and bounded descriptor disagree")
 		}
 		external := contractVersion == 2 || contractVersion == 4
 		if HasExternalSource(options) {
@@ -210,7 +210,7 @@ func SnapshotSourceUsesSharedL0(source *internalpb.SnapshotImportSource) bool {
 }
 
 // SnapshotSourceBounded reports whether the descriptor's files are cut at a
-// per-channel end bound. The cut itself is applied to the reader's timestamp
+// per-PChannel end bound. The cut itself is applied to the reader's timestamp
 // range; the descriptor only carries the channel that picks the bound.
 func SnapshotSourceBounded(source *internalpb.SnapshotImportSource) bool {
 	version := source.GetVersion()
@@ -219,7 +219,7 @@ func SnapshotSourceBounded(source *internalpb.SnapshotImportSource) bool {
 
 // SnapshotSourceScoped reports whether the descriptor names its file's source
 // channel and partition, either to bind a shared L0 inventory or to resolve a
-// per-channel end bound.
+// per-PChannel end bound.
 func SnapshotSourceScoped(source *internalpb.SnapshotImportSource) bool {
 	return SnapshotSourceUsesSharedL0(source) || SnapshotSourceBounded(source)
 }

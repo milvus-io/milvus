@@ -263,7 +263,7 @@ func expandSnapshotImportFiles(
 		return nil, nil, nil, err
 	}
 	// An empty map means the job cuts at its single end_ts.
-	channelEndTS, err := importutilv2.GetSnapshotChannelEndTs(options)
+	pchannelEndTS, err := importutilv2.GetSnapshotPChannelEndTs(options)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -347,7 +347,7 @@ func expandSnapshotImportFiles(
 	sort.Slice(segments, func(i, j int) bool {
 		return segments[i].GetSegmentId() < segments[j].GetSegmentId()
 	})
-	if err := validateSnapshotChannelEndTS(channelEndTS, segments); err != nil {
+	if err := validateSnapshotPChannelEndTS(pchannelEndTS, segments); err != nil {
 		return nil, nil, nil, err
 	}
 	if len(segments) > paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt() {
@@ -419,9 +419,9 @@ func expandSnapshotImportFiles(
 		// never choose delete semantics based on where the deletes are stored.
 		needsSourceContext = needsSourceContext || segment.GetCommitTimestamp() != 0
 	}
-	// Per-channel end bounds need each file's source channel even when the
+	// Per-PChannel end bounds need each file's source channel even when the
 	// collection has no deletes to bind.
-	withSourceScope := len(channelEndTS) != 0
+	withSourceScope := len(pchannelEndTS) != 0
 	var l0Sources []*internalpb.SnapshotImportL0Source
 	if needsSourceContext || withSourceScope {
 		l0Sources, err = attachSnapshotImportSources(ctx, cm, metadataPath, snapshot, segments, applicable, result, withSourceScope)
@@ -434,7 +434,7 @@ func expandSnapshotImportFiles(
 		// Select the complete contract once: external storage adds 1, target
 		// routing adds 2, and shared L0 adds 4 to the base version. Older workers
 		// must reject capabilities they cannot preserve, never ignore them — a
-		// per-channel bound adds 16, a family the worker before it does not read,
+		// per-PChannel bound adds 16, a family the worker before it does not read,
 		// so an old worker fails the job instead of importing the bundle whole.
 		version := uint32(1)
 		if external {
@@ -572,11 +572,11 @@ func snapshotImportL0Segments(all, data []*datapb.SegmentDescription) ([]*datapb
 	return result, nil
 }
 
-// validateSnapshotChannelEndTS refuses a cut that does not name the channel of
+// validateSnapshotPChannelEndTS refuses a cut that does not name the channel of
 // every data segment. A channel left out would import its bundle through the
 // freeze point, and the CDC would replay that tail again once replication
 // resumes; failing the job here is the loud version of that mistake.
-func validateSnapshotChannelEndTS(bounds map[string]uint64, segments []*datapb.SegmentDescription) error {
+func validateSnapshotPChannelEndTS(bounds map[string]uint64, segments []*datapb.SegmentDescription) error {
 	if len(bounds) == 0 {
 		return nil
 	}
@@ -584,9 +584,9 @@ func validateSnapshotChannelEndTS(bounds map[string]uint64, segments []*datapb.S
 		channel := segment.GetChannelName()
 		if strings.TrimSpace(channel) == "" {
 			return merr.WrapErrImportFailedMsg(
-				"snapshot segment %d carries no source channel for the per-channel end bounds", segment.GetSegmentId())
+				"snapshot segment %d carries no source channel for the per-PChannel end bounds", segment.GetSegmentId())
 		}
-		if _, ok := importutilv2.SnapshotChannelEnd(bounds, channel); !ok {
+		if _, ok := importutilv2.SnapshotPChannelEnd(bounds, channel); !ok {
 			return merr.WrapErrImportFailedMsg(
 				"snapshot end bounds do not cover source channel %s of segment %d", channel, segment.GetSegmentId())
 		}
@@ -625,7 +625,7 @@ func attachSnapshotImportSources(ctx context.Context, cm milvusstorage.ChunkMana
 		source := &internalpb.SnapshotImportSource{
 			Version: 1, ManifestPath: segment.GetManifestPath(), SourceCommitTimestamp: segment.GetCommitTimestamp(),
 		}
-		// Deletes bind to a scope, and a per-channel end bound resolves through
+		// Deletes bind to a scope, and a per-PChannel end bound resolves through
 		// one. Only deletes need an inventory in that scope; the caller picks the
 		// version bits, because a bound without deletes must not read as a
 		// shared-L0 job.

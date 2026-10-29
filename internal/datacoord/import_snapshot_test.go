@@ -1108,7 +1108,7 @@ func TestExpandSnapshotImportPartitionMapping(t *testing.T) {
 					opts := append(snapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.PartitionMapping, Value: `{"A":"X","B":"Y","empty":"Z"}`})
 					if bounded {
 						opts = append(opts, &commonpb.KeyValuePair{
-							Key: importutilv2.SnapshotChannelEndTs, Value: fmt.Sprintf(`{"source":"%d"}`, tsoutil.ComposeTSByTime(time.Now())),
+							Key: importutilv2.SnapshotPChannelEndTs, Value: fmt.Sprintf(`{"source":"%d"}`, tsoutil.ComposeTSByTime(time.Now())),
 						})
 					}
 					files, normalized, l0Sources, err := expandSnapshotImportFiles(context.Background(), []int64{200, 100, 300}, milvusstorage.NewLocalChunkManager(), snapshotImportTestSchema(),
@@ -2824,11 +2824,11 @@ func TestSnapshotImportManifestDeleteTimestamps(t *testing.T) {
 	}
 }
 
-// A per-channel end bound needs each file's source channel, and the version it
+// A per-PChannel end bound needs each file's source channel, and the version it
 // stamps must be one a worker without the bound rejects, so the cut cannot be
 // silently dropped. A bound without deletes must not read as a shared-L0 job:
 // there is no inventory to build and no bitmap scan to pay for.
-func TestExpandSnapshotImportChannelEndTs(t *testing.T) {
+func TestExpandSnapshotImportPChannelEndTs(t *testing.T) {
 	patchSnapshotImportInstance(t)
 
 	const uri = "s3://source/root/snapshots/1/metadata/2.json"
@@ -2843,7 +2843,7 @@ func TestExpandSnapshotImportChannelEndTs(t *testing.T) {
 	defer read.UnPatch()
 
 	option := func(value string) *commonpb.KeyValuePair {
-		return &commonpb.KeyValuePair{Key: importutilv2.SnapshotChannelEndTs, Value: value}
+		return &commonpb.KeyValuePair{Key: importutilv2.SnapshotPChannelEndTs, Value: value}
 	}
 	now := tsoutil.ComposeTSByTime(time.Now())
 	later := tsoutil.ComposeTSByTime(time.Now().Add(time.Second))
@@ -2876,8 +2876,8 @@ func TestExpandSnapshotImportChannelEndTs(t *testing.T) {
 		append(snapshotImportTestOptions(), option(fmt.Sprintf(`{"dml_0":"%d"}`, now))), &datapb.SnapshotMetadata{})
 	require.ErrorContains(t, err, "do not cover source channel dml_1_4600v0")
 
-	// Map keys are physical channels, as the source's flush boundaries are
-	// recorded; a virtual channel spelling resolves to the same bound.
+	// Source segments name VChannels; expansion resolves their PCH keys. A
+	// segment without a source channel cannot be bounded and must fail.
 	snapshot.Segments[0].ChannelName = ""
 	_, _, _, err = expandSnapshotImportFiles(context.Background(), nil,
 		milvusstorage.NewLocalChunkManager(), snapshotImportTestSchema(), uri, opts, &datapb.SnapshotMetadata{})
