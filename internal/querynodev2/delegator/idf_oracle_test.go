@@ -90,6 +90,11 @@ func (suite *IDFOracleSuite) TearDownTest() {
 func (s *IDFOracleSuite) waitTargetVersion(targetVersion int64) {
 	for {
 		if s.idfOracle.TargetVersion() >= targetVersion {
+			// Publication no longer waits for physical cleanup. Join the sync
+			// before tests inspect files or disk-resource accounting.
+			s.idfOracle.syncMu.Lock()
+			s.Zero(s.idfOracle.retiredSealed.Len(), "obsolete statistics cleanup must finish before inspecting files or disk usage")
+			s.idfOracle.syncMu.Unlock()
 			return
 		}
 		time.Sleep(time.Millisecond * 100)
