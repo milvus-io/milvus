@@ -142,7 +142,7 @@ class TestMilvusClientFunctionChainModelIndependent(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("nq", [1, 2])
-    @pytest.mark.parametrize("batch", [1, 2, 32])
+    @pytest.mark.parametrize("batch", [1, 2, 3, 32])
     def test_function_chain_rerank_model_maps_reordered_provider_scores(self, chain_rerank_provider, nq, batch):
         """target: real provider mapping; method: reversed response indices and batched nq; expected: exact scores/fields."""
         endpoint, requests = chain_rerank_provider
@@ -154,7 +154,9 @@ class TestMilvusClientFunctionChainModelIndependent(TestMilvusClientV2Base):
         assert len(requests) == nq * ((4 + batch - 1) // batch)
         assert all(r["path"] == "/rerank" and len(r["body"]["texts"]) <= batch for r in requests)
         for query in queries:
-            sent = [text for r in requests if r["body"]["query"] == query for text in r["body"]["texts"]]
+            batches = [r["body"]["texts"] for r in requests if r["body"]["query"] == query]
+            assert [len(texts) for texts in batches] == [min(batch, 4 - offset) for offset in range(0, 4, batch)]
+            sent = [text for texts in batches for text in texts]
             assert Counter(sent) == Counter(["amber", "blue", "coral", ""])
 
     @pytest.mark.tags(CaseLabel.L1)
