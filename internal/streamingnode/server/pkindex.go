@@ -22,6 +22,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	pkindexclient "github.com/milvus-io/milvus/internal/datacoord/pkindex/client"
 	"github.com/milvus-io/milvus/internal/pkindex/engine"
 	"github.com/milvus-io/milvus/internal/pkindex/objstore"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -30,6 +31,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+)
+
+// The manifest service client and the object store satisfy the interfaces
+// the index package defines for them.
+var (
+	_ snpkindex.ManifestService = pkindexclient.Client(nil)
+	_ snpkindex.ObjectReader    = (*objstore.Store)(nil)
 )
 
 // openFileReserve is the number of file descriptors kept for everything other
@@ -43,11 +51,16 @@ type pkindexComponents struct {
 	root   string
 	mgr    *snpkindex.Manager
 	shared *engine.SharedResources
+	// manifestClient reaches the manifest service of the coordinator. The
+	// manager commits and reads manifests through it.
+	manifestClient pkindexclient.Client
 }
 
 // newPKIndexComponents builds the primary key index manager when
 // streaming.pkindex.enabled is true. It returns nil when the index is off.
-func newPKIndexComponents(ctx context.Context, cm storage.ChunkManager) *pkindexComponents {
+// newManifestClient builds the manifest service client; it is called only
+// when the index is on.
+func newPKIndexComponents(ctx context.Context, cm storage.ChunkManager, newManifestClient func() pkindexclient.Client) *pkindexComponents {
 	cfg := &paramtable.Get().StreamingCfg
 	if !cfg.PKIndexEnabled.GetAsBool() {
 		return nil
@@ -63,6 +76,8 @@ func newPKIndexComponents(ctx context.Context, cm storage.ChunkManager) *pkindex
 		CacheBytes:   cfg.PKIndexBlockCacheSize.GetAsSize(),
 		MaxOpenFiles: maxOpenFiles,
 	})
+	store := objstore.New(cm)
+	manifestClient := newManifestClient()
 	mgr := snpkindex.NewManager(snpkindex.ManagerConfig{
 		Root:   root,
 		Shared: shared,
@@ -71,18 +86,15 @@ func newPKIndexComponents(ctx context.Context, cm storage.ChunkManager) *pkindex
 			id, err := resource.Resource().IDAllocator().Allocate(ctx)
 			return int64(id), err
 		},
-		Store:           objstore.New(cm),
+		Store:           store,
 		StorageRootPath: cm.RootPath(),
-		// TODO: a later change injects the Committer over the manifest
-		// service client. Until then NewManager panics, so a streaming node
-		// with streaming.pkindex.enabled set to true does not start.
-		Committer: nil,
-		Sched:     nodescheduler.Get(),
-		Params:    snpkindex.ParamsFromConfig,
+		Committer:       snpkindex.NewManifestServiceCommitter(manifestClient, store),
+		Sched:           nodescheduler.Get(),
+		Params:          snpkindex.ParamsFromConfig,
 	})
 	mlog.Info(ctx, "primary key index manager created", mlog.String("root", root),
 		mlog.Int64("blockCacheBytes", cfg.PKIndexBlockCacheSize.GetAsSize()), mlog.Int("maxOpenFiles", maxOpenFiles))
-	return &pkindexComponents{root: root, mgr: mgr, shared: shared}
+	return &pkindexComponents{root: root, mgr: mgr, shared: shared, manifestClient: manifestClient}
 }
 
 // manager returns the index manager, nil when the index is off.
@@ -93,13 +105,14 @@ func (c *pkindexComponents) manager() *snpkindex.Manager {
 	return c.mgr
 }
 
-// close closes the manager and the shared caches in this order. Call it
-// after the WAL manager closes.
+// close closes the manager, the manifest client and the shared caches in
+// this order. Call it after the WAL manager closes.
 func (c *pkindexComponents) close() {
 	if c == nil {
 		return
 	}
 	c.mgr.Close()
+	c.manifestClient.Close()
 	c.shared.Release()
 }
 

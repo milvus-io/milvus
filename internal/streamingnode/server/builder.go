@@ -6,6 +6,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
 
+	pkindexclient "github.com/milvus-io/milvus/internal/datacoord/pkindex/client"
 	"github.com/milvus-io/milvus/internal/metastore/kv/streamingnode"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -70,8 +71,10 @@ func (b *ServerBuilder) WithMetaKV(kv kv.MetaKv) *ServerBuilder {
 // Build builds a streaming node server.
 func (b *ServerBuilder) Build() *Server {
 	// The index manager uses the same chunk manager as the resource. It reads the ID allocator from the resource only when a WAL
-	// opens, which is after resource.Init.
-	pkindex := newPKIndexComponents(context.TODO(), b.chunkManager)
+	// opens, which is after resource.Init. The manifest client needs only the etcd client, not the resource.
+	pkindex := newPKIndexComponents(context.TODO(), b.chunkManager, func() pkindexclient.Client {
+		return pkindexclient.NewClient(b.etcdClient)
+	})
 	resource.Init(
 		resource.OptETCD(b.etcdClient),
 		resource.OptChunkManager(b.chunkManager),
