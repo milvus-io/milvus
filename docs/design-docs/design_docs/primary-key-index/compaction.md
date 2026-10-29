@@ -422,46 +422,6 @@ message CompactionResult {
 
 A failed task never deletes its outputs. The GC is the only delete path.
 
-## Comparison with Other Systems
-
-The facts below come from the sources named in each paragraph, read on
-2026-10-15 for the design proposal. The values marked "not verified" were not
-checked again for this document.
-
-**Pebble and RocksDB leveled.** Both start an L0 compaction at 4 L0 files or
-sublevels (not verified against the current source). The sources are
-RocksDB `level0_file_num_compaction_trigger` in the RocksDB wiki "Leveled
-Compaction", and `L0CompactionThreshold` in the Pebble v1.1.5 source code.
-Below L0, leveled compaction partitions each level by key and picks only the
-overlapping files. This design takes the trigger value 4. It does not take
-the leveled shape. Random user primary keys make each flushed table cover the
-whole key space, so leveled compaction would rewrite the whole next level each
-time.
-
-**SlateDB.** The manifest holds an L0 list and a list of sorted runs (RFC 0002,
-`compactor.rs`, `size_tiered_compaction.rs`, `db_state.rs`, `config.rs`). The
-size-tiered policy merges consecutive sources only. It drops tombstones only
-when the destination is the last run. The writer polls the manifest every
-`manifest_poll_interval`, 1 s by default (not verified against the current
-source). Its size ratio `include_size_threshold` is 4.0 by default (not
-verified against the current source). This design takes the run as part of the
-manifest, the consecutive-input rule, the size ratio default of 4 and the
-tombstone rule. It differs in two points. The list stays flat with a run id
-per table. A data node merges, but only the coordinator writes the manifest.
-
-**HBase exploring policy.** `ExploringCompactionPolicy.java` lists all
-contiguous windows of store files and keeps the windows in ratio. It then
-picks the window with the most files, then the fewest bytes. This design takes
-this tie-break for the merge rule. Its ratio test is different: the largest run
-must be at most `sizeRatio` times the smallest.
-
-**RocksDB universal.** All data is in sorted runs in time order (RocksDB wiki
-"Universal Compaction"). A space amplification rule
-(`max_size_amplification_percent`) merges all runs when the newer runs are
-large compared with the oldest run. The outputs take the place of the inputs.
-This design takes the space amplification rule and the in-place output. It
-gives the ratio as a factor (`spaceAmpRatio`), not as a percentage.
-
 ## Known Limits and Follow-ups
 
 - **Streaming node refresh.** No code makes the streaming node poll for a
