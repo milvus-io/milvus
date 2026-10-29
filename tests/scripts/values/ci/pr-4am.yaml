@@ -6,6 +6,14 @@ log:
 
 extraConfigFiles:
   user.yaml: |+
+    # PyUDF reranking requires both the runtime and Proxy resource synchronization.
+    function:
+      pyUDF:
+        enabled: true
+    common:
+      fileResource:
+        mode:
+          proxy: sync
     proxy:
       # Temporary preview switch; removed together with the element-null / nested Array gate.
       enableElementNullAndNestedArray: true
