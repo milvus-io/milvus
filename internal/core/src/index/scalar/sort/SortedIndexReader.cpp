@@ -874,36 +874,15 @@ SortedIndexReader<T>::Gather(
     const int64_t* offsets,
     int64_t count,
     const std::function<void(int64_t i, const T*, bool valid)>& out) const {
-    AssertInfo(count >= 0 && (count == 0 || offsets != nullptr),
-               "sorted Gather received invalid offsets/count");
-    if (!state_.value_lookup) {
-        for (int64_t i = 0; i < count; ++i) {
-            out(i, nullptr, false);
-        }
-        return;
-    }
-    for (int64_t i = 0; i < count; ++i) {
-        const auto row = offsets[i];
-        AssertInfo(row >= 0 && static_cast<size_t>(row) < state_.total_num_rows,
-                   "sorted gather offset {} is outside [0, {})",
-                   row,
-                   state_.total_num_rows);
-        const auto coordinate = static_cast<size_t>(row);
-        if (!(*state_.valid_bitset)[coordinate]) {
-            out(i, nullptr, false);
-            continue;
-        }
-        AssertInfo(coordinate < state_.idx_to_offsets_size,
-                   "sorted offset map does not cover row {}",
-                   row);
-        const auto index = state_.idx_to_offsets[coordinate];
-        AssertInfo(storage_.ValidReverseIndex(index),
-                   "sorted value offset {} is invalid for row {}",
-                   index,
-                   row);
-        const auto value = storage_.ValueAt(static_cast<size_t>(index));
-        out(i, &value, true);
-    }
+    GatherViews(
+        offsets,
+        count,
+        [&](int64_t first, const T* values, ValidityView valid, int64_t size) {
+            for (int64_t lane = 0; lane < size; ++lane) {
+                const bool known = !valid || valid[lane];
+                out(first + lane, known ? values + lane : nullptr, known);
+            }
+        });
 }
 
 template <typename T>
@@ -912,6 +891,61 @@ SortedIndexReader<T>::IsNull() const {
     auto result = state_.valid_bitset->clone();
     result.flip();
     return result;
+}
+
+template <typename T>
+void
+SortedIndexReader<T>::GatherViews(
+    const int64_t* offsets,
+    int64_t count,
+    const typename IScalarValueReader<T>::ViewsConsumer& consume) const {
+    AssertInfo(count >= 0 && (count == 0 || offsets != nullptr),
+               "sorted value batch received invalid offsets/count");
+    constexpr int64_t kBatchRows = 64;
+    std::array<T, kBatchRows> values;
+    std::array<bool, kBatchRows> valid;
+    for (int64_t first = 0; first < count;) {
+        const auto size = std::min(kBatchRows, count - first);
+        bool all_valid = true;
+        for (int64_t lane = 0; lane < size; ++lane) {
+            if (!state_.value_lookup) {
+                valid[lane] = false;
+                values[lane] = T{};
+                all_valid = false;
+                continue;
+            }
+            const auto row = offsets[first + lane];
+            AssertInfo(
+                row >= 0 && static_cast<size_t>(row) < state_.total_num_rows,
+                "sorted gather offset {} is outside [0, {})",
+                row,
+                state_.total_num_rows);
+            const auto coordinate = static_cast<size_t>(row);
+            valid[lane] = (*state_.valid_bitset)[coordinate];
+            all_valid &= valid[lane];
+            if (!valid[lane]) {
+                values[lane] = T{};
+                continue;
+            }
+            AssertInfo(coordinate < state_.idx_to_offsets_size,
+                       "sorted offset map does not cover row {}",
+                       row);
+            const auto index = state_.idx_to_offsets[coordinate];
+            AssertInfo(storage_.ValidReverseIndex(index),
+                       "sorted value offset {} is invalid for row {}",
+                       index,
+                       row);
+            values[lane] = storage_.ValueAt(static_cast<size_t>(index));
+        }
+        // The reader owns its immutable dictionary/mapping across consume.
+        // Strings stay views and primitives use the same direct storage getter.
+        consume(first,
+                values.data(),
+                all_valid ? ValidityView{}
+                          : ValidityView::FromExpanded(valid.data()),
+                size);
+        first += size;
+    }
 }
 
 template <typename T>

@@ -1029,7 +1029,8 @@ class SegmentExpr : public Expr {
             [skip_func = skip_func, view = std::move(view)](int64_t cell_id) {
                 return skip_func(view, cell_id);
             },
-            !CanUseSkipFilter(is_nullable_, null_rejecting_));
+            !CanUseSkipFilter(is_nullable_, null_rejecting_),
+            true);
     }
 
     template <typename T>
@@ -1506,15 +1507,11 @@ class SegmentExpr : public Expr {
                    candidate_mask == nullptr ? 0 : candidate_mask->size(),
                    batch_size);
 
-        // Reuse the original direct Lookup for cheap, trivially owning values.
-        // A Gather callback plus staging would add work without avoiding a
-        // payload copy. Borrowed representations instead avoid reconstructing
-        // an owning value (e.g. string) for each requested lane. This is only a
-        // value-lifetime adapter, never a predicate/policy decision.
-        constexpr bool lookup_owns_payload =
-            !std::is_trivially_copyable_v<index::owned_t<index_value_t<T>>>;
-        if (offset_take_context_ != nullptr && lookup_owns_payload) {
-            std::vector<int64_t> selected;
+        // Retain batched predicate execution, not only batched lookup. The
+        // reader owns/lends the complete batch through this callback, including
+        // readers whose single-lane Gather otherwise reuses temporary bytes.
+        if (offset_take_context_ != nullptr) {
+            folly::small_vector<int64_t, 64> selected;
             selected.reserve(batch_size);
             for (size_t lane = 0; lane < batch_size; ++lane) {
                 if (!has_candidate_mask || (*candidate_mask)[lane]) {
@@ -1527,58 +1524,73 @@ class SegmentExpr : public Expr {
             size_t logical = 0;
             int64_t expected_lane = 0;
             auto advance_inactive = [&] {
+                const auto begin = logical;
                 while (logical < batch_size && has_candidate_mask &&
                        !(*candidate_mask)[logical]) {
+                    ++logical;
+                }
+                if (logical != begin) {
                     evaluate_batch.template operator()<FilterType::random>(
                         nullptr,
                         ValidityView{},
                         nullptr,
-                        1,
-                        res + logical,
-                        valid_res + logical,
+                        static_cast<int>(logical - begin),
+                        res + begin,
+                        valid_res + begin,
                         values...);
-                    ++logical;
                 }
             };
-            value_reader->Gather(
+            value_reader->GatherViews(
                 requested.data(),
                 requested.size(),
-                [&](int64_t lane, const index_value_t<T>* value, bool valid) {
-                    AssertInfo(lane == expected_lane++,
-                               "value Gather must emit ordered lanes");
-                    advance_inactive();
-                    AssertInfo(logical < batch_size && (!valid || value),
-                               "value Gather returned an invalid lane");
-                    if (!valid) {
-                        res[logical] = valid_res[logical] = false;
+                [&](int64_t first,
+                    const index_value_t<T>* batch,
+                    ValidityView valid,
+                    int64_t count) {
+                    AssertInfo(first == expected_lane && count > 0 && batch &&
+                                   count <= requested.size() - first,
+                               "value batch must emit ordered lanes");
+                    FixedVector<T> owning_values;
+                    const T* data;
+                    if constexpr (std::is_same_v<T, std::string>) {
+                        owning_values.reserve(count);
+                        for (int64_t lane = 0; lane < count; ++lane) {
+                            owning_values.emplace_back(batch[lane]);
+                        }
+                        data = owning_values.data();
+                    } else {
+                        data = batch;
                     }
-                    // The index may reuse its string buffer on the next lane.
-                    // Execute the original kernel before returning to Gather.
-                    // View consumers borrow directly. A legacy owning-string
-                    // kernel still needs its existing representation adapter;
-                    // do not reinterpret string_view as std::string storage.
-                    const auto evaluate = [&](const T* data) {
+                    for (int64_t begin = 0; begin < count;) {
+                        advance_inactive();
+                        const bool known = !valid || valid[begin];
+                        auto end = begin + 1;
+                        while (end < count &&
+                               (!has_candidate_mask ||
+                                (*candidate_mask)[logical + end - begin]) &&
+                               (!valid || valid[end]) == known) {
+                            ++end;
+                        }
+                        if (!known) {
+                            for (auto lane = begin; lane < end; ++lane) {
+                                res[logical + lane - begin] =
+                                    valid_res[logical + lane - begin] = false;
+                            }
+                        }
+                        // No predicate is run on an absent index value; the
+                        // null-data call still advances the original cursor.
                         evaluate_batch.template operator()<FilterType::random>(
-                            data,
-                            valid ? ValidityView::FromExpanded(&valid)
-                                  : ValidityView{},
+                            known ? data + begin : nullptr,
+                            ValidityView{},
                             nullptr,
-                            1,
+                            static_cast<int>(end - begin),
                             res + logical,
                             valid_res + logical,
                             values...);
-                    };
-                    if constexpr (std::is_same_v<T, std::string>) {
-                        if (valid) {
-                            const std::string owning_value(*value);
-                            evaluate(&owning_value);
-                        } else {
-                            evaluate(nullptr);
-                        }
-                    } else {
-                        evaluate(valid ? value : nullptr);
+                        logical += end - begin;
+                        begin = end;
                     }
-                    ++logical;
+                    expected_lane += count;
                 });
             advance_inactive();
             AssertInfo(
@@ -2052,20 +2064,21 @@ class SegmentExpr : public Expr {
         if (input->empty()) {
             return 0;
         }
-        const bool has_candidate_mask =
+        const bool mask_present =
             candidate_mask != nullptr && !candidate_mask->empty();
-        AssertInfo(
-            !has_candidate_mask || candidate_mask->size() == input->size(),
-            "candidate mask size {} does not match Take input {}",
-            candidate_mask == nullptr ? 0 : candidate_mask->size(),
-            input->size());
+        AssertInfo(!mask_present || candidate_mask->size() == input->size(),
+                   "candidate mask size {} does not match Take input {}",
+                   candidate_mask == nullptr ? 0 : candidate_mask->size(),
+                   input->size());
+        const bool has_candidate_mask = mask_present && !candidate_mask->all();
         EnsureDataTakeResources(skip_func);
         if (data_take_column_ == nullptr) {
             return -1;
         }
         const auto nullable = data_take_column_->IsNullable();
-        OffsetVector selected_offsets;
-        const OffsetVector* take_offsets = input;
+        // Candidate transport batches fit inline; large positional inputs
+        // remain supported without retaining request-sized scratch afterwards.
+        folly::small_vector<int32_t, 64> selected_offsets;
         if (has_candidate_mask) {
             selected_offsets.reserve(input->size());
             for (size_t i = 0; i < input->size(); ++i) {
@@ -2073,22 +2086,22 @@ class SegmentExpr : public Expr {
                     selected_offsets.push_back((*input)[i]);
                 }
             }
-            take_offsets = &selected_offsets;
         }
-        if (take_offsets->empty()) {
-            for (size_t i = 0; i < input->size(); ++i) {
-                func.template operator()<FilterType::random>(nullptr,
-                                                             ValidityView{},
-                                                             nullptr,
-                                                             1,
-                                                             res + i,
-                                                             valid_res + i,
-                                                             values...);
-            }
+        if (has_candidate_mask && selected_offsets.empty()) {
+            func.template operator()<FilterType::random>(
+                nullptr,
+                ValidityView{},
+                nullptr,
+                static_cast<int>(input->size()),
+                res,
+                valid_res,
+                values...);
             return input->size();
         }
         const auto input_view = ChunkedColumnInterface::OffsetView::From(
-            take_offsets->data(), static_cast<int64_t>(take_offsets->size()));
+            has_candidate_mask ? selected_offsets.data() : input->data(),
+            static_cast<int64_t>(has_candidate_mask ? selected_offsets.size()
+                                                    : input->size()));
         // The lease ends before selected_offsets goes out of scope, including
         // on kernel/reader failure. Ordinary callers keep immutable fresh Take
         // results; only explicitly contextual offset execution opts into reuse.
@@ -2135,11 +2148,28 @@ class SegmentExpr : public Expr {
             return owned.size;
         }
 
-        if (offset_take_context_ != nullptr && !has_candidate_mask) {
+        if (offset_take_context_ != nullptr) {
             // Consume a packed batch through the ORIGINAL random-input kernel.
             // In particular, do not substitute the sequential SIMD arithmetic
             // kernel, whose overflow behavior can differ. Raw string views
             // remain borrowed and their pin cohorts live through this callback.
+            size_t logical = 0;
+            const auto advance_inactive = [&] {
+                const auto begin = logical;
+                while (logical < input->size() && !(*candidate_mask)[logical]) {
+                    ++logical;
+                }
+                if (begin != logical) {
+                    func.template operator()<FilterType::random>(
+                        nullptr,
+                        ValidityView{},
+                        nullptr,
+                        static_cast<int>(logical - begin),
+                        res + begin,
+                        valid_res + begin,
+                        values...);
+                }
+            };
             take->template VisitViews<T>(
                 32,
                 [&](const T* data,
@@ -2147,44 +2177,57 @@ class SegmentExpr : public Expr {
                     const bool* skipped,
                     int64_t first,
                     int64_t count) {
-                    if (skipped == nullptr) {
+                    if (!has_candidate_mask && skipped == nullptr) {
                         func.template operator()<FilterType::random>(
-                            data, valid, nullptr, static_cast<int>(count),
-                            res + first, valid_res + first, values...);
+                            data,
+                            valid,
+                            nullptr,
+                            static_cast<int>(count),
+                            res + first,
+                            valid_res + first,
+                            values...);
                         return;
                     }
                     for (int64_t begin = 0; begin < count;) {
-                        if (skipped[begin]) {
-                            ApplyValidData(valid.Subview(begin),
-                                           res + first + begin,
-                                           valid_res + first + begin,
-                                           1);
-                            func.template operator()<FilterType::random>(
-                                nullptr,
-                                valid.Subview(begin),
-                                nullptr,
-                                1,
-                                res + first + begin,
-                                valid_res + first + begin,
-                                values...);
-                            ++begin;
-                            continue;
+                        if (has_candidate_mask) {
+                            advance_inactive();
                         }
+                        const bool skip = skipped != nullptr && skipped[begin];
                         auto end = begin + 1;
-                        while (end < count && !skipped[end]) {
+                        while (end < count &&
+                               (!has_candidate_mask ||
+                                (*candidate_mask)[logical + end - begin]) &&
+                               (skipped == nullptr || skipped[end] == skip)) {
                             ++end;
                         }
+                        const auto output =
+                            has_candidate_mask ? logical : first + begin;
+                        if (skip) {
+                            ApplyValidData(valid.Subview(begin),
+                                           res + output,
+                                           valid_res + output,
+                                           end - begin);
+                        }
                         func.template operator()<FilterType::random>(
-                            data + begin,
+                            skip ? nullptr : data + begin,
                             valid.Subview(begin),
                             nullptr,
                             static_cast<int>(end - begin),
-                            res + first + begin,
-                            valid_res + first + begin,
+                            res + output,
+                            valid_res + output,
                             values...);
+                        if (has_candidate_mask) {
+                            logical += end - begin;
+                        }
                         begin = end;
                     }
-                }, true);
+                },
+                true);
+            if (has_candidate_mask) {
+                advance_inactive();
+                AssertInfo(logical == input->size(),
+                           "packed Take omitted active candidate positions");
+            }
             return input->size();
         }
 

@@ -292,6 +292,43 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
         }
     }
 
+    void
+    GatherViews(const int64_t* offsets,
+                int64_t count,
+                const typename IScalarValueReader<T>::ViewsConsumer& consume)
+        const override {
+        AssertInfo(count >= 0 && (count == 0 || offsets != nullptr),
+                   "bitmap value batch received invalid offsets/count");
+        // Preserve the existing whole-request posting pass; splitting its
+        // lookup into 64-row requests could rescan every posting per prefix.
+        const auto source =
+            !options_.value_lookup  ? std::vector<const StoredT*>{}
+            : options_.offset_cache ? GatherFromOffsetCache(offsets, count)
+                                    : GatherFromPostings(offsets, count);
+        constexpr int64_t kBatchRows = 64;
+        std::array<T, kBatchRows> values;
+        std::array<bool, kBatchRows> valid;
+        for (int64_t first = 0; first < count;) {
+            const auto size = std::min(kBatchRows, count - first);
+            bool all_valid = true;
+            for (int64_t lane = 0; lane < size; ++lane) {
+                const auto* value =
+                    options_.value_lookup ? source[first + lane] : nullptr;
+                valid[lane] = value != nullptr;
+                all_valid &= valid[lane];
+                values[lane] = value != nullptr ? T(*value) : T{};
+            }
+            // Bitmap dictionary bytes belong to this pinned reader, not a
+            // temporary Lookup result; string values remain borrowed views.
+            consume(first,
+                    values.data(),
+                    all_valid ? ValidityView{}
+                              : ValidityView::FromExpanded(valid.data()),
+                    size);
+            first += size;
+        }
+    }
+
     TargetBitmap
     IsNull() const override {
         auto result = options_.valid_bitset.clone();

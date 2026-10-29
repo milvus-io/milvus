@@ -16,13 +16,18 @@
 
 #pragma once
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 
 #include "common/Types.h"
+#include "common/EasyAssert.h"
+#include "common/ValidityView.h"
 
 // Reverse lookup, exposed independently of predicate support. ReaderCaps reports
 // whether lookup is cheap; the consumer chooses between it and the raw column.
@@ -47,6 +52,8 @@ using owned_t = typename OwnedType<T>::type;
 template <typename T>
 class IScalarValueReader {
  public:
+    using ViewsConsumer = std::function<void(
+        int64_t first, const T* values, ValidityView validity, int64_t count)>;
     virtual ~IScalarValueReader() = default;
 
     // The returned value owns its bytes. Compressed structures such as marisa
@@ -79,6 +86,56 @@ class IScalarValueReader {
            int64_t count,
            const std::function<void(int64_t i, const T*, bool valid)>& out)
         const = 0;
+
+    // Ordered bounded value batches. All views/backing remain valid through
+    // ONE consumer call; an empty validity view means all lanes are valid.
+    // Like Gather, input order/duplicates are preserved and count is unbounded.
+    // Stable-storage readers override this to lend views without owning copies.
+    // The compatibility adapter owns transient strings before the next Gather
+    // callback can reuse its buffer (e.g. Marisa's local agent).
+    virtual void
+    GatherViews(const int64_t* offsets,
+                int64_t count,
+                const ViewsConsumer& consume) const {
+        AssertInfo(count >= 0 && (count == 0 || offsets != nullptr),
+                   "value batch received invalid offsets/count");
+        constexpr int64_t kBatchRows = 64;
+        std::array<T, kBatchRows> values;
+        std::array<bool, kBatchRows> valid;
+        std::array<std::string,
+                   std::is_same_v<T, std::string_view> ? kBatchRows : 0>
+            owners;
+        for (int64_t first = 0; first < count;) {
+            const auto size = std::min(kBatchRows, count - first);
+            int64_t emitted = 0;
+            bool all_valid = true;
+            Gather(
+                offsets + first,
+                size,
+                [&](int64_t lane, const T* value, bool known) {
+                    AssertInfo(
+                        lane == emitted++ && lane < size && (!known || value),
+                        "value Gather returned an invalid ordered lane");
+                    valid[lane] = known;
+                    all_valid &= known;
+                    if (!known) {
+                        values[lane] = T{};
+                    } else if constexpr (std::is_same_v<T, std::string_view>) {
+                        owners[lane].assign(value->data(), value->size());
+                        values[lane] = owners[lane];
+                    } else {
+                        values[lane] = *value;
+                    }
+                });
+            AssertInfo(emitted == size, "value Gather omitted requested lanes");
+            consume(first,
+                    values.data(),
+                    all_valid ? ValidityView{}
+                              : ValidityView::FromExpanded(valid.data()),
+                    size);
+            first += size;
+        }
+    }
 };
 
 }  // namespace milvus::index

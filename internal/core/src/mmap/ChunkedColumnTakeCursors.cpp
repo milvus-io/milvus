@@ -676,6 +676,7 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
     };
 
     struct CachedProjection {
+        uint64_t prepared_sequence{0};
         uint64_t publication{0};
         uint64_t retention_epoch{0};
         int64_t id{-1};
@@ -710,6 +711,7 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
         // Power-of-two metadata capacity eliminates division in the row loop.
         // Full IDs/backings still distinguish collisions above this capacity.
         size_t projection_mask;
+        uint64_t prepare_sequence{0};
         // Only bounded IDs, never owners or data; capacity is reused across
         // inputs so a cache-hit prefix does not allocate a missing-ID vector.
         std::vector<int64_t> missing;
@@ -741,8 +743,9 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
             for (int64_t lane = 0; lane < count; ++lane) {
                 const auto location = workspace.locations[lane];
                 const auto id = location.cell_id;
-                const auto& cached = workspace.projections[
-                    static_cast<uint64_t>(id) & workspace.projection_mask];
+                const auto& cached =
+                    workspace.projections[static_cast<uint64_t>(id) &
+                                          workspace.projection_mask];
                 if (cached.id != id || cached.fixed_data == nullptr ||
                     cached.retention_epoch == 0 ||
                     cached.retention_epoch != retention_epoch) {
@@ -751,13 +754,20 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
                 workspace.row_ids[lane] = id;
                 workspace.row_offsets[lane] = location.cell_offset;
                 workspace.row_chunks[lane] = cached.chunk;
-                workspace.fixed_values[lane] = cached.fixed_data +
+                workspace.fixed_values[lane] =
+                    cached.fixed_data +
                     location.cell_offset * cached.fixed_stride;
                 __builtin_prefetch(workspace.fixed_values[lane], 0, 1);
             }
             context_->stats_.cache_hits += count;
             detached_fixed_prefix_ = true;
             return true;
+        }
+        if (++workspace.prepare_sequence == 0) {
+            for (auto& projection : workspace.projections) {
+                projection.prepared_sequence = 0;
+            }
+            ++workspace.prepare_sequence;
         }
         for (int64_t lane = 0; lane < count; ++lane) {
             const auto location = workspace.locations[lane];
@@ -767,10 +777,17 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
             if (cached.id != id || (!strings && cached.fixed_data == nullptr)) {
                 return false;
             }
-            const auto hit = context_->FindBorrowedCached(
-                source_, id, prepared_owners_, cached.borrowed);
-            if (!hit || !ProjectionIsCurrent(cached, id, *hit)) {
-                return false;
+            if (cached.prepared_sequence != workspace.prepare_sequence) {
+                const auto hit = context_->FindBorrowedCached(
+                    source_, id, prepared_owners_, cached.borrowed);
+                if (!hit || !ProjectionIsCurrent(cached, id, *hit)) {
+                    return false;
+                }
+                cached.prepared_sequence = workspace.prepare_sequence;
+            } else {
+                // Same binding/cell in this callback-free prepare prefix.
+                // Its owner was already captured for the entire consumer.
+                ++context_->stats_.cache_hits;
             }
             workspace.row_ids[lane] = id;
             workspace.row_offsets[lane] = location.cell_offset;
@@ -1046,9 +1063,12 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
             current_filter_skip_.has_value()) {
             return *current_filter_skip_;
         }
-        auto [it, inserted] = filter_skip_by_cell_.try_emplace(cell_id, false);
-        if (inserted) {
-            it->second = filter_->CanSkipPhysicalCell(cell_id);
+        auto it = filter_skip_by_cell_.find(cell_id);
+        if (it == filter_skip_by_cell_.end()) {
+            // Evaluate before publishing: an exception must not leave a false
+            // decision that a later input could mistake for a cache hit.
+            const auto skip = filter_->CanSkipPhysicalCell(cell_id);
+            it = filter_skip_by_cell_.emplace(cell_id, skip).first;
         }
         current_filter_cell_id_ = cell_id;
         current_filter_skip_ = it->second;
@@ -1112,11 +1132,17 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
         EndBorrowedBatch();
         owned_data_ = {};
         owned_.reset();
-        current_filter_cell_id_ = -1;
-        current_filter_skip_.reset();
         // GetOwn and legacy borrowed access may visit an arbitrary number of
         // cells. Do not retain their request-sized capacity in a binding.
-        decltype(filter_skip_by_cell_){}.swap(filter_skip_by_cell_);
+        // Keep bounded immutable decision metadata, not truth or payload pins.
+        // Large/ad-hoc callbacks retain their original per-input lifetime.
+        constexpr size_t kRetainedSkipDecisions = 4096;
+        if (filter_ == nullptr || !filter_->StableAcrossInputs() ||
+            filter_skip_by_cell_.size() > kRetainedSkipDecisions) {
+            current_filter_cell_id_ = -1;
+            current_filter_skip_.reset();
+            decltype(filter_skip_by_cell_){}.swap(filter_skip_by_cell_);
+        }
         decltype(borrowed_pins_){}.swap(borrowed_pins_);
         decltype(borrowed_cohorts_){}.swap(borrowed_cohorts_);
         // Workspace and prepared owners are bounded by the existing64-row

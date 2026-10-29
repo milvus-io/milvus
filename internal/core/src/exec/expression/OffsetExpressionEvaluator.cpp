@@ -30,7 +30,8 @@ OffsetExpressionWorkspace::OffsetExpressionWorkspace(
     // The compiled offset tree is fixed for this workspace. In particular,
     // offset execution never installs the sequential-only batch-LIKE node.
     supports_offset_input_ = std::all_of(
-        expr_set_.exprs().begin(), expr_set_.exprs().end(),
+        expr_set_.exprs().begin(),
+        expr_set_.exprs().end(),
         [](const auto& root) { return root && root->SupportOffsetInput(); });
 }
 

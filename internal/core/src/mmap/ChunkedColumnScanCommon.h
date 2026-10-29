@@ -454,16 +454,19 @@ class TakeResult {
                 // all-valid/unskipped. The storage backend must prove that
                 // shape before accepting a values-only fill. Existing callers
                 // keep the expanded state contract without any API change.
-                const bool constant_state =
-                    compact_constant_state &&
-                    FillBorrowedBatch(first, count, TargetTypeOf<T>(),
-                                      values, nullptr, nullptr);
+                const bool constant_state = compact_constant_state &&
+                                            FillBorrowedBatch(first,
+                                                              count,
+                                                              TargetTypeOf<T>(),
+                                                              values,
+                                                              nullptr,
+                                                              nullptr);
                 if (!constant_state && !FillBorrowedBatch(first,
-                                       count,
-                                       TargetTypeOf<T>(),
-                                       values,
-                                       validity,
-                                       skipped)) {
+                                                          count,
+                                                          TargetTypeOf<T>(),
+                                                          values,
+                                                          validity,
+                                                          skipped)) {
                     // Compatibility path for other backends/representations:
                     // retain the original single-item state/value semantics.
                     for (int64_t i = 0; i < count; ++i) {
