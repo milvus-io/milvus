@@ -101,6 +101,16 @@ func IsCanceledOrTimeout(err error) bool {
 	return errors.IsAny(err, context.Canceled, context.DeadlineExceeded)
 }
 
+// IsCanceled reports whether err is a cancellation, as opposed to a deadline:
+// a request's ctx reports context.Canceled when its client went away or an
+// operator canceled it, and context.DeadlineExceeded when it ran out of the
+// deadline its client set. The two are treated differently by the proxy's
+// node-health code: a cancellation says nothing about the node, a timeout is
+// still counted against it.
+func IsCanceled(err error) bool {
+	return errors.Is(err, context.Canceled)
+}
+
 // Status returns a status according to the given err,
 // returns Success status if err is nil
 func Status(err error) *commonpb.Status {
