@@ -254,6 +254,18 @@ var (
 		Help: "Committed writes with primary keys omitted because the partial update version index budget was exhausted",
 	})
 
+	// StreamingNodeSplitSourcesAwaitingCheckpoint is the number of retired
+	// shard split sources on this node whose final checkpoint DataCoord has not
+	// yet been read back to hold. The wait has no timeout, since releasing a
+	// source early would let its checkpoint go unstored, so a value that does
+	// not fall is the only sign of one stuck -- DataCoord dropping the
+	// vchannel's reports because it places the WAL elsewhere, or refusing the
+	// read-back. A gauge, labeled by pchannel like the node's other gauges.
+	StreamingNodeSplitSourcesAwaitingCheckpoint = newStreamingNodeGaugeVec(prometheus.GaugeOpts{
+		Name: "split_sources_awaiting_checkpoint",
+		Help: "Number of retired shard split sources whose final checkpoint DataCoord has not been read back to hold",
+	}, WALChannelLabelName)
+
 	// WAL WAL metrics
 	WALInfo = newWALGaugeVec(prometheus.GaugeOpts{
 		Name: "info",
@@ -736,6 +748,7 @@ func RegisterStreamingNode(registry *prometheus.Registry) {
 	registry.MustRegister(StreamingNodePartialUpdateVersionIndexBytes)
 	registry.MustRegister(StreamingNodePartialUpdateVersionIndexMaxBytes)
 	registry.MustRegister(StreamingNodePartialUpdateVersionIndexMissedWrites)
+	registry.MustRegister(StreamingNodeSplitSourcesAwaitingCheckpoint)
 
 	registerWAL(registry)
 	RegisterLoggingMetrics(registry)
