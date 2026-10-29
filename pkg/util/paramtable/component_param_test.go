@@ -810,6 +810,13 @@ func TestComponentParam(t *testing.T) {
 	t.Run("test proxyConfig", func(t *testing.T) {
 		Params := &params.ProxyCfg
 
+		assert.Equal(t, "3.0.6", Params.SearchPlaceholderLogRateLimit.Version)
+		assert.Zero(t, Params.SearchPlaceholderLogRateLimit.GetAsFloat())
+		params.Save(Params.SearchPlaceholderLogRateLimit.Key, "50")
+		assert.Equal(t, float64(50), Params.SearchPlaceholderLogRateLimit.GetAsFloat())
+		params.Reset(Params.SearchPlaceholderLogRateLimit.Key)
+		assert.Zero(t, Params.SearchPlaceholderLogRateLimit.GetAsFloat())
+
 		assert.Equal(t, "proxy.splitChunk", Params.SplitChunkProxy.Key)
 		assert.True(t, Params.SplitChunkProxy.GetAsBool())
 		params.Save(Params.SplitChunkProxy.Key, "false")
