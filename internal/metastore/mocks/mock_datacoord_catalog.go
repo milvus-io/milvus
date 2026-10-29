@@ -229,53 +229,6 @@ func (_c *DataCoordCatalog_AlterSegments_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
-// ChannelExists provides a mock function with given fields: ctx, channel
-func (_m *DataCoordCatalog) ChannelExists(ctx context.Context, channel string) bool {
-	ret := _m.Called(ctx, channel)
-
-	if len(ret) == 0 {
-		panic("no return value specified for ChannelExists")
-	}
-
-	var r0 bool
-	if rf, ok := ret.Get(0).(func(context.Context, string) bool); ok {
-		r0 = rf(ctx, channel)
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-
-	return r0
-}
-
-// DataCoordCatalog_ChannelExists_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ChannelExists'
-type DataCoordCatalog_ChannelExists_Call struct {
-	*mock.Call
-}
-
-// ChannelExists is a helper method to define mock.On call
-//   - ctx context.Context
-//   - channel string
-func (_e *DataCoordCatalog_Expecter) ChannelExists(ctx interface{}, channel interface{}) *DataCoordCatalog_ChannelExists_Call {
-	return &DataCoordCatalog_ChannelExists_Call{Call: _e.mock.On("ChannelExists", ctx, channel)}
-}
-
-func (_c *DataCoordCatalog_ChannelExists_Call) Run(run func(ctx context.Context, channel string)) *DataCoordCatalog_ChannelExists_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string))
-	})
-	return _c
-}
-
-func (_c *DataCoordCatalog_ChannelExists_Call) Return(_a0 bool) *DataCoordCatalog_ChannelExists_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *DataCoordCatalog_ChannelExists_Call) RunAndReturn(run func(context.Context, string) bool) *DataCoordCatalog_ChannelExists_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // CreateIndex provides a mock function with given fields: ctx, index
 func (_m *DataCoordCatalog) CreateIndex(ctx context.Context, index *model.Index) error {
 	ret := _m.Called(ctx, index)
@@ -2832,49 +2785,58 @@ func (_c *DataCoordCatalog_MarkChannelAdded_Call) RunAndReturn(run func(context.
 	return _c
 }
 
-// MarkChannelDeleted provides a mock function with given fields: ctx, channel
-func (_m *DataCoordCatalog) MarkChannelDeleted(ctx context.Context, channel string) error {
-	ret := _m.Called(ctx, channel)
+// RemoveDroppedChannelFlags provides a mock function with given fields: ctx
+func (_m *DataCoordCatalog) RemoveDroppedChannelFlags(ctx context.Context) (int, error) {
+	ret := _m.Called(ctx)
 
 	if len(ret) == 0 {
-		panic("no return value specified for MarkChannelDeleted")
+		panic("no return value specified for RemoveDroppedChannelFlags")
 	}
 
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
-		r0 = rf(ctx, channel)
+	var r0 int
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) (int, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) int); ok {
+		r0 = rf(ctx)
 	} else {
-		r0 = ret.Error(0)
+		r0 = ret.Get(0).(int)
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
-// DataCoordCatalog_MarkChannelDeleted_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MarkChannelDeleted'
-type DataCoordCatalog_MarkChannelDeleted_Call struct {
+// DataCoordCatalog_RemoveDroppedChannelFlags_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveDroppedChannelFlags'
+type DataCoordCatalog_RemoveDroppedChannelFlags_Call struct {
 	*mock.Call
 }
 
-// MarkChannelDeleted is a helper method to define mock.On call
+// RemoveDroppedChannelFlags is a helper method to define mock.On call
 //   - ctx context.Context
-//   - channel string
-func (_e *DataCoordCatalog_Expecter) MarkChannelDeleted(ctx interface{}, channel interface{}) *DataCoordCatalog_MarkChannelDeleted_Call {
-	return &DataCoordCatalog_MarkChannelDeleted_Call{Call: _e.mock.On("MarkChannelDeleted", ctx, channel)}
+func (_e *DataCoordCatalog_Expecter) RemoveDroppedChannelFlags(ctx interface{}) *DataCoordCatalog_RemoveDroppedChannelFlags_Call {
+	return &DataCoordCatalog_RemoveDroppedChannelFlags_Call{Call: _e.mock.On("RemoveDroppedChannelFlags", ctx)}
 }
 
-func (_c *DataCoordCatalog_MarkChannelDeleted_Call) Run(run func(ctx context.Context, channel string)) *DataCoordCatalog_MarkChannelDeleted_Call {
+func (_c *DataCoordCatalog_RemoveDroppedChannelFlags_Call) Run(run func(ctx context.Context)) *DataCoordCatalog_RemoveDroppedChannelFlags_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string))
+		run(args[0].(context.Context))
 	})
 	return _c
 }
 
-func (_c *DataCoordCatalog_MarkChannelDeleted_Call) Return(_a0 error) *DataCoordCatalog_MarkChannelDeleted_Call {
-	_c.Call.Return(_a0)
+func (_c *DataCoordCatalog_RemoveDroppedChannelFlags_Call) Return(_a0 int, _a1 error) *DataCoordCatalog_RemoveDroppedChannelFlags_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *DataCoordCatalog_MarkChannelDeleted_Call) RunAndReturn(run func(context.Context, string) error) *DataCoordCatalog_MarkChannelDeleted_Call {
+func (_c *DataCoordCatalog_RemoveDroppedChannelFlags_Call) RunAndReturn(run func(context.Context) (int, error)) *DataCoordCatalog_RemoveDroppedChannelFlags_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3870,53 +3832,6 @@ func (_c *DataCoordCatalog_SaveStatsTask_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
-// ShouldDropChannel provides a mock function with given fields: ctx, channel
-func (_m *DataCoordCatalog) ShouldDropChannel(ctx context.Context, channel string) bool {
-	ret := _m.Called(ctx, channel)
-
-	if len(ret) == 0 {
-		panic("no return value specified for ShouldDropChannel")
-	}
-
-	var r0 bool
-	if rf, ok := ret.Get(0).(func(context.Context, string) bool); ok {
-		r0 = rf(ctx, channel)
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-
-	return r0
-}
-
-// DataCoordCatalog_ShouldDropChannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ShouldDropChannel'
-type DataCoordCatalog_ShouldDropChannel_Call struct {
-	*mock.Call
-}
-
-// ShouldDropChannel is a helper method to define mock.On call
-//   - ctx context.Context
-//   - channel string
-func (_e *DataCoordCatalog_Expecter) ShouldDropChannel(ctx interface{}, channel interface{}) *DataCoordCatalog_ShouldDropChannel_Call {
-	return &DataCoordCatalog_ShouldDropChannel_Call{Call: _e.mock.On("ShouldDropChannel", ctx, channel)}
-}
-
-func (_c *DataCoordCatalog_ShouldDropChannel_Call) Run(run func(ctx context.Context, channel string)) *DataCoordCatalog_ShouldDropChannel_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string))
-	})
-	return _c
-}
-
-func (_c *DataCoordCatalog_ShouldDropChannel_Call) Return(_a0 bool) *DataCoordCatalog_ShouldDropChannel_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *DataCoordCatalog_ShouldDropChannel_Call) RunAndReturn(run func(context.Context, string) bool) *DataCoordCatalog_ShouldDropChannel_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // Update provides a mock function with given fields: ctx, actions
 func (_m *DataCoordCatalog) Update(ctx context.Context, actions ...metastore.UpdateAction) error {
 	_va := make([]interface{}, len(actions))
@@ -3983,8 +3898,7 @@ func (_c *DataCoordCatalog_Update_Call) RunAndReturn(run func(context.Context, .
 func NewDataCoordCatalog(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *DataCoordCatalog {
+}) *DataCoordCatalog {
 	mock := &DataCoordCatalog{}
 	mock.Mock.Test(t)
 

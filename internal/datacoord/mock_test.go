@@ -1146,14 +1146,6 @@ func (h *mockHandler) GetDataVChanPositions(channel RWChannel, partitionID Uniqu
 	}
 }
 
-func (h *mockHandler) CheckShouldDropChannel(channel string) bool {
-	return false
-}
-
-func (h *mockHandler) FinishDropChannel(channel string, collectionID int64) error {
-	return nil
-}
-
 func (h *mockHandler) GetCollection(_ context.Context, collectionID UniqueID) (*collectionInfo, error) {
 	// empty schema
 	if h.meta != nil {

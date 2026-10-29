@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
@@ -53,8 +54,6 @@ type Handler interface {
 	GetQueryVChanPositions(ch RWChannel, partitionIDs ...UniqueID) *datapb.VchannelInfo
 	// GetDataVChanPositions gets the information recovery needed of a channel for DataNode
 	GetDataVChanPositions(ch RWChannel, partitionID UniqueID) *datapb.VchannelInfo
-	CheckShouldDropChannel(ch string) bool
-	FinishDropChannel(ch string, collectionID int64) error
 	GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error)
 	GetCurrentSegmentsView(ctx context.Context, channel RWChannel, partitionIDs ...UniqueID) *SegmentsView
 	ListLoadedSegments(ctx context.Context) ([]int64, error)
@@ -619,6 +618,10 @@ func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID
 		err := h.s.loadCollectionFromRootCoord(ctx2, collectionID)
 		if err != nil {
 			mlog.Warn(ctx, "failed to load collection from rootcoord", mlog.FieldCollectionID(collectionID), mlog.Err(err))
+			// A dropped collection never comes back, retrying only stalls the caller.
+			if errors.Is(err, merr.ErrCollectionNotFound) {
+				return retry.Unrecoverable(err)
+			}
 			return err
 		}
 		return nil
@@ -630,38 +633,12 @@ func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID
 	}
 
 	// TODO: the cache should be removed in next step.
-	return h.s.meta.GetCollection(collectionID), nil
-}
-
-// CheckShouldDropChannel returns whether specified channel is marked to be removed
-func (h *ServerHandler) CheckShouldDropChannel(channel string) bool {
-	return h.s.meta.catalog.ShouldDropChannel(h.s.ctx, channel)
-}
-
-// FinishDropChannel cleans up the remove flag for channels
-// this function is a wrapper of server.meta.FinishDropChannel
-func (h *ServerHandler) FinishDropChannel(channel string, collectionID int64) error {
-	err := h.s.meta.catalog.DropChannel(h.s.ctx, channel)
-	if err != nil {
-		mlog.Warn(context.TODO(), "DropChannel failed", mlog.String("vChannel", channel), mlog.Err(err))
-		return err
+	coll = h.s.meta.GetCollection(collectionID)
+	if coll == nil {
+		// Dropped and recycled by GC right after it was loaded.
+		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
-	mlog.Info(context.TODO(), "DropChannel succeeded", mlog.String("channel", channel))
-	// Channel checkpoints are cleaned up during garbage collection.
-
-	// clean collection info cache when meet drop collection info
-	h.s.meta.DropCollection(collectionID)
-
-	// tedxu: drop this collection's segment change group records together with
-	// its other metadata. Without this they would leak in etcd forever (and a
-	// reused collectionID could resurrect stale groups on recovery).
-	if err := h.s.meta.DropSegmentChangeGroupsOfCollection(h.s.ctx, collectionID); err != nil {
-		mlog.Warn(context.TODO(), "drop segment change groups of collection failed",
-			mlog.Int64("collectionID", collectionID), mlog.Err(err))
-		return err
-	}
-
-	return nil
+	return coll, nil
 }
 
 func (h *ServerHandler) ListLoadedSegments(ctx context.Context) ([]int64, error) {
