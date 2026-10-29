@@ -436,11 +436,11 @@ topic IDs. See [lifecycle.md](lifecycle.md#comparison-with-similar-systems).
 
 ## Not done
 
-- **The Committer is not wired.** The streaming node `Manager` has no
-  `Committer`, and `NewManager` panics without one. So a streaming node with
-  `streaming.pkindex.enabled` set to true does not start, and the feature does
-  not run end to end. The integration suite of the primary key index stays
-  skipped.
+- **End-to-end coverage is partial.** The integration suite
+  `tests/integration/pkindex` creates the `PRIMARY_KEY` index on an empty
+  collection, deduplicates inserts, commits a handover at flush, and keeps the
+  deduplication across a graceful restart of the streaming node. It does not
+  cover a kill -9, a measured recovery time, or a real S3 throttle.
 - **CDC divergence.** The secondary computes `ever_written` from its own
   vchannel meta. For example, if the streaming nodes of the secondary were
   older when the collection was created there (UNKNOWN), and the primary has
@@ -529,4 +529,6 @@ DataCoord (`internal/datacoord`):
 - The segment index code skips the primary key index, and `DescribeIndex`
   reports its persisted state. The QueryCoord index checker skips it.
 
-Not run: an end-to-end test on a cluster. It needs the Committer adapter.
+The integration suite `tests/integration/pkindex` runs the CreateIndex on an
+empty collection end to end. Not run: a CreateIndex on a non-empty
+collection, a DropIndex, and a truncate on a cluster.

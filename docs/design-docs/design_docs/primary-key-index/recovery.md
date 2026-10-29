@@ -445,19 +445,19 @@ What the index follows:
 
 ## Not done in this change
 
-- **The adapter over the manifest service.** It implements
-  `ManifestReader.ReadManifest` with the manifest proto and the `Committer`. Until
-  it is injected, a streaming node with the index on panics at start.
 - **The callers of `WaitUntil`** for the events the index can not see in its
   in-flight set: the promotion of a secondary cluster and the recovery from
   an engine failure.
 - **The default of `streaming.pkindex.memTableSize`.**
 - **A metric of the vchannels that wait for their install**, and the log
   lines at the start and the end of the wait with its duration.
-- **End-to-end tests with a restart.** A cluster with the index on, a kill
-  of the streaming node, duplicate inserts after the restart, a flush that
-  returns, and the recovery time by the number of vchannels and by the table
-  size.
+- **End-to-end tests with a crash.** The integration suite
+  `tests/integration/pkindex` stops the streaming node gracefully and adds a
+  new one. The new node recovers from the manifest and the WAL, and duplicate
+  inserts after the restart are deduplicated, both for the keys handed over
+  to object storage and for the keys still in the WAL. Not covered: a kill -9
+  of the streaming node, and the recovery time by the number of vchannels and
+  by the table size.
 - **Lazy recovery.** A read-through of the committed tables from object
   storage instead of the download before ready.
 - **A `checkpoint_time_tick` in the manifest pointer.** It would let R2 skip
@@ -554,4 +554,5 @@ The interceptor:
   write that reaches the observe after the drop is skipped.
 
 The fake `Committer` of the tests serves the manifest bodies that it
-committed. Not run for this change: the end-to-end tests with a restart.
+committed. Not run for this change: a kill -9 of the streaming node and a
+measured recovery time (see [Not done in this change](#not-done-in-this-change)).

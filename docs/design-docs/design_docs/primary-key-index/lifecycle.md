@@ -235,8 +235,8 @@ purge.
 
 ## Not done
 
-- **The Committer is not wired.** See [ddl.md](ddl.md#not-done). The truncate
-  reset and the GC by index ID have unit tests only.
+- **The truncate reset and the GC by index ID have unit tests only.** The
+  integration suite does not run them (see [ddl.md](ddl.md#not-done)).
 - **DropPartition and TTL.** Their stale keys stay in the index.
 - **Delete time of an index.** `FieldIndex` has no delete time, so the GC uses
   the newest object time for both tolerances.
@@ -279,5 +279,6 @@ Truncate (`internal/pkindex/engine`, `pkindex`, `pkindex/recovery`,
 - A flush with a reset replaces the SST list.
 
 Not run: a truncate with a kill of the streaming node on a cluster, and a
-truncate concurrent with a compaction. They need the Committer adapter and the
-compaction of the primary key index.
+truncate concurrent with a compaction. The truncate with a kill needs a
+kill -9 in the integration suite; the concurrent case needs the compaction of
+the primary key index.

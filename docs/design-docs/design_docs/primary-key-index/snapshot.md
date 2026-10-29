@@ -91,8 +91,16 @@ packages:  server/pkindex  ──▶  server/pkindex/index  ──▶  pkindex/d
 - The manifest service is used through two interfaces that the users define,
   `ManifestReader` (the recovery of a pchannel) and `Committer` (the handover of a
   vchannel); the root package's `Committer` is the union of the two, which the
-  one adapter of the streaming node implements. Neither side imports the manifest service, its
-  client or its proto. See [Committer](#committer).
+  one adapter of the streaming node implements. The index package imports
+  neither the manifest service, nor its client, nor its proto. The package
+  `internal/streamingnode/server/pkindex` imports only the proto, through two
+  narrow interfaces, `ManifestService` and `ObjectReader`. The shell package
+  `internal/streamingnode/server` imports the manifest service client and the
+  object store, which satisfy these interfaces, and injects them. The package
+  `internal/streamingnode/server/pkindex` does not import the client because
+  the client pulls in cgo, and the tests of the package must run without the
+  C++ build. See
+  [Committer](#committer).
 
 ### Committer
 
@@ -141,14 +149,29 @@ handover when a retry can not help:
   corrupted stored manifest.
 
 Every other error is retryable. The handover code does not look at merr
-codes. The adapter over the manifest service client translates them, in a
-later change (see [Not done in this change](#not-done-in-this-change)):
+codes. `NewManifestServiceCommitter` in the streaming node package
+(`internal/streamingnode/server/pkindex/manifest_service.go`) translates them:
 
 | Manifest service code | Handover error |
 |---|---|
 | `ChannelNotAvailable` | `ErrFenced` |
-| `ServiceInternal`, `ParameterInvalid`, `DataIntegrity` | `ErrRejected` |
-| `ServiceUnavailable`, `ServiceNotReady`, a timeout, a cancel | retryable, unchanged |
+| any other code that is not retryable (`ServiceInternal`, `DataIntegrity`, `IoPermissionDenied`, `IoBucketNotFound`, …) | `ErrRejected` |
+| a retryable code (`ServiceUnavailable`, `ServiceNotReady`), a timeout, a cancel, or an error that is not a merr error | retryable, unchanged |
+
+The retryable flag of merr decides, so a code that the coordinator adds later
+is classified without a change in the adapter. A permanent error must end the
+WAL instance; an endless retry would only stall the checkpoint. A code that
+merr marks permanent by mistake also ends the WAL instance, which is the safer
+failure. `IoFailed` is permanent in merr, so it is rejected; the manifest
+service does not send it today.
+
+The same rule applies to the status of each entry of `GetRecoveryManifests`.
+A found entry whose pointer has no version or no body key is `ErrRejected`,
+and so is an answer whose entry count differs from the request.
+`ReadManifest` reads the body with `ObjectReader.ReadObject` (a missing
+object is `ErrCorrupted`, any other failure `ErrUnavailable`) and decodes the
+`Manifest` proto; a body that does not decode is `ErrCorrupted`. The caller
+checks that the body version equals the pointer version.
 
 The streaming node computes the SST base path of a vchannel itself, with
 `pkindex.SSTBasePath(rootPath, collectionID, indexID, vchannel)`:
@@ -167,8 +190,8 @@ drops its copy at the rebase.
 
 `NewManager` panics without a `Committer`. An `Index` that can not commit is
 never recovered: the WAL checkpoint would not wait for it, and a reopen of the
-WAL would lose the writes before the checkpoint. This change does not inject a
-`Committer` (see
+WAL would lose the writes before the checkpoint. The streaming node injects
+the committer over the manifest service client (see
 [Wiring into the streaming node](#wiring-into-the-streaming-node)).
 
 ### Wiring into the WAL
@@ -238,12 +261,15 @@ directory, the chunk manager as the `TableStore`, the node ID allocator and
 the node scheduler. The WAL interceptors get the `Manager` as a streaming
 node resource.
 
-The `Manager` gets no `Committer` in this change. A later change builds the
-adapter over the manifest service client and injects it, after the manifest
-service is merged. Until then, a streaming node with
-`streaming.pkindex.enabled` set to true panics at start, and the code marks
-the place with a TODO. The switch is false by default, and the product entry
-for the index does not exist yet, so production does not see the difference.
+The `Manager` also gets the `Committer`. The streaming node builds the
+manifest service client over its etcd client (`client.NewClient`) and the
+object store over the chunk manager (`objstore.New`), passes both to
+`NewManifestServiceCommitter`, and gives the result to `NewManager`. The
+object store is also the `TableStore`. Two compile-time assertions in
+`internal/streamingnode/server/pkindex.go` check that the client satisfies
+`ManifestService` and that `*objstore.Store` satisfies `ObjectReader`. At
+stop, the streaming node closes the `Manager`, then the manifest service
+client, then the shared caches. The switch is false by default.
 
 The interceptor does not read `streaming.pkindex.enabled`. It uses the index
 only when the streaming node built the `Manager`. Without a `Manager`, it
@@ -672,11 +698,11 @@ reach 64 MiB and hand over through triggers 2 and 4.
 | Concurrency | At most one handover per vchannel at a time. The node scheduler limits the handovers of the node. |
 
 - `isFatal` checks only `ErrFenced`, `ErrRejected` and
-  `pkindex.ErrCorrupted`. The adapter of the later change maps the merr codes
+  `pkindex.ErrCorrupted`. `NewManifestServiceCommitter` maps the merr codes
   of the manifest service to the sentinels (see [Committer](#committer)).
-  The mapping relies on the manifest service to return
-  `ServiceUnavailable` for every transient failure. A transient failure that
-  arrives as `ServiceInternal` would end the WAL instance.
+  The mapping relies on the manifest service to return a retryable code
+  such as `ServiceUnavailable` for every transient failure. A transient
+  failure that arrives as `ServiceInternal` would end the WAL instance.
 - The table store on the streaming node classifies its errors:
 
   | Failure | Error |
@@ -764,16 +790,11 @@ Common patterns:
 
 ## Not done in this change
 
-- **The adapter over the manifest service client and its wiring.** A later
-  change, after the manifest service and this change merge, adds the
-  adapter that implements `Committer`. It translates the proto
-  types and the merr codes (see [Committer](#committer)), with a test for
-  each error class, and the streaming node injects it into the `Manager`.
-  Until then no `Index` hands over.
-- **End-to-end tests of the handover.** They run in the wiring change: a
-  handover with object storage, an object storage outage, sustained writes
-  with large vectors, and a check in the integration suite that a handover
-  ran.
+- **End-to-end tests of the handover under failure.** The integration suite
+  `tests/integration/pkindex` checks that a flush commits a handover (the
+  manifest pointer of the index appears in the meta kv). It does not run an
+  object storage outage, a real S3 throttle, or sustained writes with large
+  vectors.
 
 - **Recovery of a pchannel.** The manifest lookups, the install of
   the committed sets, the WAL replay and `Start`, and the `Manager.New` call
@@ -837,7 +858,12 @@ Unit tests cover these cases:
   removes them and starts empty.
 - No `Committer`: `NewManager` panics.
 - Fatal errors: `ErrFenced`, `ErrRejected` and `ErrCorrupted` are fatal.
-  Other errors are retryable, also a merr code that no adapter translated.
+  Other errors are retryable, also an untranslated merr code (the adapter, not
+  `isFatal`, translates them).
+- Manifest service adapter: each error class of the translation table, a
+  per-entry status of `GetRecoveryManifests`, a found entry without a
+  version or a body key, a wrong entry count, and a manifest body that is
+  missing or does not decode.
 - Object key: `pkindex.SSTKey` gives `<sst_base_path>/<id>.sst`.
 - Duplicate open: an `OpenIndex` of an `Index` that exists reports that it
   opened nothing. An `OpenIndex` of another index ID on the same vchannel
@@ -876,11 +902,12 @@ Unit tests cover these cases:
   `Manager`, it uses the index.
 
 The fake `Committer` of the tests follows the lookup and flush rules of the
-manifest service. The integration suite of the write path is skipped: a
-streaming node with the index on does not start without a `Committer`.
+manifest service. The integration suite `tests/integration/pkindex` runs with
+the real manifest service: it inserts duplicate keys, checks the row count
+and the surviving row, flushes, and checks that the manifest pointer of the
+index appears in the meta kv. A second test stops the streaming node, adds a
+new one, inserts the same keys again, and checks that both the keys handed
+over to object storage and the keys still in the WAL are deduplicated.
 
-Not run for this change: the end-to-end tests of the handover. They run in
-the wiring change. Restart consistency needs recovery.
-
-An end-to-end run with a crash and a large WAL tail is not done. It waits for
-recovery.
+Not run: a kill -9 of the streaming node (the suite stops it gracefully), a
+measured recovery time, an object storage outage, and a real S3 throttle.
