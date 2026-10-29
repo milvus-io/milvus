@@ -1,6 +1,7 @@
 """Numerical and operator contracts through the public FunctionChain search API."""
 
 import math
+import struct
 
 import pytest
 from base.client_v2_base import TestMilvusClientV2Base
@@ -100,14 +101,16 @@ class TestMilvusClientFunctionChainBuiltinIndependent(TestMilvusClientV2Base):
     def _assert_scores(result, rows, scores, ids=None, *, exact=False):
         expected = dict(zip([r["id"] for r in rows], scores))
         order = ids if ids is not None else sorted(expected, key=lambda pk: (-expected[pk], pk))
-        expected_scores = [expected[pk] for pk in order]
-        if not exact:
-            expected_scores = pytest.approx(expected_scores, rel=2e-6, abs=2e-7)
         assert len(result) == 2
         for hits in result:
             assert [h["id"] for h in hits] == order
-            assert [h["distance"] for h in hits] == expected_scores
             for hit in hits:
+                score = expected[hit["id"]]
+                if exact or score == 0:
+                    assert hit["distance"] == score
+                else:
+                    # A fixed absolute floor would accept zero for small nonzero decay scores.
+                    assert hit["distance"] == pytest.approx(score, rel=2e-6, abs=0)
                 # Only the requested stored field is projected; temporary/input columns stay private.
                 assert hit["entity"] == {"label": f"row_{hit['id']}"}
 
@@ -356,7 +359,7 @@ class TestMilvusClientFunctionChainBuiltinIndependent(TestMilvusClientV2Base):
     @pytest.mark.parametrize("stage", STAGES, ids=["l0", "l1", "l2"])
     @pytest.mark.parametrize("decimal", range(7))
     def test_function_chain_round_decimal_signed_values_and_ties(self, stage, decimal):
-        """target: Float32 rounding; method: exact binary half values; expected: ties toward positive infinity."""
+        """target: Float32 rounding; method: signed ties and fine decimals; expected: distinct precisions and ties toward +inf."""
         client = self._client()
         # Binary fractions avoid decimal input conversion ambiguities at exact ties.
         values = [-2.5, -0.5, 0.0, 0.5, 2.5, 0.125, -0.125, 0.0625, -0.0625]
@@ -366,9 +369,17 @@ class TestMilvusClientFunctionChainBuiltinIndependent(TestMilvusClientV2Base):
             2: [-2.5, -0.5, 0.0, 0.5, 2.5, 0.13, -0.12, 0.06, -0.06],
             3: [-2.5, -0.5, 0.0, 0.5, 2.5, 0.125, -0.125, 0.063, -0.062],
         }.get(decimal, values)
+        # Use the stored Float32 input, then quantize the rounded output to Float32.
+        # These values distinguish precision 4, 5 and 6, including negative inputs.
+        fine_values = [0.1234567, -0.1234567]
+        multiplier = 10**decimal
+        float_inputs = [struct.unpack("f", struct.pack("f", v))[0] for v in fine_values]
+        fine_expected = [math.floor(v * multiplier + 0.5) / multiplier for v in float_inputs]
+        values = values + fine_values
+        expected = [struct.unpack("f", struct.pack("f", v))[0] for v in expected + fine_expected]
         name, rows = self._collection(client, [(v, 0.0) for v in values], extra_types={"single": DataType.FLOAT})
         chain = self._finish(FunctionChain(stage).map("$score", fn.round_decimal(col("single"), decimal=decimal)))
-        self._assert_scores(self._search(client, name, chain, len(rows)), rows, expected)
+        self._assert_scores(self._search(client, name, chain, len(rows)), rows, expected, exact=True)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("stage", STAGES, ids=["l0", "l1", "l2"])
