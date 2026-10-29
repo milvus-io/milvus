@@ -30,6 +30,7 @@
 
 #include "cachinglayer/Manager.h"
 #include "cachinglayer/Utils.h"
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/Tracer.h"
@@ -159,12 +160,8 @@ NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info) {
         status.error_code = milvus::Success;
         status.error_msg = "";
         return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 void
@@ -285,12 +282,8 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
         status.error_code = milvus::Success;
         status.error_msg = "";
         return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -306,12 +299,8 @@ CleanLoadedIndex(CLoadIndexInfo c_load_index_info) {
         status.error_code = milvus::Success;
         status.error_msg = "";
         return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 CStatus
@@ -340,12 +329,8 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
         status.error_code = milvus::Success;
         status.error_msg = "";
         return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = milvus::UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
 
 void
