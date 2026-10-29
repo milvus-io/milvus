@@ -2811,12 +2811,16 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 	ctxLog.Debug(ctx, method+" success")
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	var visibility *internalpb.CollectionVisibilitySnapshot
+	if Params.ProxyCfg.EnableLocalCollectionVisibility.GetAsBool() {
+		visibility = rbacutil.CompileCollectionVisibility(policies, collectionVisibilityGroups(allGroups))
+	}
 	return &internalpb.ListPolicyResponse{
 		Status:               merr.Success(),
 		PolicyInfos:          expandPolicies,
 		UserRoles:            userRoles,
 		PrivilegeGroups:      allGroups,
-		CollectionVisibility: rbacutil.CompileCollectionVisibility(policies, collectionVisibilityGroups(allGroups)),
+		CollectionVisibility: visibility,
 	}, nil
 }
 

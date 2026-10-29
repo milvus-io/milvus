@@ -93,4 +93,11 @@ func TestCollectionVisibilityCacheLifecycle(t *testing.T) {
 	coordinator.response.CollectionVisibility = nil
 	require.NoError(t, cache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheRefresh}))
 	check(false, false)
+	// Enabling RC projection production after an unsupported full snapshot
+	// requires a full refresh; the next role delta alone is insufficient.
+	coordinator.response.CollectionVisibility = projection
+	require.NoError(t, cache.RefreshPolicyInfoWithVisibility(op, projection))
+	check(false, false)
+	require.NoError(t, cache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheRefresh}))
+	check(true, true)
 }

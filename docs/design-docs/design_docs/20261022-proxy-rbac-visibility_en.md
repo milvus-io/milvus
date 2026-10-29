@@ -85,10 +85,12 @@ PR1 proves rule equivalence only. It does not claim to fix lost notifications, s
 
 ### 4.4 PR1 implementation choices
 
-- `proxy.enableLocalCollectionVisibility` defaults to `false`. PR1 does not enable the new path for existing deployments.
-- Internal `CollectionVisibilitySnapshot` version 1 distinguishes unsupported data from supported empty rules. `ListPolicyResponse` carries the full projection; grant/revoke notifications carry complete replacements for affected roles across all databases.
-- A raw grant change with no expanded action delta uses the existing full-refresh operation so older Proxies remain compatible. Group membership changes preserve raw visibility and carry an explicit supported empty partial update.
+- `proxy.enableLocalCollectionVisibility` defaults to `false`, is not exported, and is omitted from the default YAML. It remains an internal experimental switch until PR2 completes. PR1 does not enable the new path for existing deployments.
+- RootCoord uses the same switch to gate projection production. When disabled, ListPolicy and grant/revoke/group notifications omit the projection. Grant/revoke does not add an all-database role read, and a raw-grant change with no action delta retains the original no-notification behavior. The existing revoke read for overlapping action permissions remains necessary.
+- When enabled, internal `CollectionVisibilitySnapshot` version 1 distinguishes unsupported data from supported empty rules. `ListPolicyResponse` carries the full projection; grant/revoke notifications carry complete replacements for affected roles across all databases.
+- In enabled mode, a raw grant change with no expanded action delta uses the existing full-refresh operation so older Proxies remain compatible. Group membership changes preserve raw visibility and carry an explicit supported empty partial update.
 - Legacy grant/revoke deltas without a projection invalidate local visibility support until the next complete refresh. They do not infer visibility from action policies.
+- Enabling RootCoord projection production later requires a complete policy refresh or Proxy reinitialization before local checks can be used; a partial delta cannot establish a complete snapshot. Toggling the flag alone is not a safe activation procedure. Production activation, including reactivation after a disabled interval, remains gated on PR2.
 - Cached responses authorize the resolved cache entry locally. The remote task has a provider-selected internal-metadata mode and the provider checks its resolved result before release. Console ordinary-user requests use the same local decision and retain RC fallback; verified management administrators retain their operator view.
 - RC retains user-forwarded visibility checks, and no client-controlled bypass field is added. Missing actual database identity fails closed.
 - The PR does not implement revision ordering, bootstrap catch-up, resource-generation fencing, or a cluster-wide revocation completion protocol. Those remain PR2 work. Local mode must remain disabled for the default rollout until that work is complete.
@@ -164,6 +166,8 @@ PR1 validation on macOS arm64 with the local native libraries:
 No complete repository test run, deployment E2E run, failure-injection consistency test, or production benchmark is claimed. PR2 guarantees remain unverified and local mode stays disabled by default.
 
 ## 7. Quick mitigation: reuse legacy-ID check data within ListGrant (S)
+
+This is a separate follow-up, not part of PR1. With local visibility disabled, PR1 alone does not reduce the DescribeCollection load in issue #54580. No implementation or deployment of this mitigation is claimed here.
 
 ### Minimal patch
 
