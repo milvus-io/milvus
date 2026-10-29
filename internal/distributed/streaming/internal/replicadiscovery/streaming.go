@@ -235,10 +235,15 @@ func (w *resumableStream) run() {
 		if err == nil {
 			idle, stable, err = w.runAttempt(ctx, stream)
 		}
-		cancel()
+		// A healthy idle stream can finish its bounded close handshake. Failed
+		// attempts still cancel first to unblock transport operations immediately.
+		if !idle {
+			cancel()
+		}
 		if stream != nil {
 			_ = stream.Close()
 		}
+		cancel()
 		w.mu.Lock()
 		w.invalidateLocked()
 		w.mu.Unlock()

@@ -166,6 +166,11 @@ acknowledged. Surviving fields advance through the remaining DataVersion floor b
 old DataView files may Drop. No historical schema/load identity map survives solely
 because the shared QueryRuntime remains alive.
 
+TODO: Make View resource release retryable. IDF binding Release currently waits
+for the preparation mutex, so another View's slow resource preparation can hold
+up a shared scheduler worker. Retrying must preserve the binding and its references
+until release actually completes; replacing Lock with a skipped TryLock is unsafe.
+
 Read-only CCollections are shared by `(CollectionID, SchemaVersion)` with separate
 View load scopes. Function registrations have distinct owner keys while the existing
 function manager shares unchanged function signatures. Native execution handles pin

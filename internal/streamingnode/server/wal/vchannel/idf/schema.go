@@ -247,6 +247,9 @@ func (b *viewBinding) advance(ctx context.Context, target qviews.DataVersion) er
 
 func (b *viewBinding) Release() {
 	r := b.runtime
+	// TODO: Make resource release retryable so waiting for another View's
+	// preparation does not occupy a shared scheduler worker. A failed TryLock
+	// must retain this binding until the scheduler retries its release.
 	r.prepareMu.Lock()
 	defer r.prepareMu.Unlock()
 	r.mu.Lock()

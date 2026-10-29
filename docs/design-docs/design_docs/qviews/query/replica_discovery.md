@@ -127,8 +127,11 @@ no goroutines per VChannel or handler registration.
 
 Removing the last logical subscription cancels an in-progress acquisition.
 An established physical stream remains reusable for one idle minute, following
-TransformLog's idle lifecycle, then closes. Normal idle retirement does not
-consume failure backoff. A failed attempt invalidates cached availability,
+TransformLog's idle lifecycle, then closes. Healthy idle retirement completes the
+bounded physical close handshake before canceling its attempt context, and does
+not consume failure backoff. Failed attempts and owner shutdown cancel first to
+unblock transport operations; they do not guarantee a graceful handshake.
+A failed attempt invalidates cached availability,
 rediscovers the owner, backs off, and recreates desired subscriptions. Local to
 remote and remote to local migration use this same loop. A replacement physical
 attempt starts only after the old one closes. Old callbacks are checked against

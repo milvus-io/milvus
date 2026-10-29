@@ -461,3 +461,52 @@ func TestReplicaWatchIdleRetirementDoesNotBackoff(t *testing.T) {
 		require.NotSame(t, first, <-streams)
 	})
 }
+
+func TestReplicaWatchIdleRetirementCompletesRemoteHandshake(t *testing.T) {
+	mockey.PatchConvey("idle retirement closes the real RPC before canceling its parent context", t, func() {
+		var reset func(*time.Timer, time.Duration) bool
+		mockey.Mock((*time.Timer).Reset).Origin(&reset).To(func(timer *time.Timer, duration time.Duration) bool {
+			if duration == idleStreamTimeout {
+				duration = time.Millisecond
+			}
+			return reset(timer, duration)
+		}).Build()
+		ack := make(chan error, 1)
+		mockey.Mock((*snapshotBlockedStream).SendMsg).To(func(s *snapshotBlockedStream, message any) error {
+			err := s.ServerStream.SendMsg(message)
+			if response, ok := message.(*streamingpb.ReplicaWatchResponse); ok && response.GetCloseStream() != nil {
+				ack <- err
+			}
+			return err
+		}).Build()
+		_, client := newDirectoryTransport(t, grpc.StreamInterceptor(func(srv any, stream grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+			return handler(srv, &snapshotBlockedStream{ServerStream: stream})
+		}))
+		attempts := make(chan context.Context, 1)
+		streams := make(chan Stream, 1)
+		w := newResumableStream(t.Context(), "p", func(ctx context.Context) (Stream, error) {
+			stream, err := openRemote(ctx, client)
+			attempts <- ctx
+			streams <- stream
+			return stream, err
+		})
+		defer w.Close()
+		sub, err := w.subscribe("p_1v0", func(Snapshot) {})
+		require.NoError(t, err)
+		waitReplicaSnapshot(t, sub, nil)
+		attempt, stream := <-attempts, <-streams
+		require.NoError(t, sub.Close())
+		select {
+		case err := <-ack:
+			require.NoError(t, err, "server must receive CloseStream and send its acknowledgement")
+		case <-time.After(5 * time.Second):
+			t.Fatal("idle retirement canceled the RPC before the close handshake")
+		}
+		select {
+		case <-attempt.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatal("retired attempt context was not canceled")
+		}
+		require.NoError(t, stream.Error(), "the remote adapter must receive the close acknowledgement")
+	})
+}
