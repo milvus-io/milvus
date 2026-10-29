@@ -1173,6 +1173,17 @@ func (m *externalCollectionRefreshManager) GetActiveJobByCollectionID(collection
 	return m.refreshMeta.GetActiveJobByCollectionID(collectionID)
 }
 
+// externalCollectionPolicy is the operator's credential policy for external
+// collections, read from this process's configuration. externalspec cannot
+// import paramtable, so each admission point builds the policy itself.
+func externalCollectionPolicy() externalspec.Policy {
+	cfg := &Params.CommonCfg
+	return externalspec.Policy{
+		AllowServerIdentity:       cfg.ExternalCollectionAllowServerIdentity.GetAsBool(),
+		CredentialBrokerEndpoints: cfg.ExternalCollectionCredentialBrokerEndpoints.GetAsStrings(),
+	}
+}
+
 // exploreExternalFiles runs one DataCoord-side Explore for the current planning
 // attempt and returns its full file list and shared manifest path.
 func (m *externalCollectionRefreshManager) exploreExternalFiles(
@@ -1184,7 +1195,7 @@ func (m *externalCollectionRefreshManager) exploreExternalFiles(
 	// Empty source is legal (see typeutil.IsExternalCollection); only validate
 	// when both present.
 	if job.GetExternalSource() != "" {
-		if err := externalspec.ValidateSourceAndSpec(job.GetExternalSource(), job.GetExternalSpec()); err != nil {
+		if err := externalspec.ValidateSourceAndSpec(job.GetExternalSource(), job.GetExternalSpec(), externalCollectionPolicy()); err != nil {
 			return nil, "", merr.Wrap(err, "external source/spec failed revalidation")
 		}
 	}

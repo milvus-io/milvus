@@ -7413,6 +7413,17 @@ func (node *Proxy) BatchUpdateManifest(ctx context.Context, req *milvuspb.BatchU
 }
 
 // RefreshExternalCollection manually triggers a refresh job for an external collection
+// externalCollectionPolicy is the operator's credential policy for external
+// collections, read from this process's configuration. externalspec cannot
+// import paramtable, so each admission point builds the policy itself.
+func externalCollectionPolicy() externalspec.Policy {
+	cfg := &paramtable.Get().CommonCfg
+	return externalspec.Policy{
+		AllowServerIdentity:       cfg.ExternalCollectionAllowServerIdentity.GetAsBool(),
+		CredentialBrokerEndpoints: cfg.ExternalCollectionCredentialBrokerEndpoints.GetAsStrings(),
+	}
+}
+
 func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.RefreshExternalCollectionRequest) (*milvuspb.RefreshExternalCollectionResponse, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.RefreshExternalCollectionResponse{
@@ -7453,7 +7464,7 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 	// that CreateCollection runs, otherwise alter-bypass via refresh would
 	// allow SSRF (file://, http://169.254.169.254/, userinfo URLs, etc.).
 	if srcSet {
-		if err := externalspec.ValidateSourceAndSpec(req.GetExternalSource(), req.GetExternalSpec()); err != nil {
+		if err := externalspec.ValidateSourceAndSpec(req.GetExternalSource(), req.GetExternalSpec(), externalCollectionPolicy()); err != nil {
 			return &milvuspb.RefreshExternalCollectionResponse{
 				Status: merr.Status(err),
 			}, nil

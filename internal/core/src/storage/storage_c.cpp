@@ -20,6 +20,8 @@
 #include <exception>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "PluginInterface.h"
 #include "common/EasyAssert.h"
@@ -37,6 +39,7 @@
 #include "storage/KeyRetriever.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "storage/loon_ffi/external_credential_policy.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "milvus-storage/thread_pool.h"
 
@@ -331,6 +334,33 @@ InitExternalIopsConfig(uint32_t initial_rate, uint32_t max_rate) {
         }
         milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
             .SetExternalIopsConfig(initial_rate, max_rate);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+SetExternalCollectionCredentialPolicy(bool allow_server_identity,
+                                      const char* broker_endpoints_csv) {
+    try {
+        std::vector<std::string> endpoints;
+        if (broker_endpoints_csv != nullptr) {
+            std::string csv(broker_endpoints_csv);
+            size_t start = 0;
+            while (start <= csv.size()) {
+                auto comma = csv.find(',', start);
+                if (comma == std::string::npos) {
+                    comma = csv.size();
+                }
+                // Set() normalizes each entry and drops the empty ones that
+                // a trailing comma or an empty list leaves behind.
+                endpoints.emplace_back(csv.substr(start, comma - start));
+                start = comma + 1;
+            }
+        }
+        milvus::storage::ExternalCredentialPolicyHolder::GetInstance().Set(
+            allow_server_identity, std::move(endpoints));
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);

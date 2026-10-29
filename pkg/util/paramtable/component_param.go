@@ -390,14 +390,18 @@ type commonConfig struct {
 	DiskWriteRateLimiterMiddlePriorityRatio ParamItem `refreshable:"true"`
 	DiskWriteRateLimiterLowPriorityRatio    ParamItem `refreshable:"true"`
 
-	AuthorizationEnabled        ParamItem `refreshable:"false"`
-	AdminAuthEnabled            ParamItem `refreshable:"true"`
-	SuperUsers                  ParamItem `refreshable:"true"`
-	DefaultRootPassword         ParamItem `refreshable:"false"`
-	RootShouldBindRole          ParamItem `refreshable:"true"`
-	EnablePublicPrivilege       ParamItem `refreshable:"false"`
-	FeatureUsageEnabled         ParamItem `refreshable:"false"`
-	FeatureUsageCountersEnabled ParamItem `refreshable:"false"`
+	AuthorizationEnabled  ParamItem `refreshable:"false"`
+	AdminAuthEnabled      ParamItem `refreshable:"true"`
+	SuperUsers            ParamItem `refreshable:"true"`
+	DefaultRootPassword   ParamItem `refreshable:"false"`
+	RootShouldBindRole    ParamItem `refreshable:"true"`
+	EnablePublicPrivilege ParamItem `refreshable:"false"`
+	FeatureUsageEnabled   ParamItem `refreshable:"false"`
+	// External collection credential policy. Both are read at process start
+	// (Forbidden) so Go admission and the C++ runtime check agree.
+	ExternalCollectionAllowServerIdentity       ParamItem `refreshable:"false"`
+	ExternalCollectionCredentialBrokerEndpoints ParamItem `refreshable:"false"`
+	FeatureUsageCountersEnabled                 ParamItem `refreshable:"false"`
 
 	ClusterName ParamItem `refreshable:"false"`
 
@@ -1204,6 +1208,38 @@ docs/design-docs/design_docs/20260902-feature-usage-reporting.md.`,
 		Export: true,
 	}
 	p.FeatureUsageEnabled.Init(base.mgr)
+
+	p.ExternalCollectionAllowServerIdentity = ParamItem{
+		Key:          "common.security.externalCollection.allowServerIdentity",
+		Version:      "3.1.0",
+		DefaultValue: "false",
+		Doc: `Whether an external collection may read its source with this cluster's own cloud
+identity: extfs.use_iam=true, extfs.role_arn (the cluster identity assumes the role), or
+extfs.gcp_target_service_account without a credential Broker (the cluster identity
+impersonates the account). Off by default: external sources then need their own access
+keys, anonymous access, or a credential Broker listed in
+common.security.externalCollection.credentialBrokerEndpoints. Checked when a collection
+is created or refreshed and again when its files are opened, so it also applies to
+collections created before the setting changed. Read at process start.`,
+		Export:    true,
+		Forbidden: true,
+	}
+	p.ExternalCollectionAllowServerIdentity.Init(base.mgr)
+
+	p.ExternalCollectionCredentialBrokerEndpoints = ParamItem{
+		Key:          "common.security.externalCollection.credentialBrokerEndpoints",
+		Version:      "3.1.0",
+		DefaultValue: "",
+		Doc: `Comma-separated credential Broker URLs that external collections may name in
+extfs.credential_endpoint (or the older extfs.azure_credential_endpoint). Milvus asks a
+Broker for short-lived credentials for the account the collection names; a Broker
+deployment decides which accounts it issues for. Empty (the default) disables Broker
+credentials. Each entry must match the spec value exactly, ignoring a trailing slash.
+Checked at create/refresh and when files are opened. Read at process start.`,
+		Export:    true,
+		Forbidden: true,
+	}
+	p.ExternalCollectionCredentialBrokerEndpoints.Init(base.mgr)
 
 	p.FeatureUsageCountersEnabled = ParamItem{
 		Key:          "common.featureUsage.countersEnabled",

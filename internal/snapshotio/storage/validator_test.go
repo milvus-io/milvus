@@ -506,7 +506,7 @@ func TestBuildInstanceSnapshotURIRoundTrip(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantURI, uri)
 			if tt.externalSpec != "" {
-				require.NoError(t, externalspec.ValidateSourceAndSpec(uri, tt.externalSpec))
+				require.NoError(t, externalspec.ValidateSourceAndSpec(uri, tt.externalSpec, externalspec.Policy{AllowServerIdentity: true}))
 			}
 
 			bucket, parsedKey, endpoint, err := ParseForeignURI(uri)

@@ -19,10 +19,13 @@
 #include <arrow/compute/api.h>
 #include <arrow/table.h>
 #include <arrow/type.h>
+#include <aws/core/http/URI.h>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "common/ChunkWriter.h"
@@ -35,6 +38,9 @@
 #include "common/VirtualPK.h"
 #include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/filesystem/gcp/gcp_credential_provider.h"
+#include "milvus-storage/filesystem/gcp/gcp_credential_registry.h"
 #include "milvus-storage/lob_column/lob_reference.h"
 #include "milvus-storage/properties.h"
 #include "milvus-storage/reader.h"
@@ -42,6 +48,7 @@
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegmentSealed.h"
 #include "storage/Util.h"
+#include "storage/loon_ffi/external_credential_policy.h"
 #include "storage/loon_ffi/external_spec_c.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
@@ -91,6 +98,39 @@ class ScopedExternalIopsConfig {
 
  private:
     milvus::storage::ExternalIopsConfig old_config_;
+};
+
+// Publishes an external collection credential policy for the lifetime of the
+// scope and reinstates the previous process-wide state afterwards, including
+// the "never initialized" state.
+class ScopedExternalCredentialPolicy {
+ public:
+    struct UninitializedTag {};
+    static constexpr UninitializedTag kUninitialized{};
+
+    ScopedExternalCredentialPolicy(bool allow_server_identity,
+                                   std::vector<std::string> broker_endpoints)
+        : old_(milvus::storage::ExternalCredentialPolicyHolder::GetInstance()
+                   .Get()) {
+        milvus::storage::ExternalCredentialPolicyHolder::GetInstance().Set(
+            allow_server_identity, std::move(broker_endpoints));
+    }
+
+    // A process that never published a policy.
+    explicit ScopedExternalCredentialPolicy(UninitializedTag)
+        : old_(milvus::storage::ExternalCredentialPolicyHolder::GetInstance()
+                   .Get()) {
+        milvus::storage::ExternalCredentialPolicyHolder::GetInstance().Restore(
+            milvus::storage::ExternalCredentialPolicy{});
+    }
+
+    ~ScopedExternalCredentialPolicy() {
+        milvus::storage::ExternalCredentialPolicyHolder::GetInstance().Restore(
+            old_);
+    }
+
+ private:
+    milvus::storage::ExternalCredentialPolicy old_;
 };
 
 std::string
@@ -3426,6 +3466,8 @@ TEST(InjectExtfsAllowlist, AzurePublicCloudWithExplicitRegion) {
 }
 
 TEST(InjectExtfsAllowlist, AzureCredentialBrokerProperties) {
+    ScopedExternalCredentialPolicy policy(
+        false, {"https://broker.example.com/v1/credentials/assume-role"});
     milvus_storage::api::Properties props;
     const int64_t coll_id = 42;
     std::string spec = R"({
@@ -3453,11 +3495,424 @@ TEST(InjectExtfsAllowlist, AzureCredentialBrokerProperties) {
               "client");
     EXPECT_EQ(std::get<std::string>(props.at("extfs.42.azure_tenant_id")),
               "tenant");
-    EXPECT_EQ(
-        std::get<std::string>(props.at("extfs.42.azure_credential_endpoint")),
-        "https://broker.example.com/v1/credentials/assume-role");
+    // milvus-storage names the Broker endpoint fs.credential_endpoint.
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.credential_endpoint")),
+              "https://broker.example.com/v1/credentials/assume-role");
+    EXPECT_EQ(props.count("extfs.42.azure_credential_endpoint"), 0u);
     EXPECT_EQ(props.count("extfs.42.access_key_value"), 0u);
     EXPECT_EQ(props.count("extfs.42.request_timeout_ms"), 0u);
+}
+
+TEST(InjectExtfsAllowlist, GcpCredentialBrokerProperties) {
+    ScopedExternalCredentialPolicy policy(
+        false, {"http://credential-broker/v1/credentials/assume-role"});
+    milvus_storage::api::Properties props;
+    const int64_t coll_id = 43;
+    std::string spec = R"({
+        "format":"parquet",
+        "extfs":{
+            "cloud_provider":"gcp",
+            "use_ssl":"true",
+            "gcp_target_service_account":"reader@proj.iam.gserviceaccount.com",
+            "credential_endpoint":"http://credential-broker/v1/credentials/assume-role",
+            "load_frequency":"3600"
+        }
+    })";
+
+    ::InjectExternalSpecProperties(
+        props, coll_id, "gs://storage.googleapis.com/bucket/path", spec);
+
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.43.address")),
+              "https://storage.googleapis.com");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.43.bucket_name")),
+              "bucket");
+    EXPECT_EQ(
+        std::get<std::string>(props.at("extfs.43.gcp_target_service_account")),
+        "reader@proj.iam.gserviceaccount.com");
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.43.credential_endpoint")),
+              "http://credential-broker/v1/credentials/assume-role");
+}
+
+// ---------------------------------------------------------------------------
+// External collection credential policy
+// (common.security.externalCollection.allowServerIdentity and
+// common.security.externalCollection.credentialBrokerEndpoints), enforced by
+// InjectExternalSpecProperties on every injection. Each test uses its own
+// bucket name because GcpCredentialRegistry is process-wide.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+constexpr const char* kPolicyBroker =
+    "https://broker.example.com/v1/credentials/assume-role";
+
+std::string
+SpecWithExtfs(const std::string& extfs_body) {
+    return R"({"format":"parquet","extfs":{)" + extfs_body + "}}";
+}
+
+// Runs fn and expects a SegcoreError with ConfigInvalid whose message
+// contains every needle.
+void
+ExpectConfigInvalid(const std::function<void()>& fn,
+                    const std::vector<std::string>& needles) {
+    try {
+        fn();
+        FAIL() << "expected ConfigInvalid";
+    } catch (const milvus::SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), milvus::ErrorCode::ConfigInvalid);
+        const std::string message = e.what();
+        for (const auto& needle : needles) {
+            EXPECT_NE(message.find(needle), std::string::npos)
+                << "missing '" << needle << "' in: " << message;
+        }
+    }
+}
+
+}  // namespace
+
+TEST(ExternalCredentialPolicy, UseIamNeedsServerIdentity) {
+    // milvus-storage lowercases booleans before validating them, so every
+    // spelling it accepts must be gated.
+    for (const std::string spelling : {"true", "True", "TRUE"}) {
+        SCOPED_TRACE(spelling);
+        const auto spec = SpecWithExtfs(
+            R"("cloud_provider":"aws","region":"us-east-1","use_iam":")" +
+            spelling + "\"");
+        {
+            ScopedExternalCredentialPolicy policy(false, {});
+            milvus_storage::api::Properties props;
+            ExpectConfigInvalid(
+                [&] {
+                    ::InjectExternalSpecProperties(
+                        props, 501, "s3://policy-iam-bucket/key", spec);
+                },
+                {"common.security.externalCollection.allowServerIdentity",
+                 "501"});
+        }
+        {
+            ScopedExternalCredentialPolicy policy(true, {});
+            milvus_storage::api::Properties props;
+            EXPECT_NO_THROW(::InjectExternalSpecProperties(
+                props, 501, "s3://policy-iam-bucket/key", spec));
+            EXPECT_EQ(std::get<std::string>(props.at("extfs.501.use_iam")),
+                      spelling);
+        }
+    }
+}
+
+TEST(ExternalCredentialPolicy, UseIamFalseNeedsNoPolicyDecision) {
+    ScopedExternalCredentialPolicy policy(false, {});
+    milvus_storage::api::Properties props;
+    const auto spec = SpecWithExtfs(
+        R"("access_key_id":"AK","access_key_value":"SK","use_iam":"false")");
+    EXPECT_NO_THROW(::InjectExternalSpecProperties(
+        props, 502, "s3://policy-iam-off-bucket/key", spec));
+}
+
+TEST(ExternalCredentialPolicy, RoleArnNeedsServerIdentity) {
+    const auto spec = SpecWithExtfs(
+        R"("cloud_provider":"aws","region":"us-east-1","role_arn":"arn:aws:iam::123456789012:role/reader")");
+    {
+        ScopedExternalCredentialPolicy policy(false, {});
+        milvus_storage::api::Properties props;
+        ExpectConfigInvalid(
+            [&] {
+                ::InjectExternalSpecProperties(
+                    props, 503, "s3://policy-role-bucket/key", spec);
+            },
+            {"common.security.externalCollection.allowServerIdentity", "503"});
+    }
+    {
+        ScopedExternalCredentialPolicy policy(true, {});
+        milvus_storage::api::Properties props;
+        EXPECT_NO_THROW(::InjectExternalSpecProperties(
+            props, 503, "s3://policy-role-bucket/key", spec));
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.503.role_arn")),
+                  "arn:aws:iam::123456789012:role/reader");
+    }
+}
+
+TEST(ExternalCredentialPolicy, GcpTargetWithoutBrokerNeedsServerIdentity) {
+    const auto spec = SpecWithExtfs(
+        R"("cloud_provider":"gcp","use_ssl":"true","gcp_target_service_account":"reader@proj.iam.gserviceaccount.com")");
+    {
+        ScopedExternalCredentialPolicy policy(false, {});
+        milvus_storage::api::Properties props;
+        ExpectConfigInvalid(
+            [&] {
+                ::InjectExternalSpecProperties(
+                    props, 504, "gs://policy-target-bucket/path", spec);
+            },
+            {"common.security.externalCollection.allowServerIdentity", "504"});
+    }
+    {
+        ScopedExternalCredentialPolicy policy(true, {});
+        milvus_storage::api::Properties props;
+        EXPECT_NO_THROW(::InjectExternalSpecProperties(
+            props, 504, "gs://policy-target-bucket/path", spec));
+    }
+}
+
+TEST(ExternalCredentialPolicy, GcpTargetThroughBrokerIsNotServerIdentity) {
+    // With a Broker the Broker's identity impersonates the target, so the
+    // server-identity setting does not apply; only the allowlist does.
+    ScopedExternalCredentialPolicy policy(false, {kPolicyBroker});
+    milvus_storage::api::Properties props;
+    const auto spec = SpecWithExtfs(
+        R"("cloud_provider":"gcp","use_ssl":"true","gcp_target_service_account":"reader@proj.iam.gserviceaccount.com","credential_endpoint":")" +
+        std::string(kPolicyBroker) + "\"");
+    EXPECT_NO_THROW(::InjectExternalSpecProperties(
+        props, 505, "gs://policy-target-broker-bucket/path", spec));
+}
+
+TEST(ExternalCredentialPolicy, BrokerEndpointMustBeListed) {
+    const auto spec_with_broker = [](const std::string& endpoint) {
+        return SpecWithExtfs(
+            R"("cloud_provider":"gcp","use_ssl":"true","gcp_target_service_account":"reader@proj.iam.gserviceaccount.com","credential_endpoint":")" +
+            endpoint + "\"");
+    };
+    const std::string source = "gs://policy-broker-bucket/path";
+
+    {
+        // Empty allowlist disables Brokers.
+        ScopedExternalCredentialPolicy policy(false, {});
+        milvus_storage::api::Properties props;
+        ExpectConfigInvalid(
+            [&] {
+                ::InjectExternalSpecProperties(
+                    props, 506, source, spec_with_broker(kPolicyBroker));
+            },
+            {"common.security.externalCollection.credentialBrokerEndpoints",
+             "506",
+             kPolicyBroker});
+    }
+    {
+        // A different Broker is not a match.
+        ScopedExternalCredentialPolicy policy(
+            false, {"https://other.example.com/v1/credentials/assume-role"});
+        milvus_storage::api::Properties props;
+        ExpectConfigInvalid(
+            [&] {
+                ::InjectExternalSpecProperties(
+                    props, 506, source, spec_with_broker(kPolicyBroker));
+            },
+            {"common.security.externalCollection.credentialBrokerEndpoints"});
+    }
+    {
+        // allowServerIdentity does not stand in for the allowlist.
+        ScopedExternalCredentialPolicy policy(true, {});
+        milvus_storage::api::Properties props;
+        ExpectConfigInvalid(
+            [&] {
+                ::InjectExternalSpecProperties(
+                    props, 506, source, spec_with_broker(kPolicyBroker));
+            },
+            {"common.security.externalCollection.credentialBrokerEndpoints"});
+    }
+    {
+        ScopedExternalCredentialPolicy policy(false, {kPolicyBroker});
+        milvus_storage::api::Properties props;
+        EXPECT_NO_THROW(::InjectExternalSpecProperties(
+            props, 506, source, spec_with_broker(kPolicyBroker)));
+        EXPECT_EQ(
+            std::get<std::string>(props.at("extfs.506.credential_endpoint")),
+            kPolicyBroker);
+    }
+    {
+        // A trailing slash on either side is tolerated; the property keeps
+        // the spec's spelling.
+        ScopedExternalCredentialPolicy policy(
+            false, {std::string(kPolicyBroker) + "/"});
+        milvus_storage::api::Properties props;
+        EXPECT_NO_THROW(::InjectExternalSpecProperties(
+            props, 506, source, spec_with_broker(kPolicyBroker)));
+    }
+    {
+        ScopedExternalCredentialPolicy policy(
+            false, {std::string(" ") + kPolicyBroker});
+        milvus_storage::api::Properties props;
+        EXPECT_NO_THROW(::InjectExternalSpecProperties(
+            props,
+            506,
+            source,
+            spec_with_broker(std::string(kPolicyBroker) + "/")));
+        EXPECT_EQ(
+            std::get<std::string>(props.at("extfs.506.credential_endpoint")),
+            std::string(kPolicyBroker) + "/");
+    }
+}
+
+TEST(ExternalCredentialPolicy, AzureCredentialEndpointIsMappedAndGated) {
+    const auto spec = SpecWithExtfs(
+        R"("access_key_id":"myacct","cloud_provider":"azure","region":"westus3","azure_client_id":"client","azure_tenant_id":"tenant","azure_credential_endpoint":")" +
+        std::string(kPolicyBroker) + "\"");
+    const std::string source = "azure://core.windows.net/policy-container/path";
+    {
+        ScopedExternalCredentialPolicy policy(false, {});
+        milvus_storage::api::Properties props;
+        ExpectConfigInvalid(
+            [&] { ::InjectExternalSpecProperties(props, 507, source, spec); },
+            {"common.security.externalCollection.credentialBrokerEndpoints",
+             "507"});
+    }
+    {
+        ScopedExternalCredentialPolicy policy(false, {kPolicyBroker});
+        milvus_storage::api::Properties props;
+        EXPECT_NO_THROW(
+            ::InjectExternalSpecProperties(props, 507, source, spec));
+        EXPECT_EQ(
+            std::get<std::string>(props.at("extfs.507.credential_endpoint")),
+            kPolicyBroker);
+        EXPECT_EQ(props.count("extfs.507.azure_credential_endpoint"), 0u);
+    }
+}
+
+TEST(ExternalCredentialPolicy, UninitializedPolicyRejectsGatedSpecs) {
+    ScopedExternalCredentialPolicy policy(
+        ScopedExternalCredentialPolicy::kUninitialized);
+    {
+        milvus_storage::api::Properties props;
+        ExpectConfigInvalid(
+            [&] {
+                ::InjectExternalSpecProperties(
+                    props,
+                    508,
+                    "s3://policy-uninit-bucket/key",
+                    SpecWithExtfs(
+                        R"("cloud_provider":"aws","region":"us-east-1","use_iam":"true")"));
+            },
+            {"external collection credential policy not initialized"});
+    }
+    {
+        milvus_storage::api::Properties props;
+        ExpectConfigInvalid(
+            [&] {
+                ::InjectExternalSpecProperties(
+                    props,
+                    508,
+                    "gs://policy-uninit-bucket/path",
+                    SpecWithExtfs(
+                        R"("cloud_provider":"gcp","use_ssl":"true","gcp_target_service_account":"reader@proj.iam.gserviceaccount.com","credential_endpoint":")" +
+                        std::string(kPolicyBroker) + "\""));
+            },
+            {"external collection credential policy not initialized"});
+    }
+    {
+        // Access keys involve neither setting, so a process without a
+        // published policy still serves such collections.
+        milvus_storage::api::Properties props;
+        EXPECT_NO_THROW(::InjectExternalSpecProperties(
+            props,
+            508,
+            "s3://policy-uninit-bucket/key",
+            SpecWithExtfs(R"("access_key_id":"AK","access_key_value":"SK")")));
+    }
+}
+
+TEST(ExternalCredentialPolicy, CAbiEnforcesPolicy) {
+    // The Go FFI explore path (DataCoord/MixCoord) shares the enforcement.
+    ScopedExternalCredentialPolicy policy(false, {});
+    LoonProperties properties{};
+    const auto spec = SpecWithExtfs(
+        R"("cloud_provider":"aws","region":"us-east-1","use_iam":"true")");
+    auto result =
+        loon_properties_inject_external_spec(&properties,
+                                             509,
+                                             "s3://policy-cabi-bucket/key",
+                                             spec.c_str(),
+                                             2000,
+                                             5000);
+    EXPECT_NE(result.err_code, loon_errcode_success);
+    const std::string error = result.message != nullptr ? result.message : "";
+    EXPECT_NE(
+        error.find("common.security.externalCollection.allowServerIdentity"),
+        std::string::npos)
+        << error;
+    loon_ffi_free_result(&result);
+    loon_properties_free(&properties);
+}
+
+// End to end: the injected extfs namespace resolves through milvus-storage to
+// the collection's config, that config builds the expected Bearer provider,
+// and the registry hands the provider back for a request to the bucket.
+TEST(ExternalCredentialPolicy, GcpProvidersResolveFromInjectedProperties) {
+    ScopedExternalCredentialPolicy policy(true, {kPolicyBroker});
+    auto props = std::make_shared<milvus_storage::api::Properties>();
+
+    // (a) Target only: AWS-form source, the cluster identity impersonates.
+    const int64_t impersonate_id = 601;
+    ::InjectExternalSpecProperties(
+        *props,
+        impersonate_id,
+        "gs://policy-e2e-impersonate/path",
+        SpecWithExtfs(
+            R"("cloud_provider":"gcp","use_ssl":"true","gcp_target_service_account":"reader@proj.iam.gserviceaccount.com")"));
+
+    // (b) Broker: Milvus-form source naming the Google endpoint.
+    const int64_t broker_id = 602;
+    ::InjectExternalSpecProperties(
+        *props,
+        broker_id,
+        "gs://storage.googleapis.com/policy-e2e-broker/path",
+        SpecWithExtfs(
+            R"("cloud_provider":"gcp","use_ssl":"true","gcp_target_service_account":"broker-reader@proj.iam.gserviceaccount.com","credential_endpoint":")" +
+            std::string(kPolicyBroker) + "\""));
+
+    struct Case {
+        int64_t collection_id;
+        std::string bucket;
+        std::string target;
+        std::string endpoint;
+        std::string identity_prefix;
+    };
+    const std::vector<Case> cases = {
+        {impersonate_id,
+         "policy-e2e-impersonate",
+         "reader@proj.iam.gserviceaccount.com",
+         "",
+         "impersonate:"},
+        {broker_id,
+         "policy-e2e-broker",
+         "broker-reader@proj.iam.gserviceaccount.com",
+         kPolicyBroker,
+         "broker:"},
+    };
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.bucket);
+        const std::string milvus_form_path =
+            "gs://storage.googleapis.com/" + c.bucket + "/k";
+        auto config = milvus_storage::FilesystemCache::resolve_config(
+            props, milvus_form_path);
+        ASSERT_TRUE(config.ok()) << config.status().ToString();
+        EXPECT_EQ(config->alias, std::to_string(c.collection_id));
+        EXPECT_EQ(config->cloud_provider, "gcp");
+        EXPECT_EQ(config->bucket_name, c.bucket);
+        EXPECT_TRUE(config->use_ssl);
+        EXPECT_EQ(config->gcp_target_service_account, c.target);
+        EXPECT_EQ(config->credential_endpoint, c.endpoint);
+
+        auto provider = milvus_storage::BuildGcpProviderFromConfig(*config);
+        ASSERT_TRUE(provider.ok()) << provider.status().ToString();
+        EXPECT_TRUE((*provider)->IssuesBearerToken());
+        EXPECT_EQ((*provider)->Identity().rfind(c.identity_prefix, 0), 0u)
+            << (*provider)->Identity();
+
+        milvus_storage::GcpBucketKey key{milvus_storage::NormalizeGcpEndpoint(
+                                             config->address, config->use_ssl),
+                                         config->bucket_name};
+        const auto registered =
+            milvus_storage::GcpCredentialRegistry::Instance().Register(
+                key, *provider);
+        ASSERT_TRUE(registered.ok()) << registered.ToString();
+
+        const auto found =
+            milvus_storage::GcpCredentialRegistry::Instance().Lookup(
+                Aws::Http::URI(
+                    ("https://storage.googleapis.com/" + c.bucket + "/k")
+                        .c_str()));
+        EXPECT_EQ(found.get(), provider->get());
+    }
 }
 
 TEST(InjectExtfsAllowlist, AzureSovereignCloudEndpoints) {

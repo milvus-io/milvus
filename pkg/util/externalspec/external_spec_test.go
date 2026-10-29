@@ -196,6 +196,22 @@ func minimalValidSpec() string {
 	return `{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"aws"}}`
 }
 
+// Broker endpoints the fixtures name; permissivePolicy lists both.
+const (
+	testAzureBroker = "https://broker.example.com/v1/credentials/assume-role"
+	testGCPBroker   = "http://credential-broker.example/v1/credentials/assume-role"
+)
+
+// permissivePolicy allows every credential mode and the Brokers the fixtures
+// name, so structural tests are not confounded by the policy gate.
+// TestValidateExtfsComplete_Policy covers the gate itself.
+func permissivePolicy() Policy {
+	return Policy{
+		AllowServerIdentity:       true,
+		CredentialBrokerEndpoints: []string{testAzureBroker, testGCPBroker},
+	}
+}
+
 func TestValidateSourceAndSpec(t *testing.T) {
 	requireParameterInvalid := func(t *testing.T, err error) {
 		t.Helper()
@@ -203,24 +219,24 @@ func TestValidateSourceAndSpec(t *testing.T) {
 	}
 
 	t.Run("both_valid", func(t *testing.T) {
-		err := ValidateSourceAndSpec("s3://bucket/prefix", minimalValidSpec())
+		err := ValidateSourceAndSpec("s3://bucket/prefix", minimalValidSpec(), permissivePolicy())
 		assert.NoError(t, err)
 	})
 
 	t.Run("invalid_source", func(t *testing.T) {
-		err := ValidateSourceAndSpec("file:///tmp/x", minimalValidSpec())
+		err := ValidateSourceAndSpec("file:///tmp/x", minimalValidSpec(), permissivePolicy())
 		requireParameterInvalid(t, err)
 	})
 
 	t.Run("source_credentials_rejected", func(t *testing.T) {
-		err := ValidateSourceAndSpec("s3://SOURCE_ACCESS_ERROR_SENTINEL:SOURCE_SECRET_ERROR_SENTINEL@bucket/prefix", minimalValidSpec())
+		err := ValidateSourceAndSpec("s3://SOURCE_ACCESS_ERROR_SENTINEL:SOURCE_SECRET_ERROR_SENTINEL@bucket/prefix", minimalValidSpec(), permissivePolicy())
 		requireParameterInvalid(t, err)
 		assert.Contains(t, err.Error(), "external_source is invalid")
 		assert.Contains(t, err.Error(), "must not embed credentials")
 	})
 
 	t.Run("malformed_source_redacts_parse_error", func(t *testing.T) {
-		err := ValidateSourceAndSpec("s3://SOURCE_PARSE_ERROR_SENTINEL bad/prefix", minimalValidSpec())
+		err := ValidateSourceAndSpec("s3://SOURCE_PARSE_ERROR_SENTINEL bad/prefix", minimalValidSpec(), permissivePolicy())
 		requireParameterInvalid(t, err)
 		assert.NotContains(t, err.Error(), "SOURCE_PARSE_ERROR_SENTINEL")
 		assert.Contains(t, err.Error(), "external_source is invalid")
@@ -228,14 +244,14 @@ func TestValidateSourceAndSpec(t *testing.T) {
 	})
 
 	t.Run("invalid_spec_includes_parse_error", func(t *testing.T) {
-		err := ValidateSourceAndSpec("s3://bucket/prefix", `{bad json`)
+		err := ValidateSourceAndSpec("s3://bucket/prefix", `{bad json`, permissivePolicy())
 		requireParameterInvalid(t, err)
 		assert.Contains(t, err.Error(), "external_spec is invalid")
 		assert.Contains(t, err.Error(), "invalid external spec JSON")
 	})
 
 	t.Run("invalid_format_includes_validation_error", func(t *testing.T) {
-		err := ValidateSourceAndSpec("s3://bucket/prefix", `{"format":"FORMAT_VALUE_SECRET_SENTINEL"}`)
+		err := ValidateSourceAndSpec("s3://bucket/prefix", `{"format":"FORMAT_VALUE_SECRET_SENTINEL"}`, permissivePolicy())
 		requireParameterInvalid(t, err)
 		assert.Contains(t, err.Error(), "FORMAT_VALUE_SECRET_SENTINEL")
 		assert.Contains(t, err.Error(), "external_spec is invalid")
@@ -243,7 +259,7 @@ func TestValidateSourceAndSpec(t *testing.T) {
 	})
 
 	t.Run("invalid_extfs_value_includes_validation_error", func(t *testing.T) {
-		err := ValidateSourceAndSpec("s3://bucket/prefix", `{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"CLOUD_PROVIDER_SECRET_SENTINEL"}}`)
+		err := ValidateSourceAndSpec("s3://bucket/prefix", `{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"CLOUD_PROVIDER_SECRET_SENTINEL"}}`, permissivePolicy())
 		requireParameterInvalid(t, err)
 		assert.Contains(t, err.Error(), "CLOUD_PROVIDER_SECRET_SENTINEL")
 		assert.Contains(t, err.Error(), "cloud_provider_secret_sentinel")
@@ -252,7 +268,7 @@ func TestValidateSourceAndSpec(t *testing.T) {
 	})
 
 	t.Run("missing_credentials_rejected", func(t *testing.T) {
-		err := ValidateSourceAndSpec("s3://bucket/prefix", `{"format":"parquet"}`)
+		err := ValidateSourceAndSpec("s3://bucket/prefix", `{"format":"parquet"}`, permissivePolicy())
 		require.ErrorIs(t, err, merr.ErrParameterMissing)
 		assert.Contains(t, err.Error(), "external_spec is invalid")
 		assert.Contains(t, err.Error(), "cloud_provider is required")
@@ -260,33 +276,33 @@ func TestValidateSourceAndSpec(t *testing.T) {
 
 	t.Run("missing_region_for_aws_scheme_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix",
-			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","cloud_provider":"aws"}}`)
+			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","cloud_provider":"aws"}}`, permissivePolicy())
 		require.ErrorIs(t, err, merr.ErrParameterMissing)
 	})
 
 	t.Run("missing_cloud_provider_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix",
-			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1"}}`)
+			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1"}}`, permissivePolicy())
 		require.ErrorIs(t, err, merr.ErrParameterMissing)
 		assert.Contains(t, err.Error(), "external_spec is invalid")
 	})
 
 	t.Run("invalid_cloud_provider_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix",
-			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"unknown"}}`)
+			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"unknown"}}`, permissivePolicy())
 		requireParameterInvalid(t, err)
 		assert.Contains(t, err.Error(), "external_spec is invalid")
 	})
 
 	t.Run("minio_cloud_provider_milvus_form", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://localhost:9000/mybucket/path",
-			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"minio"}}`)
+			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"minio"}}`, permissivePolicy())
 		assert.NoError(t, err)
 	})
 
 	t.Run("explicit_endpoint_rejects_endpoint_form_source", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://localhost:9000/mybucket/path",
-			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","endpoint_url":"http://rook-ceph-rgw:80"}}`)
+			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","endpoint_url":"http://rook-ceph-rgw:80"}}`, permissivePolicy())
 		requireParameterInvalid(t, err)
 		assert.Contains(t, err.Error(), "bucket name without a port")
 	})
@@ -295,7 +311,7 @@ func TestValidateSourceAndSpec(t *testing.T) {
 		for _, scheme := range []string{SchemeS3, SchemeS3A, SchemeAWS, SchemeMinIO} {
 			t.Run(scheme, func(t *testing.T) {
 				err := ValidateSourceAndSpec(scheme+"://bucket:/data/",
-					`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","endpoint_url":"http://rook-ceph-rgw:80"}}`)
+					`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","endpoint_url":"http://rook-ceph-rgw:80"}}`, permissivePolicy())
 				requireParameterInvalid(t, err)
 				assert.Equal(t, merr.InputError, merr.GetErrorType(err))
 				assert.Contains(t, err.Error(), "bucket name without a port")
@@ -305,98 +321,121 @@ func TestValidateSourceAndSpec(t *testing.T) {
 
 	t.Run("minio_scheme_selects_minio_validation_semantics", func(t *testing.T) {
 		err := ValidateSourceAndSpec("minio://localhost:9000/mybucket/path",
-			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK"}}`)
+			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK"}}`, permissivePolicy())
 		assert.NoError(t, err)
 	})
 
 	t.Run("minio_scheme_rejects_non_minio_cloud_provider", func(t *testing.T) {
 		err := ValidateSourceAndSpec("minio://localhost:9000/mybucket/path",
-			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"aws"}}`)
+			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"aws"}}`, permissivePolicy())
 		requireParameterInvalid(t, err)
 		assert.Contains(t, err.Error(), "external_spec is invalid")
 	})
 
 	t.Run("gcs_scheme_does_not_require_region", func(t *testing.T) {
 		err := ValidateSourceAndSpec("gs://bucket/prefix",
-			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","cloud_provider":"gcp"}}`)
+			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","cloud_provider":"gcp"}}`, permissivePolicy())
 		assert.NoError(t, err)
 	})
 
 	t.Run("role_arn_mode", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix",
-			`{"format":"parquet","extfs":{"role_arn":"arn:aws:iam::1:role/r","region":"us-east-1","cloud_provider":"aws"}}`)
+			`{"format":"parquet","extfs":{"role_arn":"arn:aws:iam::1:role/r","region":"us-east-1","cloud_provider":"aws"}}`, permissivePolicy())
 		assert.NoError(t, err)
 	})
 
 	t.Run("use_iam_alone_mode", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix",
-			`{"format":"parquet","extfs":{"use_iam":"true","region":"us-east-1","cloud_provider":"aws"}}`)
+			`{"format":"parquet","extfs":{"use_iam":"true","region":"us-east-1","cloud_provider":"aws"}}`, permissivePolicy())
 		assert.NoError(t, err)
 	})
 
 	t.Run("anonymous_mode", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix",
-			`{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`)
+			`{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`, permissivePolicy())
 		assert.NoError(t, err)
 	})
 
 	t.Run("ak_without_sk_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix",
-			`{"format":"parquet","extfs":{"access_key_id":"AK","region":"us-east-1","cloud_provider":"aws"}}`)
+			`{"format":"parquet","extfs":{"access_key_id":"AK","region":"us-east-1","cloud_provider":"aws"}}`, permissivePolicy())
 		require.ErrorIs(t, err, merr.ErrParameterMissing)
 	})
 
 	t.Run("anonymous_with_aksk_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix",
-			`{"format":"parquet","extfs":{"anonymous":"true","access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"aws"}}`)
+			`{"format":"parquet","extfs":{"anonymous":"true","access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"aws"}}`, permissivePolicy())
 		requireParameterInvalid(t, err)
 	})
 
 	t.Run("multiple_modes_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix",
-			`{"format":"parquet","extfs":{"role_arn":"arn:aws:iam::1:role/r","access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"aws"}}`)
+			`{"format":"parquet","extfs":{"role_arn":"arn:aws:iam::1:role/r","access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"aws"}}`, permissivePolicy())
 		requireParameterInvalid(t, err)
 	})
 
 	t.Run("gcp_impersonation_mode", func(t *testing.T) {
 		err := ValidateSourceAndSpec("gs://bucket/prefix",
-			`{"format":"parquet","extfs":{"gcp_target_service_account":"sa@proj.iam.gserviceaccount.com","cloud_provider":"gcp"}}`)
+			`{"format":"parquet","extfs":{"gcp_target_service_account":"sa@proj.iam.gserviceaccount.com","cloud_provider":"gcp"}}`, permissivePolicy())
 		assert.NoError(t, err)
 	})
 
 	t.Run("gcp_impersonation_with_gcs_scheme", func(t *testing.T) {
 		err := ValidateSourceAndSpec("gcs://bucket/prefix",
-			`{"format":"parquet","extfs":{"gcp_target_service_account":"sa@proj.iam.gserviceaccount.com","cloud_provider":"gcp"}}`)
+			`{"format":"parquet","extfs":{"gcp_target_service_account":"sa@proj.iam.gserviceaccount.com","cloud_provider":"gcp"}}`, permissivePolicy())
 		assert.NoError(t, err)
+	})
+
+	t.Run("gcp_broker_mode", func(t *testing.T) {
+		// Exercises the credential_endpoint allowlist entry in specutil.
+		spec := `{"format":"parquet","extfs":{"gcp_target_service_account":"sa@proj.iam.gserviceaccount.com","cloud_provider":"gcp","credential_endpoint":"` + testGCPBroker + `"}}`
+		assert.NoError(t, ValidateSourceAndSpec("gs://storage.googleapis.com/bucket/prefix", spec, permissivePolicy()))
+
+		// A Broker is not the server's identity: the allowlist alone admits it.
+		brokerOnly := Policy{CredentialBrokerEndpoints: []string{testGCPBroker}}
+		assert.NoError(t, ValidateSourceAndSpec("gs://storage.googleapis.com/bucket/prefix", spec, brokerOnly))
+
+		err := ValidateSourceAndSpec("gs://storage.googleapis.com/bucket/prefix", spec, Policy{AllowServerIdentity: true})
+		requireParameterInvalid(t, err)
+		assert.Contains(t, err.Error(), "external_spec is invalid")
+		assert.Contains(t, err.Error(), "common.security.externalCollection.credentialBrokerEndpoints")
+	})
+
+	t.Run("duplicate_spec_key_rejected", func(t *testing.T) {
+		err := ValidateSourceAndSpec("s3://bucket/prefix",
+			`{"format":"parquet","extfs":{"access_key_id":"AK","access_key_value":"SK","region":"us-east-1","cloud_provider":"aws","cloud_provider":"minio"}}`, permissivePolicy())
+		requireParameterInvalid(t, err)
+		assert.Contains(t, err.Error(), "external_spec is invalid")
+		assert.Contains(t, err.Error(), `duplicate key "cloud_provider"`)
 	})
 
 	t.Run("gcp_impersonation_on_aws_scheme_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("s3://bucket/prefix",
-			`{"format":"parquet","extfs":{"gcp_target_service_account":"sa@proj.iam.gserviceaccount.com","region":"us-east-1","cloud_provider":"aws"}}`)
+			`{"format":"parquet","extfs":{"gcp_target_service_account":"sa@proj.iam.gserviceaccount.com","region":"us-east-1","cloud_provider":"aws"}}`, permissivePolicy())
 		requireParameterInvalid(t, err)
 	})
 
 	t.Run("gcp_impersonation_malformed_email_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("gs://bucket/prefix",
-			`{"format":"parquet","extfs":{"gcp_target_service_account":"not-an-email","cloud_provider":"gcp"}}`)
+			`{"format":"parquet","extfs":{"gcp_target_service_account":"not-an-email","cloud_provider":"gcp"}}`, permissivePolicy())
 		requireParameterInvalid(t, err)
 	})
 
 	t.Run("gcp_impersonation_missing_at_sign_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("gs://bucket/prefix",
-			`{"format":"parquet","extfs":{"gcp_target_service_account":"saproj.iam.gserviceaccount.com","cloud_provider":"gcp"}}`)
+			`{"format":"parquet","extfs":{"gcp_target_service_account":"saproj.iam.gserviceaccount.com","cloud_provider":"gcp"}}`, permissivePolicy())
 		requireParameterInvalid(t, err)
 	})
 
 	t.Run("gcp_impersonation_with_aksk_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("gs://bucket/prefix",
-			`{"format":"parquet","extfs":{"gcp_target_service_account":"sa@proj.iam.gserviceaccount.com","access_key_id":"AK","access_key_value":"SK","cloud_provider":"gcp"}}`)
+			`{"format":"parquet","extfs":{"gcp_target_service_account":"sa@proj.iam.gserviceaccount.com","access_key_id":"AK","access_key_value":"SK","cloud_provider":"gcp"}}`, permissivePolicy())
 		requireParameterInvalid(t, err)
 	})
 
 	t.Run("gcp_impersonation_with_anonymous_rejected", func(t *testing.T) {
 		err := ValidateSourceAndSpec("gs://bucket/prefix",
-			`{"format":"parquet","extfs":{"gcp_target_service_account":"sa@proj.iam.gserviceaccount.com","anonymous":"true","cloud_provider":"gcp"}}`)
+			`{"format":"parquet","extfs":{"gcp_target_service_account":"sa@proj.iam.gserviceaccount.com","anonymous":"true","cloud_provider":"gcp"}}`, permissivePolicy())
 		requireParameterInvalid(t, err)
 	})
 }
@@ -418,26 +457,27 @@ func TestValidateEndpointURL(t *testing.T) {
 		"http://127.0.0.1:9000/",
 	} {
 		t.Run("valid_"+endpoint, func(t *testing.T) {
-			assert.NoError(t, ValidateExtfsComplete("s3://my-bucket/object", validExtfs(endpoint)))
+			assert.NoError(t, ValidateExtfsComplete("s3://my-bucket/object", validExtfs(endpoint), permissivePolicy()))
 		})
 	}
 
 	t.Run("matching_use_ssl", func(t *testing.T) {
 		extfs := validExtfs("https://s3.example.com")
 		extfs[ExtfsKeyUseSSL] = "true"
-		assert.NoError(t, ValidateExtfsComplete("s3://my-bucket/object", extfs))
+		assert.NoError(t, ValidateExtfsComplete("s3://my-bucket/object", extfs, permissivePolicy()))
 	})
 
 	t.Run("cloud_provider_optional", func(t *testing.T) {
 		extfs := validExtfs("http://rook-ceph-rgw.storage.svc:80")
 		delete(extfs, ExtfsKeyCloudProvider)
-		assert.NoError(t, ValidateExtfsComplete("s3://my-bucket/object", extfs))
+		assert.NoError(t, ValidateExtfsComplete("s3://my-bucket/object", extfs, permissivePolicy()))
 	})
 
 	t.Run("issue_minimal_configuration", func(t *testing.T) {
 		err := ValidateSourceAndSpec(
 			"s3://iceberg-warehouse/lakehouse/sec/rag_chunks/metadata/00001.json",
 			`{"format":"iceberg-table","snapshot_id":"517536919083875277","extfs":{"access_key_id":"AK","access_key_value":"SK","endpoint_url":"http://rook-ceph-rgw.storage.svc:80","region":"us-east-1","use_ssl":"false"}}`,
+			permissivePolicy(),
 		)
 		assert.NoError(t, err)
 	})
@@ -446,7 +486,7 @@ func TestValidateEndpointURL(t *testing.T) {
 		extfs := validExtfs("http://localhost:9000")
 		delete(extfs, ExtfsKeyCloudProvider)
 		delete(extfs, ExtfsKeyRegion)
-		assert.NoError(t, ValidateExtfsComplete("minio://my-bucket/object", extfs))
+		assert.NoError(t, ValidateExtfsComplete("minio://my-bucket/object", extfs, permissivePolicy()))
 	})
 
 	tests := []struct {
@@ -501,7 +541,7 @@ func TestValidateEndpointURL(t *testing.T) {
 			if test.mutate != nil {
 				test.mutate(extfs)
 			}
-			err := ValidateExtfsComplete(test.source, extfs)
+			err := ValidateExtfsComplete(test.source, extfs, permissivePolicy())
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), test.wantErrMsg)
 		})
@@ -545,7 +585,7 @@ func TestValidateEndpointURL(t *testing.T) {
 				})
 				require.NoError(t, err)
 
-				err = ValidateSourceAndSpec("s3://bucket/key", string(spec))
+				err = ValidateSourceAndSpec("s3://bucket/key", string(spec), permissivePolicy())
 				require.ErrorIs(t, err, merr.ErrParameterInvalid)
 				assert.NotContains(t, err.Error(), marker)
 				status := merr.Status(err)
@@ -834,6 +874,7 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 		err := ValidateExtfsComplete(
 			"azure://core.windows.net/container/path",
 			azureBrokerSpec(),
+			permissivePolicy(),
 		)
 		assert.NoError(t, err)
 	})
@@ -841,7 +882,7 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 	t.Run("azure_credential_broker_rejects_noncanonical_provider_case", func(t *testing.T) {
 		extfs := azureBrokerSpec()
 		extfs["cloud_provider"] = "Azure"
-		err := ValidateExtfsComplete("azure://core.windows.net/container/path", extfs)
+		err := ValidateExtfsComplete("azure://core.windows.net/container/path", extfs, permissivePolicy())
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "must use the canonical lowercase value \"azure\"")
 	})
@@ -849,7 +890,7 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 	t.Run("azure_credential_mode_missing", func(t *testing.T) {
 		err := ValidateExtfsComplete("azure://core.windows.net/container/path", map[string]string{
 			"cloud_provider": "azure",
-		})
+		}, permissivePolicy())
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "credential mode missing")
 	})
@@ -865,7 +906,7 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 			t.Run(key, func(t *testing.T) {
 				extfs := azureBrokerSpec()
 				delete(extfs, key)
-				err := ValidateExtfsComplete("azure://core.windows.net/container/path", extfs)
+				err := ValidateExtfsComplete("azure://core.windows.net/container/path", extfs, permissivePolicy())
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), "is required for Azure credential broker mode")
 			})
@@ -881,7 +922,7 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 			t.Run(endpoint, func(t *testing.T) {
 				extfs := azureBrokerSpec()
 				extfs["azure_credential_endpoint"] = endpoint
-				err := ValidateExtfsComplete("azure://core.windows.net/container/path", extfs)
+				err := ValidateExtfsComplete("azure://core.windows.net/container/path", extfs, permissivePolicy())
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), "must be a valid HTTP(S) URL")
 			})
@@ -901,7 +942,7 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 			t.Run(test.name, func(t *testing.T) {
 				extfs := azureBrokerSpec()
 				extfs["cloud_provider"] = test.provider
-				err := ValidateExtfsComplete(test.source, extfs)
+				err := ValidateExtfsComplete(test.source, extfs, permissivePolicy())
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), "requires scheme=\"azure\"")
 			})
@@ -924,7 +965,7 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 			t.Run(test.name, func(t *testing.T) {
 				extfs := azureBrokerSpec()
 				extfs[test.key] = test.value
-				err := ValidateExtfsComplete("azure://core.windows.net/container/path", extfs)
+				err := ValidateExtfsComplete("azure://core.windows.net/container/path", extfs, permissivePolicy())
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), "credential modes are mutually exclusive")
 			})
@@ -936,7 +977,7 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 			"access_key_id":    "mystorageacct",
 			"access_key_value": "base64key",
 			"cloud_provider":   "azure",
-		})
+		}, permissivePolicy())
 		assert.NoError(t, err)
 	})
 
@@ -944,7 +985,7 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 		err := ValidateExtfsComplete("azure://core.windows.net/container/path", map[string]string{
 			"use_iam":        "true",
 			"cloud_provider": "azure",
-		})
+		}, permissivePolicy())
 		assert.NoError(t, err)
 	})
 
@@ -953,7 +994,7 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 			"access_key_id":    "mystorageacct",
 			"access_key_value": "base64key",
 			"cloud_provider":   "azure",
-		})
+		}, permissivePolicy())
 		assert.NoError(t, err)
 	})
 
@@ -962,7 +1003,7 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 			"access_key_id":    "AK",
 			"access_key_value": "SK",
 			"cloud_provider":   "gcp",
-		})
+		}, permissivePolicy())
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "scheme=azure requires extfs.cloud_provider")
 	})
@@ -973,7 +1014,7 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 			"access_key_value": "SK",
 			"region":           "us-east-1",
 			"cloud_provider":   "azure",
-		})
+		}, permissivePolicy())
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "cloud_provider=azure requires scheme=azure")
 	})
@@ -982,10 +1023,191 @@ func TestValidateExtfsComplete_Azure(t *testing.T) {
 		err := ValidateExtfsComplete("azure://core.windows.net/container/path", map[string]string{
 			"gcp_target_service_account": "sa@proj.iam.gserviceaccount.com",
 			"cloud_provider":             "azure",
-		})
+		}, permissivePolicy())
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "only valid for GCP")
 	})
+}
+
+func TestValidateExtfsComplete_GCPTargetServiceAccount(t *testing.T) {
+	requireParameterInvalid := func(t *testing.T, err error) {
+		t.Helper()
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	}
+	const target = "reader@proj.iam.gserviceaccount.com"
+	const broker = "http://credential-broker.example/v1/credentials/assume-role"
+	impersonation := func() map[string]string {
+		return map[string]string{
+			"cloud_provider":             "gcp",
+			"gcp_target_service_account": target,
+			"use_ssl":                    "true",
+		}
+	}
+	withBroker := func() map[string]string {
+		extfs := impersonation()
+		extfs["credential_endpoint"] = broker
+		extfs["load_frequency"] = "3600"
+		return extfs
+	}
+
+	t.Run("accepted", func(t *testing.T) {
+		tests := []struct {
+			name   string
+			source string
+			extfs  map[string]string
+		}{
+			{name: "impersonation", source: "gs://bucket/path", extfs: impersonation()},
+			{name: "impersonation_milvus_form", source: "gs://storage.googleapis.com/bucket/path", extfs: impersonation()},
+			{name: "broker", source: "gs://storage.googleapis.com/bucket/path", extfs: withBroker()},
+		}
+		withUseIAM := impersonation()
+		withUseIAM["use_iam"] = "true"
+		tests = append(tests, struct {
+			name   string
+			source string
+			extfs  map[string]string
+		}{name: "impersonation_with_use_iam", source: "gs://bucket/path", extfs: withUseIAM})
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				assert.NoError(t, ValidateExtfsComplete(test.source, test.extfs, permissivePolicy()))
+			})
+		}
+	})
+
+	t.Run("token_requires_https", func(t *testing.T) {
+		// Only an explicit use_ssl=false downgrades: a missing or empty value
+		// takes the scheme default (TestValidateExtfsComplete_GCPBearerUseSSL).
+		extfs := withBroker()
+		extfs["use_ssl"] = "false"
+		err := ValidateExtfsComplete("gs://bucket/path", extfs, permissivePolicy())
+		requireParameterInvalid(t, err)
+		assert.Contains(t, err.Error(), "requires HTTPS")
+	})
+
+	t.Run("broker_without_target_names_target", func(t *testing.T) {
+		// Checked before the mode count, so the user is told what is missing
+		// rather than "credential mode missing".
+		extfs := withBroker()
+		delete(extfs, "gcp_target_service_account")
+		err := ValidateExtfsComplete("gs://bucket/path", extfs, permissivePolicy())
+		require.ErrorIs(t, err, merr.ErrParameterMissing)
+		assert.Contains(t, err.Error(), "gcp_target_service_account is required")
+		assert.NotContains(t, err.Error(), "credential mode missing")
+	})
+
+	t.Run("token_goes_only_to_google_endpoints", func(t *testing.T) {
+		otherCloud := impersonation()
+		err := ValidateExtfsComplete("gs://s3.us-east-1.amazonaws.com/bucket/path", otherCloud, permissivePolicy())
+		requireParameterInvalid(t, err)
+		assert.Contains(t, err.Error(), "only supported for Google Cloud Storage endpoints")
+
+		customEndpoint := impersonation()
+		delete(customEndpoint, "use_ssl")
+		customEndpoint["endpoint_url"] = "https://storage.example.com"
+		customEndpoint["region"] = "us-east-1"
+		err = ValidateExtfsComplete("s3://bucket/path", customEndpoint, permissivePolicy())
+		requireParameterInvalid(t, err)
+		assert.Contains(t, err.Error(), "only supported for Google Cloud Storage endpoints")
+	})
+
+	t.Run("requires_gcp_provider", func(t *testing.T) {
+		extfs := impersonation()
+		extfs["cloud_provider"] = "aws"
+		extfs["region"] = "us-east-1"
+		err := ValidateExtfsComplete("gs://bucket/path", extfs, permissivePolicy())
+		requireParameterInvalid(t, err)
+		assert.Contains(t, err.Error(), "only valid for GCP")
+	})
+
+	t.Run("token_lifetime_range", func(t *testing.T) {
+		for _, lifetime := range []string{"899", "3601", "7200", "abc"} {
+			extfs := withBroker()
+			extfs["load_frequency"] = lifetime
+			err := ValidateExtfsComplete("gs://bucket/path", extfs, permissivePolicy())
+			requireParameterInvalid(t, err)
+			assert.Contains(t, err.Error(), "must be an integer in [900, 3600]")
+		}
+	})
+
+	t.Run("broker_requires_target", func(t *testing.T) {
+		extfs := withBroker()
+		delete(extfs, "gcp_target_service_account")
+		extfs["use_iam"] = "true"
+		err := ValidateExtfsComplete("gs://bucket/path", extfs, permissivePolicy())
+		require.ErrorIs(t, err, merr.ErrParameterMissing)
+		assert.Contains(t, err.Error(), "gcp_target_service_account is required")
+	})
+
+	t.Run("broker_rejects_use_iam", func(t *testing.T) {
+		extfs := withBroker()
+		extfs["use_iam"] = "true"
+		err := ValidateExtfsComplete("gs://bucket/path", extfs, permissivePolicy())
+		requireParameterInvalid(t, err)
+		assert.Contains(t, err.Error(), "use_iam=true conflicts")
+	})
+
+	t.Run("broker_invalid_endpoint", func(t *testing.T) {
+		for _, endpoint := range []string{"file:///tmp/credentials", "http:///credentials", "not-a-url"} {
+			extfs := withBroker()
+			extfs["credential_endpoint"] = endpoint
+			err := ValidateExtfsComplete("gs://bucket/path", extfs, permissivePolicy())
+			requireParameterInvalid(t, err)
+			assert.Contains(t, err.Error(), "must be a valid HTTP(S) URL")
+		}
+	})
+
+	t.Run("broker_other_provider_rejected", func(t *testing.T) {
+		err := ValidateExtfsComplete("s3://bucket/path", map[string]string{
+			"cloud_provider":      "aws",
+			"region":              "us-east-1",
+			"role_arn":            "arn:aws:iam::1:role/r",
+			"credential_endpoint": broker,
+		}, permissivePolicy())
+		requireParameterInvalid(t, err)
+		assert.Contains(t, err.Error(), "only supported for cloud_provider gcp and azure")
+	})
+
+	t.Run("legacy_azure_endpoint_is_not_a_gcp_broker", func(t *testing.T) {
+		extfs := impersonation()
+		extfs["azure_credential_endpoint"] = broker
+		err := ValidateExtfsComplete("gs://bucket/path", extfs, permissivePolicy())
+		requireParameterInvalid(t, err)
+		assert.Contains(t, err.Error(), "Azure credential broker mode requires")
+	})
+}
+
+func TestValidateExtfsComplete_AzureCredentialEndpointKeys(t *testing.T) {
+	requireParameterInvalid := func(t *testing.T, err error) {
+		t.Helper()
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	}
+	azureBroker := func() map[string]string {
+		return map[string]string{
+			"access_key_id":   "mystorageacct",
+			"cloud_provider":  "azure",
+			"region":          "westus3",
+			"azure_client_id": "client",
+			"azure_tenant_id": "tenant",
+		}
+	}
+
+	extfs := azureBroker()
+	extfs["credential_endpoint"] = "https://broker.example.com/v1/credentials/assume-role"
+	assert.NoError(t, ValidateExtfsComplete("azure://core.windows.net/container/path", extfs, permissivePolicy()))
+
+	extfs["azure_credential_endpoint"] = extfs["credential_endpoint"]
+	assert.NoError(t, ValidateExtfsComplete("azure://core.windows.net/container/path", extfs, permissivePolicy()))
+
+	extfs["azure_credential_endpoint"] = "https://other-broker.example.com/v1/credentials/assume-role"
+	err := ValidateExtfsComplete("azure://core.windows.net/container/path", extfs, permissivePolicy())
+	requireParameterInvalid(t, err)
+	assert.Contains(t, err.Error(), "must not differ")
+
+	invalid := azureBroker()
+	invalid["credential_endpoint"] = "file:///tmp/credentials"
+	err = ValidateExtfsComplete("azure://core.windows.net/container/path", invalid, permissivePolicy())
+	requireParameterInvalid(t, err)
+	assert.Contains(t, err.Error(), "extfs.credential_endpoint must be a valid HTTP(S) URL")
 }
 
 func TestParseExternalSpec_SnapshotID(t *testing.T) {
@@ -1020,4 +1242,257 @@ func TestRedactExternalSpec_SnapshotIDNumber(t *testing.T) {
 	redacted := RedactExternalSpec(`{"format":"iceberg-table","snapshot_id":5320540205222981137}`)
 	assert.Contains(t, redacted, `"snapshot_id":"5320540205222981137"`)
 	assert.NotEqual(t, "<invalid spec>", redacted)
+}
+
+func TestValidateExtfsComplete_Policy(t *testing.T) {
+	const (
+		allowKey  = "common.security.externalCollection.allowServerIdentity"
+		brokerKey = "common.security.externalCollection.credentialBrokerEndpoints"
+	)
+	requireDeniedServerIdentity := func(t *testing.T, err error) {
+		t.Helper()
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), allowKey)
+		assert.Contains(t, err.Error(), brokerKey, "the message must offer the Broker alternative")
+	}
+	requireUnlistedBroker := func(t *testing.T, err error, key string) {
+		t.Helper()
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), brokerKey)
+		assert.Contains(t, err.Error(), "extfs."+key)
+		assert.NotContains(t, err.Error(), allowKey)
+	}
+	deny := Policy{}
+	allow := Policy{AllowServerIdentity: true}
+
+	serverIdentity := []struct {
+		name   string
+		source string
+		extfs  map[string]string
+	}{
+		{name: "use_iam_aws", source: "s3://bucket/path", extfs: map[string]string{
+			"use_iam": "true", "region": "us-east-1", "cloud_provider": "aws",
+		}},
+		{name: "use_iam_gcp", source: "gs://bucket/path", extfs: map[string]string{
+			"use_iam": "true", "cloud_provider": "gcp",
+		}},
+		{name: "use_iam_azure", source: "azure://core.windows.net/container/path", extfs: map[string]string{
+			"use_iam": "true", "cloud_provider": "azure",
+		}},
+		{name: "role_arn", source: "s3://bucket/path", extfs: map[string]string{
+			"role_arn": "arn:aws:iam::1:role/r", "region": "us-east-1", "cloud_provider": "aws",
+		}},
+		{name: "role_arn_with_use_iam", source: "s3://bucket/path", extfs: map[string]string{
+			"role_arn": "arn:aws:iam::1:role/r", "use_iam": "true", "region": "us-east-1", "cloud_provider": "aws",
+		}},
+		{name: "gcp_target_without_broker", source: "gs://bucket/path", extfs: map[string]string{
+			"gcp_target_service_account": "sa@proj.iam.gserviceaccount.com", "cloud_provider": "gcp",
+		}},
+		{name: "gcp_target_with_use_iam", source: "gs://bucket/path", extfs: map[string]string{
+			"gcp_target_service_account": "sa@proj.iam.gserviceaccount.com", "use_iam": "true", "cloud_provider": "gcp",
+		}},
+	}
+	for _, test := range serverIdentity {
+		t.Run("server_identity/"+test.name, func(t *testing.T) {
+			requireDeniedServerIdentity(t, ValidateExtfsComplete(test.source, test.extfs, deny))
+			assert.NoError(t, ValidateExtfsComplete(test.source, test.extfs, allow))
+			// The Broker allowlist does not substitute for allowServerIdentity.
+			requireDeniedServerIdentity(t, ValidateExtfsComplete(test.source, test.extfs,
+				Policy{CredentialBrokerEndpoints: []string{testGCPBroker, testAzureBroker}}))
+		})
+	}
+
+	azureBroker := func(key, endpoint string) map[string]string {
+		return map[string]string{
+			"access_key_id": "mystorageacct", "cloud_provider": "azure", "region": "westus3",
+			"azure_client_id": "client", "azure_tenant_id": "tenant", key: endpoint,
+		}
+	}
+	gcpBroker := func(endpoint string) map[string]string {
+		return map[string]string{
+			"cloud_provider": "gcp", "gcp_target_service_account": "sa@proj.iam.gserviceaccount.com",
+			"credential_endpoint": endpoint,
+		}
+	}
+	nonServerIdentity := []struct {
+		name   string
+		source string
+		extfs  map[string]string
+		policy Policy
+	}{
+		{name: "aksk", source: "s3://bucket/path", policy: deny, extfs: map[string]string{
+			"access_key_id": "AK", "access_key_value": "SK", "region": "us-east-1", "cloud_provider": "aws",
+		}},
+		{name: "anonymous", source: "s3://bucket/path", policy: deny, extfs: map[string]string{
+			"anonymous": "true", "region": "us-east-1", "cloud_provider": "aws",
+		}},
+		{name: "azure_shared_key", source: "azure://core.windows.net/container/path", policy: deny, extfs: map[string]string{
+			"access_key_id": "mystorageacct", "access_key_value": "base64key", "cloud_provider": "azure",
+		}},
+		{
+			name: "azure_broker_credential_endpoint", source: "azure://core.windows.net/container/path",
+			policy: Policy{CredentialBrokerEndpoints: []string{testAzureBroker}},
+			extfs:  azureBroker("credential_endpoint", testAzureBroker),
+		},
+		{
+			name: "azure_broker_legacy_key", source: "azure://core.windows.net/container/path",
+			policy: Policy{CredentialBrokerEndpoints: []string{testAzureBroker}},
+			extfs:  azureBroker("azure_credential_endpoint", testAzureBroker),
+		},
+		{
+			name: "gcp_broker", source: "gs://bucket/path",
+			policy: Policy{CredentialBrokerEndpoints: []string{testGCPBroker}},
+			extfs:  gcpBroker(testGCPBroker),
+		},
+	}
+	for _, test := range nonServerIdentity {
+		t.Run("not_server_identity/"+test.name, func(t *testing.T) {
+			require.False(t, test.policy.AllowServerIdentity, "fixture must prove the mode is admitted without allowServerIdentity")
+			assert.NoError(t, ValidateExtfsComplete(test.source, test.extfs, test.policy))
+		})
+	}
+
+	t.Run("broker_allowlist", func(t *testing.T) {
+		listed := Policy{CredentialBrokerEndpoints: []string{"https://x.example/other", testGCPBroker}}
+		t.Run("exact_match", func(t *testing.T) {
+			assert.NoError(t, ValidateExtfsComplete("gs://bucket/path", gcpBroker(testGCPBroker), listed))
+		})
+		t.Run("spec_trailing_slash", func(t *testing.T) {
+			assert.NoError(t, ValidateExtfsComplete("gs://bucket/path", gcpBroker(testGCPBroker+"/"), listed))
+		})
+		t.Run("allowlist_trailing_slash", func(t *testing.T) {
+			policy := Policy{CredentialBrokerEndpoints: []string{testGCPBroker + "/"}}
+			assert.NoError(t, ValidateExtfsComplete("gs://bucket/path", gcpBroker(testGCPBroker), policy))
+		})
+		t.Run("empty_allowlist", func(t *testing.T) {
+			requireUnlistedBroker(t, ValidateExtfsComplete("gs://bucket/path", gcpBroker(testGCPBroker), deny), "credential_endpoint")
+			requireUnlistedBroker(t, ValidateExtfsComplete("gs://bucket/path", gcpBroker(testGCPBroker), allow), "credential_endpoint")
+		})
+		t.Run("unlisted_endpoint", func(t *testing.T) {
+			err := ValidateExtfsComplete("gs://bucket/path", gcpBroker("http://credential-broker.example/v1/credentials/other"), listed)
+			requireUnlistedBroker(t, err, "credential_endpoint")
+		})
+		t.Run("prefix_is_not_a_match", func(t *testing.T) {
+			policy := Policy{CredentialBrokerEndpoints: []string{"http://credential-broker.example"}}
+			requireUnlistedBroker(t, ValidateExtfsComplete("gs://bucket/path", gcpBroker(testGCPBroker), policy), "credential_endpoint")
+			policy = Policy{CredentialBrokerEndpoints: []string{testGCPBroker + "/extra"}}
+			requireUnlistedBroker(t, ValidateExtfsComplete("gs://bucket/path", gcpBroker(testGCPBroker), policy), "credential_endpoint")
+		})
+		t.Run("case_sensitive", func(t *testing.T) {
+			policy := Policy{CredentialBrokerEndpoints: []string{strings.ToUpper(testGCPBroker)}}
+			requireUnlistedBroker(t, ValidateExtfsComplete("gs://bucket/path", gcpBroker(testGCPBroker), policy), "credential_endpoint")
+		})
+		t.Run("azure_unlisted_names_key_used", func(t *testing.T) {
+			other := Policy{CredentialBrokerEndpoints: []string{testGCPBroker}}
+			requireUnlistedBroker(t,
+				ValidateExtfsComplete("azure://core.windows.net/container/path", azureBroker("credential_endpoint", testAzureBroker), other),
+				"credential_endpoint")
+			requireUnlistedBroker(t,
+				ValidateExtfsComplete("azure://core.windows.net/container/path", azureBroker("azure_credential_endpoint", testAzureBroker), other),
+				"azure_credential_endpoint")
+		})
+		t.Run("structural_errors_come_first", func(t *testing.T) {
+			// An unparseable Broker URL is reported as such even when unlisted.
+			err := ValidateExtfsComplete("gs://bucket/path", gcpBroker("not-a-url"), deny)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "must be a valid HTTP(S) URL")
+			assert.NotContains(t, err.Error(), brokerKey)
+		})
+	})
+}
+
+func TestValidateExtfsComplete_GCPBearerUseSSL(t *testing.T) {
+	requireParameterInvalid := func(t *testing.T, err error) {
+		t.Helper()
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	}
+	modes := []struct {
+		name  string
+		extfs func() map[string]string
+	}{
+		{name: "gcp_target_service_account", extfs: func() map[string]string {
+			return map[string]string{"cloud_provider": "gcp", "gcp_target_service_account": "sa@proj.iam.gserviceaccount.com"}
+		}},
+		{name: "use_iam", extfs: func() map[string]string {
+			return map[string]string{"cloud_provider": "gcp", "use_iam": "true"}
+		}},
+		{name: "broker", extfs: func() map[string]string {
+			return map[string]string{
+				"cloud_provider": "gcp", "gcp_target_service_account": "sa@proj.iam.gserviceaccount.com",
+				"credential_endpoint": testGCPBroker,
+			}
+		}},
+	}
+	for _, mode := range modes {
+		t.Run(mode.name, func(t *testing.T) {
+			t.Run("use_ssl_missing_defaults_to_https", func(t *testing.T) {
+				extfs := mode.extfs()
+				require.NotContains(t, extfs, "use_ssl")
+				assert.NoError(t, ValidateExtfsComplete("gs://bucket/path", extfs, permissivePolicy()))
+				assert.NoError(t, ValidateExtfsComplete("gcs://bucket/path", extfs, permissivePolicy()))
+				assert.NoError(t, ValidateExtfsComplete("gs://storage.googleapis.com/bucket/path", extfs, permissivePolicy()))
+			})
+			t.Run("use_ssl_empty_defaults_to_https", func(t *testing.T) {
+				extfs := mode.extfs()
+				extfs["use_ssl"] = ""
+				assert.NoError(t, ValidateExtfsComplete("gs://bucket/path", extfs, permissivePolicy()))
+			})
+			t.Run("use_ssl_true", func(t *testing.T) {
+				extfs := mode.extfs()
+				extfs["use_ssl"] = "true"
+				assert.NoError(t, ValidateExtfsComplete("gs://bucket/path", extfs, permissivePolicy()))
+			})
+			t.Run("use_ssl_false_rejected", func(t *testing.T) {
+				extfs := mode.extfs()
+				extfs["use_ssl"] = "false"
+				err := ValidateExtfsComplete("gs://bucket/path", extfs, permissivePolicy())
+				requireParameterInvalid(t, err)
+				assert.Contains(t, err.Error(), "requires HTTPS")
+			})
+			t.Run("non_google_host_rejected", func(t *testing.T) {
+				err := ValidateExtfsComplete("gs://s3.us-east-1.amazonaws.com/bucket/path", mode.extfs(), permissivePolicy())
+				requireParameterInvalid(t, err)
+				assert.Contains(t, err.Error(), "only supported for Google Cloud Storage endpoints")
+			})
+			t.Run("http_endpoint_url_rejected", func(t *testing.T) {
+				extfs := mode.extfs()
+				extfs["endpoint_url"] = "http://storage.googleapis.com"
+				extfs["region"] = "us-east-1"
+				err := ValidateExtfsComplete("s3://bucket/path", extfs, permissivePolicy())
+				requireParameterInvalid(t, err)
+				assert.Contains(t, err.Error(), "requires HTTPS")
+			})
+			t.Run("https_google_endpoint_url_accepted", func(t *testing.T) {
+				extfs := mode.extfs()
+				extfs["endpoint_url"] = "https://storage.googleapis.com"
+				extfs["region"] = "us-east-1"
+				assert.NoError(t, ValidateExtfsComplete("s3://bucket/path", extfs, permissivePolicy()))
+			})
+		})
+	}
+
+	t.Run("use_iam_message_names_the_mode", func(t *testing.T) {
+		err := ValidateExtfsComplete("gs://bucket/path", map[string]string{
+			"cloud_provider": "gcp", "use_iam": "true", "use_ssl": "false",
+		}, permissivePolicy())
+		requireParameterInvalid(t, err)
+		assert.Contains(t, err.Error(), "use_iam=true")
+		assert.NotContains(t, err.Error(), "gcp_target_service_account")
+	})
+
+	t.Run("aksk_on_gcp_is_not_bearer", func(t *testing.T) {
+		// HMAC keys sign requests; no bearer token, so plain HTTP and other
+		// hosts stay acceptable for them.
+		assert.NoError(t, ValidateExtfsComplete("gs://bucket/path", map[string]string{
+			"cloud_provider": "gcp", "access_key_id": "AK", "access_key_value": "SK", "use_ssl": "false",
+		}, permissivePolicy()))
+	})
+}
+
+func TestDeriveUseSSLFromScheme(t *testing.T) {
+	assert.False(t, DeriveUseSSLFromScheme(SchemeMinIO))
+	assert.False(t, DeriveUseSSLFromScheme("MINIO"))
+	for _, scheme := range []string{SchemeS3, SchemeS3A, SchemeAWS, SchemeGS, SchemeGCS, SchemeOSS, SchemeCOS, SchemeOBS, SchemeAzure, ""} {
+		assert.True(t, DeriveUseSSLFromScheme(scheme), scheme)
+	}
 }
