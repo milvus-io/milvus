@@ -144,11 +144,13 @@ The backfill contract is implemented once per layer and shared by all callers in
 
 ### Reads on the added sub-field
 
-Retrieval returns N nulls per row for old rows. Element-level filters and `MATCH_*` see null elements under three-valued logic; this needs the element-level read path for `element_nullable=true` scalar arrays (`ArrayValueView` with validity) and the corresponding vector-array path from the query-layer plan. Until those land, expressions on the added sub-field return the existing "not supported yet" error, while insert, flush, load, compaction and retrieve work.
+Retrieval returns N nulls per row for old rows. Row-level filters, element-level filters and `MATCH_*` see the null elements under three-valued logic, as for any element-nullable sub-field ([element-level null](./20260709-element-level-null.md#query-and-index)).
+
+Output of a sub-field that a segment does not store uses the same dense layout as a stored sub-field column, so it has as many rows as its siblings: a null struct row is an empty placeholder with row validity false; a scalar row of N elements holds N zero values and N false element flags; an `Array<T>` row holds N empty inner arrays of the leaf type and N false element flags; a vector row holds no vectors and N false element flags. N and the row validity come from a stored sibling.
 
 ### Indexing an added vector sub-field
 
-An added `ArrayOfVector` sub-field is element-nullable, so it takes element-level metrics only; MAX_SIM is rejected. Load requires an index on every vector field it loads, struct sub-fields included, so a later load that includes the new sub-field (the default load of all fields does) needs a CreateIndex on it first; a load with an explicit field list may leave it out. Adding it to a loaded collection does not release the collection, and retrieval of the new sub-field works before the index exists.
+An added `ArrayOfVector` sub-field is element-nullable, so it takes element-level metrics only; MAX_SIM is rejected. Load requires an index on every vector field it loads, struct sub-fields included, so a later load that includes the new sub-field (the default load of all fields does) needs a CreateIndex on it first; a load with an explicit field list may leave it out. Adding it to a loaded collection does not release the collection, and retrieval of the new sub-field works before the index exists. DataCoord's indexed-segment filter waits on every vector field, struct vector sub-fields included, so until the index exists it counts no segment of the collection as indexed.
 
 ### Client compatibility
 

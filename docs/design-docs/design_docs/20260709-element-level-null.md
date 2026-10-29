@@ -22,26 +22,40 @@ cannot itself be null.
 
 ## Semantics
 
-The following are the intended logical semantics. Expression evaluation on
-new-format fields with null elements is not supported in this stage.
+These semantics apply to row-level filters, element-level filters
+(`MATCH_*`, `element_filter`) and search on new-format struct sub-fields.
+[Query and Index](#query-and-index) lists the supported forms.
 
-`array IS NULL` tests the whole row. An empty array and an array containing
-only null elements are both non-null rows. `array[index]` evaluates to `NULL`
-when the row is null, the index is out of range, or the selected element is
-null:
+Row validity is shared by all sub-fields of a struct, and `s IS NULL` on the
+struct field tests the whole row. An empty array and an array containing only
+null elements are both non-null rows. `IS NULL` / `IS NOT NULL` on a
+sub-field (`s[b]`, `s[i][b]`) is rejected; whether one element is null is
+tested with `$[b] IS NULL` inside `MATCH_*` or `element_filter`. A subscript
+`s[i][b]` evaluates to `NULL` when the row is null, the index is out of range,
+or the selected element is null:
 
-| State | `array[index] > 1` | `array[index] IS NULL` | `array[index] IS NOT NULL` |
-| --- | --- | --- | --- |
-| Null row | `NULL` | `true` | `false` |
-| Index out of range | `NULL` | `true` | `false` |
-| Null element | `NULL` | `true` | `false` |
-| Non-null element `x` | `x > 1` | `false` | `true` |
+| State | `s[i][b] > 1` | `not (s[i][b] > 1)` |
+| --- | --- | --- |
+| Null row | `NULL` | `NULL` |
+| Index out of range | `NULL` | `NULL` |
+| Null element | `NULL` | `NULL` |
+| Non-null element `x` | `x > 1` | `not (x > 1)` |
 
-Here `NULL` means an unknown predicate result, not a valid `false`.
-Comparisons, term tests, and string predicates on an accessed element
-propagate that result. Array membership operations (`array_contains*`) skip
-null slots. Null vectors do not participate in similarity search.
-`array_length` and capacity limits count logical slots, including null slots.
+Here `NULL` means an unknown (UNKNOWN) predicate result, not a valid `false`;
+`&&`, `||` and `not` follow three-valued logic, and a filter keeps only rows
+whose result is `true`. Comparisons, term tests, arithmetic and string
+predicates on an accessed element propagate that result. `array_contains*`
+on a non-null Array value matches no null slot and is only `true` or
+`false`; on an UNKNOWN operand (a null row, or a missing or null inner array
+`s[i][tags]`) it is UNKNOWN. Null vectors do not participate in similarity
+search. `array_length` and capacity limits count logical slots, including
+null slots.
+
+An empty `in` set is the exception to UNKNOWN propagation: `x in []` is
+`false` for every `x`, including a null row, an out-of-range subscript and a
+null element, so `not (x in [])` is `true`. This holds for `s[i][b] in []`,
+`$[b] in []` and the subscript of a top-level Array, `arr[i] in []`. A
+non-empty set follows the table above.
 
 ## Representation and Data Flow
 
@@ -214,6 +228,10 @@ in that configuration. The check runs only on these DDL requests.
 
 ## Query and Index
 
+Ordinary filters produce row bits; `element_filter` and `MATCH_*` child
+expressions produce element bits. Both apply row, bounds and element validity
+as described in [Semantics](#semantics).
+
 ### Element ids
 
 Outside the index and brute-force internals, element ids are logical: every
@@ -271,6 +289,60 @@ type. HNSW and DiskANN builds are covered by tests.
   segment counts as zero vectors; a manifest-backed segment whose in-memory
   binlogs do not list the field skips the vector-count threshold and leaves
   the decision to the worker build.
+- Compaction target size: a segment uses the DiskANN segment size
+  (`DiskSegmentMaxSize`) only when every dense vector field of the
+  collection, struct vector sub-fields included, has a disk index.
+
+### Row-level filters
+
+- Subscript predicates on `s[i][b]` (comparison, `in`, `like`, range,
+  arithmetic) are UNKNOWN for a null row, an out-of-range index or a null
+  element, and stay UNKNOWN under `not`. Subscripts are parsed with a range
+  check, so an index that overflows is out of range rather than an error.
+  These rules apply to top-level Array fields too: `arr[i] > 1` on a null
+  row or a row shorter than `i + 1` is UNKNOWN.
+- `in []` is `false` on every row, `not (... in [])` `true`; see
+  [Semantics](#semantics).
+- `array_contains`, `array_contains_any` and `array_contains_all` on `s[b]`:
+  null elements match nothing, and the result of a non-null row is only
+  `true` or `false`. For a null struct row the result is UNKNOWN, also when
+  the target array is empty.
+- `s[b] == [...]` / `!=`: an array holding a null element never equals a
+  literal, since a literal cannot spell null.
+- `array_length(s[b])` counts null elements, also on element-nullable vector
+  sub-fields.
+- The parser rejects `array_contains*` and `array_length` on a single array
+  element (`arr[i]`, `s[i][scalar_sub]`), also on top-level Array fields, and
+  `IS NULL` / `IS NOT NULL` on a sub-field (`s[b]`, `s[i][b]`).
+
+Rules for nested `Array<Array<T>>` sub-fields (`s[i][tags]`, and the rejection
+of `array_contains*` on the whole sub-field) are in
+[Struct Data Type](./20260306-struct.md#nested-array-sub-fields-in-filters).
+
+### Element-level filters
+
+`MATCH_*` and `element_filter` predicates run on element-nullable sub-fields,
+including sub-fields added to an existing struct.
+
+- A null sub-field value makes the element comparison UNKNOWN; `&&`, `||` and
+  `!` follow three-valued logic. Sub-fields of one element stay aligned by
+  element id even when their null layouts differ.
+- `element_filter` selects only `true` elements. `MATCH_*` counts an UNKNOWN
+  element as a miss, so `MATCH_ALL` is `false` when any element is UNKNOWN; an
+  empty array still satisfies `MATCH_ALL`. On a null struct row `MATCH_*` is
+  UNKNOWN, also under `not`.
+- `$[b] in []` is `false` for every element, a null one included. A
+  non-empty set is UNKNOWN on a null element, also when all its literals are
+  out of the element type's range (`$[i8] in [1000]`).
+- `$[b] IS NULL` / `IS NOT NULL` is accepted inside `MATCH_*` and
+  `element_filter` for scalar, vector and `Array<T>` sub-fields. It reads the
+  element's own validity and is only `true` or `false`; on a sub-field that
+  cannot hold null elements `IS NULL` is always `false`. `IS NULL` outside an
+  element context (`clips[b] IS NULL`) stays rejected.
+- On an `Array<T>` sub-field, `$[tags]` is an `Array<T>` value: a null leaf
+  matches nothing in `array_contains*`, `array_length` counts null leaves, a
+  null inner array is UNKNOWN, and `$[tags] IS NULL` is `true` only for a null
+  inner array.
 
 ### Not supported
 
