@@ -159,6 +159,7 @@ func (m *meta) addSegmentChangeGroupLocked(ctx context.Context, group *model.Seg
 		return err
 	}
 	m.segmentChangeGroups[group.GroupID] = group.Clone()
+	m.changeGroupPredecessorReferenceLocked(group.PreviousGroupID, 1)
 	if group.State == model.SegmentChangeStateStaged || group.State == model.SegmentChangeStateReady {
 		for _, id := range group.NewSegmentIDs {
 			m.stagedSegmentToGroup[id] = group.GroupID
@@ -576,6 +577,7 @@ func (m *meta) DropSegmentChangeGroupsOfCollection(ctx context.Context, collecti
 		}
 		delete(m.segmentChangeGroups, groupID)
 	}
+	m.rebuildSegmentChangeSuccessorsLocked()
 	return nil
 }
 
@@ -726,6 +728,18 @@ func (m *meta) updateSegmentsInfoAndChangeGroupsMaterializedLocked(ctx context.C
 		}
 	}
 	groupActions = normalized
+	// The persisted index only describes the state before this transaction.
+	// A sibling save must not introduce a new successor of a group deleted
+	// in the same write, regardless of action order.
+	newPredecessors := make(map[int64]struct{})
+	for _, action := range groupActions {
+		if action.Type == metastore.ActionUpdate {
+			group := action.Entry.(metastore.SegmentChangeGroupEntry).Group
+			if group.PreviousGroupID != 0 {
+				newPredecessors[group.PreviousGroupID] = struct{}{}
+			}
+		}
+	}
 
 	updatePack := &updateSegmentPack{
 		meta:       m,
@@ -744,6 +758,9 @@ func (m *meta) updateSegmentsInfoAndChangeGroupsMaterializedLocked(ctx context.C
 	for _, action := range groupActions {
 		entry := action.Entry.(metastore.SegmentChangeGroupEntry)
 		if action.Type == metastore.ActionDelete {
+			if _, referenced := newPredecessors[entry.GroupID]; referenced {
+				return merr.WrapErrDataIntegrityMsg("segment change group %d cannot be deleted while a successor is saved in the same write", entry.GroupID)
+			}
 			if err := m.validateSegmentChangeGroupDeletionLocked(m.segmentChangeGroups[entry.GroupID], updatePack.segments); err != nil {
 				return err
 			}
@@ -1049,6 +1066,13 @@ func (m *meta) applySegmentChangeGroupActionMemoryLocked(action metastore.Update
 		if entry.Group == nil {
 			return
 		}
+		previous := m.segmentChangeGroups[entry.Group.GroupID]
+		if previous == nil || previous.PreviousGroupID != entry.Group.PreviousGroupID {
+			if previous != nil {
+				m.changeGroupPredecessorReferenceLocked(previous.PreviousGroupID, -1)
+			}
+			m.changeGroupPredecessorReferenceLocked(entry.Group.PreviousGroupID, 1)
+		}
 		m.dropGroupReferencesLocked(entry.Group.GroupID)
 		m.segmentChangeGroups[entry.Group.GroupID] = entry.Group.Clone()
 		if entry.Group.State == model.SegmentChangeStateStaged || entry.Group.State == model.SegmentChangeStateReady {
@@ -1066,6 +1090,9 @@ func (m *meta) applySegmentChangeGroupActionMemoryLocked(action metastore.Update
 			}
 		}
 	case metastore.ActionDelete:
+		if previous := m.segmentChangeGroups[entry.GroupID]; previous != nil {
+			m.changeGroupPredecessorReferenceLocked(previous.PreviousGroupID, -1)
+		}
 		m.dropGroupReferencesLocked(entry.GroupID)
 		delete(m.segmentChangeGroups, entry.GroupID)
 	}
@@ -1147,5 +1174,30 @@ func (m *meta) ensureSegmentChangeGroupStoreLocked() {
 	}
 	if m.supersededSegmentToGroup == nil {
 		m.supersededSegmentToGroup = make(map[int64]int64)
+	}
+	if m.segmentChangeSuccessors == nil {
+		m.rebuildSegmentChangeSuccessorsLocked()
+	}
+}
+
+// The predecessor index includes terminal successors: deleting a predecessor
+// while even a COMMITTED successor remains makes startup's chain validation
+// reject the persisted group table.
+func (m *meta) rebuildSegmentChangeSuccessorsLocked() {
+	m.segmentChangeSuccessors = make(map[int64]int)
+	for _, group := range m.segmentChangeGroups {
+		m.changeGroupPredecessorReferenceLocked(group.PreviousGroupID, 1)
+	}
+}
+
+func (m *meta) changeGroupPredecessorReferenceLocked(previousGroupID int64, delta int) {
+	if previousGroupID == 0 {
+		return
+	}
+	count := m.segmentChangeSuccessors[previousGroupID] + delta
+	if count == 0 {
+		delete(m.segmentChangeSuccessors, previousGroupID)
+	} else {
+		m.segmentChangeSuccessors[previousGroupID] = count
 	}
 }

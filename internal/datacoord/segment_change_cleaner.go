@@ -66,13 +66,41 @@ func (c *segmentChangeCleaner) clean(ctx context.Context, groups []*model.Segmen
 			}
 		}
 	}
+	// A persisted successor requires its predecessor at startup, even when
+	// both groups are terminal. Only delete leaves of the remaining chains.
+	// On a failed or ineligible leaf, keep its ancestors for the next sweep.
+	byID := make(map[int64]*model.SegmentChangeGroup, len(groups))
+	successors := make(map[int64]int, len(groups))
 	for _, g := range groups {
+		byID[g.GroupID] = g
+		if g.PreviousGroupID != 0 {
+			successors[g.PreviousGroupID]++
+		}
+	}
+	leaves := make([]*model.SegmentChangeGroup, 0, len(groups))
+	for _, g := range groups {
+		if successors[g.GroupID] == 0 {
+			leaves = append(leaves, g)
+		}
+	}
+	for len(leaves) > 0 {
+		g := leaves[len(leaves)-1]
+		leaves = leaves[:len(leaves)-1]
 		if !g.IsTerminal() || !c.producerFinished(ctx, g, compactionTasks) || !c.segmentsRetired(ctx, g) {
 			continue
 		}
 		if err := c.mt.DeleteSegmentChangeGroup(ctx, g.CollectionID, g.GroupID); err != nil {
 			mlog.Warn(ctx, "failed to delete terminal segment change group, will retry",
 				mlog.Int64("groupID", g.GroupID), mlog.Err(err))
+			continue
+		}
+		if g.PreviousGroupID != 0 {
+			successors[g.PreviousGroupID]--
+			if successors[g.PreviousGroupID] == 0 {
+				if previous := byID[g.PreviousGroupID]; previous != nil {
+					leaves = append(leaves, previous)
+				}
+			}
 		}
 	}
 }
