@@ -81,7 +81,7 @@ func setupResourceSchedulingTest(t *testing.T) *resourceSchedulingFixture {
 				return nil, err
 			}
 		}
-		base := &segmentBase{segment: &fakeTransformSegment{id: r.id}, caughtUp: f.caughtUp}
+		base := &segmentBase{segment: &fakeTransformSegment{id: r.id}, caughtUp: f.caughtUp, registration: instantTransformRegistration{}}
 		return &preparedSegmentRead{schema: b.view.req.Meta.SchemaVersion, load: b.view.req.Meta.LoadInfoVersion, manifest: snapshotManifestVersion(snapshot), base: base, read: &resourceTestRead{}}, nil
 	}).Build()
 	m := NewSegmentResourceManager(t.Context(), &resourceSchedulingTestScheduler{}, &resourceTestLoader{}, nil, &resourceTestMetadata{}, nil, nil)
@@ -267,8 +267,7 @@ func TestSegmentResourceReleaseCancelsRetry(t *testing.T) {
 		f.r.manager.Release(ReleaseSegments{Key: f.r.bindings[0].view.req.Key, OnDropped: func() { close(dropped) }})
 		require.Nil(t, f.r.retryTimer)
 		callback()
-		require.Len(t, f.queue, 1, "only the close task is queued")
-		f.runNext()
+		require.Empty(t, f.queue, "an idle resource closes without a scheduler task")
 		select {
 		case <-dropped:
 		case <-time.After(5 * time.Second):
@@ -282,6 +281,28 @@ func TestSegmentResourceReleaseCancelsRetry(t *testing.T) {
 		callback()
 		require.Empty(t, f.queue)
 		require.False(t, next.scheduled)
+	})
+}
+
+func TestSegmentResourceLastQueryClosesWithoutScheduler(t *testing.T) {
+	runResourceSchedulingTest(t, "the last query handle finishes closing a released resource without a scheduler task", func(t *testing.T, f *resourceSchedulingFixture) {
+		mockey.Mock((*resourceTestRead).RetainReadState).Return(func() {}).Build()
+		f.wake()
+		f.runNext()
+		req := f.r.bindings[0].view.req
+		handles, err := f.r.manager.AcquireSealedSegmentHandles(t.Context(), req.Key, req.View, 0)
+		require.NoError(t, err)
+		f.r.manager.Release(ReleaseSegments{Key: req.Key})
+		require.Empty(t, f.queue, "closing takes no scheduler task")
+		synctest.Wait()
+		select {
+		case <-f.r.done:
+			t.Fatal("the executing query keeps the resource open")
+		default:
+		}
+		handles[0].Release()
+		<-f.r.done
+		require.Empty(t, f.queue)
 	})
 }
 
