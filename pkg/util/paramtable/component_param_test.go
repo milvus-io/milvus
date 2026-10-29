@@ -1941,6 +1941,7 @@ func TestProxyLocalCollectionVisibilityDefault(t *testing.T) {
 	params := &ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true)))
 	require.False(t, params.ProxyCfg.EnableLocalCollectionVisibility.GetAsBool())
+	require.False(t, params.ProxyCfg.EnableLocalCollectionVisibility.Export)
 	require.NoError(t, params.Save(params.ProxyCfg.EnableLocalCollectionVisibility.Key, "true"))
 	require.True(t, params.ProxyCfg.EnableLocalCollectionVisibility.GetAsBool())
 }

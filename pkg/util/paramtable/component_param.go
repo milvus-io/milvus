@@ -3456,8 +3456,8 @@ Disabled if the value is less or equal to 0.`,
 		Key:          "proxy.enableLocalCollectionVisibility",
 		Version:      "3.0.4",
 		DefaultValue: "false",
-		Doc:          "Use the local RBAC collection visibility projection when supported. Keep disabled until snapshot consistency rollout is complete.",
-		Export:       true,
+		Doc:          "Experimental: enable RBAC collection visibility projection on RootCoord and local checks on Proxy. Keep disabled until snapshot consistency rollout is complete; enabling requires a full policy refresh.",
+		Export:       false,
 	}
 	p.EnableLocalCollectionVisibility.Init(base.mgr)
 	p.GracefulStopTimeout = ParamItem{

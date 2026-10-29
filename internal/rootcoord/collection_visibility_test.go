@@ -18,12 +18,15 @@ package rootcoord
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/rbacutil"
 )
 
@@ -53,4 +56,36 @@ func TestCollectionVisibilityRoleReplacement(t *testing.T) {
 	require.Equal(t, "reader", snapshot.GetRoles()[0].GetRole())
 	index.Replace(snapshot.GetRoles())
 	require.False(t, index.CanSee([]string{"reader"}, "tenant_b", "orders"))
+}
+
+func TestListPolicyLocalVisibilityGate(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run("enabled="+strconv.FormatBool(enabled), func(t *testing.T) {
+			require.NoError(t, Params.Save(Params.ProxyCfg.EnableLocalCollectionVisibility.Key, strconv.FormatBool(enabled)))
+			t.Cleanup(func() { Params.Reset(Params.ProxyCfg.EnableLocalCollectionVisibility.Key) })
+			meta := newMockMetaTable()
+			meta.ListPolicyFunc = func(context.Context, string) ([]*milvuspb.GrantEntity, error) {
+				return []*milvuspb.GrantEntity{{
+					Role: &milvuspb.RoleEntity{Name: "reader"}, Object: &milvuspb.ObjectEntity{Name: "Collection"},
+					DbName: "tenant_b", ObjectName: "orders",
+					Grantor: &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: "Search"}},
+				}}, nil
+			}
+			meta.ListPrivilegeGroupsFunc = func(context.Context) ([]*milvuspb.PrivilegeGroupInfo, error) { return nil, nil }
+			meta.ListUserRoleFunc = func(context.Context, string) ([]string, error) { return nil, nil }
+			core := newTestCore(withMeta(meta), withHealthyCode())
+			response, err := core.ListPolicy(context.Background(), &internalpb.ListPolicyRequest{})
+			require.NoError(t, err)
+			require.NoError(t, merr.Error(response.GetStatus()))
+			require.Len(t, response.GetPolicyInfos(), 1)
+			if !enabled {
+				require.Nil(t, response.GetCollectionVisibility())
+				return
+			}
+			require.EqualValues(t, 1, response.GetCollectionVisibility().GetFormatVersion())
+			index := make(rbacutil.CollectionVisibilityIndex)
+			index.Replace(response.GetCollectionVisibility().GetRoles())
+			require.True(t, index.CanSee([]string{"reader"}, "tenant_b", "orders"))
+		})
+	}
 }

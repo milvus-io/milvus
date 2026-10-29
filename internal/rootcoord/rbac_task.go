@@ -123,15 +123,22 @@ func executeOperatePrivilegeTaskSteps(ctx context.Context, core *Core, entity *m
 			return nil
 		}
 		// Visibility follows raw grants, even when empty groups or overlapping
-		// actions produce no action delta. CacheRefresh also supports old Proxies.
+		// actions produce no action delta. Keep the original no-op behavior when
+		// local visibility is disabled; a refresh would reload every Proxy.
 		if len(keys) == 0 {
+			if !Params.ProxyCfg.EnableLocalCollectionVisibility.GetAsBool() {
+				return nil
+			}
 			return core.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 				OpType: int32(typeutil.CacheRefresh),
 			})
 		}
-		visibility, err := core.collectionVisibilityForRole(ctx, entity.Role, allGroups)
-		if err != nil {
-			return err
+		var visibility *internalpb.CollectionVisibilitySnapshot
+		if Params.ProxyCfg.EnableLocalCollectionVisibility.GetAsBool() {
+			visibility, err = core.collectionVisibilityForRole(ctx, entity.Role, allGroups)
+			if err != nil {
+				return err
+			}
 		}
 		if err := core.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 			OpType:               opType,
@@ -223,12 +230,16 @@ func executeOperatePrivilegeGroupTaskSteps(ctx context.Context, core *Core, in *
 			keysToGrant = append(keysToGrant, policyKeysWithout(newKeys, currKeys)...)
 		}
 
+		var visibility *internalpb.CollectionVisibilitySnapshot
+		if Params.ProxyCfg.EnableLocalCollectionVisibility.GetAsBool() {
+			visibility = &internalpb.CollectionVisibilitySnapshot{FormatVersion: rbacutil.CollectionVisibilityFormatVersion}
+		}
 		if len(keysToRevoke) > 0 {
 			opType := int32(typeutil.CacheRevokePrivilege)
 			if err := core.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 				OpType:               opType,
 				OpKey:                strings.Join(keysToRevoke, "|"),
-				CollectionVisibility: &internalpb.CollectionVisibilitySnapshot{FormatVersion: rbacutil.CollectionVisibilityFormatVersion},
+				CollectionVisibility: visibility,
 			}); err != nil {
 				mlog.Warn(ctx, "fail to refresh policy info cache for revoke privileges in operate privilege group", mlog.Any("in", in), mlog.Err(err))
 				return err
@@ -240,7 +251,7 @@ func executeOperatePrivilegeGroupTaskSteps(ctx context.Context, core *Core, in *
 			if err := core.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 				OpType:               opType,
 				OpKey:                strings.Join(keysToGrant, "|"),
-				CollectionVisibility: &internalpb.CollectionVisibilitySnapshot{FormatVersion: rbacutil.CollectionVisibilityFormatVersion},
+				CollectionVisibility: visibility,
 			}); err != nil {
 				mlog.Warn(ctx, "fail to refresh policy info cache for grants privilege in operate privilege group", mlog.Any("in", in), mlog.Err(err))
 				return err
