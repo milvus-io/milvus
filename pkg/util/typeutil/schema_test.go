@@ -6146,8 +6146,10 @@ func TestMergeDynamicJSONKeepsUntouchedValues(t *testing.T) {
 // retain exact numbers only when the caller explicitly enables the backport.
 func TestDynamicUpdatePrecisionPolicy(t *testing.T) {
 	field := func(raw string) *schemapb.FieldData {
-		return &schemapb.FieldData{FieldId: 100, FieldName: "$meta", Type: schemapb.DataType_JSON, IsDynamic: true,
-			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: [][]byte{[]byte(raw)}}}}}}
+		return &schemapb.FieldData{
+			FieldId: 100, FieldName: "$meta", Type: schemapb.DataType_JSON, IsDynamic: true,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: [][]byte{[]byte(raw)}}}}},
+		}
 	}
 	for _, strict := range []bool{false, true} {
 		for _, column := range []bool{false, true} {

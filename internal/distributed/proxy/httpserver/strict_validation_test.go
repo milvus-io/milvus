@@ -120,10 +120,6 @@ func TestStrictValidationDecodeAndTemplatePolicy(t *testing.T) {
 		} else {
 			require.Equal(t, int64(9007199254740992), values["n"].GetInt64Val())
 		}
-		var req QueryReqV2
-		err = json.Unmarshal([]byte(`{"exprParams":{"n":1e400}}`), &req)
-		// The outer JSON decoder rejects infinity in either mode.
-		require.Error(t, err)
 		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64}}}
 		filter, values, err := checkGetPrimaryKey(schema, gjson.Parse(`1`))
 		require.NoError(t, err)
@@ -152,5 +148,24 @@ func TestDisabledValidationUsesOriginalRequestDecoder(t *testing.T) {
 		if oldErr == nil {
 			require.Equal(t, old.IDs, []int64(current.IDs), raw)
 		}
+	}
+}
+
+func TestStrictValidationExpressionOverflow(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		setStrictValidationForTest(t, enabled)
+		var req QueryReqV2
+		err := json.Unmarshal([]byte(`{"exprParams":{"n":1e400}}`), &req)
+		// A decoder may retain an overflowing number as RawMessage in strict
+		// mode. It must still be rejected when converted to a template value.
+		if enabled {
+			_, conversionErr := generateExpressionTemplate(map[string]json.RawMessage{"n": json.RawMessage(`1e400`)})
+			require.Error(t, conversionErr)
+			if err == nil {
+				require.Equal(t, json.RawMessage(`1e400`), req.ExprParams["n"])
+				_, err = generateExpressionTemplate(req.ExprParams)
+			}
+		}
+		require.Error(t, err)
 	}
 }
