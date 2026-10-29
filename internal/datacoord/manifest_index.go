@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"path"
-	"sort"
 	"strings"
 
 	"golang.org/x/sync/semaphore"
@@ -70,17 +69,14 @@ func buildManifestIndexInfo(m *meta, segment *SegmentInfo, segIdx *model.Segment
 	}
 
 	indexParams := m.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
-	properties := common.KeyValuePairs(m.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)).ToMap()
-	for key, value := range common.KeyValuePairs(indexParams).ToMap() {
-		properties[key] = value
-	}
 	indexType := GetIndexType(indexParams)
 	// A per-segment override wins: DataCoord may downgrade the index type for
 	// one segment (e.g. to a flat index for a tiny segment).
 	if segIdx.IndexType != "" {
 		indexType = segIdx.IndexType
 	}
-	properties[common.IndexTypeKey] = indexType
+	// Collection parameters describe the current definition, not this build.
+	// Leave Properties empty rather than persisting them as artifact metadata.
 
 	fieldID := m.indexMeta.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID)
 	return packed.ManifestIndexInfo{
@@ -99,7 +95,6 @@ func buildManifestIndexInfo(m *meta, segment *SegmentInfo, segIdx *model.Segment
 		CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
 		IndexStorePathVersion:     segIdx.IndexStorePathVersion,
 		IndexFileKeys:             common.CloneStringList(segIdx.IndexFileKeys),
-		Properties:                properties,
 	}, nil
 }
 
@@ -169,7 +164,7 @@ func manifestIndexFilePathInfo(segmentID int64, manifestIndex packed.ManifestInd
 		IndexID:                   manifestIndex.IndexID,
 		BuildID:                   manifestIndex.BuildID,
 		IndexName:                 manifestIndex.IndexName,
-		IndexParams:               manifestIndexParams(manifestIndex),
+		IndexParams:               []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: manifestIndex.IndexType}},
 		IndexFilePaths:            filePaths,
 		SerializedSize:            uint64(manifestIndex.SerializedSize),
 		MemSize:                   uint64(manifestIndex.MemSize),
@@ -256,25 +251,6 @@ func validateManifestIndexPublishable(segmentID int64, manifestIndex packed.Mani
 			segmentID, manifestIndex.IndexID, manifestIndex.BuildID, manifestIndex.IndexName)
 	}
 	return nil
-}
-
-func manifestIndexParams(manifestIndex packed.ManifestIndexInfo) []*commonpb.KeyValuePair {
-	properties := make(map[string]string, len(manifestIndex.Properties)+1)
-	for key, value := range manifestIndex.Properties {
-		properties[key] = value
-	}
-	properties[common.IndexTypeKey] = manifestIndex.IndexType
-
-	keys := make([]string, 0, len(properties))
-	for key := range properties {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	params := make([]*commonpb.KeyValuePair, 0, len(keys))
-	for _, key := range keys {
-		params = append(params, &commonpb.KeyValuePair{Key: key, Value: properties[key]})
-	}
-	return params
 }
 
 // reloadSegmentIndexesFromManifests rebuilds completed index records from
@@ -424,5 +400,6 @@ func segmentIndexFromManifest(segment *SegmentInfo, manifestIndex packed.Manifes
 		CurrentScalarIndexVersion: manifestIndex.CurrentScalarIndexVersion,
 		IndexType:                 manifestIndex.IndexType,
 		IndexStorePathVersion:     manifestIndex.IndexStorePathVersion,
+		ManifestPublished:         true,
 	}
 }

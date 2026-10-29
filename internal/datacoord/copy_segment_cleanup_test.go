@@ -209,6 +209,7 @@ func TestRejectedCopyCleanupSkipsActivePublication(t *testing.T) {
 	base := path.Join(root, "insert_log/100/10/2001")
 	dataFile := path.Join(base, "_data/data.parquet")
 	require.NoError(t, m.chunkManager.Write(ctx, dataFile, []byte("completed worker output")))
+	originalManifest := m.GetSegment(ctx, 2001).GetManifestPath()
 	entered, release := make(chan struct{}), make(chan struct{})
 	var releaseOnce sync.Once
 	unblock := func() { releaseOnce.Do(func() { close(release) }) }
@@ -244,14 +245,25 @@ func TestRejectedCopyCleanupSkipsActivePublication(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, exists, "cleanup must skip an in-flight publication")
 	unblock()
-	require.NoError(t, <-finished)
-	// This change preserves the old late-publication behavior, but cannot delete
-	// files from under it. A subsequent cleanup pass must recheck task state.
+	require.ErrorIs(t, <-finished, merr.ErrSegmentNotFound)
+	require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskFailed, task.GetState())
+	require.Equal(t, commonpb.SegmentState_Dropped, m.GetSegment(ctx, 2001).GetState(),
+		"late publication must not resurrect the dropped target")
+	require.Equal(t, originalManifest, m.GetSegment(ctx, 2001).GetManifestPath())
+	// Publication has released the task lock, but ordinary segment GC must
+	// still retire the target before rejected-copy cleanup can delete files.
 	require.NoError(t, cleanupRejectedCopy(ctx, task, m, copies))
 	exists, err = m.chunkManager.Exist(ctx, dataFile)
 	require.NoError(t, err)
 	require.True(t, exists)
-	require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskCompleted, task.GetState())
+	require.True(t, task.GetCleanupRequired())
+	retireRejectedCopyTargets(t, m, task)
+	require.NoError(t, cleanupRejectedCopy(ctx, task, m, copies))
+	exists, err = m.chunkManager.Exist(ctx, dataFile)
+	require.NoError(t, err)
+	require.False(t, exists)
+	require.False(t, task.GetCleanupRequired())
+	require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskFailed, task.GetState())
 }
 
 type cleanupEnqueueRecorder struct {
@@ -381,7 +393,7 @@ func retireRejectedCopyTargets(t *testing.T, m *meta, task CopySegmentTask) {
 	for _, mapping := range task.GetIdMappings() {
 		id := mapping.GetTargetSegmentId()
 		if segment := m.GetSegment(context.Background(), id); segment != nil {
-			gc.recycleDroppedSegment(context.Background(), newGCManifestReadIO(t), id, segment)
+			gc.recycleDroppedSegment(context.Background(), newGCManifestReadIO(t), id)
 		}
 		require.Nil(t, m.GetSegment(context.Background(), id))
 	}

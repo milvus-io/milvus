@@ -742,11 +742,8 @@ func buildTargetManifestIndexes(
 		if err != nil {
 			return nil, err
 		}
-		properties := make(map[string]string, len(definition.GetProperties())+1)
-		for key, value := range definition.GetProperties() {
-			properties[key] = value
-		}
-		properties[common.IndexTypeKey] = definition.GetIndexType()
+		// Ignore legacy collection parameters supplied by older coordinators.
+		// They do not describe how the copied artifact was built.
 		entries = append(entries, packed.ManifestIndexInfo{
 			ColumnName:                definition.GetColumnName(),
 			IndexName:                 info.GetIndexName(),
@@ -763,7 +760,6 @@ func buildTargetManifestIndexes(
 			CurrentScalarIndexVersion: info.GetCurrentScalarIndexVersion(),
 			IndexStorePathVersion:     info.GetIndexStorePathVersion(),
 			IndexFileKeys:             fileKeys,
-			Properties:                properties,
 		})
 	}
 	return entries, nil

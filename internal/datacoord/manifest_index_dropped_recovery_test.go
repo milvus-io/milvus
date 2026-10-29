@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
@@ -164,7 +165,10 @@ func TestManifestDroppedRecoveryAfterFilesDeleted(t *testing.T) {
 	seedRestartFixture(t, m)
 	require.NoError(t, m.UpdateSegmentsInfo(ctx, UpdateStatusOperator(restartSegID, commonpb.SegmentState_Dropped)))
 	segment := m.GetSegment(ctx, restartSegID)
-	gc := newGarbageCollector(m, newMockHandler(), GcOption{cli: m.chunkManager})
+	// GC validates local paths by the concrete backend type. The restart
+	// fixture's metadata-only Copy wrapper must not disguise that backend.
+	local := storage.NewLocalChunkManager(objectstorage.RootPath(m.chunkManager.RootPath()))
+	gc := newGarbageCollector(m, newMockHandler(), GcOption{cli: local})
 	defer gc.option.removeObjectPool.Release()
 	job, ok := m.indexMeta.GetIndexJob(restartBuildID)
 	require.True(t, ok)
@@ -177,15 +181,23 @@ func TestManifestDroppedRecoveryAfterFilesDeleted(t *testing.T) {
 	require.NoError(t, m.chunkManager.Write(ctx, manifestFile, []byte("manifest")))
 	// Crash after file removal but before either index/segment catalog removal.
 	require.NoError(t, gc.removeDroppedSegmentFiles(ctx, segment.Clone(), files))
+	for file := range files {
+		exists, err := local.Exist(ctx, file)
+		require.NoError(t, err)
+		require.False(t, exists)
+	}
+	exists, err := local.Exist(ctx, manifestFile)
+	require.NoError(t, err)
+	require.False(t, exists)
 	store.failReadsFrom()
 	restarted := bootMetaForRestart(t, catalog, restartCollID)
 	retained := restarted.GetSegment(ctx, restartSegID)
 	require.NotNil(t, retained)
 	require.True(t, retained.GetManifestHasIndex())
 	require.Empty(t, restarted.indexMeta.GetAllSegIndexes())
-	retryGC := newGarbageCollector(restarted, newMockHandler(), GcOption{cli: restarted.chunkManager})
+	retryGC := newGarbageCollector(restarted, newMockHandler(), GcOption{cli: local})
 	defer retryGC.option.removeObjectPool.Release()
-	retryGC.recycleDroppedSegment(ctx, newGCManifestReadIO(t), restartSegID, retained)
+	retryGC.recycleDroppedSegment(ctx, newGCManifestReadIO(t), restartSegID)
 	require.Nil(t, restarted.GetSegment(ctx, restartSegID), "pending GC must remove the remaining catalog row")
 	again := bootMetaForRestart(t, catalog, restartCollID)
 	require.Nil(t, again.GetSegment(ctx, restartSegID))

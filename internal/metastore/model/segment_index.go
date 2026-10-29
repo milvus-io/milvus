@@ -38,6 +38,12 @@ type SegmentIndex struct {
 	// FinishTask. Readers that construct paths from this field must check
 	// IndexState == Finished first.
 	IndexStorePathVersion indexpb.IndexStorePathVersion
+	// ManifestPublished tracks manifest placement with no catalog row. This is
+	// process-local: reload derives it from the record's source, and writing the
+	// index back to the catalog clears it. Superseded builds retained in memory
+	// keep it even after their entry leaves the current manifest. The zero value
+	// conservatively treats a record as catalog-backed. It is not serialized.
+	ManifestPublished bool
 }
 
 func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {
@@ -122,5 +128,6 @@ func CloneSegmentIndex(segIndex *SegmentIndex) *SegmentIndex {
 		CurrentScalarIndexVersion: segIndex.CurrentScalarIndexVersion,
 		IndexType:                 segIndex.IndexType,
 		IndexStorePathVersion:     segIndex.IndexStorePathVersion,
+		ManifestPublished:         segIndex.ManifestPublished,
 	}
 }

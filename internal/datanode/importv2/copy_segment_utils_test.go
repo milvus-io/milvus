@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -3790,8 +3789,7 @@ func TestBuildTargetManifestIndexes(t *testing.T) {
 	assert.Equal(t, int64(2), entry.IndexVersion)
 	assert.Equal(t, int64(4096), entry.NumRows)
 	assert.Equal(t, []string{"a", "b"}, entry.IndexFileKeys)
-	assert.Equal(t, "16", entry.Properties["M"])
-	assert.Equal(t, "HNSW", entry.Properties[common.IndexTypeKey])
+	assert.Empty(t, entry.Properties, "ignore collection parameters even from older coordinators")
 
 	expectedPath, err := packed.ManifestIndexRelativePath("files/insert_log/100/200/300", "files/insert_log/100/200/300/_index/888/2")
 	assert.NoError(t, err)

@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
@@ -1139,7 +1140,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 			continue
 		}
 
-		gc.recycleDroppedSegment(ctx, io, segmentID, segment)
+		gc.recycleDroppedSegment(ctx, io, segmentID)
 	}
 }
 
@@ -1168,7 +1169,16 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 // surface NotFound, or batching RemoveSegmentIndex past the per-buildID
 // keyLock — must preserve these invariants, otherwise dropped-segment GC
 // will silently break under load.
-func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, io *packed.ManifestIOContext, segmentID int64, segment *SegmentInfo) {
+func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, io *packed.ManifestIOContext, segmentID int64) {
+	// Rollback may advance a retained Dropped segment's manifest while keeping
+	// its files. Serialize prefix deletion with that metadata transfer.
+	locks := gc.meta.getSegmentManifestLocks()
+	locks.Lock(segmentID)
+	defer locks.Unlock(segmentID)
+	segment := gc.meta.GetSegment(ctx, segmentID)
+	if segment == nil || segment.GetState() != commonpb.SegmentState_Dropped {
+		return
+	}
 	log := mlog.With(mlog.Int64("segmentID", segmentID), mlog.Int64("collectionID", segment.GetCollectionID()))
 
 	if ctx.Err() != nil {
@@ -1244,7 +1254,7 @@ func (gc *garbageCollector) getDroppedSegmentIndexFiles(ctx context.Context, io 
 	}
 	indexFiles := make(map[string]struct{}, len(segIndexes))
 	for _, segIdx := range segIndexes {
-		for key := range gc.getAllIndexFilesOfIndex(segIdx) {
+		for key := range gc.getRetainedIndexFilesOfIndex(segIdx) {
 			indexFiles[key] = struct{}{}
 		}
 	}
@@ -1838,7 +1848,7 @@ func (gc *garbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Contex
 				mlog.Int64("buildID", segIdx.BuildID))
 			continue
 		}
-		items = append(items, segmentIndexGCItem{segIdx: segIdx, files: gc.getAllIndexFilesOfIndex(segIdx)})
+		items = append(items, segmentIndexGCItem{segIdx: segIdx, files: gc.getRetainedIndexFilesOfIndex(segIdx)})
 	}
 	if len(items) == 0 {
 		return
@@ -1894,12 +1904,27 @@ func (gc *garbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Contex
 	}
 
 	for _, item := range legacyItems {
-		gc.recycleRecordOnlySegmentIndex(ctx, item)
+		gc.recycleRecordOnlySegmentIndex(ctx, segment, item)
 	}
 	gc.recycleManifestSegmentIndexes(ctx, manifestItems)
 }
 
-func (gc *garbageCollector) recycleRecordOnlySegmentIndex(ctx context.Context, item segmentIndexGCItem) {
+func (gc *garbageCollector) recycleRecordOnlySegmentIndex(ctx context.Context, observed *SegmentInfo, item segmentIndexGCItem) {
+	// Keep record-only cleanup ordered with publication. Selection may have
+	// read an index-free revision just before backfill installed this build.
+	// Recheck that observation under the manifest lock before deleting bytes
+	// or the record that drives manifest retraction on the next GC cycle.
+	locks := gc.meta.getSegmentManifestLocks()
+	locks.Lock(item.segIdx.SegmentID)
+	defer locks.Unlock(item.segIdx.SegmentID)
+	current := gc.meta.GetSegment(ctx, item.segIdx.SegmentID)
+	if current != nil && (isSegmentHealthy(current) || isSegmentIndexRollbackRetained(current)) &&
+		(observed == nil || current.GetManifestPath() != observed.GetManifestPath() ||
+			current.GetManifestHasIndex() != observed.GetManifestHasIndex()) {
+		mlog.RatedInfo(ctx, rate.Limit(10), "segment manifest changed during index GC; retry selection",
+			mlog.FieldSegmentID(item.segIdx.SegmentID), mlog.FieldBuildID(item.segIdx.BuildID))
+		return
+	}
 	log := segmentIndexGCLog(item)
 	log.Info(ctx, "GC Segment Index file start...")
 	if err := gc.removeObjectFiles(ctx, item.files); err != nil {
@@ -1917,6 +1942,10 @@ func (gc *garbageCollector) recycleManifestSegmentIndexes(ctx context.Context, i
 	if len(items) == 0 {
 		return
 	}
+	locks := gc.meta.getSegmentManifestLocks()
+	locks.Lock(items[0].segIdx.SegmentID)
+	defer locks.Unlock(items[0].segIdx.SegmentID)
+	// Serialize file retirement with migration copies and publication.
 	// One segment pointer PUT shares the atomic transaction with every
 	// defensive SegmentIndex DELETE. Keep each chunk within the configured
 	// etcd bound; stores with a larger native limit are conservatively split.
@@ -1942,7 +1971,7 @@ func (gc *garbageCollector) recycleManifestSegmentIndexes(ctx context.Context, i
 			continue
 		}
 
-		retracted, err := gc.commitManifestIndexRetractions(ctx, ready)
+		retracted, err := gc.commitManifestIndexRetractionsLocked(ctx, ready)
 		if err != nil {
 			mlog.Warn(ctx, "failed to retract segment indexes from manifest, wait to retry",
 				mlog.Int64("segmentID", ready[0].segIdx.SegmentID),
@@ -1993,13 +2022,21 @@ func (gc *garbageCollector) commitManifestIndexRetractions(ctx context.Context, 
 	if len(items) == 0 {
 		return true, nil
 	}
+	locks := gc.meta.getSegmentManifestLocks()
+	locks.Lock(items[0].segIdx.SegmentID)
+	defer locks.Unlock(items[0].segIdx.SegmentID)
+	return gc.commitManifestIndexRetractionsLocked(ctx, items)
+}
+
+// Caller holds the segment manifest lock through deletion and publication.
+func (gc *garbageCollector) commitManifestIndexRetractionsLocked(ctx context.Context, items []segmentIndexGCItem) (bool, error) {
 	drops := make([]packed.DropIndexEntry, 0, len(items))
 	mutations := make([]SegmentIndexMutation, 0, len(items))
 	for _, item := range items {
 		drops = append(drops, packed.DropIndexEntry{IndexID: item.segIdx.IndexID, ExpectedBuildID: item.segIdx.BuildID})
 		mutations = append(mutations, SegmentIndexMutation{Type: SegmentIndexRemove, BuildID: item.segIdx.BuildID})
 	}
-	if err := gc.meta.CommitSegmentManifest(ctx, SegmentManifestCommit{
+	if err := gc.meta.commitSegmentManifestLocked(ctx, SegmentManifestCommit{
 		SegmentID:     items[0].segIdx.SegmentID,
 		StorageConfig: createStorageConfig(),
 		Mutation: ManifestMutation{
@@ -2011,7 +2048,7 @@ func (gc *garbageCollector) commitManifestIndexRetractions(ctx context.Context, 
 		CatalogMutation: SegmentCatalogMutation{
 			SegmentIndexes: mutations,
 		},
-	}); err != nil {
+	}, "", 0); err != nil {
 		// Retired between resolution and this commit: the whole manifest goes
 		// away with the segment, so there is nothing left to retract.
 		if errors.Is(err, merr.ErrSegmentNotFound) {
@@ -2103,7 +2140,7 @@ func (gc *garbageCollector) recycleUnusedIndexFilesV0(ctx context.Context) {
 			}
 		}
 
-		filesMap := gc.getAllIndexFilesOfIndex(segIdx)
+		filesMap := gc.getRetainedIndexFilesOfIndex(segIdx)
 
 		logger.Info(ctx, "recycle index files", mlog.Int("meta files num", len(filesMap)))
 		deletedFilesNum := atomic.NewInt32(0)
@@ -2169,6 +2206,30 @@ func (gc *garbageCollector) getAllIndexFilesOfIndex(segmentIndex *model.SegmentI
 	for _, fileID := range segmentIndex.IndexFileKeys {
 		filesMap[builder.BuildFilePath(fileID)] = struct{}{}
 	}
+
+	return filesMap
+}
+
+// getRetainedIndexFilesOfIndex protects both sides of migration, including
+// copies not yet published and source paths held by existing readers. Retain
+// these bounded aliases until the build itself is retired; snapshot guards
+// still run before retirement. Keeping them independent of placement also
+// makes the orphan scanner's cached decision safe during long copies/retries.
+func (gc *garbageCollector) getRetainedIndexFilesOfIndex(segmentIndex *model.SegmentIndex) map[string]struct{} {
+	filesMap := gc.getAllIndexFilesOfIndex(segmentIndex)
+	if segment := gc.meta.GetSegment(context.TODO(), segmentIndex.SegmentID); segment != nil && segment.GetStorageVersion() == storage.StorageV3 {
+		for _, version := range []indexpb.IndexStorePathVersion{
+			indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED,
+			indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+			indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+		} {
+			retained := model.CloneSegmentIndex(segmentIndex)
+			retained.IndexStorePathVersion = version
+			for _, file := range migrationIndexPaths(gc.option.cli.RootPath(), segment.GetManifestPath(), retained) {
+				filesMap[file] = struct{}{}
+			}
+		}
+	}
 	return filesMap
 }
 
@@ -2219,26 +2280,30 @@ func (gc *garbageCollector) newIndexFileReclaimChecker(ctx context.Context) func
 			// Keep everything; nil decision fields mean "reclaim nothing".
 			return d
 		}
+		// Read import protection before looking up the build. Finalization
+		// clears it only after installing every record: a missing-record read
+		// before finalization must not be combined with a segment read after it.
+		segment := gc.meta.GetSegment(ctx, segmentID)
+		if segment != nil && (segment.GetState() == commonpb.SegmentState_Importing || segment.GetIsImporting()) {
+			return d
+		}
 		canRecycle, segIdx := gc.meta.indexMeta.CheckCleanSegmentIndex(buildID)
 		if !canRecycle {
 			return d
 		}
 		if segIdx == nil {
-			segment := gc.meta.GetSegment(ctx, segmentID)
 			switch {
 			case segment == nil:
 				d.reclaimAll = true
 			case !isSegmentHealthy(segment):
 				// Dropped-segment GC and rejected-copy cleanup own these files
 				// for as long as the segment row exists.
-			case segment.GetState() == commonpb.SegmentState_Importing || segment.GetIsImporting():
-				// Snapshot restore still copying into this segment.
 			default:
 				d.reclaimAll = true
 			}
 			return d
 		}
-		d.recorded = gc.getAllIndexFilesOfIndex(segIdx)
+		d.recorded = gc.getRetainedIndexFilesOfIndex(segIdx)
 		return d
 	}
 

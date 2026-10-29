@@ -895,6 +895,11 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_CompletedUpdatesSegment()
 	// get built.
 	assertBuildIndexEvents(s.T(), 2001)
 	assertNoBuildIndexEvent(s.T())
+
+	// Replaying a finalized result must not republish or enqueue it again.
+	s.NoError(SyncCopySegmentTask(task, resp, copyMeta, m))
+	assertNoBuildIndexEvent(s.T())
+	s.Empty(drainStatsBuildChForTest(), "finalized replay must not enqueue stats again")
 }
 
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ReconcilesDataView() {
@@ -1635,16 +1640,20 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_IndexWritePlacementMatrix
 	)
 
 	for _, tc := range []struct {
-		name    string
-		enabled bool
+		name     string
+		enabled  bool
+		rollback bool
 	}{
 		{name: "manifest writes disabled", enabled: false},
 		{name: "manifest writes enabled", enabled: true},
+		{name: "rollback drains manifest copy", enabled: true, rollback: true},
+		{name: "rollback accepts etcd copy", enabled: false, rollback: true},
 	} {
 		s.Run(tc.name, func() {
 			// The runtime switch has flipped by the time the result is handled.
 			// The task's persisted dispatch-time value must still win.
 			withSegmentIndexManifestWrites(s.T(), !tc.enabled)
+			withManifestIndexRollback(s.T(), tc.rollback)
 			store := newFakeManifestStore(s.T())
 			ctx := context.Background()
 			catalog := kvdatacoord.NewCatalog(NewMetaMemoryKV(), "", "")
@@ -1717,6 +1726,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_IndexWritePlacementMatrix
 							BuildId:        buildID,
 							IndexName:      "vec_idx",
 							IndexFilePaths: []string{"index.bin"},
+							IndexSize:      1024,
 						},
 					},
 				}},
@@ -1751,6 +1761,21 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_IndexWritePlacementMatrix
 			s.Require().Len(recovered, 1)
 			s.EqualValues(buildID, recovered[indexID].BuildID)
 			s.Equal(commonpb.IndexState_Finished, recovered[indexID].IndexState)
+			if tc.rollback {
+				inspector := newManifestIndexRollbackInspector(ctx, m)
+				inspector.runOnce(ctx)
+				inspector.runOnce(ctx)
+				s.True(inspector.ready)
+				s.False(m.GetSegment(ctx, segmentID).GetManifestHasIndex())
+				persisted, err = catalog.ListSegmentIndexes(ctx, collectionID)
+				s.Require().NoError(err)
+				s.Require().Len(persisted, 1)
+				s.EqualValues(buildID, persisted[0].BuildID)
+				final := m.GetSegment(ctx, segmentID).GetManifestPath()
+				s.Require().NoError(SyncCopySegmentTask(task, resp, copyMeta, m))
+				s.Equal(final, m.GetSegment(ctx, segmentID).GetManifestPath())
+				s.False(indexManifestPublished(s.T(), m.indexMeta, buildID))
+			}
 		})
 	}
 }
@@ -1811,6 +1836,11 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_LegacyStorageRetainsEtcdI
 }
 
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PreservesImportingFlagOnFailure() {
+	drainBuildIndexChForTest()
+	defer drainBuildIndexChForTest()
+	drainStatsBuildChForTest()
+	defer drainStatsBuildChForTest()
+
 	collectionID := int64(1)
 	segmentID := int64(103)
 
@@ -1851,6 +1881,8 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_PreservesImportingFlagOnF
 	s.Require().NotNil(updated)
 	s.Equal(commonpb.SegmentState_Importing, updated.GetState())
 	s.True(updated.GetIsImporting())
+	assertNoBuildIndexEvent(s.T())
+	s.Empty(drainStatsBuildChForTest(), "failed finalization must not enqueue stats")
 }
 
 func TestAssembleCopySegmentRequest_SourceSegmentNotFound(t *testing.T) {
@@ -2925,7 +2957,11 @@ func TestAssembleCopySegmentRequest_ManifestFallbackPreCanceledSkipsRead(t *test
 func (s *CopySegmentTaskSuite) TestBuildCopySegmentTargetIndexes_GatedBySwitch() {
 	collectionID := int64(1)
 	im := createTestIndexMeta(s.T(), collectionID, map[int64]*model.Index{
-		300: {CollectionID: collectionID, FieldID: 101, IndexID: 300, IndexName: "vec_idx"},
+		300: {
+			CollectionID: collectionID, FieldID: 101, IndexID: 300, IndexName: "vec_idx",
+			IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}, {Key: "M", Value: "16"}},
+			TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}},
+		},
 	})
 	ms6 := metacache.NewMetaStore(nil)
 	m := &meta{indexMeta: im, segments: NewSegmentsInfo(ms6), metaStore: ms6}
@@ -2937,6 +2973,8 @@ func (s *CopySegmentTaskSuite) TestBuildCopySegmentTargetIndexes_GatedBySwitch()
 	s.Require().Len(targets, 1)
 	s.Equal("vec_idx", targets[0].GetIndexName())
 	s.EqualValues(300, targets[0].GetIndexId())
+	s.Equal("HNSW", targets[0].GetIndexType())
+	s.Empty(targets[0].GetProperties())
 }
 
 // With manifest publication on, a StorageV3 copy may install an artifact-bearing
@@ -3004,7 +3042,7 @@ func copiedManifestReviewEntry() packed.ManifestIndexInfo {
 func (s *CopySegmentTaskSuite) TestCopiedManifestRejectsChangedIdentityAndPaths() {
 	mockManifestIndexSubmissions(s.T())
 	for _, acknowledged := range []bool{false, true} {
-		for _, scenario := range []string{"recreated", "parameters", "foreign path", "wrong files"} {
+		for _, scenario := range []string{"recreated", "index type", "foreign path", "wrong files"} {
 			s.Run(strconv.FormatBool(acknowledged)+"/"+scenario, func() {
 				task, copyMeta, m, resp := s.newCopiedManifestReadBackFixture()
 				result := resp.GetSegmentResults()[0]
@@ -3020,8 +3058,8 @@ func (s *CopySegmentTaskSuite) TestCopiedManifestRejectsChangedIdentityAndPaths(
 						CollectionID: 100, FieldID: 101, IndexID: 301, IndexName: "vec_idx",
 						IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}},
 					}))
-				case "parameters":
-					entry.Properties["M"] = "32"
+				case "index type":
+					entry.IndexType = "IVF_FLAT"
 				case "foreign path":
 					// IDs collide, but the directory still names the source segment.
 					entry.Path = "files/index_files/9001/0/10/9999"
@@ -3035,6 +3073,38 @@ func (s *CopySegmentTaskSuite) TestCopiedManifestRejectsChangedIdentityAndPaths(
 				s.False(segment.GetManifestHasIndex())
 				s.Empty(m.indexMeta.GetSegmentIndexes(100, 2001))
 				s.Equal(datapb.CopySegmentTaskState_CopySegmentTaskFailed, copyMeta.GetTask(context.Background(), task.GetTaskId()).GetState())
+			})
+		}
+	}
+}
+
+func (s *CopySegmentTaskSuite) TestCopiedManifestIgnoresCollectionProperties() {
+	mockManifestIndexSubmissions(s.T())
+	for _, acknowledged := range []bool{false, true} {
+		for _, legacyProperties := range []bool{false, true} {
+			s.Run(strconv.FormatBool(acknowledged)+"/legacyProperties="+strconv.FormatBool(legacyProperties), func() {
+				task, copyMeta, m, resp := s.newCopiedManifestReadBackFixture()
+				result := resp.GetSegmentResults()[0]
+				if acknowledged {
+					result.ManifestIndexRewritten = proto.Bool(true)
+					result.ManifestIndexBuildIds = []int64{9001}
+				}
+				// Altering collection parameters must not invalidate an already copied artifact.
+				definition := model.CloneIndex(m.indexMeta.GetIndexesForCollection(100, "vec_idx")[0])
+				definition.IndexParams = append(definition.IndexParams, &commonpb.KeyValuePair{Key: "mmap.enabled", Value: "true"})
+				s.Require().NoError(m.indexMeta.AlterIndex(context.Background(), definition))
+				entry := copiedManifestReviewEntry()
+				entry.Properties = nil
+				if legacyProperties {
+					entry.Properties = map[string]string{common.IndexTypeKey: "HNSW", "mmap.enabled": "false", "M": "16"}
+				}
+				defer mockey.Mock(packed.GetManifestIndexInfosAsync).Return([]packed.ManifestIndexInfo{entry}, nil).Build().UnPatch()
+				s.Require().NoError(SyncCopySegmentTask(task, resp, copyMeta, m))
+				s.Equal(commonpb.SegmentState_Flushed, m.GetSegment(context.Background(), result.GetSegmentId()).GetState())
+				record, ok := m.indexMeta.GetIndexJob(9001)
+				s.Require().True(ok)
+				s.True(record.ManifestPublished)
+				s.EqualValues(300, record.IndexID)
 			})
 		}
 	}
