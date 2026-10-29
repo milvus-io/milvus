@@ -520,6 +520,11 @@ func (m *immutableMessageImpl) IntoImmutableMessageProto() *commonpb.ImmutableMe
 	}
 }
 
+// RemoveUnreplicable removes the replication restriction from a caller-owned protobuf message.
+func RemoveUnreplicable(msg *commonpb.ImmutableMessage) {
+	delete(msg.Properties, messageUnreplicable)
+}
+
 // IntoBroadcastMutableMessage converts the message to a broadcast mutable message.
 func (m *immutableMessageImpl) IntoBroadcastMutableMessage() BroadcastMutableMessage {
 	if !m.properties.Exist(messageBroadcastHeader) {

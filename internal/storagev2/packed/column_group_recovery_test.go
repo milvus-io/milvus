@@ -64,7 +64,7 @@ func TestRestoreColumnGroupsFromManifest(t *testing.T) {
 	output, err := writer.Close()
 	require.NoError(t, err)
 	defer output.Destroy()
-	manifest, err := CommitManifestUpdates(filepath.Join(root, "segment"), ManifestEarliest, config, &ManifestUpdates{NewFiles: output})
+	manifest, err := CommitManifestUpdates(MarshalManifestPath(filepath.Join(root, "segment"), ManifestEarliest), config, &ManifestUpdates{NewFiles: output})
 	require.NoError(t, err)
 
 	info := &datapb.SegmentInfo{ManifestPath: manifest, Stats: &datapb.Statistics{

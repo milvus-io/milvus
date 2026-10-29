@@ -453,6 +453,21 @@ func TestComponentParam_LazyColumnGroupEnabled(t *testing.T) {
 	assert.False(t, item.GetAsBool())
 }
 
+func TestTieredLazyIndexSlotConfig(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil)))
+	item := &params.QueryNodeCfg.TieredLazyIndexSlotEnabled
+
+	assert.Equal(t, "queryNode.segcore.tieredStorage.lazyIndexSlotEnabled", item.Key)
+	assert.Equal(t, "false", item.DefaultValue)
+	assert.True(t, item.Export)
+	assert.False(t, item.GetAsBool())
+	require.NoError(t, params.Save(item.Key, "true"))
+	assert.True(t, item.GetAsBool())
+	require.NoError(t, params.Save(item.Key, "false"))
+	assert.False(t, item.GetAsBool())
+}
+
 func TestComponentParam_IDFLazyLoadSealedStats(t *testing.T) {
 	Init()
 	params := Get()
@@ -1138,7 +1153,12 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 100*time.Millisecond, Params.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse())
 		assert.Equal(t, 10.0, Params.CPURatio.GetAsFloat())
 		assert.Equal(t, uint32(hardware.GetCPUNum()), Params.KnowhereThreadPoolSize.GetAsUint32())
-		assert.Equal(t, "10s", Params.StandaloneMigrateDataTimeout.DefaultValue)
+		assert.Equal(t, "10s", Params.MigrateDataTimeout.DefaultValue)
+		assert.Equal(t, 10*time.Second, Params.MigrateDataTimeout.GetAsDurationByParse())
+		// The old key still works for configs written before the rename.
+		assert.NoError(t, params.Save("queryNode.standaloneMigrateDataTimeout", "3m"))
+		assert.Equal(t, 3*time.Minute, Params.MigrateDataTimeout.GetAsDurationByParse())
+		params.Reset("queryNode.standaloneMigrateDataTimeout")
 
 		// chunk cache
 		assert.Equal(t, "willneed", Params.ReadAheadPolicy.GetValue())

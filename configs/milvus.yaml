@@ -731,6 +731,7 @@ queryNode:
       # If set to 0, time based eviction is disabled.
       cacheTtl: 0
       storageUsageTrackingEnabled: false # Enable storage usage tracking for Tiered Storage. Defaults to false.
+      lazyIndexSlotEnabled: false # When enabled, sealed scalar, vector, and text index translators and cache slots with warmup=disable are created on first access instead of segment load.
       lazyColumnGroupEnabled: false # When enabled, Storage V3 manifest fields with warmup=disable and no load-time side effects defer projected ChunkReader, translator, and cache creation until first access.
     knowhereScoreConsistency: false # Enable knowhere strong consistency score computation logic
     mutatePoolSizeFactor: 2 # size factor (CPUNum * factor) of the online-write cgo pool for segment insert/delete; isolated from the load/management pool so segment loading cannot starve online writes
@@ -788,7 +789,7 @@ queryNode:
     nqMergeRatio: 16 # Maximum ratio between merged total NQ and the smaller task NQ when grouping query node read tasks.
     maxDeadlineMergeGap: 50ms # Maximum allowed gap between task context deadlines when grouping query node read tasks. Tasks with only one deadline cannot be grouped. Set a negative duration to disable this check.
     topKMergeRatio: 20
-  standaloneMigrateDataTimeout: 10s # Duration string (e.g. 10s, 3m). In standalone mode, after this duration, the node stops waiting for data migration if no other active query node is available.
+  migrateDataTimeout: 10s # Duration string (e.g. 10s, 3m). After this duration, a stopping query node stops waiting for data migration if no other active query node is available.
   search:
     enableResultZeroCopy: false # When true, delegator passes reduced SearchResultData directly instead of re-marshaling to SlicedBlob. Toggle at runtime for instant fallback.
   levelZeroForwardPolicy: FilterByBF # delegator level zero deletion forward policy, possible option["FilterByBF", "RemoteLoad"]

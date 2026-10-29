@@ -1280,12 +1280,11 @@ func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
 
 			commitCalled := false
 			mockCommit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
-				func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
+				func(_ context.Context, _ *packed.ManifestIOContext, baseManifest string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 					commitCalled = true
 					// Rebased on the segment's current manifest (version 2), not the
 					// worker's plan-time base.
-					s.Equal(basePath, base)
-					s.EqualValues(2, version)
+					s.Equal(currentManifest, baseManifest)
 					s.Require().Len(updates.Stats, 1)
 					s.Equal("json_stats.500", updates.Stats[0].Key)
 					// Manifest stores absolute paths reconstructed from the relative result.
@@ -1400,12 +1399,11 @@ func (s *statsTaskSuite) TestSetJobInfoTextStatsResultManifestHandling() {
 
 			commitCalled := false
 			mockCommit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
-				func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
+				func(_ context.Context, _ *packed.ManifestIOContext, baseManifest string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
 					commitCalled = true
 					// Rebased on the segment's current manifest (version 2), not the
 					// worker's plan-time base.
-					s.Equal(basePath, base)
-					s.EqualValues(2, version)
+					s.Equal(currentManifest, baseManifest)
 					s.Require().Len(updates.Stats, 1)
 					s.Equal("text_index.500", updates.Stats[0].Key)
 					s.Equal(files, updates.Stats[0].Files)

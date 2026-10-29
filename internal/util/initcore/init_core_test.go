@@ -392,6 +392,21 @@ func TestLazyColumnGroupHotUpdate(t *testing.T) {
 	}
 }
 
+func TestTieredLazyIndexSlotUpdate(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	item := &params.QueryNodeCfg.TieredLazyIndexSlotEnabled
+	previous := item.GetValue()
+	t.Cleanup(func() {
+		assert.NoError(t, params.Save(item.Key, previous))
+		assert.NoError(t, UpdateTieredStorageConfig(params))
+	})
+	for _, value := range []string{"true", "false"} {
+		assert.NoError(t, params.Save(item.Key, value))
+		assert.NoError(t, UpdateTieredStorageConfig(params))
+	}
+}
+
 // TestRegisterArrowReaderConfigWatchers verifies the lifted helper registers
 // a handler under each of the two arrow-reader range/hole keys, using the
 // same sentinel approach as above.

@@ -50,7 +50,9 @@ import (
 //
 // Lock order: SegmentManager channel lock -> segment manifest locks ->
 // indexMeta key lock -> DataView collection lock -> segment writer locks ->
-// segment change groups (groupMu) -> MetaStore shards.
+// segment change groups (groupMu) -> MetaStore shards. A backfill replace
+// commit holds the read side of indexMeta.fieldIndexLock while it takes a
+// segment writer lock, so no write may take fieldIndexLock while it holds one.
 
 // segmentLockSet is the segment writer locks one write holds.
 type segmentLockSet struct {

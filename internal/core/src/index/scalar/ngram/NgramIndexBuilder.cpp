@@ -157,6 +157,33 @@ class NgramBuilderCore {
               params_.max_gram)) {
     }
 
+    template <typename T>
+    void
+    ReserveNullOffsets(const ScalarBuildInput<T>& input) {
+        size_t total = 0;
+        for (const auto& batch : input.batches) {
+            size_t invalid = 0;
+            if constexpr (std::is_same_v<T, JsonProjectedString>) {
+                for (size_t i = 0; i < batch.values.size(); ++i) {
+                    invalid += batch.values[i].state ==
+                                       JsonProjectedStringState::FieldNull
+                                   ? 1
+                                   : 0;
+                }
+            } else if (batch.validity) {
+                for (size_t i = 0; i < batch.values.size(); ++i) {
+                    invalid += batch.validity[i] ? 0 : 1;
+                }
+            }
+            if (invalid > null_offsets_.max_size() - total) {
+                ThrowInfo(DataTypeInvalid,
+                          "NGRAM null-offset count exceeds vector capacity");
+            }
+            total += invalid;
+        }
+        null_offsets_.reserve(total);
+    }
+
     void
     AddBatch(const ScalarBuildBatch<std::string_view>& batch) {
         AddRows(
@@ -203,14 +230,11 @@ class NgramBuilderCore {
     AddRows(size_t n, StateAt state_at, ValueAt value_at) {
         CheckAppend(count_, n);
 
-        size_t added_nulls = 0;
         size_t added_bytes = 0;
         size_t added_rows = 0;
         for (size_t i = 0; i < n; ++i) {
             switch (state_at(i)) {
                 case JsonProjectedStringState::FieldNull:
-                    ++added_nulls;
-                    break;
                 case JsonProjectedStringState::NoValue:
                     break;
                 case JsonProjectedStringState::Value: {
@@ -230,15 +254,10 @@ class NgramBuilderCore {
                               "state");
             }
         }
-        if (added_nulls > null_offsets_.max_size() - null_offsets_.size()) {
-            ThrowInfo(DataTypeInvalid,
-                      "NGRAM null-offset count exceeds vector capacity");
-        }
         if (added_bytes > std::numeric_limits<size_t>::max() - total_bytes_ ||
             added_rows > std::numeric_limits<size_t>::max() - valid_rows_) {
             ThrowInfo(DataTypeInvalid, "NGRAM row-size accounting overflows");
         }
-        null_offsets_.reserve(null_offsets_.size() + added_nulls);
 
         std::string owned;
         for (size_t i = 0; i < n; ++i) {
@@ -281,6 +300,7 @@ NgramIndexBuilder<T>::~NgramIndexBuilder() = default;
 template <typename T>
 storage::ArtifactPtr
 NgramIndexBuilder<T>::Build(const ScalarBuildInput<T>& input) && {
+    core_->ReserveNullOffsets(input);
     for (const auto& batch : input.batches) {
         core_->AddBatch(batch);
     }

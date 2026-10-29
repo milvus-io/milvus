@@ -72,6 +72,14 @@ type ManifestUpdates struct {
 	// register. Each entry's Files / Metadata replace any existing entry
 	// with the same Key (loon overwrite semantics).
 	Stats []StatEntry
+	// DropColumns removes whole columns (identified by column name / Milvus
+	// field ID) from the manifest. milvus-storage drops the column from every
+	// column group that contains it, deletes any group that becomes empty, and
+	// auto-drops all indexes attached to the column; a column that is absent is
+	// a no-op. Used by backfill "replace" to overwrite a column atomically:
+	// the drop and the re-add travel in one transaction, and drops are staged
+	// before column-group adds to match milvus-storage's apply order.
+	DropColumns []string
 	// Indexes registers completed index artifacts. milvus-storage replaces
 	// any existing entry carrying the same index_id, so republishing a
 	// rebuilt index supersedes its predecessor instead of duplicating it.
@@ -95,34 +103,40 @@ func (u *ManifestUpdates) isEmpty() bool {
 		return false
 	}
 	return len(u.ColumnGroups) == 0 && len(u.DeltaLogs) == 0 && len(u.Stats) == 0 &&
-		len(u.Indexes) == 0 && len(u.DropIndexes) == 0
+		len(u.Indexes) == 0 && len(u.DropIndexes) == 0 && len(u.DropColumns) == 0
 }
 
-// CommitManifestUpdates opens a loon transaction at (basePath, baseVersion),
-// applies every change in updates, commits, and returns the new manifest
-// path. With no effective changes it returns the unchanged manifest path
-// without opening a transaction.
+// CommitManifestUpdates opens a loon transaction at the revision named by
+// baseManifestPath, applies every change in updates, commits, and returns the
+// new manifest path. With no effective changes it returns baseManifestPath
+// itself without opening a transaction: a pointer that did not move keeps its
+// exact text, so callers comparing pointers never see a phantom change.
 //
 // The caller retains ownership of any WriterOutput referenced by updates
 // and is responsible for calling Destroy on it after CommitManifestUpdates
 // returns.
-func CommitManifestUpdates(basePath string, baseVersion int64,
+func CommitManifestUpdates(baseManifestPath string,
 	storageConfig *indexpb.StorageConfig, updates *ManifestUpdates,
 ) (string, error) {
 	if updates.isEmpty() {
-		return MarshalManifestPath(basePath, baseVersion), nil
+		return baseManifestPath, nil
+	}
+	basePath, baseVersion, err := UnmarshalManifestPath(baseManifestPath)
+	if err != nil {
+		return "", merr.WrapErrDataIntegrity(err, "parse base manifest path %q", baseManifestPath)
 	}
 
 	// Resolve drops against the exact revision the transaction will open at,
 	// before opening it: a drop that no longer applies must not turn into an
 	// empty commit, which loon rejects with "no updates recorded".
-	dropIndexIDs, err := resolveDropIndexes(basePath, baseVersion, storageConfig, updates.DropIndexes)
+	dropIndexIDs, err := resolveDropIndexes(baseManifestPath, storageConfig, updates.DropIndexes)
 	if err != nil {
 		return "", err
 	}
 	if updates.NewFiles == nil && len(updates.ColumnGroups) == 0 && len(updates.DeltaLogs) == 0 &&
-		len(updates.Stats) == 0 && len(updates.Indexes) == 0 && len(dropIndexIDs) == 0 {
-		return MarshalManifestPath(basePath, baseVersion), nil
+		len(updates.Stats) == 0 && len(updates.Indexes) == 0 && len(dropIndexIDs) == 0 &&
+		len(updates.DropColumns) == 0 {
+		return baseManifestPath, nil
 	}
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
@@ -168,6 +182,20 @@ func CommitManifestUpdates(basePath string, baseVersion int64,
 // transaction handle. dropIndexIDs is the drop set already resolved against
 // the transaction's base revision by resolveDropIndexes.
 func applyManifestUpdates(handle C.LoonTransactionHandle, updates *ManifestUpdates, dropIndexIDs []int64) error {
+	// Column drops are staged before every add: a backfill "replace" bundles a
+	// drop with the re-add of the same column, and milvus-storage applies
+	// dropped columns before add-column-group validation (a re-add of a column
+	// that still exists would be rejected). Staging them first keeps the Go
+	// layer aligned with that contract regardless of the C++ apply order.
+	for _, column := range updates.DropColumns {
+		cPath := C.CString(column)
+		err := HandleLoonFFIResult(C.loon_transaction_drop_column(handle, cPath))
+		C.free(unsafe.Pointer(cPath))
+		if err != nil {
+			return merr.WrapErrStorage(err, "commit manifest drop_column")
+		}
+	}
+
 	if updates.NewFiles != nil {
 		if err := updates.NewFiles.applyTo(handle); err != nil {
 			return err
@@ -218,13 +246,12 @@ func applyManifestUpdates(handle C.LoonTransactionHandle, updates *ManifestUpdat
 // revision. An index that is present under a different build was republished
 // by a rebuild after the caller collected its metadata; dropping it by ID
 // would delete the live artifact, so the whole commit is refused.
-func resolveDropIndexes(basePath string, baseVersion int64,
+func resolveDropIndexes(manifestPath string,
 	storageConfig *indexpb.StorageConfig, drops []DropIndexEntry,
 ) ([]int64, error) {
 	if len(drops) == 0 {
 		return nil, nil
 	}
-	manifestPath := MarshalManifestPath(basePath, baseVersion)
 	current, err := GetManifestIndexInfos(manifestPath, storageConfig)
 	if err != nil {
 		return nil, merr.Wrap(err, "resolve manifest index drops")
