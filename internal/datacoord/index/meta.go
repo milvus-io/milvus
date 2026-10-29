@@ -20,6 +20,7 @@ package index
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -76,8 +77,10 @@ type IndexMeta struct {
 
 	// collectionIndexes records which indexes are on the collection
 	// collID -> indexID -> index
-	fieldIndexLock sync.RWMutex
-	Indexes        map[UniqueID]map[UniqueID]*model.Index
+	fieldIndexLock   sync.RWMutex
+	segmentLocksOnce sync.Once
+	segmentLocks     *lock.KeyLock[int64]
+	Indexes          map[UniqueID]map[UniqueID]*model.Index
 
 	// buildID2Meta records building index meta information of the segment
 	SegmentBuildInfo *segmentBuildInfo
@@ -568,8 +571,19 @@ func (m *IndexMeta) addStoredIndexSizeMetric(collID, indexID UniqueID, delta flo
 	}
 }
 
-// AddSegmentIndex adds the index meta corresponding the indexBuildID to meta table.
+// lockSegmentIndexes serializes membership changes with backfill replacement.
+// Acquire it before individual build locks. Ordinary task state transitions
+// only need their build lock.
+func (m *IndexMeta) lockSegmentIndexes(id int64) func() {
+	m.segmentLocksOnce.Do(func() { m.segmentLocks = lock.NewKeyLock[int64]() })
+	m.segmentLocks.Lock(id)
+	return func() { m.segmentLocks.Unlock(id) }
+}
+
+// AddSegmentIndex persists the new build before making it available to the scheduler.
 func (m *IndexMeta) AddSegmentIndex(ctx context.Context, segIndex *model.SegmentIndex) error {
+	unlock := m.lockSegmentIndexes(segIndex.SegmentID)
+	defer unlock()
 	buildID := segIndex.BuildID
 
 	m.KeyLock.Lock(buildID)
@@ -1183,7 +1197,50 @@ func (m *IndexMeta) GetAllSegIndexes() map[int64]*model.SegmentIndex {
 	return segIndexes
 }
 
+// PublishColumnReplacement keeps matching build records stable until the
+// caller saves their removals and the new manifest pointer in one transaction.
+// A build admitted afterwards will read the replacement manifest.
+func (m *IndexMeta) PublishColumnReplacement(segmentID int64, fields map[int64]struct{}, publish func([]metastore.UpdateAction, func()) error) error {
+	unlock := m.lockSegmentIndexes(segmentID)
+	defer unlock()
+
+	var builds []int64
+	for _, si := range m.GetAllSegmentIndexes(segmentID) {
+		fieldID := m.GetFieldIDByIndexID(si.CollectionID, si.IndexID)
+		if _, replaced := fields[fieldID]; replaced && !si.IsDeleted {
+			builds = append(builds, si.BuildID)
+		}
+	}
+	slices.Sort(builds)
+	var records []*model.SegmentIndex
+	var actions []metastore.UpdateAction
+	for _, id := range builds {
+		m.KeyLock.Lock(id)
+		defer m.KeyLock.Unlock(id)
+		si, exists := m.SegmentBuildInfo.Get(id)
+		if exists && !si.IsDeleted {
+			records = append(records, si)
+			actions = append(actions, metastore.DropSegmentIndex(si))
+		}
+	}
+	// Hold the read lock through the gauge changes to serialize with DropIndex.
+	m.fieldIndexLock.RLock()
+	defer m.fieldIndexLock.RUnlock()
+	return publish(actions, func() {
+		for _, si := range records {
+			m.removeSegmentIndexFromMemory(si)
+		}
+	})
+}
+
 func (m *IndexMeta) RemoveSegmentIndex(ctx context.Context, buildID UniqueID) error {
+	current, exists := m.SegmentBuildInfo.Get(buildID)
+	if !exists {
+		return nil
+	}
+	unlock := m.lockSegmentIndexes(current.SegmentID)
+	defer unlock()
+
 	m.KeyLock.Lock(buildID)
 	defer m.KeyLock.Unlock(buildID)
 
@@ -1200,23 +1257,24 @@ func (m *IndexMeta) RemoveSegmentIndex(ctx context.Context, buildID UniqueID) er
 	// Reclaim size only when the index is still alive (segment-drop case);
 	// MarkIndexAsDeleted already subtracted otherwise.
 	m.fieldIndexLock.RLock()
-	m.addStoredIndexSizeMetric(segIdx.CollectionID, segIdx.IndexID,
-		-float64(segIdx.IndexSerializedSize))
-	m.fieldIndexLock.RUnlock()
-
-	segIndexes, ok := m.SegmentIndexes.Get(segIdx.SegmentID)
-	if ok {
-		segIndexes.Remove(segIdx.IndexID)
-		if segIndexes.Len() == 0 {
-			m.SegmentIndexes.Remove(segIdx.SegmentID)
-		} else {
-			m.SegmentIndexes.Insert(segIdx.SegmentID, segIndexes)
-		}
-	}
-
-	m.SegmentBuildInfo.Remove(buildID)
+	defer m.fieldIndexLock.RUnlock()
+	m.removeSegmentIndexFromMemory(segIdx)
 
 	return nil
+}
+
+// Caller holds the segment membership lock, build lock and field index read lock.
+func (m *IndexMeta) removeSegmentIndexFromMemory(si *model.SegmentIndex) {
+	m.addStoredIndexSizeMetric(si.CollectionID, si.IndexID, -float64(si.IndexSerializedSize))
+	if indexes, ok := m.SegmentIndexes.Get(si.SegmentID); ok {
+		if current, ok := indexes.Get(si.IndexID); ok && current.BuildID == si.BuildID {
+			indexes.Remove(si.IndexID)
+			if indexes.Len() == 0 {
+				m.SegmentIndexes.Remove(si.SegmentID)
+			}
+		}
+	}
+	m.SegmentBuildInfo.Remove(si.BuildID)
 }
 
 func (m *IndexMeta) GetDeletedIndexes() []*model.Index {

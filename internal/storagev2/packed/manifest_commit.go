@@ -67,6 +67,14 @@ type ManifestUpdates struct {
 	// register. Each entry's Files / Metadata replace any existing entry
 	// with the same Key (loon overwrite semantics).
 	Stats []StatEntry
+	// DropColumns removes whole columns (identified by column name / Milvus
+	// field ID) from the manifest. milvus-storage drops the column from every
+	// column group that contains it, deletes any group that becomes empty, and
+	// auto-drops all indexes attached to the column; a column that is absent is
+	// a no-op. Used by backfill "replace" to overwrite a column atomically:
+	// the drop and the re-add travel in one transaction, and drops are staged
+	// before column-group adds to match milvus-storage's apply order.
+	DropColumns []string
 }
 
 // isEmpty short-circuits CommitManifestUpdates when the caller assembled
@@ -81,7 +89,7 @@ func (u *ManifestUpdates) isEmpty() bool {
 	if u.NewFiles != nil {
 		return false
 	}
-	return len(u.ColumnGroups) == 0 && len(u.DeltaLogs) == 0 && len(u.Stats) == 0
+	return len(u.ColumnGroups) == 0 && len(u.DeltaLogs) == 0 && len(u.Stats) == 0 && len(u.DropColumns) == 0
 }
 
 // CommitManifestUpdates opens a loon transaction at (basePath, baseVersion),
@@ -150,6 +158,19 @@ func CommitManifestUpdates(basePath string, baseVersion int64,
 // applyManifestUpdates stages every operation in updates onto the loon
 // transaction handle.
 func applyManifestUpdates(handle C.LoonTransactionHandle, updates *ManifestUpdates) error {
+	// Column drops are staged before every add: a backfill "replace" bundles a
+	// drop with the re-add of the same column, and milvus-storage applies
+	// dropped columns before add-column-group validation (a re-add of a column
+	// that still exists would be rejected). Staging them first keeps the Go
+	// layer aligned with that contract regardless of the C++ apply order.
+	for _, column := range updates.DropColumns {
+		cPath := C.CString(column)
+		err := HandleLoonFFIResult(C.loon_transaction_drop_column(handle, cPath))
+		C.free(unsafe.Pointer(cPath))
+		if err != nil {
+			return merr.WrapErrStorage(err, "commit manifest drop_column")
+		}
+	}
 	if updates.NewFiles != nil {
 		if err := updates.NewFiles.applyTo(handle); err != nil {
 			return err
