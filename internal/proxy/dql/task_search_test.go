@@ -3404,7 +3404,8 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 			Value: strconv.FormatInt(10, 10),
 		})
 		rank := &rankParams{
-			limit: externalLimit,
+			limit:  externalLimit,
+			offset: 10,
 		}
 
 		searchInfo, err := parseSearchInfo(offsetParam, nil, rank, false)
@@ -3412,6 +3413,47 @@ func TestSearchTask_parseSearchInfo(t *testing.T) {
 		assert.NotNil(t, searchInfo.planInfo)
 		assert.Equal(t, int64(10), searchInfo.planInfo.GetTopk())
 		assert.Equal(t, int64(0), searchInfo.offset)
+	})
+
+	t.Run("parseSearchInfo offset in hybrid search sub-request", func(t *testing.T) {
+		withOffset := func(offset string) []*commonpb.KeyValuePair {
+			return append(getValidSearchParams(), &commonpb.KeyValuePair{Key: OffsetKey, Value: offset})
+		}
+		rank := &rankParams{limit: 10, offset: 5}
+
+		tests := []struct {
+			description string
+			params      []*commonpb.KeyValuePair
+		}{
+			// The shapes clients send: none, 0 (Go SDK, REST v2), the hybrid search's own offset (PyMilvus).
+			{"no offset", getValidSearchParams()},
+			{"zero offset", withOffset("0")},
+			{"offset of the hybrid search", withOffset("5")},
+		}
+		for _, test := range tests {
+			t.Run(test.description, func(t *testing.T) {
+				searchInfo, err := parseSearchInfo(test.params, nil, rank, false)
+				assert.NoError(t, err)
+				assert.Equal(t, int64(10), searchInfo.planInfo.GetTopk())
+				assert.Equal(t, int64(0), searchInfo.offset)
+			})
+		}
+
+		t.Run("other offset", func(t *testing.T) {
+			_, err := parseSearchInfo(withOffset("45"), nil, rank, false)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.ErrorContains(t, err, "hybrid search sub-request")
+		})
+
+		t.Run("other offset without a hybrid search offset", func(t *testing.T) {
+			_, err := parseSearchInfo(withOffset("45"), nil, &rankParams{limit: 10}, false)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		})
+
+		t.Run("unparsable offset", func(t *testing.T) {
+			_, err := parseSearchInfo(withOffset("abc"), nil, rank, false)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		})
 	})
 
 	t.Run("parseSearchInfo groupBy info for hybrid search", func(t *testing.T) {
