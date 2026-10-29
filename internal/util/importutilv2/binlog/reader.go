@@ -780,14 +780,14 @@ func (r *reader) Read() (*storage.InsertData, error) {
 				insertData.Data[field.GetFieldID()] = fieldData
 			}
 
-			err := fieldData.AppendRow(row[field.GetFieldID()])
+			err := fieldData.TrackedAppendRow(row[field.GetFieldID()])
 			if err != nil {
 				return nil, err
 			}
 			rowNum++
 		}
 		if rowNum%100 == 0 && // Prevent frequent memory check
-			insertData.GetMemorySize() >= r.bufferSize {
+			insertData.GetTrackedMemorySize() >= r.bufferSize {
 			break
 		}
 	}

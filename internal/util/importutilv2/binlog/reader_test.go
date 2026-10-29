@@ -2918,3 +2918,79 @@ func TestMultiReadWithRetry_RetryableError(t *testing.T) {
 	assert.Equal(t, [][]byte{[]byte("data")}, result)
 	assert.Equal(t, 3, callCount, "retryable error should be retried until success")
 }
+
+func TestStorageV2ReaderTrackedBufferBoundary(t *testing.T) {
+	type valueReader struct {
+		storage.DeserializeReader[*storage.Value]
+	}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, Nullable: true},
+		{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, Nullable: true},
+	}}
+	rows := make([]map[int64]any, 135)
+	baseline, err := storage.NewInsertDataWithFunctionOutputField(schema)
+	require.NoError(t, err)
+	for i := range rows {
+		var text, sparse any
+		if i%3 != 0 {
+			text = strings.Repeat("中", i%7+1)
+		}
+		if i%5 != 0 {
+			sparse = typeutil.CreateSparseFloatRow([]uint32{uint32(126 + i)}, []float32{1})
+		}
+		rows[i] = map[int64]any{100: int64(i), 101: text, 102: sparse}
+		if i < 100 {
+			require.NoError(t, baseline.Append(rows[i]))
+		}
+	}
+	// Three fields per row: the existing field-append counter reaches a multiple
+	// of 100 after 100 complete rows. Use the scan implementation as the baseline.
+	threshold := baseline.GetMemorySize()
+	for _, tc := range []struct {
+		name      string
+		limit     int
+		batchRows []int
+	}{
+		{"exact threshold", threshold, []int{100, 35}},
+		{"below threshold at check", threshold + 1, []int{135}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			consumed, scans := 0, 0
+			owner := &valueReader{}
+			next := mockey.Mock((*valueReader).NextValue).To(func(*valueReader) (**storage.Value, error) {
+				if consumed == len(rows) {
+					return nil, io.EOF
+				}
+				value := &storage.Value{Value: rows[consumed]}
+				consumed++
+				return &value, nil
+			}).Build()
+			defer next.UnPatch()
+			r := &reader{ctx: context.Background(), schema: schema, storageVersion: storage.StorageV2, bufferSize: tc.limit, dr: owner}
+			offset := 0
+			for _, count := range tc.batchRows {
+				// Return zero if the scan is called: both the call count and batch boundary
+				// must then fail, rather than silently exercising the old implementation.
+				scan := mockey.Mock((*storage.InsertData).GetMemorySize).To(func(*storage.InsertData) int { scans++; return 0 }).Build()
+				actual, err := r.Read()
+				scan.UnPatch()
+				require.NoError(t, err)
+				require.Equal(t, count, actual.GetRowNum())
+				require.Equal(t, offset+count, consumed)
+				require.Equal(t, actual.GetMemorySize(), actual.GetTrackedMemorySize())
+				for _, field := range actual.Data {
+					require.Equal(t, field.GetMemorySize(), field.GetTrackedMemorySize())
+				}
+				for i := 0; i < count; i++ {
+					require.Equal(t, rows[offset+i], actual.GetRow(i))
+				}
+				offset += count
+			}
+			actual, err := r.Read()
+			require.ErrorIs(t, err, io.EOF)
+			require.Nil(t, actual)
+			require.Zero(t, scans)
+		})
+	}
+}

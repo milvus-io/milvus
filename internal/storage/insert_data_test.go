@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -302,4 +303,104 @@ func TestInsertMemorySizeAllFields(t *testing.T) {
 			require.Equal(t, total, data.GetMemorySize())
 		}
 	}
+}
+
+func TestInsertDataTrackedFieldSizes(t *testing.T) {
+	cases := fieldMemoryCases()
+	cases = append(cases, fieldMemoryCase{schemapb.DataType_Text, "中", []string{"中"}, 1, 19, 0, 0})
+	for _, nullable := range []bool{false, true} {
+		for _, capacity := range []int{0, 64} {
+			t.Run(fmt.Sprintf("nullable=%t/cap=%d", nullable, capacity), func(t *testing.T) {
+				schema := &schemapb.CollectionSchema{}
+				expected := make(map[FieldID]int)
+				for i, tc := range cases {
+					element := schemapb.DataType_Int64
+					if tc.dataType == schemapb.DataType_ArrayOfVector {
+						element = schemapb.DataType_FloatVector
+					}
+					id := FieldID(100 + i)
+					schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+						FieldID: id, Name: fmt.Sprintf("field_%d", id), DataType: tc.dataType,
+						Nullable: nullable, ElementType: element,
+						TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}},
+					})
+					expected[id] = tc.fixed
+				}
+				var data *InsertData
+				var err error
+				if capacity == 0 {
+					data, err = NewInsertData(schema)
+				} else {
+					data, err = NewInsertDataWithCap(schema, capacity, false)
+				}
+				require.NoError(t, err)
+				require.Len(t, data.Data, len(cases))
+				check := func() {
+					t.Helper()
+					total, trackedTotal := 0, 0
+					for id, field := range data.Data {
+						require.Equal(t, expected[id], field.GetTrackedMemorySize(), "field %d", id)
+						require.Equal(t, field.GetMemorySize(), field.GetTrackedMemorySize(), "field %d", id)
+						total += expected[id]
+						trackedTotal += field.GetTrackedMemorySize()
+					}
+					require.Equal(t, total, trackedTotal)
+					require.Equal(t, data.GetMemorySize(), trackedTotal)
+				}
+				check()
+				for i, tc := range cases {
+					id := FieldID(100 + i)
+					field := data.Data[id] // Exercise the public FieldData interface.
+					require.NoError(t, field.TrackedAppendRow(tc.row))
+					expected[id] += tc.perRow + tc.shared
+					if nullable {
+						expected[id] += 1 + tc.mapping
+					}
+					check()
+					var validity interface{}
+					validitySize := 0
+					if nullable {
+						validity, validitySize = []bool{true}, 1+tc.mapping
+					}
+					require.NoError(t, field.TrackedAppendRows(tc.batch, validity))
+					expected[id] += tc.perRow + validitySize
+					check()
+					require.NoError(t, field.TrackedAppendDataRows(tc.batch))
+					expected[id] += tc.perRow
+					check()
+					require.NoError(t, field.TrackedAppendValidDataRows(validity))
+					expected[id] += validitySize
+					check()
+				}
+			})
+		}
+	}
+}
+
+// A tracked total must not fall back to scanning any field's historical data.
+type noScanFieldData struct{ FieldData }
+
+func (noScanFieldData) GetMemorySize() int { panic("unexpected field scan") }
+
+func TestInsertDataTrackedSizeAndFieldChanges(t *testing.T) {
+	data := &InsertData{Data: map[FieldID]FieldData{100: NewStringFieldData(schemapb.DataType_VarChar, true, 0)}}
+	require.NoError(t, data.Data[100].TrackedAppendRow("中"))
+	require.Equal(t, 21, data.GetTrackedMemorySize())
+	require.Equal(t, data.GetMemorySize(), data.GetTrackedMemorySize())
+	data.Data[100] = noScanFieldData{data.Data[100]}
+	require.Equal(t, 21, data.GetTrackedMemorySize())
+	require.NoError(t, data.Data[100].TrackedAppendRow(nil))
+	require.Equal(t, 38, data.GetTrackedMemorySize())
+	require.ErrorIs(t, data.Data[100].TrackedAppendRow(42), merr.ErrParameterInvalid)
+	require.Equal(t, 38, data.GetTrackedMemorySize())
+	data.Data[100] = NewJSONFieldData(false, 0)
+	require.NoError(t, data.Data[100].TrackedAppendRow([]byte("{}")))
+	require.Equal(t, 19, data.GetTrackedMemorySize())
+	data.Data[101] = NewInt64FieldData(false, 0)
+	require.NoError(t, data.Data[101].TrackedAppendRow(int64(1)))
+	require.Equal(t, 28, data.GetTrackedMemorySize())
+	require.Equal(t, data.GetMemorySize(), data.GetTrackedMemorySize())
+	delete(data.Data, 100)
+	require.Equal(t, 9, data.GetTrackedMemorySize())
+	require.Zero(t, (&InsertData{}).GetTrackedMemorySize())
 }

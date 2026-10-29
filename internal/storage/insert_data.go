@@ -142,6 +142,17 @@ func (i *InsertData) GetMemorySize() int {
 	return size
 }
 
+// GetTrackedMemorySize sums field sizes without scanning their rows.
+// All fields must be constructed and mutated according to FieldData's tracking
+// contract. Field replacement and deletion are reflected on each call.
+func (i *InsertData) GetTrackedMemorySize() int {
+	var size int
+	for _, field := range i.Data {
+		size += field.GetTrackedMemorySize()
+	}
+	return size
+}
+
 func (i *InsertData) Append(row map[FieldID]interface{}) error {
 	for fID, v := range row {
 		field, ok := i.Data[fID]
