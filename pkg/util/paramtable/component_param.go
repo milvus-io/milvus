@@ -5712,7 +5712,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 
 	p.MigrateDataTimeout = ParamItem{
 		Key:          "queryNode.migrateDataTimeout",
-		Version:      "3.1.0",
+		Version:      "3.0.5",
 		FallbackKeys: []string{"queryNode.standaloneMigrateDataTimeout"},
 		DefaultValue: "10s",
 		Doc:          "Duration string (e.g. 10s, 3m). After this duration, a stopping query node stops waiting for data migration if no other active query node is available.",
