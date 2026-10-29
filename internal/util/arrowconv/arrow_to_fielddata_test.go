@@ -24,6 +24,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -586,4 +587,42 @@ func TestArrowFieldsToProto_JSONOwnedAfterRelease(t *testing.T) {
 	data := result[0].GetScalars().GetJsonData().GetData()
 	assert.Equal(t, []byte(`{"key":"val"}`), data[0])
 	assert.Equal(t, []byte(`[1,2,3]`), data[1])
+}
+
+func TestEmptyNativeColumnTypesExportWithDeclaredTypes(t *testing.T) {
+	for _, dtype := range []schemapb.DataType{
+		schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16,
+		schemapb.DataType_Int32, schemapb.DataType_Int64, schemapb.DataType_Timestamptz,
+		schemapb.DataType_Float, schemapb.DataType_Double,
+		schemapb.DataType_VarChar, schemapb.DataType_Text, schemapb.DataType_JSON,
+		schemapb.DataType_Array, schemapb.DataType_Geometry, schemapb.DataType_SparseFloatVector,
+		schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
+		schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_Int8Vector,
+		schemapb.DataType_ArrayOfVector,
+	} {
+		t.Run(dtype.String(), func(t *testing.T) {
+			schema := &schemapb.FieldSchema{
+				Name: "output", FieldID: 100, DataType: dtype, Nullable: true,
+				ElementType: schemapb.DataType_Int64,
+				TypeParams:  []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}},
+			}
+			if dtype == schemapb.DataType_ArrayOfVector {
+				schema.ElementType = schemapb.DataType_FloatVector
+			}
+			physical, err := NativeColumnType(schema)
+			require.NoError(t, err)
+			column := arrow.NewChunked(physical, nil)
+			defer column.Release()
+			require.Zero(t, column.Len())
+			require.NotEqual(t, arrow.NULL, column.DataType().ID())
+			field, err := ArrowChunkedColumnToFieldData(column, schema)
+			require.NoError(t, err)
+			require.Equal(t, dtype, field.Type)
+			require.Equal(t, int64(100), field.FieldId)
+			if dtype == schemapb.DataType_Timestamptz {
+				require.NotNil(t, field.GetScalars().GetTimestamptzData())
+				require.Nil(t, field.GetScalars().GetLongData())
+			}
+		})
+	}
 }

@@ -669,39 +669,47 @@ func (s *LBPolicySuite) TestExecuteWithRetryNonRetriableErrorUsesBlacklist() {
 // (the request's own fault) does not blacklist the serving node nor get retried
 // across replicas.
 func (s *LBPolicySuite) TestExecuteWithRetryInputErrorSkipsBlacklist() {
-	ctx := context.Background()
-	channel := s.channels[0]
-	nodes := []NodeInfo{{NodeID: 1, Address: "localhost:9000", Serviceable: true}}
-	s.lbPolicy.retryOnReplica = 3
+	for name, inputErr := range map[string]error{
+		"parameter invalid": merr.ErrParameterInvalid,
+		"grep native error after RPC": merr.Error(merr.Status(merr.SegcoreError(
+			int32(merr.CodeInvalidParameter), "grep result budget exceeded"))),
+	} {
+		s.Run(name, func() {
+			ctx := context.Background()
+			channel := s.channels[0]
+			nodes := []NodeInfo{{NodeID: 1, Address: "localhost:9000", Serviceable: true}}
+			s.lbPolicy.retryOnReplica = 3
 
-	s.mgr.ExpectedCalls = nil
-	s.lbBalancer.ExpectedCalls = nil
-	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil)
-	s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Maybe()
-	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
-	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
-	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+			s.mgr.ExpectedCalls = nil
+			s.lbBalancer.ExpectedCalls = nil
+			s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil)
+			s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Maybe()
+			s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+			s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+			s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
+			s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 
-	execCount := 0
-	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
-		Db:             s.dbName,
-		CollectionName: s.collectionName,
-		CollectionID:   s.collectionID,
-		Channel:        channel,
-		Nq:             1,
-		Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
-			execCount++
-			return errors.Wrapf(merr.ErrParameterInvalid, "bad request on QueryNode %d", nodeID)
-		},
-	})
+			execCount := 0
+			err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+				Db:             s.dbName,
+				CollectionName: s.collectionName,
+				CollectionID:   s.collectionID,
+				Channel:        channel,
+				Nq:             1,
+				Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+					execCount++
+					return merr.Wrapf(inputErr, "bad request on QueryNode %d", nodeID)
+				},
+			})
 
-	s.Error(err)
-	s.ErrorIs(err, merr.ErrParameterInvalid)
-	// not retried across replicas despite retryOnReplica=3
-	s.Equal(1, execCount)
-	// serving node not blacklisted for the request's own fault
-	s.NotContains(s.lbPolicy.blacklist.GetBlacklistedNodes(channel), int64(1))
+			s.Error(err)
+			s.ErrorIs(err, inputErr)
+			// not retried across replicas despite retryOnReplica=3
+			s.Equal(1, execCount)
+			// serving node not blacklisted for the request's own fault
+			s.NotContains(s.lbPolicy.blacklist.GetBlacklistedNodes(channel), int64(1))
+		})
+	}
 }
 
 // TestExecuteWithRetryUnsupportedSkipsBlacklist verifies that a segcore

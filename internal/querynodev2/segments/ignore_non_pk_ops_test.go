@@ -329,7 +329,7 @@ func TestFetchFieldsAsRecordReleasesLocalPins(t *testing.T) {
 			defer unpin.UnPatch()
 			fill := mockey.Mock(segcore.FillRetrieveFieldsOrdered).Return(nil, context.Canceled).Build()
 			defer fill.UnPatch()
-			_, err := fetchFieldsAsRecord(context.Background(), tc.segments, nil, &MergedResultWithOffsets{})
+			_, err := fetchFieldsAsRecord(context.Background(), tc.segments, nil, &MergedResultWithOffsets{}, 1024)
 			require.Error(t, err)
 			require.EqualValues(t, tc.wantPin, pin.Times())
 			require.EqualValues(t, tc.wantUnpin, unpin.Times())

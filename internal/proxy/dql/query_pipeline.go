@@ -215,6 +215,15 @@ func (p *QueryPipeline) Execute(ctx context.Context, results []*internalpb.Retri
 		return nil, err
 	}
 
+	// Computed columns have already followed the same row selection and pagination
+	// as stored fields. Publish them as ordinary output columns only after all
+	// schema/FieldID-based pipeline processing and empty-field completion.
+	if computed := output.GetComputedResults(); len(computed) > 0 {
+		fields := make([]*schemapb.FieldData, 0, len(result.FieldsData)+len(computed))
+		fields = append(fields, result.FieldsData...)
+		result.FieldsData = append(fields, computed...)
+	}
+
 	return result, nil
 }
 

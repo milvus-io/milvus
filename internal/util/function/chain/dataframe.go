@@ -19,9 +19,10 @@
 package chain
 
 import (
+	"strconv"
+
 	"github.com/apache/arrow/go/v17/arrow"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -44,8 +45,7 @@ import (
 //	├── schema: Arrow schema with field metadata
 //	├── columns: []arrow.Chunked (one per column, each has NQ chunks)
 //	├── chunkSizes: []int64 (row count per chunk, corresponds to Topks)
-//	├── fieldTypes: Milvus DataType per column (for export back to protobuf)
-//	├── fieldIDs: field ID per column (for export back to protobuf)
+//	├── fieldMetadata: owned type/identity/nullability descriptors and column origin
 //	└── metadata: key-value pairs (e.g., metric_type)
 //
 // Data layout example (2 columns, 3 chunks/NQ):
@@ -55,14 +55,12 @@ import (
 //	$score     [0.9,0.8,0.7] [0.6,0.5]   [0.4]
 //	chunkSizes: [3, 2, 1]
 type DataFrame struct {
-	schema         *arrow.Schema                // Arrow schema with field metadata
-	columns        []*arrow.Chunked             // Chunked arrays, one per column
-	chunkSizes     []int64                      // Row count per chunk (corresponds to Topks)
-	nameIndex      map[string]int               // Column name to index mapping
-	fieldTypes     map[string]schemapb.DataType // Preserve Milvus type info for export
-	fieldIDs       map[string]int64             // Field IDs for export
-	fieldNullables map[string]bool              // Field nullable info for schema creation
-	metadata       map[string]string            // Arbitrary key-value metadata (e.g., metric_type)
+	schema        *arrow.Schema             // Arrow schema with field metadata
+	columns       []*arrow.Chunked          // Chunked arrays, one per column
+	chunkSizes    []int64                   // Row count per chunk (corresponds to Topks)
+	nameIndex     map[string]int            // Column name to index mapping
+	fieldMetadata map[string]columnMetadata // Immutable per-column definitions and explicit origin
+	metadata      map[string]string         // Arbitrary key-value metadata (e.g., metric_type)
 }
 
 // =============================================================================
@@ -137,18 +135,6 @@ func (df *DataFrame) HasColumn(name string) bool {
 // Field Metadata Methods (Read-only)
 // =============================================================================
 
-// FieldType returns the Milvus DataType for a column.
-func (df *DataFrame) FieldType(name string) (schemapb.DataType, bool) {
-	dt, exists := df.fieldTypes[name]
-	return dt, exists
-}
-
-// FieldID returns the field ID for a column.
-func (df *DataFrame) FieldID(name string) (int64, bool) {
-	id, exists := df.fieldIDs[name]
-	return id, exists
-}
-
 // Metadata returns a metadata value by key.
 func (df *DataFrame) Metadata(key string) (string, bool) {
 	val, ok := df.metadata[key]
@@ -197,7 +183,8 @@ func (df *DataFrame) Release() {
 //   - AddColumnFromChunks: add a column from Arrow Array slices (takes ownership of chunks)
 //   - AddColumnFrom: copy a column from another DataFrame (retains and copies metadata)
 //   - AddColumns: batch add multiple columns (all-or-nothing with rollback on error)
-//   - CopyFieldMetadata: copy field type/ID/nullable from source DataFrame
+//   - SetFieldSchema: snapshot declared collection field definitions
+//   - CopyFieldMetadata: copy field definitions, type/ID/nullable from source DataFrame
 //   - Build: construct the DataFrame and invalidate the builder
 type DataFrameBuilder struct {
 	result *DataFrame
@@ -208,13 +195,11 @@ type DataFrameBuilder struct {
 func NewDataFrameBuilder() *DataFrameBuilder {
 	return &DataFrameBuilder{
 		result: &DataFrame{
-			columns:        make([]*arrow.Chunked, 0),
-			chunkSizes:     make([]int64, 0),
-			nameIndex:      make(map[string]int),
-			fieldTypes:     make(map[string]schemapb.DataType),
-			fieldIDs:       make(map[string]int64),
-			fieldNullables: make(map[string]bool),
-			metadata:       make(map[string]string),
+			columns:       make([]*arrow.Chunked, 0),
+			chunkSizes:    make([]int64, 0),
+			nameIndex:     make(map[string]int),
+			fieldMetadata: make(map[string]columnMetadata),
+			metadata:      make(map[string]string),
 		},
 	}
 }
@@ -226,33 +211,6 @@ func (b *DataFrameBuilder) SetChunkSizes(sizes []int64) *DataFrameBuilder {
 	}
 	b.result.chunkSizes = make([]int64, len(sizes))
 	copy(b.result.chunkSizes, sizes)
-	return b
-}
-
-// SetFieldType sets the Milvus data type for a column.
-func (b *DataFrameBuilder) SetFieldType(name string, dataType schemapb.DataType) *DataFrameBuilder {
-	if b.result == nil {
-		return b
-	}
-	b.result.fieldTypes[name] = dataType
-	return b
-}
-
-// SetFieldID sets the field ID for a column.
-func (b *DataFrameBuilder) SetFieldID(name string, fieldID int64) *DataFrameBuilder {
-	if b.result == nil {
-		return b
-	}
-	b.result.fieldIDs[name] = fieldID
-	return b
-}
-
-// SetFieldNullable sets whether a column is nullable.
-func (b *DataFrameBuilder) SetFieldNullable(name string, nullable bool) *DataFrameBuilder {
-	if b.result == nil {
-		return b
-	}
-	b.result.fieldNullables[name] = nullable
 	return b
 }
 
@@ -297,6 +255,9 @@ func (b *DataFrameBuilder) addColumn(name string, col *arrow.Chunked) error {
 
 // addColumnUnchecked adds a column without validation (internal use).
 func (b *DataFrameBuilder) addColumnUnchecked(name string, col *arrow.Chunked) {
+	if _, exists := b.result.fieldMetadata[name]; !exists {
+		b.result.fieldMetadata[name] = columnMetadata{origin: columnComputed}
+	}
 	// Accumulate field for deferred schema creation in Build()
 	b.fields = append(b.fields, arrow.Field{Name: name, Type: col.DataType(), Nullable: true})
 
@@ -399,28 +360,28 @@ func (b *DataFrameBuilder) AddColumnFromChunks(name string, chunks []arrow.Array
 	}
 
 	// Infer Milvus type if not set
-	if _, exists := b.result.fieldTypes[name]; !exists {
+	if _, exists := b.result.FieldType(name); !exists {
 		if milvusType, err := ToMilvusType(arrowType); err == nil {
-			b.result.fieldTypes[name] = milvusType
+			if err := b.SetFieldType(name, milvusType); err != nil {
+				chunked.Release()
+				return err
+			}
 		}
 	}
 
 	return b.addColumn(name, chunked)
 }
 
-// CopyFieldMetadata copies field type, ID, and nullable from source DataFrame.
+// CopyFieldMetadata replaces the whole descriptor, including absent values.
+// Immutable schema snapshots can be shared; setters copy before modification.
 func (b *DataFrameBuilder) CopyFieldMetadata(source *DataFrame, colName string) *DataFrameBuilder {
 	if b.result == nil {
 		return b
 	}
-	if ft, ok := source.FieldType(colName); ok {
-		b.result.fieldTypes[colName] = ft
-	}
-	if fid, ok := source.FieldID(colName); ok {
-		b.result.fieldIDs[colName] = fid
-	}
-	if nullable, ok := source.fieldNullables[colName]; ok {
-		b.result.fieldNullables[colName] = nullable
+	if meta, ok := source.fieldMetadata[colName]; ok {
+		b.result.fieldMetadata[colName] = meta
+	} else {
+		delete(b.result.fieldMetadata, colName)
 	}
 	return b
 }
@@ -447,7 +408,11 @@ func (b *DataFrameBuilder) Build() *DataFrame {
 			finalFields[i] = arrow.Field{
 				Name:     f.Name,
 				Type:     f.Type,
-				Nullable: b.result.fieldNullables[f.Name],
+				Nullable: b.result.FieldNullable(f.Name),
+			}
+			if meta := b.result.fieldMetadata[f.Name]; meta.explicitType {
+				finalFields[i].Metadata = arrow.NewMetadata([]string{ArrowDataTypeMetadataKey},
+					[]string{strconv.Itoa(int(meta.field.GetDataType()))})
 			}
 		}
 		b.result.schema = arrow.NewSchema(finalFields, nil)

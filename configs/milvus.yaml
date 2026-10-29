@@ -1882,6 +1882,12 @@ credential:
 
 # Any configuration related to functions
 function:
+  grep:
+    maxArgumentBytes: 65536 # Maximum byte length of GrepOp arguments. Invalid or non-positive values fall back to 65536. Changes apply to newly prepared operators.
+    maxRegexBytes: 10485760 # Regex engine compiled-program size budget in bytes. Invalid or non-positive values fall back to 10485760. Changes apply to newly prepared operators.
+    maxDFACacheBytes: 8388608 # Regex engine DFA cache budget in bytes; not an aggregate process memory limit. Invalid or non-positive values fall back to 8388608. Changes apply to newly prepared operators.
+    batchSize: 128 # Candidate text rows per Grep read batch, independent of the matching limit. Invalid or non-positive configuration falls back to 128. Changes apply to newly prepared operators.
+    maxScanRows: 0 # Maximum candidate offsets returned per segment for Grep after filter and MVCC. 0 disables the row cap; invalid or negative configuration falls back to 0. A positive cap truncates candidate selection and logs a warning when more candidates may remain; Grep results may be incomplete. Changes apply to newly enabled candidate plans.
   model:
     requestTimeout: 30s # Global timeout for external model requests, e.g. 30s. Function param timeout_ms overrides it.
   textEmbedding:

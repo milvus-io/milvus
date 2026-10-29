@@ -194,6 +194,7 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                           const int32_t* seg_indices,
                           const int64_t* seg_offsets,
                           int64_t total_rows,
+                          int64_t max_output_size,
                           ArrowSchema* out_schema,
                           ArrowArray* out_array,
                           void* cancellation_source) {
@@ -203,6 +204,7 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
         AssertInfo(num_segments > 0, "num_segments must be positive");
         AssertInfo(c_plan != nullptr, "null retrieve plan");
         AssertInfo(total_rows >= 0, "total_rows must not be negative");
+        AssertInfo(max_output_size >= 0, "negative output byte budget");
         AssertInfo(total_rows == 0 || seg_indices != nullptr,
                    "null seg_indices for non-empty rows");
         AssertInfo(total_rows == 0 || seg_offsets != nullptr,
@@ -251,6 +253,26 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                 segment_fields[seg_idx].result_positions.push_back(pos);
                 segment_fields[seg_idx].segment_offsets.push_back(
                     seg_offsets[pos]);
+            }
+
+            // Check the aggregate for all winning segments before reading any
+            // output fields. Reuse ordinary Retrieve's per-field statistics.
+            int64_t estimated_size = 0;
+            for (const auto& selected : segment_fields) {
+                if (selected.segment_offsets.empty()) {
+                    continue;
+                }
+                milvus::futures::throwIfCancelled(cancel_token);
+                estimated_size +=
+                    selected.segment->get_fields_avg_size(plan->field_ids_) *
+                    static_cast<int64_t>(selected.segment_offsets.size());
+            }
+            if (estimated_size > max_output_size) {
+                ThrowInfo(milvus::InvalidParameter,
+                          "estimated query output size {} exceeds remaining "
+                          "output byte budget {}",
+                          estimated_size,
+                          max_output_size);
             }
 
             auto dynamic_field_id = plan->schema_->get_dynamic_field_id();

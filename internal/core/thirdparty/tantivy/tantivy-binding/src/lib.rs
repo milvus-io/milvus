@@ -1,5 +1,9 @@
 use error::TantivyBindingError;
 
+// Aggregate Grep's rlib into the existing static artifact. ABI definitions and
+// ownership remain in the Grep crate; milvus_core retains its exported symbols.
+pub use milvus_grep_core::ffi as grep_ffi;
+
 mod array;
 mod bitset_wrapper;
 mod data_type;

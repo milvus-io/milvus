@@ -88,6 +88,8 @@ github.com/gin-gonic/gin v1.4.0/go.mod h1:OW2EZn3DO8Ln9oIKOvM++LBO+5UPHJJDH72/q/
 github.com/go-check/check v0.0.0-20180628173108-788fd7840127/go.mod h1:9ES+weclKsC9YodN5RgxqK/VD9HM9JsCSh7rNhMZE98=
 github.com/go-errors/errors v1.0.1 h1:LUHzmkK3GUKUrL/1gfBUxAHzcev3apQlezX/+O7ma6w=
 github.com/go-errors/errors v1.0.1/go.mod h1:f4zRHt4oKfwPJE5k8C9vpYG+aDHdBFUsgrm6/TyX73Q=
+github.com/go-errors/errors v1.4.2 h1:J6MZopCL4uSllY1OfXM374weqZFFItUbrImctkmUxIA=
+github.com/go-errors/errors v1.4.2/go.mod h1:sIVyrIiJhuEF+Pj9Ebtd6P/rEYROXFi3BopGUQ5a5Og=
 github.com/go-ini/ini v1.67.0 h1:z6ZrTEZqSWOTyH2FlglNbNgARyHG8oLW9gMELqKr06A=
 github.com/go-ini/ini v1.67.0/go.mod h1:ByCAeIL28uOIIG0E3PJtZPDL8WnHpFKFOtgjp+3Ies8=
 github.com/go-kit/kit v0.9.0/go.mod h1:xBxKIO96dXMWWy0MnWVtmwkA9/13aqxPnvrjFYMA2as=
@@ -221,6 +223,8 @@ github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260914122923-ae7fea6ab2f4 h
 github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260914122923-ae7fea6ab2f4/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
 github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261014040338-d453f0648677 h1:XrNH1S4Ifk/5RJ1dEM8TAPRpXPiH9xUFB9d5bbXxaSc=
 github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261014040338-d453f0648677/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
+github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261027141346-6f03375388ae h1:M0ye8Vv+cEfQQGT3T58rRmsbtz3+C0JL689pTIO/WAY=
+github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20261027141346-6f03375388ae/go.mod h1:rbKpv5JToISTKTTLl0duL5r6wbYnjJ9SsD0QgXMzKy0=
 github.com/minio/asm2plan9s v0.0.0-20200509001527-cdd76441f9d8 h1:AMFGa4R4MiIpspGNG7Z948v4n35fFGB3RR3G/ry4FWs=
 github.com/minio/asm2plan9s v0.0.0-20200509001527-cdd76441f9d8/go.mod h1:mC1jAcsrzbxHt8iiaC+zU4b1ylILSosueou12R++wfY=
 github.com/minio/c2goasm v0.0.0-20190812172519-36a3d3bbc4f3 h1:+n/aFZefKZp7spd8DFdX7uMikMLXX4oubIzJF4kv/wI=

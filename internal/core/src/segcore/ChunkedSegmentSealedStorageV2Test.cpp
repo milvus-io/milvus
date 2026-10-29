@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <arrow/api.h>
+#include <arrow/c/abi.h>
 #include <arrow/array/array_base.h>
 #include <arrow/array/builder_binary.h>
 #include <arrow/array/builder_primitive.h>
@@ -49,6 +50,7 @@
 #include <utility>
 #include <vector>
 #include "segcore/default_fs.h"
+#include "segcore/retrieve_result_export_c.h"
 
 #include "NamedType/named_type_impl.hpp"
 #include "cachinglayer/Manager.h"
@@ -1643,6 +1645,32 @@ TEST_P(TestLazyManifest, LazyManifestRetrieveSizeAndValuesAreCorrect) {
     plan->plan_node_->plannodes_ = milvus::test::CreateRetrievePlanByExpr(
         std::make_shared<expr::AlwaysTrueExpr>());
     plan->field_ids_ = {fields.at("string1")};
+
+    // Late materialization must use the same real column statistics, not a
+    // schema/default string length. This check must precede bulk field reads.
+    CSegmentInterface c_segment = manifest_segment.get();
+    int32_t segment_index = 0;
+    int64_t segment_offset = 0;
+    ArrowSchema out_schema{};
+    ArrowArray out_array{};
+    auto status = FillRetrieveFieldsOrdered(&c_segment,
+                                            1,
+                                            plan.get(),
+                                            &segment_index,
+                                            &segment_offset,
+                                            1,
+                                            eager_avg_size - 1,
+                                            &out_schema,
+                                            &out_array,
+                                            nullptr);
+    EXPECT_EQ(status.error_code, InvalidParameter);
+    EXPECT_EQ(out_schema.release, nullptr);
+    EXPECT_EQ(out_array.release, nullptr);
+    if (status.error_code != Success) {
+        free(const_cast<char*>(status.error_msg));
+    }
+    EXPECT_EQ(segment_impl->get_fields_avg_size(plan->field_ids_),
+              eager_avg_size);
 
     segment_interface->set_field_avg_size(
         fields.at("string1"), kNumRows, kNumRows);

@@ -218,9 +218,8 @@ func assembleOperatorResult(ctx *types.FuncContext, inputDF *DataFrame, outputs 
 		if err := builder.addColumn(col.Field.Name, col.Data); err != nil {
 			return nil, err
 		}
-		builder.SetFieldNullable(col.Field.Name, col.Field.Nullable)
-		if typ, err := ToMilvusType(col.Field.Type); err == nil {
-			builder.SetFieldType(col.Field.Name, typ)
+		if err := builder.SetComputedField(col.Field); err != nil {
+			return nil, err
 		}
 		fields = append(fields, col.Field)
 	}
