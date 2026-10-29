@@ -32,16 +32,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
 
-func TestSegmentChangeOptInDefault(t *testing.T) {
+func TestSegmentChangeEnabledDefault(t *testing.T) {
 	params := &ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true)))
 	item := &params.DataCoordCfg.SegmentChangeEnabled
-	require.Equal(t, "false", item.DefaultValue)
-	require.False(t, item.GetAsBool())
-	require.NoError(t, params.Save(item.Key, "true"))
+	require.Equal(t, "true", item.DefaultValue)
 	require.True(t, item.GetAsBool())
 	require.NoError(t, params.Save(item.Key, "false"))
 	require.False(t, item.GetAsBool())
+	require.NoError(t, params.Save(item.Key, "true"))
+	require.True(t, item.GetAsBool())
 }
 
 func TestDataNodeConcurrencyAndImportMemoryFallbacks(t *testing.T) {
