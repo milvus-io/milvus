@@ -206,7 +206,7 @@ CachedSearchIterator::CachedSearchIterator(
                 int64_t total_elements = 0;
                 for (int64_t i = 0; i < chunk_size; ++i) {
                     total_bytes += va_ptr[i].byte_size();
-                    total_elements += va_ptr[i].length();
+                    total_elements += va_ptr[i].physical_length();
                 }
                 auto buf = std::make_unique<uint8_t[]>(total_bytes);
                 auto* ptr = buf.get();

@@ -707,6 +707,7 @@ TEST(MatchExprZeroElementBatch,
                                DataType::ARRAY,
                                DataType::ARRAY,
                                true,
+                               false,
                                std::nullopt,
                                std::string{},
                                std::make_optional(std::move(nested_int_type))));
@@ -827,6 +828,7 @@ TEST(MatchExprNestedArrayExpressions, MatchFamilyGrowingAndSealed) {
                                DataType::ARRAY,
                                DataType::ARRAY,
                                false,
+                               false,
                                std::nullopt,
                                std::string{},
                                std::make_optional(std::move(nested_int_type))));
@@ -841,6 +843,7 @@ TEST(MatchExprNestedArrayExpressions, MatchFamilyGrowingAndSealed) {
                   nested_string_fid,
                   DataType::ARRAY,
                   DataType::ARRAY,
+                  false,
                   false,
                   std::nullopt,
                   std::string{},
@@ -1435,7 +1438,8 @@ TEST(MatchExprNullableStruct, PinnedSchemaBuildsOldMappingAfterStructReadded) {
                          FieldId(sub.get() + 1),
                          DataType::ARRAY,
                          DataType::INT32,
-                         true);
+                         true,
+                         false);
     segment->Reopen(new_schema);
 
     auto child = std::make_shared<FixedBitmapExpr>(TargetBitmap(3, true),

@@ -1521,6 +1521,9 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 								if row.GetData() == nil {
 									return 0, merr.WrapErrParameterInvalidMsg("nil array data")
 								}
+								if subFieldSchema.GetElementNullable() {
+									return len(typeutil.GetArrayElementValidData(row)), nil
+								}
 								if typeutil.IsNestedArrayTypeSchema(subFieldSchema.GetTypeSchema()) {
 									return len(row.GetArrayData().GetData()), nil
 								}
@@ -1581,6 +1584,9 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 								}
 								if payloadLen%vectorWidth != 0 {
 									return 0, merr.WrapErrParameterInvalidMsg("payload length %d is not divisible by vector width %d", payloadLen, vectorWidth)
+								}
+								if subFieldSchema.GetElementNullable() {
+									return len(typeutil.GetVectorArrayElementValidData(row)), nil
 								}
 								return payloadLen / vectorWidth, nil
 							},

@@ -202,7 +202,7 @@ BitmapIndex<T>::BuildArrayField(const std::vector<FieldDataPtr>& field_datas) {
                 auto array =
                     reinterpret_cast<const milvus::Array*>(data->RawValue(i));
                 for (size_t j = 0; j < array->length(); ++j) {
-                    auto val = array->get_data<T>(j);
+                    auto val = array->get_data_unchecked<T>(j);
                     data_[val].add(offset);
                 }
                 valid_bitset_.set(offset);
@@ -231,7 +231,7 @@ BitmapIndex<T>::BuildArrayFieldNested(
                 reinterpret_cast<const milvus::Array*>(data->RawValue(i));
             auto length = array->length();
             for (size_t j = 0; j < length; ++j) {
-                auto val = array->get_data<T>(j);
+                auto val = array->get_data_unchecked<T>(j);
                 data_[val].add(offset++);
             }
         }

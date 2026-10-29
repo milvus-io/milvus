@@ -936,6 +936,14 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 				vectors.Vectors.Data = &schemapb.VectorField_Int8Vector{
 					Int8Vector: make([]byte, 0, topK*dim),
 				}
+			case *schemapb.VectorField_VectorArray:
+				vectors.Vectors.Data = &schemapb.VectorField_VectorArray{
+					VectorArray: &schemapb.VectorArray{
+						Dim:         vectorField.GetVectorArray().GetDim(),
+						ElementType: vectorField.GetVectorArray().GetElementType(),
+						Data:        make([]*schemapb.VectorField, 0, topK),
+					},
+				}
 			}
 			fd.Field = vectors
 		case *schemapb.FieldData_StructArrays:
@@ -1635,6 +1643,8 @@ func DeleteFieldData(dst []*schemapb.FieldData) {
 				dstScalar.GetDoubleData().Data = dstScalar.GetDoubleData().Data[:len(dstScalar.GetDoubleData().Data)-1]
 			case *schemapb.ScalarField_StringData:
 				dstScalar.GetStringData().Data = dstScalar.GetStringData().Data[:len(dstScalar.GetStringData().Data)-1]
+			case *schemapb.ScalarField_ArrayData:
+				dstScalar.GetArrayData().Data = dstScalar.GetArrayData().Data[:len(dstScalar.GetArrayData().Data)-1]
 			case *schemapb.ScalarField_JsonData:
 				dstScalar.GetJsonData().Data = dstScalar.GetJsonData().Data[:len(dstScalar.GetJsonData().Data)-1]
 			case *schemapb.ScalarField_GeometryData:
@@ -1663,6 +1673,8 @@ func DeleteFieldData(dst []*schemapb.FieldData) {
 			case *schemapb.VectorField_Int8Vector:
 				dstInt8Vector := dstVector.Data.(*schemapb.VectorField_Int8Vector)
 				dstInt8Vector.Int8Vector = dstInt8Vector.Int8Vector[:len(dstInt8Vector.Int8Vector)-int(dim)]
+			case *schemapb.VectorField_VectorArray:
+				dstVector.GetVectorArray().Data = dstVector.GetVectorArray().Data[:len(dstVector.GetVectorArray().Data)-1]
 			}
 		}
 	}
@@ -4283,6 +4295,9 @@ func ApplyArrayRowOp(
 func replaceArrayRowElement(base, update *schemapb.ScalarField, elementType schemapb.DataType, index int) (*schemapb.ScalarField, error) {
 	if base == nil || update == nil {
 		return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE requires non-nil Array rows")
+	}
+	if len(GetArrayElementValidData(base)) != 0 || len(GetArrayElementValidData(update)) != 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE does not support Array element valid_data")
 	}
 
 	// Keep row metadata and unknown protobuf fields, and never mutate request

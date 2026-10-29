@@ -72,7 +72,7 @@ func TestStorageV2V3NestedArraySize(t *testing.T) {
 	}
 	require.Equal(t, 8, data.GetRowSize(0))
 	require.Equal(t, 4, data.GetRowSize(1))
-	require.Equal(t, 13, data.GetMemorySize()) // 8 + 4 payload bytes + Nullable flag.
+	require.Equal(t, 14, data.GetMemorySize()) // Payload plus Nullable and ElementNullable flags.
 
 	deepRow := nestedArrayData(
 		schemapb.DataType_Array,
@@ -87,7 +87,7 @@ func TestStorageV2V3NestedArraySize(t *testing.T) {
 		Data:        []*schemapb.ScalarField{deepRow},
 	}
 	require.Equal(t, 24, deepData.GetRowSize(0))
-	require.Equal(t, 25, deepData.GetMemorySize())
+	require.Equal(t, 26, deepData.GetMemorySize())
 
 	quadrupleRow := nestedArrayData(
 		schemapb.DataType_Array,
@@ -105,7 +105,7 @@ func TestStorageV2V3NestedArraySize(t *testing.T) {
 		Data:        []*schemapb.ScalarField{quadrupleRow},
 	}
 	require.Equal(t, 12, quadrupleData.GetRowSize(0))
-	require.Equal(t, 13, quadrupleData.GetMemorySize())
+	require.Equal(t, 14, quadrupleData.GetMemorySize())
 }
 
 func TestStorageV2V3NestedArraySerdeRoundTrip(t *testing.T) {

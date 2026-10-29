@@ -33,6 +33,26 @@ func GetFieldDataValidData(fieldData *schemapb.FieldData) []bool {
 	return getFieldSpecificValidData(fieldData)
 }
 
+// GetArrayElementValidData returns element validity carried by one scalar
+// Array row. Unlike GetFieldDataValidData, this bitmap is element-level.
+func GetArrayElementValidData(row *schemapb.ScalarField) []bool {
+	return row.GetValidData()
+}
+
+// GetVectorArrayElementValidData returns element validity carried by one
+// ArrayOfVector row. Unlike GetFieldDataValidData, this bitmap is element-level.
+func GetVectorArrayElementValidData(row *schemapb.VectorField) []bool {
+	return row.GetValidData()
+}
+
+// SetVectorArrayElementValidData writes element validity carried by one
+// ArrayOfVector row.
+func SetVectorArrayElementValidData(row *schemapb.VectorField, validData []bool) {
+	if row != nil {
+		row.ValidData = validData
+	}
+}
+
 // SetFieldDataValidData writes row validity to the legacy location, and to the
 // field-specific location when the ScalarField or VectorField wrapper exists.
 // Both locations share validData.

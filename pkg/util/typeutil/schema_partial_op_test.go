@@ -114,6 +114,8 @@ func TestApplyArrayRowOp_PathReplace(t *testing.T) {
 }
 
 func TestApplyArrayRowOp_PathReplaceRejectsInvalidOperand(t *testing.T) {
+	withValidity := longRow(1)
+	withValidity.ValidData = []bool{true}
 	for _, test := range []struct {
 		name         string
 		base, update *schemapb.ScalarField
@@ -123,6 +125,8 @@ func TestApplyArrayRowOp_PathReplaceRejectsInvalidOperand(t *testing.T) {
 	}{
 		{"nil base", nil, longRow(9), schemapb.DataType_Int64, []int{0}, "non-nil"},
 		{"nil operand", longRow(1), nil, schemapb.DataType_Int64, []int{0}, "non-nil"},
+		{"base element validity", withValidity, longRow(9), schemapb.DataType_Int64, []int{0}, "element valid_data"},
+		{"operand element validity", longRow(1), withValidity, schemapb.DataType_Int64, []int{0}, "element valid_data"},
 		{"empty base", longRow(), longRow(9), schemapb.DataType_Int64, []int{0}, "out of range"},
 		{"empty operand", longRow(1), longRow(), schemapb.DataType_Int64, []int{0}, "exactly one Array element"},
 		{"multiple elements", longRow(1), longRow(8, 9), schemapb.DataType_Int64, []int{0}, "exactly one Array element"},

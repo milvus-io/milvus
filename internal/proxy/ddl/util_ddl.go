@@ -444,6 +444,20 @@ func validateArrayFieldSchema(collectionName string, field *schemapb.FieldSchema
 	return nil
 }
 
+func validateElementNullable(field *schemapb.FieldSchema) error {
+	if !field.GetElementNullable() {
+		return nil
+	}
+	if field.GetDataType() != schemapb.DataType_Array && field.GetDataType() != schemapb.DataType_ArrayOfVector {
+		return merr.WrapErrParameterInvalidMsg("element_nullable is only valid for Array and ArrayOfVector fields, field name = %s", field.GetName())
+	}
+	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+		return merr.WrapErrParameterInvalidMsg("element_nullable is not supported for nested Array field %s", field.GetName())
+	}
+	// TODO: temporarily disable element nullable until all parts ready
+	return merr.WrapErrParameterInvalidMsg("element_nullable is not supported yet, field name = %s", field.GetName())
+}
+
 func validateFieldType(schema *schemapb.CollectionSchema) error {
 	for _, field := range schema.GetFields() {
 		if err := typeutil.ValidateFieldTypeSchema(field); err != nil {
@@ -542,6 +556,9 @@ func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchem
 	if err := validateFieldName(field.Name); err != nil {
 		return err
 	}
+	if err := validateElementNullable(field); err != nil {
+		return err
+	}
 	if err := typeutil.ValidateFieldTypeSchema(field); err != nil {
 		return err
 	}
@@ -598,6 +615,9 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 	// validate field name
 	var err error
 	if err := validateFieldName(field.Name); err != nil {
+		return err
+	}
+	if err := validateElementNullable(field); err != nil {
 		return err
 	}
 	if err := typeutil.ValidateFieldTypeSchema(field); err != nil {
