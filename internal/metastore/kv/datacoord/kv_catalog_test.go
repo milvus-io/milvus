@@ -894,17 +894,6 @@ func TestChannelCP(t *testing.T) {
 	})
 }
 
-func Test_MarkChannelDeleted_SaveError(t *testing.T) {
-	txn := mocks.NewMetaKv(t)
-	txn.EXPECT().
-		Save(mock.Anything, mock.Anything, mock.Anything).
-		Return(errors.New("mock error"))
-
-	catalog := NewCatalog(txn, rootPath, "")
-	err := catalog.MarkChannelDeleted(context.TODO(), "test_channel_1")
-	assert.Error(t, err)
-}
-
 func Test_MarkChannelAdded_SaveError(t *testing.T) {
 	txn := mocks.NewMetaKv(t)
 	txn.EXPECT().
@@ -916,14 +905,68 @@ func Test_MarkChannelAdded_SaveError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func Test_ChannelExists_SaveError(t *testing.T) {
+func Test_RemoveDroppedChannelFlags(t *testing.T) {
 	txn := mocks.NewMetaKv(t)
-	txn.EXPECT().
-		Load(mock.Anything, mock.Anything).
-		Return("", errors.New("mock error"))
-
+	flags := map[string]string{
+		"live_channel":     NonRemoveFlagTomestone,
+		"legacy_channel_1": RemoveFlagTomestone,
+		"legacy_channel_2": RemoveFlagTomestone,
+	}
+	txn.EXPECT().WalkWithPrefix(mock.Anything, ChannelRemovePrefix+"/", mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, prefix string, _ int, fn func([]byte, []byte) error) error {
+			for channel, value := range flags {
+				// The walk reports keys under the meta root path.
+				if err := fn([]byte(rootPath+"/"+prefix+channel), []byte(value)); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	var removed []string
+	txn.EXPECT().MultiRemove(mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, keys []string) error {
+			removed = append(removed, keys...)
+			return nil
+		})
 	catalog := NewCatalog(txn, rootPath, "")
-	assert.False(t, catalog.ChannelExists(context.TODO(), "test_channel_1"))
+
+	count, err := catalog.RemoveDroppedChannelFlags(context.TODO())
+	require.NoError(t, err)
+	assert.Equal(t, 2, count)
+	// Only the "removed" flags go; the live channel keeps its flag.
+	assert.ElementsMatch(t, []string{
+		buildChannelRemovePath("legacy_channel_1"),
+		buildChannelRemovePath("legacy_channel_2"),
+	}, removed)
+}
+
+func Test_DropChannel(t *testing.T) {
+	txn := mocks.NewMetaKv(t)
+	txn.EXPECT().Remove(mock.Anything, buildChannelRemovePath("ch1")).Return(nil).Once()
+	catalog := NewCatalog(txn, rootPath, "")
+	assert.NoError(t, catalog.DropChannel(context.TODO(), "ch1"))
+}
+
+func Test_RemoveDroppedChannelFlags_Error(t *testing.T) {
+	t.Run("walk fails", func(t *testing.T) {
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock error"))
+		catalog := NewCatalog(txn, rootPath, "")
+		_, err := catalog.RemoveDroppedChannelFlags(context.TODO())
+		assert.Error(t, err)
+	})
+
+	t.Run("remove fails", func(t *testing.T) {
+		txn := mocks.NewMetaKv(t)
+		txn.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(ctx context.Context, prefix string, _ int, fn func([]byte, []byte) error) error {
+				return fn([]byte(prefix+"ch1"), []byte(RemoveFlagTomestone))
+			})
+		txn.EXPECT().MultiRemove(mock.Anything, []string{buildChannelRemovePath("ch1")}).Return(errors.New("mock error"))
+		catalog := NewCatalog(txn, rootPath, "")
+		_, err := catalog.RemoveDroppedChannelFlags(context.TODO())
+		assert.Error(t, err)
+	})
 }
 
 func Test_parseBinlogKey(t *testing.T) {
