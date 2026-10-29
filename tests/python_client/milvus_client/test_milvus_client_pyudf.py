@@ -93,6 +93,12 @@ def create_udf(context):
         return hit.get("entity", {}).get(field)
 
     @staticmethod
+    def _assert_intermediate_field_absent(hits, field):
+        for hit in hits:
+            assert field not in hit, hit
+            assert field not in hit.get("entity", {}), hit
+
+    @staticmethod
     def _remove_file_resource(client, resource_name, timeout=30):
         deadline = time.time() + timeout
         while time.time() < deadline:
@@ -908,7 +914,7 @@ def create_udf(context):
                 20,
                 10,
             ]
-            assert all(self._hit_field(hit, intermediate_column) is None for hit in result[0])
+            self._assert_intermediate_field_absent(result[0], intermediate_column)
         finally:
             if client is not None:
                 if collection_created:
@@ -1069,7 +1075,7 @@ def create_udf(context):
                 20,
                 10,
             ]
-            assert all(self._hit_field(hit, intermediate_column) is None for hit in result[0])
+            self._assert_intermediate_field_absent(result[0], intermediate_column)
         finally:
             if client is not None:
                 if collection_created:
@@ -1327,14 +1333,33 @@ def create_udf(context):
     def test_pyudf_output_types_and_shape_contracts(self, tmp_path, minio_host, minio_bucket, dtype, expected_error):
         """
         target: validate supported outputs, score conversion and nonnumeric score rejection
-        method: return typed Arrow values; consume bool/string intermediate columns in a second UDF
+        method: return typed scores and inspect intermediate Arrow types/boundary values in a second UDF
         expected: valid results preserve IDs/fields; rejected outputs return 2400 and valid calls recover
         """
         module = """import pyarrow as pa
 
+NUMERIC_VALUES = {
+    "int8": [-128, -1, 127],
+    "int16": [-32768, -1, 32767],
+    "int32": [-2147483648, -1, 2147483647],
+    "int64": [-9223372036854775808, -1, 9223372036854775807],
+    "float32": [-1.25, 2.0 ** -20, 16777216.0],
+    "float64": [-1.25, 2.0 ** -40, 9007199254740991.0],
+}
+
 class UDF:
     def transform_query(self, params, columns):
         mode = params.get("mode", "float32")
+        if mode in ("produce_numeric", "consume_numeric"):
+            dtype = params["dtype"]
+            expected = [NUMERIC_VALUES[dtype][v.as_py() // 10 - 1] for v in columns[1]]
+            if mode == "produce_numeric":
+                return [pa.array(expected, type=getattr(pa, dtype)())]
+            if columns[0].type != getattr(pa, dtype)():
+                raise AssertionError("numeric intermediate output type changed")
+            if columns[0].to_pylist() != expected:
+                raise AssertionError("numeric intermediate output values changed")
+            return [pa.array([v.as_py() * 2.0 for v in columns[1]], type=pa.float32())]
         if mode == "consume":
             expected = pa.bool_() if params["dtype"] == "bool" else pa.string()
             if columns[0].type != expected:
@@ -1391,7 +1416,31 @@ def create_udf(context):
                 assert [hit["id"] for hit in result[0]] == [3, 2, 1]
                 assert [hit["distance"] for hit in result[0]] == pytest.approx([60, 40, 20], rel=1e-5, abs=1e-5)
                 assert [self._hit_field(hit, "ts") for hit in result[0]] == [30, 20, 10]
-                assert all(self._hit_field(hit, "typed_value") is None for hit in result[0])
+                self._assert_intermediate_field_absent(result[0], "typed_value")
+                if dtype not in ("bool", "string"):
+                    # Keep the direct numeric-to-score assertion above, and
+                    # separately check precision before the final Float32 cast.
+                    typed_chain = FunctionChain(FunctionChainStage.L2_RERANK)
+                    for output, input_column, mode in [
+                        ("typed_value", "$score", "produce_numeric"),
+                        ("$score", "typed_value", "consume_numeric"),
+                    ]:
+                        typed_chain.map(
+                            output,
+                            FunctionChainExpr(
+                                "py_udf",
+                                args=(col(input_column), col("ts")),
+                                params={"resource_name": resource, "udf_params": {"mode": mode, "dtype": dtype}},
+                            ),
+                        )
+                    typed_chain.sort(col("$score"), desc=True, tie_break_col=col("$id"))
+                    typed = self._search_with_synced_resource(client, name, typed_chain, data=[[0.0, 0.0], [0.02, 0.0]])
+                    assert len(typed) == 2
+                    for hits in typed:
+                        assert [hit["id"] for hit in hits] == [3, 2, 1]
+                        assert [hit["distance"] for hit in hits] == pytest.approx([60, 40, 20])
+                        assert [self._hit_field(hit, "ts") for hit in hits] == [30, 20, 10]
+                        self._assert_intermediate_field_absent(hits, "typed_value")
             self._assert_pyudf_recovery(client, name, resource)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1846,12 +1895,14 @@ def create_udf(context):
             assert [self._hit_field(h, "ts") for h in result[0]] == [ledger[i] for i in expected]
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("nq", [1, 2, 8])
+    @pytest.mark.parametrize("nq", [1, 2, 4, 8])
     def test_pyudf_ragged_query_batches(self, tmp_path, minio_host, minio_bucket, nq):
         """target: unequal query chunk sizes; method: independent range ledger; expected: no cross-query leakage."""
         with self._pyudf_test_environment(tmp_path, minio_host, minio_bucket, None) as (client, name, resource):
-            queries = [[-0.001, 0.0], [0.019, 0.0], [10.0, 10.0]]
-            queries = [queries[i % 3] for i in range(nq)]
+            # Range membership produces lengths [1, 3, 0, 2], including a
+            # nonempty batch after an empty one. Avoid exact vector matches.
+            queries = [[-0.01, 0.0], [0.009, 0.0], [10.0, 10.0], [0.019, 0.0]]
+            queries = [queries[i % 4] for i in range(nq)]
             result = self._search_with_synced_resource(
                 client,
                 name,
@@ -2627,7 +2678,11 @@ def create_udf(context):
         assert 500 < threshold <= 3000, f"mixed segment fixture requires compatible build threshold, got {threshold}"
         record_property("min_index_rows", threshold)
 
-        rows = [{"id": i, "ts": i * 10, "vector": [i / 10000.0, 0.0]} for i in range(1, 4001)]
+        ledger = {i: i * 10 for i in range(1, 4001)}
+        # The combined top three must include indexed sealed, small sealed,
+        # and growing data, in that order.
+        ledger.update({1500: 90000, 3250: 80000, 3750: 70000})
+        rows = [{"id": i, "ts": ledger[i], "vector": [i / 10000.0, 0.0]} for i in ledger]
         with self._pyudf_test_environment(tmp_path, minio_host, minio_bucket, None) as (client, control, resource):
             self._assert_pyudf_recovery(client, control, resource)
             with ExitStack() as cleanup:
@@ -2686,10 +2741,22 @@ def create_udf(context):
                         search_params={"metric_type": "L2", "params": {"ef": 4000}},
                         filter=expression,
                     )
-                    expected = sorted(selected, reverse=True)[:3]
+                    expected = sorted(selected, key=lambda i: (-ledger[i], i))[:3]
                     assert [h["id"] for h in result[0]] == expected
-                    assert [h["distance"] for h in result[0]] == pytest.approx([i * 20 for i in expected])
-                    assert [self._hit_field(h, "ts") for h in result[0]] == [i * 10 for i in expected]
+                    assert [h["distance"] for h in result[0]] == pytest.approx([ledger[i] * 2 for i in expected])
+                    assert [self._hit_field(h, "ts") for h in result[0]] == [ledger[i] for i in expected]
+                complete = self._search_with_synced_resource(
+                    client,
+                    name,
+                    self._pyudf_chain(resource),
+                    limit=len(ledger),
+                    search_params={"metric_type": "L2", "params": {"ef": 4000}},
+                )[0]
+                expected = sorted(ledger, key=lambda i: (-ledger[i], i))
+                assert expected[:3] == [1500, 3250, 3750]
+                assert [h["id"] for h in complete] == expected
+                assert [h["distance"] for h in complete] == pytest.approx([ledger[i] * 2 for i in expected])
+                assert [self._hit_field(h, "ts") for h in complete] == [ledger[i] for i in expected]
                 assert {s.segment_id for s in client.list_loaded_segments(name)} == sealed_ids
                 assert {s.segment_id for s in client.list_persistent_segments(name)} == persistent_ids
                 record_property("growing_rows", "500 visible rows without an added persistent segment")
@@ -2718,13 +2785,21 @@ def create_udf(context):
                 stored = self.query(client, name, filter="id >= 0", output_fields=["id", "ts"], limit=5000)[0]
                 assert len(stored) == len(ledger)
                 assert {r["id"]: r["ts"] for r in stored} == ledger
-                result = self._search_with_synced_resource(
-                    client, name, self._pyudf_chain(resource).limit(10), limit=5000
-                )
-                expected = sorted(ledger, key=lambda i: (-ledger[i], i))[:10]
+                result = self._search_with_synced_resource(client, name, self._pyudf_chain(resource), limit=5000)
+                expected = sorted(ledger, key=lambda i: (-ledger[i], i))
                 assert [h["id"] for h in result[0]] == expected
                 assert [h["distance"] for h in result[0]] == pytest.approx([ledger[i] * 2 for i in expected])
                 assert [self._hit_field(h, "ts") for h in result[0]] == [ledger[i] for i in expected]
+                # Target tombstones and the old upsert version through Search,
+                # independently of the complete Query ledger above.
+                stale = self._search_with_synced_resource(
+                    client,
+                    name,
+                    self._pyudf_chain(resource),
+                    limit=5000,
+                    filter="id in [1, 2] or (id >= 1000 and id < 1100) or (id == 3 and ts == 30)",
+                )
+                assert len(stale) == 1 and list(stale[0]) == []
 
             verify()
             job = self.compact(client, name)[0]
@@ -2880,6 +2955,32 @@ def create_udf(context):
                         [scores[pk] for pk in expected], rel=1e-5, abs=1e-5
                     )
                     assert [self._hit_field(h, "ts") for h in hits] == [i * 10 for i in expected]
+                if mode.startswith("hybrid"):
+                    # Each union has three candidates. Requesting two makes
+                    # ignored pagination observable without changing the fusion oracle.
+                    for request_limit, request_offset, chain_page in [(2, 0, False), (2, 1, False), (1, 2, True)]:
+                        page_chain = merged.limit(2, offset=0) if chain_page else merged
+                        paged = self.hybrid_search(
+                            client,
+                            name,
+                            reqs=reqs,
+                            ranker=None,
+                            limit=request_limit,
+                            offset=request_offset,
+                            output_fields=["ts"],
+                            function_chains=page_chain,
+                        )[0]
+                        assert len(paged) == nq
+                        for scores, hits in zip(expected_scores, paged):
+                            ordered = sorted(scores, key=lambda pk: (-scores[pk], pk))
+                            expected = (
+                                ordered[:2] if chain_page else ordered[request_offset : request_offset + request_limit]
+                            )
+                            assert [h["id"] for h in hits] == expected
+                            assert [h["distance"] for h in hits] == pytest.approx(
+                                [scores[pk] for pk in expected], rel=1e-5, abs=1e-5
+                            )
+                            assert [self._hit_field(h, "ts") for h in hits] == [pk * 10 for pk in expected]
             self._assert_pyudf_recovery(client, control, resource)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -2950,7 +3051,8 @@ class UDF:
     def transform_query(self, params, columns):
         if FACTORY_CALLS != 1:
             raise AssertionError("factory ran more than once in this worker")
-        return [pa.array([v.as_py() * 2.0 for v in columns[1]], type=pa.float32())]
+        factor = float(params.get("factor", 2.0))
+        return [pa.array([v.as_py() * factor for v in columns[1]], type=pa.float32())]
 def create_udf(context):
     global FACTORY_CALLS
     FACTORY_CALLS += 1
@@ -2961,13 +3063,21 @@ def create_udf(context):
             # Resource registration does not execute the factory; fan-in starts before any UDF warmup.
             with ThreadPoolExecutor(max_workers=6) as pool:
                 futures = [
-                    pool.submit(self._search_with_synced_resource, client, name, self._pyudf_chain(resource))
-                    for _ in range(12)
+                    (
+                        factor,
+                        pool.submit(
+                            self._search_with_synced_resource,
+                            client,
+                            name,
+                            self._pyudf_chain(resource, {"factor": factor}),
+                        ),
+                    )
+                    for factor in range(1, 13)
                 ]
-                for future in futures:
+                for factor, future in futures:
                     result = future.result(timeout=40)
                     assert [h["id"] for h in result[0]] == [3, 2, 1]
-                    assert [h["distance"] for h in result[0]] == pytest.approx([60, 40, 20])
+                    assert [h["distance"] for h in result[0]] == pytest.approx([30 * factor, 20 * factor, 10 * factor])
                     assert [self._hit_field(h, "ts") for h in result[0]] == [30, 20, 10]
             self._assert_pyudf_recovery(client, name, resource)
 
