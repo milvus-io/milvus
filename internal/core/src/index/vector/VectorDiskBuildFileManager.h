@@ -53,7 +53,8 @@ class VectorDiskBuildFileManager final
     std::shared_ptr<milvus::InputStream>
     OpenInputStream(const std::string& filename) override;
     std::shared_ptr<milvus::OutputStream>
-    OpenOutputStream(const std::string& filename) override;
+    OpenOutputStream(const std::string& filename,
+                     milvus::OutputStreamOptions options = {}) override;
 
     const std::string&
     Directory() const;
