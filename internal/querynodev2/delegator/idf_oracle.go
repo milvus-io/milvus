@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -543,6 +544,10 @@ type idfOracle struct {
 
 	sealed         typeutil.ConcurrentMap[int64, *sealedBm25Stats]
 	sealedDiskSize *atomic.Int64
+	// Detached entries are no longer visible to SyncFunctions or reopen. Their
+	// directories remain owned here until cleanup finishes under the lifecycle lock.
+	retiredSealed   typeutil.ConcurrentMap[int64, *sealedBm25Stats]
+	sealedLifecycle *lock.KeyLock[int64]
 
 	channel string
 
@@ -713,7 +718,9 @@ func (o *idfOracle) SyncFunctions(functions []*schemapb.FunctionSchema) error {
 // Idempotent: skips if segment already loaded.
 func (o *idfOracle) LoadSealed(ctx context.Context, segmentID int64, loadInfo *querypb.SegmentLoadInfo, cm storage.ChunkManager) error {
 	_, err, _ := o.sf.Do(fmt.Sprintf("load_sealed_%d", segmentID), func() (any, error) {
-		if o.sealed.Contain(segmentID) {
+		o.lockSealedLifecycle(segmentID)
+		defer o.sealedLifecycle.Unlock(segmentID)
+		if _, loaded := o.sealedForLoad(segmentID); loaded {
 			return nil, nil
 		}
 
@@ -776,6 +783,15 @@ func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, lo
 	// QueryCoord deduplicates same sealed-segment load/reopen tasks by replica, segment, and scope.
 	// This shared singleflight key only coalesces duplicate calls; it is not relied on to serialize different tasks.
 	_, err, _ := o.sf.Do(fmt.Sprintf("load_sealed_%d", segmentID), func() (any, error) {
+		targetVersion := o.targetVersion.Load()
+		schemaEpoch := o.schemaEpoch.Load()
+		o.lockSealedLifecycle(segmentID)
+		defer o.sealedLifecycle.Unlock(segmentID)
+		// The caller sampled readability before this attempt. Retry if waiting
+		// for cleanup crossed a target or BM25-field change, as for other reopen conflicts.
+		if targetVersion != o.targetVersion.Load() || schemaEpoch != o.schemaEpoch.Load() {
+			return nil, errReopenStateChanged(segmentID)
+		}
 		logger := mlog.With(mlog.FieldSegmentID(segmentID))
 		logpaths, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BM25StatsPaths()
 		if err != nil {
@@ -786,7 +802,12 @@ func (o *idfOracle) LoadSealedForReopen(ctx context.Context, segmentID int64, lo
 			return nil, nil
 		}
 
-		segStats, existedBeforeLoad := o.sealed.Get(segmentID)
+		segStats, existedBeforeLoad := o.sealedForLoad(segmentID)
+		// Retirement can start after lockSealedLifecycle's initial cleanup.
+		// Resample readability if draining it crossed a target/schema change.
+		if targetVersion != o.targetVersion.Load() || schemaEpoch != o.schemaEpoch.Load() {
+			return nil, errReopenStateChanged(segmentID)
+		}
 		missingPaths := make(map[int64][]string, len(logpaths))
 		for fieldID, paths := range logpaths {
 			if existedBeforeLoad && segStats.HasField(fieldID) {
@@ -1429,7 +1450,9 @@ func (o *idfOracle) syncDistributionOnce() (retry bool, err error) {
 		stats.Unlock()
 	}
 
-	// remove sealed segment not in target
+	// Detach obsolete entries while publishing the target. In particular,
+	// SyncFunctions must not find an entry whose physical cleanup may be blocked.
+	toRemove := make(map[int64]*sealedBm25Stats)
 	o.sealed.Range(func(segmentID int64, stats *sealedBm25Stats) bool {
 		reserve := reserveMap.Contain(segmentID)
 		intarget := targetMap.Contain(segmentID)
@@ -1441,12 +1464,11 @@ func (o *idfOracle) syncDistributionOnce() (retry bool, err error) {
 		// (forbid remove some new segment register after current snapshot)
 		stats.RLock()
 		remove := !intarget && !reserve && stats.ts.Before(snapshotTs)
-		diskSize := stats.diskSize
 		stats.RUnlock()
 		if remove {
-			o.sealedDiskSize.Add(-diskSize)
-			stats.Remove()
+			o.retiredSealed.Insert(segmentID, stats)
 			o.sealed.Remove(segmentID)
+			toRemove[segmentID] = stats
 		}
 		return true
 	})
@@ -1460,9 +1482,70 @@ func (o *idfOracle) syncDistributionOnce() (retry bool, err error) {
 	sealedLen := o.sealed.Len()
 	o.Unlock()
 
+	// Waiting for statistics readers and removing files must not hold the IDF
+	// reader lock. Loads/reopens of the same ID finish this cleanup before writing.
+	for segmentID, stats := range toRemove {
+		o.removeRetiredSealedStats(segmentID, stats)
+	}
 	o.syncResource()
 	mlog.Info(context.TODO(), "sync idf distribution finished", mlog.Int64("version", snapshot.targetVersion), mlog.Int64("numrow", numRow), mlog.Int("growing", growingLen), mlog.Int("sealed", sealedLen))
 	return false, nil
+}
+
+// Caller must not hold the oracle lock: a load/reopen acquires this lifecycle
+// lock before taking the oracle lock. Cleanup never takes the oracle lock.
+func (o *idfOracle) lockSealedLifecycle(segmentID int64) {
+	o.sealedLifecycle.Lock(segmentID)
+	if stats, ok := o.retiredSealed.Get(segmentID); ok {
+		o.removeRetiredSealedStatsLocked(segmentID, stats)
+	}
+}
+
+// sealedBeforeLoadHook runs in tests after the initial pending cleanup and before
+// choosing the entry whose directory a load/reopen may write.
+var sealedBeforeLoadHook func()
+
+// Caller holds the segment lifecycle lock. Sample retirement and the active
+// entry together: sync can detach an entry even while this lifecycle lock is
+// held. If it did, finish its cleanup before reusing the segment directory.
+func (o *idfOracle) sealedForLoad(segmentID int64) (*sealedBm25Stats, bool) {
+	if sealedBeforeLoadHook != nil {
+		sealedBeforeLoadHook()
+	}
+	for {
+		o.RLock()
+		retired, pending := o.retiredSealed.Get(segmentID)
+		if !pending {
+			stats, loaded := o.sealed.Get(segmentID)
+			o.RUnlock()
+			return stats, loaded
+		}
+		o.RUnlock()
+		// Neither waiting for readers nor deleting files may hold the oracle
+		// lock. The lifecycle lock keeps another load/cleanup from interfering.
+		o.removeRetiredSealedStatsLocked(segmentID, retired)
+	}
+}
+
+func (o *idfOracle) removeRetiredSealedStats(segmentID int64, expected *sealedBm25Stats) {
+	o.sealedLifecycle.Lock(segmentID)
+	defer o.sealedLifecycle.Unlock(segmentID)
+	o.removeRetiredSealedStatsLocked(segmentID, expected)
+}
+
+// Caller holds the segment lifecycle lock, not the oracle lock. Check identity
+// so a delayed cleanup cannot remove a replacement or refund its disk usage.
+func (o *idfOracle) removeRetiredSealedStatsLocked(segmentID int64, expected *sealedBm25Stats) {
+	stats, ok := o.retiredSealed.Get(segmentID)
+	if !ok || stats != expected {
+		return
+	}
+	stats.RLock()
+	diskSize := stats.diskSize
+	stats.RUnlock()
+	stats.Remove()
+	o.retiredSealed.Remove(segmentID)
+	o.sealedDiskSize.Add(-diskSize)
 }
 
 // fetchStatsDiff reads the stats of all candidates from local disk on up to idfSyncParallelism goroutines,
@@ -1539,16 +1622,17 @@ func (o *idfOracle) BuildIDF(fieldID int64, tfs *schemapb.SparseFloatArray) ([][
 
 func NewIDFOracle(channel string, functions []*schemapb.FunctionSchema) IDFOracle {
 	return &idfOracle{
-		channel:        channel,
-		targetVersion:  atomic.NewInt64(0),
-		current:        newStatsTable(functions),
-		growing:        make(map[int64]bm25Stats),
-		sealed:         typeutil.ConcurrentMap[int64, *sealedBm25Stats]{},
-		sealedDiskSize: atomic.NewInt64(0),
-		dirPath:        path.Join(pathutil.GetPath(pathutil.BM25Path, paramtable.GetNodeID()), channel),
-		syncNotify:     make(chan struct{}, 1),
-		closeCh:        make(chan struct{}),
-		sf:             conc.Singleflight[any]{},
-		schemaEpoch:    atomic.NewUint64(0),
+		sealedLifecycle: lock.NewKeyLock[int64](),
+		channel:         channel,
+		targetVersion:   atomic.NewInt64(0),
+		current:         newStatsTable(functions),
+		growing:         make(map[int64]bm25Stats),
+		sealed:          typeutil.ConcurrentMap[int64, *sealedBm25Stats]{},
+		sealedDiskSize:  atomic.NewInt64(0),
+		dirPath:         path.Join(pathutil.GetPath(pathutil.BM25Path, paramtable.GetNodeID()), channel),
+		syncNotify:      make(chan struct{}, 1),
+		closeCh:         make(chan struct{}),
+		sf:              conc.Singleflight[any]{},
+		schemaEpoch:     atomic.NewUint64(0),
 	}
 }
