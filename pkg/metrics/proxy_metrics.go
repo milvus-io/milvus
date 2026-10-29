@@ -518,6 +518,17 @@ var (
 			Help:      "Current count of entries in the expression parser cache.",
 		}, func() float64 { return float64(ProxyExprCacheLen()) })
 
+	// ProxyExprCacheEstimatedSize is set by planparserv2 during package initialization.
+	ProxyExprCacheEstimatedSize = func() int { return 0 }
+
+	ProxyExprCacheEstimatedBytes = prometheus.NewGaugeFunc(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "expr_cache_estimated_bytes",
+			Help:      "Estimated bytes of unexpired expression parser cache entries, based on input size and token count.",
+		}, func() float64 { return float64(ProxyExprCacheEstimatedSize()) })
+
 	ProxyParseExpressionLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -623,6 +634,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 
 	registry.MustRegister(ProxyParseExpressionLatency)
 	registry.MustRegister(ProxyExprCacheEntries)
+	registry.MustRegister(ProxyExprCacheEstimatedBytes)
 
 	registry.MustRegister(ProxyFunctionlatency)
 
