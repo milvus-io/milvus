@@ -33,6 +33,12 @@ void
 KnowhereInitBuildThreadPool(const uint32_t);
 
 void
+KnowhereSetMRLRefineRatio(const float value);
+
+float
+KnowhereGetMRLRefineRatio();
+
+void
 KnowhereInitSearchThreadPool(const uint32_t);
 
 void

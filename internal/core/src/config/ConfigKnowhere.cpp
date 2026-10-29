@@ -16,6 +16,8 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <atomic>
+#include <cmath>
 #include <exception>
 #include <mutex>
 
@@ -29,6 +31,10 @@
 #include "log/Log.h"
 
 namespace milvus::config {
+
+namespace {
+std::atomic<float> mrl_refine_ratio{1.0f};
+}  // namespace
 
 std::once_flag init_knowhere_once_;
 
@@ -84,6 +90,20 @@ EnableKnowhereScoreConsistency() {
 void
 KnowhereInitBuildThreadPool(const uint32_t num_threads) {
     knowhere::KnowhereConfig::SetBuildThreadPoolSize(num_threads);
+}
+
+void
+KnowhereSetMRLRefineRatio(const float value) {
+    if (!std::isfinite(value) || value < 1.0f) {
+        ThrowInfo(ConfigInvalid,
+                  "knowhere.MRL.search.refine_ratio must be finite and >= 1");
+    }
+    mrl_refine_ratio.store(value, std::memory_order_relaxed);
+}
+
+float
+KnowhereGetMRLRefineRatio() {
+    return mrl_refine_ratio.load(std::memory_order_relaxed);
 }
 
 void

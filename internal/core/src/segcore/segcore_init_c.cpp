@@ -24,7 +24,6 @@
 #include "common/FastMem.h"
 #include "config/ConfigKnowhere.h"
 #include "glog/logging.h"
-#include "knowhere/comp/knowhere_config.h"
 #include "log/Log.h"
 #include "pthread.h"
 #include "segcore/SegcoreConfig.h"
@@ -272,11 +271,7 @@ SegcoreSetKnowhereBuildThreadPoolNum(const uint32_t num_threads) {
 extern "C" CStatus
 SegcoreSetMRLRefineRatio(const float value) {
     try {
-        if (!knowhere::KnowhereConfig::SetMRLRefineRatio(value)) {
-            ThrowInfo(
-                ConfigInvalid,
-                "knowhere.MRL.search.refine_ratio must be finite and >= 1");
-        }
+        milvus::config::KnowhereSetMRLRefineRatio(value);
         return milvus::SuccessCStatus();
     }
     CGO_CATCH_AND_RETURN_CSTATUS

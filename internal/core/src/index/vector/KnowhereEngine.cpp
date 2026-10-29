@@ -23,6 +23,7 @@
 #include "common/EasyAssert.h"
 #include "common/FastMem.h"
 #include "common/Utils.h"
+#include "config/ConfigKnowhere.h"
 #include "index/Utils.h"
 #include "knowhere/index/index_factory.h"
 #include "knowhere/index/mrl_index_node.h"
@@ -331,6 +332,9 @@ KnowhereEngine::operator=(KnowhereEngine&& other) {
 knowhere::Json
 PrepareVectorSearchParams(const VectorSearchParams& params) {
     auto search_config = params.search_params_;
+    // Server configuration takes precedence over any SDK-supplied value.
+    search_config[knowhere::indexparam::MRL_REFINE_RATIO] =
+        milvus::config::KnowhereGetMRLRefineRatio();
     search_config[knowhere::meta::METRIC_TYPE] = params.metric_type_;
     search_config[knowhere::meta::TOPK] = params.topk_;
     if (params.trace_ctx_.traceID != nullptr &&
