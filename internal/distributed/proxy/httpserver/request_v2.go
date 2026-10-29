@@ -24,6 +24,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
@@ -492,7 +493,44 @@ type CollectionFilterReq struct {
 func (req *CollectionFilterReq) GetDbName() string         { return req.DbName }
 func (req *CollectionFilterReq) GetCollectionName() string { return req.CollectionName }
 
+type WriteConditionReq struct {
+	Field     string `json:"field"`
+	Op        string `json:"op"`
+	OnMissing string `json:"onMissing"`
+}
+
+func (condition *WriteConditionReq) toProto() (*milvuspb.WriteCondition, error) {
+	if condition == nil {
+		return nil, nil
+	}
+	op, ok := milvuspb.WriteCondition_Op_value[strings.ToUpper(condition.Op)]
+	if !ok || op == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("writeCondition.op must be gt or gte")
+	}
+	missing := strings.ToUpper(condition.OnMissing)
+	if missing == "" {
+		missing = "INSERT"
+	}
+	policy, ok := milvuspb.WriteCondition_MissingRowPolicy_value[missing+"_IF_MISSING"]
+	if !ok {
+		return nil, merr.WrapErrParameterInvalidMsg("writeCondition.onMissing must be insert, skip or error")
+	}
+	return &milvuspb.WriteCondition{Field: condition.Field, Op: milvuspb.WriteCondition_Op(op), OnMissing: milvuspb.WriteCondition_MissingRowPolicy(policy)}, nil
+}
+
+func conditionalUpsertData(condition *milvuspb.WriteCondition, data gin.H, result *milvuspb.MutationResult) gin.H {
+	if condition != nil {
+		indexes := result.GetSuccIndex()
+		if indexes == nil {
+			indexes = []uint32{}
+		}
+		data["succIndex"] = indexes
+	}
+	return data
+}
+
 type CollectionDataReq struct {
+	WriteCondition *WriteConditionReq        `json:"writeCondition,omitempty"`
 	DbName         string                    `json:"dbName"`
 	CollectionName string                    `json:"collectionName" binding:"required"`
 	PartitionName  string                    `json:"partitionName"`
