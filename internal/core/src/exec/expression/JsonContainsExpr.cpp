@@ -2452,12 +2452,13 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
     }
 
     // Get array offsets for nested index (needed for element-to-row conversion)
-    auto array_offsets = GetArrayOffsets(expr_->column_.field_id_);
+    auto struct_element_offsets =
+        GetStructElementOffsets(expr_->column_.field_id_);
 
     // Convert terms only on an index-result cache miss. Later batches and
     // ExprResCache hits reuse the bitmap without rebuilding the term list.
     auto execute_sub_batch =
-        [this, &array_offsets](Index* index_ptr) -> TargetBitmap {
+        [this, &struct_element_offsets](Index* index_ptr) -> TargetBitmap {
         std::unordered_set<GetType> elements;
         for (auto const& element : expr_->vals_) {
             elements.insert(GetValueWithCastNumber<GetType>(element));
@@ -2471,10 +2472,10 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
             if (!index_ptr->IsNestedIndex()) {
                 return element_bitset;
             }
-            AssertInfo(array_offsets != nullptr,
+            AssertInfo(struct_element_offsets != nullptr,
                        "array offsets not found for field {}",
                        expr_->column_.field_id_.get());
-            return array_offsets->ForEachRowElementRange(
+            return struct_element_offsets->ForEachRowElementRange(
                 [&element_bitset](int32_t elem_start, int32_t elem_end) {
                     for (int32_t i = elem_start; i < elem_end; ++i) {
                         if (element_bitset[i]) {

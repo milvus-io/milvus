@@ -1352,7 +1352,7 @@ TEST(MatchExprNullableStruct, ColdMatchCancellationAndFreshContextRetry) {
         dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(sealed, nullptr);
     auto state = sealed->TestGetPublishedStateSnapshot();
-    auto entry = state->runtime->array_offsets_map.at(sub);
+    auto entry = state->runtime->struct_element_offsets_map.at(sub);
     auto column = state->runtime->fields.at(sub);
     const int64_t first_row = 0;
     ASSERT_NE(entry, nullptr);
@@ -1393,14 +1393,14 @@ TEST(MatchExprNullableStruct, ColdMatchCancellationAndFreshContextRetry) {
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
     }
-    EXPECT_EQ(segment->GetArrayOffsets(sub), entry);
+    EXPECT_EQ(segment->GetStructElementOffsets(sub), entry);
     EXPECT_FALSE(column->CellsLoaded(&first_row, 1));
 
     OpContext fresh_ctx;
     auto output = evaluate(fresh_ctx);
     ASSERT_NE(output, nullptr);
     ASSERT_EQ(output->size(), 5);
-    EXPECT_EQ(segment->GetArrayOffsets(sub), entry);
+    EXPECT_EQ(segment->GetStructElementOffsets(sub), entry);
     TargetBitmapView values(output->GetRawData(), output->size());
     TargetBitmapView validity(output->GetValidRawData(), output->size());
     EXPECT_TRUE(values[0]);
@@ -1460,9 +1460,9 @@ TEST(MatchExprNullableStruct, PinnedSchemaBuildsOldMappingAfterStructReadded) {
                             ->GetFirstArrayFieldInStruct("struct_array")
                             .get_id();
     EXPECT_EQ(pinned_field, sub);
-    EXPECT_EQ(
-        query_context.get_array_offsets(pinned_field)->GetTotalElementCount(),
-        3);
+    EXPECT_EQ(query_context.get_struct_element_offsets(pinned_field)
+                  ->GetTotalElementCount(),
+              3);
     auto output = std::dynamic_pointer_cast<ColumnVector>(result);
     ASSERT_NE(output, nullptr);
     ASSERT_EQ(output->size(), 5);
@@ -1525,7 +1525,7 @@ TEST(MatchExprNullableStruct, NestedIndexUsesPhysicalRowValidity) {
         CreateTestCacheIndex("nullable_sub_int", std::move(index));
     segment->LoadIndex(info);
 
-    auto offsets = segment->GetArrayOffsets(sub_int_fid);
+    auto offsets = segment->GetStructElementOffsets(sub_int_fid);
     ASSERT_TRUE(offsets->HasRowValidity());
     auto snapshot = segment->CaptureReadSnapshot();
     auto column = snapshot->GetColumn(sub_int_fid);
@@ -1548,7 +1548,7 @@ TEST(MatchExprNullableStruct, NestedIndexUsesPhysicalRowValidity) {
         << "indexed MATCH must use cached parent validity without raw reads";
 }
 
-TEST(StructArrayOffsetsReopen, ConcurrentReadersAreSynchronized) {
+TEST(StructElementOffsetsReopen, ConcurrentReadersAreSynchronized) {
     auto schema = std::make_shared<Schema>();
     auto int64_fid = schema->AddDebugField("id", DataType::INT64);
     schema->set_primary_field_id(int64_fid);
@@ -1563,7 +1563,7 @@ TEST(StructArrayOffsetsReopen, ConcurrentReadersAreSynchronized) {
     for (int i = 0; i < 4; ++i) {
         readers.emplace_back([&]() {
             while (!stop.load(std::memory_order_relaxed)) {
-                if (segment->GetArrayOffsets(base_sub_fid) == nullptr) {
+                if (segment->GetStructElementOffsets(base_sub_fid) == nullptr) {
                     missing.fetch_add(1, std::memory_order_relaxed);
                 }
             }

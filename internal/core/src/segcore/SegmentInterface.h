@@ -35,7 +35,7 @@
 #include "cachinglayer/CacheSlot.h"
 #include "cachinglayer/Utils.h"
 #include "common/Array.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/BitsetView.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
@@ -144,8 +144,8 @@ class SegmentReadSnapshot {
 
     // Returns nullptr when this field has no struct mapping in the captured
     // state. Consumers that require element-to-row conversion must check it.
-    virtual std::shared_ptr<const IArrayOffsets>
-    GetArrayOffsets(FieldId field_id) const = 0;
+    virtual std::shared_ptr<const IStructElementOffsets>
+    GetStructElementOffsets(FieldId field_id) const = 0;
 
     // Must return a non-null schema from the same captured state as the columns.
     virtual SchemaPtr
@@ -425,8 +425,8 @@ class SegmentInterface {
     // Returns nullptr if the field has no struct-element mapping.
     // Sealed segments build it during loading, before publishing the column
     // generation. This getter only reads immutable metadata and performs no IO.
-    virtual std::shared_ptr<const IArrayOffsets>
-    GetArrayOffsets(FieldId field_id) const = 0;
+    virtual std::shared_ptr<const IStructElementOffsets>
+    GetStructElementOffsets(FieldId field_id) const = 0;
 };
 
 // internal API for DSL calculation
@@ -857,7 +857,7 @@ class SegmentInternalInterface : public SegmentInterface {
      *
      * @param limit Maximum number of elements to return
      * @param element_bitset Element-level bitset (size = total_element_count)
-     * @param array_offsets Mapping between element IDs and (doc_id, element_index)
+     * @param struct_element_offsets Mapping between element IDs and (doc_id, element_index)
      * @return tuple of:
      *   - vector of unique doc_offsets (no duplicates)
      *   - vector of element_indices per doc (element_indices[i] for doc_offsets[i])
@@ -868,7 +868,7 @@ class SegmentInternalInterface : public SegmentInterface {
         find_first_n_element(
             int64_t limit,
             const BitsetTypeView& element_bitset,
-            const IArrayOffsets* array_offsets,
+            const IStructElementOffsets* struct_element_offsets,
             const std::optional<QueryIteratorCursor>& cursor) const = 0;
 
     void

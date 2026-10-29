@@ -617,7 +617,7 @@ TEST(test_chunk_segment, GetFieldIndexMetaThrowsOnMissingField) {
                  SegcoreError);
 }
 
-TEST(test_chunk_segment, MissingStructArrayOffsetsReturnsEmptyForOldRows) {
+TEST(test_chunk_segment, MissingStructElementOffsetsReturnsEmptyForOldRows) {
     auto old_schema = std::make_shared<Schema>();
     old_schema->set_schema_version(1);
     auto pk = old_schema->AddDebugField("pk", DataType::INT64);
@@ -653,7 +653,7 @@ TEST(test_chunk_segment, MissingStructArrayOffsetsReturnsEmptyForOldRows) {
                          false);
     segment->Reopen(new_schema);
 
-    auto offsets = segment->GetArrayOffsets(label);
+    auto offsets = segment->GetStructElementOffsets(label);
     ASSERT_NE(offsets, nullptr);
     EXPECT_EQ(offsets->GetRowCount(), row_count);
     EXPECT_EQ(offsets->GetTotalElementCount(), 0);
@@ -704,10 +704,10 @@ TEST(test_chunk_segment,
         dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(sealed, nullptr);
     auto state = sealed->TestGetPublishedStateSnapshot();
-    auto offsets = state->runtime->array_offsets_map.at(vector);
+    auto offsets = state->runtime->struct_element_offsets_map.at(vector);
     ASSERT_NE(offsets, nullptr);
-    EXPECT_EQ(offsets, state->runtime->array_offsets_map.at(label));
-    EXPECT_EQ(offsets, state->runtime->array_offsets_map.at(score));
+    EXPECT_EQ(offsets, state->runtime->struct_element_offsets_map.at(label));
+    EXPECT_EQ(offsets, state->runtime->struct_element_offsets_map.at(score));
     EXPECT_EQ(offsets->GetTotalElementCount(), rows * elements_per_row);
     const int64_t first_row = 0;
     // A complete unordered load batch must choose the scalar with the lower
@@ -718,7 +718,8 @@ TEST(test_chunk_segment,
             state->runtime->fields.at(field)->CellsLoaded(&first_row, 1));
     }
     // A vector-only struct pays the raw-read cost during load too.
-    auto vector_only_offsets = state->runtime->array_offsets_map.at(unrelated);
+    auto vector_only_offsets =
+        state->runtime->struct_element_offsets_map.at(unrelated);
     ASSERT_NE(vector_only_offsets, nullptr);
     EXPECT_EQ(vector_only_offsets->GetTotalElementCount(),
               rows * elements_per_row);
@@ -731,16 +732,16 @@ TEST(test_chunk_segment,
             state->runtime->fields.at(field)->CellsLoaded(&first_row, 1));
     }
     auto read = segment->CaptureReadSnapshot();
-    EXPECT_EQ(read->GetArrayOffsets(score), offsets);
-    EXPECT_EQ(read->GetArrayOffsets(vector), offsets);
-    EXPECT_EQ(vector_only_offsets, segment->GetArrayOffsets(unrelated));
+    EXPECT_EQ(read->GetStructElementOffsets(score), offsets);
+    EXPECT_EQ(read->GetStructElementOffsets(vector), offsets);
+    EXPECT_EQ(vector_only_offsets, segment->GetStructElementOffsets(unrelated));
     for (auto field : {label, unrelated}) {
         EXPECT_FALSE(
             state->runtime->fields.at(field)->CellsLoaded(&first_row, 1));
     }
     segment->ClearData();
-    EXPECT_EQ(segment->GetArrayOffsets(label), nullptr);
-    EXPECT_EQ(read->GetArrayOffsets(label), offsets);
+    EXPECT_EQ(segment->GetStructElementOffsets(label), nullptr);
+    EXPECT_EQ(read->GetStructElementOffsets(label), offsets);
 }
 
 TEST(test_chunk_segment, StructOffsetsFromNullableVectorChunks) {
@@ -756,7 +757,8 @@ TEST(test_chunk_segment, StructOffsetsFromNullableVectorChunks) {
          {{true, {}}, {true, {1, 2, 3, 4}}, {true, {5, 6}}}},
         buffers);
     OpContext ctx;
-    auto offsets = ArrayOffsetsSealed::BuildFromColumn(*column, meta, 5, &ctx);
+    auto offsets =
+        StructElementOffsetsSealed::BuildFromColumn(*column, meta, 5, &ctx);
     EXPECT_EQ(offsets->GetTotalElementCount(), 3);
     EXPECT_EQ(offsets->ElementIDToRowID(0), std::make_pair(3, 0));
     EXPECT_EQ(offsets->ElementIDToRowID(2), std::make_pair(4, 0));
@@ -784,7 +786,7 @@ TEST(test_chunk_segment,
     ASSERT_NE(sealed, nullptr);
     auto current = sealed->TestGetPublishedStateSnapshot();
     auto read = segment->CaptureReadSnapshot();
-    auto old_offsets = read->GetArrayOffsets(field);
+    auto old_offsets = read->GetStructElementOffsets(field);
     ASSERT_NE(old_offsets, nullptr);
     EXPECT_EQ(old_offsets->GetTotalElementCount(), rows * 2);
     current->runtime->fields.at(field)->ManualEvictCache();
@@ -826,7 +828,7 @@ TEST(test_chunk_segment,
             [&] {
                 EXPECT_EQ(probe->calls, calls_before_publish);
                 EXPECT_EQ(sealed->TestGetPublishedStateSnapshot(), current);
-                EXPECT_EQ(read->GetArrayOffsets(field), old_offsets);
+                EXPECT_EQ(read->GetStructElementOffsets(field), old_offsets);
             });
     };
     for (const auto& [failure, code] :
@@ -845,22 +847,22 @@ TEST(test_chunk_segment,
             EXPECT_EQ(error.get_error_code(), code);
         }
         EXPECT_EQ(sealed->TestGetPublishedStateSnapshot(), current);
-        EXPECT_EQ(segment->GetArrayOffsets(field), old_offsets);
+        EXPECT_EQ(segment->GetStructElementOffsets(field), old_offsets);
     }
     probe->failure = OffsetsPreparationProbe::Failure::None;
     publish_replacement();
-    auto offsets = segment->GetArrayOffsets(field);
+    auto offsets = segment->GetStructElementOffsets(field);
     ASSERT_NE(offsets, nullptr);
     EXPECT_NE(offsets, old_offsets);
     EXPECT_EQ(offsets->GetTotalElementCount(), 3);
-    EXPECT_EQ(read->GetArrayOffsets(field), old_offsets);
+    EXPECT_EQ(read->GetStructElementOffsets(field), old_offsets);
     EXPECT_EQ(old_offsets->GetTotalElementCount(), rows * 2);
     EXPECT_TRUE(old_offsets->IsRowValid(0));
     EXPECT_FALSE(offsets->IsRowValid(0));
     EXPECT_TRUE(offsets->IsRowValid(2));  // valid empty array
     EXPECT_EQ(probe->calls, 4);
     column->ManualEvictCache();
-    EXPECT_EQ(segment->GetArrayOffsets(field), offsets);
+    EXPECT_EQ(segment->GetStructElementOffsets(field), offsets);
     EXPECT_EQ(probe->calls, 4);
 }
 
@@ -887,9 +889,10 @@ TEST(test_chunk_segment,
                                     array_len);
     auto segment = CreateSealedWithFieldDataLoaded(old_schema, dataset);
 
-    auto old_offsets = segment->GetArrayOffsets(old_label);
+    auto old_offsets = segment->GetStructElementOffsets(old_label);
     ASSERT_NE(old_offsets, nullptr);
-    ASSERT_EQ(old_offsets.get(), segment->GetArrayOffsets(old_score).get());
+    ASSERT_EQ(old_offsets.get(),
+              segment->GetStructElementOffsets(old_score).get());
     // DataGen marks alternating rows valid for nullable scalar fields, starting
     // with row 0. Sealed binlog serialization drops payloads from null rows, so
     // only the three valid rows contribute elements to the shared offsets.
@@ -920,14 +923,15 @@ TEST(test_chunk_segment,
     // name is unchanged, while every child field ID belongs to a new generation.
     segment->Reopen(new_schema);
 
-    auto new_offsets = segment->GetArrayOffsets(new_label);
+    auto new_offsets = segment->GetStructElementOffsets(new_label);
     ASSERT_NE(new_offsets, nullptr);
     EXPECT_NE(new_offsets.get(), old_offsets.get());
-    EXPECT_EQ(new_offsets.get(), segment->GetArrayOffsets(new_score).get());
+    EXPECT_EQ(new_offsets.get(),
+              segment->GetStructElementOffsets(new_score).get());
     EXPECT_EQ(new_offsets->GetRowCount(), row_count);
     EXPECT_EQ(new_offsets->GetTotalElementCount(), 0);
-    EXPECT_EQ(segment->GetArrayOffsets(old_label), nullptr);
-    EXPECT_EQ(segment->GetArrayOffsets(old_score), nullptr);
+    EXPECT_EQ(segment->GetStructElementOffsets(old_label), nullptr);
+    EXPECT_EQ(segment->GetStructElementOffsets(old_score), nullptr);
 }
 
 TEST(test_chunk_segment, SearchOnSealedColumnBruteForceUsesOriginalTopk) {
