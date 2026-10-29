@@ -32,6 +32,7 @@ func TestHTTPConfig_Init(t *testing.T) {
 	assert.Equal(t, cfg.DebugMode.GetAsBool(), false)
 	assert.Equal(t, cfg.Port.GetValue(), "")
 	assert.Equal(t, cfg.AcceptTypeAllowInt64.GetValue(), "true")
+	assert.False(t, cfg.StrictValidation.GetAsBool())
 	assert.Equal(t, cfg.EnablePprof.GetAsBool(), true)
 	assert.Equal(t, cfg.DQLAdmissionEnabled.GetAsBool(), true)
 	assert.Equal(t, cfg.EnableWebUI.GetAsBool(), true)
@@ -46,4 +47,14 @@ func TestHTTPConfig_V1Override(t *testing.T) {
 	require.NoError(t, base.Save(cfg.EnableV1.Key, "false"))
 	assert.False(t, cfg.EnableV1.GetAsBool())
 	assert.True(t, cfg.Enabled.GetAsBool(), "disabling V1 must preserve the listener")
+}
+
+func TestHTTPConfig_StrictValidationOptIn(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{}))
+	t.Cleanup(base.mgr.Close)
+	cfg := httpConfig{}
+	cfg.init(base)
+	require.False(t, cfg.StrictValidation.GetAsBool())
+	require.NoError(t, base.Save("proxy.http.strictValidation", "true"))
+	require.True(t, cfg.StrictValidation.GetAsBool())
 }
