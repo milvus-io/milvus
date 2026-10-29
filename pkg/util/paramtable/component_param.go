@@ -2482,7 +2482,6 @@ type proxyConfig struct {
 	QueryNodePoolingSize   ParamItem `refreshable:"false"`
 
 	HybridSearchRequeryPolicy     ParamItem `refreshable:"true"`
-	SearchPlaceholderLogEnabled   ParamItem `refreshable:"true"`
 	SearchPlaceholderLogRateLimit ParamItem `refreshable:"true"`
 }
 
@@ -3143,20 +3142,11 @@ Disabled if the value is less or equal to 0.`,
 	p.SearchPlaceholderLogRateLimit = ParamItem{
 		Key:          "proxy.searchPlaceholderLogRateLimit",
 		Version:      "3.0.6",
-		Doc:          "The maximum number of search placeholder (query vector/text) info log entries emitted per second. Set to 0 to disable.",
-		DefaultValue: "50",
+		Doc:          "The maximum number of search placeholder preview info log entries per second per Proxy process, shared by Search and HybridSearch. One entry covers one request. Values <= 0 disable logging.",
+		DefaultValue: "0",
 		Export:       false,
 	}
 	p.SearchPlaceholderLogRateLimit.Init(base.mgr)
-
-	p.SearchPlaceholderLogEnabled = ParamItem{
-		Key:          "proxy.searchPlaceholderLogEnabled",
-		Version:      "3.0.6",
-		Doc:          "Whether to emit search placeholder (query vector/text) info log entries. Controlled rate is configured by proxy.searchPlaceholderLogRateLimit.",
-		DefaultValue: "false",
-		Export:       false,
-	}
-	p.SearchPlaceholderLogEnabled.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
