@@ -2,6 +2,7 @@ package utility
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -140,13 +141,15 @@ func TestWALSwitchCatchUpAssemblesCommittedTransactionsAndAbortsUnfinished(t *te
 		WithHeader(&message.CommitTxnMessageHeader{}).WithBody(&message.CommitTxnMessageBody{}).
 		MustBuildMutable().WithTxnContext(committed), 30)
 	input := newCatchUpTestInput(commit, begin(unfinished, 21), catchUpInsert(22, "v1", &unfinished), catchUpInsert(12, "v1", &committed), begin(committed, 11), catchUpAlterWAL(40))
-	alterWALTimeTick, err := r.Read(t.Context(), input, h)
+	alterWALTimeTick, err := r.Read(t.Context(), input, &catchUpProgressHandler{Handler: h, walSwitchCatchUpStats: r.stats})
 	require.NoError(t, err)
 	require.EqualValues(t, 40, alterWALTimeTick)
 	require.Len(t, h.messages, 1)
 	require.Equal(t, message.MessageTypeTxn, h.messages[0].MessageType())
 	require.EqualValues(t, 30, h.messages[0].TimeTick())
 	require.Empty(t, r.TxnBuffer.GetUncommittedMessageBuilder())
+	require.EqualValues(t, 6, r.stats.readMessages)
+	require.EqualValues(t, 1, r.stats.handledMessages, "a committed transaction is one logical delivery; unfinished transactions are not delivered")
 }
 
 func TestWALSwitchCatchUpWaitsForDeliveryAndHonorsCancellation(t *testing.T) {
@@ -245,7 +248,8 @@ func TestWALSwitchCatchUpRetriesFromHandledProgress(t *testing.T) {
 				DeliverPolicy:  options.DeliverPolicyStartFrom(walimplstest.NewTestMessageID(0)),
 				DeliverFilters: []options.DeliverFilter{options.DeliverFilterTimeTickGT(1), options.DeliverFilterMessageType(message.MessageTypeInsert)},
 			}
-			alterWALTimeTick, err := catchUpWALWithRetry(ctx, opts, nil, opener)
+			stats := &walSwitchCatchUpStats{}
+			alterWALTimeTick, err := catchUpWALWithRetry(ctx, opts, nil, opener, stats)
 			if cancelRetry {
 				require.ErrorIs(t, err, context.Canceled)
 				require.Zero(t, alterWALTimeTick)
@@ -257,7 +261,13 @@ func TestWALSwitchCatchUpRetriesFromHandledProgress(t *testing.T) {
 				require.Equal(t, 2, opens)
 				require.Len(t, h.messages, 3, "retry must not repeat the handled prefix")
 				require.EqualValues(t, 30, h.messages[2].TimeTick())
+				require.EqualValues(t, 6, stats.readMessages, "include records reread and filtered on retry")
+				require.EqualValues(t, 3, stats.handledMessages, "exclude retry duplicates and AlterWAL")
+				require.Greater(t, stats.readBytes, stats.handledBytes)
+				require.Positive(t, stats.handledBytes)
+				require.Equal(t, catchUpAlterWAL(40).MessageID(), stats.endMessageID)
 			}
+			require.Equal(t, opens, stats.attempts)
 			require.Equal(t, opens, closes)
 			require.False(t, h.closed)
 			require.Len(t, opts.DeliverFilters, 2)
@@ -334,12 +344,13 @@ func TestWALSwitchCatchUpReadsRocksMQHistoryAfterWriterClose(t *testing.T) {
 		}
 	}
 	marker := message.NewAlterWALMessageBuilderV2().WithAllVChannel().WithHeader(&message.AlterWALMessageHeader{TargetWalName: commonpb.WALName_WoodPecker}).WithBody(&message.AlterWALMessageBody{}).MustBuildMutable().WithTimeTick(30).WithLastConfirmedUseMessageID()
-	_, err = writer.Append(t.Context(), marker)
+	markerID, err := writer.Append(t.Context(), marker)
 	require.NoError(t, err)
 	writer.Close()
 	h := &catchUpTestHandler{}
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
+	sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "info", DisableTimestamp: true})
 	alterWALTimeTick, err := CatchUpWALAfterSwitch(ctx, WALSwitchCatchUpOptions{
 		PChannel: channel.Name, VChannel: "v1", DeliverPolicy: options.DeliverPolicyStartFrom(firstID), MessageHandler: h,
 	})
@@ -349,6 +360,43 @@ func TestWALSwitchCatchUpReadsRocksMQHistoryAfterWriterClose(t *testing.T) {
 	require.EqualValues(t, 10, h.messages[0].TimeTick())
 	require.EqualValues(t, 20, h.messages[1].TimeTick())
 	require.False(t, h.closed)
+	logs := sink.String()
+	require.Contains(t, logs, "[INFO]")
+	require.Contains(t, logs, "historical WAL catch-up started")
+	var finished string
+	for _, line := range strings.Split(logs, "\n") {
+		if strings.Contains(line, "historical WAL catch-up finished") {
+			finished = line
+		}
+	}
+	for _, field := range []string{
+		"[catchUpID=", "[pchannel=" + channel.Name + "]", "[vchannel=v1]", "[walName=rocksmq]",
+		"[startMessageID=" + firstID.String() + "]", "[startAfter=false]", "[completed=true]",
+		"[endMessageID=" + markerID.String() + "]", "[endTimeTick=30]", "[lastReadMessageID=" + markerID.String() + "]",
+		"[readMessages=3]", "[handledMessages=2]", "[estimatedReadBytes=", "[estimatedHandledBytes=", "[attempts=1]", "[elapsed=",
+	} {
+		require.Contains(t, finished, field)
+	}
+}
+
+func TestWALSwitchCatchUpLogsFailureBeforeOpeningHistory(t *testing.T) {
+	paramtable.Init()
+	oldRole := paramtable.GetRole()
+	paramtable.SetRole(typeutil.QueryNodeRole)
+	t.Cleanup(func() { paramtable.SetRole(oldRole) })
+	sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "info", DisableTimestamp: true})
+	_, err := CatchUpWALAfterSwitch(t.Context(), WALSwitchCatchUpOptions{
+		PChannel: "unavailable-history", VChannel: "v1", DeliverPolicy: options.DeliverPolicyStartAfter(rmqwal.NewRmqID(10)),
+	})
+	require.Error(t, err)
+	logs := sink.String()
+	for _, field := range []string{
+		"historical WAL catch-up started", "historical WAL catch-up finished",
+		"[startAfter=true]", "[completed=false]", "[readMessages=0]", "[handledMessages=0]", "[attempts=0]", "[error=", "[elapsed=",
+	} {
+		require.Contains(t, logs, field)
+	}
+	require.NotContains(t, logs, "[endMessageID=")
 }
 
 func TestWALSwitchCatchUpOrdersConcurrentRocksMQWritesThroughAlterWAL(t *testing.T) {

@@ -43,9 +43,8 @@ type WALSwitchCatchUpOptions struct {
 
 // CatchUpWALAfterSwitch replays the old WAL read-only through AlterWAL and returns
 // its TimeTick after selected messages are handled. It never closes MessageHandler.
-func CatchUpWALAfterSwitch(ctx context.Context, opts WALSwitchCatchUpOptions) (uint64, error) {
+func CatchUpWALAfterSwitch(ctx context.Context, opts WALSwitchCatchUpOptions) (endTimeTick uint64, err error) {
 	var startMessageID, startAfterMessageID message.MessageID
-	var err error
 	switch policy := opts.DeliverPolicy.GetPolicy().(type) {
 	case *streamingpb.DeliverPolicy_StartFrom:
 		startMessageID, err = message.UnmarshalMessageID(policy.StartFrom)
@@ -58,6 +57,34 @@ func CatchUpWALAfterSwitch(ctx context.Context, opts WALSwitchCatchUpOptions) (u
 	if err != nil {
 		return 0, merr.Wrap(err, "decode historical WAL position")
 	}
+	startedAt := time.Now()
+	stats := &walSwitchCatchUpStats{id: walCatchUpScannerID.Add(1)}
+	logger := mlog.With(mlog.FieldPChannel(opts.PChannel), mlog.FieldVChannel(opts.VChannel),
+		mlog.Int64("catchUpID", stats.id), mlog.String("walName", startMessageID.WALName().String()),
+		mlog.Stringer("startMessageID", startMessageID), mlog.Bool("startAfter", startAfterMessageID != nil))
+	logger.Info(ctx, "historical WAL catch-up started", mlog.Stringers("deliverFilters", opts.DeliverFilters))
+	defer func() {
+		fields := []mlog.Field{
+			mlog.Bool("completed", err == nil), mlog.Duration("elapsed", time.Since(startedAt)),
+			mlog.Int("attempts", stats.attempts), mlog.Int64("readMessages", stats.readMessages),
+			mlog.Int64("estimatedReadBytes", stats.readBytes), mlog.Int64("handledMessages", stats.handledMessages),
+			mlog.Int64("estimatedHandledBytes", stats.handledBytes),
+		}
+		if err != nil {
+			fields = append(fields, mlog.Err(err))
+		}
+		if stats.lastReadMessageID != nil {
+			fields = append(fields, mlog.Stringer("lastReadMessageID", stats.lastReadMessageID))
+		}
+		if stats.lastHandledMessage != nil {
+			fields = append(fields, mlog.Stringer("lastHandledMessageID", stats.lastHandledMessage.MessageID()),
+				mlog.Uint64("lastHandledTimeTick", stats.lastHandledMessage.TimeTick()))
+		}
+		if stats.endMessageID != nil {
+			fields = append(fields, mlog.Stringer("endMessageID", stats.endMessageID), mlog.Uint64("endTimeTick", endTimeTick))
+		}
+		logger.Info(ctx, "historical WAL catch-up finished", fields...)
+	}()
 	// Open inclusively so StartAfter on AlterWAL cannot hide the stop marker.
 	opts.DeliverPolicy = options.DeliverPolicyStartFrom(startMessageID)
 	select {
@@ -77,19 +104,19 @@ func CatchUpWALAfterSwitch(ctx context.Context, opts WALSwitchCatchUpOptions) (u
 		return 0, err
 	}
 	defer opener.Close()
-	return catchUpWALWithRetry(ctx, opts, startAfterMessageID, opener)
+	return catchUpWALWithRetry(ctx, opts, startAfterMessageID, opener, stats)
 }
 
 // Once any output has been handled, retry here with its checkpoint instead of
 // returning stale construction options to Resuming. All state is call-local.
-func catchUpWALWithRetry(ctx context.Context, opts WALSwitchCatchUpOptions, startAfterMessageID message.MessageID, opener walimpls.OpenerImpls) (uint64, error) {
-	logger := mlog.With(mlog.FieldPChannel(opts.PChannel), mlog.FieldVChannel(opts.VChannel))
+func catchUpWALWithRetry(ctx context.Context, opts WALSwitchCatchUpOptions, startAfterMessageID message.MessageID, opener walimpls.OpenerImpls, stats *walSwitchCatchUpStats) (uint64, error) {
+	logger := mlog.With(mlog.FieldPChannel(opts.PChannel), mlog.FieldVChannel(opts.VChannel), mlog.Int64("catchUpID", stats.id))
 	channel := types.PChannelInfo{Name: opts.PChannel, AccessMode: types.AccessModeRO}
 	metrics := metricsutil.NewScanMetrics(channel).NewScannerMetrics()
 	// Standalone may share these metric series with SN; release this scanner's
 	// contribution without deleting the shared series.
 	defer metrics.Close()
-	progress := &catchUpProgressHandler{Handler: opts.MessageHandler}
+	progress := &catchUpProgressHandler{Handler: opts.MessageHandler, walSwitchCatchUpStats: stats}
 	readRetryBackoff := 100 * time.Millisecond
 	for {
 		for !opts.IgnorePauseConsumption && paramtable.Get().StreamingCfg.WALScannerPauseConsumption.GetAsBool() {
@@ -98,6 +125,7 @@ func catchUpWALWithRetry(ctx context.Context, opts WALSwitchCatchUpOptions, star
 			}
 		}
 		alterWALTimeTick, err := func() (uint64, error) {
+			stats.attempts++
 			w, err := opener.Open(ctx, &walimpls.OpenOption{Channel: channel})
 			if err != nil {
 				return 0, err
@@ -112,6 +140,7 @@ func catchUpWALWithRetry(ctx context.Context, opts WALSwitchCatchUpOptions, star
 			}
 			defer scanner.Close()
 			r := newWALSwitchCatchUpReader(opts.PChannel, opts.VChannel, logger, metrics, opts.DeliverFilters)
+			r.stats = stats
 			r.ResolveVChannel, r.WaitForReadBudget, r.StartAfterMessageID = opts.ResolveVChannel, waitForCatchUpReadBudget, startAfterMessageID
 			return r.Read(ctx, scanner, progress)
 		}()
@@ -139,7 +168,9 @@ func catchUpWALWithRetry(ctx context.Context, opts WALSwitchCatchUpOptions, star
 		} else {
 			opts.DeliverFilters = append(filters, options.DeliverFilterTimeTickGT(progress.lastHandledMessage.TimeTick()))
 		}
-		logger.RatedWarn(ctx, 1, "retry historical WAL from successfully handled progress", mlog.Err(err))
+		logger.RatedWarn(ctx, 1, "retry historical WAL from successfully handled progress", mlog.Err(err),
+			mlog.Int("attempts", stats.attempts), mlog.Stringer("resumeMessageID", progress.lastHandledMessage.LastConfirmedMessageID()),
+			mlog.Uint64("lastHandledTimeTick", progress.lastHandledMessage.TimeTick()), mlog.Int64("readMessages", stats.readMessages))
 		if err := waitForCatchUpRetry(ctx, readRetryBackoff); err != nil {
 			return 0, err
 		}
@@ -172,15 +203,33 @@ func waitForCatchUpReadBudget(ctx context.Context, size int) error {
 	return nil
 }
 
+// Read counters include physical records filtered out or reread during retries.
+// Handled counters count logical messages acknowledged by the handler, including
+// assembled transactions and TimeTicks, but excluding the AlterWAL stop marker.
+// Byte counters use EstimateSize, not broker/network byte counts.
+type walSwitchCatchUpStats struct {
+	id                 int64
+	attempts           int
+	readMessages       int64
+	readBytes          int64
+	handledMessages    int64
+	handledBytes       int64
+	lastReadMessageID  message.MessageID
+	endMessageID       message.MessageID
+	lastHandledMessage message.ImmutableMessage
+}
+
 type catchUpProgressHandler struct {
 	message.Handler
-	lastHandledMessage message.ImmutableMessage
+	*walSwitchCatchUpStats
 }
 
 func (p *catchUpProgressHandler) Handle(param message.HandleParam) message.HandleResult {
 	result := p.Handler.Handle(param)
 	if result.MessageHandled && param.Message != nil {
 		p.lastHandledMessage = param.Message
+		p.handledMessages++
+		p.handledBytes += int64(param.Message.EstimateSize())
 	}
 	return result
 }
@@ -201,6 +250,7 @@ type walSwitchCatchUpReader struct {
 	ResolveVChannel         func(context.Context, int64, string) (string, error)
 	WaitForReadBudget       func(context.Context, int) error
 	StartAfterMessageID     message.MessageID
+	stats                   *walSwitchCatchUpStats
 }
 
 func newWALSwitchCatchUpReader(pchannel, vchannel string, logger *mlog.Logger, metrics *metricsutil.ScannerMetrics, filters []options.DeliverFilter) *walSwitchCatchUpReader {
@@ -210,6 +260,7 @@ func newWALSwitchCatchUpReader(pchannel, vchannel string, logger *mlog.Logger, m
 		PChannel:                pchannel, VChannel: vchannel, Metrics: metrics,
 		Filter: options.GetFilterFunc(filters), ReorderBuffer: NewReOrderBuffer(),
 		TxnBuffer: NewTxnBuffer(logger, metrics), PendingQueue: NewPendingQueue(),
+		stats: &walSwitchCatchUpStats{},
 	}
 }
 
@@ -226,6 +277,9 @@ func (r *walSwitchCatchUpReader) Read(ctx context.Context, scanner walimpls.Scan
 				}
 				return 0, status.NewUnrecoverableError("historical WAL ended before AlterWAL on %s", r.PChannel)
 			}
+			r.stats.readMessages++
+			r.stats.readBytes += int64(msg.EstimateSize())
+			r.stats.lastReadMessageID = msg.MessageID()
 			if r.WaitForReadBudget != nil {
 				if err := r.WaitForReadBudget(ctx, msg.EstimateSize()); err != nil {
 					return 0, err
@@ -258,6 +312,7 @@ func (r *walSwitchCatchUpReader) Read(ctx context.Context, scanner walimpls.Scan
 				}
 				pending := r.PendingQueue.Next()
 				if pending.MessageType() == message.MessageTypeAlterWAL {
+					r.stats.endMessageID = pending.MessageID()
 					r.PendingQueue.UnsafeAdvance()
 					r.Metrics.UpdatePendingQueueSize(r.PendingQueue.Bytes())
 					return pending.TimeTick(), nil
