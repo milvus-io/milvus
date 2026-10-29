@@ -53,22 +53,20 @@ func SetVectorArrayElementValidData(row *schemapb.VectorField, validData []bool)
 	}
 }
 
-// SetFieldDataValidData writes row validity to both the legacy and the
-// field-specific location. Both locations share validData.
+// SetFieldDataValidData writes row validity to the legacy location, and to the
+// field-specific location when the ScalarField or VectorField wrapper exists.
+// Both locations share validData.
 func SetFieldDataValidData(fieldData *schemapb.FieldData, validData []bool) {
 	if fieldData == nil {
 		return
 	}
 
+	fieldData.ValidData = validData
 	if scalars := fieldData.GetScalars(); scalars != nil {
 		scalars.ValidData = validData
 	} else if vectors := fieldData.GetVectors(); vectors != nil {
 		vectors.ValidData = validData
-	} else {
-		return
 	}
-
-	fieldData.ValidData = validData
 }
 
 // ValidateAndNormalizeFieldDataValidData checks a user payload once when it
