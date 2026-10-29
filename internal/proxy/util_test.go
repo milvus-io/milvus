@@ -2569,23 +2569,39 @@ func Test_validateMaxLengthPerRow(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("max length not int", func(t *testing.T) {
-		err := validateMaxLengthPerRow("collection", &schemapb.FieldSchema{
-			Name:     "arr",
-			DataType: schemapb.DataType_VarChar,
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.MaxLengthKey,
-					Value: "()",
+	for _, tc := range []struct {
+		name  string
+		value string
+		cause error
+	}{
+		{name: "max length not int", value: "()", cause: strconv.ErrSyntax},
+		{name: "max length overflows int64", value: "9223372036854775808", cause: strconv.ErrRange},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateMaxLengthPerRow("collection", &schemapb.FieldSchema{
+				Name:     "arr",
+				DataType: schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxLengthKey, Value: tc.value},
 				},
-			},
+			})
+			// Keep the input-error classification and field context while preserving
+			// the original parse failure for callers inspecting the error chain.
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.ErrorIs(t, err, tc.cause)
+			var parseErr *strconv.NumError
+			require.ErrorAs(t, err, &parseErr)
+			assert.Equal(t, "ParseInt", parseErr.Func)
+			assert.Equal(t, tc.value, parseErr.Num)
+			status := merr.Status(err)
+			assert.Equal(t, int32(1100), status.GetCode())
+			assert.Equal(t, merr.InputError, merr.GetErrorType(err))
+			assert.False(t, status.GetRetriable())
+			assert.Contains(t, status.GetReason(), "max_length")
+			assert.Contains(t, status.GetReason(), "arr")
+			assert.Contains(t, status.GetReason(), tc.value)
 		})
-		// A malformed max_length must surface as an invalid-parameter error (1100)
-		// that names the field and the parameter, not a raw strconv error (65535).
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.Contains(t, err.Error(), "max_length")
-		assert.Contains(t, err.Error(), "arr")
-	})
+	}
 
 	t.Run("no max length", func(t *testing.T) {
 		err := validateMaxLengthPerRow("collection", &schemapb.FieldSchema{
