@@ -108,15 +108,32 @@ class FieldMeta {
               DataType element_type,
               bool nullable,
               std::optional<DefaultValueType> default_value,
-              std::string external_field_mapping = "")
+              std::string external_field_mapping = "",
+              std::optional<milvus::proto::schema::TypeSchema> type_schema =
+                  std::nullopt)
         : name_(std::move(name)),
           id_(id),
           type_(type),
           element_type_(element_type),
           nullable_(nullable),
           default_value_(std::move(default_value)),
-          external_field_mapping_(std::move(external_field_mapping)) {
+          external_field_mapping_(std::move(external_field_mapping)),
+          type_schema_(std::move(type_schema)) {
         Assert(IsArrayDataType(type_));
+        if (type_schema_.has_value()) {
+            AssertInfo(
+                type_ == DataType::ARRAY && element_type_ == DataType::ARRAY,
+                "type_schema is only supported for nested ARRAY "
+                "FieldMeta");
+
+            // Temporary compatibility for schemas that still carry root
+            // nullability in FieldSchema.nullable. Runtime nested ARRAY code
+            // reads nullability uniformly from each TypeSchema node.
+            if (nullable_) {
+                type_schema_->set_nullable(true);
+            }
+            nullable_ = type_schema_->nullable();
+        }
     }
 
     // pass in any value for dim for sparse vector is ok as it'll never be used:
@@ -237,6 +254,18 @@ class FieldMeta {
         return element_type_;
     }
 
+    const milvus::proto::schema::TypeSchema&
+    get_array_type_schema() const {
+        Assert(is_nested_array());
+        return *type_schema_;
+    }
+
+    bool
+    is_nested_array() const {
+        return type_schema_.has_value() && type_schema_->has_array_element() &&
+               type_schema_->array_element().has_array_element();
+    }
+
     bool
     is_vector() const {
         return IsVectorDataType(type_);
@@ -345,6 +374,7 @@ class FieldMeta {
     // of collection schema, the field id is the json shredding field id
     int64_t main_field_id_ = INVALID_FIELD_ID;
     std::string external_field_mapping_;
+    std::optional<milvus::proto::schema::TypeSchema> type_schema_;
 };
 
 }  // namespace milvus

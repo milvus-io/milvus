@@ -682,6 +682,26 @@ func TestCheckAndFlattenStructFieldDataRejectsInvalidVectorWidth(t *testing.T) {
 	}
 }
 
+func recursiveArrayLongFieldData(name string) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_Array,
+		FieldName: name,
+		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+				ElementType: schemapb.DataType_Array,
+				Data: []*schemapb.ScalarField{{
+					Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+						ElementType: schemapb.DataType_Int64,
+						Data: []*schemapb.ScalarField{{
+							Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}},
+						}},
+					}},
+				}},
+			}},
+		}},
+	}
+}
+
 func op(name string, t schemapb.FieldPartialUpdateOp_OpType) *schemapb.FieldPartialUpdateOp {
 	return &schemapb.FieldPartialUpdateOp{FieldName: name, Op: t}
 }
@@ -774,6 +794,36 @@ func TestValidateFieldPartialUpdateOps_RemoveOnArrayField(t *testing.T) {
 	_, seen, err := resolveFieldPartialUpdateOps(req, schema)
 	require.NoError(t, err)
 	assert.True(t, seen)
+}
+
+func TestValidateFieldPartialUpdateOps_RejectsRecursiveArrayOps(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+		Name:        "nested",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Array,
+		TypeSchema: &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_ArrayElement{
+			ArrayElement: &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_ArrayElement{
+				ArrayElement: &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_LeafType{
+					LeafType: schemapb.DataType_Int64,
+				}},
+			}},
+		}},
+	}}}
+
+	for _, partialOp := range []schemapb.FieldPartialUpdateOp_OpType{
+		schemapb.FieldPartialUpdateOp_ARRAY_APPEND,
+		schemapb.FieldPartialUpdateOp_ARRAY_REMOVE,
+	} {
+		t.Run(partialOp.String(), func(t *testing.T) {
+			req := &milvuspb.UpsertRequest{
+				FieldsData: []*schemapb.FieldData{recursiveArrayLongFieldData("nested")},
+				FieldOps:   []*schemapb.FieldPartialUpdateOp{op("nested", partialOp)},
+			}
+			_, _, err := resolveFieldPartialUpdateOps(req, schema)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "not supported for recursive ARRAY field")
+		})
+	}
 }
 
 func TestValidateFieldPartialUpdateOps_RejectsEmptyFieldName(t *testing.T) {

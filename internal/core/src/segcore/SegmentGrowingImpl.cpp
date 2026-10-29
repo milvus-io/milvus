@@ -227,15 +227,26 @@ ExtractArrayLengthsFromFieldData(const std::vector<FieldDataPtr>& field_data,
                 array_lengths[offset + i] = raw_data[source_index].length();
             }
         } else {
-            // Regular nullable ARRAY FieldData is dense: invalid rows retain
-            // their physical Array slot but contribute no logical elements.
-            auto* raw_data = static_cast<const Array*>(data->Data());
-            for (int64_t i = 0; i < num_rows; ++i) {
-                if (data->IsNullable() && !data->is_valid(i)) {
-                    array_lengths[offset + i] = 0;
-                    continue;
+            if (field_meta.is_nested_array()) {
+                auto* raw_data = static_cast<const ArrayValue*>(data->Data());
+                for (int64_t i = 0; i < num_rows; ++i) {
+                    array_lengths[offset + i] =
+                        data->IsNullable() && !data->is_valid(i)
+                            ? 0
+                            : static_cast<int32_t>(raw_data[i].size());
                 }
-                array_lengths[offset + i] = raw_data[i].length();
+            } else {
+                // Regular nullable ARRAY FieldData is dense: invalid rows
+                // retain their physical Array slot but contribute no logical
+                // elements.
+                auto* raw_data = static_cast<const Array*>(data->Data());
+                for (int64_t i = 0; i < num_rows; ++i) {
+                    if (data->IsNullable() && !data->is_valid(i)) {
+                        array_lengths[offset + i] = 0;
+                        continue;
+                    }
+                    array_lengths[offset + i] = raw_data[i].length();
+                }
             }
         }
         offset += num_rows;
@@ -304,6 +315,17 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
     } else {
         // ARRAY: extract from scalars().array_data().data(i)
         const auto& array_data = field_data.scalars().array_data();
+        if (field_meta.is_nested_array()) {
+            const auto has_valid_data = valid_data.size() == num_rows;
+            for (int64_t i = 0; i < num_rows; ++i) {
+                if (has_valid_data && !valid_data[i]) {
+                    array_lengths[i] = 0;
+                    continue;
+                }
+                array_lengths[i] = array_data.data(i).array_data().data_size();
+            }
+            return;
+        }
         auto element_type = field_meta.get_element_type();
 
         for (int i = 0; i < num_rows; ++i) {
@@ -1015,6 +1037,17 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
             continue;
         }
 
+        if (!SystemProperty::Instance().IsSystem(field_id)) {
+            const auto& field_meta = (*schema)[field_id];
+            if (field_meta.is_nested_array() &&
+                infos.storage_version < STORAGE_V2) {
+                ThrowInfo(ErrorCode::Unsupported,
+                          "nested ARRAY field {} is supported only by Storage "
+                          "V2/V3",
+                          field_id.get());
+            }
+        }
+
         auto insert_files = info.insert_files;
         storage::SortByPath(insert_files);
 
@@ -1033,11 +1066,25 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
             AssertInfo(field_meta.is_nullable(),
                        "nullable must be true when lack rows");
             auto lack_num = info.row_count - total;
-            auto field_data = storage::CreateFieldDataFromDefaultValue(
-                field_meta.get_data_type(),
-                true,
-                lack_num,
-                field_meta.default_value());
+            FieldDataPtr field_data;
+            if (infos.storage_version >= STORAGE_V2 &&
+                field_meta.is_nested_array()) {
+                field_data = storage::CreateFieldData(
+                    field_meta.get_data_type(),
+                    field_meta.get_element_type(),
+                    true,
+                    1,
+                    lack_num,
+                    field_meta.get_array_type_schema());
+                std::static_pointer_cast<FieldData<ArrayValue>>(field_data)
+                    ->FillFieldData(field_meta.default_value(), lack_num);
+            } else {
+                field_data = storage::CreateFieldDataFromDefaultValue(
+                    field_meta.get_data_type(),
+                    true,
+                    lack_num,
+                    field_meta.default_value());
+            }
             channel->push(field_data);
         }
 
@@ -1045,10 +1092,19 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
                  this->get_segment_id(),
                  field_id.get(),
                  num_rows);
+        std::optional<proto::schema::TypeSchema> array_type;
+        if (!SystemProperty::Instance().IsSystem(field_id)) {
+            const auto& field_meta = (*schema)[field_id];
+            if (infos.storage_version >= STORAGE_V2 &&
+                field_meta.is_nested_array()) {
+                array_type = field_meta.get_array_type_schema();
+            }
+        }
         auto load_future = pool.Submit(LoadFieldDatasFromRemote,
                                        insert_files,
                                        channel,
-                                       infos.load_priority);
+                                       infos.load_priority,
+                                       std::move(array_type));
 
         LOG_INFO("segment {} submits load field {} task to thread pool",
                  this->get_segment_id(),
@@ -1325,7 +1381,11 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                     !IsSparseFloatVectorDataType(data_type)
                                 ? field.second.get_dim()
                                 : 1,
-                            batch_num_rows);
+                            batch_num_rows,
+                            field.second.is_nested_array()
+                                ? std::make_optional(
+                                      field.second.get_array_type_schema())
+                                : std::nullopt);
                         field_data->FillFieldData(table_info.table->column(i));
                         field_data_map[FieldId(field_id)].push_back(field_data);
                     }
@@ -1429,6 +1489,13 @@ cachinglayer::PinWrapper<SpanBase>
 SegmentGrowingImpl::chunk_data_impl(milvus::OpContext* op_ctx,
                                     FieldId field_id,
                                     int64_t chunk_id) const {
+    auto schema = get_schema_snapshot();
+    const auto& field_meta = (*schema)[field_id];
+    if (field_meta.is_nested_array()) {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "Span API does not support nested ARRAY field {}",
+                  field_id.get());
+    }
     return cachinglayer::PinWrapper<SpanBase>(
         get_insert_record().get_span_base(field_id, chunk_id));
 }
@@ -1558,6 +1625,92 @@ SegmentGrowingImpl::chunk_array_view_impl(
     std::optional<std::pair<int64_t, int64_t>> offset_len) const {
     ThrowInfo(ErrorCode::NotImplemented,
               "chunk array view impl not implement for growing segment");
+}
+
+cachinglayer::PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>
+SegmentGrowingImpl::chunk_array_value_view_impl(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    int64_t chunk_id,
+    std::optional<std::pair<int64_t, int64_t>> offset_len) const {
+    (void)op_ctx;
+
+    auto schema = get_schema_snapshot();
+    const auto& field_meta = (*schema)[field_id];
+    AssertInfo(field_meta.is_nested_array(),
+               "chunk_array_value_view_impl only supports recursive ARRAY "
+               "fields");
+
+    const auto* array_data = insert_record_.get_data<ArrayValue>(field_id);
+    const auto size_per_chunk = array_data->get_size_per_chunk();
+    const auto active_count = insert_record_.ack_responder_.GetAck();
+    AssertInfo(chunk_id >= 0,
+               "Retrieve array value views with invalid chunk id:{}",
+               chunk_id);
+
+    int64_t start_offset = 0;
+    int64_t len = size_per_chunk;
+    if (offset_len.has_value()) {
+        start_offset = offset_len->first;
+        len = offset_len->second;
+        AssertInfo(start_offset >= 0 && start_offset < size_per_chunk,
+                   "Retrieve array value views with out-of-bound offset:{}, "
+                   "len:{}, wrong",
+                   start_offset,
+                   len);
+        AssertInfo(len > 0 && len <= size_per_chunk,
+                   "Retrieve array value views with out-of-bound offset:{}, "
+                   "len:{}, wrong",
+                   start_offset,
+                   len);
+        AssertInfo(start_offset + len <= size_per_chunk,
+                   "Retrieve array value views with out-of-bound offset:{}, "
+                   "len:{}, wrong",
+                   start_offset,
+                   len);
+    }
+
+    const auto logical_start = chunk_id * size_per_chunk + start_offset;
+    AssertInfo(logical_start >= 0 && logical_start < active_count,
+               "Retrieve array value views with out-of-bound chunk:{}, "
+               "offset:{}, len:{}",
+               chunk_id,
+               start_offset,
+               len);
+    if (offset_len.has_value()) {
+        AssertInfo(logical_start + len <= active_count,
+                   "Retrieve array value views with out-of-bound chunk:{}, "
+                   "offset:{}, len:{}",
+                   chunk_id,
+                   start_offset,
+                   len);
+    } else {
+        len = std::min(len, active_count - logical_start);
+    }
+
+    std::vector<ArrayValueView> views;
+    views.reserve(len);
+    if (field_meta.is_nullable()) {
+        auto valid_data = insert_record_.get_valid_data(field_id);
+        const auto* row_valid = valid_data->get_chunk_data(logical_start);
+        for (int64_t i = 0; i < len; ++i) {
+            views.push_back(array_data->view_element(logical_start + i));
+        }
+        std::pair<std::vector<ArrayValueView>, ValidityView> content{
+            std::move(views), ValidityView::FromExpanded(row_valid)};
+        return cachinglayer::PinWrapper<
+            std::pair<std::vector<ArrayValueView>, ValidityView>>(
+            std::move(valid_data), std::move(content));
+    }
+
+    for (int64_t i = 0; i < len; ++i) {
+        views.push_back(array_data->view_element(logical_start + i));
+    }
+    std::pair<std::vector<ArrayValueView>, ValidityView> content{
+        std::move(views), ValidityView{}};
+    return cachinglayer::PinWrapper<
+        std::pair<std::vector<ArrayValueView>, ValidityView>>(
+        std::move(content));
 }
 
 cachinglayer::PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
@@ -1699,6 +1852,68 @@ SegmentGrowingImpl::chunk_array_views_by_offsets(
     ThrowInfo(
         ErrorCode::NotImplemented,
         "chunk array views by offsets not implemented for growing segment");
+}
+
+cachinglayer::PinWrapper<
+    std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
+SegmentGrowingImpl::chunk_array_value_views_by_offsets(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    int64_t chunk_id,
+    const FixedVector<int32_t>& offsets) const {
+    (void)op_ctx;
+
+    auto schema = get_schema_snapshot();
+    const auto& field_meta = (*schema)[field_id];
+    AssertInfo(field_meta.is_nested_array(),
+               "chunk_array_value_views_by_offsets only supports recursive "
+               "ARRAY fields");
+
+    const auto* array_data = insert_record_.get_data<ArrayValue>(field_id);
+    const auto size_per_chunk = array_data->get_size_per_chunk();
+    const auto active_count = insert_record_.ack_responder_.GetAck();
+    AssertInfo(chunk_id >= 0,
+               "Retrieve array value views with invalid chunk id:{}",
+               chunk_id);
+    const auto logical_chunk_start = chunk_id * size_per_chunk;
+    AssertInfo(logical_chunk_start >= 0 && logical_chunk_start < active_count,
+               "Retrieve array value views with out-of-bound chunk:{}",
+               chunk_id);
+
+    std::vector<ArrayValueView> views;
+    views.reserve(offsets.size());
+    std::vector<int64_t> logical_offsets;
+    logical_offsets.reserve(offsets.size());
+    for (auto offset : offsets) {
+        AssertInfo(offset >= 0 && offset < size_per_chunk,
+                   "Retrieve array value view with out-of-bound offset:{} "
+                   "for chunk size:{}",
+                   offset,
+                   size_per_chunk);
+        const auto logical_offset = logical_chunk_start + offset;
+        AssertInfo(logical_offset >= 0 && logical_offset < active_count,
+                   "Retrieve array value view with out-of-bound chunk:{}, "
+                   "offset:{}",
+                   chunk_id,
+                   offset);
+        logical_offsets.push_back(logical_offset);
+    }
+
+    FixedVector<bool> valid_data;
+    if (field_meta.is_nullable()) {
+        valid_data.resize(offsets.size());
+        insert_record_.get_valid_data(field_id)->bulk_is_valid(
+            logical_offsets.data(), logical_offsets.size(), valid_data.data());
+    }
+    for (auto logical_offset : logical_offsets) {
+        views.push_back(array_data->view_element(logical_offset));
+    }
+
+    std::pair<std::vector<ArrayValueView>, FixedVector<bool>> content{
+        std::move(views), std::move(valid_data)};
+    return cachinglayer::PinWrapper<
+        std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>(
+        std::move(content));
 }
 
 int64_t
@@ -2265,13 +2480,24 @@ SegmentGrowingImpl::bulk_subscript_array_impl(
     const int64_t* seg_offsets,
     int64_t count,
     google::protobuf::RepeatedPtrField<T>* dst) const {
+    if (auto vec_ptr =
+            dynamic_cast<const ConcurrentVector<ArrayValue>*>(&vec_raw);
+        vec_ptr != nullptr) {
+        for (int64_t i = 0; i < count; ++i) {
+            auto offset = seg_offsets[i];
+            if (offset != INVALID_SEG_OFFSET) {
+                dst->at(i) = vec_ptr->view_element(offset).output_data();
+            }
+        }
+        return;
+    }
+
     auto vec_ptr = dynamic_cast<const ConcurrentVector<Array>*>(&vec_raw);
-    AssertInfo(vec_ptr, "Pointer of vec_raw is nullptr");
-    auto& vec = *vec_ptr;
+    AssertInfo(vec_ptr, "ARRAY field has an unexpected growing vector type");
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
         if (offset != INVALID_SEG_OFFSET) {
-            dst->at(i) = vec[offset].output_data();
+            dst->at(i) = (*vec_ptr)[offset].output_data();
         }
     }
 }
@@ -2452,6 +2678,12 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
             break;
         }
         case DataType::ARRAY: {
+            if (field_meta.is_nested_array()) {
+                ThrowInfo(ErrorCode::Unsupported,
+                          "raw Array* API does not support nested ARRAY field "
+                          "{}; use protobuf retrieve output",
+                          field_id.get());
+            }
             auto vec = dynamic_cast<const ConcurrentVector<Array>*>(vec_ptr);
             AssertInfo(vec, "Pointer of vec_ptr is nullptr for ARRAY type");
             auto& src = *vec;
@@ -3229,7 +3461,10 @@ SegmentGrowingImpl::LoadColumnGroup(
                             !IsSparseFloatVectorDataType(data_type)
                         ? field.get_dim()
                         : 1,
-                    rows_to_load);
+                    rows_to_load,
+                    field.is_nested_array()
+                        ? std::make_optional(field.get_array_type_schema())
+                        : std::nullopt);
                 auto array = record_batch->column(i);
                 if (rows_to_load < batch_num_rows) {
                     array = array->Slice(0, rows_to_load);

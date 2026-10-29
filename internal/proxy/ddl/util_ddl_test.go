@@ -272,7 +272,7 @@ func Test_validateMaxLengthPerRow(t *testing.T) {
 	paramtable.Init()
 
 	t.Run("normal case", func(t *testing.T) {
-		err := validateMaxLengthPerRow("collection", &schemapb.FieldSchema{
+		field := &schemapb.FieldSchema{
 			Name:     "field",
 			DataType: schemapb.DataType_VarChar,
 			TypeParams: []*commonpb.KeyValuePair{
@@ -281,12 +281,13 @@ func Test_validateMaxLengthPerRow(t *testing.T) {
 					Value: "100",
 				},
 			},
-		})
+		}
+		err := validateMaxLengthPerRow("collection", field.GetName(), field.GetDataType(), field.GetTypeParams())
 		assert.NoError(t, err)
 	})
 
 	t.Run("max length not int", func(t *testing.T) {
-		err := validateMaxLengthPerRow("collection", &schemapb.FieldSchema{
+		field := &schemapb.FieldSchema{
 			Name:     "arr",
 			DataType: schemapb.DataType_VarChar,
 			TypeParams: []*commonpb.KeyValuePair{
@@ -295,7 +296,8 @@ func Test_validateMaxLengthPerRow(t *testing.T) {
 					Value: "()",
 				},
 			},
-		})
+		}
+		err := validateMaxLengthPerRow("collection", field.GetName(), field.GetDataType(), field.GetTypeParams())
 		// A malformed max_length must surface as an invalid-parameter error (1100)
 		// that names the field and the parameter, not a raw strconv error (65535).
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
@@ -304,10 +306,11 @@ func Test_validateMaxLengthPerRow(t *testing.T) {
 	})
 
 	t.Run("no max length", func(t *testing.T) {
-		err := validateMaxLengthPerRow("collection", &schemapb.FieldSchema{
+		field := &schemapb.FieldSchema{
 			Name:     "field",
 			DataType: schemapb.DataType_VarChar,
-		})
+		}
+		err := validateMaxLengthPerRow("collection", field.GetName(), field.GetDataType(), field.GetTypeParams())
 		assert.Error(t, err)
 	})
 }
@@ -385,13 +388,14 @@ func TestValidateFieldsInStruct(t *testing.T) {
 		assert.Contains(t, err.Error(), "is not supported")
 	})
 
-	t.Run("nested array not supported", func(t *testing.T) {
+	t.Run("old-style nested element_type not supported", func(t *testing.T) {
 		testCases := []struct {
 			elementType schemapb.DataType
+			expected    string
 		}{
-			{schemapb.DataType_ArrayOfStruct},
-			{schemapb.DataType_ArrayOfVector},
-			{schemapb.DataType_Array},
+			{schemapb.DataType_ArrayOfStruct, "nested ArrayOfStruct is not supported"},
+			{schemapb.DataType_ArrayOfVector, "nested ArrayOfVector is not supported"},
+			{schemapb.DataType_Array, "nested array field nested_array must specify type_schema"},
 		}
 
 		for _, tc := range testCases {
@@ -402,7 +406,7 @@ func TestValidateFieldsInStruct(t *testing.T) {
 			}
 			err := ValidateFieldsInStruct(field, schema)
 			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "nested array is not supported")
+			assert.Contains(t, err.Error(), tc.expected)
 		}
 	})
 
@@ -694,5 +698,266 @@ func TestValidateStructArrayField_NullablePropagation(t *testing.T) {
 
 		err := ValidateStructArrayField(structField, schema)
 		assert.NoError(t, err)
+	})
+}
+
+func testArrayTypeSchema(element *schemapb.TypeSchema, params ...*commonpb.KeyValuePair) *schemapb.TypeSchema {
+	return &schemapb.TypeSchema{
+		Kind:       &schemapb.TypeSchema_ArrayElement{ArrayElement: element},
+		TypeParams: params,
+	}
+}
+
+func TestValidateFieldNestedArray(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Name: "test_collection"}
+	nestedField := func(element *schemapb.TypeSchema) *schemapb.FieldSchema {
+		rootParams := []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}}
+		return &schemapb.FieldSchema{
+			Name:        "nested_array",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array,
+			TypeParams:  rootParams,
+			TypeSchema:  testArrayTypeSchema(element, rootParams...),
+		}
+	}
+	leafType := func(dataType schemapb.DataType, params ...*commonpb.KeyValuePair) *schemapb.TypeSchema {
+		return &schemapb.TypeSchema{
+			Kind:       &schemapb.TypeSchema_LeafType{LeafType: dataType},
+			TypeParams: params,
+		}
+	}
+
+	t.Run("top-level nested array rejected", func(t *testing.T) {
+		field := nestedField(testArrayTypeSchema(
+			leafType(schemapb.DataType_Int64),
+			&commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "10"},
+		))
+		err := ValidateField(field, schema)
+		require.ErrorContains(t, err, "nested array can only be in a struct array field")
+	})
+
+	t.Run("array of array in struct field supported", func(t *testing.T) {
+		field := nestedField(testArrayTypeSchema(
+			leafType(schemapb.DataType_Int64),
+			&commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "10"},
+		))
+		assert.NoError(t, ValidateFieldsInStruct(field, schema))
+	})
+
+	t.Run("root capacity mirror is optional", func(t *testing.T) {
+		field := nestedField(testArrayTypeSchema(
+			leafType(schemapb.DataType_Int64),
+			&commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "10"},
+		))
+		field.TypeParams = nil
+		assert.NoError(t, ValidateFieldsInStruct(field, schema))
+	})
+
+	t.Run("root capacity mirror must match", func(t *testing.T) {
+		field := nestedField(testArrayTypeSchema(
+			leafType(schemapb.DataType_Int64),
+			&commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "10"},
+		))
+		field.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "50"}}
+		err := ValidateFieldsInStruct(field, schema)
+		require.ErrorContains(t, err, "must match type_schema root capacity")
+	})
+
+	t.Run("root type schema capacity is required", func(t *testing.T) {
+		field := nestedField(testArrayTypeSchema(
+			leafType(schemapb.DataType_Int64),
+			&commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "10"},
+		))
+		field.TypeSchema.TypeParams = nil
+		err := ValidateFieldsInStruct(field, schema)
+		require.ErrorContains(t, err, "type param(max_capacity) should be specified")
+	})
+
+	t.Run("nested type schema capacity is required", func(t *testing.T) {
+		field := nestedField(testArrayTypeSchema(
+			leafType(schemapb.DataType_Int64),
+			&commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "10"},
+		))
+		field.TypeSchema.GetArrayElement().TypeParams = nil
+		err := ValidateFieldsInStruct(field, schema)
+		require.ErrorContains(t, err, "type param(max_capacity) should be specified")
+	})
+
+	t.Run("root type schema capacity observes configured limit", func(t *testing.T) {
+		field := nestedField(testArrayTypeSchema(
+			leafType(schemapb.DataType_Int64),
+			&commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "10"},
+		))
+		field.TypeParams = nil
+		field.TypeSchema.TypeParams[0].Value = strconv.FormatInt(
+			paramtable.Get().ProxyCfg.MaxArrayCapacity.GetAsInt64()+1, 10)
+		err := ValidateFieldsInStruct(field, schema)
+		require.ErrorContains(t, err, "maximum capacity")
+	})
+
+	t.Run("nested type schema capacity observes configured limit", func(t *testing.T) {
+		field := nestedField(testArrayTypeSchema(
+			leafType(schemapb.DataType_Int64),
+			&commonpb.KeyValuePair{
+				Key: common.MaxCapacityKey,
+				Value: strconv.FormatInt(
+					paramtable.Get().ProxyCfg.MaxArrayCapacity.GetAsInt64()+1, 10),
+			},
+		))
+		err := ValidateFieldsInStruct(field, schema)
+		require.ErrorContains(t, err, "maximum capacity")
+	})
+
+	t.Run("nullable nested array element is rejected", func(t *testing.T) {
+		child := testArrayTypeSchema(
+			leafType(schemapb.DataType_Int64),
+			&commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "10"},
+		)
+		child.Nullable = true
+		field := nestedField(child)
+		err := ValidateFieldsInStruct(field, schema)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "nullable nested array elements are not supported")
+	})
+
+	t.Run("valid array of varchar array", func(t *testing.T) {
+		field := nestedField(testArrayTypeSchema(
+			leafType(schemapb.DataType_VarChar,
+				&commonpb.KeyValuePair{Key: common.MaxLengthKey, Value: "64"}),
+			&commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "10"},
+		))
+		assert.NoError(t, ValidateFieldsInStruct(field, schema))
+	})
+
+	t.Run("nested varchar array missing max length", func(t *testing.T) {
+		field := nestedField(testArrayTypeSchema(
+			leafType(schemapb.DataType_VarChar),
+			&commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "10"},
+		))
+		err := ValidateFieldsInStruct(field, schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "max_length")
+	})
+
+	t.Run("missing type schema", func(t *testing.T) {
+		field := &schemapb.FieldSchema{
+			Name:        "nested_array",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array,
+			TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
+		}
+		err := ValidateFieldsInStruct(field, schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "element type Array is not supported")
+		assert.Contains(t, err.Error(), "must specify type_schema")
+	})
+
+	t.Run("type schema element type mismatch", func(t *testing.T) {
+		field := nestedField(testArrayTypeSchema(
+			leafType(schemapb.DataType_Int64),
+			&commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "10"},
+		))
+		field.ElementType = schemapb.DataType_Int64
+		err := ValidateFieldsInStruct(field, schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "must specify data_type Array and element_type Array")
+	})
+
+	t.Run("deeper nested array rejected", func(t *testing.T) {
+		field := nestedField(testArrayTypeSchema(
+			testArrayTypeSchema(
+				leafType(schemapb.DataType_Int64),
+				&commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "5"},
+			),
+			&commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "10"},
+		))
+		err := ValidateFieldsInStruct(field, schema)
+		require.ErrorContains(t, err, "supports exactly one nested array level")
+	})
+
+	t.Run("nested array in struct array field supported", func(t *testing.T) {
+		field := nestedField(testArrayTypeSchema(
+			leafType(schemapb.DataType_Int64),
+			&commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "10"},
+		))
+		require.NoError(t, ValidateStructArrayField(
+			&schemapb.StructArrayFieldSchema{
+				Name:   "struct_array",
+				Fields: []*schemapb.FieldSchema{field},
+			},
+			schema,
+		))
+	})
+}
+
+func TestValidateFieldNestedArrayOfVector(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Name: "test_collection"}
+
+	nestedField := func() *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			Name:        "nested_array_of_vector",
+			DataType:    schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array,
+			TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
+			TypeSchema: &schemapb.TypeSchema{
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
+				Kind: &schemapb.TypeSchema_ArrayElement{
+					ArrayElement: &schemapb.TypeSchema{
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "10"}},
+						Kind: &schemapb.TypeSchema_ArrayElement{
+							ArrayElement: &schemapb.TypeSchema{
+								Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_ArrayOfVector},
+							},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	t.Run("top-level nested array of vector rejected", func(t *testing.T) {
+		err := ValidateField(nestedField(), schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "element type ArrayOfVector is not supported")
+	})
+
+	t.Run("plain struct field array of vector still supported", func(t *testing.T) {
+		field := &schemapb.FieldSchema{
+			Name:        "array_of_vector",
+			DataType:    schemapb.DataType_ArrayOfVector,
+			ElementType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxCapacityKey, Value: "100"},
+				{Key: common.DimKey, Value: "4"},
+			},
+		}
+		assert.NoError(t, ValidateFieldsInStruct(field, schema))
+	})
+
+	t.Run("plain top-level array of vector still rejected", func(t *testing.T) {
+		field := &schemapb.FieldSchema{
+			Name:        "array_of_vector",
+			DataType:    schemapb.DataType_ArrayOfVector,
+			ElementType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxCapacityKey, Value: "100"},
+				{Key: common.DimKey, Value: "4"},
+			},
+		}
+		err := ValidateField(field, schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "array of vector can only be in the struct array field")
+	})
+
+	t.Run("old-style nested array of vector rejected", func(t *testing.T) {
+		field := &schemapb.FieldSchema{
+			Name:        "nested_array_of_vector",
+			DataType:    schemapb.DataType_ArrayOfVector,
+			TypeParams:  []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "100"}},
+			ElementType: schemapb.DataType_ArrayOfVector,
+		}
+		err := ValidateFieldsInStruct(field, schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "nested ArrayOfVector is not supported")
 	})
 }

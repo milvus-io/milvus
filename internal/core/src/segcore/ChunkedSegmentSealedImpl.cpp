@@ -3188,6 +3188,13 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
             storage::SortByPath(file_infos);
 
             const auto& field_meta = schema_snapshot->operator[](field_id);
+            if (field_meta.is_nested_array() &&
+                load_info.storage_version < STORAGE_V2) {
+                ThrowInfo(ErrorCode::Unsupported,
+                          "nested ARRAY field {} is supported only by Storage "
+                          "V2/V3",
+                          field_id.get());
+            }
             std::unique_ptr<cachinglayer::Translator<milvus::Chunk>>
                 translator =
                     std::make_unique<storagev1translator::ChunkTranslator>(
@@ -3543,6 +3550,22 @@ ChunkedSegmentSealedImpl::chunk_array_view_impl(
               "chunk_array_view_impl only used for chunk column field ");
 }
 
+cachinglayer::PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>
+ChunkedSegmentSealedImpl::chunk_array_value_view_impl(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    int64_t chunk_id,
+    std::optional<std::pair<int64_t, int64_t>> offset_len) const {
+    auto snapshot = CapturePublishedState();
+    AssertInfo(get_bit(snapshot->field_data_ready_bitset, field_id),
+               "Can't get bitset element at " + std::to_string(field_id.get()));
+    if (auto column = get_column(snapshot->runtime, field_id)) {
+        return column->ArrayValueViews(op_ctx, chunk_id, offset_len);
+    }
+    ThrowInfo(ErrorCode::UnexpectedError,
+              "chunk_array_value_view_impl only used for chunk column field ");
+}
+
 cachinglayer::PinWrapper<std::pair<std::vector<VectorArrayView>, ValidityView>>
 ChunkedSegmentSealedImpl::chunk_vector_array_view_impl(
     milvus::OpContext* op_ctx,
@@ -3607,6 +3630,24 @@ ChunkedSegmentSealedImpl::chunk_array_views_by_offsets(
     ThrowInfo(ErrorCode::UnexpectedError,
               "chunk_array_views_by_offsets only used for variable column "
               "field ");
+}
+
+cachinglayer::PinWrapper<
+    std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
+ChunkedSegmentSealedImpl::chunk_array_value_views_by_offsets(
+    milvus::OpContext* op_ctx,
+    FieldId field_id,
+    int64_t chunk_id,
+    const FixedVector<int32_t>& offsets) const {
+    auto snapshot = CapturePublishedState();
+    AssertInfo(get_bit(snapshot->field_data_ready_bitset, field_id),
+               "Can't get bitset element at " + std::to_string(field_id.get()));
+    if (auto column = get_column(snapshot->runtime, field_id)) {
+        return column->ArrayValueViewsByOffsets(op_ctx, chunk_id, offsets);
+    }
+    ThrowInfo(ErrorCode::UnexpectedError,
+              "chunk_array_value_views_by_offsets only used for recursive "
+              "ARRAY column field ");
 }
 
 cachinglayer::PinWrapper<index::NgramInvertedIndex*>
@@ -5165,6 +5206,12 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
             break;
         }
         case DataType::ARRAY: {
+            if (field_meta.is_nested_array()) {
+                ThrowInfo(ErrorCode::Unsupported,
+                          "raw Array* API does not support nested ARRAY field "
+                          "{}; use protobuf retrieve output",
+                          field_id.get());
+            }
             // dst must have at least count elements; the callback's index
             // parameter is guaranteed to be in [0, count)
             auto dst = static_cast<Array*>(data);
@@ -5292,7 +5339,19 @@ ChunkedSegmentSealedImpl::bulk_subscript_array_impl(
     ChunkedColumnInterface* column,
     const int64_t* seg_offsets,
     int64_t count,
-    google::protobuf::RepeatedPtrField<T>* dst) {
+    google::protobuf::RepeatedPtrField<T>* dst,
+    bool nested_array) {
+    if (nested_array) {
+        column->BulkArrayValueAt(
+            op_ctx,
+            [dst](ScalarFieldProto&& value, size_t i) {
+                dst->at(i) = std::move(value);
+            },
+            seg_offsets,
+            count);
+        return;
+    }
+
     column->BulkArrayAt(
         op_ctx,
         [dst](const ArrayView& view, size_t i) {
@@ -6063,12 +6122,14 @@ ChunkedSegmentSealedImpl::get_raw_data_from_state(
             ret->mutable_scalars()->mutable_array_data()->set_element_type(
                 static_cast<milvus::proto::schema::DataType>(
                     field_meta.get_element_type()));
-            bulk_subscript_array_impl(
-                op_ctx,
-                column.get(),
-                seg_offsets,
-                count,
-                ret->mutable_scalars()->mutable_array_data()->mutable_data());
+            auto* dst =
+                ret->mutable_scalars()->mutable_array_data()->mutable_data();
+            bulk_subscript_array_impl(op_ctx,
+                                      column.get(),
+                                      seg_offsets,
+                                      count,
+                                      dst,
+                                      field_meta.is_nested_array());
             break;
         }
 
@@ -9284,9 +9345,18 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
                 field_meta.get_element_type()));
             auto typed = std::static_pointer_cast<arrow::BinaryArray>(arr);
             for (int64_t i = 0; i < size; i++) {
+                if (typed->IsNull(result_mapping[i])) {
+                    obj->add_data();
+                    continue;
+                }
                 auto val = typed->Value(result_mapping[i]);
                 auto* sf = obj->add_data();
-                sf->ParseFromArray(val.data(), static_cast<int>(val.size()));
+                AssertInfo(
+                    sf->ParseFromArray(val.data(),
+                                       static_cast<int>(val.size())),
+                    "failed to parse ARRAY field {} row {} from Arrow Binary",
+                    field_meta.get_id().get(),
+                    result_mapping[i]);
             }
             break;
         }

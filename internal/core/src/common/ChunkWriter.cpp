@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -24,6 +25,7 @@
 #include "arrow/record_batch.h"
 #include "arrow/result.h"
 #include "common/Array.h"
+#include "common/ColumnarArrayChunk.h"
 #include "common/Chunk.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
@@ -603,6 +605,10 @@ create_chunk_writer(const FieldMeta& field_meta) {
             return std::make_shared<GeometryChunkWriter>(nullable);
         }
         case milvus::DataType::ARRAY:
+            if (field_meta.is_nested_array()) {
+                return std::make_shared<ColumnarArrayChunkWriter>(
+                    field_meta.get_array_type_schema());
+            }
             return std::make_shared<ArrayChunkWriter>(
                 field_meta.get_element_type(), nullable);
         case milvus::DataType::VECTOR_SPARSE_U32_F32:
@@ -744,6 +750,15 @@ make_chunk(const FieldMeta& field_meta,
                 row_nums, data, size, nullable, chunk_mmap_guard);
         }
         case milvus::DataType::ARRAY:
+            if (field_meta.is_nested_array()) {
+                return std::make_unique<ColumnarArrayChunk>(
+                    row_nums,
+                    data,
+                    size,
+                    std::make_shared<const proto::schema::TypeSchema>(
+                        field_meta.get_array_type_schema()),
+                    chunk_mmap_guard);
+            }
             return std::make_unique<ArrayChunk>(row_nums,
                                                 data,
                                                 size,

@@ -431,6 +431,20 @@ class ArrayEqualityCountingColumn : public ChunkedColumnInterface {
         ++candidate_chunk_reads[id];
         return column_->ArrayViewsByOffsets(ctx, id, offsets);
     }
+    PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>
+    ArrayValueViews(
+        milvus::OpContext* ctx,
+        int64_t id,
+        std::optional<std::pair<int64_t, int64_t>> range) const override {
+        return column_->ArrayValueViews(ctx, id, range);
+    }
+    PinWrapper<std::pair<std::vector<ArrayValueView>, FixedVector<bool>>>
+    ArrayValueViewsByOffsets(
+        milvus::OpContext* ctx,
+        int64_t id,
+        const FixedVector<int32_t>& offsets) const override {
+        return column_->ArrayValueViewsByOffsets(ctx, id, offsets);
+    }
     PinWrapper<const char*>
     DataOfChunk(milvus::OpContext* ctx, int id) const override {
         return column_->DataOfChunk(ctx, id);

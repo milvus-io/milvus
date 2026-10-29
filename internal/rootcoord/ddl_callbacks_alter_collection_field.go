@@ -112,9 +112,20 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 	// build new collection schema.
 	schema := coll.ToCollectionSchemaPB()
 	schema.Version = coll.SchemaVersion + 1
+	var targetField *schemapb.FieldSchema
 	for _, field := range schema.Fields {
 		if field.Name == req.GetFieldName() {
+			targetField = field
 			field.TypeParams = newFieldProperties
+			if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+				if maxCapacity, ok := common.GetStringValue(
+					newFieldProperties, common.MaxCapacityKey); ok {
+					typeParams := common.KeyValuePairs(
+						field.GetTypeSchema().GetTypeParams()).ToMap()
+					typeParams[common.MaxCapacityKey] = maxCapacity
+					field.TypeSchema.TypeParams = common.NewKeyValuePairs(typeParams)
+				}
+			}
 			if desc != nil {
 				field.Description = desc.GetValue()
 			}
@@ -123,6 +134,11 @@ func (c *Core) broadcastAlterCollectionV2ForAlterCollectionField(ctx context.Con
 	}
 	if err := validateSchemaEvolution(coll, schema); err != nil {
 		return err
+	}
+	if targetField != nil {
+		if err := checkNestedArrayTypeSchemaCapacity(targetField); err != nil {
+			return err
+		}
 	}
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
