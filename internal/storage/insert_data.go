@@ -43,15 +43,15 @@ type InsertData struct {
 	Infos []BlobInfo
 }
 
-func NewInsertData(schema *schemapb.CollectionSchema) (*InsertData, error) {
-	return NewInsertDataWithCap(schema, 0, false)
+func NewInsertData(schema *schemapb.CollectionSchema, trackMemory ...bool) (*InsertData, error) {
+	return NewInsertDataWithCap(schema, 0, false, trackMemory...)
 }
 
-func NewInsertDataWithFunctionOutputField(schema *schemapb.CollectionSchema) (*InsertData, error) {
-	return NewInsertDataWithCap(schema, 0, true)
+func NewInsertDataWithFunctionOutputField(schema *schemapb.CollectionSchema, trackMemory ...bool) (*InsertData, error) {
+	return NewInsertDataWithCap(schema, 0, true, trackMemory...)
 }
 
-func NewInsertDataWithCap(schema *schemapb.CollectionSchema, cap int, withFunctionOutput bool) (*InsertData, error) {
+func NewInsertDataWithCap(schema *schemapb.CollectionSchema, cap int, withFunctionOutput bool, trackMemory ...bool) (*InsertData, error) {
 	if schema == nil {
 		// A nil schema here is an internal invariant violation (callers within
 		// Milvus always pass a schema), not a client-supplied missing parameter.
@@ -82,7 +82,7 @@ func NewInsertDataWithCap(schema *schemapb.CollectionSchema, cap int, withFuncti
 				return nil
 			}
 		}
-		fieldData, err := NewFieldData(field.DataType, field, cap)
+		fieldData, err := NewFieldData(field.DataType, field, cap, trackMemory...)
 		if err != nil {
 			return err
 		}
@@ -139,17 +139,6 @@ func (i *InsertData) GetMemorySize() int {
 		size += data.GetMemorySize()
 	}
 
-	return size
-}
-
-// GetTrackedMemorySize sums field sizes without scanning their rows.
-// All fields must be constructed and mutated according to FieldData's tracking
-// contract. Field replacement and deletion are reflected on each call.
-func (i *InsertData) GetTrackedMemorySize() int {
-	var size int
-	for _, field := range i.Data {
-		size += field.GetTrackedMemorySize()
-	}
 	return size
 }
 

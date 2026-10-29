@@ -696,7 +696,7 @@ func (c fieldMemoryCase) newField(t *testing.T, nullable bool, capacity int) Fie
 	field, err := NewFieldData(c.dataType, &schemapb.FieldSchema{
 		DataType: c.dataType, Nullable: nullable, ElementType: element,
 		TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}},
-	}, capacity)
+	}, capacity, true)
 	require.NoError(t, err)
 	return field
 }
@@ -793,30 +793,30 @@ func TestStringFieldDataTrackedAppend(t *testing.T) {
 		for _, nullable := range []bool{false, true} {
 			for _, capacity := range []int{0, 64} {
 				t.Run(fmt.Sprintf("%s/nullable=%t/cap=%d", dataType, nullable, capacity), func(t *testing.T) {
-					field := NewStringFieldData(dataType, nullable, capacity)
+					field := NewStringFieldData(dataType, nullable, capacity, true)
 					legacy := &StringFieldData{Data: make([]string, 0, capacity), DataType: dataType, Nullable: nullable}
 					if nullable {
 						legacy.ValidData = make([]bool, 0, capacity)
 					}
-					require.Equal(t, 1, field.GetTrackedMemorySize())
+					require.Equal(t, 1, checkedMemorySize(t, field))
 					require.Equal(t, capacity, cap(field.Data))
 					require.Equal(t, dataType, field.GetDataType())
 					steps := []struct {
 						name         string
 						tracked, old func() error
 					}{
-						{"row", func() error { return field.TrackedAppendRow("中") }, func() error { return legacy.AppendRow("中") }},
-						{"empty row", func() error { return field.TrackedAppendRow("") }, func() error { return legacy.AppendRow("") }},
-						{"null row", func() error { return field.TrackedAppendRow(nil) }, func() error { return legacy.AppendRow(nil) }},
-						{"invalid row", func() error { return field.TrackedAppendRow(42) }, func() error { return legacy.AppendRow(42) }},
-						{"batch", func() error { return field.TrackedAppendRows([]string{"a", "", "你好"}, []bool{true, false, true}) }, func() error { return legacy.AppendRows([]string{"a", "", "你好"}, []bool{true, false, true}) }},
-						{"data only", func() error { return field.TrackedAppendDataRows([]string{"split", ""}) }, func() error { return legacy.AppendDataRows([]string{"split", ""}) }},
-						{"validity only", func() error { return field.TrackedAppendValidDataRows([]bool{true, false}) }, func() error { return legacy.AppendValidDataRows([]bool{true, false}) }},
-						{"nil validity", func() error { return field.TrackedAppendValidDataRows(nil) }, func() error { return legacy.AppendValidDataRows(nil) }},
-						{"empty batch", func() error { return field.TrackedAppendRows([]string(nil), []bool(nil)) }, func() error { return legacy.AppendRows([]string(nil), []bool(nil)) }},
-						{"invalid data", func() error { return field.TrackedAppendRows(42, []bool{true}) }, func() error { return legacy.AppendRows(42, []bool{true}) }},
-						{"partial success", func() error { return field.TrackedAppendRows([]string{"retained"}, "bad validity") }, func() error { return legacy.AppendRows([]string{"retained"}, "bad validity") }},
-						{"after error", func() error { return field.TrackedAppendRow("last") }, func() error { return legacy.AppendRow("last") }},
+						{"row", func() error { return field.AppendRow("中") }, func() error { return legacy.AppendRow("中") }},
+						{"empty row", func() error { return field.AppendRow("") }, func() error { return legacy.AppendRow("") }},
+						{"null row", func() error { return field.AppendRow(nil) }, func() error { return legacy.AppendRow(nil) }},
+						{"invalid row", func() error { return field.AppendRow(42) }, func() error { return legacy.AppendRow(42) }},
+						{"batch", func() error { return field.AppendRows([]string{"a", "", "你好"}, []bool{true, false, true}) }, func() error { return legacy.AppendRows([]string{"a", "", "你好"}, []bool{true, false, true}) }},
+						{"data only", func() error { return field.AppendDataRows([]string{"split", ""}) }, func() error { return legacy.AppendDataRows([]string{"split", ""}) }},
+						{"validity only", func() error { return field.AppendValidDataRows([]bool{true, false}) }, func() error { return legacy.AppendValidDataRows([]bool{true, false}) }},
+						{"nil validity", func() error { return field.AppendValidDataRows(nil) }, func() error { return legacy.AppendValidDataRows(nil) }},
+						{"empty batch", func() error { return field.AppendRows([]string(nil), []bool(nil)) }, func() error { return legacy.AppendRows([]string(nil), []bool(nil)) }},
+						{"invalid data", func() error { return field.AppendRows(42, []bool{true}) }, func() error { return legacy.AppendRows(42, []bool{true}) }},
+						{"partial success", func() error { return field.AppendRows([]string{"retained"}, "bad validity") }, func() error { return legacy.AppendRows([]string{"retained"}, "bad validity") }},
+						{"after error", func() error { return field.AppendRow("last") }, func() error { return legacy.AppendRow("last") }},
 					}
 					for _, step := range steps {
 						t.Run(step.name, func(t *testing.T) {
@@ -828,8 +828,8 @@ func TestStringFieldDataTrackedAppend(t *testing.T) {
 							}
 							require.Equal(t, legacy.Data, field.Data)
 							require.Equal(t, legacy.ValidData, field.ValidData)
-							require.Equal(t, legacy.GetMemorySize(), field.GetTrackedMemorySize())
-							require.Equal(t, field.GetMemorySize(), field.GetTrackedMemorySize())
+							require.Equal(t, legacy.GetMemorySize(), checkedMemorySize(t, field))
+							require.Equal(t, field.GetMemorySize(), checkedMemorySize(t, field))
 						})
 					}
 				})
@@ -839,19 +839,19 @@ func TestStringFieldDataTrackedAppend(t *testing.T) {
 }
 
 func TestStringFieldDataTrackedSizeBaseline(t *testing.T) {
-	field := NewStringFieldData(schemapb.DataType_VarChar, true, 64)
-	require.Equal(t, 1, field.GetTrackedMemorySize())
-	require.NoError(t, field.TrackedAppendRow(nil))
-	require.Equal(t, 18, field.GetTrackedMemorySize())
-	require.NoError(t, field.TrackedAppendRow("中"))
-	require.Equal(t, 38, field.GetTrackedMemorySize())
-	require.NoError(t, field.TrackedAppendDataRows([]string{"a", ""}))
-	require.Equal(t, 71, field.GetTrackedMemorySize())
-	require.NoError(t, field.TrackedAppendValidDataRows([]bool{true, false}))
-	require.Equal(t, 73, field.GetTrackedMemorySize())
-	require.Error(t, field.TrackedAppendRows([]string{"b"}, "invalid"))
-	require.Equal(t, 90, field.GetTrackedMemorySize())
-	require.Equal(t, field.GetMemorySize(), field.GetTrackedMemorySize())
+	field := NewStringFieldData(schemapb.DataType_VarChar, true, 64, true)
+	require.Equal(t, 1, checkedMemorySize(t, field))
+	require.NoError(t, field.AppendRow(nil))
+	require.Equal(t, 18, checkedMemorySize(t, field))
+	require.NoError(t, field.AppendRow("中"))
+	require.Equal(t, 38, checkedMemorySize(t, field))
+	require.NoError(t, field.AppendDataRows([]string{"a", ""}))
+	require.Equal(t, 71, checkedMemorySize(t, field))
+	require.NoError(t, field.AppendValidDataRows([]bool{true, false}))
+	require.Equal(t, 73, checkedMemorySize(t, field))
+	require.Error(t, field.AppendRows([]string{"b"}, "invalid"))
+	require.Equal(t, 90, checkedMemorySize(t, field))
+	require.Equal(t, field.GetMemorySize(), checkedMemorySize(t, field))
 }
 
 func TestScalarFieldDataTrackedAppend(t *testing.T) {
@@ -869,9 +869,9 @@ func TestScalarFieldDataTrackedAppend(t *testing.T) {
 		{"Float", func(n bool, c int) FieldData { return NewFloatFieldData(n, c) }, float32(1), []float32{1, 0}, 4, 8},
 		{"Double", func(n bool, c int) FieldData { return NewDoubleFieldData(n, c) }, float64(1), []float64{1, 0}, 8, 16},
 		{"Timestamptz", func(n bool, c int) FieldData { return NewTimestamptzFieldData(n, c) }, int64(1), []int64{1, 0}, 8, 16},
-		{"JSON", func(n bool, c int) FieldData { return NewJSONFieldData(n, c) }, []byte("{}"), [][]byte{[]byte("{}"), nil}, 18, 34},
-		{"Geometry", func(n bool, c int) FieldData { return NewGeometryFieldData(n, c) }, []byte{1, 2, 3}, [][]byte{{1, 2, 3}, nil}, 19, 35},
-		{"GeometryString", func(n bool, c int) FieldData { return NewGeometryFieldData(n, c) }, "中", []string{"中", ""}, 19, 35},
+		{"JSON", func(n bool, c int) FieldData { return NewJSONFieldData(n, c, true) }, []byte("{}"), [][]byte{[]byte("{}"), nil}, 18, 34},
+		{"Geometry", func(n bool, c int) FieldData { return NewGeometryFieldData(n, c, true) }, []byte{1, 2, 3}, [][]byte{{1, 2, 3}, nil}, 19, 35},
+		{"GeometryString", func(n bool, c int) FieldData { return NewGeometryFieldData(n, c, true) }, "中", []string{"中", ""}, 19, 35},
 	}
 	for _, tc := range cases {
 		for _, nullable := range []bool{false, true} {
@@ -881,39 +881,39 @@ func TestScalarFieldDataTrackedAppend(t *testing.T) {
 					want := 1
 					check := func() {
 						t.Helper()
-						require.Equal(t, want, field.GetTrackedMemorySize())
-						require.Equal(t, legacy.GetMemorySize(), field.GetTrackedMemorySize())
-						require.Equal(t, field.GetMemorySize(), field.GetTrackedMemorySize())
+						require.Equal(t, want, checkedMemorySize(t, field))
+						require.Equal(t, legacy.GetMemorySize(), checkedMemorySize(t, field))
+						require.Equal(t, field.GetMemorySize(), checkedMemorySize(t, field))
 						require.Equal(t, legacy.GetDataRows(), field.GetDataRows())
 						require.Equal(t, legacy.GetValidData(), field.GetValidData())
 					}
 					check()
 					// Multiple batches exercise growth beyond the initial capacity.
 					for i := 0; i < 40; i++ {
-						require.NoError(t, field.TrackedAppendRow(tc.row))
+						require.NoError(t, field.AppendRow(tc.row))
 						require.NoError(t, legacy.AppendRow(tc.row))
 						want += tc.rowSize
 						if nullable {
 							want++
 						}
 						check()
-						require.NoError(t, field.TrackedAppendRows(tc.batch, []bool{true, false}))
+						require.NoError(t, field.AppendRows(tc.batch, []bool{true, false}))
 						require.NoError(t, legacy.AppendRows(tc.batch, []bool{true, false}))
 						want += tc.batchSize + 2
 						check()
 					}
-					require.NoError(t, field.TrackedAppendDataRows(tc.batch))
+					require.NoError(t, field.AppendDataRows(tc.batch))
 					require.NoError(t, legacy.AppendDataRows(tc.batch))
 					want += tc.batchSize
 					check()
-					require.NoError(t, field.TrackedAppendValidDataRows([]bool{true, false}))
+					require.NoError(t, field.AppendValidDataRows([]bool{true, false}))
 					require.NoError(t, legacy.AppendValidDataRows([]bool{true, false}))
 					want += 2
 					check()
-					require.NoError(t, field.TrackedAppendValidDataRows(nil))
+					require.NoError(t, field.AppendValidDataRows(nil))
 					require.NoError(t, legacy.AppendValidDataRows(nil))
 					check()
-					got, old := field.TrackedAppendRow(nil), legacy.AppendRow(nil)
+					got, old := field.AppendRow(nil), legacy.AppendRow(nil)
 					if nullable {
 						require.NoError(t, got)
 						require.NoError(t, old)
@@ -927,20 +927,20 @@ func TestScalarFieldDataTrackedAppend(t *testing.T) {
 						require.EqualError(t, got, old.Error())
 					}
 					check()
-					got, old = field.TrackedAppendRow(struct{}{}), legacy.AppendRow(struct{}{})
+					got, old = field.AppendRow(struct{}{}), legacy.AppendRow(struct{}{})
 					require.Error(t, old)
 					require.EqualError(t, got, old.Error())
 					check()
-					got, old = field.TrackedAppendRows(struct{}{}, []bool{true}), legacy.AppendRows(struct{}{}, []bool{true})
+					got, old = field.AppendRows(struct{}{}, []bool{true}), legacy.AppendRows(struct{}{}, []bool{true})
 					require.Error(t, old)
 					require.EqualError(t, got, old.Error())
 					check()
-					got, old = field.TrackedAppendRows(tc.batch, "invalid validity"), legacy.AppendRows(tc.batch, "invalid validity")
+					got, old = field.AppendRows(tc.batch, "invalid validity"), legacy.AppendRows(tc.batch, "invalid validity")
 					require.Error(t, old)
 					require.EqualError(t, got, old.Error())
 					want += tc.batchSize
 					check()
-					require.NoError(t, field.TrackedAppendRow(tc.row))
+					require.NoError(t, field.AppendRow(tc.row))
 					require.NoError(t, legacy.AppendRow(tc.row))
 					want += tc.rowSize
 					if nullable {
@@ -991,7 +991,7 @@ func TestArrayFieldDataTrackedAppend(t *testing.T) {
 				}
 
 				runTrackedArrayAppend(t, func(nullable bool, capacity int) FieldData {
-					field := NewArrayFieldData(tt.element, nullable, elementNullable, capacity)
+					field := NewArrayFieldData(tt.element, nullable, elementNullable, capacity, true)
 					require.Equal(t, capacity, cap(field.Data))
 					require.Equal(t, tt.element, field.GetElementType())
 					require.Equal(t, elementNullable, field.GetElementNullable())
@@ -1026,7 +1026,7 @@ func TestVectorArrayFieldDataTrackedAppend(t *testing.T) {
 				}
 
 				runTrackedArrayAppend(t, func(nullable bool, capacity int) FieldData {
-					field := NewVectorArrayFieldData(tt.element, 8, nullable, elementNullable, capacity)
+					field := NewVectorArrayFieldData(tt.element, 8, nullable, elementNullable, capacity, true)
 					require.Equal(t, capacity, cap(field.Data))
 					require.Equal(t, tt.element, field.ElementType)
 					require.EqualValues(t, 8, field.Dim)
@@ -1049,47 +1049,47 @@ func runTrackedArrayAppend(t *testing.T, newField func(bool, int) FieldData, row
 				want := 2
 				check := func() {
 					t.Helper()
-					require.Equal(t, want, field.GetTrackedMemorySize())
-					require.Equal(t, legacy.GetMemorySize(), field.GetTrackedMemorySize())
-					require.Equal(t, field.GetMemorySize(), field.GetTrackedMemorySize())
+					require.Equal(t, want, checkedMemorySize(t, field))
+					require.Equal(t, legacy.GetMemorySize(), checkedMemorySize(t, field))
+					require.Equal(t, field.GetMemorySize(), checkedMemorySize(t, field))
 					require.Equal(t, legacy.GetDataRows(), field.GetDataRows())
 					require.Equal(t, legacy.GetValidData(), field.GetValidData())
 				}
 				check()
 				for i := 0; i < 8; i++ {
-					require.NoError(t, field.TrackedAppendRow(row))
+					require.NoError(t, field.AppendRow(row))
 					require.NoError(t, legacy.AppendRow(row))
 					want += rowSize
 					if nullable {
 						want++
 					}
 					check()
-					require.NoError(t, field.TrackedAppendRows(batch, []bool{true, false}))
+					require.NoError(t, field.AppendRows(batch, []bool{true, false}))
 					require.NoError(t, legacy.AppendRows(batch, []bool{true, false}))
 					want += rowSize + 2
 					check()
 				}
-				require.NoError(t, field.TrackedAppendDataRows(batch))
+				require.NoError(t, field.AppendDataRows(batch))
 				require.NoError(t, legacy.AppendDataRows(batch))
 				want += rowSize
 				check()
-				require.NoError(t, field.TrackedAppendValidDataRows([]bool{true, false}))
+				require.NoError(t, field.AppendValidDataRows([]bool{true, false}))
 				require.NoError(t, legacy.AppendValidDataRows([]bool{true, false}))
 				want += 2
 				check()
-				require.NoError(t, field.TrackedAppendRows(emptyBatch, nil))
+				require.NoError(t, field.AppendRows(emptyBatch, nil))
 				require.NoError(t, legacy.AppendRows(emptyBatch, nil))
-				require.NoError(t, field.TrackedAppendValidDataRows(nil))
+				require.NoError(t, field.AppendValidDataRows(nil))
 				require.NoError(t, legacy.AppendValidDataRows(nil))
 				check()
 				// Typed nil pointers are accepted as data, even for non-nullable fields.
-				require.NoError(t, field.TrackedAppendRow(nilRow))
+				require.NoError(t, field.AppendRow(nilRow))
 				require.NoError(t, legacy.AppendRow(nilRow))
 				if nullable {
 					want++
 				}
 				check()
-				got, old := field.TrackedAppendRow(nil), legacy.AppendRow(nil)
+				got, old := field.AppendRow(nil), legacy.AppendRow(nil)
 				if nullable {
 					require.NoError(t, got)
 					require.NoError(t, old)
@@ -1099,20 +1099,20 @@ func runTrackedArrayAppend(t *testing.T, newField func(bool, int) FieldData, row
 					require.EqualError(t, got, old.Error())
 				}
 				check()
-				got, old = field.TrackedAppendRow(42), legacy.AppendRow(42)
+				got, old = field.AppendRow(42), legacy.AppendRow(42)
 				require.Error(t, old)
 				require.EqualError(t, got, old.Error())
 				check()
-				got, old = field.TrackedAppendRows(42, []bool{true}), legacy.AppendRows(42, []bool{true})
+				got, old = field.AppendRows(42, []bool{true}), legacy.AppendRows(42, []bool{true})
 				require.Error(t, old)
 				require.EqualError(t, got, old.Error())
 				check()
-				got, old = field.TrackedAppendRows(batch, "invalid validity"), legacy.AppendRows(batch, "invalid validity")
+				got, old = field.AppendRows(batch, "invalid validity"), legacy.AppendRows(batch, "invalid validity")
 				require.Error(t, old)
 				require.EqualError(t, got, old.Error())
 				want += rowSize
 				check()
-				require.NoError(t, field.TrackedAppendRow(row))
+				require.NoError(t, field.AppendRow(row))
 				require.NoError(t, legacy.AppendRow(row))
 				want += rowSize
 				if nullable {
@@ -1131,7 +1131,7 @@ func TestVectorFieldDataTrackedAppend(t *testing.T) {
 		schemapb.DataType_Float16Vector:     func(n bool, c int) FieldData { return NewFloat16VectorFieldData(8, n, c) },
 		schemapb.DataType_BFloat16Vector:    func(n bool, c int) FieldData { return NewBFloat16VectorFieldData(8, n, c) },
 		schemapb.DataType_Int8Vector:        func(n bool, c int) FieldData { return NewInt8VectorFieldData(8, n, c) },
-		schemapb.DataType_SparseFloatVector: func(n bool, c int) FieldData { return NewSparseFloatVectorFieldData(n, c) },
+		schemapb.DataType_SparseFloatVector: func(n bool, c int) FieldData { return NewSparseFloatVectorFieldData(n, c, true) },
 	}
 	for _, tc := range fieldMemoryCases() {
 		newField, ok := constructors[tc.dataType]
@@ -1145,9 +1145,9 @@ func TestVectorFieldDataTrackedAppend(t *testing.T) {
 					want := tc.fixed
 					check := func() {
 						t.Helper()
-						require.Equal(t, want, field.GetTrackedMemorySize())
-						require.Equal(t, legacy.GetMemorySize(), field.GetTrackedMemorySize())
-						require.Equal(t, field.GetMemorySize(), field.GetTrackedMemorySize())
+						require.Equal(t, want, checkedMemorySize(t, field))
+						require.Equal(t, legacy.GetMemorySize(), checkedMemorySize(t, field))
+						require.Equal(t, field.GetMemorySize(), checkedMemorySize(t, field))
 						require.Equal(t, legacy.GetDataRows(), field.GetDataRows())
 						require.Equal(t, legacy.GetValidData(), field.GetValidData())
 					}
@@ -1176,32 +1176,32 @@ func TestVectorFieldDataTrackedAppend(t *testing.T) {
 						if i == 0 {
 							delta += tc.shared
 						}
-						apply(fmt.Sprintf("row-%d", i), func() error { return field.TrackedAppendRow(tc.row) }, func() error { return legacy.AppendRow(tc.row) }, delta, false)
+						apply(fmt.Sprintf("row-%d", i), func() error { return field.AppendRow(tc.row) }, func() error { return legacy.AppendRow(tc.row) }, delta, false)
 					}
 					nullDelta := 0
 					if nullable {
 						nullDelta = 1
 					}
-					apply("null", func() error { return field.TrackedAppendRow(nil) }, func() error { return legacy.AppendRow(nil) }, nullDelta, !nullable)
+					apply("null", func() error { return field.AppendRow(nil) }, func() error { return legacy.AppendRow(nil) }, nullDelta, !nullable)
 					// Explicit validity is stored and mapped even for a non-nullable field.
-					apply("compact batch", func() error { return field.TrackedAppendRows(tc.batch, []bool{true, false}) }, func() error { return legacy.AppendRows(tc.batch, []bool{true, false}) }, tc.perRow+18, false)
-					apply("data only", func() error { return field.TrackedAppendDataRows(tc.batch) }, func() error { return legacy.AppendDataRows(tc.batch) }, tc.perRow, false)
-					apply("nil validity during split", func() error { return field.TrackedAppendValidDataRows(nil) }, func() error { return legacy.AppendValidDataRows(nil) }, 0, false)
-					apply("typed nil validity during split", func() error { return field.TrackedAppendValidDataRows([]bool(nil)) }, func() error { return legacy.AppendValidDataRows([]bool(nil)) }, 0, nullable)
+					apply("compact batch", func() error { return field.AppendRows(tc.batch, []bool{true, false}) }, func() error { return legacy.AppendRows(tc.batch, []bool{true, false}) }, tc.perRow+18, false)
+					apply("data only", func() error { return field.AppendDataRows(tc.batch) }, func() error { return legacy.AppendDataRows(tc.batch) }, tc.perRow, false)
+					apply("nil validity during split", func() error { return field.AppendValidDataRows(nil) }, func() error { return legacy.AppendValidDataRows(nil) }, 0, false)
+					apply("typed nil validity during split", func() error { return field.AppendValidDataRows([]bool(nil)) }, func() error { return legacy.AppendValidDataRows([]bool(nil)) }, 0, nullable)
 					if nullable {
-						apply("invalid validity count", func() error { return field.TrackedAppendValidDataRows([]bool{false}) }, func() error { return legacy.AppendValidDataRows([]bool{false}) }, 0, true)
+						apply("invalid validity count", func() error { return field.AppendValidDataRows([]bool{false}) }, func() error { return legacy.AppendValidDataRows([]bool{false}) }, 0, true)
 					}
-					apply("validity only", func() error { return field.TrackedAppendValidDataRows([]bool{true, false}) }, func() error { return legacy.AppendValidDataRows([]bool{true, false}) }, 18, false)
-					apply("nil validity", func() error { return field.TrackedAppendValidDataRows(nil) }, func() error { return legacy.AppendValidDataRows(nil) }, 0, false)
-					apply("invalid row type", func() error { return field.TrackedAppendRow(42) }, func() error { return legacy.AppendRow(42) }, 0, true)
-					apply("invalid data type", func() error { return field.TrackedAppendDataRows(42) }, func() error { return legacy.AppendDataRows(42) }, 0, true)
-					apply("invalid batch type", func() error { return field.TrackedAppendRows(42, []bool{true}) }, func() error { return legacy.AppendRows(42, []bool{true}) }, 0, true)
+					apply("validity only", func() error { return field.AppendValidDataRows([]bool{true, false}) }, func() error { return legacy.AppendValidDataRows([]bool{true, false}) }, 18, false)
+					apply("nil validity", func() error { return field.AppendValidDataRows(nil) }, func() error { return legacy.AppendValidDataRows(nil) }, 0, false)
+					apply("invalid row type", func() error { return field.AppendRow(42) }, func() error { return legacy.AppendRow(42) }, 0, true)
+					apply("invalid data type", func() error { return field.AppendDataRows(42) }, func() error { return legacy.AppendDataRows(42) }, 0, true)
+					apply("invalid batch type", func() error { return field.AppendRows(42, []bool{true}) }, func() error { return legacy.AppendRows(42, []bool{true}) }, 0, true)
 					delta := tc.perRow
 					if nullable {
 						delta = 0
 					}
-					apply("invalid validity type", func() error { return field.TrackedAppendRows(tc.batch, "invalid") }, func() error { return legacy.AppendRows(tc.batch, "invalid") }, delta, true)
-					apply("after error", func() error { return field.TrackedAppendRow(tc.row) }, func() error { return legacy.AppendRow(tc.row) }, single, false)
+					apply("invalid validity type", func() error { return field.AppendRows(tc.batch, "invalid") }, func() error { return legacy.AppendRows(tc.batch, "invalid") }, delta, true)
+					apply("after error", func() error { return field.AppendRow(tc.row) }, func() error { return legacy.AppendRow(tc.row) }, single, false)
 				})
 			}
 		}
@@ -1209,43 +1209,43 @@ func TestVectorFieldDataTrackedAppend(t *testing.T) {
 }
 
 func TestSparseFloatVectorFieldDataTrackedEncoding(t *testing.T) {
-	field := NewSparseFloatVectorFieldData(false, 64)
+	field := NewSparseFloatVectorFieldData(false, 64, true)
 	for _, step := range []struct {
 		index uint32
 		want  int
 	}{{126, 21}, {127, 32}, {0, 42}, {16383, 53}} {
-		require.NoError(t, field.TrackedAppendRow(typeutil.CreateSparseFloatRow([]uint32{step.index}, []float32{1})))
-		require.Equal(t, step.want, field.GetTrackedMemorySize())
-		require.Equal(t, field.GetMemorySize(), field.GetTrackedMemorySize())
+		require.NoError(t, field.AppendRow(typeutil.CreateSparseFloatRow([]uint32{step.index}, []float32{1})))
+		require.Equal(t, step.want, checkedMemorySize(t, field))
+		require.Equal(t, field.GetMemorySize(), checkedMemorySize(t, field))
 	}
 	indices, values := make([]uint32, 16), make([]float32, 16)
 	for i := range indices {
 		indices[i], values[i] = uint32(i), 1
 	}
-	require.NoError(t, field.TrackedAppendRow(typeutil.CreateSparseFloatRow(indices, values)))
-	require.Equal(t, 184, field.GetTrackedMemorySize()) // 128-byte row + tag + two-byte length.
-	require.NoError(t, field.TrackedAppendRow([]byte{}))
-	require.Equal(t, 186, field.GetTrackedMemorySize())
-	require.Equal(t, field.GetMemorySize(), field.GetTrackedMemorySize())
-	require.Error(t, field.TrackedAppendRow([]byte{1}))
-	require.Equal(t, 186, field.GetTrackedMemorySize())
+	require.NoError(t, field.AppendRow(typeutil.CreateSparseFloatRow(indices, values)))
+	require.Equal(t, 184, checkedMemorySize(t, field)) // 128-byte row + tag + two-byte length.
+	require.NoError(t, field.AppendRow([]byte{}))
+	require.Equal(t, 186, checkedMemorySize(t, field))
+	require.Equal(t, field.GetMemorySize(), checkedMemorySize(t, field))
+	require.Error(t, field.AppendRow([]byte{1}))
+	require.Equal(t, 186, checkedMemorySize(t, field))
 	// An empty source can still increase the shared Dim encoding size.
 	source := &SparseFloatVectorFieldData{SparseFloatArray: schemapb.SparseFloatArray{Dim: 1 << 21}}
-	require.NoError(t, field.TrackedAppendDataRows(source))
-	require.Equal(t, 187, field.GetTrackedMemorySize())
-	require.Equal(t, field.GetMemorySize(), field.GetTrackedMemorySize())
+	require.NoError(t, field.AppendDataRows(source))
+	require.Equal(t, 187, checkedMemorySize(t, field))
+	require.Equal(t, field.GetMemorySize(), checkedMemorySize(t, field))
 }
 
 func TestSparseFloatVectorFieldDataTrackedAppendAllRows(t *testing.T) {
-	field := NewSparseFloatVectorFieldData(false, 8)
-	source := NewSparseFloatVectorFieldData(true, 8)
-	require.NoError(t, source.TrackedAppendRow(nil))
-	require.NoError(t, source.TrackedAppendRow(typeutil.CreateSparseFloatRow([]uint32{127}, []float32{1})))
+	field := NewSparseFloatVectorFieldData(false, 8, true)
+	source := NewSparseFloatVectorFieldData(true, 8, true)
+	require.NoError(t, source.AppendRow(nil))
+	require.NoError(t, source.AppendRow(typeutil.CreateSparseFloatRow([]uint32{127}, []float32{1})))
 	for i := 1; i <= 2; i++ {
-		field.TrackedAppendAllRows(source)
+		field.AppendAllRows(source)
 		require.True(t, field.Nullable)
-		require.Equal(t, 9+3+i*(10+2+16), field.GetTrackedMemorySize())
-		require.Equal(t, field.GetMemorySize(), field.GetTrackedMemorySize())
+		require.Equal(t, 9+3+i*(10+2+16), checkedMemorySize(t, field))
+		require.Equal(t, field.GetMemorySize(), checkedMemorySize(t, field))
 		require.Nil(t, field.GetRow((i-1)*2))
 		require.Equal(t, source.GetRow(1), field.GetRow((i-1)*2+1))
 	}
@@ -1261,29 +1261,29 @@ func TestTrackedAppendValidDataRowsInvalidType(t *testing.T) {
 		NewFloatFieldData(true, 0),
 		NewDoubleFieldData(true, 0),
 		NewTimestamptzFieldData(true, 0),
-		NewJSONFieldData(true, 0),
-		NewGeometryFieldData(true, 0),
+		NewJSONFieldData(true, 0, true),
+		NewGeometryFieldData(true, 0, true),
 
-		NewStringFieldData(schemapb.DataType_VarChar, true, 0),
-		NewArrayFieldData(schemapb.DataType_Int64, true, true, 0),
-		NewVectorArrayFieldData(schemapb.DataType_FloatVector, 8, true, true, 0),
+		NewStringFieldData(schemapb.DataType_VarChar, true, 0, true),
+		NewArrayFieldData(schemapb.DataType_Int64, true, true, 0, true),
+		NewVectorArrayFieldData(schemapb.DataType_FloatVector, 8, true, true, 0, true),
 		NewBinaryVectorFieldData(8, true, 0),
 		NewFloatVectorFieldData(8, true, 0),
 		NewFloat16VectorFieldData(8, true, 0),
 		NewBFloat16VectorFieldData(8, true, 0),
 		NewInt8VectorFieldData(8, true, 0),
-		NewSparseFloatVectorFieldData(true, 0),
+		NewSparseFloatVectorFieldData(true, 0, true),
 	}
 	for _, field := range fields {
 		t.Run(field.GetDataType().String(), func(t *testing.T) {
-			before := field.GetTrackedMemorySize()
-			got := field.TrackedAppendValidDataRows("invalid")
+			before := checkedMemorySize(t, field)
+			got := field.AppendValidDataRows("invalid")
 			want := field.AppendValidDataRows("invalid")
 			require.Error(t, want)
 			require.EqualError(t, got, want.Error())
 			require.Empty(t, field.GetValidData())
-			require.Equal(t, before, field.GetTrackedMemorySize())
-			require.Equal(t, field.GetMemorySize(), field.GetTrackedMemorySize())
+			require.Equal(t, before, checkedMemorySize(t, field))
+			require.Equal(t, field.GetMemorySize(), checkedMemorySize(t, field))
 		})
 	}
 }
@@ -1297,7 +1297,7 @@ func TestNewFieldDataTrackedSize(t *testing.T) {
 				t.Run(fmt.Sprintf("%s/nullable=%t/cap=%d", tc.dataType, nullable, capacity), func(t *testing.T) {
 					field := tc.newField(t, nullable, capacity)
 					tracked := field
-					require.Equal(t, tc.fixed, tracked.GetTrackedMemorySize())
+					require.Equal(t, tc.fixed, checkedMemorySize(t, tracked))
 					require.Zero(t, field.RowNum())
 					require.Equal(t, tc.dataType, field.GetDataType())
 					require.Equal(t, nullable, field.GetNullable())
@@ -1319,13 +1319,13 @@ func TestNewFieldDataTrackedSize(t *testing.T) {
 						require.Nil(t, field.GetValidData())
 					}
 					for n := 1; n <= 2; n++ {
-						require.NoError(t, tracked.TrackedAppendRow(tc.row))
+						require.NoError(t, tracked.AppendRow(tc.row))
 						want := tc.fixed + tc.shared + n*tc.perRow
 						if nullable {
 							want += n * (1 + tc.mapping)
 						}
-						require.Equal(t, want, tracked.GetTrackedMemorySize())
-						require.Equal(t, field.GetMemorySize(), tracked.GetTrackedMemorySize())
+						require.Equal(t, want, checkedMemorySize(t, tracked))
+						require.Equal(t, field.GetMemorySize(), checkedMemorySize(t, tracked))
 					}
 				})
 			}
@@ -1340,7 +1340,7 @@ func TestNewFieldDataMissingDimension(t *testing.T) {
 		schemapb.DataType_Int8Vector, schemapb.DataType_ArrayOfVector,
 	} {
 		t.Run(dataType.String(), func(t *testing.T) {
-			field, err := NewFieldData(dataType, &schemapb.FieldSchema{DataType: dataType}, 0)
+			field, err := NewFieldData(dataType, &schemapb.FieldSchema{DataType: dataType}, 0, true)
 			require.Error(t, err)
 			require.Nil(t, field)
 		})
@@ -1349,7 +1349,7 @@ func TestNewFieldDataMissingDimension(t *testing.T) {
 
 // BenchmarkFieldDataMemoryAccounting compares whole batches with and without
 // incremental accounting. Input decoding is excluded; each batch starts with
-// the same 1024-row reservation as the binlog reader. An operation is one batch.
+// a controlled 1024-row reservation. An operation is one batch.
 func BenchmarkFieldDataMemoryAccounting(b *testing.B) {
 	indices, values := make([]uint32, 64), make([]float32, 64)
 	for i := range indices {
@@ -1359,15 +1359,21 @@ func BenchmarkFieldDataMemoryAccounting(b *testing.B) {
 	text := strings.Repeat("x", 1024)
 	cases := []struct {
 		name     string
-		newField func(bool, int) FieldData
+		newField func(bool, int, bool) FieldData
 		row      any
 	}{
-		{"Int64", func(nullable bool, capacity int) FieldData { return NewInt64FieldData(nullable, capacity) }, int64(42)},
-		{"String1024", func(nullable bool, capacity int) FieldData {
-			return NewStringFieldData(schemapb.DataType_VarChar, nullable, capacity)
+		{"Int64", func(nullable bool, capacity int, enabled bool) FieldData {
+			return NewInt64FieldData(nullable, capacity)
+		}, int64(42)},
+		{"String1024", func(nullable bool, capacity int, enabled bool) FieldData {
+			return NewStringFieldData(schemapb.DataType_VarChar, nullable, capacity, enabled)
 		}, text},
-		{"JSON1024", func(nullable bool, capacity int) FieldData { return NewJSONFieldData(nullable, capacity) }, []byte(`{"value":"` + text + `"}`)},
-		{"Sparse64", func(nullable bool, capacity int) FieldData { return NewSparseFloatVectorFieldData(nullable, capacity) }, sparse},
+		{"JSON1024", func(nullable bool, capacity int, enabled bool) FieldData {
+			return NewJSONFieldData(nullable, capacity, enabled)
+		}, []byte(`{"value":"` + text + `"}`)},
+		{"Sparse64", func(nullable bool, capacity int, enabled bool) FieldData {
+			return NewSparseFloatVectorFieldData(nullable, capacity, enabled)
+		}, sparse},
 	}
 	for _, tc := range cases {
 		rowCounts := []int{1000, 10000, 100000}
@@ -1387,20 +1393,20 @@ func BenchmarkFieldDataMemoryAccounting(b *testing.B) {
 						}
 					}
 					// Verify identical sizes at each checkpoint outside timed work.
-					legacy, tracked := tc.newField(nullable, 1024), tc.newField(nullable, 1024)
+					legacy, tracked := tc.newField(nullable, 1024, false), tc.newField(nullable, 1024, true)
 					for i, row := range rows {
 						require.NoError(b, legacy.AppendRow(row))
-						require.NoError(b, tracked.TrackedAppendRow(row))
+						require.NoError(b, tracked.AppendRow(row))
 						if (i+1)%100 == 0 {
-							require.Equal(b, legacy.GetMemorySize(), tracked.GetTrackedMemorySize())
+							require.Equal(b, legacy.GetMemorySize(), checkedMemorySize(b, tracked))
 						}
 					}
 					require.Equal(b, legacy.RowNum(), tracked.RowNum())
 					for _, checkEvery := range []int{0, 100} {
 						for _, useTracked := range []bool{false, true} {
-							method := "Scan"
+							method := "TrackingOff"
 							if useTracked {
-								method = "Tracked"
+								method = "TrackingOn"
 							}
 							b.Run(fmt.Sprintf("check=%d/%s", checkEvery, method), func(b *testing.B) {
 								var field FieldData
@@ -1408,11 +1414,8 @@ func BenchmarkFieldDataMemoryAccounting(b *testing.B) {
 								b.ReportAllocs()
 								b.ResetTimer()
 								for n := 0; n < b.N; n++ {
-									field = tc.newField(nullable, 1024)
+									field = tc.newField(nullable, 1024, useTracked)
 									appendRow, getSize := field.AppendRow, field.GetMemorySize
-									if useTracked {
-										appendRow, getSize = field.TrackedAppendRow, field.GetTrackedMemorySize
-									}
 									for i, row := range rows {
 										if err := appendRow(row); err != nil {
 											b.Fatal(err)
@@ -1425,7 +1428,7 @@ func BenchmarkFieldDataMemoryAccounting(b *testing.B) {
 								b.StopTimer()
 								require.Equal(b, rowCount, field.RowNum())
 								if useTracked {
-									require.Equal(b, field.GetMemorySize(), field.GetTrackedMemorySize())
+									require.Equal(b, field.GetMemorySize(), checkedMemorySize(b, field))
 								}
 								if checkEvery != 0 {
 									require.Equal(b, field.GetMemorySize(), size)
@@ -1433,6 +1436,59 @@ func BenchmarkFieldDataMemoryAccounting(b *testing.B) {
 								b.ReportMetric(float64(rowCount)*float64(b.N)/b.Elapsed().Seconds(), "rows/s")
 							})
 						}
+					}
+				})
+			}
+		}
+	}
+}
+
+func checkedMemorySize(t testing.TB, data interface{ GetMemorySize() int }) int {
+	t.Helper()
+	size := data.GetMemorySize()
+	require.Equal(t, scannedMemorySize(data), size)
+	return size
+}
+
+// Keep the scan independent of GetMemorySize when tracking is enabled.
+func scannedMemorySize(data interface{ GetMemorySize() int }) int {
+	if field, ok := data.(interface{ getMemorySize() int }); ok {
+		return field.getMemorySize()
+	}
+	if insert, ok := data.(*InsertData); ok {
+		total := 0
+		for _, field := range insert.Data {
+			total += scannedMemorySize(field)
+		}
+		return total
+	}
+	return data.GetMemorySize() // Fixed-width fields have no cache.
+}
+
+func TestFieldDataMemoryTrackingMode(t *testing.T) {
+	for _, tc := range fieldMemoryCases() {
+		for _, nullable := range []bool{false, true} {
+			for _, mode := range [][]bool{nil, {false}, {true}} {
+				t.Run(fmt.Sprintf("%s/nullable=%t/mode=%v", tc.dataType, nullable, mode), func(t *testing.T) {
+					element := schemapb.DataType_Int64
+					if tc.dataType == schemapb.DataType_ArrayOfVector {
+						element = schemapb.DataType_FloatVector
+					}
+					schema := &schemapb.FieldSchema{
+						DataType: tc.dataType, Nullable: nullable, ElementType: element,
+						TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}},
+					}
+					field, err := NewFieldData(tc.dataType, schema, 0, mode...)
+					require.NoError(t, err)
+					check := func() {
+						require.Equal(t, scannedMemorySize(field), field.GetMemorySize())
+					}
+					check()
+					require.NoError(t, field.AppendRow(tc.row))
+					check()
+					if nullable {
+						require.NoError(t, field.AppendRow(nil))
+						check()
 					}
 				})
 			}

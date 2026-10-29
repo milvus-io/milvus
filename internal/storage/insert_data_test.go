@@ -329,9 +329,9 @@ func TestInsertDataTrackedFieldSizes(t *testing.T) {
 				var data *InsertData
 				var err error
 				if capacity == 0 {
-					data, err = NewInsertData(schema)
+					data, err = NewInsertData(schema, true)
 				} else {
-					data, err = NewInsertDataWithCap(schema, capacity, false)
+					data, err = NewInsertDataWithCap(schema, capacity, false, true)
 				}
 				require.NoError(t, err)
 				require.Len(t, data.Data, len(cases))
@@ -339,10 +339,10 @@ func TestInsertDataTrackedFieldSizes(t *testing.T) {
 					t.Helper()
 					total, trackedTotal := 0, 0
 					for id, field := range data.Data {
-						require.Equal(t, expected[id], field.GetTrackedMemorySize(), "field %d", id)
-						require.Equal(t, field.GetMemorySize(), field.GetTrackedMemorySize(), "field %d", id)
+						require.Equal(t, expected[id], checkedMemorySize(t, field), "field %d", id)
+						require.Equal(t, field.GetMemorySize(), checkedMemorySize(t, field), "field %d", id)
 						total += expected[id]
-						trackedTotal += field.GetTrackedMemorySize()
+						trackedTotal += checkedMemorySize(t, field)
 					}
 					require.Equal(t, total, trackedTotal)
 					require.Equal(t, data.GetMemorySize(), trackedTotal)
@@ -351,7 +351,7 @@ func TestInsertDataTrackedFieldSizes(t *testing.T) {
 				for i, tc := range cases {
 					id := FieldID(100 + i)
 					field := data.Data[id] // Exercise the public FieldData interface.
-					require.NoError(t, field.TrackedAppendRow(tc.row))
+					require.NoError(t, field.AppendRow(tc.row))
 					expected[id] += tc.perRow + tc.shared
 					if nullable {
 						expected[id] += 1 + tc.mapping
@@ -362,13 +362,13 @@ func TestInsertDataTrackedFieldSizes(t *testing.T) {
 					if nullable {
 						validity, validitySize = []bool{true}, 1+tc.mapping
 					}
-					require.NoError(t, field.TrackedAppendRows(tc.batch, validity))
+					require.NoError(t, field.AppendRows(tc.batch, validity))
 					expected[id] += tc.perRow + validitySize
 					check()
-					require.NoError(t, field.TrackedAppendDataRows(tc.batch))
+					require.NoError(t, field.AppendDataRows(tc.batch))
 					expected[id] += tc.perRow
 					check()
-					require.NoError(t, field.TrackedAppendValidDataRows(validity))
+					require.NoError(t, field.AppendValidDataRows(validity))
 					expected[id] += validitySize
 					check()
 				}
@@ -377,30 +377,40 @@ func TestInsertDataTrackedFieldSizes(t *testing.T) {
 	}
 }
 
-// A tracked total must not fall back to scanning any field's historical data.
-type noScanFieldData struct{ FieldData }
-
-func (noScanFieldData) GetMemorySize() int { panic("unexpected field scan") }
-
 func TestInsertDataTrackedSizeAndFieldChanges(t *testing.T) {
-	data := &InsertData{Data: map[FieldID]FieldData{100: NewStringFieldData(schemapb.DataType_VarChar, true, 0)}}
-	require.NoError(t, data.Data[100].TrackedAppendRow("中"))
-	require.Equal(t, 21, data.GetTrackedMemorySize())
-	require.Equal(t, data.GetMemorySize(), data.GetTrackedMemorySize())
-	data.Data[100] = noScanFieldData{data.Data[100]}
-	require.Equal(t, 21, data.GetTrackedMemorySize())
-	require.NoError(t, data.Data[100].TrackedAppendRow(nil))
-	require.Equal(t, 38, data.GetTrackedMemorySize())
-	require.ErrorIs(t, data.Data[100].TrackedAppendRow(42), merr.ErrParameterInvalid)
-	require.Equal(t, 38, data.GetTrackedMemorySize())
-	data.Data[100] = NewJSONFieldData(false, 0)
-	require.NoError(t, data.Data[100].TrackedAppendRow([]byte("{}")))
-	require.Equal(t, 19, data.GetTrackedMemorySize())
+	data := &InsertData{Data: map[FieldID]FieldData{100: NewStringFieldData(schemapb.DataType_VarChar, true, 0, true)}}
+	require.NoError(t, data.Data[100].AppendRow("中"))
+	require.Equal(t, 21, checkedMemorySize(t, data))
+	require.Equal(t, data.GetMemorySize(), checkedMemorySize(t, data))
+	require.Equal(t, 21, checkedMemorySize(t, data))
+	require.NoError(t, data.Data[100].AppendRow(nil))
+	require.Equal(t, 38, checkedMemorySize(t, data))
+	require.ErrorIs(t, data.Data[100].AppendRow(42), merr.ErrParameterInvalid)
+	require.Equal(t, 38, checkedMemorySize(t, data))
+	data.Data[100] = NewJSONFieldData(false, 0, true)
+	require.NoError(t, data.Data[100].AppendRow([]byte("{}")))
+	require.Equal(t, 19, checkedMemorySize(t, data))
 	data.Data[101] = NewInt64FieldData(false, 0)
-	require.NoError(t, data.Data[101].TrackedAppendRow(int64(1)))
-	require.Equal(t, 28, data.GetTrackedMemorySize())
-	require.Equal(t, data.GetMemorySize(), data.GetTrackedMemorySize())
+	require.NoError(t, data.Data[101].AppendRow(int64(1)))
+	require.Equal(t, 28, checkedMemorySize(t, data))
+	require.Equal(t, data.GetMemorySize(), checkedMemorySize(t, data))
 	delete(data.Data, 100)
-	require.Equal(t, 9, data.GetTrackedMemorySize())
-	require.Zero(t, (&InsertData{}).GetTrackedMemorySize())
+	require.Equal(t, 9, checkedMemorySize(t, data))
+	require.Zero(t, checkedMemorySize(t, &InsertData{}))
+}
+
+func TestInsertDataMemoryTrackingMixedFields(t *testing.T) {
+	tracked := NewStringFieldData(schemapb.DataType_VarChar, false, 0, true)
+	require.NoError(t, tracked.AppendRow("tracked"))
+	untracked := NewJSONFieldData(false, 0)
+	require.NoError(t, untracked.AppendRow([]byte("{}")))
+	data := &InsertData{Data: map[FieldID]FieldData{100: tracked, 101: untracked, 102: NewInt64FieldData(false, 0)}}
+	require.Equal(t, scannedMemorySize(data), data.GetMemorySize())
+	// Changes to an untracked field are picked up by the next aggregate scan.
+	require.NoError(t, untracked.AppendRow([]byte("{\"value\":1}")))
+	require.Equal(t, scannedMemorySize(data), data.GetMemorySize())
+	delete(data.Data, 101)
+	require.Equal(t, scannedMemorySize(data), data.GetMemorySize())
+	data.Data[100] = NewJSONFieldData(false, 0)
+	require.Equal(t, scannedMemorySize(data), data.GetMemorySize())
 }

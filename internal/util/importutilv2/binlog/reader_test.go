@@ -2658,13 +2658,13 @@ func TestStorageV3Reader_ReadFailurePaths(t *testing.T) {
 			}).Build()
 			defer nextPatch.UnPatch()
 
-			data, err := storage.NewInsertDataWithFunctionOutputField(r.schema)
+			data, err := storage.NewInsertDataWithFunctionOutputField(r.schema, true)
 			require.NoError(t, err)
 			if name == "missing_field" || name == "allocate_field" {
 				delete(data.Data, 100)
 			}
 			allocations := 0
-			batchPatch := mockey.Mock(storage.NewInsertDataWithFunctionOutputField).To(func(_ *schemapb.CollectionSchema) (*storage.InsertData, error) {
+			batchPatch := mockey.Mock(storage.NewInsertDataWithFunctionOutputField).To(func(_ *schemapb.CollectionSchema, _ ...bool) (*storage.InsertData, error) {
 				allocations++
 				if name == "allocate_batch" || (name == "filter_batch" && allocations == 2) {
 					return nil, cause
@@ -2956,7 +2956,7 @@ func TestStorageV2ReaderTrackedBufferBoundary(t *testing.T) {
 		{"below threshold at check", threshold + 1, []int{135}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			consumed, scans := 0, 0
+			consumed := 0
 			owner := &valueReader{}
 			next := mockey.Mock((*valueReader).NextValue).To(func(*valueReader) (**storage.Value, error) {
 				if consumed == len(rows) {
@@ -2970,17 +2970,18 @@ func TestStorageV2ReaderTrackedBufferBoundary(t *testing.T) {
 			r := &reader{ctx: context.Background(), schema: schema, storageVersion: storage.StorageV2, bufferSize: tc.limit, dr: owner}
 			offset := 0
 			for _, count := range tc.batchRows {
-				// Return zero if the scan is called: both the call count and batch boundary
-				// must then fail, rather than silently exercising the old implementation.
-				scan := mockey.Mock((*storage.InsertData).GetMemorySize).To(func(*storage.InsertData) int { scans++; return 0 }).Build()
 				actual, err := r.Read()
-				scan.UnPatch()
 				require.NoError(t, err)
 				require.Equal(t, count, actual.GetRowNum())
 				require.Equal(t, offset+count, consumed)
-				require.Equal(t, actual.GetMemorySize(), actual.GetTrackedMemorySize())
-				for _, field := range actual.Data {
-					require.Equal(t, field.GetMemorySize(), field.GetTrackedMemorySize())
+				expected, err := storage.NewInsertDataWithFunctionOutputField(schema)
+				require.NoError(t, err)
+				for _, row := range rows[offset : offset+count] {
+					require.NoError(t, expected.Append(row))
+				}
+				require.Equal(t, expected.GetMemorySize(), actual.GetMemorySize())
+				for id, field := range actual.Data {
+					require.Equal(t, expected.Data[id].GetMemorySize(), field.GetMemorySize())
 				}
 				for i := 0; i < count; i++ {
 					require.Equal(t, rows[offset+i], actual.GetRow(i))
@@ -2990,7 +2991,6 @@ func TestStorageV2ReaderTrackedBufferBoundary(t *testing.T) {
 			actual, err := r.Read()
 			require.ErrorIs(t, err, io.EOF)
 			require.Nil(t, actual)
-			require.Zero(t, scans)
 		})
 	}
 }

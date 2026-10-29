@@ -29,23 +29,21 @@ import (
 
 // FieldData represents the data of a field.
 //
-// Incremental memory accounting is optional. To use it:
-// 1. Create an empty field with the corresponding NewXXXFieldData constructor to initialize its fixed overhead.
-// 2. Use TrackedAppend* methods for all subsequent appends to account for newly added data and associated auxiliary structures.
-// 3. Call GetTrackedMemorySize to read the size without rescanning existing data.
-// Fixed-width scalar and dense vector fields compute sizes in constant time and
-// forward TrackedAppend* to Append*; other field types maintain an incremental cache.
+// Memory tracking is disabled by default. For variable-width fields, pass true as
+// the optional final constructor argument to enable it for an initially empty field.
+// All Append* methods then update the cached size, including data appended before an error,
+// and GetMemorySize returns that cache. With tracking disabled, GetMemorySize calculates the current size by scanning the data.
+// Fixed-width scalar and dense vector fields always calculate their sizes in constant time;
+// they do not store a tracking flag or maintain a size cache.
 //
-// When using incremental accounting, do not mix in ordinary Append* methods or directly modify struct fields
-// or underlying data returned by getters, as this may make the accumulated size inaccurate.
-// If TrackedAppend* returns an error, any data already appended successfully is still included in the accumulated size.
+// With tracking enabled, do not modify struct fields or backing data returned by getters directly,
+// as those changes bypass accounting. The mode is fixed at creation.
 type FieldData interface {
 	RowNum() int
 
 	// get size
 	GetRowSize(i int) int
 	GetMemorySize() int
-	GetTrackedMemorySize() int
 
 	// get data/data type
 	GetRow(i int) any
@@ -59,23 +57,15 @@ type FieldData interface {
 	AppendRows(dataRows interface{}, validDataRows interface{}) error
 	AppendDataRows(rows interface{}) error
 	AppendValidDataRows(rows interface{}) error
-
-	// append data with incremental size accounting
-	TrackedAppendRow(row interface{}) error
-	TrackedAppendRows(dataRows interface{}, validDataRows interface{}) error
-	TrackedAppendDataRows(rows interface{}) error
-	TrackedAppendValidDataRows(rows interface{}) error
 }
 
-// NewFieldData creates an empty FieldData with incremental size accounting initialized.
-// Subsequent mutations must use TrackedAppend* to maintain the accumulated size.
+// NewFieldData creates an empty FieldData. The optional final flag enables memory tracking; omitted or false leaves tracking disabled.
 // Cap is expressed in rows;
-// vector columns scale it by their per-row element count, except nullable
-// columns, which reserve only cap: a nullable column missing from the source
-// only appends ValidData (see AppendNullableDefaultFieldsData), so a
-// dim-scaled Data reservation would stay invisible to GetMemorySize and never
-// trigger spill.
-func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema, cap int) (FieldData, error) {
+// vector columns scale it by their per-row element count, except nullable columns,
+// which reserve only cap: a nullable column missing from the source
+// only appends ValidData (see AppendNullableDefaultFieldsData),
+// so a dim-scaled Data reservation would stay invisible to GetMemorySize and never trigger spill.
+func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema, cap int, trackMemory ...bool) (FieldData, error) {
 	nullable := fieldSchema.GetNullable()
 	switch dataType {
 	case schemapb.DataType_Bool:
@@ -95,13 +85,13 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 	case schemapb.DataType_Timestamptz:
 		return NewTimestamptzFieldData(nullable, cap), nil
 	case schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text:
-		return NewStringFieldData(dataType, nullable, cap), nil
+		return NewStringFieldData(dataType, nullable, cap, trackMemory...), nil
 	case schemapb.DataType_JSON:
-		return NewJSONFieldData(nullable, cap), nil
+		return NewJSONFieldData(nullable, cap, trackMemory...), nil
 	case schemapb.DataType_Geometry:
-		return NewGeometryFieldData(nullable, cap), nil
+		return NewGeometryFieldData(nullable, cap, trackMemory...), nil
 	case schemapb.DataType_Array:
-		return NewArrayFieldData(fieldSchema.GetElementType(), nullable, fieldSchema.GetElementNullable(), cap), nil
+		return NewArrayFieldData(fieldSchema.GetElementType(), nullable, fieldSchema.GetElementNullable(), cap, trackMemory...), nil
 	case schemapb.DataType_BinaryVector:
 		dim, err := GetDimFromParams(fieldSchema.GetTypeParams())
 		if err != nil {
@@ -133,13 +123,13 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 		}
 		return NewInt8VectorFieldData(dim, nullable, cap), nil
 	case schemapb.DataType_SparseFloatVector:
-		return NewSparseFloatVectorFieldData(nullable, cap), nil
+		return NewSparseFloatVectorFieldData(nullable, cap, trackMemory...), nil
 	case schemapb.DataType_ArrayOfVector:
 		dim, err := GetDimFromParams(fieldSchema.GetTypeParams())
 		if err != nil {
 			return nil, err
 		}
-		return NewVectorArrayFieldData(fieldSchema.GetElementType(), int64(dim), nullable, fieldSchema.GetElementNullable(), cap), nil
+		return NewVectorArrayFieldData(fieldSchema.GetElementType(), int64(dim), nullable, fieldSchema.GetElementNullable(), cap, trackMemory...), nil
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unexpected schema data type: %d", dataType)
 	}
@@ -161,9 +151,6 @@ func NewBoolFieldData(nullable bool, capacity int) *BoolFieldData {
 	}
 	return data
 }
-
-// GetTrackedMemorySize computes the size in constant time without scanning rows.
-func (data *BoolFieldData) GetTrackedMemorySize() int { return data.GetMemorySize() }
 
 // RowNum implements FieldData.RowNum
 func (data *BoolFieldData) RowNum() int { return len(data.Data) }
@@ -241,22 +228,6 @@ func (data *BoolFieldData) AppendValidDataRows(rows interface{}) error {
 	return nil
 }
 
-func (data *BoolFieldData) TrackedAppendRow(row interface{}) error {
-	return data.AppendRow(row)
-}
-
-func (data *BoolFieldData) TrackedAppendRows(dataRows interface{}, validDataRows interface{}) error {
-	return data.AppendRows(dataRows, validDataRows)
-}
-
-func (data *BoolFieldData) TrackedAppendDataRows(rows interface{}) error {
-	return data.AppendDataRows(rows)
-}
-
-func (data *BoolFieldData) TrackedAppendValidDataRows(rows interface{}) error {
-	return data.AppendValidDataRows(rows)
-}
-
 type Int8FieldData struct {
 	Data      []int8
 	ValidData []bool
@@ -271,9 +242,6 @@ func NewInt8FieldData(nullable bool, capacity int) *Int8FieldData {
 	}
 	return data
 }
-
-// GetTrackedMemorySize computes the size in constant time without scanning rows.
-func (data *Int8FieldData) GetTrackedMemorySize() int { return data.GetMemorySize() }
 
 func (data *Int8FieldData) RowNum() int { return len(data.Data) }
 
@@ -346,22 +314,6 @@ func (data *Int8FieldData) AppendValidDataRows(rows interface{}) error {
 	return nil
 }
 
-func (data *Int8FieldData) TrackedAppendRow(row interface{}) error {
-	return data.AppendRow(row)
-}
-
-func (data *Int8FieldData) TrackedAppendRows(dataRows interface{}, validDataRows interface{}) error {
-	return data.AppendRows(dataRows, validDataRows)
-}
-
-func (data *Int8FieldData) TrackedAppendDataRows(rows interface{}) error {
-	return data.AppendDataRows(rows)
-}
-
-func (data *Int8FieldData) TrackedAppendValidDataRows(rows interface{}) error {
-	return data.AppendValidDataRows(rows)
-}
-
 type Int16FieldData struct {
 	Data      []int16
 	ValidData []bool
@@ -376,9 +328,6 @@ func NewInt16FieldData(nullable bool, capacity int) *Int16FieldData {
 	}
 	return data
 }
-
-// GetTrackedMemorySize computes the size in constant time without scanning rows.
-func (data *Int16FieldData) GetTrackedMemorySize() int { return data.GetMemorySize() }
 
 func (data *Int16FieldData) RowNum() int { return len(data.Data) }
 
@@ -451,22 +400,6 @@ func (data *Int16FieldData) AppendValidDataRows(rows interface{}) error {
 	return nil
 }
 
-func (data *Int16FieldData) TrackedAppendRow(row interface{}) error {
-	return data.AppendRow(row)
-}
-
-func (data *Int16FieldData) TrackedAppendRows(dataRows interface{}, validDataRows interface{}) error {
-	return data.AppendRows(dataRows, validDataRows)
-}
-
-func (data *Int16FieldData) TrackedAppendDataRows(rows interface{}) error {
-	return data.AppendDataRows(rows)
-}
-
-func (data *Int16FieldData) TrackedAppendValidDataRows(rows interface{}) error {
-	return data.AppendValidDataRows(rows)
-}
-
 type Int32FieldData struct {
 	Data      []int32
 	ValidData []bool
@@ -481,9 +414,6 @@ func NewInt32FieldData(nullable bool, capacity int) *Int32FieldData {
 	}
 	return data
 }
-
-// GetTrackedMemorySize computes the size in constant time without scanning rows.
-func (data *Int32FieldData) GetTrackedMemorySize() int { return data.GetMemorySize() }
 
 func (data *Int32FieldData) RowNum() int { return len(data.Data) }
 
@@ -556,22 +486,6 @@ func (data *Int32FieldData) AppendValidDataRows(rows interface{}) error {
 	return nil
 }
 
-func (data *Int32FieldData) TrackedAppendRow(row interface{}) error {
-	return data.AppendRow(row)
-}
-
-func (data *Int32FieldData) TrackedAppendRows(dataRows interface{}, validDataRows interface{}) error {
-	return data.AppendRows(dataRows, validDataRows)
-}
-
-func (data *Int32FieldData) TrackedAppendDataRows(rows interface{}) error {
-	return data.AppendDataRows(rows)
-}
-
-func (data *Int32FieldData) TrackedAppendValidDataRows(rows interface{}) error {
-	return data.AppendValidDataRows(rows)
-}
-
 type Int64FieldData struct {
 	Data      []int64
 	ValidData []bool
@@ -586,9 +500,6 @@ func NewInt64FieldData(nullable bool, capacity int) *Int64FieldData {
 	}
 	return data
 }
-
-// GetTrackedMemorySize computes the size in constant time without scanning rows.
-func (data *Int64FieldData) GetTrackedMemorySize() int { return data.GetMemorySize() }
 
 func (data *Int64FieldData) RowNum() int { return len(data.Data) }
 
@@ -661,22 +572,6 @@ func (data *Int64FieldData) AppendValidDataRows(rows interface{}) error {
 	return nil
 }
 
-func (data *Int64FieldData) TrackedAppendRow(row interface{}) error {
-	return data.AppendRow(row)
-}
-
-func (data *Int64FieldData) TrackedAppendRows(dataRows interface{}, validDataRows interface{}) error {
-	return data.AppendRows(dataRows, validDataRows)
-}
-
-func (data *Int64FieldData) TrackedAppendDataRows(rows interface{}) error {
-	return data.AppendDataRows(rows)
-}
-
-func (data *Int64FieldData) TrackedAppendValidDataRows(rows interface{}) error {
-	return data.AppendValidDataRows(rows)
-}
-
 type FloatFieldData struct {
 	Data      []float32
 	ValidData []bool
@@ -691,9 +586,6 @@ func NewFloatFieldData(nullable bool, capacity int) *FloatFieldData {
 	}
 	return data
 }
-
-// GetTrackedMemorySize computes the size in constant time without scanning rows.
-func (data *FloatFieldData) GetTrackedMemorySize() int { return data.GetMemorySize() }
 
 func (data *FloatFieldData) RowNum() int { return len(data.Data) }
 
@@ -766,22 +658,6 @@ func (data *FloatFieldData) AppendValidDataRows(rows interface{}) error {
 	return nil
 }
 
-func (data *FloatFieldData) TrackedAppendRow(row interface{}) error {
-	return data.AppendRow(row)
-}
-
-func (data *FloatFieldData) TrackedAppendRows(dataRows interface{}, validDataRows interface{}) error {
-	return data.AppendRows(dataRows, validDataRows)
-}
-
-func (data *FloatFieldData) TrackedAppendDataRows(rows interface{}) error {
-	return data.AppendDataRows(rows)
-}
-
-func (data *FloatFieldData) TrackedAppendValidDataRows(rows interface{}) error {
-	return data.AppendValidDataRows(rows)
-}
-
 type DoubleFieldData struct {
 	Data      []float64
 	ValidData []bool
@@ -796,9 +672,6 @@ func NewDoubleFieldData(nullable bool, capacity int) *DoubleFieldData {
 	}
 	return data
 }
-
-// GetTrackedMemorySize computes the size in constant time without scanning rows.
-func (data *DoubleFieldData) GetTrackedMemorySize() int { return data.GetMemorySize() }
 
 func (data *DoubleFieldData) RowNum() int { return len(data.Data) }
 
@@ -871,22 +744,6 @@ func (data *DoubleFieldData) AppendValidDataRows(rows interface{}) error {
 	return nil
 }
 
-func (data *DoubleFieldData) TrackedAppendRow(row interface{}) error {
-	return data.AppendRow(row)
-}
-
-func (data *DoubleFieldData) TrackedAppendRows(dataRows interface{}, validDataRows interface{}) error {
-	return data.AppendRows(dataRows, validDataRows)
-}
-
-func (data *DoubleFieldData) TrackedAppendDataRows(rows interface{}) error {
-	return data.AppendDataRows(rows)
-}
-
-func (data *DoubleFieldData) TrackedAppendValidDataRows(rows interface{}) error {
-	return data.AppendValidDataRows(rows)
-}
-
 type TimestamptzFieldData struct {
 	Data      []int64
 	ValidData []bool
@@ -901,9 +758,6 @@ func NewTimestamptzFieldData(nullable bool, capacity int) *TimestamptzFieldData 
 	}
 	return data
 }
-
-// GetTrackedMemorySize computes the size in constant time without scanning rows.
-func (data *TimestamptzFieldData) GetTrackedMemorySize() int { return data.GetMemorySize() }
 
 func (data *TimestamptzFieldData) RowNum() int { return len(data.Data) }
 
@@ -978,51 +832,35 @@ func (data *TimestamptzFieldData) AppendValidDataRows(rows interface{}) error {
 	return nil
 }
 
-func (data *TimestamptzFieldData) TrackedAppendRow(row interface{}) error {
-	return data.AppendRow(row)
-}
-
-func (data *TimestamptzFieldData) TrackedAppendRows(dataRows interface{}, validDataRows interface{}) error {
-	return data.AppendRows(dataRows, validDataRows)
-}
-
-func (data *TimestamptzFieldData) TrackedAppendDataRows(rows interface{}) error {
-	return data.AppendDataRows(rows)
-}
-
-func (data *TimestamptzFieldData) TrackedAppendValidDataRows(rows interface{}) error {
-	return data.AppendValidDataRows(rows)
-}
-
 // --------------- Fixed-width scalar fields.  end  -----------
 
 // --------------- Variable-length scalar fields.  begin  -----------
 
 type StringFieldData struct {
-	Data       []string
-	DataType   schemapb.DataType
-	ValidData  []bool
-	Nullable   bool
-	memorySize int
+	Data      []string
+	DataType  schemapb.DataType
+	ValidData []bool
+	Nullable  bool
+
+	trackMemory bool
+	memorySize  int
 }
 
 // NewStringFieldData creates an empty string field with size tracking initialized.
 // dataType is String, VarChar, or Text; capacity reserves rows and is not charged.
-func NewStringFieldData(dataType schemapb.DataType, nullable bool, capacity int) *StringFieldData {
+func NewStringFieldData(dataType schemapb.DataType, nullable bool, capacity int, trackMemory ...bool) *StringFieldData {
 	data := &StringFieldData{
-		Data:       make([]string, 0, capacity),
-		DataType:   dataType,
-		Nullable:   nullable,
-		memorySize: 1, // Nullable; same accounting as GetMemorySize.
+		trackMemory: len(trackMemory) > 0 && trackMemory[0],
+		Data:        make([]string, 0, capacity),
+		DataType:    dataType,
+		Nullable:    nullable,
+		memorySize:  1, // Nullable; same accounting as GetMemorySize.
 	}
 	if nullable {
 		data.ValidData = make([]bool, 0, capacity)
 	}
 	return data
 }
-
-// GetTrackedMemorySize returns the incrementally maintained GetMemorySize value.
-func (data *StringFieldData) GetTrackedMemorySize() int { return data.memorySize }
 
 func (data *StringFieldData) RowNum() int { return len(data.Data) }
 
@@ -1033,6 +871,14 @@ func (data *StringFieldData) GetRowSize(i int) int { return len(data.Data[i]) + 
 // must be a fixed-size value or a slice of fixed-size values, or a pointer to such data.
 // If v is neither of these, binary.Size returns -1.
 func (data *StringFieldData) GetMemorySize() int {
+	if data.trackMemory {
+		return data.memorySize
+	}
+	return data.getMemorySize()
+}
+
+// getMemorySize calculates the size independently of the incremental cache.
+func (data *StringFieldData) getMemorySize() int {
 	var size int
 	for _, val := range data.Data {
 		size += len(val) + 16
@@ -1057,9 +903,14 @@ func (data *StringFieldData) GetNullable() bool {
 
 func (data *StringFieldData) GetValidData() []bool { return data.ValidData }
 
+// AppendRow appends a row and accounts for the data and validity added.
 func (data *StringFieldData) AppendRow(row interface{}) error {
+	if data.trackMemory {
+		defer data.trackAppendedSize(len(data.Data), len(data.ValidData))
+	}
+
 	if data.GetNullable() && row == nil {
-		data.Data = append(data.Data, make([]string, 1)...)
+		data.Data = append(data.Data, "")
 		data.ValidData = append(data.ValidData, false)
 		return nil
 	}
@@ -1074,15 +925,21 @@ func (data *StringFieldData) AppendRow(row interface{}) error {
 	return nil
 }
 
+// AppendRows preserves AppendRows' partial-success behavior: data remains
+// appended and counted if appending validity subsequently fails.
 func (data *StringFieldData) AppendRows(dataRows interface{}, validDataRows interface{}) error {
-	err := data.AppendDataRows(dataRows)
-	if err != nil {
+	if err := data.AppendDataRows(dataRows); err != nil {
 		return err
 	}
 	return data.AppendValidDataRows(validDataRows)
 }
 
+// AppendDataRows accounts only for newly appended data, not validity.
 func (data *StringFieldData) AppendDataRows(rows interface{}) error {
+	if data.trackMemory {
+		defer data.trackAppendedSize(len(data.Data), len(data.ValidData))
+	}
+
 	v, ok := rows.([]string)
 	if !ok {
 		return merr.WrapErrParameterInvalid("[]string", rows, "Wrong rows type")
@@ -1091,7 +948,12 @@ func (data *StringFieldData) AppendDataRows(rows interface{}) error {
 	return nil
 }
 
+// AppendValidDataRows accounts only for newly appended validity bytes.
 func (data *StringFieldData) AppendValidDataRows(rows interface{}) error {
+	if data.trackMemory {
+		defer data.trackAppendedSize(len(data.Data), len(data.ValidData))
+	}
+
 	if rows == nil {
 		return nil
 	}
@@ -1103,61 +965,44 @@ func (data *StringFieldData) AppendValidDataRows(rows interface{}) error {
 	return nil
 }
 
-func (data *StringFieldData) trackedAppend(appendFn func() error) error {
-	oldRows, oldValid := len(data.Data), len(data.ValidData)
-	err := appendFn()
+func (data *StringFieldData) trackAppendedSize(oldRows, oldValid int) {
 	for _, value := range data.Data[oldRows:] {
 		data.memorySize += len(value) + 16
 	}
 	data.memorySize += len(data.ValidData) - oldValid
-	return err
-}
-
-// TrackedAppendRow appends a row and accounts for the data and validity added.
-func (data *StringFieldData) TrackedAppendRow(row interface{}) error {
-	return data.trackedAppend(func() error { return data.AppendRow(row) })
-}
-
-// TrackedAppendRows preserves AppendRows' partial-success behavior: data remains
-// appended and counted if appending validity subsequently fails.
-func (data *StringFieldData) TrackedAppendRows(dataRows interface{}, validDataRows interface{}) error {
-	return data.trackedAppend(func() error { return data.AppendRows(dataRows, validDataRows) })
-}
-
-// TrackedAppendDataRows accounts only for newly appended data, not validity.
-func (data *StringFieldData) TrackedAppendDataRows(rows interface{}) error {
-	return data.trackedAppend(func() error { return data.AppendDataRows(rows) })
-}
-
-// TrackedAppendValidDataRows accounts only for newly appended validity bytes.
-func (data *StringFieldData) TrackedAppendValidDataRows(rows interface{}) error {
-	return data.trackedAppend(func() error { return data.AppendValidDataRows(rows) })
 }
 
 type JSONFieldData struct {
-	Data       [][]byte
-	ValidData  []bool
-	Nullable   bool
-	memorySize int
+	Data      [][]byte
+	ValidData []bool
+	Nullable  bool
+
+	trackMemory bool
+	memorySize  int
 }
 
 // NewJSONFieldData creates an empty field with size tracking initialized.
-func NewJSONFieldData(nullable bool, capacity int) *JSONFieldData {
-	data := &JSONFieldData{Data: make([][]byte, 0, capacity), Nullable: nullable, memorySize: 1}
+func NewJSONFieldData(nullable bool, capacity int, trackMemory ...bool) *JSONFieldData {
+	data := &JSONFieldData{trackMemory: len(trackMemory) > 0 && trackMemory[0], Data: make([][]byte, 0, capacity), Nullable: nullable, memorySize: 1}
 	if nullable {
 		data.ValidData = make([]bool, 0, capacity)
 	}
 	return data
 }
 
-// GetTrackedMemorySize returns the incrementally maintained GetMemorySize value.
-func (data *JSONFieldData) GetTrackedMemorySize() int { return data.memorySize }
-
 func (data *JSONFieldData) RowNum() int { return len(data.Data) }
 
 func (data *JSONFieldData) GetRowSize(i int) int { return len(data.Data[i]) + 16 }
 
 func (data *JSONFieldData) GetMemorySize() int {
+	if data.trackMemory {
+		return data.memorySize
+	}
+	return data.getMemorySize()
+}
+
+// getMemorySize calculates the size independently of the incremental cache.
+func (data *JSONFieldData) getMemorySize() int {
 	var size int
 	for _, val := range data.Data {
 		size += len(val) + 16
@@ -1183,6 +1028,10 @@ func (data *JSONFieldData) GetNullable() bool {
 func (data *JSONFieldData) GetValidData() []bool { return data.ValidData }
 
 func (data *JSONFieldData) AppendRow(row interface{}) error {
+	if data.trackMemory {
+		defer data.trackAppendedSize(len(data.Data), len(data.ValidData))
+	}
+
 	if data.GetNullable() && row == nil {
 		data.Data = append(data.Data, make([][]byte, 1)...)
 		data.ValidData = append(data.ValidData, false)
@@ -1208,6 +1057,10 @@ func (data *JSONFieldData) AppendRows(dataRows interface{}, validDataRows interf
 }
 
 func (data *JSONFieldData) AppendDataRows(rows interface{}) error {
+	if data.trackMemory {
+		defer data.trackAppendedSize(len(data.Data), len(data.ValidData))
+	}
+
 	v, ok := rows.([][]byte)
 	if !ok {
 		return merr.WrapErrParameterInvalid("[][]byte", rows, "Wrong rows type")
@@ -1217,6 +1070,10 @@ func (data *JSONFieldData) AppendDataRows(rows interface{}) error {
 }
 
 func (data *JSONFieldData) AppendValidDataRows(rows interface{}) error {
+	if data.trackMemory {
+		defer data.trackAppendedSize(len(data.Data), len(data.ValidData))
+	}
+
 	if rows == nil {
 		return nil
 	}
@@ -1228,56 +1085,44 @@ func (data *JSONFieldData) AppendValidDataRows(rows interface{}) error {
 	return nil
 }
 
-func (data *JSONFieldData) trackedAppend(appendFn func() error) error {
-	oldRows, oldValid := len(data.Data), len(data.ValidData)
-	err := appendFn()
+func (data *JSONFieldData) trackAppendedSize(oldRows, oldValid int) {
 	for _, value := range data.Data[oldRows:] {
 		data.memorySize += len(value) + 16
 	}
 	data.memorySize += len(data.ValidData) - oldValid
-	return err
-}
-
-func (data *JSONFieldData) TrackedAppendRow(row interface{}) error {
-	return data.trackedAppend(func() error { return data.AppendRow(row) })
-}
-
-func (data *JSONFieldData) TrackedAppendRows(dataRows interface{}, validDataRows interface{}) error {
-	return data.trackedAppend(func() error { return data.AppendRows(dataRows, validDataRows) })
-}
-
-func (data *JSONFieldData) TrackedAppendDataRows(rows interface{}) error {
-	return data.trackedAppend(func() error { return data.AppendDataRows(rows) })
-}
-
-func (data *JSONFieldData) TrackedAppendValidDataRows(rows interface{}) error {
-	return data.trackedAppend(func() error { return data.AppendValidDataRows(rows) })
 }
 
 type GeometryFieldData struct {
-	Data       [][]byte
-	ValidData  []bool
-	Nullable   bool
-	memorySize int
+	Data      [][]byte
+	ValidData []bool
+	Nullable  bool
+
+	trackMemory bool
+	memorySize  int
 }
 
 // NewGeometryFieldData creates an empty field with size tracking initialized.
-func NewGeometryFieldData(nullable bool, capacity int) *GeometryFieldData {
-	data := &GeometryFieldData{Data: make([][]byte, 0, capacity), Nullable: nullable, memorySize: 1}
+func NewGeometryFieldData(nullable bool, capacity int, trackMemory ...bool) *GeometryFieldData {
+	data := &GeometryFieldData{trackMemory: len(trackMemory) > 0 && trackMemory[0], Data: make([][]byte, 0, capacity), Nullable: nullable, memorySize: 1}
 	if nullable {
 		data.ValidData = make([]bool, 0, capacity)
 	}
 	return data
 }
 
-// GetTrackedMemorySize returns the incrementally maintained GetMemorySize value.
-func (data *GeometryFieldData) GetTrackedMemorySize() int { return data.memorySize }
-
 func (data *GeometryFieldData) RowNum() int { return len(data.Data) }
 
 func (data *GeometryFieldData) GetRowSize(i int) int { return len(data.Data[i]) + 16 }
 
 func (data *GeometryFieldData) GetMemorySize() int {
+	if data.trackMemory {
+		return data.memorySize
+	}
+	return data.getMemorySize()
+}
+
+// getMemorySize calculates the size independently of the incremental cache.
+func (data *GeometryFieldData) getMemorySize() int {
 	var size int
 	// what's the meaning of 16?
 	for _, val := range data.Data {
@@ -1306,6 +1151,10 @@ func (data *GeometryFieldData) GetNullable() bool {
 func (data *GeometryFieldData) GetValidData() []bool { return data.ValidData }
 
 func (data *GeometryFieldData) AppendRow(row interface{}) error {
+	if data.trackMemory {
+		defer data.trackAppendedSize(len(data.Data), len(data.ValidData))
+	}
+
 	if data.GetNullable() && row == nil {
 		data.Data = append(data.Data, make([][]byte, 1)...)
 		data.ValidData = append(data.ValidData, false)
@@ -1334,6 +1183,10 @@ func (data *GeometryFieldData) AppendRows(dataRows interface{}, validDataRows in
 }
 
 func (data *GeometryFieldData) AppendDataRows(rows interface{}) error {
+	if data.trackMemory {
+		defer data.trackAppendedSize(len(data.Data), len(data.ValidData))
+	}
+
 	switch v := rows.(type) {
 	case [][]byte:
 		data.Data = append(data.Data, v...)
@@ -1348,6 +1201,10 @@ func (data *GeometryFieldData) AppendDataRows(rows interface{}) error {
 }
 
 func (data *GeometryFieldData) AppendValidDataRows(rows interface{}) error {
+	if data.trackMemory {
+		defer data.trackAppendedSize(len(data.Data), len(data.ValidData))
+	}
+
 	if rows == nil {
 		return nil
 	}
@@ -1359,30 +1216,11 @@ func (data *GeometryFieldData) AppendValidDataRows(rows interface{}) error {
 	return nil
 }
 
-func (data *GeometryFieldData) trackedAppend(appendFn func() error) error {
-	oldRows, oldValid := len(data.Data), len(data.ValidData)
-	err := appendFn()
+func (data *GeometryFieldData) trackAppendedSize(oldRows, oldValid int) {
 	for _, value := range data.Data[oldRows:] {
 		data.memorySize += len(value) + 16
 	}
 	data.memorySize += len(data.ValidData) - oldValid
-	return err
-}
-
-func (data *GeometryFieldData) TrackedAppendRow(row interface{}) error {
-	return data.trackedAppend(func() error { return data.AppendRow(row) })
-}
-
-func (data *GeometryFieldData) TrackedAppendRows(dataRows interface{}, validDataRows interface{}) error {
-	return data.trackedAppend(func() error { return data.AppendRows(dataRows, validDataRows) })
-}
-
-func (data *GeometryFieldData) TrackedAppendDataRows(rows interface{}) error {
-	return data.trackedAppend(func() error { return data.AppendDataRows(rows) })
-}
-
-func (data *GeometryFieldData) TrackedAppendValidDataRows(rows interface{}) error {
-	return data.trackedAppend(func() error { return data.AppendValidDataRows(rows) })
 }
 
 // --------------- Variable-length scalar fields.  end  -----------
@@ -1395,12 +1233,15 @@ type ArrayFieldData struct {
 	ValidData       []bool
 	Nullable        bool
 	ElementNullable bool
-	memorySize      int
+
+	trackMemory bool
+	memorySize  int
 }
 
 // NewArrayFieldData creates an empty field with size tracking initialized.
-func NewArrayFieldData(elementType schemapb.DataType, nullable, elementNullable bool, capacity int) *ArrayFieldData {
+func NewArrayFieldData(elementType schemapb.DataType, nullable, elementNullable bool, capacity int, trackMemory ...bool) *ArrayFieldData {
 	data := &ArrayFieldData{
+		trackMemory: len(trackMemory) > 0 && trackMemory[0],
 		Data:        make([]*schemapb.ScalarField, 0, capacity),
 		ElementType: elementType,
 		Nullable:    nullable, ElementNullable: elementNullable,
@@ -1412,9 +1253,6 @@ func NewArrayFieldData(elementType schemapb.DataType, nullable, elementNullable 
 	return data
 }
 
-// GetTrackedMemorySize returns the incrementally maintained GetMemorySize value.
-func (data *ArrayFieldData) GetTrackedMemorySize() int { return data.memorySize }
-
 func (data *ArrayFieldData) RowNum() int { return len(data.Data) }
 
 func (data *ArrayFieldData) GetRowSize(i int) int {
@@ -1422,6 +1260,14 @@ func (data *ArrayFieldData) GetRowSize(i int) int {
 }
 
 func (data *ArrayFieldData) GetMemorySize() int {
+	if data.trackMemory {
+		return data.memorySize
+	}
+	return data.getMemorySize()
+}
+
+// getMemorySize calculates the size independently of the incremental cache.
+func (data *ArrayFieldData) getMemorySize() int {
 	var size int
 	for _, val := range data.Data {
 		size += getArrayScalarFieldMemorySize(val, data.ElementType)
@@ -1458,6 +1304,10 @@ func (data *ArrayFieldData) GetElementNullable() bool {
 func (data *ArrayFieldData) GetValidData() []bool { return data.ValidData }
 
 func (data *ArrayFieldData) AppendRow(row interface{}) error {
+	if data.trackMemory {
+		defer data.trackAppendedSize(len(data.Data), len(data.ValidData))
+	}
+
 	if data.GetNullable() && row == nil {
 		data.Data = append(data.Data, nil)
 		data.ValidData = append(data.ValidData, false)
@@ -1485,6 +1335,10 @@ func (data *ArrayFieldData) AppendRows(dataRows interface{}, validDataRows inter
 }
 
 func (data *ArrayFieldData) AppendDataRows(rows interface{}) error {
+	if data.trackMemory {
+		defer data.trackAppendedSize(len(data.Data), len(data.ValidData))
+	}
+
 	v, ok := rows.([]*schemapb.ScalarField)
 	if !ok {
 		return merr.WrapErrParameterInvalid("[]*schemapb.ScalarField", rows, "Wrong rows type")
@@ -1494,6 +1348,10 @@ func (data *ArrayFieldData) AppendDataRows(rows interface{}) error {
 }
 
 func (data *ArrayFieldData) AppendValidDataRows(rows interface{}) error {
+	if data.trackMemory {
+		defer data.trackAppendedSize(len(data.Data), len(data.ValidData))
+	}
+
 	if rows == nil {
 		return nil
 	}
@@ -1505,30 +1363,11 @@ func (data *ArrayFieldData) AppendValidDataRows(rows interface{}) error {
 	return nil
 }
 
-func (data *ArrayFieldData) trackedAppend(appendFn func() error) error {
-	oldRows, oldValid := len(data.Data), len(data.ValidData)
-	err := appendFn()
+func (data *ArrayFieldData) trackAppendedSize(oldRows, oldValid int) {
 	for _, value := range data.Data[oldRows:] {
 		data.memorySize += getArrayScalarFieldMemorySize(value, data.ElementType) + len(typeutil.GetArrayElementValidData(value))
 	}
 	data.memorySize += len(data.ValidData) - oldValid
-	return err
-}
-
-func (data *ArrayFieldData) TrackedAppendRow(row interface{}) error {
-	return data.trackedAppend(func() error { return data.AppendRow(row) })
-}
-
-func (data *ArrayFieldData) TrackedAppendRows(dataRows interface{}, validDataRows interface{}) error {
-	return data.trackedAppend(func() error { return data.AppendRows(dataRows, validDataRows) })
-}
-
-func (data *ArrayFieldData) TrackedAppendDataRows(rows interface{}) error {
-	return data.trackedAppend(func() error { return data.AppendDataRows(rows) })
-}
-
-func (data *ArrayFieldData) TrackedAppendValidDataRows(rows interface{}) error {
-	return data.trackedAppend(func() error { return data.AppendValidDataRows(rows) })
 }
 
 func getArrayScalarFieldMemorySize(data *schemapb.ScalarField, elementType schemapb.DataType) int {
@@ -1689,9 +1528,6 @@ func NewBinaryVectorFieldData(dim int, nullable bool, capacity int) *BinaryVecto
 	return data
 }
 
-// GetTrackedMemorySize computes the size in constant time without scanning rows.
-func (data *BinaryVectorFieldData) GetTrackedMemorySize() int { return data.GetMemorySize() }
-
 func (data *BinaryVectorFieldData) RowNum() int {
 	if data.Nullable {
 		return len(data.ValidData)
@@ -1799,22 +1635,6 @@ func (data *BinaryVectorFieldData) AppendValidDataRows(rows interface{}) error {
 	return nil
 }
 
-func (data *BinaryVectorFieldData) TrackedAppendRow(row interface{}) error {
-	return data.AppendRow(row)
-}
-
-func (data *BinaryVectorFieldData) TrackedAppendRows(dataRows interface{}, validDataRows interface{}) error {
-	return data.AppendRows(dataRows, validDataRows)
-}
-
-func (data *BinaryVectorFieldData) TrackedAppendDataRows(rows interface{}) error {
-	return data.AppendDataRows(rows)
-}
-
-func (data *BinaryVectorFieldData) TrackedAppendValidDataRows(rows interface{}) error {
-	return data.AppendValidDataRows(rows)
-}
-
 type FloatVectorFieldData struct {
 	Data       []float32
 	ValidData  []bool
@@ -1838,9 +1658,6 @@ func NewFloatVectorFieldData(dim int, nullable bool, capacity int) *FloatVectorF
 	}
 	return data
 }
-
-// GetTrackedMemorySize computes the size in constant time without scanning rows.
-func (data *FloatVectorFieldData) GetTrackedMemorySize() int { return data.GetMemorySize() }
 
 func (data *FloatVectorFieldData) RowNum() int {
 	if data.Nullable {
@@ -1947,22 +1764,6 @@ func (data *FloatVectorFieldData) AppendValidDataRows(rows interface{}) error {
 	return nil
 }
 
-func (data *FloatVectorFieldData) TrackedAppendRow(row interface{}) error {
-	return data.AppendRow(row)
-}
-
-func (data *FloatVectorFieldData) TrackedAppendRows(dataRows interface{}, validDataRows interface{}) error {
-	return data.AppendRows(dataRows, validDataRows)
-}
-
-func (data *FloatVectorFieldData) TrackedAppendDataRows(rows interface{}) error {
-	return data.AppendDataRows(rows)
-}
-
-func (data *FloatVectorFieldData) TrackedAppendValidDataRows(rows interface{}) error {
-	return data.AppendValidDataRows(rows)
-}
-
 type Float16VectorFieldData struct {
 	Data       []byte
 	ValidData  []bool
@@ -1986,9 +1787,6 @@ func NewFloat16VectorFieldData(dim int, nullable bool, capacity int) *Float16Vec
 	}
 	return data
 }
-
-// GetTrackedMemorySize computes the size in constant time without scanning rows.
-func (data *Float16VectorFieldData) GetTrackedMemorySize() int { return data.GetMemorySize() }
 
 func (data *Float16VectorFieldData) RowNum() int {
 	if data.Nullable {
@@ -2096,22 +1894,6 @@ func (data *Float16VectorFieldData) AppendValidDataRows(rows interface{}) error 
 	return nil
 }
 
-func (data *Float16VectorFieldData) TrackedAppendRow(row interface{}) error {
-	return data.AppendRow(row)
-}
-
-func (data *Float16VectorFieldData) TrackedAppendRows(dataRows interface{}, validDataRows interface{}) error {
-	return data.AppendRows(dataRows, validDataRows)
-}
-
-func (data *Float16VectorFieldData) TrackedAppendDataRows(rows interface{}) error {
-	return data.AppendDataRows(rows)
-}
-
-func (data *Float16VectorFieldData) TrackedAppendValidDataRows(rows interface{}) error {
-	return data.AppendValidDataRows(rows)
-}
-
 type BFloat16VectorFieldData struct {
 	Data       []byte
 	ValidData  []bool
@@ -2135,9 +1917,6 @@ func NewBFloat16VectorFieldData(dim int, nullable bool, capacity int) *BFloat16V
 	}
 	return data
 }
-
-// GetTrackedMemorySize computes the size in constant time without scanning rows.
-func (data *BFloat16VectorFieldData) GetTrackedMemorySize() int { return data.GetMemorySize() }
 
 func (data *BFloat16VectorFieldData) RowNum() int {
 	if data.Nullable {
@@ -2245,22 +2024,6 @@ func (data *BFloat16VectorFieldData) AppendValidDataRows(rows interface{}) error
 	return nil
 }
 
-func (data *BFloat16VectorFieldData) TrackedAppendRow(row interface{}) error {
-	return data.AppendRow(row)
-}
-
-func (data *BFloat16VectorFieldData) TrackedAppendRows(dataRows interface{}, validDataRows interface{}) error {
-	return data.AppendRows(dataRows, validDataRows)
-}
-
-func (data *BFloat16VectorFieldData) TrackedAppendDataRows(rows interface{}) error {
-	return data.AppendDataRows(rows)
-}
-
-func (data *BFloat16VectorFieldData) TrackedAppendValidDataRows(rows interface{}) error {
-	return data.AppendValidDataRows(rows)
-}
-
 type Int8VectorFieldData struct {
 	Data       []int8
 	ValidData  []bool
@@ -2284,9 +2047,6 @@ func NewInt8VectorFieldData(dim int, nullable bool, capacity int) *Int8VectorFie
 	}
 	return data
 }
-
-// GetTrackedMemorySize computes the size in constant time without scanning rows.
-func (data *Int8VectorFieldData) GetTrackedMemorySize() int { return data.GetMemorySize() }
 
 func (data *Int8VectorFieldData) RowNum() int {
 	if data.Nullable {
@@ -2390,44 +2150,28 @@ func (data *Int8VectorFieldData) AppendValidDataRows(rows interface{}) error {
 	return nil
 }
 
-func (data *Int8VectorFieldData) TrackedAppendRow(row interface{}) error {
-	return data.AppendRow(row)
-}
-
-func (data *Int8VectorFieldData) TrackedAppendRows(dataRows interface{}, validDataRows interface{}) error {
-	return data.AppendRows(dataRows, validDataRows)
-}
-
-func (data *Int8VectorFieldData) TrackedAppendDataRows(rows interface{}) error {
-	return data.AppendDataRows(rows)
-}
-
-func (data *Int8VectorFieldData) TrackedAppendValidDataRows(rows interface{}) error {
-	return data.AppendValidDataRows(rows)
-}
-
 type SparseFloatVectorFieldData struct {
 	schemapb.SparseFloatArray
 	ValidData  []bool
 	Nullable   bool
 	L2PMapping LogicalToPhysicalMapping
-	memorySize int
+
+	trackMemory bool
+	memorySize  int
 }
 
 // NewSparseFloatVectorFieldData creates an empty field with size tracking initialized.
 // Capacity reserves validity entries; sparse contents grow on append, as in NewFieldData.
-func NewSparseFloatVectorFieldData(nullable bool, capacity int) *SparseFloatVectorFieldData {
+func NewSparseFloatVectorFieldData(nullable bool, capacity int, trackMemory ...bool) *SparseFloatVectorFieldData {
 	data := &SparseFloatVectorFieldData{
-		Nullable: nullable, memorySize: 9, // Nullable and empty L2PMapping.
+		trackMemory: len(trackMemory) > 0 && trackMemory[0],
+		Nullable:    nullable, memorySize: 9, // Nullable and empty L2PMapping.
 	}
 	if nullable {
 		data.ValidData = make([]bool, 0, capacity)
 	}
 	return data
 }
-
-// GetTrackedMemorySize returns the incrementally maintained GetMemorySize value.
-func (data *SparseFloatVectorFieldData) GetTrackedMemorySize() int { return data.memorySize }
 
 func (data *SparseFloatVectorFieldData) RowNum() int {
 	if data.Nullable {
@@ -2445,6 +2189,14 @@ func (data *SparseFloatVectorFieldData) GetRowSize(i int) int {
 }
 
 func (data *SparseFloatVectorFieldData) GetMemorySize() int {
+	if data.trackMemory {
+		return data.memorySize
+	}
+	return data.getMemorySize()
+}
+
+// getMemorySize calculates the size independently of the incremental cache.
+func (data *SparseFloatVectorFieldData) getMemorySize() int {
 	// TODO(SPARSE): should this be the memory size of serialzied size?
 	// SparseFloatArray + ValidData + Nullable(1) + L2PMapping
 	return proto.Size(&data.SparseFloatArray) + binary.Size(data.ValidData) + 1 + data.L2PMapping.GetMemorySize()
@@ -2474,6 +2226,11 @@ func (data *SparseFloatVectorFieldData) GetNullable() bool {
 func (data *SparseFloatVectorFieldData) GetValidData() []bool { return data.ValidData }
 
 func (data *SparseFloatVectorFieldData) AppendRow(row interface{}) error {
+	if data.trackMemory {
+		defer data.trackAppendedSize(len(data.Contents), len(data.ValidData),
+			proto.Size(&schemapb.SparseFloatArray{Dim: data.Dim}), data.L2PMapping.GetMemorySize())
+	}
+
 	if data.GetNullable() && row == nil {
 		data.L2PMapping.Build([]bool{false}, len(data.ValidData), 1)
 		data.ValidData = append(data.ValidData, false)
@@ -2506,14 +2263,18 @@ func (data *SparseFloatVectorFieldData) AppendRows(dataRows interface{}, validDa
 	if err := validateNullableVectorCompactRows(data.GetNullable(), validDataRows, len(v.Contents)); err != nil {
 		return err
 	}
-	data.Contents = append(data.Contents, v.Contents...)
-	if data.Dim < v.Dim {
-		data.Dim = v.Dim
+	if err := data.AppendDataRows(v); err != nil {
+		return err
 	}
 	return data.AppendValidDataRows(validDataRows)
 }
 
 func (data *SparseFloatVectorFieldData) AppendDataRows(rows interface{}) error {
+	if data.trackMemory {
+		defer data.trackAppendedSize(len(data.Contents), len(data.ValidData),
+			proto.Size(&schemapb.SparseFloatArray{Dim: data.Dim}), data.L2PMapping.GetMemorySize())
+	}
+
 	v, ok := rows.(*SparseFloatVectorFieldData)
 	if !ok {
 		return merr.WrapErrParameterInvalid("SparseFloatVectorFieldData", rows, "Wrong rows type")
@@ -2526,6 +2287,11 @@ func (data *SparseFloatVectorFieldData) AppendDataRows(rows interface{}) error {
 }
 
 func (data *SparseFloatVectorFieldData) AppendValidDataRows(rows interface{}) error {
+	if data.trackMemory {
+		defer data.trackAppendedSize(len(data.Contents), len(data.ValidData),
+			proto.Size(&schemapb.SparseFloatArray{Dim: data.Dim}), data.L2PMapping.GetMemorySize())
+	}
+
 	if rows == nil {
 		return nil
 	}
@@ -2541,56 +2307,32 @@ func (data *SparseFloatVectorFieldData) AppendValidDataRows(rows interface{}) er
 	return nil
 }
 
-func (data *SparseFloatVectorFieldData) trackedAppend(appendFn func() error) error {
-	oldRows, oldValid := len(data.Contents), len(data.ValidData)
-	oldDimSize := proto.Size(&schemapb.SparseFloatArray{Dim: data.Dim})
-	oldMappingSize := data.L2PMapping.GetMemorySize()
-	err := appendFn()
+func (data *SparseFloatVectorFieldData) trackAppendedSize(oldRows, oldValid, oldDimSize, oldMappingSize int) {
 	// Size only the new rows and the change in the shared Dim encoding.
 	data.memorySize += proto.Size(&schemapb.SparseFloatArray{
 		Contents: data.Contents[oldRows:], Dim: data.Dim,
 	}) - oldDimSize
 	data.memorySize += len(data.ValidData) - oldValid
 	data.memorySize += data.L2PMapping.GetMemorySize() - oldMappingSize
-	return err
 }
 
-func (data *SparseFloatVectorFieldData) TrackedAppendRow(row interface{}) error {
-	return data.trackedAppend(func() error { return data.AppendRow(row) })
-}
-
-func (data *SparseFloatVectorFieldData) TrackedAppendRows(dataRows interface{}, validDataRows interface{}) error {
-	return data.trackedAppend(func() error { return data.AppendRows(dataRows, validDataRows) })
-}
-
-func (data *SparseFloatVectorFieldData) TrackedAppendDataRows(rows interface{}) error {
-	return data.trackedAppend(func() error { return data.AppendDataRows(rows) })
-}
-
-func (data *SparseFloatVectorFieldData) TrackedAppendValidDataRows(rows interface{}) error {
-	return data.trackedAppend(func() error { return data.AppendValidDataRows(rows) })
-}
-
-// TrackedAppendAllRows preserves AppendAllRows' data and nullable-state updates.
-func (data *SparseFloatVectorFieldData) TrackedAppendAllRows(src *SparseFloatVectorFieldData) {
-	data.trackedAppend(func() error {
-		data.AppendAllRows(src)
-		return nil
-	})
-}
-
-func (dst *SparseFloatVectorFieldData) AppendAllRows(src *SparseFloatVectorFieldData) {
-	if dst.Dim < src.Dim {
-		dst.Dim = src.Dim
+func (data *SparseFloatVectorFieldData) AppendAllRows(src *SparseFloatVectorFieldData) {
+	if data.trackMemory {
+		defer data.trackAppendedSize(len(data.Contents), len(data.ValidData),
+			proto.Size(&schemapb.SparseFloatArray{Dim: data.Dim}), data.L2PMapping.GetMemorySize())
 	}
-	dst.Contents = append(dst.Contents, src.Contents...)
+
+	if data.Dim < src.Dim {
+		data.Dim = src.Dim
+	}
+	data.Contents = append(data.Contents, src.Contents...)
 	if src.Nullable {
-		if dst.ValidData == nil {
-			dst.ValidData = make([]bool, 0, len(src.ValidData))
+		if data.ValidData == nil {
+			data.ValidData = make([]bool, 0, len(src.ValidData))
 		}
-		dst.L2PMapping.Build(src.ValidData, len(dst.ValidData), len(src.ValidData))
-		dst.ValidData = append(dst.ValidData, src.ValidData...)
-		dst.Nullable = true
+		data.L2PMapping.Build(src.ValidData, len(data.ValidData), len(src.ValidData))
+		data.ValidData = append(data.ValidData, src.ValidData...)
+		data.Nullable = true
 	}
 }
 
@@ -2605,12 +2347,15 @@ type VectorArrayFieldData struct {
 	ValidData       []bool
 	Nullable        bool
 	ElementNullable bool
-	memorySize      int
+
+	trackMemory bool
+	memorySize  int
 }
 
 // NewVectorArrayFieldData creates an empty field with size tracking initialized.
-func NewVectorArrayFieldData(elementType schemapb.DataType, dim int64, nullable, elementNullable bool, capacity int) *VectorArrayFieldData {
+func NewVectorArrayFieldData(elementType schemapb.DataType, dim int64, nullable, elementNullable bool, capacity int, trackMemory ...bool) *VectorArrayFieldData {
 	data := &VectorArrayFieldData{
+		trackMemory: len(trackMemory) > 0 && trackMemory[0],
 		Data:        make([]*schemapb.VectorField, 0, capacity),
 		ElementType: elementType, Dim: dim,
 		Nullable: nullable, ElementNullable: elementNullable,
@@ -2622,9 +2367,6 @@ func NewVectorArrayFieldData(elementType schemapb.DataType, dim int64, nullable,
 	return data
 }
 
-// GetTrackedMemorySize returns the incrementally maintained GetMemorySize value.
-func (data *VectorArrayFieldData) GetTrackedMemorySize() int { return data.memorySize }
-
 func (data *VectorArrayFieldData) RowNum() int { return len(data.Data) }
 
 func (data *VectorArrayFieldData) GetRowSize(i int) int {
@@ -2632,6 +2374,14 @@ func (data *VectorArrayFieldData) GetRowSize(i int) int {
 }
 
 func (data *VectorArrayFieldData) GetMemorySize() int {
+	if data.trackMemory {
+		return data.memorySize
+	}
+	return data.getMemorySize()
+}
+
+// getMemorySize calculates the size independently of the incremental cache.
+func (data *VectorArrayFieldData) getMemorySize() int {
 	var size int
 	for _, val := range data.Data {
 		size += GetVectorSize(val, data.ElementType)
@@ -2666,6 +2416,10 @@ func (data *VectorArrayFieldData) GetElementNullable() bool {
 func (data *VectorArrayFieldData) GetValidData() []bool { return data.ValidData }
 
 func (data *VectorArrayFieldData) AppendRow(row interface{}) error {
+	if data.trackMemory {
+		defer data.trackAppendedSize(len(data.Data), len(data.ValidData))
+	}
+
 	if data.GetNullable() && row == nil {
 		data.Data = append(data.Data, emptyPerRowVectorField(data.Dim, data.ElementType))
 		data.ValidData = append(data.ValidData, false)
@@ -2693,6 +2447,10 @@ func (data *VectorArrayFieldData) AppendRows(dataRows interface{}, validDataRows
 }
 
 func (data *VectorArrayFieldData) AppendDataRows(rows interface{}) error {
+	if data.trackMemory {
+		defer data.trackAppendedSize(len(data.Data), len(data.ValidData))
+	}
+
 	v, ok := rows.([]*schemapb.VectorField)
 	if !ok {
 		return merr.WrapErrParameterInvalid("[]*schemapb.VectorField", rows, "Wrong rows type")
@@ -2702,6 +2460,10 @@ func (data *VectorArrayFieldData) AppendDataRows(rows interface{}) error {
 }
 
 func (data *VectorArrayFieldData) AppendValidDataRows(rows interface{}) error {
+	if data.trackMemory {
+		defer data.trackAppendedSize(len(data.Data), len(data.ValidData))
+	}
+
 	if rows == nil {
 		return nil
 	}
@@ -2713,30 +2475,11 @@ func (data *VectorArrayFieldData) AppendValidDataRows(rows interface{}) error {
 	return nil
 }
 
-func (data *VectorArrayFieldData) trackedAppend(appendFn func() error) error {
-	oldRows, oldValid := len(data.Data), len(data.ValidData)
-	err := appendFn()
+func (data *VectorArrayFieldData) trackAppendedSize(oldRows, oldValid int) {
 	for _, value := range data.Data[oldRows:] {
 		data.memorySize += GetVectorSize(value, data.ElementType) + len(typeutil.GetVectorArrayElementValidData(value))
 	}
 	data.memorySize += len(data.ValidData) - oldValid
-	return err
-}
-
-func (data *VectorArrayFieldData) TrackedAppendRow(row interface{}) error {
-	return data.trackedAppend(func() error { return data.AppendRow(row) })
-}
-
-func (data *VectorArrayFieldData) TrackedAppendRows(dataRows interface{}, validDataRows interface{}) error {
-	return data.trackedAppend(func() error { return data.AppendRows(dataRows, validDataRows) })
-}
-
-func (data *VectorArrayFieldData) TrackedAppendDataRows(rows interface{}) error {
-	return data.trackedAppend(func() error { return data.AppendDataRows(rows) })
-}
-
-func (data *VectorArrayFieldData) TrackedAppendValidDataRows(rows interface{}) error {
-	return data.trackedAppend(func() error { return data.AppendValidDataRows(rows) })
 }
 
 func emptyPerRowVectorField(dim int64, elementType schemapb.DataType) *schemapb.VectorField {
