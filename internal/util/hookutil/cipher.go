@@ -432,8 +432,7 @@ func initCipher() error {
 	// The compiled-in cipher is used and cipherPlugin.soPathGo is ignored.
 	if compiled := ext.InstalledCipher(); compiled != nil {
 		if pathGo != "" {
-			mlog.Warn(context.TODO(), "cipherPlugin.soPathGo is ignored, a cipher is compiled into this binary",
-				mlog.String("so_path_go", pathGo))
+			mlog.Warn(context.TODO(), "cipherPlugin.soPathGo is ignored, a cipher is compiled into this binary")
 		}
 		if pathCpp == "" {
 			mlog.Info(context.TODO(), "empty cipherPlugin.soPathCpp, encryption is off and the compiled-in cipher stays idle")

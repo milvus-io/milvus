@@ -35,16 +35,16 @@ on the wire. What remains is small enough to state on one page.
 ```go
 package extension
 
-func SetHook(h hook.Hook)                     // hookutil prefers it over proxy.soPath
+func SetHook(h hook.Hook)                     // hookutil uses it; proxy.soPath is ignored
 func InstalledHook() hook.Hook
 func SetForm()                                // declares a form installed, in every role
 func FormInstalled() bool                     // reads SetForm's mark; independent of SetHook
 
 type QueryHook interface { ... }              // the queryNode.soPath plug-in's method set
-func SetQueryHook(h QueryHook)                // the QueryNode prefers it over queryNode.soPath
+func SetQueryHook(h QueryHook)                // the QueryNode uses it; queryNode.soPath is ignored
 func InstalledQueryHook() QueryHook
 
-func SetCipher(c hook.Cipher)                 // hookutil prefers it over cipherPlugin.soPathGo
+func SetCipher(c hook.Cipher)                 // hookutil uses it; cipherPlugin.soPathGo is ignored
 func InstalledCipher() hook.Cipher
 
 type Coordinator interface {                  // the coordinator as its own clients see it
@@ -101,13 +101,12 @@ stops the proxy whatever the setting says.
 The QueryNode's search-parameter tuning hook - the `QueryNodePlugin` symbol a
 `queryNode.soPath` plug-in exports - can be compiled in the same way
 (`SetQueryHook`). A compiled-in query hook is used and `queryNode.soPath` is
-ignored, with a warning. A compiled-in hook
-that fails to initialize is reported the way a plug-in's load failure is: the
-QueryNode treats it as fatal when `autoIndex.enable` is on, and with tuning
-off it starts without either hook, as it always has. It is otherwise treated exactly as the plug-in
-is: it gets the same two `Init` calls with the
-`autoIndex.params.search` and `autoIndex.params.tuning` configuration before it
-is installed, and the same watchers re-initialize it when those keys change.
+ignored, with a warning. A compiled-in hook that fails to initialize is
+reported the way a plug-in's load failure is: the QueryNode treats it as fatal
+when `autoIndex.enable` is on, and with tuning off it starts without either
+hook, as it always has. It is otherwise treated exactly as the plug-in is: it
+gets the same two `Init` calls with the `autoIndex.params.search` and
+`autoIndex.params.tuning` configuration before it is installed, and the same watchers re-initialize it when those keys change.
 `autoIndex.enable` still decides whether tuning happens at all, whichever way
 the hook got there. `optimizers.QueryHook` is now an alias of
 `extension.QueryHook`, so nothing in the tree changes.
@@ -117,8 +116,9 @@ the hook got there. `optimizers.QueryHook` is now an alias of
 The Go half of the cipher plug-in pair - the `CipherPlugin` symbol a
 `cipherPlugin.soPathGo` plug-in exports - can be compiled in the same way
 (`SetCipher`). A compiled-in cipher is used and `cipherPlugin.soPathGo` is
-ignored, with a warning. Only
-that half changes hands: the C++ half is still loaded by the core from
+ignored, with a warning that names the key but not its value: cipher paths
+stay out of the logs, as they do when a plug-in fails to load. Only that half
+changes hands: the C++ half is still loaded by the core from
 `cipherPlugin.soPathCpp`, and that path stays the deployment's declaration
 that encryption is on. A compiled-in cipher in a deployment without
 `soPathCpp` is left idle and `IsClusterEncryptionEnabled` stays false,
@@ -287,8 +287,9 @@ them through `user.yaml` or the environment.
   installed even with `common.panicWhenPluginFail` off, and following that
   setting without a form.
 - hookutil: a compiled-in cipher is used when `cipherPlugin.soPathCpp` is
-  set, `cipherPlugin.soPathGo` ignored beside it, idle without `soPathCpp`,
-  absent by default, not installed when it cannot initialize, and
+  set, `cipherPlugin.soPathGo` ignored beside it without its value reaching
+  the logs (whether the cipher initializes, fails to, or stays idle), idle
+  without `soPathCpp`, absent by default, not installed when it cannot initialize, and
   re-initialized on a `cipherPlugin.*` edit.
 - querynode: a compiled-in query hook is used, `queryNode.soPath` ignored beside it,
   absent by default, initialized with the `autoIndex.params.*` configuration,
