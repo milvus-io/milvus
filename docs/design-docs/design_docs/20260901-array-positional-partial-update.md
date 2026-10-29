@@ -569,6 +569,13 @@ element nullability under `PATH_REPLACE`:
   values and validity.
 - A child name the Struct does not have, such as a dropped child, is
   rejected.
+- REST v2 follows the same rule. An `[index]` operand must name every child
+  that is not `element_nullable` and may omit an `element_nullable` child:
+  REST leaves the omitted child out of the request, and Proxy fills a null
+  element for it as above. A JSON `null` for an `element_nullable` child is a
+  null element. A key that names no child, such as a dropped child, is
+  rejected, unlike REST insert and upsert, which ignore such keys; the
+  `[index][child]` rules are unchanged.
 
 ### Unsupported operations and rejected inputs
 
