@@ -67,6 +67,11 @@ func isVectorTypeMatch(placeholderType commonpb.PlaceholderType, fieldType schem
 // Otherwise returns an error for incompatible types.
 // Also returns the original placeholder type (before conversion) for callers that need it.
 func ConvertPlaceholderGroup(phgBytes []byte, fieldSchema *schemapb.FieldSchema) ([]byte, commonpb.PlaceholderType, error) {
+	return convertPlaceholderGroup(phgBytes, fieldSchema, nil)
+}
+
+// onDecoded observes the original input before any vector conversion mutates it.
+func convertPlaceholderGroup(phgBytes []byte, fieldSchema *schemapb.FieldSchema, onDecoded func(*commonpb.PlaceholderGroup)) ([]byte, commonpb.PlaceholderType, error) {
 	var phg commonpb.PlaceholderGroup
 	if err := proto.Unmarshal(phgBytes, &phg); err != nil {
 		return nil, 0, merr.WrapErrParameterInvalidMsg("failed to unmarshal placeholder group: %v", err)
@@ -80,6 +85,10 @@ func ConvertPlaceholderGroup(phgBytes []byte, fieldSchema *schemapb.FieldSchema)
 				return nil, placeholder.GetType(), err
 			}
 		}
+	}
+
+	if onDecoded != nil {
+		onDecoded(&phg)
 	}
 
 	if len(phg.Placeholders) == 0 {

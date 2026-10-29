@@ -24,7 +24,6 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/time/rate"
-	"google.golang.org/protobuf/encoding/protowire"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -33,9 +32,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
-
-// Limit metadata scanning independently of payload size (including empty values).
-const maxPlaceholderLogFields = 65536
 
 const placeholderLogTruncated = " <truncated>"
 
@@ -86,23 +82,51 @@ func (w *placeholderLogWriter) finish() string {
 	return w.String()
 }
 
-func logSearchPlaceholders(ctx context.Context, log *mlog.Logger, request *milvuspb.SearchRequest, queryInfos []*planpb.QueryInfo) {
-	limit := paramtable.Get().ProxyCfg.SearchPlaceholderLogRateLimit.GetAsFloat()
-	// Check before RatedInfo: its burst token would otherwise allow a zero-rate log.
-	if limit > 0 {
-		log.RatedInfo(ctx, rate.Limit(limit), "proxy search request placeholder",
-			mlog.Stringer("placeholder", searchPlaceholderStringer{
-				request: request, queryInfos: queryInfos,
-				maxBytes: paramtable.Get().ProxyCfg.SearchPlaceholderLogMaxBytes.GetAsInt(),
-			}))
-	}
+// Keep only the first decoded query and its summary, without retaining all nq
+// values or formatting anything before the rate limiter admits the log entry.
+type placeholderLogValue struct {
+	kind  commonpb.PlaceholderType
+	nq    int
+	first []byte
 }
 
-// Rendering is deferred until the shared request-level limiter admits the entry.
 type searchPlaceholderStringer struct {
 	request    *milvuspb.SearchRequest
 	queryInfos []*planpb.QueryInfo
+	groups     [][]placeholderLogValue
 	maxBytes   int
+}
+
+func newSearchPlaceholderLog() *searchPlaceholderStringer {
+	if !(paramtable.Get().ProxyCfg.SearchPlaceholderLogRateLimit.GetAsFloat() > 0) || !mlog.LevelEnabled(mlog.InfoLevel) {
+		return nil
+	}
+	return &searchPlaceholderStringer{}
+}
+
+// Called by the existing placeholder decoder, before fp32 -> fp16/bf16 conversion.
+func (s *searchPlaceholderStringer) capture(group *commonpb.PlaceholderGroup) {
+	if s == nil {
+		return
+	}
+	values := make([]placeholderLogValue, len(group.GetPlaceholders()))
+	for i, ph := range group.GetPlaceholders() {
+		values[i] = placeholderLogValue{kind: ph.GetType(), nq: len(ph.GetValues())}
+		if len(ph.GetValues()) > 0 {
+			values[i].first = ph.GetValues()[0]
+		}
+	}
+	s.groups = append(s.groups, values)
+}
+
+func logSearchPlaceholders(ctx context.Context, log *mlog.Logger, request *milvuspb.SearchRequest, queryInfos []*planpb.QueryInfo, preview *searchPlaceholderStringer) {
+	limit := paramtable.Get().ProxyCfg.SearchPlaceholderLogRateLimit.GetAsFloat()
+	// Check before RatedInfo: its burst token would otherwise allow a zero-rate log.
+	if preview != nil && limit > 0 {
+		preview.request, preview.queryInfos = request, queryInfos
+		preview.maxBytes = paramtable.Get().ProxyCfg.SearchPlaceholderLogMaxBytes.GetAsInt()
+		log.RatedInfo(ctx, rate.Limit(limit), "proxy search request placeholder", mlog.Stringer("placeholder", preview))
+	}
 }
 
 func (s searchPlaceholderStringer) String() string {
@@ -123,100 +147,30 @@ func (s searchPlaceholderStringer) String() string {
 			i, fieldID, nq, len(placeholder)), "] ") {
 			break
 		}
-		writePlaceholderGroup(w, placeholder)
+		if i < len(s.groups) {
+			writePlaceholderGroup(w, s.groups[i])
+		}
 		w.close("] ")
 	}
 	return w.finish()
 }
 
-// Inspect protobuf field headers without unmarshalling/copying the entire payload.
-// Only the first value is retained as a view. Its contents are decoded one element
-// at a time, using the remaining request-wide output budget.
-func writePlaceholderGroup(w *placeholderLogWriter, data []byte) {
-	groups := 0
-	for fields := 0; len(data) > 0 && !w.truncated; fields++ {
-		if fields == maxPlaceholderLogFields {
-			w.write("<placeholder metadata exceeds scan limit>")
+func writePlaceholderGroup(w *placeholderLogWriter, values []placeholderLogValue) {
+	for i, value := range values {
+		if w.truncated {
 			break
 		}
-		num, typ, value, rest, ok := consumePlaceholderLogField(data)
-		if !ok {
-			w.write("<invalid placeholder group>")
-			break
-		}
-		data = rest
-		if num != 1 {
-			continue
-		}
-		if typ != protowire.BytesType {
-			w.write("<invalid placeholder group>")
-			break
-		}
-		if groups > 0 {
+		if i > 0 {
 			w.write(" | ")
 		}
-		if !w.truncated {
-			writePlaceholderValue(w, value)
-		}
-		groups++
+		writePlaceholderValue(w, value)
 	}
 }
 
-// The returned value aliases the input. Groups are not part of PlaceholderGroup's
-// schema; do not recursively inspect them just to produce a diagnostic preview.
-func consumePlaceholderLogField(data []byte) (protowire.Number, protowire.Type, []byte, []byte, bool) {
-	num, typ, n := protowire.ConsumeTag(data)
-	if n < 0 || typ == protowire.StartGroupType || typ == protowire.EndGroupType {
-		return 0, 0, nil, nil, false
-	}
-	data = data[n:]
-	m := protowire.ConsumeFieldValue(num, typ, data)
-	if m < 0 {
-		return 0, 0, nil, nil, false
-	}
-	value := data[:m]
-	if typ == protowire.BytesType {
-		value, _ = protowire.ConsumeBytes(data)
-	}
-	return num, typ, value, data[m:], true
-}
+func writePlaceholderValue(w *placeholderLogWriter, value placeholderLogValue) {
+	phType, nq, first := value.kind, value.nq, value.first
 
-func writePlaceholderValue(w *placeholderLogWriter, data []byte) {
-	var phType commonpb.PlaceholderType
-	var first []byte
-	nq, size := 0, len(data)
-	for fields := 0; len(data) > 0; fields++ {
-		if fields == maxPlaceholderLogFields {
-			w.write("<placeholder metadata exceeds scan limit>")
-			return
-		}
-		num, typ, value, rest, ok := consumePlaceholderLogField(data)
-		if !ok {
-			w.write("<invalid placeholder>")
-			return
-		}
-		data = rest
-		switch num {
-		case 2: // PlaceholderValue.type
-			if typ != protowire.VarintType {
-				w.write("<invalid placeholder type>")
-				return
-			}
-			v, _ := protowire.ConsumeVarint(value)
-			phType = commonpb.PlaceholderType(v)
-		case 3: // PlaceholderValue.values
-			if typ != protowire.BytesType {
-				w.write("<invalid placeholder values>")
-				return
-			}
-			nq++
-			if nq == 1 {
-				first = value
-			}
-		}
-	}
-
-	if !w.open(fmt.Sprintf("[type=%s nq=%d bytes=%d omitted_queries=%d", phType, nq, size, max(0, nq-1)), "]") {
+	if !w.open(fmt.Sprintf("[type=%s nq=%d omitted_queries=%d", phType, nq, max(0, nq-1)), "]") {
 		return
 	}
 	defer w.close("]")
