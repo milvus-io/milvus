@@ -3362,12 +3362,12 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job bulkimpor
 		return err
 	}
 	if Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool() ||
-		(s.meta != nil && len(s.meta.producerChangeGroups(model.SegmentChangeSourceImportJob, job.GetJobID(), "")) > 0) {
+		(s.meta != nil && len(s.meta.ProducerChangeGroups(model.SegmentChangeSourceImportJob, job.GetJobID(), "")) > 0) {
 		// Preparation may have registered groups long before they became READY.
 		// Persist the point of no return immediately before starting the WAL
 		// broadcast. Timeout and other failure updates share importMeta's lock
 		// with this action and cannot reclaim a possibly durable commit.
-		if err := s.importMeta.UpdateJob(ctx, job.GetJobID(), UpdateJobCommitBroadcastStarted); err != nil {
+		if err := s.importMeta.UpdateJob(ctx, job.GetJobID(), bulkimport.UpdateJobCommitBroadcastStarted); err != nil {
 			return err
 		}
 		current := s.importMeta.GetJob(ctx, job.GetJobID())

@@ -780,10 +780,12 @@ their planning slots without dropping their L0 inputs; the next planner pass
 can retry them after publication. Pending or executing copy jobs also block
 new L0 admission on their collection channels because copied rows preserve
 their original timestamps. Existing groups keep this guard after opt-out.
-This safety guard can starve L0 under continuous flush→Sort groups. A bounded
-wait alone cannot safely release deletes: new outputs may not yet contain
-them. Production opt-in requires a channel-level fairness rule that stops new
-group admission, drains existing groups, and then runs queued L0 work. This
+This safety guard can starve L0 under continuous flush→Sort groups. The same
+long-lived group reservations can starve clustering compaction for the same
+partition/channel while sort and index work completes. A bounded wait alone
+cannot safely release deletes: new outputs may not yet contain them. Production
+opt-in requires a channel-level fairness rule that stops new group admission,
+drains existing groups, and then runs queued L0 and clustering work. This
 remains an open admission/scheduling requirement.
 
 ### 6.3 Mix / Sort compaction — deferred superseded retirement
@@ -1002,10 +1004,10 @@ Replay safety:
 >    members; then delete the group record key.
 > 4. Report the incident so the DataView integration can be prioritized.
 >
-> Base-PR mitigation: terminal-group GC is wired into collection drop
-> (`DropSegmentChangeGroupsOfCollection`); a periodic sweep of old terminal
-> groups and the recovery-time member-visibility consistency check remain
-> reconciler follow-ups (M5).
+> Terminal-group GC is wired into collection drop
+> (`DropSegmentChangeGroupsOfCollection`) and a periodic inspector sweep after
+> producer completion and segment retirement. The recovery-time
+> member-visibility consistency check remains a reconciler follow-up (M5).
 
 ## GC and Staged-Member Reclamation
 
@@ -1027,6 +1029,13 @@ Replay safety:
 - **Snapshot export** (`handler.GenSnapshot`): export contains only published
   members. The candidate projection excludes unpublished group outputs while
   retaining their still-visible parents; restore therefore cannot copy both.
+- **Terminal group cleanup**: the inspector sweeps terminal groups after each
+  evaluation pass. It keeps the record while the owning compaction task,
+  import job, copy task/job, or external refresh job can still retry. A
+  COMMITTED group waits until all superseded segment records have been removed
+  by the existing GC, which also enforces snapshot references. FAILED/ABORTED
+  groups wait for unpublished members to be Dropped or removed. The cleaner
+  then deletes the catalog key and in-memory entry; restart repeats the sweep.
 
 - **Zero-row result metadata**: a Dropped zero-row member of an ALIVE group
   remains a durable no-output marker until the group terminates. `DropSegment`
@@ -1145,6 +1154,9 @@ parents early.
   groups before consulting the flag, including after member GC.
   A copy task with an existing group resumes publication without re-running
   the file-copy worker, including when its task record is still in progress.
+- Once the import WAL ack binds the commit timestamp, its callback publishes
+  READY subgroups in ordinal order before releasing the collection resource
+  key. The periodic inspector retries transient failures.
 - Schema bump's full-rewrite replacement uses a group and waits in meta_saved;
   its in-place manifest/materialization form has no membership change and keeps
   its existing manifest transaction. Force-merge and storage-version rewrites
@@ -1188,6 +1200,8 @@ internal/datacoord/
 - **`meta.loadableProjection`** excludes unpublished group members, including
   failed/aborted groups awaiting reclamation. Raw invisible flush inputs with a
   durable seal binding remain projected until their replacement publishes.
+  This projection fix also applies when the opt-in switch is off; it preserves
+  already sealed flush inputs during a concurrent DataView recomputation.
 - **Replace wiring points**: the `meta.recomputeDataView(...)` calls scattered
   across compaction / copy / import commit / BatchUpdateManifest in PR #52537
   are replaced path-by-path with "publishGroup once the staged group is ready";

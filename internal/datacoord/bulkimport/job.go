@@ -132,7 +132,7 @@ func UpdateJobReason(reason string) UpdateJobAction {
 // concurrent timeout either wins first or observes this durable marker.
 func UpdateJobCommitBroadcastStarted(job ImportJob) {
 	if job.GetState() == internalpb.ImportJobState_Uncommitted {
-		job.(*importJob).CommitBroadcastStarted = true
+		job.(*Job).CommitBroadcastStarted = true
 	}
 }
 

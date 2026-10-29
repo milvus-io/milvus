@@ -445,6 +445,10 @@ func (s *Server) initDataCoord() (initErr error) {
 	if err != nil {
 		return err
 	}
+	s.segmentChangeInspector.cleaner = &segmentChangeCleaner{
+		mt: s.meta, importMeta: s.importMeta, copyMeta: s.copySegmentMeta,
+		refreshMeta: s.externalCollectionRefreshMeta, compactionMeta: s.compactionTaskMeta,
+	}
 	if cph, ok := s.compactionInspector.(*compaction.Inspector); ok {
 		cph.SetCopySegmentMeta(s.copySegmentMeta)
 	}
