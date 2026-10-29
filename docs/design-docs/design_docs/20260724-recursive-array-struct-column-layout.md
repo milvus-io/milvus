@@ -133,8 +133,10 @@ field: list<item: list<item: int32 nullable> nullable> nullable
 The top-level Arrow field nullable flag equals `FieldSchema.nullable`; the
 first `item` nullable flag equals `FieldSchema.element_nullable`; the second
 `item` nullable flag equals the leaf `TypeSchema.nullable`. The TypeSchema root
-and second node must mirror the first two FieldSchema flags, respectively;
-the leaf flag is independent. Only nested Arrays carry this wire TypeSchema.
+and second node mirror the first two FieldSchema flags: the server sets the
+root's flag from `FieldSchema.nullable`, and rejects a second node whose flag
+differs from `FieldSchema.element_nullable`. The leaf flag is independent.
+Only nested Arrays carry this wire TypeSchema.
 For a single-level element-nullable scalar Array, `FieldMeta` synthesizes an
 internal TypeSchema for `ColumnarArrayChunk`/`ArrayValue`; it is not added to
 the field's wire schema.

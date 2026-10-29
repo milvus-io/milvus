@@ -7,7 +7,13 @@ This design extends row-level null support to elements of scalar `Array` and
 `FieldSchema.nullable` controls the whole row, `element_nullable` controls the
 first Array element, and the nested scalar leaf uses its `TypeSchema.nullable`.
 
-The design targets Storage V2. Storage V1 rejects all new-format fields.
+The design targets Storage V2 and V3. Storage V1 cannot store the new
+formats, and the check runs only when a V1 insert binlog is written: on
+Storage V1, creating the collection and inserting succeed, and the flush
+fails with ErrStorage. The check covers every field of the collection, so one
+element-nullable or nested Array field fails the flush of the whole segment;
+it also rejects a row-nullable `ArrayOfVector`, such as a vector sub-field of
+a nullable struct.
 Nested Arrays, vector Arrays, and element-nullable Arrays are allowed only as
 `StructArrayField` sub-fields. Top-level `Array<nullable T>`,
 `Array<Array<T>>`, and `Array<Vector>` are rejected. Nesting is limited to
@@ -43,6 +49,8 @@ The existing `ScalarField` and `VectorField` messages carry `valid_data` for
 their immediate logical values; no nullable wrapper messages are needed.
 Row validity is written to both `FieldData.valid_data` and the outer
 `ScalarField.valid_data` or `VectorField.valid_data`, with identical bits.
+Proxy rejects a request whose two copies differ; inside Milvus, readers take
+`FieldData.valid_data` whenever it is set.
 Only the corresponding inner `ScalarField.valid_data` or
 `VectorField.valid_data` carries element or leaf validity. Go storage
 containers keep row validity separate from child validity.
@@ -56,7 +64,8 @@ count(child.valid_data == true)   = physical payload element count
 ```
 
 Proxy validates this relationship before normalization, including at both
-inner levels of a nested scalar Array. Row payloads are also compact; Proxy
+inner levels of a nested scalar Array, and rejects `valid_data` on a level
+that is not nullable. Row payloads are also compact; Proxy
 restores null row positions without changing child validity. Scalar levels
 become dense (one payload or placeholder per logical position), while vector
 payloads remain compact:
@@ -114,7 +123,7 @@ Storage V2 selects the physical format by the full field schema:
 | Field | Arrow representation | Status |
 | --- | --- | --- |
 | Single-level scalar Array, non-nullable elements | One `Binary` per row containing a serialized `ScalarField` | Existing format |
-| Vector Array, non-nullable elements | `list<item: fixed_size_binary[dim*width] not null>` | Existing format |
+| Vector Array, non-nullable elements | `list<item: fixed_size_binary[dim*width] nullable>` | Existing format |
 | Single-level scalar Array, nullable elements | `list<item: T nullable>` | New format |
 | Vector Array, nullable elements | `list<item: binary nullable>` | New format |
 | Nested scalar `Array<Array<T>>`, whether or not its inner levels are nullable | `list<item: list<item: T> >` | New format |
@@ -126,10 +135,12 @@ its own row nullable flag.
 The top-level Arrow field's nullable flag equals `FieldSchema.nullable`.
 The first list's `item` nullable flag equals `FieldSchema.element_nullable`;
 the nested leaf's flag equals the leaf `TypeSchema.nullable`. The vector
-`list<Binary>` item is nullable, while the existing
-`list<FixedSizeBinary>` item is not. Every list child field is named `item`.
+`list<Binary>` item is nullable. The existing `list<FixedSizeBinary>` item is
+also declared nullable (Arrow's default list child, in both Go and C++), even
+though its elements are never null. Every list child field is named `item`.
 
-Scalar leaf `T` uses native widths in Go and C++: Bool→`bool`, Int8→`int8`,
+The scalar leaf type is one of Bool, Int8, Int16, Int32, Int64, Float, Double
+and VarChar. Leaf `T` uses native widths in Go and C++: Bool→`bool`, Int8→`int8`,
 Int16→`int16`, Int32→`int32`, Int64→`int64`, Float→`float32`,
 Double→`float64`, VarChar→`utf8` (Go `arrow.BinaryTypes.String`, C++
 `arrow::utf8()`). In particular, Int8 and Int16 are not widened to int32 as
@@ -155,9 +166,11 @@ builder copies and slices, must preserve this invariant.
 ## Schema and Runtime Routing
 
 Only nested scalar Arrays carry a wire `TypeSchema`:
-`data_type == Array` and `element_type == Array`. The root node's `nullable`
-must equal `FieldSchema.nullable`; the second node's `nullable` must equal
-`FieldSchema.element_nullable`; the leaf node's `nullable` is independent.
+`data_type == Array` and `element_type == Array`; a single-level Array that
+carries one is rejected. The server sets the root node's `nullable` to
+`FieldSchema.nullable` without checking the value the request sent. The
+second node's `nullable` must equal `FieldSchema.element_nullable`, or the
+request is rejected. The leaf node's `nullable` is independent.
 Single-level fields use `nullable`, `element_nullable`, `data_type`, and
 `element_type` without a wire `TypeSchema`. Schema alter APIs cannot change
 `nullable` or `element_nullable`.
@@ -170,10 +183,30 @@ load into `VectorArrayChunk`, which retains compact vectors and element
 validity. For a single-level element-nullable scalar Array, `FieldMeta`
 synthesizes an internal TypeSchema so `ColumnarArrayChunk` and `ArrayValue`
 use the same representation for single-level and nested fields. Growing
-segments use `ArrayValue` for these scalar fields as well. The growing-flush
-path (`FlushGrowingSegmentData`/`AllowGrowingSourceFlush`) is being removed;
-it does not support these formats, so the proxy rejects creating them while
-growing-source flush is enabled.
+segments use `ArrayValue` for these scalar fields as well.
+The growing-source flush
+path (`FlushGrowingSegmentData`/`AllowGrowingSourceFlush`) does not write
+these formats. It is in use when `common.storage.enableGrowingSourceFlush`
+is on and StorageV3 (`common.storage.useLoonFFI`) is enabled; then the proxy
+rejects create collection, add struct field and add struct sub-field
+requests that carry an element-nullable or nested Array field. An added
+struct sub-field is always element-nullable, so adding one is always rejected
+in that configuration. The check runs only on these DDL requests.
+
+## Upsert
+
+- An upsert that omits an element-nullable sub-field, or an insert that does,
+  gets null elements in it (see
+  [Adding and dropping sub-fields](./20260930-struct-subfield-evolution.md#producing-the-n-null-elements-value)).
+- A partial upsert that omits a struct keeps the old struct value, null
+  elements included: Proxy converts the queried value, which is dense, back
+  to the compact input layout before the merged rows are validated.
+- Replacing a whole struct in a partial upsert fills each omitted
+  element-nullable sub-field with null elements. A non-nullable struct with
+  no payload is rejected.
+- `PATH_REPLACE` on a struct element or child accepts null elements and
+  element-nullable nested Array children; see
+  [Path Replacement](./20260901-array-positional-partial-update.md#element-nullable-struct-children).
 
 ## Query and Index
 
