@@ -16,10 +16,16 @@
 
 #pragma once
 
+#include <atomic>
+#include <functional>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include <folly/synchronization/DistributedMutex.h>
 
 #include "cachinglayer/CacheSlot.h"
 #include "common/OpContext.h"
@@ -28,11 +34,8 @@
 #include "segcore/indexing/FieldIndexCapability.h"
 #include "segcore/indexing/IndexPin.h"
 
-// Segment index inventory: metadata, cache entries, and the sealed query pin.
-// Capability(field) reads metadata only. Once execution chooses an entry, its
-// pin exit opens the payload and checks Caps(). Keep the root pin alive while
-// borrowing any query mixin from its IIndexReaderBase.
-//
+// Sealed index registrations, resolved metadata/slots, and reader pins.
+// Keep an IndexPin alive while using its borrowed reader.
 namespace milvus::segcore {
 
 class IndexInventory {
@@ -40,61 +43,79 @@ class IndexInventory {
     using RootSlot = std::shared_ptr<
         milvus::cachinglayer::CacheSlot<index::IIndexReaderBase>>;
 
-    struct Entry {
-        // Pure data, readable without a pin.
-        IndexCapabilityEntry meta;
-
-        // Type-erased slot shared across index families. The cache cell uniquely
-        // owns its IIndexReaderBase; query consumers only borrow it through pins.
+    struct ResolvedData {
+        std::string family;
+        DataType value_type;
+        index::ReaderCaps caps;
         RootSlot slot;
     };
 
+    using Factory = std::function<ResolvedData(milvus::OpContext*)>;
+
+    // Runtime snapshots share entries and their initialization results.
+    class Entry {
+     public:
+        Entry(IndexCapabilityEntry meta, RootSlot slot);
+        Entry(IndexRegistration registration, Factory factory);
+
+        const IndexRegistration&
+        registration() const {
+            return registration_;
+        }
+
+        const ResolvedData&
+        Resolve(milvus::OpContext* op_ctx) const;
+
+        RootSlot
+        Peek() const;
+
+     private:
+        // Registration is immutable; resolved data is immutable once ready.
+        IndexRegistration registration_;
+        mutable std::optional<ResolvedData> resolved_;
+        mutable Factory factory_;
+        mutable folly::DistributedMutex init_mutex_;
+        // Publishes resolved_ to Resolve() and Peek() without taking the lock.
+        mutable std::atomic<bool> ready_{false};
+    };
+
     // ---- Build side (load) --------------------------------------------------
-    // Called by segcore's load-planning path once per index. The concrete family
-    // and caps are derived from selector/runtime metadata before payload open;
-    // registration installs that metadata with a cold slot whose translator
-    // opens the reader only when the slot is pinned.
-    // Returns the replaced slot, if this exact key already existed. The caller
-    // retires it only after publishing the new runtime generation.
+    // Installs a shared entry without resolving it. Returns the replaced entry's
+    // existing slot, if any; retire it after publishing the new runtime.
     RootSlot
-    Register(Entry entry);
+    Register(std::shared_ptr<Entry> entry);
 
     // Returns the removed slot for post-publication retirement.
     RootSlot
     Drop(const IndexKey& key);
 
-    // Metadata-only capability lookup; must not pin payloads. The returned
-    // value is a cheap handle to the immutable per-field snapshot rebuilt only
-    // when this inventory generation is mutated.
-    // Expression consumers select one exact entry from this value before
-    // pinning. Legacy availability helpers may project the same metadata but
-    // must not open a payload to answer capability questions.
+    // Resolves this field's entries and assembles a fresh capability list.
+    // Lazy resolution may read artifact metadata but does not load readers.
+    // All entries must resolve; successful entries are reused after failures.
     FieldIndexCapability
-    Capability(FieldId field_id) const;
+    ResolveCapability(milvus::OpContext* op_ctx, FieldId field_id) const;
 
-    // Metadata-only snapshot used while normalizing one unpublished runtime
-    // generation. Slots and readers are not exposed.
-    std::vector<IndexCapabilityEntry>
+    // Copies registrations without resolving entries or exposing slots/readers.
+    std::vector<IndexRegistration>
     Entries() const;
+
+    std::vector<IndexRegistration>
+    Entries(FieldId field_id) const;
 
     // Internal lifecycle snapshot for post-publication warmup retirement.
     // Query consumers never receive slots through this API.
     std::vector<RootSlot>
     Slots() const;
 
-    // Erased sealed-segment exit. Callers select one exact metadata entry before
-    // pinning, then borrow the required query mixin while retaining this pin.
-    // A missing key returns empty; cache loading failures and metadata/reader
-    // mismatches propagate as failures.
+    // Pins the selected key, resolving its entry and loading its reader if needed.
+    // Missing keys return an empty pin; resolution, load, and caps errors propagate.
     IndexPin
     PinIndex(milvus::OpContext* op_ctx, const IndexKey& key) const;
 
  private:
-    void
-    RefreshCapability(FieldId field_id);
-
-    std::unordered_map<IndexKey, Entry, IndexKeyHash> entries_;
-    std::unordered_map<FieldId, FieldIndexCapability> capabilities_;
+    using FieldEntries =
+        std::unordered_map<IndexKey, std::shared_ptr<Entry>, IndexKeyHash>;
+    std::unordered_map<FieldId, FieldEntries> entries_;
 };
 
 // Related ownership boundaries:

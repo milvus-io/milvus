@@ -214,12 +214,6 @@ class VortexColumn final : public ChunkedColumnInterface {
                     int64_t count = 0) const override;
 
     void
-    BulkRawJsonAt(milvus::OpContext* op_ctx,
-                  std::function<void(Json, size_t, bool)> fn,
-                  const int64_t* offsets,
-                  int64_t count) const override;
-
-    void
     BulkRawBsonAt(milvus::OpContext* op_ctx,
                   std::function<void(BsonView, uint32_t, uint32_t)> fn,
                   const uint32_t* row_offsets,
@@ -351,9 +345,12 @@ class VortexColumn final : public ChunkedColumnInterface {
         std::optional<std::pair<int64_t, int64_t>> offset_len) const;
 
     std::shared_ptr<arrow::Table>
-    TakeArrowFromFile(milvus::OpContext* op_ctx,
-                      int64_t chunk_id,
-                      const std::vector<int64_t>& offsets) const;
+    TakeArrowFromFile(
+        milvus::OpContext* op_ctx,
+        int64_t chunk_id,
+        const std::vector<int64_t>& offsets,
+        std::shared_ptr<cachinglayer::CellAccessor<
+            milvus_storage::vortex::VortexCellGuard>> pin = nullptr) const;
 
     template <typename ArrowArrayT, typename ValueT>
     void

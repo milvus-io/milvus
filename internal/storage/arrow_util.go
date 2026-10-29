@@ -450,6 +450,8 @@ type RecordBuilder struct {
 	builders    []array.Builder
 	defaults    []appendValueDefault
 	allocator   *recordBuilderAllocator
+	// Append reuses this slice and clears its borrowed columns before returning.
+	columns []arrow.Array
 
 	nRows int
 	size  uint64
@@ -497,13 +499,30 @@ func (b *RecordBuilder) prepareAppendDefaults() error {
 }
 
 func (b *RecordBuilder) Append(rec Record, start, end int) error {
+	if start >= end {
+		return b.appendColumns(nil, start, end)
+	}
+	if b.columns == nil {
+		b.columns = make([]arrow.Array, len(b.fields))
+	}
+	defer clear(b.columns)
+	for i, field := range b.fields {
+		b.columns[i] = rec.Column(field.GetFieldID())
+	}
+	return b.appendColumns(b.columns, start, end)
+}
+
+// appendColumns appends rows from source columns already resolved in builder
+// field order. MergeSort keeps these columns with each reader's current record
+// so the per-row output loop does not repeat Record.Column lookups.
+func (b *RecordBuilder) appendColumns(columns []arrow.Array, start, end int) error {
 	if err := b.prepareAppendDefaults(); err != nil {
 		return err
 	}
 	for offset := start; offset < end; offset++ {
 		for i, builder := range b.builders {
 			f := b.fields[i]
-			col := rec.Column(f.FieldID)
+			col := columns[i]
 			// TEXT may be decoded UTF8 or a binary LOB reference. Preserve the
 			// reader's representation instead of treating decoded text as a ref.
 			// Reader/writer schemas must agree on one non-null representation

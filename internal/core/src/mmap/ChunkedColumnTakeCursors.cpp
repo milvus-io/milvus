@@ -15,12 +15,19 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <string>
+#include <tuple>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include <folly/Portability.h>
+
+#include "flat_hash_map/flat_hash_map.hpp"
 
 #include "mmap/ChunkedColumnFilter.h"
 #include "mmap/ChunkedColumnInterface.h"
@@ -29,6 +36,7 @@ namespace milvus {
 namespace detail {
 
 using RawTakeCellPin = std::function<PinWrapper<Chunk*>(int64_t)>;
+using RawTakeCellRead = std::function<Chunk*(int64_t)>;
 
 struct OwnedTakeStorage {
     std::vector<int8_t> int8_values;
@@ -55,6 +63,19 @@ struct RawTakeLocation {
     size_t cell_offset = 0;
 };
 
+struct RawTakeLocations {
+    std::vector<int64_t> cell_indices;
+    std::vector<int64_t> cell_offsets;
+};
+
+struct RawTakeBatch : RawTakeLocations {
+    struct Cell {
+        int64_t source_cell_id;
+        Chunk* chunk = nullptr;
+    };
+    std::vector<Cell> cells;
+};
+
 std::optional<ChunkedColumnInterface::TargetType>
 ValidateTakeTargetType(DataType data_type,
                        ChunkedColumnInterface::TargetType requested) {
@@ -70,24 +91,30 @@ ValidateTakeTargetType(DataType data_type,
     return requested;
 }
 
+template <bool HasCandidateMask, TakePinPolicy PinPolicy>
 class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
  public:
-    RawTakeResult(RawTakeCellPin pin_cell,
-                  std::shared_ptr<const ColumnPlanner> planner,
+    using CellAccess = std::conditional_t<PinPolicy == TakePinPolicy::Batch,
+                                          RawTakeCellRead,
+                                          RawTakeCellPin>;
+    using Batch = std::conditional_t<PinPolicy == TakePinPolicy::Batch,
+                                     RawTakeBatch,
+                                     RawTakeLocations>;
+
+    RawTakeResult(std::shared_ptr<const ColumnPlanner> planner,
                   OffsetView offsets,
                   ColumnFilterPtr filter,
                   DataType data_type,
                   ChunkedColumnInterface::TargetType target_type,
-                  bool nullable)
-        : pin_cell_(std::move(pin_cell)),
-          planner_(std::move(planner)),
+                  bool nullable,
+                  const TargetBitmap* candidate_mask)
+        : planner_(std::move(planner)),
           data_type_(data_type),
           target_type_(target_type),
           nullable_(nullable),
           offsets_(offsets),
-          filter_(std::move(filter)) {
-        AssertInfo(static_cast<bool>(pin_cell_),
-                   "raw take cell accessor is null");
+          filter_(std::move(filter)),
+          candidate_mask_(candidate_mask) {
         AssertInfo(planner_ != nullptr, "raw take planner is null");
     }
 
@@ -106,13 +133,98 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
         return data_type_;
     }
 
+    std::vector<int64_t>
+    PlanBatch() {
+        auto& batch = batch_.emplace();
+        if constexpr (!HasCandidateMask) {
+            std::tie(batch.cell_indices, batch.cell_offsets) =
+                planner_->LocateBatch(offsets_);
+        } else {
+            batch.cell_indices.resize(Size(), -1);
+            batch.cell_offsets.resize(Size());
+            for (int64_t i = 0; i < Size(); ++i) {
+                if ((*candidate_mask_)[i]) {
+                    const auto location =
+                        planner_->Locate(offsets_.AtUnchecked(i));
+                    batch.cell_indices[i] = location.cell_id;
+                    batch.cell_offsets[i] = location.cell_offset;
+                }
+            }
+        }
+        std::vector<int64_t> pin_cell_ids;
+        ska::flat_hash_map<int64_t, int64_t> cell_indices;
+        const auto max_cells = std::min(Size(), planner_->NumCells());
+        pin_cell_ids.reserve(max_cells);
+        cell_indices.reserve(max_cells);
+        batch.cells.reserve(max_cells);
+        int64_t last_cell = -1;
+        int64_t last_index = -1;
+        // Reuse the planner's Cell IDs as request-local indices for direct reads.
+        for (auto& cell_index : batch.cell_indices) {
+            const auto cell_id = cell_index;
+            if (cell_id == -1) {
+                continue;
+            }
+            if (cell_id == last_cell) {
+                cell_index = last_index;
+                continue;
+            }
+            last_cell = cell_id;
+            const auto [it, inserted] =
+                cell_indices.emplace(cell_id, batch.cells.size());
+            cell_index = last_index = it->second;
+            if (!inserted) {
+                continue;
+            }
+            batch.cells.push_back({cell_id});
+            const auto skipped =
+                !nullable_ && filter_ != nullptr &&
+                filter_->Source() ==
+                    ColumnFilter::MetricsSource::PreloadedStatistics &&
+                ShouldSkipFilteredCell(cell_id);
+            if (!skipped) {
+                pin_cell_ids.push_back(cell_id);
+            }
+        }
+        return pin_cell_ids;
+    }
+
+    void
+    SetCellAccess(CellAccess access_cell) {
+        access_cell_ = std::move(access_cell);
+        if constexpr (PinPolicy == TakePinPolicy::Batch) {
+            for (auto& cell : batch_->cells) {
+                if (!nullable_ && filter_ != nullptr &&
+                    filter_->Source() ==
+                        ColumnFilter::MetricsSource::PreloadedStatistics &&
+                    ShouldSkipFilteredCell(cell.source_cell_id)) {
+                    continue;
+                }
+                cell.chunk = access_cell_(cell.source_cell_id);
+                AssertInfo(cell.chunk != nullptr,
+                           "raw take pinned null cell {}",
+                           cell.source_cell_id);
+            }
+        }
+    }
+
  protected:
     ChunkedColumnInterface::TakeItemState
     PrepareItem(int64_t index, bool read_data) const override {
+        if constexpr (HasCandidateMask) {
+            AssertInfo((*candidate_mask_)[index],
+                       "Take position {} was excluded by the candidate mask",
+                       index);
+        }
         if (owned_ != nullptr) {
             return {!owned_data_.validity || owned_data_.validity[index],
                     read_data && owned_data_.data_skipped &&
                         owned_data_.data_skipped[index]};
+        }
+        if (!nullable_ && read_data && filter_ == nullptr) {
+            // The value read resolves the position; IsValid still validates
+            // lazy offsets without pinning.
+            return {true, false};
         }
         const auto& location = ResolveLocation(index);
         if (!nullable_ && !read_data) {
@@ -127,8 +239,8 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
             (!nullable_ || !filter_->SkippedValidityRequired())) {
             return {true, true};
         }
-        auto* chunk = PinCell(location.source_cell_id);
-        const auto valid = !nullable_ || chunk->isValid(location.cell_offset);
+        const auto [chunk, cell_offset] = ResolveBorrowed(index);
+        const auto valid = !nullable_ || chunk->isValid(cell_offset);
         if (!read_data || filter_ == nullptr) {
             return {valid, false};
         }
@@ -280,18 +392,16 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
                     owner->array_values.resize(Size());
                     owner->array_value_views.resize(Size());
                     visit_values([&](int64_t index,
-                                     Chunk* chunk,
+                                     Chunk*,
                                      size_t chunk_offset,
                                      bool valid) {
                         if (!valid) {
                             return;
                         }
                         auto* array_chunk =
-                            dynamic_cast<ColumnarArrayChunk*>(chunk);
-                        AssertInfo(array_chunk != nullptr,
-                                   "raw take Cell is not a recursive array");
-                        auto view =
-                            array_chunk->View<ArrayValueView>(chunk_offset);
+                            ResolveData<ColumnarArrayChunk>(index).first;
+                        auto view = array_chunk->template View<ArrayValueView>(
+                            chunk_offset);
                         owner->array_values[index] =
                             ArrayValue(view.output_data(), view.type());
                         owner->array_value_views[index] =
@@ -303,15 +413,14 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
                     owner->arrays.resize(Size());
                     owner->array_views.resize(Size());
                     visit_values([&](int64_t index,
-                                     Chunk* chunk,
+                                     Chunk*,
                                      size_t chunk_offset,
                                      bool valid) {
                         if (!valid) {
                             return;
                         }
-                        auto* array_chunk = dynamic_cast<ArrayChunk*>(chunk);
-                        AssertInfo(array_chunk != nullptr,
-                                   "raw take Cell is not a flat array");
+                        auto* array_chunk =
+                            ResolveData<ArrayChunk>(index).first;
                         array_chunk->View(chunk_offset)
                             .output_data(owner->arrays[index]);
                         auto& array = owner->arrays[index];
@@ -351,7 +460,10 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
 
  protected:
     const void*
-    FixedValueAt(int64_t index) const override {
+    FixedValueAt(int64_t index, TakeItemState& state) const override {
+        if (!PrepareValue(index, state)) {
+            return nullptr;
+        }
         if (owned_ != nullptr) {
             return static_cast<const char*>(owned_data_.values.data) +
                    (owned_data_.values.offset + index) *
@@ -362,7 +474,10 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
     }
 
     std::string_view
-    StringViewAt(int64_t index) const override {
+    StringViewAt(int64_t index, TakeItemState& state) const override {
+        if (!PrepareValue(index, state)) {
+            return {};
+        }
         if (owned_ != nullptr) {
             return owned_data_.values.data_as<std::string_view>()[index];
         }
@@ -370,53 +485,71 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
         return static_cast<StringChunk*>(chunk)->operator[](offset);
     }
 
-    Json
-    JsonAt(int64_t index) const override {
-        if (owned_ != nullptr) {
-            return owned_data_.values.data_as<Json>()[index];
+    std::string_view
+    JsonViewAt(int64_t index, TakeItemState& state) const override {
+        if (!PrepareValue(index, state)) {
+            return {};
         }
-        return Json(StringViewAt(index));
+        if (owned_ != nullptr) {
+            return owned_data_.values.data_as<Json>()[index].data();
+        }
+        const auto [chunk, offset] = ResolveBorrowed(index);
+        return static_cast<StringChunk*>(chunk)->operator[](offset);
     }
 
     ArrayView
-    ArrayAt(int64_t index) const override {
+    ArrayAt(int64_t index, TakeItemState& state) const override {
+        if (!PrepareValue(index, state)) {
+            return {};
+        }
         if (owned_ != nullptr) {
             return owned_data_.values.data_as<ArrayView>()[index];
         }
-        const auto [chunk, offset] = ResolveBorrowed(index);
-        auto* array_chunk = dynamic_cast<ArrayChunk*>(chunk);
-        AssertInfo(array_chunk != nullptr, "raw take Cell is not a flat array");
+        const auto [array_chunk, offset] = ResolveData<ArrayChunk>(index);
         return array_chunk->View(offset);
     }
 
     ArrayValueView
-    ArrayValueAt(int64_t index) const override {
+    ArrayValueAt(int64_t index, TakeItemState& state) const override {
+        if (!PrepareValue(index, state)) {
+            return {};
+        }
         if (owned_ != nullptr) {
             return owned_data_.values.data_as<ArrayValueView>()[index];
         }
-        const auto [chunk, offset] = ResolveBorrowed(index);
-        auto* array_chunk = dynamic_cast<ColumnarArrayChunk*>(chunk);
-        AssertInfo(array_chunk != nullptr,
-                   "raw take Cell is not a recursive array");
-        return array_chunk->View<ArrayValueView>(offset);
+        const auto [array_chunk, offset] =
+            ResolveData<ColumnarArrayChunk>(index);
+        return array_chunk->template View<ArrayValueView>(offset);
     }
 
  private:
+    bool
+    PrepareValue(int64_t index, TakeItemState& state) const {
+        if constexpr (!HasCandidateMask) {
+            if (!nullable_ && filter_ == nullptr) {
+                state = {};
+                return true;
+            }
+        }
+        return TakeResult::PrepareValue(index, state);
+    }
+
     struct CellGroup {
         int64_t cell_id;
         std::vector<int64_t> positions;
     };
 
-    Chunk*
-    PinCell(int64_t cell_id) const {
-        if (current_pin_.has_value() && current_cell_id_ == cell_id) {
-            return current_chunk_;
+    // Keep Cell-switch setup off the per-row resolver's stack frame.
+    FOLLY_NOINLINE Chunk*
+    LoadCell(int64_t cell_id) const {
+        Chunk* chunk;
+        {
+            ResetBorrowedPin();
+            auto next = access_cell_(cell_id);
+            chunk = next.get();
+            current_pin_.emplace(std::move(next));
         }
-        ResetBorrowedPin();
-        auto next = pin_cell_(cell_id);
-        auto* chunk = next.get();
         AssertInfo(chunk != nullptr, "raw take pinned null cell {}", cell_id);
-        current_pin_.emplace(std::move(next));
         current_cell_id_ = cell_id;
         current_chunk_ = chunk;
         return chunk;
@@ -424,26 +557,65 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
 
     std::pair<Chunk*, size_t>
     ResolveBorrowed(int64_t index) const {
-        const auto& location = ResolveLocation(index);
-        return {PinCell(location.source_cell_id), location.cell_offset};
+        if constexpr (PinPolicy == TakePinPolicy::Batch) {
+            return {batch_->cells[batch_->cell_indices[index]].chunk,
+                    static_cast<size_t>(batch_->cell_offsets[index])};
+        } else {
+            const auto& location = ResolveLocation(index);
+            auto* chunk = current_chunk_;
+            if (chunk == nullptr ||
+                current_cell_id_ != location.source_cell_id) {
+                chunk = LoadCell(location.source_cell_id);
+            }
+            return {chunk, location.cell_offset};
+        }
     }
 
-    const RawTakeLocation&
+    template <typename T>
+    std::pair<T*, size_t>
+    ResolveData(int64_t index) const {
+        const auto cast_chunk = [this](Chunk* chunk) {
+            auto* data = dynamic_cast<T*>(chunk);
+            AssertInfo(data != nullptr,
+                       "raw Cell representation does not match target {}",
+                       static_cast<int>(target_type_));
+            return data;
+        };
+        const auto [chunk, offset] = ResolveBorrowed(index);
+        if constexpr (PinPolicy == TakePinPolicy::Batch) {
+            if (current_chunk_ != chunk) {
+                current_chunk_ = chunk;
+                current_data_ = nullptr;
+            }
+        }
+        if (current_data_ == nullptr) {
+            current_data_ = cast_chunk(chunk);
+        }
+        return {static_cast<T*>(current_data_), offset};
+    }
+
+    RawTakeLocation
     ResolveLocation(int64_t index) const {
-        if (cached_location_index_ == index) {
+        if constexpr (PinPolicy == TakePinPolicy::Batch) {
+            return {batch_->cells[batch_->cell_indices[index]].source_cell_id,
+                    static_cast<size_t>(batch_->cell_offsets[index])};
+        } else {
+            if (cached_location_index_ == index) {
+                return cached_location_;
+            }
+            const auto location = planner_->Locate(offsets_.AtUnchecked(index));
+            cached_location_ = {location.cell_id,
+                                static_cast<size_t>(location.cell_offset)};
+            cached_location_index_ = index;
             return cached_location_;
         }
-        const auto location = planner_->Locate(offsets_.AtUnchecked(index));
-        cached_location_ = RawTakeLocation{
-            location.cell_id, static_cast<size_t>(location.cell_offset)};
-        cached_location_index_ = index;
-        return cached_location_;
     }
 
     bool
     ShouldSkipFilteredCell(int64_t cell_id) const {
         AssertInfo(filter_ != nullptr, "raw take filter is null");
-        if (filter_->Source() == ColumnFilter::MetricsSource::LoadedPayload) {
+        if (PinPolicy == TakePinPolicy::CurrentCell &&
+            filter_->Source() == ColumnFilter::MetricsSource::LoadedPayload) {
             AssertInfo(current_cell_id_ == cell_id && current_chunk_ != nullptr,
                        "loaded-payload filter Cell {} is not pinned",
                        cell_id);
@@ -464,6 +636,17 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
     template <typename Fn>
     void
     VisitGrouped(Fn&& fn) const {
+        if constexpr (PinPolicy == TakePinPolicy::Batch) {
+            for (int64_t position = 0; position < Size(); ++position) {
+                if constexpr (HasCandidateMask) {
+                    if (!(*candidate_mask_)[position]) {
+                        continue;
+                    }
+                }
+                fn(position);
+            }
+            return;
+        }
         std::vector<CellGroup> cell_groups;
         std::unordered_map<int64_t, size_t> cell_to_group;
         const auto max_groups =
@@ -471,6 +654,11 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
         cell_groups.reserve(max_groups);
         cell_to_group.reserve(max_groups);
         for (int64_t position = 0; position < Size(); ++position) {
+            if constexpr (HasCandidateMask) {
+                if (!(*candidate_mask_)[position]) {
+                    continue;
+                }
+            }
             const auto cell_id = ResolveLocation(position).source_cell_id;
             auto [it, inserted] =
                 cell_to_group.emplace(cell_id, cell_groups.size());
@@ -492,9 +680,10 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
         current_pin_.reset();
         current_cell_id_ = -1;
         current_chunk_ = nullptr;
+        current_data_ = nullptr;
     }
 
-    RawTakeCellPin pin_cell_;
+    CellAccess access_cell_;
     std::shared_ptr<const ColumnPlanner> planner_;
     DataType data_type_;
     ChunkedColumnInterface::TargetType target_type_;
@@ -506,11 +695,14 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
     mutable std::optional<bool> current_filter_skip_;
     mutable int64_t cached_location_index_{-1};
     mutable RawTakeLocation cached_location_;
+    std::optional<Batch> batch_;
     mutable std::optional<PinWrapper<Chunk*>> current_pin_;
     mutable int64_t current_cell_id_{-1};
     mutable Chunk* current_chunk_{nullptr};
     mutable std::shared_ptr<OwnedTakeStorage> owned_;
     mutable ChunkedColumnInterface::OwnedTakeData owned_data_;
+    mutable void* current_data_{nullptr};
+    const TargetBitmap* candidate_mask_;
 };
 
 }  // namespace detail
@@ -524,6 +716,13 @@ ChunkedColumnInterface::Take(milvus::OpContext* op_ctx,
     AssertInfo(options.offsets.size == 0 || options.offsets.data != nullptr,
                "take offsets are null with count {}",
                options.offsets.size);
+    AssertInfo(options.candidate_mask == nullptr ||
+                   options.candidate_mask->size() == options.offsets.size,
+               "Take candidate mask size does not match offset count {}",
+               options.offsets.size);
+    if (options.candidate_mask != nullptr && options.candidate_mask->all()) {
+        options.candidate_mask = nullptr;
+    }
     auto data_type = GetDefaultScanDataType();
     if (!data_type.has_value()) {
         return nullptr;
@@ -533,18 +732,39 @@ ChunkedColumnInterface::Take(milvus::OpContext* op_ctx,
     if (!target_type.has_value()) {
         return nullptr;
     }
-    auto pin_cell = MakeTakeCellPin(op_ctx);
-    if (!pin_cell) {
-        return nullptr;
-    }
     auto planner = PlannerHandle();
-    return std::make_unique<detail::RawTakeResult>(std::move(pin_cell),
-                                                   std::move(planner),
-                                                   options.offsets,
-                                                   std::move(options.filter),
-                                                   *data_type,
-                                                   *target_type,
-                                                   IsNullable());
+    const auto make_result =
+        [&]<bool HasCandidateMask, TakePinPolicy PinPolicy>() -> TakeResultPtr {
+        using Result = detail::RawTakeResult<HasCandidateMask, PinPolicy>;
+        auto result = std::make_unique<Result>(std::move(planner),
+                                               options.offsets,
+                                               std::move(options.filter),
+                                               *data_type,
+                                               *target_type,
+                                               IsNullable(),
+                                               options.candidate_mask);
+        std::optional<std::vector<int64_t>> batch_cell_ids;
+        if constexpr (PinPolicy == TakePinPolicy::Batch) {
+            batch_cell_ids.emplace(result->PlanBatch());
+        }
+        // Retain the generation even for empty/fully pruned requests.
+        auto access = MakeTakeCellAccess(
+            op_ctx, batch_cell_ids ? &*batch_cell_ids : nullptr);
+        auto* access_cell = std::get_if<typename Result::CellAccess>(&access);
+        if (access_cell == nullptr || !*access_cell) {
+            return nullptr;
+        }
+        result->SetCellAccess(std::move(*access_cell));
+        return result;
+    };
+    const auto with_policy = [&]<TakePinPolicy PinPolicy>() {
+        return options.candidate_mask == nullptr
+                   ? make_result.template operator()<false, PinPolicy>()
+                   : make_result.template operator()<true, PinPolicy>();
+    };
+    return options.pin_policy == TakePinPolicy::Batch
+               ? with_policy.template operator()<TakePinPolicy::Batch>()
+               : with_policy.template operator()<TakePinPolicy::CurrentCell>();
 }
 
 }  // namespace milvus

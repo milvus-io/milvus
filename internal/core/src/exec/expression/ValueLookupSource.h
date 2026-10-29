@@ -29,8 +29,9 @@
 
 namespace milvus::exec {
 
-// One expression-local value source. Selection is metadata-only until the
-// exact entry is pinned; an empty pin means the caller scans raw column data.
+// One expression-local value source. Resolving a sealed lazy index may read
+// artifact metadata; the exact entry is then pinned. An empty pin means the
+// caller scans raw column data.
 class PinnedValueLookup final {
  public:
     PinnedValueLookup() = default;
@@ -40,7 +41,8 @@ class PinnedValueLookup final {
                       FieldId field_id,
                       DataType data_type,
                       int64_t active_count) {
-        const auto capabilities = segment->IndexCapability(field_id);
+        const auto capabilities =
+            segment->ResolveIndexCapability(op_ctx, field_id);
         const auto decision =
             DetermineExecPath({.field_id = field_id,
                                .reader = RequiredReader::ValueLookup,

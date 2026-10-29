@@ -127,7 +127,11 @@ func parseSingleMsgPayload(msg message.ImmutableMessage) (msgstream.TsMsg, error
 
 // fromMessageToTsMsgV1 converts message to ts message.
 func fromMessageToTsMsgV1(msg message.ImmutableMessage) (msgstream.TsMsg, error) {
-	tsMsg, err := UnmashalerDispatcher.Unmarshal(msg.Payload(), MustGetCommonpbMsgTypeFromMessageType(msg.MessageType()))
+	return fromMessagePayloadToTsMsgV1(msg, msg.Payload())
+}
+
+func fromMessagePayloadToTsMsgV1(msg message.ImmutableMessage, payload []byte) (msgstream.TsMsg, error) {
+	tsMsg, err := UnmashalerDispatcher.Unmarshal(payload, MustGetCommonpbMsgTypeFromMessageType(msg.MessageType()))
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to unmarshal message")
 	}

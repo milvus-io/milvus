@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "mmap/ChunkedColumnInterface.h"
+#include "mmap/ColumnOffsetLookup.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -24,15 +25,19 @@
 
 namespace milvus {
 
-ColumnPlanner::ColumnPlanner(const std::vector<int64_t>& num_rows_until_cell)
-    : num_rows_until_cell_(&num_rows_until_cell) {
+ColumnPlanner::ColumnPlanner(const std::vector<int64_t>& num_rows_until_cell,
+                             OffsetLookupOptions lookup_options)
+    : num_rows_until_cell_(&num_rows_until_cell),
+      lookup_options_(lookup_options) {
     ValidateBoundaries();
 }
 
-ColumnPlanner::ColumnPlanner(std::vector<int64_t>&& num_rows_until_cell)
+ColumnPlanner::ColumnPlanner(std::vector<int64_t>&& num_rows_until_cell,
+                             OffsetLookupOptions lookup_options)
     : owned_num_rows_until_cell_(std::make_shared<const std::vector<int64_t>>(
           std::move(num_rows_until_cell))),
-      num_rows_until_cell_(owned_num_rows_until_cell_.get()) {
+      num_rows_until_cell_(owned_num_rows_until_cell_.get()),
+      lookup_options_(lookup_options) {
     ValidateBoundaries();
 }
 
@@ -54,6 +59,21 @@ ColumnPlanner::ValidateBoundaries() const {
                    boundaries[i],
                    boundaries[i - 1]);
     }
+    if (lookup_options_.strategy == OffsetLookupStrategy::Bucket) {
+        AssertInfo(lookup_options_.bucket_cells != nullptr &&
+                       lookup_options_.bucket_order >= 0 &&
+                       lookup_options_.bucket_order < 63,
+                   "column planner bucket index is invalid");
+        AssertInfo(NumCells() <= 1 || NumRows() == 0 ||
+                       lookup_options_.bucket_cells->size() >
+                           ((NumRows() - 1) >> lookup_options_.bucket_order),
+                   "column planner bucket index does not cover all rows");
+    } else {
+        AssertInfo(
+            lookup_options_.strategy == OffsetLookupStrategy::PerOffset ||
+                lookup_options_.strategy == OffsetLookupStrategy::BatchBinary,
+            "column planner lookup strategy is invalid");
+    }
 }
 
 CellLocation
@@ -71,6 +91,45 @@ ColumnPlanner::Locate(int64_t segment_offset) const {
     const auto cell_id =
         static_cast<int64_t>(std::distance(boundaries.begin(), it)) - 1;
     return CellLocation{cell_id, segment_offset - boundaries[cell_id]};
+}
+
+std::pair<std::vector<int64_t>, std::vector<int64_t>>
+ColumnPlanner::LocateBatch(OffsetView offsets) const {
+    AssertInfo(
+        offsets.size >= 0 && (offsets.size == 0 || offsets.data != nullptr),
+        "column planner batch offsets are invalid");
+    const auto locate = [this, count = offsets.size](const auto* input) {
+        if (lookup_options_.strategy == OffsetLookupStrategy::PerOffset) {
+            std::pair<std::vector<int64_t>, std::vector<int64_t>> result{
+                std::vector<int64_t>(count), std::vector<int64_t>(count)};
+            for (int64_t i = 0; i < count; ++i) {
+                const auto location = Locate(input[i]);
+                result.first[i] = location.cell_id;
+                result.second[i] = location.cell_offset;
+            }
+            return result;
+        }
+        const auto rows = NumRows();
+        for (int64_t i = 0; i < count; ++i) {
+            AssertInfo(input[i] >= 0 && input[i] < rows,
+                       "segment offset {} out of planner rows {}",
+                       input[i],
+                       rows);
+        }
+        const auto& boundaries = *num_rows_until_cell_;
+        if (lookup_options_.strategy == OffsetLookupStrategy::Bucket) {
+            return detail::LocateOffsetsByBuckets(
+                input,
+                count,
+                boundaries,
+                lookup_options_.bucket_order,
+                *lookup_options_.bucket_cells);
+        }
+        return detail::LocateOffsetsByBinary(input, count, boundaries);
+    };
+    return offsets.element_type == OffsetElementType::Int32
+               ? locate(static_cast<const int32_t*>(offsets.data))
+               : locate(static_cast<const int64_t*>(offsets.data));
 }
 
 int64_t

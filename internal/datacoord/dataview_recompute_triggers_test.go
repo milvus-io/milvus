@@ -58,7 +58,10 @@ func TestMixCompactionSaveSegmentMetaRecomputesDataView(t *testing.T) {
 		Schema:        &schemapb.CollectionSchema{Version: 1},
 	}, nil, m, newMockVersionManager())
 
+	drainStatsBuildChForTest()
+	defer drainStatsBuildChForTest()
 	require.NoError(t, task.saveSegmentMeta(&datapb.CompactionPlanResult{}))
+	require.Equal(t, []UniqueID{100}, drainStatsBuildChForTest(), "mix and sort compaction outputs must reach stats discovery")
 
 	recomputeManager.mu.Lock()
 	defer recomputeManager.mu.Unlock()
@@ -91,7 +94,10 @@ func TestBumpSchemaVersionSaveSegmentMetaRecomputesDataView(t *testing.T) {
 		Schema:        &schemapb.CollectionSchema{Version: 2},
 	}, nil, m, newMockVersionManager())
 
+	drainStatsBuildChForTest()
+	defer drainStatsBuildChForTest()
 	require.NoError(t, task.saveSegmentMeta(&datapb.CompactionPlanResult{}))
+	require.Equal(t, []UniqueID{100}, drainStatsBuildChForTest(), "schema-bump outputs must reach stats discovery")
 
 	recomputeManager.mu.Lock()
 	defer recomputeManager.mu.Unlock()

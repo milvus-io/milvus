@@ -578,6 +578,7 @@ struct VortexColumn::OrderedTakeOwner {
     std::vector<ArrayValueView> array_value_views;
 };
 
+template <bool HasCandidateMask>
 class VortexTakeResult final : public ChunkedColumnInterface::TakeResult {
  public:
     VortexTakeResult(ChunkedColumnInterface::ValueView values,
@@ -585,13 +586,15 @@ class VortexTakeResult final : public ChunkedColumnInterface::TakeResult {
                      ValidityView data_skipped,
                      std::shared_ptr<void> owner,
                      int64_t size,
-                     DataType data_type)
+                     DataType data_type,
+                     const TargetBitmap* candidate_mask)
         : values_(values),
           validity_(validity),
           data_skipped_(data_skipped),
           owner_(std::move(owner)),
           size_(size),
-          data_type_(data_type) {
+          data_type_(data_type),
+          candidate_mask_(candidate_mask) {
         AssertInfo(size_ >= 0, "vortex take result has invalid size {}", size_);
         AssertInfo(CanReadAsTargetType(data_type_, values_.target_type),
                    "vortex take type {} does not match target {}",
@@ -634,38 +637,58 @@ class VortexTakeResult final : public ChunkedColumnInterface::TakeResult {
  protected:
     ChunkedColumnInterface::TakeItemState
     PrepareItem(int64_t index, bool read_data) const override {
+        if constexpr (HasCandidateMask) {
+            AssertInfo((*candidate_mask_)[index],
+                       "Take position {} was excluded by the candidate mask",
+                       index);
+        }
         return ChunkedColumnInterface::TakeItemState{
             !validity_ || validity_[index],
             read_data && data_skipped_ && data_skipped_[index]};
     }
 
     const void*
-    FixedValueAt(int64_t index) const override {
+    FixedValueAt(int64_t index, TakeItemState& state) const override {
+        if (!PrepareValue(index, state)) {
+            return nullptr;
+        }
         return static_cast<const char*>(values_.data) +
                (values_.offset + index) * values_.byte_width;
     }
 
     std::string_view
-    StringViewAt(int64_t index) const override {
+    StringViewAt(int64_t index, TakeItemState& state) const override {
+        if (!PrepareValue(index, state)) {
+            return {};
+        }
         return static_cast<const std::string_view*>(
             values_.data)[values_.offset + index];
     }
 
-    Json
-    JsonAt(int64_t index) const override {
+    std::string_view
+    JsonViewAt(int64_t index, TakeItemState& state) const override {
+        if (!PrepareValue(index, state)) {
+            return {};
+        }
         const auto& value =
             static_cast<const Json*>(values_.data)[values_.offset + index];
-        return Json(static_cast<std::string_view>(value));
+        return value.data();
     }
 
     ArrayView
-    ArrayAt(int64_t index) const override {
+    ArrayAt(int64_t index, TakeItemState& state) const override {
+        if (!PrepareValue(index, state)) {
+            return {};
+        }
         return static_cast<const ArrayView*>(
             values_.data)[values_.offset + index];
     }
 
     ArrayValueView
-    ArrayValueAt(int64_t index) const override {
+    ArrayValueAt(int64_t index, TakeItemState& state) const override {
+        if (!PrepareValue(index, state)) {
+            return {};
+        }
         return static_cast<const ArrayValueView*>(
             values_.data)[values_.offset + index];
     }
@@ -726,6 +749,7 @@ class VortexTakeResult final : public ChunkedColumnInterface::TakeResult {
     std::shared_ptr<void> owner_;
     int64_t size_;
     DataType data_type_;
+    const TargetBitmap* candidate_mask_;
 };
 
 class VortexColumn::ArrowStringLikeColumn {
@@ -3015,7 +3039,8 @@ VortexColumn::ScanStringLikeViewsFromFile(
 std::shared_ptr<arrow::Table>
 VortexColumn::TakeArrowFromFile(milvus::OpContext* op_ctx,
                                 int64_t file_id,
-                                const std::vector<int64_t>& offsets) const {
+                                const std::vector<int64_t>& offsets,
+                                VortexCellPin pin) const {
     CheckChunkId(file_id);
     const auto& file = column_group_->files()[file_id];
     std::vector<int64_t> file_offsets;
@@ -3030,10 +3055,12 @@ VortexColumn::TakeArrowFromFile(milvus::OpContext* op_ctx,
         file_offsets.emplace_back(offset - file.start_index);
     }
 
-    auto plan = PlanOffsets(file_id, file_offsets);
     // Storage reads into owned Rust buffers before Arrow export, not sparse
     // mapping views. The Cell pin is only needed through import.
-    auto pin = PinPlanCells(op_ctx, file_id, plan.cell_ids);
+    if (pin == nullptr) {
+        auto plan = PlanOffsets(file_id, file_offsets);
+        pin = PinPlanCells(op_ctx, file_id, plan.cell_ids);
+    }
     auto vortex_reader = BuildFileReader(file);
     auto table_result = vortex_reader->take(file_offsets);
     if (!table_result.ok()) {
@@ -3112,6 +3139,13 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
                    "take offsets are null with count {}",
                    offsets.size);
     }
+    AssertInfo(options.candidate_mask == nullptr ||
+                   options.candidate_mask->size() == offsets.size,
+               "Take candidate mask size does not match offset count {}",
+               offsets.size);
+    if (options.candidate_mask != nullptr && options.candidate_mask->all()) {
+        options.candidate_mask = nullptr;
+    }
     const auto target_type = options.target_type;
     AssertInfo(options.filter == nullptr ||
                    options.filter->Source() ==
@@ -3135,6 +3169,7 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
         std::vector<int64_t> unique_offsets;
         std::vector<int64_t> original_positions;
         std::vector<int64_t> original_position_ends;
+        VortexCellPin pin;
     };
 
     auto owner = std::make_shared<OrderedTakeOwner>();
@@ -3149,8 +3184,25 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
 
     std::vector<OffsetEntry> entries;
     entries.reserve(offsets.size);
-    for (int64_t i = 0; i < offsets.size; ++i) {
-        entries.emplace_back(OffsetEntry{offsets[i], i});
+    const auto add_entries = [&]<bool HasCandidateMask>() {
+        for (int64_t i = 0; i < offsets.size; ++i) {
+            if constexpr (HasCandidateMask) {
+                if (!(*options.candidate_mask)[i]) {
+                    if (owner->data_skipped.empty()) {
+                        owner->data_skipped.resize(offsets.size, false);
+                    }
+                    owner->data_skipped.set(i);
+                    has_data_skipped = true;
+                    continue;
+                }
+            }
+            entries.emplace_back(OffsetEntry{offsets[i], i});
+        }
+    };
+    if (options.candidate_mask == nullptr) {
+        add_entries.template operator()<false>();
+    } else {
+        add_entries.template operator()<true>();
     }
     std::sort(entries.begin(),
               entries.end(),
@@ -3197,6 +3249,7 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
                                             planned_cell_skipped,
                                             {},
                                             {},
+                                            {},
                                             {}});
         }
         auto& group = groups.back();
@@ -3207,6 +3260,26 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
         }
         group.original_positions.emplace_back(entry.original_position);
         group.original_position_ends.back() = group.original_positions.size();
+    }
+
+    if (options.pin_policy == TakePinPolicy::Batch) {
+        for (size_t begin = 0; begin < groups.size();) {
+            const auto file_id = groups[begin].file_id;
+            auto end = begin;
+            std::vector<int64_t> file_offsets;
+            while (end < groups.size() && groups[end].file_id == file_id) {
+                for (const auto offset : groups[end].unique_offsets) {
+                    file_offsets.push_back(offset - files[file_id].start_index);
+                }
+                ++end;
+            }
+            auto plan = PlanOffsets(file_id, file_offsets);
+            auto pin = PinPlanCells(op_ctx, file_id, plan.cell_ids);
+            for (auto i = begin; i < end; ++i) {
+                groups[i].pin = pin;
+            }
+            begin = end;
+        }
     }
 
     auto for_each_original_position = [](const OffsetGroup& group,
@@ -3264,7 +3337,7 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
             output.resize(offsets.size);
             for (const auto& group : groups) {
                 auto take = TakeArrowFromFile(
-                    op_ctx, group.file_id, group.unique_offsets);
+                    op_ctx, group.file_id, group.unique_offsets, group.pin);
                 if (group.validity_only) {
                     copy_validity(take, group);
                     continue;
@@ -3341,7 +3414,7 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
             owner->string_views.resize(offsets.size);
             for (const auto& group : groups) {
                 auto take = TakeArrowFromFile(
-                    op_ctx, group.file_id, group.unique_offsets);
+                    op_ctx, group.file_id, group.unique_offsets, group.pin);
                 if (group.validity_only) {
                     copy_validity(take, group);
                     continue;
@@ -3412,7 +3485,7 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
             std::vector<int64_t> ordered_array_indices(offsets.size, -1);
             for (const auto& group : groups) {
                 auto take = TakeArrowFromFile(
-                    op_ctx, group.file_id, group.unique_offsets);
+                    op_ctx, group.file_id, group.unique_offsets, group.pin);
                 if (group.validity_only) {
                     copy_validity(take, group);
                     continue;
@@ -3531,12 +3604,19 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
     const auto data_skipped = has_data_skipped
                                   ? PackedValidityView(owner->data_skipped)
                                   : ValidityView{};
-    return std::make_unique<VortexTakeResult>(values,
-                                              validity,
-                                              data_skipped,
-                                              std::move(owner),
-                                              offsets.size,
-                                              data_type_);
+    const auto make_result = [&]<bool HasCandidateMask>() -> TakeResultPtr {
+        return std::make_unique<VortexTakeResult<HasCandidateMask>>(
+            values,
+            validity,
+            data_skipped,
+            std::move(owner),
+            offsets.size,
+            data_type_,
+            options.candidate_mask);
+    };
+    return options.candidate_mask == nullptr
+               ? make_result.template operator()<false>()
+               : make_result.template operator()<true>();
 }
 
 void
@@ -3630,45 +3710,6 @@ VortexColumn::BulkRawStringAt(
                   "VortexColumn::BulkRawStringAt only supports string fields");
     }
     BulkStringLikeAt(op_ctx, fn, offsets, count);
-}
-
-void
-VortexColumn::BulkRawJsonAt(milvus::OpContext* op_ctx,
-                            std::function<void(Json, size_t, bool)> fn,
-                            const int64_t* offsets,
-                            int64_t count) const {
-    if (data_type_ != DataType::JSON) {
-        ThrowInfo(ErrorCode::Unsupported,
-                  "VortexColumn::BulkRawJsonAt only supports JSON fields");
-    }
-    if (offsets == nullptr) {
-        BulkStringLikeAt(
-            op_ctx,
-            [&](std::string_view value, size_t index, bool valid) {
-                fn(valid ? Json(MakePaddedJson(value)) : Json{}, index, valid);
-            },
-            offsets,
-            count);
-        return;
-    }
-    if (count == 0) {
-        return;
-    }
-    auto take =
-        Take(op_ctx,
-             TakeOptions{OffsetView::From(offsets, count), TargetType::Json});
-    AssertInfo(take != nullptr,
-               "vortex JSON take is unsupported for type {}",
-               data_type_);
-    const auto owned = take->GetOwn();
-    const auto* values = owned.values.data_as<Json>();
-    for (int64_t i = 0; i < count; ++i) {
-        if (take->IsValid(i)) {
-            fn(values[i], i, true);
-        } else {
-            fn(Json{}, i, false);
-        }
-    }
 }
 
 void

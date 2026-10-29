@@ -2803,6 +2803,11 @@ type proxyConfig struct {
 	EnableCachedServiceProvider       ParamItem `refreshable:"true"`
 	MaxSearchAggregationResultEntries ParamItem `refreshable:"true"`
 
+	// EnableElementNullAndNestedArray is a temporary preview switch that lets
+	// the proxy accept element-nullable and nested Array fields while the feature
+	// is incomplete. It is removed together with the gate.
+	EnableElementNullAndNestedArray ParamItem `refreshable:"true"`
+
 	AccessLog AccessLogConfig
 
 	// connection manager
@@ -3355,6 +3360,15 @@ please adjust in embedded Milvus: false`,
 		Doc:          "switch for whether proxy shall skip partition key check when inserting data",
 	}
 	p.SkipPartitionKeyCheck.Init(base.mgr)
+
+	p.EnableElementNullAndNestedArray = ParamItem{
+		Key:          "proxy.enableElementNullAndNestedArray",
+		Version:      "3.1.0",
+		DefaultValue: "false",
+		Doc:          "temporary preview switch: accept element-nullable and nested Array fields, which are not complete yet; for tests only",
+		Export:       false,
+	}
+	p.EnableElementNullAndNestedArray.Init(base.mgr)
 
 	p.ResolveAliasForPrivilege = ParamItem{
 		Key:          "proxy.resolveAliasForPrivilege",
@@ -4422,6 +4436,7 @@ type queryNodeConfig struct {
 	TieredWarmupLoadingTimeoutMs    ParamItem `refreshable:"true"`
 	StorageUsageTrackingEnabled     ParamItem `refreshable:"true"`
 	TieredRejectRemoteVectorOutput  ParamItem `refreshable:"true"`
+	TieredLazyIndexSlotEnabled      ParamItem `refreshable:"true"`
 	TieredLazyColumnGroupEnabled    ParamItem `refreshable:"true"`
 
 	KnowhereScoreConsistency ParamItem `refreshable:"false"`
@@ -4460,16 +4475,16 @@ type queryNodeConfig struct {
 	ReadAheadPolicy     ParamItem `refreshable:"false"`
 	ChunkCacheWarmingUp ParamItem `refreshable:"true"`
 
-	MaxUnsolvedQueueSize         ParamItem `refreshable:"true"`
-	MaxReadConcurrency           ParamItem `refreshable:"true"`
-	MaxGpuReadConcurrency        ParamItem `refreshable:"false"`
-	MaxGroupNQ                   ParamItem `refreshable:"true"`
-	NQMergeRatio                 ParamItem `refreshable:"true"`
-	MaxDeadlineMergeGap          ParamItem `refreshable:"true"`
-	TopKMergeRatio               ParamItem `refreshable:"true"`
-	CPURatio                     ParamItem `refreshable:"true"`
-	GracefulStopTimeout          ParamItem `refreshable:"false"`
-	StandaloneMigrateDataTimeout ParamItem `refreshable:"false"`
+	MaxUnsolvedQueueSize  ParamItem `refreshable:"true"`
+	MaxReadConcurrency    ParamItem `refreshable:"true"`
+	MaxGpuReadConcurrency ParamItem `refreshable:"false"`
+	MaxGroupNQ            ParamItem `refreshable:"true"`
+	NQMergeRatio          ParamItem `refreshable:"true"`
+	MaxDeadlineMergeGap   ParamItem `refreshable:"true"`
+	TopKMergeRatio        ParamItem `refreshable:"true"`
+	CPURatio              ParamItem `refreshable:"true"`
+	GracefulStopTimeout   ParamItem `refreshable:"false"`
+	MigrateDataTimeout    ParamItem `refreshable:"false"`
 
 	EnableResultZeroCopy ParamItem `refreshable:"true"`
 
@@ -4736,6 +4751,15 @@ Defaults to "sync".`,
 		Export:       true,
 	}
 	p.TieredWarmupVectorIndex.Init(base.mgr)
+
+	p.TieredLazyIndexSlotEnabled = ParamItem{
+		Key:          "queryNode.segcore.tieredStorage.lazyIndexSlotEnabled",
+		Version:      "3.0.5",
+		DefaultValue: "false",
+		Doc:          "When enabled, sealed scalar, vector, and text index translators and cache slots with warmup=disable are created on first access instead of segment load.",
+		Export:       true,
+	}
+	p.TieredLazyIndexSlotEnabled.Init(base.mgr)
 
 	p.TieredLazyColumnGroupEnabled = ParamItem{
 		Key:          "queryNode.segcore.tieredStorage.lazyColumnGroupEnabled",
@@ -5686,14 +5710,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
 
-	p.StandaloneMigrateDataTimeout = ParamItem{
-		Key:          "queryNode.standaloneMigrateDataTimeout",
-		Version:      "2.6.16",
+	p.MigrateDataTimeout = ParamItem{
+		Key:          "queryNode.migrateDataTimeout",
+		Version:      "3.0.5",
+		FallbackKeys: []string{"queryNode.standaloneMigrateDataTimeout"},
 		DefaultValue: "10s",
-		Doc:          "Duration string (e.g. 10s, 3m). In standalone mode, after this duration, the node stops waiting for data migration if no other active query node is available.",
+		Doc:          "Duration string (e.g. 10s, 3m). After this duration, a stopping query node stops waiting for data migration if no other active query node is available.",
 		Export:       true,
 	}
-	p.StandaloneMigrateDataTimeout.Init(base.mgr)
+	p.MigrateDataTimeout.Init(base.mgr)
 
 	p.MaxSegmentDeleteBuffer = ParamItem{
 		Key:          "queryNode.maxSegmentDeleteBuffer",
@@ -9215,47 +9240,6 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 		Export:       false,
 	}
 	p.ExternalCollectionTargetRowsPerSegment.Init(base.mgr)
-}
-
-type queryViewConfig struct {
-	IDFLazyLoadSealedStats             ParamItem `refreshable:"true"`
-	IDFSealedStatsLoadConcurrencyRatio ParamItem `refreshable:"true"`
-	LeaseDuration                      ParamItem `refreshable:"false"`
-}
-
-func (p *queryViewConfig) init(base *BaseTable) {
-	p.IDFLazyLoadSealedStats = ParamItem{
-		Key:          "queryView.idfOracle.lazyLoadSealedStats",
-		Version:      "3.1.0",
-		Export:       true,
-		DefaultValue: "false",
-		Doc:          "Whether QueryView IDF runtimes defer sealed BM25 resource discovery and stats materialization until the first BM25 search.",
-	}
-	p.IDFLazyLoadSealedStats.Init(base.mgr)
-
-	p.IDFSealedStatsLoadConcurrencyRatio = ParamItem{
-		Key:          "queryView.idfOracle.sealedStatsLoadConcurrencyRatio",
-		Version:      "3.1.0",
-		Export:       true,
-		DefaultValue: "4",
-		Doc:          "Maximum process-wide concurrency for loading sealed BM25 stats, expressed as a ratio of CPU cores.",
-		Formatter: func(v string) string {
-			if getAsFloat(v) <= 0 {
-				return "1"
-			}
-			return v
-		},
-	}
-	p.IDFSealedStatsLoadConcurrencyRatio.Init(base.mgr)
-
-	p.LeaseDuration = ParamItem{
-		Key:          "queryView.leaseDuration",
-		Version:      "3.1.0",
-		DefaultValue: "60s",
-		Doc:          "Renewable SN Up-view retention after query access. Delays normal Down; non-positive durations disable timed retention. Not refreshable.",
-		Export:       true,
-	}
-	p.LeaseDuration.Init(base.mgr)
 }
 
 type streamingConfig struct {

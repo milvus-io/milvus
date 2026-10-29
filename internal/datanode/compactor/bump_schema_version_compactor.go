@@ -1015,8 +1015,9 @@ type bumpSchemaVersionWriterResult struct {
 	columnGroups   []storagecommon.ColumnGroup
 	storageVersion int64
 	basePath       string
-	baseVersion    int64
-	v3Stats        []packed.StatEntry
+	// baseManifest is the segment's manifest path the in-place commit builds on.
+	baseManifest string
+	v3Stats      []packed.StatEntry
 	// statsBlobSize tracks the cumulative bloom-filter + BM25 blob memory
 	// committed via addV3Stats. Reported to DataCoord on
 	// CompactionSegment.Stats.StatsBinlogSize.
@@ -1039,7 +1040,7 @@ func (t *bumpSchemaVersionCompactionTask) setupWriter(outputFields []*schemapb.F
 	if err != nil {
 		return nil, merr.WrapErrDataIntegrity(err, "failed to parse existing manifest for schema bump")
 	}
-	writerResult, err := t.newV3WriterResult(outputSchema, newColumnGroups, segment, collectionID, basePath, existingVersion)
+	writerResult, err := t.newV3WriterResult(outputSchema, newColumnGroups, segment, collectionID, basePath)
 	if err != nil {
 		return nil, err
 	}
@@ -1053,7 +1054,7 @@ func (t *bumpSchemaVersionCompactionTask) setupWriter(outputFields []*schemapb.F
 	return writerResult, nil
 }
 
-func (t *bumpSchemaVersionCompactionTask) newV3WriterResult(schema *schemapb.CollectionSchema, columnGroups []storagecommon.ColumnGroup, segment *datapb.CompactionSegmentBinlogs, collectionID int64, basePath string, baseVersion int64) (*bumpSchemaVersionWriterResult, error) {
+func (t *bumpSchemaVersionCompactionTask) newV3WriterResult(schema *schemapb.CollectionSchema, columnGroups []storagecommon.ColumnGroup, segment *datapb.CompactionSegmentBinlogs, collectionID int64, basePath string) (*bumpSchemaVersionWriterResult, error) {
 	if segment.GetStorageVersion() < storage.StorageV3 || segment.GetManifest() == "" {
 		return nil, merr.WrapErrServiceInternalMsg("schema bump compaction requires a StorageV3 segment with manifest")
 	}
@@ -1076,7 +1077,7 @@ func (t *bumpSchemaVersionCompactionTask) newV3WriterResult(schema *schemapb.Col
 		return nil, err
 	}
 	mlog.Info(t.ctx, "schema bump partial manifest writer created",
-		mlog.Int64("baseVersion", baseVersion),
+		mlog.String("baseManifest", segment.GetManifest()),
 		mlog.Int("schemaFieldCount", len(schema.GetFields())),
 		mlog.Int("columnGroupCount", len(columnGroups)),
 	)
@@ -1086,7 +1087,7 @@ func (t *bumpSchemaVersionCompactionTask) newV3WriterResult(schema *schemapb.Col
 		columnGroups:   columnGroups,
 		storageVersion: segment.GetStorageVersion(),
 		basePath:       basePath,
-		baseVersion:    baseVersion,
+		baseManifest:   segment.GetManifest(),
 	}, nil
 }
 
@@ -1368,7 +1369,7 @@ func (t *bumpSchemaVersionCompactionTask) runAdditivePhysicalReconciliation(ctx 
 		}
 	} else {
 		manifestPath, err = packed.CommitManifestUpdates(
-			writerResult.basePath, writerResult.baseVersion,
+			writerResult.baseManifest,
 			t.compactionParams.StorageConfig,
 			&packed.ManifestUpdates{NewFiles: writerOutput, Stats: writerResult.v3Stats},
 		)

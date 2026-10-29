@@ -395,26 +395,22 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
             const auto coordinate = static_cast<size_t>(offsets[i]);
             ValidateCoordinate(coordinate, "gather");
             if (options_.valid_bitset[coordinate]) {
-                wanted[coordinate].push_back(i);
+                if constexpr (std::is_same_v<Posting, roaring::Roaring>) {
+                    // Sparse output requests must not enumerate a posting
+                    // proportional to the segment size. Probe keys in order
+                    // and keep the first match, as Lookup does.
+                    values[static_cast<size_t>(i)] = LookupPosting(coordinate);
+                } else {
+                    wanted[coordinate].push_back(i);
+                }
             }
         }
 
-        for (const auto& [key, posting] : storage_->postings) {
-            if (wanted.empty()) {
-                break;
-            }
-            if constexpr (std::is_same_v<Posting, roaring::Roaring>) {
-                for (auto coordinate : posting) {
-                    auto match = wanted.find(coordinate);
-                    if (match == wanted.end()) {
-                        continue;
-                    }
-                    for (auto i : match->second) {
-                        values[static_cast<size_t>(i)] = &key;
-                    }
-                    wanted.erase(match);
+        if constexpr (!std::is_same_v<Posting, roaring::Roaring>) {
+            for (const auto& [key, posting] : storage_->postings) {
+                if (wanted.empty()) {
+                    break;
                 }
-            } else {
                 for (auto match = wanted.begin(); match != wanted.end();) {
                     if (!posting[match->first]) {
                         ++match;

@@ -502,8 +502,20 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     FieldIndexCapability
-    IndexCapability(FieldId field_id) const override {
+    ResolveIndexCapability(milvus::OpContext*,
+                           FieldId field_id) const override {
         return growing_indexes_.Capability(field_id);
+    }
+
+    std::vector<IndexRegistration>
+    IndexRegistrations(FieldId field_id) const override {
+        std::vector<IndexRegistration> registrations;
+        const auto capability = growing_indexes_.Capability(field_id);
+        registrations.reserve(capability.entries().size());
+        for (const auto& entry : capability.entries()) {
+            registrations.push_back(RegistrationFromCapability(entry));
+        }
+        return registrations;
     }
 
     IndexPin

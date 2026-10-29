@@ -1168,7 +1168,7 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 			Status: merr.Success(),
 			Results: &schemapb.SearchResultData{
 				NumQueries:     op.nq,
-				TopK:           op.topK,
+				TopK:           0,
 				FieldsData:     make([]*schemapb.FieldData, 0),
 				Scores:         []float32{},
 				Ids:            &schemapb.IDs{},

@@ -52,13 +52,13 @@ func TestManifestSegmentRootedIndexRoundTrip(t *testing.T) {
 			IndexFileKeys:         []string{"index.bin"},
 		}
 	}
-	manifest, err := CommitManifestUpdates(base, ManifestEarliest, cfg,
+	manifest, err := CommitManifestUpdates(MarshalManifestPath(base, ManifestEarliest), cfg,
 		&ManifestUpdates{Indexes: []ManifestIndexInfo{entry(100, "100/1")}})
 	require.NoError(t, err)
 	_, version, err := UnmarshalManifestPath(manifest)
 	require.NoError(t, err)
 	// A second commit must preserve the first index's complete path.
-	manifest, err = CommitManifestUpdates(base, version, cfg,
+	manifest, err = CommitManifestUpdates(MarshalManifestPath(base, version), cfg,
 		&ManifestUpdates{Indexes: []ManifestIndexInfo{entry(200, "200/1")}})
 	require.NoError(t, err)
 	indexes, err := GetManifestIndexInfos(manifest, cfg)
@@ -72,7 +72,7 @@ func TestManifestSegmentRootedIndexRoundTrip(t *testing.T) {
 	// A rejected incremental entry must not replace the committed revision.
 	_, version, err = UnmarshalManifestPath(manifest)
 	require.NoError(t, err)
-	_, err = CommitManifestUpdates(base, version, cfg,
+	_, err = CommitManifestUpdates(MarshalManifestPath(base, version), cfg,
 		&ManifestUpdates{Indexes: []ManifestIndexInfo{entry(300, "../../index_files/300")}})
 	require.Error(t, err)
 	indexes, err = GetManifestIndexInfos(manifest, cfg)
