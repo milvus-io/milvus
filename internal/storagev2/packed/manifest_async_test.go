@@ -696,3 +696,39 @@ func TestAsyncManifestIndexMarkerResult(t *testing.T) {
 		})
 	}
 }
+
+// TestAsyncManifestDropColumns verifies the production async commit path
+// (SubmitManifestUpdates -> applyAsyncManifestUpdates, the path
+// meta.CommitSegmentManifests actually drives) recognizes a DropColumns-only
+// update as real work. Without DropColumns in applyAsyncManifestUpdates'
+// "changed" check, a drop-only update would silently return the base path and
+// never produce a revision that strips the column.
+func TestAsyncManifestDropColumns(t *testing.T) {
+	cfg := manifestTestStorageConfig(t)
+	io := NewManifestIOContext(1)
+	defer io.Close()
+	ctx := context.Background()
+	base := path.Join(cfg.RootPath, "async_drop_columns", "seg1")
+
+	seed, err := CommitManifestUpdates(MarshalManifestPath(base, 0), cfg, &ManifestUpdates{
+		ColumnGroups: []ColumnGroupEntry{{
+			Columns: []string{"100"},
+			Format:  "parquet",
+			Files:   []ColumnGroupFileEntry{{Path: path.Join(base, "_data", "100_a.parquet"), StartIndex: 0, EndIndex: 5}},
+		}},
+	})
+	require.NoError(t, err)
+	fields, err := GetManifestFieldIDs(seed, cfg)
+	require.NoError(t, err)
+	require.Contains(t, fields, int64(100))
+
+	dropped, err := CommitManifestUpdatesWithResultAsync(ctx, io, seed, cfg, &ManifestUpdates{
+		DropColumns: []string{"100"},
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, seed, dropped.ManifestPath,
+		"a DropColumns-only update must produce a new revision, not return the base path unchanged")
+	fields, err = GetManifestFieldIDs(dropped.ManifestPath, cfg)
+	require.NoError(t, err)
+	require.NotContains(t, fields, int64(100))
+}

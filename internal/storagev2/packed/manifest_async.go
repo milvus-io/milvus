@@ -536,7 +536,8 @@ func applyAsyncManifestUpdates(txn C.LoonTransactionHandle, manifestPath string,
 	}
 	hasIndexes := manifestIndexesAfterUpdates(indexes, updates, drops, columns)
 	if updates.NewFiles == nil && len(updates.ColumnGroups) == 0 && len(updates.DeltaLogs) == 0 &&
-		len(updates.Stats) == 0 && len(updates.Indexes) == 0 && len(drops) == 0 {
+		len(updates.Stats) == 0 && len(updates.Indexes) == 0 && len(drops) == 0 &&
+		len(updates.DropColumns) == 0 {
 		return false, hasIndexes, nil
 	}
 	return true, hasIndexes, applyManifestUpdates(txn, updates, drops)
