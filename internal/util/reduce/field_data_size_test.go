@@ -76,7 +76,7 @@ func TestFieldDataRowSizeScalars(t *testing.T) {
 				value := refValues.Get(row)
 				refValues.Truncate(0)
 				refValues.Append(value)
-				refScalar.ValidData = refScalar.ValidData[row : row+1]
+				typeutil.SetFieldDataValidData(reference, refScalar.ValidData[row:row+1])
 				got, err := FieldDataRowSize(field, int64(row), int64(row), false)
 				require.NoError(t, err)
 				require.Equal(t, proto.Size(reference), got, "row %d", row)
@@ -152,12 +152,12 @@ func TestFieldDataRowSizeInvalidData(t *testing.T) {
 	got, err := FieldDataRowSize(field, 0, 0, false)
 	require.NoError(t, err)
 	field.GetScalars().GetLongData().Data = []int64{0}
+	typeutil.SetFieldDataValidData(field, []bool{false})
 	require.Equal(t, proto.Size(field), got)
 	field.GetScalars().ValidData = nil
 	field.ValidData = []bool{true}
 	got, err = FieldDataRowSize(field, 0, 0, false)
 	require.NoError(t, err)
-	field.ValidData = nil
-	field.GetScalars().ValidData = []bool{true}
+	typeutil.SetFieldDataValidData(field, []bool{true})
 	require.Equal(t, proto.Size(field), got)
 }
