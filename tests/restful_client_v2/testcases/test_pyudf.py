@@ -218,6 +218,31 @@ def create_udf(context):
             payload = self._search_payload(resource)
             self._assert_ranked_response(self._search_after_resource_sync(payload))
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("query_order", [[0, 1], [0, 2, 1]], ids=["unequal_nonempty", "empty_between"])
+    def test_search_pyudf_multi_query_preserves_boundaries(self, query_order):
+        """target: REST query boundaries; method: ragged range results; expected: exact topks, IDs, scores and fields."""
+        with self._pyudf_environment() as resource:
+            payload = self._search_payload(resource)
+            self._assert_ranked_response(self._search_after_resource_sync(payload))
+            queries = [[-0.01, 0.0], [0.019, 0.0], [10.0, 10.0]]
+            expected_ids = [[1], [3, 2], []]
+            payload["data"] = [queries[i] for i in query_order]
+            payload["searchParams"]["params"] = {"radius": 0.00015, "range_filter": 0.0}
+            response = self._search_once(payload)
+            assert response["code"] == 0, response
+            # REST flattens data; topks is the authoritative query boundary vector.
+            assert response["topks"] == [len(expected_ids[i]) for i in query_order], response
+            assert len(response["data"]) == sum(response["topks"]), response
+            offset = 0
+            for query_index, count in zip(query_order, response["topks"]):
+                hits = response["data"][offset : offset + count]
+                ids = expected_ids[query_index]
+                assert [h["id"] for h in hits] == ids
+                assert [h["distance"] for h in hits] == pytest.approx([pk * 20 for pk in ids])
+                assert [h["ts"] for h in hits] == [pk * 10 for pk in ids]
+                offset += count
+
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
         "failure, code, message",
