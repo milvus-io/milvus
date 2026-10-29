@@ -99,7 +99,7 @@ func (t *PipelineTrace) traceReduce(opName string, msg opMsg) {
 		if gbvs := rd.GetGroupByFieldValues(); len(gbvs) > 0 {
 			gbv := gbvs[0]
 			t.Set(prefix+".groupByRows", fieldDataLen(gbv))
-			t.Set(prefix+".groupByCards", scalarGroupByCards(gbv.GetScalars(), topks, gbv.GetValidData()))
+			t.Set(prefix+".groupByCards", scalarGroupByCards(gbv.GetScalars(), topks, typeutil.GetFieldDataValidData(gbv)))
 		}
 	}
 }
@@ -125,7 +125,7 @@ func (t *PipelineTrace) traceSearchResult(prefix string, msg opMsg, key string) 
 	if gbvs := rd.GetGroupByFieldValues(); len(gbvs) > 0 {
 		gbv := gbvs[0]
 		t.Set(prefix+".groupByRows", fieldDataLen(gbv))
-		t.Set(prefix+".groupByCards", scalarGroupByCards(gbv.GetScalars(), topks, gbv.GetValidData()))
+		t.Set(prefix+".groupByCards", scalarGroupByCards(gbv.GetScalars(), topks, typeutil.GetFieldDataValidData(gbv)))
 	}
 }
 
@@ -184,7 +184,7 @@ func fieldDataLen(fd *schemapb.FieldData) int {
 	if fd == nil {
 		return 0
 	}
-	if vd := fd.GetValidData(); len(vd) > 0 {
+	if vd := typeutil.GetFieldDataValidData(fd); len(vd) > 0 {
 		return len(vd)
 	}
 	switch fd.GetField().(type) {

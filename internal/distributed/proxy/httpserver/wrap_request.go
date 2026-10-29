@@ -224,12 +224,6 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 			data = append(data, *value)
 			validData[i] = true
 		}
-		// This wrapper does not have the collection schema, so only emit ValidData
-		// when the payload actually contains null. Proxy fills an all-true bitmap
-		// for nullable fields without nulls and requires no bitmap for non-nullable fields.
-		if hasNull {
-			ret.ValidData = validData
-		}
 		ret.Field = &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_StringData{
@@ -238,6 +232,12 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 					},
 				},
 			},
+		}
+		// This wrapper does not have the collection schema, so only emit ValidData
+		// when the payload actually contains null. Proxy fills an all-true bitmap
+		// for nullable fields without nulls and requires no bitmap for non-nullable fields.
+		if hasNull {
+			typeutil.SetFieldDataValidData(&ret, validData)
 		}
 	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
 		data := []int32{}

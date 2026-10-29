@@ -54,19 +54,20 @@ VectorBase::set_data_raw(ssize_t element_offset,
                 element_offset, VEC_FIELD_DATA(data, int8), element_count);
         } else if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
             auto& vector_array = data->vectors().vector_array().data();
+            const auto& valid_data = GetFieldDataRowValidData(*data);
             std::vector<VectorArray> data_raw{};
             if (field_meta.is_nullable() &&
-                data->valid_data_size() == element_count) {
+                valid_data.size() == element_count) {
                 ssize_t valid_count = 0;
                 for (ssize_t i = 0; i < element_count; ++i) {
-                    if (data->valid_data(i)) {
+                    if (valid_data[i]) {
                         ++valid_count;
                     }
                 }
                 data_raw.reserve(valid_count);
                 if (vector_array.size() == element_count) {
                     for (ssize_t i = 0; i < element_count; ++i) {
-                        if (data->valid_data(i)) {
+                        if (valid_data[i]) {
                             data_raw.emplace_back(VectorArray(vector_array[i]));
                         }
                     }

@@ -426,7 +426,7 @@ func int32ToType[T ~int8 | int16](data []int32) []T {
 // FieldDataColumn converts schemapb.FieldData to Column, used int search result conversion logic
 // begin, end specifies the start and end positions
 func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
-	validData := fd.GetValidData()
+	validData := getFieldDataValidData(fd)
 
 	switch fd.GetType() {
 	case schemapb.DataType_Bool:

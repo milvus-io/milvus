@@ -21,6 +21,7 @@
 #include "common/GeometryCache.h"
 #include "common/OpContext.h"
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "exec/expression/GISFunctionFilterExpr.h"
 #include "geos_c.h"
 #include "index/Index.h"
@@ -487,7 +488,7 @@ PhyGISRefineConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
             auto geometry_array =
                 static_cast<const milvus::proto::schema::GeometryArray*>(
                     &data_array->scalars().geometry_data());
-            const auto& vd = data_array->valid_data();
+            const auto& vd = GetFieldDataRowValidData(*data_array);
             GEOSContextHandle_t local_ctx = GetThreadLocalGEOSContext();
             for (size_t k = 0; k < hit_abs.size(); ++k) {
                 if (!vd.empty() && !vd[k]) {

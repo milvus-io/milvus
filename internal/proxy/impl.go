@@ -3406,7 +3406,7 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 	}
 
 	// validData is per requested ID: one entry per row, in request order.
-	validData := fieldData.GetValidData()
+	validData := typeutil.GetFieldDataValidData(fieldData)
 
 	// The placeholder group must hold only the rows that can be searched, one
 	// per true entry of validData, since adjustSearchResultsForNullVectors

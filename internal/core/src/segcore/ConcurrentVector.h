@@ -82,7 +82,8 @@ class ThreadSafeValidData {
         if (field_meta.is_nullable()) {
             check_source_span(num_rows, data, field_meta);
             reserve_to(length_ + num_rows);
-            write_from(length_, num_rows, data->valid_data().data());
+            write_from(
+                length_, num_rows, GetFieldDataRowValidData(*data).data());
             length_ += num_rows;
         }
     }
@@ -115,7 +116,9 @@ class ThreadSafeValidData {
                        element_offset,
                        length_);
             reserve_to(end);
-            write_from(element_offset, num_rows, data->valid_data().data());
+            write_from(element_offset,
+                       num_rows,
+                       GetFieldDataRowValidData(*data).data());
             length_ = std::max(length_, end);
         }
     }
@@ -208,8 +211,9 @@ class ThreadSafeValidData {
                       const DataArray* data,
                       const FieldMeta& field_meta) {
         // Resolve validity the same way write_from's caller does
-        // (FieldData.valid_data on 3.0).
-        const auto valid_size = static_cast<size_t>(data->valid_data_size());
+        // through GetFieldDataRowValidData.
+        const auto valid_size =
+            static_cast<size_t>(GetFieldDataRowValidData(*data).size());
         AssertInfo(valid_size == num_rows,
                    "nullable field {} valid_data size {} must match "
                    "num_rows {}",

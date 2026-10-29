@@ -86,7 +86,7 @@ func NewInt64FieldDataWithStart(fieldName string, numRows int, start int64) *sch
 
 func NewInt64FieldDataNullableWithStart(fieldName string, numRows, start int) *schemapb.FieldData {
 	validData, num := GenerateBoolArray(numRows)
-	return &schemapb.FieldData{
+	fieldData := &schemapb.FieldData{
 		Type:      schemapb.DataType_Int64,
 		FieldName: fieldName,
 		Field: &schemapb.FieldData_Scalars{
@@ -98,8 +98,9 @@ func NewInt64FieldDataNullableWithStart(fieldName string, numRows, start int) *s
 				},
 			},
 		},
-		ValidData: validData,
 	}
+	typeutil.SetFieldDataValidData(fieldData, validData)
+	return fieldData
 }
 
 func NewInt64SameFieldData(fieldName string, numRows int, value int64) *schemapb.FieldData {
@@ -139,7 +140,7 @@ func NewVarCharFieldData(fieldName string, numRows int, nullable bool) *schemapb
 	if nullable {
 		numValid = numRows / 2
 	}
-	return &schemapb.FieldData{
+	fieldData := &schemapb.FieldData{
 		Type:      schemapb.DataType_String,
 		FieldName: fieldName,
 		Field: &schemapb.FieldData_Scalars{
@@ -152,8 +153,9 @@ func NewVarCharFieldData(fieldName string, numRows int, nullable bool) *schemapb
 				},
 			},
 		},
-		ValidData: testutils.GenerateBoolArray(numRows),
 	}
+	typeutil.SetFieldDataValidData(fieldData, testutils.GenerateBoolArray(numRows))
+	return fieldData
 }
 
 func NewStringFieldData(fieldName string, numRows int) *schemapb.FieldData {

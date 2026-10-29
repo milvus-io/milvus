@@ -260,7 +260,7 @@ func materializeJSONPathReplace(dst, old, operand *schemapb.FieldData, path []js
 		return merr.WrapErrServiceInternalMsg("malformed retrieved JSON field or row mapping")
 	}
 	values := make([][]byte, len(dataIndices))
-	valid := old.GetValidData()
+	valid := typeutil.GetFieldDataValidData(old)
 	maxLength := paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt64()
 	for i, index := range dataIndices {
 		row := rowIndices[i]
