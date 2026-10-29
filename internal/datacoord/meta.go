@@ -134,9 +134,12 @@ type meta struct {
 	// member or a superseded parent — by at most one alive group):
 	//   - stagedSegmentToGroup:    new_segment (member)     -> groupID
 	//   - supersededSegmentToGroup: superseded (parent)      -> groupID
+	//   - segmentChangeSuccessors: predecessor groupID -> number of persisted
+	//     successor groups; a predecessor cannot be deleted while this is nonzero.
 	segmentChangeGroups      map[int64]*model.SegmentChangeGroup
 	stagedSegmentToGroup     map[int64]int64
 	supersededSegmentToGroup map[int64]int64
+	segmentChangeSuccessors  map[int64]int
 }
 
 func (m *meta) GetIndexMeta() *indexMeta {
@@ -248,6 +251,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		segmentChangeGroups:      make(map[int64]*model.SegmentChangeGroup),
 		stagedSegmentToGroup:     make(map[int64]int64),
 		supersededSegmentToGroup: make(map[int64]int64),
+		segmentChangeSuccessors:  make(map[int64]int),
 	}
 
 	initialized := false
@@ -365,6 +369,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	mt.segmentChangeGroups = scg
 	mt.stagedSegmentToGroup = stag
 	mt.supersededSegmentToGroup = sup
+	mt.rebuildSegmentChangeSuccessorsLocked()
 
 	initialized = true
 	return mt, nil

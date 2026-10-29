@@ -269,7 +269,13 @@ func (m *meta) validateSegmentChangeVisibilityLocked(segments map[int64]*Segment
 // Keep the recovery anchor and read-side exclusion until failed outputs have
 // actually been retired. A metadata-only delete must not orphan invisible rows.
 func (m *meta) validateSegmentChangeGroupDeletionLocked(g *model.SegmentChangeGroup, updates map[int64]*SegmentInfo) error {
-	if g == nil || g.State == model.SegmentChangeStateCommitted {
+	if g == nil {
+		return nil
+	}
+	if successors := m.segmentChangeSuccessors[g.GroupID]; successors != 0 {
+		return merr.WrapErrDataIntegrityMsg("segment change group %d cannot be deleted while %d successor groups still reference it", g.GroupID, successors)
+	}
+	if g.State == model.SegmentChangeStateCommitted {
 		return nil
 	}
 	for _, id := range g.UnpublishedSegmentIDs() {
