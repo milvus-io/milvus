@@ -202,16 +202,6 @@ class TestMetricsColumn : public ChunkedColumnInterface {
     }
 
     void
-    BulkPrimitiveValueAt(milvus::OpContext* op_ctx,
-                         void* dst,
-                         const int64_t* offsets,
-                         int64_t count,
-                         bool small_int_raw_type) override {
-        return column_->BulkPrimitiveValueAt(
-            op_ctx, dst, offsets, count, small_int_raw_type);
-    }
-
-    void
     BulkVectorValueAt(milvus::OpContext* op_ctx,
                       void* dst,
                       const int64_t* offsets,

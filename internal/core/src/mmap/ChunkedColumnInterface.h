@@ -367,13 +367,6 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
                 int64_t count) = 0;
 
     virtual void
-    BulkPrimitiveValueAt(milvus::OpContext* op_ctx,
-                         void* dst,
-                         const int64_t* offsets,
-                         int64_t count,
-                         bool small_int_raw_type = false) = 0;
-
-    virtual void
     BulkVectorValueAt(milvus::OpContext* op_ctx,
                       void* dst,
                       const int64_t* offsets,
@@ -403,25 +396,6 @@ class ChunkedColumnInterface : public FieldChunkMetricsProvider {
         ThrowInfo(ErrorCode::Unsupported,
                   "BulkRawBsonAt only supported for ChunkColumnInterface of "
                   "Bson type");
-    }
-
-    virtual void
-    BulkArrayAt(milvus::OpContext* op_ctx,
-                std::function<void(const ArrayView&, size_t)> fn,
-                const int64_t* offsets,
-                int64_t count) const {
-        ThrowInfo(ErrorCode::Unsupported,
-                  "BulkArrayAt only supported for ChunkedArrayColumn");
-    }
-
-    virtual void
-    BulkArrayValueAt(milvus::OpContext* op_ctx,
-                     std::function<void(ScalarFieldProto&&, size_t)> fn,
-                     const int64_t* offsets,
-                     int64_t count) const {
-        ThrowInfo(
-            ErrorCode::Unsupported,
-            "BulkArrayValueAt only supported for recursive ARRAY columns");
     }
 
     virtual void
