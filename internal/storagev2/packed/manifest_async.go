@@ -31,6 +31,7 @@ import (
 	"context"
 	"runtime/cgo"
 	"slices"
+	"strconv"
 	"sync"
 	"time"
 	"unsafe"
@@ -552,7 +553,9 @@ func manifestIndexesAfterUpdates(indexes []ManifestIndexInfo, updates *ManifestU
 		return nil
 	}
 	for _, index := range indexes {
-		if !slices.Contains(drops, index.IndexID) && !slices.Contains(appendedColumns, index.ColumnName) {
+		// Internal data columns use decimal field IDs; ColumnName retains the
+		// schema name. Keep this projection aligned with storage invalidation.
+		if !slices.Contains(drops, index.IndexID) && !slices.Contains(appendedColumns, strconv.FormatInt(index.FieldID, 10)) {
 			value = true
 			break
 		}
