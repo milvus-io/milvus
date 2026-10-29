@@ -1413,6 +1413,16 @@ func (q *QuotaCenter) resetAllCurrentRates() error {
 		}
 	}
 	partitions := q.meta.ListAllAvailPartitions(q.ctx)
+	// Map every available collection to its DB from the meta the limiter tree is
+	// built from. The collected metrics only name loaded collections and
+	// collections with healthy segments, but a quota factor can name any
+	// collection: the WAL lag check covers every collection on a pchannel. A
+	// collection without a DB is skipped by every write rate decision.
+	for dbID, collections := range partitions {
+		for collectionID := range collections {
+			q.collectionIDToDBID.Insert(collectionID, dbID)
+		}
+	}
 	initLimiters(partitions)
 	return nil
 }
