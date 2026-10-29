@@ -133,6 +133,13 @@ SegcoreGetLazyColumnGroupEnabled() {
 }
 
 extern "C" void
+SegcoreSetLazyIndexSlotEnabled(const bool value) {
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
+    config.set_lazy_index_slot_enabled(value);
+}
+
+extern "C" void
 SegcoreSetNlist(const int64_t value) {
     milvus::segcore::SegcoreConfig& config =
         milvus::segcore::SegcoreConfig::default_config();

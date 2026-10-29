@@ -189,6 +189,25 @@ getCacheWarmupPolicy(const std::string& warmup_policy,
 milvus::cachinglayer::CellDataType
 getCellDataType(bool is_vector, bool is_index);
 
+bool
+CanDeferSealedIndexSlot(const milvus::segcore::LoadIndexInfo& load_index_info);
+
+bool
+IsSealedNgramIndex(const milvus::segcore::LoadIndexInfo& load_index_info);
+
+void
+ValidateSealedIndexLoadInfo(
+    const milvus::segcore::LoadIndexInfo& load_index_info);
+
+void
+EnsureSealedIndexLoadResource(milvus::segcore::LoadIndexInfo& load_index_info);
+
+milvus::index::CacheIndexBasePtr
+CreateSealedIndexCacheSlot(
+    milvus::tracer::TraceContext& ctx,
+    const milvus::segcore::LoadIndexInfo& load_index_info,
+    milvus::OpContext* op_ctx = nullptr);
+
 void
 LoadIndexData(milvus::tracer::TraceContext& ctx,
               milvus::segcore::LoadIndexInfo* load_index_info,

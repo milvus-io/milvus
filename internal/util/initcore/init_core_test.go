@@ -461,3 +461,17 @@ func TestInitStorageV2FileSystem(t *testing.T) {
 	err = InitStorageV2FileSystem(paramtable.Get())
 	assert.NoError(t, err)
 }
+
+func TestTieredLazyIndexSlotUpdate(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	item := &params.QueryNodeCfg.TieredLazyIndexSlotEnabled
+	defer func() {
+		params.Reset(item.Key)
+		assert.NoError(t, UpdateTieredStorageConfig(params))
+	}()
+	for _, value := range []string{"true", "false"} {
+		assert.NoError(t, params.Save(item.Key, value))
+		assert.NoError(t, UpdateTieredStorageConfig(params))
+	}
+}

@@ -266,19 +266,27 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
         auto span = milvus::tracer::StartSpan("SegCoreLoadIndex", &ctx);
         milvus::tracer::SetRootSpan(span);
 
-        LoadIndexData(ctx, load_index_info);
+        auto defer_slot =
+            milvus::segcore::CanDeferSealedIndexSlot(*load_index_info);
+        if (defer_slot) {
+            milvus::segcore::ValidateSealedIndexLoadInfo(*load_index_info);
+            milvus::segcore::EnsureSealedIndexLoadResource(*load_index_info);
+        } else {
+            LoadIndexData(ctx, load_index_info);
+        }
 
         span->End();
         milvus::tracer::CloseRootSpan();
 
         LOG_INFO(
-            "[collection={}][segment={}][field={}][enable_mmap={}] load index "
-            "{} done, mmap_dir_path={}",
+            "[collection={}][segment={}][field={}][enable_mmap={}] prepare "
+            "index {} done, deferred={}, mmap_dir_path={}",
             load_index_info->collection_id,
             load_index_info->segment_id,
             load_index_info->field_id,
             load_index_info->enable_mmap,
             load_index_info->index_id,
+            defer_slot,
             load_index_info->mmap_dir_path);
 
         auto status = CStatus();

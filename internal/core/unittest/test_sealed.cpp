@@ -13,6 +13,7 @@
 #include <folly/CancellationToken.h>
 #include <folly/FBVector.h>
 #include <nlohmann/json.hpp>
+#include <simdjson/padded_string.h>
 #include <stdlib.h>
 #include <time.h>
 #include <algorithm>
@@ -59,6 +60,7 @@
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
+#include "index/JsonScalarIndexWrapper.h"
 #include "index/Meta.h"
 #include "index/SkipIndex.h"
 #include "index/StringIndexSort.h"
@@ -99,6 +101,1394 @@ using namespace milvus::query;
 using namespace milvus::segcore;
 
 using milvus::segcore::LoadIndexInfo;
+
+#include "common/OpContext.h"
+#include "index/ScalarIndexSort.h"
+#include "index/TextMatchIndex.h"
+#include "segcore/InsertRecord.h"
+#include "segcore/default_fs.h"
+#include "segcore/load_index_c.h"
+#include "storage/DiskFileManagerImpl.h"
+
+namespace {
+
+class ScopedLazyIndexSlotEnabled {
+ public:
+    explicit ScopedLazyIndexSlotEnabled(bool enabled)
+        : previous_(
+              SegcoreConfig::default_config().get_lazy_index_slot_enabled()) {
+        SegcoreConfig::default_config().set_lazy_index_slot_enabled(enabled);
+    }
+
+    ~ScopedLazyIndexSlotEnabled() {
+        SegcoreConfig::default_config().set_lazy_index_slot_enabled(previous_);
+    }
+
+ private:
+    bool previous_;
+};
+
+LoadIndexInfo
+MakeLazyBusinessIndexInfo(const SchemaPtr& schema,
+                          FieldId field_id,
+                          std::string index_type,
+                          std::string warmup_policy,
+                          int64_t index_id = 1) {
+    const auto& field_meta = schema->operator[](field_id);
+    LoadIndexInfo info;
+    info.collection_id = 1;
+    info.partition_id = 2;
+    info.segment_id = 3;
+    info.field_id = field_id.get();
+    info.field_type = field_meta.get_data_type();
+    info.element_type = field_meta.get_element_type();
+    info.enable_mmap = false;
+    info.mmap_dir_path = TestMmapPath;
+    info.index_id = index_id;
+    info.index_build_id = 1000 + index_id;
+    info.index_version = 1;
+    info.index_params[index::INDEX_TYPE] = std::move(index_type);
+    info.index_params[milvus::LOAD_PRIORITY] = "HIGH";
+    if (field_meta.is_vector()) {
+        info.index_params[knowhere::meta::METRIC_TYPE] =
+            field_meta.get_metric_type().value();
+    }
+    info.index = nullptr;
+    info.cache_index = nullptr;
+    info.uri.clear();
+    info.index_engine_version = static_cast<IndexVersion>(
+        knowhere::Version::GetCurrentVersion().VersionNumber());
+    info.schema = field_meta.ToProto();
+    info.index_size = 4096;
+    info.num_rows = 120;
+    info.dim = IsSparseFloatVectorDataType(field_meta.get_data_type())
+                   ? 0
+                   : (field_meta.is_vector() ? field_meta.get_dim() : 1);
+    info.warmup_policy = std::move(warmup_policy);
+    info.load_resource_request = LoadResourceRequest{};
+    return info;
+}
+
+storage::FileManagerContext
+MakeLazyBusinessIndexFileManagerContext(const LoadIndexInfo& info) {
+    auto remote_chunk_manager =
+        storage::RemoteChunkManagerSingleton::GetInstance()
+            .GetRemoteChunkManager();
+    auto fs = segcore::GetDefaultArrowFileSystem();
+    AssertInfo(remote_chunk_manager != nullptr,
+               "remote chunk manager is not initialized");
+    AssertInfo(fs != nullptr, "arrow file system is not initialized");
+
+    storage::FieldDataMeta field_meta{info.collection_id,
+                                      info.partition_id,
+                                      info.segment_id,
+                                      info.field_id,
+                                      info.schema};
+    storage::IndexMeta index_meta{info.segment_id,
+                                  info.field_id,
+                                  info.index_build_id,
+                                  info.index_version};
+    return storage::FileManagerContext(
+        field_meta, index_meta, remote_chunk_manager, fs);
+}
+
+LoadIndexInfo
+MakeUploadedLazyScalarIndexInfo(const SchemaPtr& schema,
+                                FieldId field_id,
+                                const std::vector<int64_t>& values,
+                                int64_t index_id) {
+    auto info = MakeLazyBusinessIndexInfo(
+        schema, field_id, index::ASCENDING_SORT, "disable", index_id);
+    info.num_rows = values.size();
+    info.load_resource_request.reset();
+    info.index_params[index::SCALAR_INDEX_ENGINE_VERSION] = "3";
+
+    auto index = std::make_unique<index::ScalarIndexSort<int64_t>>(
+        MakeLazyBusinessIndexFileManagerContext(info));
+    index->Build(values.size(), values.data());
+    auto stats = index->UploadUnified({});
+    info.index_files = stats->GetIndexFiles();
+    info.index_size = stats->GetSerializedSize();
+    return info;
+}
+
+LoadIndexInfo
+MakeUploadedLazyStringIndexInfo(const SchemaPtr& schema,
+                                FieldId field_id,
+                                const std::vector<std::string>& values,
+                                int64_t index_id) {
+    auto info = MakeLazyBusinessIndexInfo(
+        schema, field_id, index::ASCENDING_SORT, "disable", index_id);
+    info.num_rows = values.size();
+    info.load_resource_request.reset();
+    info.index_params[index::SCALAR_INDEX_ENGINE_VERSION] = "3";
+
+    auto index = std::make_unique<index::StringIndexSort>(
+        MakeLazyBusinessIndexFileManagerContext(info));
+    index->Build(values.size(), values.data());
+    auto stats = index->UploadUnified({});
+    info.index_files = stats->GetIndexFiles();
+    info.index_size = stats->GetSerializedSize();
+    return info;
+}
+
+LoadIndexInfo
+MakeUploadedLazyInvertedIndexInfo(const SchemaPtr& schema,
+                                  FieldId field_id,
+                                  const std::vector<int64_t>& values,
+                                  int64_t index_id) {
+    auto info = MakeLazyBusinessIndexInfo(
+        schema, field_id, index::INVERTED_INDEX_TYPE, "disable", index_id);
+    info.num_rows = values.size();
+    info.load_resource_request.reset();
+    info.index_params[index::SCALAR_INDEX_ENGINE_VERSION] = "3";
+
+    index::CreateIndexInfo create_info;
+    create_info.field_type = info.field_type;
+    create_info.index_type = index::INVERTED_INDEX_TYPE;
+    create_info.scalar_index_engine_version = 3;
+    create_info.tantivy_index_version = index::TANTIVY_INDEX_LATEST_VERSION;
+    auto index = index::IndexFactory::GetInstance().CreateIndex(
+        create_info, MakeLazyBusinessIndexFileManagerContext(info));
+    index->BuildWithRawDataForUT(values.size(), values.data());
+    auto stats = index->UploadUnified({});
+    info.index_files = stats->GetIndexFiles();
+    info.index_size = stats->GetSerializedSize();
+    return info;
+}
+
+LoadIndexInfo
+MakeUploadedLazyVectorIndexInfo(const SchemaPtr& schema,
+                                FieldId field_id,
+                                const float* values,
+                                size_t value_count,
+                                int64_t index_id) {
+    auto info = MakeLazyBusinessIndexInfo(
+        schema, field_id, knowhere::IndexEnum::INDEX_HNSW, "disable", index_id);
+    info.num_rows = value_count / info.dim;
+    info.load_resource_request.reset();
+
+    index::CreateIndexInfo create_info;
+    create_info.field_type = info.field_type;
+    create_info.index_type = knowhere::IndexEnum::INDEX_HNSW;
+    create_info.metric_type = knowhere::metric::L2;
+    create_info.index_engine_version = info.index_engine_version;
+    auto index = index::IndexFactory::GetInstance().CreateIndex(
+        create_info, MakeLazyBusinessIndexFileManagerContext(info));
+
+    Config build_config{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+                        {knowhere::meta::DIM, std::to_string(info.dim)},
+                        {knowhere::indexparam::HNSW_M, "8"},
+                        {knowhere::indexparam::EFCONSTRUCTION, "64"}};
+    index->BuildWithDataset(
+        knowhere::GenDataSet(info.num_rows, info.dim, values), build_config);
+    auto stats = index->Upload();
+    info.index_params = GenIndexParams(index.get());
+    info.index_params[knowhere::meta::METRIC_TYPE] = knowhere::metric::L2;
+    info.index_params[milvus::LOAD_PRIORITY] = "HIGH";
+    info.index_files = stats->GetIndexFiles();
+    info.index_size = stats->GetSerializedSize();
+    return info;
+}
+
+LoadIndexInfo
+MakeUploadedLazySparseIndexInfo(
+    const SchemaPtr& schema,
+    FieldId field_id,
+    const std::vector<knowhere::sparse::SparseRow<milvus::SparseValueType>>&
+        values,
+    int64_t index_id) {
+    auto info = MakeLazyBusinessIndexInfo(
+        schema,
+        field_id,
+        knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
+        "disable",
+        index_id);
+    info.num_rows = values.size();
+    info.dim = kTestSparseDim;
+    info.load_resource_request.reset();
+
+    index::CreateIndexInfo create_info;
+    create_info.field_type = info.field_type;
+    create_info.index_type = knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX;
+    create_info.metric_type = knowhere::metric::IP;
+    create_info.index_engine_version = info.index_engine_version;
+    auto index = index::IndexFactory::GetInstance().CreateIndex(
+        create_info, MakeLazyBusinessIndexFileManagerContext(info));
+
+    auto dataset =
+        knowhere::GenDataSet(values.size(), kTestSparseDim, values.data());
+    dataset->SetIsSparse(true);
+    index->BuildWithDataset(
+        dataset,
+        generate_build_conf(knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
+                            knowhere::metric::IP));
+    auto stats = index->Upload();
+    info.index_params = GenIndexParams(index.get());
+    info.index_params[milvus::LOAD_PRIORITY] = "HIGH";
+    info.index_files = stats->GetIndexFiles();
+    info.index_size = stats->GetSerializedSize();
+    return info;
+}
+
+LoadIndexInfo
+MakeUploadedLazyJsonIndexInfo(const SchemaPtr& schema,
+                              FieldId field_id,
+                              std::string index_type,
+                              std::string path,
+                              std::string cast_type,
+                              const std::vector<std::string>& raw_json,
+                              int64_t index_id) {
+    auto info = MakeLazyBusinessIndexInfo(
+        schema, field_id, std::move(index_type), "disable", index_id);
+    info.num_rows = raw_json.size();
+    info.index_params[JSON_PATH] = std::move(path);
+    info.index_params[JSON_CAST_TYPE] = std::move(cast_type);
+    if (info.index_params.at(index::INDEX_TYPE) == index::NGRAM_INDEX_TYPE) {
+        info.index_params[index::MIN_GRAM] = "2";
+        info.index_params[index::MAX_GRAM] = "3";
+    }
+
+    index::CreateIndexInfo create_info;
+    create_info.index_type = info.index_params.at(index::INDEX_TYPE);
+    create_info.field_type = DataType::JSON;
+    create_info.json_cast_type =
+        JsonCastType::FromString(info.index_params.at(JSON_CAST_TYPE));
+    create_info.json_path = info.index_params.at(JSON_PATH);
+    if (create_info.index_type == index::NGRAM_INDEX_TYPE) {
+        create_info.ngram_params = index::NgramParams{false, 2, 3};
+    }
+    auto json_index = index::IndexFactory::GetInstance().CreateJsonIndex(
+        create_info, MakeLazyBusinessIndexFileManagerContext(info));
+
+    std::vector<milvus::Json> values;
+    values.reserve(raw_json.size());
+    for (const auto& value : raw_json) {
+        values.emplace_back(simdjson::padded_string(value));
+    }
+    auto field_data =
+        std::make_shared<FieldData<milvus::Json>>(DataType::JSON, false);
+    field_data->add_json_data(values);
+    index::IndexStatsPtr stats;
+    if (create_info.index_type == index::NGRAM_INDEX_TYPE) {
+        auto ngram_index = std::unique_ptr<index::NgramInvertedIndex>(
+            static_cast<index::NgramInvertedIndex*>(json_index.release()));
+        ngram_index->BuildWithFieldData({field_data});
+        stats = ngram_index->Upload();
+    } else {
+        AssertInfo(create_info.json_cast_type.data_type() ==
+                       JsonCastType::DataType::DOUBLE,
+                   "test helper only builds DOUBLE JSON inverted indexes");
+        auto typed_index = std::unique_ptr<index::JsonInvertedIndex<double>>(
+            static_cast<index::JsonInvertedIndex<double>*>(
+                json_index.release()));
+        typed_index->BuildWithFieldData({field_data});
+        stats = typed_index->Upload();
+    }
+    info.index_files = stats->GetIndexFiles();
+    info.index_size = stats->GetSerializedSize();
+    return info;
+}
+
+std::tuple<SchemaPtr, FieldId, FieldId>
+MakeLazyBusinessIndexSchema() {
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    auto scalar_id = schema->AddDebugField("scalar", DataType::INT64);
+    auto vector_id = schema->AddDebugField(
+        "vector", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    schema->set_primary_field_id(pk_id);
+    return {schema, scalar_id, vector_id};
+}
+
+std::pair<SchemaPtr, FieldId>
+MakeLazySparseBusinessIndexSchema() {
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    auto sparse_id = schema->AddDebugField(
+        "sparse", DataType::VECTOR_SPARSE_U32_F32, 0, knowhere::metric::IP);
+    schema->set_primary_field_id(pk_id);
+    return {schema, sparse_id};
+}
+
+std::pair<SchemaPtr, FieldId>
+MakeLazyTextIndexSchema() {
+    auto schema = std::make_shared<Schema>();
+    auto pk_id = schema->AddDebugField("pk", DataType::INT64);
+    FieldId text_id(101);
+    std::map<std::string, std::string> params;
+    FieldMeta text_field(FieldName("text"),
+                         text_id,
+                         DataType::VARCHAR,
+                         65536,
+                         false,
+                         true,
+                         true,
+                         params,
+                         std::nullopt);
+    schema->AddField(std::move(text_field));
+    schema->set_primary_field_id(pk_id);
+    return {schema, text_id};
+}
+
+std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>
+MakeLazyTextIndexInfo(const SchemaPtr& schema,
+                      FieldId field_id,
+                      std::string warmup_policy,
+                      int64_t build_id = 1000) {
+    auto info = std::make_shared<proto::indexcgo::LoadTextIndexInfo>();
+    info->set_collectionid(1);
+    info->set_partitionid(2);
+    info->set_fieldid(field_id.get());
+    info->set_buildid(build_id);
+    info->set_version(1);
+    info->set_index_size(4096);
+    info->set_enable_mmap(false);
+    info->set_warmup_policy(std::move(warmup_policy));
+    *info->mutable_schema() = schema->operator[](field_id).ToProto();
+    return info;
+}
+
+std::shared_ptr<proto::indexcgo::LoadTextIndexInfo>
+MakeUploadedLazyTextIndexInfo(const SchemaPtr& schema,
+                              FieldId field_id,
+                              int64_t build_id,
+                              int64_t segment_id) {
+    auto info = MakeLazyTextIndexInfo(schema, field_id, "disable", build_id);
+    info->set_load_priority(proto::common::LoadPriority::HIGH);
+
+    auto remote_chunk_manager =
+        storage::RemoteChunkManagerSingleton::GetInstance()
+            .GetRemoteChunkManager();
+    auto fs = segcore::GetDefaultArrowFileSystem();
+    AssertInfo(remote_chunk_manager != nullptr,
+               "remote chunk manager is not initialized");
+    AssertInfo(fs != nullptr, "arrow file system is not initialized");
+
+    storage::FieldDataMeta field_meta{info->collectionid(),
+                                      info->partitionid(),
+                                      segment_id,
+                                      info->fieldid(),
+                                      info->schema()};
+    storage::IndexMeta index_meta{
+        segment_id, info->fieldid(), info->buildid(), info->version()};
+    storage::FileManagerContext file_manager_context(
+        field_meta, index_meta, remote_chunk_manager, fs);
+    storage::DiskFileManagerImpl path_resolver(file_manager_context);
+    info->set_base_path(path_resolver.GetRemoteTextLogPrefix());
+    auto analyzer_params = schema->operator[](field_id).get_analyzer_params();
+    auto index = std::make_unique<index::TextMatchIndex>(
+        file_manager_context,
+        index::TANTIVY_INDEX_LATEST_VERSION,
+        "milvus_tokenizer",
+        analyzer_params.c_str(),
+        "");
+
+    std::vector<std::string> texts = {
+        "football basketball", "swimming football", "table tennis"};
+    auto field_data =
+        storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, false);
+    field_data->FillFieldData(texts.data(), texts.size());
+    index->BuildIndexFromFieldData({field_data}, false);
+    auto stats = index->Upload({});
+    for (const auto& file : stats->GetIndexFiles()) {
+        info->add_files(file);
+    }
+    info->set_index_size(stats->GetMemSize());
+    return info;
+}
+
+ChunkedSegmentSealedImpl*
+AsChunkedSealed(const SegmentSealedUPtr& segment) {
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    EXPECT_NE(sealed, nullptr);
+    return sealed;
+}
+
+}  // namespace
+
+TEST(SealedLazyBusinessIndex, DefersAllIndexesWithDisabledWarmup) {
+    auto [schema, scalar_id, vector_id] = MakeLazyBusinessIndexSchema();
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = AsChunkedSealed(segment);
+
+    auto scalar_disable = MakeLazyBusinessIndexInfo(
+        schema, scalar_id, index::ASCENDING_SORT, "disable");
+    auto scalar_sync = MakeLazyBusinessIndexInfo(
+        schema, scalar_id, index::ASCENDING_SORT, "sync");
+    auto scalar_inverted = MakeLazyBusinessIndexInfo(
+        schema, scalar_id, index::INVERTED_INDEX_TYPE, "disable");
+    auto scalar_bitmap = MakeLazyBusinessIndexInfo(
+        schema, scalar_id, index::BITMAP_INDEX_TYPE, "disable");
+    auto vector_disable = MakeLazyBusinessIndexInfo(
+        schema, vector_id, knowhere::IndexEnum::INDEX_HNSW, "disable");
+    auto vector_ivf_flat = MakeLazyBusinessIndexInfo(
+        schema, vector_id, knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, "disable");
+
+    {
+        ScopedLazyIndexSlotEnabled disabled(false);
+        EXPECT_FALSE(
+            sealed->TestCanDeferBusinessIndex(scalar_id, {scalar_disable}));
+    }
+    {
+        ScopedLazyIndexSlotEnabled enabled(true);
+        EXPECT_TRUE(
+            sealed->TestCanDeferBusinessIndex(scalar_id, {scalar_disable}));
+        EXPECT_TRUE(
+            sealed->TestCanDeferBusinessIndex(scalar_id, {scalar_inverted}));
+        EXPECT_FALSE(
+            sealed->TestCanDeferBusinessIndex(scalar_id, {scalar_sync}));
+        EXPECT_TRUE(
+            sealed->TestCanDeferBusinessIndex(scalar_id, {scalar_bitmap}));
+        EXPECT_FALSE(sealed->TestCanDeferBusinessIndex(
+            scalar_id, {scalar_disable, scalar_disable}));
+        EXPECT_TRUE(
+            sealed->TestCanDeferBusinessIndex(vector_id, {vector_disable}));
+        EXPECT_TRUE(
+            sealed->TestCanDeferBusinessIndex(vector_id, {vector_ivf_flat}));
+    }
+
+    auto [sparse_schema, sparse_id] = MakeLazySparseBusinessIndexSchema();
+    auto sparse_segment = CreateSealedSegment(sparse_schema);
+    auto* sparse_sealed = AsChunkedSealed(sparse_segment);
+    auto sparse_disable = MakeLazyBusinessIndexInfo(
+        sparse_schema,
+        sparse_id,
+        knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
+        "disable");
+    ScopedLazyIndexSlotEnabled enabled(true);
+    EXPECT_TRUE(
+        sparse_sealed->TestCanDeferBusinessIndex(sparse_id, {sparse_disable}));
+}
+
+TEST(SealedLazyBusinessIndex, DisabledConfigKeepsEagerSlotCreation) {
+    ScopedLazyIndexSlotEnabled disabled(false);
+    auto [schema, scalar_id, vector_id] = MakeLazyBusinessIndexSchema();
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = AsChunkedSealed(segment);
+
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes;
+    indexes[scalar_id].push_back(MakeLazyBusinessIndexInfo(
+        schema, scalar_id, index::ASCENDING_SORT, "disable"));
+    sealed->TestLoadBatchIndexes(indexes);
+
+    EXPECT_TRUE(sealed->HasIndex(scalar_id));
+    EXPECT_EQ(sealed->TestDeferredBusinessIndexCount(), 0);
+    EXPECT_TRUE(sealed->TestHasMaterializedBusinessIndex(scalar_id));
+}
+
+TEST(SealedLazyBusinessIndex, OnlineLoadPathDefersBeforeSlotCreation) {
+    ScopedLazyIndexSlotEnabled enabled(true);
+    auto [schema, scalar_id, vector_id] = MakeLazyBusinessIndexSchema();
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = AsChunkedSealed(segment);
+
+    auto info = MakeLazyBusinessIndexInfo(
+        schema, scalar_id, index::ASCENDING_SORT, "disable");
+    info.load_resource_request.reset();
+    auto status = AppendIndexV2(CTraceContext{}, &info);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    EXPECT_EQ(info.cache_index, nullptr);
+    EXPECT_TRUE(info.load_resource_request.has_value());
+
+    sealed->LoadIndex(info);
+    EXPECT_TRUE(sealed->HasIndex(scalar_id));
+    EXPECT_EQ(sealed->TestDeferredBusinessIndexCount(), 1);
+    EXPECT_FALSE(sealed->TestHasMaterializedBusinessIndex(scalar_id));
+}
+
+TEST(SealedLazyBusinessIndex,
+     ConfigChangeBetweenPrepareAndPublishFallsBackToEager) {
+    auto [schema, scalar_id, vector_id] = MakeLazyBusinessIndexSchema();
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = AsChunkedSealed(segment);
+
+    auto info = MakeLazyBusinessIndexInfo(
+        schema, scalar_id, index::ASCENDING_SORT, "disable");
+    info.load_resource_request.reset();
+    {
+        ScopedLazyIndexSlotEnabled enabled(true);
+        auto status = AppendIndexV2(CTraceContext{}, &info);
+        ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    }
+    ASSERT_EQ(info.cache_index, nullptr);
+
+    {
+        ScopedLazyIndexSlotEnabled disabled(false);
+        sealed->LoadIndex(info);
+    }
+
+    EXPECT_TRUE(sealed->HasIndex(scalar_id));
+    EXPECT_EQ(sealed->TestDeferredBusinessIndexCount(), 0);
+    EXPECT_TRUE(sealed->TestHasMaterializedBusinessIndex(scalar_id));
+}
+
+TEST(SealedLazyBusinessIndex, RejectsInvalidMetadataBeforePublishing) {
+    ScopedLazyIndexSlotEnabled enabled(true);
+    auto [schema, scalar_id, vector_id] = MakeLazyBusinessIndexSchema();
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = AsChunkedSealed(segment);
+
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes;
+    auto info = MakeLazyBusinessIndexInfo(
+        schema, scalar_id, index::ASCENDING_SORT, "disable");
+    info.index_params[index::SCALAR_INDEX_ENGINE_VERSION] = "invalid";
+    indexes[scalar_id].push_back(std::move(info));
+
+    EXPECT_THROW(sealed->TestLoadBatchIndexes(indexes), std::exception);
+    EXPECT_FALSE(sealed->HasIndex(scalar_id));
+    EXPECT_EQ(sealed->TestDeferredBusinessIndexCount(), 0);
+    EXPECT_FALSE(sealed->TestHasMaterializedBusinessIndex(scalar_id));
+}
+
+TEST(SealedLazyBusinessIndex, DeferredScalarIndexLifecycle) {
+    ScopedLazyIndexSlotEnabled enabled(true);
+    auto [schema, scalar_id, vector_id] = MakeLazyBusinessIndexSchema();
+    auto segment = CreateSealedSegment(schema, empty_index_meta, 3);
+    auto* sealed = AsChunkedSealed(segment);
+
+    const std::vector<int64_t> values = {10, 20, 30, 40, 50, 60};
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes;
+    indexes[scalar_id].push_back(
+        MakeUploadedLazyScalarIndexInfo(schema, scalar_id, values, 11));
+    sealed->TestLoadBatchIndexes(indexes);
+
+    EXPECT_TRUE(sealed->HasIndex(scalar_id));
+    EXPECT_EQ(sealed->TestDeferredBusinessIndexCount(), 1);
+    EXPECT_FALSE(sealed->TestHasMaterializedBusinessIndex(scalar_id));
+
+    folly::CancellationSource cancellation_source;
+    cancellation_source.requestCancellation();
+    OpContext cancelled_context(cancellation_source.getToken());
+    EXPECT_THROW(sealed->PinIndex(&cancelled_context, scalar_id),
+                 std::exception);
+    EXPECT_EQ(sealed->TestDeferredBusinessIndexCount(), 1);
+
+    auto pinned_indexes = sealed->PinIndex(nullptr, scalar_id);
+    ASSERT_EQ(pinned_indexes.size(), 1);
+    auto* scalar_index = const_cast<index::ScalarIndex<int64_t>*>(
+        dynamic_cast<const index::ScalarIndex<int64_t>*>(
+            pinned_indexes.front().get()));
+    ASSERT_NE(scalar_index, nullptr);
+    EXPECT_EQ(scalar_index->Count(), values.size());
+    int64_t lookup = 30;
+    auto matches = scalar_index->In(1, &lookup);
+    ASSERT_EQ(matches.size(), values.size());
+    EXPECT_TRUE(matches[2]);
+
+    EXPECT_EQ(sealed->PinIndex(nullptr, scalar_id).size(), 1);
+    EXPECT_EQ(sealed->TestDeferredBusinessIndexCount(), 0);
+    EXPECT_TRUE(sealed->TestHasMaterializedBusinessIndex(scalar_id));
+
+    sealed->TestDropLazyIndex(scalar_id);
+    EXPECT_FALSE(sealed->HasIndex(scalar_id));
+    EXPECT_FALSE(sealed->TestHasMaterializedBusinessIndex(scalar_id));
+
+    indexes.clear();
+    indexes[scalar_id].push_back(MakeLazyBusinessIndexInfo(
+        schema, scalar_id, index::ASCENDING_SORT, "disable", 12));
+    sealed->TestLoadBatchIndexes(indexes);
+    EXPECT_EQ(sealed->TestDeferredBusinessIndexCount(), 1);
+
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> replacement;
+    replacement[scalar_id].push_back(MakeLazyBusinessIndexInfo(
+        schema, scalar_id, index::ASCENDING_SORT, "disable", 13));
+    sealed->TestLoadBatchIndexes(replacement, true);
+    EXPECT_EQ(sealed->TestDeferredBusinessIndexCount(), 1);
+    EXPECT_FALSE(sealed->TestHasMaterializedBusinessIndex(scalar_id));
+
+    sealed->ClearData();
+    EXPECT_EQ(sealed->TestDeferredBusinessIndexCount(), 0);
+    EXPECT_FALSE(sealed->HasIndex(scalar_id));
+}
+
+TEST(SealedLazyBusinessIndex, DeferredInvertedIndexFirstAccess) {
+    ScopedLazyIndexSlotEnabled enabled(true);
+    auto [schema, scalar_id, vector_id] = MakeLazyBusinessIndexSchema();
+    auto segment = CreateSealedSegment(schema, empty_index_meta, 3);
+    auto* sealed = AsChunkedSealed(segment);
+
+    const std::vector<int64_t> values = {10, 20, 30, 40, 50, 60};
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes;
+    indexes[scalar_id].push_back(
+        MakeUploadedLazyInvertedIndexInfo(schema, scalar_id, values, 14));
+    sealed->TestLoadBatchIndexes(indexes);
+
+    EXPECT_TRUE(sealed->HasIndex(scalar_id));
+    EXPECT_EQ(sealed->TestDeferredBusinessIndexCount(), 1);
+    EXPECT_FALSE(sealed->TestHasMaterializedBusinessIndex(scalar_id));
+
+    auto pinned_indexes = sealed->PinIndex(nullptr, scalar_id);
+    ASSERT_EQ(pinned_indexes.size(), 1);
+    auto* scalar_index = const_cast<index::ScalarIndex<int64_t>*>(
+        dynamic_cast<const index::ScalarIndex<int64_t>*>(
+            pinned_indexes.front().get()));
+    ASSERT_NE(scalar_index, nullptr);
+    EXPECT_EQ(scalar_index->Count(), values.size());
+    int64_t lookup = 40;
+    auto matches = scalar_index->In(1, &lookup);
+    ASSERT_EQ(matches.size(), values.size());
+    EXPECT_TRUE(matches[3]);
+
+    EXPECT_EQ(sealed->TestDeferredBusinessIndexCount(), 0);
+    EXPECT_TRUE(sealed->TestHasMaterializedBusinessIndex(scalar_id));
+}
+
+TEST(SealedLazyBusinessIndex, MaterializesUnderSegmentReadLock) {
+    ScopedLazyIndexSlotEnabled enabled(true);
+    auto [schema, scalar_id, vector_id] = MakeLazyBusinessIndexSchema();
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = AsChunkedSealed(segment);
+
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes;
+    indexes[scalar_id].push_back(MakeLazyBusinessIndexInfo(
+        schema, scalar_id, index::ASCENDING_SORT, "disable"));
+    sealed->TestLoadBatchIndexes(indexes);
+
+    sealed->TestEnsureBusinessIndexSlotUnderSegmentReadLock(scalar_id);
+    EXPECT_EQ(sealed->TestDeferredBusinessIndexCount(), 0);
+    EXPECT_TRUE(sealed->TestHasMaterializedBusinessIndex(scalar_id));
+}
+
+TEST(SealedLazyBusinessIndex, DropBeforeFirstAccessDiscardsDescriptor) {
+    ScopedLazyIndexSlotEnabled enabled(true);
+    auto [schema, scalar_id, vector_id] = MakeLazyBusinessIndexSchema();
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = AsChunkedSealed(segment);
+
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes;
+    indexes[scalar_id].push_back(MakeLazyBusinessIndexInfo(
+        schema, scalar_id, index::ASCENDING_SORT, "disable"));
+    sealed->TestLoadBatchIndexes(indexes);
+    EXPECT_EQ(sealed->TestDeferredBusinessIndexCount(), 1);
+
+    sealed->TestDropLazyIndex(scalar_id);
+    EXPECT_EQ(sealed->TestDeferredBusinessIndexCount(), 0);
+    EXPECT_FALSE(sealed->HasIndex(scalar_id));
+
+    sealed->TestEnsureBusinessIndexSlot(scalar_id);
+    EXPECT_FALSE(sealed->TestHasMaterializedBusinessIndex(scalar_id));
+}
+
+TEST(SealedLazyBusinessIndex, DeferredSparseVectorIndexFirstSearch) {
+    ScopedLazyIndexSlotEnabled enabled(true);
+    auto [schema, sparse_id] = MakeLazySparseBusinessIndexSchema();
+    constexpr int64_t row_count = 4;
+    auto generated = DataGen(schema, row_count);
+    auto segment = CreateSealedSegment(schema, empty_index_meta, 3);
+    LoadGeneratedDataIntoSegment(
+        generated, segment.get(), false, {sparse_id.get()});
+    auto* sealed = AsChunkedSealed(segment);
+
+    using SparseRow = knowhere::sparse::SparseRow<milvus::SparseValueType>;
+    std::vector<SparseRow> values;
+    values.reserve(row_count);
+    for (int64_t i = 0; i < row_count; ++i) {
+        values.emplace_back(1);
+        values.back().set_at(0, i, static_cast<float>(i + 1));
+    }
+
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes;
+    indexes[sparse_id].push_back(
+        MakeUploadedLazySparseIndexInfo(schema, sparse_id, values, 41));
+    sealed->TestLoadBatchIndexes(indexes);
+
+    EXPECT_TRUE(sealed->HasIndex(sparse_id));
+    EXPECT_EQ(sealed->TestDeferredBusinessIndexCount(), 1);
+    EXPECT_FALSE(sealed->TestHasMaterializedBusinessIndex(sparse_id));
+
+    ScopedSchemaHandle handle(*schema);
+    auto plan_str = handle.ParseSearch(
+        "", "sparse", 1, knowhere::metric::IP, R"({"drop_ratio_search": 0.0})");
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+    proto::common::PlaceholderGroup placeholder_raw;
+    auto* placeholder_value = placeholder_raw.add_placeholders();
+    placeholder_value->set_tag("$0");
+    placeholder_value->set_type(
+        proto::common::PlaceholderType::SparseFloatVector);
+    placeholder_value->add_values(values.back().data(),
+                                  values.back().data_byte_size());
+    auto placeholder =
+        ParsePlaceholderGroup(plan.get(), placeholder_raw.SerializeAsString());
+    auto result = segment->Search(plan.get(), placeholder.get(), MAX_TIMESTAMP);
+
+    EXPECT_EQ(sealed->TestDeferredBusinessIndexCount(), 0);
+    EXPECT_TRUE(sealed->TestHasMaterializedBusinessIndex(sparse_id));
+    ASSERT_EQ(result->seg_offsets_.size(), 1);
+    ASSERT_EQ(result->distances_.size(), 1);
+    EXPECT_EQ(result->seg_offsets_.front(), row_count - 1);
+}
+
+TEST(SealedLazyBusinessIndex, DeferredVectorIndexFirstSearch) {
+    ScopedLazyIndexSlotEnabled enabled(true);
+    auto [schema, scalar_id, vector_id] = MakeLazyBusinessIndexSchema();
+    constexpr int64_t row_count = 64;
+    auto dataset = DataGen(schema, row_count);
+    auto vectors = dataset.get_col<float>(vector_id);
+    auto segment = CreateSealedSegment(schema, empty_index_meta, 3);
+    LoadGeneratedDataIntoSegment(
+        dataset, segment.get(), false, {vector_id.get()});
+    auto* sealed = AsChunkedSealed(segment);
+
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes;
+    indexes[vector_id].push_back(MakeUploadedLazyVectorIndexInfo(
+        schema, vector_id, vectors.data(), vectors.size(), 31));
+    sealed->TestLoadBatchIndexes(indexes);
+
+    EXPECT_TRUE(sealed->HasIndex(vector_id));
+    EXPECT_EQ(sealed->TestDeferredBusinessIndexCount(), 1);
+    EXPECT_FALSE(sealed->TestHasMaterializedBusinessIndex(vector_id));
+
+    ScopedSchemaHandle handle(*schema);
+    auto plan_str = handle.ParseSearch(
+        "", "vector", 3, knowhere::metric::L2, R"({"ef": 32})");
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+    auto placeholder_raw = CreatePlaceholderGroupFromBlob(1, 4, vectors.data());
+    auto placeholder =
+        ParsePlaceholderGroup(plan.get(), placeholder_raw.SerializeAsString());
+    auto result = segment->Search(plan.get(), placeholder.get(), MAX_TIMESTAMP);
+
+    EXPECT_EQ(segment->get_row_count(), row_count);
+    EXPECT_EQ(sealed->TestDeferredBusinessIndexCount(), 0);
+    EXPECT_TRUE(sealed->TestHasMaterializedBusinessIndex(vector_id));
+    ASSERT_EQ(result->seg_offsets_.size(), 3);
+    ASSERT_EQ(result->distances_.size(), 3);
+    EXPECT_EQ(result->seg_offsets_.front(), 0);
+    EXPECT_FLOAT_EQ(result->distances_.front(), 0.0F);
+}
+
+TEST(SealedLazyBusinessIndex, ConcurrentFirstAccessPublishesOneSlot) {
+    ScopedLazyIndexSlotEnabled enabled(true);
+    auto [schema, scalar_id, vector_id] = MakeLazyBusinessIndexSchema();
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = AsChunkedSealed(segment);
+
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes;
+    indexes[scalar_id].push_back(MakeLazyBusinessIndexInfo(
+        schema, scalar_id, index::ASCENDING_SORT, "disable"));
+    sealed->TestLoadBatchIndexes(indexes);
+
+    const auto scalar_field_id = scalar_id;
+    std::vector<std::thread> workers;
+    workers.reserve(16);
+    for (int i = 0; i < 16; ++i) {
+        workers.emplace_back([sealed, scalar_field_id]() {
+            sealed->TestEnsureBusinessIndexSlot(scalar_field_id);
+        });
+    }
+    for (auto& worker : workers) {
+        worker.join();
+    }
+
+    EXPECT_EQ(sealed->TestDeferredBusinessIndexCount(), 0);
+    EXPECT_TRUE(sealed->TestHasMaterializedBusinessIndex(scalar_id));
+}
+
+TEST(SealedLazyBusinessIndex, CancelledFactoryCanRetryAndReleasesMetadata) {
+    ScopedLazyIndexSlotEnabled enabled(true);
+    auto [schema, scalar_id, vector_id] = MakeLazyBusinessIndexSchema();
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = AsChunkedSealed(segment);
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes;
+    indexes[scalar_id].push_back(MakeLazyBusinessIndexInfo(
+        schema, scalar_id, index::ASCENDING_SORT, "disable"));
+    sealed->TestLoadBatchIndexes(indexes);
+    auto deferred = sealed->TestGetPublishedStateSnapshot()
+                        ->runtime->deferred_business_indexes.at(scalar_id);
+    auto factory = std::move(deferred->factory);
+    folly::CancellationSource source;
+    int attempts = 0;
+    deferred->factory = [&, factory = std::move(factory)](OpContext* op_ctx) {
+        if (attempts++ == 0) {
+            source.requestCancellation();
+        }
+        return factory(op_ctx);
+    };
+    OpContext op_ctx(source.getToken());
+    EXPECT_THROW(deferred->Get(&op_ctx), SegcoreError);
+    EXPECT_FALSE(deferred->ready.load(std::memory_order_acquire));
+    EXPECT_TRUE(deferred->factory);
+    EXPECT_EQ(deferred->materialized, nullptr);
+    EXPECT_NE(deferred->Get(nullptr), nullptr);
+    EXPECT_EQ(attempts, 2);
+    EXPECT_TRUE(deferred->ready.load(std::memory_order_acquire));
+    EXPECT_FALSE(deferred->factory);
+}
+
+TEST(SealedLazyBusinessIndex,
+     WaitingCallerCancelsWithoutInterruptingInitializer) {
+    ScopedLazyIndexSlotEnabled enabled(true);
+    auto [schema, scalar_id, vector_id] = MakeLazyBusinessIndexSchema();
+    auto segment = CreateSealedSegment(schema, empty_index_meta, 3);
+    auto* sealed = AsChunkedSealed(segment);
+
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes;
+    indexes[scalar_id].push_back(
+        MakeUploadedLazyScalarIndexInfo(schema, scalar_id, {10, 20, 30}, 181));
+    sealed->TestLoadBatchIndexes(indexes);
+
+    auto snapshot = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(snapshot, nullptr);
+    auto deferred = snapshot->runtime->deferred_business_indexes.at(scalar_id);
+    std::promise<void> started;
+    std::promise<void> release;
+    auto release_initialization = release.get_future().share();
+    auto factory = std::move(deferred->factory);
+    ASSERT_TRUE(factory);
+    deferred->factory = [&, factory = std::move(factory)](OpContext* op_ctx) {
+        started.set_value();
+        release_initialization.wait();
+        return factory(op_ctx);
+    };
+
+    std::thread initializer(
+        [&] { sealed->TestEnsureBusinessIndexSlot(scalar_id); });
+    started.get_future().wait();
+
+    folly::CancellationSource source;
+    OpContext waiter_context(source.getToken());
+    auto waiter = std::async(std::launch::async, [&] {
+        return sealed->PinIndex(&waiter_context, scalar_id);
+    });
+    EXPECT_EQ(waiter.wait_for(std::chrono::milliseconds(50)),
+              std::future_status::timeout);
+    source.requestCancellation();
+    const auto waiter_status = waiter.wait_for(std::chrono::seconds(1));
+    if (waiter_status != std::future_status::ready) {
+        release.set_value();
+        initializer.join();
+        FAIL() << "cancelled waiter remained blocked by the initializer";
+        return;
+    }
+    try {
+        static_cast<void>(waiter.get());
+        FAIL() << "cancelled waiter unexpectedly pinned a lazy index";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+    } catch (const std::exception& error) {
+        ADD_FAILURE() << "waiter returned the wrong error: " << error.what();
+    }
+
+    EXPECT_FALSE(deferred->ready.load(std::memory_order_acquire));
+    release.set_value();
+    initializer.join();
+    EXPECT_TRUE(deferred->ready.load(std::memory_order_acquire));
+    EXPECT_EQ(sealed->PinIndex(nullptr, scalar_id).size(), 1);
+}
+
+TEST(SealedLazyBusinessIndex,
+     ReplaceAndConcurrentMaterializationLeavesUsableIndex) {
+    ScopedLazyIndexSlotEnabled enabled(true);
+    auto [schema, scalar_id, vector_id] = MakeLazyBusinessIndexSchema();
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = AsChunkedSealed(segment);
+
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes;
+    indexes[scalar_id].push_back(MakeLazyBusinessIndexInfo(
+        schema, scalar_id, index::ASCENDING_SORT, "disable", 21));
+    sealed->TestLoadBatchIndexes(indexes);
+
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> replacement;
+    replacement[scalar_id].push_back(MakeLazyBusinessIndexInfo(
+        schema, scalar_id, index::ASCENDING_SORT, "disable", 22));
+
+    const auto scalar_field_id = scalar_id;
+    std::atomic<bool> start{false};
+    std::thread materialize([&]() {
+        while (!start.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        sealed->TestEnsureBusinessIndexSlot(scalar_field_id);
+    });
+    std::thread replace([&]() {
+        while (!start.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        sealed->TestLoadBatchIndexes(replacement, true);
+    });
+    start.store(true, std::memory_order_release);
+    materialize.join();
+    replace.join();
+
+    EXPECT_TRUE(sealed->HasIndex(scalar_id));
+    sealed->TestEnsureBusinessIndexSlot(scalar_id);
+    EXPECT_EQ(sealed->TestDeferredBusinessIndexCount(), 0);
+    EXPECT_TRUE(sealed->TestHasMaterializedBusinessIndex(scalar_id));
+}
+
+TEST(SealedLazyBusinessIndex, CreateTextIndexPinsDeferredStringIndex) {
+    ScopedLazyIndexSlotEnabled enabled(true);
+    auto [schema, text_id] = MakeLazyTextIndexSchema();
+    auto segment = CreateSealedSegment(schema, empty_index_meta, 3);
+    auto* sealed = AsChunkedSealed(segment);
+
+    const std::vector<std::string> values = {
+        "football basketball", "swimming football", "table tennis"};
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes;
+    indexes[text_id].push_back(
+        MakeUploadedLazyStringIndexInfo(schema, text_id, values, 51));
+    sealed->TestLoadBatchIndexes(indexes);
+
+    ASSERT_EQ(sealed->TestDeferredBusinessIndexCount(), 1);
+    ASSERT_FALSE(sealed->TestHasMaterializedBusinessIndex(text_id));
+
+    sealed->CreateTextIndex(text_id);
+
+    EXPECT_EQ(sealed->TestDeferredBusinessIndexCount(), 0);
+    EXPECT_TRUE(sealed->TestHasMaterializedBusinessIndex(text_id));
+    auto text_index = sealed->GetTextIndex(nullptr, text_id);
+    auto matches = text_index.get()->MatchQuery("football", 1);
+    ASSERT_EQ(matches.size(), values.size());
+    EXPECT_TRUE(matches[0]);
+    EXPECT_TRUE(matches[1]);
+    EXPECT_FALSE(matches[2]);
+}
+
+TEST(SealedLazyTextIndex, DefersOnlyDisableWarmupWhenEnabled) {
+    auto [schema, text_id] = MakeLazyTextIndexSchema();
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = AsChunkedSealed(segment);
+    auto disable = MakeLazyTextIndexInfo(schema, text_id, "disable");
+    auto sync = MakeLazyTextIndexInfo(schema, text_id, "sync");
+
+    {
+        ScopedLazyIndexSlotEnabled disabled(false);
+        EXPECT_FALSE(sealed->TestCanDeferTextIndex(*disable));
+    }
+    {
+        ScopedLazyIndexSlotEnabled enabled(true);
+        EXPECT_TRUE(sealed->TestCanDeferTextIndex(*disable));
+        EXPECT_FALSE(sealed->TestCanDeferTextIndex(*sync));
+    }
+}
+
+TEST(SealedLazyTextIndex, DeferredSlotLifecycle) {
+    ScopedLazyIndexSlotEnabled enabled(true);
+    auto [schema, text_id] = MakeLazyTextIndexSchema();
+    auto segment = CreateSealedSegment(schema, empty_index_meta, 3);
+    auto* sealed = AsChunkedSealed(segment);
+
+    sealed->TestLoadTextIndex(
+        nullptr, MakeUploadedLazyTextIndexInfo(schema, text_id, 1000, 3));
+    EXPECT_EQ(sealed->TestDeferredTextIndexCount(), 1);
+    EXPECT_FALSE(sealed->TestHasMaterializedTextIndex(text_id));
+
+    auto text_index = sealed->GetTextIndex(nullptr, text_id);
+    auto matches = text_index.get()->MatchQuery("football", 1);
+    ASSERT_EQ(matches.size(), 3);
+    EXPECT_TRUE(matches[0]);
+    EXPECT_TRUE(matches[1]);
+    EXPECT_FALSE(matches[2]);
+
+    EXPECT_NE(sealed->GetTextIndex(nullptr, text_id).get(), nullptr);
+    EXPECT_EQ(sealed->TestDeferredTextIndexCount(), 0);
+    EXPECT_TRUE(sealed->TestHasMaterializedTextIndex(text_id));
+}
+
+TEST(SealedLazyTextIndex, DisabledConfigKeepsEagerSlotCreation) {
+    ScopedLazyIndexSlotEnabled disabled(false);
+    auto [schema, text_id] = MakeLazyTextIndexSchema();
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = AsChunkedSealed(segment);
+
+    sealed->TestLoadTextIndex(
+        nullptr, MakeLazyTextIndexInfo(schema, text_id, "disable"));
+    EXPECT_EQ(sealed->TestDeferredTextIndexCount(), 0);
+    EXPECT_TRUE(sealed->TestHasMaterializedTextIndex(text_id));
+}
+
+TEST(SealedLazyTextIndex, DeferredLoadReplacesMaterializedSlot) {
+    auto [schema, text_id] = MakeLazyTextIndexSchema();
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = AsChunkedSealed(segment);
+
+    {
+        ScopedLazyIndexSlotEnabled disabled(false);
+        sealed->TestLoadTextIndex(
+            nullptr, MakeLazyTextIndexInfo(schema, text_id, "disable", 1000));
+    }
+    ASSERT_EQ(sealed->TestDeferredTextIndexCount(), 0);
+    ASSERT_TRUE(sealed->TestHasMaterializedTextIndex(text_id));
+
+    {
+        ScopedLazyIndexSlotEnabled enabled(true);
+        sealed->TestLoadTextIndex(
+            nullptr, MakeLazyTextIndexInfo(schema, text_id, "disable", 1001));
+    }
+    EXPECT_EQ(sealed->TestDeferredTextIndexCount(), 1);
+    EXPECT_FALSE(sealed->TestHasMaterializedTextIndex(text_id));
+}
+
+TEST(SealedLazyTextIndex, RejectsInvalidMetadataBeforePublishing) {
+    ScopedLazyIndexSlotEnabled enabled(true);
+    auto [schema, text_id] = MakeLazyTextIndexSchema();
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = AsChunkedSealed(segment);
+    auto info = MakeLazyTextIndexInfo(schema, text_id, "disable");
+    info->mutable_schema()->clear_type_params();
+
+    EXPECT_THROW(sealed->TestLoadTextIndex(nullptr, info), std::exception);
+    EXPECT_EQ(sealed->TestDeferredTextIndexCount(), 0);
+    EXPECT_FALSE(sealed->TestHasMaterializedTextIndex(text_id));
+}
+
+TEST(SealedLazyTextIndex, ClearBeforeFirstAccessDiscardsDescriptor) {
+    ScopedLazyIndexSlotEnabled enabled(true);
+    auto [schema, text_id] = MakeLazyTextIndexSchema();
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = AsChunkedSealed(segment);
+
+    sealed->TestLoadTextIndex(
+        nullptr, MakeLazyTextIndexInfo(schema, text_id, "disable"));
+    EXPECT_EQ(sealed->TestDeferredTextIndexCount(), 1);
+
+    sealed->ClearData();
+    EXPECT_EQ(sealed->TestDeferredTextIndexCount(), 0);
+    sealed->TestEnsureTextIndexSlot(text_id);
+    EXPECT_FALSE(sealed->TestHasMaterializedTextIndex(text_id));
+}
+
+TEST(SealedLazyTextIndex, ConcurrentFirstAccessPublishesOneSlot) {
+    ScopedLazyIndexSlotEnabled enabled(true);
+    auto schema_and_id = MakeLazyTextIndexSchema();
+    auto schema = schema_and_id.first;
+    auto text_id = schema_and_id.second;
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = AsChunkedSealed(segment);
+
+    sealed->TestLoadTextIndex(
+        nullptr, MakeLazyTextIndexInfo(schema, text_id, "disable"));
+
+    std::vector<std::thread> workers;
+    workers.reserve(16);
+    for (int i = 0; i < 16; ++i) {
+        workers.emplace_back(
+            [sealed, text_id]() { sealed->TestEnsureTextIndexSlot(text_id); });
+    }
+    for (auto& worker : workers) {
+        worker.join();
+    }
+
+    EXPECT_EQ(sealed->TestDeferredTextIndexCount(), 0);
+    EXPECT_TRUE(sealed->TestHasMaterializedTextIndex(text_id));
+}
+
+TEST(SealedLazyTextIndex, WaitingCallerCancelsWithoutInterruptingInitializer) {
+    ScopedLazyIndexSlotEnabled enabled(true);
+    auto [schema, text_id] = MakeLazyTextIndexSchema();
+    auto segment = CreateSealedSegment(schema, empty_index_meta, 3);
+    auto* sealed = AsChunkedSealed(segment);
+    sealed->TestLoadTextIndex(
+        nullptr, MakeUploadedLazyTextIndexInfo(schema, text_id, 1074, 3));
+
+    auto snapshot = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(snapshot, nullptr);
+    auto deferred =
+        std::get<std::shared_ptr<ChunkedSegmentSealedImpl::DeferredTextIndex>>(
+            snapshot->runtime->text_indexes.at(text_id));
+    std::promise<void> started;
+    std::promise<void> release;
+    auto release_initialization = release.get_future().share();
+    auto factory = std::move(deferred->factory);
+    ASSERT_TRUE(factory);
+    deferred->factory = [&, factory = std::move(factory)](OpContext* op_ctx) {
+        started.set_value();
+        release_initialization.wait();
+        return factory(op_ctx);
+    };
+
+    std::thread initializer([&] { sealed->TestEnsureTextIndexSlot(text_id); });
+    started.get_future().wait();
+
+    folly::CancellationSource source;
+    OpContext waiter_context(source.getToken());
+    auto waiter = std::async(std::launch::async, [&] {
+        return sealed->GetTextIndex(&waiter_context, text_id);
+    });
+    EXPECT_EQ(waiter.wait_for(std::chrono::milliseconds(50)),
+              std::future_status::timeout);
+    source.requestCancellation();
+    const auto waiter_status = waiter.wait_for(std::chrono::seconds(1));
+    if (waiter_status != std::future_status::ready) {
+        release.set_value();
+        initializer.join();
+        FAIL() << "cancelled waiter remained blocked by the initializer";
+        return;
+    }
+    try {
+        static_cast<void>(waiter.get());
+        FAIL() << "cancelled waiter unexpectedly pinned a lazy text index";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+    } catch (const std::exception& error) {
+        ADD_FAILURE() << "waiter returned the wrong error: " << error.what();
+    }
+
+    EXPECT_FALSE(deferred->ready.load(std::memory_order_acquire));
+    release.set_value();
+    initializer.join();
+    EXPECT_TRUE(deferred->ready.load(std::memory_order_acquire));
+    EXPECT_NE(sealed->GetTextIndex(nullptr, text_id).get(), nullptr);
+}
+
+TEST(SealedLazyBusinessIndex,
+     TypedJsonAndNgramPathsKeepIndependentDeferredDescriptors) {
+    ScopedLazyIndexSlotEnabled enabled(true);
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto json = schema->AddDebugField("payload", DataType::JSON);
+    schema->set_primary_field_id(pk);
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = AsChunkedSealed(segment);
+
+    auto make_info =
+        [&](std::string path, std::string cast_type, int64_t index_id) {
+            auto info = MakeLazyBusinessIndexInfo(
+                schema, json, index::NGRAM_INDEX_TYPE, "disable", index_id);
+            info.index_params[JSON_PATH] = std::move(path);
+            info.index_params[JSON_CAST_TYPE] = std::move(cast_type);
+            info.index_params[index::MIN_GRAM] = "2";
+            info.index_params[index::MAX_GRAM] = "4";
+            info.cache_index.reset();
+            return info;
+        };
+
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> initial;
+    initial[json].push_back(make_info("/array", "ARRAY_VARCHAR", 91));
+    initial[json].push_back(make_info("/bool", "BOOL", 92));
+    initial[json].push_back(make_info("/double", "DOUBLE", 93));
+    initial[json].push_back(make_info("/flat", "JSON", 94));
+    sealed->TestLoadBatchIndexes(initial);
+
+    auto first = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(first, nullptr);
+    ASSERT_EQ(first->runtime->json_indices.size(), 3);
+    EXPECT_TRUE(std::all_of(first->runtime->json_indices.begin(),
+                            first->runtime->json_indices.end(),
+                            [](const auto& entry) {
+                                return entry.deferred != nullptr &&
+                                       entry.index == nullptr;
+                            }));
+    ASSERT_EQ(first->runtime->deferred_ngram_indexings.count(json), 1);
+    auto first_ngram =
+        first->runtime->deferred_ngram_indexings.at(json).at("/array");
+    ASSERT_NE(first_ngram, nullptr);
+    EXPECT_FALSE(first_ngram->ready.load(std::memory_order_acquire));
+    EXPECT_TRUE(sealed->HasJsonIndex(json));
+
+    auto old_typed_entry = std::find_if(
+        first->runtime->json_indices.begin(),
+        first->runtime->json_indices.end(),
+        [](const auto& entry) { return entry.nested_path == "/double"; });
+    ASSERT_NE(old_typed_entry, first->runtime->json_indices.end());
+    auto old_typed = old_typed_entry->deferred;
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> replacement;
+    replacement[json].push_back(make_info("/double", "DOUBLE", 95));
+    sealed->TestLoadBatchIndexes(replacement, true);
+    auto replaced = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_EQ(replaced->runtime->json_indices.size(), 3);
+    auto new_typed_entry = std::find_if(
+        replaced->runtime->json_indices.begin(),
+        replaced->runtime->json_indices.end(),
+        [](const auto& entry) { return entry.nested_path == "/double"; });
+    ASSERT_NE(new_typed_entry, replaced->runtime->json_indices.end());
+    auto new_typed = new_typed_entry->deferred;
+    EXPECT_NE(old_typed, new_typed);
+    EXPECT_EQ(replaced->runtime->deferred_ngram_indexings.at(json).at("/array"),
+              first_ngram);
+    EXPECT_FALSE(old_typed->ready.load(std::memory_order_acquire));
+    EXPECT_FALSE(first_ngram->ready.load(std::memory_order_acquire));
+
+    sealed->TestDropLazyIndex(json);
+    EXPECT_FALSE(sealed->HasJsonIndex(json));
+    auto second = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(second, nullptr);
+    EXPECT_TRUE(second->runtime->json_indices.empty());
+    EXPECT_TRUE(second->runtime->deferred_ngram_indexings.empty());
+    EXPECT_EQ(sealed->GetNgramIndexForJson(nullptr, json, "/array").get(),
+              nullptr);
+}
+
+TEST(SealedLazyBusinessIndex, TypedJsonAndNgramMaterializeOnTheirFirstPin) {
+    ScopedLazyIndexSlotEnabled enabled(true);
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto json = schema->AddDebugField("payload", DataType::JSON);
+    schema->set_primary_field_id(pk);
+    auto segment = CreateSealedSegment(schema, empty_index_meta, 3);
+    auto* sealed = AsChunkedSealed(segment);
+    const std::vector<std::string> rows{
+        R"({"score": 1.5, "name": "milvus"})",
+        R"({"score": 2.5, "name": "vector"})",
+        R"({"score": 3.5, "name": "database"})"};
+
+    auto typed = MakeUploadedLazyJsonIndexInfo(
+        schema, json, index::INVERTED_INDEX_TYPE, "/score", "DOUBLE", rows, 94);
+    auto ngram = MakeUploadedLazyJsonIndexInfo(
+        schema, json, index::NGRAM_INDEX_TYPE, "/name", "VARCHAR", rows, 95);
+    sealed->LoadIndex(typed);
+    sealed->LoadIndex(ngram);
+
+    auto snapshot = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(snapshot, nullptr);
+    ASSERT_EQ(snapshot->runtime->json_indices.size(), 1);
+    auto typed_deferred = snapshot->runtime->json_indices.front().deferred;
+    ASSERT_NE(typed_deferred, nullptr);
+    auto ngram_deferred =
+        snapshot->runtime->deferred_ngram_indexings.at(json).at("/name");
+    ASSERT_NE(ngram_deferred, nullptr);
+    EXPECT_FALSE(typed_deferred->ready.load(std::memory_order_acquire));
+    EXPECT_FALSE(ngram_deferred->ready.load(std::memory_order_acquire));
+
+    auto typed_pin = sealed->PinJsonIndex(
+        nullptr, json, "/score", DataType::DOUBLE, false, false);
+    ASSERT_EQ(typed_pin.size(), 1);
+    EXPECT_NE(typed_pin.front().get(), nullptr);
+    EXPECT_TRUE(typed_deferred->ready.load(std::memory_order_acquire));
+    EXPECT_FALSE(ngram_deferred->ready.load(std::memory_order_acquire));
+
+    auto ngram_pin = sealed->GetNgramIndexForJson(nullptr, json, "/name");
+    EXPECT_NE(ngram_pin.get(), nullptr);
+    EXPECT_TRUE(ngram_deferred->ready.load(std::memory_order_acquire));
+}
+
+TEST(SealedLazyBusinessIndex, TypedJsonMissingArtifactRetriesAtFirstPin) {
+    ScopedLazyIndexSlotEnabled enabled(true);
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto json = schema->AddDebugField("payload", DataType::JSON);
+    schema->set_primary_field_id(pk);
+    auto segment = CreateSealedSegment(schema, empty_index_meta, 3);
+    auto* sealed = AsChunkedSealed(segment);
+    const std::vector<std::string> rows{
+        R"({"score": 1.5})", R"({"score": 2.5})", R"({"score": 3.5})"};
+    auto typed = MakeUploadedLazyJsonIndexInfo(
+        schema, json, index::INVERTED_INDEX_TYPE, "/score", "DOUBLE", rows, 96);
+    ASSERT_FALSE(typed.index_files.empty());
+    auto chunk_manager = storage::RemoteChunkManagerSingleton::GetInstance()
+                             .GetRemoteChunkManager();
+    const auto missing_path = typed.index_files.front();
+    std::vector<uint8_t> saved(chunk_manager->Size(missing_path));
+    ASSERT_EQ(chunk_manager->Read(missing_path, saved.data(), saved.size()),
+              saved.size());
+    chunk_manager->Remove(missing_path);
+    auto restore_artifact = folly::makeGuard([&] {
+        chunk_manager->Write(missing_path, saved.data(), saved.size());
+    });
+
+    sealed->LoadIndex(typed);
+    auto snapshot = sealed->TestGetPublishedStateSnapshot();
+    ASSERT_NE(snapshot, nullptr);
+    ASSERT_EQ(snapshot->runtime->json_indices.size(), 1);
+    auto deferred = snapshot->runtime->json_indices.front().deferred;
+    ASSERT_NE(deferred, nullptr);
+    EXPECT_THROW(sealed->PinJsonIndex(
+                     nullptr, json, "/score", DataType::DOUBLE, false, false),
+                 std::exception);
+    EXPECT_TRUE(deferred->ready.load(std::memory_order_acquire));
+    ASSERT_NE(deferred->materialized, nullptr);
+    auto slot = deferred->materialized->indexing_;
+    ASSERT_NE(slot, nullptr);
+    EXPECT_FALSE(slot->IsCached(0));
+
+    chunk_manager->Write(missing_path, saved.data(), saved.size());
+    restore_artifact.dismiss();
+    auto pinned = sealed->PinJsonIndex(
+        nullptr, json, "/score", DataType::DOUBLE, false, false);
+    ASSERT_EQ(pinned.size(), 1);
+    EXPECT_NE(pinned.front().get(), nullptr);
+    EXPECT_TRUE(deferred->ready.load(std::memory_order_acquire));
+    EXPECT_EQ(deferred->materialized->indexing_, slot);
+    EXPECT_TRUE(slot->IsCached(0));
+}
+
+TEST(SealedLazyBusinessIndex,
+     OldSnapshotMaterializationDoesNotReplaceNewIndex) {
+    ScopedLazyIndexSlotEnabled enabled(true);
+    auto [schema, scalar_id, vector_id] = MakeLazyBusinessIndexSchema();
+    auto segment = CreateSealedSegment(schema, empty_index_meta, 3);
+    auto* sealed = AsChunkedSealed(segment);
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes;
+    indexes[scalar_id].push_back(
+        MakeUploadedLazyScalarIndexInfo(schema, scalar_id, {10, 20, 30}, 71));
+    sealed->TestLoadBatchIndexes(indexes);
+    auto old_runtime = sealed->TestGetPublishedStateSnapshot()->runtime;
+    auto frozen_copy = sealed->TestFreezeRuntimeResourceStateCopy(*old_runtime);
+    ASSERT_EQ(old_runtime->deferred_business_indexes.at(scalar_id),
+              frozen_copy->deferred_business_indexes.at(scalar_id));
+
+    indexes.clear();
+    indexes[scalar_id].push_back(
+        MakeUploadedLazyScalarIndexInfo(schema, scalar_id, {40, 50, 60}, 72));
+    sealed->TestLoadBatchIndexes(indexes, true);
+    auto new_runtime = sealed->TestGetPublishedStateSnapshot()->runtime;
+    ASSERT_NE(old_runtime->deferred_business_indexes.at(scalar_id),
+              new_runtime->deferred_business_indexes.at(scalar_id));
+    auto old_slot = sealed->TestGetScalarIndexSlot(*old_runtime, scalar_id);
+    EXPECT_EQ(old_slot,
+              sealed->TestGetScalarIndexSlot(*frozen_copy, scalar_id));
+    EXPECT_FALSE(sealed->TestHasMaterializedBusinessIndex(scalar_id));
+    auto new_slot = sealed->TestGetScalarIndexSlot(*new_runtime, scalar_id);
+    ASSERT_NE(old_slot, new_slot);
+    auto old_pin =
+        cachinglayer::SemiInlineGet(old_slot->PinCells(nullptr, {0}));
+    auto new_pin =
+        cachinglayer::SemiInlineGet(new_slot->PinCells(nullptr, {0}));
+    auto* old_index =
+        dynamic_cast<index::ScalarIndex<int64_t>*>(old_pin->get_cell_of(0));
+    auto* new_index =
+        dynamic_cast<index::ScalarIndex<int64_t>*>(new_pin->get_cell_of(0));
+    ASSERT_NE(old_index, nullptr);
+    ASSERT_NE(new_index, nullptr);
+    EXPECT_EQ(old_index->Reverse_Lookup(0), 10);
+    EXPECT_EQ(new_index->Reverse_Lookup(0), 40);
+
+    sealed->ClearData();
+    EXPECT_FALSE(sealed->HasIndex(scalar_id));
+    EXPECT_EQ(sealed->TestGetScalarIndexSlot(*old_runtime, scalar_id),
+              old_slot);
+    EXPECT_EQ(sealed->TestGetScalarIndexSlot(*new_runtime, scalar_id),
+              new_slot);
+}
+
+TEST(SealedLazyBusinessIndex, ConfigRefreshPreservesPublishedDescriptor) {
+    ScopedLazyIndexSlotEnabled enabled(true);
+    auto [schema, scalar_id, vector_id] = MakeLazyBusinessIndexSchema();
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = AsChunkedSealed(segment);
+    std::unordered_map<FieldId, std::vector<LoadIndexInfo>> indexes;
+    indexes[scalar_id].push_back(MakeLazyBusinessIndexInfo(
+        schema, scalar_id, index::ASCENDING_SORT, "disable"));
+    sealed->TestLoadBatchIndexes(indexes);
+    // Disabling the feature affects new loads, while this published descriptor
+    // remains usable and does not require republishing segment state.
+    SegcoreConfig::default_config().set_lazy_index_slot_enabled(false);
+    EXPECT_EQ(sealed->TestDeferredBusinessIndexCount(), 1);
+    sealed->TestEnsureBusinessIndexSlot(scalar_id);
+    EXPECT_TRUE(sealed->TestHasMaterializedBusinessIndex(scalar_id));
+}
+
+TEST(SealedLazyTextIndex, CancelledFirstAccessCanRetry) {
+    ScopedLazyIndexSlotEnabled enabled(true);
+    auto [schema, text_id] = MakeLazyTextIndexSchema();
+    auto segment = CreateSealedSegment(schema, empty_index_meta, 3);
+    auto* sealed = AsChunkedSealed(segment);
+    sealed->TestLoadTextIndex(
+        nullptr, MakeUploadedLazyTextIndexInfo(schema, text_id, 1073, 3));
+    folly::CancellationSource source;
+    source.requestCancellation();
+    OpContext cancelled(source.getToken());
+    EXPECT_THROW(sealed->GetTextIndex(&cancelled, text_id), std::exception);
+    EXPECT_EQ(sealed->TestDeferredTextIndexCount(), 1);
+    auto pinned = sealed->GetTextIndex(nullptr, text_id);
+    auto matches = pinned.get()->MatchQuery("football", 1);
+    ASSERT_EQ(matches.size(), 3);
+    EXPECT_TRUE(matches[0]);
+    EXPECT_TRUE(matches[1]);
+    EXPECT_FALSE(matches[2]);
+}
 
 namespace {
 
@@ -5594,9 +6984,7 @@ TEST(SealedSegmentCowState, JsonIndexReplaceScalarWithNgramErasesScalarPath) {
              is_ngram ? index::NGRAM_INDEX_TYPE : index::INVERTED_INDEX_TYPE},
             {JSON_PATH, std::move(path)},
         };
-        if (!is_ngram) {
-            info.index_params[JSON_CAST_TYPE] = "DOUBLE";
-        }
+        info.index_params[JSON_CAST_TYPE] = is_ngram ? "VARCHAR" : "DOUBLE";
         auto indexing =
             GenScalarIndexing<int64_t>(values.size(), values.data());
         info.cache_index =
@@ -5693,9 +7081,7 @@ TEST(SealedSegmentCowState, JsonIndexReplaceNgramWithScalarErasesNgramPath) {
              is_ngram ? index::NGRAM_INDEX_TYPE : index::INVERTED_INDEX_TYPE},
             {JSON_PATH, std::move(path)},
         };
-        if (!is_ngram) {
-            info.index_params[JSON_CAST_TYPE] = "DOUBLE";
-        }
+        info.index_params[JSON_CAST_TYPE] = is_ngram ? "VARCHAR" : "DOUBLE";
         auto indexing =
             GenScalarIndexing<int64_t>(values.size(), values.data());
         info.cache_index =

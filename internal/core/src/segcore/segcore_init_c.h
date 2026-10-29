@@ -45,6 +45,9 @@ void
 SegcoreSetEnableGISSplitFusion(const bool);
 
 void
+SegcoreSetLazyIndexSlotEnabled(bool enabled);
+
+void
 SegcoreSetNlist(const int64_t);
 
 void
