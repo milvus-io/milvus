@@ -13,6 +13,28 @@ enum class JsonExistValueType : uint8_t {
   Bool,
 };
 
+/// Stable discriminant carried over the FFI boundary so the C++ side can
+/// classify an error without parsing the Display text (whose wording is a
+/// human-facing detail, not a contract). Exported through cbindgen; values
+/// are part of the C ABI -- append, never renumber.
+enum class TantivyBindingErrorCode : int32_t {
+  Ok = 0,
+  /// Malformed caller input (analyzer params, query arguments).
+  InvalidArgument = 1,
+  /// I/O failure underneath the index (read/open); typically transient.
+  Io = 2,
+  /// Persisted index data failed validation / deserialization.
+  DataCorruption = 3,
+  /// JSON (de)serialization failure.
+  Json = 4,
+  /// Any other tantivy engine error.
+  Tantivy = 5,
+  /// Binding-internal error (ad-hoc failures, poisoned locks, ...).
+  Internal = 6,
+  /// An I/O operation reported ErrorKind::NotFound; policy belongs to the caller.
+  IoNotFound = 7,
+};
+
 enum class TantivyDataType : uint8_t {
   Text,
   Keyword,
@@ -34,11 +56,14 @@ struct RustArrayI64 {
   size_t cap;
 };
 
-/// Array of C strings (char*) for returning Vec<String> to C++
+/// Array of byte strings for returning Vec<String> to C++. Each element is
+/// `array[i]` with `lens[i]` bytes, NOT NUL-terminated: the strings are index
+/// terms that may legitimately contain interior NUL bytes, which a C string
+/// cannot carry. `array` and `lens` are boxed slices of `len` elements.
 struct RustStringArray {
   char **array;
+  size_t *lens;
   size_t len;
-  size_t cap;
 };
 
 struct Value {
@@ -96,6 +121,9 @@ struct RustResult {
   bool success;
   Value value;
   const char *error;
+  /// 0 (Ok) on success. Carried explicitly so the C++ side classifies by
+  /// discriminant instead of parsing the error text.
+  TantivyBindingErrorCode error_code;
 };
 
 using SetBitsetFn = void(*)(void*, const uint32_t*, uintptr_t);
@@ -171,7 +199,15 @@ RustResult tantivy_terms_query_keyword(void *ptr,
                                        uintptr_t len,
                                        void *bitset);
 
+RustResult tantivy_terms_query_keyword_with_len(void *ptr,
+                                                const char *const *terms,
+                                                const uintptr_t *lengths,
+                                                uintptr_t len,
+                                                void *bitset);
+
 RustResult tantivy_term_query_keyword_i64(void *ptr, const char *term);
+
+RustResult tantivy_term_query_keyword_i64_with_len(void *ptr, const char *term, uintptr_t term_len);
 
 RustResult tantivy_lower_bound_range_query_i64(void *ptr,
                                                int64_t lower_bound,
@@ -229,10 +265,22 @@ RustResult tantivy_lower_bound_range_query_keyword(void *ptr,
                                                    bool inclusive,
                                                    void *bitset);
 
+RustResult tantivy_lower_bound_range_query_keyword_with_len(void *ptr,
+                                                            const char *lower_bound,
+                                                            uintptr_t lower_bound_len,
+                                                            bool inclusive,
+                                                            void *bitset);
+
 RustResult tantivy_upper_bound_range_query_keyword(void *ptr,
                                                    const char *upper_bound,
                                                    bool inclusive,
                                                    void *bitset);
+
+RustResult tantivy_upper_bound_range_query_keyword_with_len(void *ptr,
+                                                            const char *upper_bound,
+                                                            uintptr_t upper_bound_len,
+                                                            bool inclusive,
+                                                            void *bitset);
 
 RustResult tantivy_range_query_keyword(void *ptr,
                                        const char *lower_bound,
@@ -240,6 +288,15 @@ RustResult tantivy_range_query_keyword(void *ptr,
                                        bool lb_inclusive,
                                        bool ub_inclusive,
                                        void *bitset);
+
+RustResult tantivy_range_query_keyword_with_len(void *ptr,
+                                                const char *lower_bound,
+                                                uintptr_t lower_bound_len,
+                                                const char *upper_bound,
+                                                uintptr_t upper_bound_len,
+                                                bool lb_inclusive,
+                                                bool ub_inclusive,
+                                                void *bitset);
 
 RustResult tantivy_prefix_query_keyword(void *ptr,
                                         const uint8_t *prefix,
@@ -275,6 +332,12 @@ RustResult tantivy_json_term_query_keyword(void *ptr,
                                            const char *term,
                                            void *bitset);
 
+RustResult tantivy_json_term_query_keyword_with_len(void *ptr,
+                                                    const char *json_path,
+                                                    const char *term,
+                                                    uintptr_t length,
+                                                    void *bitset);
+
 RustResult tantivy_json_terms_query_i64(void *ptr,
                                         const char *json_path,
                                         const int64_t *terms,
@@ -304,6 +367,13 @@ RustResult tantivy_json_terms_query_keyword(void *ptr,
                                             const char *const *terms,
                                             uintptr_t len,
                                             void *bitset);
+
+RustResult tantivy_json_terms_query_keyword_with_len(void *ptr,
+                                                     const char *json_path,
+                                                     const char *const *terms,
+                                                     const uintptr_t *lengths,
+                                                     uintptr_t len,
+                                                     void *bitset);
 
 RustResult tantivy_json_exist_query(void *ptr,
                                     const char *json_path,
@@ -361,6 +431,18 @@ RustResult tantivy_json_range_query_keyword(void *ptr,
                                             bool ub_inclusive,
                                             void *bitset);
 
+RustResult tantivy_json_range_query_keyword_with_len(void *ptr,
+                                                     const char *json_path,
+                                                     const char *lower_bound,
+                                                     uintptr_t lower_bound_len,
+                                                     const char *higher_bound,
+                                                     uintptr_t higher_bound_len,
+                                                     bool lb_unbounded,
+                                                     bool up_unbounded,
+                                                     bool lb_inclusive,
+                                                     bool ub_inclusive,
+                                                     void *bitset);
+
 RustResult tantivy_json_regex_query(void *ptr,
                                     const char *json_path,
                                     const uint8_t *pattern,
@@ -375,17 +457,22 @@ RustResult tantivy_json_prefix_query(void *ptr,
 
 RustResult tantivy_ngram_match_query(void *ptr,
                                      const char *literal,
+                                     uintptr_t literal_len,
                                      uintptr_t min_gram,
                                      uintptr_t max_gram,
                                      void *bitset);
 
 RustResult tantivy_ngram_tokenize(void *ptr,
                                   const char *const *literals,
+                                  const uintptr_t *literal_lens,
                                   uintptr_t literals_len,
                                   uintptr_t min_gram,
                                   uintptr_t max_gram);
 
-RustResult tantivy_ngram_term_posting_list(void *ptr, const char *term, void *bitset);
+RustResult tantivy_ngram_term_posting_list(void *ptr,
+                                           const char *term,
+                                           uintptr_t term_len,
+                                           void *bitset);
 
 RustResult tantivy_match_query(void *ptr,
                                const char *query,
@@ -423,7 +510,11 @@ RustResult tantivy_finish_index(void *ptr);
 
 RustResult tantivy_commit_index(void *ptr);
 
+RustResult tantivy_rollback_index(void *ptr);
+
 RustResult tantivy_create_reader_from_writer(void *ptr, SetBitsetFn set_bitset);
+
+RustResult tantivy_create_snapshot_reader_from_writer(void *ptr, SetBitsetFn set_bitset);
 
 RustResult tantivy_index_add_int8s(void *ptr,
                                    const int8_t *array,

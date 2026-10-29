@@ -38,26 +38,19 @@ Milvus Snapshot mechanism provides complete collection-level data snapshot capab
 
 **Execution Steps**:
 
-1. **Acquire Channel Seek Positions**: Obtain a `MsgPosition` for each collection channel. These positions form the snapshot's per-channel data boundary.
-2. **Compute Compatibility CreateTs**: Store `create_ts = min(channel_seek_positions.timestamp)` for legacy display and sorting.
-3. **Filter Segments By Channel**: Select each non-dropped segment only when `segmentEffectiveTs(segment) < channel_seek_positions[segment.channel_name].timestamp`.
-4. **Collect Metadata**: Retrieve collection schema, index definitions, and segment details (binlog/deltalog/indexfile paths).
-5. **Write to S3**: Write complete metadata, schema, index, and segment information to S3 in manifest format.
-6. **Write to Etcd**: Save basic SnapshotInfo to Etcd and establish segment/index references.
+1. **Broadcast CreateSnapshot**: Hold the existing collection/snapshot resource locks and broadcast with `AckSyncUp` to every collection VChannel plus CChannel. CreateSnapshot itself carries flush semantics; it does not call the Flush RPC.
+2. **Persist Through Each Channel Boundary**: The shard interceptor fences segment allocation and seals earlier L1 segments. Each business-channel consumer holds its message until L1 final commits and L0 output/registration complete. L0 batches stop at CreateSnapshot even when the request queues behind an active batch, so a file cannot mix deletes from both sides of the cut.
+3. **Acquire Channel Seek Positions**: The all-Ack callback builds each business channel's `MsgPosition` from its CreateSnapshot append result (TimeTick, LastConfirmedMessageID and WAL name). Exclude CChannel. These positions define the snapshot cut independently of the shared WAL recovery checkpoint.
+4. **Compute Compatibility CreateTs**: Store `create_ts = min(channel_seek_positions.timestamp)` for legacy display and sorting.
+5. **Filter Segments By Channel**: Select each non-dropped segment only when `segmentEffectiveTs(segment) < channel_seek_positions[segment.channel_name].timestamp`.
+6. **Collect and Persist Metadata**: Retrieve schema, indexes and segment files; write manifests to S3, then save SnapshotInfo and segment/index references to Etcd using the existing snapshot flow.
 
-**Important Notes**:
+**Boundary Semantics**:
 
-- **CreateSnapshot does not actively flush data**: Only collects existing sealed segments
-- **Channel Boundary Source**: Each channel boundary is obtained from that channel's seek position.
-- **CreateTs Semantics**: `create_ts` is a compatibility summary equal to the minimum channel seek timestamp. It is not a global cross-channel visibility boundary.
-- **Data Coverage**: A segment is included according to the seek timestamp of its own insert channel.
-- **Best Practice (Strongly Recommended)**: Call Flush API before creating snapshot to ensure latest data is persisted. Flush is not mandatory but highly recommended to avoid missing data in growing segments.
-
-**Data Point-in-Time**:
-
-- Snapshot contains sealed segment data before each segment channel's seek timestamp.
-- To include latest data, it is strongly recommended to call Flush API before creating snapshot.
-- Data in growing segments will not be included in the snapshot.
+- A successful CreateSnapshot waits for its own collection's L1/L0 persistence. An unrelated collection holding the same physical WAL checkpoint does not delay this completion.
+- No preceding Flush call is required to include growing data before the snapshot message. Data after each channel's boundary is outside the snapshot.
+- `create_ts` is a compatibility summary, not a global cross-channel visibility boundary. Segment selection uses the timestamp of its own channel.
+- Compaction protection, snapshot publication, GC references and restore retain their existing protocols; this integration does not redesign those protocols.
 
 ## Snapshot Storage Implementation
 
@@ -137,6 +130,37 @@ type StorageV2SegmentManifest struct {
   - is_sorted (whether segment data is sorted by primary key)
 - Uses Avro format to provide schema evolution support
 
+### Snapshot format compatibility
+
+V0 (missing `format_version`) and V1-V5 manifests use raw Avro binary.
+Readers select the exact historical writer schema: V2 adds index path version,
+V3 adds commit timestamp, V4 adds field groups and format, and V5 adds the
+manifest index marker. Existing upstream segment metadata retains that marker.
+
+V6 writes one record per Avro Object Container File (OCF), embedding the full
+writer schema and using the null (uncompressed) codec. The record fields remain
+those of V5; V6 changes the container encoding rather than the segment model.
+
+`format_version` is a writer format identifier, not a reader ceiling. OCF
+readers use the embedded writer schema and skip fields absent from the current
+Go structure. Metadata readers likewise ignore unknown JSON fields.
+
+Future format changes MUST consider compatibility with existing V6 readers.
+Keep OCF framing and supported codecs; preserve existing field names, types,
+and meanings; and make added fields safe for older readers to ignore. A
+change to storage layouts, index interpretation, or other required restore
+semantics needs explicit reader handling and compatibility tests before the
+new writer format is introduced. Embedded schemas describe binary encoding;
+they cannot establish semantic restore compatibility. There is no separate
+minimum-reader or feature-negotiation protocol.
+
+Historical raw binary manifests continue to require an exact V0-V5 version;
+OCF manifests declaring V0-V5 and raw binary manifests declaring V6+ are rejected.
+Old unmodified readers cannot read OCF snapshots. OCF corruption must not fall
+back to historical binary decoding.
+Before OCF decoding, readers reject declared block sizes exceeding the input
+length to prevent allocations based on corrupt block headers.
+
 **StorageV2 Support**: For segments using Milvus's newer storage format, additional manifest paths are stored in `StorageV2ManifestList`. This enables seamless snapshot/restore for both legacy and new storage formats.
 
 ### Write Process (SnapshotWriter)
@@ -146,7 +170,7 @@ type StorageV2SegmentManifest struct {
    a. Create manifest directory: manifests/{snapshot_id}/
    b. For each segment, call writeSegmentManifest():
       - Convert SegmentDescription to Avro ManifestEntry
-      - Serialize to Avro binary format
+      - Serialize to Avro OCF with the writer schema
       - Write to S3: manifests/{snapshot_id}/{segment_id}.avro
    c. Collect StorageV2 manifest paths (if applicable)
    d. Call writeMetadataFile()
@@ -361,7 +385,7 @@ func (gc *garbageCollector) recycleUnusedIndexes() {
 ```
 Create:
   User Request -> Proxy CreateSnapshot -> DataCoord
-    -> GetSnapshotSeekPositions() (obtain one seek position per channel)
+    -> CreateSnapshot AckSyncUp results (one boundary per business channel)
     -> compute create_ts as min(channel_seek_positions.timestamp)
     -> SelectSegments() (filter each segment by its own channel seek timestamp)
     -> Collect Schema/Indexes/Segment detailed information
@@ -799,15 +823,15 @@ message CreateSnapshotResponse {
 ```
 
 **Implementation Details**:
-1. Obtain a seek position for each current channel and store the minimum timestamp as compatibility `create_ts`.
+1. Flush through CreateSnapshot with AckSyncUp; derive each business channel boundary from its broadcast result and store the minimum timestamp as compatibility `create_ts`.
 2. Filter sealed segments by their own insert channel seek timestamp (exclude dropped/importing segments).
 3. Collect collection schema, index definitions, segment detailed information.
 4. Write complete data to S3 in manifest format.
 5. Save SnapshotInfo in Etcd and establish reference relationships.
 
 **Notes**:
-- Does not actively flush data, only collects existing sealed segments
-- **Best Practice (Strongly Recommended)**: Call Flush API before creating snapshot to ensure latest data is persisted. Flush is not mandatory but highly recommended
+- CreateSnapshot itself flushes preceding L1/L0 data before the all-Ack callback collects segment metadata.
+- No separate Flush RPC is required. Snapshot positions come from CreateSnapshot, independently of the recovery checkpoint.
 - Creation will fail if collection has no sealed segments
 
 ### DropSnapshot

@@ -23,10 +23,7 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
-#include "common/GrowingOffsetMapping.h"
-#include "common/OffsetMapping.h"
 #include "common/OpContext.h"
-#include "common/SealedOffsetMapping.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "common/Utils.h"
@@ -243,6 +240,64 @@ TEST(Util_Segcore, MergeDataArrayWithNullableVectors) {
     ASSERT_TRUE(merged_valid_data[4]);
 }
 
+TEST(Util_Segcore, MergeDataArrayPreservesAllNullVectorMetadata) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    for (auto data_type : {DataType::VECTOR_FLOAT,
+                           DataType::VECTOR_BINARY,
+                           DataType::VECTOR_FLOAT16,
+                           DataType::VECTOR_BFLOAT16,
+                           DataType::VECTOR_INT8}) {
+        SCOPED_TRACE(fmt::format("data_type={}", data_type));
+        constexpr int64_t dim = 16;
+        auto schema = std::make_shared<Schema>();
+        auto vec = schema->AddDebugField("embeddings",
+                                         data_type,
+                                         dim,
+                                         data_type == DataType::VECTOR_BINARY
+                                             ? knowhere::metric::HAMMING
+                                             : knowhere::metric::L2,
+                                         true);
+        auto& field_meta = (*schema)[vec];
+        auto source = CreateEmptyVectorDataArray(0, field_meta);
+        MutableFieldDataRowValidData(source.get())->Add(false);
+        MutableFieldDataRowValidData(source.get())->Add(false);
+        auto expected_data_case = source->vectors().data_case();
+        std::map<FieldId, std::unique_ptr<DataArray>> output_fields;
+        output_fields[vec] = std::move(source);
+
+        // Both empty output and non-empty, entirely null output must carry
+        // enough metadata to serve as the template for a later shard.
+        for (size_t count : {0, 2}) {
+            SCOPED_TRACE(count);
+            std::vector<MergeBase> merge_bases;
+            for (size_t row = 0; row < count; ++row) {
+                merge_bases.emplace_back(&output_fields, row);
+            }
+            auto merged = MergeDataArray(merge_bases, field_meta);
+            DataArray decoded;
+            ASSERT_TRUE(decoded.ParseFromString(merged->SerializeAsString()));
+            EXPECT_EQ(decoded.field_id(), vec.get());
+            EXPECT_EQ(decoded.type(), proto::schema::DataType(data_type));
+            EXPECT_EQ(decoded.vectors().dim(), dim);
+            EXPECT_EQ(decoded.vectors().data_case(), expected_data_case);
+            const auto& valid_data = GetFieldDataRowValidData(decoded);
+            ASSERT_EQ(valid_data.size(), count);
+            for (auto valid : valid_data) {
+                EXPECT_FALSE(valid);
+            }
+            // No physical vector values should be allocated for null rows.
+            auto expected = CreateEmptyVectorDataArray(0, field_meta);
+            for (size_t row = 0; row < count; ++row) {
+                MutableFieldDataRowValidData(expected.get())->Add(false);
+            }
+            EXPECT_EQ(decoded.SerializeAsString(),
+                      expected->SerializeAsString());
+        }
+    }
+}
+
 TEST(Util_Segcore, MergeDataArrayWithNullableByteVectorsAppendsRows) {
     using namespace milvus;
     using namespace milvus::segcore;
@@ -392,93 +447,6 @@ TEST(Util_Segcore, BitsetViewAllNone) {
             }
         }
     }
-}
-
-TEST(Util_Segcore, TransformBitsetAllFilteredAndNoFilterFastPaths) {
-    using namespace milvus;
-
-    constexpr size_t kRows = 130;  // not a multiple of 8 or 64
-    std::vector<bool> valid_flags(kRows, true);
-    std::unique_ptr<bool[]> valid_data(new bool[kRows]);
-    std::copy(valid_flags.begin(), valid_flags.end(), valid_data.get());
-
-    SealedOffsetMapping mapping;
-    mapping.Build(valid_data.get(), kRows);
-
-    const size_t n_bytes = (kRows + 7) / 8;
-    std::vector<uint8_t> ones(n_bytes, 0xFF);
-    ones.back() = static_cast<uint8_t>((1U << (kRows & 7)) - 1U);
-    TargetBitmap physical_bitset;
-    auto status = mapping.TransformBitset(BitsetView(ones.data(), kRows),
-                                          physical_bitset);
-    EXPECT_EQ(status, OffsetMapping::BitsetTransformStatus::AllFiltered);
-
-    std::vector<uint8_t> zeros(n_bytes, 0x00);
-    status = mapping.TransformBitset(BitsetView(zeros.data(), kRows),
-                                     physical_bitset);
-    EXPECT_EQ(status, OffsetMapping::BitsetTransformStatus::NoFilter);
-}
-
-TEST(Util_Segcore, TransformBitsetMasksNullableVectorRowsOutsideLogicalView) {
-    using namespace milvus;
-
-    std::array<bool, 3> valid_data = {true, true, true};
-    GrowingOffsetMapping mapping;
-    mapping.Append(valid_data.data(), valid_data.size(), 0, 0);
-
-    // Growing search passes a logical bitset sized by the query timestamp's
-    // active row count. Rows beyond that logical view are not visible yet and
-    // must be masked in the transformed physical bitset.
-    BitsetType logical_bitset(2);
-    BitsetView logical_view(logical_bitset);
-
-    TargetBitmap physical_bitset;
-    auto status = mapping.TransformBitset(logical_view, physical_bitset);
-
-    EXPECT_EQ(status, OffsetMapping::BitsetTransformStatus::Transformed);
-    ASSERT_EQ(physical_bitset.size(), 3);
-    EXPECT_FALSE(physical_bitset[0]);
-    EXPECT_FALSE(physical_bitset[1]);
-    EXPECT_TRUE(physical_bitset[2]);
-}
-
-TEST(Util_Segcore, GrowingTransformBitsetMaterializesNoFilterSnapshot) {
-    using namespace milvus;
-
-    std::array<bool, 5> valid_data = {true, true, false, true, true};
-    GrowingOffsetMapping mapping;
-    mapping.Append(valid_data.data(), valid_data.size(), 0, 0);
-
-    BitsetType logical_bitset(valid_data.size());
-    BitsetView logical_view(logical_bitset);
-
-    TargetBitmap physical_bitset;
-    auto status = mapping.TransformBitset(logical_view, physical_bitset);
-
-    EXPECT_EQ(status, OffsetMapping::BitsetTransformStatus::Transformed);
-    ASSERT_EQ(physical_bitset.size(), 4);
-    EXPECT_TRUE(physical_bitset.none());
-
-    std::array<bool, 2> later_valid_data = {true, true};
-    mapping.Append(later_valid_data.data(), later_valid_data.size(), 5, 4);
-    EXPECT_EQ(mapping.GetValidCount(), 6);
-    EXPECT_EQ(physical_bitset.size(), 4);
-    EXPECT_TRUE(physical_bitset.none());
-}
-
-TEST(Util_Segcore, TransformBitsetKeepsEmptyViewAsAllVisibleFastPath) {
-    using namespace milvus;
-
-    std::array<bool, 3> valid_data = {true, true, true};
-    SealedOffsetMapping mapping;
-    mapping.Build(valid_data.data(), valid_data.size());
-
-    BitsetView all_visible;
-    TargetBitmap physical_bitset;
-    auto status = mapping.TransformBitset(all_visible, physical_bitset);
-
-    EXPECT_EQ(status, OffsetMapping::BitsetTransformStatus::NoFilter);
-    EXPECT_TRUE(physical_bitset.empty());
 }
 
 TEST(Util_Segcore, MergeDataArrayWithNullableVectorArrayUsesLogicalOffsets) {

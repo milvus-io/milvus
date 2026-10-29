@@ -25,10 +25,10 @@ package types
 const (
 	OpTypeMap     = "map"
 	OpTypeFilter  = "filter"
-	OpTypeSelect  = "select"
 	OpTypeSort    = "sort"
 	OpTypeLimit   = "limit"
 	OpTypeGroupBy = "group_by"
+	OpTypeMerge   = "merge"
 )
 
 // =============================================================================
@@ -55,8 +55,9 @@ const (
 
 const (
 	// Numeric combine parameter keys
-	NumCombineParamMode    = "mode"
-	NumCombineParamWeights = "weights"
+	NumCombineParamMode       = "mode"
+	NumCombineParamWeights    = "weights"
+	NumCombineParamNullPolicy = "null_policy"
 
 	// Numeric combine mode values
 	NumCombineModeMultiply = "multiply"
@@ -76,6 +77,13 @@ const (
 	ScoreFieldName     = "$score"
 	SegOffsetFieldName = "$seg_offset"
 	GroupByFieldName   = "$group_by"
+	// ElementIndicesFieldName stores one Int32 element index per result row.
+	ElementIndicesFieldName = "$element_indices"
+)
+
+// Function Chain framework parameter keys.
+const (
+	InputDataTypesParam = "$input_data_types"
 )
 
 // =============================================================================

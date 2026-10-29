@@ -21,22 +21,32 @@ type Type = string
 const (
 	TypeNone                  Type = "None"
 	PreImport                 Type = "PreImport"
+	PreImportV3               Type = "PreImportV3"
 	Import                    Type = "Import"
+	Reshard                   Type = "Reshard"
+	ImportV3                  Type = "ImportV3"
 	Compaction                Type = "Compaction"
 	Index                     Type = "Index"
 	Stats                     Type = "Stats"
 	Analyze                   Type = "Analyze"
 	RefreshExternalCollection Type = "RefreshExternalCollection"
 	CopySegment               Type = "CopySegment"
+	// ExternalCopySegment is a fail-closed capability discriminator. Workers
+	// predating foreign-source copy support reject it before decoding the task.
+	ExternalCopySegment Type = "ExternalCopySegment"
 )
 
 var TypeList = []Type{
 	PreImport,
+	PreImportV3,
 	Import,
+	Reshard,
+	ImportV3,
 	Compaction,
 	Index,
 	Stats,
 	Analyze,
 	RefreshExternalCollection,
 	CopySegment,
+	ExternalCopySegment,
 }

@@ -308,6 +308,11 @@ func fillDatabase(ctx context.Context, req interface{}) (context.Context, interf
 			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
 		}
 		return ctx, r
+	case *milvuspb.GetCompactionPlansRequest:
+		if r.DbName == "" {
+			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
+		}
+		return ctx, r
 	case *milvuspb.AddCollectionFieldRequest:
 		if r.DbName == "" {
 			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
@@ -355,8 +360,12 @@ func fillDatabase(ctx context.Context, req interface{}) (context.Context, interf
 		}
 		return ctx, r
 	case *milvuspb.RestoreSnapshotRequest:
+		activeDBName := GetCurDBNameFromContextOrDefault(ctx)
 		if r.DbName == "" {
-			r.DbName = GetCurDBNameFromContextOrDefault(ctx)
+			r.DbName = activeDBName
+		}
+		if r.TargetDbName == "" {
+			r.TargetDbName = activeDBName
 		}
 		return ctx, r
 	case *milvuspb.RestoreExternalSnapshotRequest:

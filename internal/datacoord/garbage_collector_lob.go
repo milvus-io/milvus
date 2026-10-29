@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -60,7 +59,7 @@ func newLOBManifestCache(ttl time.Duration) *lobManifestCache {
 }
 
 // Get retrieves LOB files from cache or fetches from storage
-func (c *lobManifestCache) Get(ctx context.Context, manifestPath string, storageConfig *indexpb.StorageConfig) ([]packed.LobFileInfo, error) {
+func (c *lobManifestCache) Get(ctx context.Context, io *packed.ManifestIOContext, manifestPath string, storageConfig *indexpb.StorageConfig) ([]packed.LobFileInfo, error) {
 	c.mu.RLock()
 	entry, ok := c.cache[manifestPath]
 	if ok && time.Since(entry.cachedAt) < c.ttl {
@@ -70,7 +69,7 @@ func (c *lobManifestCache) Get(ctx context.Context, manifestPath string, storage
 	c.mu.RUnlock()
 
 	// cache miss or expired, fetch from storage
-	lobFiles, err := packed.GetManifestLobFiles(manifestPath, storageConfig)
+	lobFiles, err := packed.GetManifestLobFilesAsync(ctx, io, manifestPath, storageConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -154,14 +153,10 @@ func (gc *garbageCollector) recycleUnusedLOBFiles(ctx context.Context) {
 		logger.Info(ctx, "recycleUnusedLOBFiles done", mlog.Duration("timeCost", time.Since(start)))
 	}()
 
-	storageConfig := gc.getStorageConfig()
-	if storageConfig == nil {
-		logger.Warn(ctx, "failed to get storage config, skip LOB GC")
-		return
-	}
-
 	lobCtx := newLOBGCContext(gc)
-	lobCtx.storageConfig = storageConfig
+	// Same builder as every other primary-storage caller: under local storage
+	// the key prefix is localStorage.path, not minio.rootPath.
+	lobCtx.storageConfig = createStorageConfig()
 
 	// Step 1: Collect all used LOB files from active segments.
 	// If any manifest read fails, abort the entire GC run to avoid
@@ -187,36 +182,15 @@ func (gc *garbageCollector) recycleUnusedLOBFiles(ctx context.Context) {
 	lobCtx.cache.Cleanup()
 }
 
-// getStorageConfig returns the storage configuration for FFI calls
-func (gc *garbageCollector) getStorageConfig() *indexpb.StorageConfig {
-	params := paramtable.Get()
-
-	return &indexpb.StorageConfig{
-		Address:           params.MinioCfg.Address.GetValue(),
-		AccessKeyID:       params.MinioCfg.AccessKeyID.GetValue(),
-		SecretAccessKey:   params.MinioCfg.SecretAccessKey.GetValue(),
-		UseSSL:            params.MinioCfg.UseSSL.GetAsBool(),
-		SslCACert:         params.MinioCfg.SslCACert.GetValue(),
-		BucketName:        params.MinioCfg.BucketName.GetValue(),
-		RootPath:          params.MinioCfg.RootPath.GetValue(),
-		UseIAM:            params.MinioCfg.UseIAM.GetAsBool(),
-		IAMEndpoint:       params.MinioCfg.IAMEndpoint.GetValue(),
-		StorageType:       params.CommonCfg.StorageType.GetValue(),
-		Region:            params.MinioCfg.Region.GetValue(),
-		UseVirtualHost:    params.MinioCfg.UseVirtualHost.GetAsBool(),
-		CloudProvider:     params.MinioCfg.CloudProvider.GetValue(),
-		RequestTimeoutMs:  params.MinioCfg.RequestTimeoutMs.GetAsInt64(),
-		MaxConnections:    uint32(params.MinioCfg.MaxConnections.GetAsInt()),
-		GcpCredentialJSON: params.MinioCfg.GcpCredentialJSON.GetValue(),
-	}
-}
-
 // collectUsedLOBFiles collects all LOB file paths that are referenced by active segments
 // and by dropped segments that are protected by snapshots.
 // Returns a set of LOB file paths (relative paths within LOB directory).
 // Returns error if any segment's manifest cannot be read, to prevent
 // orphan deletion from removing files that are still in use.
 func (lobCtx *lobGCContext) collectUsedLOBFiles(ctx context.Context) (typeutil.Set[string], error) {
+	// This scan reads manifests sequentially and owns one executor until it ends.
+	io := packed.NewManifestIOContext(1)
+	defer io.Close()
 	usedFiles := typeutil.NewSet[string]()
 
 	// Collect from active (non-dropped) segments
@@ -224,7 +198,7 @@ func (lobCtx *lobGCContext) collectUsedLOBFiles(ctx context.Context) (typeutil.S
 		return si.GetState() != commonpb.SegmentState_Dropped
 	}))
 	for _, segment := range activeSegments {
-		if err := lobCtx.collectLOBFilesFromSegment(ctx, segment, usedFiles); err != nil {
+		if err := lobCtx.collectLOBFilesFromSegment(ctx, io, segment, usedFiles); err != nil {
 			return nil, err
 		}
 	}
@@ -246,7 +220,7 @@ func (lobCtx *lobGCContext) collectUsedLOBFiles(ctx context.Context) (typeutil.S
 				continue
 			}
 			if snapshotMeta.IsSegmentGCBlocked(segment.GetCollectionID(), segment.GetID()) {
-				if err := lobCtx.collectLOBFilesFromSegment(ctx, segment, usedFiles); err != nil {
+				if err := lobCtx.collectLOBFilesFromSegment(ctx, io, segment, usedFiles); err != nil {
 					return nil, err
 				}
 			}
@@ -260,7 +234,7 @@ func (lobCtx *lobGCContext) collectUsedLOBFiles(ctx context.Context) (typeutil.S
 // and adds them to the usedFiles set.
 // Returns error if the manifest cannot be read, so the caller can abort GC
 // and avoid deleting files that may still be referenced.
-func (lobCtx *lobGCContext) collectLOBFilesFromSegment(ctx context.Context, segment *SegmentInfo, usedFiles typeutil.Set[string]) error {
+func (lobCtx *lobGCContext) collectLOBFilesFromSegment(ctx context.Context, io *packed.ManifestIOContext, segment *SegmentInfo, usedFiles typeutil.Set[string]) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -269,7 +243,7 @@ func (lobCtx *lobGCContext) collectLOBFilesFromSegment(ctx context.Context, segm
 		return nil
 	}
 
-	lobFiles, err := lobCtx.cache.Get(ctx, manifestPath, lobCtx.storageConfig)
+	lobFiles, err := lobCtx.cache.Get(ctx, io, manifestPath, lobCtx.storageConfig)
 	if err != nil {
 		return merr.WrapErrServiceInternalErr(err, "failed to get LOB files from manifest for segment %d (path=%s)", segment.GetID(), manifestPath)
 	}
@@ -290,6 +264,10 @@ func (lobCtx *lobGCContext) scanOrphanLOBFiles(ctx context.Context, usedFiles ty
 	safetyWindow := Params.DataCoordCfg.GCLOBSafetyWindow.GetAsDuration(time.Second)
 
 	// LOB files are stored at: {root_path}/insert_log/{coll}/{part}/lobs/{field_id}/_data/{file_id}.vx
+	// TODO: Cover the legacy local namespace when upgrading from 3.0.0/3.0.1
+	// with LOB enabled. Files under localStorage.path/minio.rootPath/insert_log
+	// remain readable in place, but this scan misses their partition-level LOBs,
+	// so unreferenced LOB files there are not reclaimed.
 	lobBasePath := path.Join(lobCtx.gc.option.cli.RootPath(), common.SegmentInsertLogPath)
 
 	// Walk through all files under insert_log to find LOB files

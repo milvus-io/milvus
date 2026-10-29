@@ -35,6 +35,7 @@ from chaos.checker import (
     TextMatchChecker,
     UpsertChecker,
 )
+from chaos.recovery_continuation import RecoveryContinuationChecker
 from common.common_type import CaseLabel
 from common.milvus_sys import MilvusSys
 from delayed_assert import assert_expectations
@@ -94,6 +95,10 @@ class TestOperations(TestBase):
         self.enable_import = enable_import
         self.minio_endpoint = f"{minio_host}:9000"
         self.bucket_name = minio_bucket
+        yield
+        checker = self.health_checkers.get(Op.recovery_continuation)
+        if checker is not None:
+            checker.close()
 
     def init_health_checkers(self, collection_name=None):
         c_name = collection_name
@@ -126,6 +131,7 @@ class TestOperations(TestBase):
             checkers[Op.bulk_insert] = BulkInsertChecker(
                 collection_name=c_name, bucket_name=self.bucket_name, minio_endpoint=self.minio_endpoint
             )
+        checkers[Op.recovery_continuation] = RecoveryContinuationChecker()
         self.health_checkers = checkers
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -137,30 +143,34 @@ class TestOperations(TestBase):
         c_name = None
         event_records.insert("init_health_checkers", "start")
         self.init_health_checkers(collection_name=c_name)
+        recovery_checker = self.health_checkers[Op.recovery_continuation]
         event_records.insert("init_health_checkers", "finished")
         tasks = cc.start_monitor_threads(self.health_checkers)
-        log.info("*********************Load Start**********************")
-        # wait request_duration
-        request_duration = request_duration.replace("h", "*3600+").replace("m", "*60+").replace("s", "")
-        if request_duration[-1] == "+":
-            request_duration = request_duration[:-1]
-        request_duration = eval(request_duration)
-        for i in range(10):
-            sleep(request_duration // 10)
-            # add an event so that the chaos can start to apply
-            if i == 3:
-                event_records.insert("init_chaos", "ready")
-            for k, v in self.health_checkers.items():
-                v.check_result()
-        if is_check:
-            assert_statistic(self.health_checkers, succ_rate_threshold=0.98)
-            assert_expectations()
-        # wait all pod ready
-        wait_pods_ready(self.milvus_ns, f"app.kubernetes.io/instance={self.release_name}")
-        time.sleep(60)
-        cc.check_thread_status(tasks)
-        for k, v in self.health_checkers.items():
-            v.pause()
+        try:
+            log.info("*********************Load Start**********************")
+            # wait request_duration
+            request_duration = request_duration.replace("h", "*3600+").replace("m", "*60+").replace("s", "")
+            if request_duration[-1] == "+":
+                request_duration = request_duration[:-1]
+            request_duration = eval(request_duration)
+            for i in range(10):
+                sleep(request_duration // 10)
+                # add an event so that the chaos can start to apply
+                if i == 3:
+                    event_records.insert("init_chaos", "ready")
+                for checker in self.health_checkers.values():
+                    checker.check_result()
+            if is_check:
+                assert_statistic(self.health_checkers, succ_rate_threshold=0.98)
+                assert_expectations()
+            # wait all pod ready
+            wait_pods_ready(self.milvus_ns, f"app.kubernetes.io/instance={self.release_name}")
+            time.sleep(60)
+        finally:
+            alive = cc.stop_monitor_threads(self.health_checkers, tasks)
+        assert not alive, f"Checker threads did not stop: {alive}"
+        # Integrity failures are fatal even when availability statistics are disabled.
+        recovery_checker.verify()
         ra = ResultAnalyzer()
         ra.get_stage_success_rate()
         ra.show_result_table()

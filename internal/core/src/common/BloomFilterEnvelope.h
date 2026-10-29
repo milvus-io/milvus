@@ -21,7 +21,7 @@
 #include <string_view>
 
 // Single C++ source of truth for the MBF1 envelope layout (the bloom_match
-// filter blob wire format; the Go twin is client/sbbf). Layout, all integers
+// filter blob wire format; the Go twin is client/membership/sbbf). Layout, all integers
 // little-endian:
 //   offset  size  field
 //   0       4     magic "MBF1"

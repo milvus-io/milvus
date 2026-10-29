@@ -40,7 +40,9 @@ class ChunkTarget {
     write(const void* data, size_t size) = 0;
 
     /**
-     * @brief release the data pointer to the caller
+     * @brief finish writing and return the data pointer to the caller
+     * @note owning targets retain fallback cleanup until TransferOwnership()
+     *       is called after the caller has installed its own owner
      * @note no write() should be called after release()
      * @return the data pointer
      */
@@ -55,22 +57,38 @@ class ChunkTarget {
     tell() = 0;
 };
 
+enum class MmapChunkWritebackMode {
+    Disabled,
+    FdatasyncOnFinish,
+};
+
 class MmapChunkTarget : public ChunkTarget {
  public:
     explicit MmapChunkTarget(std::string file_path,
                              bool populate,
                              size_t cap,
-                             storage::io::Priority io_prio)
+                             storage::io::Priority io_prio,
+                             MmapChunkWritebackMode writeback_mode =
+                                 MmapChunkWritebackMode::Disabled)
         : file_path_(std::move(file_path)), cap_(cap), populate_(populate) {
         file_writer_ =
             std::make_unique<storage::FileWriter>(file_path_, io_prio);
+        if (writeback_mode == MmapChunkWritebackMode::FdatasyncOnFinish) {
+            file_writer_->SetFdatasyncOnFinish();
+        }
     }
+
+    ~MmapChunkTarget() override;
 
     void
     write(const void* data, size_t size) override;
 
     char*
     release() override;
+
+    // Disarm fallback cleanup after ChunkMmapGuard owns the mapping and path.
+    void
+    TransferOwnership() noexcept;
 
     size_t
     tell() override;
@@ -84,6 +102,8 @@ class MmapChunkTarget : public ChunkTarget {
     size_t cap_{0};
     size_t size_{0};
     bool populate_{false};
+    char* mapped_data_{nullptr};
+    bool owns_file_{true};
 };
 
 class MemChunkTarget : public ChunkTarget {
@@ -94,12 +114,20 @@ class MemChunkTarget : public ChunkTarget {
             mmap_flag |= MAP_POPULATE;
         }
         auto m = mmap(nullptr, cap, PROT_READ | PROT_WRITE, mmap_flag, -1, 0);
-        AssertInfo(m != MAP_FAILED,
-                   "failed to map: {}, map_size={}",
-                   strerror(errno),
-                   size_);
+        if (m == MAP_FAILED) {
+            ThrowInfo(ErrorCode::MmapError,
+                      "failed to map: {}, map_size={}",
+                      strerror(errno),
+                      cap_);
+        }
         data_ = reinterpret_cast<char*>(m);
     }
+
+    ~MemChunkTarget() override;
+
+    MemChunkTarget(const MemChunkTarget&) = delete;
+    MemChunkTarget&
+    operator=(const MemChunkTarget&) = delete;
 
     void
     write(const void* data, size_t size) override;
@@ -107,11 +135,15 @@ class MemChunkTarget : public ChunkTarget {
     char*
     release() override;
 
+    // Disarm fallback cleanup only after ChunkMmapGuard owns the mapping.
+    void
+    TransferOwnership() noexcept;
+
     size_t
     tell() override;
 
  private:
-    char* data_;  // no need to delete in destructor, will be deleted by Chunk
+    char* data_{nullptr};
     size_t cap_;
     size_t size_ = 0;
 };

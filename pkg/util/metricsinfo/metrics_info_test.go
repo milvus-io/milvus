@@ -88,6 +88,10 @@ func TestQueryNodeInfos_Codec(t *testing.T) {
 		SystemConfigurations: QueryNodeConfiguration{
 			SimdType: "avx2",
 		},
+		LocalStorage: &QueryNodeLocalStorageMetrics{
+			CapacityBytes: 1600,
+			UsedBytes:     2,
+		},
 	}
 	s, err := MarshalComponentInfos(infos1)
 	assert.Equal(t, nil, err)
@@ -210,7 +214,9 @@ func TestDataCoordInfos_Codec(t *testing.T) {
 			ID:          1,
 		},
 		SystemConfigurations: DataCoordConfiguration{
-			SegmentMaxSize: 1024 * 1024,
+			SegmentMaxSize:                  1024 * 1024,
+			ForceMergeDataNodeMemoryFactor:  4,
+			ForceMergeQueryNodeMemoryFactor: 4,
 		},
 	}
 	s, err := MarshalComponentInfos(infos1)

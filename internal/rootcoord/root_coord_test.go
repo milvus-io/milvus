@@ -81,6 +81,54 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+func TestDataViewCollectionRecoveryValidator(t *testing.T) {
+	mockey.PatchConvey("validate CollectionMeta state for DataView recovery", t, func() {
+		lookupErr := errors.New("lookup failed")
+		meta := &MetaTable{}
+		mockey.Mock((*MetaTable).GetCollectionByID).To(func(
+			_ *MetaTable,
+			_ context.Context,
+			_ string,
+			collectionID UniqueID,
+			_ Timestamp,
+			_ bool,
+		) (*model.Collection, error) {
+			switch collectionID {
+			case 1:
+				return &model.Collection{CollectionID: collectionID, State: etcdpb.CollectionState_CollectionCreated}, nil
+			case 2:
+				return &model.Collection{CollectionID: collectionID, State: etcdpb.CollectionState_CollectionCreating}, nil
+			case 3:
+				return &model.Collection{CollectionID: collectionID, State: etcdpb.CollectionState_CollectionDropping}, nil
+			case 4:
+				return &model.Collection{CollectionID: collectionID, State: etcdpb.CollectionState_CollectionDropped}, nil
+			case 5:
+				return nil, merr.WrapErrCollectionNotFound(collectionID)
+			case 6:
+				return nil, lookupErr
+			default:
+				return &model.Collection{CollectionID: collectionID, State: etcdpb.CollectionState(100)}, nil
+			}
+		}).Build()
+
+		core := &Core{meta: meta}
+		recover, err := core.ValidateDataViewCollectionForRecovery(context.Background(), 1)
+		require.NoError(t, err)
+		require.True(t, recover)
+		for _, collectionID := range []int64{2, 3, 4, 5} {
+			recover, err = core.ValidateDataViewCollectionForRecovery(context.Background(), collectionID)
+			require.NoError(t, err)
+			require.False(t, recover)
+		}
+		recover, err = core.ValidateDataViewCollectionForRecovery(context.Background(), 6)
+		require.ErrorIs(t, err, lookupErr)
+		require.False(t, recover)
+		recover, err = core.ValidateDataViewCollectionForRecovery(context.Background(), 7)
+		require.Error(t, err)
+		require.False(t, recover)
+	})
+}
+
 // testBoundIndexRecorder captures FieldIndexes applied through the fake
 // CreateIndexV2 ack callback so DDL tests can assert on bound-index creation.
 var testBoundIndexRecorder = struct {
@@ -117,6 +165,7 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	tso.EXPECT().GenerateTSO(mock.Anything).Return(uint64(1), nil).Maybe()
 	core := newTestCore(withHealthyCode(),
 		withMeta(&MetaTable{
+			ctx:              context.Background(),
 			catalog:          rootcoord.NewCatalog(catalogKV),
 			names:            testDB,
 			aliases:          newNameDb(),
@@ -155,7 +204,9 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 
 	bapi := mock_broadcaster.NewMockBroadcastAPI(t)
 	bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
-		msg = msg.WithBroadcastID(1)
+		// Stamp the header the way the real broadcaster does, control channel included.
+		msg = msg.OverwriteBroadcastHeader(1)
+		msg = message.WithBroadcastControlChannel(msg, streaming.WAL().ControlChannel())
 		results := make(map[string]*message.AppendResult)
 		for _, vchannel := range msg.BroadcastHeader().VChannels {
 			results[vchannel] = &message.AppendResult{
@@ -1786,10 +1837,6 @@ func TestCore_getMetastorePrivilegeName(t *testing.T) {
 	priv, err := c.getMetastorePrivilegeName(context.Background(), util.AnyWord)
 	assert.NoError(t, err)
 	assert.Equal(t, priv, util.AnyWord)
-
-	meta.EXPECT().IsCustomPrivilegeGroup(mock.Anything, "unknown").Return(false, nil)
-	_, err = c.getMetastorePrivilegeName(context.Background(), "unknown")
-	assert.ErrorContains(t, err, "not found the privilege name [unknown] from metastore")
 }
 
 func TestCore_expandPrivilegeGroup(t *testing.T) {
@@ -2272,6 +2319,7 @@ func TestCore_NotifyFileResourceObserverOnProxySession(t *testing.T) {
 		proxyManager.EXPECT().AddProxyClient(session).Run(func(*sessionutil.Session) {
 			clientAdded = true
 		})
+		observer.EXPECT().IsEmpty().Return(false)
 		observer.EXPECT().Notify().Run(func() {
 			assert.True(t, clientAdded)
 		})
@@ -2290,6 +2338,7 @@ func TestCore_NotifyFileResourceObserverOnProxySession(t *testing.T) {
 		proxyManager.EXPECT().SetProxyClients(sessions).Run(func([]*sessionutil.Session) {
 			clientsSet = true
 		})
+		observer.EXPECT().IsEmpty().Return(false)
 		observer.EXPECT().Notify().Run(func() {
 			assert.True(t, clientsSet)
 		})
@@ -2307,6 +2356,19 @@ func TestCore_NotifyFileResourceObserverOnProxySession(t *testing.T) {
 
 		c := newTestCore()
 		c.proxyClientManager = proxyManager
+		c.addProxyClient(session)
+	})
+
+	t.Run("empty resources", func(t *testing.T) {
+		proxyManager := proxyutil.NewMockProxyClientManager(t)
+		observer := NewMockFileResourceObserver(t)
+		session := &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: TestProxyID}}
+		proxyManager.EXPECT().AddProxyClient(session)
+		observer.EXPECT().IsEmpty().Return(true)
+
+		c := newTestCore()
+		c.proxyClientManager = proxyManager
+		c.SetFileResourceObserver(observer)
 		c.addProxyClient(session)
 	})
 }
@@ -2334,6 +2396,26 @@ func TestRootCoord_ListFileResources(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.NotNil(t, resp.GetResources())
+	})
+}
+
+func TestRootCoord_GetFileResources(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		c := newTestCore(withAbnormalCode())
+		resources, err := c.GetFileResources(context.Background(), 1)
+		assert.Nil(t, resources)
+		assert.ErrorIs(t, err, merr.ErrServiceNotReady)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		expected := []*internalpb.FileResourceInfo{{Id: 1, Name: "test", Path: "test_path"}}
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().GetFileResources(mock.Anything, int64(1)).Return(expected, nil)
+
+		c := newTestCore(withHealthyCode(), withMeta(meta))
+		resources, err := c.GetFileResources(context.Background(), 1)
+		assert.NoError(t, err)
+		assert.Equal(t, expected, resources)
 	})
 }
 

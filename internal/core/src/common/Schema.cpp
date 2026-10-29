@@ -234,7 +234,9 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
     for (const milvus::proto::schema::StructArrayFieldSchema& child :
          schema_proto.struct_array_fields()) {
         for (const auto& sub_field : child.fields()) {
-            process_field(sub_field);
+            auto field = sub_field;
+            field.set_nullable(field.nullable() || child.nullable());
+            process_field(field);
         }
     }
 
@@ -300,9 +302,6 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
 
     return schema;
 }
-
-const FieldMeta FieldMeta::RowIdMeta(
-    FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
 
 const ArrowSchemaPtr
 Schema::ConvertToArrowSchema() const {
@@ -488,22 +487,32 @@ Schema::GetPhysicalColumnName(FieldId field_id) const {
 
 FieldId
 Schema::ResolveColumnFieldId(const std::string& column_name) const {
+    return ResolveColumnFieldIds(column_name).front();
+}
+
+std::vector<FieldId>
+Schema::ResolveColumnFieldIds(const std::string& column_name) const {
     if (is_external_collection()) {
         if (is_milvus_table_external_collection()) {
             if (auto field_id = ParseFieldIdColumnName(column_name);
                 field_id.has_value() && fields_.count(field_id.value())) {
-                return field_id.value();
+                return {field_id.value()};
             }
         }
-        for (const auto& [fid, meta] : fields_) {
+        std::vector<FieldId> field_ids;
+        for (const auto fid : field_ids_) {
+            const auto& meta = fields_.at(fid);
             if (meta.is_external_field() &&
                 meta.get_external_field() == column_name) {
-                return fid;
+                field_ids.emplace_back(fid);
             }
+        }
+        if (!field_ids.empty()) {
+            return field_ids;
         }
         if (auto field_id = ParseFieldIdColumnName(column_name);
             field_id.has_value()) {
-            return field_id.value();
+            return {field_id.value()};
         }
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "external column '{}' not found in schema",
@@ -511,7 +520,7 @@ Schema::ResolveColumnFieldId(const std::string& column_name) const {
     }
     if (auto field_id = ParseFieldIdColumnName(column_name);
         field_id.has_value()) {
-        return field_id.value();
+        return {field_id.value()};
     }
     ThrowInfo(ErrorCode::DataFormatBroken,
               "column '{}' is not a valid field id",

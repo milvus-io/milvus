@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -61,6 +62,16 @@ type GcOption struct {
 
 	broker           broker.Broker
 	removeObjectPool *conc.Pool[struct{}]
+	dataViewGC       DataViewGarbageCollector
+
+	// importJobAlive reports whether an ImportJob still exists for jobID. It is
+	// wired by the server from ImportMeta so the orphan scan never deletes an
+	// active job's import_v3/{job_id}/ prefix. nil disables the import_v3 scan.
+	importJobAlive func(ctx context.Context, jobID int64) bool
+}
+
+type DataViewGarbageCollector interface {
+	GarbageCollect(ctx context.Context, collectionID int64, retainLatest int) error
 }
 
 // garbageCollector handles garbage files in object storage
@@ -179,6 +190,12 @@ func (gc *gcPauseRecords) DeleteByID(id int64) {
 	gc.deleteMatching(func(r gcPauseRecord) bool { return r.id == id })
 }
 
+// Clear drops every record, whatever ticket it holds. It backs the ticket-less
+// resume, which has no ticket to match on and means "GC must not be paused".
+func (gc *gcPauseRecords) Clear() {
+	gc.deleteMatching(func(gcPauseRecord) bool { return true })
+}
+
 // deleteMatching rebuilds the heap without the matching records, dropping
 // already-expired records along the way.
 func (gc *gcPauseRecords) deleteMatching(match func(gcPauseRecord) bool) {
@@ -247,7 +264,7 @@ func newGarbageCollector(meta *meta, handler Handler, opt GcOption) *garbageColl
 		mlog.Duration("missingTolerance", opt.missingTolerance),
 		mlog.Duration("dropTolerance", opt.dropTolerance))
 	opt.removeObjectPool = conc.NewPool[struct{}](Params.DataCoordCfg.GCRemoveConcurrent.GetAsInt(), conc.WithExpiryDuration(time.Minute))
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) // #nosec G118 -- close() invokes the retained cancel function.
 	metaSignal := make(chan gcCmd)
 	orphanSignal := make(chan gcCmd)
 	lobSignal := make(chan gcCmd)
@@ -366,6 +383,7 @@ func (gc *garbageCollector) work(ctx context.Context) {
 	go func() {
 		defer gc.wg.Done()
 		gc.runRecycleTaskWithPauser(ctx, "meta", gc.option.checkInterval, func(ctx context.Context, signal <-chan gcCmd) {
+			gc.recycleDataViews(ctx, signal)
 			gc.recycleDroppedSegments(ctx, signal)
 			gc.recycleChannelCPMeta(ctx, signal)
 			gc.recycleUnusedIndexes(ctx, signal)
@@ -384,6 +402,7 @@ func (gc *garbageCollector) work(ctx context.Context) {
 			gc.recycleUnusedBinlogFiles(ctx)
 			gc.recycleUnusedIndexFilesV0(ctx)
 			gc.recycleUnusedIndexFilesV1(ctx)
+			gc.recycleUnusedImportV3Prefixes(ctx)
 		})
 	}()
 	go func() {
@@ -510,6 +529,20 @@ func (gc *garbageCollector) rollbackPause(cmd gcCmd, recordID int64) {
 }
 
 func (gc *garbageCollector) resume(cmd gcCmd) {
+	// A resume carrying no ticket is the pre collection level GC control
+	// semantic: release every outstanding pause. Pauses issued through the proxy
+	// route always carry a generated ticket, so a ticket-scoped delete would
+	// match nothing here and leave GC paused while reporting success.
+	if cmd.ticket == "" {
+		gc.pauseUntil.Clear()
+		gc.pausedCollection.Range(func(collectionID int64, _ *gcPauseRecords) bool {
+			gc.pausedCollection.Remove(collectionID)
+			return true
+		})
+		mlog.Info(gc.ctx, "garbage collection resumed", mlog.Bool("stillPaused", false))
+		return
+	}
+
 	// reset to zero value
 	var afterResume time.Time
 	if cmd.collectionID <= 0 {
@@ -601,15 +634,52 @@ func (gc *garbageCollector) recycleUnusedBinlogFiles(ctx context.Context) {
 		{
 			prefix: path.Join(gc.option.cli.RootPath(), common.SegmentStatslogPath),
 			checker: func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
+				if segment == nil {
+					return false
+				}
+				// Import V3 pre-registers the segment as Importing but persists
+				// Statslogs only at acceptance; the PK stats file already sits
+				// under stats_log/ while the task retries. Keep it until the
+				// segment leaves Importing, or acceptance would persist a log
+				// ID whose file was already recycled.
+				if segment.GetIsImporting() {
+					return true
+				}
 				logID, err := binlog.GetLogIDFromBingLogPath(objectInfo.FilePath)
 				if err != nil {
 					log.Warn(ctx, "garbageCollector find dirty stats log", mlog.String("filePath", objectInfo.FilePath), mlog.Err(err))
 					return false
 				}
-				return segment != nil && segment.IsStatsLogExists(logID)
+				return segment.IsStatsLogExists(logID)
 			},
 			segmentIDFromPath: storage.ParseSegmentIDByBinlog,
 			label:             metrics.StatFileLabel,
+		},
+		{
+			prefix: path.Join(gc.option.cli.RootPath(), common.SegmentBm25LogPath),
+			checker: func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
+				if segment == nil {
+					return false
+				}
+				for _, fieldLogs := range segment.GetBm25Statslogs() {
+					for _, statsLog := range fieldLogs.GetBinlogs() {
+						key := statsLog.GetLogPath()
+						if key == "" {
+							// Catalog binlogs carry IDs, not paths. Match the field too:
+							// compound stats reuse the same log ID across fields.
+							key = metautil.BuildBm25LogPath(gc.option.cli.RootPath(),
+								segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(),
+								fieldLogs.GetFieldID(), statsLog.GetLogID())
+						}
+						if key == objectInfo.FilePath {
+							return true
+						}
+					}
+				}
+				return false
+			},
+			segmentIDFromPath: storage.ParseSegmentIDByBinlog,
+			label:             common.SegmentBm25LogPath,
 		},
 		{
 			prefix: path.Join(gc.option.cli.RootPath(), common.SegmentDeltaLogPath),
@@ -668,6 +738,75 @@ func (gc *garbageCollector) recycleUnusedBinlogFiles(ctx context.Context) {
 	metrics.GarbageCollectorRunCount.WithLabelValues(paramtable.GetStringNodeID()).Add(1)
 }
 
+// recycleUnusedImportV3Prefixes removes import_v3/{job_id}/ prefixes that have
+// no live ImportJob in the catalog and whose newest object is older than the
+// orphan tolerance. It runs on the orphan scan cadence
+// (dataCoord.gc.scanInterval, default 7 days); importJobAlive is optional and
+// when nil the scan is skipped entirely. The import subsystem itself removes a
+// terminal job's prefix in deleteImportJob; this scan only covers abnormal
+// leftovers (crashed/aborted creations, late old-run writers after GC).
+func (gc *garbageCollector) recycleUnusedImportV3Prefixes(ctx context.Context) {
+	if gc.option.cli == nil || gc.option.importJobAlive == nil {
+		return
+	}
+	root := path.Join(gc.option.cli.RootPath(), metautil.ImportV3RootPath) + "/"
+	paths, modTimes, err := storage.ListAllChunkWithPrefix(ctx, gc.option.cli, root, true)
+	if err != nil {
+		mlog.Warn(ctx, "failed to list import v3 orphan prefixes", mlog.Err(err))
+		return
+	}
+	type jobInfo struct {
+		newest time.Time
+	}
+	jobs := make(map[int64]*jobInfo)
+	for i, path := range paths {
+		// Chunk managers do not agree on path shape: RemoteChunkManager returns
+		// bucket-relative object keys (import_v3/{job}/...), while LocalChunkManager
+		// returns absolute filesystem paths rooted above the storage root. Locate
+		// the root component anywhere in the path instead of assuming a fixed prefix.
+		marker := metautil.ImportV3RootPath + "/"
+		idx := strings.Index(path, marker)
+		if idx < 0 {
+			continue
+		}
+		rel := path[idx+len(marker):]
+		parts := strings.SplitN(rel, "/", 2)
+		if len(parts) == 0 || parts[0] == "" {
+			continue
+		}
+		jobID, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil {
+			continue
+		}
+		info := jobs[jobID]
+		if info == nil {
+			info = &jobInfo{newest: modTimes[i]}
+			jobs[jobID] = info
+		} else if modTimes[i].After(info.newest) {
+			info.newest = modTimes[i]
+		}
+	}
+	for jobID, info := range jobs {
+		if gc.option.importJobAlive(ctx, jobID) {
+			continue
+		}
+		// Only delete when nothing has been written to the prefix for at least
+		// missingTolerance: a job that just lost its catalog record but is still
+		// being written by a late worker must not have its fragments removed.
+		if time.Since(info.newest) <= gc.option.missingTolerance {
+			continue
+		}
+		prefix := path.Join(gc.option.cli.RootPath(), metautil.BuildImportV3JobPath(jobID)) + "/"
+		if err := gc.option.cli.RemoveWithPrefix(ctx, prefix); err != nil {
+			mlog.Warn(ctx, "remove orphan import v3 prefix failed",
+				mlog.Int64("jobID", jobID), mlog.Err(err))
+			continue
+		}
+		mlog.Info(ctx, "removed orphan import v3 prefix",
+			mlog.Int64("jobID", jobID), mlog.String("prefix", prefix))
+	}
+}
+
 // recycleUnusedBinLogWithChecker scans the prefix and checks the path with checker.
 // GC the file if checker returns false.
 func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, prefix string, label string, segmentIDFromPath func(rootPath, filePath string) (int64, error), checker func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool) {
@@ -696,6 +835,10 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 		return snapshotMeta.IsSegmentGCBlocked(collectionID, segmentID)
 	}
 
+	rootPath := gc.option.cli.RootPath()
+	insertPrefix := path.Join(rootPath, common.SegmentInsertLogPath) + "/"
+	canReclaimIndex := gc.newIndexFileReclaimChecker(ctx)
+
 	futures := make([]*conc.Future[struct{}], 0)
 	err := gc.option.cli.WalkWithPrefix(ctx, prefix, true, func(chunkInfo *storage.ChunkObjectInfo) bool {
 		total++
@@ -707,64 +850,82 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 			return true
 		}
 
-		// Parse segmentID from file path.
-		// TODO: Does all files in the same segment have the same segmentID?
-		segmentID, err := segmentIDFromPath(gc.option.cli.RootPath(), chunkInfo.FilePath)
-		if err != nil {
-			// Try V3 path format: insert_log/{coll}/{part}/{seg}/...
-			v3SegID, parseErr := parseV3SegmentID(gc.option.cli.RootPath(), chunkInfo.FilePath)
+		rel, underInsert := strings.CutPrefix(chunkInfo.FilePath, insertPrefix)
+		parts := strings.SplitN(rel, "/", 5)
+		if underInsert && len(parts) >= 4 && parts[3] == "_index" {
+			// Handle indexes before the live-V3 blanket skip. Malformed _index
+			// paths stay protected; they must not fall into generic binlog GC.
+			collectionID, segmentID, buildID, parseErr := parseIndexV2FilePath(rootPath, chunkInfo.FilePath)
 			if parseErr != nil {
-				unexpectedFailure.Inc()
-				logger.Warn(ctx, "garbageCollector recycleUnusedBinlogFiles parse segment id error",
-					mlog.String("filePath", chunkInfo.FilePath),
-					mlog.Err(err))
+				logger.RatedWarn(ctx, 1.0, "garbageCollector recycleUnusedBinlogFiles skip unparsable index file",
+					mlog.String("file", chunkInfo.FilePath), mlog.Err(parseErr))
+				valid++
 				return true
 			}
-			if v3Seg := gc.meta.GetSegment(ctx, v3SegID); v3Seg != nil {
-				if v3Seg.GetStorageVersion() == storage.StorageV3 {
-					// registered V3 segment file — skip, live files are managed by
-					// loon and dropped V3 segments are recycled with the whole
-					// basePath by recycleDroppedSegments
-					valid++
+			if !canReclaimIndex(chunkInfo.FilePath, collectionID, segmentID, buildID) {
+				valid++
+				return true
+			}
+		} else {
+			// Parse segmentID from file path.
+			// TODO: Does all files in the same segment have the same segmentID?
+			segmentID, err := segmentIDFromPath(gc.option.cli.RootPath(), chunkInfo.FilePath)
+			if err != nil {
+				// Try V3 path format: insert_log/{coll}/{part}/{seg}/...
+				v3SegID, parseErr := parseV3SegmentID(gc.option.cli.RootPath(), chunkInfo.FilePath)
+				if parseErr != nil {
+					unexpectedFailure.Inc()
+					logger.Warn(ctx, "garbageCollector recycleUnusedBinlogFiles parse segment id error",
+						mlog.String("filePath", chunkInfo.FilePath),
+						mlog.Err(err))
 					return true
 				}
-				unexpectedFailure.Inc()
-				logger.Warn(ctx, "garbageCollector recycleUnusedBinlogFiles parse segment id error",
-					mlog.String("filePath", chunkInfo.FilePath),
-					mlog.Err(err))
+				if v3Seg := gc.meta.GetSegment(ctx, v3SegID); v3Seg != nil {
+					if v3Seg.GetStorageVersion() == storage.StorageV3 {
+						// registered V3 segment file — skip, live files are managed by
+						// loon and dropped V3 segments are recycled with the whole
+						// basePath by recycleDroppedSegments
+						valid++
+						return true
+					}
+					unexpectedFailure.Inc()
+					logger.Warn(ctx, "garbageCollector recycleUnusedBinlogFiles parse segment id error",
+						mlog.String("filePath", chunkInfo.FilePath),
+						mlog.Err(err))
+					return true
+				}
+				// Orphan V3 file: its segment was never registered in meta, e.g.
+				// output uploaded by a failed sort/mix compaction attempt (issue
+				// #50962). Nothing manages it, so recycle it like V1/V2 orphans:
+				// fall through to the shared checker/removal path below.
+				segmentID = v3SegID
+			}
+
+			segment := gc.meta.GetSegment(ctx, segmentID)
+
+			// Skip V3 segments — orphan files managed by loon
+			if segment != nil && segment.GetStorageVersion() == storage.StorageV3 {
+				valid++
 				return true
 			}
-			// Orphan V3 file: its segment was never registered in meta, e.g.
-			// output uploaded by a failed sort/mix compaction attempt (issue
-			// #50962). Nothing manages it, so recycle it like V1/V2 orphans:
-			// fall through to the shared checker/removal path below.
-			segmentID = v3SegID
-		}
 
-		segment := gc.meta.GetSegment(ctx, segmentID)
+			if checker(chunkInfo, segment) {
+				valid++
+				logger.Info(ctx, "garbageCollector recycleUnusedBinlogFiles skip file since it is valid", mlog.String("filePath", chunkInfo.FilePath), mlog.Int64("segmentID", segmentID))
+				return true
+			}
 
-		// Skip V3 segments — orphan files managed by loon
-		if segment != nil && segment.GetStorageVersion() == storage.StorageV3 {
-			valid++
-			return true
-		}
-
-		if checker(chunkInfo, segment) {
-			valid++
-			logger.Info(ctx, "garbageCollector recycleUnusedBinlogFiles skip file since it is valid", mlog.String("filePath", chunkInfo.FilePath), mlog.Int64("segmentID", segmentID))
-			return true
-		}
-
-		// Check if segment is referenced by any snapshot before deleting its binlog.
-		collectionID := int64(-1)
-		if segment != nil {
-			collectionID = segment.GetCollectionID()
-		}
-		if isSnapshotProtected(segmentID, collectionID) {
-			logger.Info(ctx, "skip GC binlog files since segment is protected by snapshot",
-				mlog.Int64("segmentID", segmentID))
-			valid++
-			return true
+			// Check if segment is referenced by any snapshot before deleting its binlog.
+			collectionID := int64(-1)
+			if segment != nil {
+				collectionID = segment.GetCollectionID()
+			}
+			if isSnapshotProtected(segmentID, collectionID) {
+				logger.Info(ctx, "skip GC binlog files since segment is protected by snapshot",
+					mlog.Int64("segmentID", segmentID))
+				valid++
+				return true
+			}
 		}
 
 		// ignore error since it could be cleaned up next time
@@ -774,7 +935,7 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 			logger := logger.With(mlog.String("file", file))
 			logger.Info(ctx, "garbageCollector recycleUnusedBinlogFiles remove file...")
 
-			if err = gc.option.cli.Remove(ctx, file); err != nil {
+			if err := gc.option.cli.Remove(ctx, file); err != nil {
 				logger.Warn(ctx, "garbageCollector recycleUnusedBinlogFiles remove file failed", mlog.Err(err))
 				unexpectedFailure.Inc()
 				return struct{}{}, err
@@ -807,6 +968,33 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 		Observe(float64(cost.Milliseconds()))
 }
 
+func (gc *garbageCollector) recycleDataViews(ctx context.Context, signal <-chan gcCmd) {
+	if gc.meta == nil || gc.option.dataViewGC == nil {
+		return
+	}
+	start := time.Now()
+	logger := mlog.With(mlog.String("gcName", "recycleDataViews"), mlog.Time("startAt", start))
+	logger.Info(ctx, "start recycleDataViews")
+	defer func() { logger.Info(ctx, "recycleDataViews done", mlog.Duration("timeCost", time.Since(start))) }()
+
+	for _, collection := range gc.meta.GetCollections() {
+		if ctx.Err() != nil {
+			return
+		}
+		gc.ackSignal(signal)
+
+		collectionID := collection.ID
+		if gc.collectionGCPaused(collectionID) {
+			logger.Info(ctx, "skip DataView GC since collection is paused", mlog.FieldCollectionID(collectionID))
+			continue
+		}
+
+		if err := gc.option.dataViewGC.GarbageCollect(ctx, collectionID, 1); err != nil {
+			logger.Warn(ctx, "DataView GC failed", mlog.FieldCollectionID(collectionID), mlog.Err(err))
+		}
+	}
+}
+
 func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 	childSegment *SegmentInfo,
 	indexSet typeutil.UniqueSet,
@@ -829,14 +1017,23 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 		}
 	}
 
+	dmlTs := segmentEffectiveDmlTs(segment.SegmentInfo)
+	if dmlTs <= cpTimestamp {
+		return true
+	}
+
+	// A removed channel no longer needs checkpoint protection. Its checkpoint
+	// may stop advancing, while collection cleanup waits for segment GC.
 	segInsertChannel := segment.GetInsertChannel()
-	// Ignore segments from potentially dropped collection. Check if collection is to be dropped by checking if channel is dropped.
-	// We do this because collection meta drop relies on all segment being GCed.
-	if gc.meta.catalog.ChannelExists(context.Background(), segInsertChannel) &&
-		segmentEffectiveDmlTs(segment.SegmentInfo) > cpTimestamp {
-		// segment gc shall only happen when channel cp is after segment dml cp.
+	channelExists, err := gc.meta.metaStore.ChannelExists(gc.ctx, segInsertChannel)
+	if err != nil {
+		log.RatedWarn(gc.ctx, rate.Limit(60), "failed to check channel existence, skip dropped segment GC",
+			mlog.FieldVChannel(segInsertChannel), mlog.Err(err))
+		return false
+	}
+	if channelExists {
 		log.RatedInfo(gc.ctx, rate.Limit(60), "dropped segment dml position after channel cp, skip meta gc",
-			mlog.Uint64("dmlPosTs", segmentEffectiveDmlTs(segment.SegmentInfo)),
+			mlog.Uint64("dmlPosTs", dmlTs),
 			mlog.Uint64("channelCpTs", cpTimestamp),
 		)
 		return false
@@ -875,7 +1072,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 			droppedCompactTo[to.GetID()] = to
 		}
 	}
-	indexedSegments := FilterInIndexedSegments(ctx, gc.handler, gc.meta, false, lo.Values(droppedCompactTo)...)
+	indexedSegments := FilterInIndexedSegments(ctx, gc.handler, gc.meta, true, lo.Values(droppedCompactTo)...)
 	if ctx.Err() != nil {
 		return
 	}
@@ -901,6 +1098,8 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 		loadedSegments.Insert(segmentID)
 	}
 
+	io := packed.NewManifestIOContext(1)
+	defer io.Close()
 	log.Info(ctx, "start to GC segments", mlog.Int("drop_num", len(drops)))
 	for segmentID, segment := range drops {
 		if ctx.Err() != nil {
@@ -940,18 +1139,17 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 			continue
 		}
 
-		gc.recycleDroppedSegment(ctx, segmentID, segment)
+		gc.recycleDroppedSegment(ctx, io, segmentID, segment)
 	}
 }
 
-// recycleDroppedSegment deletes a single dropped segment's object files,
-// segment-index files, segment-index meta, and segment meta in that order.
+// recycleDroppedSegment marks its index tasks deleted before removing a
+// dropped segment's files, segment-index records, and finally segment record.
 //
-// The ordering matters: files first so a meta-only retry after partial
-// file deletion can still observe the leftover keys; segment-index meta
-// next so segment meta deletion (the final marker) is the only step that
-// commits the GC; if any step fails the later state is preserved for the
-// next GC cycle to retry.
+// Persisted task markers keep a retained compaction ancestor from appearing
+// ready after partial file cleanup or a failed catalog deletion, including
+// across restart. Keep the marked records and their file keys until cleanup
+// completes so subsequent GC cycles can retry the same files.
 //
 // This path can race with recycleUnusedSegIndexes on the same BuildID
 // whenever a dropped segment's parent field index has also been marked
@@ -970,17 +1168,27 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 // surface NotFound, or batching RemoveSegmentIndex past the per-buildID
 // keyLock — must preserve these invariants, otherwise dropped-segment GC
 // will silently break under load.
-func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, segmentID int64, segment *SegmentInfo) {
+func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, io *packed.ManifestIOContext, segmentID int64, segment *SegmentInfo) {
 	log := mlog.With(mlog.Int64("segmentID", segmentID), mlog.Int64("collectionID", segment.GetCollectionID()))
 
 	if ctx.Err() != nil {
 		return
 	}
 
-	segIndexes, indexFiles, indexSnapshotBlocked := gc.getDroppedSegmentIndexFiles(segmentID)
-	if indexSnapshotBlocked {
+	segIndexes, indexFiles, blockReason := gc.getDroppedSegmentIndexFiles(ctx, io, segmentID)
+	switch blockReason {
+	case gcBlockedBySnapshot:
 		log.Info(ctx, "skip GC segment since segment index is protected by snapshot",
 			mlog.Int("segmentIndexes", len(segIndexes)))
+		return
+	case gcBlockedByManifest:
+		// The class-specific message (transient read failure vs invalid
+		// entry) is logged where the manifest error is classified.
+		return
+	}
+
+	if err := gc.markSegmentIndexesDeleted(ctx, segIndexes); err != nil {
+		log.Warn(ctx, "GC segment index tasks failed to mark deleted, wait to retry", mlog.Err(err))
 		return
 	}
 
@@ -1010,15 +1218,27 @@ func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, segmentID
 	log.Info(ctx, "GC segment meta drop segment done", mlog.Int("segmentIndexes", len(segIndexes)))
 }
 
-func (gc *garbageCollector) getDroppedSegmentIndexFiles(segmentID int64) ([]*model.SegmentIndex, map[string]struct{}, bool) {
+// gcBlockReason says why getDroppedSegmentIndexFiles refused to release a
+// dropped segment for recycling, so the caller reports the actual cause
+// instead of folding every block into "protected by snapshot".
+type gcBlockReason int
+
+const (
+	gcNotBlocked gcBlockReason = iota
+	// gcBlockedBySnapshot: a snapshot still references one of the segment's
+	// index buildIDs, from a SegmentIndex record or a manifest entry.
+	gcBlockedBySnapshot
+	// gcBlockedByManifest: the manifest could not be read, or carries an
+	// entry that fails validation, so the full delete list is unknown.
+	gcBlockedByManifest
+)
+
+func (gc *garbageCollector) getDroppedSegmentIndexFiles(ctx context.Context, io *packed.ManifestIOContext, segmentID int64) ([]*model.SegmentIndex, map[string]struct{}, gcBlockReason) {
 	segIndexes := gc.getAllSegmentIndexesForDroppedSegment(segmentID)
-	if len(segIndexes) == 0 {
-		return nil, nil, false
-	}
 	if snapshotMeta := gc.meta.GetSnapshotMeta(); snapshotMeta != nil {
 		for _, segIdx := range segIndexes {
 			if snapshotMeta.IsBuildIDGCBlocked(segIdx.CollectionID, segIdx.BuildID) {
-				return segIndexes, nil, true
+				return segIndexes, nil, gcBlockedBySnapshot
 			}
 		}
 	}
@@ -1028,7 +1248,123 @@ func (gc *garbageCollector) getDroppedSegmentIndexFiles(segmentID int64) ([]*mod
 			indexFiles[key] = struct{}{}
 		}
 	}
-	return segIndexes, indexFiles, false
+
+	// A dropped StorageV3 segment can hold both kinds of index metadata at
+	// once - a manifest-only entry published while the etcd write switch was
+	// off, and a record-only one whose build finished after the drop - so the
+	// delete list is always the union of records and manifest, mirroring
+	// recycleUnusedSegIndexes.
+	segment := gc.meta.GetSegment(ctx, segmentID)
+	manifestIndexFiles, blocked, err := gc.getManifestIndexFiles(ctx, io, segment)
+	if err != nil {
+		if errors.Is(err, errManifestIndexEntryInvalid) {
+			// Deterministic: re-reading the same manifest cannot clear it,
+			// and recycling anyway would leak whatever the entry names.
+			metrics.GarbageCollectorInvalidManifestCount.WithLabelValues(paramtable.GetStringNodeID()).Inc()
+			mlog.Error(ctx, "dropped segment manifest carries an invalid index entry; GC for this segment is blocked until the manifest is repaired",
+				mlog.FieldSegmentID(segmentID),
+				mlog.String("manifestPath", segment.GetManifestPath()),
+				mlog.Err(err))
+			return segIndexes, nil, gcBlockedByManifest
+		}
+		// An unreadable manifest may still reference artifacts that live
+		// outside the segment directory, and no scan reclaims those once the
+		// segment record is gone. Wait for the next cycle instead - unless the
+		// manifest file itself is gone, in which case it is not unreadable but
+		// absent, there is nothing left to protect, and blocking would strand
+		// this segment's metadata forever.
+		if gc.manifestExists(ctx, segment) {
+			mlog.Warn(ctx, "failed to read dropped segment manifest index files, blocking GC, will retry",
+				mlog.FieldSegmentID(segmentID), mlog.Err(err))
+			return segIndexes, nil, gcBlockedByManifest
+		}
+		mlog.Info(ctx, "dropped segment manifest is already gone, recycling without manifest index metadata",
+			mlog.FieldSegmentID(segmentID), mlog.Err(err))
+	}
+	if blocked {
+		return segIndexes, nil, gcBlockedBySnapshot
+	}
+	for file := range manifestIndexFiles {
+		indexFiles[file] = struct{}{}
+	}
+	if len(indexFiles) == 0 {
+		indexFiles = nil
+	}
+	return segIndexes, indexFiles, gcNotBlocked
+}
+
+// manifestExists reports whether the segment's manifest revision is still in
+// object storage. The FFI collapses every manifest read failure into one
+// transient class, so this is what separates "the manifest could not be read
+// right now" from "the manifest is gone". Anything other than a definitive
+// "absent" answer counts as present: under doubt, retry the segment later.
+func (gc *garbageCollector) manifestExists(ctx context.Context, segment *SegmentInfo) bool {
+	manifestFilePath, err := packed.ManifestFilePath(segment.GetManifestPath())
+	if err != nil {
+		return true
+	}
+	exists, err := gc.option.cli.Exist(ctx, manifestFilePath)
+	if err != nil {
+		mlog.Warn(ctx, "failed to check dropped segment manifest existence",
+			mlog.FieldSegmentID(segment.GetID()),
+			mlog.String("manifestFilePath", manifestFilePath), mlog.Err(err))
+		return true
+	}
+	return exists
+}
+
+// errManifestIndexEntryInvalid classifies a manifest index entry that fails
+// manifestIndexFilePathInfo validation. Unlike a read failure this is
+// deterministic: retrying the read cannot clear it, only a repaired manifest
+// revision can.
+var errManifestIndexEntryInvalid = errors.New("manifest carries an invalid index entry")
+
+// getManifestIndexFiles returns the object-storage paths of every completed
+// index artifact a StorageV3 segment's manifest still references. Any read or
+// validation failure is returned so callers can fail closed; a validation
+// rejection wraps errManifestIndexEntryInvalid so callers can tell "retry the
+// read" apart from "the manifest needs repair".
+func (gc *garbageCollector) getManifestIndexFiles(ctx context.Context, io *packed.ManifestIOContext, segment *SegmentInfo) (map[string]struct{}, bool, error) {
+	if segment == nil || segment.GetStorageVersion() != storage.StorageV3 || segment.GetManifestPath() == "" || !segment.GetManifestHasIndex() {
+		return nil, false, nil
+	}
+	manifestIndexes, err := gc.meta.readManifestIndexesWithIO(ctx, io, segment.GetManifestPath(), createStorageConfig())
+	if err != nil {
+		return nil, false, merr.Wrap(err, "failed to read manifest index metadata")
+	}
+	files := make(map[string]struct{})
+	for _, manifestIndex := range manifestIndexes {
+		if snapshotMeta := gc.meta.GetSnapshotMeta(); snapshotMeta != nil &&
+			snapshotMeta.IsBuildIDGCBlocked(segment.GetCollectionID(), manifestIndex.BuildID) {
+			return nil, true, nil
+		}
+		info, ok := manifestIndexFilePathInfoForSegment(gc.option.cli.RootPath(), segment.SegmentInfo, manifestIndex)
+		if !ok {
+			return nil, false, errors.Wrapf(errManifestIndexEntryInvalid,
+				"segment %d index %d build %d", segment.GetID(), manifestIndex.IndexID, manifestIndex.BuildID)
+		}
+		for _, file := range info.GetIndexFilePaths() {
+			files[file] = struct{}{}
+		}
+	}
+	return files, false, nil
+}
+
+// markSegmentIndexesDeleted persists every task's deletion marker before any
+// segment artifacts are removed. A failure leaves all files for the next GC
+// cycle; markers already persisted remain authoritative and are idempotent.
+func (gc *garbageCollector) markSegmentIndexesDeleted(ctx context.Context, segIndexes []*model.SegmentIndex) error {
+	for _, segIdx := range segIndexes {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := gc.meta.indexMeta.DeleteTask(segIdx.BuildID); err != nil {
+			mlog.Warn(ctx, "failed to mark segment index task deleted before GC",
+				mlog.FieldSegmentID(segIdx.SegmentID), mlog.FieldBuildID(segIdx.BuildID), mlog.Err(err))
+			return err
+		}
+	}
+	return nil
 }
 
 // getAllSegmentIndexesForDroppedSegment wraps indexMeta.GetAllSegmentIndexes
@@ -1043,12 +1379,58 @@ func (gc *garbageCollector) getAllSegmentIndexesForDroppedSegment(segmentID int6
 	return gc.meta.indexMeta.GetAllSegmentIndexes(segmentID)
 }
 
+// v3SegmentGCPrefix accepts canonical and legacy namespaces beneath the root,
+// but only for this segment. Remote keys retain their literal spelling.
+func (gc *garbageCollector) v3SegmentGCPrefix(basePath string, segment *SegmentInfo) (string, error) {
+	root := path.Clean(gc.option.cli.RootPath())
+	_, local := gc.option.cli.(*storage.LocalChunkManager)
+	if path.IsAbs(basePath) != local {
+		return "", merr.WrapErrDataIntegrityMsg("GC V3 segment %d has an invalid storage path %q", segment.GetID(), basePath)
+	}
+	basePath = strings.TrimRight(basePath, "/")
+	if local {
+		basePath = path.Clean(basePath)
+		rel, err := filepath.Rel(root, basePath)
+		if err != nil || rel == "." || !filepath.IsLocal(rel) {
+			return "", merr.WrapErrDataIntegrityMsg("GC V3 segment %d path %q is outside storage root %q", segment.GetID(), basePath, root)
+		}
+	} else if root != "." && (basePath == root || !strings.HasPrefix(basePath, root+"/")) {
+		return "", merr.WrapErrDataIntegrityMsg("GC V3 segment %d path %q is outside storage root %q", segment.GetID(), basePath, root)
+	}
+
+	if !segmentBaseMatches(basePath, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID()) {
+		return "", merr.WrapErrDataIntegrityMsg("GC V3 segment %d manifest base path does not match segment identity", segment.GetID())
+	}
+	// Keep segment 2001 from matching sibling 20010 during prefix deletion.
+	return basePath + "/", nil
+}
+
 func (gc *garbageCollector) removeDroppedSegmentFiles(ctx context.Context, cloned *SegmentInfo, indexFiles map[string]struct{}) error {
 	log := mlog.With(mlog.Int64("segmentID", cloned.GetID()))
 
-	// V3 segment data lives under the manifest base path. Segment index files still
-	// live under index file prefixes and must be deleted from recorded file keys.
+	// V3 segment data lives under the manifest base path. Segment index files
+	// still live under index file prefixes outside it, while the manifest that
+	// names them lives inside it: index files go first, so a partial deletion
+	// failure leaves the manifest for the next cycle to re-derive the
+	// survivors from (re-deleting removed keys is a no-op - removeObjectFiles
+	// swallows NotFound), and the basePath prefix goes last.
 	if cloned.GetStorageVersion() == storage.StorageV3 {
+		// An empty ManifestPath means the segment was allocated but never
+		// accepted (import retry, failure, or cleanup), so there are no data
+		// files to remove; still delete any recorded index files, then proceed
+		// to the meta drop instead of erroring.
+		if cloned.GetManifestPath() == "" {
+			if len(indexFiles) == 0 {
+				log.Info(ctx, "GC V3 segment files done")
+				return nil
+			}
+			if err := gc.removeObjectFiles(ctx, indexFiles); err != nil {
+				log.Warn(ctx, "GC V3 segment remove index files failed", mlog.Err(err))
+				return err
+			}
+			log.Info(ctx, "GC V3 segment files done")
+			return nil
+		}
 		basePath, _, err := packed.UnmarshalManifestPath(cloned.GetManifestPath())
 		if err != nil {
 			log.Warn(ctx, "GC V3 segment failed to parse manifest path",
@@ -1056,21 +1438,22 @@ func (gc *garbageCollector) removeDroppedSegmentFiles(ctx context.Context, clone
 				mlog.Err(err))
 			return err
 		}
+		basePath, err = gc.v3SegmentGCPrefix(basePath, cloned)
+		if err != nil {
+			return err
+		}
 		log.Info(ctx, "GC V3 segment start, removing basePath...",
 			mlog.String("basePath", basePath),
 			mlog.Int("indexFiles", len(indexFiles)))
-		if err := gc.option.cli.RemoveWithPrefix(ctx, basePath); err != nil {
+		if err := gc.removeObjectFiles(ctx, indexFiles); err != nil {
+			log.Warn(ctx, "GC V3 segment remove index files failed", mlog.Err(err))
+			return err
+		}
+		prefix := strings.TrimSuffix(basePath, "/") + "/"
+		if err := gc.option.cli.RemoveWithPrefix(ctx, prefix); err != nil && !isAbsentLocalPrefix(gc.option.cli, prefix, err) {
 			log.Warn(ctx, "GC V3 segment remove basePath failed",
 				mlog.String("basePath", basePath),
 				mlog.Err(err))
-			return err
-		}
-		if len(indexFiles) == 0 {
-			log.Info(ctx, "GC V3 segment files done")
-			return nil
-		}
-		if err := gc.removeObjectFiles(ctx, indexFiles); err != nil {
-			log.Warn(ctx, "GC V3 segment remove index files failed", mlog.Err(err))
 			return err
 		}
 		log.Info(ctx, "GC V3 segment files done")
@@ -1118,11 +1501,12 @@ func (gc *garbageCollector) removeDroppedSegmentIndexMeta(ctx context.Context, s
 func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context, signal <-chan gcCmd) {
 	channelCPs, err := gc.meta.catalog.ListChannelCheckpoint(ctx)
 	if err != nil {
-		mlog.Warn(ctx, "list channel cp fail during GC", mlog.Err(err))
+		mlog.Warn(ctx, "recycleChannelCPMeta: failed to list channel checkpoints", mlog.Err(err))
 		return
 	}
 
 	collectionID2GcStatus := make(map[int64]bool)
+	availability, _ := gc.option.broker.(broker.CollectionAvailability)
 	skippedCnt := 0
 
 	mlog.Info(ctx, "start to GC channel cp", mlog.Int("vchannelCPCnt", len(channelCPs)))
@@ -1141,17 +1525,23 @@ func (gc *garbageCollector) recycleChannelCPMeta(ctx context.Context, signal <-c
 			continue
 		}
 
+		if ctx.Err() != nil {
+			return
+		}
+		// A positive resident lookup avoids schema conversion, task scheduling,
+		// per-collection timeouts and retaining live IDs for the entire sweep.
+		if availability != nil && availability.IsCollectionAvailable(collectionID) {
+			skippedCnt++
+			continue
+		}
+
 		_, ok := collectionID2GcStatus[collectionID]
 		if !ok {
-			if ctx.Err() != nil {
-				// process canceled, stop.
-				return
-			}
 			timeoutCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-			defer cancel()
 			has, err := gc.option.broker.HasCollection(timeoutCtx, collectionID)
+			cancel()
 			if err == nil && !has {
-				collectionID2GcStatus[collectionID] = gc.meta.catalog.GcConfirm(ctx, collectionID, -1)
+				collectionID2GcStatus[collectionID] = gc.meta.metaStore.GcConfirm(ctx, collectionID, -1)
 			} else {
 				// skip checkpoints GC of this cycle if describe collection fails or the collection state is available.
 				mlog.Debug(ctx, "skip channel cp GC, the collection state is available",
@@ -1358,7 +1748,20 @@ func (gc *garbageCollector) recycleUnusedIndexes(ctx context.Context, signal <-c
 	}
 }
 
-// recycleUnusedSegIndexes remove the index of segment if index is deleted or segment itself is deleted.
+type manifestIndexIdentity struct {
+	indexID int64
+	buildID int64
+}
+
+type segmentIndexGCItem struct {
+	segIdx *model.SegmentIndex
+	files  map[string]struct{}
+}
+
+// recycleUnusedSegIndexes removes segment indexes whose index definition or
+// segment is gone. Candidates are grouped by segment so one manifest read and
+// one manifest revision can retire every eligible entry in a transaction-sized
+// chunk, while record-only indexes keep the legacy path.
 func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal <-chan gcCmd) {
 	start := time.Now()
 	log := mlog.With(mlog.String("gcName", "recycleUnusedSegIndexes"), mlog.Time("startAt", start))
@@ -1367,10 +1770,34 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 		log.Info(ctx, "recycleUnusedSegIndexes done", mlog.Duration("timeCost", time.Since(start)))
 	}()
 
-	segIndexes := gc.meta.indexMeta.GetAllSegIndexes()
-	for _, candidate := range segIndexes {
+	io := packed.NewManifestIOContext(1)
+	defer io.Close()
+	groups := make(map[int64][]*model.SegmentIndex)
+	segmentOrder := make([]int64, 0)
+	for _, candidate := range gc.meta.indexMeta.GetAllSegIndexes() {
+		if candidate == nil {
+			continue
+		}
+		if _, ok := groups[candidate.SegmentID]; !ok {
+			segmentOrder = append(segmentOrder, candidate.SegmentID)
+		}
+		groups[candidate.SegmentID] = append(groups[candidate.SegmentID], candidate)
+	}
+	for _, segmentID := range segmentOrder {
 		if ctx.Err() != nil {
-			// process canceled.
+			return
+		}
+		gc.recycleUnusedSegIndexesForSegment(ctx, io, segmentID, groups[segmentID], signal)
+	}
+}
+
+func (gc *garbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Context, io *packed.ManifestIOContext, segmentID int64,
+	candidates []*model.SegmentIndex, signal <-chan gcCmd,
+) {
+	segment := gc.meta.GetSegment(ctx, segmentID)
+	items := make([]segmentIndexGCItem, 0, len(candidates))
+	for _, candidate := range candidates {
+		if ctx.Err() != nil {
 			return
 		}
 		// GetAllSegIndexes returns a point-in-time snapshot. Refresh by buildID
@@ -1387,60 +1814,212 @@ func (gc *garbageCollector) recycleUnusedSegIndexes(ctx context.Context, signal 
 
 		// 1. segment belongs to is deleted.
 		// 2. index is deleted.
-		if gc.meta.GetSegment(ctx, segIdx.SegmentID) == nil || !gc.meta.indexMeta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
-			// Non-terminal tasks may still be writing index files or updating meta.
-			// Keep the SegmentIndex until the task reaches a terminal state.
-			if segIdx.IndexState == commonpb.IndexState_Unissued ||
-				segIdx.IndexState == commonpb.IndexState_InProgress ||
-				segIdx.IndexState == commonpb.IndexState_Retry {
-				log.Info(ctx, "skip GC segment index since index task is not terminal",
-					mlog.Int64("collectionID", segIdx.CollectionID),
-					mlog.Int64("partitionID", segIdx.PartitionID),
-					mlog.Int64("segmentID", segIdx.SegmentID),
-					mlog.Int64("indexID", segIdx.IndexID),
-					mlog.Int64("buildID", segIdx.BuildID),
-					mlog.String("state", segIdx.IndexState.String()))
-				continue
-			}
-			indexFiles := gc.getAllIndexFilesOfIndex(segIdx)
-			// Empty indexFiles is valid for fake-finished small/no-train indexes.
-			// removeObjectFiles is a no-op in that case; the stale meta still needs
-			// to be removed when its segment or field index is gone.
-			log := mlog.With(mlog.Int64("collectionID", segIdx.CollectionID),
+		if segment != nil && gc.meta.indexMeta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
+			continue
+		}
+		// Non-terminal tasks may still be writing index files or updating meta.
+		// Keep the SegmentIndex until the task reaches a terminal state.
+		if segIdx.IndexState == commonpb.IndexState_Unissued ||
+			segIdx.IndexState == commonpb.IndexState_InProgress ||
+			segIdx.IndexState == commonpb.IndexState_Retry {
+			mlog.Info(ctx, "skip GC segment index since index task is not terminal",
+				mlog.Int64("collectionID", segIdx.CollectionID),
 				mlog.Int64("partitionID", segIdx.PartitionID),
 				mlog.Int64("segmentID", segIdx.SegmentID),
 				mlog.Int64("indexID", segIdx.IndexID),
 				mlog.Int64("buildID", segIdx.BuildID),
-				mlog.Int64("nodeID", segIdx.NodeID),
-				mlog.Int("indexFiles", len(indexFiles)))
+				mlog.String("state", segIdx.IndexState.String()))
+			continue
+		}
+		if snapshotMeta := gc.meta.GetSnapshotMeta(); snapshotMeta != nil &&
+			snapshotMeta.IsBuildIDGCBlocked(segIdx.CollectionID, segIdx.BuildID) {
+			mlog.Info(ctx, "skip GC segment index since buildID is protected by snapshot",
+				mlog.Int64("collectionID", segIdx.CollectionID),
+				mlog.Int64("buildID", segIdx.BuildID))
+			continue
+		}
+		items = append(items, segmentIndexGCItem{segIdx: segIdx, files: gc.getAllIndexFilesOfIndex(segIdx)})
+	}
+	if len(items) == 0 {
+		return
+	}
 
-			// Skip buildIDs protected by snapshot references. IsBuildIDGCBlocked is O(1)
-			// and embeds the "RefIndex not loaded → fail-closed" check.
-			if snapshotMeta := gc.meta.GetSnapshotMeta(); snapshotMeta != nil {
-				if snapshotMeta.IsBuildIDGCBlocked(segIdx.CollectionID, segIdx.BuildID) {
-					log.Info(ctx, "skip GC segment index since buildID is protected by snapshot",
-						mlog.Int64("collectionID", segIdx.CollectionID),
-						mlog.Int64("buildID", segIdx.BuildID))
-					continue
-				}
+	// Task refresh can observe a completion published after the initial segment
+	// snapshot. Read placement after admitting terminal tasks, or an old marker
+	// or revision could send a manifest-resident result through record-only GC.
+	segment = gc.meta.GetSegment(ctx, segmentID)
+
+	// Only a healthy, marked StorageV3 segment can contain entries to retract.
+	// A false marker proves the published section is empty and preserves the
+	// legacy path with zero manifest I/O. Dropped/missing segments publish no
+	// further revision and are likewise handled record-by-record below.
+	manifestEntries := make(map[manifestIndexIdentity]packed.ManifestIndexInfo)
+	if segment != nil && isSegmentHealthy(segment) && segment.GetStorageVersion() == storage.StorageV3 &&
+		segment.GetManifestPath() != "" && segment.GetManifestHasIndex() {
+		indexes, err := gc.meta.readManifestIndexesWithIO(ctx, io, segment.GetManifestPath(), createStorageConfig())
+		if err != nil {
+			mlog.Warn(ctx, "failed to read segment manifest index metadata, wait to retry",
+				mlog.Int64("segmentID", segmentID), mlog.Err(err))
+			return
+		}
+		for _, index := range indexes {
+			key := manifestIndexIdentity{indexID: index.IndexID, buildID: index.BuildID}
+			if _, exists := manifestEntries[key]; !exists {
+				manifestEntries[key] = index
 			}
+		}
+	}
 
+	manifestItems := make([]segmentIndexGCItem, 0, len(items))
+	legacyItems := make([]segmentIndexGCItem, 0, len(items))
+	for _, item := range items {
+		key := manifestIndexIdentity{indexID: item.segIdx.IndexID, buildID: item.segIdx.BuildID}
+		entry, matched := manifestEntries[key]
+		if !matched {
+			legacyItems = append(legacyItems, item)
+			continue
+		}
+		info, ok := manifestIndexFilePathInfoForSegment(gc.option.cli.RootPath(), segment.SegmentInfo, entry)
+		if !ok {
+			mlog.Warn(ctx, "invalid segment manifest index metadata, wait to retry",
+				mlog.Int64("segmentID", item.segIdx.SegmentID),
+				mlog.Int64("indexID", item.segIdx.IndexID),
+				mlog.Int64("buildID", item.segIdx.BuildID))
+			continue
+		}
+		for _, file := range info.GetIndexFilePaths() {
+			item.files[file] = struct{}{}
+		}
+		manifestItems = append(manifestItems, item)
+	}
+
+	for _, item := range legacyItems {
+		gc.recycleRecordOnlySegmentIndex(ctx, item)
+	}
+	gc.recycleManifestSegmentIndexes(ctx, manifestItems)
+}
+
+func (gc *garbageCollector) recycleRecordOnlySegmentIndex(ctx context.Context, item segmentIndexGCItem) {
+	log := segmentIndexGCLog(item)
+	log.Info(ctx, "GC Segment Index file start...")
+	if err := gc.removeObjectFiles(ctx, item.files); err != nil {
+		log.Warn(ctx, "fail to remove index files for index", mlog.Err(err))
+		return
+	}
+	if err := gc.meta.indexMeta.RemoveSegmentIndex(ctx, item.segIdx.BuildID); err != nil {
+		log.Warn(ctx, "delete index meta from etcd failed, wait to retry", mlog.Err(err))
+		return
+	}
+	log.Info(ctx, "index meta recycle success")
+}
+
+func (gc *garbageCollector) recycleManifestSegmentIndexes(ctx context.Context, items []segmentIndexGCItem) {
+	if len(items) == 0 {
+		return
+	}
+	// One segment pointer PUT shares the atomic transaction with every
+	// defensive SegmentIndex DELETE. Keep each chunk within the configured
+	// etcd bound; stores with a larger native limit are conservatively split.
+	maxBatch := paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt() - 1
+	if maxBatch < 1 {
+		mlog.Error(ctx, "cannot atomically retract manifest indexes with the configured transaction limit",
+			mlog.Int("maxEtcdTxnNum", paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt()))
+		return
+	}
+	for start := 0; start < len(items); start += maxBatch {
+		end := min(start+maxBatch, len(items))
+		ready := make([]segmentIndexGCItem, 0, end-start)
+		for _, item := range items[start:end] {
+			log := segmentIndexGCLog(item)
 			log.Info(ctx, "GC Segment Index file start...")
-
-			// Remove index files first.
-			if err := gc.removeObjectFiles(ctx, indexFiles); err != nil {
+			if err := gc.removeObjectFiles(ctx, item.files); err != nil {
 				log.Warn(ctx, "fail to remove index files for index", mlog.Err(err))
 				continue
 			}
+			ready = append(ready, item)
+		}
+		if len(ready) == 0 {
+			continue
+		}
 
-			// Remove meta from index meta.
-			if err := gc.meta.indexMeta.RemoveSegmentIndex(ctx, segIdx.BuildID); err != nil {
-				log.Warn(ctx, "delete index meta from etcd failed, wait to retry", mlog.Err(err))
-				continue
+		retracted, err := gc.commitManifestIndexRetractions(ctx, ready)
+		if err != nil {
+			mlog.Warn(ctx, "failed to retract segment indexes from manifest, wait to retry",
+				mlog.Int64("segmentID", ready[0].segIdx.SegmentID),
+				mlog.Int("indexCount", len(ready)), mlog.Err(err))
+			continue
+		}
+		if retracted {
+			for _, item := range ready {
+				segmentIndexGCLog(item).Info(ctx, "index meta recycle success")
 			}
-			log.Info(ctx, "index meta recycle success")
+			continue
+		}
+		// The segment retired between resolution and commit. It will publish no
+		// further manifest revision; remove any surviving records via the legacy
+		// idempotent path so they do not strand the already-deleted files.
+		for _, item := range ready {
+			if err := gc.meta.indexMeta.RemoveSegmentIndex(ctx, item.segIdx.BuildID); err != nil {
+				segmentIndexGCLog(item).Warn(ctx, "delete index meta from etcd failed, wait to retry", mlog.Err(err))
+			}
 		}
 	}
+}
+
+func segmentIndexGCLog(item segmentIndexGCItem) *mlog.Logger {
+	return mlog.With(mlog.Int64("collectionID", item.segIdx.CollectionID),
+		mlog.Int64("partitionID", item.segIdx.PartitionID),
+		mlog.Int64("segmentID", item.segIdx.SegmentID),
+		mlog.Int64("indexID", item.segIdx.IndexID),
+		mlog.Int64("buildID", item.segIdx.BuildID),
+		mlog.Int64("nodeID", item.segIdx.NodeID),
+		mlog.Int("indexFiles", len(item.files)))
+}
+
+// commitManifestIndexRetractions publishes a manifest revision without these
+// indexes and removes their SegmentIndex records in one catalog transaction. It
+// reports whether the records were actually removed; false means the segment
+// was retired in the meantime, so the caller still has records to remove on
+// its own.
+//
+// ExpectedBuildID makes the drop reject a manifest that a rebuild has
+// meanwhile republished under the same index ID; the commit is resolved
+// against the revision it is opened at, not the one the file list was resolved
+// from. The SegmentIndex removal rides in the same catalog transaction as the
+// resulting pointer, so the manifest and etcd can never disagree about whether
+// this index still exists. The etcd side needs no expectation of its own: the
+// records are keyed by buildID, and rebuilds allocate new ones.
+func (gc *garbageCollector) commitManifestIndexRetractions(ctx context.Context, items []segmentIndexGCItem) (bool, error) {
+	if len(items) == 0 {
+		return true, nil
+	}
+	drops := make([]packed.DropIndexEntry, 0, len(items))
+	mutations := make([]SegmentIndexMutation, 0, len(items))
+	for _, item := range items {
+		drops = append(drops, packed.DropIndexEntry{IndexID: item.segIdx.IndexID, ExpectedBuildID: item.segIdx.BuildID})
+		mutations = append(mutations, SegmentIndexMutation{Type: SegmentIndexRemove, BuildID: item.segIdx.BuildID})
+	}
+	if err := gc.meta.CommitSegmentManifest(ctx, SegmentManifestCommit{
+		SegmentID:     items[0].segIdx.SegmentID,
+		StorageConfig: createStorageConfig(),
+		Mutation: ManifestMutation{
+			Type: ManifestMutationCommitUpdates,
+			Updates: &packed.ManifestUpdates{
+				DropIndexes: drops,
+			},
+		},
+		CatalogMutation: SegmentCatalogMutation{
+			SegmentIndexes: mutations,
+		},
+	}); err != nil {
+		// Retired between resolution and this commit: the whole manifest goes
+		// away with the segment, so there is nothing left to retract.
+		if errors.Is(err, merr.ErrSegmentNotFound) {
+			return false, nil
+		}
+		return false, merr.Wrap(err, "failed to publish segment manifest without the recycled index")
+	}
+	return true, nil
 }
 
 // getLatestSegmentIndexForGC takes a SegmentIndex candidate from GC scanning and
@@ -1580,6 +2159,12 @@ func (gc *garbageCollector) getAllIndexFilesOfIndex(segmentIndex *model.SegmentI
 		segmentIndex.IndexStorePathVersion, segmentIndex.CollectionID,
 		segmentIndex.PartitionID, segmentIndex.SegmentID,
 		segmentIndex.BuildID, segmentIndex.IndexVersion)
+	if metautil.IsSegmentRooted(segmentIndex.IndexStorePathVersion) {
+		if segment := gc.meta.GetSegment(context.TODO(), segmentIndex.SegmentID); segment != nil {
+			builder.WithManifestPath(segment.GetManifestPath())
+		}
+	}
+
 	filesMap := make(map[string]struct{})
 	for _, fileID := range segmentIndex.IndexFileKeys {
 		filesMap[builder.BuildFilePath(fileID)] = struct{}{}
@@ -1587,75 +2172,183 @@ func (gc *garbageCollector) getAllIndexFilesOfIndex(segmentIndex *model.SegmentI
 	return filesMap
 }
 
-// recycleUnusedIndexFilesV1 cleans index files for v1 format entries (collection-partitioned paths).
-// v1 uses the separate index_v1 prefix and puts collectionID before buildID,
-// so GC iterates deleted metadata entries instead of trying to parse buildID from a prefix walk.
-func (gc *garbageCollector) recycleUnusedIndexFilesV1(ctx context.Context) {
-	log := mlog.With(mlog.String("gcName", "recycleUnusedIndexFilesV1"))
-
+// newIndexFileReclaimChecker shares build and snapshot protection between the
+// index_v1 scan and the _index objects encountered by the insert_log scan.
+// Each traversal retains at most one build's recorded files.
+//
+// A file is reclaimed when meta no longer accounts for it: its buildID has no
+// SegmentIndex record (task aborted and recycled, DataCoord crashed before
+// FinishTask, worker restarted after uploading, ...), or the record is
+// Finished and does not list the file (an earlier attempt's index version).
+// Files of records that are not Finished are left alone: the task may still be
+// running, or the record is terminal and waiting for recycleUnusedSegIndexes,
+// which removes it and lets the next scan reclaim the files. Files younger
+// than missingTolerance are skipped so an upload still in flight (the cgo
+// upload does not observe cancellation) is never raced.
+//
+// Files of a segment whose row still exists but is no longer healthy are left
+// alone: dropped-segment GC owns them while the row lives, as does the cleanup
+// plan of a rejected copy task. The orphan scan takes over once the row is gone.
+//
+// A build without a record whose segment is still Importing is kept too: a
+// snapshot restore pre-registers its target segments as Importing, copies
+// index files under freshly allocated build IDs, and only writes the
+// SegmentIndex once the copy has finished, so a restore that runs longer than
+// missingTolerance would otherwise lose the files it copied first.
+func (gc *garbageCollector) newIndexFileReclaimChecker(ctx context.Context) func(string, int64, int64, int64) bool {
 	snapshotMeta := gc.meta.GetSnapshotMeta()
-	deletedIndexes := gc.meta.indexMeta.GetDeletedIndexesWithV1Path()
-	if len(deletedIndexes) == 0 {
-		return
+	// The decision for the build currently being walked is cached: a build's
+	// keys share its prefix and are listed together, so one entry avoids
+	// rebuilding the recorded file set per file while keeping memory bounded
+	// by a single build rather than every live index file. If a listing ever
+	// interleaves builds, the decision is simply recomputed.
+	type buildDecision struct {
+		buildID    int64
+		reclaimAll bool                // no record: everything under the build is garbage
+		recorded   map[string]struct{} // Finished record: only unlisted files are garbage
+	}
+	var current *buildDecision
+
+	decide := func(collectionID, segmentID, buildID int64) *buildDecision {
+		if current != nil && current.buildID == buildID {
+			return current
+		}
+		d := &buildDecision{buildID: buildID}
+		current = d
+		if snapshotMeta != nil && snapshotMeta.IsBuildIDGCBlocked(collectionID, buildID) {
+			// Keep everything; nil decision fields mean "reclaim nothing".
+			return d
+		}
+		canRecycle, segIdx := gc.meta.indexMeta.CheckCleanSegmentIndex(buildID)
+		if !canRecycle {
+			return d
+		}
+		if segIdx == nil {
+			segment := gc.meta.GetSegment(ctx, segmentID)
+			switch {
+			case segment == nil:
+				d.reclaimAll = true
+			case !isSegmentHealthy(segment):
+				// Dropped-segment GC and rejected-copy cleanup own these files
+				// for as long as the segment row exists.
+			case segment.GetState() == commonpb.SegmentState_Importing || segment.GetIsImporting():
+				// Snapshot restore still copying into this segment.
+			default:
+				d.reclaimAll = true
+			}
+			return d
+		}
+		d.recorded = gc.getAllIndexFilesOfIndex(segIdx)
+		return d
 	}
 
-	log.Info(ctx, "start recycleUnusedIndexFilesV1", mlog.Int("deletedCount", len(deletedIndexes)))
-	futures := make([]*conc.Future[struct{}], 0, len(deletedIndexes))
-	for _, segIdx := range deletedIndexes {
-		segIdx := segIdx
-		if snapshotMeta != nil && snapshotMeta.IsBuildIDGCBlocked(segIdx.CollectionID, segIdx.BuildID) {
-			log.Info(ctx, "skip GC v1 index files since buildID is protected by snapshot",
-				mlog.Int64("collectionID", segIdx.CollectionID),
-				mlog.Int64("buildID", segIdx.BuildID))
-			continue
+	return func(file string, collectionID, segmentID, buildID int64) bool {
+		d := decide(collectionID, segmentID, buildID)
+		if d.reclaimAll {
+			return true
+		}
+		_, listed := d.recorded[file]
+		return d.recorded != nil && !listed
+	}
+}
+
+func (gc *garbageCollector) recycleUnusedIndexFilesV1(ctx context.Context) {
+	start := time.Now()
+	log := mlog.With(mlog.String("gcName", "recycleUnusedIndexFiles"), mlog.Time("startAt", start))
+	log.Info(ctx, "start recycleUnusedIndexFiles...")
+
+	rootPath := gc.option.cli.RootPath()
+	prefix := path.Join(rootPath, common.SegmentIndexV1Path) + "/"
+	canReclaim := gc.newIndexFileReclaimChecker(ctx)
+
+	var (
+		total, skipped, valid int
+		removed               = atomic.NewInt32(0)
+		futures               = make([]*conc.Future[struct{}], 0)
+	)
+	err := gc.option.cli.WalkWithPrefix(ctx, prefix, true, func(obj *storage.ChunkObjectInfo) bool {
+		total++
+		file := obj.FilePath
+		if time.Since(obj.ModifyTime) <= gc.option.missingTolerance {
+			skipped++
+			return true
 		}
 
-		future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
-			builder := metautil.NewIndexPathBuilder(gc.option.cli.RootPath(),
-				segIdx.IndexStorePathVersion, segIdx.CollectionID,
-				segIdx.PartitionID, segIdx.SegmentID,
-				segIdx.BuildID, segIdx.IndexVersion)
-			prefix := builder.BuildPrefix() + "/"
-
-			if err := gc.option.cli.RemoveWithPrefix(ctx, prefix); err != nil {
-				log.Warn(ctx, "recycleUnusedIndexFilesV1 remove failed",
-					mlog.Int64("collectionID", segIdx.CollectionID),
-					mlog.Int64("partitionID", segIdx.PartitionID),
-					mlog.Int64("segmentID", segIdx.SegmentID),
-					mlog.Int64("buildID", segIdx.BuildID),
-					mlog.Int64("indexID", segIdx.IndexID),
-					mlog.Stringer("pathVersion", segIdx.IndexStorePathVersion),
-					mlog.String("prefix", prefix),
-					mlog.Err(err))
+		collectionID, segmentID, buildID, err := parseIndexV1FilePath(rootPath, file)
+		if err != nil {
+			skipped++
+			log.Warn(ctx, "recycleUnusedIndexFiles skip unparsable index file", mlog.String("file", file), mlog.Err(err))
+			return true
+		}
+		if !canReclaim(file, collectionID, segmentID, buildID) {
+			valid++
+			return true
+		}
+		futures = append(futures, gc.option.removeObjectPool.Submit(func() (struct{}, error) {
+			if err := gc.option.cli.Remove(ctx, file); err != nil {
+				log.Warn(ctx, "recycleUnusedIndexFiles remove file failed", mlog.String("file", file), mlog.Err(err))
 				return struct{}{}, err
 			}
-			if err := gc.meta.indexMeta.RemoveSegmentIndex(ctx, segIdx.BuildID); err != nil {
-				log.Warn(ctx, "recycleUnusedIndexFilesV1 remove segment index meta failed",
-					mlog.Int64("collectionID", segIdx.CollectionID),
-					mlog.Int64("partitionID", segIdx.PartitionID),
-					mlog.Int64("segmentID", segIdx.SegmentID),
-					mlog.Int64("buildID", segIdx.BuildID),
-					mlog.Int64("indexID", segIdx.IndexID),
-					mlog.Stringer("pathVersion", segIdx.IndexStorePathVersion),
-					mlog.String("prefix", prefix),
-					mlog.Err(err))
-				return struct{}{}, err
-			}
-			log.Info(ctx, "recycleUnusedIndexFilesV1 removed index files and meta",
-				mlog.Int64("collectionID", segIdx.CollectionID),
-				mlog.Int64("partitionID", segIdx.PartitionID),
-				mlog.Int64("segmentID", segIdx.SegmentID),
-				mlog.Int64("buildID", segIdx.BuildID),
-				mlog.Int64("indexID", segIdx.IndexID),
-				mlog.Stringer("pathVersion", segIdx.IndexStorePathVersion),
-				mlog.String("prefix", prefix))
+			removed.Inc()
+			log.Info(ctx, "recycleUnusedIndexFiles removed orphan index file",
+				mlog.String("file", file), mlog.FieldCollectionID(collectionID), mlog.FieldBuildID(buildID))
 			return struct{}{}, nil
-		})
-		futures = append(futures, future)
+		}))
+		return true
+	})
+	if walkErr := conc.BlockOnAll(futures...); walkErr != nil {
+		log.Warn(ctx, "some task failure in remove object pool", mlog.Err(walkErr))
 	}
-	if err := conc.BlockOnAll(futures...); err != nil {
-		log.Warn(ctx, "some task failure in remove object pool", mlog.Err(err))
+	log = log.With(mlog.Duration("timeCost", time.Since(start)), mlog.Int("total", total),
+		mlog.Int("valid", valid), mlog.Int("skipped", skipped), mlog.Int32("removed", removed.Load()))
+	if err != nil {
+		log.Warn(ctx, "recycleUnusedIndexFiles walk failed, remaining files wait for the next scan", mlog.Err(err))
+		return
 	}
+	log.Info(ctx, "recycleUnusedIndexFiles done")
+}
+
+// parseIndexV2FilePath recognizes only canonical segment index objects.
+func parseIndexV2FilePath(rootPath, filePath string) (collectionID, segmentID, buildID int64, err error) {
+	prefix := path.Join(rootPath, common.SegmentInsertLogPath) + "/"
+	rel, ok := strings.CutPrefix(filePath, prefix)
+	parts := strings.Split(rel, "/")
+	if !ok || len(parts) < 7 || parts[3] != "_index" || parts[6] == "" {
+		return 0, 0, 0, merr.WrapErrDataIntegrityMsg("invalid segment index object %s", filePath)
+	}
+	ids := make([]int64, 0, 5)
+	for _, pos := range []int{0, 1, 2, 4, 5} {
+		id, parseErr := strconv.ParseInt(parts[pos], 10, 64)
+		if parseErr != nil || id < 0 {
+			return 0, 0, 0, merr.WrapErrDataIntegrityMsg("invalid identifier in segment index object %s", filePath)
+		}
+		ids = append(ids, id)
+	}
+	return ids[0], ids[2], ids[3], nil
+}
+
+// parseIndexV1FilePath extracts the collection, segment and build IDs from an
+// index_v1 object path: {root}/index_v1/{coll}/{part}/{seg}/{buildID}/{version}/{key}.
+func parseIndexV1FilePath(rootPath, filePath string) (collectionID, segmentID, buildID int64, err error) {
+	prefix := path.Join(rootPath, common.SegmentIndexV1Path) + "/"
+	rel, ok := strings.CutPrefix(filePath, prefix)
+	if !ok {
+		return 0, 0, 0, merr.WrapErrParameterInvalidMsg("index file %s is not under %s", filePath, prefix)
+	}
+	parts := strings.Split(rel, "/")
+	if len(parts) < 6 {
+		return 0, 0, 0, merr.WrapErrParameterInvalidMsg("index file %s does not match {coll}/{part}/{seg}/{buildID}/{version}/{key}", filePath)
+	}
+	if collectionID, err = strconv.ParseInt(parts[0], 10, 64); err != nil {
+		return 0, 0, 0, merr.WrapErrParameterInvalidMsg("index file %s has non-numeric collection id: %v", filePath, err)
+	}
+	if segmentID, err = strconv.ParseInt(parts[2], 10, 64); err != nil {
+		return 0, 0, 0, merr.WrapErrParameterInvalidMsg("index file %s has non-numeric segment id: %v", filePath, err)
+	}
+	if buildID, err = strconv.ParseInt(parts[3], 10, 64); err != nil {
+		return 0, 0, 0, merr.WrapErrParameterInvalidMsg("index file %s has non-numeric build id: %v", filePath, err)
+	}
+	return collectionID, segmentID, buildID, nil
 }
 
 // recycleUnusedAnalyzeFiles is used to delete those analyze stats files that no longer exist in the meta.
@@ -1831,6 +2524,7 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context, sig
 	}))
 	fileNum := 0
 	deletedFilesNum := atomic.NewInt32(0)
+	maxJSONStatsDataFormat := int64(1)
 
 	snapshotMeta := gc.meta.GetSnapshotMeta()
 
@@ -1855,6 +2549,9 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context, sig
 		gc.ackSignal(signal)
 		for _, fieldStats := range seg.GetJsonKeyStats() {
 			log := mlog.With(mlog.Int64("segmentID", seg.GetID()), mlog.Int64("fieldID", fieldStats.GetFieldID()))
+			if fieldStats.GetJsonKeyStatsDataFormat() > maxJSONStatsDataFormat {
+				maxJSONStatsDataFormat = fieldStats.GetJsonKeyStatsDataFormat()
+			}
 			// clear low version task
 			for i := int64(1); i < fieldStats.GetVersion(); i++ {
 				prefix := metautil.BuildJSONKeyStatsPrefix(gc.option.cli.RootPath(), fieldStats.GetJsonKeyStatsDataFormat(),
@@ -1892,44 +2589,47 @@ func (gc *garbageCollector) recycleUnusedJSONStatsFiles(ctx context.Context, sig
 					return
 				}
 			}
+		}
+	}
 
-			// clear low data format version stats file
-			// for upgrade from old version to new version, we need to clear the old data format version stats file
-			for i := int64(1); i < fieldStats.GetJsonKeyStatsDataFormat(); i++ {
-				prefix := fmt.Sprintf("%s/%s/%d", gc.option.cli.RootPath(), common.JSONStatsPath, i)
-				futures := make([]*conc.Future[struct{}], 0)
+	// Clear files from older data formats once per global format prefix.
+	for dataFormat := int64(1); dataFormat < maxJSONStatsDataFormat; dataFormat++ {
+		if ctx.Err() != nil {
+			return
+		}
+		gc.ackSignal(signal)
+		prefix := fmt.Sprintf("%s/%s/%d", gc.option.cli.RootPath(), common.JSONStatsPath, dataFormat)
+		futures := make([]*conc.Future[struct{}], 0)
 
-				err := gc.option.cli.WalkWithPrefix(ctx, prefix, true, func(files *storage.ChunkObjectInfo) bool {
-					fileNum++
-					file := files.FilePath
+		err := gc.option.cli.WalkWithPrefix(ctx, prefix, true, func(files *storage.ChunkObjectInfo) bool {
+			fileNum++
+			file := files.FilePath
 
-					future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
-						log := mlog.With(mlog.String("file", file))
-						log.Info(ctx, "garbageCollector recycleUnusedJSONStatsFiles remove file...")
+			future := gc.option.removeObjectPool.Submit(func() (struct{}, error) {
+				log := mlog.With(mlog.String("file", file))
+				log.Info(ctx, "garbageCollector recycleUnusedJSONStatsFiles remove file...")
 
-						if err := gc.option.cli.Remove(ctx, file); err != nil {
-							log.Warn(ctx, "garbageCollector recycleUnusedJSONStatsFiles remove file failed", mlog.Err(err))
-							return struct{}{}, err
-						}
-						deletedFilesNum.Inc()
-						log.Info(ctx, "garbageCollector recycleUnusedJSONStatsFiles remove file success")
-						return struct{}{}, nil
-					})
-					futures = append(futures, future)
-					return true
-				})
-
-				// Wait for all remove tasks done.
-				if err := conc.BlockOnAll(futures...); err != nil {
-					// error is logged, and can be ignored here.
-					log.Warn(ctx, "some task failure in remove object pool", mlog.Err(err))
+				if err := gc.option.cli.Remove(ctx, file); err != nil {
+					log.Warn(ctx, "garbageCollector recycleUnusedJSONStatsFiles remove file failed", mlog.Err(err))
+					return struct{}{}, err
 				}
+				deletedFilesNum.Inc()
+				log.Info(ctx, "garbageCollector recycleUnusedJSONStatsFiles remove file success")
+				return struct{}{}, nil
+			})
+			futures = append(futures, future)
+			return true
+		})
 
-				if err != nil {
-					log.Warn(ctx, "json stats lower data format files recycle failed when walk with prefix", mlog.Err(err))
-					return
-				}
-			}
+		// Wait for all remove tasks done.
+		if err := conc.BlockOnAll(futures...); err != nil {
+			// error is logged, and can be ignored here.
+			log.Warn(ctx, "some task failure in remove object pool", mlog.Err(err))
+		}
+
+		if err != nil {
+			log.Warn(ctx, "json stats lower data format files recycle failed when walk with prefix", mlog.Err(err))
+			return
 		}
 	}
 	log.Info(ctx, "json stats files recycle done",

@@ -41,19 +41,27 @@ pub struct LinderaSegmenter {
     /// If provided, this dictionary will be used in addition to the default dictionary to improve
     /// the accuracy of segmentation for specific words or phrases.
     pub user_dictionary: Option<Arc<UserDictionary>>,
+
+    /// Characters used to split input before running the lattice.
+    /// Delimiters are retained so token offsets stay aligned with the input.
+    pub sentence_split_chars: Arc<[char]>,
 }
+
+const DEFAULT_SENTENCE_SPLIT_CHARS: &[char] = &['。', '、', '\n', '\t'];
 
 impl LinderaSegmenter {
     /// Creates a new instance with the specified mode, dictionary, and optional user dictionary.
     pub fn new(
         mode: Mode,
-        dictionary: Dictionary,
+        dictionary: Arc<Dictionary>,
         user_dictionary: Option<UserDictionary>,
+        sentence_split_chars: Vec<char>,
     ) -> Self {
         Self {
             mode,
-            dictionary: Arc::new(dictionary),
+            dictionary,
             user_dictionary: user_dictionary.map(|d| Arc::new(d)),
+            sentence_split_chars: sentence_split_chars.into(),
         }
     }
 
@@ -64,8 +72,8 @@ impl LinderaSegmenter {
         let mut position = 0_usize;
         let mut byte_position = 0_usize;
 
-        // Split text into sentences using Japanese punctuation.
-        for sentence in text.split_inclusive(&['。', '、', '\n', '\t']) {
+        for sentence in text.split_inclusive(|ch| self.sentence_split_chars.as_ref().contains(&ch))
+        {
             if sentence.is_empty() {
                 continue;
             }
@@ -126,6 +134,7 @@ pub struct LinderaTokenStream<'a> {
 const DICT_KIND_KEY: &str = "dict_kind";
 const FILTER_KEY: &str = "filter";
 const MODE_KEY: &str = "mode";
+const SENTENCE_SPLIT_CHARS_KEY: &str = "sentence_split_chars";
 const USER_DICT_KEY: &str = "user_dict";
 
 impl<'a> TokenStream for LinderaTokenStream<'a> {
@@ -181,6 +190,7 @@ impl LinderaTokenizer {
         helper: &mut FileResourcePathHelper,
     ) -> Result<LinderaTokenizer> {
         let kind: DictionaryKind = fetch_lindera_kind(params)?;
+        let sentence_split_chars = get_sentence_split_chars(params)?;
 
         // for download dict online
         let build_dir = fetch_dict_build_dir()?;
@@ -190,7 +200,8 @@ impl LinderaTokenizer {
 
         let mode = get_lindera_mode(params)?;
         let user_dictionary = fetch_lindera_user_dict(&kind, params, helper)?;
-        let segmenter = LinderaSegmenter::new(mode, dictionary, user_dictionary);
+        let segmenter =
+            LinderaSegmenter::new(mode, dictionary, user_dictionary, sentence_split_chars);
         let mut tokenizer = LinderaTokenizer::from_segmenter(segmenter);
 
         // append lindera filter
@@ -294,6 +305,43 @@ fn get_lindera_mode(params: &json::Map<String, json::Value>) -> Result<Mode> {
         }
         _ => Ok(Mode::Normal),
     }
+}
+
+fn get_sentence_split_chars(params: &json::Map<String, json::Value>) -> Result<Vec<char>> {
+    let Some(value) = params.get(SENTENCE_SPLIT_CHARS_KEY) else {
+        return Ok(DEFAULT_SENTENCE_SPLIT_CHARS.to_vec());
+    };
+
+    let values = value.as_array().ok_or_else(|| {
+        TantivyBindingError::InvalidArgument(
+            "lindera tokenizer sentence_split_chars must be an array".to_string(),
+        )
+    })?;
+
+    values
+        .iter()
+        .map(|value| {
+            let text = value.as_str().ok_or_else(|| {
+                TantivyBindingError::InvalidArgument(
+                    "lindera tokenizer sentence_split_chars item must be a string".to_string(),
+                )
+            })?;
+            let mut chars = text.chars();
+            let ch = chars.next().ok_or_else(|| {
+                TantivyBindingError::InvalidArgument(
+                    "lindera tokenizer sentence_split_chars item must contain exactly one character"
+                        .to_string(),
+                )
+            })?;
+            if chars.next().is_some() {
+                return Err(TantivyBindingError::InvalidArgument(
+                    "lindera tokenizer sentence_split_chars item must contain exactly one character"
+                        .to_string(),
+                ));
+            }
+            Ok(ch)
+        })
+        .collect()
 }
 
 fn fetch_lindera_kind(params: &json::Map<String, json::Value>) -> Result<DictionaryKind> {
@@ -515,7 +563,7 @@ fn fetch_lindera_token_filter(
 
 #[cfg(test)]
 mod tests {
-    use super::LinderaTokenizer;
+    use super::{get_sentence_split_chars, LinderaTokenizer, DEFAULT_SENTENCE_SPLIT_CHARS};
     use crate::analyzer::options::{FileResourcePathHelper, ResourceInfo};
     use serde_json as json;
     use std::io::Write;
@@ -524,6 +572,86 @@ mod tests {
 
     fn default_helper() -> FileResourcePathHelper {
         FileResourcePathHelper::new(Arc::new(ResourceInfo::new()))
+    }
+
+    #[test]
+    #[cfg(feature = "lindera-ipadic")]
+    fn test_independent_lindera_tokenizers_share_dictionary() {
+        use tantivy::tokenizer::TokenStream;
+        let params = json::json!({"type": "lindera", "dict_kind": "ipadic"});
+        let mut tokenizers: Vec<_> = (0..100)
+            .map(|_| {
+                LinderaTokenizer::from_json(params.as_object().unwrap(), &mut default_helper())
+                    .unwrap()
+            })
+            .collect();
+        for tokenizer in &tokenizers {
+            assert!(Arc::ptr_eq(
+                &tokenizers[0].segmenter.dictionary,
+                &tokenizer.segmenter.dictionary
+            ));
+        }
+        let text = "東京スカイツリー";
+        let dictionary = lindera::dictionary::load_dictionary_from_kind(
+            lindera::dictionary::DictionaryKind::IPADIC,
+        )
+        .unwrap();
+        let mut reference = LinderaTokenizer::from_segmenter(super::LinderaSegmenter::new(
+            lindera::mode::Mode::Normal,
+            Arc::new(dictionary),
+            None,
+            DEFAULT_SENTENCE_SPLIT_CHARS.to_vec(),
+        ));
+        let expected: Vec<_> = reference
+            .token_stream(text)
+            .tokens
+            .into_iter()
+            .map(|token| {
+                (
+                    token.text.into_owned(),
+                    token.byte_start,
+                    token.byte_end,
+                    token.position,
+                )
+            })
+            .collect();
+        assert!(!expected.is_empty());
+        for tokenizer in &mut tokenizers {
+            let actual: Vec<_> = tokenizer
+                .token_stream(text)
+                .tokens
+                .into_iter()
+                .map(|token| {
+                    (
+                        token.text.into_owned(),
+                        token.byte_start,
+                        token.byte_end,
+                        token.position,
+                    )
+                })
+                .collect();
+            assert_eq!(expected, actual);
+        }
+        let nested = json::json!({"tokenizer": {
+            "type": "language_identifier",
+            "analyzers": {
+                "default": {"tokenizer": params},
+                "Japanese": {"tokenizer": params}
+            }
+        }});
+        for _ in 0..2 {
+            let mut analyzer = crate::analyzer::create_analyzer(&nested.to_string(), "").unwrap();
+            let mut actual = Vec::new();
+            analyzer.token_stream(text).process(&mut |token| {
+                actual.push((
+                    token.text.clone(),
+                    token.offset_from,
+                    token.offset_to,
+                    token.position,
+                ));
+            });
+            assert_eq!(expected, actual);
+        }
     }
 
     #[test]
@@ -682,6 +810,128 @@ mod tests {
             "user dict entry not applied, tokens: {:?}",
             results
         );
+    }
+
+    #[test]
+    fn test_lindera_tokenizer_custom_sentence_split_chars() {
+        let dir = std::env::temp_dir().join("milvus_lindera_split_chars_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("ipadic_userdic.csv");
+        std::fs::write(&path, "結巴、分詞器,カスタム名詞,ケッパブンシキ\n").unwrap();
+
+        let default_params = format!(
+            r#"{{
+                "type": "lindera",
+                "dict_kind": "ipadic",
+                "user_dict": {{
+                    "type": "local",
+                    "path": "{}"
+                }}
+            }}"#,
+            path.to_str().unwrap()
+        );
+        let default_params =
+            json::from_str::<json::Map<String, json::Value>>(&default_params).unwrap();
+        let mut helper = default_helper();
+        let mut default_tokenizer =
+            LinderaTokenizer::from_json(&default_params, &mut helper).unwrap();
+        let default_stream = default_tokenizer.token_stream("milvus結巴、分詞器中文測試");
+        assert!(
+            default_stream
+                .tokens
+                .iter()
+                .all(|token| token.text != "結巴、分詞器"),
+            "default sentence split chars should preserve existing behavior"
+        );
+
+        let custom_params = format!(
+            r#"{{
+                "type": "lindera",
+                "dict_kind": "ipadic",
+                "sentence_split_chars": ["\n", "\t"],
+                "user_dict": {{
+                    "type": "local",
+                    "path": "{}"
+                }}
+            }}"#,
+            path.to_str().unwrap()
+        );
+        let custom_params =
+            json::from_str::<json::Map<String, json::Value>>(&custom_params).unwrap();
+
+        let mut helper = default_helper();
+        let tokenizer = LinderaTokenizer::from_json(&custom_params, &mut helper).unwrap();
+        let mut binding = tokenizer;
+        let stream = binding.token_stream("milvus結巴、分詞器中文測試");
+        let results: Vec<String> = stream.tokens.iter().map(|t| t.text.to_string()).collect();
+
+        assert!(
+            results.iter().any(|t| t == "結巴、分詞器"),
+            "custom sentence split chars should allow punctuation in user dict token, tokens: {:?}",
+            results
+        );
+        let token = stream
+            .tokens
+            .iter()
+            .find(|t| t.text == "結巴、分詞器")
+            .unwrap();
+        assert_eq!(token.byte_start, "milvus".len());
+        assert_eq!(token.byte_end, "milvus結巴、分詞器".len());
+
+        let no_split_params = format!(
+            r#"{{
+                "type": "lindera",
+                "dict_kind": "ipadic",
+                "sentence_split_chars": [],
+                "user_dict": {{
+                    "type": "local",
+                    "path": "{}"
+                }}
+            }}"#,
+            path.to_str().unwrap()
+        );
+        let no_split_params =
+            json::from_str::<json::Map<String, json::Value>>(&no_split_params).unwrap();
+        let mut helper = default_helper();
+        let mut no_split_tokenizer =
+            LinderaTokenizer::from_json(&no_split_params, &mut helper).unwrap();
+        let no_split_stream = no_split_tokenizer.token_stream("milvus結巴、分詞器中文測試");
+        assert!(
+            no_split_stream
+                .tokens
+                .iter()
+                .any(|token| token.text == "結巴、分詞器"),
+            "empty sentence split chars should disable pre-splitting, tokens: {:?}",
+            no_split_stream
+                .tokens
+                .iter()
+                .map(|token| token.text.as_ref())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_lindera_tokenizer_sentence_split_chars_validation() {
+        let params = json::from_str::<json::Map<String, json::Value>>(r#"{}"#).unwrap();
+        assert_eq!(
+            get_sentence_split_chars(&params).unwrap(),
+            DEFAULT_SENTENCE_SPLIT_CHARS
+        );
+
+        let params =
+            json::from_str::<json::Map<String, json::Value>>(r#"{"sentence_split_chars":[]}"#)
+                .unwrap();
+        assert!(get_sentence_split_chars(&params).unwrap().is_empty());
+
+        for params in [
+            r#"{"sentence_split_chars":"。"}"#,
+            r#"{"sentence_split_chars":[1]}"#,
+            r#"{"sentence_split_chars":[""]}"#,
+            r#"{"sentence_split_chars":["。a"]}"#,
+        ] {
+            let params = json::from_str::<json::Map<String, json::Value>>(params).unwrap();
+            assert!(get_sentence_split_chars(&params).is_err());
+        }
     }
 
     #[test]

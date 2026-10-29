@@ -37,9 +37,8 @@
 #include "fmt/core.h"
 #include "folly/FBVector.h"
 #include "monitor/Monitor.h"
-#include "index/ScalarIndex.h"
-#include "index/json_stats/JsonKeyStats.h"
-#include "index/json_stats/utils.h"
+#include "segcore/json_stats/JsonKeyStats.h"
+#include "segcore/json_stats/utils.h"
 #include "opentelemetry/trace/span.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentSealed.h"
@@ -129,13 +128,15 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     WaitPrefetch();
     tracer::AutoSpan span(
         "PhyJsonContainsFilterExpr::Eval", tracer::GetRootSpan(), true);
-    span.GetSpan()->SetAttribute("data_type",
-                                 static_cast<int>(expr_->column_.data_type_));
-    span.GetSpan()->SetAttribute("json_filter_expr_type", "json_contains");
+    span.SetAttribute("data_type", static_cast<int>(expr_->column_.data_type_));
+    span.SetAttribute("json_filter_expr_type", "json_contains");
 
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
-    if (expr_->vals_.empty()) {
+    const bool is_element_level_array =
+        expr_->column_.data_type_ == DataType::ARRAY &&
+        expr_->column_.element_level_;
+    if (expr_->vals_.empty() && !is_element_level_array) {
         auto real_batch_size =
             has_offset_input_ ? input->size() : GetNextBatchSize();
         if (real_batch_size == 0) {
@@ -184,13 +185,9 @@ PhyJsonContainsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         case DataType::JSON: {
             if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
-                if (value_type_ == DataType::INT64 && PinnedJsonIndexIsFlat()) {
-                    result = EvalArrayContainsForIndexSegment(DataType::INT64);
-                } else {
-                    result = EvalArrayContainsForIndexSegment(
-                        value_type_ == DataType::INT64 ? DataType::DOUBLE
-                                                       : value_type_);
-                }
+                result = EvalArrayContainsForIndexSegment(
+                    value_type_ == DataType::INT64 ? DataType::DOUBLE
+                                                   : value_type_);
             } else {
                 result = EvalJsonContainsForDataSegment(context);
             }
@@ -332,6 +329,16 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment(EvalCtx& context) {
 template <typename ExprValueType>
 VectorPtr
 PhyJsonContainsFilterExpr::ExecArrayContains(EvalCtx& context) {
+    if (expr_->column_.element_level_) {
+        return ExecArrayContainsImpl<ArrayValueView, ExprValueType, true>(
+            context);
+    }
+    return ExecArrayContainsImpl<ArrayView, ExprValueType, false>(context);
+}
+
+template <typename ArrayType, typename ExprValueType, bool ElementLevel>
+VectorPtr
+PhyJsonContainsFilterExpr::ExecArrayContainsImpl(EvalCtx& context) {
     using GetType =
         std::conditional_t<std::is_same_v<ExprValueType, std::string>,
                            std::string_view,
@@ -355,11 +362,19 @@ PhyJsonContainsFilterExpr::ExecArrayContains(EvalCtx& context) {
 
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
-    auto real_batch_size =
-        has_offset_input_ ? input->size() : GetNextBatchSize();
-    if (real_batch_size == 0) {
+    auto next_batch_size = GetNextRealBatchSize(input, ElementLevel);
+    if (!next_batch_size.has_value()) {
         return nullptr;
     }
+    auto real_batch_size = *next_batch_size;
+    if (auto res =
+            AdvanceEmptyElementBatch(input, ElementLevel, real_batch_size)) {
+        return res;
+    }
+    AssertInfo(expr_->column_.element_level_ == ElementLevel,
+               "ARRAY contains element-level mismatch: plan={}, executor={}",
+               expr_->column_.element_level_,
+               ElementLevel);
     AssertInfo(expr_->column_.nested_path_.size() == 0,
                "[ExecArrayContains]nested path must be null");
 
@@ -384,7 +399,7 @@ PhyJsonContainsFilterExpr::ExecArrayContains(EvalCtx& context) {
     auto execute_sub_batch =
         [&processed_cursor, &
          bitmap_input ]<FilterType filter_type = FilterType::sequential>(
-            const milvus::ArrayView* data,
+            const ArrayType* data,
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
@@ -399,9 +414,10 @@ PhyJsonContainsFilterExpr::ExecArrayContains(EvalCtx& context) {
         }
         auto executor = [&](size_t i) {
             const auto& array = data[i];
-            for (int j = 0; j < array.length(); ++j) {
-                if (elements.find(array.template get_data<GetType>(j)) !=
-                    elements.end()) {
+            const auto array_size = GetArrayRowSize(array);
+            for (size_t j = 0; j < array_size; ++j) {
+                if (elements.find(array.template get_data_unchecked<GetType>(
+                        j)) != elements.end()) {
                     return true;
                 }
             }
@@ -427,16 +443,30 @@ PhyJsonContainsFilterExpr::ExecArrayContains(EvalCtx& context) {
 
     int64_t processed_size;
     if (has_offset_input_) {
-        processed_size =
-            ProcessDataByOffsets<milvus::ArrayView>(execute_sub_batch,
-                                                    std::nullptr_t{},
-                                                    input,
-                                                    res,
-                                                    valid_res,
-                                                    *elements);
+        if constexpr (ElementLevel) {
+            processed_size =
+                ProcessElementLevelByOffsets<ArrayType>(execute_sub_batch,
+                                                        std::nullptr_t{},
+                                                        input,
+                                                        res,
+                                                        valid_res,
+                                                        *elements);
+        } else {
+            processed_size = ProcessDataByOffsets<ArrayType>(execute_sub_batch,
+                                                             std::nullptr_t{},
+                                                             input,
+                                                             res,
+                                                             valid_res,
+                                                             *elements);
+        }
     } else {
-        processed_size = ProcessDataChunks<milvus::ArrayView>(
-            execute_sub_batch, std::nullptr_t{}, res, valid_res, *elements);
+        if constexpr (ElementLevel) {
+            processed_size = ProcessDataChunksForElementLevel<ArrayType>(
+                execute_sub_batch, std::nullptr_t{}, res, valid_res, *elements);
+        } else {
+            processed_size = ProcessDataChunks<ArrayType>(
+                execute_sub_batch, std::nullptr_t{}, res, valid_res, *elements);
+        }
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -591,7 +621,6 @@ PhyJsonContainsFilterExpr::ExecJsonContainsByStats() {
     if (real_batch_size == 0) {
         return nullptr;
     }
-    std::unordered_set<GetType> elements;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     if (!arg_inited_) {
         arg_set_ = std::make_shared<SetElement<GetType>>(expr_->vals_);
@@ -944,6 +973,16 @@ PhyJsonContainsFilterExpr::ExecJsonContainsArrayByStats() {
 template <typename ExprValueType>
 VectorPtr
 PhyJsonContainsFilterExpr::ExecArrayContainsAll(EvalCtx& context) {
+    if (expr_->column_.element_level_) {
+        return ExecArrayContainsAllImpl<ArrayValueView, ExprValueType, true>(
+            context);
+    }
+    return ExecArrayContainsAllImpl<ArrayView, ExprValueType, false>(context);
+}
+
+template <typename ArrayType, typename ExprValueType, bool ElementLevel>
+VectorPtr
+PhyJsonContainsFilterExpr::ExecArrayContainsAllImpl(EvalCtx& context) {
     using GetType =
         std::conditional_t<std::is_same_v<ExprValueType, std::string>,
                            std::string_view,
@@ -952,11 +991,20 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(EvalCtx& context) {
     const auto& bitmap_input = context.get_bitmap_input();
     AssertInfo(expr_->column_.nested_path_.size() == 0,
                "[ExecArrayContainsAll]nested path must be null");
-    auto real_batch_size =
-        has_offset_input_ ? input->size() : GetNextBatchSize();
-    if (real_batch_size == 0) {
+    auto next_batch_size = GetNextRealBatchSize(input, ElementLevel);
+    if (!next_batch_size.has_value()) {
         return nullptr;
     }
+    auto real_batch_size = *next_batch_size;
+    if (auto res =
+            AdvanceEmptyElementBatch(input, ElementLevel, real_batch_size)) {
+        return res;
+    }
+    AssertInfo(expr_->column_.element_level_ == ElementLevel,
+               "ARRAY contains-all element-level mismatch: plan={}, "
+               "executor={}",
+               expr_->column_.element_level_,
+               ElementLevel);
 
     auto res_vec =
         std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
@@ -982,7 +1030,7 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(EvalCtx& context) {
     auto execute_sub_batch =
         [&processed_cursor, &bitmap_input, &matcher, &
          found_large ]<FilterType filter_type = FilterType::sequential>(
-            const milvus::ArrayView* data,
+            const ArrayType* data,
             ValidityView valid_data,
             const int32_t* offsets,
             const int size,
@@ -996,15 +1044,16 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(EvalCtx& context) {
             return;
         }
         auto executor = [&](size_t i) {
-            if (static_cast<size_t>(data[i].length()) <
-                matcher.target_count()) {
+            const auto array_size = GetArrayRowSize(data[i]);
+            if (array_size < matcher.target_count()) {
                 return false;
             }
             if (matcher.use_small()) {
                 uint64_t found = 0;
-                for (int j = 0; j < data[i].length(); ++j) {
+                for (size_t j = 0; j < array_size; ++j) {
                     if (matcher.set_if_found(
-                            data[i].template get_data<GetType>(j), found)) {
+                            data[i].template get_data_unchecked<GetType>(j),
+                            found)) {
                         return true;
                     }
                 }
@@ -1012,9 +1061,9 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(EvalCtx& context) {
             } else {
                 std::fill(found_large.begin(), found_large.end(), 0);
                 size_t remaining = matcher.target_count();
-                for (int j = 0; j < data[i].length(); ++j) {
+                for (size_t j = 0; j < array_size; ++j) {
                     if (matcher.set_if_found(
-                            data[i].template get_data<GetType>(j),
+                            data[i].template get_data_unchecked<GetType>(j),
                             found_large,
                             remaining)) {
                         return true;
@@ -1042,16 +1091,30 @@ PhyJsonContainsFilterExpr::ExecArrayContainsAll(EvalCtx& context) {
     };
     int64_t processed_size;
     if (has_offset_input_) {
-        processed_size =
-            ProcessDataByOffsets<milvus::ArrayView>(execute_sub_batch,
-                                                    std::nullptr_t{},
-                                                    input,
-                                                    res,
-                                                    valid_res,
-                                                    *elements);
+        if constexpr (ElementLevel) {
+            processed_size =
+                ProcessElementLevelByOffsets<ArrayType>(execute_sub_batch,
+                                                        std::nullptr_t{},
+                                                        input,
+                                                        res,
+                                                        valid_res,
+                                                        *elements);
+        } else {
+            processed_size = ProcessDataByOffsets<ArrayType>(execute_sub_batch,
+                                                             std::nullptr_t{},
+                                                             input,
+                                                             res,
+                                                             valid_res,
+                                                             *elements);
+        }
     } else {
-        processed_size = ProcessDataChunks<milvus::ArrayView>(
-            execute_sub_batch, std::nullptr_t{}, res, valid_res, *elements);
+        if constexpr (ElementLevel) {
+            processed_size = ProcessDataChunksForElementLevel<ArrayType>(
+                execute_sub_batch, std::nullptr_t{}, res, valid_res, *elements);
+        } else {
+            processed_size = ProcessDataChunks<ArrayType>(
+                execute_sub_batch, std::nullptr_t{}, res, valid_res, *elements);
+        }
     }
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -2360,7 +2423,7 @@ PhyJsonContainsFilterExpr::EvalArrayContainsForIndexSegment(
         }
         case DataType::VARCHAR:
         case DataType::STRING: {
-            return ExecArrayContainsForIndexSegmentImpl<std::string>();
+            return ExecArrayContainsForIndexSegmentImpl<std::string_view>();
         }
         default:
             ThrowInfo(UnexpectedError,
@@ -2373,39 +2436,44 @@ PhyJsonContainsFilterExpr::EvalArrayContainsForIndexSegment(
 template <typename ExprValueType>
 VectorPtr
 PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
-    typedef std::conditional_t<std::is_same_v<ExprValueType, std::string_view>,
-                               std::string,
-                               ExprValueType>
-        GetType;
-    using Index = index::ScalarIndex<GetType>;
+    using GetType = ExprValueType;
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
     }
 
-    std::unordered_set<GetType> elements;
-    for (auto const& element : expr_->vals_) {
-        elements.insert(GetValueWithCastNumber<GetType>(element));
-    }
-    boost::container::vector<GetType> elems(elements.begin(), elements.end());
+    // Project each value's element hits to rows before combining uncorrelated
+    // contains predicates. Correlated struct predicates require a different fold
+    // point, as constrained by index/contracts/README.md. Offsets come from the
+    // column via execution, not from the index. TODO: consolidate the projection
+    // helpers with UnaryExpr and Expr at plan-selected boundaries.
+    auto struct_element_offsets =
+        GetStructElementOffsets(expr_->column_.field_id_);
 
-    // Get array offsets for nested index (needed for element-to-row conversion)
-    auto array_offsets = segment_->GetArrayOffsets(expr_->column_.field_id_);
-
+    // ProcessIndexChunksImpl invokes this only on an index-result cache miss,
+    // so the term list is converted here rather than on every batch: with
+    // hundreds of terms the per-batch rebuild dominated the query cost. An
+    // ExprResCache hit skips the conversion entirely.
     auto execute_sub_batch =
-        [this, &array_offsets](
-            Index* index_ptr,
-            const boost::container::vector<GetType>& vals) -> TargetBitmap {
+        [this, &struct_element_offsets](
+            const index::IScalarPredicateReader<GetType>* index_ptr)
+        -> TargetBitmap {
+        std::unordered_set<GetType> elements;
+        for (const auto& element : expr_->vals_) {
+            elements.insert(GetValueWithCastNumber<GetType>(element));
+        }
+        boost::container::vector<GetType> vals(elements.begin(),
+                                               elements.end());
         // Query helper: for nested index, convert element-level to row-level
         auto query_in = [&](size_t n, const GetType* data) -> TargetBitmap {
             auto element_bitset = index_ptr->In(n, data);
-            if (!index_ptr->IsNestedIndex()) {
+            if (!selected_element_level_result_) {
                 return element_bitset;
             }
-            AssertInfo(array_offsets != nullptr,
-                       "array offsets not found for field {}",
+            AssertInfo(struct_element_offsets != nullptr,
+                       "struct element offsets not found for field {}",
                        expr_->column_.field_id_.get());
-            return array_offsets->ForEachRowElementRange(
+            return struct_element_offsets->ForEachRowElementRange(
                 [&element_bitset](int32_t elem_start, int32_t elem_end) {
                     for (int32_t i = elem_start; i < elem_end; ++i) {
                         if (element_bitset[i]) {
@@ -2443,8 +2511,8 @@ PhyJsonContainsFilterExpr::ExecArrayContainsForIndexSegmentImpl() {
     auto validity_mode = field_type_ == DataType::JSON
                              ? IndexValidityMode::JsonExactPath
                              : IndexValidityMode::Default;
-    auto res = ProcessIndexChunksWithRowLevel<GetType>(
-        execute_sub_batch, validity_mode, elems);
+    auto res = ProcessIndexChunksWithRowLevel<GetType>(execute_sub_batch,
+                                                       validity_mode);
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",

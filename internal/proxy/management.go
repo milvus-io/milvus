@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // this file contains proxy management restful API handler
@@ -41,66 +42,47 @@ var mgrRouteRegisterOnce sync.Once
 
 func RegisterMgrRoute(proxy *Proxy) {
 	mgrRouteRegisterOnce.Do(func() {
-		management.Register(&management.Handler{
-			Path:        management.RouteGcPause,
-			HandlerFunc: proxy.PauseDatacoordGC,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteGcResume,
-			HandlerFunc: proxy.ResumeDatacoordGC,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteCommitBackfill,
-			HandlerFunc: proxy.CommitBackfillResult,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteListQueryNode,
-			HandlerFunc: proxy.ListQueryNode,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteGetQueryNodeDistribution,
-			HandlerFunc: proxy.GetQueryNodeDistribution,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteSuspendQueryCoordBalance,
-			HandlerFunc: proxy.SuspendQueryCoordBalance,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteResumeQueryCoordBalance,
-			HandlerFunc: proxy.ResumeQueryCoordBalance,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteSuspendQueryNode,
-			HandlerFunc: proxy.SuspendQueryNode,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteResumeQueryNode,
-			HandlerFunc: proxy.ResumeQueryNode,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteTransferSegment,
-			HandlerFunc: proxy.TransferSegment,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteTransferChannel,
-			HandlerFunc: proxy.TransferChannel,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteCheckQueryNodeDistribution,
-			HandlerFunc: proxy.CheckQueryNodeDistribution,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteClearReadTaskQueue,
-			HandlerFunc: proxy.ClearReadTaskQueueManagement,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteQueryCoordBalanceStatus,
-			HandlerFunc: proxy.CheckQueryCoordBalanceStatus,
-		})
-		management.Register(&management.Handler{
-			Path:        management.RouteBackupEZ,
-			HandlerFunc: proxy.BackupEZ,
-		})
+		// All /management/* routes are gated by common.security.adminAuthEnabled.
+		// When the flag is true, requests must present HTTP Basic Auth with
+		// the milvus root user's credentials; when false (default), behavior
+		// is unchanged from earlier releases.
+		routes := []struct {
+			path    string
+			handler http.HandlerFunc
+		}{
+			{management.RouteGcPause, proxy.PauseDatacoordGC},
+			{management.RouteGcResume, proxy.ResumeDatacoordGC},
+			{management.RouteCommitBackfill, proxy.CommitBackfillResult},
+			{management.RouteListQueryNode, proxy.ListQueryNode},
+			{management.RouteGetQueryNodeDistribution, proxy.GetQueryNodeDistribution},
+			{management.RouteSuspendQueryCoordBalance, proxy.SuspendQueryCoordBalance},
+			{management.RouteResumeQueryCoordBalance, proxy.ResumeQueryCoordBalance},
+			{management.RouteSuspendQueryNode, proxy.SuspendQueryNode},
+			{management.RouteResumeQueryNode, proxy.ResumeQueryNode},
+			{management.RouteTransferSegment, proxy.TransferSegment},
+			{management.RouteTransferChannel, proxy.TransferChannel},
+			{management.RouteCheckQueryNodeDistribution, proxy.CheckQueryNodeDistribution},
+			{management.RouteClearReadTaskQueue, proxy.ClearReadTaskQueueManagement},
+			{management.RouteQueryCoordBalanceStatus, proxy.CheckQueryCoordBalanceStatus},
+			{management.RouteBackupEZ, proxy.BackupEZ},
+		}
+		// Off by default: the report is opt-in, so the route is not even
+		// registered unless the operator turns it on. The handler additionally
+		// verifies root Basic Auth on its own, independent of
+		// common.security.adminAuthEnabled.
+		if paramtable.Get().CommonCfg.FeatureUsageEnabled.GetAsBool() {
+			routes = append(routes, struct {
+				path    string
+				handler http.HandlerFunc
+			}{management.RouteFeatureUsage, proxy.FeatureUsage})
+		}
+		for _, r := range routes {
+			management.Register(&management.Handler{
+				Path:        r.path,
+				HandlerFunc: r.handler,
+				AdminAuth:   true,
+			})
+		}
 	})
 }
 
@@ -257,8 +239,15 @@ func (node *Proxy) ResumeDatacoordGC(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 	params := []*commonpb.KeyValuePair{
-		{Key: "ticket", Value: req.URL.Query().Get("ticket")},
-		{Key: "collection_id", Value: collectionID},
+		{Key: "ticket", Value: ticket},
+	}
+	// only forward collection_id when the ticket carries one, an empty value
+	// fails to parse on the coordinator side and rejects the whole request
+	if collectionID != "" {
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   "collection_id",
+			Value: collectionID,
+		})
 	}
 
 	resp, err := node.mixCoord.GcControl(req.Context(), &datapb.GcControlRequest{
@@ -723,4 +712,55 @@ func (node *Proxy) BackupEZ(w http.ResponseWriter, req *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, `{"msg": "OK", "ezk": "%s"}`, resp.Ezk)
+}
+
+// FeatureUsage serves GET /management/feature_usage: the merged feature usage
+// report collected by MixCoord. It requires HTTP Basic Auth as the root user
+// even when common.security.adminAuthEnabled is off, verified by CheckRootAuth
+// so it shares the root credential cache of the other management routes.
+func (node *Proxy) FeatureUsage(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		fmt.Fprint(w, `{"msg": "method not allowed"}`)
+		return
+	}
+	// With adminAuthEnabled the route wrapper has already verified root; do
+	// not run a second bcrypt comparison.
+	if _, ok := management.AuthenticatedAdminFromContext(req.Context()); !ok {
+		if err := management.CheckRootAuth(req.Context(), req, management.RouteFeatureUsage); err != nil {
+			status := management.HTTPStatusFromPrivilegeError(err)
+			if status == http.StatusUnauthorized {
+				management.WriteBasicAuthChallenge(w)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			msg, _ := json.Marshal(err.Error())
+			fmt.Fprintf(w, `{"msg": %s}`, msg)
+			return
+		}
+	}
+
+	resp, err := node.mixCoord.GetFeatureUsage(req.Context(), &internalpb.GetFeatureUsageRequest{
+		Base: commonpbutil.NewMsgBase(),
+	})
+	if err == nil {
+		err = merr.Error(resp.GetStatus())
+	}
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, `{"msg": "failed to get feature usage, %s"}`, err.Error())
+		return
+	}
+
+	// skip marshal status to output
+	resp.Status = nil
+	bytes, err := json.Marshal(resp)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, `{"msg": "failed to marshal feature usage, %s"}`, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(bytes)
 }

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
@@ -38,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -65,6 +67,19 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 		}, nil
 	}
 	defer meta.GlobalFailedLoadCache.TryExpire()
+
+	// A scope names a resource group; one the resource manager does not know
+	// is refused before any collection is looked at. The loaded path below
+	// validates it too, but a collection that is not loaded answers -1 for
+	// the group without reaching that path, and a client polling a misspelled
+	// group after a refused load would wait on -1 forever.
+	if rgName := req.GetResourceGroup(); rgName != "" && !s.meta.ContainResourceGroup(ctx, rgName) {
+		err := merr.WrapErrResourceGroupNotFound(rgName)
+		mlog.Warn(ctx, "show collection failed on an unknown resource group", mlog.String("resourceGroup", rgName), mlog.Err(err))
+		return &querypb.ShowCollectionsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
 
 	isGetAll := false
 	collectionSet := typeutil.NewUniqueSet(req.GetCollectionIDs()...)
@@ -102,6 +117,21 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 				}, nil
 			}
 
+			if req.GetResourceGroup() != "" {
+				// Scoped to a resource group, a collection that is not loaded
+				// at all and has no failure recorded is a collection with no
+				// replica in that group: -1, the same answer a loaded
+				// collection gives for a group it has no replica in, so a
+				// caller polling one group's progress right after issuing a
+				// load is not told the load failed.
+				resp.CollectionIDs = append(resp.CollectionIDs, collectionID)
+				resp.InMemoryPercentages = append(resp.InMemoryPercentages, -1)
+				resp.QueryServiceAvailable = append(resp.QueryServiceAvailable, false)
+				resp.RefreshProgress = append(resp.RefreshProgress, 0)
+				resp.LoadFields = append(resp.LoadFields, &schemapb.LongArray{})
+				continue
+			}
+
 			err = merr.WrapErrCollectionNotLoaded(collectionID)
 			mlog.Warn(context.TODO(), "show collection failed", mlog.Err(err))
 			return &querypb.ShowCollectionsResponse{
@@ -113,9 +143,31 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 			refreshProgress = 100
 		}
 
+		// A request that names a resource group asks for the progress of the
+		// replicas living there, not the collection-wide figure; -1 says the
+		// group holds no replica of this collection. Whether the service is
+		// available follows the same scope: the caller asks whether THAT
+		// group can serve, and a group that cannot must not be reported as
+		// serving because some other group can.
+		var queryServiceAvailable bool
+		if rgName := req.GetResourceGroup(); rgName != "" {
+			scoped, err := utils.LoadPercentageByResourceGroup(ctx, s.meta, s.targetMgr, s.dist, collectionID, rgName)
+			if err != nil {
+				mlog.Warn(ctx, "show collection failed on the resource-group scoped progress",
+					mlog.Int64("collectionID", collectionID), mlog.String("resourceGroup", rgName), mlog.Err(err))
+				return &querypb.ShowCollectionsResponse{
+					Status: merr.Status(err),
+				}, nil
+			}
+			percentage = scoped
+			queryServiceAvailable = s.checkAnyReplicaAvailableInResourceGroup(ctx, collectionID, rgName)
+		} else {
+			queryServiceAvailable = s.checkAnyReplicaAvailable(collectionID)
+		}
+
 		resp.CollectionIDs = append(resp.CollectionIDs, collectionID)
 		resp.InMemoryPercentages = append(resp.InMemoryPercentages, int64(percentage))
-		resp.QueryServiceAvailable = append(resp.QueryServiceAvailable, s.checkAnyReplicaAvailable(collectionID))
+		resp.QueryServiceAvailable = append(resp.QueryServiceAvailable, queryServiceAvailable)
 		resp.RefreshProgress = append(resp.RefreshProgress, refreshProgress)
 		resp.LoadFields = append(resp.LoadFields, &schemapb.LongArray{
 			Data: loadFields,
@@ -223,7 +275,7 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 	if err := s.broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx, req); err != nil {
 		logger.Warn(ctx, "failed to load collection", mlog.Err(err))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
-		return merr.Status(err), nil
+		return statusWithLoadResourcePrecheckSuggestion(err), nil
 	}
 
 	logger.Info(ctx, "load collection done")
@@ -296,7 +348,7 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 	if err := s.broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx, req); err != nil {
 		logger.Warn(ctx, "failed to load partitions", mlog.Err(err))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
-		return merr.Status(err), nil
+		return statusWithLoadResourcePrecheckSuggestion(err), nil
 	}
 	logger.Info(ctx, "load partitions done")
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
@@ -1158,18 +1210,15 @@ func (s *Server) ValidateAnalyzer(ctx context.Context, req *querypb.ValidateAnal
 		return &querypb.ValidateAnalyzerResponse{Status: merr.Status(merr.Wrap(err, "failed to validate analyzer"))}, nil
 	}
 
-	nodeIDs := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs().Collect()
-
-	if len(nodeIDs) == 0 {
-		return &querypb.ValidateAnalyzerResponse{Status: merr.Status(merr.WrapErrServiceUnavailable("failed to validate analyzer, no delegator"))}, nil
+	infos := make([]*streamingpb.StreamingAnalyzerInfo, 0, len(req.GetAnalyzerInfos()))
+	for _, info := range req.GetAnalyzerInfos() {
+		infos = append(infos, &streamingpb.StreamingAnalyzerInfo{Params: info.GetParams(), Field: info.GetField(), Name: info.GetName()})
 	}
-
-	idx := s.nodeIdx.Inc() % uint32(len(nodeIDs))
-	resp, err := s.cluster.ValidateAnalyzer(ctx, nodeIDs[idx], req)
+	resp, err := streaming.WAL().AnalyzerClient().ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{AnalyzerInfos: infos})
 	if err != nil {
 		return &querypb.ValidateAnalyzerResponse{Status: merr.Status(err)}, nil
 	}
-	return resp, nil
+	return &querypb.ValidateAnalyzerResponse{Status: merr.Success(), ResourceIds: resp.GetResourceIds()}, nil
 }
 
 func (s *Server) ComputePhraseMatchSlop(ctx context.Context, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {

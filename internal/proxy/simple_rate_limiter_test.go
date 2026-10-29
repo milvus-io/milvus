@@ -19,7 +19,9 @@ package proxy
 import (
 	"fmt"
 	"math"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -401,4 +403,83 @@ func TestRateLimiter(t *testing.T) {
 		err = simpleLimiter.Check(-1, nil, internalpb.RateType_DDLDB, 0)
 		assert.NoError(t, err)
 	})
+}
+
+func TestSimpleLimiterCheckDoesNotWaitForSetRates(t *testing.T) {
+	bak := Params.QuotaConfig.QuotaAndLimitsEnabled.GetValue()
+	Params.Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
+	t.Cleanup(func() {
+		Params.Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, bak)
+	})
+
+	simpleLimiter := NewSimpleLimiter(0, 0)
+	simpleLimiter.setRatesMu.Lock()
+	defer simpleLimiter.setRatesMu.Unlock()
+
+	checked := make(chan error, 1)
+	go func() {
+		checked <- simpleLimiter.Check(util.InvalidDBID, nil, internalpb.RateType_DDLDB, 1)
+	}()
+
+	select {
+	case err := <-checked:
+		assert.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("rate limit check waited for SetRates")
+	}
+}
+
+func TestSimpleLimiterConcurrentCheckAndSetRates(t *testing.T) {
+	bak := Params.QuotaConfig.QuotaAndLimitsEnabled.GetValue()
+	Params.Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
+	t.Cleanup(func() {
+		Params.Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, bak)
+	})
+
+	simpleLimiter := NewSimpleLimiter(0, 0)
+	request := newCollectionLimiterNode(map[int64]*proxypb.LimiterNode{
+		1: {
+			Limiter: &proxypb.Limiter{
+				Rates: []*internalpb.Rate{{
+					Rt: internalpb.RateType_DMLInsert,
+					R:  0,
+				}},
+				States: []milvuspb.QuotaState{milvuspb.QuotaState_DenyToWrite},
+				Codes:  []commonpb.ErrorCode{commonpb.ErrorCode_ForceDeny},
+			},
+			Children: make(map[int64]*proxypb.LimiterNode),
+		},
+	})
+
+	assert.NoError(t, simpleLimiter.SetRates(request))
+
+	const iterations = 1000
+	setRatesErr := make(chan error, 1)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			if err := simpleLimiter.SetRates(request); err != nil {
+				setRatesErr <- err
+				return
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			if !assert.ErrorIs(t, simpleLimiter.Check(0, map[int64][]int64{1: nil}, internalpb.RateType_DMLInsert, 1), merr.ErrServiceQuotaExceeded) {
+				return
+			}
+			states, _ := simpleLimiter.GetQuotaStates()
+			assert.Contains(t, states, milvuspb.QuotaState_DenyToWrite)
+		}
+	}()
+	wg.Wait()
+	select {
+	case err := <-setRatesErr:
+		assert.NoError(t, err)
+	default:
+	}
 }

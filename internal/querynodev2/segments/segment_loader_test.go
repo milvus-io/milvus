@@ -27,6 +27,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
@@ -36,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/segcore/loadresource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -48,6 +50,60 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestGetLocalDiskUsage(t *testing.T) {
+	duf := &diskUsageFetcher{
+		usage: atomic.NewInt64(0),
+		err:   atomic.NewError(nil),
+	}
+	loader := &segmentLoader{duf: duf}
+	usage, err := loader.GetLocalDiskUsage()
+	assert.NoError(t, err)
+	assert.Zero(t, usage)
+
+	duf.usage.Store(100)
+	loader.committedResource.DiskSize = 20
+	usage, err = loader.GetLocalDiskUsage()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(100), usage)
+
+	duf.err.Store(merr.WrapErrServiceInternalMsg("disk usage unavailable"))
+	_, err = loader.GetLocalDiskUsage()
+	assert.Error(t, err)
+}
+
+func TestSeparateLoadInfoV2LegacyStatsRoot(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	for _, item := range []*paramtable.ParamItem{&params.CommonCfg.StorageType, &params.LocalStorageCfg.Path, &params.MinioCfg.RootPath} {
+		key, value := item.Key, item.GetValue()
+		t.Cleanup(func() { require.NoError(t, params.Save(key, value)) })
+	}
+	const localRoot = "/var/lib/milvus/data"
+	require.NoError(t, params.Save(params.LocalStorageCfg.Path.Key, localRoot))
+	require.NoError(t, params.Save(params.MinioCfg.RootPath.Key, "files"))
+	for _, backend := range []struct{ name, root string }{{"local", localRoot}, {"remote", "files"}} {
+		t.Run(backend.name, func(t *testing.T) {
+			require.NoError(t, params.Save(params.CommonCfg.StorageType.Key, backend.name))
+			for _, version := range []int64{storage.StorageV1, storage.StorageV2} {
+				loadInfo := &querypb.SegmentLoadInfo{
+					StorageVersion: version, CollectionID: 2, PartitionID: 3, SegmentID: 4,
+					TextStatsLogs: map[int64]*datapb.TextIndexStats{
+						106: {FieldID: 106, BuildID: 10, Version: 1, Files: []string{"index.v3"}},
+					},
+					JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+						107: {FieldID: 107, BuildID: 11, Version: 1, JsonKeyStatsDataFormat: 3, Files: []string{"meta.json", "shared_key_index/0", "shredding_data/0/0"}},
+					},
+				}
+				_, _, textStats, _, jsonStats, textBases, jsonBases := separateLoadInfoV2(loadInfo, &schemapb.CollectionSchema{})
+				assert.Equal(t, backend.root+"/text_log/10/1/2/3/4/106", textBases[106])
+				assert.Equal(t, backend.root+"/json_stats/3/11/1/2/3/4/107", jsonBases[107])
+				assert.Equal(t, loadInfo.TextStatsLogs, textStats)
+				assert.Equal(t, loadInfo.JsonKeyStatsLogs, jsonStats)
+			}
+		})
+	}
+}
 
 type SegmentLoaderSuite struct {
 	suite.Suite
@@ -139,7 +195,7 @@ func TestLoadDeltalogsExternalRealPKManifestReadsSourceDeltas(t *testing.T) {
 	readerCalled := atomic.NewInt32(0)
 	var gotPathSets [][]string
 	patchReader := mockey.Mock(storage.NewDeltalogReader).To(
-		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+		func(_ context.Context, pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 			readerCalled.Inc()
 			gotPathSets = append(gotPathSets, append([]string(nil), paths...))
 			return eofRecordReader{}, nil
@@ -196,7 +252,7 @@ func TestLoadDeltalogsExternalRealPKManifestRejectsTargetDeltas(t *testing.T) {
 
 	readerCalled := atomic.NewInt32(0)
 	patchReader := mockey.Mock(storage.NewDeltalogReader).To(
-		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+		func(_ context.Context, pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 			readerCalled.Inc()
 			return eofRecordReader{}, nil
 		},
@@ -240,8 +296,9 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 	initcore.InitLocalChunkManager(suite.rootPath)
 	initcore.InitMmapManager(paramtable.Get(), 1)
 	initcore.InitTieredStorage(paramtable.Get())
-	initcore.InitLocalArrowFileSystem(suite.rootPath)
-	initcore.InitRemoteArrowFileSystem(paramtable.Get())
+	// Like the query node, initialize the process-wide default filesystem once
+	// from common.storageType so it matches the remote ChunkManager.
+	initcore.InitStorageV2FileSystem(paramtable.Get())
 
 	// Data
 	suite.schema = mock_segcore.GenTestCollectionSchema("test", schemapb.DataType_Int64, false)
@@ -457,6 +514,7 @@ func (suite *SegmentLoaderSuite) TestLoadWithIndex() {
 			suite.chunkManager,
 		)
 		suite.NoError(err)
+		indexInfo.NumRows = int64(msgLength)
 		loadInfos = append(loadInfos, &querypb.SegmentLoadInfo{
 			SegmentID:     segmentID,
 			PartitionID:   suite.partitionID,
@@ -514,6 +572,7 @@ func (suite *SegmentLoaderSuite) TestLoadWithIndexPreferFieldDataWhenIndexHasRaw
 			suite.chunkManager,
 		)
 		suite.NoError(err)
+		indexInfo.NumRows = int64(msgLength)
 		loadInfos = append(loadInfos, &querypb.SegmentLoadInfo{
 			SegmentID:     segmentID,
 			PartitionID:   suite.partitionID,
@@ -579,6 +638,7 @@ func (suite *SegmentLoaderSuite) TestLoadWithIndexSkipsFieldDataByDefault() {
 			suite.chunkManager,
 		)
 		suite.NoError(err)
+		indexInfo.NumRows = int64(msgLength)
 		loadInfos = append(loadInfos, &querypb.SegmentLoadInfo{
 			SegmentID:     segmentID,
 			PartitionID:   suite.partitionID,
@@ -889,7 +949,7 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsV3PlaceholderSkipsPathRead() {
 	defer patchManifest.UnPatch()
 
 	patchReader := mockey.Mock(storage.NewDeltalogReader).To(
-		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+		func(_ context.Context, pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 			readerCalled.Inc()
 			return nil, errors.New("should not be called when manifest has no delta paths")
 		},
@@ -978,7 +1038,7 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsExternalRealPKManifestStorageV
 
 	readerCalled := atomic.NewInt32(0)
 	patchReader := mockey.Mock(storage.NewDeltalogReader).To(
-		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+		func(_ context.Context, pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 			readerCalled.Inc()
 			suite.Equal(schemapb.DataType_Int64, pkType)
 			suite.Equal([]string{sourceDeltaPath}, paths)
@@ -1049,7 +1109,7 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsExternalRealPKManifestLegacyL0
 
 	legacyReaderCalled := atomic.NewInt32(0)
 	patchReader := mockey.Mock(storage.NewDeltalogReader).
-		To(func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+		To(func(_ context.Context, pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 			legacyReaderCalled.Inc()
 			suite.Equal(schemapb.DataType_Int64, pkType)
 			suite.Equal([]string{sourceDeltaPath}, paths)
@@ -1281,7 +1341,7 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsV1StillUsesPathRead() {
 	defer patchManifest.UnPatch()
 
 	patchReader := mockey.Mock(storage.NewDeltalogReader).To(
-		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+		func(_ context.Context, pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 			readerCalled.Inc()
 			return nil, io.EOF
 		},
@@ -1351,9 +1411,9 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogsLegacyParentLoadsChildManifest
 	defer patchManifest.UnPatch()
 
 	patchReader := mockey.Mock(storage.NewDeltalogReader).To(
-		func(pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
+		func(_ context.Context, pkType schemapb.DataType, paths []string, option ...storage.RwOption) (storage.RecordReader, error) {
 			legacyReaderCalls.Inc()
-			return storage.NewLegacyDeltalogReader(&schemapb.FieldSchema{
+			return storage.NewLegacyDeltalogReader(context.Background(), &schemapb.FieldSchema{
 				FieldID:      0,
 				DataType:     pkType,
 				IsPrimaryKey: true,
@@ -1622,6 +1682,53 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 		err := suite.loader.waitSegmentLoadDone(ctx, SegmentTypeSealed, []int64{suite.segmentID}, 0)
 		suite.Error(err)
 		suite.True(merr.IsCanceledOrTimeout(err))
+	})
+
+	suite.Run("wait_completed_before_wait", func() {
+		suite.SetupTest()
+
+		infos := suite.loader.prepare(context.Background(), SegmentTypeSealed, &querypb.SegmentLoadInfo{
+			SegmentID:     suite.segmentID,
+			PartitionID:   suite.partitionID,
+			CollectionID:  suite.collectionID,
+			NumOfRows:     100,
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+		})
+
+		suite.loader.notifyLoadFinish(infos...)
+
+		err := suite.loader.waitSegmentLoadDone(context.Background(), SegmentTypeSealed, []int64{suite.segmentID}, 0)
+		suite.NoError(err)
+	})
+
+	suite.Run("wait_concurrent_waiters_all_woken", func() {
+		suite.SetupTest()
+
+		infos := suite.loader.prepare(context.Background(), SegmentTypeSealed, &querypb.SegmentLoadInfo{
+			SegmentID:     suite.segmentID,
+			PartitionID:   suite.partitionID,
+			CollectionID:  suite.collectionID,
+			NumOfRows:     100,
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+		})
+
+		const waiters = 16
+		results := make(chan error, waiters)
+		start := make(chan struct{})
+		for i := 0; i < waiters; i++ {
+			go func() {
+				<-start
+				results <- suite.loader.waitSegmentLoadDone(context.Background(), SegmentTypeSealed, []int64{suite.segmentID}, 0)
+			}()
+		}
+		close(start)
+		time.Sleep(200 * time.Millisecond)
+
+		suite.loader.notifyLoadFinish(infos...)
+
+		for i := 0; i < waiters; i++ {
+			suite.NoError(<-results)
+		}
 	})
 }
 
@@ -2032,6 +2139,13 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) baseLoadInfo(textStats map[int
 	}
 }
 
+func expectedTantivyValidityBitmapBytes(numRows int64) uint64 {
+	if numRows <= 0 {
+		return 0
+	}
+	return ((uint64(numRows)-1)/64 + 1) * 8
+}
+
 func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_NonMmap_NoTieredEviction() {
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapScalarField.Key, "false")
 	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.MmapScalarField.Key)
@@ -2049,7 +2163,8 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_NonMmap_No
 	}
 	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	suite.EqualValues(textIndexSize, usage.MemorySize, "non-mmap text index must be counted in memory")
+	expectedMemorySize := uint64(textIndexSize) + expectedTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
+	suite.EqualValues(expectedMemorySize, usage.MemorySize, "non-mmap text index files and validity bitmap must be counted in memory")
 	suite.EqualValues(0, usage.DiskSize, "non-mmap text index must not be counted in disk")
 }
 
@@ -2070,7 +2185,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_Mmap_NoTie
 	}
 	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	suite.EqualValues(0, usage.MemorySize, "mmap text index must not be counted in memory")
+	suite.EqualValues(expectedTantivyValidityBitmapBytes(loadInfo.GetNumOfRows()), usage.MemorySize, "mmap text index validity bitmap must be counted in memory")
 	suite.EqualValues(textIndexSize, usage.DiskSize, "mmap text index must be counted in disk")
 }
 
@@ -2106,6 +2221,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_MultipleTe
 		101: {FieldID: 101, MemorySize: size1},
 		102: {FieldID: 102, MemorySize: size2},
 	})
+	loadInfo.NumOfRows = 65
 
 	factor := resourceEstimateFactor{
 		TieredEvictionEnabled:    false,
@@ -2114,7 +2230,8 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_MultipleTe
 	}
 	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	suite.EqualValues(size1+size2, usage.MemorySize, "all text index sizes must be summed")
+	validityBitmapBytes := expectedTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
+	suite.EqualValues(uint64(size1+size2)+2*validityBitmapBytes, usage.MemorySize, "each text field must include its word-aligned validity bitmap")
 }
 
 func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_ExpansionFactor() {
@@ -2134,8 +2251,8 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_ExpansionF
 	}
 	usage, err := estimateLoadingResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	expected := uint64(float64(textIndexSize) * expansionFactor)
-	suite.EqualValues(expected, usage.MemorySize, "expansion factor must be applied to text index size")
+	expected := uint64(float64(textIndexSize)*expansionFactor) + expectedTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
+	suite.EqualValues(expected, usage.MemorySize, "expansion factor must apply only to text index file bytes")
 }
 
 func (suite *SegmentLoaderTextIndexEstimateSuite) TestLoadingEstimate_EmptyTextStats_NoContribution() {
@@ -2196,7 +2313,8 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_NonMmap_Ev
 	}
 	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	suite.EqualValues(textIndexSize, usage.MemorySize, "non-mmap text index must be in evictable memory")
+	expectedMemorySize := uint64(textIndexSize) + expectedTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
+	suite.EqualValues(expectedMemorySize, usage.MemorySize, "non-mmap text index files and validity bitmap must be in evictable memory")
 	suite.EqualValues(0, usage.DiskSize)
 }
 
@@ -2218,7 +2336,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_Mmap_Evict
 	}
 	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	suite.EqualValues(0, usage.MemorySize, "mmap text index must not be in memory")
+	suite.EqualValues(expectedTantivyValidityBitmapBytes(loadInfo.GetNumOfRows()), usage.MemorySize, "mmap text index validity bitmap must be in evictable memory")
 	suite.EqualValues(textIndexSize, usage.DiskSize, "mmap text index must be in evictable disk")
 }
 
@@ -2242,8 +2360,9 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_CacheRatio
 	}
 	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	expected := uint64(float64(textIndexSize) * cacheRatio)
-	suite.EqualValues(expected, usage.MemorySize, "cache ratio must be applied to evictable text index memory")
+	evictableMemorySize := uint64(textIndexSize) + expectedTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
+	expected := uint64(float64(evictableMemorySize) * cacheRatio)
+	suite.EqualValues(expected, usage.MemorySize, "cache ratio must be applied to evictable text index files and validity bitmap")
 }
 
 func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_EmptyTextStats_NoContribution() {
@@ -2274,6 +2393,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_MultipleTe
 		101: {FieldID: 101, MemorySize: size1},
 		102: {FieldID: 102, MemorySize: size2},
 	})
+	loadInfo.NumOfRows = 65
 
 	factor := resourceEstimateFactor{
 		TieredEvictionEnabled:           true,
@@ -2284,7 +2404,8 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_MultipleTe
 	}
 	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	suite.EqualValues(size1+size2, usage.MemorySize, "all text index sizes must be summed in logical estimate")
+	validityBitmapBytes := expectedTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
+	suite.EqualValues(uint64(size1+size2)+2*validityBitmapBytes, usage.MemorySize, "each text field must include its word-aligned validity bitmap in logical estimate")
 }
 
 func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_DiskCacheRatioApplied() {
@@ -2307,7 +2428,7 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_DiskCacheR
 	}
 	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	suite.EqualValues(0, usage.MemorySize, "mmap text index must not be in memory")
+	suite.EqualValues(expectedTantivyValidityBitmapBytes(loadInfo.GetNumOfRows()), usage.MemorySize, "mmap text index validity bitmap must remain in memory")
 	expected := uint64(float64(textIndexSize) * diskCacheRatio)
 	suite.EqualValues(expected, usage.DiskSize, "disk cache ratio must be applied to mmap text index")
 }
@@ -2331,8 +2452,55 @@ func (suite *SegmentLoaderTextIndexEstimateSuite) TestLogicalEstimate_ExpansionF
 	}
 	usage, err := estimateLogicalResourceUsageOfSegment(suite.schema, loadInfo, factor)
 	suite.NoError(err)
-	expected := uint64(float64(textIndexSize) * expansionFactor)
+	expected := uint64(float64(textIndexSize)*expansionFactor) + expectedTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
 	suite.EqualValues(expected, usage.MemorySize)
+}
+
+func TestCheckLogicalSegmentSizeUsesJSONKeyStatsExpansionFactor(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	params.Save(params.QueryNodeCfg.TieredEvictionEnabled.Key, "true")
+	defer params.Reset(params.QueryNodeCfg.TieredEvictionEnabled.Key)
+	params.Save(params.QueryNodeCfg.TieredEvictableMemoryCacheRatio.Key, "1.0")
+	defer params.Reset(params.QueryNodeCfg.TieredEvictableMemoryCacheRatio.Key)
+	params.Save(params.QueryNodeCfg.MmapJSONStats.Key, "false")
+	defer params.Reset(params.QueryNodeCfg.MmapJSONStats.Key)
+	params.Save(params.QueryNodeCfg.JSONKeyStatsExpansionFactor.Key, "3.0")
+	defer params.Reset(params.QueryNodeCfg.JSONKeyStatsExpansionFactor.Key)
+
+	const collectionID = int64(10)
+	collectionManager := NewMockCollectionManager(t)
+	segmentManager := NewMockSegmentManager(t)
+	loader := &segmentLoader{
+		manager: &Manager{
+			Collection: collectionManager,
+			Segment:    segmentManager,
+		},
+	}
+	collectionManager.EXPECT().
+		Get(collectionID).
+		Return(NewCollectionWithoutSegcoreForTest(collectionID, &schemapb.CollectionSchema{
+			Name: "test_json_stats_estimate",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			},
+		}))
+	segmentManager.EXPECT().GetLogicalResource().Return(ResourceUsage{}).Twice()
+
+	memoryBytes, diskBytes, err := loader.checkLogicalSegmentSize(context.Background(), []*querypb.SegmentLoadInfo{
+		{
+			CollectionID: collectionID,
+			SegmentID:    20,
+			NumOfRows:    1,
+			JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+				101: {FieldID: 101, MemorySize: 100},
+			},
+		},
+	}, 1024)
+
+	assert.NoError(t, err)
+	assert.EqualValues(t, 300, memoryBytes)
+	assert.Zero(t, diskBytes)
 }
 
 func TestSeparateLoadInfoV2_ExternalFieldIndexNotSkipped(t *testing.T) {
@@ -2795,7 +2963,7 @@ func TestResolveSegmentEstimateLogs(t *testing.T) {
 	}
 	loadInfo := newLoadInfo()
 
-	binlogs, deltalogs := resolveSegmentEstimateLogs(schema, loadInfo)
+	binlogs, deltalogs := loadresource.ResolveSegmentEstimateLogs(schema, loadInfo)
 	assert.Empty(t, loadInfo.GetBinlogPaths())
 	assert.Len(t, binlogs, 1)
 	assert.Equal(t, int64(0), binlogs[0].GetFieldID())
@@ -2835,7 +3003,7 @@ func TestResolveSegmentEstimateLogs(t *testing.T) {
 	assert.Equal(t, manualUsage, adaptedUsage)
 
 	loadInfo.GetStats().InsertBinlogSize = 99
-	binlogs, _ = resolveSegmentEstimateLogs(schema, loadInfo)
+	binlogs, _ = loadresource.ResolveSegmentEstimateLogs(schema, loadInfo)
 	assert.Len(t, binlogs, 1)
 
 	for name, mutate := range map[string]func(*querypb.SegmentLoadInfo, *schemapb.CollectionSchema){
@@ -2858,7 +3026,7 @@ func TestResolveSegmentEstimateLogs(t *testing.T) {
 			info.BinlogPaths = []*datapb.FieldBinlog{{FieldID: 99}}
 			testSchema := newSchema()
 			mutate(info, testSchema)
-			gotBinlogs, gotDeltalogs := resolveSegmentEstimateLogs(testSchema, info)
+			gotBinlogs, gotDeltalogs := loadresource.ResolveSegmentEstimateLogs(testSchema, info)
 			assert.Equal(t, info.GetBinlogPaths(), gotBinlogs)
 			assert.Equal(t, info.GetDeltalogs(), gotDeltalogs)
 		})
@@ -2869,7 +3037,7 @@ func TestResolveSegmentEstimateLogs(t *testing.T) {
 		info.Stats.InsertBinlogSize = 0
 		info.Stats.LoadResource.ColumnGroups = nil
 
-		gotBinlogs, gotDeltalogs := resolveSegmentEstimateLogs(schema, info)
+		gotBinlogs, gotDeltalogs := loadresource.ResolveSegmentEstimateLogs(schema, info)
 		assert.Empty(t, gotBinlogs)
 		assert.Len(t, gotDeltalogs, 1)
 		assert.EqualValues(t, 50, gotDeltalogs[0].GetBinlogs()[0].GetMemorySize())

@@ -18,6 +18,7 @@
 
 #include <string.h>
 #include <cstdint>
+#include <memory>
 
 #include "common/BitUtil.h"
 #include "common/Vector.h"
@@ -87,10 +88,11 @@ RowContainer::initializeRow(char* row) {
 
 char*
 RowContainer::newRow() {
-    char* row = new char[fixedRowSize_];
-    rows_.emplace_back(row);
+    std::unique_ptr<char[]> row(new char[fixedRowSize_]);
+    initializeRow(row.get());
+    rows_.emplace_back(row.get());
     ++numRows_;
-    return initializeRow(row);
+    return row.release();
 }
 
 void
@@ -111,10 +113,6 @@ RowContainer::store(const milvus::ColumnVectorPtr& column_data,
                                  rowColumn.offset(),
                                  rowColumn.nullByte(),
                                  rowColumn.nullMask());
-}
-
-Accumulator::Accumulator(bool isFixedSize, int32_t fixedSize, int32_t alignment)
-    : isFixedSize_(isFixedSize), fixedSize_(fixedSize), alignment_(alignment) {
 }
 
 Accumulator::Accumulator(milvus::exec::Aggregate* aggregate)

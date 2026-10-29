@@ -7,19 +7,25 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// FieldData valid_data is handled in three stages:
-//   - At an input boundary, ValidateAndNormalizeFieldDataValidData validates
-//     that the legacy and field-specific values do not conflict, then keeps
-//     only the field-specific representation.
-//   - Internal code uses GetFieldDataValidData and SetFieldDataValidData to
-//     process validity without depending on where it is physically stored.
-//   - At a user-facing response boundary,
-//     ProjectFieldDataValidDataForLegacy restores the legacy representation
-//     while retaining the field-specific value for SDK compatibility.
+// Row validity of a FieldData has two wire locations: the legacy
+// FieldData.valid_data and the field-specific ScalarField.valid_data or
+// VectorField.valid_data. Components built before the field-specific location
+// existed read and update only the legacy location, and forward the
+// field-specific one untouched as an unknown field. While such components can
+// still share a cluster, WAL, or replication stream with this version:
+//   - Writers store the same mask in both locations (SetFieldDataValidData), so
+//     older readers keep seeing row validity.
+//   - Readers treat the legacy location as authoritative whenever it is set
+//     (GetFieldDataValidData). Every version writes and updates it, while an
+//     older component may rewrite it and leave a stale field-specific copy.
+//   - A user payload entering the proxy is rejected if the two locations
+//     disagree (ValidateAndNormalizeFieldDataValidData). Payloads produced
+//     inside Milvus, such as WAL messages written by an older proxy, are
+//     reconciled to the legacy value instead (NormalizeFieldDataValidData).
 
-// GetFieldDataValidData returns the validity of the immediate values carried by
-// FieldData. New payloads store it on ScalarField or VectorField; FieldData is
-// retained as a legacy fallback for older payloads.
+// GetFieldDataValidData returns the row validity of the immediate values
+// carried by FieldData. The legacy location wins when it is set; see the
+// comment at the top of this file.
 func GetFieldDataValidData(fieldData *schemapb.FieldData) []bool {
 	if legacy := fieldData.GetValidData(); len(legacy) > 0 {
 		return legacy
@@ -27,34 +33,60 @@ func GetFieldDataValidData(fieldData *schemapb.FieldData) []bool {
 	return getFieldSpecificValidData(fieldData)
 }
 
-// SetFieldDataValidData writes validity to the current field-specific location
-// and clears the legacy FieldData.valid_data source.
+// GetArrayElementValidData returns element validity carried by one scalar
+// Array row. Unlike GetFieldDataValidData, this bitmap is element-level.
+func GetArrayElementValidData(row *schemapb.ScalarField) []bool {
+	return row.GetValidData()
+}
+
+// GetVectorArrayElementValidData returns element validity carried by one
+// ArrayOfVector row. Unlike GetFieldDataValidData, this bitmap is element-level.
+func GetVectorArrayElementValidData(row *schemapb.VectorField) []bool {
+	return row.GetValidData()
+}
+
+// SetVectorArrayElementValidData writes element validity carried by one
+// ArrayOfVector row.
+func SetVectorArrayElementValidData(row *schemapb.VectorField, validData []bool) {
+	if row != nil {
+		row.ValidData = validData
+	}
+}
+
+// SetFieldDataValidData writes row validity to the legacy location, and to the
+// field-specific location when the ScalarField or VectorField wrapper exists.
+// Both locations share validData.
 func SetFieldDataValidData(fieldData *schemapb.FieldData, validData []bool) {
 	if fieldData == nil {
 		return
 	}
 
+	fieldData.ValidData = validData
 	if scalars := fieldData.GetScalars(); scalars != nil {
 		scalars.ValidData = validData
 	} else if vectors := fieldData.GetVectors(); vectors != nil {
 		vectors.ValidData = validData
-	} else {
-		return
 	}
-
-	fieldData.ValidData = nil
 }
 
-// ValidateAndNormalizeFieldDataValidData checks the legacy and current
-// validity locations once at an input boundary. Matching values are accepted
-// and normalized to the current field-specific location. It returns false if
-// any immediate or nested FieldData carries different values in both places.
+// ValidateAndNormalizeFieldDataValidData checks a user payload once when it
+// enters the proxy. It returns false if any immediate or nested FieldData
+// carries different values in the two locations; otherwise it writes the
+// validity to both locations.
 func ValidateAndNormalizeFieldDataValidData(fieldData *schemapb.FieldData) bool {
 	if !fieldDataValidDataConsistent(fieldData) {
 		return false
 	}
 	normalizeFieldDataValidData(fieldData)
 	return true
+}
+
+// NormalizeFieldDataValidData reconciles a payload produced inside Milvus. When
+// the two locations disagree, the legacy value wins, because an older component
+// may have rewritten it without updating the field-specific copy. The result is
+// written to both locations.
+func NormalizeFieldDataValidData(fieldData *schemapb.FieldData) {
+	normalizeFieldDataValidData(fieldData)
 }
 
 func fieldDataValidDataConsistent(fieldData *schemapb.FieldData) bool {
@@ -81,13 +113,24 @@ func normalizeFieldDataValidData(fieldData *schemapb.FieldData) {
 		return
 	}
 
+	// Older SDKs omit the sparse payload for an all-null batch. Materialize
+	// its empty container before moving legacy validity into VectorField,
+	// otherwise the default branch below discards the only null information.
+	// Keep the bitmap unchanged: row alignment still rejects missing vectors
+	// when any bit is true.
+	if fieldData.Field == nil && fieldData.GetType() == schemapb.DataType_SparseFloatVector && len(fieldData.GetValidData()) > 0 {
+		fieldData.Field = &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Data: &schemapb.VectorField_SparseFloatVector{
+					SparseFloatVector: &schemapb.SparseFloatArray{},
+				},
+			},
+		}
+	}
+
 	switch fieldData.Field.(type) {
 	case *schemapb.FieldData_Scalars, *schemapb.FieldData_Vectors:
-		if validData := GetFieldDataValidData(fieldData); len(validData) > 0 {
-			SetFieldDataValidData(fieldData, validData)
-		} else {
-			fieldData.ValidData = nil
-		}
+		SetFieldDataValidData(fieldData, GetFieldDataValidData(fieldData))
 	case *schemapb.FieldData_StructArrays:
 		fieldData.ValidData = nil
 		for _, subField := range fieldData.GetStructArrays().GetFields() {
@@ -95,21 +138,6 @@ func normalizeFieldDataValidData(fieldData *schemapb.FieldData) {
 		}
 	default:
 		fieldData.ValidData = nil
-	}
-}
-
-// ProjectFieldDataValidDataForLegacy copies current top-level validity to the
-// legacy location without clearing the current value. This is intended only
-// for user-facing response boundaries so old SDKs can read the validity mask.
-func ProjectFieldDataValidDataForLegacy(fieldData *schemapb.FieldData) {
-	if fieldData == nil {
-		return
-	}
-	if validData := getFieldSpecificValidData(fieldData); len(validData) > 0 {
-		fieldData.ValidData = slices.Clone(validData)
-	}
-	for _, subField := range fieldData.GetStructArrays().GetFields() {
-		ProjectFieldDataValidDataForLegacy(subField)
 	}
 }
 
@@ -270,4 +298,50 @@ func (b *FieldDataBuilder) Build() *schemapb.FieldData {
 		SetFieldDataValidData(field, b.valid)
 	}
 	return field
+}
+
+// CopyFieldDataMetadata copies field wrappers for consumer-local normalization.
+// Column values and validity bitmap backing arrays remain borrowed read-only.
+// Preserve both validity locations so conflicting input is still rejected by
+// ValidateAndNormalizeFieldDataValidData instead of being silently repaired.
+func CopyFieldDataMetadata(fields []*schemapb.FieldData) []*schemapb.FieldData {
+	if fields == nil {
+		return nil
+	}
+	result := make([]*schemapb.FieldData, len(fields))
+	for i, src := range fields {
+		if src == nil {
+			continue
+		}
+		dst := &schemapb.FieldData{
+			Type: src.Type, FieldName: src.FieldName, FieldId: src.FieldId,
+			IsDynamic: src.IsDynamic, ValidData: src.ValidData,
+		}
+		switch field := src.Field.(type) {
+		case *schemapb.FieldData_Scalars:
+			var scalar *schemapb.ScalarField
+			if field.Scalars != nil {
+				scalar = &schemapb.ScalarField{Data: field.Scalars.Data, ValidData: field.Scalars.ValidData}
+				scalar.ProtoReflect().SetUnknown(slices.Clone(field.Scalars.ProtoReflect().GetUnknown()))
+			}
+			dst.Field = &schemapb.FieldData_Scalars{Scalars: scalar}
+		case *schemapb.FieldData_Vectors:
+			var vector *schemapb.VectorField
+			if field.Vectors != nil {
+				vector = &schemapb.VectorField{Dim: field.Vectors.Dim, Data: field.Vectors.Data, ValidData: field.Vectors.ValidData}
+				vector.ProtoReflect().SetUnknown(slices.Clone(field.Vectors.ProtoReflect().GetUnknown()))
+			}
+			dst.Field = &schemapb.FieldData_Vectors{Vectors: vector}
+		case *schemapb.FieldData_StructArrays:
+			var array *schemapb.StructArrayField
+			if field.StructArrays != nil {
+				array = &schemapb.StructArrayField{Fields: CopyFieldDataMetadata(field.StructArrays.Fields)}
+				array.ProtoReflect().SetUnknown(slices.Clone(field.StructArrays.ProtoReflect().GetUnknown()))
+			}
+			dst.Field = &schemapb.FieldData_StructArrays{StructArrays: array}
+		}
+		dst.ProtoReflect().SetUnknown(slices.Clone(src.ProtoReflect().GetUnknown()))
+		result[i] = dst
+	}
+	return result
 }

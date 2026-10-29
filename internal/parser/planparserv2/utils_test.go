@@ -256,6 +256,10 @@ func Test_canBeComparedDataType(t *testing.T) {
 		{schemapb.DataType_VarChar, schemapb.DataType_Int64, false},
 		{schemapb.DataType_Array, schemapb.DataType_Int64, false},
 		{schemapb.DataType_Array, schemapb.DataType_Array, false},
+		{schemapb.DataType_Timestamptz, schemapb.DataType_Timestamptz, true},
+		{schemapb.DataType_Timestamptz, schemapb.DataType_Int64, false},
+		{schemapb.DataType_Int64, schemapb.DataType_Timestamptz, false},
+		{schemapb.DataType_Timestamptz, schemapb.DataType_JSON, false},
 	}
 
 	for _, c := range cases {
@@ -590,6 +594,33 @@ func Test_handleCompare(t *testing.T) {
 		assert.NotNil(t, result.GetUnaryRangeExpr())
 		assert.Equal(t, planpb.OpType_GreaterThan, result.GetUnaryRangeExpr().GetOp())
 		assert.Equal(t, "var1", result.GetUnaryRangeExpr().GetTemplateVariableName())
+	})
+
+	t.Run("reject composite template expression", func(t *testing.T) {
+		left := &ExprWithType{
+			expr: &planpb.Expr{
+				IsTemplate: true,
+				Expr: &planpb.Expr_BinaryArithExpr{
+					BinaryArithExpr: &planpb.BinaryArithExpr{Op: planpb.ArithOpType_Add},
+				},
+			},
+			dataType: schemapb.DataType_Int64,
+		}
+		right := &ExprWithType{
+			expr: &planpb.Expr{
+				Expr: &planpb.Expr_ColumnExpr{
+					ColumnExpr: &planpb.ColumnExpr{
+						Info: &planpb.ColumnInfo{FieldId: 102, DataType: schemapb.DataType_Int64},
+					},
+				},
+			},
+			dataType: schemapb.DataType_Int64,
+		}
+
+		result, err := handleCompare(planpb.OpType_Equal, left, right)
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "template variables in composite expressions")
 	})
 }
 

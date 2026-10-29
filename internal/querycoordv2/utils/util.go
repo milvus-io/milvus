@@ -62,9 +62,12 @@ func CheckDelegatorDataReady(nodeMgr *session.NodeManager, targetMgr meta.Target
 		return merr.WrapErrChannelNotAvailable(leader.Channel, "still catching up streaming data")
 	}
 
-	segmentDist := targetMgr.GetSealedSegmentsByChannel(context.TODO(), leader.CollectionID, leader.Channel, scope)
+	// Require every segment the target owns, taken from its ID set: a segment
+	// the shared store can no longer resolve must still be accounted for, or a
+	// delegator missing it would be reported ready.
+	segmentIDs := targetMgr.GetSealedSegmentIDsByChannel(context.TODO(), leader.CollectionID, leader.Channel, scope)
 	// Check whether segments are fully loaded
-	for segmentID := range segmentDist {
+	for segmentID := range segmentIDs {
 		version, exist := leader.Segments[segmentID]
 		if !exist {
 			mlog.RatedInfo(context.TODO(), rate.Limit(10), "leader is not available due to lack of segment", mlog.Int64("segmentID", segmentID))
@@ -190,6 +193,11 @@ func GetShardLeadersWithChannelsAndReplicaFilter(
 		ids := make([]int64, 0, len(replicas))
 		addrs := make([]string, 0, len(replicas))
 		serviceable := make([]bool, 0, len(replicas))
+		// The replica's resource group, not the node's: a replica may borrow
+		// nodes from another group, so node-set membership is not replica
+		// membership. The replica is in hand here and nowhere downstream --
+		// this list flattens every replica into one entry per channel.
+		resourceGroups := make([]string, 0, len(replicas))
 		for _, replica := range replicas {
 			if replicaFilter != nil && !replicaFilter(replica) {
 				continue
@@ -205,6 +213,7 @@ func GetShardLeadersWithChannelsAndReplicaFilter(
 				ids = append(ids, info.ID())
 				addrs = append(addrs, info.Addr())
 				serviceable = append(serviceable, leader.IsServiceable())
+				resourceGroups = append(resourceGroups, replica.GetResourceGroup())
 			}
 		}
 
@@ -215,11 +224,18 @@ func GetShardLeadersWithChannelsAndReplicaFilter(
 			return nil, err
 		}
 
+		// The four arrays are parallel by construction -- every append above
+		// happens in the same `info != nil` branch -- and every consumer
+		// indexes them that way, so the tag's correctness rests entirely on
+		// it. TestShardLeaderResourceGroupsStayIndexAligned pins it with a
+		// leader dropped at that branch; the proxy neutralizes the tags if a
+		// response ever arrives misaligned anyway.
 		ret = append(ret, &querypb.ShardLeadersList{
-			ChannelName: channel.GetChannelName(),
-			NodeIds:     ids,
-			NodeAddrs:   addrs,
-			Serviceable: serviceable,
+			ChannelName:    channel.GetChannelName(),
+			NodeIds:        ids,
+			NodeAddrs:      addrs,
+			Serviceable:    serviceable,
+			ResourceGroups: resourceGroups,
 		})
 	}
 

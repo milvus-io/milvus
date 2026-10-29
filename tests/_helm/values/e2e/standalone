@@ -36,7 +36,17 @@ log:
   level: debug
 extraConfigFiles:
   user.yaml: |+
+    proxy:
+      # Temporary preview switch; removed together with the element-null / nested Array gate.
+      enableElementNullAndNestedArray: true
+    grpc:
+      client:
+        compressionEnabled: true
+        compressionAlgorithm: s2
     common:
+      fileResource:
+        mode:
+          proxy: sync
       storage:
         # enable storage v3
         useLoonFFI: true
@@ -44,6 +54,9 @@ extraConfigFiles:
       storage:
         format: vortex
     dataCoord:
+      targetVecIndexVersion: 11
+      forceRebuildScalarSegmentIndex: true
+      targetScalarIndexVersion: 5
       compaction:
         bumpSchemaVersion:
           enabled: true
@@ -54,6 +67,9 @@ extraConfigFiles:
     queryNode:
       segcore:
         exprEvalBatchSize: 512
+    function:
+      pyUDF:
+        enabled: true
     quotaAndLimits:
       flushRate:
         collection:

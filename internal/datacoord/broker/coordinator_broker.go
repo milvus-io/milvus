@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -39,6 +40,7 @@ type Broker interface {
 	ShowPartitionsInternal(ctx context.Context, collectionID int64) ([]int64, error)
 	ShowCollections(ctx context.Context, dbName string) (*milvuspb.ShowCollectionsResponse, error)
 	ShowCollectionIDs(ctx context.Context, dbNames ...string) (*rootcoordpb.ShowCollectionIDsResponse, error)
+	GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error)
 	ListDatabases(ctx context.Context) (*milvuspb.ListDatabasesResponse, error)
 	HasCollection(ctx context.Context, collectionID int64) (bool, error)
 	ShowPartitions(ctx context.Context, collectionID int64) (*milvuspb.ShowPartitionsResponse, error)
@@ -62,6 +64,17 @@ type Broker interface {
 
 type coordinatorBroker struct {
 	mixCoord types.MixCoord
+}
+
+// CollectionAvailability is an optional in-process fast path. Only true is
+// conclusive; false must fall back to HasCollection before deciding to GC.
+type CollectionAvailability interface {
+	IsCollectionAvailable(collectionID int64) bool
+}
+
+func (b *coordinatorBroker) IsCollectionAvailable(collectionID int64) bool {
+	checker, ok := b.mixCoord.(CollectionAvailability)
+	return ok && checker.IsCollectionAvailable(collectionID)
 }
 
 func NewCoordinatorBroker(mixCoord types.MixCoord) *coordinatorBroker {
@@ -182,6 +195,19 @@ func (b *coordinatorBroker) ShowCollectionIDs(ctx context.Context, dbNames ...st
 	}
 
 	return resp, nil
+}
+
+func (b *coordinatorBroker) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error) {
+	if len(resourceIDs) == 0 {
+		return nil, nil
+	}
+
+	resources, err := b.mixCoord.GetFileResources(ctx, resourceIDs...)
+	if err != nil {
+		mlog.Warn(ctx, "get file resources failed", mlog.Err(err))
+		return nil, err
+	}
+	return resources, nil
 }
 
 func (b *coordinatorBroker) ListDatabases(ctx context.Context) (*milvuspb.ListDatabasesResponse, error) {

@@ -38,7 +38,7 @@ import (
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-func (s *BulkInsertSuite) testImportDynamicField() {
+func (s *importTestBase) testImportDynamicField() {
 	const (
 		rowCount = 100
 	)
@@ -97,14 +97,14 @@ func (s *BulkInsertSuite) testImportDynamicField() {
 	options := []*commonpb.KeyValuePair{}
 
 	switch s.fileType {
-	case importutilv2.Numpy:
+	case importutilv2.FileTypeNumpy:
 		importFile, err := GenerateNumpyFiles(c, schema, rowCount)
 		s.NoError(err)
 		importFile.Paths = lo.Filter(importFile.Paths, func(path string, _ int) bool {
 			return !strings.Contains(path, "$meta")
 		})
 		files = []*internalpb.ImportFile{importFile}
-	case importutilv2.JSON:
+	case importutilv2.FileTypeJSON:
 		rowBasedFile := GenerateJSONFile(s.T(), c, schema, rowCount)
 		files = []*internalpb.ImportFile{
 			{
@@ -113,7 +113,7 @@ func (s *BulkInsertSuite) testImportDynamicField() {
 				},
 			},
 		}
-	case importutilv2.Parquet:
+	case importutilv2.FileTypeParquet:
 		filePath, err := GenerateParquetFile(s.Cluster, schema, rowCount)
 		s.NoError(err)
 		files = []*internalpb.ImportFile{
@@ -123,7 +123,7 @@ func (s *BulkInsertSuite) testImportDynamicField() {
 				},
 			},
 		}
-	case importutilv2.CSV:
+	case importutilv2.FileTypeCsv:
 		filePath, sep := GenerateCSVFile(s.T(), s.Cluster, schema, rowCount)
 		options = []*commonpb.KeyValuePair{{Key: "sep", Value: string(sep)}}
 		s.NoError(err)
@@ -190,21 +190,21 @@ func (s *BulkInsertSuite) testImportDynamicField() {
 }
 
 func (s *BulkInsertSuite) TestImportDynamicField_JSON() {
-	s.fileType = importutilv2.JSON
+	s.fileType = importutilv2.FileTypeJSON
 	s.testImportDynamicField()
 }
 
 func (s *BulkInsertSuite) TestImportDynamicField_Numpy() {
-	s.fileType = importutilv2.Numpy
+	s.fileType = importutilv2.FileTypeNumpy
 	s.testImportDynamicField()
 }
 
 func (s *BulkInsertSuite) TestImportDynamicField_Parquet() {
-	s.fileType = importutilv2.Parquet
+	s.fileType = importutilv2.FileTypeParquet
 	s.testImportDynamicField()
 }
 
 func (s *BulkInsertSuite) TestImportDynamicField_CSV() {
-	s.fileType = importutilv2.CSV
+	s.fileType = importutilv2.FileTypeCsv
 	s.testImportDynamicField()
 }

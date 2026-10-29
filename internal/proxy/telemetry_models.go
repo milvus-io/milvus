@@ -40,11 +40,16 @@ type CommandReply struct {
 // ClientMetrics wraps client telemetry data for JSON API responses.
 //
 // The three collection fields are always present and always an array, never null and never
-// absent. Metrics in particular reset every heartbeat window, so an idle client legitimately
-// reports none -- and "no operations this window" must not be indistinguishable from a
-// missing or broken field. Consumers can rely on `metrics` existing and branch on its
-// length; combined with `status`, an empty array plus "active" means idle, while "inactive"
-// means the client stopped heartbeating.
+// absent. Metrics in particular covers one heartbeat window rather than the client's whole
+// life -- counters reset as the client takes each snapshot -- so a client that has been
+// quiet legitimately reports none, and "no operations in that window" must not be
+// indistinguishable from a missing or broken field. Consumers can rely on `metrics`
+// existing and branch on its length; combined with `status`, an empty array plus "active"
+// means idle, while "inactive" means the client stopped heartbeating.
+//
+// The window reported is the older of the two the coordinator retains, so it lags the
+// client by one heartbeat interval and one idle interval does not blank it. See
+// servedMetricsLocked in internal/rootcoord/telemetry for why it is served that way.
 type ClientMetrics struct {
 	ClientID          string                       `json:"client_id"`
 	ClientInfo        *commonpb.ClientInfo         `json:"client_info"`

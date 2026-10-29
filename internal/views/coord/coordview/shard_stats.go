@@ -1,0 +1,121 @@
+package coordview
+
+import (
+	"github.com/milvus-io/milvus/internal/views/qviews"
+)
+
+// ShardStats is an atomic snapshot of a shard's placement state.
+// Returned by ShardViewManager.Stats for use by Balancer / ShardViewRegistry.
+//
+// The snapshot is taken under the ShardViewManager's mutex, so all fields are
+// consistent with each other: segment placements reflect exactly the views whose
+// state is reported.
+// SchemaUpView is the newest serving view for one exact read schema.
+type SchemaUpView struct {
+	Version         qviews.QueryViewVersion
+	LoadInfoVersion uint64
+}
+
+type ShardStats struct {
+	UpBySchema map[int32]SchemaUpView
+
+	// Per-view placements are independent of merged physical resource progress.
+	UpPlacement        *ViewPlacement
+	PreparingPlacement *ViewPlacement
+	// Exact view footprints, including empty partitions and retained Dropping
+	// references. ResidentNodes disappear only after durable view removal.
+	UpNodes        []int64
+	PreparingNodes []int64
+	ResidentNodes  []int64
+	// Resources contains confirmed ready resources. Matching the full key is
+	// conservative: a different DataVersion may still be physically reusable.
+	Resources map[int64]map[ResourceKey]struct{}
+	// UpVersion is the version of the current Up view, if any.
+	// Nil when no view is currently Up.
+	UpVersion *qviews.QueryViewVersion
+
+	// UpLoadInfoVersion is the load-config snapshot version of the current Up view.
+	// Zero when no view is currently Up.
+	UpLoadInfoVersion uint64
+
+	// Schema revisions of the serving and in-flight views.
+	UpSchemaVersion        int32
+	PreparingSchemaVersion int32
+
+	// PreparingVersion is the version of the current Preparing or Ready view,
+	// if any. Nil when there is no in-flight view.
+	PreparingVersion *qviews.QueryViewVersion
+
+	// Segments lists every segment currently placed for this shard, keyed by
+	// segmentID. The value is node-level state: the same segment may appear on
+	// multiple nodes while views overlap, but one node has at most one state.
+	// Each segment also carries the published LogicalSize footprint (see
+	// SegmentStats.LogicalSize).
+	//
+	// Down view placements are reported as Ready because QueryNodes do not
+	// receive Down and the loaded segments are still more reusable than
+	// Preparing placements. Dropping and Dropped views are excluded.
+	Segments map[int64]*SegmentStats
+}
+
+// ViewPlacement is immutable after publication. Missing statistics can be completed
+// from the cache's retained footprint without confusing known zero with absent.
+type ViewPlacement struct {
+	Assignments map[int64]int64
+	// PartitionSizes keeps exact per-view footprints by partition and node so
+	// a released partition can leave target accounting before view teardown.
+	PartitionSizes map[int64]map[int64]int64
+	// LostStats lists Segment IDs without a published footprint.
+	LostStats []int64
+}
+
+// ResourceKey identifies a compatible loading requirement within a collection.
+// DataVersion covers membership/manifest revisions; LoadInfoVersion covers fields
+// and indexes. Unknown load versions are not published as reusable resources.
+type ResourceKey struct {
+	PartitionID     int64
+	SegmentID       int64
+	DataVersion     qviews.DataVersion
+	LoadInfoVersion uint64
+}
+
+// SegmentState is the per-node segment progress observed by Coord. Larger
+// values are more reusable and override smaller values when multiple views
+// mention the same segment on the same node.
+type SegmentState int
+
+const (
+	// SegmentStateUnrecoverable means the previous load on this node failed
+	// unrecoverably. Balancer should prefer other nodes when possible.
+	SegmentStateUnrecoverable SegmentState = iota
+
+	// SegmentStatePreparing means the segment is being loaded on this node.
+	SegmentStatePreparing
+
+	// SegmentStateReady means the segment has loaded and can participate in a
+	// query view, but is not in the current Up view. This also covers Down
+	// views: Down is sent only to StreamingNode, so QueryNode segments are still
+	// loaded and should be treated as more reusable than Preparing placements.
+	SegmentStateReady
+
+	// SegmentStateUp means the segment is in the current Up view and serves
+	// queries.
+	SegmentStateUp
+)
+
+// SegmentStats describes all currently tracked node states for one segment.
+type SegmentStats struct {
+	SegmentID   int64
+	PartitionID int64
+	// Nodes maps nodeID to the segment state on that node. A segment may appear
+	// on multiple nodes while views overlap, but one node only has one state for
+	// a given segment.
+	Nodes map[int64]SegmentState
+
+	// RowNum and LogicalSize are one footprint from a retained DataViewRef.
+	// LostStats means the entire footprint is unavailable; zero values alone
+	// never indicate missing statistics.
+	RowNum      int64
+	LogicalSize int64
+	LostStats   bool
+}

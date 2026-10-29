@@ -7,6 +7,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -25,15 +26,18 @@ func newBroadcastTaskFromProto(proto *streamingpb.BroadcastTask, metrics *broadc
 	fixAckInfoFromProto(proto, len(msg.BroadcastHeader().VChannels))
 
 	bt := &broadcastTask{
-		mu:                   sync.Mutex{},
-		taskMetricsGuard:     m,
-		msg:                  msg,
-		task:                 proto,
-		dirty:                false, // the task is recovered from the recovery info, so it's persisted.
-		ackCallbackScheduler: ackCallbackScheduler,
-		done:                 make(chan struct{}),
-		allAcked:             make(chan struct{}),
-		allAckedClosed:       false,
+		mu:                     sync.Mutex{},
+		taskMetricsGuard:       m,
+		msg:                    msg,
+		schemaCollectionID:     schemaTargetCollectionID(msg),
+		messageTypeWithVersion: msg.MessageTypeWithVersion(),
+		idempotencyScope:       idempotencyScopeOfMessage(msg),
+		task:                   proto,
+		dirty:                  false, // the task is recovered from the recovery info, so it's persisted.
+		ackCallbackScheduler:   ackCallbackScheduler,
+		done:                   make(chan struct{}),
+		allAcked:               make(chan struct{}),
+		allAckedClosed:         false,
 	}
 	if isAllDone(bt.task) {
 		bt.closeAllAcked()
@@ -67,10 +71,13 @@ func newBroadcastTaskFromBroadcastMessage(msg message.BroadcastMutableMessage, m
 	m := metrics.NewBroadcastTask(msg.MessageType(), streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING, msg.BroadcastHeader().ResourceKeys.Collect())
 	header := msg.BroadcastHeader()
 	bt := &broadcastTask{
-		Binder:           mlog.Binder{},
-		taskMetricsGuard: m,
-		mu:               sync.Mutex{},
-		msg:              msg,
+		Binder:                 mlog.Binder{},
+		taskMetricsGuard:       m,
+		mu:                     sync.Mutex{},
+		msg:                    msg,
+		schemaCollectionID:     schemaTargetCollectionID(msg),
+		messageTypeWithVersion: msg.MessageTypeWithVersion(),
+		idempotencyScope:       idempotencyScopeOfMessage(msg),
 		task: &streamingpb.BroadcastTask{
 			Message:             msg.IntoMessageProto(),
 			State:               streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING,
@@ -101,16 +108,23 @@ type broadcastTask struct {
 	mlog.Binder
 	*taskMetricsGuard
 
-	mu                       sync.Mutex
-	msg                      message.BroadcastMutableMessage // protected by mu since MarkIgnore may mutate it.
-	task                     *streamingpb.BroadcastTask
-	dirty                    bool // a flag to indicate that the task has been modified and needs to be saved into the recovery info.
-	done                     chan struct{}
-	allAcked                 chan struct{}
-	allAckedClosed           bool
-	guards                   *lockGuards
-	ackCallbackScheduler     *ackCallbackScheduler
-	joinAckCallbackScheduled bool // a flag to indicate that the join ack callback is scheduled.
+	// Immutable collection index key; zero for tasks without schema intent.
+	schemaCollectionID     int64
+	schemaTasks            *schemaTaskIndex           // set by the manager before publication; contains durable snapshots only.
+	schemaForTarget        *schemapb.CollectionSchema // lazily decoded and immutable; protected by mu.
+	mu                     sync.Mutex
+	msg                    message.BroadcastMutableMessage // protected by mu since MarkIgnore may mutate it.
+	messageTypeWithVersion message.MessageTypeWithVersion  // immutable after construction; safe to read without mu.
+	idempotencyScope       string                          // immutable; MarkIgnore only changes the replication header.
+	task                   *streamingpb.BroadcastTask
+	dirty                  bool // a flag to indicate that the task has been modified and needs to be saved into the recovery info.
+	done                   chan struct{}
+	allAcked               chan struct{}
+	allAckedClosed         bool
+	guards                 *lockGuards
+	ackCallbackScheduler   *ackCallbackScheduler
+	// a flag to indicate that the join ack callback is scheduled.
+	joinAckCallbackScheduled bool
 }
 
 // SetLogger sets the logger of the broadcast task.
@@ -133,6 +147,17 @@ func (b *broadcastTask) BroadcastResult() (message.BroadcastMutableMessage, map[
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	msg, result, acked := b.broadcastResult()
+	if !acked {
+		panic("unreachable: BroadcastResult is called before the broadcast task is acked")
+	}
+	return msg, result
+}
+
+// broadcastResult zips the vchannels of the task with their acked checkpoints.
+// Returns acked=false and a nil result when any vchannel has no checkpoint yet.
+// Caller must hold b.mu.
+func (b *broadcastTask) broadcastResult() (message.BroadcastMutableMessage, map[string]*types.AppendResult, bool) {
 	vchannels := b.header().VChannels
 	result := make(map[string]*types.AppendResult, len(vchannels))
 	for idx, vchannel := range vchannels {
@@ -147,7 +172,7 @@ func (b *broadcastTask) BroadcastResult() (message.BroadcastMutableMessage, map[
 		}
 		cp := b.task.AckedCheckpoints[idx]
 		if cp == nil || cp.TimeTick == 0 {
-			panic("unreachable: BroadcastResult is called before the broadcast task is acked")
+			return b.msg, nil, false
 		}
 		result[vchannel] = &types.AppendResult{
 			MessageID:              message.MustUnmarshalMessageID(cp.MessageId),
@@ -155,7 +180,7 @@ func (b *broadcastTask) BroadcastResult() (message.BroadcastMutableMessage, map[
 			TimeTick:               cp.TimeTick,
 		}
 	}
-	return b.msg, result
+	return b.msg, result, true
 }
 
 // Header returns the header of the broadcast task.
@@ -170,6 +195,20 @@ func (b *broadcastTask) Header() *message.BroadcastHeader {
 // Caller must hold b.mu.
 func (b *broadcastTask) header() *message.BroadcastHeader {
 	return b.msg.BroadcastHeader()
+}
+
+// IdempotencyScope returns the idempotency scope of the message of the broadcast task.
+// The identity never changes, even when MarkIgnore replaces the message.
+func (b *broadcastTask) IdempotencyScope() string {
+	return b.idempotencyScope
+}
+
+// BroadcastMessage returns the message of the broadcast task.
+// Must acquire b.mu because MarkIgnore may replace b.msg concurrently.
+func (b *broadcastTask) BroadcastMessage() message.BroadcastMutableMessage {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.msg
 }
 
 // ControlChannelTimeTick returns the time tick of the control channel.
@@ -195,7 +234,12 @@ func (b *broadcastTask) State() streamingpb.BroadcastTaskState {
 func (b *broadcastTask) PendingBroadcastMessages() []message.MutableMessage {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	return b.pendingBroadcastMessages()
+}
 
+// pendingBroadcastMessages returns pending messages without acquiring b.mu.
+// Caller must hold b.mu.
+func (b *broadcastTask) pendingBroadcastMessages() []message.MutableMessage {
 	msg := message.NewBroadcastMutableMessageBeforeAppend(b.task.Message.Payload, b.task.Message.Properties)
 	msgs := msg.SplitIntoMutableMessage()
 	// filter out the vchannel that has been acked.
@@ -207,6 +251,56 @@ func (b *broadcastTask) PendingBroadcastMessages() []message.MutableMessage {
 		pendingMessages = append(pendingMessages, msg)
 	}
 	return pendingMessages
+}
+
+// HasPendingMessagesInIncompleteState atomically checks whether this task is
+// eligible for force-promote recovery and still has messages to broadcast.
+func (b *broadcastTask) HasPendingMessagesInIncompleteState() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.task.State != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING &&
+		b.task.State != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_REPLICATED {
+		return false
+	}
+	return len(b.pendingBroadcastMessages()) > 0
+}
+
+// MessageTypeWithVersion returns the immutable message type cached when the
+// task is constructed. MarkIgnore may replace b.msg but never changes its type.
+func (b *broadcastTask) MessageTypeWithVersion() message.MessageTypeWithVersion {
+	return b.messageTypeWithVersion
+}
+
+// PendingSchemaFileResourceSnapshot returns the collection and file resource
+// IDs referenced by a CreateCollection or AlterCollection task that is neither
+// a tombstone nor a tombstone being dropped (DONE).
+func (b *broadcastTask) PendingSchemaFileResourceSnapshot() (int64, []int64, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE ||
+		b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
+		return 0, nil, false
+	}
+	switch b.messageTypeWithVersion {
+	case message.MessageTypeCreateCollectionV1:
+		createMsg, err := message.AsMutableCreateCollectionMessageV1(b.msg)
+		if err != nil {
+			return 0, nil, false
+		}
+		ids := createMsg.MustBody().CollectionSchema.GetFileResourceIds()
+		return createMsg.Header().CollectionId, append([]int64(nil), ids...), true
+	case message.MessageTypeAlterCollectionV2:
+		alterMsg, err := message.AsMutableAlterCollectionMessageV2(b.msg)
+		if err != nil {
+			return 0, nil, false
+		}
+		ids := alterMsg.MustBody().GetUpdates().GetSchema().GetFileResourceIds()
+		return alterMsg.Header().CollectionId, append([]int64(nil), ids...), true
+	default:
+		return 0, nil, false
+	}
 }
 
 // IsAlterReplicateConfigMessage returns true if this task is an AlterReplicateConfig message.
@@ -315,21 +409,27 @@ func (b *broadcastTask) getImmutableMessageFromVChannel(vchannel string, result 
 // Ack acknowledges the message at the specified vchannel.
 // return true if all the vchannels are acked at first time, false if not.
 func (b *broadcastTask) Ack(ctx context.Context, msgs message.ImmutableMessage) (err error) {
+	callback, err := registry.ResolveMessageAckOnceCallback(ctx, b.messageTypeWithVersion)
+	if err != nil {
+		return err
+	}
+
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	return b.ack(ctx, msgs)
+	return b.ack(ctx, callback, msgs)
 }
 
 // ack acknowledges the message at the specified vchannel.
-func (b *broadcastTask) ack(ctx context.Context, msgs ...message.ImmutableMessage) (err error) {
+// Caller must resolve callback before acquiring b.mu and hold b.mu while calling.
+func (b *broadcastTask) ack(ctx context.Context, callback registry.ResolvedMessageAckOnceCallback, msgs ...message.ImmutableMessage) (err error) {
 	isControlChannelAcked := b.copyAndSetAckedCheckpoints(msgs...)
 	if !b.dirty {
 		return nil
 	}
 	// because the incoming ack operation is always with one vchannel at a time or with all the vchannels at once,
 	// so we don't need to filter the vchannel that has been acked.
-	if err := registry.CallMessageAckOnceCallbacks(ctx, msgs...); err != nil {
+	if err := registry.CallResolvedMessageAckOnceCallbacks(ctx, callback, msgs...); err != nil {
 		return err
 	}
 	if err := b.saveTaskIfDirty(ctx, b.Logger()); err != nil {
@@ -450,15 +550,25 @@ func findIdxOfVChannel(vchannel string, vchannels []string) int {
 func (b *broadcastTask) FastAck(ctx context.Context, broadcastResult map[string]*types.AppendResult) error {
 	// Broadcast operation is done.
 	b.mu.Lock()
-	defer b.mu.Unlock()
-
 	b.ObserveBroadcastDone()
 
 	if b.header().AckSyncUp {
 		// Because the ack sync up is enabled, the ack operation want to be synced up at comsuming side of streaming node,
 		// so we can not make a fast ack operation here to speed up the ack operation.
+		b.mu.Unlock()
 		return nil
 	}
+	b.mu.Unlock()
+
+	// Callback registration may depend on coordinator startup. Never wait for
+	// that future while holding the task lock.
+	callback, err := registry.ResolveMessageAckOnceCallback(ctx, b.messageTypeWithVersion)
+	if err != nil {
+		return err
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
 
 	// because we need to wait for the streamingnode to ack the message,
 	// however, if the message is already write into wal, the message is determined,
@@ -467,19 +577,39 @@ func (b *broadcastTask) FastAck(ctx context.Context, broadcastResult map[string]
 	for vchannel := range broadcastResult {
 		msgs = append(msgs, b.getImmutableMessageFromVChannel(vchannel, broadcastResult[vchannel]))
 	}
-	return b.ack(ctx, msgs...)
+	return b.ack(ctx, callback, msgs...)
 }
 
-// DropTombstone drops the tombstone of the broadcast task.
-// It will remove the tombstone of the broadcast task in recovery storage.
-// After the tombstone is dropped, the idempotency and deduplication can not be guaranteed.
-func (b *broadcastTask) DropTombstone(ctx context.Context) error {
+// canDropTombstone requires every local broadcast copy to be strictly behind
+// its PChannel's durable replay checkpoint. ACK/callback completion alone does
+// not establish this boundary, for either primary or replicated tasks.
+func (b *broadcastTask) canDropTombstone(checkpoints map[string]*streamingpb.WALCheckpoint) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for idx, vchannel := range b.header().VChannels {
+		acked := b.task.AckedCheckpoints[idx]
+		if acked.GetTimeTick() == 0 {
+			// Legacy tasks without positions cannot prove they are safe to remove.
+			return false
+		}
+		if checkpoints[funcutil.ToPhysicalChannel(vchannel)].GetTimeTick() <= acked.GetTimeTick() {
+			return false
+		}
+	}
+	return true
+}
+
+// markTombstoneDropped marks the task DONE before its tombstone is deleted from
+// recovery storage.
+func (b *broadcastTask) markTombstoneDropped() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	if b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE {
+		return // A retry after a failed deletion.
+	}
 	b.task.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE
-	b.dirty = true
-	return b.saveTaskIfDirty(ctx, b.Logger())
+	b.ObserveStateChanged(b.task.State)
 }
 
 // isAllDone check if all the vchannels are acked.
@@ -529,7 +659,6 @@ func (b *broadcastTask) saveTaskIfDirty(ctx context.Context, logger *mlog.Logger
 	if !b.dirty {
 		return nil
 	}
-	b.dirty = false
 	logger = logger.With(mlog.String("state", b.task.State.String()), mlog.Int("ackedVChannelCount", ackedCount(b.task)))
 	if err := resource.Resource().StreamingCatalog().SaveBroadcastTask(ctx, b.header().BroadcastID, b.task); err != nil {
 		logger.Warn(ctx, "save broadcast task failed", mlog.Err(err))
@@ -537,6 +666,10 @@ func (b *broadcastTask) saveTaskIfDirty(ctx context.Context, logger *mlog.Logger
 			panic("critical error: the save broadcast task is failed before the context is done")
 		}
 		return err
+	}
+	b.dirty = false
+	if b.schemaTasks != nil {
+		b.schemaTasks.update(b)
 	}
 	b.ObserveStateChanged(b.task.State)
 	logger.Info(ctx, "save broadcast task done")

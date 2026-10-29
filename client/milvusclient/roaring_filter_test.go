@@ -17,14 +17,41 @@
 package milvusclient
 
 import (
+	"bytes"
+	"encoding/binary"
 	"math"
 	"testing"
 
+	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/client/v3/roaringfilter"
+	"github.com/milvus-io/milvus/client/v3/membership/roaringfilter"
 )
+
+// decodeBlob deserializes the portable Roaring64 body of an MRB1 blob. The
+// structural validator lives on the server (pkg/util/roaringfilter), so these
+// SDK tests decode directly rather than through a client-side copy of it.
+func decodeBlob(t *testing.T, blob RoaringBitmapBlob) *roaring64.Bitmap {
+	t.Helper()
+	// The envelope is Build's output too, and the structural validator lives on
+	// the server, so assert the header here rather than decoding straight past it.
+	require.Equal(t, roaringfilter.Magic, string(blob[:4]))
+	require.Equal(t, roaringfilter.Version, binary.LittleEndian.Uint16(blob[4:6]))
+	require.Equal(t, roaringfilter.FormatPortableRoaring64, binary.LittleEndian.Uint16(blob[6:8]))
+	require.Zero(t, binary.LittleEndian.Uint64(blob[24:32]), "reserved must be zero")
+
+	bitmap := roaring64.New()
+	consumed, err := bitmap.ReadFrom(bytes.NewReader(blob[roaringfilter.HeaderSize:]))
+	require.NoError(t, err)
+	require.Equal(t, int64(len(blob)-roaringfilter.HeaderSize), consumed,
+		"body must be consumed exactly, with no trailing bytes")
+	return bitmap
+}
+
+func containsSigned(bitmap *roaring64.Bitmap, member int64) bool {
+	return bitmap.Contains(uint64(member))
+}
 
 func TestNewRoaringBitmapBlobAcceptsSignedIntegerSlices(t *testing.T) {
 	tests := map[string]any{
@@ -39,11 +66,10 @@ func TestNewRoaringBitmapBlobAcceptsSignedIntegerSlices(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			blob, err := NewRoaringBitmapBlob(members)
 			require.NoError(t, err)
-			filter, err := roaringfilter.Parse(blob)
-			require.NoError(t, err)
-			require.Equal(t, uint64(4), filter.Cardinality())
-			require.True(t, filter.ContainsInt64(-1))
-			require.True(t, filter.ContainsInt64(0))
+			bitmap := decodeBlob(t, blob)
+			require.Equal(t, uint64(4), bitmap.GetCardinality())
+			require.True(t, containsSigned(bitmap, -1))
+			require.True(t, containsSigned(bitmap, 0))
 		})
 	}
 }
@@ -52,11 +78,10 @@ func TestNewRoaringBitmapBlobDeduplicatesMembers(t *testing.T) {
 	blob, err := NewRoaringBitmapBlob([]int64{-1, -1, 42, 42})
 	require.NoError(t, err)
 
-	filter, err := roaringfilter.Parse(blob)
-	require.NoError(t, err)
-	require.Equal(t, uint64(2), filter.Cardinality())
-	require.True(t, filter.ContainsInt64(-1))
-	require.True(t, filter.ContainsInt64(42))
+	bitmap := decodeBlob(t, blob)
+	require.Equal(t, uint64(2), bitmap.GetCardinality())
+	require.True(t, containsSigned(bitmap, -1))
+	require.True(t, containsSigned(bitmap, 42))
 }
 
 func TestNewRoaringBitmapBlobRejectsUnsupportedMemberTypes(t *testing.T) {
@@ -80,4 +105,73 @@ func TestRoaringBitmapBlobTemplateMarshaling(t *testing.T) {
 	bytesValue, ok := value.GetVal().(*schemapb.TemplateValue_BytesVal)
 	require.True(t, ok, "RoaringBitmapBlob must marshal as native protobuf bytes")
 	require.Equal(t, []byte(blob), bytesValue.BytesVal)
+}
+
+var benchmarkRoaringBitmapBlobSink RoaringBitmapBlob
+
+func makeSignedMembers[T ~int32 | ~int64](n int, shuffled bool) []T {
+	members := make([]T, n)
+	for i := range members {
+		value := i
+		if shuffled {
+			value = (i*2053)%n - n/2
+		}
+		members[i] = T(value)
+	}
+	return members
+}
+
+func roaringBitmapBlobAllocsPerRun(members any) (float64, error) {
+	var err error
+	allocs := testing.AllocsPerRun(20, func() {
+		benchmarkRoaringBitmapBlobSink, err = NewRoaringBitmapBlob(members)
+	})
+	return allocs, err
+}
+
+func TestNewRoaringBitmapBlobNarrowAllocationParity(t *testing.T) {
+	for _, shuffled := range []bool{false, true} {
+		name := "ordered"
+		if shuffled {
+			name = "shuffled"
+		}
+		t.Run(name, func(t *testing.T) {
+			int32Members := makeSignedMembers[int32](4096, shuffled)
+			int64Members := makeSignedMembers[int64](4096, shuffled)
+			int32Allocs, err := roaringBitmapBlobAllocsPerRun(int32Members)
+			require.NoError(t, err)
+			int64Allocs, err := roaringBitmapBlobAllocsPerRun(int64Members)
+			require.NoError(t, err)
+			require.Equal(t, int64Allocs, int32Allocs,
+				"a narrow input must not allocate an intermediate []int64")
+		})
+	}
+}
+
+func benchmarkNewRoaringBitmapBlob(b *testing.B, members any) {
+	b.Helper()
+	blob, err := NewRoaringBitmapBlob(members)
+	if err != nil {
+		b.Fatal(err)
+	}
+	benchmarkRoaringBitmapBlobSink = blob
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		blob, err := NewRoaringBitmapBlob(members)
+		if err != nil {
+			b.Fatal(err)
+		}
+		benchmarkRoaringBitmapBlobSink = blob
+	}
+}
+
+func BenchmarkNewRoaringBitmapBlobInt32Shuffled(b *testing.B) {
+	members := makeSignedMembers[int32](64*1024, true)
+	benchmarkNewRoaringBitmapBlob(b, members)
+}
+
+func BenchmarkNewRoaringBitmapBlobInt64Shuffled(b *testing.B) {
+	members := makeSignedMembers[int64](64*1024, true)
+	benchmarkNewRoaringBitmapBlob(b, members)
 }

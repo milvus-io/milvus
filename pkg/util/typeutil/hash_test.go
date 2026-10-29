@@ -27,6 +27,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 )
 
+var hash32BenchmarkSink uint32
+
 func TestUint64(t *testing.T) {
 	var i int64 = -1
 	u := uint64(i)
@@ -305,6 +307,37 @@ func TestHashKey2PartitionsMatchesLegacyModulo(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, expected, got)
 	})
+}
+
+func BenchmarkHash32Bytes(b *testing.B) {
+	data := []byte("milvus-typeutil-hash-routing-key")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		hash, err := Hash32Bytes(data)
+		assert.NoError(b, err)
+		hash32BenchmarkSink = hash
+	}
+}
+
+func BenchmarkHash32Uint64(b *testing.B) {
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		hash, err := Hash32Uint64(uint64(i))
+		assert.NoError(b, err)
+		hash32BenchmarkSink = hash
+	}
+}
+
+func BenchmarkHash32Int64(b *testing.B) {
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		hash, err := Hash32Int64(int64(i))
+		assert.NoError(b, err)
+		hash32BenchmarkSink = hash
+	}
 }
 
 func TestRearrangePartitionsForPartitionKey(t *testing.T) {

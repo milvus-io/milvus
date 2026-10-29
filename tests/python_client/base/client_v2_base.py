@@ -8,6 +8,11 @@ from base.client_base import Base
 from check.func_check import ResponseChecker
 from common import common_func as cf
 from common import common_type as ct
+from common.compaction_utils import (
+    get_compaction_state_info,
+    wait_for_compaction_completed,
+    wait_for_compaction_eligible_segments,
+)
 from utils.api_request import api_request
 from utils.util_log import test_log as log
 from utils.wrapper import trace
@@ -484,6 +489,10 @@ class TestMilvusClientV2Base(Base):
 
     @trace()
     def drop_collection(self, client, collection_name, check_task=None, check_items=None, **kwargs):
+        # Drops in test bodies do not use Base's collection-cleanup budget.
+        timeout = kwargs.get("timeout")
+        kwargs["timeout"] = TIMEOUT if timeout is None else timeout
+
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([client.drop_collection, collection_name], **kwargs)
         check_result = ResponseChecker(
@@ -623,6 +632,18 @@ class TestMilvusClientV2Base(Base):
             res, func_name, check_task, check_items, check, collection_name=collection_name, **kwargs
         ).run()
         return res, check_result
+
+    def wait_for_compaction_eligible_segments(
+        self, client, collection_name, minimum_segment_count, timeout=30, poll_interval=2
+    ):
+        return wait_for_compaction_eligible_segments(
+            client._get_connection(),
+            collection_name,
+            minimum_segment_count,
+            timeout=timeout,
+            poll_interval=poll_interval,
+            context=client._generate_call_context(),
+        )
 
     @trace()
     def load_partitions(
@@ -868,11 +889,45 @@ class TestMilvusClientV2Base(Base):
 
     def wait_for_compaction_ready(self, client, compact_id, timeout=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
+        handler = client._get_connection()
+        context = client._generate_call_context(**kwargs)
+
+        def get_state(compaction_id, rpc_timeout):
+            return get_compaction_state_info(
+                handler,
+                compaction_id,
+                timeout=rpc_timeout,
+                context=context,
+            )
+
+        return wait_for_compaction_completed(
+            get_state=get_state,
+            compact_id=compact_id,
+            timeout=timeout,
+        )
+
+    def wait_for_schema_version_consistency(self, client, collection_name, timeout=None):
+        """Wait until every eligible sealed segment catches up with the latest collection
+        schema version, i.e. all pending schema-bump backfill is done. Polls the
+        schema_version_consistent_segments / schema_version_total_segments stats emitted
+        by DataCoord through get_collection_stats (present only after a schema-changing
+        DDL; growing and L0 segments are excluded server-side, so flush data that must
+        be counted). Two consecutive consistent polls absorb the DDL -> DataCoord
+        propagation window.
+        """
+        timeout = TIMEOUT if timeout is None else timeout
         start_time = time.time()
+        streak = 0
         while start_time + timeout > time.time():
-            res = self.get_compaction_state(client, compact_id, **kwargs)[0]
-            if res == "Completed":
-                return True
+            stats, _ = self.get_collection_stats(client, collection_name)
+            consistent = stats.get("schema_version_consistent_segments")
+            total = stats.get("schema_version_total_segments")
+            if consistent is not None and total is not None and int(total) > 0 and int(consistent) == int(total):
+                streak += 1
+                if streak >= 2:
+                    return True
+            else:
+                streak = 0
             time.sleep(2)
         return False
 

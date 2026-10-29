@@ -26,7 +26,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// Update applies a composite set of UpdateActions as a single write: each
+// Update applies a composite set of UpdateActions: each
 // action's Entry/Type pair is type-switched into the same kv encoding its
 // dedicated Catalog method uses, accumulated into a txn.Builder, which is
 // then committed via txn.Commit - atomically if the op count fits within

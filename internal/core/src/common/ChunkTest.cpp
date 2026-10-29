@@ -805,6 +805,7 @@ TEST(chunk, test_array) {
                          DataType::ARRAY,
                          DataType::STRING,
                          false,
+                         false,
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
     auto chunk = create_chunk(field_meta, array_vec);
@@ -813,7 +814,7 @@ TEST(chunk, test_array) {
     EXPECT_EQ(views.size(), 1);
     auto& arr = views[0];
     for (size_t i = 0; i < arr.length(); ++i) {
-        auto str = arr.get_data<std::string>(i);
+        auto str = arr.get_data_unchecked<std::string>(i);
         EXPECT_EQ(str, field_string_data.string_data().data(i));
     }
 }
@@ -868,6 +869,7 @@ TEST(chunk, test_null_array) {
                          DataType::ARRAY,
                          DataType::STRING,
                          true,
+                         false,
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
     auto chunk = create_chunk(field_meta, array_vec);
@@ -890,7 +892,7 @@ TEST(chunk, test_null_array) {
             EXPECT_EQ(arr.length(),
                       field_string_data.string_data().data_size());
             for (size_t j = 0; j < arr.length(); j++) {
-                auto str = arr.get_data<std::string>(j);
+                auto str = arr.get_data_unchecked<std::string>(j);
                 EXPECT_EQ(str, field_string_data.string_data().data(j));
             }
         }
@@ -941,6 +943,7 @@ TEST(chunk, test_array_views) {
                          DataType::ARRAY,
                          DataType::STRING,
                          true,
+                         false,
                          std::nullopt);
     arrow::ArrayVector array_vec = read_single_column_batches(rb_reader);
     auto chunk = create_chunk(field_meta, array_vec);
@@ -951,7 +954,7 @@ TEST(chunk, test_array_views) {
         for (auto i = 0; i < array_count; i++) {
             auto& arr = views[i];
             for (size_t j = 0; j < arr.length(); ++j) {
-                auto str = arr.get_data<std::string>(j);
+                auto str = arr.get_data_unchecked<std::string>(j);
                 EXPECT_EQ(str, field_string_data.string_data().data(j));
             }
         }
@@ -964,7 +967,7 @@ TEST(chunk, test_array_views) {
         for (auto i = 0; i < len; i++) {
             auto& arr = views[i];
             for (size_t j = 0; j < arr.length(); ++j) {
-                auto str = arr.get_data<std::string>(j);
+                auto str = arr.get_data_unchecked<std::string>(j);
                 EXPECT_EQ(str, field_string_data.string_data().data(j));
             }
         }

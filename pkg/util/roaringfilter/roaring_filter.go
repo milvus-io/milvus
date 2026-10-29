@@ -14,7 +14,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package roaringfilter implements the exact MRB1 membership-filter envelope.
+// Package roaringfilter validates the exact MRB1 membership-filter envelope.
+// It is the server-side half of the format: the proxy calls Validate on an
+// untrusted client blob before embedding it in a plan. Construction lives in
+// the SDK (client/v3/membership/roaringfilter) and decoding lives in segcore
+// (internal/core/src/common/RoaringMembership.cpp), so neither is exported
+// here.
+//
 // Its body is the portable 64-bit Roaring format implemented by Go Roaring v2
 // and CRoaring C++. Java interoperability is not claimed until independent
 // Java fixtures pass the cross-language suite. Signed values preserve their
@@ -24,9 +30,6 @@ package roaringfilter
 import (
 	"bytes"
 	"encoding/binary"
-	"slices"
-
-	"github.com/RoaringBitmap/roaring/v2/roaring64"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -64,144 +67,17 @@ const (
 
 // ValidationSummary describes a structurally valid MRB1 blob without
 // materializing a roaring64.Bitmap.
+//
+// The proxy discards it today (`_, err := Validate(blob)`). It is kept because
+// the counts are what the cross-module contract test grades the validator
+// against, and because admitted-blob shape is the natural thing to log or meter
+// at the proxy if that is ever wanted.
 type ValidationSummary struct {
 	Cardinality           uint64
 	BodyBytes             uint64
 	HighContainerCount    uint64
 	LowContainerCount     uint64
 	EstimatedDecodedBytes uint64
-}
-
-// Filter is an immutable exact-membership bitmap after construction.
-type Filter struct {
-	bitmap *roaring64.Bitmap
-}
-
-// Build deduplicates members into a portable Roaring64 bitmap and wraps it in
-// an MRB1 envelope.
-func Build(members []int64) ([]byte, error) {
-	var sortedKeys []uint64
-	ascending, highContainerCount, lowContainerCount := memberContainerCounts(members)
-	if !ascending {
-		sortedKeys = make([]uint64, len(members))
-		for i, member := range members {
-			sortedKeys[i] = uint64(member)
-		}
-		slices.Sort(sortedKeys)
-		highContainerCount, lowContainerCount = sortedKeyContainerCounts(sortedKeys)
-	}
-	if _, err := estimateAndCheckDecodedBytes(0, highContainerCount, lowContainerCount); err != nil {
-		return nil, err
-	}
-
-	bitmap := roaring64.New()
-	if len(members) > 0 {
-		// Insert in ascending key order. A Roaring bitmap is a set, so input
-		// order cannot change the result, but roaring64 keeps its high-32
-		// containers in a sorted slice and binary-searches it per inserted
-		// value: an unsorted set spread over many 2^32 buckets makes each new
-		// key an insert into the middle of that slice, which is O(n^2) memmove
-		// overall (measured: 51s for 1M uniformly-random int64, vs 0.2s sorted).
-		//
-		// Ordering is on the two's-complement key, not the signed value: an
-		// int64 slice that is ascending as signed, like {-1, 5}, maps to
-		// {0xffffffffffffffff, 5} and is descending as keys.
-		if ascending {
-			// Already in key order — the common shape for auto-increment ids,
-			// contiguous ranges and sorted query results. Insert in place: each
-			// Add extends the last container or appends a new one, so this is
-			// linear and, unlike the sort path, allocates nothing per member.
-			for _, member := range members {
-				bitmap.Add(uint64(member))
-			}
-		} else {
-			bitmap.AddMany(sortedKeys)
-		}
-	}
-	bitmap.RunOptimize()
-
-	// GetSerializedSizeInBytes is exact for the portable format, so the envelope
-	// can be sized up front and the body written straight into its tail. Going
-	// through ToBytes would allocate a second, equally large buffer and copy it
-	// in, doubling peak footprint for a blob that is already the largest thing
-	// in the request.
-	bodyLen := bitmap.GetSerializedSizeInBytes()
-	if bodyLen > MaxBodyBytes {
-		return nil, merr.WrapErrParameterInvalidMsg(
-			"roaring bitmap body too large: %d bytes, exceeds max %d", bodyLen, MaxBodyBytes)
-	}
-	if _, err := estimateAndCheckDecodedBytes(bodyLen, highContainerCount, lowContainerCount); err != nil {
-		return nil, err
-	}
-
-	blob := make([]byte, HeaderSize+int(bodyLen))
-	copy(blob[0:4], Magic)
-	binary.LittleEndian.PutUint16(blob[4:6], Version)
-	binary.LittleEndian.PutUint16(blob[6:8], FormatPortableRoaring64)
-	binary.LittleEndian.PutUint64(blob[8:16], bitmap.GetCardinality())
-	binary.LittleEndian.PutUint64(blob[16:24], bodyLen)
-	binary.LittleEndian.PutUint64(blob[24:32], 0)
-
-	// A zero-length slice over the envelope's tail: WriteTo appends into the
-	// existing capacity rather than growing a new buffer.
-	body := bytes.NewBuffer(blob[HeaderSize:HeaderSize])
-	written, err := bitmap.WriteTo(body)
-	if err != nil {
-		return nil, merr.WrapErrParameterInvalidMsg("failed to serialize roaring bitmap: %v", err)
-	}
-	if uint64(written) != bodyLen || body.Len() != int(bodyLen) {
-		// Would mean GetSerializedSizeInBytes disagreed with WriteTo, so the
-		// declared body_len no longer describes the bytes. Fail rather than emit
-		// a blob every validator downstream would reject.
-		return nil, merr.WrapErrParameterInvalidMsg(
-			"roaring bitmap serialized %d bytes into a %d-byte body", written, bodyLen)
-	}
-	return blob, nil
-}
-
-// memberContainerCounts reports whether members is already non-decreasing in
-// the unsigned key space and, when it is, counts distinct high-32 children and
-// Roaring32 low containers without allocating. Equal keys are duplicates.
-func memberContainerCounts(members []int64) (bool, uint64, uint64) {
-	if len(members) == 0 {
-		return true, 0, 0
-	}
-	previous := uint64(members[0])
-	highContainerCount := uint64(1)
-	lowContainerCount := uint64(1)
-	for i := 1; i < len(members); i++ {
-		key := uint64(members[i])
-		if key < previous {
-			return false, 0, 0
-		}
-		if key>>32 != previous>>32 {
-			highContainerCount++
-		}
-		if key>>16 != previous>>16 {
-			lowContainerCount++
-		}
-		previous = key
-	}
-	return true, highContainerCount, lowContainerCount
-}
-
-func sortedKeyContainerCounts(keys []uint64) (uint64, uint64) {
-	if len(keys) == 0 {
-		return 0, 0
-	}
-	highContainerCount := uint64(1)
-	lowContainerCount := uint64(1)
-	previous := keys[0]
-	for _, key := range keys[1:] {
-		if key>>32 != previous>>32 {
-			highContainerCount++
-		}
-		if key>>16 != previous>>16 {
-			lowContainerCount++
-		}
-		previous = key
-	}
-	return highContainerCount, lowContainerCount
 }
 
 func prevalidatePortableRoaring64Body(body []byte) error {
@@ -232,25 +108,6 @@ func prevalidatePortableRoaring64Body(body []byte) error {
 			highContainerCount, MaxHighContainerCount)
 	}
 	return nil
-}
-
-func decodePortableRoaring64(body []byte) (bitmap *roaring64.Bitmap, consumed int64, err error) {
-	bitmap = roaring64.New()
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			bitmap = nil
-			consumed = 0
-			err = merr.WrapErrParameterInvalidMsg(
-				"invalid portable roaring64 body: decoder panic: %v", recovered)
-		}
-	}()
-
-	consumed, err = bitmap.ReadFrom(bytes.NewReader(body))
-	if err != nil {
-		return nil, consumed, merr.WrapErrParameterInvalidMsg(
-			"invalid portable roaring64 body: %v", err)
-	}
-	return bitmap, consumed, nil
 }
 
 func validateEnvelope(blob []byte) (uint64, []byte, error) {
@@ -338,37 +195,4 @@ func Validate(blob []byte) (ValidationSummary, error) {
 		LowContainerCount:     wire.lowContainerCount,
 		EstimatedDecodedBytes: estimatedDecodedBytes,
 	}, nil
-}
-
-// Parse validates an MRB1 blob and deserializes its portable Roaring64 body.
-func Parse(blob []byte) (*Filter, error) {
-	summary, err := Validate(blob)
-	if err != nil {
-		return nil, err
-	}
-	body := blob[HeaderSize:]
-	bitmap, consumed, err := decodePortableRoaring64(body)
-	if err != nil {
-		return nil, err
-	}
-	if uint64(consumed) != summary.BodyBytes {
-		return nil, merr.WrapErrParameterInvalidMsg(
-			"portable roaring64 body consumed %d bytes, expected %d", consumed, summary.BodyBytes)
-	}
-	if cardinality := bitmap.GetCardinality(); cardinality != summary.Cardinality {
-		return nil, merr.WrapErrParameterInvalidMsg(
-			"roaring bitmap cardinality %d does not match declared value %d",
-			cardinality, summary.Cardinality)
-	}
-	return &Filter{bitmap: bitmap}, nil
-}
-
-// ContainsInt64 reports exact membership for v.
-func (f *Filter) ContainsInt64(v int64) bool {
-	return f.bitmap.Contains(uint64(v))
-}
-
-// Cardinality returns the number of distinct values in the bitmap.
-func (f *Filter) Cardinality() uint64 {
-	return f.bitmap.GetCardinality()
 }

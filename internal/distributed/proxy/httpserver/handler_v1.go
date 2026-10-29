@@ -44,13 +44,13 @@ import (
 
 var RestRequestInterceptorErr = errors.New("interceptor error placeholder")
 
-func checkAuthorization(ctx context.Context, c *gin.Context, req interface{}) error {
+func (h *HandlersV1) checkAuthorization(ctx context.Context, c *gin.Context, req interface{}) error {
 	username, ok := c.Get(ContextUsername)
 	if !ok || username.(string) == "" {
 		HTTPReturn(c, http.StatusUnauthorized, gin.H{HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 		return RestRequestInterceptorErr
 	}
-	_, authErr := proxy.PrivilegeInterceptor(ctx, req)
+	_, authErr := proxy.PrivilegeInterceptorWithMetaCache(h.metaCache)(ctx, req)
 	if authErr != nil {
 		HTTPReturn(c, http.StatusForbidden, gin.H{HTTPReturnCode: merr.Code(authErr), HTTPReturnMessage: authErr.Error()})
 		return RestRequestInterceptorErr
@@ -64,6 +64,7 @@ type RestRequestInterceptor func(ctx context.Context, ginCtx *gin.Context, req a
 // HandlersV1 handles http requests
 type HandlersV1 struct {
 	proxy        types.ProxyComponent
+	metaCache    func() proxy.Cache
 	interceptors []RestRequestInterceptor
 }
 
@@ -71,13 +72,14 @@ type HandlersV1 struct {
 func NewHandlersV1(proxyComponent types.ProxyComponent) *HandlersV1 {
 	h := &HandlersV1{
 		proxy:        proxyComponent,
+		metaCache:    getProxyMetaCache(proxyComponent),
 		interceptors: []RestRequestInterceptor{},
 	}
 	if proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 		h.interceptors = append(h.interceptors,
 			// authorization
 			func(ctx context.Context, ginCtx *gin.Context, req any, handler func(reqCtx context.Context, req any) (any, error)) (any, error) {
-				err := checkAuthorization(ctx, ginCtx, req)
+				err := h.checkAuthorization(ctx, ginCtx, req)
 				if err != nil {
 					return nil, err
 				}
@@ -111,7 +113,7 @@ func (h *HandlersV1) checkDatabase(ctx context.Context, c *gin.Context, dbName s
 	if dbName == DefaultDbName {
 		return nil
 	}
-	if proxy.CheckDatabase(ctx, dbName) {
+	if proxy.CheckDatabase(ctx, h.metaCache(), dbName) {
 		return nil
 	}
 	response, err := h.proxy.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{})
@@ -135,7 +137,7 @@ func (h *HandlersV1) checkDatabase(ctx context.Context, c *gin.Context, dbName s
 }
 
 func (h *HandlersV1) describeCollection(ctx context.Context, c *gin.Context, dbName string, collectionName string) (*schemapb.CollectionSchema, error) {
-	collSchema, err := proxy.GetCachedCollectionSchema(ctx, dbName, collectionName)
+	collSchema, err := proxy.GetCachedCollectionSchema(ctx, h.metaCache(), dbName, collectionName)
 	if err == nil {
 		return collSchema.CollectionSchema, nil
 	}

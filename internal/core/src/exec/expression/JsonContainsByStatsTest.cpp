@@ -15,7 +15,9 @@
 #include <nlohmann/json.hpp>
 #include <simdjson.h>
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
+#include <future>
 #include <memory>
 #include <string>
 #include <utility>
@@ -24,7 +26,10 @@
 #include "NamedType/named_type_impl.hpp"
 #include "bitset/bitset.h"
 #include "bitset/detail/element_vectorized.h"
+#include "cachinglayer/Manager.h"
+#include "cachinglayer/Translator.h"
 #include "common/Consts.h"
+#include "common/ChunkWriter.h"
 #include "common/FieldData.h"
 #include "common/Json.h"
 #include "common/Schema.h"
@@ -35,13 +40,15 @@
 #include "exec/expression/ExprBatchTestUtils.h"
 #include "exec/expression/TermExpr.h"
 #include "exec/expression/UnaryExpr.h"
+#include "exec/operator/search-groupby/SearchGroupByOperator.h"
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
-#include "index/IndexStats.h"
-#include "index/json_stats/JsonKeyStats.h"
+#include "storage/artifact/ArtifactStats.h"
+#include "segcore/json_stats/JsonKeyStats.h"
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/common/metadata.h"
+#include "mmap/ChunkedColumn.h"
 #include "pb/common.pb.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
@@ -50,6 +57,7 @@
 #include "query/ExecPlanNodeVisitor.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegmentSealed.h"
+#include "segcore/storagev2translator/JsonStatsTranslator.h"
 #include "simdjson/padded_string.h"
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
@@ -60,6 +68,7 @@
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "test_utils/Constants.h"
+#include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/storage_test_utils.h"
 
@@ -110,6 +119,100 @@ struct BuiltJsonStatsIndex {
     std::string stats_base_path;
     milvus_storage::ArrowFileSystemPtr fs;
 };
+
+class CountingJsonStatsTranslator
+    : public segcore::storagev2translator::JsonStatsTranslator {
+ public:
+    using JsonStatsTranslator::JsonStatsTranslator;
+
+    std::vector<
+        std::pair<cachinglayer::cid_t, std::unique_ptr<index::JsonKeyStats>>>
+    get_cells(milvus::OpContext* ctx,
+              const std::vector<cachinglayer::cid_t>& cids) override {
+        load_count_.fetch_add(1, std::memory_order_relaxed);
+        return JsonStatsTranslator::get_cells(ctx, cids);
+    }
+
+    int64_t
+    LoadCount() const {
+        return load_count_.load(std::memory_order_relaxed);
+    }
+
+ private:
+    std::atomic<int64_t> load_count_{0};
+};
+
+class TestJsonStatsTranslator
+    : public cachinglayer::Translator<index::JsonKeyStats> {
+ public:
+    explicit TestJsonStatsTranslator(std::unique_ptr<index::JsonKeyStats> stats)
+        : stats_(std::move(stats)),
+          key_(fmt::format("test_json_stats_{}",
+                           segcore::NextSegmentInstanceUid())),
+          meta_(cachinglayer::StorageType::MEMORY,
+                cachinglayer::CellIdMappingMode::ALWAYS_ZERO,
+                cachinglayer::CellDataType::SCALAR_INDEX,
+                CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                /* support_eviction */ false) {
+    }
+
+    size_t
+    num_cells() const override {
+        return 1;
+    }
+
+    cachinglayer::cid_t
+    cell_id_of(cachinglayer::uid_t) const override {
+        return 0;
+    }
+
+    std::pair<cachinglayer::ResourceUsage, cachinglayer::ResourceUsage>
+    estimated_byte_size_of_cell(cachinglayer::cid_t) const override {
+        return {{0, 0}, {0, 0}};
+    }
+
+    int64_t
+    cells_storage_bytes(
+        const std::vector<cachinglayer::cid_t>&) const override {
+        return 0;
+    }
+
+    const std::string&
+    key() const override {
+        return key_;
+    }
+
+    std::vector<
+        std::pair<cachinglayer::cid_t, std::unique_ptr<index::JsonKeyStats>>>
+    get_cells(milvus::OpContext*,
+              const std::vector<cachinglayer::cid_t>& cids) override {
+        AssertInfo(cids.size() == 1 && cids.front() == 0 && stats_ != nullptr,
+                   "test JSON stats translator requires one available cell");
+        std::vector<std::pair<cachinglayer::cid_t,
+                              std::unique_ptr<index::JsonKeyStats>>>
+            result;
+        result.emplace_back(0, std::move(stats_));
+        return result;
+    }
+
+    cachinglayer::Meta*
+    meta() override {
+        return &meta_;
+    }
+
+ private:
+    std::unique_ptr<index::JsonKeyStats> stats_;
+    std::string key_;
+    cachinglayer::Meta meta_;
+};
+
+std::shared_ptr<cachinglayer::CacheSlot<index::JsonKeyStats>>
+MakeTestJsonStatsSlot(std::unique_ptr<index::JsonKeyStats> stats) {
+    std::unique_ptr<cachinglayer::Translator<index::JsonKeyStats>> translator =
+        std::make_unique<TestJsonStatsTranslator>(std::move(stats));
+    return cachinglayer::Manager::GetInstance().CreateCacheSlot(
+        std::move(translator));
+}
 
 BuiltJsonStatsIndex
 BuildJsonStatsIndex(const std::vector<std::string>& json_strings,
@@ -180,8 +283,12 @@ BuildJsonStatsIndex(const std::vector<std::string>& json_strings,
     auto builder = std::make_shared<JsonKeyStats>(ctx, false);
     builder->Build(build_config);
 
-    auto create_index_result = builder->Upload(build_config);
-    auto index_files = create_index_result->GetIndexFiles();
+    const auto create_index_result = builder->Upload(build_config);
+    std::vector<std::string> index_files;
+    index_files.reserve(create_index_result.Files().size());
+    for (const auto& file : create_index_result.Files()) {
+        index_files.push_back(file.file_name);
+    }
 
     Config load_config;
     load_config["index_files"] = index_files;
@@ -203,14 +310,55 @@ BuildJsonStatsIndex(const std::vector<std::string>& json_strings,
                                std::move(fs)};
 }
 
-std::shared_ptr<JsonKeyStats>
+struct CountedJsonStatsSlot {
+    std::shared_ptr<cachinglayer::CacheSlot<index::JsonKeyStats>> slot;
+    const CountingJsonStatsTranslator* translator;  // Owned by slot.
+};
+
+CountedJsonStatsSlot
+MakeCountedJsonStatsSlot(const BuiltJsonStatsIndex& built_index,
+                         const FieldId field_id,
+                         std::string warmup_policy = "disable") {
+    const auto& field_meta = built_index.ctx.fieldDataMeta;
+    const auto& index_meta = built_index.ctx.indexMeta;
+    auto info = std::make_shared<proto::indexcgo::LoadJsonKeyIndexInfo>();
+    info->set_collectionid(field_meta.collection_id);
+    info->set_partitionid(field_meta.partition_id);
+    info->set_fieldid(field_id.get());
+    info->set_buildid(index_meta.build_id);
+    info->set_version(index_meta.index_version);
+    *info->mutable_schema() = field_meta.field_schema;
+    for (const auto& file : built_index.index_files) {
+        info->add_files(file);
+    }
+    info->set_load_priority(built_index.load_config.at(milvus::LOAD_PRIORITY)
+                                .get<proto::common::LoadPriority>());
+    info->set_base_path(built_index.stats_base_path);
+    info->set_warmup_policy(warmup_policy);
+    segcore::storagev2translator::JsonStatsLoadInfo load_info{
+        segcore::NextSegmentInstanceUid(),
+        field_meta.segment_id,
+        "json-stats-test-shard"};
+    auto translator = std::make_unique<CountingJsonStatsTranslator>(
+        std::move(load_info),
+        std::move(info),
+        built_index.ctx.chunkManagerPtr,
+        built_index.ctx.fs);
+    auto* counted_translator = translator.get();
+    auto slot =
+        cachinglayer::Manager::GetInstance()
+            .CreateCacheSlot<index::JsonKeyStats>(std::move(translator));
+    return {std::move(slot), counted_translator};
+}
+
+std::unique_ptr<JsonKeyStats>
 LoadBuiltJsonStatsIndex(const BuiltJsonStatsIndex& built_index) {
-    auto reader = std::make_shared<JsonKeyStats>(built_index.ctx, true);
+    auto reader = std::make_unique<JsonKeyStats>(built_index.ctx, true);
     reader->Load(milvus::tracer::TraceContext{}, built_index.load_config);
     return reader;
 }
 
-std::shared_ptr<JsonKeyStats>
+std::unique_ptr<JsonKeyStats>
 BuildAndLoadJsonKeyStats(const std::vector<std::string>& json_strings,
                          const milvus::FieldId json_fid,
                          const std::string& root_path,
@@ -466,6 +614,128 @@ AssertJsonStatsProjectionMode(const std::string& warmup_policy,
 
 }  // namespace
 
+TEST(JsonStatsLazyInitializationTest,
+     InitialSegmentLoadDoesNotTouchUnusedStatsFiles) {
+    proto::schema::CollectionSchema schema_proto;
+    auto* pk_field = schema_proto.add_fields();
+    pk_field->set_fieldid(START_USER_FIELDID);
+    pk_field->set_name("pk");
+    pk_field->set_data_type(proto::schema::DataType::Int64);
+    pk_field->set_is_primary_key(true);
+    auto* json_field_schema = schema_proto.add_fields();
+    json_field_schema->set_fieldid(START_USER_FIELDID + 1);
+    json_field_schema->set_name("json");
+    json_field_schema->set_data_type(proto::schema::DataType::JSON);
+    auto* columns_policy = schema_proto.add_properties();
+    columns_policy->set_key(WARMUP_SCALAR_FIELD_KEY);
+    columns_policy->set_value("disable");
+    auto* bson_policy = schema_proto.add_properties();
+    bson_policy->set_key(WARMUP_SCALAR_INDEX_KEY);
+    bson_policy->set_value("disable");
+    auto schema = Schema::ParseFrom(schema_proto);
+    const auto pk_fid = FieldId(START_USER_FIELDID);
+    const auto json_fid = FieldId(START_USER_FIELDID + 1);
+    constexpr int64_t kSegmentId = 3415;
+    auto segment =
+        segcore::CreateSealedSegment(schema, empty_index_meta, kSegmentId);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_collectionid(1415);
+    load_info.set_partitionid(2415);
+    load_info.set_segmentid(kSegmentId);
+    load_info.set_num_of_rows(1);
+    load_info.set_insert_channel("json-stats-test-channel");
+    load_info.set_priority(proto::common::LoadPriority::HIGH);
+    auto& stats = (*load_info.mutable_jsonkeystatslogs())[json_fid.get()];
+    stats.set_fieldid(json_fid.get());
+    stats.set_buildid(5416);
+    stats.set_version(1);
+    stats.set_log_size(1024);
+    stats.set_memory_size(1024);
+    stats.set_json_key_stats_data_format(
+        std::stoll(JSON_STATS_DATA_FORMAT_VERSION));
+    stats.set_base_path(TestLocalPath +
+                        "json-stats-initial-load-must-not-be-read");
+    stats.add_files(JSON_STATS_META_FILE_NAME);
+    stats.add_files(std::string(JSON_STATS_SHREDDING_DATA_PATH) + "/0/0");
+
+    auto pk_data =
+        storage::CreateFieldData(DataType::INT64, DataType::NONE, false, 1, 1);
+    const int64_t pk_value = 1;
+    pk_data->FillFieldData(&pk_value, 1);
+    auto remote_chunk_manager =
+        storage::RemoteChunkManagerSingleton::GetInstance()
+            .GetRemoteChunkManager();
+    auto pk_load_info = PrepareSingleFieldInsertBinlog(
+        1415, 2415, kSegmentId, pk_fid.get(), {pk_data}, remote_chunk_manager);
+    for (const auto& [field_id, field_info] : pk_load_info.field_infos) {
+        auto* binlog = load_info.add_binlog_paths();
+        binlog->set_fieldid(field_id);
+        for (size_t i = 0; i < field_info.insert_files.size(); ++i) {
+            auto* log = binlog->add_binlogs();
+            log->set_log_path(field_info.insert_files[i]);
+            log->set_entries_num(field_info.entries_nums[i]);
+            log->set_log_size(field_info.memory_sizes[i]);
+        }
+    }
+    sealed->SetLoadInfo(load_info);
+    milvus::tracer::TraceContext trace_ctx;
+    milvus::OpContext op_ctx;
+    ASSERT_NO_THROW(sealed->Load(trace_ctx, &op_ctx));
+    EXPECT_TRUE(segment->HasJsonStats(json_fid));
+}
+
+TEST(JsonStatsLazyInitializationTest, ConcurrentFirstUseSharesInitialization) {
+    auto schema = std::make_shared<Schema>();
+    auto json_fid = schema->AddDebugField("json", DataType::JSON);
+    auto built_index =
+        BuildJsonStatsIndex({R"({"a": 1})", R"({"a": 2})", R"({"a": 1})"},
+                            json_fid,
+                            TestLocalPath,
+                            1403,
+                            2403,
+                            3403,
+                            json_fid.get(),
+                            5403,
+                            1);
+    auto counted = MakeCountedJsonStatsSlot(built_index, json_fid);
+    auto segment = segcore::CreateSealedSegment(schema);
+    auto* sealed =
+        dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    sealed->SetJsonStatsForTesting(json_fid, counted.slot);
+
+    constexpr size_t kConcurrency = 8;
+    std::promise<void> start_promise;
+    auto start = start_promise.get_future().share();
+    std::vector<std::future<std::shared_ptr<JsonKeyStats>>> futures;
+    futures.reserve(kConcurrency);
+    for (size_t i = 0; i < kConcurrency; ++i) {
+        futures.push_back(
+            std::async(std::launch::async, [&segment, json_fid, start] {
+                start.wait();
+                return segment->GetJsonStats(nullptr, json_fid);
+            }));
+    }
+    start_promise.set_value();
+
+    std::vector<std::shared_ptr<JsonKeyStats>> results;
+    results.reserve(kConcurrency);
+    for (auto& future : futures) {
+        results.push_back(future.get());
+    }
+    ASSERT_NE(results.front(), nullptr);
+    for (const auto& result : results) {
+        EXPECT_EQ(result.get(), results.front().get());
+    }
+    EXPECT_EQ(counted.translator->LoadCount(), 1);
+
+    auto field = results.front()->GetShreddingField("/a", JSONType::INT64);
+    ASSERT_FALSE(field.empty());
+}
+
 TEST(JsonContainsByStatsTest, BasicContainsAnyOnArray) {
     auto schema = std::make_shared<Schema>();
     auto json_fid = schema->AddDebugField("json", DataType::JSON);
@@ -522,7 +792,8 @@ TEST(JsonContainsByStatsTest, BasicContainsAnyOnArray) {
     auto* sealed =
         dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(sealed, nullptr);
-    sealed->SetJsonStatsForTesting(json_fid, stats);
+    sealed->SetJsonStatsForTesting(json_fid,
+                                   MakeTestJsonStatsSlot(std::move(stats)));
 
     // Load raw field data into sealed segment for execution
     std::vector<milvus::Json> jsons;
@@ -715,7 +986,8 @@ TEST(JsonStatsUnaryRangeTest, NotEqualKeepsJsonPathUnknownsAndMasksFieldNull) {
     auto* sealed =
         dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(sealed, nullptr);
-    sealed->SetJsonStatsForTesting(json_fid, stats);
+    sealed->SetJsonStatsForTesting(json_fid,
+                                   MakeTestJsonStatsSlot(std::move(stats)));
 
     auto json_field =
         std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
@@ -762,21 +1034,23 @@ TEST(JsonStatsUnaryRangeTest, UsesStatsValidityWithoutReadingRawJsonValidity) {
         R"({"a": 1})",
     };
 
-    auto stats = BuildAndLoadJsonKeyStats(json_raw_data,
-                                          json_fid,
-                                          TestLocalPath,
-                                          1102,
-                                          2102,
-                                          3102,
-                                          json_fid.get(),
-                                          5102,
-                                          1);
-    ASSERT_FALSE(stats->GetShreddingField("/a", JSONType::INT64).empty());
+    auto built_index = BuildJsonStatsIndex(json_raw_data,
+                                           json_fid,
+                                           TestLocalPath,
+                                           1102,
+                                           2102,
+                                           3102,
+                                           json_fid.get(),
+                                           5102,
+                                           1);
+    auto counted = MakeCountedJsonStatsSlot(built_index, json_fid);
 
     auto* sealed =
         dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(sealed, nullptr);
-    sealed->SetJsonStatsForTesting(json_fid, stats);
+    sealed->SetJsonStatsForTesting(json_fid, counted.slot);
+    ASSERT_EQ(counted.translator->LoadCount(), 0);
+    ASSERT_FALSE(counted.slot->IsCached(0));
 
     // Deliberately make raw top-level JSON validity disagree with the stats.
     // The stats path must rely on shredding/shared validity only; otherwise row
@@ -792,6 +1066,7 @@ TEST(JsonStatsUnaryRangeTest, UsesStatsValidityWithoutReadingRawJsonValidity) {
     auto load_info = PrepareSingleFieldInsertBinlog(
         0, 0, 0, json_fid.get(), {json_field}, cm);
     segment->LoadFieldData(load_info);
+    ASSERT_EQ(counted.translator->LoadCount(), 0);
 
     proto::plan::GenericValue val;
     val.set_int64_val(1);
@@ -800,10 +1075,16 @@ TEST(JsonStatsUnaryRangeTest, UsesStatsValidityWithoutReadingRawJsonValidity) {
         proto::plan::OpType::Equal,
         val,
         std::vector<proto::plan::GenericValue>());
+    ASSERT_TRUE(milvus::test::CanExprExecuteAllAtOnce(
+        unary_expr, segment.get(), json_raw_data.size()));
+    ASSERT_EQ(counted.translator->LoadCount(), 0);
+
     auto plan =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, unary_expr);
     auto result = milvus::test::gen_filter_res(
         plan.get(), segment.get(), json_raw_data.size(), MAX_TIMESTAMP);
+    EXPECT_TRUE(counted.slot->IsCached(0));
+    EXPECT_EQ(counted.translator->LoadCount(), 1);
 
     TargetBitmapView result_view(result->GetRawData(), result->size());
     TargetBitmapView valid_view(result->GetValidRawData(), result->size());
@@ -817,6 +1098,11 @@ TEST(JsonStatsUnaryRangeTest, UsesStatsValidityWithoutReadingRawJsonValidity) {
     EXPECT_FALSE(result_view[2]);
     EXPECT_TRUE(valid_view[3]);
     EXPECT_TRUE(result_view[3]);
+
+    auto reused_result = milvus::test::gen_filter_res(
+        plan.get(), segment.get(), json_raw_data.size(), MAX_TIMESTAMP);
+    ASSERT_EQ(reused_result->size(), result->size());
+    EXPECT_EQ(counted.translator->LoadCount(), 1);
 }
 
 TEST(JsonStatsThreeValuedAuditTest,
@@ -848,7 +1134,8 @@ TEST(JsonStatsThreeValuedAuditTest,
     auto* sealed =
         dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(sealed, nullptr);
-    sealed->SetJsonStatsForTesting(json_fid, stats);
+    sealed->SetJsonStatsForTesting(json_fid,
+                                   MakeTestJsonStatsSlot(std::move(stats)));
 
     auto json_field =
         std::make_shared<FieldData<milvus::Json>>(DataType::JSON, true);
@@ -974,7 +1261,8 @@ TEST(JsonStatsBinaryRangeTest, ShreddingMatchesRawData) {
     auto* sealed =
         dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(stats_segment.get());
     ASSERT_NE(sealed, nullptr);
-    sealed->SetJsonStatsForTesting(json_fid, stats);
+    sealed->SetJsonStatsForTesting(json_fid,
+                                   MakeTestJsonStatsSlot(std::move(stats)));
     auto raw_segment = segcore::CreateSealedSegment(schema);
 
     auto make_json_field = [&] {
@@ -1131,7 +1419,8 @@ TEST(JsonStatsThreeValuedAuditTest,
     auto* sealed =
         dynamic_cast<segcore::ChunkedSegmentSealedImpl*>(segment.get());
     ASSERT_NE(sealed, nullptr);
-    sealed->SetJsonStatsForTesting(json_fid, stats);
+    sealed->SetJsonStatsForTesting(json_fid,
+                                   MakeTestJsonStatsSlot(std::move(stats)));
 
     std::vector<milvus::Json> jsons;
     jsons.reserve(json_raw_data.size());
@@ -1188,4 +1477,152 @@ TEST(JsonStatsThreeValuedAuditTest,
                 true,
                 std::vector<proto::plan::GenericValue>{value})));
     }
+}
+
+namespace {
+class ShreddedOnlyGroupByColumn : public ChunkedVariableColumn<Json> {
+ public:
+    using ChunkedVariableColumn<Json>::ChunkedVariableColumn;
+
+    PinWrapper<Chunk*>
+    GetChunk(milvus::OpContext*, int64_t) const override {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "valid shredded group-by must not access raw JSON");
+    }
+};
+
+class ShreddedOnlyGroupBySegment : public segcore::ChunkedSegmentSealedImpl {
+ public:
+    ShreddedOnlyGroupBySegment(SchemaPtr schema,
+                               std::shared_ptr<JsonKeyStats> stats,
+                               FieldId field,
+                               std::shared_ptr<ChunkedColumnInterface> column)
+        : ChunkedSegmentSealedImpl(schema,
+                                   empty_index_meta,
+                                   segcore::SegcoreConfig::default_config(),
+                                   66),
+          stats_(std::move(stats)),
+          field_(field),
+          column_(std::move(column)) {
+    }
+
+    bool
+    HasFieldData(FieldId field) const override {
+        return field == field_;
+    }
+
+    int64_t
+    get_row_count() const override {
+        return stats_->Count();
+    }
+
+    std::shared_ptr<JsonKeyStats>
+    GetJsonStats(milvus::OpContext*, FieldId) const override {
+        return stats_;
+    }
+
+    std::shared_ptr<ChunkedColumnInterface>
+    GetChunkedColumn(FieldId field) const override {
+        return field == field_ ? column_ : nullptr;
+    }
+
+ private:
+    std::shared_ptr<JsonKeyStats> stats_;
+    FieldId field_;
+    std::shared_ptr<ChunkedColumnInterface> column_;
+};
+}  // namespace
+
+TEST(JsonContainsByStatsTest, GroupByScalarReadersSurviveBuildUploadLoad) {
+    auto schema = std::make_shared<Schema>();
+    auto field = schema->AddDebugField("json", DataType::JSON);
+    const std::vector<std::string> documents{
+        R"({"s":"one","n":9223372036854775807,"b":true,"":{"a/b":{"~key":"x"}}})",
+        R"({"s":"two\n\u4e2d","n":-9223372036854775808,"b":false,"":{"a/b":{"~key":"y"}}})",
+        R"({"s":"one","n":-17,"b":true,"":{"a/b":{"~key":"x"}}})",
+    };
+    auto stats = BuildAndLoadJsonKeyStats(documents,
+                                          field,
+                                          TestLocalPath,
+                                          1266,
+                                          2266,
+                                          3266,
+                                          field.get(),
+                                          5266,
+                                          1);
+    arrow::BinaryBuilder builder;
+    for (const auto& document : documents) {
+        ASSERT_TRUE(builder.Append(document).ok());
+    }
+    std::shared_ptr<arrow::Array> array;
+    ASSERT_TRUE(builder.Finish(&array).ok());
+    std::vector<std::unique_ptr<Chunk>> chunks;
+    chunks.push_back(create_chunk((*schema)[field], {array}, false));
+    auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
+        std::make_unique<TestChunkTranslator>(
+            std::vector<int64_t>{static_cast<int64_t>(documents.size())},
+            "shredded_group_by",
+            std::move(chunks)),
+        nullptr);
+    auto column = std::make_shared<ShreddedOnlyGroupByColumn>(std::move(slot),
+                                                              (*schema)[field]);
+    ShreddedOnlyGroupBySegment segment(
+        schema, std::move(stats), field, std::move(column));
+    auto strings = exec::GetDataGetter<std::string, Json>(
+        nullptr, segment, field, "/s", DataType::VARCHAR);
+    auto integers = exec::GetDataGetter<int64_t, Json>(
+        nullptr, segment, field, "/n", DataType::INT64);
+    auto booleans = exec::GetDataGetter<bool, Json>(
+        nullptr, segment, field, "/b", DataType::BOOL);
+    auto nested = exec::GetDataGetter<std::string, Json>(
+        nullptr, segment, field, "//a~1b/~0key", DataType::VARCHAR);
+    std::map<std::string, int> groups;
+    for (auto row : {2, 0, 1, 0}) {
+        Json raw{simdjson::padded_string(documents[row])};
+        EXPECT_EQ(strings->Get(row), raw.at<std::string_view>("/s").value());
+        EXPECT_EQ(integers->Get(row), raw.at<int64_t>("/n").value());
+        EXPECT_EQ(booleans->Get(row), raw.at<bool>("/b").value());
+        EXPECT_EQ(nested->Get(row),
+                  raw.at<std::string_view>("//a~1b/~0key").value());
+        ++groups[strings->Get(row).value()];
+    }
+    EXPECT_EQ(groups["one"], 3);
+    EXPECT_EQ(groups["two\n中"], 1);
+    EXPECT_EQ((exec::GetDataGetter<int8_t, Json>(
+                   nullptr, segment, field, "/n", DataType::INT8)
+                   ->Get(2)),
+              -17);
+    EXPECT_EQ((exec::GetDataGetter<int16_t, Json>(
+                   nullptr, segment, field, "/n", DataType::INT16)
+                   ->Get(2)),
+              -17);
+    EXPECT_EQ((exec::GetDataGetter<int32_t, Json>(
+                   nullptr, segment, field, "/n", DataType::INT32)
+                   ->Get(2)),
+              -17);
+}
+
+TEST(JsonContainsByStatsTest, GroupByReaderRetainsEmptyStringRawFallback) {
+    auto schema = std::make_shared<Schema>();
+    auto field = schema->AddDebugField("json", DataType::JSON);
+    const std::vector<std::string> documents{
+        R"({"s":""})", R"({"s":"value"})", R"({"s":null})", R"({})"};
+    auto stats = BuildAndLoadJsonKeyStats(documents,
+                                          field,
+                                          TestLocalPath,
+                                          1267,
+                                          2267,
+                                          3267,
+                                          field.get(),
+                                          5267,
+                                          1);
+    auto reader = stats->CreateShreddingReader("/s", JSONType::STRING, 4);
+    ASSERT_NE(reader, nullptr);
+    EXPECT_FALSE(reader->Get(nullptr, 0).has_value());
+    ASSERT_TRUE(reader->Get(nullptr, 1).has_value());
+    EXPECT_EQ(std::get<std::string>(*reader->Get(nullptr, 1)), "value");
+    EXPECT_FALSE(reader->Get(nullptr, 2).has_value());
+    EXPECT_FALSE(reader->Get(nullptr, 3).has_value());
+    Json raw{simdjson::padded_string(documents[0])};
+    EXPECT_EQ(raw.at<std::string_view>("/s").value(), "");
 }

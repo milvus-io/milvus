@@ -41,6 +41,7 @@ const (
 	WALChannelTermLabelName               = "term"
 	WALNameLabelName                      = "wal_name"
 	WALTxnTypeLabelName                   = "txn_type"
+	WALVChannelLabelName                  = "vchannel"
 	StatusLabelName                       = statusLabelName
 	StreamingNodeLabelName                = "streaming_node"
 	NodeIDLabelName                       = nodeIDLabelName
@@ -480,6 +481,11 @@ var (
 		Help: "Current info of recovery storage on current wal",
 	}, WALChannelLabelName, WALChannelTermLabelName, WALRecoveryStorageStateLabelName)
 
+	WALRecoveryObservedTimeTick = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "recovery_observed_time_tick",
+		Help: "the latest timetick observed by recovery storage",
+	}, WALChannelLabelName, WALChannelTermLabelName)
+
 	WALRecoveryInMemTimeTick = newWALGaugeVec(prometheus.GaugeOpts{
 		Name: "recovery_in_mem_time_tick",
 		Help: "the final timetick tick of recovery storage seen",
@@ -488,6 +494,21 @@ var (
 	WALRecoveryPersistedTimeTick = newWALGaugeVec(prometheus.GaugeOpts{
 		Name: "recovery_persisted_time_tick",
 		Help: "the final persisted timetick tick of recovery storage seen",
+	}, WALChannelLabelName, WALChannelTermLabelName)
+
+	WALRecoveryTailBytes = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "recovery_tail_bytes",
+		Help: "Logical bytes observed after the catalog-published recovery checkpoint",
+	}, WALChannelLabelName, WALChannelTermLabelName)
+
+	WALRecoveryBlockingBytes = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "recovery_blocking_bytes",
+		Help: "Logical bytes observed after the continuous completed recovery frontier",
+	}, WALChannelLabelName, WALChannelTermLabelName)
+
+	WALRecoveryPublishLagBytes = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "recovery_publish_lag_bytes",
+		Help: "Logical bytes completed after the catalog-published recovery checkpoint",
 	}, WALChannelLabelName, WALChannelTermLabelName)
 
 	WALRecoveryInconsistentEventTotal = newWALCounterVec(prometheus.CounterOpts{
@@ -499,6 +520,34 @@ var (
 		Name: "recovery_is_on_persisting",
 		Help: "Is recovery storage on persisting",
 	}, WALChannelLabelName, WALChannelTermLabelName)
+
+	// vchannel already encodes its pchannel, so these per-vchannel idempotency
+	// window metrics intentionally carry only node_id + vchannel (no redundant
+	// pchannel label). The interceptor deletes a vchannel's series on Close.
+	WALIdempotencyWindowEntries = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "idempotency_window_entries",
+		Help: "Current retained idempotency key entries in idempotency window",
+	}, WALVChannelLabelName)
+
+	WALIdempotencyWindowInflight = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "idempotency_window_inflight",
+		Help: "Current inflight idempotency key entries in idempotency window",
+	}, WALVChannelLabelName)
+
+	WALIdempotencyDuplicateTotal = newWALCounterVec(prometheus.CounterOpts{
+		Name: "idempotency_duplicate_total",
+		Help: "Total duplicate idempotent write hits",
+	}, WALVChannelLabelName)
+
+	WALIdempotencyEvictionTotal = newWALCounterVec(prometheus.CounterOpts{
+		Name: "idempotency_eviction_total",
+		Help: "Total idempotency key entries evicted from idempotency windows",
+	}, WALVChannelLabelName)
+
+	WALIdempotencyReaderDedupDropTotal = newWALCounterVec(prometheus.CounterOpts{
+		Name: "idempotency_reader_physical_dedup_drop_total",
+		Help: "Total physically duplicated non-timetick messages dropped by reader reorder buffer",
+	}, WALChannelLabelName, WALScannerModelLabelName)
 
 	WALDelegatorEmptyTimeTickFilteredTotal = newWALCounterVec(prometheus.CounterOpts{
 		Name: "delegator_empty_time_tick_filtered_total",
@@ -701,10 +750,19 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALFlusherInfo)
 	registry.MustRegister(WALFlusherTimeTick)
 	registry.MustRegister(WALRecoveryInfo)
+	registry.MustRegister(WALRecoveryObservedTimeTick)
 	registry.MustRegister(WALRecoveryInMemTimeTick)
 	registry.MustRegister(WALRecoveryPersistedTimeTick)
+	registry.MustRegister(WALRecoveryTailBytes)
+	registry.MustRegister(WALRecoveryBlockingBytes)
+	registry.MustRegister(WALRecoveryPublishLagBytes)
 	registry.MustRegister(WALRecoveryInconsistentEventTotal)
 	registry.MustRegister(WALRecoveryIsOnPersisting)
+	registry.MustRegister(WALIdempotencyWindowEntries)
+	registry.MustRegister(WALIdempotencyWindowInflight)
+	registry.MustRegister(WALIdempotencyDuplicateTotal)
+	registry.MustRegister(WALIdempotencyEvictionTotal)
+	registry.MustRegister(WALIdempotencyReaderDedupDropTotal)
 	registry.MustRegister(WALDelegatorEmptyTimeTickFilteredTotal)
 	registry.MustRegister(WALDelegatorTsafeTimeTickUnfilteredTotal)
 	registry.MustRegister(WALFlusherEmptyTimeTickFilteredTotal)

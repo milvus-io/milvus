@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -29,7 +30,233 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestRetrieveSegment(t *testing.T) {
+	segment := func(id int64, state commonpb.SegmentState, parents ...int64) *SegmentInfo {
+		return NewSegmentInfo(&datapb.SegmentInfo{
+			ID:             id,
+			State:          state,
+			CompactionFrom: parents,
+		})
+	}
+
+	t.Run("all direct parents indexed", func(t *testing.T) {
+		segments := map[int64]*SegmentInfo{
+			1: segment(1, commonpb.SegmentState_Dropped),
+			2: segment(2, commonpb.SegmentState_Dropped),
+			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
+		}
+		indexed := typeutil.NewUniqueSet(1, 2)
+		flushed, dropped := retrieveSegment(
+			segments,
+			typeutil.NewUniqueSet(3),
+			typeutil.NewUniqueSet(1, 2),
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+		)
+
+		assert.ElementsMatch(t, []int64{1, 2}, flushed.Collect())
+		assert.Empty(t, dropped.Collect())
+	})
+
+	t.Run("one direct parent unindexed", func(t *testing.T) {
+		segments := map[int64]*SegmentInfo{
+			1: segment(1, commonpb.SegmentState_Dropped),
+			2: segment(2, commonpb.SegmentState_Dropped),
+			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
+		}
+		indexed := typeutil.NewUniqueSet(1)
+		flushed, dropped := retrieveSegment(
+			segments,
+			typeutil.NewUniqueSet(3),
+			typeutil.NewUniqueSet(1, 2),
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+		)
+
+		assert.Equal(t, []int64{3}, flushed.Collect())
+		assert.ElementsMatch(t, []int64{1, 2}, dropped.Collect())
+	})
+
+	t.Run("does not walk to indexed grandparent", func(t *testing.T) {
+		segments := map[int64]*SegmentInfo{
+			1: segment(1, commonpb.SegmentState_Dropped),
+			2: segment(2, commonpb.SegmentState_Dropped, 1),
+			3: segment(3, commonpb.SegmentState_Flushed, 2),
+		}
+		indexed := typeutil.NewUniqueSet(1)
+		flushed, dropped := retrieveSegment(
+			segments,
+			typeutil.NewUniqueSet(3),
+			typeutil.NewUniqueSet(1, 2),
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+		)
+
+		assert.Equal(t, []int64{3}, flushed.Collect())
+		assert.ElementsMatch(t, []int64{1, 2}, dropped.Collect())
+	})
+
+	t.Run("indexed child wins", func(t *testing.T) {
+		segments := map[int64]*SegmentInfo{
+			1: segment(1, commonpb.SegmentState_Dropped),
+			2: segment(2, commonpb.SegmentState_Flushed, 1),
+		}
+		indexed := typeutil.NewUniqueSet(1, 2)
+		flushed, dropped := retrieveSegment(
+			segments,
+			typeutil.NewUniqueSet(2),
+			typeutil.NewUniqueSet(1),
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+		)
+
+		assert.Equal(t, []int64{2}, flushed.Collect())
+		assert.Equal(t, []int64{1}, dropped.Collect())
+	})
+
+	t.Run("keeps compactFrom before retirement starts", func(t *testing.T) {
+		segments := map[int64]*SegmentInfo{
+			1: segment(1, commonpb.SegmentState_Flushed),
+			2: segment(2, commonpb.SegmentState_Flushed),
+			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
+			4: segment(4, commonpb.SegmentState_Flushed, 1, 2),
+		}
+		flushed, dropped := retrieveSegment(
+			segments,
+			typeutil.NewUniqueSet(1, 2, 3, 4),
+			make(typeutil.UniqueSet),
+			func(UniqueID) bool { return true },
+			func(UniqueID) bool { return true },
+		)
+
+		assert.ElementsMatch(t, []int64{1, 2}, flushed.Collect())
+		assert.Empty(t, dropped.Collect())
+	})
+
+	t.Run("keeps compactTo after retirement starts", func(t *testing.T) {
+		segments := map[int64]*SegmentInfo{
+			1: segment(1, commonpb.SegmentState_Flushed),
+			2: segment(2, commonpb.SegmentState_Dropped),
+			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
+			4: segment(4, commonpb.SegmentState_Flushed, 1, 2),
+		}
+		flushed, dropped := retrieveSegment(
+			segments,
+			typeutil.NewUniqueSet(1, 3, 4),
+			typeutil.NewUniqueSet(2),
+			func(UniqueID) bool { return true },
+			func(UniqueID) bool { return true },
+		)
+
+		assert.ElementsMatch(t, []int64{3, 4}, flushed.Collect())
+		assert.Equal(t, []int64{2}, dropped.Collect())
+	})
+
+	t.Run("deduplicates candidates from an immutable snapshot", func(t *testing.T) {
+		segments := map[int64]*SegmentInfo{
+			1: segment(1, commonpb.SegmentState_Flushed),
+			2: segment(2, commonpb.SegmentState_Flushed),
+			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
+			4: segment(4, commonpb.SegmentState_Flushed, 3),
+		}
+		flushed, _ := retrieveSegment(
+			segments,
+			typeutil.NewUniqueSet(1, 2, 3, 4),
+			make(typeutil.UniqueSet),
+			func(UniqueID) bool { return true },
+			func(UniqueID) bool { return true },
+		)
+
+		assert.ElementsMatch(t, []int64{1, 2}, flushed.Collect())
+	})
+
+	t.Run("deduplicates selected ancestors across multiple generations", func(t *testing.T) {
+		segments := map[int64]*SegmentInfo{
+			1: segment(1, commonpb.SegmentState_Dropped),
+			2: segment(2, commonpb.SegmentState_Dropped),
+			3: segment(3, commonpb.SegmentState_Dropped, 1, 2),
+			4: segment(4, commonpb.SegmentState_Flushed, 1, 2),
+			5: segment(5, commonpb.SegmentState_Flushed, 3),
+		}
+		// Segment 5 remains serviceable while segment 4 falls back to 1 and 2.
+		// Recursive deduplication must remove 5 without selecting unready 3.
+		indexed := typeutil.NewUniqueSet(1, 2, 5)
+		flushed, dropped := retrieveSegment(
+			segments,
+			typeutil.NewUniqueSet(4, 5),
+			typeutil.NewUniqueSet(1, 2, 3),
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+		)
+
+		assert.ElementsMatch(t, []int64{1, 2}, flushed.Collect())
+		assert.Equal(t, []int64{3}, dropped.Collect())
+	})
+
+	t.Run("keeps child when fallback parent is not explicitly ready", func(t *testing.T) {
+		segments := map[int64]*SegmentInfo{
+			1: segment(1, commonpb.SegmentState_Dropped),
+			2: segment(2, commonpb.SegmentState_Flushed, 1),
+		}
+		flushed, dropped := retrieveSegment(
+			segments,
+			typeutil.NewUniqueSet(2),
+			typeutil.NewUniqueSet(1),
+			func(segmentID UniqueID) bool { return segmentID == 1 },
+			func(UniqueID) bool { return false },
+		)
+
+		assert.Equal(t, []int64{2}, flushed.Collect())
+		assert.Equal(t, []int64{1}, dropped.Collect())
+	})
+
+	t.Run("cancels fallback on partial ancestor coverage", func(t *testing.T) {
+		segments := map[int64]*SegmentInfo{
+			1: segment(1, commonpb.SegmentState_Dropped),
+			2: segment(2, commonpb.SegmentState_Dropped),
+			3: segment(3, commonpb.SegmentState_Dropped, 1, 2),
+			4: segment(4, commonpb.SegmentState_Flushed, 1, 2),
+			5: segment(5, commonpb.SegmentState_Dropped),
+			6: segment(6, commonpb.SegmentState_Flushed, 3, 5),
+		}
+		indexed := typeutil.NewUniqueSet(1, 2, 6)
+		flushed, dropped := retrieveSegment(
+			segments,
+			typeutil.NewUniqueSet(4, 6),
+			typeutil.NewUniqueSet(1, 2, 3, 5),
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+		)
+
+		assert.ElementsMatch(t, []int64{4, 6}, flushed.Collect())
+		assert.ElementsMatch(t, []int64{1, 2, 3, 5}, dropped.Collect())
+	})
+
+	t.Run("expands partial coverage through ready parents", func(t *testing.T) {
+		segments := map[int64]*SegmentInfo{
+			1: segment(1, commonpb.SegmentState_Dropped),
+			2: segment(2, commonpb.SegmentState_Dropped),
+			3: segment(3, commonpb.SegmentState_Dropped, 1, 2),
+			4: segment(4, commonpb.SegmentState_Flushed, 1, 2),
+			5: segment(5, commonpb.SegmentState_Dropped),
+			6: segment(6, commonpb.SegmentState_Flushed, 3, 5),
+		}
+		indexed := typeutil.NewUniqueSet(1, 2, 3, 5, 6)
+		flushed, dropped := retrieveSegment(
+			segments,
+			typeutil.NewUniqueSet(4, 6),
+			typeutil.NewUniqueSet(1, 2, 3, 5),
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+			func(segmentID UniqueID) bool { return indexed.Contain(segmentID) },
+		)
+
+		assert.ElementsMatch(t, []int64{1, 2, 5}, flushed.Collect())
+		assert.Equal(t, []int64{3}, dropped.Collect())
+	})
+}
 
 func TestGetQueryVChanPositionsRetrieveM2N(t *testing.T) {
 	svr := newTestServer(t)
@@ -596,8 +823,9 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 		//        \         /     \        /                              |
 		//         \       /       \      /                               |
 		//           [16u]          [17u]       [18u](unsorted)     [20u](sorted)      [21i](unsorted)
-		// all leaf nodes are [1,2,3,4,5,6,7], but because segment3 has been gced, the leaf node becomes [7,8,9,10,4,5,6]
-		// should be returned: flushed: [7, 8, 9, 10, 4, 5, 6, 20, 21], growing: [18]
+		// Segments 7-15 are not valid fallbacks for the current frontier, so keep
+		// their children 16 and 17. The independent leaves 20 and 21 are unchanged.
+		// Expected: flushed [16, 17, 20, 21], growing [18].
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		schema := newTestSchema()
@@ -972,9 +1200,9 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 		assert.NoError(t, err)
 
 		vchan := svr.handler.GetQueryVChanPositions(&channelMeta{Name: "ch1", CollectionID: 0})
-		assert.ElementsMatch(t, []int64{7, 8, 9, 10, 4, 5, 6, 20, 21}, vchan.FlushedSegmentIds)
+		assert.ElementsMatch(t, []int64{16, 17, 20, 21}, vchan.FlushedSegmentIds)
 		assert.ElementsMatch(t, []int64{18}, vchan.UnflushedSegmentIds)
-		assert.ElementsMatch(t, []int64{1, 2, 19}, vchan.DroppedSegmentIds)
+		assert.ElementsMatch(t, []int64{1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19}, vchan.DroppedSegmentIds)
 	})
 
 	t.Run("compaction iterate", func(t *testing.T) {
@@ -1352,6 +1580,65 @@ func TestGetCurrentSegmentsView(t *testing.T) {
 	assert.ElementsMatch(t, []int64{9}, view.ImportingSegmentIDs)
 }
 
+func TestGetCurrentSegmentsViewExternalCollection(t *testing.T) {
+	svr := newTestServer(t)
+	defer closeTestServer(t, svr)
+	schema := newTestSchema()
+	svr.meta.AddCollection(&collectionInfo{
+		ID:         0,
+		Partitions: []int64{0},
+		Schema:     schema,
+	})
+
+	// External collection segments are produced by refresh, not the WAL, so they
+	// carry neither start nor dml position. A committed manifest or fake binlogs
+	// must still admit them, otherwise GetPersistentSegmentInfo returns nothing
+	// for external collections while GetQuerySegmentInfo does report them.
+	manifestSeg := &datapb.SegmentInfo{
+		ID:             100,
+		CollectionID:   0,
+		PartitionID:    0,
+		InsertChannel:  "ch1",
+		State:          commonpb.SegmentState_Flushed,
+		StorageVersion: storage.StorageV3,
+		ManifestPath:   packed.MarshalManifestPath("/data/segments/100", 1),
+		NumOfRows:      100,
+	}
+	err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(manifestSeg))
+	assert.NoError(t, err)
+
+	// Fake binlogs are stripped on persistence, but before a restart they are the
+	// only marker a freshly refreshed external segment carries.
+	binlogSeg := &datapb.SegmentInfo{
+		ID:            101,
+		CollectionID:  0,
+		PartitionID:   0,
+		InsertChannel: "ch1",
+		State:         commonpb.SegmentState_Flushed,
+		Binlogs: []*datapb.FieldBinlog{
+			{FieldID: 1, Binlogs: []*datapb.Binlog{{LogID: 1, EntriesNum: 100}}},
+		},
+		NumOfRows: 100,
+	}
+	err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(binlogSeg))
+	assert.NoError(t, err)
+
+	// A segment with no position, no manifest and no binlogs is still dropped.
+	emptySeg := &datapb.SegmentInfo{
+		ID:            102,
+		CollectionID:  0,
+		PartitionID:   0,
+		InsertChannel: "ch1",
+		State:         commonpb.SegmentState_Flushed,
+		NumOfRows:     100,
+	}
+	err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(emptySeg))
+	assert.NoError(t, err)
+
+	view := svr.handler.GetCurrentSegmentsView(context.Background(), &channelMeta{Name: "ch1", CollectionID: 0})
+	assert.ElementsMatch(t, []int64{100, 101}, view.FlushedSegmentIDs)
+}
+
 func TestShouldDropChannel(t *testing.T) {
 	type myRootCoord struct {
 		mocks2.MockRootCoordClient
@@ -1542,62 +1829,6 @@ func TestGetDataVChanPositions(t *testing.T) {
 		assert.EqualValues(t, 0, infos.CollectionID)
 		assert.EqualValues(t, vchannel, infos.ChannelName)
 	})
-}
-
-func TestGetSnapshotSeekPositions_ReturnsSortedPositionsAndMinTs(t *testing.T) {
-	handler := &ServerHandler{s: &Server{}}
-
-	mockChannels := mockey.Mock((*Server).getChannelsByCollectionID).To(func(s *Server, ctx context.Context, collectionID int64) ([]RWChannel, error) {
-		assert.Equal(t, UniqueID(100), collectionID)
-		return []RWChannel{
-			&channelMeta{Name: "ch-b", CollectionID: 100},
-			&channelMeta{Name: "ch-a", CollectionID: 100},
-		}, nil
-	}).Build()
-	defer mockChannels.UnPatch()
-
-	chAPosition := &msgpb.MsgPosition{
-		Timestamp: 100,
-		MsgID:     []byte{1},
-	}
-	chBPosition := &msgpb.MsgPosition{
-		ChannelName: "ch-b",
-		Timestamp:   1000,
-		MsgID:       []byte{2},
-	}
-	mockSeekPosition := mockey.Mock((*ServerHandler).GetChannelSeekPosition).To(func(h *ServerHandler, channel RWChannel, partitionIDs ...UniqueID) *msgpb.MsgPosition {
-		assert.Equal(t, []UniqueID{10, 20}, partitionIDs)
-		switch channel.GetName() {
-		case "ch-a":
-			return chAPosition
-		case "ch-b":
-			return chBPosition
-		default:
-			t.Fatalf("unexpected channel: %s", channel.GetName())
-			return nil
-		}
-	}).Build()
-	defer mockSeekPosition.UnPatch()
-
-	positions, minTs, err := handler.GetSnapshotSeekPositions(context.Background(), 100, 10, 20)
-	require.NoError(t, err)
-	assert.Equal(t, uint64(100), minTs)
-	require.Len(t, positions, 2)
-	assert.Equal(t, "ch-a", positions[0].GetChannelName())
-	assert.Equal(t, uint64(100), positions[0].GetTimestamp())
-	assert.Equal(t, []byte{1}, positions[0].GetMsgID())
-	assert.Equal(t, "ch-b", positions[1].GetChannelName())
-	assert.Equal(t, uint64(1000), positions[1].GetTimestamp())
-	assert.Equal(t, []byte{2}, positions[1].GetMsgID())
-
-	positions[0].Timestamp = 9999
-
-	positions, minTs, err = handler.GetSnapshotSeekPositions(context.Background(), 100, 10, 20)
-	require.NoError(t, err)
-	assert.Equal(t, uint64(100), minTs)
-	require.Len(t, positions, 2)
-	assert.Equal(t, "ch-a", positions[0].GetChannelName())
-	assert.Equal(t, uint64(100), positions[0].GetTimestamp())
 }
 
 func TestGetDeltaLogFromCompactTo(t *testing.T) {
@@ -1822,12 +2053,9 @@ func TestGenSnapshot(t *testing.T) {
 	}
 
 	// Setup mocks for other methods
-	mock1 := mockey.Mock((*ServerHandler).GetSnapshotSeekPositions).To(func(h *ServerHandler, ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*msgpb.MsgPosition, uint64, error) {
-		return []*msgpb.MsgPosition{
-			{ChannelName: "dml_0_200v0", Timestamp: 12345, MsgID: []byte{1}},
-		}, uint64(12345), nil
-	}).Build()
-	defer mock1.UnPatch()
+	positions := []*msgpb.MsgPosition{
+		{ChannelName: "dml_0_200v0", Timestamp: 12345, MsgID: []byte{1}},
+	}
 
 	mock4 := mockey.Mock((*indexMeta).GetIndexesForCollection).To(func(im *indexMeta, collectionID UniqueID, fieldName string) []*model.Index {
 		return []*model.Index{
@@ -1844,12 +2072,13 @@ func TestGenSnapshot(t *testing.T) {
 
 	mock5 := mockey.Mock((*meta).SelectSegments).To(func(m *meta, ctx context.Context, filters ...SegmentFilter) []*SegmentInfo {
 		seg := NewSegmentInfo(&datapb.SegmentInfo{
-			ID:            1001,
-			CollectionID:  200,
-			PartitionID:   0,
-			InsertChannel: "dml_0_200v0",
-			State:         commonpb.SegmentState_Flushed,
-			StartPosition: &msgpb.MsgPosition{Timestamp: 10000},
+			ID:               1001,
+			CollectionID:     200,
+			PartitionID:      0,
+			InsertChannel:    "dml_0_200v0",
+			State:            commonpb.SegmentState_Flushed,
+			ManifestHasIndex: true,
+			StartPosition:    &msgpb.MsgPosition{Timestamp: 10000},
 			Binlogs: []*datapb.FieldBinlog{
 				{
 					FieldID: 1,
@@ -1896,7 +2125,7 @@ func TestGenSnapshot(t *testing.T) {
 	defer mock8.UnPatch()
 
 	// Test GenSnapshot
-	snapshotData, err := handler.GenSnapshot(context.Background(), 200)
+	snapshotData, err := handler.GenSnapshot(context.Background(), 200, positions)
 	assert.NoError(t, err)
 	assert.NotNil(t, snapshotData)
 	assert.Equal(t, int64(200), snapshotData.SnapshotInfo.CollectionId)
@@ -1906,6 +2135,8 @@ func TestGenSnapshot(t *testing.T) {
 	assert.Equal(t, 1, len(snapshotData.Indexes))
 	assert.Equal(t, 1, len(snapshotData.Segments))
 	assert.Equal(t, int64(1001), snapshotData.Segments[0].SegmentId)
+	assert.NotNil(t, snapshotData.Segments[0].ManifestHasIndex)
+	assert.True(t, snapshotData.Segments[0].GetManifestHasIndex())
 	// Verify VirtualChannelNames is populated from DescribeCollectionInternal response
 	assert.Equal(t, []string{"dml_0_200v0", "dml_1_200v1"}, snapshotData.Collection.VirtualChannelNames)
 }
@@ -1954,13 +2185,9 @@ func TestGenSnapshot_PreservesCollectionMetadata(t *testing.T) {
 		}).Build()
 	defer mockShowPartitions.UnPatch()
 
-	mockSeekPositions := mockey.Mock((*ServerHandler).GetSnapshotSeekPositions).To(
-		func(_ *ServerHandler, _ context.Context, _ UniqueID, _ ...UniqueID) ([]*msgpb.MsgPosition, uint64, error) {
-			return []*msgpb.MsgPosition{
-				{ChannelName: "ch-1", Timestamp: 100, MsgID: []byte{1}},
-			}, uint64(100), nil
-		}).Build()
-	defer mockSeekPositions.UnPatch()
+	positions := []*msgpb.MsgPosition{
+		{ChannelName: "ch-1", Timestamp: 100, MsgID: []byte{1}},
+	}
 
 	mockIndexes := mockey.Mock((*indexMeta).GetIndexesForCollection).
 		Return([]*model.Index{}).
@@ -1972,7 +2199,7 @@ func TestGenSnapshot_PreservesCollectionMetadata(t *testing.T) {
 		Build()
 	defer mockSelectSegments.UnPatch()
 
-	snapshotData, err := handler.GenSnapshot(context.Background(), 200)
+	snapshotData, err := handler.GenSnapshot(context.Background(), 200, positions)
 	require.NoError(t, err)
 	require.NotNil(t, snapshotData.Collection)
 	assert.Equal(t, commonpb.ConsistencyLevel_Bounded, snapshotData.Collection.GetConsistencyLevel())
@@ -2040,14 +2267,10 @@ func TestGenSnapshot_UsesPerChannelSeekPositions(t *testing.T) {
 		}).Build()
 	defer mockShowPartitions.UnPatch()
 
-	mockSeekPositions := mockey.Mock((*ServerHandler).GetSnapshotSeekPositions).To(
-		func(h *ServerHandler, ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*msgpb.MsgPosition, uint64, error) {
-			return []*msgpb.MsgPosition{
-				{ChannelName: "ch-1", Timestamp: 100, MsgID: []byte{1}},
-				{ChannelName: "ch-2", Timestamp: 1000, MsgID: []byte{2}},
-			}, uint64(100), nil
-		}).Build()
-	defer mockSeekPositions.UnPatch()
+	positions := []*msgpb.MsgPosition{
+		{ChannelName: "ch-1", Timestamp: 100, MsgID: []byte{1}},
+		{ChannelName: "ch-2", Timestamp: 1000, MsgID: []byte{2}},
+	}
 
 	mockIndexes := mockey.Mock((*indexMeta).GetIndexesForCollection).To(
 		func(im *indexMeta, collectionID UniqueID, fieldName string) []*model.Index {
@@ -2086,7 +2309,7 @@ func TestGenSnapshot_UsesPerChannelSeekPositions(t *testing.T) {
 		}).Build()
 	defer mockSegmentIndexes.UnPatch()
 
-	snapshotData, err := handler.GenSnapshot(context.Background(), 200)
+	snapshotData, err := handler.GenSnapshot(context.Background(), 200, positions)
 	require.NoError(t, err)
 	require.NotNil(t, snapshotData)
 	require.NotNil(t, snapshotData.SnapshotInfo)
@@ -2176,15 +2399,16 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	schema := newTestSchema()
 	// Committed V3 manifest with empty legacy arrays must be kept.
 	manifestSeg := NewSegmentInfo(&datapb.SegmentInfo{
-		ID:             2001,
-		CollectionID:   200,
-		PartitionID:    0,
-		InsertChannel:  "ch-1",
-		State:          commonpb.SegmentState_Flushed,
-		StartPosition:  &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 500},
-		DmlPosition:    &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 600},
-		StorageVersion: storage.StorageV3,
-		ManifestPath:   packed.MarshalManifestPath("/data/segments/2001", 3),
+		ID:              2001,
+		CollectionID:    200,
+		PartitionID:     0,
+		InsertChannel:   "ch-1",
+		State:           commonpb.SegmentState_Flushed,
+		StartPosition:   &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 500},
+		DmlPosition:     &msgpb.MsgPosition{ChannelName: "ch-1", Timestamp: 600},
+		StorageVersion:  storage.StorageV3,
+		ManifestPath:    packed.MarshalManifestPath("/data/segments/2001", 3),
+		CommitTimestamp: 700,
 	})
 	// A growing V3 segment only has an allocation placeholder and must be dropped.
 	growingSeg := NewSegmentInfo(&datapb.SegmentInfo{
@@ -2242,13 +2466,9 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 		}).Build()
 	defer mockShowPartitions.UnPatch()
 
-	mockSeekPositions := mockey.Mock((*ServerHandler).GetSnapshotSeekPositions).To(
-		func(h *ServerHandler, ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*msgpb.MsgPosition, uint64, error) {
-			return []*msgpb.MsgPosition{
-				{ChannelName: "ch-1", Timestamp: 1000, MsgID: []byte{1}},
-			}, uint64(1000), nil
-		}).Build()
-	defer mockSeekPositions.UnPatch()
+	positions := []*msgpb.MsgPosition{
+		{ChannelName: "ch-1", Timestamp: 1000, MsgID: []byte{1}},
+	}
 
 	mockIndexes := mockey.Mock((*indexMeta).GetIndexesForCollection).To(
 		func(im *indexMeta, collectionID UniqueID, fieldName string) []*model.Index {
@@ -2286,12 +2506,13 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 		}).Build()
 	defer mockSegmentIndexes.UnPatch()
 
-	snapshotData, err := handler.GenSnapshot(context.Background(), 200)
+	snapshotData, err := handler.GenSnapshot(context.Background(), 200, positions)
 	require.NoError(t, err)
 	require.NotNil(t, snapshotData)
 	require.Len(t, snapshotData.Segments, 1)
 	assert.Equal(t, int64(2001), snapshotData.Segments[0].GetSegmentId())
 	assert.NotEmpty(t, snapshotData.Segments[0].GetManifestPath())
+	assert.EqualValues(t, 700, snapshotData.Segments[0].GetCommitTimestamp())
 
 	candidates = []*SegmentInfo{NewSegmentInfo(&datapb.SegmentInfo{
 		ID:             2004,
@@ -2304,10 +2525,72 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 		StorageVersion: storage.StorageV3,
 		ManifestPath:   "invalid",
 	})}
-	snapshotData, err = handler.GenSnapshot(context.Background(), 200)
+	snapshotData, err = handler.GenSnapshot(context.Background(), 200, positions)
 	assert.Nil(t, snapshotData)
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 	assert.Contains(t, err.Error(), "invalid manifest path for segment 2004")
+}
+
+func TestGenSnapshotDependencyErrors(t *testing.T) {
+	type snapshotBroker struct{ broker.Broker }
+	for _, stage := range []string{"describe", "partitions", "empty_positions", "empty_channel", "decompress", "compact_delta", "index_files", "success"} {
+		t.Run(stage, func(t *testing.T) {
+			wantErr := merr.ErrServiceNotReady
+			errFor := func(name string) error {
+				if stage == name {
+					return wantErr
+				}
+				return nil
+			}
+			handler := &ServerHandler{s: &Server{broker: &snapshotBroker{}, meta: &meta{
+				indexMeta: &indexMeta{}, chunkManager: storage.NewLocalChunkManager(),
+			}}}
+			describe := mockey.Mock((*snapshotBroker).DescribeCollectionInternal).Return(
+				&milvuspb.DescribeCollectionResponse{Schema: newTestSchema()}, errFor("describe")).Build()
+			defer describe.UnPatch()
+			partitions := mockey.Mock((*snapshotBroker).ShowPartitions).Return(
+				&milvuspb.ShowPartitionsResponse{PartitionNames: []string{"_default"}, PartitionIDs: []int64{10}}, errFor("partitions")).Build()
+			defer partitions.UnPatch()
+			position := &msgpb.MsgPosition{ChannelName: "v1", Timestamp: 100}
+			if stage == "empty_channel" {
+				position.ChannelName = ""
+			}
+			positions := []*msgpb.MsgPosition{position}
+			if stage == "empty_positions" {
+				positions = nil
+			}
+			indexes := mockey.Mock((*indexMeta).GetIndexesForCollection).Return([]*model.Index(nil)).Build()
+			defer indexes.UnPatch()
+			segment := NewSegmentInfo(&datapb.SegmentInfo{
+				ID: 1, CollectionID: 2, PartitionID: 10, InsertChannel: "v1", State: commonpb.SegmentState_Flushed,
+				Binlogs:      []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
+				JsonKeyStats: map[int64]*datapb.JsonKeyStats{101: {FieldID: 101}},
+			})
+			segments := mockey.Mock((*meta).SelectSegments).Return([]*SegmentInfo{segment}).Build()
+			defer segments.UnPatch()
+			decompress := mockey.Mock(binlog.DecompressMultiBinLogs).Return(errFor("decompress")).Build()
+			defer decompress.UnPatch()
+			deltas := mockey.Mock((*ServerHandler).GetDeltaLogFromCompactTo).Return([]*datapb.FieldBinlog(nil), errFor("compact_delta")).Build()
+			defer deltas.UnPatch()
+			indexFiles := mockey.Mock(uncompressIndexFiles).Return([]*indexpb.IndexFilePathInfo(nil), errFor("index_files")).Build()
+			defer indexFiles.UnPatch()
+
+			snapshot, err := handler.GenSnapshot(context.Background(), 2, positions)
+			switch stage {
+			case "compact_delta", "success":
+				// Preserve the existing best-effort compact-to lookup behavior.
+				require.NoError(t, err)
+				require.Len(t, snapshot.Segments, 1)
+				require.Contains(t, snapshot.Segments[0].JsonKeyIndexFiles, int64(101))
+			case "empty_positions", "empty_channel":
+				require.ErrorIs(t, err, merr.ErrServiceInternal)
+				require.Nil(t, snapshot)
+			default:
+				require.ErrorIs(t, err, wantErr)
+				require.Nil(t, snapshot)
+			}
+		})
+	}
 }
 
 func TestGenSnapshot_RejectsSegmentWithoutChannelSeekPosition(t *testing.T) {
@@ -2346,13 +2629,9 @@ func TestGenSnapshot_RejectsSegmentWithoutChannelSeekPosition(t *testing.T) {
 		}).Build()
 	defer mockShowPartitions.UnPatch()
 
-	mockSeekPositions := mockey.Mock((*ServerHandler).GetSnapshotSeekPositions).To(
-		func(h *ServerHandler, ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*msgpb.MsgPosition, uint64, error) {
-			return []*msgpb.MsgPosition{
-				{ChannelName: "ch-1", Timestamp: 1000, MsgID: []byte{1}},
-			}, uint64(1000), nil
-		}).Build()
-	defer mockSeekPositions.UnPatch()
+	positions := []*msgpb.MsgPosition{
+		{ChannelName: "ch-1", Timestamp: 1000, MsgID: []byte{1}},
+	}
 
 	mockIndexes := mockey.Mock((*indexMeta).GetIndexesForCollection).To(
 		func(im *indexMeta, collectionID UniqueID, fieldName string) []*model.Index {
@@ -2392,7 +2671,7 @@ func TestGenSnapshot_RejectsSegmentWithoutChannelSeekPosition(t *testing.T) {
 				},
 			})
 
-			snapshotData, err := handler.GenSnapshot(context.Background(), 200)
+			snapshotData, err := handler.GenSnapshot(context.Background(), 200, positions)
 			require.Error(t, err)
 			assert.Nil(t, snapshotData)
 			assert.Contains(t, err.Error(), "missing snapshot channel seek position")
@@ -2401,6 +2680,7 @@ func TestGenSnapshot_RejectsSegmentWithoutChannelSeekPosition(t *testing.T) {
 }
 
 func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
+	version := indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED
 	handler := &ServerHandler{
 		s: &Server{
 			meta: &meta{
@@ -2421,7 +2701,7 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 				IndexVersion:          40,
 				IndexState:            commonpb.IndexState_Finished,
 				IndexFileKeys:         []string{"index_data"},
-				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+				IndexStorePathVersion: version,
 			},
 		}
 	}).Build()
@@ -2439,11 +2719,32 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 	mockTypeParams := mockey.Mock((*indexMeta).GetTypeParams).Return(nil).Build()
 	defer mockTypeParams.UnPatch()
 
-	indexFiles := uncompressIndexFiles(handler, 1, 2)
+	indexFiles, err := uncompressIndexFiles(handler, &datapb.SegmentInfo{CollectionID: 1, ID: 2})
+	require.NoError(t, err)
 
 	require.Len(t, indexFiles, 1)
+	assert.Equal(t, int64(2), indexFiles[0].GetSegmentID())
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, indexFiles[0].GetIndexStorePathVersion())
 	assert.Equal(t, []string{"files/index_v1/1/20/2/30/40/index_data"}, indexFiles[0].GetIndexFilePaths())
+
+	// There is no segment store in this handler. The selected snapshot segment
+	// must be sufficient, including when its base differs from the current root.
+	version = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
+	segment := &datapb.SegmentInfo{
+		CollectionID: 1, ID: 2,
+		ManifestPath: packed.MarshalManifestPath("/data/legacy/insert_log/1/20/2", 1),
+	}
+	indexFiles, err = uncompressIndexFiles(handler, segment)
+	require.NoError(t, err)
+	require.Len(t, indexFiles, 1)
+	assert.Equal(t, segment.GetID(), indexFiles[0].GetSegmentID())
+	assert.Equal(t, version, indexFiles[0].GetIndexStorePathVersion())
+	assert.Equal(t, []string{"/data/legacy/insert_log/1/20/2/_index/30/40/index_data"}, indexFiles[0].GetIndexFilePaths())
+
+	segment.ManifestPath = ""
+	indexFiles, err = uncompressIndexFiles(handler, segment)
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	assert.Empty(t, indexFiles)
 }
 
 func TestUncompressJsonStatsForSnapshotPaths(t *testing.T) {
@@ -2520,7 +2821,7 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 		},
 	})
 
-	setupHandlerMocks := func(t *testing.T, snapshotTs uint64) (*ServerHandler, []*mockey.Mocker) {
+	setupHandlerMocks := func(t *testing.T) (*ServerHandler, []*mockey.Mocker) {
 		mockIndexMeta := &indexMeta{}
 		mockMeta := &meta{indexMeta: mockIndexMeta}
 
@@ -2547,13 +2848,6 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 		}
 
 		var mockers []*mockey.Mocker
-
-		m1 := mockey.Mock((*ServerHandler).GetSnapshotSeekPositions).To(func(h *ServerHandler, ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*msgpb.MsgPosition, uint64, error) {
-			return []*msgpb.MsgPosition{
-				{ChannelName: "dml_0_200v0", Timestamp: snapshotTs, MsgID: []byte{1}},
-			}, snapshotTs, nil
-		}).Build()
-		mockers = append(mockers, m1)
 
 		m2 := mockey.Mock((*indexMeta).GetIndexesForCollection).To(func(im *indexMeta, collectionID UniqueID, fieldName string) []*model.Index {
 			return []*model.Index{}
@@ -2600,12 +2894,13 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 
 	t.Run("import segment excluded when snapshotTs < commit_timestamp", func(t *testing.T) {
 		// snapshotTs=3000 < commit_ts=5000 → segment must NOT appear
-		handler, mockers := setupHandlerMocks(t, 3000)
+		positions := []*msgpb.MsgPosition{{ChannelName: "dml_0_200v0", Timestamp: 3000}}
+		handler, mockers := setupHandlerMocks(t)
 		for _, m := range mockers {
 			defer m.UnPatch()
 		}
 
-		snapshotData, err := handler.GenSnapshot(context.Background(), 200)
+		snapshotData, err := handler.GenSnapshot(context.Background(), 200, positions)
 		assert.NoError(t, err)
 		assert.NotNil(t, snapshotData)
 		assert.Equal(t, 0, len(snapshotData.Segments), "segment with commit_ts=5000 must not appear at snapshotTs=3000")
@@ -2613,12 +2908,13 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 
 	t.Run("import segment included when snapshotTs >= commit_timestamp", func(t *testing.T) {
 		// snapshotTs=6000 >= commit_ts=5000 → segment must appear
-		handler, mockers := setupHandlerMocks(t, 6000)
+		positions := []*msgpb.MsgPosition{{ChannelName: "dml_0_200v0", Timestamp: 6000}}
+		handler, mockers := setupHandlerMocks(t)
 		for _, m := range mockers {
 			defer m.UnPatch()
 		}
 
-		snapshotData, err := handler.GenSnapshot(context.Background(), 200)
+		snapshotData, err := handler.GenSnapshot(context.Background(), 200, positions)
 		assert.NoError(t, err)
 		assert.NotNil(t, snapshotData)
 		assert.Equal(t, 1, len(snapshotData.Segments), "segment with commit_ts=5000 must appear at snapshotTs=6000")

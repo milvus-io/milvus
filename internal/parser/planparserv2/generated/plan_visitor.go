@@ -112,6 +112,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#TemplateVariable.
 	VisitTemplateVariable(ctx *TemplateVariableContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#MembershipMatchWithOption.
+	VisitMembershipMatchWithOption(ctx *MembershipMatchWithOptionContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#TimestamptzCompareReverse.
 	VisitTimestamptzCompareReverse(ctx *TimestamptzCompareReverseContext) interface{}
 
@@ -162,6 +165,12 @@ type PlanVisitor interface {
 
 	// Visit a parse tree produced by PlanParser#Power.
 	VisitPower(ctx *PowerContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#fieldName.
+	VisitFieldName(ctx *FieldNameContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#fieldReference.
+	VisitFieldReference(ctx *FieldReferenceContext) interface{}
 
 	// Visit a parse tree produced by PlanParser#textMatchOption.
 	VisitTextMatchOption(ctx *TextMatchOptionContext) interface{}

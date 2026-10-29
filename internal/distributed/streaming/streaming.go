@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -84,6 +85,7 @@ func ResolvePChannelInfo(ctx context.Context, vchannel string) (types.PChannelIn
 type AppendOption struct {
 	BarrierTimeTick uint64 // BarrierTimeTick is the barrier time tick of the message.
 	// Must be allocated from tso, otherwise undetermined behavior.
+	IdempotencyKey string
 }
 
 type ReadOption struct {
@@ -107,6 +109,14 @@ type ReadOption struct {
 
 	// IgnorePauseConsumption is the flag to ignore the consumption pause of the scanner.
 	IgnorePauseConsumption bool
+}
+
+// AnalyzerClient exposes analyzer execution through the streaming WAL entry.
+type AnalyzerClient interface {
+	RunAnalyzer(context.Context, *streamingpb.StreamingNodeRunAnalyzerRequest) (*streamingpb.StreamingNodeRunAnalyzerResponse, error)
+
+	// ValidateAnalyzer prepares file resources and validates configs without a collection.
+	ValidateAnalyzer(context.Context, *streamingpb.StreamingNodeValidateAnalyzerRequest) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error)
 }
 
 // Scanner is the interface for reading records from the wal.
@@ -172,6 +182,15 @@ type Balancer interface {
 
 // WALAccesser is the interfaces to interact with the milvus write ahead log.
 type WALAccesser interface {
+	// TransformLogStreamManager returns independently closeable transform streams.
+	TransformLogStreamManager() wal.TransformLogStreamManager
+
+	// AnalyzerClient returns the analyzer domain client backed by streaming discovery.
+	AnalyzerClient() AnalyzerClient
+
+	// SchemaClient returns schema access backed by streaming discovery.
+	SchemaClient() SchemaClient
+
 	// ForwardService returns the forward service of the wal.
 	ForwardService() ForwardService
 
@@ -207,6 +226,9 @@ type WALAccesser interface {
 	// Otherwise, it will be sent as individual messages.
 	// !!! This function do not promise the atomicity and deliver order of the messages appending.
 	AppendMessages(ctx context.Context, msgs ...message.MutableMessage) AppendResponses
+
+	// AppendMessagesWithOptions appends messages to the wal with append options.
+	AppendMessagesWithOptions(ctx context.Context, msgs []message.MutableMessage, opts ...AppendOption) AppendResponses
 }
 
 type Local interface {

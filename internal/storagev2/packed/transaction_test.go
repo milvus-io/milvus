@@ -15,6 +15,7 @@
 package packed
 
 import (
+	"context"
 	"fmt"
 	"path"
 	"path/filepath"
@@ -23,13 +24,171 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestExternalFilePropertiesRoundTrip(t *testing.T) {
+	paramtable.Init()
+	for _, tc := range []struct {
+		format     string
+		properties map[string]string
+	}{
+		{"parquet", map[string]string{"extra": "preserved"}},
+		{"lance-table", map[string]string{"dataset_version": "10", "extra": "preserved"}},
+		{"iceberg-table", map[string]string{"metadata": `[{"path":"delete.parquet","file_type":"position"}]`, "extra": "preserved"}},
+	} {
+		t.Run(tc.format, func(t *testing.T) {
+			dir := t.TempDir()
+			config := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
+			exploreBase := filepath.Join(dir, "explore")
+			filePath := filepath.Join(dir, "source.parquet")
+			exploreManifest, err := CommitManifestUpdates(MarshalManifestPath(exploreBase, ManifestEarliest), config, &ManifestUpdates{
+				ColumnGroups: []ColumnGroupEntry{{
+					Columns: []string{"id"}, Format: tc.format,
+					Files: []ColumnGroupFileEntry{{Path: filePath, StartIndex: 0, EndIndex: 4, Properties: tc.properties}},
+				}},
+			})
+			require.NoError(t, err)
+			_, version, err := UnmarshalManifestPath(exploreManifest)
+			require.NoError(t, err)
+			explorePath := filepath.Join(exploreBase, "_metadata", fmt.Sprintf("manifest-%d.avro", version))
+
+			fileInfos, err := ReadFileInfosFromManifestPath(explorePath, config)
+			require.NoError(t, err)
+			require.Len(t, fileInfos, 1)
+			assert.Equal(t, tc.properties, fileInfos[0].Properties)
+
+			fragments, err := FetchFragmentsFromExternalSourceWithRange(context.Background(), tc.format,
+				[]string{"id"}, "", config, 0, 1, explorePath, ExternalFetchOptions{RowLimit: 2})
+			require.NoError(t, err)
+			require.Len(t, fragments, 2)
+			for i, fragment := range fragments {
+				assert.Equal(t, tc.properties, fragment.Properties)
+				assert.Equal(t, int64(i*2), fragment.StartRow)
+				assert.Equal(t, int64(i*2+2), fragment.EndRow)
+			}
+
+			manifestPath, err := CreateManifestForSegment(filepath.Join(dir, "segment"), []string{"id"}, tc.format, fragments, config)
+			require.NoError(t, err)
+			readBack, err := ReadFragmentsFromManifest(manifestPath, config, []string{"id"})
+			require.NoError(t, err)
+			assert.Equal(t, fragments, readBack)
+
+			manifestPath, err = AppendSegmentManifestColumns(context.Background(), manifestPath, tc.format, []string{"extra_column"}, readBack, config)
+			require.NoError(t, err)
+			readBack, err = ReadFragmentsFromManifest(manifestPath, config, []string{"extra_column"})
+			require.NoError(t, err)
+			assert.Equal(t, fragments, readBack)
+		})
+	}
+}
+
+func TestDeltaLogsFromManifestMalformedFFIMetadata(t *testing.T) {
+	logs, err := deltaLogsFromManifest("test-manifest", nil)
+	require.NoError(t, err)
+	require.Nil(t, logs)
+	empty, valid := "", "root/delta"
+	for _, tc := range []struct {
+		name    string
+		paths   []*string
+		entries []uint32
+		wantErr bool
+	}{
+		{"missing_paths", nil, []uint32{1}, true},
+		{"missing_counts", []*string{&valid}, nil, true},
+		{"nil_path_with_rows", []*string{nil}, []uint32{1}, true},
+		{"nil_empty_marker", []*string{nil}, []uint32{0}, false},
+		{"empty_marker", []*string{&empty}, []uint32{0}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logs, err := testManifestDeltaLogs(tc.paths, tc.entries, 1)
+			if tc.wantErr {
+				require.ErrorIs(t, err, merr.ErrDataIntegrity)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Nil(t, logs)
+		})
+	}
+}
+
+func TestManifestReadDependencyErrors(t *testing.T) {
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+	manifest := MarshalManifestPath(filepath.Join(cfg.RootPath, "missing"), 1)
+	_, err := readColumnGroupsFromManifest(manifest, cfg)
+	require.Error(t, err)
+	_, err = GetDeltaLogsFromManifestWithExtfs(manifest, cfg, ExternalSpecContext{})
+	require.Error(t, err)
+	properties := mockey.Mock(MakePropertiesFromStorageConfig).Return(nil, merr.ErrServiceNotReady).Build()
+	defer properties.UnPatch()
+	_, err = readColumnGroupsFromManifest(manifest, cfg)
+	require.ErrorIs(t, err, merr.ErrServiceNotReady)
+	_, err = GetDeltaLogsFromManifestWithExtfs(manifest, cfg, ExternalSpecContext{})
+	require.ErrorIs(t, err, merr.ErrServiceNotReady)
+}
+
+func TestManifestDeltaDependencyFailures(t *testing.T) {
+	paramtable.Init()
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+	base := filepath.Join(cfg.RootPath, "segment")
+	manifest := createBaseManifest(t, base, cfg)
+	manifest, err := AddDeltaLogsToManifest(manifest, cfg, []DeltaLogEntry{{Path: filepath.Join(base, "_delta/1"), NumEntries: 1}})
+	require.NoError(t, err)
+	for _, stage := range []string{"inject", "decode", "resolve", "empty_resolved_path"} {
+		t.Run(stage, func(t *testing.T) {
+			cause := merr.ErrServiceNotReady
+			if stage == "decode" {
+				decode := mockey.Mock(deltaLogsFromManifest).Return(nil, cause).Build()
+				defer decode.UnPatch()
+				_, err := readColumnGroupsFromManifest(manifest, cfg)
+				require.ErrorIs(t, err, cause)
+				return
+			}
+			var injectErr error
+			if stage == "inject" {
+				injectErr = cause
+			}
+			inject := mockey.Mock(injectExternalSpecProperties).Return(injectErr).Build()
+			defer inject.UnPatch()
+			var resolveErr error
+			if stage == "resolve" {
+				resolveErr = cause
+			}
+			resolve := mockey.Mock(externalFilesystemFilePath).Return("", resolveErr).Build()
+			defer resolve.UnPatch()
+			logs, err := GetDeltaLogsFromManifestWithExtfs(manifest, cfg, ExternalSpecContext{Source: "file://source"})
+			require.Nil(t, logs)
+			if stage == "empty_resolved_path" {
+				require.ErrorIs(t, err, merr.ErrDataIntegrity)
+			} else {
+				require.ErrorIs(t, err, cause)
+			}
+		})
+	}
+}
+
+func TestReadColumnGroupsInvalidSourceRowCount(t *testing.T) {
+	paramtable.Init()
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+	base := filepath.Join(cfg.RootPath, "segment")
+	manifest, err := CommitManifestUpdates(MarshalManifestPath(base, ManifestEarliest), cfg, &ManifestUpdates{
+		ColumnGroups: []ColumnGroupEntry{{Columns: []string{"100"}, Format: "parquet", Files: []ColumnGroupFileEntry{{
+			Path: filepath.Join(base, "data.parquet"), EndIndex: 1,
+			Properties: map[string]string{milvusTableSourceManifestPathProperty: "source", milvusTableSourceRowCountProperty: "invalid"},
+		}}}},
+	})
+	require.NoError(t, err)
+	_, err = readColumnGroupsFromManifest(manifest, cfg)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.ErrorContains(t, err, "source row count")
+}
 
 func TestDeltaLogEntry(t *testing.T) {
 	entry := DeltaLogEntry{
@@ -80,7 +239,7 @@ func createBaseManifest(t *testing.T, basePath string, storageConfig *indexpb.St
 	require.NoError(t, err)
 	defer out.Destroy()
 
-	manifestPath, err := CommitManifestUpdates(basePath, ManifestEarliest, storageConfig,
+	manifestPath, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), storageConfig,
 		&ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 	return manifestPath
@@ -438,6 +597,30 @@ func TestGetDeltaLogPathsFromManifest(t *testing.T) {
 	})
 }
 
+func TestValidateDeltaLogMetadata(t *testing.T) {
+	manifestPath := MarshalManifestPath("backup/insert_log/1/2/3", 7)
+
+	t.Run("zero-entry marker may omit path", func(t *testing.T) {
+		assert.NoError(t, validateDeltaLogMetadata(manifestPath, "", 0))
+	})
+
+	t.Run("negative entries are corrupt", func(t *testing.T) {
+		err := validateDeltaLogMetadata(manifestPath, "delta/1", -1)
+		assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+		assert.ErrorContains(t, err, "negative entries_num")
+	})
+
+	t.Run("positive entries require path", func(t *testing.T) {
+		err := validateDeltaLogMetadata(manifestPath, "  ", 1)
+		assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+		assert.ErrorContains(t, err, "but no path")
+	})
+
+	t.Run("positive entries with path are readable", func(t *testing.T) {
+		assert.NoError(t, validateDeltaLogMetadata(manifestPath, "delta/1", 1))
+	})
+}
+
 func TestCreateMilvusTableManifestFromSegmentManifests_ImportsSourceDeltalogs(t *testing.T) {
 	paramtable.Init()
 	pt := paramtable.Get()
@@ -480,7 +663,7 @@ func TestCreateMilvusTableManifestFromSegmentManifests_ImportsSourceDeltalogs(t 
 
 func TestGetDeltaLogsFromManifestWithExtfsResolvesRelativeSourceDeltalogs(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
-	sourceBasePath := "files/source/segment/10"
+	sourceBasePath := path.Join(cfg.GetRootPath(), "source/segment/10")
 	sourceManifest := createBaseManifest(t, sourceBasePath, cfg)
 	sourceDeltaPath := path.Join(sourceBasePath, "_delta/9001")
 

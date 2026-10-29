@@ -19,33 +19,10 @@
 #include "common/common_type_c.h"
 #include "gtest/gtest.h"
 #include "pb/common.pb.h"
-#include "pb/schema.pb.h"
 #include "segcore/token_stream_c.h"
 #include "segcore/tokenizer_c.h"
 
 using Map = std::map<std::string, std::string>;
-
-TEST(ValidateTextSchema, Default) {
-    milvus::proto::schema::FieldSchema schema;
-    std::vector<uint8_t> buffer(schema.ByteSizeLong());
-    schema.SerializeToArray(buffer.data(), buffer.size());
-    auto status = validate_text_schema(buffer.data(), buffer.size());
-    ASSERT_EQ(milvus::ErrorCode::Success, status.error_code);
-}
-
-TEST(ValidateTextSchema, JieBa) {
-    milvus::proto::schema::FieldSchema schema;
-    {
-        auto kv = schema.add_type_params();
-        kv->set_key("analyzer_params");
-        kv->set_value(R"({"tokenizer": "jieba"})");
-    }
-
-    std::vector<uint8_t> buffer(schema.ByteSizeLong());
-    schema.SerializeToArray(buffer.data(), buffer.size());
-    auto status = validate_text_schema(buffer.data(), buffer.size());
-    ASSERT_EQ(milvus::ErrorCode::Success, status.error_code);
-}
 
 TEST(CTokenizer, Default) {
     auto analyzer_params = R"({"tokenizer": "standard"})";
@@ -56,8 +33,12 @@ TEST(CTokenizer, Default) {
     }
 
     std::string text("football, basketball, swimming");
-    auto token_stream =
-        create_token_stream(tokenizer, text.c_str(), text.length());
+    CTokenStream token_stream;
+    {
+        auto status = create_token_stream(
+            tokenizer, text.c_str(), text.length(), &token_stream);
+        ASSERT_EQ(milvus::ErrorCode::Success, status.error_code);
+    }
 
     std::vector<std::string> refs{"football", "basketball", "swimming"};
     std::vector<std::int64_t> offsets{0, 10, 22};
@@ -71,7 +52,11 @@ TEST(CTokenizer, Default) {
 
     free_token_stream(token_stream);
 
-    token_stream = create_token_stream(tokenizer, text.c_str(), text.length());
+    {
+        auto status = create_token_stream(
+            tokenizer, text.c_str(), text.length(), &token_stream);
+        ASSERT_EQ(milvus::ErrorCode::Success, status.error_code);
+    }
 
     for (int i = 0; i < 3; i++) {
         ASSERT_TRUE(token_stream_advance(token_stream));

@@ -33,23 +33,16 @@
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
-#include "index/json_stats/bson_inverted.h"
+#include "segcore/json_stats/bson_inverted.h"
 #include "segcore/SegmentInterface.h"
 
 namespace milvus {
 namespace exec {
 
-template <typename T>
-struct ExistsElementFunc {
-    void
-    operator()(const T* src, size_t size, T val, TargetBitmapView res) {
-    }
-};
-
 class PhyExistsFilterExpr : public SegmentExpr {
  public:
     PhyExistsFilterExpr(
-        const std::vector<std::shared_ptr<Expr>>& input,
+        std::vector<std::shared_ptr<Expr>> input,
         const std::shared_ptr<const milvus::expr::ExistsExpr>& expr,
         const std::string& name,
         milvus::OpContext* op_ctx,
@@ -77,6 +70,11 @@ class PhyExistsFilterExpr : public SegmentExpr {
 
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
+
+    bool
+    SupportsRawExprCache() const override {
+        return !expr_->column_.element_level_;
+    }
 
     std::string
     ToString() const override {

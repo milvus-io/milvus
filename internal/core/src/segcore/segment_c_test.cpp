@@ -40,10 +40,8 @@
 #include "exec/expression/Element.h"
 #include "expr/ITypeExpr.h"
 #include "gtest/gtest.h"
-#include "index/Index.h"
+#include "segcore/test_utils/ConsumerIndexTestUtils.h"
 #include "index/Meta.h"
-#include "index/ScalarIndexSort.h"
-#include "index/VectorIndex.h"
 #include "knowhere/binaryset.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/config.h"
@@ -56,7 +54,6 @@
 #include "query/PlanNode.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/Collection.h"
-#include "segcore/ReduceStructure.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
@@ -70,15 +67,15 @@
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/PbHelper.h"
-#include "test_utils/c_api_test_utils.h"
+#include "segcore/test_utils/ConsumerCApiTestUtils.h"
 #include "test_utils/cachinglayer_test_utils.h"
-#include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
 using namespace milvus::test;
 using namespace knowhere;
+using namespace milvus::test::consumer;
 
 const int64_t ROW_COUNT = 10 * 1000;
 const int64_t BIAS = 4200;
@@ -624,6 +621,75 @@ TEST(CApiTest, SearchTestWhenNullable) {
     DeleteSegment(segment);
 }
 
+TEST(CApiTest, RetrieveWritesRowValidityToBothLocations) {
+    auto c_collection = NewCollection(get_default_schema_config_nullable());
+    CSegmentInterface segment;
+    auto status = NewSegment(c_collection, Growing, -1, &segment, false);
+    ASSERT_EQ(status.error_code, Success);
+    auto col = (milvus::segcore::Collection*)c_collection;
+
+    // DataGen marks the odd rows of the nullable INT64 field as null.
+    int N = 100;
+    auto dataset = DataGen(col->get_schema(), N);
+    int64_t offset;
+    PreInsert(segment, N, &offset);
+    auto insert_data = serialize(dataset.raw_);
+    auto ins_res = Insert(segment,
+                          offset,
+                          N,
+                          dataset.row_ids_.data(),
+                          dataset.timestamps_.data(),
+                          insert_data.data(),
+                          insert_data.size());
+    ASSERT_EQ(ins_res.error_code, Success);
+
+    std::vector<proto::plan::GenericValue> retrieve_pks;
+    for (int64_t pk = 0; pk < N; ++pk) {
+        proto::plan::GenericValue value;
+        value.set_int64_val(pk);
+        retrieve_pks.push_back(value);
+    }
+    auto schema = col->get_schema();
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
+    auto term_expr = std::make_shared<milvus::expr::TermFilterExpr>(
+        milvus::expr::ColumnInfo(
+            FieldId(101), DataType::INT64, std::vector<std::string>()),
+        retrieve_pks);
+    plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+    plan->plan_node_->plannodes_ = CreateRetrievePlanByExpr(term_expr);
+    plan->field_ids_ = {FieldId(101), FieldId(102)};
+
+    CRetrieveResult* retrieve_result = nullptr;
+    auto res = CRetrieve(
+        segment, plan.get(), dataset.timestamps_[N - 1] + 10, &retrieve_result);
+    ASSERT_EQ(res.error_code, Success);
+    auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
+    ASSERT_TRUE(query_result->ParseFromArray(retrieve_result->proto_blob,
+                                             retrieve_result->proto_size));
+    DeleteRetrieveResult(retrieve_result);
+
+    const proto::schema::FieldData* nullable_field = nullptr;
+    for (const auto& field_data : query_result->fields_data()) {
+        if (field_data.field_id() == 102) {
+            nullable_field = &field_data;
+        }
+    }
+    ASSERT_NE(nullable_field, nullptr);
+    ASSERT_EQ(nullable_field->scalars().valid_data_size(), N);
+    ASSERT_EQ(nullable_field->valid_data_size(), N);
+    int64_t null_count = 0;
+    for (int i = 0; i < N; ++i) {
+        EXPECT_EQ(nullable_field->valid_data(i),
+                  nullable_field->scalars().valid_data(i));
+        null_count += nullable_field->valid_data(i) ? 0 : 1;
+    }
+    EXPECT_GT(null_count, 0);
+    EXPECT_LT(null_count, N);
+
+    DeleteCollection(c_collection);
+    DeleteSegment(segment);
+}
+
 TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
     auto collection = NewCollection(get_default_schema_config().c_str());
     CSegmentInterface segment;
@@ -725,40 +791,6 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
 
     DeleteCollection(collection);
     DeleteSegment(segment);
-}
-
-TEST(CApiTest, TestMultiElement) {
-    std::vector<std::string> params;
-    for (int i = 0; i < 100; i++) {
-        params.push_back(std::to_string(i));
-    }
-    auto multi_element =
-        std::make_shared<milvus::exec::SortVectorElement<std::string>>(params);
-    std::string target = "50";
-    auto res = multi_element->In(target);
-    ASSERT_EQ(res, true);
-    target = "30";
-    res = multi_element->In(target);
-    ASSERT_EQ(res, true);
-    target = "40";
-    res = multi_element->In(target);
-    ASSERT_EQ(res, true);
-    target = "100";
-    res = multi_element->In(target);
-    ASSERT_EQ(res, false);
-    target = "1000";
-    res = multi_element->In(target);
-    ASSERT_EQ(res, false);
-
-    std::string_view target_view = "30";
-    res = multi_element->In(target_view);
-    ASSERT_EQ(res, true);
-    target_view = "40";
-    res = multi_element->In(target_view);
-    ASSERT_EQ(res, true);
-    target_view = "50";
-    res = multi_element->In(target_view);
-    ASSERT_EQ(res, true);
 }
 
 TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
@@ -1259,15 +1291,19 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
                                    N);
 
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
-    auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
+    auto vec_index =
+        dynamic_cast<const index::IVectorReader*>(indexing.reader.get());
     SearchInfo search_info;
     search_info.topk_ = TOPK;
     search_info.metric_type_ = knowhere::metric::L2;
     search_info.search_params_ = generate_search_conf(
         IndexEnum::INDEX_FAISS_IVFSQ8, knowhere::metric::L2);
     SearchResult result_on_index;
-    vec_index->Query(
-        query_dataset, search_info, nullptr, nullptr, result_on_index);
+    vec_index->Search(query_dataset,
+                      MakeVectorSearchParams(search_info),
+                      milvus::BitsetView{},
+                      nullptr,
+                      result_on_index);
     EXPECT_EQ(result_on_index.distances_.size(), num_queries * TOPK);
 
     auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
@@ -1284,8 +1320,8 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     ASSERT_EQ(status.error_code, Success);
 
     // load index for vec field, load raw data for scalar field
-    auto load_index_info = CreateTestLoadIndexInfo(
-        std::move(indexing), DataType::VECTOR_FLOAT, 100);
+    auto load_index_info =
+        MakeLoadIndexInfo(std::move(indexing), DataType::VECTOR_FLOAT, 100);
     auto sealed_segment = CreateSealedWithFieldDataLoaded(schema, dataset);
     sealed_segment->DropFieldData(FieldId(100));
     sealed_segment->LoadIndex(load_index_info);
@@ -1431,12 +1467,16 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
 
     // gen query dataset and query on index before moving it
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
-    auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
+    auto vec_index =
+        dynamic_cast<const index::IVectorReader*>(indexing.reader.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
     SearchResult result_on_index;
-    vec_index->Query(
-        query_dataset, search_info, nullptr, nullptr, result_on_index);
+    vec_index->Search(query_dataset,
+                      MakeVectorSearchParams(search_info),
+                      milvus::BitsetView{},
+                      nullptr,
+                      result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
@@ -1445,8 +1485,8 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto load_index_info = CreateTestLoadIndexInfo(
-        std::move(indexing), DataType::VECTOR_FLOAT, 100);
+    auto load_index_info =
+        MakeLoadIndexInfo(std::move(indexing), DataType::VECTOR_FLOAT, 100);
     auto segment = CreateSealedWithFieldDataLoaded(schema, dataset);
 
     // load vec index
@@ -1680,75 +1720,71 @@ TEST(CApiTest, RetrieveScalarFieldFromSealedSegmentWithIndex) {
 
     // load index for int8 field
     auto age8_col = raw_data.get_col<int8_t>(i8_fid);
-    GenScalarIndexing(N, age8_col.data());
-    auto age8_index = milvus::index::CreateScalarIndexSort<int8_t>();
-    age8_index->Build(N, age8_col.data());
-    load_index_info.field_id = i8_fid.get();
-    load_index_info.field_type = DataType::INT8;
-    load_index_info.index_params = GenIndexParams(age8_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age8_index));
+    auto age8_index = BuildScalarReader<int8_t>(
+        i8_fid, DataType::INT8, index::ASCENDING_SORT, N, age8_col.data());
+    load_index_info =
+        MakeLoadIndexInfo(std::move(age8_index), DataType::INT8, i8_fid.get());
+    // Derive raw-value availability from the index parameters instead of
+    // retaining the helper's zero-cost placeholder resource request.
+    load_index_info.load_resource_request.reset();
     segment->LoadIndex(load_index_info);
 
     // load index for 16 field
     auto age16_col = raw_data.get_col<int16_t>(i16_fid);
-    GenScalarIndexing(N, age16_col.data());
-    auto age16_index = milvus::index::CreateScalarIndexSort<int16_t>();
-    age16_index->Build(N, age16_col.data());
-    load_index_info.field_id = i16_fid.get();
-    load_index_info.field_type = DataType::INT16;
-    load_index_info.index_params = GenIndexParams(age16_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age16_index));
+    auto age16_index = BuildScalarReader<int16_t>(
+        i16_fid, DataType::INT16, index::ASCENDING_SORT, N, age16_col.data());
+    load_index_info = MakeLoadIndexInfo(
+        std::move(age16_index), DataType::INT16, i16_fid.get());
+    load_index_info.load_resource_request.reset();
     segment->LoadIndex(load_index_info);
 
     // load index for int32 field
     auto age32_col = raw_data.get_col<int32_t>(i32_fid);
-    GenScalarIndexing(N, age32_col.data());
-    auto age32_index = milvus::index::CreateScalarIndexSort<int32_t>();
-    age32_index->Build(N, age32_col.data());
-    load_index_info.field_id = i32_fid.get();
-    load_index_info.field_type = DataType::INT32;
-    load_index_info.index_params = GenIndexParams(age32_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age32_index));
+    auto age32_index = BuildScalarReader<int32_t>(
+        i32_fid, DataType::INT32, index::ASCENDING_SORT, N, age32_col.data());
+    load_index_info = MakeLoadIndexInfo(
+        std::move(age32_index), DataType::INT32, i32_fid.get());
+    load_index_info.load_resource_request.reset();
     segment->LoadIndex(load_index_info);
 
     // load index for int64 field
     auto age64_col = raw_data.get_col<int64_t>(i64_fid);
-    GenScalarIndexing(N, age64_col.data());
-    auto age64_index = milvus::index::CreateScalarIndexSort<int64_t>();
-    age64_index->Build(N, age64_col.data());
-    load_index_info.field_id = i64_fid.get();
-    load_index_info.field_type = DataType::INT64;
-    load_index_info.index_params = GenIndexParams(age64_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age64_index));
+    auto age64_index = BuildScalarReader<int64_t>(
+        i64_fid, DataType::INT64, index::ASCENDING_SORT, N, age64_col.data());
+    load_index_info = MakeLoadIndexInfo(
+        std::move(age64_index), DataType::INT64, i64_fid.get());
+    load_index_info.load_resource_request.reset();
     segment->LoadIndex(load_index_info);
 
     // load index for float field
     auto age_float_col = raw_data.get_col<float>(float_fid);
-    GenScalarIndexing(N, age_float_col.data());
-    auto age_float_index = milvus::index::CreateScalarIndexSort<float>();
-    age_float_index->Build(N, age_float_col.data());
-    load_index_info.field_id = float_fid.get();
-    load_index_info.field_type = DataType::FLOAT;
-    load_index_info.index_params = GenIndexParams(age_float_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age_float_index));
+    auto age_float_index = BuildScalarReader<float>(float_fid,
+                                                    DataType::FLOAT,
+                                                    index::ASCENDING_SORT,
+                                                    N,
+                                                    age_float_col.data());
+    load_index_info = MakeLoadIndexInfo(
+        std::move(age_float_index), DataType::FLOAT, float_fid.get());
+    load_index_info.load_resource_request.reset();
     segment->LoadIndex(load_index_info);
 
     // load index for double field
     auto age_double_col = raw_data.get_col<double>(double_fid);
-    GenScalarIndexing(N, age_double_col.data());
-    auto age_double_index = milvus::index::CreateScalarIndexSort<double>();
-    age_double_index->Build(N, age_double_col.data());
-    load_index_info.field_id = double_fid.get();
-    load_index_info.field_type = DataType::FLOAT;
-    load_index_info.index_params = GenIndexParams(age_double_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age_double_index));
+    auto age_double_index = BuildScalarReader<double>(double_fid,
+                                                      DataType::DOUBLE,
+                                                      index::ASCENDING_SORT,
+                                                      N,
+                                                      age_double_col.data());
+    load_index_info = MakeLoadIndexInfo(
+        std::move(age_double_index), DataType::DOUBLE, double_fid.get());
+    load_index_info.load_resource_request.reset();
     segment->LoadIndex(load_index_info);
+
+    for (auto field_id :
+         {i8_fid, i16_fid, i32_fid, i64_fid, float_fid, double_fid}) {
+        ASSERT_TRUE(segment->HasRawData(field_id.get()));
+        ASSERT_EQ(segment->HasFieldData(field_id), field_id == i64_fid);
+    }
 
     // create retrieve plan
     auto plan = std::make_unique<query::RetrievePlan>(schema);
@@ -1845,16 +1881,13 @@ TEST(
         value += 1;
     }
 
-    GenScalarIndexing(N, age32_index_col.data());
-    auto age32_index = milvus::index::CreateScalarIndexSort<int32_t>();
-    age32_index->Build(N, age32_index_col.data());
-
-    LoadIndexInfo load_index_info;
-    load_index_info.field_id = i32_fid.get();
-    load_index_info.field_type = DataType::INT32;
-    load_index_info.index_params = GenIndexParams(age32_index.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(age32_index));
+    auto age32_index = BuildScalarReader<int32_t>(i32_fid,
+                                                  DataType::INT32,
+                                                  index::ASCENDING_SORT,
+                                                  N,
+                                                  age32_index_col.data());
+    auto load_index_info = MakeLoadIndexInfo(
+        std::move(age32_index), DataType::INT32, i32_fid.get());
     segment->LoadIndex(load_index_info);
 
     auto age64_col = raw_data.get_col<int64_t>(i64_fid);
@@ -2052,5 +2085,9 @@ TEST(CApiTest, SearchIdTest) {
 }
 
 TEST(CApiTest, IsLoadWithDisk) {
-    ASSERT_TRUE(IsLoadWithDisk(INVERTED_INDEX_TYPE, 0));
+    bool is_load_with_disk = false;
+    const auto status =
+        IsLoadWithDisk(INVERTED_INDEX_TYPE, 0, &is_load_with_disk);
+    ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    ASSERT_TRUE(is_load_with_disk);
 }

@@ -21,26 +21,28 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/client/v3/column"
 	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/internal/rowutil"
 )
 
 const (
 	// MilvusTag struct tag const for milvus row based struct
-	MilvusTag = `milvus`
+	MilvusTag = rowutil.MilvusTag
 
 	// MilvusSkipTagValue struct tag const for skip this field.
-	MilvusSkipTagValue = `-`
+	MilvusSkipTagValue = rowutil.MilvusSkipTagValue
 
 	// MilvusTagSep struct tag const for attribute separator
-	MilvusTagSep = `;`
+	MilvusTagSep = rowutil.MilvusTagSep
 
 	// MilvusTagName struct tag const for field name
-	MilvusTagName = `NAME`
+	MilvusTagName = rowutil.MilvusTagName
 
 	// VectorDimTag struct tag const for vector dimension
 	VectorDimTag = `DIM`
@@ -116,7 +118,7 @@ func AnyToColumns(rows []interface{}, keepPkField bool, schemas ...*entity.Schem
 	for _, row := range rows {
 		// collection schema name need not to be same, since receiver could has other names
 		v := reflect.ValueOf(row)
-		set, err := reflectValueCandi(v)
+		set, err := rowutil.ParseFields(v)
 		if err != nil {
 			return nil, err
 		}
@@ -138,14 +140,14 @@ func AnyToColumns(rows []interface{}, keepPkField bool, schemas ...*entity.Schem
 			}
 			nameColumns[fieldName] = column
 
-			if candi.isPtr {
-				if candi.v.IsNil() {
+			if candi.IsPtr {
+				if candi.Value.IsNil() {
 					err = column.AppendNull()
 				} else {
-					err = column.AppendValue(candi.v.Elem().Interface())
+					err = column.AppendValue(candi.Value.Elem().Interface())
 				}
 			} else {
-				err = column.AppendValue(candi.v.Interface())
+				err = column.AppendValue(candi.Value.Interface())
 			}
 			if err != nil {
 				return nil, err
@@ -156,14 +158,14 @@ func AnyToColumns(rows []interface{}, keepPkField bool, schemas ...*entity.Schem
 		if isDynamic {
 			m := make(map[string]interface{})
 			for name, candi := range set {
-				if candi.isPtr {
-					if candi.v.IsNil() {
+				if candi.IsPtr {
+					if candi.Value.IsNil() {
 						m[name] = nil
 					} else {
-						m[name] = candi.v.Elem().Interface()
+						m[name] = candi.Value.Elem().Interface()
 					}
 				} else {
-					m[name] = candi.v.Interface()
+					m[name] = candi.Value.Interface()
 				}
 			}
 			bs, err := json.Marshal(m)
@@ -226,13 +228,26 @@ func getColumnCreators(sch *entity.Schema) map[string]columnCreator {
 			case entity.FieldTypeText:
 				data := make([]string, 0, rowsLen)
 				col = column.NewColumnText(field.Name, data)
+			case entity.FieldTypeTimestamptz:
+				col = column.NewColumnTimestamptz(field.Name, nil)
 			case entity.FieldTypeJSON:
 				data := make([][]byte, 0, rowsLen)
 				col = column.NewColumnJSONBytes(field.Name, data)
+			case entity.FieldTypeGeometry:
+				data := make([]string, 0, rowsLen)
+				col = column.NewColumnGeometryWKT(field.Name, data)
 			case entity.FieldTypeArray:
-				col = NewArrayColumn(field)
-				if col == nil {
-					return nil, errors.Newf("unsupported element type %s for Array", field.ElementType.String())
+				if field.ElementType == entity.FieldTypeStruct {
+					structColumn, err := column.NewColumnStructArrayFromSchema(field.Name, field.StructSchema)
+					if err != nil {
+						return nil, err
+					}
+					col = structColumn
+				} else {
+					col = NewArrayColumn(field)
+					if col == nil {
+						return nil, errors.Newf("unsupported element type %s for Array", field.ElementType.String())
+					}
 				}
 			case entity.FieldTypeFloatVector:
 				data := make([][]float32, 0, rowsLen)
@@ -318,8 +333,32 @@ func NewArrayColumn(f *entity.Field) column.Column {
 	}
 }
 
+var timeType = reflect.TypeOf(time.Time{})
+
+// CoerceValue converts value into a value assignable to targetType when
+// unmarshalling read-back data into typed struct fields.
+//
+// TIMESTAMPTZ columns are transported as RFC3339Nano ISO strings, so string
+// values are parsed into time.Time (or *time.Time) targets; string targets and
+// any other type pair keep the value unchanged.
+func CoerceValue(targetType reflect.Type, value any) (any, error) {
+	if value == nil {
+		return nil, nil
+	}
+	if targetType == timeType {
+		if s, ok := value.(string); ok {
+			t, err := time.Parse(time.RFC3339Nano, s)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse timestamptz string %q: %w", s, err)
+			}
+			return t, nil
+		}
+	}
+	return value, nil
+}
+
 func SetField(receiver any, fieldName string, value any) error {
-	candidates, err := reflectValueCandi(reflect.ValueOf(receiver))
+	candidates, err := rowutil.ParseFields(reflect.ValueOf(receiver))
 	if err != nil {
 		return err
 	}
@@ -330,118 +369,27 @@ func SetField(receiver any, fieldName string, value any) error {
 		return nil
 	}
 
-	if candidate.v.CanSet() {
-		if candidate.isPtr {
+	if candidate.Value.CanSet() {
+		if candidate.IsPtr {
 			if value == nil {
-				candidate.v.Set(reflect.Zero(candidate.v.Type()))
+				candidate.Value.Set(reflect.Zero(candidate.Value.Type()))
 			} else {
-				ptr := reflect.New(candidate.v.Type().Elem())
-				ptr.Elem().Set(reflect.ValueOf(value))
-				candidate.v.Set(ptr)
+				converted, err := CoerceValue(candidate.Value.Type().Elem(), value)
+				if err != nil {
+					return err
+				}
+				ptr := reflect.New(candidate.Value.Type().Elem())
+				ptr.Elem().Set(reflect.ValueOf(converted))
+				candidate.Value.Set(ptr)
 			}
 		} else {
-			candidate.v.Set(reflect.ValueOf(value))
+			converted, err := CoerceValue(candidate.Value.Type(), value)
+			if err != nil {
+				return err
+			}
+			candidate.Value.Set(reflect.ValueOf(converted))
 		}
 	}
 
 	return nil
-}
-
-type fieldCandi struct {
-	name    string
-	v       reflect.Value
-	options map[string]string
-	isPtr   bool
-}
-
-func reflectValueCandi(v reflect.Value) (map[string]fieldCandi, error) {
-	// unref **/***/... struct{}
-	for v.Kind() == reflect.Ptr {
-		v = v.Elem()
-	}
-
-	switch v.Kind() {
-	case reflect.Map: // map[string]any
-		return getMapReflectCandidates(v), nil
-	case reflect.Struct:
-		return getStructReflectCandidates(v)
-	default:
-		return nil, fmt.Errorf("unsupport row type: %s", v.Kind().String())
-	}
-}
-
-// getMapReflectCandidates converts input map into fieldCandidate struct.
-// if value is struct/map etc, it will be treated as json data type directly(if schema say so).
-func getMapReflectCandidates(v reflect.Value) map[string]fieldCandi {
-	result := make(map[string]fieldCandi)
-	iter := v.MapRange()
-	for iter.Next() {
-		key := iter.Key().String()
-		result[key] = fieldCandi{
-			name: key,
-			v:    iter.Value(),
-		}
-	}
-	return result
-}
-
-// getStructReflectCandidates parses struct fields into fieldCandidates.
-// embedded struct will be flatten as field as well.
-func getStructReflectCandidates(v reflect.Value) (map[string]fieldCandi, error) {
-	result := make(map[string]fieldCandi)
-	for i := 0; i < v.NumField(); i++ {
-		ft := v.Type().Field(i)
-		name := ft.Name
-
-		// embedded struct, flatten all fields
-		if ft.Anonymous && ft.Type.Kind() == reflect.Struct {
-			embedCandidate, err := reflectValueCandi(v.Field(i))
-			if err != nil {
-				return nil, err
-			}
-			for key, candi := range embedCandidate {
-				// check duplicated field name in different structs
-				_, ok := result[key]
-				if ok {
-					return nil, fmt.Errorf("column has duplicated name: %s when parsing field: %s", key, ft.Name)
-				}
-				result[key] = candi
-			}
-			continue
-		}
-
-		tag, ok := ft.Tag.Lookup(MilvusTag)
-		settings := make(map[string]string)
-		if ok {
-			if tag == MilvusSkipTagValue {
-				continue
-			}
-			settings = ParseTagSetting(tag, MilvusTagSep)
-			fn, has := settings[MilvusTagName]
-			if has {
-				// overwrite column to tag name
-				name = fn
-			}
-		}
-		_, ok = result[name]
-		// duplicated
-		if ok {
-			return nil, fmt.Errorf("column has duplicated name: %s when parsing field: %s", name, ft.Name)
-		}
-
-		v := v.Field(i)
-		isPtr := v.Kind() == reflect.Ptr
-		if v.Kind() == reflect.Array {
-			v = v.Slice(0, v.Len())
-		}
-
-		result[name] = fieldCandi{
-			name:    name,
-			v:       v,
-			options: settings,
-			isPtr:   isPtr,
-		}
-	}
-
-	return result, nil
 }

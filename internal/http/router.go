@@ -28,12 +28,6 @@ const LogLevelRouterPath = "/log/level"
 // EventLogRouterPath is path for eventlog control.
 const EventLogRouterPath = "/eventlog"
 
-// ExprPath is path for expression.
-const ExprPath = "/expr"
-
-// StaticPath is path for the static view.
-const StaticPath = "/static/"
-
 const RootPath = "/"
 
 // Prometheus restful api path
@@ -52,6 +46,10 @@ const (
 // proxy management restful api root path
 const (
 	RouteBackupEZ = "/management/rootcoord/ez/backup"
+
+	// RouteFeatureUsage returns the feature usage report; registered on Proxy only,
+	// gated by common.security.featureUsageEnabled and root Basic Auth.
+	RouteFeatureUsage = "/management/feature_usage"
 
 	RouteGcPause  = "/management/datacoord/garbage_collection/pause"
 	RouteGcResume = "/management/datacoord/garbage_collection/resume"

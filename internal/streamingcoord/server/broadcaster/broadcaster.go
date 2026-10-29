@@ -28,6 +28,10 @@ type Broadcaster interface {
 	// Return ErrNotPrimary if the cluster is not primary, so no DDL message can be broadcasted.
 	WithResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (BroadcastAPI, error)
 
+	// WithUnreplicableResourceKeys acquires the resource keys for a broadcast that stays in this cluster.
+	// It is accepted on any replicate role, and the message passed to Broadcast must be unreplicable.
+	WithUnreplicableResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (BroadcastAPI, error)
+
 	// WithSecondaryClusterResourceKey acquires an exclusive cluster-level resource key
 	// and verifies the cluster is secondary. Returns error if the cluster is primary.
 	// This is used for force promote operations that should only be executed on secondary clusters.
@@ -43,6 +47,10 @@ type Broadcaster interface {
 	// for all pending schema broadcast tasks that haven't completed their ack
 	// callback yet. Used during recovery to rebuild file resource refCnt.
 	GetPendingSchemaFileResources() map[int64][]int64
+
+	// GetPendingSchemaTarget returns the earliest unfinished persisted schema
+	// ALTER, or nil if none exists. It does not wait for WAL append or ACKs.
+	GetPendingSchemaTarget(collectionID int64) (*SchemaTarget, error)
 
 	// Close closes the broadcaster.
 	Close()

@@ -19,6 +19,7 @@ package storage
 import (
 	"context"
 	"io"
+	"net/http"
 
 	"github.com/minio/minio-go/v7"
 
@@ -29,10 +30,13 @@ import (
 
 var _ ObjectStorage = (*MinioObjectStorage)(nil)
 
+// minio-go caps a single CopyObject request at 5 GiB, regardless of the configured threshold.
 const minioSingleCopyObjectMaxSize = 5 * 1024 * 1024 * 1024
 
 type MinioObjectStorage struct {
 	*minio.Client
+
+	cloudProvider string
 }
 
 type ObjectReader struct {
@@ -48,11 +52,13 @@ func (or *ObjectReader) Size() (int64, error) {
 }
 
 func newMinioObjectStorageWithConfig(ctx context.Context, c *objectstorage.Config) (*MinioObjectStorage, error) {
-	minIOClient, err := objectstorage.NewMinioClient(ctx, c)
+	resolvedConfig := *c
+	resolvedConfig.CloudProvider = objectstorage.ResolveCloudProvider(c)
+	minIOClient, err := objectstorage.NewMinioClient(ctx, &resolvedConfig)
 	if err != nil {
 		return nil, err
 	}
-	return &MinioObjectStorage{minIOClient}, nil
+	return &MinioObjectStorage{Client: minIOClient, cloudProvider: resolvedConfig.CloudProvider}, nil
 }
 
 func (minioObjectStorage *MinioObjectStorage) GetObject(ctx context.Context, bucketName, objectName string, offset int64, size int64) (FileReader, error) {
@@ -109,7 +115,7 @@ func (minioObjectStorage *MinioObjectStorage) WalkWithObjects(ctx context.Contex
 
 	for object := range in {
 		if object.Err != nil {
-			return object.Err
+			return mapObjectStorageError(prefix, object.Err)
 		}
 		if !walkFunc(&ChunkObjectInfo{FilePath: object.Key, ModifyTime: object.LastModified}) {
 			return nil
@@ -120,10 +126,26 @@ func (minioObjectStorage *MinioObjectStorage) WalkWithObjects(ctx context.Contex
 
 func (minioObjectStorage *MinioObjectStorage) RemoveObject(ctx context.Context, bucketName, objectName string) error {
 	err := minioObjectStorage.Client.RemoveObject(ctx, bucketName, objectName, minio.RemoveObjectOptions{})
+	if isDeleteSucceededWithOK(err) {
+		return nil
+	}
 	return mapObjectStorageError(objectName, err)
 }
 
+// isDeleteSucceededWithOK reports whether a RemoveObject error only says that the
+// store answered DeleteObject with HTTP 200. The S3 API specifies 204 for a
+// successful delete and minio-go reports every other status as an error, but
+// some S3-compatible stores answer 200 and have deleted the object. A
+// conforming store never answers 200 here, so this changes nothing for them.
+func isDeleteSucceededWithOK(err error) bool {
+	if err == nil {
+		return false
+	}
+	return minio.ToErrorResponse(err).StatusCode == http.StatusOK
+}
+
 func (minioObjectStorage *MinioObjectStorage) CopyObjectCrossBucket(ctx context.Context, srcBucket, srcObjectName, dstBucket, dstObjectName string) error {
+	singleCopyMaxSize := min(paramtable.Get().MinioCfg.MultipartCopyThreshold.GetAsInt64(), minioSingleCopyObjectMaxSize)
 	srcOpts := minio.CopySrcOptions{
 		Bucket: srcBucket,
 		Object: srcObjectName,
@@ -136,12 +158,15 @@ func (minioObjectStorage *MinioObjectStorage) CopyObjectCrossBucket(ctx context.
 	if err != nil {
 		return mapObjectStorageError(srcObjectName, err)
 	}
-	if srcInfo.Size <= minioSingleCopyObjectMaxSize {
+	// GCS's XML API has no multipart copy: x-amz-copy-source-range (emitted by
+	// ComposeObject) has no x-goog-* equivalent. Its whole-object copy has no
+	// 5GiB cap though, so GCP always takes the single-copy path.
+	if srcInfo.Size <= singleCopyMaxSize || minioObjectStorage.cloudProvider == objectstorage.CloudProviderGCP {
 		_, err = minioObjectStorage.CopyObject(ctx, dstOpts, srcOpts)
 		return mapObjectStorageError(srcObjectName, err)
 	}
-	// MinIO's single CopyObject path is capped at 5GiB. ComposeObject still runs
-	// provider-side and avoids streaming snapshot data through Milvus.
+	// Copy larger objects in parts to reduce the work per request. ComposeObject
+	// runs provider-side and avoids streaming snapshot data through Milvus.
 	_, err = minioObjectStorage.ComposeObject(ctx, dstOpts, srcOpts)
 	return mapObjectStorageError(srcObjectName, err)
 }

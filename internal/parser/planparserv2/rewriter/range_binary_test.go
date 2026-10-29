@@ -194,6 +194,53 @@ func TestRewrite_BinaryRange_OR_BinaryRange_PreferInclusive(t *testing.T) {
 	require.Equal(t, int64(30), bre.GetUpperValue().GetInt64Val())
 }
 
+// Test BinaryRangeExpr OR BinaryRangeExpr - equal lower values, mixed inclusivity.
+// A union must keep the weaker (inclusive) bound regardless of operand order.
+func TestRewrite_BinaryRange_OR_BinaryRange_EqualLower_PreferInclusive(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	// (10 < x < 30) OR (10 <= x < 20) → (10 <= x < 30)
+	expr, err := parser.ParseExpr(helper, `(Int64Field > 10 and Int64Field < 30) or (Int64Field >= 10 and Int64Field < 20)`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	bre := expr.GetBinaryRangeExpr()
+	require.NotNil(t, bre)
+	require.Equal(t, true, bre.GetLowerInclusive(), "union must keep the inclusive lower bound")
+	require.Equal(t, false, bre.GetUpperInclusive())
+	require.Equal(t, int64(10), bre.GetLowerValue().GetInt64Val())
+	require.Equal(t, int64(30), bre.GetUpperValue().GetInt64Val())
+}
+
+// Test BinaryRangeExpr OR BinaryRangeExpr - same as above with the operands swapped.
+// Both orders must produce the same plan.
+func TestRewrite_BinaryRange_OR_BinaryRange_EqualLower_PreferInclusive_Swapped(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	// (10 <= x < 20) OR (10 < x < 30) → (10 <= x < 30)
+	expr, err := parser.ParseExpr(helper, `(Int64Field >= 10 and Int64Field < 20) or (Int64Field > 10 and Int64Field < 30)`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	bre := expr.GetBinaryRangeExpr()
+	require.NotNil(t, bre)
+	require.Equal(t, true, bre.GetLowerInclusive(), "union must keep the inclusive lower bound")
+	require.Equal(t, false, bre.GetUpperInclusive())
+	require.Equal(t, int64(10), bre.GetLowerValue().GetInt64Val())
+	require.Equal(t, int64(30), bre.GetUpperValue().GetInt64Val())
+}
+
+// Test BinaryRangeExpr OR BinaryRangeExpr - equal lower values on VarChar.
+func TestRewrite_BinaryRange_OR_BinaryRange_EqualLower_VarChar(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	// ("b" < x <= "d") OR ("b" <= x <= "c") → ("b" <= x <= "d")
+	expr, err := parser.ParseExpr(helper, `(VarCharField > "b" and VarCharField <= "d") or (VarCharField >= "b" and VarCharField <= "c")`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	bre := expr.GetBinaryRangeExpr()
+	require.NotNil(t, bre)
+	require.Equal(t, true, bre.GetLowerInclusive(), "union must keep the inclusive lower bound")
+	require.Equal(t, true, bre.GetUpperInclusive())
+	require.Equal(t, "b", bre.GetLowerValue().GetStringVal())
+	require.Equal(t, "d", bre.GetUpperValue().GetStringVal())
+}
+
 // Test with Float fields
 func TestRewrite_BinaryRange_AND_Float(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)

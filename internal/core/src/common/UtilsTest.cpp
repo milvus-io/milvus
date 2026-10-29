@@ -12,10 +12,46 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <vector>
 
 #include "common/Utils.h"
 #include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
+
+TEST(Util_Common, SparseRowsRejectMisalignedSizes) {
+    for (bool validate : {true, false}) {
+        for (size_t size : {9, 1, 7, 17, 25}) {
+            SCOPED_TRACE(size);
+            SCOPED_TRACE(validate);
+            std::string bytes(size, '\0');
+            try {
+                (void)milvus::CopyAndWrapSparseRow(
+                    bytes.data(), bytes.size(), validate);
+                FAIL() << "expected invalid sparse row length";
+            } catch (const milvus::SegcoreError& error) {
+                EXPECT_EQ(error.get_error_code(),
+                          milvus::ErrorCode::DataFormatBroken);
+            }
+        }
+    }
+}
+
+TEST(Util_Common, SparseRowsPreserveAlignedData) {
+    const std::string bytes("\x01\0\0\0\0\0\x80\x3f", 8);
+    for (bool validate : {true, false}) {
+        std::vector<std::string> rows{"", bytes, bytes};
+        auto result = milvus::SparseBytesToRows(rows, validate);
+        EXPECT_EQ(result[0].size(), 0);
+        for (size_t i = 1; i < rows.size(); ++i) {
+            ASSERT_EQ(result[i].size(), 1);
+            EXPECT_EQ(result[i][0].id, 1);
+            EXPECT_FLOAT_EQ(result[i][0].val, 1.0f);
+            EXPECT_EQ(std::string(static_cast<const char*>(result[i].data()),
+                                  result[i].data_byte_size()),
+                      bytes);
+        }
+    }
+}
 
 TEST(Util_Common, GetCommonPrefix) {
     std::string str1 = "";
@@ -87,6 +123,191 @@ TEST(Util_Common, MutableFieldDataRowValidData) {
     EXPECT_TRUE(vector_field.valid_data().empty());
     ASSERT_EQ(vector_field.vectors().valid_data_size(), 1);
     EXPECT_TRUE(vector_field.vectors().valid_data(0));
+}
+
+TEST(Util_Common, FieldDataRowValidDataPrefersLegacy) {
+    // An older component rewrote the legacy location and forwarded a stale
+    // field-specific copy.
+    milvus::DataArray field_data;
+    field_data.add_valid_data(true);
+    field_data.add_valid_data(true);
+    auto* scalar_valid_data =
+        field_data.mutable_scalars()->mutable_valid_data();
+    scalar_valid_data->Add(true);
+    scalar_valid_data->Add(false);
+
+    const auto& valid_data = milvus::GetFieldDataRowValidData(field_data);
+    ASSERT_EQ(valid_data.size(), 2);
+    EXPECT_TRUE(valid_data[0]);
+    EXPECT_TRUE(valid_data[1]);
+}
+
+TEST(Util_Common, SyncFieldDataRowValidData) {
+    // Field-specific only: mirrored to the legacy location.
+    milvus::DataArray scalar_field;
+    scalar_field.set_type(milvus::proto::schema::DataType::Int64);
+    auto* scalar_valid_data =
+        milvus::MutableFieldDataRowValidData(&scalar_field);
+    scalar_valid_data->Add(true);
+    scalar_valid_data->Add(false);
+    milvus::SyncFieldDataRowValidData(&scalar_field);
+    ASSERT_EQ(scalar_field.valid_data_size(), 2);
+    EXPECT_TRUE(scalar_field.valid_data(0));
+    EXPECT_FALSE(scalar_field.valid_data(1));
+    ASSERT_EQ(scalar_field.scalars().valid_data_size(), 2);
+
+    // Conflicting locations: the legacy value is written to both.
+    milvus::DataArray vector_field;
+    vector_field.add_valid_data(false);
+    vector_field.add_valid_data(true);
+    auto* vector_valid_data =
+        vector_field.mutable_vectors()->mutable_valid_data();
+    vector_valid_data->Add(true);
+    vector_valid_data->Add(true);
+    milvus::SyncFieldDataRowValidData(&vector_field);
+    ASSERT_EQ(vector_field.vectors().valid_data_size(), 2);
+    EXPECT_FALSE(vector_field.vectors().valid_data(0));
+    EXPECT_TRUE(vector_field.vectors().valid_data(1));
+    ASSERT_EQ(vector_field.valid_data_size(), 2);
+    EXPECT_FALSE(vector_field.valid_data(0));
+
+    // No validity at all: both locations stay empty.
+    milvus::DataArray non_nullable_field;
+    non_nullable_field.mutable_scalars();
+    milvus::SyncFieldDataRowValidData(&non_nullable_field);
+    EXPECT_TRUE(non_nullable_field.valid_data().empty());
+    EXPECT_TRUE(non_nullable_field.scalars().valid_data().empty());
+
+    // Struct arrays: every sub-field is synced.
+    milvus::DataArray struct_field;
+    auto* sub_field =
+        struct_field.mutable_struct_arrays()->mutable_fields()->Add();
+    sub_field->mutable_scalars()->mutable_valid_data()->Add(false);
+    milvus::SyncFieldDataRowValidData(&struct_field);
+    EXPECT_TRUE(struct_field.valid_data().empty());
+    ASSERT_EQ(sub_field->valid_data_size(), 1);
+    EXPECT_FALSE(sub_field->valid_data(0));
+}
+
+TEST(Util_Common, SaturatingAddReturnsExactSum) {
+    EXPECT_EQ(milvus::SaturatingAdd(uint32_t{40}, uint32_t{2}), uint32_t{42});
+}
+
+TEST(Util_Common, SaturatingAddClampsOnOverflow) {
+    constexpr auto max = std::numeric_limits<uint64_t>::max();
+    EXPECT_EQ(milvus::SaturatingAdd(max - 1, uint64_t{2}), max);
+}
+
+TEST(Util_Common, SaturatingMultiplyReturnsExactProduct) {
+    EXPECT_EQ(milvus::SaturatingMultiply(uint32_t{6}, uint32_t{7}),
+              uint32_t{42});
+}
+
+TEST(Util_Common, SaturatingMultiplyClampsOnOverflow) {
+    constexpr auto max = std::numeric_limits<uint64_t>::max();
+    EXPECT_EQ(milvus::SaturatingMultiply(max / 2 + 1, uint64_t{2}), max);
+}
+
+TEST(Util_Common, SparseRowValidationAndCopy) {
+    using SparseRow = knowhere::sparse::SparseRow<milvus::SparseValueType>;
+    SparseRow source(std::vector<std::pair<uint32_t, float>>{
+        {0, 0.0f},
+        {std::numeric_limits<uint32_t>::max() - 1,
+         std::numeric_limits<float>::max()}});
+    std::string unaligned(source.data_byte_size() + 1, '\0');
+    std::memcpy(unaligned.data() + 1, source.data(), source.data_byte_size());
+    auto* data = unaligned.data() + 1;
+    EXPECT_EQ(milvus::ValidateSparseRow(data, source.data_byte_size()),
+              nullptr);
+    auto copy =
+        milvus::CopyAndWrapSparseRow(data, source.data_byte_size(), true);
+    ASSERT_EQ(copy.size(), source.size());
+    for (size_t i = 0; i < source.size(); ++i) {
+        EXPECT_EQ(copy[i].id, source[i].id);
+        EXPECT_EQ(copy[i].val, source[i].val);
+    }
+    std::memset(data, 0, source.data_byte_size());
+    EXPECT_EQ(copy[1].id, source[1].id);
+    EXPECT_EQ(copy[1].val, source[1].val);
+
+    EXPECT_EQ(milvus::ValidateSparseRow(nullptr, 0), nullptr);
+    EXPECT_EQ(milvus::CopyAndWrapSparseRow("", 0, true).size(), 0);
+}
+
+TEST(Util_Common, SparseRowValidationRejectsInvalidData) {
+    using SparseRow = knowhere::sparse::SparseRow<milvus::SparseValueType>;
+    auto check_invalid = [](const void* data, size_t size, const char* reason) {
+        EXPECT_STREQ(milvus::ValidateSparseRow(data, size), reason);
+        try {
+            milvus::CopyAndWrapSparseRow(data, size, true);
+            FAIL() << "expected rejection: " << reason;
+        } catch (const milvus::SegcoreError& e) {
+            EXPECT_EQ(e.get_error_code(), milvus::DataFormatBroken);
+            EXPECT_NE(std::string(e.what()).find(reason), std::string::npos);
+        }
+    };
+    // Invalid lengths must fail before accessing or copying the buffer.
+    check_invalid(nullptr, 1, "Invalid size for sparse row data");
+    check_invalid(nullptr,
+                  SparseRow::element_size() + 1,
+                  "Invalid size for sparse row data");
+    const std::vector<
+        std::pair<std::vector<std::pair<uint32_t, float>>, const char*>>
+        cases = {{{{2, 1}, {2, 2}},
+                  "Invalid sparse row: id should be strict ascending"},
+                 {{{3, 1}, {2, 2}},
+                  "Invalid sparse row: id should be strict ascending"},
+                 {{{std::numeric_limits<uint32_t>::max(), 1}},
+                  "Invalid sparse row: id should be smaller than uint32 max"},
+                 {{{1, -1}}, "Invalid sparse row: negative value"},
+                 {{{1, std::numeric_limits<float>::infinity()}},
+                  "Invalid sparse row: NaN or Inf value"},
+                 {{{1, std::numeric_limits<float>::quiet_NaN()}},
+                  "Invalid sparse row: NaN or Inf value"}};
+    for (const auto& [entries, reason] : cases) {
+        SparseRow source(entries);
+        check_invalid(source.data(), source.data_byte_size(), reason);
+        // Trusted callers retain the existing opt-out from validation.
+        EXPECT_NO_THROW(milvus::CopyAndWrapSparseRow(
+            source.data(), source.data_byte_size(), false));
+    }
+}
+
+TEST(Util_Common, SparseRowValidationReportsOrdering) {
+    using SparseRow = knowhere::sparse::SparseRow<milvus::SparseValueType>;
+    bool sorted = false;
+    EXPECT_EQ(milvus::ValidateSparseRow(nullptr, 0, true, &sorted), nullptr);
+    EXPECT_TRUE(sorted);
+    SparseRow ordered(std::vector<std::pair<uint32_t, float>>{{0, 0}, {3, 1}});
+    EXPECT_EQ(milvus::ValidateSparseRow(
+                  ordered.data(), ordered.data_byte_size(), true, &sorted),
+              nullptr);
+    EXPECT_TRUE(sorted);
+    for (auto entries :
+         {std::vector<std::pair<uint32_t, float>>{{3, 1}, {2, 2}},
+          {{2, 1}, {2, 2}},
+          {{3, 1}, {2, 2}, {3, 3}}}) {
+        SparseRow row(entries);
+        EXPECT_EQ(milvus::ValidateSparseRow(
+                      row.data(), row.data_byte_size(), true, &sorted),
+                  nullptr);
+        EXPECT_FALSE(sorted);
+        // Reporting order must not relax validation for existing callers.
+        EXPECT_NE(milvus::ValidateSparseRow(row.data(), row.data_byte_size()),
+                  nullptr);
+    }
+    // Continue validating values after discovering an unordered pair.
+    for (auto entries :
+         {std::vector<std::pair<uint32_t, float>>{{3, 1}, {2, 2}, {1, -1}},
+          {{3, 1}, {2, 2}, {1, std::numeric_limits<float>::infinity()}},
+          {{3, 1}, {2, 2}, {1, std::numeric_limits<float>::quiet_NaN()}},
+          {{3, 1}, {2, 2}, {std::numeric_limits<uint32_t>::max(), 1}}}) {
+        SparseRow row(entries);
+        EXPECT_NE(milvus::ValidateSparseRow(
+                      row.data(), row.data_byte_size(), true, &sorted),
+                  nullptr);
+    }
+    EXPECT_NE(milvus::ValidateSparseRow(nullptr, 1, true, &sorted), nullptr);
 }
 
 TEST(SimilarityCorelation, Naive) {

@@ -15,11 +15,18 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
+#include <future>
+#include <limits>
 #include <memory>
+#include <numeric>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -29,14 +36,19 @@
 #include "common/GroupChunk.h"
 #include "common/Schema.h"
 #include "common/Types.h"
+#include "folly/ScopeGuard.h"
+#include "folly/executors/CPUThreadPoolExecutor.h"
 #include "gtest/gtest.h"
 #include "mmap/ChunkedColumnGroup.h"
+#include "milvus-storage/common/extend_status.h"
 #include "pb/common.pb.h"
 #include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/LoadOverheadController.h"
+#include "storage/LocalFileIOPool.h"
 #include "storage/ThreadPools.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
@@ -201,6 +213,87 @@ class FullyDeletedTestChunkReader : public milvus_storage::api::ChunkReader {
     size_t column_count_;
 };
 
+namespace {
+
+class CountingChunkReader : public milvus_storage::api::ChunkReader {
+ public:
+    explicit CountingChunkReader(
+        std::shared_ptr<milvus_storage::api::ChunkReader> inner)
+        : inner_(std::move(inner)) {
+    }
+
+    size_t
+    total_number_of_chunks() const override {
+        return inner_->total_number_of_chunks();
+    }
+
+    arrow::Result<std::vector<int64_t>>
+    get_chunk_indices(const std::vector<int64_t>& row_indices) override {
+        return inner_->get_chunk_indices(row_indices);
+    }
+
+    arrow::Result<std::shared_ptr<arrow::RecordBatch>>
+    get_chunk(int64_t chunk_index) override {
+        return inner_->get_chunk(chunk_index);
+    }
+
+    arrow::Result<std::vector<std::shared_ptr<arrow::RecordBatch>>>
+    get_chunks(const std::vector<int64_t>& chunk_indices,
+               size_t parallelism) override {
+        sync_calls_.fetch_add(1);
+        return inner_->get_chunks(chunk_indices, parallelism);
+    }
+
+    folly::SemiFuture<
+        arrow::Result<std::vector<std::shared_ptr<arrow::RecordBatch>>>>
+    get_chunks_async(const std::vector<int64_t>& chunk_indices,
+                     size_t parallelism) override {
+        async_calls_.fetch_add(1);
+        return inner_->get_chunks_async(chunk_indices, parallelism);
+    }
+
+    arrow::Result<std::vector<uint64_t>>
+    get_chunk_estimated_size() override {
+        return inner_->get_chunk_estimated_size();
+    }
+
+    arrow::Result<std::vector<std::vector<uint64_t>>>
+    get_chunk_column_estimated_size() override {
+        return inner_->get_chunk_column_estimated_size();
+    }
+
+    arrow::Result<std::vector<uint64_t>>
+    get_chunk_rows() override {
+        if (!chunk_rows_status_.ok()) {
+            return chunk_rows_status_;
+        }
+        return inner_->get_chunk_rows();
+    }
+
+    size_t
+    SyncCalls() const {
+        return sync_calls_.load();
+    }
+
+    size_t
+    AsyncCalls() const {
+        return async_calls_.load();
+    }
+
+    void
+    SetChunkRowsStatus(arrow::Status status) {
+        chunk_rows_status_ = std::move(status);
+    }
+
+ private:
+    std::shared_ptr<milvus_storage::api::ChunkReader> inner_;
+    std::atomic<size_t> sync_calls_{0};
+    std::atomic<size_t> async_calls_{0};
+    arrow::Status chunk_rows_status_;
+};
+
+}  // namespace
+
 class ManifestGroupTranslatorTest : public ::testing::TestWithParam<bool> {
     void
     SetUp() override {
@@ -213,6 +306,11 @@ class ManifestGroupTranslatorTest : public ::testing::TestWithParam<bool> {
             schema_, n_batch_, per_batch_, dim_, TestLocalPath, base_path_);
     }
 
+    void
+    TearDown() override {
+        storage::LocalFileIOPool::GetInstance().Configure(0);
+    }
+
  protected:
     ~ManifestGroupTranslatorTest() override {
         if (std::filesystem::exists(mmap_dir_)) {
@@ -220,10 +318,27 @@ class ManifestGroupTranslatorTest : public ::testing::TestWithParam<bool> {
         }
     }
 
+    std::unordered_map<std::string, std::vector<FieldId>>
+    GetPhysicalColumnFieldIds(
+        const std::unordered_map<FieldId, FieldMeta>& field_metas) const {
+        std::unordered_map<std::string, std::vector<FieldId>> result;
+        for (const auto& [field_id, _] : field_metas) {
+            result[schema_->get_storage_column_name(field_id)].push_back(
+                field_id);
+        }
+        return result;
+    }
+
     // Helper to create a ManifestGroupTranslator for a given column group
     std::unique_ptr<ManifestGroupTranslator>
-    MakeTranslator(int64_t cg_index, bool use_mmap) {
-        auto chunk_reader = test_data_->CreateChunkReader(cg_index);
+    MakeTranslator(int64_t cg_index,
+                   bool use_mmap,
+                   bool enable_async_load = false,
+                   std::shared_ptr<milvus_storage::api::ChunkReader>
+                       chunk_reader = nullptr) {
+        if (chunk_reader == nullptr) {
+            chunk_reader = test_data_->CreateChunkReader(cg_index);
+        }
         auto field_metas = test_data_->GetFieldMetas(cg_index);
         return std::make_unique<ManifestGroupTranslator>(
             segment_id_,
@@ -231,6 +346,7 @@ class ManifestGroupTranslatorTest : public ::testing::TestWithParam<bool> {
             cg_index,
             std::move(chunk_reader),
             field_metas,
+            GetPhysicalColumnFieldIds(field_metas),
             test_data_->GetColumnGroups()->at(cg_index)->columns,
             test_data_->GetColumnGroups()->at(cg_index)->columns,
             use_mmap,
@@ -239,7 +355,13 @@ class ManifestGroupTranslatorTest : public ::testing::TestWithParam<bool> {
             field_metas.size(),
             milvus::proto::common::LoadPriority::LOW,
             /*eager_load=*/true,
-            /*warmup_policy=*/"");
+            /*warmup_policy=*/"",
+            /*cache_key_suffix=*/"",
+            /*fallback_bytes_per_row=*/0,
+            /*shard=*/"",
+            /*column_size_estimate=*/std::nullopt,
+            /*writeback_mode=*/MmapChunkWritebackMode::Disabled,
+            /*enable_async_load=*/enable_async_load);
     }
 
     SchemaPtr schema_;
@@ -262,10 +384,9 @@ TEST_P(ManifestGroupTranslatorTest, TestScalarColumnGroup) {
     auto use_mmap = GetParam();
     auto translator = MakeTranslator(/*cg_index=*/0, use_mmap);
 
-    auto executor_workers = milvus::ThreadPools::GetLoadExecutorWorkers();
     auto memory_group =
         milvus::storage::LoadMemoryOverheadController::GetInstance()
-            .GetOrCreate(executor_workers);
+            .GetOrCreate();
     ASSERT_TRUE(translator->meta()->loading_overhead_config.has_value());
     ASSERT_TRUE(
         translator->meta()->loading_overhead_config->memory.has_value());
@@ -282,7 +403,7 @@ TEST_P(ManifestGroupTranslatorTest, TestScalarColumnGroup) {
             translator->meta()->loading_overhead_config->file.has_value());
         EXPECT_EQ(translator->meta()->loading_overhead_config->file->group,
                   milvus::storage::LoadFileOverheadController::GetInstance()
-                      .GetOrCreate(executor_workers));
+                      .GetOrCreate());
         ASSERT_TRUE(
             translator->meta()
                 ->loading_overhead_config->file->max_runtime_unit.has_value());
@@ -489,6 +610,7 @@ TEST_P(ManifestGroupTranslatorTest,
         /*column_group_index=*/0,
         std::move(chunk_reader),
         field_metas,
+        GetPhysicalColumnFieldIds(field_metas),
         column_group->columns,
         *needed_columns,
         GetParam(),
@@ -543,6 +665,7 @@ TEST_P(ManifestGroupTranslatorTest,
         /*column_group_index=*/0,
         std::move(chunk_reader),
         field_metas,
+        GetPhysicalColumnFieldIds(field_metas),
         column_group->columns,
         *needed_columns,
         GetParam(),
@@ -590,6 +713,7 @@ TEST_P(ManifestGroupTranslatorTest, TestPrecomputedColumnEstimatesAreReused) {
             /*column_group_index=*/0,
             std::move(chunk_reader),
             field_metas,
+            GetPhysicalColumnFieldIds(field_metas),
             column_group->columns,
             *needed_columns,
             GetParam(),
@@ -655,6 +779,7 @@ TEST_P(ManifestGroupTranslatorTest,
         /*column_group_index=*/0,
         std::move(chunk_reader),
         projected_field_metas,
+        GetPhysicalColumnFieldIds(projected_field_metas),
         column_group->columns,
         *needed_columns,
         GetParam(),
@@ -728,6 +853,7 @@ TEST_P(ManifestGroupTranslatorTest,
         /*column_group_index=*/0,
         std::move(chunk_reader),
         projected_field_metas,
+        GetPhysicalColumnFieldIds(projected_field_metas),
         column_group->columns,
         *needed_columns,
         GetParam(),
@@ -777,6 +903,7 @@ TEST_P(ManifestGroupTranslatorTest,
         /*column_group_index=*/0,
         std::move(chunk_reader),
         projected_field_metas,
+        GetPhysicalColumnFieldIds(projected_field_metas),
         column_group->columns,
         *needed_columns,
         GetParam(),
@@ -816,6 +943,7 @@ TEST_P(ManifestGroupTranslatorTest,
         /*column_group_index=*/0,
         std::move(chunk_reader),
         field_metas,
+        GetPhysicalColumnFieldIds(field_metas),
         column_group->columns,
         column_group->columns,
         GetParam(),
@@ -898,6 +1026,7 @@ TEST_P(ManifestGroupTranslatorTest,
         /*column_group_index=*/0,
         std::move(chunk_reader),
         projected_field_metas,
+        GetPhysicalColumnFieldIds(projected_field_metas),
         column_group->columns,
         *needed_columns,
         GetParam(),
@@ -965,6 +1094,7 @@ TEST_P(ManifestGroupTranslatorTest,
         /*column_group_index=*/0,
         std::move(chunk_reader),
         projected_field_metas,
+        GetPhysicalColumnFieldIds(projected_field_metas),
         column_group->columns,
         *needed_columns,
         GetParam(),
@@ -1022,6 +1152,7 @@ TEST_P(ManifestGroupTranslatorTest,
         /*column_group_index=*/0,
         std::move(chunk_reader),
         projected_field_metas,
+        GetPhysicalColumnFieldIds(projected_field_metas),
         column_group->columns,
         *needed_columns,
         GetParam(),
@@ -1075,6 +1206,7 @@ TEST_P(ManifestGroupTranslatorTest,
         /*column_group_index=*/0,
         std::move(chunk_reader),
         projected_field_metas,
+        GetPhysicalColumnFieldIds(projected_field_metas),
         column_group->columns,
         *needed_columns,
         GetParam(),
@@ -1120,6 +1252,262 @@ TEST_P(ManifestGroupTranslatorTest, TestGetCellsOrderPreservation) {
         for (size_t i = 0; i < subset_cells.size(); ++i) {
             EXPECT_EQ(subset_cells[i].first, subset_cids[i]);
         }
+    }
+}
+
+TEST_P(ManifestGroupTranslatorTest, TestAsyncLoadParity) {
+    auto use_mmap = GetParam();
+    auto count_mmap_files = [this]() {
+        size_t count = 0;
+        for (const auto& entry :
+             std::filesystem::directory_iterator(mmap_dir_)) {
+            count += entry.is_regular_file() ? 1 : 0;
+        }
+        return count;
+    };
+    auto sync_translator = MakeTranslator(0, use_mmap, false);
+    auto async_translator = MakeTranslator(0, use_mmap, true);
+    ASSERT_TRUE(sync_translator->meta()->loading_overhead_config.has_value());
+    ASSERT_TRUE(async_translator->meta()->loading_overhead_config.has_value());
+    EXPECT_EQ(sync_translator->meta()->loading_overhead_config->memory->group,
+              async_translator->meta()->loading_overhead_config->memory->group);
+    EXPECT_EQ(
+        async_translator->meta()->loading_overhead_config->memory->group,
+        storage::LoadMemoryOverheadController::GetInstance().GetOrCreate());
+    if (use_mmap) {
+        EXPECT_EQ(
+            sync_translator->meta()->loading_overhead_config->file->group,
+            async_translator->meta()->loading_overhead_config->file->group);
+        EXPECT_EQ(
+            async_translator->meta()->loading_overhead_config->file->group,
+            storage::LoadFileOverheadController::GetInstance().GetOrCreate());
+    }
+    ASSERT_EQ(sync_translator->num_cells(), async_translator->num_cells());
+
+    std::vector<milvus::cachinglayer::cid_t> cids(sync_translator->num_cells());
+    std::iota(cids.begin(), cids.end(), 0);
+    std::reverse(cids.begin(), cids.end());
+
+    auto mmap_files_before_sync = count_mmap_files();
+    auto sync_cells = sync_translator->get_cells(nullptr, cids);
+    auto mmap_files_before_async = count_mmap_files();
+    if (use_mmap) {
+        EXPECT_GT(mmap_files_before_async, mmap_files_before_sync);
+    } else {
+        EXPECT_EQ(mmap_files_before_async, mmap_files_before_sync);
+    }
+    storage::LocalFileIOPool::GetInstance().Configure(1);
+    auto async_cells = async_translator->get_cells(nullptr, cids);
+    auto mmap_files_after_async = count_mmap_files();
+    if (use_mmap) {
+        EXPECT_GT(mmap_files_after_async, mmap_files_before_async);
+    } else {
+        EXPECT_EQ(mmap_files_after_async, mmap_files_before_async);
+    }
+    ASSERT_EQ(sync_cells.size(), async_cells.size());
+    const auto field_metas = test_data_->GetFieldMetas(0);
+    for (size_t i = 0; i < sync_cells.size(); ++i) {
+        EXPECT_EQ(sync_cells[i].first, async_cells[i].first);
+        for (const auto& field_meta : field_metas) {
+            const auto field_id = field_meta.first;
+            auto sync_chunk = sync_cells[i].second->GetChunk(field_id);
+            auto async_chunk = async_cells[i].second->GetChunk(field_id);
+            ASSERT_NE(sync_chunk, nullptr);
+            ASSERT_NE(async_chunk, nullptr);
+            ASSERT_EQ(sync_chunk->RowNums(), async_chunk->RowNums());
+            ASSERT_EQ(sync_chunk->Size(), async_chunk->Size());
+            EXPECT_EQ(std::memcmp(sync_chunk->RawData(),
+                                  async_chunk->RawData(),
+                                  sync_chunk->Size()),
+                      0);
+        }
+    }
+}
+
+TEST_P(ManifestGroupTranslatorTest, AsyncOverheadBoundsWholeWindows) {
+    const auto previous_window = StorageV2AsyncLoadReadWindowSizeBytes();
+    const auto previous_cell_target = GetCellTargetSizeBytes();
+    auto restore = folly::makeGuard([&] {
+        SetStorageV2AsyncLoadReadWindowSizeBytes(previous_window);
+        SetCellTargetSizeBytes(previous_cell_target);
+    });
+    SetCellTargetSizeBytes(1);
+    const int64_t wide_window = 4 * FieldDataLoadBatchTargetBytes();
+    for (const int64_t window :
+         {int64_t{1}, wide_window, std::numeric_limits<int64_t>::max()}) {
+        SetStorageV2AsyncLoadReadWindowSizeBytes(window);
+        // Group 0 contains arrays; group 1 contains only a vector field.
+        for (const int64_t group : {int64_t{0}, int64_t{1}}) {
+            auto translator = MakeTranslator(group, GetParam(), true);
+            const auto* meta = static_cast<GroupCTMeta*>(translator->meta());
+            ASSERT_GT(meta->chunk_memory_size_.size(), 1);
+            const auto largest_cell =
+                *std::max_element(meta->chunk_memory_size_.begin(),
+                                  meta->chunk_memory_size_.end());
+            if (window == wide_window) {
+                ASSERT_LT(largest_cell, window);
+            }
+            const auto data_bound = std::max(window, largest_cell);
+            const auto memory_bound =
+                group == 0
+                    ? (data_bound > std::numeric_limits<int64_t>::max() / 2
+                           ? std::numeric_limits<int64_t>::max()
+                           : 2 * data_bound)
+                    : data_bound;
+            ASSERT_TRUE(meta->loading_overhead_config.has_value());
+            const auto& config = *meta->loading_overhead_config;
+            ASSERT_TRUE(config.memory.has_value());
+            EXPECT_EQ(config.memory->max_runtime_unit, memory_bound);
+            if (GetParam()) {
+                ASSERT_TRUE(config.file.has_value());
+                EXPECT_EQ(config.file->max_runtime_unit, data_bound);
+            }
+        }
+    }
+}
+
+TEST_P(ManifestGroupTranslatorTest, AsyncReadWindowIsCapturedForReloads) {
+    auto previous = StorageV2AsyncLoadReadWindowSizeBytes();
+    auto restore = folly::makeGuard(
+        [previous]() { SetStorageV2AsyncLoadReadWindowSizeBytes(previous); });
+    auto previous_cell_target = GetCellTargetSizeBytes();
+    auto restore_cell_target = folly::makeGuard([previous_cell_target]() {
+        SetCellTargetSizeBytes(previous_cell_target);
+    });
+    auto use_mmap = GetParam();
+
+    SetCellTargetSizeBytes(1);
+    SetStorageV2AsyncLoadReadWindowSizeBytes(
+        std::numeric_limits<int64_t>::max());
+    auto wide_window_reader =
+        std::make_shared<CountingChunkReader>(test_data_->CreateChunkReader(0));
+    auto wide_window_translator =
+        MakeTranslator(0, use_mmap, true, wide_window_reader);
+    auto num_cells = wide_window_translator->num_cells();
+    ASSERT_GT(num_cells, 1);
+    std::vector<cachinglayer::cid_t> cids(num_cells);
+    std::iota(cids.begin(), cids.end(), 0);
+    auto wide_window_cells = wide_window_translator->get_cells(nullptr, cids);
+    EXPECT_EQ(wide_window_cells.size(), num_cells);
+    EXPECT_EQ(wide_window_reader->AsyncCalls(), 1);
+
+    SetStorageV2AsyncLoadReadWindowSizeBytes(1);
+    auto reloaded_cells = wide_window_translator->get_cells(nullptr, cids);
+    EXPECT_EQ(reloaded_cells.size(), num_cells);
+    EXPECT_EQ(wide_window_reader->AsyncCalls(), 2);
+
+    auto limited_reader =
+        std::make_shared<CountingChunkReader>(test_data_->CreateChunkReader(0));
+    auto limited_translator = MakeTranslator(0, use_mmap, true, limited_reader);
+    auto limited_cells = limited_translator->get_cells(nullptr, cids);
+    EXPECT_EQ(limited_cells.size(), num_cells);
+    EXPECT_EQ(limited_reader->AsyncCalls(), num_cells);
+
+    SetStorageV2AsyncLoadReadWindowSizeBytes(
+        std::numeric_limits<int64_t>::max());
+    auto limited_reload = limited_translator->get_cells(nullptr, cids);
+    EXPECT_EQ(limited_reload.size(), num_cells);
+    EXPECT_EQ(limited_reader->AsyncCalls(), 2 * num_cells);
+}
+
+TEST_P(ManifestGroupTranslatorTest, RoutesAsyncFinalizationByMmapMode) {
+    auto use_mmap = GetParam();
+    auto& pool = storage::LocalFileIOPool::GetInstance();
+    pool.Configure(1);
+    auto io_executor = pool.GetExecutor();
+    ASSERT_TRUE(io_executor);
+    auto* worker_executor =
+        dynamic_cast<folly::CPUThreadPoolExecutor*>(io_executor.get());
+    ASSERT_NE(worker_executor, nullptr);
+
+    auto blocker_started_promise = std::make_shared<std::promise<void>>();
+    auto blocker_started = blocker_started_promise->get_future();
+    auto release_blocker_promise = std::make_shared<std::promise<void>>();
+    auto release_blocker = release_blocker_promise->get_future().share();
+    io_executor->add([blocker_started_promise, release_blocker]() {
+        blocker_started_promise->set_value();
+        release_blocker.wait();
+    });
+    if (blocker_started.wait_for(std::chrono::seconds(5)) !=
+        std::future_status::ready) {
+        release_blocker_promise->set_value();
+        FAIL() << "local file I/O blocker did not start";
+    }
+
+    auto translator = MakeTranslator(0, use_mmap, true);
+    std::vector<cachinglayer::cid_t> cids{0};
+    using CellResult =
+        std::pair<cachinglayer::cid_t, std::unique_ptr<GroupChunk>>;
+    std::future<std::vector<CellResult>> load;
+    bool blocker_released = false;
+    auto release_guard = folly::makeGuard([&]() {
+        if (!blocker_released) {
+            release_blocker_promise->set_value();
+        }
+    });
+    load = std::async(std::launch::async, [&translator, &cids]() {
+        return translator->get_cells(nullptr, cids);
+    });
+
+    if (use_mmap) {
+        auto deadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (worker_executor->getPendingTaskCount() == 0 &&
+               load.wait_for(std::chrono::milliseconds(0)) !=
+                   std::future_status::ready &&
+               std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        EXPECT_GT(worker_executor->getPendingTaskCount(), 0);
+        EXPECT_EQ(load.wait_for(std::chrono::milliseconds(0)),
+                  std::future_status::timeout);
+    } else {
+        EXPECT_EQ(load.wait_for(std::chrono::seconds(5)),
+                  std::future_status::ready);
+        EXPECT_EQ(worker_executor->getPendingTaskCount(), 0);
+    }
+
+    release_blocker_promise->set_value();
+    blocker_released = true;
+    release_guard.dismiss();
+    auto cells = load.get();
+    ASSERT_EQ(cells.size(), 1);
+    EXPECT_EQ(cells.front().first, cids.front());
+}
+
+TEST_P(ManifestGroupTranslatorTest, CapturesAsyncRolloutAtConstruction) {
+    SetStorageV2AsyncLoadEnabled(false);
+    auto sync_reader =
+        std::make_shared<CountingChunkReader>(test_data_->CreateChunkReader(0));
+    auto sync_translator =
+        MakeTranslator(0, GetParam(), StorageV2AsyncLoadEnabled(), sync_reader);
+    SetStorageV2AsyncLoadEnabled(true);
+    sync_translator->get_cells(nullptr, {0});
+    EXPECT_GT(sync_reader->SyncCalls(), 0);
+    EXPECT_EQ(sync_reader->AsyncCalls(), 0);
+
+    auto async_reader =
+        std::make_shared<CountingChunkReader>(test_data_->CreateChunkReader(0));
+    auto async_translator = MakeTranslator(
+        0, GetParam(), StorageV2AsyncLoadEnabled(), async_reader);
+    SetStorageV2AsyncLoadEnabled(false);
+    async_translator->get_cells(nullptr, {0});
+    EXPECT_EQ(async_reader->SyncCalls(), 0);
+    EXPECT_GT(async_reader->AsyncCalls(), 0);
+}
+
+TEST_P(ManifestGroupTranslatorTest, PreservesMetadataStorageError) {
+    auto reader =
+        std::make_shared<CountingChunkReader>(test_data_->CreateChunkReader(0));
+    reader->SetChunkRowsStatus(milvus_storage::MakeExtendError(
+        milvus_storage::ExtendStatusCode::StorageTransientTimeout,
+        "metadata timeout"));
+
+    try {
+        MakeTranslator(0, GetParam(), true, reader);
+        FAIL() << "expected storage metadata error";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::StorageTransientError);
     }
 }
 

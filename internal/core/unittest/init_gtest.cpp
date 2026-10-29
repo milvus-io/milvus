@@ -34,9 +34,9 @@
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
 #include "storage/RemoteChunkManagerSingleton.h"
+#include "storage/Util.h"
 #include "index/Meta.h"
 #include "test_utils/Constants.h"
-#include "test_utils/storage_test_utils.h"
 
 std::string TestLocalPath;
 std::string TestRemotePath;
@@ -97,11 +97,29 @@ main(int argc, char** argv) {
     // Initialize expression function factory (registers aggregate functions like count, sum, min, max)
     InitExecExpressionFunctionFactory();
 
+    // Test-suite master switch: MILVUS_USE_ARROW_FS_CHUNK_MANAGER=1 runs
+    // every test that obtains a chunk manager via CreateChunkManager (the
+    // remote chunk manager singleton below, DataGen, indexbuilder, ...) on
+    // the ArrowFileSystem backed IO path instead of the legacy one.
+    if (auto* env = std::getenv("MILVUS_USE_ARROW_FS_CHUNK_MANAGER")) {
+        std::string value(env);
+        milvus::storage::SetUseArrowFileSystemChunkManager(value == "1" ||
+                                                           value == "true");
+    }
+
     milvus::storage::LocalChunkManagerSingleton::GetInstance().Init(
         TestLocalPath);
+    milvus::storage::StorageConfig local_config;
+    local_config.storage_type = "local";
+    local_config.root_path = TestRemotePath;
     milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(
-        get_default_local_storage_config());
-    milvus::storage::MmapManager::GetInstance().Init(get_default_mmap_config());
+        local_config);
+    milvus::storage::MmapManager::GetInstance().Init(
+        {"willneed",
+         TestMmapPath,
+         uint64_t{2} * 1024 * 1024 * 1024,
+         uint64_t{4} * 1024 * 1024,
+         false});
 
     CStorageConfig arrow_fs_config = {};
     arrow_fs_config.root_path = TestLocalPath.c_str();
@@ -125,6 +143,5 @@ main(int argc, char** argv) {
         std::chrono::milliseconds(0),
         std::chrono::milliseconds(-1));
 
-    milvus::index::kOverrideRootPathForUT = "files";
     return RUN_ALL_TESTS();
 }

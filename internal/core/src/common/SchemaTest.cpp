@@ -560,6 +560,35 @@ TEST_F(SchemaTest, ExternalFunctionOutputUsesFieldIdColumnName) {
               columns->end());
 }
 
+TEST_F(SchemaTest, ExternalColumnResolvesAllLogicalAliases) {
+    milvus::proto::schema::CollectionSchema schema_proto;
+    schema_proto.set_external_source("s3://bucket/path");
+    schema_proto.set_external_spec(R"({"format":"parquet"})");
+
+    auto* pk_field = schema_proto.add_fields();
+    pk_field->set_fieldid(100);
+    pk_field->set_name("pk");
+    pk_field->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk_field->set_is_primary_key(true);
+    pk_field->set_external_field("id_col");
+
+    for (int64_t field_id : {101, 102}) {
+        auto* field = schema_proto.add_fields();
+        field->set_fieldid(field_id);
+        field->set_name("alias_" + std::to_string(field_id));
+        field->set_data_type(milvus::proto::schema::DataType::VarChar);
+        field->set_external_field("shared");
+        auto* max_length = field->add_type_params();
+        max_length->set_key("max_length");
+        max_length->set_value("1024");
+    }
+
+    auto schema = Schema::ParseFrom(schema_proto);
+    EXPECT_EQ(schema->ResolveColumnFieldIds("shared"),
+              (std::vector<FieldId>{FieldId(101), FieldId(102)}));
+    EXPECT_EQ(schema->ResolveColumnFieldId("shared"), FieldId(101));
+}
+
 TEST_F(SchemaTest, ConvertToLoonArrowSchemaNullableDenseVectorUsesBinary) {
     auto pk_id = schema_->AddDebugField("pk_field", DataType::INT64, false);
     schema_->set_primary_field_id(pk_id);
@@ -652,6 +681,43 @@ TEST_F(SchemaTest,
               columns->end());
     EXPECT_NE(std::find(columns->begin(), columns->end(), "102"),
               columns->end());
+}
+
+TEST_F(SchemaTest, NullableStructArrayMakesSubFieldsEffectivelyNullable) {
+    milvus::proto::schema::CollectionSchema schema_proto;
+
+    auto* pk_field = schema_proto.add_fields();
+    pk_field->set_fieldid(100);
+    pk_field->set_name("pk");
+    pk_field->set_data_type(milvus::proto::schema::DataType::Int64);
+    pk_field->set_is_primary_key(true);
+
+    auto* struct_array = schema_proto.add_struct_array_fields();
+    struct_array->set_fieldid(200);
+    struct_array->set_name("events");
+    struct_array->set_nullable(true);
+
+    auto* vector = struct_array->add_fields();
+    vector->set_fieldid(201);
+    vector->set_name("events[embedding]");
+    vector->set_data_type(milvus::proto::schema::DataType::ArrayOfVector);
+    vector->set_element_type(milvus::proto::schema::DataType::FloatVector);
+    auto* dim = vector->add_type_params();
+    dim->set_key("dim");
+    dim->set_value("8");
+
+    auto* tag = struct_array->add_fields();
+    tag->set_fieldid(202);
+    tag->set_name("events[tag]");
+    tag->set_data_type(milvus::proto::schema::DataType::Array);
+    tag->set_element_type(milvus::proto::schema::DataType::VarChar);
+
+    auto schema = Schema::ParseFrom(schema_proto);
+
+    EXPECT_TRUE(schema->operator[](FieldId(201)).is_nullable());
+    EXPECT_TRUE(schema->operator[](FieldId(202)).is_nullable());
+    EXPECT_FALSE(vector->nullable());
+    EXPECT_FALSE(tag->nullable());
 }
 
 TEST_F(SchemaTest, MilvusTableRealPKLoadsSourceTimestampColumn) {

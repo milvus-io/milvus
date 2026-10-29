@@ -178,6 +178,10 @@ func (m *GrpcRootCoordClient) ShowCollectionIDs(ctx context.Context, in *rootcoo
 	return &rootcoordpb.ShowCollectionIDsResponse{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) GetRLSMetadata(ctx context.Context, in *rootcoordpb.GetRLSMetadataRequest, opts ...grpc.CallOption) (*rootcoordpb.GetRLSMetadataResponse, error) {
+	return &rootcoordpb.GetRLSMetadataResponse{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
@@ -334,12 +338,48 @@ func (m *GrpcRootCoordClient) OperatePrivilegeGroup(ctx context.Context, in *mil
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) CreateRowPolicy(ctx context.Context, in *milvuspb.CreateRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) UpdateRowPolicy(ctx context.Context, in *milvuspb.UpdateRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) DropRowPolicy(ctx context.Context, in *milvuspb.DropRowPolicyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) ListRowPolicies(ctx context.Context, in *milvuspb.ListRowPoliciesRequest, opts ...grpc.CallOption) (*milvuspb.ListRowPoliciesResponse, error) {
+	return &milvuspb.ListRowPoliciesResponse{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) SetRLSPrincipalTags(ctx context.Context, in *milvuspb.SetRLSPrincipalTagsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) GetRLSPrincipalTags(ctx context.Context, in *milvuspb.GetRLSPrincipalTagsRequest, opts ...grpc.CallOption) (*milvuspb.GetRLSPrincipalTagsResponse, error) {
+	return &milvuspb.GetRLSPrincipalTagsResponse{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) ListRLSPrincipals(ctx context.Context, in *milvuspb.ListRLSPrincipalsRequest, opts ...grpc.CallOption) (*milvuspb.ListRLSPrincipalsResponse, error) {
+	return &milvuspb.ListRLSPrincipalsResponse{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) DeleteRLSPrincipalTags(ctx context.Context, in *milvuspb.DeleteRLSPrincipalTagsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) Close() error {
 	return nil
 }
 
 func (m *GrpcRootCoordClient) GetQuotaMetrics(ctx context.Context, in *internalpb.GetQuotaMetricsRequest, opts ...grpc.CallOption) (*internalpb.GetQuotaMetricsResponse, error) {
 	return &internalpb.GetQuotaMetricsResponse{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) GetFeatureUsage(ctx context.Context, in *internalpb.GetFeatureUsageRequest, opts ...grpc.CallOption) (*internalpb.FeatureUsageReport, error) {
+	return &internalpb.FeatureUsageReport{}, m.Err
 }
 
 func (m *GrpcRootCoordClient) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) (*milvuspb.TruncateCollectionResponse, error) {
@@ -366,6 +406,10 @@ func (m *GrpcRootCoordClient) ClientHeartbeat(ctx context.Context, in *milvuspb.
 	return &milvuspb.ClientHeartbeatResponse{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) ListClientCommands(ctx context.Context, in *rootcoordpb.ListClientCommandsRequest, opts ...grpc.CallOption) (*rootcoordpb.ListClientCommandsResponse, error) {
+	return &rootcoordpb.ListClientCommandsResponse{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) DeleteClientCommand(ctx context.Context, in *milvuspb.DeleteClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.DeleteClientCommandResponse, error) {
 	return &milvuspb.DeleteClientCommandResponse{}, m.Err
 }
@@ -376,4 +420,8 @@ func (m *GrpcRootCoordClient) GetClientTelemetry(ctx context.Context, in *milvus
 
 func (m *GrpcRootCoordClient) PushClientCommand(ctx context.Context, in *milvuspb.PushClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.PushClientCommandResponse, error) {
 	return &milvuspb.PushClientCommandResponse{}, m.Err
+}
+
+func (*GrpcRootCoordClient) FetchFileResources(context.Context, *rootcoordpb.FetchFileResourcesRequest, ...grpc.CallOption) (*rootcoordpb.FetchFileResourcesResponse, error) {
+	panic("mock FetchFileResources with mockey")
 }

@@ -8,6 +8,7 @@ import (
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	metastore "github.com/milvus-io/milvus/internal/metastore"
 	streamingpb "github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	viewpb "github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -142,6 +143,63 @@ func (_c *MockStreamingNodeCataLog_GetSalvageCheckpoint_Call) RunAndReturn(run f
 	return _c
 }
 
+// ListQueryViews provides a mock function with given fields: ctx, pChannelName
+func (_m *MockStreamingNodeCataLog) ListQueryViews(ctx context.Context, pChannelName string) ([]*viewpb.QueryViewOfShard, error) {
+	ret := _m.Called(ctx, pChannelName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListQueryViews")
+	}
+
+	var r0 []*viewpb.QueryViewOfShard
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) ([]*viewpb.QueryViewOfShard, error)); ok {
+		return rf(ctx, pChannelName)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) []*viewpb.QueryViewOfShard); ok {
+		r0 = rf(ctx, pChannelName)
+	} else if ret.Get(0) != nil {
+		r0 = ret.Get(0).([]*viewpb.QueryViewOfShard)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, pChannelName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStreamingNodeCataLog_ListQueryViews_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListQueryViews'
+type MockStreamingNodeCataLog_ListQueryViews_Call struct {
+	*mock.Call
+}
+
+// ListQueryViews is a helper method to define mock.On call
+//   - ctx context.Context
+//   - pChannelName string
+func (_e *MockStreamingNodeCataLog_Expecter) ListQueryViews(ctx interface{}, pChannelName interface{}) *MockStreamingNodeCataLog_ListQueryViews_Call {
+	return &MockStreamingNodeCataLog_ListQueryViews_Call{Call: _e.mock.On("ListQueryViews", ctx, pChannelName)}
+}
+
+func (_c *MockStreamingNodeCataLog_ListQueryViews_Call) Run(run func(ctx context.Context, pChannelName string)) *MockStreamingNodeCataLog_ListQueryViews_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockStreamingNodeCataLog_ListQueryViews_Call) Return(_a0 []*viewpb.QueryViewOfShard, _a1 error) *MockStreamingNodeCataLog_ListQueryViews_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStreamingNodeCataLog_ListQueryViews_Call) RunAndReturn(run func(context.Context, string) ([]*viewpb.QueryViewOfShard, error)) *MockStreamingNodeCataLog_ListQueryViews_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListSegmentAssignment provides a mock function with given fields: ctx, pChannelName
 func (_m *MockStreamingNodeCataLog) ListSegmentAssignment(ctx context.Context, pChannelName string) ([]*streamingpb.SegmentAssignmentMeta, error) {
 	ret := _m.Called(ctx, pChannelName)
@@ -260,17 +318,17 @@ func (_c *MockStreamingNodeCataLog_ListVChannel_Call) RunAndReturn(run func(cont
 	return _c
 }
 
-// SaveConsumeCheckpoint provides a mock function with given fields: ctx, pChannelName, checkpoint
-func (_m *MockStreamingNodeCataLog) SaveConsumeCheckpoint(ctx context.Context, pChannelName string, checkpoint *streamingpb.WALCheckpoint) error {
-	ret := _m.Called(ctx, pChannelName, checkpoint)
+// SaveRecoverySnapshot provides a mock function with given fields: ctx, pChannelName, snapshot
+func (_m *MockStreamingNodeCataLog) SaveQueryViews(ctx context.Context, pChannelName string, views []*viewpb.QueryViewOfShard) error {
+	ret := _m.Called(ctx, pChannelName, views)
 
 	if len(ret) == 0 {
-		panic("no return value specified for SaveConsumeCheckpoint")
+		panic("no return value specified for SaveQueryViews")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, *streamingpb.WALCheckpoint) error); ok {
-		r0 = rf(ctx, pChannelName, checkpoint)
+	if rf, ok := ret.Get(0).(func(context.Context, string, []*viewpb.QueryViewOfShard) error); ok {
+		r0 = rf(ctx, pChannelName, views)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -278,32 +336,32 @@ func (_m *MockStreamingNodeCataLog) SaveConsumeCheckpoint(ctx context.Context, p
 	return r0
 }
 
-// MockStreamingNodeCataLog_SaveConsumeCheckpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveConsumeCheckpoint'
-type MockStreamingNodeCataLog_SaveConsumeCheckpoint_Call struct {
+// MockStreamingNodeCataLog_SaveQueryViews_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveQueryViews'
+type MockStreamingNodeCataLog_SaveQueryViews_Call struct {
 	*mock.Call
 }
 
-// SaveConsumeCheckpoint is a helper method to define mock.On call
+// SaveQueryViews is a helper method to define mock.On call
 //   - ctx context.Context
 //   - pChannelName string
-//   - checkpoint *streamingpb.WALCheckpoint
-func (_e *MockStreamingNodeCataLog_Expecter) SaveConsumeCheckpoint(ctx interface{}, pChannelName interface{}, checkpoint interface{}) *MockStreamingNodeCataLog_SaveConsumeCheckpoint_Call {
-	return &MockStreamingNodeCataLog_SaveConsumeCheckpoint_Call{Call: _e.mock.On("SaveConsumeCheckpoint", ctx, pChannelName, checkpoint)}
+//   - views []*viewpb.QueryViewOfShard
+func (_e *MockStreamingNodeCataLog_Expecter) SaveQueryViews(ctx interface{}, pChannelName interface{}, views interface{}) *MockStreamingNodeCataLog_SaveQueryViews_Call {
+	return &MockStreamingNodeCataLog_SaveQueryViews_Call{Call: _e.mock.On("SaveQueryViews", ctx, pChannelName, views)}
 }
 
-func (_c *MockStreamingNodeCataLog_SaveConsumeCheckpoint_Call) Run(run func(ctx context.Context, pChannelName string, checkpoint *streamingpb.WALCheckpoint)) *MockStreamingNodeCataLog_SaveConsumeCheckpoint_Call {
+func (_c *MockStreamingNodeCataLog_SaveQueryViews_Call) Run(run func(ctx context.Context, pChannelName string, views []*viewpb.QueryViewOfShard)) *MockStreamingNodeCataLog_SaveQueryViews_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(*streamingpb.WALCheckpoint))
+		run(args[0].(context.Context), args[1].(string), args[2].([]*viewpb.QueryViewOfShard))
 	})
 	return _c
 }
 
-func (_c *MockStreamingNodeCataLog_SaveConsumeCheckpoint_Call) Return(_a0 error) *MockStreamingNodeCataLog_SaveConsumeCheckpoint_Call {
+func (_c *MockStreamingNodeCataLog_SaveQueryViews_Call) Return(_a0 error) *MockStreamingNodeCataLog_SaveQueryViews_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockStreamingNodeCataLog_SaveConsumeCheckpoint_Call) RunAndReturn(run func(context.Context, string, *streamingpb.WALCheckpoint) error) *MockStreamingNodeCataLog_SaveConsumeCheckpoint_Call {
+func (_c *MockStreamingNodeCataLog_SaveQueryViews_Call) RunAndReturn(run func(context.Context, string, []*viewpb.QueryViewOfShard) error) *MockStreamingNodeCataLog_SaveQueryViews_Call {
 	_c.Call.Return(run)
 	return _c
 }

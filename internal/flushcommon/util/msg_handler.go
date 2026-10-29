@@ -19,8 +19,6 @@ package util
 import (
 	"context"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
@@ -40,11 +38,4 @@ type MsgHandler interface {
 	HandleTruncateCollection(truncateCollectionMsg message.ImmutableTruncateCollectionMessageV2) error
 
 	HandleAlterWAL(ctx context.Context, alterWALMsg message.ImmutableAlterWALMessageV2, vchannel string) error
-}
-
-func ConvertInternalImportFile(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
-	return &internalpb.ImportFile{
-		Id:    file.GetId(),
-		Paths: file.GetPaths(),
-	}
 }

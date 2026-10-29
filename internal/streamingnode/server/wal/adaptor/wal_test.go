@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -17,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/lock"
@@ -29,12 +31,15 @@ import (
 	"github.com/milvus-io/milvus/internal/util/idalloc"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
@@ -55,6 +60,11 @@ func TestFencedError(t *testing.T) {
 func TestWAL(t *testing.T) {
 	walimplstest.Reset()
 	initResourceForTest(t)
+	// Exercise eviction with the existing 10 KiB cache without turning this
+	// append/scan test into a producer-admission test: keep slowdown at 64 MiB.
+	pressureKey := paramtable.Get().StreamingCfg.WALRateLimitWABSlowdownRatio.Key
+	require.NoError(t, paramtable.Get().Save(pressureKey, "6553.6")) // 64 MiB / 10 KiB
+	t.Cleanup(func() { _ = paramtable.Get().Reset(pressureKey) })
 	b := registry.MustGetBuilder(message.WALNameTest,
 		redo.NewInterceptorBuilder(),
 		lock.NewInterceptorBuilder(),
@@ -78,11 +88,14 @@ func initResourceForTest(t *testing.T) {
 	params.Save(params.StreamingCfg.WALWriteAheadBufferCapacity.Key, "10k")
 
 	rc := idalloc.NewMockRootCoordClient(t)
-	rc.EXPECT().GetPChannelInfo(mock.Anything, mock.Anything).Return(&rootcoordpb.GetPChannelInfoResponse{}, nil)
+	rc.EXPECT().GetPChannelInfo(mock.Anything, mock.Anything).Return(&rootcoordpb.GetPChannelInfoResponse{}, nil).Maybe()
+	rc.EXPECT().AllocSegment(mock.Anything, mock.Anything).Return(&datapb.AllocSegmentResponse{Status: merr.Success()}, nil).Maybe()
+	rc.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 
 	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
+	queryViewsPatch := mockey.Mock((*mock_metastore.MockStreamingNodeCataLog).ListQueryViews).Return(nil, nil).Build()
+	t.Cleanup(func() { queryViewsPatch.UnPatch() })
 	catalog.EXPECT().GetConsumeCheckpoint(mock.Anything, mock.Anything).Return(nil, nil)
-	catalog.EXPECT().SaveConsumeCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	catalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListVChannel(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().GetSalvageCheckpoint(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -93,6 +106,7 @@ func initResourceForTest(t *testing.T) {
 		t,
 		resource.OptMixCoordClient(fMixCoordClient),
 		resource.OptStreamingNodeCatalog(catalog),
+		resource.OptChunkManager(storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))),
 	)
 }
 

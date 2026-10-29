@@ -19,9 +19,11 @@
 package chain
 
 import (
+	"context"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -30,7 +32,52 @@ import (
 	chainexpr "github.com/milvus-io/milvus/internal/util/function/chain/expr"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/internal/util/function/pyudf"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestDisabledPyUDFErrorThroughFunctionChain(t *testing.T) {
+	item := &paramtable.Get().FunctionCfg.PyUDFEnabled
+	old := item.SwapTempValue("false")
+	t.Cleanup(func() { item.SwapTempValue(old) })
+	// Match Proxy startup: capture the disabled configuration without starting
+	// Python, so execution tests the disabled error rather than an uninitialized runtime.
+	require.NoError(t, pyudf.StartSupervisor(context.Background()))
+	pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer pool.AssertSize(t, 0)
+	repr := &ChainRepr{
+		Stage: types.StageL2Rerank,
+		Operators: []OperatorRepr{{
+			Type: types.OpTypeMap,
+			Function: &FunctionRepr{
+				Name: chainexpr.PyUDFFuncName,
+				Params: map[string]*schemapb.FunctionParamValue{
+					"resource_name": {Value: &schemapb.FunctionParamValue_StringValue{StringValue: "rank_udf"}},
+				},
+				Args: []*schemapb.FunctionChainExprArg{{Arg: &schemapb.FunctionChainExprArg_Column{Column: &schemapb.FunctionChainColumnArg{Name: types.ScoreFieldName}}}},
+			},
+			Inputs: []string{types.ScoreFieldName}, Outputs: []string{types.ScoreFieldName},
+		}},
+	}
+	fc, err := FuncChainFromRepr(repr, pool)
+	require.NoError(t, err, "construction and stage validation do not initialize runtime resources")
+	builder := array.NewFloat32Builder(pool)
+	builder.Append(1)
+	values := builder.NewArray()
+	builder.Release()
+	dfBuilder := NewDataFrameBuilder().SetChunkSizes([]int64{1})
+	require.NoError(t, dfBuilder.AddColumnFromChunks(types.ScoreFieldName, []arrow.Array{values}))
+	df := dfBuilder.Build()
+	defer df.Release()
+	_, err = fc.ExecuteWithContext(context.Background(), df)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.ErrorContains(t, err, "function.pyUDF.enabled is false")
+	status := merr.Status(err)
+	require.EqualValues(t, 1100, status.Code)
+	require.Equal(t, "true", status.ExtraInfo[merr.InputErrorFlagKey])
+	require.False(t, status.Retriable)
+}
 
 // MockFunctionExpr is a mock implementation of FunctionExpr for testing.
 type MockFunctionExpr struct {
@@ -87,20 +134,6 @@ func TestParseFuncChainProto_BasicOperators(t *testing.T) {
 		Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
 		Ops: []*schemapb.FunctionChainOp{
 			{
-				Op: "filter",
-				Expr: &schemapb.FunctionChainExpr{
-					Name:   "mock_filter",
-					Args:   []*schemapb.FunctionChainExprArg{columnArg("score")},
-					Params: map[string]*schemapb.FunctionParamValue{},
-				},
-			},
-			{
-				Op: "select",
-				Params: map[string]*schemapb.FunctionParamValue{
-					"columns": arrayParam(stringParam("id"), stringParam("score"), stringParam("name")),
-				},
-			},
-			{
 				Op:     "sort",
 				Inputs: []string{"score"},
 				Params: map[string]*schemapb.FunctionParamValue{
@@ -122,12 +155,36 @@ func TestParseFuncChainProto_BasicOperators(t *testing.T) {
 	assert.NotNil(t, chain)
 	assert.Equal(t, "test-chain", chain.name)
 	assert.Equal(t, types.StageL2Rerank, chain.Stage())
-	assert.Len(t, chain.operators, 4)
+	assert.Len(t, chain.operators, 2)
 
-	assert.IsType(t, &FilterOp{}, chain.operators[0])
-	assert.IsType(t, &SelectOp{}, chain.operators[1])
-	assert.IsType(t, &SortOp{}, chain.operators[2])
-	assert.IsType(t, &LimitOp{}, chain.operators[3])
+	assert.IsType(t, &SortOp{}, chain.operators[0])
+	assert.IsType(t, &LimitOp{}, chain.operators[1])
+}
+
+func TestFilterOperatorRejected(t *testing.T) {
+	for _, functionName := range []string{"mock_filter", chainexpr.PyUDFFuncName} {
+		t.Run(functionName, func(t *testing.T) {
+			pb := &schemapb.FunctionChain{
+				Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
+				Ops: []*schemapb.FunctionChainOp{{
+					Op: types.OpTypeFilter,
+					Expr: &schemapb.FunctionChainExpr{
+						Name: functionName,
+						Args: []*schemapb.FunctionChainExprArg{columnArg("score")},
+					},
+				}},
+			}
+			_, err := ProtoChainToRepr(pb)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.Contains(t, err.Error(), "unknown operator type: filter")
+			_, err = ParseFuncChainProto(pb, memory.NewGoAllocator())
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.Contains(t, err.Error(), "unknown operator type: filter")
+		})
+	}
+	_, err := operatorFromRepr(&OperatorRepr{Type: types.OpTypeFilter})
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.Contains(t, err.Error(), "unknown operator type: filter")
 }
 
 func TestParseFuncChainProto_UnknownOperator(t *testing.T) {
@@ -145,9 +202,9 @@ func TestParseFuncChainProto_MissingStage(t *testing.T) {
 	_, err := ParseFuncChainProto(&schemapb.FunctionChain{
 		Ops: []*schemapb.FunctionChainOp{
 			{
-				Op: "select",
+				Op: "limit",
 				Params: map[string]*schemapb.FunctionParamValue{
-					"columns": arrayParam(stringParam("test")),
+					"limit": intParam(10),
 				},
 			},
 		},
@@ -168,7 +225,7 @@ func TestParseFuncChainProto_MissingParams(t *testing.T) {
 				Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
 				Ops:   []*schemapb.FunctionChainOp{{Op: "filter"}},
 			},
-			errMsg: "filter_op: function is required",
+			errMsg: "unknown operator type: filter",
 		},
 		{
 			name: "filter missing inputs",
@@ -179,7 +236,7 @@ func TestParseFuncChainProto_MissingParams(t *testing.T) {
 					Expr: &schemapb.FunctionChainExpr{Name: "mock_filter"},
 				}},
 			},
-			errMsg: "filter_op: inputs is required",
+			errMsg: "unknown operator type: filter",
 		},
 		{
 			name: "sort missing column",
@@ -188,14 +245,6 @@ func TestParseFuncChainProto_MissingParams(t *testing.T) {
 				Ops:   []*schemapb.FunctionChainOp{{Op: "sort"}},
 			},
 			errMsg: "sort_op: column is required",
-		},
-		{
-			name: "select missing columns",
-			chain: &schemapb.FunctionChain{
-				Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
-				Ops:   []*schemapb.FunctionChainOp{{Op: "select"}},
-			},
-			errMsg: "select_op: columns is required",
 		},
 		{
 			name: "limit invalid limit",
@@ -272,6 +321,13 @@ func TestParseFuncChainProto_RoundDecimalFunction(t *testing.T) {
 func TestProtoOpToReprDerivesInputsFromExprArgs(t *testing.T) {
 	repr, err := ProtoOpToRepr(&schemapb.FunctionChainOp{
 		Op: types.OpTypeMap,
+		Params: map[string]*schemapb.FunctionParamValue{
+			types.InputDataTypesParam: arrayParam(
+				intParam(int64(schemapb.DataType_Float)),
+				intParam(int64(schemapb.DataType_VarChar)),
+				intParam(int64(schemapb.DataType_Float)),
+			),
+		},
 		Expr: &schemapb.FunctionChainExpr{
 			Name: "expr",
 			Args: []*schemapb.FunctionChainExprArg{
@@ -288,12 +344,75 @@ func TestProtoOpToReprDerivesInputsFromExprArgs(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NotNil(t, repr)
-	assert.Equal(t, []string{"$score", "tag"}, repr.Inputs)
+	assert.Equal(t, []string{"$score", "tag", "$score"}, repr.Inputs)
+	assert.Equal(t, []schemapb.DataType{
+		schemapb.DataType_Float,
+		schemapb.DataType_VarChar,
+		schemapb.DataType_Float,
+	}, repr.InputDataTypes)
+	assert.NotContains(t, repr.Params, types.InputDataTypesParam)
 	assert.Equal(t, []string{"new_score"}, repr.Outputs)
 	require.NotNil(t, repr.Function)
 	assert.Equal(t, "expr", repr.Function.Name)
 	require.Len(t, repr.Function.Args, 4)
 	assert.Equal(t, "($0 > $1) && ($2 != \"dog\")", repr.Function.Params["expr"].GetStringValue())
+}
+
+func TestProtoOpToReprInputDataTypes(t *testing.T) {
+	pb := &schemapb.FunctionChainOp{
+		Op:     types.OpTypeSort,
+		Inputs: []string{`metadata["price"]`, "$id"},
+		Params: map[string]*schemapb.FunctionParamValue{
+			"desc": boolParam(true),
+			types.InputDataTypesParam: arrayParam(
+				intParam(int64(schemapb.DataType_Double)),
+				intParam(int64(schemapb.DataType_None)),
+			),
+		},
+	}
+
+	repr, err := ProtoOpToRepr(pb)
+	require.NoError(t, err)
+	assert.Equal(t, []schemapb.DataType{schemapb.DataType_Double, schemapb.DataType_None}, repr.InputDataTypes)
+	assert.NotContains(t, repr.Params, types.InputDataTypesParam)
+	assert.Contains(t, repr.Params, "desc")
+	assert.Contains(t, pb.GetParams(), types.InputDataTypesParam, "conversion must not mutate the request proto")
+
+	_, err = ProtoOpToRepr(&schemapb.FunctionChainOp{
+		Op:     types.OpTypeSort,
+		Inputs: []string{"score"},
+		Params: map[string]*schemapb.FunctionParamValue{
+			types.InputDataTypesParam: arrayParam(),
+		},
+	})
+	assert.ErrorContains(t, err, "does not match input count")
+
+	_, err = ProtoOpToRepr(&schemapb.FunctionChainOp{
+		Op:     types.OpTypeSort,
+		Inputs: []string{"score"},
+		Params: map[string]*schemapb.FunctionParamValue{
+			types.InputDataTypesParam: stringParam("Double"),
+		},
+	})
+	assert.ErrorContains(t, err, "must be an array")
+
+	_, err = ProtoOpToRepr(&schemapb.FunctionChainOp{
+		Op:     types.OpTypeSort,
+		Inputs: []string{"score"},
+		Params: map[string]*schemapb.FunctionParamValue{
+			types.InputDataTypesParam: arrayParam(stringParam("Double")),
+		},
+	})
+	assert.ErrorContains(t, err, "must be an int64")
+
+	_, err = ProtoOpToRepr(&schemapb.FunctionChainOp{
+		Op:     types.OpTypeSort,
+		Inputs: []string{"score"},
+		Params: map[string]*schemapb.FunctionParamValue{
+			types.InputDataTypesParam: arrayParam(intParam(9999)),
+		},
+	})
+	assert.ErrorContains(t, err, "unknown data type value")
 }
 
 func TestProtoChainToReprBuildsInfo(t *testing.T) {
@@ -332,6 +451,77 @@ func TestProtoChainToReprBuildsInfo(t *testing.T) {
 	assert.Equal(t, []string{"$score"}, repr.Info.Ops[1].WriteNames)
 }
 
+func TestRefreshInfoUsesExplicitDependencies(t *testing.T) {
+	tests := []struct {
+		name           string
+		op             OperatorRepr
+		wantReads      []string
+		wantWrites     []string
+		wantRequired   []string
+		wantAllWritten []string
+	}{
+		{
+			name:           "sort uses explicit inputs only",
+			op:             OperatorRepr{Type: types.OpTypeSort, Inputs: []string{types.ScoreFieldName}},
+			wantReads:      []string{types.ScoreFieldName},
+			wantWrites:     nil,
+			wantRequired:   []string{types.ScoreFieldName},
+			wantAllWritten: []string{},
+		},
+		{
+			name: "group by has no declared field dependencies",
+			op: OperatorRepr{Type: types.OpTypeGroupBy, Params: map[string]*schemapb.FunctionParamValue{
+				"field":      stringParam("$group_by_101"),
+				"group_size": intParam(2),
+				"limit":      intParam(10),
+			}},
+			wantReads:      nil,
+			wantWrites:     nil,
+			wantRequired:   []string{},
+			wantAllWritten: []string{},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repr := &ChainRepr{Operators: []OperatorRepr{test.op}}
+			require.NoError(t, repr.RefreshInfo())
+			require.Len(t, repr.Info.Ops, 1)
+			assert.Len(t, repr.Operators[0].InputDataTypes, len(test.op.Inputs))
+			assert.Equal(t, test.wantReads, repr.Info.Ops[0].ReadNames)
+			assert.Equal(t, test.wantWrites, repr.Info.Ops[0].WriteNames)
+			assert.Equal(t, test.wantRequired, repr.Info.RequiredInputs)
+			assert.Equal(t, test.wantAllWritten, repr.Info.WrittenNames)
+		})
+	}
+}
+
+func TestProtoChainToReprPreservesDuplicateOpInputsAndDeduplicatesRequiredInputs(t *testing.T) {
+	repr, err := ProtoChainToRepr(&schemapb.FunctionChain{
+		Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
+		Ops: []*schemapb.FunctionChainOp{
+			{
+				Op: types.OpTypeMap,
+				Expr: &schemapb.FunctionChainExpr{
+					Name: "expr",
+					Args: []*schemapb.FunctionChainExprArg{
+						columnArg("a"),
+						columnArg("a"),
+						columnArg("b"),
+					},
+				},
+				Outputs: []string{"result"},
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, repr)
+	require.Len(t, repr.Operators, 1)
+	assert.Equal(t, []string{"a", "a", "b"}, repr.Operators[0].Inputs)
+	assert.Equal(t, []string{"a", "a", "b"}, repr.Info.Ops[0].ReadNames)
+	assert.Equal(t, []string{"a", "b"}, repr.Info.RequiredInputs)
+}
+
 func TestProtoStageToReprStage(t *testing.T) {
 	tests := []struct {
 		stage    schemapb.FunctionChainStage
@@ -360,6 +550,9 @@ func TestProtoStageToReprStage(t *testing.T) {
 func TestIsFunctionChainSystemName(t *testing.T) {
 	assert.True(t, IsFunctionChainSystemName("$score"))
 	assert.True(t, IsFunctionChainSystemName("$id"))
+	assert.True(t, IsFunctionChainSystemName("$unknown"))
+	assert.False(t, IsFunctionChainSystemName("$meta"))
+	assert.False(t, IsFunctionChainSystemName(`$meta["value"]`))
 	assert.False(t, IsFunctionChainSystemName("score"))
 	assert.False(t, IsFunctionChainSystemName(""))
 }
@@ -485,7 +678,9 @@ func TestFuncChainFromReprWithContextPassesBuildContext(t *testing.T) {
 		},
 	}
 
-	chain, err := FuncChainFromReprWithContext(repr, memory.NewGoAllocator(), types.FunctionBuildContext{ModelExtraInfo: extraInfo})
+	chain, err := FuncChainFromReprWithContext(repr, memory.NewGoAllocator(), types.FunctionBuildContext{
+		ModelExtraInfo: extraInfo,
+	})
 	require.NoError(t, err)
 	require.NotNil(t, chain)
 	assert.True(t, called)
@@ -497,20 +692,6 @@ func TestFuncChainFromRepr(t *testing.T) {
 		Name:  "repr-chain",
 		Stage: types.StageL2Rerank,
 		Operators: []OperatorRepr{
-			{
-				Type: types.OpTypeFilter,
-				Function: &FunctionRepr{
-					Name:   "mock_filter",
-					Params: map[string]*schemapb.FunctionParamValue{},
-				},
-				Inputs: []string{"score"},
-			},
-			{
-				Type: types.OpTypeSelect,
-				Params: map[string]*schemapb.FunctionParamValue{
-					"columns": arrayParam(stringParam("a"), stringParam("b")),
-				},
-			},
 			{
 				Type:   types.OpTypeSort,
 				Inputs: []string{"a"},
@@ -532,7 +713,7 @@ func TestFuncChainFromRepr(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, chain)
 	assert.Equal(t, "repr-chain", chain.name)
-	assert.Len(t, chain.operators, 4)
+	assert.Len(t, chain.operators, 2)
 }
 
 func columnArg(name string) *schemapb.FunctionChainExprArg {

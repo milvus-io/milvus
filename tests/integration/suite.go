@@ -19,6 +19,7 @@ package integration
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -35,9 +36,27 @@ import (
 
 var caseTimeout time.Duration
 
+const integrationCaseTimeoutEnv = "MILVUS_INTEGRATION_CASE_TIMEOUT"
+
 func init() {
-	flag.DurationVar(&caseTimeout, "caseTimeout", 10*time.Minute, "timeout duration for single case")
+	defaultTimeout, err := caseTimeoutFromEnvironment(os.Getenv)
+	if err != nil {
+		panic(err)
+	}
+	flag.DurationVar(&caseTimeout, "caseTimeout", defaultTimeout, "timeout duration for single case")
 	streamingutil.SetStreamingServiceEnabled()
+}
+
+func caseTimeoutFromEnvironment(getenv func(string) string) (time.Duration, error) {
+	value := getenv(integrationCaseTimeoutEnv)
+	if value == "" {
+		return 10 * time.Minute, nil
+	}
+	timeout, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("parse %s: %w", integrationCaseTimeoutEnv, err)
+	}
+	return timeout, nil
 }
 
 type MiniClusterSuite struct {
@@ -80,6 +99,12 @@ func (s *MiniClusterSuite) WithOptions(options ...ClusterSuiteOption) {
 // After it is called, the cluster is ready for tests.
 func (s *MiniClusterSuite) SetupSuite() {
 	paramtable.Init()
+	// Element-nullable and nested Array fields are gated at the proxy until the
+	// feature is complete; integration suites exercise them.
+	enableKey := paramtable.Get().ProxyCfg.EnableElementNullAndNestedArray.Key
+	if _, ok := s.envConfigs[strings.ToUpper(strings.ReplaceAll(enableKey, ".", "_"))]; !ok {
+		s.WithMilvusConfig(enableKey, "true")
+	}
 	s.T().Log("Setup test...")
 	s.T().Log("Setup case timeout", caseTimeout)
 	ctx, cancel := context.WithTimeout(context.Background(), caseTimeout) //nolint:gosec // cancel is stored and called in TearDownSuite()
@@ -106,25 +131,10 @@ func (s *MiniClusterSuite) TearDownSuite() {
 		Type: milvuspb.ShowType_InMemory,
 	})
 	if err == nil {
-		wg := sync.WaitGroup{}
-		for idx, collectionName := range resp.GetCollectionNames() {
-			wg.Add(1)
-			idx := idx
-			collectionName := collectionName
-			func() {
-				defer wg.Done()
-				if resp.GetInMemoryPercentages()[idx] == 100 || resp.GetQueryServiceAvailable()[idx] {
-					status, err := s.Cluster.MilvusClient.ReleaseCollection(context.Background(), &milvuspb.ReleaseCollectionRequest{
-						CollectionName: collectionName,
-					})
-					err = merr.CheckRPCCall(status, err)
-					s.NoError(err)
-					collectionID := resp.GetCollectionIds()[idx]
-					s.CheckCollectionCacheReleased(collectionID)
-				}
-			}()
+		for _, result := range releaseLoadedCollections(context.Background(), s.Cluster.MilvusClient, resp) {
+			s.NoError(result.err, "release collection %s", result.name)
+			s.CheckCollectionCacheReleased(result.id)
 		}
-		wg.Wait()
 	}
 	s.T().Log("Tear Down test...")
 	defer s.cancelFunc()
@@ -132,4 +142,39 @@ func (s *MiniClusterSuite) TearDownSuite() {
 		s.Cluster.Stop()
 		s.Cluster = nil
 	}
+}
+
+type collectionReleaseResult struct {
+	name string
+	id   int64
+	err  error
+}
+
+// releaseLoadedCollections returns every selected collection in the original
+// order, including failed releases. Cache checks and test assertions stay in
+// the calling test goroutine.
+func releaseLoadedCollections(ctx context.Context, client milvuspb.MilvusServiceClient, collections *milvuspb.ShowCollectionsResponse) []collectionReleaseResult {
+	results := make([]collectionReleaseResult, 0, len(collections.GetCollectionNames()))
+	for i, name := range collections.GetCollectionNames() {
+		if collections.GetInMemoryPercentages()[i] == 100 || collections.GetQueryServiceAvailable()[i] {
+			results = append(results, collectionReleaseResult{name: name, id: collections.GetCollectionIds()[i]})
+		}
+	}
+	const concurrency = 4
+	slots := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+	for i := range results {
+		slots <- struct{}{}
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			defer func() { <-slots }()
+			status, err := client.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
+				CollectionName: results[i].name,
+			})
+			results[i].err = merr.CheckRPCCall(status, err)
+		}(i)
+	}
+	wg.Wait()
+	return results
 }

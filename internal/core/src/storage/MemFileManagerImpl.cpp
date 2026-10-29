@@ -42,6 +42,7 @@
 #include "storage/ChunkManager.h"
 #include "storage/DataCodec.h"
 #include "storage/FileManager.h"
+#include "storage/LegacyIndexFileIO.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -51,7 +52,8 @@ namespace milvus::storage {
 MemFileManagerImpl::MemFileManagerImpl(
     const FileManagerContext& fileManagerContext)
     : FileManagerImpl(fileManagerContext.fieldDataMeta,
-                      fileManagerContext.indexMeta) {
+                      fileManagerContext.indexMeta,
+                      fileManagerContext.use_async_load) {
     rcm_ = fileManagerContext.chunkManagerPtr;
     fs_ = fileManagerContext.fs;
     loon_ffi_properties_ = fileManagerContext.loon_ffi_properties;
@@ -132,15 +134,24 @@ MemFileManagerImpl::LoadFile(const std::string& filename) noexcept {
 std::map<std::string, std::unique_ptr<DataCodec>>
 MemFileManagerImpl::LoadIndexToMemory(
     const std::vector<std::string>& remote_files,
-    milvus::proto::common::LoadPriority priority) {
+    milvus::proto::common::LoadPriority priority,
+    folly::CancellationToken token) {
     std::map<std::string, std::unique_ptr<DataCodec>> file_to_index_data;
     auto parallel_degree =
         static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
     std::vector<std::string> batch_files;
 
     auto LoadBatchIndexFiles = [&]() {
-        auto index_datas = GetObjectData(
-            rcm_.get(), batch_files, milvus::PriorityForLoad(priority));
+        auto& pool =
+            ThreadPools::GetThreadPool(milvus::PriorityForLoad(priority));
+        std::vector<std::future<std::unique_ptr<DataCodec>>> index_datas;
+        index_datas.reserve(batch_files.size());
+        for (const auto& path : batch_files) {
+            index_datas.push_back(
+                pool.Submit([manager = rcm_, path, priority, token] {
+                    return ReadLegacyIndexFile(*manager, path, priority, token);
+                }));
+        }
         size_t idx = 0;
         storage::ProcessFuturesInOrder(
             index_datas, [&](std::unique_ptr<DataCodec> codec) {
@@ -163,8 +174,10 @@ MemFileManagerImpl::LoadIndexToMemory(
         LoadBatchIndexFiles();
     }
 
-    AssertInfo(file_to_index_data.size() == remote_files.size(),
-               "inconsistent file num and index data num!");
+    if (!(file_to_index_data.size() == remote_files.size())) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "inconsistent file num and index data num!");
+    }
     return file_to_index_data;
 }
 
@@ -185,7 +198,7 @@ MemFileManagerImpl::cache_raw_data_to_memory_internal(const Config& config) {
         config, INSERT_FILES_KEY);
     AssertInfo(insert_files.has_value(),
                "insert file paths is empty when build index");
-    auto remote_files = insert_files.value();
+    auto& remote_files = insert_files.value();
     SortByPath(remote_files);
 
     auto parallel_degree =
@@ -212,8 +225,10 @@ MemFileManagerImpl::cache_raw_data_to_memory_internal(const Config& config) {
         FetchRawData();
     }
 
-    AssertInfo(field_datas.size() == remote_files.size(),
-               "inconsistent file num and raw data num!");
+    if (!(field_datas.size() == remote_files.size())) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "inconsistent file num and raw data num!");
+    }
     return field_datas;
 }
 
@@ -227,6 +242,45 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
     AssertInfo(element_type.has_value(),
                "[StorageV2] element type is empty when build index");
     auto dim = index::GetValueFromConfig<int64_t>(config, DIM_KEY).value_or(0);
+    auto max_rows =
+        index::GetValueFromConfig<int64_t>(config, NUM_ROWS_KEY).value_or(0);
+    auto offset =
+        index::GetValueFromConfig<int64_t>(config, OFFSET_KEY).value_or(0);
+    // max_rows and offset are read as signed values but the storage-v2 /
+    // manifest readers below take size_t. Validate the pagination range
+    // BEFORE the implicit signed->unsigned conversion at the call sites:
+    //   - A negative value would wrap to a huge size_t, turning a malformed
+    //     parameter into a full-column read (or an out-of-range manifest row
+    //     index) instead of a clean rejection.
+    //   - Both readers treat max_rows == 0 as "read the whole column" and
+    //     ignore offset, so `offset > 0 && max_rows == 0` would silently drop
+    //     the requested offset and read everything. Reject it rather than
+    //     honoring a request the readers cannot express.
+    // num_rows / offset are not API-caller input: they are produced by the
+    // index-build code that assembles this config (a Milvus-internal caller,
+    // not the end user), so a bad value is a Milvus bug and is reported as
+    // UnexpectedError (System), the same class as the sibling
+    // data-type / element-type checks above. InvalidParameter would cross
+    // the cgo boundary as an InputError and pin the failure on the user's
+    // request, which is the classification this file must not make for a
+    // value the user never supplied.
+    if (max_rows < 0) {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "[StorageV2] num_rows must be non-negative, got: {}",
+                  max_rows);
+    }
+    if (offset < 0) {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "[StorageV2] offset must be non-negative, got: {}",
+                  offset);
+    }
+    if (offset > 0 && max_rows == 0) {
+        ThrowInfo(ErrorCode::UnexpectedError,
+                  "[StorageV2] offset ({}) requires a positive num_rows; "
+                  "num_rows == 0 selects a full-column read and ignores "
+                  "offset",
+                  offset);
+    }
     auto segment_insert_files =
         index::GetValueFromConfig<std::vector<std::vector<std::string>>>(
             config, SEGMENT_INSERT_FILES_KEY);
@@ -261,19 +315,20 @@ MemFileManagerImpl::cache_raw_data_to_memory_storage_v2(const Config& config) {
                                          data_type,
                                          dim,
                                          element_type,
+                                         max_rows,
+                                         offset,
                                          storage_column_mapping);
     }
 
-    auto remote_files = segment_insert_files.value();
-    for (auto& files : remote_files) {
-        SortByPath(files);
-    }
+    auto& remote_files = segment_insert_files.value();
     auto field_datas = GetFieldDatasFromStorageV2(remote_files,
                                                   field_meta_.field_id,
                                                   data_type.value(),
                                                   element_type.value(),
                                                   dim,
-                                                  fs_);
+                                                  fs_,
+                                                  max_rows,
+                                                  offset);
     // field data list could differ for storage v2 group list
     return field_datas;
 }
@@ -358,7 +413,7 @@ MemFileManagerImpl::cache_opt_field_memory(const Config& config) {
     if (!opt_fields.has_value()) {
         return res;
     }
-    auto fields_map = opt_fields.value();
+    auto& fields_map = opt_fields.value();
     auto num_of_fields = fields_map.size();
     if (0 == num_of_fields) {
         return {};
@@ -391,7 +446,7 @@ MemFileManagerImpl::cache_opt_field_memory_v2(const Config& config) {
     if (!opt_fields.has_value()) {
         return {};
     }
-    auto fields_map = opt_fields.value();
+    auto& fields_map = opt_fields.value();
     auto num_of_fields = fields_map.size();
     if (0 == num_of_fields) {
         return {};
@@ -406,10 +461,7 @@ MemFileManagerImpl::cache_opt_field_memory_v2(const Config& config) {
             config, SEGMENT_INSERT_FILES_KEY);
     AssertInfo(segment_insert_files.has_value(),
                "insert file paths for storage v2 is empty when build index");
-    auto remote_files = segment_insert_files.value();
-    for (auto& files : remote_files) {
-        SortByPath(files);
-    }
+    auto& remote_files = segment_insert_files.value();
 
     std::unordered_map<int64_t, std::vector<std::vector<uint32_t>>> res;
     for (auto& [field_id, tup] : fields_map) {
@@ -431,7 +483,7 @@ MemFileManagerImpl::cache_opt_field_memory_v3(const Config& config) {
     if (!opt_fields.has_value()) {
         return {};
     }
-    auto fields_map = opt_fields.value();
+    auto& fields_map = opt_fields.value();
     auto num_of_fields = fields_map.size();
     if (0 == num_of_fields) {
         return {};
@@ -471,6 +523,8 @@ MemFileManagerImpl::cache_opt_field_memory_v3(const Config& config) {
                                       field_type,
                                       1,  // scalar field
                                       element_type,
+                                      0,
+                                      0,
                                       GetStorageColumnMapping(field_id));
 
         res[field_id] = GetOptFieldIvfData(field_type, field_datas);

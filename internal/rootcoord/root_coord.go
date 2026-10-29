@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/rand"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -66,7 +68,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/expr"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -182,6 +183,7 @@ type Core struct {
 type FileResourceObserver interface {
 	CheckAllQnReady() error
 	InitMeta(meta IMetaTable)
+	IsEmpty() bool
 	Notify()
 	Sync() error
 }
@@ -202,7 +204,6 @@ func NewCore(c context.Context, factory dependency.Factory) (*Core, error) {
 	core.UpdateStateCode(commonpb.StateCode_Abnormal)
 	core.SetProxyCreator(proxyutil.DefaultProxyCreator)
 
-	expr.Register("rootcoord", core)
 	return core, nil
 }
 
@@ -214,6 +215,30 @@ func (c *Core) UpdateStateCode(code commonpb.StateCode) {
 
 func (c *Core) SetFileResourceObserver(observer FileResourceObserver) {
 	c.fileResourceObserver = observer
+}
+
+func (c *Core) ValidateDataViewCollectionForRecovery(ctx context.Context, collectionID int64) (bool, error) {
+	collection, err := c.meta.GetCollectionByID(ctx, "", collectionID, typeutil.MaxTimestamp, true)
+	if errors.Is(err, merr.ErrCollectionNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	switch collection.State {
+	case pb.CollectionState_CollectionCreated:
+		return true, nil
+	case pb.CollectionState_CollectionCreating,
+		pb.CollectionState_CollectionDropping,
+		pb.CollectionState_CollectionDropped:
+		return false, nil
+	default:
+		return false, merr.WrapErrDataIntegrityMsg(
+			"collection %d has unknown state %d during DataView recovery",
+			collectionID,
+			collection.State,
+		)
+	}
 }
 
 func (c *Core) GetStateCode() commonpb.StateCode {
@@ -247,14 +272,14 @@ func (c *Core) ServerExist(serverID int64) bool {
 
 func (c *Core) setProxyClients(sessions []*sessionutil.Session) {
 	c.proxyClientManager.SetProxyClients(sessions)
-	if c.fileResourceObserver != nil {
+	if c.fileResourceObserver != nil && !c.fileResourceObserver.IsEmpty() {
 		c.fileResourceObserver.Notify()
 	}
 }
 
 func (c *Core) addProxyClient(session *sessionutil.Session) {
 	c.proxyClientManager.AddProxyClient(session)
-	if c.fileResourceObserver != nil {
+	if c.fileResourceObserver != nil && !c.fileResourceObserver.IsEmpty() {
 		c.fileResourceObserver.Notify()
 	}
 }
@@ -416,7 +441,6 @@ func (c *Core) initKVCreator() {
 func (c *Core) initMetaTable(initCtx context.Context) error {
 	fn := func() error {
 		var catalog metastore.RootCoordCatalog
-		var err error
 
 		switch Params.MetaStoreCfg.MetaStoreType.GetValue() {
 		case util.MetaStoreTypeEtcd:
@@ -435,9 +459,11 @@ func (c *Core) initMetaTable(initCtx context.Context) error {
 			return retry.Unrecoverable(merr.WrapErrServiceInternalMsg("not supported meta store: %s", Params.MetaStoreCfg.MetaStoreType.GetValue()))
 		}
 
-		if c.meta, err = NewMetaTable(c.ctx, catalog, c.tsoAllocator); err != nil {
+		meta, err := NewMetaTable(c.ctx, catalog, c.tsoAllocator)
+		if err != nil {
 			return err
 		}
+		c.meta = meta
 
 		return nil
 	}
@@ -537,7 +563,7 @@ func (c *Core) initInternal() error {
 	c.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 
 	// Initialize telemetry manager for client telemetry collection
-	c.telemetryMgr = telemetry.NewTelemetryManager(c.etcdCli)
+	c.telemetryMgr = telemetry.NewTelemetryManagerWithConfig(c.etcdCli, telemetryConfigFromParams())
 	mlog.Debug(context.TODO(), "init telemetry manager done")
 
 	c.quotaCenter = NewQuotaCenter(c.proxyClientManager, c.mixCoord, c.tsoAllocator, c.meta)
@@ -588,15 +614,14 @@ func (c *Core) Init() error {
 
 	c.initOnce.Do(func() {
 		initError = c.initInternal()
-		// Recover file resource refCnt for pending schema broadcast tasks
-		// before registering DDL callbacks, so ack callbacks won't race with recovery.
+		// Recover file resource refCnt for pending schema broadcast tasks before
+		// MixCoord registers DDL callbacks after coordinator recovery.
 		// See #48612.
 		pending := broadcast.GetPendingSchemaFileResources()
 		if len(pending) > 0 {
 			c.meta.RecoverFileResourceRefCnt(pending)
 			mlog.Info(context.TODO(), "recovered file resource refCnt from pending broadcast tasks", mlog.Int("count", len(pending)))
 		}
-		RegisterDDLCallbacks(c)
 	})
 	mlog.Info(context.TODO(), "RootCoord init successfully")
 	return initError
@@ -1157,6 +1182,16 @@ func (c *Core) TruncateCollection(ctx context.Context, in *milvuspb.TruncateColl
 	return &milvuspb.TruncateCollectionResponse{
 		Status: merr.Success(),
 	}, nil
+}
+
+// IsCollectionAvailable lets in-process GC skip live collections without
+// materializing their schemas. False means unknown, not safe to delete.
+func (c *Core) IsCollectionAvailable(collectionID int64) bool {
+	if c.GetStateCode() != commonpb.StateCode_Healthy {
+		return false
+	}
+	checker, ok := c.meta.(interface{ IsCollectionAvailable(int64) bool })
+	return ok && checker.IsCollectionAvailable(collectionID)
 }
 
 // HasCollection check collection existence
@@ -3231,6 +3266,14 @@ func (c *Core) ListFileResources(ctx context.Context, req *milvuspb.ListFileReso
 	}, nil
 }
 
+// GetFileResources resolves file resources for other coordinators inside MixCoord.
+func (c *Core) GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return nil, err
+	}
+	return c.meta.GetFileResources(ctx, resourceIDs...)
+}
+
 func (c *Core) expandPrivilegeGroups(ctx context.Context, grants []*milvuspb.GrantEntity, groups map[string][]*milvuspb.PrivilegeEntity) ([]*milvuspb.GrantEntity, error) {
 	newGrants := []*milvuspb.GrantEntity{}
 	createGrantEntity := func(grant *milvuspb.GrantEntity, privilegeName string) (*milvuspb.GrantEntity, error) {
@@ -3273,9 +3316,14 @@ func (c *Core) expandPrivilegeGroups(ctx context.Context, grants []*milvuspb.Gra
 			newGrants = append(newGrants, newGrant)
 		}
 	}
-	// uniq by role + object + object name + grantor user + privilege name + db name
+	// uniq by role + object + object name + grantor user + privilege name + db name.
+	// Use the names directly: formatting the proto messages with %s goes through
+	// prototext and dominated the cost for roles with thousands of expanded grants.
 	return lo.UniqBy(newGrants, func(g *milvuspb.GrantEntity) string {
-		return fmt.Sprintf("%s-%s-%s-%s-%s-%s", g.Role, g.Object, g.ObjectName, g.Grantor.User, g.Grantor.Privilege.Name, g.DbName)
+		return strings.Join([]string{
+			g.GetRole().GetName(), g.GetObject().GetName(), g.GetObjectName(),
+			g.GetGrantor().GetUser().GetName(), g.GetGrantor().GetPrivilege().GetName(), g.GetDbName(),
+		}, "\x00")
 	}), nil
 }
 
@@ -3454,6 +3502,41 @@ func (c *Core) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetr
 	return c.quotaCenter.getQuotaMetrics(), nil
 }
 
+// GetFeatureUsage computes the collection-derived groups of the feature usage
+// report from the in-memory metadata (see internal/featureusage). Every call
+// recomputes from scratch; nothing is cached or persisted.
+func (c *Core) GetFeatureUsage(ctx context.Context, req *internalpb.GetFeatureUsageRequest) (*internalpb.GetFeatureUsageResponse, error) {
+	resp, _ := c.FeatureUsageStatic(ctx)
+	return resp, nil
+}
+
+// FeatureUsageStatic computes the collection groups and, from the same
+// snapshot, the CollectionContext the other coordinators' groups resolve
+// their collection IDs against. The response status is unhealthy, and the
+// context empty, when the node is not ready.
+func (c *Core) FeatureUsageStatic(ctx context.Context) (*internalpb.GetFeatureUsageResponse, featureusage.CollectionContext) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &internalpb.GetFeatureUsageResponse{Status: merr.Status(err)}, featureusage.CollectionContext{}
+	}
+	in := c.collectFeatureUsageInput(ctx)
+	return &internalpb.GetFeatureUsageResponse{
+		Status:        merr.Success(),
+		Role:          typeutil.RootCoordRole,
+		NodeId:        paramtable.GetNodeID(),
+		NodeStartTime: paramtable.GetCreateTime().Unix(),
+		CollectedAt:   time.Now().Unix(),
+		Entries:       featureusage.ComputeCollectionEntries(in),
+	}, in.Context()
+}
+
+// collectFeatureUsageInput gathers the metadata the report is computed from,
+// in one snapshot of the MetaTable cache. It touches no KV: RBAC objects are
+// deliberately not counted, because listing roles, grants and privilege
+// groups reads the catalog and the counts are not needed yet.
+func (c *Core) collectFeatureUsageInput(ctx context.Context) featureusage.CollectionInput {
+	return c.meta.FeatureUsageSnapshot(ctx)
+}
+
 func (c *Core) BackupEzk(ctx context.Context, req *internalpb.BackupEzkRequest) (*internalpb.BackupEzkResponse, error) {
 	method := "BackupEzk"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
@@ -3561,4 +3644,53 @@ func (c *Core) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteClie
 	}
 
 	return c.telemetryMgr.DeleteCommand(ctx, req)
+}
+
+// ListClientCommands returns the commands the coordinator is currently holding for clients.
+//
+// The manager has been able to produce this list since the feature landed, but nothing
+// could reach it: there was no RPC, so the telemetry UI's command panel called an endpoint
+// that did not exist and showed an empty list no matter what was pending.
+func (c *Core) ListClientCommands(ctx context.Context, req *rootcoordpb.ListClientCommandsRequest) (*rootcoordpb.ListClientCommandsResponse, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &rootcoordpb.ListClientCommandsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	if c.telemetryMgr == nil {
+		return &rootcoordpb.ListClientCommandsResponse{
+			Status: merr.Status(merr.WrapErrServiceInternalMsg("telemetry manager not initialized")),
+		}, nil
+	}
+
+	infos, err := c.telemetryMgr.ListAllCommands(ctx)
+	if err != nil {
+		return &rootcoordpb.ListClientCommandsResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	commands := make([]*commonpb.ClientCommand, 0, len(infos))
+	for _, info := range infos {
+		// Payload is deliberately left empty: the list is for showing what is outstanding,
+		// and a persistent config's payload can be large and hold whatever an operator put
+		// in it. Callers that need it can fetch the command itself.
+		commands = append(commands, &commonpb.ClientCommand{
+			CommandId:   info.CommandID,
+			CommandType: info.CommandType,
+			CreateTime:  info.CreateTime,
+			Persistent:  info.Persistent,
+			TargetScope: info.TargetScope,
+		})
+	}
+
+	return &rootcoordpb.ListClientCommandsResponse{
+		Status:   merr.Success(),
+		Commands: commands,
+	}, nil
+}
+
+func (c *Core) GetRLSMetadata(ctx context.Context, req *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
+	return &rootcoordpb.GetRLSMetadataResponse{Status: merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "RLS is not supported"))}, nil
 }

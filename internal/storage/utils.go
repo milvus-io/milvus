@@ -90,15 +90,32 @@ func WriteFile(filepath string, data []byte, perm fs.FileMode) error {
 // ValidateStorageV1InsertWritableSchema validates schema constraints required by V1 insert binlogs.
 func ValidateStorageV1InsertWritableSchema(schema *schemapb.CollectionSchema) error {
 	for _, field := range schema.GetFields() {
+		if field.GetElementNullable() &&
+			(field.GetDataType() == schemapb.DataType_Array || field.GetDataType() == schemapb.DataType_ArrayOfVector) {
+			return merr.WrapErrStorageMsg("element nullable %s is not supported in V1 storage format, fieldName=%s",
+				field.GetDataType().String(), field.GetName())
+		}
+		if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+			return merr.WrapErrStorageMsg("nested Array is not supported in V1 storage format, fieldName=%s", field.GetName())
+		}
 		if isNullableArrayOfVectorField(field) {
-			return merr.WrapErrParameterInvalidMsg("nullable ArrayOfVector is not supported in V1 storage format, fieldName=%s", field.GetName())
+			return merr.WrapErrStorageMsg("nullable ArrayOfVector is not supported in V1 storage format, fieldName=%s", field.GetName())
 		}
 	}
 
 	for _, structField := range schema.GetStructArrayFields() {
 		for _, field := range structField.GetFields() {
+			if field.GetElementNullable() &&
+				(field.GetDataType() == schemapb.DataType_Array || field.GetDataType() == schemapb.DataType_ArrayOfVector) {
+				return merr.WrapErrStorageMsg("element nullable %s is not supported in V1 storage format, structName=%s, fieldName=%s",
+					field.GetDataType().String(), structField.GetName(), field.GetName())
+			}
+			if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+				return merr.WrapErrStorageMsg("nested Array is not supported in V1 storage format, structName=%s, fieldName=%s",
+					structField.GetName(), field.GetName())
+			}
 			if isNullableArrayOfVectorField(field) {
-				return merr.WrapErrParameterInvalidMsg("nullable ArrayOfVector is not supported in V1 storage format, structName=%s, fieldName=%s",
+				return merr.WrapErrStorageMsg("nullable ArrayOfVector is not supported in V1 storage format, structName=%s, fieldName=%s",
 					structField.GetName(), field.GetName())
 			}
 		}
@@ -586,12 +603,9 @@ func validateColumnBasedNullableVectorFieldData(field *schemapb.FieldSchema, src
 func validateColumnBasedInsertMsgNullableVectors(schema *schemapb.CollectionSchema, msg *msgstream.InsertMsg) error {
 	srcFields := make(map[int64]*schemapb.FieldData, len(msg.GetFieldsData()))
 	for _, fieldData := range msg.GetFieldsData() {
-		if !typeutil.ValidateAndNormalizeFieldDataValidData(fieldData) {
-			return merr.WrapErrParameterInvalidMsg(
-				"field %s has different legacy and field-specific valid_data",
-				fieldData.GetFieldName(),
-			)
-		}
+		// A WAL insert message may come from an older proxy that rewrote only the
+		// legacy validity, so reconcile instead of rejecting a conflict.
+		typeutil.NormalizeFieldDataValidData(fieldData)
 		srcFields[fieldData.GetFieldId()] = fieldData
 	}
 
@@ -614,12 +628,9 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			// unreachable
 			panic("struct is not flattened")
 		}
-		if !typeutil.ValidateAndNormalizeFieldDataValidData(field) {
-			return nil, merr.WrapErrParameterInvalidMsg(
-				"field %s has different legacy and field-specific valid_data",
-				field.GetFieldName(),
-			)
-		}
+		// A WAL insert message may come from an older proxy that rewrote only the
+		// legacy validity, so reconcile instead of rejecting a conflict.
+		typeutil.NormalizeFieldDataValidData(field)
 		srcFields[field.FieldId] = field
 	}
 
@@ -882,10 +893,11 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			validData := typeutil.GetFieldDataValidData(srcField)
 
 			fieldData = &ArrayFieldData{
-				ElementType: field.GetElementType(),
-				Data:        srcData,
-				ValidData:   validData,
-				Nullable:    field.GetNullable(),
+				ElementType:     field.GetElementType(),
+				Data:            srcData,
+				ValidData:       validData,
+				Nullable:        field.GetNullable(),
+				ElementNullable: field.GetElementNullable(),
 			}
 
 		case schemapb.DataType_JSON:
@@ -903,11 +915,12 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			validData := typeutil.GetFieldDataValidData(srcField)
 
 			fieldData = &VectorArrayFieldData{
-				ElementType: field.GetElementType(),
-				Data:        vectorArray.GetData(),
-				Dim:         vectorArray.GetDim(),
-				ValidData:   validData,
-				Nullable:    field.GetNullable(),
+				ElementType:     field.GetElementType(),
+				Data:            vectorArray.GetData(),
+				Dim:             vectorArray.GetDim(),
+				ValidData:       validData,
+				Nullable:        field.GetNullable(),
+				ElementNullable: field.GetElementNullable(),
 			}
 		case schemapb.DataType_Geometry:
 			srcData := srcField.GetScalars().GetGeometryData().GetData()
@@ -994,6 +1007,7 @@ func mergeBoolField(data *InsertData, fid FieldID, field *BoolFieldData) {
 		fieldData := &BoolFieldData{
 			Data:      nil,
 			ValidData: nil,
+			Nullable:  field.Nullable,
 		}
 		data.Data[fid] = fieldData
 	}
@@ -1007,6 +1021,7 @@ func mergeInt8Field(data *InsertData, fid FieldID, field *Int8FieldData) {
 		fieldData := &Int8FieldData{
 			Data:      nil,
 			ValidData: nil,
+			Nullable:  field.Nullable,
 		}
 		data.Data[fid] = fieldData
 	}
@@ -1020,6 +1035,7 @@ func mergeInt16Field(data *InsertData, fid FieldID, field *Int16FieldData) {
 		fieldData := &Int16FieldData{
 			Data:      nil,
 			ValidData: nil,
+			Nullable:  field.Nullable,
 		}
 		data.Data[fid] = fieldData
 	}
@@ -1033,6 +1049,7 @@ func mergeInt32Field(data *InsertData, fid FieldID, field *Int32FieldData) {
 		fieldData := &Int32FieldData{
 			Data:      nil,
 			ValidData: nil,
+			Nullable:  field.Nullable,
 		}
 		data.Data[fid] = fieldData
 	}
@@ -1046,6 +1063,7 @@ func mergeInt64Field(data *InsertData, fid FieldID, field *Int64FieldData) {
 		fieldData := &Int64FieldData{
 			Data:      nil,
 			ValidData: nil,
+			Nullable:  field.Nullable,
 		}
 		data.Data[fid] = fieldData
 	}
@@ -1059,6 +1077,7 @@ func mergeFloatField(data *InsertData, fid FieldID, field *FloatFieldData) {
 		fieldData := &FloatFieldData{
 			Data:      nil,
 			ValidData: nil,
+			Nullable:  field.Nullable,
 		}
 		data.Data[fid] = fieldData
 	}
@@ -1072,6 +1091,7 @@ func mergeDoubleField(data *InsertData, fid FieldID, field *DoubleFieldData) {
 		fieldData := &DoubleFieldData{
 			Data:      nil,
 			ValidData: nil,
+			Nullable:  field.Nullable,
 		}
 		data.Data[fid] = fieldData
 	}
@@ -1085,6 +1105,7 @@ func mergeTimestamptzField(data *InsertData, fid FieldID, field *TimestamptzFiel
 		fieldData := &TimestamptzFieldData{
 			Data:      nil,
 			ValidData: nil,
+			Nullable:  field.Nullable,
 		}
 		data.Data[fid] = fieldData
 	}
@@ -1097,7 +1118,9 @@ func mergeStringField(data *InsertData, fid FieldID, field *StringFieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &StringFieldData{
 			Data:      nil,
+			DataType:  field.DataType,
 			ValidData: nil,
+			Nullable:  field.Nullable,
 		}
 		data.Data[fid] = fieldData
 	}
@@ -1106,18 +1129,51 @@ func mergeStringField(data *InsertData, fid FieldID, field *StringFieldData) {
 	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
 }
 
-func mergeArrayField(data *InsertData, fid FieldID, field *ArrayFieldData) {
+func validateElementNullableMerge(fid FieldID, existing, incoming FieldData) error {
+	switch incoming := incoming.(type) {
+	case *ArrayFieldData:
+		existing, ok := existing.(*ArrayFieldData)
+		if ok && existing.ElementNullable != incoming.ElementNullable {
+			return merr.WrapErrServiceInternalMsg(
+				"cannot merge Array field %d with inconsistent element_nullable: existing=%t, incoming=%t",
+				fid,
+				existing.ElementNullable,
+				incoming.ElementNullable,
+			)
+		}
+	case *VectorArrayFieldData:
+		existing, ok := existing.(*VectorArrayFieldData)
+		if ok && existing.ElementNullable != incoming.ElementNullable {
+			return merr.WrapErrServiceInternalMsg(
+				"cannot merge ArrayOfVector field %d with inconsistent element_nullable: existing=%t, incoming=%t",
+				fid,
+				existing.ElementNullable,
+				incoming.ElementNullable,
+			)
+		}
+	}
+	return nil
+}
+
+func mergeArrayField(data *InsertData, fid FieldID, field *ArrayFieldData) error {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &ArrayFieldData{
-			ElementType: field.ElementType,
-			Data:        nil,
-			ValidData:   nil,
+			ElementType:     field.ElementType,
+			Data:            nil,
+			ValidData:       nil,
+			Nullable:        field.Nullable,
+			ElementNullable: field.ElementNullable,
 		}
 		data.Data[fid] = fieldData
 	}
 	fieldData := data.Data[fid].(*ArrayFieldData)
+	if err := validateElementNullableMerge(fid, fieldData, field); err != nil {
+		return err
+	}
+	fieldData.Nullable = fieldData.Nullable || field.Nullable
 	fieldData.Data = append(fieldData.Data, field.Data...)
 	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
+	return nil
 }
 
 func mergeJSONField(data *InsertData, fid FieldID, field *JSONFieldData) {
@@ -1125,10 +1181,22 @@ func mergeJSONField(data *InsertData, fid FieldID, field *JSONFieldData) {
 		fieldData := &JSONFieldData{
 			Data:      nil,
 			ValidData: nil,
+			Nullable:  field.Nullable,
 		}
 		data.Data[fid] = fieldData
 	}
 	fieldData := data.Data[fid].(*JSONFieldData)
+	fieldData.Data = append(fieldData.Data, field.Data...)
+	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
+}
+
+func mergeGeometryField(data *InsertData, fid FieldID, field *GeometryFieldData) {
+	if _, ok := data.Data[fid]; !ok {
+		data.Data[fid] = &GeometryFieldData{
+			Nullable: field.Nullable,
+		}
+	}
+	fieldData := data.Data[fid].(*GeometryFieldData)
 	fieldData.Data = append(fieldData.Data, field.Data...)
 	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
 }
@@ -1215,20 +1283,25 @@ func mergeSparseFloatVectorField(data *InsertData, fid FieldID, field *SparseFlo
 	fieldData.AppendAllRows(field)
 }
 
-func mergeVectorArrayField(data *InsertData, fid FieldID, field *VectorArrayFieldData) {
+func mergeVectorArrayField(data *InsertData, fid FieldID, field *VectorArrayFieldData) error {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &VectorArrayFieldData{
-			Data:        nil,
-			Dim:         field.Dim,
-			ElementType: field.ElementType,
-			ValidData:   nil,
-			Nullable:    field.Nullable,
+			Data:            nil,
+			Dim:             field.Dim,
+			ElementType:     field.ElementType,
+			ValidData:       nil,
+			Nullable:        field.Nullable,
+			ElementNullable: field.ElementNullable,
 		}
 		data.Data[fid] = fieldData
 	}
 	fieldData := data.Data[fid].(*VectorArrayFieldData)
+	if err := validateElementNullableMerge(fid, fieldData, field); err != nil {
+		return err
+	}
 	fieldData.Data = append(fieldData.Data, field.Data...)
 	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
+	return nil
 }
 
 func mergeInt8VectorField(data *InsertData, fid FieldID, field *Int8VectorFieldData) {
@@ -1249,10 +1322,10 @@ func mergeInt8VectorField(data *InsertData, fid FieldID, field *Int8VectorFieldD
 	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
 }
 
-// MergeFieldData merge field into data.
-func MergeFieldData(data *InsertData, fid FieldID, field FieldData) {
+// MergeFieldData merges field into data.
+func MergeFieldData(data *InsertData, fid FieldID, field FieldData) error {
 	if field == nil {
-		return
+		return nil
 	}
 	switch field := field.(type) {
 	case *BoolFieldData:
@@ -1274,9 +1347,11 @@ func MergeFieldData(data *InsertData, fid FieldID, field FieldData) {
 	case *StringFieldData:
 		mergeStringField(data, fid, field)
 	case *ArrayFieldData:
-		mergeArrayField(data, fid, field)
+		return mergeArrayField(data, fid, field)
 	case *JSONFieldData:
 		mergeJSONField(data, fid, field)
+	case *GeometryFieldData:
+		mergeGeometryField(data, fid, field)
 	case *BinaryVectorFieldData:
 		mergeBinaryVectorField(data, fid, field)
 	case *FloatVectorFieldData:
@@ -1290,27 +1365,53 @@ func MergeFieldData(data *InsertData, fid FieldID, field FieldData) {
 	case *Int8VectorFieldData:
 		mergeInt8VectorField(data, fid, field)
 	case *VectorArrayFieldData:
-		mergeVectorArrayField(data, fid, field)
+		return mergeVectorArrayField(data, fid, field)
 	}
+	return nil
 }
 
 // MergeInsertData append the insert datas to the original buffer.
-func MergeInsertData(buffer *InsertData, datas ...*InsertData) {
+func MergeInsertData(buffer *InsertData, datas ...*InsertData) error {
 	if buffer == nil {
 		mlog.Warn(context.TODO(), "Attempt to merge data into a nil buffer, skip the data merge.")
-		return
+		return nil
+	}
+
+	fields := make(map[FieldID]FieldData, len(buffer.Data))
+	for fid, field := range buffer.Data {
+		fields[fid] = field
+	}
+	for _, data := range datas {
+		if data == nil {
+			continue
+		}
+		for fid, field := range data.Data {
+			if field == nil {
+				continue
+			}
+			if existing, ok := fields[fid]; ok {
+				if err := validateElementNullableMerge(fid, existing, field); err != nil {
+					return err
+				}
+			} else {
+				fields[fid] = field
+			}
+		}
 	}
 
 	for _, data := range datas {
 		if data != nil {
 			for fid, field := range data.Data {
-				MergeFieldData(buffer, fid, field)
+				if err := MergeFieldData(buffer, fid, field); err != nil {
+					return err
+				}
 			}
 
 			// TODO: handle storage.InsertData.Infos
 			buffer.Infos = append(buffer.Infos, data.Infos...)
 		}
 	}
+	return nil
 }
 
 // TODO: string type.
@@ -1375,11 +1476,6 @@ func boolFieldDataToPbBytes(field *BoolFieldData) ([]byte, error) {
 
 func stringFieldDataToPbBytes(field *StringFieldData) ([]byte, error) {
 	arr := &schemapb.StringArray{Data: field.Data}
-	return proto.Marshal(arr)
-}
-
-func arrayFieldDataToPbBytes(field *ArrayFieldData) ([]byte, error) {
-	arr := &schemapb.ArrayArray{Data: field.Data}
 	return proto.Marshal(arr)
 }
 
@@ -1537,15 +1633,17 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 				},
 			}
 		case *ArrayFieldData:
+			arrayData := &schemapb.ArrayArray{
+				ElementType: rawData.ElementType,
+				Data:        rawData.Data,
+			}
 			fieldData = &schemapb.FieldData{
 				Type:    schemapb.DataType_Array,
 				FieldId: fieldID,
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_ArrayData{
-							ArrayData: &schemapb.ArrayArray{
-								Data: rawData.Data,
-							},
+							ArrayData: arrayData,
 						},
 					},
 				},
@@ -1659,17 +1757,18 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 				},
 			}
 		case *VectorArrayFieldData:
+			vectorArray := &schemapb.VectorArray{
+				Dim:         rawData.Dim,
+				ElementType: rawData.ElementType,
+				Data:        rawData.Data,
+			}
 			fieldData = &schemapb.FieldData{
 				Type:    schemapb.DataType_ArrayOfVector,
 				FieldId: fieldID,
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
 						Data: &schemapb.VectorField_VectorArray{
-							VectorArray: &schemapb.VectorArray{
-								Data:        rawData.Data,
-								ElementType: rawData.ElementType,
-								Dim:         rawData.Dim,
-							},
+							VectorArray: vectorArray,
 						},
 						Dim: rawData.Dim,
 					},

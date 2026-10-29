@@ -82,6 +82,19 @@ func (s *Server) startBroadcastWithCollectionID(ctx context.Context, collectionI
 	return broadcaster, nil
 }
 
+// startLocalFlushBroadcast serializes local collection operations on either role.
+// Replicated Drop bypasses these locks; the WAL accepts the admitted local flush
+// as an empty flush if Drop removes its shard before it appends.
+func (s *Server) startLocalFlushBroadcast(ctx context.Context, collectionID int64) (broadcaster.BroadcastAPI, error) {
+	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+	if err != nil {
+		return nil, err
+	}
+	return broadcast.StartUnreplicableBroadcastWithResourceKeys(ctx,
+		message.NewSharedDBNameResourceKey(coll.GetDbName()),
+		message.NewExclusiveCollectionNameResourceKey(coll.GetDbName(), coll.GetCollectionName()))
+}
+
 // startBroadcastForRestoreSnapshot starts a broadcast for restore snapshot operations.
 // It only creates the broadcaster with appropriate resource keys (DB, collection, snapshot)
 // without performing resource validation.
@@ -112,13 +125,11 @@ func (s *Server) startBroadcastForRestoreSnapshot(ctx context.Context, collectio
 
 // startRestoreSnapshotLock acquires the Phase 0 restore lock set for RestoreSnapshot.
 //
-// It holds three locks that together serialize the full restore flow against
-// concurrent DropSnapshot / CreateCollection on both the source snapshot and
-// the target collection name:
+// These locks protect target validation and source snapshot pinning against
+// concurrent DropSnapshot / CreateCollection during Phase 0:
 //
 //   - Shared lock on target database
-//   - Exclusive lock on target collection name (reserves the name before the
-//     collection is created in Phase 2)
+//   - Exclusive lock on target collection name during validation
 //   - Exclusive lock on (sourceCollectionID, snapshotName) — namespaced by
 //     collection so cross-collection same-name snapshots do not contend,
 //     and serializes against DropSnapshot of the same source snapshot
@@ -126,7 +137,9 @@ func (s *Server) startBroadcastForRestoreSnapshot(ctx context.Context, collectio
 // The returned broadcaster holds the locks only; Close() releases them
 // without broadcasting any message. Callers are expected to increment
 // the restore reference count while the lock is held, then Close() — the
-// refcount becomes the persistent guard after the lock is released.
+// pin becomes the persistent source guard after the lock is released. The
+// separate restore target lock serializes restore requests through job submission
+// and synchronous cleanup without holding the DDL lock across nested DDL calls.
 func (s *Server) startRestoreSnapshotLock(
 	ctx context.Context,
 	sourceCollectionID int64,

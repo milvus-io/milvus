@@ -14,12 +14,15 @@
 
 #include <boost/container/vector.hpp>
 #include <boost/cstdint.hpp>
+#include <folly/ScopeGuard.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <stddef.h>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <iostream>
 #include <map>
@@ -30,11 +33,15 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "common/Common.h"
+#include "common/Array.h"
 #include "common/Consts.h"
+#include "common/FieldData.h"
+#include "common/FieldMeta.h"
 #include "common/IndexMeta.h"
 #include "common/PrometheusClient.h"
 #include "common/QueryResult.h"
@@ -44,15 +51,16 @@
 #include "common/protobuf_utils.h"
 #include "exec/QueryContext.h"
 #include "exec/expression/EvalCtx.h"
+#include "exec/expression/ExprIndexIntegrationTestUtils.h"
 #include "exec/expression/MatchExpr.h"
 #include "expr/ITypeExpr.h"
 #include "gtest/gtest.h"
-#include "index/Index.h"
-#include "index/InvertedIndexTantivy.h"
+#include "index/Meta.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
+#include "query/ExecPlanNodeVisitor.h"
 #include "query/Plan.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
@@ -60,14 +68,59 @@
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
 #include "segcore/Utils.h"
-#include "test_utils/DataGen.h"
-#include "test_utils/GenExprProto.h"
+#include "segcore/segment_c.h"
+#include "storage/MmapManager.h"
 #include "test_utils/cachinglayer_test_utils.h"
+#include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
+#include "test_utils/GenExprProto.h"
+#include "test_utils/SegcoreConfigUtils.h"
 
 using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
+
+namespace {
+
+template <typename T>
+void
+InstallNestedInvertedIndex(SegmentSealed& segment,
+                           FieldId field_id,
+                           const std::vector<boost::container::vector<T>>& rows,
+                           DataType element_type) {
+    std::vector<Array> arrays;
+    arrays.reserve(rows.size());
+    for (const auto& row : rows) {
+        proto::schema::ScalarField values;
+        if constexpr (std::is_same_v<T, std::string>) {
+            auto* strings = values.mutable_string_data();
+            for (const auto& value : row) {
+                strings->add_data(value);
+            }
+        } else {
+            auto* integers = values.mutable_int_data();
+            for (const auto value : row) {
+                integers->add_data(value);
+            }
+        }
+        arrays.emplace_back(values);
+    }
+    // Parent row validity stays in the segment's physical column. The nested
+    // reader answers in element coordinates, including valid empty rows.
+    auto field = std::make_shared<FieldData<Array>>(DataType::ARRAY, false);
+    field->FillFieldData(arrays.data(), arrays.size());
+    auto opened = test::expr_index::BuildIndex(field_id,
+                                               DataType::ARRAY,
+                                               index::INVERTED_INDEX_TYPE,
+                                               {field},
+                                               Config::object(),
+                                               element_type,
+                                               true);
+    test::expr_index::InstallIndex(
+        segment, field_id, DataType::ARRAY, std::move(opened), element_type);
+}
+
+}  // namespace
 
 class MatchExprTest : public ::testing::Test {
  protected:
@@ -95,8 +148,11 @@ class MatchExprTest : public ::testing::Test {
         // Create and populate segment
         seg_ = CreateGrowingSegment(schema_, empty_index_meta);
         seg_->PreInsert(N_);
-        seg_->Insert(
-            0, N_, row_ids_.data(), timestamps_.data(), insert_data_.get());
+        seg_->Insert(0,
+                     N_,
+                     row_ids_.data(),
+                     timestamps_.data(),
+                     std::make_shared<InsertRecordProto>(*insert_data_));
     }
 
     void
@@ -550,7 +606,7 @@ TEST(MatchExprWordFoldTest, OffsetRowsMatchPerBitReference) {
                     row_count,
                     row_ids.data(),
                     timestamps.data(),
-                    insert_data.get());
+                    std::make_shared<InsertRecordProto>(*insert_data));
 
     exec::OffsetVector offsets = {1, 3, 4, 5, 0, 2};
     std::vector<int64_t> bitset_starts(offsets.size() + 1, 0);
@@ -674,7 +730,8 @@ TEST(MatchExprWordFoldTest, OffsetRowsMatchPerBitReference) {
     }
 }
 
-TEST(MatchExprZeroElementBatch, MatchAnyTreatsEmptyRowsAsNoMatch) {
+TEST(MatchExprZeroElementBatch,
+     NullableNestedRowsAcrossConsecutiveEmptyBatches) {
     struct BatchSizeGuard {
         int64_t saved;
         ~BatchSizeGuard() {
@@ -686,45 +743,505 @@ TEST(MatchExprZeroElementBatch, MatchAnyTreatsEmptyRowsAsNoMatch) {
     auto schema = std::make_shared<Schema>();
     auto int64_fid = schema->AddDebugField("id", DataType::INT64);
     schema->set_primary_field_id(int64_fid);
-    auto sub_int_fid = schema->AddDebugArrayField(
-        "struct_array[sub_int]", DataType::INT32, false);
+    const auto nested_int_fid = FieldId(int64_fid.get() + 1);
+    proto::schema::TypeSchema nested_int_type;
+    nested_int_type.mutable_array_element()
+        ->mutable_array_element()
+        ->set_leaf_type(proto::schema::DataType::Int32);
+    schema->AddField(FieldMeta(FieldName("struct_array[nested_values]"),
+                               nested_int_fid,
+                               DataType::ARRAY,
+                               DataType::ARRAY,
+                               true,
+                               false,
+                               std::nullopt,
+                               std::string{},
+                               LOCAL_FORMAT_RAW,
+                               std::make_optional(std::move(nested_int_type))));
 
-    constexpr int64_t N = 3;
+    constexpr int64_t N = 7;
     auto insert_data = std::make_unique<InsertRecordProto>();
 
-    std::vector<int64_t> ids = {0, 1, 2};
+    std::vector<int64_t> ids(N);
+    std::iota(ids.begin(), ids.end(), 0);
     auto id_array = CreateDataArrayFrom(
         ids.data(), nullptr, N, schema->operator[](int64_fid));
     insert_data->mutable_fields_data()->AddAllocated(id_array.release());
 
-    std::vector<milvus::proto::schema::ScalarField> sub_int_data(N);
-    sub_int_data[2].mutable_int_data()->add_data(9001);
-    auto sub_int_array = CreateDataArrayFrom(
-        sub_int_data.data(), nullptr, N, schema->operator[](sub_int_fid));
-    insert_data->mutable_fields_data()->AddAllocated(sub_int_array.release());
+    auto* nested_int_field = insert_data->add_fields_data();
+    nested_int_field->set_field_id(nested_int_fid.get());
+    nested_int_field->set_field_name("struct_array[nested_values]");
+    nested_int_field->set_type(proto::schema::DataType::Array);
+    for (const bool valid : {false, true, true, false, true, true, true}) {
+        nested_int_field->mutable_scalars()->add_valid_data(valid);
+    }
+    auto* nested_int_rows =
+        nested_int_field->mutable_scalars()->mutable_array_data();
+    nested_int_rows->set_element_type(proto::schema::DataType::Array);
+    auto append_row =
+        [nested_int_rows](const std::vector<std::vector<int32_t>>& children) {
+            auto* row = nested_int_rows->add_data()->mutable_array_data();
+            row->set_element_type(proto::schema::DataType::Int32);
+            for (const auto& child_values : children) {
+                auto* child = row->add_data()->mutable_int_data();
+                for (const auto value : child_values) {
+                    child->add_data(value);
+                }
+            }
+        };
+    // NULL rows retain non-empty physical payloads. As with regular ARRAY,
+    // field validity is authoritative and these elements are not logical rows.
+    append_row({{7000}});
+    append_row({});
+    append_row({});
+    append_row({{8000}});
+    append_row({});
+    append_row({{9001}});
+    append_row({{1}});
     insert_data->set_num_rows(N);
 
-    GeneratedData generated_data;
-    generated_data.schema_ = schema;
-    generated_data.raw_ = insert_data.release();
-    for (int64_t i = 0; i < N; ++i) {
-        generated_data.row_ids_.push_back(i);
-        generated_data.timestamps_.push_back(i);
+    std::vector<Timestamp> timestamps(N);
+    std::iota(timestamps.begin(), timestamps.end(), 0);
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore config_restore(config);
+    config.set_chunk_rows(2);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta, 1, config);
+    const auto reserved_offset = segment->PreInsert(N);
+    segment->Insert(reserved_offset,
+                    N,
+                    ids.data(),
+                    timestamps.data(),
+                    std::make_shared<InsertRecordProto>(*insert_data));
+    ScopedSchemaHandle schema_handle(*schema);
+    auto retrieve = [&](const std::string& expression)
+        -> std::unique_ptr<proto::segcore::RetrieveResults> {
+        const auto plan_bytes = schema_handle.Parse(expression);
+        auto plan = CreateRetrievePlanByExpr(
+            schema, plan_bytes.data(), plan_bytes.size());
+        EXPECT_NE(plan, nullptr);
+        if (plan == nullptr) {
+            return nullptr;
+        }
+        return segment->Retrieve(
+            nullptr, plan.get(), 1L << 63, DEFAULT_MAX_OUTPUT_SIZE, false);
+    };
+
+    // Rows [0, 1] and [2, 3] form two consecutive batches with no elements.
+    // The child cursor must still advance before rows 5 and 6 are evaluated.
+    auto match_any = retrieve(
+        "match_any(struct_array, array_contains($[nested_values], 9001))");
+    ASSERT_NE(match_any, nullptr);
+    ASSERT_EQ(match_any->offset_size(), 1);
+    EXPECT_EQ(match_any->offset(0), 5);
+
+    // Empty non-null rows match_all vacuously; nullable StructArray rows 0
+    // and 3 must remain invalid and therefore must not be returned.
+    auto match_all = retrieve(
+        "match_all(struct_array, array_length($[nested_values]) >= 0)");
+    ASSERT_NE(match_all, nullptr);
+    const std::vector<int64_t> expected = {1, 2, 4, 5, 6};
+    ASSERT_EQ(match_all->offset_size(), expected.size());
+    for (size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_EQ(match_all->offset(i), expected[i]);
     }
 
-    auto segment = CreateSealedWithFieldDataLoaded(schema, generated_data);
-    ScopedSchemaHandle schema_handle(*schema);
-    auto plan_str =
-        schema_handle.Parse("match_any(struct_array, $[sub_int] >= 9000)");
-    auto plan =
-        CreateRetrievePlanByExpr(schema, plan_str.data(), plan_str.size());
-    ASSERT_NE(plan, nullptr);
+    // Row-level length uses the recursive ARRAY root and must preserve field
+    // nullability: null rows 0 and 3 do not match length zero.
+    auto root_length =
+        retrieve("array_length(struct_array[nested_values]) == 0");
+    ASSERT_NE(root_length, nullptr);
+    const std::vector<int64_t> expected_empty = {1, 2, 4};
+    ASSERT_EQ(root_length->offset_size(), expected_empty.size());
+    for (size_t i = 0; i < expected_empty.size(); ++i) {
+        EXPECT_EQ(root_length->offset(i), expected_empty[i]);
+    }
+}
 
-    auto result = segment->Retrieve(
-        nullptr, plan.get(), 1L << 63, DEFAULT_MAX_OUTPUT_SIZE, false);
-    ASSERT_NE(result, nullptr);
-    ASSERT_EQ(result->offset_size(), 1);
-    EXPECT_EQ(result->offset(0), 2);
+TEST(MatchExprNestedArrayExpressions, MatchFamilyGrowingAndSealed) {
+    const auto saved_batch_size = EXEC_EVAL_EXPR_BATCH_SIZE.load();
+    EXEC_EVAL_EXPR_BATCH_SIZE.store(2);
+    auto batch_size_guard = folly::makeGuard([saved_batch_size] {
+        EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size);
+    });
+
+    auto schema = std::make_shared<Schema>();
+    const auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    const auto nested_int_fid = FieldId(int64_fid.get() + 1);
+    proto::schema::TypeSchema nested_int_type;
+    nested_int_type.mutable_array_element()
+        ->mutable_array_element()
+        ->set_leaf_type(proto::schema::DataType::Int32);
+    schema->AddField(FieldMeta(FieldName("struct_array[nested_values]"),
+                               nested_int_fid,
+                               DataType::ARRAY,
+                               DataType::ARRAY,
+                               false,
+                               false,
+                               std::nullopt,
+                               std::string{},
+                               LOCAL_FORMAT_RAW,
+                               std::make_optional(std::move(nested_int_type))));
+
+    const auto nested_string_fid = FieldId(int64_fid.get() + 2);
+    proto::schema::TypeSchema nested_string_type;
+    nested_string_type.mutable_array_element()
+        ->mutable_array_element()
+        ->set_leaf_type(proto::schema::DataType::VarChar);
+    schema->AddField(
+        FieldMeta(FieldName("struct_array[nested_strings]"),
+                  nested_string_fid,
+                  DataType::ARRAY,
+                  DataType::ARRAY,
+                  false,
+                  false,
+                  std::nullopt,
+                  std::string{},
+                  LOCAL_FORMAT_RAW,
+                  std::make_optional(std::move(nested_string_type))));
+
+    constexpr int64_t row_count = 4;
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    std::vector<int64_t> ids = {0, 1, 2, 3};
+    auto id_array = CreateDataArrayFrom(
+        ids.data(), nullptr, row_count, schema->operator[](int64_fid));
+    insert_data->mutable_fields_data()->AddAllocated(id_array.release());
+
+    auto* nested_int_field = insert_data->add_fields_data();
+    nested_int_field->set_field_id(nested_int_fid.get());
+    nested_int_field->set_field_name("struct_array[nested_values]");
+    nested_int_field->set_type(proto::schema::DataType::Array);
+    auto* nested_int_rows =
+        nested_int_field->mutable_scalars()->mutable_array_data();
+    nested_int_rows->set_element_type(proto::schema::DataType::Array);
+    auto append_int_row =
+        [nested_int_rows](const std::vector<std::vector<int32_t>>& children) {
+            auto* row = nested_int_rows->add_data()->mutable_array_data();
+            row->set_element_type(proto::schema::DataType::Int32);
+            for (const auto& child_values : children) {
+                auto* child = row->add_data()->mutable_int_data();
+                for (const auto value : child_values) {
+                    child->add_data(value);
+                }
+            }
+        };
+    append_int_row({{1, 2}, {3, 4}});
+    append_int_row({{5, 6}, {7}});
+    append_int_row({{8}});
+    append_int_row({{9, 10}, {11, 12}, {13}});
+
+    auto* nested_string_field = insert_data->add_fields_data();
+    nested_string_field->set_field_id(nested_string_fid.get());
+    nested_string_field->set_field_name("struct_array[nested_strings]");
+    nested_string_field->set_type(proto::schema::DataType::Array);
+    auto* nested_string_rows =
+        nested_string_field->mutable_scalars()->mutable_array_data();
+    nested_string_rows->set_element_type(proto::schema::DataType::Array);
+    auto append_string_row =
+        [nested_string_rows](
+            const std::vector<std::vector<std::string>>& children) {
+            auto* row = nested_string_rows->add_data()->mutable_array_data();
+            row->set_element_type(proto::schema::DataType::VarChar);
+            for (const auto& child_values : children) {
+                auto* child = row->add_data()->mutable_string_data();
+                for (const auto& value : child_values) {
+                    child->add_data(value);
+                }
+            }
+        };
+    append_string_row({{"abc", "x"}, {"efg"}});
+    append_string_row({{"abc"}, {"abc", "efg"}});
+    append_string_row({{}});
+    append_string_row({{"tail"}, {"abc", "efg"}, {"zzz"}});
+    insert_data->set_num_rows(row_count);
+
+    struct TestCase {
+        std::string expression;
+        std::vector<int64_t> expected_offsets;
+    };
+    const std::vector<TestCase> cases = {
+        {"array_length(struct_array[nested_values]) == 2", {0, 1}},
+        {"match_any(struct_array, "
+         "array_length($[nested_values]) == 2)",
+         {0, 1, 3}},
+        {"match_all(struct_array, "
+         "array_length($[nested_values]) == 2)",
+         {0}},
+        {"match_least(struct_array, "
+         "array_length($[nested_values]) == 2, threshold=2)",
+         {0, 3}},
+        {"match_most(struct_array, "
+         "array_length($[nested_values]) == 2, threshold=1)",
+         {1, 2}},
+        {"match_exact(struct_array, "
+         "array_length($[nested_values]) == 2, threshold=2)",
+         {0, 3}},
+        {"match_any(struct_array, "
+         "array_contains($[nested_values], 7))",
+         {1}},
+        {"match_all(struct_array, "
+         "array_contains_any($[nested_values], [1, 4]))",
+         {0}},
+        {"match_any(struct_array, "
+         "array_contains_all($[nested_values], [9, 10]))",
+         {3}},
+        {"match_any(struct_array, "
+         "array_contains($[nested_strings], \"efg\"))",
+         {0, 1, 3}},
+        {"match_all(struct_array, "
+         "array_contains_any($[nested_strings], [\"abc\", \"tail\"]))",
+         {1}},
+        {"match_any(struct_array, "
+         "array_contains_all($[nested_strings], [\"abc\", \"efg\"]))",
+         {1, 3}},
+        {"match_all(struct_array, "
+         "array_contains_all($[nested_strings], []))",
+         {0, 1, 2, 3}},
+        {"match_any(struct_array, "
+         "array_contains_any($[nested_strings], []))",
+         {}},
+    };
+
+    ScopedSchemaHandle schema_handle(*schema);
+    auto check_segment = [&](SegmentInternalInterface* segment,
+                             const char* segment_name) {
+        for (const auto& test : cases) {
+            SCOPED_TRACE(std::string(segment_name) + ": " + test.expression);
+            const auto plan_bytes = schema_handle.Parse(test.expression);
+            auto plan = CreateRetrievePlanByExpr(
+                schema, plan_bytes.data(), plan_bytes.size());
+            ASSERT_NE(plan, nullptr);
+
+            auto result = segment->Retrieve(
+                nullptr, plan.get(), 1L << 63, DEFAULT_MAX_OUTPUT_SIZE, false);
+            ASSERT_NE(result, nullptr);
+            ASSERT_EQ(result->offset_size(), test.expected_offsets.size());
+            for (size_t i = 0; i < test.expected_offsets.size(); ++i) {
+                EXPECT_EQ(result->offset(i), test.expected_offsets[i]);
+            }
+        }
+
+        const std::string offset_expression =
+            "match_any(struct_array, "
+            "array_contains_all($[nested_values], [9, 10]))";
+        const auto plan_bytes = schema_handle.Parse(offset_expression);
+        auto plan = CreateRetrievePlanByExpr(
+            schema, plan_bytes.data(), plan_bytes.size());
+        ASSERT_NE(plan, nullptr);
+        const auto& sources = plan->plan_node_->plannodes_->sources();
+        ASSERT_EQ(sources.size(), 1);
+        auto* filter_node = sources.front().get();
+        ASSERT_NE(filter_node, nullptr);
+        exec::OffsetVector offsets = {3, 1, 0};
+        auto output = test::gen_filter_res(
+            filter_node, segment, row_count, MAX_TIMESTAMP, &offsets);
+        ASSERT_EQ(output->size(), offsets.size());
+        TargetBitmapView output_data(output->GetRawData(), output->size());
+        EXPECT_TRUE(output_data[0]);
+        EXPECT_FALSE(output_data[1]);
+        EXPECT_FALSE(output_data[2]);
+
+        const std::string length_offset_expression =
+            "match_all(struct_array, "
+            "array_length($[nested_values]) == 2)";
+        const auto length_plan_bytes =
+            schema_handle.Parse(length_offset_expression);
+        auto length_plan = CreateRetrievePlanByExpr(
+            schema, length_plan_bytes.data(), length_plan_bytes.size());
+        ASSERT_NE(length_plan, nullptr);
+        const auto& length_sources =
+            length_plan->plan_node_->plannodes_->sources();
+        ASSERT_EQ(length_sources.size(), 1);
+        auto* length_filter_node = length_sources.front().get();
+        ASSERT_NE(length_filter_node, nullptr);
+        exec::OffsetVector length_offsets = {3, 1, 0};
+        auto length_output = test::gen_filter_res(length_filter_node,
+                                                  segment,
+                                                  row_count,
+                                                  MAX_TIMESTAMP,
+                                                  &length_offsets);
+        ASSERT_EQ(length_output->size(), length_offsets.size());
+        TargetBitmapView length_output_data(length_output->GetRawData(),
+                                            length_output->size());
+        EXPECT_FALSE(length_output_data[0]);
+        EXPECT_FALSE(length_output_data[1]);
+        EXPECT_TRUE(length_output_data[2]);
+
+        const std::string row_length_offset_expression =
+            "array_length(struct_array[nested_values]) == 2";
+        const auto row_length_plan_bytes =
+            schema_handle.Parse(row_length_offset_expression);
+        auto row_length_plan = CreateRetrievePlanByExpr(
+            schema, row_length_plan_bytes.data(), row_length_plan_bytes.size());
+        ASSERT_NE(row_length_plan, nullptr);
+        const auto& row_length_sources =
+            row_length_plan->plan_node_->plannodes_->sources();
+        ASSERT_EQ(row_length_sources.size(), 1);
+        auto* row_length_filter_node = row_length_sources.front().get();
+        ASSERT_NE(row_length_filter_node, nullptr);
+        exec::OffsetVector row_length_offsets = {3, 1, 0};
+        auto row_length_output = test::gen_filter_res(row_length_filter_node,
+                                                      segment,
+                                                      row_count,
+                                                      MAX_TIMESTAMP,
+                                                      &row_length_offsets);
+        ASSERT_EQ(row_length_output->size(), row_length_offsets.size());
+        TargetBitmapView row_length_output_data(row_length_output->GetRawData(),
+                                                row_length_output->size());
+        EXPECT_FALSE(row_length_output_data[0]);
+        EXPECT_TRUE(row_length_output_data[1]);
+        EXPECT_TRUE(row_length_output_data[2]);
+    };
+
+    std::vector<idx_t> row_ids = {0, 1, 2, 3};
+    std::vector<Timestamp> timestamps = {0, 1, 2, 3};
+    {
+        auto& config = SegcoreConfig::default_config();
+        ScopedSegcoreConfigRestore config_restore(config);
+        config.set_chunk_rows(2);
+        auto growing =
+            CreateGrowingSegment(schema, empty_index_meta, 1, config);
+        const auto reserved_offset = growing->PreInsert(row_count);
+        growing->Insert(reserved_offset,
+                        row_count,
+                        row_ids.data(),
+                        timestamps.data(),
+                        std::make_shared<InsertRecordProto>(*insert_data));
+        ASSERT_GT(growing->num_chunk(nested_int_fid), 1);
+        check_segment(growing.get(), "growing multi-chunk");
+    }
+
+    {
+        auto& mmap_config = storage::MmapManager::GetInstance().GetMmapConfig();
+        const auto saved_growing_mmap = mmap_config.GetEnableGrowingMmap();
+        mmap_config.growing_enable_mmap = true;
+        auto mmap_guard = folly::makeGuard([&mmap_config, saved_growing_mmap] {
+            mmap_config.growing_enable_mmap = saved_growing_mmap;
+        });
+
+        auto& config = SegcoreConfig::default_config();
+        ScopedSegcoreConfigRestore config_restore(config);
+        config.set_chunk_rows(2);
+        auto growing =
+            CreateGrowingSegment(schema, empty_index_meta, 1, config);
+        const auto reserved_offset = growing->PreInsert(row_count);
+        growing->Insert(reserved_offset,
+                        row_count,
+                        row_ids.data(),
+                        timestamps.data(),
+                        std::make_shared<InsertRecordProto>(*insert_data));
+        auto* growing_impl = dynamic_cast<SegmentGrowingImpl*>(growing.get());
+        ASSERT_NE(growing_impl, nullptr);
+        EXPECT_TRUE(growing_impl->get_insert_record()
+                        .get_data<ArrayValue>(nested_int_fid)
+                        ->is_mmap());
+        check_segment(growing.get(), "growing mmap multi-chunk");
+    }
+
+    proto::schema::CollectionSchema storage_schema_proto;
+    auto add_system_field = [&](FieldId field_id, const char* name) {
+        auto* field = storage_schema_proto.add_fields();
+        field->set_fieldid(field_id.get());
+        field->set_name(name);
+        field->set_data_type(proto::schema::DataType::Int64);
+    };
+    add_system_field(RowFieldID, "RowID");
+    add_system_field(TimestampFieldID, "Timestamp");
+    const auto user_schema_proto = schema->ToProto();
+    for (const auto& field : user_schema_proto.fields()) {
+        auto* storage_field = storage_schema_proto.add_fields();
+        *storage_field = field;
+        if (field.fieldid() == nested_int_fid.get() ||
+            field.fieldid() == nested_string_fid.get()) {
+            auto* mmap = storage_field->add_type_params();
+            mmap->set_key(MMAP_ENABLED_KEY);
+            mmap->set_value("false");
+        }
+    }
+    auto storage_schema = Schema::ParseFrom(storage_schema_proto);
+
+    auto storage_growing =
+        CreateGrowingSegment(storage_schema, empty_index_meta, 2);
+    const auto storage_offset = storage_growing->PreInsert(row_count);
+    storage_growing->Insert(storage_offset,
+                            row_count,
+                            row_ids.data(),
+                            timestamps.data(),
+                            std::make_shared<InsertRecordProto>(*insert_data));
+
+    const auto unique =
+        std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto segment_path =
+        (std::filesystem::temp_directory_path() /
+         ("milvus_match_nested_array_v3_" + std::to_string(unique)))
+            .string();
+    std::filesystem::remove_all(segment_path);
+    auto directory_guard = folly::makeGuard(
+        [&segment_path] { std::filesystem::remove_all(segment_path); });
+
+    auto schema_blob = storage_schema_proto.SerializeAsString();
+    const auto column_group_pattern =
+        "0|1|" + std::to_string(int64_fid.get()) + "," +
+        std::to_string(nested_int_fid.get()) + "," +
+        std::to_string(nested_string_fid.get());
+    CFlushConfig flush_config{};
+    flush_config.segment_path = segment_path.c_str();
+    flush_config.read_version = -1;
+    flush_config.retry_limit = 3;
+    flush_config.schema_blob = schema_blob.data();
+    flush_config.schema_length = static_cast<int64_t>(schema_blob.size());
+    flush_config.schema_based_pattern = column_group_pattern.c_str();
+
+    CFlushResult flush_result{};
+    auto flush_guard =
+        folly::makeGuard([&flush_result] { FreeFlushResult(&flush_result); });
+    const auto flush_status = FlushGrowingSegmentData(
+        storage_growing.get(), 0, row_count, &flush_config, &flush_result);
+    ASSERT_EQ(flush_status.error_code, Success) << flush_status.error_msg;
+    ASSERT_EQ(flush_result.num_rows, row_count);
+
+    const auto manifest_path =
+        "{\"base_path\":\"" + segment_path +
+        "\",\"ver\":" + std::to_string(flush_result.committed_version) + "}";
+    proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_collectionid(1);
+    load_info.set_partitionid(2);
+    load_info.set_storageversion(STORAGE_V3);
+    load_info.set_num_of_rows(row_count);
+    load_info.set_manifest_path(manifest_path);
+    load_info.set_insert_channel("nested-array-match-test");
+
+    auto load_sealed = [&](SchemaPtr load_schema, int64_t segment_id) {
+        auto segment_load_info = load_info;
+        segment_load_info.set_segmentid(segment_id);
+        auto sealed = CreateSealedSegment(
+            std::move(load_schema), empty_index_meta, segment_id);
+        sealed->SetLoadInfo(segment_load_info);
+        tracer::TraceContext trace_ctx;
+        sealed->Load(trace_ctx, nullptr);
+        return sealed;
+    };
+
+    auto sealed = load_sealed(storage_schema, 3);
+    EXPECT_FALSE(sealed->is_mmap_field(nested_int_fid));
+    check_segment(sealed.get(), "sealed");
+
+    auto mmap_schema_proto = storage_schema_proto;
+    for (auto& field : *mmap_schema_proto.mutable_fields()) {
+        if (field.fieldid() != nested_int_fid.get() &&
+            field.fieldid() != nested_string_fid.get()) {
+            continue;
+        }
+        for (auto& type_param : *field.mutable_type_params()) {
+            if (type_param.key() == MMAP_ENABLED_KEY) {
+                type_param.set_value("true");
+            }
+        }
+    }
+    auto sealed_mmap = load_sealed(Schema::ParseFrom(mmap_schema_proto), 4);
+    EXPECT_TRUE(sealed_mmap->is_mmap_field(nested_int_fid));
+    check_segment(sealed_mmap.get(), "sealed mmap");
 }
 
 namespace {
@@ -866,6 +1383,66 @@ TEST(MatchExprNullableStruct, SealedPropagatesStructRowValidity) {
     CheckNullableStructExpressions(segment.get(), schema);
 }
 
+TEST(MatchExprNullableStruct, PinnedSchemaBuildsOldMappingAfterStructReadded) {
+    FieldId pk;
+    FieldId sub;
+    auto schema = BuildNullableStructSchema(pk, sub);
+    schema->set_schema_version(1);
+    auto insert_data = BuildNullableStructInsertData(schema, pk, sub);
+    GeneratedData data;
+    data.schema_ = schema;
+    data.raw_ = insert_data.release();
+    data.row_ids_ = {0, 1, 2, 3, 4};
+    data.timestamps_ = {0, 1, 2, 3, 4};
+    auto segment = CreateSealedWithFieldDataLoaded(schema, data);
+    auto read = segment->CaptureReadSnapshot();
+
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->set_schema_version(2);
+    new_schema->AddField(
+        FieldName("id"), pk, DataType::INT64, false, std::nullopt);
+    new_schema->set_primary_field_id(pk);
+    new_schema->AddField(FieldName("struct_array[sub_int]"),
+                         FieldId(sub.get() + 1),
+                         DataType::ARRAY,
+                         DataType::INT32,
+                         true,
+                         false);
+    segment->Reopen(new_schema);
+
+    auto child = std::make_shared<FixedBitmapExpr>(TargetBitmap(3, true),
+                                                   TargetBitmap(3, true));
+    auto logical = std::make_shared<expr::MatchExpr>(
+        "struct_array", expr::MatchType::MatchAll, 0, expr::TypedExprPtr{});
+    exec::PhyMatchFilterExpr physical(
+        {child}, logical, "pinned_match", nullptr, segment.get(), 5, 5);
+    physical.SetSnapshot(read.get());
+    exec::QueryContext query_context(
+        "pinned_match", segment.get(), 5, MAX_TIMESTAMP);
+    query_context.set_read_snapshot(read);
+    exec::ExecContext exec_context(&query_context);
+    exec::EvalCtx eval_context(&exec_context);
+    VectorPtr result;
+    physical.Eval(eval_context, result);
+    auto pinned_field = query_context.get_schema_snapshot()
+                            ->GetFirstArrayFieldInStruct("struct_array")
+                            .get_id();
+    EXPECT_EQ(pinned_field, sub);
+    EXPECT_EQ(query_context.get_struct_element_offsets(pinned_field)
+                  ->GetTotalElementCount(),
+              3);
+    auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+    ASSERT_NE(output, nullptr);
+    ASSERT_EQ(output->size(), 5);
+    TargetBitmapView values(output->GetRawData(), output->size());
+    TargetBitmapView validity(output->GetValidRawData(), output->size());
+    for (int64_t i = 0; i < 5; ++i) {
+        const bool valid = i == 0 || i == 2 || i == 3;
+        EXPECT_EQ(values[i], valid);
+        EXPECT_EQ(validity[i], valid);
+    }
+}
+
 TEST(MatchExprNullableStruct, GrowingPropagatesStructRowValidity) {
     FieldId int64_fid;
     FieldId sub_int_fid;
@@ -881,7 +1458,7 @@ TEST(MatchExprNullableStruct, GrowingPropagatesStructRowValidity) {
                     row_ids.size(),
                     row_ids.data(),
                     timestamps.data(),
-                    insert_data.get());
+                    std::make_shared<InsertRecordProto>(*insert_data));
 
     CheckNullableStructExpressions(segment.get(), schema);
 }
@@ -904,17 +1481,16 @@ TEST(MatchExprNullableStruct, NestedIndexUsesPhysicalRowValidity) {
 
     std::vector<boost::container::vector<int32_t>> arrays = {
         {1, 2}, {}, {}, {9001}, {}};
-    auto index = std::make_unique<index::InvertedIndexTantivy<int32_t>>();
-    Config cfg;
-    cfg["is_array"] = true;
-    cfg["is_nested_index"] = true;
-    index->BuildWithRawDataForUT(arrays.size(), arrays.data(), cfg);
-    LoadIndexInfo info{};
-    info.field_id = sub_int_fid.get();
-    info.index_params = GenIndexParams(index.get());
-    info.cache_index =
-        CreateTestCacheIndex("nullable_sub_int", std::move(index));
-    segment->LoadIndex(info);
+    InstallNestedInvertedIndex(*segment, sub_int_fid, arrays, DataType::INT32);
+
+    auto offsets = segment->GetStructElementOffsets(sub_int_fid);
+    ASSERT_TRUE(offsets->HasRowValidity());
+    auto snapshot = segment->CaptureReadSnapshot();
+    auto column = snapshot->GetColumn(sub_int_fid);
+    ASSERT_NE(column, nullptr);
+    column->ManualEvictCache();
+    const int64_t first_row = 0;
+    ASSERT_FALSE(column->CellsLoaded(&first_row, 1));
 
     EXPECT_EQ(RetrieveOffsets(segment.get(),
                               schema,
@@ -926,9 +1502,11 @@ TEST(MatchExprNullableStruct, NestedIndexUsesPhysicalRowValidity) {
                         schema,
                         "not array_contains(struct_array[sub_int], 9001)"),
         (std::set<int64_t>{0, 2}));
+    EXPECT_FALSE(column->CellsLoaded(&first_row, 1))
+        << "indexed MATCH must use cached parent validity without raw reads";
 }
 
-TEST(StructArrayOffsetsReopen, ConcurrentReadersAreSynchronized) {
+TEST(StructElementOffsetsReopen, ConcurrentReadersAreSynchronized) {
     auto schema = std::make_shared<Schema>();
     auto int64_fid = schema->AddDebugField("id", DataType::INT64);
     schema->set_primary_field_id(int64_fid);
@@ -943,7 +1521,7 @@ TEST(StructArrayOffsetsReopen, ConcurrentReadersAreSynchronized) {
     for (int i = 0; i < 4; ++i) {
         readers.emplace_back([&]() {
             while (!stop.load(std::memory_order_relaxed)) {
-                if (segment->GetArrayOffsets(base_sub_fid) == nullptr) {
+                if (segment->GetStructElementOffsets(base_sub_fid) == nullptr) {
                     missing.fetch_add(1, std::memory_order_relaxed);
                 }
             }
@@ -1088,36 +1666,12 @@ class SealedMatchExprTest : public ::testing::Test {
     void
     LoadNestedInvertedIndexes() {
         // Load nested index for sub_str field
-        {
-            auto index =
-                std::make_unique<index::InvertedIndexTantivy<std::string>>();
-            Config cfg;
-            cfg["is_array"] = true;
-            cfg["is_nested_index"] = true;
-            index->BuildWithRawDataForUT(N_, sub_str_arrays_.data(), cfg);
-            LoadIndexInfo info{};
-            info.field_id = sub_str_fid_.get();
-            info.index_params = GenIndexParams(index.get());
-            info.cache_index =
-                CreateTestCacheIndex("sub_str", std::move(index));
-            seg_->LoadIndex(info);
-        }
+        InstallNestedInvertedIndex(
+            *seg_, sub_str_fid_, sub_str_arrays_, DataType::VARCHAR);
 
         // Load nested index for sub_int field
-        {
-            auto index =
-                std::make_unique<index::InvertedIndexTantivy<int32_t>>();
-            Config cfg;
-            cfg["is_array"] = true;
-            cfg["is_nested_index"] = true;
-            index->BuildWithRawDataForUT(N_, sub_int_arrays_.data(), cfg);
-            LoadIndexInfo info{};
-            info.field_id = sub_int_fid_.get();
-            info.index_params = GenIndexParams(index.get());
-            info.cache_index =
-                CreateTestCacheIndex("sub_int", std::move(index));
-            seg_->LoadIndex(info);
-        }
+        InstallNestedInvertedIndex(
+            *seg_, sub_int_fid_, sub_int_arrays_, DataType::INT32);
     }
 
     // Count elements matching: sub_str == target_str && sub_int > target_int
@@ -1390,6 +1944,167 @@ class SealedMatchExprTest : public ::testing::Test {
     int64_t saved_batch_size_{0};
 };
 
+// The pinned sealed read snapshot must yield bit-identical results to the
+// per-call segment fallback for the struct-array MatchExpr path. This covers
+// ApplyStructRowValidity's per-chunk get_chunk_by_offset / chunk_size reads,
+// which go through SegmentChunkReader when pinned.
+TEST_F(SealedMatchExprTest, PinnedSnapshotMatchesUnpinnedForMatchExpr) {
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto filter_expr =
+        CreateSealedFilterExpr("MatchAny", 0, target_str, target_int);
+    ScopedSchemaHandle schema_handle(*schema_);
+    auto plan_str =
+        schema_handle.ParseSearch(filter_expr,          // expression
+                                  "vec",                // vector field name
+                                  10,                   // topK
+                                  "L2",                 // metric_type
+                                  R"({"nprobe": 10})",  // search_params
+                                  3                     // round_decimal
+        );
+    auto plan =
+        CreateSearchPlanByExpr(schema_, plan_str.data(), plan_str.size());
+    ASSERT_NE(plan, nullptr);
+
+    // vector search node -> mvcc node -> filter node
+    auto filter_node = plan->plan_node_->plannodes_->sources()[0]->sources()[0];
+    auto segment_internal = dynamic_cast<SegmentInternalInterface*>(seg_.get());
+    ASSERT_NE(segment_internal, nullptr);
+    ASSERT_NE(seg_->CaptureReadSnapshot(), nullptr);
+
+    auto unpinned =
+        ExecuteQueryExpr(filter_node, segment_internal, N_, MAX_TIMESTAMP);
+    auto pinned = ExecuteQueryExpr(
+        filter_node, segment_internal, N_, MAX_TIMESTAMP, true);
+
+    ASSERT_EQ(pinned.size(), unpinned.size());
+    for (size_t i = 0; i < N_; ++i) {
+        EXPECT_EQ(bool(pinned[i]), bool(unpinned[i])) << "row " << i;
+    }
+    EXPECT_GT(unpinned.count(), 0);
+}
+
+// The same pinned/unpinned parity for a nullable struct-array field across two
+// chunks. ApplyStructRowValidity must read validity data through the pinned
+// snapshot (SegmentChunkReader::ApplyFieldValidData). To make the validity
+// write observable, every row holds an empty array and the predicate is
+// match_all: an empty array is vacuously true, so the result bitset starts all
+// set and only the NULL rows (cleared by ApplyFieldValidData) flip to false.
+// Gutting the validity write to a no-op would leave the NULL rows set and fail
+// the count assertion below.
+TEST_F(SealedMatchExprTest,
+       PinnedSnapshotMatchesUnpinnedForNullableStructAcrossChunks) {
+    FieldId vec_fid;
+    FieldId int64_fid;
+    FieldId sub_int_fid;
+    auto schema = std::make_shared<Schema>();
+    vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+    sub_int_fid = schema->AddDebugArrayField(
+        "struct_array[sub_int]", DataType::INT32, true);
+
+    const std::vector<bool> chunk1_valid = {true, false, true, true, false};
+    const std::vector<bool> chunk2_valid = {false, true, true, false, true};
+
+    auto make_dataset = [&](int64_t seed,
+                            const std::vector<bool>& valid,
+                            const std::vector<std::vector<int32_t>>& rows) {
+        const int64_t row_count = valid.size();
+        auto insert_data = std::make_unique<InsertRecordProto>();
+
+        std::vector<int64_t> ids(row_count);
+        for (int64_t i = 0; i < row_count; ++i) {
+            ids[i] = seed + i;
+        }
+        auto id_array = CreateDataArrayFrom(
+            ids.data(), nullptr, row_count, schema->operator[](int64_fid));
+        insert_data->mutable_fields_data()->AddAllocated(id_array.release());
+
+        std::vector<float> fakevec(row_count * 4, 1.0F);
+        auto vec_array = CreateDataArrayFrom(
+            fakevec.data(), nullptr, row_count, schema->operator[](vec_fid));
+        insert_data->mutable_fields_data()->AddAllocated(vec_array.release());
+
+        auto* sub_field = insert_data->add_fields_data();
+        sub_field->set_field_id(sub_int_fid.get());
+        sub_field->set_field_name("struct_array[sub_int]");
+        sub_field->set_type(proto::schema::DataType::Array);
+        auto* array_data = sub_field->mutable_scalars()->mutable_array_data();
+        array_data->set_element_type(proto::schema::DataType::Int32);
+        for (auto is_valid : valid) {
+            sub_field->mutable_scalars()->add_valid_data(is_valid);
+        }
+        for (const auto& row : rows) {
+            auto* data_row = array_data->add_data();
+            for (auto value : row) {
+                data_row->mutable_int_data()->add_data(value);
+            }
+        }
+        insert_data->set_num_rows(row_count);
+
+        GeneratedData generated_data;
+        generated_data.schema_ = schema;
+        generated_data.raw_ = insert_data.release();
+        for (int64_t i = 0; i < row_count; ++i) {
+            generated_data.row_ids_.push_back(seed + i);
+            generated_data.timestamps_.push_back(seed + i);
+        }
+        return generated_data;
+    };
+
+    // Every row holds an empty array. Rows 1 and 4 of chunk 1 are NULL (no
+    // elements); rows 0 and 3 of chunk 2 are NULL. match_all on an empty array
+    // is vacuously true, so only the NULL rows are dropped by the validity
+    // write.
+    auto first = make_dataset(100, chunk1_valid, {{}, {}, {}, {}, {}});
+    auto second = make_dataset(200, chunk2_valid, {{}, {}, {}, {}, {}});
+
+    auto segment = CreateTwoChunkSealed(schema, first, second);
+    ASSERT_NE(segment->CaptureReadSnapshot(), nullptr);
+
+    ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str = schema_handle.ParseSearch(
+        "match_all(struct_array, $[sub_int] >= 0)",  // expression
+        "fakevec",                                   // vector field name
+        10,                                          // topK
+        "L2",                                        // metric_type
+        R"({"nprobe": 10})",                         // search_params
+        3                                            // round_decimal
+    );
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+    ASSERT_NE(plan, nullptr);
+
+    // vector search node -> mvcc node -> filter node
+    auto filter_node = plan->plan_node_->plannodes_->sources()[0]->sources()[0];
+    auto segment_internal =
+        dynamic_cast<SegmentInternalInterface*>(segment.get());
+    ASSERT_NE(segment_internal, nullptr);
+
+    const int64_t total_rows = 10;
+    auto unpinned = ExecuteQueryExpr(
+        filter_node, segment_internal, total_rows, MAX_TIMESTAMP);
+    auto pinned = ExecuteQueryExpr(
+        filter_node, segment_internal, total_rows, MAX_TIMESTAMP, true);
+
+    ASSERT_EQ(pinned.size(), unpinned.size());
+    for (int64_t i = 0; i < total_rows; ++i) {
+        EXPECT_EQ(bool(pinned[i]), bool(unpinned[i])) << "row " << i;
+    }
+    // Only the non-NULL empty-array rows survive (vacuous match_all truth).
+    // Non-NULL rows: 0,2,3 (chunk1) and 1,2,4 (chunk2) -> global 0,2,3,6,7,9.
+    EXPECT_EQ(unpinned.count(), 6);
+    for (const auto row : {0, 2, 3, 6, 7, 9}) {
+        EXPECT_TRUE(unpinned[row]) << "row " << row << " should be valid";
+    }
+    for (const auto row : {1, 4, 5, 8}) {
+        EXPECT_FALSE(unpinned[row]) << "row " << row << " should be NULL";
+    }
+}
+
 TEST_F(SealedMatchExprTest, MatchAnyWithNestedIndex) {
     // Use fixed query values matching MatchExprTest pattern
     // sub_str has choices {"aaa", "bbb", "ccc"}, each ~1/3 probability
@@ -1655,17 +2370,8 @@ class SealedMatchExprTestPartialIndex : public SealedMatchExprTest {
     void
     LoadPartialIndex() {
         // Only load nested index for sub_str field
-        auto index =
-            std::make_unique<index::InvertedIndexTantivy<std::string>>();
-        Config cfg;
-        cfg["is_array"] = true;
-        cfg["is_nested_index"] = true;
-        index->BuildWithRawDataForUT(N_, sub_str_arrays_.data(), cfg);
-        LoadIndexInfo info{};
-        info.field_id = sub_str_fid_.get();
-        info.index_params = GenIndexParams(index.get());
-        info.cache_index = CreateTestCacheIndex("sub_str", std::move(index));
-        seg_->LoadIndex(info);
+        InstallNestedInvertedIndex(
+            *seg_, sub_str_fid_, sub_str_arrays_, DataType::VARCHAR);
         // sub_int field has NO index - will use brute force
     }
 };

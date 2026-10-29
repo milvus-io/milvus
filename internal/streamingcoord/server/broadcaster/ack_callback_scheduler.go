@@ -9,19 +9,21 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"go.opentelemetry.io/otel/codes"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // newAckCallbackScheduler creates a new ack callback scheduler.
 func newAckCallbackScheduler(logger *mlog.Logger) *ackCallbackScheduler {
 	s := &ackCallbackScheduler{
 		notifier:           syncutil.NewAsyncTaskNotifier[struct{}](),
-		pending:            make(chan *broadcastTask, 16),
+		pending:            typeutil.NewMultipartQueue[*broadcastTask](),
 		triggerChan:        make(chan struct{}, 1),
 		rkLockerMu:         sync.Mutex{},
 		rkLocker:           newResourceKeyLocker(),
@@ -35,10 +37,13 @@ type ackCallbackScheduler struct {
 	mlog.Binder
 
 	notifier           *syncutil.AsyncTaskNotifier[struct{}]
-	pending            chan *broadcastTask
 	triggerChan        chan struct{}
 	tombstoneScheduler *tombstoneScheduler
-	pendingAckedTasks  []*broadcastTask // should already sorted by the broadcastID
+	// Only enqueue and queue exchange hold pendingMu; task inspection and
+	// resource-key scheduling run after releasing it.
+	pendingMu         sync.Mutex
+	pending           *typeutil.MultipartQueue[*broadcastTask]
+	pendingAckedTasks []*broadcastTask // should already sorted by the broadcastID
 	// For the task that hold the conflicted resource-key (which is protected by the resource-key lock),
 	// broadcastID is always increasing,
 	// the task which broadcastID is smaller happens before the task which broadcastID is larger.
@@ -81,10 +86,22 @@ func (s *ackCallbackScheduler) Initialize(tasks []*broadcastTask, tombstoneIDs [
 
 // AddTask adds a new broadcast task into the ack scheduler.
 func (s *ackCallbackScheduler) AddTask(task *broadcastTask) {
-	select {
-	case <-s.notifier.Context().Done():
+	s.pendingMu.Lock()
+	if s.notifier.Context().Err() != nil {
+		s.pendingMu.Unlock()
 		panic("unreachable: ack scheduler is closing when adding new task")
-	case s.pending <- task:
+	}
+	s.pending.AddOne(task)
+	s.pendingMu.Unlock()
+	s.notify()
+}
+
+// notify coalesces wakeups: the loop drains pending tasks and retries blocked
+// callbacks before waiting again, so one outstanding notification is enough.
+func (s *ackCallbackScheduler) notify() {
+	select {
+	case s.triggerChan <- struct{}{}:
+	default:
 	}
 }
 
@@ -122,22 +139,23 @@ func (s *ackCallbackScheduler) background() {
 		select {
 		case <-s.notifier.Context().Done():
 			return
-		case task := <-s.pending:
-			s.addBroadcastTask(task)
 		case <-s.triggerChan:
 		case <-triggerTicker:
 		}
 	}
 }
 
-// addBroadcastTask adds a broadcast task into the pending acked tasks.
-func (s *ackCallbackScheduler) addBroadcastTask(task *broadcastTask) error {
-	s.pendingAckedTasks = append(s.pendingAckedTasks, task)
-	return nil
-}
-
 // triggerAckCallback triggers the ack callback.
 func (s *ackCallbackScheduler) triggerAckCallback() {
+	s.pendingMu.Lock()
+	pending := s.pending
+	s.pending = typeutil.NewMultipartQueue[*broadcastTask]()
+	s.pendingMu.Unlock()
+	for pending.Len() > 0 {
+		s.pendingAckedTasks = append(s.pendingAckedTasks, pending.Next())
+		pending.UnsafeAdvance()
+	}
+
 	s.rkLockerMu.Lock()
 	defer s.rkLockerMu.Unlock()
 
@@ -153,7 +171,6 @@ func (s *ackCallbackScheduler) triggerAckCallback() {
 
 		g, err := s.rkLocker.FastLock(task.Header().ResourceKeys.Collect()...)
 		if err != nil {
-			s.Logger().Warn(context.TODO(), "lock is occupied, delay the ack callback", mlog.Uint64("broadcastID", task.Header().BroadcastID), mlog.Err(err))
 			pendingTasks = append(pendingTasks, task)
 			continue
 		}
@@ -162,6 +179,13 @@ func (s *ackCallbackScheduler) triggerAckCallback() {
 		go s.doAckCallback(task, g)
 	}
 	s.pendingAckedTasks = pendingTasks
+	if len(pendingTasks) > 0 {
+		// Blocked tasks are retried on every wakeup: log a rate-limited summary,
+		// not one line per task.
+		s.Logger().RatedWarn(s.notifier.Context(), rate.Every(time.Second), "lock is occupied, delay the ack callbacks",
+			mlog.Int("blockedTaskCount", len(pendingTasks)),
+			mlog.Uint64("firstBlockedBroadcastID", pendingTasks[0].Header().BroadcastID))
+	}
 }
 
 // doForcePromoteFixIncompleteBroadcasts handles the full force promote lifecycle:
@@ -169,7 +193,7 @@ func (s *ackCallbackScheduler) triggerAckCallback() {
 // 2. Fix incomplete broadcasts by delegating to broadcastScheduler (WAL append + ack + callback + tombstone)
 // 3. Acquire resource key lock and execute ack callback (close done channel → unblock RPC)
 func (s *ackCallbackScheduler) doForcePromoteFixIncompleteBroadcasts(bt *broadcastTask) {
-	logger := s.Logger().With(mlog.Uint64("broadcastID", bt.Header().BroadcastID))
+	logger := s.Logger().With(mlog.FieldBroadcastID(bt.Header().BroadcastID))
 	ctx := s.notifier.Context()
 
 	if err := bt.BlockUntilAllAck(ctx); err != nil {
@@ -213,7 +237,7 @@ func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx contex
 		if !task.IsAlterReplicateConfigMessage() {
 			continue
 		}
-		s.Logger().Info(ctx, "Marking AlterReplicateConfig task with ignore=true", mlog.Uint64("broadcastID", task.Header().BroadcastID))
+		s.Logger().Info(ctx, "Marking AlterReplicateConfig task with ignore=true", mlog.FieldBroadcastID(task.Header().BroadcastID))
 
 		if err := task.MarkIgnore(); err != nil {
 			panic(fmt.Sprintf("unreachable: MarkIgnore failed on AlterReplicateConfig task %d: %v", task.Header().BroadcastID, err))
@@ -233,7 +257,7 @@ func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx contex
 		}
 		s.Logger().Info(ctx,
 			"Delegating incomplete task to broadcastScheduler",
-			mlog.Uint64("broadcastID", task.Header().BroadcastID),
+			mlog.FieldBroadcastID(task.Header().BroadcastID),
 			mlog.String("messageType", task.msg.MessageType().String()),
 			mlog.Int("pendingVChannels", len(pending.pendingMessages)))
 		if _, err := s.bm.broadcastScheduler.AddTask(ctx, pending); err != nil {
@@ -246,13 +270,13 @@ func (s *ackCallbackScheduler) fixIncompleteBroadcastsForForcePromote(ctx contex
 
 // doAckCallback executes the ack callback.
 func (s *ackCallbackScheduler) doAckCallback(bt *broadcastTask, g *lockGuards) (err error) {
-	logger := s.Logger().With(mlog.Uint64("broadcastID", bt.Header().BroadcastID))
+	logger := s.Logger().With(mlog.FieldBroadcastID(bt.Header().BroadcastID))
 	defer func() {
 		s.rkLockerMu.Lock()
 		g.Unlock()
 		s.rkLockerMu.Unlock()
 
-		s.triggerChan <- struct{}{}
+		s.notify()
 		if err == nil {
 			logger.Info(context.TODO(), "execute ack callback done")
 		} else {
@@ -335,9 +359,23 @@ func runAckCallbackWithTrace(baseCtx context.Context, msg message.BroadcastMutab
 	return err
 }
 
-// sortByControlChannelTimeTick sorts the tasks by the time tick of the control channel.
+// sortByControlChannelTimeTick sorts the tasks by the time tick of the control channel,
+// breaking ties by broadcastID.
+//
+// The tick is the primary key: it is the WAL order on the single control channel, which
+// orders every pair of tasks that shares a resource key -- the ack scheduler's only
+// ordering obligation. But a message not broadcast to the control channel has no tick
+// (ControlChannelTimeTick returns 0), and two such tasks tie. sort.Slice is not stable:
+// its permutation of tied elements depends on the whole slice, which differs between
+// clusters (different recovery info), so tied tasks could be ordered differently on the
+// primary and on a secondary. broadcastID is unique and travels with the replicated message, so
+// every cluster breaks the tie the same way.
 func sortByControlChannelTimeTick(tasks []*broadcastTask) {
 	sort.Slice(tasks, func(i, j int) bool {
-		return tasks[i].ControlChannelTimeTick() < tasks[j].ControlChannelTimeTick()
+		ti, tj := tasks[i].ControlChannelTimeTick(), tasks[j].ControlChannelTimeTick()
+		if ti != tj {
+			return ti < tj
+		}
+		return tasks[i].Header().BroadcastID < tasks[j].Header().BroadcastID
 	})
 }

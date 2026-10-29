@@ -24,7 +24,7 @@
 #include <vector>
 
 #include "bitset/bitset.h"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/BitsetView.h"
 #include "common/EasyAssert.h"
 #include "common/QueryResult.h"
@@ -34,6 +34,7 @@
 #include "exec/expression/Utils.h"
 #include "exec/operator/Utils.h"
 #include "monitor/Monitor.h"
+#include "query/Utils.h"
 #include "opentelemetry/trace/span.h"
 #include "plan/PlanNode.h"
 #include "prometheus/histogram.h"
@@ -101,8 +102,8 @@ PhyVectorSearchNode::GetOutput() {
     }
 
     WaitPrefetch();
-    span.GetSpan()->SetAttribute("search_type", search_info_.metric_type_);
-    span.GetSpan()->SetAttribute("topk", search_info_.topk_);
+    span.SetAttribute("search_type", search_info_.metric_type_);
+    span.SetAttribute("topk", search_info_.topk_);
 
     std::chrono::high_resolution_clock::time_point vector_start =
         std::chrono::high_resolution_clock::now();
@@ -111,12 +112,15 @@ PhyVectorSearchNode::GetOutput() {
     auto src_data = ph.get_blob();
     auto src_offsets = ph.get_offsets();
     auto num_queries = ph.num_of_queries_;
-    std::shared_ptr<const IArrayOffsets> array_offsets = nullptr;
+    std::shared_ptr<const IStructElementOffsets> struct_element_offsets =
+        nullptr;
     if (ph.element_level_) {
-        array_offsets = segment_->GetArrayOffsets(search_info_.field_id_);
-        AssertInfo(array_offsets != nullptr, "Array offsets not available");
-        query_context_->set_array_offsets(array_offsets);
-        search_info_.array_offsets_ = array_offsets;
+        struct_element_offsets =
+            query_context_->get_struct_element_offsets(search_info_.field_id_);
+        AssertInfo(struct_element_offsets != nullptr,
+                   "Struct element offsets not available");
+        query_context_->set_struct_element_offsets(struct_element_offsets);
+        search_info_.struct_element_offsets_ = struct_element_offsets;
     }
 
     // Prepare BitsetView for search.
@@ -151,7 +155,8 @@ PhyVectorSearchNode::GetOutput() {
                                         col_input->size());
 
             auto [element_bitset, valid_element_bitset] =
-                array_offsets->RowBitsetToElementBitset(view, valid_view, 0);
+                struct_element_offsets->RowBitsetToElementBitset(
+                    view, valid_view, 0);
 
             query_context_->set_active_element_count(element_bitset.size());
             if (element_bitset.empty()) {
@@ -163,7 +168,7 @@ PhyVectorSearchNode::GetOutput() {
             std::vector<VectorPtr> col_res;
             col_res.push_back(std::make_shared<ColumnVector>(
                 std::move(element_bitset), std::move(valid_element_bitset)));
-            input_ = std::make_shared<RowVector>(col_res);
+            input_ = std::make_shared<RowVector>(std::move(col_res));
             query_context_->set_bitset_is_element_level(true);
         }
 
@@ -186,6 +191,10 @@ PhyVectorSearchNode::GetOutput() {
 
     // Single search + metrics path
     milvus::SearchResult search_result;
+    if (query::CanUseStrictGroupSearch(search_info_, num_queries) &&
+        !search_view.empty()) {
+        search_result.vector_search_filter_owner_ = GetColumnVector(input_);
+    }
     auto op_context = query_context_->get_op_context();
     segment_->vector_search(search_info_,
                             src_data,
@@ -195,12 +204,16 @@ PhyVectorSearchNode::GetOutput() {
                             search_view,
                             op_context,
                             search_result);
+    if (search_result.used_interim_index_) {
+        MarkFeature(query_context_->get_plan_options().feature_recorder.get(),
+                    FeatureBit::InterimIndexSearch);
+    }
 
     search_result.total_data_cnt_ = data_cnt;
     search_result.element_level_ = ph.element_level_;
 
-    span.GetSpan()->SetAttribute(
-        "result_count", static_cast<int>(search_result.seg_offsets_.size()));
+    span.SetAttribute("result_count",
+                      static_cast<int>(search_result.seg_offsets_.size()));
     query_context_->set_search_result(std::move(search_result));
 
     std::chrono::high_resolution_clock::time_point vector_end =

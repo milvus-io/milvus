@@ -19,11 +19,13 @@ package tombstone
 import (
 	"context"
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
@@ -34,10 +36,8 @@ func TestTombstoneSweeper_AddTombstone(t *testing.T) {
 	sweeper.Close()
 
 	sweeperImpl := &tombstoneSweeperImpl{
-		notifier:   syncutil.NewAsyncTaskNotifier[struct{}](),
-		incoming:   make(chan Tombstone),
-		tombstones: make(map[string]Tombstone),
-		interval:   1 * time.Millisecond,
+		notifier: syncutil.NewAsyncTaskNotifier[struct{}](),
+		interval: 1 * time.Millisecond,
 	}
 	go sweeperImpl.background()
 
@@ -63,7 +63,155 @@ func TestTombstoneSweeper_AddTombstone(t *testing.T) {
 	}, 100*time.Millisecond, 10*time.Millisecond)
 
 	sweeperImpl.Close()
-	assert.Len(t, sweeperImpl.tombstones, 0)
+	assert.Equal(t, 0, countTombstones(sweeperImpl))
+}
+
+func TestTombstoneSweeper_AddDoesNotBlockDuringGC(t *testing.T) {
+	sweeper := &tombstoneSweeperImpl{
+		notifier: syncutil.NewAsyncTaskNotifier[struct{}](),
+	}
+	defer sweeper.notifier.Cancel()
+
+	confirmStarted := make(chan struct{})
+	confirmRelease := make(chan struct{})
+	blocking := &funcTombstone{
+		id: "blocking",
+		confirm: func(ctx context.Context) (bool, error) {
+			close(confirmStarted)
+			select {
+			case <-ctx.Done():
+				return false, ctx.Err()
+			case <-confirmRelease:
+				return false, nil
+			}
+		},
+	}
+	sweeper.AddTombstone(blocking)
+
+	gcDone := make(chan struct{})
+	go func() {
+		defer close(gcDone)
+		sweeper.triggerGCTombstone(context.Background())
+	}()
+
+	select {
+	case <-confirmStarted:
+	case <-time.After(time.Second):
+		t.Fatal("GC did not start")
+	}
+
+	addDone := make(chan struct{})
+	go func() {
+		defer close(addDone)
+		sweeper.AddTombstone(&funcTombstone{id: "concurrent"})
+	}()
+
+	select {
+	case <-addDone:
+	case <-time.After(time.Second):
+		t.Fatal("AddTombstone blocked while GC was running")
+	}
+
+	close(confirmRelease)
+	select {
+	case <-gcDone:
+	case <-time.After(time.Second):
+		t.Fatal("GC did not finish")
+	}
+	require.Equal(t, 2, countTombstones(sweeper))
+}
+
+func TestTombstoneSweeper_ConcurrentReplacementIsNotDeleted(t *testing.T) {
+	sweeper := &tombstoneSweeperImpl{
+		notifier: syncutil.NewAsyncTaskNotifier[struct{}](),
+	}
+	defer sweeper.notifier.Cancel()
+
+	replacement := &funcTombstone{id: "same"}
+	original := &funcTombstone{
+		id: "same",
+		confirm: func(context.Context) (bool, error) {
+			return true, nil
+		},
+		remove: func(context.Context) error {
+			sweeper.AddTombstone(replacement)
+			return nil
+		},
+	}
+	sweeper.AddTombstone(original)
+
+	sweeper.triggerGCTombstone(context.Background())
+
+	value, ok := sweeper.tombstones.Load("same")
+	require.True(t, ok)
+	assert.Same(t, replacement, value.(*tombstoneEntry).tombstone)
+}
+
+func TestTombstoneSweeper_RemovalsAreSerial(t *testing.T) {
+	sweeper := &tombstoneSweeperImpl{
+		notifier: syncutil.NewAsyncTaskNotifier[struct{}](),
+		interval: time.Millisecond,
+	}
+	started := make(chan string, 4)
+	proceed := make(chan struct{})
+	release := sync.OnceFunc(func() { close(proceed) })
+	for _, id := range []string{"c:100", "p:100:1001"} {
+		sweeper.AddTombstone(&funcTombstone{
+			id: id,
+			confirm: func(context.Context) (bool, error) {
+				return true, nil
+			},
+			remove: func(ctx context.Context) error {
+				select {
+				case started <- id:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+				select {
+				case <-proceed:
+					return nil
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			},
+		})
+	}
+	go sweeper.background()
+	t.Cleanup(func() {
+		release()
+		sweeper.Close()
+	})
+	waitStarted := func() string {
+		t.Helper()
+		select {
+		case id := <-started:
+			return id
+		case <-time.After(5 * time.Second):
+			t.Fatal("tombstone removal did not start")
+			return ""
+		}
+	}
+	first := waitStarted()
+	// Neither the other tombstone nor a later tick may enter Remove until the
+	// current catalog operation completes.
+	select {
+	case id := <-started:
+		t.Fatalf("removal %s overlapped blocked removal %s", id, first)
+	case <-time.After(50 * time.Millisecond):
+	}
+	release()
+	second := waitStarted()
+	assert.ElementsMatch(t, []string{"c:100", "p:100:1001"}, []string{first, second})
+	require.Eventually(t, func() bool { return countTombstones(sweeper) == 0 }, 5*time.Second, time.Millisecond)
+}
+
+func countTombstones(sweeper *tombstoneSweeperImpl) int {
+	count := 0
+	sweeper.tombstones.Range(func(_, _ any) bool {
+		count++
+		return true
+	})
+	return count
 }
 
 type testTombstoneImpl struct {
@@ -90,4 +238,28 @@ func (t *testTombstoneImpl) Remove(ctx context.Context) error {
 	}
 	t.removed.Store(true)
 	return nil
+}
+
+type funcTombstone struct {
+	id      string
+	confirm func(context.Context) (bool, error)
+	remove  func(context.Context) error
+}
+
+func (t *funcTombstone) ID() string {
+	return t.id
+}
+
+func (t *funcTombstone) ConfirmCanBeRemoved(ctx context.Context) (bool, error) {
+	if t.confirm == nil {
+		return false, nil
+	}
+	return t.confirm(ctx)
+}
+
+func (t *funcTombstone) Remove(ctx context.Context) error {
+	if t.remove == nil {
+		return nil
+	}
+	return t.remove(ctx)
 }

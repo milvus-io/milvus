@@ -18,30 +18,520 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// Manifest bases on local storage are complete filesystem paths; cleanup
+// deletes the reported files below <base>/_stats/... directly, without
+// joining any root.
+func TestCleanupRejectedStatsResultFiles_LocalUsesCompletePaths(t *testing.T) {
+	root := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	basePath := filepath.Join(root, "insert_log/1/2/3")
+	statsFile := filepath.Join(basePath, "_stats/text_index.100/1178/2/index")
+	require.NoError(t, cm.Write(context.Background(), statsFile, []byte("stale")))
+
+	task := &statsTask{
+		StatsTask: &indexpb.StatsTask{CollectionID: 1, PartitionID: 2, SegmentID: 3},
+		meta:      &meta{chunkManager: cm},
+	}
+	task.cleanupRejectedStatsResultFiles(context.Background(), &workerpb.StatsResult{
+		CollectionID: 1,
+		PartitionID:  2,
+		SegmentID:    3,
+		BaseManifest: packed.MarshalManifestPath(basePath, 1),
+		TextStatsLogs: map[int64]*datapb.TextIndexStats{
+			100: {Files: []string{statsFile}},
+		},
+	})
+
+	_, err := os.Stat(statsFile)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestCleanupRejectedStatsResultFiles_LocalCompleteTextAndRelativeJSON(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	basePath := filepath.Join(root, "insert_log/1/2/3")
+	textFile := filepath.Join(basePath, "_stats/text_index.100/tokenizer.json")
+	jsonFile := filepath.Join(basePath, "_stats/json_stats.101/shared_key_index/.managed.json_0")
+	untouchedFile := filepath.Join(basePath, "_stats/json_stats.101/shared_key_index/keep")
+	for _, file := range []string{textFile, jsonFile, untouchedFile} {
+		require.NoError(t, cm.Write(ctx, file, []byte("stats")))
+	}
+
+	task := &statsTask{
+		StatsTask: &indexpb.StatsTask{CollectionID: 1, PartitionID: 2, SegmentID: 3},
+		meta:      &meta{chunkManager: cm},
+	}
+	task.cleanupRejectedStatsResultFiles(ctx, &workerpb.StatsResult{
+		CollectionID: 1,
+		PartitionID:  2,
+		SegmentID:    3,
+		BaseManifest: packed.MarshalManifestPath(basePath, 1),
+		TextStatsLogs: map[int64]*datapb.TextIndexStats{
+			100: {Files: []string{textFile}},
+		},
+		JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+			101: {Files: []string{"shared_key_index/.managed.json_0"}},
+		},
+	})
+
+	require.NoFileExists(t, textFile)
+	require.NoFileExists(t, jsonFile)
+	content, err := cm.Read(ctx, untouchedFile)
+	require.NoError(t, err)
+	require.Equal(t, []byte("stats"), content)
+}
+
+func TestCleanupRejectedStatsResultFiles_LocalRejectsRelativeTextFiles(t *testing.T) {
+	for _, relativeFile := range []string{"index", "./index", "task/index"} {
+		t.Run(relativeFile, func(t *testing.T) {
+			ctx := context.Background()
+			root := t.TempDir()
+			cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+			basePath := filepath.Join(root, "insert_log/1/2/3")
+			statsDir := filepath.Join(basePath, "_stats/text_index.100")
+			completeFile := filepath.Join(statsDir, "complete")
+			guessedFile := filepath.Join(statsDir, relativeFile)
+			require.NoError(t, cm.Write(ctx, completeFile, []byte("keep-complete")))
+			require.NoError(t, cm.Write(ctx, guessedFile, []byte("keep-relative")))
+
+			task := &statsTask{
+				StatsTask: &indexpb.StatsTask{CollectionID: 1, PartitionID: 2, SegmentID: 3},
+				meta:      &meta{chunkManager: cm},
+			}
+			task.cleanupRejectedStatsResultFiles(ctx, &workerpb.StatsResult{
+				CollectionID: 1,
+				PartitionID:  2,
+				SegmentID:    3,
+				BaseManifest: packed.MarshalManifestPath(basePath, 1),
+				TextStatsLogs: map[int64]*datapb.TextIndexStats{
+					100: {Files: []string{completeFile, relativeFile}},
+				},
+			})
+
+			// Reject the whole result, including its otherwise valid entry; no
+			// relative entry may be guessed into a complete deletion path.
+			content, err := cm.Read(ctx, completeFile)
+			require.NoError(t, err)
+			require.Equal(t, []byte("keep-complete"), content)
+			content, err = cm.Read(ctx, guessedFile)
+			require.NoError(t, err)
+			require.Equal(t, []byte("keep-relative"), content)
+		})
+	}
+}
+
+// A relative manifest base on local storage is a pre-3.0.2 manifest that
+// DataCoord has not rewritten; cleanup must neither resolve it against the
+// process CWD nor guess a root.
+func TestCleanupRejectedStatsResultFiles_LocalRefusesRelativeManifestBase(t *testing.T) {
+	root := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	inRoot := filepath.Join(root, "insert_log/1/2/3/_stats/text_index.100/index")
+	require.NoError(t, cm.Write(context.Background(), inRoot, []byte("keep")))
+
+	task := &statsTask{
+		StatsTask: &indexpb.StatsTask{CollectionID: 1, PartitionID: 2, SegmentID: 3},
+		meta:      &meta{chunkManager: cm},
+	}
+	task.cleanupRejectedStatsResultFiles(context.Background(), &workerpb.StatsResult{
+		CollectionID: 1,
+		PartitionID:  2,
+		SegmentID:    3,
+		BaseManifest: packed.MarshalManifestPath("insert_log/1/2/3", 1),
+		TextStatsLogs: map[int64]*datapb.TextIndexStats{
+			100: {Files: []string{"insert_log/1/2/3/_stats/text_index.100/index"}},
+		},
+	})
+	require.FileExists(t, inRoot)
+}
+
+func TestCleanupRejectedStatsResultFiles_LocalRejectsUnsafePaths(t *testing.T) {
+	ctx := context.Background()
+	outer := t.TempDir()
+	root := filepath.Join(outer, "storage")
+	require.NoError(t, os.MkdirAll(root, 0o755))
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	task := &statsTask{
+		StatsTask: &indexpb.StatsTask{CollectionID: 1, PartitionID: 2, SegmentID: 3},
+		meta:      &meta{chunkManager: cm},
+	}
+	basePath := filepath.Join(root, "insert_log/1/2/3")
+	baseManifest := packed.MarshalManifestPath(basePath, 1)
+	resultForTextPath := func(filePath string) *workerpb.StatsResult {
+		return &workerpb.StatsResult{
+			CollectionID: 1,
+			PartitionID:  2,
+			SegmentID:    3,
+			BaseManifest: baseManifest,
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{
+				100: {Files: []string{filePath}},
+			},
+		}
+	}
+
+	// Traversal and complete paths outside the stats directory are refused.
+	outsidePath := filepath.Join(outer, "outside")
+	require.NoError(t, os.WriteFile(outsidePath, []byte("keep"), 0o600))
+	task.cleanupRejectedStatsResultFiles(ctx, resultForTextPath("../../../../outside"))
+	require.FileExists(t, outsidePath)
+	task.cleanupRejectedStatsResultFiles(ctx, resultForTextPath(outsidePath))
+	require.FileExists(t, outsidePath)
+
+	// A file outside <base>/_stats/<type>.<field> is refused even when it is
+	// below the segment base.
+	arbitraryPath := filepath.Join(basePath, "not-stats")
+	require.NoError(t, os.MkdirAll(basePath, 0o755))
+	require.NoError(t, os.WriteFile(arbitraryPath, []byte("keep"), 0o600))
+	task.cleanupRejectedStatsResultFiles(ctx, resultForTextPath("../../not-stats"))
+	require.FileExists(t, arbitraryPath)
+	task.cleanupRejectedStatsResultFiles(ctx, resultForTextPath(arbitraryPath))
+	require.FileExists(t, arbitraryPath)
+
+	safePath := filepath.Join(basePath, "_stats/text_index.100/index")
+	require.NoError(t, os.MkdirAll(filepath.Dir(safePath), 0o755))
+	require.NoError(t, os.WriteFile(safePath, []byte("keep"), 0o600))
+	for _, unsafePath := range []string{
+		"file://" + safePath,
+		filepath.Dir(safePath),
+		filepath.Dir(safePath) + "/../../not-stats",
+	} {
+		task.cleanupRejectedStatsResultFiles(ctx, resultForTextPath(unsafePath))
+		require.FileExists(t, safePath, unsafePath)
+	}
+
+	// A result for another segment is refused even when it reports a
+	// complete path in this task's stats directory.
+	task.cleanupRejectedStatsResultFiles(ctx, &workerpb.StatsResult{
+		CollectionID: 1,
+		PartitionID:  2,
+		SegmentID:    4,
+		BaseManifest: packed.MarshalManifestPath(filepath.Join(root, "insert_log/1/2/4"), 1),
+		TextStatsLogs: map[int64]*datapb.TextIndexStats{
+			100: {Files: []string{safePath}},
+		},
+	})
+	require.FileExists(t, safePath)
+
+	// An unparsable or empty manifest is refused.
+	task.cleanupRejectedStatsResultFiles(ctx, &workerpb.StatsResult{
+		CollectionID: 1,
+		PartitionID:  2,
+		SegmentID:    3,
+		BaseManifest: "not-a-manifest",
+		TextStatsLogs: map[int64]*datapb.TextIndexStats{
+			100: {Files: []string{safePath}},
+		},
+	})
+	require.FileExists(t, safePath)
+	task.cleanupRejectedStatsResultFiles(ctx, &workerpb.StatsResult{
+		CollectionID: 1,
+		PartitionID:  2,
+		SegmentID:    3,
+		BaseManifest: packed.MarshalManifestPath("", 1),
+		TextStatsLogs: map[int64]*datapb.TextIndexStats{
+			100: {Files: []string{safePath}},
+		},
+	})
+	require.FileExists(t, safePath)
+}
+
+type rootedStatsChunkManager struct {
+	storage.ChunkManager
+	rootPath string
+	removed  []string
+}
+
+func (m *rootedStatsChunkManager) RootPath() string { return m.rootPath }
+
+func (m *rootedStatsChunkManager) MultiRemove(_ context.Context, filePaths []string) error {
+	m.removed = append(m.removed, filePaths...)
+	return nil
+}
+
+// The manifest base is a complete object key; cleanup deletes exactly the keys
+// the worker reported under it and does not second-guess them against the
+// configured root (a manifest written under an earlier minio.rootPath is still
+// authoritative for where its files are).
+func TestCleanupRejectedStatsResultFiles_RemoteUsesManifestKeysAsIs(t *testing.T) {
+	cm := &rootedStatsChunkManager{rootPath: "files"}
+	task := &statsTask{
+		StatsTask: &indexpb.StatsTask{CollectionID: 1, PartitionID: 2, SegmentID: 3},
+		meta:      &meta{chunkManager: cm},
+	}
+	result := func(basePath string) *workerpb.StatsResult {
+		return &workerpb.StatsResult{
+			CollectionID: 1,
+			PartitionID:  2,
+			SegmentID:    3,
+			BaseManifest: packed.MarshalManifestPath(basePath, 1),
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{
+				100: {Files: []string{basePath + "/_stats/text_index.100/index"}},
+			},
+		}
+	}
+
+	task.cleanupRejectedStatsResultFiles(context.Background(), result("other/insert_log/1/2/3"))
+	require.Equal(t, []string{"other/insert_log/1/2/3/_stats/text_index.100/index"}, cm.removed)
+
+	cm.removed = nil
+	task.cleanupRejectedStatsResultFiles(context.Background(), result("files/insert_log/1/2/3"))
+	require.Equal(t, []string{"files/insert_log/1/2/3/_stats/text_index.100/index"}, cm.removed)
+
+	cm.rootPath = ""
+	cm.removed = nil
+	task.cleanupRejectedStatsResultFiles(context.Background(), result("insert_log/1/2/3"))
+	require.Equal(t, []string{"insert_log/1/2/3/_stats/text_index.100/index"}, cm.removed)
+	for _, base := range []string{"files/./insert_log/1/2/3", "files//insert_log/1/2/3", "files/tmp/../insert_log/1/2/3"} {
+		cm.removed = nil
+		task.cleanupRejectedStatsResultFiles(context.Background(), result(base))
+		require.Equal(t, []string{base + "/_stats/text_index.100/index"}, cm.removed)
+	}
+
+	// Wrong segment identity and URI bases are still refused.
+	for _, base := range []string{"files/insert_log/1/2/4", "s3://bucket/files/insert_log/1/2/3"} {
+		cm.removed = nil
+		task.cleanupRejectedStatsResultFiles(context.Background(), result(base))
+		require.Empty(t, cm.removed, base)
+	}
+}
+
+func TestCleanupRejectedStatsResultFiles_RemoteRejectsIncompleteOrUnsafeTextPaths(t *testing.T) {
+	for _, basePath := range []string{"files/insert_log/1/2/3", "insert_log/1/2/3"} {
+		t.Run(basePath, func(t *testing.T) {
+			statsDir := path.Join(basePath, "_stats/text_index.100")
+			completeFile := path.Join(statsDir, "index")
+			for _, file := range []string{
+				"index",
+				"./index",
+				"task/index",
+				"../index",
+				"/" + completeFile,
+				"s3://bucket/" + completeFile,
+				path.Join(basePath, "not-stats"),
+				path.Join(basePath, "_stats/text_index.1000/index"),
+				statsDir,
+				path.Join(statsDir, "../text_index.101/index"),
+			} {
+				t.Run(file, func(t *testing.T) {
+					cm := &rootedStatsChunkManager{}
+					task := &statsTask{
+						StatsTask: &indexpb.StatsTask{CollectionID: 1, PartitionID: 2, SegmentID: 3},
+						meta:      &meta{chunkManager: cm},
+					}
+					result := &workerpb.StatsResult{
+						CollectionID: 1,
+						PartitionID:  2,
+						SegmentID:    3,
+						BaseManifest: packed.MarshalManifestPath(basePath, 1),
+						TextStatsLogs: map[int64]*datapb.TextIndexStats{
+							100: {Files: []string{completeFile, file}},
+						},
+					}
+
+					_, files, err := collectRejectedStatsResultFiles(result, "files", 1, 2, 3)
+					require.Error(t, err)
+					require.Empty(t, files)
+					task.cleanupRejectedStatsResultFiles(context.Background(), result)
+					require.Empty(t, cm.removed)
+				})
+			}
+		})
+	}
+}
+
+func TestCleanupRejectedStatsResultFiles_RemoteRejectsAbsoluteManifestBase(t *testing.T) {
+	cm := &rootedStatsChunkManager{rootPath: "files"}
+	task := &statsTask{
+		StatsTask: &indexpb.StatsTask{CollectionID: 1, PartitionID: 2, SegmentID: 3},
+		meta:      &meta{chunkManager: cm},
+	}
+	basePath := "/files/insert_log/1/2/3"
+	task.cleanupRejectedStatsResultFiles(context.Background(), &workerpb.StatsResult{
+		CollectionID: 1,
+		PartitionID:  2,
+		SegmentID:    3,
+		BaseManifest: packed.MarshalManifestPath(basePath, 1),
+		TextStatsLogs: map[int64]*datapb.TextIndexStats{
+			100: {Files: []string{path.Join(basePath, "_stats/text_index.100/index")}},
+		},
+	})
+	require.Empty(t, cm.removed)
+}
+
+func TestCleanupRejectedStatsResultFiles_RejectsInvalidJSONDescriptors(t *testing.T) {
+	basePath := "files/insert_log/1/2/3"
+	for _, descriptor := range []string{
+		"/tmp/index",
+	} {
+		t.Run(descriptor, func(t *testing.T) {
+			cm := &rootedStatsChunkManager{rootPath: "files"}
+			task := &statsTask{
+				StatsTask: &indexpb.StatsTask{CollectionID: 1, PartitionID: 2, SegmentID: 3},
+				meta:      &meta{chunkManager: cm},
+			}
+			result := &workerpb.StatsResult{
+				CollectionID: 1,
+				PartitionID:  2,
+				SegmentID:    3,
+				BaseManifest: packed.MarshalManifestPath(basePath, 1),
+				TextStatsLogs: map[int64]*datapb.TextIndexStats{
+					100: {Files: []string{path.Join(basePath, "_stats/text_index.100/index")}},
+				},
+				JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+					101: {Files: []string{"shared_key_index/index", descriptor}},
+				},
+			}
+			_, files, err := collectRejectedStatsResultFiles(result, "files", 1, 2, 3)
+			require.Error(t, err)
+			require.Empty(t, files)
+			task.cleanupRejectedStatsResultFiles(context.Background(), result)
+			require.Empty(t, cm.removed)
+		})
+	}
+}
+
+func TestCollectRejectedStatsResultFiles_LocalJSONDirectoryBoundary(t *testing.T) {
+	basePath := filepath.Join(t.TempDir(), "insert_log/1/2/3")
+	for _, descriptor := range []string{"../index", "nested/../../index", ".", ".."} {
+		t.Run(descriptor, func(t *testing.T) {
+			result := &workerpb.StatsResult{
+				BaseManifest: packed.MarshalManifestPath(basePath, 1),
+				JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+					101: {Files: []string{descriptor}},
+				},
+			}
+			_, files, err := collectRejectedStatsResultFiles(result, "", 1, 2, 3)
+			require.Error(t, err)
+			require.Empty(t, files)
+		})
+	}
+}
+
+func TestCollectRejectedStatsResultFiles_ManifestBaseIdentity(t *testing.T) {
+	for _, root := range []string{"files", t.TempDir()} {
+		t.Run(root, func(t *testing.T) {
+			base := root + "/./insert_log/1/2/3"
+			result := &workerpb.StatsResult{
+				BaseManifest: packed.MarshalManifestPath(base, 1),
+				Manifest:     packed.MarshalManifestPath(path.Clean(base), 2),
+				JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+					101: {Files: []string{"index"}},
+				},
+			}
+			_, files, err := collectRejectedStatsResultFiles(result, root, 1, 2, 3)
+			if path.IsAbs(root) {
+				require.NoError(t, err)
+				require.Equal(t, []string{base + "/_stats/json_stats.101/index"}, files)
+			} else {
+				// Equivalent filesystem spellings are distinct remote objects.
+				require.Error(t, err)
+				require.Empty(t, files)
+			}
+		})
+	}
+}
+
+func TestCollectRejectedStatsResultFiles_PreservesFileKeys(t *testing.T) {
+	for _, root := range []string{"files", "", t.TempDir()} {
+		for _, manifestLayout := range []bool{false, true} {
+			t.Run(fmt.Sprintf("root=%s/manifest=%t", root, manifestLayout), func(t *testing.T) {
+				basePath := path.Join(root, "insert_log/1/2/3")
+				textDir := metautil.BuildTextIndexPrefix(root, 10, 1, 1, 2, 3, 100)
+				jsonDir := metautil.BuildJSONKeyStatsPrefix(root, 2, 10, 1, 1, 2, 3, 101)
+				manifest := ""
+				if manifestLayout {
+					manifest = packed.MarshalManifestPath(basePath, 1)
+					textDir = basePath + "/_stats/text_index.100"
+					jsonDir = basePath + "/_stats/json_stats.101"
+				}
+				names := []string{"./index", "nested//index", "nested/../index", "s3://bucket/index"}
+				if !path.IsAbs(root) {
+					// These are literal object names, not filesystem traversal.
+					names = append(names, "../index", ".", "..")
+				}
+				textFiles := make([]string, 0, len(names))
+				want := make([]string, 0, 2*len(names))
+				for _, name := range names {
+					textFiles = append(textFiles, textDir+"/"+name)
+					want = append(want, textDir+"/"+name, jsonDir+"/"+name)
+				}
+				result := &workerpb.StatsResult{
+					BaseManifest: manifest,
+					TextStatsLogs: map[int64]*datapb.TextIndexStats{
+						100: {BuildID: 10, Version: 1, Files: append(textFiles, textFiles[0])},
+					},
+					JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+						101: {BuildID: 10, Version: 1, JsonKeyStatsDataFormat: 2, Files: names},
+					},
+				}
+				_, files, err := collectRejectedStatsResultFiles(result, root, 1, 2, 3)
+				require.NoError(t, err)
+				require.ElementsMatch(t, want, files)
+				require.Equal(t, names, result.GetJsonKeyStatsLogs()[101].GetFiles())
+			})
+		}
+	}
+}
+
+func TestCleanupRejectedStatsResultFiles_LocalAcceptsEquivalentPaths(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	basePath := filepath.Join(root, "insert_log/1/2/3")
+	statsDir := basePath + "/_stats/text_index.100"
+	require.NoError(t, os.MkdirAll(statsDir+"/nested", 0o755))
+	task := &statsTask{
+		StatsTask: &indexpb.StatsTask{CollectionID: 1, PartitionID: 2, SegmentID: 3},
+		meta:      &meta{chunkManager: cm},
+	}
+	for _, name := range []string{"./index", "nested//index", "nested/../index"} {
+		file := statsDir + "/" + name
+		require.NoError(t, cm.Write(ctx, file, []byte("stale")))
+		task.cleanupRejectedStatsResultFiles(ctx, &workerpb.StatsResult{
+			CollectionID:  1,
+			PartitionID:   2,
+			SegmentID:     3,
+			BaseManifest:  packed.MarshalManifestPath(basePath, 1),
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{100: {Files: []string{file}}},
+		})
+		require.NoFileExists(t, file)
+	}
+}
 
 type statsTaskSuite struct {
 	suite.Suite
@@ -66,6 +556,8 @@ type mockeyChunkManager struct {
 	storage.ChunkManager
 }
 
+func (m *mockeyChunkManager) RootPath() string { return "" }
+
 func Test_statsTaskSuite(t *testing.T) {
 	suite.Run(t, new(statsTaskSuite))
 }
@@ -77,6 +569,13 @@ func (s *statsTaskSuite) SetupSuite() {
 	s.segID = 1179
 	s.targetID = 1180
 
+	s.mt = s.newMeta()
+}
+
+// newMeta builds a fresh meta holding one flushed segment and one Init stats
+// task on it. Tests that remove the task or drop the segment should use their
+// own instance instead of mutating the shared s.mt.
+func (s *statsTaskSuite) newMeta() *meta {
 	tasks := typeutil.NewConcurrentMap[UniqueID, *indexpb.StatsTask]()
 	statsTask := &indexpb.StatsTask{
 		CollectionID:  1,
@@ -95,59 +594,30 @@ func (s *statsTaskSuite) SetupSuite() {
 	secondaryKey := createSecondaryIndexKey(statsTask.GetSegmentID(), statsTask.GetSubJobType().String())
 	secondaryIndex.Insert(secondaryKey, statsTask)
 
-	s.mt = &meta{
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{
-				s.segID: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:            s.segID,
-						CollectionID:  s.collID,
-						PartitionID:   s.partID,
-						InsertChannel: "ch1",
-						NumOfRows:     65535,
-						State:         commonpb.SegmentState_Flushed,
-						MaxRowNum:     65535,
-						Level:         datapb.SegmentLevel_L2,
-						Stats:         &datapb.Statistics{InsertBinlogSize: 512 * 1024 * 1024},
-					},
-				},
-			},
-			secondaryIndexes: segmentInfoIndexes{
-				coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-					s.collID: {
-						s.segID: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:            s.segID,
-								CollectionID:  s.collID,
-								PartitionID:   s.partID,
-								InsertChannel: "ch1",
-								NumOfRows:     65535,
-								State:         commonpb.SegmentState_Flushed,
-								MaxRowNum:     65535,
-								Level:         datapb.SegmentLevel_L2,
-							},
-						},
-					},
-				},
-				channel2Segments: map[string]map[UniqueID]*SegmentInfo{
-					"ch1": {
-						s.segID: {
-							SegmentInfo: &datapb.SegmentInfo{
-								ID:            s.segID,
-								CollectionID:  s.collID,
-								PartitionID:   s.partID,
-								InsertChannel: "ch1",
-								NumOfRows:     65535,
-								State:         commonpb.SegmentState_Flushed,
-								MaxRowNum:     65535,
-								Level:         datapb.SegmentLevel_L2,
-							},
-						},
-					},
-				},
-			},
-			compactionTo: map[UniqueID][]UniqueID{},
+	executor := newManifestCommitExecutor(1)
+	s.T().Cleanup(executor.close)
+
+	metaStore := metacache.NewMetaStore(nil)
+	segments := NewSegmentsInfo(metaStore)
+	seg := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            s.segID,
+			CollectionID:  s.collID,
+			PartitionID:   s.partID,
+			InsertChannel: "ch1",
+			NumOfRows:     65535,
+			State:         commonpb.SegmentState_Flushed,
+			MaxRowNum:     65535,
+			Level:         datapb.SegmentLevel_L2,
+			Stats:         &datapb.Statistics{InsertBinlogSize: 512 * 1024 * 1024},
 		},
+	}
+	segments.SetSegment(s.segID, seg)
+
+	return &meta{
+		manifestCommitExecutor: executor,
+		metaStore:              metaStore,
+		segments:               segments,
 
 		statsTaskMeta: &statsTaskMeta{
 			keyLock:         lock.NewKeyLock[UniqueID](),
@@ -259,7 +729,7 @@ func (s *statsTaskSuite) TestResetTask() {
 		st.resetTask(context.Background(), "reset task")
 		s.Equal(indexpb.JobState_JobStateInit, st.GetState())
 		s.Equal("reset task", st.GetFailReason())
-		s.False(s.mt.segments.segments[s.segID].isCompacting)
+		s.False(s.mt.segments.GetSegment(s.segID).isCompacting)
 	})
 
 	s.Run("reset with update failure", func() {
@@ -293,7 +763,7 @@ func (s *statsTaskSuite) TestHandleEmptySegment() {
 	s.Run("handle empty segment with update failure", func() {
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		s.mt.statsTaskMeta.catalog = catalog
-		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Flushed
+		s.mt.segments.GetSegment(s.segID).State = commonpb.SegmentState_Flushed
 		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).
 			Return(errors.New("mock error"))
 		err := st.handleEmptySegment(context.Background())
@@ -312,7 +782,7 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 
 	s.Run("segment not healthy", func() {
 		// Set up a temporary nil segment return
-		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Dropped
+		s.mt.segments.GetSegment(s.segID).State = commonpb.SegmentState_Dropped
 
 		s.Run("drop task failed", func() {
 			catalog := catalogmocks.NewDataCoordCatalog(s.T())
@@ -323,7 +793,7 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 		})
 
 		s.Run("drop task success", func() {
-			s.mt.segments.segments[s.segID].isCompacting = false
+			s.mt.segments.SetIsCompacting(s.segID, false)
 			catalog := catalogmocks.NewDataCoordCatalog(s.T())
 			catalog.EXPECT().DropStatsTask(mock.Anything, mock.Anything).Return(nil)
 			st.meta.statsTaskMeta.catalog = catalog
@@ -338,9 +808,9 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 		st.meta.statsTaskMeta.catalog = catalog
 		st.meta.catalog = catalog
 		s.NoError(s.mt.statsTaskMeta.AddStatsTask(st.StatsTask))
-		s.mt.segments.segments[s.segID].NumOfRows = 0
-		s.mt.segments.segments[s.segID].isCompacting = false
-		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Flushed
+		s.mt.segments.GetSegment(s.segID).NumOfRows = 0
+		s.mt.segments.SetIsCompacting(s.segID, false)
+		s.mt.segments.GetSegment(s.segID).State = commonpb.SegmentState_Flushed
 
 		st.CreateTaskOnWorker(1, session.NewMockCluster(s.T()))
 		s.Equal(indexpb.JobState_JobStateFinished, st.GetState())
@@ -348,9 +818,9 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 
 	s.Run("update version failed", func() {
 		st.SetState(indexpb.JobState_JobStateInit, "")
-		s.mt.segments.segments[s.segID].isCompacting = false
-		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Flushed
-		s.mt.segments.segments[s.segID].NumOfRows = 1000
+		s.mt.segments.SetIsCompacting(s.segID, false)
+		s.mt.segments.GetSegment(s.segID).State = commonpb.SegmentState_Flushed
+		s.mt.segments.GetSegment(s.segID).NumOfRows = 1000
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error"))
 		st.meta.statsTaskMeta.catalog = catalog
@@ -361,8 +831,8 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 
 	s.Run("prepare job request failed", func() {
 		st.SetState(indexpb.JobState_JobStateInit, "")
-		s.mt.segments.segments[s.segID].isCompacting = false
-		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Flushed
+		s.mt.segments.SetIsCompacting(s.segID, false)
+		s.mt.segments.GetSegment(s.segID).State = commonpb.SegmentState_Flushed
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
 		st.meta.statsTaskMeta.catalog = catalog
@@ -377,8 +847,8 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 
 	s.Run("send job to worker failed", func() {
 		st.SetState(indexpb.JobState_JobStateInit, "")
-		s.mt.segments.segments[s.segID].isCompacting = false
-		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Flushed
+		s.mt.segments.SetIsCompacting(s.segID, false)
+		s.mt.segments.GetSegment(s.segID).State = commonpb.SegmentState_Flushed
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
 		st.meta.statsTaskMeta.catalog = catalog
@@ -405,8 +875,8 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 
 	s.Run("update InProgress failed", func() {
 		st.SetState(indexpb.JobState_JobStateInit, "")
-		s.mt.segments.segments[s.segID].isCompacting = false
-		s.mt.segments.segments[s.segID].State = commonpb.SegmentState_Flushed
+		s.mt.segments.SetIsCompacting(s.segID, false)
+		s.mt.segments.GetSegment(s.segID).State = commonpb.SegmentState_Flushed
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil).Once()
 		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
@@ -422,7 +892,7 @@ func (s *statsTaskSuite) TestCreateTaskOnWorker() {
 	})
 
 	s.Run("success case", func() {
-		s.mt.segments.segments[s.segID].isCompacting = false
+		s.mt.segments.SetIsCompacting(s.segID, false)
 		catalog := catalogmocks.NewDataCoordCatalog(s.T())
 		catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil)
 		st.meta.statsTaskMeta.catalog = catalog
@@ -454,8 +924,8 @@ func (s *statsTaskSuite) TestCreateTaskOnWorkerDropsExternalJSONWithoutV3Manifes
 			StorageVersion: storage.StorageV2,
 		},
 	}
-	s.mt.segments.segments[segmentID] = segment
-	defer delete(s.mt.segments.segments, segmentID)
+	s.mt.segments.SetSegment(segmentID, segment)
+	defer s.mt.segments.DropSegment(segmentID)
 
 	statsTask := &indexpb.StatsTask{
 		CollectionID:    s.collID,
@@ -553,6 +1023,81 @@ func (s *statsTaskSuite) TestQueryTaskOnWorker() {
 	})
 }
 
+func (s *statsTaskSuite) TestQueryTaskOnWorkerAbortsWhenSegmentDropped() {
+	newTask := func(mt *meta) *statsTask {
+		return newStatsTask(&indexpb.StatsTask{
+			TaskID:     s.taskID,
+			SegmentID:  s.segID,
+			SubJobType: indexpb.StatsSubJob_JsonKeyIndexJob,
+			State:      indexpb.JobState_JobStateInProgress,
+			NodeID:     100,
+		}, 1, mt, nil, nil, newIndexEngineVersionManager())
+	}
+
+	s.Run("segment dropped", func() {
+		mt := s.newMeta()
+		mt.segments.GetSegment(s.segID).State = commonpb.SegmentState_Dropped
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().DropStatsTask(mock.Anything, s.taskID).Return(nil)
+		mt.statsTaskMeta.catalog = catalog
+		st := newTask(mt)
+
+		// No QueryStats expectation: the dropped segment must be detected
+		// before polling the worker, and the worker-side job canceled.
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().DropStats(int64(100), s.taskID).Return(nil)
+		st.QueryTaskOnWorker(cluster)
+
+		s.Equal(indexpb.JobState_JobStateNone, st.GetState())
+		s.Nil(mt.statsTaskMeta.GetStatsTask(s.taskID))
+	})
+
+	s.Run("segment removed from meta", func() {
+		mt := s.newMeta()
+		mt.segments.DropSegment(s.segID)
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().DropStatsTask(mock.Anything, s.taskID).Return(nil)
+		mt.statsTaskMeta.catalog = catalog
+		st := newTask(mt)
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().DropStats(int64(100), s.taskID).Return(nil)
+		st.QueryTaskOnWorker(cluster)
+
+		s.Equal(indexpb.JobState_JobStateNone, st.GetState())
+		s.Nil(mt.statsTaskMeta.GetStatsTask(s.taskID))
+	})
+
+	s.Run("drop on worker failed keeps task for next round", func() {
+		mt := s.newMeta()
+		mt.segments.GetSegment(s.segID).State = commonpb.SegmentState_Dropped
+		st := newTask(mt)
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().DropStats(int64(100), s.taskID).Return(errors.New("mock error"))
+		st.QueryTaskOnWorker(cluster)
+
+		s.Equal(indexpb.JobState_JobStateInProgress, st.GetState())
+		s.NotNil(mt.statsTaskMeta.GetStatsTask(s.taskID))
+	})
+
+	s.Run("drop meta failed keeps task for next round", func() {
+		mt := s.newMeta()
+		mt.segments.GetSegment(s.segID).State = commonpb.SegmentState_Dropped
+		catalog := catalogmocks.NewDataCoordCatalog(s.T())
+		catalog.EXPECT().DropStatsTask(mock.Anything, s.taskID).Return(errors.New("mock error"))
+		mt.statsTaskMeta.catalog = catalog
+		st := newTask(mt)
+
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().DropStats(int64(100), s.taskID).Return(nil)
+		st.QueryTaskOnWorker(cluster)
+
+		s.Equal(indexpb.JobState_JobStateInProgress, st.GetState())
+		s.NotNil(mt.statsTaskMeta.GetStatsTask(s.taskID))
+	})
+}
+
 func (s *statsTaskSuite) TestDropTaskOnWorker() {
 	st := newStatsTask(&indexpb.StatsTask{
 		TaskID:     s.taskID,
@@ -612,7 +1157,7 @@ func (s *statsTaskSuite) TestSetJobInfo() {
 		},
 	}
 
-	s.mt.segments.segments[s.segID] = testSegment
+	s.mt.segments.SetSegment(s.segID, testSegment)
 
 	s.Run("set job info success for different sub job types", func() {
 		catalog := &mockeyDataCoordCatalog{}
@@ -638,78 +1183,124 @@ func (s *statsTaskSuite) TestSetJobInfo() {
 	s.mt.segments = origSegments
 }
 
-func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
-	oldManifest := `{"base_path":"files/insert_log/1/2/1179","ver":1}`
-	currentManifest := `{"base_path":"files/insert_log/1/2/1179","ver":2}`
-	resultManifest := `{"base_path":"files/insert_log/1/2/1179","ver":3}`
+func (s *statsTaskSuite) TestSetSortJobInfoEnqueuesTargetSegment() {
+	drainBuildIndexChForTest()
+	defer drainBuildIndexChForTest()
 
-	statsLogs := map[int64]*datapb.JsonKeyStats{
+	s.mt.segments.SetSegment(s.targetID, &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:            s.targetID,
+			CollectionID:  s.collID,
+			PartitionID:   s.partID,
+			InsertChannel: "ch1",
+			State:         commonpb.SegmentState_Flushed,
+		},
+	})
+	st := newStatsTask(&indexpb.StatsTask{
+		TaskID:          s.taskID,
+		SegmentID:       s.segID,
+		TargetSegmentID: s.targetID,
+		SubJobType:      indexpb.StatsSubJob_Sort,
+		State:           indexpb.JobState_JobStateInProgress,
+	}, 1, s.mt, nil, nil, newIndexEngineVersionManager())
+
+	err := st.SetJobInfo(context.Background(), &workerpb.StatsResult{
+		TaskID: s.taskID,
+		State:  indexpb.JobState_JobStateFinished,
+	})
+
+	s.NoError(err)
+	assertBuildIndexEvents(s.T(), s.targetID)
+}
+
+// TestSetJobInfoJSONStatsResultManifestHandling exercises the structured-delta
+// publish path for a standalone JsonKeyIndexJob: DataCoord rebuilds the JSON key
+// StatEntries from the worker's raw result and runs the manifest transaction
+// itself, rebasing on the segment's CURRENT manifest.
+func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
+	basePath := "files/insert_log/1/2/1179"
+	currentManifest := packed.MarshalManifestPath(basePath, 2)
+	committedManifest := packed.MarshalManifestPath(basePath, 3)
+
+	// The worker ships manifest-relative paths (kept relative in SegmentInfo for
+	// read reconstruction); DataCoord rebuilds the absolute form for the manifest.
+	relativeFiles := []string{"shared_key_index/.managed.json_0"}
+	absoluteFiles := []string{basePath + "/_stats/json_stats.500/shared_key_index/.managed.json_0"}
+	freshStats := map[int64]*datapb.JsonKeyStats{
 		500: {
 			FieldID:                500,
 			Version:                1,
 			BuildID:                s.taskID,
+			Files:                  relativeFiles,
 			JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion,
 		},
 	}
 
 	testCases := []struct {
 		name           string
-		current        string
-		base           string
-		result         string
+		preStats       map[int64]*datapb.JsonKeyStats
 		logs           map[int64]*datapb.JsonKeyStats
+		expectCommit   bool
 		expectManifest string
 		expectStats    bool
-		expectCatalog  bool
-		expectErr      error
 	}{
 		{
-			name:           "stale_result",
-			current:        currentManifest,
-			base:           oldManifest,
-			result:         resultManifest,
-			logs:           statsLogs,
-			expectManifest: currentManifest,
-			expectErr:      errStatsResultStale,
+			name:           "fresh_commit",
+			logs:           freshStats,
+			expectCommit:   true,
+			expectManifest: committedManifest,
+			expectStats:    true,
 		},
 		{
-			name:           "fresh_result",
-			current:        currentManifest,
-			base:           currentManifest,
-			result:         resultManifest,
-			logs:           statsLogs,
-			expectManifest: resultManifest,
+			// Result already persisted (same BuildID): the idempotent-replay guard
+			// short-circuits before any manifest transaction.
+			name:           "already_applied_skip",
+			preStats:       map[int64]*datapb.JsonKeyStats{500: {FieldID: 500, BuildID: s.taskID}},
+			logs:           freshStats,
+			expectCommit:   false,
+			expectManifest: currentManifest,
 			expectStats:    true,
-			expectCatalog:  true,
 		},
 		{
 			name:           "empty_stats_noop",
-			current:        currentManifest,
-			base:           currentManifest,
-			result:         currentManifest,
 			logs:           map[int64]*datapb.JsonKeyStats{},
+			expectCommit:   false,
 			expectManifest: currentManifest,
+			expectStats:    false,
 		},
 	}
 
 	for _, testCase := range testCases {
 		s.Run(testCase.name, func() {
-			restore := s.installJSONStatsSegment(testCase.current)
+			restore := s.installJSONStatsSegment(currentManifest)
 			defer restore()
+			if testCase.preStats != nil {
+				s.mt.segments.GetSegment(s.segID).JsonKeyStats = testCase.preStats
+			}
 
-			alterSegmentsCount := 0
-			mockAlterSegments := mockey.Mock((*mockeyDataCoordCatalog).AlterSegments).To(
-				func(
-					_ *mockeyDataCoordCatalog,
-					_ context.Context,
-					_ []*datapb.SegmentInfo,
-					_ ...metastore.BinlogsIncrement,
-				) error {
-					alterSegmentsCount++
+			commitCalled := false
+			mockCommit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+				func(_ context.Context, _ *packed.ManifestIOContext, baseManifest string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
+					commitCalled = true
+					// Rebased on the segment's current manifest (version 2), not the
+					// worker's plan-time base.
+					s.Equal(currentManifest, baseManifest)
+					s.Require().Len(updates.Stats, 1)
+					s.Equal("json_stats.500", updates.Stats[0].Key)
+					// Manifest stores absolute paths reconstructed from the relative result.
+					s.Equal(absoluteFiles, updates.Stats[0].Files)
+					return mockManifestUpdateResult(committedManifest, updates), nil
+				}).Build()
+			defer mockCommit.UnPatch()
+
+			catalogWrites := 0
+			s.mt.catalog = &mockeyDataCoordCatalog{}
+			mockUpdate := mockey.Mock((*mockeyDataCoordCatalog).Update).To(
+				func(_ *mockeyDataCoordCatalog, _ context.Context, _ ...metastore.UpdateAction) error {
+					catalogWrites++
 					return nil
 				}).Build()
-			defer mockAlterSegments.UnPatch()
-			s.mt.catalog = &mockeyDataCoordCatalog{}
+			defer mockUpdate.UnPatch()
 
 			err := s.newJSONStatsTask().SetJobInfo(context.Background(), &workerpb.StatsResult{
 				TaskID:           s.taskID,
@@ -717,15 +1308,10 @@ func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
 				PartitionID:      s.partID,
 				SegmentID:        s.segID,
 				Channel:          "ch1",
-				BaseManifest:     testCase.base,
-				Manifest:         testCase.result,
 				JsonKeyStatsLogs: testCase.logs,
 			})
-			if testCase.expectErr != nil {
-				s.ErrorIs(err, testCase.expectErr)
-			} else {
-				s.NoError(err)
-			}
+			s.NoError(err)
+			s.Equal(testCase.expectCommit, commitCalled)
 
 			segment := s.mt.GetHealthySegment(context.Background(), s.segID)
 			s.Require().NotNil(segment)
@@ -736,87 +1322,105 @@ func (s *statsTaskSuite) TestSetJobInfoJSONStatsResultManifestHandling() {
 			} else {
 				s.Empty(segment.GetJsonKeyStats())
 			}
-			if testCase.expectCatalog {
-				s.Equal(1, alterSegmentsCount)
+			if testCase.expectCommit {
+				s.Equal(1, catalogWrites)
+				// The SegmentInfo dual-write keeps paths relative; only the manifest
+				// entry carries the reconstructed absolute form.
+				s.Equal(relativeFiles, segment.GetJsonKeyStats()[500].GetFiles())
 			} else {
-				s.Equal(0, alterSegmentsCount)
+				s.Equal(0, catalogWrites)
 			}
 		})
 	}
 }
 
+// TestSetJobInfoTextStatsResultManifestHandling exercises the structured-delta
+// publish path for a standalone TextIndexJob: DataCoord rebuilds the text-index
+// StatEntries from the worker's raw result (pinning the scalar index version the
+// index was built with) and runs the manifest transaction itself, rebasing on the
+// segment's CURRENT manifest.
 func (s *statsTaskSuite) TestSetJobInfoTextStatsResultManifestHandling() {
-	oldManifest := `{"base_path":"files/insert_log/1/2/1179","ver":1}`
-	currentManifest := `{"base_path":"files/insert_log/1/2/1179","ver":2}`
-	resultManifest := `{"base_path":"files/insert_log/1/2/1179","ver":3}`
+	basePath := "files/insert_log/1/2/1179"
+	currentManifest := packed.MarshalManifestPath(basePath, 2)
+	committedManifest := packed.MarshalManifestPath(basePath, 3)
 
-	statsLogs := map[int64]*datapb.TextIndexStats{
+	files := []string{basePath + "/_stats/text_index.500/tokenizer.json"}
+	freshStats := map[int64]*datapb.TextIndexStats{
 		500: {
-			FieldID: 500,
-			Version: 1,
-			BuildID: s.taskID,
-			Files:   []string{"files/insert_log/1/2/1179/_stats/text_index.500/tokenizer.json"},
+			FieldID:                   500,
+			Version:                   1,
+			BuildID:                   s.taskID,
+			Files:                     files,
+			CurrentScalarIndexVersion: 7,
 		},
 	}
 
 	testCases := []struct {
 		name           string
-		current        string
-		base           string
-		result         string
+		preStats       map[int64]*datapb.TextIndexStats
 		logs           map[int64]*datapb.TextIndexStats
+		expectCommit   bool
 		expectManifest string
 		expectStats    bool
-		expectCatalog  bool
-		expectErr      error
 	}{
 		{
-			name:           "stale_result",
-			current:        currentManifest,
-			base:           oldManifest,
-			result:         resultManifest,
-			logs:           statsLogs,
-			expectManifest: currentManifest,
-			expectErr:      errStatsResultStale,
+			name:           "fresh_commit",
+			logs:           freshStats,
+			expectCommit:   true,
+			expectManifest: committedManifest,
+			expectStats:    true,
 		},
 		{
-			name:           "fresh_result",
-			current:        currentManifest,
-			base:           currentManifest,
-			result:         resultManifest,
-			logs:           statsLogs,
-			expectManifest: resultManifest,
+			// Result already persisted (same BuildID): the idempotent-replay guard
+			// short-circuits before any manifest transaction.
+			name:           "already_applied_skip",
+			preStats:       map[int64]*datapb.TextIndexStats{500: {FieldID: 500, BuildID: s.taskID}},
+			logs:           freshStats,
+			expectCommit:   false,
+			expectManifest: currentManifest,
 			expectStats:    true,
-			expectCatalog:  true,
 		},
 		{
 			name:           "empty_stats_noop",
-			current:        currentManifest,
-			base:           currentManifest,
-			result:         currentManifest,
 			logs:           map[int64]*datapb.TextIndexStats{},
+			expectCommit:   false,
 			expectManifest: currentManifest,
+			expectStats:    false,
 		},
 	}
 
 	for _, testCase := range testCases {
 		s.Run(testCase.name, func() {
-			restore := s.installJSONStatsSegment(testCase.current)
+			restore := s.installJSONStatsSegment(currentManifest)
 			defer restore()
+			if testCase.preStats != nil {
+				s.mt.segments.GetSegment(s.segID).TextStatsLogs = testCase.preStats
+			}
 
-			alterSegmentsCount := 0
-			mockAlterSegments := mockey.Mock((*mockeyDataCoordCatalog).AlterSegments).To(
-				func(
-					_ *mockeyDataCoordCatalog,
-					_ context.Context,
-					_ []*datapb.SegmentInfo,
-					_ ...metastore.BinlogsIncrement,
-				) error {
-					alterSegmentsCount++
+			commitCalled := false
+			mockCommit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).To(
+				func(_ context.Context, _ *packed.ManifestIOContext, baseManifest string, _ *indexpb.StorageConfig, updates *packed.ManifestUpdates) (packed.ManifestUpdateResult, error) {
+					commitCalled = true
+					// Rebased on the segment's current manifest (version 2), not the
+					// worker's plan-time base.
+					s.Equal(currentManifest, baseManifest)
+					s.Require().Len(updates.Stats, 1)
+					s.Equal("text_index.500", updates.Stats[0].Key)
+					s.Equal(files, updates.Stats[0].Files)
+					// Scalar index version pinned to the value the worker built with.
+					s.Equal("7", updates.Stats[0].Metadata["current_scalar_index_version"])
+					return mockManifestUpdateResult(committedManifest, updates), nil
+				}).Build()
+			defer mockCommit.UnPatch()
+
+			catalogWrites := 0
+			s.mt.catalog = &mockeyDataCoordCatalog{}
+			mockUpdate := mockey.Mock((*mockeyDataCoordCatalog).Update).To(
+				func(_ *mockeyDataCoordCatalog, _ context.Context, _ ...metastore.UpdateAction) error {
+					catalogWrites++
 					return nil
 				}).Build()
-			defer mockAlterSegments.UnPatch()
-			s.mt.catalog = &mockeyDataCoordCatalog{}
+			defer mockUpdate.UnPatch()
 
 			err := s.newTextStatsTask().SetJobInfo(context.Background(), &workerpb.StatsResult{
 				TaskID:        s.taskID,
@@ -824,15 +1428,10 @@ func (s *statsTaskSuite) TestSetJobInfoTextStatsResultManifestHandling() {
 				PartitionID:   s.partID,
 				SegmentID:     s.segID,
 				Channel:       "ch1",
-				BaseManifest:  testCase.base,
-				Manifest:      testCase.result,
 				TextStatsLogs: testCase.logs,
 			})
-			if testCase.expectErr != nil {
-				s.ErrorIs(err, testCase.expectErr)
-			} else {
-				s.NoError(err)
-			}
+			s.NoError(err)
+			s.Equal(testCase.expectCommit, commitCalled)
 
 			segment := s.mt.GetHealthySegment(context.Background(), s.segID)
 			s.Require().NotNil(segment)
@@ -843,19 +1442,34 @@ func (s *statsTaskSuite) TestSetJobInfoTextStatsResultManifestHandling() {
 			} else {
 				s.Empty(segment.GetTextStatsLogs())
 			}
-			if testCase.expectCatalog {
-				s.Equal(1, alterSegmentsCount)
+			if testCase.expectCommit {
+				s.Equal(1, catalogWrites)
 			} else {
-				s.Equal(0, alterSegmentsCount)
+				s.Equal(0, catalogWrites)
 			}
 		})
 	}
 }
 
+func (s *statsTaskSuite) TestClassifyStatsManifestCommitError() {
+	s.Nil(classifyStatsManifestCommitError(nil))
+
+	transient := merr.WrapErrServiceUnavailableMsg("object storage temporarily unavailable")
+	classified := classifyStatsManifestCommitError(transient)
+	s.ErrorIs(classified, merr.ErrServiceUnavailable)
+	s.NotErrorIs(classified, errStatsResultStale)
+
+	conflict := staleSegmentManifestError(s.segID, "manifest-1", "manifest-2")
+	classified = classifyStatsManifestCommitError(conflict)
+	s.ErrorIs(classified, merr.ErrServiceUnavailable)
+	s.ErrorIs(classified, errSegmentManifestStale)
+	s.ErrorIs(classified, errStatsResultStale)
+}
+
 func (s *statsTaskSuite) TestCollectRejectedStatsResultFiles() {
 	baseManifest := `{"base_path":"files/insert_log/1/2/1179","ver":2}`
 	s.Run("collect text and json stats files", func() {
-		files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
+		basePath, files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
 			BaseManifest: baseManifest,
 			TextStatsLogs: map[int64]*datapb.TextIndexStats{
 				101: {
@@ -867,9 +1481,10 @@ func (s *statsTaskSuite) TestCollectRejectedStatsResultFiles() {
 					Files: []string{"shared_key_index/.managed.json_0"},
 				},
 			},
-		})
+		}, "files", 1, 2, 1179)
 
 		s.NoError(err)
+		s.Equal("files/insert_log/1/2/1179", basePath)
 		s.ElementsMatch([]string{
 			"files/insert_log/1/2/1179/_stats/text_index.101/tokenizer.json",
 			"files/insert_log/1/2/1179/_stats/json_stats.102/shared_key_index/.managed.json_0",
@@ -877,7 +1492,8 @@ func (s *statsTaskSuite) TestCollectRejectedStatsResultFiles() {
 	})
 
 	s.Run("deduplicate text stats files without json stats", func() {
-		files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
+		basePath, files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
+			BaseManifest: baseManifest,
 			TextStatsLogs: map[int64]*datapb.TextIndexStats{
 				101: {
 					Files: []string{
@@ -887,38 +1503,122 @@ func (s *statsTaskSuite) TestCollectRejectedStatsResultFiles() {
 					},
 				},
 			},
-		})
+		}, "files", 1, 2, 1179)
 
 		s.NoError(err)
+		s.Equal("files/insert_log/1/2/1179", basePath)
 		s.Equal([]string{"files/insert_log/1/2/1179/_stats/text_index.101/tokenizer.json"}, files)
 	})
 
-	s.Run("json stats without manifest returns typed error", func() {
-		files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
+	// Without a manifest the legacy prefix is rebuilt from the build ID and task
+	// version, so a result that reports neither does not say where its files
+	// live. Refuse rather than addressing build 0 / version 0.
+	s.Run("stats without manifest or build coordinates are refused", func() {
+		basePath, files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
 			JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
 				102: {
 					Files: []string{"shared_key_index/.managed.json_0"},
 				},
 			},
-		})
+		}, "files", 1, 2, 1179)
 
+		s.Empty(basePath)
 		s.Empty(files)
-		s.ErrorIs(err, merr.ErrServiceInternal)
-		s.Contains(err.Error(), "manifest is empty for rejected json stats result")
+		s.ErrorIs(err, merr.ErrDataIntegrity)
+		s.Contains(err.Error(), "carries no build ID or version")
 	})
 
 	s.Run("json stats with invalid manifest returns error", func() {
-		files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
+		basePath, files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
 			BaseManifest: "invalid",
 			JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
 				102: {
 					Files: []string{"shared_key_index/.managed.json_0"},
 				},
 			},
-		})
+		}, "files", 1, 2, 1179)
 
+		s.Empty(basePath)
 		s.Empty(files)
 		s.Error(err)
+	})
+
+	// A StorageV2 stats result has no manifest at all: the worker writes TEXT and
+	// JSON stats to the traditional prefixes under the storage root. Requiring a
+	// manifest would skip cleanup and leak those files.
+	s.Run("legacy text stats without manifest are collected", func() {
+		basePath, files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{
+				101: {
+					BuildID: 77,
+					Version: 3,
+					Files: []string{
+						"files/text_log/77/3/1/2/1179/101/tokenizer.json",
+						"files/text_log/77/3/1/2/1179/101/meta.json",
+					},
+				},
+			},
+		}, "files", 1, 2, 1179)
+
+		s.NoError(err)
+		s.Equal("files", basePath)
+		s.ElementsMatch([]string{
+			"files/text_log/77/3/1/2/1179/101/tokenizer.json",
+			"files/text_log/77/3/1/2/1179/101/meta.json",
+		}, files)
+	})
+
+	s.Run("legacy json stats without manifest resolve relative names", func() {
+		basePath, files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
+			JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+				102: {
+					BuildID:                77,
+					Version:                3,
+					JsonKeyStatsDataFormat: 2,
+					Files:                  []string{"shared_key_index/.managed.json_0"},
+				},
+			},
+		}, "files", 1, 2, 1179)
+
+		s.NoError(err)
+		s.Equal("files", basePath)
+		s.Equal([]string{"files/json_stats/2/77/3/1/2/1179/102/shared_key_index/.managed.json_0"}, files)
+	})
+
+	// Local storage keys are absolute, and the legacy prefix is rebuilt from the
+	// storage root rather than guessed against the process working directory.
+	s.Run("legacy stats under an absolute local root", func() {
+		basePath, files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{
+				101: {
+					BuildID: 77,
+					Version: 3,
+					Files:   []string{"/var/lib/milvus/data/text_log/77/3/1/2/1179/101/tokenizer.json"},
+				},
+			},
+		}, "/var/lib/milvus/data", 1, 2, 1179)
+
+		s.NoError(err)
+		s.Equal("/var/lib/milvus/data", basePath)
+		s.Equal([]string{"/var/lib/milvus/data/text_log/77/3/1/2/1179/101/tokenizer.json"}, files)
+	})
+
+	// The segment identity still comes from the task, so a file written under
+	// another segment's legacy prefix is refused rather than deleted.
+	s.Run("legacy stats outside the task segment prefix are refused", func() {
+		basePath, files, err := collectRejectedStatsResultFiles(&workerpb.StatsResult{
+			TextStatsLogs: map[int64]*datapb.TextIndexStats{
+				101: {
+					BuildID: 77,
+					Version: 3,
+					Files:   []string{"files/text_log/77/3/1/2/9999/101/tokenizer.json"},
+				},
+			},
+		}, "files", 1, 2, 1179)
+
+		s.Empty(basePath)
+		s.Empty(files)
+		s.ErrorIs(err, merr.ErrDataIntegrity)
 	})
 }
 
@@ -950,6 +1650,15 @@ func (s *statsTaskSuite) TestQueryTaskOnWorkerDiscardsStaleStatsResult() {
 			defer restoreSegment()
 			restoreCollection := s.installStatsTaskCollection(testCase.external)
 			defer restoreCollection()
+
+			// The delta commit rebases on the current manifest under the per-segment
+			// lock, so it does not itself reject on a concurrent advance; this guards
+			// the remaining defensive wiring: if CommitSegmentManifest ever surfaces a
+			// classified stale conflict, QueryTaskOnWorker must discard (not retry) the
+			// obsolete worker result. Mock the commit to return that classified error.
+			mockCommit := mockey.Mock((*meta).CommitSegmentManifest).Return(
+				staleSegmentManifestError(s.segID, oldManifest, currentManifest)).Build()
+			defer mockCommit.UnPatch()
 
 			task := &indexpb.StatsTask{
 				CollectionID:    s.collID,
@@ -1022,11 +1731,14 @@ func (s *statsTaskSuite) TestQueryTaskOnWorkerDiscardsStaleStatsResult() {
 				}).Build()
 			defer mockDropStats.UnPatch()
 			st := newStatsTask(task, 1, s.mt, nil, nil, newIndexEngineVersionManager())
+			drainStatsBuildChForTest()
+			defer drainStatsBuildChForTest()
 
 			st.QueryTaskOnWorker(cluster)
 
 			s.Equal(indexpb.JobState_JobStateNone, st.GetState())
 			s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(s.segID, indexpb.StatsSubJob_TextIndexJob))
+			s.Equal([]UniqueID{s.segID}, drainStatsBuildChForTest(), "a rejected result must send the segment back to discovery")
 			s.Equal([]int64{task.GetTaskID()}, droppedStatsTasks)
 			s.Equal([]int64{task.GetTaskID()}, droppedWorkerTasks)
 			if testCase.expectCleanup {
@@ -1039,7 +1751,7 @@ func (s *statsTaskSuite) TestQueryTaskOnWorkerDiscardsStaleStatsResult() {
 }
 
 func (s *statsTaskSuite) installStatsTaskCollection(external bool) func() {
-	origCollections := s.mt.collections
+	origColl := s.mt.GetCollection(s.collID)
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{
@@ -1052,21 +1764,23 @@ func (s *statsTaskSuite) installStatsTaskCollection(external bool) func() {
 	if external {
 		schema.Fields[0].ExternalField = "pk"
 	}
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(s.collID, &collectionInfo{
+	s.mt.AddCollection(&collectionInfo{
 		ID:     s.collID,
 		Schema: schema,
 	})
-	s.mt.collections = collections
 	return func() {
-		s.mt.collections = origCollections
+		if origColl != nil {
+			s.mt.AddCollection(origColl)
+		} else {
+			s.mt.DropCollection(s.collID)
+		}
 	}
 }
 
 func (s *statsTaskSuite) installJSONStatsSegment(manifest string) func() {
-	origSegment := s.mt.segments.segments[s.segID]
+	origSegment := s.mt.segments.GetSegment(s.segID)
 	origCatalog := s.mt.catalog
-	s.mt.segments.segments[s.segID] = &SegmentInfo{
+	s.mt.segments.SetSegment(s.segID, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:             s.segID,
 			CollectionID:   s.collID,
@@ -1078,9 +1792,13 @@ func (s *statsTaskSuite) installJSONStatsSegment(manifest string) func() {
 			ManifestPath:   manifest,
 			StorageVersion: 3,
 		},
-	}
+	})
 	return func() {
-		s.mt.segments.segments[s.segID] = origSegment
+		if origSegment != nil {
+			s.mt.segments.SetSegment(s.segID, origSegment)
+		} else {
+			s.mt.segments.DropSegment(s.segID)
+		}
 		s.mt.catalog = origCatalog
 	}
 }
@@ -1222,6 +1940,7 @@ func (s *statsTaskSuite) TestPrepareJobRequest() {
 		s.NotNil(req)
 
 		// Verify request fields
+		s.True(req.GetEnableManifestDelta())
 		s.Equal(s.taskID, req.TaskID)
 		s.Equal(s.collID, req.CollectionID)
 		s.Equal(s.partID, req.PartitionID)

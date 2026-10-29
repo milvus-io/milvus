@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -42,14 +43,30 @@ func NewInterceptorBuilder() interceptors.InterceptorBuilder {
 func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) interceptors.Interceptor {
 	state := newPartialUpdateStateWithBudget(defaultVersionIndexTTL, b.versionIndexBudget)
 	state.channel = param.ChannelInfo
+	if param.LastTimeTickMessage != nil {
+		state.historyStartTs = param.LastTimeTickMessage.TimeTick()
+	}
 	pkDescriptorGetter, _ := param.ShardManager.(primaryKeyDescriptorGetter)
-	return &appendInterceptor{
+	interceptor := &appendInterceptor{
+		enableCAS:          paramtable.Get().StreamingCfg.PartialUpdateEnableCAS.GetAsBool(),
 		state:              state,
 		pkDescriptorGetter: pkDescriptorGetter,
 	}
+	if !interceptor.enableCAS {
+		// CAS is disabled: no write-set recovery and no row-lock hook. The lock
+		// interceptor keeps only its shard lifecycle locks, and this
+		// interceptor passes writes through.
+		return interceptor
+	}
+	interceptor.recoverTransactions(param)
+	// Builders share this per-WAL parameter. The lock interceptor reads the
+	// hook at append time, after every builder has completed.
+	param.RowLock = interceptor
+	return interceptor
 }
 
 type appendInterceptor struct {
+	enableCAS          bool
 	state              *partialUpdateState
 	pkDescriptorGetter primaryKeyDescriptorGetter
 }
@@ -63,6 +80,9 @@ func (i *appendInterceptor) DoAppend(
 	msg message.MutableMessage,
 	appendOp interceptors.Append,
 ) (message.MessageID, error) {
+	if !i.enableCAS {
+		return appendOp(ctx, msg)
+	}
 	switch msg.MessageType() {
 	case message.MessageTypeCommitTxn:
 		return i.appendCommit(ctx, msg, appendOp)
@@ -117,7 +137,7 @@ func (i *appendInterceptor) appendWrite(
 		return nil, status.NewUnrecoverableError("partial update CAS message must be transactional")
 	}
 
-	var pks primaryKeys
+	var pks primarykey.Keys
 	var metaEncoded string
 	var casScope casInsertScope
 	var fenceCollectionID int64
@@ -136,32 +156,24 @@ func (i *appendInterceptor) appendWrite(
 			return nil, err
 		}
 	} else {
-		extractedPKs, ok, err := extractPKsWithContext(ctx, msg)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			pks = extractedPKs
-		} else if collectionID, ok := extractCollectionFenceID(msg); ok {
-			if collectionID == 0 {
-				return nil, status.NewUnrecoverableError("partial update collection fence has empty collection id")
-			}
-			fenceCollectionID = collectionID
-		} else if collectionID, ok := extractDropCollectionID(msg); ok {
-			if collectionID == 0 {
-				return nil, status.NewUnrecoverableError("partial update dropped collection has empty collection id")
-			}
-			droppedCollectionID = collectionID
-		} else if msg.MessageType() == message.MessageTypeInsert {
-			pks, fenceCollectionID, err = extractPKsFromOrdinaryInsertWithContext(ctx, msg, i.pkDescriptorGetter)
+		set, cached := ctx.Value(ordinaryWriteSetContextKey{}).(ordinaryWriteSet)
+		if !cached {
+			set, err = i.extractOrdinaryWriteSet(ctx, msg)
 			if err != nil {
 				return nil, err
 			}
 		}
+		pks = set.pks
+		fenceCollectionID = set.fenceCollectionID
+		droppedCollectionID = set.droppedCollectionID
 	}
 
 	if msg.TxnContext() != nil {
-		i.state.registerTxnCleanup(txn.GetTxnSessionFromContext(ctx), msg.TimeTick())
+		session := txn.GetTxnSessionFromContext(ctx)
+		if msg.MessageType() == message.MessageTypeBeginTxn {
+			i.state.prepareTxnBegin(session)
+		}
+		i.state.registerTxnCleanup(session, msg.TimeTick())
 	}
 
 	msgID, err := appendOp(ctx, msg)
@@ -170,12 +182,14 @@ func (i *appendInterceptor) appendWrite(
 	}
 
 	if msg.TxnContext() != nil {
+		// Transaction bodies are Insert and Delete, whose PKs are exact.
+		// Collection fences and drops come from exclusive DDL, which is not
+		// transactional and fails every transaction on its vchannel.
 		txnID := msg.TxnContext().TxnID
 		if msg.MessageType() == message.MessageTypeBeginTxn {
 			i.state.recordTxnBegin(txnID)
 		}
 		i.state.recordTxnWritesTyped(txnID, pks)
-		i.state.recordTxnFence(txnID, fenceCollectionID)
 		return msgID, nil
 	}
 

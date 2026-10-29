@@ -17,13 +17,17 @@
 package accesslog
 
 import (
+	"bytes"
 	"context"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -33,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -185,6 +190,76 @@ func TestAccessLogger_Basic(t *testing.T) {
 	assert.True(t, ok)
 }
 
+func TestAccessLogger_RestfulMethodUsesURLPath(t *testing.T) {
+	newLogger := func(writer *bytes.Buffer) *AccessLogger {
+		formatters := NewFormatterManger()
+		formatters.Add(BaseFormatterKey, "base: $method_name")
+		formatters.Add("search", "search: $method_name")
+		formatters.SetMethod("search", "/v2/search")
+
+		logger := NewAccessLogger()
+		logger.enable.Store(true)
+		logger.writer = writer
+		logger.formatters = formatters
+		return logger
+	}
+
+	tests := []struct {
+		name     string
+		target   string
+		expected string
+	}{
+		{
+			name:     "exact path matches",
+			target:   "/v2/search",
+			expected: "search: /v2/search\n",
+		},
+		{
+			name:     "query does not change restful method",
+			target:   "/v2/search?cluster_id=123",
+			expected: "search: /v2/search?cluster_id=123\n",
+		},
+		{
+			name:     "different prefix does not match",
+			target:   "/search?cluster_id=123",
+			expected: "base: /search?cluster_id=123\n",
+		},
+		{
+			name:     "different path does not match",
+			target:   "/v2/searching?cluster_id=123",
+			expected: "base: /v2/searching?cluster_id=123\n",
+		},
+		{
+			name:     "child path does not match",
+			target:   "/v2/search/result?cluster_id=123",
+			expected: "base: /v2/search/result?cluster_id=123\n",
+		},
+		{
+			name:     "escaped question mark remains part of path",
+			target:   "/v2/search%3Fcluster_id=123",
+			expected: "base: /v2/search%3Fcluster_id=123\n",
+		},
+	}
+
+	gin.SetMode(gin.TestMode)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodPost, test.target, nil)
+			accessInfo := info.NewRestfulInfo(ctx)
+			accessInfo.SetParams(&gin.LogFormatterParams{
+				Request: ctx.Request,
+				Path:    ctx.Request.URL.RequestURI(),
+			})
+
+			var writer bytes.Buffer
+			logger := newLogger(&writer)
+			require.True(t, logger.Write(accessInfo))
+			assert.Equal(t, test.expected, writer.String())
+		})
+	}
+}
+
 func TestAccessLogger_WriteFailed(t *testing.T) {
 	once = sync.Once{}
 	var Params paramtable.ComponentParam
@@ -301,4 +376,36 @@ func TestAccessLogger_WithMinio(t *testing.T) {
 	logfiles, err := writer.handler.listAll()
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(logfiles))
+}
+
+// Capture the real initialization failure log, not only the parser return.
+// Dynamic formatter names arrive from management configuration updates.
+type formatterLogBuffer struct{ bytes.Buffer }
+
+func (*formatterLogBuffer) Sync() error { return nil }
+
+func TestAccessLoggerInvalidFormatterDoesNotLogPayload(t *testing.T) {
+	base := paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true))
+	t.Cleanup(base.Manager().Close)
+	require.NoError(t, base.Save("localStorage.path", t.TempDir()))
+	params := &paramtable.ComponentParam{}
+	params.Init(base)
+	require.NoError(t, params.Save(params.ProxyCfg.AccessLog.Enable.Key, "true"))
+	params.SaveGroup(map[string]string{
+		params.ProxyCfg.AccessLog.Formatter.KeyPrefix + "formatter-name-canary.invalid": "formatter-value-canary",
+	})
+	logs := &formatterLogBuffer{}
+	logger, props, err := mlog.InitLoggerWithWriteSyncer(&mlog.Config{
+		Level: "info", Format: "text", DisableCaller: true,
+		DisableTimestamp: true, DisableStacktrace: true,
+	}, logs)
+	require.NoError(t, err)
+	oldLogger, oldLevel := mlog.L(), mlog.GetAtomicLevel()
+	mlog.ReplaceGlobals(logger, props)
+	t.Cleanup(func() { mlog.ReplaceGlobals(oldLogger, &mlog.ZapProperties{Level: oldLevel}) })
+	once = sync.Once{}
+	InitAccessLogger(params)
+	assert.Contains(t, logs.String(), "Init access logger failed")
+	assert.NotContains(t, logs.String(), "formatter-name-canary")
+	assert.NotContains(t, logs.String(), "formatter-value-canary")
 }

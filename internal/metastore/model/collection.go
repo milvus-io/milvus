@@ -30,17 +30,18 @@ import (
 
 // TODO: These collection is dirty implementation and easy to be broken, we should drop it in the future.
 type Collection struct {
-	TenantID             string
-	DBID                 int64
-	CollectionID         int64
-	Partitions           []*Partition
-	Name                 string
-	DBName               string
-	Description          string
-	AutoID               bool
-	Fields               []*Field
-	StructArrayFields    []*StructArrayField
-	Functions            []*Function
+	TenantID          string
+	DBID              int64
+	CollectionID      int64
+	Partitions        []*Partition
+	Name              string
+	DBName            string
+	Description       string
+	AutoID            bool
+	Fields            []*Field
+	StructArrayFields []*StructArrayField
+	Functions         []*Function
+
 	VirtualChannelNames  []string
 	PhysicalChannelNames []string
 	ShardsNum            int32

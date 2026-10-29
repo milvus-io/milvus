@@ -76,7 +76,8 @@ ChunkTranslator::ChunkTranslator(
     bool use_mmap,
     bool mmap_populate,
     milvus::proto::common::LoadPriority load_priority,
-    const std::string& warmup_policy)
+    const std::string& warmup_policy,
+    MmapChunkWritebackMode writeback_mode)
     : segment_id_(segment_id),
       field_id_(field_data_info.field_id),
       field_meta_(field_meta),
@@ -99,6 +100,7 @@ ChunkTranslator::ChunkTranslator(
                 /* in_load_list*/ field_data_info.in_load_list),
             /* support_eviction */ true,
             field_data_info.shard),
+      writeback_mode_(writeback_mode),
       load_priority_(load_priority) {
     AssertInfo(!SystemProperty::Instance().IsSystem(FieldId(field_id_)),
                "ChunkTranslator not supported for system field");
@@ -107,12 +109,14 @@ ChunkTranslator::ChunkTranslator(
         meta_.num_rows_until_chunk_.push_back(
             meta_.num_rows_until_chunk_.back() + info.row_count);
     }
-    AssertInfo(meta_.num_rows_until_chunk_.back() == field_data_info.row_count,
-               fmt::format("data lost while loading column {}: found "
-                           "num rows {} but expected {}",
-                           field_data_info.field_id,
-                           meta_.num_rows_until_chunk_.back(),
-                           field_data_info.row_count));
+    if (!(meta_.num_rows_until_chunk_.back() == field_data_info.row_count)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  fmt::format("data lost while loading column {}: found "
+                              "num rows {} but expected {}",
+                              field_data_info.field_id,
+                              meta_.num_rows_until_chunk_.back(),
+                              field_data_info.row_count));
+    }
     virtual_chunk_config(field_data_info.row_count,
                          file_infos_.size(),
                          meta_.num_rows_until_chunk_,
@@ -213,7 +217,8 @@ ChunkTranslator::get_cells(
                                  array_vec,
                                  mmap_populate_,
                                  filepath.string(),
-                                 load_priority_);
+                                 load_priority_,
+                                 writeback_mode_);
         }
         cells.emplace_back(cid, std::move(chunk));
     }

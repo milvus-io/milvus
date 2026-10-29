@@ -21,14 +21,13 @@
 #include <string>
 #include <utility>
 
+#include "common/FeatureBits.h"
 #include "common/Types.h"
 #include "exec/expression/ExprCache.h"
 #include "segcore/SegmentInterface.h"
 
 namespace milvus {
 namespace exec {
-
-class BatchedCachedMixin;
 
 // Wrapper around ExprResCacheManager to simplify the get→compute→put pattern
 // for expression implementations. Each expression only needs to:
@@ -41,7 +40,7 @@ class BatchedCachedMixin;
 // Example usage in an expression:
 //
 //   auto cached = exec::ExprCacheHelper::GetOrCompute(
-//       segment_, this->ToString(), active_count_,
+//       segment_, [this]() { return this->ToString(); }, active_count_,
 //       [&]() -> exec::ExprCacheHelper::ComputeResult {
 //           TargetBitmap res = do_actual_computation();
 //           TargetBitmap valid = compute_valid();
@@ -67,9 +66,8 @@ class ExprCacheHelper {
 
     // Try cache; on miss, call `compute`, put result into cache, return.
     // Backend semantics:
-    //   - Memory mode supports sealed and growing segments. `active_count`
-    //     participates in the memory cache key, so growing-segment snapshots
-    //     with different row counts are isolated from each other.
+    //   - Memory mode always supports sealed segments. Growing segments are
+    //     supported only when explicitly enabled.
     //   - Disk mode is sealed-segment only. DiskSlotFile uses fixed-size slots
     //     derived from row_count; if a segment's row_count changes, the manager
     //     drops that disk file and skips disk caching for the segment.
@@ -78,35 +76,47 @@ class ExprCacheHelper {
     // also skips growing segments because DiskSlotFile has fixed row_count slots.
     //
     // Correctness requirements for the caller:
-    //   - `expr_signature` MUST uniquely identify the expression and its
-    //     parameters. Same parameters → same signature. Field order in the
-    //     string must be fixed (don't rely on protobuf DebugString).
+    //   - `make_signature` MUST return a string that uniquely identifies the
+    //     expression and its parameters. Same parameters → same signature.
+    //     Field order in the string must be fixed (don't rely on protobuf
+    //     DebugString).
     //   - `active_count` MUST be the current segment row count. Used to
     //     detect staleness after insert/compaction.
     //   - `compute` MUST be deterministic: same segment + same signature
     //     + same active_count must always produce the same bitmaps.
-    template <typename ComputeFn>
+    template <typename SignatureFn, typename ComputeFn>
     static CachedBitmaps
     GetOrCompute(const segcore::SegmentInternalInterface* segment,
-                 const std::string& expr_signature,
+                 SignatureFn&& make_signature,
                  int64_t active_count,
                  ComputeFn&& compute,
-                 bool enable_cache_write = true) {
-        bool cache_eligible =
-            segment != nullptr && ExprResCacheManager::IsEnabled();
-        if (cache_eligible &&
-            ExprResCacheManager::Instance().GetMode() == CacheMode::Disk &&
-            segment->type() != SegmentType::Sealed) {
-            cache_eligible = false;
+                 bool enable_cache_write = true,
+                 FeatureRecorder* recorder = nullptr) {
+        ExprResCacheManager* manager = nullptr;
+        bool cache_eligible = false;
+        std::string expr_signature;
+        if (segment != nullptr && ExprResCacheManager::IsEnabled()) {
+            RunExprCacheBestEffort([&]() {
+                manager = &ExprResCacheManager::Instance();
+                if (!manager->CanCacheSegment(segment->type())) {
+                    return;
+                }
+                expr_signature = std::forward<SignatureFn>(make_signature)();
+                cache_eligible = true;
+            });
         }
 
         if (cache_eligible) {
-            // Try Get
-            ExprResCacheManager::Key key{segment->get_segment_id(),
-                                         expr_signature};
             ExprResCacheManager::Value got;
-            got.active_count = active_count;
-            if (ExprResCacheManager::Instance().Get(key, got)) {
+            bool cache_hit = false;
+            RunExprCacheBestEffort([&]() {
+                ExprResCacheManager::Key key{segment->get_segment_id(),
+                                             expr_signature};
+                got.active_count = active_count;
+                cache_hit = manager->Get(key, got);
+            });
+            if (cache_hit) {
+                MarkFeature(recorder, FeatureBit::ExprCacheHit);
                 return {got.result, got.valid_result};
             }
         }
@@ -129,13 +139,16 @@ class ExprCacheHelper {
         auto result = std::make_shared<TargetBitmap>(std::move(out.result));
         auto valid = std::make_shared<TargetBitmap>(std::move(out.valid));
 
-        ExprResCacheManager::Key key{segment->get_segment_id(), expr_signature};
-        ExprResCacheManager::Value v;
-        v.result = result;
-        v.valid_result = valid;
-        v.active_count = active_count;
-        v.eval_duration_us = eval_us;
-        ExprResCacheManager::Instance().Put(key, v);
+        RunExprCacheBestEffort([&]() {
+            ExprResCacheManager::Key key{segment->get_segment_id(),
+                                         expr_signature};
+            ExprResCacheManager::Value v;
+            v.result = result;
+            v.valid_result = valid;
+            v.active_count = active_count;
+            v.eval_duration_us = eval_us;
+            manager->Put(key, v);
+        });
 
         return {result, valid};
     }
@@ -144,16 +157,16 @@ class ExprCacheHelper {
     // staleness, and segment-invalidation rules as full expression results.
     // The all-ones companion satisfies the existing two-bitmap cache value
     // contract and is compressed efficiently by the memory backend.
-    template <typename ComputeFn>
+    template <typename SignatureFn, typename ComputeFn>
     static std::shared_ptr<TargetBitmap>
     GetOrComputeBitmap(const segcore::SegmentInternalInterface* segment,
-                       const std::string& artifact_signature,
+                       SignatureFn&& make_signature,
                        int64_t active_count,
                        ComputeFn&& compute,
                        bool enable_cache_write = true) {
         auto cached = GetOrCompute(
             segment,
-            artifact_signature,
+            std::forward<SignatureFn>(make_signature),
             active_count,
             [&]() -> ComputeResult {
                 auto result = compute();
@@ -163,163 +176,6 @@ class ExprCacheHelper {
             enable_cache_write);
         return cached.result;
     }
-};
-
-// ============================================================
-//  BatchedCachedMixin — eliminate boilerplate for cached expressions
-// ============================================================
-//
-// Many filter expressions use the Volcano execution model: each Eval()
-// returns one batch_size slice. When caching, we want:
-//   1. First Eval: compute the FULL segment bitset (or load from cache),
-//      store it in a member, then slice the current batch.
-//   2. Later Evals: just slice from the stored full bitset.
-//
-// This mixin encapsulates that pattern. A derived expression inherits
-// it and implements `ComputeFullBitset()`. Call sites only need:
-//
-//   auto [result, valid, advance] = EnsureFullAndSlice(batch_size);
-//
-// The mixin handles:
-//   - Cache lookup on first access
-//   - Compute + timing + cache put on miss
-//   - Slicing the current batch from the full bitset
-//   - Cursor management (via `batch_offset_`)
-//
-// Expressions holding this mixin must also provide:
-//   - A valid `segment_` pointer
-//   - `active_count_` (current row count)
-//   - `ToString()` returning a stable signature
-//   - `ComputeFullBitset()` implementation in the derived class
-//
-// Example:
-//
-//   class PhyJsonContainsExpr : public SegmentExpr,
-//                                public BatchedCachedMixin {
-//       VectorPtr Eval() override {
-//           auto [result, valid, has_more] =
-//               this->NextBatchViaCache(GetNextBatchSize(), this);
-//           if (!has_more) return nullptr;
-//           return std::make_shared<ColumnVector>(std::move(result),
-//                                                   std::move(valid));
-//       }
-//
-//       ExprCacheHelper::ComputeResult ComputeFullBitset() {
-//           TargetBitmap r(active_count_);
-//           TargetBitmap v(active_count_, true);
-//           for (int64_t i = 0; i < active_count_; ++i) {
-//               r[i] = DoJsonContains(i);
-//           }
-//           return {std::move(r), std::move(v)};
-//       }
-//   };
-
-class BatchedCachedMixin {
- public:
-    struct BatchSlice {
-        TargetBitmap result;   // size = actual_batch_size
-        TargetBitmap valid;    // size = actual_batch_size
-        bool has_data{false};  // false when cursor is past the end
-    };
-
-    // Reset cache state between queries (call from the expression's reset/init)
-    void
-    ResetCache() {
-        full_result_.reset();
-        full_valid_.reset();
-        batch_offset_ = 0;
-    }
-
-    // Derived expression calls this from Eval() to get the next batch slice.
-    // On first call, runs cache lookup / compute via ExprCacheHelper.
-    // On subsequent calls, slices from the stored full bitset.
-    //
-    // `derived` should be `this` (the derived expression), used to access
-    // segment/signature/active_count/ComputeFullBitset via CRTP-like dispatch.
-    template <typename Derived>
-    BatchSlice
-    NextBatchViaCache(int64_t batch_size, Derived* derived) {
-        EnsureFullLoaded(derived);
-
-        BatchSlice out;
-        const int64_t total = static_cast<int64_t>(full_result_->size());
-        if (batch_offset_ >= total || batch_size <= 0) {
-            return out;  // has_data=false → end of stream
-        }
-        const int64_t actual =
-            std::min<int64_t>(batch_size, total - batch_offset_);
-        out.result = TargetBitmap(actual);
-        out.valid = TargetBitmap(actual);
-        out.result.append(*full_result_, batch_offset_, actual);
-        out.valid.append(*full_valid_, batch_offset_, actual);
-        out.has_data = true;
-        batch_offset_ += actual;
-        return out;
-    }
-
-    // Take exclusive ownership of the full bitsets (use_count == 1 after this
-    // call, enabling std::move of the underlying TargetBitmap by the caller).
-    // After this call the mixin's internal state is cleared; subsequent
-    // NextBatchViaCache / TakeFullBitset calls will reload from cache/recompute.
-    //
-    // Use this in `execute_all_at_once_` optimization paths where you want to
-    // avoid the batch-slice append copy:
-    //
-    //   if (execute_all_at_once_) {
-    //       auto full = TakeFullBitset(this);
-    //       MoveCursor();
-    //       return std::make_shared<ColumnVector>(
-    //           std::move(*full.result), std::move(*full.valid));
-    //   }
-    //   // else: normal batch loop
-    //   auto slice = NextBatchViaCache(batch_size, this);
-    //   ...
-    template <typename Derived>
-    ExprCacheHelper::CachedBitmaps
-    TakeFullBitset(Derived* derived) {
-        EnsureFullLoaded(derived);
-        ExprCacheHelper::CachedBitmaps out{std::move(full_result_),
-                                           std::move(full_valid_)};
-        // Reset so a subsequent call reloads (mixin no longer owns the data).
-        // Note: the underlying cache entry is still on disk/memory, so reload
-        // is cheap (single Get).
-        batch_offset_ = 0;
-        return out;
-    }
-
-    // True if the full bitset has been loaded into the mixin already.
-    bool
-    IsFullLoaded() const {
-        return full_result_ != nullptr;
-    }
-
- private:
-    template <typename Derived>
-    void
-    EnsureFullLoaded(Derived* derived) {
-        if (full_result_ != nullptr) {
-            return;
-        }
-        auto cached = ExprCacheHelper::GetOrCompute(
-            derived->cache_segment(),
-            derived->cache_signature(),
-            derived->cache_active_count(),
-            [derived]() { return derived->ComputeFullBitset(); });
-        full_result_ = cached.result;
-        full_valid_ = cached.valid;
-    }
-
- public:
-    // Advance cursor without computing (used for cache-skip optimizations)
-    void
-    AdvanceBatchCursor(int64_t step) {
-        batch_offset_ += step;
-    }
-
- protected:
-    std::shared_ptr<TargetBitmap> full_result_;
-    std::shared_ptr<TargetBitmap> full_valid_;
-    int64_t batch_offset_{0};
 };
 
 }  // namespace exec

@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
@@ -81,6 +82,8 @@ import (
 
 type ServiceSuite struct {
 	suite.Suite
+	// metaStore is shared by Meta and TargetManager.
+	metaStore metacache.MetaStore
 
 	// Data
 	collections   []int64
@@ -150,6 +153,7 @@ func initStreamingSystem() {
 
 	mb := mock_broadcaster.NewMockBroadcaster(t)
 	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
+	mb.EXPECT().WithUnreplicableResourceKeys(mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
 	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
 	mb.EXPECT().WithResourceKeys(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(bapi, nil).Maybe()
 	mb.EXPECT().Close().Return().Maybe()
@@ -218,9 +222,10 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.store = querycoord.NewCatalog(suite.kv)
 	suite.nodeMgr = session.NewNodeManager()
 	suite.dist = meta.NewDistributionManager(suite.nodeMgr)
-	suite.meta = meta.NewMeta(params.RandomIncrementIDAllocator(), suite.store, suite.nodeMgr)
+	suite.metaStore = metacache.NewMetaStore(nil)
+	suite.meta = meta.NewMeta(params.RandomIncrementIDAllocator(), suite.store, suite.nodeMgr, suite.metaStore)
 	suite.broker = meta.NewMockBroker(suite.T())
-	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
+	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta, suite.metaStore)
 	suite.cluster = session.NewMockCluster(suite.T())
 	suite.cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 	suite.targetObserver = observers.NewTargetObserver(
@@ -1301,6 +1306,30 @@ func (suite *ServiceSuite) TestGetPartitionStates() {
 	suite.Equal(resp.GetStatus().GetCode(), merr.Code(merr.ErrServiceNotReady))
 }
 
+// TestListLoadedSegmentsCoversCurrentTarget pins the DataCoord-side GC
+// contract: recycleDroppedSegments skips every segment ListLoadedSegments
+// reports, so this response is what keeps a segment a target still owns from
+// being erased from the shared store. Targets now resolve their segments
+// through that store rather than carrying their own protos, so a regression
+// here is invisible until GC quietly drops a live target's segment.
+func (suite *ServiceSuite) TestListLoadedSegmentsCoversCurrentTarget() {
+	suite.loadAll()
+	ctx := context.Background()
+
+	resp, err := suite.server.ListLoadedSegments(ctx, &querypb.ListLoadedSegmentsRequest{})
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+
+	reported := typeutil.NewUniqueSet(resp.GetSegmentIDs()...)
+	for _, collection := range suite.collections {
+		for _, segment := range suite.getAllSegments(collection) {
+			suite.True(reported.Contain(segment),
+				"segment %d is in collection %d's current target but was not reported as loaded",
+				segment, collection)
+		}
+	}
+}
+
 func (suite *ServiceSuite) TestGetSegmentInfo() {
 	suite.loadAll()
 	ctx := context.Background()
@@ -2119,9 +2148,41 @@ func (suite *ServiceSuite) expectGetRecoverInfo(collection int64) {
 			})
 		}
 	}
-	suite.broker.EXPECT().
-		GetRecoveryInfoV2(mock.Anything, collection, mock.Anything, mock.Anything).
-		Return(vChannels, segmentBinlogs, nil).Maybe()
+	for _, segment := range segmentBinlogs {
+		suite.metaStore.PutSegment(segment)
+	}
+
+	getRecoveryInfo := func(_ context.Context, _ int64, partitionIDs ...int64) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error) {
+		if len(partitionIDs) == 0 {
+			return vChannels, segmentBinlogs, nil
+		}
+		partitionSet := typeutil.NewSet(partitionIDs...)
+		filteredSegments := lo.Filter(segmentBinlogs, func(segment *datapb.SegmentInfo, _ int) bool {
+			return partitionSet.Contain(segment.GetPartitionID())
+		})
+		return vChannels, filteredSegments, nil
+	}
+	for partitionNum := 0; partitionNum <= len(suite.partitions[collection])+1; partitionNum++ {
+		partitionArgs := make([]interface{}, 0, partitionNum)
+		for i := 0; i < partitionNum; i++ {
+			partitionArgs = append(partitionArgs, mock.Anything)
+		}
+		suite.broker.EXPECT().
+			GetRecoveryInfoV2(mock.Anything, collection, partitionArgs...).
+			RunAndReturn(getRecoveryInfo).
+			Maybe()
+	}
+
+	for segmentNum := 0; segmentNum <= len(segmentBinlogs); segmentNum++ {
+		indexArgs := make([]interface{}, 0, segmentNum)
+		for i := 0; i < segmentNum; i++ {
+			indexArgs = append(indexArgs, mock.Anything)
+		}
+		suite.broker.EXPECT().
+			GetIndexInfo(mock.Anything, collection, indexArgs...).
+			Return(nil, nil).
+			Maybe()
+	}
 }
 
 func (suite *ServiceSuite) expectLoadMetaRPCs() {

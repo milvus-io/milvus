@@ -20,10 +20,13 @@ pub extern "C" fn tantivy_create_analyzer(
     let analyzer = create_analyzer(&params, &extra_info_str);
     match analyzer {
         Ok(text_analyzer) => RustResult::from_ptr(create_binding(text_analyzer)),
-        Err(err) => RustResult::from_error(format!(
-            "create tokenizer failed with error: {} param: {}",
-            err, params,
-        )),
+        Err(err) => RustResult::from_binding_error_msg(
+            &err,
+            format!(
+                "create tokenizer failed with error: {} param: {}",
+                err, params,
+            ),
+        ),
     }
 }
 
@@ -38,10 +41,13 @@ pub extern "C" fn tantivy_validate_analyzer(
     let result = validate_analyzer(&params, &extra_info_str);
     match result {
         Ok(ids) => RustResult::from_vec_i64(ids),
-        Err(err) => RustResult::from_error(format!(
-            "validate tokenizer failed with error: {} param: {}",
-            err, params,
-        )),
+        Err(err) => RustResult::from_binding_error_msg(
+            &err,
+            format!(
+                "validate tokenizer failed with error: {} param: {}",
+                err, params,
+            ),
+        ),
     }
 }
 
@@ -64,10 +70,10 @@ pub extern "C" fn tantivy_set_analyzer_options(params: *const c_char) -> RustRes
 
     set_options(&json_str).map_or_else(
         |e| {
-            RustResult::from_error(format!(
-                "set analyzer option failed: {}, params: {}",
-                e, json_str
-            ))
+            RustResult::from_binding_error_msg(
+                &e,
+                format!("set analyzer option failed: {}, params: {}", e, json_str),
+            )
         },
         |_| RustResult::from_success(),
     )

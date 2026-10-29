@@ -262,10 +262,19 @@ func (r *StatsResolver) TextAndJSONIndexStatsWithBasePaths() *StatsResultWithErr
 
 		switch prefix {
 		case "text_index":
-			// For V3: extract basePath and convert to relative paths
+			// For V3: extract basePath and convert to relative paths.
 			statBasePath := basePath + "/_stats/" + key
 			resolvedPaths := r.resolveStatPaths(stat.Paths)
 			relativeFiles := stripBasePathPrefix(resolvedPaths, statBasePath)
+			// Unified text indexes are opened through FileManager, which resolves
+			// the remote object from StatsBasePath plus the file basename. A manifest
+			// may place the object under attempt directories such as taskID/version,
+			// so use the actual object directory as StatsBasePath. This also accepts
+			// older writers that keep the file directly under the field directory.
+			if len(resolvedPaths) == 1 && strings.HasSuffix(resolvedPaths[0], ".v3") {
+				statBasePath = path.Dir(resolvedPaths[0])
+				relativeFiles = []string{path.Base(resolvedPaths[0])}
+			}
 
 			version, _ := strconv.ParseInt(stat.Metadata["version"], 10, 64)
 			buildID, _ := strconv.ParseInt(stat.Metadata["build_id"], 10, 64)

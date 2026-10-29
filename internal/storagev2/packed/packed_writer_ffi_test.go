@@ -2,6 +2,7 @@ package packed
 
 import (
 	"math"
+	"path"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -59,6 +60,40 @@ func TestGetManifestFieldIDs_InvalidManifestPath(t *testing.T) {
 	assert.Nil(t, fields)
 }
 
+func TestManifestFieldIDsFromColumnGroupsValidatesShape(t *testing.T) {
+	fieldID := "100"
+	tests := []struct {
+		name        string
+		columns     []*string
+		numColumns  int
+		wantFieldID bool
+		wantErr     string
+	}{
+		{name: "nil empty array", columns: nil, numColumns: 0},
+		{name: "non-nil empty array", columns: []*string{}, numColumns: 0},
+		{name: "positive count with nil array", columns: nil, numColumns: 1, wantErr: "columns array is nil"},
+		{name: "nil column element", columns: []*string{nil}, numColumns: 1, wantErr: "nil column name"},
+		{name: "valid column", columns: []*string{&fieldID}, numColumns: 1, wantFieldID: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fields, err := testManifestFieldIDsFromColumns(test.columns, test.numColumns)
+			if test.wantErr != "" {
+				require.ErrorContains(t, err, test.wantErr)
+				assert.Nil(t, fields)
+				return
+			}
+			require.NoError(t, err)
+			if test.wantFieldID {
+				assert.Contains(t, fields, int64(100))
+			} else {
+				assert.Empty(t, fields)
+			}
+		})
+	}
+}
+
 func TestGetManifestFieldIDs_InvalidColumnName(t *testing.T) {
 	paramtable.Init()
 	pt := paramtable.Get()
@@ -78,7 +113,7 @@ func TestGetManifestFieldIDs_InvalidColumnName(t *testing.T) {
 		},
 	}, nil)
 	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{0}, GroupID: storagecommon.DefaultShortColumnGroupID}}
-	basePath := "files/packed_writer_invalid_column/1"
+	basePath := path.Join(CreateStorageConfig().GetRootPath(), "packed_writer_invalid_column/1")
 	cfg := CreateStorageConfig()
 	writer, err := NewFFIPackedWriter(basePath, schema, columnGroups, cfg, nil)
 	require.NoError(t, err)
@@ -92,7 +127,7 @@ func TestGetManifestFieldIDs_InvalidColumnName(t *testing.T) {
 	out, err := writer.Close()
 	require.NoError(t, err)
 	defer out.Destroy()
-	manifest, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{NewFiles: out})
+	manifest, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 
 	fields, err := GetManifestFieldIDs(manifest, cfg)
@@ -125,7 +160,7 @@ func TestGetManifestFieldIDs_FromPackedWriterManifest(t *testing.T) {
 		},
 	}, nil)
 	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{0, 1}, GroupID: storagecommon.DefaultShortColumnGroupID}}
-	basePath := "files/packed_writer_field_ids/1"
+	basePath := path.Join(CreateStorageConfig().GetRootPath(), "packed_writer_field_ids/1")
 	cfg := CreateStorageConfig()
 	writer, err := NewFFIPackedWriter(basePath, schema, columnGroups, cfg, nil)
 	require.NoError(t, err)
@@ -140,7 +175,7 @@ func TestGetManifestFieldIDs_FromPackedWriterManifest(t *testing.T) {
 	out, err := writer.Close()
 	require.NoError(t, err)
 	defer out.Destroy()
-	manifest, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{NewFiles: out})
+	manifest, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 
 	fields, err := GetManifestFieldIDs(manifest, cfg)
@@ -180,7 +215,7 @@ func TestResolveManifestSingleWriterFormat_FromPackedWriterManifest(t *testing.T
 		},
 	}, nil)
 	columnGroups := []storagecommon.ColumnGroup{{Columns: []int{0}, GroupID: storagecommon.DefaultShortColumnGroupID, Fields: []int64{100}}}
-	basePath := "files/packed_writer_format/1"
+	basePath := path.Join(CreateStorageConfig().GetRootPath(), "packed_writer_format/1")
 	cfg := CreateStorageConfig()
 	writer, err := NewFFIPackedWriter(basePath, schema, columnGroups, cfg, nil)
 	require.NoError(t, err)
@@ -194,7 +229,7 @@ func TestResolveManifestSingleWriterFormat_FromPackedWriterManifest(t *testing.T
 	out, err := writer.Close()
 	require.NoError(t, err)
 	defer out.Destroy()
-	manifest, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{NewFiles: out})
+	manifest, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 
 	format, err := ResolveManifestSingleWriterFormat(manifest, cfg, []string{"100"}, "")
@@ -216,7 +251,7 @@ func TestResolveManifestSingleWriterFormat_FiltersMixedAddColumnGroups(t *testin
 		pt.Reset(pt.LocalStorageCfg.Path.Key)
 	})
 
-	basePath := "files/packed_writer_mixed_format/1"
+	basePath := path.Join(CreateStorageConfig().GetRootPath(), "packed_writer_mixed_format/1")
 	cfg := CreateStorageConfig()
 	writeColumn := func(name string, fieldID int64, format string, asNewColumnGroup bool) WriterOutput {
 		schema := arrow.NewSchema([]arrow.Field{
@@ -255,14 +290,12 @@ func TestResolveManifestSingleWriterFormat_FiltersMixedAddColumnGroups(t *testin
 	}
 
 	parquetOut := writeColumn("100", 100, "parquet", false)
-	manifest, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{NewFiles: parquetOut})
+	manifest, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg, &ManifestUpdates{NewFiles: parquetOut})
 	parquetOut.Destroy()
 	require.NoError(t, err)
 
-	committedBasePath, version, err := UnmarshalManifestPath(manifest)
-	require.NoError(t, err)
 	vortexOut := writeColumn("101", 101, "vortex", true)
-	manifest, err = CommitManifestUpdates(committedBasePath, version, cfg, &ManifestUpdates{NewFiles: vortexOut})
+	manifest, err = CommitManifestUpdates(manifest, cfg, &ManifestUpdates{NewFiles: vortexOut})
 	vortexOut.Destroy()
 	require.NoError(t, err)
 
@@ -313,7 +346,7 @@ func TestPackedFFIWriter(t *testing.T) {
 		},
 	}, nil)
 
-	basePath := "files/packed_writer_test/1"
+	basePath := path.Join(CreateStorageConfig().GetRootPath(), "packed_writer_test/1")
 	version := int64(0)
 
 	for i := 0; i < batch; i++ {
@@ -367,7 +400,7 @@ func TestPackedFFIWriter(t *testing.T) {
 		out, err := pw.Close()
 		require.NoError(t, err)
 
-		manifest, err := CommitManifestUpdates(basePath, version, cfg,
+		manifest, err := CommitManifestUpdates(MarshalManifestPath(basePath, version), cfg,
 			&ManifestUpdates{NewFiles: out})
 		out.Destroy()
 		require.NoError(t, err)
@@ -416,7 +449,7 @@ func TestFFIPackedWriter_CloseThenCommitUpdates(t *testing.T) {
 		{Columns: []int{0}, GroupID: storagecommon.DefaultShortColumnGroupID},
 	}
 
-	basePath := "files/close_commit_test/1"
+	basePath := path.Join(CreateStorageConfig().GetRootPath(), "close_commit_test/1")
 	cfg := CreateStorageConfig()
 	w, err := NewFFIPackedWriter(basePath, schema, columnGroups, cfg, nil)
 	require.NoError(t, err)
@@ -427,7 +460,7 @@ func TestFFIPackedWriter_CloseThenCommitUpdates(t *testing.T) {
 	require.NotNil(t, out)
 	defer out.Destroy()
 
-	mfPath, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg,
+	mfPath, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg,
 		&ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 

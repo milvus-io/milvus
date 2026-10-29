@@ -33,13 +33,9 @@
 #include "common/protobuf_utils.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
-#include "index/IndexStats.h"
 #include "index/Meta.h"
-#include "index/ScalarIndexSort.h"
-#include "index/StringIndexMarisa.h"
-#include "index/VectorDiskIndex.h"
-#include "indexbuilder/IndexCreatorBase.h"
-#include "indexbuilder/IndexFactory.h"
+#include "index/IndexTypeAdapter.h"
+#include "indexbuilder/BuildSession.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/expected.h"
 #include "milvus-storage/common/config.h"
@@ -49,6 +45,7 @@
 #include "storage/BinlogReader.h"
 #include "storage/ChunkManager.h"
 #include "storage/DiskFileManagerImpl.h"
+#include "storage/MemFileManagerImpl.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "storage/FileManager.h"
 #include "storage/Types.h"
@@ -90,8 +87,10 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
     int64_t n_batch = 3;
     int64_t dim = 128;
     // Write data to storage v2
-    auto paths = std::vector<std::string>{path_ + "/19530.parquet",
-                                          path_ + "/19531.parquet"};
+    auto paths =
+        std::vector<std::string>{path_ + "/0/19530", path_ + "/1/19531"};
+    ASSERT_TRUE(fs_->CreateDir(path_ + "/0").ok());
+    ASSERT_TRUE(fs_->CreateDir(path_ + "/1").ok());
     auto column_groups = std::vector<std::vector<int>>{
         {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}, {15}};
     auto writer_memory = 16 * 1024 * 1024;
@@ -116,6 +115,30 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
     }
     EXPECT_TRUE(writer->Close().ok());
 
+    auto make_build_request = [&](FieldId field_id,
+                                  DataType field_type,
+                                  const std::string& index_type,
+                                  const Config& params,
+                                  IndexVersion engine_version = 0) {
+        index::IndexTypeAdapterRequest adapter;
+        adapter.index_type = index_type;
+        adapter.field_type = field_type;
+        adapter.index_engine_version = engine_version;
+        adapter.params = params;
+        auto adapted = index::AdaptIndexType(adapter);
+
+        indexbuilder::BuildRequest request;
+        request.family = std::move(adapted.family);
+        request.params = std::move(adapted.params);
+        request.value_type = adapted.value_type;
+        request.field_id = field_id;
+        request.source =
+            indexbuilder::StorageV2BuildSource{{{paths[0]}, {paths[1]}}};
+        request.expected_rows = per_batch * n_batch;
+        request.staging_parent = path_;
+        return request;
+    };
+
     {
         // test memory file manager
         auto int64_field = schema->get_field_id(FieldName("int64"));
@@ -123,7 +146,7 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
         milvus::Config config;
         config["index_type"] = milvus::index::INVERTED_INDEX_TYPE;
         config[SEGMENT_INSERT_FILES_KEY] =
-            std::vector<std::vector<std::string>>{paths};
+            std::vector<std::vector<std::string>>{{paths[0]}, {paths[1]}};
         config[STORAGE_VERSION_KEY] = STORAGE_V2;
         config[DATA_TYPE_KEY] = milvus::DataType::INT64;
         config[DIM_KEY] = 0;
@@ -139,16 +162,21 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
             segment_id, int64_field.get(), index_build_id, index_version);
         storage::FileManagerContext ctx(field_meta, index_meta, cm_, fs_);
 
-        auto index = indexbuilder::IndexFactory::GetInstance().CreateIndex(
-            milvus::DataType::INT64, config, ctx);
-        index->Build();
-
-        auto create_index_result = index->Upload();
-        auto memSize = create_index_result->GetMemSize();
-        auto serializedSize = create_index_result->GetSerializedSize();
-        ASSERT_GT(memSize, 0);
-        ASSERT_GT(serializedSize, 0);
-        auto index_files = create_index_result->GetIndexFiles();
+        indexbuilder::BuildSession session(
+            make_build_request(int64_field,
+                               DataType::INT64,
+                               index::INVERTED_INDEX_TYPE,
+                               config),
+            ctx);
+        session.BuildFromSource();
+        const auto stats = session.Publish();
+        int64_t serialized_size = 0;
+        for (const auto& file : stats.Files()) {
+            serialized_size += file.file_size;
+        }
+        ASSERT_GT(stats.MemSize(), 0);
+        ASSERT_GT(serialized_size, 0);
+        ASSERT_FALSE(stats.Files().empty());
     }
 
     {
@@ -158,7 +186,7 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
         milvus::Config config;
         config["index_type"] = milvus::index::INVERTED_INDEX_TYPE;
         config[SEGMENT_INSERT_FILES_KEY] =
-            std::vector<std::vector<std::string>>{paths};
+            std::vector<std::vector<std::string>>{{paths[0]}, {paths[1]}};
         config[STORAGE_VERSION_KEY] = STORAGE_V2;
         config[DATA_TYPE_KEY] = milvus::DataType::FLOAT;
         config[DIM_KEY] = 0;
@@ -188,7 +216,7 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
         milvus::Config config;
         config["index_type"] = milvus::index::INVERTED_INDEX_TYPE;
         config[SEGMENT_INSERT_FILES_KEY] =
-            std::vector<std::vector<std::string>>{paths};
+            std::vector<std::vector<std::string>>{{paths[0]}, {paths[1]}};
         config[STORAGE_VERSION_KEY] = STORAGE_V2;
         config[DATA_TYPE_KEY] = milvus::DataType::INT32;
         config[DIM_KEY] = 0;
@@ -201,13 +229,21 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
                                 "int32",
                                 milvus::DataType::INT32,
                                 0};
-        FieldDataMeta field_data_meta = {
-            collection_id, partition_id, segment_id, int32_field.get()};
+        auto field_data_meta = gen_field_meta(collection_id,
+                                              partition_id,
+                                              segment_id,
+                                              int32_field.get(),
+                                              DataType::INT32,
+                                              DataType::NONE,
+                                              true);
         auto ctx =
             storage::FileManagerContext(field_data_meta, index_meta, cm_, fs_);
 
-        auto int32_index = milvus::index::CreateScalarIndexSort<int32_t>(ctx);
-        int32_index->Build(config);
+        indexbuilder::BuildSession session(
+            make_build_request(
+                int32_field, DataType::INT32, index::ASCENDING_SORT, config),
+            ctx);
+        session.BuildFromSource();
     }
 
     {
@@ -217,7 +253,7 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
         milvus::Config config;
         config["index_type"] = milvus::index::INVERTED_INDEX_TYPE;
         config[SEGMENT_INSERT_FILES_KEY] =
-            std::vector<std::vector<std::string>>{paths};
+            std::vector<std::vector<std::string>>{{paths[0]}, {paths[1]}};
         config[STORAGE_VERSION_KEY] = STORAGE_V2;
         config[DATA_TYPE_KEY] = milvus::DataType::VARCHAR;
         config[DIM_KEY] = 0;
@@ -230,14 +266,21 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
                                 "varchar",
                                 milvus::DataType::VARCHAR,
                                 0};
-        FieldDataMeta field_data_meta = {
-            collection_id, partition_id, segment_id, varchar_field.get()};
+        auto field_data_meta = gen_field_meta(collection_id,
+                                              partition_id,
+                                              segment_id,
+                                              varchar_field.get(),
+                                              DataType::VARCHAR,
+                                              DataType::NONE,
+                                              true);
         auto ctx =
             storage::FileManagerContext(field_data_meta, index_meta, cm_, fs_);
 
-        auto string_index =
-            std::make_unique<milvus::index::StringIndexMarisa>(ctx);
-        string_index->Build(config);
+        indexbuilder::BuildSession session(
+            make_build_request(
+                varchar_field, DataType::VARCHAR, index::MARISA_TRIE, config),
+            ctx);
+        session.BuildFromSource();
     }
 
     {
@@ -248,12 +291,12 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
         milvus::Config config;
         config["index_type"] = index_type;
         config[SEGMENT_INSERT_FILES_KEY] =
-            std::vector<std::vector<std::string>>{paths};
+            std::vector<std::vector<std::string>>{{paths[0]}, {paths[1]}};
         config[STORAGE_VERSION_KEY] = STORAGE_V2;
         config[DATA_TYPE_KEY] = milvus::DataType::VECTOR_FLOAT;
-        config[DIM_KEY] = 0;
+        config[DIM_KEY] = dim;
+        config[index::METRIC_TYPE] = knowhere::metric::L2;
         config[milvus::index::DISK_ANN_BUILD_THREAD_NUM] = std::to_string(2);
-        auto metric_type = knowhere::metric::L2;
 
         IndexMeta index_meta = {segment_id,
                                 vec_field.get(),
@@ -262,17 +305,23 @@ TEST_F(StorageV2IndexRawDataTest, TestGetRawData) {
                                 "opt_fields",
                                 "embeddings",
                                 milvus::DataType::VECTOR_FLOAT,
-                                0};
-        FieldDataMeta field_data_meta = {
-            collection_id, partition_id, segment_id, vec_field.get()};
+                                dim};
+        auto field_data_meta = gen_field_meta(collection_id,
+                                              partition_id,
+                                              segment_id,
+                                              vec_field.get(),
+                                              DataType::VECTOR_FLOAT,
+                                              DataType::NONE,
+                                              false);
         auto ctx =
             storage::FileManagerContext(field_data_meta, index_meta, cm_, fs_);
 
         try {
-            auto vec_index =
-                std::make_unique<milvus::index::VectorDiskAnnIndex<float>>(
-                    milvus::DataType::NONE, index_type, metric_type, 6, ctx);
-            vec_index->Build(config);
+            indexbuilder::BuildSession session(
+                make_build_request(
+                    vec_field, DataType::VECTOR_FLOAT, index_type, config, 6),
+                ctx);
+            session.BuildFromSource();
         } catch (const std::exception& e) {
             std::cout << "Exception: " << e.what() << std::endl;
         }
@@ -374,5 +423,60 @@ TEST_F(CacheRawDataToDiskTest, ManifestRoundTripHeaderAndPayload) {
               static_cast<std::streamsize>(payload.size() * sizeof(float)));
     for (size_t i = 0; i < payload.size(); ++i) {
         ASSERT_TRUE(std::isfinite(payload[i])) << "row-major offset " << i;
+    }
+}
+
+// The storage-v2 pagination parameters (num_rows / offset) are assembled by
+// Milvus-internal index-build code, never by the API caller, so a malformed
+// value must surface as UnexpectedError (System) rather than InvalidParameter
+// (Input). The message is asserted as well: the sibling data-type checks in
+// the same function are also UnexpectedError, so the code alone would not
+// prove which check fired.
+TEST_F(CacheRawDataToDiskTest, PaginationParamsAreInternalNotInput) {
+    auto field_meta = gen_field_meta(collection_id,
+                                     partition_id,
+                                     segment_id,
+                                     /*field_id=*/101,
+                                     DataType::VECTOR_FLOAT,
+                                     DataType::NONE,
+                                     false);
+    auto index_meta =
+        gen_index_meta(segment_id, 101, index_build_id, index_version);
+    storage::FileManagerContext ctx(field_meta, index_meta, cm_, fs_);
+    auto file_manager =
+        std::make_shared<milvus::storage::MemFileManagerImpl>(ctx);
+
+    auto expect_internal = [&](const milvus::Config& config,
+                               const std::string& needle) {
+        try {
+            file_manager->CacheRawDataToMemory(config);
+            FAIL() << "expected SegcoreError for " << needle;
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::UnexpectedError);
+            EXPECT_NE(std::string(error.what()).find(needle), std::string::npos)
+                << error.what();
+        }
+    };
+
+    milvus::Config base;
+    base[STORAGE_VERSION_KEY] = STORAGE_V3;
+    base[DATA_TYPE_KEY] = DataType::VECTOR_FLOAT;
+    base[ELEMENT_TYPE_KEY] = DataType::NONE;
+
+    {
+        auto config = base;
+        config[NUM_ROWS_KEY] = int64_t(-1);
+        expect_internal(config, "num_rows must be non-negative");
+    }
+    {
+        auto config = base;
+        config[OFFSET_KEY] = int64_t(-1);
+        expect_internal(config, "offset must be non-negative");
+    }
+    {
+        auto config = base;
+        config[OFFSET_KEY] = int64_t(5);
+        config[NUM_ROWS_KEY] = int64_t(0);
+        expect_internal(config, "requires a positive num_rows");
     }
 }

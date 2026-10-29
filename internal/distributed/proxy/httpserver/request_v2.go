@@ -379,6 +379,55 @@ type JobIDReq struct {
 
 func (req *JobIDReq) GetJobID() string { return req.JobID }
 
+type CreateSnapshotReq struct {
+	DbName                      string `json:"dbName"`
+	CollectionName              string `json:"collectionName" binding:"required"`
+	SnapshotName                string `json:"snapshotName" binding:"required"`
+	Description                 string `json:"description"`
+	CompactionProtectionSeconds int64  `json:"compactionProtectionSeconds" binding:"gte=0"`
+}
+
+func (req *CreateSnapshotReq) GetDbName() string { return req.DbName }
+
+func (req *CreateSnapshotReq) GetCollectionName() string { return req.CollectionName }
+
+type SnapshotReq struct {
+	DbName         string `json:"dbName"`
+	CollectionName string `json:"collectionName" binding:"required"`
+	SnapshotName   string `json:"snapshotName" binding:"required"`
+}
+
+func (req *SnapshotReq) GetDbName() string { return req.DbName }
+
+func (req *SnapshotReq) GetCollectionName() string { return req.CollectionName }
+
+type RestoreSnapshotReq struct {
+	SourceDbName         string `json:"sourceDbName"`
+	SourceCollectionName string `json:"sourceCollectionName" binding:"required"`
+	TargetDbName         string `json:"targetDbName"`
+	TargetCollectionName string `json:"targetCollectionName" binding:"required"`
+	SnapshotName         string `json:"snapshotName" binding:"required"`
+}
+
+func (req *RestoreSnapshotReq) GetDbName() string { return req.SourceDbName }
+
+func (req *RestoreSnapshotReq) GetCollectionName() string { return req.SourceCollectionName }
+
+type PinSnapshotDataReq struct {
+	DbName         string `json:"dbName"`
+	CollectionName string `json:"collectionName" binding:"required"`
+	SnapshotName   string `json:"snapshotName" binding:"required"`
+	TTLSeconds     int64  `json:"ttlSeconds" binding:"gte=0"`
+}
+
+func (req *PinSnapshotDataReq) GetDbName() string { return req.DbName }
+
+func (req *PinSnapshotDataReq) GetCollectionName() string { return req.CollectionName }
+
+type UnpinSnapshotDataReq struct {
+	PinID string `json:"pinId" binding:"required"`
+}
+
 type RestoreExternalSnapshotReq struct {
 	DbName               string `json:"dbName"`
 	TargetCollectionName string `json:"targetCollectionName" binding:"required"`
@@ -447,7 +496,7 @@ type CollectionDataReq struct {
 	DbName         string                    `json:"dbName"`
 	CollectionName string                    `json:"collectionName" binding:"required"`
 	PartitionName  string                    `json:"partitionName"`
-	Data           []map[string]interface{}  `json:"data" binding:"required"`
+	Data           []map[string]interface{}  `json:"data"`
 	PartialUpdate  bool                      `json:"partialUpdate"`
 	FieldOps       []FieldPartialUpdateOpReq `json:"fieldOps"`
 }
@@ -458,25 +507,51 @@ func (req *CollectionDataReq) GetCollectionName() string { return req.Collection
 type FieldPartialUpdateOpReq struct {
 	FieldName string `json:"fieldName"`
 	Op        string `json:"op"`
+	Path      string `json:"path"`
 }
 
 func buildFieldPartialUpdateOps(fieldOps []FieldPartialUpdateOpReq) ([]*schemapb.FieldPartialUpdateOp, error) {
+	return buildFieldPartialUpdateOpsWithParser(fieldOps, parseFieldPartialUpdateOp, false)
+}
+
+func buildFieldPartialUpdateOpsV2(fieldOps []FieldPartialUpdateOpReq) ([]*schemapb.FieldPartialUpdateOp, error) {
+	return buildFieldPartialUpdateOpsWithParser(fieldOps, parseFieldPartialUpdateOpV2, true)
+}
+
+func buildFieldPartialUpdateOpsWithParser(
+	fieldOps []FieldPartialUpdateOpReq,
+	parseOp func(string) (schemapb.FieldPartialUpdateOp_OpType, error),
+	includePath bool,
+) ([]*schemapb.FieldPartialUpdateOp, error) {
 	if len(fieldOps) == 0 {
 		return nil, nil
 	}
 
 	ops := make([]*schemapb.FieldPartialUpdateOp, 0, len(fieldOps))
 	for _, fieldOp := range fieldOps {
-		op, err := parseFieldPartialUpdateOp(fieldOp.Op)
+		op, err := parseOp(fieldOp.Op)
 		if err != nil {
 			return nil, err
 		}
-		ops = append(ops, &schemapb.FieldPartialUpdateOp{
+		partialUpdateOp := &schemapb.FieldPartialUpdateOp{
 			FieldName: fieldOp.FieldName,
 			Op:        op,
-		})
+		}
+		if includePath {
+			partialUpdateOp.Path = fieldOp.Path
+		}
+		ops = append(ops, partialUpdateOp)
 	}
 	return ops, nil
+}
+
+func hasNonReplaceFieldPartialUpdateOp(fieldOps []*schemapb.FieldPartialUpdateOp) bool {
+	for _, fieldOp := range fieldOps {
+		if fieldOp.GetOp() != schemapb.FieldPartialUpdateOp_REPLACE {
+			return true
+		}
+	}
+	return false
 }
 
 func parseFieldPartialUpdateOp(op string) (schemapb.FieldPartialUpdateOp_OpType, error) {
@@ -491,6 +566,13 @@ func parseFieldPartialUpdateOp(op string) (schemapb.FieldPartialUpdateOp_OpType,
 		return schemapb.FieldPartialUpdateOp_REPLACE,
 			merr.WrapErrParameterInvalidMsg("unsupported partial update op: " + op)
 	}
+}
+
+func parseFieldPartialUpdateOpV2(op string) (schemapb.FieldPartialUpdateOp_OpType, error) {
+	if strings.EqualFold(strings.TrimSpace(op), "PATH_REPLACE") {
+		return schemapb.FieldPartialUpdateOp_PATH_REPLACE, nil
+	}
+	return parseFieldPartialUpdateOp(op)
 }
 
 type SearchReqV2 struct {
@@ -568,6 +650,7 @@ type SubSearchReq struct {
 	Offset            int32                      `json:"offset"`
 	SearchParams      map[string]interface{}     `json:"params"`
 	ExprParams        map[string]json.RawMessage `json:"exprParams"`
+	FunctionChains    []FunctionChainReq         `json:"functionChains"`
 	SearchAggregation *SearchAggregationReq      `json:"searchAggregation"`
 }
 
@@ -1104,7 +1187,7 @@ func wrapperReturnDefault() gin.H {
 }
 
 type ResourceGroupNodeFilter struct {
-	NodeLabels map[string]string `json:"node_labels" binding:"required"`
+	NodeLabels map[string]string `json:"node_labels"`
 }
 
 func (req *ResourceGroupNodeFilter) GetNodeLabels() map[string]string {
@@ -1112,7 +1195,8 @@ func (req *ResourceGroupNodeFilter) GetNodeLabels() map[string]string {
 }
 
 type ResourceGroupLimit struct {
-	NodeNum int32 `json:"node_num" binding:"required"`
+	// Zero is valid, including when draining a resource group before dropping it.
+	NodeNum int32 `json:"node_num"`
 }
 
 func (req *ResourceGroupLimit) GetNodeNum() int32 {
@@ -1130,8 +1214,8 @@ func (req *ResourceGroupTransfer) GetResourceGroup() string {
 type ResourceGroupConfig struct {
 	Requests     *ResourceGroupLimit      `json:"requests" binding:"required"`
 	Limits       *ResourceGroupLimit      `json:"limits" binding:"required"`
-	TransferFrom []*ResourceGroupTransfer `json:"transfer_from"`
-	TransferTo   []*ResourceGroupTransfer `json:"transfer_to"`
+	TransferFrom []*ResourceGroupTransfer `json:"transfer_from" binding:"dive,required"`
+	TransferTo   []*ResourceGroupTransfer `json:"transfer_to" binding:"dive,required"`
 	NodeFilter   *ResourceGroupNodeFilter `json:"node_filter"`
 }
 
@@ -1169,7 +1253,7 @@ func (req *ResourceGroupReq) GetConfig() *ResourceGroupConfig {
 }
 
 type UpdateResourceGroupReq struct {
-	ResourceGroups map[string]*ResourceGroupConfig `json:"resource_groups" binding:"required"`
+	ResourceGroups map[string]*ResourceGroupConfig `json:"resource_groups" binding:"required,dive,required"`
 }
 
 func (req *UpdateResourceGroupReq) GetResourceGroups() map[string]*ResourceGroupConfig {

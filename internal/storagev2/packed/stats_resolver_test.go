@@ -267,6 +267,7 @@ func TestStatsResolverManifest(t *testing.T) {
 	bfPath := filepath.Join(bp, "_stats/bloom_filter.100/42")
 	bm25Path := filepath.Join(bp, "_stats/bm25.200/43")
 	jsonPath := filepath.Join(bp, "_stats/json_stats.300/shared_key_index/.managed.json_0")
+	textPath := filepath.Join(bp, "_stats/text_index.400/9001/7/milvus_packed_inverted_index.v3")
 	newManifest, err := AddStatsToManifest(manifestPath, storageConfig, []StatEntry{
 		{
 			Key:      "bloom_filter.100",
@@ -286,6 +287,16 @@ func TestStatsResolverManifest(t *testing.T) {
 				"log_size":                   "1024",
 				"memory_size":                "2048",
 				"json_key_stats_data_format": "3",
+			},
+		},
+		{
+			Key:   "text_index.400",
+			Files: []string{textPath},
+			Metadata: map[string]string{
+				"version":     "7",
+				"build_id":    "9001",
+				"log_size":    "1024",
+				"memory_size": "2048",
 			},
 		},
 	})
@@ -327,6 +338,10 @@ func TestStatsResolverManifest(t *testing.T) {
 
 		assert.Empty(t, result.JSONKeyStats)
 		assert.Empty(t, result.JSONBasePaths)
+		require.Contains(t, result.TextIndexStats, int64(400))
+		assert.Equal(t, []string{"milvus_packed_inverted_index.v3"}, result.TextIndexStats[400].GetFiles())
+		assert.Equal(t, int64(7), result.TextIndexStats[400].GetVersion())
+		assert.Equal(t, filepath.ToSlash(filepath.Dir(textPath)), filepath.ToSlash(result.TextBasePaths[400]))
 	})
 
 	t.Run("TextAndJSONIndexStatsWithBasePaths returns json stats with metadata placeholder", func(t *testing.T) {

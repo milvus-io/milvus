@@ -617,4 +617,20 @@ func TestMapObjectStorageError_GCP_SentinelErrors(t *testing.T) {
 		result := mapObjectStorageError("test/path", wrappedErr)
 		assert.ErrorIs(t, result, merr.ErrIoKeyNotFound)
 	})
+
+	// cloud.google.com/go/storage >= v1.51 wraps not-found as
+	// fmt.Errorf("%w: %w", sentinel, *googleapi.Error).
+	notFound := &googleapi.Error{Code: http.StatusNotFound}
+
+	t.Run("MultiWrappedErrObjectNotExist", func(t *testing.T) {
+		libErr := fmt.Errorf("%w: %w", cstorage.ErrObjectNotExist, notFound)
+		result := mapObjectStorageError("test/path", libErr)
+		assert.ErrorIs(t, result, merr.ErrIoKeyNotFound)
+	})
+
+	t.Run("MultiWrappedErrBucketNotExist", func(t *testing.T) {
+		libErr := fmt.Errorf("%w: %w", cstorage.ErrBucketNotExist, notFound)
+		result := mapObjectStorageError("test/path", libErr)
+		assert.ErrorIs(t, result, merr.ErrIoBucketNotFound)
+	})
 }

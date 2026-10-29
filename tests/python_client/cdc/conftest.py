@@ -12,6 +12,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS = 600
+CDC_SWITCHOVER_CONNECT_TIMEOUT_SECONDS = 180
 
 
 def apply_replicate_configuration(tasks, timeout=CDC_UPDATE_REPLICATE_TIMEOUT_SECONDS):
@@ -93,6 +94,12 @@ def pytest_addoption(parser):
         help="Kubernetes namespace for Milvus deployment",
     )
     parser.addoption(
+        "--upstream-milvus-name",
+        action="store",
+        default="",
+        help="Upstream Milvus CR/release name for CDC stability Pod readiness checks",
+    )
+    parser.addoption(
         "--import-2pc-workload",
         action="store",
         default="true",
@@ -143,6 +150,14 @@ def _minio_endpoint(host):
     if ":" in host:
         return host
     return f"{host}:9000"
+
+
+@pytest.fixture(scope="session")
+def upstream_milvus_name(request):
+    name = request.config.getoption("--upstream-milvus-name")
+    if not name:
+        raise pytest.UsageError("CDC stability tests require --upstream-milvus-name for Pod readiness checks")
+    return name
 
 
 @pytest.fixture(scope="session")
@@ -290,7 +305,7 @@ def switchover_helper(request, upstream_client, downstream_client):
         original_target: {"uri": downstream_uri, "token": downstream_token},
     }
 
-    def do_switchover(new_source_id, new_target_id):
+    def do_switchover(new_source_id, new_target_id, connect_timeout=CDC_SWITCHOVER_CONNECT_TIMEOUT_SECONDS):
         logger.info(f"Performing switchover: {new_source_id} -> {new_target_id}")
         config = {
             "clusters": [
@@ -315,13 +330,32 @@ def switchover_helper(request, upstream_client, downstream_client):
         # update_replicate_configuration RPC is in flight on the same
         # channel, the latter surfaces "Cannot invoke RPC on closed
         # channel!". Separate clients = separate channels = no race.
-        up_tmp = MilvusClient(uri=upstream_uri, token=upstream_token)
-        dn_tmp = MilvusClient(uri=downstream_uri, token=downstream_token)
-        try:
-            apply_replicate_configuration([(up_tmp, config), (dn_tmp, config)])
-        finally:
-            up_tmp.close()
-            dn_tmp.close()
+        #
+        # Retry while an attempt fails, until both clusters accept the RPC: a
+        # chaos test that just killed containers leaves a proxy that refuses
+        # connections (or drops RPCs) for a while after its Pod reports Ready,
+        # so a single attempt loses the race and leaves the topology unrestored
+        # for every later test. Any failure is retried; a deterministic error
+        # therefore surfaces only after the budget is spent.
+        deadline = time.time() + connect_timeout
+        attempt = 0
+        while True:
+            attempt += 1
+            up_tmp = dn_tmp = None
+            try:
+                up_tmp = MilvusClient(uri=upstream_uri, token=upstream_token)
+                dn_tmp = MilvusClient(uri=downstream_uri, token=downstream_token)
+                apply_replicate_configuration([(up_tmp, config), (dn_tmp, config)])
+                break
+            except Exception as e:
+                if time.time() >= deadline:
+                    raise
+                logger.warning(f"switchover attempt {attempt} failed, retrying in 5s: {e}")
+                time.sleep(5)
+            finally:
+                for client in (up_tmp, dn_tmp):
+                    if client is not None:
+                        client.close()
         logger.info("Switchover completed, waiting 10s for stabilization...")
         time.sleep(10)
 
@@ -547,6 +581,9 @@ def cdc_topology_setup(request, upstream_client, downstream_client):
     target_cluster_id = request.config.getoption("--target-cluster-id")
     pchannel_num = int(request.config.getoption("--pchannel-num"))
 
+    logger.info("CDC source build: %s", upstream_client.get_server_version(detail=True))
+    logger.info("CDC target build: %s", downstream_client.get_server_version(detail=True))
+
     logger.info(f"Setting up CDC topology: {source_cluster_id} -> {target_cluster_id} (channels: {pchannel_num})...")
 
     # Create CDC replication configuration
@@ -601,3 +638,10 @@ def cdc_topology_setup(request, upstream_client, downstream_client):
 
     # Cleanup can be added here if needed
     logger.info("CDC topology teardown completed")
+
+
+@pytest.fixture
+def cdc_contract(upstream_client, downstream_client, sync_timeout, request):
+    from cdc.testcases.contract_helpers import CDCContract
+
+    return CDCContract(upstream_client, downstream_client, sync_timeout, request)

@@ -1325,7 +1325,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_NewFragmentsAd
 
 func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_SmallFile() {
 	// File smaller than limit - should return single fragment
-	fragments := packed.SplitFileToFragments("/data/small.parquet", 500000, packed.DefaultFragmentRowLimit, packed.NewFragmentIDGenerator(0))
+	fragments := packed.SplitFileToFragments("/data/small.parquet", 500000, packed.DefaultFragmentRowLimit, nil, packed.NewFragmentIDGenerator(0))
 
 	s.Len(fragments, 1)
 	s.Equal(int64(0), fragments[0].FragmentID)
@@ -1337,7 +1337,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_SmallFile(
 
 func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_ExactLimit() {
 	// File exactly at limit - should return single fragment
-	fragments := packed.SplitFileToFragments("/data/exact.parquet", packed.DefaultFragmentRowLimit, packed.DefaultFragmentRowLimit, packed.NewFragmentIDGenerator(0))
+	fragments := packed.SplitFileToFragments("/data/exact.parquet", packed.DefaultFragmentRowLimit, packed.DefaultFragmentRowLimit, nil, packed.NewFragmentIDGenerator(0))
 
 	s.Len(fragments, 1)
 	s.Equal(int64(0), fragments[0].FragmentID)
@@ -1349,7 +1349,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_ExactLimit
 func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_LargeFile() {
 	// File with 2.5 million rows - should split into 3 fragments
 	totalRows := int64(2500000)
-	fragments := packed.SplitFileToFragments("/data/large.parquet", totalRows, packed.DefaultFragmentRowLimit, packed.NewFragmentIDGenerator(0))
+	fragments := packed.SplitFileToFragments("/data/large.parquet", totalRows, packed.DefaultFragmentRowLimit, nil, packed.NewFragmentIDGenerator(0))
 
 	s.Len(fragments, 3)
 
@@ -1377,7 +1377,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_LargeFile(
 
 func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_BaseFragmentID() {
 	// Test with non-zero base fragment ID
-	fragments := packed.SplitFileToFragments("/data/test.parquet", 2500000, packed.DefaultFragmentRowLimit, packed.NewFragmentIDGenerator(100))
+	fragments := packed.SplitFileToFragments("/data/test.parquet", 2500000, packed.DefaultFragmentRowLimit, nil, packed.NewFragmentIDGenerator(100))
 
 	s.Len(fragments, 3)
 	s.Equal(int64(100), fragments[0].FragmentID)
@@ -1387,7 +1387,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_BaseFragme
 
 func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_ZeroRows() {
 	// Empty file - should return single fragment with zero rows
-	fragments := packed.SplitFileToFragments("/data/empty.parquet", 0, packed.DefaultFragmentRowLimit, packed.NewFragmentIDGenerator(0))
+	fragments := packed.SplitFileToFragments("/data/empty.parquet", 0, packed.DefaultFragmentRowLimit, nil, packed.NewFragmentIDGenerator(0))
 
 	s.Len(fragments, 1)
 	s.Equal(int64(0), fragments[0].RowCount)
@@ -1396,7 +1396,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_ZeroRows()
 func (s *RefreshExternalCollectionTaskSuite) TestSplitFileToFragments_TenMillionRows() {
 	// 10 million rows - should split into 10 fragments
 	totalRows := int64(10000000)
-	fragments := packed.SplitFileToFragments("/data/huge.parquet", totalRows, packed.DefaultFragmentRowLimit, packed.NewFragmentIDGenerator(0))
+	fragments := packed.SplitFileToFragments("/data/huge.parquet", totalRows, packed.DefaultFragmentRowLimit, nil, packed.NewFragmentIDGenerator(0))
 
 	s.Len(fragments, 10)
 
@@ -1721,9 +1721,8 @@ func (s *RefreshExternalCollectionTaskSuite) TestFinalizeBM25Stats() {
 		}).Build()
 	defer mockWrite.UnPatch()
 	mockCommit := mockey.Mock(packed.CommitManifestUpdates).
-		To(func(basePath string, version int64, storageConfig *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
-			s.Equal("files/insert_log/1000/2000/3000", basePath)
-			s.Equal(int64(42), version)
+		To(func(baseManifest string, storageConfig *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+			s.Equal(manifestPath, baseManifest)
 			gotEntries = updates.Stats
 			return "updated-manifest", nil
 		}).Build()
@@ -2069,8 +2068,8 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentSucce
 	mockAppend := mockey.Mock(appendBM25Stats).Return(nil).Build()
 	defer mockAppend.UnPatch()
 	mockCommit := mockey.Mock(packed.CommitManifestUpdates).
-		To(func(basePath string, version int64, storageConfig *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
-			s.Equal(int64(42), version)
+		To(func(baseManifest string, storageConfig *indexpb.StorageConfig, updates *packed.ManifestUpdates) (string, error) {
+			s.Equal(packed.MarshalManifestPath(basePath, 42), baseManifest)
 			s.Same(output, updates.NewFiles)
 			return "final-manifest", nil
 		}).Build()
@@ -2772,6 +2771,16 @@ func (s *RefreshExternalCollectionTaskSuite) TestFragmentKey() {
 	}
 	s.Equal(fragmentKey(f1), fragmentKey(f5))
 	s.Equal(fragmentKey(f5), fragmentKey(f6))
+
+	// A milvus-table fragment's file is a source segment manifest path: two
+	// spellings of the same revision are one fragment, another revision is not.
+	source := packed.Fragment{FilePath: packed.MarshalManifestPath("files/insert_log/1/2/3", 5), EndRow: 1000}
+	respelled := source
+	respelled.FilePath = `{"base_path":"files/insert_log/1/2/3","size":1024,"ver":5}`
+	advanced := source
+	advanced.FilePath = packed.MarshalManifestPath("files/insert_log/1/2/3", 6)
+	s.Equal(fragmentKey(source), fragmentKey(respelled))
+	s.NotEqual(fragmentKey(source), fragmentKey(advanced))
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestGetColumnNamesFromSchema() {

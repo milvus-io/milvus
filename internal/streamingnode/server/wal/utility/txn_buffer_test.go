@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
@@ -17,6 +18,63 @@ import (
 )
 
 var idAllocator = typeutil.NewIDAllocator()
+
+func TestFlushAbortsScopedTransactions(t *testing.T) {
+	for _, origin := range []string{"local", "historical", "replicated"} {
+		t.Run(origin, func(t *testing.T) {
+			b := NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
+			for i, vchannel := range []string{"v1", "v2"} {
+				begin := message.NewBeginTxnMessageBuilderV2().WithVChannel(vchannel).
+					WithHeader(&message.BeginTxnMessageHeader{}).WithBody(&message.BeginTxnMessageBody{}).
+					MustBuildMutable().WithTimeTick(uint64(i + 1)).WithLastConfirmedUseMessageID().
+					WithTxnContext(message.TxnContext{TxnID: message.TxnID(i + 1), Keepalive: message.TxnKeepaliveInfinite}).
+					IntoImmutableMessage(walimplstest.NewTestMessageID(int64(i + 1)))
+				b.HandleImmutableMessages([]message.ImmutableMessage{begin}, begin.TimeTick())
+			}
+			flush := func(msg message.MutableMessage, ts uint64) {
+				if origin == "replicated" {
+					msg = msg.WithReplicateHeader(&message.ReplicateHeader{
+						ClusterID: "source", VChannel: msg.VChannel(), TimeTick: ts,
+						MessageID:              walimplstest.NewTestMessageID(int64(ts)),
+						LastConfirmedMessageID: walimplstest.NewTestMessageID(0),
+					})
+				}
+				immutable := msg.WithTimeTick(ts).WithLastConfirmedUseMessageID().
+					IntoImmutableMessage(walimplstest.NewTestMessageID(int64(ts)))
+				require.Equal(t, []message.ImmutableMessage{immutable}, b.HandleImmutableMessages([]message.ImmutableMessage{immutable}, ts))
+			}
+			manualFlush := func(vchannel string) message.MutableMessage {
+				builder := message.NewManualFlushMessageBuilderV2().WithVChannel(vchannel).
+					WithHeader(&message.ManualFlushMessageHeader{}).WithBody(&message.ManualFlushMessageBody{})
+				if origin == "local" {
+					builder.WithUnreplicable()
+				}
+				return builder.MustBuildMutable()
+			}
+
+			bytesBefore := b.Bytes()
+			flush(manualFlush("p1_vcchan"), 3)
+			require.Len(t, b.builders, 2, "control-channel flush must not abort data transactions")
+			require.Equal(t, bytesBefore, b.Bytes())
+
+			flush(manualFlush("v1"), 4)
+			require.NotContains(t, b.builders, message.TxnID(1))
+			require.Contains(t, b.builders, message.TxnID(2))
+			require.Less(t, b.Bytes(), bytesBefore)
+			require.Len(t, b.Snapshot().builders, 1, "recovery must not revive the aborted prefix")
+
+			// Legacy FlushAll records may carry the PChannel name without a scope flag.
+			all := message.NewFlushAllMessageBuilderV2().WithVChannel("p1").
+				WithHeader(&message.FlushAllMessageHeader{}).WithBody(&message.FlushAllMessageBody{})
+			if origin == "local" {
+				all.WithUnreplicable()
+			}
+			flush(all.MustBuildMutable(), 5)
+			require.Empty(t, b.builders)
+			require.Zero(t, b.Bytes())
+		})
+	}
+}
 
 func TestTxnBuffer(t *testing.T) {
 	b := NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
@@ -172,57 +230,6 @@ func newAlterReplicateConfigMessage(t *testing.T, forcePromote bool, ignore bool
 		IntoImmutableMessage(walimplstest.NewTestMessageID(idAllocator.Allocate()))
 }
 
-func TestRollbackAllUncommittedTxn(t *testing.T) {
-	b := NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
-
-	baseTso := tsoutil.ComposeTSByTime(time.Now())
-
-	// Create uncommitted transactions
-	txnCtx1 := &message.TxnContext{
-		TxnID:     1,
-		Keepalive: time.Hour, // Long keepalive so it doesn't expire
-	}
-	txnCtx2 := &message.TxnContext{
-		TxnID:     2,
-		Keepalive: time.Hour,
-	}
-
-	// Start two transactions
-	msgs := b.HandleImmutableMessages([]message.ImmutableMessage{
-		newBeginMessage(t, txnCtx1, baseTso),
-		newBeginMessage(t, txnCtx2, baseTso),
-	}, tsoutil.AddPhysicalDurationOnTs(baseTso, time.Millisecond))
-	assert.Len(t, msgs, 0)
-	assert.Len(t, b.builders, 2)
-
-	// Add some body messages
-	msgs = b.HandleImmutableMessages([]message.ImmutableMessage{
-		newInsertMessage(t, txnCtx1, tsoutil.AddPhysicalDurationOnTs(baseTso, 100*time.Millisecond)),
-		newInsertMessage(t, txnCtx2, tsoutil.AddPhysicalDurationOnTs(baseTso, 100*time.Millisecond)),
-	}, tsoutil.AddPhysicalDurationOnTs(baseTso, 200*time.Millisecond))
-	assert.Len(t, msgs, 0)
-	assert.Len(t, b.builders, 2)
-
-	// Verify bytes are tracked
-	assert.Greater(t, b.Bytes(), 0)
-
-	// Rollback all uncommitted transactions
-	b.rollbackAllUncommittedTxn()
-
-	// Verify all transactions are rolled back
-	assert.Len(t, b.builders, 0)
-	assert.Equal(t, 0, b.Bytes())
-}
-
-func TestRollbackAllUncommittedTxn_Empty(t *testing.T) {
-	b := NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
-
-	// Rollback on empty buffer should be a no-op
-	b.rollbackAllUncommittedTxn()
-	assert.Len(t, b.builders, 0)
-	assert.Equal(t, 0, b.Bytes())
-}
-
 func TestForcePromoteRollsBackUncommittedTxn(t *testing.T) {
 	b := NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 
@@ -295,7 +302,7 @@ func TestForcePromoteIgnored_DoesNotRollback(t *testing.T) {
 	assert.Len(t, b.builders, 1)
 }
 
-func TestNonForcePromoteAlterReplicateConfig_DoesNotRollback(t *testing.T) {
+func TestNonForcePromoteAlterReplicateConfigAborts(t *testing.T) {
 	b := NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
 
 	baseTso := tsoutil.ComposeTSByTime(time.Now())
@@ -313,13 +320,37 @@ func TestNonForcePromoteAlterReplicateConfig_DoesNotRollback(t *testing.T) {
 	assert.Len(t, msgs, 0)
 	assert.Len(t, b.builders, 1)
 
-	// Send AlterReplicateConfig message WITHOUT force promote - should NOT rollback
+	// Ordinary topology changes share the exclusive transaction boundary.
 	msgs = b.HandleImmutableMessages([]message.ImmutableMessage{
 		newAlterReplicateConfigMessage(t, false, false, tsoutil.AddPhysicalDurationOnTs(baseTso, 200*time.Millisecond)),
 	}, tsoutil.AddPhysicalDurationOnTs(baseTso, 300*time.Millisecond))
 
 	// Message should be returned
 	assert.Len(t, msgs, 1)
-	// Transaction should still exist (not force promote)
-	assert.Len(t, b.builders, 1)
+	// Transaction is aborted even without ForcePromote.
+	assert.Empty(t, b.builders)
+}
+
+func TestTxnBufferSnapshotIsIndependent(t *testing.T) {
+	metrics := metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics()
+	defer metrics.Close()
+	buffer := NewTxnBuffer(mlog.With(), metrics)
+	txn := &message.TxnContext{TxnID: 1, Keepalive: message.TxnKeepaliveInfinite}
+	buffer.HandleImmutableMessages([]message.ImmutableMessage{
+		newBeginMessage(t, txn, 1), newInsertMessage(t, txn, 2),
+	}, 3)
+	snapshot := buffer.Snapshot()
+	assert.Equal(t, buffer.Bytes(), snapshot.Bytes())
+	assert.NotSame(t, buffer.builders[1], snapshot.builders[1])
+	// Build mutates the builder and body slice, even with no later body append.
+	committed := buffer.HandleImmutableMessages([]message.ImmutableMessage{newCommitMessage(t, txn, 4)}, 4)
+	assert.Len(t, committed, 1)
+	assert.Empty(t, buffer.builders)
+	begin, body := snapshot.builders[1].Messages()
+	assert.Equal(t, uint64(1), begin.TimeTick())
+	assert.Len(t, body, 1)
+	assert.Equal(t, uint64(2), body[0].TimeTick())
+	snapshot.HandleImmutableMessages([]message.ImmutableMessage{newRollbackMessage(t, txn, 5)}, 5)
+	assert.Empty(t, snapshot.builders)
+	assert.Zero(t, snapshot.Bytes())
 }

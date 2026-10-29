@@ -20,9 +20,11 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sort"
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -36,8 +38,11 @@ import (
 
 func TestImportMeta_Restore(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return([]*datapb.ImportJob{{JobID: 0}}, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return([]*datapb.PreImportTask{{TaskID: 1}}, nil)
+	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{{TaskID: 2}}, nil)
 	ctx := context.TODO()
 
@@ -47,6 +52,7 @@ func TestImportMeta_Restore(t *testing.T) {
 	jobs := im.GetJobBy(ctx)
 	assert.Equal(t, 1, len(jobs))
 	assert.Equal(t, int64(0), jobs[0].GetJobID())
+	assert.Equal(t, internalpb.ImportVersion_ImportVersionV2, jobs[0].GetVersion())
 	tasks := im.GetTaskBy(ctx)
 	assert.Equal(t, 2, len(tasks))
 	tasks = im.GetTaskBy(ctx, WithType(PreImportTaskType))
@@ -55,32 +61,97 @@ func TestImportMeta_Restore(t *testing.T) {
 	tasks = im.GetTaskBy(ctx, WithType(ImportTaskType))
 	assert.Equal(t, 1, len(tasks))
 	assert.Equal(t, int64(2), tasks[0].GetTaskID())
+	tasks = im.GetTaskByJob(ctx, 0)
+	assert.Equal(t, 2, len(tasks))
 
 	// new meta failed
 	mockErr := errors.New("mock error")
 	catalog = mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return([]*datapb.PreImportTask{{TaskID: 1}}, mockErr)
+	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	_, err = NewImportMeta(ctx, catalog, nil, nil)
 	assert.Error(t, err)
 
 	catalog = mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{{TaskID: 2}}, mockErr)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return([]*datapb.PreImportTask{{TaskID: 1}}, nil)
+	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	_, err = NewImportMeta(ctx, catalog, nil, nil)
 	assert.Error(t, err)
 
 	catalog = mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return([]*datapb.ImportJob{{JobID: 0}}, mockErr)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return([]*datapb.PreImportTask{{TaskID: 1}}, nil)
+	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{{TaskID: 2}}, nil)
 	_, err = NewImportMeta(ctx, catalog, nil, nil)
 	assert.Error(t, err)
 }
 
+func TestImportMetaRejectsUnsupportedJobVersion(t *testing.T) {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return([]*datapb.ImportJob{{
+		JobID:   1,
+		Version: internalpb.ImportVersion(4),
+	}}, nil)
+
+	_, err := NewImportMeta(context.Background(), catalog, nil, nil)
+	assert.Error(t, err)
+}
+
+func TestImportMetaRejectsUnsupportedJobVersionBeforeSave(t *testing.T) {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+
+	meta, err := NewImportMeta(context.Background(), catalog, nil, nil)
+	assert.NoError(t, err)
+	err = meta.AddJob(context.Background(), &importJob{ImportJob: &datapb.ImportJob{
+		JobID:   1,
+		Version: internalpb.ImportVersion(4),
+	}})
+	assert.Error(t, err)
+}
+
+func TestImportMeta_RestoreV3Tasks(t *testing.T) {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return([]*datapb.ReshardTask{{JobId: 1, TaskId: 10, CollectionId: 2}}, nil)
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return([]*datapb.ImportTaskV3{{JobId: 1, TaskId: 20, CollectionId: 2, SegmentId: 100}}, nil)
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return([]*datapb.ImportJob{{JobID: 1}}, nil)
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	ctx := context.TODO()
+
+	im, err := NewImportMeta(ctx, catalog, nil, nil)
+	assert.NoError(t, err)
+	assert.Len(t, im.GetTaskBy(ctx, WithType(ReshardTaskType)), 1)
+	assert.Len(t, im.GetTaskBy(ctx, WithType(ImportTaskV3Type)), 1)
+	assert.Equal(t, int64(100), im.GetTaskBy(ctx, WithType(ImportTaskV3Type))[0].(*importTaskV3).task.Load().GetSegmentId())
+}
+
 func TestImportMeta_Job(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().DropImportJob(mock.Anything, mock.Anything).Return(nil)
@@ -152,10 +223,77 @@ func TestImportMeta_Job(t *testing.T) {
 	assert.Equal(t, 2, count)
 }
 
-func TestImportMetaAddJob(t *testing.T) {
+// TestImportMeta_JobVersionFilter pins the ownership boundary both checkers
+// rely on: WithJobVersions selects exactly one version, and an unspecified
+// version normalizes to V2 so a legacy job is never orphaned from the V2
+// checker.
+func TestImportMeta_JobVersionFilter(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+
+	im, err := NewImportMeta(context.TODO(), catalog, nil, nil)
+	assert.NoError(t, err)
+
+	for _, job := range []*importJob{
+		{ImportJob: &datapb.ImportJob{JobID: 1, Version: internalpb.ImportVersion_ImportVersionV2}},
+		{ImportJob: &datapb.ImportJob{JobID: 2, Version: internalpb.ImportVersion_ImportVersionV3}},
+		{ImportJob: &datapb.ImportJob{JobID: 3}}, // unspecified normalizes to V2
+	} {
+		assert.NoError(t, im.AddJob(context.TODO(), job))
+	}
+
+	v2Jobs := im.GetJobBy(context.TODO(), WithJobVersions(internalpb.ImportVersion_ImportVersionV2))
+	assert.Len(t, v2Jobs, 2)
+	assert.ElementsMatch(t, []int64{1, 3}, lo.Map(v2Jobs, func(job ImportJob, _ int) int64 { return job.GetJobID() }))
+
+	v3Jobs := im.GetJobBy(context.TODO(), WithJobVersions(internalpb.ImportVersion_ImportVersionV3))
+	assert.Len(t, v3Jobs, 1)
+	assert.Equal(t, int64(2), v3Jobs[0].GetJobID())
+}
+
+func TestImportMetaUpdateJobCannotRegressCommittingToFailed(t *testing.T) {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	var saved []*datapb.ImportJob
+	// One save for AddJob, one for the reason-only update below: Committing is
+	// the 2PC point of no return, so UpdateJobState refuses the regression
+	// (UnfailableJobStates) and the persisted job must stay Committing.
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Run(func(_ context.Context, job *datapb.ImportJob) {
+		saved = append(saved, job)
+	}).Return(nil).Times(2)
+
+	im, err := NewImportMeta(context.TODO(), catalog, nil, nil)
+	assert.NoError(t, err)
+	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, State: internalpb.ImportJobState_Committing}}
+	assert.NoError(t, im.AddJob(context.TODO(), job))
+
+	assert.NoError(t, im.UpdateJob(context.TODO(), 1,
+		UpdateJobState(internalpb.ImportJobState_Failed),
+		UpdateJobReason("late worker failure")))
+	assert.Equal(t, internalpb.ImportJobState_Committing, im.GetJob(context.TODO(), 1).GetState())
+	assert.Len(t, saved, 2)
+	assert.Equal(t, internalpb.ImportJobState_Committing, saved[1].GetState())
+	assert.Equal(t, "late worker failure", saved[1].GetReason())
+}
+
+func TestImportMetaAddJob(t *testing.T) {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 
@@ -196,8 +334,11 @@ func TestImportMetaAddJob(t *testing.T) {
 
 func TestImportMeta_ImportTask(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().DropImportTask(mock.Anything, mock.Anything).Return(nil)
@@ -228,8 +369,12 @@ func TestImportMeta_ImportTask(t *testing.T) {
 	err = im.AddTask(context.TODO(), task2)
 	assert.NoError(t, err)
 
-	tasks := im.GetTaskBy(context.TODO(), WithJob(task1.GetJobID()))
+	tasks := im.GetTaskByJob(context.TODO(), task1.GetJobID())
 	assert.Equal(t, 2, len(tasks))
+	tasks = im.GetTaskByJob(context.TODO(), task1.GetJobID(), WithStates(datapb.ImportTaskStateV2_Completed))
+	assert.Equal(t, 1, len(tasks))
+	assert.Equal(t, task2.GetTaskID(), tasks[0].GetTaskID())
+	assert.Empty(t, im.GetTaskByJob(context.TODO(), 100))
 	tasks = im.GetTaskBy(context.TODO(), WithType(ImportTaskType), WithStates(datapb.ImportTaskStateV2_Completed))
 	assert.Equal(t, 1, len(tasks))
 	assert.Equal(t, task2.GetTaskID(), tasks[0].GetTaskID())
@@ -256,17 +401,106 @@ func TestImportMeta_ImportTask(t *testing.T) {
 	assert.NoError(t, err)
 	tasks = im.GetTaskBy(context.TODO())
 	assert.Equal(t, 1, len(tasks))
+	assert.Equal(t, 1, len(im.GetTaskByJob(context.TODO(), task1.GetJobID())))
 	err = im.RemoveTask(context.TODO(), 10)
 	assert.NoError(t, err)
 	tasks = im.GetTaskBy(context.TODO())
 	assert.Equal(t, 1, len(tasks))
 }
 
+func TestImportTasksByJobIndex(t *testing.T) {
+	tasks := newImportTasks()
+	newTask := func(jobID, taskID int64) ImportTask {
+		task := &importTask{}
+		task.task.Store(&datapb.ImportTaskV2{JobID: jobID, TaskID: taskID})
+		return task
+	}
+
+	tasks.add(newTask(10, 1))
+	tasks.add(newTask(10, 2))
+	tasks.add(newTask(20, 3))
+	assert.ElementsMatch(t, []int64{1, 2}, lo.Map(tasks.listTasksByJob(10), func(task ImportTask, _ int) int64 {
+		return task.GetTaskID()
+	}))
+	assert.ElementsMatch(t, []int64{3}, lo.Map(tasks.listTasksByJob(20), func(task ImportTask, _ int) int64 {
+		return task.GetTaskID()
+	}))
+
+	// Re-adding an existing task ID under a different job keeps both indexes consistent.
+	tasks.add(newTask(20, 1))
+	assert.ElementsMatch(t, []int64{2}, lo.Map(tasks.listTasksByJob(10), func(task ImportTask, _ int) int64 {
+		return task.GetTaskID()
+	}))
+	assert.ElementsMatch(t, []int64{1, 3}, lo.Map(tasks.listTasksByJob(20), func(task ImportTask, _ int) int64 {
+		return task.GetTaskID()
+	}))
+
+	tasks.remove(1)
+	assert.ElementsMatch(t, []int64{3}, lo.Map(tasks.listTasksByJob(20), func(task ImportTask, _ int) int64 {
+		return task.GetTaskID()
+	}))
+	tasks.remove(3)
+	assert.Empty(t, tasks.listTasksByJob(20))
+	assert.NotContains(t, tasks.taskIDsByJobID, int64(20))
+
+	// Moving the only task of a job removes the old empty index bucket.
+	tasks.add(newTask(30, 4))
+	tasks.add(newTask(40, 4))
+	assert.Empty(t, tasks.listTasksByJob(30))
+	assert.NotContains(t, tasks.taskIDsByJobID, int64(30))
+	assert.ElementsMatch(t, []int64{4}, lo.Map(tasks.listTasksByJob(40), func(task ImportTask, _ int) int64 {
+		return task.GetTaskID()
+	}))
+}
+
+func BenchmarkImportTaskLookupByJob(b *testing.B) {
+	for _, jobCount := range []int{100, 1000, 10000} {
+		b.Run(fmt.Sprintf("jobs_%d", jobCount), func(b *testing.B) {
+			tasks := newImportTasks()
+			for jobID := range jobCount {
+				for taskOffset := range 2 {
+					task := &importTask{}
+					task.task.Store(&datapb.ImportTaskV2{
+						JobID:  int64(jobID),
+						TaskID: int64(jobID*2 + taskOffset),
+					})
+					tasks.add(task)
+				}
+			}
+			targetJobID := int64(jobCount - 1)
+
+			b.Run("full_scan", func(b *testing.B) {
+				b.ReportAllocs()
+				for range b.N {
+					result := filterImportTasks(tasks.listTasks(), func(task ImportTask) bool {
+						return task.GetJobID() == targetJobID
+					})
+					if len(result) != 2 {
+						b.Fatalf("expected 2 tasks, got %d", len(result))
+					}
+				}
+			})
+			b.Run("job_index", func(b *testing.B) {
+				b.ReportAllocs()
+				for range b.N {
+					result := filterImportTasks(tasks.listTasksByJob(targetJobID))
+					if len(result) != 2 {
+						b.Fatalf("expected 2 tasks, got %d", len(result))
+					}
+				}
+			})
+		})
+	}
+}
+
 func TestImportMeta_Task_Failed(t *testing.T) {
 	mockErr := errors.New("mock err")
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(mockErr)
 	catalog.EXPECT().DropImportTask(mock.Anything, mock.Anything).Return(mockErr)
@@ -297,8 +531,11 @@ func TestImportMeta_Task_Failed(t *testing.T) {
 
 func TestTaskStatsJSON(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 
@@ -340,8 +577,11 @@ func TestTaskStatsJSON(t *testing.T) {
 
 func TestHandleCommitVchannel(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Maybe()
 
@@ -381,8 +621,11 @@ func TestHandleCommitVchannel(t *testing.T) {
 
 func TestHandleCommitVchannel_BeforeUncommitted_RetryWithoutMutation(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Maybe()
 
@@ -415,8 +658,11 @@ func TestHandleCommitVchannel_BeforeUncommitted_RetryWithoutMutation(t *testing.
 
 func TestHandleCommitVchannel_RetryAfterUncommitted(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Maybe()
 
@@ -458,8 +704,11 @@ func TestHandleCommitVchannel_RetryAfterUncommitted(t *testing.T) {
 func TestHandleCommitVchannelTransitionsUncommittedToCommittingBeforeCallback(t *testing.T) {
 	jobID := int64(101)
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 
 	type savedJob struct {
@@ -512,4 +761,53 @@ func TestHandleCommitVchannelTransitionsUncommittedToCommittingBeforeCallback(t 
 	updated := im.GetJob(context.TODO(), jobID)
 	assert.Equal(t, internalpb.ImportJobState_Committing, updated.GetState())
 	assert.Contains(t, updated.GetCommittedVchannels(), "ch1")
+}
+
+func TestImportMetaTaskByJobIndex(t *testing.T) {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().SaveReshardTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().SaveImportTaskV3(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().DropReshardTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().DropImportTaskV3(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	im, err := NewImportMeta(context.TODO(), catalog, nil, nil)
+	assert.NoError(t, err)
+
+	mkReshard := func(jobID, taskID int64) ImportTask {
+		return newReshardTask(&datapb.ReshardTask{JobId: jobID, TaskId: taskID}, im.(*importMeta), nil, nil)
+	}
+	mkV3 := func(jobID, taskID int64) ImportTask {
+		return newImportTaskV3(&datapb.ImportTaskV3{JobId: jobID, TaskId: taskID}, im.(*importMeta), nil, nil)
+	}
+	for _, task := range []ImportTask{mkReshard(1, 10), mkV3(1, 11), mkReshard(2, 20)} {
+		assert.NoError(t, im.AddTask(context.TODO(), task))
+	}
+
+	byJob := func(jobID int64) []int64 {
+		var ids []int64
+		for _, task := range im.GetTaskByJob(context.TODO(), jobID) {
+			ids = append(ids, task.GetTaskID())
+		}
+		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+		return ids
+	}
+	assert.Equal(t, []int64{10, 11}, byJob(1))
+	assert.Equal(t, []int64{20}, byJob(2))
+	// Combined job + type filter stays correct on the indexed path.
+	assert.Equal(t, int64(11), im.GetTaskByJob(context.TODO(), 1, WithType(ImportTaskV3Type))[0].GetTaskID())
+	// No job filter still returns everything.
+	assert.Len(t, im.GetTaskBy(context.TODO()), 3)
+
+	// Removal keeps the per-job index consistent.
+	assert.NoError(t, im.RemoveTask(context.TODO(), 11))
+	assert.Equal(t, []int64{10}, byJob(1))
+	assert.NoError(t, im.RemoveTask(context.TODO(), 20))
+	assert.Equal(t, []int64(nil), byJob(2))
+	assert.Len(t, im.GetTaskBy(context.TODO()), 1)
 }

@@ -497,7 +497,7 @@ func (b *DataFrameBuilder) Release() {
 // On error before all columns are consumed, Release() frees unconsumed arrays
 // while consumed arrays are managed by their new owner (typically DataFrameBuilder).
 //
-// Used by operators that transform data per-chunk: filter, sort, select, limit,
+// Used by operators that transform data per-chunk: filter, sort, limit,
 // group_by, merge.
 type ChunkCollector struct {
 	chunks   map[string][]arrow.Array

@@ -17,16 +17,156 @@
 package paramtable
 
 import (
+	"os"
+	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestMinioConfig_MultipartCopyThreshold(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{}))
+	t.Cleanup(base.mgr.Close)
+	var params MinioConfig
+	params.Init(base)
+	assert.Equal(t, "minio.multipartCopyThreshold", params.MultipartCopyThreshold.Key)
+	assert.Equal(t, "3.0.3", params.MultipartCopyThreshold.Version)
+	assert.True(t, params.MultipartCopyThreshold.Export)
+	assert.Equal(t, int64(1024*1024*1024), params.MultipartCopyThreshold.GetAsInt64())
+
+	for _, tc := range []struct {
+		name  string
+		value string
+		want  int64
+	}{
+		{name: "minimum", value: "1", want: 1},
+		{name: "lower_threshold", value: "500000000", want: 500_000_000},
+		{name: "higher_threshold", value: "2000000000", want: 2_000_000_000},
+		{name: "single_copy_limit", value: "5368709120", want: 5 * 1024 * 1024 * 1024},
+		{name: "above_single_copy_limit", value: "5368709121", want: 5*1024*1024*1024 + 1},
+		{name: "ten_gib", value: "10737418240", want: 10 * 1024 * 1024 * 1024},
+		{name: "max_int64", value: "9223372036854775807", want: 1<<63 - 1},
+		{name: "zero", value: "0", want: 1024 * 1024 * 1024},
+		{name: "negative", value: "-1", want: 1024 * 1024 * 1024},
+		{name: "empty", value: "", want: 1024 * 1024 * 1024},
+		{name: "invalid", value: "invalid", want: 1024 * 1024 * 1024},
+		{name: "unit_suffix", value: "1GB", want: 1024 * 1024 * 1024},
+		{name: "overflow", value: "9223372036854775808", want: 1024 * 1024 * 1024},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NoError(t, base.Save(params.MultipartCopyThreshold.Key, tc.value))
+			assert.Equal(t, tc.want, params.MultipartCopyThreshold.GetAsInt64())
+		})
+	}
+	require.NoError(t, base.Reset(params.MultipartCopyThreshold.Key))
+	assert.Equal(t, int64(1024*1024*1024), params.MultipartCopyThreshold.GetAsInt64())
+}
+
+// Every local storage key is a complete filesystem path that starts with
+// localStorage.path, and the loon local filesystem is rooted at "/", so the
+// configured value must never depend on the process working directory.
+func TestLocalStorageConfig_PathIsAbsolute(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		configured string
+		want       string
+	}{
+		{name: "default", want: filepath.Clean(defaultLocalStoragePath)},
+		{name: "absolute", configured: "/var/lib/milvus/data", want: "/var/lib/milvus/data"},
+		{name: "clean_absolute", configured: "  /var/lib/milvus/./old/../data/  ", want: "/var/lib/milvus/data"},
+		{name: "filesystem_root", configured: "/", want: "/"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bt := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{}))
+			t.Cleanup(bt.mgr.Close)
+			if tc.configured != "" {
+				require.NoError(t, bt.Save("localStorage.path", tc.configured))
+			}
+			var params ServiceParam
+			require.NotPanics(t, func() { params.init(bt) })
+			require.Equal(t, tc.want, params.LocalStorageCfg.Path.GetValue())
+			require.True(t, filepath.IsAbs(params.LocalStorageCfg.Path.GetValue()))
+		})
+	}
+}
+
+func TestLocalStorageConfig_RejectsInvalidPathDuringInit(t *testing.T) {
+	assertInvalidInit := func(t *testing.T, bt *BaseTable) {
+		t.Helper()
+		t.Cleanup(bt.mgr.Close)
+		var panicValue any
+		func() {
+			defer func() { panicValue = recover() }()
+			var params ServiceParam
+			params.init(bt)
+		}()
+		require.NotNil(t, panicValue, "service initialization must reject the configured path before starting components")
+		panicErr, ok := panicValue.(error)
+		require.True(t, ok, "initialization must panic with a typed configuration error, got %T", panicValue)
+		require.ErrorIs(t, panicErr, merr.ErrParameterInvalid)
+		require.Contains(t, panicErr.Error(), "localStorage.path must be an absolute filesystem path")
+	}
+	for _, tc := range []struct {
+		name  string
+		value string
+	}{
+		{name: "relative", value: "relative/data"},
+		{name: "current_directory_relative", value: "./data"},
+		{name: "parent_directory_relative", value: "../data"},
+		{name: "current_directory", value: "."},
+		{name: "empty", value: ""},
+		{name: "blank", value: " \t\n "},
+	} {
+		t.Run("saved/"+tc.name, func(t *testing.T) {
+			bt := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{}))
+			// Save before initialization exercises the startup path, rather
+			// than calling the formatter through a later GetValue.
+			require.NoError(t, bt.Save("localStorage.path", tc.value))
+			assertInvalidInit(t, bt)
+		})
+		t.Run("environment/"+tc.name, func(t *testing.T) {
+			t.Setenv("LOCALSTORAGE_PATH", tc.value)
+			bt := NewBaseTable(SkipRemote(true), Files([]string{}))
+			assertInvalidInit(t, bt)
+		})
+	}
+}
+
+func TestLocalStorageConfig_PathDoesNotChangeAtRuntime(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MILVUSCONF", dir)
+	configFile := filepath.Join(dir, "local-storage.yaml")
+	require.NoError(t, os.WriteFile(configFile, []byte("localStorage:\n  path: /var/lib/milvus/data\n"), 0o600))
+	bt := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{filepath.Base(configFile)}), Interval(10*time.Millisecond))
+	t.Cleanup(bt.mgr.Close)
+
+	var params ServiceParam
+	require.NotPanics(t, func() { params.init(bt) })
+	require.Equal(t, "/var/lib/milvus/data", params.LocalStorageCfg.Path.GetValue())
+
+	// File and config-center sources replace their stored value before emitting
+	// an update event. A forbidden path must retain its startup value even then.
+	require.NoError(t, os.WriteFile(configFile, []byte("localStorage:\n  path: relative/data\n"), 0o600))
+	require.Eventually(t, func() bool {
+		return bt.Get("localStorage.path") == "relative/data"
+	}, time.Second, 10*time.Millisecond)
+	require.NotPanics(t, func() {
+		require.Equal(t, "/var/lib/milvus/data", params.LocalStorageCfg.Path.GetValue())
+	})
+	value, raw, err := params.LocalStorageCfg.Path.getWithRaw()
+	require.NoError(t, err)
+	require.Equal(t, "/var/lib/milvus/data", value)
+	require.Equal(t, "relative/data", raw)
+}
 
 func TestServiceParam(t *testing.T) {
 	var SParams ServiceParam
@@ -132,6 +272,8 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, wpCfg.SegmentRollingMaxTime.GetAsDurationByParse().Seconds(), float64(600))
 		assert.Equal(t, wpCfg.SegmentRollingMaxBlocks.GetAsInt64(), int64(1000))
 		assert.Equal(t, wpCfg.AuditorMaxInterval.GetAsDurationByParse().Seconds(), float64(10))
+		assert.Equal(t, wpCfg.AuditorCompactionAttemptTimeout.GetAsDurationByParse().Seconds(), float64(330))
+		assert.Equal(t, wpCfg.AuditorCompactionPassBudget.GetAsDurationByParse().Seconds(), float64(60))
 		assert.True(t, wpCfg.DirectReadEnabled.GetAsBool())
 		assert.Equal(t, int64(16*1024*1024), wpCfg.DirectReadMaxBatchSize.GetAsSize())
 		assert.Equal(t, 4, wpCfg.DirectReadMaxFetchThreads.GetAsInt())
@@ -160,6 +302,10 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, wpCfg.CompactionSize.GetAsSize(), int64(2*1024*1024))
 		assert.Equal(t, wpCfg.CompactionMaxParallelUploads.GetAsInt(), 4)
 		assert.Equal(t, wpCfg.CompactionMaxParallelReads.GetAsInt(), 8)
+		assert.Equal(t, wpCfg.CompactionTimeout.GetAsDurationByParse().Seconds(), float64(300))
+		assert.Equal(t, wpCfg.CompactionMaxInflightMemory.GetAsSize(), int64(1000000000))
+		assert.Equal(t, wpCfg.CompactionMemoryHighWatermark.GetAsFloat(), 0.7)
+		assert.Equal(t, wpCfg.SyncSchedulerMaxWorkers.GetAsInt(), 32)
 		assert.Equal(t, wpCfg.ReaderMaxBatchSize.GetAsSize(), int64(16*1024*1024))
 		assert.Equal(t, wpCfg.ReaderMaxFetchThreads.GetAsInt(), 32)
 		assert.Equal(t, wpCfg.RetentionTTL.GetAsDurationByParse().Milliseconds()/1000, int64(72*60*60))
@@ -299,6 +445,63 @@ func TestServiceParam(t *testing.T) {
 			bt.Save(SParams.PulsarCfg.Address.Key, "")
 			assert.Equal(t, SParams.PulsarCfg.WebAddress.GetValue(), "")
 		}
+
+		{
+			// derived from pulsar.address: single host is unchanged, a multi-host
+			// service url uses the first host, and IPv6 hosts are bracketed
+			webPort := SParams.PulsarCfg.WebPort.GetValue()
+			for _, c := range []struct {
+				address  string
+				expected string
+			}{
+				{"pulsar://localhost:6650", "http://localhost:" + webPort},
+				{"pulsar://10.1.2.3:6650", "http://10.1.2.3:" + webPort},
+				{"pulsar+ssl://broker.example.com:6651", "http://broker.example.com:" + webPort},
+				{"pulsar://broker.example.com", "http://broker.example.com:" + webPort},
+				{"broker.example.com", "http://broker.example.com:" + webPort},
+				{"pulsar://user:pw@broker.example.com:6650", "http://broker.example.com:" + webPort},
+				{"pulsar://[::1]:6650", "http://[::1]:" + webPort},
+				{"pulsar://[fd00::1]", "http://[fd00::1]:" + webPort},
+				{"pulsar://broker-0.example.com:6650,broker-1.example.com:6650", "http://broker-0.example.com:" + webPort},
+				{"broker-0.example.com,broker-1.example.com", "http://broker-0.example.com:" + webPort},
+			} {
+				bt.Save(SParams.PulsarCfg.Address.Key, c.address)
+				assert.Equal(t, c.expected, SParams.PulsarCfg.WebAddress.GetValue(), c.address)
+			}
+		}
+
+		{
+			// an explicitly configured web address is honored as is, whatever pulsar.address is
+			bt.Save(SParams.PulsarCfg.WebAddress.Key, "http://pulsar-web.example.com:8080")
+			for _, address := range []string{"pulsar://localhost:6650", "pulsar://broker-0.example.com:6650,broker-1.example.com:6650", ""} {
+				bt.Save(SParams.PulsarCfg.Address.Key, address)
+				assert.Equal(t, "http://pulsar-web.example.com:8080", SParams.PulsarCfg.WebAddress.GetValue(), address)
+			}
+			bt.Remove(SParams.PulsarCfg.WebAddress.Key)
+		}
+
+		{
+			// an explicit web address must be an http(s) url, otherwise it is ignored in favor of the derived one
+			bt.Save(SParams.PulsarCfg.Address.Key, "pulsar://localhost:6650")
+			derived := "http://localhost:" + SParams.PulsarCfg.WebPort.GetValue()
+			for _, c := range []struct {
+				webAddress string
+				expected   string
+			}{
+				{"https://pulsar-admin.example.com", "https://pulsar-admin.example.com"},
+				{" http://pulsar-web.example.com:8080 ", "http://pulsar-web.example.com:8080"},
+				{"   ", derived},                                  // blank
+				{"pulsar-web.example.com:8080", derived},          // no scheme
+				{"pulsar://pulsar-web.example.com:6650", derived}, // not http(s)
+				{"http://", derived},                              // no host
+			} {
+				bt.Save(SParams.PulsarCfg.WebAddress.Key, c.webAddress)
+				assert.Equal(t, c.expected, SParams.PulsarCfg.WebAddress.GetValue(), c.webAddress)
+			}
+			bt.Remove(SParams.PulsarCfg.WebAddress.Key)
+		}
+
+		bt.Save(SParams.PulsarCfg.Address.Key, "")
 	})
 
 	t.Run("test pulsar auth config", func(t *testing.T) {
@@ -333,11 +536,26 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, int64(100*1024*1024), Params.BacklogAutoClearBytes.GetAsSize())
 	})
 
+	t.Run("pulsar_producer_access_mode", func(t *testing.T) {
+		Params := &SParams.PulsarCfg
+		assert.Equal(t, "exclusive", Params.ProducerAccessMode.GetValue())
+	})
+
+	t.Run("pulsar_producer_create_timeout", func(t *testing.T) {
+		Params := &SParams.PulsarCfg
+		assert.Equal(t, "1m", Params.ProducerCreateTimeout.GetValue())
+	})
+
 	t.Run("test rocksmqConfig", func(t *testing.T) {
 		Params := &SParams.RocksmqCfg
 
 		assert.NotEqual(t, Params.Path.GetValue(), "")
 		t.Logf("rocksmq path = %s", Params.Path.GetValue())
+
+		// The shipped default must survive getAsFloat: the accessor swallows the
+		// parse error and returns 0, which silently disables the memory-proportional
+		// RocksDB block cache sizing in NewRocksMQ.
+		assert.Equal(t, 0.06, Params.LRUCacheRatio.GetAsFloat())
 	})
 
 	t.Run("test kafkaConfig", func(t *testing.T) {
@@ -425,4 +643,122 @@ func TestRuntimConfig(t *testing.T) {
 
 	SetLocalComponentEnabled(typeutil.QueryCoordRole)
 	assert.True(t, IsLocalComponentEnabled(typeutil.QueryCoordRole))
+}
+
+func TestNormalizePulsarMessageReserve(t *testing.T) {
+	const maxMessageSize = 2 * 1024 * 1024
+
+	t.Run("configured reserve is honored", func(t *testing.T) {
+		assert.Equal(t, 128*1024, normalizePulsarMessageReserve(maxMessageSize, 128*1024))
+		assert.Equal(t, minPulsarMessageReserveSize, normalizePulsarMessageReserve(maxMessageSize, minPulsarMessageReserveSize))
+	})
+
+	t.Run("reserve below the envelope minimum falls back", func(t *testing.T) {
+		// A reserve this small cannot absorb one record's envelope, so a
+		// full-budget chunk would still be rejected by the backend and retried
+		// forever. The ParamItem formatter prevents these values in production;
+		// keep the helper defensive for direct callers.
+		for _, reserve := range []int{0, 1, minPulsarMessageReserveSize - 1, -1} {
+			assert.Equal(t, defaultPulsarMessageReserveSize, normalizePulsarMessageReserve(maxMessageSize, reserve),
+				"reserve=%d", reserve)
+		}
+	})
+
+	t.Run("reserve not fitting under the active limit falls back", func(t *testing.T) {
+		// The default no longer fits, but the minimum still does.
+		assert.Equal(t, minPulsarMessageReserveSize, normalizePulsarMessageReserve(32*1024, 32*1024))
+		// These values are below the supported WAL message-size minimum and are
+		// unreachable through normalized configuration. Keep zero as a safe
+		// defensive result for direct callers.
+		assert.Equal(t, 0, normalizePulsarMessageReserve(512, 0))
+		assert.Equal(t, 0, normalizePulsarMessageReserve(0, 1024))
+	})
+
+	t.Run("every effective reserve leaves a usable budget", func(t *testing.T) {
+		for _, maxSize := range []int{512, 1024, 1025, 32 * 1024, 64 * 1024, 10 * 1024 * 1024} {
+			for _, reserve := range []int{0, 1, 1024, 64 * 1024, 1 << 30} {
+				effective := normalizePulsarMessageReserve(maxSize, reserve)
+				if effective == 0 {
+					// Defensive direct-helper outcome. Normalized bounded WAL
+					// configuration cannot supply a limit this small.
+					continue
+				}
+				assert.GreaterOrEqual(t, effective, minPulsarMessageReserveSize,
+					"maxSize=%d reserve=%d", maxSize, reserve)
+				assert.Less(t, effective, maxSize, "maxSize=%d reserve=%d", maxSize, reserve)
+			}
+		}
+	})
+}
+
+func TestWALMessageSizeMinimum(t *testing.T) {
+	bt := NewBaseTable(SkipRemote(true))
+	params := &ServiceParam{}
+	params.init(bt)
+
+	tests := []struct {
+		name        string
+		walName     string
+		item        *ParamItem
+		defaultSize int
+	}{
+		{
+			name:        "pulsar",
+			walName:     "pulsar",
+			item:        &params.PulsarCfg.MaxMessageSize,
+			defaultSize: 2 * 1024 * 1024,
+		},
+		{
+			name:        "kafka",
+			walName:     "kafka",
+			item:        &params.KafkaCfg.ProducerMessageMaxBytes,
+			defaultSize: 10 * 1024 * 1024,
+		},
+		{
+			name:        "woodpecker",
+			walName:     "woodpecker",
+			item:        &params.WoodpeckerCfg.MaxMessageSize,
+			defaultSize: 10 * 1024 * 1024,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, tc := range []struct {
+				configured string
+				expected   int
+			}{
+				{configured: "-1", expected: minWALMessageSize},
+				{configured: "0", expected: minWALMessageSize},
+				{configured: strconv.Itoa(minWALMessageSize - 1), expected: minWALMessageSize},
+				{configured: strconv.Itoa(minWALMessageSize), expected: minWALMessageSize},
+				{configured: strconv.Itoa(minWALMessageSize + 1), expected: minWALMessageSize + 1},
+				{configured: "invalid", expected: test.defaultSize},
+				{configured: "2147483648", expected: test.defaultSize},
+			} {
+				assert.NoError(t, bt.Save(test.item.Key, tc.configured))
+				assert.Equal(t, tc.expected, test.item.GetAsInt(), "configured=%s", tc.configured)
+				assert.Equal(t, tc.expected, params.WALMaxMessageSize(test.walName), "configured=%s", tc.configured)
+			}
+			assert.NoError(t, bt.Reset(test.item.Key))
+		})
+	}
+
+	assert.Zero(t, params.WALMaxMessageSize("rocksmq"))
+	assert.Zero(t, params.WALMaxMessageSize("unknown"))
+
+	t.Run("clamped limit and invalid reserve leave a usable budget", func(t *testing.T) {
+		assert.NoError(t, bt.Save(params.PulsarCfg.MessageReserveSize.Key, "0"))
+		t.Cleanup(func() { assert.NoError(t, bt.Reset(params.PulsarCfg.MessageReserveSize.Key)) })
+
+		for _, test := range tests {
+			assert.NoError(t, bt.Save(test.item.Key, "1"))
+			maxMessageSize := params.WALMaxMessageSize(test.walName)
+			_, reserve := params.PulsarCfg.GetMessageSizeLimitsFor(maxMessageSize)
+			assert.Equal(t, minWALMessageSize, maxMessageSize, test.name)
+			assert.Equal(t, defaultPulsarMessageReserveSize, reserve, test.name)
+			assert.Positive(t, maxMessageSize-reserve, test.name)
+			assert.NoError(t, bt.Reset(test.item.Key))
+		}
+	})
 }

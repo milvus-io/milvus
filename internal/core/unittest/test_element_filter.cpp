@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <folly/FBVector.h>
+#include <folly/executors/CPUThreadPoolExecutor.h>
 #include <gtest/gtest.h>
 #include <stddef.h>
 #include <cstdint>
@@ -25,7 +26,7 @@
 #include <vector>
 
 #include "NamedType/named_type_impl.hpp"
-#include "common/ArrayOffsets.h"
+#include "common/StructElementOffsets.h"
 #include "common/IndexMeta.h"
 #include "common/QueryResult.h"
 #include "common/Schema.h"
@@ -34,11 +35,13 @@
 #include "common/Types.h"
 #include "common/VectorTrait.h"
 #include "common/protobuf_utils.h"
+#include "exec/expression/ExprBatchTestUtils.h"
+#include "exec/expression/UnaryExpr.h"
 #include "gtest/gtest.h"
-#include "index/Index.h"
+#include "index/Families.h"
+#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/query/IVectorReader.h"
 #include "index/Meta.h"
-#include "index/ScalarIndexSort.h"
-#include "index/VectorIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/operands.h"
 #include "pb/common.pb.h"
@@ -53,6 +56,7 @@
 #include "segcore/Types.h"
 #include "storage/FileManager.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/index_test_utils.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
 #include "common/Common.h"
@@ -179,7 +183,7 @@ TEST_P(ElementFilterSealed, RangeExpr) {
     auto array_vec_values = raw_data.get_col<VectorFieldProto>(vec_fid);
 
     // Flatten vector data and build index based on element type
-    std::unique_ptr<milvus::index::VectorIndex> indexing;
+    milvus::index::IIndexReaderBasePtr indexing;
     std::string actual_metric;
 
     if (elem_type == DataType::VECTOR_FLOAT) {
@@ -259,8 +263,10 @@ TEST_P(ElementFilterSealed, RangeExpr) {
         actual_metric = knowhere::metric::HAMMING;
     }
 
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
@@ -403,7 +409,7 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
     auto array_vec_values = raw_data.get_col<VectorFieldProto>(vec_fid);
 
     // Flatten vector data and build index based on element type
-    std::unique_ptr<milvus::index::VectorIndex> indexing;
+    milvus::index::IIndexReaderBasePtr indexing;
     std::string actual_metric;
 
     if (elem_type == DataType::VECTOR_FLOAT) {
@@ -483,8 +489,10 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
         actual_metric = knowhere::metric::HAMMING;
     }
 
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
@@ -605,7 +613,7 @@ INSTANTIATE_TEST_SUITE_P(
         return name;
     });
 
-TEST(ElementFilter, GrowingSegmentArrayOffsets) {
+TEST(ElementFilter, GrowingSegmentStructElementOffsets) {
     int dim = 4;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugVectorArrayField("structA[array_float_vec]",
@@ -653,20 +661,20 @@ TEST(ElementFilter, GrowingSegmentArrayOffsets) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
 
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_impl, nullptr);
 
-    // Both fields should share the same ArrayOffsets
-    auto offsets_vec = growing_impl->GetArrayOffsets(vec_fid);
-    auto offsets_int = growing_impl->GetArrayOffsets(int_array_fid);
+    // Both fields should share the same StructElementOffsets
+    auto offsets_vec = growing_impl->GetStructElementOffsets(vec_fid);
+    auto offsets_int = growing_impl->GetStructElementOffsets(int_array_fid);
     ASSERT_NE(offsets_vec, nullptr);
     ASSERT_NE(offsets_int, nullptr);
 
     // Should point to the same object (shared)
     ASSERT_EQ(offsets_vec, offsets_int)
-        << "Fields in same struct should share ArrayOffsets";
+        << "Fields in same struct should share StructElementOffsets";
 
     // Verify counts
     ASSERT_EQ(offsets_vec->GetRowCount(), N)
@@ -689,7 +697,7 @@ TEST(ElementFilter, GrowingSegmentArrayOffsets) {
 }
 
 TEST(ElementFilter, GrowingSegmentOutOfOrderInsert) {
-    // Test out-of-order Insert handling in GrowingArrayOffsets
+    // Test out-of-order Insert handling in StructElementOffsetsGrowing
     int dim = 4;
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugVectorArrayField("structA[array_float_vec]",
@@ -744,26 +752,35 @@ TEST(ElementFilter, GrowingSegmentOutOfOrderInsert) {
     // Insert batch 2 first (docs 10-19) - should be cached
     auto batch2 = gen_batch(10, 10);
     segment->PreInsert(10);
-    segment->Insert(
-        10, 10, batch2.row_ids_.data(), batch2.timestamps_.data(), batch2.raw_);
+    segment->Insert(10,
+                    10,
+                    batch2.row_ids_.data(),
+                    batch2.timestamps_.data(),
+                    batch2.SharedRaw());
 
     // Insert batch 1 (docs 0-9) - should trigger drain of batch 2
     auto batch1 = gen_batch(0, 10);
     segment->PreInsert(10);
-    segment->Insert(
-        0, 10, batch1.row_ids_.data(), batch1.timestamps_.data(), batch1.raw_);
+    segment->Insert(0,
+                    10,
+                    batch1.row_ids_.data(),
+                    batch1.timestamps_.data(),
+                    batch1.SharedRaw());
 
     // Insert batch 3 (docs 25-34) - should be cached (gap at 20-24)
     auto batch3 = gen_batch(25, 10);
     segment->PreInsert(10);
-    segment->Insert(
-        25, 10, batch3.row_ids_.data(), batch3.timestamps_.data(), batch3.raw_);
+    segment->Insert(25,
+                    10,
+                    batch3.row_ids_.data(),
+                    batch3.timestamps_.data(),
+                    batch3.SharedRaw());
 
-    // Verify ArrayOffsets
+    // Verify StructElementOffsets
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_impl, nullptr);
 
-    auto offsets = growing_impl->GetArrayOffsets(vec_fid);
+    auto offsets = growing_impl->GetStructElementOffsets(vec_fid);
     ASSERT_NE(offsets, nullptr);
 
     // After inserting docs [0-19] (batch3 cached due to gap), committed count
@@ -847,8 +864,10 @@ TEST(ElementFilter, MultiQueryCollectResults) {
                                    dim,
                                    vector_data.data(),
                                    knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
@@ -924,8 +943,7 @@ TEST(ElementFilter, MultiQueryCollectResults) {
 
 TEST(ElementFilter, CollectResultsWithCosineMetric) {
     // Test CollectResults with large_is_better=true (COSINE metric)
-    auto saved_batch_size = EXEC_EVAL_EXPR_BATCH_SIZE.load();
-    EXEC_EVAL_EXPR_BATCH_SIZE.store(100);
+    milvus::test::ExprBatchSizeGuard batch_size_guard(100);
 
     int dim = 4;
     auto schema = std::make_shared<Schema>();
@@ -977,17 +995,22 @@ TEST(ElementFilter, CollectResultsWithCosineMetric) {
             vector_data[i * array_len * dim + j] = float_vec[j];
         }
     }
-    auto indexing = GenVecIndexing(N * array_len,
-                                   dim,
-                                   vector_data.data(),
-                                   knowhere::IndexEnum::INDEX_HNSW,
-                                   knowhere::metric::COSINE);
-    LoadIndexInfo load_index_info;
+    auto indexing = BuildTestVectorIndex<float>(N * array_len,
+                                                dim,
+                                                vector_data.data(),
+                                                knowhere::IndexEnum::INDEX_HNSW,
+                                                knowhere::metric::COSINE);
+    const auto* vector_reader =
+        dynamic_cast<const index::IVectorReader*>(indexing.get());
+    ASSERT_NE(vector_reader, nullptr);
+    ASSERT_EQ(vector_reader->Metric(), knowhere::metric::COSINE);
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
-    load_index_info.index_params["metric_type"] = knowhere::metric::COSINE;
     load_index_info.field_type = DataType::VECTOR_ARRAY;
     load_index_info.element_type = DataType::VECTOR_FLOAT;
     segment->LoadIndex(load_index_info);
@@ -1038,8 +1061,6 @@ TEST(ElementFilter, CollectResultsWithCosineMetric) {
         ASSERT_GT(element_value, 100);
         ASSERT_LT(element_value, 400);
     }
-
-    EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size);
 }
 
 // Test parameter for Growing: <use_hints, element_type, metric_type, dim>
@@ -1154,12 +1175,12 @@ TEST_P(ElementFilterGrowing, RangeExpr) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
 
-    // Verify ArrayOffsets was built
+    // Verify StructElementOffsets was built
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_impl, nullptr);
-    auto offsets = growing_impl->GetArrayOffsets(vec_fid);
+    auto offsets = growing_impl->GetStructElementOffsets(vec_fid);
     ASSERT_NE(offsets, nullptr);
     ASSERT_EQ(offsets->GetRowCount(), N);
     ASSERT_EQ(offsets->GetTotalElementCount(), N * array_len);
@@ -1381,7 +1402,7 @@ TEST_P(ElementFilterRetrieve, RangeExpr) {
                         N,
                         raw_data.row_ids_.data(),
                         raw_data.timestamps_.data(),
-                        raw_data.raw_);
+                        raw_data.SharedRaw());
         segment = std::move(growing);
     }
 
@@ -1586,7 +1607,7 @@ TEST_P(ElementFilterRetrieve, UnaryExpr) {
                         N,
                         raw_data.row_ids_.data(),
                         raw_data.timestamps_.data(),
-                        raw_data.raw_);
+                        raw_data.SharedRaw());
         segment = std::move(growing);
     }
 
@@ -1828,7 +1849,7 @@ RunElementStrideDiscriminatorCase(DataType elem_type,
                         N,
                         raw_data.row_ids_.data(),
                         raw_data.timestamps_.data(),
-                        raw_data.raw_);
+                        raw_data.SharedRaw());
         segment = std::move(growing);
     }
 
@@ -2238,6 +2259,144 @@ TEST(ElementFilter, QueryIteratorCursorRequiresElementFilter) {
     ASSERT_ANY_THROW(parser.CreateRetrievePlan(plan_node));
 }
 
+TEST(ElementFilter, RecursiveArrayJsonContainsPlanValidation) {
+    auto make_schema = [](proto::schema::TypeSchema logical_child) {
+        auto schema = std::make_shared<Schema>();
+        auto field_id = FieldId(100);
+        proto::schema::TypeSchema physical_type;
+        *physical_type.mutable_array_element() = std::move(logical_child);
+        schema->AddField(
+            FieldMeta(FieldName("structA[nested]"),
+                      field_id,
+                      DataType::ARRAY,
+                      DataType::ARRAY,
+                      false,
+                      false,
+                      std::nullopt,
+                      std::string{},
+                      LOCAL_FORMAT_RAW,
+                      std::make_optional(std::move(physical_type))));
+        return std::pair{std::move(schema), field_id};
+    };
+
+    auto make_contains_expr = [](FieldId field_id, DataType element_type) {
+        proto::plan::Expr expr;
+        auto* contains = expr.mutable_json_contains_expr();
+        auto* column = contains->mutable_column_info();
+        column->set_field_id(field_id.get());
+        column->set_data_type(proto::schema::DataType::Array);
+        column->set_element_type(ToProtoDataType(element_type));
+        column->set_is_element_level(true);
+        contains->set_op(proto::plan::JSONContainsExpr_JSONOp_ContainsAny);
+        contains->set_elements_same_type(true);
+        contains->add_elements()->set_string_val("abc");
+        return expr;
+    };
+
+    proto::schema::TypeSchema array_of_varchar;
+    array_of_varchar.mutable_array_element()->set_leaf_type(
+        proto::schema::DataType::VarChar);
+    auto [schema, field_id] = make_schema(std::move(array_of_varchar));
+
+    auto contains = make_contains_expr(field_id, DataType::VARCHAR);
+    ASSERT_NO_THROW(ProtoParser(schema).ParseExprs(contains));
+
+    auto wrong_leaf = make_contains_expr(field_id, DataType::INT64);
+    ASSERT_ANY_THROW(ProtoParser(schema).ParseExprs(wrong_leaf));
+
+    auto wrong_logical_type = make_contains_expr(field_id, DataType::VARCHAR);
+    wrong_logical_type.mutable_json_contains_expr()
+        ->mutable_column_info()
+        ->set_data_type(proto::schema::DataType::VarChar);
+    ASSERT_ANY_THROW(ProtoParser(schema).ParseExprs(wrong_logical_type));
+
+    auto row_level = make_contains_expr(field_id, DataType::VARCHAR);
+    row_level.mutable_json_contains_expr()
+        ->mutable_column_info()
+        ->set_is_element_level(false);
+    ASSERT_ANY_THROW(ProtoParser(schema).ParseExprs(row_level));
+
+    auto flat_schema = std::make_shared<Schema>();
+    auto flat_field_id = flat_schema->AddDebugArrayField(
+        "structA[scalar]", DataType::VARCHAR, false);
+    auto flat_contains = make_contains_expr(flat_field_id, DataType::VARCHAR);
+    ASSERT_ANY_THROW(ProtoParser(flat_schema).ParseExprs(flat_contains));
+
+    proto::schema::TypeSchema array_of_array_of_varchar;
+    array_of_array_of_varchar.mutable_array_element()
+        ->mutable_array_element()
+        ->set_leaf_type(proto::schema::DataType::VarChar);
+    auto [deeper_schema, deeper_field_id] =
+        make_schema(std::move(array_of_array_of_varchar));
+    auto deeper_contains =
+        make_contains_expr(deeper_field_id, DataType::VARCHAR);
+    ASSERT_ANY_THROW(ProtoParser(deeper_schema).ParseExprs(deeper_contains));
+
+    proto::plan::Expr range_expr;
+    auto* range = range_expr.mutable_unary_range_expr();
+    auto* range_column = range->mutable_column_info();
+    range_column->set_field_id(field_id.get());
+    range_column->set_data_type(proto::schema::DataType::Array);
+    range_column->set_element_type(proto::schema::DataType::VarChar);
+    range_column->set_is_element_level(true);
+    range->set_op(proto::plan::OpType::Equal);
+    range->mutable_value()->set_string_val("abc");
+    ASSERT_ANY_THROW(ProtoParser(schema).ParseExprs(range_expr));
+}
+
+TEST(ElementFilter, RecursiveArrayLengthPlanValidation) {
+    auto schema = std::make_shared<Schema>();
+    const auto field_id = FieldId(100);
+    proto::schema::TypeSchema physical_type;
+    physical_type.mutable_array_element()
+        ->mutable_array_element()
+        ->set_leaf_type(proto::schema::DataType::Int32);
+    schema->AddField(FieldMeta(FieldName("structA[nested]"),
+                               field_id,
+                               DataType::ARRAY,
+                               DataType::ARRAY,
+                               false,
+                               false,
+                               std::nullopt,
+                               std::string{},
+                               LOCAL_FORMAT_RAW,
+                               std::make_optional(std::move(physical_type))));
+
+    auto make_length_expr = [field_id]() {
+        proto::plan::Expr expr;
+        auto* length = expr.mutable_binary_arith_op_eval_range_expr();
+        auto* column = length->mutable_column_info();
+        column->set_field_id(field_id.get());
+        column->set_data_type(proto::schema::DataType::Array);
+        column->set_element_type(proto::schema::DataType::Array);
+        column->set_is_element_level(true);
+        length->set_arith_op(proto::plan::ArithOpType::ArrayLength);
+        length->set_op(proto::plan::OpType::Equal);
+        length->mutable_value()->set_int64_val(1);
+        return expr;
+    };
+
+    auto length = make_length_expr();
+    ASSERT_NO_THROW(ProtoParser(schema).ParseExprs(length));
+
+    auto wrong_element_type = make_length_expr();
+    wrong_element_type.mutable_binary_arith_op_eval_range_expr()
+        ->mutable_column_info()
+        ->set_element_type(proto::schema::DataType::Int32);
+    ASSERT_ANY_THROW(ProtoParser(schema).ParseExprs(wrong_element_type));
+
+    auto nested_path = make_length_expr();
+    nested_path.mutable_binary_arith_op_eval_range_expr()
+        ->mutable_column_info()
+        ->add_nested_path("0");
+    ASSERT_ANY_THROW(ProtoParser(schema).ParseExprs(nested_path));
+
+    auto wrong_arith = make_length_expr();
+    wrong_arith.mutable_binary_arith_op_eval_range_expr()->set_arith_op(
+        proto::plan::ArithOpType::Add);
+    ASSERT_ANY_THROW(ProtoParser(schema).ParseExprs(wrong_arith));
+}
+
 // Regression test for https://github.com/milvus-io/milvus/issues/49260
 // ElementFilterBitsNode: when element_filter is AND-composed with a predicate
 // that matches 0 docs on a segment, doc_hit_ratio = 0 triggers offset_mode
@@ -2303,7 +2462,7 @@ TEST_P(ElementFilterEmptyDocHit, ZeroHitPredicateWithAnd) {
                         N,
                         raw_data.row_ids_.data(),
                         raw_data.timestamps_.data(),
-                        raw_data.raw_);
+                        raw_data.SharedRaw());
         segment = std::move(growing);
     }
 
@@ -2371,11 +2530,13 @@ INSTANTIATE_TEST_SUITE_P(ElementFilter,
                              return info.param ? "Sealed" : "Growing";
                          });
 
+class ElementFilterZeroElementBatch : public ::testing::TestWithParam<bool> {};
+
 // Element-level filters can legitimately produce a zero-length element bitmap
 // even when the segment has active rows: every active document may have an
 // empty/null struct array. ExecPlanNodeVisitor must still treat that bitmap as
 // element-level instead of comparing it with the row count.
-TEST_P(ElementFilterEmptyDocHit, ActiveDocsWithZeroElements) {
+TEST_P(ElementFilterZeroElementBatch, ActiveDocsWithZeroElements) {
     bool with_sealed = GetParam();
 
     int dim = 4;
@@ -2402,7 +2563,7 @@ TEST_P(ElementFilterEmptyDocHit, ActiveDocsWithZeroElements) {
                         N,
                         raw_data.row_ids_.data(),
                         raw_data.timestamps_.data(),
-                        raw_data.raw_);
+                        raw_data.SharedRaw());
         segment = std::move(growing);
     }
 
@@ -2447,6 +2608,413 @@ TEST_P(ElementFilterEmptyDocHit, ActiveDocsWithZeroElements) {
     ASSERT_EQ(retrieve_results->offset_size(), 0);
 }
 
+TEST_P(ElementFilterZeroElementBatch, FullModeAdvancesPastZeroElementBatches) {
+    milvus::test::ExprBatchSizeGuard batch_size_guard(4);
+
+    bool with_sealed = GetParam();
+    auto schema = std::make_shared<Schema>();
+    auto int_array_fid = schema->AddDebugArrayField(
+        "structA[price_array]", DataType::INT32, true);
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+
+    constexpr size_t kRowCount = 9;
+    constexpr size_t kTargetRow = 8;
+    auto raw_data = DataGen(schema, kRowCount, 42, 0, 1, 1);
+    for (int i = 0; i < raw_data.raw_->fields_data_size(); ++i) {
+        auto* field_data = raw_data.raw_->mutable_fields_data(i);
+        if (field_data->field_id() != int_array_fid.get()) {
+            continue;
+        }
+
+        auto* array_data = field_data->mutable_scalars()->mutable_array_data();
+        // Batch 1 contains NULL arrays with retained physical payloads.
+        for (size_t row = 0; row < 4; ++row) {
+            auto* values = array_data->mutable_data(row)
+                               ->mutable_int_data()
+                               ->mutable_data();
+            values->Clear();
+            values->Add(100 + row);
+        }
+        // Batch 2 contains valid but empty arrays.
+        for (size_t row = 4; row < kTargetRow; ++row) {
+            array_data->mutable_data(row)
+                ->mutable_int_data()
+                ->mutable_data()
+                ->Clear();
+        }
+        auto* target_values = array_data->mutable_data(kTargetRow)
+                                  ->mutable_int_data()
+                                  ->mutable_data();
+        target_values->Clear();
+        target_values->Add(7);
+        target_values->Add(9);
+
+        auto* valid_data = MutableFieldDataRowValidData(field_data);
+        valid_data->Clear();
+        for (size_t row = 0; row < kTargetRow; ++row) {
+            valid_data->Add(row >= 4);
+        }
+        valid_data->Add(true);
+        break;
+    }
+
+    std::shared_ptr<SegmentInterface> segment;
+    if (with_sealed) {
+        segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+    } else {
+        SegcoreConfig config;
+        config.set_chunk_rows(4);
+        auto growing =
+            CreateGrowingSegment(schema, empty_index_meta, 1, config);
+        growing->PreInsert(kRowCount);
+        growing->Insert(0,
+                        kRowCount,
+                        raw_data.row_ids_.data(),
+                        raw_data.timestamps_.data(),
+                        raw_data.SharedRaw());
+        segment = std::move(growing);
+    }
+    auto* internal_segment =
+        dynamic_cast<SegmentInternalInterface*>(segment.get());
+    ASSERT_NE(internal_segment, nullptr);
+
+    auto struct_element_offsets =
+        segment->GetStructElementOffsets(int_array_fid);
+    ASSERT_NE(struct_element_offsets, nullptr);
+    ASSERT_EQ(struct_element_offsets->GetTotalElementCount(), 2);
+    for (size_t row = 0; row < kTargetRow; ++row) {
+        EXPECT_EQ(struct_element_offsets->ElementIDRangeOfRow(row),
+                  std::make_pair(0, 0));
+    }
+    EXPECT_EQ(struct_element_offsets->ElementIDRangeOfRow(kTargetRow),
+              std::make_pair(0, 2));
+
+    enum class PredicateMode {
+        UnaryRange,
+        UnaryOverflow,
+        BinaryRange,
+        BinaryRangeOverflow,
+        Term,
+        BinaryArithmetic,
+    };
+    auto run_retrieve = [&](PredicateMode mode) {
+        proto::plan::PlanNode plan_node;
+        auto* query = plan_node.mutable_query();
+        query->set_is_count(false);
+        query->set_limit(100);
+
+        auto* element_filter =
+            query->mutable_predicates()->mutable_element_filter_expr();
+        element_filter->set_struct_name("structA");
+
+        auto* binary =
+            element_filter->mutable_element_expr()->mutable_binary_expr();
+        binary->set_op(mode == PredicateMode::BinaryRangeOverflow
+                           ? proto::plan::BinaryExpr::LogicalOr
+                           : proto::plan::BinaryExpr::LogicalAnd);
+        auto set_element_column = [&](proto::plan::ColumnInfo* column) {
+            column->set_field_id(int_array_fid.get());
+            column->set_data_type(proto::schema::DataType::Int32);
+            column->set_element_type(proto::schema::DataType::Int32);
+            column->set_is_element_level(true);
+        };
+        auto set_element_range = [&](proto::plan::Expr* expr,
+                                     proto::plan::OpType op,
+                                     int64_t value) {
+            auto* range = expr->mutable_unary_range_expr();
+            set_element_column(range->mutable_column_info());
+            range->set_op(op);
+            range->mutable_value()->set_int64_val(value);
+        };
+        switch (mode) {
+            case PredicateMode::BinaryRange:
+            case PredicateMode::BinaryRangeOverflow: {
+                auto* range =
+                    binary->mutable_left()->mutable_binary_range_expr();
+                set_element_column(range->mutable_column_info());
+                range->set_lower_inclusive(true);
+                range->set_upper_inclusive(true);
+                range->mutable_lower_value()->set_int64_val(
+                    mode == PredicateMode::BinaryRangeOverflow ? 2147483648LL
+                                                               : 0LL);
+                range->mutable_upper_value()->set_int64_val(
+                    mode == PredicateMode::BinaryRangeOverflow ? 2147483649LL
+                                                               : 10LL);
+                break;
+            }
+            case PredicateMode::Term: {
+                auto* term = binary->mutable_left()->mutable_term_expr();
+                set_element_column(term->mutable_column_info());
+                term->add_values()->set_int64_val(7);
+                term->add_values()->set_int64_val(9);
+                break;
+            }
+            case PredicateMode::BinaryArithmetic: {
+                auto* arith = binary->mutable_left()
+                                  ->mutable_binary_arith_op_eval_range_expr();
+                set_element_column(arith->mutable_column_info());
+                arith->set_arith_op(proto::plan::ArithOpType::Add);
+                arith->mutable_right_operand()->set_int64_val(0);
+                arith->set_op(proto::plan::OpType::GreaterEqual);
+                arith->mutable_value()->set_int64_val(0);
+                break;
+            }
+            case PredicateMode::UnaryRange:
+            case PredicateMode::UnaryOverflow: {
+                auto lower_bound =
+                    mode == PredicateMode::UnaryOverflow ? -2147483649LL : 0LL;
+                set_element_range(binary->mutable_left(),
+                                  proto::plan::OpType::GreaterEqual,
+                                  lower_bound);
+                break;
+            }
+        }
+        set_element_range(
+            binary->mutable_right(), proto::plan::OpType::Equal, 9);
+
+        plan_node.add_output_field_ids(int64_fid.get());
+        plan_node.add_output_field_ids(int_array_fid.get());
+
+        auto parser = ProtoParser(schema);
+        auto plan = parser.CreateRetrievePlan(plan_node);
+        return segment->Retrieve(nullptr,
+                                 plan.get(),
+                                 1L << 63,
+                                 INT64_MAX,
+                                 false,
+                                 folly::CancellationToken(),
+                                 0,
+                                 0);
+    };
+
+    auto assert_target_element = [&](const auto& retrieve_results) {
+        ASSERT_NE(retrieve_results, nullptr);
+        ASSERT_TRUE(retrieve_results->element_level());
+        ASSERT_EQ(retrieve_results->offset_size(), 1);
+        EXPECT_EQ(retrieve_results->offset(0), kTargetRow);
+        ASSERT_EQ(retrieve_results->element_indices(0).indices_size(), 1);
+        EXPECT_EQ(retrieve_results->element_indices(0).indices(0), 1);
+    };
+
+    std::unique_ptr<proto::segcore::RetrieveResults> retrieve_results;
+    auto run_all_modes = [&] {
+        for (auto mode : {PredicateMode::UnaryRange,
+                          PredicateMode::UnaryOverflow,
+                          PredicateMode::BinaryRange,
+                          PredicateMode::BinaryRangeOverflow,
+                          PredicateMode::Term,
+                          PredicateMode::BinaryArithmetic}) {
+            // Every visitor family and both overflow fast paths must keep the
+            // child expressions aligned across zero-element batches.
+            ASSERT_NO_THROW(retrieve_results = run_retrieve(mode));
+            assert_target_element(retrieve_results);
+        }
+    };
+    run_all_modes();
+
+    class CountingPrefetchUnaryExpr final
+        : public exec::PhyUnaryRangeFilterExpr {
+     public:
+        using exec::PhyUnaryRangeFilterExpr::PhyUnaryRangeFilterExpr;
+
+        int
+        prefetch_count() const {
+            return prefetch_count_;
+        }
+
+        size_t
+        prefetch_start_chunk() const {
+            return prefetch_start_chunk_;
+        }
+
+     private:
+        void
+        PrefetchRawData() override {
+            prefetch_start_chunk_ = RawDataPrefetchStartChunk();
+            ++prefetch_count_;
+        }
+
+        int prefetch_count_{0};
+        size_t prefetch_start_chunk_{0};
+    };
+
+    auto assert_leaf_batches_to_eof = [&](bool expect_nested_index) {
+        auto column =
+            expr::ColumnInfo(int_array_fid, DataType::ARRAY, DataType::INT32);
+        column.element_level_ = true;
+        proto::plan::GenericValue lower_bound;
+        lower_bound.set_int64_val(0);
+        auto logical = std::make_shared<expr::UnaryRangeFilterExpr>(
+            column, proto::plan::OpType::GreaterEqual, lower_bound);
+        auto make_physical = [&](const std::string& name,
+                                 int64_t active_count) {
+            return std::make_shared<CountingPrefetchUnaryExpr>(
+                std::vector<exec::ExprPtr>{},
+                logical,
+                name,
+                nullptr,
+                internal_segment,
+                active_count,
+                4,
+                0);
+        };
+        auto physical = make_physical("CountingPrefetchUnaryExpr", kRowCount);
+
+        auto prefetch_pool = std::make_shared<folly::CPUThreadPoolExecutor>(1);
+        physical->PrefetchAsync(prefetch_pool);
+        physical->WaitPrefetch();
+        EXPECT_EQ(physical->prefetch_count(), 0);
+        EXPECT_EQ(physical->CanUseNestedIndex(), expect_nested_index);
+
+        auto query_context = std::make_shared<exec::QueryContext>(
+            DEAFULT_QUERY_ID, internal_segment, kRowCount, MAX_TIMESTAMP);
+        exec::ExecContext exec_context(query_context.get());
+        exec::OffsetVector empty_offsets;
+        exec::EvalCtx empty_offset_context(&exec_context, &empty_offsets);
+        VectorPtr result;
+        physical->Eval(empty_offset_context, result);
+        EXPECT_EQ(result, nullptr);
+        EXPECT_EQ(physical->prefetch_count(), 0);
+
+        // An empty offset input is exhaustion for that invocation only; it
+        // must neither touch payload nor advance the full-mode row cursor.
+        exec::EvalCtx eval_context(&exec_context);
+        for (auto expected_size : {0, 0, 2}) {
+            physical->Eval(eval_context, result);
+            auto column_result =
+                std::dynamic_pointer_cast<ColumnVector>(result);
+            ASSERT_NE(column_result, nullptr);
+            EXPECT_EQ(column_result->size(), expected_size);
+        }
+        EXPECT_EQ(physical->prefetch_count(), expect_nested_index ? 0 : 1);
+        if (!expect_nested_index) {
+            const auto [target_chunk, _] =
+                internal_segment->get_chunk_by_offset(int_array_fid,
+                                                      kTargetRow);
+            EXPECT_EQ(physical->prefetch_start_chunk(), target_chunk);
+        }
+
+        physical->Eval(eval_context, result);
+        EXPECT_EQ(result, nullptr);
+
+        if (!expect_nested_index) {
+            exec::OffsetVector element_offsets;
+            element_offsets.emplace_back(0);
+            element_offsets.emplace_back(1);
+
+            auto deferred_offset_physical = make_physical(
+                "DeferredOffsetCountingPrefetchUnaryExpr", kRowCount);
+            deferred_offset_physical->PrefetchAsync(prefetch_pool);
+            deferred_offset_physical->WaitPrefetch();
+            EXPECT_EQ(deferred_offset_physical->prefetch_count(), 0);
+            exec::EvalCtx deferred_offset_context(&exec_context,
+                                                  &element_offsets);
+            deferred_offset_physical->Eval(deferred_offset_context, result);
+            auto offset_column =
+                std::dynamic_pointer_cast<ColumnVector>(result);
+            ASSERT_NE(offset_column, nullptr);
+            EXPECT_EQ(offset_column->size(), element_offsets.size());
+            EXPECT_EQ(deferred_offset_physical->prefetch_count(), 1);
+
+            auto iterative_offset_physical = make_physical(
+                "IterativeOffsetCountingPrefetchUnaryExpr", kRowCount);
+            exec::EvalCtx iterative_offset_context(&exec_context,
+                                                   &element_offsets);
+            iterative_offset_physical->Eval(iterative_offset_context, result);
+            offset_column = std::dynamic_pointer_cast<ColumnVector>(result);
+            ASSERT_NE(offset_column, nullptr);
+            EXPECT_EQ(offset_column->size(), element_offsets.size());
+            EXPECT_EQ(iterative_offset_physical->prefetch_count(), 0);
+        }
+
+        constexpr int64_t kZeroTailRowCount = 7;
+        auto zero_tail_physical = make_physical(
+            "ZeroTailCountingPrefetchUnaryExpr", kZeroTailRowCount);
+        zero_tail_physical->PrefetchAsync(prefetch_pool);
+        zero_tail_physical->WaitPrefetch();
+        auto zero_tail_query_context =
+            std::make_shared<exec::QueryContext>(DEAFULT_QUERY_ID,
+                                                 internal_segment,
+                                                 kZeroTailRowCount,
+                                                 MAX_TIMESTAMP);
+        exec::ExecContext zero_tail_exec_context(zero_tail_query_context.get());
+        exec::EvalCtx zero_tail_eval_context(&zero_tail_exec_context);
+        for (auto expected_size : {0, 0}) {
+            zero_tail_physical->Eval(zero_tail_eval_context, result);
+            auto column_result =
+                std::dynamic_pointer_cast<ColumnVector>(result);
+            ASSERT_NE(column_result, nullptr);
+            EXPECT_EQ(column_result->size(), expected_size);
+        }
+        EXPECT_EQ(zero_tail_physical->prefetch_count(), 0);
+        zero_tail_physical->Eval(zero_tail_eval_context, result);
+        EXPECT_EQ(result, nullptr);
+
+        auto skipped_batch_physical =
+            make_physical("SkippedBatchCountingPrefetchUnaryExpr", kRowCount);
+        skipped_batch_physical->PrefetchAsync(prefetch_pool);
+        skipped_batch_physical->WaitPrefetch();
+        auto skipped_query_context = std::make_shared<exec::QueryContext>(
+            DEAFULT_QUERY_ID, internal_segment, kRowCount, MAX_TIMESTAMP);
+        exec::ExecContext skipped_exec_context(skipped_query_context.get());
+        exec::EvalCtx skipped_eval_context(&skipped_exec_context);
+
+        skipped_batch_physical->Eval(skipped_eval_context, result);
+        auto skipped_column = std::dynamic_pointer_cast<ColumnVector>(result);
+        ASSERT_NE(skipped_column, nullptr);
+        EXPECT_EQ(skipped_column->size(), 0);
+        skipped_batch_physical->MoveCursor();
+        skipped_batch_physical->Eval(skipped_eval_context, result);
+        skipped_column = std::dynamic_pointer_cast<ColumnVector>(result);
+        ASSERT_NE(skipped_column, nullptr);
+        EXPECT_EQ(skipped_column->size(), 2);
+        EXPECT_EQ(skipped_batch_physical->prefetch_count(),
+                  expect_nested_index ? 0 : 1);
+        skipped_batch_physical->Eval(skipped_eval_context, result);
+        EXPECT_EQ(result, nullptr);
+    };
+    assert_leaf_batches_to_eof(false);
+
+    if (with_sealed) {
+        std::vector<int32_t> indexed_elements = {7, 9};
+        auto nested_index =
+            BuildTestScalarIndex<int32_t>(milvus::index::families::kSort,
+                                          indexed_elements.size(),
+                                          indexed_elements.data(),
+                                          nullptr,
+                                          {{"nested", true},
+                                           {"field_type", DataType::ARRAY},
+                                           {"element_type", DataType::INT32}});
+
+        LoadIndexInfo load_info{};
+        load_info.field_id = int_array_fid.get();
+        load_info.field_type = DataType::ARRAY;
+        load_info.element_type = DataType::INT32;
+        load_info.index_params["index_type"] = milvus::index::ASCENDING_SORT;
+        SetTestIndexMetadata(
+            load_info, *nested_index, milvus::index::families::kSort);
+        load_info.cache_index = CreateTestCacheIndex("zero_element_nested",
+                                                     std::move(nested_index));
+        auto* sealed_segment = dynamic_cast<SegmentSealed*>(segment.get());
+        ASSERT_NE(sealed_segment, nullptr);
+        sealed_segment->LoadIndex(load_info);
+
+        // Re-run the compound cases after the nested index is present. Binary
+        // arithmetic remains a raw fallback, so this also covers mixed
+        // raw/index children sharing the same zero-element cursor contract.
+        run_all_modes();
+        assert_leaf_batches_to_eof(true);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(ElementFilter,
+                         ElementFilterZeroElementBatch,
+                         ::testing::Values(true, false),
+                         [](const ::testing::TestParamInfo<bool>& info) {
+                             return info.param ? "Sealed" : "Growing";
+                         });
+
 TEST(ElementFilter, GrowingNullableArrayTailChunkUsesActiveRows) {
     auto schema = std::make_shared<Schema>();
     auto int_array_fid = schema->AddDebugArrayField(
@@ -2458,7 +3026,7 @@ TEST(ElementFilter, GrowingNullableArrayTailChunkUsesActiveRows) {
     config.set_chunk_rows(1024);
     auto segment = CreateGrowingSegment(schema, empty_index_meta, 1, config);
 
-    auto insert_record_proto = std::make_unique<InsertRecordProto>();
+    auto insert_record_proto = std::make_shared<InsertRecordProto>();
     insert_record_proto->set_num_rows(3);
 
     auto pk_data = insert_record_proto->add_fields_data();
@@ -2488,11 +3056,8 @@ TEST(ElementFilter, GrowingNullableArrayTailChunkUsesActiveRows) {
     std::vector<int64_t> row_ids = {0, 1, 2};
     std::vector<Timestamp> timestamps = {100, 101, 102};
     auto offset = segment->PreInsert(3);
-    segment->Insert(offset,
-                    3,
-                    row_ids.data(),
-                    timestamps.data(),
-                    insert_record_proto.get());
+    segment->Insert(
+        offset, 3, row_ids.data(), timestamps.data(), insert_record_proto);
 
     proto::plan::PlanNode plan_node;
     auto* query = plan_node.mutable_query();
@@ -2570,7 +3135,7 @@ TEST_P(ElementFilterEmptyDocHit, ElementLevelSearchWithZeroElements) {
                         N,
                         raw_data.row_ids_.data(),
                         raw_data.timestamps_.data(),
-                        raw_data.raw_);
+                        raw_data.SharedRaw());
         segment = std::move(growing);
     }
 
@@ -2707,8 +3272,10 @@ TEST_P(ElementFilterNestedIndex, ExecutionMode) {
                                    dim,
                                    vector_data.data(),
                                    knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
@@ -2728,26 +3295,20 @@ TEST_P(ElementFilterNestedIndex, ExecutionMode) {
             }
         }
 
-        milvus::index::IndexBasePtr nested_index;
-        if (index_type == NestedIndexType::STL_SORT) {
-            auto stl_index =
-                std::make_unique<milvus::index::ScalarIndexSort<int32_t>>(
-                    storage::FileManagerContext(), true /* is_nested */);
-            stl_index->Build(all_elements.size(), all_elements.data(), nullptr);
-            nested_index = std::move(stl_index);
-        } else {
-            // INVERTED index - use BuildWithRawDataForUT is not available for int32
-            // So we use ScalarIndexSort for now as a workaround
-            // In real scenario, inverted index would be loaded from disk
-            auto stl_index =
-                std::make_unique<milvus::index::ScalarIndexSort<int32_t>>(
-                    storage::FileManagerContext(), true /* is_nested */);
-            stl_index->Build(all_elements.size(), all_elements.data(), nullptr);
-            nested_index = std::move(stl_index);
-        }
+        const auto family = index_type == NestedIndexType::STL_SORT
+                                ? milvus::index::families::kSort
+                                : milvus::index::families::kInverted;
+        auto nested_index =
+            BuildTestScalarIndex<int32_t>(family,
+                                          all_elements.size(),
+                                          all_elements.data(),
+                                          nullptr,
+                                          {{"nested", true},
+                                           {"field_type", DataType::ARRAY},
+                                           {"element_type", DataType::INT32}});
 
         // Load nested index to segment
-        LoadIndexInfo nested_load_info;
+        LoadIndexInfo nested_load_info{};
         nested_load_info.field_id = int_array_fid.get();
         nested_load_info.field_type = DataType::ARRAY;
         nested_load_info.element_type = DataType::INT32;
@@ -2755,6 +3316,7 @@ TEST_P(ElementFilterNestedIndex, ExecutionMode) {
             index_type == NestedIndexType::STL_SORT
                 ? milvus::index::ASCENDING_SORT
                 : milvus::index::INVERTED_INDEX_TYPE;
+        SetTestIndexMetadata(nested_load_info, *nested_index, family);
         nested_load_info.cache_index =
             CreateTestCacheIndex("nested_test", std::move(nested_index));
         segment->LoadIndex(nested_load_info);
@@ -2939,8 +3501,10 @@ TEST(ElementFilterGroupBy, SealedWithIndex) {
                                    dim,
                                    vector_data.data(),
                                    knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
@@ -3073,7 +3637,7 @@ TEST(ElementFilterGroupBy, GrowingSegment) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
 
     int topK = 5;
     int group_size = 4;
@@ -3169,8 +3733,10 @@ TEST(ElementFilterGroupBy, NormalGroupBy) {
     auto indexing = GenVecIndexing(
         N, dim, vec_values.data(), knowhere::IndexEnum::INDEX_HNSW);
 
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
@@ -3318,8 +3884,10 @@ TEST(ElementFilterGroupBy, DeduplicateRowsInGroup) {
                                    dim,
                                    vector_data.data(),
                                    knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
@@ -3460,8 +4028,10 @@ TEST(ElementFilter, SearchWithNestedScalarIndex) {
                                    dim,
                                    vector_data.data(),
                                    knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
@@ -3470,8 +4040,7 @@ TEST(ElementFilter, SearchWithNestedScalarIndex) {
     load_index_info.element_type = DataType::VECTOR_FLOAT;
     segment->LoadIndex(load_index_info);
 
-    // Build nested scalar index with is_nested=true (the correct behavior
-    // after the fix sets field_name so IndexFactory routes to CreateNestedIndex).
+    // Build an element-domain scalar reader for the flattened array values.
     std::vector<int32_t> all_elements;
     all_elements.reserve(N * array_len);
     for (size_t row = 0; row < N; row++) {
@@ -3480,16 +4049,22 @@ TEST(ElementFilter, SearchWithNestedScalarIndex) {
         }
     }
 
-    auto stl_index = std::make_unique<milvus::index::ScalarIndexSort<int32_t>>(
-        storage::FileManagerContext(),
-        true /* is_nested=true: correct after fix */);
-    stl_index->Build(all_elements.size(), all_elements.data(), nullptr);
+    auto stl_index =
+        BuildTestScalarIndex<int32_t>(milvus::index::families::kSort,
+                                      all_elements.size(),
+                                      all_elements.data(),
+                                      nullptr,
+                                      {{"nested", true},
+                                       {"field_type", DataType::ARRAY},
+                                       {"element_type", DataType::INT32}});
 
-    LoadIndexInfo nested_load_info;
+    LoadIndexInfo nested_load_info{};
     nested_load_info.field_id = int_array_fid.get();
     nested_load_info.field_type = DataType::ARRAY;
     nested_load_info.element_type = DataType::INT32;
     nested_load_info.index_params["index_type"] = milvus::index::ASCENDING_SORT;
+    SetTestIndexMetadata(
+        nested_load_info, *stl_index, milvus::index::families::kSort);
     nested_load_info.cache_index =
         CreateTestCacheIndex("nested_test", std::move(stl_index));
     segment->LoadIndex(nested_load_info);
@@ -3579,12 +4154,12 @@ TEST(ElementFilter, GrowingMultiChunkElementSearch) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
 
-    // Verify ArrayOffsets
+    // Verify StructElementOffsets
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_impl, nullptr);
-    auto offsets = growing_impl->GetArrayOffsets(vec_fid);
+    auto offsets = growing_impl->GetStructElementOffsets(vec_fid);
     ASSERT_NE(offsets, nullptr);
     ASSERT_EQ(offsets->GetRowCount(), N);
     ASSERT_EQ(offsets->GetTotalElementCount(), N * array_len);
@@ -3926,8 +4501,10 @@ LoadElementHnswIndex(SegmentSealed* segment,
                                    kElemDim,
                                    flat_data.data(),
                                    knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
@@ -3949,7 +4526,7 @@ CreateNullableSealedSegment(const NullableElementSearchFixture& f) {
     vector_arrays.reserve(vec_array_values.size());
     for (int64_t row = 0; row < f.raw_data.raw_->num_rows(); ++row) {
         if (IsBitmapRowValid(valid_bitmap, row)) {
-            vector_arrays.emplace_back(vec_array_values[row]);
+            vector_arrays.emplace_back(vec_array_values[row], false);
         }
     }
 
@@ -3983,14 +4560,10 @@ LoadNullableElementFlatIndex(SegmentSealed* segment,
                                    flat_data.data(),
                                    knowhere::IndexEnum::INDEX_FAISS_IDMAP);
 
-    std::unique_ptr<bool[]> valid_rows(new bool[kNullableElemN]);
-    for (int row = 0; row < kNullableElemN; ++row) {
-        valid_rows[row] = true;
-    }
-    indexing->BuildValidData(valid_rows.get(), kNullableElemN);
-
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
@@ -4010,14 +4583,10 @@ LoadNullableElementFlatIndexWithValidRows(SegmentSealed* segment,
                                    flat_data.data(),
                                    knowhere::IndexEnum::INDEX_FAISS_IDMAP);
 
-    std::unique_ptr<bool[]> valid_data(new bool[valid_rows.size()]);
-    for (size_t row = 0; row < valid_rows.size(); ++row) {
-        valid_data[row] = valid_rows[row];
-    }
-    indexing->BuildValidData(valid_data.get(), valid_rows.size());
-
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
     load_index_info.cache_index =
         CreateTestCacheIndex("test", std::move(indexing));
@@ -4205,7 +4774,7 @@ TEST(ElementVectorSearch, NullableGrowingBruteForce_ElementBitset) {
                     kNullableElemN,
                     f.raw_data.row_ids_.data(),
                     f.raw_data.timestamps_.data(),
-                    f.raw_data.raw_);
+                    f.raw_data.SharedRaw());
 
     auto sr = RunNullableElementSearch(segment.get(), f);
     ASSERT_NE(sr, nullptr);
@@ -4220,7 +4789,7 @@ TEST(ElementVectorSearch, GrowingBruteForce_RangeSearch) {
                     kElemN,
                     f.raw_data.row_ids_.data(),
                     f.raw_data.timestamps_.data(),
-                    f.raw_data.raw_);
+                    f.raw_data.SharedRaw());
 
     ScopedSchemaHandle handle(*f.schema);
     const float radius = 1e6f;
@@ -4249,7 +4818,7 @@ TEST(ElementVectorSearch, GrowingBruteForce_IteratorV2) {
                     kElemN,
                     f.raw_data.row_ids_.data(),
                     f.raw_data.timestamps_.data(),
-                    f.raw_data.raw_);
+                    f.raw_data.SharedRaw());
 
     ScopedSchemaHandle handle(*f.schema);
     auto plan_bytes =
@@ -4400,7 +4969,7 @@ CreateMultiChunkGrowingSegment(const ElementSearchFixture& f) {
                     kElemN,
                     f.raw_data.row_ids_.data(),
                     f.raw_data.timestamps_.data(),
-                    f.raw_data.raw_);
+                    f.raw_data.SharedRaw());
     static_assert(kElemN > kElemChunkRows,
                   "N must exceed chunk_rows to exercise multi-chunk paths");
     return segment;
@@ -4683,11 +5252,11 @@ TEST(ElementFilterGrowingNullable, SearchAndSubscriptAcrossPhysicalChunks) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
 
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_impl, nullptr);
-    auto offsets = growing_impl->GetArrayOffsets(vec_fid);
+    auto offsets = growing_impl->GetStructElementOffsets(vec_fid);
     ASSERT_NE(offsets, nullptr);
     ASSERT_EQ(offsets->GetRowCount(), N);
     ASSERT_EQ(offsets->GetTotalElementCount(), 1);

@@ -8,7 +8,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/wab"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -47,6 +46,7 @@ func buildInterceptorParams(ctx context.Context, underlyingWALImpls walimpls.WAL
 	)
 	mvccManager := mvcc.NewMVCCManager(msg.TimeTick())
 	return &interceptors.InterceptorBuildParam{
+		Context:             ctx,
 		ChannelInfo:         underlyingWALImpls.Channel(),
 		WAL:                 syncutil.NewFuture[wal.WAL](),
 		LastTimeTickMessage: msg,
@@ -75,8 +75,6 @@ func sendFirstTimeTick(ctx context.Context, underlyingWALImpls walimpls.WALImpls
 		logger.Info(ctx, "sync first time tick done", mlog.String("msgID", msg.MessageID().String()), mlog.Uint64("timetick", msg.TimeTick()))
 	}()
 
-	sourceID := paramtable.GetNodeID()
-
 	// Send first timetick message to wal before interceptor is ready.
 	// New TT is always greater than all tt on previous streamingnode.
 	// A fencing operation of underlying WAL is needed to make exclusive produce of topic.
@@ -88,7 +86,16 @@ func sendFirstTimeTick(ctx context.Context, underlyingWALImpls walimpls.WALImpls
 	if err != nil {
 		return nil, errors.Wrap(err, "allocate timestamp failed")
 	}
-	mutableMsg := timetick.NewTimeTickMsg(ts, lastConfirmedMessageID, sourceID, true)
+	mutableMsg := message.NewRecoveryBarrierMessageBuilderV2().
+		WithHeader(&message.RecoveryBarrierMessageHeader{}).
+		WithBody(&message.RecoveryBarrierMessageBody{}).
+		WithAllVChannel().
+		MustBuildMutable()
+	if lastConfirmedMessageID != nil {
+		mutableMsg = mutableMsg.WithTimeTick(ts).WithLastConfirmed(lastConfirmedMessageID)
+	} else {
+		mutableMsg = mutableMsg.WithTimeTick(ts).WithLastConfirmedUseMessageID()
+	}
 	msgID, err := underlyingWALImpls.Append(ctx, mutableMsg)
 	if err != nil {
 		return nil, errors.Wrap(err, "send first timestamp message failed")

@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -50,6 +51,7 @@ func (s *CopySegmentMetaSuite) SetupTest() {
 	s.collectionID = 1
 
 	s.catalog = mocks.NewDataCoordCatalog(s.T())
+	s.catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	s.catalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
@@ -67,7 +69,7 @@ func (s *CopySegmentMetaSuite) SetupTest() {
 	s.broker = broker.NewMockBroker(s.T())
 	s.broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
-	s.meta, err = newMeta(context.TODO(), s.catalog, nil, s.broker)
+	s.meta, err = newMeta(context.TODO(), s.catalog, nil, metacache.NewMetaStore(s.catalog), s.broker)
 	s.NoError(err)
 	s.meta.AddCollection(&collectionInfo{
 		ID:     s.collectionID,
@@ -84,6 +86,7 @@ func TestCopySegmentMeta(t *testing.T) {
 
 func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_Success() {
 	catalog := mocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
@@ -101,7 +104,7 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_Success() {
 	broker := broker.NewMockBroker(s.T())
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	s.NoError(err)
 
 	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, meta, nil, nil)
@@ -111,6 +114,7 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_Success() {
 
 func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_ListJobsError() {
 	catalog := mocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, errors.New("list jobs error"))
 
 	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, nil, nil, nil)
@@ -121,6 +125,7 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_ListJobsError() {
 
 func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_ListTasksError() {
 	catalog := mocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, errors.New("list tasks error"))
 
@@ -132,6 +137,7 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_ListTasksError() {
 
 func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_RestoreJobs() {
 	catalog := mocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 
 	restoredJobs := []*datapb.CopySegmentJob{
 		{
@@ -163,7 +169,7 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_RestoreJobs() {
 	broker := broker.NewMockBroker(s.T())
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	s.NoError(err)
 
 	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, meta, nil, nil)
@@ -181,6 +187,7 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_RestoreJobs() {
 
 func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_RestoreTasks() {
 	catalog := mocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 
 	restoredTasks := []*datapb.CopySegmentTask{
 		{
@@ -214,7 +221,7 @@ func (s *CopySegmentMetaSuite) TestNewCopySegmentMeta_RestoreTasks() {
 	broker := broker.NewMockBroker(s.T())
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
-	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	meta, err := newMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker)
 	s.NoError(err)
 
 	copyMeta, err := NewCopySegmentMeta(context.TODO(), catalog, meta, nil, nil)
@@ -952,6 +959,7 @@ func (s *CopySegmentMetaSuite) TestCopySegmentTasks_Operations() {
 // job to Completed with PinId>0 unpins the source snapshot exactly once.
 func TestUpdateJobStateAndReleaseRef_UnpinsOnTerminal(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	snapMeta := &snapshotMeta{}
@@ -1003,6 +1011,7 @@ func TestUpdateJobStateAndReleaseRef_UnpinsOnTerminal(t *testing.T) {
 // before the pin refactor (PinId=0) skip Unpin and do not panic on nil snapshotMeta.
 func TestUpdateJobStateAndReleaseRef_SkipsUnpinForLegacyJob(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	unpinCalled := false
@@ -1045,6 +1054,7 @@ func TestUpdateJobStateAndReleaseRef_SkipsUnpinForLegacyJob(t *testing.T) {
 // The pin is expected to self-expire via TTL — failing the state machine would double-drive it.
 func TestUpdateJobStateAndReleaseRef_UnpinErrorSwallowed(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().SaveCopySegmentJob(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	unpinCalls := 0

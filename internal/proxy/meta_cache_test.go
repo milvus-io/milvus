@@ -981,16 +981,16 @@ func TestMetaCache_GetCollection(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
 
-	err := InitMetaCache(ctx, rootCoord)
+	cache, err := initMetaCache(ctx, rootCoord)
 	assert.NoError(t, err)
 
-	id, err := globalMetaCache.GetCollectionID(ctx, dbName, "collection1")
+	id, err := cache.GetCollectionID(ctx, dbName, "collection1")
 	assert.NoError(t, err)
 	assert.Equal(t, id, typeutil.UniqueID(1))
 	assert.Equal(t, rootCoord.GetAccessCount(), 1)
 
 	// should'nt be accessed to remote root coord.
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, dbName, "collection1")
+	schema, err := cache.GetCollectionSchema(ctx, dbName, "collection1")
 	assert.Equal(t, rootCoord.GetAccessCount(), 1)
 	assert.NoError(t, err)
 	EqualSchema(t, schema.CollectionSchema, &schemapb.CollectionSchema{
@@ -999,11 +999,11 @@ func TestMetaCache_GetCollection(t *testing.T) {
 		Functions: []*schemapb.FunctionSchema{},
 		Name:      "collection1",
 	})
-	id, err = globalMetaCache.GetCollectionID(ctx, dbName, "collection2")
+	id, err = cache.GetCollectionID(ctx, dbName, "collection2")
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 	assert.NoError(t, err)
 	assert.Equal(t, id, typeutil.UniqueID(2))
-	schema, err = globalMetaCache.GetCollectionSchema(ctx, dbName, "collection2")
+	schema, err = cache.GetCollectionSchema(ctx, dbName, "collection2")
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 	assert.NoError(t, err)
 	EqualSchema(t, schema.CollectionSchema, &schemapb.CollectionSchema{
@@ -1014,11 +1014,11 @@ func TestMetaCache_GetCollection(t *testing.T) {
 	})
 
 	// test to get from cache, this should trigger root request
-	id, err = globalMetaCache.GetCollectionID(ctx, dbName, "collection1")
+	id, err = cache.GetCollectionID(ctx, dbName, "collection1")
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 	assert.NoError(t, err)
 	assert.Equal(t, id, typeutil.UniqueID(1))
-	schema, err = globalMetaCache.GetCollectionSchema(ctx, dbName, "collection1")
+	schema, err = cache.GetCollectionSchema(ctx, dbName, "collection1")
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 	assert.NoError(t, err)
 	EqualSchema(t, schema.CollectionSchema, &schemapb.CollectionSchema{
@@ -1033,25 +1033,25 @@ func TestMetaCache_GetCollectionByAliasHitsCache(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
 
-	err := InitMetaCache(ctx, rootCoord)
+	cache, err := initMetaCache(ctx, rootCoord)
 	assert.NoError(t, err)
 
-	id, err := globalMetaCache.GetCollectionID(ctx, dbName, "collection1_alias")
+	id, err := cache.GetCollectionID(ctx, dbName, "collection1_alias")
 	assert.NoError(t, err)
 	assert.Equal(t, typeutil.UniqueID(1), id)
 	assert.Equal(t, 1, rootCoord.GetAccessCount())
 
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, dbName, "collection1_alias")
+	schema, err := cache.GetCollectionSchema(ctx, dbName, "collection1_alias")
 	assert.NoError(t, err)
 	assert.Equal(t, "collection1", schema.GetName())
 	assert.Equal(t, 1, rootCoord.GetAccessCount())
 
-	info, err := globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1_alias", 0)
+	info, err := cache.GetCollectionInfo(ctx, dbName, "collection1_alias", 0)
 	assert.NoError(t, err)
 	assert.Equal(t, typeutil.UniqueID(1), info.CollID)
 	assert.Equal(t, 1, rootCoord.GetAccessCount())
 
-	metaCache := globalMetaCache.(*MetaCache)
+	metaCache := cache.(*MetaCache)
 	aliasCachedAsCollection := metaCache.HasNameHintForTest(dbName, "collection1_alias")
 	assert.False(t, aliasCachedAsCollection, "the alias must not be registered as a collection-name hint")
 	aliasTarget, ok := metaCache.AliasTargetForTest(dbName, "collection1_alias")
@@ -1063,7 +1063,7 @@ func TestMetaCache_GetBasicCollectionInfo(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
 
-	err := InitMetaCache(ctx, rootCoord)
+	cache, err := initMetaCache(ctx, rootCoord)
 	assert.NoError(t, err)
 
 	// should be no data race.
@@ -1071,7 +1071,7 @@ func TestMetaCache_GetBasicCollectionInfo(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		info, err := globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
+		info, err := cache.GetCollectionInfo(ctx, dbName, "collection1", 1)
 		assert.NoError(t, err)
 		assert.Equal(t, info.CollID, int64(1))
 		_ = info.ConsistencyLevel
@@ -1080,7 +1080,7 @@ func TestMetaCache_GetBasicCollectionInfo(t *testing.T) {
 	}()
 	go func() {
 		defer wg.Done()
-		info, err := globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
+		info, err := cache.GetCollectionInfo(ctx, dbName, "collection1", 1)
 		assert.NoError(t, err)
 		assert.Equal(t, info.CollID, int64(1))
 		_ = info.ConsistencyLevel
@@ -1091,12 +1091,10 @@ func TestMetaCache_GetBasicCollectionInfo(t *testing.T) {
 }
 
 func TestMetaCacheGetCollectionWithUpdate(t *testing.T) {
-	cache := globalMetaCache
-	defer func() { globalMetaCache = cache }()
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{Status: merr.Success()}, nil)
-	err := InitMetaCache(ctx, rootCoord)
+	cache, err := initMetaCache(ctx, rootCoord)
 	assert.NoError(t, err)
 	t.Run("update with name", func(t *testing.T) {
 		rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
@@ -1119,7 +1117,7 @@ func TestMetaCacheGetCollectionWithUpdate(t *testing.T) {
 			PhysicalChannelNames: []string{"by-dev-rootcoord-dml_1"},
 			VirtualChannelNames:  []string{"by-dev-rootcoord-dml_1_1v0"},
 		}, nil).Once()
-		c, err := globalMetaCache.GetCollectionInfo(ctx, "foo", "bar", 1)
+		c, err := cache.GetCollectionInfo(ctx, "foo", "bar", 1)
 		assert.NoError(t, err)
 		assert.Equal(t, c.CollID, int64(1))
 		assert.Equal(t, c.Schema.Name, "bar")
@@ -1146,7 +1144,7 @@ func TestMetaCacheGetCollectionWithUpdate(t *testing.T) {
 			PhysicalChannelNames: []string{"by-dev-rootcoord-dml_1"},
 			VirtualChannelNames:  []string{"by-dev-rootcoord-dml_1_1v0"},
 		}, nil).Once()
-		c, err := globalMetaCache.GetCollectionInfo(ctx, "foo", "hoo", 0)
+		c, err := cache.GetCollectionInfo(ctx, "foo", "hoo", 0)
 		assert.NoError(t, err)
 		assert.Equal(t, c.CollID, int64(1))
 		assert.Equal(t, c.Schema.Name, "bar")
@@ -1159,7 +1157,7 @@ func TestMetaCache_InitCache(t *testing.T) {
 		rootCoord := mocks.NewMockMixCoordClient(t)
 		rootCoord.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{}, nil).Maybe()
 		rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{Status: merr.Success()}, nil).Once()
-		err := InitMetaCache(ctx, rootCoord)
+		_, err := initMetaCache(ctx, rootCoord)
 		assert.NoError(t, err)
 	})
 
@@ -1169,7 +1167,7 @@ func TestMetaCache_InitCache(t *testing.T) {
 		rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(
 			&internalpb.ListPolicyResponse{Status: merr.Status(errors.New("mock list policy error"))},
 			nil).Once()
-		err := InitMetaCache(ctx, rootCoord)
+		_, err := initMetaCache(ctx, rootCoord)
 		assert.Error(t, err)
 	})
 
@@ -1178,7 +1176,7 @@ func TestMetaCache_InitCache(t *testing.T) {
 		rootCoord := mocks.NewMockMixCoordClient(t)
 		rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(
 			nil, errors.New("mock list policy rpc errorr")).Once()
-		err := InitMetaCache(ctx, rootCoord)
+		_, err := initMetaCache(ctx, rootCoord)
 		assert.Error(t, err)
 	})
 }
@@ -1407,10 +1405,10 @@ func TestMetaCache_GetCollectionInfoByIDCacheHit(t *testing.T) {
 func TestMetaCache_EmptyDBNameSharesDefaultEntry(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
-	err := InitMetaCache(ctx, rootCoord)
+	cache, err := initMetaCache(ctx, rootCoord)
 	assert.NoError(t, err)
 
-	id, err := globalMetaCache.GetCollectionID(ctx, "", "collection1")
+	id, err := cache.GetCollectionID(ctx, "", "collection1")
 	assert.NoError(t, err)
 	assert.Equal(t, UniqueID(1), id)
 	assert.Equal(t, 1, rootCoord.GetAccessCount())
@@ -1418,13 +1416,13 @@ func TestMetaCache_EmptyDBNameSharesDefaultEntry(t *testing.T) {
 	// explicit default db, by-id with empty db, and by-id with an unrelated db
 	// (ids are cluster-unique, rootcoord ignores the db for by-id describes)
 	// are all served by the same entry without further RPCs
-	id, err = globalMetaCache.GetCollectionID(ctx, "default", "collection1")
+	id, err = cache.GetCollectionID(ctx, "default", "collection1")
 	assert.NoError(t, err)
 	assert.Equal(t, UniqueID(1), id)
-	name, err := globalMetaCache.GetCollectionName(ctx, "", 1)
+	name, err := cache.GetCollectionName(ctx, "", 1)
 	assert.NoError(t, err)
 	assert.Equal(t, "collection1", name)
-	name, err = globalMetaCache.GetCollectionName(ctx, "some_other_db", 1)
+	name, err = cache.GetCollectionName(ctx, "some_other_db", 1)
 	assert.NoError(t, err)
 	assert.Equal(t, "collection1", name)
 	assert.Equal(t, 1, rootCoord.GetAccessCount())
@@ -1433,16 +1431,16 @@ func TestMetaCache_EmptyDBNameSharesDefaultEntry(t *testing.T) {
 func TestMetaCache_GetCollectionName(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
-	err := InitMetaCache(ctx, rootCoord)
+	cache, err := initMetaCache(ctx, rootCoord)
 	assert.NoError(t, err)
 
-	collection, err := globalMetaCache.GetCollectionName(ctx, GetCurDBNameFromContextOrDefault(ctx), 1)
+	collection, err := cache.GetCollectionName(ctx, GetCurDBNameFromContextOrDefault(ctx), 1)
 	assert.NoError(t, err)
 	assert.Equal(t, collection, "collection1")
 	assert.Equal(t, rootCoord.GetAccessCount(), 1)
 
 	// should'nt be accessed to remote root coord.
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, dbName, "collection1")
+	schema, err := cache.GetCollectionSchema(ctx, dbName, "collection1")
 	assert.Equal(t, rootCoord.GetAccessCount(), 1)
 	assert.NoError(t, err)
 	EqualSchema(t, schema.CollectionSchema, &schemapb.CollectionSchema{
@@ -1451,11 +1449,11 @@ func TestMetaCache_GetCollectionName(t *testing.T) {
 		Functions: []*schemapb.FunctionSchema{},
 		Name:      "collection1",
 	})
-	collection, err = globalMetaCache.GetCollectionName(ctx, GetCurDBNameFromContextOrDefault(ctx), 1)
+	collection, err = cache.GetCollectionName(ctx, GetCurDBNameFromContextOrDefault(ctx), 1)
 	assert.Equal(t, rootCoord.GetAccessCount(), 1)
 	assert.NoError(t, err)
 	assert.Equal(t, collection, "collection1")
-	schema, err = globalMetaCache.GetCollectionSchema(ctx, dbName, "collection2")
+	schema, err = cache.GetCollectionSchema(ctx, dbName, "collection2")
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 	assert.NoError(t, err)
 	EqualSchema(t, schema.CollectionSchema, &schemapb.CollectionSchema{
@@ -1466,11 +1464,11 @@ func TestMetaCache_GetCollectionName(t *testing.T) {
 	})
 
 	// test to get from cache, this should trigger root request
-	collection, err = globalMetaCache.GetCollectionName(ctx, GetCurDBNameFromContextOrDefault(ctx), 1)
+	collection, err = cache.GetCollectionName(ctx, GetCurDBNameFromContextOrDefault(ctx), 1)
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 	assert.NoError(t, err)
 	assert.Equal(t, collection, "collection1")
-	schema, err = globalMetaCache.GetCollectionSchema(ctx, dbName, "collection1")
+	schema, err = cache.GetCollectionSchema(ctx, dbName, "collection1")
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 	assert.NoError(t, err)
 	EqualSchema(t, schema.CollectionSchema, &schemapb.CollectionSchema{
@@ -1484,17 +1482,17 @@ func TestMetaCache_GetCollectionName(t *testing.T) {
 func TestMetaCache_GetCollectionFailure(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
-	err := InitMetaCache(ctx, rootCoord)
+	cache, err := initMetaCache(ctx, rootCoord)
 	assert.NoError(t, err)
 	rootCoord.Error = true
 
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, dbName, "collection1")
+	schema, err := cache.GetCollectionSchema(ctx, dbName, "collection1")
 	assert.Error(t, err)
 	assert.Nil(t, schema)
 
 	rootCoord.Error = false
 
-	schema, err = globalMetaCache.GetCollectionSchema(ctx, dbName, "collection1")
+	schema, err = cache.GetCollectionSchema(ctx, dbName, "collection1")
 	assert.NoError(t, err)
 	EqualSchema(t, schema.CollectionSchema, &schemapb.CollectionSchema{
 		AutoID:    true,
@@ -1517,13 +1515,13 @@ func TestMetaCache_GetCollectionFailure(t *testing.T) {
 func TestMetaCache_GetNonExistCollection(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
-	err := InitMetaCache(ctx, rootCoord)
+	cache, err := initMetaCache(ctx, rootCoord)
 	assert.NoError(t, err)
 
-	id, err := globalMetaCache.GetCollectionID(ctx, dbName, "collection3")
+	id, err := cache.GetCollectionID(ctx, dbName, "collection3")
 	assert.Error(t, err)
 	assert.Equal(t, id, int64(0))
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, dbName, "collection3")
+	schema, err := cache.GetCollectionSchema(ctx, dbName, "collection3")
 	assert.Error(t, err)
 	assert.Nil(t, schema)
 }
@@ -1531,19 +1529,19 @@ func TestMetaCache_GetNonExistCollection(t *testing.T) {
 func TestMetaCache_GetPartitionID(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
-	err := InitMetaCache(ctx, rootCoord)
+	cache, err := initMetaCache(ctx, rootCoord)
 	assert.NoError(t, err)
 
-	id, err := globalMetaCache.GetPartitionID(ctx, dbName, "collection1", "par1")
+	id, err := cache.GetPartitionID(ctx, dbName, "collection1", "par1")
 	assert.NoError(t, err)
 	assert.Equal(t, id, typeutil.UniqueID(1))
-	id, err = globalMetaCache.GetPartitionID(ctx, dbName, "collection1", "par2")
+	id, err = cache.GetPartitionID(ctx, dbName, "collection1", "par2")
 	assert.NoError(t, err)
 	assert.Equal(t, id, typeutil.UniqueID(2))
-	id, err = globalMetaCache.GetPartitionID(ctx, dbName, "collection2", "par1")
+	id, err = cache.GetPartitionID(ctx, dbName, "collection2", "par1")
 	assert.NoError(t, err)
 	assert.Equal(t, id, typeutil.UniqueID(3))
-	id, err = globalMetaCache.GetPartitionID(ctx, dbName, "collection2", "par2")
+	id, err = cache.GetPartitionID(ctx, dbName, "collection2", "par2")
 	assert.NoError(t, err)
 	assert.Equal(t, id, typeutil.UniqueID(4))
 }
@@ -1551,7 +1549,7 @@ func TestMetaCache_GetPartitionID(t *testing.T) {
 func TestMetaCache_ConcurrentTest1(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
-	err := InitMetaCache(ctx, rootCoord)
+	cache, err := initMetaCache(ctx, rootCoord)
 	assert.NoError(t, err)
 
 	var wg sync.WaitGroup
@@ -1560,7 +1558,7 @@ func TestMetaCache_ConcurrentTest1(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < cnt; i++ {
 			// GetCollectionSchema will never fail
-			schema, err := globalMetaCache.GetCollectionSchema(ctx, dbName, "collection1")
+			schema, err := cache.GetCollectionSchema(ctx, dbName, "collection1")
 			assert.NoError(t, err)
 			EqualSchema(t, schema.CollectionSchema, &schemapb.CollectionSchema{
 				AutoID:    true,
@@ -1576,7 +1574,7 @@ func TestMetaCache_ConcurrentTest1(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < cnt; i++ {
 			// GetPartitions may fail
-			globalMetaCache.GetPartitions(ctx, dbName, "collection1")
+			cache.GetPartitions(ctx, dbName, "collection1")
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
@@ -1585,7 +1583,7 @@ func TestMetaCache_ConcurrentTest1(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < cnt; i++ {
 			// periodically invalid collection cache
-			globalMetaCache.RemoveCollection(ctx, dbName, "collection1")
+			cache.RemoveCollection(ctx, dbName, "collection1")
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
@@ -1604,25 +1602,25 @@ func TestMetaCache_ConcurrentTest1(t *testing.T) {
 func TestMetaCache_GetPartitionError(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
-	err := InitMetaCache(ctx, rootCoord)
+	cache, err := initMetaCache(ctx, rootCoord)
 	assert.NoError(t, err)
 
 	// Test the case where ShowPartitionsResponse is not aligned
-	id, err := globalMetaCache.GetPartitionID(ctx, dbName, "errorCollection", "par1")
+	id, err := cache.GetPartitionID(ctx, dbName, "errorCollection", "par1")
 	assert.Error(t, err)
 	assert.Equal(t, id, typeutil.UniqueID(0))
 
-	partitions, err2 := globalMetaCache.GetPartitions(ctx, dbName, "errorCollection")
+	partitions, err2 := cache.GetPartitions(ctx, dbName, "errorCollection")
 	assert.NotNil(t, err2)
 	assert.Equal(t, len(partitions), 0)
 
 	// Test non existed tables
-	id, err = globalMetaCache.GetPartitionID(ctx, dbName, "nonExisted", "par1")
+	id, err = cache.GetPartitionID(ctx, dbName, "nonExisted", "par1")
 	assert.Error(t, err)
 	assert.Equal(t, id, typeutil.UniqueID(0))
 
 	// Test non existed partition
-	id, err = globalMetaCache.GetPartitionID(ctx, dbName, "collection1", "par3")
+	id, err = cache.GetPartitionID(ctx, dbName, "collection1", "par3")
 	assert.Error(t, err)
 	assert.Equal(t, id, typeutil.UniqueID(0))
 }
@@ -1640,11 +1638,11 @@ func TestMetaCache_ClearShards(t *testing.T) {
 func TestMetaCache_PolicyInfo(t *testing.T) {
 	client := &MockMixCoordClientInterface{}
 
-	t.Run("InitMetaCache", func(t *testing.T) {
+	t.Run("initMetaCache", func(t *testing.T) {
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
 			return nil, errors.New("mock error")
 		}
-		err := InitMetaCache(context.Background(), client)
+		_, err := initMetaCache(context.Background(), client)
 		assert.Error(t, err)
 
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
@@ -1653,7 +1651,7 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 				PolicyInfos: []string{"policy1", "policy2", "policy3"},
 			}, nil
 		}
-		err = InitMetaCache(context.Background(), client)
+		_, err = initMetaCache(context.Background(), client)
 		assert.NoError(t, err)
 	})
 
@@ -1665,7 +1663,7 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 				UserRoles:   []string{funcutil.EncodeUserRoleCache("foo", "role1"), funcutil.EncodeUserRoleCache("foo", "role2"), funcutil.EncodeUserRoleCache("foo2", "role2")},
 			}, nil
 		}
-		err := InitMetaCache(context.Background(), client)
+		_, err := initMetaCache(context.Background(), client)
 		assert.NoError(t, err)
 		policyInfos := privilege.GetPrivilegeCache().GetPrivilegeInfo(context.Background())
 		assert.Equal(t, 3, len(policyInfos))
@@ -1681,7 +1679,7 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 				UserRoles:   []string{funcutil.EncodeUserRoleCache("foo", "role1"), funcutil.EncodeUserRoleCache("foo", "role2"), funcutil.EncodeUserRoleCache("foo2", "role2")},
 			}, nil
 		}
-		err := InitMetaCache(context.Background(), client)
+		_, err := initMetaCache(context.Background(), client)
 		assert.NoError(t, err)
 
 		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheGrantPrivilege, OpKey: "policyX"})
@@ -1722,7 +1720,7 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 				UserRoles: []string{funcutil.EncodeUserRoleCache("foo", "role1"), funcutil.EncodeUserRoleCache("foo", "role2"), funcutil.EncodeUserRoleCache("foo2", "role2"), funcutil.EncodeUserRoleCache("foo2", "role3")},
 			}, nil
 		}
-		err := InitMetaCache(context.Background(), client)
+		_, err := initMetaCache(context.Background(), client)
 		assert.NoError(t, err)
 
 		err = privilege.GetPrivilegeCache().RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheDeleteUser, OpKey: "foo"})
@@ -1757,7 +1755,7 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 func TestMetaCache_RemoveCollection(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
-	err := InitMetaCache(ctx, rootCoord)
+	cache, err := initMetaCache(ctx, rootCoord)
 	assert.NoError(t, err)
 
 	rootCoord.showLoadCollections = func(ctx context.Context, in *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
@@ -1768,33 +1766,33 @@ func TestMetaCache_RemoveCollection(t *testing.T) {
 		}, nil
 	}
 
-	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
+	_, err = cache.GetCollectionInfo(ctx, dbName, "collection1", 1)
 	assert.NoError(t, err)
 	// no collectionInfo of collection1, should access RootCoord
 	assert.Equal(t, rootCoord.GetAccessCount(), 1)
 
-	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
+	_, err = cache.GetCollectionInfo(ctx, dbName, "collection1", 1)
 	assert.NoError(t, err)
 	// shouldn't access RootCoord again
 	assert.Equal(t, rootCoord.GetAccessCount(), 1)
 
-	globalMetaCache.RemoveCollection(ctx, dbName, "collection1")
+	cache.RemoveCollection(ctx, dbName, "collection1")
 	// no collectionInfo of collection2, should access RootCoord
-	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
+	_, err = cache.GetCollectionInfo(ctx, dbName, "collection1", 1)
 	assert.NoError(t, err)
 	// shouldn't access RootCoord again
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
 
-	globalMetaCache.RemoveCollectionsByID(ctx, UniqueID(1))
+	cache.RemoveCollectionsByID(ctx, UniqueID(1))
 	// no collectionInfo of collection2, should access RootCoord
-	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
+	_, err = cache.GetCollectionInfo(ctx, dbName, "collection1", 1)
 	assert.NoError(t, err)
 	// shouldn't access RootCoord again
 	assert.Equal(t, rootCoord.GetAccessCount(), 3)
 
-	globalMetaCache.RemoveCollectionsByID(ctx, UniqueID(1))
+	cache.RemoveCollectionsByID(ctx, UniqueID(1))
 	// no collectionInfo of collection2, should access RootCoord
-	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
+	_, err = cache.GetCollectionInfo(ctx, dbName, "collection1", 1)
 	assert.NoError(t, err)
 	// no collectionInfo of collection1, should access RootCoord
 	assert.Equal(t, rootCoord.GetAccessCount(), 4)
@@ -1808,16 +1806,16 @@ func TestGlobalMetaCache_ShuffleShardLeaders(t *testing.T) {
 func TestMetaCache_Database(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
-	err := InitMetaCache(ctx, rootCoord)
+	cache, err := initMetaCache(ctx, rootCoord)
 	assert.NoError(t, err)
-	assert.Equal(t, globalMetaCache.HasDatabase(ctx, dbName), false)
+	assert.Equal(t, cache.HasDatabase(ctx, dbName), false)
 
-	_, err = globalMetaCache.GetCollectionInfo(ctx, dbName, "collection1", 1)
+	_, err = cache.GetCollectionInfo(ctx, dbName, "collection1", 1)
 	assert.NoError(t, err)
-	_, err = GetCachedCollectionSchema(ctx, dbName, "collection1")
+	_, err = GetCachedCollectionSchema(ctx, cache, dbName, "collection1")
 	assert.NoError(t, err)
-	assert.Equal(t, globalMetaCache.HasDatabase(ctx, dbName), true)
-	assert.Equal(t, CheckDatabase(ctx, dbName), true)
+	assert.Equal(t, cache.HasDatabase(ctx, dbName), true)
+	assert.Equal(t, CheckDatabase(ctx, cache, dbName), true)
 }
 
 func TestGetDatabaseInfo(t *testing.T) {
@@ -1994,11 +1992,11 @@ func TestMetaCache_AllocID(t *testing.T) {
 			PolicyInfos: []string{"policy1", "policy2", "policy3"},
 		}, nil)
 
-		err := InitMetaCache(ctx, rootCoord)
+		cache, err := initMetaCache(ctx, rootCoord)
 		assert.NoError(t, err)
-		assert.Equal(t, globalMetaCache.HasDatabase(ctx, dbName), false)
+		assert.Equal(t, cache.HasDatabase(ctx, dbName), false)
 
-		id, err := globalMetaCache.AllocID(ctx)
+		id, err := cache.AllocID(ctx)
 		assert.NoError(t, err)
 		assert.Equal(t, id, int64(11198))
 	})
@@ -2013,11 +2011,11 @@ func TestMetaCache_AllocID(t *testing.T) {
 			PolicyInfos: []string{"policy1", "policy2", "policy3"},
 		}, nil)
 
-		err := InitMetaCache(ctx, rootCoord)
+		cache, err := initMetaCache(ctx, rootCoord)
 		assert.NoError(t, err)
-		assert.Equal(t, globalMetaCache.HasDatabase(ctx, dbName), false)
+		assert.Equal(t, cache.HasDatabase(ctx, dbName), false)
 
-		id, err := globalMetaCache.AllocID(ctx)
+		id, err := cache.AllocID(ctx)
 		assert.Error(t, err)
 		assert.Equal(t, id, int64(0))
 	})
@@ -2032,11 +2030,11 @@ func TestMetaCache_AllocID(t *testing.T) {
 			PolicyInfos: []string{"policy1", "policy2", "policy3"},
 		}, nil)
 
-		err := InitMetaCache(ctx, rootCoord)
+		cache, err := initMetaCache(ctx, rootCoord)
 		assert.NoError(t, err)
-		assert.Equal(t, globalMetaCache.HasDatabase(ctx, dbName), false)
+		assert.Equal(t, cache.HasDatabase(ctx, dbName), false)
 
-		id, err := globalMetaCache.AllocID(ctx)
+		id, err := cache.AllocID(ctx)
 		assert.Error(t, err)
 		assert.Equal(t, id, int64(0))
 	})
@@ -2460,17 +2458,21 @@ func TestMetaCache_GetPartitionInfo_CacheHit(t *testing.T) {
 		Status: merr.Success(),
 	}, nil).Maybe()
 
-	// the cold fill costs two describes -- one for the collection resolution and
-	// one inside the partition-list filler; the second lookup hits both caches
+	// The cold fill describes once to resolve and cache the collection. The
+	// partition-list filler reuses that cached schema; the second lookup hits
+	// both caches.
 	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		Status:       merr.Success(),
 		CollectionID: 1,
 		DbName:       "db",
 		Schema:       &schemapb.CollectionSchema{Name: "collection", Fields: []*schemapb.FieldSchema{}},
 		RequestTime:  1000,
-	}, nil).Times(2)
+	}, nil).Once()
 
-	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
+	// The partition fill shows partitions by the resolved id, never by name.
+	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.MatchedBy(func(req *milvuspb.ShowPartitionsRequest) bool {
+		return req.GetCollectionName() == "" && req.GetCollectionID() == 1
+	})).Return(&milvuspb.ShowPartitionsResponse{
 		Status:               merr.Success(),
 		PartitionIDs:         []int64{100},
 		PartitionNames:       []string{"par1"},
@@ -2500,14 +2502,14 @@ func TestMetaCache_GetPartitionInfo_DefaultPartition(t *testing.T) {
 		Status: merr.Success(),
 	}, nil).Maybe()
 
-	// two describes on the cold fill: collection resolution + partition-list filler
+	// One describe resolves the collection; the partition fill reuses its schema.
 	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		Status:       merr.Success(),
 		CollectionID: 1,
 		DbName:       "db",
 		Schema:       &schemapb.CollectionSchema{Name: "collection", Fields: []*schemapb.FieldSchema{}},
 		RequestTime:  1000,
-	}, nil).Times(2)
+	}, nil).Once()
 
 	defaultPartitionName := Params.CommonCfg.DefaultPartitionName.GetValue()
 	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.MatchedBy(func(req *milvuspb.ShowPartitionsRequest) bool {
@@ -2538,15 +2540,15 @@ func TestMetaCache_GetPartitionInfo_Error(t *testing.T) {
 		Status: merr.Success(),
 	}, nil).Maybe()
 
-	// two describes: collection resolution + the filler's describe, which
-	// precedes the failing ShowPartitions inside the fill
+	// The collection is described once; the failing ShowPartitions follows while
+	// the partition fill reuses the cached schema.
 	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		Status:       merr.Success(),
 		CollectionID: 1,
 		DbName:       "db",
 		Schema:       &schemapb.CollectionSchema{Name: "collection", Fields: []*schemapb.FieldSchema{}},
 		RequestTime:  1000,
-	}, nil).Times(2)
+	}, nil).Once()
 
 	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(nil, errors.New("connection failed")).Once()
 
@@ -2566,8 +2568,8 @@ func TestMetaCache_GetPartitionInfos_CacheHit(t *testing.T) {
 		Status: merr.Success(),
 	}, nil).Maybe()
 
-	// one describe for the name resolution (fills the collection cache) and one inside the
-	// collection-level partition fill; the second GetPartitionInfos hits both caches
+	// One describe resolves and fills the collection cache. The partition fill
+	// reuses its schema, and the second GetPartitionInfos hits both caches.
 	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		Status:       merr.Success(),
 		CollectionID: 1,
@@ -2577,7 +2579,7 @@ func TestMetaCache_GetPartitionInfos_CacheHit(t *testing.T) {
 			Fields: []*schemapb.FieldSchema{},
 		},
 		RequestTime: 1000,
-	}, nil).Times(2)
+	}, nil).Once()
 
 	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
 		Status:               merr.Success(),
@@ -2608,9 +2610,9 @@ func TestMetaCache_RemovePartition(t *testing.T) {
 		Status: merr.Success(),
 	}, nil).Maybe()
 
-	// Four describes: the initial resolution + the partition-list filler's
-	// describe on the cold fill, then both again after the partition DDL staled
-	// the collection entry and the partition list.
+	// Two describes: one initial collection resolution, then one refetch after
+	// the partition DDL stales both the collection entry and partition list. Each
+	// partition fill reuses the corresponding cached schema.
 	describeCalls := 0
 	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, req *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
@@ -2634,7 +2636,7 @@ func TestMetaCache_RemovePartition(t *testing.T) {
 				Aliases:     []string{"alias"},
 				RequestTime: requestTime,
 			}, nil
-		}).Times(4)
+		}).Times(2)
 
 	// Two fills: the initial one, and the refetch after the partition DDL staled
 	// the exact real-name key. The alias lookups resolve to the real name and hit
@@ -2910,7 +2912,7 @@ func TestMetaCache_GetPartitionInfos_SingleflightKeyIncludesDatabase(t *testing.
 				},
 				RequestTime: 1000,
 			}, nil
-		}).Times(4) // per db: one name resolution + one inside the partition fill
+		}).Twice() // one name resolution per database; partition fills reuse the schemas
 
 	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, req *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
@@ -2977,9 +2979,9 @@ func TestMetaCache_GetPartitionInfosNormalizesEmptyDB(t *testing.T) {
 		Status: merr.Success(),
 	}, nil).Maybe()
 
-	// two describes on the first call (name resolution + partition fill); the
-	// explicit-default call hits the caches, proving both requests share the
-	// canonical bucket
+	// One describe on the first call resolves the collection; the partition fill
+	// reuses its schema. The explicit-default call hits the caches, proving both
+	// requests share the canonical bucket.
 	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		Status:       merr.Success(),
 		CollectionID: 1,
@@ -2989,7 +2991,7 @@ func TestMetaCache_GetPartitionInfosNormalizesEmptyDB(t *testing.T) {
 			Fields: []*schemapb.FieldSchema{},
 		},
 		RequestTime: 1000,
-	}, nil).Times(2)
+	}, nil).Once()
 
 	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
 		Status:               merr.Success(),
@@ -3026,15 +3028,16 @@ func TestMetaCache_GetPartitionInfoNormalizesEmptyDB(t *testing.T) {
 		Status: merr.Success(),
 	}, nil).Maybe()
 
-	// two describes on the cold fill (name resolution + partition-list filler);
-	// the explicit-default lookup hits the same cached entries
+	// One describe resolves the collection on the cold fill; the partition-list
+	// filler reuses its schema and the explicit-default lookup hits the same
+	// cached entries.
 	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		Status:       merr.Success(),
 		CollectionID: 1,
 		DbName:       "default",
 		Schema:       &schemapb.CollectionSchema{Name: "collection", Fields: []*schemapb.FieldSchema{}},
 		RequestTime:  1000,
-	}, nil).Times(2)
+	}, nil).Once()
 
 	// ShowPartitions must fire exactly once across both lookups when the cache
 	// key is normalized.
@@ -4972,13 +4975,11 @@ func TestMetaCache_ConsistencyCheckerCatchesGhostAlias(t *testing.T) {
 	assert.Empty(t, v, "with only B declaring \"a\", the cache is consistent")
 }
 
-// TestMetaCache_PartitionFillDoesNotAttachNewCollectionToOldID: the partition
-// fill resolves the collection id first, then must describe/show BY THAT ID.
-// If a same-name drop+recreate happens between resolve and fill, a by-name
-// describe would return the NEW collection's partitions and cache them under
-// the OLD id (wrong partition context, uncleanable with no GC). By id, the
-// stale old id returns not-found and the fill fails (caller re-resolves)
-// instead of caching a mismatch.
+// TestMetaCache_PartitionFillDoesNotAttachNewCollectionToOldID: even if the
+// collection cache still contains a stale same-name entry, the partition fill
+// must show partitions BY THAT RESOLVED ID. A by-name ShowPartitions could
+// return the recreated collection's list and cache it under the old id; the
+// id-addressed RPC instead fails for the dropped id, so no mismatch is cached.
 func TestMetaCache_PartitionFillDoesNotAttachNewCollectionToOldID(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
@@ -4986,33 +4987,17 @@ func TestMetaCache_PartitionFillDoesNotAttachNewCollectionToOldID(t *testing.T) 
 		Status: merr.Success(),
 	}, nil).Maybe()
 
-	// id 1 was dropped and "foo" recreated as id 2; the proxy's collection cache
-	// still holds the stale foo->1 mapping, so the partition fill resolves id 1.
-	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, req *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
-			id := req.GetCollectionID()
-			if id == 0 { // by-name resolve -> the CURRENT collection (id 2)
-				id = 2
-			}
-			if id == 1 { // by-id describe of the dropped old id -> not found
-				return &milvuspb.DescribeCollectionResponse{Status: merr.Status(merr.WrapErrCollectionNotFound("foo"))}, nil
-			}
-			return &milvuspb.DescribeCollectionResponse{
-				Status:       merr.Success(),
-				CollectionID: id,
-				DbName:       "db",
-				Schema:       &schemapb.CollectionSchema{Name: "foo", Fields: []*schemapb.FieldSchema{}},
-				RequestTime:  100,
-			}, nil
-		})
+	// The stale collection entry below already resolves foo -> id 1, so an
+	// additional DescribeCollection would be the redundant RPC this regression
+	// test is meant to prevent.
 	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, req *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
-			// id 2's partitions -- must NOT be cached under id 1
+			assert.Empty(t, req.GetCollectionName(), "partition fill must not resolve by the reused name")
+			assert.Equal(t, int64(1), req.GetCollectionID())
 			return &milvuspb.ShowPartitionsResponse{
-				Status: merr.Success(), PartitionIDs: []int64{201}, PartitionNames: []string{"p_new"},
-				CreatedTimestamps: []uint64{100}, CreatedUtcTimestamps: []uint64{100},
+				Status: merr.Status(merr.WrapErrCollectionNotFound("foo")),
 			}, nil
-		}).Maybe()
+		}).Once()
 
 	cache, err := NewMetaCache(rootCoord)
 	assert.NoError(t, err)
@@ -5021,7 +5006,7 @@ func TestMetaCache_PartitionFillDoesNotAttachNewCollectionToOldID(t *testing.T) 
 	// seed the stale collection-cache entry foo->id 1 (as if cached before the drop)
 	seedCollection(cache, "db", "foo", 1)
 
-	// partition fill resolves id 1, describes BY id 1 -> not-found -> error;
+	// Partition fill resolves id 1 and shows BY id 1 -> not-found -> error;
 	// NOTHING is cached under id 1.
 	_, err = cache.GetPartitionInfos(ctx, "db", "foo")
 	assert.Error(t, err, "the fill must fail rather than attach id 2's partitions to id 1")
@@ -5030,13 +5015,14 @@ func TestMetaCache_PartitionFillDoesNotAttachNewCollectionToOldID(t *testing.T) 
 	assert.False(t, ok, "no partition entry may be cached under the stale old id")
 }
 
-// TestMetaCache_PartitionFillSkipsWriteWhenPrimaryEvictedMidFill: the partition
-// fill resolves the collection id BEFORE taking fillMu.RLock; an invalidation in
-// that window evicts the primary (and its partition list). The fill still
-// describes/shows the collection successfully, but must NOT cache the list under
-// the now-owner-less id -- otherwise a later Create/DropPartition invalidation
-// (which routes through evictCollectionEntryLocked, a no-op when the primary is
-// absent) cannot clean it, and it would be re-adopted when the primary re-fills.
+// TestMetaCache_PartitionFillSkipsWriteWhenPrimaryEvictedMidFill: the exceptional
+// RemoveDatabase post-drain walk can evict the primary while a partition fill
+// holds fillMu.RLock. The fill may still successfully show partitions by id, but
+// must NOT cache the list under the now-owner-less id -- otherwise a later
+// Create/DropPartition invalidation (whose unified eviction no-ops when the
+// primary is absent) cannot clean it, and a refill could re-adopt stale data.
+// The partition-key order still comes from the resolved schema, which is
+// described only once.
 func TestMetaCache_PartitionFillSkipsWriteWhenPrimaryEvictedMidFill(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
@@ -5044,35 +5030,45 @@ func TestMetaCache_PartitionFillSkipsWriteWhenPrimaryEvictedMidFill(t *testing.T
 		Status: merr.Success(),
 	}, nil).Maybe()
 
+	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status:       merr.Success(),
+		CollectionID: 1,
+		DbName:       "db",
+		Schema: &schemapb.CollectionSchema{
+			Name: "collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: common.StartOfUserFieldID, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: common.StartOfUserFieldID + 1, Name: "part_key", DataType: schemapb.DataType_Int64, IsPartitionKey: true},
+			},
+		},
+		RequestTime: 1000,
+	}, nil).Once()
+
 	var cache *MetaCache
-	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, req *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
-			// The partition fill describes BY ID (empty name). At that exact
-			// moment simulate a concurrent invalidation evicting the primary.
-			if req.GetCollectionName() == "" && req.GetCollectionID() == 1 {
-				cache.DeleteCollectionForTest(1)
-			}
-			return &milvuspb.DescribeCollectionResponse{
-				Status:       merr.Success(),
-				CollectionID: 1,
-				DbName:       "db",
-				Schema:       &schemapb.CollectionSchema{Name: "collection", Fields: []*schemapb.FieldSchema{}},
-				RequestTime:  1000,
+	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
+			assert.Empty(t, req.GetCollectionName())
+			assert.Equal(t, int64(1), req.GetCollectionID())
+			// Simulate the exceptional RemoveDatabase post-drain walk, which can
+			// evict an entry while fills run because it intentionally releases
+			// fillMu before its O(N) primary-store cleanup.
+			cache.DeleteCollectionForTest(1)
+			return &milvuspb.ShowPartitionsResponse{
+				Status: merr.Success(), PartitionIDs: []int64{101, 100}, PartitionNames: []string{"_default_1", "_default_0"},
+				CreatedTimestamps: []uint64{1000, 1000}, CreatedUtcTimestamps: []uint64{1000, 1000},
 			}, nil
-		})
-	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
-		Status: merr.Success(), PartitionIDs: []int64{100}, PartitionNames: []string{"par1"},
-		CreatedTimestamps: []uint64{1000}, CreatedUtcTimestamps: []uint64{1000},
-	}, nil).Maybe()
+		}).Once()
 
 	cache, err := NewMetaCache(rootCoord)
 	assert.NoError(t, err)
 	defer cache.Close()
 
-	// the caller still gets the correct list...
+	// the caller still gets the correct list, ordered by the partition key...
 	info, err := cache.GetPartitionInfos(ctx, "db", "collection")
 	assert.NoError(t, err)
-	assert.NotNil(t, info)
+	if assert.NotNil(t, info) {
+		assert.Equal(t, []string{"_default_0", "_default_1"}, info.IndexedPartitionNames)
+	}
 
 	// ...but it must NOT be cached under the now-owner-less id 1.
 	cached := cache.HasPartitionCacheForTest(1)

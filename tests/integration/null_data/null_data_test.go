@@ -61,6 +61,9 @@ func (s *NullDataSuite) checkNullableFieldData(fieldName string, fieldDatas []*s
 	fieldData := actual.GetScalars().GetLongData().Data
 	validData := typeutil.GetFieldDataValidData(actual)
 	s.Equal(len(validData), len(fieldData))
+	// Row validity must be in both the legacy and the field-specific location.
+	s.Equal(validData, actual.GetValidData())
+	s.Equal(validData, actual.GetScalars().GetValidData())
 	for i, ans := range actual.GetScalars().GetLongData().Data {
 		if ans < start {
 			s.False(validData[i])
@@ -146,9 +149,9 @@ func (s *NullDataSuite) run() {
 		CollectionNames: []string{collectionName},
 	})
 	s.NoError(err)
-	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
+	segmentIDs, has := flushResp.GetFlushCollSegIDs()[collectionName]
 	ids := segmentIDs.GetData()
-	s.Require().NotEmpty(segmentIDs)
+	s.Require().NotEmpty(ids)
 	s.Require().True(has)
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	s.True(has)
@@ -340,9 +343,9 @@ func (s *NullDataSuite) run() {
 		CollectionNames: []string{collectionName},
 	})
 	s.NoError(err)
-	segmentIDs, has = flushResp.GetCollSegIDs()[collectionName]
+	segmentIDs, has = flushResp.GetFlushCollSegIDs()[collectionName]
 	ids = segmentIDs.GetData()
-	s.Require().NotEmpty(segmentIDs)
+	s.Require().NotEmpty(segmentIDs.GetData())
 	s.Require().True(has)
 	flushTs, has = flushResp.GetCollFlushTs()[collectionName]
 	s.True(has)

@@ -1,4 +1,6 @@
+use std::any::Any;
 use std::ffi::{c_char, c_void, CStr};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use crate::{
     array::RustResult,
@@ -39,7 +41,7 @@ pub extern "C" fn tantivy_create_index(
 
     let tantivy_index_version = match TantivyIndexVersion::from_u32(tantivy_index_version) {
         Ok(v) => v,
-        Err(e) => return RustResult::from_error(e.to_string()),
+        Err(e) => return RustResult::from_binding_error(&e),
     };
 
     match IndexWriterWrapper::new(
@@ -53,7 +55,7 @@ pub extern "C" fn tantivy_create_index(
         enable_background_merge,
     ) {
         Ok(wrapper) => RustResult::from_ptr(create_binding(wrapper)),
-        Err(e) => RustResult::from_error(e.to_string()),
+        Err(e) => RustResult::from_binding_error(&e),
     }
 }
 
@@ -72,7 +74,7 @@ pub extern "C" fn tantivy_create_index_with_single_segment(
         String::from(path_str),
     ) {
         Ok(wrapper) => RustResult::from_ptr(create_binding(wrapper)),
-        Err(e) => RustResult::from_error(e.to_string()),
+        Err(e) => RustResult::from_binding_error(&e),
     }
 }
 
@@ -96,6 +98,28 @@ pub extern "C" fn tantivy_commit_index(ptr: *mut c_void) -> RustResult {
 }
 
 #[no_mangle]
+pub extern "C" fn tantivy_rollback_index(ptr: *mut c_void) -> RustResult {
+    let real = ptr as *mut IndexWriterWrapper;
+    match catch_unwind(AssertUnwindSafe(|| unsafe { (*real).rollback() })) {
+        Ok(result) => result.into(),
+        Err(payload) => RustResult::from_error(format!(
+            "panic while rolling back Tantivy writer: {}",
+            panic_message(payload.as_ref())
+        )),
+    }
+}
+
+fn panic_message(payload: &(dyn Any + Send)) -> &str {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        message
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.as_str()
+    } else {
+        "non-string panic payload"
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn tantivy_create_reader_from_writer(
     ptr: *mut c_void,
     set_bitset: SetBitsetFn,
@@ -104,7 +128,20 @@ pub extern "C" fn tantivy_create_reader_from_writer(
     let reader = unsafe { (*writer).create_reader(set_bitset) };
     match reader {
         Ok(r) => RustResult::from_ptr(create_binding(r)),
-        Err(e) => RustResult::from_error(e.to_string()),
+        Err(e) => RustResult::from_binding_error(&e),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn tantivy_create_snapshot_reader_from_writer(
+    ptr: *mut c_void,
+    set_bitset: SetBitsetFn,
+) -> RustResult {
+    let writer = ptr as *mut IndexWriterWrapper;
+    let reader = unsafe { (*writer).create_snapshot_reader(set_bitset) };
+    match reader {
+        Ok(r) => RustResult::from_ptr(create_binding(r)),
+        Err(e) => RustResult::from_binding_error(&e),
     }
 }
 

@@ -2,6 +2,7 @@ package timetick
 
 import (
 	"context"
+	"slices"
 	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
@@ -49,6 +50,8 @@ type timeTickSyncOperator struct {
 	sourceID              int64                               // source id of the time tick sync operator.
 	metrics               *metricsutil.TimeTickMetrics
 	walShutdownOrFenced   atomic.Bool
+	queryBarriers         map[string]uint64 // scoped frontiers for the current serialized Sync
+	lastPublishedTick     uint64
 }
 
 // Channel returns the pchannel info.
@@ -69,17 +72,34 @@ func (impl *timeTickSyncOperator) MVCCManager() *mvcc.MVCCManager {
 // Sync trigger a sync operation.
 // Sync operation is not thread safe, so call it in a single goroutine.
 func (impl *timeTickSyncOperator) Sync(ctx context.Context, persisted bool) {
+	_, _ = impl.SyncWithQueryBarriers(ctx, persisted, nil)
+}
+
+func (impl *timeTickSyncOperator) SyncWithQueryBarriers(ctx context.Context, persisted bool, barriers map[string]uint64) (map[string]uint64, error) {
 	if impl.walShutdownOrFenced.Load() {
 		// skip append tt msg to a shutdown or fenced wal
-		return
+		return nil, status.NewChannelFenced(impl.Channel().Name)
 	}
 
 	// Sync operation cannot trigger until isReady.
 	wal, err := impl.interceptorBuildParam.WAL.GetWithContext(ctx)
 	if err != nil {
 		impl.logger.Warn(ctx, "unreachable: get wal failed", mlog.Err(err))
-		return
+		return nil, err
 	}
+
+	var target uint64
+	for _, tick := range barriers {
+		target = max(target, tick)
+	}
+	if target > impl.lastPublishedTick {
+		if err := resource.Resource().TSOAllocator().BarrierUntil(ctx, target); err != nil {
+			return nil, err
+		}
+	}
+	impl.queryBarriers = barriers
+	impl.lastPublishedTick = 0
+	defer func() { impl.queryBarriers = nil }()
 
 	err = impl.sendTsMsg(ctx, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
 		appendResult, err := wal.Append(ctx, msg)
@@ -93,7 +113,15 @@ func (impl *timeTickSyncOperator) Sync(ctx context.Context, persisted bool) {
 		if s := status.AsStreamingError(err); s.IsFenced() || s.IsOnShutdown() {
 			impl.walShutdownOrFenced.Store(true)
 		}
+		return nil, err
 	}
+	published := make(map[string]uint64)
+	for vchannel := range barriers {
+		if impl.lastPublishedTick > 0 {
+			published[vchannel] = impl.lastPublishedTick
+		}
+	}
+	return published, nil
 }
 
 // AckManager returns the ack manager.
@@ -134,6 +162,20 @@ func (impl *timeTickSyncOperator) sendTsMsgToWAL(ctx context.Context,
 	appender func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error),
 ) error {
 	msg := NewTimeTickMsg(ts, lastConfirmedMessageID, impl.sourceID, persist)
+	if len(impl.queryBarriers) != 0 {
+		channels := make([]string, 0, len(impl.queryBarriers))
+		for channel := range impl.queryBarriers {
+			channels = append(channels, channel)
+		}
+		slices.Sort(channels)
+		builder := message.NewMVCCBarrierMessageBuilderV2().
+			WithHeader(&message.MVCCBarrierMessageHeader{Vchannels: channels}).
+			WithBody(&message.MVCCBarrierMessageBody{}).WithAllVChannel()
+		if !persist {
+			builder.WithNotPersisted()
+		}
+		msg = builder.MustBuildMutable().WithTimeTick(ts).WithLastConfirmed(lastConfirmedMessageID)
+	}
 	if !persist {
 		// there's no persisted message, so no need to send persistent time tick message.
 		// With the hint of not persisted message, the underlying wal will not persist it.
@@ -168,6 +210,7 @@ func (impl *timeTickSyncOperator) sendTsMsgToWAL(ctx context.Context,
 	tsMsg := msg.IntoImmutableMessage(msgID)
 	// Add it into write ahead buffer.
 	impl.interceptorBuildParam.WriteAheadBuffer.Append(msgs, tsMsg)
+	impl.lastPublishedTick = ts
 	return nil
 }
 

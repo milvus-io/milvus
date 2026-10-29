@@ -18,11 +18,10 @@ package segments
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -30,6 +29,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func makeSegcoreIntIDs(ids []int64) *schemapb.IDs {
@@ -132,122 +133,13 @@ func TestMergeByPKWithOffsetsOperator(t *testing.T) {
 }
 
 func TestFetchFieldsDataOperator_EmptySelections(t *testing.T) {
-	op := NewFetchFieldsDataOperator(nil, nil, nil)
+	paramtable.Init()
+	op := NewFetchFieldsDataOperator(nil, nil, nil, nil)
 	outs, err := op.Run(context.Background(), nil, &MergedResultWithOffsets{IDs: makeSegcoreIntIDs([]int64{1, 2}), Selections: nil})
 	require.NoError(t, err)
 	out := outs[0].(*segcorepb.RetrieveResults)
 	assert.Equal(t, []int64{1, 2}, out.GetIds().GetIntId().GetData())
 	assert.Empty(t, out.GetFieldsData())
-}
-
-func TestFetchFieldsDataOperator_SingleSegment(t *testing.T) {
-	seg := NewMockSegment(t)
-	seg.EXPECT().DatabaseName().Return("default").Maybe()
-	seg.EXPECT().ResourceGroup().Return("rg").Maybe()
-	seg.EXPECT().RetrieveByOffsets(mock.Anything, mock.AnythingOfType("*segcore.RetrievePlanWithOffsets")).
-		RunAndReturn(func(ctx context.Context, plan *segcore.RetrievePlanWithOffsets) (*segcorepb.RetrieveResults, error) {
-			assert.Equal(t, []int64{101, 103, 102}, plan.Offsets)
-			return &segcorepb.RetrieveResults{
-				FieldsData: []*schemapb.FieldData{
-					{
-						FieldId:   101,
-						FieldName: "age",
-						Type:      schemapb.DataType_Int64,
-						Field: &schemapb.FieldData_Scalars{
-							Scalars: &schemapb.ScalarField{
-								Data: &schemapb.ScalarField_LongData{
-									LongData: &schemapb.LongArray{Data: []int64{30, 10, 20}},
-								},
-							},
-						},
-					},
-				},
-			}, nil
-		}).Once()
-
-	op := NewFetchFieldsDataOperator([]Segment{seg}, nil, nil)
-	merged := &MergedResultWithOffsets{
-		IDs: makeSegcoreIntIDs([]int64{1, 2, 3}),
-		Selections: []OffsetSelection{
-			{SegmentIndex: 0, Offset: 101},
-			{SegmentIndex: 0, Offset: 103},
-			{SegmentIndex: 0, Offset: 102},
-		},
-	}
-
-	outs, err := op.Run(context.Background(), nil, merged)
-	require.NoError(t, err)
-	out := outs[0].(*segcorepb.RetrieveResults)
-	assert.Equal(t, []int64{1, 2, 3}, out.GetIds().GetIntId().GetData())
-	assert.Equal(t, []int64{30, 10, 20}, out.GetFieldsData()[0].GetScalars().GetLongData().GetData())
-}
-
-func TestFetchFieldsDataOperator_MultipleSegments(t *testing.T) {
-	seg0 := NewMockSegment(t)
-	seg1 := NewMockSegment(t)
-	seg0.EXPECT().DatabaseName().Return("default").Maybe()
-	seg0.EXPECT().ResourceGroup().Return("rg").Maybe()
-	seg1.EXPECT().DatabaseName().Return("default").Maybe()
-	seg1.EXPECT().ResourceGroup().Return("rg").Maybe()
-
-	seg0.EXPECT().RetrieveByOffsets(mock.Anything, mock.AnythingOfType("*segcore.RetrievePlanWithOffsets")).
-		RunAndReturn(func(ctx context.Context, plan *segcore.RetrievePlanWithOffsets) (*segcorepb.RetrieveResults, error) {
-			assert.Equal(t, []int64{10, 11}, plan.Offsets)
-			return &segcorepb.RetrieveResults{
-				FieldsData: []*schemapb.FieldData{
-					{
-						FieldId:   101,
-						FieldName: "age",
-						Type:      schemapb.DataType_Int64,
-						Field: &schemapb.FieldData_Scalars{
-							Scalars: &schemapb.ScalarField{
-								Data: &schemapb.ScalarField_LongData{
-									LongData: &schemapb.LongArray{Data: []int64{100, 110}},
-								},
-							},
-						},
-					},
-				},
-			}, nil
-		}).Once()
-
-	seg1.EXPECT().RetrieveByOffsets(mock.Anything, mock.AnythingOfType("*segcore.RetrievePlanWithOffsets")).
-		RunAndReturn(func(ctx context.Context, plan *segcore.RetrievePlanWithOffsets) (*segcorepb.RetrieveResults, error) {
-			assert.Equal(t, []int64{20, 21}, plan.Offsets)
-			return &segcorepb.RetrieveResults{
-				FieldsData: []*schemapb.FieldData{
-					{
-						FieldId:   101,
-						FieldName: "age",
-						Type:      schemapb.DataType_Int64,
-						Field: &schemapb.FieldData_Scalars{
-							Scalars: &schemapb.ScalarField{
-								Data: &schemapb.ScalarField_LongData{
-									LongData: &schemapb.LongArray{Data: []int64{200, 210}},
-								},
-							},
-						},
-					},
-				},
-			}, nil
-		}).Once()
-
-	op := NewFetchFieldsDataOperator([]Segment{seg0, seg1}, nil, nil)
-	merged := &MergedResultWithOffsets{
-		IDs: makeSegcoreIntIDs([]int64{1, 2, 3, 4}),
-		Selections: []OffsetSelection{
-			{SegmentIndex: 0, Offset: 10},
-			{SegmentIndex: 1, Offset: 20},
-			{SegmentIndex: 0, Offset: 11},
-			{SegmentIndex: 1, Offset: 21},
-		},
-	}
-
-	outs, err := op.Run(context.Background(), nil, merged)
-	require.NoError(t, err)
-	out := outs[0].(*segcorepb.RetrieveResults)
-	assert.Equal(t, []int64{1, 2, 3, 4}, out.GetIds().GetIntId().GetData())
-	assert.Equal(t, []int64{100, 200, 110, 210}, out.GetFieldsData()[0].GetScalars().GetLongData().GetData())
 }
 
 // =========================================================================
@@ -380,59 +272,68 @@ func TestMergeByPKWithOffsetsOperator_ElementLevel_IndicesLengthMismatch(t *test
 	assert.Contains(t, err.Error(), "element_indices length")
 }
 
-func TestFetchFieldsDataOperator_ElementLevel_Propagation(t *testing.T) {
-	seg := NewMockSegment(t)
-	seg.EXPECT().DatabaseName().Return("default").Maybe()
-	seg.EXPECT().ResourceGroup().Return("rg").Maybe()
-	seg.EXPECT().RetrieveByOffsets(mock.Anything, mock.Anything).
-		Return(&segcorepb.RetrieveResults{
-			FieldsData: []*schemapb.FieldData{
-				{
-					FieldId: 101, FieldName: "val", Type: schemapb.DataType_Int64,
-					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10, 20}}},
-					}},
-				},
-			},
-		}, nil).Once()
-
-	op := NewFetchFieldsDataOperator([]Segment{seg}, nil, nil)
-	merged := &MergedResultWithOffsets{
-		IDs: makeSegcoreIntIDs([]int64{1, 2}),
-		Selections: []OffsetSelection{
-			{SegmentIndex: 0, Offset: 10, ElementIndices: makeElementIndices(0, 1)},
-			{SegmentIndex: 0, Offset: 20, ElementIndices: makeElementIndices(2)},
-		},
-		ElementLevel: true,
+func TestFetchFieldsDataOperatorArrowCompatibility(t *testing.T) {
+	paramtable.Init()
+	cfg := &paramtable.Get().CommonCfg.InterfaceZeroCopyEnabled
+	old := cfg.GetValue()
+	defer paramtable.Get().Save(cfg.Key, old)
+	require.NoError(t, paramtable.Get().Save(cfg.Key, "true"))
+	for _, tc := range []struct {
+		name     string
+		segments []Segment
+	}{
+		{"local", []Segment{&LocalSegment{}, &LocalSegment{}}},
+		{"sn", []Segment{&viewQueryGrowingSegment{}, &viewQueryGrowingSegment{}}},
+		{"mixed", []Segment{&LocalSegment{}, &viewQueryGrowingSegment{}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			arrow := mockey.Mock(fetchFieldsArrow).Return([]any{"arrow"}, nil).Build()
+			defer arrow.UnPatch()
+			fallback := mockey.Mock(fetchFieldsProto).Return([]any{"proto"}, nil).Build()
+			defer fallback.UnPatch()
+			op := NewFetchFieldsDataOperator(tc.segments, nil, nil, nil)
+			out, err := op.Run(context.Background(), nil, &MergedResultWithOffsets{
+				IDs: makeSegcoreIntIDs([]int64{1}), Selections: []OffsetSelection{{SegmentIndex: 0, Offset: 0}},
+			})
+			require.NoError(t, err)
+			require.Equal(t, []any{"arrow"}, out)
+			require.Zero(t, fallback.Times())
+		})
 	}
-
-	outs, err := op.Run(context.Background(), nil, merged)
-	require.NoError(t, err)
-	out := outs[0].(*segcorepb.RetrieveResults)
-
-	assert.True(t, out.GetElementLevel())
-	assert.Len(t, out.GetElementIndices(), 2)
-	assert.Equal(t, []int32{0, 1}, out.GetElementIndices()[0].GetIndices())
-	assert.Equal(t, []int32{2}, out.GetElementIndices()[1].GetIndices())
-	assert.Equal(t, []int64{10, 20}, out.GetFieldsData()[0].GetScalars().GetLongData().GetData())
 }
 
-func TestFetchFieldsDataOperator_SegmentRetrieveError(t *testing.T) {
-	seg := NewMockSegment(t)
-	seg.EXPECT().DatabaseName().Return("default").Maybe()
-	seg.EXPECT().ResourceGroup().Return("rg").Maybe()
-	seg.EXPECT().RetrieveByOffsets(mock.Anything, mock.Anything).
-		Return(nil, fmt.Errorf("segment not available")).Once()
-
-	op := NewFetchFieldsDataOperator([]Segment{seg}, nil, nil)
-	merged := &MergedResultWithOffsets{
-		IDs: makeSegcoreIntIDs([]int64{1}),
-		Selections: []OffsetSelection{
-			{SegmentIndex: 0, Offset: 10},
-		},
+func TestFetchFieldsAsRecordReleasesLocalPins(t *testing.T) {
+	local, failed := &LocalSegment{}, &LocalSegment{}
+	sn := &viewQueryGrowingSegment{}
+	for _, tc := range []struct {
+		name                         string
+		segments                     []Segment
+		wantPin, wantUnpin, wantFill int
+	}{
+		{"sn", []Segment{sn}, 0, 0, 1},
+		{"mixed_fill_failure", []Segment{sn, local}, 1, 1, 1},
+		{"partial_pin_failure", []Segment{local, sn, failed}, 2, 1, 0},
+		{"unsupported_segment", []Segment{local, nil}, 1, 1, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pin := mockey.Mock((*LocalSegment).PinIfNotReleased).To(func(s *LocalSegment) error {
+				if s == failed {
+					return merr.ErrSegmentNotLoaded
+				}
+				return nil
+			}).Build()
+			defer pin.UnPatch()
+			unpin := mockey.Mock((*LocalSegment).Unpin).To(func(s *LocalSegment) {
+				require.Same(t, local, s, "only a successfully acquired local pin may be released")
+			}).Build()
+			defer unpin.UnPatch()
+			fill := mockey.Mock(segcore.FillRetrieveFieldsOrdered).Return(nil, context.Canceled).Build()
+			defer fill.UnPatch()
+			_, err := fetchFieldsAsRecord(context.Background(), tc.segments, nil, &MergedResultWithOffsets{})
+			require.Error(t, err)
+			require.EqualValues(t, tc.wantPin, pin.Times())
+			require.EqualValues(t, tc.wantUnpin, unpin.Times())
+			require.EqualValues(t, tc.wantFill, fill.Times())
+		})
 	}
-
-	_, err := op.Run(context.Background(), nil, merged)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "segment not available")
 }

@@ -382,74 +382,36 @@ TEST(GrowingOffsetMapping, AppendGrowsAcrossChunkBoundaries) {
     }
 }
 
-// ---------- TransformBitset ----------
+TEST(GrowingOffsetMapping,
+     PhysicalToLogicalIdViewStopsAtInternalChunkBoundary) {
+    constexpr int64_t kRows = 1700;
 
-// A bitset is built from the logical rows a query can see. Rows appended after
-// it must stay filtered out -- that is what stops a concurrent insert from
-// occupying top-k slots. p2l is increasing, so the scan stops at the first such
-// row; everything above it keeps the "filtered" default.
-TEST(GrowingOffsetMapping, TransformBitsetExcludesRowsAppendedAfterTheBitset) {
     GrowingOffsetMapping mapping;
-    auto v = ToBoolBytes(MakeValid({1, 0, 1, 1, 1, 1}));
-    mapping.Append(reinterpret_cast<const bool*>(v.data()), 6, 0, 0);
-    ASSERT_EQ(mapping.GetValidCount(), 5);
+    std::vector<int64_t> expected_p2l;
+    std::vector<uint8_t> valid(kRows);
+    for (int64_t i = 0; i < kRows; ++i) {
+        const bool is_valid = i % 7 != 3;
+        valid[i] = is_valid ? 1 : 0;
+        if (is_valid) {
+            expected_p2l.push_back(i);
+        }
+    }
+    ASSERT_GT(expected_p2l.size(), 1124);
+    mapping.Append(reinterpret_cast<const bool*>(valid.data()), kRows, 0, 0);
 
-    // The query saw 4 logical rows, none of them filtered.
-    BitsetType logical_bitset(4);
-    TargetBitmap physical;
-    const auto status =
-        mapping.TransformBitset(BitsetView(logical_bitset), physical);
+    auto tail = mapping.GetPhysicalToLogicalIds(1000, 100);
+    ASSERT_NE(tail.data, nullptr);
+    ASSERT_EQ(tail.count, 24);
+    for (int64_t i = 0; i < tail.count; ++i) {
+        EXPECT_EQ(tail.data[i], expected_p2l[1000 + i]) << "i=" << i;
+    }
 
-    ASSERT_EQ(status, OffsetMapping::BitsetTransformStatus::Transformed);
-    ASSERT_EQ(physical.size(), 5);
-    // logical 0,2,3 -> physical 0,1,2 : visible.
-    EXPECT_FALSE(physical[0]);
-    EXPECT_FALSE(physical[1]);
-    EXPECT_FALSE(physical[2]);
-    // logical 4,5 -> physical 3,4 : past the query's view, still filtered.
-    EXPECT_TRUE(physical[3]);
-    EXPECT_TRUE(physical[4]);
-}
-
-TEST(GrowingOffsetMapping, TransformBitsetMaterializesTheNoFilterCase) {
-    GrowingOffsetMapping mapping;
-    auto v = ToBoolBytes(MakeValid({1, 0, 1, 1}));
-    mapping.Append(reinterpret_cast<const bool*>(v.data()), 4, 0, 0);
-
-    BitsetType logical_bitset(4);  // covers every row, nothing filtered
-    TargetBitmap physical;
-    const auto status =
-        mapping.TransformBitset(BitsetView(logical_bitset), physical);
-
-    ASSERT_EQ(status, OffsetMapping::BitsetTransformStatus::Transformed);
-    ASSERT_EQ(physical.size(), 3);
-    EXPECT_TRUE(physical.none());
-}
-
-// An empty BitsetView is how "no filter at all" reaches the search kernels
-// (VectorSearchNode's all-rows-visible fast path). Both all() and none() are
-// vacuously true on it, so classifying it last -- as #51953 did after
-// open-coding this function -- reports AllFiltered and turns an unfiltered
-// growing search into an empty result. SealedOffsetMapping has always answered
-// NoFilter here via ShouldSkipBitsetTransform; the two must agree.
-TEST(GrowingOffsetMapping, TransformBitsetTreatsEmptyBitsetAsNoFilter) {
-    GrowingOffsetMapping mapping;
-    auto v = ToBoolBytes(MakeValid({1, 0, 1}));
-    mapping.Append(reinterpret_cast<const bool*>(v.data()), 3, 0, 0);
-    ASSERT_TRUE(mapping.IsEnabled());
-
-    TargetBitmap physical;
-    EXPECT_EQ(mapping.TransformBitset(BitsetView{}, physical),
-              OffsetMapping::BitsetTransformStatus::NoFilter);
-    EXPECT_TRUE(physical.empty());
-}
-
-TEST(GrowingOffsetMapping, TransformBitsetOnDisabledMappingIsNoFilter) {
-    GrowingOffsetMapping mapping;
-    BitsetType logical_bitset(4);
-    TargetBitmap physical;
-    EXPECT_EQ(mapping.TransformBitset(BitsetView(logical_bitset), physical),
-              OffsetMapping::BitsetTransformStatus::NoFilter);
+    auto next = mapping.GetPhysicalToLogicalIds(1024, 100);
+    ASSERT_NE(next.data, nullptr);
+    ASSERT_EQ(next.count, 100);
+    for (int64_t i = 0; i < next.count; ++i) {
+        EXPECT_EQ(next.data[i], expected_p2l[1024 + i]) << "i=" << i;
+    }
 }
 
 // ---------- concurrency ----------

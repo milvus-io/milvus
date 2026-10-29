@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -61,7 +62,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) SetupTest() {
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
 	broker := broker.NewMockBroker(s.T())
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	meta, err := newMeta(ctx, catalog, cm, broker)
+	meta, err := newMeta(ctx, catalog, cm, metacache.NewMetaStore(catalog), broker)
 	s.NoError(err)
 	s.meta = meta
 
@@ -193,6 +194,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildCompactionRequest() {
 	s.NotNil(plan)
 
 	// Verify plan
+	s.True(plan.GetEnableManifestDelta())
 	s.Equal(int64(1), plan.GetPlanID())
 	s.Equal(datapb.CompactionType_BumpSchemaVersionCompaction, plan.GetType())
 	s.Equal("ch-1", plan.GetChannel())
@@ -426,6 +428,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestQueryTaskOnWorker() {
 		}, nil).Once()
 		task.QueryTaskOnWorker(cluster)
 		s.Equal(datapb.CompactionTaskState_timeout, task.GetTaskProto().GetState())
+		s.Equal("DataNode reported compaction timeout", task.GetTaskProto().GetFailReason())
 	})
 
 	s.Run("QueryTaskOnWorker, failed state", func() {
@@ -437,6 +440,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestQueryTaskOnWorker() {
 		}, nil).Once()
 		task.QueryTaskOnWorker(cluster)
 		s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+		s.Equal("compaction failed in datanode", task.GetTaskProto().GetFailReason())
 	})
 
 	s.Run("QueryTaskOnWorker, completed with ValidateSegmentState error (segment not in meta)", func() {
@@ -606,6 +610,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestQueryTaskOnWorker() {
 		}, nil).Once()
 		task.QueryTaskOnWorker(cluster)
 		s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+		s.Equal("unsupported compaction state: unknown", task.GetTaskProto().GetFailReason())
 	})
 }
 

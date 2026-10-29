@@ -18,17 +18,20 @@ package proxy
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	internalhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -37,7 +40,30 @@ import (
 // credentials against Milvus's authentication system.
 // It checks if authentication is enabled and validates username/password.
 func TelemetryAuthMiddleware() gin.HandlerFunc {
+	adminAuth := internalhttp.GinAdminAuthMiddleware(false)
 	return func(c *gin.Context) {
+		// These routes push commands to connected clients and delete queued
+		// ones, so once the gate is on they run the root check themselves
+		// rather than trusting the caller of RegisterRestRouter to have
+		// installed the group middleware: a second mount point would publish
+		// them anonymously and every test here would stay green.
+		//
+		// The typed request context says the parent group already verified root.
+		// Reusing that principal avoids both another bcrypt and a second metric,
+		// without relying on an untyped Gin marker that can lose the identity.
+		if _, checked := internalhttp.AuthenticatedAdminFromContext(c.Request.Context()); checked {
+			c.Next()
+			return
+		}
+		if internalhttp.AdminAuthEnabled() {
+			adminAuth(c)
+			if c.IsAborted() {
+				return
+			}
+			c.Next()
+			return
+		}
+
 		// Check if authorization is enabled
 		if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 			c.Next()
@@ -65,7 +91,7 @@ func TelemetryAuthMiddleware() gin.HandlerFunc {
 		encoded := strings.TrimPrefix(authHeader, "Basic ")
 		decoded, err := crypto.Base64Decode(encoded)
 		if err != nil {
-			mlog.Warn(context.TODO(), "TelemetryAuthMiddleware: failed to decode credentials", mlog.Err(err))
+			mlog.Warn(c.Request.Context(), "TelemetryAuthMiddleware: failed to decode credentials", mlog.Err(err))
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": "invalid credentials encoding",
 			})
@@ -86,7 +112,7 @@ func TelemetryAuthMiddleware() gin.HandlerFunc {
 
 		// Validate credentials using Milvus auth system
 		if !passwordVerify(c.Request.Context(), username, password, privilege.GetPrivilegeCache()) {
-			mlog.Warn(context.TODO(), "TelemetryAuthMiddleware: authentication failed", mlog.String("username", username))
+			mlog.Warn(c.Request.Context(), "TelemetryAuthMiddleware: authentication failed", mlog.String("username", username))
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": "invalid username or password",
 			})
@@ -95,6 +121,11 @@ func TelemetryAuthMiddleware() gin.HandlerFunc {
 
 		// Store username in context for potential use by handlers
 		c.Set("username", username)
+		authCtx := metadata.NewIncomingContext(c.Request.Context(), metadata.Pairs(
+			util.HeaderAuthorize,
+			crypto.Base64Encode(username+util.CredentialSeparator+password),
+		))
+		c.Request = c.Request.WithContext(authCtx)
 		c.Next()
 	}
 }
@@ -300,6 +331,42 @@ func getTelemetryClientMetrics(node *Proxy) gin.HandlerFunc {
 // command that never goes away and keeps being handed to every new client.
 //
 // Persistent configs ignore ttl_seconds entirely.
+// listTelemetryCommands returns the commands the coordinator is currently holding: one-time
+// commands that have neither expired nor been answered, and persistent configs.
+//
+// The UI's command panel has always called this endpoint; until it existed the panel showed
+// an empty list whatever was actually pending, which is worse than showing nothing.
+func listTelemetryCommands(node *Proxy) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+
+		if node == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "proxy node not initialized",
+			})
+			return
+		}
+
+		resp, err := node.ListClientCommands(ctx, &rootcoordpb.ListClientCommandsRequest{})
+		if err := merr.CheckRPCCall(resp.GetStatus(), err); err != nil {
+			mlog.Warn(ctx, "listTelemetryCommands: failed to list commands", mlog.Err(err))
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		commands := make([]*CommandResponse, 0, len(resp.GetCommands()))
+		for _, cmd := range resp.GetCommands() {
+			commands = append(commands, ConvertCommandResponse(cmd, cmd.GetPersistent()))
+		}
+
+		// Always an array, never null: the page branches on length, and a null would read
+		// as a broken response rather than as "nothing outstanding".
+		c.JSON(http.StatusOK, gin.H{"commands": commands})
+	}
+}
+
 func postTelemetryCommand(node *Proxy) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()

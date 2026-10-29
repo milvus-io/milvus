@@ -98,6 +98,7 @@ endif()
 add_subdirectory( pb )
 add_subdirectory( config )
 add_subdirectory( common )
+add_subdirectory( mmap )
 add_subdirectory( monitor )
 add_subdirectory( storage )
 add_subdirectory( index )
@@ -113,6 +114,32 @@ add_subdirectory( plan )
 add_subdirectory( minhash )
 
 milvus_add_pkg_config("milvus_core")
+
+# Keep unity builds scoped to first-party code. Enabling CMAKE_UNITY_BUILD
+# globally also changes vendored targets (notably Knowhere/FAISS), which contain
+# translation-unit-local symbols that collide when their sources are merged.
+# Protobuf-generated sources are not unity-compatible, while milvus_query was
+# slower in isolation because merging its ten sources reduced parallelism.
+#
+# milvus_index is deliberately NOT in this list. Its sources are laid out as
+# one parallel unit per index family (index/scalar/<family>/{Artifact,Builder,
+# Loader,Reader}.cpp), and that symmetry is expressed by giving every family the
+# same translation-unit-local helper names: 47 function/constant names and 4
+# file-scope type names (RuntimeParams, EffectiveLoadOptions, PersistedEntries,
+# StagingDirectory) are each defined in 2-8 of its 61 translation units.
+# Merging any two of them is a redefinition, and the collisions span nearly
+# every file, so neither SKIP_UNITY_BUILD_INCLUSION nor UNITY_GROUP leaves a
+# useful batch behind. Re-enabling it means prefixing or per-family-namespacing
+# those helpers first.
+if (MILVUS_UNITY_BUILD)
+    foreach(_target
+        milvus_common milvus_storage milvus_storage_artifact milvus_segcore
+        milvus_exec)
+        set_target_properties(${_target} PROPERTIES
+            UNITY_BUILD ON
+            UNITY_BUILD_BATCH_SIZE 8)
+    endforeach()
+endif()
 
 # ---- Precompiled Headers (PCH) ----
 # Apply the same STL PCH to all OBJECT libraries. Each target generates its
@@ -130,11 +157,16 @@ if (MILVUS_USE_PCH)
     # source files compiled with special target flags (-mavx512f, -march=armv8-a+sve)
     # which are incompatible with PCH compiled under default target features.
     foreach(_target
-        milvus_common milvus_config milvus_monitor milvus_storage milvus_index
-        milvus_query milvus_segcore milvus_indexbuilder milvus_clustering
+        milvus_common milvus_config milvus_monitor milvus_storage
+        milvus_storage_artifact milvus_index
+        milvus_mmap milvus_query milvus_segcore milvus_indexbuilder milvus_clustering
         milvus_exec milvus_futures milvus_rescores
         milvus_plan)
         target_precompile_headers(${_target} PRIVATE ${MILVUS_PCH_HEADERS})
+        if (MILVUS_PCH_CXX_COMPILER_LAUNCHER)
+            set_property(TARGET ${_target} PROPERTY
+                CXX_COMPILER_LAUNCHER "${MILVUS_PCH_CXX_COMPILER_LAUNCHER}")
+        endif()
     endforeach()
 endif()
 
@@ -142,8 +174,10 @@ add_library(milvus_core SHARED
     $<TARGET_OBJECTS:milvus_pb>
     $<TARGET_OBJECTS:milvus_config>
     $<TARGET_OBJECTS:milvus_common>
+    $<TARGET_OBJECTS:milvus_mmap>
     $<TARGET_OBJECTS:milvus_monitor>
     $<TARGET_OBJECTS:milvus_storage>
+    $<TARGET_OBJECTS:milvus_storage_artifact>
     $<TARGET_OBJECTS:milvus_index>
     $<TARGET_OBJECTS:milvus_query>
     $<TARGET_OBJECTS:milvus_segcore>
@@ -179,5 +213,9 @@ if (ENABLE_GCP_NATIVE)
 endif()
 
 target_link_libraries(milvus_core ${LINK_TARGETS})
+milvus_check_aws_runtime(milvus_core)
+if(TARGET milvus-storage_aws_runtime_check)
+    add_dependencies(milvus_core milvus-storage_aws_runtime_check)
+endif()
 
 install(TARGETS milvus_core DESTINATION "${CMAKE_INSTALL_LIBDIR}")

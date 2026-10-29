@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -44,9 +45,22 @@ import (
 func TestBroadcaster(t *testing.T) {
 	registry.ResetRegistration()
 	paramtable.Init()
-	paramtable.Get().StreamingCfg.WALBroadcasterTombstoneCheckInternal.SwapTempValue("10ms")
-	paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxCount.SwapTempValue("2")
-	paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxLifetime.SwapTempValue("20ms")
+	// These scheduling tests have no persisted WAL checkpoints. GC must retain
+	// their tasks; dedicated tombstone tests exercise checkpoint publication.
+	checkpointPatch := mockey.Mock((*mock_metastore.MockStreamingCoordCataLog).ListPChannel).Return(nil, nil).Build()
+	t.Cleanup(func() { checkpointPatch.UnPatch() })
+	oldWALBroadcasterTombstoneCheckInternal := paramtable.Get().StreamingCfg.WALBroadcasterTombstoneCheckInternal.SwapTempValue("10ms")
+	t.Cleanup(func() {
+		paramtable.Get().StreamingCfg.WALBroadcasterTombstoneCheckInternal.SwapTempValue(oldWALBroadcasterTombstoneCheckInternal)
+	})
+	oldWALBroadcasterTombstoneMaxCount := paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxCount.SwapTempValue("2")
+	t.Cleanup(func() {
+		paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxCount.SwapTempValue(oldWALBroadcasterTombstoneMaxCount)
+	})
+	oldWALBroadcasterTombstoneMaxLifetime := paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxLifetime.SwapTempValue("20ms")
+	t.Cleanup(func() {
+		paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxLifetime.SwapTempValue(oldWALBroadcasterTombstoneMaxLifetime)
+	})
 
 	mb := mock_balancer.NewMockBalancer(t)
 	mb.EXPECT().ReplicateRole().Return(replicateutil.RolePrimary)
@@ -131,14 +145,14 @@ func TestBroadcaster(t *testing.T) {
 		b, err := bc.WithResourceKeys(context.Background(), message.NewCollectionNameResourceKey("c7"))
 		assert.NoError(t, err)
 		result, err = b.Broadcast(context.Background(), createNewBroadcastMsg([]string{"v1", "v2", "v3"}, message.NewCollectionNameResourceKey("c7")))
-		assert.Equal(t, len(result.AppendResults), 3)
+		assert.Equal(t, len(result.AppendResults), 4)
 		assert.NoError(t, err)
 	}
 	go broadcastWithSameRK()
 	go broadcastWithSameRK()
 
 	assert.Eventually(t, func() bool {
-		return appended.Load() == 15 && len(done.Collect()) == 9
+		return appended.Load() == 17 && len(done.Collect()) == 9
 	}, 30*time.Second, 10*time.Millisecond)
 
 	// Test close befor broadcast
@@ -182,6 +196,7 @@ func createOpeartor(t *testing.T, broadcaster *syncutil.Future[Broadcaster]) *at
 	id := atomic.NewInt64(1)
 	appended := atomic.NewInt64(0)
 	operator := mock_streaming.NewMockWALAccesser(t)
+	operator.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0_vcchan").Maybe()
 	f := func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
 		resps := types.AppendResponses{
 			Responses: make([]types.AppendResponse, len(msgs)),
@@ -485,6 +500,8 @@ func TestGetPendingSchemaFileResources(t *testing.T) {
 			3: newTask(3, alterCollectionMsg(200, nil), streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING),
 			4: newTask(4, alterCollectionMsg(300, []int64{40}), streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE),
 			5: newTask(5, createNewBroadcastMsg([]string{"v1"}), streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING),
+			// A tombstone being dropped is marked DONE until it leaves the manager.
+			6: newTask(6, createCollectionMsg(400, []int64{50}), streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE),
 		},
 	}
 
@@ -492,6 +509,47 @@ func TestGetPendingSchemaFileResources(t *testing.T) {
 
 	require.Len(t, result, 1)
 	assert.ElementsMatch(t, []int64{10, 20, 30}, result[100])
+}
+
+func TestWithUnreplicableResourceKeys(t *testing.T) {
+	registry.ResetRegistration()
+	paramtable.Init()
+	balance.ResetBalancer()
+
+	mb := mock_balancer.NewMockBalancer(t)
+	mb.EXPECT().ReplicateRole().Return(replicateutil.RoleSecondary).Maybe()
+	mb.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
+		time.Sleep(100 * time.Second)
+		return nil
+	}).Maybe()
+	balance.Register(mb)
+
+	meta := mock_metastore.NewMockStreamingCoordCataLog(t)
+	meta.EXPECT().ListBroadcastTask(mock.Anything).Return([]*streamingpb.BroadcastTask{}, nil).Times(1)
+	meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	rc := idalloc.NewMockRootCoordClient(t)
+	f := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	f.Set(rc)
+	resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
+
+	mw := mock_streaming.NewMockWALAccesser(t)
+	mw.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0_vcchan").Maybe()
+	streaming.SetWALForTest(mw)
+
+	bc, err := RecoverBroadcaster(context.Background())
+	assert.NoError(t, err)
+
+	// A replicable broadcast is still rejected on a secondary cluster.
+	_, err = bc.WithResourceKeys(context.Background(), message.NewExclusiveClusterResourceKey())
+	assert.ErrorIs(t, err, ErrNotPrimary)
+
+	// An unreplicable broadcast is accepted on a secondary cluster.
+	api, err := bc.WithUnreplicableResourceKeys(context.Background(), message.NewExclusiveClusterResourceKey())
+	assert.NoError(t, err)
+	assert.NotNil(t, api)
+	api.Close()
+
+	bc.Close()
 }
 
 func TestWithSecondaryClusterResourceKey(t *testing.T) {
@@ -517,6 +575,7 @@ func TestWithSecondaryClusterResourceKey(t *testing.T) {
 		resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
 
 		mw := mock_streaming.NewMockWALAccesser(t)
+		mw.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0_vcchan").Maybe()
 		streaming.SetWALForTest(mw)
 
 		bc, err := RecoverBroadcaster(context.Background())
@@ -553,6 +612,7 @@ func TestWithSecondaryClusterResourceKey(t *testing.T) {
 		resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
 
 		mw := mock_streaming.NewMockWALAccesser(t)
+		mw.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0_vcchan").Maybe()
 		streaming.SetWALForTest(mw)
 
 		bc, err := RecoverBroadcaster(context.Background())
@@ -589,6 +649,7 @@ func TestWithSecondaryClusterResourceKey(t *testing.T) {
 		resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
 
 		mw := mock_streaming.NewMockWALAccesser(t)
+		mw.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0_vcchan").Maybe()
 		streaming.SetWALForTest(mw)
 
 		bc, err := RecoverBroadcaster(context.Background())
@@ -773,6 +834,23 @@ func TestSortByControlChannelTimeTick(t *testing.T) {
 	assert.Equal(t, uint64(1), tasks[2].Header().BroadcastID)
 }
 
+func TestBroadcasterSchedulerAddTaskAfterClose(t *testing.T) {
+	// Regression for the shutdown race in the same family as #50550.
+	// broadcastTaskManager.Close cancels the broadcaster (broadcastScheduler.Close)
+	// before the ack scheduler, so an in-flight doForcePromoteFixIncompleteBroadcasts
+	// goroutine can still call broadcastScheduler.AddTask after the broadcaster
+	// background queue is gone. AddTask must return a shutdown error instead of
+	// panicking, because a panic in that background goroutine crashes the whole process.
+	scheduler := newBroadcasterScheduler(nil, mlog.With())
+	scheduler.Close()
+
+	// A nil task is fine here: AddTask returns at the closed-context branch of the
+	// select before it ever touches the task.
+	result, err := scheduler.AddTask(context.Background(), nil)
+	assert.Nil(t, result)
+	assert.Error(t, err)
+}
+
 func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 	t.Run("no_incomplete_tasks", func(t *testing.T) {
 		paramtable.Init()
@@ -822,6 +900,7 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 		alterTask.SetLogger(mlog.With())
 
 		mw := mock_streaming.NewMockWALAccesser(t)
+		mw.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0_vcchan").Maybe()
 		appendF := func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
 			resps := types.AppendResponses{Responses: make([]types.AppendResponse, len(msgs))}
 			for i := range msgs {
@@ -883,6 +962,7 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 
 		appendedCount := atomic.NewInt32(0)
 		mw := mock_streaming.NewMockWALAccesser(t)
+		mw.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0_vcchan").Maybe()
 		appendF2 := func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
 			resps := types.AppendResponses{Responses: make([]types.AppendResponse, len(msgs))}
 			for i := range msgs {
@@ -944,6 +1024,7 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 		// First call fails, subsequent calls succeed
 		callCount := atomic.NewInt32(0)
 		mw := mock_streaming.NewMockWALAccesser(t)
+		mw.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0_vcchan").Maybe()
 		appendF := func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
 			resps := types.AppendResponses{Responses: make([]types.AppendResponse, len(msgs))}
 			count := callCount.Inc()
@@ -1007,6 +1088,7 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 		dropTask.SetLogger(mlog.With())
 
 		mw := mock_streaming.NewMockWALAccesser(t)
+		mw.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0_vcchan").Maybe()
 		appendF := func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
 			resps := types.AppendResponses{Responses: make([]types.AppendResponse, len(msgs))}
 			for i := range msgs {
@@ -1063,6 +1145,7 @@ func TestFixIncompleteBroadcastsForForcePromote(t *testing.T) {
 
 		// WAL mock succeeds but never acks
 		mw := mock_streaming.NewMockWALAccesser(t)
+		mw.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0_vcchan").Maybe()
 		mw.EXPECT().AppendMessages(mock.Anything, mock.Anything).RunAndReturn(
 			func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
 				resps := types.AppendResponses{Responses: make([]types.AppendResponse, len(msgs))}
@@ -1126,6 +1209,7 @@ func TestDoForcePromoteFixIncompleteBroadcasts(t *testing.T) {
 		resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
 
 		mw := mock_streaming.NewMockWALAccesser(t)
+		mw.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0_vcchan").Maybe()
 		streaming.SetWALForTest(mw)
 
 		metrics := newBroadcasterMetrics()

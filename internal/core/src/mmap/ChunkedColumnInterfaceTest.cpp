@@ -17,11 +17,10 @@
 #include <gtest/gtest.h>
 
 #include <array>
-#include <chrono>
 #include <cstring>
-#include <filesystem>
 #include <iterator>
 #include <memory>
+#include <numeric>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -31,6 +30,7 @@
 #include "common/Chunk.h"
 #include "common/GroupChunk.h"
 #include "mmap/ChunkedColumn.h"
+#include "mmap/ChunkedColumnFilter.h"
 #include "mmap/ChunkedColumnGroup.h"
 #include "test_utils/cachinglayer_test_utils.h"
 
@@ -43,26 +43,45 @@ constexpr int64_t kVectorArrayFieldId = 2;
 constexpr int64_t kVectorArrayRows = 4;
 constexpr int64_t kVectorArrayDim = 2;
 
-std::filesystem::path
-MakeMmapRoot(const std::string& test_name) {
-    return std::filesystem::temp_directory_path() /
-           ("milvus_chunked_column_" + test_name + "_" +
-            std::to_string(
-                std::chrono::steady_clock::now().time_since_epoch().count()));
-}
-
 struct ColumnFixture {
     std::shared_ptr<ChunkedColumnInterface> column;
     std::shared_ptr<std::set<cachinglayer::cid_t>> fetched;
+    std::shared_ptr<std::vector<std::vector<int64_t>>> pin_requests;
     // Keeps chunk data buffers alive for the column's lifetime.
     std::shared_ptr<void> buffer_holder;
+    // Proxy columns delegate cache ownership to their shared group.
+    std::shared_ptr<ChunkedColumnGroup> group;
+    std::shared_ptr<std::vector<int64_t>> cell_reads;
 };
 
 struct ColumnSpec {
     std::vector<int64_t> rows_per_chunk;
     std::vector<std::vector<bool>> valid_patterns;  // empty => all valid
     bool nullable{true};
+    DataType data_type{DataType::VECTOR_INT8};
+    // Primitive ChunkWriter keeps one payload slot per logical row. Some
+    // positional-access tests intentionally exercise the legacy compact
+    // fixture, while scan tests use the production dense layout.
+    bool dense_nullable_payload{false};
 };
+
+FieldMeta
+MakeTestFieldMeta(const ColumnSpec& spec) {
+    if (IsVectorDataType(spec.data_type)) {
+        return FieldMeta(FieldName("t"),
+                         FieldId(kTestFieldId),
+                         spec.data_type,
+                         kElementSize,
+                         std::nullopt,
+                         spec.nullable,
+                         std::nullopt);
+    }
+    return FieldMeta(FieldName("t"),
+                     FieldId(kTestFieldId),
+                     spec.data_type,
+                     spec.nullable,
+                     std::nullopt);
+}
 
 struct VectorArrayColumnFixture {
     std::shared_ptr<ChunkedColumnInterface> column;
@@ -73,7 +92,8 @@ std::vector<char>
 BuildChunkBuffer(int64_t row_num,
                  const std::vector<bool>* pattern,
                  bool nullable,
-                 int64_t start_logical_offset) {
+                 int64_t start_logical_offset,
+                 bool dense_nullable_payload = false) {
     const int32_t bitmap_bytes = nullable ? (row_num + 7) / 8 : 0;
     std::vector<char> buf(bitmap_bytes + row_num * kElementSize, 0);
     int64_t physical_offset = 0;
@@ -82,13 +102,17 @@ BuildChunkBuffer(int64_t row_num,
             const bool v = pattern ? (*pattern)[j] : true;
             if (v) {
                 buf[j >> 3] |= (1 << (j & 0x07));
-                const int32_t value = start_logical_offset + j;
+            }
+            const int32_t value = start_logical_offset + j;
+            const auto value_offset =
+                dense_nullable_payload ? j : physical_offset;
+            if (dense_nullable_payload || v) {
                 std::memcpy(
-                    buf.data() + bitmap_bytes + physical_offset * kElementSize,
+                    buf.data() + bitmap_bytes + value_offset * kElementSize,
                     &value,
                     sizeof(value));
-                ++physical_offset;
             }
+            physical_offset += v ? 1 : 0;
         }
     } else {
         for (int64_t j = 0; j < row_num; ++j) {
@@ -155,6 +179,47 @@ MakeVectorArrayChunk(char* data, size_t size) {
                                               /*nullable=*/true);
 }
 
+std::vector<char>
+BuildNullableEmptyArrayChunkBuffer() {
+    constexpr int64_t row_count = 2;
+    constexpr size_t bitmap_bytes = 1;
+    constexpr size_t header_entries = row_count * 2 + 1;
+    constexpr size_t header_bytes = header_entries * sizeof(uint32_t);
+    constexpr uint32_t payload_offset = bitmap_bytes + header_bytes;
+
+    // Keep one padding byte so an empty ArrayView has a stable, non-null data
+    // pointer. Row 0 is a valid empty INT64 array; row 1 is null.
+    std::vector<char> buffer(payload_offset + 1, 0);
+    buffer[0] = 0b00000001;
+    const std::array<uint32_t, header_entries> header{
+        payload_offset, 0, payload_offset, 0, payload_offset};
+    std::memcpy(buffer.data() + bitmap_bytes,
+                header.data(),
+                header.size() * sizeof(uint32_t));
+    return buffer;
+}
+
+std::vector<char>
+BuildStringChunkBuffer(const std::vector<std::string>& values) {
+    const auto header_bytes = sizeof(uint32_t) * (values.size() + 1);
+    size_t payload_bytes = 0;
+    for (const auto& value : values) {
+        payload_bytes += value.size();
+    }
+
+    std::vector<char> buffer(header_bytes + payload_bytes, 0);
+    auto* offsets = reinterpret_cast<uint32_t*>(buffer.data());
+    uint32_t next_offset = static_cast<uint32_t>(header_bytes);
+    offsets[0] = next_offset;
+    for (size_t i = 0; i < values.size(); ++i) {
+        std::memcpy(
+            buffer.data() + next_offset, values[i].data(), values[i].size());
+        next_offset += static_cast<uint32_t>(values[i].size());
+        offsets[i + 1] = next_offset;
+    }
+    return buffer;
+}
+
 class CountingChunkTranslator : public TestChunkTranslator {
  public:
     CountingChunkTranslator(
@@ -206,6 +271,192 @@ class CountingGroupChunkTranslator : public TestGroupChunkTranslator {
     std::shared_ptr<std::set<cachinglayer::cid_t>> fetched_;
 };
 
+class ScanCountingChunkedColumn : public ChunkedColumn {
+ public:
+    ScanCountingChunkedColumn(
+        std::shared_ptr<CacheSlot<Chunk>> slot,
+        const FieldMeta& field_meta,
+        std::shared_ptr<std::vector<std::vector<int64_t>>> pin_requests,
+        std::shared_ptr<std::vector<int64_t>> cell_reads)
+        : ChunkedColumn(std::move(slot), field_meta),
+          pin_requests_(std::move(pin_requests)),
+          cell_reads_(std::move(cell_reads)) {
+    }
+
+    PinWrapper<Chunk*>
+    GetChunk(milvus::OpContext* op_ctx, int64_t chunk_id) const override {
+        pin_requests_->emplace_back(std::vector<int64_t>{chunk_id});
+        return ChunkedColumn::GetChunk(op_ctx, chunk_id);
+    }
+
+    TakeCellAccess
+    MakeTakeCellAccess(
+        milvus::OpContext* op_ctx,
+        const std::vector<int64_t>* batch_cell_ids = nullptr) const override {
+        auto access = ChunkedColumn::MakeTakeCellAccess(op_ctx, batch_cell_ids);
+        if (batch_cell_ids != nullptr) {
+            if (!batch_cell_ids->empty()) {
+                pin_requests_->push_back(*batch_cell_ids);
+            }
+            return TakeCellRead(
+                [read_cell = std::move(std::get<TakeCellRead>(access)),
+                 cell_reads = cell_reads_](int64_t cell_id) {
+                    cell_reads->push_back(cell_id);
+                    return read_cell(cell_id);
+                });
+        }
+        auto pin_requests = pin_requests_;
+        return TakeCellPin(
+            [pin_cell = std::move(std::get<TakeCellPin>(access)),
+             pin_requests = std::move(pin_requests)](int64_t chunk_id) {
+                pin_requests->emplace_back(std::vector<int64_t>{chunk_id});
+                return pin_cell(chunk_id);
+            });
+    }
+
+ private:
+    std::shared_ptr<std::vector<std::vector<int64_t>>> pin_requests_;
+    std::shared_ptr<std::vector<int64_t>> cell_reads_;
+};
+
+class ScanCountingProxyChunkColumn : public ProxyChunkColumn {
+ public:
+    ScanCountingProxyChunkColumn(
+        std::shared_ptr<ChunkedColumnGroup> group,
+        FieldId field_id,
+        const FieldMeta& field_meta,
+        std::shared_ptr<std::vector<std::vector<int64_t>>> pin_requests,
+        std::shared_ptr<std::vector<int64_t>> cell_reads)
+        : ProxyChunkColumn(std::move(group), field_id, field_meta),
+          pin_requests_(std::move(pin_requests)),
+          cell_reads_(std::move(cell_reads)) {
+    }
+
+    PinWrapper<Chunk*>
+    GetChunk(milvus::OpContext* op_ctx, int64_t chunk_id) const override {
+        pin_requests_->emplace_back(std::vector<int64_t>{chunk_id});
+        return ProxyChunkColumn::GetChunk(op_ctx, chunk_id);
+    }
+
+    TakeCellAccess
+    MakeTakeCellAccess(
+        milvus::OpContext* op_ctx,
+        const std::vector<int64_t>* batch_cell_ids = nullptr) const override {
+        auto access =
+            ProxyChunkColumn::MakeTakeCellAccess(op_ctx, batch_cell_ids);
+        if (batch_cell_ids != nullptr) {
+            if (!batch_cell_ids->empty()) {
+                pin_requests_->push_back(*batch_cell_ids);
+            }
+            return TakeCellRead(
+                [read_cell = std::move(std::get<TakeCellRead>(access)),
+                 cell_reads = cell_reads_](int64_t cell_id) {
+                    cell_reads->push_back(cell_id);
+                    return read_cell(cell_id);
+                });
+        }
+        auto pin_requests = pin_requests_;
+        return TakeCellPin(
+            [pin_cell = std::move(std::get<TakeCellPin>(access)),
+             pin_requests = std::move(pin_requests)](int64_t chunk_id) {
+                pin_requests->emplace_back(std::vector<int64_t>{chunk_id});
+                return pin_cell(chunk_id);
+            });
+    }
+
+ private:
+    std::shared_ptr<std::vector<std::vector<int64_t>>> pin_requests_;
+    std::shared_ptr<std::vector<int64_t>> cell_reads_;
+};
+
+class ScanCountingStringColumn : public ChunkedVariableColumn<std::string> {
+ public:
+    ScanCountingStringColumn(
+        std::shared_ptr<cachinglayer::CacheSlot<Chunk>> slot,
+        const FieldMeta& field_meta,
+        std::shared_ptr<std::vector<std::vector<int64_t>>> pin_requests)
+        : ChunkedVariableColumn<std::string>(std::move(slot), field_meta),
+          pin_requests_(std::move(pin_requests)) {
+    }
+
+    PinWrapper<Chunk*>
+    GetChunk(milvus::OpContext* op_ctx, int64_t chunk_id) const override {
+        pin_requests_->emplace_back(std::vector<int64_t>{chunk_id});
+        return ChunkedVariableColumn<std::string>::GetChunk(op_ctx, chunk_id);
+    }
+
+    TakeCellAccess
+    MakeTakeCellAccess(
+        milvus::OpContext* op_ctx,
+        const std::vector<int64_t>* batch_cell_ids = nullptr) const override {
+        auto access = ChunkedVariableColumn<std::string>::MakeTakeCellAccess(
+            op_ctx, batch_cell_ids);
+        if (batch_cell_ids != nullptr) {
+            if (!batch_cell_ids->empty()) {
+                pin_requests_->push_back(*batch_cell_ids);
+            }
+            return access;
+        }
+        auto pin_requests = pin_requests_;
+        return TakeCellPin(
+            [pin_cell = std::move(std::get<TakeCellPin>(access)),
+             pin_requests = std::move(pin_requests)](int64_t chunk_id) {
+                pin_requests->emplace_back(std::vector<int64_t>{chunk_id});
+                return pin_cell(chunk_id);
+            });
+    }
+
+ private:
+    std::shared_ptr<std::vector<std::vector<int64_t>>> pin_requests_;
+};
+
+ColumnFixture
+CreateNullableEmptyArrayColumn(size_t num_cells = 1,
+                               bool wrong_last_cell = false) {
+    auto buffers = std::make_shared<std::vector<std::vector<char>>>(num_cells);
+    auto guard = std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
+    std::vector<std::unique_ptr<Chunk>> chunks;
+    for (size_t i = 0; i < num_cells; ++i) {
+        if (wrong_last_cell && i + 1 == num_cells) {
+            const std::vector<bool> validity{true, false};
+            (*buffers)[i] = BuildChunkBuffer(2, &validity, true, i * 2, true);
+            chunks.emplace_back(MakeFixedChunk(
+                2, true, (*buffers)[i].data(), (*buffers)[i].size()));
+        } else {
+            (*buffers)[i] = BuildNullableEmptyArrayChunkBuffer();
+            chunks.emplace_back(
+                std::make_unique<ArrayChunk>(2,
+                                             (*buffers)[i].data(),
+                                             (*buffers)[i].size(),
+                                             DataType::INT64,
+                                             /*nullable=*/true,
+                                             guard));
+        }
+    }
+
+    auto fetched = std::make_shared<std::set<cachinglayer::cid_t>>();
+    auto translator = std::make_unique<CountingChunkTranslator>(
+        std::vector<int64_t>(num_cells, 2),
+        "cc_empty_array_iface",
+        std::move(chunks),
+        fetched);
+    FieldMeta field_meta(FieldName("array"),
+                         FieldId(kTestFieldId),
+                         DataType::ARRAY,
+                         DataType::INT64,
+                         /*nullable=*/true,
+                         /*element_nullable=*/false,
+                         std::nullopt);
+    auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
+        std::move(translator), nullptr);
+    auto column =
+        MakeChunkedColumnBase(DataType::ARRAY, std::move(slot), field_meta);
+    return {std::move(column),
+            std::move(fetched),
+            std::make_shared<std::vector<std::vector<int64_t>>>(),
+            std::static_pointer_cast<void>(buffers)};
+}
+
 struct ChunkedColumnFactory {
     static ColumnFixture
     Create(const ColumnSpec& spec) {
@@ -219,7 +470,8 @@ struct ChunkedColumnFactory {
                 spec.rows_per_chunk[i],
                 spec.valid_patterns.empty() ? nullptr : &spec.valid_patterns[i],
                 spec.nullable,
-                start_logical_offset);
+                start_logical_offset,
+                spec.dense_nullable_payload);
             chunks.push_back(MakeFixedChunk(spec.rows_per_chunk[i],
                                             spec.nullable,
                                             (*buffers)[i].data(),
@@ -229,19 +481,20 @@ struct ChunkedColumnFactory {
         auto fetched = std::make_shared<std::set<cachinglayer::cid_t>>();
         auto translator = std::make_unique<CountingChunkTranslator>(
             spec.rows_per_chunk, "cc_iface", std::move(chunks), fetched);
-        FieldMeta fm(FieldName("t"),
-                     FieldId(kTestFieldId),
-                     DataType::VECTOR_INT8,
-                     kElementSize,
-                     std::nullopt,
-                     spec.nullable,
-                     std::nullopt);
+        auto fm = MakeTestFieldMeta(spec);
         auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
             std::move(translator), nullptr);
-        auto column = std::make_shared<ChunkedColumn>(std::move(slot), fm);
+        auto pin_requests =
+            std::make_shared<std::vector<std::vector<int64_t>>>();
+        auto cell_reads = std::make_shared<std::vector<int64_t>>();
+        auto column = std::make_shared<ScanCountingChunkedColumn>(
+            std::move(slot), fm, pin_requests, cell_reads);
         return {std::static_pointer_cast<ChunkedColumnInterface>(column),
                 std::move(fetched),
-                std::static_pointer_cast<void>(buffers)};
+                std::move(pin_requests),
+                std::static_pointer_cast<void>(buffers),
+                nullptr,
+                std::move(cell_reads)};
     }
 };
 
@@ -258,7 +511,8 @@ struct ProxyChunkColumnFactory {
                 spec.rows_per_chunk[i],
                 spec.valid_patterns.empty() ? nullptr : &spec.valid_patterns[i],
                 spec.nullable,
-                start_logical_offset);
+                start_logical_offset,
+                spec.dense_nullable_payload);
             std::shared_ptr<Chunk> chunk =
                 MakeFixedChunk(spec.rows_per_chunk[i],
                                spec.nullable,
@@ -278,18 +532,18 @@ struct ProxyChunkColumnFactory {
             fetched);
         auto group =
             std::make_shared<ChunkedColumnGroup>(std::move(translator));
-        FieldMeta fm(FieldName("t"),
-                     FieldId(kTestFieldId),
-                     DataType::VECTOR_INT8,
-                     kElementSize,
-                     std::nullopt,
-                     spec.nullable,
-                     std::nullopt);
-        auto column = std::make_shared<ProxyChunkColumn>(
-            group, FieldId(kTestFieldId), fm);
+        auto fm = MakeTestFieldMeta(spec);
+        auto pin_requests =
+            std::make_shared<std::vector<std::vector<int64_t>>>();
+        auto cell_reads = std::make_shared<std::vector<int64_t>>();
+        auto column = std::make_shared<ScanCountingProxyChunkColumn>(
+            group, FieldId(kTestFieldId), fm, pin_requests, cell_reads);
         return {std::static_pointer_cast<ChunkedColumnInterface>(column),
                 std::move(fetched),
-                std::static_pointer_cast<void>(buffers)};
+                std::move(pin_requests),
+                std::static_pointer_cast<void>(buffers),
+                std::move(group),
+                std::move(cell_reads)};
     }
 };
 
@@ -309,10 +563,11 @@ struct ChunkedVectorArrayColumnFactory {
         FieldMeta fm(FieldName("va"),
                      FieldId(kVectorArrayFieldId),
                      DataType::VECTOR_ARRAY,
+                     DataType::VECTOR_FLOAT,
                      kVectorArrayDim,
                      knowhere::metric::L2,
                      /*nullable=*/true,
-                     std::nullopt);
+                     /*element_nullable=*/false);
         auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
             std::move(translator), nullptr);
         auto column =
@@ -342,16 +597,22 @@ struct ProxyVectorArrayColumnFactory {
         FieldMeta fm(FieldName("va"),
                      FieldId(kVectorArrayFieldId),
                      DataType::VECTOR_ARRAY,
+                     DataType::VECTOR_FLOAT,
                      kVectorArrayDim,
                      knowhere::metric::L2,
                      /*nullable=*/true,
-                     std::nullopt);
+                     /*element_nullable=*/false);
         auto column = std::make_shared<ProxyChunkColumn>(
             group, FieldId(kVectorArrayFieldId), fm);
         return {std::static_pointer_cast<ChunkedColumnInterface>(column),
                 std::static_pointer_cast<void>(buffers)};
     }
 };
+
+bool
+IsScanRowValid(const ChunkedColumnInterface::ScanBatch& batch, int64_t offset) {
+    return !batch.validity || batch.validity[offset];
+}
 
 }  // namespace
 
@@ -369,44 +630,32 @@ TYPED_TEST(ChunkedColumnInterfaceTest, BuildValidRowIdsBuildsFullMapping) {
                      {true, true, true, true}},
                     true};
 
-    auto run_case = [&](bool enable_mmap) {
-        auto fx = TypeParam::Create(spec);
-        EXPECT_TRUE(fx.fetched->empty());
+    auto fx = TypeParam::Create(spec);
+    EXPECT_TRUE(fx.fetched->empty());
 
-        OffsetMappingBuildOptions options;
-        options.enable_mmap_i2o_map = enable_mmap;
-        options.enable_mmap_o2i_map = enable_mmap;
-        if (enable_mmap) {
-            options.mmap_dir_path = MakeMmapRoot("valid_row_ids").string();
-        }
-        fx.column->BuildValidRowIds(nullptr, options);
-        EXPECT_EQ(fx.fetched->size(), 3u);
-        EXPECT_EQ(fx.fetched->count(0), 1u);
-        EXPECT_EQ(fx.fetched->count(1), 1u);
-        EXPECT_EQ(fx.fetched->count(2), 1u);
+    fx.column->BuildValidRowIds(nullptr);
+    EXPECT_EQ(fx.fetched->size(), 3u);
+    EXPECT_EQ(fx.fetched->count(0), 1u);
+    EXPECT_EQ(fx.fetched->count(1), 1u);
+    EXPECT_EQ(fx.fetched->count(2), 1u);
 
-        EXPECT_EQ(fx.column->GetValidCountInChunk(0), 3);
-        EXPECT_EQ(fx.column->GetValidCountInChunk(1), 0);
-        EXPECT_EQ(fx.column->GetValidCountInChunk(2), 4);
+    EXPECT_EQ(fx.column->GetValidCountInChunk(0), 3);
+    EXPECT_EQ(fx.column->GetValidCountInChunk(1), 0);
+    EXPECT_EQ(fx.column->GetValidCountInChunk(2), 4);
 
-        const auto& m = fx.column->GetOffsetMapping();
-        EXPECT_TRUE(m.IsEnabled());
-        EXPECT_EQ(m.IsMmap(), enable_mmap);
-        EXPECT_EQ(m.GetTotalCount(), 12);
-        EXPECT_EQ(m.GetValidCount(), 7);
-        EXPECT_EQ(m.GetPhysicalOffset(0), 0);
-        EXPECT_EQ(m.GetPhysicalOffset(2), 1);
-        EXPECT_EQ(m.GetPhysicalOffset(3), 2);
-        EXPECT_EQ(m.GetPhysicalOffset(1), -1);
-        EXPECT_EQ(m.GetPhysicalOffset(4), -1);
-        EXPECT_EQ(m.GetPhysicalOffset(8), 3);
-        EXPECT_EQ(m.GetPhysicalOffset(9), 4);
-        EXPECT_EQ(m.GetPhysicalOffset(10), 5);
-        EXPECT_EQ(m.GetPhysicalOffset(11), 6);
-    };
-
-    run_case(false);
-    run_case(true);
+    const auto& m = fx.column->GetOffsetMapping();
+    EXPECT_TRUE(m.IsEnabled());
+    EXPECT_EQ(m.GetTotalCount(), 12);
+    EXPECT_EQ(m.GetValidCount(), 7);
+    EXPECT_EQ(m.GetPhysicalOffset(0), 0);
+    EXPECT_EQ(m.GetPhysicalOffset(2), 1);
+    EXPECT_EQ(m.GetPhysicalOffset(3), 2);
+    EXPECT_EQ(m.GetPhysicalOffset(1), -1);
+    EXPECT_EQ(m.GetPhysicalOffset(4), -1);
+    EXPECT_EQ(m.GetPhysicalOffset(8), 3);
+    EXPECT_EQ(m.GetPhysicalOffset(9), 4);
+    EXPECT_EQ(m.GetPhysicalOffset(10), 5);
+    EXPECT_EQ(m.GetPhysicalOffset(11), 6);
 }
 
 TYPED_TEST(ChunkedColumnInterfaceTest, CellsLoadedDoesNotFetchCells) {
@@ -453,6 +702,32 @@ TYPED_TEST(ChunkedColumnInterfaceTest, BuildValidRowIdsNonNullableIsNoop) {
     EXPECT_FALSE(fx.column->GetOffsetMapping().IsEnabled());
     EXPECT_EQ(fx.column->GetValidCountInChunk(0), 5);
     EXPECT_TRUE(fx.fetched->empty());
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           BulkIsValidWithoutOffsetsTraversesNullableColumn) {
+    ColumnSpec spec{{3, 2},
+                    {{true, false, true}, {false, true}},
+                    /*nullable=*/true};
+    auto fx = TypeParam::Create(spec);
+
+    std::vector<std::pair<size_t, bool>> validity;
+    fx.column->BulkIsValid(
+        nullptr,
+        [&](bool valid, size_t offset) {
+            validity.emplace_back(offset, valid);
+        },
+        nullptr,
+        0);
+
+    EXPECT_EQ(validity,
+              (std::vector<std::pair<size_t, bool>>{
+                  {0, true},
+                  {1, false},
+                  {2, true},
+                  {3, false},
+                  {4, true},
+              }));
 }
 
 TYPED_TEST(ChunkedColumnInterfaceTest,
@@ -560,6 +835,2069 @@ TYPED_TEST(VectorArrayColumnInterfaceTest,
         fx.column->BulkVectorArrayAt(
             nullptr, [](VectorFieldProto&&, size_t) {}, null_offset, 1),
         std::exception);
+}
+
+TYPED_TEST(VectorArrayColumnInterfaceTest,
+           DataScanReturnsLogicalVectorArrayViews) {
+    auto fx = TypeParam::Create();
+
+    auto cursor = fx.column->Scan(
+        nullptr,
+        ChunkedColumnInterface::ScanOptions::ForData(
+            0, ChunkedColumnInterface::TargetType::VectorArrayView));
+    ASSERT_NE(cursor, nullptr);
+
+    ChunkedColumnInterface::ScanBatch batch;
+    ASSERT_TRUE(cursor->Next(
+        4, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(batch.row_id_start, 0);
+    EXPECT_EQ(batch.size, 4);
+    EXPECT_EQ(batch.values.target_type,
+              ChunkedColumnInterface::TargetType::VectorArrayView);
+
+    const auto* views = batch.values.data_as<VectorArrayView>();
+    EXPECT_EQ(views[0].length(), 1);
+    EXPECT_EQ(views[2].length(), 0);
+    EXPECT_EQ(views[3].length(), 2);
+    EXPECT_TRUE(IsScanRowValid(batch, 0));
+    EXPECT_FALSE(IsScanRowValid(batch, 1));
+    EXPECT_TRUE(IsScanRowValid(batch, 2));
+    EXPECT_TRUE(IsScanRowValid(batch, 3));
+}
+
+TYPED_TEST(VectorArrayColumnInterfaceTest,
+           ValidityOnlyScanUsesColumnTypeWithoutBuildingValues) {
+    auto fx = TypeParam::Create();
+
+    auto cursor =
+        fx.column->Scan(nullptr,
+                        ChunkedColumnInterface::ScanOptions::ForData(
+                            0, ChunkedColumnInterface::TargetType::None));
+    ASSERT_NE(cursor, nullptr);
+
+    ChunkedColumnInterface::ScanBatch batch;
+    ASSERT_TRUE(cursor->Next(
+        2, ChunkedColumnInterface::ScanReadMode::ValidityOnly, &batch));
+    EXPECT_TRUE(batch.values.empty());
+    EXPECT_EQ(batch.size, 2);
+    EXPECT_TRUE(IsScanRowValid(batch, 0));
+    EXPECT_FALSE(IsScanRowValid(batch, 1));
+    ASSERT_NE(batch.owner, nullptr);
+
+    ASSERT_TRUE(cursor->Next(
+        2, ChunkedColumnInterface::ScanReadMode::ValidityOnly, &batch));
+    EXPECT_EQ(batch.row_id_start, 2);
+    EXPECT_EQ(batch.size, 2);
+    EXPECT_TRUE(IsScanRowValid(batch, 0));
+    EXPECT_TRUE(IsScanRowValid(batch, 1));
+    ASSERT_NE(batch.owner, nullptr);
+}
+
+TYPED_TEST(VectorArrayColumnInterfaceTest,
+           DataScanRejectsMismatchedTargetType) {
+    auto fx = TypeParam::Create();
+
+    EXPECT_THROW(
+        fx.column->Scan(nullptr,
+                        ChunkedColumnInterface::ScanOptions::ForData(
+                            0, ChunkedColumnInterface::TargetType::Int32)),
+        std::exception);
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest, RawFormatScanDoesNotSupportUnaryRowIds) {
+    ColumnSpec spec{{5}, {{true, false, true, true, false}}, true};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    proto::plan::GenericValue value;
+    value.set_int64_val(3);
+    auto options = ChunkedColumnInterface::ScanOptions::ForUnary(
+        0, proto::plan::OpType::Equal, value);
+
+    EXPECT_FALSE(fx.column->SupportsScanPushdown(options));
+    EXPECT_EQ(fx.column->Scan(nullptr, options), nullptr);
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           RawFormatScanDoesNotSupportBinaryRangeRowIds) {
+    ColumnSpec spec{{5}, {{true, false, true, true, false}}, true};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    proto::plan::GenericValue lower;
+    proto::plan::GenericValue upper;
+    lower.set_int64_val(1);
+    upper.set_int64_val(10);
+    auto options = ChunkedColumnInterface::ScanOptions::ForBinaryRange(
+        0, lower, true, upper, true);
+
+    EXPECT_FALSE(fx.column->SupportsScanPushdown(options));
+    EXPECT_EQ(fx.column->Scan(nullptr, options), nullptr);
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           FixedWidthDataScanReturnsNaturalChunkBatches) {
+    ColumnSpec spec{{3, 2},
+                    {{true, false, true}, {false, true}},
+                    /*nullable=*/true};
+    spec.data_type = DataType::INT32;
+    spec.dense_nullable_payload = true;
+    auto fx = TypeParam::Create(spec);
+
+    auto cursor =
+        fx.column->Scan(nullptr,
+                        ChunkedColumnInterface::ScanOptions::ForData(
+                            1, ChunkedColumnInterface::TargetType::Int32));
+    ASSERT_NE(cursor, nullptr);
+    EXPECT_TRUE(fx.pin_requests->empty());
+    EXPECT_TRUE(fx.fetched->empty());
+
+    ChunkedColumnInterface::ScanBatch batch;
+    ASSERT_TRUE(cursor->Next(
+        4, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(batch.row_id_start, 1);
+    EXPECT_EQ(batch.size, 2);
+    ASSERT_FALSE(batch.values.empty());
+    EXPECT_EQ(batch.values.target_type,
+              ChunkedColumnInterface::TargetType::Int32);
+    EXPECT_EQ(batch.values.data_as<int32_t>()[1], 2);
+    EXPECT_FALSE(IsScanRowValid(batch, 0));
+    EXPECT_TRUE(IsScanRowValid(batch, 1));
+    ASSERT_TRUE(cursor->Next(
+        2, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(batch.row_id_start, 3);
+    EXPECT_EQ(batch.size, 2);
+    EXPECT_EQ(batch.values.data_as<int32_t>()[1], 4);
+    EXPECT_FALSE(IsScanRowValid(batch, 0));
+    EXPECT_TRUE(IsScanRowValid(batch, 1));
+
+    EXPECT_EQ(fx.pin_requests->size(), 2u);
+    EXPECT_EQ((*fx.pin_requests)[0], (std::vector<int64_t>{0}));
+    EXPECT_EQ((*fx.pin_requests)[1], (std::vector<int64_t>{1}));
+    EXPECT_EQ(*fx.fetched, (std::set<cachinglayer::cid_t>{0, 1}));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest, PrefetchOptionBatchWarmsRemainingCells) {
+    ColumnSpec spec{{3, 2},
+                    {{true, false, true}, {false, true}},
+                    /*nullable=*/true};
+    spec.data_type = DataType::INT32;
+    spec.dense_nullable_payload = true;
+    auto fx = TypeParam::Create(spec);
+
+    // Without prefetch, creation loads nothing.
+    auto plain =
+        fx.column->Scan(nullptr,
+                        ChunkedColumnInterface::ScanOptions::ForData(
+                            0, ChunkedColumnInterface::TargetType::Int32));
+    ASSERT_NE(plain, nullptr);
+    EXPECT_TRUE(fx.fetched->empty());
+
+    // With prefetch, creation batch-warms every remaining cell.
+    auto cursor =
+        fx.column->Scan(nullptr,
+                        ChunkedColumnInterface::ScanOptions::ForData(
+                            0,
+                            ChunkedColumnInterface::TargetType::Int32,
+                            ChunkedColumnInterface::ScanPinPolicy::ResultOwned,
+                            /*prefetch=*/true));
+    ASSERT_NE(cursor, nullptr);
+    EXPECT_EQ(*fx.fetched, (std::set<cachinglayer::cid_t>{0, 1}));
+    // Warmup loads cells but does not retain pins; reads still pin per Cell.
+    EXPECT_TRUE(fx.pin_requests->empty());
+
+    ChunkedColumnInterface::ScanBatch batch;
+    ASSERT_TRUE(cursor->Next(
+        5, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(batch.row_id_start, 0);
+    EXPECT_EQ(batch.size, 3);
+    EXPECT_EQ(fx.pin_requests->size(), 1u);
+    EXPECT_EQ(fx.pin_requests->front(), (std::vector<int64_t>{0}));
+
+    ASSERT_TRUE(cursor->Next(
+        2, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(batch.row_id_start, 3);
+    EXPECT_EQ(batch.size, 2);
+    EXPECT_EQ(fx.pin_requests->size(), 2u);
+    EXPECT_EQ(fx.pin_requests->back(), (std::vector<int64_t>{1}));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           PrefetchRetainsFilterDecisionsAndWarmsNullableSkippedCells) {
+    auto make_filter = [](const std::shared_ptr<std::vector<int>>& decisions) {
+        return std::make_shared<const detail::ColumnFilter>(
+            detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+            [decisions](int64_t cell_id) {
+                ++(*decisions)[cell_id];
+                return cell_id == 0;
+            });
+    };
+
+    {
+        ColumnSpec spec{{2, 2}, {}, /*nullable=*/false};
+        spec.data_type = DataType::INT32;
+        auto fx = TypeParam::Create(spec);
+        auto decisions = std::make_shared<std::vector<int>>(2, 0);
+        auto options = ChunkedColumnInterface::ScanOptions::ForData(
+            0,
+            ChunkedColumnInterface::TargetType::Int32,
+            ChunkedColumnInterface::ScanPinPolicy::ResultOwned,
+            /*prefetch=*/true);
+        options.filter = make_filter(decisions);
+
+        auto cursor = fx.column->Scan(nullptr, options);
+        ASSERT_NE(cursor, nullptr);
+        EXPECT_EQ(*decisions, (std::vector<int>{1, 1}));
+        EXPECT_EQ(*fx.fetched, (std::set<cachinglayer::cid_t>{1}));
+
+        ChunkedColumnInterface::ScanBatch batch;
+        ASSERT_TRUE(cursor->Next(
+            4, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+        EXPECT_TRUE(batch.data_skipped);
+        ASSERT_TRUE(cursor->Next(
+            2, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+        EXPECT_FALSE(batch.data_skipped);
+        EXPECT_EQ(*decisions, (std::vector<int>{1, 1}));
+    }
+
+    {
+        ColumnSpec spec{{2, 2},
+                        {{false, true}, {true, true}},
+                        /*nullable=*/true};
+        spec.data_type = DataType::INT32;
+        spec.dense_nullable_payload = true;
+        auto fx = TypeParam::Create(spec);
+        auto decisions = std::make_shared<std::vector<int>>(2, 0);
+        auto options = ChunkedColumnInterface::ScanOptions::ForData(
+            0,
+            ChunkedColumnInterface::TargetType::Int32,
+            ChunkedColumnInterface::ScanPinPolicy::ResultOwned,
+            /*prefetch=*/true);
+        options.filter = make_filter(decisions);
+
+        auto cursor = fx.column->Scan(nullptr, options);
+        ASSERT_NE(cursor, nullptr);
+        EXPECT_EQ(*decisions, (std::vector<int>{1, 1}));
+        EXPECT_EQ(*fx.fetched, (std::set<cachinglayer::cid_t>{0, 1}));
+
+        ChunkedColumnInterface::ScanBatch batch;
+        ASSERT_TRUE(cursor->Next(
+            4, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+        EXPECT_TRUE(batch.data_skipped);
+        EXPECT_FALSE(IsScanRowValid(batch, 0));
+        EXPECT_TRUE(IsScanRowValid(batch, 1));
+        EXPECT_EQ(*decisions, (std::vector<int>{1, 1}));
+    }
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           ScanNextClampsLengthToRemainingSegmentRows) {
+    ColumnSpec spec{{3, 2}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    auto cursor =
+        fx.column->Scan(nullptr,
+                        ChunkedColumnInterface::ScanOptions::ForData(
+                            4, ChunkedColumnInterface::TargetType::Int32));
+    ASSERT_NE(cursor, nullptr);
+
+    ChunkedColumnInterface::ScanBatch batch;
+    ASSERT_TRUE(cursor->Next(
+        1024, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(batch.row_id_start, 4);
+    EXPECT_EQ(batch.size, 1);
+    EXPECT_EQ(batch.values.data_as<int32_t>()[0], 4);
+    EXPECT_EQ(cursor->Position(), 5);
+    EXPECT_FALSE(cursor->Next(
+        1024, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest, PrefetchOptionSkipsZeroRowCells) {
+    ColumnSpec spec{{2, 0, 2},
+                    {{true, true}, {}, {true, true}},
+                    /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    auto cursor =
+        fx.column->Scan(nullptr,
+                        ChunkedColumnInterface::ScanOptions::ForData(
+                            0,
+                            ChunkedColumnInterface::TargetType::Int32,
+                            ChunkedColumnInterface::ScanPinPolicy::ResultOwned,
+                            /*prefetch=*/true));
+    ASSERT_NE(cursor, nullptr);
+    // Only non-empty remaining cells are warmed; the zero-row cell is skipped.
+    EXPECT_EQ(*fx.fetched, (std::set<cachinglayer::cid_t>{0, 2}));
+    EXPECT_TRUE(fx.pin_requests->empty());
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           FixedWidthValidityOnlyScanReturnsOnlyValidity) {
+    ColumnSpec spec{{4},
+                    {{true, false, true, false}},
+                    /*nullable=*/true};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    auto cursor =
+        fx.column->Scan(nullptr,
+                        ChunkedColumnInterface::ScanOptions::ForData(
+                            0, ChunkedColumnInterface::TargetType::None));
+    ASSERT_NE(cursor, nullptr);
+    EXPECT_TRUE(fx.pin_requests->empty());
+
+    ChunkedColumnInterface::ScanBatch batch;
+    ASSERT_TRUE(cursor->Next(
+        4, ChunkedColumnInterface::ScanReadMode::ValidityOnly, &batch));
+    EXPECT_EQ(batch.row_id_start, 0);
+    EXPECT_EQ(batch.size, 4);
+    EXPECT_TRUE(batch.values.empty());
+    EXPECT_TRUE(IsScanRowValid(batch, 0));
+    EXPECT_FALSE(IsScanRowValid(batch, 1));
+    EXPECT_TRUE(IsScanRowValid(batch, 2));
+    EXPECT_FALSE(IsScanRowValid(batch, 3));
+    EXPECT_EQ(fx.pin_requests->size(), 1u);
+    EXPECT_EQ(fx.pin_requests->front(), (std::vector<int64_t>{0}));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           FixedWidthDataScanPinIsOwnedByResultByDefault) {
+    ColumnSpec spec{{5}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    auto cursor =
+        fx.column->Scan(nullptr,
+                        ChunkedColumnInterface::ScanOptions::ForData(
+                            1, ChunkedColumnInterface::TargetType::Int32));
+    ASSERT_NE(cursor, nullptr);
+    EXPECT_TRUE(fx.pin_requests->empty());
+
+    ChunkedColumnInterface::ScanBatch batch;
+    ASSERT_TRUE(cursor->Next(
+        2, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(batch.row_id_start, 1);
+    EXPECT_EQ(batch.size, 2);
+    EXPECT_NE(batch.owner, nullptr);
+
+    ASSERT_TRUE(cursor->Next(
+        1, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(batch.row_id_start, 3);
+    EXPECT_EQ(batch.size, 1);
+
+    ASSERT_TRUE(cursor->Next(
+        1, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(batch.row_id_start, 4);
+    EXPECT_EQ(batch.size, 1);
+    EXPECT_EQ(fx.pin_requests->size(), 3u);
+    EXPECT_EQ((*fx.pin_requests)[0], (std::vector<int64_t>{0}));
+    EXPECT_EQ((*fx.pin_requests)[1], (std::vector<int64_t>{0}));
+    EXPECT_EQ((*fx.pin_requests)[2], (std::vector<int64_t>{0}));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           ResultOwnedScanBatchKeepsPinAfterCursorDestruction) {
+    for (const auto mode :
+         {ScanReadMode::DataAndValidity, ScanReadMode::ValidityOnly}) {
+        ColumnSpec spec{
+            {2, 0, 3}, {{true, false}, {}, {true, true, true}}, true};
+        spec.data_type = DataType::INT32;
+        spec.dense_nullable_payload = true;
+        auto fx = TypeParam::Create(spec);
+        auto cursor = fx.column->Scan(
+            nullptr, ScanOptions::ForData(0, TargetType::Int32));
+        ASSERT_NE(cursor, nullptr);
+        ScanBatch batch;
+        ASSERT_TRUE(cursor->Next(4, mode, &batch));
+        EXPECT_EQ(batch.size, 2);
+        EXPECT_EQ(cursor->Position(), 2);
+        cursor.reset();
+        auto evict = [&] {
+            if (fx.group) {
+                fx.group->ManualEvictCache();
+            } else {
+                fx.column->ManualEvictCache();
+            }
+        };
+        const int64_t offset[]{0};
+        evict();
+        EXPECT_TRUE(fx.column->CellsLoaded(offset, 1));
+        EXPECT_TRUE(IsScanRowValid(batch, 0));
+        EXPECT_FALSE(IsScanRowValid(batch, 1));
+        if (mode == ScanReadMode::DataAndValidity) {
+            EXPECT_EQ(batch.values.template data_as<int32_t>()[0], 0);
+        } else {
+            EXPECT_TRUE(batch.values.empty());
+        }
+        batch = {};
+        evict();
+        EXPECT_FALSE(fx.column->CellsLoaded(offset, 1));
+        EXPECT_EQ(*fx.pin_requests, (std::vector<std::vector<int64_t>>{{0}}));
+    }
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           FixedWidthDataScanPinCanBeOwnedByCursor) {
+    ColumnSpec spec{{5}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    auto cursor = fx.column->Scan(
+        nullptr,
+        ChunkedColumnInterface::ScanOptions::ForData(
+            0,
+            ChunkedColumnInterface::TargetType::Int32,
+            ChunkedColumnInterface::ScanPinPolicy::CursorOwned));
+    ASSERT_NE(cursor, nullptr);
+    EXPECT_TRUE(fx.pin_requests->empty());
+
+    ChunkedColumnInterface::ScanBatch batch;
+    ASSERT_TRUE(cursor->Next(
+        2, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(batch.owner, nullptr);
+    ASSERT_EQ(fx.pin_requests->size(), 1u);
+    EXPECT_EQ(fx.pin_requests->front(), (std::vector<int64_t>{0}));
+
+    ASSERT_TRUE(cursor->Next(
+        2, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(fx.pin_requests->size(), 1u);
+
+    ASSERT_TRUE(cursor->Next(
+        1, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(fx.pin_requests->size(), 1u);
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           CursorOwnedScanReleasesPreviousPinForSkippedCell) {
+    ColumnSpec spec{{2, 2}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+    auto filter = std::make_shared<const detail::ColumnFilter>(
+        detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+        [](int64_t cell_id) { return cell_id == 1; });
+    auto options = ChunkedColumnInterface::ScanOptions::ForData(
+        0,
+        ChunkedColumnInterface::TargetType::Int32,
+        ChunkedColumnInterface::ScanPinPolicy::CursorOwned);
+    options.filter = std::move(filter);
+    auto cursor = fx.column->Scan(nullptr, options);
+    ASSERT_NE(cursor, nullptr);
+
+    ChunkedColumnInterface::ScanBatch batch;
+    ASSERT_TRUE(cursor->Next(
+        2, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    EXPECT_FALSE(batch.data_skipped);
+    const int64_t first_cell_offset[] = {0};
+    ASSERT_TRUE(fx.column->CellsLoaded(first_cell_offset, 1));
+    const auto evict = [&] {
+        if (fx.group != nullptr) {
+            fx.group->ManualEvictCache();
+        } else {
+            fx.column->ManualEvictCache();
+        }
+    };
+    evict();
+    EXPECT_TRUE(fx.column->CellsLoaded(first_cell_offset, 1));
+
+    ASSERT_TRUE(cursor->Next(
+        2, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    EXPECT_TRUE(batch.data_skipped);
+    evict();
+    EXPECT_FALSE(fx.column->CellsLoaded(first_cell_offset, 1));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           CursorOwnedScanReturnsBeforeCrossingCells) {
+    ColumnSpec spec{{3, 4}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    auto cursor = fx.column->Scan(
+        nullptr,
+        ChunkedColumnInterface::ScanOptions::ForData(
+            0,
+            ChunkedColumnInterface::TargetType::Int32,
+            ChunkedColumnInterface::ScanPinPolicy::CursorOwned));
+    ASSERT_NE(cursor, nullptr);
+
+    ChunkedColumnInterface::ScanBatch batch;
+    ASSERT_TRUE(cursor->Next(
+        4, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(batch.row_id_start, 0);
+    EXPECT_EQ(batch.size, 3);
+    ASSERT_EQ(fx.pin_requests->size(), 1u);
+    EXPECT_EQ(fx.pin_requests->front(), (std::vector<int64_t>{0}));
+
+    ASSERT_TRUE(cursor->Next(
+        3, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(batch.row_id_start, 3);
+    EXPECT_EQ(batch.size, 3);
+    EXPECT_EQ(fx.pin_requests->size(), 2u);
+    EXPECT_EQ((*fx.pin_requests)[1], (std::vector<int64_t>{1}));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest, ScanSkipsZeroRowCellsAtBoundaries) {
+    ColumnSpec spec{{0, 0, 2, 0, 0, 3, 0, 0}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    auto cursor =
+        fx.column->Scan(nullptr,
+                        ChunkedColumnInterface::ScanOptions::ForData(
+                            0, ChunkedColumnInterface::TargetType::Int32));
+    ASSERT_NE(cursor, nullptr);
+
+    ChunkedColumnInterface::ScanBatch batch;
+    ASSERT_TRUE(cursor->Next(
+        5, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(batch.row_id_start, 0);
+    EXPECT_EQ(batch.size, 2);
+    EXPECT_EQ(batch.values.data_as<int32_t>()[0], 0);
+    EXPECT_EQ(batch.values.data_as<int32_t>()[1], 1);
+
+    ASSERT_TRUE(cursor->Next(
+        3, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(batch.row_id_start, 2);
+    EXPECT_EQ(batch.size, 3);
+    EXPECT_EQ(batch.values.data_as<int32_t>()[0], 2);
+    EXPECT_EQ(batch.values.data_as<int32_t>()[2], 4);
+
+    ASSERT_EQ(fx.pin_requests->size(), 2u);
+    EXPECT_EQ((*fx.pin_requests)[0], (std::vector<int64_t>{2}));
+    EXPECT_EQ((*fx.pin_requests)[1], (std::vector<int64_t>{5}));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           CursorOwnedScanSkipsZeroRowCellsWithoutRepinning) {
+    ColumnSpec spec{{0, 0, 2, 0, 0, 3, 0, 0}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    auto cursor = fx.column->Scan(
+        nullptr,
+        ChunkedColumnInterface::ScanOptions::ForData(
+            0,
+            ChunkedColumnInterface::TargetType::Int32,
+            ChunkedColumnInterface::ScanPinPolicy::CursorOwned));
+    ASSERT_NE(cursor, nullptr);
+
+    ChunkedColumnInterface::ScanBatch batch;
+    ASSERT_TRUE(cursor->Next(
+        1, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    ASSERT_TRUE(cursor->Next(
+        1, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    ASSERT_TRUE(cursor->Next(
+        3, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(batch.row_id_start, 2);
+    EXPECT_EQ(batch.size, 3);
+    EXPECT_EQ(batch.values.data_as<int32_t>()[2], 4);
+
+    ASSERT_EQ(fx.pin_requests->size(), 2u);
+    EXPECT_EQ((*fx.pin_requests)[0], (std::vector<int64_t>{2}));
+    EXPECT_EQ((*fx.pin_requests)[1], (std::vector<int64_t>{5}));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest, SeekSkipsWithoutPinningSkippedCells) {
+    ColumnSpec spec{{4, 4}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    auto cursor = fx.column->Scan(
+        nullptr,
+        ChunkedColumnInterface::ScanOptions::ForData(
+            0,
+            ChunkedColumnInterface::TargetType::Int32,
+            ChunkedColumnInterface::ScanPinPolicy::CursorOwned));
+    ASSERT_NE(cursor, nullptr);
+
+    ChunkedColumnInterface::ScanBatch batch;
+    ASSERT_TRUE(cursor->Next(
+        2, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    ASSERT_EQ(fx.pin_requests->size(), 1u);
+    EXPECT_EQ(fx.pin_requests->front(), (std::vector<int64_t>{0}));
+
+    cursor->Seek(5);
+    ASSERT_TRUE(cursor->Next(
+        1, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    ASSERT_EQ(fx.pin_requests->size(), 2u);
+    EXPECT_EQ((*fx.pin_requests)[1], (std::vector<int64_t>{1}));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest, DataScanRejectsBackwardSeek) {
+    ColumnSpec spec{{4}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    auto cursor =
+        fx.column->Scan(nullptr,
+                        ChunkedColumnInterface::ScanOptions::ForData(
+                            0, ChunkedColumnInterface::TargetType::Int32));
+    ASSERT_NE(cursor, nullptr);
+
+    ChunkedColumnInterface::ScanBatch batch;
+    cursor->Seek(1);
+    ASSERT_TRUE(cursor->Next(
+        2, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    EXPECT_THROW(cursor->Seek(2), std::exception);
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest, NonNullableScanRejectsValidityOnlyMode) {
+    ColumnSpec spec{{3, 2}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    auto cursor =
+        fx.column->Scan(nullptr,
+                        ChunkedColumnInterface::ScanOptions::ForData(
+                            0, ChunkedColumnInterface::TargetType::Int32));
+    ASSERT_NE(cursor, nullptr);
+    EXPECT_TRUE(fx.fetched->empty());
+    EXPECT_TRUE(fx.pin_requests->empty());
+
+    ChunkedColumnInterface::ScanBatch batch;
+    EXPECT_THROW(
+        cursor->Next(
+            3, ChunkedColumnInterface::ScanReadMode::ValidityOnly, &batch),
+        std::exception);
+    EXPECT_TRUE(fx.fetched->empty());
+    EXPECT_TRUE(fx.pin_requests->empty());
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           FixedWidthDataScanReportsAllValidForNonNullableColumn) {
+    ColumnSpec spec{{3}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    auto cursor =
+        fx.column->Scan(nullptr,
+                        ChunkedColumnInterface::ScanOptions::ForData(
+                            0, ChunkedColumnInterface::TargetType::Int32));
+    ASSERT_NE(cursor, nullptr);
+
+    ChunkedColumnInterface::ScanBatch batch;
+    ASSERT_TRUE(cursor->Next(
+        3, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    EXPECT_FALSE(batch.validity);
+    for (int64_t i = 0; i < batch.size; ++i) {
+        EXPECT_TRUE(IsScanRowValid(batch, i));
+    }
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           FixedWidthTakePreservesOrderDuplicatesAcrossChunks) {
+    ColumnSpec spec{{3, 2}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    const FixedVector<int32_t> offsets{2, 0, 0, 4, 3, 1};
+    auto take = fx.column->Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(
+                offsets.data(), static_cast<int64_t>(offsets.size())),
+            ChunkedColumnInterface::TargetType::Int32});
+    ASSERT_NE(take, nullptr);
+    ASSERT_EQ(take->Size(), static_cast<int64_t>(offsets.size()));
+    EXPECT_TRUE(fx.pin_requests->empty());
+
+    std::vector<int32_t> actual;
+    for (int64_t i = 0; i < take->Size(); ++i) {
+        const auto item = take->template Get<int32_t>(i);
+        ASSERT_TRUE(item.value.has_value());
+        actual.emplace_back(*item.value);
+        EXPECT_TRUE(item.is_valid);
+        EXPECT_FALSE(item.data_skipped);
+    }
+
+    EXPECT_EQ(actual, (std::vector<int32_t>{2, 0, 0, 4, 3, 1}));
+    ASSERT_EQ(fx.pin_requests->size(), 3u);
+    EXPECT_EQ((*fx.pin_requests)[0], (std::vector<int64_t>{0}));
+    EXPECT_EQ((*fx.pin_requests)[1], (std::vector<int64_t>{1}));
+    EXPECT_EQ((*fx.pin_requests)[2], (std::vector<int64_t>{0}));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           TakeCandidateMaskExcludesCellsBeforePin) {
+    for (const auto nullable : {false, true}) {
+        for (const auto policy :
+             {TakePinPolicy::CurrentCell, TakePinPolicy::Batch}) {
+            ColumnSpec spec{{2, 2, 2},
+                            {{true, false}, {true, true}, {true, false}},
+                            nullable};
+            spec.data_type = DataType::INT32;
+            spec.dense_nullable_payload = true;
+            auto fx = TypeParam::Create(spec);
+            const int64_t offsets[]{4, -1, 0, 5, 4, 2};
+            TargetBitmap candidates(6, false);
+            for (const auto i : {0, 2, 3, 4}) {
+                candidates.set(i);
+            }
+            auto take = fx.column->Take(nullptr,
+                                        {OffsetView::From(offsets, 6),
+                                         TargetType::Int32,
+                                         nullptr,
+                                         policy,
+                                         &candidates});
+            ASSERT_NE(take, nullptr);
+            EXPECT_EQ(take->Size(), 6);
+            EXPECT_THROW(take->template Get<int32_t>(1), SegcoreError);
+            EXPECT_THROW(take->IsValid(5), SegcoreError);
+            for (const auto i : {0, 2, 3, 4}) {
+                const auto item = take->template Get<int32_t>(i);
+                EXPECT_EQ(item.is_valid, !nullable || offsets[i] != 5);
+                if (item.is_valid) {
+                    ASSERT_TRUE(item.value);
+                    EXPECT_EQ(*item.value, offsets[i]);
+                }
+            }
+            const auto owned = take->GetOwn();
+            EXPECT_EQ(owned.size, 6);
+            EXPECT_EQ(owned.values.template data_as<int32_t>()[0], 4);
+            EXPECT_EQ(owned.values.template data_as<int32_t>()[2], 0);
+            EXPECT_EQ(owned.values.template data_as<int32_t>()[4], 4);
+            EXPECT_EQ(fx.fetched->count(1), 0);
+            EXPECT_EQ(offsets[1], -1);
+            EXPECT_FALSE(candidates[1]);
+        }
+    }
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest, TakeEmptyCandidateMaskNeverPlansOrPins) {
+    for (const auto policy :
+         {TakePinPolicy::CurrentCell, TakePinPolicy::Batch}) {
+        ColumnSpec spec{{2, 2}, {}, true};
+        spec.data_type = DataType::INT32;
+        auto fx = TypeParam::Create(spec);
+        const int32_t offsets[]{-1, 100};
+        TargetBitmap candidates(2, false);
+        auto filter = std::make_shared<const detail::ColumnFilter>(
+            detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+            [](int64_t) {
+                ADD_FAILURE() << "excluded offsets must not reach the filter";
+                return false;
+            });
+        auto options = TakeOptions{OffsetView::From(offsets, 2),
+                                   TargetType::Int32,
+                                   filter,
+                                   policy,
+                                   &candidates};
+        auto take = fx.column->Take(nullptr, options);
+        ASSERT_NE(take, nullptr);
+        EXPECT_EQ(take->GetOwn().size, 2);
+        EXPECT_TRUE(fx.pin_requests->empty());
+        TargetBitmap wrong_size(1, true);
+        options.candidate_mask = &wrong_size;
+        EXPECT_THROW(fx.column->Take(nullptr, options), SegcoreError);
+        EXPECT_TRUE(fx.pin_requests->empty());
+    }
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           TakeCandidateMaskKeepsNullableFilterValidity) {
+    for (const auto nullable : {false, true}) {
+        for (const auto policy :
+             {TakePinPolicy::CurrentCell, TakePinPolicy::Batch}) {
+            ColumnSpec spec{{2, 2, 2},
+                            {{true, false}, {true, true}, {true, false}},
+                            nullable};
+            spec.data_type = DataType::INT32;
+            spec.dense_nullable_payload = true;
+            auto fx = TypeParam::Create(spec);
+            const int32_t offsets[]{1, -1, 4, 2};
+            TargetBitmap candidates(4, false);
+            candidates.set(0);
+            candidates.set(2);
+            auto filter = std::make_shared<const detail::ColumnFilter>(
+                detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+                [](int64_t cell) {
+                    EXPECT_NE(cell, 1);
+                    return cell == 0;
+                });
+            auto take = fx.column->Take(nullptr,
+                                        {OffsetView::From(offsets, 4),
+                                         TargetType::Int32,
+                                         filter,
+                                         policy,
+                                         &candidates});
+            ASSERT_NE(take, nullptr);
+            const auto skipped = take->template Get<int32_t>(0);
+            EXPECT_TRUE(skipped.data_skipped);
+            EXPECT_EQ(skipped.is_valid, !nullable);
+            EXPECT_FALSE(skipped.value);
+            EXPECT_EQ(*take->template Get<int32_t>(2).value, 4);
+            EXPECT_EQ(fx.fetched->count(0), nullable ? 1 : 0);
+            EXPECT_EQ(fx.fetched->count(1), 0);
+        }
+    }
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           TakeKeepsSkippedRowsAlignedWithoutPinningNonNullableData) {
+    ColumnSpec spec{{2, 2}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+    auto filter = std::make_shared<const detail::ColumnFilter>(
+        detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+        [](int64_t cell_id) { return cell_id == 0; });
+
+    const FixedVector<int32_t> offsets{0, 3, 1};
+    auto take = fx.column->Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(
+                offsets.data(), static_cast<int64_t>(offsets.size())),
+            ChunkedColumnInterface::TargetType::Int32,
+            std::move(filter)});
+    ASSERT_NE(take, nullptr);
+
+    const auto skipped_first = take->template Get<int32_t>(0);
+    EXPECT_TRUE(skipped_first.is_valid);
+    EXPECT_TRUE(skipped_first.data_skipped);
+    EXPECT_FALSE(skipped_first.value.has_value());
+    EXPECT_TRUE(fx.pin_requests->empty());
+
+    const auto active = take->template Get<int32_t>(1);
+    ASSERT_TRUE(active.value.has_value());
+    EXPECT_EQ(*active.value, 3);
+    EXPECT_FALSE(active.data_skipped);
+
+    const auto skipped_last = take->template Get<int32_t>(2);
+    EXPECT_TRUE(skipped_last.data_skipped);
+    EXPECT_FALSE(skipped_last.value.has_value());
+    ASSERT_EQ(fx.pin_requests->size(), 1u);
+    EXPECT_EQ((*fx.pin_requests)[0], (std::vector<int64_t>{1}));
+
+    const auto owned = take->GetOwn();
+    ASSERT_TRUE(owned.data_skipped);
+    EXPECT_TRUE(owned.data_skipped[0]);
+    EXPECT_FALSE(owned.data_skipped[1]);
+    EXPECT_TRUE(owned.data_skipped[2]);
+    // Materializing the aligned result still must not pin the skipped Cell.
+    ASSERT_EQ(fx.pin_requests->size(), 1u);
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           NullableSkipMayOmitValidityOnlyForNullRejectingConsumer) {
+    for (const bool needs_validity : {false, true}) {
+        for (const bool prefetch : {false, true}) {
+            ColumnSpec spec{{2, 2}, {{false, true}, {true, true}}, true};
+            spec.data_type = DataType::INT32;
+            auto fx = TypeParam::Create(spec);
+            auto filter = std::make_shared<const detail::ColumnFilter>(
+                detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+                [](int64_t) { return true; },
+                needs_validity);
+            auto options = ChunkedColumnInterface::ScanOptions::ForData(
+                0,
+                ChunkedColumnInterface::TargetType::Int32,
+                ChunkedColumnInterface::ScanPinPolicy::CursorOwned,
+                prefetch);
+            options.filter = filter;
+            auto cursor = fx.column->Scan(nullptr, options);
+            ASSERT_NE(cursor, nullptr);
+            ChunkedColumnInterface::ScanBatch batch;
+            ASSERT_TRUE(cursor->Next(
+                4,
+                ChunkedColumnInterface::ScanReadMode::DataAndValidity,
+                &batch));
+            EXPECT_TRUE(batch.data_skipped);
+            EXPECT_TRUE(batch.values.empty());
+            if (needs_validity) {
+                ASSERT_TRUE(batch.validity);
+                EXPECT_FALSE(batch.validity[0]);
+                EXPECT_TRUE(batch.validity[1]);
+                EXPECT_FALSE(fx.pin_requests->empty());
+            } else {
+                EXPECT_FALSE(batch.validity);
+                EXPECT_TRUE(fx.pin_requests->empty());
+            }
+
+            const int32_t offsets[] = {0, 1, 0};
+            auto take = fx.column->Take(
+                nullptr,
+                ChunkedColumnInterface::TakeOptions{
+                    ChunkedColumnInterface::OffsetView::From(offsets, 3),
+                    ChunkedColumnInterface::TargetType::Int32,
+                    filter});
+            ASSERT_NE(take, nullptr);
+            for (int64_t i = 0; i < 3; ++i) {
+                const auto item = take->template Get<int32_t>(i);
+                EXPECT_TRUE(item.data_skipped);
+                EXPECT_FALSE(item.value.has_value());
+                EXPECT_EQ(item.is_valid, !needs_validity || offsets[i] == 1);
+            }
+            if (!needs_validity) {
+                EXPECT_TRUE(fx.pin_requests->empty());
+            }
+        }
+    }
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           TakeSkippedNullableRowsStillReadRealValidity) {
+    ColumnSpec spec{{2, 2}, {{false, true}, {true, true}}, /*nullable=*/true};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+    auto filter = std::make_shared<const detail::ColumnFilter>(
+        detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+        [](int64_t cell_id) { return cell_id == 0; });
+
+    const FixedVector<int32_t> offsets{0, 1, 3};
+    auto take = fx.column->Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(
+                offsets.data(), static_cast<int64_t>(offsets.size())),
+            ChunkedColumnInterface::TargetType::Int32,
+            std::move(filter)});
+    ASSERT_NE(take, nullptr);
+
+    const auto null_skipped = take->template Get<int32_t>(0);
+    EXPECT_FALSE(null_skipped.is_valid);
+    EXPECT_TRUE(null_skipped.data_skipped);
+    EXPECT_FALSE(null_skipped.value.has_value());
+
+    const auto valid_skipped = take->template Get<int32_t>(1);
+    EXPECT_TRUE(valid_skipped.is_valid);
+    EXPECT_TRUE(valid_skipped.data_skipped);
+    EXPECT_FALSE(valid_skipped.value.has_value());
+
+    const auto active = take->template Get<int32_t>(2);
+    EXPECT_TRUE(active.is_valid);
+    EXPECT_FALSE(active.data_skipped);
+    ASSERT_TRUE(active.value.has_value());
+    EXPECT_EQ(*active.value, 3);
+    ASSERT_EQ(fx.pin_requests->size(), 2u);
+    EXPECT_EQ((*fx.pin_requests)[0], (std::vector<int64_t>{0}));
+    EXPECT_EQ((*fx.pin_requests)[1], (std::vector<int64_t>{1}));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest, TakeAccessorPreservesStateAfterGetOwn) {
+    for (const auto policy :
+         {TakePinPolicy::CurrentCell, TakePinPolicy::Batch}) {
+        ColumnSpec spec{{2, 2}, {{false, true}, {true, false}}, true};
+        spec.data_type = DataType::INT32;
+        spec.dense_nullable_payload = true;
+        auto fx = TypeParam::Create(spec);
+        auto filter_calls = std::make_shared<int>(0);
+        auto filter = std::make_shared<const detail::ColumnFilter>(
+            detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+            [filter_calls](int64_t cell_id) {
+                ++*filter_calls;
+                return cell_id == 0;
+            });
+        const int64_t offsets[]{0, 1, 2, 3};
+        auto take = fx.column->Take(
+            nullptr,
+            {OffsetView::From(offsets, 4), TargetType::Int32, filter, policy});
+        ASSERT_NE(take, nullptr);
+        const auto items = take->template Access<int32_t>();
+        const auto check = [&] {
+            for (int64_t i = 0; i < 4; ++i) {
+                const auto item = items[i];
+                EXPECT_EQ(item.is_valid, i == 1 || i == 2);
+                EXPECT_EQ(item.data_skipped, i < 2);
+                EXPECT_EQ(item.value.has_value(), i == 2);
+                if (item.value) {
+                    EXPECT_EQ(*item.value, 2);
+                }
+            }
+        };
+        const auto check_validity = [&] {
+            const auto before = *filter_calls;
+            for (int64_t i = 0; i < 4; ++i) {
+                EXPECT_EQ(take->IsValid(i), i == 1 || i == 2);
+            }
+            EXPECT_EQ(*filter_calls, before);
+        };
+        check_validity();
+        check();
+        const auto owned = take->GetOwn();
+        ASSERT_TRUE(owned.validity);
+        ASSERT_TRUE(owned.data_skipped);
+        check_validity();
+        check();
+    }
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           ScanReturnsExplicitSkippedBatchWithoutExposingCellPlan) {
+    ColumnSpec spec{{2, 2}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+    auto options = ChunkedColumnInterface::ScanOptions::ForData(
+        0, ChunkedColumnInterface::TargetType::Int32);
+    options.filter = std::make_shared<const detail::ColumnFilter>(
+        detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+        [](int64_t cell_id) { return cell_id == 0; });
+    auto cursor = fx.column->Scan(nullptr, options);
+    ASSERT_NE(cursor, nullptr);
+
+    ChunkedColumnInterface::ScanBatch skipped;
+    ASSERT_TRUE(cursor->Next(
+        4, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &skipped));
+    EXPECT_EQ(skipped.row_id_start, 0);
+    EXPECT_EQ(skipped.size, 2);
+    EXPECT_TRUE(skipped.data_skipped);
+    EXPECT_TRUE(skipped.values.empty());
+    EXPECT_TRUE(fx.pin_requests->empty());
+
+    ChunkedColumnInterface::ScanBatch active;
+    ASSERT_TRUE(cursor->Next(
+        2, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &active));
+    EXPECT_EQ(active.row_id_start, 2);
+    EXPECT_EQ(active.size, 2);
+    EXPECT_FALSE(active.data_skipped);
+    EXPECT_EQ(active.values.data_as<int32_t>()[0], 2);
+    ASSERT_EQ(fx.pin_requests->size(), 1u);
+    EXPECT_EQ((*fx.pin_requests)[0], (std::vector<int64_t>{1}));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           TakePreservesRequestedOrderWithoutEagerPin) {
+    ColumnSpec spec{{3, 2}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    const FixedVector<int32_t> offsets{4, 1, 3, 1};
+    EXPECT_TRUE(fx.pin_requests->empty());
+
+    auto take = fx.column->Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(
+                offsets.data(), static_cast<int64_t>(offsets.size())),
+            ChunkedColumnInterface::TargetType::Int32});
+    ASSERT_NE(take, nullptr);
+    ASSERT_EQ(take->Size(), static_cast<int64_t>(offsets.size()));
+    EXPECT_TRUE(fx.pin_requests->empty());
+
+    const auto items = take->template Access<int32_t>();
+    ASSERT_EQ(items.Size(), static_cast<int64_t>(offsets.size()));
+    std::vector<int32_t> actual;
+    for (int64_t i = 0; i < items.Size(); ++i) {
+        actual.emplace_back(*items[i].value);
+    }
+    EXPECT_EQ(actual, (std::vector<int32_t>{4, 1, 3, 1}));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           BatchTakePinsOnlyRequestedCellsUntilResultDestruction) {
+    ColumnSpec spec{
+        {2, 2, 2}, {{true, false}, {true, true}, {false, true}}, true};
+    spec.data_type = DataType::INT32;
+    spec.dense_nullable_payload = true;
+    auto fx = TypeParam::Create(spec);
+    const int64_t offsets[]{5, 1, 4, 0, 5};
+    auto take = fx.column->Take(nullptr,
+                                {OffsetView::From(offsets, std::size(offsets)),
+                                 TargetType::Int32,
+                                 nullptr,
+                                 TakePinPolicy::Batch});
+    ASSERT_NE(take, nullptr);
+    EXPECT_EQ(*fx.pin_requests, (std::vector<std::vector<int64_t>>{{2, 0}}));
+    EXPECT_EQ(*fx.fetched, (std::set<cachinglayer::cid_t>{0, 2}));
+    EXPECT_EQ(*fx.cell_reads, (std::vector<int64_t>{2, 0}));
+    const auto items = take->template Access<int32_t>();
+    for (const auto i : {3, 0, 2, 1, 4, 0, 3}) {
+        const bool valid = offsets[i] != 1 && offsets[i] != 4;
+        const auto item = items[i];
+        EXPECT_EQ(item.is_valid, valid);
+        EXPECT_EQ(item.value.has_value(), valid);
+        EXPECT_FALSE(item.data_skipped);
+        EXPECT_EQ(take->IsValid(i), valid);
+        if (valid) {
+            ASSERT_TRUE(item.value.has_value());
+            EXPECT_EQ(*item.value, offsets[i]);
+        }
+    }
+    EXPECT_EQ(fx.pin_requests->size(), 1u);
+    auto evict = [&] {
+        if (fx.group) {
+            fx.group->ManualEvictCache();
+        } else {
+            fx.column->ManualEvictCache();
+        }
+    };
+    for (int repeat = 0; repeat < 32; ++repeat) {
+        evict();
+        for (const auto i : {0, 3, 4, 3}) {
+            const auto item = items[i];
+            ASSERT_TRUE(item.is_valid);
+            ASSERT_TRUE(item.value.has_value());
+            EXPECT_EQ(*item.value, offsets[i]);
+        }
+    }
+    EXPECT_EQ(fx.pin_requests->size(), 1u);
+    EXPECT_EQ(*fx.cell_reads, (std::vector<int64_t>{2, 0}));
+    evict();
+    EXPECT_TRUE(fx.column->CellsLoaded(offsets, std::size(offsets)));
+    EXPECT_EQ(*items[3].value, 0);
+    const auto owned = take->GetOwn();
+    evict();
+    EXPECT_TRUE(fx.column->CellsLoaded(offsets, std::size(offsets)));
+    EXPECT_EQ(fx.pin_requests->size(), 1u);
+    const auto reads = fx.cell_reads->size();
+    EXPECT_EQ(*items[0].value, 5);
+    EXPECT_EQ(fx.cell_reads->size(), reads);
+    take.reset();
+    evict();
+    EXPECT_FALSE(fx.column->CellsLoaded(offsets, std::size(offsets)));
+    EXPECT_EQ(owned.values.template data_as<int32_t>()[0], 5);
+    EXPECT_FALSE(owned.validity[1]);
+    EXPECT_FALSE(owned.validity[2]);
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           BatchTakeSingleCellReadsOnceAndKeepsPinAcrossGetOwn) {
+    for (const bool nullable : {false, true}) {
+        ColumnSpec spec{{2, 3, 2},
+                        {{true, true}, {true, false, true}, {true, true}},
+                        nullable};
+        spec.data_type = DataType::INT32;
+        spec.dense_nullable_payload = true;
+        auto fx = TypeParam::Create(spec);
+        const int64_t offsets[]{4, 2, 3, 4, 2};
+        auto take =
+            fx.column->Take(nullptr,
+                            {OffsetView::From(offsets, std::size(offsets)),
+                             TargetType::Int32,
+                             nullptr,
+                             TakePinPolicy::Batch});
+        ASSERT_NE(take, nullptr);
+        const std::vector<std::vector<int64_t>> expected_pins{{1}};
+        EXPECT_EQ(*fx.pin_requests, expected_pins);
+        EXPECT_EQ(*fx.cell_reads, (std::vector<int64_t>{1}));
+        const auto items = take->template Access<int32_t>();
+        for (const auto i : {0, 2, 4, 1, 3, 0}) {
+            const auto item = items[i];
+            const auto valid = !nullable || offsets[i] != 3;
+            EXPECT_EQ(item.is_valid, valid);
+            EXPECT_EQ(item.value.has_value(), valid);
+            EXPECT_EQ(take->IsValid(i), valid);
+            if (valid) {
+                ASSERT_TRUE(item.value.has_value());
+                EXPECT_EQ(*item.value, offsets[i]);
+            }
+        }
+        const auto owned = take->GetOwn();
+        auto evict = [&] {
+            if (fx.group) {
+                fx.group->ManualEvictCache();
+            } else {
+                fx.column->ManualEvictCache();
+            }
+        };
+        evict();
+        EXPECT_TRUE(fx.column->CellsLoaded(offsets, std::size(offsets)));
+        EXPECT_EQ(*fx.cell_reads, (std::vector<int64_t>{1}));
+        const auto reads = fx.cell_reads->size();
+        EXPECT_EQ(*items[0].value, 4);
+        EXPECT_EQ(fx.cell_reads->size(), reads);
+        take.reset();
+        evict();
+        EXPECT_FALSE(fx.column->CellsLoaded(offsets, std::size(offsets)));
+        EXPECT_EQ(owned.values.template data_as<int32_t>()[0], 4);
+        EXPECT_EQ(*fx.pin_requests, expected_pins);
+    }
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           BatchTakeLocationsStayAlignedWithInputPositions) {
+    const auto check = [&]<typename Offset>(bool nullable, bool masked) {
+        ColumnSpec spec{{3, 1, 4, 2, 3},
+                        {{true, false, true},
+                         {false},
+                         {true, false, true, true},
+                         {false, true},
+                         {true, false, true}},
+                        nullable};
+        spec.data_type = DataType::INT32;
+        spec.dense_nullable_payload = true;
+        auto fx = TypeParam::Create(spec);
+        const Offset offsets[]{12, 0, 5, 3, 12, 8, 2, masked ? -1 : 1, 5, 10};
+        TargetBitmap candidates(std::size(offsets), true);
+        candidates.set(7, !masked);
+        auto filter = std::make_shared<const detail::ColumnFilter>(
+            detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+            [](int64_t cell_id) { return cell_id == 2; });
+        auto take =
+            fx.column->Take(nullptr,
+                            {OffsetView::From(offsets, std::size(offsets)),
+                             TargetType::Int32,
+                             filter,
+                             TakePinPolicy::Batch,
+                             masked ? &candidates : nullptr});
+        ASSERT_NE(take, nullptr);
+        ASSERT_EQ(fx.pin_requests->size(), 1u);
+        EXPECT_EQ(fx.pin_requests->front(),
+                  (nullable ? std::vector<int64_t>{4, 0, 2, 1, 3}
+                            : std::vector<int64_t>{4, 0, 1, 3}));
+        EXPECT_EQ(*fx.cell_reads, fx.pin_requests->front());
+        fx.column.reset();
+        fx.group.reset();
+        const auto items = take->template Access<int32_t>();
+        for (const auto i : {9, 4, 2, 6, 0, 8, 3, 1, 5, 7}) {
+            if (!candidates[i]) {
+                EXPECT_THROW(items[i], SegcoreError);
+                EXPECT_THROW(take->IsValid(i), SegcoreError);
+                continue;
+            }
+            const auto item = items[i];
+            const auto valid =
+                !nullable || (offsets[i] != 1 && offsets[i] != 3 &&
+                              offsets[i] != 5 && offsets[i] != 8);
+            EXPECT_EQ(item.is_valid, valid);
+            EXPECT_EQ(take->IsValid(i), valid);
+            EXPECT_EQ(item.data_skipped, offsets[i] == 5);
+            EXPECT_EQ(item.value.has_value(), valid && offsets[i] != 5);
+            if (item.value) {
+                EXPECT_EQ(*item.value, offsets[i]);
+            }
+        }
+        const auto owned = take->GetOwn();
+        take.reset();
+        EXPECT_EQ(owned.values.template data_as<int32_t>()[0], 12);
+        EXPECT_EQ(owned.values.template data_as<int32_t>()[9], 10);
+        EXPECT_TRUE(owned.data_skipped[2]);
+        EXPECT_TRUE(owned.data_skipped[8]);
+        EXPECT_EQ(fx.pin_requests->size(), 1u);
+        const std::set<int64_t> resolved(fx.cell_reads->begin(),
+                                         fx.cell_reads->end());
+        EXPECT_EQ(fx.cell_reads->size(), resolved.size());
+        EXPECT_EQ(resolved,
+                  (nullable ? std::set<int64_t>{0, 1, 2, 3, 4}
+                            : std::set<int64_t>{0, 1, 3, 4}));
+    };
+    for (const bool nullable : {false, true}) {
+        for (const bool masked : {false, true}) {
+            check.template operator()<int32_t>(nullable, masked);
+            check.template operator()<int64_t>(nullable, masked);
+        }
+    }
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           BatchTakeValidatesBeforePinAndDoesNotPinEmptyInput) {
+    ColumnSpec spec{{2, 2}, {}, false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+    const int64_t invalid_offsets[]{0, 4};
+    EXPECT_THROW(fx.column->Take(nullptr,
+                                 {OffsetView::From(invalid_offsets, 2),
+                                  TargetType::Int32,
+                                  nullptr,
+                                  TakePinPolicy::Batch}),
+                 std::exception);
+    EXPECT_TRUE(fx.pin_requests->empty());
+    EXPECT_TRUE(fx.fetched->empty());
+    const int32_t negative_offsets[]{0, -1};
+    EXPECT_THROW(fx.column->Take(nullptr,
+                                 {OffsetView::From(negative_offsets, 2),
+                                  TargetType::Int32,
+                                  nullptr,
+                                  TakePinPolicy::Batch}),
+                 std::exception);
+    EXPECT_TRUE(fx.pin_requests->empty());
+    EXPECT_TRUE(fx.fetched->empty());
+    auto empty = fx.column->Take(
+        nullptr,
+        {OffsetView::From(static_cast<const int64_t*>(nullptr), 0),
+         TargetType::Int32,
+         nullptr,
+         TakePinPolicy::Batch});
+    ASSERT_NE(empty, nullptr);
+    EXPECT_EQ(empty->Size(), 0);
+    fx.column.reset();
+    EXPECT_EQ(empty->GetOwn().size, 0);
+    EXPECT_TRUE(fx.pin_requests->empty());
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           BatchTakePrunesOnlyNonNullablePreloadedSkips) {
+    for (const bool nullable : {false, true}) {
+        ColumnSpec spec{{2, 2}, {{false, true}, {true, true}}, nullable};
+        spec.data_type = DataType::INT32;
+        spec.dense_nullable_payload = true;
+        auto fx = TypeParam::Create(spec);
+        auto filter = std::make_shared<const detail::ColumnFilter>(
+            detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+            [](int64_t cell_id) { return cell_id == 0; });
+        const int64_t offsets[]{0, 3, 1};
+        auto take =
+            fx.column->Take(nullptr,
+                            {OffsetView::From(offsets, std::size(offsets)),
+                             TargetType::Int32,
+                             filter,
+                             TakePinPolicy::Batch});
+        ASSERT_NE(take, nullptr);
+        EXPECT_EQ(fx.pin_requests->size(), 1u);
+        EXPECT_EQ(
+            fx.pin_requests->front(),
+            (nullable ? std::vector<int64_t>{0, 1} : std::vector<int64_t>{1}));
+        EXPECT_EQ(*fx.cell_reads, fx.pin_requests->front());
+        const auto first = take->template Get<int32_t>(0);
+        EXPECT_EQ(first.is_valid, !nullable);
+        EXPECT_TRUE(first.data_skipped);
+        EXPECT_FALSE(first.value.has_value());
+        EXPECT_EQ(*take->template Get<int32_t>(1).value, 3);
+        EXPECT_TRUE(take->template Get<int32_t>(2).data_skipped);
+        EXPECT_EQ(take->IsValid(0), !nullable);
+        const auto owned = take->GetOwn();
+        EXPECT_TRUE(owned.data_skipped[0]);
+        EXPECT_FALSE(owned.data_skipped[1]);
+        EXPECT_TRUE(owned.data_skipped[2]);
+        EXPECT_EQ(fx.pin_requests->size(), 1u);
+        EXPECT_EQ(
+            *fx.cell_reads,
+            (nullable ? std::vector<int64_t>{0, 1} : std::vector<int64_t>{1}));
+    }
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           BatchTakeAllSkippedRetainsAlignmentWithoutPins) {
+    ColumnSpec spec{{2, 2, 2}, {}, false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+    std::array<int, 3> calls{};
+    auto filter = std::make_shared<const detail::ColumnFilter>(
+        detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+        [&calls](int64_t cell_id) {
+            ++calls[cell_id];
+            return true;
+        });
+    const int64_t offsets[]{5, 1, 4, 0, 5, 3};
+    auto take = fx.column->Take(nullptr,
+                                {OffsetView::From(offsets, std::size(offsets)),
+                                 TargetType::Int32,
+                                 std::move(filter),
+                                 TakePinPolicy::Batch});
+    ASSERT_NE(take, nullptr);
+    EXPECT_EQ(calls, (std::array<int, 3>{1, 1, 1}));
+    EXPECT_TRUE(fx.pin_requests->empty());
+    EXPECT_TRUE(fx.fetched->empty());
+    EXPECT_TRUE(fx.cell_reads->empty());
+    fx.column.reset();
+    fx.group.reset();
+    for (int64_t i = 0; i < take->Size(); ++i) {
+        const auto item = take->template Get<int32_t>(i);
+        EXPECT_TRUE(item.is_valid);
+        EXPECT_TRUE(item.data_skipped);
+        EXPECT_FALSE(item.value.has_value());
+        EXPECT_TRUE(take->IsValid(i));
+    }
+    const auto owned = take->GetOwn();
+    ASSERT_TRUE(owned.data_skipped);
+    for (int64_t i = 0; i < owned.size; ++i) {
+        EXPECT_TRUE(owned.data_skipped[i]);
+    }
+    EXPECT_EQ(calls, (std::array<int, 3>{1, 1, 1}));
+    EXPECT_TRUE(fx.pin_requests->empty());
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           BatchTakeRetainsGenerationAndEvaluatesLoadedFiltersAfterPin) {
+    ColumnSpec spec{{2, 2}, {}, false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+    const int64_t offsets[]{3, 0, 3};
+    int calls = 0;
+    auto filter = std::make_shared<const detail::ColumnFilter>(
+        detail::ColumnFilter::MetricsSource::LoadedPayload,
+        [&calls, &fx, &offsets](int64_t cell_id) {
+            ++calls;
+            EXPECT_TRUE(fx.column->CellsLoaded(offsets, std::size(offsets)));
+            return cell_id == 0;
+        });
+    auto take = fx.column->Take(nullptr,
+                                {OffsetView::From(offsets, std::size(offsets)),
+                                 TargetType::Int32,
+                                 std::move(filter),
+                                 TakePinPolicy::Batch});
+    ASSERT_NE(take, nullptr);
+    EXPECT_EQ(calls, 0);
+    EXPECT_EQ(*take->template Get<int32_t>(0).value, 3);
+    EXPECT_TRUE(take->template Get<int32_t>(1).data_skipped);
+    EXPECT_EQ(*take->template Get<int32_t>(2).value, 3);
+    EXPECT_EQ(calls, 2);
+    fx.column.reset();
+    fx.group.reset();
+    EXPECT_EQ(*take->template Get<int32_t>(2).value, 3);
+    EXPECT_TRUE(take->template Get<int32_t>(1).data_skipped);
+    EXPECT_EQ(fx.pin_requests->size(), 1u);
+}
+
+TEST(ColumnPlannerTest, LocatesSegmentOffsets) {
+    ColumnPlanner planner(std::vector<int64_t>{0, 3, 5});
+    EXPECT_EQ(planner.NumCells(), 2);
+    EXPECT_EQ(planner.NumRows(), 5);
+    EXPECT_EQ(planner.CellBoundaries(), (std::vector<int64_t>{0, 3, 5}));
+
+    const auto last = planner.Locate(4);
+    EXPECT_EQ(last.cell_id, 1);
+    EXPECT_EQ(last.cell_offset, 1);
+    const auto first = planner.Locate(1);
+    EXPECT_EQ(first.cell_id, 0);
+    EXPECT_EQ(first.cell_offset, 1);
+    const auto boundary = planner.Locate(3);
+    EXPECT_EQ(boundary.cell_id, 1);
+    EXPECT_EQ(boundary.cell_offset, 0);
+
+    ColumnPlanner single_cell(std::vector<int64_t>{0, 5});
+    const auto single_cell_last = single_cell.Locate(4);
+    EXPECT_EQ(single_cell_last.cell_id, 0);
+    EXPECT_EQ(single_cell_last.cell_offset, 4);
+}
+
+TEST(ColumnPlannerTest, BorrowsStableBoundariesAndOwnsTemporaryBoundaries) {
+    const std::vector<int64_t> stable_boundaries{0, 3, 5};
+    ColumnPlanner borrowed(stable_boundaries);
+    EXPECT_EQ(borrowed.CellBoundaries().data(), stable_boundaries.data());
+
+    ColumnPlanner owned(std::vector<int64_t>{0, 2, 5});
+    EXPECT_EQ(owned.CellBoundaries(), (std::vector<int64_t>{0, 2, 5}));
+    EXPECT_EQ(owned.NumRows(), 5);
+}
+
+TEST(ColumnPlannerTest, BatchStrategiesPreserveOrderForBothOffsetWidths) {
+    for (const auto& boundaries : std::vector<std::vector<int64_t>>{
+             {0, 8}, {0, 0, 3, 3, 5, 5, 8, 8}, {0, 1, 2, 3, 1'000'000}}) {
+        int64_t bucket_order = 0;
+        std::vector<int64_t> buckets;
+        segcore::storagev1translator::virtual_chunk_config(
+            boundaries.back(),
+            boundaries.size() - 1,
+            boundaries,
+            bucket_order,
+            buckets);
+        const std::vector<int64_t> offsets64{
+            boundaries.back() - 1, 0, 3, 2, 1, 3, 0};
+        const std::vector<int32_t> offsets32(offsets64.begin(),
+                                             offsets64.end());
+        const ColumnPlanner reference(boundaries);
+        for (const auto strategy : {OffsetLookupStrategy::PerOffset,
+                                    OffsetLookupStrategy::BatchBinary,
+                                    OffsetLookupStrategy::Bucket}) {
+            const ColumnPlanner planner(
+                boundaries,
+                OffsetLookupOptions{strategy, bucket_order, &buckets});
+            for (const auto offsets :
+                 {OffsetView::From(offsets64.data(), offsets64.size()),
+                  OffsetView::From(offsets32.data(), offsets32.size())}) {
+                const auto [cells, cell_offsets] = planner.LocateBatch(offsets);
+                ASSERT_EQ(cells.size(), offsets64.size());
+                ASSERT_EQ(cell_offsets.size(), offsets64.size());
+                for (size_t i = 0; i < offsets64.size(); ++i) {
+                    const auto expected = reference.Locate(offsets64[i]);
+                    EXPECT_EQ(cells[i], expected.cell_id);
+                    EXPECT_EQ(cell_offsets[i], expected.cell_offset);
+                }
+            }
+        }
+    }
+}
+
+TEST(ColumnPlannerTest, BatchStrategiesValidateOffsetsAndAllowEmptyRequests) {
+    const std::vector<int64_t> boundaries{0, 0, 2, 2, 5, 5};
+    int64_t bucket_order = 0;
+    std::vector<int64_t> buckets;
+    segcore::storagev1translator::virtual_chunk_config(
+        5, 5, boundaries, bucket_order, buckets);
+    for (const auto strategy : {OffsetLookupStrategy::PerOffset,
+                                OffsetLookupStrategy::BatchBinary,
+                                OffsetLookupStrategy::Bucket}) {
+        const ColumnPlanner planner(
+            boundaries, OffsetLookupOptions{strategy, bucket_order, &buckets});
+        for (const int64_t invalid : {-1, 5}) {
+            const int64_t offsets64[]{0, invalid};
+            const int32_t offsets32[]{0, static_cast<int32_t>(invalid)};
+            EXPECT_THROW(planner.LocateBatch(OffsetView::From(offsets64, 2)),
+                         std::exception);
+            EXPECT_THROW(planner.LocateBatch(OffsetView::From(offsets32, 2)),
+                         std::exception);
+        }
+        for (const auto offsets :
+             {OffsetView::From(static_cast<const int32_t*>(nullptr), 0),
+              OffsetView::From(static_cast<const int64_t*>(nullptr), 0)}) {
+            const auto result = planner.LocateBatch(offsets);
+            EXPECT_TRUE(result.first.empty());
+            EXPECT_TRUE(result.second.empty());
+        }
+        EXPECT_THROW(planner.LocateBatch(OffsetView::From(
+                         static_cast<const int64_t*>(nullptr), 1)),
+                     std::exception);
+        EXPECT_THROW(planner.LocateBatch(OffsetView::From(
+                         static_cast<const int64_t*>(nullptr), -1)),
+                     std::exception);
+    }
+}
+
+TEST(ColumnPlannerTest, RejectsInvalidBucketConfiguration) {
+    const std::vector<int64_t> boundaries{0, 3, 8};
+    const std::vector<int64_t> short_index{0};
+    EXPECT_THROW(
+        (ColumnPlanner(boundaries, {OffsetLookupStrategy::Bucket, 0, nullptr})),
+        std::exception);
+    EXPECT_THROW(
+        (ColumnPlanner(boundaries,
+                       {OffsetLookupStrategy::Bucket, 63, &short_index})),
+        std::exception);
+    EXPECT_THROW(
+        (ColumnPlanner(boundaries,
+                       {OffsetLookupStrategy::Bucket, 0, &short_index})),
+        std::exception);
+    EXPECT_THROW(
+        (ColumnPlanner(boundaries,
+                       {static_cast<OffsetLookupStrategy>(99), 0, nullptr})),
+        std::exception);
+}
+
+TEST(ColumnPlannerTest, EmptyColumnsHaveNoLocationsForAnyBatchStrategy) {
+    const std::vector<int64_t> buckets;
+    for (const auto& boundaries :
+         std::vector<std::vector<int64_t>>{{0, 0}, {0, 0, 0}}) {
+        for (const auto strategy : {OffsetLookupStrategy::PerOffset,
+                                    OffsetLookupStrategy::BatchBinary,
+                                    OffsetLookupStrategy::Bucket}) {
+            const ColumnPlanner planner(boundaries, {strategy, 0, &buckets});
+            const auto result = planner.LocateBatch(OffsetView{});
+            EXPECT_TRUE(result.first.empty());
+            EXPECT_TRUE(result.second.empty());
+            const int64_t invalid = 0;
+            EXPECT_THROW(planner.LocateBatch(OffsetView::From(&invalid, 1)),
+                         std::exception);
+        }
+    }
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           BatchTakeReadsInt32OffsetsWithoutChangingInputOrPinOrder) {
+    ColumnSpec spec{{2, 3, 1}, {}, false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+    std::vector<int32_t> offsets{5, 0, 3, 5, 2};
+    const auto original = offsets;
+    auto take =
+        fx.column->Take(nullptr,
+                        {OffsetView::From(offsets.data(), offsets.size()),
+                         TargetType::Int32,
+                         nullptr,
+                         TakePinPolicy::Batch});
+    ASSERT_NE(take, nullptr);
+    EXPECT_EQ(offsets, original);
+    EXPECT_EQ(*fx.pin_requests, (std::vector<std::vector<int64_t>>{{2, 0, 1}}));
+    const auto items = take->template Access<int32_t>();
+    for (int64_t i = 0; i < items.Size(); ++i) {
+        ASSERT_TRUE(items[i].is_valid);
+        EXPECT_EQ(*items[i].value, original[i]);
+    }
+    EXPECT_EQ(fx.pin_requests->size(), 1);
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           FixedWidthTakeReadsValidityByLogicalPosition) {
+    ColumnSpec spec{{4}, {{true, false, true, false}}, /*nullable=*/true};
+    spec.data_type = DataType::INT32;
+    spec.dense_nullable_payload = true;
+    auto fx = TypeParam::Create(spec);
+
+    const FixedVector<int32_t> offsets{3, 0, 1, 2};
+    auto take = fx.column->Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(
+                offsets.data(), static_cast<int64_t>(offsets.size())),
+            ChunkedColumnInterface::TargetType::Int32});
+    ASSERT_NE(take, nullptr);
+    ASSERT_EQ(take->Size(), 4);
+    EXPECT_FALSE(take->IsValid(0));
+    EXPECT_TRUE(take->IsValid(1));
+    EXPECT_FALSE(take->IsValid(2));
+    EXPECT_TRUE(take->IsValid(3));
+    ASSERT_EQ(fx.pin_requests->size(), 1u);
+    EXPECT_EQ(fx.pin_requests->front(), (std::vector<int64_t>{0}));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           NonNullableTakeIsValidRejectsInvalidOffsetWithoutPinning) {
+    ColumnSpec spec{{3, 2}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    const FixedVector<int32_t> offsets{5, -1};
+    auto take = fx.column->Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(offsets.data(), 2),
+            ChunkedColumnInterface::TargetType::Int32});
+    ASSERT_NE(take, nullptr);
+
+    EXPECT_THROW(take->IsValid(0), std::exception);
+    EXPECT_THROW(take->IsValid(1), std::exception);
+    EXPECT_THROW(take->template Get<int32_t>(0), std::exception);
+    EXPECT_THROW(take->template Get<int32_t>(1), std::exception);
+    EXPECT_TRUE(fx.pin_requests->empty());
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           RawTakeLazyPinAccessorKeepsColumnGenerationAlive) {
+    ColumnSpec spec{{2, 2}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    const FixedVector<int32_t> offsets{3, 2, 0};
+    auto take = fx.column->Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(
+                offsets.data(), static_cast<int64_t>(offsets.size())),
+            ChunkedColumnInterface::TargetType::Int32});
+    ASSERT_NE(take, nullptr);
+    EXPECT_TRUE(fx.pin_requests->empty());
+
+    fx.column.reset();
+    EXPECT_EQ(*take->template Get<int32_t>(0).value, 3);
+    EXPECT_EQ(*take->template Get<int32_t>(1).value, 2);
+    EXPECT_EQ(*take->template Get<int32_t>(2).value, 0);
+    ASSERT_EQ(fx.pin_requests->size(), 2u);
+    EXPECT_EQ((*fx.pin_requests)[0], (std::vector<int64_t>{1}));
+    EXPECT_EQ((*fx.pin_requests)[1], (std::vector<int64_t>{0}));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest, RawTakeDefersCellPlanning) {
+    ColumnSpec spec{{2, 2}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+    auto filter_calls = std::make_shared<std::vector<int>>(2, 0);
+    auto filter = std::make_shared<const detail::ColumnFilter>(
+        detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+        [filter_calls](int64_t cell_id) {
+            ++(*filter_calls)[cell_id];
+            return false;
+        });
+
+    const auto offsets = FixedVector<int32_t>{0, 3, 1};
+    auto take = fx.column->Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(
+                offsets.data(), static_cast<int64_t>(offsets.size())),
+            ChunkedColumnInterface::TargetType::Int32,
+            std::move(filter)});
+    ASSERT_NE(take, nullptr);
+    EXPECT_EQ(*filter_calls, (std::vector<int>{0, 0}));
+    EXPECT_TRUE(fx.pin_requests->empty());
+
+    // Physical planning is performed only for positions that are consumed.
+    EXPECT_EQ(*take->template Get<int32_t>(1).value, 3);
+    EXPECT_EQ(*filter_calls, (std::vector<int>{0, 1}));
+    EXPECT_EQ(*take->template Get<int32_t>(1).value, 3);
+    EXPECT_EQ(*filter_calls, (std::vector<int>{0, 1}));
+    EXPECT_EQ(*take->template Get<int32_t>(0).value, 0);
+    EXPECT_EQ(*filter_calls, (std::vector<int>{1, 1}));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           RawTakeGetOwnMaterializesOrderedIndependentData) {
+    ColumnSpec spec{{3, 2},
+                    {{true, false, true}, {false, true}},
+                    /*nullable=*/true};
+    spec.data_type = DataType::INT32;
+    spec.dense_nullable_payload = true;
+    auto fx = TypeParam::Create(spec);
+
+    const FixedVector<int32_t> offsets{4, 0, 3, 2};
+    auto take = fx.column->Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(
+                offsets.data(), static_cast<int64_t>(offsets.size())),
+            ChunkedColumnInterface::TargetType::Int32});
+    ASSERT_NE(take, nullptr);
+    EXPECT_FALSE(take->IsOwned());
+    EXPECT_TRUE(fx.pin_requests->empty());
+    auto owned = take->GetOwn();
+    EXPECT_TRUE(take->IsOwned());
+    ASSERT_EQ(owned.size, 4);
+    ASSERT_NE(owned.owner, nullptr);
+    ASSERT_TRUE(owned.validity);
+    take.reset();
+
+    const auto* values = owned.values.template data_as<int32_t>();
+    EXPECT_EQ(values[0], 4);
+    EXPECT_EQ(values[1], 0);
+    EXPECT_EQ(values[2], 3);
+    EXPECT_EQ(values[3], 2);
+    EXPECT_TRUE(owned.validity[0]);
+    EXPECT_TRUE(owned.validity[1]);
+    EXPECT_FALSE(owned.validity[2]);
+    EXPECT_TRUE(owned.validity[3]);
+    ASSERT_EQ(fx.pin_requests->size(), 2u);
+    EXPECT_EQ((*fx.pin_requests)[0], (std::vector<int64_t>{1}));
+    EXPECT_EQ((*fx.pin_requests)[1], (std::vector<int64_t>{0}));
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           RawTakeGetOwnOmitsSkipMaskWhenFilterMatchesNoCell) {
+    ColumnSpec spec{{3, 2}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+    auto filter = std::make_shared<const detail::ColumnFilter>(
+        detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+        [](int64_t) { return false; });
+
+    const FixedVector<int32_t> offsets{4, 0, 3, 2};
+    auto take = fx.column->Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(
+                offsets.data(), static_cast<int64_t>(offsets.size())),
+            ChunkedColumnInterface::TargetType::Int32,
+            std::move(filter)});
+    ASSERT_NE(take, nullptr);
+
+    const auto owned = take->GetOwn();
+    ASSERT_EQ(owned.size, static_cast<int64_t>(offsets.size()));
+    EXPECT_FALSE(owned.data_skipped);
+    const auto* values = owned.values.template data_as<int32_t>();
+    EXPECT_EQ(values[0], 4);
+    EXPECT_EQ(values[1], 0);
+    EXPECT_EQ(values[2], 3);
+    EXPECT_EQ(values[3], 2);
+}
+
+TEST(ChunkedColumnInterfaceTest,
+     RawTakeGetOwnPreservesValidEmptyArrayMetadata) {
+    auto fx = CreateNullableEmptyArrayColumn();
+    const FixedVector<int32_t> offsets{0, 1};
+    auto take = fx.column->Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(offsets.data(), 2),
+            ChunkedColumnInterface::TargetType::ArrayView});
+    ASSERT_NE(take, nullptr);
+    ASSERT_TRUE(take->IsValid(0));
+    ASSERT_FALSE(take->IsValid(1));
+
+    auto owned = take->GetOwn();
+    ASSERT_EQ(owned.size, 2);
+    ASSERT_TRUE(owned.validity);
+    const auto* arrays = owned.values.data_as<ArrayView>();
+    EXPECT_EQ(arrays[0].length(), 0);
+    EXPECT_EQ(arrays[0].output_data().data_case(), ScalarFieldProto::kLongData);
+    EXPECT_NE(arrays[0].data(), nullptr);
+    EXPECT_EQ(arrays[1].output_data().data_case(),
+              ScalarFieldProto::DATA_NOT_SET);
+    EXPECT_EQ(arrays[1].data(), nullptr);
+}
+
+TEST(ChunkedColumnInterfaceTest, ArrayTakeDataBindingFollowsEachPin) {
+    for (const auto policy :
+         {TakePinPolicy::CurrentCell, TakePinPolicy::Batch}) {
+        auto fx = CreateNullableEmptyArrayColumn(2);
+        const int64_t offsets[]{2, 0, 3, 1, 2};
+        auto take = fx.column->Take(nullptr,
+                                    {OffsetView::From(offsets, 5),
+                                     TargetType::ArrayView,
+                                     nullptr,
+                                     policy});
+        ASSERT_NE(take, nullptr);
+        const auto items = take->Access<ArrayView>();
+        for (const auto i : {0, 1, 4, 2, 3, 0}) {
+            const auto item = items[i];
+            ASSERT_EQ(item.is_valid, offsets[i] % 2 == 0);
+            if (item.is_valid) {
+                ASSERT_TRUE(item.value);
+                EXPECT_EQ(item.value->length(), 0);
+            }
+        }
+        const auto own = take->GetOwn();
+        fx.column.reset();
+        EXPECT_EQ(own.values.data_as<ArrayView>()[0].length(), 0);
+        EXPECT_FALSE(own.validity[2]);
+        EXPECT_EQ(take->Get<ArrayView>(1).value->length(), 0);
+    }
+}
+
+TEST(ChunkedColumnInterfaceTest, ArrayTakeChecksNewSourceOnlyWhenReadingData) {
+    for (const auto policy :
+         {TakePinPolicy::CurrentCell, TakePinPolicy::Batch}) {
+        auto fx = CreateNullableEmptyArrayColumn(2, true);
+        const int64_t offsets[]{0, 2, 3, 0};
+        auto options = TakeOptions{OffsetView::From(offsets, 4),
+                                   TargetType::ArrayView,
+                                   nullptr,
+                                   policy};
+        auto take = fx.column->Take(nullptr, options);
+        ASSERT_NE(take, nullptr);
+        EXPECT_EQ(take->Get<ArrayView>(0).value->length(), 0);
+        EXPECT_TRUE(take->IsValid(1));
+        EXPECT_FALSE(take->IsValid(2));
+        EXPECT_FALSE(take->Get<ArrayView>(2).value);
+        EXPECT_THROW(take->Get<ArrayView>(1), SegcoreError);
+        EXPECT_EQ(take->Get<ArrayView>(3).value->length(), 0);
+        EXPECT_THROW(take->GetOwn(), SegcoreError);
+
+        options.filter = std::make_shared<const detail::ColumnFilter>(
+            detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+            [](int64_t) { return true; });
+        auto skipped = fx.column->Take(nullptr, options);
+        ASSERT_NE(skipped, nullptr);
+        EXPECT_TRUE(skipped->Get<ArrayView>(1).data_skipped);
+        EXPECT_FALSE(skipped->Get<ArrayView>(2).is_valid);
+        EXPECT_NO_THROW(skipped->GetOwn());
+    }
+}
+
+TEST(ChunkedColumnInterfaceTest, ArrayScanChecksNewSourceOnlyWhenReadingData) {
+    for (const auto policy :
+         {ScanPinPolicy::ResultOwned, ScanPinPolicy::CursorOwned}) {
+        auto fx = CreateNullableEmptyArrayColumn(2, true);
+        auto options = ScanOptions::ForData(0, TargetType::ArrayView, policy);
+        auto cursor = fx.column->Scan(nullptr, options);
+        ASSERT_NE(cursor, nullptr);
+        ScanBatch batch;
+        for (int i = 0; i < 2; ++i) {
+            ASSERT_TRUE(cursor->Next(1, ScanReadMode::DataAndValidity, &batch));
+            EXPECT_EQ(batch.row_id_start, i);
+        }
+        ASSERT_TRUE(cursor->Next(1, ScanReadMode::ValidityOnly, &batch));
+        EXPECT_EQ(batch.row_id_start, 2);
+        EXPECT_TRUE(IsScanRowValid(batch, 0));
+        EXPECT_THROW(cursor->Next(1, ScanReadMode::DataAndValidity, &batch),
+                     SegcoreError);
+
+        options.filter = std::make_shared<const detail::ColumnFilter>(
+            detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+            [](int64_t) { return true; });
+        auto skipped = fx.column->Scan(nullptr, options);
+        for (int i = 0; i < 2; ++i) {
+            ASSERT_TRUE(
+                skipped->Next(2, ScanReadMode::DataAndValidity, &batch));
+            EXPECT_TRUE(batch.data_skipped);
+            EXPECT_TRUE(IsScanRowValid(batch, 0));
+            EXPECT_FALSE(IsScanRowValid(batch, 1));
+        }
+    }
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest, TakeDataBindingValidatesPhysicalSource) {
+    ColumnSpec spec{{2}, {{true, false}}, true};
+    spec.data_type = DataType::ARRAY;
+    spec.dense_nullable_payload = true;
+    // Intentionally supplies a fixed-width Cell for a recursive ARRAY field.
+    auto fx = TypeParam::Create(spec);
+    const int64_t offsets[]{0, 1};
+    for (const auto policy :
+         {TakePinPolicy::CurrentCell, TakePinPolicy::Batch}) {
+        auto take = fx.column->Take(nullptr,
+                                    {OffsetView::From(offsets, 2),
+                                     TargetType::ArrayValueView,
+                                     nullptr,
+                                     policy});
+        ASSERT_NE(take, nullptr);
+        EXPECT_TRUE(take->IsValid(0));
+        EXPECT_FALSE(take->template Get<ArrayValueView>(1).is_valid);
+        EXPECT_THROW(take->template Get<ArrayValueView>(0), SegcoreError);
+        EXPECT_THROW(take->GetOwn(), SegcoreError);
+    }
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest, TakeGetRejectsMismatchedFixedType) {
+    ColumnSpec spec{{2}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    const FixedVector<int32_t> offsets{0};
+    auto take = fx.column->Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(offsets.data(), 1),
+            ChunkedColumnInterface::TargetType::Int32});
+    ASSERT_NE(take, nullptr);
+    EXPECT_THROW(take->template Get<int64_t>(0), std::exception);
+}
+
+TYPED_TEST(ChunkedColumnInterfaceTest,
+           FixedWidthDataScanRejectsMismatchedTargetType) {
+    ColumnSpec spec{{3}, {}, /*nullable=*/false};
+    spec.data_type = DataType::INT32;
+    auto fx = TypeParam::Create(spec);
+
+    EXPECT_THROW(
+        fx.column->Scan(nullptr,
+                        ChunkedColumnInterface::ScanOptions::ForData(
+                            0, ChunkedColumnInterface::TargetType::StringView)),
+        std::exception);
+}
+
+TEST(ChunkedColumnInterfaceTest, VarcharPrimaryKeyUsesStringViewScanCursor) {
+    // Primary-key metadata does not change the underlying column
+    // representation: a user-defined VARCHAR PK uses the regular string
+    // column and must therefore resolve to a StringView scan cursor.
+    const std::vector<std::string> values{"alpha", "beta", "gamma"};
+    auto buffer = BuildStringChunkBuffer(values);
+    auto guard = std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
+    std::vector<std::unique_ptr<Chunk>> chunks;
+    chunks.push_back(
+        std::make_unique<StringChunk>(static_cast<int32_t>(values.size()),
+                                      buffer.data(),
+                                      buffer.size(),
+                                      /*nullable=*/false,
+                                      std::move(guard)));
+    auto translator = std::make_unique<TestChunkTranslator>(
+        std::vector<int64_t>{static_cast<int64_t>(values.size())},
+        "varchar_pk_scan",
+        std::move(chunks));
+    FieldMeta field_meta(FieldName("varchar_pk"),
+                         FieldId(kTestFieldId),
+                         DataType::VARCHAR,
+                         /*nullable=*/false,
+                         std::nullopt);
+    auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
+        std::move(translator), nullptr);
+    auto pin_requests = std::make_shared<std::vector<std::vector<int64_t>>>();
+    auto column = std::make_shared<ScanCountingStringColumn>(
+        std::move(slot), field_meta, pin_requests);
+
+    auto cursor =
+        column->Scan(nullptr,
+                     ChunkedColumnInterface::ScanOptions::ForData(
+                         0, ChunkedColumnInterface::TargetType::StringView));
+    ASSERT_NE(cursor, nullptr);
+    EXPECT_TRUE(pin_requests->empty());
+
+    ChunkedColumnInterface::ScanBatch batch;
+    ASSERT_TRUE(
+        cursor->Next(static_cast<int64_t>(values.size()),
+                     ChunkedColumnInterface::ScanReadMode::DataAndValidity,
+                     &batch));
+    EXPECT_EQ(batch.values.target_type,
+              ChunkedColumnInterface::TargetType::StringView);
+    const auto* scanned = batch.values.data_as<std::string_view>();
+    ASSERT_EQ(batch.size, static_cast<int64_t>(values.size()));
+    for (size_t i = 0; i < values.size(); ++i) {
+        EXPECT_EQ(scanned[i], values[i]);
+    }
+    ASSERT_EQ(pin_requests->size(), 1u);
+    EXPECT_EQ(pin_requests->front(), (std::vector<int64_t>{0}));
+}
+
+TEST(ChunkedColumnInterfaceTest, VarcharTakeBuildsOnlyRequestedOrderedViews) {
+    const std::vector<std::string> values{"alpha", "beta", "gamma", "delta"};
+    auto buffer = BuildStringChunkBuffer(values);
+    auto guard = std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
+    std::vector<std::unique_ptr<Chunk>> chunks;
+    chunks.push_back(
+        std::make_unique<StringChunk>(static_cast<int32_t>(values.size()),
+                                      buffer.data(),
+                                      buffer.size(),
+                                      /*nullable=*/false,
+                                      std::move(guard)));
+    auto translator = std::make_unique<TestChunkTranslator>(
+        std::vector<int64_t>{static_cast<int64_t>(values.size())},
+        "varchar_take",
+        std::move(chunks));
+    FieldMeta field_meta(FieldName("varchar"),
+                         FieldId(kTestFieldId),
+                         DataType::VARCHAR,
+                         /*nullable=*/false,
+                         std::nullopt);
+    auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
+        std::move(translator), nullptr);
+    auto pin_requests = std::make_shared<std::vector<std::vector<int64_t>>>();
+    auto column = std::make_shared<ScanCountingStringColumn>(
+        std::move(slot), field_meta, pin_requests);
+
+    const FixedVector<int32_t> offsets{3, 1, 1, 0};
+    auto take = column->Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(
+                offsets.data(), static_cast<int64_t>(offsets.size())),
+            ChunkedColumnInterface::TargetType::StringView});
+    ASSERT_NE(take, nullptr);
+    ASSERT_EQ(take->Size(), 4);
+    EXPECT_TRUE(pin_requests->empty());
+    EXPECT_EQ(*take->Get<std::string_view>(0).value, "delta");
+    EXPECT_EQ(*take->Get<std::string_view>(1).value, "beta");
+    EXPECT_EQ(*take->Get<std::string_view>(2).value, "beta");
+    EXPECT_EQ(*take->Get<std::string_view>(3).value, "alpha");
+    ASSERT_EQ(pin_requests->size(), 1u);
+    EXPECT_EQ(pin_requests->front(), (std::vector<int64_t>{0}));
+}
+
+TEST(ChunkedColumnInterfaceTest, MaterializedViewDataScanUsesWindowBounds) {
+    const std::vector<std::string> values{
+        "alpha", "beta", "gamma", "delta", "epsilon"};
+    auto buffer = BuildStringChunkBuffer(values);
+    auto guard = std::make_shared<ChunkMmapGuard>(nullptr, 0, "");
+    std::vector<std::unique_ptr<Chunk>> chunks;
+    chunks.push_back(
+        std::make_unique<StringChunk>(static_cast<int32_t>(values.size()),
+                                      buffer.data(),
+                                      buffer.size(),
+                                      /*nullable=*/false,
+                                      std::move(guard)));
+    auto translator = std::make_unique<TestChunkTranslator>(
+        std::vector<int64_t>{static_cast<int64_t>(values.size())},
+        "bounded_varchar_scan",
+        std::move(chunks));
+    FieldMeta field_meta(FieldName("varchar"),
+                         FieldId(kTestFieldId),
+                         DataType::VARCHAR,
+                         /*nullable=*/false,
+                         std::nullopt);
+    auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
+        std::move(translator), nullptr);
+    auto pin_requests = std::make_shared<std::vector<std::vector<int64_t>>>();
+    auto column = std::make_shared<ScanCountingStringColumn>(
+        std::move(slot), field_meta, pin_requests);
+
+    constexpr int64_t kMaxBatchRows = 2;
+    auto cursor =
+        column->Scan(nullptr,
+                     ChunkedColumnInterface::ScanOptions::ForData(
+                         0, ChunkedColumnInterface::TargetType::StringView));
+    ASSERT_NE(cursor, nullptr);
+    EXPECT_TRUE(pin_requests->empty());
+
+    std::vector<std::string> scanned;
+    std::vector<int64_t> batch_starts;
+    std::vector<int64_t> batch_sizes;
+    ChunkedColumnInterface::ScanBatch batch;
+    for (int64_t start = 0; start < static_cast<int64_t>(values.size());
+         start += kMaxBatchRows) {
+        const auto length = std::min<int64_t>(
+            kMaxBatchRows, static_cast<int64_t>(values.size()) - start);
+        ASSERT_TRUE(
+            cursor->Next(length,
+                         ChunkedColumnInterface::ScanReadMode::DataAndValidity,
+                         &batch));
+        batch_starts.emplace_back(batch.row_id_start);
+        batch_sizes.emplace_back(batch.size);
+        EXPECT_LE(batch.size, kMaxBatchRows);
+        const auto* batch_values = batch.values.data_as<std::string_view>();
+        for (int64_t i = 0; i < batch.size; ++i) {
+            scanned.emplace_back(batch_values[i]);
+        }
+    }
+
+    EXPECT_EQ(batch_starts, (std::vector<int64_t>{0, 2, 4}));
+    EXPECT_EQ(batch_sizes, (std::vector<int64_t>{2, 2, 1}));
+    EXPECT_EQ(scanned, values);
+    EXPECT_EQ(pin_requests->size(), 3u);
+    cursor.reset();
+    const int64_t last_offset[]{4};
+    column->ManualEvictCache();
+    EXPECT_TRUE(column->CellsLoaded(last_offset, 1));
+    EXPECT_EQ(batch.values.data_as<std::string_view>()[0], "epsilon");
+    batch = {};
+    column->ManualEvictCache();
+    EXPECT_FALSE(column->CellsLoaded(last_offset, 1));
 }
 
 }  // namespace milvus

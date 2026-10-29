@@ -44,6 +44,12 @@ GetNumOfQueries(CPlaceholderGroup placeholder_group);
 int64_t
 GetTopK(CSearchPlan plan);
 
+int64_t
+GetGroupSize(CSearchPlan plan);
+
+void
+SetSearchPlanTakeForOutputAllowed(CSearchPlan plan, bool allowed);
+
 CStatus
 GetFieldID(CSearchPlan plan, int64_t* field_id);
 
@@ -55,6 +61,14 @@ HasTargetEntries(CSearchPlan plan);
 
 void
 SetMetricType(CSearchPlan plan, const char* metric_type);
+
+// Execution feature bits the plan recorded across every segment it ran on
+// (milvus::FeatureBit), or 0 when the plan does not collect them.
+uint64_t
+GetSearchPlanFeatureBits(CSearchPlan plan);
+
+uint64_t
+GetRetrievePlanFeatureBits(CRetrievePlan plan);
 
 void
 DeleteSearchPlan(CSearchPlan plan);
@@ -70,6 +84,9 @@ CreateRetrievePlanByExpr(CCollection c_col,
 
 void
 DeleteRetrievePlan(CRetrievePlan plan);
+
+void
+SetRetrievePlanTakeForOutputAllowed(CRetrievePlan plan, bool allowed);
 
 bool
 ShouldIgnoreNonPk(CRetrievePlan plan);

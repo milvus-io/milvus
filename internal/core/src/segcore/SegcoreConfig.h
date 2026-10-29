@@ -14,9 +14,11 @@
 #include <stdint.h>
 #include <string>
 #include <unordered_set>
+#include <utility>
 
 #include "common/EasyAssert.h"
 #include "knowhere/comp/index_param.h"
+#include "knowhere/version.h"
 
 namespace milvus::segcore {
 
@@ -28,9 +30,6 @@ class SegcoreConfig {
         static SegcoreConfig config;
         return config;
     }
-
-    void
-    parse_from(const std::string& string_path);
 
     int64_t
     get_chunk_rows() const {
@@ -70,6 +69,23 @@ class SegcoreConfig {
     bool
     get_enable_interim_segment_index() const {
         return enable_interim_segment_index_;
+    }
+
+    int32_t
+    get_interim_index_target_version() const {
+        return interim_index_target_version_;
+    }
+
+    int32_t
+    get_interim_index_version() const {
+        return interim_index_target_version_ == -1
+                   ? knowhere::Version::GetCurrentVersion().VersionNumber()
+                   : interim_index_target_version_;
+    }
+
+    void
+    set_interim_index_target_version(int32_t target_version) {
+        interim_index_target_version_ = target_version;
     }
 
     void
@@ -117,6 +133,21 @@ class SegcoreConfig {
         return build_ratio_;
     }
 
+    // Fraction of the knowhere build thread pool that a single growing
+    // segment interim index build may use
+    // (queryNode.segcore.interimIndex.growingBuildThreadRate). 0 keeps the
+    // build single threaded, which is the legacy behavior. Resolved against
+    // the live pool size in VectorFieldIndexing::get_build_params.
+    void
+    set_growing_index_build_thread_rate(float rate) {
+        growing_index_build_thread_rate_.store(rate);
+    }
+
+    float
+    get_growing_index_build_thread_rate() const {
+        return growing_index_build_thread_rate_.load();
+    }
+
     // FM-index count-first guard threshold (queryNode.fmindexCostRatio):
     // accelerate a pattern through FMINDEX iff
     // occ x sa_sample_rate < ratio x total_tokens. Default 0.001 is the
@@ -142,15 +173,49 @@ class SegcoreConfig {
 
     void
     set_dense_vector_intermin_index_type(const std::string index_type) {
-        AssertInfo(valid_dense_vector_index_type.find(index_type) !=
-                       valid_dense_vector_index_type.end(),
-                   "fail to set dense vector index type.");
+        if (!(valid_dense_vector_index_type.find(index_type) !=
+              valid_dense_vector_index_type.end())) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "fail to set dense vector index type.");
+        }
         dense_index_type_ = index_type;
     }
 
     std::string
     get_dense_vector_intermin_index_type() const {
         return dense_index_type_;
+    }
+
+    void
+    set_sparse_interim_index_algos(std::string ip_algo, std::string bm25_algo) {
+        // Validate both before publishing either setting. These are startup
+        // settings, and must not silently turn an invalid override into a
+        // failed cold build followed by brute-force fallback.
+        for (const auto* algo : {&ip_algo, &bm25_algo}) {
+            if (!algo->empty() && valid_sparse_index_algos_.count(*algo) == 0) {
+                ThrowInfo(ConfigInvalid,
+                          "unsupported sparse interim index algorithm: {}",
+                          *algo);
+            }
+            if (*algo == "SINDI" && get_interim_index_version() < 10) {
+                ThrowInfo(ConfigInvalid,
+                          "sparse interim index algorithm SINDI requires "
+                          "targetIndexVersion >= 10, resolved version is {}",
+                          get_interim_index_version());
+            }
+        }
+        sparse_ip_index_algo_ = std::move(ip_algo);
+        sparse_bm25_index_algo_ = std::move(bm25_algo);
+    }
+
+    const std::string&
+    get_sparse_ip_interim_index_algo() const {
+        return sparse_ip_index_algo_;
+    }
+
+    const std::string&
+    get_sparse_bm25_interim_index_algo() const {
+        return sparse_bm25_index_algo_;
     }
 
     void
@@ -205,6 +270,26 @@ class SegcoreConfig {
     }
 
     void
+    set_lazy_index_slot_enabled(bool value) {
+        lazy_index_slot_enabled_.store(value, std::memory_order_relaxed);
+    }
+
+    bool
+    get_lazy_index_slot_enabled() const {
+        return lazy_index_slot_enabled_.load(std::memory_order_relaxed);
+    }
+
+    void
+    set_lazy_column_group_enabled(bool value) {
+        lazy_column_group_enabled_.store(value, std::memory_order_relaxed);
+    }
+
+    bool
+    get_lazy_column_group_enabled() const {
+        return lazy_column_group_enabled_.load(std::memory_order_relaxed);
+    }
+
+    void
     set_reject_remote_vector_output(bool value) {
         reject_remote_vector_output_ = value;
     }
@@ -246,6 +331,16 @@ class SegcoreConfig {
         return enable_gis_split_fusion_;
     }
 
+    void
+    set_scan_cursor_owns_pin(bool value) {
+        scan_cursor_owns_pin_ = value;
+    }
+
+    bool
+    get_scan_cursor_owns_pin() const {
+        return scan_cursor_owns_pin_;
+    }
+
  private:
     inline static const std::unordered_set<std::string>
         valid_dense_vector_index_type = {
@@ -253,7 +348,17 @@ class SegcoreConfig {
             knowhere::IndexEnum::INDEX_FAISS_SCANN_DVR,
     };
     inline static bool storage_v3_enabled_ = false;
+    inline static const std::unordered_set<std::string>
+        valid_sparse_index_algos_ = {"TAAT_NAIVE",
+                                     "DAAT_WAND",
+                                     "DAAT_MAXSCORE",
+                                     "BLOCK_MAX_WAND",
+                                     "BLOCK_MAX_MAXSCORE",
+                                     "SINDI"};
+    inline static std::string sparse_ip_index_algo_;
+    inline static std::string sparse_bm25_index_algo_;
     inline static bool enable_interim_segment_index_ = false;
+    inline static int32_t interim_index_target_version_ = -1;
     inline static bool enable_growing_source_flush_ = false;
     inline static int64_t chunk_rows_ = 32 * 1024;
     inline static int64_t nlist_ = 100;
@@ -261,6 +366,7 @@ class SegcoreConfig {
     inline static int64_t sub_dim_ = 2;
     inline static float refine_ratio_ = 3.0;
     inline static float build_ratio_ = 0.1;
+    inline static std::atomic<float> growing_index_build_thread_rate_{0.0f};
     // FM-index guard threshold; overridden from queryNode.fmindexCostRatio.
     inline static float fmindex_cost_ratio_ = 0.001f;
     inline static std::string dense_index_type_ =
@@ -270,7 +376,10 @@ class SegcoreConfig {
     inline static bool refine_with_quant_flag_ = false;
     inline static bool enable_geometry_cache_ = false;
     inline static bool enable_gis_split_fusion_ = false;
+    inline static bool scan_cursor_owns_pin_ = false;
     inline static bool prefer_field_data_when_index_has_raw_data_ = false;
+    inline static std::atomic<bool> lazy_index_slot_enabled_ = false;
+    inline static std::atomic<bool> lazy_column_group_enabled_ = false;
     inline static bool reject_remote_vector_output_ = false;
     inline static float interim_index_mem_expansion_rate_ = 1.15f;
     inline static int64_t max_group_by_groups_ = kDefaultMaxGroupByGroups;

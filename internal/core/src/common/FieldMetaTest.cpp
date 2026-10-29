@@ -84,6 +84,112 @@ TEST(FieldMetaTest, ParseFromWithoutExternalField) {
     EXPECT_TRUE(field.get_external_field_mapping().empty());
 }
 
+TEST(FieldMetaTest, RejectTypeSchemaForScalarField) {
+    milvus::proto::schema::FieldSchema proto;
+    proto.set_fieldid(202);
+    proto.set_name("typed_scalar");
+    proto.set_data_type(milvus::proto::schema::DataType::Int64);
+    proto.mutable_type_schema()->set_leaf_type(
+        milvus::proto::schema::DataType::Int64);
+
+    EXPECT_ANY_THROW(FieldMeta::ParseFrom(proto));
+}
+
+TEST(FieldMetaTest, RejectLegacyNestedArray) {
+    milvus::proto::schema::FieldSchema proto;
+    proto.set_fieldid(203);
+    proto.set_name("legacy_nested_array");
+    proto.set_data_type(milvus::proto::schema::DataType::Array);
+    proto.set_element_type(milvus::proto::schema::DataType::Array);
+
+    EXPECT_ANY_THROW(FieldMeta::ParseFrom(proto));
+}
+
+TEST(FieldMetaTest, NestedArrayRoundTrip) {
+    milvus::proto::schema::FieldSchema proto;
+    proto.set_fieldid(203);
+    proto.set_name("nested_array");
+    proto.set_data_type(milvus::proto::schema::DataType::Array);
+    proto.set_element_type(milvus::proto::schema::DataType::Array);
+    auto* child = proto.mutable_type_schema()->mutable_array_element();
+    child->mutable_array_element()->set_leaf_type(
+        milvus::proto::schema::DataType::Int32);
+
+    auto field = FieldMeta::ParseFrom(proto);
+    EXPECT_EQ(field.get_data_type(), DataType::ARRAY);
+    EXPECT_EQ(field.get_element_type(), DataType::ARRAY);
+    EXPECT_TRUE(field.is_nested_array());
+
+    auto serialized = field.ToProto();
+    ASSERT_TRUE(serialized.has_type_schema());
+    EXPECT_EQ(serialized.data_type(), milvus::proto::schema::DataType::Array);
+    EXPECT_EQ(serialized.element_type(),
+              milvus::proto::schema::DataType::Array);
+    EXPECT_EQ(serialized.SerializeAsString(), proto.SerializeAsString());
+}
+
+TEST(FieldMetaTest, RejectUnsupportedNestedArrayLeafType) {
+    milvus::proto::schema::FieldSchema proto;
+    proto.set_fieldid(203);
+    proto.set_name("nested_vector_array");
+    proto.set_data_type(milvus::proto::schema::DataType::Array);
+    proto.set_element_type(milvus::proto::schema::DataType::Array);
+    proto.mutable_type_schema()
+        ->mutable_array_element()
+        ->mutable_array_element()
+        ->set_leaf_type(milvus::proto::schema::DataType::FloatVector);
+
+    EXPECT_ANY_THROW(FieldMeta::ParseFrom(proto));
+}
+
+TEST(FieldMetaTest, NestedArrayRootNullableIsNormalizedIntoTypeSchema) {
+    milvus::proto::schema::FieldSchema proto;
+    proto.set_fieldid(204);
+    proto.set_name("nullable_nested_array");
+    proto.set_data_type(milvus::proto::schema::DataType::Array);
+    proto.set_element_type(milvus::proto::schema::DataType::Array);
+    proto.set_nullable(true);
+    auto* child = proto.mutable_type_schema()->mutable_array_element();
+    child->mutable_array_element()->set_leaf_type(
+        milvus::proto::schema::DataType::Int32);
+
+    auto field = FieldMeta::ParseFrom(proto);
+    EXPECT_TRUE(field.is_nullable());
+    EXPECT_TRUE(field.get_array_type_schema().nullable());
+
+    auto serialized = field.ToProto();
+    EXPECT_TRUE(serialized.nullable());
+    EXPECT_TRUE(serialized.type_schema().nullable());
+}
+
+TEST(FieldMetaTest, NestedArrayRootNullableComesFromTypeSchema) {
+    milvus::proto::schema::FieldSchema proto;
+    proto.set_fieldid(205);
+    proto.set_name("type_schema_nullable_nested_array");
+    proto.set_data_type(milvus::proto::schema::DataType::Array);
+    proto.set_element_type(milvus::proto::schema::DataType::Array);
+    auto* type = proto.mutable_type_schema();
+    type->set_nullable(true);
+    type->mutable_array_element()->mutable_array_element()->set_leaf_type(
+        milvus::proto::schema::DataType::Int32);
+
+    auto field = FieldMeta::ParseFrom(proto);
+    EXPECT_TRUE(field.is_nullable());
+    EXPECT_TRUE(field.get_array_type_schema().nullable());
+    EXPECT_TRUE(field.ToProto().nullable());
+}
+
+TEST(FieldMetaTest, RejectTypeSchemaOnlyNestedArray) {
+    milvus::proto::schema::FieldSchema proto;
+    proto.set_fieldid(203);
+    proto.set_name("nested_array");
+    auto* child = proto.mutable_type_schema()->mutable_array_element();
+    child->mutable_array_element()->set_leaf_type(
+        milvus::proto::schema::DataType::Int32);
+
+    EXPECT_ANY_THROW(FieldMeta::ParseFrom(proto));
+}
+
 TEST(FieldMetaTest, LocalFormatRoundTrip) {
     milvus::proto::schema::FieldSchema proto;
     proto.set_fieldid(202);
@@ -128,6 +234,109 @@ TEST(FieldMetaTest, RawLocalFormatIsDefaultAndNotSerialized) {
     for (const auto& param : serialized.type_params()) {
         EXPECT_NE(param.key(), LOCAL_FORMAT_KEY);
     }
+}
+
+TEST(FieldMetaTest, ElementNullableArrayRoundTrip) {
+    milvus::proto::schema::FieldSchema proto;
+    proto.set_fieldid(204);
+    proto.set_name("nullable_elements");
+    proto.set_data_type(milvus::proto::schema::DataType::Array);
+    proto.set_element_type(milvus::proto::schema::DataType::Int64);
+    proto.set_nullable(true);
+    proto.set_element_nullable(true);
+
+    auto field = FieldMeta::ParseFrom(proto);
+    EXPECT_EQ(field.get_data_type(), DataType::ARRAY);
+    EXPECT_EQ(field.get_element_type(), DataType::INT64);
+    EXPECT_TRUE(field.is_nullable());
+    EXPECT_TRUE(field.is_element_nullable());
+
+    auto serialized = field.ToProto();
+    EXPECT_EQ(serialized.data_type(), milvus::proto::schema::DataType::Array);
+    EXPECT_EQ(serialized.element_type(),
+              milvus::proto::schema::DataType::Int64);
+    EXPECT_TRUE(serialized.nullable());
+    EXPECT_TRUE(serialized.element_nullable());
+}
+
+TEST(FieldMetaTest, ElementNullableVectorArrayRoundTrip) {
+    constexpr int64_t kDim = 16;
+    milvus::proto::schema::FieldSchema proto;
+    proto.set_fieldid(205);
+    proto.set_name("nullable_vectors");
+    proto.set_data_type(milvus::proto::schema::DataType::ArrayOfVector);
+    proto.set_element_type(milvus::proto::schema::DataType::FloatVector);
+    proto.set_nullable(true);
+    proto.set_element_nullable(true);
+    auto* dim = proto.add_type_params();
+    dim->set_key("dim");
+    dim->set_value(std::to_string(kDim));
+
+    auto field = FieldMeta::ParseFrom(proto);
+    EXPECT_EQ(field.get_data_type(), DataType::VECTOR_ARRAY);
+    EXPECT_EQ(field.get_element_type(), DataType::VECTOR_FLOAT);
+    EXPECT_EQ(field.get_dim(), kDim);
+    EXPECT_TRUE(field.is_nullable());
+    EXPECT_TRUE(field.is_element_nullable());
+
+    auto serialized = field.ToProto();
+    EXPECT_EQ(serialized.data_type(),
+              milvus::proto::schema::DataType::ArrayOfVector);
+    EXPECT_EQ(serialized.element_type(),
+              milvus::proto::schema::DataType::FloatVector);
+    EXPECT_TRUE(serialized.nullable());
+    EXPECT_TRUE(serialized.element_nullable());
+
+    auto reparsed = FieldMeta::ParseFrom(serialized);
+    EXPECT_EQ(reparsed.get_dim(), kDim);
+    EXPECT_TRUE(reparsed.is_element_nullable());
+}
+
+TEST(FieldMetaTest, RejectElementNullableNonArrayFields) {
+    milvus::proto::schema::FieldSchema scalar;
+    scalar.set_fieldid(206);
+    scalar.set_name("scalar");
+    scalar.set_data_type(milvus::proto::schema::DataType::Int64);
+    scalar.set_element_nullable(true);
+    EXPECT_ANY_THROW(FieldMeta::ParseFrom(scalar));
+
+    milvus::proto::schema::FieldSchema vector;
+    vector.set_fieldid(207);
+    vector.set_name("vector");
+    vector.set_data_type(milvus::proto::schema::DataType::FloatVector);
+    vector.set_element_nullable(true);
+    EXPECT_ANY_THROW(FieldMeta::ParseFrom(vector));
+}
+
+TEST(FieldMetaTest, RejectUnsupportedVectorArrayElementType) {
+    milvus::proto::schema::FieldSchema proto;
+    proto.set_fieldid(208);
+    proto.set_name("nested_vectors");
+    proto.set_data_type(milvus::proto::schema::DataType::ArrayOfVector);
+    proto.set_element_type(milvus::proto::schema::DataType::SparseFloatVector);
+    auto* dim = proto.add_type_params();
+    dim->set_key("dim");
+    dim->set_value("16");
+
+    EXPECT_ANY_THROW(FieldMeta::ParseFrom(proto));
+}
+
+TEST(FieldMetaTest, RejectVectorArrayThroughOtherConstructors) {
+    EXPECT_ANY_THROW((void)FieldMeta(FieldName("vector_array"),
+                                     FieldId(209),
+                                     DataType::VECTOR_ARRAY,
+                                     16,
+                                     std::nullopt,
+                                     false,
+                                     std::nullopt));
+
+    EXPECT_ANY_THROW((void)FieldMeta(FieldName("vector_array"),
+                                     FieldId(210),
+                                     DataType::VECTOR_ARRAY,
+                                     DataType::VECTOR_FLOAT,
+                                     false,
+                                     false,
+                                     std::nullopt));
 }
 
 TEST(FieldMetaTest, ShouldLoadFieldReturnsFalseForExternalField) {

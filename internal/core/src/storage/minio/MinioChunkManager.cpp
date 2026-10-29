@@ -15,9 +15,10 @@
 // limitations under the License.
 
 #include "storage/minio/MinioChunkManager.h"
+#include "storage/minio/GuardedS3EndpointProvider.h"
 
 #include <aws/core/auth/AWSCredentials.h>
-#include <aws/core/auth/AWSCredentialsProviderChain.h>
+#include <aws/core/auth/AWSCredentialsProvider.h>
 #include <aws/s3/model/CreateBucketRequest.h>
 #include <aws/s3/model/DeleteBucketRequest.h>
 #include <aws/s3/model/DeleteObjectRequest.h>
@@ -29,10 +30,16 @@
 #include <string.h>
 #include <unistd.h>
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <exception>
 #include <functional>
+#include <mutex>
+#include <optional>
+#include <set>
 #include <sstream>
+#include <unordered_map>
+#include <utility>
 
 #include "aws/core/Aws.h"
 #include "aws/core/auth/signer/AWSAuthV4Signer.h"
@@ -49,10 +56,11 @@
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "fmt/core.h"
-#include "google/cloud/internal/rest_client.h"
-#include "google/cloud/storage/oauth2/compute_engine_credentials.h"
-#include "google/cloud/version.h"
 #include "log/Log.h"
+#include "milvus-storage/common/extend_status.h"
+#include "milvus-storage/filesystem/gcp/gcp_credential_registry.h"
+#include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/filesystem/s3/s3_filesystem_producer.h"
 #include "monitor/Monitor.h"
 #include "prometheus/counter.h"
 #include "prometheus/histogram.h"
@@ -65,20 +73,154 @@ namespace milvus::storage {
 std::atomic<size_t> MinioChunkManager::init_count_(0);
 std::mutex MinioChunkManager::client_mutex_;
 
+namespace {
+
+std::mutex&
+GcsEndpointsMutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+
+std::set<std::string>&
+GcsEndpointHosts() {
+    static std::set<std::string> hosts;
+    return hosts;
+}
+
+// The IAM providers of the GCS buckets Milvus itself is configured with,
+// guarded by GcsEndpointsMutex(). milvus-storage replaces its registry entry
+// for a bucket whenever it opens a filesystem there, possibly with another
+// identity (an external table on the same bucket), so Milvus' own requests do
+// not use the registry entry. Reusing the provider also keeps its cached token.
+using GcpProviderMap =
+    std::unordered_map<milvus_storage::GcpBucketKey,
+                       std::shared_ptr<milvus_storage::GcpCredentialProvider>,
+                       milvus_storage::GcpBucketKeyHash>;
+
+GcpProviderMap&
+MilvusGcpProviders() {
+    static GcpProviderMap providers;
+    return providers;
+}
+
+std::string
+ToLower(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+        return std::tolower(c);
+    });
+    return s;
+}
+
+// Matches a request like GcpCredentialRegistry::Lookup: path-style
+// (<endpoint>/<bucket>/<key>), then virtual-host style (<bucket>.<endpoint>).
+std::shared_ptr<milvus_storage::GcpCredentialProvider>
+LookupMilvusGcpProvider(const Aws::Http::URI& uri) {
+    milvus_storage::GcpEndpointKey endpoint{
+        uri.GetScheme(), uri.GetPort(), ToLower(uri.GetAuthority().c_str())};
+    std::string path = uri.GetPath().c_str();
+    size_t start = (!path.empty() && path.front() == '/') ? 1 : 0;
+    std::string bucket = path.substr(start, path.find('/', start) - start);
+
+    std::lock_guard<std::mutex> lock(GcsEndpointsMutex());
+    const auto& providers = MilvusGcpProviders();
+    if (!bucket.empty()) {
+        auto it = providers.find({endpoint, bucket});
+        if (it != providers.end()) {
+            return it->second;
+        }
+    }
+    auto dot = endpoint.host.find('.');
+    if (dot != std::string::npos && dot > 0) {
+        bucket = endpoint.host.substr(0, dot);
+        endpoint.host.erase(0, dot + 1);
+        auto it = providers.find({endpoint, bucket});
+        if (it != providers.end()) {
+            return it->second;
+        }
+    }
+    return nullptr;
+}
+
+// Whether a request to `host` may carry GCP credentials: Google's own
+// endpoints, and the GCS endpoints Milvus is configured with, also in
+// virtual-host form (<bucket>.<endpoint>).
+bool
+IsGcsHostForCredentials(std::string host) {
+    host = ToLower(std::move(host));
+    const std::string google_suffix = ".googleapis.com";
+    if (host.size() > google_suffix.size() &&
+        host.compare(host.size() - google_suffix.size(),
+                     google_suffix.size(),
+                     google_suffix) == 0) {
+        return true;
+    }
+    std::lock_guard<std::mutex> lock(GcsEndpointsMutex());
+    const auto& hosts = GcsEndpointHosts();
+    if (hosts.count(host) > 0) {
+        return true;
+    }
+    auto dot = host.find('.');
+    return dot != std::string::npos && hosts.count(host.substr(dot + 1)) > 0;
+}
+
+}  // namespace
+
+void
+AddGcsEndpointForCredentials(const std::string& address, bool use_ssl) {
+    auto endpoint = milvus_storage::NormalizeGcpEndpoint(address, use_ssl);
+    std::lock_guard<std::mutex> lock(GcsEndpointsMutex());
+    GcsEndpointHosts().insert(endpoint.host);
+}
+
 void
 ConfigureGoogleCloudIAMHttpClientFactory(Aws::SDKOptions& sdk_options) {
     sdk_options.httpOptions.httpClientFactory_create_fn = []() {
-        auto credentials =
-            std::make_shared<google::cloud::oauth2_internal::
-                                 GOOGLE_CLOUD_CPP_NS::ComputeEngineCredentials>(
-                google::cloud::Options{},
-                [](google::cloud::Options const& opts) {
-                    return google::cloud::rest_internal::MakeDefaultRestClient(
-                        "", opts);
-                });
         return Aws::MakeShared<GoogleHttpClientFactory>(
-            GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, credentials);
+            GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG);
     };
+}
+
+std::shared_ptr<Aws::Http::HttpRequest>
+GoogleHttpClientFactory::CreateHttpRequest(
+    const Aws::Http::URI& uri,
+    Aws::Http::HttpMethod method,
+    const Aws::IOStreamFactory& streamFactory) const {
+    auto request = Aws::MakeShared<Aws::Http::Standard::StandardHttpRequest>(
+        GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, uri, method);
+    request->SetResponseStreamFactory(streamFactory);
+    // Only GCS endpoints get a token, and only for buckets with a registered
+    // provider, as in milvus-storage's GCP factory. Requests to any other
+    // host, such as the instance metadata endpoint or an external table
+    // endpoint, carry no GCP credentials.
+    if (!IsGcsHostForCredentials(uri.GetAuthority().c_str())) {
+        return request;
+    }
+    auto provider = LookupMilvusGcpProvider(uri);
+    if (provider == nullptr) {
+        provider =
+            milvus_storage::GcpCredentialRegistry::Instance().Lookup(uri);
+    }
+    if (provider == nullptr) {
+        return request;
+    }
+    // The AWS SDK calls this and is built with -fno-exceptions: an exception
+    // must not unwind through it, on milvus-storage's Arrow IO threads that
+    // ends in std::terminate. google-cloud-cpp can throw while parsing a token
+    // response. A request without a token is rejected by GCS, which is also
+    // what happens when the provider cannot fetch one.
+    std::optional<std::pair<std::string, std::string>> auth_header;
+    try {
+        auth_header = provider->AuthorizationHeader();
+    } catch (const std::exception& e) {
+        LOG_WARN("get GCP authorization header failed: {}", e.what());
+    } catch (...) {
+        LOG_WARN("get GCP authorization header failed: unknown exception");
+    }
+    if (auth_header.has_value() && !auth_header->first.empty()) {
+        request->SetHeaderValue(auth_header->first.c_str(),
+                                auth_header->second.c_str());
+    }
+    return request;
 }
 
 static void
@@ -106,18 +248,8 @@ SwallowHandler(int signal) {
  * @return Aws::String
  */
 inline Aws::String
-ConvertToAwsString(const std::string& str) {
+ConvertMinioToAwsString(const std::string& str) {
     return Aws::String(str.c_str(), str.size());
-}
-
-/**
- * @brief convert Aws::string to std::string
- * @param aws_str
- * @return std::string
- */
-inline std::string
-ConvertFromAwsString(const Aws::String& aws_str) {
-    return std::string(aws_str.c_str(), aws_str.size());
 }
 
 void
@@ -250,15 +382,16 @@ MinioChunkManager::BuildS3Client(
     const Aws::Client::ClientConfiguration& config) {
     if (storage_config.useIAM) {
         auto provider =
-            std::make_shared<Aws::Auth::DefaultAWSCredentialsProviderChain>();
+            std::make_shared<milvus_storage::AwsCredentialsProviderChain>();
         auto aws_credentials = provider->GetAWSCredentials();
-        AssertInfo(!aws_credentials.GetAWSAccessKeyId().empty(),
-                   "if use iam, access key id should not be empty");
-        AssertInfo(!aws_credentials.GetAWSSecretKey().empty(),
-                   "if use iam, secret key should not be empty");
-        AssertInfo(!aws_credentials.GetSessionToken().empty(),
-                   "if use iam, token should not be empty");
-
+        if (!(!aws_credentials.GetAWSAccessKeyId().empty())) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "if use iam, access key id should not be empty");
+        }
+        if (!(!aws_credentials.GetAWSSecretKey().empty())) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "if use iam, secret key should not be empty");
+        }
         client_ = std::make_shared<Aws::S3::S3Client>(
             provider,
             config,
@@ -271,6 +404,7 @@ MinioChunkManager::BuildS3Client(
 
 void
 MinioChunkManager::PreCheck(const StorageConfig& config) {
+    InstallS3EndpointAuthGuard(*client_);
     LOG_INFO("start to precheck chunk manager with configuration: {}",
              config.ToString());
     try {
@@ -290,7 +424,10 @@ MinioChunkManager::PreCheck(const StorageConfig& config) {
         LOG_ERROR("{}", err_message);
         throw SegcoreError(e.get_error_code(), err_message);
     } catch (std::exception& e) {
-        throw e;
+        // Bare rethrow: `throw e;` would copy-construct a plain std::exception,
+        // slicing off any derived type (and its error code) before it reaches
+        // the cgo boundary.
+        throw;
     }
 };
 
@@ -298,15 +435,19 @@ void
 MinioChunkManager::BuildAccessKeyClient(
     const StorageConfig& storage_config,
     const Aws::Client::ClientConfiguration& config) {
-    AssertInfo(!storage_config.access_key_id.empty(),
-               "if not use iam, access key should not be empty");
-    AssertInfo(!storage_config.access_key_value.empty(),
-               "if not use iam, access value should not be empty");
+    if (!(!storage_config.access_key_id.empty())) {
+        ThrowInfo(ErrorCode::ConfigInvalid,
+                  "if not use iam, access key should not be empty");
+    }
+    if (!(!storage_config.access_key_value.empty())) {
+        ThrowInfo(ErrorCode::ConfigInvalid,
+                  "if not use iam, access value should not be empty");
+    }
 
     client_ = std::make_shared<Aws::S3::S3Client>(
         Aws::Auth::AWSCredentials(
-            ConvertToAwsString(storage_config.access_key_id),
-            ConvertToAwsString(storage_config.access_key_value)),
+            ConvertMinioToAwsString(storage_config.access_key_id),
+            ConvertMinioToAwsString(storage_config.access_key_value)),
         config,
         Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
         storage_config.useVirtualHost);
@@ -324,12 +465,18 @@ MinioChunkManager::BuildAliyunCloudClient(
             Aws::Auth::AliyunSTSAssumeRoleWebIdentityCredentialsProvider>(
             "AliyunSTSAssumeRoleWebIdentityCredentialsProvider");
         auto aliyun_credentials = aliyun_provider->GetAWSCredentials();
-        AssertInfo(!aliyun_credentials.GetAWSAccessKeyId().empty(),
-                   "if use iam, access key id should not be empty");
-        AssertInfo(!aliyun_credentials.GetAWSSecretKey().empty(),
-                   "if use iam, secret key should not be empty");
-        AssertInfo(!aliyun_credentials.GetSessionToken().empty(),
-                   "if use iam, token should not be empty");
+        if (!(!aliyun_credentials.GetAWSAccessKeyId().empty())) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "if use iam, access key id should not be empty");
+        }
+        if (!(!aliyun_credentials.GetAWSSecretKey().empty())) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "if use iam, secret key should not be empty");
+        }
+        if (!(!aliyun_credentials.GetSessionToken().empty())) {
+            ThrowInfo(ErrorCode::ConfigInvalid,
+                      "if use iam, token should not be empty");
+        }
         client_ = std::make_shared<Aws::S3::S3Client>(
             aliyun_provider,
             config,
@@ -344,14 +491,60 @@ void
 MinioChunkManager::BuildGoogleCloudClient(
     const StorageConfig& storage_config,
     const Aws::Client::ClientConfiguration& config) {
+    if (!storage_config.useIAM) {
+        // Preserve the existing access-key validation before building a provider.
+        BuildAccessKeyClient(storage_config, config);
+    }
+
+    // Storage may have installed the process-wide GCP HTTP factory first.
+    // Register both IAM and HMAC identities before PreCheck, even if our
+    // InitAPI was ignored. Building an access-key client alone is insufficient.
+    milvus_storage::GcpBucketKey key{
+        milvus_storage::NormalizeGcpEndpoint(storage_config.address,
+                                             storage_config.useSSL),
+        storage_config.bucket_name};
+    std::shared_ptr<milvus_storage::GcpCredentialProvider> provider;
     if (storage_config.useIAM) {
-        // Using S3 client instead of google client because of compatible protocol
+        // An IAM provider holds no secret, so one per bucket serves every
+        // chunk manager and keeps its cached token.
+        std::lock_guard<std::mutex> lock(GcsEndpointsMutex());
+        auto it = MilvusGcpProviders().find(key);
+        if (it != MilvusGcpProviders().end()) {
+            provider = it->second;
+        }
+    }
+    if (provider == nullptr) {
+        milvus_storage::ArrowFileSystemConfig gcp_config;
+        gcp_config.use_iam = storage_config.useIAM;
+        gcp_config.access_key_id = storage_config.access_key_id;
+        gcp_config.access_key_value = storage_config.access_key_value;
+        auto built = milvus_storage::BuildGcpProviderFromConfig(gcp_config);
+        if (!built.ok()) {
+            throw milvus_storage::ToSegcoreError(built.status());
+        }
+        provider = std::move(built).ValueOrDie();
+        if (storage_config.useIAM) {
+            std::lock_guard<std::mutex> lock(GcsEndpointsMutex());
+            provider =
+                MilvusGcpProviders().emplace(key, provider).first->second;
+        }
+    }
+    milvus_storage::GcpCredentialRegistry::Instance().Register(key, provider);
+    AddGcsEndpointForCredentials(storage_config.address, storage_config.useSSL);
+
+    if (storage_config.useIAM) {
+        // Using S3 client instead of google client because of compatible protocol.
+        // GoogleHttpClientFactory adds the OAuth token, so the S3 client signs
+        // nothing. Without an explicit provider the client uses
+        // DefaultAWSCredentialsProviderChain, which never finds AWS credentials
+        // on GCP and so queries the instance metadata endpoint (the GKE
+        // metadata server) on every request.
         client_ = std::make_shared<Aws::S3::S3Client>(
+            Aws::MakeShared<Aws::Auth::AnonymousAWSCredentialsProvider>(
+                GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG),
             config,
             Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
             storage_config.useVirtualHost);
-    } else {
-        BuildAccessKeyClient(storage_config, config);
     }
 }
 
@@ -402,7 +595,7 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
     // For more details, please refer to https://github.com/aws/aws-sdk-cpp/issues/1440
     static Aws::Client::ClientConfiguration g_config;
     Aws::Client::ClientConfiguration config = g_config;
-    config.endpointOverride = ConvertToAwsString(storage_config.address);
+    config.endpointOverride = ConvertMinioToAwsString(storage_config.address);
 
     // Three cases:
     // 1. no ssl, verifySSL=false
@@ -412,7 +605,7 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
         config.scheme = Aws::Http::Scheme::HTTPS;
         config.verifySSL = true;
         if (!storage_config.sslCACert.empty()) {
-            config.caPath = ConvertToAwsString(storage_config.sslCACert);
+            config.caPath = ConvertMinioToAwsString(storage_config.sslCACert);
             config.verifySSL = false;
         }
     } else {
@@ -429,7 +622,7 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
     }
 
     if (!storage_config.region.empty()) {
-        config.region = ConvertToAwsString(storage_config.region);
+        config.region = ConvertMinioToAwsString(storage_config.region);
     }
 
     if (NeedChecksumOverride(storage_config.cloud_provider)) {
