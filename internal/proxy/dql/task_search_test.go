@@ -4414,6 +4414,41 @@ func TestSearchShardCanceledContextKeepsShardLeaderCache(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
+// TestSearchShardTimedOutContextInvalidatesShardLeaderCache pins the boundary
+// of the test above: a deadline is not a cancellation, and the cache is
+// invalidated as before.
+func TestSearchShardTimedOutContextInvalidatesShardLeaderCache(t *testing.T) {
+	const nodeID int64 = 101
+	channel := "ch-timed-out"
+
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(20*time.Millisecond))
+	defer cancel()
+	qn := mocks.NewMockQueryNodeClient(t)
+	qn.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *querypb.SearchRequest, opts ...grpc.CallOption) (*internalpb.SearchResults, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		})
+	mgr := shardclient.NewMockShardClientManager(t)
+	mgr.EXPECT().InvalidateShardLeaderCache([]int64{7}).Return().Once()
+
+	task := &SearchTask{
+		ctx: ctx,
+		SearchRequest: &internalpb.SearchRequest{
+			Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_Search},
+			CollectionID: 7,
+		},
+		request:           &milvuspb.SearchRequest{DbName: "default", CollectionName: "c"},
+		Condition:         NewTaskCondition(ctx),
+		shardClientMgr:    mgr,
+		resultBuf:         typeutil.NewConcurrentSet[*internalpb.SearchResults](),
+		queryChannelsNode: typeutil.NewConcurrentMap[string, int64](),
+	}
+
+	err := task.searchShard(ctx, nodeID, qn, channel)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
 type GetPartitionIDsSuite struct {
 	suite.Suite
 

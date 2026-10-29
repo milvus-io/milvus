@@ -446,10 +446,11 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			log.Warn(ctx, "search/query channel failed, node not available",
 				mlog.Int64("nodeID", targetNode.NodeID),
 				mlog.Err(err))
-			// The request itself is already over (client deadline, client
-			// disconnect, or an operator cancel): the failure says nothing
-			// about the node, so neither blacklist it nor retry.
-			if ctx.Err() != nil {
+			// The request was canceled (client disconnect or an operator
+			// cancel): the failure says nothing about the node, so neither
+			// blacklist it nor retry. A request that ran out of its own
+			// deadline keeps the previous behavior and falls through.
+			if merr.IsCanceled(ctx.Err()) {
 				return false, err
 			}
 			lb.blacklist.Add(workload.Channel, targetNode.NodeID)
@@ -463,16 +464,20 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			log.Warn(ctx, "search/query channel failed",
 				mlog.Int64("nodeID", targetNode.NodeID),
 				mlog.Err(err))
-			// Once the request's own ctx is done -- client deadline, client
-			// disconnect, or an operator canceling it -- whatever the node
-			// returned (context.Canceled, a segcore FollyCancel, or an inner
-			// error raised while unwinding) is a consequence of the
-			// cancellation, not evidence about node health. Abort without
-			// retrying, without excluding the node from this request, and
-			// without touching the blacklist. This check is keyed on ctx state
-			// on purpose: it must not depend on the index layer reporting the
-			// cancellation with any particular status code.
-			if ctx.Err() != nil {
+			// Once the request has been canceled -- the client disconnected
+			// or an operator canceled it -- whatever the node returned
+			// (context.Canceled, a segcore FollyCancel, or an inner error
+			// raised while unwinding) is a consequence of the cancellation,
+			// not evidence about node health. Abort without retrying, without
+			// excluding the node from this request, and without touching the
+			// blacklist. This check is keyed on ctx state on purpose: it must
+			// not depend on the index layer reporting the cancellation with
+			// any particular status code.
+			//
+			// A request that exceeded the deadline its client set is not a
+			// cancellation and keeps the previous behavior: the node that
+			// was serving it is blacklisted for the channel as before.
+			if merr.IsCanceled(ctx.Err()) {
 				return false, err
 			}
 			// An input error is the request's own fault: re-dispatching it to

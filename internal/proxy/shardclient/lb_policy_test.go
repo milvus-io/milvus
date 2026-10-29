@@ -20,6 +20,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -833,6 +834,78 @@ func (s *LBPolicySuite) TestExecuteWithRetryCanceledContextClientFailureSkipsBla
 	s.Error(err)
 	s.Equal(1, getClientCount)
 	s.NotContains(s.lbPolicy.blacklist.GetBlacklistedNodes(channel), int64(1))
+}
+
+// TestExecuteWithRetryTimedOutContextStillBlacklists pins the boundary of the
+// two tests above: a request that ran out of the deadline its client set is
+// not a cancellation, and the node that was serving it is blacklisted for the
+// channel exactly as before.
+func (s *LBPolicySuite) TestExecuteWithRetryTimedOutContextStillBlacklists() {
+	channel := s.channels[0]
+	nodes := []NodeInfo{{NodeID: 1, Address: "localhost:9000", Serviceable: true}}
+	s.lbPolicy.retryOnReplica = 3
+
+	s.Run("exec fails after the deadline", func() {
+		s.mgr.ExpectedCalls = nil
+		s.lbBalancer.ExpectedCalls = nil
+		s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Maybe()
+		s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Maybe()
+		s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+		s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+		s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
+		s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(20*time.Millisecond))
+		defer cancel()
+		err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+			Db:             s.dbName,
+			CollectionName: s.collectionName,
+			CollectionID:   s.collectionID,
+			Channel:        channel,
+			Nq:             1,
+			Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+				<-ctx.Done()
+				return ctx.Err()
+			},
+		})
+
+		s.Error(err)
+		s.Contains(s.lbPolicy.blacklist.GetBlacklistedNodes(channel), int64(1),
+			"a node that let a request run past its deadline is blacklisted as before")
+	})
+
+	s.Run("client cannot be obtained after the deadline", func() {
+		s.mgr.ExpectedCalls = nil
+		s.lbBalancer.ExpectedCalls = nil
+		s.lbPolicy.blacklist = NewChannelBlacklist()
+		s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Maybe()
+		s.mgr.EXPECT().GetShard(mock.Anything, false, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil).Maybe()
+		s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+		s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
+		s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(20*time.Millisecond))
+		defer cancel()
+		s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, info NodeInfo) (types.QueryNodeClient, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		})
+
+		err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+			Db:             s.dbName,
+			CollectionName: s.collectionName,
+			CollectionID:   s.collectionID,
+			Channel:        channel,
+			Nq:             1,
+			Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
+				s.Fail("Exec must not run once the client could not be obtained")
+				return nil
+			},
+		})
+
+		s.Error(err)
+		s.Contains(s.lbPolicy.blacklist.GetBlacklistedNodes(channel), int64(1))
+	})
 }
 
 func (s *LBPolicySuite) TestExecuteOneChannel() {
