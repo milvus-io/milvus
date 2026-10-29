@@ -516,6 +516,17 @@ func TestComponentParam(t *testing.T) {
 	t.Run("test proxyConfig", func(t *testing.T) {
 		Params := &params.ProxyCfg
 
+		assert.Equal(t, "3.0.6", Params.SearchPlaceholderLogMaxBytes.Version)
+		assert.Equal(t, 16384, Params.SearchPlaceholderLogMaxBytes.GetAsInt())
+		params.Save(Params.SearchPlaceholderLogMaxBytes.Key, "32768")
+		assert.Equal(t, 32768, Params.SearchPlaceholderLogMaxBytes.GetAsInt())
+		for _, value := range []string{"0", "-1", "invalid", "9223372036854775808"} {
+			params.Save(Params.SearchPlaceholderLogMaxBytes.Key, value)
+			assert.Equal(t, 16384, Params.SearchPlaceholderLogMaxBytes.GetAsInt())
+		}
+		params.Reset(Params.SearchPlaceholderLogMaxBytes.Key)
+		assert.Equal(t, 16384, Params.SearchPlaceholderLogMaxBytes.GetAsInt())
+
 		assert.Equal(t, "3.0.6", Params.SearchPlaceholderLogRateLimit.Version)
 		assert.Zero(t, Params.SearchPlaceholderLogRateLimit.GetAsFloat())
 		params.Save(Params.SearchPlaceholderLogRateLimit.Key, "50")

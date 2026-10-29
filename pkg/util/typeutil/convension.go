@@ -175,18 +175,6 @@ func Float32ArrayToBytes(fv []float32) []byte {
 	return data
 }
 
-// BytesToFloat32Vector is the inverse of Float32ArrayToBytes. Trailing bytes
-// that do not make up a whole float32 are ignored, so a caller that needs an
-// exact dimension must check len(b) itself.
-func BytesToFloat32Vector(b []byte) []float32 {
-	dim := len(b) / 4
-	vec := make([]float32, dim)
-	for i := 0; i < dim; i++ {
-		vec[i] = math.Float32frombits(binary.LittleEndian.Uint32(b[i*4:]))
-	}
-	return vec
-}
-
 // Float32ArrayToFloat16Bytes converts float32 vector `fv` to float16 vector
 func Float32ArrayToFloat16Bytes(fv []float32) []byte {
 	data := make([]byte, 0, 2*len(fv)) // float16 occupies 2 bytes

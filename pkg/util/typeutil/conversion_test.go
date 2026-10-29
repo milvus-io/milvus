@@ -134,23 +134,4 @@ func TestConversion(t *testing.T) {
 		assert.Equal(t, "\xe3=", string(Float32ToBFloat16Bytes(0.11111)))
 		assert.Equal(t, "c>", string(Float32ToBFloat16Bytes(0.22222)))
 	})
-
-	t.Run("TestBytesToFloat32Vector", func(t *testing.T) {
-		assert.Equal(t, []float32{0.11111, 0.22222}, BytesToFloat32Vector([]byte("\xa4\x8d\xe3=\xa4\x8dc>")))
-
-		// Compared as bits: -0 == 0 and NaN != NaN, so float equality would
-		// pass a sign flip and fail an exact NaN payload.
-		values := []float32{
-			0.1, float32(math.Copysign(0, -1)), 0, math.SmallestNonzeroFloat32, math.MaxFloat32,
-			float32(math.Inf(-1)), math.Float32frombits(0x7fc00001),
-		}
-		got := BytesToFloat32Vector(Float32ArrayToBytes(values))
-		assert.Equal(t, len(values), len(got))
-		for i := range values {
-			assert.Equal(t, math.Float32bits(values[i]), math.Float32bits(got[i]), "index %d", i)
-		}
-
-		assert.Empty(t, BytesToFloat32Vector(nil))
-		assert.Equal(t, []float32{0.11111}, BytesToFloat32Vector([]byte("\xa4\x8d\xe3=\xa4\x8d")))
-	})
 }

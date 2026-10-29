@@ -19,7 +19,9 @@ package dql
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/encoding/protowire"
@@ -32,20 +34,67 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-const (
-	maxPlaceholderLogBytes      = 16 * 1024
-	maxPlaceholderLogGroups     = 4
-	maxPlaceholderLogValues     = 1
-	maxPlaceholderLogValueBytes = 128
-	maxPlaceholderLogFields     = 65536
-)
+// Limit metadata scanning independently of payload size (including empty values).
+const maxPlaceholderLogFields = 65536
+
+const placeholderLogTruncated = " <truncated>"
+
+// One writer owns the budget for the entire request, including metadata, quoted
+// text, delimiters and the truncation marker. Tokens are written incrementally;
+// formatting stops as soon as the budget is exhausted.
+type placeholderLogWriter struct {
+	strings.Builder
+	limit     int
+	reserved  int
+	truncated bool
+}
+
+func newPlaceholderLogWriter(limit int) *placeholderLogWriter {
+	return &placeholderLogWriter{limit: max(0, limit), reserved: len(placeholderLogTruncated)}
+}
+
+func (w *placeholderLogWriter) write(token string) bool {
+	if w.truncated {
+		return false
+	}
+	if len(token) > w.limit-w.Len()-w.reserved {
+		w.truncated = true
+		return false
+	}
+	w.WriteString(token)
+	return true
+}
+
+func (w *placeholderLogWriter) open(prefix, suffix string) bool {
+	w.reserved += len(suffix)
+	if !w.write(prefix) {
+		w.reserved -= len(suffix)
+		return false
+	}
+	return true
+}
+
+func (w *placeholderLogWriter) close(suffix string) {
+	w.reserved -= len(suffix)
+	w.WriteString(suffix) // Space was reserved by open, even if the body was truncated.
+}
+
+func (w *placeholderLogWriter) finish() string {
+	if w.truncated {
+		w.WriteString(placeholderLogTruncated[:min(w.limit, len(placeholderLogTruncated))])
+	}
+	return w.String()
+}
 
 func logSearchPlaceholders(ctx context.Context, log *mlog.Logger, request *milvuspb.SearchRequest, queryInfos []*planpb.QueryInfo) {
 	limit := paramtable.Get().ProxyCfg.SearchPlaceholderLogRateLimit.GetAsFloat()
 	// Check before RatedInfo: its burst token would otherwise allow a zero-rate log.
 	if limit > 0 {
 		log.RatedInfo(ctx, rate.Limit(limit), "proxy search request placeholder",
-			mlog.Stringer("placeholder", searchPlaceholderStringer{request: request, queryInfos: queryInfos}))
+			mlog.Stringer("placeholder", searchPlaceholderStringer{
+				request: request, queryInfos: queryInfos,
+				maxBytes: paramtable.Get().ProxyCfg.SearchPlaceholderLogMaxBytes.GetAsInt(),
+			}))
 	}
 }
 
@@ -53,14 +102,15 @@ func logSearchPlaceholders(ctx context.Context, log *mlog.Logger, request *milvu
 type searchPlaceholderStringer struct {
 	request    *milvuspb.SearchRequest
 	queryInfos []*planpb.QueryInfo
+	maxBytes   int
 }
 
 func (s searchPlaceholderStringer) String() string {
-	var sb strings.Builder
+	w := newPlaceholderLogWriter(s.maxBytes)
 	subReqs := s.request.GetSubReqs()
 	count := max(1, len(subReqs))
-	fmt.Fprintf(&sb, "sub_requests=%d ", len(subReqs))
-	for i := 0; i < count; i++ {
+	w.write(fmt.Sprintf("sub_requests=%d ", len(subReqs)))
+	for i := 0; i < count && !w.truncated; i++ {
 		placeholder, nq := s.request.GetPlaceholderGroup(), s.request.GetNq()
 		if len(subReqs) > 0 {
 			placeholder, nq = subReqs[i].GetPlaceholderGroup(), subReqs[i].GetNq()
@@ -69,32 +119,29 @@ func (s searchPlaceholderStringer) String() string {
 		if i < len(s.queryInfos) {
 			fieldID = s.queryInfos[i].GetQueryFieldId()
 		}
-		entry := fmt.Sprintf("[index=%d anns_field_id=%d nq=%d bytes=%d %s] ",
-			i, fieldID, nq, len(placeholder), placeholderGroupToLogString(placeholder))
-		// Leave room for the omitted-request count; never cut a quoted text value.
-		if sb.Len()+len(entry) > maxPlaceholderLogBytes-128 {
-			fmt.Fprintf(&sb, "<truncated: omitted_sub_requests=%d>", count-i)
+		if !w.open(fmt.Sprintf("[index=%d anns_field_id=%d nq=%d bytes=%d ",
+			i, fieldID, nq, len(placeholder)), "] ") {
 			break
 		}
-		sb.WriteString(entry)
+		writePlaceholderGroup(w, placeholder)
+		w.close("] ")
 	}
-	return sb.String()
+	return w.finish()
 }
 
 // Inspect protobuf field headers without unmarshalling/copying the entire payload.
-// Only the first value is retained as a view; only its first 128 bytes are
-// decoded/formatted. A large nq or dimension therefore cannot cause large allocations.
-func placeholderGroupToLogString(data []byte) string {
-	var sb strings.Builder
+// Only the first value is retained as a view. Its contents are decoded one element
+// at a time, using the remaining request-wide output budget.
+func writePlaceholderGroup(w *placeholderLogWriter, data []byte) {
 	groups := 0
-	for fields := 0; len(data) > 0; fields++ {
-		if groups == maxPlaceholderLogGroups || fields == maxPlaceholderLogFields {
-			sb.WriteString("<truncated placeholders>")
+	for fields := 0; len(data) > 0 && !w.truncated; fields++ {
+		if fields == maxPlaceholderLogFields {
+			w.write("<placeholder metadata exceeds scan limit>")
 			break
 		}
 		num, typ, value, rest, ok := consumePlaceholderLogField(data)
 		if !ok {
-			sb.WriteString("<invalid placeholder group>")
+			w.write("<invalid placeholder group>")
 			break
 		}
 		data = rest
@@ -102,16 +149,17 @@ func placeholderGroupToLogString(data []byte) string {
 			continue
 		}
 		if typ != protowire.BytesType {
-			sb.WriteString("<invalid placeholder group>")
+			w.write("<invalid placeholder group>")
 			break
 		}
 		if groups > 0 {
-			sb.WriteString(" | ")
+			w.write(" | ")
 		}
-		sb.WriteString(placeholderValueToLogString(value))
+		if !w.truncated {
+			writePlaceholderValue(w, value)
+		}
 		groups++
 	}
-	return sb.String()
 }
 
 // The returned value aliases the input. Groups are not part of PlaceholderGroup's
@@ -133,92 +181,135 @@ func consumePlaceholderLogField(data []byte) (protowire.Number, protowire.Type, 
 	return num, typ, value, data[m:], true
 }
 
-func placeholderValueToLogString(data []byte) string {
+func writePlaceholderValue(w *placeholderLogWriter, data []byte) {
 	var phType commonpb.PlaceholderType
-	var values [][]byte
+	var first []byte
 	nq, size := 0, len(data)
 	for fields := 0; len(data) > 0; fields++ {
 		if fields == maxPlaceholderLogFields {
-			return "<placeholder metadata exceeds preview limit>"
+			w.write("<placeholder metadata exceeds scan limit>")
+			return
 		}
 		num, typ, value, rest, ok := consumePlaceholderLogField(data)
 		if !ok {
-			return "<invalid placeholder>"
+			w.write("<invalid placeholder>")
+			return
 		}
 		data = rest
 		switch num {
 		case 2: // PlaceholderValue.type
 			if typ != protowire.VarintType {
-				return "<invalid placeholder type>"
+				w.write("<invalid placeholder type>")
+				return
 			}
 			v, _ := protowire.ConsumeVarint(value)
 			phType = commonpb.PlaceholderType(v)
 		case 3: // PlaceholderValue.values
 			if typ != protowire.BytesType {
-				return "<invalid placeholder values>"
+				w.write("<invalid placeholder values>")
+				return
 			}
 			nq++
-			if len(values) < maxPlaceholderLogValues {
-				values = append(values, value)
+			if nq == 1 {
+				first = value
 			}
 		}
 	}
 
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "[type=%s nq=%d bytes=%d", phType, nq, size)
-	if len(values) > 0 {
-		length := len(values[0])
+	if !w.open(fmt.Sprintf("[type=%s nq=%d bytes=%d omitted_queries=%d", phType, nq, size, max(0, nq-1)), "]") {
+		return
+	}
+	defer w.close("]")
+	if nq > 0 {
+		length := len(first)
 		switch phType {
 		case commonpb.PlaceholderType_FloatVector:
-			fmt.Fprintf(&sb, " dim=%d", length/4)
+			w.write(fmt.Sprintf(" dim=%d", length/4))
 		case commonpb.PlaceholderType_Float16Vector, commonpb.PlaceholderType_BFloat16Vector:
-			fmt.Fprintf(&sb, " dim=%d", length/2)
+			w.write(fmt.Sprintf(" dim=%d", length/2))
 		case commonpb.PlaceholderType_BinaryVector:
-			fmt.Fprintf(&sb, " dim=%d", length*8)
+			w.write(fmt.Sprintf(" dim=%d", length*8))
 		case commonpb.PlaceholderType_Int8Vector:
-			fmt.Fprintf(&sb, " dim=%d", length)
+			w.write(fmt.Sprintf(" dim=%d", length))
 		case commonpb.PlaceholderType_SparseFloatVector:
-			fmt.Fprintf(&sb, " first_nnz=%d", length/8)
+			w.write(fmt.Sprintf(" first_nnz=%d", length/8))
 		default:
-			fmt.Fprintf(&sb, " first_value_bytes=%d", length)
+			w.write(fmt.Sprintf(" first_value_bytes=%d", length))
 		}
 	}
-	sb.WriteString(" preview=[")
-	truncated := nq > len(values)
-	for i, value := range values {
-		if i > 0 {
-			sb.WriteByte(' ')
+	if !w.open(" preview=[", "]") {
+		return
+	}
+	defer w.close("]")
+	if nq > 0 {
+		writePlaceholderFirstQuery(w, phType, first)
+	}
+}
+
+func writePlaceholderFirstQuery(w *placeholderLogWriter, phType commonpb.PlaceholderType, value []byte) {
+	if phType == commonpb.PlaceholderType_VarChar {
+		if !w.open(`"`, `"`) {
+			return
 		}
-		truncated = truncated || len(value) > maxPlaceholderLogValueBytes
-		sample := value[:min(len(value), maxPlaceholderLogValueBytes)]
+		defer w.close(`"`)
+		for len(value) > 0 {
+			_, width := utf8.DecodeRune(value)
+			quoted := strconv.Quote(string(value[:width]))
+			if !w.write(quoted[1 : len(quoted)-1]) {
+				return
+			}
+			value = value[width:]
+		}
+		return
+	}
+	if phType == commonpb.PlaceholderType_Int64 {
+		if v, err := typeutil.BytesToInt64(value); err == nil {
+			w.write(strconv.FormatInt(v, 10))
+		} else {
+			w.write("<invalid int64>")
+		}
+		return
+	}
+
+	width, prefix := 1, "["
+	switch phType {
+	case commonpb.PlaceholderType_FloatVector:
+		width = 4
+	case commonpb.PlaceholderType_Float16Vector, commonpb.PlaceholderType_BFloat16Vector:
+		width = 2
+	case commonpb.PlaceholderType_SparseFloatVector:
+		width, prefix = 8, "map["
+	case commonpb.PlaceholderType_Int8Vector:
+	default:
+		// Binary vectors and opaque/embedding-list payloads use a byte preview.
+		prefix = "bytes=["
+	}
+	if !w.open(prefix, "]") {
+		return
+	}
+	defer w.close("]")
+	for i := 0; i+width <= len(value); i += width {
+		var token string
 		switch phType {
-		case commonpb.PlaceholderType_VarChar:
-			fmt.Fprintf(&sb, "%q", sample)
-		case commonpb.PlaceholderType_Int64:
-			if v, err := typeutil.BytesToInt64(sample); err == nil {
-				fmt.Fprint(&sb, v)
-			} else {
-				sb.WriteString("<invalid int64>")
-			}
 		case commonpb.PlaceholderType_FloatVector:
-			fmt.Fprint(&sb, typeutil.BytesToFloat32Vector(sample))
+			token = strconv.FormatFloat(float64(typeutil.BytesToFloat32(value[i:])), 'g', -1, 32)
 		case commonpb.PlaceholderType_Float16Vector:
-			fmt.Fprint(&sb, typeutil.Float16BytesToFloat32Vector(sample))
+			token = strconv.FormatFloat(float64(typeutil.Float16BytesToFloat32(value[i:])), 'g', -1, 32)
 		case commonpb.PlaceholderType_BFloat16Vector:
-			fmt.Fprint(&sb, typeutil.BFloat16BytesToFloat32Vector(sample))
-		case commonpb.PlaceholderType_Int8Vector:
-			vec := make([]int8, len(sample))
-			for j, v := range sample {
-				vec[j] = int8(v)
-			}
-			fmt.Fprint(&sb, vec)
+			token = strconv.FormatFloat(float64(typeutil.BFloat16BytesToFloat32(value[i:])), 'g', -1, 32)
 		case commonpb.PlaceholderType_SparseFloatVector:
-			fmt.Fprint(&sb, typeutil.SparseFloatBytesToMap(sample))
+			token = strconv.FormatUint(uint64(typeutil.SparseFloatRowIndexAt(value, i/8)), 10) + ":" +
+				strconv.FormatFloat(float64(typeutil.SparseFloatRowValueAt(value, i/8)), 'g', -1, 32)
+		case commonpb.PlaceholderType_Int8Vector:
+			token = strconv.FormatInt(int64(int8(value[i])), 10)
 		default:
-			// Binary vectors and opaque/embedding-list payloads use a byte preview.
-			fmt.Fprintf(&sb, "bytes=%v", sample)
+			token = strconv.FormatUint(uint64(value[i]), 10)
+		}
+		if i > 0 {
+			token = " " + token
+		}
+		if !w.write(token) {
+			return
 		}
 	}
-	fmt.Fprintf(&sb, "] truncated=%t]", truncated)
-	return sb.String()
 }
