@@ -7625,7 +7625,7 @@ Startup continuously schedules bounded concurrent reads and retries failed reads
 		Key:          "dataCoord.segmentChange.enabled",
 		Version:      "3.0.4",
 		DefaultValue: "false",
-		Doc:          "Experimental opt-in for staged segment membership publication. Do not enable in production until L0 fairness is implemented: continuous Flush-to-Sort groups can starve L0 delete compaction. Existing groups finish after disabling this switch. Flush keeps its synchronous version handshake; content-only updates retain their existing protocol.",
+		Doc:          "Experimental opt-in for staged segment membership publication. Do not enable in production until L0 and clustering fairness is implemented: continuous Flush-to-Sort groups can starve L0 delete and clustering compaction. Existing groups finish after disabling this switch. Flush keeps its synchronous version handshake; content-only updates retain their existing protocol.",
 		Export:       true,
 	}
 	p.SegmentChangeEnabled.Init(base.mgr)
