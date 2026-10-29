@@ -1102,8 +1102,13 @@ func (rm *ResourceManager) unassignNode(ctx context.Context, node int64) (string
 		// restart) even if the failed attempt was applied. The retry is bounded
 		// because rm.rwmutex is held; a persistent failure still exits to reload
 		// a consistent state.
-		err := retry.Do(ctx, func() error {
-			return rm.catalog.SaveResourceGroup(ctx, rg.GetMeta())
+		//
+		// A failed save exits the process, so the caller (e.g. a SuspendNode RPC
+		// whose client went away) must not decide it by canceling ctx. Each save
+		// keeps the metastore's own request timeout, which still aborts.
+		saveCtx := context.WithoutCancel(ctx)
+		err := retry.Do(saveCtx, func() error {
+			return rm.catalog.SaveResourceGroup(saveCtx, rg.GetMeta())
 		}, retry.RetryErr(etcd.IsRetriableEtcdErr))
 		if err != nil {
 			mlog.Fatal(context.TODO(), "unassign node from resource group",
