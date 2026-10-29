@@ -409,20 +409,6 @@ The secondary computes `ever_written` from its own vchannel meta. If the two
 clusters have different write histories for a vchannel, they can reach
 different states. See [Not done](#not-done).
 
-## Comparison with similar systems
-
-| System | What it does | Source | Difference from this design |
-|---|---|---|---|
-| PostgreSQL `CREATE UNIQUE INDEX CONCURRENTLY` | No exclusive lock. Two table scans do the backfill. A failure leaves an INVALID index that still enforces uniqueness on new writes. The user drops it and creates it again. | PostgreSQL docs, `sql-createindex` | The same "failed but partly in effect" window. Here the system drops the failed index, and the user does nothing. |
-| F1 online schema change | Intermediate states (delete-only, write-only) let servers at different schema versions run at the same time. A backfill fills the index before it becomes public. | Rae et al., "Online, Asynchronous Schema Change in F1", VLDB 2013 | The first phase has no backfill, so it needs no intermediate state. Each vchannel decides at one WAL position. |
-| CockroachDB, TiDB, MySQL online DDL | A unique index on existing data: a backfill with a check, in F1-style states. | Product docs | Reject semantics: a duplicate value fails the create. Here an existing row only makes the create fail because no backfill exists yet. |
-| Doris Unique Key, Paimon primary key table, Spanner, DynamoDB | The key or upsert model is declared at table creation and can not change later. | Product docs | Rejected here, see [Rejected alternatives](#rejected-alternatives). |
-| Two-phase commit and sagas | 2PC votes first, and the participants block until the decision. A saga runs first and undoes a failure with a compensating step. The middle state is visible. | DDIA chapter 9 (not verified), Garcia-Molina and Salem, "Sagas", 1987 (not verified) | This design is a saga: success takes one message and blocks no write. A failure takes one compensating DropIndex. |
-| Coordination avoidance | A constraint that each shard can keep alone needs no cross-shard coordination. A uniqueness constraint on the partition key is such a constraint. | Bailis et al., "Coordination Avoidance in Database Systems", VLDB 2015 (paper verified, the uniqueness claim not verified) | The primary key routes to one vchannel, so correctness needs no 2PC. |
-
-The object layout by index ID and its GC follow TiDB, CockroachDB and Kafka
-topic IDs. See [lifecycle.md](lifecycle.md#comparison-with-similar-systems).
-
 ## Rejected alternatives
 
 | Alternative | Why it was rejected |

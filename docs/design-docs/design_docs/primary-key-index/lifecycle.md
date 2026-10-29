@@ -224,15 +224,6 @@ masks no live row. It costs one extra delete message.
 The keys of both stay in the index until a later phase adds a drop marker and a
 purge.
 
-## Comparison with similar systems
-
-| System | What it does | Source | This design |
-|---|---|---|---|
-| Kafka KIP-516 topic IDs | A topic known only by name mixes old data into a topic of the same name that is created again after a delete. The old fix required a full delete before a new create, so one down broker blocked the name for a long time. The KIP gives each topic a unique ID. | KIP-516 (motivation verified) | The keys hold the index ID, so a new index does not wait for the cleanup of the old one. |
-| TiDB | Keys start with `t{tableID}_i{indexID}`. DROP TABLE or DROP INDEX records the range to delete and its time. A GC removes the range after the GC safe point. | TiDB GC overview (range delete verified, `gc_delete_range` details not verified) | The GC reads the drop from the meta and waits a tolerance. |
-| CockroachDB | Keys are `/Table/<tableID>/<indexID>/...`. After a drop, a GC job clears the span when `gc.ttlseconds` expires. | Product docs (key layout not verified in the official docs) | The same. |
-| Milvus binlog GC | `dataCoord.gc.missingTolerance` keeps a file that the meta does not know for a time, so a file that is written but not yet registered survives. `dropTolerance` keeps the files of a dropped segment for a time. `collectionGCPaused` lets milvus-backup pause the GC of a collection. | `configs/milvus.yaml`, `datacoord/garbage_collector.go` | The same three rules. |
-
 ## Not done
 
 - **The truncate reset and the GC by index ID have unit tests only.** The
