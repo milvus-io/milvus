@@ -172,6 +172,7 @@ service QueryNode {
     rpc DeleteBatch(DeleteBatchRequest) returns (DeleteBatchResponse) {
     } 
     rpc UpdateSchema(UpdateSchemaRequest) returns (common.Status) {}
+    rpc SyncIndexMeta(SyncIndexMetaRequest) returns (common.Status) {}
 
     rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
     rpc GetHighlight(GetHighlightRequest) returns (GetHighlightResponse){}
@@ -335,6 +336,10 @@ message LoadMetaInfo {
     repeated int64 load_fields = 7;
     repeated common.KeyValuePair db_properties = 8;
     uint64 schema_version = 9; // used for schema change detection.
+    // Version of the index_info_list sent with this load meta. QueryCoord takes
+    // it before it lists the indexes, so QueryNode drops a list whose version is
+    // older than the one it already applied.
+    int64 index_info_version = 10;
 }
 
 message WatchDmChannelsRequest {
@@ -1002,6 +1007,15 @@ message UpdateSchemaRequest {
     int64 collectionID = 2;
     schema.CollectionSchema schema = 3;
     uint64 version = 4;
+}
+
+// SyncIndexMetaRequest carries the collection index list from a shard
+// delegator to the workers that serve the shard.
+message SyncIndexMetaRequest {
+    common.MsgBase base = 1;
+    int64 collectionID = 2;
+    repeated index.IndexInfo index_info_list = 3;
+    int64 index_info_version = 4; // same meaning as LoadMetaInfo.index_info_version
 }
 
 message RunAnalyzerRequest{
