@@ -51,7 +51,7 @@ pub fn load_unidic(
 }
 
 #[cfg(feature = "lindera-unidic")]
-pub fn load_ipadic(
+pub fn load_unidic(
     build_dir: String,
     download_url: Vec<String>,
 ) -> Result<lindera::dictionary::Dictionary> {
