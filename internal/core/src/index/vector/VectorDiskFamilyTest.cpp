@@ -277,6 +277,10 @@ TEST(VectorDiskFamilyTest, MRLBuildLoadAndRefine) {
         "/tmp", "vector_disk_mrl_XXXXXX", "vector disk MRL test");
     const auto raw_path = files->Path() + "/raw";
     auto values = MakeRows<float>();
+    // Only rows 0 and 1 may tie for the nearest prefix.
+    for (int64_t row = 2; row < kRows; ++row) {
+        values[row * kDim] += 1.0f;
+    }
     std::copy_n(values.data(), kDim / 2, values.data() + kDim);
     WriteRaw(raw_path, values, kRows, kDim);
     OpenedDiskIndex<float> opened;
@@ -298,7 +302,8 @@ TEST(VectorDiskFamilyTest, MRLBuildLoadAndRefine) {
     EXPECT_FALSE(reader->HasRawData());
 
     VectorSearchParams params{
-        .search_params_ = {{DISK_ANN_QUERY_LIST, 8}},
+        // This correctness test must retrieve both identical vector prefixes.
+        .search_params_ = {{DISK_ANN_QUERY_LIST, kRows}},
         .metric_type_ = "L2",
         .topk_ = 2,
     };
