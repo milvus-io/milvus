@@ -620,10 +620,15 @@ InjectExternalSpecProperties(
                         if (key == "cloud_provider" && val == "minio") {
                             continue;
                         }
+                        // Keep the legacy spec key compatible with storage's shared Broker property.
+                        const auto property =
+                            key == "azure_credential_endpoint"
+                                ? ExternalFsPropertyKey(
+                                      extfs_prefix,
+                                      PROPERTY_FS_CREDENTIAL_ENDPOINT)
+                                : extfs_prefix + key;
                         milvus_storage::api::SetValue(
-                            properties,
-                            (extfs_prefix + key).c_str(),
-                            val.c_str());
+                            properties, property.c_str(), val.c_str());
                     } catch (const simdjson::simdjson_error& per_field) {
                         LOG_WARN(
                             "extfs field parse failed, skipping "
