@@ -244,10 +244,13 @@ class ColumnPlanner {
 
  private:
     void
-    ValidateBoundaries() const;
+    ValidateBoundaries();
 
     std::shared_ptr<const std::vector<int64_t>> owned_num_rows_until_cell_;
     const std::vector<int64_t>* num_rows_until_cell_{nullptr};
+    // Proven once from immutable geometry, never inferred from an offset.
+    // Zero retains the general mapping for irregular or empty interior Cells.
+    int64_t uniform_cell_rows_{0};
 };
 
 struct ValueView {

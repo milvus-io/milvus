@@ -27,13 +27,18 @@ namespace {
 
 inline CellLocation
 LocateInBoundaries(const std::vector<int64_t>& boundaries,
-                   int64_t segment_offset) {
+                   int64_t segment_offset,
+                   int64_t uniform_cell_rows) {
     AssertInfo(segment_offset >= 0 && segment_offset < boundaries.back(),
                "segment offset {} out of planner rows {}",
                segment_offset,
                boundaries.back());
     if (boundaries.size() == 2) {
         return CellLocation{0, segment_offset};
+    }
+    if (uniform_cell_rows != 0) {
+        return CellLocation{segment_offset / uniform_cell_rows,
+                            segment_offset % uniform_cell_rows};
     }
     // The first boundary is zero and the checked row is inside the column.
     // Keep the rightmost boundary <= row; repeated boundaries (empty cells)
@@ -65,7 +70,7 @@ ColumnPlanner::ColumnPlanner(std::vector<int64_t>&& num_rows_until_cell)
 }
 
 void
-ColumnPlanner::ValidateBoundaries() const {
+ColumnPlanner::ValidateBoundaries() {
     AssertInfo(num_rows_until_cell_ != nullptr,
                "column planner Cell boundaries are null");
     const auto& boundaries = *num_rows_until_cell_;
@@ -82,11 +87,23 @@ ColumnPlanner::ValidateBoundaries() const {
                    boundaries[i],
                    boundaries[i - 1]);
     }
+    // Equal complete Cells and a possibly short final Cell need no boundary
+    // search. Never extend this proof across an empty/irregular interior Cell.
+    auto width = boundaries[1];
+    for (size_t i = 1; width != 0 && i + 1 < boundaries.size(); ++i) {
+        const auto rows = boundaries[i + 1] - boundaries[i];
+        if (rows != width &&
+            (i + 2 != boundaries.size() || rows > width)) {
+            width = 0;
+        }
+    }
+    uniform_cell_rows_ = width;
 }
 
 CellLocation
 ColumnPlanner::Locate(int64_t segment_offset) const {
-    return LocateInBoundaries(*num_rows_until_cell_, segment_offset);
+    return LocateInBoundaries(
+        *num_rows_until_cell_, segment_offset, uniform_cell_rows_);
 }
 
 void
@@ -108,7 +125,8 @@ ColumnPlanner::LocateBatch(OffsetView offsets,
     const auto& boundaries = *num_rows_until_cell_;
     const auto locate = [&](const auto* values) {
         for (int64_t i = 0; i < count; ++i) {
-            output[i] = LocateInBoundaries(boundaries, values[first + i]);
+            output[i] = LocateInBoundaries(
+                boundaries, values[first + i], uniform_cell_rows_);
         }
     };
     switch (offsets.element_type) {

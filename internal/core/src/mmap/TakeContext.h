@@ -3,6 +3,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -76,27 +77,38 @@ class TakeBatchOwners final {
         if (cohort == nullptr) {
             ReportNullOwner();
         }
-        // A negative membership hint skips the quadratic scan when a prefix
-        // touches many different owners. Collisions ALWAYS check full pointer
-        // equality, so this changes neither deduplication nor ownership limits.
+        // Common bounded read prefixes use exact open-addressed membership,
+        // rather than rescanning all owners for every row. The table contains
+        // no strong references; owners_ remains the lifetime authority.
+        // Larger owner sets retain the original unbounded, exact fallback.
+        if (owners_.size() >= owner_slots_.size()) {
+            if (std::find(owners_.begin(), owners_.end(), cohort) ==
+                owners_.end()) {
+                owners_.push_back(cohort);
+            }
+            return;
+        }
         const auto hash =
             (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(cohort.get())) >>
              4) *
             uint64_t{0x9e3779b97f4a7c15};
-        const auto bit = uint64_t{1} << (hash >> 58);
-        if ((owner_hash_mask_ & bit) != 0 &&
-            std::find(owners_.begin(), owners_.end(), cohort) !=
-                owners_.end()) {
-            return;
+        auto slot = static_cast<size_t>(hash >> 58);
+        while (owner_slots_[slot] != nullptr) {
+            if (owner_slots_[slot] == cohort.get()) {
+                return;
+            }
+            slot = (slot + 1) & (owner_slots_.size() - 1);
         }
+        // Publish membership only after the owning insertion succeeds, so an
+        // allocation failure cannot leave a false hit on a later retry.
         owners_.push_back(cohort);
-        owner_hash_mask_ |= bit;
+        owner_slots_[slot] = cohort.get();
     }
 
     void
     Clear() {
         owners_.clear();
-        owner_hash_mask_ = 0;
+        owner_slots_.fill(nullptr);
     }
 
     size_t
@@ -110,7 +122,7 @@ class TakeBatchOwners final {
 
     // Reuse the existing inline-storage container; larger batches spill safely.
     folly::small_vector<std::shared_ptr<const TakeCellCohort>, 4> owners_;
-    uint64_t owner_hash_mask_{0};
+    std::array<const TakeCellCohort*, 64> owner_slots_{};
 };
 
 // Mutable, worker-private retention state shared by the Expr leaves in that
