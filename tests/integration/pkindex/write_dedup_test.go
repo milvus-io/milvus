@@ -19,9 +19,11 @@ package pkindex
 import (
 	"context"
 	"fmt"
+	"path"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
@@ -29,7 +31,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/pkindex/manifest"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/pkindexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -40,12 +44,15 @@ import (
 // It turns on streaming.pkindex.enabled, so the streaming node deduplicates
 // them: the WAL recovery opens the index of the pchannel at the WAL open.
 //
-// TODO: the change that connects the index to the manifest service removes
-// the skip, sets a small handover size here and checks that a handover runs.
+// The suite also checks that a flush hands the index over to object
+// storage (the manifest pointer appears in the meta kv), and that the
+// deduplication survives a restart of the streaming node.
 const (
 	dedupDim      = 8
 	dedupTagField = "tag"
 	dedupPKField  = integration.Int64Field
+
+	dedupPKIndexName = "pk_index"
 )
 
 type WriteDedupSuite struct {
@@ -58,7 +65,6 @@ func (s *WriteDedupSuite) SetupSuite() {
 }
 
 func TestWriteDedup(t *testing.T) {
-	t.Skip("a streaming node with the primary key index on panics until the Committer is injected")
 	suite.Run(t, new(WriteDedupSuite))
 }
 
@@ -107,8 +113,64 @@ func (s *WriteDedupSuite) TestDeleteOfAbsentKeyIsHarmless() {
 	s.Equal(map[int64]int64{1000: 1}, s.queryTags(ctx, collectionName, []int64{1000}), "the insert after the delete of the same key is visible")
 }
 
+// TestFlushCommitsManifest checks that a flush hands the index over to object
+// storage: the manifest pointer of the index appears in the meta kv.
+func (s *WriteDedupSuite) TestFlushCommitsManifest() {
+	ctx, cancel := context.WithCancel(s.Cluster.GetContext())
+	defer cancel()
+
+	collectionName := "TestWriteDedupManifest" + funcutil.GenRandomStr()
+	s.createAndLoadCollection(ctx, collectionName)
+	s.insert(ctx, collectionName, 0, 100, 1)
+	s.flush(ctx, collectionName)
+	versions := s.waitForManifest(ctx, collectionName)
+	for vchannel, version := range versions {
+		s.Positive(version, "vchannel %s", vchannel)
+	}
+}
+
+// TestDedupSurvivesStreamingNodeRestart checks that the deduplication
+// survives a restart of the streaming node after a handover: the new node
+// must know the keys that were handed over to object storage and the keys
+// that were still in the WAL. The test does not tell apart a recovery that
+// reads the manifest from one that replays the whole WAL; the log of the
+// new node shows which one happened.
+func (s *WriteDedupSuite) TestDedupSurvivesStreamingNodeRestart() {
+	ctx, cancel := context.WithCancel(s.Cluster.GetContext())
+	defer cancel()
+
+	collectionName := "TestWriteDedupRestart" + funcutil.GenRandomStr()
+	s.createAndLoadCollection(ctx, collectionName)
+
+	const handedOver = 100
+	const inWAL = 50
+	s.insert(ctx, collectionName, 0, handedOver, 1)
+	s.flush(ctx, collectionName)
+	s.waitForManifest(ctx, collectionName)
+	s.insert(ctx, collectionName, handedOver, inWAL, 1)
+
+	for _, sn := range s.Cluster.GetAllStreamingNodes() {
+		// Stop sends SIGTERM and escalates to SIGKILL after 10 s. Either way
+		// the node is gone; a kill only makes the recovery start from an
+		// older checkpoint.
+		_ = sn.Stop()
+	}
+	s.Cluster.AddStreamingNode()
+
+	// the same keys again, from the handed over part and from the WAL part
+	s.insert(ctx, collectionName, 0, handedOver+inWAL, 2)
+	s.waitUntilQueryable(ctx, collectionName)
+
+	s.Equal(int64(handedOver+inWAL), s.queryCount(ctx, collectionName), "a second insert after the restart must not add a row")
+	s.Equal(map[int64]int64{0: 2, handedOver - 1: 2, handedOver: 2, handedOver + inWAL - 1: 2},
+		s.queryTags(ctx, collectionName, []int64{0, handedOver - 1, handedOver, handedOver + inWAL - 1}),
+		"the row written after the restart is the one that survives")
+}
+
 // createAndLoadCollection creates a collection with one user provided int64
-// primary key, one float vector and one int64 tag, on a single shard, and loads it.
+// primary key, one float vector and one int64 tag, on a single shard, creates
+// the primary key index on the primary key while the collection is empty, and
+// loads it.
 func (s *WriteDedupSuite) createAndLoadCollection(ctx context.Context, collectionName string) {
 	schema := integration.ConstructSchema(collectionName, dedupDim, false,
 		&schemapb.FieldSchema{
@@ -141,6 +203,16 @@ func (s *WriteDedupSuite) createAndLoadCollection(ctx context.Context, collectio
 	})
 	s.Require().NoError(err)
 	s.Require().True(merr.Ok(createResp), createResp.GetReason())
+
+	pkIndexResp, err := s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+		CollectionName: collectionName,
+		FieldName:      dedupPKField,
+		IndexName:      dedupPKIndexName,
+		ExtraParams:    []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: common.PrimaryKeyIndexType}},
+	})
+	s.Require().NoError(err)
+	s.Require().True(merr.Ok(pkIndexResp), pkIndexResp.GetReason())
+	s.WaitForIndexBuiltWithIndexName(ctx, collectionName, dedupPKField, dedupPKIndexName)
 
 	indexResp, err := s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
@@ -187,6 +259,88 @@ func (s *WriteDedupSuite) flush(ctx context.Context, collectionName string) {
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	s.Require().True(has)
 	s.WaitForFlush(ctx, segmentIDs.GetData(), flushTs, "", collectionName)
+}
+
+// manifestVersions returns the manifest version of the primary key index on
+// every vchannel of the collection, keyed by vchannel. A vchannel without a
+// manifest is absent. It returns an error instead of failing the test, so a
+// poll can retry it.
+func (s *WriteDedupSuite) manifestVersions(ctx context.Context, collectionName string) (map[string]int64, error) {
+	descResp, err := s.Cluster.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
+	if err != nil {
+		return nil, err
+	}
+	if err := merr.Error(descResp.GetStatus()); err != nil {
+		return nil, err
+	}
+	indexResp, err := s.Cluster.MilvusClient.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
+		CollectionName: collectionName,
+		FieldName:      dedupPKField,
+		IndexName:      dedupPKIndexName,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := merr.Error(indexResp.GetStatus()); err != nil {
+		return nil, err
+	}
+	if len(indexResp.GetIndexDescriptions()) != 1 {
+		return nil, fmt.Errorf("expected 1 description of index %s, got %d", dedupPKIndexName, len(indexResp.GetIndexDescriptions()))
+	}
+	indexID := indexResp.GetIndexDescriptions()[0].GetIndexID()
+
+	versions := make(map[string]int64)
+	for _, vchannel := range descResp.GetVirtualChannelNames() {
+		key := path.Join(s.Cluster.RootPath(), "meta", manifest.PointerKey(descResp.GetCollectionID(), indexID, vchannel))
+		resp, err := s.Cluster.EtcdCli.Get(ctx, key)
+		if err != nil {
+			return nil, err
+		}
+		if len(resp.Kvs) == 0 {
+			continue
+		}
+		var p pkindexpb.ManifestPointer
+		if err := proto.Unmarshal(resp.Kvs[0].Value, &p); err != nil {
+			return nil, err
+		}
+		versions[vchannel] = p.GetVersion()
+	}
+	return versions, nil
+}
+
+// waitForManifest waits until every vchannel of the collection has a manifest
+// of the primary key index: the handover after a flush commits it
+// asynchronously. It returns the manifest version of each vchannel.
+func (s *WriteDedupSuite) waitForManifest(ctx context.Context, collectionName string) map[string]int64 {
+	descResp, err := s.Cluster.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: collectionName})
+	s.Require().NoError(err)
+	s.Require().True(merr.Ok(descResp.GetStatus()), descResp.GetStatus().GetReason())
+	vchannels := len(descResp.GetVirtualChannelNames())
+
+	var versions map[string]int64
+	s.Require().Eventually(func() bool {
+		got, err := s.manifestVersions(ctx, collectionName)
+		if err != nil || len(got) != vchannels {
+			return false
+		}
+		versions = got
+		return true
+	}, 60*time.Second, 500*time.Millisecond, "the flush must commit a manifest of the primary key index on every vchannel")
+	return versions
+}
+
+// waitUntilQueryable waits until a query of the collection succeeds again:
+// after a streaming node restart the delegator of the channel moves, and the
+// query path is not serviceable until the new one is ready.
+func (s *WriteDedupSuite) waitUntilQueryable(ctx context.Context, collectionName string) {
+	s.Require().Eventually(func() bool {
+		queryResp, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
+			CollectionName:   collectionName,
+			OutputFields:     []string{"count(*)"},
+			ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+		})
+		return err == nil && merr.Ok(queryResp.GetStatus())
+	}, 60*time.Second, 500*time.Millisecond, "the collection must become queryable after the streaming node restart")
 }
 
 // queryCount reads the number of rows of the collection with strong consistency.
