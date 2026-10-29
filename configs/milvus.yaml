@@ -1838,6 +1838,8 @@ streaming:
       lowWatermark: 4g # RecoveryStorage releases WAL append pressure after the unpublished WAL tail falls to this logical size.
       softWatermark: 8g # RecoveryStorage requests VChannel persistence and slows WAL append after the unpublished WAL tail reaches this logical size.
       highWatermark: 16g # RecoveryStorage rejects new DML append after the unpublished WAL tail reaches this logical size.
+  queryView:
+    liveEventDispatchConcurrencyRatioPerPChannel: 0.25 # QueryRuntime live-event workers per PChannel: max(1, floor(CPU count * ratio)); dynamically resizable.
   replication:
     pendingMessagesQueueLength: 128 # The capacity of pending message queue for each replication stream client.
     pendingMessagesQueueMaxSize: 134217728 # The maximum size (in bytes) of pending message queue for each replication stream client. Default is 128MB.

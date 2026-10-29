@@ -129,3 +129,14 @@ TODO: Bind resource IDs during query planning across shards, stages and retries.
 Until then, a warm name binding is not revalidated against Coord: deleting and
 recreating a name may continue to use the cached model until eviction. This local
 reuse does not guarantee one resource identity for the entire distributed query.
+
+## Live resource dispatch concurrency
+
+The PChannel recovery manager owns one shared live-event dispatcher. Its worker
+count is `max(1, floor(hardware.GetCPUNum() * ratio))`, controlled by
+`streaming.queryView.liveEventDispatchConcurrencyRatioPerPChannel` (default `0.25`).
+Configuration updates resize existing pools; shrinking retires workers after their
+current drain finishes. Each QueryRuntime still applies events serially, while
+different runtimes may drain concurrently. Closing the dispatcher unregisters its
+configuration watcher and joins its workers. This adds no per-VChannel worker and
+does not change remote TransformLog delivery.

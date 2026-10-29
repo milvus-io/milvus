@@ -9242,6 +9242,8 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 }
 
 type streamingConfig struct {
+	QueryViewLiveEventDispatchConcurrencyPerPChannel ParamItem `refreshable:"true"`
+
 	// WAL payload chunking rollout switch.
 	SplitChunkSN ParamItem `refreshable:"true"`
 
@@ -9876,6 +9878,18 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 		Export:       false,
 	}
 	p.IdempotencyMaxBytesPerWindow.Init(base.mgr)
+
+	p.QueryViewLiveEventDispatchConcurrencyPerPChannel = ParamItem{
+		Key:          "streaming.queryView.liveEventDispatchConcurrencyRatioPerPChannel",
+		Version:      "3.1.0",
+		DefaultValue: "0.25",
+		Doc:          "QueryRuntime live-event worker count per PChannel is max(1, floor(CPU count * ratio)). Updates existing worker pools dynamically.",
+		Export:       true,
+		Formatter: func(v string) string {
+			return strconv.Itoa(max(1, int(float64(hardware.GetCPUNum())*getAsFloat(v))))
+		},
+	}
+	p.QueryViewLiveEventDispatchConcurrencyPerPChannel.Init(base.mgr)
 
 	p.OldVersionLastConfirmedWindowSize = ParamItem{
 		Key:     "streaming.walScanner.oldVersionLastConfirmedWindowSize",
