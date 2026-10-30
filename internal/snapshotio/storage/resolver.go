@@ -512,3 +512,33 @@ func azureEndpointCloudSuffix(cfg *objectstorage.Config) string {
 	}
 	return ""
 }
+
+// StorageConfigFromInstance captures the source configuration sent to export workers.
+func StorageConfigFromInstance(params *paramtable.ComponentParam) *indexpb.StorageConfig {
+	return storageConfigFromObjectConfig(InstanceConfigFromParamtable(params), params.CommonCfg.StorageType.GetValue())
+}
+
+func ObjectStorageConfigFromIndexConfig(config *indexpb.StorageConfig) *objectstorage.Config {
+	cfg := objectstorage.NewDefaultConfig()
+	if config == nil {
+		return cfg
+	}
+
+	cfg.Address = config.GetAddress()
+	cfg.BucketName = config.GetBucketName()
+	cfg.AccessKeyID = config.GetAccessKeyID()
+	cfg.SecretAccessKeyID = config.GetSecretAccessKey()
+	cfg.UseSSL = config.GetUseSSL()
+	cfg.SslCACert = config.GetSslCACert()
+	cfg.SslTLSMinVersion = config.GetSslTlsMinVersion()
+	cfg.CreateBucket = true
+	cfg.RootPath = config.GetRootPath()
+	cfg.UseIAM = config.GetUseIAM()
+	cfg.CloudProvider = config.GetCloudProvider()
+	cfg.IAMEndpoint = config.GetIAMEndpoint()
+	cfg.UseVirtualHost = config.GetUseVirtualHost()
+	cfg.Region = config.GetRegion()
+	cfg.RequestTimeoutMs = config.GetRequestTimeoutMs()
+	cfg.GcpCredentialJSON = config.GetGcpCredentialJSON()
+	return cfg
+}

@@ -87,8 +87,10 @@ Export to the source or a foreign bucket:
    the source snapshot, persists the effective
    `<target_s3_path>/exports/<export-id>` root in a `Pending` export job, and
    immediately returns its `job_id`.
-3. A background worker resolves the target storage config from the instance
-   credential or request `external_spec`.
+3. DataCoord assigns segment ranges to DataNodes, persists scalar completions,
+   and publishes verified staging metadata after every writer exits. The
+   [distributed execution design](20260923-snapshot-export-datanode.md) owns
+   task execution, concurrency, range recovery and Restore copy changes.
 4. For a same-bucket export, Milvus rejects the job before copying if any
    generated target metadata, segment manifest, or data object key would
    overwrite an object used by the source snapshot.
@@ -153,15 +155,20 @@ compatibility field and is empty on submission.
 
 `GetExportSnapshotStateRequest` contains the export `job_id`.
 `GetExportSnapshotStateResponse.info` contains the job identity, state,
-checkpoint-based progress, copied and total file counts, timing, sanitized
-failure reason, total bundle bytes, and the completed bundle metadata URI.
-`total_bytes` is exposed for Completed jobs and sums the unique copied data
-objects plus generated segment manifests and final metadata. DataCoord computes
-and persists it before entering `Publishing`, but both it and the metadata URI
-remain hidden until the state is `Completed`.
+progress, copied and total file counts, timing, sanitized failure reason, total
+copied data/index bytes, and the completed bundle metadata URI. Under the revised
+segment-range design, execution progress is volatile display information and
+may reset after coordinator recovery or worker replacement; it is not a recovery
+checkpoint. Each completed task returns scalar file and byte counts. DataCoord
+sums these persisted results before entering `Publishing`; `total_bytes` and the
+metadata URI remain hidden until `Completed`. Byte counts exclude snapshot Avro,
+native manifests, and top-level metadata. Files are deduplicated per segment;
+shared objects contribute again for each segment that copies them, including
+segments in the same task, so this is a
+copy-byte statistic rather than the bundle's unique physical size.
 
 DataCoord persists an internal `Publishing` state only after all data objects
-are copied, final segment manifests are written, and a private
+and segment manifests are copied, and a private
 `_staging/metadata.json` object has been written and read back successfully.
 The public API maps this state to `Executing` with progress `99`; it does not add
 another public enum value or expose the metadata URI before `Completed`.
@@ -423,6 +430,15 @@ Self-contained root relocation is two-stage:
    manifest paths carry a base path; rebasing that base path is enough for
    manifest-relative data and LOB listing.
 
+Export emits V6 Avro OCF with explicit target paths and copies native manifests
+unchanged, relocating their top-level entry points. Restore and milvus-table
+share the root-prefix replacement rule for Avro entry points, native bases and
+L0 deltalogs. Referenced snapshots retain original paths. Newly created/exported
+snapshots use upstream format 6; compatibility with an older release still depends on
+that release's storage/native capabilities. See the
+[execution design](20260923-snapshot-export-datanode.md#v6-avro-ocf-and-relocation)
+for worker behavior.
+
 Both layouts require metadata URIs that contain the
 `snapshots/.../metadata/...` structure. Referenced snapshots need that anchor to
 derive the source storage root. Self-contained snapshots additionally need it to
@@ -460,29 +476,20 @@ Provider limitations fail closed:
 
 Metadata reads/writes and large object copy can use different helper objects,
 but the large object move itself must be one provider-side copy request.
-Export schedules object copies with the refreshable DataCoord configuration
-`dataCoord.snapshot.exportCopyConcurrency`, which defaults to `16`. Each export
-worker reads the limit once when it starts, so configuration changes affect new
-worker attempts without changing an active attempt. Invalid or non-positive
-values fall back to `16`. `dataCoord.snapshot.exportMaxConcurrentJobs` defaults
-to `1`, `dataCoord.snapshot.exportJobTimeout` defaults to 12 hours including
-queue wait, and `dataCoord.snapshot.exportJobRetention` keeps terminal state for
-3 hours after pin cleanup. Public snapshot metadata is written only after every
-object copy and final segment manifest write succeeds. Each accepted export
-receives a random namespace that is stored
-in the durable job before object-store work begins. Therefore two clusters can
-use the same requested target root without sharing metadata, manifest, or data
-object keys, and correctness does not depend on an `Exist` preflight or a
-single-DataCoord lock. A failed attempt may leave isolated, unreferenced
-objects; Milvus does not remove them automatically.
+The [execution design](20260923-snapshot-export-datanode.md#scheduling-concurrency-and-provider-copies)
+owns range size, node concurrency, multipart copy and job namespace isolation.
+`dataCoord.snapshot.exportJobTimeout` defaults to 12 hours including queue wait;
+`dataCoord.snapshot.exportJobRetention` keeps terminal state for 3 hours after
+pin cleanup. Each accepted job persists a random namespace before object-store
+work. Public metadata is written only after every range succeeds and staging is
+verified. Failed attempts can leave isolated objects without automatic removal.
 
 Same-bucket export is supported, but source protection is an object-level
-invariant. Before copy starts, DataCoord builds the complete source object set:
-the source metadata file, snapshot segment manifests, StorageV2 manifests, and
-all concrete data/index objects. It also builds the destination object set for
-the exported metadata, manifests, and `files/...` data. If the sets intersect,
-the request fails with an input error. Equal object keys in different buckets
-do not intersect and must still be copied.
+invariant. Each DataNode builds source and destination object sets for each segment
+before copying that segment, including metadata references, native manifests,
+and concrete data/index objects. Intersecting paths fail validation. DataCoord also
+validates top-level metadata paths during finalization. Equal object keys in
+different buckets do not intersect and must still be copied.
 
 ## 7. Internal Architecture
 
@@ -495,32 +502,26 @@ Proxy:
 
 DataCoord:
 
-- Owns snapshot metadata parsing, validation, export layout generation, restore
-  job creation, and WAL restore message emission.
-- Owns a durable `SnapshotExportManager`. Submission persists one constant-size
-  job record before returning. Reconciliation schedules `Pending`, recovered
-  `Executing`, and recovered internal `Publishing` jobs, enforces the configured
-  deadline and concurrency limit, retries pin cleanup, and removes
-  credential-free terminal jobs after retention.
-- Builds a deterministic ordered copy plan and persists its version,
-  fingerprint, total file count, and copy cursor. A recovered job resumes only
-  when the rebuilt plan matches; otherwise it fails closed.
-- Advances public progress only after an entire copy batch is durably
-  checkpointed. Uncheckpointed batches may be replayed to the same deterministic
-  destination keys after restart.
-- For external restore, reads metadata/manifests from the foreign source before
-  broadcasting the restore message.
+- Owns export job lifecycle and final publication, external restore metadata
+  parsing and validation, restore job creation, and WAL restore message emission.
+- Owns a durable `SnapshotExportManager`. Submission persists the job identity
+  before returning. Reconciliation schedules `Pending`, recovered `Executing`,
+  and recovered internal `Publishing` jobs, enforces the configured deadline,
+  retries pin cleanup, and removes credential-free terminal jobs after retention.
+  Worker slots control task admission; each task has its own copy-concurrency limit.
+- Delegates Export range copying to DataNode and owns durable scalar results,
+  writer cleanup, staging and publication. The
+  [execution design](20260923-snapshot-export-datanode.md) defines the ordering
+  and range recovery contract.
+- Named/external Restore admission reads top-level metadata; job creation loads
+  and validates Avro and caches it for task assembly. See the execution design
+  for failure persistence, pin release and fingerprint compatibility.
 - The WAL ACK callback retries transient source failures. If the source is
   permanently unavailable after the preflight read, it persists a failed
   restore job and returns successfully so broadcaster resource locks are
   released.
 - Persists enough external storage information for restore jobs and DataNode
   copy tasks.
-- For export, resolves the target in the background, prevents same-bucket
-  source-object overwrite, copies data, writes final segment manifests, and
-  serializes final metadata to `<bundle-root>/_staging/metadata.json`. It reads
-  the staging object back before persisting `Publishing`, the deterministic
-  final metadata URI, prepared total bytes, and progress `99`.
 - A recovered `Publishing` job resolves only the target storage and reads the
   staging object. It never reads the source snapshot or rebuilds the export
   plan, so source pin expiration or source snapshot deletion cannot invalidate
@@ -538,13 +539,16 @@ DataCoord:
 - Publication replay does not persist a second metadata checksum. It compares
   staging and final metadata bytes directly; the staging path is derived from
   the durable target root, so no additional proto field is required.
-- Computes a deterministic fingerprint of external snapshot metadata and loaded
-  segment manifests after preflight. The fingerprint is carried through WAL and
-  copy-job state so ACK and task assembly reject metadata that changed between
-  phases. It does not hash referenced object contents.
+- Carries a top-level external metadata fingerprint through WAL and validates it
+  at job creation, which also records the full metadata/Avro fingerprint. Tasks
+  reuse the job cache; after restart, reloading checks the full fingerprint.
+  These fingerprints do not hash referenced object contents.
 
 DataNode:
 
+- Executes `SnapshotExportCopy` ranges under the
+  [distributed execution contract](20260923-snapshot-export-datanode.md),
+  including per-segment inventory, V6 Avro OCF generation and scalar completion.
 - Executes copy segment tasks.
 - Accepts external restore copies through the `ExternalCopySegment` worker task
   type. This task type is the capability handshake: workers that predate
@@ -561,9 +565,14 @@ DataNode:
 - Gives each object copy a refreshable
   `dataNode.import.copyObjectTimeout` deadline. Provider SDKs own request-level
   retries; DataNode does not replay the whole copy operation.
-- Azure starts an asynchronous copy once. If the SDK observes an existing
-  pending copy, the provider resumes polling that operation and validates its
-  source URL and copy ID instead of starting another copy.
+- Azure starts an asynchronous copy with destination `If-None-Match: *`.
+  Pending-copy and destination-condition conflicts resume the existing copy
+  after validating its source URL, copy ID and status. Same-source completed
+  copies are reusable. After an initial conflict, a same-source failed/aborted
+  destination observed on the first successful properties read may restart once
+  using its ETag with `If-Match`. Once a properties read observes pending, or this
+  call starts a new copy, a subsequent failure is reported without restarting. Snapshot source objects
+  must remain immutable and target namespaces must belong to the task/job.
 
 `snapshotstorage`:
 
@@ -584,9 +593,10 @@ Data flow:
 
 ```text
 ExportSnapshot:
-Proxy -> DataCoord durable Pending job -> background plan/checkpoint loop ->
-provider-side copies -> final manifests -> verified staging metadata -> durable
-Publishing state -> final metadata byte comparison/publication -> Completed job
+Proxy -> DataCoord durable Pending job -> frozen snapshot descriptor ->
+DataNode range tasks (enumeration, provider copies, manifests, scalar counts) ->
+DataCoord persist counts -> worker cleanup -> metadata-only staging/finalization ->
+DataCoord durable Publishing result -> final metadata publication -> Completed job
 
 GetExportSnapshotState:
 Proxy -> DataCoord in-memory cache backed by persisted export job metadata
@@ -714,8 +724,12 @@ Export tests:
 
 - Submission returns a durable job ID without object-store access; state query
   hides the metadata URI until `Completed`.
-- Copy progress advances only after a complete persisted batch, remains
-  non-decreasing after restart, and fails closed if the rebuilt plan changes.
+- The segment-range design requires tests for volatile progress, zero
+  intermediate checkpoint writes, persisted scalar completions before worker
+  cleanup, and range replay on worker loss. Staging/finalization waits for
+  every writer to exit; durable `Publishing` prevents subsequent copy replay.
+  A mismatched snapshot ID or collection ID fails closed. See the worker design
+  for validation limits.
 - Queue timeout, active-worker timeout, shutdown, finalization replay, terminal
   credential clearing, pin cleanup retry, and retention are covered.
 - Internal `Publishing` remains schedulable after the original deadline, maps
@@ -729,8 +743,10 @@ Export tests:
   would overlap.
 - Export to a foreign target copies equal object keys instead of treating them
   as already present.
-- StorageV2 manifests are copied and rewritten as ordinary objects; StorageV3
-  manifest objects and LOB files remain manifest-owned.
+- Snapshot Avro file paths are rewritten and encoded as V6 OCF with bounded
+  concurrency. StorageV2/StorageV3 manifest objects are copied unchanged;
+  top-level export metadata records relocated manifest entry points. StorageV3
+  manifests remain the source of concrete data and LOB references.
 - Provider/endpoint mismatch rejects before copying.
 - Object copies use bounded concurrency, and any copy failure prevents metadata
   from being written without deleting objects that may belong to an older

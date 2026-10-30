@@ -18,12 +18,15 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -1137,4 +1140,68 @@ func (s *CopySegmentCheckerSuite) TestFinishJob_FlushFailure_FailsJob() {
 	s.Contains(updatedJob.GetReason(), "failed to flush")
 
 	// Verify: Ref count is released even on failure
+}
+
+type copyGroupingMetaTarget struct{ CopySegmentMeta }
+
+func TestCopySegmentChecker_TextUsesConfiguredGrouping(t *testing.T) {
+	cfg := &Params.DataCoordCfg.MaxSegmentsPerCopyTask
+	previous := cfg.GetValue()
+	defer cfg.SwapTempValue(previous)
+	for _, size := range []int{1000, 0, -1} {
+		for _, text := range []bool{false, true} {
+			t.Run(fmt.Sprintf("size=%d/text=%t", size, text), func(t *testing.T) {
+				cfg.SwapTempValue(fmt.Sprint(size))
+				slotKey := Params.DataCoordCfg.SnapshotTaskSlotUsage.Key
+				Params.Save(slotKey, "16")
+				defer Params.Reset(slotKey)
+				ctx := context.Background()
+				pb := &datapb.CopySegmentJob{JobId: 1, State: datapb.CopySegmentJobState_CopySegmentJobPending}
+				if text {
+					// Older persisted jobs must also use configured grouping for new tasks.
+					pb.Options = []*commonpb.KeyValuePair{{Key: "snapshot_has_text", Value: "true"}}
+				}
+				for id := int64(1); id <= 2001; id++ {
+					pb.IdMappings = append(pb.IdMappings, &datapb.CopySegmentIDMapping{SourceSegmentId: id})
+				}
+				job := &copySegmentJob{CopySegmentJob: pb}
+				fake := &copyGroupingMetaTarget{}
+				defer mockey.Mock((*copyGroupingMetaTarget).GetJob).Return(job).Build().UnPatch()
+				var tasks []CopySegmentTask
+				defer mockey.Mock((*copyGroupingMetaTarget).GetTasksByJobID).To(func(context.Context, int64) []CopySegmentTask { return tasks }).Build().UnPatch()
+				defer mockey.Mock((*copyGroupingMetaTarget).AddTask).To(func(_ context.Context, task CopySegmentTask) error { tasks = append(tasks, task); return nil }).Build().UnPatch()
+				// Simulate a failed state transition after durable task creation.
+				defer mockey.Mock((*copyGroupingMetaTarget).UpdateJobInState).Return(false, errors.New("persist failed")).Build().UnPatch()
+				var next int64
+				defer mockey.Mock((*snapshotExportTestAllocator).AllocID).To(func(context.Context) (int64, error) { next++; return next, nil }).Build().UnPatch()
+				checker := &copySegmentChecker{ctx: ctx, copyMeta: fake, alloc: &snapshotExportTestAllocator{}}
+				require.NotPanics(t, func() { checker.checkPendingJob(job) })
+				if size <= 0 {
+					require.Empty(t, tasks, "invalid configuration must not create tasks")
+					require.Zero(t, next, "invalid configuration must not allocate IDs")
+					require.Equal(t, datapb.CopySegmentJobState_CopySegmentJobPending, job.GetState())
+					// Fixing the configuration resumes the same job's pending mappings.
+					cfg.SwapTempValue("1000")
+					checker.checkPendingJob(job)
+				}
+				require.Len(t, tasks, 3)
+				require.Len(t, tasks[0].GetIdMappings(), 1000)
+				require.Len(t, tasks[1].GetIdMappings(), 1000)
+				require.Len(t, tasks[2].GetIdMappings(), 1)
+				var count int
+				for _, task := range tasks {
+					count += len(task.GetIdMappings())
+					require.EqualValues(t, 16, task.GetTaskSlot())
+				}
+				require.Equal(t, 2001, count)
+				before := len(tasks)
+				Params.Save(slotKey, "32")
+				checker.checkPendingJob(job)
+				require.Len(t, tasks, before, "recovery must reuse the persisted task grouping")
+				for _, task := range tasks {
+					require.EqualValues(t, 16, task.GetTaskSlot())
+				}
+			})
+		}
+	}
 }

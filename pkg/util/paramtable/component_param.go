@@ -6402,10 +6402,12 @@ type dataCoordConfig struct {
 	SnapshotMaxCompactionProtectionSeconds ParamItem `refreshable:"true"`
 	SnapshotRestorePinTTLSeconds           ParamItem `refreshable:"true"`
 	SnapshotCrossBucketEndpointAllowlist   ParamItem `refreshable:"true"`
-	SnapshotExportCopyConcurrency          ParamItem `refreshable:"true"`
+	SnapshotTaskSlotUsage                  ParamItem `refreshable:"true"`
+	SnapshotCopyConcurrency                ParamItem `refreshable:"true"`
+	SnapshotExportCopyConcurrency          ParamItem `refreshable:"true"` // Deprecated: No longer used.
 	SnapshotExportJobTimeout               ParamItem `refreshable:"true"`
 	SnapshotExportJobRetention             ParamItem `refreshable:"true"`
-	SnapshotExportMaxConcurrentJobs        ParamItem `refreshable:"true"`
+	SnapshotExportMaxConcurrentJobs        ParamItem `refreshable:"true"` // Deprecated: No longer used.
 	EnableActiveStandby                    ParamItem `refreshable:"false"`
 
 	// LOB Garbage Collection
@@ -7511,12 +7513,43 @@ Startup continuously schedules bounded concurrent reads and retries failed reads
 	}
 	p.SnapshotCrossBucketEndpointAllowlist.Init(base.mgr)
 
+	p.SnapshotTaskSlotUsage = ParamItem{
+		Key:          "dataCoord.snapshot.taskSlotUsage",
+		Version:      "3.0.3",
+		DefaultValue: "1",
+		Doc:          "Scheduler slots per snapshot export/restore task, frozen at creation.",
+		Formatter: func(v string) string {
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || n <= 0 {
+				return "1"
+			}
+			return v
+		},
+		Export: false,
+	}
+	p.SnapshotTaskSlotUsage.Init(base.mgr)
+
+	p.SnapshotCopyConcurrency = ParamItem{
+		Key:          "dataCoord.snapshot.copyConcurrency",
+		Version:      "3.0.3",
+		DefaultValue: "128",
+		Doc:          "Maximum concurrent file operations per snapshot export/restore task.",
+		Formatter: func(v string) string {
+			n, err := strconv.ParseInt(v, 10, 32)
+			if err != nil || n <= 0 {
+				return "128"
+			}
+			return v
+		},
+		Export: false,
+	}
+	p.SnapshotCopyConcurrency.Init(base.mgr)
+
 	p.SnapshotExportCopyConcurrency = ParamItem{
 		Key:          "dataCoord.snapshot.exportCopyConcurrency",
 		Version:      "2.6.15",
 		DefaultValue: "16",
-		Doc: "Maximum concurrent provider-side object copy requests for ExportSnapshot. " +
-			"Invalid or non-positive values are coerced to the default value 16.",
+		Doc:          "Deprecated: No longer used. Use dataCoord.snapshot.copyConcurrency for per-task snapshot copy concurrency.",
 		Formatter: func(v string) string {
 			parsed, err := strconv.Atoi(v)
 			if err != nil || parsed <= 0 {
@@ -7564,7 +7597,7 @@ Startup continuously schedules bounded concurrent reads and retries failed reads
 		Key:          "dataCoord.snapshot.exportMaxConcurrentJobs",
 		Version:      "2.6.15",
 		DefaultValue: "1",
-		Doc:          "Maximum number of snapshot export jobs executed concurrently by DataCoord.",
+		Doc:          "Deprecated: No longer used. Snapshot export tasks are scheduled through worker slots; this value does not limit concurrent export jobs.",
 		Formatter: func(v string) string {
 			parsed, err := strconv.Atoi(v)
 			if err != nil || parsed <= 0 {
@@ -8112,7 +8145,7 @@ raise this for files written with small row groups, many columns, or untruncated
 	p.MaxSegmentsPerCopyTask = ParamItem{
 		Key:          "dataCoord.import.maxSegmentsPerCopyTask",
 		Version:      "2.5.0",
-		Doc:          "Maximum number of segments that can be grouped into a single copy task during snapshot restore.",
+		Doc:          "Maximum segments per snapshot export or restore copy task, including TEXT snapshots; must be positive.",
 		DefaultValue: "100",
 		PanicIfEmpty: false,
 		Export:       true,

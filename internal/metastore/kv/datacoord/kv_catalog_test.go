@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -2225,4 +2226,86 @@ func TestCatalog_ExternalCollectionRefresh(t *testing.T) {
 		assert.Equal(t, 1, len(tasks))
 		assert.Equal(t, int64(54321), tasks[0].TaskId)
 	})
+}
+
+func (m *snapshotExportJobMetaKV) MultiSaveAndRemove(_ context.Context, saves map[string]string, removals []string, _ ...predicates.Predicate) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.saveErr != nil {
+		return m.saveErr
+	}
+	for k, v := range saves {
+		m.values[k] = v
+	}
+	for _, k := range removals {
+		delete(m.values, k)
+	}
+	return nil
+}
+
+func (m *snapshotExportJobMetaKV) RemoveWithPrefix(_ context.Context, prefix string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.removeErr != nil {
+		return m.removeErr
+	}
+	for key := range m.values {
+		if strings.HasPrefix(key, prefix) {
+			delete(m.values, key)
+		}
+	}
+	return nil
+}
+
+func TestCatalog_ExportSnapshotTasks(t *testing.T) {
+	ctx := context.Background()
+	kv := newSnapshotExportJobMetaKV()
+	catalog := &Catalog{MetaKv: kv, paginationSize: 2}
+	require.Error(t, catalog.SaveExportSnapshotTasks(ctx, 1, &datapb.ExportSnapshotJob{Reason: string([]byte{0xff})}, nil, nil))
+	require.Error(t, catalog.SaveExportSnapshotTasks(ctx, 1, nil, []*datapb.SnapshotExportCopyTask{{Result: &datapb.SnapshotExportCopyResponse{Reason: string([]byte{0xff})}}}, nil))
+	first := &datapb.SnapshotExportCopyTask{TaskId: 1, SegmentEnd: 1}
+	second := &datapb.SnapshotExportCopyTask{TaskId: 2, SegmentEnd: 1}
+	job := &datapb.ExportSnapshotJob{JobId: 1}
+	require.NoError(t, catalog.SaveExportSnapshotTasks(ctx, 1, job, []*datapb.SnapshotExportCopyTask{first}, nil))
+	require.NoError(t, catalog.SaveExportSnapshotTasks(ctx, 10, nil, []*datapb.SnapshotExportCopyTask{second}, nil))
+	first.Retired = true
+	kv.saveErr = merr.ErrServiceUnavailable
+	require.Error(t, catalog.SaveExportSnapshotTasks(ctx, 1, nil, []*datapb.SnapshotExportCopyTask{first, second}, nil))
+	tasks, err := catalog.ListExportSnapshotTasks(ctx, 1)
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.False(t, tasks[0].Retired)
+	kv.saveErr = nil
+	require.NoError(t, catalog.SaveExportSnapshotTasks(ctx, 1, nil, []*datapb.SnapshotExportCopyTask{first, second}, nil))
+	tasks, err = catalog.ListExportSnapshotTasks(ctx, 1)
+	require.NoError(t, err)
+	require.Len(t, tasks, 2)
+	require.True(t, tasks[0].Retired)
+	require.NoError(t, catalog.SaveExportSnapshotTasks(ctx, 1, nil, nil, []int64{1}))
+	tasks, err = catalog.ListExportSnapshotTasks(ctx, 1)
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	kv.values[exportSnapshotTaskPrefix(1)+"3"] = "bad-protobuf"
+	_, err = catalog.ListExportSnapshotTasks(ctx, 1)
+	require.Error(t, err)
+	delete(kv.values, exportSnapshotTaskPrefix(1)+"3")
+	value, _ := proto.Marshal(first)
+	kv.values[exportSnapshotTaskPrefix(1)+"3"] = string(value)
+	_, err = catalog.ListExportSnapshotTasks(ctx, 1)
+	require.Error(t, err)
+	delete(kv.values, exportSnapshotTaskPrefix(1)+"3")
+	kv.walkErr = merr.ErrServiceUnavailable
+	_, err = catalog.ListExportSnapshotTasks(ctx, 1)
+	require.Error(t, err)
+	kv.walkErr = nil
+	kv.removeErr = merr.ErrServiceUnavailable
+	require.Error(t, catalog.DropExportSnapshotTasks(ctx, 1))
+	kv.removeErr = nil
+	require.NoError(t, catalog.DropExportSnapshotTasks(ctx, 1))
+	tasks, err = catalog.ListExportSnapshotTasks(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, tasks, 1, "job 1 cleanup must not remove job 10")
+	jobs, err := catalog.ListExportSnapshotJobs(ctx)
+	require.NoError(t, err)
+	require.Len(t, jobs, 1, "tasks are removed before their owning job")
 }

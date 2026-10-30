@@ -918,6 +918,25 @@ func (p *updateSegmentPack) Get(segmentID int64) *SegmentInfo {
 
 type UpdateOperator func(*updateSegmentPack) bool
 
+// UpdateTextAndJSONIndexLogs merges copied stats into the same update pack as
+// the manifest/binlogs, avoiding separate catalog writes for one copy target.
+func UpdateTextAndJSONIndexLogs(segmentID int64, text map[int64]*datapb.TextIndexStats, json map[int64]*datapb.JsonKeyStats) UpdateOperator {
+	return func(pack *updateSegmentPack) bool {
+		segment := pack.Get(segmentID)
+		if segment == nil {
+			return pack.fail(merr.WrapErrSegmentNotFound(segmentID))
+		}
+		changed := false
+		if len(text) > 0 {
+			changed = SetTextIndexLogs(text)(segment)
+		}
+		if len(json) > 0 {
+			changed = SetJSONKeyIndexLogs(json)(segment) || changed
+		}
+		return changed
+	}
+}
+
 func CreateL0Operator(collectionID, partitionID, segmentID int64, channel string) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.meta.segments.GetSegment(segmentID)

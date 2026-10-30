@@ -35,6 +35,8 @@ const NullNodeID = -1
 
 type GlobalScheduler interface {
 	Enqueue(task Task)
+	// RemoveTask drains local callbacks without issuing a worker RPC.
+	RemoveTask(taskID int64)
 	AbortAndRemoveTask(taskID int64)
 	// GetPendingTaskCount returns the number of queued tasks of the given type.
 	// The queue is shared by every task type, so callers that gate admission for
@@ -57,6 +59,8 @@ type globalTaskScheduler struct {
 
 	mu           *lock.KeyLock[int64]
 	pendingTasks PriorityQueue
+	// Registration outlives Pop, fencing callbacks during the queue-to-pool handoff.
+	tasks        *typeutil.ConcurrentMap[int64, Task]
 	runningTasks *typeutil.ConcurrentMap[int64, Task]
 	execPool     *conc.Pool[struct{}]
 	checkPool    *conc.Pool[struct{}]
@@ -112,19 +116,28 @@ func (s *globalTaskScheduler) taskInBackoff(task Task) bool {
 	return ok && time.Now().Before(bo.notBefore)
 }
 
+// Each enqueue gets a distinct identity, even if a caller reuses its Task object.
+type scheduledTask struct{ Task }
+
 func (s *globalTaskScheduler) Enqueue(task Task) {
-	if s.pendingTasks.Get(task.GetTaskID()) != nil {
+	// Repeated inspection must not wait behind an already registered task's RPC.
+	if s.tasks.Contain(task.GetTaskID()) {
 		return
 	}
-	if s.runningTasks.Contain(task.GetTaskID()) {
+	s.mu.Lock(task.GetTaskID())
+	defer s.mu.Unlock(task.GetTaskID())
+	if s.tasks.Contain(task.GetTaskID()) {
 		return
 	}
+	task = &scheduledTask{Task: task}
 	switch task.GetTaskState() {
 	case taskcommon.Init:
 		task.SetTaskTime(taskcommon.TimeQueue, time.Now())
+		s.tasks.Insert(task.GetTaskID(), task)
 		s.pendingTasks.Push(task)
 	case taskcommon.InProgress, taskcommon.Retry:
 		task.SetTaskTime(taskcommon.TimeStart, time.Now())
+		s.tasks.Insert(task.GetTaskID(), task)
 		s.runningTasks.Insert(task.GetTaskID(), task)
 	}
 	mlog.Info(s.ctx, "task enqueued", WrapTaskLog(task)...)
@@ -136,17 +149,33 @@ func (s *globalTaskScheduler) GetPendingTaskCount(taskType taskcommon.Type) int 
 	})
 }
 
+func (s *globalTaskScheduler) registered(task Task) bool {
+	current, ok := s.tasks.Get(task.GetTaskID())
+	return ok && current == task
+}
+
+// External removal holds the per-task write lock. Scheduler callbacks may remove
+// their own registration while holding the read lock.
+func (s *globalTaskScheduler) removeTask(taskID int64) {
+	s.tasks.Remove(taskID)
+	s.pendingTasks.Remove(taskID)
+	s.runningTasks.Remove(taskID)
+	s.backoffs.Remove(taskID)
+}
+
+func (s *globalTaskScheduler) RemoveTask(taskID int64) {
+	s.mu.Lock(taskID)
+	defer s.mu.Unlock(taskID)
+	s.removeTask(taskID)
+}
+
 func (s *globalTaskScheduler) AbortAndRemoveTask(taskID int64) {
 	s.mu.Lock(taskID)
 	defer s.mu.Unlock(taskID)
-	if task, ok := s.runningTasks.GetAndRemove(taskID); ok {
+	if task, ok := s.tasks.Get(taskID); ok {
 		task.DropTaskOnWorker(s.cluster)
 	}
-	if task := s.pendingTasks.Get(taskID); task != nil {
-		task.DropTaskOnWorker(s.cluster)
-		s.pendingTasks.Remove(taskID)
-	}
-	s.backoffs.Remove(taskID)
+	s.removeTask(taskID)
 }
 
 func (s *globalTaskScheduler) Start() {
@@ -278,22 +307,29 @@ func (s *globalTaskScheduler) schedule() {
 		if task == nil {
 			break
 		}
-		// A task in failure backoff gives way: it re-enters the queue after
-		// this round and is dispatched once its delay elapses, so one
-		// persistently failing task cannot occupy the scheduler.
-		if s.taskInBackoff(task) {
-			delayed = append(delayed, task)
+		s.mu.RLock(task.GetTaskID())
+		if !s.registered(task) {
+			s.mu.RUnlock(task.GetTaskID())
 			continue
 		}
-		taskSlot := task.GetTaskSlot()
-		nodeID := s.pickNode(slotHeap, taskSlot)
+		if s.taskInBackoff(task) {
+			delayed = append(delayed, task)
+			s.mu.RUnlock(task.GetTaskID())
+			continue
+		}
+		nodeID := s.pickNode(slotHeap, task.GetTaskSlot())
 		if nodeID == NullNodeID {
 			s.pendingTasks.Push(task)
+			s.mu.RUnlock(task.GetTaskID())
 			break
 		}
+		s.mu.RUnlock(task.GetTaskID())
 		future := s.execPool.Submit(func() (struct{}, error) {
 			s.mu.RLock(task.GetTaskID())
 			defer s.mu.RUnlock(task.GetTaskID())
+			if !s.registered(task) {
+				return struct{}{}, nil
+			}
 			mlog.Info(s.ctx, "processing task...", WrapTaskLog(task)...)
 			if task.GetTaskState() == taskcommon.Init {
 				task.CreateTaskOnWorker(nodeID, s.cluster)
@@ -319,15 +355,21 @@ func (s *globalTaskScheduler) schedule() {
 					// never runs. Drop the backoff entry here; otherwise it would
 					// leak until datacoord restarts and grow without bound under
 					// the very failure storms this backoff exists to relieve.
-					s.backoffs.Remove(task.GetTaskID())
+					s.removeTask(task.GetTaskID())
 				}
+			} else {
+				s.removeTask(task.GetTaskID())
 			}
 			return struct{}{}, nil
 		})
 		futures = append(futures, future)
 	}
 	for _, task := range delayed {
-		s.pendingTasks.Push(task)
+		s.mu.RLock(task.GetTaskID())
+		if s.registered(task) {
+			s.pendingTasks.Push(task)
+		}
+		s.mu.RUnlock(task.GetTaskID())
 	}
 	_ = conc.AwaitAll(futures...)
 }
@@ -344,11 +386,13 @@ func (s *globalTaskScheduler) check() {
 		future := s.checkPool.Submit(func() (struct{}, error) {
 			s.mu.RLock(task.GetTaskID())
 			defer s.mu.RUnlock(task.GetTaskID())
+			if !s.registered(task) {
+				return struct{}{}, nil
+			}
 			task.QueryTaskOnWorker(s.cluster)
 			switch task.GetTaskState() {
 			case taskcommon.None:
-				s.runningTasks.Remove(task.GetTaskID())
-				s.backoffs.Remove(task.GetTaskID())
+				s.removeTask(task.GetTaskID())
 			case taskcommon.Init, taskcommon.Retry:
 				s.recordTaskFailure(task)
 				s.runningTasks.Remove(task.GetTaskID())
@@ -356,8 +400,7 @@ func (s *globalTaskScheduler) check() {
 			case taskcommon.Finished, taskcommon.Failed:
 				task.SetTaskTime(taskcommon.TimeEnd, time.Now())
 				task.DropTaskOnWorker(s.cluster)
-				s.runningTasks.Remove(task.GetTaskID())
-				s.backoffs.Remove(task.GetTaskID())
+				s.removeTask(task.GetTaskID())
 			}
 			return struct{}{}, nil
 		})
@@ -462,6 +505,7 @@ func NewGlobalTaskScheduler(ctx context.Context, cluster session.Cluster) Global
 		wg:           sync.WaitGroup{},
 		mu:           lock.NewKeyLock[int64](),
 		pendingTasks: NewPriorityQueuePolicy(),
+		tasks:        typeutil.NewConcurrentMap[int64, Task](),
 		runningTasks: typeutil.NewConcurrentMap[int64, Task](),
 		execPool:     execPool,
 		checkPool:    checkPool,

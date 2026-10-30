@@ -20,17 +20,24 @@ import (
 	"context"
 	"net/url"
 	"path"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/snapshotio"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func validateSnapshotForeignStorageForTest(
@@ -827,4 +834,330 @@ func TestApplySnapshotExternalSpecAzureSourceSAS(t *testing.T) {
 		assert.Equal(t, "backup-account", cfg.AccessKeyID)
 		assert.Equal(t, "sv=2024-08-04&sig=abc", cfg.AzureSourceSAS)
 	})
+}
+
+// SnapshotExportTestPlan composes worker copies and coordinator metadata for fixtures.
+type SnapshotExportTestPlan struct {
+	*SnapshotExportPlan
+	Items      []FileCopy
+	snapshot   *SnapshotData
+	sourceRoot string
+}
+
+// BuildSnapshotExportPlanForTest exposes real planners only in this package's tests.
+func BuildSnapshotExportPlanForTest(ctx context.Context, sourceCM, targetCM storage.ChunkManager,
+	sourceBucket, targetBucket string, snapshot *SnapshotData, targetPath string,
+	targetConfig, sourceConfig *indexpb.StorageConfig,
+) (*SnapshotExportTestPlan, error) {
+	items, err := buildSnapshotExportFiles(ctx, sourceCM, targetCM, sourceBucket, targetBucket, snapshot, targetPath, targetConfig, sourceConfig, nil)
+	if err != nil {
+		return nil, err
+	}
+	plan, err := buildSnapshotExportMetadataPlan(snapshot, sourceCM.RootPath(), targetPath, targetConfig)
+	if err != nil {
+		return nil, err
+	}
+	root, err := snapshotExportSourceRoot(snapshot, sourceCM.RootPath())
+	if err != nil {
+		return nil, err
+	}
+	return &SnapshotExportTestPlan{SnapshotExportPlan: plan, Items: items, snapshot: snapshot, sourceRoot: root}, nil
+}
+
+// CopySnapshotExportPlanForTest executes the real shard stages for fixtures.
+func CopySnapshotExportPlanForTest(ctx context.Context, plan *SnapshotExportTestPlan, sourceBucket, targetBucket string, copier storage.CrossBucketCopier, targetCM storage.ChunkManager, permits chan struct{}, completed func(int64)) error {
+	return copySnapshotExportSegment(ctx, &datapb.SnapshotExportCopyRequest{SourceStorageConfig: &indexpb.StorageConfig{BucketName: sourceBucket}}, plan.Items, plan.snapshot, plan.sourceRoot, plan.TargetRoot,
+		&ResolvedForeignStorage{Copier: copier, ForeignCM: targetCM, ForeignBucket: targetBucket}, permits, func(files, bytes, _ int64) {
+			if completed != nil && files > 0 {
+				completed(bytes)
+			}
+		})
+}
+
+// BuildSnapshotExportFilesForTest exposes the worker inventory without finalization.
+func BuildSnapshotExportFilesForTest(ctx context.Context, sourceCM, targetCM storage.ChunkManager,
+	sourceBucket, targetBucket string, snapshot *SnapshotData, targetPath string,
+	targetConfig, sourceConfig *indexpb.StorageConfig,
+) ([]FileCopy, error) {
+	return buildSnapshotExportFiles(ctx, sourceCM, targetCM, sourceBucket, targetBucket, snapshot, targetPath, targetConfig, sourceConfig, nil)
+}
+
+func TestSnapshotExportFiles_BucketOverlap(t *testing.T) {
+	for _, mode := range []string{"disjoint", "metadata", "literal metadata", "Avro", "data", "cross bucket"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			target := path.Join(root, "backup")
+			if mode == "literal metadata" {
+				target += "?Version=1"
+			}
+			sourceRoot := path.Join(root, "source")
+			if mode == "data" || mode == "cross bucket" {
+				sourceRoot = path.Join(target, "files")
+			}
+			cm := storage.NewLocalChunkManager(objectstorage.RootPath(sourceRoot))
+			manifestDir, metadata := GetSnapshotPaths(target, 100, 1)
+			snapshot := &SnapshotData{
+				SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100},
+				Collection:   &datapb.CollectionDescription{}, MetadataPath: path.Join(sourceRoot, "metadata.json"),
+				ManifestPaths: []string{path.Join(sourceRoot, "1.avro")},
+				Segments: []*datapb.SegmentDescription{{
+					SegmentId: 1,
+					Binlogs:   []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: path.Join(sourceRoot, "data")}}}},
+				}},
+			}
+			switch mode {
+			case "metadata", "literal metadata":
+				snapshot.MetadataPath = metadata
+			case "Avro":
+				snapshot.ManifestPaths[0] = GetSegmentManifestPath(manifestDir, 1)
+			}
+			targetBucket := "source"
+			if mode == "cross bucket" {
+				targetBucket = "target"
+			}
+			items, err := buildSnapshotExportFiles(context.Background(), cm, cm, "source", targetBucket,
+				snapshot, target, &indexpb.StorageConfig{}, &indexpb.StorageConfig{}, nil)
+			if mode != "disjoint" && mode != "cross bucket" {
+				require.ErrorContains(t, err, "overlaps source snapshot object")
+				require.Nil(t, items)
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, items, 2)
+			require.Equal(t, snapshot.Segments[0].Binlogs[0].Binlogs[0].LogPath, items[0].SourcePath)
+			require.Equal(t, path.Join(target, "files/data"), items[0].DestinationPath)
+		})
+	}
+}
+
+// Retain the input guards previously covered through the removed exported planner.
+func TestSnapshotExportFiles_InvalidInputs(t *testing.T) {
+	for _, mode := range []string{"nil snapshot", "nil info", "nil collection", "nil segment", "nil index", "nil source", "nil target", "external collection", "foreign target", "empty root", "nil target config", "missing bundle root", "manifest count", "foreign Avro"} {
+		t.Run(mode, func(t *testing.T) {
+			cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+			var sourceCM, targetCM storage.ChunkManager = cm, cm
+			snapshot := &SnapshotData{SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100}, Collection: &datapb.CollectionDescription{}}
+			target := path.Join(cm.RootPath(), "export")
+			cfg := &indexpb.StorageConfig{}
+			switch mode {
+			case "nil snapshot":
+				snapshot = nil
+			case "nil info":
+				snapshot.SnapshotInfo = nil
+			case "nil collection":
+				snapshot.Collection = nil
+			case "nil segment":
+				snapshot.Segments = []*datapb.SegmentDescription{nil}
+			case "nil index":
+				snapshot.Indexes = []*indexpb.IndexInfo{nil}
+			case "nil source":
+				sourceCM = nil
+			case "nil target":
+				targetCM = nil
+			case "external collection":
+				snapshot.Collection.Schema = &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{ExternalField: "source_id"}}}
+			case "foreign target":
+				target = "s3://other/export"
+			case "empty root":
+				target = "/"
+			case "nil target config":
+				cfg = nil
+			case "missing bundle root":
+				snapshot.Layout = datapb.SnapshotLayout_SnapshotLayoutSelfContained
+			case "manifest count":
+				snapshot.Segments = []*datapb.SegmentDescription{{SegmentId: 1}}
+			case "foreign Avro":
+				snapshot.Segments = []*datapb.SegmentDescription{{SegmentId: 1}}
+				snapshot.ManifestPaths = []string{"s3://other/1.avro"}
+			}
+			items, err := buildSnapshotExportFiles(context.Background(), sourceCM, targetCM, "bucket", "bucket", snapshot, target, cfg, &indexpb.StorageConfig{}, nil)
+			require.Error(t, err)
+			require.Nil(t, items, "invalid preparation must never return a usable copy list")
+		})
+	}
+}
+
+func TestSnapshotExportMetadata_RequiresCompleteMetadata(t *testing.T) {
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	err := prepareSnapshotExportMetadata(context.Background(), cm, &SnapshotData{}, nil)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
+func TestSnapshotExportManifest_V6PathsAndIndexMarker(t *testing.T) {
+	for _, mode := range []string{"legacy", "V3 unknown", "V3 empty", "V3 indexes", "invalid path", "encode failure"} {
+		t.Run(mode, func(t *testing.T) {
+			logs := func() []*datapb.FieldBinlog {
+				return []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "source/data"}, {LogPath: ""}}}}
+			}
+			segment := &datapb.SegmentDescription{
+				SegmentId: 1, Binlogs: logs(), Deltalogs: logs(), Statslogs: logs(), Bm25Statslogs: logs(),
+				IndexFiles:        []*indexpb.IndexFilePathInfo{{IndexFilePaths: []string{"s3://bucket/source/index", "source-sibling/index"}}},
+				TextIndexFiles:    map[int64]*datapb.TextIndexStats{1: {Files: []string{"source/text"}}},
+				JsonKeyIndexFiles: map[int64]*datapb.JsonKeyStats{2: {Files: []string{"source/json"}}},
+			}
+			if strings.HasPrefix(mode, "V3") {
+				segment.StorageVersion = storage.StorageV3
+				segment.Binlogs[0].Binlogs[0].LogPath = "legacy/insert/placeholder"
+				switch mode {
+				case "V3 empty":
+					segment.ManifestHasIndex = proto.Bool(false)
+				case "V3 indexes":
+					segment.ManifestHasIndex = proto.Bool(true)
+				}
+			} else if mode == "invalid path" {
+				segment.Deltalogs[0].Binlogs[0].LogPath = "source/../outside"
+			} else if mode == "encode failure" {
+				defer mockey.Mock(snapshotio.MarshalSegmentManifest).Return(nil, merr.ErrServiceUnavailable).Build().UnPatch()
+			}
+			before := proto.Clone(segment)
+			data, err := marshalSnapshotExportManifest(segment, "source", "target")
+			require.True(t, proto.Equal(before, segment))
+			if mode == "invalid path" || mode == "encode failure" {
+				require.Error(t, err)
+				require.Nil(t, data)
+				if mode == "encode failure" {
+					require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+				}
+				return
+			}
+			require.NoError(t, err)
+			exported, err := snapshotio.ParseSegmentManifest(data, snapshotio.SnapshotFormatVersion)
+			require.NoError(t, err)
+			require.Equal(t, []string{"target/files/index", "target/files/source-sibling/index"}, exported.GetIndexFiles()[0].IndexFilePaths)
+			for _, fieldLogs := range [][]*datapb.FieldBinlog{exported.Deltalogs, exported.Statslogs, exported.Bm25Statslogs} {
+				require.Equal(t, "target/files/data", fieldLogs[0].Binlogs[0].LogPath)
+				require.Empty(t, fieldLogs[0].Binlogs[1].LogPath)
+			}
+			if mode == "legacy" {
+				require.Equal(t, "target/files/data", exported.Binlogs[0].Binlogs[0].LogPath)
+				require.Equal(t, []string{"target/files/text"}, exported.TextIndexFiles[1].Files)
+				require.Equal(t, []string{"target/files/json"}, exported.JsonKeyIndexFiles[2].Files)
+			} else {
+				require.Empty(t, exported.Binlogs)
+				require.Equal(t, mode != "V3 empty", exported.GetManifestHasIndex())
+				require.Equal(t, []string{"source/text"}, exported.TextIndexFiles[1].Files)
+				require.Equal(t, []string{"source/json"}, exported.JsonKeyIndexFiles[2].Files)
+			}
+		})
+	}
+}
+
+func TestSnapshotExportSegment_RequiresOneSegment(t *testing.T) {
+	for _, segments := range [][]*datapb.SegmentDescription{nil, {nil}, {{SegmentId: 1}, {SegmentId: 2}}} {
+		err := copySnapshotExportSegment(context.Background(), nil, nil, &SnapshotData{Segments: segments}, "", "", nil, nil, nil)
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+	}
+}
+
+func TestSnapshotExportShard_CanceledAfterManifestWrites(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	target := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	snapshot := &SnapshotData{SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100}, Segments: []*datapb.SegmentDescription{{SegmentId: 1}}}
+	manifestDir, _ := GetSnapshotPaths(target.RootPath(), 100, 1)
+	destination := GetSegmentManifestPath(manifestDir, 1)
+	var original func(context.Context, []FileCopy, chan struct{}, func(context.Context, FileCopy) error) error
+	calls := 0
+	defer mockey.Mock(CopyFiles).Origin(&original).To(func(ctx context.Context, items []FileCopy, permits chan struct{}, copy func(context.Context, FileCopy) error) error {
+		err := original(ctx, items, permits, copy)
+		calls++
+		if calls == 2 {
+			// Exercise cancellation immediately after the last executor has drained
+			// and checked its context, but before the shard publishes completion.
+			cancel()
+		}
+		return err
+	}).Build().UnPatch()
+	err := copySnapshotExportSegment(ctx, &datapb.SnapshotExportCopyRequest{}, []FileCopy{{SourcePath: "source/1.avro", DestinationPath: destination, IsMetadata: true}},
+		snapshot, "source", target.RootPath(), &ResolvedForeignStorage{ForeignCM: target, Copier: &struct{ storage.SizedCrossBucketCopier }{}}, make(chan struct{}, 1), nil)
+	require.ErrorIs(t, err, context.Canceled)
+	exists, err := target.Exist(context.Background(), destination)
+	require.NoError(t, err)
+	require.True(t, exists, "confirmed Avro writes do not override cancellation")
+}
+
+func TestSnapshotSegmentVisitorValidation(t *testing.T) {
+	for _, kind := range []string{"unbuffered", "duplicate native mapping", "rebase descriptor", "invalid path", "outside bundle", "cancel after read"} {
+		t.Run(kind, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			snapshot := &SnapshotData{
+				ManifestPaths: []string{"bundle/snapshots/100/manifests/1/1.avro"},
+				MetadataPath:  "bundle/snapshots/100/metadata/1.json",
+				SegmentIDs:    []int64{1},
+			}
+			segment := &datapb.SegmentDescription{SegmentId: 1}
+			permits := make(chan struct{}, 1)
+			rebase := false
+			switch kind {
+			case "unbuffered":
+				permits = make(chan struct{})
+			case "duplicate native mapping":
+				snapshot.StorageManifests = []*datapb.StorageV2SegmentManifest{
+					{SegmentId: 1, Manifest: "a"}, {SegmentId: 1, Manifest: "b"},
+				}
+			case "rebase descriptor":
+				segment.ManifestPath = "{invalid-descriptor"
+				rebase = true
+			case "invalid path":
+				segment.Deltalogs = []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "../escape"}}}}
+			case "outside bundle":
+				snapshot.Layout = datapb.SnapshotLayout_SnapshotLayoutSelfContained
+				segment.Deltalogs = []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "outside/delta"}}}}
+			}
+			defer mockey.Mock((*SnapshotReader).readManifestFile).To(func(context.Context, string, int) (*datapb.SegmentDescription, error) {
+				if kind == "cancel after read" {
+					cancel()
+				}
+				return segment, nil
+			}).Build().UnPatch()
+			visits := 0
+			err := NewSnapshotReader(nil, WithManifestReadPermits(permits)).visitSnapshotSegments(
+				ctx, snapshot, "old", "bundle", rebase,
+				func(context.Context, *SnapshotData) error { visits++; return nil })
+			require.Error(t, err)
+			require.Zero(t, visits, "invalid segment must not enter the copy stage")
+			require.Empty(t, permits)
+		})
+	}
+}
+
+func TestSnapshotSegmentVisitorRejectsTopLevelPathOutsideBundle(t *testing.T) {
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	metadata := &datapb.SnapshotMetadata{
+		FormatVersion:         int32(SnapshotFormatVersion),
+		SnapshotInfo:          &datapb.SnapshotInfo{Id: 1, CollectionId: 100, S3Location: "bundle/snapshots/100/metadata/1.json"},
+		Collection:            &datapb.CollectionDescription{},
+		Layout:                datapb.SnapshotLayout_SnapshotLayoutSelfContained,
+		ManifestList:          []string{"bundle/snapshots/100/manifests/1/1.avro"},
+		Storagev2ManifestList: []*datapb.StorageV2SegmentManifest{{SegmentId: 1, Manifest: "outside/native"}},
+	}
+	data, err := protojson.Marshal(metadata)
+	require.NoError(t, err)
+	defer mockey.Mock((*storage.LocalChunkManager).Read).Return(data, nil).Build().UnPatch()
+	_, err = NewSnapshotReader(cm).ReadSnapshot(context.Background(), metadata.SnapshotInfo.S3Location, false)
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	require.ErrorContains(t, err, "outside snapshot data root")
+}
+
+func TestSnapshotSegmentVisitorCancellationWhileWaitingForPermit(t *testing.T) {
+	// An occupied permit must remain owned by the other operation on cancellation.
+	permits := make(chan struct{}, 1)
+	permits <- struct{}{}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	snapshot := &SnapshotData{ManifestPaths: []string{"1.avro"}}
+	err := NewSnapshotReader(nil, WithManifestReadPermits(permits)).visitSnapshotSegments(
+		ctx, snapshot, "", "", false,
+		func(context.Context, *SnapshotData) error {
+			t.Error("copy must not start without a read permit")
+			return nil
+		})
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Len(t, permits, 1)
+}
+
+// PrepareSnapshotExportMetadataForTest exposes metadata preparation to external tests.
+func PrepareSnapshotExportMetadataForTest(ctx context.Context, cm storage.ChunkManager, snapshot *SnapshotData, plan *SnapshotExportPlan) error {
+	return prepareSnapshotExportMetadata(ctx, cm, snapshot, plan)
 }

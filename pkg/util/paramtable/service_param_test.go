@@ -71,6 +71,40 @@ func TestMinioConfig_MultipartCopyThreshold(t *testing.T) {
 	assert.Equal(t, int64(1024*1024*1024), params.MultipartCopyThreshold.GetAsInt64())
 }
 
+func TestMinioConfig_MultipartCopyPartSize(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{}))
+	t.Cleanup(base.mgr.Close)
+	var params MinioConfig
+	params.Init(base)
+	item := &params.MultipartCopyPartSize
+	require.Equal(t, "minio.multipartCopyPartSize", item.Key)
+	require.False(t, item.Export)
+	require.EqualValues(t, 10*1024*1024, item.GetAsInt64())
+	for _, tc := range []struct {
+		value string
+		want  int64
+	}{
+		{"10485760", 10 * 1024 * 1024},
+		{"134217728", 128 * 1024 * 1024},
+		{"5368709120", 5 * 1024 * 1024 * 1024},
+		{"0", 10 * 1024 * 1024},
+		{"-1", 10 * 1024 * 1024},
+		{"10485759", 10 * 1024 * 1024},
+		{"5368709121", 10 * 1024 * 1024},
+		{"", 10 * 1024 * 1024},
+		{"invalid", 10 * 1024 * 1024},
+		{"10MB", 10 * 1024 * 1024},
+		{"9223372036854775808", 10 * 1024 * 1024},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			require.NoError(t, base.Save(item.Key, tc.value))
+			require.Equal(t, tc.want, item.GetAsInt64())
+		})
+	}
+	require.NoError(t, base.Reset(item.Key))
+	require.EqualValues(t, 10*1024*1024, item.GetAsInt64())
+}
+
 // Every local storage key is a complete filesystem path that starts with
 // localStorage.path, and the loon local filesystem is rooted at "/", so the
 // configured value must never depend on the process working directory.
@@ -171,6 +205,7 @@ func TestLocalStorageConfig_PathDoesNotChangeAtRuntime(t *testing.T) {
 func TestServiceParam(t *testing.T) {
 	var SParams ServiceParam
 	bt := NewBaseTable(SkipRemote(true))
+	require.NoError(t, bt.Save("minio.address", "localhost"))
 	SParams.init(bt)
 
 	t.Run("test MQConfig", func(t *testing.T) {

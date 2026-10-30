@@ -883,7 +883,7 @@ func TestExpandSnapshotImportExternalStorage(t *testing.T) {
 				ForeignCM: foreignCM, ForeignStorageConfig: foreignCfg,
 			}, nil).Build()
 			defer resolve.UnPatch()
-			read := mockey.Mock(snapshotstorage.NewSnapshotReader).When(func(cm milvusstorage.ChunkManager) bool {
+			read := mockey.Mock(snapshotstorage.NewSnapshotReader).When(func(cm milvusstorage.ChunkManager, _ ...snapshotstorage.SnapshotReaderOption) bool {
 				require.Same(t, foreignCM, cm)
 				return true
 			}).Return(&snapshotstorage.SnapshotReader{}).Build()
@@ -891,10 +891,10 @@ func TestExpandSnapshotImportExternalStorage(t *testing.T) {
 			readSnapshot := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
 			defer readSnapshot.UnPatch()
 			validate := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).To(func(ctx context.Context,
-				cm milvusstorage.ChunkManager, uri string, data *snapshotstorage.SnapshotData, cfg *indexpb.StorageConfig,
+				uri string, data *snapshotstorage.SnapshotData,
 			) error {
-				require.Same(t, foreignCM, cm)
-				require.Same(t, foreignCfg, cfg)
+				require.Equal(t, "s3://source/root/snapshots/1/metadata/2.json", uri)
+				require.Same(t, snapshot, data)
 				return nil
 			}).Build()
 			defer validate.UnPatch()
@@ -2658,7 +2658,7 @@ func TestExpandSnapshotImportCommitTimestamps(t *testing.T) {
 				read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
 				defer read.UnPatch()
 				fileChecks, manifestChecks := 0, 0
-				validate := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).To(func(context.Context, milvusstorage.ChunkManager, string, *snapshotstorage.SnapshotData, *indexpb.StorageConfig) error {
+				validate := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).To(func(context.Context, string, *snapshotstorage.SnapshotData) error {
 					fileChecks++
 					return nil
 				}).Build()

@@ -34,7 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// Manifest readback rejects every result before installation, including legacy
+// A failed manifest readback rejects every result before installation, including legacy
 // siblings in the same task. Their completed-worker output needs the durable
 // cleanup plan even though those segments never adopt a manifest pointer.
 func TestRejectedCopyCleanupIncludesLegacySibling(t *testing.T) {
@@ -82,6 +82,7 @@ func TestRejectedCopyCleanupIncludesLegacySibling(t *testing.T) {
 				},
 			}, copies, m)
 			require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+			require.Equal(t, 1, patch.Times(), "legacy worker results must read back the native manifest")
 			require.Empty(t, m.indexMeta.GetAllSegmentIndexes(2002))
 			persisted, err := catalog.ListSegmentIndexes(ctx, 100)
 			require.NoError(t, err)

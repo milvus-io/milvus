@@ -2040,6 +2040,7 @@ type MinioConfig struct {
 	UseCRC32C          ParamItem `refreshable:"false"`
 
 	MultipartCopyThreshold    ParamItem `refreshable:"true"`
+	MultipartCopyPartSize     ParamItem `refreshable:"true"`
 	DisableAWSChunkedEncoding ParamItem `refreshable:"false"`
 }
 
@@ -2305,7 +2306,7 @@ Leave it empty if you want to use AWS default endpoint`,
 		Version:      "3.0.3",
 		DefaultValue: "1073741824",
 		Doc: "Object size threshold in bytes for switching from a single CopyObject request to multipart copy. " +
-			"Larger objects use multipart copy. Default is 1 GiB (1073741824 bytes). " +
+			"Objects at or above the threshold use multipart copy (minimum 10 MiB). Default is 1 GiB (1073741824 bytes). " +
 			"Must be a positive integer; invalid values fall back to the default. " +
 			"Single CopyObject requests remain capped at 5 GiB regardless of this threshold. " +
 			"Changes apply to subsequent copies, not copies already in progress. " +
@@ -2320,6 +2321,25 @@ Leave it empty if you want to use AWS default endpoint`,
 		Export: true,
 	}
 	p.MultipartCopyThreshold.Init(base.mgr)
+
+	p.MultipartCopyPartSize = ParamItem{
+		Key:          "minio.multipartCopyPartSize",
+		Version:      "3.0.3",
+		DefaultValue: "10485760",
+		Doc: "Target part size in bytes for S3 multipart copy. Default is 10 MiB (10485760 bytes). " +
+			"Valid range is 10 MiB to 5 GiB; invalid values fall back to the default. " +
+			"Larger objects automatically use larger parts to stay within 10000 parts. " +
+			"Changes apply to subsequent copies, not copies already in progress. Does not apply to GCP or Azure.",
+		Formatter: func(v string) string {
+			size, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || size < 10*1024*1024 || size > 5*1024*1024*1024 {
+				return "10485760"
+			}
+			return v
+		},
+		Export: false,
+	}
+	p.MultipartCopyPartSize.Init(base.mgr)
 
 	p.UseCRC32C = ParamItem{
 		Key:          "minio.ssl.useCRC32C",
