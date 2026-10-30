@@ -519,6 +519,53 @@ func (_c *MockBalancer_ReplicateRole_Call) RunAndReturn(run func() replicateutil
 	return _c
 }
 
+// TransferChannels provides a mock function with given fields: ctx, req
+func (_m *MockBalancer) TransferChannels(ctx context.Context, req balancer.TransferChannelsRequest) error {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for TransferChannels")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, balancer.TransferChannelsRequest) error); ok {
+		r0 = rf(ctx, req)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockBalancer_TransferChannels_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TransferChannels'
+type MockBalancer_TransferChannels_Call struct {
+	*mock.Call
+}
+
+// TransferChannels is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req balancer.TransferChannelsRequest
+func (_e *MockBalancer_Expecter) TransferChannels(ctx interface{}, req interface{}) *MockBalancer_TransferChannels_Call {
+	return &MockBalancer_TransferChannels_Call{Call: _e.mock.On("TransferChannels", ctx, req)}
+}
+
+func (_c *MockBalancer_TransferChannels_Call) Run(run func(ctx context.Context, req balancer.TransferChannelsRequest)) *MockBalancer_TransferChannels_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(balancer.TransferChannelsRequest))
+	})
+	return _c
+}
+
+func (_c *MockBalancer_TransferChannels_Call) Return(_a0 error) *MockBalancer_TransferChannels_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBalancer_TransferChannels_Call) RunAndReturn(run func(context.Context, balancer.TransferChannelsRequest) error) *MockBalancer_TransferChannels_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Trigger provides a mock function with given fields: ctx
 func (_m *MockBalancer) Trigger(ctx context.Context) error {
 	ret := _m.Called(ctx)

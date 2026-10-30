@@ -1,6 +1,7 @@
 # ruff: noqa: E712,E731,F401,F403,F405,F541,F841,I001,UP031,UP032,W291,W292,W293
 # fmt: off
 import random
+import time
 
 import pytest
 from common import common_func as cf
@@ -978,9 +979,16 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
                  json_field_name: {'a': {"b": i}}} for i in range(default_nb)]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
-        # 3. release and load collection to make sure the new index is loaded
+        # 3. Reload, then allow asynchronous index preparation to settle.
         self.release_collection(client, collection_name)
         self.load_collection(client, collection_name)
+        # No public API confirms native index-load completion under QueryView:
+        # index progress/segment info only report coordinator metadata. Allow
+        # a best-effort 5s settling window for this 3000-row fixture to reduce
+        # raw-vector -> quantized-index switches during distance pagination.
+        # This delay does not guarantee index readiness on a slow environment.
+        index_load_settle_seconds = 5
+        time.sleep(index_load_settle_seconds)
         # 4. search iterator
         vectors_to_search = cf.gen_vectors(1, default_dim)
         search_params = {"params": {}}

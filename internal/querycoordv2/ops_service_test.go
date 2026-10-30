@@ -21,17 +21,15 @@ import (
 	"testing"
 
 	"github.com/bytedance/mockey"
-	"github.com/cockroachdb/errors"
-	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
@@ -43,17 +41,17 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	walbalancer "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	walbalance "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
-	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type OpsServiceSuite struct {
@@ -166,42 +164,26 @@ func (suite *OpsServiceSuite) SetupTest() {
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
 }
 
-func (suite *OpsServiceSuite) TestActiveCheckers() {
-	// test server unhealthy
-	suite.server.UpdateStateCode(commonpb.StateCode_Abnormal)
-	ctx := context.Background()
-	resp, err := suite.server.ListCheckers(ctx, &querypb.ListCheckersRequest{})
-	suite.NoError(err)
-	suite.False(merr.Ok(resp.Status))
-
-	resp1, err := suite.server.DeactivateChecker(ctx, &querypb.DeactivateCheckerRequest{})
-	suite.NoError(err)
-	suite.False(merr.Ok(resp1))
-
-	resp2, err := suite.server.ActivateChecker(ctx, &querypb.ActivateCheckerRequest{})
-	suite.NoError(err)
-	suite.False(merr.Ok(resp2))
-
-	// test active success
-	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
-	resp, err = suite.server.ListCheckers(ctx, &querypb.ListCheckersRequest{})
-	suite.NoError(err)
-	suite.True(merr.Ok(resp.Status))
-	suite.Len(resp.GetCheckerInfos(), 5)
-
-	resp4, err := suite.server.DeactivateChecker(ctx, &querypb.DeactivateCheckerRequest{
-		CheckerID: int32(utils.ChannelChecker),
-	})
-	suite.NoError(err)
-	suite.True(merr.Ok(resp4))
-	suite.False(suite.checkerController.IsActive(utils.ChannelChecker))
-
-	resp5, err := suite.server.ActivateChecker(ctx, &querypb.ActivateCheckerRequest{
-		CheckerID: int32(utils.ChannelChecker),
-	})
-	suite.NoError(err)
-	suite.True(merr.Ok(resp5))
-	suite.True(suite.checkerController.IsActive(utils.ChannelChecker))
+func (suite *OpsServiceSuite) TestDeprecatedCheckers() {
+	// These compatibility endpoints must not touch the retired controller.
+	suite.server.checkerController = nil
+	ctx := suite.T().Context()
+	for _, state := range []commonpb.StateCode{commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal} {
+		suite.server.UpdateStateCode(state)
+		resp, err := suite.server.ListCheckers(ctx, &querypb.ListCheckersRequest{})
+		suite.NoError(err)
+		suite.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceUnimplemented)
+		suite.Contains(resp.GetStatus().GetReason(), "deprecated")
+		suite.Empty(resp.GetCheckerInfos())
+		status, err := suite.server.ActivateChecker(ctx, &querypb.ActivateCheckerRequest{CheckerID: int32(utils.BalanceChecker)})
+		suite.NoError(err)
+		suite.ErrorIs(merr.Error(status), merr.ErrServiceUnimplemented)
+		suite.Contains(status.GetReason(), "ResumeBalance")
+		status, err = suite.server.DeactivateChecker(ctx, &querypb.DeactivateCheckerRequest{CheckerID: int32(utils.BalanceChecker)})
+		suite.NoError(err)
+		suite.ErrorIs(merr.Error(status), merr.ErrServiceUnimplemented)
+		suite.Contains(status.GetReason(), "SuspendBalance")
+	}
 }
 
 func (suite *OpsServiceSuite) TestListQueryNode() {
@@ -265,127 +247,26 @@ func (suite *OpsServiceSuite) TestGetQueryNodeDistribution() {
 	suite.Equal(2, len(resp.GetSealedSegmentIDs()))
 }
 
-func (suite *OpsServiceSuite) TestCheckQueryNodeDistribution() {
-	// test server unhealthy
-	suite.server.UpdateStateCode(commonpb.StateCode_Abnormal)
-	ctx := context.Background()
-	resp, err := suite.server.CheckQueryNodeDistribution(ctx, &querypb.CheckQueryNodeDistributionRequest{})
-	suite.NoError(err)
-	suite.False(merr.Ok(resp))
-
-	// test node not found
-	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
-	resp, err = suite.server.CheckQueryNodeDistribution(ctx, &querypb.CheckQueryNodeDistributionRequest{
-		TargetNodeID: 2,
-	})
-	suite.NoError(err)
-	suite.False(merr.Ok(resp))
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   1,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-
-	resp, err = suite.server.CheckQueryNodeDistribution(ctx, &querypb.CheckQueryNodeDistributionRequest{
-		SourceNodeID: 1,
-	})
-	suite.NoError(err)
-	suite.False(merr.Ok(resp))
-
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   1,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	// test success
-	channels := []*meta.DmChannel{
-		{
-			VchannelInfo: &datapb.VchannelInfo{
-				CollectionID: 1,
-				ChannelName:  "channel1",
-			},
-			Node: 1,
-		},
-		{
-			VchannelInfo: &datapb.VchannelInfo{
-				CollectionID: 1,
-				ChannelName:  "channel2",
-			},
-			Node: 1,
-		},
+func (suite *OpsServiceSuite) TestCheckQueryNodeDistributionDeprecated() {
+	// A deprecated endpoint must not read the retired distribution or Target,
+	// nor report success merely because the old resource sets are empty.
+	suite.server.nodeMgr = nil
+	suite.server.dist = nil
+	suite.server.targetMgr = nil
+	for _, state := range []commonpb.StateCode{commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal} {
+		suite.server.UpdateStateCode(state)
+		for _, req := range []*querypb.CheckQueryNodeDistributionRequest{
+			{},
+			{SourceNodeID: 1, TargetNodeID: 2},
+			{SourceNodeID: 1, TargetNodeID: 1},
+		} {
+			resp, err := suite.server.CheckQueryNodeDistribution(suite.T().Context(), req)
+			suite.NoError(err)
+			suite.ErrorIs(merr.Error(resp), merr.ErrServiceUnimplemented)
+			suite.Contains(resp.GetReason(), "deprecated")
+			suite.Contains(resp.GetReason(), "LoadBalance and TransferSegment")
+		}
 	}
-
-	segments := []*meta.Segment{
-		{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:            1,
-				CollectionID:  1,
-				PartitionID:   1,
-				InsertChannel: "channel1",
-			},
-			Node: 1,
-		},
-		{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:            2,
-				CollectionID:  1,
-				PartitionID:   1,
-				InsertChannel: "channel2",
-			},
-			Node: 1,
-		},
-	}
-	suite.dist.ChannelDistManager.Update(1, channels...)
-	suite.dist.SegmentDistManager.Update(1, segments...)
-
-	resp, err = suite.server.CheckQueryNodeDistribution(ctx, &querypb.CheckQueryNodeDistributionRequest{
-		SourceNodeID: 1,
-		TargetNodeID: 2,
-	})
-	suite.NoError(err)
-	suite.False(merr.Ok(resp))
-
-	suite.dist.ChannelDistManager.Update(2, channels...)
-	suite.dist.SegmentDistManager.Update(2, segments...)
-	resp, err = suite.server.CheckQueryNodeDistribution(ctx, &querypb.CheckQueryNodeDistributionRequest{
-		SourceNodeID: 1,
-		TargetNodeID: 1,
-	})
-	suite.NoError(err)
-	suite.True(merr.Ok(resp))
-}
-
-func (suite *OpsServiceSuite) TestSuspendAndResumeBalance() {
-	// test server unhealthy
-	suite.server.UpdateStateCode(commonpb.StateCode_Abnormal)
-	ctx := context.Background()
-	resp, err := suite.server.SuspendBalance(ctx, &querypb.SuspendBalanceRequest{})
-	suite.NoError(err)
-	suite.False(merr.Ok(resp))
-
-	resp, err = suite.server.ResumeBalance(ctx, &querypb.ResumeBalanceRequest{})
-	suite.NoError(err)
-	suite.False(merr.Ok(resp))
-
-	// test suspend success
-	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
-	resp, err = suite.server.SuspendBalance(ctx, &querypb.SuspendBalanceRequest{})
-	suite.NoError(err)
-	suite.True(merr.Ok(resp))
-	suite.False(suite.checkerController.IsActive(utils.BalanceChecker))
-
-	resp1, err := suite.server.CheckBalanceStatus(ctx, &querypb.CheckBalanceStatusRequest{})
-	suite.NoError(err)
-	suite.Equal(false, resp1.GetIsActive())
-
-	resp, err = suite.server.ResumeBalance(ctx, &querypb.ResumeBalanceRequest{})
-	suite.NoError(err)
-	suite.True(merr.Ok(resp))
-	suite.True(suite.checkerController.IsActive(utils.BalanceChecker))
-
-	resp2, err := suite.server.CheckBalanceStatus(ctx, &querypb.CheckBalanceStatusRequest{})
-	suite.NoError(err)
-	suite.Equal(true, resp2.GetIsActive())
 }
 
 func (suite *OpsServiceSuite) TestSuspendAndResumeNode() {
@@ -446,508 +327,94 @@ func (suite *OpsServiceSuite) TestSuspendAndResumeNode() {
 }
 
 func (suite *OpsServiceSuite) TestTransferSegment() {
-	ctx := context.Background()
-
-	// test server unhealthy
-	suite.server.UpdateStateCode(commonpb.StateCode_Abnormal)
-	resp, err := suite.server.TransferSegment(ctx, &querypb.TransferSegmentRequest{})
-	suite.NoError(err)
-	suite.False(merr.Ok(resp))
-
-	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
-	// test source node not healthy
-	resp, err = suite.server.TransferSegment(ctx, &querypb.TransferSegmentRequest{
-		SourceNodeID: 1,
-	})
-	suite.NoError(err)
-	suite.False(merr.Ok(resp))
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   1,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-
-	collectionID := int64(1)
-	partitionID := int64(1)
-	replicaID := int64(1)
-	nodes := []int64{1, 2, 3, 4}
-	replica := utils.CreateTestReplica(replicaID, collectionID, nodes)
-	suite.meta.Put(ctx, replica)
-	collection := utils.CreateTestCollection(collectionID, 1)
-	partition := utils.CreateTestPartition(partitionID, collectionID)
-	suite.meta.PutCollection(ctx, collection, partition)
-	segmentIDs := []int64{1, 2, 3, 4}
-	channelNames := []string{"channel-1", "channel-2", "channel-3", "channel-4"}
-
-	// test target node not healthy
-	resp, err = suite.server.TransferSegment(ctx, &querypb.TransferSegmentRequest{
-		SourceNodeID: nodes[0],
-		TargetNodeID: nodes[1],
-	})
-	suite.NoError(err)
-	suite.False(merr.Ok(resp))
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   2,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-
-	// test segment not exist in node
-	resp, err = suite.server.TransferSegment(ctx, &querypb.TransferSegmentRequest{
-		SourceNodeID: nodes[0],
-		TargetNodeID: nodes[1],
-		SegmentID:    segmentIDs[0],
-	})
-	suite.NoError(err)
-	suite.False(merr.Ok(resp))
-
-	segments := []*datapb.SegmentInfo{
-		{
-			ID:            segmentIDs[0],
-			CollectionID:  collectionID,
-			PartitionID:   partitionID,
-			InsertChannel: channelNames[0],
-			NumOfRows:     1,
-		},
-		{
-			ID:            segmentIDs[1],
-			CollectionID:  collectionID,
-			PartitionID:   partitionID,
-			InsertChannel: channelNames[1],
-			NumOfRows:     1,
-		},
-		{
-			ID:            segmentIDs[2],
-			CollectionID:  collectionID,
-			PartitionID:   partitionID,
-			InsertChannel: channelNames[2],
-			NumOfRows:     1,
-		},
-		{
-			ID:            segmentIDs[3],
-			CollectionID:  collectionID,
-			PartitionID:   partitionID,
-			InsertChannel: channelNames[3],
-			NumOfRows:     1,
-		},
-	}
-
-	channels := []*datapb.VchannelInfo{
-		{
-			CollectionID: collectionID,
-			ChannelName:  channelNames[0],
-		},
-		{
-			CollectionID: collectionID,
-			ChannelName:  channelNames[1],
-		},
-		{
-			CollectionID: collectionID,
-			ChannelName:  channelNames[2],
-		},
-		{
-			CollectionID: collectionID,
-			ChannelName:  channelNames[3],
-		},
-	}
-	segmentInfos := lo.Map(segments, func(segment *datapb.SegmentInfo, _ int) *meta.Segment {
-		return &meta.Segment{
-			SegmentInfo: segment,
-			Node:        nodes[0],
+	calls := 0
+	var failure error
+	patch := mockey.Mock((*Server).manualMoveSegments).To(func(_ *Server, _ context.Context, collection, source int64, destinations, segments []int64) error {
+		calls++
+		suite.Zero(collection)
+		suite.Equal(int64(1), source)
+		if calls == 1 {
+			suite.Equal([]int64{2}, destinations)
+			suite.Equal([]int64{100}, segments)
+		} else {
+			suite.Empty(destinations)
+			suite.Empty(segments)
 		}
-	})
-	chanenlInfos := lo.Map(channels, func(channel *datapb.VchannelInfo, _ int) *meta.DmChannel {
-		return &meta.DmChannel{
-			VchannelInfo: channel,
-			Node:         nodes[0],
-		}
-	})
-	suite.dist.SegmentDistManager.Update(1, segmentInfos[0])
-
-	// test segment not exist in current target, expect no task assign and success
-	assign.InitGlobalAssignPolicyFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetMgr)
-	balance.InitGlobalBalancerFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.targetMgr)
-	resp, err = suite.server.TransferSegment(ctx, &querypb.TransferSegmentRequest{
-		SourceNodeID: nodes[0],
-		TargetNodeID: nodes[1],
-		SegmentID:    segmentIDs[0],
-	})
-	suite.NoError(err)
-	suite.True(merr.Ok(resp))
-
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(channels, segments, nil)
-	suite.targetMgr.UpdateCollectionNextTarget(ctx, 1)
-	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, 1)
-	suite.dist.SegmentDistManager.Update(1, segmentInfos...)
-	suite.dist.ChannelDistManager.Update(1, chanenlInfos...)
-
-	for _, node := range nodes {
-		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-			NodeID:   node,
-			Address:  "localhost",
-			Hostname: "localhost",
-		}))
-		suite.meta.HandleNodeUp(ctx, node)
-	}
-
-	// test transfer segment success, expect generate 1 balance segment task
-	suite.taskScheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
-		actions := t.Actions()
-		suite.Equal(len(actions), 2)
-		suite.Equal(actions[0].Node(), int64(2))
-		return nil
-	})
-	resp, err = suite.server.TransferSegment(ctx, &querypb.TransferSegmentRequest{
-		SourceNodeID: nodes[0],
-		TargetNodeID: nodes[1],
-		SegmentID:    segmentIDs[0],
-	})
-	suite.NoError(err)
-	suite.True(merr.Ok(resp))
-
-	// test copy mode, expect generate 1 load segment task
-	suite.taskScheduler.ExpectedCalls = nil
-	suite.taskScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
-	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
-	suite.taskScheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
-		actions := t.Actions()
-		suite.Equal(len(actions), 1)
-		suite.Equal(actions[0].Node(), int64(2))
-		return nil
-	})
-	resp, err = suite.server.TransferSegment(ctx, &querypb.TransferSegmentRequest{
-		SourceNodeID: nodes[0],
-		TargetNodeID: nodes[1],
-		SegmentID:    segmentIDs[0],
-		CopyMode:     true,
-	})
-	suite.NoError(err)
-	suite.True(merr.Ok(resp))
-
-	// test transfer all segments, expect generate 4 load segment task
-	suite.taskScheduler.ExpectedCalls = nil
-	suite.taskScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
-	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
-	counter := atomic.NewInt64(0)
-	suite.taskScheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
-		actions := t.Actions()
-		suite.Equal(len(actions), 2)
-		suite.Equal(actions[0].Node(), int64(2))
-		counter.Inc()
-		return nil
-	})
-	resp, err = suite.server.TransferSegment(ctx, &querypb.TransferSegmentRequest{
-		SourceNodeID: nodes[0],
-		TargetNodeID: nodes[1],
-		TransferAll:  true,
-	})
-	suite.NoError(err)
-	suite.True(merr.Ok(resp))
-	suite.Equal(counter.Load(), int64(4))
-
-	// test transfer all segment to all nodes, expect generate 4 load segment task
-	suite.taskScheduler.ExpectedCalls = nil
-	suite.taskScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
-	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
-	counter = atomic.NewInt64(0)
-	nodeSet := typeutil.NewUniqueSet()
-	suite.taskScheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
-		actions := t.Actions()
-		suite.Equal(len(actions), 2)
-		nodeSet.Insert(actions[0].Node())
-		counter.Inc()
-		return nil
-	})
-	resp, err = suite.server.TransferSegment(ctx, &querypb.TransferSegmentRequest{
-		SourceNodeID: nodes[0],
-		TransferAll:  true,
-		ToAllNodes:   true,
-	})
-	suite.NoError(err)
-	suite.True(merr.Ok(resp))
-	suite.Equal(counter.Load(), int64(4))
-	suite.Len(nodeSet.Collect(), 3)
-
-	// test transfer segment idempotent
-	suite.taskScheduler.ExpectedCalls = nil
-	suite.taskScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
-	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
-	counter = atomic.NewInt64(0)
-	taskIDSet := typeutil.NewUniqueSet()
-	suite.taskScheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
-		if taskIDSet.Contain(t.ID()) {
-			return errors.New("duplicate task")
-		}
-		return nil
-	})
-	resp, err = suite.server.TransferSegment(ctx, &querypb.TransferSegmentRequest{
-		SourceNodeID: nodes[0],
-		TransferAll:  true,
-		ToAllNodes:   true,
-	})
-	suite.NoError(err)
-	suite.True(merr.Ok(resp))
-	resp, err = suite.server.TransferSegment(ctx, &querypb.TransferSegmentRequest{
-		SourceNodeID: nodes[0],
-		TransferAll:  true,
-		ToAllNodes:   true,
-	})
-	suite.NoError(err)
-	suite.True(merr.Ok(resp))
+		return failure
+	}).Build()
+	defer patch.UnPatch()
+	req := &querypb.TransferSegmentRequest{SourceNodeID: 1, TargetNodeID: 2, SegmentID: 100}
+	resp, err := suite.server.TransferSegment(suite.T().Context(), req)
+	suite.NoError(merr.CheckRPCCall(resp, err))
+	req.ToAllNodes, req.TransferAll = true, true
+	failure = merr.ErrServiceUnavailable
+	resp, err = suite.server.TransferSegment(suite.T().Context(), req)
+	suite.ErrorIs(merr.CheckRPCCall(resp, err), failure)
+	req.CopyMode = true
+	resp, err = suite.server.TransferSegment(suite.T().Context(), req)
+	suite.ErrorIs(merr.CheckRPCCall(resp, err), failure)
+	suite.Equal(3, calls)
+	suite.server.UpdateStateCode(commonpb.StateCode_Initializing)
+	resp, err = suite.server.TransferSegment(suite.T().Context(), req)
+	suite.ErrorIs(merr.CheckRPCCall(resp, err), merr.ErrServiceNotReady)
+	suite.Equal(3, calls)
 }
 
 func (suite *OpsServiceSuite) TestTransferChannel() {
-	ctx := context.Background()
-
-	// test server unhealthy
-	suite.server.UpdateStateCode(commonpb.StateCode_Abnormal)
-	resp, err := suite.server.TransferChannel(ctx, &querypb.TransferChannelRequest{})
-	suite.NoError(err)
-	suite.False(merr.Ok(resp))
+	ctx := suite.T().Context()
+	b := &mock_balancer.MockBalancer{}
+	get := mockey.Mock(walbalance.GetWithContext).Return(b, nil).Build()
+	defer get.UnPatch()
+	var received walbalancer.TransferChannelsRequest
+	calls := 0
+	transfer := mockey.Mock((*mock_balancer.MockBalancer).TransferChannels).To(func(_ *mock_balancer.MockBalancer, _ context.Context, req walbalancer.TransferChannelsRequest) error {
+		received = req
+		calls++
+		return nil
+	}).Build()
+	defer transfer.UnPatch()
 
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
-	// test source node not healthy
-	resp, err = suite.server.TransferChannel(ctx, &querypb.TransferChannelRequest{
-		SourceNodeID: 1,
-	})
-	suite.NoError(err)
-	suite.False(merr.Ok(resp))
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   1,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
+	req := &querypb.TransferChannelRequest{SourceNodeID: 11, TargetNodeID: 12, ChannelName: "p1_100v0"}
+	resp, err := suite.server.TransferChannel(ctx, req)
+	suite.NoError(merr.CheckRPCCall(resp, err))
+	suite.Equal(walbalancer.TransferChannelsRequest{SourceNodeID: 11, TargetNodeID: 12, ChannelName: "p1_100v0"}, received)
 
-	collectionID := int64(1)
-	partitionID := int64(1)
-	replicaID := int64(1)
-	nodes := []int64{1, 2, 3, 4}
-	replica := utils.CreateTestReplica(replicaID, collectionID, nodes)
-	suite.meta.Put(ctx, replica)
-	collection := utils.CreateTestCollection(collectionID, 1)
-	partition := utils.CreateTestPartition(partitionID, collectionID)
-	suite.meta.PutCollection(ctx, collection, partition)
-	segmentIDs := []int64{1, 2, 3, 4}
-	channelNames := []string{"channel-1", "channel-2", "channel-3", "channel-4"}
+	req.TransferAll, req.ToAllNodes = true, true
+	resp, err = suite.server.TransferChannel(ctx, req)
+	suite.NoError(merr.CheckRPCCall(resp, err))
+	suite.Equal(walbalancer.TransferChannelsRequest{SourceNodeID: 11}, received)
+	suite.Equal(2, calls)
 
-	// test target node not healthy
-	resp, err = suite.server.TransferChannel(ctx, &querypb.TransferChannelRequest{
-		SourceNodeID: nodes[0],
-		TargetNodeID: nodes[1],
-	})
-	suite.NoError(err)
-	suite.False(merr.Ok(resp))
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   2,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
+	req.CopyMode = true
+	resp, err = suite.server.TransferChannel(ctx, req)
+	suite.ErrorIs(merr.CheckRPCCall(resp, err), merr.ErrServiceUnimplemented)
+	req.CopyMode = false
+	req.SourceNodeID = 0
+	resp, err = suite.server.TransferChannel(ctx, req)
+	suite.ErrorIs(merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+	req.SourceNodeID = 11
+	req.ToAllNodes = false
+	req.TargetNodeID = 11
+	resp, err = suite.server.TransferChannel(ctx, req)
+	suite.ErrorIs(merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+	req.TargetNodeID = 12
+	req.TransferAll = false
+	req.ChannelName = ""
+	resp, err = suite.server.TransferChannel(ctx, req)
+	suite.ErrorIs(merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+	suite.Equal(2, calls)
 
-	segments := []*datapb.SegmentInfo{
-		{
-			ID:            segmentIDs[0],
-			CollectionID:  collectionID,
-			PartitionID:   partitionID,
-			InsertChannel: channelNames[0],
-			NumOfRows:     1,
-		},
-		{
-			ID:            segmentIDs[1],
-			CollectionID:  collectionID,
-			PartitionID:   partitionID,
-			InsertChannel: channelNames[1],
-			NumOfRows:     1,
-		},
-		{
-			ID:            segmentIDs[2],
-			CollectionID:  collectionID,
-			PartitionID:   partitionID,
-			InsertChannel: channelNames[2],
-			NumOfRows:     1,
-		},
-		{
-			ID:            segmentIDs[3],
-			CollectionID:  collectionID,
-			PartitionID:   partitionID,
-			InsertChannel: channelNames[3],
-			NumOfRows:     1,
-		},
-	}
+	req.TransferAll = true
+	transfer.UnPatch()
+	transfer = mockey.Mock((*mock_balancer.MockBalancer).TransferChannels).Return(merr.ErrServiceUnavailable).Build()
+	defer transfer.UnPatch()
+	resp, err = suite.server.TransferChannel(ctx, req)
+	suite.ErrorIs(merr.CheckRPCCall(resp, err), merr.ErrServiceUnavailable)
 
-	channels := []*datapb.VchannelInfo{
-		{
-			CollectionID: collectionID,
-			ChannelName:  channelNames[0],
-		},
-		{
-			CollectionID: collectionID,
-			ChannelName:  channelNames[1],
-		},
-		{
-			CollectionID: collectionID,
-			ChannelName:  channelNames[2],
-		},
-		{
-			CollectionID: collectionID,
-			ChannelName:  channelNames[3],
-		},
-	}
-	segmentInfos := lo.Map(segments, func(segment *datapb.SegmentInfo, _ int) *meta.Segment {
-		return &meta.Segment{
-			SegmentInfo: segment,
-			Node:        nodes[0],
-		}
-	})
-	suite.dist.SegmentDistManager.Update(1, segmentInfos...)
-	chanenlInfos := lo.Map(channels, func(channel *datapb.VchannelInfo, _ int) *meta.DmChannel {
-		return &meta.DmChannel{
-			VchannelInfo: channel,
-			Node:         nodes[0],
-		}
-	})
-
-	// test channel not exist in node
-	resp, err = suite.server.TransferChannel(ctx, &querypb.TransferChannelRequest{
-		SourceNodeID: nodes[0],
-		TargetNodeID: nodes[1],
-		ChannelName:  channelNames[0],
-	})
-	suite.NoError(err)
-	suite.False(merr.Ok(resp))
-
-	suite.dist.ChannelDistManager.Update(1, chanenlInfos[0])
-
-	// test channel not exist in current target, expect no task assign and success
-	assign.InitGlobalAssignPolicyFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetMgr)
-	balance.InitGlobalBalancerFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.targetMgr)
-	resp, err = suite.server.TransferChannel(ctx, &querypb.TransferChannelRequest{
-		SourceNodeID: nodes[0],
-		TargetNodeID: nodes[1],
-		ChannelName:  channelNames[0],
-	})
-	suite.NoError(err)
-	suite.True(merr.Ok(resp))
-
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(channels, segments, nil)
-	suite.targetMgr.UpdateCollectionNextTarget(ctx, 1)
-	suite.targetMgr.UpdateCollectionCurrentTarget(ctx, 1)
-	suite.dist.SegmentDistManager.Update(1, segmentInfos...)
-	suite.dist.ChannelDistManager.Update(1, chanenlInfos...)
-
-	for _, node := range nodes {
-		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-			NodeID:   node,
-			Address:  "localhost",
-			Hostname: "localhost",
-		}))
-		suite.meta.HandleNodeUp(ctx, node)
-	}
-
-	// test transfer channel success, expect generate 1 balance channel task
-	suite.taskScheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
-		actions := t.Actions()
-		suite.Equal(len(actions), 2)
-		suite.Equal(actions[0].Node(), int64(2))
-		return nil
-	})
-	resp, err = suite.server.TransferChannel(ctx, &querypb.TransferChannelRequest{
-		SourceNodeID: nodes[0],
-		TargetNodeID: nodes[1],
-		ChannelName:  channelNames[0],
-	})
-	suite.NoError(err)
-	suite.True(merr.Ok(resp))
-
-	// test copy mode, expect generate 1 load segment task
-	suite.taskScheduler.ExpectedCalls = nil
-	suite.taskScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
-	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
-	suite.taskScheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
-		actions := t.Actions()
-		suite.Equal(len(actions), 1)
-		suite.Equal(actions[0].Node(), int64(2))
-		return nil
-	})
-	resp, err = suite.server.TransferChannel(ctx, &querypb.TransferChannelRequest{
-		SourceNodeID: nodes[0],
-		TargetNodeID: nodes[1],
-		ChannelName:  channelNames[0],
-		CopyMode:     true,
-	})
-	suite.NoError(err)
-	suite.True(merr.Ok(resp))
-
-	// test transfer all channels, expect generate 4 load segment task
-	suite.taskScheduler.ExpectedCalls = nil
-	suite.taskScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
-	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
-	counter := atomic.NewInt64(0)
-	suite.taskScheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
-		actions := t.Actions()
-		suite.Equal(len(actions), 2)
-		suite.Equal(actions[0].Node(), int64(2))
-		counter.Inc()
-		return nil
-	})
-	resp, err = suite.server.TransferChannel(ctx, &querypb.TransferChannelRequest{
-		SourceNodeID: nodes[0],
-		TargetNodeID: nodes[1],
-		TransferAll:  true,
-	})
-	suite.NoError(err)
-	suite.True(merr.Ok(resp))
-	suite.Equal(counter.Load(), int64(4))
-
-	// test transfer all channels to all nodes, expect generate 4 load segment task
-	suite.taskScheduler.ExpectedCalls = nil
-	suite.taskScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
-	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
-	counter = atomic.NewInt64(0)
-	nodeSet := typeutil.NewUniqueSet()
-	suite.taskScheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
-		actions := t.Actions()
-		suite.Equal(len(actions), 2)
-		nodeSet.Insert(actions[0].Node())
-		counter.Inc()
-		return nil
-	})
-	resp, err = suite.server.TransferChannel(ctx, &querypb.TransferChannelRequest{
-		SourceNodeID: nodes[0],
-		TransferAll:  true,
-		ToAllNodes:   true,
-	})
-	suite.NoError(err)
-	suite.True(merr.Ok(resp))
-	suite.Equal(counter.Load(), int64(4))
-	suite.Len(nodeSet.Collect(), 3)
-
-	// test transfer channel idempotent
-	suite.taskScheduler.ExpectedCalls = nil
-	suite.taskScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
-	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
-	counter = atomic.NewInt64(0)
-	taskIDSet := typeutil.NewUniqueSet()
-	suite.taskScheduler.EXPECT().Add(mock.Anything).RunAndReturn(func(t task.Task) error {
-		if taskIDSet.Contain(t.ID()) {
-			return errors.New("duplicate task")
-		}
-		return nil
-	})
-
-	resp, err = suite.server.TransferChannel(ctx, &querypb.TransferChannelRequest{
-		SourceNodeID: nodes[0],
-		TransferAll:  true,
-		ToAllNodes:   true,
-	})
-	suite.NoError(err)
-	suite.True(merr.Ok(resp))
-	resp, err = suite.server.TransferChannel(ctx, &querypb.TransferChannelRequest{
-		SourceNodeID: nodes[0],
-		TransferAll:  true,
-		ToAllNodes:   true,
-	})
-	suite.NoError(err)
-	suite.True(merr.Ok(resp))
+	suite.server.UpdateStateCode(commonpb.StateCode_Abnormal)
+	resp, err = suite.server.TransferChannel(ctx, req)
+	suite.ErrorIs(merr.CheckRPCCall(resp, err), merr.ErrServiceNotReady)
 }
 
 func TestOpsService(t *testing.T) {

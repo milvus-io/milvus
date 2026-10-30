@@ -15,7 +15,3 @@ import (
 func (coord *MixCoordMock) EnsureCollectionReady(ctx context.Context, req *querypb.EnsureCollectionReadyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	panic("patch QueryView client method with mockey")
 }
-
-func (coord *MixCoordMock) WatchQueryViewSegmentLoadInfo(ctx context.Context, opts ...grpc.CallOption) (querypb.QueryCoord_WatchQueryViewSegmentLoadInfoClient, error) {
-	panic("patch QueryView client method with mockey")
-}

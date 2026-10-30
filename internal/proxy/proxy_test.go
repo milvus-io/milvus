@@ -59,8 +59,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	querynodehandler "github.com/milvus-io/milvus/internal/querynodev2/client/handler"
 	"github.com/milvus-io/milvus/internal/storage"
-	streamingcoordclient "github.com/milvus-io/milvus/internal/streamingcoord/client"
-	streamingnodehandler "github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
@@ -1032,13 +1030,12 @@ func TestProxy(t *testing.T) {
 
 	// This test constructs the Proxy component directly, bypassing the gRPC
 	// server bootstrap which normally installs the QueryView client.
-	viewCoord := streamingcoordclient.NewClient(etcdcli)
-	viewSN := streamingnodehandler.NewHandlerClient(viewCoord.Assignment())
+	viewSN := streaming.WAL().QueryViewClient()
 	viewQN := querynodehandler.NewClient(etcdcli)
 	viewResolver := resolver.NewShardResolverImpl(proxy)
 	proxy.SetViewQueryClient(queryclient.NewLegacyViewQueryClient(
-		queryclient.ViewQueryClientConfig{}, viewSN.QueryViewClient(),
-		queryclient.NewCompositeViewQueryServiceClient(viewSN.QueryViewClient(), viewQN.QueryViewClient()), viewResolver))
+		queryclient.ViewQueryClientConfig{LoadInfoClient: rootCoordClient}, viewSN,
+		queryclient.NewCompositeViewQueryServiceClient(viewSN, viewQN.QueryViewClient()), viewResolver))
 
 	err = proxy.Start()
 	assert.NoError(t, err)
@@ -1049,10 +1046,9 @@ func TestProxy(t *testing.T) {
 	assert.NoError(t, err)
 	mlog.Info(context.TODO(), "Register proxy done")
 	defer func() {
+		proxy.ViewQueryClient().Close()
 		viewResolver.Close()
-		viewSN.Close()
 		viewQN.Close()
-		viewCoord.Close()
 		a := []any{mix, qn, dn, sn, proxy}
 		fmt.Println(len(a))
 		// HINT: the order of stopping service refers to the `roles.go` file

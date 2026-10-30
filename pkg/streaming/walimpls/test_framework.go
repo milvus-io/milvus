@@ -6,6 +6,7 @@ package walimpls
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/rand"
 	"sort"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -92,7 +94,8 @@ type testOneWALImplsFramework struct {
 }
 
 func (f *testOneWALImplsFramework) Run() {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(f.t.Context(), 3*time.Minute)
+	defer cancel()
 
 	// test a read write loop
 	for ; f.term <= 3; f.term++ {
@@ -110,7 +113,10 @@ func (f *testOneWALImplsFramework) Run() {
 		assert.Equal(f.t, pChannel.Name, w.Channel().Name)
 		assert.Equal(f.t, pChannel.Term, w.Channel().Term)
 
-		f.testReadAndWrite(ctx, w)
+		if !f.testReadAndWrite(ctx, w) {
+			w.Close()
+			return
+		}
 		// close the wal
 		w.Close()
 
@@ -159,33 +165,17 @@ func (f *testOneWALImplsFramework) testTruncate(ctx context.Context, w WALImpls)
 	assert.NoError(f.t, err)
 }
 
-func (f *testOneWALImplsFramework) testReadAndWrite(ctx context.Context, w WALImpls) {
-	// Test read and write.
-	wg := sync.WaitGroup{}
-	wg.Add(3)
-
-	var newWritten []message.ImmutableMessage
-	var read1, read2 []message.ImmutableMessage
-	go func() {
-		defer wg.Done()
-		var err error
-		newWritten, err = f.testAppend(ctx, w)
-		assert.NoError(f.t, err)
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		read1, err = f.testRead(ctx, w, "scanner1")
-		assert.NoError(f.t, err)
-	}()
-	go func() {
-		defer wg.Done()
-		var err error
-		read2, err = f.testRead(ctx, w, "scanner2")
-		assert.NoError(f.t, err)
-	}()
-
-	wg.Wait()
+func (f *testOneWALImplsFramework) testReadAndWrite(ctx context.Context, w WALImpls) bool {
+	// A failed append cannot produce the reader's expected message count. Cancel
+	// both readers immediately instead of waiting for the package test timeout.
+	group, runCtx := errgroup.WithContext(ctx)
+	var newWritten, read1, read2 []message.ImmutableMessage
+	group.Go(func() (err error) { newWritten, err = f.testAppend(runCtx, w); return })
+	group.Go(func() (err error) { read1, err = f.testRead(runCtx, w, "scanner1"); return })
+	group.Go(func() (err error) { read2, err = f.testRead(runCtx, w, "scanner2"); return })
+	if !assert.NoError(f.t, group.Wait()) {
+		return false
+	}
 	f.testReadWithFastClose(ctx, w)
 
 	f.assertSortedMessageList(read1)
@@ -205,9 +195,19 @@ func (f *testOneWALImplsFramework) testReadAndWrite(ctx context.Context, w WALIm
 	})
 	assert.NoError(f.t, err)
 	for i := readFromIdx; i < len(f.written); i++ {
-		msg, ok := <-s.Chan()
-		assert.NotNil(f.t, msg)
-		assert.True(f.t, ok)
+		var msg message.ImmutableMessage
+		var ok bool
+		select {
+		case msg, ok = <-s.Chan():
+		case <-ctx.Done():
+			assert.NoError(f.t, ctx.Err())
+			s.Close()
+			return false
+		}
+		if !assert.True(f.t, ok) || !assert.NotNil(f.t, msg) {
+			s.Close()
+			return false
+		}
 		assert.True(f.t, msg.MessageID().EQ(f.written[i].MessageID()))
 	}
 	s.Close()
@@ -219,9 +219,19 @@ func (f *testOneWALImplsFramework) testReadAndWrite(ctx context.Context, w WALIm
 	})
 	assert.NoError(f.t, err)
 	for i := readFromIdx + 1; i < len(f.written); i++ {
-		msg, ok := <-s.Chan()
-		assert.NotNil(f.t, msg)
-		assert.True(f.t, ok)
+		var msg message.ImmutableMessage
+		var ok bool
+		select {
+		case msg, ok = <-s.Chan():
+		case <-ctx.Done():
+			assert.NoError(f.t, ctx.Err())
+			s.Close()
+			return false
+		}
+		if !assert.True(f.t, ok) || !assert.NotNil(f.t, msg) {
+			s.Close()
+			return false
+		}
 		assert.True(f.t, msg.MessageID().EQ(f.written[i].MessageID()))
 	}
 	s.Close()
@@ -239,6 +249,7 @@ func (f *testOneWALImplsFramework) testReadAndWrite(ctx context.Context, w WALIm
 	case <-timeoutCh:
 	}
 	s.Close()
+	return true
 }
 
 func (f *testOneWALImplsFramework) assertSortedMessageList(msgs []message.ImmutableMessage) {
@@ -267,27 +278,24 @@ func (f *testOneWALImplsFramework) assertEqualMessageList(msgs1 []message.Immuta
 
 func (f *testOneWALImplsFramework) testAppend(ctx context.Context, w WALImpls) ([]message.ImmutableMessage, error) {
 	ids := make([]message.ImmutableMessage, f.messageCount)
-	sem := make(chan struct{}, 5)
-	var wg sync.WaitGroup
+	group, appendCtx := errgroup.WithContext(ctx)
+	group.SetLimit(5)
 	for i := 0; i < f.messageCount-1; i++ {
-		sem <- struct{}{}
-		wg.Add(1)
-		go func(i int) {
-			defer func() { <-sem; wg.Done() }()
-			// ...rocksmq has a dirty implement of properties,
-			// without commonpb.MsgHeader, it can not work.
-			properties := map[string]string{
-				"id":    fmt.Sprintf("%d", i),
-				"const": "t",
-			}
+		group.Go(func() error {
+			properties := map[string]string{"id": fmt.Sprintf("%d", i), "const": "t"}
 			msg := message.CreateTestEmptyInsertMesage(int64(i), properties)
-			id, err := w.Append(ctx, msg)
-			assert.NoError(f.t, err)
+			id, err := w.Append(appendCtx, msg)
+			if err != nil {
+				return err
+			}
 			assert.NotNil(f.t, id)
 			ids[i] = msg.IntoImmutableMessage(id)
-		}(i)
+			return nil
+		})
 	}
-	wg.Wait()
+	if err := group.Wait(); err != nil {
+		return nil, err
+	}
 
 	properties := map[string]string{
 		"id":    fmt.Sprintf("%d", f.messageCount-1),
@@ -304,10 +312,15 @@ func (f *testOneWALImplsFramework) testAppend(ctx context.Context, w WALImpls) (
 		}).
 		WithVChannel("v1").
 		WithProperties(properties).BuildMutable()
-	assert.NoError(f.t, err)
+	if err != nil {
+		return nil, err
+	}
 
 	id, err := w.Append(ctx, msg)
-	assert.NoError(f.t, err)
+	if err != nil {
+		return nil, err
+	}
+	assert.NotNil(f.t, id)
 	ids[f.messageCount-1] = msg.IntoImmutableMessage(id)
 	return ids, nil
 }
@@ -337,16 +350,25 @@ func (f *testOneWALImplsFramework) testRead(ctx context.Context, w ROWALImpls, n
 		DeliverPolicy:       options.DeliverPolicyAll(),
 		ReadAheadBufferSize: 128,
 	})
-	assert.NoError(f.t, err)
+	if err != nil {
+		return nil, err
+	}
 	assert.Equal(f.t, name, s.Name())
 	defer s.Close()
 
 	expectedCnt := f.messageCount + len(f.written)
 	msgs := make([]message.ImmutableMessage, 0, expectedCnt)
 	for {
-		msg, ok := <-s.Chan()
-		assert.NotNil(f.t, msg)
-		assert.True(f.t, ok)
+		var msg message.ImmutableMessage
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case received, ok := <-s.Chan():
+			if !ok {
+				return nil, io.ErrUnexpectedEOF
+			}
+			msg = received
+		}
 		msgs = append(msgs, msg)
 		if msg.MessageType() == message.MessageTypeTimeTick {
 			termString, ok := msg.Properties().Get("term")

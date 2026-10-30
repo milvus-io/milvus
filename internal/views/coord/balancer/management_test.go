@@ -6,6 +6,7 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
@@ -37,12 +38,24 @@ func TestManualBalance(t *testing.T) {
 	b := NewDefaultBalancer(c, &coordview.ShardViewRegistry{}, policy, nil)
 	manager := &coordview.ShardViewManager{}
 	var accepted []*viewpb.QueryViewOfShard
+	source := qviews.NewQueryViewAtCoordBuilder(10, syntheticDataView(cfg, dv, c.GetCollection(1).DataView().Shard(id.VChannel)), id.VChannel).
+		SetAssignments(map[int64]map[int64][]int64{1: {100: {101, 102}}}).SetSchemaVersion(7).SetLoadInfoVersion(1)
 	for _, patch := range []*mockey.Mocker{
 		mockey.Mock((*coordview.ShardViewRegistry).Get).Return(manager).Build(),
-		mockey.Mock((*coordview.ShardViewManager).AddPreparing).To(func(_ *coordview.ShardViewManager, _ context.Context, builder *qviews.QueryViewAtCoordBuilder) error {
+		mockey.Mock((*coordview.ShardViewRegistry).NodeShards).Return([]qviews.ShardID{id}).Build(),
+		mockey.Mock((*coordview.ShardViewRegistry).CollectionShards).Return([]qviews.ShardID{id}).Build(),
+		mockey.Mock((*coordview.ShardViewManager).PlacementBuilder).To(func(*coordview.ShardViewManager) *qviews.QueryViewAtCoordBuilder {
+			return qviews.NewQueryViewAtCoordBuilderFromView(source.Build())
+		}).Build(),
+		mockey.Mock((*coordview.ShardViewManager).AddManualPreparing).To(func(_ *coordview.ShardViewManager, _ context.Context, builder *qviews.QueryViewAtCoordBuilder, _ qviews.QueryViewVersion) (*coordview.Preparation, error) {
 			builder.SetQueryVersion(2)
 			accepted = append(accepted, builder.Build())
-			return nil
+			return &coordview.Preparation{Version: qviews.FromProtoQueryViewVersion(builder.Build().GetMeta().GetVersion())}, nil
+		}).Build(),
+		mockey.Mock((*coordview.Preparation).Wait).To(func(_ *coordview.Preparation, _ context.Context) coordview.PreparationResult {
+			require.True(t, b.reconcileMu.TryLock(), "manual waits must not block reconciliation")
+			b.reconcileMu.Unlock()
+			return coordview.PreparationResult{State: qviews.QueryViewStateUp}
 		}).Build(),
 	} {
 		t.Cleanup(func() { patch.UnPatch() })
@@ -52,25 +65,31 @@ func TestManualBalance(t *testing.T) {
 		source                 int64
 		destinations, segments []int64
 		err                    error
+		message                string
 	}{
-		{"unknown source", 99, []int64{2}, []int64{101}, merr.ErrNodeNotFound},
-		{"unknown destination", 1, []int64{99}, []int64{101}, merr.ErrNodeNotFound},
-		{"one missing segment rejects whole request", 1, []int64{2}, []int64{101, 999}, merr.ErrSegmentNotFound},
-		{"all missing segments", 1, []int64{2}, []int64{998, 999}, merr.ErrSegmentNotFound},
-		{"unloaded partition", 1, []int64{2}, []int64{201}, merr.ErrSegmentNotFound},
-		{"source only", 1, []int64{1}, []int64{101}, merr.ErrParameterInvalid},
-		{"missing segment before source-only destination", 1, []int64{1}, []int64{999}, merr.ErrSegmentNotFound},
+		{"unknown source", 99, []int64{2}, []int64{101}, merr.ErrNodeNotFound, "source node not found in any replica"},
+		{"unknown destination", 1, []int64{99}, []int64{101}, merr.ErrNodeNotFound, "destination node not found in the same replica"},
+		{"one missing segment rejects whole request", 1, []int64{2}, []int64{101, 999}, merr.ErrSegmentNotFound, "segment not found in source node"},
+		{"all missing segments", 1, []int64{2}, []int64{998, 999}, merr.ErrSegmentNotFound, "segment not found in source node"},
+		{"unloaded partition", 1, []int64{2}, []int64{201}, merr.ErrSegmentNotFound, "segment not found in source node"},
+		{"source only", 1, []int64{1}, []int64{101}, merr.ErrParameterInvalid, "no destination query node other than source"},
+		{"missing segment before source-only destination", 1, []int64{1}, []int64{999}, merr.ErrSegmentNotFound, "segment not found in source node"},
+		{"mixed selection before source-only destination", 1, []int64{1}, []int64{101, 999}, merr.ErrSegmentNotFound, "segment not found in source node"},
+		{"mixed selection before invalid destination", 1, []int64{99}, []int64{101, 999}, merr.ErrSegmentNotFound, "segment not found in source node"},
+		{"mixed selection with automatic destination", 1, nil, []int64{101, 999}, merr.ErrSegmentNotFound, "segment not found in source node"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := b.MoveSegments(t.Context(), cfg, tc.source, tc.destinations, tc.segments)
+			_, err := b.MoveSegments(t.Context(), 1, tc.source, tc.destinations, tc.segments)
 			require.ErrorIs(t, err, tc.err)
+			require.ErrorContains(t, err, tc.message)
+			require.Equal(t, map[int64]int64{101: 1, 102: 1}, flattenAssignments(source.Build()))
 			require.Empty(t, accepted)
 		})
 	}
-	moves, err := b.MoveSegments(t.Context(), cfg, 1, []int64{2}, []int64{101})
+	moves, err := b.MoveSegments(t.Context(), 1, 1, []int64{2}, []int64{101})
 	require.NoError(t, err)
 	require.Len(t, accepted, 1)
-	require.Equal(t, map[int64]int64{101: 2}, moves[id].Destinations)
+	require.Equal(t, qviews.QueryViewStateUp, moves[id].State)
 	require.Equal(t, int64(2), moves[id].Version.QueryVersion)
 	require.Equal(t, map[int64]int64{101: 2, 102: 1}, flattenAssignments(accepted[0]))
 	require.Equal(t, int32(7), accepted[0].GetMeta().GetSchemaVersion())
@@ -83,22 +102,150 @@ func TestManualBalance(t *testing.T) {
 		}
 	}
 	accepted = nil
-	_, err = b.MoveSegments(t.Context(), cfg.Clone(), 1, []int64{2}, []int64{101})
-	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
-	require.Empty(t, accepted)
-	moves, err = b.MoveSegments(t.Context(), cfg, 1, nil, nil)
+	_, err = b.MoveSegments(t.Context(), 1, 1, []int64{2}, []int64{101, 102})
 	require.NoError(t, err)
-	require.Equal(t, map[int64]int64{101: 2, 102: 2}, moves[id].Destinations)
+	require.Len(t, accepted, 1)
+	require.Equal(t, map[int64]int64{101: 2, 102: 2}, flattenAssignments(accepted[0]))
 	accepted = nil
-	preparing := *stats
-	preparing.PreparingVersion = &qviews.QueryViewVersion{DataVersion: dv, QueryVersion: 2}
-	c.PublishShard(id, &preparing)
-	_, err = b.MoveSegments(t.Context(), cfg, 1, []int64{2}, []int64{101})
-	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	_, err = b.MoveSegments(t.Context(), 1, 1, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, map[int64]int64{101: 2, 102: 2}, flattenAssignments(accepted[0]))
+	accepted = nil
+	results, err := b.ManualPlace(t.Context(), PlacementScope{NodeID: 1}, func(_ map[qviews.ShardID]*qviews.QueryViewAtCoordBuilder) error { return nil })
+	require.NoError(t, err)
+	require.False(t, results[id].Changed)
 	require.Empty(t, accepted)
+	results, err = b.ManualPlace(t.Context(), PlacementScope{NodeID: 1}, func(builders map[qviews.ShardID]*qviews.QueryViewAtCoordBuilder) error {
+		delete(builders, id)
+		return nil
+	})
+	require.NoError(t, err)
+	require.Empty(t, results)
+	require.Empty(t, accepted)
+	rejected := merr.WrapErrParameterInvalidMsg("operation rejected the selected placement")
+	_, err = b.ManualPlace(t.Context(), PlacementScope{NodeID: 1}, func(builders map[qviews.ShardID]*qviews.QueryViewAtCoordBuilder) error {
+		builders[id].SetAssignments(map[int64]map[int64][]int64{2: {100: {101, 102}}})
+		return rejected
+	})
+	require.Equal(t, rejected, err)
+	require.Empty(t, accepted)
+	for name, modify := range map[string]func(*viewpb.QueryViewOfShard){
+		"removed segment":   func(v *viewpb.QueryViewOfShard) { v.QueryNode[0].Partitions[0].SegmentIds = []int64{101} },
+		"duplicate segment": func(v *viewpb.QueryViewOfShard) { v.QueryNode[0].Partitions[0].SegmentIds = []int64{101, 101, 102} },
+		"new segment": func(v *viewpb.QueryViewOfShard) {
+			v.QueryNode[0].Partitions[0].SegmentIds = append(v.QueryNode[0].Partitions[0].SegmentIds, 999)
+		},
+		"changed partition":        func(v *viewpb.QueryViewOfShard) { v.QueryNode[0].Partitions[0].PartitionId = 200 },
+		"changed manifest":         func(v *viewpb.QueryViewOfShard) { v.QueryNode[0].Partitions[0].SegmentManifestVersions[0]++ },
+		"changed data version":     func(v *viewpb.QueryViewOfShard) { v.Meta.Version.DataVersion.StreamingVersion++ },
+		"changed schema":           func(v *viewpb.QueryViewOfShard) { v.Meta.SchemaVersion++ },
+		"changed load config":      func(v *viewpb.QueryViewOfShard) { v.Meta.LoadInfoVersion++ },
+		"changed transform cursor": func(v *viewpb.QueryViewOfShard) { v.Meta.TransformStartAfterTimetick++ },
+		"changed partition stats": func(v *viewpb.QueryViewOfShard) {
+			v.StreamingNode.PartitionStats = []*viewpb.ClusteredPartitionStats{{PartitionId: 100, Version: 42}}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := b.ManualPlace(t.Context(), PlacementScope{NodeID: 1}, func(builders map[qviews.ShardID]*qviews.QueryViewAtCoordBuilder) error {
+				modified := proto.Clone(builders[id].Build()).(*viewpb.QueryViewOfShard)
+				modify(modified)
+				builders[id] = qviews.NewQueryViewAtCoordBuilderFromView(modified)
+				return nil
+			})
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
+			require.Empty(t, accepted, "invalid data must be rejected before publishing")
+		})
+	}
 	c.PublishNode(2, &NodeInfo{NodeID: 2, Alive: true, Stopping: true, ResourceGroup: "rg1"})
-	_, err = b.MoveSegments(t.Context(), cfg, 1, []int64{2}, []int64{101})
+	_, err = b.MoveSegments(t.Context(), 1, 1, []int64{2}, []int64{101})
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+
+	// A single-node replica has no automatic destination. Missing source data
+	// must still take precedence, including when the request also selects data
+	// that is present. Neither failure may publish a partial migration.
+	policy.Plan(c, []qviews.ShardID{id})
+	pl, err := b.Placement(t.Context(), 1)
+	require.NoError(t, err)
+	require.Equal(t, []int64{1}, pl.Nodes[id.ReplicaID])
+	_, err = b.MoveSegments(t.Context(), 1, 1, nil, []int64{101, 999})
+	require.ErrorIs(t, err, merr.ErrSegmentNotFound)
+	require.ErrorContains(t, err, "segment not found in source node")
+	require.Empty(t, accepted)
+	_, err = b.MoveSegments(t.Context(), 1, 1, nil, []int64{101})
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.Empty(t, accepted)
+}
+
+func TestManualPlacePartialSubmission(t *testing.T) {
+	c := newTestCache(cfgFor(1, 10, nil, nil))
+	c.PublishLoadConfig(2, cfgFor(2, 20, nil, nil), 1)
+	ids := []qviews.ShardID{cacheShard(1, 10), cacheShard(2, 20)}
+	managers := make(map[qviews.ShardID]*coordview.ShardViewManager)
+	sources := make(map[*coordview.ShardViewManager]*qviews.QueryViewAtCoordBuilder)
+	for i, id := range ids {
+		collection := int64(i + 1)
+		data := cacheData(collection, id.VChannel, 100)
+		c.PublishDataView(collection, data)
+		c.PublishShard(id, upStats(data.DataVersion, placement(collection*1000, 1, 1, coordview.SegmentStateUp)))
+		manager := &coordview.ShardViewManager{}
+		managers[id] = manager
+		sources[manager] = qviews.NewQueryViewAtCoordBuilder(id.ReplicaID, syntheticDataView(c.GetCollection(collection).LoadConfig(), data.DataVersion, data.Shard(id.VChannel)), id.VChannel).
+			SetAssignments(map[int64]map[int64][]int64{1: {1: {collection * 1000}}}).SetLoadInfoVersion(1)
+	}
+	publishTestNodes(c, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"}, &NodeInfo{NodeID: 2, Alive: true, ResourceGroup: "rg1"})
+	c.MarkReady()
+	policy := NewDefaultBalancePolicy()
+	policy.Plan(c, ids)
+	b := NewDefaultBalancer(c, &coordview.ShardViewRegistry{}, policy, nil)
+	accepted := 0
+	for _, patch := range []*mockey.Mocker{
+		mockey.Mock((*coordview.ShardViewRegistry).NodeShards).Return(ids).Build(),
+		mockey.Mock((*coordview.ShardViewRegistry).Get).To(func(_ *coordview.ShardViewRegistry, id qviews.ShardID) *coordview.ShardViewManager {
+			return managers[id]
+		}).Build(),
+		mockey.Mock((*coordview.ShardViewManager).PlacementBuilder).To(func(m *coordview.ShardViewManager) *qviews.QueryViewAtCoordBuilder {
+			return qviews.NewQueryViewAtCoordBuilderFromView(sources[m].Build())
+		}).Build(),
+		mockey.Mock((*coordview.ShardViewManager).AddManualPreparing).To(func(m *coordview.ShardViewManager, _ context.Context, builder *qviews.QueryViewAtCoordBuilder, _ qviews.QueryViewVersion) (*coordview.Preparation, error) {
+			if m == managers[ids[1]] {
+				return nil, merr.WrapErrServiceUnavailableMsg("concurrent release")
+			}
+			accepted++
+			return &coordview.Preparation{Version: qviews.QueryViewVersion{DataVersion: builder.DataVersion(), QueryVersion: 2}}, nil
+		}).Build(),
+		mockey.Mock((*coordview.Preparation).Wait).Return(coordview.PreparationResult{State: qviews.QueryViewStateUp}).Build(),
+	} {
+		t.Cleanup(func() { patch.UnPatch() })
+	}
+	_, err := b.ManualPlace(t.Context(), PlacementScope{NodeID: 1}, func(builders map[qviews.ShardID]*qviews.QueryViewAtCoordBuilder) error {
+		builders[ids[0]].SetAssignments(map[int64]map[int64][]int64{2: {1: {1000}}})
+		builders[ids[1]].SetAssignments(nil)
+		return nil
+	})
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.Zero(t, accepted, "validate all changed shards before the first submission")
+	results, err := b.MoveSegments(t.Context(), 0, 1, []int64{2}, nil)
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.Equal(t, 1, accepted)
+	require.Len(t, results, 2)
+	require.True(t, results[ids[0]].Changed)
+	require.Equal(t, qviews.QueryViewStateUp, results[ids[0]].State)
+	require.NoError(t, results[ids[0]].Err)
+	require.False(t, results[ids[1]].Changed)
+	require.ErrorIs(t, results[ids[1]].Err, merr.ErrServiceUnavailable)
+	// The callback can discard a shard whose submission would fail. ManualPlace
+	// does not add a LoadConfig policy gate to these captured snapshots.
+	accepted = 0
+	results, err = b.ManualPlace(t.Context(), PlacementScope{NodeID: 1}, func(builders map[qviews.ShardID]*qviews.QueryViewAtCoordBuilder) error {
+		delete(builders, ids[1])
+		builders[ids[0]].SetAssignments(map[int64]map[int64][]int64{2: {1: {1000}}})
+		c.PublishLoadConfig(1, nil, 2)
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, accepted)
+	require.Len(t, results, 1)
+	require.Equal(t, qviews.QueryViewStateUp, results[ids[0]].State)
 }
 
 func TestManualBalancePreservesReplicaIsolation(t *testing.T) {
@@ -111,12 +258,57 @@ func TestManualBalancePreservesReplicaIsolation(t *testing.T) {
 	c.MarkReady()
 	policy := NewDefaultBalancePolicy()
 	policy.Plan(c, []qviews.ShardID{id})
-	b := NewDefaultBalancer(c, nil, policy, nil)
+	b := NewDefaultBalancer(c, &coordview.ShardViewRegistry{}, policy, nil)
 	pl, err := b.Placement(t.Context(), 1)
 	require.NoError(t, err)
 	require.Len(t, pl.Nodes[10], 1)
 	require.Len(t, pl.Nodes[11], 1)
 	require.NotEqual(t, pl.Nodes[10], pl.Nodes[11])
-	_, err = b.MoveSegments(t.Context(), cfg, pl.Nodes[10][0], pl.Nodes[11], nil)
+	before := qviews.NewQueryViewAtCoordBuilder(10, syntheticDataView(cfg, qviews.DataVersion{StreamingVersion: 1}, c.GetCollection(1).DataView().Shard(id.VChannel)), id.VChannel).
+		SetAssignments(map[int64]map[int64][]int64{pl.Nodes[10][0]: {1: {100}}}).Build()
+	manager := &coordview.ShardViewManager{}
+	for _, patch := range []*mockey.Mocker{
+		mockey.Mock((*coordview.ShardViewRegistry).NodeShards).Return([]qviews.ShardID{id}).Build(),
+		mockey.Mock((*coordview.ShardViewRegistry).CollectionShards).Return([]qviews.ShardID{id}).Build(),
+		mockey.Mock((*coordview.ShardViewRegistry).Get).Return(manager).Build(),
+		mockey.Mock((*coordview.ShardViewManager).PlacementBuilder).To(func(*coordview.ShardViewManager) *qviews.QueryViewAtCoordBuilder {
+			return qviews.NewQueryViewAtCoordBuilderFromView(before)
+		}).Build(),
+	} {
+		t.Cleanup(func() { patch.UnPatch() })
+	}
+	_, err = b.MoveSegments(t.Context(), 1, pl.Nodes[10][0], pl.Nodes[11], []int64{100})
 	require.ErrorIs(t, err, merr.ErrNodeNotFound, "same RG does not allow crossing replica ownership")
+}
+
+func TestManualPlaceEmptySnapshotPolicy(t *testing.T) {
+	c := newTestCache(cfgFor(1, 10, nil, nil))
+	c.MarkReady()
+	b := NewDefaultBalancer(c, &coordview.ShardViewRegistry{}, NewDefaultBalancePolicy(), nil)
+	ids := []qviews.ShardID{cacheShard(1, 10), cacheShard(2, 20)}
+	manager := &coordview.ShardViewManager{}
+	for _, patch := range []*mockey.Mocker{
+		mockey.Mock((*coordview.ShardViewRegistry).ShardIDs).Return(ids).Build(),
+		mockey.Mock((*coordview.ShardViewRegistry).Get).To(func(_ *coordview.ShardViewRegistry, id qviews.ShardID) *coordview.ShardViewManager {
+			if id == ids[0] {
+				return nil
+			}
+			return manager
+		}).Build(),
+		mockey.Mock((*coordview.ShardViewManager).PlacementBuilder).Return(nil).Build(),
+	} {
+		t.Cleanup(func() { patch.UnPatch() })
+	}
+	results, err := b.ManualPlace(t.Context(), PlacementScope{}, func(builders map[qviews.ShardID]*qviews.QueryViewAtCoordBuilder) error {
+		require.Empty(t, builders, "removed and unavailable managers do not prevent callback execution")
+		return nil
+	})
+	require.NoError(t, err)
+	require.Empty(t, results)
+	rejected := merr.WrapErrSegmentNotFound(100)
+	_, err = b.ManualPlace(t.Context(), PlacementScope{}, func(builders map[qviews.ShardID]*qviews.QueryViewAtCoordBuilder) error {
+		require.Empty(t, builders)
+		return rejected
+	})
+	require.Equal(t, rejected, err)
 }

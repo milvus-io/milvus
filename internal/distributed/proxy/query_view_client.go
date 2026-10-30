@@ -19,9 +19,8 @@ package grpcproxy
 import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	querynodehandler "github.com/milvus-io/milvus/internal/querynodev2/client/handler"
-	streamingcoordclient "github.com/milvus-io/milvus/internal/streamingcoord/client"
-	streamingnodehandler "github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/internal/views/queryclient/resolver"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -40,7 +39,7 @@ func (s *Server) initViewQueryClient(setter viewQueryClientSetter) error {
 	if !ok {
 		return merr.WrapErrServiceInternalMsg("proxy does not implement collection vchannel provider")
 	}
-	client, closeFunc, err := newProxyViewQueryClient(s.etcdCli, provider)
+	client, closeFunc, err := newProxyViewQueryClient(s.etcdCli, provider, s.mixCoordClient)
 	if err != nil {
 		return err
 	}
@@ -57,20 +56,17 @@ func (s *Server) closeViewQueryClient() {
 	s.viewQueryClientClose = nil
 }
 
-func newDefaultProxyViewQueryClient(etcdCli *clientv3.Client, vchannelProvider resolver.CollectionVChannelProvider) (queryclient.Client, func(), error) {
-	streamingCoordClient := streamingcoordclient.NewClient(etcdCli)
-	assignment := streamingCoordClient.Assignment()
+func newDefaultProxyViewQueryClient(etcdCli *clientv3.Client, vchannelProvider resolver.CollectionVChannelProvider, loadInfoClient queryclient.LoadInfoClient) (queryclient.Client, func(), error) {
 	shardResolver := resolver.NewShardResolverImpl(vchannelProvider)
-	streamingNodeClient := streamingnodehandler.NewHandlerClient(assignment)
 	queryNodeClient := querynodehandler.NewClient(etcdCli)
 
-	queryPlanClient := streamingNodeClient.QueryViewClient()
+	queryPlanClient := streaming.WAL().QueryViewClient()
 	queryServiceClient := queryclient.NewCompositeViewQueryServiceClient(
-		streamingNodeClient.QueryViewClient(),
+		queryPlanClient,
 		queryNodeClient.QueryViewClient(),
 	)
 	client := queryclient.NewLegacyViewQueryClient(
-		queryclient.ViewQueryClientConfig{},
+		queryclient.ViewQueryClientConfig{LoadInfoClient: loadInfoClient},
 		queryPlanClient,
 		queryServiceClient,
 		shardResolver,
@@ -78,9 +74,7 @@ func newDefaultProxyViewQueryClient(etcdCli *clientv3.Client, vchannelProvider r
 	closeFunc := func() {
 		client.Close()
 		shardResolver.Close()
-		streamingNodeClient.Close()
 		queryNodeClient.Close()
-		streamingCoordClient.Close()
 	}
 	return client, closeFunc, nil
 }

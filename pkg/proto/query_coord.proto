@@ -38,6 +38,7 @@ service QueryCoord {
 
     rpc GetPartitionStates(GetPartitionStatesRequest)
         returns (GetPartitionStatesResponse) {
+        option deprecated = true;
     }
     rpc GetLoadSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {
     }
@@ -60,6 +61,7 @@ service QueryCoord {
     }
     rpc GetShardLeaders(GetShardLeadersRequest)
         returns (GetShardLeadersResponse) {
+        option deprecated = true;
     }
 
     rpc CheckHealth(milvus.CheckHealthRequest)
@@ -107,7 +109,9 @@ service QueryCoord {
   rpc ClearReadTaskQueue(internal.ClearReadTaskQueueRequest) returns (internal.ClearReadTaskQueueResponse) {}
 
   rpc UpdateLoadConfig(UpdateLoadConfigRequest) returns (common.Status) {}
-  rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
+  rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){
+    option deprecated = true;
+  }
   rpc ComputePhraseMatchSlop(ComputePhraseMatchSlopRequest) returns(ComputePhraseMatchSlopResponse){}
   rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(ValidateAnalyzerResponse){}
   rpc EnsureCollectionReady(EnsureCollectionReadyRequest) returns (common.Status) {}

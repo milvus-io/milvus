@@ -415,21 +415,21 @@ func segmentSet(segments []int64) map[int64]bool {
 //
 // Validation: The new DataVersion must not be lower than any existing view's DataVersion.
 func (m *ShardViewManager) AddPreparing(ctx context.Context, builder *qviews.QueryViewAtCoordBuilder) error {
-	return m.addPreparing(ctx, builder, nil)
+	return m.addPreparing(ctx, builder, nil, nil)
 }
 
 // AddPublishedRecovery changes placement of a retained published-schema view.
 // It preserves that view's exact data and load identities while a newer schema
 // prepares independently. Ordinary planning still cannot roll DataVersion back.
 func (m *ShardViewManager) AddPublishedRecovery(ctx context.Context, builder *qviews.QueryViewAtCoordBuilder, source qviews.QueryViewVersion) error {
-	return m.addPreparing(ctx, builder, &source)
+	return m.addPreparing(ctx, builder, &source, nil)
 }
 
-func (m *ShardViewManager) addPreparing(ctx context.Context, builder *qviews.QueryViewAtCoordBuilder, source *qviews.QueryViewVersion) error {
+func (m *ShardViewManager) addPreparing(ctx context.Context, builder *qviews.QueryViewAtCoordBuilder, source *qviews.QueryViewVersion, preparation *Preparation) error {
 	newDV := builder.DataVersion()
 	view := builder.Build()
 	m.mu.Lock()
-	err := m.validatePreparationLocked(view, source)
+	err := m.validateManualPreparationLocked(view, source, preparation)
 	m.mu.Unlock()
 	if err != nil {
 		return err
@@ -452,7 +452,7 @@ func (m *ShardViewManager) addPreparing(ctx context.Context, builder *qviews.Que
 	}
 	// The manager may have been retired, or a newer view accepted, during Get.
 	// QueryVersion must also be assigned from the state observed after Get.
-	err = m.validatePreparationLocked(view, source)
+	err = m.validateManualPreparationLocked(view, source, preparation)
 	if err == nil {
 		err = ctx.Err()
 	}
@@ -471,6 +471,10 @@ func (m *ShardViewManager) addPreparing(ctx context.Context, builder *qviews.Que
 	}
 	view.Meta.TransformStartAfterTimetick = m.publishedRetentionStartLocked(view.Meta)
 	sm := NewCoordQueryViewStateMachineWithRef(view, ref)
+	sm.preparation = preparation
+	if preparation != nil {
+		preparation.Version = sm.Version()
+	}
 
 	// Different schema generations have independent preparation obligations.
 	// Preserve published recovery while superseding obsolete target work.
@@ -595,16 +599,19 @@ func (m *ShardViewManager) processStateMachine(sm *CoordQueryViewStateMachine) {
 			m.processStateMachine(sm)
 			return
 		}
+		sm.completePreparation(nil)
 		m.downOlderUpView(sm)
 		m.refreshNewestUpLocked()
 		m.advanceUnrecoverableToDropping()
 
 	case qviews.QueryViewStateDown:
+		sm.failPreparation("manual view retired before becoming serving")
 		if m.upView == sm {
 			m.refreshNewestUpLocked()
 		}
 
 	case qviews.QueryViewStateUnrecoverable:
+		sm.failPreparation("manual view became unrecoverable")
 		if m.preparingView == sm {
 			m.refreshNewestPreparingLocked()
 		}
@@ -992,6 +999,7 @@ func (m *ShardViewManager) abortRecovery() {
 	m.closed = true
 	refs := make([]qviews.DataViewRef, 0, len(m.views))
 	for _, sm := range m.views {
+		sm.failPreparation("shard manager closed")
 		if ref := sm.takeRef(); ref != nil {
 			refs = append(refs, ref)
 		}

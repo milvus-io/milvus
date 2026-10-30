@@ -1346,12 +1346,12 @@ func (suite *ServiceSuite) TestGetSegmentInfo() {
 }
 
 func (suite *ServiceSuite) TestLoadBalance() {
-	// Handoff, configuration fencing and worker failures are covered by
-	// resource.TestManualBalanceCompletion and TestManualBalanceAcceptanceConfigFence.
+	// Exact-version completion and failure handling are covered by the balancer
+	// and ShardViewManager manual placement tests.
 	var result error
 	calls := 0
 	req := &querypb.LoadBalanceRequest{CollectionID: 1000, SourceNodeIDs: []int64{1}}
-	patch := mockey.Mock((*qvresource.Resources).Balance).To(func(_ *qvresource.Resources, ctx context.Context, collection, source int64, destinations, segments []int64) error {
+	patch := mockey.Mock((*Server).manualMoveSegments).To(func(_ *Server, ctx context.Context, collection, source int64, destinations, segments []int64) error {
 		calls++
 		suite.Equal(req.CollectionID, collection)
 		suite.Equal(req.SourceNodeIDs[0], source)

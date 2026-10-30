@@ -112,10 +112,11 @@ func (t *HighlightTask) Execute(ctx context.Context) error {
 			texts[i] = []byte(text)
 		}
 		response, err := streaming.WAL().AnalyzerClient().RunAnalyzer(ctx, &streamingpb.StreamingNodeRunAnalyzerRequest{
-			Placeholder: texts, WithDetail: true,
+			Placeholder: texts,
 			Source: &streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer{FieldAnalyzer: &streamingpb.StreamingFieldAnalyzer{
 				CollectionId: t.collectionID, Vchannel: info.VChannels[0], FieldId: task.GetFieldId(), AnalyzerNames: task.GetAnalyzerNames(), ReadSchemaVersion: t.readSchemaVersion,
 			}},
+			Operation: &streamingpb.StreamingNodeRunAnalyzerRequest_Tokenize{Tokenize: &streamingpb.TokenizeOptions{WithDetail: true}},
 		})
 		if err != nil {
 			if status.IsCanceled(err) {
@@ -126,8 +127,8 @@ func (t *HighlightTask) Execute(ctx context.Context) error {
 		if err := merr.Error(response.GetStatus()); err != nil {
 			return err
 		}
-		tokens := make([][]*milvuspb.AnalyzerToken, len(response.GetResults()))
-		for i, analyzed := range response.GetResults() {
+		tokens := make([][]*milvuspb.AnalyzerToken, len(response.GetTokenize().GetResults()))
+		for i, analyzed := range response.GetTokenize().GetResults() {
 			tokens[i] = analyzed.GetTokens()
 		}
 		fragments, err := highlight.BuildFragments(task, t.GetTopks(), tokens)

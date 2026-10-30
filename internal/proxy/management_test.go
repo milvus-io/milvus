@@ -25,8 +25,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
 
@@ -666,130 +668,34 @@ func (s *ProxyManagementSuite) TestTransferSegment() {
 }
 
 func (s *ProxyManagementSuite) TestTransferChannel() {
-	s.Run("normal", func() {
-		s.SetupTest()
-		defer s.TearDownTest()
-
-		s.mixcoord.EXPECT().TransferChannel(mock.Anything, mock.Anything).Return(merr.Success(), nil)
-
-		req, err := http.NewRequest(http.MethodPost, management.RouteTransferChannel, strings.NewReader("source_node_id=1&target_node_id=1&segment_id=1&copy_mode=false"))
-		s.Require().NoError(err)
+	// No coordinator client is installed: even malformed legacy requests must
+	// succeed without parsing parameters or performing an RPC.
+	proxy := &Proxy{}
+	for _, body := range []string{"", "source_node_id=1&target_node_id=2", "source_node_id=invalid&copy_mode=%zz"} {
+		req := httptest.NewRequest(http.MethodPost, management.RouteTransferChannel, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		recorder := httptest.NewRecorder()
-		s.proxy.TransferChannel(recorder, req)
+		proxy.TransferChannel(recorder, req)
 		s.Equal(http.StatusOK, recorder.Code)
-		s.Equal(`{"msg": "OK"}`, recorder.Body.String())
-
-		// test use default param
-		req, err = http.NewRequest(http.MethodPost, management.RouteTransferChannel, strings.NewReader("source_node_id=1"))
-		s.Require().NoError(err)
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		recorder = httptest.NewRecorder()
-		s.proxy.TransferChannel(recorder, req)
-		s.Equal(http.StatusOK, recorder.Code)
-		s.Equal(`{"msg": "OK"}`, recorder.Body.String())
-	})
-
-	s.Run("return_error", func() {
-		s.SetupTest()
-		defer s.TearDownTest()
-
-		// test invalid request body
-		req, err := http.NewRequest(http.MethodPost, management.RouteTransferChannel, nil)
-		s.Require().NoError(err)
-		recorder := httptest.NewRecorder()
-		s.proxy.TransferChannel(recorder, req)
-		s.Equal(http.StatusBadRequest, recorder.Code)
-
-		// test miss requested param
-		req, err = http.NewRequest(http.MethodPost, management.RouteTransferChannel, strings.NewReader(""))
-		s.Require().NoError(err)
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		recorder = httptest.NewRecorder()
-		s.proxy.TransferChannel(recorder, req)
-		s.Equal(http.StatusBadRequest, recorder.Code)
-
-		// test rpc return error
-		s.mixcoord.EXPECT().TransferChannel(mock.Anything, mock.Anything).Return(nil, errors.New("mocked error"))
-		req, err = http.NewRequest(http.MethodPost, management.RouteTransferChannel, strings.NewReader("source_node_id=1&target_node_id=1&segment_id=1"))
-		s.Require().NoError(err)
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		recorder = httptest.NewRecorder()
-		s.proxy.TransferChannel(recorder, req)
-		s.Equal(http.StatusInternalServerError, recorder.Code)
-	})
-
-	s.Run("return_failure", func() {
-		s.SetupTest()
-		defer s.TearDownTest()
-
-		s.mixcoord.EXPECT().TransferChannel(mock.Anything, mock.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
-		req, err := http.NewRequest(http.MethodPost, management.RouteTransferChannel, strings.NewReader("source_node_id=1"))
-		s.Require().NoError(err)
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		recorder := httptest.NewRecorder()
-		s.proxy.TransferChannel(recorder, req)
-		s.Equal(http.StatusInternalServerError, recorder.Code)
-	})
+		s.Equal("application/json", recorder.Header().Get("Content-Type"))
+		s.Contains(recorder.Body.String(), "deprecated")
+		s.Contains(recorder.Body.String(), "no migration performed")
+		s.Contains(recorder.Body.String(), "/management/streaming/transfer")
+	}
 }
 
 func (s *ProxyManagementSuite) TestCheckQueryNodeDistribution() {
-	s.Run("normal", func() {
-		s.SetupTest()
-		defer s.TearDownTest()
-
-		s.mixcoord.EXPECT().CheckQueryNodeDistribution(mock.Anything, mock.Anything).Return(merr.Success(), nil)
-
-		req, err := http.NewRequest(http.MethodPost, management.RouteCheckQueryNodeDistribution, strings.NewReader("source_node_id=1&target_node_id=1"))
-		s.Require().NoError(err)
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		recorder := httptest.NewRecorder()
-		s.proxy.CheckQueryNodeDistribution(recorder, req)
-		s.Equal(http.StatusOK, recorder.Code)
-		s.Equal(`{"msg": "OK"}`, recorder.Body.String())
-	})
-
-	s.Run("return_error", func() {
-		s.SetupTest()
-		defer s.TearDownTest()
-
-		// test invalid request body
-		req, err := http.NewRequest(http.MethodPost, management.RouteCheckQueryNodeDistribution, nil)
-		s.Require().NoError(err)
-		recorder := httptest.NewRecorder()
-		s.proxy.CheckQueryNodeDistribution(recorder, req)
-		s.Equal(http.StatusBadRequest, recorder.Code)
-
-		// test miss requested param
-		req, err = http.NewRequest(http.MethodPost, management.RouteCheckQueryNodeDistribution, strings.NewReader(""))
-		s.Require().NoError(err)
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		recorder = httptest.NewRecorder()
-		s.proxy.CheckQueryNodeDistribution(recorder, req)
-		s.Equal(http.StatusBadRequest, recorder.Code)
-
-		// test rpc return error
-		s.mixcoord.EXPECT().CheckQueryNodeDistribution(mock.Anything, mock.Anything).Return(nil, errors.New("mocked error"))
-		req, err = http.NewRequest(http.MethodPost, management.RouteCheckQueryNodeDistribution, strings.NewReader("source_node_id=1&target_node_id=1"))
-		s.Require().NoError(err)
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		recorder = httptest.NewRecorder()
-		s.proxy.CheckQueryNodeDistribution(recorder, req)
-		s.Equal(http.StatusInternalServerError, recorder.Code)
-	})
-
-	s.Run("return_failure", func() {
-		s.SetupTest()
-		defer s.TearDownTest()
-
-		s.mixcoord.EXPECT().CheckQueryNodeDistribution(mock.Anything, mock.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
-		req, err := http.NewRequest(http.MethodPost, management.RouteCheckQueryNodeDistribution, strings.NewReader("source_node_id=1&target_node_id=1"))
-		s.Require().NoError(err)
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		recorder := httptest.NewRecorder()
-		s.proxy.CheckQueryNodeDistribution(recorder, req)
-		s.Equal(http.StatusInternalServerError, recorder.Code)
-	})
+	proxy := &Proxy{}
+	for _, handler := range []http.HandlerFunc{proxy.CheckQueryNodeDistribution, proxy.ClearReadTaskQueueManagement} {
+		for _, body := range []string{"", "source_node_id=invalid%zz"} {
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			w := httptest.NewRecorder()
+			handler(w, req)
+			s.Equal(http.StatusOK, w.Code)
+			s.Contains(w.Body.String(), "deprecated")
+		}
+	}
 }
 
 func (s *ProxyManagementSuite) TestCommitBackfillResult() {
@@ -923,4 +829,27 @@ func (s *ProxyManagementSuite) TestCommitBackfillResult() {
 
 func TestProxyManagement(t *testing.T) {
 	suite.Run(t, new(ProxyManagementSuite))
+}
+
+func TestTransferSegmentManagementMoveOnly(t *testing.T) {
+	client := &mocks.MockMixCoordClient{}
+	calls := 0
+	patch := mockey.Mock((*mocks.MockMixCoordClient).TransferSegment).To(func(_ *mocks.MockMixCoordClient, _ context.Context, req *querypb.TransferSegmentRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
+		calls++
+		require.False(t, req.CopyMode)
+		require.Equal(t, int64(1), req.SourceNodeID)
+		require.True(t, req.ToAllNodes)
+		require.True(t, req.TransferAll)
+		return merr.Success(), nil
+	}).Build()
+	defer patch.UnPatch()
+	proxy := &Proxy{mixCoord: client}
+	for _, suffix := range []string{"", "&copy_mode=true", "&copy_mode=false"} {
+		req := httptest.NewRequest(http.MethodPost, management.RouteTransferSegment, strings.NewReader("source_node_id=1"+suffix))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+		proxy.TransferSegment(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+	}
+	require.Equal(t, 3, calls)
 }

@@ -1,4 +1,4 @@
-package queryclient
+package queryclient_test
 
 import (
 	"testing"
@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -42,15 +43,15 @@ func TestAggregatePartialAcrossEmptyShard(t *testing.T) {
 			require.NoError(t, err)
 			outputMap, err := agg.NewAggregationFieldMap([]string{tc.op + "(pk)"}, nil, operators)
 			require.NoError(t, err)
-			request := &LegacyQueryRequest{Schema: schema, Req: &internalpb.RetrieveRequest{Aggregates: agg.AggregatesToPB(operators)}}
+			request := &queryclient.LegacyQueryRequest{Schema: schema, Req: &internalpb.RetrieveRequest{Aggregates: agg.AggregatesToPB(operators)}}
 			pipeline, err := dql.NewQueryPipeline(schema, -1, 0, reduce.IReduceNoOrder, nil, nil, request.Req.Aggregates, outputMap, nil)
 			require.NoError(t, err)
-			plans := []ShardPlan{
+			plans := []queryclient.ShardPlan{
 				{ShardID: qviews.ShardID{VChannel: "empty_1v0", ReplicaID: 1}, Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 100}, ExecutionSummary: &viewpb.ExecutionSummary{GlobalOptimizer: &viewpb.GlobalOptimizerExecutionSummary{Flags: 1 << viewpb.GlobalOptimizerExecutionSummary_PrunedByScalarFiltering}}},
 				{ShardID: qviews.ShardID{VChannel: "values_1v0", ReplicaID: 1}, Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 110}},
 			}
 			for _, emptyFirst := range []bool{true, false} {
-				collector := newLegacyQueryCollector()
+				collector := queryclient.NewLegacyQueryCollectorForTest()
 				for _, values := range tc.workers {
 					response := &internalpb.RetrieveResults{ScannedTotalBytes: 10, CostAggregation: &internalpb.CostAggregation{TotalRelatedDataSize: 20}}
 					for _, value := range values {
@@ -61,7 +62,7 @@ func TestAggregatePartialAcrossEmptyShard(t *testing.T) {
 				ordered := plans
 				emptyIndex := 0
 				if !emptyFirst {
-					ordered = []ShardPlan{plans[1], plans[0]}
+					ordered = []queryclient.ShardPlan{plans[1], plans[0]}
 					emptyIndex = 1
 				}
 				shards, err := collector.Reduce(t.Context(), request, ordered)

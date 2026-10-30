@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/types"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -54,6 +55,17 @@ func TestQueryViewLoadInfoInitializationAndRecovery(t *testing.T) {
 			s.mixCoord = &loadInfoIndexSourceForTest{}
 		}
 		require.NoError(t, s.initMeta())
+		// The integrated QueryView runtime owns load metadata; initMeta only
+		// initializes the legacy coordinator metadata needed during recovery.
+		deps := newDefaultQViewsRuntimeDependencies(storage, client, s.store, nil, s.mixCoord)
+		t.Cleanup(func() {
+			deps.queryNodeManager.Close()
+			deps.streamingNodeHandler.Close()
+			deps.streamingCoordClient.Close()
+		})
+		configs, err := loadmgr.RecoverLoadConfigStore(ctx, s.store, deps.loadInfos)
+		require.NoError(t, err)
+		s.qviewsRuntime = &qviewsRuntime{loadConfigStore: configs, loadInfos: deps.loadInfos}
 		s.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1, Version: 9})
 		require.NoError(t, err)
