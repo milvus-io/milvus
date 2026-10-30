@@ -1267,6 +1267,6 @@ func (s *Server) GetStreamingNodeQueryViewResources(ctx context.Context, req *da
 	return s.mixCoord.GetStreamingNodeQueryViewResources(ctx, req)
 }
 
-func (s *Server) WatchQueryViewSegmentLoadInfo(stream querypb.QueryCoord_WatchQueryViewSegmentLoadInfoServer) error {
-	return s.mixCoord.WatchQueryViewSegmentLoadInfo(stream)
+func (s *Server) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+	return s.mixCoord.GetQueryViewSegmentLoadInfo(ctx, req)
 }

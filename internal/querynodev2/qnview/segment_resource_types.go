@@ -100,8 +100,7 @@ type QueryViewLoadMetadataProvider interface {
 }
 
 // QueryViewLoadInfoVersion is bound to QueryCoord's collection-level
-// load-config snapshot. Segment-level load-info changes are tracked by
-// SegmentLoadInfoRevision.
+// load-config snapshot. Segment data requirements are carried by Manifest versions.
 type QueryViewLoadInfoVersion uint64
 
 func QueryViewLoadInfoVersionFromProto(version uint64) QueryViewLoadInfoVersion {
@@ -117,48 +116,19 @@ type QueryViewLoadInfo struct {
 	IndexInfos     []*indexpb.IndexInfo
 }
 
-type SegmentLoadInfoRevision struct {
-	Revision uint64
+// SegmentLoadInfoProvider resolves a complete current snapshot on demand.
+// Implementations bound each RPC by a timeout and respect owner cancellation.
+type SegmentLoadInfoProvider interface {
+	GetQueryViewSegmentLoadInfo(ctx context.Context, collectionID, segmentID int64) (SegmentLoadInfoSnapshot, error)
 }
 
-func (r SegmentLoadInfoRevision) Empty() bool {
-	return r.Revision == 0
-}
-
+// SegmentLoadInfoSnapshot binds the physical base and its certified replay
+// cursor. The resource owner retains it across physical preparation retries.
 type SegmentLoadInfoSnapshot struct {
 	CollectionID int64
 	SegmentID    int64
-	Revision     SegmentLoadInfoRevision
 	LoadInfo     *querypb.SegmentLoadInfo
 	IndexInfos   []*indexpb.IndexInfo
-}
-
-type SegmentLoadInfoSubscriptionOption struct {
-	CollectionID int64
-	SegmentID    int64
-	Revision     SegmentLoadInfoRevision
-	Handler      SegmentLoadInfoEventHandler
-}
-
-type SegmentLoadInfoEventHandler interface {
-	Handle(snapshot SegmentLoadInfoSnapshot) error
-	Close()
-}
-
-type SegmentLoadInfoSubscription interface {
-	CollectionID() int64
-	SegmentID() int64
-	Error() error
-	Close()
-}
-
-type SegmentLoadInfoStream interface {
-	Subscribe(option SegmentLoadInfoSubscriptionOption) SegmentLoadInfoSubscription
-	Close()
-}
-
-type SegmentLoadInfoStreamFactory interface {
-	NewSegmentLoadInfoStream(ctx context.Context) SegmentLoadInfoStream
 }
 
 type PhysicalSegmentLoader interface {

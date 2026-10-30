@@ -11,7 +11,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -31,9 +30,8 @@ func TestSegmentResourceWaitsForManifestAndCatchup(t *testing.T) {
 		req := f.request(1, 1, 1)
 		req.View.Partitions[0].SegmentManifestVersions = []int64{2}
 		f.manager.Acquire(req)
-		handler := <-f.handler
 		require.Never(t, func() bool { return f.loads.Load() != 0 }, 100*time.Millisecond, time.Millisecond)
-		require.NoError(t, handler.Handle(SegmentLoadInfoSnapshot{SegmentID: 1000, Revision: SegmentLoadInfoRevision{Revision: 2}, LoadInfo: &querypb.SegmentLoadInfo{SegmentID: 1000, PartitionID: 10, ManifestPath: packed.MarshalManifestPath("test", 2), NumOfRows: 10, TransformStartAfterTimetick: 50}}))
+		f.manifest.Store(2)
 		<-entered
 		require.Empty(t, f.ready)
 		_, err := f.manager.AcquireSealedSegmentHandles(t.Context(), req.Key, req.View, 0)
@@ -46,7 +44,7 @@ func TestSegmentResourceWaitsForManifestAndCatchup(t *testing.T) {
 	})
 }
 
-func TestSegmentResourcePendingViewRetainsSubscription(t *testing.T) {
+func TestSegmentResourcePendingViewRetainsSnapshot(t *testing.T) {
 	mockey.PatchConvey("a complete pending binding survives release of the previous View", t, func() {
 		f := setupResourceTest(t, nil)
 		first := f.acquire(1, 1, 1)
@@ -66,7 +64,7 @@ func TestSegmentResourcePendingViewRetainsSubscription(t *testing.T) {
 		<-entered
 		f.drop(t, first)
 		require.Zero(t, f.releases.Load())
-		require.Len(t, f.handler, 1, "same subscription remains owned by pending binding")
+		require.EqualValues(t, 1, f.gets.Load(), "pending binding retains the existing snapshot")
 		close(resume)
 		f.await(t, 2)
 		require.EqualValues(t, 1, f.loads.Load())
@@ -109,22 +107,28 @@ type resourceTestReservation struct{}
 
 func (*resourceTestReservation) Release() { panic("unpatched") }
 
-func TestSegmentResourceTerminalMetadataClosure(t *testing.T) {
-	mockey.PatchConvey("terminal watch closure invalidates all affected Views", t, func() {
+func TestSegmentResourceMetadataFailureLeavesReadyViewsQueryable(t *testing.T) {
+	mockey.PatchConvey("terminal Get failure affects only the new unmet demand", t, func() {
 		f := setupResourceTest(t, nil)
-		failed := make(chan struct{}, 1)
-		req := f.request(1, 1, 1)
-		req.OnUnrecoverable = func() { failed <- struct{}{} }
-		f.manager.Acquire(req)
+		old := f.acquire(1, 1, 1)
 		f.await(t, 1)
-		handler := <-f.handler
-		handler.Close()
+		f.getMock.UnPatch()
+		mockey.Mock((*resourceTestMetadata).GetQueryViewSegmentLoadInfo).Return(SegmentLoadInfoSnapshot{}, merr.WrapErrSegmentNotFound(1000)).Build()
+		failed := make(chan struct{}, 1)
+		next := f.request(2, 1, 1)
+		next.View.Partitions[0].SegmentManifestVersions = []int64{2}
+		next.OnUnrecoverable = func() { failed <- struct{}{} }
+		f.manager.Acquire(next)
 		select {
 		case <-failed:
 		case <-time.After(5 * time.Second):
-			t.Fatal("watch closure not reported")
+			t.Fatal("missing metadata failure")
 		}
-		f.drop(t, req)
+		handles, err := f.manager.AcquireSealedSegmentHandles(t.Context(), old.Key, old.View, 100)
+		require.NoError(t, err)
+		handles[0].Release()
+		f.drop(t, next)
+		f.drop(t, old)
 	})
 }
 

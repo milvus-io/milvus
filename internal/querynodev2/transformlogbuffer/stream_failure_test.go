@@ -28,7 +28,7 @@ func TestLogicalStreamFailureReachesSharedBuffersAndLaterReferences(t *testing.T
 	require.ErrorIs(t, first.WaitTransformVisible(ctx, 60), failure)
 	require.ErrorIs(t, second.WaitTransformVisible(ctx, 60), failure)
 
-	// The terminal watcher has finished notifying the existing references.
+	// Handler closure has notified the existing references.
 	// A later VChannel must not keep retrying this already-closed logical stream.
 	later, err := buffer.Bind(newTestQueryView("p_3v0", 50))
 	require.NoError(t, err)
@@ -57,7 +57,7 @@ func TestLogicalStreamFailureDuringSubscribeIsTerminal(t *testing.T) {
 	require.ErrorIs(t, err, failure)
 }
 
-func TestClosedLogicalStreamWithoutErrorStillUnblocksWaiters(t *testing.T) {
+func TestNormalLogicalStreamCloseDoesNotSynthesizeFailure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	streams := newFakeStreamManager()
@@ -66,5 +66,10 @@ func TestClosedLogicalStreamWithoutErrorStillUnblocksWaiters(t *testing.T) {
 	require.NoError(t, err)
 	defer guard.Release()
 	require.NoError(t, streams.stream("v1").Close())
-	require.ErrorIs(t, guard.WaitTransformVisible(ctx, 60), merr.ErrServiceUnavailable)
+	require.NoError(t, streams.stream("v1").Error())
+	buffer.channels["v1"].mu.Lock()
+	require.NoError(t, buffer.channels["v1"].err)
+	buffer.channels["v1"].mu.Unlock()
+	cancel()
+	require.ErrorIs(t, guard.WaitTransformVisible(ctx, 60), context.Canceled)
 }

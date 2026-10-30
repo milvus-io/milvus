@@ -445,14 +445,13 @@ later local progress does not retroactively mutate an already-pending report.
 - Received Preparing sync signal from Coord via SyncQueryView.
 
 **Automatic Behavior:**
-1. Resolve each Segment's loading metadata from the DataView Manifest version:
-   - Version `0`: Coord keeps watching Coordinator SegmentMeta, resolves the
-     complete current SegmentInfo, and freezes it into this QueryView/load
-     operation before dispatch.
-   - Positive version: QueryNode constructs the canonical StorageV3 Manifest
-     object path from Collection/Partition/Segment IDs plus the version and
-     derives all loading metadata directly from that Manifest; no Coordinator
-     SegmentMeta watch is required for this Segment.
+1. Resolve unmet Segment loading requirements through the unary batch
+   `GetQueryViewSegmentLoadInfo` RPC (StorageV3, with indexes in the Manifest).
+   QN batches pending IDs by Collection and receives a complete current snapshot
+   or an independent error for each Segment. It validates the Manifest against
+   the View's requirement, together with the matching statistics and certified
+   Transform replay cursor. Compatible prepared ReadStates remain reusable;
+   Ready Views do not poll metadata. See [resource preparation §7](qnview/querynode_queryview_resource_preparation.md#7-on-demand-loading-metadata).
 2. Asynchronously load segments from object storage.
 3. Subscribe to the pure delete stream from SN, apply its ordered Entries and
    establish catch-up using SyncUp and the required Transform MVCC boundary.

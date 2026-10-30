@@ -91,9 +91,8 @@ type CompactionMeta interface {
 var _ CompactionMeta = (*meta)(nil)
 
 type meta struct {
-	queryViewLoadInfoNotifier QueryViewLoadInfoNotifier
-	ctx                       context.Context
-	catalog                   metastore.DataCoordCatalog
+	ctx     context.Context
+	catalog metastore.DataCoordCatalog
 
 	// metaStore is the shared MetaStore — the backbone for segments, collections,
 	// channel checkpoints, file resources, and catalog persistence.

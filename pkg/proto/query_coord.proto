@@ -39,8 +39,8 @@ service QueryCoord {
     }
     rpc GetLoadSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {
     }
-    rpc WatchQueryViewSegmentLoadInfo(stream WatchQueryViewSegmentLoadInfoRequest)
-        returns (stream WatchQueryViewSegmentLoadInfoResponse) {}
+    rpc GetQueryViewSegmentLoadInfo(GetQueryViewSegmentLoadInfoRequest)
+        returns (GetQueryViewSegmentLoadInfoResponse) {}
     rpc LoadBalance(LoadBalanceRequest) returns (common.Status) {
     }
 
@@ -327,45 +327,26 @@ message GetSegmentInfoResponse {
     repeated SegmentInfo infos = 2;
 }
 
-message QueryViewSegmentLoadInfoRevision {
-    uint64 load_info_revision = 1;
-}
-
-message WatchQueryViewSegmentLoadInfoSubscription {
-    int64 collectionID = 1;
-    int64 segmentID = 2;
-    QueryViewSegmentLoadInfoRevision revision = 3;
-}
-
-message WatchQueryViewSegmentLoadInfoUnsubscription {
-    int64 collectionID = 1;
-    int64 segmentID = 2;
-}
-
-message WatchQueryViewSegmentLoadInfoRequest {
+// Current complete loading snapshots for segments in one collection. Consumers
+// validate each manifest against their View requirement; this is not a history API.
+message GetQueryViewSegmentLoadInfoRequest {
     common.MsgBase base = 1;
-    repeated WatchQueryViewSegmentLoadInfoSubscription subscribe = 2;
-    repeated WatchQueryViewSegmentLoadInfoUnsubscription unsubscribe = 3;
+    int64 collectionID = 2;
+    repeated int64 segmentIDs = 3;
 }
 
-message QueryViewSegmentLoadInfoSnapshot {
-    int64 collectionID = 1;
-    int64 segmentID = 2;
-    QueryViewSegmentLoadInfoRevision revision = 3;
-    SegmentLoadInfo load_info = 4;
-}
-
-// Shared once per collection within each response; snapshots in that response
-// resolve their collection's current index definitions from this table.
-message QueryViewCollectionIndexes {
-    int64 collectionID = 1;
-    repeated index.IndexInfo index_info_list = 2;
-}
-
-message WatchQueryViewSegmentLoadInfoResponse {
+message GetQueryViewSegmentLoadInfoResponse {
+    // Request-wide errors only. Segment-specific failures belong in results.
     common.Status status = 1;
-    repeated QueryViewSegmentLoadInfoSnapshot snapshots = 2;
-    repeated QueryViewCollectionIndexes collection_indexes = 3;
+    // One result per distinct requested ID, including failed segments.
+    repeated QueryViewSegmentLoadInfoResult results = 2;
+    repeated index.IndexInfo index_info_list = 3;
+}
+
+message QueryViewSegmentLoadInfoResult {
+    int64 segmentID = 1;
+    common.Status status = 2;
+    SegmentLoadInfo load_info = 3;
 }
 
 message GetShardLeadersRequest {

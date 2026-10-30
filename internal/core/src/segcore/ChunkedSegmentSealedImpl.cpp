@@ -1980,7 +1980,8 @@ ChunkedSegmentSealedImpl::NormalizePublishedState(
             for (const auto& entry : state.runtime->indexes.Entries()) {
                 const auto field_id = entry.key.field_id;
                 if (!field_exists_in_schema(state.fields, field_id) ||
-                    is_vector_registration(entry) || is_text_registration(entry)) {
+                    is_vector_registration(entry) ||
+                    is_text_registration(entry)) {
                     continue;
                 }
                 const bool is_json_entry = entry.json_cast_type.data_type() !=

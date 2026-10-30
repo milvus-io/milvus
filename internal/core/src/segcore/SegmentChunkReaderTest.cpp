@@ -383,7 +383,8 @@ class ReaderStringSegment : public ChunkedSegmentSealedImpl {
 
 class ReaderStringSnapshot : public SegmentReadSnapshot {
  public:
-    explicit ReaderStringSnapshot(std::shared_ptr<ChunkedColumnInterface> column)
+    explicit ReaderStringSnapshot(
+        std::shared_ptr<ChunkedColumnInterface> column)
         : column_(std::move(column)) {
     }
     int64_t

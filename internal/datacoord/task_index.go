@@ -167,9 +167,6 @@ func (it *indexBuildTask) setJobInfo(result *workerpb.IndexTaskInfo) error {
 		}
 	}
 	it.SetState(indexpb.JobState(result.GetState()), result.GetFailReason())
-	if result.GetState() == commonpb.IndexState_Finished {
-		it.meta.notifyQueryViewSegments(it.CollectionID, it.SegmentID)
-	}
 	return nil
 }
 
@@ -411,7 +408,6 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 			log.Warn(ctx, "failed to mark index task as finished", mlog.Err(err))
 			return
 		}
-		it.meta.notifyQueryViewSegments(it.CollectionID, it.SegmentID)
 		return
 	}
 

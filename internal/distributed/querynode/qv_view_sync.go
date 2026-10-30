@@ -112,6 +112,9 @@ func queryViewTransformLogStreamManager() wal.TransformLogStreamManager {
 }
 
 type lazyQueryViewLoadMetadataProvider struct {
+	ctx      context.Context
+	batchMu  sync.Mutex
+	pending  map[int64]*queryViewMetadataBatch
 	mixCoord *syncutil.Future[types.MixCoordClient]
 }
 

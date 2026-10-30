@@ -18,42 +18,15 @@ package datacoord
 
 import "context"
 
-// QueryViewLoadInfoNotifier invalidates QueryNode segment load-info snapshots
-// after the corresponding DataCoord metadata has been durably committed.
-// Notifications are best-effort wakeups: QueryNode recovery always rebuilds
-// state from the durable complete snapshot.
-type QueryViewLoadInfoNotifier interface {
-	NotifySegments(collectionID int64, segmentIDs ...int64)
-}
-
-type noopQueryViewLoadInfoNotifier struct{}
-
-func (noopQueryViewLoadInfoNotifier) NotifySegments(int64, ...int64) {}
-
-func (s *Server) SetQueryViewLoadInfoNotifier(notifier QueryViewLoadInfoNotifier) {
-	if notifier == nil {
-		notifier = noopQueryViewLoadInfoNotifier{}
-	}
-	s.queryViewLoadInfoNotifier = notifier
-	if s.meta != nil {
-		s.meta.queryViewLoadInfoNotifier = notifier
-	}
-}
-
-func (m *meta) notifyQueryViewSegments(collectionID int64, segmentIDs ...int64) {
-	if m != nil && m.queryViewLoadInfoNotifier != nil {
-		m.queryViewLoadInfoNotifier.NotifySegments(collectionID, segmentIDs...)
-	}
-}
-
 // notifyQueryViewSegmentUpdates runs after catalog and in-memory publication,
-// outside segMu, so subscribers can read the complete committed snapshot.
+// outside segment/manifest locks. New Manifest requirements reach QueryNodes
+// through a new DataView and QueryView rather than a SegmentMeta subscription.
 func (m *meta) notifyQueryViewSegmentUpdates(ctx context.Context, segments []*SegmentInfo) {
-	byCollection := make(map[int64][]int64)
+	collections := make(map[int64]struct{})
 	for _, segment := range segments {
-		byCollection[segment.GetCollectionID()] = append(byCollection[segment.GetCollectionID()], segment.GetID())
+		collections[segment.GetCollectionID()] = struct{}{}
 	}
-	for collectionID, segmentIDs := range byCollection {
-		m.notifyQueryViewSegments(collectionID, segmentIDs...)
+	for collectionID := range collections {
+		m.recomputeDataView(ctx, collectionID)
 	}
 }
