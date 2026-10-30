@@ -463,21 +463,28 @@ func Test_validateMaxCapacityPerRow(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("max capacity not int", func(t *testing.T) {
-		arrayField := &schemapb.FieldSchema{
-			DataType:    schemapb.DataType_Array,
-			ElementType: schemapb.DataType_Int64,
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   common.MaxCapacityKey,
-					Value: "six",
+	for _, tc := range []struct {
+		name  string
+		value string
+		cause error
+	}{
+		{name: "max capacity not int", value: "six", cause: strconv.ErrSyntax},
+		{name: "max capacity overflows int64", value: "9223372036854775808", cause: strconv.ErrRange},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			arrayField := &schemapb.FieldSchema{
+				Name:        "arr",
+				DataType:    schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Int64,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.MaxCapacityKey, Value: tc.value},
 				},
-			},
-		}
+			}
 
-		err := validateMaxCapacityPerRow("collection", arrayField)
-		assert.Error(t, err)
-	})
+			err := validateMaxCapacityPerRow("collection", arrayField)
+			assertParameterParseError(t, err, tc.cause, tc.value, "arr", common.MaxCapacityKey)
+		})
+	}
 
 	t.Run("max capacity exceed max", func(t *testing.T) {
 		arrayField := &schemapb.FieldSchema{
@@ -542,21 +549,7 @@ func Test_validateMaxLengthPerRow(t *testing.T) {
 			err := validateMaxLengthPerRow("collection", "arr", schemapb.DataType_VarChar, []*commonpb.KeyValuePair{
 				{Key: common.MaxLengthKey, Value: tc.value},
 			})
-			// Keep the input-error classification and field context while preserving
-			// the original parse failure for callers inspecting the error chain.
-			require.ErrorIs(t, err, merr.ErrParameterInvalid)
-			assert.ErrorIs(t, err, tc.cause)
-			var parseErr *strconv.NumError
-			require.ErrorAs(t, err, &parseErr)
-			assert.Equal(t, "ParseInt", parseErr.Func)
-			assert.Equal(t, tc.value, parseErr.Num)
-			status := merr.Status(err)
-			assert.Equal(t, int32(1100), status.GetCode())
-			assert.Equal(t, merr.InputError, merr.GetErrorType(err))
-			assert.False(t, status.GetRetriable())
-			assert.Contains(t, status.GetReason(), "max_length")
-			assert.Contains(t, status.GetReason(), "arr")
-			assert.Contains(t, status.GetReason(), tc.value)
+			assertParameterParseError(t, err, tc.cause, tc.value, "arr", common.MaxLengthKey)
 		})
 	}
 
@@ -564,6 +557,26 @@ func Test_validateMaxLengthPerRow(t *testing.T) {
 		err := validateMaxLengthPerRow("collection", "field", schemapb.DataType_VarChar, nil)
 		assert.Error(t, err)
 	})
+}
+
+func assertParameterParseError(t *testing.T, err, cause error, value, fieldName, paramKey string) {
+	t.Helper()
+	// Keep the input-error classification and field context while preserving
+	// the original parse failure for callers inspecting the error chain.
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.ErrorIs(t, err, cause)
+	var parseErr *strconv.NumError
+	require.ErrorAs(t, err, &parseErr)
+	assert.Equal(t, value, parseErr.Num)
+	status := merr.Status(err)
+	assert.Equal(t, int32(1100), status.GetCode())
+	assert.Equal(t, merr.InputError, merr.GetErrorType(err))
+	assert.Equal(t, "true", status.GetExtraInfo()[merr.InputErrorFlagKey])
+	assert.False(t, merr.IsRetryableErr(err))
+	assert.False(t, status.GetRetriable())
+	assert.Contains(t, status.GetReason(), paramKey)
+	assert.Contains(t, status.GetReason(), fieldName)
+	assert.Contains(t, status.GetReason(), value)
 }
 
 func TestValidateFieldsInStruct(t *testing.T) {

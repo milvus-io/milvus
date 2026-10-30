@@ -5509,6 +5509,7 @@ func TestAlterCollectionField(t *testing.T) {
 		deleteKeys  []string
 		expectError bool
 		errCode     int32
+		parseCause  error
 	}{
 		{
 			name:      "update string field max_length",
@@ -5605,6 +5606,7 @@ func TestAlterCollectionField(t *testing.T) {
 			},
 			expectError: true,
 			errCode:     merr.Code(merr.ErrParameterInvalid),
+			parseCause:  strconv.ErrSyntax,
 		},
 		{
 			name:      "invalid max_capacity value type",
@@ -5614,6 +5616,27 @@ func TestAlterCollectionField(t *testing.T) {
 			},
 			expectError: true,
 			errCode:     merr.Code(merr.ErrParameterInvalid),
+			parseCause:  strconv.ErrSyntax,
+		},
+		{
+			name:      "max_length overflows int",
+			fieldName: "string_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.MaxLengthKey, Value: "9223372036854775808"},
+			},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+			parseCause:  strconv.ErrRange,
+		},
+		{
+			name:      "max_capacity overflows int64",
+			fieldName: "array_field",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.MaxCapacityKey, Value: "9223372036854775808"},
+			},
+			expectError: true,
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+			parseCause:  strconv.ErrRange,
 		},
 		{
 			name:      "max_length exceeds limit",
@@ -5734,6 +5757,10 @@ func TestAlterCollectionField(t *testing.T) {
 				assert.Error(t, err)
 				if test.errCode != 0 {
 					assert.Equal(t, test.errCode, merr.Code(err))
+				}
+				if test.parseCause != nil {
+					prop := test.properties[0]
+					assertParameterParseError(t, err, test.parseCause, prop.Value, test.fieldName, prop.Key)
 				}
 			} else {
 				assert.NoError(t, err)
