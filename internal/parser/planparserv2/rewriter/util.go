@@ -43,6 +43,39 @@ func effectiveDataType(c *planpb.ColumnInfo) schemapb.DataType {
 	return dt
 }
 
+// Scalar and element-level FLOAT executors narrow literals for all operators.
+// Fixed ARRAY<FLOAT> indices are excluded: UnaryRange narrows to float32, but
+// Term and BinaryRange use double, so their algebra needs an operator-aware policy.
+func usesFloat32Comparisons(col *planpb.ColumnInfo) bool {
+	return col.GetDataType() == schemapb.DataType_Float ||
+		(col.GetIsElementLevel() && effectiveDataType(col) == schemapb.DataType_Float)
+}
+
+// Fixed ARRAY<FLOAT> paths use different executor precision depending on the
+// expression kind: UnaryRange narrows literals to float32, while Term and
+// BinaryRange retain double precision.  Until those executor paths agree,
+// algebra that changes or combines expression kinds must leave these columns
+// untouched to preserve the original semantics.
+func isFixedFloatArray(col *planpb.ColumnInfo) bool {
+	return col != nil && col.GetDataType() == schemapb.DataType_Array &&
+		col.GetElementType() == schemapb.DataType_Float &&
+		!col.GetIsElementLevel() && len(col.GetNestedPath()) > 0
+}
+
+func float32Literal(value *planpb.GenericValue) float32 {
+	if _, ok := value.GetVal().(*planpb.GenericValue_Int64Val); ok {
+		return float32(value.GetInt64Val())
+	}
+	return float32(value.GetFloatVal())
+}
+
+func equalsGenericForColumn(col *planpb.ColumnInfo, a, b *planpb.GenericValue) bool {
+	if usesFloat32Comparisons(col) {
+		return float32Literal(a) == float32Literal(b)
+	}
+	return equalsGeneric(a, b)
+}
+
 func valueCase(v *planpb.GenericValue) string {
 	switch v.GetVal().(type) {
 	case *planpb.GenericValue_BoolVal:
