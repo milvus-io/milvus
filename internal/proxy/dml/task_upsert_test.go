@@ -8302,16 +8302,19 @@ func TestPartialUpsertSubsetRetryPreservesNullablePayloads(t *testing.T) {
 					}
 					task.schema = mustNewSchemaInfo(schema)
 					makeExtra := func(valid []bool, values []int32) *schemapb.FieldData {
-						field := &schemapb.FieldData{FieldId: 102, FieldName: "extra", Type: schemapb.DataType_Int32,
-							Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: values}}}}}
-						if kind == "struct_scalar" {
+						field := &schemapb.FieldData{
+							FieldId: 102, FieldName: "extra", Type: schemapb.DataType_Int32,
+							Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: values}}}},
+						}
+						switch kind {
+						case "struct_scalar":
 							arrays := make([]*schemapb.ScalarField, len(values))
 							for i, value := range values {
 								arrays[i] = &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{value}}}}
 							}
 							field.Type = schemapb.DataType_Array
 							field.Field = &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{ElementType: schemapb.DataType_Int32, Data: arrays}}}}
-						} else if kind == "struct_vector" {
+						case "struct_vector":
 							arrays := make([]*schemapb.VectorField, len(values))
 							for i, value := range values {
 								arrays[i] = &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{float32(value), float32(value + 1)}}}}
