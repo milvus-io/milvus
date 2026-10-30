@@ -78,7 +78,7 @@ func newAliProvider(params []*commonpb.KeyValuePair, conf map[string]string, cre
 }
 
 func (provider *aliProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
-	rerankResp, err := provider.client.Rerank(provider.url, provider.modelName, query, docs, provider.params, provider.timeoutMs)
+	rerankResp, err := provider.client.Rerank(ctx, provider.url, provider.modelName, query, docs, provider.params, provider.timeoutMs)
 	if err != nil {
 		return nil, err
 	}

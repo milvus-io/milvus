@@ -98,7 +98,7 @@ func newSiliconflowProvider(params []*commonpb.KeyValuePair, conf map[string]str
 }
 
 func (provider *siliconflowProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
-	rerankResp, err := provider.siliconflowClient.Rerank(provider.url, provider.modelName, query, docs, nil, provider.timeoutMs)
+	rerankResp, err := provider.siliconflowClient.Rerank(ctx, provider.url, provider.modelName, query, docs, nil, provider.timeoutMs)
 	if err != nil {
 		return nil, err
 	}
