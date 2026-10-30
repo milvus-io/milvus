@@ -3,6 +3,9 @@ package idempotency
 import (
 	"context"
 
+	"github.com/pingcap/failpoint"
+
+	walpoint "github.com/milvus-io/milvus/internal/streamingnode/server/wal/failpoint"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/idempotencyview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	idempotencyutils "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/idempotency/utils"
@@ -154,6 +157,9 @@ func (impl *idempotencyInterceptor) appendIdempotentMessage(ctx context.Context,
 			window.Fail(begin.Pending, err, msg)
 			return nil, err
 		}
+		failpoint.Inject("beforeIdempotencyAppend", func(value failpoint.Value) {
+			walpoint.Hit(ctx, value, walpoint.BeforeIdempotencyAppend, msg, nil, insertResult)
+		})
 		msgID, err := append(ctx, msg)
 		if err != nil {
 			// KNOWN LIMITATION (documented; live reconciliation is a follow-up):
@@ -170,6 +176,9 @@ func (impl *idempotencyInterceptor) appendIdempotentMessage(ctx context.Context,
 			window.Fail(begin.Pending, err, msg)
 			return nil, err
 		}
+		failpoint.Inject("afterIdempotencyAppend", func(value failpoint.Value) {
+			walpoint.Hit(ctx, value, walpoint.AfterIdempotencyAppend, msg, msgID, insertResult)
+		})
 		window.Complete(begin.Pending, commitResultFromAppendContext(ctx, msgID, insertResult), msg)
 		return msgID, nil
 	case BeginDecisionWait:
@@ -216,11 +225,17 @@ func (impl *idempotencyInterceptor) appendIdempotentTxnCommitMessage(ctx context
 			window.Fail(begin.Pending, err, msg)
 			return nil, err
 		}
+		failpoint.Inject("beforeIdempotencyAppend", func(value failpoint.Value) {
+			walpoint.Hit(ctx, value, walpoint.BeforeIdempotencyAppend, msg, nil, insertResult)
+		})
 		msgID, err := append(ctx, msg)
 		if err != nil {
 			window.Fail(begin.Pending, err, msg)
 			return nil, err
 		}
+		failpoint.Inject("afterIdempotencyAppend", func(value failpoint.Value) {
+			walpoint.Hit(ctx, value, walpoint.AfterIdempotencyAppend, msg, msgID, insertResult)
+		})
 		window.Complete(begin.Pending, commitResultFromAppendContext(ctx, msgID, insertResult), msg)
 		return msgID, nil
 	case BeginDecisionWait:
