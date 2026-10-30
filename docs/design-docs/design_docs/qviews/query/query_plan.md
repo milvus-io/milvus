@@ -209,11 +209,18 @@ Successful transaction bodies record whether Transform consumption is required
 before releasing their in-flight slots. Recovery reconstructs the same
 classification. At a complete ACK prefix, an insert-only commit advances only
 GrowingMVCC; a commit containing Delete advances both frontiers. ACK details
-remain available until WAB.Append and QueryMVCC publication finish. Empty
-transactions retain their existing acceptance behavior and conservative dual
-frontier projection.
+remain available until WAB.Append and QueryMVCC publication finish. The production
+integration rejects transactions with no successful bodies after in-flight appends
+finish.
 
 A published RestoreSnapshot, like CreateCollection, initializes both frontiers
 for its channel. Observing its append alone cannot register a query snapshot;
-late append callbacks cannot overwrite newer published progress. The full
-RestoreSnapshot creation workflow remains separate production integration.
+late append callbacks cannot overwrite newer published progress. The
+RestoreSnapshot creation workflow is wired by the production integration.
+
+## Partition statistics and pruning
+
+[Global segment pruning](../query/segment_pruning.md) defines immutable DataView
+statistics references, SN resource readiness and shared ownership, and per-worker
+Plan selections. Scalar and vector clustering pruning run on SN during Phase 1;
+QN applies the recorded selection before acquiring execution handles.

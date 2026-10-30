@@ -3089,6 +3089,7 @@ func (m *meta) loadableProjection(ctx context.Context, collectionID int64) ([]da
 			}
 		}
 		loadable = append(loadable, dataview.LoadableSegment{
+			PartitionStatsVersion:       segment.GetPartitionStatsVersion(),
 			SchemaVersion:               segment.GetSchemaVersion(),
 			SegmentID:                   segment.GetID(),
 			VChannel:                    segment.GetInsertChannel(),

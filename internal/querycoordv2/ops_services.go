@@ -170,12 +170,11 @@ func (s *Server) GetQueryNodeDistribution(ctx context.Context, req *querypb.GetQ
 		}, nil
 	}
 
-	segments := s.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(req.GetNodeID()))
-	channels := s.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(req.GetNodeID()))
+	// QueryNodes no longer host channel delegators. Read confirmed segment
+	// resources from QueryView reports, not the retired distribution heartbeat.
 	return &querypb.GetQueryNodeDistributionResponse{
 		Status:           merr.Success(),
-		ChannelNames:     lo.Map(channels, func(c *meta.DmChannel, _ int) string { return c.GetChannelName() }),
-		SealedSegmentIDs: lo.Map(segments, func(s *meta.Segment, _ int) int64 { return s.GetID() }),
+		SealedSegmentIDs: s.qviewsRuntime.shardViewRegistry.LoadedSegmentsOnNode(req.GetNodeID()),
 	}, nil
 }
 

@@ -286,8 +286,8 @@ func (g *GetStatisticsTask) getStatisticsFromQueryNode(ctx context.Context) erro
 	}
 	if g.viewQueryClient != nil {
 		rows, err := g.viewQueryClient.Legacy().Statistics(ctx, g.CollectionID, &viewpb.StatisticsRequest{
-			PartitionIds: g.loadedPartitionIDs, GuaranteeTimestamp: g.GuaranteeTimestamp,
-		})
+			PartitionIds: g.loadedPartitionIDs,
+		}, g.GuaranteeTimestamp)
 		if err != nil {
 			return err
 		}

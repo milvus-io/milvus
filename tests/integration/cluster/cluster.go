@@ -99,6 +99,15 @@ func NewMiniClusterV3(
 	for _, opt := range opts {
 		opt(client)
 	}
+	// SetupSuite cannot tear down a cluster whose constructor did not return.
+	// In particular, a readiness timeout must not leave nodes occupying the
+	// fixed integration-test ports for the next suite.
+	defer func() {
+		if failure := recover(); failure != nil {
+			client.Stop()
+			panic(failure)
+		}
+	}()
 	client.init()
 	client.Logger().Info(ctx,
 
@@ -191,8 +200,9 @@ func (c *MiniClusterV3) init() {
 
 // initClients initializes the clients.
 func (c *MiniClusterV3) initClients() {
-	c.initMilvusClient()
+	// Observe a failed coordinator before waiting for dependent Proxy readiness.
 	c.initInternalClient()
+	c.initMilvusClient()
 }
 
 // initMilvusClient initializes the milvus client.
@@ -201,13 +211,13 @@ func (c *MiniClusterV3) initMilvusClient() {
 		return
 	}
 
-	_, err := c.defaultProxy.GetAddress(context.Background())
+	_, err := c.defaultProxy.GetAddress(c.ctx)
 	if err != nil {
 		panic(err)
 	}
 
 	// wait for proxy ready.
-	clientConn, err := grpc.DialContext(context.Background(), "localhost:19530", getGrpcDialOpt()...)
+	clientConn, err := grpc.DialContext(c.ctx, "localhost:19530", getGrpcDialOpt()...)
 	if err != nil {
 		panic(err)
 	}

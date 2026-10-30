@@ -6297,7 +6297,9 @@ func TestCompleteCompactionMutationPublishesOnlyFinalDataViewSegments(t *testing
 	ctx := context.Background()
 	newMetaWithDataView := func(t *testing.T) (*meta, dataviewpkg.Manager) {
 		catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
-		segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
+		metaStore := metacache.NewMetaStore(nil)
+		metaStore.PutCollection(&collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Version: 1}})
+		segments := NewSegmentsInfo(metaStore)
 		for _, segmentID := range []int64{1, 2} {
 			segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
 				ID:            segmentID,
@@ -6315,8 +6317,9 @@ func TestCompleteCompactionMutationPublishesOnlyFinalDataViewSegments(t *testing
 		}
 		manager := dataviewpkg.NewManager(catalog, nil)
 		_, err := manager.OnCreateCollection(ctx, dataviewpkg.CreateCollectionDataViewEvent{
-			CollectionID: 100,
-			VChannels:    []string{"ch-1"},
+			CollectionID:  100,
+			SchemaVersion: 1,
+			VChannels:     []string{"ch-1"},
 		})
 		require.NoError(t, err)
 		_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64) ([]dataviewpkg.LoadableSegment, error) {
@@ -6326,7 +6329,7 @@ func TestCompleteCompactionMutationPublishesOnlyFinalDataViewSegments(t *testing
 			}, nil
 		})
 		require.NoError(t, err)
-		return &meta{ctx: ctx, catalog: catalog, segments: segments, dataViewManager: manager}, manager
+		return &meta{ctx: ctx, catalog: catalog, metaStore: metaStore, segments: segments, dataViewManager: manager}, manager
 	}
 	dataViewSegmentIDs := func(t *testing.T, manager dataviewpkg.Manager) []int64 {
 		ref, err := manager.Latest(ctx, 100)
@@ -6475,7 +6478,9 @@ func TestCompleteCompactionMutationPublishesOnlyFinalDataViewSegments(t *testing
 func TestCompleteCompactionMutationKeepsDataViewOrder(t *testing.T) {
 	ctx := context.Background()
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
-	segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
+	metaStore := metacache.NewMetaStore(nil)
+	metaStore.PutCollection(&collectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Version: 1}})
+	segments := NewSegmentsInfo(metaStore)
 	segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{
 		ID:            1,
 		CollectionID:  100,
@@ -6490,13 +6495,13 @@ func TestCompleteCompactionMutationKeepsDataViewOrder(t *testing.T) {
 		}},
 	}))
 	manager := dataviewpkg.NewManager(catalog, nil)
-	_, err := manager.OnCreateCollection(ctx, dataviewpkg.CreateCollectionDataViewEvent{CollectionID: 100, VChannels: []string{"ch-1"}})
+	_, err := manager.OnCreateCollection(ctx, dataviewpkg.CreateCollectionDataViewEvent{CollectionID: 100, SchemaVersion: 1, VChannels: []string{"ch-1"}})
 	require.NoError(t, err)
 	_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64) ([]dataviewpkg.LoadableSegment, error) {
 		return []dataviewpkg.LoadableSegment{{SegmentID: 1, VChannel: "ch-1", PartitionID: 10}}, nil
 	})
 	require.NoError(t, err)
-	meta := &meta{ctx: ctx, catalog: catalog, segments: segments, dataViewManager: manager}
+	meta := &meta{ctx: ctx, catalog: catalog, metaStore: metaStore, segments: segments, dataViewManager: manager}
 	compact := func(from, to int64) error {
 		_, err := meta.CompleteCompactionMutation(ctx, &datapb.CompactionTask{
 			CollectionID:  100,

@@ -263,6 +263,31 @@ func (r *ShardViewRegistry) SnapshotForCollection(collectionID int64) *ShardView
 	return &ShardViewSnapshot{version: r.version, stats: stats}
 }
 
+// CollectionIDs returns collections with resident shard managers, including
+// released collections whose views have not finished cleanup.
+func (r *ShardViewRegistry) CollectionIDs() []int64 {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return maps.Keys(r.collectionShards)
+}
+
+// LoadedSegmentsOnNode returns distinct segments confirmed ready by QueryView
+// reports, including retained Down views. Preparing targets are not loaded
+// facts; Dropping views are no longer advertised as available resources.
+func (r *ShardViewRegistry) LoadedSegmentsOnNode(nodeID int64) []int64 {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	segments := make(map[int64]struct{})
+	for shardID := range r.nodeShards[nodeID] {
+		for id, segment := range r.stats[shardID].Segments {
+			if segment.Nodes[nodeID] >= SegmentStateReady {
+				segments[id] = struct{}{}
+			}
+		}
+	}
+	return maps.Keys(segments)
+}
+
 // CollectionShards returns the resident shards belonging to collectionID.
 func (r *ShardViewRegistry) CollectionShards(collectionID int64) []qviews.ShardID {
 	r.mu.RLock()

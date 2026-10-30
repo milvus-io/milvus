@@ -427,6 +427,20 @@ An ordinary empty manager may remain resident. A released manager is removed
 after its last view completes durable removal; its cache state is removed with
 an identity check so a late callback cannot erase a replacement manager.
 
+#### Operational distribution and quota scope
+
+`GetQueryNodeDistribution` keeps its RPC contract and reports distinct Segment IDs
+from Registry-confirmed Ready/Up resources, including retained Down views. It does
+not count Preparing targets or advertise Dropping resources as available. This is
+an observed loading snapshot, not a physical-memory reclamation barrier. QueryNodes
+no longer host channel delegators, so their channel list is empty; serving shard
+coverage comes from `GetReplicas`.
+
+Read-quota scope includes desired load configurations and collections with resident
+shard managers, in addition to worker metrics. Empty and growing-only collections
+must honor read quotas even without QN physical resources. Removing desired load
+state does not remove quota coverage while old views remain resident.
+
 #### CollectionLoadManager (Facade)
 
 ```go
