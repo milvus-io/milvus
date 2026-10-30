@@ -242,14 +242,13 @@ Locate(const JsonBatch& batch,
     if (!batch.IsValid(row))
         return RowPresence::FieldNull;
     const auto& document = batch.Document(row);
-    AssertInfo(!document.data().empty(),
-               "valid JSON row {} has an empty document",
-               row);
-    root = document.dom_doc().value();
-    if (!path_exists(root, params.path_tokens) ||
+    // A valid row with empty bytes has no document, so no path exists in it.
+    auto dom = document.dom_doc();
+    if (!path_exists(dom, params.path_tokens) ||
         !document.exist(params.json_path)) {
         return RowPresence::NoValue;
     }
+    root = dom.value_unsafe();
     return RowPresence::Present;
 }
 

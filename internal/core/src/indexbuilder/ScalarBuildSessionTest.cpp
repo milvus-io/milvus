@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <arrow/builder.h>
 #include <gtest/gtest.h>
 
 #include <array>
@@ -510,6 +511,94 @@ TEST_F(ScalarBuildSessionTest, NgramJsonIndexOnFieldRoot) {
     ngram->Candidates("apple", index::PatternOp::InnerMatch, candidates);
     for (int64_t row = 0; row < rows; ++row) {
         EXPECT_EQ(candidates[row], row % 3 == 0) << "row " << row;
+    }
+}
+
+// Older clients could store a valid nullable JSON row whose bytes are empty.
+// Such a row has no document: every JSON index must still build and treat it
+// as a row where no path exists, distinct from a null row.
+TEST_F(ScalarBuildSessionTest, JsonIndexBuildsWithEmptyValidDocument) {
+    constexpr int64_t rows = 12;
+    constexpr int64_t empty_row = 0;
+    constexpr int64_t null_row = 1;
+    arrow::BinaryBuilder builder;
+    for (int64_t row = 0; row < rows; ++row) {
+        arrow::Status status;
+        if (row == empty_row) {
+            status = builder.Append("");
+        } else if (row == null_row) {
+            status = builder.AppendNull();
+        } else if (row % 2 == 0) {
+            status = builder.Append("{\"a\":" + std::to_string(row) + "}");
+        } else {
+            status = builder.Append("\"apple " + std::to_string(row) + "\"");
+        }
+        ASSERT_TRUE(status.ok()) << status.ToString();
+    }
+    std::shared_ptr<arrow::Array> array;
+    ASSERT_TRUE(builder.Finish(&array).ok());
+
+    struct Case {
+        const char* index_type;
+        const char* cast;
+        const char* path;
+    };
+    for (const auto& [index_type, cast, path] :
+         {Case{index::INVERTED_INDEX_TYPE, "JSON", ""},
+          Case{index::INVERTED_INDEX_TYPE, "DOUBLE", "/a"},
+          Case{index::ASCENDING_SORT, "DOUBLE", "/a"},
+          Case{index::NGRAM_INDEX_TYPE, "VARCHAR", ""}}) {
+        SCOPED_TRACE(::testing::Message()
+                     << index_type << "/" << cast << "/" << path);
+        auto info = Info(DataType::JSON, index_type);
+        info.set_num_rows(rows);
+        info.mutable_field_schema()->set_nullable(true);
+        std::vector<std::pair<std::string, std::string>> params{
+            {JSON_CAST_TYPE, cast}, {JSON_PATH, path}};
+        if (std::string_view(index_type) == index::NGRAM_INDEX_TYPE) {
+            params.emplace_back(index::MIN_GRAM, "2");
+            params.emplace_back(index::MAX_GRAM, "3");
+        }
+        for (const auto& [key, value] : params) {
+            auto* param = info.add_index_params();
+            param->set_key(key);
+            param->set_value(value);
+        }
+        auto prepared = AdaptBuildIndexInfo(info, BuildPurpose::ScalarIndex);
+        auto data = std::make_shared<FieldData<Json>>(DataType::JSON, true);
+        data->FillFieldData(array);
+        ASSERT_EQ(data->get_null_count(), 1);
+        info.add_insert_files(WriteBinlog(prepared.file_manager_context, data));
+        prepared = AdaptBuildIndexInfo(info, BuildPurpose::ScalarIndex);
+        auto reader = BuildAndLoad(std::move(prepared));
+        ASSERT_NE(reader, nullptr);
+        EXPECT_EQ(reader->Count(), rows);
+        const auto* json =
+            dynamic_cast<const index::IJsonIndexReader*>(reader.get());
+        ASSERT_NE(json, nullptr);
+        const auto exists = json->Exists(path);
+        ASSERT_EQ(exists.size(), rows);
+        EXPECT_FALSE(exists[empty_row]);
+        EXPECT_FALSE(exists[null_row]);
+        if (std::string_view(path) == "/a") {
+            // Only the even object rows from 2 on carry "a".
+            EXPECT_EQ(exists.count(), rows / 2 - 1);
+            const auto resolved =
+                json->Resolve(path, JsonCastType::FromString(cast));
+            ASSERT_TRUE(static_cast<bool>(resolved));
+            const auto* predicate =
+                dynamic_cast<const index::IScalarPredicateReader<double>*>(
+                    resolved.get());
+            ASSERT_NE(predicate, nullptr);
+            const double key = 4.0;
+            const auto hits = predicate->In(1, &key);
+            ASSERT_EQ(hits.size(), rows);
+            EXPECT_EQ(hits.count(), 1);
+            EXPECT_TRUE(hits[4]);
+        } else {
+            // Every non-null row except the empty one has a root document.
+            EXPECT_EQ(exists.count(), rows - 2);
+        }
     }
 }
 
