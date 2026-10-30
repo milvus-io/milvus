@@ -3037,25 +3037,30 @@ func (m *meta) isCollectionCompactionBlocked(collectionID int64) bool {
 	return m.snapshotMeta.IsCollectionCompactionBlocked(collectionID)
 }
 
-// GetCompactableSegmentGroupByCollection returns sealed segments grouped by collection.
-// This is consumed exclusively by the L0 compaction policy, which only acts on L0 segments.
-// Snapshot compaction protection targets L1/L2 segments referenced by snapshots, so it must
-// NOT filter segments here: doing so would prevent L0 delete-log compaction and cause
-// delta log accumulation, query latency spikes, and write stalls on collections with
-// active snapshots.
+// GetCompactableSegmentGroupByCollection returns eligible L0 segments grouped by collection.
+// Collections with eligible L1/L2 segments retain an empty entry for the L0
+// policy's active/idle bookkeeping, without collecting those segments.
+// Snapshot protection applies to referenced L1/L2 segments and must not block
+// L0 delete-log compaction, which would cause delta log accumulation and write stalls.
 func (m *meta) GetCompactableSegmentGroupByCollection() map[int64][]*SegmentInfo {
-	allSegs := m.SelectSegments(m.ctx, SegmentFilterFunc(func(segment *SegmentInfo) bool {
-		return isSegmentHealthy(segment) &&
-			isFlushed(segment) && // sealed segment
-			!segment.isCompacting && // not compacting now
-			!segment.GetIsImporting() // not importing now
-	}))
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
 
 	ret := make(map[int64][]*SegmentInfo)
-	for _, seg := range allSegs {
-		ret[seg.CollectionID] = append(ret[seg.CollectionID], seg)
-	}
+	for _, segment := range m.segments.segments {
+		if !isSegmentHealthy(segment) || !isFlushed(segment) ||
+			segment.isCompacting || segment.GetIsImporting() {
+			continue
+		}
 
+		collectionID := segment.GetCollectionID()
+		if _, ok := ret[collectionID]; !ok {
+			ret[collectionID] = nil
+		}
+		if segment.GetLevel() == datapb.SegmentLevel_L0 {
+			ret[collectionID] = append(ret[collectionID], segment)
+		}
+	}
 	return ret
 }
 

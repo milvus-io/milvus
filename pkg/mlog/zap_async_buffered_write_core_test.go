@@ -21,6 +21,7 @@ import (
 	"math/rand"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -33,6 +34,40 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 )
+
+type cloneCountingEncoder struct {
+	zapcore.Encoder
+	clones *atomic.Int64
+}
+
+func (e *cloneCountingEncoder) Clone() zapcore.Encoder {
+	e.clones.Add(1)
+	return &cloneCountingEncoder{Encoder: e.Encoder.Clone(), clones: e.clones}
+}
+
+func TestAsyncTextIOCoreWithClonesEncoderOnce(t *testing.T) {
+	clones := &atomic.Int64{}
+	core := &asyncTextIOCore{
+		LevelEnabler: zap.DebugLevel,
+		enc: &cloneCountingEncoder{
+			Encoder: newZapTextEncoder(&Config{}),
+			clones:  clones,
+		},
+	}
+
+	child := core.With([]zapcore.Field{zap.Int64("collectionID", 42)}).(*asyncTextIOCore)
+	require.EqualValues(t, 1, clones.Load())
+
+	buf, err := child.enc.EncodeEntry(zapcore.Entry{Message: "child"}, nil)
+	require.NoError(t, err)
+	defer buf.Free()
+	assert.Contains(t, buf.String(), "collectionID=42")
+
+	parent, err := core.enc.EncodeEntry(zapcore.Entry{Message: "parent"}, nil)
+	require.NoError(t, err)
+	defer parent.Free()
+	assert.NotContains(t, parent.String(), "collectionID")
+}
 
 func TestAsyncBufferedWriteSyncer(t *testing.T) {
 	blockWriter := &blockWriter{
