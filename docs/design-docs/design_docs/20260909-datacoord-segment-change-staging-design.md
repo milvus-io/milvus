@@ -869,8 +869,13 @@ After staging:
   using the first local output ID as group ID. `subgroupOrdinal` and
   `previousGroupID` persist the order. Every subgroup may become READY before
   WAL commit, but publication waits for its predecessor to become COMMITTED.
+  Registration checks that the predecessor is still persisted with the same
+  collection, source, job, channel and preceding ordinal; a composite write
+  cannot delete it while saving a successor.
   Job completion waits for every subgroup. An already-admitted job finishes
-  its remaining subgroups even after opt-out.
+  its remaining subgroups even after opt-out. A failed V3 job aborts and
+  reclaims its pre-fence groups after its workers are unbound and before the
+  job metadata is collected, as V2 already does.
 
 ### 6.6 Backfill / BatchUpdateManifest — no group
 
@@ -902,7 +907,8 @@ lower version and the group returns to STAGED and re-reads.
   keep the existing content-update protocol because a group cannot currently
   roll back a visible patch if publication fails. A failed refresh aborts
   unpublished new outputs. Atomic mixed content/membership publication is a
-  separate protocol extension.
+  separate protocol extension. Index-build nudges wait until the refreshed
+  source/spec is visible in DataCoord collection metadata.
 - CDC-replicated import: `SOURCE_CDC_REPLICATED`; commit_ts comes from the CDC
   source; the publish txn uses `max(source commit_ts, existing invariant)`.
 
@@ -1029,6 +1035,10 @@ Replay safety:
 - **Snapshot export** (`handler.GenSnapshot`): export contains only published
   members. The candidate projection excludes unpublished group outputs while
   retaining their still-visible parents; restore therefore cannot copy both.
+  Candidate segments and exclusions are read under one `segMu.RLock`. A
+  compaction group rechecks snapshot protection under the commit's `segMu`
+  write lock, so a snapshot starting after the first publish check cannot
+  race the final SegmentMeta write.
 - **Terminal group cleanup**: the inspector sweeps terminal groups after each
   evaluation pass. It keeps the record while the owning compaction task,
   import job, copy task/job, or external refresh job can still retry. A

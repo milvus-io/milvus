@@ -48,8 +48,20 @@ func collectImportV3JobGC(jc *importV3JobContext) {
 		jc.job.GetState() != internalpb.ImportJobState_Failed {
 		return
 	}
+	if jc.job.GetState() == internalpb.ImportJobState_Failed {
+		if jc.meta.failedImportGroupsHaveCommitFence(jc.job.GetJobID()) {
+			jc.log.Warn(jc.ctx, "refusing failed import v3 cleanup after a WAL commit fence")
+			return
+		}
+	}
 	if !prepareImportV3JobGC(jc) {
 		return
+	}
+	if jc.job.GetState() == internalpb.ImportJobState_Failed {
+		if err := jc.meta.abortFailedImportGroups(jc.ctx, jc.job.GetJobID()); err != nil {
+			jc.log.Warn(jc.ctx, "reclaim failed import v3 groups before job GC", mlog.Err(err))
+			return
+		}
 	}
 	if !deleteImportV3JobObjects(jc) {
 		return

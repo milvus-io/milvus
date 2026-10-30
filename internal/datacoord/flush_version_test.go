@@ -95,6 +95,53 @@ func (s *ServerSuite) TestSegmentChangePreservesSortEnabledFlushHandoff() {
 	require.True(t, proto.Equal(version, s.flushVersion(req)))
 }
 
+func TestSortEnabledFlushHandoffWithSegmentChangeDisabled(t *testing.T) {
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "false")
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.EnableCompaction, "true")
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.EnableSortCompaction, "true")
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	manager := dataview.NewManager(m.catalog.(dataview.Catalog), nil)
+	m.dataViewManager = manager
+	schema := readinessVectorSchema()
+	m.AddCollection(&collectionInfo{ID: 100, Schema: schema, VChannelNames: []string{"ch1"}})
+	_, err = manager.OnCreateCollection(t.Context(), dataview.CreateCollectionDataViewEvent{
+		CollectionID: 100, VChannels: []string{"ch1"},
+	})
+	require.NoError(t, err)
+	// This is the SegmentMeta shape written by a sort-enabled flush with the
+	// flag off: still invisible to compaction, but already sealed in DataView.
+	require.NoError(t, m.AddSegment(t.Context(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 10, CollectionID: 100, PartitionID: 10, InsertChannel: "ch1",
+		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
+		NumOfRows: 10, IsInvisible: true, SealedAtDataVersion: &viewpb.DataVersion{StreamingVersion: 1},
+		Binlogs: []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 10, EntriesNum: 10}}}},
+	})))
+	_, err = manager.RecomputeNow(t.Context(), 100, m.loadableProjection)
+	require.NoError(t, err)
+	ref, err := manager.Latest(t.Context(), 100)
+	require.NoError(t, err)
+	require.Equal(t, []int64{10}, ref.DataView().GetShards()[0].GetPartitions()[0].GetSegmentIds())
+	ref.Deref()
+
+	_, err = m.CompleteCompactionMutation(t.Context(), &datapb.CompactionTask{
+		PlanID: 5000, CollectionID: 100, PartitionID: 10, Channel: "ch1",
+		Type: datapb.CompactionType_SortCompaction, InputSegments: []int64{10}, Schema: schema,
+	}, &datapb.CompactionPlanResult{
+		PlanID: 5000, Segments: []*datapb.CompactionSegment{{
+			SegmentID: 20, NumOfRows: 10, IsSorted: true,
+			InsertLogs: []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 20, EntriesNum: 10}}}},
+		}},
+	})
+	require.NoError(t, err)
+	_, err = manager.RecomputeNow(t.Context(), 100, m.loadableProjection)
+	require.NoError(t, err)
+	ref, err = manager.Latest(t.Context(), 100)
+	require.NoError(t, err)
+	defer ref.Deref()
+	require.Equal(t, []int64{20}, ref.DataView().GetShards()[0].GetPartitions()[0].GetSegmentIds())
+}
+
 func (s *ServerSuite) TestSegmentChangeFlushToSort() {
 	t := s.T()
 	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "true")

@@ -116,6 +116,39 @@ func (m *meta) abortProducerChange(ctx context.Context, g *model.SegmentChangeGr
 	return m.reclaimSegmentChangeGroup(ctx, g)
 }
 
+// Failed import jobs must release staged groups before their task and job
+// metadata can be collected. Both V2 and V3 use this idempotent path.
+func (m *meta) abortFailedImportGroups(ctx context.Context, jobID int64) error {
+	if m == nil {
+		return nil
+	}
+	if m.failedImportGroupsHaveCommitFence(jobID) {
+		return merr.WrapErrServiceUnavailableMsg("cannot reclaim import job %d after its WAL commit fence", jobID)
+	}
+	for _, source := range []model.SegmentChangeSource{model.SegmentChangeSourceImportJob, model.SegmentChangeSourceCDCReplicated} {
+		for _, group := range m.producerChangeGroups(source, jobID, "") {
+			if err := m.abortProducerChange(ctx, group, "import job failed before WAL commit"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (m *meta) failedImportGroupsHaveCommitFence(jobID int64) bool {
+	if m == nil {
+		return false
+	}
+	for _, source := range []model.SegmentChangeSource{model.SegmentChangeSourceImportJob, model.SegmentChangeSourceCDCReplicated} {
+		for _, group := range m.producerChangeGroups(source, jobID, "") {
+			if groupHasCommittedImportFence(group) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // The commit fence is assigned by this VChannel's WAL, including on a CDC
 // secondary. Physical segment/group IDs are local and never enter the WAL.
 func (s *Server) stageImportChange(ctx context.Context, job ImportJob, channel string, ids []int64, commitTS uint64) (bool, error) {
