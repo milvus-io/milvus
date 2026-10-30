@@ -67,6 +67,7 @@ func (s *FailpointSuite) SetupSuite() {
 	s.WithMilvusConfig("pulsar.maxMessageSize", "524288")
 	s.WithMilvusConfig("pulsar.messageReserveSize", "65536")
 	s.WithMilvusConfig("dataCoord.enableCompaction", "false")
+	s.WithMilvusConfig("rootCoord.dmlChannelNum", "4")
 	s.WithMilvusConfig("streaming.walBalancer.balancePolicy.minRebalanceIntervalThreshold", "1ms")
 	s.WithOptions(integration.WithDropAllCollectionsWhenTestTearDown())
 	s.MiniClusterSuite.SetupSuite()
