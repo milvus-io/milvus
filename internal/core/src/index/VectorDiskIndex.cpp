@@ -46,6 +46,7 @@
 #include "knowhere/binaryset.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
+#include "knowhere/emb_list_utils.h"
 #include "knowhere/index/index_factory.h"
 #include "log/Log.h"
 #include "nlohmann/json.hpp"
@@ -267,9 +268,10 @@ WriteDiskValidData(const LocalChunkManagerPtr& local_chunk_manager,
     AssertInfo(validity.has_value(), "nullable validity is missing");
     auto wire_count = validity->logical_row_count;
     auto& packed_data = validity->packed_bits;
-    if (!local_chunk_manager->Exist(valid_data_path)) {
-        local_chunk_manager->CreateFile(valid_data_path);
-    }
+    // Replace any file left by raw-data caching; the exported domain may be
+    // shorter than the raw per-row bitmap.
+    local_chunk_manager->Remove(valid_data_path);
+    local_chunk_manager->CreateFile(valid_data_path);
     local_chunk_manager->Write(
         valid_data_path, 0, &wire_count, sizeof(uint64_t));
     if (!packed_data.empty()) {
@@ -380,6 +382,15 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
         local_chunk_manager,
         local_index_path_prefix + "/" + EMPTY_EMB_LIST_OFFSET_KEY);
     if (!all_null_nullable && !empty_emb_list_state.has_value()) {
+        // An embedding list searched with an ordinary metric is a flat element
+        // index whose ids are the element ids the search bitset uses. Indexes
+        // built before the validity fix persisted the per-row bitmap instead,
+        // so the persisted validity cannot be trusted for this domain. Element
+        // nulls are not supported, hence every element is valid: load the
+        // engine without validity and import the element-domain identity.
+        const bool element_domain =
+            disk_valid_data.found && elem_type_ != DataType::NONE &&
+            !knowhere::get_el_metric_type(GetMetricType()).has_value();
         // start engine load index span
         auto span_load_engine =
             milvus::tracer::StartSpan("SegCoreEngineLoadDiskIndex", &ctx);
@@ -388,13 +399,30 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
         auto engine_scope = opentelemetry::trace::Tracer::WithActiveSpan(
             nostd_span_load_engine);
         auto stat = index_.Deserialize(
-            knowhere::BinarySet(), load_config, load_options);
+            knowhere::BinarySet(),
+            load_config,
+            element_domain ? knowhere::LoadOptions{} : load_options);
         if (stat != knowhere::Status::success)
             ThrowInfo(ErrorCode::UnexpectedError,
                       "failed to Deserialize index, {}",
                       KnowhereStatusString(stat));
         span_load_engine->End();
         SetDim(index_.Dim());
+        if (element_domain) {
+            const auto element_count = static_cast<size_t>(index_.Count());
+            std::vector<uint8_t> all_valid(
+                GetValidDataBitmapSize(element_count), 0xFF);
+            if (element_count % 8 != 0) {
+                all_valid.back() &=
+                    static_cast<uint8_t>((1U << (element_count % 8)) - 1);
+            }
+            ImportValidData(
+                index_,
+                {knowhere::ValidityView{all_valid.data(),
+                                        all_valid.size(),
+                                        static_cast<uint64_t>(element_count)},
+                 load_options.mmap});
+        }
     } else {
         auto dim = GetValueFromConfig<int64_t>(load_config, DIM_KEY);
         if (dim.has_value()) {
@@ -586,8 +614,12 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
                   "failed to build disk index, {}",
                   KnowhereStatusString(stat));
 
-    // Add valid_data file to index if it was created (nullable vector field)
-    if (local_chunk_manager->Exist(valid_data_path)) {
+    // Persist the index-owned validity rather than the raw per-row file
+    // written while caching raw data: an embedding list searched with an
+    // ordinary metric builds a flat element index whose id map is in the
+    // element domain, so the per-row file would not match it on load.
+    if (disk_valid_data.found) {
+        WriteDiskValidData(local_chunk_manager, valid_data_path, index_);
         file_manager_->AddFile(valid_data_path);
     }
 

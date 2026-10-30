@@ -70,6 +70,8 @@
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"
 #include "storage/PayloadReader.h"
+#include "storage/DiskFileManagerImpl.h"
+#include "storage/LocalChunkManagerSingleton.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -1937,6 +1939,198 @@ TEST(Indexing, DiskAnnEmbListBuildAllNullNullableFromBinlog) {
         [](int64_t offset) { return offset == INVALID_SEG_OFFSET; }));
 
     loaded_vec_index->CleanLocalData();
+}
+
+namespace {
+
+// Builds a nullable VECTOR_ARRAY index searched with an ordinary metric
+// (element-level), reloads it and checks that every element searches back to
+// its own element id. `legacy_validity` replaces the uploaded valid_data with
+// the per-row bitmap that disk builds persisted before the validity fix.
+void
+CheckNullableElementLevelIndex(const IndexType& index_type,
+                               bool more_rows_than_vectors,
+                               bool legacy_validity) {
+    constexpr int64_t row_count = 64;
+    constexpr int64_t dim = DIM;
+    const MetricType metric_type = knowhere::metric::COSINE;
+    int64_t collection_id = 500091;
+    int64_t partition_id = 2;
+    int64_t segment_id = 3;
+    int64_t field_id = 100;
+    int64_t build_id = 1000;
+    int64_t index_version = 1;
+
+    std::default_random_engine rng(42);
+    std::normal_distribution<float> dist(0.0F, 1.0F);
+    std::vector<uint8_t> valid_bitmap((row_count + 7) / 8, 0);
+    std::vector<milvus::VectorArray> vec_arrays;
+    std::vector<float> elements;
+    for (int64_t i = 0; i < row_count; ++i) {
+        if (i % 5 == 1) {
+            continue;  // null row
+        }
+        valid_bitmap[i / 8] |= static_cast<uint8_t>(1U << (i % 8));
+        int64_t num_vectors = 0;
+        if (more_rows_than_vectors) {
+            num_vectors = i % 5 == 0 ? 1 : 0;
+        } else {
+            num_vectors = i % 5 == 3 ? 0 : i % 4 + 1;
+        }
+        std::vector<float> data(num_vectors * dim);
+        for (auto& x : data) {
+            x = dist(rng);
+        }
+        elements.insert(elements.end(), data.begin(), data.end());
+        vec_arrays.emplace_back(num_vectors == 0 ? nullptr : data.data(),
+                                static_cast<int>(num_vectors),
+                                dim,
+                                DataType::VECTOR_FLOAT);
+    }
+    const auto element_count = static_cast<int64_t>(elements.size()) / dim;
+    ASSERT_GT(element_count, 0);
+    ASSERT_EQ(more_rows_than_vectors,
+              static_cast<int64_t>(vec_arrays.size()) > element_count);
+
+    auto field_data = storage::CreateFieldData(
+        DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, true, dim);
+    field_data->FillFieldData(
+        vec_arrays.data(), valid_bitmap.data(), row_count, 0);
+
+    StorageConfig storage_config = get_default_local_storage_config();
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = milvus::storage::InitArrowFileSystem(storage_config);
+    auto field_data_meta =
+        milvus::segcore::gen_field_meta(collection_id,
+                                        partition_id,
+                                        segment_id,
+                                        field_id,
+                                        DataType::VECTOR_ARRAY,
+                                        DataType::VECTOR_FLOAT,
+                                        true);
+    auto log_path =
+        WriteInsertBinlog(field_data, field_data_meta, chunk_manager, 0);
+
+    milvus::storage::IndexMeta index_meta{segment_id,
+                                          field_id,
+                                          build_id,
+                                          index_version,
+                                          "test",
+                                          "vec_field",
+                                          DataType::VECTOR_FLOAT,
+                                          dim};
+    milvus::storage::FileManagerContext file_manager_context(
+        field_data_meta, index_meta, chunk_manager, fs);
+
+    milvus::index::CreateIndexInfo create_index_info;
+    create_index_info.index_type = index_type;
+    create_index_info.metric_type = metric_type;
+    create_index_info.field_type = milvus::DataType::VECTOR_ARRAY;
+    create_index_info.index_engine_version =
+        knowhere::Version::GetCurrentVersion().VersionNumber();
+    auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_manager_context);
+
+    const bool is_disk = index_type == knowhere::IndexEnum::INDEX_DISKANN;
+    Config build_conf;
+    build_conf[knowhere::meta::METRIC_TYPE] = metric_type;
+    build_conf[knowhere::meta::DIM] = std::to_string(dim);
+    build_conf[INSERT_FILES_KEY] = std::vector<std::string>{log_path};
+    if (is_disk) {
+        build_conf[milvus::index::DISK_ANN_MAX_DEGREE] = std::to_string(24);
+        build_conf[milvus::index::DISK_ANN_SEARCH_LIST_SIZE] =
+            std::to_string(56);
+        build_conf[milvus::index::DISK_ANN_PQ_CODE_BUDGET] =
+            std::to_string(0.001);
+        build_conf[milvus::index::DISK_ANN_BUILD_DRAM_BUDGET] =
+            std::to_string(2);
+        build_conf[milvus::index::DISK_ANN_BUILD_THREAD_NUM] =
+            std::to_string(2);
+    } else {
+        build_conf[milvus::index::INDEX_TYPE] = index_type;
+        build_conf[knowhere::indexparam::M] = "16";
+        build_conf[knowhere::indexparam::EF] = "64";
+        build_conf[DIM_KEY] = dim;
+    }
+    ASSERT_NO_THROW(index->Build(build_conf));
+
+    if (legacy_validity) {
+        ASSERT_TRUE(is_disk);
+        milvus::storage::DiskFileManagerImpl legacy_file_manager(
+            file_manager_context);
+        auto local_chunk_manager =
+            storage::LocalChunkManagerSingleton::GetInstance()
+                .GetChunkManager();
+        auto path = legacy_file_manager.GetLocalIndexObjectPrefix() + "/" +
+                    milvus::index::VALID_DATA_KEY;
+        local_chunk_manager->Remove(path);
+        local_chunk_manager->CreateFile(path);
+        uint64_t wire_count = row_count;
+        local_chunk_manager->Write(path, 0, &wire_count, sizeof(wire_count));
+        local_chunk_manager->Write(
+            path, sizeof(wire_count), valid_bitmap.data(), valid_bitmap.size());
+        ASSERT_TRUE(legacy_file_manager.AddFile(path));
+    }
+
+    auto create_index_result = index->Upload();
+    auto index_files = create_index_result->GetIndexFiles();
+    index.reset();
+
+    auto new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, file_manager_context);
+    auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
+    ASSERT_NE(vec_index, nullptr);
+    Config load_conf = generate_load_conf(index_type, metric_type, 0);
+    load_conf["index_files"] = index_files;
+    load_conf[milvus::LOAD_PRIORITY] =
+        milvus::proto::common::LoadPriority::HIGH;
+    load_conf[DIM_KEY] = dim;
+    ASSERT_NO_THROW(vec_index->Load(milvus::tracer::TraceContext{}, load_conf));
+    EXPECT_EQ(vec_index->Count(), element_count);
+    EXPECT_EQ(vec_index->GetValidCount(), element_count);
+
+    // The element-level search bitset covers every element of the segment.
+    TargetBitmap filtered(element_count, false);
+    milvus::SearchInfo search_info;
+    search_info.topk_ = 1;
+    search_info.metric_type_ = metric_type;
+    search_info.search_params_ = milvus::Config{
+        {knowhere::meta::METRIC_TYPE, metric_type},
+        {knowhere::indexparam::EF, 64},
+        {milvus::index::DISK_ANN_QUERY_LIST, 16},
+    };
+    for (int64_t e = 0; e < element_count; ++e) {
+        auto query = knowhere::GenDataSet(1, dim, elements.data() + e * dim);
+        SearchResult result;
+        ASSERT_NO_THROW(vec_index->Query(
+            query, search_info, BitsetView(filtered), nullptr, result));
+        ASSERT_EQ(result.seg_offsets_.size(), 1);
+        EXPECT_EQ(result.seg_offsets_[0], e) << "element " << e;
+    }
+    vec_index->CleanLocalData();
+}
+
+}  // namespace
+
+TEST(Indexing, DiskAnnNullableElementLevelSearchesElementIds) {
+    CheckNullableElementLevelIndex(
+        knowhere::IndexEnum::INDEX_DISKANN, false, false);
+    CheckNullableElementLevelIndex(
+        knowhere::IndexEnum::INDEX_DISKANN, true, false);
+}
+
+TEST(Indexing, DiskAnnNullableElementLevelLoadsLegacyRowValidity) {
+    CheckNullableElementLevelIndex(
+        knowhere::IndexEnum::INDEX_DISKANN, false, true);
+    CheckNullableElementLevelIndex(
+        knowhere::IndexEnum::INDEX_DISKANN, true, true);
+}
+
+TEST(Indexing, HnswNullableElementLevelSearchesElementIds) {
+    CheckNullableElementLevelIndex(
+        knowhere::IndexEnum::INDEX_HNSW, false, false);
+    CheckNullableElementLevelIndex(
+        knowhere::IndexEnum::INDEX_HNSW, true, false);
 }
 
 #endif
