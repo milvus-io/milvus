@@ -457,7 +457,8 @@ func (sd *shardDelegator) executeSearchSubTasks(
 
 	results, err := executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount),
 		func(ctx context.Context, req *querypb.SearchRequest, worker cluster.Worker) (*internalpb.SearchResults, error) {
-			ctx = retry.WithMaxAttemptsContext(ctx, 3)
+			// Proxy owns replica failover; a dead worker must not consume its deadline.
+			ctx = retry.WithMaxAttemptsContext(ctx, 1)
 			resp, err := worker.SearchSegments(ctx, req)
 			if errors.Is(err, merr.ErrNodeNotFound) || grpcclient.IsServerIDMismatchErr(err) {
 				sd.markSegmentOffline(req.GetSegmentIDs()...)
@@ -803,7 +804,7 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 	}
 
 	_, err = executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount), func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
-		ctx = retry.WithMaxAttemptsContext(ctx, 3)
+		ctx = retry.WithMaxAttemptsContext(ctx, 1)
 		err := worker.QueryStreamSegments(ctx, req, srv)
 		if errors.Is(err, merr.ErrNodeNotFound) || grpcclient.IsServerIDMismatchErr(err) {
 			sd.markSegmentOffline(req.GetSegmentIDs()...)
@@ -907,7 +908,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 	}
 
 	results, err := executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount), func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
-		ctx = retry.WithMaxAttemptsContext(ctx, 3)
+		ctx = retry.WithMaxAttemptsContext(ctx, 1)
 		resp, err := worker.QuerySegments(ctx, req)
 		if errors.Is(err, merr.ErrNodeNotFound) || grpcclient.IsServerIDMismatchErr(err) {
 			sd.markSegmentOffline(req.GetSegmentIDs()...)

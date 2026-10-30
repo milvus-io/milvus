@@ -20,6 +20,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -30,10 +31,12 @@ import (
 
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -1535,4 +1538,54 @@ func (s *LBPolicySuite) TestExecuteWithRetryScopedKeepsTheExecErrorOnBalancerFai
 	s.ErrorIs(err, merr.ErrSegmentNotLoaded, "scoped, a balancer-side retriable error must not mask the terminal exec error")
 	s.False(merr.IsRetryableErr(err))
 	s.NotErrorIs(err, merr.ErrServiceUnavailable)
+}
+
+// Exercise the real ClientBase dial failure and Status round trip inside the LB.
+func (s *LBPolicySuite) TestDeadWorkerConnectionFailsOverBeforeDeadline() {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	channel := s.channels[0]
+	nodes := []NodeInfo{{NodeID: 1, Address: "dead", Serviceable: true}, {NodeID: 2, Address: "healthy", Serviceable: true}}
+	s.mgr.ExpectedCalls = nil
+	s.lbBalancer.ExpectedCalls = nil
+	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil)
+	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
+	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, available []int64, _ int64) (int64, error) {
+		for _, node := range available {
+			if node == 1 {
+				return 1, nil
+			}
+		}
+		return available[0], nil
+	})
+	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+	base := grpcclient.NewClientBase[*mocks.MockQueryNodeClient](&paramtable.Get().QueryNodeGrpcClientCfg, "test")
+	base.DialTimeout = 20 * time.Millisecond
+	// Localhost port 0 cannot accept a TCP connection; no remote service required.
+	base.SetGetAddrFunc(func() (string, error) { return "127.0.0.1:0", nil })
+	defer base.Close()
+	visited := []int64{}
+	err := s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
+		Db: s.dbName, CollectionName: s.collectionName, CollectionID: s.collectionID, Channel: channel, Nq: 1,
+		Exec: func(ctx context.Context, node UniqueID, _ types.QueryNodeClient, _ string) error {
+			visited = append(visited, node)
+			if node == 2 {
+				return nil
+			}
+			_, err := base.Call(retry.WithMaxAttemptsContext(ctx, 1), func(*mocks.MockQueryNodeClient) (any, error) {
+				s.Fail("dead worker must not execute RPC")
+				return nil, nil
+			})
+			s.ErrorIs(err, grpcclient.ErrConnect)
+			status := merr.Status(err)
+			s.EqualValues(65535, status.GetCode())
+			s.False(status.GetRetriable())
+			return merr.Error(status)
+		},
+	})
+	s.NoError(err)
+	s.Equal([]int64{1, 2}, visited)
+	s.NoError(ctx.Err())
+	s.Contains(s.lbPolicy.blacklist.GetBlacklistedNodes(channel), int64(1))
 }
