@@ -18,6 +18,8 @@ const RecoveryMagicStreamingInitialized = utility.RecoveryMagicStreamingInitiali
 
 // RecoverySnapshot is the snapshot of the recovery info.
 type RecoverySnapshot struct {
+	// TxnTombstones contains bounded successful Commit results observed in startup replay.
+	TxnTombstones      *utility.TxnTombstones
 	VChannels          map[string]*streamingpb.VChannelMeta
 	SegmentAssignments map[int64]*streamingpb.SegmentAssignmentMeta
 	Checkpoint         *WALCheckpoint

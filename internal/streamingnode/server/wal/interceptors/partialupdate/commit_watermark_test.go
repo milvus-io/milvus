@@ -170,7 +170,8 @@ func exerciseCommitWatermarkQueue(
 	require.NoError(t, err)
 	for _, commit := range append(waiters, newChainTestCASCommit(t, first)) {
 		_, err := env.txnManager.GetSessionOfTxn(commit.TxnContext().TxnID)
-		require.True(t, status.AsStreamingError(err).IsTxnExpired())
+		require.ErrorContains(t, err, "not found")
+		require.False(t, status.AsStreamingError(err).IsTxnExpired())
 	}
 	requireTestRowLocksAvailable(t, env.partial.state.rowLocks, "v1", 10, 20)
 	return obstructed
@@ -230,14 +231,16 @@ func TestPartialUpdateCommitExpiresDuringRealGuardWait(t *testing.T) {
 			require.NoError(t, err)
 			require.Nil(t, env.partial.state.getTxn(cas.TxnID))
 			_, err = env.txnManager.GetSessionOfTxn(cas.TxnID)
-			require.True(t, status.AsStreamingError(err).IsTxnExpired(), "cleaned session lookup returned: %v", err)
+			require.ErrorContains(t, err, "not found")
+			require.False(t, status.AsStreamingError(err).IsTxnExpired())
 			snapshotOnce.Do(func() { close(resumeSnapshot) })
 			once.Do(unlock)
 			err = receiveCommitValue(t, done)
 			// Either way the commit reaches TimeTick and finds its session
 			// gone. With the record already cleaned up, admission takes no row
 			// lock and leaves the classification to TimeTick.
-			require.True(t, status.AsStreamingError(err).IsTxnExpired(), "guarded commit returned: %v", err)
+			require.ErrorContains(t, err, "not found")
+			require.False(t, status.AsStreamingError(err).IsTxnExpired())
 			require.Empty(t, wal)
 			requireTestRowLocksAvailable(t, guards, "v1", 10)
 		})

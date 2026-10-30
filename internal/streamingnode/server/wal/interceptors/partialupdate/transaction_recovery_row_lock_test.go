@@ -77,7 +77,8 @@ func TestPartialUpdateRecoveryRegistersLeaseCleanup(t *testing.T) {
 	env.txnManager.CleanupTxnUntil(math.MaxUint64)
 	require.Nil(t, env.partial.state.getTxn(1))
 	_, err := env.txnManager.GetSessionOfTxn(1)
-	require.True(t, status.AsStreamingError(err).IsTxnExpired())
+	require.ErrorContains(t, err, "not found")
+	require.False(t, status.AsStreamingError(err).IsTxnExpired())
 	requireTestRowLocksAvailable(t, env.partial.state.rowLocks, "v1", 10)
 }
 
@@ -300,7 +301,8 @@ func TestPartialUpdateRecoveryCanceledDecodeKeepsDurableBodiesAndCleanup(t *test
 	env.txnManager.FailTxnAtVChannel("v1")
 	require.Nil(t, env.partial.state.getTxn(1), "session cleanup must remove the incomplete recovery record")
 	_, err := env.txnManager.GetSessionOfTxn(1)
-	requireTransactionExpired(t, err)
+	requireUnrecoverable(t, err)
+	require.ErrorContains(t, err, "not found")
 	requireTestRowLocksAvailable(t, env.partial.state.rowLocks, "v1", 10)
 }
 
@@ -324,7 +326,8 @@ func TestPartialUpdateRecoveryCleanupPreservesOriginalLease(t *testing.T) {
 	env.txnManager.CleanupTxnUntil(tsoutil.AddPhysicalDurationOnTs(lastBodyTS, 100*time.Millisecond))
 	require.Nil(t, env.partial.state.getTxn(1), "snapshot recovery must not renew the old lease")
 	_, err = env.txnManager.GetSessionOfTxn(1)
-	requireTransactionExpired(t, err)
+	requireUnrecoverable(t, err)
+	require.ErrorContains(t, err, "not found")
 	requireTestRowLocksAvailable(t, env.partial.state.rowLocks, "v1", 10)
 }
 
