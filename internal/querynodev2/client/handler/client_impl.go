@@ -8,6 +8,7 @@ import (
 var _ Client = (*clientImpl)(nil)
 
 type clientImpl struct {
+	sessionChanges  *sessionChanges
 	lifetime        *typeutil.Lifetime
 	rb              resolver.Builder
 	queryViewClient *queryViewClient
@@ -21,6 +22,9 @@ func (c *clientImpl) Close() {
 	c.lifetime.SetState(typeutil.LifetimeStateStopped)
 	c.lifetime.Wait()
 	c.queryViewClient.close()
+	if c.sessionChanges != nil {
+		c.sessionChanges.Close()
+	}
 	if c.rb != nil {
 		c.rb.Close()
 	}

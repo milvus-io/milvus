@@ -4604,9 +4604,8 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		assert.Error(t, merr.Error(resp.GetStatus()))
 	})
 
-	// A successful V3 commit must reconcile the DataView snapshot so consumers
-	// observe the new manifest versions; a V2-only result must not (V2
-	// column-group upserts do not touch the manifest).
+	// Successful commits notify reconciliation through the metadata primitives.
+	// The handler must not add a second notification after a V3 commit.
 	t.Run("v3_commit_recomputes_data_view", func(t *testing.T) {
 		ctx := context.Background()
 		m, err := newMemoryMeta(t)
@@ -4646,8 +4645,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		assert.Equal(t, 1, recomputeCalls, "a V3 commit must recompute the DataView")
 	})
 
-	// A V2-only result must not recompute the DataView snapshot.
-	t.Run("v2_only_does_not_recompute_data_view", func(t *testing.T) {
+	// V2 metadata updates use the same notification path. Reconciliation of an
+	// unchanged membership/manifest projection does not publish a new DataVersion.
+	t.Run("v2_commit_notifies_data_view_reconciliation", func(t *testing.T) {
 		ctx := context.Background()
 		m, err := newMemoryMeta(t)
 		require.NoError(t, err)
@@ -4691,7 +4691,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, merr.Ok(resp.GetStatus()))
 		assert.Equal(t, int32(1), resp.GetCommittedSegments())
-		assert.Equal(t, 0, recomputeCalls, "a V2-only commit must not recompute the DataView")
+		assert.Equal(t, 1, recomputeCalls, "a V2 metadata commit must notify reconciliation")
 	})
 
 	// Schema-version fence: a result computed against a schema version that no

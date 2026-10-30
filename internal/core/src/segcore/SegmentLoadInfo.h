@@ -414,21 +414,19 @@ class SegmentLoadInfo {
     SegmentLoadInfo() = delete;
 
     explicit SegmentLoadInfo(const ProtoType& info, SchemaPtr schema)
-        : SegmentLoadInfo(
-              info,
-              std::make_shared<const SealedFieldLayout>(
-                  schema.get(), LoadScope::FromLegacySchema(*schema))) {
+        : SegmentLoadInfo(info,
+                          std::make_shared<const SealedFieldLayout>(
+                              schema, LoadScope::FromLegacySchema(*schema))) {
     }
 
     explicit SegmentLoadInfo(ProtoType&& info, SchemaPtr schema)
-        : SegmentLoadInfo(
-              std::move(info),
-              std::make_shared<const SealedFieldLayout>(
-                  schema.get(), LoadScope::FromLegacySchema(*schema))) {
+        : SegmentLoadInfo(std::move(info),
+                          std::make_shared<const SealedFieldLayout>(
+                              schema, LoadScope::FromLegacySchema(*schema))) {
     }
 
     SegmentLoadInfo(const ProtoType& info,
-                    const Schema* schema,
+                    SchemaPtr schema,
                     const LoadScope& scope)
         : info_(info), restrict_load_fields_(true) {
         const auto fields =
@@ -547,7 +545,7 @@ class SegmentLoadInfo {
     Set(const ProtoType& info, SchemaPtr schema) {
         info_ = info;
         const auto fields = std::make_shared<const SealedFieldLayout>(
-            schema.get(), LoadScope::FromLegacySchema(*schema));
+            schema, LoadScope::FromLegacySchema(*schema));
         SetFieldSelection(*fields);
         BuildCache(fields);
     }
@@ -559,7 +557,7 @@ class SegmentLoadInfo {
     Set(ProtoType&& info, SchemaPtr schema) {
         info_ = std::move(info);
         const auto fields = std::make_shared<const SealedFieldLayout>(
-            schema.get(), LoadScope::FromLegacySchema(*schema));
+            schema, LoadScope::FromLegacySchema(*schema));
         SetFieldSelection(*fields);
         BuildCache(fields);
     }
@@ -1093,7 +1091,7 @@ class SegmentLoadInfo {
         if (!schema) {
             return;
         }
-        const SealedFieldLayout fields(schema.get(),
+        const SealedFieldLayout fields(schema,
                                        LoadScope::FromLegacySchema(*schema));
         SetFieldSelection(fields);
         PruneRuntimeStateNotInSchema();

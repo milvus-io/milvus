@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -364,5 +365,45 @@ func TestSegmentResourceFailureLeavesOtherInstancesQueryable(t *testing.T) {
 		query[0].Release()
 		f.drop(t, replacement)
 		f.drop(t, healthy)
+	})
+}
+
+func TestSegmentResourceUsesViewIndexSelection(t *testing.T) {
+	mockey.PatchConvey("same-schema Views select different index artifacts without mutating cached metadata", t, func() {
+		f := setupResourceTest(t, nil)
+		f.getMock.UnPatch()
+		source := resourceSnapshot(1, 1000, 1)
+		source.LoadInfo.IndexInfos = []*querypb.FieldIndexInfo{{FieldID: 100, IndexID: 300}, {FieldID: 100, IndexID: 301}}
+		mockey.Mock((*resourceTestMetadata).GetQueryViewSegmentLoadInfo).To(func(_ *resourceTestMetadata, _ context.Context, collection, segment int64) (SegmentLoadInfoSnapshot, error) {
+			snapshot := source
+			snapshot.CollectionID, snapshot.SegmentID = collection, segment
+			// The fixture's IDs match the acquired View; the metadata itself is
+			// intentionally shared across preparations to exercise immutability.
+			snapshot.LoadInfo.CollectionID, snapshot.LoadInfo.SegmentID = collection, segment
+			return snapshot, nil
+		}).Build()
+		f.dependencyMock.UnPatch()
+		mockey.Mock((*fakeQueryViewCollectionRuntimeManager).Acquire).To(func(_ *fakeQueryViewCollectionRuntimeManager, _ context.Context, view *qviews.QueryViewAtQueryNode) (CollectionRuntimeGuard, bool, error) {
+			id := int64(299 + view.IntoProto().GetMeta().GetLoadInfoVersion())
+			return &fakeCollectionRuntimeGuard{schema: &schemapb.CollectionSchema{Version: 1}, updatedIndexes: []*indexpb.IndexInfo{{FieldID: 100, IndexID: id}}}, false, nil
+		}).Build()
+		observed := make(chan int64, 2)
+		f.manager.estimator = &resourceTestEstimator{}
+		mockey.Mock((*resourceTestEstimator).Reserve).To(func(_ *resourceTestEstimator, _ context.Context, info *querypb.SegmentLoadInfo, c CollectionRuntime) (ResourceReservation, error) {
+			require.Len(t, info.IndexInfos, 1)
+			require.Equal(t, c.IndexInfos()[0].IndexID, info.IndexInfos[0].IndexID)
+			observed <- info.IndexInfos[0].IndexID
+			return nil, nil
+		}).Build()
+		a := f.acquire(1, 1, 1)
+		f.await(t, 1)
+		require.EqualValues(t, 300, <-observed)
+		b := f.acquire(2, 1, 2)
+		f.await(t, 1)
+		require.EqualValues(t, 301, <-observed)
+		require.Len(t, source.LoadInfo.IndexInfos, 2)
+		require.EqualValues(t, 1, f.loads.Load(), "read bindings share compatible physical rows")
+		f.drop(t, a)
+		f.drop(t, b)
 	})
 }

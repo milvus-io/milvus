@@ -41,9 +41,9 @@ A View requirement contains:
 
 Schema is resolved through `streaming.WAL().SchemaClient()` using the VChannel
 and exact SchemaVersion. `GetQueryViewLoadInfo` resolves the exact retained
-LoadInfo identity, including fields and partitions. LoadInfo IndexID is always
-zero: QueryViews do not bind an index version. Physical preparation uses the latest
-available compatible indexes from current Segment metadata. A
+LoadInfo identity, including fields, partitions and exact IndexIDs. Physical
+preparation filters Segment artifacts to this selection; it does not replace the
+binding metadata with current collection indexes. See [load requirements](../collection_load_info.md). A
 pending dependency is represented explicitly; preparation never substitutes
 latest schema or load configuration for an unavailable required identity.
 
@@ -62,8 +62,8 @@ Distinguish these identities:
 | Manifest/base revision | Required stored data and materialization capability |
 | Operation identity | A particular load, reopen, subscription or drain attempt |
 
-A logical key is not an incarnation fence. LoadInfoVersion is a content identity,
-not an ordered clock. A larger SchemaVersion alone does
+A logical key is not an incarnation fence. The parent allocates durable LoadInfoVersion identities; their ordering does not
+prove physical compatibility. A larger SchemaVersion alone does
 not prove compatibility with another View's field, Function or query semantics.
 
 ## 3. Ownership model
@@ -87,7 +87,7 @@ QueryView
 | QueryView handler/state machine | Receives desired Views, binds/unbinds their resources, aggregates reports and implements View lifecycle |
 | ViewResources | Owns one View's immutable requirements, resource references and per-binding readiness results |
 | SegmentResource | Sole owner of a Segment's physical preparation and lifetime; reconciles all bindings and owns metadata acquisition, operations and transform registration |
-| CollectionRuntime | Reference-counted CollectionID + SchemaVersion planning resource with a separate immutable View load scope |
+| CollectionRuntime | Reference-counted CollectionID + SchemaVersion + LoadInfoVersion metadata binding with a separate immutable View load scope |
 | TransformLogBuffer | Shares VChannel history and transport; applies transforms through instance-bound registrations |
 | Metadata provider | Returns complete loading snapshots through GetQueryViewSegmentLoadInfo |
 | Physical loader | Executes load/reopen/index/delta work using pinned inputs; returns results to the resource owner |
@@ -206,8 +206,8 @@ ReadStates and prepares missing capabilities without invalidating older ones.
 
 A binding waiting for unavailable materialization must not prevent another
 compatible, executable binding from progressing. Preserve published-schema
-availability and provide fair progress for pending bindings. LoadInfo hashes
-cannot be used to rank requests.
+availability and provide fair progress for pending bindings. LoadInfo version ordering cannot establish physical compatibility or justify
+starving older retained Views.
 
 Only one physical load/reopen mutation runs on a resource at a time. Metadata
 acceptance, demand updates and cancellation remain available while I/O runs.
@@ -288,17 +288,17 @@ field metadata while preparing columns and interim indexes. A newly added field
 need not exist in the previously published ReadState, which remains unchanged
 until preparation succeeds and the new state is published.
 
-CCollection owns one immutable logical Schema per `(CollectionID, SchemaVersion)`.
-LoadInfoVersion and loaded fields are not part of that identity. Published schema
-content cannot change through another mutable alias. Equivalent derived caches
-may be initialized with synchronization. Current compatible index metadata is
-separate from immutable schema content; QueryView never binds an IndexID.
+CCollection bindings share one immutable native Schema per
+`(CollectionID, SchemaVersion)`. Each LoadInfoVersion has independent immutable
+index metadata. Published schema content cannot change through another mutable
+alias. Equivalent derived caches may be initialized with synchronization.
 
 Schema-dependent Segment operations borrow `const Schema*` from their operation
-context. Physical operations such as HasRawData and DropFieldData use independently
-owned field descriptions and do not require a logical Schema argument. A sealed
-Segment does not store a current logical Schema, copy the complete collection
-Schema, or replace its Schema during Reopen. A query context binds:
+context. Physical operations such as HasRawData and DropFieldData use the retained
+layout. A sealed Segment does not deep-copy the collection Schema. Its layout
+owns a reference to the immutable Schema needed for physical preparation/reload;
+that Schema is not the authority for a query's logical schema.
+A query context binds:
 
 ```text
 borrowed Schema + immutable LoadScope + pinned physical ReadState + MVCC
@@ -342,39 +342,28 @@ available to Views. The Go View owns its Collection until all operations finish.
 
 
 Physical ReadStates retain immutable resource generations: columns, indexes,
-readers and row-domain metadata. PublishedSegmentState also owns a
-SealedFieldLayout containing the independent descriptions needed by those
-resources. FieldMeta is retained only for the selected fields and their physical
-dependencies, including the type, default projection and encoding information
-needed for physical inspection, decoding and reload. An all-field scope can
-require all field descriptions; a narrower scope does not copy unrelated
-FieldMeta. This layout is not the authority for query SchemaVersion or semantics.
-Stored SegmentLoadInfo retains field selection and load metadata without owning
-another layout reference.
+readers and row-domain metadata. PublishedSegmentState owns a shared immutable
+SealedFieldLayout. The layout owns a shared Schema reference, an IndexMeta
+reference, a LoadScope value and derived field/column lookup data; it does not
+copy FieldMeta. Collection caches layouts weakly by schema/index identity and
+scope selection. SegmentLoadInfo does not own a duplicate layout.
 
-Manifest discovery also needs storage-name, alias and local-format mappings.
-These compact mappings may include unselected fields: a column group can contain
-them, and external aliases can share one physical column. Dropping such aliases
-can change column-group decoding. They do not require retaining those fields'
-FieldMeta or a borrowed Schema. Layouts may retain the scope and resolved physical
-loading policies needed to prepare or reload their own resources; logical access
-remains bounded by the View's immutable LoadScope.
+Creation/reopen acquires the target layout before asynchronous execution. A
+reopened private generation retains its target layout; failure leaves the old
+state intact. Base adoption shares the adopted PublishedState and its layout.
+Thus B reusing A's read remains safe after A releases its View and CCollection:
+B and the physical state still retain the required metadata. A physical cache
+can extend Schema lifetime beyond all Views of that Schema without retaining
+those Views or their other Segment/buffer bindings.
 
-Schema-dependent creation and Reopen borrow the caller's Schema and LoadScope
-and construct independently owned physical descriptions. The operation waits
-for all children that borrow these inputs before returning. Schema-less physical
-load, inspection and eviction use the retained layout. Queries and output
-conversion use the operation's Plan Schema, not a logical schema reconstructed
-from a Segment. Both protobuf and Arrow retrieval execute against the query's
-pinned ReadState; Arrow output types and names come from that same Plan Schema.
-A retained successful preparation remains valid after its
-preparing View and operation have disappeared.
-
-Long-lived decoding resources own the encoding and column-group descriptors they
-need for eviction and reload. Delete owns stable primary-key identity/type and
-does not depend on a query Schema. These physical descriptors neither retain a
-CCollection nor introduce a native Schema pin. Their lifetime follows the
-physical resources, independently of the View that first prepared them.
+Queries and output conversion use their operation's Plan Schema and pinned
+ReadState. Arrow types and names also come from that Plan Schema. Native work,
+result conversion and cancellation must finish before releasing their handles.
+Background decoding resources own their descriptors or metadata references.
+Delete owns stable PK identity/type. Final resource destruction releases the
+states/layouts; the last shared metadata owner destroys Schema and IndexMeta.
+A narrow layout can keep the full shared Schema alive, so memory savings are
+not guaranteed for every field-selection pattern.
 
 For A requiring `{x, y}` and B requiring `{x, z}`, unchanged x can be shared,
 A retains y, and B prepares z. B becoming Ready does not wait for y to be removed.
@@ -662,8 +651,8 @@ false Ready or silent indefinite waiting.
 | Old transform drain exits after a new registration | New registration is unaffected; no false catch-up success |
 | Inputs change while a reconcile/task runs | A successor pass uses current requirements and metadata |
 | One requirement lacks a Manifest, another is executable | Executable compatible work makes progress |
-| Multiple schemas/scopes share a Segment | Correct fields/results per View, shared immutable CCollection, reuse of unchanged resources |
-| Schema owner retires while physical caches remain | Cache eviction/reload and Delete use independent physical metadata |
+| Multiple schemas/scopes share a Segment | Correct fields/results per View, shared parsed Schema with versioned index bindings, reuse of unchanged resources |
+| Schema owner retires while physical caches remain | Retained layouts own Schema/index metadata; Delete keeps independent PK state |
 | Original View exits before preparation completes | Reusable result has no dangling logical-schema borrow |
 | Result outlives native execution | Reduce, refill and zero-copy consumption retain all dependencies |
 | Same-ID Manifest update | Required content and deltas are applied before readiness |

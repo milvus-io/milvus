@@ -29,6 +29,8 @@ func (e *DirectSegmentTaskExecutor) Search(ctx context.Context, tasks []qnview.Q
 		return nil, err
 	}
 	req := buildQNSearchRequest(tasks[0].Request, tasks[0].MVCC, handles)
+	req.FilterOnly = tasks[0].Options.GetFilterOnly()
+	req.EnableExprCache = tasks[0].Options.GetEnableExprCache()
 	return e.searchRunner.Search(ctx, collection, selected, req, e.serverID)
 }
 

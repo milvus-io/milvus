@@ -14,6 +14,7 @@ var (
 )
 
 type QNSearchSegmentTask struct {
+	Options *viewpb.SearchExecutionOptions
 	Handle  SealedSegmentHandle
 	Request *internalpb.SearchRequest
 	MVCC    *viewpb.QueryPlanMVCC

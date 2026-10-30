@@ -852,7 +852,7 @@ SegmentLoadInfo::ComputeDiffDefaultFields(LoadDiff& diff,
                            fields_filled_with_default_.end());
 
     // Compute: new schema fields - new_info_fields - current_handled
-    for (const auto& [field_id, field_meta] : fields->get_fields()) {
+    for (const auto field_id : fields->get_field_ids()) {
         if (field_id.get() < START_USER_FIELDID ||
             !new_info.HasFieldInSchema(field_id)) {
             continue;
@@ -952,7 +952,8 @@ SegmentLoadInfo::ComputeDiffTextIndexes(LoadDiff& diff,
     }
 
     // Find text indexes to create: enable_match fields without pre-built index
-    for (const auto& [field_id, field_meta] : fields->get_fields()) {
+    for (const auto field_id : fields->get_field_ids()) {
+        const auto& field_meta = (*fields)[field_id];
         if (!field_meta.enable_match() ||
             !new_info.HasFieldInSchema(field_id)) {
             continue;
@@ -1103,7 +1104,7 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info,
             if (diff.manifest_updated) {
                 diff.load_external_manifest = true;
             }
-            for (const auto& [field_id, field] : fields->get_fields()) {
+            for (const auto field_id : fields->get_field_ids()) {
                 if (new_info.HasFieldInSchema(field_id) &&
                     !HasFieldInSchema(field_id)) {
                     diff.load_external_manifest = true;

@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
-	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
@@ -27,14 +26,6 @@ func (f schedulerTaskFunc) Execute(ctx context.Context) error {
 }
 
 var _ nodescheduler.Task = schedulerTaskFunc(nil)
-
-func updateCollectionIndexMeta(ctx context.Context, collection CollectionRuntime, indexes []*indexpb.IndexInfo) error {
-	updater, ok := collection.(CollectionIndexMetaUpdater)
-	if !ok {
-		return nil
-	}
-	return updater.UpdateIndexMeta(ctx, indexes)
-}
 
 type transformStartSegment struct {
 	TransformSegment

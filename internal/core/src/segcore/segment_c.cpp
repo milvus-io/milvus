@@ -137,8 +137,7 @@ CreateSegment(milvus::segcore::Collection* col,
             auto scope = milvus::segcore::LoadScope::FromLegacySchema(*schema);
             segment =
                 std::make_unique<milvus::segcore::ChunkedSegmentSealedImpl>(
-                    std::make_shared<const milvus::segcore::SealedFieldLayout>(
-                        schema.get(), std::move(scope)),
+                    col->GetSealedFieldLayout(scope),
                     col->get_index_meta(),
                     milvus::segcore::SegcoreConfig::default_config(),
                     segment_id,
@@ -223,8 +222,8 @@ NewSealedSegmentWithCollection(CCollection collection,
                                    info.field_hints().end());
         auto segment =
             std::make_unique<milvus::segcore::ChunkedSegmentSealedImpl>(
-                std::make_shared<const milvus::segcore::SealedFieldLayout>(
-                    schema.get(), milvus::segcore::LoadScope(fields, hints)),
+                col->GetSealedFieldLayout(
+                    milvus::segcore::LoadScope(fields, hints)),
                 col->get_index_meta(),
                 milvus::segcore::SegcoreConfig::default_config(),
                 segment_id,
@@ -273,26 +272,26 @@ AsyncReopenSealedSegmentWithCollection(CTraceContext trace,
     try {
         auto* collection =
             static_cast<milvus::segcore::Collection*>(c_collection);
-        auto schema = collection->get_schema();
         std::vector<int64_t> fields;
         if (load_field_count > 0) {
             fields.assign(load_fields, load_fields + load_field_count);
         }
-        // The Go operation pins CCollection through completion. Native physical
-        // loading metadata owns its descriptors and does not retain that Schema.
+        milvus::proto::segcore::SegmentLoadInfo info;
+        AssertInfo(info.ParseFromArray(load_blob, load_length),
+                   "unmarshal load info failed");
+        auto layout =
+            collection->GetSealedFieldLayout(milvus::segcore::LoadScope(
+                fields,
+                std::vector<int64_t>(info.field_hints().begin(),
+                                     info.field_hints().end())));
+        // Capture the exact metadata before scheduling. The CCollection handle
+        // may be released once its Go owner has joined this operation; retained
+        // PublishedStates continue owning the layout independently.
         auto future = milvus::futures::Future<bool>::async(
             milvus::futures::getLoadCPUExecutor(),
             milvus::futures::ExecutePriority::NORMAL,
-            [trace,
-             c_segment,
-             schema = schema.get(),
-             blob = std::string(reinterpret_cast<const char*>(load_blob),
-                                load_length),
-             fields =
-                 std::move(fields)](folly::CancellationToken token) -> bool* {
-                milvus::proto::segcore::SegmentLoadInfo info;
-                AssertInfo(info.ParseFromString(blob),
-                           "unmarshal load info failed");
+            [c_segment, info = std::move(info), layout = std::move(layout)](
+                folly::CancellationToken token) -> bool* {
                 auto* segment =
                     dynamic_cast<milvus::segcore::ChunkedSegmentSealedImpl*>(
                         static_cast<milvus::segcore::SegmentInterface*>(
@@ -300,14 +299,7 @@ AsyncReopenSealedSegmentWithCollection(CTraceContext trace,
                 AssertInfo(segment != nullptr,
                            "borrowed schema reopen requires a sealed segment");
                 milvus::OpContext ctx(token);
-                segment->Reopen(
-                    &ctx,
-                    info,
-                    schema,
-                    milvus::segcore::LoadScope(
-                        fields,
-                        std::vector<int64_t>(info.field_hints().begin(),
-                                             info.field_hints().end())));
+                segment->Reopen(&ctx, info, layout);
                 return nullptr;
             },
             milvus::futures::PoolType::kLoad);

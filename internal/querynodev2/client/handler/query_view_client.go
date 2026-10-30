@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
@@ -12,6 +13,8 @@ import (
 
 // QueryViewClient is the QueryView domain client under the QueryNode handler client.
 type QueryViewClient interface {
+	StatisticsOnView(ctx context.Context, nodeID int64, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error)
+
 	SearchOnView(ctx context.Context, nodeID int64, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error)
 	QueryOnView(ctx context.Context, nodeID int64, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error)
 }
@@ -58,10 +61,24 @@ func executeViewQueryRPC[T any](
 		var zero T
 		return zero, err
 	}
-	resp, err := call(contextutil.WithPickServerID(ctx, nodeID), client)
-	return resp, viewerror.ConvertViewError(method, err)
+	var changed <-chan struct{}
+	if qvc.owner.sessionChanges != nil {
+		changed = qvc.owner.sessionChanges.Changed()
+	}
+	resp, err := call(contextutil.WithFailFastPick(contextutil.WithPickServerID(ctx, nodeID)), client)
+	err = viewerror.ConvertViewError(method, err)
+	if picker.IsErrSubConnNoExist(err) {
+		err = &viewerror.NodeSessionUnavailable{Cause: err, Changed: changed}
+	}
+	return resp, err
 }
 
 func (qvc *queryViewClient) close() {
 	qvc.service.Close()
+}
+
+func (qvc *queryViewClient) StatisticsOnView(ctx context.Context, nodeID int64, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error) {
+	return executeViewQueryRPC(ctx, qvc, nodeID, "ViewQueryService.StatisticsOnView", func(ctx context.Context, client viewpb.ViewQueryServiceClient) (*viewpb.StatisticsOnViewResponse, error) {
+		return client.StatisticsOnView(ctx, req)
+	})
 }

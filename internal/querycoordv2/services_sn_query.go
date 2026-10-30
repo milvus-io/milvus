@@ -3,8 +3,8 @@ package querycoordv2
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -29,7 +29,7 @@ func (s *Server) GetQueryViewLoadInfo(ctx context.Context, req *querypb.GetQuery
 		}
 		resp.PartitionIDs = s.meta.GetPartitionIDsByCollection(ctx, req.GetCollectionID())
 		for _, fieldID := range collection.GetLoadFields() {
-			resp.LoadFields = append(resp.LoadFields, &messagespb.LoadFieldConfig{FieldId: fieldID})
+			resp.LoadFields = append(resp.LoadFields, &viewpb.LoadFieldConfig{FieldId: fieldID})
 		}
 		return resp, nil
 	}
@@ -37,7 +37,7 @@ func (s *Server) GetQueryViewLoadInfo(ctx context.Context, req *querypb.GetQuery
 		resp.Status = merr.Status(merr.WrapErrServiceNotReadyMsg("query view load history is not initialized"))
 		return resp, nil
 	}
-	info, err := s.loadInfos.Get(ctx, req.GetCollectionID(), req.GetVersion())
+	info, err := s.loadInfos.GetLoadInfo(ctx, req.GetCollectionID(), req.GetVersion())
 	if err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil

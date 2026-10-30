@@ -815,6 +815,20 @@ func (m *indexMeta) GetIndexesForCollection(collID UniqueID, indexName string) [
 	return indexInfos
 }
 
+// GetIndexesByID resolves exact index references, including definitions retained
+// after logical deletion. It does not substitute a newer index on the same field.
+func (m *indexMeta) GetIndexesByID(collectionID int64, ids []int64) []*model.Index {
+	m.fieldIndexLock.RLock()
+	defer m.fieldIndexLock.RUnlock()
+	result := make([]*model.Index, 0, len(ids))
+	for _, id := range ids {
+		if index := m.indexes[collectionID][id]; index != nil {
+			result = append(result, model.CloneIndex(index))
+		}
+	}
+	return result
+}
+
 // ListAllIndexes returns a clone of every index that is not deleted, across all
 // collections. Used by the feature usage report.
 func (m *indexMeta) ListAllIndexes() []*model.Index {

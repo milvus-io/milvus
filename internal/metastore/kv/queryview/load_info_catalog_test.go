@@ -8,8 +8,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -21,7 +21,7 @@ func TestLoadInfoCatalogPersistsHistoricalDescriptors(t *testing.T) {
 	missing, err := catalog.GetLoadInfo(ctx, 1, 10)
 	require.NoError(t, err)
 	require.Nil(t, missing)
-	info := &querypb.GetQueryViewLoadInfoResponse{CollectionID: 1, Version: 10, Status: merr.Success(), PartitionIDs: []int64{100}, LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 101, IndexId: 201}}, IndexInfoList: []*indexpb.IndexInfo{{FieldID: 101, IndexID: 201, IndexName: "retained"}}}
+	info := &querypb.GetQueryViewLoadInfoResponse{CollectionID: 1, Version: 10, Status: merr.Success(), PartitionIDs: []int64{100}, LoadFields: []*viewpb.LoadFieldConfig{{FieldId: 101, IndexIds: []int64{201}}}, IndexInfoList: []*indexpb.IndexInfo{{FieldID: 101, IndexID: 201, IndexName: "retained"}}}
 	require.NoError(t, catalog.SaveLoadInfo(ctx, info))
 	recovered, err := NewLoadInfoCatalog(storage).GetLoadInfo(ctx, 1, 10)
 	require.NoError(t, err)

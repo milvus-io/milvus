@@ -59,6 +59,7 @@ type CollectionManager interface {
 type collectionManager struct {
 	mut         sync.RWMutex
 	collections map[int64]*Collection
+	shareSchema bool
 }
 
 type collectionSchemaUpdatePlan struct {
@@ -78,6 +79,14 @@ func NewCollectionManager() *collectionManager {
 	return &collectionManager{
 		collections: make(map[int64]*Collection),
 	}
+}
+
+// NewQueryViewCollectionManager creates immutable metadata bindings whose parsed
+// Schema is shared across LoadInfo versions. View scope stays outside Schema.
+func NewQueryViewCollectionManager() *collectionManager {
+	m := NewCollectionManager()
+	m.shareSchema = true
+	return m
 }
 
 func (m *collectionManager) List() []int64 {
@@ -136,7 +145,7 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 	}
 	defer m.mut.Unlock()
 
-	collection, err := NewCollection(collectionID, schema, meta, loadMeta)
+	collection, err := newCollection(collectionID, schema, meta, loadMeta, m.shareSchema)
 	if err != nil {
 		return err
 	}
@@ -657,13 +666,20 @@ func (c *Collection) Unref(count uint32) uint32 {
 
 // newCollection returns a new Collection
 func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta, loadMetaInfo *querypb.LoadMetaInfo) (*Collection, error) {
+	return newCollection(collectionID, schema, indexMeta, loadMetaInfo, false)
+}
+
+func newCollection(collectionID int64, schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta, loadMetaInfo *querypb.LoadMetaInfo, shareSchema bool) (*Collection, error) {
 	/*
 		CCollection
 		NewCollection(const char* schema_proto_blob);
 	*/
 
 	var loadFieldIDs typeutil.Set[int64]
-	loadSchema := typeutil.Clone(schema)
+	loadSchema := schema
+	if !shareSchema {
+		loadSchema = typeutil.Clone(schema)
+	}
 	// if load fields is specified, do filtering logic
 	// otherwise use all fields for backward compatibility
 	if len(loadMetaInfo.GetLoadFields()) > 0 {
@@ -679,6 +695,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 
 	isGpuIndex := false
 	req := &segcore.CreateCCollectionRequest{
+		CollectionID: collectionID, ShareSchema: shareSchema,
 		Schema:        loadSchema,
 		LoadFieldList: loadFieldIDs.Collect(),
 	}

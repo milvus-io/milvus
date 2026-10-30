@@ -478,10 +478,17 @@ func (r *segmentResource) validateSnapshot(snapshot SegmentLoadInfoSnapshot) err
 
 func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collection CollectionRuntime, snapshot SegmentLoadInfoSnapshot) (*preparedSegmentRead, error) {
 	m := r.manager
-	info := snapshot.LoadInfo
-	if err := updateCollectionIndexMeta(ctx, collection, snapshot.IndexInfos); err != nil {
-		return nil, err
+	info := proto.Clone(snapshot.LoadInfo).(*querypb.SegmentLoadInfo)
+	selected := make(map[int64]struct{}, len(collection.IndexInfos()))
+	for _, index := range collection.IndexInfos() {
+		selected[index.GetIndexID()] = struct{}{}
 	}
+	info.IndexInfos = slices.DeleteFunc(info.IndexInfos, func(index *querypb.FieldIndexInfo) bool {
+		_, ok := selected[index.GetIndexID()]
+		return !ok
+	})
+	snapshot.LoadInfo = info
+	snapshot.IndexInfos = collection.IndexInfos()
 	if m.estimator != nil {
 		reservation, err := m.estimator.Reserve(ctx, info, collection)
 		if err != nil {

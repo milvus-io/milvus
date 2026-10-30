@@ -85,6 +85,12 @@ class LoadScope {
         return explicit_;
     }
 
+    bool
+    SameSelection(const LoadScope& other) const {
+        return explicit_ == other.explicit_ && fields_ == other.fields_ &&
+               hints_ == other.hints_;
+    }
+
  private:
     bool explicit_ = true;
     std::unordered_set<int64_t> dependencies_;

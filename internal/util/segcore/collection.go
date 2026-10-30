@@ -29,10 +29,15 @@ type CreateCCollectionRequest struct {
 	Schema        *schemapb.CollectionSchema
 	IndexMeta     *segcorepb.CollectionIndexMeta
 	LoadFieldList []int64
+	// ShareSchema is for immutable QueryView bindings; scope is passed separately.
+	ShareSchema bool
 }
 
 // CreateCCollection creates a CCollection from a CreateCCollectionRequest.
 func CreateCCollection(req *CreateCCollectionRequest) (*CCollection, error) {
+	if req.ShareSchema {
+		return createSharedSchemaCollection(req)
+	}
 	schemaBlob, err := proto.Marshal(req.Schema)
 	if err != nil {
 		return nil, merr.WrapErrSegcoreMsg("marshal schema failed")
@@ -94,6 +99,7 @@ type CCollection struct {
 	schema        *schemapb.CollectionSchema
 	indexMetaMu   sync.RWMutex
 	indexMeta     *segcorepb.CollectionIndexMeta
+	releaseSchema func()
 }
 
 // ID returns the collection ID.
@@ -147,6 +153,10 @@ func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema, version uint6
 	if version <= c.schemaVersion {
 		return nil
 	}
+	if c.releaseSchema != nil {
+		return merr.WrapErrServiceInternalMsg("cannot mutate a QueryView schema binding")
+	}
+
 	schemaBlob, err := proto.Marshal(sch)
 	if err != nil {
 		return err
@@ -165,6 +175,10 @@ func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema, version uint6
 func (c *CCollection) Release() {
 	C.DeleteCollection(c.ptr)
 	c.ptr = nil
+	if c.releaseSchema != nil {
+		c.releaseSchema()
+		c.releaseSchema = nil
+	}
 }
 
 func PutOrRefPluginContext(ez *hookutil.EZ, key string) error {
@@ -198,4 +212,68 @@ func UnRefPluginContext(ez *hookutil.EZ) error {
 		return err
 	}
 	return nil
+}
+
+// A parsed Schema is shared by immutable QueryView collection bindings. The
+// pool owns one native handle while any binding exists. Published native layouts
+// retain the Schema itself, so their lifetime does not depend on this registry.
+type sharedSchemaKey struct {
+	collectionID int64
+	version      int32
+}
+type sharedCollectionSchema struct {
+	collection *CCollection
+	refs       int
+}
+
+var readCollectionSchemas = struct {
+	sync.Mutex
+	entries map[sharedSchemaKey]*sharedCollectionSchema
+}{entries: make(map[sharedSchemaKey]*sharedCollectionSchema)}
+
+func createSharedSchemaCollection(req *CreateCCollectionRequest) (*CCollection, error) {
+	key := sharedSchemaKey{req.CollectionID, req.Schema.GetVersion()}
+	readCollectionSchemas.Lock()
+	entry := readCollectionSchemas.entries[key]
+	if entry == nil {
+		owner, err := CreateCCollection(&CreateCCollectionRequest{CollectionID: req.CollectionID, Schema: req.Schema})
+		if err != nil {
+			readCollectionSchemas.Unlock()
+			return nil, err
+		}
+		entry = &sharedCollectionSchema{collection: owner}
+		readCollectionSchemas.entries[key] = entry
+	}
+	var ptr C.CCollection
+	status := C.NewCollectionWithSharedSchema(entry.collection.ptr, &ptr)
+	if err := ConsumeCStatusIntoError(&status); err != nil {
+		if entry.refs == 0 {
+			delete(readCollectionSchemas.entries, key)
+			entry.collection.Release()
+		}
+		readCollectionSchemas.Unlock()
+		return nil, err
+	}
+	entry.refs++
+	readCollectionSchemas.Unlock()
+	binding := &CCollection{
+		ptr: ptr, collectionID: req.CollectionID, schema: req.Schema,
+		schemaVersion: uint64(req.Schema.GetVersion()), releaseSchema: func() {
+			readCollectionSchemas.Lock()
+			entry.refs--
+			last := entry.refs == 0
+			if last {
+				delete(readCollectionSchemas.entries, key)
+			}
+			readCollectionSchemas.Unlock()
+			if last {
+				entry.collection.Release()
+			}
+		},
+	}
+	if err := binding.UpdateIndexMeta(req.IndexMeta); err != nil {
+		binding.Release()
+		return nil, err
+	}
+	return binding, nil
 }

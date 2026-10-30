@@ -12,9 +12,10 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segcore"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 type fakeQVCollectionManager struct {
@@ -112,13 +113,13 @@ type fakeQVLoadMetadataProvider struct {
 }
 
 func (p *fakeQVLoadMetadataProvider) GetQueryViewLoadInfo(_ context.Context, collectionID int64, version qnview.QueryViewLoadInfoVersion) (qnview.QueryViewLoadInfo, error) {
-	fields := make([]*messagespb.LoadFieldConfig, 0, len(p.loadFields))
+	fields := make([]*viewpb.LoadFieldConfig, 0, len(p.loadFields))
 	for _, fieldID := range p.loadFields {
-		fields = append(fields, &messagespb.LoadFieldConfig{FieldId: fieldID})
+		fields = append(fields, &viewpb.LoadFieldConfig{FieldId: fieldID})
 	}
 	requiredFields := fields
 	if len(requiredFields) == 0 {
-		requiredFields = []*messagespb.LoadFieldConfig{{FieldId: 100}}
+		requiredFields = []*viewpb.LoadFieldConfig{{FieldId: 100}}
 	}
 	return qnview.QueryViewLoadInfo{
 		CollectionID: collectionID, Version: version,
@@ -236,3 +237,5 @@ func (s *fakeQVSegment) PkCandidateExist() bool {
 func (s *fakeQVSegment) BatchPkExist(*storage.BatchLocationsCache) []bool {
 	return append([]bool(nil), s.hits...)
 }
+
+func (r fakeQVCollectionRuntime) IndexInfos() []*indexpb.IndexInfo { return nil }

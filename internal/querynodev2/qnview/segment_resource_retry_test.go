@@ -22,8 +22,7 @@ func requireResourceRetryDelay(t *testing.T, actual, base time.Duration) {
 func TestSegmentResourceRetryBackoff(t *testing.T) {
 	for _, stage := range []string{"metadata", "physical"} {
 		t.Run(stage, func(t *testing.T) {
-			mockey.PatchConvey("persistent failures back off without occupying a scheduler worker", t, func() {
-				f := setupResourceSchedulingTest(t)
+			runResourceSchedulingTest(t, "persistent failures back off without occupying a scheduler worker", func(t *testing.T, f *resourceSchedulingFixture) {
 				b := f.r.bindings[0]
 				failing := true
 				calls := 0
@@ -49,7 +48,7 @@ func TestSegmentResourceRetryBackoff(t *testing.T) {
 					f.wake()
 					f.runNext()
 					require.Equal(t, i+1, calls)
-					requireResourceRetryDelay(t, b.retryAfter.Sub(f.now), base)
+					requireResourceRetryDelay(t, time.Until(b.retryAfter), base)
 					require.False(t, f.r.scheduled)
 					require.Empty(t, f.queue)
 					require.NotNil(t, f.r.retryTimer)
@@ -57,7 +56,7 @@ func TestSegmentResourceRetryBackoff(t *testing.T) {
 					f.wake()
 					f.runNext()
 					require.Equal(t, i+1, calls)
-					f.now = b.retryAfter
+					time.Sleep(time.Until(b.retryAfter))
 				}
 				failing = false
 				f.timers[len(f.timers)-1]()
@@ -73,14 +72,13 @@ func TestSegmentResourceRetryBackoff(t *testing.T) {
 }
 
 func TestSegmentResourceRetryBackoffIsolation(t *testing.T) {
-	mockey.PatchConvey("a new binding does not inherit another binding's capped delay", t, func() {
-		f := setupResourceSchedulingTest(t)
+	runResourceSchedulingTest(t, "a new binding does not inherit another binding's capped delay", func(t *testing.T, f *resourceSchedulingFixture) {
 		first := f.r.bindings[0]
 		f.onPrepare = func(*segmentBinding) error { return merr.WrapErrServiceNotReadyMsg("materialization pending") }
 		for range 7 {
 			f.wake()
 			f.runNext()
-			f.now = first.retryAfter
+			time.Sleep(time.Until(first.retryAfter))
 		}
 		f.wake()
 		f.runNext()
@@ -88,10 +86,10 @@ func TestSegmentResourceRetryBackoffIsolation(t *testing.T) {
 		second := f.addBinding(2)
 		f.wake()
 		f.runNext()
-		requireResourceRetryDelay(t, second.retryAfter.Sub(f.now), 200*time.Millisecond)
+		requireResourceRetryDelay(t, time.Until(second.retryAfter), 200*time.Millisecond)
 		require.Equal(t, deadline, first.retryAfter)
 		require.NotSame(t, first.retryBackoff, second.retryBackoff)
-		f.now = second.retryAfter
+		time.Sleep(time.Until(second.retryAfter))
 		f.onPrepare = func(b *segmentBinding) error {
 			require.Same(t, second, b)
 			return nil
@@ -106,13 +104,12 @@ func TestSegmentResourceRetryBackoffIsolation(t *testing.T) {
 }
 
 func TestSegmentResourceRetrySatisfiedReadBypassesDelay(t *testing.T) {
-	mockey.PatchConvey("a newly available compatible read publishes Ready during backoff", t, func() {
-		f := setupResourceSchedulingTest(t)
+	runResourceSchedulingTest(t, "a newly available compatible read publishes Ready during backoff", func(t *testing.T, f *resourceSchedulingFixture) {
 		b := f.r.bindings[0]
 		f.onPrepare = func(*segmentBinding) error { return merr.WrapErrServiceNotReadyMsg("materialization pending") }
 		f.wake()
 		f.runNext()
-		require.True(t, f.now.Before(b.retryAfter))
+		require.True(t, time.Now().Before(b.retryAfter))
 		f.r.reads = append(f.r.reads, &preparedSegmentRead{
 			schema: 1, load: 1, manifest: 1,
 			base: &segmentBase{segment: &fakeTransformSegment{id: f.r.id}, caughtUp: true},

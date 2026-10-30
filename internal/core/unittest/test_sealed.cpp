@@ -5671,7 +5671,7 @@ TEST(SealedSegmentCowState, DropShrunkHighestFieldStateDoesNotReadPastBitset) {
 
     ChunkedSegmentSealedImpl::StateDelta delta;
     delta.fields = std::make_shared<const SealedFieldLayout>(
-        new_schema.get(), LoadScope::FromLegacySchema(*new_schema));
+        new_schema, LoadScope::FromLegacySchema(*new_schema));
     delta.load_info = std::make_shared<const SegmentLoadInfo>(
         current->load_info->GetProto(), new_schema);
     delta.runtime = current->runtime;
@@ -5721,14 +5721,14 @@ TEST(SealedSegmentCowState, StagedVectorIndexLoadUsesResizedNewSchemaBitset) {
 
     auto current = sealed->TestGetPublishedStateSnapshot();
     ASSERT_EQ(current->index_ready_bitset.size(), 1);
-    ASSERT_FALSE(current->fields->get_fields().count(new_vec));
+    ASSERT_FALSE(current->fields->has_field(new_vec));
 
     auto runtime = sealed->TestCloneMutableRuntimeResourceState();
     auto staged_load_info = std::make_shared<const SegmentLoadInfo>(
         current->load_info->GetProto(), new_schema);
     ChunkedSegmentSealedImpl::StateDelta initial_delta;
     initial_delta.fields = std::make_shared<const SealedFieldLayout>(
-        new_schema.get(), LoadScope::FromLegacySchema(*new_schema));
+        new_schema, LoadScope::FromLegacySchema(*new_schema));
     initial_delta.load_info = staged_load_info;
     initial_delta.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
     initial_delta.commit_ts = current->commit_ts;
@@ -5758,7 +5758,7 @@ TEST(SealedSegmentCowState, StagedVectorIndexLoadUsesResizedNewSchemaBitset) {
 
     ChunkedSegmentSealedImpl::StateDelta final_delta;
     final_delta.fields = std::make_shared<const SealedFieldLayout>(
-        new_schema.get(), LoadScope::FromLegacySchema(*new_schema));
+        new_schema, LoadScope::FromLegacySchema(*new_schema));
     final_delta.load_info = staged_load_info;
     final_delta.commit_ts = current->commit_ts;
 
@@ -5774,8 +5774,7 @@ TEST(SealedSegmentCowState, StagedVectorIndexLoadUsesResizedNewSchemaBitset) {
             auto published_after_staged_load =
                 sealed->TestGetPublishedStateSnapshot();
             EXPECT_FALSE(
-                published_after_staged_load->fields->get_fields().count(
-                    new_vec));
+                published_after_staged_load->fields->has_field(new_vec));
             EXPECT_EQ(published_after_staged_load->index_ready_bitset.size(),
                       1);
             EXPECT_FALSE(sealed->TestVectorIndexReady(new_vec));
@@ -5802,7 +5801,7 @@ TEST(SealedSegmentCowState,
     auto current = sealed->TestGetPublishedStateSnapshot();
     ASSERT_NE(current, nullptr);
     ASSERT_LE(current->binlog_index_bitset.size(), 1);
-    ASSERT_FALSE(current->fields->get_fields().count(vec));
+    ASSERT_FALSE(current->fields->has_field(vec));
 
     SegmentLoadInfo staged_load_info(current->load_info->GetProto(),
                                      new_schema);
@@ -6394,7 +6393,7 @@ TEST(SealedSegmentCowState, ResolvesCompleteVortexGroupsPerSchemaSnapshot) {
 
     // Physical layout keeps alias/format metadata even outside a View scope,
     // and remains valid after its preparing Schema is destroyed.
-    auto layout = std::make_shared<const SealedFieldLayout>(next_schema.get(),
+    auto layout = std::make_shared<const SealedFieldLayout>(next_schema,
                                                             LoadScope({101}));
     next_schema.reset();
     EXPECT_FALSE(layout->has_field(FieldId(102)));
@@ -6459,7 +6458,7 @@ TEST(SealedSegmentCowState, StagedVectorIndexSkipsInterimIndexGeneration) {
         current->load_info->GetProto(), schema);
     ChunkedSegmentSealedImpl::StateDelta initial_delta;
     initial_delta.fields = std::make_shared<const SealedFieldLayout>(
-        schema.get(), LoadScope::FromLegacySchema(*schema));
+        schema, LoadScope::FromLegacySchema(*schema));
     initial_delta.load_info = staged_load_info;
     initial_delta.runtime = sealed->TestFreezeRuntimeResourceState(runtime);
     initial_delta.commit_ts = current->commit_ts;
@@ -6486,7 +6485,7 @@ TEST(SealedSegmentCowState, StagedVectorIndexSkipsInterimIndexGeneration) {
 
     ChunkedSegmentSealedImpl::StateDelta final_delta;
     final_delta.fields = std::make_shared<const SealedFieldLayout>(
-        schema.get(), LoadScope::FromLegacySchema(*schema));
+        schema, LoadScope::FromLegacySchema(*schema));
     final_delta.load_info = staged_load_info;
     final_delta.commit_ts = current->commit_ts;
 

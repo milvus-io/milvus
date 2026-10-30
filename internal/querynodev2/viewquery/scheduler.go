@@ -29,6 +29,9 @@ func (s *Scheduler) Search(ctx context.Context, tasks sharedviewquery.SearchSegm
 	if err != nil {
 		return nil, err
 	}
+	for i := range qnTasks {
+		qnTasks[i].Options = sharedviewquery.SearchOptions(tasks)
+	}
 	return s.executor.Search(ctx, qnTasks)
 }
 

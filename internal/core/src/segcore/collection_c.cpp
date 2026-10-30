@@ -38,6 +38,19 @@ NewCollection(const void* schema_proto_blob,
 }
 
 CStatus
+NewCollectionWithSharedSchema(CCollection owner, CCollection* output) {
+    SCOPE_CGO_CALL_METRIC();
+    try {
+        auto* collection = static_cast<milvus::segcore::Collection*>(owner);
+        auto binding = std::make_unique<milvus::segcore::Collection>(
+            collection->get_schema());
+        *output = binding.release();
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
+CStatus
 UpdateSchema(CCollection collection,
              const void* proto_blob,
              const int64_t length,

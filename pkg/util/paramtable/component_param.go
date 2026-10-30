@@ -9355,8 +9355,7 @@ type streamingConfig struct {
 	IdempotencyChunkMaxBytes      ParamItem `refreshable:"false"`
 	IdempotencyMaxStagingInterval ParamItem `refreshable:"false"`
 
-	TransformLogCatchupConcurrencyPerPChannel        ParamItem `refreshable:"true"`
-	QueryViewLiveEventDispatchConcurrencyPerPChannel ParamItem `refreshable:"true"`
+	TransformLogCatchupConcurrencyPerPChannel ParamItem `refreshable:"true"`
 
 	// wal rate limit
 	WALRateLimitDefaultBurst                     ParamItem `refreshable:"true"`
