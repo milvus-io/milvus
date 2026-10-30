@@ -495,7 +495,7 @@ func validateMaxCapacityPerRow(collectionName string, field *schemapb.FieldSchem
 
 		maxCapacityPerRow, err := strconv.ParseInt(param.Value, 10, 64)
 		if err != nil {
-			return merr.WrapErrParameterInvalidMsg("the value for %s of field %s must be an integer", common.MaxCapacityKey, field.GetName())
+			return merr.WrapErrParameterInvalidErr(err, "the value for %s of field %s must be an integer", common.MaxCapacityKey, field.GetName())
 		}
 		if maxCapacityPerRow > maxArrayCapacity || maxCapacityPerRow <= 0 {
 			return merr.WrapErrParameterInvalidMsg("the maximum capacity specified for a Array should be in (0, %d]", maxArrayCapacity)
