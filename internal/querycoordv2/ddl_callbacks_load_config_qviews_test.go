@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -97,11 +98,9 @@ func TestLoadPartitionsBroadcastsLoadConfigToControlChannel(t *testing.T) {
 
 func TestReleaseCollectionUsesQViewsLoadConfigAsLoadedSource(t *testing.T) {
 	ctx := context.Background()
-	server, catalog, broker := newLoadConfigQViewsServer(t)
+	server, _, broker := newLoadConfigQViewsServer(t)
 	collectionID := int64(100)
 	vchannels := []string{"v0", "v1"}
-	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
-	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Once()
 	require.NoError(t, server.qviewsRuntime.loadConfigStore.Put(ctx, &loadmgr.LoadConfig{
 		DbID:         1,
 		CollectionID: collectionID,
@@ -130,10 +129,9 @@ func TestReleaseCollectionUsesQViewsLoadConfigAsLoadedSource(t *testing.T) {
 
 func TestReleasePartitionsDropLoadConfigBroadcastsToControlChannel(t *testing.T) {
 	ctx := context.Background()
-	server, catalog, broker := newLoadConfigQViewsServer(t)
+	server, _, broker := newLoadConfigQViewsServer(t)
 	collectionID := int64(100)
 	vchannels := []string{"v0", "v1"}
-	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 	require.NoError(t, server.qviewsRuntime.loadConfigStore.Put(ctx, &loadmgr.LoadConfig{
 		CollectionID: collectionID,
 		PartitionIDs: []int64{10},
@@ -170,12 +168,12 @@ func newLoadConfigQViewsServer(t *testing.T) (*Server, *metastoremocks.QueryCoor
 	catalog.EXPECT().GetReplicas(mock.Anything).Return(nil, nil).Once()
 	fakeBalancer := &fakeRuntimeBalancer{}
 	runtime, err := newQViewsRuntime(context.Background(), qviewsRuntimeDependencies{
-		queryCoordCatalog:    catalog,
-		queryViewCatalog:     &fakeQueryViewCatalog{},
-		viewSyncClient:       &fakeRuntimeViewSyncClient{},
-		queryNodeClient:      &fakeRuntimeQueryNodeClient{},
-		resourceGroupManager: &fakeRuntimeResourceGroupManager{},
-		dataViewProvider:     newRuntimeDataViewProvider(t),
+		loadConfigDependencies: loadmgrtest.FromLegacyCatalog(t, catalog),
+		queryViewCatalog:       &fakeQueryViewCatalog{},
+		viewSyncClient:         &fakeRuntimeViewSyncClient{},
+		queryNodeClient:        &fakeRuntimeQueryNodeClient{},
+		resourceGroupManager:   &fakeRuntimeResourceGroupManager{},
+		dataViewProvider:       newRuntimeDataViewProvider(t),
 		balancerFactory: func(*cache.Cache) qviewsBalancer {
 			return fakeBalancer
 		},

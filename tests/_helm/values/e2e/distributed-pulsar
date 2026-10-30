@@ -95,6 +95,8 @@ extraConfigFiles:
       storage:
         format: vortex
     dataCoord:
+      index:
+        writeSegmentIndexToManifest: true
       targetVecIndexVersion: 11
       forceRebuildScalarSegmentIndex: true
       targetScalarIndexVersion: 5

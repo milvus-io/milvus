@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/ce"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
@@ -530,10 +531,10 @@ func (c *DDLCallback) prepareAndPublishCollectionSchema(ctx context.Context, res
 		return err
 	}
 	updates := result.Message.MustBody().GetUpdates()
-	fields := make([]*messagespb.LoadFieldConfig, 0, len(updates.GetBoundFieldIndexes()))
+	fields := make([]*viewpb.LoadFieldConfig, 0, len(updates.GetBoundFieldIndexes()))
 	for _, field := range updates.GetBoundFieldIndexes() {
 		index := field.GetIndexInfo()
-		fields = append(fields, &messagespb.LoadFieldConfig{FieldId: index.GetFieldID(), IndexId: index.GetIndexID()})
+		fields = append(fields, &viewpb.LoadFieldConfig{FieldId: index.GetFieldID(), IndexIds: []int64{index.GetIndexID()}})
 	}
 	if err := resources.PrepareSchema(ctx, id, published.ToCollectionSchemaPB(), updates.GetSchema(), fields); err != nil {
 		return merr.Wrap(err, "prepare collection schema QueryViews")

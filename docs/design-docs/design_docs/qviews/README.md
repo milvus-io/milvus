@@ -95,16 +95,18 @@ Broadcaster exposes the target to DataCoord and QueryView planning; RootCoord
 publishes the read schema after complete target handoff. Proxy and workers resolve
 exact schemas through `streaming.WAL().SchemaClient()`.
 
-QueryNode CCollection owns immutable Schema per CollectionID/SchemaVersion, with
-independent View LoadScope. The Go View retains its CCollection until all queries
-and preparation operations finish; SealedSegment operations borrow that Schema
-without an additional Collection.Pin. Physical ReadStates retain their resource
-generations and independently owned field/column descriptors, not a current
-logical Schema. Compatible columns/readers remain shared through query completion.
+QueryNode CCollection bindings share immutable Schema per CollectionID/SchemaVersion
+and isolate index metadata by LoadInfoVersion, with independent View LoadScope.
+The Go View retains its binding through queries and preparation operations.
+PublishedState and asynchronous native operations retain the exact shared
+SealedFieldLayout, which owns its Schema and index metadata; base adoption cannot
+invalidate an older operation's borrowed metadata. Compatible columns/readers
+remain shared through query completion without copying Schema per Segment.
 See [QN resource preparation](qnview/querynode_queryview_resource_preparation.md)
 for preparation, borrowing, asynchronous lifetime and compatibility. This native
-ownership refactor covers QN and SealedSegment; SN/GrowingSegment retain their
-separate resource model.
+ownership model covers QN and SealedSegment. SN read bindings use the same
+Schema/LoadInfo identities, while Growing write resources retain their separate
+WAL-driven lifecycle.
 
 ### Advantages
 
@@ -350,6 +352,11 @@ Loaded → Release
 | **Release** | No view on the current QN contains this Segment | Noop |
 
 ## 10. Resources and View Dependencies
+
+The [versioned CollectionLoadConfig revision](collection_load_info.md) records the
+2026-10-29 target for unified partition/field/index references, index-DDL updates,
+View-reference GC and Release cleanup. It is pending implementation and
+supersedes the scope-only/current-index rules where explicitly identified.
 
 - All resources are tied to view dependencies (except growing segments; see Section 8).
 - Resource lifecycle ≥ the union of lifecycles of all query views that hold it.

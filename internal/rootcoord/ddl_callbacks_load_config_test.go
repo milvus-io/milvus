@@ -9,6 +9,7 @@ import (
 
 	catalogkv "github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
 	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -39,7 +40,7 @@ func TestAlterCallbacksApplyLoadConfigDirectly(t *testing.T) {
 			} {
 				t.Cleanup(func() { p.UnPatch() })
 			}
-			store, err := loadmgr.RecoverLoadConfigStore(t.Context(), catalogkv.Catalog{})
+			store, err := loadmgr.RecoverLoadConfigStore(t.Context(), loadmgrtest.Dependencies(t))
 			require.NoError(t, err)
 			cfg := &loadmgr.LoadConfig{CollectionID: 1, PartitionIDs: []int64{10}, Replicas: []*loadmgr.ReplicaAssignment{{ReplicaID: 11, ResourceGroup: "rg"}}}
 			require.NoError(t, store.Put(t.Context(), cfg))

@@ -4,9 +4,13 @@ import (
 	"context"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // LoadConfigStore persists and serves the per-collection desired load state.
@@ -30,8 +34,13 @@ type LoadConfigStore struct {
 	mu sync.RWMutex
 	// collectionLocks serializes persistence and in-memory commits per collection.
 	collectionLocks *lock.KeyLock[int64]
-	catalog         metastore.QueryCoordCatalog
-	loadInfos       *LoadInfoStore
+	catalog         queryview.CollectionLoadInfoCatalog
+	allocateVersion func(context.Context) (uint64, error)
+	indexes         func(int64, ...int64) []*indexpb.IndexInfo
+	schema          func(context.Context, int64) (*schemapb.CollectionSchema, error)
+	history         map[int64]map[uint64]*LoadConfig
+	references      map[loadInfoKey]int
+	gcEnabled       bool
 	version         uint64
 	listeners       map[uint64]LoadConfigListener
 	nextListener    uint64
@@ -54,172 +63,151 @@ type LoadConfigEntry struct {
 	ConfigVersion uint64
 }
 
-// RecoverLoadConfigStore constructs a LoadConfigStore and rebuilds its
-// in-memory state from ETCD via the catalog. It is the sole constructor:
-// the store is always fully recovered before any operation.
-func RecoverLoadConfigStore(ctx context.Context, catalog metastore.QueryCoordCatalog, loadInfos ...*LoadInfoStore) (*LoadConfigStore, error) {
-	collections, err := catalog.GetCollections(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	collectionIDs := make([]int64, 0, len(collections))
-	for _, c := range collections {
-		collectionIDs = append(collectionIDs, c.GetCollectionID())
-	}
-
-	partitions, err := catalog.GetPartitions(ctx, collectionIDs)
-	if err != nil {
-		return nil, err
-	}
-
-	replicas, err := catalog.GetReplicas(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// Group replicas by collection for efficient lookup.
-	replicasByColl := make(map[int64][]*querypb.Replica, len(collections))
-	for _, r := range replicas {
-		replicasByColl[r.GetCollectionID()] = append(replicasByColl[r.GetCollectionID()], r)
-	}
-
-	configs := make(map[int64]*LoadConfig, len(collections))
-	versions := make(map[int64]uint64, len(collections))
-	for _, info := range collections {
-		collID := info.GetCollectionID()
-		cfg := buildFromPersisted(info, partitions[collID], replicasByColl[collID])
-		if len(loadInfos) > 0 && loadInfos[0] != nil {
-			cfg, err = loadInfos[0].normalize(ctx, cfg)
-			if err != nil {
-				return nil, err
-			}
-		}
-		configs[collID] = cfg
-		versions[collID] = loadInfoVersion(cfg)
-	}
-
-	store := &LoadConfigStore{
-		collectionLocks: lock.NewKeyLock[int64](),
-		catalog:         catalog,
-		version:         1,
-		configs:         configs,
-		versions:        versions,
-	}
-	if len(loadInfos) > 0 && loadInfos[0] != nil {
-		store.loadInfos = loadInfos[0]
-		for _, cfg := range configs {
-			if err := store.loadInfos.Ensure(ctx, cfg); err != nil {
-				return nil, err
-			}
-		}
-	}
-	return store, nil
+// LoadConfigStoreDependencies supplies persistence and metadata for publication.
+// Schema supplies defaults during publication; Indexes resolves exact
+// selected IDs for reads as well as current IDs for publication.
+type LoadConfigStoreDependencies struct {
+	Catalog         queryview.CollectionLoadInfoCatalog
+	AllocateVersion func(context.Context) (uint64, error)
+	Indexes         func(int64, ...int64) []*indexpb.IndexInfo
+	Schema          func(context.Context, int64) (*schemapb.CollectionSchema, error)
 }
 
-// Put persists the full LoadConfig to ETCD and updates the live in-memory state.
-// Orphan partitions / replicas (present in the previous state but not in cfg)
-// are deleted.
+// RecoverLoadConfigStore loads all immutable versions before any View can acquire
+// them. GC remains disabled until the registry has rebuilt every reference.
+func RecoverLoadConfigStore(ctx context.Context, deps LoadConfigStoreDependencies) (*LoadConfigStore, error) {
+	s := &LoadConfigStore{
+		collectionLocks: lock.NewKeyLock[int64](), catalog: deps.Catalog,
+		allocateVersion: deps.AllocateVersion, indexes: deps.Indexes, schema: deps.Schema,
+		version: 1, configs: make(map[int64]*LoadConfig), versions: make(map[int64]uint64),
+		history: make(map[int64]map[uint64]*LoadConfig), references: make(map[loadInfoKey]int),
+	}
+	records, err := deps.Catalog.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, info := range records {
+		if info.GetVersion() == 0 || len(info.GetRequiredFields()) == 0 {
+			return nil, merr.WrapErrDataIntegrityMsg("invalid collection load info, collection=%d version=%d", info.GetCollectionID(), info.GetVersion())
+		}
+		cfg := buildFromPersisted(info)
+		versions := s.history[cfg.CollectionID]
+		if versions == nil {
+			versions = make(map[uint64]*LoadConfig)
+			s.history[cfg.CollectionID] = versions
+		}
+		versions[cfg.Version] = cfg
+		if cfg.Version > s.versions[cfg.CollectionID] {
+			s.configs[cfg.CollectionID], s.versions[cfg.CollectionID] = cfg, cfg.Version
+		}
+	}
+	// Durable DDL callbacks replay after startup. Release withdraws this
+	// recovered intent again, drains any newly planned Views, and only then
+	// removes the retained records. Collection locking serializes a later Load.
+	return s, nil
+}
+
+// Put publishes a new immutable version after persistence. The caller holds the
+// collection DDL guard; the local guard also serializes reference GC and release.
 func (s *LoadConfigStore) Put(ctx context.Context, cfg *LoadConfig) error {
 	if cfg == nil {
 		return nil
 	}
-	collectionID := cfg.CollectionID
-	s.collectionLocks.Lock(collectionID)
-	defer s.collectionLocks.Unlock(collectionID)
-
+	s.collectionLocks.Lock(cfg.CollectionID)
+	defer s.collectionLocks.Unlock(cfg.CollectionID)
 	return s.putLocked(ctx, cfg)
 }
 
 func (s *LoadConfigStore) putLocked(ctx context.Context, cfg *LoadConfig) error {
-	if s.loadInfos != nil {
-		var err error
-		cfg, err = s.loadInfos.normalize(ctx, cfg)
-		if err != nil {
-			return err
-		}
-		if err := s.loadInfos.Ensure(ctx, cfg); err != nil {
-			return err
-		}
-	}
-	collectionID := cfg.CollectionID
-	s.mu.RLock()
-	existing := s.configs[collectionID]
-	s.mu.RUnlock()
-
-	// Delete orphans (items present in existing but absent from cfg) first,
-	// so stale ETCD keys do not linger after partition / replica removal.
-	if existing != nil {
-		if removedParts := diffInt64Set(existing.PartitionIDs, cfg.PartitionIDs); len(removedParts) > 0 {
-			if err := s.catalog.ReleasePartition(ctx, cfg.CollectionID, removedParts...); err != nil {
-				return err
-			}
-		}
-		if removedReplicas := diffRemovedReplicaIDs(existing.Replicas, cfg.Replicas); len(removedReplicas) > 0 {
-			if err := s.catalog.ReleaseReplica(ctx, cfg.CollectionID, removedReplicas...); err != nil {
-				return err
-			}
-		}
-	}
-
-	// Save the full collection (including all partitions) and all replicas.
-	if err := s.catalog.SaveCollection(
-		ctx,
-		cfg.toCollectionLoadInfoProto(),
-		cfg.toPartitionLoadInfoProtos()...,
-	); err != nil {
+	cfg, err := s.normalize(ctx, cfg)
+	if err != nil {
 		return err
 	}
-	if len(cfg.Replicas) > 0 {
-		replicaProtos := make([]*querypb.Replica, 0, len(cfg.Replicas))
-		for _, r := range cfg.Replicas {
-			replicaProtos = append(replicaProtos, r.toReplicaProto(cfg.CollectionID))
-		}
-		if err := s.catalog.SaveReplica(ctx, replicaProtos...); err != nil {
-			return err
-		}
+	s.mu.RLock()
+	previous := s.configs[cfg.CollectionID]
+	s.mu.RUnlock()
+	if sameLoadRequirements(previous, cfg) {
+		return nil
 	}
-
+	version, err := s.allocateVersion(ctx)
+	if err != nil {
+		return err
+	}
+	if version == 0 || (previous != nil && version <= previous.Version) {
+		return merr.WrapErrServiceInternalMsg("non-increasing collection load version %d", version)
+	}
+	cfg.Version = version
+	if err := s.catalog.Save(ctx, cfg.toCollectionLoadConfigProto()); err != nil {
+		return err
+	}
 	s.mu.Lock()
-	s.replaceInMemoryLocked(cfg)
+	versions := s.history[cfg.CollectionID]
+	if versions == nil {
+		versions = make(map[uint64]*LoadConfig)
+		s.history[cfg.CollectionID] = versions
+	}
+	versions[version] = cfg
+	s.configs[cfg.CollectionID], s.versions[cfg.CollectionID] = cfg, version
 	s.version++
-	s.versions[collectionID] = loadInfoVersion(s.configs[collectionID])
-	s.publishConfigLocked(collectionID)
+	s.publishConfigLocked(cfg.CollectionID)
 	s.mu.Unlock()
-	s.notifyObservers(collectionID, false)
+	s.notifyObservers(cfg.CollectionID, false)
 	return nil
 }
 
-// Remove deletes all persisted state for a collection
-// (CollectionLoadInfo + PartitionLoadInfo keys + all Replicas).
-// No-op if the collection is not present.
-func (s *LoadConfigStore) Remove(ctx context.Context, collectionID int64) error {
+// StopPlanning withdraws desired state but retains all metadata for node cleanup.
+// The durable Release callback must drain reconciliation and wait for final View
+// removal before calling Remove. The durable callback repeats this after restart.
+func (s *LoadConfigStore) StopPlanning(collectionID int64) {
 	s.collectionLocks.Lock(collectionID)
 	defer s.collectionLocks.Unlock(collectionID)
-
-	s.mu.RLock()
-	existing := s.configs[collectionID]
-	s.mu.RUnlock()
-	if existing == nil {
-		return nil
-	}
-
-	// Remove replicas first, then collection (includes partitions via ReleaseCollection).
-	if err := s.catalog.ReleaseReplicas(ctx, collectionID); err != nil {
-		return err
-	}
-	if err := s.catalog.ReleaseCollection(ctx, collectionID); err != nil {
-		return err
-	}
-
 	s.mu.Lock()
 	delete(s.configs, collectionID)
-	s.version++
 	delete(s.versions, collectionID)
+	s.version++
 	s.publishConfigLocked(collectionID)
 	s.mu.Unlock()
 	s.notifyObservers(collectionID, true)
+}
+
+// Remove completes Release after all View references have been returned. It is
+// idempotent across a crash after deletion and before the durable callback ACK.
+func (s *LoadConfigStore) Remove(ctx context.Context, collectionID int64) error {
+	s.collectionLocks.Lock(collectionID)
+	defer s.collectionLocks.Unlock(collectionID)
+	s.mu.RLock()
+	active := s.configs[collectionID] != nil
+	referenced := false
+	for version := range s.history[collectionID] {
+		if s.references[loadInfoKey{collectionID, version}] != 0 {
+			referenced = true
+			break
+		}
+	}
+	s.mu.RUnlock()
+	if active || referenced {
+		return merr.WrapErrServiceNotReadyMsg("collection %d still owns load requirements", collectionID)
+	}
+	if err := s.catalog.RemoveCollection(ctx, collectionID); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	delete(s.history, collectionID)
+	s.mu.Unlock()
 	return nil
+}
+
+// sameLoadRequirements compares canonical immutable content, not its identity.
+// It makes durable callback replay idempotent without reusing version IDs after
+// Release. Index selections and replica priorities participate in equality.
+func sameLoadRequirements(a, b *LoadConfig) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	left, right := a.toCollectionLoadConfigProto(), b.toCollectionLoadConfigProto()
+	left.Version, right.Version = 0, 0
+	return proto.Equal(left, right)
 }
 
 // RegisterObserver observes future committed changes. Callbacks run under the
@@ -302,43 +290,6 @@ func (s *LoadConfigStore) publishSnapshotLocked() {
 	s.snapshot = NewLoadConfigSnapshotWithVersions(s.version, s.configs, s.versions)
 }
 
-// replaceInMemoryLocked swaps the live in-memory config for a collection.
-// Must be called under s.mu.
-func (s *LoadConfigStore) replaceInMemoryLocked(next *LoadConfig) {
-	clone := next.Clone()
-	s.configs[next.CollectionID] = clone
-}
-
-// diffRemovedReplicaIDs returns replicaIDs that appear in prev but not in next.
-func diffRemovedReplicaIDs(prev, next []*ReplicaAssignment) []int64 {
-	nextIDs := make(map[int64]struct{}, len(next))
-	for _, r := range next {
-		nextIDs[r.ReplicaID] = struct{}{}
-	}
-	var removed []int64
-	for _, r := range prev {
-		if _, keep := nextIDs[r.ReplicaID]; !keep {
-			removed = append(removed, r.ReplicaID)
-		}
-	}
-	return removed
-}
-
-// diffInt64Set returns elements in a that are not in b.
-func diffInt64Set(a, b []int64) []int64 {
-	bset := make(map[int64]struct{}, len(b))
-	for _, v := range b {
-		bset[v] = struct{}{}
-	}
-	var out []int64
-	for _, v := range a {
-		if _, ok := bset[v]; !ok {
-			out = append(out, v)
-		}
-	}
-	return out
-}
-
 // GetConfigWithVersion returns one immutable configuration and its matching version.
 func (s *LoadConfigStore) GetConfigWithVersion(collectionID int64) (*LoadConfig, uint64) {
 	s.mu.RLock()
@@ -346,8 +297,8 @@ func (s *LoadConfigStore) GetConfigWithVersion(collectionID int64) (*LoadConfig,
 	return s.configs[collectionID], s.versions[collectionID]
 }
 
-// LoadConfigListener receives immutable committed configs and their stable content
-// identity (not an ordered revision); nil and version zero denote removal.
+// LoadConfigListener receives immutable committed configs and their durable
+// version; nil and version zero denote withdrawal of load intent.
 // It runs under the store lock and must not re-enter the store or perform I/O.
 type LoadConfigListener func(collectionID int64, config *LoadConfig, version uint64)
 

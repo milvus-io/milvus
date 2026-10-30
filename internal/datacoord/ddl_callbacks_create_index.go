@@ -20,12 +20,16 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 func (s *DDLCallbacks) createIndexV2AckCallback(ctx context.Context, result message.BroadcastResultCreateIndexMessageV2) error {
 	index := result.Message.MustBody().FieldIndex
 	if err := s.meta.indexMeta.CreateIndex(ctx, model.UnmarshalIndexModel(index)); err != nil {
+		return err
+	}
+	if err := qvresource.PublishIndexes(ctx, index.IndexInfo.CollectionID); err != nil {
 		return err
 	}
 	select {

@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -194,7 +195,7 @@ func GenerateAlterLoadConfigMessage(ctx context.Context, req *AlterLoadConfigReq
 		CollectionId:             req.CollectionInfo.CollectionID,
 		PartitionIds:             partitionIDs,
 		LoadFields:               loadFields,
-		RequiredFields:           qviews.ResolveRequiredFields(req.CollectionInfo.GetSchema(), nil),
+		RequiredFields:           loadmgr.FieldsToMessage(qviews.ResolveRequiredFields(req.CollectionInfo.GetSchema(), nil)),
 		Replicas:                 loadReplicaConfigs,
 		UserSpecifiedReplicaMode: req.Expected.ExpectedUserSpecifiedReplicaMode,
 	}

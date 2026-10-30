@@ -26,7 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -35,8 +35,8 @@ func TestQueryViewFeatureUsageEntries(t *testing.T) {
 	s, up := newHandoffServer(t)
 	store := s.qviewsRuntime.loadConfigStore
 	cfg := store.GetConfig(1).Clone()
-	cfg.RequiredFields = []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}, {FieldId: 102}, {FieldId: 103}}
-	cfg.LoadFields = []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}, {FieldId: 102}}
+	cfg.RequiredFields = []*viewpb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}, {FieldId: 102}, {FieldId: 103}}
+	cfg.LoadFields = []*viewpb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}, {FieldId: 102}}
 	cfg.Replicas[0].ResourceGroup = "custom"
 	require.NoError(t, store.Put(t.Context(), cfg))
 	check := func(loaded, partial, custom int64, cc featureusage.CollectionContext) {

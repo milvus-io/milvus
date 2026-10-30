@@ -63,6 +63,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
 	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
@@ -277,6 +278,7 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.collectionObserver.Start()
 
 	suite.server = &Server{
+		idAllocator:         params.RandomIncrementIDAllocator(),
 		kv:                  suite.kv,
 		etcdCli:             cli,
 		store:               suite.store,
@@ -311,12 +313,12 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.server.registerMetricsRequest()
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
 	runtime, err := newQViewsRuntime(context.Background(), qviewsRuntimeDependencies{
-		queryCoordCatalog:    suite.store,
-		queryViewCatalog:     &fakeQueryViewCatalog{},
-		viewSyncClient:       &fakeRuntimeViewSyncClient{},
-		queryNodeClient:      &fakeRuntimeQueryNodeClient{},
-		resourceGroupManager: suite.meta,
-		dataViewProvider:     newRuntimeDataViewProvider(suite.T()),
+		loadConfigDependencies: loadmgrtest.FromLegacyCatalog(suite.T(), suite.store),
+		queryViewCatalog:       &fakeQueryViewCatalog{},
+		viewSyncClient:         &fakeRuntimeViewSyncClient{},
+		queryNodeClient:        &fakeRuntimeQueryNodeClient{},
+		resourceGroupManager:   suite.meta,
+		dataViewProvider:       newRuntimeDataViewProvider(suite.T()),
 	})
 	suite.Require().NoError(err)
 	suite.server.qviewsRuntime = runtime
@@ -386,6 +388,7 @@ func (suite *ServiceSuite) TestShowCollections() {
 
 	// Test insufficient memory
 	cfgBak := suite.server.qviewsRuntime.loadConfigStore.Snapshot().ConfigsMap()[collection].Clone()
+	suite.server.qviewsRuntime.loadConfigStore.StopPlanning(collection)
 	err = suite.server.qviewsRuntime.loadConfigStore.Remove(ctx, collection)
 	suite.NoError(err)
 	meta.GlobalFailedLoadCache.Put(collection, merr.WrapErrServiceMemoryLimitExceeded(100, 10))
@@ -442,6 +445,7 @@ func (suite *ServiceSuite) TestShowPartitions() {
 
 		// Test insufficient memory
 		cfgBak := suite.server.qviewsRuntime.loadConfigStore.Snapshot().ConfigsMap()[collection].Clone()
+		suite.server.qviewsRuntime.loadConfigStore.StopPlanning(collection)
 		err = suite.server.qviewsRuntime.loadConfigStore.Remove(ctx, collection)
 		suite.NoError(err)
 		meta.GlobalFailedLoadCache.Put(collection, merr.WrapErrServiceMemoryLimitExceeded(100, 10))
@@ -468,6 +472,7 @@ func (suite *ServiceSuite) TestShowPartitionsAfterFinalRelease() {
 	suite.loadAll()
 	ctx := context.Background()
 	collection := suite.collections[0]
+	suite.server.qviewsRuntime.loadConfigStore.StopPlanning(collection)
 	suite.Require().NoError(suite.server.qviewsRuntime.loadConfigStore.Remove(ctx, collection))
 	resp, err := suite.server.ShowLoadPartitions(ctx, &querypb.ShowPartitionsRequest{CollectionID: collection})
 	suite.Require().NoError(err)

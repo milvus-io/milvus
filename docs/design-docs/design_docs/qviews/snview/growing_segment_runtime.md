@@ -172,14 +172,18 @@ type QueryRuntimeModule interface {
 
 `GrowingRuntime` implements this interface.
 
-It also implements `QueryRuntimeIndexModule.UpdateIndexMeta`. Before a reused
-runtime reports a view with changed load requirements Ready, QueryRuntime obtains
-current index definitions from GetQueryViewLoadInfo and applies them under its
-live-event/close serialization. GrowingRuntime updates the collection's native
-search metadata using the WAL-applied schema. This supplies metric and search
-parameters for growing searches; it does not load sealed index files. Metadata
-for fields absent from the new list is retained for older leased views. Schema
-application remains WAL-driven and independent of this refresh.
+It implements `QueryRuntimeGrowingIndexModule.PrepareGrowingIndexes` to add
+construction metadata for newly introduced vector fields. Existing segments keep
+their encodingIndexMeta snapshot, and metadata for an existing field is never
+hot-replaced. AlterIndex and vector-index replacement retain their release
+requirements. The WAL drives write Schema independently of View preparation.
+
+Queries use a separate immutable read binding for
+(CollectionID, SchemaVersion, LoadInfoVersion). GetQueryViewLoadInfo resolves its
+selected IndexIDs in one response; the read-schema pool does not merge bindings.
+The bindings share one parsed native Schema per (CollectionID, SchemaVersion),
+while owning distinct index metadata. Query handles retain their binding through
+native completion, regardless of View removal.
 
 ### 4.2 GrowingRuntime
 
@@ -394,8 +398,7 @@ Existing segments are retained for old views and pinned queries. Shrinking a
 view's logical scope does not immediately destroy singleton Growing resources:
 physical reclamation follows the existing sealed DataVersion watermark, or the
 last view's release. Newly prepared partitions borrow the pinned native
-collection, so the snapshot and existing segments share WAL-driven schema and
-index metadata. Ready is reported only after scope expansion and index metadata
+collection, while individual segments retain their encoding schema and index metadata snapshots. Ready is reported only after scope expansion and index metadata
 preparation both succeed.
 
 ## Explicit Query Barrier Progress

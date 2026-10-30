@@ -4,83 +4,79 @@ import (
 	"context"
 	"testing"
 
-	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-type loadInfoCatalogForTest struct{ queryview.LoadInfoCatalog }
-
-func (*loadInfoCatalogForTest) GetLoadInfo(context.Context, int64, uint64) (*querypb.GetQueryViewLoadInfoResponse, error) {
-	panic("patch with mockey")
-}
-
 func TestQueryViewLoadInfoUsesExactSnapshots(t *testing.T) {
 	ctx := context.Background()
-
-	s := &Server{qviewsRuntime: &qviewsRuntime{loadConfigStore: &loadmgr.LoadConfigStore{}, loadInfos: &loadmgr.LoadInfoStore{}}}
+	deps := loadmgrtest.Dependencies(t)
+	indexes := []*indexpb.IndexInfo{{FieldID: 100, IndexID: 200}, {FieldID: 101, IndexID: 201}, {FieldID: 102, IndexID: 202}}
+	definitions := append([]*indexpb.IndexInfo(nil), indexes...)
+	deps.Indexes = func(_ int64, ids ...int64) []*indexpb.IndexInfo {
+		if len(ids) == 0 {
+			return indexes
+		}
+		return definitions // GetLoadInfo filters exact IDs, never current field membership.
+	}
+	store, err := loadmgr.RecoverLoadConfigStore(ctx, deps)
+	require.NoError(t, err)
+	cfg := &loadmgr.LoadConfig{
+		CollectionID: 1, PartitionIDs: []int64{10},
+		LoadFields:     []*viewpb.LoadFieldConfig{{FieldId: 100}},
+		RequiredFields: []*viewpb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}},
+	}
+	require.NoError(t, store.Put(ctx, cfg))
+	first := store.GetConfigVersion(1)
+	indexes = []*indexpb.IndexInfo{{FieldID: 101, IndexID: 301}}
+	definitions = append(definitions, indexes...)
+	require.NoError(t, store.Put(ctx, cfg))
+	s := &Server{qviewsRuntime: &qviewsRuntime{loadConfigStore: store}}
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
-	released := false
-	patch := mockey.Mock((*loadmgr.LoadConfigStore).GetConfigWithVersion).To(func(_ *loadmgr.LoadConfigStore, id int64) (*loadmgr.LoadConfig, uint64) {
-		if id != 1 || released {
-			return nil, 0
-		}
-		return &loadmgr.LoadConfig{CollectionID: 1, PartitionIDs: []int64{10}, LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 102}}}, 3
-	}).Build()
-	defer patch.UnPatch()
-	snapshot := mockey.Mock((*loadmgr.LoadInfoStore).Get).To(func(_ *loadmgr.LoadInfoStore, _ context.Context, id int64, version uint64) (*querypb.GetQueryViewLoadInfoResponse, error) {
-		if version != 3 && version != 2 {
-			return nil, merr.WrapErrServiceNotReadyMsg("snapshot missing")
-		}
-		return &querypb.GetQueryViewLoadInfoResponse{Status: merr.Success(), CollectionID: id, Version: version, PartitionIDs: []int64{10}, LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 102}}}, nil
-	}).Build()
-	defer snapshot.UnPatch()
-	historical, err := s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1, Version: 2})
+	historical, err := s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1, Version: first})
 	require.NoError(t, err)
 	require.NoError(t, merr.Error(historical.Status))
-	require.EqualValues(t, 2, historical.Version, "historical views must not be rejected because desired config advanced")
-	resp, err := s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1, Version: 3})
+	require.Len(t, historical.IndexInfoList, 2, "history includes required fields outside preload hints")
+	require.EqualValues(t, 200, historical.IndexInfoList[0].IndexID)
+	latest, err := s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1})
 	require.NoError(t, err)
-	require.NoError(t, merr.Error(resp.GetStatus()))
-	require.Equal(t, int64(1), resp.GetCollectionID())
-	require.Equal(t, []int64{10}, resp.GetPartitionIDs())
-	require.Len(t, resp.GetLoadFields(), 2)
-	require.Equal(t, int64(100), resp.LoadFields[0].FieldId)
-	require.Equal(t, int64(102), resp.LoadFields[1].FieldId)
-	require.Equal(t, uint64(3), resp.GetVersion(), "return the requested current configuration")
-	stale, err := s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1, Version: 9})
+	require.NoError(t, merr.Error(latest.Status))
+	require.Len(t, latest.IndexInfoList, 1)
+	require.EqualValues(t, 301, latest.IndexInfoList[0].IndexID)
+	require.Greater(t, latest.Version, first)
+	store.StopPlanning(1)
+	historical, err = s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1, Version: first})
 	require.NoError(t, err)
-	require.ErrorIs(t, merr.Error(stale.GetStatus()), merr.ErrServiceNotReady)
+	require.NoError(t, merr.Error(historical.Status))
+	latest, err = s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1})
+	require.NoError(t, err)
+	require.ErrorIs(t, merr.Error(latest.Status), merr.ErrCollectionNotLoaded)
+	missing, err := s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1, Version: 999})
+	require.NoError(t, err)
+	require.ErrorIs(t, merr.Error(missing.Status), merr.ErrServiceNotReady)
 	for _, id := range []int64{0, 2} {
-		resp, err = s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: id})
+		resp, err := s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: id})
 		require.NoError(t, err)
-		require.Error(t, merr.Error(resp.GetStatus()))
+		require.Error(t, merr.Error(resp.Status))
 	}
-	released = true
-	historical, err = s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1, Version: 2})
-	require.NoError(t, err)
-	require.NoError(t, merr.Error(historical.Status), "live old views retain their snapshot after release")
-	resp, err = s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1})
-	require.NoError(t, err)
-	require.ErrorIs(t, merr.Error(resp.Status), merr.ErrCollectionNotLoaded)
 	s.UpdateStateCode(commonpb.StateCode_Abnormal)
-	resp, err = s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1})
+	latest, err = s.GetQueryViewLoadInfo(ctx, &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1})
 	require.NoError(t, err)
-	require.Error(t, merr.Error(resp.GetStatus()))
+	require.Error(t, merr.Error(latest.Status))
 }
 
 func TestQueryViewLoadConfigFeedsAdmissionChecks(t *testing.T) {
 	cfg := &loadmgr.LoadConfig{
 		CollectionID: 1, DbID: 2, PartitionIDs: []int64{10, 11}, UserSpecifiedReplicaMode: true,
-		LoadFields:     []*messagespb.LoadFieldConfig{{FieldId: 100, IndexId: 200}},
-		RequiredFields: []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}},
+		LoadFields:     []*viewpb.LoadFieldConfig{{FieldId: 100, IndexIds: []int64{200}}},
+		RequiredFields: []*viewpb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}},
 		Replicas: []*loadmgr.ReplicaAssignment{
 			{ReplicaID: 3, ResourceGroup: "rg1", Priority: commonpb.LoadPriority_HIGH},
 			{ReplicaID: 4, ResourceGroup: "rg2", Priority: commonpb.LoadPriority_LOW},
@@ -90,77 +86,11 @@ func TestQueryViewLoadConfigFeedsAdmissionChecks(t *testing.T) {
 	require.Equal(t, int64(1), current.Collection.GetCollectionID())
 	require.True(t, current.Collection.GetUserSpecifiedReplicaMode())
 	require.Equal(t, map[int64]int64{100: 200}, current.Collection.GetFieldIndexID())
-	require.Equal(t, cfg.RequiredFields, current.Collection.GetRequiredFields())
-	require.NotSame(t, cfg.RequiredFields[0], current.Collection.RequiredFields[0])
+	require.Equal(t, loadmgr.FieldsToMessage(cfg.RequiredFields), current.Collection.GetRequiredFields())
+	current.Collection.RequiredFields[0].FieldId++
+	require.EqualValues(t, 100, cfg.RequiredFields[0].FieldId, "legacy projection does not mutate the immutable View config")
 	require.ElementsMatch(t, []int64{10, 11}, current.GetPartitionIDs())
 	require.Equal(t, map[string]int{"rg1": 1, "rg2": 1}, current.GetReplicaNumber())
 	require.Equal(t, commonpb.LoadPriority_LOW, current.Replicas[4].LoadPriority())
 	require.Nil(t, qviewsCurrentLoadConfig(nil).Collection)
-}
-
-func TestQueryViewLoadInfoResolvesCurrentRequiredIndexes(t *testing.T) {
-	ctx := context.Background()
-	stored := &querypb.GetQueryViewLoadInfoResponse{
-		Status: merr.Success(), CollectionID: 1, Version: 9,
-		LoadFields:     []*messagespb.LoadFieldConfig{{FieldId: 100}},
-		RequiredFields: []*messagespb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}},
-		IndexInfoList:  []*indexpb.IndexInfo{{FieldID: 100, IndexID: 42}},
-	}
-	catalogPatch := mockey.Mock((*loadInfoCatalogForTest).GetLoadInfo).Return(stored, nil).Build()
-	defer catalogPatch.UnPatch()
-	indexes := []*indexpb.IndexInfo{{FieldID: 100, IndexID: 200}, {FieldID: 101, IndexID: 201}, {FieldID: 102, IndexID: 202}}
-	runtime := &qviewsRuntime{loadConfigStore: &loadmgr.LoadConfigStore{}, loadInfos: loadmgr.NewLoadInfoStore(&loadInfoCatalogForTest{}, func(id int64) []*indexpb.IndexInfo {
-		require.EqualValues(t, 1, id)
-		return indexes
-	})}
-	s := &Server{qviewsRuntime: runtime}
-	s.UpdateStateCode(commonpb.StateCode_Healthy)
-	req := &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1, Version: 9}
-	resp, err := s.GetQueryViewLoadInfo(ctx, req)
-	require.NoError(t, err)
-	require.NoError(t, merr.Error(resp.Status))
-	require.Len(t, resp.IndexInfoList, 2, "indexes follow required fields, including fields outside preload hints")
-	require.EqualValues(t, 200, resp.IndexInfoList[0].IndexID)
-	require.EqualValues(t, 201, resp.IndexInfoList[1].IndexID)
-	resp.IndexInfoList[0].IndexID = 999
-	resp.RequiredFields[0].FieldId = 999
-	require.EqualValues(t, 200, indexes[0].IndexID)
-	require.EqualValues(t, 100, stored.RequiredFields[0].FieldId)
-	require.EqualValues(t, 42, stored.IndexInfoList[0].IndexID)
-
-	indexes = []*indexpb.IndexInfo{{FieldID: 101, IndexID: 301}, {FieldID: 102, IndexID: 302}}
-	resp, err = s.GetQueryViewLoadInfo(ctx, req)
-	require.NoError(t, err)
-	require.NoError(t, merr.Error(resp.Status))
-	require.Len(t, resp.IndexInfoList, 1, "cached history must refresh indexes and observe removed indexes")
-	require.EqualValues(t, 301, resp.IndexInfoList[0].IndexID)
-	require.EqualValues(t, 100, resp.RequiredFields[0].FieldId)
-	require.Equal(t, 1, catalogPatch.Times(), "only the immutable scope is cached")
-}
-
-func TestQueryViewLoadInfoRejectsInvalidHistory(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		info *querypb.GetQueryViewLoadInfoResponse
-		err  error
-		want error
-	}{
-		{name: "missing scope", info: &querypb.GetQueryViewLoadInfoResponse{CollectionID: 1, Version: 9}, want: merr.ErrDataIntegrity},
-		{name: "missing snapshot", want: merr.ErrServiceNotReady},
-		{name: "catalog failure", err: merr.WrapErrServiceUnavailableMsg("catalog busy"), want: merr.ErrServiceUnavailable},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			patch := mockey.Mock((*loadInfoCatalogForTest).GetLoadInfo).Return(tc.info, tc.err).Build()
-			defer patch.UnPatch()
-			runtime := &qviewsRuntime{loadConfigStore: &loadmgr.LoadConfigStore{}, loadInfos: loadmgr.NewLoadInfoStore(&loadInfoCatalogForTest{}, func(int64) []*indexpb.IndexInfo {
-				t.Fatal("invalid history must fail before resolving indexes")
-				return nil
-			})}
-			s := &Server{qviewsRuntime: runtime}
-			s.UpdateStateCode(commonpb.StateCode_Healthy)
-			resp, err := s.GetQueryViewLoadInfo(t.Context(), &querypb.GetQueryViewLoadInfoRequest{CollectionID: 1, Version: 9})
-			require.NoError(t, err)
-			require.ErrorIs(t, merr.Error(resp.Status), tc.want)
-		})
-	}
 }

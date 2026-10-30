@@ -9,6 +9,7 @@ import (
 	catalogkv "github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
@@ -26,7 +27,7 @@ func TestProgressInResourceGroup(t *testing.T) {
 	} {
 		t.Cleanup(func() { patch.UnPatch() })
 	}
-	store, err := loadmgr.RecoverLoadConfigStore(t.Context(), catalogkv.Catalog{})
+	store, err := loadmgr.RecoverLoadConfigStore(t.Context(), loadmgrtest.Dependencies(t))
 	require.NoError(t, err)
 	cfg := &loadmgr.LoadConfig{CollectionID: 1, Replicas: []*loadmgr.ReplicaAssignment{
 		{ReplicaID: 10, ResourceGroup: "a"}, {ReplicaID: 20, ResourceGroup: "b"},
@@ -95,6 +96,7 @@ func TestProgressInResourceGroup(t *testing.T) {
 			up(10, "v1")
 			duringSnapshot = func() {
 				if action != "update" {
+					store.StopPlanning(1)
 					require.NoError(t, store.Remove(t.Context(), 1))
 				}
 				if action != "release" {
