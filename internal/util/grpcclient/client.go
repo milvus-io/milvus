@@ -134,7 +134,7 @@ type ClientBase[T interface {
 	lastSessionCheck        atomic.Time
 
 	// counter for canceled or deadline exceeded
-	ctxCounter     atomic.Int32
+	ctxCounter     atomic.Int64
 	maxCancelError int32
 
 	NodeID atomic.Int64
@@ -418,8 +418,12 @@ func (c *ClientBase[T]) verifySession(ctx context.Context) error {
 }
 
 func (c *ClientBase[T]) needResetCancel() (needReset bool) {
+	if c.maxCancelError < 0 {
+		return false
+	}
+
 	val := c.ctxCounter.Add(1)
-	if val > c.maxCancelError {
+	if val > int64(c.maxCancelError) {
 		c.ctxCounter.Store(0)
 		return true
 	}
@@ -443,6 +447,9 @@ func (c *ClientBase[T]) checkGrpcErr(ctx context.Context, err error) (needRetry,
 		return false, true, true, err
 	case funcutil.IsGrpcErr(err, codes.Canceled, codes.DeadlineExceeded):
 		// canceled or deadline exceeded
+		if ctx.Err() != nil {
+			return false, false, false, ctx.Err()
+		}
 		return true, c.needResetCancel(), false, err
 	case funcutil.IsGrpcErr(err, codes.Unimplemented):
 		// for unimplemented error, reset coord connection to avoid old coord's side effect.
@@ -531,10 +538,13 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 				resetClientFunc(forceReset)
 			} else {
 				// err occurs but no need to reset connection, try to verify session
-				err := c.verifySession(ctx)
-				if err != nil {
-					log.Warn(ctx, "failed to verify session, reset connection", mlog.Err(err))
+				sessionErr := c.verifySession(ctx)
+				if errors.Is(sessionErr, merr.ErrNodeNotFound) ||
+					errors.Is(sessionErr, merr.ErrNodeNotMatch) {
+					log.Warn(ctx, "node session is invalid, reset connection", mlog.Err(sessionErr))
 					resetClientFunc(forceReset)
+				} else if sessionErr != nil {
+					log.Warn(ctx, "failed to verify session, skip connection reset", mlog.Err(sessionErr))
 				}
 			}
 			return needRetry, err

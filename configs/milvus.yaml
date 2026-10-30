@@ -1260,7 +1260,7 @@ grpc:
     maxBackoff: 10
     backoffMultiplier: 2
     minResetInterval: 1000
-    maxCancelError: 32
+    maxCancelError: 32 # maximum number of canceled or deadline exceeded errors before resetting the connection; negative values disable this reset
     minSessionCheckInterval: 200
 
 # Configure external tls.
