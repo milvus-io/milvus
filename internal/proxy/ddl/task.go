@@ -1607,9 +1607,10 @@ type DescribeCollectionTask struct {
 	baseTask
 	Condition
 	*milvuspb.DescribeCollectionRequest
-	ctx      context.Context
-	mixCoord types.MixCoordClient
-	result   *milvuspb.DescribeCollectionResponse
+	ctx              context.Context
+	mixCoord         types.MixCoordClient
+	result           *milvuspb.DescribeCollectionResponse
+	internalMetadata bool
 }
 
 func (t *DescribeCollectionTask) TraceCtx() context.Context {
@@ -1672,7 +1673,11 @@ func (t *DescribeCollectionTask) Execute(ctx context.Context) error {
 		DbName:               t.GetDbName(),
 	}
 
-	ctx = DescribeCollectionRPCContext(ctx)
+	if t.internalMetadata {
+		ctx = describeCollectionMetadataContext(ctx)
+	} else {
+		ctx = DescribeCollectionRPCContext(ctx)
+	}
 	result, err := t.mixCoord.DescribeCollection(ctx, t.DescribeCollectionRequest)
 	if err != nil {
 		return err
@@ -1682,6 +1687,9 @@ func (t *DescribeCollectionTask) Execute(ctx context.Context) error {
 		t.result.Status = DescribeCollectionErrorStatus(
 			merr.Error(result.GetStatus()), t.GetDbName(), t.GetCollectionName())
 		return nil
+	}
+	if t.internalMetadata && result.GetDbName() == "" {
+		return merr.WrapErrServiceUnavailable("collection database is unavailable for visibility check")
 	}
 	if t.result.CollectionName == "" {
 		t.result.CollectionName = result.GetCollectionName()
@@ -4100,3 +4108,7 @@ func (t *ListResourceGroupsTask) Execute(ctx context.Context) error {
 func (t *ListResourceGroupsTask) PostExecute(ctx context.Context) error {
 	return nil
 }
+
+// UseInternalMetadata is selected only by the trusted Proxy provider. The provider
+// must authorize the resolved result before it is returned to a user.
+func (t *DescribeCollectionTask) UseInternalMetadata() { t.internalMetadata = true }

@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
 
@@ -327,6 +328,7 @@ func describeCollection(node *Proxy) gin.HandlerFunc {
 		}
 
 		ctx := c.Request.Context()
+		localVisibility := false
 		if _, admin := mhttp.AuthenticatedAdminFromContext(ctx); !admin {
 			// With the management gate disabled, this route also accepts
 			// ordinary authenticated users. Preserve their object visibility;
@@ -336,22 +338,50 @@ func describeCollection(node *Proxy) gin.HandlerFunc {
 				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{mhttp.HTTPReturnMessage: err.Error()})
 				return
 			}
-			ctx = DescribeCollectionRPCContext(ctx)
+			localVisibility = localCollectionVisibilityEnabled()
+			if !localVisibility {
+				ctx = DescribeCollectionRPCContext(ctx)
+			}
 		}
 		// A verified management administrator retains the operator view,
 		// independently of data-plane RootShouldBindRole grants.
-		describeCollectionResp, err := rootCoord.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+		lookupCtx := ctx
+		if localVisibility {
+			lookupCtx = describeCollectionMetadataContext(ctx)
+		}
+		describeCollectionReq := &milvuspb.DescribeCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_DescribeCollection,
 			},
 			DbName:         dbName,
 			CollectionName: collectionName,
-		})
+		}
+		describeCollectionResp, err := rootCoord.DescribeCollection(lookupCtx, describeCollectionReq)
 		if err := merr.CheckRPCCall(describeCollectionResp, err); err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 				mhttp.HTTPReturnMessage: err.Error(),
 			})
 			return
+		}
+
+		if localVisibility {
+			known, visibilityErr := tryLocalCollectionVisibility(ctx, describeCollectionResp.GetDbName(), describeCollectionResp.GetSchema().GetName(), describeCollectionResp.GetCollectionID())
+			ctx = DescribeCollectionRPCContext(ctx)
+			if visibilityErr != nil {
+				status := http.StatusInternalServerError
+				if errors.Is(visibilityErr, merr.ErrPrivilegeNotPermitted) {
+					status = http.StatusForbidden
+				}
+				c.AbortWithStatusJSON(status, gin.H{mhttp.HTTPReturnMessage: visibilityErr.Error()})
+				return
+			}
+			if !known {
+				describeCollectionResp, err = rootCoord.DescribeCollection(ctx, describeCollectionReq)
+				if err := merr.CheckRPCCall(describeCollectionResp, err); err != nil {
+					c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{mhttp.HTTPReturnMessage: err.Error()})
+					return
+				}
+			}
 		}
 
 		// Convert TIMESTAMPTZ default values back to string format for the user.

@@ -27,10 +27,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/rbacutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -116,14 +118,35 @@ func executeOperatePrivilegeTaskSteps(ctx context.Context, core *Core, entity *m
 			}
 			keys = policyKeysWithout(keys, policyKeysOf(metaExpandGrants))
 		}
-		if len(keys) > 0 {
-			if err := core.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
-				OpType: opType,
-				OpKey:  strings.Join(keys, "|"),
-			}); err != nil {
-				mlog.Warn(ctx, "fail to refresh policy info cache", mlog.Any("in", entity), mlog.Err(err))
+		// No receiver needs a role projection when the proxy set is empty.
+		if core.proxyClientManager.GetProxyCount() == 0 {
+			return nil
+		}
+		// Visibility follows raw grants, even when empty groups or overlapping
+		// actions produce no action delta. Keep the original no-op behavior when
+		// local visibility is disabled; a refresh would reload every Proxy.
+		if len(keys) == 0 {
+			if !Params.ProxyCfg.EnableLocalCollectionVisibility.GetAsBool() {
+				return nil
+			}
+			return core.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+				OpType: int32(typeutil.CacheRefresh),
+			})
+		}
+		var visibility *internalpb.CollectionVisibilitySnapshot
+		if Params.ProxyCfg.EnableLocalCollectionVisibility.GetAsBool() {
+			visibility, err = core.collectionVisibilityForRole(ctx, entity.Role, allGroups)
+			if err != nil {
 				return err
 			}
+		}
+		if err := core.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+			OpType:               opType,
+			OpKey:                strings.Join(keys, "|"),
+			CollectionVisibility: visibility,
+		}); err != nil {
+			mlog.Warn(ctx, "fail to refresh policy info cache", mlog.Any("in", entity), mlog.Err(err))
+			return err
 		}
 		return nil
 	}(); err != nil {
@@ -207,11 +230,16 @@ func executeOperatePrivilegeGroupTaskSteps(ctx context.Context, core *Core, in *
 			keysToGrant = append(keysToGrant, policyKeysWithout(newKeys, currKeys)...)
 		}
 
+		var visibility *internalpb.CollectionVisibilitySnapshot
+		if Params.ProxyCfg.EnableLocalCollectionVisibility.GetAsBool() {
+			visibility = &internalpb.CollectionVisibilitySnapshot{FormatVersion: rbacutil.CollectionVisibilityFormatVersion}
+		}
 		if len(keysToRevoke) > 0 {
 			opType := int32(typeutil.CacheRevokePrivilege)
 			if err := core.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
-				OpType: opType,
-				OpKey:  strings.Join(keysToRevoke, "|"),
+				OpType:               opType,
+				OpKey:                strings.Join(keysToRevoke, "|"),
+				CollectionVisibility: visibility,
 			}); err != nil {
 				mlog.Warn(ctx, "fail to refresh policy info cache for revoke privileges in operate privilege group", mlog.Any("in", in), mlog.Err(err))
 				return err
@@ -221,8 +249,9 @@ func executeOperatePrivilegeGroupTaskSteps(ctx context.Context, core *Core, in *
 		if len(keysToGrant) > 0 {
 			opType := int32(typeutil.CacheGrantPrivilege)
 			if err := core.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
-				OpType: opType,
-				OpKey:  strings.Join(keysToGrant, "|"),
+				OpType:               opType,
+				OpKey:                strings.Join(keysToGrant, "|"),
+				CollectionVisibility: visibility,
 			}); err != nil {
 				mlog.Warn(ctx, "fail to refresh policy info cache for grants privilege in operate privilege group", mlog.Any("in", in), mlog.Err(err))
 				return err

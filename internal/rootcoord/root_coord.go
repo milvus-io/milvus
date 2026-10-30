@@ -72,6 +72,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/rbacutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -2810,11 +2811,16 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 	ctxLog.Debug(ctx, method+" success")
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	var visibility *internalpb.CollectionVisibilitySnapshot
+	if Params.ProxyCfg.EnableLocalCollectionVisibility.GetAsBool() {
+		visibility = rbacutil.CompileCollectionVisibility(policies, collectionVisibilityGroups(allGroups))
+	}
 	return &internalpb.ListPolicyResponse{
-		Status:          merr.Success(),
-		PolicyInfos:     expandPolicies,
-		UserRoles:       userRoles,
-		PrivilegeGroups: allGroups,
+		Status:               merr.Success(),
+		PolicyInfos:          expandPolicies,
+		UserRoles:            userRoles,
+		PrivilegeGroups:      allGroups,
+		CollectionVisibility: visibility,
 	}, nil
 }
 
@@ -3467,21 +3473,13 @@ func (c *Core) getCurrentUserVisibleCollections(ctx context.Context, databaseNam
 			return nil, err
 		}
 		for _, entity := range entities {
-			objectType := entity.GetObject().GetName()
-			priv := entity.GetGrantor().GetPrivilege().GetName()
-			if objectType == commonpb.ObjectType_Global.String() &&
-				priv == util.PrivilegeNameForAPI(commonpb.ObjectPrivilege_PrivilegeAll.String()) {
-				privilegeColls.Insert(util.AnyWord)
-				return privilegeColls, nil
+			collectionName, visible := rbacutil.CollectionVisibilityName(entity, func(name string) bool {
+				_, custom := customPrivilegeGroupMap[name]
+				return custom || Params.RbacConfig.IsCollectionPrivilegeGroup(name)
+			})
+			if !visible {
+				continue
 			}
-			// should list collection level built-in privilege group or custom privilege group objects
-			if objectType != commonpb.ObjectType_Collection.String() {
-				_, isCustomGroup := customPrivilegeGroupMap[priv]
-				if !isCustomGroup && !Params.RbacConfig.IsCollectionPrivilegeGroup(priv) {
-					continue
-				}
-			}
-			collectionName := entity.GetObjectName()
 			privilegeColls.Insert(collectionName)
 			if collectionName == util.AnyWord {
 				return privilegeColls, nil
