@@ -1,93 +1,74 @@
-# Idempotency fault integration tests
+# Idempotency fault integration test design
 
-These tests use the existing subprocess MiniCluster and real Pulsar, etcd and
-MinIO. They exercise single-message inserts and multi-message transactions with
-auto-generated primary keys.
+## Purpose
 
-| Scenario | Injection boundary | Assertions |
+Verify idempotent inserts across ambiguous WAL acknowledgements, client deadlines,
+and StreamingNode owner replacement. The suite uses the subprocess MiniCluster
+with Pulsar, etcd, and MinIO, and covers both single-message inserts and
+multi-message transactions with auto-generated primary keys.
+
+## Fault boundaries
+
+| Scenario | Boundary | Expected behavior |
 | --- | --- | --- |
-| Lost backend acknowledgement | Successful WAL implementation append, inside the adaptor retry loop | Same TimeTick, different persisted message IDs, stable autoIDs across retry/reopen, exact stored row count |
-| Crash before window completion | Successful append, before idempotency `Window.Complete` | SIGKILL of the receipt's process, recovered original IDs and row offsets, exact rows |
-| Partial shard completion | Pause one shard before append/commit; observe three persisted shards | Preserve IDs of committed shards, finish the fourth shard once |
-| Client deadline | Pause after append, let the client deadline expire, release | Retry returns original IDs and repeated retries do not add rows |
+| Lost backend acknowledgement | A successful `walimpls.Append`, before the adaptor evaluates its result | The real retry loop persists another record with the same TimeTick; reader deduplication prevents extra rows |
+| Crash before window completion | A successful append, before idempotency `Window.Complete` | SIGKILL followed by owner recovery preserves the original IDs and row offsets |
+| Partial shard completion | One shard paused before append or transaction commit; three other shards durably appended | Recovery preserves the committed shards and completes the remaining shard once |
+| Client deadline | A successful append paused before window completion | The client times out; releasing the barrier and retrying the same key returns the original IDs |
+| Unrelated request | A backend fault armed for a different idempotency key | The unrelated write succeeds without consuming the selected request's one-shot fault |
 
-Every scenario requires receipts from the actual server write path. Enabling a
-failpoint alone never counts as coverage. Query results check every ordinal/ID
-pair; flushed collection statistics also check row count because queries can
-hide duplicate physical rows with the same primary key. Compaction is disabled.
+The backend fault changes the return value at the WAL implementation boundary,
+inside the existing adaptor retry loop. Timestamp allocation and interceptor
+callbacks remain intact. Changing a successful whole interceptor chain into an
+error above this loop would cause an outer retry with a new TimeTick and model a
+different failure.
 
-## Running
+The idempotency boundaries only observe or pause execution. Process termination
+and client deadlines supply the actual failures; the controller never forces
+`Window.Fail`, `Window.Complete`, or a replication checkpoint result.
 
-With the native SDK and integration dependencies already prepared:
+## Process isolation
 
-```sh
-make integration-test-failpoint
-```
+MiniCluster components run in separate processes, so a failpoint enabled in the
+test process cannot control a StreamingNode. Standard PingCAP markers are
+rewritten in a private source copy to produce an instrumented server fixture,
+using the tool version selected by `go.mod` and the normal Milvus build flags.
+The ordinary build retains inert markers.
 
-This target builds a private source copy with the `failpoint-ctl` version selected
-by `go.mod`, then uses the normal `make build-go` flags. It never rewrites the
-checkout or replaces `bin/milvus`. The fixture lives in
-`cmake_build/failpoint-fixture` and must be retained until all test processes exit.
-`make integration-test` includes this stage after the ordinary suites.
+The controller supplies failpoint configuration only to StreamingNode processes
+and clears inherited HTTP failpoint controls. Each configuration selects a
+process PID, idempotency key, message type, and optionally a vchannel. Matching
+happens before an atomic one-shot claim. A replacement process has a different
+PID and cannot rearm the previous incarnation's fault.
 
-The remote development runner needs no special build flags:
+## Hit receipts and barriers
 
-```sh
-milvus-dev-cli go-integration local . -b master --allow-dirty \
-  -t tests/integration/idempotency
-```
+The server write path atomically publishes a receipt containing the process PID,
+key, vchannel, message type, durable message ID, TimeTick, autoIDs, and original
+row offsets. A pre-append receipt has no durable message ID. Enabling a failpoint
+alone does not prove that the selected write reached its boundary.
 
-Select one leaf case during development with Go's slash-separated run pattern:
+Pause barriers have a two-minute bound and a release signal controlled by the
+test. Cleanup disarms the configuration and releases barriers. Control files
+remain available until all cluster processes stop, preventing a paused process
+from missing a release because its directory was removed too early.
 
-```sh
-milvus-dev-cli go-integration local . -b master --allow-dirty \
-  -t tests/integration/idempotency \
-  -k '^TestIdempotencyFailpoints$/^TestBackendAcknowledgementLost$/^single$'
-```
+## Correctness checks
 
-Case selection limits execution; the server and selected test package still need
-to be compiled.
+Backend retries must preserve the logical message's TimeTick while producing
+distinct persisted message IDs. This exercises physical reader deduplication,
+which exists independently of request-level idempotency.
 
-When no `MILVUS_FAILPOINT_WORK_DIR` is supplied, the shared `TestMain` helper builds
-one temporary fixture before running this package and removes it after teardown.
-A CI runner that prebuilds can set that variable to reuse the fixture instead.
+Request-level checks compare the IDs returned by explicit same-key retries with
+the server's original IDs at their recorded row offsets, including after owner
+recovery. Queries verify every ordinal/primary-key pair. Flushed collection
+statistics verify the exact stored row count because query-level primary-key
+deduplication can hide duplicate physical rows. Compaction is disabled to preserve
+this check.
 
-## Control and cleanup
+## Scope
 
-Standard `failpoint.Inject` markers are inert in the ordinary, unrewritten build.
-The instrumented server reads `GO_FAILPOINTS` only on StreamingNode processes;
-this suite clears inherited HTTP failpoint controls. A point's value names a
-private JSON configuration file. Configuration selects an exact process PID,
-idempotency key, message type, and optionally vchannel before claiming a one-shot
-hit. Replacements receive a new PID and cannot accidentally rearm the old fault.
-
-Receipts contain the PID, key, channel, message type, durable message ID, TimeTick,
-autoIDs and original row offsets. Atomic publication avoids partial reads. Pause
-barriers have a two-minute bound and can be released by cleanup; their files stay
-alive until the entire cluster stops. No probabilistic injection or timing-only
-sleep is used to enter a crash window.
-
-These cases cover local WAL/idempotency behavior. They do not claim CDC switchover
-coverage, nor do they turn errors injected above the WAL retry loop into evidence
-about backend acknowledgement loss. Recovery correctness follows the current
-upstream WAL summary replay, not the historical QA checkpoint/CAS hooks.
-
-## Fault interpretation
-
-The backend fault changes the result immediately after `walimpls.Append`, inside
-the adaptor's retry loop. The real retry, timestamp allocation, and interceptor
-callbacks remain intact. Converting a successful *whole interceptor chain* into
-an error above this loop would instead cause a new append with a new TimeTick;
-that injection does not establish a reachable backend failure.
-
-The idempotency boundaries only observe or pause execution. SIGKILL and client
-deadlines supply the actual failure; the controller never forces `Window.Fail`,
-`Window.Complete`, or a replication checkpoint result.
-
-Same-TimeTick backend retries exercise physical reader deduplication, which also
-exists without request idempotency. Request-level coverage comes from explicit
-same-key retries, original autoID/offset comparisons, owner recovery, and exact
-stored row counts. Reader duplicate-drop logs are useful additional execution
-evidence; this suite does not currently assert their metric counters. The current
-MiniCluster uses Pulsar, so these results do not establish Woodpecker or CDC
-behavior under real storage/network faults.
+The suite covers local WAL behavior with Pulsar. Woodpecker, CDC switchover, and
+real storage/network chaos require separate coverage. Recovery follows the
+upstream WAL summary replay path. Reader duplicate-drop logs and metrics provide
+additional diagnostics; metric counters are not currently asserted by the suite.
