@@ -61,6 +61,33 @@ func TestProperties_GetTaskType_Unrecognized(t *testing.T) {
 	assert.Equal(t, "UnknownType", taskType)
 }
 
+func TestProperties_CollectionMeta(t *testing.T) {
+	t.Run("append and get", func(t *testing.T) {
+		props := NewProperties(nil)
+		props.AppendCollectionName("docs")
+		props.AppendDatabaseID(7)
+		props.AppendDatabaseName("analytics")
+		assert.Equal(t, "docs", props[CollectionNameKey])
+		assert.Equal(t, "7", props[DatabaseIDKey])
+		assert.Equal(t, "analytics", props[DatabaseNameKey])
+		assert.Equal(t, "docs", props.GetCollectionName())
+		assert.Equal(t, int64(7), props.GetDatabaseID())
+		assert.Equal(t, "analytics", props.GetDatabaseName())
+	})
+
+	t.Run("missing reads as zero values", func(t *testing.T) {
+		props := NewProperties(nil)
+		assert.Equal(t, "", props.GetCollectionName())
+		assert.Equal(t, int64(0), props.GetDatabaseID())
+		assert.Equal(t, "", props.GetDatabaseName())
+	})
+
+	t.Run("invalid database ID reads as zero", func(t *testing.T) {
+		props := NewProperties(map[string]string{DatabaseIDKey: "not_a_number"})
+		assert.Equal(t, int64(0), props.GetDatabaseID())
+	})
+}
+
 func TestProperties_CollectionID(t *testing.T) {
 	t.Run("append and get", func(t *testing.T) {
 		props := NewProperties(nil)
