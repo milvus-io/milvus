@@ -157,7 +157,7 @@ func TestReleasePartitionsDropLoadConfigBroadcastsToControlChannel(t *testing.T)
 	assert.False(t, captured.BroadcastHeader().AckSyncUp)
 }
 
-func newLoadConfigQViewsServer(t *testing.T) (*Server, *metastoremocks.QueryCoordCatalog, *meta.MockBroker) {
+func newLoadConfigQViewsServer(t *testing.T, configure ...func(*loadmgr.LoadConfigStoreDependencies)) (*Server, *metastoremocks.QueryCoordCatalog, *meta.MockBroker) {
 	t.Helper()
 	paramtable.Init()
 	initStreamingSystem()
@@ -167,9 +167,13 @@ func newLoadConfigQViewsServer(t *testing.T) (*Server, *metastoremocks.QueryCoor
 	catalog.EXPECT().GetPartitions(mock.Anything, mock.Anything).
 		Return(map[int64][]*querypb.PartitionLoadInfo{}, nil).Once()
 	catalog.EXPECT().GetReplicas(mock.Anything).Return(nil, nil).Once()
+	loadDependencies := loadmgrtest.FromLegacyCatalog(t, catalog)
+	for _, configureDependencies := range configure {
+		configureDependencies(&loadDependencies)
+	}
 	fakeBalancer := &fakeRuntimeBalancer{}
 	runtime, err := newQViewsRuntime(context.Background(), qviewsRuntimeDependencies{
-		loadConfigDependencies: loadmgrtest.FromLegacyCatalog(t, catalog),
+		loadConfigDependencies: loadDependencies,
 		queryViewCatalog:       &fakeQueryViewCatalog{},
 		viewSyncClient:         &fakeRuntimeViewSyncClient{},
 		queryNodeClient:        &fakeRuntimeQueryNodeClient{},
