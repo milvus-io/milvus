@@ -295,6 +295,28 @@ func (s *FailpointSuite) TestBackendAcknowledgementLost() {
 	}
 }
 
+func (s *FailpointSuite) TestUnrelatedRequestDoesNotConsumeFault() {
+	ctx, cancel := context.WithTimeout(s.T().Context(), 3*time.Minute)
+	defer cancel()
+	tc := writeCases[0]
+	req, _ := s.create(ctx, tc, 1)
+	key := funcutil.GenRandomStr()
+	dir := s.arm(walpoint.AfterBackendAppend, key, "", tc.messageType, "error")
+
+	// An unrelated write must not consume the selected request's one-shot hit.
+	unrelated, _ := s.create(ctx, tc, 1)
+	unrelatedIDs := s.retry(ctx, unrelated, funcutil.GenRandomStr())
+	files, err := filepath.Glob(filepath.Join(dir, "*.json"))
+	s.Require().NoError(err)
+	s.Require().Empty(files)
+	ids := s.retry(ctx, req, key)
+	receipt := s.receipts(dir, 1)[0]
+	s.Require().Equal(key, receipt.Key)
+	s.Require().Equal(s.Cluster.GetAllStreamingNodes()[0].PID(), receipt.PID)
+	s.verify(ctx, req, ids, tc.dim)
+	s.verify(ctx, unrelated, unrelatedIDs, tc.dim)
+}
+
 func (s *FailpointSuite) restartStreamingNode(pid ...int) {
 	nodes := s.Cluster.GetAllStreamingNodes()
 	s.Require().Len(nodes, 1)
