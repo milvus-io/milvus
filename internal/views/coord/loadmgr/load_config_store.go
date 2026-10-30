@@ -10,7 +10,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // LoadConfigStore persists and serves the per-collection desired load state.

@@ -1710,10 +1710,6 @@ func (coord *MixCoordMock) GetQueryNodeDistribution(ctx context.Context, in *que
 	}, nil
 }
 
-func (coord *MixCoordMock) WatchQueryViewSegmentLoadInfo(ctx context.Context, opts ...grpc.CallOption) (querypb.QueryCoord_WatchQueryViewSegmentLoadInfoClient, error) {
-	return nil, nil
-}
-
 func (coord *MixCoordMock) SuspendBalance(ctx context.Context, in *querypb.SuspendBalanceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return merr.Success(), nil
 }

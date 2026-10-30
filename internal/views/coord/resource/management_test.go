@@ -3,7 +3,6 @@ package resource
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"

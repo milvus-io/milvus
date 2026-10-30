@@ -247,7 +247,7 @@ func (s *mixCoordImpl) ListBatchQueryNodes(w http.ResponseWriter, req *http.Requ
 	w.Write(bytes)
 }
 
-// GetStreamingNodeDistribution handles GET requests to retrieve streaming node distribution.
+// GetStreamingNodeDistribution returns confirmed WAL assignments for an SN.
 func (s *mixCoordImpl) GetStreamingNodeDistribution(w http.ResponseWriter, req *http.Request) {
 	nodeID, err := strconv.ParseInt(req.URL.Query().Get("node_id"), 10, 64)
 	if err != nil || nodeID <= 0 {
@@ -335,26 +335,6 @@ func (s *mixCoordImpl) HandleBatchBalanceStatus(w http.ResponseWriter, req *http
 	}
 }
 
-func (s *mixCoordImpl) getQueryCoordChannelBalanceActive(ctx context.Context) (bool, error) {
-	channelActivate, err := s.queryCoordServer.CheckChannelBalanceActive(ctx)
-	if err != nil {
-		return false, err
-	}
-
-	resp, err2 := s.CheckBalanceStatus(ctx, &querypb.CheckBalanceStatusRequest{
-		Base: commonpbutil.NewMsgBase(),
-	})
-	if err2 != nil {
-		return channelActivate, err2
-	}
-
-	if !merr.Ok(resp.GetStatus()) {
-		return channelActivate, merr.Error(resp.GetStatus())
-	}
-
-	return channelActivate && resp.IsActive, nil
-}
-
 func (s *mixCoordImpl) getQueryCoordBalanceActive(ctx context.Context) (bool, error) {
 	resp, err := s.CheckBalanceStatus(ctx, &querypb.CheckBalanceStatusRequest{
 		Base: commonpbutil.NewMsgBase(),
@@ -389,37 +369,6 @@ func (s *mixCoordImpl) getBatchBalanceStatus(w http.ResponseWriter, req *http.Re
 	fmt.Fprintf(w, `{"msg": "OK", "status": "%v"}`, balanceStatus)
 }
 
-func (s *mixCoordImpl) controlQueryCoordChannelBalanceStatus(ctx context.Context, status string) error {
-	// Call the appropriate MixCoord method based on the status.
-	var err error
-	var errMsg string
-
-	switch status {
-	case "suspended":
-		err = s.queryCoordServer.SuspendChannelBalance(ctx)
-		errMsg = "failed to suspend balance"
-	case "resumed", "active":
-		err = s.queryCoordServer.ResumeChannelBalance(ctx)
-		errMsg = "failed to resume balance"
-	default:
-		// If the status is not recognized, return an informative error immediately.
-		// This avoids proceeding with an invalid state.
-		err = merr.WrapErrParameterInvalidMsg("invalid status value: '%s'. Use 'suspended', 'resumed' or 'active'", status)
-	}
-
-	// --- Unified Error Handling ---
-	// After the switch, we handle potential errors from the called method.
-
-	// First, check if there was a low-level error during the method execution (e.g., network issue).
-	if err != nil {
-		// Wrap the original error with more context.
-		return merr.Wrap(err, errMsg)
-	}
-	// If no errors were encountered, the operation was successful. Return nil to indicate success.
-	return nil
-}
-
-// controlBatchBalanceStatus handles PUT requests to suspend or resume balance.
 func (s *mixCoordImpl) controlBatchBalanceStatus(w http.ResponseWriter, req *http.Request) {
 	logger := mlog.With(mlog.String("Scope", "Rolling"))
 	// Define the request body struct for the PUT request.
@@ -479,7 +428,7 @@ func (s *mixCoordImpl) HandleStreamingBalanceStatus(w http.ResponseWriter, req *
 	}
 }
 
-// getStreamingBalanceStatus handles GET requests to fetch the balance status.
+// getStreamingBalanceStatus reports only the WAL automatic-optimization setting.
 func (s *mixCoordImpl) getStreamingBalanceStatus(w http.ResponseWriter, req *http.Request) {
 	state := "active"
 	if !paramtable.Get().StreamingCfg.WALBalancerPolicyAllowRebalance.GetAsBool() {
@@ -489,7 +438,6 @@ func (s *mixCoordImpl) getStreamingBalanceStatus(w http.ResponseWriter, req *htt
 	json.NewEncoder(w).Encode(map[string]string{"msg": "OK", "status": state})
 }
 
-// controlStreamingBalanceStatus handles PUT requests to change the balance status.
 func (s *mixCoordImpl) controlStreamingBalanceStatus(w http.ResponseWriter, req *http.Request) {
 	var body struct {
 		Status string `json:"status"`
@@ -635,6 +583,8 @@ func (s *mixCoordImpl) handlePutStreamingNodeStatus(w http.ResponseWriter, req *
 	w.Write([]byte(`{"msg": "OK"}`))
 }
 
+// Scheduling status is meaningful only for a registered StreamingNode.
+
 // HandleBatchNodeStatus is the main handler that dispatches requests
 // based on the HTTP method.
 func (s *mixCoordImpl) HandleBatchNodeStatus(w http.ResponseWriter, req *http.Request) {
@@ -774,7 +724,6 @@ func (s *mixCoordImpl) TransferBatchSegment(w http.ResponseWriter, req *http.Req
 		SourceNodeID int64 `json:"source_node_id"`
 		TargetNodeID int64 `json:"target_node_id,omitempty"`
 		SegmentID    int64 `json:"segment_id,omitempty"`
-		CopyMode     *bool `json:"copy_mode,omitempty"`
 	}
 	logger := mlog.With(mlog.String("Scope", "Rolling"))
 	// Decodes the JSON from the request body.
@@ -811,12 +760,7 @@ func (s *mixCoordImpl) TransferBatchSegment(w http.ResponseWriter, req *http.Req
 		request.TransferAll = true
 	}
 
-	// Check if the CopyMode field was provided.
-	if requestBody.CopyMode != nil {
-		request.CopyMode = *requestBody.CopyMode
-	} else {
-		request.CopyMode = false // Default to false if not provided
-	}
+	// Legacy copy_mode fields are ignored; all segment transfers are moves.
 
 	resp, err := s.TransferSegment(req.Context(), request)
 	err = merr.CheckRPCCall(resp, err)

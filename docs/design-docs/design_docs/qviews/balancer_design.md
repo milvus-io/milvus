@@ -117,7 +117,7 @@ does not read ParamTable directly.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `queryView.balancer.autoBalance` | `true` | Enables MayOptimize on both event-triggered and periodic reconciles; mandatory placement, recovery, replica isolation, and releases continue when false. |
+| `queryView.balancer.optimization.enabled` | `true` | Enables MayOptimize on both event-triggered and periodic reconciles; mandatory placement, recovery, replica isolation, and releases continue when false. |
 | `queryView.balancer.reconcileInterval` | `1m` | Positive duration between periodic reconciles. Lower values increase optimization/check frequency and CPU overhead; higher values reduce scans. Event-triggered work is independent. |
 | `queryView.balancer.targetRowsPerShardNode` | `100000` | Positive rows used to derive free shard fanout. Increasing favors fewer nodes; decreasing increases the free allowance. Not a node capacity limit. |
 
@@ -221,29 +221,54 @@ replica node lists include leaders; QN migration eligibility is determined from
 the QN layout separately. Configuration identity is rechecked after the snapshot,
 including release/reload with identical configuration content.
 
-`LoadBalance` requires complete current-config shard coverage. It validates the
-source QN, destination QNs in the same replica target, and requested segments in
-the source's Up placement before accepting any replacement views. An omitted
-destination list selects other eligible QNs of that replica; an omitted segment
-list selects all source segments. An ongoing handoff or stale layout returns a
-retriable error instead of overriding newer work.
+`LoadBalance` and `TransferSegment` use the synchronous, exact-version
+[Manual placement](#manual-placement) contract below.
+All Segment transfers are moves. Both REST variants ignore the legacy
+`copy_mode` parameter; the retained RPC `CopyMode` field is ignored as well.
+There is no separate copy-placement path.
 
-Manual placement is serialized with automatic reconciliation and uses the same
-`ShardViewManager.AddPreparing` lifecycle. It preserves the source view's data,
-schema, load configuration, Manifest identities and transform cursors, changing
-only requested segment assignments. The normal Preparing/Up/Down protocol keeps
-old service and references until handoff. Load/release is serialized with view
-acceptance through the collection config lock; the lock is released before
-waiting for workers.
+`TransferChannel` instead delegates to the WAL Balancer: it moves a whole
+PChannel between StreamingNodes and waits for target WAL assignment confirmation,
+not QueryView readiness. Coordinator `/management/streaming/transfer` uses the
+same operation. The old Proxy `/management/querycoord/transfer/channel` endpoint
+is a successful no-op with an explicit deprecated message. See
+[manual WAL migration](../../../agent_guides/streaming-system/coordination/channel_management.md#manual-wal-migration).
 
-The RPC remains synchronous: success requires an Up view at least as new as
-each accepted migration and the requested destination assignments. A release,
-configuration change, failed preparation or superseding incompatible placement
-cannot report success. Waiting subscribes before acceptance and rechecks after
-reading state to avoid lost notifications. The request deadline and existing
-segment-task timeout bound the wait. Timeout does not roll back accepted views;
-multi-shard application is not an atomic transaction. Manual placement is a
-one-time operation, not a permanent constraint on later automatic balancing.
+`SuspendBalance` and `ResumeBalance` persist `false` or `true` to
+`queryView.balancer.optimization.enabled`. `CheckBalanceStatus` reads that same
+configuration. There is no separate administrative suspension flag. The existing
+configuration watcher publishes the changed profile and wakes reconciliation;
+an active batch may finish with its pinned profile, and accepted Preparing views
+continue. Disabling optimization leaves mandatory placement, recovery,
+data/schema/config updates, release and manual placement enabled. These calls
+reuse AlterConfig's `UpdateConfigInEtcd` / `AlterConfigsInEtcd` path: commit to
+etcd and synchronously refresh the local EtcdSource before returning. Subsequent
+processes recover the same value from etcd. No runtime overlay is written, so
+later AlterConfig writes or resets remain effective. If the etcd source is
+unavailable or persistence/refresh fails, the operation returns an error instead
+of falling back to a process-local change.
+
+`ListCheckers`, `ActivateChecker` and `DeactivateChecker` are deprecated. Their
+wire endpoints remain available but return `ErrServiceUnimplemented` (code 10)
+with a reason identifying the deprecated API and its balance-control alternative.
+They neither access nor modify the retired CheckerController.
+
+`CheckQueryNodeDistribution` is also deprecated and returns
+`ErrServiceUnimplemented` through its existing RPC. Its old ChannelName/SegmentID
+coverage check is removed: it cannot establish QueryView migration completion or
+safe source-node shutdown. `LoadBalance` and `TransferSegment` already wait for
+the accepted QueryView to become Up; neither promises that all old leases and
+in-flight requests on the source node have drained. `GetQueryNodeDistribution`
+remains available for inspecting confirmed resources.
+
+Proxy `/management/querycoord/distribution/check` is a deprecated HTTP 200
+no-op with an explicit message that no check was performed. It does not call
+the deprecated RPC. `/management/query/task_queue/clear` follows the same
+HTTP convention and does not clear any queues. Coordinator and QueryCoord
+`ClearReadTaskQueue` RPCs return `ErrServiceUnimplemented` with a deprecated
+reason, without fan-out to Proxy or QN legacy schedulers. QueryView execution
+is not governed by those schedulers. The lower-level worker RPC definitions
+remain available; they are no longer invoked by these management endpoints.
 
 ### 2.2 BalancePolicy
 
@@ -1243,3 +1268,50 @@ acknowledgement. If LoadConfig is already absent, repeat release drains the
 Balancer and waits for final Registry removal under the same collection lock.
 Physical cleanup of older views after a partial release continues through the
 normal serving lease/reference protocol; fresh Phase 1 plans select the new Up.
+
+## Manual placement
+
+`ManualPlace(ctx, scope, modify)` is the common management operation. The optional
+scope restricts the snapshot by collection and/or node using resident shard
+indexes. NodeID is an index hint, with no source/destination semantics. Missing
+entries or managers without a usable view are absent from the snapshot; an empty
+snapshot still reaches the callback.
+
+The callback receives an independent `map[ShardID]*QueryViewAtCoordBuilder`. It
+owns operation-specific filtering and validation, may remove entries, and decides
+whether missing matches are errors. The segment-move adapter implements source
+and target semantics, segment matching, replica/RG eligibility and configuration
+checks inside this callback. ManualPlace does not impose those policies or read
+ReplicaManager. The segment adapter validates all requested source segments
+before checking destinations, and validates every selected shard before changing
+assignments. Invalid requests therefore submit no views, including mixed
+valid/missing segment requests when no other query node is available.
+ManualPlace rejects additions without a captured manager/source, which
+cannot participate in its source-version submission protocol.
+
+Data integrity is a mandatory ManualPlace invariant. Before any submission, each
+retained changed builder must preserve its source metadata (including DataVersion,
+SchemaVersion, load version and transform cursor), streaming resources (partition
+stats), and exact Segment membership, partition and Manifest version. Segments
+may move between nodes but cannot be added, removed or duplicated. Filtering out
+an entire shard means no submission for that shard; it does not remove its data.
+The comparison uses the captured source view, which already reflects partition
+selection, rather than requiring the latest full collection DataView.
+
+Under the reconcile lock, snapshot each manager's newest usable target
+(Preparing/Ready before an older Up), run the callback once, detach changed
+builders and submit them. The manager rechecks the exact source version before
+acceptance, including after acquiring DataView references. Lifecycle checks
+remain in the manager; topology changes are reconciled by the normal controller.
+Unchanged builders create no views. Each accepted view carries a one-shot
+completion attached before callbacks can run, reporting its first Up or failed
+preparation; a newer successful view never completes an older request.
+
+Release the reconcile lock before waiting. Waits are event-driven, bounded by
+request context and a server timeout, and return per-shard exact versions and
+outcomes. Cancellation ends observation, not the accepted handoff. Return partial
+results on submission failure or cancellation; this is not a cross-shard atomic
+transaction. Completion state is in-memory and lives only with the operation/view.
+`LoadBalance` and `TransferSegment` share this synchronous contract. Copy mode is
+not supported by this single-placement operation. Successful placement is not a
+permanent pin and does not assert that retained old-view resources are gone.

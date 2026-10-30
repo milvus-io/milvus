@@ -9,6 +9,30 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
+func TestQueryViewBuilderOwnsPlacementCopy(t *testing.T) {
+	view := &viewpb.QueryViewOfShard{
+		Meta: &viewpb.QueryViewMeta{
+			CollectionId: 1, ReplicaId: 10, Vchannel: "v1", SchemaVersion: 7, LoadInfoVersion: 8,
+			Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 2}, QueryVersion: 3}, TransformStartAfterTimetick: 99,
+		},
+		QueryNode: []*viewpb.QueryViewOfQueryNode{{NodeId: 1, Partitions: []*viewpb.QueryViewOfPartition{
+			{PartitionId: 100, SegmentIds: []int64{101}, SegmentManifestVersions: []int64{5}},
+		}}},
+		StreamingNode: &viewpb.QueryViewOfStreamingNode{PartitionStats: []*viewpb.ClusteredPartitionStats{{PartitionId: 100, Version: 6}}},
+	}
+	b := NewQueryViewAtCoordBuilderFromView(view)
+	b.Assignments()[1][100][0] = 999
+	require.Equal(t, int64(101), view.QueryNode[0].Partitions[0].SegmentIds[0])
+	b = NewQueryViewAtCoordBuilderFromView(view)
+	b.SetAssignments(map[int64]map[int64][]int64{2: {100: {101}}})
+	result := b.Build()
+	require.Equal(t, []int64{5}, result.QueryNode[0].Partitions[0].SegmentManifestVersions)
+	require.Equal(t, int32(7), result.Meta.SchemaVersion)
+	require.Equal(t, uint64(8), result.Meta.LoadInfoVersion)
+	require.Equal(t, uint64(99), result.Meta.TransformStartAfterTimetick)
+	require.Equal(t, int64(6), result.StreamingNode.PartitionStats[0].Version)
+}
+
 func TestQueryViewAtCoordBuilder(t *testing.T) {
 	shardView := &viewpb.DataViewOfShard{
 		Vchannel: "v1",

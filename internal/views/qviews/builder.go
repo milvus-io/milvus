@@ -168,20 +168,22 @@ func (b *QueryViewAtCoordBuilder) Build() *viewpb.QueryViewOfShard {
 		// Manual placement preserves all streaming resources, including stats
 		// for partitions without sealed segments in this shard.
 		stats = proto.Clone(b.streamingNode).(*viewpb.QueryViewOfStreamingNode)
-	selected := make(map[int64]bool)
-	for _, node := range queryNodes {
-		for _, partition := range node.GetPartitions() {
-			selected[partition.GetPartitionId()] = true
+	} else {
+		selected := make(map[int64]bool)
+		for _, node := range queryNodes {
+			for _, partition := range node.GetPartitions() {
+				selected[partition.GetPartitionId()] = true
+			}
 		}
-	}
-	ids := make([]int64, 0, len(selected))
-	for id := range selected {
-		ids = append(ids, id)
-	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	for _, id := range ids {
-		if version := b.partitionStatsVersions[id]; version > 0 {
-			stats.PartitionStats = append(stats.PartitionStats, &viewpb.ClusteredPartitionStats{PartitionId: id, Version: version})
+		ids := make([]int64, 0, len(selected))
+		for id := range selected {
+			ids = append(ids, id)
+		}
+		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+		for _, id := range ids {
+			if version := b.partitionStatsVersions[id]; version > 0 {
+				stats.PartitionStats = append(stats.PartitionStats, &viewpb.ClusteredPartitionStats{PartitionId: id, Version: version})
+			}
 		}
 	}
 	return &viewpb.QueryViewOfShard{

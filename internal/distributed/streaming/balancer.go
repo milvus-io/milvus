@@ -19,7 +19,7 @@ type balancerImpl struct {
 
 // ListStreamingNode returns all the streaming nodes.
 func (b balancerImpl) ListStreamingNode(ctx context.Context) ([]types.StreamingNodeInfo, error) {
-	_, err := b.checkIfStreamingServiceReady(ctx)
+	err := b.checkIfStreamingServiceReady(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -35,7 +35,7 @@ func (b balancerImpl) ListStreamingNode(ctx context.Context) ([]types.StreamingN
 	return nodeInfos, nil
 }
 
-// GetWALDistribution returns the wal distribution of the streaming node.
+// GetWALDistribution distinguishes an empty registered SN from an unknown node.
 func (b balancerImpl) GetWALDistribution(ctx context.Context, nodeID int64) (*types.StreamingNodeAssignment, error) {
 	if _, err := b.checkIfStreamingServiceReady(ctx); err != nil {
 		return nil, err
@@ -64,7 +64,7 @@ func (b balancerImpl) GetWALDistribution(ctx context.Context, nodeID int64) (*ty
 
 // GetFrozenNodeIDs returns the frozen node ids.
 func (b balancerImpl) GetFrozenNodeIDs(ctx context.Context) ([]int64, error) {
-	_, err := b.checkIfStreamingServiceReady(ctx)
+	err := b.checkIfStreamingServiceReady(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +135,7 @@ func (b balancerImpl) ResumeRebalance(ctx context.Context) error {
 }
 
 func (b balancerImpl) FreezeNodeIDs(ctx context.Context, nodeIDs []int64) error {
-	_, err := b.checkIfStreamingServiceReady(ctx)
+	err := b.checkIfStreamingServiceReady(ctx)
 	if err != nil {
 		return err
 	}
@@ -151,7 +151,7 @@ func (b balancerImpl) FreezeNodeIDs(ctx context.Context, nodeIDs []int64) error 
 }
 
 func (b balancerImpl) DefreezeNodeIDs(ctx context.Context, nodeIDs []int64) error {
-	_, err := b.checkIfStreamingServiceReady(ctx)
+	err := b.checkIfStreamingServiceReady(ctx)
 	if err != nil {
 		return err
 	}
@@ -166,12 +166,9 @@ func (b balancerImpl) DefreezeNodeIDs(ctx context.Context, nodeIDs []int64) erro
 	return err
 }
 
-func (b balancerImpl) checkIfStreamingServiceReady(ctx context.Context) (bool, error) {
+func (b balancerImpl) checkIfStreamingServiceReady(ctx context.Context) error {
 	if !paramtable.IsLocalComponentEnabled(typeutil.MixCoordRole) {
 		panic("should be only called at mix coord")
 	}
-	if err := snmanager.StaticStreamingNodeManager.CheckIfStreamingServiceReady(ctx); err != nil {
-		return false, err
-	}
-	return true, nil
+	return snmanager.StaticStreamingNodeManager.CheckIfStreamingServiceReady(ctx)
 }

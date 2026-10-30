@@ -479,3 +479,14 @@ standalone lifecycle without DataView reference ownership. Integrated runtimes
 must call `RecoverShardViewRegistryWithDataViews` with a non-nil provider before
 enabling DataView GC. State-machine constructors similarly retain the original
 API and expose explicit `WithRef` variants for reference-owning managers.
+
+## Manual preparation completion
+
+A tracked manual preparation names the exact source QueryView version and binds
+an operation-local completion before emitting its first effects. The source must
+still be the current planning target at both admission checks. The completion is
+resolved once on Up or unsuccessful preparation (including preemption/release).
+Later Down, removal, or a newer Up cannot overwrite that result. Failed recovery
+shutdown also wakes pending observers. Waiting does not hold manager/reconcile
+locks and cancellation does not change the view lifecycle. This is an in-memory
+observation handle, not a persisted management job or a new lifecycle state.
