@@ -92,8 +92,7 @@ ColumnPlanner::ValidateBoundaries() {
     auto width = boundaries[1];
     for (size_t i = 1; width != 0 && i + 1 < boundaries.size(); ++i) {
         const auto rows = boundaries[i + 1] - boundaries[i];
-        if (rows != width &&
-            (i + 2 != boundaries.size() || rows > width)) {
+        if (rows != width && (i + 2 != boundaries.size() || rows > width)) {
             width = 0;
         }
     }
