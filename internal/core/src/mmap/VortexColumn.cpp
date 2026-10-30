@@ -135,9 +135,45 @@ CanReadVortexAsTargetType(const FieldMeta& field_meta, TargetType target_type) {
     if (field_meta.get_data_type() != DataType::ARRAY) {
         return true;
     }
-    return field_meta.is_nested_array()
+    // Native-list ARRAY (nested or element-nullable) is read through
+    // ArrayValueView, like ChunkedArrayColumn; legacy ARRAY through ArrayView.
+    return field_meta.is_native_list_array()
                ? target_type == TargetType::ArrayValueView
                : target_type == TargetType::ArrayView;
+}
+
+// Builds the ColumnarArrayChunk the raw load path builds for a native-list
+// ARRAY field, from Vortex-decoded Arrow lists. The chunk carries row,
+// inner-array and leaf validity, so ArrayValueViews over it see every level.
+std::shared_ptr<ColumnarArrayChunk>
+MakeNativeListArrayChunk(const FieldMeta& field_meta,
+                         const arrow::ArrayVector& arrays,
+                         int64_t expected_rows) {
+    AssertInfo(field_meta.is_native_list_array() &&
+                   field_meta.get_data_type() == DataType::ARRAY,
+               "vortex field {} is not a native-list ARRAY",
+               field_meta.get_id().get());
+    for (const auto& array : arrays) {
+        if (array == nullptr || array->type_id() != arrow::Type::LIST) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "vortex native-list ARRAY field {} expected Arrow "
+                      "list, got {}",
+                      field_meta.get_id().get(),
+                      array == nullptr ? "<null>" : array->type()->ToString());
+        }
+    }
+    std::shared_ptr<Chunk> chunk = create_chunk(field_meta, arrays);
+    auto array_chunk = std::dynamic_pointer_cast<ColumnarArrayChunk>(chunk);
+    AssertInfo(array_chunk != nullptr,
+               "vortex native-list ARRAY field {} must build a "
+               "ColumnarArrayChunk",
+               field_meta.get_id().get());
+    AssertInfo(static_cast<int64_t>(array_chunk->row_count()) == expected_rows,
+               "vortex native-list ARRAY field {} built {} rows, expected {}",
+               field_meta.get_id().get(),
+               array_chunk->row_count(),
+               expected_rows);
+    return array_chunk;
 }
 
 ScalarFieldProto::DataCase
@@ -576,8 +612,10 @@ struct VortexColumn::OrderedTakeOwner {
     std::vector<ArrayView> array_views;
     std::vector<ArrayValue> array_values;
     std::vector<ArrayValueView> array_value_views;
+    std::vector<std::shared_ptr<const ColumnarArrayChunk>> native_list_chunks;
 };
 
+template <bool HasCandidateMask>
 class VortexTakeResult final : public ChunkedColumnInterface::TakeResult {
  public:
     VortexTakeResult(ChunkedColumnInterface::ValueView values,
@@ -585,13 +623,15 @@ class VortexTakeResult final : public ChunkedColumnInterface::TakeResult {
                      ValidityView data_skipped,
                      std::shared_ptr<void> owner,
                      int64_t size,
-                     DataType data_type)
+                     DataType data_type,
+                     const TargetBitmap* candidate_mask)
         : values_(values),
           validity_(validity),
           data_skipped_(data_skipped),
           owner_(std::move(owner)),
           size_(size),
-          data_type_(data_type) {
+          data_type_(data_type),
+          candidate_mask_(candidate_mask) {
         AssertInfo(size_ >= 0, "vortex take result has invalid size {}", size_);
         AssertInfo(CanReadAsTargetType(data_type_, values_.target_type),
                    "vortex take type {} does not match target {}",
@@ -634,38 +674,58 @@ class VortexTakeResult final : public ChunkedColumnInterface::TakeResult {
  protected:
     ChunkedColumnInterface::TakeItemState
     PrepareItem(int64_t index, bool read_data) const override {
+        if constexpr (HasCandidateMask) {
+            AssertInfo((*candidate_mask_)[index],
+                       "Take position {} was excluded by the candidate mask",
+                       index);
+        }
         return ChunkedColumnInterface::TakeItemState{
             !validity_ || validity_[index],
             read_data && data_skipped_ && data_skipped_[index]};
     }
 
     const void*
-    FixedValueAt(int64_t index) const override {
+    FixedValueAt(int64_t index, TakeItemState& state) const override {
+        if (!PrepareValue(index, state)) {
+            return nullptr;
+        }
         return static_cast<const char*>(values_.data) +
                (values_.offset + index) * values_.byte_width;
     }
 
     std::string_view
-    StringViewAt(int64_t index) const override {
+    StringViewAt(int64_t index, TakeItemState& state) const override {
+        if (!PrepareValue(index, state)) {
+            return {};
+        }
         return static_cast<const std::string_view*>(
             values_.data)[values_.offset + index];
     }
 
-    Json
-    JsonAt(int64_t index) const override {
+    std::string_view
+    JsonViewAt(int64_t index, TakeItemState& state) const override {
+        if (!PrepareValue(index, state)) {
+            return {};
+        }
         const auto& value =
             static_cast<const Json*>(values_.data)[values_.offset + index];
-        return Json(static_cast<std::string_view>(value));
+        return value.data();
     }
 
     ArrayView
-    ArrayAt(int64_t index) const override {
+    ArrayAt(int64_t index, TakeItemState& state) const override {
+        if (!PrepareValue(index, state)) {
+            return {};
+        }
         return static_cast<const ArrayView*>(
             values_.data)[values_.offset + index];
     }
 
     ArrayValueView
-    ArrayValueAt(int64_t index) const override {
+    ArrayValueAt(int64_t index, TakeItemState& state) const override {
+        if (!PrepareValue(index, state)) {
+            return {};
+        }
         return static_cast<const ArrayValueView*>(
             values_.data)[values_.offset + index];
     }
@@ -726,6 +786,7 @@ class VortexTakeResult final : public ChunkedColumnInterface::TakeResult {
     std::shared_ptr<void> owner_;
     int64_t size_;
     DataType data_type_;
+    const TargetBitmap* candidate_mask_;
 };
 
 class VortexColumn::ArrowStringLikeColumn {
@@ -1254,6 +1315,7 @@ class VortexDataBatchReader final {
         std::vector<ArrayView> array_views;
         std::vector<ArrayValue> array_values;
         std::vector<ArrayValueView> array_value_views;
+        std::shared_ptr<const ColumnarArrayChunk> native_list_chunk;
     };
 
     bool
@@ -1413,13 +1475,38 @@ class VortexDataBatchReader final {
     }
 
     void
+    FillNativeListArrayOutput(const std::shared_ptr<arrow::Array>& array,
+                              const std::shared_ptr<BatchOwner>& owner,
+                              ChunkedColumnInterface::ScanBatch* out) const {
+        AssertInfo(
+            target_type_ == ChunkedColumnInterface::TargetType::ArrayValueView,
+            "vortex native-list ARRAY scan field {} requires "
+            "ArrayValueView",
+            column_->field_id_.get());
+        auto rows =
+            array->length() == out->size ? array : array->Slice(0, out->size);
+        owner->native_list_chunk =
+            MakeNativeListArrayChunk(column_->field_meta_, {rows}, out->size);
+        auto views = owner->native_list_chunk->Views();
+        owner->array_value_views = std::move(views.first);
+        out->values.target_type =
+            ChunkedColumnInterface::TargetType::ArrayValueView;
+        out->values.data = owner->array_value_views.data();
+        out->values.byte_width = sizeof(ArrayValueView);
+        out->values.offset = 0;
+        FillValidityPointer(array, out);
+    }
+
+    void
     FillArrayOutput(const std::shared_ptr<arrow::Array>& array,
                     const std::shared_ptr<BatchOwner>& owner,
                     ChunkedColumnInterface::ScanBatch* out) const {
-        // TODO(local-format): ARRAY Scan currently normalizes native List and
+        if (column_->field_meta_.is_native_list_array()) {
+            FillNativeListArrayOutput(array, owner, out);
+            return;
+        }
+        // TODO(local-format): legacy ARRAY Scan normalizes native List and
         // Milvus-written Binary to the same protobuf-per-row representation.
-        // Return reader-backed native List views after writer/local-format
-        // ARRAY representation is unified.
         AssertInfo(array->type_id() == arrow::Type::BINARY,
                    "vortex array scan field {} expected normalized Arrow "
                    "binary, got {}",
@@ -2120,7 +2207,8 @@ VortexColumn::ArrayViews(
         ThrowInfo(ErrorCode::Unsupported,
                   "VortexColumn::ArrayViews only supports array fields");
     }
-    if (field_meta_.is_nested_array()) {
+    if (field_meta_.is_native_list_array()) {
+        RejectNullableArrayElements();
         ThrowInfo(ErrorCode::Unsupported,
                   "legacy ArrayViews API does not support nested ARRAY");
     }
@@ -2136,15 +2224,16 @@ VortexColumn::ArrayValueViews(
     int64_t chunk_id,
     std::optional<std::pair<int64_t, int64_t>> offset_len) const {
     if (!IsChunkedArrayColumnDataType(data_type_) ||
-        !field_meta_.is_nested_array()) {
+        !field_meta_.is_native_list_array()) {
         ThrowInfo(ErrorCode::Unsupported,
-                  "VortexColumn::ArrayValueViews only supports recursive "
+                  "VortexColumn::ArrayValueViews only supports native-list "
                   "ARRAY fields");
     }
+    RejectNullableArrayElements();
     auto chunk = MaterializeChunk(op_ctx, chunk_id, offset_len);
     auto* array_chunk = dynamic_cast<ColumnarArrayChunk*>(chunk.get());
     AssertInfo(array_chunk != nullptr,
-               "vortex recursive ARRAY chunk {} must use ColumnarArrayChunk",
+               "vortex native-list ARRAY chunk {} must use ColumnarArrayChunk",
                chunk_id);
     auto views = array_chunk->Views();
     return PinWrapper<std::pair<std::vector<ArrayValueView>, ValidityView>>(
@@ -2253,7 +2342,8 @@ VortexColumn::ArrayViewsByOffsets(milvus::OpContext* op_ctx,
                   "VortexColumn::ArrayViewsByOffsets only supports array "
                   "fields");
     }
-    if (field_meta_.is_nested_array()) {
+    if (field_meta_.is_native_list_array()) {
+        RejectNullableArrayElements();
         ThrowInfo(
             ErrorCode::Unsupported,
             "legacy ArrayViewsByOffsets API does not support nested ARRAY");
@@ -2308,11 +2398,12 @@ VortexColumn::ArrayValueViewsByOffsets(
     int64_t chunk_id,
     const FixedVector<int32_t>& offsets) const {
     if (!IsChunkedArrayColumnDataType(data_type_) ||
-        !field_meta_.is_nested_array()) {
+        !field_meta_.is_native_list_array()) {
         ThrowInfo(ErrorCode::Unsupported,
                   "VortexColumn::ArrayValueViewsByOffsets only supports "
-                  "recursive ARRAY fields");
+                  "native-list ARRAY fields");
     }
+    RejectNullableArrayElements();
     CheckChunkId(chunk_id);
     std::pair<std::vector<ArrayValueView>, FixedVector<bool>> views;
     views.first.resize(offsets.size());
@@ -2806,6 +2897,9 @@ VortexColumn::MaterializeChunk(
                   length);
     }
     arrays = storage::NormalizeArrowForChunkWriter(arrays, field_meta_);
+    if (data_type_ == DataType::ARRAY && field_meta_.is_native_list_array()) {
+        return MakeNativeListArrayChunk(field_meta_, arrays, length);
+    }
     if (data_type_ == DataType::ARRAY) {
         for (const auto& array : arrays) {
             auto binary = std::dynamic_pointer_cast<arrow::BinaryArray>(array);
@@ -3015,7 +3109,8 @@ VortexColumn::ScanStringLikeViewsFromFile(
 std::shared_ptr<arrow::Table>
 VortexColumn::TakeArrowFromFile(milvus::OpContext* op_ctx,
                                 int64_t file_id,
-                                const std::vector<int64_t>& offsets) const {
+                                const std::vector<int64_t>& offsets,
+                                VortexCellPin pin) const {
     CheckChunkId(file_id);
     const auto& file = column_group_->files()[file_id];
     std::vector<int64_t> file_offsets;
@@ -3030,10 +3125,12 @@ VortexColumn::TakeArrowFromFile(milvus::OpContext* op_ctx,
         file_offsets.emplace_back(offset - file.start_index);
     }
 
-    auto plan = PlanOffsets(file_id, file_offsets);
     // Storage reads into owned Rust buffers before Arrow export, not sparse
     // mapping views. The Cell pin is only needed through import.
-    auto pin = PinPlanCells(op_ctx, file_id, plan.cell_ids);
+    if (pin == nullptr) {
+        auto plan = PlanOffsets(file_id, file_offsets);
+        pin = PinPlanCells(op_ctx, file_id, plan.cell_ids);
+    }
     auto vortex_reader = BuildFileReader(file);
     auto table_result = vortex_reader->take(file_offsets);
     if (!table_result.ok()) {
@@ -3103,6 +3200,32 @@ VortexColumn::CopyArrowPrimitiveValues(
 
 ChunkedColumnInterface::TakeResultPtr
 VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
+    ValidateArrayViewTarget(options.target_type);
+    return TakeUnchecked(op_ctx, std::move(options));
+}
+
+void
+VortexColumn::ValidateArrayViewTarget(TargetType target_type) const {
+    if (target_type == TargetType::ArrayView ||
+        target_type == TargetType::ArrayValueView) {
+        RejectNullableArrayElements();
+    }
+}
+
+void
+VortexColumn::RejectNullableArrayElements() const {
+    if (data_type_ == DataType::ARRAY &&
+        field_meta_.has_nullable_array_element()) {
+        ThrowInfo(ErrorCode::NotImplemented,
+                  "expressions on element-nullable array field {} are "
+                  "not supported yet",
+                  field_name_);
+    }
+}
+
+ChunkedColumnInterface::TakeResultPtr
+VortexColumn::TakeUnchecked(milvus::OpContext* op_ctx,
+                            TakeOptions options) const {
     const auto& offsets = options.offsets;
     AssertInfo(offsets.size >= 0,
                "take offset count must be non-negative, got {}",
@@ -3111,6 +3234,13 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
         AssertInfo(offsets.data != nullptr,
                    "take offsets are null with count {}",
                    offsets.size);
+    }
+    AssertInfo(options.candidate_mask == nullptr ||
+                   options.candidate_mask->size() == offsets.size,
+               "Take candidate mask size does not match offset count {}",
+               offsets.size);
+    if (options.candidate_mask != nullptr && options.candidate_mask->all()) {
+        options.candidate_mask = nullptr;
     }
     const auto target_type = options.target_type;
     AssertInfo(options.filter == nullptr ||
@@ -3135,6 +3265,7 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
         std::vector<int64_t> unique_offsets;
         std::vector<int64_t> original_positions;
         std::vector<int64_t> original_position_ends;
+        VortexCellPin pin;
     };
 
     auto owner = std::make_shared<OrderedTakeOwner>();
@@ -3149,8 +3280,25 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
 
     std::vector<OffsetEntry> entries;
     entries.reserve(offsets.size);
-    for (int64_t i = 0; i < offsets.size; ++i) {
-        entries.emplace_back(OffsetEntry{offsets[i], i});
+    const auto add_entries = [&]<bool HasCandidateMask>() {
+        for (int64_t i = 0; i < offsets.size; ++i) {
+            if constexpr (HasCandidateMask) {
+                if (!(*options.candidate_mask)[i]) {
+                    if (owner->data_skipped.empty()) {
+                        owner->data_skipped.resize(offsets.size, false);
+                    }
+                    owner->data_skipped.set(i);
+                    has_data_skipped = true;
+                    continue;
+                }
+            }
+            entries.emplace_back(OffsetEntry{offsets[i], i});
+        }
+    };
+    if (options.candidate_mask == nullptr) {
+        add_entries.template operator()<false>();
+    } else {
+        add_entries.template operator()<true>();
     }
     std::sort(entries.begin(),
               entries.end(),
@@ -3197,6 +3345,7 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
                                             planned_cell_skipped,
                                             {},
                                             {},
+                                            {},
                                             {}});
         }
         auto& group = groups.back();
@@ -3207,6 +3356,26 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
         }
         group.original_positions.emplace_back(entry.original_position);
         group.original_position_ends.back() = group.original_positions.size();
+    }
+
+    if (options.pin_policy == TakePinPolicy::Batch) {
+        for (size_t begin = 0; begin < groups.size();) {
+            const auto file_id = groups[begin].file_id;
+            auto end = begin;
+            std::vector<int64_t> file_offsets;
+            while (end < groups.size() && groups[end].file_id == file_id) {
+                for (const auto offset : groups[end].unique_offsets) {
+                    file_offsets.push_back(offset - files[file_id].start_index);
+                }
+                ++end;
+            }
+            auto plan = PlanOffsets(file_id, file_offsets);
+            auto pin = PinPlanCells(op_ctx, file_id, plan.cell_ids);
+            for (auto i = begin; i < end; ++i) {
+                groups[i].pin = pin;
+            }
+            begin = end;
+        }
     }
 
     auto for_each_original_position = [](const OffsetGroup& group,
@@ -3264,7 +3433,7 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
             output.resize(offsets.size);
             for (const auto& group : groups) {
                 auto take = TakeArrowFromFile(
-                    op_ctx, group.file_id, group.unique_offsets);
+                    op_ctx, group.file_id, group.unique_offsets, group.pin);
                 if (group.validity_only) {
                     copy_validity(take, group);
                     continue;
@@ -3341,7 +3510,7 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
             owner->string_views.resize(offsets.size);
             for (const auto& group : groups) {
                 auto take = TakeArrowFromFile(
-                    op_ctx, group.file_id, group.unique_offsets);
+                    op_ctx, group.file_id, group.unique_offsets, group.pin);
                 if (group.validity_only) {
                     copy_validity(take, group);
                     continue;
@@ -3396,10 +3565,44 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
             break;
         }
         case DataType::ARRAY: {
-            // TODO(local-format): Like Scan, ARRAY Take currently parses the
-            // normalized protobuf Binary rows. Replace this with owned or
-            // reader-backed native List results when the writer representation
-            // is unified.
+            if (field_meta_.is_native_list_array()) {
+                // Each group's taken rows become one ColumnarArrayChunk; the
+                // views point into it and the owner keeps it alive.
+                owner->array_value_views.resize(offsets.size);
+                for (const auto& group : groups) {
+                    auto take = TakeArrowFromFile(
+                        op_ctx, group.file_id, group.unique_offsets, group.pin);
+                    if (group.validity_only) {
+                        copy_validity(take, group);
+                        continue;
+                    }
+                    auto table = normalize_table(take);
+                    auto chunk = MakeNativeListArrayChunk(
+                        field_meta_,
+                        table->column(0)->chunks(),
+                        static_cast<int64_t>(group.unique_offsets.size()));
+                    for (size_t i = 0; i < group.unique_offsets.size(); ++i) {
+                        const auto valid = chunk->is_valid(i);
+                        const auto view = chunk->View(i);
+                        for_each_original_position(
+                            group, i, [&](auto original_position) {
+                                owner->array_value_views[original_position] =
+                                    view;
+                                if (IsNullable()) {
+                                    owner->validity.set(original_position,
+                                                        valid);
+                                }
+                            });
+                    }
+                    owner->native_list_chunks.emplace_back(std::move(chunk));
+                }
+                values.target_type = TargetType::ArrayValueView;
+                values.data = owner->array_value_views.data();
+                values.byte_width = sizeof(ArrayValueView);
+                break;
+            }
+            // TODO(local-format): legacy ARRAY Take parses the normalized
+            // protobuf Binary rows.
             size_t unique_count = 0;
             for (const auto& group : groups) {
                 unique_count += group.unique_offsets.size();
@@ -3412,7 +3615,7 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
             std::vector<int64_t> ordered_array_indices(offsets.size, -1);
             for (const auto& group : groups) {
                 auto take = TakeArrowFromFile(
-                    op_ctx, group.file_id, group.unique_offsets);
+                    op_ctx, group.file_id, group.unique_offsets, group.pin);
                 if (group.validity_only) {
                     copy_validity(take, group);
                     continue;
@@ -3531,12 +3734,19 @@ VortexColumn::Take(milvus::OpContext* op_ctx, TakeOptions options) const {
     const auto data_skipped = has_data_skipped
                                   ? PackedValidityView(owner->data_skipped)
                                   : ValidityView{};
-    return std::make_unique<VortexTakeResult>(values,
-                                              validity,
-                                              data_skipped,
-                                              std::move(owner),
-                                              offsets.size,
-                                              data_type_);
+    const auto make_result = [&]<bool HasCandidateMask>() -> TakeResultPtr {
+        return std::make_unique<VortexTakeResult<HasCandidateMask>>(
+            values,
+            validity,
+            data_skipped,
+            std::move(owner),
+            offsets.size,
+            data_type_,
+            options.candidate_mask);
+    };
+    return options.candidate_mask == nullptr
+               ? make_result.template operator()<false>()
+               : make_result.template operator()<true>();
 }
 
 void
@@ -3633,45 +3843,6 @@ VortexColumn::BulkRawStringAt(
 }
 
 void
-VortexColumn::BulkRawJsonAt(milvus::OpContext* op_ctx,
-                            std::function<void(Json, size_t, bool)> fn,
-                            const int64_t* offsets,
-                            int64_t count) const {
-    if (data_type_ != DataType::JSON) {
-        ThrowInfo(ErrorCode::Unsupported,
-                  "VortexColumn::BulkRawJsonAt only supports JSON fields");
-    }
-    if (offsets == nullptr) {
-        BulkStringLikeAt(
-            op_ctx,
-            [&](std::string_view value, size_t index, bool valid) {
-                fn(valid ? Json(MakePaddedJson(value)) : Json{}, index, valid);
-            },
-            offsets,
-            count);
-        return;
-    }
-    if (count == 0) {
-        return;
-    }
-    auto take =
-        Take(op_ctx,
-             TakeOptions{OffsetView::From(offsets, count), TargetType::Json});
-    AssertInfo(take != nullptr,
-               "vortex JSON take is unsupported for type {}",
-               data_type_);
-    const auto owned = take->GetOwn();
-    const auto* values = owned.values.data_as<Json>();
-    for (int64_t i = 0; i < count; ++i) {
-        if (take->IsValid(i)) {
-            fn(values[i], i, true);
-        } else {
-            fn(Json{}, i, false);
-        }
-    }
-}
-
-void
 VortexColumn::BulkRawBsonAt(
     milvus::OpContext* op_ctx,
     std::function<void(BsonView, uint32_t, uint32_t)> fn,
@@ -3712,7 +3883,8 @@ VortexColumn::BulkArrayAt(milvus::OpContext* op_ctx,
         ThrowInfo(ErrorCode::Unsupported,
                   "VortexColumn::BulkArrayAt only supports array fields");
     }
-    if (field_meta_.is_nested_array()) {
+    if (field_meta_.is_native_list_array()) {
+        RejectNullableArrayElements();
         ThrowInfo(ErrorCode::Unsupported,
                   "BulkArrayAt does not support nested ARRAY");
     }
@@ -3741,17 +3913,19 @@ VortexColumn::BulkArrayValueAt(
     const int64_t* offsets,
     int64_t count) const {
     if (!IsChunkedArrayColumnDataType(data_type_) ||
-        !field_meta_.is_nested_array()) {
+        !field_meta_.is_native_list_array()) {
         ThrowInfo(ErrorCode::Unsupported,
-                  "VortexColumn::BulkArrayValueAt only supports recursive "
+                  "VortexColumn::BulkArrayValueAt only supports native-list "
                   "ARRAY fields");
     }
     if (count == 0) {
         return;
     }
-    auto take = Take(op_ctx,
-                     TakeOptions{OffsetView::From(offsets, count),
-                                 TargetType::ArrayValueView});
+    // Output path: like ChunkedArrayColumn::BulkArrayValueAt, served for
+    // fields with null elements too.
+    auto take = TakeUnchecked(op_ctx,
+                              TakeOptions{OffsetView::From(offsets, count),
+                                          TargetType::ArrayValueView});
     AssertInfo(take != nullptr, "vortex recursive array take is unsupported");
     AssertInfo(take->Size() == count,
                "vortex recursive array take returned {} rows, expected {}",
@@ -3876,6 +4050,7 @@ VortexColumn::Scan(milvus::OpContext* op_ctx,
                options.start_offset,
                NumRows());
     if (options.output == ScanOutput::Data) {
+        ValidateArrayViewTarget(options.target_type);
         // Dense data scans do not accept pushed-down predicates. Predicates
         // that must be evaluated by Milvus should use a plain data scan and
         // let the expression layer compare values from the returned batches.

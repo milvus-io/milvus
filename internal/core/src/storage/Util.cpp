@@ -405,12 +405,15 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
                        "valid_data is required for nullable VectorArray");
 
             if (length > 0) {
-                auto value_builder =
-                    static_cast<arrow::FixedSizeBinaryBuilder*>(
+                auto* fixed_builder =
+                    dynamic_cast<arrow::FixedSizeBinaryBuilder*>(
                         list_builder->value_builder());
-                AssertInfo(value_builder != nullptr,
-                           "value_builder must be FixedSizeBinaryBuilder for "
-                           "VectorArray");
+                auto* binary_builder = dynamic_cast<arrow::BinaryBuilder*>(
+                    list_builder->value_builder());
+                AssertInfo(
+                    fixed_builder != nullptr || binary_builder != nullptr,
+                    "VectorArray value builder must be "
+                    "FixedSizeBinaryBuilder or BinaryBuilder");
 
                 DataType element_type = DataType::NONE;
                 auto append_vector_array = [&](const VectorArray& array) {
@@ -445,11 +448,33 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
                             status.ToString());
                     }
 
-                    int num_vectors = array.physical_length();
-                    if (num_vectors > 0) {
-                        auto ast = value_builder->AppendValues(
+                    AssertInfo(array.is_element_nullable() ==
+                                   (binary_builder != nullptr),
+                               "VectorArray element validity does not match "
+                               "Arrow builder type");
+                    if (binary_builder != nullptr) {
+                        const auto width = vector_bytes_per_element(
+                            array.get_element_type(), array.dim());
+                        auto bits = array.element_validity_view();
+                        size_t physical = 0;
+                        for (int j = 0; j < array.length(); ++j) {
+                            auto ast =
+                                bits[j] ? binary_builder->Append(
+                                              reinterpret_cast<const uint8_t*>(
+                                                  array.data()) +
+                                                  physical++ * width,
+                                              width)
+                                        : binary_builder->AppendNull();
+                            if (!ast.ok()) {
+                                ThrowInfo(storage::ArrowStatusToErrorCode(ast),
+                                          "Failed to append vector element: {}",
+                                          ast.ToString());
+                            }
+                        }
+                    } else if (array.physical_length() > 0) {
+                        auto ast = fixed_builder->AppendValues(
                             reinterpret_cast<const uint8_t*>(array.data()),
-                            num_vectors);
+                            array.physical_length());
                         if (!ast.ok()) {
                             ThrowInfo(
                                 milvus::storage::ArrowStatusToErrorCode(ast),
@@ -574,6 +599,18 @@ CreateArrowBuilder(DataType data_type) {
                 DataTypeInvalid, "unsupported numeric data type {}", data_type);
         }
     }
+}
+
+std::shared_ptr<arrow::ArrayBuilder>
+CreateArrowBuilder(const FieldMeta& field_meta) {
+    auto result = arrow::MakeBuilder(GetArrowDataType(field_meta));
+    if (!result.ok()) {
+        ThrowInfo(ArrowStatusToErrorCode(result),
+                  "failed to create Arrow builder for field {}: {}",
+                  field_meta.get_name().get(),
+                  result.status().ToString());
+    }
+    return std::shared_ptr<arrow::ArrayBuilder>(std::move(*result));
 }
 
 std::shared_ptr<arrow::ArrayBuilder>
@@ -787,6 +824,12 @@ CreateArrowSchema(DataType data_type, bool nullable) {
                 DataTypeInvalid, "unsupported numeric data type {}", data_type);
         }
     }
+}
+
+std::shared_ptr<arrow::Schema>
+CreateArrowSchema(const FieldMeta& field_meta) {
+    return arrow::schema({arrow::field(
+        "val", GetArrowDataType(field_meta), field_meta.is_nullable())});
 }
 
 std::shared_ptr<arrow::Schema>
@@ -1692,8 +1735,8 @@ SortBinlogPaths(std::vector<std::string>& paths) {
 // keeps #50088's partial download: only the row groups covering
 // [offset, offset + max_rows) are read, and the visit ends once that many rows
 // have been handed to the visitor. `max_rows == 0` visits every row group.
-static VisitOutcome
-VisitFieldDataFromStorageV2Paged(
+VisitOutcome
+detail::VisitFieldDataFromStorageV2Paged(
     const std::vector<std::vector<std::string>>& remote_files,
     int64_t field_id,
     DataType data_type,
@@ -1702,13 +1745,20 @@ VisitFieldDataFromStorageV2Paged(
     milvus_storage::ArrowFileSystemPtr fs,
     const FieldDataVisitor& visitor,
     size_t max_rows,
-    size_t offset) {
+    size_t offset,
+    size_t window_bytes) {
     if (!(remote_files.size() > 0)) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "[StorageV2] remote files size is 0");
     }
     AssertInfo(static_cast<bool>(visitor),
                "[StorageV2] field-data visitor is empty");
+    AssertInfo(window_bytes > 0,
+               "[StorageV2] read window byte limit must be positive");
+    const auto slice_size = FILE_SLICE_SIZE.load();
+    AssertInfo(slice_size > 0, "[StorageV2] file slice size must be positive");
+    const auto parallel_degree =
+        std::max<uint64_t>(1, DEFAULT_FIELD_MAX_MEMORY_LIMIT / slice_size);
 
     // remote files might not followed the sequence of column group id,
     // so we need to put into map<column_group_id, remote_chunk_files>
@@ -1856,10 +1906,27 @@ VisitFieldDataFromStorageV2Paged(
             }
         }
 
-        // Preserve the source field's nullability while decoding each row
-        // group. The visitor intentionally trades the old all-row-group
-        // parallel window for a genuine row-group early-stop boundary.
+        // Preserve nullability while the bounded parallel loader reads the
+        // selected row groups. LoadWithStrategy publishes blocks in row-group
+        // order, regardless of the order in which its worker tasks finish.
         auto field_schema = reader->schema()->field(col_offset)->Copy();
+        if (data_type == DataType::ARRAY &&
+            field_schema->type()->id() == arrow::Type::LIST) {
+            const auto outer =
+                std::static_pointer_cast<arrow::ListType>(field_schema->type());
+            bool nullable_element = outer->value_field()->nullable();
+            if (outer->value_type()->id() == arrow::Type::LIST) {
+                const auto inner = std::static_pointer_cast<arrow::ListType>(
+                    outer->value_type());
+                nullable_element |= inner->value_field()->nullable();
+            }
+            if (nullable_element) {
+                ThrowInfo(ErrorCode::NotImplemented,
+                          "scalar index build on element-nullable array "
+                          "field {} is not supported yet",
+                          field_id);
+            }
+        }
         auto status = reader->Close();
         if (!status.ok()) {
             ThrowInfo(ArrowStatusToErrorCode(status),
@@ -1869,67 +1936,107 @@ VisitFieldDataFromStorageV2Paged(
                           " with error: " + status.ToString());
         }
 
-        for (const auto row_group : selected_row_groups) {
-            // One block produces one ArrowDataWrapper followed by the channel
-            // close marker. Capacity two lets the producer finish before this
-            // thread consumes either item, avoiding producer/consumer
-            // deadlock and ensuring no task outlives captured state.
-            auto channel = std::make_shared<ArrowReaderChannel>(2);
-            auto load_future = pool.Submit([channel,
-                                            column_group_file,
-                                            fs,
-                                            row_group]() mutable {
-                auto strategy =
-                    std::make_unique<segcore::ParallelDegreeSplitStrategy>(1);
-                LoadWithStrategy(std::vector<std::string>{column_group_file},
-                                 channel,
-                                 DEFAULT_FIELD_MAX_MEMORY_LIMIT,
-                                 std::move(strategy),
-                                 std::vector<std::vector<int64_t>>{{row_group}},
-                                 fs,
-                                 nullptr,
-                                 milvus::proto::common::LoadPriority::HIGH);
-            });
-
-            // LoadWithStrategy has published both the single wrapper and the
-            // close marker before get() returns. Any producer error is
-            // rethrown here before captured objects can leave scope.
-            load_future.get();
-
-            std::shared_ptr<milvus::ArrowDataWrapper> r;
-            while (channel->pop(r)) {
-                size_t num_rows = 0;
-                std::vector<std::shared_ptr<arrow::ChunkedArray>>
-                    chunked_arrays;
-                for (const auto& table_info : r->arrow_tables) {
-                    num_rows += table_info.table->num_rows();
-                    chunked_arrays.push_back(
-                        table_info.table->column(col_offset));
+        for (size_t begin = 0; begin < selected_row_groups.size();) {
+            size_t end = begin;
+            size_t used_bytes = 0;
+            while (end < selected_row_groups.size()) {
+                const auto group_bytes =
+                    row_group_meta_data_vector.Get(selected_row_groups[end])
+                        .memory_size();
+                if (end > begin && (group_bytes == 0 ||
+                                    group_bytes > window_bytes - used_bytes)) {
+                    break;
                 }
-                auto field_data =
-                    storage::CreateFieldData(data_type,
-                                             element_type,
-                                             field_schema->nullable(),
-                                             dim,
-                                             num_rows);
-                for (const auto& chunked_array : chunked_arrays) {
-                    field_data->FillFieldData(chunked_array);
+                ++end;
+                // A row group is indivisible. Unknown (zero) sizes are also
+                // isolated, so they cannot make an entire file appear free.
+                if (group_bytes == 0 || group_bytes >= window_bytes) {
+                    break;
                 }
-                if (visitor(std::move(field_data)) == VisitControl::Stop) {
-                    return VisitOutcome::Stopped;
-                }
-                total_num_rows += num_rows;
-                if (max_rows > 0 && total_num_rows >= max_rows) {
-                    // The page is full. The load task for this row group has
-                    // already been joined above, so returning here leaves
-                    // nothing running behind us.
-                    LOG_DEBUG(
-                        "[StorageV2] max_rows: {} reached, total rows: {}",
-                        max_rows,
-                        total_num_rows);
-                    return VisitOutcome::Exhausted;
-                }
+                used_bytes += group_bytes;
             }
+            std::vector<int64_t> row_groups(selected_row_groups.begin() + begin,
+                                            selected_row_groups.begin() + end);
+            auto channel =
+                std::make_shared<ArrowReaderChannel>(parallel_degree);
+            auto load_future =
+                pool.Submit([channel,
+                             column_group_file,
+                             fs,
+                             parallel_degree,
+                             row_groups = std::move(row_groups)]() mutable {
+                    auto strategy =
+                        std::make_unique<segcore::ParallelDegreeSplitStrategy>(
+                            parallel_degree);
+                    std::vector<std::vector<int64_t>> row_group_lists;
+                    row_group_lists.emplace_back(std::move(row_groups));
+                    LoadWithStrategy(
+                        std::vector<std::string>{column_group_file},
+                        channel,
+                        DEFAULT_FIELD_MAX_MEMORY_LIMIT,
+                        std::move(strategy),
+                        row_group_lists,
+                        fs,
+                        nullptr,
+                        milvus::proto::common::LoadPriority::HIGH);
+                });
+
+            bool channel_exhausted = false;
+            auto drain = [&] {
+                // The producer can be blocked pushing into the bounded channel,
+                // including its close marker. Consume it before joining (#46958).
+                if (!channel_exhausted) {
+                    std::shared_ptr<milvus::ArrowDataWrapper> pending;
+                    while (channel->pop(pending)) {
+                    }
+                    channel_exhausted = true;
+                }
+                DrainFuture(load_future);
+            };
+            try {
+                std::shared_ptr<milvus::ArrowDataWrapper> r;
+                while (channel->pop(r)) {
+                    size_t num_rows = 0;
+                    std::vector<std::shared_ptr<arrow::ChunkedArray>>
+                        chunked_arrays;
+                    chunked_arrays.reserve(r->arrow_tables.size());
+                    for (const auto& table_info : r->arrow_tables) {
+                        num_rows += table_info.table->num_rows();
+                        chunked_arrays.push_back(
+                            table_info.table->column(col_offset));
+                    }
+                    auto field_data =
+                        storage::CreateFieldData(data_type,
+                                                 element_type,
+                                                 field_schema->nullable(),
+                                                 dim,
+                                                 num_rows);
+                    for (const auto& chunked_array : chunked_arrays) {
+                        field_data->FillFieldData(chunked_array);
+                    }
+                    if (visitor(std::move(field_data)) == VisitControl::Stop) {
+                        drain();
+                        return VisitOutcome::Stopped;
+                    }
+                    total_num_rows += num_rows;
+                    if (max_rows > 0 && total_num_rows >= max_rows) {
+                        LOG_DEBUG(
+                            "[StorageV2] max_rows: {} reached, total rows: {}",
+                            max_rows,
+                            total_num_rows);
+                        drain();
+                        return VisitOutcome::Exhausted;
+                    }
+                }
+                channel_exhausted = true;
+                load_future.get();
+            } catch (...) {
+                drain();
+                throw;
+            }
+            // No prefetch: the current producer and every reader it owns
+            // have finished before the next window can be submitted.
+            begin = end;
         }
     }
     return VisitOutcome::Exhausted;
@@ -1944,15 +2051,15 @@ VisitFieldDataFromStorageV2(
     int64_t dim,
     milvus_storage::ArrowFileSystemPtr fs,
     const FieldDataVisitor& visitor) {
-    return VisitFieldDataFromStorageV2Paged(remote_files,
-                                            field_id,
-                                            data_type,
-                                            element_type,
-                                            dim,
-                                            std::move(fs),
-                                            visitor,
-                                            /*max_rows=*/0,
-                                            /*offset=*/0);
+    return detail::VisitFieldDataFromStorageV2Paged(remote_files,
+                                                    field_id,
+                                                    data_type,
+                                                    element_type,
+                                                    dim,
+                                                    std::move(fs),
+                                                    visitor,
+                                                    /*max_rows=*/0,
+                                                    /*offset=*/0);
 }
 
 std::vector<FieldDataPtr>
@@ -1965,7 +2072,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            size_t max_rows /*=0*/,
                            size_t offset /*=0*/) {
     std::vector<FieldDataPtr> field_data_list;
-    const auto outcome = VisitFieldDataFromStorageV2Paged(
+    const auto outcome = detail::VisitFieldDataFromStorageV2Paged(
         remote_files,
         field_id,
         data_type,
@@ -2072,7 +2179,16 @@ VisitFieldDataFromManifestPaged(
     std::shared_ptr<arrow::Schema> reader_schema = nullptr;
     if (!is_external) {
         std::shared_ptr<arrow::Schema> arrow_schema;
-        if (IsVectorDataType(data_type.value())) {
+        if ((data_type.value() == DataType::ARRAY ||
+             data_type.value() == DataType::VECTOR_ARRAY) &&
+            (field_meta.field_schema.element_nullable() ||
+             field_meta.field_schema.has_type_schema())) {
+            auto schema = field_meta.field_schema;
+            if (schema.fieldid() == 0) {
+                schema.set_fieldid(field_meta.field_id);
+            }
+            arrow_schema = CreateArrowSchema(FieldMeta::ParseFrom(schema));
+        } else if (IsVectorDataType(data_type.value())) {
             if (data_type.value() == DataType::VECTOR_ARRAY) {
                 arrow_schema = CreateArrowSchema(data_type.value(),
                                                  static_cast<int>(dim),
@@ -3544,30 +3660,120 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
     // List variants -> LIST (recursively canonicalize values)
     if (tid == arrow::Type::LARGE_LIST || tid == arrow::Type::LIST_VIEW ||
         tid == arrow::Type::LIST) {
+        const auto& data = array->data();
+        if (array->offset() < 0 || array->length() < 0 ||
+            array->offset() >
+                std::numeric_limits<int64_t>::max() - array->length() ||
+            data->buffers.empty()) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "CanonicalizeArrowVariants: invalid list range");
+        }
+        auto require_buffer_range = [&](size_t index,
+                                        uint64_t count,
+                                        size_t width) {
+            if (count == 0) {
+                return;
+            }
+            const auto first = static_cast<uint64_t>(array->offset());
+            if (data->buffers.size() <= index ||
+                data->buffers[index] == nullptr ||
+                data->buffers[index]->size() < 0 ||
+                first > static_cast<uint64_t>(data->buffers[index]->size()) /
+                            width ||
+                count > static_cast<uint64_t>(data->buffers[index]->size()) /
+                                width -
+                            first) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "CanonicalizeArrowVariants: list buffer {} is "
+                          "shorter than the declared range",
+                          index);
+            }
+        };
+        const auto& bitmap = data->buffers[0];
+        if (bitmap == nullptr && data->null_count > 0) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "CanonicalizeArrowVariants: null list has no bitmap");
+        }
+        if (bitmap != nullptr) {
+            const auto bits = static_cast<uint64_t>(array->offset()) +
+                              static_cast<uint64_t>(array->length());
+            const auto bytes = bits / 8 + (bits % 8 != 0);
+            if (bitmap->size() < 0 ||
+                bytes > static_cast<uint64_t>(bitmap->size())) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "CanonicalizeArrowVariants: list validity buffer "
+                          "is shorter than the declared range");
+            }
+        }
+        require_buffer_range(
+            1,
+            static_cast<uint64_t>(array->length()) +
+                (tid == arrow::Type::LIST_VIEW ? 0 : 1),
+            tid == arrow::Type::LARGE_LIST ? sizeof(int64_t) : sizeof(int32_t));
+        if (tid == arrow::Type::LIST_VIEW) {
+            require_buffer_range(
+                2, static_cast<uint64_t>(array->length()), sizeof(int32_t));
+        }
         std::shared_ptr<arrow::Array> values;
         std::vector<std::pair<int64_t, int64_t>> ranges;
         ranges.reserve(array->length());
+        auto append_range = [&](int64_t i, int64_t start, int64_t length) {
+            if (values == nullptr || values->length() < 0 || start < 0 ||
+                length < 0 || start > values->length() ||
+                length > values->length() - start) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "CanonicalizeArrowVariants: list row {} exceeds "
+                          "child values",
+                          i);
+            }
+            if (array->IsNull(i) && length != 0) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "CanonicalizeArrowVariants: null list row {} has "
+                          "a non-empty child range",
+                          i);
+            }
+            ranges.emplace_back(start, start + length);
+        };
         if (tid == arrow::Type::LIST) {
             auto la = std::static_pointer_cast<arrow::ListArray>(array);
             values = la->values();
             for (int64_t i = 0; i < la->length(); ++i) {
                 int64_t s = la->value_offset(i);
-                ranges.emplace_back(s, s + la->value_length(i));
+                int64_t e = la->value_offset(i + 1);
+                if (s < 0 || e < s) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "CanonicalizeArrowVariants: invalid list "
+                              "offsets at row {}",
+                              i);
+                }
+                append_range(i, s, e - s);
             }
         } else if (tid == arrow::Type::LARGE_LIST) {
             auto la = std::static_pointer_cast<arrow::LargeListArray>(array);
             values = la->values();
             for (int64_t i = 0; i < la->length(); ++i) {
                 int64_t s = la->value_offset(i);
-                ranges.emplace_back(s, s + la->value_length(i));
+                int64_t e = la->value_offset(i + 1);
+                if (s < 0 || e < s) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "CanonicalizeArrowVariants: invalid list "
+                              "offsets at row {}",
+                              i);
+                }
+                append_range(i, s, e - s);
             }
         } else {
             auto lv = std::static_pointer_cast<arrow::ListViewArray>(array);
             values = lv->values();
             for (int64_t i = 0; i < lv->length(); ++i) {
                 int64_t s = lv->value_offset(i);
-                ranges.emplace_back(s, s + lv->value_length(i));
+                append_range(i, s, lv->value_length(i));
             }
+        }
+
+        if (values == nullptr) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "CanonicalizeArrowVariants: list has no child values");
         }
 
         auto canonical_values = CanonicalizeArrowVariants(values);
@@ -3594,7 +3800,7 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
             if (!array->IsNull(i)) {
                 auto [s, e] = ranges[i];
                 int64_t len = e - s;
-                if (!(cur + len <= INT32_MAX)) {
+                if (len > INT32_MAX - cur) {
                     ThrowInfo(
                         ErrorCode::DataFormatBroken,
                         "CanonicalizeArrowVariants: int32 offset overflow");
@@ -3633,7 +3839,8 @@ CanonicalizeArrowVariants(const std::shared_ptr<arrow::Array>& array) {
         auto offsets_buf =
             std::static_pointer_cast<arrow::Int32Array>(offsets_arr)->values();
         return std::make_shared<arrow::ListArray>(
-            arrow::list(canonical_values->type()),
+            arrow::list(
+                array->type()->field(0)->WithType(canonical_values->type())),
             array->length(),
             offsets_buf,
             concat_values,
@@ -4526,6 +4733,13 @@ NormalizeExternalArrowByType(const std::shared_ptr<arrow::Array>& array_in,
 
     ValidateScalarArrowType(data_type, array, field_meta);
 
+    if (field_meta.is_native_list_array()) {
+        if (type_id != arrow::Type::LIST) {
+            AssertExternalArrowType(array, "list", field_meta);
+        }
+        return array;
+    }
+
     // Dense vectors
     if (IsVectorDataType(data_type) &&
         !IsSparseFloatVectorDataType(data_type) &&
@@ -4549,6 +4763,14 @@ NormalizeExternalArrowByType(const std::shared_ptr<arrow::Array>& array_in,
         AssertInfo(element_type != DataType::NONE,
                    "element_type must be specified for VECTOR_ARRAY");
         if (type_id == arrow::Type::LIST) {
+            if (field_meta.is_element_nullable()) {
+                auto list = std::dynamic_pointer_cast<arrow::ListArray>(array);
+                if (std::dynamic_pointer_cast<arrow::BinaryArray>(
+                        list->values()) == nullptr) {
+                    AssertExternalArrowType(array, "list<binary>", field_meta);
+                }
+                return array;
+            }
             auto result = NormalizeVectorArrayInner(
                 {array}, element_type, dim, field_meta);
             return result[0];

@@ -30,8 +30,8 @@ type QueryHook interface {
 	CalculateEffectiveSegmentNum(rowCounts []int64, topk int64) int
 }
 
-// SetQueryHook installs a compiled-in query hook. The QueryNode prefers it
-// over queryNode.soPath and refuses a deployment that configures both. Call it
+// SetQueryHook installs a compiled-in query hook. The QueryNode uses it and
+// ignores queryNode.soPath, with a warning, when both are configured. Call it
 // before milvus starts; a nil hook leaves the stock behavior in place. It is
 // independent of SetHook and of FormInstalled: it marks nothing but itself.
 func SetQueryHook(h QueryHook) {

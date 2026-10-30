@@ -385,18 +385,17 @@ func convertSegcoreElementIndicesToInternal(src []*segcorepb.ElementIndices) []*
 
 // emptySegcoreResult creates an empty result with proper field schema.
 // For aggregation queries (GROUP BY / count(*) / sum / etc.), it generates
-// a semantically correct empty aggregation result (e.g., count=0) via
-// GroupAggReducer.EmptyAggResult, because FillRetrieveResultIfEmpty relies
+// an aggregate identity payload, because FillRetrieveResultIfEmpty relies
 // on OutputFieldsId which is intentionally empty for aggregation queries.
 func emptySegcoreResult(req *querypb.QueryRequest, schema *schemapb.CollectionSchema) (*segcorepb.RetrieveResults, error) {
 	hasAggregation := len(req.GetReq().GetGroupByFieldIds()) > 0 || len(req.GetReq().GetAggregates()) > 0
 	if hasAggregation {
 		reducer := agg.NewGroupAggReducer(req.GetReq().GetGroupByFieldIds(), req.GetReq().GetAggregates(), -1, schema)
-		emptyAgg, err := reducer.EmptyAggResult()
+		wire, err := reducer.EncodePartial(&agg.PartialAggregationResult{})
 		if err != nil {
 			return nil, err
 		}
-		return agg.AggResult2segcoreResult(emptyAgg), nil
+		return &segcorepb.RetrieveResults{FieldsData: wire.FieldsData, AllRetrieveCount: wire.AllRetrieveCount}, nil
 	}
 
 	empty := &segcorepb.RetrieveResults{}

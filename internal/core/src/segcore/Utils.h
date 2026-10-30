@@ -193,6 +193,18 @@ getCacheWarmupPolicy(const std::string& warmup_policy,
 milvus::cachinglayer::CellDataType
 getCellDataType(bool is_vector, bool is_index);
 
+bool
+CanLazyCreateSealedIndexSlot(const LoadIndexInfo& load_index_info);
+
+void
+PrepareLazySealedIndexSlot(LoadIndexInfo& load_index_info);
+
+IndexRegistration
+MakeSealedIndexRegistration(const LoadIndexInfo& info);
+
+IndexCapabilityEntry
+MakeSealedIndexCapability(const LoadIndexInfo& info);
+
 void
 LoadIndexData(milvus::tracer::TraceContext& ctx,
               milvus::segcore::LoadIndexInfo* load_index_info,

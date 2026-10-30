@@ -103,17 +103,18 @@ func TestInitCipherUsesTheCompiledInCipher(t *testing.T) {
 	assert.Equal(t, 1, c.initCount(), "initialized once, with the cipherPlugin.* configuration, as a plug-in is")
 }
 
-// Two answers for the same keys is a deployment mistake, and it is reported
-// rather than silently resolved by start-up order.
-func TestInitCipherRefusesACompiledInCipherBesideAPlugin(t *testing.T) {
-	installCipher(t, &recordingCipher{})
-	saveCipherKey(t, paramtable.GetCipherParams().SoPathGo.Key, "/tmp/some-cipher-go.so")
+// A compiled-in cipher is used and cipherPlugin.soPathGo is ignored; the C++
+// half is still loaded from cipherPlugin.soPathCpp.
+func TestInitCipherIgnoresSoPathGoBesideACompiledInCipher(t *testing.T) {
+	c := &recordingCipher{}
+	installCipher(t, c)
+	saveCipherKey(t, paramtable.GetCipherParams().SoPathGo.Key, "/tmp/no-such-cipher-go.so")
 	saveCipherKey(t, paramtable.GetCipherParams().SoPathCpp.Key, "/tmp/some-cipher.so")
 
-	err := initCipher()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "only one can")
-	assert.Nil(t, installedCipher())
+	require.NoError(t, initCipher())
+
+	assert.Same(t, c, installedCipher(), "the compiled-in cipher is used; the Go path is not loaded")
+	assert.Equal(t, 1, c.initCount())
 }
 
 // The C++ half is still a file the core loads from cipherPlugin.soPathCpp, so

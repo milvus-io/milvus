@@ -86,10 +86,7 @@ struct IndexKeyHash {
     operator()(const IndexKey& key) const;
 };
 
-// One inventory entry's capability record. Built at LOAD time from load
-// metadata (family + build parameters) via the registered
-// `index::LoaderEntry::derive_caps` function — never by touching the index
-// object.
+// Resolved metadata for one index, used to select and validate its reader.
 struct IndexCapabilityEntry {
     IndexKey key;
 
@@ -114,6 +111,25 @@ struct IndexCapabilityEntry {
     // checks that invariant after pinning.
     index::ReaderCaps caps;
 };
+
+// Index category available without initializing a lazy entry.
+enum class IndexKind : uint8_t {
+    Scalar,
+    Vector,
+    Text,
+    Ngram,
+};
+
+struct IndexRegistration {
+    IndexKey key;
+    IndexKind kind{IndexKind::Scalar};
+    std::string json_path;
+    JsonCastType json_cast_type{JsonCastType::UNKNOWN};
+};
+
+// Copies registration metadata and classifies the resolved family.
+IndexRegistration
+RegistrationFromCapability(const IndexCapabilityEntry& entry);
 
 class FieldIndexCapability {
  public:

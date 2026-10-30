@@ -1,4 +1,5 @@
 import sys
+import time
 
 from base.database_wrapper import ApiDatabaseWrapper
 from pymilvus import DefaultConfig
@@ -18,6 +19,8 @@ from common.common_params import IndexPrams
 from pymilvus import DataType, MilvusClient, ResourceGroupInfo, utility
 from utils.util_log import test_log as log
 
+COLLECTION_CLEANUP_TIMEOUT = 120
+
 
 class Base:
     """Initialize class object"""
@@ -30,7 +33,7 @@ class Base:
     collection_schema_wrap = None
     field_schema_wrap = None
     database_wrap = None
-    tear_down_collection_names = []
+    tear_down_collection_names = ()
     tear_down_role_names = []
     tear_down_user_names = []
     resource_group_list = []
@@ -51,8 +54,13 @@ class Base:
         self._setup_objects()
 
     def _setup_objects(self):
+        # TestCaseClassBase calls this once per class; ordinary cases call it
+        # once per method. Keep the registries in the same scope as the wrappers.
+        self.tear_down_collection_names = []
+        self.tear_down_role_names = []
+        self.tear_down_user_names = []
         self.connection_wrap = ApiConnectionsWrapper()
-        self.utility_wrap = ApiUtilityWrapper()
+        self.utility_wrap = ApiUtilityWrapper(role_names=self.tear_down_role_names)
         self.collection_wrap = ApiCollectionWrapper()
         self.partition_wrap = ApiPartitionWrapper()
         self.index_wrap = ApiIndexWrapper()
@@ -65,6 +73,67 @@ class Base:
         log.info(("*" * 35) + " teardown " + ("*" * 35))
         log.info(f"[teardown_method] Start teardown test case {method.__name__}...")
         self._teardown_objects()
+
+    def _cleanup_collections(self):
+        deadline = time.monotonic() + COLLECTION_CLEANUP_TIMEOUT
+        errors = []
+
+        def cleanup_call(action, operation, *args, **kwargs):
+            try:
+                timeout = deadline - time.monotonic()
+                if timeout <= 0:
+                    raise TimeoutError("collection cleanup deadline exceeded")
+                result, success = operation(*args, timeout=timeout, check_task=ct.CheckTasks.check_nothing, **kwargs)
+                if not success:
+                    raise AssertionError(str(result))
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("collection cleanup deadline exceeded")
+                return result
+            except Exception as error:
+                errors.append((action, error))
+                log.exception(f"Collection cleanup failed: {action}")
+                return None
+
+        def drop_aliases(collection_name, using):
+            aliases = cleanup_call(
+                f"list aliases for {collection_name}", self.utility_wrap.list_aliases, collection_name, using=using
+            )
+            for alias in aliases or []:
+                cleanup_call(f"drop alias {alias}", self.utility_wrap.drop_alias, alias, using=using)
+
+        # A collection may be registered more than once, or also be owned by
+        # collection_wrap. Attempt each drop only once during this teardown.
+        collection_names = dict.fromkeys(name for name in self.tear_down_collection_names if name is not None)
+        collection = self.collection_wrap.collection
+        collection_list = None
+        if collection is not None:
+            if collection.name.startswith("alias"):
+                log.info(f"collection {collection.name} is alias, skip drop operation")
+            else:
+                using = collection._using
+                wrapped_collection_list = cleanup_call(
+                    f"list collections using {using}", self.utility_wrap.list_collections, using=using
+                )
+                if wrapped_collection_list is not None and collection.name in wrapped_collection_list:
+                    drop_aliases(collection.name, using)
+                    cleanup_call(f"drop collection {collection.name}", self.collection_wrap.drop)
+                if using == DefaultConfig.DEFAULT_USING:
+                    collection_list = wrapped_collection_list
+                    collection_names.pop(collection.name, None)
+
+        if collection_names:
+            if collection_list is None:
+                collection_list = cleanup_call("list collections", self.utility_wrap.list_collections)
+            if collection_list is not None:
+                for collection_name in collection_names:
+                    if collection_name not in collection_list:
+                        continue
+                    drop_aliases(collection_name, DefaultConfig.DEFAULT_USING)
+                    cleanup_call(
+                        f"drop collection {collection_name}", self.utility_wrap.drop_collection, collection_name
+                    )
+
+        return errors
 
     def _teardown_objects(self):
         # Prioritize uri and token for connection
@@ -82,29 +151,29 @@ class Base:
                 else None
             )
 
+        cleanup_errors = []
         try:
             """ Drop collection before disconnect """
             if not self.connection_wrap.has_connection(alias=DefaultConfig.DEFAULT_USING)[0]:
                 if token:
-                    self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, uri=uri, token=token)
+                    self.connection_wrap.connect(
+                        alias=DefaultConfig.DEFAULT_USING, uri=uri, token=token, timeout=COLLECTION_CLEANUP_TIMEOUT
+                    )
                 else:
-                    self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, uri=uri)
+                    self.connection_wrap.connect(
+                        alias=DefaultConfig.DEFAULT_USING, uri=uri, timeout=COLLECTION_CLEANUP_TIMEOUT
+                    )
 
-            if self.collection_wrap.collection is not None:
-                if self.collection_wrap.collection.name.startswith("alias"):
-                    log.info(f"collection {self.collection_wrap.collection.name} is alias, skip drop operation")
-                else:
-                    self.collection_wrap.drop(check_task=ct.CheckTasks.check_nothing)
+            # The legacy class-scoped base also invokes teardown with a class
+            # rather than an instance.
+            cleanup_errors.extend(Base._cleanup_collections(self))
+        except Exception as error:
+            cleanup_errors.append(("prepare collection cleanup", error))
+            log.exception("Failed to prepare collection cleanup")
+        finally:
+            self.tear_down_collection_names.clear()
 
-            collection_list = self.utility_wrap.list_collections()[0]
-            for collection_name in self.tear_down_collection_names:
-                if collection_name is not None and collection_name in collection_list:
-                    alias_list = self.utility_wrap.list_aliases(collection_name)[0]
-                    if alias_list:
-                        for alias in alias_list:
-                            self.utility_wrap.drop_alias(alias)
-                    self.utility_wrap.drop_collection(collection_name)
-
+        try:
             """ Clean up the rgs before disconnect """
             rgs_list = self.utility_wrap.list_resource_groups()[0]
             for rg_name in self.resource_group_list:
@@ -124,19 +193,21 @@ class Base:
 
         if not self.skip_global_role_cleanup:
             try:
-                """ Drop roles before disconnect """
+                """ Drop only roles created by this test before disconnect """
                 if not self.connection_wrap.has_connection(alias=DefaultConfig.DEFAULT_USING)[0]:
                     if token:
                         self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, uri=uri, token=token)
                     else:
                         self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, uri=uri)
 
-                role_list = self.utility_wrap.list_roles(False)[0]
-                for role in role_list.groups:
-                    role_name = role.role_name
+                for role_name in self.tear_down_role_names:
                     if role_name not in ["admin", "public"]:
-                        each_role = self.utility_wrap.init_role(name=role_name)[0]
-                        each_role.drop()
+                        try:
+                            each_role = self.utility_wrap.init_role(name=role_name)[0]
+                            if each_role.is_exist():
+                                each_role.drop()
+                        except Exception as e:
+                            log.debug(str(e))
 
             except Exception as e:
                 log.debug(str(e))
@@ -153,6 +224,10 @@ class Base:
             )
         except Exception as e:
             log.debug(str(e))
+
+        if cleanup_errors:
+            details = "\n".join(f"{action}: {error}" for action, error in cleanup_errors)
+            raise AssertionError(f"Collection cleanup failed:\n{details}") from cleanup_errors[0][1]
 
 
 class TestcaseBase(Base):

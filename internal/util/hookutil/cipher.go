@@ -429,14 +429,10 @@ func initCipher() error {
 	// loaded by the core from cipherPlugin.soPathCpp, so that path stays the
 	// deployment's declaration that encryption is on. A compiled-in cipher
 	// with no soPathCpp is left idle, exactly as no plug-in would be loaded.
-	// Configuring soPathGo beside a compiled-in cipher is refused: both would
-	// answer for the same keys, and picking silently would make which one
-	// wins depend on start-up order rather than on the deployment.
+	// The compiled-in cipher is used and cipherPlugin.soPathGo is ignored.
 	if compiled := ext.InstalledCipher(); compiled != nil {
 		if pathGo != "" {
-			return merr.WrapErrServiceInternalMsg(
-				"hookutil: cipherPlugin.soPathGo is set to %q and a cipher is also compiled in; "+
-					"both answer for the encryption keys, and only one can", pathGo)
+			mlog.Warn(context.TODO(), "cipherPlugin.soPathGo is ignored, a cipher is compiled into this binary")
 		}
 		if pathCpp == "" {
 			mlog.Info(context.TODO(), "empty cipherPlugin.soPathCpp, encryption is off and the compiled-in cipher stays idle")

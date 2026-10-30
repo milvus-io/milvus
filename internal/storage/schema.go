@@ -40,10 +40,10 @@ func ConvertToArrowSchemaWithNameResolver(
 			}
 			physicalName = name
 		}
-		if serdeMap[field.DataType].arrowType == nil {
+		if serdeMap[field.DataType].legacyArrowType == nil {
 			return merr.WrapErrParameterInvalidMsg("unknown field data type [%s] for field [%s]", field.DataType, field.GetName())
 		}
-		var dim int
+		dim := 0
 		switch field.DataType {
 		case schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector,
 			schemapb.DataType_Int8Vector, schemapb.DataType_FloatVector, schemapb.DataType_ArrayOfVector:
@@ -52,16 +52,11 @@ func ConvertToArrowSchemaWithNameResolver(
 			if err != nil {
 				return merr.WrapErrParameterInvalidMsg("dim not found in field [%s] params", field.GetName())
 			}
-		default:
-			dim = 0
 		}
-
-		elementType := schemapb.DataType_None
-		if field.DataType == schemapb.DataType_ArrayOfVector {
-			elementType = field.GetElementType()
+		arrowType, err := ArrowTypeForField(field)
+		if err != nil {
+			return err
 		}
-
-		arrowType := serdeMap[field.DataType].arrowType(dim, elementType, field.GetElementNullable())
 
 		if field.GetNullable() {
 			switch field.DataType {
@@ -91,7 +86,7 @@ func ConvertToArrowSchemaWithNameResolver(
 		if field.DataType == schemapb.DataType_ArrayOfVector {
 			arrowField.Metadata = arrow.NewMetadata(
 				[]string{packed.ArrowFieldIdMetadataKey, "elementType", "dim"},
-				[]string{strconv.Itoa(int(field.GetFieldID())), strconv.Itoa(int(elementType)), strconv.Itoa(dim)},
+				[]string{strconv.Itoa(int(field.GetFieldID())), strconv.Itoa(int(field.GetElementType())), strconv.Itoa(dim)},
 			)
 		}
 

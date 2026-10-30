@@ -328,7 +328,9 @@ TEST(VectorDiskFileManagerTest, MetadataBeforeOrAfterClosePublishesRawBytes) {
         auto manager = std::make_shared<VectorDiskBuildFileManager>(owner);
         const auto path = owner->Path() + "/engine";
         const std::array<uint8_t, 3> bytes{4, 5, 6};
-        auto output = manager->OpenOutputStream(path);
+        milvus::FileManager& base = *manager;
+        auto output = base.OpenOutputStream(
+            path, {.expected_size = 1, .use_memory = true});
         ASSERT_EQ(output->Write(bytes.data(), bytes.size()), bytes.size());
         const milvus::FileMeta meta{path, bytes.size()};
         if (before_close) {

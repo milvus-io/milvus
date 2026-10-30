@@ -331,6 +331,7 @@ func TestRuntimeRejectsLiveInsertAfterFlush(t *testing.T) {
 	require.NoError(t, err)
 	runtime := newRuntime()
 	runtime.collection = collection
+	runtime.writeSchema = schema
 	defer runtime.Close()
 
 	segmentID := int64(21)

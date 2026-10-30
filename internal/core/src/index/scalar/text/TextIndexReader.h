@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "common/Types.h"
+#include "index/SharedValidityBitmap.h"
 #include "index/contracts/query/IIndexReaderBase.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/ITextMatchReader.h"
@@ -32,7 +33,7 @@ struct TantivyIndexWrapper;
 }
 
 // Text-match reader over a composed, stable tantivy snapshot. Construction and
-// loading are separate from querying. Null offsets are frozen with the same
+// loading are separate from querying. Validity is frozen with the same
 // snapshot so match results and SQL validity always share one row generation.
 
 namespace milvus::storage {
@@ -52,6 +53,16 @@ class TextIndexReader final : public IIndexReaderBase,
         std::shared_ptr<storage::LocalDirectory> directory,
         std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine,
         std::shared_ptr<const std::vector<size_t>> null_offsets,
+        int64_t count,
+        DataType value_type,
+        bool file_backed,
+        size_t payload_bytes);
+
+    // Growing snapshots share complete words and own a private partial word.
+    TextIndexReader(
+        std::shared_ptr<storage::LocalDirectory> directory,
+        std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine,
+        SharedValidityBitmap::Snapshot validity,
         int64_t count,
         DataType value_type,
         bool file_backed,
@@ -106,6 +117,9 @@ class TextIndexReader final : public IIndexReaderBase,
     TargetBitmap
     IsNotNull() const override;
 
+    const SharedValidityBitmap::Snapshot&
+    Validity() const;
+
  private:
     // Allocates the result bitmap and installs the tantivy set-bit callback.
     TargetBitmap
@@ -118,14 +132,7 @@ class TextIndexReader final : public IIndexReaderBase,
     // state belong to the growing owner, not this query reader.
     std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine_;
 
-    // Validity materialized once at construction instead of replaying the
-    // frozen null-offset vector on every IsNull/IsNotNull call, which sit on
-    // the query hot path. The offset vector is not retained: it would duplicate
-    // the same information at 8 bytes per null row. `all_valid_` leaves the
-    // bitmap empty rather than allocating rows/8 bytes of all-ones for a
-    // non-nullable field or a field with no nulls.
-    bool all_valid_{false};
-    TargetBitmap valid_bitmap_;
+    SharedValidityBitmap::Snapshot validity_;
 
     int64_t count_{0};
     DataType value_type_{DataType::NONE};

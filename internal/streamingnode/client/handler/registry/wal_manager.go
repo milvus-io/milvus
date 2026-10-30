@@ -107,3 +107,6 @@ type localScanner struct {
 func (s localScanner) isLocal() localTrait {
 	return localTrait{}
 }
+
+// UnwrapWAL preserves optional WAL capabilities across the local-client wrapper.
+func (l localWAL) UnwrapWAL() wal.WAL { return wal.Unwrap(l.WAL) }

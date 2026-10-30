@@ -38,7 +38,7 @@ func TestServerIDPickerBuilder(t *testing.T) {
 	builder := &serverIDPickerBuilder{}
 	picker := builder.Build(bbalancer.PickerBuildInfo{})
 	assert.NotNil(t, picker)
-	_, err := picker.Pick(balancer.PickInfo{})
+	_, err := picker.Pick(balancer.PickInfo{Ctx: context.Background()})
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, balancer.ErrNoSubConnAvailable)
 
@@ -115,4 +115,23 @@ func TestIsErrNoSubConnForPick(t *testing.T) {
 	assert.False(t, IsErrSubConnNoExist(errors.New("test")))
 	err := status.ConvertStreamingError("test", ErrSubConnNotExist)
 	assert.True(t, IsErrSubConnNoExist(err))
+}
+
+func TestFailFastPickDistinguishesDisconnectedAndRemovedSessions(t *testing.T) {
+	builder := &serverIDPickerBuilder{}
+	p := builder.Build(bbalancer.PickerBuildInfo{
+		Err:        ErrSubConnNotReady,
+		UnReadySCs: map[balancer.SubConn]base.SubConnInfo{&testSubConn{}: {Address: resolver.Address{Addr: "localhost:1", BalancerAttributes: attributes.WithServerID(new(attributes.Attributes), 1)}}},
+	})
+	// Even with no ready connections the picker retains session membership.
+	_, err := p.Pick(balancer.PickInfo{Ctx: contextutil.WithFailFastPick(contextutil.WithPickServerID(context.Background(), 1))})
+	assert.ErrorIs(t, err, ErrSubConnNotReady)
+	_, err = p.Pick(balancer.PickInfo{Ctx: contextutil.WithFailFastPick(contextutil.WithPickServerID(context.Background(), 2))})
+	assert.ErrorIs(t, err, ErrSubConnNotExist)
+	// Ordinary WAL callers keep their aggregate error/readiness behavior.
+	_, err = p.Pick(balancer.PickInfo{Ctx: contextutil.WithPickServerID(context.Background(), 1)})
+	assert.ErrorIs(t, err, ErrSubConnNotReady)
+	p = builder.Build(bbalancer.PickerBuildInfo{UnReadySCs: map[balancer.SubConn]base.SubConnInfo{&testSubConn{}: {Address: resolver.Address{Addr: "localhost:1", BalancerAttributes: attributes.WithServerID(new(attributes.Attributes), 1)}}}})
+	_, err = p.Pick(balancer.PickInfo{Ctx: contextutil.WithPickServerID(context.Background(), 1)})
+	assert.ErrorIs(t, err, balancer.ErrNoSubConnAvailable)
 }

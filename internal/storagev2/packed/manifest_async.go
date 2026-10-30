@@ -31,6 +31,7 @@ import (
 	"context"
 	"runtime/cgo"
 	"slices"
+	"strconv"
 	"sync"
 	"time"
 	"unsafe"
@@ -535,7 +536,8 @@ func applyAsyncManifestUpdates(txn C.LoonTransactionHandle, manifestPath string,
 	}
 	hasIndexes := manifestIndexesAfterUpdates(indexes, updates, drops, columns)
 	if updates.NewFiles == nil && len(updates.ColumnGroups) == 0 && len(updates.DeltaLogs) == 0 &&
-		len(updates.Stats) == 0 && len(updates.Indexes) == 0 && len(drops) == 0 {
+		len(updates.Stats) == 0 && len(updates.Indexes) == 0 && len(drops) == 0 &&
+		len(updates.DropColumns) == 0 {
 		return false, hasIndexes, nil
 	}
 	return true, hasIndexes, applyManifestUpdates(txn, updates, drops)
@@ -552,7 +554,9 @@ func manifestIndexesAfterUpdates(indexes []ManifestIndexInfo, updates *ManifestU
 		return nil
 	}
 	for _, index := range indexes {
-		if !slices.Contains(drops, index.IndexID) && !slices.Contains(appendedColumns, index.ColumnName) {
+		// Internal data columns use decimal field IDs; ColumnName retains the
+		// schema name. Keep this projection aligned with storage invalidation.
+		if !slices.Contains(drops, index.IndexID) && !slices.Contains(appendedColumns, strconv.FormatInt(index.FieldID, 10)) {
 			value = true
 			break
 		}

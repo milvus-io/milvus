@@ -89,7 +89,7 @@ func TestRetainedMVCCIgnoresSegmentStorageMessages(t *testing.T) {
 			if kind == message.MessageTypeFlush {
 				transformTarget = 140
 			}
-			require.Equal(t, QueryVChannelMVCC{GrowingTimetick: 120, TransformingTimetick: transformTarget}, cm.GetQueryMVCCOfVChannel("a"))
+			require.Equal(t, max(uint64(120), transformTarget), cm.QueryMVCC().Minimum("a", true))
 			cm.UpdateMVCC(createQueryTestMessage(t, 300, "", message.MessageTypeTimeTick, false, true))
 			cm.UpdateMVCC(createQueryTestMessage(t, 400, "a", kind, false, true))
 			require.Equal(t, VChannelMVCC{Timetick: 120, Confirmed: true}, cm.GetMVCCOfVChannel("a"))
@@ -198,7 +198,7 @@ func TestRetainedMVCCClusterBroadcast(t *testing.T) {
 				if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
 					transformTarget = 100
 				}
-				require.Equal(t, transformTarget, cm.GetQueryMVCCOfVChannel("a").TransformingTimetick)
+				require.Equal(t, max(uint64(120), transformTarget), cm.QueryMVCC().Minimum("a", true))
 				cm.UpdateMVCC(createQueryTestMessage(t, 300, "", message.MessageTypeTimeTick, false, true))
 				require.Equal(t, VChannelMVCC{Timetick: 120, Confirmed: true}, cm.GetMVCCOfVChannel("a"))
 				require.Len(t, cm.vchannelMVCCTimestamps, 2)

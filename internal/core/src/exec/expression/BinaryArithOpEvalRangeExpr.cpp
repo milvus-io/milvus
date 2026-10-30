@@ -1382,11 +1382,15 @@ PhyBinaryArithOpEvalRangeExpr::UseArrayChunkLengths() const {
         return *use_array_chunk_lengths_;
     }
     const auto& column = expr_->column_;
-    bool use = expr_->arith_op_type_ == proto::plan::ArithOpType::ArrayLength &&
-               column.data_type_ == DataType::ARRAY &&
-               column.element_type_ != DataType::ARRAY &&
-               !column.element_level_ && column.nested_path_.empty() &&
-               segment_->type() == SegmentType::Sealed;
+    bool use =
+        expr_->arith_op_type_ == proto::plan::ArithOpType::ArrayLength &&
+        column.data_type_ == DataType::ARRAY &&
+        column.element_type_ != DataType::ARRAY && !column.element_level_ &&
+        column.nested_path_.empty() &&
+        segment_->type() == SegmentType::Sealed &&
+        // Native-list ARRAY columns are ColumnarArrayChunk, which has
+        // no per-row (offset, length) table; they keep the view path.
+        !(*segment_->get_schema_snapshot())[field_id_].is_native_list_array();
     if (use) {
         // Plain and struct-member ARRAY columns on sealed segments are made
         // of ArrayChunk (see ChunkedArrayColumn / ProxyChunkColumn

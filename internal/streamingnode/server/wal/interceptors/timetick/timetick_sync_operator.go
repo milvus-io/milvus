@@ -161,9 +161,10 @@ func (impl *timeTickSyncOperator) sendTsMsgToWAL(ctx context.Context,
 	persist bool,
 	appender func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error),
 ) error {
+	var channels []string
 	msg := NewTimeTickMsg(ts, lastConfirmedMessageID, impl.sourceID, persist)
 	if len(impl.queryBarriers) != 0 {
-		channels := make([]string, 0, len(impl.queryBarriers))
+		channels = make([]string, 0, len(impl.queryBarriers))
 		for channel := range impl.queryBarriers {
 			channels = append(channels, channel)
 		}
@@ -185,6 +186,19 @@ func (impl *timeTickSyncOperator) sendTsMsgToWAL(ctx context.Context,
 		})
 	}
 
+	// ACKed data already forms a complete durable prefix. Publish its query
+	// targets before the confirmation can reach any WAL/WAB consumer and
+	// expose a newer View. Queries still wait for runtime data visibility.
+	impl.MVCCManager().QueryMVCC().Publish(func(yield func(message.ImmutableMessage, bool) bool) {
+		impl.ackDetails.Range(func(detail *ack.AckDetail) bool {
+			if detail.IsSync || detail.Err != nil {
+				return true
+			}
+			insertOnly := detail.Message.MessageType() == message.MessageTypeCommitTxn && detail.TxnSession != nil && detail.TxnSession.IsInsertOnly()
+			return yield(detail.Message, insertOnly)
+		})
+	}, ts, channels)
+
 	// Append it to wal.
 	msgID, err := appender(ctx, msg)
 	if err != nil {
@@ -205,11 +219,11 @@ func (impl *timeTickSyncOperator) sendTsMsgToWAL(ctx context.Context,
 		}
 		return true
 	})
-	// Ack details has been committed to wal, clear it.
-	impl.ackDetails.Clear()
 	tsMsg := msg.IntoImmutableMessage(msgID)
 	// Add it into write ahead buffer.
 	impl.interceptorBuildParam.WriteAheadBuffer.Append(msgs, tsMsg)
+
+	impl.ackDetails.Clear()
 	impl.lastPublishedTick = ts
 	return nil
 }

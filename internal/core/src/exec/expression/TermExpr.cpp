@@ -1289,21 +1289,16 @@ PhyTermFilterExpr::DetermineExecPath() {
         return;
     }
 
+    auto req = MakeIndexRequirement(RequiredReader::Predicate);
+    req.value_type = field_type_ == DataType::JSON ? value_type_ : data_type;
     if (data_type == DataType::JSON && !expr_->vals_.empty() &&
         expr_->vals_[0].val_case() ==
             proto::plan::GenericValue::ValCase::kInt64Val) {
-        const auto has_unsafe_literal = std::any_of(
+        req.requires_flat_json_index = std::any_of(
             expr_->vals_.begin(), expr_->vals_.end(), [this](const auto& val) {
                 return !IsInt64SafeForJsonDoubleIndex(val.int64_val());
             });
-        if (has_unsafe_literal) {
-            exec_path_ = ExprExecPath::RawData;
-            return;
-        }
     }
-
-    auto req = MakeIndexRequirement(RequiredReader::Predicate);
-    req.value_type = field_type_ == DataType::JSON ? value_type_ : data_type;
     SelectAndPinIndex(req);
 }
 
