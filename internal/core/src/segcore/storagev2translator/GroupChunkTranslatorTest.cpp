@@ -241,8 +241,9 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
         batch.resident,
         (use_mmap ? cachinglayer::ResourceUsage{0, expected_batch_bytes}
                   : cachinglayer::ResourceUsage{expected_batch_bytes, 0}));
+    // This schema contains ARRAY fields, whose memory scratch is doubled.
     const cachinglayer::ResourceUsage expected_overhead{
-        expected_batch_bytes, use_mmap ? expected_batch_bytes : 0};
+        2 * expected_batch_bytes, use_mmap ? expected_batch_bytes : 0};
     EXPECT_EQ(batch.private_overhead + batch.shared_overhead,
               expected_overhead);
     EXPECT_EQ(batch.shared_overhead,
