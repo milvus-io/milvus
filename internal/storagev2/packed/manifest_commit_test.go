@@ -361,10 +361,10 @@ func TestRefreshMilvusTableManifestSingleCommit(t *testing.T) {
 				base := path.Join(cfg.RootPath, "target")
 				updates := &ManifestUpdates{DeltaLogs: []DeltaLogEntry{{Path: path.Join(base, "_delta/old"), NumEntries: 1}}}
 				if withStats {
-					// Match the production layout: completed artifacts live outside
-					// the manifest namespace, with paths encoded relative to _index.
+					// Manifest-published indexes live under this segment's _index;
+					// only the build/version suffix is stored in each entry.
 					for i := int64(0); i < 2; i++ {
-						entry := indexEntry(t, base, path.Join(cfg.RootPath, fmt.Sprintf("index_v1/1/2/3/%d/1", 500+i)), 10+i, 500+i)
+						entry := indexEntry(t, base, path.Join(base, ManifestIndexDir, fmt.Sprintf("%d/1", 500+i)), 10+i, 500+i)
 						entry.ColumnName = "pk"
 						entry.NumRows = 1
 						updates.Indexes = append(updates.Indexes, entry)
@@ -452,33 +452,55 @@ func TestRefreshMilvusTableManifestSingleCommit(t *testing.T) {
 func TestRefreshMilvusTableManifestRetainsRemoteIndexPaths(t *testing.T) {
 	base := "files/insert_log/1/2/3"
 	oldManifest := MarshalManifestPath(base, 1)
-	index := ManifestIndexInfo{
-		ColumnName: "vec", IndexID: 10, BuildID: 500,
-		Path: "files/index_files/500/1", IndexFileKeys: []string{"index.v3"},
+	for _, tc := range []struct {
+		name    string
+		prefix  string
+		wantErr bool
+	}{
+		{name: "segment rooted", prefix: base + "/_index/500/1"},
+		{name: "external namespace", prefix: "files/index_files/500/1", wantErr: true},
+		{name: "another segment", prefix: "files/insert_log/1/2/4/_index/500/1", wantErr: true},
+		{name: "parent traversal", prefix: base + "/_index/../500/1", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			index := ManifestIndexInfo{
+				ColumnName: "vec", IndexID: 10, BuildID: 500,
+				Path: tc.prefix, IndexFileKeys: []string{"index.v3"},
+			}
+			statsPatch := mockey.Mock(GetManifestStats).Return(nil, nil).Build()
+			defer statsPatch.UnPatch()
+			indexPatch := mockey.Mock(GetManifestIndexInfos).Return([]ManifestIndexInfo{index}, nil).Build()
+			defer indexPatch.UnPatch()
+			committed := MarshalManifestPath(base, 2)
+			commitCalls := 0
+			commitPatch := mockey.Mock(createMilvusTableManifest).To(func(_ context.Context, gotBase string,
+				_ []string, _ []Fragment, _ *indexpb.StorageConfig, _ ExternalSpecContext, updates *ManifestUpdates,
+			) (string, error) {
+				commitCalls++
+				require.Equal(t, base, gotBase)
+				// Remote complete keys are not absolute filesystem paths. Re-encode
+				// against this segment's _index without duplicating the root prefix.
+				expected := index
+				expected.Path = "500/1"
+				require.Equal(t, []ManifestIndexInfo{expected}, updates.Indexes)
+				return committed, nil
+			}).Build()
+			defer commitPatch.UnPatch()
+			// Keep path validation real: invalid retained entries must fail before
+			// opening a transaction, rather than escaping _index through "..".
+			result, err := RefreshMilvusTableManifest(context.Background(), oldManifest, nil, nil, nil, ExternalSpecContext{}, nil, nil)
+			if tc.wantErr {
+				require.ErrorIs(t, err, merr.ErrServiceInternal)
+				require.ErrorContains(t, err, "outside segment index directory")
+				require.Equal(t, MilvusTableRefreshResult{}, result)
+				require.Zero(t, commitCalls)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, committed, result.ManifestPath)
+			require.Equal(t, 1, commitCalls)
+		})
 	}
-	statsPatch := mockey.Mock(GetManifestStats).Return(nil, nil).Build()
-	defer statsPatch.UnPatch()
-	indexPatch := mockey.Mock(GetManifestIndexInfos).Return([]ManifestIndexInfo{index}, nil).Build()
-	defer indexPatch.UnPatch()
-	committed := MarshalManifestPath(base, 2)
-	commitCalls := 0
-	commitPatch := mockey.Mock(createMilvusTableManifest).To(func(_ context.Context, gotBase string,
-		_ []string, _ []Fragment, _ *indexpb.StorageConfig, _ ExternalSpecContext, updates *ManifestUpdates,
-	) (string, error) {
-		commitCalls++
-		require.Equal(t, base, gotBase)
-		// Remote complete keys are not absolute filesystem paths. Passing them
-		// through unchanged would put the artifact under <base>/_index/files/...
-		expected := index
-		expected.Path = "../../../../../index_files/500/1"
-		require.Equal(t, []ManifestIndexInfo{expected}, updates.Indexes)
-		return committed, nil
-	}).Build()
-	defer commitPatch.UnPatch()
-	result, err := RefreshMilvusTableManifest(context.Background(), oldManifest, nil, nil, nil, ExternalSpecContext{}, nil, nil)
-	require.NoError(t, err)
-	require.Equal(t, committed, result.ManifestPath)
-	require.Equal(t, 1, commitCalls)
 }
 
 func TestCreateMilvusTableManifestRejectsInvalidRetainedGroups(t *testing.T) {
