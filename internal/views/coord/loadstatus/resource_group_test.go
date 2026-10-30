@@ -6,27 +6,13 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
-	catalogkv "github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
 
 func TestProgressInResourceGroup(t *testing.T) {
-	for _, patch := range []*mockey.Mocker{
-		mockey.Mock(catalogkv.Catalog.GetCollections).Return([]*querypb.CollectionLoadInfo(nil), nil).Build(),
-		mockey.Mock(catalogkv.Catalog.GetPartitions).Return(map[int64][]*querypb.PartitionLoadInfo(nil), nil).Build(),
-		mockey.Mock(catalogkv.Catalog.GetReplicas).Return([]*querypb.Replica(nil), nil).Build(),
-		mockey.Mock(catalogkv.Catalog.SaveCollection).Return(nil).Build(),
-		mockey.Mock(catalogkv.Catalog.SaveReplica).Return(nil).Build(),
-		mockey.Mock(catalogkv.Catalog.ReleaseCollection).Return(nil).Build(),
-		mockey.Mock(catalogkv.Catalog.ReleaseReplica).Return(nil).Build(),
-		mockey.Mock(catalogkv.Catalog.ReleaseReplicas).Return(nil).Build(),
-	} {
-		t.Cleanup(func() { patch.UnPatch() })
-	}
 	store, err := loadmgr.RecoverLoadConfigStore(t.Context(), loadmgrtest.Dependencies(t))
 	require.NoError(t, err)
 	cfg := &loadmgr.LoadConfig{CollectionID: 1, Replicas: []*loadmgr.ReplicaAssignment{
@@ -95,6 +81,9 @@ func TestProgressInResourceGroup(t *testing.T) {
 			up(10, "v0")
 			up(10, "v1")
 			duringSnapshot = func() {
+				if action == "update" {
+					cfg.PartitionIDs = []int64{100}
+				}
 				if action != "update" {
 					store.StopPlanning(1)
 					require.NoError(t, store.Remove(t.Context(), 1))

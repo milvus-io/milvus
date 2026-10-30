@@ -2,7 +2,6 @@ package viewquery
 
 import (
 	"github.com/milvus-io/milvus/internal/views/viewerror"
-
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 

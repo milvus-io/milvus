@@ -9,7 +9,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/dataview"
 	datacatalog "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
-	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
 	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
@@ -18,7 +17,6 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -32,11 +30,6 @@ func TestBalancerConsumesRealDataViewManager(t *testing.T) {
 	for _, patch := range []*mockey.Mocker{
 		mockey.Mock((*datacatalog.Catalog).ListAllDataViews).Return(nil, nil).Build(),
 		mockey.Mock((*datacatalog.Catalog).SaveDataView).Return(nil).Build(),
-		mockey.Mock((*querycoord.Catalog).GetCollections).Return([]*querypb.CollectionLoadInfo{{CollectionID: 1}}, nil).Build(),
-		mockey.Mock((*querycoord.Catalog).GetPartitions).Return(map[int64][]*querypb.PartitionLoadInfo{
-			1: {{CollectionID: 1, PartitionID: 100}},
-		}, nil).Build(),
-		mockey.Mock((*querycoord.Catalog).GetReplicas).Return([]*querypb.Replica{{ID: 10, CollectionID: 1}}, nil).Build(),
 
 		mockey.Mock((*stubSyncer).SyncViews).Return(nil).Build(),
 	} {
@@ -63,6 +56,10 @@ func TestBalancerConsumesRealDataViewManager(t *testing.T) {
 	t.Cleanup(registry.Close)
 	store, err := loadmgr.RecoverLoadConfigStore(ctx, loadmgrtest.Dependencies(t))
 	require.NoError(t, err)
+	require.NoError(t, store.Put(ctx, &loadmgr.LoadConfig{
+		CollectionID: 1, PartitionIDs: []int64{100},
+		Replicas: []*loadmgr.ReplicaAssignment{{ReplicaID: 10}},
+	}))
 	// Use real replaying source hooks; mock only the node source boundary.
 	nodes := &testNodePublisher{}
 	nodePatch := mockey.Mock((*testNodePublisher).RegisterNodeListener).To(func(_ *testNodePublisher, listener balancercache.NodeListener) func() {
@@ -76,6 +73,7 @@ func TestBalancerConsumesRealDataViewManager(t *testing.T) {
 	controller := NewDefaultBalancer(cache, registry, nil, nil)
 	controller.Trigger(TriggerScope{DirtyCollections: []int64{1}})
 	require.NoError(t, controller.Reconcile(ctx))
+	require.NotNil(t, registry.Get(shardID))
 	stats := registry.Get(shardID).Stats()
 	require.Equal(t, qviews.FromProtoDataVersion(version), stats.PreparingVersion.DataVersion)
 	require.False(t, stats.Segments[101].LostStats)
