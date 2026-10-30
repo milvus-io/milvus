@@ -2416,6 +2416,9 @@ type proxyConfig struct {
 	// Alias  string
 	SoPath ParamItem `refreshable:"false"`
 
+	ExprParseCacheEnabled    ParamItem `refreshable:"false"`
+	ExprParseCacheMaxEntries ParamItem `refreshable:"false"`
+
 	TimeTickInterval               ParamItem `refreshable:"false"`
 	HealthCheckTimeout             ParamItem `refreshable:"true"`
 	MsgStreamTimeTickBufSize       ParamItem `refreshable:"true"`
@@ -2499,6 +2502,25 @@ func positiveProxyLimitFormatter(defaultValue string) func(string) string {
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
+	p.ExprParseCacheEnabled = ParamItem{
+		Key:          "proxy.exprParseCache.enabled",
+		Version:      "3.0.6",
+		DefaultValue: "true",
+		Doc:          "Enable caching expression parse trees and parsing errors. These settings apply to all components using the expression parser, not only Proxy; each process maintains its own cache. Restart required; disabling the cache does not reject expressions.",
+		Export:       true,
+	}
+	p.ExprParseCacheEnabled.Init(base.mgr)
+
+	p.ExprParseCacheMaxEntries = ParamItem{
+		Key:          "proxy.exprParseCache.maxEntries",
+		Version:      "3.0.6",
+		DefaultValue: "1024",
+		Formatter:    positiveProxyLimitFormatter("1024"),
+		Doc:          "Maximum number of cached expression parse trees and parsing errors per process. Non-positive or invalid values use 1024. Entries retain the existing 10-minute TTL. Restart required.",
+		Export:       true,
+	}
+	p.ExprParseCacheMaxEntries.Init(base.mgr)
+
 	p.TimeTickInterval = ParamItem{
 		Key:          "proxy.timeTickInterval",
 		Version:      "2.2.0",
