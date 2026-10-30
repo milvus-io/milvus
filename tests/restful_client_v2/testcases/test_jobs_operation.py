@@ -70,8 +70,16 @@ class RestImportTestBase(TestBase):
         t0 = time.time()
         last_count = None
         last_refresh_rsp = None
+        # refresh_load answers ErrCollectionNotLoaded (101) / ErrCollectionNotFullyLoaded (103)
+        # while the load triggered by collection creation is still in progress. That is a
+        # transient server state, not an import failure, so keep polling instead of asserting
+        # on the first response; the timeout error below still reports the last response.
+        pending_load_codes = {101, 103}
         while time.time() - t0 < timeout:
             last_refresh_rsp = self.collection_client.refresh_load(collection_name, db_name=db_name)
+            if last_refresh_rsp.get("code") in pending_load_codes:
+                time.sleep(2)
+                continue
             assert last_refresh_rsp.get("code") == 0, last_refresh_rsp
             last_count = self._query_count(
                 collection_name,
