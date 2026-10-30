@@ -129,8 +129,14 @@ func (s *assignmentServiceImpl) waitUntilPrimaryChangeOrConfigurationSame(ctx co
 	if err != nil {
 		return err
 	}
+	// The configuration this cluster received may carry redacted tokens that it
+	// could not fill from its own store, for example when it is joining the
+	// topology and has never stored its peers, while the configuration replicated
+	// from the primary carries the real ones. Tokens are not part of the topology,
+	// so the comparison ignores them; otherwise the wait would never end.
+	want := replicateutil.SanitizeReplicateConfiguration(config)
 	err = b.WatchChannelAssignments(ctx, func(param balancer.WatchChannelAssignmentsCallbackParam) error {
-		if proto.Equal(config, param.ReplicateConfiguration) {
+		if proto.Equal(want, replicateutil.SanitizeReplicateConfiguration(param.ReplicateConfiguration)) {
 			return errAssignmentDone
 		}
 		return nil
@@ -153,6 +159,14 @@ func (s *assignmentServiceImpl) validateReplicateConfiguration(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
+
+	// Connection tokens are redacted whenever the configuration is read, so a
+	// caller that read it back cannot resend them. Take the stored ones from
+	// this same assignment snapshot, which the comparison, the validation and
+	// the message below also use: filling from an earlier read would let CDC
+	// apply a newer configuration in between, and a cluster it added would then
+	// be compared with an empty token and rejected.
+	config = replicateutil.FillRedactedConnectionTokens(config, latestAssignment.ReplicateConfiguration)
 
 	// double check if the configuration is same after resource key is acquired.
 	if proto.Equal(config, latestAssignment.ReplicateConfiguration) {
