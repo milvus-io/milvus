@@ -68,6 +68,7 @@ const (
 	DefaultThreadPoolMaxThreadsSize              = 16
 	DefaultStorageIopsInitialRate                = uint32(2000)
 	DefaultStorageIopsMaxRate                    = uint32(5000)
+	DefaultSearchFanoutPoolSizeRatio             = 2
 
 	DefaultSessionTTL        = 15 // s
 	DefaultSessionRetryTimes = 30
@@ -900,9 +901,8 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Key:          "common.threadCoreCoefficient.middlePriority",
 		Version:      "2.0.0",
 		DefaultValue: strconv.Itoa(DefaultMiddlePriorityThreadCoreCoefficient),
-		Doc: "Thread-to-core ratio for each of the independent middle priority " +
-			"and search fanout pools; both follow maxThreadsSize.",
-		Export: true,
+		Doc:          "Thread-to-core ratio for the middle priority pool; follows maxThreadsSize.",
+		Export:       true,
 	}
 	p.MiddlePriorityThreadCoreCoefficient.Init(base.mgr)
 
@@ -920,7 +920,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Key:          "common.threadCoreCoefficient.maxThreadsSize",
 		Version:      "2.6.13",
 		DefaultValue: strconv.Itoa(DefaultThreadPoolMaxThreadsSize),
-		Doc:          "The maximum number of threads in the thread pool, only effective when greater than 0",
+		Doc:          "Maximum thread count for the high, middle and low priority pools; only effective when greater than 0. Does not limit the search fanout pool.",
 		Export:       true,
 	}
 	p.ThreadPoolMaxThreadsSize.Init(base.mgr)
@@ -4394,6 +4394,7 @@ type queryNodeConfig struct {
 	// segcore
 	KnowhereFetchThreadPoolSize        ParamItem `refreshable:"true"`
 	KnowhereThreadPoolSize             ParamItem `refreshable:"true"`
+	SearchFanoutPoolSizeRatio          ParamItem `refreshable:"true"`
 	ChunkRows                          ParamItem `refreshable:"false"`
 	FmindexCostRatio                   ParamItem `refreshable:"false"`
 	EnableInterminSegmentIndex         ParamItem `refreshable:"false"`
@@ -5034,6 +5035,15 @@ If set to 0, time based eviction is disabled.`,
 		Export: true,
 	}
 	p.KnowhereThreadPoolSize.Init(base.mgr)
+
+	p.SearchFanoutPoolSizeRatio = ParamItem{
+		Key:          "queryNode.segcore.searchFanoutPoolSizeRatio",
+		Version:      "3.0.0",
+		DefaultValue: strconv.Itoa(DefaultSearchFanoutPoolSizeRatio),
+		Doc:          "Thread-to-core ratio for the search fanout pool; independent of the search executor and not limited by common.threadCoreCoefficient.maxThreadsSize.",
+		Export:       true,
+	}
+	p.SearchFanoutPoolSizeRatio.Init(base.mgr)
 
 	p.KnowhereFetchThreadPoolSize = ParamItem{
 		Key:          "queryNode.segcore.knowhereFetchThreadPoolNumRatio",

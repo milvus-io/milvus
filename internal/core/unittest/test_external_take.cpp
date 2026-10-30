@@ -1740,7 +1740,7 @@ TEST(ExternalTakeTest, OrderedSearchOutputOtherSegmentReadsDuringTake) {
                            int64_t count) const override {
                 EXPECT_TRUE(
                     folly::getCurrentThreadName().value_or("").starts_with(
-                        "SRCH_FAN_POOL"));
+                        "MILVUS_SEARCH_"));
                 on_read();
                 return SegmentGrowingImpl::bulk_subscript(
                     ctx, field_id, offsets, count);

@@ -44,6 +44,9 @@ void
 SetMiddlePriorityThreadCoreCoefficient(const float);
 
 void
+SetSearchFanoutThreadCoreCoefficient(const float);
+
+void
 SetLowPriorityThreadCoreCoefficient(const float);
 
 void

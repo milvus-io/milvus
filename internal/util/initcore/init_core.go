@@ -42,6 +42,7 @@ import (
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
+	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -747,6 +748,13 @@ func SetupCoreConfigChangelCallback() {
 			UpdateLowPriorityThreadCoreCoefficient(coefficient)
 			return nil
 		})
+
+		fanoutRatio := &paramtable.Get().QueryNodeCfg.SearchFanoutPoolSizeRatio
+		paramtable.Get().Watch(fanoutRatio.Key, config.NewHandler("querynode.searchfanout.poolsize", func(event *config.Event) {
+			if event.HasUpdated {
+				UpdateSearchFanoutThreadCoreCoefficient(fanoutRatio.GetAsFloat())
+			}
+		}))
 
 		paramtable.Get().CommonCfg.ThreadPoolMaxThreadsSize.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			size, err := strconv.Atoi(newValue)

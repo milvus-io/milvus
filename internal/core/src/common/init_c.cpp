@@ -74,6 +74,11 @@ SetMiddlePriorityThreadCoreCoefficient(const float value) {
 }
 
 void
+SetSearchFanoutThreadCoreCoefficient(const float value) {
+    milvus::SetSearchFanoutThreadCoreCoefficient(value);
+}
+
+void
 SetLowPriorityThreadCoreCoefficient(const float value) {
     milvus::SetLowPriorityThreadCoreCoefficient(value);
 }

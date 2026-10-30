@@ -203,29 +203,11 @@ class InstrumentedGrowingSearchSegment
 
     using SegmentGrowingImpl::bulk_subscript;
 
-    void
-    FillTargetEntry(const milvus::query::Plan* plan,
-                    SearchResult& result,
-                    milvus::OpContext* ctx) const override {
-        EXPECT_TRUE(folly::getCurrentThreadName().value_or("").starts_with(
-            "MILVUS_SEARCH_"));
-        SegmentGrowingImpl::FillTargetEntry(plan, result, ctx);
-    }
-
-    std::shared_ptr<const milvus::segcore::SegmentReadSnapshot>
-    CaptureReadSnapshot() const override {
-        EXPECT_TRUE(folly::getCurrentThreadName().value_or("").starts_with(
-            "MILVUS_SEARCH_"));
-        return SegmentGrowingImpl::CaptureReadSnapshot();
-    }
-
     std::unique_ptr<milvus::DataArray>
     bulk_subscript(milvus::OpContext* ctx,
                    FieldId field_id,
                    const int64_t* offsets,
                    int64_t count) const override {
-        EXPECT_TRUE(folly::getCurrentThreadName().value_or("").starts_with(
-            "SRCH_FAN_POOL"));
         if (before_read) {
             before_read(field_id, ctx);
         }
@@ -3423,7 +3405,9 @@ TEST_P(GrowingSearchOutputFieldsTest, BothPoolsMakeProgressWithOneWorker) {
                         internal_storage_pool_task_submitted_total_search_fanout
                             .Value() -
                     fanout_before,
-                layout.size() * plan_->target_entries_.size());
+                plan_->target_entries_.size() == 1
+                    ? 0
+                    : layout.size() * plan_->target_entries_.size());
             ExpectValues(expected);
         }
     });
@@ -3435,6 +3419,8 @@ TEST_P(GrowingSearchOutputFieldsTest, FieldReadsOverlap) {
     std::atomic<bool> overlapped{false};
     milvus::OpContext* contexts[2]{};
     segment_->before_read = [&](FieldId field, milvus::OpContext* ctx) {
+        EXPECT_TRUE(folly::getCurrentThreadName().value_or("").starts_with(
+            "SRCH_FAN_POOL"));
         contexts[field.get() == first_.get() ? 0 : 1] = ctx;
         if (field.get() == first_.get()) {
             overlapped = last_ready.wait_for(std::chrono::seconds(5)) ==

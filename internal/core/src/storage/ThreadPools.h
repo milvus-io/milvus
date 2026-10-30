@@ -54,7 +54,7 @@ class ThreadPools {
     static ThreadPool&
     GetThreadPool(ThreadPoolPriority priority);
 
-    // MIDDLE and SEARCH_FANOUT share sizing, including before first use.
+    // Each priority keeps its own coefficient, including before first use.
     static void
     ResizeThreadPool(ThreadPoolPriority priority, float ratio);
 
