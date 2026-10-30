@@ -47,22 +47,17 @@ func (m *SegmentResourceManager) AcquireSealedSegmentHandles(ctx context.Context
 		b := v.bindings[id]
 		r, read := b.resource, b.prepared
 		unpinRead := read.read.RetainReadState()
-		r.queryRefs++
-		read.base.queryRefs++
+		r.operations.Add(1)
+		read.base.operationRefs++
 		v.operationRefs++
 		segment := &viewSchemaSegment{TransformSegment: read.base.segment, collection: v.collection.Collection(), read: read.read}
 		handles = append(handles, &resourceSegmentHandle{segment: segment, registration: read.base.registration, release: func() {
+			defer r.operations.Done()
 			unpinRead()
 			m.mu.Lock()
-			r.queryRefs--
-			read.base.queryRefs--
+			read.base.operationRefs--
 			v.operationRefs--
 			r.wakeLocked()
-			if len(r.bindings) == 0 && r.queryRefs == 0 {
-				r.closing = true
-				r.stopRetryLocked()
-				r.cancel()
-			}
 			m.mu.Unlock()
 			// These are the exact objects acquired above, even after the View
 			// has disappeared or the same logical Segment has been recreated.

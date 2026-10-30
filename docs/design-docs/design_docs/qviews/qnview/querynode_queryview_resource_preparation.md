@@ -595,9 +595,13 @@ another View's ReadState or resources already held by executing queries.
 Successful shared resources survive a failed Preparing View until its release,
 and survive that release when replacement bindings already protect them.
 
-When no View or query needs a resource, the owner enters Closing, prevents new
-operations on that physical incarnation, cancels obsolete work, and drains all
-operations/callbacks that can access it. It unregisters transform application,
+When the last View binding leaves a resource, the owner immediately enters
+Closing under the resource lock. Query handles and metrics sampling are operation
+pins, not View ownership: they delay destruction but cannot delay Closing or
+permit reuse by a new View. Closing prevents new operations on that physical
+incarnation, cancels obsolete preparation, and drains all operations/callbacks
+that can access it. Existing queries retain their transform registrations through
+MVCC waiting and execution. After those queries finish, it unregisters transform application,
 drains metadata acquisition and releases native resources and dependency
 pins in an order that preserves every outstanding reference.
 
@@ -614,8 +618,8 @@ SegmentResource owner detached by this release, an unshared or already-closing
 owner must finish physical destruction before the callback. Waiting joins that
 concrete incarnation, including when a new binding arrived during closure; it
 never looks up a replacement by SegmentID. A still-live owner taken over by
-another View or its active query may remain resident and does not delay this
-callback. The final consumer establishes Closing under the resource lock before
+another View's binding may remain resident and does not delay this callback.
+The final binding establishes Closing under the resource lock before
 waiting, so a later binding cannot extend that incarnation's release obligation.
 
 This completion promise is at whole-SegmentResource granularity. It does not

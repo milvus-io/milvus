@@ -1,6 +1,8 @@
 package qnview
 
 import (
+	"context"
+	"sync"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -58,7 +60,9 @@ func TestSegmentResourceMetricsRetainsPhysicalBases(t *testing.T) {
 		go func() { result <- m.SegmentMetrics(1, 5) }()
 		<-entered
 		m.mu.Lock()
-		require.Equal(t, 2, r.queryRefs)
+		for _, base := range r.bases {
+			require.Equal(t, 1, base.operationRefs)
+		}
 		require.Empty(t, r.pruneBasesLocked(), "no View remains, but in-flight sampling retains both bases")
 		m.mu.Unlock()
 		close(proceed)
@@ -70,8 +74,67 @@ func TestSegmentResourceMetricsRetainsPhysicalBases(t *testing.T) {
 		require.Len(t, got[0].IndexedFields, 1)
 		require.True(t, got[0].IndexedFields[0].HasRawData)
 		m.mu.Lock()
-		require.Zero(t, r.queryRefs)
+		for _, base := range r.bases {
+			require.Zero(t, base.operationRefs)
+		}
 		require.Len(t, r.pruneBasesLocked(), 2, "retirement becomes possible after sampling")
 		m.mu.Unlock()
+	})
+}
+
+func TestSegmentResourceDroppedWaitsForMetricsAndPhysicalRelease(t *testing.T) {
+	mockey.PatchConvey("metrics pins delay destruction but cannot bypass the last binding's Dropped promise", t, func() {
+		f := setupResourceTest(t, nil)
+		mockey.Mock((*metricsTestSegment).ID).Return(int64(1000)).Build()
+		mockey.Mock((*metricsTestSegment).Collection).Return(int64(1)).Build()
+		mockey.Mock((*metricsTestSegment).Partition).Return(int64(10)).Build()
+		mockey.Mock((*metricsTestSegment).Type).Return(segments.SegmentTypeSealed).Build()
+		mockey.Mock((*metricsTestSegment).ResourceGroup).Return("rg").Build()
+		mockey.Mock((*metricsTestSegment).InsertCount).Return(int64(100)).Build()
+		mockey.Mock((*metricsTestSegment).Indexes).Return([]*segments.IndexedFieldInfo(nil)).Build()
+		f.loadMock.To(func(_ *resourceTestLoader, _ context.Context, info *querypb.SegmentLoadInfo, _ CollectionRuntime) (TransformSegment, error) {
+			return &metricsTransformSegment{
+				TransformSegment: &fakeTransformSegment{id: info.SegmentID, partitionID: info.PartitionID},
+				physical:         &metricsTestSegment{},
+			}, nil
+		})
+		sampling, finishSampling := make(chan struct{}), make(chan struct{})
+		releasing, finishRelease := make(chan struct{}), make(chan struct{})
+		unblockSampling := sync.OnceFunc(func() { close(finishSampling) })
+		unblockRelease := sync.OnceFunc(func() { close(finishRelease) })
+		defer unblockSampling()
+		defer unblockRelease()
+		mockey.Mock((*metricsTestSegment).MemSize).To(func(*metricsTestSegment) int64 {
+			close(sampling)
+			<-finishSampling
+			return 50
+		}).Build()
+		f.releaseMock.To(func(*fakeTransformSegment, context.Context) error {
+			close(releasing)
+			<-finishRelease
+			return nil
+		})
+		req := f.acquire(1, 1, 1)
+		f.await(t, 1)
+		result := make(chan []*metricsinfo.Segment, 1)
+		go func() { result <- f.manager.SegmentMetrics(0, 5) }()
+		awaitShutdown(t, sampling)
+		dropped := f.beginDrop(req)
+		f.manager.mu.Lock()
+		r := f.manager.resources[1000]
+		require.True(t, r.closing)
+		require.Empty(t, r.bindings)
+		f.manager.mu.Unlock()
+		require.Empty(t, f.manager.SegmentMetrics(0, 5), "Closing refuses additional sampling pins")
+		requireDropPending(t, dropped)
+		requireDropPending(t, releasing)
+		unblockSampling()
+		require.Len(t, <-result, 1)
+		awaitShutdown(t, releasing)
+		requireDropPending(t, dropped)
+		unblockRelease()
+		awaitShutdown(t, dropped)
+		awaitShutdown(t, r.done)
+		f.manager.Close()
 	})
 }
