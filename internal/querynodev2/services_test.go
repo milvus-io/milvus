@@ -56,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -1912,6 +1913,99 @@ func (suite *ServiceSuite) TestQuerySegments_Normal() {
 	rsp, err := suite.node.QuerySegments(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
+}
+
+// genCountRequest builds count(*) on the collection the suite loaded.
+// legacy=true is the 2.6 Proxy encoding: IsCount on the request, is_count on
+// the plan, no Aggregates. legacy=false is the current encoding: one count
+// aggregate on the request and on the plan.
+func (suite *ServiceSuite) genCountRequest(legacy bool) *querypb.QueryRequest {
+	countAll := []*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 0}}
+	query := &planpb.QueryPlanNode{}
+	req := &internalpb.RetrieveRequest{
+		QueryLabel: "query",
+		Base: &commonpb.MsgBase{
+			MsgType:  commonpb.MsgType_Retrieve,
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		CollectionID:  suite.collectionID,
+		PartitionIDs:  suite.partitionIDs,
+		Limit:         typeutil.Unlimited,
+		MvccTimestamp: typeutil.MaxTimestamp,
+	}
+	if legacy {
+		query.IsCount = true
+		req.IsCount = true
+	} else {
+		query.Aggregates = countAll
+		req.Aggregates = countAll
+	}
+	serialized, err := proto.Marshal(&planpb.PlanNode{Node: &planpb.PlanNode_Query{Query: query}})
+	suite.Require().NoError(err)
+	req.SerializedExprPlan = serialized
+	return &querypb.QueryRequest{
+		Req:         req,
+		DmlChannels: []string{suite.vchannel},
+	}
+}
+
+// countOf reads the single value of a count(*) result in the shape a 2.6
+// Proxy requires: exactly one Int64 column with one row.
+func (suite *ServiceSuite) countOf(rsp *internalpb.RetrieveResults) int64 {
+	suite.Require().NoError(merr.Error(rsp.GetStatus()))
+	suite.Require().Len(rsp.GetFieldsData(), 1)
+	suite.Require().Equal(schemapb.DataType_Int64, rsp.GetFieldsData()[0].GetType())
+	counts := rsp.GetFieldsData()[0].GetScalars().GetLongData().GetData()
+	suite.Require().Len(counts, 1)
+	return counts[0]
+}
+
+// TestQuery_LegacyCount is a 2.6 Proxy that sends count(*) to this node's
+// delegator during a rolling upgrade. The answer must equal the answer to the
+// same count(*) in the current encoding.
+// The two legacy count tests cover the paths that enter this node: a 2.6
+// Proxy that sends to a 3.0 delegator, and a 2.6 delegator that sends to a 3.0
+// worker. The third mixed-version path, a 3.0 delegator that forwards to a 2.6
+// worker, is not run here: it requires a 2.6 worker binary. That path was
+// traced by code: the forwarded plan keeps is_count, the 2.6 worker answers
+// with one Int64 column and no Ids, and the delegator aggregate reduce accepts
+// that shape (TestDelegatorPipelineCountWithEmptyWorkerResult).
+func (suite *ServiceSuite) TestQuery_LegacyCount() {
+	ctx := context.Background()
+	suite.TestWatchDmChannelsInt64()
+	suite.TestLoadSegments_Int64()
+	suite.syncDistribution(ctx)
+
+	current, err := suite.node.Query(ctx, suite.genCountRequest(false))
+	suite.Require().NoError(err)
+	expected := suite.countOf(current)
+	suite.Require().Positive(expected)
+
+	legacy, err := suite.node.Query(ctx, suite.genCountRequest(true))
+	suite.Require().NoError(err)
+	suite.Equal(expected, suite.countOf(legacy))
+}
+
+// TestQuerySegments_LegacyCount is a 2.6 delegator that forwards count(*) to
+// this node as a worker during a rolling upgrade.
+func (suite *ServiceSuite) TestQuerySegments_LegacyCount() {
+	ctx := context.Background()
+	suite.TestWatchDmChannelsInt64()
+	suite.TestLoadSegments_Int64()
+
+	querySegments := func(legacy bool) *internalpb.RetrieveResults {
+		req := suite.genCountRequest(legacy)
+		req.SegmentIDs = suite.validSegmentIDs
+		req.Scope = querypb.DataScope_Historical
+		rsp, err := suite.node.QuerySegments(ctx, req)
+		suite.Require().NoError(err)
+		return rsp
+	}
+
+	expected := suite.countOf(querySegments(false))
+	suite.Require().Positive(expected)
+	suite.Equal(expected, suite.countOf(querySegments(true)))
 }
 
 func (suite *ServiceSuite) TestQueryStreamSegments_Normal() {
