@@ -80,3 +80,39 @@ TEST(CApiTest, CPlan) {
     Test_CPlan<milvus::BFloat16Vector>(knowhere::metric::L2);
     Test_CPlan<milvus::Int8Vector>(knowhere::metric::L2);
 }
+// A query vector of the wrong dimension is a caller mistake. The C API must
+// hand Go the DimNotMatch code Plan.cpp throws, not collapse it to the generic
+// UnexpectedError, or the proxy reports the request as a system error.
+TEST(CApiTest, ParsePlaceholderGroupKeepsDimNotMatchCode) {
+    std::string schema_string = generate_collection_schema<milvus::FloatVector>(
+        knowhere::metric::L2, DIM);
+    auto collection = NewCollection(schema_string.c_str());
+
+    milvus::proto::plan::PlanNode plan_node;
+    auto vector_anns = plan_node.mutable_vector_anns();
+    vector_anns->set_vector_type(milvus::FloatVector::vector_type);
+    vector_anns->set_placeholder_tag("$0");
+    vector_anns->set_field_id(100);
+    auto query_info = vector_anns->mutable_query_info();
+    query_info->set_topk(10);
+    query_info->set_round_decimal(3);
+    query_info->set_metric_type("L2");
+    query_info->set_search_params(R"({"nprobe": 10})");
+    auto plan_str = plan_node.SerializeAsString();
+
+    void* plan = nullptr;
+    auto status = CreateSearchPlanByExpr(
+        collection, plan_str.data(), plan_str.size(), &plan);
+    ASSERT_EQ(status.error_code, Success);
+
+    auto blob = CreatePlaceholderGroup(1, DIM * 2).SerializeAsString();
+    CPlaceholderGroup placeholder_group = &plan_str;
+    status = ParsePlaceholderGroup(
+        plan, blob.data(), blob.size(), &placeholder_group);
+    EXPECT_EQ(status.error_code, DimNotMatch);
+    EXPECT_EQ(placeholder_group, nullptr);
+    free(const_cast<char*>(status.error_msg));
+
+    DeleteSearchPlan(plan);
+    DeleteCollection(collection);
+}
