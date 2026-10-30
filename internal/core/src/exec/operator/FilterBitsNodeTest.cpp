@@ -170,6 +170,9 @@ PartialTracePredicate(const RowVector&, VectorPtr& result) {
 void
 AllTracePredicate(const RowVector& args, VectorPtr& result) {
     const auto rows = args.childrens().empty() ? 8 : args.size();
+    if (!args.childrens().empty()) {
+        EXPECT_LE(rows, 3);
+    }
     result = std::make_shared<ColumnVector>(TargetBitmap(rows, true),
                                             TargetBitmap(rows, true));
 }
@@ -200,7 +203,7 @@ class FilterBitsTraceTest : public testing::Test {
         auto schema = std::make_shared<Schema>();
         schema->set_primary_field_id(
             schema->AddDebugField("pk", DataType::INT64));
-        const auto data = DataGen(schema, 8);
+        const auto data = segcore::DataGen(schema, 8);
         segment_ = CreateSealedWithFieldDataLoaded(schema, data);
     }
 
@@ -221,9 +224,10 @@ class FilterBitsTraceTest : public testing::Test {
         bool batched = false) {
         std::vector<expr::TypedExprPtr> inputs;
         if (batched) {
-            proto::plan::GenericValue value;
-            value.set_bool_val(true);
-            inputs.push_back(std::make_shared<expr::ValueExpr>(value));
+            expr::ColumnInfo column(
+                segment_->get_schema_snapshot()->get_primary_field_id().value(),
+                DataType::INT64);
+            inputs.push_back(std::make_shared<expr::ColumnExpr>(column));
         }
         auto predicate = std::make_shared<expr::CallExpr>(
             "filter_trace_test", inputs, function);
