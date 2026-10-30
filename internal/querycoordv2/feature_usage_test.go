@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/featureusage"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -45,6 +46,7 @@ func (suite *ServiceSuite) TestFeatureUsageEntries() {
 	suite.Require().NoError(suite.meta.PutCollection(ctx, &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: 1000, ReplicaNumber: 2, Status: querypb.LoadStatus_Loaded, LoadFields: []int64{100, 101, 102}},
 	}))
+	suite.metaStore.PutCollection(&metacache.CollectionInfo{ID: 1000, Schema: schema})
 	suite.Require().NoError(suite.meta.Put(ctx,
 		meta.NewReplica(&querypb.Replica{ID: 1, CollectionID: 1000, ResourceGroup: meta.DefaultResourceGroupName}),
 		meta.NewReplica(&querypb.Replica{ID: 2, CollectionID: 1000, ResourceGroup: meta.DefaultResourceGroupName}),
@@ -53,6 +55,7 @@ func (suite *ServiceSuite) TestFeatureUsageEntries() {
 	suite.Require().NoError(suite.meta.PutCollection(ctx, &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: 1001, ReplicaNumber: 1, Status: querypb.LoadStatus_Loaded, LoadFields: []int64{100}},
 	}))
+	suite.metaStore.PutCollection(&metacache.CollectionInfo{ID: 1001, Schema: schema})
 	suite.Require().NoError(suite.meta.Put(ctx,
 		meta.NewReplica(&querypb.Replica{ID: 3, CollectionID: 1001, ResourceGroup: "rg_custom"}),
 	))

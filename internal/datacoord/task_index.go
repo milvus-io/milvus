@@ -606,7 +606,7 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 		}
 	}
 
-	if isDiskANNIndex(GetIndexType(params)) {
+	if isDiskIndex(GetIndexType(params)) {
 		var err error
 		params, err = indexparams.UpdateDiskIndexBuildParams(Params, params)
 		if err != nil {

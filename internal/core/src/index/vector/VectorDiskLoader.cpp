@@ -62,6 +62,13 @@ using vector_load_params::ValidateLoadedShape;
 
 constexpr const char* kEnableDiskMmap = "enable_disk_mmap";
 constexpr uint32_t kDefaultBeamwidth = 8;
+// AISAQ carries its own, lower default beamwidths than DiskANN: the graph
+// beamwidth and the on-disk PQ-vectors beamwidth. These mirror the historical
+// VectorDiskAnnIndex members (aisaq_search_beamwidth_ = 2,
+// search_vectors_beamwidth_ = 1) and apply when the config does not override
+// them.
+constexpr uint32_t kAisaqDefaultBeamwidth = 2;
+constexpr uint32_t kAisaqDefaultVectorsBeamwidth = 1;
 
 // Range-check a normalized integer before narrowing to a disk-backend option.
 uint32_t
@@ -85,6 +92,9 @@ using RuntimeParams = NormalizedLoadMetadata;
  */
 struct DiskOpenOptions {
     uint32_t beamwidth{kDefaultBeamwidth};
+    // AISAQ only: beamwidth used for the on-disk PQ vectors
+    // (DISK_ANN_QUERY_PQ_BEAMWIDTH). DiskANN leaves this unset.
+    std::optional<uint32_t> vectors_beamwidth;
     std::optional<int32_t> load_threads;
 };
 
@@ -93,12 +103,26 @@ struct DiskOpenOptions {
 DiskOpenOptions
 ParseOpenOptions(const Config& params, const RuntimeParams& runtime) {
     DiskOpenOptions result;
-    if (runtime.index_type == knowhere::IndexEnum::INDEX_DISKANN) {
+    if (runtime.index_type == knowhere::IndexEnum::INDEX_DISKANN ||
+        runtime.index_type == knowhere::IndexEnum::INDEX_AISAQ) {
+        if (runtime.index_type == knowhere::IndexEnum::INDEX_AISAQ) {
+            result.beamwidth = kAisaqDefaultBeamwidth;
+            result.vectors_beamwidth = kAisaqDefaultVectorsBeamwidth;
+        }
         if (params.contains(DISK_ANN_QUERY_BEAMWIDTH)) {
             result.beamwidth = ParseUint32(params.at(DISK_ANN_QUERY_BEAMWIDTH),
                                            DISK_ANN_QUERY_BEAMWIDTH);
         }
         vector_disk_ann::ValidateBeamwidth(result.beamwidth);
+        if (runtime.index_type == knowhere::IndexEnum::INDEX_AISAQ &&
+            params.contains(DISK_ANN_QUERY_PQ_BEAMWIDTH)) {
+            result.vectors_beamwidth =
+                ParseUint32(params.at(DISK_ANN_QUERY_PQ_BEAMWIDTH),
+                            DISK_ANN_QUERY_PQ_BEAMWIDTH);
+        }
+        if (result.vectors_beamwidth.has_value()) {
+            vector_disk_ann::ValidateBeamwidth(*result.vectors_beamwidth);
+        }
         if (!params.contains(DISK_ANN_LOAD_THREAD_NUM)) {
             ThrowInfo(ConfigInvalid,
                       "DiskANN load requires {}",
@@ -267,7 +291,8 @@ PrepareCommonLoadConfig(Config& config,
         config[kEnableDiskMmap] = enable_mmap;
     }
     config[DISK_ANN_PREFIX_PATH] = prefix;
-    if (params.index_type != knowhere::IndexEnum::INDEX_DISKANN) {
+    if (params.index_type != knowhere::IndexEnum::INDEX_DISKANN &&
+        params.index_type != knowhere::IndexEnum::INDEX_AISAQ) {
         return;
     }
     config[DISK_ANN_PREPARE_WARM_UP] = false;
@@ -488,8 +513,10 @@ OpenIndex(bool use_async,
     }
 
     ValidateLoadedShape(params, plan.state, engine, LoadBackend::Disk);
-    co_return std::make_unique<VectorIndexReader>(open_options.beamwidth,
-                                                  std::move(engine));
+    co_return std::make_unique<VectorIndexReader>(
+        open_options.beamwidth,
+        std::move(engine),
+        open_options.vectors_beamwidth);
 }
 
 }  // namespace

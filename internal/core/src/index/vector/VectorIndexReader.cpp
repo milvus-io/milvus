@@ -121,16 +121,22 @@ VectorIndexReader::VectorIndexReader(KnowhereEngine engine)
                           : engine_.native_index.Count()) {
 }
 
-VectorIndexReader::VectorIndexReader(uint32_t disk_ann_beamwidth,
-                                     KnowhereEngine engine)
+VectorIndexReader::VectorIndexReader(
+    uint32_t disk_ann_beamwidth,
+    KnowhereEngine engine,
+    std::optional<uint32_t> disk_ann_vectors_beamwidth)
     : engine_(std::move(engine)),
       backend_(Backend::Disk),
       disk_ann_beamwidth_(disk_ann_beamwidth),
+      disk_ann_vectors_beamwidth_(disk_ann_vectors_beamwidth),
       physical_count_(IsAllNullNullable(engine_.native_index) ||
                               engine_.IsEmptyEmbListIndex()
                           ? 0
                           : engine_.native_index.Count()) {
     ValidateDiskAnnBeamwidth(engine_, disk_ann_beamwidth_);
+    if (disk_ann_vectors_beamwidth_.has_value()) {
+        vector_disk_ann::ValidateBeamwidth(*disk_ann_vectors_beamwidth_);
+    }
 }
 
 VectorIndexReader::VectorIndexReader(KnowhereEngine engine,
@@ -629,14 +635,28 @@ VectorIndexReader::SearchDisk(const DatasetPtr& dataset,
         return;
     }
 
-    if (engine_.KnowhereIndexType() == knowhere::IndexEnum::INDEX_DISKANN) {
+    const auto knowhere_index_type = engine_.KnowhereIndexType();
+    if (knowhere_index_type == knowhere::IndexEnum::INDEX_DISKANN ||
+        knowhere_index_type == knowhere::IndexEnum::INDEX_AISAQ) {
         ValidateDiskAnnBeamwidth(engine_, disk_ann_beamwidth_);
         if (params.search_params_.contains(DISK_ANN_QUERY_LIST)) {
             search_config[DISK_ANN_SEARCH_LIST_SIZE] =
                 params.search_params_.at(DISK_ANN_QUERY_LIST);
         }
-        search_config[DISK_ANN_QUERY_BEAMWIDTH] =
-            static_cast<int32_t>(disk_ann_beamwidth_);
+        // A per-query beamwidth (already copied into search_config) wins;
+        // otherwise fall back to the beamwidth captured at load time.
+        if (!search_config.contains(DISK_ANN_QUERY_BEAMWIDTH)) {
+            search_config[DISK_ANN_QUERY_BEAMWIDTH] =
+                static_cast<int32_t>(disk_ann_beamwidth_);
+        }
+        // AISAQ additionally honors a PQ-vectors beamwidth: per-query value
+        // wins, otherwise the value captured at load time (if any).
+        if (knowhere_index_type == knowhere::IndexEnum::INDEX_AISAQ &&
+            !search_config.contains(DISK_ANN_QUERY_PQ_BEAMWIDTH) &&
+            disk_ann_vectors_beamwidth_.has_value()) {
+            search_config[DISK_ANN_QUERY_PQ_BEAMWIDTH] =
+                static_cast<int32_t>(*disk_ann_vectors_beamwidth_);
+        }
         search_config[DISK_ANN_PQ_CODE_BUDGET] = 0.0;
     }
 
