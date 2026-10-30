@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"path"
 	"testing"
+	"time"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -69,6 +70,36 @@ func TestCommitManifestUpdates_EmptyShortCircuit(t *testing.T) {
 				"empty updates must return the unchanged manifest path verbatim")
 		})
 	}
+}
+
+// A commit on object storage records the size of the manifest object it wrote,
+// and a read through the recorded path gets the committed revision.
+func TestCommitManifestUpdates_RecordsManifestSize(t *testing.T) {
+	paramtable.Init()
+	cfg := CreateStorageConfig()
+	if cfg.GetStorageType() == "local" {
+		t.Skip("local storage records no manifest size")
+	}
+	basePath := path.Join(cfg.GetRootPath(), fmt.Sprintf("manifest_size_record/%d", time.Now().UnixNano()))
+	statPath := path.Join(basePath, "_stats/bloom_filter.100/1")
+	require.NoError(t, WriteFile(cfg, statPath, []byte("stats")))
+
+	manifest, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), cfg,
+		&ManifestUpdates{Stats: []StatEntry{{Key: "bloom_filter.100", Files: []string{statPath}}}})
+	require.NoError(t, err)
+	assert.Equal(t, MarshalManifestPath(basePath, 1), ManifestPathKey(manifest))
+
+	manifestFile, err := ManifestFilePath(manifest)
+	require.NoError(t, err)
+	data, err := ReadFile(cfg, manifestFile)
+	require.NoError(t, err)
+	recorded, err := ParseManifestPath(manifest)
+	require.NoError(t, err)
+	assert.EqualValues(t, len(data), recorded.Size)
+
+	stats, err := GetManifestStats(manifest, cfg)
+	require.NoError(t, err)
+	assert.Equal(t, []string{statPath}, stats["bloom_filter.100"].Paths)
 }
 
 // TestCommitManifestUpdates_InvalidBaseManifest verifies that a base pointer

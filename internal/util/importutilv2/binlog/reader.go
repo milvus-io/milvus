@@ -768,6 +768,9 @@ func (r *reader) Read() (*storage.InsertData, error) {
 			}
 		}
 		row := (*v).Value.(map[int64]any)
+		if !r.filter(row) {
+			continue
+		}
 		allFields := typeutil.GetAllFieldSchemas(r.schema)
 		// convert record to fieldData
 		for _, field := range allFields {
@@ -791,46 +794,16 @@ func (r *reader) Read() (*storage.InsertData, error) {
 			break
 		}
 	}
-	insertData, err = r.filter(insertData)
-	if err != nil {
-		return nil, err
-	}
 	return insertData, nil
 }
 
-func (r *reader) filter(insertData *storage.InsertData) (*storage.InsertData, error) {
-	if len(r.filters) == 0 {
-		return insertData, nil
-	}
-	masks := make(map[int]struct{}, 0)
-OUTER:
-	for i := 0; i < insertData.GetRowNum(); i++ {
-		row := insertData.GetRow(i)
-		for _, f := range r.filters {
-			if !f(row) {
-				masks[i] = struct{}{}
-				continue OUTER
-			}
+func (r *reader) filter(row map[int64]interface{}) bool {
+	for _, f := range r.filters {
+		if !f(row) {
+			return false
 		}
 	}
-	if len(masks) == 0 { // no data will undergo filtration, return directly
-		return insertData, nil
-	}
-	result, err := storage.NewInsertDataWithFunctionOutputField(r.schema)
-	if err != nil {
-		return nil, err
-	}
-	for i := 0; i < insertData.GetRowNum(); i++ {
-		if _, ok := masks[i]; ok {
-			continue
-		}
-		row := insertData.GetRow(i)
-		err = result.Append(row)
-		if err != nil {
-			return nil, merr.WrapErrImportFailedMsg("failed to append row, err=%s", err.Error())
-		}
-	}
-	return result, nil
+	return true
 }
 
 func (r *reader) Size() (int64, error) {
