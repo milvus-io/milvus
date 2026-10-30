@@ -357,29 +357,20 @@ func createMilvusTableManifest(
 		cExternalSource,
 		cProperties,
 		hasExternalPrimaryKey,
->>>>>>> 87e6c6aeb0 (fix: commit external delete refresh manifests in one transaction)
 	)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return "", err
 	}
-<<<<<<< HEAD
-	return CommittedManifestPath(basePath, int64(committedVersion), int64(manifestSize), storageConfig.GetStorageType()), nil
-||||||| parent of 87e6c6aeb0 (fix: commit external delete refresh manifests in one transaction)
-	if outManifestPath == nil {
-		return "", merr.WrapErrServiceInternalMsg("loon_milvus_table_create_manifest_from_segment_manifests returned nil manifest path")
-	}
-	manifestPath := C.GoString(outManifestPath)
-	C.loon_free_cstr(outManifestPath)
-	return manifestPath, nil
-=======
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	var committedVersion C.int64_t
-	if err := HandleLoonFFIResult(C.loon_transaction_commit(handle, &committedVersion, nil)); err != nil {
+	// Preserve the committed object's size, as other manifest writers do, while
+	// keeping source columns and retained artifacts in this single transaction.
+	manifestPath, err := commitTransaction(handle, basePath, storageConfig)
+	if err != nil {
 		return "", merr.WrapErrStorage(err, "commit milvus-table manifest")
 	}
-	return MarshalManifestPath(basePath, int64(committedVersion)), nil
+	return manifestPath, nil
 }
 
 // createColumnGroups creates storage-owned column groups, including all file properties.
