@@ -71,3 +71,23 @@ These cases cover local WAL/idempotency behavior. They do not claim CDC switchov
 coverage, nor do they turn errors injected above the WAL retry loop into evidence
 about backend acknowledgement loss. Recovery correctness follows the current
 upstream WAL summary replay, not the historical QA checkpoint/CAS hooks.
+
+## Fault interpretation
+
+The backend fault changes the result immediately after `walimpls.Append`, inside
+the adaptor's retry loop. The real retry, timestamp allocation, and interceptor
+callbacks remain intact. Converting a successful *whole interceptor chain* into
+an error above this loop would instead cause a new append with a new TimeTick;
+that injection does not establish a reachable backend failure.
+
+The idempotency boundaries only observe or pause execution. SIGKILL and client
+deadlines supply the actual failure; the controller never forces `Window.Fail`,
+`Window.Complete`, or a replication checkpoint result.
+
+Same-TimeTick backend retries exercise physical reader deduplication, which also
+exists without request idempotency. Request-level coverage comes from explicit
+same-key retries, original autoID/offset comparisons, owner recovery, and exact
+stored row counts. Reader duplicate-drop logs are useful additional execution
+evidence; this suite does not currently assert their metric counters. The current
+MiniCluster uses Pulsar, so these results do not establish Woodpecker or CDC
+behavior under real storage/network faults.
