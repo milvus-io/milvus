@@ -503,8 +503,8 @@ func (m *meta) DeleteSegmentChangeGroup(ctx context.Context, collectionID, group
 }
 
 // DropSegmentChangeGroupsOfCollection removes every group of one collection.
-// Used by collection drop; per-collection prefix delete runs under the caller's
-// collection lifecycle lock.
+// GC calls it once RootCoord has dropped the collection and all its segments
+// are recycled.
 func (m *meta) DropSegmentChangeGroupsOfCollection(ctx context.Context, collectionID int64) error {
 	m.segMu.Lock()
 	defer m.segMu.Unlock()

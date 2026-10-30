@@ -3,7 +3,6 @@ package datacoord
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/samber/lo"
@@ -15,7 +14,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
-	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
@@ -25,11 +24,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -1639,58 +1636,6 @@ func TestGetCurrentSegmentsViewExternalCollection(t *testing.T) {
 	assert.ElementsMatch(t, []int64{100, 101}, view.FlushedSegmentIDs)
 }
 
-func TestShouldDropChannel(t *testing.T) {
-	type myRootCoord struct {
-		mocks2.MockRootCoordClient
-	}
-	myRoot := &myRootCoord{}
-	myRoot.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocTimestampResponse{
-		Status:    merr.Success(),
-		Timestamp: tsoutil.ComposeTSByTime(time.Now()),
-		Count:     1,
-	}, nil)
-
-	myRoot.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
-		Status: merr.Success(),
-		ID:     int64(tsoutil.ComposeTSByTime(time.Now())),
-		Count:  1,
-	}, nil)
-
-	svr := newTestServer(t)
-	defer closeTestServer(t, svr)
-	schema := newTestSchema()
-	svr.meta.AddCollection(&collectionInfo{
-		ID:     0,
-		Schema: schema,
-		StartPositions: []*commonpb.KeyDataPair{
-			{
-				Key:  "ch1",
-				Data: []byte{8, 9, 10},
-			},
-		},
-	})
-	svr.meta.AddCollection(&collectionInfo{
-		ID:     1,
-		Schema: schema,
-		StartPositions: []*commonpb.KeyDataPair{
-			{
-				Key:  "ch0",
-				Data: []byte{8, 9, 10},
-			},
-		},
-	})
-
-	t.Run("channel name not in kv ", func(t *testing.T) {
-		assert.False(t, svr.handler.CheckShouldDropChannel("ch99"))
-	})
-
-	t.Run("channel in remove flag", func(t *testing.T) {
-		err := svr.meta.catalog.Update(context.TODO(), metastore.MarkChannelDropped("ch1"))
-		require.NoError(t, err)
-		assert.True(t, svr.handler.CheckShouldDropChannel("ch1"))
-	})
-}
-
 func TestGetDataVChanPositions(t *testing.T) {
 	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
@@ -2919,5 +2864,53 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 		assert.NotNil(t, snapshotData)
 		assert.Equal(t, 1, len(snapshotData.Segments), "segment with commit_ts=5000 must appear at snapshotTs=6000")
 		assert.Equal(t, int64(999), snapshotData.Segments[0].SegmentId)
+	})
+}
+
+func TestServerHandler_GetCollectionRetry(t *testing.T) {
+	newHandler := func(b broker.Broker) *ServerHandler {
+		m := &meta{metaStore: metacache.NewMetaStore(nil)}
+		return newServerHandler(&Server{broker: b, meta: m})
+	}
+
+	t.Run("dropped collection is not retried", func(t *testing.T) {
+		b := broker.NewMockBroker(t)
+		b.EXPECT().HasCollection(mock.Anything, int64(1)).Return(false, nil).Once()
+
+		coll, err := newHandler(b).GetCollection(context.TODO(), 1)
+		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
+		assert.Nil(t, coll)
+	})
+
+	t.Run("transient error is retried", func(t *testing.T) {
+		b := broker.NewMockBroker(t)
+		b.EXPECT().HasCollection(mock.Anything, int64(1)).Return(false, merr.ErrServiceUnavailable).Once()
+		b.EXPECT().HasCollection(mock.Anything, int64(1)).Return(true, nil).Once()
+		b.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{
+			Status:       merr.Success(),
+			CollectionID: 1,
+		}, nil).Once()
+		b.EXPECT().ShowPartitionsInternal(mock.Anything, int64(1)).Return([]int64{10}, nil).Once()
+
+		coll, err := newHandler(b).GetCollection(context.TODO(), 1)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(1), coll.ID)
+	})
+
+	t.Run("collection gone from the cache after load", func(t *testing.T) {
+		b := broker.NewMockBroker(t)
+		b.EXPECT().HasCollection(mock.Anything, int64(1)).Return(true, nil).Once()
+		b.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{
+			Status:       merr.Success(),
+			CollectionID: 1,
+		}, nil).Once()
+		b.EXPECT().ShowPartitionsInternal(mock.Anything, int64(1)).Return([]int64{10}, nil).Once()
+		// GC drops the collection between the load and the read.
+		dropAfterAdd := mockey.Mock((*meta).AddCollection).Return().Build()
+		defer dropAfterAdd.UnPatch()
+
+		coll, err := newHandler(b).GetCollection(context.TODO(), 1)
+		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
+		assert.Nil(t, coll)
 	})
 }

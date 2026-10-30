@@ -19,11 +19,13 @@ package metacache
 import (
 	"testing"
 
+	prometheustestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
@@ -169,6 +171,16 @@ func TestStore_RemoveCollection(t *testing.T) {
 
 	_, ok := s.GetCollection(100)
 	assert.False(t, ok)
+}
+
+func TestStore_RemoveCollectionCleansMetricsOfUncachedCollection(t *testing.T) {
+	// The collection metrics are emitted from segments, so a collection that
+	// was never cached can still have them.
+	metrics.DataCoordStoredIndexFilesSize.WithLabelValues("db", "c", "101").Set(1)
+	s := NewMetaStore(nil)
+	s.RemoveCollection(101)
+
+	assert.Zero(t, prometheustestutil.CollectAndCount(metrics.DataCoordStoredIndexFilesSize))
 }
 
 func TestStore_PutCollectionOverwrites(t *testing.T) {
