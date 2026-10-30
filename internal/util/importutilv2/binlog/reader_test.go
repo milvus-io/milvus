@@ -2559,10 +2559,14 @@ func TestStorageV3Reader_SourceTimestampInvariant(t *testing.T) {
 					require.Same(t, err, nextErr, "retry must not skip the invalid source row")
 					return
 				}
-				require.NoError(t, err)
-				require.Equal(t, tc.wantRows, data.GetRowNum())
-				if tc.wantRows > 0 {
-					require.Equal(t, tc.rowTs, data.Data[common.TimeStampField].GetRow(0), "do not rewrite raw timestamps")
+				if tc.wantRows == 0 && errors.Is(err, io.EOF) {
+					require.Nil(t, data)
+				} else {
+					require.NoError(t, err)
+					require.Equal(t, tc.wantRows, data.GetRowNum())
+					if tc.wantRows > 0 {
+						require.Equal(t, tc.rowTs, data.Data[common.TimeStampField].GetRow(0), "do not rewrite raw timestamps")
+					}
 				}
 				_, err = r.Read()
 				require.ErrorIs(t, err, io.EOF)
@@ -2623,7 +2627,7 @@ func TestStorageV3Reader_ReadFailurePaths(t *testing.T) {
 		storage.DeserializeReader[*storage.Value]
 	}
 	paramtable.Init()
-	for _, name := range []string{"allocate_batch", "deserialize", "allocate_field", "append_field", "filter_batch", "missing_field", "buffer_boundary"} {
+	for _, name := range []string{"allocate_batch", "deserialize", "allocate_field", "append_field", "missing_field", "buffer_boundary"} {
 		t.Run(name, func(t *testing.T) {
 			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
@@ -2663,10 +2667,8 @@ func TestStorageV3Reader_ReadFailurePaths(t *testing.T) {
 			if name == "missing_field" || name == "allocate_field" {
 				delete(data.Data, 100)
 			}
-			allocations := 0
 			batchPatch := mockey.Mock(storage.NewInsertDataWithFunctionOutputField).To(func(_ *schemapb.CollectionSchema) (*storage.InsertData, error) {
-				allocations++
-				if name == "allocate_batch" || (name == "filter_batch" && allocations == 2) {
+				if name == "allocate_batch" {
 					return nil, cause
 				}
 				return data, nil
@@ -2675,9 +2677,6 @@ func TestStorageV3Reader_ReadFailurePaths(t *testing.T) {
 			if name == "allocate_field" {
 				fieldPatch := mockey.Mock(storage.NewFieldData).Return(nil, cause).Build()
 				defer fieldPatch.UnPatch()
-			}
-			if name == "filter_batch" {
-				r.filters = []Filter{func(_ map[int64]interface{}) bool { return false }}
 			}
 
 			result, err := r.Read()
@@ -2917,4 +2916,90 @@ func TestMultiReadWithRetry_RetryableError(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, [][]byte{[]byte("data")}, result)
 	assert.Equal(t, 3, callCount, "retryable error should be retried until success")
+}
+
+func TestBinlogReaderReadFilterResults(t *testing.T) {
+	const rowCount = 240
+	schema := typeutil.AppendSystemFields(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "optional", DataType: schemapb.DataType_Int64, Nullable: true},
+		{
+			FieldID: 102, Name: "vector", DataType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+		},
+	}})
+	for _, tc := range []struct {
+		name       string
+		timeFilter bool
+		start, end uint64
+		deletes    bool
+	}{
+		{name: "no_filters"},
+		{name: "time_only", timeFilter: true, start: 31, end: 180},
+		{name: "delete_only", deletes: true},
+		{name: "combined", timeFilter: true, start: 31, end: 180, deletes: true},
+		{name: "all_filtered", timeFilter: true, start: rowCount + 1, end: rowCount + 10},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var values []*storage.Value
+			var want []map[int64]any
+			for i := 0; i < rowCount; i++ {
+				ts, pk := int64(i+1), int64(i%5)
+				var optional any
+				if i%3 != 0 {
+					optional = int64(i * 10)
+				}
+				row := map[int64]any{
+					common.RowIDField: int64(i), common.TimeStampField: ts,
+					100: pk, 101: optional, 102: []float32{float32(i + 1), -float32(i + 1)},
+				}
+				values = append(values, &storage.Value{Value: row})
+				if tc.timeFilter && (uint64(ts) < tc.start || uint64(ts) > tc.end) {
+					continue
+				}
+				// The same PK appears at different timestamps. Equality with
+				// the delete timestamp keeps a row; only older rows are removed.
+				if tc.deletes && ((pk == 0 && ts < 41) || (pk == 2 && ts < 143)) {
+					continue
+				}
+				want = append(want, row)
+			}
+			record, err := storage.ValueSerializer(values, schema)
+			require.NoError(t, err)
+			owner := &storageV3DeltaRecordReader{record: record}
+			defer owner.Close()
+			// A small buffer exercises repeated Read calls, including filtered
+			// prefixes/tails. Do not prescribe batch sizes or empty batches.
+			r := newReader(context.Background(), nil, schema, nil, storage.StorageV1, 1, "")
+			r.dr = storage.NewDeserializeReader(owner, func(rec storage.Record, dst []*storage.Value) error {
+				return storage.ValueDeserializerWithSchema(rec, dst, schema, true)
+			})
+			defer r.Close()
+			if tc.timeFilter {
+				r.filters = append(r.filters, FilterWithTimeRange(tc.start, tc.end))
+			}
+			if tc.deletes {
+				r.deleteData = map[any]typeutil.Timestamp{int64(0): 41, int64(2): 143}
+				filter, err := FilterWithDelete(r)
+				require.NoError(t, err)
+				r.filters = append(r.filters, filter)
+			}
+			var got []map[int64]any
+			for {
+				data, err := r.Read()
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				require.NoError(t, err)
+				require.NotNil(t, data)
+				for _, column := range data.Data {
+					require.Equal(t, data.GetRowNum(), column.RowNum())
+				}
+				for i := 0; i < data.GetRowNum(); i++ {
+					got = append(got, data.GetRow(i))
+				}
+			}
+			require.Equal(t, want, got)
+		})
+	}
 }
