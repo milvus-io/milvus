@@ -1,10 +1,47 @@
 package qviews
 
 import (
+	"slices"
 	"sort"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
+
+// NewQueryViewAtCoordBuilderFromView owns a placement copy while preserving the
+// exact data, schema, load and physical metadata of its planning source.
+func NewQueryViewAtCoordBuilderFromView(view *viewpb.QueryViewOfShard) *QueryViewAtCoordBuilder {
+	m := view.GetMeta()
+	b := &QueryViewAtCoordBuilder{
+		collectionID: m.GetCollectionId(), replicaID: m.GetReplicaId(), vchannel: m.GetVchannel(),
+		dataVersion: FromProtoDataVersion(m.GetVersion().GetDataVersion()), queryVersion: m.GetVersion().GetQueryVersion(),
+		transformStartAfterTimetick: m.GetTransformStartAfterTimetick(),
+		loadInfoVersion:             m.GetLoadInfoVersion(), schemaVersion: m.GetSchemaVersion(),
+		assignments: make(map[int64]map[int64][]int64), segmentManifestVersions: make(map[int64]int64),
+		partitionStatsVersions: make(map[int64]int64),
+	}
+	for _, node := range view.GetQueryNode() {
+		partitions := make(map[int64][]int64)
+		for _, p := range node.GetPartitions() {
+			partitions[p.GetPartitionId()] = slices.Clone(p.GetSegmentIds())
+			for i, id := range p.GetSegmentIds() {
+				if i < len(p.GetSegmentManifestVersions()) {
+					b.segmentManifestVersions[id] = p.GetSegmentManifestVersions()[i]
+				}
+			}
+		}
+		b.assignments[node.GetNodeId()] = partitions
+	}
+	for _, p := range view.GetStreamingNode().GetPartitionStats() {
+		b.partitionStatsVersions[p.GetPartitionId()] = p.GetVersion()
+	}
+	return b
+}
+
+// Assignments is mutable only by the owner of this builder. The owner must not
+// retain or mutate it after submitting the builder.
+func (b *QueryViewAtCoordBuilder) Assignments() map[int64]map[int64][]int64 {
+	return b.assignments
+}
 
 // QueryViewAtCoordBuilder builds a complete QueryViewOfShard from a DataViewOfCollection.
 type QueryViewAtCoordBuilder struct {

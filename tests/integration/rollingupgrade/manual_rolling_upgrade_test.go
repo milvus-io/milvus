@@ -19,6 +19,7 @@ package rollingupgrade
 import (
 	"context"
 	"math/rand"
+	"path"
 	"testing"
 	"time"
 
@@ -29,9 +30,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	streamingcatalog "github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -47,7 +51,11 @@ func (s *ManualRollingUpgradeSuite) SetupSuite() {
 	rand.Seed(time.Now().UnixNano())
 	s.WithMilvusConfig(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "100")
 	s.WithMilvusConfig(paramtable.Get().StreamingCfg.WALBalancerPolicyMinRebalanceIntervalThreshold.Key, "1ms")
+	// Config updates are observed by the periodic WAL balance loop (default 1m).
+	s.WithMilvusConfig(paramtable.Get().StreamingCfg.WALBalancerTriggerInterval.Key, "1s")
 
+	// Keep new SNs empty until the test explicitly migrates or enables WAL balancing.
+	s.WithMilvusConfig(paramtable.Get().StreamingCfg.WALBalancerPolicyAllowRebalance.Key, "false")
 	s.MiniClusterSuite.SetupSuite()
 }
 
@@ -150,103 +158,131 @@ func (s *ManualRollingUpgradeSuite) TestTransfer() {
 		CollectionName: collectionName,
 	})
 
-	// suspend balance
-	resp2, err := s.Cluster.MixCoordClient.SuspendBalance(ctx, &querypb.SuspendBalanceRequest{})
-	s.NoError(err)
-	s.True(merr.Ok(resp2))
+	// QN optimization and WAL balancing are independent. The suite disables
+	// WAL optimization before startup; suspend QN optimization before adding QNs.
+	status, err := c.MixCoordClient.SuspendBalance(ctx, &querypb.SuspendBalanceRequest{})
+	s.Require().NoError(merr.CheckRPCCall(status, err))
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		status, err := c.MixCoordClient.ResumeBalance(cleanupCtx, &querypb.ResumeBalanceRequest{})
+		s.NoError(merr.CheckRPCCall(status, err))
+	}()
+	qn1, sn1 := c.DefaultQueryNode(), c.DefaultStreamingNode()
+	distribution, err := c.MixCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{NodeID: qn1.GetNodeID()})
+	s.Require().NoError(merr.CheckRPCCall(distribution, err))
+	expectedSegments := distribution.GetSealedSegmentIDs()
+	s.Require().NotEmpty(expectedSegments)
+	s.Empty(distribution.GetChannelNames(), "QN no longer hosts channel delegators")
 
-	// get origin qn
-	qn1 := s.Cluster.DefaultQueryNode()
-	sn1 := s.Cluster.DefaultStreamingNode()
+	// Read persisted ASSIGNED state, not the old QN channel distribution. A
+	// successful TransferChannel must have completed this barrier on return.
+	catalog := streamingcatalog.NewCataLog(etcdkv.NewEtcdKV(c.EtcdCli, path.Join(c.RootPath(), "meta")))
+	before, err := catalog.ListPChannel(ctx)
+	s.Require().NoError(err)
+	s.Require().NotEmpty(before)
+	terms := make(map[string]int64, len(before))
+	for _, channel := range before {
+		s.Require().Equal(streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED, channel.GetState())
+		s.Require().Equal(sn1.GetNodeID(), channel.GetNode().GetServerId())
+		terms[channel.GetChannel().GetName()] = channel.GetChannel().GetTerm()
+	}
 
-	// wait for transfer segment done
-	s.Eventually(func() bool {
-		resp, err := s.Cluster.MixCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{
-			NodeID: qn1.GetNodeID(),
-		})
-		s.NoError(err)
-		resp2, err := s.Cluster.MixCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{
-			NodeID: sn1.GetNodeID(),
-		})
-		s.NoError(err)
-		return len(resp.GetSealedSegmentIDs()) > 0 && len(resp2.GetChannelNames()) > 0
-	}, 10*time.Second, 1*time.Second)
+	qn2, sn2 := c.AddQueryNode(), c.AddStreamingNode()
+	nodes, err := c.MixCoordClient.ListQueryNode(ctx, &querypb.ListQueryNodeRequest{})
+	s.Require().NoError(merr.CheckRPCCall(nodes, err))
+	s.ElementsMatch([]int64{qn1.GetNodeID(), qn2.GetNodeID()}, lo.Map(nodes.GetNodeInfos(), func(node *querypb.NodeInfo, _ int) int64 {
+		return node.GetID()
+	}))
+	distribution, err = c.MixCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{NodeID: qn2.GetNodeID()})
+	s.Require().NoError(merr.CheckRPCCall(distribution, err))
+	s.Empty(distribution.GetSealedSegmentIDs())
+	s.Empty(distribution.GetChannelNames())
 
-	// add new querynode
-	qn2 := s.Cluster.AddQueryNode()
-	sn2 := s.Cluster.AddStreamingNode()
-	time.Sleep(5 * time.Second)
-
-	// expected 2 querynode found
-	resp3, err := s.Cluster.MixCoordClient.ListQueryNode(ctx, &querypb.ListQueryNodeRequest{})
-	s.NoError(err)
-	s.Len(resp3.GetNodeInfos(), 4) // 2 querynode + 2 streaming node
-
-	// due to balance has been suspended, qn2 won't have any segment/channel distribution
-	resp4, err := s.Cluster.MixCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{
-		NodeID: qn2.GetNodeID(),
+	status, err = c.MixCoordClient.TransferChannel(ctx, &querypb.TransferChannelRequest{
+		SourceNodeID: sn1.GetNodeID(), TargetNodeID: sn2.GetNodeID(), TransferAll: true,
 	})
-	s.NoError(err)
-	s.Len(resp4.GetChannelNames(), 0)
-	s.Len(resp4.GetSealedSegmentIDs(), 0)
+	s.Require().NoError(merr.CheckRPCCall(status, err))
+	after, err := catalog.ListPChannel(ctx)
+	s.Require().NoError(err)
+	s.Require().Len(after, len(before))
+	for _, channel := range after {
+		previousTerm, exists := terms[channel.GetChannel().GetName()]
+		s.Require().True(exists, "migration must preserve the PChannel set")
+		s.Equal(streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED, channel.GetState())
+		s.Equal(sn2.GetNodeID(), channel.GetNode().GetServerId())
+		s.Greater(channel.GetChannel().GetTerm(), previousTerm)
+	}
 
-	resp4, err = s.Cluster.MixCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{
-		NodeID: sn2.GetNodeID(),
+	status, err = c.MixCoordClient.TransferSegment(ctx, &querypb.TransferSegmentRequest{
+		SourceNodeID: qn1.GetNodeID(), TargetNodeID: qn2.GetNodeID(), TransferAll: true,
 	})
-	s.NoError(err)
-	s.Len(resp4.GetChannelNames(), 0)
-	s.Len(resp4.GetSealedSegmentIDs(), 0)
+	s.Require().NoError(merr.CheckRPCCall(status, err))
+	distribution, err = c.MixCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{NodeID: qn2.GetNodeID()})
+	s.Require().NoError(merr.CheckRPCCall(distribution, err))
+	s.ElementsMatch(expectedSegments, distribution.GetSealedSegmentIDs())
+	assertRows := func() {
+		result, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
+			CollectionName: collectionName, OutputFields: []string{"count(*)"}, ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+		})
+		s.Require().NoError(merr.CheckRPCCall(result, err))
+		s.Require().Len(result.GetFieldsData(), 1)
+		s.Equal([]int64{int64(rowNum * insertRound)}, result.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	}
+	assertRows()
+	// Serving on the target precedes retirement of old leased views. Check
+	// eventual source release separately from the synchronous handoff result.
+	s.Require().Eventually(func() bool {
+		distribution, err := c.MixCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{NodeID: qn1.GetNodeID()})
+		return merr.CheckRPCCall(distribution, err) == nil && len(distribution.GetSealedSegmentIDs()) == 0
+	}, 30*time.Second, 100*time.Millisecond)
 
-	resp5, err := s.Cluster.MixCoordClient.TransferChannel(ctx, &querypb.TransferChannelRequest{
-		SourceNodeID: sn1.GetNodeID(),
-		TargetNodeID: sn2.GetNodeID(),
-		TransferAll:  true,
+	// The default tolerance deliberately keeps small workloads concentrated.
+	// Make splitting this fixture profitable, then test QN and WAL convergence
+	// independently, without prescribing which individual segment/channel moves.
+	restoreScoring := c.MustModifyMilvusConfig(map[string]string{
+		paramtable.Get().QueryViewCfg.BalancerResourceGroupAbsoluteTolerance.Key: "1",
+		paramtable.Get().QueryViewCfg.BalancerResourceGroupRelativeTolerance.Key: "0",
+		paramtable.Get().QueryViewCfg.BalancerMoveCostPerUnit.Key:                "0",
+		paramtable.Get().QueryViewCfg.BalancerLoadCostPerUnit.Key:                "0",
 	})
-	s.NoError(err)
-	s.True(merr.Ok(resp5))
-	// wait for transfer channel done
-	s.Eventually(func() bool {
-		resp, err := s.Cluster.MixCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{
-			NodeID: sn1.GetNodeID(),
-		})
-		s.NoError(err)
-		return len(resp.GetChannelNames()) == 0
-	}, 20*time.Second, 1*time.Second)
+	defer restoreScoring()
+	status, err = c.MixCoordClient.ResumeBalance(ctx, &querypb.ResumeBalanceRequest{})
+	s.Require().NoError(merr.CheckRPCCall(status, err))
+	s.Require().Eventually(func() bool {
+		first, err := c.MixCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{NodeID: qn1.GetNodeID()})
+		if merr.CheckRPCCall(first, err) != nil || len(first.GetSealedSegmentIDs()) == 0 {
+			return false
+		}
+		second, err := c.MixCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{NodeID: qn2.GetNodeID()})
+		if merr.CheckRPCCall(second, err) != nil || len(second.GetSealedSegmentIDs()) == 0 {
+			return false
+		}
+		// Retained Down views may temporarily duplicate physical resources.
+		// Wait for disjoint final ownership covering every original segment.
+		all := append(append([]int64(nil), first.GetSealedSegmentIDs()...), second.GetSealedSegmentIDs()...)
+		return len(all) == len(expectedSegments) && len(lo.Uniq(all)) == len(all) && len(lo.Without(expectedSegments, all...)) == 0
+	}, 30*time.Second, 100*time.Millisecond)
 
-	// test transfer segment
-	resp6, err := s.Cluster.MixCoordClient.TransferSegment(ctx, &querypb.TransferSegmentRequest{
-		SourceNodeID: qn1.GetNodeID(),
-		TargetNodeID: qn2.GetNodeID(),
-		TransferAll:  true,
+	restoreWAL := c.MustModifyMilvusConfig(map[string]string{
+		paramtable.Get().StreamingCfg.WALBalancerPolicyAllowRebalance.Key: "true",
 	})
-	s.NoError(err)
-	s.True(merr.Ok(resp6))
-
-	// wait for transfer segment done
-	s.Eventually(func() bool {
-		resp, err := s.Cluster.MixCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{
-			NodeID: qn1.GetNodeID(),
-		})
-		s.NoError(err)
-		return len(resp.GetSealedSegmentIDs()) == 0
-	}, 10*time.Second, 1*time.Second)
-
-	// resume balance, segment/channel will be balance to qn1
-	resp7, err := s.Cluster.MixCoordClient.ResumeBalance(ctx, &querypb.ResumeBalanceRequest{})
-	s.NoError(err)
-	s.True(merr.Ok(resp7))
-
-	s.Eventually(func() bool {
-		resp, err := s.Cluster.MixCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{
-			NodeID: qn1.GetNodeID(),
-		})
-		s.NoError(err)
-		resp2, err := s.Cluster.MixCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{
-			NodeID: sn1.GetNodeID(),
-		})
-		s.NoError(err)
-		return len(resp.GetSealedSegmentIDs()) > 0 || len(resp2.GetChannelNames()) > 0
-	}, 10*time.Second, 1*time.Second)
+	defer restoreWAL()
+	s.Require().Eventually(func() bool {
+		channels, err := catalog.ListPChannel(ctx)
+		if err != nil || len(channels) != len(before) {
+			return false
+		}
+		owners := make(map[int64]int)
+		for _, channel := range channels {
+			if _, ok := terms[channel.GetChannel().GetName()]; !ok || channel.GetState() != streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED {
+				return false
+			}
+			owners[channel.GetNode().GetServerId()]++
+		}
+		return len(owners) == 2 && owners[sn1.GetNodeID()] > 0 && owners[sn2.GetNodeID()] > 0
+	}, 30*time.Second, 100*time.Millisecond)
+	assertRows()
 
 	mlog.Info(context.TODO(), "==================")
 	mlog.Info(context.TODO(), "==================")

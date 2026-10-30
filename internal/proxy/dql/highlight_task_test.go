@@ -155,8 +155,8 @@ func TestHighlightStreamingAnalyzer(t *testing.T) {
 				require.Equal(t, int64(7), req.GetFieldAnalyzer().GetCollectionId())
 				require.Equal(t, "p_7v0", req.GetFieldAnalyzer().GetVchannel())
 				require.Equal(t, []string{"default", "zh", "default", "zh"}, req.GetFieldAnalyzer().GetAnalyzerNames())
-				require.True(t, req.GetWithDetail())
-				require.False(t, req.GetWithHash())
+				require.True(t, req.GetTokenize().GetWithDetail())
+				require.False(t, req.GetTokenize().GetWithHash())
 				require.Equal(t, [][]byte{[]byte("hello"), []byte("世界"), []byte("hello 👋"), []byte("你好世界")}, req.GetPlaceholder())
 				if scenario == "transport" {
 					return nil, streamingstatus.NewOnShutdownError("WAL is closing")
@@ -167,14 +167,14 @@ func TestHighlightStreamingAnalyzer(t *testing.T) {
 				if scenario == "business" {
 					return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Status(merr.ErrParameterInvalid)}, nil
 				}
-				resp := &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Success(), Results: []*milvuspb.AnalyzerResult{
+				resp := &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Success(), Result: &streamingpb.StreamingNodeRunAnalyzerResponse_Tokenize{Tokenize: &streamingpb.TokenizeResult{Results: []*milvuspb.AnalyzerResult{
 					{Tokens: []*milvuspb.AnalyzerToken{{Token: "hello", StartOffset: 0, EndOffset: 5}}},
 					{Tokens: []*milvuspb.AnalyzerToken{{Token: "世界", StartOffset: 0, EndOffset: 6}}},
 					{Tokens: []*milvuspb.AnalyzerToken{{Token: "hello", StartOffset: 0, EndOffset: 5}}},
 					{Tokens: []*milvuspb.AnalyzerToken{{Token: "世界", StartOffset: 6, EndOffset: 12}}},
-				}}
+				}}}}
 				if scenario == "malformed" {
-					resp.Results = resp.Results[:1]
+					resp.GetTokenize().Results = resp.GetTokenize().Results[:1]
 				}
 				return resp, nil
 			}).Build()
@@ -223,6 +223,6 @@ func mockPipelineAnalyzer(t *testing.T, expectedTexts []string) {
 		require.Equal(t, expectedTexts, texts)
 		require.Equal(t, "p_1v0", req.GetFieldAnalyzer().GetVchannel())
 		require.NotNil(t, req.GetFieldAnalyzer().ReadSchemaVersion)
-		return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Success(), Results: results}, nil
+		return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Success(), Result: &streamingpb.StreamingNodeRunAnalyzerResponse_Tokenize{Tokenize: &streamingpb.TokenizeResult{Results: results}}}, nil
 	})
 }

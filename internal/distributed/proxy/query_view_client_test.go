@@ -66,7 +66,7 @@ func TestInitViewQueryClientInjectsClient(t *testing.T) {
 	expected := &fakeViewQueryClient{}
 	closeCalled := false
 	buildCalled := false
-	newProxyViewQueryClient = func(_ *clientv3.Client, _ resolver.CollectionVChannelProvider) (queryclient.Client, func(), error) {
+	newProxyViewQueryClient = func(_ *clientv3.Client, _ resolver.CollectionVChannelProvider, _ queryclient.LoadInfoClient) (queryclient.Client, func(), error) {
 		buildCalled = true
 		return expected, func() {
 			closeCalled = true

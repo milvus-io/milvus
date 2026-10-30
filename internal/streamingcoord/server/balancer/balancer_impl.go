@@ -300,7 +300,10 @@ func (b *balancerImpl) sendRequestAndWaitFinish(ctx context.Context, newReq *req
 		return nil, ctx.Err()
 	case b.reqCh <- newReq:
 	}
-	resp := newReq.future.Get()
+	resp, err := newReq.future.GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return resp.resp, resp.err
 }
 

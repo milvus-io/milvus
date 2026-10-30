@@ -80,6 +80,7 @@ type QueryCoordClient interface {
 	LoadCollection(ctx context.Context, in *LoadCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ReleaseCollection(ctx context.Context, in *ReleaseCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	SyncNewCreatedPartition(ctx context.Context, in *SyncNewCreatedPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	// Deprecated: Do not use.
 	GetPartitionStates(ctx context.Context, in *GetPartitionStatesRequest, opts ...grpc.CallOption) (*GetPartitionStatesResponse, error)
 	GetLoadSegmentInfo(ctx context.Context, in *GetSegmentInfoRequest, opts ...grpc.CallOption) (*GetSegmentInfoResponse, error)
 	GetQueryViewSegmentLoadInfo(ctx context.Context, in *GetQueryViewSegmentLoadInfoRequest, opts ...grpc.CallOption) (*GetQueryViewSegmentLoadInfoResponse, error)
@@ -89,6 +90,7 @@ type QueryCoordClient interface {
 	GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error)
 	// https://wiki.lfaidata.foundation/display/MIL/MEP+23+--+Multiple+memory+replication+design
 	GetReplicas(ctx context.Context, in *milvuspb.GetReplicasRequest, opts ...grpc.CallOption) (*milvuspb.GetReplicasResponse, error)
+	// Deprecated: Do not use.
 	GetShardLeaders(ctx context.Context, in *GetShardLeadersRequest, opts ...grpc.CallOption) (*GetShardLeadersResponse, error)
 	CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error)
 	CreateResourceGroup(ctx context.Context, in *milvuspb.CreateResourceGroupRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
@@ -116,6 +118,7 @@ type QueryCoordClient interface {
 	CheckQueryNodeDistribution(ctx context.Context, in *CheckQueryNodeDistributionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error)
 	UpdateLoadConfig(ctx context.Context, in *UpdateLoadConfigRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	// Deprecated: Do not use.
 	RunAnalyzer(ctx context.Context, in *RunAnalyzerRequest, opts ...grpc.CallOption) (*milvuspb.RunAnalyzerResponse, error)
 	ComputePhraseMatchSlop(ctx context.Context, in *ComputePhraseMatchSlopRequest, opts ...grpc.CallOption) (*ComputePhraseMatchSlopResponse, error)
 	ValidateAnalyzer(ctx context.Context, in *ValidateAnalyzerRequest, opts ...grpc.CallOption) (*ValidateAnalyzerResponse, error)
@@ -202,6 +205,7 @@ func (c *queryCoordClient) SyncNewCreatedPartition(ctx context.Context, in *Sync
 	return out, nil
 }
 
+// Deprecated: Do not use.
 func (c *queryCoordClient) GetPartitionStates(ctx context.Context, in *GetPartitionStatesRequest, opts ...grpc.CallOption) (*GetPartitionStatesResponse, error) {
 	out := new(GetPartitionStatesResponse)
 	err := c.cc.Invoke(ctx, QueryCoord_GetPartitionStates_FullMethodName, in, out, opts...)
@@ -265,6 +269,7 @@ func (c *queryCoordClient) GetReplicas(ctx context.Context, in *milvuspb.GetRepl
 	return out, nil
 }
 
+// Deprecated: Do not use.
 func (c *queryCoordClient) GetShardLeaders(ctx context.Context, in *GetShardLeadersRequest, opts ...grpc.CallOption) (*GetShardLeadersResponse, error) {
 	out := new(GetShardLeadersResponse)
 	err := c.cc.Invoke(ctx, QueryCoord_GetShardLeaders_FullMethodName, in, out, opts...)
@@ -491,6 +496,7 @@ func (c *queryCoordClient) UpdateLoadConfig(ctx context.Context, in *UpdateLoadC
 	return out, nil
 }
 
+// Deprecated: Do not use.
 func (c *queryCoordClient) RunAnalyzer(ctx context.Context, in *RunAnalyzerRequest, opts ...grpc.CallOption) (*milvuspb.RunAnalyzerResponse, error) {
 	out := new(milvuspb.RunAnalyzerResponse)
 	err := c.cc.Invoke(ctx, QueryCoord_RunAnalyzer_FullMethodName, in, out, opts...)
@@ -539,6 +545,7 @@ type QueryCoordServer interface {
 	LoadCollection(context.Context, *LoadCollectionRequest) (*commonpb.Status, error)
 	ReleaseCollection(context.Context, *ReleaseCollectionRequest) (*commonpb.Status, error)
 	SyncNewCreatedPartition(context.Context, *SyncNewCreatedPartitionRequest) (*commonpb.Status, error)
+	// Deprecated: Do not use.
 	GetPartitionStates(context.Context, *GetPartitionStatesRequest) (*GetPartitionStatesResponse, error)
 	GetLoadSegmentInfo(context.Context, *GetSegmentInfoRequest) (*GetSegmentInfoResponse, error)
 	GetQueryViewSegmentLoadInfo(context.Context, *GetQueryViewSegmentLoadInfoRequest) (*GetQueryViewSegmentLoadInfoResponse, error)
@@ -548,6 +555,7 @@ type QueryCoordServer interface {
 	GetMetrics(context.Context, *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 	// https://wiki.lfaidata.foundation/display/MIL/MEP+23+--+Multiple+memory+replication+design
 	GetReplicas(context.Context, *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error)
+	// Deprecated: Do not use.
 	GetShardLeaders(context.Context, *GetShardLeadersRequest) (*GetShardLeadersResponse, error)
 	CheckHealth(context.Context, *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error)
 	CreateResourceGroup(context.Context, *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error)
@@ -575,6 +583,7 @@ type QueryCoordServer interface {
 	CheckQueryNodeDistribution(context.Context, *CheckQueryNodeDistributionRequest) (*commonpb.Status, error)
 	ClearReadTaskQueue(context.Context, *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error)
 	UpdateLoadConfig(context.Context, *UpdateLoadConfigRequest) (*commonpb.Status, error)
+	// Deprecated: Do not use.
 	RunAnalyzer(context.Context, *RunAnalyzerRequest) (*milvuspb.RunAnalyzerResponse, error)
 	ComputePhraseMatchSlop(context.Context, *ComputePhraseMatchSlopRequest) (*ComputePhraseMatchSlopResponse, error)
 	ValidateAnalyzer(context.Context, *ValidateAnalyzerRequest) (*ValidateAnalyzerResponse, error)

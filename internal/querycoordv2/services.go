@@ -590,7 +590,7 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 	}
 	ctx, cancel := context.WithTimeout(ctx, Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
-	err := qvresource.Resource().Balance(ctx, req.GetCollectionID(), req.GetSourceNodeIDs()[0], req.GetDstNodeIDs(), req.GetSealedSegmentIDs())
+	err := s.manualMoveSegments(ctx, req.GetCollectionID(), req.GetSourceNodeIDs()[0], req.GetDstNodeIDs(), req.GetSealedSegmentIDs())
 	return merr.Status(err), nil
 }
 

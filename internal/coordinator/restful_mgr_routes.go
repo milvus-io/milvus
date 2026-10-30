@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -12,10 +13,10 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	management "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
+	walbalancer "github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	pkgconfig "github.com/milvus-io/milvus/pkg/v3/config"
@@ -171,126 +172,41 @@ func (s *mixCoordImpl) ControlDatacoordGC(w http.ResponseWriter, req *http.Reque
 	w.Write([]byte(`{"msg": "OK"}`))
 }
 
-// HandleStreamingNodes handles GET requests to list streaming and query nodes.
+// HandleStreamingNodes lists only registered SNs and their scheduling status.
 func (s *mixCoordImpl) HandleStreamingNodes(w http.ResponseWriter, req *http.Request) {
-	logger := mlog.With(mlog.String("Scope", "Rolling"))
-
-	// 1. Fetch data from the streaming service.
-	streamingNodes, err := streaming.WAL().Balancer().ListStreamingNode(req.Context())
+	nodes, err := streaming.WAL().Balancer().ListStreamingNode(req.Context())
 	if err != nil {
-		logger.Info(req.Context(), "HandleStreamingNodes failed to list streaming nodes", mlog.Err(err))
-		http.Error(w, fmt.Sprintf(`{"msg": "failed to list streaming nodes, %s"}`, err.Error()), http.StatusInternalServerError)
+		writeStreamingManagementError(w, err)
 		return
 	}
-
-	// Define the custom JSON response structures.
+	frozen, err := streaming.WAL().Balancer().GetFrozenNodeIDs(req.Context())
+	if err != nil {
+		writeStreamingManagementError(w, err)
+		return
+	}
+	frozenSet := make(map[int64]struct{}, len(frozen))
+	for _, id := range frozen {
+		frozenSet[id] = struct{}{}
+	}
 	type nodeResponse struct {
 		ID      int64  `json:"ID"`
 		Address string `json:"address"`
 		State   string `json:"state"`
 	}
-
-	// Use a map for efficient de-duplication.
-	combinedNodes := make(map[int64]nodeResponse)
-
-	// Add streaming nodes to the map.
-	for _, info := range streamingNodes {
-		// Assume streaming nodes are "active".
-		combinedNodes[info.ServerID] = nodeResponse{
-			ID:      info.ServerID,
-			Address: info.Address,
-			State:   "active",
+	infos := make([]nodeResponse, 0, len(nodes))
+	for _, node := range nodes {
+		state := "active"
+		if _, ok := frozenSet[node.ServerID]; ok {
+			state = "suspended"
 		}
+		infos = append(infos, nodeResponse{ID: node.ServerID, Address: node.Address, State: state})
 	}
-
-	// Call GetFrozenNodeIDs to get the list of suspended nodes.
-	frozenNodeIDs, err := streaming.WAL().Balancer().GetFrozenNodeIDs(req.Context())
-	if err != nil {
-		logger.Info(req.Context(), "HandleStreamingNodes failed to get frozen nodes", mlog.Err(err))
-		http.Error(w, fmt.Sprintf(`{"msg": "failed to get frozen nodes, %s"}`, err.Error()), http.StatusInternalServerError)
-		return
-	}
-	logger.Info(req.Context(), "HandleStreamingNodes get frozen nodes", mlog.Any("frozen nodes", frozenNodeIDs))
-	// Update the state of suspended nodes.
-	for _, nodeID := range frozenNodeIDs {
-		// Check if the node ID exists in the combined map.
-		if node, ok := combinedNodes[nodeID]; ok {
-			// If it exists, update its state to "suspended".
-			node.State = "suspended"
-			combinedNodes[nodeID] = node
-		}
-	}
-
-	// 2. Fetch data from the mixCoord service.
-	queryResp, err := s.getQueryNodes(req.Context())
-	if err != nil {
-		logger.Info(req.Context(), "HandleStreamingNodes failed to get query nodes", mlog.Err(err))
-		http.Error(w, fmt.Sprintf(`{"msg": "failed to list query nodes, %s"}`, err.Error()), http.StatusInternalServerError)
-		return
-	}
-
-	// 3. Iterate through query nodes and perform a second RPC for distribution.
-	for _, info := range queryResp.NodeInfos {
-		// Skip if the node ID is already in the map (from streaming service)
-		if _, exists := combinedNodes[info.ID]; exists {
-			continue
-		}
-
-		// Make the second RPC call to get distribution
-		distResp, err := s.GetQueryNodeDistribution(req.Context(), &querypb.GetQueryNodeDistributionRequest{
-			Base:   commonpbutil.NewMsgBase(),
-			NodeID: info.ID,
-		})
-
-		err = merr.CheckRPCCall(distResp, err)
-		// On error, log it and skip this node, but don't return.
-		if err != nil {
-			if errors.Is(err, snmanager.ErrStreamingServiceNotReady) {
-				continue
-			}
-			if errors.Is(err, merr.ErrNodeNotFound) {
-				continue
-			}
-			logger.Info(req.Context(), "HandleStreamingNodes GetQueryNodeDistribution failed", mlog.Err(err))
-			http.Error(w, fmt.Sprintf(`{"msg": "failed to get query node distribution, %s"}`, err.Error()), http.StatusInternalServerError)
-			return
-		}
-
-		// 4. Check if the channel names list is not empty.
-		if len(distResp.ChannelNames) > 0 {
-			// If channels exist and the node is not in the map, add it.
-			combinedNodes[info.ID] = nodeResponse{
-				ID:      info.ID,
-				Address: info.Address,
-				State:   info.State,
-			}
-		}
-	}
-
-	// 3. Convert the map values back to a slice for the final response.
-	finalNodes := make([]nodeResponse, 0, len(combinedNodes))
-	for _, node := range combinedNodes {
-		finalNodes = append(finalNodes, node)
-	}
-
-	// Define the final response envelope.
-	type response struct {
+	sort.Slice(infos, func(i, j int) bool { return infos[i].ID < infos[j].ID })
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(struct {
 		Msg       string         `json:"msg"`
 		NodeInfos []nodeResponse `json:"nodeInfos"`
-	}
-
-	res := response{
-		Msg:       "OK",
-		NodeInfos: finalNodes,
-	}
-	mlog.Info(req.Context(), "HandleStreamingNodes success", mlog.Any("response", res))
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(res); err != nil {
-		logger.Info(req.Context(), "HandleStreamingNodes failed to encode response", mlog.Err(err))
-		http.Error(w, fmt.Sprintf(`{"msg": "failed to encode response, %s"}`, err.Error()), http.StatusInternalServerError)
-		return
-	}
+	}{Msg: "OK", NodeInfos: infos})
 }
 
 // getQueryNodes handles the RPC call to list query nodes and checks for errors.
@@ -331,110 +247,36 @@ func (s *mixCoordImpl) ListBatchQueryNodes(w http.ResponseWriter, req *http.Requ
 	w.Write(bytes)
 }
 
-// GetStreamingNodeDistribution handles GET requests to retrieve streaming node distribution.
+// GetStreamingNodeDistribution returns confirmed WAL assignments for an SN.
 func (s *mixCoordImpl) GetStreamingNodeDistribution(w http.ResponseWriter, req *http.Request) {
-	logger := mlog.With(mlog.String("Scope", "Rolling"))
-	if err := req.ParseForm(); err != nil { //nolint:gosec // internal admin endpoint
-		logger.Info(req.Context(), "GetStreamingNodeDistribution failed to parse form", mlog.Err(err))
-		http.Error(w, fmt.Sprintf(`{"msg": "failed to parse form data, %s"}`, err.Error()), http.StatusBadRequest)
+	nodeID, err := strconv.ParseInt(req.URL.Query().Get("node_id"), 10, 64)
+	if err != nil || nodeID <= 0 {
+		writeJSONError(w, "invalid node_id", http.StatusBadRequest)
 		return
 	}
-
-	nodeID, err := strconv.ParseInt(req.FormValue("node_id"), 10, 64) //nolint:gosec // internal admin endpoint
+	assignment, err := streaming.WAL().Balancer().GetWALDistribution(req.Context(), nodeID)
 	if err != nil {
-		logger.Info(req.Context(), "GetStreamingNodeDistribution failed to parse form", mlog.Err(err))
-		http.Error(w, fmt.Sprintf(`{"msg": "failed to get streaming node distribution, invalid node_id: %s"}`, err.Error()), http.StatusBadRequest)
+		writeStreamingManagementError(w, err)
 		return
 	}
-
-	// Define the custom response struct to match the desired format.
-	type distributionResponse struct {
+	names := make([]string, 0, len(assignment.Channels))
+	for name := range assignment.Channels {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(struct {
 		ChannelNames     []string `json:"channel_names"`
 		SealedSegmentIDs []string `json:"sealed_segmentIDs"`
+	}{ChannelNames: names, SealedSegmentIDs: []string{}})
+}
+
+func writeStreamingManagementError(w http.ResponseWriter, err error) {
+	code := http.StatusInternalServerError
+	if errors.Is(err, merr.ErrNodeNotFound) {
+		code = http.StatusNotFound
 	}
-
-	var dist distributionResponse
-
-	// First, try to get the streaming node assignment.
-	streamingResp, streamingErr := streaming.WAL().Balancer().GetWALDistribution(req.Context(), nodeID)
-
-	if streamingErr != nil {
-		// If streaming node is not found, try to get the batch node distribution.
-		if errors.Is(streamingErr, merr.ErrNodeNotFound) {
-			logger.Info(req.Context(), "GetStreamingNodeDistribution default to QueryNode", mlog.Any("node_id", nodeID))
-			batchResp, batchErr := s.GetQueryNodeDistribution(req.Context(), &querypb.GetQueryNodeDistributionRequest{
-				Base:   commonpbutil.NewMsgBase(),
-				NodeID: nodeID,
-			})
-			batchErr = merr.CheckRPCCall(batchResp, batchErr)
-			// If batch fails or returns a non-OK status, check the reason.
-			if batchErr != nil {
-				// If the status is specifically a node not found error, return an empty distribution.
-				if errors.Is(batchErr, merr.ErrNodeNotFound) {
-					// Both streaming and batch nodes were not found.
-					logger.Info(req.Context(), "GetStreamingNodeDistribution ignore node not found", mlog.Any("node_id", nodeID))
-					dist = distributionResponse{
-						ChannelNames:     []string{},
-						SealedSegmentIDs: []string{},
-					}
-				} else {
-					// Batch returned an error other than "NodeNotFound".
-					logger.Info(req.Context(), "GetStreamingNodeDistribution GetQueryNodeDistribution failed", mlog.Err(batchErr))
-					http.Error(w, fmt.Sprintf(`{"msg": "failed to get query node distribution, %s"}`, batchErr.Error()), http.StatusInternalServerError)
-					return
-				}
-			} else {
-				// Batch call succeeded. Populate with channel names and an empty sealed_segmentIDs.
-				dist = distributionResponse{
-					ChannelNames: batchResp.ChannelNames,
-				}
-			}
-		} else {
-			// Streaming returned an error other than "NodeNotFound".
-			logger.Error(req.Context(), "GetStreamingNodeDistribution failed to get wal distribution", mlog.Err(streamingErr))
-			http.Error(w, fmt.Sprintf(`{"msg": "failed to get streaming node distribution, %s"}`, streamingErr.Error()), http.StatusInternalServerError)
-			return
-		}
-	} else {
-		if streamingResp == nil {
-			batchResp, batchErr := s.GetQueryNodeDistribution(req.Context(), &querypb.GetQueryNodeDistributionRequest{
-				Base:   commonpbutil.NewMsgBase(),
-				NodeID: nodeID,
-			})
-			batchErr = merr.CheckRPCCall(batchResp, batchErr)
-			// If batch fails or returns a non-OK status, check the reason.
-			if batchErr != nil {
-				// Batch returned an error other than "NodeNotFound".
-				logger.Info(req.Context(), "GetStreamingNodeDistribution GetQueryNodeDistribution failed", mlog.Err(batchErr))
-				http.Error(w, fmt.Sprintf(`{"msg": "failed to get query node distribution, %s"}`, batchErr.Error()), http.StatusInternalServerError)
-				return
-			} else {
-				// Batch call succeeded. Populate with channel names and an empty sealed_segmentIDs.
-				dist = distributionResponse{
-					ChannelNames: batchResp.ChannelNames,
-				}
-			}
-		} else {
-			// Streaming call succeeded. Populate with channel names and an empty sealed_segmentIDs.
-			channelNames := make([]string, 0, len(streamingResp.Channels))
-			for name := range streamingResp.Channels {
-				channelNames = append(channelNames, name)
-			}
-			dist = distributionResponse{
-				ChannelNames: channelNames,
-			}
-		}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-
-	// Encode and write the response.
-	if err := json.NewEncoder(w).Encode(dist); err != nil {
-		http.Error(w, fmt.Sprintf(`{"msg": "failed to encode response, %s"}`, err.Error()), http.StatusInternalServerError)
-		return
-	}
-	logger.Info(req.Context(), "GetStreamingNodeDistribution success", mlog.Any("response", dist))
+	writeJSONError(w, err.Error(), code)
 }
 
 // GetBatchNodeDistribution handles GET requests to retrieve node distribution.
@@ -501,26 +343,6 @@ func (s *mixCoordImpl) HandleBatchBalanceStatus(w http.ResponseWriter, req *http
 	}
 }
 
-func (s *mixCoordImpl) getQueryCoordChannelBalanceActive(ctx context.Context) (bool, error) {
-	channelActivate, err := s.queryCoordServer.CheckChannelBalanceActive(ctx)
-	if err != nil {
-		return false, err
-	}
-
-	resp, err2 := s.CheckBalanceStatus(ctx, &querypb.CheckBalanceStatusRequest{
-		Base: commonpbutil.NewMsgBase(),
-	})
-	if err2 != nil {
-		return channelActivate, err2
-	}
-
-	if !merr.Ok(resp.GetStatus()) {
-		return channelActivate, merr.Error(resp.GetStatus())
-	}
-
-	return channelActivate && resp.IsActive, nil
-}
-
 func (s *mixCoordImpl) getQueryCoordBalanceActive(ctx context.Context) (bool, error) {
 	resp, err := s.CheckBalanceStatus(ctx, &querypb.CheckBalanceStatusRequest{
 		Base: commonpbutil.NewMsgBase(),
@@ -555,37 +377,6 @@ func (s *mixCoordImpl) getBatchBalanceStatus(w http.ResponseWriter, req *http.Re
 	fmt.Fprintf(w, `{"msg": "OK", "status": "%v"}`, balanceStatus)
 }
 
-func (s *mixCoordImpl) controlQueryCoordChannelBalanceStatus(ctx context.Context, status string) error {
-	// Call the appropriate MixCoord method based on the status.
-	var err error
-	var errMsg string
-
-	switch status {
-	case "suspended":
-		err = s.queryCoordServer.SuspendChannelBalance(ctx)
-		errMsg = "failed to suspend balance"
-	case "resumed", "active":
-		err = s.queryCoordServer.ResumeChannelBalance(ctx)
-		errMsg = "failed to resume balance"
-	default:
-		// If the status is not recognized, return an informative error immediately.
-		// This avoids proceeding with an invalid state.
-		err = merr.WrapErrParameterInvalidMsg("invalid status value: '%s'. Use 'suspended', 'resumed' or 'active'", status)
-	}
-
-	// --- Unified Error Handling ---
-	// After the switch, we handle potential errors from the called method.
-
-	// First, check if there was a low-level error during the method execution (e.g., network issue).
-	if err != nil {
-		// Wrap the original error with more context.
-		return merr.Wrap(err, errMsg)
-	}
-	// If no errors were encountered, the operation was successful. Return nil to indicate success.
-	return nil
-}
-
-// controlBatchBalanceStatus handles PUT requests to suspend or resume balance.
 func (s *mixCoordImpl) controlBatchBalanceStatus(w http.ResponseWriter, req *http.Request) {
 	logger := mlog.With(mlog.String("Scope", "Rolling"))
 	// Define the request body struct for the PUT request.
@@ -645,93 +436,39 @@ func (s *mixCoordImpl) HandleStreamingBalanceStatus(w http.ResponseWriter, req *
 	}
 }
 
-// getStreamingBalanceStatus handles GET requests to fetch the balance status.
+// getStreamingBalanceStatus reports only the WAL automatic-optimization setting.
 func (s *mixCoordImpl) getStreamingBalanceStatus(w http.ResponseWriter, req *http.Request) {
-	logger := mlog.With(mlog.String("Scope", "Rolling"))
-	isSuspended, err := streaming.WAL().Balancer().IsRebalanceSuspended(req.Context())
-	if err != nil && !errors.Is(err, snmanager.ErrStreamingServiceNotReady) {
-		logger.Info(req.Context(), "getStreamingBalanceStatus failed", mlog.Err(err))
-		http.Error(w, fmt.Sprintf(`{"msg": "failed to get balance status: %s"}`, err.Error()), http.StatusInternalServerError)
-		return
+	state := "active"
+	if !paramtable.Get().StreamingCfg.WALBalancerPolicyAllowRebalance.GetAsBool() {
+		state = "suspended"
 	}
-
-	if errors.Is(err, snmanager.ErrStreamingServiceNotReady) {
-		isSuspended = true
-	}
-	logger.Info(req.Context(), "getStreamingBalanceStatus", mlog.Any("suspended", isSuspended), mlog.Err(err))
-
-	active, err2 := s.getQueryCoordChannelBalanceActive(req.Context())
-	if err2 == nil {
-		isSuspended = isSuspended && !active
-		logger.Info(req.Context(), "getStreamingBalanceStatus suspended merge with queryCoord channel", mlog.Any("suspended", isSuspended))
-	} else {
-		logger.Info(req.Context(), "getStreamingBalanceStatus getQueryCoordChannelBalanceActive failed", mlog.Err(err))
-		http.Error(w, fmt.Sprintf(`{"msg": "failed to get balance status: %s"}`, err.Error()), http.StatusInternalServerError)
-		return
-	}
-
-	status := "activate"
-	if isSuspended {
-		status = "suspended"
-	}
-
-	response := map[string]string{
-		"msg":    "OK",
-		"status": status,
-	}
-	logger.Info(req.Context(), "getStreamingBalanceStatus success", mlog.Any("status", status))
-
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(response)
+	json.NewEncoder(w).Encode(map[string]string{"msg": "OK", "status": state})
 }
 
-// controlStreamingBalanceStatus handles PUT requests to change the balance status.
 func (s *mixCoordImpl) controlStreamingBalanceStatus(w http.ResponseWriter, req *http.Request) {
-	var requestBody struct {
+	var body struct {
 		Status string `json:"status"`
 	}
-	logger := mlog.With(mlog.String("Scope", "Rolling"))
-
-	if err := json.NewDecoder(req.Body).Decode(&requestBody); err != nil {
-		logger.Info(req.Context(), "controlStreamingBalanceStatus json decoder failed", mlog.Err(err))
-		http.Error(w, `{"msg": "Invalid request body"}`, http.StatusBadRequest)
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeJSONError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-
-	var err error
-	var errMsg string
-
-	switch requestBody.Status {
+	var enabled bool
+	switch body.Status {
 	case "suspended":
-		err = streaming.WAL().Balancer().SuspendRebalance(req.Context())
-		errMsg = "failed to suspend balance"
+		enabled = false
 	case "resumed", "active":
-		err = streaming.WAL().Balancer().ResumeRebalance(req.Context())
-		errMsg = "failed to resume balance"
+		enabled = true
 	default:
-		logger.Info(req.Context(), "controlStreamingBalanceStatus invalid status value", mlog.String("status", requestBody.Status))
-		http.Error(w, `{"msg": "Invalid status value. Use 'suspended', 'resumed' or 'active'."}`, http.StatusBadRequest)
+		writeJSONError(w, "Invalid status value. Use 'suspended', 'resumed' or 'active'.", http.StatusBadRequest)
 		return
 	}
-
-	if err != nil {
-		mlog.Info(req.Context(), "controlStreamingBalanceStatus failed", mlog.Err(err))
-		http.Error(w, fmt.Sprintf(`{"msg": "%s"}`, errMsg), http.StatusInternalServerError)
+	if err := walbalancer.SetRebalanceEnabled(enabled); err != nil {
+		writeStreamingManagementError(w, err)
 		return
 	}
-
-	// For compatibility, this also forwards to QueryCoord to set the channel's balance status.
-	err2 := s.controlQueryCoordChannelBalanceStatus(req.Context(), requestBody.Status)
-	if err2 != nil {
-		logger.Warn(req.Context(), "controlStreamingBalanceStatus controlQueryCoordChannelBalanceStatus failed", mlog.Err(err2))
-		http.Error(w, err2.Error(), http.StatusInternalServerError)
-		return
-	}
-	logger.Info(req.Context(), "controlStreamingBalanceStatus success", mlog.Any("status", requestBody.Status))
-
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"msg": "OK"}`))
 }
 
@@ -767,12 +504,16 @@ func (s *mixCoordImpl) handleGetStreamingNodeStatus(w http.ResponseWriter, req *
 	}
 
 	nodeID, err := strconv.ParseInt(nodeIDStr, 10, 64)
-	if err != nil {
+	if err != nil || nodeID <= 0 {
 		logger.Info(req.Context(), "handleGetStreamingNodeStatus invalid node_id", mlog.Err(err))
 		http.Error(w, `{"msg": "Invalid node_id parameter"}`, http.StatusBadRequest)
 		return
 	}
 
+	if err := checkStreamingNode(req.Context(), nodeID); err != nil {
+		writeStreamingManagementError(w, err)
+		return
+	}
 	// 1. Call GetFrozenNodeIDs to get the list of suspended nodes.
 	frozenNodeIDs, err := streaming.WAL().Balancer().GetFrozenNodeIDs(req.Context())
 	if err != nil {
@@ -784,22 +525,6 @@ func (s *mixCoordImpl) handleGetStreamingNodeStatus(w http.ResponseWriter, req *
 
 	// 2. Use lo.Contains to check if the nodeID is in the list.
 	isSuspended := lo.Contains(frozenNodeIDs, nodeID)
-
-	// If the node is not in the streaming list, perform a fallback check on the batch service.
-	if !isSuspended {
-		suspended, err := s.queryCoordServer.IsNodeSuspended(req.Context(), nodeID)
-		logger.Info(req.Context(), "handleGetStreamingNodeStatus queryCoord IsNodeSuspended", mlog.Any("suspended", suspended), mlog.Err(err))
-		if err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
-			logger.Info(req.Context(), "handleGetStreamingNodeStatus queryCoord suspended failed", mlog.Err(err))
-			http.Error(w, fmt.Sprintf(`{"msg": "failed to get batch node status, %s"}`, err.Error()), http.StatusInternalServerError)
-			return
-		}
-		if err == nil {
-			isSuspended = suspended
-		} else {
-			logger.Info(req.Context(), "handleGetStreamingNodeStatus queryCoord complain node not found")
-		}
-	}
 
 	status := "active"
 	if isSuspended {
@@ -832,7 +557,7 @@ func (s *mixCoordImpl) handlePutStreamingNodeStatus(w http.ResponseWriter, req *
 		return
 	}
 
-	if requestBody.NodeID == 0 {
+	if requestBody.NodeID <= 0 {
 		logger.Info(req.Context(), "handlePutStreamingNodeStatus missing node_id")
 		http.Error(w, `{"msg": "node_id is required"}`, http.StatusBadRequest)
 		return
@@ -857,22 +582,27 @@ func (s *mixCoordImpl) handlePutStreamingNodeStatus(w http.ResponseWriter, req *
 
 	if err != nil {
 		logger.Info(req.Context(), "handlePutStreamingNodeStatus failed", mlog.Err(err))
-		http.Error(w, fmt.Sprintf(`{"msg": "%s, %s"}`, errMsg, err.Error()), http.StatusInternalServerError)
+		writeStreamingManagementError(w, merr.Wrap(err, errMsg))
 		return
-	}
-	err = s.handleQueryNodeStatusUpdate(req.Context(), requestBody.NodeID, requestBody.Status)
-	if err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
-		logger.Info(req.Context(), "handlePutStreamingNodeStatus handleQueryNodeStatusUpdate update failed", mlog.Err(err))
-		http.Error(w, fmt.Sprintf(`{"msg": "%s", "%s"}`, errMsg, err.Error()), http.StatusInternalServerError)
-		return
-	}
-	if err != nil {
-		logger.Info(req.Context(), "handlePutStreamingNodeStatus QueryCoord ingore node")
 	}
 	logger.Info(req.Context(), "handlePutStreamingNodeStatus success", mlog.Any("status", requestBody.Status))
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"msg": "OK"}`))
+}
+
+// Scheduling status is meaningful only for a registered StreamingNode.
+func checkStreamingNode(ctx context.Context, nodeID int64) error {
+	nodes, err := streaming.WAL().Balancer().ListStreamingNode(ctx)
+	if err != nil {
+		return err
+	}
+	for _, node := range nodes {
+		if node.ServerID == nodeID {
+			return nil
+		}
+	}
+	return merr.WrapErrNodeNotFound(nodeID, "StreamingNode not found")
 }
 
 // HandleBatchNodeStatus is the main handler that dispatches requests
@@ -1014,7 +744,6 @@ func (s *mixCoordImpl) TransferBatchSegment(w http.ResponseWriter, req *http.Req
 		SourceNodeID int64 `json:"source_node_id"`
 		TargetNodeID int64 `json:"target_node_id,omitempty"`
 		SegmentID    int64 `json:"segment_id,omitempty"`
-		CopyMode     *bool `json:"copy_mode,omitempty"`
 	}
 	logger := mlog.With(mlog.String("Scope", "Rolling"))
 	// Decodes the JSON from the request body.
@@ -1051,12 +780,7 @@ func (s *mixCoordImpl) TransferBatchSegment(w http.ResponseWriter, req *http.Req
 		request.TransferAll = true
 	}
 
-	// Check if the CopyMode field was provided.
-	if requestBody.CopyMode != nil {
-		request.CopyMode = *requestBody.CopyMode
-	} else {
-		request.CopyMode = false // Default to false if not provided
-	}
+	// Legacy copy_mode fields are ignored; all segment transfers are moves.
 
 	resp, err := s.TransferSegment(req.Context(), request)
 	err = merr.CheckRPCCall(resp, err)
@@ -1071,7 +795,8 @@ func (s *mixCoordImpl) TransferBatchSegment(w http.ResponseWriter, req *http.Req
 	w.Write([]byte(`{"msg": "OK"}`))
 }
 
-// TransferStreamingChannel handles the transfer and defreeze operation.
+// TransferStreamingChannel moves PChannels and waits for confirmed WAL assignment.
+// It does not defreeze nodes or wait for QueryView readiness.
 func (s *mixCoordImpl) TransferStreamingChannel(w http.ResponseWriter, req *http.Request) {
 	logger := mlog.With(mlog.String("Scope", "Rolling"))
 	if req.Method != http.MethodPost {

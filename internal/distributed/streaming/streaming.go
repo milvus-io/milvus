@@ -163,15 +163,6 @@ type Balancer interface {
 	// GetFrozenNodeIDs returns the frozen node ids.
 	GetFrozenNodeIDs(ctx context.Context) ([]int64, error)
 
-	// IsRebalanceSuspended returns whether the rebalance of the wal is suspended.
-	IsRebalanceSuspended(ctx context.Context) (bool, error)
-
-	// SuspendRebalance suspends the rebalance of the wal.
-	SuspendRebalance(ctx context.Context) error
-
-	// ResumeRebalance resumes the rebalance of the wal.
-	ResumeRebalance(ctx context.Context) error
-
 	// FreezeNodeIDs freezes the streaming node.
 	// The wal will not be assigned to the frozen nodes and the wal will be removed from the frozen nodes.
 	FreezeNodeIDs(ctx context.Context, nodeIDs []int64) error

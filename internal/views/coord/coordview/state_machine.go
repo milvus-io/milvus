@@ -25,8 +25,9 @@ import (
 //
 // Thread-safety: NOT thread-safe. The caller (Manager) must serialize access.
 type CoordQueryViewStateMachine struct {
-	state qviews.QueryViewState
-	view  *viewpb.QueryViewOfShard
+	preparation *Preparation // optional, operation-local completion; protected by manager lock
+	state       qviews.QueryViewState
+	view        *viewpb.QueryViewOfShard
 
 	// Per-node reported states.
 	snState  qviews.QueryViewState
