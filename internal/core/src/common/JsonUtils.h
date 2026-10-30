@@ -25,4 +25,12 @@ parse_json_pointer(const std::string& pointer);
 bool
 path_exists(const simdjson::dom::element& root,
             const std::vector<std::string>& tokens);
+
+// Check if a JSON Pointer path exists in the result of Json::dom_doc(). A
+// valid row whose stored bytes are empty has no document (dom_doc() returns an
+// error result instead of throwing), so no path exists in it. Taking the result
+// keeps callers from converting it to an element, which would throw.
+bool
+path_exists(const simdjson::simdjson_result<simdjson::dom::element>& root,
+            const std::vector<std::string>& tokens);
 }  // namespace milvus

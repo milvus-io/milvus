@@ -78,4 +78,13 @@ path_exists(const simdjson::dom::element& root,
     }
     return true;
 }
+
+bool
+path_exists(const simdjson::simdjson_result<simdjson::dom::element>& root,
+            const std::vector<std::string>& tokens) {
+    if (root.error() != simdjson::SUCCESS) {
+        return false;
+    }
+    return path_exists(root.value_unsafe(), tokens);
+}
 }  // namespace milvus
