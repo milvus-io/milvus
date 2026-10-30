@@ -23,7 +23,9 @@ type qnShardView struct {
 // qnViewEntry pairs an ApplyView (carrying the OnReport callback) with its state machine.
 type qnViewEntry struct {
 	handler.ApplyView
-	sm *QNQueryViewStateMachine
+	sm             *QNQueryViewStateMachine
+	queryRefs      int
+	releasePending bool
 }
 
 // ApplyViews applies a batch of coord-pushed views atomically.
@@ -160,12 +162,11 @@ func (s *qnShardView) consumeReportAndCleanup(key qviews.QueryViewKey, entry *qn
 		entry.OnReport(qviews.NewQueryViewAtWorkNodeFromProto(report))
 	}
 	if entry.sm.ConsumeRelease() {
-		s.segMgr.Release(ReleaseSegments{
-			Key: key,
-			OnDropped: func() {
-				s.notifyDropped(key.QueryViewVersion)
-			},
-		})
+		if entry.queryRefs > 0 {
+			entry.releasePending = true
+		} else {
+			s.releaseQueryResourceLocked(key.QueryViewVersion, entry)
+		}
 	}
 	if entry.sm.State() == qviews.QueryViewStateDropped {
 		delete(s.views, key.QueryViewVersion)
@@ -174,4 +175,9 @@ func (s *qnShardView) consumeReportAndCleanup(key qviews.QueryViewKey, entry *qn
 			s.onEmpty(s)
 		}
 	}
+}
+
+func (s *qnShardView) releaseQueryResourceLocked(version qviews.QueryViewVersion, entry *qnViewEntry) {
+	entry.releasePending = false
+	s.segMgr.Release(ReleaseSegments{Key: entry.View.QueryViewKey(), OnDropped: func() { s.notifyDropped(version) }})
 }

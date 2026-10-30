@@ -495,7 +495,7 @@ TEST_P(RawExprCacheExtendedTest, MissHitAndOffsetsPreserveRawResults) {
         auto miss_calls = std::make_shared<RawCalls>();
         auto input = MakeInput(c.logical, miss_calls);
         FeatureRecorder miss_recorder;
-        input->SetFeatureRecorder(&miss_recorder);
+        input->SetFeatureRecorder(&miss_recorder, *schema_);
         auto miss = std::make_shared<RawExprCacheAdapter>(input, nullptr, true);
         miss->PrefetchAsync(pool_);
         EvalCtx context(exec_.get());
@@ -520,7 +520,7 @@ TEST_P(RawExprCacheExtendedTest, MissHitAndOffsetsPreserveRawResults) {
         // hook therefore never runs; the adapter records through the
         // expression's recorder instead.
         FeatureRecorder hit_recorder;
-        hit_input->SetFeatureRecorder(&hit_recorder);
+        hit_input->SetFeatureRecorder(&hit_recorder, *schema_);
         auto hit =
             std::make_shared<RawExprCacheAdapter>(hit_input, nullptr, false);
         hit->PrefetchAsync(pool_);

@@ -54,6 +54,14 @@ import (
 
 var _ kv.MetaKv = &metaMemoryKV{}
 
+func (*mockMixCoord) GetQueryViewSegmentLoadInfos(context.Context, int64, []int64) ([]*querypb.SegmentLoadInfo, []*indexpb.IndexInfo, error) {
+	panic("patch GetQueryViewSegmentLoadInfos with mockey")
+}
+
+func (*mockMixCoord) WatchQueryViewSegmentLoadInfo(querypb.QueryCoord_WatchQueryViewSegmentLoadInfoServer) error {
+	panic("patch WatchQueryViewSegmentLoadInfo with mockey")
+}
+
 type metaMemoryKV struct {
 	memkv.MemoryKV
 }

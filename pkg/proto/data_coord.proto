@@ -496,6 +496,7 @@ message SegmentInfo {
   // First growing-to-sealed DataView publication. Written with the flush snapshot
   // and retained across compaction/drop so a retried commit returns the same version.
   view.DataVersion sealed_at_data_version = 41;
+  uint64 transform_start_after_timetick = 42;
 }
 
 // Statistics carries aggregate metrics for a segment so DataCoord can make

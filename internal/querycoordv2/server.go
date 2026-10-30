@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
@@ -54,10 +55,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -70,19 +73,21 @@ import (
 var Params = params.Params
 
 type Server struct {
-	ctx                 context.Context
-	cancel              context.CancelFunc
-	wg                  sync.WaitGroup
-	status              atomic.Int32
-	etcdCli             *clientv3.Client
-	tikvCli             *txnkv.Client
-	address             string
-	session             sessionutil.SessionInterface
-	sessionWatcher      sessionutil.SessionWatcher
-	sessionWatcherMu    sync.Mutex
-	kv                  kv.MetaKv
-	idAllocator         func() (int64, error)
-	metricsCacheManager *metricsinfo.MetricsCacheManager
+	segmentLoadInfoWatcher *queryViewSegmentLoadInfoWatcher
+	loadInfos              *loadmgr.LoadInfoStore
+	ctx                    context.Context
+	cancel                 context.CancelFunc
+	wg                     sync.WaitGroup
+	status                 atomic.Int32
+	etcdCli                *clientv3.Client
+	tikvCli                *txnkv.Client
+	address                string
+	session                sessionutil.SessionInterface
+	sessionWatcher         sessionutil.SessionWatcher
+	sessionWatcherMu       sync.Mutex
+	kv                     kv.MetaKv
+	idAllocator            func() (int64, error)
+	metricsCacheManager    *metricsinfo.MetricsCacheManager
 
 	// Coordinators
 	mixCoord types.MixCoord
@@ -148,9 +153,10 @@ type FileResourceObserver interface {
 func NewQueryCoord(ctx context.Context) (*Server, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	server := &Server{
-		ctx:            ctx,
-		cancel:         cancel,
-		metricsRequest: metricsinfo.NewMetricsRequest(),
+		segmentLoadInfoWatcher: newQueryViewSegmentLoadInfoWatcher(),
+		ctx:                    ctx,
+		cancel:                 cancel,
+		metricsRequest:         metricsinfo.NewMetricsRequest(),
 	}
 	server.UpdateStateCode(commonpb.StateCode_Abnormal)
 	server.queryNodeCreator = session.DefaultQueryNodeCreator
@@ -381,6 +387,14 @@ func (s *Server) initMeta() error {
 
 	mlog.Info(s.ctx, "init meta")
 	s.store = querycoord.NewCatalog(s.kv)
+	s.loadInfos = loadmgr.NewLoadInfoStore(queryview.NewLoadInfoCatalog(s.kv), func(id int64) []*indexpb.IndexInfo {
+		if source, ok := s.mixCoord.(interface {
+			QueryViewCollectionIndexInfos(int64) []*indexpb.IndexInfo
+		}); ok {
+			return source.QueryViewCollectionIndexInfos(id)
+		}
+		return nil
+	})
 	s.meta = meta.NewMeta(s.idAllocator, s.store, s.nodeMgr, s.metaView)
 
 	s.broker = meta.NewCoordinatorBroker(
