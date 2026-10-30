@@ -125,39 +125,49 @@ func TestSnapshotBitmapTextAndLocalDeletes(t *testing.T) {
 	require.NoError(t, err)
 	input := &internalpb.SnapshotImportL0Source{ManifestL0Paths: []string{l0, l0}}
 	source := &internalpb.SnapshotImportSource{Version: 1, ManifestPath: manifest}
-	for _, batchBudget := range []int64{int64(len(paths[0])) + 64 + 256, 1 << 20} {
-		opens := make(map[string]int)
-		patch := mockey.Mock((*DeleteMerger).mergeFile).When(func(_ *DeleteMerger, _ context.Context, path string, _, _ uint64, _ int64) bool {
-			opens[path]++
-			return false
-		}).Return(false, nil).Build()
-		masks, err := BuildSnapshotDeleteMasks(ctx, cm, schema, cfg, []*internalpb.SnapshotImportSource{source}, input,
-			0, 300, batchBudget, 1<<20, SourceEncryption{}, nil)
-		patch.UnPatch()
-		require.NoError(t, err)
-		require.Equal(t, map[string]int{paths[0]: 1, paths[1]: 1}, opens)
-		r, err := NewStorageV3ManifestReaderWithSharedL0(ctx, cm, schema, cfg, manifest, 0, 300, 1,
-			SourceEncryption{}, source, batchBudget, masks, nil)
-		require.NoError(t, err)
-		var got []int64
-		for {
-			data, err := r.Read()
-			if err == io.EOF {
-				break
-			}
+	// Both shared and local deletes at ts=200 must be invisible at end=150 and
+	// effective at end=300; rows themselves are at ts=100 and remain readable.
+	for _, end := range []uint64{150, 300} {
+		for _, batchBudget := range []int64{int64(len(paths[0])) + 64 + 256, 1 << 20} {
+			opens := make(map[string]int)
+			patch := mockey.Mock((*DeleteMerger).mergeFile).When(func(_ *DeleteMerger, _ context.Context, path string, _, _ uint64, _ int64) bool {
+				opens[path]++
+				return false
+			}).Return(false, nil).Build()
+			masks, err := BuildSnapshotDeleteMasks(ctx, cm, schema, cfg, []*internalpb.SnapshotImportSource{source}, input,
+				0, end, batchBudget, 1<<20, SourceEncryption{}, nil)
+			patch.UnPatch()
 			require.NoError(t, err)
-			for i := 0; i < data.GetRowNum(); i++ {
-				pk := data.Data[100].GetRow(i).(int64)
-				got = append(got, pk)
-				require.Equal(t, strings.Repeat(fmt.Sprint(pk), 100), data.Data[101].GetRow(i))
+			require.Equal(t, map[string]int{paths[0]: 1, paths[1]: 1}, opens)
+			r, err := NewStorageV3ManifestReaderWithSharedL0(ctx, cm, schema, cfg, manifest, 0, end, 1,
+				SourceEncryption{}, source, batchBudget, masks, nil)
+			require.NoError(t, err)
+			var got []int64
+			for {
+				data, err := r.Read()
+				if err == io.EOF {
+					break
+				}
+				require.NoError(t, err)
+				for i := 0; i < data.GetRowNum(); i++ {
+					pk := data.Data[100].GetRow(i).(int64)
+					got = append(got, pk)
+					require.Equal(t, strings.Repeat(fmt.Sprint(pk), 100), data.Data[101].GetRow(i))
+				}
 			}
+			r.Close()
+			var want []int64
+			if end == 150 {
+				for pk := int64(0); pk < 130; pk++ {
+					want = append(want, pk)
+				}
+			} else {
+				for pk := int64(1); pk < 129; pk += 2 {
+					want = append(want, pk)
+				}
+			}
+			require.Equal(t, want, got)
 		}
-		r.Close()
-		var want []int64
-		for pk := int64(1); pk < 129; pk += 2 {
-			want = append(want, pk)
-		}
-		require.Equal(t, want, got)
 	}
 }
 
