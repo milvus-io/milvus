@@ -324,6 +324,7 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 		SslTlsMinVersion:            it.req.GetStorageConfig().GetSslTlsMinVersion(),
 		UseCrc32CChecksum:           it.req.GetStorageConfig().GetUseCrc32CChecksum(),
 		TalonMode:                   it.req.GetStorageConfig().GetTalonMode(),
+		TalonEnabledStages:          it.req.GetStorageConfig().GetTalonEnabledStages(),
 		TalonSmallReadThreshold:     it.req.GetStorageConfig().GetTalonSmallReadThreshold(),
 		TalonCoordinator:            it.req.GetStorageConfig().GetTalonCoordinator(),
 		TalonBlockSize:              it.req.GetStorageConfig().GetTalonBlockSize(),

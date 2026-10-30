@@ -33,6 +33,12 @@
 std::shared_ptr<milvus_storage::api::Properties>
 MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config);
 
+// Build a private properties copy for a load reader. The shared base contains
+// no open overrides, and the stage mask never enters storage properties.
+std::shared_ptr<milvus_storage::api::Properties>
+MakeLoadProperties(const milvus_storage::api::Properties& base,
+                   const milvus::storage::TalonReadConfig& talon);
+
 /**
  * @brief fs.root_path handed to the loon / Arrow filesystem for a storage
  * config.

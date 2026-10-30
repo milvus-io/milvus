@@ -108,6 +108,7 @@ NewPackedReaderWithStorageConfig(char** paths,
                 : "",
             c_storage_config.use_crc32c_checksum,
             c_storage_config.talon_mode,
+            c_storage_config.talon_enabled_stages,
             c_storage_config.talon_small_read_threshold,
             c_storage_config.talon_coordinator != nullptr
                 ? c_storage_config.talon_coordinator

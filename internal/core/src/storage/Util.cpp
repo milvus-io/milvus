@@ -1304,6 +1304,8 @@ CreateChunkManager(const StorageConfig& storage_config) {
 StorageV2FSCache::Key
 ToStorageV2FSCacheKey(const StorageConfig& storage_config) {
     StorageV2FSCache::Key conf;
+    conf.talon_mode = storage_config.talon_mode;
+    conf.talon_enabled_stages = storage_config.talon_enabled_stages;
     if (storage_config.storage_type == "local") {
         std::string path(storage_config.root_path);
         conf.root_path = path;
@@ -1334,7 +1336,6 @@ ToStorageV2FSCacheKey(const StorageConfig& storage_config) {
         conf.max_connections = storage_config.max_connections;
         conf.tls_min_version = storage_config.tls_min_version;
         conf.use_crc32c_checksum = storage_config.use_crc32c_checksum;
-        conf.talon_mode = storage_config.talon_mode;
         conf.talon_small_read_threshold =
             storage_config.talon_small_read_threshold;
         conf.talon_coordinator = storage_config.talon_coordinator;

@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/snapshotio"
@@ -931,13 +932,21 @@ func TestMakePropertiesFromStorageConfig_Talon(t *testing.T) {
 	for _, tc := range []struct {
 		name             string
 		mode             string
+		mask             uint32
+		wantMode         string
 		enableExternal   bool
 		wantExternalMode string
 	}{
-		{name: "external_disabled", mode: "2", wantExternalMode: "0"},
-		{name: "external_small_reads", mode: "2", enableExternal: true, wantExternalMode: "2"},
-		{name: "external_all_reads", mode: "1", enableExternal: true, wantExternalMode: "1"},
-		{name: "talon_disabled", mode: "0", enableExternal: true, wantExternalMode: "0"},
+		{name: "external_disabled", mode: "2", wantMode: "2", wantExternalMode: "0"},
+		{name: "legacy_stages", mode: "2", wantMode: "2", enableExternal: true, wantExternalMode: "2"},
+		{name: "external_small_reads", mode: "2", mask: ^uint32(0), wantMode: "2", enableExternal: true, wantExternalMode: "2"},
+		{name: "external_all_reads", mode: "1", mask: ^uint32(0), wantMode: "1", enableExternal: true, wantExternalMode: "1"},
+		{name: "talon_disabled", mode: "0", wantMode: "0", enableExternal: true, wantExternalMode: "0"},
+		{name: "load_open_disabled", mode: "0", mask: 1, wantMode: "0", enableExternal: true, wantExternalMode: "0"},
+		{name: "load_open_only", mode: "1", mask: 1, wantMode: "0", enableExternal: true, wantExternalMode: "0"},
+		{name: "load_open_small_reads", mode: "2", mask: 1, wantMode: "0", enableExternal: true, wantExternalMode: "0"},
+		{name: "unknown_stage", mode: "1", mask: 2, wantMode: "0", enableExternal: true, wantExternalMode: "0"},
+		{name: "load_open_and_unknown_stage", mode: "2", mask: 3, wantMode: "0", enableExternal: true, wantExternalMode: "0"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			params := &paramtable.ComponentParam{}
@@ -960,21 +969,39 @@ func TestMakePropertiesFromStorageConfig_Talon(t *testing.T) {
 				t.Run(storageType, func(t *testing.T) {
 					require.NoError(t, params.Save(params.CommonCfg.StorageType.Key, storageType))
 					require.NoError(t, params.Save(params.CommonCfg.StorageTalonMode.Key, tc.mode))
+					require.NoError(t, params.Save(params.CommonCfg.StorageTalonEnabledStages.Key, "all"))
 					config := CreateStorageConfig()
-					// The request configuration must not be overwritten by later process changes.
+					config.TalonEnabledStages = tc.mask
+					config.AccessKeyID = "request-access-key"
+					config.SecretAccessKey = "request-secret-key"
+					original := proto.Clone(config)
+					// Request policy must survive a worker with different local settings.
 					require.NoError(t, params.Save(params.CommonCfg.StorageTalonMode.Key, "0"))
+					localStages := "load_open"
+					if tc.mask == 1 {
+						localStages = "all"
+					}
+					require.NoError(t, params.Save(params.CommonCfg.StorageTalonEnabledStages.Key, localStages))
 					cConfig := GetCStorageConfig(config)
 					assert.Equal(t, config.GetTalonMode(), uint32(cConfig.talon_mode))
+					assert.Equal(t, tc.mask, uint32(cConfig.talon_enabled_stages))
 					assert.Equal(t, config.GetTalonEnableForExternalTable(), bool(cConfig.talon_enable_for_external_table))
 					DeleteCStorageConfig(cConfig)
+					readerConfig, release := newCStorageConfig(config)
+					assert.Equal(t, config.GetTalonMode(), uint32(readerConfig.talon_mode))
+					assert.Equal(t, tc.mask, uint32(readerConfig.talon_enabled_stages))
+					release()
 					props, err := MakePropertiesFromStorageConfig(config, nil)
 					require.NoError(t, err)
 					defer FreeProperties(props)
+					assert.Equal(t, "request-access-key", loonPropertyString(props, "fs.access_key_id"))
+					assert.Equal(t, "request-secret-key", loonPropertyString(props, "fs.access_key_value"))
+					assert.True(t, proto.Equal(original, config), "conversions must preserve the request")
 					if storageType == "local" {
 						assert.Equal(t, "0", loonPropertyString(props, "fs.talon.mode"))
 					} else {
 						for key, want := range map[string]string{
-							"mode":                 tc.mode,
+							"mode":                 tc.wantMode,
 							"small_read_threshold": "65536",
 							"coordinator":          "127.0.0.1:7000",
 							"block_size":           "8388608",

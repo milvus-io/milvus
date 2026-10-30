@@ -61,6 +61,9 @@ class LoonFFIPropertiesSingleton {
         if (properties_ == nullptr) {
             properties_ =
                 MakeInternalPropertiesFromStorageConfig(c_storage_config);
+            talon_config_ = {c_storage_config.talon_mode,
+                             c_storage_config.talon_enabled_stages,
+                             c_storage_config.talon_enable_for_external_table};
             ApplyArrowReaderConfig(*properties_);
         }
     }
@@ -92,6 +95,12 @@ class LoonFFIPropertiesSingleton {
     GetProperties() const {
         std::shared_lock lck(mutex_);
         return properties_;
+    }
+
+    TalonReadConfig
+    GetTalonConfig() const {
+        std::shared_lock lck(mutex_);
+        return talon_config_;
     }
 
     void
@@ -169,6 +178,7 @@ class LoonFFIPropertiesSingleton {
  private:
     mutable std::shared_mutex mutex_;
     std::shared_ptr<milvus_storage::api::Properties> properties_ = nullptr;
+    TalonReadConfig talon_config_{};
     // Guards configuration snapshots that do not belong to the internal
     // filesystem properties. Separate from mutex_ so the limits can be read
     // while mutex_ is held; see ApplyArrowReaderConfig.

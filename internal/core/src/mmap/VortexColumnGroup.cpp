@@ -136,13 +136,27 @@ VortexColumnGroup::VortexColumnGroup(
         // TODO(local-format): Thread OpContext into footer and later remote
         // range reads after milvus-storage exposes context-aware APIs. The
         // current API only permits cancellation checks around, not during, IO.
-        auto open_status = state.footer_reader->Open(source_fs);
+        auto open_fs_result = milvus_storage::MakeReaderFileSystem(
+            source_fs, *properties, file.path);
+        if (!open_fs_result.ok()) {
+            ThrowVortexStatus(
+                open_fs_result.status(),
+                ErrorCode::FileOpenFailed,
+                fmt::format(
+                    "failed to get footer filesystem for vortex file {}",
+                    file.path));
+        }
+        const auto open_fs = std::move(open_fs_result).ValueOrDie();
+        auto open_status = state.footer_reader->Open(open_fs);
         if (!open_status.ok()) {
             ThrowVortexStatus(
                 open_status,
                 ErrorCode::DataFormatBroken,
                 fmt::format("failed to open vortex file {}", file.path));
         }
+
+        // Footer initialization is complete. Cell fills below keep the ordinary source_fs.
+        milvus_storage::FinishReaderOpen(open_fs);
 
         auto cell_metas_result =
             milvus_storage::vortex::BuildVortexGroupCellMetas(

@@ -167,19 +167,24 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
     const bool is_local =
         c_storage_config.storage_type != nullptr &&
         std::string_view(c_storage_config.storage_type) == "local";
+    // Default properties serve arbitrary operations. Only unrestricted policy
+    // enables their FS; a load entry point builds its own open override later.
+    const uint32_t data_mode = (c_storage_config.talon_enabled_stages == 0 ||
+                                c_storage_config.talon_enabled_stages ==
+                                    milvus::storage::kTalonStagesAll)
+                                   ? c_storage_config.talon_mode
+                                   : 0;
     const std::pair<const char*, uint32_t> talon_values[] = {
-        {PROPERTY_FS_TALON_MODE, c_storage_config.talon_mode},
+        {PROPERTY_FS_TALON_MODE, data_mode},
         {PROPERTY_FS_TALON_SMALL_READ_THRESHOLD,
          c_storage_config.talon_small_read_threshold},
         {PROPERTY_FS_TALON_BLOCK_SIZE, c_storage_config.talon_block_size},
         {PROPERTY_FS_TALON_MAX_IDLE_PER_ADDR,
          c_storage_config.talon_max_idle_per_addr}};
     // Keep the External Table policy alongside ordinary filesystem properties.
-    // This Milvus-only key is consumed below; storage ignores unknown properties.
-    (*properties_map)["milvus.talon.external_mode"] =
-        std::to_string(c_storage_config.talon_enable_for_external_table
-                           ? c_storage_config.talon_mode
-                           : 0);
+    // This Milvus-only key is consumed below, including for local primary storage.
+    (*properties_map)["milvus.talon.external_mode"] = std::to_string(
+        c_storage_config.talon_enable_for_external_table ? data_mode : 0);
     for (const auto& [key, value] : talon_values) {
         const bool is_mode = std::string_view(key) == PROPERTY_FS_TALON_MODE;
         if (!is_mode && value == 0) {
@@ -316,6 +321,30 @@ PropertyValueAsString(const milvus_storage::api::Properties& properties,
             }
         },
         it->second);
+}
+
+std::shared_ptr<milvus_storage::api::Properties>
+MakeLoadProperties(const milvus_storage::api::Properties& base,
+                   const milvus::storage::TalonReadConfig& talon) {
+    auto properties = std::make_shared<milvus_storage::api::Properties>(base);
+    if (talon.mode == 0 ||
+        !milvus::storage::TalonStageEnabled(
+            talon.enabled_stages, milvus::storage::kTalonStageLoadOpen)) {
+        return properties;
+    }
+    const auto mode = std::to_string(talon.mode);
+    if (PropertyValueAsString(base, PROPERTY_FS_STORAGE_TYPE) != "local" &&
+        PropertyValueAsString(base, PROPERTY_FS_TALON_MODE) != mode) {
+        (*properties)[std::string(PROPERTY_READER_OPEN_PREFIX) +
+                      PROPERTY_FS_TALON_MODE] = talon.mode;
+    }
+    // External aliases are injected after this private load configuration is
+    // created, so they inherit the open mode only for this reader.
+    if (talon.enable_for_external_table &&
+        PropertyValueAsString(base, "milvus.talon.external_mode") != mode) {
+        (*properties)["milvus.talon.external_open_mode"] = mode;
+    }
+    return properties;
 }
 
 static std::string
@@ -782,6 +811,19 @@ InjectExternalSpecProperties(
             properties[extfs_key] = *value;
         }
     }
+    const auto external_data_mode =
+        PropertyValueAsString(properties, "milvus.talon.external_mode");
+    const auto external_open_mode =
+        PropertyValueAsString(properties, "milvus.talon.external_open_mode");
+    const std::string open_mode_key =
+        std::string(PROPERTY_READER_OPEN_PREFIX) +
+        ExternalFsPropertyKey(extfs_prefix, PROPERTY_FS_TALON_MODE);
+    if (!external_is_local && external_open_mode.has_value() &&
+        external_open_mode != external_data_mode) {
+        properties[open_mode_key] = *external_open_mode;
+    } else {
+        properties.erase(open_mode_key);
+    }
 
     // Format-layer: emit per-format properties derived from spec.format.
     // Currently only Iceberg-table → reader.exttable.snapshot_id. Future formats
@@ -894,7 +936,8 @@ ToCStorageConfig(const milvus::storage::StorageConfig& config) {
                           config.talon_coordinator.c_str(),
                           config.talon_block_size,
                           config.talon_max_idle_per_addr,
-                          config.talon_enable_for_external_table};
+                          config.talon_enable_for_external_table,
+                          config.talon_enabled_stages};
 }
 
 std::shared_ptr<milvus_storage::api::Manifest>

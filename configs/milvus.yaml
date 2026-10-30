@@ -1320,7 +1320,8 @@ common:
       # The default matches the milvus-storage default.
       maxRate: 5000
     talon:
-      mode: 0 # Remote milvus-storage read routing: 0 disables Talon, 1 routes all reads through Talon, and 2 routes only small reads. Requires a restart.
+      mode: 0 # Remote milvus-storage read routing within enabledStages: 0 disables Talon, 1 routes all reads through Talon, and 2 routes only small reads. Requires a restart.
+      enabledStages: all # Comma-separated Talon read stages: all preserves unrestricted routing; load_open limits Talon to QueryNode milvus-storage reader-open metadata, including footers. Data, index, and background reads use origin storage with load_open. Cannot combine all with other stages. Requires a restart.
       enableForExternalTable: false # Apply the configured Talon read routing to remote External Tables when mode is 1 or 2. Requires a restart.
       smallReadThreshold: 524288 # Inclusive request size threshold in bytes for Talon mode 2, before EOF clamping. Defaults to 512 KiB. Valid range: [1, 1048576]. Requires a restart.
       coordinator:  # Talon coordinator address (host:port), required when Talon mode is 1 or 2. Requires a restart.

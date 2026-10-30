@@ -237,9 +237,14 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 
 	// Store the External Table mode in the same properties map; it is consumed
 	// by InjectExternalSpecProperties once the collection is known.
+	// This shared filesystem cannot assume which read stage a caller will use.
+	var talonMode uint32
+	if mask := storageConfig.GetTalonEnabledStages(); mask == 0 || mask == paramtable.TalonStagesAll {
+		talonMode = storageConfig.GetTalonMode()
+	}
 	externalMode := uint32(0)
 	if storageConfig.GetTalonEnableForExternalTable() {
-		externalMode = storageConfig.GetTalonMode()
+		externalMode = talonMode
 	}
 	keys = append(keys, "milvus.talon.external_mode")
 	values = append(values, strconv.FormatUint(uint64(externalMode), 10))
@@ -247,7 +252,7 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 		key   string
 		value uint32
 	}{
-		{"fs.talon.mode", storageConfig.GetTalonMode()},
+		{"fs.talon.mode", talonMode},
 		{"fs.talon.small_read_threshold", storageConfig.GetTalonSmallReadThreshold()},
 		{"fs.talon.block_size", storageConfig.GetTalonBlockSize()},
 		{"fs.talon.max_idle_per_addr", storageConfig.GetTalonMaxIdlePerAddr()},

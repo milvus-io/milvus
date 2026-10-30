@@ -36,6 +36,7 @@
 #include "mmap/ChunkedColumnFilter.h"
 #include "mmap/SparseVortexFileSystem.h"
 #include "milvus-storage/column_groups.h"
+#include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/format/vortex/vortex_writer.h"
 #include "milvus-storage/format/vortex/vortex_types.h"
 #include "milvus-storage/properties.h"
@@ -1511,6 +1512,66 @@ TEST(VortexColumnTest, CursorOwnedScanReleasesOldFileBeforePinningNextFile) {
     EXPECT_FALSE(column.CellsLoaded(first_file_offset, 1));
     EXPECT_FALSE(column.CellsLoaded(second_file_offset, 1));
 
+    std::filesystem::remove_all(dir);
+}
+
+TEST(VortexColumnTest, OpenFilesystemOverrideOnlyReadsFooter) {
+    auto properties =
+        std::make_shared<milvus_storage::api::Properties>(MakeProperties());
+    const auto dir =
+        std::filesystem::temp_directory_path() /
+        ("milvus_vortex_open_routing_" + std::to_string(::getpid()) + "_" +
+         std::to_string(reinterpret_cast<uintptr_t>(properties.get())));
+    const auto data_dir = dir / "data";
+    const auto open_dir = dir / "open";
+    std::filesystem::create_directories(data_dir);
+    std::filesystem::create_directories(open_dir);
+    const auto object_key = dir.filename().string() + ".vx";
+    (*properties)[PROPERTY_FS_ROOT_PATH] = data_dir.string();
+    auto file_info = WriteVortexFile(
+        (data_dir / object_key).string(), MakeSchema(), *properties);
+    std::filesystem::copy_file(data_dir / object_key, open_dir / object_key);
+    file_info.path = object_key;
+
+    auto open_properties = *properties;
+    open_properties[PROPERTY_FS_ROOT_PATH] = open_dir.string();
+    (*properties)[std::string(PROPERTY_READER_OPEN_PREFIX) +
+                  PROPERTY_FS_ROOT_PATH] = open_dir.string();
+    auto& cache = milvus_storage::FilesystemCache::getInstance();
+    const auto data_fs = cache.get(*properties);
+    const auto open_fs = cache.get(open_properties);
+    ASSERT_TRUE(data_fs.ok()) << data_fs.status().ToString();
+    ASSERT_TRUE(open_fs.ok()) << open_fs.status().ToString();
+    const auto data_metrics =
+        (*data_fs)->GetMetrics(milvus_storage::kOriginMetricsSource);
+    const auto open_metrics =
+        (*open_fs)->GetMetrics(milvus_storage::kOriginMetricsSource);
+    ASSERT_TRUE(data_metrics.ok());
+    ASSERT_TRUE(open_metrics.ok());
+    ASSERT_NE(*data_metrics, nullptr);
+    ASSERT_NE(*open_metrics, nullptr);
+    const auto data_reads_before = (*data_metrics)->GetReadCount();
+    const auto open_reads_before = (*open_metrics)->GetReadCount();
+
+    auto group =
+        MakeColumnGroup({file_info}, properties, {std::to_string(kIntFieldId)});
+    EXPECT_GT((*open_metrics)->GetReadCount(), open_reads_before);
+    EXPECT_EQ((*data_metrics)->GetReadCount(), data_reads_before);
+    const auto footer_reads = (*open_metrics)->GetReadCount();
+    FieldMeta int_meta(FieldName("int_field"),
+                       FieldId(kIntFieldId),
+                       DataType::INT32,
+                       false,
+                       std::nullopt);
+    VortexColumn column(FieldId(kIntFieldId),
+                        int_meta,
+                        std::to_string(kIntFieldId),
+                        properties,
+                        group);
+    EXPECT_EQ(CollectIntScanValues(column, 4, 4),
+              (std::vector<int32_t>{40, 50, 60, 70}));
+    EXPECT_GT((*data_metrics)->GetReadCount(), data_reads_before);
+    EXPECT_EQ((*open_metrics)->GetReadCount(), footer_reads);
     std::filesystem::remove_all(dir);
 }
 
