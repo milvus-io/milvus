@@ -88,6 +88,45 @@ func TestSnapshotCandidatesAndPublishShareOneMetadataBoundary(t *testing.T) {
 	require.Equal(t, []int64{1001}, ids(), "snapshot must include the committed replacement")
 }
 
+func TestRowCountExcludesUnpublishedChangeMembers(t *testing.T) {
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "true")
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	ready := seedPublishMeta(t, m, model.SegmentChangeSourceMixCompaction)
+	count := func() {
+		require.EqualValues(t, 42, m.GetNumRowsOfCollection(t.Context(), 10))
+		require.EqualValues(t, 42, m.GetNumRowsOfPartition(t.Context(), 10, 100))
+		require.Zero(t, m.GetNumRowsOfPartition(t.Context(), 10, 101))
+	}
+	count()
+	// Existing groups still determine visibility after admission is disabled.
+	require.NoError(t, Params.Save(Params.DataCoordCfg.SegmentChangeEnabled.Key, "false"))
+	count()
+	require.NoError(t, m.publishGroup(t.Context(), ready, newMockAllocator(t)))
+	count()
+}
+
+func TestRowCountKeepsInvisibleFlushWithoutGroup(t *testing.T) {
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	require.NoError(t, m.AddSegment(t.Context(), NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 7, CollectionID: 10, PartitionID: 100, State: commonpb.SegmentState_Flushed,
+		IsInvisible: true, NumOfRows: 42,
+	})))
+	require.EqualValues(t, 42, m.GetNumRowsOfCollection(t.Context(), 10))
+	require.EqualValues(t, 42, m.GetNumRowsOfPartition(t.Context(), 10, 100))
+}
+
+func TestRowCountExcludesAbortedMembersBeforeReclamation(t *testing.T) {
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	group := seedPublishMeta(t, m, model.SegmentChangeSourceMixCompaction)
+	group.State = model.SegmentChangeStateAborted
+	require.NoError(t, m.UpdateSegmentChangeGroup(t.Context(), group))
+	require.EqualValues(t, 42, m.GetNumRowsOfCollection(t.Context(), 10))
+	require.EqualValues(t, 42, m.GetNumRowsOfPartition(t.Context(), 10, 100))
+}
+
 func TestPublishGroup_Dataviewless(t *testing.T) {
 	m, err := newMemoryMeta(t)
 	require.NoError(t, err)

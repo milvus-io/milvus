@@ -728,6 +728,7 @@ func (s *ClusteringCompactionTaskSuite) TestExecutingState() {
 }
 
 func (s *ClusteringCompactionTaskSuite) TestProcessIndexingState() {
+	setSegmentChangeTestParam(s.T(), &Params.DataCoordCfg.SegmentChangeEnabled, "false")
 	s.Run("collection has no index", func() {
 		task := s.generateBasicTask(false)
 		task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_indexing))
@@ -856,6 +857,7 @@ func (s *ClusteringCompactionTaskSuite) TestProcessAnalyzingState() {
 
 // fix: https://github.com/milvus-io/milvus/issues/35110
 func (s *ClusteringCompactionTaskSuite) TestCompleteTask() {
+	setSegmentChangeTestParam(s.T(), &Params.DataCoordCfg.SegmentChangeEnabled, "false")
 	task := s.generateBasicTask(false)
 	task.completeTask()
 	partitionStats := s.meta.GetPartitionStatsMeta().GetPartitionStats(task.GetTaskProto().GetCollectionID(), task.GetTaskProto().GetPartitionID(), task.GetTaskProto().GetChannel(), task.GetTaskProto().GetPlanID())

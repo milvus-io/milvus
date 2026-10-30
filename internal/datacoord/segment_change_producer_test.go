@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -256,7 +257,7 @@ func TestSegmentChangeCopyPublication(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, copyMeta.AddTask(t.Context(), task))
 	resp := &datapb.QueryCopySegmentResponse{State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted, SegmentResults: []*datapb.CopySegmentResult{{SegmentId: 1001, ImportedRows: 84, Binlogs: result.Segments[0].InsertLogs}}}
-	require.NoError(t, SyncCopySegmentTask(task, resp, copyMeta, m))
+	require.NoError(t, SyncCopySegmentTask(context.TODO(), task, resp, copyMeta, m))
 	g := m.producerChangeGroup(model.SegmentChangeSourceCopySegment, task.GetTaskId(), "")
 	require.NotNil(t, g)
 	require.True(t, g.PreserveMemberTimestamps)
@@ -272,7 +273,7 @@ func TestSegmentChangeCopyPublication(t *testing.T) {
 	inspector.checkAllGroups(t.Context())
 	require.Equal(t, model.SegmentChangeStateCommitted, m.GetSegmentChangeGroup(t.Context(), 10, g.GroupID).State)
 	require.Equal(t, uint64(7000), m.GetSegment(t.Context(), 1001).GetCommitTimestamp(), "file copying must preserve source row/delete timestamps")
-	require.NoError(t, SyncCopySegmentTask(task, resp, copyMeta, m), "lost task-meta response must not reset published members")
+	require.NoError(t, SyncCopySegmentTask(context.TODO(), task, resp, copyMeta, m), "lost task-meta response must not reset published members")
 	require.NoError(t, copyMeta.UpdateTask(t.Context(), task.GetTaskId(), UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed), updateCopyTaskCleanup(true)))
 	(&copySegmentInspector{ctx: t.Context(), meta: m}).processFailed(task)
 	require.Equal(t, commonpb.SegmentState_Flushed, m.GetSegment(t.Context(), 1001).GetState(), "late task failure cannot withdraw a committed group")

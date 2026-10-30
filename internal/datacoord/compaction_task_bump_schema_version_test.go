@@ -523,6 +523,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestQueryTaskOnWorker() {
 	})
 
 	s.Run("QueryTaskOnWorker, completed replacement success path", func() {
+		setSegmentChangeTestParam(s.T(), &Params.DataCoordCfg.SegmentChangeEnabled, "false")
 		segmentID := int64(101)
 		newSegmentID := int64(1000)
 		err := s.meta.AddSegment(context.TODO(), &SegmentInfo{

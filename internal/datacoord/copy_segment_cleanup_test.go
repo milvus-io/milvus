@@ -222,7 +222,7 @@ func TestRejectedCopyCleanupSkipsActivePublication(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		finished <- SyncCopySegmentTask(task, &datapb.QueryCopySegmentResponse{
+		finished <- SyncCopySegmentTask(context.TODO(), task, &datapb.QueryCopySegmentResponse{
 			State:          datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 			SegmentResults: []*datapb.CopySegmentResult{{SegmentId: 2001, ManifestPath: packed.MarshalManifestPath(base, 3)}},
 		}, copies, m)
@@ -303,7 +303,7 @@ func TestRejectedCopyCleanupDoesNotBlockDispatch(t *testing.T) {
 	// A late result must not make the scheduler wait for the cleanup worker.
 	lateResult := make(chan error, 1)
 	go func() {
-		lateResult <- SyncCopySegmentTask(failed, &datapb.QueryCopySegmentResponse{
+		lateResult <- SyncCopySegmentTask(context.TODO(), failed, &datapb.QueryCopySegmentResponse{
 			State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 		}, copies, m)
 	}()
@@ -366,7 +366,7 @@ func TestRejectedCopyCleanupAllowsAbsentLocalPrefixes(t *testing.T) {
 	// not publish the now-deleted artifact, even though the intent is cleared.
 	restarted, err := NewCopySegmentMeta(ctx, m.catalog, m, nil, nil)
 	require.NoError(t, err)
-	err = SyncCopySegmentTask(restarted.GetTask(ctx, task.GetTaskId()), &datapb.QueryCopySegmentResponse{
+	err = SyncCopySegmentTask(context.TODO(), restarted.GetTask(ctx, task.GetTaskId()), &datapb.QueryCopySegmentResponse{
 		State:          datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 		SegmentResults: []*datapb.CopySegmentResult{{SegmentId: 2001}},
 	}, restarted, m)

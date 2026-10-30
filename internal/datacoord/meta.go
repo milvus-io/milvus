@@ -520,12 +520,7 @@ func GetSegmentsChanPart(m *meta, collectionID int64, filters ...SegmentFilter) 
 
 // GetNumRowsOfCollection returns total rows count of segments belongs to provided collection
 func (m *meta) GetNumRowsOfCollection(ctx context.Context, collectionID UniqueID) int64 {
-	var ret int64
-	segments := m.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(isSegmentHealthy))
-	for _, segment := range segments {
-		ret += segment.GetNumOfRows()
-	}
-	return ret
+	return m.countPublishedRows(collectionID, nil)
 }
 
 func getBinlogFileCount(s *datapb.SegmentInfo) int {
@@ -2393,9 +2388,17 @@ func (m *meta) GetSegmentsIDOfPartitionWithDropped(ctx context.Context, collecti
 
 // GetNumRowsOfPartition returns row count of segments belongs to provided collection & partition
 func (m *meta) GetNumRowsOfPartition(ctx context.Context, collectionID UniqueID, partitionID UniqueID) int64 {
+	return m.countPublishedRows(collectionID, &partitionID)
+}
+
+// countPublishedRows observes group exclusions and segment states atomically.
+func (m *meta) countPublishedRows(collectionID UniqueID, partitionID *UniqueID) int64 {
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
+	unpublished := m.segmentChangeExclusionsLocked(collectionID, false)
 	var ret int64
-	segments := m.SelectSegments(ctx, WithCollection(collectionID), SegmentFilterFunc(func(si *SegmentInfo) bool {
-		return isSegmentHealthy(si) && si.GetPartitionID() == partitionID
+	segments := m.segments.GetSegmentsBySelector(WithCollection(collectionID), SegmentFilterFunc(func(si *SegmentInfo) bool {
+		return isSegmentHealthy(si) && !unpublished.Contain(si.GetID()) && (partitionID == nil || si.GetPartitionID() == *partitionID)
 	}))
 	for _, segment := range segments {
 		ret += segment.NumOfRows
