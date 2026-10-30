@@ -9,6 +9,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -231,6 +232,7 @@ type queryParams struct {
 	orderByFields       []string // NEW: ORDER BY field specifications (e.g., "price:desc")
 	extractTimeFields   []string
 	queryIteratorCursor *planpb.QueryIteratorCursor
+	calcDistance        *calcDistanceSpec
 }
 
 func isSupportedGroupByFieldType(dt schemapb.DataType) bool {
@@ -566,6 +568,11 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair, largeTopKEnabled
 		return nil, err
 	}
 
+	calcDistance, err := parseCalcDistance(queryParamsPair)
+	if err != nil {
+		return nil, err
+	}
+
 	return &queryParams{
 		limit:               limit,
 		offset:              offset,
@@ -576,6 +583,7 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair, largeTopKEnabled
 		orderByFields:       orderByFields,
 		queryIteratorCursor: queryIteratorCursor,
 		extractTimeFields:   extractTimeFields,
+		calcDistance:        calcDistance,
 	}, nil
 }
 
@@ -744,6 +752,69 @@ func (t *QueryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 	mlog.Debug(ctx, "translate output fields to field ids",
 		mlog.Int64s("OutputFieldsID", t.OutputFieldsId),
 		mlog.String("requestType", t.getQueryLabel()))
+	return nil
+}
+
+// applyCalcDistanceToPlan writes the calc_distance spec into the query plan and
+// injects the target vector field into the output field ids so segcore fetches
+// its raw data for the QueryNode-side distance computation.
+func (t *QueryTask) applyCalcDistanceToPlan() error {
+	spec := t.queryParams.calcDistance
+	fieldID := spec.vectorField.GetFieldID()
+
+	// inject the vector field into the plan's output field ids (deduplicated)
+	// so segcore fetches its raw data. The RetrieveRequest's OutputFieldsId is
+	// intentionally left untouched: the QueryNode uses it to decide whether the
+	// user requested the vector field (keep it) or only calc_distance needs it
+	// (drop after computing).
+	found := false
+	for _, id := range t.plan.OutputFieldIds {
+		if id == fieldID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.plan.OutputFieldIds = append(t.plan.OutputFieldIds, fieldID)
+	}
+
+	// resolve output column name: default "distance", prefix '_' until free of
+	// collision with the final output column set. The set covers explicit
+	// schema/user-requested fields, the requested dynamic-field keys (a $meta
+	// key literally named "distance" would otherwise collide after the SDK
+	// unpacks $meta), and the primary key field (always present in the output
+	// even when not listed in output_fields).
+	taken := make(map[string]bool, len(t.userOutputFields)+len(t.translatedOutputFields)+len(t.userDynamicFields))
+	for _, name := range t.userOutputFields {
+		taken[name] = true
+	}
+	for _, name := range t.translatedOutputFields {
+		taken[name] = true
+	}
+	for _, name := range t.userDynamicFields {
+		taken[name] = true
+	}
+	for _, field := range t.schema.CollectionSchema.GetFields() {
+		if field.GetIsPrimaryKey() {
+			taken[field.GetName()] = true
+		}
+	}
+	outputName := "distance"
+	for taken[outputName] {
+		outputName = "_" + outputName
+	}
+	spec.distanceOutputName = outputName
+
+	query := t.plan.GetQuery()
+	query.CalcDistance = &planpb.CalcDistanceSpec{
+		ReturnDistance:     true,
+		MetricType:         spec.metricType,
+		VectorFieldId:      fieldID,
+		DistanceOutputName: outputName,
+		RefVectorType:      spec.refVectorType,
+		// reference vector in its canonical byte encoding for the field's type
+		RefVectors: [][]byte{spec.refVector},
+	}
 	return nil
 }
 
@@ -976,6 +1047,25 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
+	// calc_distance: validate the spec against the schema, resolve any
+	// expression-form reference vector via an internal query, and write the
+	// distance spec into the plan. Runs after GetPartitionIDs so the internal
+	// reference-vector query reuses t.PartitionIDs (the caller's partition
+	// scope) instead of scanning all partitions. The output field ids and
+	// aggregates are known from createPlanArgs.
+	if t.queryParams.calcDistance != nil {
+		if len(t.userAggregates) > 0 || len(t.queryParams.groupByFields) > 0 {
+			return merr.WrapErrParameterInvalidMsg("%s is not supported with aggregation or group_by", CalcDistanceKey)
+		}
+		span := trace.SpanFromContext(ctx)
+		if err := t.resolveCalcDistance(t.queryParams.calcDistance, ctx, span); err != nil {
+			return err
+		}
+		if err := t.applyCalcDistanceToPlan(); err != nil {
+			return err
+		}
+	}
+
 	// count(*) without GROUP BY is a single-value result, pagination is meaningless.
 	// But count(*) with GROUP BY + limit is valid (limits the number of groups returned).
 	if t.hasCountStar() && t.queryParams.limit != typeutil.Unlimited && len(t.GetGroupByFieldIds()) == 0 {
@@ -1193,6 +1283,17 @@ func (t *QueryTask) PostExecute(ctx context.Context) error {
 	// final order (finishMaterialize); the plain pipeline's pk reduce passes a
 	// single result through untouched, so only complement_fields and the
 	// steps below act on it -- no cross-shard reduce runs.
+
+	// calc_distance: keep the synthetic distance column through the ORDER BY
+	// remap. The ORDER BY pipeline rebuilds FieldsData from this id list
+	// (FieldIDRemapOperator) and would otherwise drop the QueryNode's synthetic
+	// distance column (FieldId common.CalcDistanceFieldID) while PostExecute
+	// still advertises its name in output_fields. Appending it last keeps the
+	// column position aligned with the output_fields order.
+	outputFieldIDs := filterSystemFields(t.GetOutputFieldsId())
+	if t.queryParams.calcDistance != nil {
+		outputFieldIDs = append(outputFieldIDs, common.CalcDistanceFieldID)
+	}
 	pipeline, err := NewQueryPipeline(
 		t.schema.CollectionSchema,
 		t.queryParams.limit,
@@ -1202,7 +1303,7 @@ func (t *QueryTask) PostExecute(ctx context.Context) error {
 		t.GetGroupByFieldIds(),
 		t.GetAggregates(),
 		t.aggregationFieldMap,
-		filterSystemFields(t.GetOutputFieldsId()),
+		outputFieldIDs,
 	)
 	if err != nil {
 		log.Warn(ctx, "fail to create query pipeline", mlog.Err(err))
@@ -1226,6 +1327,44 @@ func (t *QueryTask) PostExecute(ctx context.Context) error {
 		}
 	}
 	t.result.OutputFields = t.userOutputFields
+	if t.queryParams.calcDistance != nil {
+		// Append the resolved distance column name only when the column actually
+		// survived the reduce. In a mixed-version cluster an old QueryNode drops
+		// the calc_distance plan field and produces no reserved-FieldId column;
+		// advertising the name without data would break SDK reconstruction, so
+		// the clean result is "no distance column" (design doc §Upgrade note).
+		// Zero-row results go through FillRetrieveResultIfEmpty, which classifies
+		// the reserved FieldId (a negative id) as a system field and fabricates a
+		// nameless Int64 column; rewrite it into the Float32 distance column with
+		// the resolved name, idempotently: on non-empty results the QueryNode
+		// already emits exactly this column, so the rewrite is a no-op there.
+		for i, fd := range t.result.FieldsData {
+			if fd.GetFieldId() == common.CalcDistanceFieldID {
+				t.result.OutputFields = append(t.result.OutputFields, t.queryParams.calcDistance.distanceOutputName)
+				var data *schemapb.FloatArray
+				if floatData := fd.GetScalars().GetFloatData(); floatData != nil {
+					data = floatData
+				} else {
+					data = &schemapb.FloatArray{}
+				}
+				t.result.FieldsData[i] = &schemapb.FieldData{
+					Type:      schemapb.DataType_Float,
+					FieldName: t.queryParams.calcDistance.distanceOutputName,
+					FieldId:   common.CalcDistanceFieldID,
+					// preserve the nullness bitmap: for a nullable vector field the
+					// QueryNode's distance column carries ValidData, and dropping it
+					// here would turn null rows (zero placeholder) into real zeros
+					ValidData: fd.GetValidData(),
+					Field: &schemapb.FieldData_Scalars{
+						Scalars: &schemapb.ScalarField{
+							Data: &schemapb.ScalarField_FloatData{FloatData: data},
+						},
+					},
+				}
+				break
+			}
+		}
+	}
 	if !t.reQuery {
 		reconstructStructFieldDataForQuery(t.result, t.schema.CollectionSchema)
 	}
