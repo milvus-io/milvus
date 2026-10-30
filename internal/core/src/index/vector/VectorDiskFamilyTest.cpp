@@ -113,6 +113,62 @@ struct OpenedDiskIndex {
     IIndexReaderBasePtr base;
 };
 
+// Publishes the validity entry from a substitute local file, standing in for
+// the per-row bytes older builds wrote. The artifact pins its staged file sizes,
+// so the substitution happens at the sink instead of in the staging directory.
+class SubstituteValiditySink final : public storage::FileSink {
+ public:
+    SubstituteValiditySink(storage::FileSink& inner, std::string validity_path)
+        : inner_(inner), validity_path_(std::move(validity_path)) {
+    }
+
+    storage::Generation
+    Gen() const override {
+        return inner_.Gen();
+    }
+    void
+    WriteEntry(std::string_view name, const void* data, size_t size) override {
+        AssertInfo(name != VALID_DATA_KEY, "validity entry is file-backed");
+        inner_.WriteEntry(name, data, size);
+    }
+    void
+    WriteEntryFromLocalFile(std::string_view name,
+                            const std::string& local_path) override {
+        inner_.WriteEntryFromLocalFile(name, Substitute(name, local_path));
+    }
+    void
+    WriteRawEntryFromLocalFile(std::string_view name,
+                               const std::string& local_path) override {
+        inner_.WriteRawEntryFromLocalFile(name, Substitute(name, local_path));
+    }
+    storage::ArtifactStats
+    Finish() override {
+        return inner_.Finish();
+    }
+    void
+    ReleaseLocalStaging() override {
+        inner_.ReleaseLocalStaging();
+    }
+    bool
+    Substituted() const {
+        return substituted_;
+    }
+
+ private:
+    const std::string&
+    Substitute(std::string_view name, const std::string& local_path) {
+        if (name != VALID_DATA_KEY) {
+            return local_path;
+        }
+        substituted_ = true;
+        return validity_path_;
+    }
+
+    storage::FileSink& inner_;
+    std::string validity_path_;
+    bool substituted_ = false;
+};
+
 template <typename T>
 void
 BuildDisk(const std::string& raw_path,
@@ -155,23 +211,15 @@ BuildDisk(const std::string& raw_path,
     }
     auto artifact = std::move(*builder).Build(input);
     ASSERT_NE(artifact, nullptr);
+    std::string legacy_validity_path;
     if (legacy_validity != nullptr) {
-        // Replace the published validity with the bytes older builds wrote.
-        bool replaced = false;
-        for (const auto& entry :
-             std::filesystem::recursive_directory_iterator(staging_dir)) {
-            if (entry.path().filename() == VALID_DATA_KEY &&
-                entry.path().string() != validity_path) {
-                std::ofstream stream(entry.path(),
-                                     std::ios::binary | std::ios::trunc);
-                stream.write(
-                    reinterpret_cast<const char*>(legacy_validity->data()),
-                    static_cast<std::streamsize>(legacy_validity->size()));
-                ASSERT_TRUE(stream.good());
-                replaced = true;
-            }
-        }
-        ASSERT_TRUE(replaced);
+        // The bytes older builds published in place of the built validity.
+        legacy_validity_path = staging_dir + "/legacy_" + VALID_DATA_KEY;
+        std::ofstream stream(legacy_validity_path,
+                             std::ios::binary | std::ios::trunc);
+        stream.write(reinterpret_cast<const char*>(legacy_validity->data()),
+                     static_cast<std::streamsize>(legacy_validity->size()));
+        ASSERT_TRUE(stream.good());
     }
 
     // DiskANN needs the V1/V2 directory source's native file-manager handle.
@@ -197,7 +245,13 @@ BuildDisk(const std::string& raw_path,
                                         storage::InitArrowFileSystem(config));
     context.use_async_load = false;
     storage::V1DiskSink sink(context);
-    artifact->Serialize(sink);
+    if (legacy_validity != nullptr) {
+        SubstituteValiditySink legacy_sink(sink, legacy_validity_path);
+        artifact->Serialize(legacy_sink);
+        ASSERT_TRUE(legacy_sink.Substituted());
+    } else {
+        artifact->Serialize(sink);
+    }
     const auto stats = sink.Finish();
     ASSERT_FALSE(stats.Files().empty());
     std::vector<std::string> paths;
