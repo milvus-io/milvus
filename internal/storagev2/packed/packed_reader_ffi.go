@@ -39,10 +39,12 @@ import "C"
 import (
 	"context"
 	"io"
+	"syscall"
 	"unsafe"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/cdata"
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
@@ -378,6 +380,12 @@ func (r *FFIPackedReader) ReadNext() (rec arrow.Record, err error) {
 	if err != nil {
 		if err == io.EOF {
 			return nil, io.EOF
+		}
+		// The C++ stream encodes the producer's retryable classification in
+		// the errno (see ffi_reader_status.h); Arrow's cdata package rebuilds
+		// it as a wrapped syscall.Errno and would otherwise lose it.
+		if errors.Is(err, syscall.EAGAIN) {
+			return nil, merr.Wrapf(ErrLoonTransient, "failed to read next record: %v", err)
 		}
 		return nil, merr.WrapErrStorage(err, "failed to read next record")
 	}
