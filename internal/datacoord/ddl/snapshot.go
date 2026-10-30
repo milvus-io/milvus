@@ -108,10 +108,20 @@ func (c *Callbacks) DropSnapshotsByCollectionV2AckCallback(ctx context.Context, 
 }
 
 // restoreSnapshotV2AckCallback handles the callback for RestoreSnapshot DDL message.
-// It creates copy segment jobs for data restoration.
-// NOTE: RestoreIndexes is now called synchronously in services.go before broadcast.
+// New messages create collection/index metadata and the asynchronous copy job.
+// Legacy messages restore data into an already-created collection.
 // NOTE: jobID is pre-allocated in RestoreSnapshot and passed via WAL message for idempotency.
-func (c *Callbacks) RestoreSnapshotV2AckCallback(ctx context.Context, result message.BroadcastResultRestoreSnapshotMessageV2) error {
+func (s *Callbacks) RestoreSnapshotV2AckCallback(ctx context.Context, result message.BroadcastResultRestoreSnapshotMessageV2) error {
+	if result.Message.MustBody().GetCollection() != nil {
+		if err := s.SnapshotManager.(*snapshotManager).applyRestoreCollection(ctx, result); err != nil {
+			return err
+		}
+		select {
+		case s.NotifyIndexChan <- result.Message.Header().GetCollectionId():
+		default:
+		}
+		return nil
+	}
 	header := result.Message.Header()
 	log := mlog.With(
 		mlog.String("snapshotName", header.SnapshotName),

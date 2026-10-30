@@ -86,6 +86,20 @@ type ServerSuite struct {
 	mockMixCoord *mocks2.MixCoord
 }
 
+func TestPackQueryViewCollectionIndexInfosUsesDeterministicOrder(t *testing.T) {
+	indexes := []*model.Index{
+		{CollectionID: 1, FieldID: 103, IndexID: 30, IndexName: "third"},
+		{CollectionID: 1, FieldID: 101, IndexID: 10, IndexName: "first"},
+		{CollectionID: 1, FieldID: 102, IndexID: 20, IndexName: "second"},
+	}
+
+	infos := packQueryViewCollectionIndexInfos(indexes)
+
+	require.Equal(t, []int64{10, 20, 30}, lo.Map(infos, func(info *indexpb.IndexInfo, _ int) int64 {
+		return info.GetIndexID()
+	}))
+}
+
 func (s *ServerSuite) SetupSuite() {
 	snmanager.ResetStreamingNodeManager()
 	b := mock_balancer.NewMockBalancer(s.T())
@@ -448,7 +462,7 @@ func (s *ServerSuite) TestSaveBinlogPath_StorageVersionImmutable() {
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
-	s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 0})
+	s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 0, VChannelNames: []string{"ch1"}})
 
 	segments := map[int64]commonpb.SegmentState{
 		0: commonpb.SegmentState_Flushed,
@@ -461,11 +475,12 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 			numOfRows = 0
 		}
 		info := &datapb.SegmentInfo{
-			ID:            segID,
-			InsertChannel: "ch1",
-			State:         state,
-			Level:         datapb.SegmentLevel_L1,
-			NumOfRows:     numOfRows,
+			TransformStartAfterTimetick: 10,
+			ID:                          segID,
+			InsertChannel:               "ch1",
+			State:                       state,
+			Level:                       datapb.SegmentLevel_L1,
+			NumOfRows:                   numOfRows,
 		}
 		err := s.testServer.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(info))
 		s.Require().NoError(err)
@@ -492,6 +507,7 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 		s.Run(test.description, func() {
 			ctx := context.Background()
 			resp, err := s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+				GrowingTransformStartAfterTimetick: 10,
 				Base: &commonpb.MsgBase{
 					Timestamp: uint64(time.Now().Unix()),
 				},
@@ -515,7 +531,8 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 
 func (s *ServerSuite) TestSaveBinlogPath_TextRequiresStorageV3Manifest() {
 	s.testServer.meta.AddCollection(&meta.CollectionInfo{
-		ID: 0,
+		ID:            0,
+		VChannelNames: []string{"ch1"},
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
@@ -525,30 +542,32 @@ func (s *ServerSuite) TestSaveBinlogPath_TextRequiresStorageV3Manifest() {
 	})
 
 	addSegment := func(segmentID int64, state commonpb.SegmentState, storageVersion int64) {
-		err := s.testServer.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(&datapb.SegmentInfo{
-			ID:             segmentID,
-			CollectionID:   0,
-			PartitionID:    1,
-			InsertChannel:  "ch1",
-			State:          state,
-			Level:          datapb.SegmentLevel_L1,
-			NumOfRows:      1,
-			StorageVersion: storageVersion,
+		err := s.testServer.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(&datapb.meta.SegmentInfo{
+			TransformStartAfterTimetick: 10,
+			ID:                          segmentID,
+			CollectionID:                0,
+			PartitionID:                 1,
+			InsertChannel:               "ch1",
+			State:                       state,
+			Level:                       datapb.SegmentLevel_L1,
+			NumOfRows:                   1,
+			StorageVersion:              storageVersion,
 		}))
 		s.Require().NoError(err)
 	}
 
 	saveBinlog := func(segmentID int64, flushed bool, storageVersion int64, binlogs []*datapb.FieldBinlog) *commonpb.Status {
 		resp, err := s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
-			Base:              &commonpb.MsgBase{Timestamp: uint64(time.Now().Unix())},
-			SegmentID:         segmentID,
-			CollectionID:      0,
-			PartitionID:       1,
-			Channel:           "ch1",
-			SegLevel:          datapb.SegmentLevel_L1,
-			Flushed:           flushed,
-			StorageVersion:    storageVersion,
-			Field2BinlogPaths: binlogs,
+			GrowingTransformStartAfterTimetick: 10,
+			Base:                               &commonpb.MsgBase{Timestamp: uint64(time.Now().Unix())},
+			SegmentID:                          segmentID,
+			CollectionID:                       0,
+			PartitionID:                        1,
+			Channel:                            "ch1",
+			SegLevel:                           datapb.SegmentLevel_L1,
+			Flushed:                            flushed,
+			StorageVersion:                     storageVersion,
+			Field2BinlogPaths:                  binlogs,
 		})
 		s.NoError(err)
 		return resp
@@ -1006,23 +1025,25 @@ func (s *ServerSuite) TestSaveBinlogPath_FlushedSegmentStaysInvisibleBeforeSortC
 		paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
 	})
 
-	s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 100})
-	seg := meta.NewSegmentInfo(&datapb.SegmentInfo{
-		ID:            10,
-		CollectionID:  100,
-		PartitionID:   20,
-		InsertChannel: "ch-1",
-		State:         commonpb.SegmentState_Growing,
-		Level:         datapb.SegmentLevel_L1,
+	s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 100, VChannelNames: []string{"ch-1"}})
+	seg := meta.NewSegmentInfo(&datapb.meta.SegmentInfo{
+		TransformStartAfterTimetick: 10,
+		ID:                          10,
+		CollectionID:                100,
+		PartitionID:                 20,
+		InsertChannel:               "ch-1",
+		State:                       commonpb.SegmentState_Growing,
+		Level:                       datapb.SegmentLevel_L1,
 	})
 	s.Require().NoError(s.testServer.meta.AddSegment(context.Background(), seg))
 
 	status, err := s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
-		SegmentID:    10,
-		CollectionID: 100,
-		PartitionID:  20,
-		Channel:      "ch-1",
-		SegLevel:     datapb.SegmentLevel_L1,
+		GrowingTransformStartAfterTimetick: 10,
+		SegmentID:                          10,
+		CollectionID:                       100,
+		PartitionID:                        20,
+		Channel:                            "ch-1",
+		SegLevel:                           datapb.SegmentLevel_L1,
 		Field2BinlogPaths: []*datapb.FieldBinlog{{
 			FieldID: 1,
 			Binlogs: []*datapb.Binlog{{
@@ -1704,7 +1725,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			return meta.NewMockMixCoord(), nil
 		}
 		svr.meta.AddCollection(&meta.CollectionInfo{
-			Schema: meta.NewTestSchema(),
+			Schema:        meta.NewTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		binlogReq := &datapb.SaveBinlogPathsRequest{
@@ -1752,6 +1774,10 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			Flushed: true,
 		}
 		seg := createSegment(binlogReq.SegmentID, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Growing)
+		// Native Flush carries the WAL-proven frontier.
+		seg.TransformStartAfterTimetick = 10
+		binlogReq.GrowingTransformStartAfterTimetick = 10
+
 		err := svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg))
 		assert.NoError(t, err)
 
@@ -1798,7 +1824,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			return meta.NewMockMixCoord(), nil
 		}
 		svr.meta.AddCollection(&meta.CollectionInfo{
-			Schema: meta.NewTestSchema(),
+			Schema:        meta.NewTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		const expectedDataVersion int32 = 7
@@ -1819,6 +1846,8 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		}
 		seg := createSegment(binlogReq.SegmentID, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Growing)
 		seg.DataVersion = expectedDataVersion
+		seg.TransformStartAfterTimetick = 10
+		binlogReq.GrowingTransformStartAfterTimetick = 10
 		err := svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg))
 		assert.NoError(t, err)
 

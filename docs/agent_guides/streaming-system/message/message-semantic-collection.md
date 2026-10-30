@@ -17,7 +17,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | DropIndex | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | CreateSnapshot | Broadcast: All Collection VChannels + CChannel (AckSyncUp) | Yes | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
 | DropSnapshot | Broadcast: CChannel | No | ExclusiveSnapshotName |
-| RestoreSnapshot | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
+| RestoreSnapshot | Broadcast: target VChannels + CChannel (AckSyncUp); legacy messages CChannel-only | Yes (VChannel) | SharedDBName + ExclusiveCollectionName |
 | DropSnapshotsByCollection | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
 | Import | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
 | UpdateImport | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
@@ -30,7 +30,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | AlterLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | DropLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName (or ExclusiveCluster) |
 | BatchUpdateManifest | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
-| RefreshExternalCollection | Broadcast: CChannel | No | — |
+| RefreshExternalCollection | Broadcast: CChannel + collection VChannels (AckSyncUp) | No | — |
 
 ## Message Descriptions
 
@@ -52,7 +52,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **AlterLoadConfig**: Modifies load configuration — partition set, replica count, load fields, etc. CChannel-only, consumed by QueryCoord.
 - **DropLoadConfig**: Removes load configuration, unloading/releasing from query nodes. Uses ExclusiveCluster when part of DropCollection flow.
 - **BatchUpdateManifest**: Updates segment manifest versions in batch. Used after compaction or index building. CChannel-only.
-- **RefreshExternalCollection**: Submits an external collection refresh job using a pre-allocated job ID from the WAL message. CChannel-only.
+- **RefreshExternalCollection**: Submits an external collection refresh job using a pre-allocated job ID from the WAL message. Target business VChannels advance Transform MVCC; the callback persists their TimeTicks with the job. Legacy CChannel-only messages remain consumable. Job completion separately waits for schema publication and QueryView handoff after applying segment results.
 
 The retired `AlterRLSMetadata` and `DropRLSMetadata` wire types remain decodable,
 but have no ACK callbacks and do not maintain metadata during replay.

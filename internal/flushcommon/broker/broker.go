@@ -35,7 +35,6 @@ type DataCoord interface {
 	AssignSegmentID(ctx context.Context, reqs ...*datapb.SegmentIDRequest) ([]typeutil.UniqueID, error)
 	ReportTimeTick(ctx context.Context, msgs []*msgpb.DataNodeTtMsg) error
 	GetSegmentInfo(ctx context.Context, segmentIDs []int64) ([]*datapb.SegmentInfo, error)
-	UpdateChannelCheckpoint(ctx context.Context, channelCPs []*msgpb.MsgPosition) error
 	SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) error
 	DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error)
 	ImportV2(ctx context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error)

@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -128,6 +129,16 @@ func (suite *ServerSuite) SetupSuite() {
 
 func (suite *ServerSuite) SetupTest() {
 	initStreamingSystem()
+	// These node lifecycle tests have no pending schema ALTER.
+	schemaTarget := mockey.Mock(broadcast.GetPendingSchemaTarget).Return(nil, nil).Build()
+	suite.T().Cleanup(func() { schemaTarget.UnPatch() })
+	provider := newRuntimeDataViewProvider(suite.T())
+	var createRuntime func(context.Context, qviewsRuntimeDependencies) (*qviewsRuntime, error)
+	patch := mockey.Mock(newQViewsRuntime).Origin(&createRuntime).To(func(ctx context.Context, deps qviewsRuntimeDependencies) (*qviewsRuntime, error) {
+		deps.dataViewProvider = provider
+		return createRuntime(ctx, deps)
+	}).Build()
+	suite.T().Cleanup(func() { patch.UnPatch() })
 
 	var err error
 	suite.tikvCli = tikv.SetupLocalTxn()
@@ -157,8 +168,7 @@ func (suite *ServerSuite) SetupTest() {
 
 	suite.loadAll()
 	for _, collection := range suite.collections {
-		suite.True(suite.server.meta.Exist(suite.ctx, collection))
-		suite.updateCollectionStatus(collection, querypb.LoadStatus_Loaded)
+		suite.True(suite.server.qviewsRuntime.loadConfigStore.Contains(collection))
 	}
 }
 
@@ -188,7 +198,7 @@ func (suite *ServerSuite) TestRecover() {
 	suite.NoError(err)
 
 	for _, collection := range suite.collections {
-		suite.True(suite.server.meta.Exist(suite.ctx, collection))
+		suite.True(suite.server.qviewsRuntime.loadConfigStore.Contains(collection))
 	}
 
 	suite.True(suite.server.nodeMgr.IsStoppingNode(suite.nodes[0].ID))
@@ -196,7 +206,7 @@ func (suite *ServerSuite) TestRecover() {
 
 func (suite *ServerSuite) TestNodeUp() {
 	node1 := mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli, 100)
-	node1.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{Status: merr.Success()}, nil)
+	node1.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{Status: merr.Success()}, nil).Maybe()
 	err := node1.Start()
 	suite.NoError(err)
 	defer node1.Stop()
@@ -206,13 +216,9 @@ func (suite *ServerSuite) TestNodeUp() {
 		if node == nil {
 			return false
 		}
-		for _, collection := range suite.collections {
-			replica := suite.server.meta.GetByCollectionAndNode(suite.ctx, collection, node1.ID)
-			if replica == nil {
-				return false
-			}
-		}
-		return true
+		// QueryView placement uses the published node cache, not legacy
+		// per-collection replica membership.
+		return suite.server.qviewsRuntime.balanceCache.GetNode(node1.ID) != nil
 	}, 5*time.Second, time.Second)
 }
 
@@ -236,13 +242,7 @@ func (suite *ServerSuite) TestNodeDown() {
 		if node != nil {
 			return false
 		}
-		for _, collection := range suite.collections {
-			replica := suite.server.meta.GetByCollectionAndNode(suite.ctx, collection, downNode.ID)
-			if replica != nil {
-				return false
-			}
-		}
-		return true
+		return suite.server.qviewsRuntime.balanceCache.GetNode(downNode.ID) == nil
 	}, 5*time.Second, time.Second)
 }
 
@@ -798,7 +798,7 @@ func (suite *ServerSuite) hackServer() {
 			DbId:           1,
 			CollectionID:   collection,
 			CollectionName: "collection_" + strconv.FormatInt(collection, 10),
-			Schema:         &schemapb.CollectionSchema{},
+			Schema:         &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100}, {FieldID: 101}, {FieldID: 102}}},
 		}, nil).Maybe()
 		suite.expectGetRecoverInfo(collection)
 	}
@@ -817,7 +817,7 @@ func (suite *ServerSuite) hackBroker(server *Server) {
 	for _, collection := range suite.collections {
 		mockRootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 			Status: merr.Success(),
-			Schema: &schemapb.CollectionSchema{},
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100}, {FieldID: 101}, {FieldID: 102}}},
 		}, nil).Maybe()
 		req := &milvuspb.ShowPartitionsRequest{
 			Base: commonpbutil.NewMsgBase(

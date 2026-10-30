@@ -24,6 +24,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
@@ -50,6 +51,24 @@ type CollectionRecoveryValidator func(ctx context.Context, collectionID int64) (
 // only (no DataView calls, no catalog writes), is non-blocking, and must not
 // re-enter the Manager.
 type Projector func(ctx context.Context, collectionID int64) ([]LoadableSegment, error)
+
+// FrontierProjector supplies conservative migration inputs for snapshots which
+// predate persisted W/A. Native snapshots never use this legacy projection.
+type FrontierProjector func(ctx context.Context, collectionID int64) (map[string]uint64, error)
+
+// PendingTransformProjector constrains publication by asynchronous data not in
+// the candidate snapshot, such as a pending Import. It must not reenter Manager.
+type PendingTransformProjector func(ctx context.Context, view *viewpb.DataViewOfCollection) (map[string]uint64, error)
+
+type Option func(*dataViewManager)
+
+func WithFrontierProjector(project FrontierProjector) Option {
+	return func(m *dataViewManager) { m.frontierProjector = project }
+}
+
+func WithPendingTransformProjector(project PendingTransformProjector) Option {
+	return func(m *dataViewManager) { m.pendingTransformProjector = project }
+}
 
 type Manager interface {
 	api.DataViewPublisher
@@ -95,11 +114,12 @@ type Manager interface {
 type DataViewRef = qviews.DataViewRef
 
 type LoadableSegment struct {
-	SchemaVersion   int32
-	SegmentID       int64
-	VChannel        string
-	PartitionID     int64
-	ManifestVersion int64
+	SchemaVersion               int32
+	SegmentID                   int64
+	VChannel                    string
+	PartitionID                 int64
+	ManifestVersion             int64
+	TransformStartAfterTimetick uint64
 	// RowNum is the segment's published row count, projected from SegmentMeta
 	// by the Coordinator. It is maintained in memory only (never persisted,
 	// never re-read from SegmentMeta) and exposed via DataViewRef.Stats.
@@ -110,9 +130,10 @@ type LoadableSegment struct {
 }
 
 type CreateCollectionDataViewEvent struct {
-	SchemaVersion int32
-	CollectionID  int64
-	VChannels     []string
+	SchemaVersion   int32
+	CollectionID    int64
+	VChannels       []string
+	TransformStarts map[string]uint64
 }
 
 // BootstrapCollectionDataViewEvent seeds the initial DataView snapshot for a
@@ -128,6 +149,8 @@ type BootstrapCollectionDataViewEvent struct {
 type FlushDataViewEvent struct {
 	CollectionID int64
 	Segments     []LoadableSegment
+	// Per-vchannel WAL proofs, effective only with this Flush's atomic commit.
+	GrowingTransformStarts map[string]uint64
 }
 
 type dataViewAdvance int
@@ -161,11 +184,12 @@ type versionRefCounter struct {
 }
 
 type collectionState struct {
-	changed        *syncutil.VersionedNotifier
-	mu             sync.Mutex
-	id             int64
-	latest         *versionEntry
-	versions       map[qviews.DataVersion]*versionEntry
+	mu       sync.Mutex
+	changed  *syncutil.VersionedNotifier
+	id       int64
+	latest   *versionEntry
+	versions map[qviews.DataVersion]*versionEntry
+	// Retain only the latest native projection, not one for every historical version.
 	publishedEntry *versionEntry
 	native         *api.CollectionDataView
 }
@@ -198,7 +222,9 @@ type dataViewManager struct {
 	// projector is the SegmentMeta projection injected at construction; the
 	// async Recompute worker runs against it. nil means the manager is not
 	// wired for async reconciliation (Recompute returns an error).
-	projector Projector
+	projector                 Projector
+	frontierProjector         FrontierProjector
+	pendingTransformProjector PendingTransformProjector
 	// workerCtx bounds the async Recompute worker's lifetime. NewManager uses
 	// a process-lifetime context; RecoverManager derives it from the caller's
 	// ctx so the worker stops when the coordinator does.
@@ -218,13 +244,13 @@ type dataViewRef struct {
 // immediately (bounded by the process lifetime). Pass nil as project when the
 // manager only serves synchronous operations (PrepareFlush, RecomputeNow,
 // bootstrap); Recompute requests then return an error.
-func NewManager(catalog Catalog, project Projector) Manager {
-	m := newManager(context.Background(), catalog, project)
+func NewManager(catalog Catalog, project Projector, options ...Option) Manager {
+	m := newManager(context.Background(), catalog, project, options...)
 	m.startWorker()
 	return m
 }
 
-func newManager(ctx context.Context, catalog Catalog, project Projector) *dataViewManager {
+func newManager(ctx context.Context, catalog Catalog, project Projector, options ...Option) *dataViewManager {
 	cfg := &paramtable.Get().QueryViewCfg
 	unit := cfg.LogicalSizeBytesPerUnit.GetAsSize()
 	if unit <= 0 {
@@ -238,6 +264,9 @@ func newManager(ctx context.Context, catalog Catalog, project Projector) *dataVi
 		dropped:        make(map[int64]struct{}),
 		projector:      project,
 		workerCtx:      ctx,
+	}
+	for _, option := range options {
+		option(m)
 	}
 	m.queue = newDataViewRecomputeQueue(m)
 	return m
@@ -304,6 +333,7 @@ func RecoverManager(
 	project Projector,
 	liveCollectionIDs []int64,
 	collectionVChannels map[int64][]string,
+	options ...Option,
 ) (Manager, error) {
 	if validator == nil {
 		return nil, merr.WrapErrServiceInternalMsg("DataView recovery requires a Collection recovery validator")
@@ -350,7 +380,7 @@ func RecoverManager(
 		recoverCollection[collectionID] = recover
 	}
 
-	manager := newManager(ctx, catalog, project)
+	manager := newManager(ctx, catalog, project, options...)
 	for _, collectionID := range collectionIDs {
 		if !recoverCollection[collectionID] {
 			continue
@@ -381,6 +411,13 @@ func RecoverManager(
 	}
 	for _, collectionID := range collectionIDs {
 		if recoverCollection[collectionID] {
+			state := manager.getState(collectionID)
+			if err := manager.restoreTransformFrontiers(ctx, state); err != nil {
+				if !errors.Is(err, merr.ErrServiceNotReady) {
+					return nil, err
+				}
+				mlog.Warn(ctx, "failed to restore DataView Transform frontiers", mlog.FieldCollectionID(collectionID), mlog.Err(err))
+			}
 			continue
 		}
 		if err := catalog.DropDataViews(ctx, collectionID); err != nil {
@@ -451,6 +488,10 @@ func (m *dataViewManager) OnCreateCollection(ctx context.Context, event CreateCo
 
 	view := buildEmptyDataView(event.CollectionID, event.VChannels)
 	view.SchemaVersion = event.SchemaVersion
+	for _, shard := range view.Shards {
+		shard.GrowingTransformStartAfterTimetick = event.TransformStarts[shard.Vchannel]
+		shard.CompactedTransformStartAfterTimetick = event.TransformStarts[shard.Vchannel]
+	}
 	view.DataVersion = &viewpb.DataVersion{StreamingVersion: 1}
 	if err := m.persistLocked(ctx, state, view); err != nil {
 		return nil, err
@@ -471,6 +512,13 @@ func (m *dataViewManager) OnBootstrapCollection(ctx context.Context, event Boots
 	view := buildEmptyDataView(event.CollectionID, event.VChannels)
 	view.DataVersion = &viewpb.DataVersion{StreamingVersion: 1}
 	if err := addSegments(view, event.Segments); err != nil {
+		return nil, err
+	}
+	bounds, err := m.captureFrontiers(ctx, event.CollectionID)
+	if err != nil {
+		return nil, err
+	}
+	if err := advanceTransformFrontiers(view, bounds); err != nil {
 		return nil, err
 	}
 	if err := m.persistLockedWithStats(ctx, state, view, buildSegmentStats(event.Segments)); err != nil {
@@ -502,6 +550,10 @@ func (m *dataViewManager) recomputeNow(ctx context.Context, collectionID int64, 
 
 	defer state.changed.NotifyAll()
 	base := latestView(state)
+	if base == nil && m.frontierProjector != nil {
+		// Only Create/Bootstrap may install the complete initial shard skeleton.
+		return nil, nil
+	}
 	segments, err := project(ctx, collectionID)
 	if err != nil {
 		return nil, err
@@ -511,6 +563,9 @@ func (m *dataViewManager) recomputeNow(ctx context.Context, collectionID int64, 
 		next = &viewpb.DataViewOfCollection{CollectionId: collectionID}
 	}
 	if err := rebuildSegments(next, segments); err != nil {
+		return nil, err
+	}
+	if err := m.advanceTransformFrontiers(ctx, next, nil); err != nil {
 		return nil, err
 	}
 	canonicalizeDataView(next)
@@ -570,17 +625,17 @@ func (m *dataViewManager) OnDropCollection(ctx context.Context, collectionID int
 	return nil, nil
 }
 
-func (m *dataViewManager) Latest(_ context.Context, collectionID int64) (DataViewRef, error) {
+func (m *dataViewManager) Latest(ctx context.Context, collectionID int64) (DataViewRef, error) {
 	state := m.getState(collectionID)
 	if state == nil {
 		return nil, nil
 	}
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	return acquireRefLocked(state, state.latest), nil
+	return m.acquireReadyRefLocked(ctx, state, state.latest)
 }
 
-func (m *dataViewManager) Get(_ context.Context, collectionID int64, version *viewpb.DataVersion) (DataViewRef, error) {
+func (m *dataViewManager) Get(ctx context.Context, collectionID int64, version *viewpb.DataVersion) (DataViewRef, error) {
 	if version == nil {
 		return nil, nil
 	}
@@ -590,7 +645,7 @@ func (m *dataViewManager) Get(_ context.Context, collectionID int64, version *vi
 	}
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	return acquireRefLocked(state, state.versions[protoVersionToStruct(version)]), nil
+	return m.acquireReadyRefLocked(ctx, state, state.versions[protoVersionToStruct(version)])
 }
 
 func (m *dataViewManager) GarbageCollect(ctx context.Context, collectionID int64, retainLatest int) error {
@@ -696,11 +751,11 @@ func (m *dataViewManager) collectionDataViewLocked(state *collectionState) *api.
 		if shard == nil {
 			continue
 		}
-		// Legacy snapshots do not carry W/A evidence. Leave those inputs unknown;
-		// the production frontier publisher is installed with QueryView activation.
 		nativeShard := &api.ShardDataView{
-			VChannel:   shard.GetVchannel(),
-			Partitions: make([]*api.PartitionDataView, 0, len(shard.GetPartitions())),
+			VChannel:                             shard.GetVchannel(),
+			GrowingTransformStartAfterTimetick:   shard.GetGrowingTransformStartAfterTimetick(),
+			CompactedTransformStartAfterTimetick: shard.GetCompactedTransformStartAfterTimetick(),
+			Partitions:                           make([]*api.PartitionDataView, 0, len(shard.GetPartitions())),
 		}
 		for _, partition := range shard.GetPartitions() {
 			if partition == nil {
@@ -714,6 +769,9 @@ func (m *dataViewManager) collectionDataViewLocked(state *collectionState) *api.
 				}
 				if index < len(partition.GetSegmentManifestVersions()) {
 					segment.ManifestVersion = partition.GetSegmentManifestVersions()[index]
+				}
+				if index < len(partition.GetSegmentTransformStartAfterTimeticks()) {
+					segment.TransformStartAfterTimetick = partition.GetSegmentTransformStartAfterTimeticks()[index]
 				}
 				if stats, ok := entry.stats[segmentID]; ok {
 					segment.RowNum = stats.RowNum
@@ -831,6 +889,10 @@ func (m *dataViewManager) PrepareFlush(ctx context.Context, event FlushDataViewE
 		next = &viewpb.DataViewOfCollection{CollectionId: event.CollectionID}
 	}
 	if err := addSegments(next, event.Segments); err != nil {
+		unlock()
+		return nil, nil, nil, err
+	}
+	if err := m.advanceTransformFrontiers(ctx, next, event.GrowingTransformStarts); err != nil {
 		unlock()
 		return nil, nil, nil, err
 	}
@@ -1036,6 +1098,13 @@ func addSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegment) 
 			if known.location != location {
 				return merr.WrapErrDataIntegrityMsg("Segment %d has conflicting DataView locations", segment.SegmentID)
 			}
+			if segment.TransformStartAfterTimetick != 0 && segment.ManifestVersion >= known.partition.SegmentManifestVersions[known.index] {
+				oldStart := known.partition.SegmentTransformStartAfterTimeticks[known.index]
+				if segment.TransformStartAfterTimetick < oldStart {
+					return merr.WrapErrDataIntegrityMsg("Segment %d Transform cursor regressed from %d to %d", segment.SegmentID, oldStart, segment.TransformStartAfterTimetick)
+				}
+				known.partition.SegmentTransformStartAfterTimeticks[known.index] = segment.TransformStartAfterTimetick
+			}
 			if segment.ManifestVersion == 0 {
 				// Zero is a resolution mode, not a comparable data revision
 				// (see data_view.md): it means "the producer does not know the
@@ -1067,6 +1136,7 @@ func addSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegment) 
 		partition := findOrCreatePartition(shard, segment.PartitionID)
 		partition.SegmentIds = append(partition.SegmentIds, segment.SegmentID)
 		partition.SegmentManifestVersions = append(partition.SegmentManifestVersions, segment.ManifestVersion)
+		partition.SegmentTransformStartAfterTimeticks = append(partition.SegmentTransformStartAfterTimeticks, segment.TransformStartAfterTimetick)
 		slots[segment.SegmentID] = segmentSlot{
 			location:  location,
 			partition: partition,
@@ -1089,10 +1159,12 @@ func addSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegment) 
 // projected version may only advance the stored version, never regress it.
 func rebuildSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegment) error {
 	known := make(map[int64]int64)
+	knownStarts := make(map[int64]uint64)
 	for _, shard := range view.GetShards() {
 		for _, partition := range shard.GetPartitions() {
 			for idx, segmentID := range partition.GetSegmentIds() {
 				known[segmentID] = partition.GetSegmentManifestVersions()[idx]
+				knownStarts[segmentID] = partition.GetSegmentTransformStartAfterTimeticks()[idx]
 			}
 		}
 	}
@@ -1104,6 +1176,17 @@ func rebuildSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegme
 			continue
 		}
 		stored, exists := known[segments[i].SegmentID]
+		oldStart := knownStarts[segments[i].SegmentID]
+		// An unresolved projection keeps the known base revision, so it must
+		// also keep that revision's cursor rather than borrow newer coverage.
+		if segments[i].ManifestVersion == 0 && stored > 0 {
+			segments[i].TransformStartAfterTimetick = oldStart
+		}
+		if segments[i].TransformStartAfterTimetick == 0 {
+			segments[i].TransformStartAfterTimetick = oldStart
+		} else if segments[i].TransformStartAfterTimetick < oldStart {
+			return merr.WrapErrDataIntegrityMsg("Segment %d Transform cursor cannot regress", segments[i].SegmentID)
+		}
 		if segments[i].ManifestVersion == 0 {
 			if exists {
 				segments[i].ManifestVersion = stored
@@ -1125,6 +1208,10 @@ func rebuildSegments(view *viewpb.DataViewOfCollection, segments []LoadableSegme
 func validatePersistedSegmentManifestVersions(view *viewpb.DataViewOfCollection) error {
 	for _, shard := range view.GetShards() {
 		for _, partition := range shard.GetPartitions() {
+			starts := partition.GetSegmentTransformStartAfterTimeticks()
+			if len(starts) != 0 && len(starts) != len(partition.GetSegmentIds()) {
+				return merr.WrapErrDataIntegrityMsg("persisted DataView has misaligned Transform cursors: collection=%d partition=%d", view.GetCollectionId(), partition.GetPartitionId())
+			}
 			versions := partition.GetSegmentManifestVersions()
 			if len(versions) != len(partition.GetSegmentIds()) {
 				return merr.WrapErrDataIntegrityMsg(
@@ -1245,14 +1332,19 @@ func canonicalizeDataView(view *viewpb.DataViewOfCollection) {
 type canonicalSegment struct {
 	id              int64
 	manifestVersion int64
+	transformStart  uint64
 }
 
 func canonicalizePartitionSegments(partition *viewpb.DataViewOfPartition) {
 	segments := make([]canonicalSegment, len(partition.GetSegmentIds()))
 	versions := partition.GetSegmentManifestVersions()
+	starts := partition.GetSegmentTransformStartAfterTimeticks()
 	for idx, segmentID := range partition.GetSegmentIds() {
 		segments[idx].id = segmentID
 		segments[idx].manifestVersion = versions[idx]
+		if idx < len(starts) {
+			segments[idx].transformStart = starts[idx]
+		}
 	}
 	sort.Slice(segments, func(i, j int) bool {
 		return segments[i].id < segments[j].id
@@ -1260,16 +1352,21 @@ func canonicalizePartitionSegments(partition *viewpb.DataViewOfPartition) {
 
 	partition.SegmentIds = make([]int64, 0, len(segments))
 	partition.SegmentManifestVersions = make([]int64, 0, len(segments))
+	partition.SegmentTransformStartAfterTimeticks = make([]uint64, 0, len(segments))
 	for _, segment := range segments {
 		last := len(partition.SegmentIds) - 1
 		if last >= 0 && partition.SegmentIds[last] == segment.id {
 			if segment.manifestVersion > partition.SegmentManifestVersions[last] {
 				partition.SegmentManifestVersions[last] = segment.manifestVersion
+				partition.SegmentTransformStartAfterTimeticks[last] = segment.transformStart
+			} else if segment.manifestVersion == partition.SegmentManifestVersions[last] {
+				partition.SegmentTransformStartAfterTimeticks[last] = min(partition.SegmentTransformStartAfterTimeticks[last], segment.transformStart)
 			}
 			continue
 		}
 		partition.SegmentIds = append(partition.SegmentIds, segment.id)
 		partition.SegmentManifestVersions = append(partition.SegmentManifestVersions, segment.manifestVersion)
+		partition.SegmentTransformStartAfterTimeticks = append(partition.SegmentTransformStartAfterTimeticks, segment.transformStart)
 	}
 }
 
@@ -1383,6 +1480,9 @@ func (m *dataViewManager) publishDataViewLocked(state *collectionState) {
 	state.changed.NotifyAll()
 	entry := state.latest
 	if entry == nil {
+		return
+	}
+	if m.frontierProjector != nil && !transformFrontiersReady(entry.view) {
 		return
 	}
 	if state.publishedEntry != entry {

@@ -11,12 +11,9 @@ and its Legacy facade share one shard client and replica router; the owning clie
 closes that router once. Independently constructed Legacy clients own independent
 routers.
 
-This extraction adds the client and the SN execution support; it does not switch
-Proxy Search, Query, Delete, Upsert or Iterator to QueryView. QN execution and native resource preparation are separate prerequisites and
-are not imported into this master-based extraction. Coordinator runtime
-activation, complete DataView publication and read-schema publication ordering
-remain integration work. The generic `NewViewQueryClient` staged API also exists,
-but its field-name-to-ID wiring still has TODOs; it is not the production entry.
+Proxy Search, Query, Delete, Upsert and Iterator use the legacy QueryView
+client. Coordinator publication and the SN/QN resources are wired in this
+branch. The generic staged client API is not the production entry.
 
 The injected QN transport must opt into `contextutil.WithFailFastPick`, disable
 hidden same-node gRPC retries, and wrap a missing session with

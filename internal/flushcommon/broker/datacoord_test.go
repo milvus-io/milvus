@@ -3,7 +3,6 @@ package broker
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -18,7 +17,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 type dataCoordSuite struct {
@@ -160,51 +158,6 @@ func (s *dataCoordSuite) TestGetSegmentInfo() {
 				Status: merr.Status(errors.New("mock")),
 			}, nil)
 		_, err := s.broker.GetSegmentInfo(ctx, segmentIDs)
-		s.Error(err)
-		s.resetMock()
-	})
-}
-
-func (s *dataCoordSuite) TestUpdateChannelCheckpoint() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	channelName := "dml_0"
-	checkpoint := &msgpb.MsgPosition{
-		ChannelName: channelName,
-		MsgID:       []byte{1, 2, 3},
-		Timestamp:   tsoutil.ComposeTSByTime(time.Now()),
-	}
-
-	s.Run("normal_case", func() {
-		s.dc.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything).
-			Run(func(_ context.Context, req *datapb.UpdateChannelCheckpointRequest, _ ...grpc.CallOption) {
-				cp := req.GetChannelCheckpoints()[0]
-				s.Equal(checkpoint.MsgID, cp.GetMsgID())
-				s.Equal(checkpoint.ChannelName, cp.GetChannelName())
-				s.Equal(checkpoint.Timestamp, cp.GetTimestamp())
-			}).
-			Return(merr.Status(nil), nil)
-
-		err := s.broker.UpdateChannelCheckpoint(ctx, []*msgpb.MsgPosition{checkpoint})
-		s.NoError(err)
-		s.resetMock()
-	})
-
-	s.Run("datacoord_return_error", func() {
-		s.dc.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything).
-			Return(nil, errors.New("mock"))
-
-		err := s.broker.UpdateChannelCheckpoint(ctx, []*msgpb.MsgPosition{checkpoint})
-		s.Error(err)
-		s.resetMock()
-	})
-
-	s.Run("datacoord_return_failure_status", func() {
-		s.dc.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything).
-			Return(merr.Status(errors.New("mock")), nil)
-
-		err := s.broker.UpdateChannelCheckpoint(ctx, []*msgpb.MsgPosition{checkpoint})
 		s.Error(err)
 		s.resetMock()
 	})

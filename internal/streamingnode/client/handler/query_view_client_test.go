@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"io"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -185,6 +186,50 @@ func (c *fakeViewQueryServiceClient) SearchOnView(ctx context.Context, req *view
 
 func (c *fakeViewQueryServiceClient) QueryOnView(ctx context.Context, req *viewpb.QueryOnViewRequest, _ ...grpc.CallOption) (*viewpb.QueryOnViewResponse, error) {
 	return c.queryOnView(ctx, req)
+}
+
+type fakeViewSyncServiceClient struct {
+	syncQueryView func(context.Context) (viewpb.ViewSyncService_SyncQueryViewClient, error)
+}
+
+func (c *fakeViewSyncServiceClient) SyncQueryView(ctx context.Context, _ ...grpc.CallOption) (viewpb.ViewSyncService_SyncQueryViewClient, error) {
+	return c.syncQueryView(ctx)
+}
+
+type noopViewSyncClientStream struct {
+	ctx context.Context
+}
+
+func (s *noopViewSyncClientStream) Send(*viewpb.SyncRequest) error {
+	return nil
+}
+
+func (s *noopViewSyncClientStream) Recv() (*viewpb.SyncResponse, error) {
+	return nil, io.EOF
+}
+
+func (s *noopViewSyncClientStream) Header() (metadata.MD, error) {
+	return nil, nil
+}
+
+func (s *noopViewSyncClientStream) Trailer() metadata.MD {
+	return nil
+}
+
+func (s *noopViewSyncClientStream) CloseSend() error {
+	return nil
+}
+
+func (s *noopViewSyncClientStream) Context() context.Context {
+	return s.ctx
+}
+
+func (s *noopViewSyncClientStream) SendMsg(interface{}) error {
+	return nil
+}
+
+func (s *noopViewSyncClientStream) RecvMsg(interface{}) error {
+	return io.EOF
 }
 
 func decodeOutgoingQueryViewPChannel(ctx context.Context) (types.PChannelInfo, error) {

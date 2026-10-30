@@ -73,6 +73,7 @@ type CompactionInspector interface {
 var _ CompactionInspector = (*Inspector)(nil)
 
 type Inspector struct {
+	restoreJobs RestoreJobStateProvider
 	queueTasks *CompactionQueue
 
 	executingGuard lock.RWMutex
@@ -442,6 +443,12 @@ func (c *Inspector) cleanCompactionTaskMeta() {
 	for _, tasks := range triggers {
 		for _, task := range tasks {
 			if task.State == datapb.CompactionTaskState_cleaned {
+				if task.GetRestoreJobId() != 0 && c.restoreJobs != nil {
+					job := c.restoreJobs.GetJob(context.TODO(), task.GetRestoreJobId())
+					if job != nil && job.GetState() != datapb.CopySegmentJobState_CopySegmentJobCompleted && job.GetState() != datapb.CopySegmentJobState_CopySegmentJobFailed {
+						continue // The restore owner still needs the durable completion proof.
+					}
+				}
 				retentionStart := task.GetEndTime()
 				if retentionStart == 0 {
 					// Tasks persisted before end_time was populated retain the

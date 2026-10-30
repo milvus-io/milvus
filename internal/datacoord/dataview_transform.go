@@ -1,0 +1,183 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package datacoord
+
+import (
+	"context"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+)
+
+// segmentTransformStart resolves legacy ordinary and committed-import metadata
+// conservatively. A compacted base needs its own cursor: its first surviving
+// row is not evidence of the Transform prefix covered by its parent revisions.
+func segmentTransformStart(segment *SegmentInfo) uint64 {
+	if start := segment.GetTransformStartAfterTimetick(); start != 0 {
+		return start
+	}
+	if commit := segment.GetCommitTimestamp(); commit != 0 {
+		return commit
+	}
+	if segment.GetIsImporting() || segment.GetCreatedByCompaction() || len(segment.GetCompactionFrom()) != 0 {
+		return 0
+	}
+	return segment.GetStartPosition().GetTimestamp()
+}
+
+func minSegmentTransformStart(segments []*SegmentInfo) uint64 {
+	var start uint64
+	for i, segment := range segments {
+		cursor := segmentTransformStart(segment)
+		if i == 0 || cursor < start {
+			start = cursor
+		}
+	}
+	return start
+}
+
+// transformFrontierBounds is only used to migrate legacy snapshots without W/A.
+// It captures K before any metadata projection. Including
+// every healthy Segment (even already-published ones) is conservative and closes
+// the window between durable output creation and DataView publication. No
+// partition filter may be applied here.
+func transformFrontierBounds(ctx context.Context, metadata *meta, imports ImportMeta, collectionID int64) (map[string]uint64, error) {
+	collection := metadata.GetCollection(collectionID)
+	if collection == nil {
+		return nil, merr.WrapErrServiceNotReadyMsg("collection %d metadata is not ready", collectionID)
+	}
+	bounds := make(map[string]uint64, len(collection.VChannelNames))
+	for _, channel := range collection.VChannelNames {
+		checkpoint := metadata.GetChannelCheckpoint(channel)
+		if checkpoint == nil || checkpoint.GetTimestamp() == 0 || funcutil.IsDroppedChannelCheckpoint(checkpoint) {
+			return nil, merr.WrapErrServiceNotReadyMsg("Transform checkpoint for %s is not ready", channel)
+		}
+		bounds[channel] = checkpoint.GetTimestamp()
+	}
+	// Read task pins before Segment metadata. A completed task has already
+	// persisted all Segment cursors, so its removal cannot create a gap.
+	if imports != nil {
+		for _, job := range imports.GetJobBy(ctx, WithCollectionID(collectionID), WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed)) {
+			stored := job.(*importJob)
+			for _, channel := range job.GetVchannels() {
+				start := stored.GetTransformCommitTimeticks()[channel]
+				if start == 0 {
+					return nil, merr.WrapErrServiceNotReadyMsg("import job %d Transform fence for %s is not ready", job.GetJobID(), channel)
+				}
+				bounds[channel] = min(bounds[channel], start)
+			}
+		}
+	}
+	for _, segment := range metadata.SelectSegments(ctx, WithCollection(collectionID)) {
+		if segment.GetLevel() == datapb.SegmentLevel_L0 || !isSegmentHealthy(segment) {
+			continue
+		}
+		start := segmentTransformStart(segment)
+		if start == 0 {
+			// Before first-pack registration, K cannot pass the first Insert.
+			// A V3 version-zero manifest is only an allocation placeholder;
+			// row-count reports and sealing do not complete registration either.
+			if !segment.GetIsImporting() &&
+				(segment.GetState() == commonpb.SegmentState_Growing || segment.GetState() == commonpb.SegmentState_Sealed) &&
+				segment.GetStartPosition() == nil && len(segment.GetBinlogs()) == 0 {
+				committed, err := hasCommittedManifest(segment)
+				if err != nil {
+					return nil, err
+				}
+				if !committed {
+					continue
+				}
+			}
+			return nil, merr.WrapErrServiceNotReadyMsg("Segment %d Transform coverage is not ready", segment.GetID())
+		}
+		channel := segment.GetInsertChannel()
+		bounds[channel] = min(bounds[channel], start)
+	}
+	return bounds, nil
+}
+
+// pendingTransformBounds protects asynchronous publications not yet represented
+// by the candidate View. Ordinary WAL completeness comes from the SN's W proof;
+// this projection neither reads checkpoints nor requires the collection cache.
+func pendingTransformBounds(ctx context.Context, metadata *meta, imports ImportMeta, view *viewpb.DataViewOfCollection) (map[string]uint64, error) {
+	// These are the previous snapshot's W values: the manager calls this
+	// projector before applying the new Flush certificate or recalculating A.
+	// An import without a CommitImport fence freezes W rather than blocking
+	// unrelated membership publication. Its future commit cannot precede this
+	// already accepted WAL prefix; once AckOnce records the actual fence, that
+	// fence protects publication instead. This also survives coordinator restart.
+	previousW := make(map[string]uint64, len(view.GetShards()))
+	for _, shard := range view.GetShards() {
+		previousW[shard.GetVchannel()] = shard.GetGrowingTransformStartAfterTimetick()
+	}
+	bounds := make(map[string]uint64)
+	pin := func(channel string, start uint64) {
+		if old, ok := bounds[channel]; !ok || start < old {
+			bounds[channel] = start
+		}
+	}
+	if imports != nil {
+		for _, job := range imports.GetJobBy(ctx, WithCollectionID(view.GetCollectionId()), WithoutJobStates(internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed)) {
+			for _, channel := range job.GetVchannels() {
+				start := job.(*importJob).GetTransformCommitTimeticks()[channel]
+				if start == 0 {
+					start = previousW[channel]
+					if start == 0 {
+						return nil, merr.WrapErrServiceNotReadyMsg("import job %d has neither a commit fence nor a published WAL frontier for %s", job.GetJobID(), channel)
+					}
+				}
+				pin(channel, start)
+			}
+		}
+	}
+	selected := make(map[int64]struct{})
+	for _, shard := range view.GetShards() {
+		for _, partition := range shard.GetPartitions() {
+			for _, id := range partition.GetSegmentIds() {
+				selected[id] = struct{}{}
+			}
+		}
+	}
+	// Read task pins before Segment metadata: completion first installs the
+	// Segment coverage, so a completed task cannot disappear from both sets.
+	for _, segment := range metadata.SelectSegments(ctx, WithCollection(view.GetCollectionId())) {
+		if _, ok := selected[segment.GetID()]; ok || segment.GetLevel() == datapb.SegmentLevel_L0 || !isSegmentHealthy(segment) {
+			continue
+		}
+		if segment.GetIsImporting() {
+			// ImportJob owns the constraint until commit installs the exact
+			// Segment cursor and clears IsImporting. Failed-job leftovers cannot
+			// become visible; they must not block other commits either.
+			continue
+		}
+		start := segmentTransformStart(segment)
+		if start == 0 {
+			if !segment.GetCreatedByCompaction() &&
+				(segment.GetState() == commonpb.SegmentState_Growing || segment.GetState() == commonpb.SegmentState_Sealed) {
+				// SN's certificate includes even a first pack not registered here.
+				continue
+			}
+			return nil, merr.WrapErrServiceNotReadyMsg("Segment %d Transform coverage is not ready", segment.GetID())
+		}
+		pin(segment.GetInsertChannel(), start)
+	}
+	return bounds, nil
+}

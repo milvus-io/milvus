@@ -3156,7 +3156,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         # 4. insert data again
         new_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, start=10000)
         self.insert(client, collection_name, new_rows)
-        self.flush(client, collection_name)
+        # Keep this batch growing: a flushed batch may already be handed off.
         # 5. query with param ignore_growing
         ignore_growings = [True, False]
         for ignore_growing in ignore_growings:

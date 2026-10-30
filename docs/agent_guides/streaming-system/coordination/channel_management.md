@@ -5,7 +5,7 @@ Singletons running inside StreamingCoord that manage [PChannel/VChannel/CChannel
 ## Functionality
 
 - **PChannel assignment**: Assigns each PChannel to exactly one StreamingNode via a pluggable balance policy (default: `vchannelfair`). Rebalancing is triggered by node join/leave, VChannel count change, periodic timer, or manual `Trigger()`.
-- **Node health monitoring**: Watches StreamingNode status. Unhealthy nodes have their PChannels marked UNAVAILABLE and reassigned.
+- **Node health monitoring**: Watches StreamingNode status. Unhealthy nodes have their PChannels marked UNAVAILABLE and reassigned. StreamingNode file-resource consumers prepare their own inventories through the pull path; QN file-resource push acknowledgments are not a prerequisite for SN assignment.
 - **VChannel allocation**: `AllocVirtualChannels()` assigns new VChannels to the least-loaded `AvailableInReplication` PChannels.
 - **CChannel management**: Persists which PChannel hosts the singleton CChannel. Assigned once at initialization, never changes.
 - **Assignment publishing**: Exposes gRPC `AssignmentDiscover` endpoint for StreamingClient. Versioned by `(Global, Local)` pair.

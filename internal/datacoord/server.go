@@ -64,6 +64,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	kvstreamingnode "github.com/milvus-io/milvus/internal/metastore/kv/streamingnode"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -73,6 +74,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
@@ -155,6 +157,7 @@ type Server struct {
 	copySegmentMeta      copysegment.CopySegmentMeta
 	copySegmentInspector copysegment.CopySegmentInspector
 	copySegmentChecker   copysegment.CopySegmentChecker
+	restoreCollectionManager snapshot.RestoreCollectionManager
 
 	snapshotManager       snapshot.SnapshotManager
 	snapshotExportManager *snapshot.SnapshotExportManager
@@ -271,8 +274,8 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		quitCh:              make(chan struct{}),
 		factory:             factory,
 		flushCh:             make(chan UniqueID, 1024),
-		notifyIndexChan:     make(chan UniqueID, 1024),
 		notifyStatsChan:     make(chan UniqueID, 1024),
+		notifyIndexChan:     make(chan UniqueID, 1024),
 		dataNodeCreator:     defaultDataNodeCreatorFunc,
 		importJobLock:       lock.NewKeyLock[int64](),
 		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
@@ -386,10 +389,6 @@ func (s *Server) initDataCoord() (initErr error) {
 
 	s.globalScheduler = task.NewGlobalTaskScheduler(s.ctx, s.cluster2)
 
-	s.importMeta, err = bulkimport.NewImportMeta(s.ctx, s.catalog, s.allocator, s.meta)
-	if err != nil {
-		return err
-	}
 	s.initCompaction()
 	mlog.Info(s.ctx, "init compaction done")
 
@@ -474,6 +473,10 @@ func (s *Server) initDataCoord() (initErr error) {
 		s.getChannelsByCollectionID,
 		s.indexEngineVersionManager,
 	)
+	snapshotManager.collectionRestorer = s.restoreCollectionManager
+	s.copySegmentChecker.(*copySegmentChecker).collectionRestorer = s.restoreCollectionManager
+	s.copySegmentChecker.(*copySegmentChecker).compactions = s.compactionInspector
+	s.compactionInspector.(*compactionInspector).restoreJobs = s.copySegmentMeta
 	s.snapshotManager = snapshotManager
 	snapshotExportMeta, err := snapshot.NewSnapshotExportMeta(s.ctx, s.meta.Catalog)
 	if err != nil {
@@ -593,6 +596,7 @@ func (s *Server) newChunkManagerFactory() (storage.ChunkManager, error) {
 
 func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 	s.garbageCollector = gc.NewGarbageCollector(s.meta, s.handler, gc.GcOption{
+		StreamingNodeCatalog: kvstreamingnode.NewCataLog(s.kv),
 		Cli:              cli,
 		Broker:           s.broker,
 		Enabled:          Params.DataCoordCfg.EnableGarbageCollection.GetAsBool(),
@@ -857,6 +861,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		)
 		recoveredMeta, err = meta.NewMeta(s.ctx, s.catalog, chunkManager, s.metaStore, s.broker, loadDomainMetas(s.catalog, chunkManager, &dm))
 		recoveredDomainMetas = dm
+		if err == nil { recoveredMeta.PreparationSchema = coordinatorPreparationSchema }
 		return err
 	}
 	if err := retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime)); err != nil {
@@ -871,6 +876,15 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	// not repeat newMeta's successful object-storage manifest scan.
 	if err := retry.Do(s.ctx, func() error {
 		return recoveredMeta.ReloadCollectionsFromRootcoord(s.ctx, s.broker)
+	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
+		return err
+	}
+
+	var recoveredImports ImportMeta
+	if err := retry.Do(s.ctx, func() error {
+		var err error
+		recoveredImports, err = NewImportMeta(s.ctx, s.catalog, s.allocator, recoveredMeta)
+		return err
 	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
 		return err
 	}
@@ -890,6 +904,12 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 			recoveredMeta.LoadableProjection,
 			collectionIDs,
 			collectionVChannels,
+			dataview.WithFrontierProjector(func(ctx context.Context, collectionID int64) (map[string]uint64, error) {
+				return transformFrontierBounds(ctx, recoveredMeta, recoveredImports, collectionID)
+			}),
+			dataview.WithPendingTransformProjector(func(ctx context.Context, view *viewpb.DataViewOfCollection) (map[string]uint64, error) {
+				return pendingTransformBounds(ctx, recoveredMeta, recoveredImports, view)
+			}),
 		)
 		return err
 	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
@@ -900,6 +920,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	recoveredMeta.DataViewManager = manager
 	s.meta = recoveredMeta
 	s.domainMetas = recoveredDomainMetas
+	s.importMeta = recoveredImports
 	s.dataViewManager = manager
 	return nil
 }
@@ -1320,6 +1341,12 @@ func (s *Server) Stop() error {
 		s.talonPrewarmInspector.Stop()
 	}
 	if !s.stateCode.CompareAndSwap(commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal) {
+		if s.garbageCollector != nil {
+			s.garbageCollector.close()
+		}
+		if s.snapshotExportManager != nil {
+			s.snapshotExportManager.Close()
+		}
 		return nil
 	}
 	mlog.Info(s.ctx, "datacoord server shutdown")
@@ -1466,14 +1493,8 @@ func (s *Server) registerMetricsRequest() {
 // loadCollectionFromRootCoord communicates with RootCoord and asks for collection information.
 // collection information will be added to server meta info.
 func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID int64) error {
-	has, err := s.broker.HasCollection(ctx, collectionID)
-	if err != nil {
-		return err
-	}
-	if !has {
-		return merr.WrapErrCollectionNotFound(collectionID)
-	}
-
+	// Internal metadata loading must include a Restoring collection. Public
+	// HasCollection hides it until its copy job publishes the restored data.
 	resp, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
 		return err

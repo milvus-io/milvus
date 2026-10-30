@@ -227,7 +227,7 @@ func (c *Core) ValidateDataViewCollectionForRecovery(ctx context.Context, collec
 		return false, err
 	}
 	switch collection.State {
-	case pb.CollectionState_CollectionCreated:
+	case pb.CollectionState_CollectionCreated, pb.CollectionState_CollectionRestoring:
 		return true, nil
 	case pb.CollectionState_CollectionCreating,
 		pb.CollectionState_CollectionDropping,
@@ -1193,6 +1193,13 @@ func (c *Core) IsCollectionAvailable(collectionID int64) bool {
 	}
 	checker, ok := c.meta.(interface{ IsCollectionAvailable(int64) bool })
 	return ok && checker.IsCollectionAvailable(collectionID)
+}
+
+func (c *Core) GetCollectionProperties(ctx context.Context, collectionID int64) ([]*commonpb.KeyValuePair, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return nil, err
+	}
+	return c.meta.GetCollectionProperties(ctx, collectionID)
 }
 
 // HasCollection check collection existence

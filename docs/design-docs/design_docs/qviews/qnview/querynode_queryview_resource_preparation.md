@@ -2,13 +2,11 @@
 
 This document defines QueryNode resource ownership, preparation, readiness and
 release. Related contracts are [QueryView lifecycle](../query_view_state_machine.md),
-[handler](../query_view_handler.md), schema handoff (see the source reference below),
+[handler](../query_view_handler.md), [schema handoff](../schema_evolution.md),
 [transform frontiers](../transform_start_after_timetick.md), and
 [TransformLog delivery](../../wal/transform_log.md).
 
-The schema handoff document is outside this extraction. Read it without changing
-branches using `git show 257a76b6e71490e78e0c2730716e9a21fff30e41:docs/design-docs/design_docs/qviews/schema_evolution.md`.
-Its former field-removal/prevalidation rule is superseded by the View-based
+The former schema handoff field-removal/prevalidation rule is superseded by the View-based
 [query execution contract](../query/query_execution.md): retained serving Views
 define read-schema validity; MVCC defines data visibility.
 
@@ -533,6 +531,21 @@ one subscription does not fail siblings.
 This extraction does not preserve historical-query availability on a poisoned
 instance or add a Coordinator Poison state or an in-place recovery protocol.
 
+The registration delivers terminal failure through
+an owner callback, including failure recorded before installation. The callback
+runs outside registration locks and only schedules reconciliation. The temporary
+resource catch-up goroutine exits after installing it; no per-Segment failure
+waiter remains while the resource serves queries.
+
+Catchup uses bounded pages on a shared worker pool. A registration awaiting
+transport coverage parks its state and releases the worker. Arrivals schedule
+pending registrations under the same VChannel lock used for the final empty
+check and attachment to the live dispatch set. A queued/running bit coalesces
+work; parking clears it under that lock so an arrival cannot lose its wakeup.
+The live buffer dispatcher applies subsequent entries directly to registered
+physical instances. Each registration honors its exclusive cursor in both replay
+and live application, including when its base is newer than current coverage.
+
 Ready is a preparation boundary, not a promise of zero lag after future writes.
 Queries wait for their own Transform MVCC; that check must prove application
 for their selected physical resources, not only remote receipt.
@@ -684,7 +697,7 @@ acceptance includes non-TEI AlterCollection L0/L1 Python, REST and Go cases.
 
 Runtime reference protection and closure are part of this design. Durable
 schema/LoadInfo/Manifest/FileResource history GC remains the unified TODO in
-schema handoff (`docs/design-docs/design_docs/qviews/schema_evolution.md` in source snapshot `257a76b6e71490e78e0c2730716e9a21fff30e41`).
+[schema handoff](../schema_evolution.md#82-todo-unified-gc-design-deferred).
 No new persistence or distributed GC protocol is introduced here.
 
 | Package | Responsibility |

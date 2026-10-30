@@ -507,6 +507,28 @@ func (m *Meta) CountJobBy(ctx context.Context, filters ...CopySegmentJobFilter) 
 // transition under m.mu; every subsequent caller sees wasTerminal=true.
 func (m *Meta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error {
 	m.mu.Lock()
+	current := m.jobs[jobID]
+	if current != nil {
+		state := current.GetState()
+		if state == datapb.CopySegmentJobState_CopySegmentJobCompleted || state == datapb.CopySegmentJobState_CopySegmentJobFailed {
+			m.mu.Unlock()
+			return nil
+		}
+		// Completed copy tasks are the durable publication prerequisite. Once
+		// every expected segment is copied, publication retries cannot fail the
+		// job or release its data, even after a crash between publishing the
+		// collection and persisting the job's Completed state.
+		if current.(*copySegmentJob).GetCreatesCollection() && allRestoreSegmentsCopied(current, m.tasks.getByJobID(jobID)) {
+			next := current.Clone()
+			for _, action := range actions {
+				action(next)
+			}
+			if next.GetState() != datapb.CopySegmentJobState_CopySegmentJobCompleted {
+				m.mu.Unlock()
+				return nil
+			}
+		}
+	}
 	prevJob, updatedJob, err := m.updateJob(ctx, jobID, actions...)
 	if err != nil {
 		m.mu.Unlock()
@@ -664,6 +686,9 @@ func (m *Meta) UpdateTask(ctx context.Context, taskID int64, actions ...UpdateCo
 		updatedTask := task.Clone()
 		for _, action := range actions {
 			action(updatedTask)
+		}
+		if task.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskCompleted && updatedTask.GetState() != task.GetState() {
+			return nil // A late worker response cannot revoke installed copy data.
 		}
 		err := m.Catalog.SaveCopySegmentTask(ctx, updatedTask.(*Task).Task.Load())
 		if err != nil {

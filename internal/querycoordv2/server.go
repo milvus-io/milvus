@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
+	"golang.org/x/sync/singleflight"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -54,11 +55,11 @@ import (
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -142,6 +143,17 @@ type Server struct {
 
 	// load config watcher
 	loadConfigWatcher *LoadConfigWatcher
+
+	// query view runtime
+	qviewsRuntime *qviewsRuntime
+
+	// DQL activity tracking and TTL-based collection release.
+	collectionUsage *collectionUsageManager
+
+	// One shared automatic load and readiness wait per collection across Proxies.
+	autoLoadCollectionGroup singleflight.Group
+
+	// query view segment load info watch
 }
 
 type FileResourceObserver interface {
@@ -377,8 +389,33 @@ func (s *Server) initQueryCoord() error {
 	// Init load status cache
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 
+	if err := s.initQViewsRuntime(); err != nil {
+		return err
+	}
 	mlog.Info(s.ctx, "init querycoord done", mlog.FieldNodeID(paramtable.GetNodeID()), mlog.String("Address", s.address))
 	return err
+}
+
+func (s *Server) initQViewsRuntime() error {
+	mlog.Info(s.ctx, "init query view runtime")
+	runtime, err := newQViewsRuntime(s.ctx, newDefaultQViewsRuntimeDependencies(
+		s.kv,
+		s.etcdCli,
+		s.store,
+		s.meta.ResourceManager,
+		s.mixCoord,
+	))
+	if err != nil {
+		return err
+	}
+	s.qviewsRuntime = runtime
+	qvresource.Init(runtime.resources)
+	s.collectionUsage = newCollectionUsageManager(
+		runtime.loadConfigStore,
+		s.broker,
+		s.autoReleaseCollection,
+	)
+	return nil
 }
 
 func (s *Server) initMeta() error {
@@ -386,14 +423,6 @@ func (s *Server) initMeta() error {
 
 	mlog.Info(s.ctx, "init meta")
 	s.store = querycoord.NewCatalog(s.kv)
-	s.loadInfos = &queryViewLoadInfoReader{storage: s.kv, indexes: func(id int64, indexIDs ...int64) []*indexpb.IndexInfo {
-		if source, ok := s.mixCoord.(interface {
-			QueryViewCollectionIndexInfos(int64, ...int64) []*indexpb.IndexInfo
-		}); ok {
-			return source.QueryViewCollectionIndexInfos(id, indexIDs...)
-		}
-		return nil
-	}}
 	s.meta = meta.NewMeta(s.idAllocator, s.store, s.nodeMgr, s.metaView)
 
 	s.broker = meta.NewCoordinatorBroker(
@@ -486,13 +515,13 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) startQueryCoord() error {
-	mlog.Info(s.ctx, "start watcher...")
+	mlog.Info(s.ctx, "start querycoord in query view mode")
 	sessions, revision, err := s.session.GetSessions(s.ctx, typeutil.QueryNodeRole)
 	if err != nil {
 		return err
 	}
 
-	mlog.Info(s.ctx, "rewatch nodes", mlog.Any("sessions", sessions))
+	mlog.Info(s.ctx, "rewatch nodes for query view mode", mlog.Any("sessions", sessions))
 	err = s.rewatchNodes(sessions)
 	if err != nil {
 		return err
@@ -501,48 +530,26 @@ func (s *Server) startQueryCoord() error {
 	s.wg.Add(1)
 	go s.watchNodes(revision)
 
-	// check whether old node exist, if yes suspend auto balance until all old nodes down
-	s.updateBalanceConfigLoop(s.ctx)
-
-	if err := s.proxyWatcher.WatchProxy(s.ctx); err != nil {
-		mlog.Warn(s.ctx, "querycoord failed to watch proxy", mlog.Err(err))
-	}
-
 	s.startServerLoop()
 	s.afterStart()
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	sessionutil.SaveServerInfo(typeutil.MixCoordRole, s.session.GetServerID())
-	// check replica changes after restart
-	// Note: this should be called after start progress is done
-	s.watchLoadConfigChanges()
 	return nil
 }
 
 func (s *Server) startServerLoop() {
-	// leader cache observer shall be started before `SyncAll` call
-	s.leaderCacheObserver.Start(s.ctx)
-	// Recover dist, to avoid generate too much task when dist not ready after restart
-	s.distController.SyncAll(s.ctx)
+	mlog.Info(s.ctx, "start resource observer...")
+	if s.resourceObserver != nil {
+		s.resourceObserver.Start()
+	}
 
-	// start the components from inside to outside,
-	// to make the dependencies ready for every component
-	mlog.Info(s.ctx, "start cluster...")
-	s.cluster.Start()
-
-	mlog.Info(s.ctx, "start observers...")
-	s.collectionObserver.Start()
-	s.targetObserver.Start()
-	s.replicaObserver.Start()
-	s.resourceObserver.Start()
-
-	mlog.Info(s.ctx, "start task scheduler...")
-	s.taskScheduler.Start()
-
-	mlog.Info(s.ctx, "start checker controller...")
-	s.checkerController.Start()
-
-	mlog.Info(s.ctx, "start job scheduler...")
-	s.jobScheduler.Start()
+	mlog.Info(s.ctx, "start query view runtime...")
+	if s.qviewsRuntime != nil {
+		s.qviewsRuntime.start(s.ctx)
+	}
+	if s.collectionUsage != nil {
+		s.collectionUsage.start(s.ctx)
+	}
 }
 
 func (s *Server) Stop() error {
@@ -550,9 +557,19 @@ func (s *Server) Stop() error {
 	// job scheduler -> checker controller -> task scheduler -> dist controller -> cluster -> session
 	// observers -> dist controller
 
+	if s.collectionUsage != nil {
+		mlog.Info(s.ctx, "stop collection usage manager...")
+		s.collectionUsage.close()
+	}
+
 	if s.loadConfigWatcher != nil {
 		mlog.Info(s.ctx, "stop load config watcher...")
 		s.loadConfigWatcher.Close()
+	}
+
+	if s.qviewsRuntime != nil {
+		mlog.Info(s.ctx, "stop query view runtime...")
+		s.qviewsRuntime.stop()
 	}
 
 	if s.jobScheduler != nil {
@@ -783,6 +800,12 @@ func (s *Server) handleNodeUp(node int64) {
 		return
 	}
 
+	if s.qviewsRuntime != nil {
+		s.meta.HandleNodeUp(s.ctx, node)
+		s.metricsCacheManager.InvalidateSystemInfoMetrics()
+		return
+	}
+
 	// add executor to task scheduler
 	s.taskScheduler.AddExecutor(node)
 
@@ -797,6 +820,13 @@ func (s *Server) handleNodeUp(node int64) {
 }
 
 func (s *Server) handleNodeDown(node int64) {
+	if s.qviewsRuntime != nil {
+		s.meta.HandleNodeDown(context.Background(), node)
+		metrics.QueryCoordLastHeartbeatTimeStamp.DeleteLabelValues(fmt.Sprint(node))
+		s.metricsCacheManager.InvalidateSystemInfoMetrics()
+		return
+	}
+
 	s.taskScheduler.RemoveExecutor(node)
 	s.distController.Remove(node)
 
@@ -817,6 +847,11 @@ func (s *Server) handleNodeDown(node int64) {
 func (s *Server) handleNodeStopping(node int64) {
 	// mark node as stopping in node manager
 	s.nodeMgr.Stopping(node)
+
+	if s.qviewsRuntime != nil {
+		s.meta.HandleNodeStopping(context.Background(), node)
+		return
+	}
 
 	// mark node as stopping in resource manager
 	s.meta.HandleNodeStopping(context.Background(), node)

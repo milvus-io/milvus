@@ -21,10 +21,10 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 var errReleaseCollectionNotLoaded = errors.New("release collection not loaded")
@@ -43,7 +43,13 @@ func (s *Server) broadcastDropLoadConfigCollectionV2ForReleaseCollection(ctx con
 		return err
 	}
 
-	if !s.meta.Exist(ctx, req.GetCollectionID()) {
+	isLoaded := s.qviewsRuntime.loadConfigStore.Contains(req.GetCollectionID())
+	if !isLoaded {
+		// A previous release may have removed desired state before cleanup
+		// completed. Keep the collection lock until its views are gone.
+		if err := s.waitQueryViewsReleased(ctx, req.GetCollectionID()); err != nil {
+			return err
+		}
 		return errReleaseCollectionNotLoaded
 	}
 	msg := message.NewDropLoadConfigMessageBuilderV2().
@@ -53,26 +59,51 @@ func (s *Server) broadcastDropLoadConfigCollectionV2ForReleaseCollection(ctx con
 		}).
 		WithBody(&message.DropLoadConfigMessageBody{}).
 		WithControlChannelBroadcast().
-		MustBuildBroadcast() // TODO: after we support query view in 3.0, we should broadcast the drop load config message to all vchannels.
+		MustBuildBroadcast()
 
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
 }
 
 func (s *Server) dropLoadConfigV2AckCallback(ctx context.Context, result message.BroadcastResultDropLoadConfigMessageV2) error {
-	releaseJob := job.NewReleaseCollectionJob(ctx,
-		result,
-		s.dist,
-		s.meta,
-		s.broker,
-		s.targetMgr,
-		s.targetObserver,
-		s.checkerController,
-		s.proxyClientManager,
-	)
-	if err := releaseJob.Execute(); err != nil {
+	if err := s.qviewsRuntime.loadManager.ReleaseCollection(ctx, result.Message.Header()); err != nil {
 		return err
 	}
 	meta.GlobalFailedLoadCache.Remove(result.Message.Header().GetCollectionId())
-	return nil
+	// Broadcast owns the collection lock until this callback completes. Waiting
+	// here also serializes a subsequent load with the old replica's cleanup.
+	return s.waitQueryViewsReleased(ctx, result.Message.Header().GetCollectionId())
+}
+
+func (s *Server) waitQueryViewsReleased(ctx context.Context, collectionID int64) error {
+	// Drain any pass that captured the old desired state before checking the
+	// registry. Otherwise an in-flight prepare could create a shard after an
+	// empty-registry check. Reconcile serializes planning and application.
+	if err := s.qviewsRuntime.balancer.Reconcile(ctx); err != nil {
+		return err
+	}
+	registry := s.qviewsRuntime.shardViewRegistry
+	changed := make(chan struct{}, 1)
+	// Subscribe before checking to avoid losing a final-removal notification.
+	unregister := registry.RegisterShardRemovalListener(collectionID, func() {
+		select {
+		case changed <- struct{}{}:
+		default:
+		}
+	})
+	defer unregister()
+	for {
+		if err := ctx.Err(); err != nil {
+			return merr.Wrapf(err, "waiting for QueryView release, collection=%d", collectionID)
+		}
+		// Dropping views can have neither Up nor segment stats. Only final
+		// registry removal proves node cleanup and durable deletion completed.
+		if len(registry.CollectionShards(collectionID)) == 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+		case <-changed:
+		}
+	}
 }

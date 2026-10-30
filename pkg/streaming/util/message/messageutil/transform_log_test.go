@@ -193,7 +193,7 @@ func TestTransformLogMessageClassification(t *testing.T) {
 		{"other txn", newTestTxnMessage(t, 100, insert, barrier), TransformLogKindBarrier},
 		{"delete then barrier txn", newTestTxnMessage(t, 100, deleted, barrier), TransformLogKindDelete},
 		{"barrier then delete txn", newTestTxnMessage(t, 100, barrier, deleted), TransformLogKindDelete},
-		{"empty txn", newTestTxnMessage(t, 100), TransformLogKindBarrier},
+		{"empty txn", newTestTxnMessage(t, 100), TransformLogKindNone},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.kind, ClassifyTransformLogMessage(tc.msg))

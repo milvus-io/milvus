@@ -66,8 +66,7 @@ func TestRetainedMVCCAppendAfterConfirmation(t *testing.T) {
 		defer w.Close()
 		require.Equal(t, message.WALNameTest, w.WALName())
 		(&testOneWALFramework{t: t}).testSendCreateCollection(ctx, w)
-		// Initialize segment assignment before injecting the race: CreateSegment
-		// also legitimately advances this VChannel's retained target.
+		// Initialize segment assignment before injecting the insert callback race.
 		_, err = w.Append(ctx, message.CreateTestEmptyInsertMesage(0, nil))
 		require.NoError(t, err)
 		inspector := resource.Resource().TimeTickInspector()

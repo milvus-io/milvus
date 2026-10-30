@@ -2,6 +2,11 @@
 
 ## Purpose and scope
 
+The agreed [schema-handoff refactor](schema_evolution.md) adds a Coordinator
+publication obligation before retiring old-schema serving coverage. The local
+lease/reference protocol below remains the draining mechanism afterward;
+Phase 1 selection becomes exact-schema-aware. This change is not implemented yet.
+
 Keep an accessed SN QueryView in Up long enough for Phase 1 plans to reach
 Phase 2 during normal view replacement. This is an SN-local, renewable serving
 lease, separate from the existing call-scoped QueryView reference and physical
@@ -9,7 +14,7 @@ segment handles. Only Up accepts new tasks; Down does not become queryable.
 
 ## Configuration and renewal
 
-`queryView.leaseDuration` defaults to `60s` and is not refreshable.
+`queryView.leaseDuration` defaults to `5s` and is not refreshable.
 The duration is captured when the PChannel handler is created and inherited by
 its shard handlers. Non-positive durations disable timed retention while
 preserving active call references. A duration is not a maximum request execution
