@@ -79,6 +79,15 @@ VChannelRecoveryModule.ObserveMessage
 Events observed while the runtime build task is still running are buffered in
 the same `QueryRuntime` event buffer. After the runtime becomes ready, the shared
 dispatcher drains future events through the same per-runtime serialized path.
+The shared pool has `max(1, floor(hardware.GetCPUNum() * ratio))` workers per
+PChannel. `streaming.queryView.liveEventDispatchConcurrencyRatioPerPChannel`
+sets this ratio, defaults to `0.25`, and dynamically resizes existing pools.
+Shrinking lets an executing runtime drain finish before retiring its worker;
+queued runtimes remain in the shared queue. Closing a dispatcher unregisters
+its configuration watcher and joins its workers. Different
+runtimes can drain concurrently; one runtime always applies events serially.
+This pool updates SN-local query resources; it does not deliver the remote
+TransformLog stream to QueryNodes.
 
 ## 5. References
 

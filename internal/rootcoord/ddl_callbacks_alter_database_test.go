@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	imocks "github.com/milvus-io/milvus/internal/mocks"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -159,19 +158,17 @@ func TestDDLCallbacksAlterDatabaseV1AckCallback_AlterDatabaseError(t *testing.T)
 	require.Error(t, err)
 }
 
-func TestDDLCallbacksAlterDatabaseV1AckCallback_UpdateLoadConfigRPCError(t *testing.T) {
+func TestDDLCallbacksAlterDatabaseV1AckCallback_ApplyLoadConfigError(t *testing.T) {
 	ctx := context.Background()
 	controlChannel := funcutil.GetControlChannel("test")
 
 	meta := mockrootcoord.NewIMetaTable(t)
 	meta.EXPECT().AlterDatabase(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
-	mixc := imocks.NewMixCoord(t)
-	mixc.On("UpdateLoadConfig", mock.Anything, mock.Anything).Return(nil, errors.New("rpc error"))
+	mockReplicaConfigUpdate(t, merr.WrapErrServiceUnavailableMsg("store unavailable"))
 
 	c := newTestCore(
 		withMeta(meta),
-		withMixCoord(mixc),
 		withValidProxyManager(),
 		withBroker(&mockBroker{}),
 	)
@@ -210,12 +207,10 @@ func TestDDLCallbacksAlterDatabaseV1AckCallback_UpdateLoadConfigNonRGNotFoundErr
 	meta := mockrootcoord.NewIMetaTable(t)
 	meta.EXPECT().AlterDatabase(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
-	mixc := imocks.NewMixCoord(t)
-	mixc.On("UpdateLoadConfig", mock.Anything, mock.Anything).Return(merr.Status(errors.New("mock error")), nil)
+	mockReplicaConfigUpdate(t, merr.WrapErrServiceInternalMsg("apply failed"))
 
 	c := newTestCore(
 		withMeta(meta),
-		withMixCoord(mixc),
 		withValidProxyManager(),
 		withBroker(&mockBroker{}),
 	)
@@ -255,16 +250,12 @@ func TestDDLCallbacksAlterDatabaseV1AckCallback_StopRetryOnResourceGroupNotFound
 	meta := mockrootcoord.NewIMetaTable(t)
 	meta.EXPECT().AlterDatabase(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
-	mixc := imocks.NewMixCoord(t)
-	mixc.On("UpdateLoadConfig", mock.Anything, mock.Anything).Return(
-		merr.Status(merr.WrapErrResourceGroupNotFound("rg_not_exist")),
-		nil,
-	)
+	mockReplicaConfigUpdate(t, merr.WrapErrResourceGroupNotFound("rg_not_exist"))
 
 	c := newTestCore(
 		withMeta(meta),
-		withMixCoord(mixc),
 		withValidProxyManager(),
+		withTsoAllocator(newMockTsoAllocator()),
 		withBroker(&mockBroker{}),
 	)
 	cb := &DDLCallback{Core: c}

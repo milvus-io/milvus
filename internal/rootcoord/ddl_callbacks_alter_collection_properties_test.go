@@ -386,18 +386,16 @@ func TestValidateNamespaceModeImmutable(t *testing.T) {
 	))
 }
 
-func TestDDLCallbacksAlterCollectionV2AckCallback_UpdateLoadConfigRPCError(t *testing.T) {
+func TestDDLCallbacksAlterCollectionV2AckCallback_ApplyLoadConfigError(t *testing.T) {
 	ctx := context.Background()
 
 	meta := mockrootcoord.NewIMetaTable(t)
 	meta.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(nil)
 
-	mixc := imocks.NewMixCoord(t)
-	mixc.On("UpdateLoadConfig", mock.Anything, mock.Anything).Return(nil, errors.New("rpc error"))
+	mockReplicaConfigUpdate(t, merr.WrapErrServiceUnavailableMsg("store unavailable"))
 
 	c := newTestCore(
 		withMeta(meta),
-		withMixCoord(mixc),
 		withValidProxyManager(),
 		withBroker(&mockBroker{
 			BroadcastAlteredCollectionFunc: func(ctx context.Context, collectionID int64) error {
@@ -436,12 +434,10 @@ func TestDDLCallbacksAlterCollectionV2AckCallback_UpdateLoadConfigNonRGNotFoundE
 	meta := mockrootcoord.NewIMetaTable(t)
 	meta.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(nil)
 
-	mixc := imocks.NewMixCoord(t)
-	mixc.On("UpdateLoadConfig", mock.Anything, mock.Anything).Return(merr.Status(errors.New("mock error")), nil)
+	mockReplicaConfigUpdate(t, merr.WrapErrServiceInternalMsg("apply failed"))
 
 	c := newTestCore(
 		withMeta(meta),
-		withMixCoord(mixc),
 		withValidProxyManager(),
 		withBroker(&mockBroker{
 			BroadcastAlteredCollectionFunc: func(ctx context.Context, collectionID int64) error {
@@ -481,15 +477,10 @@ func TestDDLCallbacksAlterCollectionV2AckCallback_StopRetryOnResourceGroupNotFou
 	meta := mockrootcoord.NewIMetaTable(t)
 	meta.EXPECT().AlterCollection(mock.Anything, mock.Anything).Return(nil)
 
-	mixc := imocks.NewMixCoord(t)
-	mixc.On("UpdateLoadConfig", mock.Anything, mock.Anything).Return(
-		merr.Status(merr.WrapErrResourceGroupNotFound("rg_not_exist")),
-		nil,
-	)
+	mockReplicaConfigUpdate(t, merr.WrapErrResourceGroupNotFound("rg_not_exist"))
 
 	c := newTestCore(
 		withMeta(meta),
-		withMixCoord(mixc),
 		withValidProxyManager(),
 		withTsoAllocator(newMockTsoAllocator()),
 		withBroker(&mockBroker{

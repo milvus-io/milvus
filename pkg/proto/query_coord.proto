@@ -352,7 +352,6 @@ message GetQueryViewLoadInfoResponse {
     repeated messages.LoadFieldConfig load_fields = 5;
     repeated index.IndexInfo index_info_list = 6;
     repeated messages.LoadFieldConfig required_fields = 7; // Internal explicit query field scope, independent of load_fields hints.
-    bool skip_load_dynamic_field = 8; // Preload hint only.
 }
 
 // Current complete loading snapshots for segments in one collection. Consumers

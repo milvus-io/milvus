@@ -553,12 +553,6 @@ func (m *externalCollectionRefreshManager) publishRefreshJob(ctx context.Context
 	if r == nil {
 		return merr.WrapErrServiceNotReadyMsg("QueryView coordinator is not initialized")
 	}
-	segments := m.mt.SelectSegments(ctx, WithCollection(job.GetCollectionId()))
-	ids := make([]int64, 0, len(segments))
-	for _, segment := range segments {
-		ids = append(ids, segment.GetID())
-	}
-	m.mt.notifyQueryViewSegments(job.GetCollectionId(), ids...)
 	return r.Refresh(ctx, job.GetCollectionId())
 }
 

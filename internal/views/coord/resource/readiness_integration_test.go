@@ -31,7 +31,7 @@ func (*refreshSource) RefreshDataView(context.Context, int64) (*viewpb.DataVersi
 func TestReadinessResourceIntegration(t *testing.T) {
 	r := managementResources(t)
 	r.RefreshVersions = &sync.Map{}
-	r.LoadManager = loadmgr.NewCollectionLoadManager(r.LoadConfigs, nil)
+	r.LoadManager = loadmgr.NewCollectionLoadManager(r.LoadConfigs, nil, nil)
 	r.Reconciler = &refreshSource{}
 	ready := false
 	var duringSnapshot func()

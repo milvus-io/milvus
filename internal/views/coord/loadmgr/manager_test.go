@@ -60,6 +60,7 @@ func TestCollectionLoadManager_UpdateLoadConfig(t *testing.T) {
 	manager := NewCollectionLoadManager(
 		store,
 		func(collectionID int64) { notified = append(notified, collectionID) },
+		nil,
 	)
 
 	expectCatalogCalls(t, mockey.Mock(catalogkv.Catalog.SaveCollection).Return(nil), 1)
@@ -82,6 +83,7 @@ func TestCollectionLoadManager_ReleaseCollectionKeepsRegistryForReconcile(t *tes
 	manager := NewCollectionLoadManager(
 		store,
 		func(collectionID int64) { notified = append(notified, collectionID) },
+		nil,
 	)
 
 	expectCatalogCalls(t, mockey.Mock(catalogkv.Catalog.SaveCollection).Return(nil), 1)

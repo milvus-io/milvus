@@ -5,14 +5,7 @@ from common.common_type import CaseLabel
 
 
 class TestMilvusClientPartitionReleaseHandoff(TestMilvusClientV2Base):
-    @pytest.mark.parametrize(
-        "replica_num",
-        [
-            pytest.param(1, marks=pytest.mark.tags(CaseLabel.L1), id="single-replica"),
-            # The ClusterOnly deployment must provide at least 2 SNs and 2 QNs.
-            pytest.param(2, marks=pytest.mark.tags(CaseLabel.ClusterOnly), id="two-replicas"),
-        ],
-    )
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("sealed", [False, True], ids=["growing", "sealed"])
     def test_release_partition_waits_for_serving_handoff(self, sealed):
         self._check_release_partition_handoff(sealed, replica_number=1)
