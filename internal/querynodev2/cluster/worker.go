@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -189,22 +190,30 @@ func (w *remoteWorker) splitDeleteBatch(ctx context.Context, req *querypb.Delete
 }
 
 func (w *remoteWorker) SearchSegments(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
+	ctx = grpcclient.WithFailFastOnConnectionError(ctx)
 	client := w.getClient()
 	ret, err := client.SearchSegments(ctx, req)
 	if err != nil && errors.Is(err, merr.ErrServiceUnimplemented) {
 		// for compatible with rolling upgrade from version before v2.2.9
-		return client.Search(ctx, req)
+		ret, err = client.Search(ctx, req)
+	}
+	if grpcclient.IsConnectionFailure(err) {
+		err = merr.WrapErrChannelWorkerUnavailable(err)
 	}
 
 	return ret, err
 }
 
 func (w *remoteWorker) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
+	ctx = grpcclient.WithFailFastOnConnectionError(ctx)
 	client := w.getClient()
 	ret, err := client.QuerySegments(ctx, req)
 	if err != nil && errors.Is(err, merr.ErrServiceUnimplemented) {
 		// for compatible with rolling upgrade from version before v2.2.9
-		return client.Query(ctx, req)
+		ret, err = client.Query(ctx, req)
+	}
+	if grpcclient.IsConnectionFailure(err) {
+		err = merr.WrapErrChannelWorkerUnavailable(err)
 	}
 
 	return ret, err
