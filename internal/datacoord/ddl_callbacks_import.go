@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
@@ -487,9 +488,15 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 		return merr.WrapErrImportSysFailedMsg("job %d is in state %s, waiting for Uncommitted", jobID, job.GetState())
 	}
 
-	// Legacy callbacks only enter Committing. The message consumer still owns
-	// per-channel visibility and the checker observes the committed markers.
-	if !result.Message.Header().GetCommitByCoordinator() {
+	// Without staging, legacy callbacks only enter Committing and consumers
+	// own channel visibility. Opted-in jobs finish here so the collection
+	// resource key remains held through group publication; old SN RPCs safely
+	// join the same groups.
+	stagedCommit := Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool()
+	if c.meta != nil && !stagedCommit {
+		stagedCommit = len(c.meta.producerChangeGroups(model.SegmentChangeSourceImportJob, jobID, ""))+len(c.meta.producerChangeGroups(model.SegmentChangeSourceCDCReplicated, jobID, "")) > 0
+	}
+	if !result.Message.Header().GetCommitByCoordinator() && !stagedCommit {
 		return nil
 	}
 
@@ -503,6 +510,16 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 			continue
 		}
 		segIDs := c.getImportSegmentIDsByVchannel(ctx, jobID, vchannel)
+		source := model.SegmentChangeSourceImportJob
+		if result.Message.ReplicateHeader() != nil && result.Message.Header().GetCommitByCoordinator() {
+			source = model.SegmentChangeSourceCDCReplicated
+		}
+		if staged, err := c.stageImportChangeFromSource(ctx, job, vchannel, segIDs, appendResult.TimeTick, source); staged {
+			if err != nil {
+				return err
+			}
+			continue
+		}
 		if len(segIDs) == 0 {
 			continue
 		}
@@ -558,10 +575,11 @@ func (c *DDLCallbacks) rollbackImportV2AckCallback(ctx context.Context, result m
 		return nil
 	}
 	state := job.GetState()
-	if state == internalpb.ImportJobState_Committing ||
+	if job.GetCommitBroadcastStarted() ||
+		state == internalpb.ImportJobState_Committing ||
 		state == internalpb.ImportJobState_Completed ||
 		state == internalpb.ImportJobState_Failed {
-		mlog.Info(ctx, "RollbackImport: job already in terminal/committed state, no-op",
+		mlog.Info(ctx, "RollbackImport: commit may have started or job is terminal, no-op",
 			mlog.FieldJobID(jobID), mlog.String("state", state.String()))
 		return nil
 	}

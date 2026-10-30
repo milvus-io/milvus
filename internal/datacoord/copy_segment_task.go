@@ -404,6 +404,9 @@ func (t *copySegmentTask) GetTaskVersion() int64 {
 // - The first task for a job reads it from storage to populate CopySegmentRequest
 // - Tasks in the same job share a cache to avoid redundant remote reads
 func (t *copySegmentTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
+	if t.resumeCopyPublication() {
+		return
+	}
 	ctx := t.ctx
 	mlog.Info(ctx, "processing pending copy segment task...", WrapCopySegmentTaskLog(t)...)
 	job := t.copyMeta.GetJob(ctx, t.GetJobId())
@@ -540,6 +543,9 @@ func isCopyTaskLostOnWorker(err error) bool {
 // - No point continuing if one task fails (data integrity)
 // - Saves resources by stopping early
 func (t *copySegmentTask) QueryTaskOnWorker(cluster session.Cluster) {
+	if t.resumeCopyPublication() {
+		return
+	}
 	nodeID := t.GetNodeId()
 	req := &datapb.QueryCopySegmentRequest{
 		TaskID: t.GetTaskId(),
@@ -630,6 +636,28 @@ func (t *copySegmentTask) QueryTaskOnWorker(cluster session.Cluster) {
 	mlog.Info(context.TODO(), "query copy segment task",
 		WrapCopySegmentTaskLog(t, mlog.String("respState", resp.GetState().String()),
 			mlog.String("reason", resp.GetReason()))...)
+}
+
+// The group is durable only after all copy artifacts and index metadata were
+// accepted. Recovering it must not re-copy files when worker/task state is lost.
+func (t *copySegmentTask) resumeCopyPublication() bool {
+	if t.meta == nil || t.copyMeta == nil {
+		return false
+	}
+	g := t.meta.producerChangeGroup(model.SegmentChangeSourceCopySegment, t.GetTaskId(), "")
+	if g == nil {
+		return false
+	}
+	if g.State == model.SegmentChangeStateFailed || g.State == model.SegmentChangeStateAborted {
+		t.markTaskAndJobFailed(g.FailReason)
+		return true
+	}
+	if err := t.copyMeta.UpdateTask(t.ctx, t.GetTaskId(), UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskCompleted), updateCopyTaskCleanup(false)); err != nil {
+		mlog.Warn(t.ctx, "cannot resume copy publication", mlog.FieldTaskID(t.GetTaskId()), mlog.Err(err))
+		return true
+	}
+	t.cleanupAdmissionPending.Store(false)
+	return true
 }
 
 // ===========================================================================================
@@ -737,6 +765,14 @@ func cleanupRejectedCopy(ctx context.Context, task CopySegmentTask, meta *meta, 
 	defer locks.Unlock(task.GetTaskId())
 	if task.GetState() != datapb.CopySegmentTaskState_CopySegmentTaskFailed || !task.GetCleanupRequired() {
 		return nil
+	}
+	if group := meta.producerChangeGroup(model.SegmentChangeSourceCopySegment, task.GetTaskId(), ""); group != nil {
+		if group.State == model.SegmentChangeStateCommitted {
+			return copyMeta.UpdateTask(ctx, task.GetTaskId(), updateCopyTaskCleanup(false))
+		}
+		if err := meta.abortProducerChange(ctx, group, "copy task rejected"); err != nil {
+			return err
+		}
 	}
 	for _, mapping := range task.GetIdMappings() {
 		segment := meta.GetSegment(ctx, mapping.GetTargetSegmentId())
@@ -1164,6 +1200,7 @@ func deriveSnapshotSourceRootURI(snapshotS3Location string, layout datapb.Snapsh
 // - Provides clear error messages for troubleshooting
 func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResponse, copyMeta CopySegmentMeta, meta *meta) error {
 	ctx := context.TODO()
+	staging := Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool()
 
 	// Update task state based on response
 	switch resp.GetState() {
@@ -1175,6 +1212,12 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			return nil
 		}
 		defer locks.Unlock(task.GetTaskId())
+		if group := meta.producerChangeGroup(model.SegmentChangeSourceCopySegment, task.GetTaskId(), ""); group != nil {
+			if group.State == model.SegmentChangeStateFailed || group.State == model.SegmentChangeStateAborted {
+				return failCopySegmentSync(ctx, task, copyMeta, merr.WrapErrDataIntegrityMsg("copy publication group %d failed: %s", group.GroupID, group.FailReason))
+			}
+			return copyMeta.UpdateTask(ctx, task.GetTaskId(), UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskCompleted), updateCopyTaskCleanup(false))
+		}
 		// Even a late result rejected below owns files that need durable cleanup.
 		// Re-arming an already cleaned task is safe because prefix deletion is idempotent.
 		if err := copyMeta.UpdateTask(ctx, task.GetTaskId(), updateCopyTaskCleanup(true)); err != nil {
@@ -1186,6 +1229,21 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			return merr.WrapErrServiceInternalMsg("cannot publish a failed copy task with planned cleanup")
 		}
 		results := resp.GetSegmentResults()
+		if staging {
+			expected := make(map[int64]bool, len(task.GetIdMappings()))
+			for _, mapping := range task.GetIdMappings() {
+				expected[mapping.GetTargetSegmentId()] = true
+			}
+			for _, result := range results {
+				if !expected[result.GetSegmentId()] {
+					return failCopySegmentSync(ctx, task, copyMeta, merr.WrapErrDataIntegrityMsg("copy task %d returned an unexpected/duplicate target %d", task.GetTaskId(), result.GetSegmentId()))
+				}
+				delete(expected, result.GetSegmentId())
+			}
+			if len(expected) > 0 {
+				return failCopySegmentSync(ctx, task, copyMeta, merr.WrapErrDataIntegrityMsg("copy task %d omitted %d target results", task.GetTaskId(), len(expected)))
+			}
+		}
 		verified := make([]map[int64]int64, len(results))
 		io := packed.NewManifestIOContext(min(max(1, len(results)), segmentIndexManifestReadConcurrency()))
 		err := runManifestBatch(ctx, len(results), func(ctx context.Context, i int, complete func(error)) error {
@@ -1209,7 +1267,7 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			op1 := UpdateBinlogsOperator(result.GetSegmentId(), result.GetBinlogs(),
 				result.GetStatslogs(), result.GetDeltalogs(), result.GetBm25Logs())
 			op2 := UpdateStatusOperator(result.GetSegmentId(), commonpb.SegmentState_Flushed)
-			op3 := UpdateIsImporting(result.GetSegmentId(), false)
+			op3 := UpdateIsImporting(result.GetSegmentId(), staging)
 			operators := []UpdateOperator{op1, op2, op3}
 			// A copy target is a freshly created, exclusively owned segment and the
 			// worker returns a complete manifest pointer - including the copied
@@ -1258,7 +1316,7 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			// The SegmentMeta mutation is committed; schedule an asynchronous
 			// DataView snapshot reconciliation instead of a synchronous event
 			// publish (materialized-view model).
-			if meta.dataViewManager != nil {
+			if !staging && meta.dataViewManager != nil {
 				meta.recomputeDataView(context.TODO(), task.GetCollectionId())
 			}
 			// The segment is Flushed and carries every index the snapshot had.
@@ -1271,6 +1329,19 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 					mlog.Int64("importedRows", result.GetImportedRows()),
 					mlog.Int("binlogFields", len(result.GetBinlogs())),
 					mlog.Bool("hasManifestPath", result.GetManifestPath() != ""))...)
+		}
+		if staging {
+			ids := make([]int64, 0, len(results))
+			for _, result := range results {
+				ids = append(ids, result.GetSegmentId())
+			}
+			_, _, err := meta.stageAdmittedChange(meta.ctx, &model.SegmentChangeGroup{
+				GroupID: task.GetTaskId(), SourceJobID: task.GetTaskId(),
+				Source: model.SegmentChangeSourceCopySegment, CollectionID: task.GetCollectionId(), NewSegmentIDs: ids, PreserveMemberTimestamps: true,
+			}, true)
+			if err != nil {
+				return err
+			}
 		}
 
 		// Mark task as completed and record copying duration

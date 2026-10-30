@@ -8110,6 +8110,20 @@ func TestAbortImport_CommittingRejected(t *testing.T) {
 	assert.False(t, merr.Ok(resp))
 }
 
+func TestAbortImport_StartedBroadcastRejected(t *testing.T) {
+	ctx := context.Background()
+	job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID: 2105, State: internalpb.ImportJobState_Uncommitted, CommitBroadcastStarted: true,
+	}}
+	im := NewMockImportMeta(t)
+	im.EXPECT().GetJob(mock.Anything, int64(2105)).Return(job).Once()
+	server := &Server{importMeta: im, importJobLock: lock.NewKeyLock[int64]()}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	resp, err := server.AbortImport(ctx, &datapb.AbortImportRequest{JobId: 2105})
+	assert.NoError(t, err)
+	assert.False(t, merr.Ok(resp))
+}
+
 func TestGetImportSegmentIDsByVchannel_V3OnlyAcceptedCompletedOutputs(t *testing.T) {
 	ctx := context.Background()
 	const jobID int64 = 3003

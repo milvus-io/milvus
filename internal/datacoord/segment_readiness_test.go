@@ -115,6 +115,7 @@ func readyFlushedSegment(id int64) *SegmentInfo {
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:           id,
 			CollectionID: readinessCollID,
+			NumOfRows:    42,
 			State:        commonpb.SegmentState_Flushed,
 			Binlogs:      []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
 		},
@@ -149,6 +150,9 @@ func TestSegmentReadiness_DataReady(t *testing.T) {
 	// No index on the collection: isolate the data term.
 	r := readinessMeta(coll, newReadinessIndexMeta(readinessCollID, map[int64]*model.Index{}, nil)).prepareReadiness(coll)
 	require.NotNil(t, r)
+	empty := readyFlushedSegment(99)
+	empty.NumOfRows = 0
+	require.False(t, r.dataReady(empty), "zero rows are no output, never a loadable member")
 
 	cases := []struct {
 		name    string
@@ -158,35 +162,35 @@ func TestSegmentReadiness_DataReady(t *testing.T) {
 		{
 			name: "growing not ready",
 			segment: &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-				ID: 1, CollectionID: readinessCollID, State: commonpb.SegmentState_Growing, Binlogs: []*datapb.FieldBinlog{{FieldID: 2}},
+				ID: 1, CollectionID: readinessCollID, NumOfRows: 42, State: commonpb.SegmentState_Growing, Binlogs: []*datapb.FieldBinlog{{FieldID: 2}},
 			}},
 			ready: false,
 		},
 		{
 			name: "flushed with binlogs ready",
 			segment: &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-				ID: 1, CollectionID: readinessCollID, State: commonpb.SegmentState_Flushed, Binlogs: []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
+				ID: 1, CollectionID: readinessCollID, NumOfRows: 42, State: commonpb.SegmentState_Flushed, Binlogs: []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
 			}},
 			ready: true,
 		},
 		{
 			name: "flushing with binlogs ready",
 			segment: &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-				ID: 1, CollectionID: readinessCollID, State: commonpb.SegmentState_Flushing, Binlogs: []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
+				ID: 1, CollectionID: readinessCollID, NumOfRows: 42, State: commonpb.SegmentState_Flushing, Binlogs: []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
 			}},
 			ready: true,
 		},
 		{
 			name: "flushed with manifest ready",
 			segment: &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-				ID: 1, CollectionID: readinessCollID, State: commonpb.SegmentState_Flushed, ManifestPath: "s3://segments/1/manifest",
+				ID: 1, CollectionID: readinessCollID, NumOfRows: 42, State: commonpb.SegmentState_Flushed, ManifestPath: "s3://segments/1/manifest",
 			}},
 			ready: true,
 		},
 		{
 			name: "flushed with no footprint not ready",
 			segment: &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
-				ID: 1, CollectionID: readinessCollID, State: commonpb.SegmentState_Flushed,
+				ID: 1, CollectionID: readinessCollID, NumOfRows: 42, State: commonpb.SegmentState_Flushed,
 			}},
 			ready: false,
 		},
@@ -419,6 +423,16 @@ func TestSegmentReadiness_StatsTerm(t *testing.T) {
 
 	t.Run("no stats written not ready", func(t *testing.T) {
 		require.False(t, r.statsReady(seg))
+	})
+	t.Run("unsorted still requires artifacts with sorting disabled", func(t *testing.T) {
+		unsorted := seg.Clone()
+		unsorted.IsSorted = false
+		require.False(t, needDoTextIndex(unsorted, []int64{2}, false), "scheduling eligibility alone says nothing about artifact readiness")
+		require.False(t, r.Ready(unsorted))
+		unsorted.TextStatsLogs = map[int64]*datapb.TextIndexStats{2: {}}
+		require.False(t, r.Ready(unsorted), "JSON-key artifacts are still missing")
+		unsorted.JsonKeyStats = map[int64]*datapb.JsonKeyStats{3: {JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion}}
+		require.True(t, r.Ready(unsorted))
 	})
 
 	t.Run("text stats only not ready", func(t *testing.T) {

@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -342,6 +343,9 @@ func (c *copySegmentChecker) checkPendingJob(job CopySegmentJob) {
 
 	// Step 3: Split uncovered mappings into groups (max segments per task)
 	maxSegmentsPerTask := Params.DataCoordCfg.MaxSegmentsPerCopyTask.GetAsInt()
+	if Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool() {
+		maxSegmentsPerTask = min(maxSegmentsPerTask, max(1, Params.DataCoordCfg.SegmentChangeGroupMaxMembers.GetAsInt()))
+	}
 	groups := lo.Chunk(pendingMappings, maxSegmentsPerTask)
 
 	// Step 4: Create task for each group
@@ -458,6 +462,15 @@ func (c *copySegmentChecker) checkCopyingJob(job CopySegmentJob) {
 
 	// Step 2: Count tasks by state
 	for _, task := range tasks {
+		if group := c.meta.producerChangeGroup(model.SegmentChangeSourceCopySegment, task.GetTaskId(), ""); group != nil {
+			switch group.State {
+			case model.SegmentChangeStateStaged, model.SegmentChangeStateReady:
+				continue
+			case model.SegmentChangeStateFailed, model.SegmentChangeStateAborted:
+				failedTasks++
+				continue
+			}
+		}
 		switch task.GetState() {
 		case datapb.CopySegmentTaskState_CopySegmentTaskCompleted:
 			completedTasks++
@@ -506,6 +519,14 @@ func (c *copySegmentChecker) checkCopyingJob(job CopySegmentJob) {
 	// Step 6: All tasks completed - collect total rows and finish job
 	var totalRows int64
 	for _, task := range tasks {
+		if group := c.meta.producerChangeGroup(model.SegmentChangeSourceCopySegment, task.GetTaskId(), ""); group != nil {
+			for _, id := range group.NewSegmentIDs {
+				if seg := c.meta.GetSegment(c.ctx, id); seg != nil && seg.GetState() != commonpb.SegmentState_Dropped {
+					totalRows += seg.GetNumOfRows()
+				}
+			}
+			continue
+		}
 		for _, mapping := range task.GetIdMappings() {
 			targetSegID := mapping.GetTargetSegmentId()
 			segment := c.meta.GetSegment(c.ctx, targetSegID)
@@ -545,6 +566,10 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 	tasks := c.copyMeta.GetTasksByJobID(c.ctx, job.GetJobId())
 	targetSegmentIDs := make([]int64, 0)
 	for _, task := range tasks {
+		if group := c.meta.producerChangeGroup(model.SegmentChangeSourceCopySegment, task.GetTaskId(), ""); group != nil {
+			targetSegmentIDs = append(targetSegmentIDs, group.NewSegmentIDs...)
+			continue
+		}
 		for _, mapping := range task.GetIdMappings() {
 			targetSegmentIDs = append(targetSegmentIDs, mapping.GetTargetSegmentId())
 		}
@@ -555,7 +580,7 @@ func (c *copySegmentChecker) finishJob(job CopySegmentJob, totalRows int64) {
 	if len(targetSegmentIDs) > 0 {
 		for _, segID := range targetSegmentIDs {
 			segment := c.meta.GetSegment(c.ctx, segID)
-			if segment != nil && segment.GetState() != commonpb.SegmentState_Flushed {
+			if segment != nil && !isEmptySegmentChangeOutput(segment) && segment.GetState() != commonpb.SegmentState_Flushed {
 				op := UpdateStatusOperator(segID, commonpb.SegmentState_Flushed)
 				if err := c.meta.UpdateSegmentsInfo(c.ctx, op); err != nil {
 					log.Error(c.ctx, "failed to update segment state to Flushed",
@@ -630,6 +655,15 @@ func (c *copySegmentChecker) checkFailedJob(job CopySegmentJob) {
 
 	// Find all Pending/InProgress tasks
 	allTasks := c.copyMeta.GetTasksByJobID(c.ctx, job.GetJobId())
+	if c.meta != nil {
+		for _, t := range allTasks {
+			g := c.meta.producerChangeGroup(model.SegmentChangeSourceCopySegment, t.GetTaskId(), "")
+			if err := c.meta.abortProducerChange(c.ctx, g, "copy job failed"); err != nil {
+				log.Warn(c.ctx, "cannot reclaim failed copy group", mlog.Err(err))
+				return
+			}
+		}
+	}
 	tasks := lo.Filter(allTasks, func(t CopySegmentTask, _ int) bool {
 		return t.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskPending ||
 			t.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskInProgress

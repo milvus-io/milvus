@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -821,4 +822,29 @@ func (s *statsInspectorSuite) TestNeedDoTextIndex() {
 	segment.TextStatsLogs = map[int64]*datapb.TextIndexStats{102: {}}
 	result = needDoTextIndex(segment, []int64{101}, true)
 	s.True(result, "Segment should build missing text index field")
+}
+
+func (s *statsInspectorSuite) TestUnsortedStatsConvergeWhenSortingDisabled() {
+	previous := Params.DataCoordCfg.EnableSortCompaction.SwapTempValue("false")
+	defer Params.DataCoordCfg.EnableSortCompaction.SwapTempValue(previous)
+	collection := s.mt.GetCollection(1)
+	collection.Schema.Fields = append(collection.Schema.Fields, &schemapb.FieldSchema{FieldID: 102, Name: "json", DataType: schemapb.DataType_JSON})
+	for _, segment := range s.mt.segments.GetSegments() {
+		clone := segment.Clone()
+		clone.IsSorted = false
+		clone.IsSortedByNamespace = false
+		s.mt.segments.SetSegment(clone.GetID(), clone)
+	}
+	s.NotContains(s.inspector.getStatsCandidateSegments(s.ctx, collection), UniqueID(20))
+	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(20, indexpb.StatsSubJob_TextIndexJob), "group-less scheduling remains unchanged")
+	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(20, indexpb.StatsSubJob_JsonKeyIndexJob))
+	s.mt.segMu.Lock()
+	s.mt.ensureSegmentChangeGroupStoreLocked()
+	s.mt.segmentChangeGroups[1] = &model.SegmentChangeGroup{GroupID: 1, CollectionID: 1, State: model.SegmentChangeStateStaged, NewSegmentIDs: []int64{20}}
+	s.mt.stagedSegmentToGroup[20] = 1
+	s.mt.segMu.Unlock()
+	s.Contains(s.inspector.getStatsCandidateSegments(s.ctx, collection), UniqueID(20))
+	s.processSegments(20)
+	s.NotNil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(20, indexpb.StatsSubJob_TextIndexJob), "required text stats must have a producer when sort is disabled")
+	s.NotNil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(20, indexpb.StatsSubJob_JsonKeyIndexJob), "required JSON-key stats must also converge")
 }
