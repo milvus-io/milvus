@@ -1041,7 +1041,156 @@ TEST(StorageConfig, PackedWriterPreservesChecksum) {
     }
 }
 
+TEST(StorageTalonConfig, StageMaskTestsRequestedBits) {
+    EXPECT_TRUE(TalonStageEnabled(0, kTalonStageLoadOpen));
+    EXPECT_TRUE(TalonStageEnabled(kTalonStagesAll, kTalonStageLoadOpen));
+    EXPECT_TRUE(TalonStageEnabled(kTalonStageLoadOpen, kTalonStageLoadOpen));
+    EXPECT_FALSE(TalonStageEnabled(1U << 1, kTalonStageLoadOpen));
+    EXPECT_TRUE(TalonStageEnabled(kTalonStageLoadOpen | (1U << 1),
+                                  kTalonStageLoadOpen));
+    EXPECT_FALSE(TalonStageEnabled(0, 0));
+    EXPECT_FALSE(TalonStageEnabled(kTalonStagesAll, 0));
+}
+
+TEST(StorageTalonConfig, OrdinaryFilesystemUsesConfiguredStages) {
+    StorageConfig config;
+    config.storage_type = "remote";
+    config.address = "http://127.0.0.1:9000";
+    config.region = "us-east-1";
+    // A non-AWS provider disables AWS instance metadata during client construction.
+    config.cloud_provider = "aliyun";
+    config.talon_coordinator = "127.0.0.1:7000";
+    for (const uint32_t stages :
+         {uint32_t{0}, uint32_t{1}, uint32_t{2}, uint32_t{3}, UINT32_MAX}) {
+        for (const uint32_t mode : {0, 1, 2}) {
+            config.talon_mode = mode;
+            config.talon_enabled_stages = stages;
+            const auto fs =
+                StorageV2FSCache::Instance().Get(ToStorageV2FSCacheKey(config));
+            ASSERT_NE(fs, nullptr);
+            const auto observable =
+                std::dynamic_pointer_cast<milvus_storage::Observable>(fs);
+            ASSERT_NE(observable, nullptr);
+            const auto sources = observable->GetMetricsSources();
+            ASSERT_TRUE(sources.ok()) << sources.status().ToString();
+            EXPECT_EQ(
+                sources->count(milvus_storage::kTalonMetricsSource),
+                mode != 0 && (stages == 0 || stages == UINT32_MAX) ? 1 : 0);
+        }
+    }
+}
+
 TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
+    const std::string open_fs_mode =
+        std::string(PROPERTY_READER_OPEN_PREFIX) + PROPERTY_FS_TALON_MODE;
+    const std::string open_external_mode =
+        std::string(PROPERTY_READER_OPEN_PREFIX) + "extfs.42.talon.mode";
+    struct StageCase {
+        uint32_t mask;
+        bool ordinary;
+        bool load_open;
+    };
+    const StageCase cases[] = {
+        {0, true, true},
+        {1, false, true},
+        {2, false, false},
+        {3, false, true},
+        {UINT32_MAX, true, true},
+    };
+    for (const bool for_load : {false, true}) {
+        for (const auto* storage_type : {"local", "remote"}) {
+            for (const auto& stage : cases) {
+                for (const uint32_t mode : {0, 1, 2}) {
+                    for (const bool external : {false, true}) {
+                        StorageConfig input;
+                        input.storage_type = storage_type;
+                        input.talon_mode = mode;
+                        input.talon_enabled_stages = stage.mask;
+                        input.talon_coordinator = "127.0.0.1:7000";
+                        input.talon_enable_for_external_table = external;
+                        const auto c_config = ToCStorageConfig(input);
+                        EXPECT_EQ(c_config.talon_mode, mode);
+                        EXPECT_EQ(c_config.talon_enabled_stages, stage.mask);
+                        const auto key = ToStorageV2FSCacheKey(input);
+                        EXPECT_EQ(key.talon_mode, mode);
+                        EXPECT_EQ(key.talon_enabled_stages, stage.mask);
+                        auto base =
+                            MakeInternalPropertiesFromStorageConfig(c_config);
+                        const auto original = *base;
+                        EXPECT_EQ(base->count(open_fs_mode), 0);
+                        EXPECT_EQ(
+                            base->count("milvus.talon.external_open_mode"), 0);
+                        auto properties =
+                            for_load
+                                ? MakeLoadProperties(
+                                      *base,
+                                      TalonReadConfig{
+                                          mode, stage.mask, external})
+                                : std::make_shared<
+                                      milvus_storage::api::Properties>(*base);
+                        EXPECT_NE(properties.get(), base.get());
+                        const bool is_local =
+                            std::string_view(storage_type) == "local";
+                        const uint32_t data_mode = stage.ordinary ? mode : 0;
+                        const bool open_differs = for_load && stage.load_open &&
+                                                  !stage.ordinary && mode != 0;
+                        const auto internal =
+                            milvus_storage::FilesystemCache::getInstance()
+                                .resolve_config(*properties, "");
+                        ASSERT_TRUE(internal.ok())
+                            << internal.status().ToString();
+                        EXPECT_EQ(static_cast<uint32_t>(internal->talon_mode),
+                                  is_local ? 0 : data_mode);
+                        EXPECT_EQ(properties->count(open_fs_mode),
+                                  !is_local && open_differs ? 1 : 0);
+                        if (!is_local && open_differs) {
+                            EXPECT_EQ(std::get<uint32_t>(
+                                          properties->at(open_fs_mode)),
+                                      mode);
+                        }
+                        ::InjectExternalSpecProperties(
+                            *properties,
+                            42,
+                            "s3://s3.amazonaws.com/bucket/data/",
+                            "");
+                        const auto resolved =
+                            milvus_storage::FilesystemCache::getInstance()
+                                .resolve_config(
+                                    *properties,
+                                    "s3://s3.amazonaws.com/bucket/data/");
+                        ASSERT_TRUE(resolved.ok())
+                            << resolved.status().ToString();
+                        EXPECT_EQ(static_cast<uint32_t>(resolved->talon_mode),
+                                  external ? data_mode : 0);
+                        EXPECT_EQ(properties->count(open_external_mode),
+                                  external && open_differs ? 1 : 0);
+                        if (external && open_differs) {
+                            EXPECT_EQ(std::get<std::string>(
+                                          properties->at(open_external_mode)),
+                                      std::to_string(mode));
+                        }
+                        ::InjectExternalSpecProperties(
+                            *properties,
+                            42,
+                            "s3://s3.amazonaws.com/bucket/data/",
+                            R"({"extfs":{"storage_type":"local"}})");
+                        EXPECT_EQ(properties->count("extfs.42.talon.mode"), 0);
+                        EXPECT_EQ(properties->count(open_external_mode), 0);
+                        ::InjectExternalSpecProperties(
+                            *properties,
+                            42,
+                            "s3://s3.amazonaws.com/bucket/data/",
+                            "");
+                        EXPECT_EQ(properties->count(open_external_mode),
+                                  external && open_differs ? 1 : 0);
+                        // Per-reader overrides and alias injection never alter the shared base.
+                        EXPECT_EQ(*base, original);
+                    }
+                }
+            }
+        }
+    }
+
     StorageConfig first;
     first.storage_type = "remote";
     first.talon_mode = 2;
