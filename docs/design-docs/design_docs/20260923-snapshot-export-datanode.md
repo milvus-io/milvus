@@ -107,7 +107,7 @@ that segment before taking another. Restore receives source segment descriptions
 from DataCoord and uses the same per-segment physical inventory/deduplication.
 There is no task-wide inventory, destination map or preparation barrier.
 
-For ordinary StorageV3 segments, `CollectStorageV3DataFiles` reads the exact
+`EnumerateSegmentFiles` shares V1/V2 metadata enumeration and reads the exact
 pinned native manifest once. It supplies columns, deltas, stats, LOBs and the
 pinned manifest object, supplemented by nonempty PB delta/stats/BM25 paths.
 Pathless summaries remain metadata only. V3 insert and TEXT/JSON PB paths do not
@@ -123,9 +123,12 @@ records whose artifacts are absent from the bundle; Restore retracts them before
 publishing selected target indexes. The bundle is a Restore input, not a native
 manifest containing every historical index artifact.
 
-V1/V2 retain their enumeration. External Collection Restore retains enumeration
-of locally owned directory objects and referenced LOBs; it must not copy foreign
-lake fragments, and a nonempty segment without local manifest objects fails.
+External Collection Restore uses the same pinned inventory without directory
+listing. Before normalization and planning, it excludes native manifest references
+with a valid URI scheme, retaining those references in the copied manifest. This
+includes external column, delta and stats references; bucket equality is irrelevant.
+The pinned manifest object and snapshot-selected indexes are never filtered by
+this rule. A nonempty segment without a pinned manifest object fails.
 
 Export validates each segment's identity, URI/root ownership, source/destination
 overlap and native relative-layout preservation before its own writes. Canonical
@@ -151,16 +154,16 @@ record, rewrites explicit paths into `<job-root>/files`, and encodes/writes
 V6 Avro OCF through the shared copy permits. It never rereads source Avro or mutates
 source records; encoded buffers exist only for active writes. V3 insert
 placeholders are cleared, while manifest-owned TEXT/JSON references stay native.
-Native manifest objects are copied byte-for-byte; DataCoord relocates their
-top-level entry points.
+Native manifest objects are copied byte-for-byte; DataCoord relocates
+their top-level entry points.
 
 Self-contained bundle relocation uses the shared `RebaseObjectPath` rule.
 Restore and milvus-table rebase Avro entry points, native bases and L0 deltalogs
 before current-filesystem resolution. Referenced snapshots are not rebased.
 Re-export uses the current bundle's `files` root, avoiding repeated prefixes.
-No manifest-mapping field or new public snapshot version is introduced. V5
-parsing compatibility does not establish support for native/storage features
-missing from an older release.
+No additional public snapshot format version is introduced beyond upstream V6.
+Format parsing compatibility does not establish support for native/storage
+features missing from an older release.
 
 ## Scheduling, concurrency and provider copies
 
@@ -214,8 +217,13 @@ Task clients are owned and closed by the executor. Registration, query and Drop
 identify tasks by `(ClusterID, TaskID)`, isolating instances on shared workers.
 
 Physical data copies remain provider-side; data bytes do not stream through
-DataNode. Restore retains `dataNode.import.copyObjectTimeout` and does not add
-size probes. Export discovers sizes during copying, never during planning.
+DataNode. Restore retains `dataNode.import.copyObjectTimeout`. ObjectStore.Copy returns
+the object size for Export, Restore and metadata copies. Backends without a
+size-returning copy operation query the destination after copying; failure of
+that query fails the operation even when the object was already written.
+`CopySizeError` preserves the underlying error and write confirmation, so Restore
+records the destination for cleanup without counting unverified bytes.
+Export discovers sizes during copying, never during planning.
 MinIO/S3 stats each source once and uses multipart copy at `minio.multipartCopyThreshold`
 (default 1 GiB, effective minimum 10 MiB), or above the
 single-copy limit. This shared threshold also affects existing S3 copy callers.
@@ -244,8 +252,8 @@ require upgraded copy workers and immutable sources/job-owned destinations.
 
 ## Completion, publication and recovery
 
-Workers return state and scalar `CopiedFiles`, `TotalFiles`, `CopiedBytes` only;
-there are no per-range JSON descriptors, object lists or metadata URIs. Completed
+Workers return state and scalar `CopiedFiles`, `TotalFiles`, `CopiedBytes`.
+Results carry no physical object lists. Completed
 file counts include successful Avro/native copies but exclude generated top-level
 metadata. Bytes count successful data/index copies only. Shared objects count
 again per segment that copies them; this is not unique bundle size. Failed
@@ -374,7 +382,16 @@ Key implementation entry points:
 
 - `internal/datacoord/snapshot_export_{manager,meta,task,shards}.go`
 - `internal/datanode/snapshot_export.go`
-- `internal/snapshotio/storage/{snapshot_copy,snapshot_export_shards,snapshot_export_files,file_copy}.go`
+- `pkg/snapshotio/{snapshot_copy,snapshot_export_shards,snapshot_export_files,file_copy}.go`
 - `internal/datanode/importv2/{task_copy_segment,copy_segment_utils}.go`
 - `internal/datacoord/{copy_segment_task,copy_segment_job}.go`
 - `internal/storagev2/packed/manifest_commit.go`
+
+## Reusable package
+
+[`pkg/snapshotio`](../../../pkg/snapshotio/README.md) provides the shared engine
+for Export and backup callers. Milvus adapters retain client
+construction, configuration, durable scheduling and publication fencing. Restore
+retains business-specific ID/path conversion and visibility while sharing format,
+inventory and object-copy execution. Native reads link milvus-storage;
+backup callers do not import Milvus internal packages or construct native readers.

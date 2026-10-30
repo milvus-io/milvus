@@ -24,12 +24,12 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	sharedsnapshot "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -107,7 +107,7 @@ func loadSnapshotL0Deletes(ctx context.Context, cm storage.ChunkManager, schema 
 				}
 				// Check storage identity before stripping the URI. URI/key aliases
 				// must share one decoder and one download.
-				path = snapshotstorage.NormalizeSnapshotObjectPath(path)
+				path = sharedsnapshot.NormalizeSnapshotObjectPath(path)
 			}
 			if previous, ok := paths[path]; ok {
 				if previous != legacy {
@@ -150,7 +150,7 @@ func loadSnapshotL0Deletes(ctx context.Context, cm storage.ChunkManager, schema 
 			if err := validate(base); err != nil {
 				return nil, err
 			}
-			manifest = packed.MarshalManifestPath(snapshotstorage.NormalizeSnapshotObjectPath(base), version)
+			manifest = packed.MarshalManifestPath(sharedsnapshot.NormalizeSnapshotObjectPath(base), version)
 		}
 		if _, seen := manifests[manifest]; seen {
 			continue

@@ -26,9 +26,10 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
-	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
+	snapshotadapter "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	snapshotstorage "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -65,7 +66,7 @@ func (m *snapshotExportManager) prepareWorkerRequest(ctx context.Context, job *s
 	if info.GetId() <= 0 || info.GetS3Location() == "" || info.GetCollectionId() != job.record.GetCollectionId() {
 		return nil, merr.WrapErrDataIntegrityMsg("snapshot export source identity is incomplete")
 	}
-	req := &datapb.SnapshotExportCopyRequest{TaskSlot: Params.DataCoordCfg.SnapshotTaskSlotUsage.GetAsInt64(), CopyConcurrency: Params.DataCoordCfg.SnapshotCopyConcurrency.GetAsInt32(), ClusterId: Params.CommonCfg.ClusterPrefix.GetValue(), JobId: job.record.GetJobId(), DeadlineTime: job.record.GetDeadlineTime(), TargetUri: job.record.GetTargetS3Path(), ExternalSpec: job.record.GetExternalSpec(), SourceStorageConfig: snapshotstorage.StorageConfigFromInstance(Params), SnapshotMetadataPath: info.GetS3Location(), SnapshotId: info.GetId(), CollectionId: info.GetCollectionId()}
+	req := &datapb.SnapshotExportCopyRequest{TaskSlot: Params.DataCoordCfg.SnapshotTaskSlotUsage.GetAsInt64(), CopyConcurrency: Params.DataCoordCfg.SnapshotCopyConcurrency.GetAsInt32(), ClusterId: Params.CommonCfg.ClusterPrefix.GetValue(), JobId: job.record.GetJobId(), DeadlineTime: job.record.GetDeadlineTime(), TargetUri: job.record.GetTargetS3Path(), ExternalSpec: job.record.GetExternalSpec(), SourceStorageConfig: snapshotadapter.StorageConfigFromInstance(Params), SnapshotMetadataPath: info.GetS3Location(), SnapshotId: info.GetId(), CollectionId: info.GetCollectionId()}
 	if proto.Size(req)+32 > snapshotstorage.SnapshotExportMaxRequestBytes {
 		return nil, merr.WrapErrServiceInternalMsg("snapshot export request exceeds size limit")
 	}
@@ -103,7 +104,7 @@ func snapshotExportExecutionRequest(frozen *datapb.SnapshotExportCopyRequest) *d
 		(cfg.GetCloudProvider() != objectstorage.CloudProviderAzure && cfg.GetAccessKeyID() != "") {
 		return req
 	}
-	auth := snapshotstorage.StorageConfigFromInstance(Params)
+	auth := snapshotadapter.StorageConfigFromInstance(Params)
 	if cfg.GetCloudProvider() != objectstorage.CloudProviderAzure {
 		cfg.AccessKeyID = auth.GetAccessKeyID()
 	}

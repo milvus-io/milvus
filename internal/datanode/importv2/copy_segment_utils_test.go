@@ -34,37 +34,43 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	objectstore "github.com/milvus-io/milvus/pkg/v3/objectstorage/store"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	snapshotstorage "github.com/milvus-io/milvus/pkg/v3/snapshotio"
+	snapshotformat "github.com/milvus-io/milvus/pkg/v3/snapshotio/format"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-type copySegmentExportCopierTarget struct{ storage.SizedCrossBucketCopier }
+type copySegmentExportStoreTarget struct{ objectstore.ObjectStore }
 
-type copySegmentCopierTarget struct {
-	storage.CrossBucketCopier
+type copySegmentStoreTarget struct {
+	objectstore.ObjectStore
 }
 
-func newCopySegmentCopierMock(
+func newCopySegmentStoreMock(
 	t *testing.T,
 	copyFn func(context.Context, string, string, string, string) error,
-) storage.CrossBucketCopier {
+) objectstore.ObjectStore {
 	t.Helper()
-	target := &copySegmentCopierTarget{}
-	mockCopy := mockey.Mock((*copySegmentCopierTarget).CopyCrossBucket).To(
-		func(ctx context.Context, srcBucket, srcObject, dstBucket, dstObject string) error {
+	target := &copySegmentStoreTarget{}
+	mockCopy := mockey.Mock((*copySegmentStoreTarget).Copy).To(
+		func(ctx context.Context, req objectstore.CopyRequest) (int64, error) {
+			srcBucket := req.Source.Bucket
+			srcObject := req.Source.Key
+			dstBucket := req.Destination.Bucket
+			dstObject := req.Destination.Key
 			if copyFn == nil {
-				return nil
+				return 0, nil
 			}
-			return copyFn(ctx, srcBucket, srcObject, dstBucket, dstObject)
+			return 0, copyFn(ctx, srcBucket, srcObject, dstBucket, dstObject)
 		},
 	).Build()
 	t.Cleanup(func() { mockCopy.UnPatch() })
@@ -73,8 +79,8 @@ func newCopySegmentCopierMock(
 
 // manifestInventoryForTest adapts opaque physical-file fixtures to the native
 // reader boundary. Tests still execute the real shared inventory and copy path.
-func manifestInventoryForTest(paths []string, lobs []packed.LobFileInfo) *packed.ManifestFiles {
-	files := &packed.ManifestFiles{LobFiles: lobs}
+func manifestInventoryForTest(paths []string, lobs []packed.LobFileInfo) *snapshotformat.NativeManifestFiles {
+	files := &snapshotformat.NativeManifestFiles{LobFiles: lobs}
 	for _, file := range paths {
 		switch {
 		case strings.Contains(file, "/_metadata/"), strings.Contains(file, "/_manifest/"):
@@ -99,14 +105,57 @@ func mockCopiedManifestIndexEntries(t *testing.T, entries []packed.ManifestIndex
 }
 
 func TestCopyObjectWithTimeout(t *testing.T) {
+	for _, canceled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("size failure retains destination canceled=%t", canceled), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			target := &copySegmentStoreTarget{}
+			defer mockey.Mock((*copySegmentStoreTarget).Copy).To(func(context.Context, objectstore.CopyRequest) (int64, error) {
+				if canceled {
+					cancel()
+				}
+				return 0, merr.Wrap(&objectstore.CopySizeError{Err: merr.ErrIoPermissionDenied}, "target stat")
+			}).Build().UnPatch()
+			files, err := copySegmentFiles(ctx, make(chan struct{}, 1),
+				[]snapshotstorage.FileCopy{{SourcePath: "src", DestinationPath: "dst"}},
+				target, "source", "target", nil)
+			if canceled {
+				require.ErrorIs(t, err, context.Canceled)
+			} else {
+				require.ErrorIs(t, err, merr.ErrIoPermissionDenied)
+			}
+			require.Equal(t, []string{"dst"}, files)
+		})
+	}
+	for _, canceled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("confirmed size canceled=%t", canceled), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			target := &copySegmentStoreTarget{}
+			defer mockey.Mock((*copySegmentStoreTarget).Copy).To(func(context.Context, objectstore.CopyRequest) (int64, error) {
+				if canceled {
+					cancel()
+				}
+				return 17, nil
+			}).Build().UnPatch()
+			var bytes int64
+			err := copyObjectWithTimeout(ctx, target, "source", "object", "target", "object", func(size int64) { bytes = size })
+			require.EqualValues(t, 17, bytes)
+			if canceled {
+				require.ErrorIs(t, err, context.Canceled)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 	t.Run("calls provider once", func(t *testing.T) {
 		attempts := 0
-		copier := newCopySegmentCopierMock(t, func(context.Context, string, string, string, string) error {
+		targetStore := newCopySegmentStoreMock(t, func(context.Context, string, string, string, string) error {
 			attempts++
 			return errors.New("copy failed")
 		})
 
-		err := copyObjectWithTimeout(context.Background(), copier, "source", "object", "target", "object", nil)
+		err := copyObjectWithTimeout(context.Background(), targetStore, "source", "object", "target", "object", nil)
 
 		require.Error(t, err)
 		assert.Equal(t, 1, attempts)
@@ -119,14 +168,14 @@ func TestCopyObjectWithTimeout(t *testing.T) {
 		t.Cleanup(func() { require.NoError(t, params.Reset(key)) })
 
 		attempts := 0
-		copier := newCopySegmentCopierMock(t, func(ctx context.Context, _, _, _, _ string) error {
+		targetStore := newCopySegmentStoreMock(t, func(ctx context.Context, _, _, _, _ string) error {
 			attempts++
 			<-ctx.Done()
 			return errors.New("provider hid context error")
 		})
 		start := time.Now()
 
-		err := copyObjectWithTimeout(context.Background(), copier, "source", "object", "target", "object", nil)
+		err := copyObjectWithTimeout(context.Background(), targetStore, "source", "object", "target", "object", nil)
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, context.DeadlineExceeded)
@@ -261,7 +310,7 @@ func TestCollectSegmentFiles_UsesSourceStorageConfigForV3(t *testing.T) {
 			cfg := &indexpb.StorageConfig{BucketName: "foreign-source", RootPath: "foreign-root"}
 			manifest := packed.MarshalManifestPath(prefix+"foreign-root/files/insert_log/100/1/10", 2)
 			calls := 0
-			defer mockey.Mock(packed.ReadManifestFiles).To(func(got string, gotCfg *indexpb.StorageConfig) (*packed.ManifestFiles, error) {
+			defer mockey.Mock(snapshotstorage.ReadNativeManifestFiles).To(func(got string, gotCfg *indexpb.StorageConfig) (*snapshotformat.NativeManifestFiles, error) {
 				calls++
 				require.Equal(t, manifest, got)
 				require.Same(t, cfg, gotCfg)
@@ -282,7 +331,7 @@ func TestCollectSegmentFiles_LocalV3ManifestKeysAreCompletePaths(t *testing.T) {
 	base := path.Join(root, "insert_log/100/1/10")
 	manifest := packed.MarshalManifestPath(base, 2)
 	data, delta, lob := path.Join(base, "_data/0"), path.Join(base, "_delta/7"), path.Join(root, "insert_log/100/1/lobs/101/_data/0")
-	defer mockey.Mock(packed.ReadManifestFiles).To(func(got string, gotCfg *indexpb.StorageConfig) (*packed.ManifestFiles, error) {
+	defer mockey.Mock(snapshotstorage.ReadNativeManifestFiles).To(func(got string, gotCfg *indexpb.StorageConfig) (*snapshotformat.NativeManifestFiles, error) {
 		require.Equal(t, manifest, got)
 		require.Same(t, cfg, gotCfg)
 		return manifestInventoryForTest([]string{data}, []packed.LobFileInfo{{Path: lob, FieldID: 101}}), nil
@@ -714,55 +763,6 @@ func TestGenerateTargetLOBPath_RemapExternalRoot(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "target-cluster-root/insert_log/444/555/lobs/100/_data/abc123.vx", gotPath)
 }
-
-func TestLobFileInfosToPaths(t *testing.T) {
-	tests := []struct {
-		name     string
-		infos    []packed.LobFileInfo
-		expected []string
-	}{
-		{
-			name:     "empty input",
-			infos:    nil,
-			expected: []string{},
-		},
-		{
-			name: "single LOB file - absolute path preserved",
-			infos: []packed.LobFileInfo{
-				{Path: "root/insert_log/100/200/lobs/300/_data/abc.vx", FieldID: 300, TotalRows: 1000, ValidRows: 900},
-			},
-			expected: []string{"root/insert_log/100/200/lobs/300/_data/abc.vx"},
-		},
-		{
-			name: "multiple LOB files from same segment",
-			infos: []packed.LobFileInfo{
-				{Path: "root/insert_log/100/200/lobs/300/_data/file1.vx", FieldID: 300, TotalRows: 500, ValidRows: 500},
-				{Path: "root/insert_log/100/200/lobs/300/_data/file2.vx", FieldID: 300, TotalRows: 500, ValidRows: 400},
-				{Path: "root/insert_log/100/200/lobs/301/_data/file3.vx", FieldID: 301, TotalRows: 200, ValidRows: 200},
-			},
-			expected: []string{
-				"root/insert_log/100/200/lobs/300/_data/file1.vx",
-				"root/insert_log/100/200/lobs/300/_data/file2.vx",
-				"root/insert_log/100/200/lobs/301/_data/file3.vx",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := lobFileInfosToPaths(tt.infos)
-			if len(tt.expected) == 0 {
-				assert.Empty(t, result)
-			} else {
-				assert.Equal(t, tt.expected, result)
-			}
-		})
-	}
-}
-
-// TestCollectSegmentFiles_LOBFromManifest verifies that LOB file collection
-// reads from the segment manifest (not the partition directory), ensuring
-// only this segment's LOB files are collected.
 
 func TestGenerateTargetIndexPath(t *testing.T) {
 	source := &datapb.CopySegmentSource{
@@ -1335,7 +1335,7 @@ func TestBuildIndexInfoFromSource_PreservesIndexStorePathVersion(t *testing.T) {
 func TestCopySegmentAndIndexFiles_NormalizesProviderSourceURI(t *testing.T) {
 	const sourceURI = "s3://source-bucket/source-root/files/insert_log/111/222/333/1/10001"
 	var copiedSource string
-	copier := newCopySegmentCopierMock(t, func(_ context.Context, srcBucket, srcObject, dstBucket, dstObject string) error {
+	targetStore := newCopySegmentStoreMock(t, func(_ context.Context, srcBucket, srcObject, dstBucket, dstObject string) error {
 		assert.Equal(t, "source-bucket", srcBucket)
 		assert.Equal(t, "target-bucket", dstBucket)
 		assert.Equal(t, "target-root/insert_log/444/555/666/1/10001", dstObject)
@@ -1368,7 +1368,7 @@ func TestCopySegmentAndIndexFiles_NormalizesProviderSourceURI(t *testing.T) {
 		&struct{ storage.ChunkManager }{},
 		&indexpb.StorageConfig{BucketName: "source-bucket"},
 		&indexpb.StorageConfig{BucketName: "target-bucket"},
-		copier,
+		targetStore,
 		"source-bucket",
 		"target-bucket",
 		source,
@@ -2295,7 +2295,7 @@ func TestCopySegmentAndIndexFiles_StorageV2CopiesManifest(t *testing.T) {
 	}
 	copied := make(map[string]string)
 	var copyMu sync.Mutex
-	copier := newCopySegmentCopierMock(t, func(_ context.Context, _, src, _, dst string) error {
+	targetStore := newCopySegmentStoreMock(t, func(_ context.Context, _, src, _, dst string) error {
 		copyMu.Lock()
 		defer copyMu.Unlock()
 		copied[src] = dst
@@ -2308,7 +2308,7 @@ func TestCopySegmentAndIndexFiles_StorageV2CopiesManifest(t *testing.T) {
 		&struct{ storage.ChunkManager }{},
 		&indexpb.StorageConfig{BucketName: "test-bucket"},
 		&indexpb.StorageConfig{BucketName: "test-bucket"},
-		copier,
+		targetStore,
 		"test-bucket",
 		"test-bucket",
 		source,
@@ -2326,8 +2326,6 @@ func TestCopySegmentAndIndexFiles_StorageV2CopiesManifest(t *testing.T) {
 
 func TestCopySegmentAndIndexFiles_ExternalTable(t *testing.T) {
 	mockCopiedManifestIndexEntries(t, nil)
-	defer mockey.Mock(packed.GetManifestLobFiles).Return(nil, nil).Build().UnPatch()
-	defer mockey.Mock(packed.ReadManifestFiles).Return(nil, merr.ErrServiceInternal).Build().UnPatch()
 
 	source := &datapb.CopySegmentSource{
 		CollectionId:         111,
@@ -2353,15 +2351,14 @@ func TestCopySegmentAndIndexFiles_ExternalTable(t *testing.T) {
 		SegmentId:      666,
 	}
 
-	mList := mockey.Mock(listAllFiles).Return([]string{
+	defer mockey.Mock(snapshotstorage.ReadNativeManifestFiles).Return(manifestInventoryForTest([]string{
 		"files/insert_log/111/222/333/_data/0",
 		"files/insert_log/111/222/333/_metadata/manifest.json",
-	}, nil).Build()
-	defer mList.UnPatch()
+	}, nil), nil).Build().UnPatch()
 
 	copied := make(map[string]string)
 	var copyMu sync.Mutex
-	copier := newCopySegmentCopierMock(t, func(_ context.Context, _, src, _, dst string) error {
+	targetStore := newCopySegmentStoreMock(t, func(_ context.Context, _, src, _, dst string) error {
 		copyMu.Lock()
 		defer copyMu.Unlock()
 		copied[src] = dst
@@ -2375,7 +2372,7 @@ func TestCopySegmentAndIndexFiles_ExternalTable(t *testing.T) {
 		cm,
 		&indexpb.StorageConfig{BucketName: "test-bucket"},
 		&indexpb.StorageConfig{BucketName: "test-bucket"},
-		copier,
+		targetStore,
 		"test-bucket",
 		"test-bucket",
 		source,
@@ -2407,7 +2404,7 @@ func TestCollectSegmentFiles_WithManifest(t *testing.T) {
 			if empty {
 				physical = nil
 			}
-			defer mockey.Mock(packed.ReadManifestFiles).Return(manifestInventoryForTest(physical, nil), nil).Build().UnPatch()
+			defer mockey.Mock(snapshotstorage.ReadNativeManifestFiles).Return(manifestInventoryForTest(physical, nil), nil).Build().UnPatch()
 			files, err := collectSegmentFiles(context.Background(), nil, &indexpb.StorageConfig{BucketName: "test-bucket"},
 				&datapb.CopySegmentSource{
 					SegmentId: 333, StorageVersion: storage.StorageV3,
@@ -2418,18 +2415,6 @@ func TestCollectSegmentFiles_WithManifest(t *testing.T) {
 			require.ElementsMatch(t, physical, files.InsertBinlogs)
 		})
 	}
-}
-
-func TestCollectSegmentFiles_ExternalCollectionManifestLobFailure(t *testing.T) {
-	defer mockey.Mock(listAllFiles).Return([]string{"files/insert_log/111/222/333/_metadata/manifest.json"}, nil).Build().UnPatch()
-	defer mockey.Mock(packed.GetManifestLobFiles).Return(nil, merr.ErrServiceUnavailable).Build().UnPatch()
-	files, err := collectSegmentFiles(context.Background(), nil, &indexpb.StorageConfig{}, &datapb.CopySegmentSource{
-		SegmentId: 333, StorageVersion: storage.StorageV3, IsExternalCollection: true,
-		ManifestPath: packed.MarshalManifestPath("files/insert_log/111/222/333", 2),
-	})
-	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
-	require.Nil(t, files)
-	require.Contains(t, err.Error(), "failed to collect LOB files")
 }
 
 func TestCollectSegmentFiles_NoManifest(t *testing.T) {
@@ -2453,9 +2438,11 @@ func TestCollectSegmentFiles_NoManifest(t *testing.T) {
 		},
 	}
 
+	source.JsonKeyIndexFiles = map[int64]*datapb.JsonKeyStats{100: {Files: []string{"files/json_stats/test"}, JsonKeyStatsDataFormat: 2}}
 	files, err := collectSegmentFiles(ctx, cm, &indexpb.StorageConfig{BucketName: "test-bucket"}, source)
 
 	assert.NoError(t, err)
+	assert.Equal(t, []string{"files/json_stats/test"}, files.JSONStats)
 	assert.Len(t, files.InsertBinlogs, 2)
 	assert.Contains(t, files.InsertBinlogs, "files/insert_log/111/222/333/100/file1.log")
 	assert.Contains(t, files.InsertBinlogs, "files/insert_log/111/222/333/100/file2.log")
@@ -2499,61 +2486,6 @@ func TestExtractFromPb(t *testing.T) {
 	t.Run("empty input", func(t *testing.T) {
 		paths := extractFromPb(nil)
 		assert.Empty(t, paths)
-	})
-}
-
-func TestExtractIndexFiles(t *testing.T) {
-	t.Run("extract index file paths", func(t *testing.T) {
-		indexInfos := []*indexpb.IndexFilePathInfo{
-			{IndexFilePaths: []string{"idx/a", "idx/b"}},
-			{IndexFilePaths: []string{"idx/c"}},
-		}
-		paths := extractIndexFiles(indexInfos)
-		assert.Equal(t, []string{"idx/a", "idx/b", "idx/c"}, paths)
-	})
-
-	t.Run("empty input", func(t *testing.T) {
-		paths := extractIndexFiles(nil)
-		assert.Empty(t, paths)
-	})
-}
-
-func TestExtractTextIndexFiles(t *testing.T) {
-	t.Run("extract text index file paths", func(t *testing.T) {
-		textInfos := map[int64]*datapb.TextIndexStats{
-			100: {Files: []string{"text/a", "text/b"}},
-		}
-		paths := extractTextIndexFiles(textInfos)
-		assert.Equal(t, []string{"text/a", "text/b"}, paths)
-	})
-
-	t.Run("empty input", func(t *testing.T) {
-		paths := extractTextIndexFiles(nil)
-		assert.Empty(t, paths)
-	})
-}
-
-func TestExtractJsonFiles(t *testing.T) {
-	t.Run("separate by data format", func(t *testing.T) {
-		jsonInfos := map[int64]*datapb.JsonKeyStats{
-			100: {
-				JsonKeyStatsDataFormat: 1,
-				Files:                  []string{"legacy/a"},
-			},
-			101: {
-				JsonKeyStatsDataFormat: 2,
-				Files:                  []string{"new/b", "new/c"},
-			},
-		}
-		jsonKeyFiles, jsonStatsFiles := extractJSONFiles(jsonInfos)
-		assert.Equal(t, []string{"legacy/a"}, jsonKeyFiles)
-		assert.ElementsMatch(t, []string{"new/b", "new/c"}, jsonStatsFiles)
-	})
-
-	t.Run("empty input", func(t *testing.T) {
-		jsonKeyFiles, jsonStatsFiles := extractJSONFiles(nil)
-		assert.Empty(t, jsonKeyFiles)
-		assert.Empty(t, jsonStatsFiles)
 	})
 }
 
@@ -2642,7 +2574,7 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 			if mode == "new revision" {
 				inventory.Indexes = []packed.ManifestIndexInfo{{IndexID: 1}}
 			}
-			defer mockey.Mock(packed.ReadManifestFiles).Return(inventory, nil).Build().UnPatch()
+			defer mockey.Mock(snapshotstorage.ReadNativeManifestFiles).Return(inventory, nil).Build().UnPatch()
 			defer mockey.Mock(packed.GetManifestIndexInfos).To(func(string, *indexpb.StorageConfig) ([]packed.ManifestIndexInfo, error) {
 				t.Error("prepared inventory must avoid target enumeration")
 				return nil, nil
@@ -2651,7 +2583,7 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 			defer mockey.Mock(packed.ReplaceCopiedManifestIndexes).Return(republished, nil).Build().UnPatch()
 			var mu sync.Mutex
 			var copiedSources []string
-			store := newCopySegmentCopierMock(t, func(_ context.Context, _, src, _, _ string) error {
+			store := newCopySegmentStoreMock(t, func(_ context.Context, _, src, _, _ string) error {
 				if mode == "copy failure" {
 					return errors.New("storage unavailable")
 				}
@@ -2706,50 +2638,6 @@ func TestCopySegmentAndIndexFiles_WithManifest(t *testing.T) {
 	}
 }
 
-// TestCopySegmentAndIndexFiles_WithManifest_NoPbBinlogs tests StorageV3 segment with no pb insert binlogs.
-// When InsertBinlogs in pb is empty but manifest has files, Step 3.5 has nothing to add (no logical paths).
-
-func TestListAllFiles(t *testing.T) {
-	t.Run("does not match sibling prefixes", func(t *testing.T) {
-		ctx := context.Background()
-		cm := storage.NewLocalChunkManager()
-		basePath := path.Join(t.TempDir(), "base")
-		expectedPath := path.Join(basePath, "333/manifest")
-		require.NoError(t, cm.Write(ctx, expectedPath, []byte("expected")))
-		require.NoError(t, cm.Write(ctx, path.Join(basePath, "3330/manifest"), []byte("sibling")))
-
-		files, err := listAllFiles(ctx, cm, path.Join(basePath, "333"))
-		require.NoError(t, err)
-		assert.Equal(t, []string{expectedPath}, files)
-	})
-
-	t.Run("list files successfully", func(t *testing.T) {
-		mWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).
-			To(func(_ *storage.LocalChunkManager, _ context.Context, prefix string, recursive bool, walkFunc storage.ChunkObjectWalkFunc) error {
-				walkFunc(&storage.ChunkObjectInfo{FilePath: "base/path/file1"})
-				walkFunc(&storage.ChunkObjectInfo{FilePath: "base/path/file2"})
-				return nil
-			}).Build()
-		defer mWalk.UnPatch()
-
-		cm := &storage.LocalChunkManager{}
-		files, err := listAllFiles(context.Background(), cm, "base/path")
-		assert.NoError(t, err)
-		assert.Equal(t, []string{"base/path/file1", "base/path/file2"}, files)
-	})
-
-	t.Run("walk error returns error", func(t *testing.T) {
-		mWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).
-			Return(errors.New("walk failed")).Build()
-		defer mWalk.UnPatch()
-
-		cm := &storage.LocalChunkManager{}
-		files, err := listAllFiles(context.Background(), cm, "bad/path")
-		assert.Error(t, err)
-		assert.Nil(t, files)
-	})
-}
-
 func TestCopySegmentAndIndexFiles_LocalStorageV3UsesCompletePaths(t *testing.T) {
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), "local", "root")
@@ -2767,7 +2655,7 @@ func TestCopySegmentAndIndexFiles_LocalStorageV3UsesCompletePaths(t *testing.T) 
 	require.NoError(t, cm.Write(ctx, sourceDeltaPath, []byte("delta-data")))
 	require.NoError(t, cm.Write(ctx, sourcePathlessDeltaPath, []byte("pathless-delta-data")))
 
-	defer mockey.Mock(packed.ReadManifestFiles).Return(manifestInventoryForTest([]string{sourcePath, sourceDeltaPath, sourcePathlessDeltaPath}, nil), nil).Build().UnPatch()
+	defer mockey.Mock(snapshotstorage.ReadNativeManifestFiles).Return(manifestInventoryForTest([]string{sourcePath, sourceDeltaPath, sourcePathlessDeltaPath}, nil), nil).Build().UnPatch()
 
 	source := &datapb.CopySegmentSource{
 		CollectionId:     111,
@@ -2812,7 +2700,7 @@ func TestCopySegmentAndIndexFiles_LocalStorageV3UsesCompletePaths(t *testing.T) 
 	storageConfig := &indexpb.StorageConfig{StorageType: "local", RootPath: root}
 	copySources := make(map[string]string)
 	var copyMu sync.Mutex
-	copier := newCopySegmentCopierMock(t, func(ctx context.Context, _, src, _, dst string) error {
+	targetStore := newCopySegmentStoreMock(t, func(ctx context.Context, _, src, _, dst string) error {
 		copyMu.Lock()
 		defer copyMu.Unlock()
 		copySources[src] = dst
@@ -2826,7 +2714,7 @@ func TestCopySegmentAndIndexFiles_LocalStorageV3UsesCompletePaths(t *testing.T) 
 		cm,
 		storageConfig,
 		storageConfig,
-		copier,
+		targetStore,
 		"",
 		"",
 		source,
@@ -2886,7 +2774,7 @@ func TestCopySegmentAndIndexFiles_ExternalSourceToLocalCanonicalLayout(t *testin
 	// Mock the foreign provider's enumeration, but perform every destination
 	// write through a real LocalChunkManager. Manifest contents are opaque here;
 	// this test checks copy destinations, not native manifest deserialization.
-	mInventory := mockey.Mock(packed.ReadManifestFiles).To(func(manifest string, _ *indexpb.StorageConfig) (*packed.ManifestFiles, error) {
+	mInventory := mockey.Mock(snapshotstorage.ReadNativeManifestFiles).To(func(manifest string, _ *indexpb.StorageConfig) (*snapshotformat.NativeManifestFiles, error) {
 		base, _, err := packed.UnmarshalManifestPath(manifest)
 		require.NoError(t, err)
 		_ = base
@@ -2917,7 +2805,7 @@ func TestCopySegmentAndIndexFiles_ExternalSourceToLocalCanonicalLayout(t *testin
 	}
 	copied := make(map[string]string)
 	var copyMu sync.Mutex
-	copier := newCopySegmentCopierMock(t, func(ctx context.Context, srcBucket, src, dstBucket, dst string) error {
+	targetStore := newCopySegmentStoreMock(t, func(ctx context.Context, srcBucket, src, dstBucket, dst string) error {
 		copyMu.Lock()
 		defer copyMu.Unlock()
 		assert.Equal(t, "source-bucket", srcBucket)
@@ -2931,7 +2819,7 @@ func TestCopySegmentAndIndexFiles_ExternalSourceToLocalCanonicalLayout(t *testin
 	result, copiedFiles, err := CopySegmentAndIndexFiles(ctx, make(chan struct{}, 2), &struct{ storage.ChunkManager }{},
 		&indexpb.StorageConfig{StorageType: "remote", RootPath: "source-root", BucketName: "source-bucket"},
 		&indexpb.StorageConfig{StorageType: "local", RootPath: root},
-		copier, "source-bucket", "", source, target, nil)
+		targetStore, "source-bucket", "", source, target, nil)
 	require.NoError(t, err)
 	require.Len(t, copiedFiles, len(mappings))
 	require.Len(t, copied, len(mappings))
@@ -3047,7 +2935,7 @@ func TestCopySegmentAndIndexFiles_V3WithTextAndJsonStats(t *testing.T) {
 		NewBuildIds:    map[int64]int64{7000: 7777, 8000: 9000},
 	}
 
-	mInventory := mockey.Mock(packed.ReadManifestFiles).To(func(_ string, _ *indexpb.StorageConfig) (*packed.ManifestFiles, error) {
+	mInventory := mockey.Mock(snapshotstorage.ReadNativeManifestFiles).To(func(_ string, _ *indexpb.StorageConfig) (*snapshotformat.NativeManifestFiles, error) {
 		// The native manifest lists the physical TEXT/JSON files under _stats/.
 		return manifestInventoryForTest([]string{
 			"files/insert_log/111/222/333/_data/0",
@@ -3067,7 +2955,7 @@ func TestCopySegmentAndIndexFiles_V3WithTextAndJsonStats(t *testing.T) {
 		cm,
 		&indexpb.StorageConfig{BucketName: "test-bucket"},
 		&indexpb.StorageConfig{BucketName: "test-bucket"},
-		newCopySegmentCopierMock(t, nil),
+		newCopySegmentStoreMock(t, nil),
 		"test-bucket",
 		"test-bucket",
 		source,
@@ -3098,7 +2986,7 @@ func TestCopySegmentAndIndexFiles_V3WithTextAndJsonStats(t *testing.T) {
 	expectedManifestPath := packed.MarshalManifestPath("files/insert_log/444/555/666", 2)
 	assert.Equal(t, expectedManifestPath, result.ManifestPath)
 
-	// Verify _stats files are included in the copy (from listAllFiles, part of InsertBinlogs)
+	// Verify _stats files are included in the copy (from the pinned inventory, part of InsertBinlogs)
 	assert.True(t, len(copiedFiles) >= 6, "should copy all files including _stats/")
 }
 
@@ -3301,51 +3189,6 @@ func TestRepublishCopiedManifestIndexes_WritePlacementMatrix(t *testing.T) {
 	}
 }
 
-func TestExcludeUnpinnedManifestRevisions(t *testing.T) {
-	base := "files/insert_log/1/2/3"
-	pinned := base + "/_metadata/manifest-4.avro"
-	files := []string{
-		base + "/_data/col-0.parquet",
-		base + "/_stats/bm25",
-		base + "/_metadata/manifest-1.avro",
-		base + "/_metadata/manifest-4.avro",
-		// Written by the source after the snapshot pinned revision 4. Copying
-		// it would make the target's version discovery land on revision 6, and
-		// the next commit there would merge onto the source's later state.
-		base + "/_metadata/manifest-5.avro",
-		base + "/_metadata/manifest-6.avro",
-	}
-
-	kept := excludeUnpinnedManifestRevisions(files, pinned)
-	assert.Equal(t, []string{
-		base + "/_data/col-0.parquet",
-		base + "/_stats/bm25",
-		base + "/_metadata/manifest-4.avro",
-	}, kept)
-}
-
-func TestExcludeUnpinnedManifestRevisions_KeepsNonRevisionObjects(t *testing.T) {
-	base := "files/insert_log/1/2/3"
-	pinned := base + "/_metadata/manifest-2.avro"
-	// Only revision files are filtered; anything else the metadata directory
-	// may hold is carried over untouched.
-	files := []string{
-		base + "/_metadata/other.json",
-		base + "/_metadata/manifest-2.avro",
-	}
-
-	kept := excludeUnpinnedManifestRevisions(files, pinned)
-	assert.Equal(t, []string{
-		base + "/_metadata/other.json",
-		base + "/_metadata/manifest-2.avro",
-	}, kept)
-}
-
-// A source manifest written before index publication existed carries no index
-// section, so nothing is inherited and nothing is retracted. The segment's
-// indexes are still recorded in etcd and reach the worker as indexInfos, and
-// this copy is where they get written into the new manifest - the absence of
-// inherited entries must not gate the additions.
 func TestRepublishCopiedManifestIndexes_LegacySourceStillRecordsIndexes(t *testing.T) {
 	manifestPath := packed.MarshalManifestPath("files/insert_log/100/200/300", 3)
 	target := &datapb.CopySegmentTarget{
@@ -3534,11 +3377,11 @@ func TestBuildTargetManifestIndexes_RejectsExternalPaths(t *testing.T) {
 	target.NewBuildIds = map[int64]int64{5: 50}
 	defer mockey.Mock(collectSegmentFiles).Return(&SegmentFiles{VectorScalarIndex: []string{sourcePath}}, nil).Build().UnPatch()
 	copied := 0
-	copier := newCopySegmentCopierMock(t, func(context.Context, string, string, string, string) error {
+	targetStore := newCopySegmentStoreMock(t, func(context.Context, string, string, string, string) error {
 		copied++
 		return nil
 	})
-	_, writes, err := CopySegmentAndIndexFiles(context.Background(), make(chan struct{}, 1), nil, nil, nil, copier, "", "", source, target, nil)
+	_, writes, err := CopySegmentAndIndexFiles(context.Background(), make(chan struct{}, 1), nil, nil, nil, targetStore, "", "", source, target, nil)
 	require.ErrorContains(t, err, "outside segment index directory")
 	require.Zero(t, copied)
 	require.Empty(t, writes)
@@ -3599,7 +3442,7 @@ func TestCopySegmentAndIndexFiles_SelectedIndexesWithMissingInheritedArtifacts(t
 			}
 			var copied []string
 			var copyMu sync.Mutex
-			copier := newCopySegmentCopierMock(t, func(ctx context.Context, _, src, _, dst string) error {
+			targetStore := newCopySegmentStoreMock(t, func(ctx context.Context, _, src, _, dst string) error {
 				copyMu.Lock()
 				defer copyMu.Unlock()
 				copied = append(copied, src)
@@ -3610,7 +3453,7 @@ func TestCopySegmentAndIndexFiles_SelectedIndexesWithMissingInheritedArtifacts(t
 				return nil, merr.ErrServiceInternal
 			}).Build()
 			defer indexRead.UnPatch()
-			result, _, err := CopySegmentAndIndexFiles(ctx, make(chan struct{}, 2), cm, cfg, cfg, copier, "", "", source, target, nil)
+			result, _, err := CopySegmentAndIndexFiles(ctx, make(chan struct{}, 2), cm, cfg, cfg, targetStore, "", "", source, target, nil)
 			indexRead.UnPatch()
 			require.NoError(t, err)
 			manifestObject, err := packed.ManifestFilePath(manifest)
@@ -3684,23 +3527,26 @@ func TestCopySegmentAndIndexFiles_PinnedDataInventoryMatchesExport(t *testing.T)
 	defer mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).Return(merr.ErrServiceInternal).Build().UnPatch()
 	defer mockey.Mock(packed.GetManifestLobFiles).Return(nil, merr.ErrServiceInternal).Build().UnPatch()
 	var exportFiles []string
-	exportCopier := &copySegmentExportCopierTarget{}
+	exportStore := &copySegmentExportStoreTarget{}
 	recordExport := func(_ context.Context, _, src, _, dst string) error {
 		if src != loaded.ManifestPaths[0] {
 			exportFiles = append(exportFiles, src)
 		}
 		return nil
 	}
-	defer mockey.Mock((*copySegmentExportCopierTarget).CopyCrossBucket).To(recordExport).Build().UnPatch()
-	defer mockey.Mock((*copySegmentExportCopierTarget).CopyCrossBucketAndGetSize).To(
-		func(ctx context.Context, srcBucket, src, dstBucket, dst string) (int64, error) {
+	defer mockey.Mock((*copySegmentExportStoreTarget).Copy).To(
+		func(ctx context.Context, req objectstore.CopyRequest) (int64, error) {
+			srcBucket := req.Source.Bucket
+			src := req.Source.Key
+			dstBucket := req.Destination.Bucket
+			dst := req.Destination.Key
 			return 0, recordExport(ctx, srcBucket, src, dstBucket, dst)
 		}).Build().UnPatch()
 	_, err = snapshotstorage.ExecuteSnapshotExport(ctx, &datapb.SnapshotExportCopyRequest{
 		TaskId: 1, SegmentEnd: 1,
 		SnapshotId: 1, CollectionId: 100, SnapshotMetadataPath: metadata, SourceStorageConfig: cfg,
 		TargetUri: path.Join(root, "export"),
-	}, cm, &snapshotstorage.ResolvedForeignStorage{ForeignCM: cm, ForeignStorageConfig: cfg, Copier: exportCopier}, make(chan struct{}, 1), nil)
+	}, cm, &snapshotstorage.ResolvedForeignStorage{ForeignCM: cm, ForeignStorageConfig: cfg, TargetStore: exportStore}, make(chan struct{}, 1), nil)
 	require.NoError(t, err)
 	manifestObject, err := packed.ManifestFilePath(manifest)
 	require.NoError(t, err)
@@ -3714,19 +3560,19 @@ func TestCopySegmentAndIndexFiles_PinnedDataInventoryMatchesExport(t *testing.T)
 	target := &datapb.CopySegmentTarget{CollectionId: 200, PartitionId: 20, SegmentId: 2, TargetRootPath: root}
 	var restoreFiles []string
 	var copyMu sync.Mutex
-	copier := newCopySegmentCopierMock(t, func(ctx context.Context, _, src, _, dst string) error {
+	targetStore := newCopySegmentStoreMock(t, func(ctx context.Context, _, src, _, dst string) error {
 		copyMu.Lock()
 		defer copyMu.Unlock()
 		restoreFiles = append(restoreFiles, src)
 		return cm.Copy(ctx, src, dst)
 	})
-	result, _, err := CopySegmentAndIndexFiles(ctx, make(chan struct{}, 2), cm, cfg, cfg, copier, "", "", source, target, nil)
+	result, _, err := CopySegmentAndIndexFiles(ctx, make(chan struct{}, 2), cm, cfg, cfg, targetStore, "", "", source, target, nil)
 	require.NoError(t, err)
 	require.ElementsMatch(t, exportFiles, restoreFiles)
 	require.Equal(t, int64(1), result.GetImportedRows())
 	require.Len(t, result.GetDeltalogs()[0].GetBinlogs(), 2)
 	require.Empty(t, result.GetDeltalogs()[0].GetBinlogs()[1].GetLogPath())
-	targetInventory, err := packed.ReadManifestFiles(result.GetManifestPath(), cfg)
+	targetInventory, err := snapshotstorage.ReadNativeManifestFiles(result.GetManifestPath(), cfg)
 	require.NoError(t, err)
 	for _, file := range append(append(targetInventory.ColumnFiles, targetInventory.DeltaFiles...), targetInventory.StatsFiles...) {
 		_, err := cm.Read(ctx, file)
@@ -3736,7 +3582,7 @@ func TestCopySegmentAndIndexFiles_PinnedDataInventoryMatchesExport(t *testing.T)
 	// than silently omitting the object as a directory listing would.
 	require.NoError(t, cm.Remove(ctx, data))
 	target.SegmentId = 3
-	result, _, err = CopySegmentAndIndexFiles(ctx, make(chan struct{}, 2), cm, cfg, cfg, copier, "", "", source, target, nil)
+	result, _, err = CopySegmentAndIndexFiles(ctx, make(chan struct{}, 2), cm, cfg, cfg, targetStore, "", "", source, target, nil)
 	require.Error(t, err)
 	require.Nil(t, result)
 }
@@ -3745,7 +3591,7 @@ func TestCopySegmentAndIndexFiles_DrainsAndTracksLateSuccess(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	started, canceled, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
-	copier := newCopySegmentCopierMock(t, func(ctx context.Context, _, src, _, _ string) error {
+	targetStore := newCopySegmentStoreMock(t, func(ctx context.Context, _, src, _, _ string) error {
 		if strings.HasSuffix(src, "/10002") {
 			<-started
 			return merr.ErrIoTooManyRequests
@@ -3772,7 +3618,7 @@ func TestCopySegmentAndIndexFiles_DrainsAndTracksLateSuccess(t *testing.T) {
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		result, files, err := CopySegmentAndIndexFiles(ctx, permits, &struct{ storage.ChunkManager }{}, nil, nil, copier, "source", "target", source, target, nil)
+		result, files, err := CopySegmentAndIndexFiles(ctx, permits, &struct{ storage.ChunkManager }{}, nil, nil, targetStore, "source", "target", source, target, nil)
 		done <- outcome{result, files, err}
 	}()
 	select {
@@ -3802,14 +3648,14 @@ func TestCopySegmentTask_SharedLOB(t *testing.T) {
 	lob := path.Join(root, "insert_log/100/10/lobs/shared.bin")
 	require.NoError(t, cm.Write(ctx, lob, []byte("shared text")))
 	req := &datapb.CopySegmentRequest{JobID: 1, TaskID: 1, StorageConfig: cfg}
-	inventory := make(map[string]*packed.ManifestFiles)
+	inventory := make(map[string]*snapshotformat.NativeManifestFiles)
 	for id := int64(1); id <= 2; id++ {
 		base := path.Join(root, fmt.Sprintf("insert_log/100/10/%d", id))
 		data := path.Join(base, "_data/1.parquet")
 		require.NoError(t, cm.Write(ctx, data, []byte("data")))
 		manifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(base, 0), cfg, &packed.ManifestUpdates{ColumnGroups: []packed.ColumnGroupEntry{{Columns: []string{"100"}, Format: "parquet", Files: []packed.ColumnGroupFileEntry{{Path: data, EndIndex: 1}}}}})
 		require.NoError(t, err)
-		files, err := packed.ReadManifestFiles(manifest, cfg)
+		files, err := snapshotstorage.ReadNativeManifestFiles(manifest, cfg)
 		require.NoError(t, err)
 		files.LobFiles = []packed.LobFileInfo{{Path: lob}}
 		inventory[manifest] = files
@@ -3817,12 +3663,12 @@ func TestCopySegmentTask_SharedLOB(t *testing.T) {
 		req.Targets = append(req.Targets, &datapb.CopySegmentTarget{CollectionId: 200, PartitionId: 20, SegmentId: id + 10, TargetRootPath: root})
 	}
 	var prepared atomic.Int64
-	defer mockey.Mock(packed.ReadManifestFiles).To(func(manifest string, _ *indexpb.StorageConfig) (*packed.ManifestFiles, error) {
+	defer mockey.Mock(snapshotstorage.ReadNativeManifestFiles).To(func(manifest string, _ *indexpb.StorageConfig) (*snapshotformat.NativeManifestFiles, error) {
 		prepared.Add(1)
 		return inventory[manifest], nil
 	}).Build().UnPatch()
 	var lobCopies atomic.Int64
-	copier := newCopySegmentCopierMock(t, func(ctx context.Context, _, src, _, dst string) error {
+	targetStore := newCopySegmentStoreMock(t, func(ctx context.Context, _, src, _, dst string) error {
 		assert.GreaterOrEqual(t, prepared.Load(), int64(1))
 		if src == lob {
 			lobCopies.Add(1)
@@ -3830,7 +3676,7 @@ func TestCopySegmentTask_SharedLOB(t *testing.T) {
 		return cm.Copy(ctx, src, dst)
 	})
 	manager := NewTaskManager()
-	task := NewCopySegmentTask(ctx, make(chan struct{}, 4), req, manager, cm, cm, cfg, copier, "", "").(*CopySegmentTask)
+	task := NewCopySegmentTask(ctx, make(chan struct{}, 4), req, manager, cm, cm, cfg, targetStore, "", "").(*CopySegmentTask)
 	defer task.cancel()
 	manager.Add(task)
 	require.NoError(t, conc.BlockOnAll(task.Execute()...))
@@ -3857,7 +3703,7 @@ func TestCopySegmentTask_SharedLOB(t *testing.T) {
 // writes for that segment. Valid peers may already have copied files, which
 // must remain tracked for cleanup after all workers drain.
 func TestCopySegmentTask_NativeReferenceValidationBeforeWrites(t *testing.T) {
-	for _, kind := range []string{"valid", "valid lob", "bucket root", "column", "delta", "stats", "lob", "bucket alias", "endpoint", "scheme", "credentials", "entry", "read failure", "empty entry", "malformed entry", "empty base", "missing manifest"} {
+	for _, kind := range []string{"valid", "valid lob", "bucket root", "column", "delta", "stats", "lob", "bucket alias", "endpoint", "scheme", "credentials", "entry", "read failure", "external read failure", "empty entry", "malformed entry", "empty base", "missing manifest"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -3877,6 +3723,8 @@ func TestCopySegmentTask_NativeReferenceValidationBeforeWrites(t *testing.T) {
 				req.Sources[1].ManifestPath = packed.MarshalManifestPath("outside/insert_log/100/10/444", 1)
 			}
 			switch kind {
+			case "external read failure":
+				req.Sources[1].IsExternalCollection = true
 			case "empty entry":
 				req.Sources[1].ManifestPath = ""
 			case "malformed entry":
@@ -3885,13 +3733,13 @@ func TestCopySegmentTask_NativeReferenceValidationBeforeWrites(t *testing.T) {
 				req.Sources[1].ManifestPath = packed.MarshalManifestPath("", 1)
 			}
 			var reads, copies, commits, invalidCopies, invalidCommits atomic.Int64
-			defer mockey.Mock(packed.ReadManifestFiles).To(func(manifest string, _ *indexpb.StorageConfig) (*packed.ManifestFiles, error) {
+			defer mockey.Mock(snapshotstorage.ReadNativeManifestFiles).To(func(manifest string, _ *indexpb.StorageConfig) (*snapshotformat.NativeManifestFiles, error) {
 				reads.Add(1)
 				base, _, err := packed.UnmarshalManifestPath(manifest)
 				if err != nil {
 					return nil, err
 				}
-				files := &packed.ManifestFiles{ManifestFile: base + "/_manifest/manifest-1", ColumnFiles: []string{base + "/_data/1.parquet"}}
+				files := &snapshotformat.NativeManifestFiles{ManifestFile: base + "/_manifest/manifest-1", ColumnFiles: []string{base + "/_data/1.parquet"}}
 				if strings.HasSuffix(base, "/444") {
 					switch kind {
 					case "valid lob":
@@ -3912,7 +3760,7 @@ func TestCopySegmentTask_NativeReferenceValidationBeforeWrites(t *testing.T) {
 						files.ColumnFiles = []string{"gs://source/" + files.ColumnFiles[0]}
 					case "credentials":
 						files.ColumnFiles = []string{"s3://user:secret@source/" + files.ColumnFiles[0]}
-					case "read failure":
+					case "read failure", "external read failure":
 						return nil, merr.ErrIoKeyNotFound
 					case "missing manifest":
 						files.ManifestFile = ""
@@ -3927,7 +3775,7 @@ func TestCopySegmentTask_NativeReferenceValidationBeforeWrites(t *testing.T) {
 				}
 				return &datapb.CopySegmentResult{SegmentId: target.SegmentId}, nil, nil
 			}).Build().UnPatch()
-			targetStore := newCopySegmentCopierMock(t, func(_ context.Context, _, source, _, _ string) error {
+			targetStore := newCopySegmentStoreMock(t, func(_ context.Context, _, source, _, _ string) error {
 				copies.Add(1)
 				if !strings.Contains(source, "/333/") {
 					invalidCopies.Add(1)
@@ -3983,12 +3831,10 @@ func TestPrepareSegmentCopy_ExternalCollectionValidation(t *testing.T) {
 			if kind == "empty segment" {
 				source.NumOfRows = 0
 			}
-			defer mockey.Mock(listAllFiles).Return(paths, nil).Build().UnPatch()
-			defer mockey.Mock(packed.GetManifestLobFiles).Return(lobs, nil).Build().UnPatch()
-			defer mockey.Mock(packed.ReadManifestFiles).To(func(string, *indexpb.StorageConfig) (*packed.ManifestFiles, error) {
-				t.Error("external collections must not inventory externally owned columns")
-				return nil, merr.ErrServiceInternal
-			}).Build().UnPatch()
+			inventory := manifestInventoryForTest(paths, nil)
+			inventory.LobFiles = lobs
+			defer mockey.Mock(snapshotstorage.ReadNativeManifestFiles).Return(inventory, nil).Build().UnPatch()
+
 			plan, err := prepareSegmentCopy(context.Background(), nil, nil, source, target)
 			switch kind {
 			case "valid":
@@ -4091,15 +3937,15 @@ func CopySegmentAndIndexFiles(
 	sourceCM storage.ChunkManager,
 	sourceStorageConfig *indexpb.StorageConfig,
 	targetStorageConfig *indexpb.StorageConfig,
-	copier storage.CrossBucketCopier,
+	targetStore objectstore.ObjectStore,
 	sourceBucket string,
 	targetBucket string,
 	source *datapb.CopySegmentSource,
 	target *datapb.CopySegmentTarget,
 	logFields []mlog.Field,
 ) (*datapb.CopySegmentResult, []string, error) {
-	if copier == nil {
-		return nil, nil, merr.WrapErrServiceInternalMsg("cross-bucket copier is nil")
+	if targetStore == nil {
+		return nil, nil, merr.WrapErrServiceInternalMsg("cross-bucket targetStore is nil")
 	}
 	plan, err := prepareSegmentCopy(ctx, sourceCM, sourceStorageConfig, source, target)
 	if err != nil {
@@ -4109,10 +3955,124 @@ func CopySegmentAndIndexFiles(
 	if err != nil {
 		return nil, nil, err
 	}
-	copied, err := copySegmentFiles(ctx, permits, items, copier, sourceBucket, targetBucket, logFields)
+	copied, err := copySegmentFiles(ctx, permits, items, targetStore, sourceBucket, targetBucket, logFields)
 	if err != nil {
 		return nil, copied, err
 	}
 	result, created, err := completeSegmentCopy(ctx, targetStorageConfig, source, target, plan)
 	return result, append(copied, created...), err
+}
+
+func TestCollectSegmentFilesExternalReferences(t *testing.T) {
+	for _, mode := range []string{"external", "ordinary", "invalid-uri", "missing-host", "credentials", "foreign-index", "foreign-manifest", "wrong-native-root", "invalid-owned-path"} {
+		t.Run(mode, func(t *testing.T) {
+			base := "files/insert_log/1/2/3"
+			native := &snapshotformat.NativeManifestFiles{
+				ManifestFile: "s3://source/" + base + "/_metadata/manifest-1.avro",
+				ColumnFiles:  []string{"s3://source/" + base + "/_data/a", base + "/_data/a", "s3://lake/table/data"},
+				DeltaFiles:   []string{"s3://lake/table/delete", base + "/_delta/d"},
+				StatsFiles:   []string{"s3://lake/table/stats", base + "/_stats/s"},
+				LobFiles:     []packed.LobFileInfo{{Path: "s3://lake/lob"}, {Path: "files/insert_log/1/2/lobs/100/_data/l"}},
+			}
+			source := &datapb.CopySegmentSource{
+				StorageVersion: storage.StorageV3, SegmentId: 3, NumOfRows: 1,
+				IsExternalCollection: mode != "ordinary", SourceRootPath: "s3://source/files",
+				ManifestPath: packed.MarshalManifestPath(base, 1),
+				IndexFiles:   []*indexpb.IndexFilePathInfo{{IndexFilePaths: []string{"s3://source/files/index_files/i"}}},
+			}
+			switch mode {
+			case "invalid-uri":
+				native.ColumnFiles[0] = "s3://%zz/path"
+			case "missing-host":
+				native.ColumnFiles[0] = "s3:///path"
+			case "credentials":
+				native.ColumnFiles[0] = "s3://user:password@lake/path"
+			case "foreign-index":
+				source.IndexFiles[0].IndexFilePaths[0] = "s3://lake/files/index_files/i"
+			case "foreign-manifest":
+				native.ManifestFile = "s3://lake/" + base + "/_metadata/manifest-1.avro"
+			case "wrong-native-root":
+				native.StatsFiles[1] = "outside/stats"
+			case "invalid-owned-path":
+				source.SourceRootPath = ""
+				native.StatsFiles[1] = "files/../escape"
+			}
+			before := append([]string(nil), native.ColumnFiles...)
+			calls := 0
+			defer mockey.Mock(snapshotstorage.ReadNativeManifestFiles).To(func(string, *indexpb.StorageConfig) (*snapshotformat.NativeManifestFiles, error) {
+				calls++
+				return native, nil
+			}).Build().UnPatch()
+			files, err := collectSegmentFiles(context.Background(), nil, &indexpb.StorageConfig{BucketName: "source"}, source)
+			require.Equal(t, 1, calls)
+			require.Equal(t, before, native.ColumnFiles)
+			if mode != "external" {
+				require.Error(t, err)
+				require.Nil(t, files)
+				return
+			}
+			require.NoError(t, err)
+			require.ElementsMatch(t, []string{native.ManifestFile, base + "/_data/a", base + "/_delta/d", base + "/_stats/s"}, files.InsertBinlogs)
+			require.Equal(t, []string{"files/insert_log/1/2/lobs/100/_data/l"}, files.LobFiles)
+			require.Equal(t, []string{"s3://source/files/index_files/i"}, files.VectorScalarIndex)
+			require.NotNil(t, files.ManifestIndexIDs)
+		})
+	}
+}
+
+func TestCopySegmentExternalPinnedManifest(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	root := t.TempDir()
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: root}
+	base := path.Join(root, "insert_log/100/10/1")
+	owned := path.Join(base, "_stats/text_index.100/data")
+	orphan := path.Join(base, "_stats/unreferenced")
+	require.NoError(t, cm.Write(ctx, owned, []byte("owned-stats")))
+	require.NoError(t, cm.Write(ctx, orphan, []byte("not-in-snapshot")))
+	externalData, externalDelta, externalStats := "s3://lake/table/data", "s3://lake/table/delete", "s3://lake/table/bloom"
+	manifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(base, 0), cfg, &packed.ManifestUpdates{
+		ColumnGroups: []packed.ColumnGroupEntry{{Columns: []string{"100"}, Format: "parquet", Files: []packed.ColumnGroupFileEntry{{Path: externalData, EndIndex: 1}}}},
+		DeltaLogs:    []packed.DeltaLogEntry{{Path: externalDelta, NumEntries: 1}},
+		Stats:        []packed.StatEntry{{Key: "text_index.100", Files: []string{owned}}, {Key: "pk.100", Files: []string{externalStats}}},
+	})
+	require.NoError(t, err)
+	original, err := snapshotstorage.ReadNativeManifestFiles(manifest, cfg)
+	require.NoError(t, err)
+	originalBytes, err := cm.Read(ctx, original.ManifestFile)
+	require.NoError(t, err)
+	_, revision, err := packed.UnmarshalManifestPath(manifest)
+	require.NoError(t, err)
+	_, err = packed.CommitManifestUpdates(packed.MarshalManifestPath(base, revision), cfg, &packed.ManifestUpdates{Stats: []packed.StatEntry{{Key: "text_index.100", Files: []string{orphan}}}})
+	require.NoError(t, err)
+	defer mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).Return(merr.ErrServiceInternal).Build().UnPatch()
+	targetStore := newCopySegmentStoreMock(t, func(ctx context.Context, _, src, _, dst string) error {
+		data, err := cm.Read(ctx, src)
+		if err != nil {
+			return err
+		}
+		return cm.Write(ctx, dst, data)
+	})
+	source := &datapb.CopySegmentSource{
+		CollectionId: 100, PartitionId: 10, SegmentId: 1,
+		StorageVersion: storage.StorageV3, ManifestPath: manifest, IsExternalCollection: true, NumOfRows: 1,
+		InsertBinlogs: []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{EntriesNum: 1}}}},
+	}
+	target := &datapb.CopySegmentTarget{CollectionId: 200, PartitionId: 20, SegmentId: 2, TargetRootPath: root}
+	result, copied, err := CopySegmentAndIndexFiles(ctx, make(chan struct{}, 2), cm, cfg, cfg, targetStore, "", "", source, target, nil)
+	require.NoError(t, err)
+	restored, err := snapshotstorage.ReadNativeManifestFiles(result.ManifestPath, cfg)
+	require.NoError(t, err)
+	targetBytes, err := cm.Read(ctx, restored.ManifestFile)
+	require.NoError(t, err)
+	require.Equal(t, originalBytes, targetBytes)
+	require.Equal(t, []string{externalData}, restored.ColumnFiles)
+	require.Equal(t, []string{externalDelta}, restored.DeltaFiles)
+	targetStat := path.Join(root, "insert_log/200/20/2/_stats/text_index.100/data")
+	require.ElementsMatch(t, []string{externalStats, targetStat}, restored.StatsFiles)
+	require.ElementsMatch(t, []string{restored.ManifestFile, targetStat}, copied)
+	content, err := cm.Read(ctx, targetStat)
+	require.NoError(t, err)
+	require.Equal(t, "owned-stats", string(content))
 }

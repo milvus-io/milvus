@@ -20,9 +20,10 @@ import (
 	"context"
 	"io"
 
-	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
+	snapshotadapter "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	snapshotstorage "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -82,7 +83,7 @@ func (m *snapshotExportManager) prepareExportCopyPlan(ctx context.Context, job *
 	// Completed plans need no repartitioning.
 	if !job.record.GetCopyPlanComplete() && job.record.GetCopySegmentsPerTask() == 0 {
 		// Only metadata.json is read here. Native and Avro manifests stay on DataNode.
-		cfg := snapshotstorage.ObjectStorageConfigFromIndexConfig(req.GetSourceStorageConfig())
+		cfg := snapshotadapter.ObjectStorageConfigFromIndexConfig(req.GetSourceStorageConfig())
 		cfg.SkipBucketCheck = true
 		source, err := storage.NewRemoteChunkManager(ctx, cfg)
 		if err != nil {
@@ -218,14 +219,14 @@ func (m *snapshotExportManager) finalizeExportCopyPlan(ctx context.Context, job 
 	defer cancel()
 	req := snapshotExportExecutionRequest(job.record.GetCopyRequest())
 	defer func() { err = redactSnapshotExportError(err, req) }()
-	cfg := snapshotstorage.ObjectStorageConfigFromIndexConfig(req.GetSourceStorageConfig())
+	cfg := snapshotadapter.ObjectStorageConfigFromIndexConfig(req.GetSourceStorageConfig())
 	cfg.SkipBucketCheck = true
 	source, err := storage.NewRemoteChunkManager(ctx, cfg)
 	if err != nil {
 		return err
 	}
 	defer closeExportStorageClient(source)
-	resolved, err := snapshotstorage.ResolveForeignStorage(ctx, cfg, snapshotstorage.DirectionExport, req.GetTargetUri(), req.GetExternalSpec())
+	resolved, err := snapshotadapter.ResolveForeignStorage(ctx, cfg, snapshotstorage.DirectionExport, req.GetTargetUri(), req.GetExternalSpec())
 	if err != nil {
 		return err
 	}
@@ -260,7 +261,7 @@ func (m *snapshotExportManager) finalizeExportCopyPlan(ctx context.Context, job 
 	return err
 }
 
-func closeExportStorageClient(cm storage.ChunkManager) {
+func closeExportStorageClient(cm snapshotstorage.ChunkManager) {
 	if remote, ok := cm.(*storage.RemoteChunkManager); ok {
 		if closer, ok := remote.UnderlyingObjectStorage().(io.Closer); ok {
 			closer.Close()
