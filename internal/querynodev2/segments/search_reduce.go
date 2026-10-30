@@ -47,6 +47,32 @@ func reduceFieldsData(searchResultData []*schemapb.SearchResultData, rowCap int6
 	return typeutil.PresizeAppendFieldData(rowCap, sources...)
 }
 
+// fillEmptyFieldsData gives an empty reduce result empty typed columns. No row
+// was appended, so the columns presized by reduceFieldsData are still nil, and
+// the proxy cannot match a nil column to any field (e.g. the primary key).
+// Keep the column layout (FieldId, FieldName, Type) of the sources instead.
+func fillEmptyFieldsData(ret *schemapb.SearchResultData, searchResultData []*schemapb.SearchResultData) {
+	if typeutil.GetSizeOfIDs(ret.GetIds()) > 0 {
+		return
+	}
+	fieldsData := ret.GetFieldsData()
+	var sample []*schemapb.FieldData
+	for _, data := range searchResultData {
+		if len(data.GetFieldsData()) == len(fieldsData) {
+			sample = data.GetFieldsData()
+			break
+		}
+	}
+	if sample == nil {
+		return
+	}
+	for i, fieldData := range fieldsData {
+		if fieldData == nil && sample[i] != nil {
+			fieldsData[i] = typeutil.PrepareResultFieldData(sample[i:i+1], 0)[0]
+		}
+	}
+}
+
 func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.SearchResultData, info *reduce.ResultInfo) (*schemapb.SearchResultData, error) {
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "ReduceSearchResultData")
 	defer sp.End()
@@ -178,6 +204,7 @@ func (scr *SearchCommonReduce) ReduceSearchResultData(ctx context.Context, searc
 			return nil, merr.WrapErrParameterInvalidMsg("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 	}
+	fillEmptyFieldsData(ret, searchResultData)
 	mlog.Debug(ctx, "skip duplicated search result", mlog.Int64("count", skipDupCnt))
 	return ret, nil
 }
@@ -310,6 +337,7 @@ func (sbr *SearchGroupByReduce) ReduceSearchResultData(ctx context.Context, sear
 			return nil, merr.WrapErrParameterInvalidMsg("search results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 	}
+	fillEmptyFieldsData(ret, searchResultData)
 	if err := writeGroupByOutput(ret, acceptedRows, searchResultData, info); err != nil {
 		return ret, merr.Wrap(err, "failed to construct group by output")
 	}

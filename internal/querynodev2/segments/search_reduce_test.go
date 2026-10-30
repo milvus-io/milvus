@@ -585,14 +585,29 @@ func (suite *SearchReduceSuite) TestReduceSizesOutputByInputRows() {
 			if tc.groupSize > 1 {
 				reduceInfo = reduceInfo.WithGroupByFieldIdsFromProto(101, nil)
 			}
-			inputs := []*schemapb.SearchResultData{presizeReduceInput(nil, nil, nil)}
+			// issue #54924: an empty reduce result keeps typed empty columns
+			// that carry FieldId/FieldName, so the proxy can still find the
+			// primary key column.
+			inputs := []*schemapb.SearchResultData{presizeReduceInput(nil, nil, nil), presizeReduceInput(nil, nil, nil)}
 			inputs[0].Topks = []int64{0}
+			inputs[1].Topks = []int64{0}
 			res, err := InitSearchReducer(reduceInfo).ReduceSearchResultData(context.TODO(), inputs, reduceInfo)
 			suite.Require().NoError(err)
-			suite.Len(res.GetFieldsData(), 3)
-			for _, fd := range res.GetFieldsData() {
-				suite.Nil(fd)
+			suite.Require().Len(res.GetFieldsData(), 3)
+			for i, fd := range res.GetFieldsData() {
+				sample := inputs[0].GetFieldsData()[i]
+				suite.Require().NotNil(fd)
+				suite.Equal(sample.GetFieldId(), fd.GetFieldId())
+				suite.Equal(sample.GetFieldName(), fd.GetFieldName())
+				suite.Equal(sample.GetType(), fd.GetType())
 			}
+			suite.Empty(res.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+			suite.Equal(int64(4), res.GetFieldsData()[1].GetVectors().GetDim())
+
+			pkField, err := typeutil.GetPrimaryFieldData(res.GetFieldsData(),
+				&schemapb.FieldSchema{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true})
+			suite.NoError(err)
+			suite.Zero(typeutil.GetPKSize(pkField))
 		})
 	}
 }
