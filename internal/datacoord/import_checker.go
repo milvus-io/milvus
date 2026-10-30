@@ -28,6 +28,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/importid"
@@ -77,6 +79,8 @@ type importChecker struct {
 	importMeta ImportMeta
 	ci         CompactionInspector
 	handler    Handler
+	cluster    session.Cluster
+	scheduler  task.GlobalScheduler
 
 	hooks importCheckerHooks
 
@@ -99,6 +103,8 @@ func NewImportChecker(ctx context.Context,
 	importMeta ImportMeta,
 	ci CompactionInspector,
 	handler Handler,
+	cluster session.Cluster,
+	scheduler task.GlobalScheduler,
 	hooks importCheckerHooks,
 ) ImportChecker {
 	return &importChecker{
@@ -109,6 +115,8 @@ func NewImportChecker(ctx context.Context,
 		importMeta: importMeta,
 		ci:         ci,
 		handler:    handler,
+		cluster:    cluster,
+		scheduler:  scheduler,
 		hooks:      hooks,
 		closeChan:  make(chan struct{}),
 	}
@@ -929,23 +937,9 @@ func (c *importChecker) checkGC(job ImportJob) {
 		tasks := c.importMeta.GetTaskByJob(c.ctx, job.GetJobID())
 		shouldRemoveJob := true
 		for _, task := range tasks {
-			if job.GetState() == internalpb.ImportJobState_Failed && task.GetType() == ImportTaskType {
-				if len(task.(*importTask).GetSegmentIDs()) != 0 || len(task.(*importTask).GetSortedSegmentIDs()) != 0 {
-					shouldRemoveJob = false
-					continue
-				}
-			}
-			if task.GetNodeID() != NullNodeID {
+			if !c.cleanupTaskForGC(job, task.GetTaskID()) {
 				shouldRemoveJob = false
-				continue
 			}
-			err := c.importMeta.RemoveTask(c.ctx, task.GetTaskID())
-			if err != nil {
-				log.Warn(c.ctx, "remove task failed during GC", WrapTaskLog(task, mlog.Err(err))...)
-				shouldRemoveJob = false
-				continue
-			}
-			log.Info(c.ctx, "reached GC retention, task removed", WrapTaskLog(task)...)
 		}
 		if !shouldRemoveJob {
 			return
@@ -1008,6 +1002,57 @@ func (c *importChecker) checkGC(job ImportJob) {
 		}
 		log.Info(c.ctx, "import job removed")
 	}
+}
+
+func (c *importChecker) cleanupTaskForGC(job ImportJob, taskID int64) bool {
+	cleaned := false
+	cleanup := func() {
+		// An in-flight Create may have persisted its assignment while Finalize
+		// waited for it. Read the task only after scheduler callbacks drain.
+		latest := c.importMeta.GetTask(c.ctx, taskID)
+		if latest == nil {
+			cleaned = true
+			return
+		}
+		if job.GetState() == internalpb.ImportJobState_Failed {
+			// A queued Create must see a terminal state after Finalize releases
+			// the task lock, even if the failed-job checker has not run yet.
+			if latest.GetState() != datapb.ImportTaskStateV2_Failed {
+				if err := c.importMeta.UpdateTask(c.ctx, taskID,
+					UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(job.GetReason())); err != nil {
+					mlog.Warn(c.ctx, "mark import task failed during GC", WrapTaskLog(latest, mlog.Err(err))...)
+					return
+				}
+			}
+			if latest.GetType() == ImportTaskType {
+				importTask := latest.(*importTask)
+				if len(importTask.GetSegmentIDs()) != 0 || len(importTask.GetSortedSegmentIDs()) != 0 {
+					return
+				}
+			}
+		}
+		if latest.GetNodeID() != NullNodeID {
+			if c.cluster == nil {
+				return
+			}
+			if err := DropImportTask(latest, c.cluster, c.importMeta); err != nil {
+				mlog.Warn(c.ctx, "drop import task during GC failed, will retry", WrapTaskLog(latest, mlog.Err(err))...)
+				return
+			}
+		}
+		if err := c.importMeta.RemoveTask(c.ctx, taskID); err != nil {
+			mlog.Warn(c.ctx, "remove task failed during GC", WrapTaskLog(latest, mlog.Err(err))...)
+			return
+		}
+		mlog.Info(c.ctx, "reached GC retention, task removed", WrapTaskLog(latest)...)
+		cleaned = true
+	}
+	if c.scheduler != nil {
+		c.scheduler.Finalize(taskID, cleanup)
+	} else {
+		cleanup()
+	}
+	return cleaned
 }
 
 // isPermanentRollbackErr reports whether a RollbackImport broadcast error is permanent,

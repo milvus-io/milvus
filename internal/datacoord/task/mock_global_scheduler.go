@@ -83,6 +83,40 @@ func (_c *MockGlobalScheduler_Enqueue_Call) RunAndReturn(run func(Task)) *MockGl
 	return _c
 }
 
+// Finalize provides a mock function with given fields: taskID, cleanup
+func (_m *MockGlobalScheduler) Finalize(taskID int64, cleanup func()) {
+	_m.Called(taskID, cleanup)
+}
+
+// MockGlobalScheduler_Finalize_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Finalize'
+type MockGlobalScheduler_Finalize_Call struct {
+	*mock.Call
+}
+
+// Finalize is a helper method to define mock.On call
+//   - taskID int64
+//   - cleanup func()
+func (_e *MockGlobalScheduler_Expecter) Finalize(taskID interface{}, cleanup interface{}) *MockGlobalScheduler_Finalize_Call {
+	return &MockGlobalScheduler_Finalize_Call{Call: _e.mock.On("Finalize", taskID, cleanup)}
+}
+
+func (_c *MockGlobalScheduler_Finalize_Call) Run(run func(taskID int64, cleanup func())) *MockGlobalScheduler_Finalize_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(func()))
+	})
+	return _c
+}
+
+func (_c *MockGlobalScheduler_Finalize_Call) Return() *MockGlobalScheduler_Finalize_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockGlobalScheduler_Finalize_Call) RunAndReturn(run func(int64, func())) *MockGlobalScheduler_Finalize_Call {
+	_c.Run(run)
+	return _c
+}
+
 // GetPendingTaskCount provides a mock function with given fields: taskType
 func (_m *MockGlobalScheduler) GetPendingTaskCount(taskType string) int {
 	ret := _m.Called(taskType)
@@ -198,7 +232,8 @@ func (_c *MockGlobalScheduler_Stop_Call) RunAndReturn(run func()) *MockGlobalSch
 func NewMockGlobalScheduler(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockGlobalScheduler {
+},
+) *MockGlobalScheduler {
 	mock := &MockGlobalScheduler{}
 	mock.Mock.Test(t)
 
