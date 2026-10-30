@@ -1039,6 +1039,10 @@ Replay safety:
   compaction group rechecks snapshot protection under the commit's `segMu`
   write lock, so a snapshot starting after the first publish check cannot
   race the final SegmentMeta write.
+- **Row-count statistics**: collection and partition statistics exclude
+  unpublished group members and retain their still-visible parents. Segment
+  states and group exclusions are read under one metadata lock, including
+  after opt-out while existing groups drain.
 - **Terminal group cleanup**: the inspector sweeps terminal groups after each
   evaluation pass. It keeps the record while the owning compaction task,
   import job, copy task/job, or external refresh job can still retry. A

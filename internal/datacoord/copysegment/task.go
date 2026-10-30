@@ -622,7 +622,7 @@ func (t *Task) QueryTaskOnWorker(cluster session.Cluster) {
 
 	// Sync task state and binlog info
 	t.cleanupAdmissionPending.Store(true)
-	err = SyncCopySegmentTask(t, resp, t.CopyMeta, t.Meta, t.indexMeta)
+	err = SyncCopySegmentTask(t.Ctx, t, resp, t.CopyMeta, t.Meta, t.indexMeta)
 	if err != nil {
 		if !t.GetCleanupRequired() {
 			// Admission failed before cleanup intent was durable. Retry the
@@ -1194,8 +1194,7 @@ func deriveSnapshotSourceRootURI(snapshotS3Location string, layout datapb.Snapsh
 // - Any error during sync marks both task and job as failed
 // - Ensures data integrity (no partial restore)
 // - Provides clear error messages for troubleshooting
-func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResponse, copyMeta CopySegmentMeta, mt *meta.Meta, indexMeta *index.IndexMeta) error {
-	ctx := context.TODO()
+func SyncCopySegmentTask(ctx context.Context, task CopySegmentTask, resp *datapb.QueryCopySegmentResponse, copyMeta CopySegmentMeta, mt *meta.Meta, indexMeta *index.IndexMeta) error {
 	staging := Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool()
 
 	// Update task state based on response
@@ -1331,7 +1330,7 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			for _, result := range results {
 				ids = append(ids, result.GetSegmentId())
 			}
-			_, _, err := mt.StageAdmittedChange(mt.Ctx, &model.SegmentChangeGroup{
+			_, _, err := mt.StageAdmittedChange(ctx, &model.SegmentChangeGroup{
 				GroupID: task.GetTaskId(), SourceJobID: task.GetTaskId(),
 				Source: model.SegmentChangeSourceCopySegment, CollectionID: task.GetCollectionId(), NewSegmentIDs: ids, PreserveMemberTimestamps: true,
 			}, true)
