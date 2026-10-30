@@ -13,8 +13,8 @@
 
 FetchContent_Declare(
     simdjson
-    URL https://github.com/simdjson/simdjson/archive/refs/tags/v3.12.2.tar.gz
-    URL_HASH MD5=79dcf1a542c6a5e6fe7214f6b1a38303
+    URL https://github.com/simdjson/simdjson/archive/refs/tags/v5.0.2.tar.gz
+    URL_HASH SHA256=09de4289a26d3a0453569901a3837450b5b98a5c317d635eeee8e2a82b1ebe6b
 )
 FetchContent_MakeAvailable(simdjson)
 
