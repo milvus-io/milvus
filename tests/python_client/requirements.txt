@@ -36,6 +36,8 @@ python-benedict==0.24.3
 
 # for bulk insert test
 minio==7.2.0
+# Read the versioned Avro header in snapshot segment descriptors.
+fastavro>=1.9,<2
 npy-append-array==0.9.19
 Faker==19.2.0
 
