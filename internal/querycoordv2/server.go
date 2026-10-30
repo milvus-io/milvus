@@ -146,8 +146,7 @@ type FileResourceObserver interface {
 	// CheckNodesSynced reports whether the given query nodes hold the current
 	// analyzer file resources. It answers nil whenever no file resource is
 	// registered or the query-node sync mode is off, which is every deployment
-	// that does not use analyzer file resources - this barrier is part of the
-	// file-resource feature itself, not of any extension.
+	// that does not use analyzer file resources.
 	CheckNodesSynced(nodeIDs []int64) error
 }
 
@@ -332,8 +331,8 @@ func (s *Server) initQueryCoord() error {
 		s.nodeMgr,
 	)
 	// Install the analyzer file resource gate on the task executors. It is nil
-	// unless a form took the analyzer runtime over, and a nil gate is the
-	// native path: no executor consults anything.
+	// when no file-resource observer is installed, and a nil gate is the
+	// default path: no executor consults anything.
 	taskScheduler.SetFileResourceGate(s.nodeFileResourceGate())
 	s.taskScheduler = taskScheduler
 
