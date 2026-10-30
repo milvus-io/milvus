@@ -213,7 +213,15 @@ func shouldUseArrowTransport(req *querypb.QueryRequest, plan *RetrievePlan) bool
 	// selection's row refs and copy nothing. Unmeasured -- the claim is from
 	// reading the two pipelines, not from a benchmark.
 	hasOrderBy := len(req.GetReq().GetOrderByFields()) > 0
-	return !hasAggregation && !hasOrderBy && !plan.IsIgnoreNonPk()
+	// calc_distance is excluded because the internally-injected target vector
+	// field is not a user output column, so it is not present in the Arrow
+	// record and cannot be materialized for the distance computation. The
+	// protobuf path carries it in segcorepb.RetrieveResults.FieldsData. The
+	// flag is recorded on the RetrievePlan by the QueryNode (from its already
+	// parsed plan), so this stays a field read rather than a re-unmarshal of
+	// the serialized expr plan.
+	hasCalcDistance := plan.GetReturnDistance()
+	return !hasAggregation && !hasOrderBy && !hasCalcDistance && !plan.IsIgnoreNonPk()
 }
 
 func retrieveOnSegmentsWithStream(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan, svr streamrpc.QueryStreamServer) error {

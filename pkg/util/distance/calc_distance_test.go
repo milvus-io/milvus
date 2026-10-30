@@ -2,11 +2,14 @@ package distance
 
 import (
 	"math"
+	"math/bits"
 	"math/rand"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const PRECISION = 1e-5
@@ -215,4 +218,112 @@ func Test_CalcFloatDistance(t *testing.T) {
 			assert.InEpsilon(t, sum, distances[i*rightNum+j], PRECISION)
 		}
 	}
+}
+
+// hammingRef is the hand-rolled hamming distance over packed bits (LSB-first
+// per byte, matching the Milvus binary vector convention).
+func hammingRef(a, b []byte) float32 {
+	var sum float32
+	for i := range a {
+		sum += float32(bits.OnesCount8(a[i] ^ b[i]))
+	}
+	return sum
+}
+
+func Test_CalcBinaryDistance(t *testing.T) {
+	dim := int64(16) // 2 bytes per vector
+	left := []byte{0b00001111, 0b10101010}
+	right := []byte{
+		0b00001111, 0b10101010, // identical
+		0b00000000, 0b00000000, // 8 bits differ
+		0b11111111, 0b01010101, // all 16 bits differ
+	}
+
+	distances, err := CalcBinaryDistance(dim, left, right, "HAMMING")
+	assert.NoError(t, err)
+	expected := []float32{
+		hammingRef(left, right[0:2]),
+		hammingRef(left, right[2:4]),
+		hammingRef(left, right[4:6]),
+	}
+	assert.Equal(t, expected, distances)
+
+	// Jaccard: 1 - |A∩B| / |A∪B|
+	distances, err = CalcBinaryDistance(dim, left, right, "JACCARD")
+	assert.NoError(t, err)
+	for i := 0; i < 3; i++ {
+		var intersect, unionA, unionB float32
+		for j := 0; j < 2; j++ {
+			unionA += float32(bits.OnesCount8(left[j]))
+			unionB += float32(bits.OnesCount8(right[i*2+j]))
+			intersect += float32(bits.OnesCount8(left[j] & right[i*2+j]))
+		}
+		want := 1 - intersect/(unionA+unionB-intersect)
+		assert.Equal(t, want, distances[i])
+	}
+
+	// error cases
+	_, err = CalcBinaryDistance(dim, left, right, "L2")
+	assert.Error(t, err)
+	_, err = CalcBinaryDistance(7, left, right, "HAMMING") // dim not multiple of 8
+	assert.Error(t, err)
+	_, err = CalcBinaryDistance(dim, left, []byte{1}, "HAMMING") // bad byte length
+	assert.Error(t, err)
+}
+
+func sparseRow(indices []uint32, values []float32) []byte {
+	indices, values = typeutil.SortSparseFloatRow(indices, values)
+	return typeutil.CreateSparseFloatRow(indices, values)
+}
+
+func Test_CalcSparseDistance(t *testing.T) {
+	left := sparseRow([]uint32{0, 2, 5}, []float32{1, 2, 3})
+	rows := [][]byte{
+		sparseRow([]uint32{0, 2, 5}, []float32{1, 2, 3}), // identical → IP = 1+4+9
+		sparseRow([]uint32{2, 7}, []float32{2, 10}),      // overlap on idx 2 → IP = 4
+		sparseRow([]uint32{100}, []float32{5}),           // no overlap → IP = 0
+	}
+
+	distances, err := CalcSparseDistance(left, rows, "IP")
+	assert.NoError(t, err)
+	assert.Equal(t, []float32{14, 4, 0}, distances)
+
+	// cosine: dot / (normA * normB)
+	distances, err = CalcSparseDistance(left, rows, "COSINE")
+	assert.NoError(t, err)
+	normA := float32(math.Sqrt(float64(1*1 + 2*2 + 3*3)))
+	assert.InEpsilon(t, 14/(normA*normA), distances[0], PRECISION)
+	assert.InEpsilon(t, 4/(normA*float32(math.Sqrt(float64(4+100)))), distances[1], PRECISION)
+	// disjoint vectors have zero cosine similarity
+	assert.Equal(t, float32(0), distances[2])
+
+	// error cases
+	_, err = CalcSparseDistance(left, rows, "L2")
+	assert.Error(t, err)
+}
+
+func TestBinaryImpls(t *testing.T) {
+	a := []byte{0b00001111, 0b10101010}
+	b := []byte{0b11111111, 0b01010101}
+	// hamming: popcount(0x0f^0xff)=4 + popcount(0xaa^0x55)=8 = 12
+	assert.Equal(t, float32(12), HammingImplPure(a, b))
+	assert.Equal(t, float32(12), HammingImpl(a, b))
+	// jaccard: unionA=8, unionB=12, intersect=4, union=16, 1-4/16
+	assert.InEpsilon(t, 0.75, JaccardImplPure(a, b), PRECISION)
+	assert.InEpsilon(t, 0.75, JaccardImpl(a, b), PRECISION)
+	// two empty rows: no union → 0
+	assert.Equal(t, float32(0), JaccardImplPure(nil, nil))
+}
+
+func TestSparseImpls(t *testing.T) {
+	row1 := typeutil.CreateSparseFloatRow([]uint32{0, 2}, []float32{1, 2})
+	row2 := typeutil.CreateSparseFloatRow([]uint32{2, 5}, []float32{2, 3})
+	// IP: intersection on index 2 → 2*2
+	assert.Equal(t, float32(4), SparseIPImpl(row1, row2))
+	// COSINE: 4 / sqrt(5*13)
+	assert.InEpsilon(t, 4/float32(math.Sqrt(5*13)), SparseCosineImpl(row1, row2), PRECISION)
+	// disjoint rows → IP 0, COSINE 0
+	row3 := typeutil.CreateSparseFloatRow([]uint32{100}, []float32{1})
+	assert.Equal(t, float32(0), SparseIPImpl(row1, row3))
+	assert.Equal(t, float32(0), SparseCosineImpl(row1, row3))
 }

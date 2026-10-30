@@ -2,10 +2,12 @@ package distance
 
 import (
 	"math"
+	"math/bits"
 	"strings"
 	"sync"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 /**
@@ -19,6 +21,10 @@ const (
 	IP = "IP"
 	// COSINE represents the cosine distance
 	COSINE = "COSINE"
+	// HAMMING represents the hamming distance of binary vectors
+	HAMMING = "HAMMING"
+	// JACCARD represents the jaccard distance of binary vectors
+	JACCARD = "JACCARD"
 )
 
 func L2ImplPure(a []float32, b []float32) float32 {
@@ -144,4 +150,128 @@ func CalcFloatDistance(dim int64, left, right []float32, metric string) ([]float
 	waitGroup.Wait()
 
 	return distArray, nil
+}
+
+// HammingImplPure returns the number of differing bits between two packed
+// binary vectors (equivalent byte lengths).
+func HammingImplPure(a, b []byte) float32 {
+	var distance float32
+	for i := range a {
+		distance += float32(bits.OnesCount8(a[i] ^ b[i]))
+	}
+	return distance
+}
+
+// JaccardImplPure returns the Jaccard distance (1 - |A∩B| / |A∪B|) between two
+// packed binary vectors. 0 when both vectors are empty.
+func JaccardImplPure(a, b []byte) float32 {
+	var intersect, unionA, unionB float32
+	for i := range a {
+		unionA += float32(bits.OnesCount8(a[i]))
+		unionB += float32(bits.OnesCount8(b[i]))
+		intersect += float32(bits.OnesCount8(a[i] & b[i]))
+	}
+	union := unionA + unionB - intersect
+	if union == 0 {
+		return 0
+	}
+	return 1 - intersect/union
+}
+
+var (
+	HammingImpl func(a []byte, b []byte) float32 = HammingImplPure
+	JaccardImpl func(a []byte, b []byte) float32 = JaccardImplPure
+)
+
+// CalcBinaryDistance computes the distance between the packed binary vectors in
+// @left and @right (each vector is @dim/8 bytes) by given @metric, storing the
+// result in row-major order (@leftNum x @rightNum).
+func CalcBinaryDistance(dim int64, left, right []byte, metric string) ([]float32, error) {
+	if dim <= 0 || dim%8 != 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("invalid binary vector dimension %d, must be a positive multiple of 8", dim)
+	}
+	metricUpper := strings.ToUpper(metric)
+	if metricUpper != HAMMING && metricUpper != JACCARD {
+		return nil, merr.WrapErrParameterInvalidMsg("invalid binary metric type %s, only HAMMING/JACCARD are supported", metric)
+	}
+	vectorBytes := int(dim / 8)
+	if len(left)%vectorBytes != 0 || len(right)%vectorBytes != 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("invalid binary vector byte length, must be a multiple of %d", vectorBytes)
+	}
+	leftNum := len(left) / vectorBytes
+	rightNum := len(right) / vectorBytes
+
+	distArray := make([]float32, leftNum*rightNum)
+	for i := 0; i < leftNum; i++ {
+		l := left[i*vectorBytes : (i+1)*vectorBytes]
+		for j := 0; j < rightNum; j++ {
+			r := right[j*vectorBytes : (j+1)*vectorBytes]
+			switch metricUpper {
+			case HAMMING:
+				distArray[i*rightNum+j] = HammingImpl(l, r)
+			case JACCARD:
+				distArray[i*rightNum+j] = JaccardImpl(l, r)
+			}
+		}
+	}
+	return distArray, nil
+}
+
+// SparseIPImpl returns the inner product of two compact sparse rows (see
+// typeutil.SparseFloatBytesToMap for the 8-bytes-per-element encoding).
+func SparseIPImpl(a, b []byte) float32 {
+	left := typeutil.SparseFloatBytesToMap(a)
+	right := typeutil.SparseFloatBytesToMap(b)
+	if len(left) > len(right) {
+		left, right = right, left
+	}
+	var sum float32
+	for idx, value := range left {
+		sum += value * right[idx]
+	}
+	return sum
+}
+
+// SparseCosineImpl returns the cosine similarity of two compact sparse rows.
+func SparseCosineImpl(a, b []byte) float32 {
+	left := typeutil.SparseFloatBytesToMap(a)
+	right := typeutil.SparseFloatBytesToMap(b)
+	// iterate the smaller map for the dot product over the index intersection
+	if len(left) > len(right) {
+		left, right = right, left
+	}
+	var dot, normA, normB float32
+	for idx, value := range left {
+		if v, ok := right[idx]; ok {
+			dot += value * v
+		}
+		normA += value * value
+	}
+	for _, value := range right {
+		normB += value * value
+	}
+	if normA == 0 || normB == 0 {
+		return 0
+	}
+	return dot / float32(math.Sqrt(float64(normA)*float64(normB)))
+}
+
+// CalcSparseDistance computes the distance between a compact sparse reference
+// row and each sparse row in @rows (compact 8-bytes-per-element encoding) by
+// given @metric.
+func CalcSparseDistance(left []byte, rows [][]byte, metric string) ([]float32, error) {
+	metricUpper := strings.ToUpper(metric)
+	if metricUpper != IP && metricUpper != COSINE {
+		return nil, merr.WrapErrParameterInvalidMsg("invalid sparse metric type %s, only IP/COSINE are supported", metric)
+	}
+	distances := make([]float32, len(rows))
+	for i, row := range rows {
+		switch metricUpper {
+		case IP:
+			distances[i] = SparseIPImpl(left, row)
+		case COSINE:
+			distances[i] = SparseCosineImpl(left, row)
+		}
+	}
+	return distances, nil
 }
